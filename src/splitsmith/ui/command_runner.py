@@ -12,11 +12,15 @@ in the process that holds the per-machine owner lock (#1076). Each tick:
    ``cancel_requested`` reply cancels the local job; a 409 (another desktop
    took it, or it finished) cancels ours and forgets it.
 3. **Finish**: a failed or cancelled job completes the command at once. A
-   succeeded one asks for an immediate sync and completes as ``succeeded``
-   only after a sync that started after the job ended succeeds, so by the
-   time the phone reads "done" hosted has the result. If that sync fails,
-   the command fails with the sync's reason (the result still reaches
-   hosted with a later sync).
+   succeeded job whose kind is in ``SYNCED_RESULT_KINDS`` (its result
+   travels in a synced doc, e.g. ``shot_detect``'s stage audit) asks for
+   an immediate sync and completes as ``succeeded`` only after a sync
+   that started after the job ended succeeds, so by the time the phone
+   reads "done" hosted has the result; if that sync fails, the command
+   fails with the sync's reason (the result still reaches hosted with a
+   later sync). Any other kind's result travels in the completion itself
+   (e.g. ``render_upload``'s video record), so it completes as
+   ``succeeded`` on the very tick its job succeeds -- no sync is awaited.
 
 State is in memory. A restart forgets it; the lease lapses, the command is
 claimable again, and the revision guard refuses it if the first run landed.
@@ -32,7 +36,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
-from ..sync.commands import refuse_reason
+from ..sync.commands import prior_result, refuse_reason
 from .jobs import JobStatus
 
 logger = logging.getLogger(__name__)
@@ -40,6 +44,11 @@ logger = logging.getLogger(__name__)
 #: Starts the local job for a claimed command; returns the job id, or a
 #: reason the command cannot start.
 StartCommand = Callable[[str, Path, dict], Awaitable[tuple[str | None, str | None]]]
+
+#: Kinds whose result travels in a synced doc (the stage audit), so the
+#: command completes only after a sync that carried it. Any other kind's
+#: result travels in the completion itself.
+SYNCED_RESULT_KINDS = frozenset({"shot_detect"})
 
 
 class CommandApi(Protocol):
@@ -116,6 +125,10 @@ class CommandRunner:
             logger.info("desktop commands: claim for %s failed: %s", match_id, exc)
             return
         for command in commands:
+            done = await asyncio.to_thread(prior_result, root, command)
+            if done is not None:
+                await self._complete(api, command["id"], "succeeded", result=done)
+                continue
             reason = await asyncio.to_thread(refuse_reason, root, command)
             job_id: str | None = None
             if reason is None:
@@ -160,11 +173,19 @@ class CommandRunner:
                 await self._complete(api, t.command["id"], "failed", error="the desktop job disappeared")
                 continue
             if t.finished_at is None and job.status == JobStatus.SUCCEEDED:
+                if t.command.get("kind") not in SYNCED_RESULT_KINDS:
+                    # A failed call leaves it tracked; the next tick sees the
+                    # same succeeded job and tries again.
+                    await self._complete(api, t.command["id"], "succeeded", result=dict(job.result or {}))
+                    continue
                 t.finished_at = job.finished_at.timestamp() if job.finished_at else self._clock()
                 t.result = {"job_id": job.id, "message": job.message}
                 self._request_sync_now(t.match_id)
             elif job.status == JobStatus.FAILED:
-                await self._complete(api, t.command["id"], "failed", error=job.error or "detection failed")
+                fallback = (
+                    "detection failed" if t.command.get("kind") == "shot_detect" else "the desktop job failed"
+                )
+                await self._complete(api, t.command["id"], "failed", error=job.error or fallback)
                 continue
             elif job.status == JobStatus.CANCELLED:
                 await self._complete(api, t.command["id"], "cancelled")

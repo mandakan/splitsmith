@@ -93,7 +93,11 @@ def prior_result(match_root: Path, command: dict) -> dict | None:
     A render-upload whose completion never reached hosted is re-claimed
     after its lease lapses; this is what stops the re-run from uploading
     twice. It has to run before the render, which rewrites the sidecar
-    and would drop the record."""
+    and would drop the record.
+
+    A match or project this cannot read reads as "no prior upload": the
+    runner still refuses an unreadable match through ``refuse_reason``,
+    and an unreadable project fails the render before any upload."""
     if command.get("kind") != "render_upload":
         return None
     slug, command_id = command.get("slug"), command.get("id")

@@ -127,13 +127,34 @@ def test_prior_result_finds_this_commands_upload_only(tmp_path: Path) -> None:
         "url": "https://youtu.be/vid1",
         "channel_title": "My channel",
     }
-    assert prior_result(root, _command()) is None  # a re-detect never has one
+    assert prior_result(root, _command(id="c9")) is None  # a re-detect never has one
+
+
+def test_prior_result_skips_a_malformed_sidecar_sorted_before_the_match(tmp_path: Path) -> None:
+    root = _match(tmp_path, None)
+    shooter_root = match_model.Match.shooter_root(root, SLUG)
+    exports = MatchProject.load(shooter_root).exports_path(shooter_root)
+    exports.mkdir(parents=True, exist_ok=True)
+    (exports / "broken-youtube.json").write_text("{not json", encoding="utf-8")
+    _sidecar(root, "mine", command_id="c9")
+    assert prior_result(root, _upload_command()) == {
+        "video_id": "vid1",
+        "url": "https://youtu.be/vid1",
+        "channel_title": "My channel",
+    }
 
 
 # -- the runner, with fakes ------------------------------------------------
 
 
-def _job(job_id: str, status: JobStatus, *, error: str | None = None, message: str | None = None) -> Job:
+def _job(
+    job_id: str,
+    status: JobStatus,
+    *,
+    error: str | None = None,
+    message: str | None = None,
+    result: dict | None = None,
+) -> Job:
     now = datetime(2026, 9, 28, 12, 0, tzinfo=UTC)
     return Job(
         id=job_id,
@@ -144,6 +165,7 @@ def _job(job_id: str, status: JobStatus, *, error: str | None = None, message: s
         finished_at=now if status not in (JobStatus.PENDING, JobStatus.RUNNING) else None,
         error=error,
         message=message,
+        result=result,
     )
 
 
@@ -166,6 +188,7 @@ class _Api:
         self.completed: list[tuple[str, str, str | None]] = []
         self.heartbeats: list[tuple[str, str | None]] = []
         self.reply: dict | None = {"cancel_requested": False}
+        self.results: dict[str, dict | None] = {}
 
     def claim(self, match_ids: list[str]) -> list[dict]:
         out, self.to_claim = self.to_claim, []
@@ -177,6 +200,7 @@ class _Api:
 
     def complete(self, command_id, *, status, error=None, result=None) -> None:
         self.completed.append((command_id, status, error))
+        self.results[command_id] = result
 
 
 def _runner(jobs: _Jobs, started: list, synced_now: list, *, start_ok: bool = True) -> CommandRunner:
@@ -321,3 +345,37 @@ def test_a_failed_completion_is_retried_not_lost(tmp_path: Path) -> None:
     asyncio.run(runner.tick(api, {"m1": root}))  # no new sync event needed
     assert api.completed == [("c1", "succeeded", None)]
     assert runner.tracked_ids() == []
+
+
+def test_a_render_upload_already_made_completes_without_running(tmp_path: Path, monkeypatch) -> None:
+    """The upload happened, its completion was lost, the desktop restarted
+    and re-claimed it: report the existing video, render nothing."""
+    root = _match(tmp_path, None)
+    _sidecar(root, "mine", command_id="c9")
+    jobs, started, synced_now = _Jobs(), [], []
+    runner = _runner(jobs, started, synced_now)
+    api = _Api([_upload_command()])
+    runner.claim_after_sync("m1")
+    asyncio.run(runner.tick(api, {"m1": root}))
+    assert started == []
+    assert api.completed == [("c9", "succeeded", None)]
+    assert api.results["c9"]["url"] == "https://youtu.be/vid1"
+
+
+def test_a_render_upload_completes_when_its_job_succeeds(tmp_path: Path, monkeypatch) -> None:
+    """Its result travels in the command, so no sync is awaited."""
+    root = _match(tmp_path, None)
+    monkeypatch.setattr("splitsmith.sync.commands.oauth.load_connection", lambda: object())
+    jobs, started, synced_now = _Jobs(), [], []
+    runner = _runner(jobs, started, synced_now)
+    api = _Api([_upload_command()])
+    runner.claim_after_sync("m1")
+    asyncio.run(runner.tick(api, {"m1": root}))
+    assert started == ["c9"]
+    done = _job("j1", JobStatus.SUCCEEDED, message="Uploaded")
+    done.result = {"video_id": "v2", "url": "https://youtu.be/v2", "channel_title": "C"}
+    jobs.jobs["j1"] = done
+    asyncio.run(runner.tick(api, {"m1": root}))
+    assert synced_now == []
+    assert api.completed == [("c9", "succeeded", None)]
+    assert api.results["c9"] == {"video_id": "v2", "url": "https://youtu.be/v2", "channel_title": "C"}
