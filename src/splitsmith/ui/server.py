@@ -15866,7 +15866,9 @@ def create_app(
         way the local route checks it, so the phone hears "no beep yet"
         now rather than from the desktop later, and the stage audit's
         revision is recorded: the desktop refuses a reset against a stage
-        that changed after this request.
+        that changed after this request. For ``render_upload`` the render
+        settings are validated as a ``MatchExportRequest`` that uploads an
+        MP4; the pads and sources are the desktop's to check.
         """
         from ..db.desktop_commands import COMMAND_KINDS
 
@@ -15901,6 +15903,22 @@ def create_app(
             stored, _ = state.load_audit(req.slug, req.stage_number)
             expected_revision = audit_revision(stored)
             args = {"reset": bool(args.get("reset", True))}
+        elif req.kind == "render_upload":
+            if req.slug is None or req.stage_number is not None:
+                raise HTTPException(status_code=422, detail="render_upload needs slug and no stage_number")
+            state.shooter_project(req.slug)  # an unknown shooter 404s here, as for shot_detect
+            try:
+                export_req = MatchExportRequest.model_validate(args.get("request"))
+            except ValidationError as exc:
+                first = exc.errors()[0]
+                raise HTTPException(
+                    status_code=422, detail=f"render settings are not valid: {first.get('msg', 'invalid')}"
+                ) from exc
+            if not export_req.youtube_upload:
+                raise HTTPException(status_code=422, detail="render_upload needs youtube_upload")
+            # The pads and sources are checked on the desktop: a mirror has
+            # no sources here, and the desktop's project owns the buffers.
+            args = {"request": export_req.model_dump(mode="json")}
         command, created = await store.request(
             match_id=match_id,
             kind=req.kind,

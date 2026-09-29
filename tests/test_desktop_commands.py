@@ -120,6 +120,44 @@ def test_the_stage_is_checked_before_queueing(hosted_app: tuple[TestClient, _Cap
     assert bad.status_code == 422
 
 
+def test_a_render_upload_is_queued_with_its_validated_request(
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    client, sender = hosted_app
+    login(client, sender, EMAIL)
+    _mirror(client)
+    resp = _render_upload(client)
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert (body["kind"], body["slug"], body["stage_number"]) == ("render_upload", SLUG, None)
+    assert body["expected_revision"] is None
+    # Stored as the full, defaulted request, so the desktop renders what the
+    # phone saw rather than its own defaults.
+    assert body["args"]["request"]["youtube_upload"] is True
+    assert body["args"]["request"]["head_pad_seconds"] is not None
+    # One per shooter at a time.
+    again = _render_upload(client)
+    assert again.status_code == 200 and again.json()["id"] == body["id"]
+
+
+def test_a_render_upload_must_upload_an_mp4(hosted_app: tuple[TestClient, _CapturingSender]) -> None:
+    client, sender = hosted_app
+    login(client, sender, EMAIL)
+    _mirror(client)
+    base = {"stage_numbers": [1], "output_format": "mp4", "youtube_sidecar": True}
+    for request in (
+        {**base, "youtube_upload": False},
+        {**base, "output_format": "fcpxml", "youtube_upload": True},
+        {"youtube_upload": True},
+    ):
+        resp = client.post(PHONE, json={"kind": "render_upload", "slug": SLUG, "args": {"request": request}})
+        assert resp.status_code == 422, (request, resp.text)
+    no_slug = client.post(
+        PHONE, json={"kind": "render_upload", "args": {"request": {**base, "youtube_upload": True}}}
+    )
+    assert no_slug.status_code == 422
+
+
 def test_a_desktop_sees_claims_heartbeats_and_completes(
     hosted_app: tuple[TestClient, _CapturingSender],
 ) -> None:
