@@ -21,11 +21,10 @@ from .test_ui_server import _seed_match_export_project
 
 
 class _Handle:
-    def __init__(self, *, cancel_after_render: bool = False) -> None:
+    def __init__(self) -> None:
         self.updates: list[tuple[float | None, str | None]] = []
         self.result: dict | None = None
         self.cancel = False
-        self._cancel_after_render = cancel_after_render
 
     def update(self, *, progress: float | None = None, message: str | None = None) -> None:
         self.updates.append((progress, message))

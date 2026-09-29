@@ -143,7 +143,7 @@ describe("YouTubeConnect", () => {
     });
     expect(screen.getByText("Uploads to the YouTube account connected on your desktop.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /connect youtube/i })).toBeNull();
-    expect(screen.queryByRole("radio", { name: "Off" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Off" })).toBeNull();
     expect(screen.queryByRole("combobox", { name: /playlist/i })).toBeNull();
     expect(screen.getByRole("textbox", { name: /playlist/i })).toBeInTheDocument();
     expect(getYouTubePlaylists).not.toHaveBeenCalled();
