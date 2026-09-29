@@ -552,6 +552,16 @@ async def export_match(slug: str, req: MatchExportRequest, request: Request) -> 
     state = request.app.state.splitsmith_state
     check_match_export(state, slug, req)
 
+    # A phone's render-and-upload (#1100) renders to the same output path
+    # and then uploads it: a desk export now could overwrite the MP4
+    # mid-upload or rewrite the sidecar's upload record. Not its snapshot:
+    # the SPA would follow that job as if it were this export.
+    if await state.jobs.find_active(kind="render_upload", shooter_slug=slug) is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="a render and upload requested from the phone is running for this shooter; "
+            "export when it finishes",
+        )
     existing = await state.jobs.find_active(kind="match_export", shooter_slug=slug)
     if existing is not None:
         return JSONResponse(existing.model_dump(mode="json"))

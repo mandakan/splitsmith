@@ -330,3 +330,48 @@ def test_create_app_resumes_journal_on_local_boot(empty_match: Path) -> None:
         assert (resumed[0].stage_number, resumed[0].shooter_slug, resumed[0].video_id) == (1, "solo", "v1")
     finally:
         release.set()
+
+
+def test_a_render_upload_is_never_journaled(tmp_path: Path) -> None:
+    """#1100: a phone's render-and-upload recovers through the command
+    queue's lease re-claim and ``prior_result``; a resumed job would
+    re-render over the sidecar's upload record and upload again."""
+    journal = JobJournal(tmp_path / "jobs.sqlite3")
+    reg = JobRegistry(max_concurrent=1, journal=journal)
+    release = threading.Event()
+    reg.bodies.register("render_upload", lambda handle, **_a: release.wait(timeout=10))
+    try:
+        job = _submit(reg, kind="render_upload", args={"slug": "me", "command_id": "c1"}, shooter_slug="me")
+        assert journal.load_active() == []
+    finally:
+        release.set()
+    assert _wait_until(lambda: _job(reg, job.id).status == JobStatus.SUCCEEDED)
+
+
+def test_resume_drops_a_render_upload_an_earlier_build_journaled(tmp_path: Path, monkeypatch) -> None:
+    from datetime import UTC, datetime
+
+    from splitsmith.ui import job_journal
+    from splitsmith.ui.jobs import Job
+
+    path = tmp_path / "jobs.sqlite3"
+    journal1 = JobJournal(path)
+    now = datetime.now(UTC)
+    with monkeypatch.context() as m:
+        m.setattr(job_journal, "NON_RESUMABLE_KINDS", frozenset())
+        journal1.record(
+            Job(id="old", kind="render_upload", status=JobStatus.PENDING, created_at=now, updated_at=now),
+            {"slug": "me", "req": {"stage_numbers": [1]}, "command_id": "c1"},
+        )
+    assert [r.kind for r in journal1.load_active()] == ["render_upload"]
+    journal1.close()
+
+    journal2 = JobJournal(path)
+    reg2 = JobRegistry(max_concurrent=1, journal=journal2)
+    ran: list[dict] = []
+    reg2.bodies.register("render_upload", lambda handle, **a: ran.append(a))
+    resumed = asyncio.run(resume_journaled_jobs(reg2, journal2))
+    assert resumed == 0
+    assert asyncio.run(reg2.list()) == []
+    assert ran == []
+    assert journal2.load_active() == []

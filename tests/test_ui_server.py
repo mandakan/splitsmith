@@ -8388,6 +8388,49 @@ def test_match_export_endpoint_400_on_empty_stage_numbers(tmp_path: Path) -> Non
     assert "stage_numbers cannot be empty" in resp.json()["detail"]
 
 
+def test_match_export_endpoint_409_while_a_render_upload_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#1100: a phone's render-and-upload writes the same MP4 and sidecar
+    and then uploads them; a desk export for that shooter waits, and gets a
+    plain 409 rather than the other job's snapshot."""
+    import asyncio
+    import json as _json
+    import threading
+
+    from splitsmith.ui import server as server_mod
+    from splitsmith.ui.exports_api import MatchExportRequest
+
+    client, root = _seed_match_export_project(tmp_path, stage_count=1)
+    state = client.app.state.splitsmith_state
+    release = threading.Event()
+    monkeypatch.setitem(
+        state.jobs.bodies._bodies, "render_upload", lambda handle, **_a: release.wait(timeout=10)
+    )
+    match_id = _json.loads((root / "match.json").read_text(encoding="utf-8"))["match_id"]
+    id_token = server_mod.current_match_id.set(match_id)
+    root_token = server_mod.current_match_root.set(root)
+    try:
+        job = asyncio.run(
+            state.jobs.submit(
+                kind="render_upload",
+                shooter_slug="me",
+                args={"slug": "me", "req": MatchExportRequest(stage_numbers=[1]), "command_id": "c1"},
+            )
+        )
+    finally:
+        server_mod.current_match_root.reset(root_token)
+        server_mod.current_match_id.reset(id_token)
+    try:
+        resp = client.post("/api/shooters/me/export/match", json={"stage_numbers": [1]})
+        assert resp.status_code == 409, resp.text
+        assert "phone" in resp.json()["detail"]
+        assert [j["kind"] for j in client.get("/api/me/jobs").json()] == ["render_upload"]
+    finally:
+        release.set()
+    _wait_for_job(client, job.id)
+
+
 def test_match_export_endpoint_400_on_padding_above_buffer(tmp_path: Path) -> None:
     client, _ = _seed_match_export_project(tmp_path, stage_count=1)
     resp = client.post(
