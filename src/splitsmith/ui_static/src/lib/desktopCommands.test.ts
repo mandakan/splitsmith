@@ -9,6 +9,8 @@ import {
   latestForStage,
   presenceSummary,
   presenceText,
+  renderPresenceLine,
+  rendersOnDesktop,
 } from "./desktopCommands";
 
 const NOW = Date.parse("2026-09-28T12:00:00Z");
@@ -89,5 +91,79 @@ describe("helpers", () => {
     expect(commandTitle(cmd())).toBe("Re-detect Stage 03 (anna)");
     expect(isActiveCommand(cmd({ status: "claimed" }))).toBe(true);
     expect(isActiveCommand(cmd({ status: "failed" }))).toBe(false);
+  });
+});
+
+describe("render_upload", () => {
+  const ru = (over: Partial<DesktopCommand> = {}) =>
+    cmd({ kind: "render_upload", stage_number: null, args: { request: {} }, ...over });
+
+  it("is titled by shooter", () => {
+    expect(commandTitle(ru())).toBe("Render and upload (anna)");
+  });
+
+  it("links the video when it succeeded, naming the channel", () => {
+    const line = commandLine(
+      ru({
+        status: "succeeded",
+        finished_at: "2026-09-28T11:58:00Z",
+        result: { video_id: "v", url: "https://youtu.be/v", channel_title: "Anna Shoots" },
+      }),
+      around,
+      NOW,
+    );
+    expect(line.tone).toBe("ok");
+    expect(line.text).toBe("Uploaded to Anna Shoots 2 min ago.");
+    expect(line.link).toEqual({ href: "https://youtu.be/v", label: "youtu.be/v" });
+  });
+
+  it("never links a non-http(s) url, however the server serves it", () => {
+    const bad = (url: string) =>
+      commandLine(
+        ru({
+          status: "succeeded",
+          finished_at: "2026-09-28T11:58:00Z",
+          result: { video_id: "v", url, channel_title: "Anna Shoots" },
+        }),
+        around,
+        NOW,
+      ).link;
+    expect(bad("javascript:alert(1)")).toBeUndefined();
+    expect(bad("ftp://x")).toBeUndefined();
+  });
+});
+
+it("still says re-detected for a re-detect", () => {
+  expect(commandLine(cmd({ status: "succeeded" }), around, NOW).text).toMatch(/^Re-detected on your desktop/);
+});
+
+describe("rendersOnDesktop", () => {
+  it("is a hosted, desktop-origin match this account may review but not edit", () => {
+    expect(rendersOnDesktop(true, "desktop", ["review", "comment_write"])).toBe(true);
+    expect(rendersOnDesktop(false, "desktop", ["review"])).toBe(false);
+    expect(rendersOnDesktop(true, "hosted", ["review"])).toBe(false);
+    expect(rendersOnDesktop(true, "desktop", ["edit", "review"])).toBe(false);
+    expect(rendersOnDesktop(true, "desktop", ["comment_write"])).toBe(false);
+    // Not loaded yet: decides nothing.
+    expect(rendersOnDesktop(true, "desktop", null)).toBe(false);
+  });
+});
+
+describe("renderPresenceLine", () => {
+  const render = (over: Partial<DesktopCommand>) => cmd({ kind: "render_upload", stage_number: null, ...over });
+
+  it("speaks for a request only while one waits or runs", () => {
+    expect(renderPresenceLine(around, [render({ status: "pending" })], NOW)).toBe(
+      "Your desktop will pick this up shortly.",
+    );
+    expect(renderPresenceLine(around, [render({ status: "claimed" })], NOW)).toBe(
+      "Your desktop will pick this up shortly.",
+    );
+  });
+
+  it("otherwise describes the desktop", () => {
+    expect(renderPresenceLine(around, [], NOW)).toBe("Your desktop is online.");
+    expect(renderPresenceLine(around, [render({ status: "succeeded" })], NOW)).toBe("Your desktop is online.");
+    expect(renderPresenceLine(away, [render({ status: "failed" })], NOW)).toBe(presenceSummary(away, NOW));
   });
 });

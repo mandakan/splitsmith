@@ -120,6 +120,44 @@ def test_the_stage_is_checked_before_queueing(hosted_app: tuple[TestClient, _Cap
     assert bad.status_code == 422
 
 
+def test_a_render_upload_is_queued_with_its_validated_request(
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    client, sender = hosted_app
+    login(client, sender, EMAIL)
+    _mirror(client)
+    resp = _render_upload(client)
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert (body["kind"], body["slug"], body["stage_number"]) == ("render_upload", SLUG, None)
+    assert body["expected_revision"] is None
+    # Stored as the full, defaulted request, so the desktop renders what the
+    # phone saw rather than its own defaults.
+    assert body["args"]["request"]["youtube_upload"] is True
+    assert body["args"]["request"]["head_pad_seconds"] is not None
+    # One per shooter at a time.
+    again = _render_upload(client)
+    assert again.status_code == 200 and again.json()["id"] == body["id"]
+
+
+def test_a_render_upload_must_upload_an_mp4(hosted_app: tuple[TestClient, _CapturingSender]) -> None:
+    client, sender = hosted_app
+    login(client, sender, EMAIL)
+    _mirror(client)
+    base = {"stage_numbers": [1], "output_format": "mp4", "youtube_sidecar": True}
+    for request in (
+        {**base, "youtube_upload": False},
+        {**base, "output_format": "fcpxml", "youtube_upload": True},
+        {"youtube_upload": True},
+    ):
+        resp = client.post(PHONE, json={"kind": "render_upload", "slug": SLUG, "args": {"request": request}})
+        assert resp.status_code == 422, (request, resp.text)
+    no_slug = client.post(
+        PHONE, json={"kind": "render_upload", "args": {"request": {**base, "youtube_upload": True}}}
+    )
+    assert no_slug.status_code == 422
+
+
 def test_a_desktop_sees_claims_heartbeats_and_completes(
     hosted_app: tuple[TestClient, _CapturingSender],
 ) -> None:
@@ -268,3 +306,168 @@ def test_deleting_the_match_on_hosted_sweeps_its_commands(
     assert resp.status_code == 200, resp.text
     assert resp.json()["summary"]["desktop_commands_removed"] == 1
     assert asyncio.run(_store(client).pending_counts()) == {}
+
+
+def _render_upload(client: TestClient):
+    return client.post(
+        PHONE,
+        json={
+            "kind": "render_upload",
+            "slug": SLUG,
+            "args": {
+                "request": {
+                    "stage_numbers": [1],
+                    "output_format": "mp4",
+                    "youtube_sidecar": True,
+                    "youtube_upload": True,
+                }
+            },
+        },
+    )
+
+
+def test_a_lapsed_render_upload_goes_back_only_to_the_desktop_that_held_it(
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """Re-running an upload on a second machine would publish it twice."""
+    client, sender = hosted_app
+    login(client, sender, EMAIL)
+    _mirror(client)
+    command_id = _render_upload(client).json()["id"]
+    store = _store(client)
+    now = datetime.now(UTC)
+    later = now + timedelta(minutes=11)
+    assert [c.id for c in asyncio.run(store.claim([MATCH], token_id="tok-a", now=now))] == [command_id]
+
+    assert asyncio.run(store.claim([MATCH], token_id="tok-b", now=later)) == []
+    # Counted only for the desktop that may take it: another desktop that
+    # saw it would sync every poll and claim nothing, forever.
+    assert asyncio.run(store.pending_counts(token_id="tok-b", now=later)) == {}
+    assert asyncio.run(store.pending_counts(token_id="tok-a", now=later)) == {MATCH: 1}
+    again = asyncio.run(store.claim([MATCH], token_id="tok-a", now=later))
+    assert [c.id for c in again] == [command_id]
+
+
+def test_a_lapsed_shot_detect_is_still_claimable_by_any_desktop(
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """The pin is per kind: a re-detect is safe anywhere (its revision
+    guard refuses a doubled run)."""
+    client, sender = hosted_app
+    login(client, sender, EMAIL)
+    _mirror(client)
+    command_id = _request(client).json()["id"]
+    store = _store(client)
+    now = datetime.now(UTC)
+    later = now + timedelta(minutes=11)
+    asyncio.run(store.claim([MATCH], token_id="tok-a", now=now))
+    assert asyncio.run(store.pending_counts(token_id="tok-b", now=later)) == {MATCH: 1}
+    assert [c.id for c in asyncio.run(store.claim([MATCH], token_id="tok-b", now=later))] == [command_id]
+
+
+def test_a_waiting_render_upload_is_claimable_by_any_desktop(
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    client, sender = hosted_app
+    login(client, sender, EMAIL)
+    _mirror(client)
+    command_id = _render_upload(client).json()["id"]
+    store = _store(client)
+    assert asyncio.run(store.pending_counts(token_id="tok-b")) == {MATCH: 1}
+    assert [c.id for c in asyncio.run(store.claim([MATCH], token_id="tok-b"))] == [command_id]
+
+
+def test_cancelling_a_lapsed_render_upload_ends_it_at_once(
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """A pinned command whose desktop never came back must not be stuck:
+    only its holder may re-claim it and only its heartbeat would act on
+    ``cancel_requested``, so without this it dedupes every later request
+    for the shooter forever."""
+    client, sender = hosted_app
+    login(client, sender, EMAIL)
+    _mirror(client)
+    command_id = _render_upload(client).json()["id"]
+    store = _store(client)
+    now = datetime.now(UTC)
+    later = now + timedelta(minutes=11)
+    asyncio.run(store.claim([MATCH], token_id="tok-a", now=now))
+
+    cancelled = asyncio.run(store.cancel(command_id, match_id=MATCH, now=later))
+    assert cancelled is not None
+    assert cancelled.status == "cancelled"
+    # The holder coming back later is told to stop, and its completion
+    # cannot reopen the row.
+    assert asyncio.run(store.heartbeat(command_id, message=None, now=later)) is None
+    done = asyncio.run(store.complete(command_id, status="succeeded", now=later))
+    assert done is not None and done.status == "cancelled"
+
+    fresh = _render_upload(client).json()
+    assert fresh["id"] != command_id
+    assert fresh["status"] == "pending"
+
+
+def test_cancelling_a_live_render_upload_only_asks(
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    client, sender = hosted_app
+    login(client, sender, EMAIL)
+    _mirror(client)
+    command_id = _render_upload(client).json()["id"]
+    store = _store(client)
+    now = datetime.now(UTC)
+    asyncio.run(store.claim([MATCH], token_id="tok-a", now=now))
+
+    asked = asyncio.run(store.cancel(command_id, match_id=MATCH, now=now + timedelta(minutes=9)))
+    assert asked is not None
+    assert (asked.status, asked.cancel_requested) == ("claimed", True)
+
+
+def _lapse_lease(client: TestClient, command_id: str) -> None:
+    """Move a claimed command's lease into the past, as if its desktop
+    quit ten minutes ago (the routes claim with the real clock)."""
+    from sqlalchemy import update
+
+    from splitsmith.db import create_engine, sessionmaker
+    from splitsmith.db.models import DesktopCommandRow
+
+    sf = sessionmaker(create_engine(_db_url_for(client)))
+
+    async def _run() -> None:
+        async with sf() as s:
+            await s.execute(
+                update(DesktopCommandRow)
+                .where(DesktopCommandRow.id == command_id)
+                .values(lease_expires_at=datetime.now(UTC) - timedelta(minutes=1))
+            )
+            await s.commit()
+
+    asyncio.run(_run())
+
+
+def test_the_fingerprint_poll_counts_a_lapsed_render_upload_only_for_its_holder(
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """The route passes the bearer's token to the count: a desktop that
+    cannot claim a pinned command must not be woken by it every poll."""
+    client, sender = hosted_app
+    login(client, sender, EMAIL)
+    _mirror(client)
+    command_id = _render_upload(client).json()["id"]
+    holder = {
+        "Authorization": f"Bearer {client.post('/api/me/desktop-tokens', json={'name': 'a'}).json()['token']}"
+    }
+    other = {
+        "Authorization": f"Bearer {client.post('/api/me/desktop-tokens', json={'name': 'b'}).json()['token']}"
+    }
+    client.cookies.clear()
+    claimed = client.post("/api/sync/commands/claim", json={"match_ids": [MATCH]}, headers=holder).json()
+    assert [c["id"] for c in claimed["commands"]] == [command_id]
+    _lapse_lease(client, command_id)
+
+    def pending(bearer: dict[str, str]) -> int:
+        matches = client.get("/api/sync/fingerprints", headers=bearer).json()["matches"]
+        return {m["match_id"]: m for m in matches}[MATCH]["pending_commands"]
+
+    assert pending(holder) == 1
+    assert pending(other) == 0

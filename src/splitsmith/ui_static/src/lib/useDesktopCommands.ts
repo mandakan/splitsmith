@@ -6,7 +6,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 
-import { api, apiErrorText, type DesktopCommand, type DesktopPresence } from "@/lib/api";
+import { api, apiErrorText, type DesktopCommand, type DesktopPresence, type MatchExportRequestPayload } from "@/lib/api";
 import { isActiveCommand } from "@/lib/desktopCommands";
 
 export const DESKTOP_COMMAND_POLL_MS = 10_000;
@@ -15,7 +15,10 @@ export interface DesktopCommands {
   commands: DesktopCommand[];
   presence: DesktopPresence | null;
   error: string | null;
+  /** True while a render request is on its way to the server. */
+  busy: boolean;
   requestRedetect: (slug: string, stageNumber: number) => Promise<void>;
+  requestRender: (slug: string, request: MatchExportRequestPayload) => Promise<void>;
   cancel: (id: string) => Promise<void>;
   refresh: () => Promise<void>;
 }
@@ -24,6 +27,7 @@ export function useDesktopCommands(enabled: boolean): DesktopCommands {
   const [commands, setCommands] = useState<DesktopCommand[]>([]);
   const [presence, setPresence] = useState<DesktopPresence | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -61,6 +65,27 @@ export function useDesktopCommands(enabled: boolean): DesktopCommands {
     [refresh],
   );
 
+  const requestRender = useCallback(
+    async (slug: string, request: MatchExportRequestPayload) => {
+      setError(null);
+      // Busy until the list shows the new row, so a second press cannot
+      // land in between and ask twice.
+      setBusy(true);
+      try {
+        try {
+          await api.requestDesktopRender(slug, request);
+        } catch (e) {
+          setError(apiErrorText(e, "Could not send the request."));
+          return;
+        }
+        await refresh();
+      } finally {
+        setBusy(false);
+      }
+    },
+    [refresh],
+  );
+
   const cancel = useCallback(
     async (id: string) => {
       try {
@@ -74,5 +99,5 @@ export function useDesktopCommands(enabled: boolean): DesktopCommands {
     [refresh],
   );
 
-  return { commands, presence, error, requestRedetect, cancel, refresh };
+  return { commands, presence, error, busy, requestRedetect, requestRender, cancel, refresh };
 }

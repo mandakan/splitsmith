@@ -45,6 +45,10 @@ export interface YouTubeConnectProps {
   /** renderedMp4 && youtube on the form: the only case an upload can chain. */
   showUploadControl: boolean;
   busy?: boolean;
+  /** Uploads run on the linked desktop with its own connection: no
+   *  connect flow, no picker over this account's playlists, and no Off
+   *  (uploading is the request). */
+  onDesktop?: boolean;
 }
 
 const NEW_PLAYLIST = "__new__";
@@ -71,6 +75,7 @@ export function YouTubeConnect({
   matchName,
   showUploadControl,
   busy = false,
+  onDesktop = false,
 }: YouTubeConnectProps) {
   const uploadAfterRender: UploadAfterRender = options.enabled ? options.privacy : "off";
   const setUploadAfterRender = (v: UploadAfterRender) =>
@@ -82,7 +87,7 @@ export function YouTubeConnect({
   // picker with None and New only, and says why under it.
   const [playlists, setPlaylists] = useState<YouTubePlaylist[] | null>(null);
   const [playlistsError, setPlaylistsError] = useState<string | null>(null);
-  const wantPlaylists = showUploadControl && options.enabled && !!settings?.connected;
+  const wantPlaylists = !onDesktop && showUploadControl && options.enabled && !!settings?.connected;
   useEffect(() => {
     if (!wantPlaylists || playlists !== null) return;
     let cancelled = false;
@@ -114,6 +119,36 @@ export function YouTubeConnect({
       return;
     }
     onSettingsChange();
+  }
+
+  if (onDesktop) {
+    return (
+      <div className="flex flex-col gap-2">
+        <span className="text-md text-ink-2">Uploads to the YouTube account connected on your desktop.</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-md text-muted">Privacy</span>
+          <Segmented<UploadAfterRender>
+            label="Privacy"
+            value={uploadAfterRender === "off" ? "unlisted" : uploadAfterRender}
+            onChange={setUploadAfterRender}
+            options={UPLOAD_OPTIONS.filter((o) => o.value !== "off")}
+            disabled={busy}
+          />
+        </div>
+        <label className="flex flex-wrap items-center gap-2">
+          <span className="text-md text-muted">Playlist</span>
+          <input
+            type="text"
+            aria-label="Playlist"
+            className={inputClass}
+            placeholder="None"
+            value={options.playlist ?? ""}
+            onChange={(e) => onOptionsChange({ ...options, playlist: e.target.value || null, playlistId: null })}
+            disabled={busy}
+          />
+        </label>
+      </div>
+    );
   }
 
   if (settings === null) return null;

@@ -61,6 +61,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+#: Kinds that must never be journaled or resumed. A ``render_upload``
+#: (#1100) is a phone's command: its recovery is the command queue's lease
+#: re-claim plus ``sync.commands.prior_result``. Resumed at boot it would
+#: re-render over the sidecar's upload record and upload a second time, or
+#: race the re-claimed command for the shooter.
+NON_RESUMABLE_KINDS = frozenset({"render_upload"})
+
 
 def to_wire_args(args: dict[str, Any]) -> dict[str, Any]:
     """Project ``args`` to a JSON-serialisable dict for persistence.
@@ -79,8 +86,12 @@ def rehydrate_args(kind: str, args: dict[str, Any]) -> dict[str, Any]:
     :func:`to_wire_args`.
 
     ``export`` / ``match_export`` / ``compare-grid`` carry a ``req``;
-    every other kind passes through. The request models moved to ``exports_api`` under
-    #919's lift-as-you-go rule, and the import stays lazy under the same
+    every other kind passes through. ``render_upload`` carries a ``req``
+    too and is deliberately absent: it is in :data:`NON_RESUMABLE_KINDS`,
+    never journaled and never resumed, so no row of it is rehydrated.
+
+    The request models moved to ``exports_api`` under #919's
+    lift-as-you-go rule, and the import stays lazy under the same
     cycle rule that governs that module: ``server`` imports the models
     back from it, so nothing on the export-router side may be pulled in
     eagerly from a module ``server`` itself imports -- this one included.
@@ -218,8 +229,11 @@ class JobJournal:
         submitting request's context - the same values ``submit``
         captures into the job's ``contextvars`` copy - so a resume in a
         fresh process can re-bind them (the local analogue of the hosted
-        queue shipping ``match_id`` in its payload).
+        queue shipping ``match_id`` in its payload). A kind in
+        :data:`NON_RESUMABLE_KINDS` is not recorded at all.
         """
+        if job.kind in NON_RESUMABLE_KINDS:
+            return
         from .server import current_match_id, current_match_root
 
         match_root = current_match_root.get()
@@ -370,6 +384,7 @@ async def resume_journaled_jobs(backend: JobBackend, journal: JobJournal) -> int
     nothing is lost, and a claimed row we then choose to drop doesn't
     come back on the next boot either. Dropped with a warning:
 
+    - :data:`NON_RESUMABLE_KINDS` rows an earlier build journaled;
     - kinds with no registered body (dev-only kinds register lazily at
       their route callsites and can't run before someone hits the route);
     - rows whose ``match_root`` no longer exists on disk;
@@ -399,6 +414,9 @@ async def resume_journaled_jobs(backend: JobBackend, journal: JobJournal) -> int
             continue
         if not journal.claim(row.id):
             # A concurrently-booting sibling won the row.
+            continue
+        if row.kind in NON_RESUMABLE_KINDS:
+            logger.warning("dropping journaled job %s: %r is never resumed", row.id, row.kind)
             continue
         if row.kind not in backend.bodies:
             logger.warning("dropping journaled job %s: no body registered for kind %r", row.id, row.kind)

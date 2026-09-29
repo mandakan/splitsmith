@@ -40,7 +40,7 @@ import { DevFixtureDetail } from "@/pages/dev/DevFixtureDetail";
 import { DevRetrain } from "@/pages/dev/DevRetrain";
 import { DevReviewQueue } from "@/pages/dev/DevReviewQueue";
 import { DevValidate } from "@/pages/dev/DevValidate";
-import { Export } from "@/pages/Export";
+import { ExportRoute } from "@/pages/Export";
 import { Home } from "@/pages/Home";
 import { Ingest } from "@/pages/Ingest";
 import { MergeMatches } from "@/pages/MergeMatches";
@@ -322,11 +322,11 @@ export function App() {
               />
               <Route
                 path="export/:slug"
-                element={<ShooterScopedRoute element={<DesktopGate screen="Export"><Export /></DesktopGate>} />}
+                element={<ShooterScopedRoute element={<ExportRoute />} />}
               />
               <Route
                 path="export/:slug/:stage"
-                element={<ShooterScopedRoute element={<DesktopGate screen="Export"><Export /></DesktopGate>} />}
+                element={<ShooterScopedRoute element={<ExportRoute />} />}
               />
               {/* The compare grid is Export's third mode now (UX PR 8);
                   the slug-less route lands on the lead shooter's export. */}

@@ -23,6 +23,8 @@ export interface DetailsGroupProps {
   youtubeSettings: YouTubeSettings | null;
   onYouTubeSettingsChange: () => void;
   matchName: string;
+  /** The upload runs on the linked desktop's own YouTube account. */
+  onDesktop?: boolean;
 }
 
 export function DetailsGroup({
@@ -37,6 +39,7 @@ export function DetailsGroup({
   youtubeSettings,
   onYouTubeSettingsChange,
   matchName,
+  onDesktop = false,
 }: DetailsGroupProps) {
   const single = settings.mode === "single";
   const renderedMp4 = single && settings.outputFormat === "mp4";
@@ -90,7 +93,7 @@ export function DetailsGroup({
           />
         </Field>
       ) : null}
-      {renderedMp4 ? (
+      {renderedMp4 || onDesktop ? (
         <Field label="Upload">
           <YouTubeConnect
             settings={youtubeSettings}
@@ -100,6 +103,7 @@ export function DetailsGroup({
             matchName={matchName}
             showUploadControl={publishing}
             busy={busy}
+            onDesktop={onDesktop}
           />
         </Field>
       ) : null}

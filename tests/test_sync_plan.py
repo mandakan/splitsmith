@@ -442,3 +442,19 @@ def test_web_only_plan_keeps_the_full_trim_when_there_is_no_rendition(tmp_path: 
     plan = build_push_plan(root, sync_state=SyncState(), full_media=False)
 
     assert any(m.remote_key.endswith("_trimmed.mp4") for m in plan.media)
+
+
+def test_the_desktop_command_ledger_never_enters_the_push_plan(tmp_path: Path) -> None:
+    """The ledger of uploads a phone's commands made is this machine's
+    record of what it did, not match state (#1100)."""
+    from splitsmith.sync.commands import DONE_LEDGER_NAME, record_command_upload
+
+    root, _slug = _build_basic_match(tmp_path)
+    record_command_upload(root, "cmd-1", {"video_id": "v", "url": "https://youtu.be/v", "channel_title": "C"})
+    ledger = root / DONE_LEDGER_NAME
+    assert ledger.is_file()
+
+    plan = build_push_plan(root, sync_state=SyncState())
+    assert all(item.local_path != ledger for item in plan.media)
+    assert all(DONE_LEDGER_NAME not in item.remote_key for item in plan.media)
+    assert all("cmd-1" not in json.dumps(doc.body) for doc in plan.docs)

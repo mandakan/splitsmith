@@ -134,6 +134,19 @@ def test_upload_export_sends_sidecar_metadata_and_records_the_result(tmp_path: P
     assert stored.title == "Bromma Classifier"  # nothing else touched
 
 
+def test_the_record_carries_the_command_that_asked_for_it(tmp_path: Path) -> None:
+    mp4 = _seed(tmp_path)
+    record = upload.upload_export(mp4, client=FakeClient(), command_id="cmd-1")
+    assert record.command_id == "cmd-1"
+    stored = youtube_sidecar.load_sidecar(youtube_sidecar.sidecar_path_for(mp4))
+    assert stored.upload is not None and stored.upload.command_id == "cmd-1"
+
+
+def test_a_record_without_a_command_reads_as_before(tmp_path: Path) -> None:
+    mp4 = _seed(tmp_path)
+    assert upload.upload_export(mp4, client=FakeClient()).command_id is None
+
+
 def test_upload_export_refuses_without_a_sidecar(tmp_path: Path) -> None:
     mp4 = tmp_path / "x.mp4"
     mp4.write_bytes(b"0")
@@ -337,3 +350,15 @@ def test_playlist_id_skips_find_or_create(tmp_path: Path) -> None:
     assert client.added == [("PL-existing", "vid42")]
     assert client.playlists == {"Other": "PL-x"}  # nothing created
     assert record.playlist_id == "PL-existing" and record.playlist_title == "ignored title"
+
+
+def test_the_video_id_is_reported_before_anything_after_the_bytes(tmp_path: Path) -> None:
+    """A caller that must never upload twice records the id here: the
+    video exists from this moment, whatever dies afterwards."""
+    mp4 = _seed(tmp_path)
+    client = FakeClient(caption_error=RuntimeError("killed"))
+    seen: list[str] = []
+    with pytest.raises(RuntimeError, match="killed"):
+        upload.upload_export(mp4, client=client, on_video_id=seen.append)
+    assert seen == ["vid42"]
+    assert youtube_sidecar.load_sidecar(youtube_sidecar.sidecar_path_for(mp4)).upload is None

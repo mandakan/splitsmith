@@ -16,13 +16,17 @@ export function DesktopGate({
   screen,
   children,
   links = true,
+  allowOnMobile = false,
 }: {
   screen: string;
   children: ReactNode;
   links?: boolean;
+  /** This instance of the screen does fit a phone (decided by the route,
+   *  which knows the match). */
+  allowOnMobile?: boolean;
 }) {
   const isMobile = useIsMobile();
-  if (!isMobile) return <>{children}</>;
+  if (!isMobile || allowOnMobile) return <>{children}</>;
   return <DesktopOnlyNotice screen={screen} links={links} />;
 }
 

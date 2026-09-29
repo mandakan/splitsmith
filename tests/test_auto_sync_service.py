@@ -212,6 +212,7 @@ def test_read_only_posts_and_unsynced_jobs_do_not_mark_dirty(tmp_path: Path) -> 
     now = datetime.now(UTC)
     for kind in (
         "match_export",
+        "render_upload",
         "export",
         "youtube_upload",
         "compare-grid",
@@ -340,7 +341,7 @@ def test_a_render_on_another_match_holds_the_sync(tmp_path: Path) -> None:
             ]
         )
 
-    for kind in ("match_export", "compare-grid", "export"):
+    for kind in ("match_export", "render_upload", "compare-grid", "export"):
         svc._jobs = running(kind)
         asyncio.run(svc.tick())
         assert submitted == [], kind

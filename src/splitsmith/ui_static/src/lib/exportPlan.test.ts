@@ -30,6 +30,31 @@ function stage(over: Partial<StageExportStatus> = {}): StageExportStatus {
   };
 }
 
+describe("stageBlock with the sources on the desktop", () => {
+  const unreachable = stage({ source_reachable: false, ready_to_export: false, audit_shot_count: 0 });
+  it("skips only the reachability rung", () => {
+    expect(stageBlock(unreachable, 10, "single", true, { sourcesElsewhere: true })).toBeNull();
+    const [row] = exportRows([unreachable], new Map([[3, 10]]), "single", true, { sourcesElsewhere: true });
+    expect(row.eligible).toBe(true);
+    expect(row.bare).toBe(true);
+  });
+  it("every other rung still applies", () => {
+    const opts = { sourcesElsewhere: true };
+    expect(stageBlock(stage({ source_reachable: false, skipped: true }), 10, "single", true, opts)).toEqual({
+      reason: "Skipped",
+    });
+    expect(stageBlock(unreachable, 0, "single", true, opts)?.reason).toBe("No stage time");
+    expect(
+      stageBlock({ ...unreachable, ready_to_export_bare: false }, 10, "single", true, opts)?.reason,
+    ).toBe("No confirmed beep");
+    expect(stageBlock({ ...unreachable, has_primary: false }, 10, "single", true, opts)?.reason).toBe("No footage");
+  });
+  it("without the option the ladder is unchanged", () => {
+    expect(stageBlock(unreachable, 10, "single", true)?.reason).toMatch(/upload missing/i);
+    expect(exportRows([unreachable], new Map([[3, 10]]), "single", true)[0].eligible).toBe(false);
+  });
+});
+
 describe("stageBlock ladder", () => {
   it("passes a ready stage in every mode", () => {
     for (const mode of ["single", "trims", "compare"] as const) {

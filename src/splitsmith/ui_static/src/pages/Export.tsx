@@ -22,6 +22,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useOutletContext, useParams } from "react-router-dom";
 
 import { CleanupDialog } from "@/components/CleanupDialog";
+import { DesktopGate } from "@/components/DesktopOnlyNotice";
+import { DesktopCommandLine } from "@/components/desktop/DesktopCommandLine";
 import { CutGroup } from "@/components/export/CutGroup";
 import { DetailsGroup } from "@/components/export/DetailsGroup";
 import { ExportHistory } from "@/components/export/ExportHistory";
@@ -52,7 +54,8 @@ import {
   type MatchProject,
   type YouTubeSettings,
 } from "@/lib/api";
-import { camExportFields, syncedSecondaryCount } from "@/lib/camOptions";
+import { syncedSecondaryCount } from "@/lib/camOptions";
+import { commandTitle, renderPresenceLine, rendersOnDesktop } from "@/lib/desktopCommands";
 import { rowUploadOptions } from "@/lib/youtubeRows";
 import { hostedDownloads as buildHostedDownloads } from "@/lib/exportDownloads";
 import type { LookFocus } from "@/lib/exportPreview";
@@ -78,19 +81,31 @@ import {
 } from "@/lib/exportPlan";
 import { useDeploymentMode } from "@/lib/features";
 import { useMatchHref } from "@/lib/matchHref";
-import {
-  clampSeconds,
-  describeRenderOptions,
-  matchExportFields,
-  renderOptionsSeconds,
-  transitionsSupported,
-  type OutputFormat,
-} from "@/lib/renderOptions";
+import { useDesktopCommands } from "@/lib/useDesktopCommands";
+import { describeRenderOptions, renderOptionsSeconds, transitionsSupported, type OutputFormat } from "@/lib/renderOptions";
 import { cn } from "@/lib/utils";
-import { buildCompareGridPayload, CANVAS_CHOICES, summarizeGridResult } from "@/pages/matchExportModel";
+import {
+  buildCompareGridPayload,
+  buildMatchExportPayload,
+  CANVAS_CHOICES,
+  summarizeGridResult,
+} from "@/pages/matchExportModel";
 
 /** What ``ui/match_exports.py`` names the timeline file per format. */
 const BUNDLE_EXTENSION: Record<OutputFormat, string> = { fcpxml: ".fcpxml", fcp7xml: ".xml", mp4: ".mp4" };
+
+/** The Export route: phones get the desktop-only notice, except on a
+ *  desktop-synced match, where the page is the request the phone sends
+ *  to the desktop. */
+export function ExportRoute() {
+  const { mode } = useDeploymentMode();
+  const ctx = useOutletContext<MatchShellOutletContext | undefined>();
+  return (
+    <DesktopGate screen="Export" allowOnMobile={rendersOnDesktop(mode === "hosted", ctx?.origin, ctx?.capabilities)}>
+      <Export />
+    </DesktopGate>
+  );
+}
 
 export function Export() {
   const { slug, matchId } = useParams<{ slug: string; matchId?: string }>();
@@ -108,6 +123,13 @@ function ExportInner({ slug }: { slug: string }) {
   // `project` (that's the per-shooter export overview, not the match
   // capability set) - a mirror match 403s every write here.
   const editDenied = capabilityDenied(ctx?.capabilities, "edit");
+  // A desktop-synced match cannot export here (no sources, no edit), but
+  // its desktop can: the form becomes a request the desktop renders and
+  // uploads (``rendersOnDesktop``, which ExportRoute also uses to let a
+  // phone through). Match video only; the compare grid and trims have no
+  // upload.
+  const onDesktop = rendersOnDesktop(hosted, ctx?.origin, ctx?.capabilities);
+  const desktop = useDesktopCommands(onDesktop);
   const shooters = useMemo(() => ctx?.shooters ?? [], [ctx?.shooters]);
   const [project, setProject] = useState<MatchProject | null>(null);
   const [overview, setOverview] = useState<ExportOverview | null>(null);
@@ -181,6 +203,14 @@ function ExportInner({ slug }: { slug: string }) {
     return last ? applyBody(DEFAULT_EXPORT_SETTINGS, last.body) : DEFAULT_EXPORT_SETTINGS;
   });
   const patch = useCallback((p: Partial<ExportSettings>) => setSettings((s) => ({ ...s, ...p })), []);
+  // What the form shows and sends. The desktop renders a YouTube MP4 of
+  // the match and nothing else, whatever the stored settings say; the
+  // override is never written back, so the hosted-native pages keep the
+  // user's own choices.
+  const view = useMemo<ExportSettings>(
+    () => (onDesktop ? { ...settings, mode: "single", outputFormat: "mp4", youtube: true } : settings),
+    [onDesktop, settings],
+  );
   const {
     mode,
     outputFormat,
@@ -196,7 +226,7 @@ function ExportInner({ slug }: { slug: string }) {
     gridOverlay,
     gridHoldSeconds,
     uploadOptions,
-  } = settings;
+  } = view;
   const canvas = CANVAS_CHOICES.find((c) => c.id === settings.canvas) ?? CANVAS_CHOICES[0];
 
   const [selection, setSelection] = useState<Set<number>>(() => new Set());
@@ -276,8 +306,8 @@ function ExportInner({ slug }: { slug: string }) {
   }, [project]);
 
   const rows = useMemo(
-    () => exportRows(overview?.stages ?? [], stageTimeByNumber, mode, hosted),
-    [overview, stageTimeByNumber, mode, hosted],
+    () => exportRows(overview?.stages ?? [], stageTimeByNumber, mode, hosted, { sourcesElsewhere: onDesktop }),
+    [overview, stageTimeByNumber, mode, hosted, onDesktop],
   );
   const eligibleNumbers = useMemo(() => rows.filter((r) => r.eligible).map((r) => r.stage.stage_number), [rows]);
   const eligibleSet = useMemo(() => new Set(eligibleNumbers), [eligibleNumbers]);
@@ -343,8 +373,12 @@ function ExportInner({ slug }: { slug: string }) {
   // while the mode stayed put.
   const presetUnavailable = useCallback(
     (p: ExportPreset) =>
-      p.body.mode === "compare" && !multiShooter ? "The compare grid needs two or more shooters on the match" : null,
-    [multiShooter],
+      onDesktop && p.body.mode !== "single"
+        ? "Your desktop renders the match video only"
+        : p.body.mode === "compare" && !multiShooter
+          ? "The compare grid needs two or more shooters on the match"
+          : null,
+    [multiShooter, onDesktop],
   );
 
   function applyPreset(id: string) {
@@ -460,8 +494,13 @@ function ExportInner({ slug }: { slug: string }) {
   });
 
   const busy = job?.status === "pending" || job?.status === "running" || queueing;
-  const canExport =
-    !busy && orderedSelection.length > 0 && !!project && !editDenied && (!compare || audioFrom !== "");
+  const canExport = onDesktop
+    ? mode === "single" && orderedSelection.length > 0 && !!project && !desktop.busy
+    : !busy && orderedSelection.length > 0 && !!project && !editDenied && (!compare || audioFrom !== "");
+  const renderRequests = useMemo(
+    () => desktop.commands.filter((c) => c.kind === "render_upload" && c.slug === slug),
+    [desktop.commands, slug],
+  );
 
   /** Queue one trim-only job per selected stage through the per-stage
    *  export endpoint. The write flags are literals rather than the
@@ -555,38 +594,62 @@ function ExportInner({ slug }: { slug: string }) {
     }
   }
 
+  /** Ask the linked desktop to render this form and upload the video.
+   *  The upload options travel as if the form's upload toggle were on:
+   *  uploading is the request, and with the toggle off the privacy and
+   *  playlist the user picked would be dropped. */
+  async function submitDesktopRender() {
+    if (!project) return;
+    await desktop.requestRender(
+      slug,
+      buildMatchExportPayload({
+        stageNumbers: orderedSelection,
+        headPad,
+        tailPad,
+        camOptions,
+        outputFormat,
+        transitionKind,
+        transitionSeconds,
+        renderOptions,
+        youtube,
+        descriptionLead,
+        uploadOptions: { ...uploadOptions, enabled: true },
+        includeOverlay,
+        overlayCodec,
+        projectName: projectName || project.name,
+        uploadTarget: "desktop",
+        youtubeConnected: false,
+      }),
+    );
+  }
+
   async function submitBundle() {
     if (!project) return;
     try {
       // The cam rows render only with a synced secondary on the selection;
       // without one the server's own default (cams on) changes nothing,
       // so the chosen value travels either way.
-      const submitted = await api.exportMatch(slug, {
-        stage_numbers: orderedSelection,
-        head_pad_seconds: headPad,
-        tail_pad_seconds: tailPad,
-        ...camExportFields(camOptions),
-        output_format: outputFormat,
-        transition_kind: transitionsSupported(outputFormat) ? transitionKind : "none",
-        transition_duration_seconds: clampSeconds(transitionSeconds, 0.1),
-        ...matchExportFields(renderOptions, outputFormat),
-        intro_path: undefined,
-        outro_path: undefined,
-        youtube_sidecar: renderedMp4 && youtube,
-        description_lead: renderedMp4 && youtube ? descriptionLead.trim() || null : undefined,
-        youtube_preset: renderedMp4 && youtube,
-        youtube_upload: renderedMp4 && youtube && !!youtubeSettings?.connected && uploadOptions.enabled,
-        youtube_privacy: rowUploadOptions(uploadOptions).privacy,
-        youtube_playlist: rowUploadOptions(uploadOptions).playlist,
-        youtube_playlist_id: rowUploadOptions(uploadOptions).playlist_id,
-        youtube_publish_at: rowUploadOptions(uploadOptions).publish_at,
-        youtube_notify_subscribers: rowUploadOptions(uploadOptions).notify_subscribers,
-        include_overlay: includeOverlay,
-        overlay_codec: overlayCodec,
-        overlay_max_height: null,
-        overlay_max_fps: null,
-        project_name: projectName || project.name,
-      });
+      const submitted = await api.exportMatch(
+        slug,
+        buildMatchExportPayload({
+          stageNumbers: orderedSelection,
+          headPad,
+          tailPad,
+          camOptions,
+          outputFormat,
+          transitionKind,
+          transitionSeconds,
+          renderOptions,
+          youtube,
+          descriptionLead,
+          uploadOptions,
+          includeOverlay,
+          overlayCodec,
+          projectName: projectName || project.name,
+          uploadTarget: "desk",
+          youtubeConnected: !!youtubeSettings?.connected,
+        }),
+      );
       setJob(submitted);
       const final = await api.pollJob(submitted.id, setJob);
       if (final.status === "succeeded" && final.result) {
@@ -632,7 +695,8 @@ function ExportInner({ slug }: { slug: string }) {
     setResult(null);
     setGridResult(null);
     setQueuedNote(null);
-    if (trimsOnly) await submitTrims();
+    if (onDesktop) await submitDesktopRender();
+    else if (trimsOnly) await submitTrims();
     else if (compare) await submitGrid();
     else await submitBundle();
   }
@@ -681,10 +745,19 @@ function ExportInner({ slug }: { slug: string }) {
     bare: bareSelected,
   });
   const summaryCtx = { secondaryCount };
-  const primaryLabel = trimsOnly ? "Export trims" : compare ? "Render grid" : "Export bundle";
+  const primaryLabel = onDesktop
+    ? "Render on desktop"
+    : trimsOnly
+      ? "Export trims"
+      : compare
+        ? "Render grid"
+        : "Export bundle";
   const busyLabel = trimsOnly ? "Queueing..." : compare ? "Rendering..." : "Exporting...";
   const bundleName = projectName || project?.name || "";
   const gridSummary = gridResult ? summarizeGridResult(gridResult) : null;
+  // A desktop request's own failure (send, list, cancel) reads as the
+  // page's error line.
+  const pageError = error ?? (onDesktop ? desktop.error : null);
 
   return (
     <div className="px-7 py-5">
@@ -706,9 +779,9 @@ function ExportInner({ slug }: { slug: string }) {
         }
       />
 
-      {error ? (
+      {pageError ? (
         <p role="alert" className="mb-4 rounded-md border border-destructive/45 px-3 py-2 text-md text-destructive">
-          {error}
+          {pageError}
         </p>
       ) : null}
 
@@ -756,24 +829,28 @@ function ExportInner({ slug }: { slug: string }) {
                 label="Output mode"
                 value={mode}
                 onChange={selectMode}
-                options={[
-                  { value: "single", label: "Timeline" },
-                  { value: "trims", label: "Trims only" },
-                  {
-                    value: "compare",
-                    label: "Compare grid",
-                    disabled: !multiShooter,
-                    title: "The compare grid needs two or more shooters on the match",
-                  },
-                ]}
+                options={
+                  onDesktop
+                    ? [{ value: "single", label: "Timeline" }]
+                    : [
+                        { value: "single", label: "Timeline" },
+                        { value: "trims", label: "Trims only" },
+                        {
+                          value: "compare",
+                          label: "Compare grid",
+                          disabled: !multiShooter,
+                          title: "The compare grid needs two or more shooters on the match",
+                        },
+                      ]
+                }
               />
             }
-            summary={groupSummary(settings, "output", summaryCtx)}
+            summary={groupSummary(view, "output", summaryCtx)}
             open={openGroups.output}
             onToggle={() => toggleGroup("output")}
           >
             <OutputGroup
-              settings={settings}
+              settings={view}
               patch={patch}
               busy={busy}
               editDenied={editDenied}
@@ -785,29 +862,30 @@ function ExportInner({ slug }: { slug: string }) {
               onChangeCamera={(v) => void changeCamera(v)}
               secondaryCount={secondaryCount}
               bareSelected={bareSelected}
+              onDesktop={onDesktop}
             />
           </Section>
 
           {mode === "single" ? (
             <Section
               label="Cut"
-              summary={groupSummary(settings, "cut", summaryCtx)}
+              summary={groupSummary(view, "cut", summaryCtx)}
               open={openGroups.cut}
               onToggle={() => toggleGroup("cut")}
             >
-              <CutGroup settings={settings} patch={patch} busy={busy} />
+              <CutGroup settings={view} patch={patch} busy={busy} />
             </Section>
           ) : null}
 
           {mode !== "trims" ? (
             <Section
               label="Look"
-              summary={groupSummary(settings, "look", summaryCtx)}
+              summary={groupSummary(view, "look", summaryCtx)}
               open={openGroups.look}
               onToggle={() => toggleGroup("look")}
             >
               <LookGroup
-                settings={settings}
+                settings={view}
                 patch={patch}
                 busy={busy}
                 bareSelected={bareSelected}
@@ -820,7 +898,7 @@ function ExportInner({ slug }: { slug: string }) {
           {mode === "single" || (compare && (renderOptions.titlePage || renderOptions.closingCard)) ? (
             <Section label="Details">
               <DetailsGroup
-                settings={settings}
+                settings={view}
                 patch={patch}
                 busy={busy}
                 projectName={projectName}
@@ -831,6 +909,7 @@ function ExportInner({ slug }: { slug: string }) {
                 youtubeSettings={youtubeSettings}
                 onYouTubeSettingsChange={() => void reloadYouTube()}
                 matchName={projectName || project?.name || ""}
+                onDesktop={onDesktop}
               />
             </Section>
           ) : null}
@@ -838,15 +917,39 @@ function ExportInner({ slug }: { slug: string }) {
           {/* Rendered in both deployment modes -- only the reveal
               affordance is desktop-specific; the download link works on
               both (#629). */}
-          <ExportHistory
-            runs={runs}
-            exportFileUrl={(f) => api.exportFileUrl(slug, f)}
-            youtube={
-              youtubeSettings?.connected
-                ? { connected: true, onUpload: (f, again) => void uploadRow(f, again), busyFilename: uploadBusy }
-                : undefined
-            }
-          />
+          {onDesktop ? (
+            // The desktop's renders of this shooter, newest first. Rows
+            // carry only the line's ghost Cancel: the page keeps one
+            // primary.
+            <Section label="Render requests" flush>
+              <div className="divide-y divide-rule">
+                {renderRequests.length === 0 ? (
+                  <p className="px-3.5 py-3 text-sm text-muted">No render requests yet.</p>
+                ) : (
+                  renderRequests.map((c) => (
+                    <div key={c.id} className="px-3.5 py-2.5">
+                      <p className="text-md text-ink">{commandTitle(c)}</p>
+                      <DesktopCommandLine
+                        command={c}
+                        presence={desktop.presence}
+                        onCancel={(id) => void desktop.cancel(id)}
+                      />
+                    </div>
+                  ))
+                )}
+              </div>
+            </Section>
+          ) : (
+            <ExportHistory
+              runs={runs}
+              exportFileUrl={(f) => api.exportFileUrl(slug, f)}
+              youtube={
+                youtubeSettings?.connected
+                  ? { connected: true, onUpload: (f, again) => void uploadRow(f, again), busyFilename: uploadBusy }
+                  : undefined
+              }
+            />
+          )}
         </div>
 
         {/* Summary rail */}
@@ -864,7 +967,7 @@ function ExportInner({ slug }: { slug: string }) {
             <PreviewPane
               slug={compare ? audioFrom || slug : slug}
               stageNumber={orderedSelection[0] ?? 0}
-              settings={settings}
+              settings={view}
               projectName={projectName || project?.name || ""}
               focus={lookFocus}
               hover={lookHover}
@@ -911,10 +1014,13 @@ function ExportInner({ slug }: { slug: string }) {
                 className="w-full"
                 onClick={() => void submitExport()}
                 disabled={!canExport}
-                title={editDenied ? READ_ONLY_MIRROR_MESSAGE : undefined}
+                title={editDenied && !onDesktop ? READ_ONLY_MIRROR_MESSAGE : undefined}
               >
-                {busy ? busyLabel : primaryLabel}
+                {onDesktop ? (desktop.busy ? "Sending..." : primaryLabel) : busy ? busyLabel : primaryLabel}
               </Button>
+              {onDesktop && desktop.presence ? (
+                <p className="mt-2 text-sm text-muted">{renderPresenceLine(desktop.presence, renderRequests)}</p>
+              ) : null}
               {busy && job?.message ? (
                 <div className="mt-2 text-sm text-muted">
                   {job.message}

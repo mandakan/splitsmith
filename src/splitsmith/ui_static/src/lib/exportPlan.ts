@@ -32,15 +32,23 @@ export interface ExportStageRow {
   bare: boolean;
 }
 
+export interface LadderOptions {
+  /** The sources live on another machine (a desktop-synced match whose
+   *  desktop renders it), so this server's reachability says nothing:
+   *  the desktop checks its own before it renders. Skips that rung only. */
+  sourcesElsewhere?: boolean;
+}
+
 /** The blocker ladder, first match wins. */
 export function stageBlock(
   stage: StageExportStatus,
   time: number | null,
   mode: ExportMode,
   hosted: boolean,
+  options: LadderOptions = {},
 ): StageBlock | null {
   if (stage.skipped) return { reason: "Skipped" };
-  if (stage.source_reachable === false) {
+  if (stage.source_reachable === false && !options.sourcesElsewhere) {
     return hosted
       ? {
           reason: "Upload missing -- the original upload is no longer stored",
@@ -73,10 +81,11 @@ export function exportRows(
   times: Map<number, number>,
   mode: ExportMode,
   hosted: boolean,
+  options: LadderOptions = {},
 ): ExportStageRow[] {
   return stages.map((stage) => {
     const time = times.get(stage.stage_number) ?? null;
-    const block = stageBlock(stage, time, mode, hosted);
+    const block = stageBlock(stage, time, mode, hosted, options);
     return {
       stage,
       time: time !== null && time > 0 ? time : null,

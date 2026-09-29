@@ -63,6 +63,10 @@ class UploadRecord(BaseModel):
     playlist_title: str | None = None
     publish_at: datetime | None = None
     notify_subscribers: bool = True
+    #: The desktop command that asked for this upload, when one did. The
+    #: desktop checks it before re-running a command, so a request whose
+    #: completion was lost never uploads twice.
+    command_id: str | None = None
 
 
 class YouTubeSidecar(BaseModel):

@@ -32,44 +32,57 @@ function sentBody(fetchMock: ReturnType<typeof mockFetch>): Record<string, unkno
   return JSON.parse(init.body as string) as Record<string, unknown>;
 }
 
+const matchPayload: Required<MatchExportRequestPayload> = {
+  stage_numbers: [1, 2],
+  head_pad_seconds: 0.5,
+  tail_pad_seconds: 1,
+  include_secondaries: false,
+  include_overlay: true,
+  overlay_codec: "prores-4444",
+  overlay_max_height: 1080,
+  overlay_max_fps: 30,
+  project_name: "Match",
+  pip_layout: "pip-corners",
+  output_format: "mp4",
+  transition_kind: "none",
+  transition_duration_seconds: 0.5,
+  title_kind: "slate",
+  title_duration_seconds: 1.5,
+  intro_path: "/intro.mp4",
+  outro_path: "/outro.mp4",
+  youtube_sidecar: true,
+  description_lead: "Lead",
+  youtube_preset: true,
+  youtube_upload: true,
+  youtube_privacy: "unlisted",
+  youtube_playlist: "Playlist",
+  youtube_playlist_id: "PL1",
+  youtube_publish_at: "2026-09-28T10:00:00Z",
+  youtube_notify_subscribers: false,
+  title_page: true,
+  title_info: "Level II",
+  title_page_duration_seconds: 3,
+  closing_card: true,
+  summary_hold_seconds: 3,
+};
+
 describe("export wrappers forward every declared field", () => {
   it("exportMatch", async () => {
-    const payload: Required<MatchExportRequestPayload> = {
-      stage_numbers: [1, 2],
-      head_pad_seconds: 0.5,
-      tail_pad_seconds: 1,
-      include_secondaries: false,
-      include_overlay: true,
-      overlay_codec: "prores-4444",
-      overlay_max_height: 1080,
-      overlay_max_fps: 30,
-      project_name: "Match",
-      pip_layout: "pip-corners",
-      output_format: "mp4",
-      transition_kind: "none",
-      transition_duration_seconds: 0.5,
-      title_kind: "slate",
-      title_duration_seconds: 1.5,
-      intro_path: "/intro.mp4",
-      outro_path: "/outro.mp4",
-      youtube_sidecar: true,
-      description_lead: "Lead",
-      youtube_preset: true,
-      youtube_upload: true,
-      youtube_privacy: "unlisted",
-      youtube_playlist: "Playlist",
-      youtube_playlist_id: "PL1",
-      youtube_publish_at: "2026-09-28T10:00:00Z",
-      youtube_notify_subscribers: false,
-      title_page: true,
-      title_info: "Level II",
-      title_page_duration_seconds: 3,
-      closing_card: true,
-      summary_hold_seconds: 3,
-    };
     const fetchMock = mockFetch();
-    await api.exportMatch("s1", payload);
-    expect(sentBody(fetchMock)).toEqual(payload);
+    await api.exportMatch("s1", matchPayload);
+    expect(sentBody(fetchMock)).toEqual(matchPayload);
+  });
+
+  it("requestDesktopRender", async () => {
+    const fetchMock = mockFetch();
+    await api.requestDesktopRender("anna", matchPayload);
+    const body = sentBody(fetchMock);
+    expect(body.kind).toBe("render_upload");
+    expect(body.slug).toBe("anna");
+    // Every declared field reaches the desktop, as for exportMatch.
+    for (const key of Object.keys(matchPayload)) {
+      expect((body.args as { request: Record<string, unknown> }).request).toHaveProperty(key);
+    }
   });
 
   it("exportMatch keeps its pad and overlay defaults for an empty payload", async () => {
