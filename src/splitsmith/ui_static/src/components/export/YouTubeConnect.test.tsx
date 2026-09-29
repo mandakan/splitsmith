@@ -134,6 +134,20 @@ describe("YouTubeConnect", () => {
     renderRow(settings({ connected: true, channel_title: "Mine" }), { showUploadControl: false });
     expect(screen.queryByRole("group", { name: "Upload after render" })).not.toBeInTheDocument();
   });
+
+  it("on the desktop's account: no connect, no picker, no Off", async () => {
+    renderRow(null, {
+      onDesktop: true,
+      options: { ...DEFAULT_UPLOAD_OPTIONS, enabled: true },
+      showUploadControl: true,
+    });
+    expect(screen.getByText("Uploads to the YouTube account connected on your desktop.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /connect youtube/i })).toBeNull();
+    expect(screen.queryByRole("radio", { name: "Off" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: /playlist/i })).toBeNull();
+    expect(screen.getByRole("textbox", { name: /playlist/i })).toBeInTheDocument();
+    expect(getYouTubePlaylists).not.toHaveBeenCalled();
+  });
 });
 
 describe("YouTubeConnect upload options", () => {
