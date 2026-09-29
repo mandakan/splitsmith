@@ -161,6 +161,7 @@ def _fake_upload(monkeypatch: pytest.MonkeyPatch, *, video_id: str = "vid1") -> 
         progress: Any = None,
         check_cancel: Any = None,
         command_id: str | None = None,
+        on_video_id: Any = None,
     ) -> youtube_sidecar.UploadRecord:
         from splitsmith.youtube.upload import UploadOptions
 
@@ -177,6 +178,8 @@ def _fake_upload(monkeypatch: pytest.MonkeyPatch, *, video_id: str = "vid1") -> 
         if progress:
             progress(1024, 2048)
             progress(2048, 2048)
+        if on_video_id is not None:
+            on_video_id(video_id)
         rec = youtube_sidecar.UploadRecord(
             video_id=video_id,
             url=f"https://youtu.be/{video_id}",

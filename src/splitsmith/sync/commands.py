@@ -11,6 +11,7 @@ before its lease lapsed), so the command is refused rather than run.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from .. import youtube_sidecar
@@ -22,6 +23,14 @@ from ..youtube import oauth
 #: Kinds this desktop can run. Hosted may queue a kind a newer desktop
 #: knows; an older one refuses it with a reason instead of guessing.
 RUNNABLE_KINDS = frozenset({"shot_detect", "render_upload"})
+
+#: Per-match record of the uploads commands made, ``command_id -> {video_id,
+#: url, channel_title}``. Written the moment YouTube returns a video id,
+#: before captions, thumbnail and playlist, so a desktop killed after that
+#: still finds its upload on re-claim; and apart from the export sidecar,
+#: which a desk re-export rewrites without its ``upload``. Root-level and
+#: outside everything ``sync.plan`` reads, so it never leaves this machine.
+DONE_LEDGER_NAME = "desktop_commands_done.json"
 
 STAGE_CHANGED = "the stage changed after this was requested; ask again"
 YOUTUBE_NOT_CONNECTED = "YouTube is not connected on the desktop"
@@ -87,8 +96,29 @@ def _render_upload_refusal(match_root: Path, command: dict) -> str | None:
     return None
 
 
+def _read_ledger(match_root: Path) -> dict[str, dict]:
+    try:
+        data = json.loads((match_root / DONE_LEDGER_NAME).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def record_command_upload(match_root: Path, command_id: str, video: dict) -> None:
+    """Record ``command_id``'s upload in the match's ledger, atomically
+    (a temp file, then ``os.replace``)."""
+    ledger = _read_ledger(match_root)
+    ledger[command_id] = {k: video.get(k) for k in ("video_id", "url", "channel_title")}
+    path = match_root / DONE_LEDGER_NAME
+    tmp = path.with_name(f".{DONE_LEDGER_NAME}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(ledger, indent=2, sort_keys=True), encoding="utf-8")
+    tmp.replace(path)
+
+
 def prior_result(match_root: Path, command: dict) -> dict | None:
-    """The upload this very command already made, from its sidecar record.
+    """The upload this very command already made: the ledger first, then
+    the command's sidecar record (an upload made before the ledger
+    existed).
 
     A render-upload whose completion never reached hosted is re-claimed
     after its lease lapses; this is what stops the re-run from uploading
@@ -103,6 +133,9 @@ def prior_result(match_root: Path, command: dict) -> dict | None:
     slug, command_id = command.get("slug"), command.get("id")
     if not isinstance(slug, str) or not command_id:
         return None
+    recorded = _read_ledger(match_root).get(command_id)
+    if isinstance(recorded, dict) and recorded.get("video_id"):
+        return {k: recorded.get(k) for k in ("video_id", "url", "channel_title")}
     try:
         root = _shooter_root(match_root, slug)
         if root is None:

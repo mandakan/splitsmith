@@ -43,7 +43,7 @@ here is in its way.
 | Which export | `match_export` (the single-shooter match video). The compare grid has no `-youtube.json` sidecar and is out. |
 | Settings | The phone's Export page builds a full `MatchExportRequest`, carried in `args`. Presets do not sync (hosted keeps them in `export_presets`, the desktop in a JSON file), so "render with preset X" cannot work: the desktop would not have X. |
 | YouTube account | The desktop's own connection, its local OAuth file. Not the hosted account's. |
-| Double upload | The upload record in the sidecar carries `command_id`; the desktop checks for it before rendering. |
+| Double upload | The match's `desktop_commands_done.json` ledger records `command_id -> video` the moment YouTube returns the id; the upload record in the sidecar carries `command_id` too. The desktop checks both before rendering. |
 | Re-claim after a lapsed lease | Only by the desktop that claimed it (`claimed_by`). A second desktop never re-runs an upload. |
 | A render that succeeds and an upload that fails | The command fails, naming both: "Rendered on the desktop, but the upload failed: ...". The upload is the point of the request. |
 
@@ -89,10 +89,15 @@ that desktop would sync every poll and claim nothing.
   - `args.request` does not validate;
   - the desktop has no YouTube connection: "YouTube is not connected on
     the desktop".
-- A new `prior_result(match_root, command) -> dict | None` scans the
-  shooter's `exports/*-youtube.json` for an `upload.command_id` equal to
-  the command's id, and returns that record's `{video_id, url,
-  channel_title}`. The runner calls it before `refuse_reason`. A hit
+- A new `prior_result(match_root, command) -> dict | None` reads the
+  match's ledger `<match_root>/desktop_commands_done.json` first, then
+  scans the shooter's `exports/*-youtube.json` for an `upload.command_id`
+  equal to the command's id, and returns `{video_id, url,
+  channel_title}`. The ledger is written atomically by `upload_export`'s
+  `on_video_id` callback before captions, thumbnail and playlist, so a
+  desktop killed in that window, or a desk re-export that rewrote the
+  sidecar without its `upload`, still finds the video. It is root-level
+  and outside everything `sync.plan` reads, so it is never pushed. The runner calls it before `refuse_reason`. A hit
   completes the command as `succeeded` with that result and starts
   nothing.
 

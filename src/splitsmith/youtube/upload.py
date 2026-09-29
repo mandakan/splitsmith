@@ -148,6 +148,7 @@ def upload_export(
     progress: Callable[[int, int], None] | None = None,
     check_cancel: Callable[[], None] | None = None,
     command_id: str | None = None,
+    on_video_id: Callable[[str], None] | None = None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> youtube_sidecar.UploadRecord:
     """Upload ``mp4`` with its sidecar's metadata; return and record the result.
@@ -157,6 +158,10 @@ def upload_export(
     record, not a failure: the video is up, and a channel without phone
     verification cannot take a custom thumbnail at all. The playlist step
     (``options.playlist``) is the same kind of note.
+
+    ``on_video_id`` is called the moment YouTube returns the video id,
+    before any of those steps: the video exists from then on, and a
+    caller that must never upload twice records it there.
     """
     options = options or UploadOptions()
     privacy = options.effective_privacy
@@ -190,6 +195,8 @@ def upload_export(
         metadata, size=mp4.stat().st_size, notify_subscribers=options.notify_subscribers
     )
     video_id = client.upload_bytes(session, mp4, progress=progress, check_cancel=check_cancel)
+    if on_video_id is not None:
+        on_video_id(video_id)
 
     captions_uploaded = False
     srt = youtube_sidecar.srt_path_for(mp4)

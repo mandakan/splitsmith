@@ -213,3 +213,83 @@ def test_a_render_upload_job_renders_uploads_and_records_the_command(
     # No second, chained upload job: the request's youtube_upload is the
     # command's, and this job is its upload.
     assert [j["kind"] for j in client.get("/api/me/jobs").json()] == ["render_upload"]
+
+
+def _upload_command() -> dict[str, Any]:
+    return {"id": "cmd-1", "kind": "render_upload", "slug": "me"}
+
+
+def _fake_youtube(monkeypatch: pytest.MonkeyPatch) -> Any:
+    from splitsmith.ui import youtube_api
+
+    from .test_ui_server import _stub_match_export_probe
+    from .test_youtube_api import _conn, _stub_mp4_render
+    from .test_youtube_upload import FakeClient
+
+    _stub_match_export_probe(monkeypatch)
+    _stub_mp4_render(monkeypatch)
+    fake = FakeClient()
+    # Per instance: the class keeps these as shared defaults.
+    fake.playlists, fake.added, fake.notify = {}, [], []
+    monkeypatch.setattr(youtube_api, "connected_client", lambda: (fake, _conn("Mine")))
+    return fake
+
+
+def test_an_upload_killed_after_youtube_took_it_is_still_found_on_reclaim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The video is on YouTube the moment its bytes land; everything after
+    (captions, thumbnail, playlist, the sidecar write) can die. The re-run
+    after the lease lapses must find the upload, not make a second one."""
+    from splitsmith import youtube_sidecar
+    from splitsmith.sync.commands import prior_result
+
+    from .test_ui_server import _wait_for_job
+
+    client, root, start = _desktop(tmp_path, monkeypatch)
+    fake = _fake_youtube(monkeypatch)
+    fake.playlist_error = RuntimeError("the desktop was killed")
+
+    job_id, reason = _start(start, root, args={"request": _request(youtube_playlist="Season")})
+    assert reason is None and job_id is not None
+    final = _wait_for_job(client, job_id)
+    assert final["status"] == "failed", final
+    assert len(fake.uploaded) == 1
+    assert youtube_sidecar.load_sidecar(youtube_sidecar.sidecar_path_for(fake.uploaded[0])).upload is None
+
+    assert prior_result(root, _upload_command()) == {
+        "video_id": "vid42",
+        "url": "https://youtu.be/vid42",
+        "channel_title": "Mine",
+    }
+
+
+def test_a_desk_reexport_does_not_erase_the_commands_upload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A desk export with the sidecar on rewrites ``<base>-youtube.json``
+    without its ``upload``. If the desktop was killed before completing the
+    command, the re-claim must still see the upload it made."""
+    from splitsmith import youtube_sidecar
+    from splitsmith.sync.commands import prior_result
+
+    from .test_ui_server import _wait_for_job
+
+    client, root, start = _desktop(tmp_path, monkeypatch)
+    fake = _fake_youtube(monkeypatch)
+    job_id, _ = _start(start, root)
+    assert job_id is not None
+    assert _wait_for_job(client, job_id)["status"] == "succeeded"
+    sidecar_path = youtube_sidecar.sidecar_path_for(fake.uploaded[0])
+
+    body = _request(youtube_upload=False)
+    r = client.post("/api/shooters/me/export/match", json=body)
+    assert r.status_code == 200, r.text
+    assert _wait_for_job(client, r.json()["id"])["status"] == "succeeded"
+    assert youtube_sidecar.load_sidecar(sidecar_path).upload is None  # the erasure happened
+
+    assert prior_result(root, _upload_command()) == {
+        "video_id": "vid42",
+        "url": "https://youtu.be/vid42",
+        "channel_title": "Mine",
+    }

@@ -13,10 +13,12 @@ from splitsmith import match_model, youtube_sidecar
 from splitsmith.audit_revision import audit_revision
 from splitsmith.match_project import MatchProject
 from splitsmith.sync.commands import (
+    DONE_LEDGER_NAME,
     STAGE_CHANGED,
     YOUTUBE_NOT_CONNECTED,
     local_stage_revision,
     prior_result,
+    record_command_upload,
     refuse_reason,
 )
 from splitsmith.ui.command_runner import CommandRunner
@@ -128,6 +130,22 @@ def test_prior_result_finds_this_commands_upload_only(tmp_path: Path) -> None:
         "channel_title": "My channel",
     }
     assert prior_result(root, _command(id="c9")) is None  # a re-detect never has one
+
+
+def test_prior_result_reads_the_ledger_before_the_sidecars(tmp_path: Path) -> None:
+    """The ledger holds an upload whose sidecar record was never written
+    (killed after the bytes) or was erased (a desk re-export)."""
+    root = _match(tmp_path, None)
+    record_command_upload(root, "c9", {"video_id": "v7", "url": "https://youtu.be/v7", "channel_title": "C"})
+    record_command_upload(root, "c10", {"video_id": "v8", "url": "https://youtu.be/v8", "channel_title": "C"})
+    assert prior_result(root, _upload_command()) == {
+        "video_id": "v7",
+        "url": "https://youtu.be/v7",
+        "channel_title": "C",
+    }
+    assert prior_result(root, _upload_command(id="c11")) is None
+    (root / DONE_LEDGER_NAME).write_text("{torn", encoding="utf-8")
+    assert prior_result(root, _upload_command()) is None  # unreadable reads as "none"
 
 
 def test_prior_result_skips_a_malformed_sidecar_sorted_before_the_match(tmp_path: Path) -> None:

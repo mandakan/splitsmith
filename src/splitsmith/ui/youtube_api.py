@@ -38,6 +38,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
 from .. import youtube_sidecar
+from ..sync.commands import record_command_upload
 from ..youtube import oauth, sealed
 from ..youtube.client import QuotaExceededError, YouTubeClient, default_http
 from ..youtube.upload import (
@@ -506,6 +507,7 @@ def run_youtube_upload(
     publish_at: str | None = None,
     notify_subscribers: bool = True,
     command_id: str | None = None,
+    match_root: Path | None = None,
 ) -> None:
     """Job body for ``youtube_upload``. Progress is bytes sent; a cancel
     lands between chunks through ``handle.check_cancel``. Registered by
@@ -517,7 +519,11 @@ def run_youtube_upload(
     captions and thumbnail best-effort, they are optional to the upload),
     and the sidecar with its new ``upload`` record is pushed back so the
     API's history route sees it. Every pull is a no-op locally and for a
-    file already on this disk."""
+    file already on this disk.
+
+    With ``command_id`` and ``match_root`` (a phone's render-and-upload
+    request), the video id goes into the match's command ledger the moment
+    YouTube returns it, so a re-claim never uploads a second copy."""
     options = UploadOptions(
         privacy=privacy,  # type: ignore[arg-type]
         playlist=playlist or None,
@@ -544,6 +550,23 @@ def run_youtube_upload(
             progress=sent / max(1, total), message=f"Uploading {_format_mb(sent)} of {_format_mb(total)}"
         )
 
+    on_video_id = None
+    if command_id and match_root is not None:
+        ledger_root, ledger_id = match_root, command_id
+
+        def on_video_id(video_id: str) -> None:
+            video = {
+                "video_id": video_id,
+                "url": f"https://youtu.be/{video_id}",
+                "channel_title": conn.channel_title,
+            }
+            try:
+                record_command_upload(ledger_root, ledger_id, video)
+            except OSError as exc:
+                # The video is up: finish the upload and let the sidecar
+                # record stand in, rather than fail a request that worked.
+                logger.warning("desktop command %s: ledger not written: %s", ledger_id, exc)
+
     try:
         record = upload_export(
             mp4,
@@ -554,6 +577,7 @@ def run_youtube_upload(
             progress=on_progress,
             check_cancel=handle.check_cancel,
             command_id=command_id,
+            on_video_id=on_video_id,
         )
     except AlreadyUploadedError as exc:
         raise RuntimeError(f"already uploaded: {exc.record.url}") from exc

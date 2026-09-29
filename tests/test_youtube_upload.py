@@ -350,3 +350,15 @@ def test_playlist_id_skips_find_or_create(tmp_path: Path) -> None:
     assert client.added == [("PL-existing", "vid42")]
     assert client.playlists == {"Other": "PL-x"}  # nothing created
     assert record.playlist_id == "PL-existing" and record.playlist_title == "ignored title"
+
+
+def test_the_video_id_is_reported_before_anything_after_the_bytes(tmp_path: Path) -> None:
+    """A caller that must never upload twice records the id here: the
+    video exists from this moment, whatever dies afterwards."""
+    mp4 = _seed(tmp_path)
+    client = FakeClient(caption_error=RuntimeError("killed"))
+    seen: list[str] = []
+    with pytest.raises(RuntimeError, match="killed"):
+        upload.upload_export(mp4, client=client, on_video_id=seen.append)
+    assert seen == ["vid42"]
+    assert youtube_sidecar.load_sidecar(youtube_sidecar.sidecar_path_for(mp4)).upload is None

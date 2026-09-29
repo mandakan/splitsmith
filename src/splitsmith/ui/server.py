@@ -4627,6 +4627,8 @@ def register_job_bodies(state: AppState) -> None:
         from .render_upload import run_render_upload
         from .youtube_api import run_youtube_upload
 
+        # The job runs under the match context it was submitted with.
+        match_root = current_match_root.get()
         run_render_upload(
             handle,
             render=lambda h: _run_match_export(h, slug, req.model_copy(update={"youtube_upload": False})),
@@ -4642,6 +4644,7 @@ def register_job_bodies(state: AppState) -> None:
                 publish_at=req.youtube_publish_at.isoformat() if req.youtube_publish_at else None,
                 notify_subscribers=req.youtube_notify_subscribers,
                 command_id=command_id,
+                match_root=match_root,
             ),
         )
 
