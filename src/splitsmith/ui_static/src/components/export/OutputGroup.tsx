@@ -13,6 +13,8 @@ import { bareHint } from "@/lib/exportPlan";
 import type { ExportSettings } from "@/lib/exportPresets";
 import { CANVAS_CHOICES } from "@/pages/matchExportModel";
 
+const DESKTOP_RENDERS_MP4 = "Your desktop renders an MP4 and uploads it.";
+
 export interface OutputGroupProps {
   settings: ExportSettings;
   patch: (p: Partial<ExportSettings>) => void;
@@ -26,6 +28,8 @@ export interface OutputGroupProps {
   onChangeCamera: (v: string) => void;
   secondaryCount: number;
   bareSelected: number;
+  /** The linked desktop renders: always an MP4 with the YouTube preset. */
+  onDesktop?: boolean;
 }
 
 export function OutputGroup({
@@ -41,6 +45,7 @@ export function OutputGroup({
   onChangeCamera,
   secondaryCount,
   bareSelected,
+  onDesktop = false,
 }: OutputGroupProps) {
   const { mode, outputFormat, includeOverlay, overlayCodec, youtube, camOptions } = settings;
   if (mode === "trims") {
@@ -99,6 +104,8 @@ export function OutputGroup({
             { value: "fcp7xml", label: "FCP 7 XML (Premiere / Resolve)" },
             { value: "mp4", label: "MP4 (rendered)" },
           ]}
+          disabled={onDesktop}
+          title={DESKTOP_RENDERS_MP4}
           className="w-full max-w-xs"
         />
       </Field>
@@ -137,6 +144,7 @@ export function OutputGroup({
               { value: "off", label: "Off" },
               { value: "on", label: "Preset + sidecar" },
             ]}
+            disabled={onDesktop}
           />
         </Field>
       ) : null}

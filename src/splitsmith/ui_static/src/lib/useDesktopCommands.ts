@@ -15,6 +15,8 @@ export interface DesktopCommands {
   commands: DesktopCommand[];
   presence: DesktopPresence | null;
   error: string | null;
+  /** True while a render request is on its way to the server. */
+  busy: boolean;
   requestRedetect: (slug: string, stageNumber: number) => Promise<void>;
   requestRender: (slug: string, request: MatchExportRequestPayload) => Promise<void>;
   cancel: (id: string) => Promise<void>;
@@ -25,6 +27,7 @@ export function useDesktopCommands(enabled: boolean): DesktopCommands {
   const [commands, setCommands] = useState<DesktopCommand[]>([]);
   const [presence, setPresence] = useState<DesktopPresence | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -65,13 +68,20 @@ export function useDesktopCommands(enabled: boolean): DesktopCommands {
   const requestRender = useCallback(
     async (slug: string, request: MatchExportRequestPayload) => {
       setError(null);
+      // Busy until the list shows the new row, so a second press cannot
+      // land in between and ask twice.
+      setBusy(true);
       try {
-        await api.requestDesktopRender(slug, request);
-      } catch (e) {
-        setError(apiErrorText(e, "Could not send the request."));
-        return;
+        try {
+          await api.requestDesktopRender(slug, request);
+        } catch (e) {
+          setError(apiErrorText(e, "Could not send the request."));
+          return;
+        }
+        await refresh();
+      } finally {
+        setBusy(false);
       }
-      await refresh();
     },
     [refresh],
   );
@@ -89,5 +99,5 @@ export function useDesktopCommands(enabled: boolean): DesktopCommands {
     [refresh],
   );
 
-  return { commands, presence, error, requestRedetect, requestRender, cancel, refresh };
+  return { commands, presence, error, busy, requestRedetect, requestRender, cancel, refresh };
 }
