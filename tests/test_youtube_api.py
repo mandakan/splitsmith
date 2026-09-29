@@ -160,12 +160,20 @@ def _fake_upload(monkeypatch: pytest.MonkeyPatch, *, video_id: str = "vid1") -> 
         again: bool = False,
         progress: Any = None,
         check_cancel: Any = None,
+        command_id: str | None = None,
     ) -> youtube_sidecar.UploadRecord:
         from splitsmith.youtube.upload import UploadOptions
 
         options = options or UploadOptions()
         privacy = options.effective_privacy
-        seen.update(mp4=mp4, privacy=privacy, again=again, channel_title=channel_title, options=options)
+        seen.update(
+            mp4=mp4,
+            privacy=privacy,
+            again=again,
+            channel_title=channel_title,
+            options=options,
+            command_id=command_id,
+        )
         if progress:
             progress(1024, 2048)
             progress(2048, 2048)

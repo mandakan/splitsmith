@@ -134,6 +134,19 @@ def test_upload_export_sends_sidecar_metadata_and_records_the_result(tmp_path: P
     assert stored.title == "Bromma Classifier"  # nothing else touched
 
 
+def test_the_record_carries_the_command_that_asked_for_it(tmp_path: Path) -> None:
+    mp4 = _seed(tmp_path)
+    record = upload.upload_export(mp4, client=FakeClient(), command_id="cmd-1")
+    assert record.command_id == "cmd-1"
+    stored = youtube_sidecar.load_sidecar(youtube_sidecar.sidecar_path_for(mp4))
+    assert stored.upload is not None and stored.upload.command_id == "cmd-1"
+
+
+def test_a_record_without_a_command_reads_as_before(tmp_path: Path) -> None:
+    mp4 = _seed(tmp_path)
+    assert upload.upload_export(mp4, client=FakeClient()).command_id is None
+
+
 def test_upload_export_refuses_without_a_sidecar(tmp_path: Path) -> None:
     mp4 = tmp_path / "x.mp4"
     mp4.write_bytes(b"0")

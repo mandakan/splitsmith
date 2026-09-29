@@ -505,6 +505,7 @@ def run_youtube_upload(
     playlist_id: str | None = None,
     publish_at: str | None = None,
     notify_subscribers: bool = True,
+    command_id: str | None = None,
 ) -> None:
     """Job body for ``youtube_upload``. Progress is bytes sent; a cancel
     lands between chunks through ``handle.check_cancel``. Registered by
@@ -552,9 +553,17 @@ def run_youtube_upload(
             again=again,
             progress=on_progress,
             check_cancel=handle.check_cancel,
+            command_id=command_id,
         )
     except AlreadyUploadedError as exc:
         raise RuntimeError(f"already uploaded: {exc.record.url}") from exc
     export_storage.push_export_file(project, sidecar_path)
-    handle.set_result({"video_id": record.video_id, "url": record.url, "notes": record.notes})
+    handle.set_result(
+        {
+            "video_id": record.video_id,
+            "url": record.url,
+            "channel_title": record.channel_title,
+            "notes": record.notes,
+        }
+    )
     handle.update(progress=1.0, message=f"Uploaded {record.url}")

@@ -147,6 +147,7 @@ def upload_export(
     again: bool = False,
     progress: Callable[[int, int], None] | None = None,
     check_cancel: Callable[[], None] | None = None,
+    command_id: str | None = None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> youtube_sidecar.UploadRecord:
     """Upload ``mp4`` with its sidecar's metadata; return and record the result.
@@ -232,6 +233,7 @@ def upload_export(
         playlist_title=(options.playlist or None) if playlist_id else None,
         publish_at=options.publish_at,
         notify_subscribers=options.notify_subscribers,
+        command_id=command_id,
     )
     sidecar.upload = record
     youtube_sidecar.write_sidecar(sidecar, sidecar_path)
