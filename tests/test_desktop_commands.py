@@ -421,3 +421,53 @@ def test_cancelling_a_live_render_upload_only_asks(
     asked = asyncio.run(store.cancel(command_id, match_id=MATCH, now=now + timedelta(minutes=9)))
     assert asked is not None
     assert (asked.status, asked.cancel_requested) == ("claimed", True)
+
+
+def _lapse_lease(client: TestClient, command_id: str) -> None:
+    """Move a claimed command's lease into the past, as if its desktop
+    quit ten minutes ago (the routes claim with the real clock)."""
+    from sqlalchemy import update
+
+    from splitsmith.db import create_engine, sessionmaker
+    from splitsmith.db.models import DesktopCommandRow
+
+    sf = sessionmaker(create_engine(_db_url_for(client)))
+
+    async def _run() -> None:
+        async with sf() as s:
+            await s.execute(
+                update(DesktopCommandRow)
+                .where(DesktopCommandRow.id == command_id)
+                .values(lease_expires_at=datetime.now(UTC) - timedelta(minutes=1))
+            )
+            await s.commit()
+
+    asyncio.run(_run())
+
+
+def test_the_fingerprint_poll_counts_a_lapsed_render_upload_only_for_its_holder(
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """The route passes the bearer's token to the count: a desktop that
+    cannot claim a pinned command must not be woken by it every poll."""
+    client, sender = hosted_app
+    login(client, sender, EMAIL)
+    _mirror(client)
+    command_id = _render_upload(client).json()["id"]
+    holder = {
+        "Authorization": f"Bearer {client.post('/api/me/desktop-tokens', json={'name': 'a'}).json()['token']}"
+    }
+    other = {
+        "Authorization": f"Bearer {client.post('/api/me/desktop-tokens', json={'name': 'b'}).json()['token']}"
+    }
+    client.cookies.clear()
+    claimed = client.post("/api/sync/commands/claim", json={"match_ids": [MATCH]}, headers=holder).json()
+    assert [c["id"] for c in claimed["commands"]] == [command_id]
+    _lapse_lease(client, command_id)
+
+    def pending(bearer: dict[str, str]) -> int:
+        matches = client.get("/api/sync/fingerprints", headers=bearer).json()["matches"]
+        return {m["match_id"]: m for m in matches}[MATCH]["pending_commands"]
+
+    assert pending(holder) == 1
+    assert pending(other) == 0

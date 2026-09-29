@@ -293,3 +293,51 @@ def test_a_desk_reexport_does_not_erase_the_commands_upload(
         "url": "https://youtu.be/vid42",
         "channel_title": "Mine",
     }
+
+
+def test_the_phones_upload_options_reach_youtube(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each option the phone picked is wired by hand from the request into
+    ``run_youtube_upload``; dropping one would upload with the default."""
+    from .test_ui_server import _wait_for_job
+
+    client, root, start = _desktop(tmp_path, monkeypatch)
+    fake = _fake_youtube(monkeypatch)
+    request = _request(
+        youtube_privacy="public", youtube_playlist="Season 2026", youtube_notify_subscribers=False
+    )
+    job_id, _ = _start(start, root, args={"request": request})
+    assert job_id is not None
+    assert _wait_for_job(client, job_id)["status"] == "succeeded"
+
+    ((metadata, _size),) = fake.started
+    assert metadata.privacy == "public"
+    assert metadata.publish_at is None
+    assert fake.notify == [False]
+    assert fake.added == [(fake.playlists["Season 2026"], "vid42")]
+
+
+def test_a_scheduled_upload_to_a_picked_playlist_reaches_youtube(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from datetime import UTC, datetime
+
+    from .test_ui_server import _wait_for_job
+
+    client, root, start = _desktop(tmp_path, monkeypatch)
+    fake = _fake_youtube(monkeypatch)
+    request = _request(
+        youtube_privacy="unlisted",
+        youtube_playlist="Season 2026",
+        youtube_playlist_id="PL-picked",
+        youtube_publish_at="2026-10-01T10:00:00Z",
+    )
+    job_id, _ = _start(start, root, args={"request": request})
+    assert job_id is not None
+    assert _wait_for_job(client, job_id)["status"] == "succeeded"
+
+    ((metadata, _size),) = fake.started
+    assert metadata.publish_at == datetime(2026, 10, 1, 10, 0, tzinfo=UTC)
+    assert metadata.privacy == "private"  # a scheduled video is private until then
+    assert fake.notify == [True]
+    assert fake.added == [("PL-picked", "vid42")]
+    assert fake.playlists == {}  # the picked id wins; nothing looked up or created
