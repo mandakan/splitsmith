@@ -21,9 +21,12 @@ import {
   type StageExportStatus,
 } from "@/lib/api";
 import { DEFAULT_EXPORT_SETTINGS, loadLastUsed, saveLastUsed } from "@/lib/exportPresets";
-import { Export } from "@/pages/Export";
+import { ExportRoute } from "@/pages/Export";
 
 const deployment = vi.hoisted(() => ({ mode: "hosted" as "hosted" | "local" }));
+const viewport = vi.hoisted(() => ({ mobile: false }));
+
+vi.mock("@/lib/useIsMobile", () => ({ useIsMobile: () => viewport.mobile }));
 
 vi.mock("@/lib/features", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/features")>();
@@ -197,7 +200,7 @@ function renderExport({
       <ConfirmProvider>
         <Routes>
           <Route path="/match/:matchId" element={<Shell />}>
-            <Route path="export/:slug" element={<Export />} />
+            <Route path="export/:slug" element={<ExportRoute />} />
           </Route>
         </Routes>
       </ConfirmProvider>
@@ -216,6 +219,7 @@ beforeEach(() => {
   vi.mocked(api.exportPreview).mockResolvedValue(new Blob(["png"], { type: "image/png" }));
   vi.mocked(api.listDesktopCommands).mockResolvedValue({ commands: [], presence: away });
   window.localStorage.clear();
+  viewport.mobile = false;
 });
 afterEach(() => vi.clearAllMocks());
 
@@ -247,6 +251,18 @@ describe("Export on a desktop-synced match", () => {
     expect(payload.stage_numbers).toEqual([1, 2]);
     expect(payload.youtube_privacy).toBe("unlisted");
     expect(payload.youtube_playlist).toBe("Matches");
+  });
+
+  it("a mirror's stages are not blocked on sources this server cannot see", async () => {
+    // Hosted never holds a mirror's raw footage; the desktop checks its own.
+    vi.mocked(api.getExportOverview).mockResolvedValue({
+      match_exports: [],
+      stages: [ready(1), ready(2)].map((s) => ({ ...s, source_reachable: false })),
+    });
+    renderExport({ capabilities: MIRROR_CAPABILITIES, origin: "desktop", mode: "hosted" });
+    const button = await screen.findByRole("button", { name: "Render on desktop" });
+    await waitFor(() => expect(button).toBeEnabled());
+    expect(screen.queryByText(/Upload missing/)).toBeNull();
   });
 
   it("renders the match video whatever the stored form says", async () => {
@@ -322,5 +338,27 @@ describe("Export on a desktop-synced match", () => {
     expect(await screen.findByRole("button", { name: "Export bundle" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Render on desktop" })).toBeNull();
     expect(api.listDesktopCommands).not.toHaveBeenCalled();
+  });
+});
+
+describe("Export on a phone", () => {
+  it("a mirror reaches the page, since asking the desktop is a phone task", async () => {
+    viewport.mobile = true;
+    renderExport({ capabilities: MIRROR_CAPABILITIES, origin: "desktop", mode: "hosted" });
+    expect(await screen.findByRole("button", { name: "Render on desktop" })).toBeInTheDocument();
+    expect(screen.queryByText("This screen needs a desktop")).toBeNull();
+  });
+
+  it("a hosted-native match still gets the notice", async () => {
+    viewport.mobile = true;
+    renderExport({ capabilities: FULL_CAPABILITIES, origin: "hosted", mode: "hosted" });
+    expect(await screen.findByText("This screen needs a desktop")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Export bundle|Render on desktop/ })).toBeNull();
+  });
+
+  it("a desktop-origin match in the desktop app's own window still gets the notice", async () => {
+    viewport.mobile = true;
+    renderExport({ capabilities: MIRROR_CAPABILITIES, origin: "desktop", mode: "local" });
+    expect(await screen.findByText("This screen needs a desktop")).toBeInTheDocument();
   });
 });

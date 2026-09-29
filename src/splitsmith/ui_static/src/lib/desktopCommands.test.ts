@@ -9,6 +9,7 @@ import {
   latestForStage,
   presenceSummary,
   presenceText,
+  rendersOnDesktop,
 } from "./desktopCommands";
 
 const NOW = Date.parse("2026-09-28T12:00:00Z");
@@ -133,4 +134,16 @@ describe("render_upload", () => {
 
 it("still says re-detected for a re-detect", () => {
   expect(commandLine(cmd({ status: "succeeded" }), around, NOW).text).toMatch(/^Re-detected on your desktop/);
+});
+
+describe("rendersOnDesktop", () => {
+  it("is a hosted, desktop-origin match this account may review but not edit", () => {
+    expect(rendersOnDesktop(true, "desktop", ["review", "comment_write"])).toBe(true);
+    expect(rendersOnDesktop(false, "desktop", ["review"])).toBe(false);
+    expect(rendersOnDesktop(true, "hosted", ["review"])).toBe(false);
+    expect(rendersOnDesktop(true, "desktop", ["edit", "review"])).toBe(false);
+    expect(rendersOnDesktop(true, "desktop", ["comment_write"])).toBe(false);
+    // Not loaded yet: decides nothing.
+    expect(rendersOnDesktop(true, "desktop", null)).toBe(false);
+  });
 });

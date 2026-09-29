@@ -3,7 +3,7 @@
  * requests a phone makes for the desktop to run, and whether a desktop is
  * around to pick them up. Pure; pages map the results to primitives.
  */
-import type { DesktopCommand, DesktopPresence } from "@/lib/api";
+import { capabilityDenied, type DesktopCommand, type DesktopPresence, type MatchCapability, type MatchOrigin } from "@/lib/api";
 import { formatRelative } from "@/lib/matches";
 
 export type CommandTone = "muted" | "live" | "ok" | "error";
@@ -15,6 +15,23 @@ export interface CommandLine {
   cancellable: boolean;
   /** The result to open, when the request produced one (a video). */
   link?: { href: string; label: string };
+}
+
+/** A hosted page on a desktop-synced match whose export is the desktop's
+ *  to run: the match came from a desktop (origin), this account may
+ *  request (review, what the request routes need) and cannot edit here.
+ *  Unknown capabilities decide nothing yet. */
+export function rendersOnDesktop(
+  hosted: boolean,
+  origin: MatchOrigin | null | undefined,
+  capabilities: MatchCapability[] | null | undefined,
+): boolean {
+  return (
+    hosted &&
+    origin === "desktop" &&
+    capabilityDenied(capabilities, "edit") &&
+    !capabilityDenied(capabilities, "review")
+  );
 }
 
 export function isActiveCommand(c: DesktopCommand): boolean {

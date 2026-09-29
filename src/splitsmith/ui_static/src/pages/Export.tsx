@@ -22,6 +22,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useOutletContext, useParams } from "react-router-dom";
 
 import { CleanupDialog } from "@/components/CleanupDialog";
+import { DesktopGate } from "@/components/DesktopOnlyNotice";
 import { DesktopCommandLine } from "@/components/desktop/DesktopCommandLine";
 import { CutGroup } from "@/components/export/CutGroup";
 import { DetailsGroup } from "@/components/export/DetailsGroup";
@@ -54,7 +55,7 @@ import {
   type YouTubeSettings,
 } from "@/lib/api";
 import { syncedSecondaryCount } from "@/lib/camOptions";
-import { commandTitle, presenceText } from "@/lib/desktopCommands";
+import { commandTitle, presenceText, rendersOnDesktop } from "@/lib/desktopCommands";
 import { rowUploadOptions } from "@/lib/youtubeRows";
 import { hostedDownloads as buildHostedDownloads } from "@/lib/exportDownloads";
 import type { LookFocus } from "@/lib/exportPreview";
@@ -93,6 +94,19 @@ import {
 /** What ``ui/match_exports.py`` names the timeline file per format. */
 const BUNDLE_EXTENSION: Record<OutputFormat, string> = { fcpxml: ".fcpxml", fcp7xml: ".xml", mp4: ".mp4" };
 
+/** The Export route: phones get the desktop-only notice, except on a
+ *  desktop-synced match, where the page is the request the phone sends
+ *  to the desktop. */
+export function ExportRoute() {
+  const { mode } = useDeploymentMode();
+  const ctx = useOutletContext<MatchShellOutletContext | undefined>();
+  return (
+    <DesktopGate screen="Export" allowOnMobile={rendersOnDesktop(mode === "hosted", ctx?.origin, ctx?.capabilities)}>
+      <Export />
+    </DesktopGate>
+  );
+}
+
 export function Export() {
   const { slug, matchId } = useParams<{ slug: string; matchId?: string }>();
   if (!slug) return <Navigate to={matchId ? `/match/${matchId}/ingest` : "/pick"} replace />;
@@ -111,11 +125,10 @@ function ExportInner({ slug }: { slug: string }) {
   const editDenied = capabilityDenied(ctx?.capabilities, "edit");
   // A desktop-synced match cannot export here (no sources, no edit), but
   // its desktop can: the form becomes a request the desktop renders and
-  // uploads. The same test as Overview and Audit (origin plus the review
-  // capability the request routes need), narrowed to hosted and to no
-  // edit. Match video only; the compare grid and trims have no upload.
-  const onDesktop =
-    hosted && ctx?.origin === "desktop" && editDenied && !capabilityDenied(ctx?.capabilities, "review");
+  // uploads (``rendersOnDesktop``, which ExportRoute also uses to let a
+  // phone through). Match video only; the compare grid and trims have no
+  // upload.
+  const onDesktop = rendersOnDesktop(hosted, ctx?.origin, ctx?.capabilities);
   const desktop = useDesktopCommands(onDesktop);
   const shooters = useMemo(() => ctx?.shooters ?? [], [ctx?.shooters]);
   const [project, setProject] = useState<MatchProject | null>(null);
@@ -293,8 +306,8 @@ function ExportInner({ slug }: { slug: string }) {
   }, [project]);
 
   const rows = useMemo(
-    () => exportRows(overview?.stages ?? [], stageTimeByNumber, mode, hosted),
-    [overview, stageTimeByNumber, mode, hosted],
+    () => exportRows(overview?.stages ?? [], stageTimeByNumber, mode, hosted, { sourcesElsewhere: onDesktop }),
+    [overview, stageTimeByNumber, mode, hosted, onDesktop],
   );
   const eligibleNumbers = useMemo(() => rows.filter((r) => r.eligible).map((r) => r.stage.stage_number), [rows]);
   const eligibleSet = useMemo(() => new Set(eligibleNumbers), [eligibleNumbers]);
