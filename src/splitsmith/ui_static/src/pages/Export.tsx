@@ -52,7 +52,7 @@ import {
   type MatchProject,
   type YouTubeSettings,
 } from "@/lib/api";
-import { camExportFields, syncedSecondaryCount } from "@/lib/camOptions";
+import { syncedSecondaryCount } from "@/lib/camOptions";
 import { rowUploadOptions } from "@/lib/youtubeRows";
 import { hostedDownloads as buildHostedDownloads } from "@/lib/exportDownloads";
 import type { LookFocus } from "@/lib/exportPreview";
@@ -78,16 +78,14 @@ import {
 } from "@/lib/exportPlan";
 import { useDeploymentMode } from "@/lib/features";
 import { useMatchHref } from "@/lib/matchHref";
-import {
-  clampSeconds,
-  describeRenderOptions,
-  matchExportFields,
-  renderOptionsSeconds,
-  transitionsSupported,
-  type OutputFormat,
-} from "@/lib/renderOptions";
+import { describeRenderOptions, renderOptionsSeconds, transitionsSupported, type OutputFormat } from "@/lib/renderOptions";
 import { cn } from "@/lib/utils";
-import { buildCompareGridPayload, CANVAS_CHOICES, summarizeGridResult } from "@/pages/matchExportModel";
+import {
+  buildCompareGridPayload,
+  buildMatchExportPayload,
+  CANVAS_CHOICES,
+  summarizeGridResult,
+} from "@/pages/matchExportModel";
 
 /** What ``ui/match_exports.py`` names the timeline file per format. */
 const BUNDLE_EXTENSION: Record<OutputFormat, string> = { fcpxml: ".fcpxml", fcp7xml: ".xml", mp4: ".mp4" };
@@ -561,32 +559,27 @@ function ExportInner({ slug }: { slug: string }) {
       // The cam rows render only with a synced secondary on the selection;
       // without one the server's own default (cams on) changes nothing,
       // so the chosen value travels either way.
-      const submitted = await api.exportMatch(slug, {
-        stage_numbers: orderedSelection,
-        head_pad_seconds: headPad,
-        tail_pad_seconds: tailPad,
-        ...camExportFields(camOptions),
-        output_format: outputFormat,
-        transition_kind: transitionsSupported(outputFormat) ? transitionKind : "none",
-        transition_duration_seconds: clampSeconds(transitionSeconds, 0.1),
-        ...matchExportFields(renderOptions, outputFormat),
-        intro_path: undefined,
-        outro_path: undefined,
-        youtube_sidecar: renderedMp4 && youtube,
-        description_lead: renderedMp4 && youtube ? descriptionLead.trim() || null : undefined,
-        youtube_preset: renderedMp4 && youtube,
-        youtube_upload: renderedMp4 && youtube && !!youtubeSettings?.connected && uploadOptions.enabled,
-        youtube_privacy: rowUploadOptions(uploadOptions).privacy,
-        youtube_playlist: rowUploadOptions(uploadOptions).playlist,
-        youtube_playlist_id: rowUploadOptions(uploadOptions).playlist_id,
-        youtube_publish_at: rowUploadOptions(uploadOptions).publish_at,
-        youtube_notify_subscribers: rowUploadOptions(uploadOptions).notify_subscribers,
-        include_overlay: includeOverlay,
-        overlay_codec: overlayCodec,
-        overlay_max_height: null,
-        overlay_max_fps: null,
-        project_name: projectName || project.name,
-      });
+      const submitted = await api.exportMatch(
+        slug,
+        buildMatchExportPayload({
+          stageNumbers: orderedSelection,
+          headPad,
+          tailPad,
+          camOptions,
+          outputFormat,
+          transitionKind,
+          transitionSeconds,
+          renderOptions,
+          youtube,
+          descriptionLead,
+          uploadOptions,
+          includeOverlay,
+          overlayCodec,
+          projectName: projectName || project.name,
+          uploadTarget: "desk",
+          youtubeConnected: !!youtubeSettings?.connected,
+        }),
+      );
       setJob(submitted);
       const final = await api.pollJob(submitted.id, setJob);
       if (final.status === "succeeded" && final.result) {

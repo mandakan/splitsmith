@@ -4543,6 +4543,13 @@ export const api = {
    *  only; the same request while one is waiting returns that one. */
   requestDesktopCommand: (body: { kind: "shot_detect"; slug: string; stage_number: number }) =>
     request<DesktopCommand>("/api/match/desktop-commands", { method: "POST", json: body }),
+  /** Ask the linked desktop to render this shooter's match video and
+   *  upload it. Spreads the payload, as exportMatch does. */
+  requestDesktopRender: (slug: string, payload: MatchExportRequestPayload) =>
+    request<DesktopCommand>("/api/match/desktop-commands", {
+      method: "POST",
+      json: { kind: "render_upload", slug, args: { request: { ...payload } } },
+    }),
   listDesktopCommands: () => request<DesktopCommandList>("/api/match/desktop-commands"),
   cancelDesktopCommand: (id: string) =>
     request<DesktopCommand>(`/api/match/desktop-commands/${encodeURIComponent(id)}/cancel`, {

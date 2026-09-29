@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_RENDER_OPTIONS } from "@/lib/renderOptions";
+import { camExportFields } from "@/lib/camOptions";
+import { DEFAULT_EXPORT_SETTINGS as S } from "@/lib/exportPresets";
+import { DEFAULT_RENDER_OPTIONS, clampSeconds, matchExportFields, transitionsSupported } from "@/lib/renderOptions";
+import { rowUploadOptions } from "@/lib/youtubeRows";
 import {
   CANVAS_CHOICES,
   buildCompareGridPayload,
+  buildMatchExportPayload,
   summarizeGridResult,
+  type MatchExportPayloadInput,
 } from "@/pages/matchExportModel";
 
 describe("buildCompareGridPayload", () => {
@@ -52,6 +57,80 @@ describe("buildCompareGridPayload", () => {
   it("defaults to 4K UHD as the first canvas choice", () => {
     expect(CANVAS_CHOICES[0].width).toBe(3840);
     expect(CANVAS_CHOICES[0].height).toBe(2160);
+  });
+});
+
+describe("buildMatchExportPayload", () => {
+  const base: MatchExportPayloadInput = {
+    stageNumbers: [1, 2],
+    headPad: S.headPad,
+    tailPad: S.tailPad,
+    camOptions: S.camOptions,
+    outputFormat: "mp4",
+    transitionKind: S.transitionKind,
+    transitionSeconds: S.transitionSeconds,
+    renderOptions: S.renderOptions,
+    youtube: true,
+    descriptionLead: "",
+    uploadOptions: { ...S.uploadOptions, enabled: true, playlistId: "PL1", playlist: "Match" },
+    includeOverlay: S.includeOverlay,
+    overlayCodec: S.overlayCodec,
+    projectName: "Match",
+    uploadTarget: "desk",
+    youtubeConnected: true,
+  };
+
+  it("uploads only with a connected channel on the desk", () => {
+    expect(buildMatchExportPayload({ ...base, uploadTarget: "desk", youtubeConnected: false }).youtube_upload).toBe(
+      false,
+    );
+    expect(buildMatchExportPayload({ ...base, uploadTarget: "desk", youtubeConnected: true }).youtube_upload).toBe(
+      true,
+    );
+  });
+
+  it("always renders an MP4 that uploads, on the desktop", () => {
+    const p = buildMatchExportPayload({ ...base, outputFormat: "fcpxml", uploadTarget: "desktop", youtubeConnected: false });
+    expect(p.output_format).toBe("mp4");
+    expect(p.youtube_sidecar).toBe(true);
+    expect(p.youtube_upload).toBe(true);
+    expect(p.youtube_playlist_id).toBeNull();
+  });
+
+  // Export.tsx's submitBundle used to build this object inline. Reconstructed
+  // here from the same pure helpers it called (never from the builder under
+  // test) so this test proves the refactor changed nothing for the desk.
+  it("matches, field by field, what submitBundle sent to the desk before this refactor", () => {
+    const renderedMp4 = base.outputFormat === "mp4"; // submitBundle only ever ran with mode === "single"
+    const upload = rowUploadOptions(base.uploadOptions);
+    const expected = {
+      stage_numbers: base.stageNumbers,
+      head_pad_seconds: base.headPad,
+      tail_pad_seconds: base.tailPad,
+      ...camExportFields(base.camOptions),
+      output_format: base.outputFormat,
+      transition_kind: transitionsSupported(base.outputFormat) ? base.transitionKind : "none",
+      transition_duration_seconds: clampSeconds(base.transitionSeconds, 0.1),
+      ...matchExportFields(base.renderOptions, base.outputFormat),
+      intro_path: undefined,
+      outro_path: undefined,
+      youtube_sidecar: renderedMp4 && base.youtube,
+      description_lead: renderedMp4 && base.youtube ? base.descriptionLead.trim() || null : undefined,
+      youtube_preset: renderedMp4 && base.youtube,
+      youtube_upload: renderedMp4 && base.youtube && !!base.youtubeConnected && base.uploadOptions.enabled,
+      youtube_privacy: upload.privacy,
+      youtube_playlist: upload.playlist,
+      youtube_playlist_id: upload.playlist_id,
+      youtube_publish_at: upload.publish_at,
+      youtube_notify_subscribers: upload.notify_subscribers,
+      include_overlay: base.includeOverlay,
+      overlay_codec: base.overlayCodec,
+      overlay_max_height: null,
+      overlay_max_fps: null,
+      project_name: base.projectName,
+    };
+
+    expect(buildMatchExportPayload(base)).toEqual(expected);
   });
 });
 

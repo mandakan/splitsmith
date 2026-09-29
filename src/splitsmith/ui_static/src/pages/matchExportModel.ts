@@ -5,8 +5,19 @@
  * result without going through React.
  */
 
-import type { CompareGridRequestPayload, CompareGridResult } from "@/lib/api";
-import { anyRenderOptionOn, gridExportFields, type RenderOptions } from "@/lib/renderOptions";
+import type { CompareGridRequestPayload, CompareGridResult, MatchExportRequestPayload, OverlayCodec } from "@/lib/api";
+import { camExportFields, type CamOptions } from "@/lib/camOptions";
+import type { TransitionKind } from "@/lib/exportPresets";
+import {
+  anyRenderOptionOn,
+  clampSeconds,
+  gridExportFields,
+  matchExportFields,
+  transitionsSupported,
+  type OutputFormat,
+  type RenderOptions,
+} from "@/lib/renderOptions";
+import { rowUploadOptions, type UploadFormOptions } from "@/lib/youtubeRows";
 
 export interface CanvasChoice {
   id: "uhd" | "hd";
@@ -99,4 +110,70 @@ export function summarizeGridResult(result: CompareGridResult): GridResultSummar
       ? `Rendered ${result.stages_rendered} of ${result.stages_total} stages`
       : `Rendered all ${result.stages_rendered} stages`;
   return { headline, partial, failedStages, skippedStages, missingTrims };
+}
+
+/** Input to {@link buildMatchExportPayload}: exactly what the Export
+ *  page's single-shooter bundle form (submitBundle) reads, plus two
+ *  fields that only exist because of the desktop-render wrapper (#1100). */
+export interface MatchExportPayloadInput {
+  stageNumbers: number[];
+  headPad: number;
+  tailPad: number;
+  camOptions: CamOptions;
+  outputFormat: OutputFormat;
+  transitionKind: TransitionKind;
+  transitionSeconds: number;
+  renderOptions: RenderOptions;
+  youtube: boolean;
+  descriptionLead: string;
+  uploadOptions: UploadFormOptions;
+  includeOverlay: boolean;
+  overlayCodec: OverlayCodec;
+  projectName: string;
+  /** "desk" posts an export here; "desktop" asks the linked desktop to
+   *  render and upload, which only makes sense as an MP4 that uploads. */
+  uploadTarget: "desk" | "desktop";
+  youtubeConnected: boolean;
+}
+
+/** The single-shooter match-export request body, for either the desk
+ *  (``POST /api/shooters/{slug}/export/match``) or a desktop render
+ *  request (``POST /api/match/desktop-commands``). A desktop render
+ *  forces an MP4 output that uploads -- there is no other reason to ask
+ *  the desktop to render. Everything else is unchanged from the literal
+ *  Export.tsx's ``submitBundle`` used to build inline. */
+export function buildMatchExportPayload(input: MatchExportPayloadInput): MatchExportRequestPayload {
+  const desktop = input.uploadTarget === "desktop";
+  const outputFormat = desktop ? "mp4" : input.outputFormat;
+  const renderedMp4 = outputFormat === "mp4";
+  const youtube = desktop || (renderedMp4 && input.youtube);
+  const upload = rowUploadOptions(input.uploadOptions);
+  return {
+    stage_numbers: input.stageNumbers,
+    head_pad_seconds: input.headPad,
+    tail_pad_seconds: input.tailPad,
+    ...camExportFields(input.camOptions),
+    output_format: outputFormat,
+    transition_kind: transitionsSupported(outputFormat) ? input.transitionKind : "none",
+    transition_duration_seconds: clampSeconds(input.transitionSeconds, 0.1),
+    ...matchExportFields(input.renderOptions, outputFormat),
+    intro_path: undefined,
+    outro_path: undefined,
+    youtube_sidecar: youtube,
+    description_lead: youtube ? input.descriptionLead.trim() || null : undefined,
+    youtube_preset: youtube,
+    youtube_upload: desktop || (youtube && input.youtubeConnected && input.uploadOptions.enabled),
+    youtube_privacy: upload.privacy,
+    youtube_playlist: upload.playlist,
+    // The hosted picker lists the hosted connection's playlists, which may
+    // be another channel than the desktop's; by title only there.
+    youtube_playlist_id: desktop ? null : upload.playlist_id,
+    youtube_publish_at: upload.publish_at,
+    youtube_notify_subscribers: upload.notify_subscribers,
+    include_overlay: input.includeOverlay,
+    overlay_codec: input.overlayCodec,
+    overlay_max_height: null,
+    overlay_max_fps: null,
+    project_name: input.projectName,
+  };
 }

@@ -6,7 +6,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 
-import { api, apiErrorText, type DesktopCommand, type DesktopPresence } from "@/lib/api";
+import { api, apiErrorText, type DesktopCommand, type DesktopPresence, type MatchExportRequestPayload } from "@/lib/api";
 import { isActiveCommand } from "@/lib/desktopCommands";
 
 export const DESKTOP_COMMAND_POLL_MS = 10_000;
@@ -16,6 +16,7 @@ export interface DesktopCommands {
   presence: DesktopPresence | null;
   error: string | null;
   requestRedetect: (slug: string, stageNumber: number) => Promise<void>;
+  requestRender: (slug: string, request: MatchExportRequestPayload) => Promise<void>;
   cancel: (id: string) => Promise<void>;
   refresh: () => Promise<void>;
 }
@@ -61,6 +62,20 @@ export function useDesktopCommands(enabled: boolean): DesktopCommands {
     [refresh],
   );
 
+  const requestRender = useCallback(
+    async (slug: string, request: MatchExportRequestPayload) => {
+      setError(null);
+      try {
+        await api.requestDesktopRender(slug, request);
+      } catch (e) {
+        setError(apiErrorText(e, "Could not send the request."));
+        return;
+      }
+      await refresh();
+    },
+    [refresh],
+  );
+
   const cancel = useCallback(
     async (id: string) => {
       try {
@@ -74,5 +89,5 @@ export function useDesktopCommands(enabled: boolean): DesktopCommands {
     [refresh],
   );
 
-  return { commands, presence, error, requestRedetect, cancel, refresh };
+  return { commands, presence, error, requestRedetect, requestRender, cancel, refresh };
 }
