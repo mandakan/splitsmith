@@ -65,6 +65,17 @@ export function presenceSummary(presence: DesktopPresence, now: number = Date.no
   return "Your desktop has not connected yet.";
 }
 
+/** The line under the Export page's "Render on desktop" button: the
+ *  per-request wording only while one of these requests waits or runs,
+ *  otherwise where the desktop stands. */
+export function renderPresenceLine(
+  presence: DesktopPresence,
+  requests: readonly DesktopCommand[],
+  now: number = Date.now(),
+): string {
+  return requests.some(isActiveCommand) ? presenceText(presence, now) : presenceSummary(presence, now);
+}
+
 export function commandLine(
   c: DesktopCommand,
   presence: DesktopPresence,

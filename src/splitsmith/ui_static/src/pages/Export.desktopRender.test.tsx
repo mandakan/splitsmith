@@ -231,7 +231,9 @@ describe("Export on a desktop-synced match", () => {
 
     const button = await screen.findByRole("button", { name: "Render on desktop" });
     await waitFor(() => expect(button).toBeEnabled());
-    expect(await screen.findByText(/Waiting for your desktop \(last seen/)).toBeInTheDocument();
+    // No request in view: the line describes the desktop, not a request.
+    expect(await screen.findByText(/Your desktop was last seen/)).toBeInTheDocument();
+    expect(screen.queryByText(/Waiting for your desktop/)).toBeNull();
     expect(screen.getByText("Uploads to the YouTube account connected on your desktop.")).toBeInTheDocument();
     // Only the match video renders on the desktop.
     const modes = within(screen.getByRole("group", { name: "Output mode" }));
@@ -316,6 +318,32 @@ describe("Export on a desktop-synced match", () => {
     // Another shooter's render and a re-detect belong elsewhere.
     expect(screen.queryByText("Render and upload (bo)")).toBeNull();
     expect(screen.queryByText(/Re-detect/)).toBeNull();
+  });
+
+  it("says a request will be picked up only while one waits", async () => {
+    const done = renderCommand({
+      id: "c2",
+      status: "succeeded",
+      finished_at: new Date().toISOString(),
+      result: { url: "https://youtu.be/v", channel_title: "C", video_id: "v" },
+    });
+    vi.mocked(api.listDesktopCommands).mockResolvedValue({ commands: [done], presence: around });
+    renderExport({ capabilities: MIRROR_CAPABILITIES, origin: "desktop", mode: "hosted" });
+    await screen.findByRole("link", { name: "youtu.be/v" });
+    expect(screen.getByText("Your desktop is online.")).toBeInTheDocument();
+    expect(screen.queryByText("Your desktop will pick this up shortly.")).toBeNull();
+  });
+
+  it("a waiting request keeps the pick-up wording under the button", async () => {
+    vi.mocked(api.listDesktopCommands).mockResolvedValue({
+      commands: [renderCommand({ status: "pending" })],
+      presence: around,
+    });
+    renderExport({ capabilities: MIRROR_CAPABILITIES, origin: "desktop", mode: "hosted" });
+    const button = await screen.findByRole("button", { name: "Render on desktop" });
+    const rail = button.parentElement as HTMLElement;
+    expect(await within(rail).findByText("Your desktop will pick this up shortly.")).toBeInTheDocument();
+    expect(screen.queryByText("Your desktop is online.")).toBeNull();
   });
 
   it("a hosted-native match keeps its own export", async () => {

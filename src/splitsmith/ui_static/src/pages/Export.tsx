@@ -55,7 +55,7 @@ import {
   type YouTubeSettings,
 } from "@/lib/api";
 import { syncedSecondaryCount } from "@/lib/camOptions";
-import { commandTitle, presenceText, rendersOnDesktop } from "@/lib/desktopCommands";
+import { commandTitle, renderPresenceLine, rendersOnDesktop } from "@/lib/desktopCommands";
 import { rowUploadOptions } from "@/lib/youtubeRows";
 import { hostedDownloads as buildHostedDownloads } from "@/lib/exportDownloads";
 import type { LookFocus } from "@/lib/exportPreview";
@@ -1019,7 +1019,7 @@ function ExportInner({ slug }: { slug: string }) {
                 {onDesktop ? (desktop.busy ? "Sending..." : primaryLabel) : busy ? busyLabel : primaryLabel}
               </Button>
               {onDesktop && desktop.presence ? (
-                <p className="mt-2 text-sm text-muted">{presenceText(desktop.presence)}</p>
+                <p className="mt-2 text-sm text-muted">{renderPresenceLine(desktop.presence, renderRequests)}</p>
               ) : null}
               {busy && job?.message ? (
                 <div className="mt-2 text-sm text-muted">

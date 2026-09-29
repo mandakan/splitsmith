@@ -9,6 +9,7 @@ import {
   latestForStage,
   presenceSummary,
   presenceText,
+  renderPresenceLine,
   rendersOnDesktop,
 } from "./desktopCommands";
 
@@ -145,5 +146,24 @@ describe("rendersOnDesktop", () => {
     expect(rendersOnDesktop(true, "desktop", ["comment_write"])).toBe(false);
     // Not loaded yet: decides nothing.
     expect(rendersOnDesktop(true, "desktop", null)).toBe(false);
+  });
+});
+
+describe("renderPresenceLine", () => {
+  const render = (over: Partial<DesktopCommand>) => cmd({ kind: "render_upload", stage_number: null, ...over });
+
+  it("speaks for a request only while one waits or runs", () => {
+    expect(renderPresenceLine(around, [render({ status: "pending" })], NOW)).toBe(
+      "Your desktop will pick this up shortly.",
+    );
+    expect(renderPresenceLine(around, [render({ status: "claimed" })], NOW)).toBe(
+      "Your desktop will pick this up shortly.",
+    );
+  });
+
+  it("otherwise describes the desktop", () => {
+    expect(renderPresenceLine(around, [], NOW)).toBe("Your desktop is online.");
+    expect(renderPresenceLine(around, [render({ status: "succeeded" })], NOW)).toBe("Your desktop is online.");
+    expect(renderPresenceLine(away, [render({ status: "failed" })], NOW)).toBe(presenceSummary(away, NOW));
   });
 });
