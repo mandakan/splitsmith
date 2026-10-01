@@ -1,0 +1,481 @@
+{
+ "shooters": [
+  {
+   "key": "martin",
+   "name": "Martin Engström",
+   "scorecards": {
+    "1": "2026-09-26T13:19:46+00:00",
+    "2": "2026-09-26T14:00:28+00:00",
+    "3": "2026-09-26T14:22:48+00:00",
+    "4": "2026-09-26T11:14:51+00:00",
+    "5": "2026-09-26T11:40:05+00:00",
+    "6": "2026-09-26T12:05:47+00:00",
+    "7": "2026-09-26T12:29:49+00:00",
+    "8": "2026-09-26T13:02:32+00:00"
+   }
+  },
+  {
+   "key": "anton",
+   "name": "Anton Johansson",
+   "scorecards": {
+    "1": "2026-09-26T13:22:52+00:00",
+    "2": "2026-09-26T13:46:25+00:00",
+    "3": "2026-09-26T14:26:11+00:00",
+    "4": "2026-09-26T11:18:02+00:00",
+    "5": "2026-09-26T11:44:04+00:00",
+    "6": "2026-09-26T12:09:16+00:00",
+    "7": "2026-09-26T12:32:42+00:00",
+    "8": "2026-09-26T12:53:22+00:00"
+   }
+  },
+  {
+   "key": "mathias",
+   "name": "Mathias Axell",
+   "scorecards": {
+    "1": "2026-09-26T13:29:39+00:00",
+    "2": "2026-09-26T13:52:16+00:00",
+    "3": "2026-09-26T14:12:57+00:00",
+    "4": "2026-09-26T11:04:16+00:00",
+    "5": "2026-09-26T11:50:09+00:00",
+    "6": "2026-09-26T12:15:29+00:00",
+    "7": "2026-09-26T12:38:45+00:00",
+    "8": "2026-09-26T12:56:56+00:00"
+   }
+  }
+ ],
+ "clips": [
+  {
+   "id": "Höstfinalen XI - anton/IMG_5262.MOV",
+   "folder": "Höstfinalen XI - anton",
+   "filename": "IMG_5262.MOV",
+   "start": "2026-09-26T11:01:49+00:00",
+   "duration": 38.883,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "not_shooter": "anton"
+  },
+  {
+   "id": "Höstfinalen XI - anton/IMG_5264.MOV",
+   "folder": "Höstfinalen XI - anton",
+   "filename": "IMG_5264.MOV",
+   "start": "2026-09-26T11:37:27+00:00",
+   "duration": 42.103,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "not_shooter": "anton"
+  },
+  {
+   "id": "Höstfinalen XI - anton/IMG_5270.MOV",
+   "folder": "Höstfinalen XI - anton",
+   "filename": "IMG_5270.MOV",
+   "start": "2026-09-26T12:13:58+00:00",
+   "duration": 36.722,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "not_shooter": "anton"
+  },
+  {
+   "id": "Höstfinalen XI - anton/IMG_5273.MOV",
+   "folder": "Höstfinalen XI - anton",
+   "filename": "IMG_5273.MOV",
+   "start": "2026-09-26T12:27:44+00:00",
+   "duration": 70.283,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "not_shooter": "anton"
+  },
+  {
+   "id": "Höstfinalen XI - anton/IMG_5274.MOV",
+   "folder": "Höstfinalen XI - anton",
+   "filename": "IMG_5274.MOV",
+   "start": "2026-09-26T12:35:56+00:00",
+   "duration": 51.657,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "not_shooter": "anton"
+  },
+  {
+   "id": "Höstfinalen XI - anton/IMG_5276.MOV",
+   "folder": "Höstfinalen XI - anton",
+   "filename": "IMG_5276.MOV",
+   "start": "2026-09-26T13:01:19+00:00",
+   "duration": 27.645,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "not_shooter": "anton"
+  },
+  {
+   "id": "Höstfinalen XI - anton/IMG_5277.MOV",
+   "folder": "Höstfinalen XI - anton",
+   "filename": "IMG_5277.MOV",
+   "start": "2026-09-26T13:17:44+00:00",
+   "duration": 43.635,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "not_shooter": "anton"
+  },
+  {
+   "id": "Höstfinalen XI - anton/IMG_5278.MOV",
+   "folder": "Höstfinalen XI - anton",
+   "filename": "IMG_5278.MOV",
+   "start": "2026-09-26T13:26:53+00:00",
+   "duration": 22.492,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "not_shooter": "anton"
+  },
+  {
+   "id": "Höstfinalen XI - anton/IMG_5279.MOV",
+   "folder": "Höstfinalen XI - anton",
+   "filename": "IMG_5279.MOV",
+   "start": "2026-09-26T13:27:24+00:00",
+   "duration": 23.627,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "not_shooter": "anton"
+  },
+  {
+   "id": "Höstfinalen XI - anton/IMG_5280.MOV",
+   "folder": "Höstfinalen XI - anton",
+   "filename": "IMG_5280.MOV",
+   "start": "2026-09-26T13:58:44+00:00",
+   "duration": 39.933,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "not_shooter": "anton"
+  },
+  {
+   "id": "Höstfinalen XI - anton/IMG_5281.MOV",
+   "folder": "Höstfinalen XI - anton",
+   "filename": "IMG_5281.MOV",
+   "start": "2026-09-26T14:11:43+00:00",
+   "duration": 26.56,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "not_shooter": "anton"
+  },
+  {
+   "id": "Höstfinalen XI - anton/IMG_5282.MOV",
+   "folder": "Höstfinalen XI - anton",
+   "filename": "IMG_5282.MOV",
+   "start": "2026-09-26T14:21:41+00:00",
+   "duration": 20.458,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "not_shooter": "anton"
+  },
+  {
+   "id": "Höstfinalen XI - anton/video-2438_singular_display.mov",
+   "folder": "Höstfinalen XI - anton",
+   "filename": "video-2438_singular_display.mov",
+   "start": "2026-09-26T11:15:31+00:00",
+   "duration": 89.488,
+   "make": null,
+   "model": "Vanguard"
+  },
+  {
+   "id": "Höstfinalen XI - anton/video-2444_singular_display.mov",
+   "folder": "Höstfinalen XI - anton",
+   "filename": "video-2444_singular_display.mov",
+   "start": "2026-09-26T12:06:54+00:00",
+   "duration": 72.442,
+   "make": null,
+   "model": "Vanguard"
+  },
+  {
+   "id": "Höstfinalen XI - anton/video-2450_singular_display.mov",
+   "folder": "Höstfinalen XI - anton",
+   "filename": "video-2450_singular_display.mov",
+   "start": "2026-09-26T11:41:56+00:00",
+   "duration": 104.803,
+   "make": null,
+   "model": "Vanguard"
+  },
+  {
+   "id": "Höstfinalen XI - anton/video-2478_singular_display.mov",
+   "folder": "Höstfinalen XI - anton",
+   "filename": "video-2478_singular_display.mov",
+   "start": "2026-09-26T14:24:12+00:00",
+   "duration": 48.843,
+   "make": null,
+   "model": "Vanguard"
+  },
+  {
+   "id": "Höstfinalen XI - anton/video-2485_singular_display.mov",
+   "folder": "Höstfinalen XI - anton",
+   "filename": "video-2485_singular_display.mov",
+   "start": "2026-09-26T12:51:45+00:00",
+   "duration": 49.562,
+   "make": null,
+   "model": "Vanguard"
+  },
+  {
+   "id": "Höstfinalen XI - anton/video-2493_singular_display.mov",
+   "folder": "Höstfinalen XI - anton",
+   "filename": "video-2493_singular_display.mov",
+   "start": "2026-09-26T13:20:53+00:00",
+   "duration": 57.275,
+   "make": null,
+   "model": "Vanguard"
+  },
+  {
+   "id": "Höstfinalen XI - anton/video-2499_singular_display.mov",
+   "folder": "Höstfinalen XI - anton",
+   "filename": "video-2499_singular_display.mov",
+   "start": "2026-09-26T12:30:25+00:00",
+   "duration": 79.842,
+   "make": null,
+   "model": "Vanguard"
+  },
+  {
+   "id": "Höstfinalen XI - anton/video-2505_singular_display.mov",
+   "folder": "Höstfinalen XI - anton",
+   "filename": "video-2505_singular_display.mov",
+   "start": "2026-09-26T13:44:35+00:00",
+   "duration": 125.852,
+   "make": null,
+   "model": "Vanguard"
+  },
+  {
+   "id": "Höstfinalen XI - martin/IMG_3653.mov",
+   "folder": "Höstfinalen XI - martin",
+   "filename": "IMG_3653.mov",
+   "start": "2026-09-26T11:16:04+00:00",
+   "duration": 27.0,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "not_shooter": "martin"
+  },
+  {
+   "id": "Höstfinalen XI - martin/IMG_3654.mov",
+   "folder": "Höstfinalen XI - martin",
+   "filename": "IMG_3654.mov",
+   "start": "2026-09-26T11:42:11+00:00",
+   "duration": 40.533,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "not_shooter": "martin"
+  },
+  {
+   "id": "Höstfinalen XI - martin/IMG_3655.mov",
+   "folder": "Höstfinalen XI - martin",
+   "filename": "IMG_3655.mov",
+   "start": "2026-09-26T11:48:31+00:00",
+   "duration": 44.4,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "not_shooter": "martin"
+  },
+  {
+   "id": "Höstfinalen XI - martin/IMG_3656.mov",
+   "folder": "Höstfinalen XI - martin",
+   "filename": "IMG_3656.mov",
+   "start": "2026-09-26T12:13:56+00:00",
+   "duration": 33.733,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "not_shooter": "martin"
+  },
+  {
+   "id": "Höstfinalen XI - martin/IMG_3657.mov",
+   "folder": "Höstfinalen XI - martin",
+   "filename": "IMG_3657.mov",
+   "start": "2026-09-26T12:30:50+00:00",
+   "duration": 47.967,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "not_shooter": "martin"
+  },
+  {
+   "id": "Höstfinalen XI - martin/IMG_3659.mov",
+   "folder": "Höstfinalen XI - martin",
+   "filename": "IMG_3659.mov",
+   "start": "2026-09-26T12:52:04+00:00",
+   "duration": 20.267,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "not_shooter": "martin"
+  },
+  {
+   "id": "Höstfinalen XI - martin/IMG_3660.mov",
+   "folder": "Höstfinalen XI - martin",
+   "filename": "IMG_3660.mov",
+   "start": "2026-09-26T12:55:52+00:00",
+   "duration": 17.833,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "not_shooter": "martin"
+  },
+  {
+   "id": "Höstfinalen XI - martin/IMG_3661.mov",
+   "folder": "Höstfinalen XI - martin",
+   "filename": "IMG_3661.mov",
+   "start": "2026-09-26T13:21:15+00:00",
+   "duration": 20.567,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "not_shooter": "martin"
+  },
+  {
+   "id": "Höstfinalen XI - martin/IMG_3668.mov",
+   "folder": "Höstfinalen XI - martin",
+   "filename": "IMG_3668.mov",
+   "start": "2026-09-26T13:44:40+00:00",
+   "duration": 33.467,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "not_shooter": "martin"
+  },
+  {
+   "id": "Höstfinalen XI - martin/IMG_3694.mov",
+   "folder": "Höstfinalen XI - martin",
+   "filename": "IMG_3694.mov",
+   "start": "2026-09-26T13:50:16+00:00",
+   "duration": 35.333,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "not_shooter": "martin"
+  },
+  {
+   "id": "Höstfinalen XI - martin/IMG_3695.mov",
+   "folder": "Höstfinalen XI - martin",
+   "filename": "IMG_3695.mov",
+   "start": "2026-09-26T14:11:49+00:00",
+   "duration": 17.233,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "not_shooter": "martin"
+  },
+  {
+   "id": "Höstfinalen XI - martin/IMG_3696.mov",
+   "folder": "Höstfinalen XI - martin",
+   "filename": "IMG_3696.mov",
+   "start": "2026-09-26T14:24:32+00:00",
+   "duration": 29.5,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "not_shooter": "martin"
+  },
+  {
+   "id": "mathias/head/VID_20260926_130443_00_237.mp4",
+   "folder": "mathias/head",
+   "filename": "VID_20260926_130443_00_237.mp4",
+   "start": "2026-09-26T11:04:43+00:00",
+   "duration": 74.58,
+   "make": null,
+   "model": null,
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 4
+    }
+   ]
+  },
+  {
+   "id": "mathias/head/VID_20260926_135125_00_238.mp4",
+   "folder": "mathias/head",
+   "filename": "VID_20260926_135125_00_238.mp4",
+   "start": "2026-09-26T11:51:25+00:00",
+   "duration": 86.62,
+   "make": null,
+   "model": null,
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 5
+    }
+   ]
+  },
+  {
+   "id": "mathias/head/VID_20260926_141612_00_239.mp4",
+   "folder": "mathias/head",
+   "filename": "VID_20260926_141612_00_239.mp4",
+   "start": "2026-09-26T12:16:12+00:00",
+   "duration": 86.72,
+   "make": null,
+   "model": null,
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 6
+    }
+   ]
+  },
+  {
+   "id": "mathias/head/VID_20260926_143841_00_241.mp4",
+   "folder": "mathias/head",
+   "filename": "VID_20260926_143841_00_241.mp4",
+   "start": "2026-09-26T12:38:41+00:00",
+   "duration": 120.76,
+   "make": null,
+   "model": null,
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 7
+    }
+   ]
+  },
+  {
+   "id": "mathias/head/VID_20260926_145827_00_242.mp4",
+   "folder": "mathias/head",
+   "filename": "VID_20260926_145827_00_242.mp4",
+   "start": "2026-09-26T12:58:27+00:00",
+   "duration": 56.04,
+   "make": null,
+   "model": null,
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 8
+    }
+   ]
+  },
+  {
+   "id": "mathias/head/VID_20260926_152925_00_243.mp4",
+   "folder": "mathias/head",
+   "filename": "VID_20260926_152925_00_243.mp4",
+   "start": "2026-09-26T13:29:25+00:00",
+   "duration": 163.9,
+   "make": null,
+   "model": null,
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 1
+    }
+   ]
+  },
+  {
+   "id": "mathias/head/VID_20260926_155250_00_244.mp4",
+   "folder": "mathias/head",
+   "filename": "VID_20260926_155250_00_244.mp4",
+   "start": "2026-09-26T13:52:50+00:00",
+   "duration": 67.34,
+   "make": null,
+   "model": null,
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 2
+    }
+   ]
+  },
+  {
+   "id": "mathias/head/VID_20260926_161447_00_245.mp4",
+   "folder": "mathias/head",
+   "filename": "VID_20260926_161447_00_245.mp4",
+   "start": "2026-09-26T14:14:47+00:00",
+   "duration": 32.06,
+   "make": null,
+   "model": null,
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 3
+    }
+   ]
+  }
+ ],
+ "source": "2026-höstfinalen"
+}

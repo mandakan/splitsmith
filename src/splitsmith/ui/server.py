@@ -4654,6 +4654,11 @@ def register_job_bodies(state: AppState) -> None:
     from .youtube_api import run_youtube_upload
 
     state.jobs.bodies.register("youtube_upload", functools.partial(run_youtube_upload, state=state))
+    from . import footage_sort_api
+
+    state.jobs.bodies.register(
+        footage_sort_api.JOB_KIND, functools.partial(footage_sort_api.run_footage_sort_scan, state=state)
+    )
     state.jobs.bodies.register("sync_match", _run_sync_match)
     state.jobs.bodies.register("auto_sync", functools.partial(_run_sync_match, auto=True))
     if not _hosted_mode_active():
@@ -10847,6 +10852,10 @@ def create_app(
             return False
         await _submit_detect_beep(slug, stage_number, video)
         return True
+
+    # Routers outside this closure (footage_sort_api) queue beeps through
+    # the same hook rather than a second copy of its rules.
+    app.state.auto_queue_beep = _auto_queue_beep_if_needed
 
     @app.put("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/beep-window")
     async def set_beep_window(
@@ -17422,6 +17431,12 @@ def create_app(
     from .export_presets_api import router as export_presets_router
 
     app.include_router(export_presets_router)
+
+    # Sort a shared footage folder across shooters (spec 2026-10-01).
+    # Local only: every route 404s hosted.
+    from .footage_sort_api import router as footage_sort_router
+
+    app.include_router(footage_sort_router)
 
     # The rail's real-match preview (spec 2026-09-15 s3): a PNG per card.
     from .export_preview_api import router as export_preview_router

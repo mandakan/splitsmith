@@ -42,6 +42,7 @@ import { DevReviewQueue } from "@/pages/dev/DevReviewQueue";
 import { DevValidate } from "@/pages/dev/DevValidate";
 import { ExportRoute } from "@/pages/Export";
 import { Home } from "@/pages/Home";
+import { FootageSort } from "@/pages/FootageSort";
 import { Ingest } from "@/pages/Ingest";
 import { MergeMatches } from "@/pages/MergeMatches";
 import { Pick } from "@/pages/Pick";
@@ -294,6 +295,7 @@ export function App() {
               <Route path="ingest/:slug" element={<ShooterScopedRoute element={<Ingest />} />} />
               <Route path="ingest" element={<Ingest />} />
               <Route path="shooters" element={<Ingest />} />
+              <Route path="footage-sort/:scanId" element={<FootageSort />} />
               <Route
                 path="audit/:slug"
                 element={<ShooterScopedRoute element={<AuditRoute />} />}

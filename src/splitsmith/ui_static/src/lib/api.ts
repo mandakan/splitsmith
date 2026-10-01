@@ -603,6 +603,101 @@ export interface ScanResponse {
   skipped: string[];
 }
 
+/** Footage sort (spec 2026-10-01): one shared folder sorted across the
+ *  match's shooters. Shapes mirror ``ui/footage_sort_api.py``. */
+export type SortCameraClock = "trusted" | "fitted" | "anchored" | "needs_anchor" | "no_timestamps";
+export type SortConfidence = "high" | "medium" | "needs_you" | "skipped";
+export type SortIssue =
+  | "ambiguous"
+  | "conflict"
+  | "no_candidate"
+  | "no_timestamp"
+  | "needs_anchor"
+  | "outside_match";
+
+export interface SortCamera {
+  key: string;
+  folder: string;
+  model: string | null;
+  scheme: string;
+  clip_ids: string[];
+  clock: SortCameraClock;
+  offset_seconds: number;
+}
+
+export interface SortClipProposal {
+  clip_id: string;
+  camera_key: string;
+  shooter: string | null;
+  stage: number | null;
+  confidence: SortConfidence;
+  run_id: string | null;
+  role: "primary" | "secondary" | null;
+  decided_by: "engine" | "user";
+  reason: {
+    scorecard_at: string | null;
+    lead_seconds: number | null;
+    offset_seconds: number;
+    issue: SortIssue | null;
+    rival: string | null;
+    rival_stage: number | null;
+    run_size: number;
+  };
+}
+
+export interface SortClipView {
+  clip_id: string;
+  index: number;
+  folder: string;
+  filename: string;
+  start: string | null;
+  duration: number | null;
+  model: string | null;
+  imported_by: string | null;
+  thumbnail: boolean;
+  checked: boolean;
+  proposal: SortClipProposal;
+}
+
+export interface SortAnchor {
+  clip_id: string;
+  shooter: string;
+  stage: number;
+}
+
+export interface SortOverride {
+  clip_id: string;
+  shooter?: string | null;
+  stage?: number | null;
+  skip?: boolean;
+}
+
+export interface SortDecisions {
+  anchors: SortAnchor[];
+  overrides: SortOverride[];
+  checked: Record<string, boolean>;
+}
+
+export interface SortView {
+  scan_id: string;
+  status: "scanning" | "ready" | "failed" | "imported";
+  error: string | null;
+  source_dir: string;
+  skipped_files: number;
+  shooters: { key: string; name: string; stages: number[] }[];
+  cameras: SortCamera[];
+  clips: SortClipView[];
+  anchors: SortAnchor[];
+  overrides: SortOverride[];
+  user_checked: Record<string, boolean>;
+}
+
+export interface SortImportResult {
+  imported: { clip_id: string; shooter: string; stage: number; role: string; path: string }[];
+  not_imported: Record<string, string>;
+  report: string;
+}
+
 /** Filesystem state of a registered ``raw/<name>`` symlink. ``ok`` =
  *  resolves to a present file; ``broken`` = symlink with missing
  *  target; ``missing_link`` = the symlink itself is gone;
@@ -2815,6 +2910,33 @@ export const api = {
         },
       },
     ),
+
+  startFootageSort: (sourceDir: string) =>
+    request<{ scan_id: string }>("/api/match/footage-sort/scan", {
+      method: "POST",
+      json: { source_dir: sourceDir },
+    }),
+
+  getFootageSort: (scanId: string) =>
+    request<SortView>(`/api/match/footage-sort/${encodeURIComponent(scanId)}`),
+
+  putFootageSortDecisions: (scanId: string, decisions: SortDecisions) =>
+    request<SortView>(`/api/match/footage-sort/${encodeURIComponent(scanId)}/decisions`, {
+      method: "PUT",
+      json: decisions,
+    }),
+
+  importFootageSort: (scanId: string, linkMode: "symlink" | "copy") =>
+    request<SortImportResult>(`/api/match/footage-sort/${encodeURIComponent(scanId)}/import`, {
+      method: "POST",
+      json: { link_mode: linkMode },
+    }),
+
+  footageSortVideoUrl: (scanId: string, index: number) =>
+    scopeRequestPath(`/api/match/footage-sort/${encodeURIComponent(scanId)}/clips/${index}/video`),
+
+  footageSortThumbUrl: (scanId: string, index: number) =>
+    scopeRequestPath(`/api/match/footage-sort/${encodeURIComponent(scanId)}/thumbs/${index}.jpg`),
 
   scanFiles: (
     slug: string,
