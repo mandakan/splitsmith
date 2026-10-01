@@ -1,0 +1,211 @@
+{
+ "shooters": [
+  {
+   "key": "anton",
+   "name": "Anton Johansson",
+   "scorecards": {
+    "1": "2026-04-05T12:43:01.598923Z",
+    "2": "2026-04-05T11:07:25.814534Z",
+    "3": "2026-04-05T11:49:13.936334Z",
+    "4": "2026-04-05T15:36:01.762746Z",
+    "5": "2026-04-05T14:01:25.262470Z",
+    "6": "2026-04-05T14:42:07.116932Z"
+   }
+  },
+  {
+   "key": "martin",
+   "name": "Martin Engström",
+   "scorecards": {
+    "1": "2026-04-05T12:35:58.076872Z",
+    "2": "2026-04-05T11:38:57.245367Z",
+    "3": "2026-04-05T12:19:38.982746Z",
+    "4": "2026-04-05T15:30:19.428189Z",
+    "5": "2026-04-05T13:54:05.393721Z",
+    "6": "2026-04-05T14:33:16.053480Z"
+   }
+  }
+ ],
+ "clips": [
+  {
+   "id": "IMG_1293.mov",
+   "folder": "",
+   "filename": "IMG_1293.mov",
+   "start": "2026-04-05T11:05:10+00:00",
+   "duration": 36.967,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 2
+    }
+   ]
+  },
+  {
+   "id": "IMG_1294.mov",
+   "folder": "",
+   "filename": "IMG_1294.mov",
+   "start": "2026-04-05T11:45:34+00:00",
+   "duration": 45.067,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 3
+    }
+   ]
+  },
+  {
+   "id": "IMG_1295.mov",
+   "folder": "",
+   "filename": "IMG_1295.mov",
+   "start": "2026-04-05T12:42:06+00:00",
+   "duration": 18.3,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 1
+    }
+   ]
+  },
+  {
+   "id": "IMG_1296.mov",
+   "folder": "",
+   "filename": "IMG_1296.mov",
+   "start": "2026-04-05T13:59:03+00:00",
+   "duration": 31.433,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 5
+    }
+   ]
+  },
+  {
+   "id": "IMG_1297.mov",
+   "folder": "",
+   "filename": "IMG_1297.mov",
+   "start": "2026-04-05T14:40:59+00:00",
+   "duration": 33.3,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 6
+    }
+   ]
+  },
+  {
+   "id": "IMG_1298.mov",
+   "folder": "",
+   "filename": "IMG_1298.mov",
+   "start": "2026-04-05T15:34:38+00:00",
+   "duration": 27.333,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 4
+    }
+   ]
+  },
+  {
+   "id": "IMG_2931.MOV",
+   "folder": "",
+   "filename": "IMG_2931.MOV",
+   "start": "2026-04-05T11:36:23+00:00",
+   "duration": 58.877,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 2
+    }
+   ]
+  },
+  {
+   "id": "IMG_2932.MOV",
+   "folder": "",
+   "filename": "IMG_2932.MOV",
+   "start": "2026-04-05T12:16:29+00:00",
+   "duration": 61.778,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 3
+    }
+   ]
+  },
+  {
+   "id": "IMG_2933.MOV",
+   "folder": "",
+   "filename": "IMG_2933.MOV",
+   "start": "2026-04-05T12:34:23+00:00",
+   "duration": 45.705,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 1
+    }
+   ]
+  },
+  {
+   "id": "IMG_2934.MOV",
+   "folder": "",
+   "filename": "IMG_2934.MOV",
+   "start": "2026-04-05T13:51:09+00:00",
+   "duration": 54.708,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 5
+    }
+   ]
+  },
+  {
+   "id": "IMG_2938.MOV",
+   "folder": "",
+   "filename": "IMG_2938.MOV",
+   "start": "2026-04-05T14:31:45+00:00",
+   "duration": 63.728,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 6
+    }
+   ]
+  },
+  {
+   "id": "IMG_2942.MOV",
+   "folder": "",
+   "filename": "IMG_2942.MOV",
+   "start": "2026-04-05T15:26:34+00:00",
+   "duration": 52.662,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 4
+    }
+   ]
+  }
+ ],
+ "source": "vads-easter-shoot-2026"
+}

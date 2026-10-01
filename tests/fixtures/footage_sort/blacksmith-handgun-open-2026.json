@@ -1,0 +1,514 @@
+{
+ "shooters": [
+  {
+   "key": "anton",
+   "name": "Anton Johansson",
+   "scorecards": {
+    "1": "2026-04-12T11:40:43.623000Z",
+    "2": "2026-04-12T12:11:53.626220Z",
+    "3": "2026-04-12T07:09:12.218194Z",
+    "4": "2026-04-12T07:38:30.001885Z",
+    "5": "2026-04-12T08:15:52.211648Z",
+    "6": "2026-04-12T08:42:56.808882Z",
+    "7": "2026-04-12T09:11:45.152317Z",
+    "8": "2026-04-12T11:10:45.455838Z"
+   }
+  },
+  {
+   "key": "martin",
+   "name": "Martin Engström",
+   "scorecards": {
+    "1": "2026-04-12T11:43:04.103725Z",
+    "2": "2026-04-12T12:13:51.272588Z",
+    "3": "2026-04-12T07:10:57.916535Z",
+    "4": "2026-04-12T07:40:38.175837Z",
+    "5": "2026-04-12T08:18:17.990017Z",
+    "6": "2026-04-12T08:44:51.647504Z",
+    "7": "2026-04-12T09:14:05.286170Z",
+    "8": "2026-04-12T10:51:42.513646Z"
+   }
+  },
+  {
+   "key": "mathias",
+   "name": "Mathias Axell",
+   "scorecards": {
+    "1": "2026-04-12T11:29:28.833034Z",
+    "2": "2026-04-12T12:03:32.729554Z",
+    "3": "2026-04-12T07:18:54.854078Z",
+    "4": "2026-04-12T07:49:08.238240Z",
+    "5": "2026-04-12T08:28:00.884239Z",
+    "6": "2026-04-12T08:53:34.144335Z",
+    "7": "2026-04-12T09:23:09.214671Z",
+    "8": "2026-04-12T11:00:40.391960Z"
+   }
+  }
+ ],
+ "clips": [
+  {
+   "id": "IMG_2978.MOV",
+   "folder": "",
+   "filename": "IMG_2978.MOV",
+   "start": "2026-04-12T07:09:28+00:00",
+   "duration": 50.838,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 3
+    }
+   ]
+  },
+  {
+   "id": "IMG_2979.MOV",
+   "folder": "",
+   "filename": "IMG_2979.MOV",
+   "start": "2026-04-12T07:17:41+00:00",
+   "duration": 42.935,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 3
+    }
+   ]
+  },
+  {
+   "id": "IMG_2983.MOV",
+   "folder": "",
+   "filename": "IMG_2983.MOV",
+   "start": "2026-04-12T07:39:11+00:00",
+   "duration": 47.388,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 4
+    }
+   ]
+  },
+  {
+   "id": "IMG_2986.MOV",
+   "folder": "",
+   "filename": "IMG_2986.MOV",
+   "start": "2026-04-12T07:47:44+00:00",
+   "duration": 44.237,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 4
+    }
+   ]
+  },
+  {
+   "id": "IMG_2987.MOV",
+   "folder": "",
+   "filename": "IMG_2987.MOV",
+   "start": "2026-04-12T08:16:32+00:00",
+   "duration": 58.71,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 5
+    }
+   ]
+  },
+  {
+   "id": "IMG_2989.MOV",
+   "folder": "",
+   "filename": "IMG_2989.MOV",
+   "start": "2026-04-12T08:26:24+00:00",
+   "duration": 47.755,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 5
+    }
+   ]
+  },
+  {
+   "id": "IMG_2990.MOV",
+   "folder": "",
+   "filename": "IMG_2990.MOV",
+   "start": "2026-04-12T08:43:14+00:00",
+   "duration": 44.987,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 6
+    }
+   ]
+  },
+  {
+   "id": "IMG_2992.MOV",
+   "folder": "",
+   "filename": "IMG_2992.MOV",
+   "start": "2026-04-12T08:52:10+00:00",
+   "duration": 32.613,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 6
+    }
+   ]
+  },
+  {
+   "id": "IMG_2993.MOV",
+   "folder": "",
+   "filename": "IMG_2993.MOV",
+   "start": "2026-04-12T09:12:01+00:00",
+   "duration": 57.358,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 7
+    }
+   ]
+  },
+  {
+   "id": "IMG_2995.MOV",
+   "folder": "",
+   "filename": "IMG_2995.MOV",
+   "start": "2026-04-12T09:21:34+00:00",
+   "duration": 42.17,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 7
+    }
+   ]
+  },
+  {
+   "id": "IMG_3002.MOV",
+   "folder": "",
+   "filename": "IMG_3002.MOV",
+   "start": "2026-04-12T10:49:47+00:00",
+   "duration": 66.28,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 8
+    }
+   ]
+  },
+  {
+   "id": "IMG_3003.MOV",
+   "folder": "",
+   "filename": "IMG_3003.MOV",
+   "start": "2026-04-12T10:59:05+00:00",
+   "duration": 49.305,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 8
+    }
+   ]
+  },
+  {
+   "id": "IMG_3005.MOV",
+   "folder": "",
+   "filename": "IMG_3005.MOV",
+   "start": "2026-04-12T11:27:34+00:00",
+   "duration": 68.813,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 1
+    }
+   ]
+  },
+  {
+   "id": "IMG_3007.MOV",
+   "folder": "",
+   "filename": "IMG_3007.MOV",
+   "start": "2026-04-12T11:41:03+00:00",
+   "duration": 64.428,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 1
+    }
+   ]
+  },
+  {
+   "id": "IMG_3008.MOV",
+   "folder": "",
+   "filename": "IMG_3008.MOV",
+   "start": "2026-04-12T12:01:58+00:00",
+   "duration": 36.715,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 2
+    }
+   ]
+  },
+  {
+   "id": "IMG_3009.MOV",
+   "folder": "",
+   "filename": "IMG_3009.MOV",
+   "start": "2026-04-12T12:12:22+00:00",
+   "duration": 51.857,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 2
+    }
+   ]
+  },
+  {
+   "id": "VID_20260412_091752_00_034.mp4",
+   "folder": "",
+   "filename": "VID_20260412_091752_00_034.mp4",
+   "start": "2026-04-12T07:17:52+00:00",
+   "duration": 85.12,
+   "make": null,
+   "model": null,
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 3
+    }
+   ]
+  },
+  {
+   "id": "VID_20260412_102637_00_035.mp4",
+   "folder": "",
+   "filename": "VID_20260412_102637_00_035.mp4",
+   "start": "2026-04-12T08:26:37+00:00",
+   "duration": 191.14,
+   "make": null,
+   "model": null,
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 5
+    }
+   ]
+  },
+  {
+   "id": "VID_20260412_105215_00_036.mp4",
+   "folder": "",
+   "filename": "VID_20260412_105215_00_036.mp4",
+   "start": "2026-04-12T08:52:15+00:00",
+   "duration": 61.14,
+   "make": null,
+   "model": null,
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 6
+    }
+   ]
+  },
+  {
+   "id": "VID_20260412_112131_00_038.mp4",
+   "folder": "",
+   "filename": "VID_20260412_112131_00_038.mp4",
+   "start": "2026-04-12T09:21:31+00:00",
+   "duration": 77.144,
+   "make": null,
+   "model": null,
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 7
+    }
+   ]
+  },
+  {
+   "id": "VID_20260412_125853_00_039.mp4",
+   "folder": "",
+   "filename": "VID_20260412_125853_00_039.mp4",
+   "start": "2026-04-12T10:58:53+00:00",
+   "duration": 113.246,
+   "make": null,
+   "model": null,
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 8
+    }
+   ]
+  },
+  {
+   "id": "VID_20260412_132733_00_040.mp4",
+   "folder": "",
+   "filename": "VID_20260412_132733_00_040.mp4",
+   "start": "2026-04-12T11:27:33+00:00",
+   "duration": 104.338,
+   "make": null,
+   "model": null,
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 1
+    }
+   ]
+  },
+  {
+   "id": "VID_20260412_140158_00_041.mp4",
+   "folder": "",
+   "filename": "VID_20260412_140158_00_041.mp4",
+   "start": "2026-04-12T12:01:58+00:00",
+   "duration": 276.409,
+   "make": null,
+   "model": null,
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 2
+    }
+   ]
+  },
+  {
+   "id": "video-1126_singular_display.mov",
+   "folder": "",
+   "filename": "video-1126_singular_display.mov",
+   "start": "2026-04-12T07:08:07+00:00",
+   "duration": 180.095,
+   "make": null,
+   "model": "Vanguard",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 3
+    }
+   ]
+  },
+  {
+   "id": "video-1173_singular_display.mov",
+   "folder": "",
+   "filename": "video-1173_singular_display.mov",
+   "start": "2026-04-12T08:41:42+00:00",
+   "duration": 145.165,
+   "make": null,
+   "model": "Vanguard",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 6
+    }
+   ]
+  },
+  {
+   "id": "video-1175_singular_display.mov",
+   "folder": "",
+   "filename": "video-1175_singular_display.mov",
+   "start": "2026-04-12T07:36:59+00:00",
+   "duration": 115.037,
+   "make": null,
+   "model": "Vanguard",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 4
+    }
+   ]
+  },
+  {
+   "id": "video-1177_singular_display.mov",
+   "folder": "",
+   "filename": "video-1177_singular_display.mov",
+   "start": "2026-04-12T09:10:00+00:00",
+   "duration": 180.08,
+   "make": null,
+   "model": "Vanguard",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 7
+    }
+   ]
+  },
+  {
+   "id": "video-1187_singular_display.mov",
+   "folder": "",
+   "filename": "video-1187_singular_display.mov",
+   "start": "2026-04-12T08:14:13+00:00",
+   "duration": 180.112,
+   "make": null,
+   "model": "Vanguard",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 5
+    }
+   ]
+  },
+  {
+   "id": "video-1221_singular_display.mov",
+   "folder": "",
+   "filename": "video-1221_singular_display.mov",
+   "start": "2026-04-12T11:09:24+00:00",
+   "duration": 91.272,
+   "make": null,
+   "model": "Vanguard",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 8
+    }
+   ]
+  },
+  {
+   "id": "video-1223_singular_display.mov",
+   "folder": "",
+   "filename": "video-1223_singular_display.mov",
+   "start": "2026-04-12T11:38:43+00:00",
+   "duration": 180.097,
+   "make": null,
+   "model": "Vanguard",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 1
+    }
+   ]
+  },
+  {
+   "id": "video-1225_singular_display.mov",
+   "folder": "",
+   "filename": "video-1225_singular_display.mov",
+   "start": "2026-04-12T12:10:27+00:00",
+   "duration": 180.078,
+   "make": null,
+   "model": "Vanguard",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 2
+    }
+   ]
+  }
+ ],
+ "source": "blacksmith-handgun-open-2026"
+}

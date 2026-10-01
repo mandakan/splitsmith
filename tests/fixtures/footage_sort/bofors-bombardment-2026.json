@@ -1,0 +1,307 @@
+{
+ "shooters": [
+  {
+   "key": "anton",
+   "name": "Anton Johansson",
+   "scorecards": {
+    "1": "2026-05-03T08:49:27.278791Z",
+    "2": "2026-05-03T09:21:23.614856Z",
+    "3": "2026-05-03T09:58:06.575800Z",
+    "4": "2026-05-03T10:35:17.764729Z",
+    "5": "2026-05-03T11:02:19.586477Z",
+    "6": "2026-05-03T12:17:09.891620Z",
+    "7": "2026-05-03T12:59:23.884496Z",
+    "8": "2026-05-03T07:27:32.486263Z",
+    "9": "2026-05-03T08:04:42.559917Z"
+   }
+  },
+  {
+   "key": "martin",
+   "name": "Martin Engström",
+   "scorecards": {
+    "1": "2026-05-03T08:47:23.348181Z",
+    "2": "2026-05-03T09:19:33.615146Z",
+    "3": "2026-05-03T09:56:05.778466Z",
+    "4": "2026-05-03T10:32:41.113763Z",
+    "5": "2026-05-03T11:23:33.231481Z",
+    "6": "2026-05-03T12:14:48.945306Z",
+    "7": "2026-05-03T12:57:22.506567Z",
+    "8": "2026-05-03T07:25:24.737494Z",
+    "9": "2026-05-03T08:02:26.411014Z"
+   }
+  }
+ ],
+ "clips": [
+  {
+   "id": "Anton_stage_1.mov",
+   "folder": "",
+   "filename": "Anton_stage_1.mov",
+   "start": "2026-05-03T08:48:17+00:00",
+   "duration": 30.867,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 1
+    }
+   ]
+  },
+  {
+   "id": "Anton_stage_2.mov",
+   "folder": "",
+   "filename": "Anton_stage_2.mov",
+   "start": "2026-05-03T09:20:12+00:00",
+   "duration": 24.5,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 2
+    }
+   ]
+  },
+  {
+   "id": "Anton_stage_3.mov",
+   "folder": "",
+   "filename": "Anton_stage_3.mov",
+   "start": "2026-05-03T09:56:34+00:00",
+   "duration": 18.567,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 3
+    }
+   ]
+  },
+  {
+   "id": "Anton_stage_4.mov",
+   "folder": "",
+   "filename": "Anton_stage_4.mov",
+   "start": "2026-05-03T10:33:19+00:00",
+   "duration": 54.033,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 4
+    }
+   ]
+  },
+  {
+   "id": "Anton_stage_5.mov",
+   "folder": "",
+   "filename": "Anton_stage_5.mov",
+   "start": "2026-05-03T11:01:04+00:00",
+   "duration": 37.233,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 5
+    }
+   ]
+  },
+  {
+   "id": "Anton_stage_6.mov",
+   "folder": "",
+   "filename": "Anton_stage_6.mov",
+   "start": "2026-05-03T12:15:24+00:00",
+   "duration": 45.233,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 6
+    }
+   ]
+  },
+  {
+   "id": "Anton_stage_7.mov",
+   "folder": "",
+   "filename": "Anton_stage_7.mov",
+   "start": "2026-05-03T12:58:08+00:00",
+   "duration": 28.933,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 7
+    }
+   ]
+  },
+  {
+   "id": "Anton_stage_8.mov",
+   "folder": "",
+   "filename": "Anton_stage_8.mov",
+   "start": "2026-05-03T07:26:08+00:00",
+   "duration": 25.667,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 8
+    }
+   ]
+  },
+  {
+   "id": "Anton_stage_9.mov",
+   "folder": "",
+   "filename": "Anton_stage_9.mov",
+   "start": "2026-05-03T08:03:29+00:00",
+   "duration": 23.767,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 9
+    }
+   ]
+  },
+  {
+   "id": "IMG_3263.MOV",
+   "folder": "",
+   "filename": "IMG_3263.MOV",
+   "start": "2026-05-03T07:23:36+00:00",
+   "duration": 58.542,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 8
+    }
+   ]
+  },
+  {
+   "id": "IMG_3264.MOV",
+   "folder": "",
+   "filename": "IMG_3264.MOV",
+   "start": "2026-05-03T08:00:40+00:00",
+   "duration": 66.03,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 9
+    }
+   ]
+  },
+  {
+   "id": "IMG_3265.MOV",
+   "folder": "",
+   "filename": "IMG_3265.MOV",
+   "start": "2026-05-03T08:45:46+00:00",
+   "duration": 58.038,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 1
+    }
+   ]
+  },
+  {
+   "id": "IMG_3267.MOV",
+   "folder": "",
+   "filename": "IMG_3267.MOV",
+   "start": "2026-05-03T09:17:42+00:00",
+   "duration": 55.642,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 2
+    }
+   ]
+  },
+  {
+   "id": "IMG_3268.MOV",
+   "folder": "",
+   "filename": "IMG_3268.MOV",
+   "start": "2026-05-03T09:54:03+00:00",
+   "duration": 40.318,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 3
+    }
+   ]
+  },
+  {
+   "id": "IMG_3269.MOV",
+   "folder": "",
+   "filename": "IMG_3269.MOV",
+   "start": "2026-05-03T10:30:21+00:00",
+   "duration": 72.198,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 4
+    }
+   ]
+  },
+  {
+   "id": "IMG_3270.MOV",
+   "folder": "",
+   "filename": "IMG_3270.MOV",
+   "start": "2026-05-03T11:21:52+00:00",
+   "duration": 59.208,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 5
+    }
+   ]
+  },
+  {
+   "id": "IMG_3271.MOV",
+   "folder": "",
+   "filename": "IMG_3271.MOV",
+   "start": "2026-05-03T12:12:45+00:00",
+   "duration": 65.263,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 6
+    }
+   ]
+  },
+  {
+   "id": "IMG_3272.MOV",
+   "folder": "",
+   "filename": "IMG_3272.MOV",
+   "start": "2026-05-03T12:55:41+00:00",
+   "duration": 47.638,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 7
+    }
+   ]
+  }
+ ],
+ "source": "bofors-bombardment-2026"
+}

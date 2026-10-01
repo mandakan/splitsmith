@@ -1,0 +1,418 @@
+{
+ "shooters": [
+  {
+   "key": "martin",
+   "name": "Martin Engström",
+   "scorecards": {
+    "1": "2026-05-16T08:46:10.995297Z",
+    "2": "2026-05-16T09:20:53.012266Z",
+    "3": "2026-05-16T11:00:32.653626Z",
+    "4": "2026-05-16T11:52:42.804126Z",
+    "5": "2026-05-16T12:27:12.355286Z",
+    "6": "2026-05-16T12:56:13.906392Z",
+    "7": "2026-05-16T13:29:02.902338Z",
+    "8": "2026-05-16T14:10:18.303104Z",
+    "9": "2026-05-16T06:15:19.612947Z",
+    "10": "2026-05-16T06:43:58.027436Z",
+    "11": "2026-05-16T07:22:33.408313Z",
+    "12": "2026-05-16T07:57:13.979538Z"
+   }
+  },
+  {
+   "key": "anton",
+   "name": "Anton Johansson",
+   "scorecards": {
+    "1": "2026-05-16T08:41:31.360399Z",
+    "2": "2026-05-16T09:44:55.624657Z",
+    "3": "2026-05-16T11:18:41.096730Z",
+    "4": "2026-05-16T11:49:00.959031Z",
+    "5": "2026-05-16T12:23:26.263308Z",
+    "6": "2026-05-16T12:51:41.216191Z",
+    "7": "2026-05-16T13:24:17.897350Z",
+    "8": "2026-05-16T14:04:14.177806Z",
+    "9": "2026-05-16T06:11:01.219560Z",
+    "10": "2026-05-16T06:40:37.480625Z",
+    "11": "2026-05-16T07:22:33.760808Z",
+    "12": "2026-05-16T07:52:21.215541Z"
+   }
+  }
+ ],
+ "clips": [
+  {
+   "id": "Anton_pov_stage_1.mov",
+   "folder": "",
+   "filename": "Anton_pov_stage_1.mov",
+   "start": "2026-05-16T08:39:47+00:00",
+   "duration": 180.078,
+   "make": null,
+   "model": "Vanguard",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 1
+    }
+   ]
+  },
+  {
+   "id": "Anton_pov_stage_10.mov",
+   "folder": "",
+   "filename": "Anton_pov_stage_10.mov",
+   "start": "2026-05-16T06:39:28+00:00",
+   "duration": 83.29,
+   "make": null,
+   "model": "Vanguard",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 10
+    }
+   ]
+  },
+  {
+   "id": "Anton_pov_stage_11.mov",
+   "folder": "",
+   "filename": "Anton_pov_stage_11.mov",
+   "start": "2026-05-16T07:06:53+00:00",
+   "duration": 180.095,
+   "make": null,
+   "model": "Vanguard",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 11
+    }
+   ]
+  },
+  {
+   "id": "Anton_pov_stage_11_reshoot.mov",
+   "folder": "",
+   "filename": "Anton_pov_stage_11_reshoot.mov",
+   "start": "2026-05-16T07:21:13+00:00",
+   "duration": 180.077,
+   "make": null,
+   "model": "Vanguard",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 11
+    }
+   ]
+  },
+  {
+   "id": "Anton_pov_stage_12.mov",
+   "folder": "",
+   "filename": "Anton_pov_stage_12.mov",
+   "start": "2026-05-16T07:50:22+00:00",
+   "duration": 102.303,
+   "make": null,
+   "model": "Vanguard",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 12
+    }
+   ]
+  },
+  {
+   "id": "Anton_pov_stage_2.mov",
+   "folder": "",
+   "filename": "Anton_pov_stage_2.mov",
+   "start": "2026-05-16T09:43:10+00:00",
+   "duration": 80.675,
+   "make": null,
+   "model": "Vanguard",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 2
+    }
+   ]
+  },
+  {
+   "id": "Anton_pov_stage_3.mov",
+   "folder": "",
+   "filename": "Anton_pov_stage_3.mov",
+   "start": "2026-05-16T11:17:31+00:00",
+   "duration": 104.008,
+   "make": null,
+   "model": "Vanguard",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 3
+    }
+   ]
+  },
+  {
+   "id": "Anton_pov_stage_4.mov",
+   "folder": "",
+   "filename": "Anton_pov_stage_4.mov",
+   "start": "2026-05-16T11:47:42+00:00",
+   "duration": 121.652,
+   "make": null,
+   "model": "Vanguard",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 4
+    }
+   ]
+  },
+  {
+   "id": "Anton_pov_stage_5.mov",
+   "folder": "",
+   "filename": "Anton_pov_stage_5.mov",
+   "start": "2026-05-16T12:22:13+00:00",
+   "duration": 115.335,
+   "make": null,
+   "model": "Vanguard",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 5
+    }
+   ]
+  },
+  {
+   "id": "Anton_pov_stage_6.mov",
+   "folder": "",
+   "filename": "Anton_pov_stage_6.mov",
+   "start": "2026-05-16T12:50:13+00:00",
+   "duration": 43.94,
+   "make": null,
+   "model": "Vanguard",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 6
+    }
+   ]
+  },
+  {
+   "id": "Anton_pov_stage_7.mov",
+   "folder": "",
+   "filename": "Anton_pov_stage_7.mov",
+   "start": "2026-05-16T13:22:46+00:00",
+   "duration": 134.75,
+   "make": null,
+   "model": "Vanguard",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 7
+    }
+   ]
+  },
+  {
+   "id": "Anton_pov_stage_8.mov",
+   "folder": "",
+   "filename": "Anton_pov_stage_8.mov",
+   "start": "2026-05-16T14:02:31+00:00",
+   "duration": 92.822,
+   "make": null,
+   "model": "Vanguard",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 8
+    }
+   ]
+  },
+  {
+   "id": "Anton_pov_stage_9.mov",
+   "folder": "",
+   "filename": "Anton_pov_stage_9.mov",
+   "start": "2026-05-16T06:09:28+00:00",
+   "duration": 70.74,
+   "make": null,
+   "model": "Vanguard",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 9
+    }
+   ]
+  },
+  {
+   "id": "Martin_stage_1.MOV",
+   "folder": "",
+   "filename": "Martin_stage_1.MOV",
+   "start": "2026-05-16T08:44:37+00:00",
+   "duration": 65.267,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 1
+    }
+   ]
+  },
+  {
+   "id": "Martin_stage_10.MOV",
+   "folder": "",
+   "filename": "Martin_stage_10.MOV",
+   "start": "2026-05-16T06:42:57+00:00",
+   "duration": 27.395,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 10
+    }
+   ]
+  },
+  {
+   "id": "Martin_stage_11.MOV",
+   "folder": "",
+   "filename": "Martin_stage_11.MOV",
+   "start": "2026-05-16T07:10:13+00:00",
+   "duration": 27.53,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 11
+    }
+   ]
+  },
+  {
+   "id": "Martin_stage_12.MOV",
+   "folder": "",
+   "filename": "Martin_stage_12.MOV",
+   "start": "2026-05-16T07:54:53+00:00",
+   "duration": 85.473,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 12
+    }
+   ]
+  },
+  {
+   "id": "Martin_stage_2.MOV",
+   "folder": "",
+   "filename": "Martin_stage_2.MOV",
+   "start": "2026-05-16T09:18:59+00:00",
+   "duration": 67.73,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 2
+    }
+   ]
+  },
+  {
+   "id": "Martin_stage_3.MOV",
+   "folder": "",
+   "filename": "Martin_stage_3.MOV",
+   "start": "2026-05-16T10:58:55+00:00",
+   "duration": 48.955,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 3
+    }
+   ]
+  },
+  {
+   "id": "Martin_stage_4.MOV",
+   "folder": "",
+   "filename": "Martin_stage_4.MOV",
+   "start": "2026-05-16T11:50:56+00:00",
+   "duration": 66.747,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 4
+    }
+   ]
+  },
+  {
+   "id": "Martin_stage_5.MOV",
+   "folder": "",
+   "filename": "Martin_stage_5.MOV",
+   "start": "2026-05-16T12:25:28+00:00",
+   "duration": 54.325,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 5
+    }
+   ]
+  },
+  {
+   "id": "Martin_stage_6.MOV",
+   "folder": "",
+   "filename": "Martin_stage_6.MOV",
+   "start": "2026-05-16T12:54:36+00:00",
+   "duration": 46.72,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 6
+    }
+   ]
+  },
+  {
+   "id": "Martin_stage_7.MOV",
+   "folder": "",
+   "filename": "Martin_stage_7.MOV",
+   "start": "2026-05-16T13:27:01+00:00",
+   "duration": 56.925,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 7
+    }
+   ]
+  },
+  {
+   "id": "Martin_stage_8.MOV",
+   "folder": "",
+   "filename": "Martin_stage_8.MOV",
+   "start": "2026-05-16T14:07:25+00:00",
+   "duration": 67.78,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 8
+    }
+   ]
+  },
+  {
+   "id": "Martin_stage_9.MOV",
+   "folder": "",
+   "filename": "Martin_stage_9.MOV",
+   "start": "2026-05-16T06:13:25+00:00",
+   "duration": 63.56,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 9
+    }
+   ]
+  }
+ ],
+ "source": "oden-cup-2026"
+}

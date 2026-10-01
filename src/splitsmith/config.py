@@ -386,6 +386,42 @@ class VideoMatchConfig(BaseModel):
     same_run_seconds: int = 90
 
 
+class FootageSortConfig(BaseModel):
+    """Tunables for :mod:`splitsmith.footage_sort` (spec 2026-10-01).
+
+    Seconds are relative to a clip's recording start. Measured on the 2026
+    matches: a correct-clock clip's own scorecard is typed 46-227 s after it
+    starts (phones), 65-121 s (glasses); squad mates score minutes apart.
+    """
+
+    # A scorecard earlier than this after the start is the previous shooter's.
+    lead_min_s: float = 10.0
+    # Assignment window: the first scorecard up to this long after the clip
+    # ends (head cams often record past the scorecard, phones end before it).
+    tail_max_s: float = 480.0
+    # Clock trust and offset fitting use a tighter window: the run's own
+    # scorecard follows the start by at most this much.
+    fit_lead_max_s: float = 300.0
+    # A second shooter's scorecard this close to the first makes a clip
+    # ambiguous (scores typed back to back).
+    tie_s: float = 20.0
+    # A camera's clock is trusted when its recorded times line up at least
+    # this share of the clips the best correction lines up.
+    trust_ratio: float = 0.8
+    # A fitted offset must line up at least ``fit_min_clips`` clips and this
+    # many more than any offset more than ``fit_distinct_s`` away from it.
+    fit_margin: int = 2
+    fit_min_clips: int = 2
+    fit_distinct_s: float = 60.0
+    fit_grid_s: float = 15.0
+    # Lead used to place an anchored clip when the scan has no trusted
+    # camera to measure the typical lead from.
+    default_lead_s: float = 60.0
+    # Clips of one (shooter, stage) whose corrected starts are this close
+    # are one run on several cameras (shared with VideoMatchConfig).
+    same_run_seconds: float = 90.0
+
+
 class SplitColorThresholds(BaseModel):
     green_max: float = 0.25
     yellow_max: float = 0.35
@@ -506,6 +542,7 @@ class Config(BaseModel):
     coach_auto_classify: CoachAutoClassifyConfig = Field(default_factory=CoachAutoClassifyConfig)
     beep_windows: BeepWindowConfig = Field(default_factory=BeepWindowConfig)
     web_trim: WebTrimConfig = Field(default_factory=WebTrimConfig)
+    footage_sort: FootageSortConfig = Field(default_factory=FootageSortConfig)
 
     @classmethod
     def load(cls, path: Path | None) -> Config:

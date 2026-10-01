@@ -1,0 +1,979 @@
+{
+ "shooters": [
+  {
+   "key": "janne",
+   "name": "Janne Hauta",
+   "scorecards": {
+    "1": "2026-08-02T09:28:37.814968Z",
+    "2": "2026-08-02T07:07:52.913359Z",
+    "3": "2026-08-02T07:34:10.724129Z",
+    "4": "2026-08-02T07:59:24.137256Z",
+    "5": "2026-08-02T08:21:56.077944Z",
+    "6": "2026-08-02T08:58:25.714553Z",
+    "7": "2026-08-02T13:47:53.419468Z",
+    "8": "2026-08-02T11:12:06.316260Z",
+    "9": "2026-08-02T11:39:13.953447Z",
+    "10": "2026-08-02T12:02:22.178280Z",
+    "11": "2026-08-02T12:31:29.320196Z",
+    "12": "2026-08-02T13:09:44.313324Z"
+   }
+  },
+  {
+   "key": "anton",
+   "name": "Anton Johansson",
+   "scorecards": {
+    "1": "2026-08-02T09:26:51.138580Z",
+    "2": "2026-08-02T07:05:52.989934Z",
+    "3": "2026-08-02T07:32:05.730669Z",
+    "4": "2026-08-02T07:55:47.052031Z",
+    "5": "2026-08-02T08:33:37.044653Z",
+    "6": "2026-08-02T08:56:32.715161Z",
+    "7": "2026-08-02T13:46:26.213243Z",
+    "8": "2026-08-02T11:10:05.362703Z",
+    "9": "2026-08-02T11:37:12.441629Z",
+    "10": "2026-08-02T12:00:00.764340Z",
+    "11": "2026-08-02T12:29:16.244327Z",
+    "12": "2026-08-02T13:27:24.817793Z"
+   }
+  },
+  {
+   "key": "martin",
+   "name": "Martin Engström",
+   "scorecards": {
+    "1": "2026-08-02T09:23:07.719764Z",
+    "2": "2026-08-02T07:02:11.389548Z",
+    "3": "2026-08-02T07:43:15.104170Z",
+    "4": "2026-08-02T08:09:07.437877Z",
+    "5": "2026-08-02T08:30:07.349963Z",
+    "6": "2026-08-02T08:52:41.655652Z",
+    "7": "2026-08-02T13:43:36.333042Z",
+    "8": "2026-08-02T11:06:23.374735Z",
+    "9": "2026-08-02T11:33:49.678549Z",
+    "10": "2026-08-02T12:11:38.626872Z",
+    "11": "2026-08-02T12:41:38.107668Z",
+    "12": "2026-08-02T13:22:34.390933Z"
+   }
+  },
+  {
+   "key": "mathias",
+   "name": "Mathias Axell",
+   "scorecards": {
+    "1": "2026-08-02T09:20:57.856489Z",
+    "2": "2026-08-02T07:14:14.444969Z",
+    "3": "2026-08-02T07:39:55.594415Z",
+    "4": "2026-08-02T08:06:20.451144Z",
+    "5": "2026-08-02T08:27:20.203665Z",
+    "6": "2026-08-02T08:50:20.076203Z",
+    "7": "2026-08-02T13:41:09.230256Z",
+    "8": "2026-08-02T11:04:05.166103Z",
+    "9": "2026-08-02T11:44:47.351561Z",
+    "10": "2026-08-02T12:09:11.026181Z",
+    "11": "2026-08-02T12:38:50.303904Z",
+    "12": "2026-08-02T13:20:12.199376Z"
+   }
+  }
+ ],
+ "clips": [
+  {
+   "id": "IMG_2521.MOV",
+   "folder": "",
+   "filename": "IMG_2521.MOV",
+   "start": "2026-08-02T07:04:49+00:00",
+   "duration": 23.26,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 2
+    }
+   ]
+  },
+  {
+   "id": "IMG_2522.MOV",
+   "folder": "",
+   "filename": "IMG_2522.MOV",
+   "start": "2026-08-02T07:30:40+00:00",
+   "duration": 30.98,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 3
+    }
+   ]
+  },
+  {
+   "id": "IMG_2523.MOV",
+   "folder": "",
+   "filename": "IMG_2523.MOV",
+   "start": "2026-08-02T07:54:11+00:00",
+   "duration": 36.283,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 4
+    }
+   ]
+  },
+  {
+   "id": "IMG_2533.MOV",
+   "folder": "",
+   "filename": "IMG_2533.MOV",
+   "start": "2026-08-02T08:32:19+00:00",
+   "duration": 24.083,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 5
+    }
+   ]
+  },
+  {
+   "id": "IMG_2546.MOV",
+   "folder": "",
+   "filename": "IMG_2546.MOV",
+   "start": "2026-08-02T08:55:14+00:00",
+   "duration": 33.533,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 6
+    }
+   ]
+  },
+  {
+   "id": "IMG_2563.MOV",
+   "folder": "",
+   "filename": "IMG_2563.MOV",
+   "start": "2026-08-02T09:25:47+00:00",
+   "duration": 22.277,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 1
+    }
+   ]
+  },
+  {
+   "id": "IMG_2584.MOV",
+   "folder": "",
+   "filename": "IMG_2584.MOV",
+   "start": "2026-08-02T11:08:51+00:00",
+   "duration": 28.22,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 8
+    }
+   ]
+  },
+  {
+   "id": "IMG_2588.MOV",
+   "folder": "",
+   "filename": "IMG_2588.MOV",
+   "start": "2026-08-02T11:36:09+00:00",
+   "duration": 20.175,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 9
+    }
+   ]
+  },
+  {
+   "id": "IMG_2617.MOV",
+   "folder": "",
+   "filename": "IMG_2617.MOV",
+   "start": "2026-08-02T11:58:12+00:00",
+   "duration": 38.333,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 10
+    }
+   ]
+  },
+  {
+   "id": "IMG_2644.MOV",
+   "folder": "",
+   "filename": "IMG_2644.MOV",
+   "start": "2026-08-02T12:26:53+00:00",
+   "duration": 36.9,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 11
+    }
+   ]
+  },
+  {
+   "id": "IMG_2673.MOV",
+   "folder": "",
+   "filename": "IMG_2673.MOV",
+   "start": "2026-08-02T13:25:55+00:00",
+   "duration": 39.077,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 12
+    }
+   ]
+  },
+  {
+   "id": "IMG_2684.MOV",
+   "folder": "",
+   "filename": "IMG_2684.MOV",
+   "start": "2026-08-02T13:45:40+00:00",
+   "duration": 17.442,
+   "make": "Apple",
+   "model": "iPhone 17 Pro Max",
+   "labels": [
+    {
+     "shooter": "anton",
+     "stage": 7
+    }
+   ]
+  },
+  {
+   "id": "Janne_S01_B50.MOV",
+   "folder": "",
+   "filename": "Janne_S01_B50.MOV",
+   "start": "2026-08-02T09:27:32+00:00",
+   "duration": 28.53,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "janne",
+     "stage": 1
+    }
+   ]
+  },
+  {
+   "id": "Janne_S02_A100.MOV",
+   "folder": "",
+   "filename": "Janne_S02_A100.MOV",
+   "start": "2026-08-02T07:06:43+00:00",
+   "duration": 33.548,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "janne",
+     "stage": 2
+    }
+   ]
+  },
+  {
+   "id": "Janne_S03_A200.MOV",
+   "folder": "",
+   "filename": "Janne_S03_A200.MOV",
+   "start": "2026-08-02T07:32:37+00:00",
+   "duration": 36.783,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "janne",
+     "stage": 3
+    }
+   ]
+  },
+  {
+   "id": "Janne_S04_A300V.MOV",
+   "folder": "",
+   "filename": "Janne_S04_A300V.MOV",
+   "start": "2026-08-02T07:56:41+00:00",
+   "duration": 61.193,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "janne",
+     "stage": 4
+    }
+   ]
+  },
+  {
+   "id": "Janne_S05_A300H.MOV",
+   "folder": "",
+   "filename": "Janne_S05_A300H.MOV",
+   "start": "2026-08-02T08:20:34+00:00",
+   "duration": 46.003,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "janne",
+     "stage": 5
+    }
+   ]
+  },
+  {
+   "id": "Janne_S06_A300F.MOV",
+   "folder": "",
+   "filename": "Janne_S06_A300F.MOV",
+   "start": "2026-08-02T08:57:09+00:00",
+   "duration": 32.232,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "janne",
+     "stage": 6
+    }
+   ]
+  },
+  {
+   "id": "Janne_S07_B2.MOV",
+   "folder": "",
+   "filename": "Janne_S07_B2.MOV",
+   "start": "2026-08-02T13:47:02+00:00",
+   "duration": 17.557,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "janne",
+     "stage": 7
+    }
+   ]
+  },
+  {
+   "id": "Janne_S08_B3.MOV",
+   "folder": "",
+   "filename": "Janne_S08_B3.MOV",
+   "start": "2026-08-02T11:10:33+00:00",
+   "duration": 34.232,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "janne",
+     "stage": 8
+    }
+   ]
+  },
+  {
+   "id": "Janne_S09_B4.MOV",
+   "folder": "",
+   "filename": "Janne_S09_B4.MOV",
+   "start": "2026-08-02T11:37:34+00:00",
+   "duration": 37.983,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "janne",
+     "stage": 9
+    }
+   ]
+  },
+  {
+   "id": "Janne_S10_B5.MOV",
+   "folder": "",
+   "filename": "Janne_S10_B5.MOV",
+   "start": "2026-08-02T12:00:22+00:00",
+   "duration": 56.792,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "janne",
+     "stage": 10
+    }
+   ]
+  },
+  {
+   "id": "Janne_S11_B6.MOV",
+   "folder": "",
+   "filename": "Janne_S11_B6.MOV",
+   "start": "2026-08-02T12:29:32+00:00",
+   "duration": 49.273,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "janne",
+     "stage": 11
+    }
+   ]
+  },
+  {
+   "id": "Janne_S12_B100.MOV",
+   "folder": "",
+   "filename": "Janne_S12_B100.MOV",
+   "start": "2026-08-02T13:07:42+00:00",
+   "duration": 47.688,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "janne",
+     "stage": 12
+    }
+   ]
+  },
+  {
+   "id": "Martin_S01_B50.MOV",
+   "folder": "",
+   "filename": "Martin_S01_B50.MOV",
+   "start": "2026-08-02T09:21:34+00:00",
+   "duration": 55.323,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 1
+    }
+   ]
+  },
+  {
+   "id": "Martin_S02_A100.MOV",
+   "folder": "",
+   "filename": "Martin_S02_A100.MOV",
+   "start": "2026-08-02T07:00:44+00:00",
+   "duration": 50.105,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 2
+    }
+   ]
+  },
+  {
+   "id": "Martin_S03_A200.MOV",
+   "folder": "",
+   "filename": "Martin_S03_A200.MOV",
+   "start": "2026-08-02T07:40:08+00:00",
+   "duration": 60.177,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 3
+    }
+   ]
+  },
+  {
+   "id": "Martin_S04_A300V.MOV",
+   "folder": "",
+   "filename": "Martin_S04_A300V.MOV",
+   "start": "2026-08-02T08:07:01+00:00",
+   "duration": 63.878,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 4
+    }
+   ]
+  },
+  {
+   "id": "Martin_S05_A300H.MOV",
+   "folder": "",
+   "filename": "Martin_S05_A300H.MOV",
+   "start": "2026-08-02T08:27:44+00:00",
+   "duration": 75.483,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 5
+    }
+   ]
+  },
+  {
+   "id": "Martin_S06_A300F.MOV",
+   "folder": "",
+   "filename": "Martin_S06_A300F.MOV",
+   "start": "2026-08-02T08:50:57+00:00",
+   "duration": 57.06,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 6
+    }
+   ]
+  },
+  {
+   "id": "Martin_S07_B2.MOV",
+   "folder": "",
+   "filename": "Martin_S07_B2.MOV",
+   "start": "2026-08-02T13:42:39+00:00",
+   "duration": 29.762,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 7
+    }
+   ]
+  },
+  {
+   "id": "Martin_S08_B3.MOV",
+   "folder": "",
+   "filename": "Martin_S08_B3.MOV",
+   "start": "2026-08-02T11:04:36+00:00",
+   "duration": 72.152,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 8
+    }
+   ]
+  },
+  {
+   "id": "Martin_S09_B4.MOV",
+   "folder": "",
+   "filename": "Martin_S09_B4.MOV",
+   "start": "2026-08-02T11:32:11+00:00",
+   "duration": 45.523,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 9
+    }
+   ]
+  },
+  {
+   "id": "Martin_S10_B5.MOV",
+   "folder": "",
+   "filename": "Martin_S10_B5.MOV",
+   "start": "2026-08-02T12:09:52+00:00",
+   "duration": 48.072,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 10
+    }
+   ]
+  },
+  {
+   "id": "Martin_S11_B6.MOV",
+   "folder": "",
+   "filename": "Martin_S11_B6.MOV",
+   "start": "2026-08-02T12:39:19+00:00",
+   "duration": 77.237,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 11
+    }
+   ]
+  },
+  {
+   "id": "Martin_S12_B100.MOV",
+   "folder": "",
+   "filename": "Martin_S12_B100.MOV",
+   "start": "2026-08-02T13:20:44+00:00",
+   "duration": 53.057,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "martin",
+     "stage": 12
+    }
+   ]
+  },
+  {
+   "id": "Mathias_S01_B50.MOV",
+   "folder": "",
+   "filename": "Mathias_S01_B50.MOV",
+   "start": "2026-08-02T09:19:30+00:00",
+   "duration": 51.605,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 1
+    }
+   ]
+  },
+  {
+   "id": "Mathias_S02_A100.MOV",
+   "folder": "",
+   "filename": "Mathias_S02_A100.MOV",
+   "start": "2026-08-02T07:13:01+00:00",
+   "duration": 45.637,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 2
+    }
+   ]
+  },
+  {
+   "id": "Mathias_S03_A200.MOV",
+   "folder": "",
+   "filename": "Mathias_S03_A200.MOV",
+   "start": "2026-08-02T07:38:16+00:00",
+   "duration": 43.97,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 3
+    }
+   ]
+  },
+  {
+   "id": "Mathias_S04_A300V.MOV",
+   "folder": "",
+   "filename": "Mathias_S04_A300V.MOV",
+   "start": "2026-08-02T08:04:35+00:00",
+   "duration": 59.41,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 4
+    }
+   ]
+  },
+  {
+   "id": "Mathias_S05_A300H.MOV",
+   "folder": "",
+   "filename": "Mathias_S05_A300H.MOV",
+   "start": "2026-08-02T08:25:34+00:00",
+   "duration": 57.993,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 5
+    }
+   ]
+  },
+  {
+   "id": "Mathias_S06_A300F.MOV",
+   "folder": "",
+   "filename": "Mathias_S06_A300F.MOV",
+   "start": "2026-08-02T08:48:36+00:00",
+   "duration": 48.455,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 6
+    }
+   ]
+  },
+  {
+   "id": "Mathias_S07_B2.MOV",
+   "folder": "",
+   "filename": "Mathias_S07_B2.MOV",
+   "start": "2026-08-02T13:39:40+00:00",
+   "duration": 35.665,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 7
+    }
+   ]
+  },
+  {
+   "id": "Mathias_S08_B3.MOV",
+   "folder": "",
+   "filename": "Mathias_S08_B3.MOV",
+   "start": "2026-08-02T11:02:42+00:00",
+   "duration": 48.305,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 8
+    }
+   ]
+  },
+  {
+   "id": "Mathias_S09_B4.MOV",
+   "folder": "",
+   "filename": "Mathias_S09_B4.MOV",
+   "start": "2026-08-02T11:43:25+00:00",
+   "duration": 37.803,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 9
+    }
+   ]
+  },
+  {
+   "id": "Mathias_S10_B5.MOV",
+   "folder": "",
+   "filename": "Mathias_S10_B5.MOV",
+   "start": "2026-08-02T12:07:01+00:00",
+   "duration": 58.76,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 10
+    }
+   ]
+  },
+  {
+   "id": "Mathias_S11_B6.MOV",
+   "folder": "",
+   "filename": "Mathias_S11_B6.MOV",
+   "start": "2026-08-02T12:36:24+00:00",
+   "duration": 47.603,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 11
+    }
+   ]
+  },
+  {
+   "id": "Mathias_S12_B100.MOV",
+   "folder": "",
+   "filename": "Mathias_S12_B100.MOV",
+   "start": "2026-08-02T13:16:29+00:00",
+   "duration": 47.272,
+   "make": "Apple",
+   "model": "iPhone 17 Pro",
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 12
+    }
+   ]
+  },
+  {
+   "id": "VID_20260802_091358_00_081-00.00.21.181-00.00.47.342.mp4",
+   "folder": "",
+   "filename": "VID_20260802_091358_00_081-00.00.21.181-00.00.47.342.mp4",
+   "start": "2026-08-02T07:13:58+00:00",
+   "duration": 26.383,
+   "make": null,
+   "model": null,
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 2
+    }
+   ]
+  },
+  {
+   "id": "VID_20260802_093928_00_083-00.00.00.000-00.00.36.603.mp4",
+   "folder": "",
+   "filename": "VID_20260802_093928_00_083-00.00.00.000-00.00.36.603.mp4",
+   "start": "2026-08-02T07:39:28+00:00",
+   "duration": 36.625,
+   "make": null,
+   "model": null,
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 3
+    }
+   ]
+  },
+  {
+   "id": "VID_20260802_100542_00_084-00.00.13.007-00.00.51.908.mp4",
+   "folder": "",
+   "filename": "VID_20260802_100542_00_084-00.00.13.007-00.00.51.908.mp4",
+   "start": "2026-08-02T08:05:42+00:00",
+   "duration": 38.933,
+   "make": null,
+   "model": null,
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 4
+    }
+   ]
+  },
+  {
+   "id": "VID_20260802_102652_00_085-00.00.12.375-00.00.39.574.mp4",
+   "folder": "",
+   "filename": "VID_20260802_102652_00_085-00.00.12.375-00.00.39.574.mp4",
+   "start": "2026-08-02T08:26:52+00:00",
+   "duration": 27.605,
+   "make": null,
+   "model": null,
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 5
+    }
+   ]
+  },
+  {
+   "id": "VID_20260802_104934_00_087-00.00.16.184-00.00.51.589.mp4",
+   "folder": "",
+   "filename": "VID_20260802_104934_00_087-00.00.16.184-00.00.51.589.mp4",
+   "start": "2026-08-02T08:49:34+00:00",
+   "duration": 35.605,
+   "make": null,
+   "model": null,
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 6
+    }
+   ]
+  },
+  {
+   "id": "VID_20260802_112027_00_089-00.00.30.378-00.00.53.313.mp4",
+   "folder": "",
+   "filename": "VID_20260802_112027_00_089-00.00.30.378-00.00.53.313.mp4",
+   "start": "2026-08-02T09:20:27+00:00",
+   "duration": 23.339,
+   "make": null,
+   "model": null,
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 1
+    }
+   ]
+  },
+  {
+   "id": "VID_20260802_130337_00_090-00.00.15.076-00.01.04.041.mp4",
+   "folder": "",
+   "filename": "VID_20260802_130337_00_090-00.00.15.076-00.01.04.041.mp4",
+   "start": "2026-08-02T11:03:37+00:00",
+   "duration": 49.062,
+   "make": null,
+   "model": null,
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 8
+    }
+   ]
+  },
+  {
+   "id": "VID_20260802_134404_00_091-00.00.37.234-00.01.05.191.mp4",
+   "folder": "",
+   "filename": "VID_20260802_134404_00_091-00.00.37.234-00.01.05.191.mp4",
+   "start": "2026-08-02T11:44:04+00:00",
+   "duration": 28.208,
+   "make": null,
+   "model": null,
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 9
+    }
+   ]
+  },
+  {
+   "id": "VID_20260802_140806_00_092-00.00.21.246-00.01.05.943.mp4",
+   "folder": "",
+   "filename": "VID_20260802_140806_00_092-00.00.21.246-00.01.05.943.mp4",
+   "start": "2026-08-02T12:08:06+00:00",
+   "duration": 44.971,
+   "make": null,
+   "model": null,
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 10
+    }
+   ]
+  },
+  {
+   "id": "VID_20260802_143712_00_093-00.00.22.095-00.01.11.567.mp4",
+   "folder": "",
+   "filename": "VID_20260802_143712_00_093-00.00.22.095-00.01.11.567.mp4",
+   "start": "2026-08-02T12:37:12+00:00",
+   "duration": 49.585,
+   "make": null,
+   "model": null,
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 11
+    }
+   ]
+  },
+  {
+   "id": "VID_20260802_151724_00_094-00.00.22.824-00.00.59.142.mp4",
+   "folder": "",
+   "filename": "VID_20260802_151724_00_094-00.00.22.824-00.00.59.142.mp4",
+   "start": "2026-08-02T13:17:24+00:00",
+   "duration": 36.674,
+   "make": null,
+   "model": null,
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 12
+    }
+   ]
+  },
+  {
+   "id": "VID_20260802_154043_00_095-00.00.12.140-00.00.45.081.mp4",
+   "folder": "",
+   "filename": "VID_20260802_154043_00_095-00.00.12.140-00.00.45.081.mp4",
+   "start": "2026-08-02T13:40:43+00:00",
+   "duration": 33.11,
+   "make": null,
+   "model": null,
+   "labels": [
+    {
+     "shooter": "mathias",
+     "stage": 7
+    }
+   ]
+  }
+ ],
+ "source": "hfo-masters-2026"
+}
