@@ -60,9 +60,11 @@ files; photos (skipped, counted).
    confident ones pre-checked. Leftovers (no shooter) collapsed, unchecked.
 5. **Import** registers each checked clip under its shooter (link in place
    or copy, the page's existing toggle) and assigns it: the run's primary
-   when the stage has none, otherwise secondary when it is the same run as
-   the stage's primary (the #1118 rule), else left unassigned for that
-   shooter with a note. Beep jobs queue as today. A report is written.
+   when the stage has none, otherwise secondary. The user confirmed the
+   (shooter, stage), so no time comparison with an existing primary: that
+   primary may come from a camera whose clock is minutes off. Beep jobs
+   queue through the scan route's hook (``app.state.auto_queue_beep``). A
+   report is written.
 
 ## Engine: `splitsmith/footage_sort.py` (pure, no I/O)
 
