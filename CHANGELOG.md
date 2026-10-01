@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.46.0](https://github.com/mandakan/splitsmith/compare/v0.45.1...v0.46.0) (2026-10-01)
+
+
+### Features
+
+* sort a shared footage folder across shooters (local mode) ([#1120](https://github.com/mandakan/splitsmith/issues/1120)) ([739639b](https://github.com/mandakan/splitsmith/commit/739639bee002dfd984562a082e7bba43900662be))
+* **sync:** render and upload to YouTube on the desktop from the phone ([#1113](https://github.com/mandakan/splitsmith/issues/1113)) ([b261118](https://github.com/mandakan/splitsmith/commit/b26111810f1c7f6b9c781d0266558ed2c388d828))
+
+
+### Bug Fixes
+
+* **ingest:** match clips by the camera's recording time, several cameras per run ([#1118](https://github.com/mandakan/splitsmith/issues/1118)) ([70ffe76](https://github.com/mandakan/splitsmith/commit/70ffe76dd7625d6d2f89e05892627a0c925d2a9e))
+
 ## [0.45.1](https://github.com/mandakan/splitsmith/compare/v0.45.0...v0.45.1) (2026-09-28)
 
 
