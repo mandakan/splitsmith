@@ -317,3 +317,23 @@ def test_a_clip_dated_away_from_the_match_is_never_silently_skipped() -> None:
     off_clock = [p for p in proposal.clips if p.reason.issue == "outside_match"]
     assert len(off_clock) == 11
     assert all(p.clip_id.startswith("mathias_stage_") for p in off_clock)
+
+
+def test_known_limit_a_fixed_squad_order_can_hide_a_clock_error() -> None:
+    """Pinned, not endorsed: when the squad shoots in the same order on
+    every stage, a camera running exactly one rotation gap fast lines up
+    with the next shooter's runs as well as a right clock would, and the
+    engine trusts it. Real squads rotate the order across stages, which
+    breaks such a fit (no wrong high proposal over nine 2026 matches); the
+    review is what catches the rest. If this test starts failing because
+    the engine got smarter, update it."""
+    squad = _squad(alice={1: 100.0, 2: 1300.0}, bob={1: 400.0, 2: 1600.0})
+    five_fast = 300.0
+    clips = [
+        _clip("VID_20260926_110000_00_001.mp4", 0 + five_fast, make=None),
+        _clip("VID_20260926_113000_00_002.mp4", 1200 + five_fast, make=None),
+    ]
+
+    proposal = propose(clips, squad)
+
+    assert [(p.shooter, p.confidence) for p in proposal.clips] == [("bob", "high"), ("bob", "high")]

@@ -112,6 +112,10 @@ class SortView(BaseModel):
     shooters: list[ShooterRef]
     cameras: list[SortCamera]
     clips: list[ClipView]
+    # The stored decisions, so the page edits them rather than rebuilding.
+    anchors: list[Anchor]
+    overrides: list[Override]
+    user_checked: dict[str, bool]
 
 
 class ScanRequest(BaseModel):
@@ -205,10 +209,14 @@ def _view(state: Any, record: ScanRecord) -> SortView:
         config=config,
     )
     by_id = {p.clip_id: p for p in proposal.clips}
+    anchored = {c.key for c in proposal.cameras if c.clock == "anchored"}
     clips = []
     for index, scanned in enumerate(record.clips):
         p = by_id[scanned.clip.clip_id]
-        default = p.confidence == "high" and scanned.imported_by is None
+        # Pre-checked: what the engine is sure of, and what the user's own
+        # anchor placed (they answered for that camera already).
+        sure = p.confidence == "high" or (p.confidence == "medium" and p.camera_key in anchored)
+        default = sure and scanned.imported_by is None
         importable = p.shooter is not None and p.stage is not None and scanned.imported_by is None
         clips.append(
             ClipView(
@@ -234,6 +242,9 @@ def _view(state: Any, record: ScanRecord) -> SortView:
         shooters=refs,
         cameras=proposal.cameras,
         clips=clips,
+        anchors=record.anchors,
+        overrides=record.overrides,
+        user_checked=record.checked,
     )
 
 
@@ -398,6 +409,21 @@ def get_thumbnail(scan_id: str, index: int, request: Request) -> FileResponse:
     if hit is None:
         raise HTTPException(status_code=404, detail="no thumbnail")
     return FileResponse(hit, media_type="image/jpeg")
+
+
+@router.get("/api/match/footage-sort/{scan_id}/clips/{index}/video")
+def get_clip_video(scan_id: str, index: int, request: Request) -> FileResponse:
+    """The scanned file itself, so the review can play a clip before it is
+    imported. Only files the scan recorded; range requests are served."""
+    _local_only()
+    state = request.app.state.splitsmith_state
+    record = _load(state, scan_id)
+    if not 0 <= index < len(record.clips):
+        raise HTTPException(status_code=404, detail="no such clip")
+    path = Path(record.clips[index].path)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="file is gone")
+    return FileResponse(path)
 
 
 @router.post("/api/match/footage-sort/{scan_id}/import", response_model=ImportResponse)

@@ -122,13 +122,22 @@ def test_scan_proposes_each_clip_and_import_assigns_it(tmp_path: Path, source_cl
 
     assert view["status"] == "ready"
     assert view["skipped_files"] == 1
-    proposed = {c["filename"]: (c["proposal"]["shooter"], c["proposal"]["stage"], c["checked"]) for c in view["clips"]}
+    proposed = {
+        c["filename"]: (c["proposal"]["shooter"], c["proposal"]["stage"], c["checked"]) for c in view["clips"]
+    }
     assert proposed == {"IMG_0001.MOV": ("alice", 1, True), "IMG_0002.MOV": ("bob", 1, True)}
     assert all(c["thumbnail"] for c in view["clips"])
     thumb = client.get(f"{base}/match/footage-sort/{view['scan_id']}/thumbs/0.jpg")
     assert thumb.status_code == 200 and thumb.headers["content-type"] == "image/jpeg"
 
-    imported = client.post(f"{base}/match/footage-sort/{view['scan_id']}/import", json={"link_mode": "symlink"})
+    played = client.get(
+        f"{base}/match/footage-sort/{view['scan_id']}/clips/0/video", headers={"Range": "bytes=0-99"}
+    )
+    assert played.status_code == 206 and len(played.content) == 100
+
+    imported = client.post(
+        f"{base}/match/footage-sort/{view['scan_id']}/import", json={"link_mode": "symlink"}
+    )
 
     assert imported.status_code == 200, imported.text
     assert {(i["shooter"], i["stage"], i["role"]) for i in imported.json()["imported"]} == {
@@ -152,7 +161,11 @@ def test_user_decisions_change_what_is_imported(tmp_path: Path, source_clip: Pat
     ).json()
 
     clip = next(c for c in decided["clips"] if c["clip_id"] == second)
-    assert (clip["proposal"]["shooter"], clip["proposal"]["stage"], clip["proposal"]["decided_by"]) == ("alice", 2, "user")
+    assert (clip["proposal"]["shooter"], clip["proposal"]["stage"], clip["proposal"]["decided_by"]) == (
+        "alice",
+        2,
+        "user",
+    )
     resp = client.post(f"{base}/match/footage-sort/{view['scan_id']}/import", json={})
     assert {(i["shooter"], i["stage"]) for i in resp.json()["imported"]} == {("alice", 1), ("alice", 2)}
     bob = MatchProject.load(match_model.Match.shooter_root(root, "bob"))
@@ -173,7 +186,9 @@ def test_a_rescan_does_not_import_a_clip_twice(tmp_path: Path, source_clip: Path
     assert resp.json()["imported"] == []
 
 
-def test_hosted_mode_has_no_footage_sort(tmp_path: Path, source_clip: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_hosted_mode_has_no_footage_sort(
+    tmp_path: Path, source_clip: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from splitsmith.ui import server
 
     _, client, _, base = _match_app(tmp_path)
@@ -182,3 +197,31 @@ def test_hosted_mode_has_no_footage_sort(tmp_path: Path, source_clip: Path, monk
     resp = client.post(f"{base}/match/footage-sort/scan", json={"source_dir": str(tmp_path)})
 
     assert resp.status_code == 404
+
+
+def test_an_anchor_prechecks_the_rest_of_its_camera(tmp_path: Path, source_clip: Path) -> None:
+    """A head cam 10 minutes fast: needs an anchor; naming one clip places
+    and pre-checks the other."""
+    _, client, _, base = _match_app(tmp_path)
+    shared = tmp_path / "shared"
+    fast = timedelta(minutes=10)
+    _tagged(source_clip, shared / "head" / "VID_20260926_110000_00_001.mp4", T0 + fast)
+    _tagged(
+        source_clip, shared / "head" / "VID_20260926_113000_00_002.mp4", T0 + timedelta(seconds=1200) + fast
+    )
+    view = _scan(client, base, shared)
+    assert {c["proposal"]["confidence"] for c in view["clips"]} == {"needs_you"}
+    first, second = sorted(c["clip_id"] for c in view["clips"])
+
+    decided = client.put(
+        f"{base}/match/footage-sort/{view['scan_id']}/decisions",
+        json={"anchors": [{"clip_id": first, "shooter": "alice", "stage": 1}], "checked": {first: True}},
+    ).json()
+
+    rest = next(c for c in decided["clips"] if c["clip_id"] == second)
+    assert (rest["proposal"]["shooter"], rest["proposal"]["stage"], rest["proposal"]["confidence"]) == (
+        "alice",
+        2,
+        "medium",
+    )
+    assert rest["checked"] is True

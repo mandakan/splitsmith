@@ -101,8 +101,9 @@ filename) and `list[ShooterScorecards]` (slug, name, per-stage
 - **Confidence**: `high` = trusted clock, unique candidate, no conflict;
   `medium` = fitted or anchored camera; `needs_you` = ambiguous, conflict,
   no candidate on a camera that needs an anchor; `skipped` = no candidate on a
-  trusted camera (warm-up, other squad, walkthrough). Only `high` is
-  pre-checked.
+  trusted camera (warm-up, other squad, walkthrough). `high` is pre-checked,
+  and so is `medium` on a camera the user anchored (their answer placed
+  it); a fitted camera's `medium` waits for a check.
 - **Reason**: a short structured record (scorecard shooter/stage/time, gap,
   camera offset, other cameras on the run) the page words; the engine never
   formats prose.

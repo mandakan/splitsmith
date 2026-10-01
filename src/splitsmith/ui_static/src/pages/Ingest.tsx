@@ -15,7 +15,7 @@
  */
 import { Upload } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, Navigate, useOutletContext, useParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useOutletContext, useParams } from "react-router-dom";
 
 import { FolderPicker, type FolderPickerCommitFile } from "@/components/FolderPicker";
 import { AddShooterSheet } from "@/components/footage/AddShooterSheet";
@@ -124,6 +124,9 @@ function IngestInner({ slug }: { slug: string }) {
   // the FolderPicker footer (add-footage call site only).
   const [storage, setStorage] = useState<StorageMode>("symlink");
   const [showAddFootage, setShowAddFootage] = useState(false);
+  // Sort a shared folder across every shooter (spec 2026-10-01).
+  const [showSortFolder, setShowSortFolder] = useState(false);
+  const navigate = useNavigate();
   const [showRelinkDialog, setShowRelinkDialog] = useState(false);
   const [busy, setBusy] = useState(false);
   const [lastScannedDir, setLastScannedDir] = useState<string | null>(null);
@@ -657,6 +660,11 @@ function IngestInner({ slug }: { slug: string }) {
                 Find moved videos
               </Button>
             ) : null}
+            {modeResolved && mode === "local" && !editDenied && shooters.length > 1 ? (
+              <Button onClick={() => setShowSortFolder(true)} title="Sort club mates' folders across every shooter and stage">
+                Sort shared folder
+              </Button>
+            ) : null}
             <Button onClick={() => setAddShooterOpen(true)} disabled={editDenied}>
               Add shooter
             </Button>
@@ -819,6 +827,22 @@ function IngestInner({ slug }: { slug: string }) {
             onClose={() => setShowAddFootage(false)}
           />
         ))}
+
+      {showSortFolder ? (
+        <FolderPicker
+          slug={slug}
+          title="Sort a shared folder"
+          subtitle="Every video below it is matched to a shooter and stage for you to review"
+          initialPath={lastScannedDir}
+          folderLabel="Sort this folder"
+          onCommitFolder={async (path) => {
+            const { scan_id } = await api.startFootageSort(path);
+            setShowSortFolder(false);
+            navigate(href("footage-sort", scan_id));
+          }}
+          onClose={() => setShowSortFolder(false)}
+        />
+      ) : null}
 
       {hostedDropActive ? (
         <span className="sr-only" role="status" aria-live="polite">
