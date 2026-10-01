@@ -29,6 +29,7 @@ from splitsmith.match_project import (
     VIDEO_EXTENSIONS,
     MatchProject,
     RawVideo,
+    StageAutoMatch,
     StageEntry,
     StageStatus,
     StageVideo,
@@ -1591,10 +1592,105 @@ def test_auto_match_returns_suggestions_without_mutation(tmp_path: Path) -> None
 
     suggestions = project.auto_match(root)
 
-    assert suggestions == {1: video.path}
+    assert suggestions == {1: StageAutoMatch(primary=video.path)}
     # No mutation -- the video is still unassigned.
     assert len(project.unassigned_videos) == 1
     assert project.stages[0].videos == []
+
+
+def _two_stage_project(root: Path) -> tuple[MatchProject, datetime]:
+    from datetime import UTC, datetime, timedelta
+
+    project = MatchProject.init(root, name="Multi Cam")
+    base = datetime(2026, 4, 12, 12, 0, tzinfo=UTC)
+    project.stages = [
+        StageEntry(stage_number=1, stage_name="A", time_seconds=10.0, scorecard_updated_at=base),
+        StageEntry(
+            stage_number=2,
+            stage_name="B",
+            time_seconds=10.0,
+            scorecard_updated_at=base + timedelta(minutes=30),
+        ),
+    ]
+    return project, base
+
+
+@pytest.fixture
+def camera_clocks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Embedded ``creation_time`` equal to the mtime each test sets."""
+    from datetime import UTC
+
+    from splitsmith import video_match
+
+    def tags(path: Path, **_: object) -> dict[str, str]:
+        return {"creation_time": datetime.fromtimestamp(path.stat().st_mtime, UTC).isoformat()}
+
+    monkeypatch.setattr(video_match, "read_format_tags", tags)
+
+
+def _register_at(
+    project: MatchProject, root: Path, src: Path, when: datetime, mount: str | None
+) -> StageVideo:
+    src.write_bytes(b"")
+    os.utime(src, (when.timestamp(), when.timestamp()))
+    video = project.register_video(src, root)
+    video.camera_mount = mount
+    return video
+
+
+def test_auto_match_suggests_every_camera_on_the_run_head_cam_primary(
+    tmp_path: Path, camera_clocks: None
+) -> None:
+    """Head cam and a club mate's phone on one run: both are suggested, the
+    head cam as primary even though the phone started first."""
+    from datetime import timedelta
+
+    root = tmp_path / "match"
+    project, base = _two_stage_project(root)
+    phone = _register_at(project, root, tmp_path / "IMG_3005.MOV", base - timedelta(minutes=3), "hand")
+    head = _register_at(
+        project, root, tmp_path / "VID_040.mp4", base - timedelta(minutes=3, seconds=-12), "head"
+    )
+
+    suggestions = project.auto_match(root)
+
+    assert suggestions == {1: StageAutoMatch(primary=head.path, secondaries=[phone.path])}
+
+
+def test_auto_match_attaches_a_later_import_to_the_existing_primary(
+    tmp_path: Path, camera_clocks: None
+) -> None:
+    """The head cam was imported and assigned first; the phone clip of the
+    same run arrives with a club mate's folder and joins as a secondary."""
+    from datetime import timedelta
+
+    root = tmp_path / "match"
+    project, base = _two_stage_project(root)
+    head = _register_at(project, root, tmp_path / "VID_040.mp4", base - timedelta(minutes=3), "head")
+    project.assign_video(head.path, to_stage_number=1, role="primary")
+    phone = _register_at(
+        project, root, tmp_path / "IMG_3005.MOV", base - timedelta(minutes=2, seconds=30), "hand"
+    )
+
+    suggestions = project.auto_match(root)
+
+    assert suggestions == {1: StageAutoMatch(primary=None, secondaries=[phone.path])}
+
+
+def test_auto_match_does_not_attach_to_a_primary_matching_another_stage(
+    tmp_path: Path, camera_clocks: None
+) -> None:
+    """A primary the user put on stage 2 whose time says stage 1: the clip of
+    the same run is not attached anywhere, the disagreement is the user's."""
+    from datetime import timedelta
+
+    root = tmp_path / "match"
+    project, base = _two_stage_project(root)
+    head = _register_at(project, root, tmp_path / "VID_040.mp4", base - timedelta(minutes=3), "head")
+    project.assign_video(head.path, to_stage_number=2, role="primary")
+    _register_at(project, root, tmp_path / "IMG_3005.MOV", base - timedelta(minutes=2, seconds=30), "hand")
+
+    assert project.auto_match(root) == {}
 
 
 def test_storage_paths_default_to_project_subdirs(tmp_path: Path) -> None:

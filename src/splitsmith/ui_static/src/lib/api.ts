@@ -596,7 +596,10 @@ export interface NonEmptyOldDirsDetail {
 
 export interface ScanResponse {
   registered: string[];
+  /** Stage -> the clip made primary. */
   auto_assigned: Record<string, string>;
+  /** Stage -> other cameras on the same run, attached as secondaries. */
+  auto_secondary: Record<string, string[]>;
   skipped: string[];
 }
 

@@ -290,9 +290,10 @@ class StageVideo(BaseModel):
     path: Path
     role: VideoRole = "secondary"
     added_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
-    # The canonical recording-finished time used by the match heuristic
-    # (``video_match.video_timestamp``: ``st_birthtime`` when available, else
-    # ``st_mtime``; UTC-normalized). Captured at registration so the SPA
+    # The canonical timestamp used by the match heuristic
+    # (``video_match.video_timestamp``: the recording start embedded in the
+    # container when present, else ``st_birthtime`` / ``st_mtime``;
+    # UTC-normalized). Captured at registration so the SPA
     # match-window timeline and the classifier see the same value, even after
     # the source goes offline (USB unplugged, drive moved). ``None`` for
     # projects registered before this field existed -- the UI degrades by
@@ -666,6 +667,18 @@ def trim_blocker(stage: StageEntry, video: StageVideo | None) -> TrimBlocker | N
 
 class ScoreboardImportConflictError(Exception):
     """Raised when ``import_scoreboard`` would overwrite existing stage data."""
+
+
+_PRIMARY_MOUNT_RANK: dict[str | None, int] = {"head": 0, None: 1, "hand": 2}
+
+
+class StageAutoMatch(BaseModel):
+    """One stage's suggestion from :meth:`MatchProject.auto_match`: the clips
+    of one run. ``primary`` is ``None`` when the clips join the stage's
+    existing primary as secondaries."""
+
+    primary: Path | None = None
+    secondaries: list[Path] = Field(default_factory=list)
 
 
 class RemovalPlan(BaseModel):
@@ -2390,26 +2403,44 @@ class MatchProject(BaseModel):
         root: Path,
         *,
         config: VideoMatchConfig | None = None,
-    ) -> dict[int, Path]:
+    ) -> dict[int, StageAutoMatch]:
         """Run :func:`video_match.match_videos_to_stages` against unassigned videos
         and the project's stages.
 
         ``root`` is the project root directory; needed to resolve the videos'
         project-relative paths to real filesystem paths so ``os.stat`` works.
 
-        Returns ``{stage_number: video_relative_path}`` for every confident
-        match. **Does not mutate the project**; the caller decides whether to
-        apply via :meth:`assign_video` (and with what role).
+        Every stage's current primary takes part in the matching too, so a
+        club mate's phone clip imported after the head cam joins the head
+        cam's stage when both are the same run. Such a suggestion has
+        ``primary=None``: the clips are secondaries to the existing primary.
+        A primary that matches a different stage than the one it is assigned
+        to pins nothing; the unassigned clips grouped with it are left alone.
+
+        Returns ``{stage_number: StageAutoMatch}`` for every confident match
+        that includes at least one unassigned video. **Does not mutate the
+        project**; the caller decides whether to apply via
+        :meth:`assign_video`.
         """
         cfg = config or VideoMatchConfig()
-        unassigned_abs: dict[Path, Path] = {}
+        unassigned_abs: dict[Path, StageVideo] = {}
         for v in self.unassigned_videos:
             # Resolve project-relative path against the project root, then
             # resolve symlinks so video_match.py's stat() reads the real file.
-            abs_path = self.resolve_video_path(root, v.path).resolve()
-            unassigned_abs[abs_path] = v.path
+            unassigned_abs[self.resolve_video_path(root, v.path).resolve()] = v
         if not unassigned_abs:
             return {}
+
+        # Existing primaries anchor their stage's run. One that is offline
+        # (unplugged drive) cannot be stat'd and simply does not anchor.
+        assigned_primary_abs: dict[Path, int] = {}
+        for stage in self.stages:
+            current = stage.primary()
+            if current is None:
+                continue
+            abs_path = self.resolve_video_path(root, current.path).resolve()
+            if abs_path.exists() and abs_path not in unassigned_abs:
+                assigned_primary_abs[abs_path] = stage.stage_number
 
         stage_data = [
             StageData(
@@ -2424,8 +2455,27 @@ class MatchProject(BaseModel):
         if not stage_data:
             return {}
 
-        result = match_videos_to_stages(list(unassigned_abs.keys()), stage_data, cfg)
-        return {m.stage_number: unassigned_abs[m.video_path] for m in result.matches}
+        result = match_videos_to_stages([*unassigned_abs, *assigned_primary_abs], stage_data, cfg)
+        suggestions: dict[int, StageAutoMatch] = {}
+        for m in result.matches:
+            clips = [m.video_path, *m.additional_video_paths]
+            new = [unassigned_abs[p] for p in clips if p in unassigned_abs]
+            anchors = [assigned_primary_abs[p] for p in clips if p in assigned_primary_abs]
+            if not new:
+                continue
+            if anchors:
+                if anchors != [m.stage_number]:
+                    continue
+                suggestions[m.stage_number] = StageAutoMatch(secondaries=[v.path for v in new])
+                continue
+            # Head cam first: it is what the detector is tuned for. A clip
+            # with no make tag is more likely an action cam than a phone,
+            # which always tags its make. Ties keep start order.
+            ranked = sorted(new, key=lambda v: _PRIMARY_MOUNT_RANK.get(v.camera_mount, 1))
+            suggestions[m.stage_number] = StageAutoMatch(
+                primary=ranked[0].path, secondaries=[v.path for v in ranked[1:]]
+            )
+        return suggestions
 
 
 def atomic_write_json(path: Path, data: Any, *, indent: int = 2) -> None:

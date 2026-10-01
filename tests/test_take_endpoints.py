@@ -218,6 +218,42 @@ def test_suggest_coverage_explicit_span_returns_stages(tmp_path: Path) -> None:
     assert actual_end == expected_end
 
 
+def test_suggest_coverage_from_path_uses_the_embedded_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A whole-match head-cam take copied from a club mate weeks later: the
+    span comes from the start the camera embedded plus the duration, not
+    from the copy time on disk."""
+    import os
+    from datetime import datetime
+
+    from splitsmith import video_match, video_probe
+
+    client = _setup_with_scorecard(tmp_path)
+    clip = tmp_path / "match" / "shooters" / "me" / "raw" / "VID_TAKE.mp4"
+    clip.parent.mkdir(parents=True, exist_ok=True)
+    clip.write_bytes(b"")
+    copied = datetime.fromisoformat("2026-07-20T18:00:00+00:00").timestamp()
+    os.utime(clip, (copied, copied))
+    monkeypatch.setattr(
+        video_match, "read_format_tags", lambda path, **_: {"creation_time": "2026-06-01T10:06:00.000000Z"}
+    )
+    monkeypatch.setattr(video_probe, "probe", lambda path, **_: video_probe.ProbeResult(duration=1560.0))
+
+    resp = client.post(
+        "/api/shooters/me/videos/suggest-coverage",
+        json={"recorded_start": None, "duration_s": None, "path": "raw/VID_TAKE.mp4"},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["covers_stages"] == [1, 2]
+    assert datetime.fromisoformat(body["span"]["start"]) == datetime.fromisoformat(
+        "2026-06-01T10:06:00+00:00"
+    )
+    assert datetime.fromisoformat(body["span"]["end"]) == datetime.fromisoformat("2026-06-01T10:32:00+00:00")
+
+
 def test_suggest_coverage_all_null_returns_empty(tmp_path: Path) -> None:
     """POST suggest-coverage with all-null fields returns covers_stages=[] and span=null."""
     client = _setup_with_scorecard(tmp_path)

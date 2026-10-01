@@ -309,6 +309,12 @@ def process(
     for m in match.matches:
         stage = next(s for s in competitor_stages.stages if s.stage_number == m.stage_number)
         console.rule(f"[bold]Stage {stage.stage_number}: {stage.stage_name}[/]")
+        if m.additional_video_paths:
+            # The batch runs one camera per stage: the earliest-starting one.
+            others = ", ".join(p.name for p in m.additional_video_paths)
+            console.print(
+                f"[yellow]Processing {m.video_path.name}; also on this run, not processed:[/] {others}"
+            )
         try:
             _process_one(
                 stage=stage,
