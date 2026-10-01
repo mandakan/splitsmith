@@ -144,6 +144,7 @@ describe("Ingest add-footage (local)", () => {
     vi.mocked(api.scanVideos).mockResolvedValue({
       registered: ["/Users/op/Movies/GH010001.MP4"],
       auto_assigned: {},
+      auto_secondary: {},
       skipped: [],
     });
   });

@@ -6605,6 +6605,73 @@ def test_auto_beep_queued_on_scan_auto_assign(tmp_path: Path, monkeypatch) -> No
     assert primary["beep_time"] == 4.5
 
 
+def test_scan_attaches_a_club_mates_clip_of_the_same_run_as_secondary(tmp_path: Path, monkeypatch) -> None:
+    """Head cam folder first, then a club mate's phone folder: the phone
+    clip of the same run joins the stage as a secondary and gets its beep
+    queued; the head cam stays primary."""
+    import os as _os
+    from datetime import UTC, datetime
+
+    from splitsmith import video_match
+
+    # The clips' own camera clocks, as on real footage: creation_time = mtime.
+    monkeypatch.setattr(
+        video_match,
+        "read_format_tags",
+        lambda path, **_: {"creation_time": datetime.fromtimestamp(path.stat().st_mtime, UTC).isoformat()},
+    )
+    _enable_auto_beep(monkeypatch)
+    _stub_detect(monkeypatch, beep_time=4.5)
+    project_root = tmp_path / "match"
+    app = _match_create_app(project_root=project_root, project_name="x")
+    client = _MatchClient(app)
+    sb = {
+        "match": {"id": "1", "name": "x"},
+        "competitors": [
+            {
+                "competitor_id": 1,
+                "name": "T",
+                "stages": [
+                    {
+                        "stage_number": 1,
+                        "stage_name": "S",
+                        "time_seconds": 10.0,
+                        "scorecard_updated_at": "2026-01-01T12:00:00+00:00",
+                    }
+                ],
+            }
+        ],
+    }
+    client.post("/api/shooters/me/scoreboard/import", json={"data": sb})
+
+    def _folder(name: str, clip: str, epoch: int) -> Path:
+        folder = tmp_path / name
+        folder.mkdir()
+        (folder / clip).write_bytes(b"")
+        _os.utime(folder / clip, (epoch, epoch))
+        return folder
+
+    head_dir = _folder("head", "VID.mp4", 1767268500)  # 11:55:00Z
+    phone_dir = _folder("from-martin", "IMG.MOV", 1767268530)  # 30 s later, same run
+
+    first = client.post(
+        "/api/shooters/me/videos/scan", json={"source_dir": str(head_dir), "auto_assign_primary": True}
+    ).json()
+    _wait_for_jobs_to_drain(client)
+    second = client.post(
+        "/api/shooters/me/videos/scan", json={"source_dir": str(phone_dir), "auto_assign_primary": True}
+    ).json()
+    _wait_for_jobs_to_drain(client)
+
+    assert first["auto_assigned"] == {"1": "raw/VID.mp4"}
+    assert second["auto_assigned"] == {}
+    assert second["auto_secondary"] == {"1": ["raw/IMG.MOV"]}
+    videos = client.get("/api/shooters/me/project").json()["stages"][0]["videos"]
+    roles = {v["path"]: v["role"] for v in videos}
+    assert roles == {"raw/VID.mp4": "primary", "raw/IMG.MOV": "secondary"}
+    assert all(v["processed"]["beep"] for v in videos)
+
+
 # -----------------------------------------------------------------------------
 # Beep-review flow (#71). Per-video flag with explicit user toggle, automatic
 # reset when the underlying beep_time changes, manual entries auto-marked

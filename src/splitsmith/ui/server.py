@@ -5742,7 +5742,11 @@ class ScanRequest(BaseModel):
 
 class ScanResponse(BaseModel):
     registered: list[str]
+    # Stage -> the clip made primary.
     auto_assigned: dict[int, str]
+    # Stage -> the other cameras on the same run, attached as secondaries
+    # (to a primary from this scan or one the stage already had).
+    auto_secondary: dict[int, list[str]] = Field(default_factory=dict)
     skipped: list[str]
 
 
@@ -9703,8 +9707,9 @@ def create_app(
         | null}``; empty list and null span when no span is resolvable.
 
         Local mode only: when ``recorded_start`` is null but ``path`` is
-        provided, the server attempts to resolve the span from the file's
-        birthtime/mtime and ffprobe duration.
+        provided, the server resolves the span from the recording start the
+        camera embedded in the file plus the ffprobe duration; without an
+        embedded start, the file's birthtime/mtime is taken as the end.
         """
         from .. import video_match as vm
         from ..config import StageData as EngineStageData
@@ -9728,7 +9733,13 @@ def create_app(
                 duration = video_probe.probe(video_path, cache_dir=project.probes_path(root)).duration
             except video_probe.ProbeError:
                 pass
-            if duration is not None:
+            embedded_start = vm.embedded_recording_start(video_path)
+            if duration is not None and embedded_start is not None:
+                # A shared or copied file carries the copy time on disk;
+                # the camera's own start is the only reliable anchor.
+                start_dt = embedded_start
+                end_dt = start_dt + timedelta(seconds=duration)
+            elif duration is not None:
                 st = video_path.stat()
                 birth = getattr(st, "st_birthtime", None)
                 end_dt = (
@@ -10480,25 +10491,34 @@ def create_app(
             registered.append(str(video.path))
 
         auto_assigned: dict[int, str] = {}
+        auto_secondary: dict[int, list[str]] = {}
         if req.auto_assign_primary:
             suggestions = project.auto_match(root)
-            for stage_num, video_path in suggestions.items():
+            for stage_num, suggestion in suggestions.items():
                 stage = project.stage(stage_num)
-                # Only auto-assign primary when the stage has no primary yet.
-                if stage.primary() is not None:
-                    continue
-                project.assign_video(video_path, to_stage_number=stage_num, role="primary")
-                auto_assigned[stage_num] = str(video_path)
+                if suggestion.primary is not None:
+                    # A new primary only lands on a stage without one; a
+                    # stage that has one keeps it and gets nothing from
+                    # clips that are not the same run as it.
+                    if stage.primary() is not None:
+                        continue
+                    project.assign_video(suggestion.primary, to_stage_number=stage_num, role="primary")
+                    auto_assigned[stage_num] = str(suggestion.primary)
+                for video_path in suggestion.secondaries:
+                    project.assign_video(video_path, to_stage_number=stage_num, role="secondary")
+                    auto_secondary.setdefault(stage_num, []).append(str(video_path))
 
         if last_dir is not None:
             project.last_scanned_dir = str(last_dir)
 
         project.save(root)
 
-        # Queue auto-beep for every freshly-primaried video (#67). Done
+        # Queue auto-beep for every freshly-attached video (#67). Done
         # after save so the persisted state reflects the assignment when
         # the worker re-loads the project.
-        for stage_num, video_path in auto_assigned.items():
+        attached = list(auto_assigned.items())
+        attached += [(n, p) for n, paths in auto_secondary.items() for p in paths]
+        for stage_num, video_path in attached:
             stage = project.stage(stage_num)
             video = next((v for v in stage.videos if str(v.path) == video_path), None)
             if video is not None:
@@ -10507,6 +10527,7 @@ def create_app(
         return ScanResponse(
             registered=registered,
             auto_assigned=auto_assigned,
+            auto_secondary=auto_secondary,
             skipped=skipped,
         )
 
@@ -13442,7 +13463,12 @@ def create_app(
     def auto_match(slug: str) -> JSONResponse:
         project = state.shooter_project(slug)
         suggestions = project.auto_match(state.shooter_root(slug))
-        return JSONResponse({str(stage_num): str(path) for stage_num, path in suggestions.items()})
+        return JSONResponse(
+            {
+                str(stage_num): suggestion.model_dump(mode="json")
+                for stage_num, suggestion in suggestions.items()
+            }
+        )
 
     @app.post("/api/shooters/{slug}/videos/remove")
     def remove_video(slug: str, req: RemoveVideoRequest) -> JSONResponse:

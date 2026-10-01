@@ -194,11 +194,18 @@ class VideoMetadata(BaseModel):
 
 
 class VideoStageMatch(BaseModel):
-    """A confidently-matched (stage, video) pair."""
+    """A confidently-matched stage and the clips of its one run.
+
+    ``video_path`` is the earliest-starting clip; ``additional_video_paths``
+    are the other cameras on the same run (a head cam plus a club mate's
+    phone), earliest first. The matcher does not pick a primary: it knows
+    timestamps, not mounts.
+    """
 
     stage_number: int
     video_path: Path
     video_timestamp: datetime
+    additional_video_paths: list[Path] = Field(default_factory=list)
 
 
 class VideoMatchResult(BaseModel):
@@ -372,6 +379,11 @@ class ShotRefineConfig(BaseModel):
 class VideoMatchConfig(BaseModel):
     tolerance_minutes: int = 15
     prefer_ctime: bool = True
+    # Clips whose recording starts lie within this many seconds of each other
+    # are one run filmed by several cameras. Measured on 2026 matches: the
+    # cameras on one run started 0-78 s apart (78 on a trimmed head-cam
+    # export), consecutive squad mates at least ~230 s apart.
+    same_run_seconds: int = 90
 
 
 class SplitColorThresholds(BaseModel):
