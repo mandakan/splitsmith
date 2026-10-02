@@ -1264,7 +1264,7 @@ export interface MatchExportResult {
  *  ``--camera SHOOTER=VALUE`` flag. ``canvas_width`` / ``canvas_height``
  *  default to 4K server-side; the frame rate is never taken from the
  *  request -- it always derives from the audio-source shooter's footage. */
-export type GridFreeCell = "blank" | "stage" | "splits" | "match";
+export type GridFreeCell = "blank" | "stage" | "splits" | "match" | "race";
 
 export interface CompareGridRequestPayload {
   stage_numbers: number[];
@@ -1296,7 +1296,7 @@ export interface CompareGridRequestPayload {
   inset_corner?: "top-left" | "top-right" | "bottom-left" | "bottom-right";
   inset_size?: "small" | "medium" | "large";
   /** What a cell no shooter fills shows (3 shooters on a 2x2): the stage
-   *  card, the stage's splits, the match card, or black. */
+   *  card, the live race, the stage's splits, the match card, or black. */
   free_cell?: GridFreeCell;
   /** The YouTube sidecar (title, chapters per stage, tags, thumbnail)
    *  and, with it, the chained upload of the match-level file. */

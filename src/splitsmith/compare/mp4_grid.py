@@ -41,7 +41,14 @@ from ..overlay_text import FALLBACK_BUNDLED_FONT, overlay_font_file
 from ..overlay_theme import OverlayTheme, ThemeName, load_theme
 from ..runtime import FFmpegCapabilities, ffmpeg_capabilities, quote_filter_value, runtime
 from ..youtube_sidecar import Chapter
-from .free_cell import FreeCellContext, FreeCellKind, build_free_cell_still, free_cell_groups
+from .free_cell import (
+    FreeCellContext,
+    FreeCellKind,
+    build_free_cell_still,
+    free_cell_groups,
+    row_gutter,
+    surface_still,
+)
 from .layout import Layout2Up, choose_grid, grid_shape
 from .overlay_data import TileStageData, load_expected_rounds, load_overlay_data
 from .overlay_live import write_absent_sprite_sequence, write_sprite_sequence
@@ -2003,8 +2010,14 @@ def _stage_overlay_plan(
     head_pad_seconds: float,
     work: Path,
     rasterizer: Rasterizer | None,
+    tiles: bool = True,
+    race_at: tuple[int, int] | None = None,
 ) -> StageOverlayPlan:
     """Render one stage's sprites and describe its clocks.
+
+    ``tiles`` false is a render whose only live element is the free
+    square's race (``race_at``): the sprites carry the race alone and no
+    tile gets a clock, so the tiles stay as clean as with the overlay off.
 
     ``rasterizer`` is the seam issue #693 put under the sprites: they are
     an HTML document rasterized by headless Chromium rather than a PIL
@@ -2033,6 +2046,9 @@ def _stage_overlay_plan(
         stage_data,
         head_pad_seconds=head_pad_seconds,
         duration_seconds=plan.duration_seconds,
+        tiles=tiles,
+        race_at=race_at,
+        stage_number=plan.stage_number,
     )
     # One cache directory for the whole run, not one per stage: the cache
     # is content-addressed, so stages that share a state share a PNG. That
@@ -2058,7 +2074,7 @@ def _stage_overlay_plan(
     )
 
     clocks: list[TileClock] = []
-    for tile in plan.tiles:
+    for tile in plan.tiles if tiles else ():
         if tile.trim_path is None:
             continue
         tile_data = stage_data.get(tile.label)
@@ -2321,7 +2337,11 @@ def _free_cell_still(
     )
     cell_w, cell_h = _cell_size(canvas, plan)
     image = build_free_cell_still(
-        free_cell_groups(kind, context), width=cell_w, height=cell_h, theme=theme, rasterizer=rasterizer
+        free_cell_groups(kind, context, gutter=row_gutter(cell_h)),
+        width=cell_w,
+        height=cell_h,
+        theme=theme,
+        rasterizer=rasterizer,
     )
     if image is None:
         return None
@@ -2516,7 +2536,12 @@ def render_grid_mp4(
     font_path: Path | None = None
     degradations: tuple[OverlayDegradation, ...] = ()
     draw_clock = True
-    if overlay:
+    # The free square's live race rides the overlay's sprite stream, so it
+    # needs the shot data, the font and the concat probe the overlay does,
+    # but not ``drawtext``: with the overlay off nothing draws a clock.
+    race = free_cell == "race" and any(_unreached_cells(p) for p in plans)
+    sprites = overlay or race
+    if sprites:
         overlay_data = load_overlay_data(shooters)
         # One face for the whole overlay: the clock draws whatever the
         # sprite beside it resolved, so the two halves cannot diverge.
@@ -2530,7 +2555,7 @@ def render_grid_mp4(
         capabilities = ffmpeg_capabilities(binary, font_path=font_path, runner=probe_runner)
         if not capabilities.concat_option_keyword:
             raise GridRenderError(_concat_option_refusal(capabilities))
-        if not capabilities.drawtext:
+        if overlay and not capabilities.drawtext:
             draw_clock = False
             degradation = _drawtext_degradation(capabilities)
             degradations = (degradation,)
@@ -2656,9 +2681,11 @@ def render_grid_mp4(
                         png = work / f"lower-third-stage{plan.stage_number}.png"
                         image.save(png)
                         lower_third = LowerThirdInput(path=png, seconds=title_duration_seconds)
-            # ``font_path`` is set exactly when ``overlay`` is; naming both
+            # ``font_path`` is set exactly when the sprites are; naming both
             # keeps that obvious rather than asserting it.
-            if overlay and font_path is not None:
+            free_cells = _unreached_cells(plan)
+            race_at = free_cells[0] if race and free_cells and active_rasterizer is not None else None
+            if (overlay or race_at is not None) and font_path is not None:
                 stage_overlay = _stage_overlay_plan(
                     plan,
                     canvas,
@@ -2668,6 +2695,8 @@ def render_grid_mp4(
                     head_pad_seconds=head_pad_seconds,
                     work=work,
                     rasterizer=active_rasterizer,
+                    tiles=overlay,
+                    race_at=race_at,
                 )
                 if not draw_clock:
                     # Dropping the clocks is what removes ``drawtext`` from
@@ -2723,9 +2752,14 @@ def render_grid_mp4(
                         )
                         continue
             free_still: Path | None = None
-            if (
+            if race_at is not None and free_theme is not None:
+                cell_w, cell_h = _cell_size(canvas, plan)
+                free_still = work / f"free-stage{plan.stage_number}.png"
+                surface_still(width=cell_w, height=cell_h, theme=free_theme).save(free_still)
+            elif (
                 free_requested
-                and _unreached_cells(plan)
+                and free_cell != "race"
+                and free_cells
                 and active_rasterizer is not None
                 and free_theme is not None
             ):

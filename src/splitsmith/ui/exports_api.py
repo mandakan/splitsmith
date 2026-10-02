@@ -238,7 +238,7 @@ class CompareGridRequest(BaseModel):
     inset_size: Literal["small", "medium", "large"] = "medium"
     # What a cell no shooter fills shows (2x2 with three shooters): the
     # stage card, the stage's splits per shooter, the match card, or black.
-    free_cell: Literal["blank", "stage", "splits", "match"] = "blank"
+    free_cell: Literal["blank", "stage", "splits", "match", "race"] = "blank"
     youtube_sidecar: bool = False
     description_lead: str | None = None
     youtube_upload: bool = False
