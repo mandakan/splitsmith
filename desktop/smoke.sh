@@ -4,8 +4,15 @@
 # encoder, run a detection through the bundled CLI, shut down through the
 # route. Needs network the first time unless a model cache is reused.
 set -euo pipefail
-APP="${1:-$(cd "$(dirname "$0")" && pwd)/dist/mac-arm64/Splitsmith.app}"
-RES="$APP/Contents/Resources"
+HERE="$(cd "$(dirname "$0")" && pwd)"
+APP="${1:-}"
+if [ -z "$APP" ]; then
+  case "$(uname -s)" in
+    Darwin) APP="$HERE/dist/mac-arm64/Splitsmith.app" ;;
+    *) APP="$HERE/dist/linux-unpacked" ;;
+  esac
+fi
+if [ -d "$APP/Contents/Resources" ]; then RES="$APP/Contents/Resources"; else RES="$APP/resources"; fi
 PY="$RES/python/bin/python3.12"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CFG="$(mktemp -d)"
@@ -35,7 +42,13 @@ ffm="$(printf '%s' "$banner" | "$PY" -c 'import json,sys; print(json.load(sys.st
 
 curl -fsS "$base/api/health" | grep -q '"status":"ok"'
 encoders="$("$RES/bin/ffmpeg" -hide_banner -encoders)"
-grep -q h264_videotoolbox <<<"$encoders" || { echo "bundled ffmpeg lacks h264_videotoolbox"; exit 1; }
+filters="$("$RES/bin/ffmpeg" -hide_banner -filters)"
+if [ "$(uname -s)" = Darwin ]; then
+  grep -q h264_videotoolbox <<<"$encoders" || { echo "bundled ffmpeg lacks h264_videotoolbox"; exit 1; }
+else
+  grep -q libx264 <<<"$encoders" || { echo "bundled ffmpeg lacks libx264"; exit 1; }
+  grep -q drawtext <<<"$filters" || { echo "bundled ffmpeg lacks drawtext"; exit 1; }
+fi
 
 # Detection through the bundled CLI (same fixture and range as ci.yml's slim-smoke).
 "$RES/python/bin/splitsmith" detect \
