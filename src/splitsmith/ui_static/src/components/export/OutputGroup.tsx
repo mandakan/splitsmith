@@ -9,8 +9,10 @@ import { CamOptionsPanel } from "@/components/render/CamOptionsPanel";
 import { Field } from "@/components/ui/Field";
 import { Segmented } from "@/components/ui/Segmented";
 import { READ_ONLY_MIRROR_MESSAGE, type ShooterListEntry } from "@/lib/api";
+import type { CameraChoice } from "@/lib/camOptions";
 import { bareHint } from "@/lib/exportPlan";
 import type { ExportSettings } from "@/lib/exportPresets";
+import { mountLabel } from "@/lib/shareCameras";
 import { CANVAS_CHOICES } from "@/pages/matchExportModel";
 
 const DESKTOP_RENDERS_MP4 = "Your desktop renders an MP4 and uploads it.";
@@ -27,6 +29,8 @@ export interface OutputGroupProps {
   compareCamera: string;
   onChangeCamera: (v: string) => void;
   secondaryCount: number;
+  /** The cameras of the selected stages (``cameraChoices``). */
+  camChoices: CameraChoice[];
   bareSelected: number;
   /** The linked desktop renders: always an MP4 with the YouTube preset. */
   onDesktop?: boolean;
@@ -44,6 +48,7 @@ export function OutputGroup({
   compareCamera,
   onChangeCamera,
   secondaryCount,
+  camChoices,
   bareSelected,
   onDesktop = false,
 }: OutputGroupProps) {
@@ -170,6 +175,9 @@ export function OutputGroup({
         value={camOptions}
         onChange={(v) => patch({ camOptions: v })}
         secondaryCount={secondaryCount}
+        choices={camChoices}
+        savedLabel={compareCamera ? mountLabel(compareCamera) : "Primary"}
+        editing={outputFormat !== "mp4"}
         busy={busy}
       />
     </>

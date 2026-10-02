@@ -90,6 +90,28 @@ def _build_plan(stage: StageComposition) -> tuple[Any, Any]:
 # --- planning -------------------------------------------------------------
 
 
+def test_an_angle_carried_for_editing_is_left_out_of_the_mp4(tmp_path: Path) -> None:
+    """A cam the export carries switched off (an "other angle" for the
+    FCPXML editor) never reaches the MP4: it would cover the picture."""
+    shown = SecondaryClip(
+        video_path=_make_video(tmp_path, "inset.mp4"),
+        video=_meta_30fps(),
+        beep_offset_seconds=5.0,
+        label="Inset",
+    )
+    off = SecondaryClip(
+        video_path=_make_video(tmp_path, "other.mp4"),
+        video=_meta_30fps(),
+        beep_offset_seconds=5.0,
+        label="Other",
+        enabled=False,
+    )
+    stage = _basic_stage(tmp_path=tmp_path, name="A", primary_name="a.mp4", secondaries=(shown, off))
+    comp, plan = _build_plan(stage)
+    assert [s.enabled for s in comp.stages[0].secondaries] == [True, False]
+    assert [a.cam.label for a in plan.cam_alignments] == ["Inset"]
+
+
 def test_plan_stage_computes_trim_and_alignment(tmp_path: Path) -> None:
     """Default-helper pads keep the full clip; cam beep 5.0 == primary
     beep so delta=0 -> spine_start=0, seek=0."""

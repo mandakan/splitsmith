@@ -402,6 +402,9 @@ def _emit_secondary_clipitem(
         {"id": f"clipitem-cam-{_safe_id(secondary.label)}-{cam_spine_offset}"},
     )
     _text(clip, "name", secondary.label)
+    # An angle carried for editing plays switched off (as in FCPXML).
+    if not secondary.enabled:
+        _bool(clip, "enabled", False)
     _text(clip, "duration", str(sec_duration_frames))
     _emit_rate(clip, timebase, ntsc)
     _text(clip, "start", str(cam_spine_offset))

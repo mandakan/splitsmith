@@ -54,7 +54,8 @@ import {
   type MatchProject,
   type YouTubeSettings,
 } from "@/lib/api";
-import { syncedSecondaryCount } from "@/lib/camOptions";
+import { cameraChoices, camsSummary, syncedSecondaryCount } from "@/lib/camOptions";
+import { mountLabel } from "@/lib/shareCameras";
 import { commandTitle, renderPresenceLine, rendersOnDesktop } from "@/lib/desktopCommands";
 import { rowUploadOptions } from "@/lib/youtubeRows";
 import { hostedDownloads as buildHostedDownloads } from "@/lib/exportDownloads";
@@ -347,6 +348,10 @@ function ExportInner({ slug }: { slug: string }) {
 
   // Secondaries with a confirmed beep on the selected stages: what the
   // cam rows offer, and zero is what hides them.
+  const camChoices = useMemo(
+    () => cameraChoices(project?.stages ?? [], orderedSelection),
+    [project, orderedSelection],
+  );
   const secondaryCount = useMemo(
     () => syncedSecondaryCount(project?.stages ?? [], orderedSelection),
     [project, orderedSelection],
@@ -741,7 +746,10 @@ function ExportInner({ slug }: { slug: string }) {
     transitionSeconds,
     cards: describeRenderOptions(renderOptions, compare ? "grid" : "single", compare ? "mp4" : outputFormat),
     overlay: compare ? gridOverlay : includeOverlay,
-    cams: mode === "single" && secondaryCount > 0 ? (camOptions.includeSecondaries ? secondaryCount : 0) : null,
+    cams:
+      mode === "single" && secondaryCount > 0
+        ? camsSummary(camOptions, camChoices, project?.compare_camera ? mountLabel(project.compare_camera) : "Primary")
+        : null,
     youtube: renderedMp4 ? youtube : null,
     gridCamera: project?.compare_camera ?? null,
     reference: shooters.find((s) => s.slug === audioFrom)?.name ?? null,
@@ -865,6 +873,7 @@ function ExportInner({ slug }: { slug: string }) {
               compareCamera={project?.compare_camera ?? ""}
               onChangeCamera={(v) => void changeCamera(v)}
               secondaryCount={secondaryCount}
+              camChoices={camChoices}
               bareSelected={bareSelected}
               onDesktop={onDesktop}
             />

@@ -45,6 +45,8 @@ OutputFormat = Literal["fcpxml", "fcp7xml", "mp4"]
 OverlayCodec = Literal["auto", "hevc-alpha", "prores-4444"]
 Canvas = Literal["uhd", "hd"]
 PipLayout = Literal["stacked", "pip-corners"]
+InsetCorner = Literal["top-left", "top-right", "bottom-left", "bottom-right"]
+InsetSize = Literal["small", "medium", "large"]
 PaddingPreset = Literal["full", "action", "highlight", "custom"]
 TransitionKind = Literal["none", "zoom", "static"]
 StageCardStyle = Literal["none", "slate", "lower-third"]
@@ -64,6 +66,14 @@ class ExportPresetBody(BaseModel):
     canvas: Canvas = "uhd"
     include_secondaries: bool = True
     pip_layout: PipLayout = "stacked"
+    # The picture and its inset (2026-10-02). ``main_camera`` "default" is
+    # the shooter's saved camera; a body saved before these existed loads
+    # with the defaults, and a ``pip-corners`` one maps to an inset in the
+    # SPA's ``applyBody``.
+    main_camera: str = "default"
+    inset_camera: str | None = None
+    inset_corner: InsetCorner = "bottom-right"
+    inset_size: InsetSize = "medium"
     youtube_preset: bool = False
     # Cut
     padding_preset: PaddingPreset = "full"

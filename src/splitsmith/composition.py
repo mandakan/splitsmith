@@ -129,6 +129,10 @@ class ConnectedClip:
     role: ConnectedRole
     beep_offset_seconds: float | None = None
     transform: Transform | None = None
+    #: A cam carried for editing only (the export's "other angles"): the
+    #: FCPXML emitter writes it switched off, so the main picture and its
+    #: inset are what plays; the MP4 renderer leaves it out entirely.
+    enabled: bool = True
 
 
 @dataclass(frozen=True)
@@ -385,6 +389,7 @@ def from_stage_compositions(
                     role="cam",
                     beep_offset_seconds=sec.beep_offset_seconds,
                     transform=transform,
+                    enabled=sec.enabled,
                 )
             )
 
@@ -466,6 +471,7 @@ def to_stage_compositions(
                     beep_offset_seconds=sec.beep_offset_seconds,
                     label=sec.label,
                     pip=pip,
+                    enabled=sec.enabled,
                 )
             )
         overlay_path = stage.overlay.asset.path if stage.overlay is not None else None

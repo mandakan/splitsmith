@@ -4407,6 +4407,12 @@ def register_job_bodies(state: AppState) -> None:
                 include_overlay=req.include_overlay,
                 project_name=project_name,
                 pip_layout=req.pip_layout,
+                main_camera=(
+                    (proj.compare_camera or "primary") if req.main_camera == "default" else req.main_camera
+                ),
+                inset_camera=req.inset_camera,
+                inset_corner=req.inset_corner,
+                inset_size=req.inset_size,
                 output_format=req.output_format,
                 transition_kind=req.transition_kind,
                 transition_duration_seconds=req.transition_duration_seconds,
