@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.47.0](https://github.com/mandakan/splitsmith/compare/v0.46.1...v0.47.0) (2026-10-02)
+
+
+### Features
+
+* **footage-sort:** hover-scrub thumbnails and a player that steps through the clips ([#1128](https://github.com/mandakan/splitsmith/issues/1128)) ([af458cd](https://github.com/mandakan/splitsmith/commit/af458cdf35468e9b208e02ce0fa25953b6e3e1b5))
+
 ## [0.46.1](https://github.com/mandakan/splitsmith/compare/v0.46.0...v0.46.1) (2026-10-02)
 
 
