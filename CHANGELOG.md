@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.46.1](https://github.com/mandakan/splitsmith/compare/v0.46.0...v0.46.1) (2026-10-02)
+
+
+### Bug Fixes
+
+* **footage-sort:** Sort across shooters sorts without a picker; the picker takes a parent folder ([#1127](https://github.com/mandakan/splitsmith/issues/1127)) ([d8a2575](https://github.com/mandakan/splitsmith/commit/d8a257552d4d83edd5da589bd9304b5dd9334097))
+* **footage-sort:** sort footage first added to the wrong shooter ([#1125](https://github.com/mandakan/splitsmith/issues/1125)) ([86cc475](https://github.com/mandakan/splitsmith/commit/86cc475792d631d69015d54c4d47f933448d9da2))
+
 ## [0.46.0](https://github.com/mandakan/splitsmith/compare/v0.45.1...v0.46.0) (2026-10-01)
 
 
