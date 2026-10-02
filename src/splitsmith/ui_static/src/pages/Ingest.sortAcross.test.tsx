@@ -1,13 +1,13 @@
 /**
  * Footage page, local mode, two shooters: "Sort across shooters" starts the
  * footage sort over every unassigned clip with no folder picker, and the
- * header's "Sort a folder" picker accepts a folder holding only
+ * Add footage picker (the sort, once there are scorecards) accepts a folder holding only
  * subfolders (2026-10-02: it did not, and the user ended up importing the
  * parent folder as one shooter's footage instead).
  */
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ConfirmProvider } from "@/components/useConfirm";
@@ -36,7 +36,10 @@ vi.mock("@/lib/api", async (importOriginal) => {
       scanVideos: vi.fn(),
       scanFiles: vi.fn(),
       startFootageSort: vi.fn(),
+      startFootageSortFiles: vi.fn(),
       startFootageSortUnassigned: vi.fn(),
+      listFootageSorts: vi.fn(),
+      discardFootageSort: vi.fn(),
       probeFile: vi.fn().mockResolvedValue({
         duration: null,
         thumbnail_url: null,
@@ -67,7 +70,15 @@ vi.mock("@/lib/uploads", async (importOriginal) => {
 
 const alicesProject = {
   name: "Test Match",
-  stages: [{ stage_number: 1, stage_name: "S1", time_seconds: 10, videos: [] }],
+  stages: [
+    {
+      stage_number: 1,
+      stage_name: "S1",
+      time_seconds: 10,
+      scorecard_updated_at: "2026-09-26T11:05:00Z",
+      videos: [],
+    },
+  ],
   unassigned_videos: [
     {
       path: "raw/IMG_0001.MOV",
@@ -123,6 +134,20 @@ const parentListing: FsListing = {
   ],
   suggested_starts: [],
 } as unknown as FsListing;
+
+/** The match shell's outlet context, enough for Footage's default-shooter
+ *  redirect. */
+function OutletWithShooters() {
+  return (
+    <Outlet
+      context={{
+        shooters: [shooter("alice", "Alice"), shooter("bob", "Bob")],
+        capabilities: ["edit", "review"],
+        jobs: [],
+      }}
+    />
+  );
+}
 
 function renderIngest() {
   return render(
@@ -181,6 +206,15 @@ describe("Ingest sort across shooters (local)", () => {
     vi.mocked(api.startFootageSortUnassigned).mockResolvedValue({
       scan_id: "s2",
     });
+    vi.mocked(api.listFootageSorts).mockResolvedValue([]);
+    vi.mocked(api.discardFootageSort).mockResolvedValue({
+      scan_id: "s9",
+      source_dir: "/Volumes/X9/raw/2026-hostfinalen",
+      created_at: "2026-10-02T08:00:00Z",
+      status: "discarded",
+      clips: 40,
+      to_review: 0,
+    });
   });
 
   it("sorts every unassigned clip straight from the Unassigned panel, no picker", async () => {
@@ -202,15 +236,15 @@ describe("Ingest sort across shooters (local)", () => {
     expect(api.startFootageSort).not.toHaveBeenCalled();
   });
 
-  it("lets the folder picker sort a folder that only holds subfolders", async () => {
+  it("Add footage sorts a folder that only holds subfolders", async () => {
     const user = userEvent.setup();
     renderIngest();
 
     await user.click(
-      await screen.findByRole("button", { name: "Sort a folder" }),
+      await screen.findByRole("button", { name: "Add footage" }),
     );
     const dialog = await screen.findByRole("dialog", {
-      name: "Sort a folder",
+      name: "Add footage",
     });
     const sort = await within(dialog).findByRole("button", {
       name: "Sort this folder",
@@ -224,5 +258,93 @@ describe("Ingest sort across shooters (local)", () => {
       ),
     );
     expect(api.scanVideos).not.toHaveBeenCalled();
+  });
+
+  it("keeps the per-shooter import for a match without scorecards", async () => {
+    const bare = {
+      ...alicesProject,
+      stages: [
+        { stage_number: 1, stage_name: "S1", time_seconds: 10, videos: [] },
+      ],
+    } as unknown as MatchProject;
+    vi.mocked(api.getProject).mockResolvedValue(bare);
+    const user = userEvent.setup();
+    renderIngest();
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add footage" }),
+    );
+    const dialog = await screen.findByRole("dialog", { name: "Add footage" });
+
+    expect(
+      await within(dialog).findByRole("button", { name: "Add this folder" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Sort across shooters" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("offers an unfinished sort to continue or discard", async () => {
+    vi.mocked(api.listFootageSorts).mockResolvedValue([
+      {
+        scan_id: "s9",
+        source_dir: "/Volumes/X9/raw/2026-hostfinalen",
+        created_at: "2026-10-02T08:00:00Z",
+        status: "ready",
+        clips: 40,
+        to_review: 26,
+      },
+    ]);
+    const user = userEvent.setup();
+    renderIngest();
+
+    expect(
+      await screen.findByText(
+        "Sort of 2026-hostfinalen: 26 clips left to place",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Continue" })).toHaveAttribute(
+      "href",
+      "/match/m1/footage-sort/s9",
+    );
+    await user.click(screen.getByRole("button", { name: "Discard" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Discard sort" }),
+    );
+
+    await waitFor(() =>
+      expect(api.discardFootageSort).toHaveBeenCalledWith("s9"),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByText(/26 clips left to place/),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
+  it("shows the sort's import summary after the redirect to a shooter", async () => {
+    render(
+      <ConfirmProvider>
+        <MemoryRouter
+          initialEntries={[
+            {
+              pathname: "/match/m1/ingest",
+              state: { sortImported: "Imported 40 clips: Alice 25, Bob 15" },
+            },
+          ]}
+        >
+          <Routes>
+            <Route path="/match/:matchId" element={<OutletWithShooters />}>
+              <Route path="ingest" element={<Ingest />} />
+              <Route path="ingest/:slug" element={<Ingest />} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </ConfirmProvider>,
+    );
+
+    expect(
+      await screen.findByText("Imported 40 clips: Alice 25, Bob 15"),
+    ).toBeInTheDocument();
   });
 });

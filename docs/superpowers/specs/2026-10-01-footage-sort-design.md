@@ -174,6 +174,21 @@ became Mathias's primaries in a replay of Höstfinalen XI). The import
 banner and the Unassigned panel offer "Sort across shooters", which opens
 the sort one folder above the last one added.
 
+## The standard way to add footage (0.48)
+
+In local mode, **Add footage** is the sort whenever any shooter of the
+match has scorecards, with one shooter or many: the picker takes a folder
+(every video below it) or picked files, and always leads to the review.
+A match without scorecards keeps the per-shooter import, and the drop zone
+says why. The separate "Sort a folder" button is gone; "Sort across
+shooters" stays on the Unassigned panel for clips imported unsorted.
+
+A sort is resumable: Footage lists the ones still open (scanning, or
+ready with clips not yet on a stage) with Continue and Discard; discard
+keeps the record (status ``discarded``) for the audit trail. A full import
+returns to Footage with a one-line summary; a per-shooter import keeps the
+review open.
+
 ## Open after v1
 
 Hosted (probe after upload); audio cross-correlation to confirm runs and

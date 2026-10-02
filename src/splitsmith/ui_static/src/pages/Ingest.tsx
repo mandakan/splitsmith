@@ -15,7 +15,7 @@
  */
 import { Upload } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, Navigate, useNavigate, useOutletContext, useParams } from "react-router-dom";
+import { Link, Navigate, useLocation, useNavigate, useOutletContext, useParams } from "react-router-dom";
 
 import { FolderPicker, type FolderPickerCommitFile } from "@/components/FolderPicker";
 import { AddShooterSheet } from "@/components/footage/AddShooterSheet";
@@ -42,10 +42,12 @@ import {
   type MatchProject,
   type MoveShooterBlocked,
   type ShooterListEntry,
+  type SortSummary,
   type StageVideo,
   type VideoRole,
 } from "@/lib/api";
 import { useWindowFileDrag } from "@/lib/dragDepth";
+import { openSortText } from "@/lib/footageSort";
 import { useDeploymentMode } from "@/lib/features";
 import { buildFootageRows, footageStats, unassignedVideos, type UnassignedItem } from "@/lib/footage";
 import { pickDefaultShooterSlug } from "@/lib/defaultShooter";
@@ -71,8 +73,11 @@ function FootageEntry() {
   const shooters = outletCtx?.shooters ?? [];
   const editDenied = capabilityDenied(outletCtx?.capabilities, "edit");
   const [open, setOpen] = useState(false);
+  const location = useLocation();
   const slug = pickDefaultShooterSlug(shooters);
-  if (slug) return <Navigate to={href("ingest", slug)} replace />;
+  // Carry the state along: the footage sort lands here with its import
+  // summary, and a bare redirect would drop it.
+  if (slug) return <Navigate to={href("ingest", slug)} replace state={location.state} />;
   if (!outletCtx?.project && shooters.length === 0 && outletCtx?.shooters == null) {
     return <p className="px-7 py-10 text-md text-muted">Reading match state...</p>;
   }
@@ -127,6 +132,12 @@ function IngestInner({ slug }: { slug: string }) {
   // Sort a folder across every shooter (spec 2026-10-01).
   const [showSortFolder, setShowSortFolder] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
+  // Sorts left open (a closed tab, a shooter-by-shooter import): Footage
+  // offers to continue them.
+  const [openSorts, setOpenSorts] = useState<SortSummary[]>([]);
+  // The summary the sort review hands back after an import.
+  const sortedNote = (location.state as { sortImported?: string } | null)?.sortImported ?? null;
   const [showRelinkDialog, setShowRelinkDialog] = useState(false);
   const [busy, setBusy] = useState(false);
   const [lastScannedDir, setLastScannedDir] = useState<string | null>(null);
@@ -138,7 +149,6 @@ function IngestInner({ slug }: { slug: string }) {
   const outletCtx = useOutletContext<MatchShellOutletContext | undefined>();
   const [ownShooters, setOwnShooters] = useState<ShooterListEntry[]>([]);
   const shooters = outletCtx?.shooters?.length ? outletCtx.shooters : ownShooters;
-  const canSort = modeResolved && mode === "local" && !editDenied && shooters.length > 1;
   const jobs = useMemo(() => outletCtx?.jobs ?? [], [outletCtx?.jobs]);
   // B1: Paths from the most recent import batch. Cleared on banner dismiss
   // or after a successful move. Not persisted across reloads.
@@ -196,6 +206,35 @@ function IngestInner({ slug }: { slug: string }) {
   // arming this on mode alone let the overlay invite a drop that then
   // 403s on attachRawVideo. Gating the arming (not just the enqueue)
   // means the misleading overlay never shows at all.
+  useEffect(() => {
+    if (!modeResolved || mode !== "local") return;
+    let alive = true;
+    api
+      .listFootageSorts()
+      .then((list) => alive && setOpenSorts(list))
+      .catch(() => {
+        /* non-fatal: no continue line */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [modeResolved, mode]);
+
+  async function discardSort(scanId: string): Promise<void> {
+    const ok = await confirm({
+      title: "Discard this sort?",
+      body: "Its review and your choices in it are dropped. Nothing already imported changes, and the footage can be sorted again.",
+      confirmLabel: "Discard sort",
+    });
+    if (!ok.confirmed) return;
+    try {
+      await api.discardFootageSort(scanId);
+      setOpenSorts((list) => list.filter((s) => s.scan_id !== scanId));
+    } catch (e: unknown) {
+      setError(e instanceof ApiError ? e.detail : String(e));
+    }
+  }
+
   const hostedDropActive = modeResolved && mode === "hosted" && !editDenied;
   const pageDragActive = useWindowFileDrag(hostedDropActive);
   const stagesRef = useRef<{ stage_number: number; stage_name: string }[]>([]);
@@ -291,6 +330,13 @@ function IngestInner({ slug }: { slug: string }) {
     } catch (e: unknown) {
       setError(e instanceof ApiError ? e.detail : String(e));
     }
+  }
+
+  // Add footage: the sort when there are scorecards, else the per-shooter
+  // import (hosted keeps its upload either way).
+  function openAddFootage(): void {
+    if (canSort) setShowSortFolder(true);
+    else setShowAddFootage(true);
   }
 
   async function commitFiles(files: FolderPickerCommitFile[]): Promise<void> {
@@ -459,6 +505,11 @@ function IngestInner({ slug }: { slug: string }) {
     };
   }, [otherKey, othersTick]);
   const projects = useMemo<Record<string, MatchProject | null>>(() => ({ ...others, [slug]: project }), [others, slug, project]);
+  // Adding footage is the footage sort whenever there are scorecards to
+  // sort against (spec 2026-10-01, standard workflow); a match without any
+  // keeps the per-shooter import, which needs none.
+  const hasScorecards = Object.values(projects).some((p) => p?.stages?.some((s) => s.scorecard_updated_at != null));
+  const canSort = modeResolved && mode === "local" && !editDenied && hasScorecards;
 
   const rows = useMemo(() => buildFootageRows({ projects, shooters, jobs }), [projects, shooters, jobs]);
   const unassigned = useMemo(() => unassignedVideos({ projects, shooters }), [projects, shooters]);
@@ -632,6 +683,11 @@ function IngestInner({ slug }: { slug: string }) {
             </span>
           </>
         )
+      ) : canSort ? (
+        <>
+          <span>Add footage from a folder on this machine.</span>
+          <span className="text-muted">Every video is matched to its shooter and stage, and you review it before anything is added.</span>
+        </>
       ) : (
         <>
           <span>Add footage from a folder on this machine.</span>
@@ -643,12 +699,12 @@ function IngestInner({ slug }: { slug: string }) {
                 and added to <b className="font-medium text-ink">{activeShooterName}</b>
               </>
             ) : null}
-            .
+            .{shooters.length > 0 ? " With scorecards imported, footage is sorted across shooters instead." : ""}
           </span>
         </>
       )}
       <span className="ml-auto flex items-center gap-2">
-        {mode === "local" && !editDenied ? (
+        {mode === "local" && !editDenied && !canSort ? (
           <button
             type="button"
             onClick={() => setStorage((v) => (v === "symlink" ? "copy" : "symlink"))}
@@ -658,7 +714,7 @@ function IngestInner({ slug }: { slug: string }) {
             <Chip tick="muted">{storage === "symlink" ? "Link in place" : "Copy files"}</Chip>
           </button>
         ) : null}
-        <Button size="sm" onClick={() => setShowAddFootage(true)} disabled={editDenied}>
+        <Button size="sm" onClick={openAddFootage} disabled={editDenied}>
           {mode === "hosted" ? "Browse files" : "Pick a folder"}
         </Button>
       </span>
@@ -677,22 +733,17 @@ function IngestInner({ slug }: { slug: string }) {
                 Find moved videos
               </Button>
             ) : null}
-            {canSort ? (
-              <Button onClick={() => setShowSortFolder(true)} title="Match every video in a folder and its subfolders to a shooter and stage">
-                Sort a folder
-              </Button>
-            ) : null}
             <Button onClick={() => setAddShooterOpen(true)} disabled={editDenied}>
               Add shooter
             </Button>
-            <Button variant="primary" onClick={() => setShowAddFootage(true)} disabled={!modeResolved || editDenied}>
+            <Button variant="primary" onClick={openAddFootage} disabled={!modeResolved || editDenied}>
               Add footage
             </Button>
           </>
         }
       >
         {shooters.length > 1 ? (
-          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Adding footage to">
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label={canSort ? "Shooters" : "Adding footage to"}>
             {shooters.map((s) => (
               <Link key={s.slug} to={hrefs.footage(s.slug)} aria-current={s.slug === slug ? "true" : undefined}>
                 <Chip tone={s.slug === slug ? "ok" : "neutral"} tick={s.slug === slug ? "draw" : "muted"}>
@@ -712,6 +763,25 @@ function IngestInner({ slug }: { slug: string }) {
       ) : null}
 
       {dropZone}
+
+      {sortedNote ? (
+        <p role="status" className="mb-4 text-md text-ink">
+          {sortedNote}
+        </p>
+      ) : null}
+      {openSorts.map((s) => (
+        <div key={s.scan_id} className="mb-4 flex flex-wrap items-center gap-3 rounded-[10px] border border-rule bg-surface px-4 py-2.5 text-md text-ink-2">
+          <span className="flex-1">{openSortText(s)}</span>
+          <Button size="sm" asChild>
+            <Link to={href("footage-sort", s.scan_id)}>Continue</Link>
+          </Button>
+          {s.status === "ready" ? (
+            <Button size="sm" variant="ghost" onClick={() => void discardSort(s.scan_id)}>
+              Discard
+            </Button>
+          ) : null}
+        </div>
+      ))}
 
       {showBanner ? (
         <div className="mb-4">
@@ -850,8 +920,8 @@ function IngestInner({ slug }: { slug: string }) {
       {showSortFolder ? (
         <FolderPicker
           slug={slug}
-          title="Sort a folder"
-          subtitle="Every video in this folder and its subfolders is matched to a shooter and stage for you to review"
+          title="Add footage"
+          subtitle="Every video in this folder and its subfolders, or the files you pick, is matched to a shooter and stage for you to review"
           initialPath={sortStartDir}
           folderLabel="Sort this folder"
           // The sort walks every subfolder: the folder holding each club
@@ -859,6 +929,11 @@ function IngestInner({ slug }: { slug: string }) {
           allowEmptyFolder
           onCommitFolder={async (path) => {
             const { scan_id } = await api.startFootageSort(path);
+            setShowSortFolder(false);
+            navigate(href("footage-sort", scan_id));
+          }}
+          onCommitFiles={async (files) => {
+            const { scan_id } = await api.startFootageSortFiles(files.map((f) => f.path));
             setShowSortFolder(false);
             navigate(href("footage-sort", scan_id));
           }}

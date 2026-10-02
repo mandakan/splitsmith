@@ -5,7 +5,7 @@
  */
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api, type SortClipView, type SortView } from "@/lib/api";
@@ -125,6 +125,12 @@ function view(): SortView {
   };
 }
 
+/** Footage as the sort hands back to it: shows the import summary. */
+function FootageStub() {
+  const state = useLocation().state as { sortImported?: string } | null;
+  return <p>footage: {state?.sortImported ?? ""}</p>;
+}
+
 function renderPage() {
   return render(
     <MemoryRouter initialEntries={["/match/m1/footage-sort/abc123"]}>
@@ -133,6 +139,7 @@ function renderPage() {
           path="/match/:matchId/footage-sort/:scanId"
           element={<FootageSort />}
         />
+        <Route path="/match/:matchId/ingest" element={<FootageStub />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -201,7 +208,7 @@ describe("FootageSort", () => {
     });
   });
 
-  it("imports with the chosen link mode and reports per shooter", async () => {
+  it("imports with the chosen link mode and lands on Footage with the summary", async () => {
     vi.mocked(api.importFootageSort).mockResolvedValue({
       imported: [
         {
@@ -236,10 +243,16 @@ describe("FootageSort", () => {
     );
 
     await waitFor(() =>
-      expect(api.importFootageSort).toHaveBeenCalledWith("abc123", "copy", undefined),
+      expect(api.importFootageSort).toHaveBeenCalledWith(
+        "abc123",
+        "copy",
+        undefined,
+      ),
     );
     expect(
-      await screen.findByText(/Mathias Axell 1, Anton Johansson 1/),
+      await screen.findByText(
+        "footage: Imported 2 clips: Mathias Axell 1, Anton Johansson 1",
+      ),
     ).toBeInTheDocument();
   });
 

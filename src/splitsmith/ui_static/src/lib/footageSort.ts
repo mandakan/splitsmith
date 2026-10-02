@@ -5,7 +5,13 @@
  * builds the next ``SortDecisions`` from a user action. The page maps the
  * results to primitives and owns nothing.
  */
-import type { SortCamera, SortClipView, SortDecisions, SortView } from "./api";
+import type {
+  SortCamera,
+  SortClipView,
+  SortDecisions,
+  SortSummary,
+  SortView,
+} from "./api";
 
 export interface ShooterSection {
   key: string;
@@ -122,6 +128,31 @@ export function checkState(clips: SortClipView[]): "all" | "none" | "some" {
   const n = clips.filter((c) => c.checked).length;
   if (n === 0) return "none";
   return n === clips.length ? "all" : "some";
+}
+
+/** The line Footage shows for an unfinished sort. */
+export function openSortText(s: SortSummary): string {
+  const folder =
+    s.source_dir.split(/[/\\]/).filter(Boolean).pop() ?? s.source_dir;
+  if (s.status === "scanning") return `Sorting ${folder}: reading the videos`;
+  return `Sort of ${folder}: ${s.to_review} ${s.to_review === 1 ? "clip" : "clips"} left to place`;
+}
+
+/** The summary Footage shows after a sort is imported. */
+export function importedText(
+  view: SortView,
+  imported: { shooter: string }[],
+): string {
+  const per = view.shooters
+    .map(
+      (s) =>
+        [s.name, imported.filter((i) => i.shooter === s.key).length] as const,
+    )
+    .filter(([, n]) => n > 0)
+    .map(([name, n]) => `${name} ${n}`)
+    .join(", ");
+  const n = imported.length;
+  return `Imported ${n} ${n === 1 ? "clip" : "clips"}${per ? `: ${per}` : ""}`;
 }
 
 export function importCount(view: SortView): number {

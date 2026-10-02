@@ -407,3 +407,45 @@ def test_import_one_shooter_and_keep_reviewing(tmp_path: Path, source_clip: Path
     assert Path(first.json()["report"]).name.endswith("-report.json")
     assert Path(second.json()["report"]).name.endswith("-report-2.json")
     assert client.get(f"{base}/match/footage-sort/{view['scan_id']}").json()["status"] == "imported"
+
+
+def test_sort_picked_files(tmp_path: Path, source_clip: Path) -> None:
+    """The picker's file mode: sort exactly the picked videos."""
+    _, client, _, base = _match_app(tmp_path)
+    shared = _shared_folder(tmp_path, source_clip)
+    picked = [str(shared / "from-carol" / "IMG_0002.MOV"), str(shared / "from-carol" / "IMG_0003.HEIC")]
+
+    resp = client.post(f"{base}/match/footage-sort/scan", json={"source_paths": picked})
+    assert resp.status_code == 200, resp.text
+    scan_id = resp.json()["scan_id"]
+    deadline = time.monotonic() + 30
+    while client.get(f"{base}/match/footage-sort/{scan_id}").json()["status"] == "scanning":
+        assert time.monotonic() < deadline
+        time.sleep(0.1)
+    view = client.get(f"{base}/match/footage-sort/{scan_id}").json()
+
+    assert [c["filename"] for c in view["clips"]] == ["IMG_0002.MOV"]
+    assert view["clips"][0]["proposal"]["shooter"] == "bob"
+
+
+def test_open_sorts_are_listed_until_placed_or_discarded(tmp_path: Path, source_clip: Path) -> None:
+    """Footage offers to continue a sort; one fully imported or discarded
+    is no longer offered, and a discarded one keeps its record."""
+    _, client, root, base = _match_app(tmp_path)
+    shared = _shared_folder(tmp_path, source_clip)
+    first = _scan(client, base, shared)
+    second = _scan(client, base, shared / "from-carol")
+
+    listed = client.get(f"{base}/match/footage-sort").json()
+    assert [s["scan_id"] for s in listed] == [second["scan_id"], first["scan_id"]]
+    assert {s["to_review"] for s in listed} == {2}
+
+    client.post(f"{base}/match/footage-sort/{first['scan_id']}/import", json={"shooters": ["bob"]})
+    after_partial = {s["scan_id"]: s["to_review"] for s in client.get(f"{base}/match/footage-sort").json()}
+    assert after_partial == {first["scan_id"]: 1, second["scan_id"]: 1}
+
+    assert client.delete(f"{base}/match/footage-sort/{second['scan_id']}").status_code == 200
+    client.post(f"{base}/match/footage-sort/{first['scan_id']}/import", json={})
+
+    assert client.get(f"{base}/match/footage-sort").json() == []
+    assert client.get(f"{base}/match/footage-sort/{second['scan_id']}").json()["status"] == "discarded"
