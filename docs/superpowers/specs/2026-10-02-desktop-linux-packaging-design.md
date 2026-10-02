@@ -1,6 +1,6 @@
 # Desktop app on Linux (AppImage + .deb)
 
-Date: 2026-10-02. Status: approved design, not yet implemented.
+Date: 2026-10-02. Status: implemented (PR #1161); real-distro verification pending.
 
 ## Goal
 
