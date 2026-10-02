@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { isSidecarOrigin, parseReadyLine, sidecarSpec } from "./sidecar";
+import { isSidecarOrigin, parseReadyLine, platformDirs, sidecarSpec } from "./sidecar";
 
 const READY =
   'SPLITSMITH_READY {"artifacts_dir": "/a", "base_url": "http://127.0.0.1:53241", "ffmpeg_binary": "/f", "host": "127.0.0.1", "log_file": null, "pid": 12, "port": 53241}';
@@ -30,6 +30,7 @@ describe("sidecarSpec", () => {
     port: 5000,
     home: "/Users/me",
     env: { PATH: "/usr/bin", PYTHONPATH: "/evil", PYTHONHOME: "/evil", HOME: "/Users/me", SPLITSMITH_PROJECT_ROOT: "/x" },
+    platform: "darwin",
   });
   it("runs the bundled interpreter as the embedded module", () => {
     expect(spec.command).toBe("/App.app/Contents/Resources/python/bin/python3.12");
@@ -60,5 +61,49 @@ describe("isSidecarOrigin", () => {
     expect(isSidecarOrigin("http://127.0.0.1:5001/", "http://127.0.0.1:5000")).toBe(false);
     expect(isSidecarOrigin("https://my.splitsmith.app/share/x", "http://127.0.0.1:5000")).toBe(false);
     expect(isSidecarOrigin("not a url", "http://127.0.0.1:5000")).toBe(false);
+  });
+});
+
+describe("sidecarSpec on Linux", () => {
+  const base = { resourcesPath: "/opt/Splitsmith/resources", port: 5000, home: "/home/me" };
+  it("logs and caches under the XDG defaults", () => {
+    const spec = sidecarSpec({ ...base, platform: "linux", env: { PATH: "/usr/bin" } });
+    expect(spec.command).toBe("/opt/Splitsmith/resources/python/bin/python3.12");
+    expect(spec.logDir).toBe("/home/me/.local/state/splitsmith/logs");
+    expect(spec.args).toEqual(["-m", "splitsmith.ui.embedded", "--log-dir", "/home/me/.local/state/splitsmith/logs"]);
+    expect(spec.env.NUMBA_CACHE_DIR).toBe("/home/me/.cache/splitsmith/numba");
+    expect(spec.env.SPLITSMITH_FFMPEG).toBe("/opt/Splitsmith/resources/bin/ffmpeg");
+    expect(spec.env).not.toHaveProperty("SPLITSMITH_HOME");
+  });
+  it("honours absolute XDG variables", () => {
+    const spec = sidecarSpec({
+      ...base,
+      platform: "linux",
+      env: { XDG_STATE_HOME: "/x/state", XDG_CACHE_HOME: "/x/cache" },
+    });
+    expect(spec.logDir).toBe("/x/state/splitsmith/logs");
+    expect(spec.env.NUMBA_CACHE_DIR).toBe("/x/cache/splitsmith/numba");
+  });
+  it("ignores empty and relative XDG variables", () => {
+    for (const bad of ["", "relative/state", "~/state"]) {
+      const d = platformDirs("linux", "/home/me", { XDG_STATE_HOME: bad, XDG_CACHE_HOME: bad });
+      expect(d).toEqual({
+        logDir: "/home/me/.local/state/splitsmith/logs",
+        numbaCacheDir: "/home/me/.cache/splitsmith/numba",
+      });
+    }
+  });
+  it("still drops a SPLITSMITH_HOME from the environment", () => {
+    const spec = sidecarSpec({ ...base, platform: "linux", env: { SPLITSMITH_HOME: "/elsewhere" } });
+    expect(spec.env).not.toHaveProperty("SPLITSMITH_HOME");
+  });
+});
+
+describe("platformDirs on macOS", () => {
+  it("ignores XDG variables", () => {
+    expect(platformDirs("darwin", "/Users/me", { XDG_STATE_HOME: "/x" })).toEqual({
+      logDir: "/Users/me/Library/Logs/Splitsmith",
+      numbaCacheDir: "/Users/me/Library/Caches/Splitsmith/numba",
+    });
   });
 });
