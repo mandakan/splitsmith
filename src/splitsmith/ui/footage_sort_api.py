@@ -268,6 +268,18 @@ def _view(state: Any, record: ScanRecord) -> SortView:
         config=config,
     )
     by_id = {p.clip_id: p for p in proposal.clips}
+    # The engine ranks a run among the clips of this sort; the import never
+    # replaces a stage's primary (a clip joins as secondary). Show what the
+    # import will do, not a primary that would not happen.
+    occupied = {
+        (slug, stage.stage_number)
+        for slug in match_model.Match.load(state.match_root).shooters
+        for stage in state.shooter_project(slug).stages
+        if stage.primary() is not None
+    }
+    for p in proposal.clips:
+        if p.role == "primary" and (p.shooter, p.stage) in occupied:
+            p.role = "secondary"
     anchored = {c.key for c in proposal.cameras if c.clock == "anchored"}
     registered = _registrations(state)
     thumbs = _sort_dir(state) / "thumbs"
