@@ -7,6 +7,7 @@ import {
   clockText,
   formatSpan,
   importCount,
+  importedText,
   reasonText,
   neighbour,
   resetClip,
@@ -330,5 +331,22 @@ describe("select all", () => {
         { ...b, checked: false },
       ]),
     ).toBe("none");
+  });
+});
+
+describe("import summary", () => {
+  it("names the shooters and what still needs the user", () => {
+    const v = view();
+    const imported = [
+      { shooter: "anton" },
+      { shooter: "mathias" },
+      { shooter: "anton" },
+    ];
+    expect(importedText(v, imported)).toBe(
+      "Imported 3 clips: Mathias Axell 1, Anton Johansson 2",
+    );
+    expect(importedText(v, imported, 8)).toBe(
+      "Imported 3 clips: Mathias Axell 1, Anton Johansson 2. 8 still need you",
+    );
   });
 });

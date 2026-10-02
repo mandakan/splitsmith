@@ -194,6 +194,16 @@ class ImportResponse(BaseModel):
     # clip_id -> why it was not imported.
     not_imported: dict[str, str]
     report: str
+    # Clips still to place after this import (see :func:`_left_to_place`);
+    # while any remain the sort stays open.
+    remaining: int = 0
+
+
+def _left_to_place(view: SortView) -> int:
+    """Clips that still want a decision: not on a stage anywhere and not
+    skipped (by the engine as nobody's run, or by the user). A sort stays
+    open on Footage while this is above 0."""
+    return sum(1 for c in view.clips if c.imported_by is None and c.proposal.confidence != "skipped")
 
 
 def _local_only() -> None:
@@ -580,7 +590,6 @@ def list_sorts(request: Request) -> list[SortSummary]:
     folder = _sort_dir(state)
     if not folder.is_dir():
         return []
-    placed = {path for path, reg in _registrations(state).items() if reg.assigned}
     out: list[SortSummary] = []
     for path in folder.glob("*.json"):
         if "-report" in path.name:
@@ -591,7 +600,7 @@ def list_sorts(request: Request) -> list[SortSummary]:
             continue
         if record.status not in ("scanning", "ready"):
             continue
-        left = sum(1 for c in record.clips if _resolved(c.path) not in placed)
+        left = _left_to_place(_view(state, record)) if record.status == "ready" else len(record.clips)
         if record.status == "ready" and left == 0:
             continue
         out.append(
@@ -765,7 +774,11 @@ async def import_scan(scan_id: str, req: ImportRequest, request: Request) -> Imp
         for slug, project, stage_number, video in queued:
             await queue_beep(slug, project, stage_number, video)
 
-    if wanted is None:
+    # Placed clips now count as imported in a fresh view. The sort closes
+    # only when nothing is left that wants a decision: a camera still
+    # waiting for its anchor keeps it open, offered on Footage to continue.
+    remaining = _left_to_place(_view(state, record))
+    if wanted is None and remaining == 0:
         record.status = "imported"
         _save(state, record)
     # One report per import: a review imported shooter by shooter keeps
@@ -798,4 +811,6 @@ async def import_scan(scan_id: str, req: ImportRequest, request: Request) -> Imp
             ],
         },
     )
-    return ImportResponse(imported=imported, not_imported=not_imported, report=str(report_path))
+    return ImportResponse(
+        imported=imported, not_imported=not_imported, report=str(report_path), remaining=remaining
+    )

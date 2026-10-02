@@ -228,6 +228,7 @@ describe("FootageSort", () => {
       ],
       not_imported: {},
       report: "/m/footage_sort/abc123-report.json",
+      remaining: 0,
     });
     renderPage();
 
@@ -329,6 +330,7 @@ describe("FootageSort", () => {
       ],
       not_imported: {},
       report: "/m/footage_sort/abc123-report.json",
+      remaining: 0,
     });
     renderPage();
 

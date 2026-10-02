@@ -449,3 +449,43 @@ def test_open_sorts_are_listed_until_placed_or_discarded(tmp_path: Path, source_
 
     assert client.get(f"{base}/match/footage-sort").json() == []
     assert client.get(f"{base}/match/footage-sort/{second['scan_id']}").json()["status"] == "discarded"
+
+
+def test_a_full_import_leaves_the_sort_open_while_clips_need_the_user(
+    tmp_path: Path, source_clip: Path
+) -> None:
+    """Importing everything checked while a camera still waits for its
+    anchor keeps the sort open, offered on Footage with what is left; a
+    clip of nobody (skipped) does not keep it open."""
+    _, client, _, base = _match_app(tmp_path)
+    shared = _shared_folder(tmp_path, source_clip)
+    fast = timedelta(minutes=10)
+    _tagged(source_clip, shared / "head" / "VID_20260926_110000_00_001.mp4", T0 + fast)
+    _tagged(
+        source_clip, shared / "head" / "VID_20260926_113000_00_002.mp4", T0 + timedelta(seconds=1200) + fast
+    )
+    _tagged(source_clip, shared / "from-carol" / "IMG_0009.MOV", T0 + timedelta(seconds=2400))
+    view = _scan(client, base, shared)
+    by_name = {c["filename"]: c for c in view["clips"]}
+    assert by_name["IMG_0009.MOV"]["proposal"]["confidence"] == "skipped"
+    head = [c for c in view["clips"] if c["filename"].startswith("VID_")]
+    assert {c["proposal"]["confidence"] for c in head} == {"needs_you"}
+
+    done = client.post(f"{base}/match/footage-sort/{view['scan_id']}/import", json={}).json()
+
+    assert len(done["imported"]) == 2
+    assert done["remaining"] == 2
+    assert client.get(f"{base}/match/footage-sort/{view['scan_id']}").json()["status"] == "ready"
+    (open_sort,) = client.get(f"{base}/match/footage-sort").json()
+    assert (open_sort["scan_id"], open_sort["to_review"]) == (view["scan_id"], 2)
+
+    first, second = sorted(c["clip_id"] for c in head)
+    client.put(
+        f"{base}/match/footage-sort/{view['scan_id']}/decisions",
+        json={"anchors": [{"clip_id": first, "shooter": "alice", "stage": 1}], "checked": {first: True}},
+    )
+    last = client.post(f"{base}/match/footage-sort/{view['scan_id']}/import", json={}).json()
+
+    assert (len(last["imported"]), last["remaining"]) == (2, 0)
+    assert client.get(f"{base}/match/footage-sort/{view['scan_id']}").json()["status"] == "imported"
+    assert client.get(f"{base}/match/footage-sort").json() == []

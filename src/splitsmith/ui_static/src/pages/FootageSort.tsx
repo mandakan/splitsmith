@@ -131,7 +131,9 @@ export function FootageSort() {
         // Done: back to Footage, where the coverage shows the result and
         // the beep jobs run in the strip.
         navigate(footageHref, {
-          state: { sortImported: importedText(view, done.imported) },
+          state: {
+            sortImported: importedText(view, done.imported, done.remaining),
+          },
         });
       } else {
         setResult(done);

@@ -187,7 +187,9 @@ A sort is resumable: Footage lists the ones still open (scanning, or
 ready with clips not yet on a stage) with Continue and Discard; discard
 keeps the record (status ``discarded``) for the audit trail. A full import
 returns to Footage with a one-line summary; a per-shooter import keeps the
-review open.
+review open. A sort closes only when no clip is left that wants a decision
+(not on a stage, not skipped): a camera still waiting for its anchor keeps
+it open, offered on Footage with what is left (0.48.1).
 
 ## Open after v1
 
