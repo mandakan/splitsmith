@@ -3,7 +3,10 @@
 The Linux desktop bundle ships the published wheel, never one built from a
 checkout: publish-pypi.yml bakes the YouTube OAuth client into the wheel,
 and a checkout has empty constants. PyPI's JSON can lag the upload by a
-minute, so a missing version is retried before the job fails.
+minute, and pypi.org itself can blip right after a publish (a 5xx, a
+URLError, a socket timeout), so a missing version or a transient failure
+is retried before the job fails. Any other HTTP error (a 403, say) is not
+a transient condition and raises immediately.
 
     uv run --no-project python scripts/ci/fetch_pypi_wheel.py 0.53.0 build/wheel
 """
@@ -41,14 +44,9 @@ def pick_wheel(release: dict) -> tuple[str, str, str]:
     raise NoWheel("PyPI lists no py3-none-any wheel for this version")
 
 
-def _get_json(url: str) -> dict | None:
-    try:
-        with urllib.request.urlopen(url, timeout=30) as r:
-            return json.load(r)
-    except urllib.error.HTTPError as e:
-        if e.code == 404:
-            return None
-        raise
+def _get_json(url: str) -> dict:
+    with urllib.request.urlopen(url, timeout=30) as r:
+        return json.load(r)
 
 
 def _get_bytes(url: str) -> bytes:
@@ -66,14 +64,30 @@ def fetch(
     sleep: Callable[[float], None] = time.sleep,
 ) -> Path:
     release = None
+    last_reason = "not on PyPI"
     for i in range(attempts):
-        release = get_json(JSON_URL.format(version=version))
+        try:
+            release = get_json(JSON_URL.format(version=version))
+        except urllib.error.HTTPError as e:
+            if e.code == 404 or 500 <= e.code < 600:
+                last_reason = f"HTTP {e.code}"
+                release = None
+            else:
+                raise
+        except urllib.error.URLError as e:
+            last_reason = str(e.reason)
+            release = None
+        except TimeoutError as e:
+            last_reason = str(e) or "timed out"
+            release = None
         if release is not None:
             break
         if i + 1 < attempts:
             sleep(15)
     if release is None:
-        raise NotYetPublished(f"splitsmith {version} is not on PyPI after {attempts} attempts")
+        raise NotYetPublished(
+            f"splitsmith {version} is not on PyPI after {attempts} attempts ({last_reason})"
+        )
     name, url, sha = pick_wheel(release)
     body = get_bytes(url)
     got = hashlib.sha256(body).hexdigest()

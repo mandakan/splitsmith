@@ -1,5 +1,6 @@
 import hashlib
 import importlib.util
+import urllib.error
 from pathlib import Path
 
 import pytest
@@ -74,3 +75,77 @@ def test_fetch_refuses_a_sha_mismatch(tmp_path: Path) -> None:
             sleep=lambda s: None,
         )
     assert not (tmp_path / "splitsmith-1.2.3-py3-none-any.whl").exists()
+
+
+def test_fetch_retries_a_503_then_succeeds(tmp_path: Path) -> None:
+    body = b"wheel-bytes"
+    sha = hashlib.sha256(body).hexdigest()
+    rel = _release(_file("splitsmith-1.2.3-py3-none-any.whl", sha=sha))
+    calls: list[str] = []
+
+    def get_json(url: str) -> dict:
+        calls.append(url)
+        if len(calls) == 1:
+            raise urllib.error.HTTPError(url, 503, "Service Unavailable", None, None)
+        return rel
+
+    out = fpw.fetch(
+        "1.2.3", tmp_path, get_json=get_json, get_bytes=lambda url: body, attempts=5, sleep=lambda s: None
+    )
+    assert out == tmp_path / "splitsmith-1.2.3-py3-none-any.whl"
+    assert out.read_bytes() == body
+    assert len(calls) == 2
+
+
+def test_fetch_retries_a_urlerror_then_succeeds(tmp_path: Path) -> None:
+    body = b"wheel-bytes"
+    sha = hashlib.sha256(body).hexdigest()
+    rel = _release(_file("splitsmith-1.2.3-py3-none-any.whl", sha=sha))
+    calls: list[str] = []
+
+    def get_json(url: str) -> dict:
+        calls.append(url)
+        if len(calls) == 1:
+            raise urllib.error.URLError("connection refused")
+        return rel
+
+    out = fpw.fetch(
+        "1.2.3", tmp_path, get_json=get_json, get_bytes=lambda url: body, attempts=5, sleep=lambda s: None
+    )
+    assert out == tmp_path / "splitsmith-1.2.3-py3-none-any.whl"
+    assert out.read_bytes() == body
+    assert len(calls) == 2
+
+
+def test_fetch_retries_a_timeout_then_succeeds(tmp_path: Path) -> None:
+    body = b"wheel-bytes"
+    sha = hashlib.sha256(body).hexdigest()
+    rel = _release(_file("splitsmith-1.2.3-py3-none-any.whl", sha=sha))
+    calls: list[str] = []
+
+    def get_json(url: str) -> dict:
+        calls.append(url)
+        if len(calls) == 1:
+            raise TimeoutError("timed out")
+        return rel
+
+    out = fpw.fetch(
+        "1.2.3", tmp_path, get_json=get_json, get_bytes=lambda url: body, attempts=5, sleep=lambda s: None
+    )
+    assert out == tmp_path / "splitsmith-1.2.3-py3-none-any.whl"
+    assert out.read_bytes() == body
+    assert len(calls) == 2
+
+
+def test_fetch_raises_a_403_immediately_without_retrying(tmp_path: Path) -> None:
+    calls: list[str] = []
+
+    def get_json(url: str) -> dict:
+        calls.append(url)
+        raise urllib.error.HTTPError(url, 403, "Forbidden", None, None)
+
+    with pytest.raises(urllib.error.HTTPError):
+        fpw.fetch(
+            "1.2.3", tmp_path, get_json=get_json, get_bytes=lambda url: b"", attempts=5, sleep=lambda s: None
+        )
+    assert len(calls) == 1
