@@ -347,4 +347,46 @@ describe("Ingest sort across shooters (local)", () => {
       await screen.findByText("Imported 40 clips: Alice 25, Bob 15"),
     ).toBeInTheDocument();
   });
+
+  it("offers the beep review queue when beeps wait for confirmation", async () => {
+    vi.mocked(api.getBeepQueue).mockResolvedValue({
+      total_items: 1,
+      pending_count: 1,
+      confirmed_count: 0,
+      stages: [
+        {
+          stage_number: 1,
+          stage_name: "S1",
+          items: [
+            {
+              slug: "bob",
+              shooter_name: "Bob",
+              stage_number: 1,
+              stage_name: "S1",
+              role: "primary",
+              video_id: "b1",
+              video_path: "raw/IMG_1.MOV",
+              beep_time: 4,
+              beep_confidence: 0.9,
+              beep_reviewed: false,
+              status: "unreviewed",
+              alt_candidates: [],
+              proxy_ready: true,
+              snippet_ready: false,
+              trim_stale: false,
+            },
+          ],
+        },
+      ],
+      origin: "local",
+      capabilities: ["edit", "review"],
+    } as never);
+    renderIngest();
+
+    const link = await screen.findByRole("link", {
+      name: "Review beeps · 1 to confirm",
+    });
+
+    expect(link).toHaveAttribute("href", "/match/m1/audit/bob/1?cam=b1");
+  });
 });

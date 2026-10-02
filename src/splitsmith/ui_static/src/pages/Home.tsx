@@ -31,10 +31,12 @@ import {
   apiErrorText,
   capabilityDenied,
   type MatchStageDefinition,
+  type BeepQueueItem,
   type TriageResponse,
 } from "@/lib/api";
 import { pickDefaultShooterSlug } from "@/lib/defaultShooter";
 import { useDeploymentMode } from "@/lib/features";
+import { queueItemHref, queueOrder, reviewEntryText } from "@/lib/beepQueue";
 import { isJobActive } from "@/lib/jobs";
 import { useMatchHref } from "@/lib/matchHref";
 import {
@@ -79,6 +81,7 @@ export function Home() {
   const activeRequests = desktop.commands.filter(isActiveCommand).length;
 
   const [triage, setTriage] = useState<TriageResponse | null>(null);
+  const [queueItems, setQueueItems] = useState<BeepQueueItem[] | null>(null);
   const [triageError, setTriageError] = useState<string | null>(null);
   const [filterSlug, setFilterSlug] = useState<string | null>(null);
   const [matchStages, setMatchStages] = useState<MatchStageDefinition[] | null>(null);
@@ -90,6 +93,11 @@ export function Home() {
   const loadTriage = useCallback(async () => {
     try {
       setTriage(await api.getTriage());
+      // The beep review queue rides along: the next-step button opens it.
+      api
+        .getBeepQueue(false)
+        .then((q) => setQueueItems(q.stages.flatMap((g) => g.items)))
+        .catch(() => setQueueItems(null));
       setTriageError(null);
     } catch (e) {
       setTriageError(apiErrorText(e, "Could not load the stage list."));
@@ -117,6 +125,7 @@ export function Home() {
   );
   const stats = useMemo(() => overviewStats(rows), [rows]);
   const next = useMemo(() => nextAction(rows), [rows]);
+  const beepQueue = useMemo(() => queueOrder(queueItems ?? []), [queueItems]);
   const noFootage = rows.length > 0 && stats.needsFootage === stats.total;
 
   const hrefs = useMemo<OverviewHrefs>(
@@ -179,13 +188,21 @@ export function Home() {
       <Link
         to={
           next.cell.action.kind === "confirm_beep"
-            ? hrefs.beep(next.cell.slug, next.row.stageNumber)
+            ? !isMobile && beepQueue.length > 0
+              ? queueItemHref(beepQueue[0], href)
+              : hrefs.beep(next.cell.slug, next.row.stageNumber)
             : hrefs.audit(next.cell.slug, next.row.stageNumber)
         }
       >
-        {next.cell.action.kind === "confirm_beep" ? "Confirm beep" : "Audit"} {pad2(next.row.stageNumber)}{" "}
-        {next.row.stageName}
-        {shooters.length > 1 && filterSlug == null ? ` \u00b7 ${next.cell.shooterName}` : ""}
+        {next.cell.action.kind === "confirm_beep" && beepQueue.length > 0 ? (
+          reviewEntryText(beepQueue.length)
+        ) : (
+          <>
+            {next.cell.action.kind === "confirm_beep" ? "Confirm beep" : "Audit"} {pad2(next.row.stageNumber)}{" "}
+            {next.row.stageName}
+            {shooters.length > 1 && filterSlug == null ? ` \u00b7 ${next.cell.shooterName}` : ""}
+          </>
+        )}
       </Link>
     </Button>
   ) : noFootage ? (
