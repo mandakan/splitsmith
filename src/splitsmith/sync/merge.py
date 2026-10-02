@@ -170,6 +170,18 @@ def merge_project_doc(
                     processed["shot_detect"] = False
                 result.reprocess_video_ids.append(video_id)
 
+    # The shooter's default camera for comparisons is set from the share
+    # dialog and the Compare camera menu, on a hosted mirror too (a REVIEW
+    # write), so it is a merge unit of its own rather than desktop-owned.
+    base_cc = (base or {}).get("compare_camera")
+    local_cc = merged.get("compare_camera")
+    remote_cc = remote.get("compare_camera")
+    winner, is_conflict = _resolve_unit(base_cc, local_cc, remote_cc, local_ts=local_ts, remote_ts=remote_ts)
+    if is_conflict:
+        result.conflicts.append(MergeConflict(doc_key=doc_key, unit="compare_camera", winner=winner))
+    if winner == "remote" and remote_cc != local_cc:
+        merged["compare_camera"] = remote_cc
+
     for key in remote_videos.keys() - merged_videos.keys():
         result.notes.append(
             f"{doc_key}: remote has video {key[1]} in stage {key[0]} that local lacks - "
@@ -813,6 +825,7 @@ def _note_non_whitelisted_remote_changes(
         # spurious "remote changed non-whitelisted fields" note firing on
         # every phone write.
         clone.pop("updated_at", None)
+        clone.pop("compare_camera", None)
         for stage in clone.get("stages") or []:
             if not isinstance(stage, dict):
                 continue

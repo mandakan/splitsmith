@@ -122,6 +122,12 @@ _REVIEW_ROUTES: tuple[tuple[str, re.Pattern[str]], ...] = (
     # something and may cancel it. A request is not an edit of the mirror;
     # its effect arrives through sync like every other review action.
     ("POST", re.compile(r"\Amatch/desktop-commands(?:/[A-Za-z0-9]+/cancel)?\Z")),
+    # A shooter's default camera for comparisons, set from the share dialog
+    # or the Compare camera menu: which angle viewers start on, not an edit
+    # of the footage. sync/merge.py merges ``compare_camera`` as its own
+    # unit, so a mirror's choice reaches the desktop instead of being
+    # overwritten by its next push.
+    ("PATCH", re.compile(r"\Ashooters/[^/]+/compare-camera\Z")),
 )
 
 

@@ -4,7 +4,9 @@
  * 2 angles"), opening a menu with a still of every angle at the grid's
  * current moment. It sits in the header, not on the picture: the videos
  * are letterboxed already and keep the whole frame. Shown only when a
- * shooter has more than one camera on the stage.
+ * shooter has more than one camera on the stage. The shooter's saved
+ * default is marked, and the owner can make the camera on screen the
+ * default: where every viewer, share link and the export grid start.
  */
 import { Check, ChevronDown, Video } from "lucide-react";
 import { useState } from "react";
@@ -25,12 +27,18 @@ export function CameraMenu({
   value,
   onPick,
   previewFor,
+  savedIndex = null,
+  onMakeDefault,
 }: {
   shooterName: string;
   options: CameraOption[];
   value: number;
   onPick: (index: number) => void;
   previewFor: (index: number) => CameraPreview | null;
+  /** Where the saved default lands on this stage; null when none is saved. */
+  savedIndex?: number | null;
+  /** Owner only: save the camera on screen as the default. */
+  onMakeDefault?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const current = options.find((o) => o.index === value) ?? options[0];
@@ -113,11 +121,33 @@ export function CameraMenu({
                     : opt.index === 0
                       ? "Primary"
                       : "Secondary"}
+                  {savedIndex != null && opt.index === savedIndex
+                    ? " · default"
+                    : ""}
                 </span>
               </span>
             </button>
           );
         })}
+        {onMakeDefault ? (
+          <button
+            type="button"
+            role="menuitem"
+            disabled={value === (savedIndex ?? 0)}
+            onClick={() => {
+              setOpen(false);
+              onMakeDefault();
+            }}
+            className={cn(
+              menuItemClass,
+              "mt-1 border-t border-rule pt-2 text-sm",
+            )}
+          >
+            {value === (savedIndex ?? 0)
+              ? `${current.label} is the default for ${shooterName}`
+              : `Make ${current.label} the default for ${shooterName}`}
+          </button>
+        ) : null}
       </Menu>
     </span>
   );

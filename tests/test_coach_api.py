@@ -114,6 +114,9 @@ def test_get_coach_backfills_classes_on_first_read(tmp_path: Path) -> None:
     assert body["shots"][3]["reload_hint"] is True
     # Each camera carries the name a viewer switches by.
     assert [v["label"] for v in body["videos"]] == ["Camera 1"]
+    # And what a camera choice keys on across stages, plus the saved one.
+    assert [v["mount"] for v in body["videos"]] == [None]
+    assert body["compare_camera"] is None
 
 
 def test_get_coach_heal_survives_slim_install(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -575,3 +578,13 @@ def test_stale_after_audit_edit(tmp_path: Path) -> None:
     moved = body["shots"][1]
     assert moved["interval_class"] == "transition"
     assert moved["stale"] is False
+
+
+def test_get_coach_carries_the_saved_compare_camera(tmp_path: Path) -> None:
+    """Compare and the stage page start each shooter on their saved camera:
+    the coach payload carries it, as saved through the compare-camera route."""
+    client, _audit, base = _bootstrap(tmp_path)
+    resp = client.patch(f"{base}/shooters/me/compare-camera", json={"camera": "primary"})
+    assert resp.status_code == 200, resp.text
+    body = client.get(f"{base}/shooters/me/stages/1/coach").json()
+    assert body["compare_camera"] == "primary"

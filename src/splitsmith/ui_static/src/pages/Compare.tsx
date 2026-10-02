@@ -63,6 +63,7 @@ import {
   type MatchProject,
 } from "@/lib/api";
 import { cameraOptions } from "@/lib/cameraSwitch";
+import { camsParam, parseCams, resolveCamera, selectorFor, startingCamera, withCams } from "@/lib/cameraPrefs";
 import {
   allMuted,
   audibleSlugs,
@@ -222,6 +223,16 @@ export function Compare() {
   const [camsBySlug, setCamsBySlug] = useState<Record<string, CoachVideoEntry[]>>({});
   const [camIndexBySlug, setCamIndexBySlug] = useState<Record<string, number>>({});
 
+  // Camera choices that hold across stages, per shooter (lib/cameraPrefs):
+  // a mount or role, carried in ?cams= so a copied link opens on them.
+  // Each stage starts every shooter on their choice, else on the saved
+  // default (``compare_camera``), else on the primary.
+  const [camPrefs, setCamPrefs] = useState<Record<string, string>>(() => parseCams(searchParams.get("cams")));
+  const camPrefsRef = useRef(camPrefs);
+  camPrefsRef.current = camPrefs;
+  const [savedCams, setSavedCams] = useState<Record<string, string | null>>({});
+  const camsQuery = camsParam(camPrefs);
+
   useEffect(() => {
     if (!bundle) return;
     let alive = true;
@@ -232,13 +243,30 @@ export function Compare() {
         bundle.shooters.map(async (s) => {
           const coach = await api.getStageCoach(s.slug, stageNumber);
           if (!coach) throw new Error(`no coach data for ${s.slug}`);
-          return [s.slug, coach.videos] as const;
+          return [s.slug, coach] as const;
         }),
       );
       if (!alive) return;
       const map: Record<string, CoachVideoEntry[]> = {};
-      for (const r of results) if (r.status === "fulfilled") map[r.value[0]] = r.value[1];
+      const saved: Record<string, string | null> = {};
+      for (const r of results) {
+        if (r.status !== "fulfilled") continue;
+        const [slug, coach] = r.value;
+        map[slug] = coach.videos;
+        saved[slug] = coach.compare_camera ?? null;
+      }
       setCamsBySlug(map);
+      setSavedCams(saved);
+      // A moment link's per-shooter pick (?v=) has already landed and wins.
+      setCamIndexBySlug((prev) => {
+        const next = { ...prev };
+        for (const [slug, videos] of Object.entries(map)) {
+          if (next[slug] != null) continue;
+          const idx = startingCamera(videos, camPrefsRef.current[slug], saved[slug]);
+          if (idx > 0) next[slug] = idx;
+        }
+        return next;
+      });
     })();
     return () => {
       alive = false;
@@ -298,6 +326,54 @@ export function Compare() {
     },
     [camIndexFor, camsBySlug],
   );
+  const camsQueryRef = useRef(camsQuery);
+  camsQueryRef.current = camsQuery;
+  // A pick holds for the rest of the match: remembered as a selector and
+  // mirrored into ?cams= (replace, so Back is not a camera history).
+  const pickCamera = useCallback(
+    (slug: string, index: number) => {
+      setCamIndexBySlug((prev) => ({ ...prev, [slug]: index }));
+      const videos = camsBySlug[slug];
+      if (!videos) return;
+      const sel = selectorFor(videos, index) ?? "primary";
+      setCamPrefs((prev) => ({ ...prev, [slug]: sel }));
+    },
+    [camsBySlug],
+  );
+  useEffect(() => {
+    if ((searchParams.get("cams") ?? null) === camsQuery) return;
+    setSearchParams(
+      (prev) => {
+        const out = new URLSearchParams(prev);
+        if (camsQuery) out.set("cams", camsQuery);
+        else out.delete("cams");
+        return out;
+      },
+      { replace: true },
+    );
+  }, [camsQuery, searchParams, setSearchParams]);
+  // The saved default: what every viewer, share link and the export grid
+  // start on. Owner only; a REVIEW write, so the hosted copy of a desktop
+  // match can set it too (sync/merge.py carries it back to the desktop).
+  const canSaveDefault = !shareView && !capabilityDenied(ctx?.capabilities, "review");
+  const makeDefault = useCallback(
+    async (s: CompareShooterRecord) => {
+      const videos = camsBySlug[s.slug];
+      if (!videos) return;
+      const idx = camIndexBySlug[s.slug] ?? 0;
+      const sel = selectorFor(videos, idx);
+      try {
+        await api.setCompareCamera(s.slug, sel);
+        setSavedCams((prev) => ({ ...prev, [s.slug]: sel }));
+        const label = videos[idx]?.label ?? (idx === 0 ? "the primary" : `camera ${idx + 1}`);
+        setSnack({ message: `${s.name} starts on ${label} by default`, tone: "status" });
+      } catch (e) {
+        setSnack({ message: e instanceof ApiError ? e.detail : "Could not save the default camera", tone: "error" });
+      }
+    },
+    [camsBySlug, camIndexBySlug],
+  );
+
   // What another camera shows at the grid's current moment, for the
   // camera row's hover preview. Same source and anchor tileSrc would use.
   const cameraPreview = useCallback(
@@ -557,7 +633,10 @@ export function Compare() {
       const all = project.stages.map((s) => s.stage_number).sort((a, b) => a - b);
       const next = all[all.indexOf(stageNumber) + 1];
       if (next == null) return false;
-      navigate(`${href("compare", String(next))}?play=all`, { state: { autoplay: true }, replace });
+      navigate(withCams(`${href("compare", String(next))}?play=all`, camsQueryRef.current), {
+        state: { autoplay: true },
+        replace,
+      });
       return true;
     },
     [project, stageNumber, navigate, href],
@@ -755,14 +834,14 @@ export function Compare() {
     if (!project) return;
     const all = project.stages.map((s) => s.stage_number).sort((a, b) => a - b);
     const idx = all.indexOf(stageNumber);
-    if (idx > 0) navigate(`${href("compare", String(all[idx - 1]))}${playAll ? "?play=all" : ""}`);
+    if (idx > 0) navigate(withCams(`${href("compare", String(all[idx - 1]))}${playAll ? "?play=all" : ""}`, camsQuery));
   }
   function nextStage() {
     if (!project) return;
     const all = project.stages.map((s) => s.stage_number).sort((a, b) => a - b);
     const idx = all.indexOf(stageNumber);
     if (idx >= 0 && idx < all.length - 1)
-      navigate(`${href("compare", String(all[idx + 1]))}${playAll ? "?play=all" : ""}`);
+      navigate(withCams(`${href("compare", String(all[idx + 1]))}${playAll ? "?play=all" : ""}`, camsQuery));
   }
 
   if (!stageNumber || Number.isNaN(stageNumber)) {
@@ -966,9 +1045,13 @@ export function Compare() {
                   src={tileSrc(shooter)}
                   cams={camsBySlug[shooter.slug] ?? null}
                   camIndex={camIndexFor(shooter.slug)}
-                  onPickCam={(index) =>
-                    setCamIndexBySlug((prev) => ({ ...prev, [shooter.slug]: index }))
+                  onPickCam={(index) => pickCamera(shooter.slug, index)}
+                  savedIndex={
+                    savedCams[shooter.slug] != null && camsBySlug[shooter.slug]
+                      ? resolveCamera(camsBySlug[shooter.slug], savedCams[shooter.slug])
+                      : null
                   }
+                  onMakeDefault={canSaveDefault ? () => void makeDefault(shooter) : undefined}
                   previewFor={(index) => cameraPreview(shooter, index)}
                   heard={!muted.has(shooter.slug)}
                   fit={layout === "stack" ? "aspect" : "fill"}
@@ -1289,6 +1372,8 @@ function VideoTile({
   cams,
   camIndex,
   onPickCam,
+  savedIndex,
+  onMakeDefault,
   previewFor,
   heard,
   fit,
@@ -1302,6 +1387,10 @@ function VideoTile({
   cams: CoachVideoEntry[] | null;
   camIndex: number;
   onPickCam: (index: number) => void;
+  /** Where the shooter's saved default lands on this stage, or null. */
+  savedIndex: number | null;
+  /** Save the camera on screen as the default (owner only). */
+  onMakeDefault?: () => void;
   previewFor: (index: number) => CameraPreview | null;
   heard: boolean;
   fit: "fill" | "aspect";
@@ -1339,6 +1428,8 @@ function VideoTile({
               value={camIndex}
               onPick={onPickCam}
               previewFor={previewFor}
+              savedIndex={savedIndex}
+              onMakeDefault={onMakeDefault}
             />
           ) : null}
           {src ? <SpeakerButton name={shooter.name} heard={heard} onSpeaker={onSpeaker} /> : null}

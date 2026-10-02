@@ -50,6 +50,7 @@ import {
 import { buildUndoPatch } from "@/lib/coachPatch";
 import { useDeploymentMode } from "@/lib/features";
 import { useMatchHref } from "@/lib/matchHref";
+import { camsParam, parseCams, selectorFor, startingCamera, withCams } from "@/lib/cameraPrefs";
 import { momentHref, momentToSearch, parseMoment } from "@/lib/moment";
 import { isShareView } from "@/lib/shareView";
 import {
@@ -346,9 +347,12 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
     };
   }, [applyCoach, slug, stage, attempt]);
 
-  // Moment links can name a non-primary camera via ?v=. Applied once per
-  // mount, not on every coach reload - a later PATCH response must not
-  // yank the operator back to the linked camera after they have switched.
+  // The starting camera, once per mount (the page remounts per stage), not
+  // on every coach reload - a later PATCH response must not yank the
+  // viewer back after they have switched. A moment link's ?v= names one
+  // exactly; otherwise the camera chosen on an earlier stage (?cams=, a
+  // mount or role, lib/cameraPrefs), else the shooter's saved default.
+  const camsQuery = searchParams.get("cams");
   useEffect(() => {
     if (!coach || appliedMomentCamRef.current) return;
     appliedMomentCamRef.current = true;
@@ -359,8 +363,13 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
       coach.videos[v]?.beep_in_clip != null
     ) {
       setActiveCamIndex(v);
+      return;
     }
-  }, [coach, moment]);
+    const start = startingCamera(coach.videos, parseCams(camsQuery)[slug], coach.compare_camera);
+    if (start > 0) setActiveCamIndex(start);
+    // camsQuery is read once per mount on purpose.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [coach, moment, slug]);
 
   // Restores the preserved playback position after a camera switch
   // remounts ResultsPlayer. Runs after the child's own effects (parent
@@ -402,8 +411,10 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   // already paused at the tail and there is nothing left to do.
   const handleWindowEnd = useCallback(() => {
     if (nextStage == null) return;
-    navigate(`${href("results", slug, String(nextStage))}?play=all`, { state: { autoplay: true } });
-  }, [navigate, href, slug, nextStage]);
+    navigate(withCams(`${href("results", slug, String(nextStage))}?play=all`, camsQuery), {
+      state: { autoplay: true },
+    });
+  }, [navigate, href, slug, nextStage, camsQuery]);
 
   const shots = useMemo(() => coach?.shots ?? [], [coach]);
   // Shot times arrive in the primary clip's coordinates; replaying them
@@ -464,8 +475,20 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
         }
         return index;
       });
+      // The choice holds on the next stages: kept as a selector in ?cams=.
+      if (!coach || coach.videos[index]?.beep_in_clip == null) return;
+      const sel = selectorFor(coach.videos, index) ?? "primary";
+      setSearchParams(
+        (prev) => {
+          const out = new URLSearchParams(prev);
+          const cams = camsParam({ ...parseCams(prev.get("cams")), [slug]: sel });
+          if (cams) out.set("cams", cams);
+          return out;
+        },
+        { replace: true },
+      );
     },
-    [coach],
+    [coach, slug, setSearchParams],
   );
 
   if (error) {
@@ -514,7 +537,7 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
       <span className="relative inline-flex max-w-full items-center">
         <select
           value={slug}
-          onChange={(e) => navigate(href("results", e.target.value, String(stage)))}
+          onChange={(e) => navigate(withCams(href("results", e.target.value, String(stage)), camsQuery))}
           aria-label="Shooter"
           className="cursor-pointer appearance-none truncate bg-transparent pr-4 text-md text-muted transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led"
         >
@@ -538,7 +561,7 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   const stepButton = (label: string, to: number | null, icon: ReactNode) =>
     to != null ? (
       <Button asChild size="icon" aria-label={label}>
-        <Link to={href("results", slug, String(to))}>{icon}</Link>
+        <Link to={withCams(href("results", slug, String(to)), camsQuery)}>{icon}</Link>
       </Button>
     ) : (
       <Button type="button" size="icon" disabled aria-label={label}>
@@ -576,7 +599,7 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
               same way DesktopGate would reject the mount anyway. */}
           {shooters.length > 1 ? (
             <Button asChild className="hidden md:inline-flex">
-              <Link to={href("compare", String(stage))}>Compare shooters</Link>
+              <Link to={withCams(href("compare", String(stage)), camsQuery)}>Compare shooters</Link>
             </Button>
           ) : null}
           {/* Live state is the page's one primary while it is on. */}

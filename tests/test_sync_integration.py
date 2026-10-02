@@ -763,3 +763,45 @@ def test_a_phone_request_runs_on_the_desktop_and_its_result_reaches_hosted(
     assert any(j.kind == "auto_sync" and j.started_at >= detect.finished_at for j in all_jobs)
     hosted_audit = client.get(f"/api/matches/{match_id}/shooters/{SLUG}/stages/1/audit").json()
     assert [s["id"] for s in hosted_audit["shots"]] == ["s-new-1"]
+
+
+def test_mirror_default_camera_reaches_the_desktop_and_survives_its_push(
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict],
+    tmp_path: Path,
+) -> None:
+    """The share dialog sets a shooter's default camera on the hosted copy
+    of a desktop match: the route must be open to the mirror (REVIEW), the
+    desktop's pull must take the value (``compare_camera`` is a merge unit
+    of its own), and the desktop's next push must not overwrite it."""
+    client, sender, captured = hosted_app_with_storage
+    match_root, _video_path, _trimmed = _build_local_match(tmp_path)
+    shooter_root = match_model.Match.shooter_root(match_root, SLUG)
+    assert MatchProject.load(shooter_root).compare_camera is None
+
+    login(client, sender, EMAIL)
+    client.get("/api/me/recent-projects")
+    storage: S3Storage = captured["storage"]
+    raw_token = client.post("/api/me/desktop-tokens", json={"name": "camera box"}).json()["token"]
+    sync_http = TestClient(
+        client.app,
+        base_url="http://testserver",
+        headers={"Authorization": f"Bearer {raw_token}"},
+        follow_redirects=False,
+    )
+    sync_client = HostedSyncClient(
+        http=sync_http, media_http=httpx.Client(transport=httpx.MockTransport(_media_handler(storage)))
+    )
+    run_sync(match_root, client=sync_client)
+    match_id = match_model.Match.load(match_root).match_id
+
+    resp = client.patch(f"/api/matches/{match_id}/shooters/{SLUG}/compare-camera", json={"camera": "primary"})
+    assert resp.status_code == 200, resp.text
+
+    report = run_sync(match_root, client=sync_client)
+    assert report.pulled == 1
+    assert MatchProject.load(shooter_root).compare_camera == "primary"
+
+    run_sync(match_root, client=sync_client)
+    server_project = client.get(f"/api/matches/{match_id}/shooters/{SLUG}/project").json()
+    assert server_project["compare_camera"] == "primary"
+    assert MatchProject.load(shooter_root).compare_camera == "primary"
