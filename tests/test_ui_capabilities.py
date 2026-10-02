@@ -158,4 +158,3 @@ def test_default_camera_is_a_review_write() -> None:
     from splitsmith.ui.capabilities import required_capability
 
     assert required_capability("PATCH", "shooters/anna/compare-camera") == REVIEW
-

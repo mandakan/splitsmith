@@ -794,9 +794,7 @@ def test_mirror_default_camera_reaches_the_desktop_and_survives_its_push(
     run_sync(match_root, client=sync_client)
     match_id = match_model.Match.load(match_root).match_id
 
-    resp = client.patch(
-        f"/api/matches/{match_id}/shooters/{SLUG}/compare-camera", json={"camera": "primary"}
-    )
+    resp = client.patch(f"/api/matches/{match_id}/shooters/{SLUG}/compare-camera", json={"camera": "primary"})
     assert resp.status_code == 200, resp.text
 
     report = run_sync(match_root, client=sync_client)
