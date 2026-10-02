@@ -9,14 +9,33 @@ ROOT="$(cd "$HERE/.." && pwd)"
 RUNTIME="$HERE/build/runtime"
 PYVER="3.12"
 
-wheel="$(ls -t "$ROOT"/dist/splitsmith-*.whl 2>/dev/null | head -1 || true)"
+# shellcheck source=lib/target.sh
+source "$HERE/lib/target.sh"
+TARGET="$(host_target)"
+wheel=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --target) TARGET="$2"; shift 2 ;;
+    --wheel) wheel="$2"; shift 2 ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+[ -n "$wheel" ] || wheel="$(ls -t "$ROOT"/dist/splitsmith-*.whl 2>/dev/null | head -1 || true)"
 [ -n "$wheel" ] || { echo "no wheel in $ROOT/dist; run 'uv build --wheel' first" >&2; exit 1; }
+[ -f "$wheel" ] || { echo "no such wheel: $wheel" >&2; exit 1; }
 
-rm -rf "$RUNTIME"; mkdir -p "$RUNTIME"
-# uv lays the interpreter out as <install-dir>/cpython-<full>-macos-aarch64-none/;
+# uv lays the interpreter out as <install-dir>/cpython-<full>-<platform>/;
 # rename to a stable 'python' so electron-builder and main.ts have a fixed path.
-UV_PYTHON_INSTALL_DIR="$RUNTIME" uv python install "$PYVER"
-src="$(ls -d "$RUNTIME"/cpython-"$PYVER".*-macos-aarch64-none)"
+# Linux names the baseline x86_64 build explicitly: on a v3-capable host uv
+# could otherwise pick an x86_64_v3 build that dies on older CPUs.
+case "$TARGET" in
+  macos-aarch64) request="$PYVER"; layout="macos-aarch64-none" ;;
+  linux-x86_64) request="cpython-$PYVER-linux-x86_64-gnu"; layout="linux-x86_64-gnu" ;;
+  *) echo "unknown target $TARGET" >&2; exit 2 ;;
+esac
+rm -rf "$RUNTIME"; mkdir -p "$RUNTIME"
+UV_PYTHON_INSTALL_DIR="$RUNTIME" uv python install "$request"
+src="$(ls -d "$RUNTIME"/cpython-"$PYVER".*-"$layout")"
 mv "$src" "$RUNTIME/python"
 PY="$RUNTIME/python/bin/python$PYVER"
 
