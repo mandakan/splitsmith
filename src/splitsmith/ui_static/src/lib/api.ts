@@ -685,7 +685,7 @@ export interface SortDecisions {
 
 export interface SortView {
   scan_id: string;
-  status: "scanning" | "ready" | "failed" | "imported";
+  status: "scanning" | "ready" | "failed" | "imported" | "discarded";
   error: string | null;
   source_dir: string;
   skipped_files: number;
@@ -697,6 +697,16 @@ export interface SortView {
   anchors: SortAnchor[];
   overrides: SortOverride[];
   user_checked: Record<string, boolean>;
+}
+
+/** An unfinished sort, offered on Footage to continue. */
+export interface SortSummary {
+  scan_id: string;
+  source_dir: string;
+  created_at: string;
+  status: SortView["status"];
+  clips: number;
+  to_review: number;
 }
 
 export interface SortImportResult {
@@ -2923,6 +2933,18 @@ export const api = {
       method: "POST",
       json: { source_dir: sourceDir },
     }),
+
+  /** Sort the videos the user picked one by one in the picker. */
+  startFootageSortFiles: (paths: string[]) =>
+    request<{ scan_id: string }>("/api/match/footage-sort/scan", {
+      method: "POST",
+      json: { source_paths: paths },
+    }),
+
+  listFootageSorts: () => request<SortSummary[]>("/api/match/footage-sort"),
+
+  discardFootageSort: (scanId: string) =>
+    request<SortSummary>(`/api/match/footage-sort/${encodeURIComponent(scanId)}`, { method: "DELETE" }),
 
   /** Sort every video that sits unassigned in any shooter's project; no
    *  folder (the Footage page's "Sort across shooters"). */

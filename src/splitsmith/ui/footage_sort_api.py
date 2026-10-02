@@ -52,7 +52,9 @@ router = APIRouter()
 JOB_KIND = "footage_sort_scan"
 SORT_DIR = "footage_sort"
 
-ScanStatus = Literal["scanning", "ready", "failed", "imported"]
+# ``discarded``: the user dropped the review; kept for the audit trail and
+# no longer offered on Footage.
+ScanStatus = Literal["scanning", "ready", "failed", "imported", "discarded"]
 
 
 class ScannedClip(BaseModel):
@@ -144,11 +146,25 @@ class SortView(BaseModel):
 
 
 class ScanRequest(BaseModel):
-    """A folder to walk, or ``unassigned``: every video that sits unassigned
-    in any shooter's project (the Footage page's "Sort across shooters")."""
+    """Exactly one of: a folder to walk, files the user picked, or
+    ``unassigned``: every video that sits unassigned in any shooter's
+    project (the Footage page's "Sort across shooters")."""
 
     source_dir: str | None = None
+    source_paths: list[str] | None = None
     unassigned: bool = False
+
+
+class SortSummary(BaseModel):
+    """One unfinished sort, as Footage offers it to continue."""
+
+    scan_id: str
+    source_dir: str
+    created_at: datetime
+    status: ScanStatus
+    clips: int
+    # Clips not yet on a stage in any shooter's project.
+    to_review: int
 
 
 class DecisionsRequest(BaseModel):
@@ -518,10 +534,21 @@ async def start_scan(req: ScanRequest, request: Request) -> dict[str, Any]:
     state = request.app.state.splitsmith_state
     if len(match_model.Match.load(state.match_root).shooters) == 0:
         raise HTTPException(status_code=409, detail="add the match's shooters first")
-    if (req.source_dir is None) == (not req.unassigned):
-        raise HTTPException(status_code=400, detail="give a source_dir or unassigned, not both")
+    if sum([req.source_dir is not None, req.source_paths is not None, req.unassigned]) != 1:
+        raise HTTPException(status_code=400, detail="give one of source_dir, source_paths or unassigned")
     paths: list[str] = []
-    if req.unassigned:
+    if req.source_paths is not None:
+        files = [Path(p).expanduser() for p in req.source_paths]
+        missing = [str(f) for f in files if not f.is_file()]
+        if missing:
+            raise HTTPException(status_code=400, detail=f"not a file: {missing[0]}")
+        paths = sorted({str(f.resolve()) for f in files if f.suffix.lower() in VIDEO_EXTENSIONS})
+        if not paths:
+            raise HTTPException(status_code=400, detail="no video among the picked files")
+        source = Path(os.path.commonpath(paths))
+        if source.is_file():
+            source = source.parent
+    elif req.unassigned:
         paths = sorted(
             {str(path) for path, reg in _registrations(state).items() if not reg.assigned and path.is_file()}
         )
@@ -542,6 +569,64 @@ async def start_scan(req: ScanRequest, request: Request) -> dict[str, Any]:
     _save(state, record)
     job = await state.jobs.submit(kind=JOB_KIND, args={"scan_id": record.scan_id})
     return {"scan_id": record.scan_id, "job": job.model_dump(mode="json")}
+
+
+@router.get("/api/match/footage-sort", response_model=list[SortSummary])
+def list_sorts(request: Request) -> list[SortSummary]:
+    """Sorts still open (scanning, or ready with clips left to place),
+    newest first: Footage offers to continue them."""
+    _local_only()
+    state = request.app.state.splitsmith_state
+    folder = _sort_dir(state)
+    if not folder.is_dir():
+        return []
+    placed = {path for path, reg in _registrations(state).items() if reg.assigned}
+    out: list[SortSummary] = []
+    for path in folder.glob("*.json"):
+        if "-report" in path.name:
+            continue
+        try:
+            record = ScanRecord.model_validate_json(path.read_text(encoding="utf-8"))
+        except ValueError:
+            continue
+        if record.status not in ("scanning", "ready"):
+            continue
+        left = sum(1 for c in record.clips if _resolved(c.path) not in placed)
+        if record.status == "ready" and left == 0:
+            continue
+        out.append(
+            SortSummary(
+                scan_id=record.scan_id,
+                source_dir=record.source_dir,
+                created_at=record.created_at,
+                status=record.status,
+                clips=len(record.clips),
+                to_review=left,
+            )
+        )
+    out.sort(key=lambda s: s.created_at, reverse=True)
+    return out
+
+
+@router.delete("/api/match/footage-sort/{scan_id}", response_model=SortSummary)
+def discard_sort(scan_id: str, request: Request) -> SortSummary:
+    """Drop a review. The record stays (status ``discarded``) for the audit
+    trail; nothing imported is touched."""
+    _local_only()
+    state = request.app.state.splitsmith_state
+    record = _load(state, scan_id)
+    if record.status == "scanning":
+        raise HTTPException(status_code=409, detail="the scan is still reading; discard it when it is done")
+    record.status = "discarded"
+    _save(state, record)
+    return SortSummary(
+        scan_id=record.scan_id,
+        source_dir=record.source_dir,
+        created_at=record.created_at,
+        status=record.status,
+        clips=len(record.clips),
+        to_review=0,
+    )
 
 
 @router.get("/api/match/footage-sort/{scan_id}", response_model=SortView)

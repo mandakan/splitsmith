@@ -12,7 +12,7 @@
  * reached from Footage.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { ScrubThumb } from "@/components/sort/ScrubThumb";
 import { Button } from "@/components/ui/button";
@@ -35,6 +35,7 @@ import {
   cameraLabel,
   clockText,
   importCount,
+  importedText,
   neighbour,
   reasonText,
   resetClip,
@@ -65,6 +66,7 @@ export function FootageSort() {
     scanId: string;
   }>();
   const [view, setView] = useState<SortView | null>(null);
+  const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // The open clip by id, so the panel always shows the current proposal.
@@ -124,10 +126,17 @@ export function FootageSort() {
         setBatch(
           `Imported ${n} ${n === 1 ? "clip" : "clips"} to ${shooterName(view, shooter)}`,
         );
+        await load();
+      } else if (view) {
+        // Done: back to Footage, where the coverage shows the result and
+        // the beep jobs run in the strip.
+        navigate(footageHref, {
+          state: { sortImported: importedText(view, done.imported) },
+        });
       } else {
         setResult(done);
+        await load();
       }
-      await load();
     } catch (e) {
       setError(e instanceof ApiError ? e.detail : String(e));
     } finally {
@@ -191,6 +200,15 @@ export function FootageSort() {
         </p>
       ) : view.status === "imported" ? (
         <Imported view={view} result={result} footageHref={footageHref} />
+      ) : view.status === "discarded" ? (
+        <div className="mt-4 flex flex-col gap-3">
+          <p className="text-md text-muted">This sort was discarded.</p>
+          <div>
+            <Button asChild>
+              <Link to={footageHref}>Back to Footage</Link>
+            </Button>
+          </div>
+        </div>
       ) : (
         <>
           {batch ? (

@@ -633,7 +633,10 @@ belongs on ``TransportLine``'s overflow menu or ``CurrentShotLine``, a
 new per-shot signal on ``ShotList`` through ``lib/auditStep.shotRows``;
 ``_after_beep_reviewed`` in ``ui/server.py`` is the one place a confirm
 chains trim and detection. Footage (``pages/Ingest.tsx``,
-``components/footage/*``, ``lib/footage.ts``): the coverage matrix
+``components/footage/*``, ``lib/footage.ts``): in local mode Add footage
+is the footage sort (``pages/FootageSort.tsx``, ``ui/footage_sort_api.py``,
+spec 2026-10-01) whenever the match has scorecards; the per-shooter import
+is the fallback without them; the coverage matrix
 derives from ``buildFootageRows`` over every shooter's project; a new
 per-video control belongs on ``ClipSheet``, a new per-stage action on
 ``CoverageMatrix``'s row menu, shooter management on ``ShootersPanel`` /
