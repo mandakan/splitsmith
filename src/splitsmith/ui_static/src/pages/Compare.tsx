@@ -26,7 +26,6 @@
 import {
   ArrowLeft,
   ArrowRight,
-  ChevronDown,
   ListVideo,
   Loader2,
   Volume2,
@@ -62,6 +61,7 @@ import {
   type CompareStageResponse,
   type MatchProject,
 } from "@/lib/api";
+import { angleCountText, cameraOptions } from "@/lib/cameraSwitch";
 import { useMatchHref } from "@/lib/matchHref";
 import { momentHref, momentToSearch, parseMoment, resolveMomentView } from "@/lib/moment";
 import { isShareView } from "@/lib/shareView";
@@ -69,6 +69,7 @@ import { useActiveShare } from "@/lib/useActiveShare";
 import { cn } from "@/lib/utils";
 
 import { initials } from "./compare/format";
+import { CameraSwitch, type CameraPreview } from "./compare/CameraSwitch";
 import { LeaderboardRail } from "./compare/LeaderboardRail";
 import { TransportDock } from "./compare/TransportDock";
 
@@ -265,6 +266,21 @@ export function Compare() {
       return s.video_ref ? api.shooterVideoStreamUrl(s.slug, s.video_ref) : null;
     },
     [camIndexFor, camsBySlug],
+  );
+  // What another camera shows at the grid's current moment, for the
+  // camera row's hover preview. Same source and anchor tileSrc would use.
+  const cameraPreview = useCallback(
+    (s: CompareShooterRecord, index: number): CameraPreview | null => {
+      const tsb = timeSinceBeepRef.current;
+      if (index === 0) {
+        if (!s.video_ref || s.beep_offset_in_clip == null) return null;
+        return { src: api.shooterVideoStreamUrl(s.slug, s.video_ref), at: s.beep_offset_in_clip + tsb };
+      }
+      const cam = camsBySlug[s.slug]?.[index];
+      if (!cam || cam.beep_in_clip == null) return null;
+      return { src: api.videoStreamUrl(s.slug, cam.path, cam.kind), at: cam.beep_in_clip + tsb };
+    },
+    [camsBySlug],
   );
 
   // Sync engine: read the master's currentTime, derive time-since-beep,
@@ -809,6 +825,7 @@ export function Compare() {
                   onPickCam={(index) =>
                     setCamIndexBySlug((prev) => ({ ...prev, [shooter.slug]: index }))
                   }
+                  previewFor={(index) => cameraPreview(shooter, index)}
                   isAudio={audioSlug === shooter.slug}
                   fit={layout === "stack" ? "aspect" : "fill"}
                   onPickAudio={() => setAudioSlug(shooter.slug)}
@@ -1078,6 +1095,7 @@ function VideoTile({
   cams,
   camIndex,
   onPickCam,
+  previewFor,
   isAudio,
   fit,
   onPickAudio,
@@ -1088,11 +1106,13 @@ function VideoTile({
   cams: CoachVideoEntry[] | null;
   camIndex: number;
   onPickCam: (index: number) => void;
+  previewFor: (index: number) => CameraPreview | null;
   isAudio: boolean;
   fit: "fill" | "aspect";
   onPickAudio: () => void;
   onMount: (el: HTMLVideoElement | null) => void;
 }) {
+  const angles = angleCountText(cams);
   return (
     <div
       className={cn(
@@ -1113,26 +1133,7 @@ function VideoTile({
         />
         <span className="text-sm font-medium text-ink">{shooter.name}</span>
         <span className="ml-auto flex items-center gap-2">
-          {cams && cams.length > 1 ? (
-            <span className="relative inline-flex items-center">
-              <select
-                value={camIndex}
-                onChange={(e) => onPickCam(Number(e.target.value))}
-                aria-label={`${shooter.name} - camera`}
-                className="cursor-pointer appearance-none bg-transparent pr-4 text-sm text-muted transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led"
-              >
-                {cams.map((c, i) => (
-                  <option key={c.path} value={i} disabled={c.beep_in_clip == null}>
-                    {i === 0 ? "Primary" : `Cam ${i + 1}`}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown
-                aria-hidden
-                className="pointer-events-none absolute right-0 size-3 text-subtle"
-              />
-            </span>
-          ) : null}
+          {angles ? <span className="text-sm text-muted">{angles}</span> : null}
           {isAudio && (
             <span className="inline-flex items-center gap-1 text-sm text-beep">
               <Volume2 className="size-3" aria-hidden />
@@ -1171,6 +1172,15 @@ function VideoTile({
             No trim yet
           </div>
         )}
+        {src && cams && cams.length > 1 ? (
+          <CameraSwitch
+            shooterName={shooter.name}
+            options={cameraOptions(cams)}
+            value={camIndex}
+            onPick={onPickCam}
+            previewFor={previewFor}
+          />
+        ) : null}
       </div>
     </div>
   );
