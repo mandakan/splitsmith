@@ -52,7 +52,13 @@ export function showFailure(lines: string[]): void {
 
 async function startSidecar(): Promise<void> {
   const port = await freePort();
-  const spec = sidecarSpec({ resourcesPath: resourcesPath(), port, home: os.homedir(), env: process.env });
+  const spec = sidecarSpec({
+    resourcesPath: resourcesPath(),
+    port,
+    home: os.homedir(),
+    env: process.env,
+    platform: process.platform,
+  });
   sidecarState.logDir = spec.logDir;
   child = spawn(spec.command, spec.args, { env: spec.env, stdio: ["ignore", "ignore", "pipe"] });
   child.on("error", (err) => showFailure([`could not start ${spec.command}: ${err.message}`]));
