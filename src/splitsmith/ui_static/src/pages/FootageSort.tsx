@@ -39,7 +39,9 @@ import {
   reasonText,
   resetClip,
   reviewOrder,
+  checkState,
   setChecked,
+  setCheckedMany,
   setsClock,
   shooterName,
   skipClip,
@@ -69,6 +71,8 @@ export function FootageSort() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [linkMode, setLinkMode] = useState<"symlink" | "copy">("symlink");
   const [result, setResult] = useState<SortImportResult | null>(null);
+  // The last per-shooter import, said once above the review.
+  const [batch, setBatch] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -105,11 +109,24 @@ export function FootageSort() {
     }
   }
 
-  async function runImport() {
+  async function runImport(shooter?: string) {
     setBusy(true);
     setError(null);
+    setBatch(null);
     try {
-      setResult(await api.importFootageSort(scanId, linkMode));
+      const done = await api.importFootageSort(
+        scanId,
+        linkMode,
+        shooter ? [shooter] : undefined,
+      );
+      if (shooter && view) {
+        const n = done.imported.length;
+        setBatch(
+          `Imported ${n} ${n === 1 ? "clip" : "clips"} to ${shooterName(view, shooter)}`,
+        );
+      } else {
+        setResult(done);
+      }
       await load();
     } catch (e) {
       setError(e instanceof ApiError ? e.detail : String(e));
@@ -175,12 +192,20 @@ export function FootageSort() {
       ) : view.status === "imported" ? (
         <Imported view={view} result={result} footageHref={footageHref} />
       ) : (
-        <Review
-          view={view}
-          busy={busy}
-          onOpen={(c) => setOpenId(c.clip_id)}
-          onDecide={(d) => void decide(d)}
-        />
+        <>
+          {batch ? (
+            <p role="status" className="mt-4 text-md text-ink">
+              {batch}
+            </p>
+          ) : null}
+          <Review
+            view={view}
+            busy={busy}
+            onOpen={(c) => setOpenId(c.clip_id)}
+            onDecide={(d) => void decide(d)}
+            onImportShooter={(key) => void runImport(key)}
+          />
+        </>
       )}
 
       {openClip && view ? (
@@ -203,11 +228,13 @@ function Review({
   busy,
   onOpen,
   onDecide,
+  onImportShooter,
 }: {
   view: SortView;
   busy: boolean;
   onOpen: (clip: SortClipView) => void;
   onDecide: (d: SortDecisions) => void;
+  onImportShooter: (shooter: string) => void;
 }) {
   const s = sortSections(view);
   const rowProps = { view, busy, onOpen, onDecide };
@@ -233,8 +260,27 @@ function Review({
 
       {s.byShooter.map((group) => (
         <section key={group.key} className="flex flex-col gap-2">
-          <Label>{group.name}</Label>
-          <ClipTable clips={group.clips} {...rowProps} checkable />
+          <div className="flex items-center gap-3">
+            <Label>{group.name}</Label>
+            <span className="flex-1" />
+            <Button
+              size="sm"
+              onClick={() => onImportShooter(group.key)}
+              disabled={busy || group.clips.every((c) => !c.checked)}
+            >
+              Import{" "}
+              <span className="numeral">
+                {group.clips.filter((c) => c.checked).length}
+              </span>{" "}
+              for {group.name}
+            </Button>
+          </div>
+          <ClipTable
+            clips={group.clips}
+            {...rowProps}
+            checkable
+            groupLabel={group.name}
+          />
         </section>
       ))}
 
@@ -274,6 +320,7 @@ function ClipTable({
   clips,
   busy,
   checkable = false,
+  groupLabel,
   onOpen,
   onDecide,
 }: {
@@ -281,6 +328,8 @@ function ClipTable({
   clips: SortClipView[];
   busy: boolean;
   checkable?: boolean;
+  /** Names the select-all box ("Select all for Anna Jonsson"). */
+  groupLabel?: string;
   onOpen: (clip: SortClipView) => void;
   onDecide: (d: SortDecisions) => void;
 }) {
@@ -288,7 +337,24 @@ function ClipTable({
     <Table>
       <thead>
         <tr>
-          {checkable ? <Th className="w-8" aria-label="Import" /> : null}
+          {checkable ? (
+            <Th className="w-8">
+              <SelectAll
+                label={`Select all for ${groupLabel ?? "this shooter"}`}
+                state={checkState(clips)}
+                disabled={busy}
+                onChange={(value) =>
+                  onDecide(
+                    setCheckedMany(
+                      view,
+                      clips.map((c) => c.clip_id),
+                      value,
+                    ),
+                  )
+                }
+              />
+            </Th>
+          ) : null}
           <Th className="w-44">Clip</Th>
           <Th>Stage</Th>
           <Th>File</Th>
@@ -372,6 +438,35 @@ function ClipTable({
         })}
       </tbody>
     </Table>
+  );
+}
+
+/** A tri-state "select all" box: indeterminate when only some are checked;
+ *  a click checks all unless all already are. */
+function SelectAll({
+  label,
+  state,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  state: "all" | "none" | "some";
+  disabled: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  const ref = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = state === "some";
+  }, [state]);
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      aria-label={label}
+      checked={state === "all"}
+      disabled={disabled}
+      onChange={() => onChange(state !== "all")}
+    />
   );
 }
 

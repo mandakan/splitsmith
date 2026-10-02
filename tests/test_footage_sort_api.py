@@ -379,3 +379,31 @@ def test_scrub_strips_follow_the_scan(tmp_path: Path, source_clip: Path) -> None
     out.write_bytes(strip.content)
     with Image.open(out) as img:
         assert img.size == (1600, 90)
+
+
+def test_import_one_shooter_and_keep_reviewing(tmp_path: Path, source_clip: Path) -> None:
+    """The per-shooter Import: only that shooter's checked clips go in, the
+    review stays open with the rest, and each batch keeps its report."""
+    _, client, root, base = _match_app(tmp_path)
+    view = _scan(client, base, _shared_folder(tmp_path, source_clip))
+
+    first = client.post(f"{base}/match/footage-sort/{view['scan_id']}/import", json={"shooters": ["bob"]})
+
+    assert first.status_code == 200, first.text
+    assert [(i["shooter"], i["stage"]) for i in first.json()["imported"]] == [("bob", 1)]
+    alice_clip = next(c["clip_id"] for c in view["clips"] if c["filename"] == "IMG_0001.MOV")
+    assert first.json()["not_imported"][alice_clip] == "another shooter's import"
+    after = client.get(f"{base}/match/footage-sort/{view['scan_id']}").json()
+    assert after["status"] == "ready"
+    by_name = {c["filename"]: c for c in after["clips"]}
+    assert by_name["IMG_0002.MOV"]["imported_by"] == "bob"
+    assert by_name["IMG_0001.MOV"]["checked"] is True
+    alice = MatchProject.load(match_model.Match.shooter_root(root, "alice"))
+    assert alice.stage(1).videos == []
+
+    second = client.post(f"{base}/match/footage-sort/{view['scan_id']}/import", json={})
+
+    assert [(i["shooter"], i["stage"]) for i in second.json()["imported"]] == [("alice", 1)]
+    assert Path(first.json()["report"]).name.endswith("-report.json")
+    assert Path(second.json()["report"]).name.endswith("-report-2.json")
+    assert client.get(f"{base}/match/footage-sort/{view['scan_id']}").json()["status"] == "imported"

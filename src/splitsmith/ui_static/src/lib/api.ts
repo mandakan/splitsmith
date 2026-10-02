@@ -2941,10 +2941,12 @@ export const api = {
       json: decisions,
     }),
 
-  importFootageSort: (scanId: string, linkMode: "symlink" | "copy") =>
+  /** Import the checked clips; with ``shooters`` only theirs, and the
+   *  review stays open for the rest. */
+  importFootageSort: (scanId: string, linkMode: "symlink" | "copy", shooters?: string[]) =>
     request<SortImportResult>(`/api/match/footage-sort/${encodeURIComponent(scanId)}/import`, {
       method: "POST",
-      json: { link_mode: linkMode },
+      json: { link_mode: linkMode, shooters: shooters ?? null },
     }),
 
   footageSortStripUrl: (scanId: string, index: number) =>

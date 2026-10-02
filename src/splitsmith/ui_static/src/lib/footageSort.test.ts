@@ -13,7 +13,9 @@ import {
   reviewOrder,
   stripFrame,
   whereNow,
+  checkState,
   setChecked,
+  setCheckedMany,
   skipClip,
   sortSections,
 } from "./footageSort";
@@ -297,5 +299,36 @@ describe("review order", () => {
     expect(stripFrame(160, 160, 10)).toBe(9);
     expect(stripFrame(-5, 160, 10)).toBe(0);
     expect(stripFrame(10, 0, 10)).toBe(0);
+  });
+});
+
+describe("select all", () => {
+  it("checks or unchecks a group in one decision and keeps the others", () => {
+    const v = view();
+    v.user_checked = { "head/VID_1.mp4": true };
+
+    const d = setCheckedMany(
+      v,
+      ["from-martin/IMG_1.MOV", "from-martin/IMG_2.MOV"],
+      false,
+    );
+
+    expect(d.checked).toEqual({
+      "head/VID_1.mp4": true,
+      "from-martin/IMG_1.MOV": false,
+      "from-martin/IMG_2.MOV": false,
+    });
+  });
+
+  it("reads a group as all, none or some", () => {
+    const [a, b] = view().clips;
+    expect(checkState([a, b])).toBe("all");
+    expect(checkState([{ ...a, checked: false }, b])).toBe("some");
+    expect(
+      checkState([
+        { ...a, checked: false },
+        { ...b, checked: false },
+      ]),
+    ).toBe("none");
   });
 });
