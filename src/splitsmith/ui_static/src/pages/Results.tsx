@@ -29,6 +29,7 @@ import { useMatchHref } from "@/lib/matchHref";
 import { formatClock } from "@/lib/overview";
 import {
   buildSplitsRows,
+  firstComparable,
   firstPlayable,
   scoreboardTotals,
   scorecardSyncedAt,
@@ -174,6 +175,12 @@ export function Results() {
   const stats = useMemo(() => splitsStats(rows), [rows]);
   const totals = useMemo(() => scoreboardTotals(rows), [rows]);
   const playable = useMemo(() => firstPlayable(rows), [rows]);
+  // With every shooter showing (desktop: Compare is desktop-only), Play
+  // all plays the stages side by side in Compare instead of one shooter's.
+  const comparable = useMemo(
+    () => (filterSlug == null && shooters.length > 1 && !isMobile ? firstComparable(rows) : null),
+    [rows, filterSlug, shooters.length, isMobile],
+  );
   const syncedAt = scorecardSyncedAt(project);
 
   const hrefs = useMemo<SplitsHrefs>(
@@ -252,11 +259,23 @@ export function Results() {
   ) : null;
 
   // The one primary action on the page.
-  const playAll = playable ? (
-    <Button variant="primary" asChild>
-      <Link to={`${hrefs.stage(playable.slug, playable.stageNumber)}?play=all`}>Play all</Link>
-    </Button>
-  ) : null;
+  // The click is the viewer's gesture, so the first stage starts at once.
+  const playAll =
+    comparable != null ? (
+      <Button variant="primary" asChild>
+        <Link
+          to={`${href("compare", String(comparable))}?play=all`}
+          state={{ autoplay: true }}
+          title="Play every stage with all shooters side by side"
+        >
+          Play all
+        </Link>
+      </Button>
+    ) : playable ? (
+      <Button variant="primary" asChild>
+        <Link to={`${hrefs.stage(playable.slug, playable.stageNumber)}?play=all`}>Play all</Link>
+      </Button>
+    ) : null;
 
   return (
     <div className="mx-auto w-full max-w-[1100px] px-4 py-4 md:px-7 md:py-5">

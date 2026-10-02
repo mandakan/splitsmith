@@ -10,6 +10,7 @@ import type {
 } from "@/lib/api";
 import {
   buildSplitsRows,
+  firstComparable,
   firstPlayable,
   formatHits,
   scoreboardTotals,
@@ -245,6 +246,11 @@ describe("helpers", () => {
     expect(formatHits(scorecard())).toBe("10A 16C 5D");
     expect(formatHits(scorecard({ misses: 2, no_shoots: 1, procedurals: 1, dq: true }))).toBe("10A 16C 5D 2M 1NS 1P DQ");
     expect(formatHits(scorecard({ alphas: null, charlies: null, deltas: null }))).toBe("—");
+  });
+
+  it("firstComparable needs two audited shooters on a stage", () => {
+    expect(firstComparable(soloRows())).toBeNull();
+    expect(firstComparable([])).toBeNull();
   });
 
   it("firstPlayable is the first stage row whose lead is audited", () => {

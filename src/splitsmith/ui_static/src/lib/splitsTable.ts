@@ -249,6 +249,16 @@ export function firstPlayable(rows: SplitsRow[]): { slug: string; stageNumber: n
   return null;
 }
 
+/** Where "Play all" starts with every shooter showing: the first stage
+ *  row with two or more audited shooters, which Compare plays side by
+ *  side. Null when no stage has two to compare. */
+export function firstComparable(rows: SplitsRow[]): number | null {
+  for (const r of rows) {
+    if (r.kind === "stage" && r.auditedCount >= 2) return r.stageNumber;
+  }
+  return null;
+}
+
 /** The latest scorecard sync on the project, for the header sub-line. */
 export function scorecardSyncedAt(project: MatchProject | null): string | null {
   if (!project) return null;

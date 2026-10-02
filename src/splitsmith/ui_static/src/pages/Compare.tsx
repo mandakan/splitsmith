@@ -27,6 +27,7 @@ import {
   ArrowLeft,
   ArrowRight,
   ChevronDown,
+  ListVideo,
   Loader2,
   Volume2,
   VolumeX,
@@ -75,12 +76,16 @@ type Layout = "grid" | "row" | "stack";
 
 const SYNC_DRIFT_THRESHOLD_S = 0.15;
 const SYNC_INTERVAL_MS = 120;
+// Play all plays each stage from 3 s before the beep to 3 s after its
+// last shot, the window ResultsPlayer plays for one shooter.
+const PLAY_ALL_LEAD_S = 3;
+const PLAY_ALL_TAIL_S = 3;
 
 export function Compare() {
   const { stage: stageParam } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const urlMoment = useMemo(() => parseMoment(searchParams), [searchParams]);
   const href = useMatchHref();
   const shareView = isShareView(location.pathname);
@@ -167,7 +172,11 @@ export function Compare() {
         if (!alive) return;
         setBundle(b);
         if (b.shooters.length > 0) {
-          setAudioSlug(b.shooters[0].slug);
+          // Sound from the first shooter on video: a tile-less audio
+          // shooter has no master clock, so nothing would play.
+          const audible =
+            b.shooters.find((s) => s.video_ref && s.beep_offset_in_clip != null) ?? b.shooters[0];
+          setAudioSlug(audible.slug);
           setVisibleSlugs(
             new Set(b.shooters.filter((s) => s.video_ref).map((s) => s.slug)),
           );
@@ -452,6 +461,95 @@ export function Compare() {
     };
   }, [camIndexBySlug, camsBySlug, orderedShooters, effectiveBeep]);
 
+  // Play all (?play=all): every stage side by side, back to back, the
+  // grid's version of ResultsStage's play-all. The flag lives in the URL
+  // so a share link carries it; autoplay rides on navigation state, set
+  // by Splits' Play all click and by this page's own advance, so a cold
+  // link still waits for a press of Play. Compare stays mounted across
+  // stages, so the autoplay bit is re-read per navigation (location.key).
+  const playAll = searchParams.get("play") === "all";
+  const autoplayArmedRef = useRef(false);
+  const windowEndFiredRef = useRef(false);
+  useEffect(() => {
+    autoplayArmedRef.current =
+      playAll && Boolean((location.state as { autoplay?: boolean } | null)?.autoplay);
+    windowEndFiredRef.current = false;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.key]);
+
+  const togglePlayAll = useCallback(() => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (next.get("play") === "all") next.delete("play");
+        else next.set("play", "all");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [setSearchParams]);
+
+  // The next stage under play-all, autoplay armed. False on the last one.
+  const advancePlayAll = useCallback(
+    (replace: boolean): boolean => {
+      if (!project) return false;
+      const all = project.stages.map((s) => s.stage_number).sort((a, b) => a - b);
+      const next = all[all.indexOf(stageNumber) + 1];
+      if (next == null) return false;
+      navigate(`${href("compare", String(next))}?play=all`, { state: { autoplay: true }, replace });
+      return true;
+    },
+    [project, stageNumber, navigate, href],
+  );
+
+  // Arrived by an advance (or Splits' Play all): a stage with fewer than
+  // two shooters on video is skipped, otherwise every tile starts from
+  // the lead-in together. Runs after the tiles mount (child effects run
+  // first), so videoRefs is filled.
+  useEffect(() => {
+    // The navigation's own render still holds the previous stage's bundle.
+    if (!bundle || bundle.stage_number !== stageNumber || !autoplayArmedRef.current) return;
+    if (!project) return;
+    autoplayArmedRef.current = false;
+    if (playableShooters.length < 2) {
+      advancePlayAll(true);
+      return;
+    }
+    const start = -PLAY_ALL_LEAD_S;
+    setTimeSinceBeep(start);
+    videoRefs.current.forEach((el, slug) => {
+      const shooter = orderedShooters.find((s) => s.slug === slug);
+      const beep = shooter ? effectiveBeep(shooter) : null;
+      if (beep == null) return;
+      const go = () => {
+        el.currentTime = Math.max(0, beep + start);
+        void el.play().catch(() => {});
+      };
+      if (el.readyState >= 1) go();
+      else el.addEventListener("loadedmetadata", go, { once: true });
+    });
+  }, [bundle, stageNumber, project, playableShooters.length, orderedShooters, effectiveBeep, advancePlayAll]);
+
+  // The stage's end under play-all: the tail after the last shot, or the
+  // audio clip running out first. Latched once per stage.
+  const finishStage = useCallback(() => {
+    if (windowEndFiredRef.current) return;
+    windowEndFiredRef.current = true;
+    videoRefs.current.forEach((el) => el.pause());
+    advancePlayAll(false);
+  }, [advancePlayAll]);
+  useEffect(() => {
+    if (!playAll || !isPlaying) return;
+    if (timeSinceBeep >= maxStageTime + PLAY_ALL_TAIL_S) finishStage();
+  }, [playAll, isPlaying, timeSinceBeep, maxStageTime, finishStage]);
+  useEffect(() => {
+    if (!playAll || !audioShooter) return;
+    const el = videoRefs.current.get(audioShooter.slug);
+    if (!el) return;
+    el.addEventListener("ended", finishStage);
+    return () => el.removeEventListener("ended", finishStage);
+  }, [playAll, audioShooter, bundle, finishStage]);
+
   // Copies a shareable moment link: current time-since-beep, the audio
   // camera, and whichever shooters are currently visible - mirrors
   // ResultsStage's handleCopyMoment (single-shooter) but adds cam/who.
@@ -514,14 +612,14 @@ export function Compare() {
     if (!project) return;
     const all = project.stages.map((s) => s.stage_number).sort((a, b) => a - b);
     const idx = all.indexOf(stageNumber);
-    if (idx > 0) navigate(href("compare", String(all[idx - 1])));
+    if (idx > 0) navigate(`${href("compare", String(all[idx - 1]))}${playAll ? "?play=all" : ""}`);
   }
   function nextStage() {
     if (!project) return;
     const all = project.stages.map((s) => s.stage_number).sort((a, b) => a - b);
     const idx = all.indexOf(stageNumber);
     if (idx >= 0 && idx < all.length - 1)
-      navigate(href("compare", String(all[idx + 1])));
+      navigate(`${href("compare", String(all[idx + 1]))}${playAll ? "?play=all" : ""}`);
   }
 
   if (!stageNumber || Number.isNaN(stageNumber)) {
@@ -629,6 +727,18 @@ export function Compare() {
                 Export FCPXML
               </Button>
             ) : null}
+            {/* Live state is the page's one primary while it is on. */}
+            <Button
+              type="button"
+              variant={playAll ? "primary" : "default"}
+              onClick={togglePlayAll}
+              aria-pressed={playAll}
+              aria-label={playAll ? "Play all stages: on" : "Play all stages: off"}
+              title="Play every stage side by side, back to back"
+            >
+              <ListVideo className="size-4" aria-hidden="true" />
+              Play all
+            </Button>
             <Button type="button" size="icon" onClick={prevStage} aria-label="Previous stage">
               <ArrowLeft className="size-4" aria-hidden />
             </Button>

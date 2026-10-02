@@ -218,6 +218,40 @@ describe("Splits - owner surface", () => {
     expect(screen.getByRole("button", { name: "Refresh from scoreboard" })).toBeInTheDocument();
   });
 
+  it("multi-shooter: with every shooter showing, Play all plays the stages side by side in Compare", async () => {
+    vi.mocked(api.getProject).mockImplementation((slug: string) =>
+      Promise.resolve({
+        ...makeProject(),
+        stages: makeProject().stages.map((st) =>
+          st.stage_number === 1
+            ? {
+                ...st,
+                status: "audited" as const,
+                figures: null,
+                videos: [{ role: "primary" } as unknown as MatchProject["stages"][number]["videos"][number]],
+              }
+            : st,
+        ),
+        competitor_name: slug,
+      }),
+    );
+    renderResults("/match/m1/results", [
+      makeShooter("anna", "Anna", [[1, "audited"], [2, "ready"], [3, "todo"]]),
+      makeShooter("bjorn", "Bjorn", [[1, "audited"], [2, "todo"], [3, "todo"]]),
+      makeShooter("cleo", "Cleo", [[1, "skipped"], [2, "todo"], [3, "todo"]]),
+    ]);
+    await vi.waitFor(() =>
+      expect(screen.getByRole("link", { name: "Play all" })).toHaveAttribute("href", "/match/m1/compare/1?play=all"),
+    );
+    // One shooter picked: back to that shooter's own stages.
+    fireEvent.click(screen.getByRole("button", { name: "Bjorn" }));
+    await vi.waitFor(() =>
+      expect(screen.getByRole("link", { name: "Play all" })).toHaveAttribute("href", "/match/m1/results/bjorn/1?play=all"),
+    );
+    vi.mocked(api.getProject).mockImplementation(() => new Promise(() => {}));
+    vi.mocked(api.getProject).mockClear();
+  });
+
   it("multi-shooter: chips filter the table to one shooter", async () => {
     vi.mocked(api.getProject).mockImplementation((slug: string) =>
       Promise.resolve({
