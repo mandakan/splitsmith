@@ -5,7 +5,7 @@
  *  Scrub by dragging anywhere on the tracks or via the range slider
  *  (the keyboard-accessible control). */
 
-import { Link2, MoveLeft, MoveRight, Pause, Play, Volume2, VolumeX } from "lucide-react";
+import { ChevronDown, ChevronUp, Link2, MoveLeft, MoveRight, Pause, Play, Volume2, VolumeX } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 
 import { type CompareShooterRecord } from "@/lib/api";
@@ -48,6 +48,8 @@ export function TransportDock({
   onToggleAll,
   momentT,
   onCopyMoment,
+  lanesHidden = false,
+  onToggleLanes,
 }: {
   shooters: CompareShooterRecord[];
   maxTime: number;
@@ -66,6 +68,9 @@ export function TransportDock({
    *  as the playhead. */
   momentT?: number | null;
   onCopyMoment: () => void;
+  /** The shot lanes folded away, leaving the one transport row. */
+  lanesHidden?: boolean;
+  onToggleLanes?: () => void;
 }) {
   const [trackW, setTrackW] = useState(960);
   const observerRef = useRef<ResizeObserver | null>(null);
@@ -176,11 +181,27 @@ export function TransportDock({
           value={clampedT}
           onChange={(e) => onScrub(parseFloat(e.target.value))}
         />
-        <span className="hidden text-sm text-subtle lg:inline">Drag the tracks to scrub; click a name to mute it, Alt-click to hear only them.</span>
+        {lanesHidden ? null : (
+          <span className="hidden text-sm text-subtle xl:inline">
+            Drag the tracks to scrub; click a name to mute it, Alt-click to hear only them.
+          </span>
+        )}
+        {onToggleLanes ? (
+          <button
+            type="button"
+            onClick={onToggleLanes}
+            aria-expanded={!lanesHidden}
+            className="ml-auto inline-flex h-9 items-center gap-1.5 rounded-md border border-rule bg-surface-3 px-2.5 text-sm text-ink-2 transition-colors hover:bg-surface-4 hover:text-ink"
+          >
+            {lanesHidden ? <ChevronUp className="size-4" aria-hidden /> : <ChevronDown className="size-4" aria-hidden />}
+            {lanesHidden ? "Show lanes" : "Hide lanes"}
+          </button>
+        ) : null}
       </div>
 
-      {/* Lane gutter + track SVG */}
-      <div className="flex items-stretch">
+      {/* Lane gutter + track SVG; hidden, not unmounted, when folded so
+          the track keeps its measured width. */}
+      <div className={lanesHidden ? "hidden" : "flex items-stretch"}>
         <div
           className="flex flex-none flex-col"
           style={{ width: GUTTER_W, paddingTop: RULER_H }}

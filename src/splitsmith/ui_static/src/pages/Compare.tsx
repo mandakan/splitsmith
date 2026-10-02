@@ -27,6 +27,7 @@ import {
   ArrowLeft,
   ArrowRight,
   ListVideo,
+  Maximize,
   Loader2,
   Volume2,
   VolumeX,
@@ -61,7 +62,7 @@ import {
   type CompareStageResponse,
   type MatchProject,
 } from "@/lib/api";
-import { angleCountText, cameraOptions } from "@/lib/cameraSwitch";
+import { cameraOptions } from "@/lib/cameraSwitch";
 import {
   allMuted,
   audibleSlugs,
@@ -79,7 +80,8 @@ import { useActiveShare } from "@/lib/useActiveShare";
 import { cn } from "@/lib/utils";
 
 import { initials } from "./compare/format";
-import { CameraSwitch, type CameraPreview } from "./compare/CameraSwitch";
+import { CameraMenu, type CameraPreview } from "./compare/CameraMenu";
+import { CinemaBar } from "./compare/CinemaBar";
 import { LeaderboardRail } from "./compare/LeaderboardRail";
 import { TransportDock } from "./compare/TransportDock";
 
@@ -91,6 +93,23 @@ const SYNC_INTERVAL_MS = 120;
 // last shot, the window ResultsPlayer plays for one shooter.
 const PLAY_ALL_LEAD_S = 3;
 const PLAY_ALL_TAIL_S = 3;
+
+// Per-viewer page conveniences; storage can be absent (private window).
+const LANES_KEY = "splitsmith.compare.lanes";
+function readPref(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+function writePref(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    /* the choice lasts this visit */
+  }
+}
 
 export function Compare() {
   const { stage: stageParam } = useParams();
@@ -592,6 +611,88 @@ export function Compare() {
     return () => el.removeEventListener("ended", finishStage);
   }, [playAll, clockShooter, bundle, finishStage]);
 
+  // Shot lanes under the transport: open by default, folded per viewer.
+  const [lanesHidden, setLanesHidden] = useState<boolean>(() => readPref(LANES_KEY) === "hidden");
+  const toggleLanes = useCallback(() => {
+    setLanesHidden((prev) => {
+      writePref(LANES_KEY, prev ? "shown" : "hidden");
+      return !prev;
+    });
+  }, []);
+
+  // Cinema: only the videos. Everything else hides, the tiles go edge to
+  // edge, the browser goes full screen where it allows, and the control
+  // bar and name tags fade while playback runs and the pointer rests.
+  const [cinema, setCinema] = useState(false);
+  const [boardShown, setBoardShown] = useState(false);
+  const [chrome, setChrome] = useState(true);
+  const fullscreenRef = useRef(false);
+  const enterCinema = useCallback(() => {
+    setCinema(true);
+    setChrome(true);
+    const req = document.documentElement.requestFullscreen?.();
+    if (req) {
+      req.then(
+        () => {
+          fullscreenRef.current = true;
+        },
+        () => {},
+      );
+    }
+  }, []);
+  const exitCinema = useCallback(() => {
+    setCinema(false);
+    if (fullscreenRef.current && document.fullscreenElement) void document.exitFullscreen?.().catch(() => {});
+    fullscreenRef.current = false;
+  }, []);
+  // The browser's own Esc leaves full screen without a keydown reaching
+  // the page: leaving full screen leaves cinema too.
+  useEffect(() => {
+    const onChange = () => {
+      if (fullscreenRef.current && !document.fullscreenElement) {
+        fullscreenRef.current = false;
+        setCinema(false);
+      }
+    };
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el && (el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName))) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "c" || e.key === "C") {
+        if (cinema) exitCinema();
+        else enterCinema();
+        return;
+      }
+      if (!cinema) return;
+      if (e.key === "Escape") exitCinema();
+      else if (e.key === "l" || e.key === "L") setBoardShown((b) => !b);
+      else if (e.key === " ") {
+        e.preventDefault();
+        togglePlay();
+      } else return;
+      setChrome(true);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [cinema, enterCinema, exitCinema, togglePlay]);
+  // Chrome fades two seconds after the pointer last moved, only while
+  // playing: paused, the controls stay.
+  const [pointerAt, setPointerAt] = useState(0);
+  useEffect(() => {
+    if (!cinema) return;
+    if (!isPlaying) {
+      setChrome(true);
+      return;
+    }
+    setChrome(true);
+    const id = window.setTimeout(() => setChrome(false), 2000);
+    return () => window.clearTimeout(id);
+  }, [cinema, isPlaying, pointerAt]);
+
   // Copies a shareable moment link: current time-since-beep, the audio
   // camera, and whichever shooters are currently visible - mirrors
   // ResultsStage's handleCopyMoment (single-shooter) but adds cam/who.
@@ -685,7 +786,12 @@ export function Compare() {
 
   if (!bundle) {
     return (
-      <div className="flex h-64 items-center justify-center gap-2 text-md text-muted">
+      <div
+        className={cn(
+          "flex items-center justify-center gap-2 text-md text-muted",
+          cinema ? "fixed inset-0 z-takeover bg-black" : "h-64",
+        )}
+      >
         <Loader2 className="size-4 animate-spin" /> Loading compare data...
       </div>
     );
@@ -698,13 +804,19 @@ export function Compare() {
   return (
     <div
       data-testid="compare-page"
+      data-cinema={cinema || undefined}
+      onPointerMove={cinema ? () => setPointerAt(Date.now()) : undefined}
       className={cn(
-        "flex min-h-0 flex-col gap-3 overflow-hidden px-7 py-4",
-        shareView
-          ? "min-h-0 flex-1"
-          : "h-[calc(100dvh-var(--shell-header-h,86px))] min-h-[560px]",
+        "flex min-h-0 flex-col overflow-hidden",
+        cinema
+          ? cn("fixed inset-0 z-takeover bg-black", !chrome && "cursor-none")
+          : cn(
+              "gap-3 px-7 py-4",
+              shareView ? "min-h-0 flex-1" : "h-[calc(100dvh-var(--shell-header-h,86px))] min-h-[560px]",
+            ),
       )}
     >
+      {cinema ? null : (
       <PageHeader
         ordinal={pad2(stageNumber)}
         title={bundle.stage_name}
@@ -769,6 +881,10 @@ export function Compare() {
                 Export FCPXML
               </Button>
             ) : null}
+            <Button type="button" onClick={enterCinema} title="Only the videos (C)">
+              <Maximize className="size-4" aria-hidden="true" />
+              Cinema
+            </Button>
             {/* Live state is the page's one primary while it is on. */}
             <Button
               type="button"
@@ -790,13 +906,15 @@ export function Compare() {
           </>
         }
       />
+      )}
 
       {/* Unfinished banner: when at least one shooter is playable, the
        *  grid renders the playable subset. Shooters without a cached
        *  trim are surfaced here so the user can rebuild the cache (when
        *  audit is done) or jump into audit (when nothing has run yet)
        *  without having to leave the page. */}
-      {visibleShooters.length > 0 &&
+      {!cinema &&
+      visibleShooters.length > 0 &&
       orderedShooters.some((s) => !s.video_ref) ? (
         <UnfinishedShootersBanner
           unfinished={orderedShooters.filter((s) => !s.video_ref)}
@@ -809,7 +927,7 @@ export function Compare() {
       ) : null}
 
       {/* Video zone + leaderboard rail share a bounded row */}
-      <div className="flex min-h-0 flex-1 gap-4">
+      <div className={cn("relative flex min-h-0 flex-1", !cinema && "gap-4")}>
         {visibleShooters.length === 0 ? (
           <CompareEmptyState
             unfinished={orderedShooters.filter((s) => !s.video_ref)}
@@ -824,8 +942,8 @@ export function Compare() {
               className={cn(
                 "min-h-0 min-w-0 flex-1",
                 layout === "stack"
-                  ? "flex flex-col gap-3 overflow-y-auto"
-                  : "grid gap-3",
+                  ? cn("flex flex-col overflow-y-auto", cinema ? "gap-0.5" : "gap-3")
+                  : cn("grid", cinema ? "gap-0.5" : "gap-3"),
               )}
               style={
                 layout === "stack"
@@ -856,14 +974,39 @@ export function Compare() {
                   fit={layout === "stack" ? "aspect" : "fill"}
                   onSpeaker={(alt) => onSpeaker(shooter.slug, alt)}
                   onMount={(el) => setVideoRef(shooter.slug, el)}
+                  cinema={cinema}
+                  chrome={chrome}
                 />
               ))}
             </div>
-            <LeaderboardRail shooters={playableShooters} />
+            {cinema ? (
+              boardShown ? (
+                <div data-testid="cinema-board" className="absolute right-4 top-4 max-h-[60%] shadow-lg">
+                  <LeaderboardRail shooters={playableShooters} />
+                </div>
+              ) : null
+            ) : (
+              <LeaderboardRail shooters={playableShooters} />
+            )}
           </>
         )}
       </div>
-      {visibleShooters.length > 0 ? (
+      {visibleShooters.length > 0 && cinema ? (
+        <CinemaBar
+          visible={chrome}
+          stageLabel={`${pad2(stageNumber)} ${bundle.stage_name}`}
+          timeSinceBeep={timeSinceBeep}
+          maxTime={maxStageTime}
+          isPlaying={isPlaying}
+          onTogglePlay={togglePlay}
+          onScrub={scrubTo}
+          allMuted={allMuted(mixSlugs, muted)}
+          onToggleAll={onToggleAll}
+          boardShown={boardShown}
+          onToggleBoard={() => setBoardShown((b) => !b)}
+          onExit={exitCinema}
+        />
+      ) : visibleShooters.length > 0 ? (
         <TransportDock
           shooters={playableShooters}
           maxTime={maxStageTime}
@@ -877,6 +1020,8 @@ export function Compare() {
           onToggleAll={onToggleAll}
           momentT={urlMoment?.t ?? null}
           onCopyMoment={handleCopyMoment}
+          lanesHidden={lanesHidden}
+          onToggleLanes={toggleLanes}
         />
       ) : null}
       <Snackbar snack={snack} onDismiss={() => setSnack(null)} />
@@ -1149,6 +1294,8 @@ function VideoTile({
   fit,
   onSpeaker,
   onMount,
+  cinema = false,
+  chrome = true,
 }: {
   shooter: CompareShooterRecord;
   src: string | null;
@@ -1160,16 +1307,21 @@ function VideoTile({
   fit: "fill" | "aspect";
   onSpeaker: (alt: boolean) => void;
   onMount: (el: HTMLVideoElement | null) => void;
+  /** Cinema: no frame and no name bar, a small name tag on the picture
+   *  that fades with the rest of the chrome. */
+  cinema?: boolean;
+  chrome?: boolean;
 }) {
-  const angles = angleCountText(cams);
+  const multiCam = Boolean(src && cams && cams.length > 1);
   return (
     <div
       className={cn(
-        "relative overflow-hidden rounded-xl border bg-bg-glow",
+        "relative overflow-hidden bg-bg-glow",
         fit === "fill" ? "flex min-h-0 flex-col" : "shrink-0",
-        "border-rule-strong",
+        cinema ? "bg-black" : "rounded-xl border border-rule-strong",
       )}
     >
+      {cinema ? null : (
       <div className="flex flex-none items-center gap-2 border-b border-rule bg-surface-2 px-3 py-1.5">
         <Avatar
           size="xs"
@@ -1179,11 +1331,20 @@ function VideoTile({
           name={shooter.name}
         />
         <span className="text-sm font-medium text-ink">{shooter.name}</span>
-        <span className="ml-auto flex items-center gap-2">
-          {angles ? <span className="text-sm text-muted">{angles}</span> : null}
+        <span className="ml-auto flex min-w-0 items-center gap-2">
+          {multiCam && cams ? (
+            <CameraMenu
+              shooterName={shooter.name}
+              options={cameraOptions(cams)}
+              value={camIndex}
+              onPick={onPickCam}
+              previewFor={previewFor}
+            />
+          ) : null}
           {src ? <SpeakerButton name={shooter.name} heard={heard} onSpeaker={onSpeaker} /> : null}
         </span>
       </div>
+      )}
       <div className={cn("relative", fit === "fill" && "min-h-0 flex-1 bg-black")}>
         {src ? (
           <video
@@ -1208,14 +1369,16 @@ function VideoTile({
             No trim yet
           </div>
         )}
-        {src && cams && cams.length > 1 ? (
-          <CameraSwitch
-            shooterName={shooter.name}
-            options={cameraOptions(cams)}
-            value={camIndex}
-            onPick={onPickCam}
-            previewFor={previewFor}
-          />
+        {cinema ? (
+          <span
+            className={cn(
+              "absolute left-2.5 top-2 inline-flex items-center gap-1.5 rounded-md bg-surface/70 px-2 py-0.5 text-sm text-ink backdrop-blur transition-opacity duration-300",
+              chrome ? "opacity-100" : "pointer-events-none opacity-0",
+            )}
+          >
+            {shooter.name}
+            {src ? <SpeakerButton name={shooter.name} heard={heard} onSpeaker={onSpeaker} /> : null}
+          </span>
         ) : null}
       </div>
     </div>

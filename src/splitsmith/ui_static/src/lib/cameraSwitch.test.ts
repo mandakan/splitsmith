@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { CoachVideoEntry } from "./api";
-import { angleCountText, cameraOptions } from "./cameraSwitch";
+import { cameraOptions } from "./cameraSwitch";
 
 function cam(
   label: string | undefined,
@@ -30,11 +30,5 @@ describe("camera switch", () => {
     expect(
       cameraOptions([cam(undefined), cam(undefined)]).map((o) => o.label),
     ).toEqual(["Primary", "Camera 2"]);
-  });
-
-  it("says how many angles only when there is a choice", () => {
-    expect(angleCountText([cam("a"), cam("b"), cam("c")])).toBe("3 angles");
-    expect(angleCountText([cam("a")])).toBeNull();
-    expect(angleCountText(null)).toBeNull();
   });
 });

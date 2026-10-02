@@ -1,7 +1,7 @@
 /**
  * The camera switch on a Compare tile: which cameras a shooter has on a
- * stage, what each is called, and the line that says there is more than
- * one. Pure; ``pages/compare/CameraSwitch`` renders it.
+ * stage and what each is called. Pure; ``pages/compare/CameraMenu``
+ * renders it.
  */
 import type { CoachVideoEntry } from "./api";
 
@@ -21,9 +21,4 @@ export function cameraOptions(cams: CoachVideoEntry[]): CameraOption[] {
     label: c.label || (i === 0 ? "Primary" : `Camera ${i + 1}`),
     disabled: c.beep_in_clip == null,
   }));
-}
-
-/** "3 angles" when there is anything to switch to, else null. */
-export function angleCountText(cams: CoachVideoEntry[] | null): string | null {
-  return cams && cams.length > 1 ? `${cams.length} angles` : null;
 }
