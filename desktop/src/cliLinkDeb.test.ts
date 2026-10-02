@@ -81,6 +81,36 @@ describe("deb CLI wrapper", () => {
     run("splitsmith_cli_unlink", d.bin, d.opt);
     expect(fs.lstatSync(d.link, { throwIfNoEntry: false })).toBeUndefined();
   });
+  it.skipIf(process.getuid?.() === 0)("never fails the install when the wrapper cannot be written", () => {
+    const d = dirs();
+    fs.chmodSync(d.bin, 0o555);
+    try {
+      const r = spawnSync("bash", ["-c", `source '${SNIPPET}' && splitsmith_cli_link`], {
+        env: { PATH: "/usr/bin:/bin", SPLITSMITH_BIN_DIR: d.bin, SPLITSMITH_OPT_DIR: d.opt },
+        encoding: "utf8",
+      });
+      expect(r.status).toBe(0);
+      expect(r.stderr).toMatch(/splitsmith: could not write/);
+      expect(fs.readdirSync(d.bin)).toEqual([]);
+    } finally {
+      fs.chmodSync(d.bin, 0o755);
+    }
+  });
+  it("keeps the previous wrapper when the write fails part-way", () => {
+    const d = dirs();
+    run("splitsmith_cli_link", d.bin, d.opt);
+    const before = fs.readFileSync(d.link, "utf8");
+    // A cat that consumes its input and fails, as on ENOSPC: the temp file
+    // exists but is empty.
+    const r = spawnSync(
+      "bash",
+      ["-c", `source '${SNIPPET}' && cat() { command cat >/dev/null; return 1; } && splitsmith_cli_link`],
+      { env: { PATH: "/usr/bin:/bin", SPLITSMITH_BIN_DIR: d.bin, SPLITSMITH_OPT_DIR: d.opt }, encoding: "utf8" },
+    );
+    expect(r.status).toBe(0);
+    expect(fs.readFileSync(d.link, "utf8")).toBe(before);
+    expect(fs.readdirSync(d.bin)).toEqual(["splitsmith"]);
+  });
   it("runs the bundled CLI with the bundled ffmpeg unless the caller set one", () => {
     const d = dirs();
     fs.writeFileSync(

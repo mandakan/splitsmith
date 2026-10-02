@@ -25,7 +25,10 @@ splitsmith_cli_link() {
     echo "splitsmith: $link exists and is not ours; leaving it" >&2
     return 0
   fi
-  cat > "$tmp" <<SPLITSMITH_EOF
+  # Nothing is moved unless the whole write succeeded, and a failure only
+  # warns: this is the postinst's last command, and a non-zero status would
+  # leave the package half-configured over a missing CLI wrapper.
+  if cat 2>/dev/null > "$tmp" <<SPLITSMITH_EOF && chmod 0755 "$tmp" 2>/dev/null && mv -f "$tmp" "$link" 2>/dev/null
 #!/bin/sh
 $SPLITSMITH_CLI_MARKER
 : "\${SPLITSMITH_FFMPEG:=$res/bin/ffmpeg}"
@@ -33,11 +36,12 @@ $SPLITSMITH_CLI_MARKER
 export SPLITSMITH_FFMPEG SPLITSMITH_FFPROBE
 exec "$res/python/bin/splitsmith" "\$@"
 SPLITSMITH_EOF
-  if chmod 0755 "$tmp" && mv -f "$tmp" "$link"; then
+  then
     return 0
   fi
   rm -f "$tmp"
-  return 1
+  echo "splitsmith: could not write $link; the splitsmith command is not installed" >&2
+  return 0
 }
 splitsmith_cli_unlink() {
   local link="$SPLITSMITH_BIN_DIR/splitsmith"
