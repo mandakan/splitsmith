@@ -4,7 +4,7 @@
  * the second; a stage with no footage is one dim line.
  */
 import type { StageVideo } from "@/lib/api";
-import type { FootageRow } from "@/lib/footage";
+import { chipBeepMark, type FootageRow } from "@/lib/footage";
 
 import { BeepCell, type FootageHrefs } from "./CoverageMatrix";
 import { FileChip } from "./FileChip";
@@ -44,9 +44,9 @@ export function FootageCards({ rows, hrefs, onOpen }: FootageCardsProps) {
               <div key={cell.slug} className="mt-2 flex flex-wrap items-center gap-1.5">
                 {row.cells.length > 1 ? <span className="mr-1 text-sm text-muted">{cell.shooterName}</span> : null}
                 {cell.videos.map((v) => (
-                  <FileChip key={v.video_id} video={v} onOpen={(video) => onOpen(cell.slug, n, video)} />
+                  <FileChip key={v.video_id} video={v} beep={chipBeepMark(v, cell.beeps[v.video_id])} onOpen={(video) => onOpen(cell.slug, n, video)} />
                 ))}
-                {row.cells.length > 1 ? <BeepCell cell={cell} stage={n} hrefs={hrefs} className="ml-auto text-sm" /> : null}
+                {row.cells.length > 1 ? <BeepCell cell={cell} stage={n} hrefs={hrefs} className="ml-auto text-sm" quietWhenDone /> : null}
               </div>
             ))}
           </section>

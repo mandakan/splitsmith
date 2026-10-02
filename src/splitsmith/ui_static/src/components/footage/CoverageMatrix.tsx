@@ -1,9 +1,10 @@
 /**
  * CoverageMatrix -- the Footage page's table (UX PR 6, spec s4.3): one
- * row per stage, one cell per shooter with its file chips, the primary's
- * beep state, and a row menu. A cell with no footage says so and offers
- * Assign. Single-shooter matches carry the beep as its own column;
- * multi-shooter matches put it under each cell's chips.
+ * row per stage, one cell per shooter with its file chips (each with its
+ * beep mark), what the primary's beep asks of the user, and a row menu. A
+ * cell with no footage says so and offers Assign. Single-shooter matches
+ * carry the beep as its own column; multi-shooter matches put it under
+ * each cell's chips, and only when there is something to do or wait for.
  */
 import { useState } from "react";
 import { MoreHorizontal } from "lucide-react";
@@ -13,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Table, Td, Th, Tr } from "@/components/ui/DataTable";
 import { Menu, menuItemClass } from "@/components/ui/Menu";
 import type { StageVideo } from "@/lib/api";
-import { beepState, type FootageCell, type FootageRow } from "@/lib/footage";
+import { beepAction, chipBeepMark, type FootageCell, type FootageRow } from "@/lib/footage";
 import { cn } from "@/lib/utils";
 
 import { FileChip } from "./FileChip";
@@ -37,19 +38,36 @@ function pad2(n: number): string {
   return String(n).padStart(2, "0");
 }
 
-export function BeepCell({ cell, stage, hrefs, className }: { cell: FootageCell; stage: number; hrefs: FootageHrefs; className?: string }) {
-  const b = beepState(cell);
+/** What the primary's beep asks of the user. ``quietWhenDone`` drops the
+ *  line once the beep is confirmed (under a cell's chips, where the chip's
+ *  check already says so). */
+export function BeepCell({
+  cell,
+  stage,
+  hrefs,
+  className,
+  quietWhenDone = false,
+}: {
+  cell: FootageCell;
+  stage: number;
+  hrefs: FootageHrefs;
+  className?: string;
+  quietWhenDone?: boolean;
+}) {
+  const a = beepAction(cell);
+  if (!a || (quietWhenDone && a.tone === "ok")) return null;
   return (
-    <span className={cn("numeral inline-flex items-center gap-2 whitespace-nowrap", className)}>
-      <span className={b.tone === "warn" ? "text-live" : b.tone === "ok" ? "text-ink" : "text-subtle"}>
-        {b.label}
-        {b.tone === "ok" ? <span className="ml-1 text-done">&#10003;</span> : null}
-      </span>
-      {b.confirmable ? (
+    <span className={cn("inline-flex items-center gap-2 whitespace-nowrap", className)}>
+      {a.link ? (
         <Button size="sm" asChild>
-          <Link to={hrefs.audit(cell.slug, stage)}>Confirm</Link>
+          <Link to={hrefs.audit(cell.slug, stage)}>{a.label}</Link>
         </Button>
-      ) : null}
+      ) : (
+        <span className={a.tone === "ok" ? "text-ink" : "text-subtle"}>
+          {a.label}
+          {a.tone === "ok" ? <span className="ml-1 text-done">&#10003;</span> : null}
+        </span>
+      )}
     </span>
   );
 }
@@ -83,10 +101,20 @@ function Cell({ cell, stage, current, multi, hrefs, onOpen, onAssign, editDenied
     <Td>
       <span className="flex flex-wrap gap-1.5">
         {cell.videos.map((v) => (
-          <FileChip key={v.video_id} video={v} current={v.video_id === current} onOpen={(video) => onOpen(cell.slug, stage, video)} />
+          <FileChip
+            key={v.video_id}
+            video={v}
+            beep={chipBeepMark(v, cell.beeps[v.video_id])}
+            current={v.video_id === current}
+            onOpen={(video) => onOpen(cell.slug, stage, video)}
+          />
         ))}
       </span>
-      {multi ? <BeepCell cell={cell} stage={stage} hrefs={hrefs} className="mt-1 text-sm" /> : null}
+      {multi ? (
+        <span className="mt-1 flex">
+          <BeepCell cell={cell} stage={stage} hrefs={hrefs} className="text-sm" quietWhenDone />
+        </span>
+      ) : null}
     </Td>
   );
 }

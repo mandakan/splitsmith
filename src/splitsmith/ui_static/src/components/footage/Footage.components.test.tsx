@@ -61,14 +61,16 @@ describe("CoverageMatrix", () => {
     fireEvent.click(within(r1).getByRole("button", { name: /Assign/ }));
     expect(onAssign).toHaveBeenCalledWith("me", 1);
     const r2 = screen.getByText("B100 Vänster").closest("tr")!;
-    expect(within(r2).getByRole("button", { name: "VID_20260627_1066.MP4, primary" })).toBeInTheDocument();
+    expect(within(r2).getByRole("button", { name: "VID_20260627_1066.MP4, primary, beep confirmed" })).toBeInTheDocument();
+    // A secondary whose beep is fine carries no mark.
     expect(within(r2).getByRole("button", { name: "GX010012.MP4, secondary" })).toBeInTheDocument();
-    expect(within(r2).getByText("5.32")).toBeInTheDocument();
+    expect(within(r2).getByText("Beep confirmed")).toBeInTheDocument();
+    expect(within(r2).queryByText("5.32")).toBeNull();
     fireEvent.click(within(r2).getByRole("button", { name: /GX010012/ }));
     expect(onOpen).toHaveBeenCalledWith("me", 2, expect.objectContaining({ video_id: "v2" }));
     const r10 = screen.getByText("B3").closest("tr")!;
-    expect(within(r10).getByText("4.90 · unconfirmed")).toBeInTheDocument();
-    expect(within(r10).getByRole("link", { name: "Confirm" })).toHaveAttribute("href", "/m/audit/me/10");
+    expect(within(r10).getByRole("button", { name: "VID_20260627_1102.MP4, primary, beep to confirm" })).toBeInTheDocument();
+    expect(within(r10).getByRole("link", { name: "Confirm beep" })).toHaveAttribute("href", "/m/audit/me/10");
   });
 
   it("the row menu offers Detect beep only with a primary", () => {
@@ -95,7 +97,11 @@ describe("CoverageMatrix", () => {
     );
     expect(screen.getByRole("columnheader", { name: "Anna Berg" })).toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: "Beep" })).toBeNull();
-    expect(screen.getAllByText("5.32")).toHaveLength(2);
+    // No times, and no line under a cell whose beep is confirmed: the
+    // primary's check on its chip already says so.
+    expect(screen.queryByText("5.32")).toBeNull();
+    expect(screen.queryByText("Beep confirmed")).toBeNull();
+    expect(screen.getByRole("button", { name: "DJI_0044.MP4, primary, beep confirmed" })).toBeInTheDocument();
   });
 });
 
@@ -108,7 +114,7 @@ describe("FootageCards", () => {
       </MemoryRouter>,
     );
     const card = screen.getByRole("region", { name: "Stage 2 B100 Vänster" });
-    expect(within(card).getByText("5.32")).toBeInTheDocument();
+    expect(within(card).getByText("Beep confirmed")).toBeInTheDocument();
     expect(within(card).getAllByRole("button")).toHaveLength(2);
     expect(within(screen.getByRole("region", { name: "Stage 1 B100 Höger" })).getByText("no footage")).toBeInTheDocument();
   });
