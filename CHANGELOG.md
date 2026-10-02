@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.53.0](https://github.com/mandakan/splitsmith/compare/v0.52.0...v0.53.0) (2026-10-02)
+
+
+### Features
+
+* **export:** a live race in the grid's free square ([#1160](https://github.com/mandakan/splitsmith/issues/1160)) ([57ef105](https://github.com/mandakan/splitsmith/commit/57ef1056879763764de93ee066ec01b57c77364b))
+* **export:** a main camera and one inset, replacing rotating corners ([#1157](https://github.com/mandakan/splitsmith/issues/1157)) ([16d3a39](https://github.com/mandakan/splitsmith/commit/16d3a39ea6a6c30e25bdab90b90f6a182355aebe))
+* **export:** the compare grid publishes to YouTube like one shooter's render ([#1154](https://github.com/mandakan/splitsmith/issues/1154)) ([b603ae4](https://github.com/mandakan/splitsmith/commit/b603ae45ecc3f2b5773cd27ed34503a81ae209fd))
+* **export:** the grid's free square shows the stage, its splits or the match ([#1159](https://github.com/mandakan/splitsmith/issues/1159)) ([5373ef7](https://github.com/mandakan/splitsmith/commit/5373ef701ae3e9f64a3bc8fde17fd52e1c6b26c1))
+* **export:** the grid's tiles get the main camera and inset too ([#1158](https://github.com/mandakan/splitsmith/issues/1158)) ([dd25139](https://github.com/mandakan/splitsmith/commit/dd251398f36d27a90b9af6055b08e126d902448e))
+* **share:** each share link can open on its own cameras ([#1152](https://github.com/mandakan/splitsmith/issues/1152)) ([0400871](https://github.com/mandakan/splitsmith/commit/040087122ddd18047b11c5b6c50ea35e36351fbf))
+
 ## [0.52.0](https://github.com/mandakan/splitsmith/compare/v0.51.0...v0.52.0) (2026-10-02)
 
 
