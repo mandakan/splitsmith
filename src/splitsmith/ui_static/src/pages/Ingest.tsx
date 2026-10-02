@@ -280,6 +280,19 @@ function IngestInner({ slug }: { slug: string }) {
     }
   }
 
+  // "Sort across shooters": every unassigned video in the match goes to
+  // the footage sort as it is, no folder to pick (a second picker sent the
+  // user back into Add footage, 2026-10-02).
+  async function sortUnassigned(): Promise<void> {
+    setError(null);
+    try {
+      const { scan_id } = await api.startFootageSortUnassigned();
+      navigate(href("footage-sort", scan_id));
+    } catch (e: unknown) {
+      setError(e instanceof ApiError ? e.detail : String(e));
+    }
+  }
+
   async function commitFiles(files: FolderPickerCommitFile[]): Promise<void> {
     if (editDenied) throw new Error(READ_ONLY_MIRROR_MESSAGE);
     const result = await api.scanFiles(
@@ -710,7 +723,7 @@ function IngestInner({ slug }: { slug: string }) {
             blocked={moveBlocked}
             busy={busy}
             onMove={moveShooterBatch}
-            onSort={canSort ? () => setShowSortFolder(true) : undefined}
+            onSort={canSort ? () => void sortUnassigned() : undefined}
             onDismiss={() => {
               setLastImportedPaths(null);
               setMoveBlocked([]);
@@ -753,7 +766,7 @@ function IngestInner({ slug }: { slug: string }) {
               onOpen={openUnassigned}
               onAssign={assignUnassigned}
               onRemove={(item) => void removeOn(item.slug, item.video.path)}
-              onSort={canSort ? () => setShowSortFolder(true) : undefined}
+              onSort={canSort ? () => void sortUnassigned() : undefined}
             />
             <ShootersPanel
               shooters={shooters}
@@ -841,6 +854,9 @@ function IngestInner({ slug }: { slug: string }) {
           subtitle="Pick the folder that holds everyone's footage; every video below it is matched to a shooter and stage for you to review"
           initialPath={sortStartDir}
           folderLabel="Sort this folder"
+          // The sort walks every subfolder: the folder holding each club
+          // mate's folder has no video of its own and must be pickable.
+          allowEmptyFolder
           onCommitFolder={async (path) => {
             const { scan_id } = await api.startFootageSort(path);
             setShowSortFolder(false);

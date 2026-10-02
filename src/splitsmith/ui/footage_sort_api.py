@@ -82,7 +82,11 @@ class ScanRecord(BaseModel):
     """``<match>/footage_sort/<scan_id>.json``."""
 
     scan_id: str
+    # The folder walked, or for an ``unassigned`` scan the common parent of
+    # its files (clip ids and camera folders are relative to it).
     source_dir: str
+    # An ``unassigned`` scan reads exactly these files instead of a walk.
+    paths: list[str] = Field(default_factory=list)
     created_at: datetime
     status: ScanStatus = "scanning"
     error: str | None = None
@@ -135,7 +139,11 @@ class SortView(BaseModel):
 
 
 class ScanRequest(BaseModel):
-    source_dir: str
+    """A folder to walk, or ``unassigned``: every video that sits unassigned
+    in any shooter's project (the Footage page's "Sort across shooters")."""
+
+    source_dir: str | None = None
+    unassigned: bool = False
 
 
 class DecisionsRequest(BaseModel):
@@ -399,9 +407,12 @@ def run_footage_sort_scan(handle: Any, *, state: Any, scan_id: str) -> None:
     record = _load(state, scan_id)
     source = Path(record.source_dir)
     try:
-        files = sorted(p for p in source.rglob("*") if p.is_file() and not p.name.startswith("."))
-        videos = [p for p in files if p.suffix.lower() in VIDEO_EXTENSIONS]
-        record.skipped_files = len(files) - len(videos)
+        if record.paths:
+            videos = [Path(p) for p in record.paths]
+        else:
+            files = sorted(p for p in source.rglob("*") if p.is_file() and not p.name.startswith("."))
+            videos = [p for p in files if p.suffix.lower() in VIDEO_EXTENSIONS]
+            record.skipped_files = len(files) - len(videos)
         thumbs = _sort_dir(state) / "thumbs"
         scanned: list[ScannedClip] = []
         for i, path in enumerate(videos):
@@ -479,13 +490,28 @@ def _move_unassigned(
 async def start_scan(req: ScanRequest, request: Request) -> dict[str, Any]:
     _local_only()
     state = request.app.state.splitsmith_state
-    source = Path(req.source_dir).expanduser()
-    if not source.is_dir():
-        raise HTTPException(status_code=400, detail=f"not a folder: {source}")
     if len(match_model.Match.load(state.match_root).shooters) == 0:
         raise HTTPException(status_code=409, detail="add the match's shooters first")
+    if (req.source_dir is None) == (not req.unassigned):
+        raise HTTPException(status_code=400, detail="give a source_dir or unassigned, not both")
+    paths: list[str] = []
+    if req.unassigned:
+        paths = sorted(
+            {str(path) for path, reg in _registrations(state).items() if not reg.assigned and path.is_file()}
+        )
+        if not paths:
+            raise HTTPException(status_code=409, detail="no unassigned videos to sort")
+        source = Path(os.path.commonpath(paths))
+        if source.is_file():
+            source = source.parent
+    else:
+        assert req.source_dir is not None
+        source = Path(req.source_dir).expanduser()
+        if not source.is_dir():
+            raise HTTPException(status_code=400, detail=f"not a folder: {source}")
+        source = source.resolve()
     record = ScanRecord(
-        scan_id=uuid.uuid4().hex[:12], source_dir=str(source.resolve()), created_at=datetime.now(UTC)
+        scan_id=uuid.uuid4().hex[:12], source_dir=str(source), paths=paths, created_at=datetime.now(UTC)
     )
     _save(state, record)
     job = await state.jobs.submit(kind=JOB_KIND, args={"scan_id": record.scan_id})

@@ -2920,6 +2920,14 @@ export const api = {
       json: { source_dir: sourceDir },
     }),
 
+  /** Sort every video that sits unassigned in any shooter's project; no
+   *  folder (the Footage page's "Sort across shooters"). */
+  startFootageSortUnassigned: () =>
+    request<{ scan_id: string }>("/api/match/footage-sort/scan", {
+      method: "POST",
+      json: { unassigned: true },
+    }),
+
   getFootageSort: (scanId: string) =>
     request<SortView>(`/api/match/footage-sort/${encodeURIComponent(scanId)}`),
 
