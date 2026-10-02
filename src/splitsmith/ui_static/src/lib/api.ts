@@ -1494,6 +1494,9 @@ export interface CoachVideoEntry {
    *  720p faststart rendition, reported in hosted mode when the object
    *  exists; it shares the trim's anchor. */
   kind: "trim" | "source" | "web";
+  /** What a viewer calls this camera ("Insta360 GO 3S", "Handheld",
+   *  "Camera 2"); absent from servers older than 0.49.2. */
+  label?: string;
 }
 
 export interface CoachStageResponse {

@@ -112,6 +112,8 @@ def test_get_coach_backfills_classes_on_first_read(tmp_path: Path) -> None:
     assert body["shots"][1]["split"] == pytest.approx(0.3)
     # Reload-hint flag fires on the long gap.
     assert body["shots"][3]["reload_hint"] is True
+    # Each camera carries the name a viewer switches by.
+    assert [v["label"] for v in body["videos"]] == ["Camera 1"]
 
 
 def test_get_coach_heal_survives_slim_install(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

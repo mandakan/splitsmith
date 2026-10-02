@@ -79,6 +79,38 @@ def _heuristic_mount_from_make(make: str | None) -> str | None:
     return None
 
 
+_MOUNT_LABELS: dict[str, str] = {"hand": "Handheld", "gimbal": "Gimbal"}
+
+
+def camera_labels(videos: list[StageVideo]) -> list[str]:
+    """What a viewer calls each camera of one stage, in the given order.
+
+    The probed model when there is one ("iPhone 17 Pro"), with the make in
+    front when the model alone says little ("Insta360 GO 3S"); else the
+    mount ("Head cam", "Handheld"); else "Camera N". Repeats within the
+    stage get a number ("iPhone 17 Pro 2").
+    """
+    raw: list[str] = []
+    for i, video in enumerate(videos):
+        model = (video.camera_model or "").strip()
+        make = (video.camera_make or "").strip()
+        mount = (video.camera_mount or "").strip().lower()
+        if model:
+            short = len(model) < 8 and make and make.lower() not in model.lower()
+            raw.append(f"{make} {model}" if short else model)
+        elif mount:
+            raw.append(_MOUNT_LABELS.get(mount, f"{mount.capitalize()} cam"))
+        else:
+            raw.append(f"Camera {i + 1}")
+    total = {name: raw.count(name) for name in raw}
+    seen: dict[str, int] = {}
+    out: list[str] = []
+    for name in raw:
+        seen[name] = seen.get(name, 0) + 1
+        out.append(f"{name} {seen[name]}" if total[name] > 1 else name)
+    return out
+
+
 def _stage_rounds_from_info(stage: Any) -> StageRounds | None:
     """Extract ``StageRounds`` from a scoreboard ``StageInfo`` (or any object
     that exposes ``min_rounds`` / ``paper_targets`` / ``steel_targets``).

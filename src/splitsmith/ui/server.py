@@ -205,6 +205,7 @@ from ..match_project import (
     StageStatus,
     StageVideo,
     VideoRole,
+    camera_labels,
 )
 from ..match_registry import MatchRegistry
 from ..mp4_render import RenderStep
@@ -12628,8 +12629,9 @@ def create_app(
             key=lambda v: v.added_at,
         )
         ordered_videos = ([primary] if primary is not None else []) + secondaries
+        labels = camera_labels(ordered_videos)
         out: list[dict[str, Any]] = []
-        for v in ordered_videos:
+        for v, label in zip(ordered_videos, labels, strict=True):
             anchor, kind = _video_clip_anchor(slug, project, stg.stage_number, v)
             out.append(
                 {
@@ -12637,6 +12639,7 @@ def create_app(
                     "role": v.role,
                     "beep_in_clip": anchor,
                     "kind": kind,
+                    "label": label,
                 }
             )
         return out
