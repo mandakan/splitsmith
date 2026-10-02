@@ -31,6 +31,7 @@ fi
 [ -f "$tarball" ] || curl -fsSL -o "$tarball" "$URL"
 sha256_verify "$SHA256" "$tarball"
 tar -xzf "$tarball" -C "$DEST" ffmpeg ffprobe
-echo "$TAG" > "$DEST/FFMPEG_RELEASE"
+# Beside bin/, not in it: electron-builder ships all of build/bin.
+echo "$TAG" > "$HERE/build/FFMPEG_RELEASE"
 chmod +x "$DEST/ffmpeg" "$DEST/ffprobe"
 "$DEST/ffmpeg" -version | head -1
