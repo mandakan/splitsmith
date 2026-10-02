@@ -145,6 +145,10 @@
   .c-coach{grid-column:span 6}
   .c-compare{grid-column:span 6}
   .cell .pic + .pic{padding-top:0}
+  .c-sort{grid-column:span 12}
+  .c-sort .core{flex-direction:row;align-items:center;gap:20px}
+  .c-sort .body{flex:1}
+  .c-sort .pic{flex:1.4;padding:12px 12px 12px 0;margin:0}
   .c-export{grid-column:span 12}
   .c-export .core{flex-direction:row;align-items:center;gap:20px}
   .c-export .body{flex:1}
@@ -207,9 +211,9 @@
     .hero-visual .shell{transform:none}
     .figs{grid-template-columns:repeat(2,1fr)}
     .ways{grid-template-columns:1fr}
-    .c-audit,.c-coach,.c-splits,.c-compare,.c-export{grid-column:span 12}
-    .c-export .core{flex-direction:column;align-items:stretch}
-    .c-export .pic{padding:0 12px 12px}
+    .c-audit,.c-coach,.c-splits,.c-compare,.c-export,.c-sort{grid-column:span 12}
+    .c-export .core,.c-sort .core{flex-direction:column;align-items:stretch}
+    .c-export .pic,.c-sort .pic{padding:0 12px 12px}
   }
   @media (max-width:767px){
     .nav .links,.nav .cta{display:none}
@@ -292,9 +296,15 @@
     <div class="sec-hd">
       <span class="eyebrow rv"><i></i>The loop</span>
       <h2 class="rv d1">Prepare. Review. Analyse. Deliver.</h2>
-      <p class="lede rv d2">One match, one folder of clips, four phases. The app keeps score of where every stage is and always knows what to do next.</p>
+      <p class="lede rv d2">One match, the whole squad's footage, four phases. The app keeps score of where every stage is and always knows what to do next.</p>
     </div>
     <div class="bento">
+      <div class="cell shell c-sort rv">
+        <div class="core">
+          <div class="body"><span class="phase">Prepare &middot; Footage</span><h3>Your club mates' folders, sorted</h3><p>Point it at the folders your squad shared: phone clips of each other, head-cam clips, photos. Every video is matched to the shooter and stage whose scorecard was typed right after it, with the head cam first when several cameras caught the same run. A camera with a wrong clock asks once: name one of its clips and the rest follows. You check the list and import it in one go. Desktop app.</p></div>
+          <div class="pic"><img src="img/footage-sort.png" width="910" height="581" alt="The sort review: a head cam with an unknown clock waiting for one named clip, and Anna Jonsson's runs, each on two cameras with the glasses as primary" loading="lazy"></div>
+        </div>
+      </div>
       <div class="cell shell c-audit rv">
         <div class="core">
           <div class="body"><span class="phase">Review &middot; Audit</span><h3>Every shot, on the waveform</h3><p>The detector's candidates sit on the stage audio with their votes. Reject an echo, add a shot at the playhead, jump to the next flag. Confirm the beep first; the trim and detection chain from there.</p></div>
