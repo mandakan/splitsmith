@@ -19,11 +19,12 @@ parse_target_flag() {
   esac
 }
 
-# sha256_verify <sha256> <file>: shasum on macOS, sha256sum on Linux.
+# sha256_verify <sha256> <file>: shasum where it exists (macOS, the tool the
+# scripts always used there), sha256sum otherwise.
 sha256_verify() {
-  if command -v sha256sum >/dev/null; then
-    echo "$1  $2" | sha256sum -c - >/dev/null
-  else
+  if command -v shasum >/dev/null; then
     echo "$1  $2" | shasum -a 256 -c - >/dev/null
+  else
+    echo "$1  $2" | sha256sum -c - >/dev/null
   fi
 }
