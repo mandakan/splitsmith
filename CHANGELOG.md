@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.48.1](https://github.com/mandakan/splitsmith/compare/v0.48.0...v0.48.1) (2026-10-02)
+
+
+### Bug Fixes
+
+* **audit:** play iPhone .MOV in the beep picker; no Confirm beep while detection runs ([#1136](https://github.com/mandakan/splitsmith/issues/1136)) ([40d4c2b](https://github.com/mandakan/splitsmith/commit/40d4c2b4b4f88c55820566a2e99700fe583b5cab))
+* **footage-sort:** keep a sort open while clips still need the user ([#1133](https://github.com/mandakan/splitsmith/issues/1133)) ([d948098](https://github.com/mandakan/splitsmith/commit/d948098c65192d26c9cda86ef2064406f598045c))
+* **footage-sort:** show the role the import will give, never a primary it will not make ([#1135](https://github.com/mandakan/splitsmith/issues/1135)) ([988cd85](https://github.com/mandakan/splitsmith/commit/988cd85598671e10d3e80992efd9b0709358f951))
+
 ## [0.48.0](https://github.com/mandakan/splitsmith/compare/v0.47.0...v0.48.0) (2026-10-02)
 
 
