@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.49.1](https://github.com/mandakan/splitsmith/compare/v0.49.0...v0.49.1) (2026-10-02)
+
+
+### Bug Fixes
+
+* **compare:** Play all with every shooter showing plays the stages side by side ([#1140](https://github.com/mandakan/splitsmith/issues/1140)) ([d91bec7](https://github.com/mandakan/splitsmith/commit/d91bec7b1567d81a76b4f202fadfefcfb27bffab))
+
+
+### Documentation
+
+* Add footage is the footage sort; the beep queue (README and site) ([#1141](https://github.com/mandakan/splitsmith/issues/1141)) ([d808048](https://github.com/mandakan/splitsmith/commit/d8080487785bf9c09b4019a9eed98a1d65a0edff))
+
 ## [0.49.0](https://github.com/mandakan/splitsmith/compare/v0.48.1...v0.49.0) (2026-10-02)
 
 
