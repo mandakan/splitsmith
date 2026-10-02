@@ -9,7 +9,7 @@
  * drops them; ``isDirty`` therefore ignores them.
  */
 import type { ExportPresetBody, OverlayCodec } from "@/lib/api";
-import { DEFAULT_CAM_OPTIONS, type CamOptions } from "@/lib/camOptions";
+import { DEFAULT_CAM_OPTIONS, fromPipLayout, type CamOptions } from "@/lib/camOptions";
 import type { ExportMode } from "@/lib/exportPlan";
 import {
   DEFAULT_RENDER_OPTIONS,
@@ -100,7 +100,11 @@ export function settingsToBody(s: ExportSettings): ExportPresetBody {
     overlay_codec: s.overlayCodec,
     canvas: s.canvas,
     include_secondaries: s.camOptions.includeSecondaries,
-    pip_layout: s.camOptions.pipLayout,
+    pip_layout: "stacked",
+    main_camera: s.camOptions.mainCamera,
+    inset_camera: s.camOptions.insetCamera,
+    inset_corner: s.camOptions.insetCorner,
+    inset_size: s.camOptions.insetSize,
     youtube_preset: s.youtube,
     padding_preset: s.paddingPreset,
     head_pad_seconds: finite(s.headPad, PADDING_PRESETS.full.head),
@@ -131,7 +135,17 @@ export function applyBody(s: ExportSettings, body: ExportPresetBody): ExportSett
     outputFormat: body.output_format,
     overlayCodec: body.overlay_codec,
     canvas: body.canvas,
-    camOptions: { includeSecondaries: body.include_secondaries, pipLayout: body.pip_layout },
+    camOptions: fromPipLayout(
+      {
+        includeSecondaries: body.include_secondaries,
+        pipLayout: "stacked",
+        mainCamera: body.main_camera ?? DEFAULT_CAM_OPTIONS.mainCamera,
+        insetCamera: body.inset_camera ?? null,
+        insetCorner: body.inset_corner ?? DEFAULT_CAM_OPTIONS.insetCorner,
+        insetSize: body.inset_size ?? DEFAULT_CAM_OPTIONS.insetSize,
+      },
+      body.pip_layout,
+    ),
     youtube: body.youtube_preset,
     paddingPreset: body.padding_preset,
     headPad: finite(body.head_pad_seconds, PADDING_PRESETS.full.head),

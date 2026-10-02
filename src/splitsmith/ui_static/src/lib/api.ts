@@ -1020,6 +1020,10 @@ export interface ExportPresetBody {
   canvas: "uhd" | "hd";
   include_secondaries: boolean;
   pip_layout: "stacked" | "pip-corners";
+  main_camera: string;
+  inset_camera: string | null;
+  inset_corner: "top-left" | "top-right" | "bottom-left" | "bottom-right";
+  inset_size: "small" | "medium" | "large";
   youtube_preset: boolean;
   padding_preset: "full" | "action" | "highlight" | "custom";
   head_pad_seconds: number;
@@ -1132,8 +1136,18 @@ export interface MatchExportRequestPayload {
   project_name?: string | null;
   /** Issue #193. ``"stacked"`` keeps secondaries full-frame on V2/V3/...
    *  ``"pip-corners"`` adds an FCPXML adjust-transform so each cam lands
-   *  in a rotating corner (TR -> TL -> BR -> BL) at 25% scale. */
+   *  in a rotating corner (TR -> TL -> BR -> BL) at 25% scale.
+   *  Superseded by the inset below; ``pip-corners`` maps to it. */
   pip_layout?: "stacked" | "pip-corners";
+  /** The camera each stage shows: ``"default"`` (the shooter's saved
+   *  camera), ``"primary"``, or a mount; resolved per stage, falling back
+   *  to the primary. The sound is the main camera's. */
+  main_camera?: string;
+  /** A second camera in a corner, shown only when it is not the main one;
+   *  null for none. */
+  inset_camera?: string | null;
+  inset_corner?: "top-left" | "top-right" | "bottom-left" | "bottom-right";
+  inset_size?: "small" | "medium" | "large";
   /** Issue #197 / #174. ``"fcpxml"`` writes Final Cut Pro 1.10
    *  (default). ``"fcp7xml"`` writes a Final Cut Pro 7-style ``.xml``
    *  importable into Premiere Pro and DaVinci Resolve. ``"mp4"`` bakes

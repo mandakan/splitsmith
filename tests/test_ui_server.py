@@ -10122,3 +10122,43 @@ def test_export_stage_summary_card_flag_reaches_the_exporter_and_the_run_record(
     assert {"filename": "stage1_stage-1_summary.mov", "kind": "summary_card"} in [
         {"filename": a["filename"], "kind": a["kind"]} for a in latest["artifacts"]
     ]
+
+
+def test_match_export_default_main_camera_is_the_shooters_saved_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``main_camera: "default"`` (the Export page's default) reaches the
+    export as the shooter's saved ``compare_camera``; the inset fields pass
+    through."""
+    from splitsmith.ui import match_exports as match_exports_mod
+
+    client, root = _seed_match_export_project(tmp_path)
+    _stub_match_export_probe(monkeypatch)
+    project_root = next((root / "shooters").iterdir())
+    project = MatchProject.load(project_root)
+    project.compare_camera = "hand"
+    project.save(project_root)
+    seen: dict[str, object] = {}
+    real = match_exports_mod.export_match
+
+    def capture(*args: object, **kwargs: object) -> object:
+        seen["request"] = kwargs["request"]
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(match_exports_mod, "export_match", capture)
+    resp = client.post(
+        "/api/shooters/me/export/match",
+        json={
+            "stage_numbers": [1],
+            "include_overlay": False,
+            "inset_camera": "head",
+            "inset_corner": "top-left",
+            "inset_size": "large",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    assert _wait_for_job(client, resp.json()["id"])["status"] == "succeeded"
+    request = seen["request"]
+    assert isinstance(request, match_exports_mod.MatchExportRequestData)
+    assert request.main_camera == "hand"
+    assert (request.inset_camera, request.inset_corner, request.inset_size) == ("head", "top-left", "large")

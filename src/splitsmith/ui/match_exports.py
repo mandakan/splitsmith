@@ -32,6 +32,9 @@ from ..segment_cache import SegmentCache
 from ..stage_summary_data import TileStageData, load_stage_shots
 
 PipLayout = Literal["stacked", "pip-corners"]
+InsetSize = Literal["small", "medium", "large"]
+#: The inset's width as a share of the frame's.
+INSET_SCALE: dict[str, float] = {"small": 0.22, "medium": 0.30, "large": 0.40}
 # Issue #197. ``"fcpxml"`` writes a Final Cut Pro 1.10 timeline (current
 # default). ``"fcp7xml"`` writes a Final Cut Pro 7-style xmeml file
 # importable into Premiere Pro and DaVinci Resolve. Issue #174.
@@ -69,6 +72,8 @@ class MatchSecondaryInput:
     trimmed_path: Path
     beep_offset_seconds: float
     label: str = "Secondary cam"
+    #: The camera mount ("hand", "head"), what a camera choice keys on.
+    mount: str | None = None
 
 
 @dataclass(frozen=True)
@@ -88,6 +93,9 @@ class MatchStageInput:
     beep_offset_seconds: float
     secondaries: tuple[MatchSecondaryInput, ...] = ()
     overlay_path: Path | None = None
+    #: The primary camera's mount; with the secondaries' it is what the
+    #: export's main camera and inset are chosen by.
+    primary_mount: str | None = None
     # Issue #973. The stage's expected round count when the scoreboard or
     # the audit knows it; a generated stage card prints it as an info
     # line. ``None`` prints nothing -- never a guess.
@@ -101,6 +109,70 @@ class MatchStageInput:
     stage_time_seconds: float | None = None
     stage_time_is_manual: bool = False
     stage_rounds: StageRounds | None = None
+
+
+@dataclass(frozen=True)
+class StageCamera:
+    """One camera of a stage as the export chooses between them."""
+
+    path: Path
+    beep_offset_seconds: float
+    label: str
+    role: Literal["primary", "secondary"]
+    mount: str | None
+    #: How notes name it: "the primary", "cam <video id>".
+    note_name: str = "the primary"
+
+
+def stage_cameras(stage_input: MatchStageInput) -> list[StageCamera]:
+    """The stage's cameras, the primary first."""
+    cams = [
+        StageCamera(
+            path=stage_input.trimmed_path,
+            beep_offset_seconds=stage_input.beep_offset_seconds,
+            label="Primary",
+            role="primary",
+            mount=stage_input.primary_mount,
+        )
+    ]
+    for sec in stage_input.secondaries:
+        cams.append(
+            StageCamera(
+                path=sec.trimmed_path,
+                beep_offset_seconds=sec.beep_offset_seconds,
+                label=sec.label,
+                role="secondary",
+                mount=sec.mount,
+                note_name=f"cam {sec.video_id}",
+            )
+        )
+    return cams
+
+
+def _pick(cams: Sequence[StageCamera], selector: str | None) -> StageCamera | None:
+    """``camera_select``'s order: the mount first, then the role."""
+    if not selector:
+        return None
+    for cam in cams:
+        if cam.mount == selector:
+            return cam
+    for cam in cams:
+        if cam.role == selector:
+            return cam
+    return None
+
+
+def choose_stage_cameras(
+    cams: Sequence[StageCamera], main_selector: str | None, inset_selector: str | None
+) -> tuple[StageCamera, StageCamera | None, list[StageCamera]]:
+    """The picture, its inset and the rest. The main camera falls back to
+    the primary when the selector names nothing on this stage; the inset
+    is chosen among the other cameras, so it is never the picture twice."""
+    main = _pick(cams, main_selector) or cams[0]
+    rest = [c for c in cams if c is not main]
+    inset = _pick(rest, inset_selector)
+    others = [c for c in rest if c is not inset]
+    return main, inset, others
 
 
 def stage_inputs_for_project(
@@ -138,6 +210,7 @@ def stage_inputs_for_project(
                     # inside it in the source.
                     beep_offset_seconds=min(project.trim_pre_buffer_seconds, video.beep_time),
                     label=f"Cam {video.video_id}",
+                    mount=video.camera_mount,
                 )
             )
         rounds = stage.stage_rounds.expected if stage.stage_rounds is not None else None
@@ -150,6 +223,7 @@ def stage_inputs_for_project(
                 beep_offset_seconds=min(project.trim_pre_buffer_seconds, primary.beep_time),
                 secondaries=tuple(secondaries),
                 overlay_path=exports_dir / f"{base}_overlay.mov",
+                primary_mount=primary.camera_mount,
                 expected_rounds=rounds,
                 scorecard=stage.scorecard,
                 # The model treats <=0 as unset: an untouched placeholder
@@ -199,6 +273,18 @@ class MatchExportRequestData:
     # so the 1-cam case stays clear of the overlay's top-corner widgets)
     # at 30% scale with a 2% inset.
     pip_layout: PipLayout = "stacked"
+    # The picture and its inset (2026-10-02, replacing ``pip-corners``):
+    # ``main_camera`` is the camera each stage shows, a mount ("hand") or a
+    # role resolved per stage like ``camera_select`` (same mount, then
+    # role, else the primary); the caller turns the shooter's saved
+    # default into a selector before it gets here. ``inset_camera`` (None:
+    # no inset) is a second camera in a corner, shown only when it is not
+    # the main one. Shots, captions and the overlay key on each camera's
+    # own beep, and the sound is the main camera's.
+    main_camera: str = "primary"
+    inset_camera: str | None = None
+    inset_corner: fcpxml_gen.PipCorner = "bottom-right"
+    inset_size: InsetSize = "medium"
     # Issue #197. Renderer chosen for this export.
     output_format: OutputFormat = "fcpxml"
     # Issue #195. Uniform transition between every consecutive stage
@@ -249,6 +335,14 @@ class MatchExportRequestData:
     # ``None`` falls back to the project name.
     summary_hold_seconds: float = 0.0
     shooter_label: str | None = None
+
+    def __post_init__(self) -> None:
+        # A preset or a CLI call from before the inset (``pip-corners``,
+        # rotating corners) becomes the one inset it stood for: the first
+        # secondary, bottom-left.
+        if self.pip_layout == "pip-corners" and self.inset_camera is None:
+            object.__setattr__(self, "inset_camera", "secondary")
+            object.__setattr__(self, "inset_corner", "bottom-left")
 
 
 @dataclass(frozen=True)
@@ -354,28 +448,66 @@ def export_match(
                 f"stage {stage_input.stage_number}: ffprobe failed on {stage_input.trimmed_path}: {exc}"
             ) from exc
 
-        secondaries: list[fcpxml_gen.SecondaryClip] = []
-        if request.include_secondaries:
-            for sec in stage_input.secondaries:
-                if not sec.trimmed_path.exists():
-                    anomalies.append(
-                        f"stage {stage_input.stage_number}: cam {sec.video_id} trim "
-                        f"missing at {sec.trimmed_path} -- dropped"
-                    )
-                    continue
-                try:
-                    sec_meta = probe(sec.trimmed_path)  # type: ignore[operator]
-                except fcpxml_gen.FFprobeError as exc:
-                    anomalies.append(f"stage {stage_input.stage_number}: cam {sec.video_id} dropped: {exc}")
-                    continue
-                secondaries.append(
-                    fcpxml_gen.SecondaryClip(
-                        video_path=sec.trimmed_path,
-                        video=sec_meta,
-                        beep_offset_seconds=sec.beep_offset_seconds,
-                        label=sec.label,
-                    )
+        # The picture and its inset. A main camera whose trim is missing
+        # falls back to the primary rather than failing the stage.
+        main, inset, others = choose_stage_cameras(
+            stage_cameras(stage_input), request.main_camera, request.inset_camera
+        )
+        if main.role != "primary" and not main.path.exists():
+            anomalies.append(
+                f"stage {stage_input.stage_number}: {main.note_name} trim missing at {main.path} -- "
+                "the primary is the picture instead"
+            )
+            main, inset, others = choose_stage_cameras(
+                stage_cameras(stage_input), "primary", request.inset_camera
+            )
+        main_meta = primary_meta
+        if main.role != "primary":
+            try:
+                main_meta = probe(main.path)  # type: ignore[operator]
+            except fcpxml_gen.FFprobeError as exc:
+                anomalies.append(
+                    f"stage {stage_input.stage_number}: {main.note_name} unreadable ({exc}) -- "
+                    "the primary is the picture instead"
                 )
+                main, inset, others = choose_stage_cameras(
+                    stage_cameras(stage_input), "primary", request.inset_camera
+                )
+
+        secondaries: list[fcpxml_gen.SecondaryClip] = []
+        # The inset first, so it sits on the lane right above the picture;
+        # then, for an editing timeline, every other angle switched off.
+        # An MP4 has no use for those, so it carries only the inset.
+        carried = [(inset, True)] if inset is not None else []
+        if request.include_secondaries and request.output_format != "mp4":
+            carried += [(cam, False) for cam in others]
+        for cam, shown in carried:
+            if not cam.path.exists():
+                anomalies.append(
+                    f"stage {stage_input.stage_number}: {cam.note_name} trim missing at {cam.path} -- dropped"
+                )
+                continue
+            try:
+                cam_meta = probe(cam.path)  # type: ignore[operator]
+            except fcpxml_gen.FFprobeError as exc:
+                anomalies.append(f"stage {stage_input.stage_number}: {cam.note_name} dropped: {exc}")
+                continue
+            secondaries.append(
+                fcpxml_gen.SecondaryClip(
+                    video_path=cam.path,
+                    video=cam_meta,
+                    beep_offset_seconds=cam.beep_offset_seconds,
+                    label=cam.label,
+                    pip=(
+                        fcpxml_gen.PipPlacement(
+                            corner=request.inset_corner, scale=INSET_SCALE[request.inset_size]
+                        )
+                        if shown
+                        else None
+                    ),
+                    enabled=shown,
+                )
+            )
 
         overlay_path: Path | None = None
         overlay_video = None
@@ -404,23 +536,34 @@ def export_match(
                     f"{stage_input.overlay_path} -- dropped"
                 )
 
-        if request.pip_layout == "pip-corners" and secondaries:
-            laid_out = fcpxml_gen.apply_pip_corner_cycle(secondaries, default=fcpxml_gen.PipPlacement())
-        else:
-            laid_out = tuple(secondaries)
+        # The overlay is drawn on the primary trim's clock. Another main
+        # camera whose trim starts at a different point before the beep (a
+        # beep inside its source's first seconds) would carry it out of
+        # step with the shots, so that stage goes without it, said so.
+        if (
+            overlay_path is not None
+            and main.role != "primary"
+            and abs(main.beep_offset_seconds - stage_input.beep_offset_seconds) > 0.02
+        ):
+            anomalies.append(
+                f"stage {stage_input.stage_number}: overlay dropped -- {main.note_name}'s trim starts "
+                f"{abs(main.beep_offset_seconds - stage_input.beep_offset_seconds):.2f}s off the primary's"
+            )
+            overlay_path = None
+            overlay_video = None
 
         compositions.append(
             fcpxml_gen.StageComposition(
                 stage_name=stage_input.stage_name,
-                video_path=stage_input.trimmed_path,
-                video=primary_meta,
+                video_path=main.path,
+                video=main_meta,
                 shots=shots,
-                beep_offset_seconds=stage_input.beep_offset_seconds,
+                beep_offset_seconds=main.beep_offset_seconds,
                 head_pad_seconds=request.head_pad_seconds,
                 tail_pad_seconds=request.tail_pad_seconds,
                 overlay_path=overlay_path,
                 overlay_video=overlay_video,
-                secondaries=laid_out,
+                secondaries=tuple(secondaries),
             )
         )
 

@@ -118,6 +118,12 @@ class MatchExportRequest(BaseModel):
     # behaviour). ``"pip-corners"`` adds an ``<adjust-transform>`` to each
     # secondary, rotating through TR -> TL -> BR -> BL at 25% scale.
     pip_layout: Literal["stacked", "pip-corners"] = "stacked"
+    # The picture and its inset (see ``MatchExportRequestData``).
+    # ``"default"`` is the shooter's saved camera (``compare_camera``).
+    main_camera: str = "default"
+    inset_camera: str | None = None
+    inset_corner: Literal["top-right", "top-left", "bottom-right", "bottom-left"] = "bottom-right"
+    inset_size: Literal["small", "medium", "large"] = "medium"
     # Issue #197. ``"fcpxml"`` writes Final Cut Pro 1.10 (the default).
     # ``"fcp7xml"`` writes a Final Cut Pro 7-style xmeml ``.xml``
     # importable into Premiere Pro and DaVinci Resolve. Issue #174:

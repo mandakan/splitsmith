@@ -151,9 +151,9 @@ export function summaryLines(args: {
   /** ``describeRenderOptions`` for the mode and format; null is off. */
   cards: string | null;
   overlay: boolean;
-  /** Synced secondaries riding the bundle; null hides the line (the
-   *  shooter has none, or the mode does not take them). */
-  cams: number | null;
+  /** The camera choice in words (``camsSummary``); null hides the line
+   *  (the shooter has no second camera, or the mode does not take them). */
+  cams: string | null;
   /** The YouTube encode preset and sidecar; null when the format has
    *  neither to offer. */
   youtube: boolean | null;
@@ -187,13 +187,7 @@ export function summaryLines(args: {
   );
   lines.push(cards);
   lines.push(args.overlay ? { label: "Overlay", value: "on" } : { label: "Overlay", value: "off", dim: true });
-  if (args.cams !== null) {
-    lines.push(
-      args.cams > 0
-        ? { label: "Cams", value: `${args.cams} synced` }
-        : { label: "Cams", value: "primary only", dim: true },
-    );
-  }
+  if (args.cams !== null) lines.push({ label: "Cameras", value: args.cams });
   if (args.youtube !== null) {
     lines.push(args.youtube ? { label: "YouTube", value: "preset + sidecar" } : { label: "YouTube", value: "off", dim: true });
   }

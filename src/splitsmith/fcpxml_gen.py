@@ -115,6 +115,9 @@ class SecondaryClip:
     beep_offset_seconds: float
     label: str = "Secondary cam"
     pip: PipPlacement | None = None
+    #: Off: carried for editing (``enabled="0"``) so it does not cover the
+    #: main picture and its inset; the user switches it on in FCP.
+    enabled: bool = True
 
 
 def apply_pip_corner_cycle(
@@ -573,6 +576,7 @@ def generate_fcpxml(
                 "start": sec_start_str,
                 "duration": sec_duration_parent_str,
                 "format": format_id,
+                **({} if sec.enabled else {"enabled": "0"}),
             },
         )
         _attach_pip_transform(
@@ -1432,6 +1436,8 @@ def generate_match_fcpxml(
                     # PiP. Using sec_format_id makes the format consistent
                     # so PiP renders. (#236)
                     "format": sec_format_id,
+                    # An angle carried for editing plays switched off.
+                    **({} if sec.enabled else {"enabled": "0"}),
                 },
             )
             # Mute the cam's audio on the timeline (#236). The asset

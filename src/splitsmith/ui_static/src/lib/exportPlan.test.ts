@@ -154,13 +154,13 @@ describe("summaryLines", () => {
     expect(lines[3]).toEqual({ label: "Cards", value: "off", dim: true });
   });
   it("names the cards, the cams and YouTube only when the mode and format offer them", () => {
-    const lines = summaryLines({ ...base, mode: "single", cards: "title page · slate", cams: 2, youtube: true });
-    expect(lines.map((l) => l.label)).toEqual(["Stages", "Padding", "Transitions", "Cards", "Overlay", "Cams", "YouTube"]);
+    const lines = summaryLines({ ...base, mode: "single", cards: "title page · slate", cams: "Handheld + Head cam inset", youtube: true });
+    expect(lines.map((l) => l.label)).toEqual(["Stages", "Padding", "Transitions", "Cards", "Overlay", "Cameras", "YouTube"]);
     expect(lines[3]).toEqual({ label: "Cards", value: "title page · slate" });
-    expect(lines[5]).toEqual({ label: "Cams", value: "2 synced" });
+    expect(lines[5]).toEqual({ label: "Cameras", value: "Handheld + Head cam inset" });
     expect(lines[6]).toEqual({ label: "YouTube", value: "preset + sidecar" });
-    // Cams on the shooter but switched off read as "primary only", dimmed.
-    expect(summaryLines({ ...base, mode: "single", cams: 0 }).at(-1)).toEqual({ label: "Cams", value: "primary only", dim: true });
+    // The camera choice in words, whatever it is.
+    expect(summaryLines({ ...base, mode: "single", cams: "Primary" }).at(-1)).toEqual({ label: "Cameras", value: "Primary" });
   });
   it("trims show the grid camera, the grid shows reference, canvas and cards", () => {
     expect(summaryLines({ ...base, mode: "trims", gridCamera: "head" })[1]).toEqual({ label: "Grid camera", value: "head", dim: false });

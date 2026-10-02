@@ -240,7 +240,7 @@ describe("Export rendered-video rows", () => {
     // The match cards are MP4-only: not offered on FCPXML.
     expect(screen.queryByRole("radiogroup", { name: "Title page" })).toBeNull();
     await user.click(tile("Stage card", "Slate"));
-    await user.click(choice("Secondary cam layout", "Picture-in-picture"));
+    await user.click(choice("Inset camera", "Secondary"));
     await user.click(screen.getByRole("button", { name: /export bundle/i }));
 
     await waitFor(() => expect(api.exportMatch).toHaveBeenCalledTimes(1));
@@ -250,7 +250,11 @@ describe("Export rendered-video rows", () => {
       title_kind: "slate",
       title_duration_seconds: 1.5,
       include_secondaries: true,
-      pip_layout: "pip-corners",
+      pip_layout: "stacked",
+      main_camera: "default",
+      inset_camera: "secondary",
+      inset_corner: "bottom-right",
+      inset_size: "medium",
       youtube_sidecar: false,
       youtube_preset: false,
       youtube_upload: false,
@@ -276,7 +280,8 @@ describe("Export rendered-video rows", () => {
     await user.type(screen.getByLabelText("Summary hold seconds"), "3");
     await user.click(choice("YouTube", "Preset + sidecar"));
     await user.type(screen.getByLabelText("Description lead"), "  Production Optics, head cam  ");
-    await user.click(choice("Secondary cams", "Primary only"));
+    // An MP4 carries only the picture and its inset: no "other angles" row.
+    expect(screen.queryByRole("group", { name: "Other angles" })).toBeNull();
 
     expect(screen.getByText("bromma-2026-youtube.json")).toBeInTheDocument();
     expect(screen.getByText("bromma-2026.srt")).toBeInTheDocument();
@@ -292,7 +297,8 @@ describe("Export rendered-video rows", () => {
       closing_card: true,
       summary_hold_seconds: 3,
       title_kind: "none",
-      include_secondaries: false,
+      main_camera: "default",
+      inset_camera: null,
       youtube_sidecar: true,
       youtube_preset: true,
       youtube_upload: false,

@@ -220,6 +220,41 @@ def test_secondary_cam_lands_on_v2_with_alignment(tmp_path: Path) -> None:
     assert cam_clip.findtext("in") == "0"
 
 
+def test_an_angle_carried_for_editing_is_switched_off(tmp_path: Path) -> None:
+    """The export's "other angles" ride their own tracks switched off, so
+    the picture and its inset are what plays (as in FCPXML)."""
+    stages = [
+        StageComposition(
+            stage_name="A",
+            video_path=_make_video(tmp_path, "a.mp4"),
+            video=_meta_30fps(),
+            shots=[_shot(1, 1.0, 1.0)],
+            beep_offset_seconds=5.0,
+            head_pad_seconds=5.0,
+            tail_pad_seconds=5.0,
+            secondaries=(
+                SecondaryClip(
+                    video_path=_make_video(tmp_path, "inset.mp4"),
+                    video=_meta_30fps(),
+                    beep_offset_seconds=5.0,
+                    label="Inset",
+                ),
+                SecondaryClip(
+                    video_path=_make_video(tmp_path, "other.mp4"),
+                    video=_meta_30fps(),
+                    beep_offset_seconds=5.0,
+                    label="Other",
+                    enabled=False,
+                ),
+            ),
+        )
+    ]
+    tracks = _render(stages, tmp_path).findall(".//sequence/media/video/track")
+    inset, other = (t.find("clipitem") for t in tracks[1:3])
+    assert inset.findtext("enabled") is None
+    assert other.findtext("enabled") == "FALSE"
+
+
 def test_overlay_lands_on_topmost_track(tmp_path: Path) -> None:
     """When secondaries and overlay are present, overlay is on the track
     above all cams -- highest visual layer."""

@@ -806,6 +806,9 @@ def _plan_stage(stage: Stage, sequence_format) -> _StagePlan:  # type: ignore[no
     cam_alignments: list[_CamAlignment] = []
     visible_head = head_trim_seconds  # source time of the visible head in the primary
     for sec in stage.secondaries:
+        if not sec.enabled:
+            # An angle carried for editing only: an MP4 has no use for it.
+            continue
         assert sec.beep_offset_seconds is not None  # cam role
         # Same head-slip math as the FCPXML emitter, expressed in seconds.
         delta = (stage.beep_offset_seconds - visible_head) - sec.beep_offset_seconds
