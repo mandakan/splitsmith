@@ -101,4 +101,17 @@ describe("CamOptionsPanel", () => {
       expect(button).toHaveAttribute("aria-pressed");
     }
   });
+
+  it("on the grid states the main camera and offers only the inset", () => {
+    panel({ grid: true, secondaryCount: 2, editing: true });
+    expect(screen.queryByRole("group", { name: "Main camera" })).toBeNull();
+    expect(screen.getByText(/Each shooter's saved camera/)).toBeInTheDocument();
+    expect(
+      screen.getByText("2 shooters with more than one camera"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("group", { name: "Inset camera" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Other angles" })).toBeNull();
+  });
 });

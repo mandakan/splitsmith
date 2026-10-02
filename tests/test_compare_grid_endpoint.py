@@ -928,3 +928,33 @@ def test_grid_upload_without_a_sidecar_is_refused(match_client_with_trims: _Matc
         json={"stage_numbers": [1], "audio_from": "mathias", "youtube_upload": True},
     )
     assert response.status_code == 422
+
+
+def test_the_inset_look_reaches_the_renderer_and_the_selector_the_loader(
+    match_client_with_trims: _MatchClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(mp4_grid_mod, "render_grid_mp4", _capturing_render(captured))
+    seen: dict[str, Any] = {}
+    real_load = server_mod._load_compare_bundles
+
+    def _load(*args: Any, **kwargs: Any) -> Any:
+        seen.setdefault("inset", kwargs.get("inset"))
+        return real_load(*args, **kwargs)
+
+    monkeypatch.setattr(server_mod, "_load_compare_bundles", _load)
+    response = match_client_with_trims.post(
+        "/api/match/compare-export",
+        json={
+            "stage_numbers": [1],
+            "audio_from": "mathias",
+            "inset_camera": "head",
+            "inset_corner": "top-left",
+            "inset_size": "small",
+        },
+    )
+    assert response.status_code == 200, response.text
+    job = _wait_for_job(match_client_with_trims, response.json()["id"])
+    assert job["status"] == "succeeded", job
+    assert captured["inset"] == mp4_grid_mod.GridInset(corner="top-left", scale=0.22)
+    assert seen["inset"] == "head"

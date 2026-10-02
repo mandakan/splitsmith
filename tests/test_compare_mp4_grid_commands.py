@@ -712,3 +712,111 @@ def test_the_default_off_stage_command_names_no_overlay_machinery():
 
 def _graph_of(cmd: tuple[str, ...]) -> str:
     return cmd[cmd.index("-filter_complex") + 1]
+
+
+# --- the inset (2026-10-02) ------------------------------------------------
+
+CANVAS = mp4_grid.GridCanvas()
+
+
+def _with_inset(plan: mp4_grid.GridStagePlan, label: str, *, lead: float = 0.0) -> mp4_grid.GridStagePlan:
+    tiles = tuple(
+        (
+            replace(
+                t,
+                inset_path=Path(f"/trims/{label}_cam.mp4"),
+                inset_seek_seconds=0.0 if lead else 1.5,
+                inset_lead_pad_seconds=lead,
+            )
+            if t.label == label
+            else t
+        )
+        for t in plan.tiles
+    )
+    return replace(plan, tiles=tiles)
+
+
+def test_no_inset_leaves_the_argv_as_it_was():
+    plan = _plan()
+    assert mp4_grid.build_stage_command(plan, canvas=CANVAS, output_path=Path("/out/s1.mov")) == (
+        mp4_grid.build_stage_command(
+            plan, canvas=CANVAS, output_path=Path("/out/s1.mov"), inset=mp4_grid.GridInset()
+        )
+    )
+    assert "overlay=x=" not in _graph(
+        mp4_grid.build_stage_command(plan, canvas=CANVAS, output_path=Path("/out/s1.mov"))
+    )
+
+
+def test_an_inset_is_the_last_input_and_overlays_its_tile_in_the_corner():
+    plan = _with_inset(_plan(), "Johan")
+    cmd = mp4_grid.build_stage_command(
+        plan,
+        canvas=CANVAS,
+        output_path=Path("/out/s1.mov"),
+        inset=mp4_grid.GridInset(corner="top-left", scale=0.25),
+    )
+    inputs = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-i"]
+    assert inputs[-1] == "/trims/Johan_cam.mp4"
+    inset_input = len(inputs) - 1
+    seek = cmd[[i for i, a in enumerate(cmd) if a == "-i"][-1] - 3]
+    assert seek == "1.5"
+    graph = _graph(cmd)
+    cell_w = CANVAS.width // 2
+    inset_w = round(cell_w * 0.25 / 2) * 2
+    assert f"[{inset_input}:v]setpts=PTS-STARTPTS,scale={inset_w}:-2" in graph
+    # Johan is the third tile (slot 2): overlaid onto his finished tile, top-left.
+    margin = round(cell_w * 0.02)
+    assert f"[t2][n2]overlay=x={margin}:y={margin}[u2]" in graph
+    assert "[t0][t1][u2][t3]xstack" in graph
+    # The audio maps are untouched: still the mix then one track per shooter.
+    maps = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-map"]
+    assert maps == ["[final]", "[amix]", "[a0]", "[a1]", "[a2]", "[a3]"]
+
+
+def test_an_inset_whose_beep_sits_early_is_lead_padded_like_a_tile():
+    plan = _with_inset(_plan(), "Anders", lead=0.7)
+    graph = _graph(mp4_grid.build_stage_command(plan, canvas=CANVAS, output_path=Path("/out/s1.mov")))
+    assert "tpad=start_duration=0.7:start_mode=add:color=black,setpts=PTS-STARTPTS,scale=" in graph
+    assert "[t0][n0]overlay=x=W-w-" in graph and ":y=H-h-" in graph
+
+
+def test_the_plan_lines_the_inset_up_on_its_own_beep():
+    from splitsmith.compare.project_loader import CompareShooterBundle, CompareStageBundle, InsetClip
+
+    def bundle(label: str, inset_beep: float | None) -> CompareShooterBundle:
+        stage = CompareStageBundle(
+            stage_number=1,
+            stage_name="Stage 1",
+            trim_path=Path(f"/trims/{label}.mp4"),
+            audit_path=Path(f"/audit/{label}.json"),
+            beep_offset_in_clip=5.0,
+            duration_seconds=20.0,
+            width=1920,
+            height=1080,
+            frame_rate_num=30,
+            frame_rate_den=1,
+            inset=(
+                InsetClip(
+                    trim_path=Path(f"/trims/{label}_cam.mp4"),
+                    beep_offset_in_clip=inset_beep,
+                    duration_seconds=20.0,
+                )
+                if inset_beep is not None
+                else None
+            ),
+        )
+        return CompareShooterBundle(label=label, project_root=Path("/p"), stages_by_number={1: stage})
+
+    (plan,) = mp4_grid.build_stage_plans(
+        [bundle("Anna", 5.0), bundle("Bo", 0.4), bundle("Cleo", None)],
+        audio_label="Anna",
+        head_pad_seconds=1.0,
+        tail_pad_seconds=0.5,
+    )
+    anna, bo, cleo = plan.tiles
+    # Beep at 5.0 s: seek to 4.0 so it lands on the 1.0 s head pad, like the tile.
+    assert (anna.inset_seek_seconds, anna.inset_lead_pad_seconds) == (4.0, 0.0)
+    # Beep at 0.4 s: no room to seek, so 0.6 s of black in front.
+    assert bo.inset_seek_seconds == 0.0 and bo.inset_lead_pad_seconds == pytest.approx(0.6)
+    assert cleo.inset_path is None

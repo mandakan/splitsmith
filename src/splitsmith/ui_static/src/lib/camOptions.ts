@@ -17,7 +17,11 @@
  * camera never had its beep confirmed offers nothing here.
  */
 
-import type { MatchExportRequestPayload, StageEntry } from "./api";
+import type {
+  MatchExportRequestPayload,
+  ShooterListEntry,
+  StageEntry,
+} from "./api";
 import { mountLabel } from "./shareCameras";
 
 export type PipLayout = NonNullable<MatchExportRequestPayload["pip_layout"]>;
@@ -148,4 +152,25 @@ export function camsSummary(
   return options.insetCamera === null
     ? main
     : `${main} + ${name(options.insetCamera)} inset`;
+}
+
+/** The grid's inset choices: the primary and every mount any shooter's
+ *  cameras carry (one selector for the whole grid, resolved per shooter). */
+export function gridCameraChoices(
+  shooters: ReadonlyArray<Pick<ShooterListEntry, "cameras">>,
+): CameraChoice[] {
+  const mounts = new Set<string>();
+  for (const s of shooters)
+    for (const c of s.cameras ?? []) if (c.mount) mounts.add(c.mount);
+  return [
+    { value: "primary", label: "Primary" },
+    ...[...mounts].sort().map((m) => ({ value: m, label: mountLabel(m) })),
+  ];
+}
+
+/** Shooters with more than one camera: zero hides the grid's inset row. */
+export function gridMultiCamShooters(
+  shooters: ReadonlyArray<Pick<ShooterListEntry, "cameras">>,
+): number {
+  return shooters.filter((s) => (s.cameras ?? []).length > 1).length;
 }

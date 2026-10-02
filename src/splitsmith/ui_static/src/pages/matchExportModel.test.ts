@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { camExportFields } from "@/lib/camOptions";
+import { camExportFields, DEFAULT_CAM_OPTIONS } from "@/lib/camOptions";
 import { DEFAULT_EXPORT_SETTINGS as S } from "@/lib/exportPresets";
 import { DEFAULT_RENDER_OPTIONS, clampSeconds, matchExportFields, transitionsSupported } from "@/lib/renderOptions";
 import { DEFAULT_UPLOAD_OPTIONS, rowUploadOptions } from "@/lib/youtubeRows";
@@ -26,6 +26,17 @@ describe("buildCompareGridPayload", () => {
     expect(payload.canvas_width).toBe(3840);
     expect(payload.canvas_height).toBe(2160);
     expect(payload.output_name).toBe("bromma-grid");
+  });
+
+  it("sends the tiles' inset only when one is chosen", () => {
+    const base = { stageNumbers: [1], audioFrom: "mathias", canvas: CANVAS_CHOICES[1], outputName: "g" };
+    expect(buildCompareGridPayload({ ...base, cams: DEFAULT_CAM_OPTIONS })).toEqual(buildCompareGridPayload(base));
+    expect(
+      buildCompareGridPayload({
+        ...base,
+        cams: { ...DEFAULT_CAM_OPTIONS, insetCamera: "head", insetCorner: "top-left", insetSize: "large" },
+      }),
+    ).toMatchObject({ inset_camera: "head", inset_corner: "top-left", inset_size: "large" });
   });
 
   it("publishes like one shooter: the sidecar with YouTube on, the upload only when on and connected", () => {

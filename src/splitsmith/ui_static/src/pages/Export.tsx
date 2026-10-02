@@ -680,6 +680,7 @@ function ExportInner({ slug }: { slug: string }) {
         render: renderOptions,
         overlay: gridOverlay,
         summaryHoldSeconds: gridHoldSeconds,
+        cams: camOptions,
         youtube,
         descriptionLead,
         uploadOptions,

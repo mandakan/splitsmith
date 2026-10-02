@@ -52,6 +52,9 @@ export function buildCompareGridPayload(input: {
    *  only alongside it. */
   overlay?: boolean;
   summaryHoldSeconds?: number;
+  /** The tiles' inset (the same settings as one shooter's); sent only
+   *  when one is chosen, so an untouched grid body stays as it was. */
+  cams?: CamOptions;
   /** The YouTube sidecar and the chained upload, as for one shooter. */
   youtube?: boolean;
   descriptionLead?: string;
@@ -70,6 +73,11 @@ export function buildCompareGridPayload(input: {
     payload.overlay = true;
     const hold = input.summaryHoldSeconds ?? 0;
     if (Number.isFinite(hold) && hold > 0) payload.summary_hold_seconds = Math.min(30, hold);
+  }
+  if (input.cams?.insetCamera) {
+    payload.inset_camera = input.cams.insetCamera;
+    payload.inset_corner = input.cams.insetCorner;
+    payload.inset_size = input.cams.insetSize;
   }
   if (input.youtube) {
     payload.youtube_sidecar = true;

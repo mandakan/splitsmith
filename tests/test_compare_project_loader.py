@@ -599,3 +599,36 @@ def test_load_shooter_from_match_names_trims_from_the_shooters_own_stage_name(
     # The label stays the match's: a shared stage must read the same across
     # every tile in the grid, whatever one shooter's scorecard called it.
     assert stage.stage_name == "Stage One"
+
+
+# --- the tile inset (2026-10-02) ---------------------------------------------
+
+
+def test_inset_is_another_camera_lined_up_on_its_own_beep(tmp_path: Path) -> None:
+    """Main on the chest cam, the helmet inset: the inset is the shooter's
+    other camera, with its own clip-local beep."""
+    root = _seed_project_with_two_cams(tmp_path)
+    bundle = load_shooter(root, "Mathias", camera="chest", inset="helmet", probe=_stub_probe)
+    stage = bundle.stages_by_number[1]
+    assert stage.inset is not None
+    assert stage.inset.trim_path.name.endswith("_trimmed.mp4") and "_cam_" not in stage.inset.trim_path.name
+    assert stage.inset.beep_offset_in_clip == pytest.approx(5.0)
+
+
+def test_inset_is_never_the_picture_twice_and_absent_where_the_camera_is(tmp_path: Path) -> None:
+    root = _seed_project_with_two_cams(tmp_path, chest_on_stage_2=False)
+    # The inset names the main camera itself: nothing to inset.
+    same = load_shooter(root, "Mathias", camera="chest", inset="chest", probe=_stub_probe)
+    assert same.stages_by_number[1].inset is None
+    # Stage 2 has no chest cam: the helmet tile goes without an inset.
+    bundle = load_shooter(root, "Mathias", inset="chest", probe=_stub_probe)
+    assert bundle.stages_by_number[1].inset is not None
+    assert bundle.stages_by_number[2].inset is None
+
+
+def test_an_inset_whose_trim_is_missing_is_simply_left_out(tmp_path: Path) -> None:
+    root = _seed_project_with_two_cams(tmp_path)
+    for trim in (root / "exports").glob("*_cam_*_trimmed.mp4"):
+        trim.unlink()
+    bundle = load_shooter(root, "Mathias", inset="chest", probe=_stub_probe)
+    assert all(stage.inset is None for stage in bundle.stages_by_number.values())
