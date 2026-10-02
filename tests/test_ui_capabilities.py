@@ -151,3 +151,11 @@ def test_review_routes_do_not_admit_a_trailing_newline(method: str, rest: str) -
     does not see or control who builds its argument.
     """
     assert required_capability(method, rest) == EDIT
+
+
+def test_default_camera_is_a_review_write() -> None:
+    """The share dialog sets it on the hosted copy of a desktop match."""
+    from splitsmith.ui.capabilities import required_capability
+
+    assert required_capability("PATCH", "shooters/anna/compare-camera") == REVIEW
+

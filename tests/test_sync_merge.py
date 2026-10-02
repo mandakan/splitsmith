@@ -1197,3 +1197,38 @@ def test_the_tripwire_note_names_a_doc_level_field_too() -> None:
     note = next(n for n in result.notes if "non-whitelisted" in n)
     assert "document: detection" in note
     assert "should make this impossible" not in note
+
+
+# -- compare_camera (the share dialog's default camera) --------------------
+
+
+def _cc(value):
+    doc = _project(_video())
+    doc["compare_camera"] = value
+    return doc
+
+
+def test_compare_camera_set_on_the_mirror_is_pulled():
+    r = merge_project_doc(
+        _cc(None), _cc(None), _cc("hand"), doc_key="project/anna", local_ts=T_OLD, remote_ts=T_NEW
+    )
+    assert r.doc["compare_camera"] == "hand"
+    assert r.changed_vs_local
+    assert not r.notes  # whitelisted: no "remote changed non-whitelisted fields" tripwire
+    assert not r.conflicts
+
+
+def test_compare_camera_changed_on_the_desktop_only_stays():
+    r = merge_project_doc(
+        _cc(None), _cc("head"), _cc(None), doc_key="project/anna", local_ts=T_OLD, remote_ts=T_NEW
+    )
+    assert r.doc["compare_camera"] == "head"
+    assert not r.changed_vs_local
+
+
+def test_compare_camera_changed_on_both_sides_goes_to_the_newer():
+    r = merge_project_doc(
+        _cc(None), _cc("head"), _cc("hand"), doc_key="project/anna", local_ts=T_OLD, remote_ts=T_NEW
+    )
+    assert r.doc["compare_camera"] == "hand"
+    assert [c.unit for c in r.conflicts] == ["compare_camera"]

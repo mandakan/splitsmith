@@ -353,9 +353,9 @@ export function Compare() {
     );
   }, [camsQuery, searchParams, setSearchParams]);
   // The saved default: what every viewer, share link and the export grid
-  // start on. Owner only, where the match is editable (a desktop mirror
-  // saves on the desktop, which syncs it up).
-  const canSaveDefault = !shareView && !editDenied;
+  // start on. Owner only; a REVIEW write, so the hosted copy of a desktop
+  // match can set it too (sync/merge.py carries it back to the desktop).
+  const canSaveDefault = !shareView && !capabilityDenied(ctx?.capabilities, "review");
   const makeDefault = useCallback(
     async (s: CompareShooterRecord) => {
       const videos = camsBySlug[s.slug];

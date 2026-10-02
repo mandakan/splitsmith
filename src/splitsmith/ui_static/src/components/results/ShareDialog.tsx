@@ -27,6 +27,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Portal } from "@/components/ui/Portal";
+
+import { ShareCameras } from "./ShareCameras";
 import { useDialogFocus } from "@/lib/dialogFocus";
 import { api, type ShareInfo } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -279,6 +281,8 @@ export function ShareDialog({ onClose }: ShareDialogProps) {
                 })}
               </div>
             ) : null}
+
+            <ShareCameras />
           </CardContent>
 
           <div className="flex justify-end border-t border-rule p-4">
