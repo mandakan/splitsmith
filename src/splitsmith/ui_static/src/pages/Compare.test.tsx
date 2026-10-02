@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -197,3 +197,39 @@ describe("Compare trim-rebuild capability gate (#756)", () => {
     ).not.toBeInTheDocument();
   });
 });
+
+describe("Compare audio mix", () => {
+  const tiles = () =>
+    Array.from(document.querySelectorAll("video")).filter((v) => v.getAttribute("src")?.includes("/stream/")) as HTMLVideoElement[];
+
+  it("hears every shooter at 1/N, a mute leaves the other at full level, Alt-click solos", async () => {
+    renderAt("/match/m1/compare/2", "/match/:matchId/compare/:stage");
+    await screen.findByTestId("compare-page");
+    await waitFor(() => expect(tiles()).toHaveLength(2));
+    await waitFor(() => tiles().forEach((v) => expect(v.volume).toBe(0.5)));
+    expect(tiles().every((v) => !v.muted)).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Mute all" }));
+    await waitFor(() => expect(tiles().every((v) => v.muted)).toBe(true));
+    fireEvent.click(screen.getByRole("button", { name: "Unmute all" }));
+
+    const [a, b] = tiles();
+    fireEvent.click(screen.getAllByRole("button", { name: "Mute Slow Shooter" })[0]);
+    await waitFor(() => expect(b.muted).toBe(true));
+    expect(a.volume).toBe(1);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Unmute Slow Shooter" })[0], { altKey: true });
+    await waitFor(() => expect(a.muted).toBe(true));
+    expect(b.muted).toBe(false);
+    expect(b.volume).toBe(1);
+  });
+
+  it("an old single-audio link (cam=) opens hearing only that shooter", async () => {
+    renderAt("/match/m1/compare/2?t=1.00&cam=b", "/match/:matchId/compare/:stage");
+    await screen.findByTestId("compare-page");
+    await waitFor(() => expect(tiles()).toHaveLength(2));
+    await waitFor(() => expect(tiles()[0].muted).toBe(true));
+    expect(tiles()[1].muted).toBe(false);
+  });
+});
+

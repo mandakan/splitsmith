@@ -28,11 +28,13 @@ function shooter(
 
 const baseProps = {
   maxTime: 10,
-  audioSlug: "a",
+  muted: new Set<string>(),
+  allMuted: false,
   isPlaying: false,
   onTogglePlay: () => {},
   onScrub: () => {},
-  onPickAudio: () => {},
+  onSpeaker: () => {},
+  onToggleAll: () => {},
   onCopyMoment: () => {},
 };
 
@@ -69,12 +71,13 @@ describe("TransportDock", () => {
     );
   });
 
-  it("picks audio when a lane gutter button is clicked", () => {
-    const onPickAudio = vi.fn();
+  it("a lane mutes or unmutes its shooter, Alt-click hears only them", () => {
+    const onSpeaker = vi.fn();
     render(
       <TransportDock
         {...baseProps}
-        onPickAudio={onPickAudio}
+        muted={new Set(["a"])}
+        onSpeaker={onSpeaker}
         shooters={[
           shooter("a", "Fast Shooter", 9.5, [1.0]),
           shooter("b", "Slow Shooter", 9.9, [1.2]),
@@ -82,13 +85,20 @@ describe("TransportDock", () => {
         timeSinceBeep={0}
       />,
     );
-    fireEvent.click(
-      screen.getByRole("button", { name: /Slow Shooter/ }),
-    );
-    expect(onPickAudio).toHaveBeenCalledWith("b");
-    expect(
-      screen.getByRole("button", { name: /Fast Shooter/ }),
-    ).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Mute Slow Shooter" }));
+    expect(onSpeaker).toHaveBeenLastCalledWith("b", false);
+    fireEvent.click(screen.getByRole("button", { name: "Unmute Fast Shooter" }), { altKey: true });
+    expect(onSpeaker).toHaveBeenLastCalledWith("a", true);
+    expect(screen.getByRole("button", { name: "Unmute Fast Shooter" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("one button mutes or unmutes everyone", () => {
+    const onToggleAll = vi.fn();
+    const { rerender } = render(<TransportDock {...baseProps} shooters={[]} timeSinceBeep={0} onToggleAll={onToggleAll} />);
+    fireEvent.click(screen.getByRole("button", { name: "Mute all" }));
+    expect(onToggleAll).toHaveBeenCalledTimes(1);
+    rerender(<TransportDock {...baseProps} shooters={[]} timeSinceBeep={0} allMuted onToggleAll={onToggleAll} />);
+    expect(screen.getByRole("button", { name: "Unmute all" })).toBeInTheDocument();
   });
 
   it("scrubs via the range slider", () => {

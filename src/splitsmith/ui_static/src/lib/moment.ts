@@ -12,6 +12,9 @@ export type Moment = {
   t: number;
   cam?: string;
   who?: string[];
+  /** Compare: shooters muted in the mix (``cam`` alone means only that
+   *  one heard). */
+  mute?: string[];
   v?: MomentCam;
 };
 
@@ -34,6 +37,7 @@ export function momentToSearch(m: Moment): URLSearchParams {
   params.set("t", t.toFixed(2));
   if (m.cam) params.set("cam", m.cam);
   if (m.who && m.who.length > 0) params.set("who", m.who.slice(0, WHO_MAX).join(","));
+  if (m.mute && m.mute.length > 0) params.set("mute", m.mute.slice(0, WHO_MAX).join(","));
   if (m.v != null) {
     if (typeof m.v === "number") {
       if (Number.isInteger(m.v) && m.v > 0 && m.v <= V_INDEX_LIMIT) {
@@ -65,6 +69,15 @@ export function parseMoment(params: URLSearchParams): Moment | null {
       .map((s) => s.trim())
       .filter(Boolean);
     if (slugs.length > 0) moment.who = slugs;
+  }
+  const mute = params.get("mute");
+  if (mute) {
+    const slugs = mute
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, WHO_MAX);
+    if (slugs.length > 0) moment.mute = slugs;
   }
   const v = params.get("v");
   if (v) {
