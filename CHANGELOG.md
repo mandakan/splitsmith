@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.50.0](https://github.com/mandakan/splitsmith/compare/v0.49.1...v0.50.0) (2026-10-02)
+
+
+### Features
+
+* **compare:** every camera angle shown on the tile, named, with a hover preview ([#1145](https://github.com/mandakan/splitsmith/issues/1145)) ([bb3f3a9](https://github.com/mandakan/splitsmith/commit/bb3f3a9b68d1ed5d74da38547ddc9cfd3196ffab))
+* **compare:** hear every shooter in a mix; mute, unmute and solo ([#1147](https://github.com/mandakan/splitsmith/issues/1147)) ([49de9b4](https://github.com/mandakan/splitsmith/commit/49de9b4b60dd4a5ee2b9dab068b0cf2cdafef638))
+* **splits:** every shooter on every stage, sorted per stage, best marked ([#1146](https://github.com/mandakan/splitsmith/issues/1146)) ([deaf027](https://github.com/mandakan/splitsmith/commit/deaf027f26cb8c667c4935aed653e46b21ed8445))
+
+
+### Documentation
+
+* **site:** the footage sort is about videos from one or more sources ([#1143](https://github.com/mandakan/splitsmith/issues/1143)) ([fbdab95](https://github.com/mandakan/splitsmith/commit/fbdab9585923641956f5573bba267f937fc1caf4))
+
 ## [0.49.1](https://github.com/mandakan/splitsmith/compare/v0.49.0...v0.49.1) (2026-10-02)
 
 
