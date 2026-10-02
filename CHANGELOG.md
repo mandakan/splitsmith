@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.52.0](https://github.com/mandakan/splitsmith/compare/v0.51.0...v0.52.0) (2026-10-02)
+
+
+### Features
+
+* **compare, splits, share:** cameras hold across stages; starting cameras set from the share dialog ([#1150](https://github.com/mandakan/splitsmith/issues/1150)) ([a3ebcc3](https://github.com/mandakan/splitsmith/commit/a3ebcc3e60068d586dc6b1a09308b5d78a758ba8))
+
 ## [0.51.0](https://github.com/mandakan/splitsmith/compare/v0.50.0...v0.51.0) (2026-10-02)
 
 
