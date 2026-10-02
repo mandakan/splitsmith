@@ -231,6 +231,25 @@ jobs:
         working-directory: src/splitsmith/ui_static
         run: pnpm build
 
+  desktop-unit:
+    # The Electron shell's pure modules and the update feed's picking.
+    # Cheap and always on: the feed lives in functions/, outside
+    # desktop.yml's path filter, and went red unnoticed once (#1098).
+    name: desktop unit tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: pnpm/action-setup@v4
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+
   packaging:
     # The cheap half of ``slim-smoke``, promoted to always-on.
     #

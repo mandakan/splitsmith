@@ -10,6 +10,8 @@ on:
       - "pyproject.toml"
       - "uv.lock"
       - ".github/workflows/desktop.yml"
+      - ".github/workflows/desktop-linux.yml"
+      - "scripts/ci/fetch_pypi_wheel.py"
   push:
     tags: ["v*"]
   workflow_dispatch:
@@ -57,3 +59,10 @@ jobs:
           name: Splitsmith-arm64-dmg
           path: desktop/dist/*.dmg
           retention-days: 14
+
+  linux:
+    # Build, smoke, launch, artifact; no release_tag, so no upload. The
+    # called job declares contents: write, which a caller must grant.
+    uses: ./.github/workflows/desktop-linux.yml
+    permissions:
+      contents: write

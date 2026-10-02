@@ -6,8 +6,10 @@ ROOT="$(cd "$HERE/.." && pwd)"
 PY="$HERE/build/runtime/python/bin/python3.12"
 OUT="$HERE/build/NOTICES.md"
 [ -x "$PY" ] || { echo "runtime missing; run build-runtime.sh" >&2; exit 1; }
-# The ffmpeg source release the fetch script pins.
-release_url="$(grep -E '^TAG=' "$HERE/fetch-ffmpeg.sh" | sed -E 's/^TAG="?([^"]+)"?/https:\/\/github.com\/mandakan\/splitsmith\/releases\/tag\/\1/')"
+# The ffmpeg source release fetch-ffmpeg.sh unpacked into build/bin; its tag
+# sits in build/, outside the bin/ that electron-builder ships.
+tag="$(cat "$HERE/build/FFMPEG_RELEASE" 2>/dev/null)" || { echo "run fetch-ffmpeg.sh first" >&2; exit 1; }
+release_url="https://github.com/mandakan/splitsmith/releases/tag/$tag"
 {
   sed "s|FFMPEG_SOURCE_RELEASE_URL|$release_url|" "$HERE/NOTICES.head.md"
   echo

@@ -62,6 +62,18 @@ jobs:
       packages: write
     secrets: inherit
 
+  desktop-linux:
+    # The Linux AppImage + deb, from the wheel PyPI now serves. The DMG
+    # stays a local step (desktop/release.sh); the feed announces each
+    # platform only once its own assets are attached.
+    needs: [release-please, publish-pypi]
+    if: needs.release-please.outputs.release_created == 'true'
+    uses: ./.github/workflows/desktop-linux.yml
+    with:
+      release_tag: ${{ needs.release-please.outputs.tag_name }}
+    permissions:
+      contents: write
+
   deploy-prod:
     # And the production Railway deploy. Chained rather than left to the
     # `release: published` event (GITHUB_TOKEN release does not trigger it).

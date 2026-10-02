@@ -47,6 +47,36 @@ export interface SidecarOptions {
   port: number;
   home: string;
   env: NodeJS.ProcessEnv;
+  /** ``process.platform``; passed in so this stays pure. */
+  platform: NodeJS.Platform;
+}
+
+/** An XDG base dir only when it is absolute, as the spec requires (and user_config.py does). */
+function xdgBase(env: NodeJS.ProcessEnv, name: string, fallback: string): string {
+  const v = env[name];
+  return v && path.isAbsolute(v) ? v : fallback;
+}
+
+/**
+ * Where the sidecar logs and where numba caches. macOS keeps the paths
+ * it shipped with; Linux follows XDG, next to the engine's own cache dir
+ * (runtime._platform_cache_dir). Data (SPLITSMITH_HOME) is never set:
+ * the engine picks the same place the CLI does.
+ */
+export function platformDirs(
+  platform: NodeJS.Platform,
+  home: string,
+  env: NodeJS.ProcessEnv,
+): { logDir: string; numbaCacheDir: string } {
+  if (platform === "linux") {
+    const state = xdgBase(env, "XDG_STATE_HOME", path.join(home, ".local", "state"));
+    const cache = xdgBase(env, "XDG_CACHE_HOME", path.join(home, ".cache"));
+    return { logDir: path.join(state, "splitsmith", "logs"), numbaCacheDir: path.join(cache, "splitsmith", "numba") };
+  }
+  return {
+    logDir: path.join(home, "Library", "Logs", "Splitsmith"),
+    numbaCacheDir: path.join(home, "Library", "Caches", "Splitsmith", "numba"),
+  };
 }
 
 export interface SidecarSpec {
@@ -63,8 +93,8 @@ export interface SidecarSpec {
  * SPLITSMITH_PROJECT_ROOT would skip the picker. The engine's own env
  * vars are then set explicitly (see splitsmith.runtime for the list).
  */
-export function sidecarSpec({ resourcesPath, port, home, env }: SidecarOptions): SidecarSpec {
-  const logDir = path.join(home, "Library", "Logs", "Splitsmith");
+export function sidecarSpec({ resourcesPath, port, home, env, platform }: SidecarOptions): SidecarSpec {
+  const { logDir, numbaCacheDir } = platformDirs(platform, home, env);
   const clean: Record<string, string> = {};
   for (const [k, v] of Object.entries(env)) {
     if (v === undefined) continue;
@@ -80,9 +110,9 @@ export function sidecarSpec({ resourcesPath, port, home, env }: SidecarOptions):
       SPLITSMITH_PORT: String(port),
       SPLITSMITH_FFMPEG: path.join(resourcesPath, "bin", "ffmpeg"),
       SPLITSMITH_FFPROBE: path.join(resourcesPath, "bin", "ffprobe"),
-      // The bundle is sealed by its signature; numba's default cache is next
-      // to the module and would fail to write.
-      NUMBA_CACHE_DIR: path.join(home, "Library", "Caches", "Splitsmith", "numba"),
+      // The bundle is read-only (signed on macOS, squashfs in an AppImage);
+      // numba's default cache is next to the module and would fail to write.
+      NUMBA_CACHE_DIR: numbaCacheDir,
       PYTHONDONTWRITEBYTECODE: "1",
       PYTHONNOUSERSITE: "1",
     },

@@ -4,7 +4,8 @@
  * decidable without Electron lives in sidecar.ts and cliLink.ts (tested);
  * this file is wiring.
  */
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -13,6 +14,7 @@ import readline from "node:readline";
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 
 import { buildMenu } from "./menu";
+import { BLOCKED_DETAIL, BLOCKED_MESSAGE, RELEASES_PAGE, sandboxBlocked } from "./sandbox";
 import { isSidecarOrigin, parseReadyLine, sidecarSpec, sidecarState } from "./sidecar";
 import { checkForUpdates } from "./updates";
 
@@ -52,7 +54,13 @@ export function showFailure(lines: string[]): void {
 
 async function startSidecar(): Promise<void> {
   const port = await freePort();
-  const spec = sidecarSpec({ resourcesPath: resourcesPath(), port, home: os.homedir(), env: process.env });
+  const spec = sidecarSpec({
+    resourcesPath: resourcesPath(),
+    port,
+    home: os.homedir(),
+    env: process.env,
+    platform: process.platform,
+  });
   sidecarState.logDir = spec.logDir;
   child = spawn(spec.command, spec.args, { env: spec.env, stdio: ["ignore", "ignore", "pipe"] });
   child.on("error", (err) => showFailure([`could not start ${spec.command}: ${err.message}`]));
@@ -103,6 +111,34 @@ async function stopSidecar(): Promise<void> {
   }
 }
 
+function userNsWorks(): boolean {
+  return spawnSync("unshare", ["-Ur", "true"], { stdio: "ignore", timeout: 3_000 }).status === 0;
+}
+
+/** A dialog and a quit; never a window, never the sidecar, never web content. */
+async function refuseUnsandboxed(): Promise<void> {
+  try {
+    const { response } = await dialog.showMessageBox({
+      type: "error",
+      message: BLOCKED_MESSAGE,
+      detail: BLOCKED_DETAIL,
+      buttons: ["Open release page", "Quit"],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (response === 0) await shell.openExternal(RELEASES_PAGE).catch(() => undefined);
+  } finally {
+    app.quit();
+  }
+}
+
+/** The window icon on Linux; macOS takes it from the bundle. */
+function windowIcon(): string | undefined {
+  if (process.platform !== "linux") return undefined;
+  const icon = path.join(resourcesPath(), "icon.png");
+  return fs.existsSync(icon) ? icon : undefined;
+}
+
 function createWindow(): void {
   win = new BrowserWindow({
     width: 1440,
@@ -111,6 +147,7 @@ function createWindow(): void {
     minHeight: 600,
     title: "Splitsmith",
     backgroundColor: "#0e0f11",
+    icon: windowIcon(),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -148,6 +185,15 @@ if (!app.requestSingleInstanceLock()) {
   });
   process.env.SPLITSMITH_APP_VERSION = app.getVersion();
   void app.whenReady().then(() => {
+    const blocked = sandboxBlocked({
+      appImage: Boolean(process.env.APPIMAGE),
+      noSandbox: app.commandLine.hasSwitch("no-sandbox"),
+      userNsWorks,
+    });
+    if (blocked) {
+      void refuseUnsandboxed();
+      return;
+    }
     buildMenu();
     createWindow();
     startSidecar().catch((err: Error) => showFailure([String(err.message)]));

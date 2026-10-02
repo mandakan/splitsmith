@@ -325,6 +325,32 @@ picks the newest ``v*.*.*`` release that has a ``.dmg`` attached (GitHub's
 publishes before the DMG exists). Moving the download behind a purchase
 changes that function only. No auto-update.
 
+Linux ships as an x86_64 AppImage and .deb, built by
+``.github/workflows/desktop-linux.yml`` in ``ubuntu:22.04`` (glibc 2.35
+floor) from the wheel PyPI serves (``scripts/ci/fetch_pypi_wheel.py``),
+chained after ``publish-pypi`` in ``release-please.yml``; PRs build and
+smoke it through ``desktop.yml`` without uploading, and a failed release
+is re-run with ``workflow_dispatch`` and the tag. ``desktop/build.sh
+--linux`` builds locally; ``desktop/lib/target.sh`` is the one place a
+target is resolved (``host_target``); the Linux ffmpeg is our own
+static build (``build-ffmpeg-linux.sh``, release
+``ffmpeg-linux-x86_64-9.0.2-r1``), its tag landing in
+``desktop/build/FFMPEG_RELEASE``, never in ``build/bin`` (which ships
+verbatim into the bundle). The deb's ``linux/postinst.sh`` /
+``postrm.sh`` are electron-builder's stock scripts plus
+``linux/cli-link.sh`` (``/usr/bin/splitsmith``, a ``#!/bin/sh``
+wrapper rather than a link so terminal runs get the bundled ffmpeg: only
+the Electron sidecar sets ``SPLITSMITH_FFMPEG``, and the CLI looks next to
+its interpreter, not in ``resources/bin``; left alone when it is not ours) and must stay that way (``scripts/check-deb.sh``
+in CI); inside them ``${letters}`` is an electron-builder macro. The
+AppImage refuses with a dialog where the sandbox cannot start
+(``src/sandbox.ts``; ``appImage.executableArgs: []`` stops the stock
+desktop entry's unconditional ``--no-sandbox``); ``StartupWMClass`` is
+``splitsmith-desktop`` because the window class comes from
+package.json ``name``, and adding ``productName`` would move the
+macOS userData dir. The feed's ``?platform=linux`` waits for both the
+AppImage and the .deb; no parameter stays the macOS answer.
+
 ## Releasing
 
 release-please keeps a ``chore(main): release X.Y.Z`` PR open. Its CI and
@@ -333,11 +359,12 @@ desktop runs end ``action_required`` or ``failure`` with **zero jobs**
 failure. Merge it when main's CI passed on the commit it releases and the
 PR touches only the manifest, ``CHANGELOG.md``, ``pyproject.toml``,
 ``src/splitsmith/__init__.py`` and ``uv.lock``. The ``Release`` workflow
-then tags, publishes to PyPI, pushes both GHCR images and deploys
-production on Railway. The DMG is a separate local step,
-``desktop/release.sh`` (signing never leaves the Mac; notarization can
-take close to an hour), and the update feed announces a release only once
-the DMG is attached.
+then tags, publishes to PyPI, pushes both GHCR images, deploys
+production on Railway, and builds and attaches the Linux AppImage and .deb
+(``desktop-linux``, after ``publish-pypi``). The DMG is a separate local
+step, ``desktop/release.sh`` (signing never leaves the Mac; notarization
+can take close to an hour). The update feed announces per platform: macOS
+once the DMG is attached, Linux once both the AppImage and the .deb are.
 
 There are no required status checks on ``main``, so ``gh pr merge
 --auto`` merges at once. "Merge on green" means ``gh pr checks <n>

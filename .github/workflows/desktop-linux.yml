@@ -1,0 +1,95 @@
+name: desktop-linux
+
+# The x86_64 AppImage and .deb (spec 2026-10-02). Called by release-please.yml
+# after PyPI has the version (the bundle ships that wheel), and by desktop.yml
+# on PRs with no tag (checkout-built wheel, artifacts only, no upload).
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        type: string
+        default: ""
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "vX.Y.Z to build and attach (re-run after a failure)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: linux x86_64 AppImage + deb
+    runs-on: ubuntu-latest
+    # glibc 2.35 is the floor the bundle supports, so it is built there.
+    container: ubuntu:22.04
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    steps:
+      - name: Container packages
+        # git before checkout, or checkout falls back to a tarball with no
+        # .git and build.sh's `git checkout -- package.json` fails.
+        run: |
+          apt-get update -qq && apt-get install -y -qq git ca-certificates curl >/dev/null
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
+      - name: Trust the workspace
+        # The container runs as root over a runner-owned checkout.
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: desktop/ci-linux-deps.sh
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: pnpm/action-setup@v4
+      - uses: actions/cache@v4
+        with:
+          path: ~/.splitsmith/models
+          key: models-${{ hashFiles('src/splitsmith/data/ensemble_calibration.json') }}
+
+      - name: Published wheel
+        if: inputs.release_tag != ''
+        run: |
+          wheel="$(uv run --no-project python scripts/ci/fetch_pypi_wheel.py "${{ inputs.release_tag }}" build/wheel)"
+          echo "WHEEL=$PWD/$wheel" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: desktop/build.sh --linux ${WHEEL:+--wheel "$WHEEL"}
+
+      - name: The deb kept the stock scripts
+        run: desktop/scripts/check-deb.sh desktop/dist/*.deb
+
+      - name: Smoke
+        run: desktop/smoke.sh
+      - name: Launch
+        run: desktop/launch-check.sh
+
+      - name: Checksums
+        run: cd desktop/dist && sha256sum *.AppImage *.deb > SHA256SUMS && cat SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Splitsmith-linux-x86_64
+          path: |
+            desktop/dist/*.AppImage
+            desktop/dist/*.deb
+            desktop/dist/SHA256SUMS
+          retention-days: 14
+
+      - name: Attach to the release
+        if: inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # A current gh from GitHub's own apt repo (jammy's universe has 2.4).
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /usr/share/keyrings/githubcli-archive-keyring.gpg
+          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+            > /etc/apt/sources.list.d/github-cli.list
+          apt-get update -qq && apt-get install -y -qq gh >/dev/null
+          gh release upload "${{ inputs.release_tag }}" desktop/dist/*.AppImage desktop/dist/*.deb desktop/dist/SHA256SUMS --clobber

@@ -41,3 +41,32 @@ dmg:
       y: 220
       type: link
       path: /Applications
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: deb
+      arch: [x64]
+  category: AudioVideo
+  executableName: splitsmith-desktop
+  icon: build-resources/linux-icons
+  synopsis: Shot splits from head-cam footage
+  description: Splitsmith finds the beep and every shot in IPSC head-cam footage and turns them into splits, an audit trail and rendered videos.
+  maintainer: Mathias Axell <m@thias.se>
+  # Electron's WM_CLASS / Wayland app_id is app.getName(), package.json's
+  # name; the default (productName) would not match the running window.
+  desktop:
+    entry:
+      StartupWMClass: splitsmith-desktop
+  extraResources:
+    - from: build-resources/linux-icons/512x512.png
+      to: icon.png
+appImage:
+  artifactName: ${productName}-${version}-x86_64.${ext}
+  # The legacy toolset's desktop entry passes --no-sandbox unconditionally.
+  executableArgs: []
+deb:
+  artifactName: splitsmith-desktop_${version}_amd64.${ext}
+  depends: [libnss3, libgbm1, libasound2, libgtk-3-0, libxss1, libnotify4, xdg-utils, libatspi2.0-0, libdrm2, libxkbcommon0]
+  afterInstall: build/linux/postinst.sh
+  afterRemove: build/linux/postrm.sh
