@@ -70,9 +70,10 @@ describe("sha256_verify", () => {
     const wrong = `${digest.slice(0, -1)}${digest.endsWith("6") ? "7" : "6"}`;
     expect(lib("sha256_verify", wrong, file).code).not.toBe(0);
   });
-  it("falls back to sha256sum where there is no shasum", () => {
+  // A Mac without coreutils has no sha256sum; the fallback is a Linux path.
+  const sha256sum = spawnSync("bash", ["-c", "command -v sha256sum"], { encoding: "utf8" }).stdout.trim();
+  it.skipIf(!sha256sum)("falls back to sha256sum where there is no shasum", () => {
     const bin = fs.mkdtempSync(path.join(os.tmpdir(), "nosha-"));
-    const sha256sum = spawnSync("bash", ["-c", "command -v sha256sum"], { encoding: "utf8" }).stdout.trim();
     fs.symlinkSync(sha256sum, path.join(bin, "sha256sum"));
     const run = (sha: string) =>
       spawnSync("/bin/bash", ["-c", `source '${LIB}' && command -v shasum || sha256_verify "$@"`, "--", sha, file], {
