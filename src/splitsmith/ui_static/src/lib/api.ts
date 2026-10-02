@@ -658,6 +658,8 @@ export interface SortClipView {
    *  the proposal names someone else. */
   unassigned_in: string | null;
   thumbnail: boolean;
+  /** A hover-scrub strip exists (built after the scan). */
+  strip: boolean;
   checked: boolean;
   proposal: SortClipProposal;
 }
@@ -690,6 +692,8 @@ export interface SortView {
   shooters: { key: string; name: string; stages: number[] }[];
   cameras: SortCamera[];
   clips: SortClipView[];
+  /** Scrub strips still being built; poll while above 0. */
+  strips_pending: number;
   anchors: SortAnchor[];
   overrides: SortOverride[];
   user_checked: Record<string, boolean>;
@@ -2942,6 +2946,9 @@ export const api = {
       method: "POST",
       json: { link_mode: linkMode },
     }),
+
+  footageSortStripUrl: (scanId: string, index: number) =>
+    scopeRequestPath(`/api/match/footage-sort/${encodeURIComponent(scanId)}/thumbs/${index}/strip.jpg`),
 
   footageSortVideoUrl: (scanId: string, index: number) =>
     scopeRequestPath(`/api/match/footage-sort/${encodeURIComponent(scanId)}/clips/${index}/video`),

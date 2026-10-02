@@ -119,6 +119,9 @@ class ClipView(BaseModel):
     # The shooter whose unassigned list holds it (import moves it as needed).
     unassigned_in: str | None
     thumbnail: bool
+    # A hover-scrub strip exists (built after the scan, while the user
+    # reviews; :func:`run_footage_sort_scan`).
+    strip: bool
     checked: bool
     proposal: ClipProposal
 
@@ -132,6 +135,8 @@ class SortView(BaseModel):
     shooters: list[ShooterRef]
     cameras: list[SortCamera]
     clips: list[ClipView]
+    # Scrub strips still being built; the page polls while this is > 0.
+    strips_pending: int
     # The stored decisions, so the page edits them rather than rebuilding.
     anchors: list[Anchor]
     overrides: list[Override]
@@ -235,6 +240,7 @@ def _view(state: Any, record: ScanRecord) -> SortView:
     by_id = {p.clip_id: p for p in proposal.clips}
     anchored = {c.key for c in proposal.cameras if c.clock == "anchored"}
     registered = _registrations(state)
+    thumbs = _sort_dir(state) / "thumbs"
     clips = []
     for index, scanned in enumerate(record.clips):
         p = by_id[scanned.clip.clip_id]
@@ -257,6 +263,7 @@ def _view(state: Any, record: ScanRecord) -> SortView:
                 imported_by=imported_by,
                 unassigned_in=reg.shooter if reg is not None and not reg.assigned else None,
                 thumbnail=scanned.thumbnail,
+                strip=thumbnail.cached_strip(Path(scanned.path), thumbs) is not None,
                 checked=importable and record.checked.get(scanned.clip.clip_id, default),
                 proposal=p,
             )
@@ -270,6 +277,9 @@ def _view(state: Any, record: ScanRecord) -> SortView:
         shooters=refs,
         cameras=proposal.cameras,
         clips=clips,
+        strips_pending=(
+            sum(1 for c in clips if not c.strip and (c.duration or 0) > 0) if record.status == "ready" else 0
+        ),
         anchors=record.anchors,
         overrides=record.overrides,
         user_checked=record.checked,
@@ -451,6 +461,18 @@ def run_footage_sort_scan(handle: Any, *, state: Any, scan_id: str) -> None:
         _save(state, record)
         raise
     _save(state, record)
+    # The review is usable now; scrub strips follow, one ffmpeg call each
+    # (1-3 s from a USB drive). They are files, never fields on the record,
+    # so this loop cannot race the user's decisions being saved.
+    for i, item in enumerate(record.clips):
+        handle.check_cancel()
+        handle.update(progress=i / max(len(record.clips), 1), message=f"Preview {item.clip.filename}")
+        if not item.clip.duration:
+            continue
+        try:
+            thumbnail.ensure_strip(Path(item.path), cache_dir=thumbs, duration=item.clip.duration)
+        except Exception:  # noqa: BLE001 -- a preview never fails the scan
+            logger.debug("footage sort: no strip for %s", item.path, exc_info=True)
 
 
 def _move_unassigned(
@@ -554,6 +576,19 @@ def get_thumbnail(scan_id: str, index: int, request: Request) -> FileResponse:
     hit = thumbnail.cached(Path(record.clips[index].path), _sort_dir(state) / "thumbs")
     if hit is None:
         raise HTTPException(status_code=404, detail="no thumbnail")
+    return FileResponse(hit, media_type="image/jpeg")
+
+
+@router.get("/api/match/footage-sort/{scan_id}/thumbs/{index}/strip.jpg")
+def get_strip(scan_id: str, index: int, request: Request) -> FileResponse:
+    _local_only()
+    state = request.app.state.splitsmith_state
+    record = _load(state, scan_id)
+    if not 0 <= index < len(record.clips):
+        raise HTTPException(status_code=404, detail="no such clip")
+    hit = thumbnail.cached_strip(Path(record.clips[index].path), _sort_dir(state) / "thumbs")
+    if hit is None:
+        raise HTTPException(status_code=404, detail="no strip yet")
     return FileResponse(hit, media_type="image/jpeg")
 
 

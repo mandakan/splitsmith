@@ -117,6 +117,97 @@ def ensure(
     return dest
 
 
+#: Frames in a scrub strip (spec 2026-10-01, sort review): enough to tell
+#: who is on the range, few enough to stay a light hover preview.
+STRIP_FRAMES = 10
+STRIP_WIDTH = 160
+STRIP_HEIGHT = 90
+
+
+def strip_path(path: Path, cache_dir: Path) -> Path | None:
+    """Where the scrub strip for ``path`` lives (existing or not)."""
+    key = source_cache_key(path)
+    if not key:
+        return None
+    return cache_dir / f"{key}.strip.jpg"
+
+
+def cached_strip(path: Path, cache_dir: Path) -> Path | None:
+    candidate = strip_path(path, cache_dir)
+    return candidate if candidate is not None and candidate.exists() else None
+
+
+def strip_times(duration: float, frames: int = STRIP_FRAMES) -> list[float]:
+    """The middle of each of ``frames`` equal slices of the clip."""
+    return [round((i + 0.5) * duration / frames, 3) for i in range(frames)]
+
+
+def ensure_strip(
+    source: Path,
+    *,
+    cache_dir: Path,
+    duration: float,
+    frames: int = STRIP_FRAMES,
+    ffmpeg_binary: str = "ffmpeg",
+    timeout: float = 30.0,
+) -> Path:
+    """A horizontal strip of ``frames`` stills spread across ``source``,
+    each ``STRIP_WIDTH`` x ``STRIP_HEIGHT`` (letterboxed), for hover
+    scrubbing. One ffmpeg call with a fast input seek per frame: reading a
+    few GOPs per still costs 1-3 s on a USB drive, where decoding every
+    keyframe of a 4K clip took up to 8 s (measured on the Höstfinalen
+    footage, 2026-10-02). Cached like :func:`ensure`.
+    """
+    hit = cached_strip(source, cache_dir)
+    if hit is not None:
+        return hit
+    dest = strip_path(source, cache_dir)
+    if dest is None:
+        raise ThumbnailError(f"cannot stat source: {source}")
+    if not shutil.which(ffmpeg_binary):
+        raise ThumbnailError(f"ffmpeg binary not found: {ffmpeg_binary}")
+    if duration <= 0:
+        raise ThumbnailError(f"no duration for {source}")
+
+    inputs: list[str] = []
+    chains: list[str] = []
+    for i, t in enumerate(strip_times(duration, frames)):
+        inputs += ["-ss", f"{t:.3f}", "-i", str(source)]
+        chains.append(
+            f"[{i}:v]scale={STRIP_WIDTH}:{STRIP_HEIGHT}:force_original_aspect_ratio=decrease,"
+            f"pad={STRIP_WIDTH}:{STRIP_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1,trim=end_frame=1[v{i}]"
+        )
+    graph = ";".join(chains) + ";" + "".join(f"[v{i}]" for i in range(frames)) + f"hstack=inputs={frames}"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    partial = dest.with_suffix(".partial.jpg")
+    cmd = [
+        ffmpeg_binary,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        *inputs,
+        "-filter_complex",
+        graph,
+        "-frames:v",
+        "1",
+        "-q:v",
+        "5",
+        str(partial),
+    ]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        raise ThumbnailError(f"ffmpeg timed out building a strip for {source}") from exc
+    except subprocess.CalledProcessError as exc:
+        raise ThumbnailError(f"ffmpeg failed (exit {exc.returncode}): {exc.stderr or exc.stdout!r}") from exc
+    if not partial.exists():
+        raise ThumbnailError(f"ffmpeg produced no strip for {source}")
+    # Atomic: the page polls for the strip and must never read half a JPEG.
+    partial.replace(dest)
+    return dest
+
+
 def clip_cache_key(source: Path, *, center_time: float, duration_s: float) -> str:
     """Return a content-addressed key for a short clip cached around
     ``center_time``.

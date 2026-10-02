@@ -27,7 +27,13 @@ vi.mock("@/lib/api", async (importOriginal) => {
 const PHONE = "from-martin|Apple|iPhone 17 Pro Max|IMG";
 const HEAD = "head|||VID_datetime";
 
-function clip(clipId: string, index: number, camera: string, over: Partial<SortClipView["proposal"]>, checked = false): SortClipView {
+function clip(
+  clipId: string,
+  index: number,
+  camera: string,
+  over: Partial<SortClipView["proposal"]>,
+  checked = false,
+): SortClipView {
   return {
     clip_id: clipId,
     index,
@@ -39,6 +45,7 @@ function clip(clipId: string, index: number, camera: string, over: Partial<SortC
     imported_by: null,
     unassigned_in: null,
     thumbnail: false,
+    strip: false,
     checked,
     proposal: {
       clip_id: clipId,
@@ -49,7 +56,15 @@ function clip(clipId: string, index: number, camera: string, over: Partial<SortC
       run_id: null,
       role: "primary",
       decided_by: "engine",
-      reason: { scorecard_at: null, lead_seconds: 95, offset_seconds: 0, issue: null, rival: null, rival_stage: null, run_size: 1 },
+      reason: {
+        scorecard_at: null,
+        lead_seconds: 95,
+        offset_seconds: 0,
+        issue: null,
+        rival: null,
+        rival_stage: null,
+        run_size: 1,
+      },
       ...over,
     },
   };
@@ -67,14 +82,43 @@ function view(): SortView {
       { key: "anton", name: "Anton Johansson", stages: [1, 2] },
     ],
     cameras: [
-      { key: PHONE, folder: "from-martin", model: "iPhone 17 Pro Max", scheme: "IMG", clip_ids: [], clock: "trusted", offset_seconds: 0 },
-      { key: HEAD, folder: "head", model: null, scheme: "VID_datetime", clip_ids: ["head/VID_1.mp4"], clock: "needs_anchor", offset_seconds: 0 },
+      {
+        key: PHONE,
+        folder: "from-martin",
+        model: "iPhone 17 Pro Max",
+        scheme: "IMG",
+        clip_ids: [],
+        clock: "trusted",
+        offset_seconds: 0,
+      },
+      {
+        key: HEAD,
+        folder: "head",
+        model: null,
+        scheme: "VID_datetime",
+        clip_ids: ["head/VID_1.mp4"],
+        clock: "needs_anchor",
+        offset_seconds: 0,
+      },
     ],
     clips: [
-      clip("from-martin/IMG_1.MOV", 0, PHONE, { shooter: "anton", stage: 2 }, true),
-      clip("from-martin/IMG_2.MOV", 1, PHONE, { shooter: "mathias", stage: 1 }, true),
+      clip(
+        "from-martin/IMG_1.MOV",
+        0,
+        PHONE,
+        { shooter: "anton", stage: 2 },
+        true,
+      ),
+      clip(
+        "from-martin/IMG_2.MOV",
+        1,
+        PHONE,
+        { shooter: "mathias", stage: 1 },
+        true,
+      ),
       clip("head/VID_1.mp4", 2, HEAD, { confidence: "needs_you", role: null }),
     ],
+    strips_pending: 0,
     anchors: [],
     overrides: [],
     user_checked: {},
@@ -85,7 +129,10 @@ function renderPage() {
   return render(
     <MemoryRouter initialEntries={["/match/m1/footage-sort/abc123"]}>
       <Routes>
-        <Route path="/match/:matchId/footage-sort/:scanId" element={<FootageSort />} />
+        <Route
+          path="/match/:matchId/footage-sort/:scanId"
+          element={<FootageSort />}
+        />
       </Routes>
     </MemoryRouter>,
   );
@@ -94,22 +141,30 @@ function renderPage() {
 describe("FootageSort", () => {
   beforeEach(() => {
     vi.mocked(api.getFootageSort).mockResolvedValue(view());
-    vi.mocked(api.putFootageSortDecisions).mockImplementation(async () => view());
+    vi.mocked(api.putFootageSortDecisions).mockImplementation(async () =>
+      view(),
+    );
   });
 
   it("shows the unknown-clock camera first and one table per shooter", async () => {
     renderPage();
 
-    expect(await screen.findByText(/the clock lines up with no scorecard/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/the clock lines up with no scorecard/),
+    ).toBeInTheDocument();
     expect(screen.getByText("Mathias Axell")).toBeInTheDocument();
     expect(screen.getByText("Anton Johansson")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Import 2 clips" })).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "Import 2 clips" }),
+    ).toBeEnabled();
   });
 
   it("an unchecked clip reaches the server as a check mark", async () => {
     renderPage();
 
-    await userEvent.click(await screen.findByRole("checkbox", { name: "Import IMG_1.MOV" }));
+    await userEvent.click(
+      await screen.findByRole("checkbox", { name: "Import IMG_1.MOV" }),
+    );
 
     expect(api.putFootageSortDecisions).toHaveBeenCalledWith("abc123", {
       anchors: [],
@@ -121,12 +176,23 @@ describe("FootageSort", () => {
   it("naming the run of an unknown-clock clip anchors its camera", async () => {
     renderPage();
 
-    await userEvent.click(await screen.findByRole("button", { name: "Choose" }));
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Choose" }),
+    );
     const sheet = screen.getByRole("dialog", { name: "VID_1.mp4" });
-    expect(within(sheet).getByText(/sets the clock for every clip from this camera/)).toBeInTheDocument();
-    await userEvent.click(within(sheet).getByRole("button", { name: "Mathias Axell" }));
-    await userEvent.selectOptions(within(sheet).getByRole("combobox", { name: "Stage" }), "2");
-    await userEvent.click(within(sheet).getByRole("button", { name: "Use this" }));
+    expect(
+      within(sheet).getByText(/sets the clock for every clip from this camera/),
+    ).toBeInTheDocument();
+    await userEvent.click(
+      within(sheet).getByRole("button", { name: "Mathias Axell" }),
+    );
+    await userEvent.selectOptions(
+      within(sheet).getByRole("combobox", { name: "Stage" }),
+      "2",
+    );
+    await userEvent.click(
+      within(sheet).getByRole("button", { name: "Use this" }),
+    );
 
     expect(api.putFootageSortDecisions).toHaveBeenCalledWith("abc123", {
       anchors: [{ clip_id: "head/VID_1.mp4", shooter: "mathias", stage: 2 }],
@@ -138,19 +204,86 @@ describe("FootageSort", () => {
   it("imports with the chosen link mode and reports per shooter", async () => {
     vi.mocked(api.importFootageSort).mockResolvedValue({
       imported: [
-        { clip_id: "from-martin/IMG_1.MOV", shooter: "anton", stage: 2, role: "primary", path: "raw/IMG_1.MOV" },
-        { clip_id: "from-martin/IMG_2.MOV", shooter: "mathias", stage: 1, role: "primary", path: "raw/IMG_2.MOV" },
+        {
+          clip_id: "from-martin/IMG_1.MOV",
+          shooter: "anton",
+          stage: 2,
+          role: "primary",
+          path: "raw/IMG_1.MOV",
+        },
+        {
+          clip_id: "from-martin/IMG_2.MOV",
+          shooter: "mathias",
+          stage: 1,
+          role: "primary",
+          path: "raw/IMG_2.MOV",
+        },
       ],
       not_imported: {},
       report: "/m/footage_sort/abc123-report.json",
     });
     renderPage();
 
-    await userEvent.click(await screen.findByRole("button", { name: "Link in place" }));
-    vi.mocked(api.getFootageSort).mockResolvedValue({ ...view(), status: "imported" });
-    await userEvent.click(screen.getByRole("button", { name: "Import 2 clips" }));
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Link in place" }),
+    );
+    vi.mocked(api.getFootageSort).mockResolvedValue({
+      ...view(),
+      status: "imported",
+    });
+    await userEvent.click(
+      screen.getByRole("button", { name: "Import 2 clips" }),
+    );
 
-    await waitFor(() => expect(api.importFootageSort).toHaveBeenCalledWith("abc123", "copy"));
-    expect(await screen.findByText(/Mathias Axell 1, Anton Johansson 1/)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(api.importFootageSort).toHaveBeenCalledWith("abc123", "copy"),
+    );
+    expect(
+      await screen.findByText(/Mathias Axell 1, Anton Johansson 1/),
+    ).toBeInTheDocument();
+  });
+
+  it("opens the player from the thumbnail and steps through the clips", async () => {
+    renderPage();
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Play VID_1.mp4" }),
+    );
+    const sheet = screen.getByRole("dialog", { name: "VID_1.mp4" });
+    expect(within(sheet).getByText("1 / 3")).toBeInTheDocument();
+
+    await userEvent.keyboard("{ArrowDown}");
+    expect(
+      await screen.findByRole("dialog", { name: "IMG_2.MOV" }),
+    ).toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Previous clip" }),
+    );
+    expect(
+      await screen.findByRole("dialog", { name: "VID_1.mp4" }),
+    ).toBeInTheDocument();
+  });
+
+  it("moves on to the next clip after an answer", async () => {
+    renderPage();
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Play VID_1.mp4" }),
+    );
+    const sheet = screen.getByRole("dialog", { name: "VID_1.mp4" });
+    await userEvent.click(
+      within(sheet).getByRole("button", { name: "Mathias Axell" }),
+    );
+    await userEvent.selectOptions(
+      within(sheet).getByRole("combobox", { name: "Stage" }),
+      "2",
+    );
+    await userEvent.click(
+      within(sheet).getByRole("button", { name: "Use this" }),
+    );
+
+    expect(
+      await screen.findByRole("dialog", { name: "IMG_2.MOV" }),
+    ).toBeInTheDocument();
   });
 });

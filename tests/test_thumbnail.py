@@ -201,3 +201,28 @@ def test_cached_clip_returns_none_on_miss(tmp_path: Path) -> None:
     source = tmp_path / "clip.mp4"
     source.write_bytes(b"fake")
     assert thumbnail.cached_clip(source, tmp_path / "thumbs", center_time=5.0, duration_s=1.0) is None
+
+
+def test_strip_times_sample_the_middle_of_each_slice() -> None:
+    assert thumbnail.strip_times(100.0, 4) == [12.5, 37.5, 62.5, 87.5]
+
+
+@pytest.mark.integration
+def test_ensure_strip_builds_one_strip_and_caches_it(tmp_path: Path) -> None:
+    from PIL import Image
+
+    from tests.synthetic_media import SYNTHETIC_DURATION_S, build_synthetic_video, ffmpeg_available
+
+    if not ffmpeg_available():
+        pytest.skip("ffmpeg not on PATH")
+    source = build_synthetic_video(tmp_path / "clip.mp4")
+    cache = tmp_path / "thumbs"
+
+    strip = thumbnail.ensure_strip(source, cache_dir=cache, duration=SYNTHETIC_DURATION_S)
+
+    with Image.open(strip) as img:
+        assert img.size == (thumbnail.STRIP_WIDTH * thumbnail.STRIP_FRAMES, thumbnail.STRIP_HEIGHT)
+    assert thumbnail.cached_strip(source, cache) == strip
+    with patch("splitsmith.thumbnail.subprocess.run") as run:
+        assert thumbnail.ensure_strip(source, cache_dir=cache, duration=SYNTHETIC_DURATION_S) == strip
+        run.assert_not_called()

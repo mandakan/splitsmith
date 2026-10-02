@@ -4,13 +4,17 @@
  * Cameras whose clock is unknown come first (one named clip sets the
  * clock), then the clips the engine would not decide, then one table per
  * shooter with the confident proposals pre-checked; leftovers and clips
- * already imported fold away. Every decision goes to the server, which
- * re-runs the engine and answers with the new view; ``lib/footageSort``
- * groups and words it. Local mode only, reached from Footage.
+ * already imported fold away. A thumbnail scrubs through the clip on hover
+ * and opens the player, which steps through the clips in page order
+ * (Previous / Next, the arrow keys) and moves on after each answer. Every
+ * decision goes to the server, which re-runs the engine and answers with
+ * the new view; ``lib/footageSort`` groups and words it. Local mode only,
+ * reached from Footage.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
+import { ScrubThumb } from "@/components/sort/ScrubThumb";
 import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/Chip";
 import { Label } from "@/components/ui/Label";
@@ -18,14 +22,23 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Segmented } from "@/components/ui/Segmented";
 import { Sheet } from "@/components/ui/Sheet";
 import { Table, Td, Th, Tr } from "@/components/ui/DataTable";
-import { ApiError, api, type SortClipView, type SortDecisions, type SortImportResult, type SortView } from "@/lib/api";
+import {
+  ApiError,
+  api,
+  type SortClipView,
+  type SortDecisions,
+  type SortImportResult,
+  type SortView,
+} from "@/lib/api";
 import {
   assignClip,
   cameraLabel,
   clockText,
   importCount,
+  neighbour,
   reasonText,
   resetClip,
+  reviewOrder,
   setChecked,
   setsClock,
   shooterName,
@@ -34,17 +47,26 @@ import {
   stageLabel,
   whereNow,
 } from "@/lib/footageSort";
+import { useSpacePlayPause } from "@/lib/keyboard";
 import { matchHref } from "@/lib/matchHref";
 
-const SELECT = "min-w-0 rounded-md border border-rule-strong bg-surface-2 px-2.5 py-1.5 text-md text-ink disabled:opacity-50";
+const SELECT =
+  "min-w-0 rounded-md border border-rule-strong bg-surface-2 px-2.5 py-1.5 text-md text-ink disabled:opacity-50";
 const POLL_MS = 1000;
+// Scrub strips arrive while the user reviews; a slower poll picks them up.
+const STRIP_POLL_MS = 2500;
+const SEEK_S = 5;
 
 export function FootageSort() {
-  const { matchId, scanId = "" } = useParams<{ matchId: string; scanId: string }>();
+  const { matchId, scanId = "" } = useParams<{
+    matchId: string;
+    scanId: string;
+  }>();
   const [view, setView] = useState<SortView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [open, setOpen] = useState<SortClipView | null>(null);
+  // The open clip by id, so the panel always shows the current proposal.
+  const [openId, setOpenId] = useState<string | null>(null);
   const [linkMode, setLinkMode] = useState<"symlink" | "copy">("symlink");
   const [result, setResult] = useState<SortImportResult | null>(null);
 
@@ -61,8 +83,13 @@ export function FootageSort() {
   }, [load]);
 
   useEffect(() => {
-    if (view?.status !== "scanning") return;
-    const timer = setTimeout(() => void load(), POLL_MS);
+    const waiting = view?.status === "scanning";
+    const strips = view?.status === "ready" && view.strips_pending > 0;
+    if (!waiting && !strips) return;
+    const timer = setTimeout(
+      () => void load(),
+      waiting ? POLL_MS : STRIP_POLL_MS,
+    );
     return () => clearTimeout(timer);
   }, [view, load]);
 
@@ -70,9 +97,7 @@ export function FootageSort() {
     setBusy(true);
     setError(null);
     try {
-      const next = await api.putFootageSortDecisions(scanId, decisions);
-      setView(next);
-      setOpen((o) => (o ? (next.clips.find((c) => c.clip_id === o.clip_id) ?? null) : null));
+      setView(await api.putFootageSortDecisions(scanId, decisions));
     } catch (e) {
       setError(e instanceof ApiError ? e.detail : String(e));
     } finally {
@@ -93,6 +118,7 @@ export function FootageSort() {
     }
   }
 
+  const openClip = view?.clips.find((c) => c.clip_id === openId) ?? null;
   const footageHref = matchHref(matchId, "ingest");
   const count = view ? importCount(view) : 0;
   const ready = view?.status === "ready";
@@ -111,39 +137,60 @@ export function FootageSort() {
             <>
               <button
                 type="button"
-                onClick={() => setLinkMode((m) => (m === "symlink" ? "copy" : "symlink"))}
+                onClick={() =>
+                  setLinkMode((m) => (m === "symlink" ? "copy" : "symlink"))
+                }
                 aria-pressed={linkMode === "copy"}
                 title="Link videos in place, or copy them into the match folder"
               >
-                <Chip tick="muted">{linkMode === "symlink" ? "Link in place" : "Copy files"}</Chip>
+                <Chip tick="muted">
+                  {linkMode === "symlink" ? "Link in place" : "Copy files"}
+                </Chip>
               </button>
-              <Button variant="primary" onClick={() => void runImport()} disabled={busy || count === 0}>
-                Import <span className="numeral">{count}</span> {count === 1 ? "clip" : "clips"}
+              <Button
+                variant="primary"
+                onClick={() => void runImport()}
+                disabled={busy || count === 0}
+              >
+                Import <span className="numeral">{count}</span>{" "}
+                {count === 1 ? "clip" : "clips"}
               </Button>
             </>
           ) : null
         }
       />
 
-      {error ? <p className="mt-3 rounded-md border border-destructive px-3 py-2 text-sm text-destructive">{error}</p> : null}
+      {error ? (
+        <p className="mt-3 rounded-md border border-destructive px-3 py-2 text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
 
       {view === null ? null : view.status === "scanning" ? (
         <p className="mt-4 text-md text-muted">Reading the videos...</p>
       ) : view.status === "failed" ? (
-        <p className="mt-4 text-md text-destructive">The scan failed: {view.error}</p>
+        <p className="mt-4 text-md text-destructive">
+          The scan failed: {view.error}
+        </p>
       ) : view.status === "imported" ? (
         <Imported view={view} result={result} footageHref={footageHref} />
       ) : (
-        <Review view={view} busy={busy} onOpen={setOpen} onDecide={(d) => void decide(d)} />
+        <Review
+          view={view}
+          busy={busy}
+          onOpen={(c) => setOpenId(c.clip_id)}
+          onDecide={(d) => void decide(d)}
+        />
       )}
 
-      {open && view ? (
+      {openClip && view ? (
         <AssignSheet
-          key={open.clip_id}
+          key={openClip.clip_id}
           view={view}
-          clip={open}
+          clip={openClip}
           busy={busy}
-          onClose={() => setOpen(null)}
+          onClose={() => setOpenId(null)}
+          onGo={setOpenId}
           onDecide={(d) => void decide(d)}
         />
       ) : null}
@@ -172,13 +219,15 @@ function Review({
           {s.anchorCameras.map(({ camera, clips }) => (
             <div key={camera.key} className="flex flex-col gap-2">
               <p className="text-md text-ink-2">
-                {cameraLabel(camera)}: the clock lines up with no scorecard. Open one clip and name its run;
-                the rest of this camera follows.
+                {cameraLabel(camera)}: the clock lines up with no scorecard.
+                Open one clip and name its run; the rest of this camera follows.
               </p>
               <ClipTable clips={clips} {...rowProps} />
             </div>
           ))}
-          {s.needsYou.length > 0 ? <ClipTable clips={s.needsYou} {...rowProps} /> : null}
+          {s.needsYou.length > 0 ? (
+            <ClipTable clips={s.needsYou} {...rowProps} />
+          ) : null}
         </section>
       ) : null}
 
@@ -192,7 +241,8 @@ function Review({
       {s.skipped.length > 0 ? (
         <details className="flex flex-col gap-2">
           <summary className="cursor-pointer text-sm text-muted">
-            <span className="numeral">{s.skipped.length}</span> skipped: no squad run follows them
+            <span className="numeral">{s.skipped.length}</span> skipped: no
+            squad run follows them
           </summary>
           <div className="mt-2">
             <ClipTable clips={s.skipped} {...rowProps} />
@@ -203,7 +253,8 @@ function Review({
       {s.imported.length > 0 ? (
         <details>
           <summary className="cursor-pointer text-sm text-muted">
-            <span className="numeral">{s.imported.length}</span> already imported
+            <span className="numeral">{s.imported.length}</span> already
+            imported
           </summary>
           <ul className="mt-2 flex flex-col gap-1 text-sm text-muted">
             {s.imported.map((c) => (
@@ -238,7 +289,7 @@ function ClipTable({
       <thead>
         <tr>
           {checkable ? <Th className="w-8" aria-label="Import" /> : null}
-          <Th className="w-20">Clip</Th>
+          <Th className="w-44">Clip</Th>
           <Th>Stage</Th>
           <Th>File</Th>
           <Th>Why</Th>
@@ -247,7 +298,9 @@ function ClipTable({
       </thead>
       <tbody>
         {clips.map((clip) => {
-          const camera = view.cameras.find((c) => c.key === clip.proposal.camera_key);
+          const camera = view.cameras.find(
+            (c) => c.key === clip.proposal.camera_key,
+          );
           const clock = camera ? clockText(camera) : null;
           return (
             <Tr key={clip.clip_id}>
@@ -258,24 +311,31 @@ function ClipTable({
                     aria-label={`Import ${clip.filename}`}
                     checked={clip.checked}
                     disabled={busy}
-                    onChange={(e) => onDecide(setChecked(view, clip.clip_id, e.target.checked))}
+                    onChange={(e) =>
+                      onDecide(setChecked(view, clip.clip_id, e.target.checked))
+                    }
                   />
                 </Td>
               ) : null}
               <Td>
-                {clip.thumbnail ? (
-                  <img
-                    src={api.footageSortThumbUrl(view.scan_id, clip.index)}
-                    alt=""
-                    loading="lazy"
-                    className="h-9 w-16 rounded bg-surface-2 object-cover"
-                  />
-                ) : (
-                  <span className="block h-9 w-16 rounded bg-surface-2" />
-                )}
+                <ScrubThumb
+                  label={`Play ${clip.filename}`}
+                  thumbUrl={
+                    clip.thumbnail
+                      ? api.footageSortThumbUrl(view.scan_id, clip.index)
+                      : null
+                  }
+                  stripUrl={
+                    clip.strip
+                      ? api.footageSortStripUrl(view.scan_id, clip.index)
+                      : null
+                  }
+                  onOpen={() => onOpen(clip)}
+                />
               </Td>
               <Td kind="name">
-                {clip.proposal.stage !== null && clip.proposal.confidence !== "skipped"
+                {clip.proposal.stage !== null &&
+                clip.proposal.confidence !== "skipped"
                   ? `${checkable ? "" : `${shooterName(view, clip.proposal.shooter)} · `}${stageLabel(clip.proposal.stage)}`
                   : "None"}
               </Td>
@@ -284,19 +344,27 @@ function ClipTable({
                 <div className="flex flex-wrap items-center gap-1.5 text-sm text-muted">
                   {camera ? cameraLabel(camera) : null}
                   {clock ? <Chip tick="muted">{clock}</Chip> : null}
-                  {whereNow(view, clip) ? <Chip tick="muted">{whereNow(view, clip)}</Chip> : null}
-                  {clip.proposal.role === "primary" && clip.proposal.reason.run_size > 1 ? (
+                  {whereNow(view, clip) ? (
+                    <Chip tick="muted">{whereNow(view, clip)}</Chip>
+                  ) : null}
+                  {clip.proposal.role === "primary" &&
+                  clip.proposal.reason.run_size > 1 ? (
                     <Chip tick="draw">primary</Chip>
                   ) : null}
                 </div>
               </Td>
               <Td className="text-sm text-muted">
                 {reasonText(view, clip)}
-                {clip.proposal.confidence === "medium" && clip.proposal.decided_by === "engine" ? " · check it" : ""}
+                {clip.proposal.confidence === "medium" &&
+                clip.proposal.decided_by === "engine"
+                  ? " · check it"
+                  : ""}
               </Td>
               <Td className="text-right">
                 <Button size="sm" onClick={() => onOpen(clip)} disabled={busy}>
-                  {clip.proposal.confidence === "needs_you" ? "Choose" : "Change"}
+                  {clip.proposal.confidence === "needs_you"
+                    ? "Choose"
+                    : "Change"}
                 </Button>
               </Td>
             </Tr>
@@ -312,15 +380,60 @@ function AssignSheet({
   clip,
   busy,
   onClose,
+  onGo,
   onDecide,
 }: {
   view: SortView;
   clip: SortClipView;
   busy: boolean;
   onClose: () => void;
+  /** Open another clip in the player. */
+  onGo: (clipId: string) => void;
   onDecide: (d: SortDecisions) => void;
 }) {
-  const [shooter, setShooter] = useState(clip.proposal.shooter ?? view.shooters[0]?.key ?? "");
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const order = reviewOrder(view);
+  const position = order.indexOf(clip.clip_id);
+  const prev = neighbour(view, clip.clip_id, -1);
+  const next = neighbour(view, clip.clip_id, 1);
+  useSpacePlayPause(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    if (el.paused) void el.play();
+    else el.pause();
+  });
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target;
+      if (
+        t instanceof HTMLElement &&
+        (t.tagName === "SELECT" ||
+          t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA")
+      )
+        return;
+      const el = videoRef.current;
+      if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && el) {
+        e.preventDefault();
+        el.currentTime = Math.max(
+          0,
+          el.currentTime + (e.key === "ArrowRight" ? SEEK_S : -SEEK_S),
+        );
+      } else if (e.key === "ArrowUp" && prev) {
+        e.preventDefault();
+        onGo(prev);
+      } else if (e.key === "ArrowDown" && next) {
+        e.preventDefault();
+        onGo(next);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [prev, next, onGo]);
+  const [shooter, setShooter] = useState(
+    clip.proposal.shooter ?? view.shooters[0]?.key ?? "",
+  );
   const stages = view.shooters.find((s) => s.key === shooter)?.stages ?? [];
   const [stage, setStage] = useState<number | null>(clip.proposal.stage);
   const camera = view.cameras.find((c) => c.key === clip.proposal.camera_key);
@@ -330,9 +443,35 @@ function AssignSheet({
   return (
     <Sheet open onClose={onClose} label={clip.filename}>
       <div className="flex items-center gap-3 border-b border-rule px-4 py-3">
-        <span className="min-w-0 flex-1 truncate font-mono text-md text-ink" title={clip.clip_id}>
+        <span
+          className="min-w-0 flex-1 truncate font-mono text-md text-ink"
+          title={clip.clip_id}
+        >
           {clip.filename}
         </span>
+        {position >= 0 ? (
+          <span className="numeral shrink-0 text-sm text-muted">
+            {position + 1} / {order.length}
+          </span>
+        ) : null}
+        <Button
+          size="sm"
+          onClick={() => prev && onGo(prev)}
+          disabled={!prev}
+          aria-label="Previous clip"
+          title="Previous clip (↑)"
+        >
+          &#8593;
+        </Button>
+        <Button
+          size="sm"
+          onClick={() => next && onGo(next)}
+          disabled={!next}
+          aria-label="Next clip"
+          title="Next clip (↓)"
+        >
+          &#8595;
+        </Button>
         <Button size="sm" variant="ghost" onClick={onClose} aria-label="Close">
           &#10005;
         </Button>
@@ -341,7 +480,11 @@ function AssignSheet({
         <div className="overflow-hidden rounded-[10px] bg-black">
           <video
             key={clip.clip_id}
+            ref={videoRef}
             controls
+            autoPlay
+            muted
+            playsInline
             preload="metadata"
             src={api.footageSortVideoUrl(view.scan_id, clip.index)}
             className="aspect-video w-full object-contain"
@@ -352,7 +495,12 @@ function AssignSheet({
           {clock ? <Chip tick="muted">{clock}</Chip> : null}
           {clip.start ? (
             <span className="numeral">
-              {new Date(clip.start).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+              {new Date(clip.start).toLocaleString(undefined, {
+                day: "numeric",
+                month: "short",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
             </span>
           ) : null}
         </div>
@@ -362,7 +510,10 @@ function AssignSheet({
           <Segmented
             label="Shooter"
             value={shooter}
-            options={view.shooters.map((s) => ({ value: s.key, label: s.name }))}
+            options={view.shooters.map((s) => ({
+              value: s.key,
+              label: s.name,
+            }))}
             onChange={(key) => {
               setShooter(key);
               setStage(null);
@@ -375,7 +526,9 @@ function AssignSheet({
             aria-label="Stage"
             className={SELECT}
             value={stage === null ? "" : String(stage)}
-            onChange={(e) => setStage(e.target.value === "" ? null : Number(e.target.value))}
+            onChange={(e) =>
+              setStage(e.target.value === "" ? null : Number(e.target.value))
+            }
           >
             <option value="">Choose a stage</option>
             {stages.map((n) => (
@@ -386,8 +539,13 @@ function AssignSheet({
           </select>
         </div>
         {anchoring ? (
-          <p className="text-sm text-muted">This also sets the clock for every clip from this camera.</p>
+          <p className="text-sm text-muted">
+            This also sets the clock for every clip from this camera.
+          </p>
         ) : null}
+        <p className="text-sm text-subtle">
+          Space plays, ← → jump 5 s, ↑ ↓ change clip.
+        </p>
       </div>
       <div className="mt-auto flex items-center gap-2 border-t border-rule px-4 py-3">
         <Button
@@ -395,18 +553,33 @@ function AssignSheet({
           onClick={() => {
             if (stage === null) return;
             onDecide(assignClip(view, clip.clip_id, shooter, stage));
-            onClose();
+            // On to the next clip: answering is the common step.
+            if (next) onGo(next);
+            else onClose();
           }}
           disabled={busy || stage === null}
         >
           Use this
         </Button>
-        <Button size="sm" onClick={() => onDecide(skipClip(view, clip.clip_id))} disabled={busy}>
+        <Button
+          size="sm"
+          onClick={() => {
+            onDecide(skipClip(view, clip.clip_id));
+            if (next) onGo(next);
+            else onClose();
+          }}
+          disabled={busy}
+        >
           Skip clip
         </Button>
         <span className="flex-1" />
         {clip.proposal.decided_by === "user" ? (
-          <Button size="sm" variant="ghost" onClick={() => onDecide(resetClip(view, clip.clip_id))} disabled={busy}>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => onDecide(resetClip(view, clip.clip_id))}
+            disabled={busy}
+          >
             Undo my choice
           </Button>
         ) : null}
@@ -433,7 +606,13 @@ function Imported({
             {result.imported.length === 1 ? "clip" : "clips"}
             {" · "}
             {view.shooters
-              .map((s) => [s.name, result.imported.filter((i) => i.shooter === s.key).length] as const)
+              .map(
+                (s) =>
+                  [
+                    s.name,
+                    result.imported.filter((i) => i.shooter === s.key).length,
+                  ] as const,
+              )
               .filter(([, n]) => n > 0)
               .map(([name, n]) => `${name} ${n}`)
               .join(", ")}

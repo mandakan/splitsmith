@@ -26,15 +26,23 @@ export interface SortSections {
 }
 
 function byStageThenStart(a: SortClipView, b: SortClipView): number {
-  return (a.proposal.stage ?? 0) - (b.proposal.stage ?? 0) || (a.start ?? "").localeCompare(b.start ?? "");
+  return (
+    (a.proposal.stage ?? 0) - (b.proposal.stage ?? 0) ||
+    (a.start ?? "").localeCompare(b.start ?? "")
+  );
 }
 
 export function sortSections(view: SortView): SortSections {
   const open = view.clips.filter((c) => c.imported_by === null);
-  const anchorKeys = new Set(view.cameras.filter((c) => c.clock === "needs_anchor").map((c) => c.key));
+  const anchorKeys = new Set(
+    view.cameras.filter((c) => c.clock === "needs_anchor").map((c) => c.key),
+  );
   const anchorCameras = view.cameras
     .filter((c) => anchorKeys.has(c.key))
-    .map((camera) => ({ camera, clips: open.filter((c) => c.proposal.camera_key === camera.key) }))
+    .map((camera) => ({
+      camera,
+      clips: open.filter((c) => c.proposal.camera_key === camera.key),
+    }))
     .filter((group) => group.clips.length > 0);
   const byShooter = view.shooters
     .map((s) => ({
@@ -44,7 +52,8 @@ export function sortSections(view: SortView): SortSections {
         .filter(
           (c) =>
             c.proposal.shooter === s.key &&
-            (c.proposal.confidence === "high" || c.proposal.confidence === "medium"),
+            (c.proposal.confidence === "high" ||
+              c.proposal.confidence === "medium"),
         )
         .sort(byStageThenStart),
     }))
@@ -52,12 +61,48 @@ export function sortSections(view: SortView): SortSections {
   return {
     anchorCameras,
     needsYou: open.filter(
-      (c) => c.proposal.confidence === "needs_you" && !anchorKeys.has(c.proposal.camera_key),
+      (c) =>
+        c.proposal.confidence === "needs_you" &&
+        !anchorKeys.has(c.proposal.camera_key),
     ),
     byShooter,
     skipped: open.filter((c) => c.proposal.confidence === "skipped"),
     imported: view.clips.filter((c) => c.imported_by !== null),
   };
+}
+
+/** Clip ids in the order the page shows them, for Previous / Next in the
+ *  player: unknown-clock cameras, then what needs the user, then each
+ *  shooter's table, then the skipped. Already-imported clips are not in
+ *  the review. */
+export function reviewOrder(view: SortView): string[] {
+  const s = sortSections(view);
+  return [
+    ...s.anchorCameras.flatMap((g) => g.clips),
+    ...s.needsYou,
+    ...s.byShooter.flatMap((g) => g.clips),
+    ...s.skipped,
+  ].map((c) => c.clip_id);
+}
+
+/** The clip ``step`` places from ``clipId`` in :func:`reviewOrder`, or null
+ *  at either end. */
+export function neighbour(
+  view: SortView,
+  clipId: string,
+  step: 1 | -1,
+): string | null {
+  const order = reviewOrder(view);
+  const i = order.indexOf(clipId);
+  if (i < 0) return null;
+  return order[i + step] ?? null;
+}
+
+/** Which of ``frames`` stills a pointer at ``x`` over a ``width``-wide
+ *  thumbnail shows. */
+export function stripFrame(x: number, width: number, frames: number): number {
+  if (width <= 0) return 0;
+  return Math.min(frames - 1, Math.max(0, Math.floor((x / width) * frames)));
 }
 
 export function importCount(view: SortView): number {
@@ -67,7 +112,11 @@ export function importCount(view: SortView): number {
 // --- decisions -----------------------------------------------------------
 
 function current(view: SortView): SortDecisions {
-  return { anchors: [...view.anchors], overrides: [...view.overrides], checked: { ...view.user_checked } };
+  return {
+    anchors: [...view.anchors],
+    overrides: [...view.overrides],
+    checked: { ...view.user_checked },
+  };
 }
 
 function without(d: SortDecisions, clipId: string): SortDecisions {
@@ -91,7 +140,12 @@ export function setsClock(view: SortView, clipId: string): boolean {
 
 /** The user names a clip's run. On a camera whose clock is unknown (or was
  *  set by an earlier answer) that answer is the camera's one anchor. */
-export function assignClip(view: SortView, clipId: string, shooter: string, stage: number): SortDecisions {
+export function assignClip(
+  view: SortView,
+  clipId: string,
+  shooter: string,
+  stage: number,
+): SortDecisions {
   const d = without(current(view), clipId);
   if (setsClock(view, clipId)) {
     const camera = cameraOf(view, clipId);
@@ -120,7 +174,11 @@ export function resetClip(view: SortView, clipId: string): SortDecisions {
   return { ...d, checked };
 }
 
-export function setChecked(view: SortView, clipId: string, value: boolean): SortDecisions {
+export function setChecked(
+  view: SortView,
+  clipId: string,
+  value: boolean,
+): SortDecisions {
   const d = current(view);
   return { ...d, checked: { ...d.checked, [clipId]: value } };
 }
@@ -135,8 +193,10 @@ export function stageLabel(stage: number): string {
 export function formatSpan(seconds: number): string {
   const s = Math.round(Math.abs(seconds));
   if (s < 60) return `${s} s`;
-  if (s < 3600) return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-  if (s < 2 * 86400) return `${Math.floor(s / 3600)} h ${String(Math.floor((s % 3600) / 60)).padStart(2, "0")} min`;
+  if (s < 3600)
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  if (s < 2 * 86400)
+    return `${Math.floor(s / 3600)} h ${String(Math.floor((s % 3600) / 60)).padStart(2, "0")} min`;
   return `${Math.round(s / 86400)} days`;
 }
 
@@ -148,7 +208,8 @@ export function shooterName(view: SortView, key: string | null): string {
 export function reasonText(view: SortView, clip: SortClipView): string {
   const p = clip.proposal;
   const r = p.reason;
-  if (p.decided_by === "user") return p.confidence === "skipped" ? "Skipped by you" : "Your choice";
+  if (p.decided_by === "user")
+    return p.confidence === "skipped" ? "Skipped by you" : "Your choice";
   switch (r.issue) {
     case "no_timestamp":
       return "No recording time in the file";
@@ -165,8 +226,13 @@ export function reasonText(view: SortView, clip: SortClipView): string {
     default:
       break;
   }
-  const scored = r.lead_seconds !== null ? `Scored ${formatSpan(r.lead_seconds)} after the clip started` : "";
-  return r.run_size > 1 ? `${scored} · ${r.run_size} cameras on this run` : scored;
+  const scored =
+    r.lead_seconds !== null
+      ? `Scored ${formatSpan(r.lead_seconds)} after the clip started`
+      : "";
+  return r.run_size > 1
+    ? `${scored} · ${r.run_size} cameras on this run`
+    : scored;
 }
 
 /** Where the file already sits, when it was imported unplaced. */
@@ -208,6 +274,7 @@ const SCHEME_NAMES: Record<string, string> = {
 };
 
 export function cameraLabel(camera: SortCamera): string {
-  const device = camera.model ?? SCHEME_NAMES[camera.scheme] ?? camera.scheme.toUpperCase();
+  const device =
+    camera.model ?? SCHEME_NAMES[camera.scheme] ?? camera.scheme.toUpperCase();
   return camera.folder ? `${device} · ${camera.folder}` : device;
 }
