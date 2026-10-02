@@ -1,4 +1,4 @@
-# Sort a shared footage folder across shooters (v1, local mode)
+# Sort a footage folder across shooters (v1, local mode)
 
 Status: approved direction 2026-10-01. Builds on #1118 (embedded recording
 time, several cameras per run).
@@ -45,7 +45,7 @@ files; photos (skipped, counted).
 ## Flow
 
 1. Footage page, local mode, two or more shooters: **Add footage** offers
-   "Sort a shared folder" next to the per-shooter pick. The user picks a
+   "Sort a folder" next to the per-shooter pick. The user picks a
    parent folder.
 2. A `footage_sort_scan` job walks it: videos only (existing
    `VIDEO_EXTENSIONS`), skips photos, `.llc`, dotfiles. Per clip one ffprobe:

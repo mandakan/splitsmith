@@ -1,7 +1,7 @@
 /**
  * Footage page, local mode, two shooters: "Sort across shooters" starts the
  * footage sort over every unassigned clip with no folder picker, and the
- * header's "Sort shared folder" picker accepts a folder holding only
+ * header's "Sort a folder" picker accepts a folder holding only
  * subfolders (2026-10-02: it did not, and the user ended up importing the
  * parent folder as one shooter's footage instead).
  */
@@ -202,15 +202,15 @@ describe("Ingest sort across shooters (local)", () => {
     expect(api.startFootageSort).not.toHaveBeenCalled();
   });
 
-  it("lets the shared-folder picker sort a folder that only holds subfolders", async () => {
+  it("lets the folder picker sort a folder that only holds subfolders", async () => {
     const user = userEvent.setup();
     renderIngest();
 
     await user.click(
-      await screen.findByRole("button", { name: "Sort shared folder" }),
+      await screen.findByRole("button", { name: "Sort a folder" }),
     );
     const dialog = await screen.findByRole("dialog", {
-      name: "Sort a shared folder",
+      name: "Sort a folder",
     });
     const sort = await within(dialog).findByRole("button", {
       name: "Sort this folder",

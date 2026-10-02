@@ -124,7 +124,7 @@ function IngestInner({ slug }: { slug: string }) {
   // the FolderPicker footer (add-footage call site only).
   const [storage, setStorage] = useState<StorageMode>("symlink");
   const [showAddFootage, setShowAddFootage] = useState(false);
-  // Sort a shared folder across every shooter (spec 2026-10-01).
+  // Sort a folder across every shooter (spec 2026-10-01).
   const [showSortFolder, setShowSortFolder] = useState(false);
   const navigate = useNavigate();
   const [showRelinkDialog, setShowRelinkDialog] = useState(false);
@@ -678,8 +678,8 @@ function IngestInner({ slug }: { slug: string }) {
               </Button>
             ) : null}
             {canSort ? (
-              <Button onClick={() => setShowSortFolder(true)} title="Sort club mates' folders across every shooter and stage">
-                Sort shared folder
+              <Button onClick={() => setShowSortFolder(true)} title="Match every video in a folder and its subfolders to a shooter and stage">
+                Sort a folder
               </Button>
             ) : null}
             <Button onClick={() => setAddShooterOpen(true)} disabled={editDenied}>
@@ -850,8 +850,8 @@ function IngestInner({ slug }: { slug: string }) {
       {showSortFolder ? (
         <FolderPicker
           slug={slug}
-          title="Sort a shared folder"
-          subtitle="Pick the folder that holds everyone's footage; every video below it is matched to a shooter and stage for you to review"
+          title="Sort a folder"
+          subtitle="Every video in this folder and its subfolders is matched to a shooter and stage for you to review"
           initialPath={sortStartDir}
           folderLabel="Sort this folder"
           // The sort walks every subfolder: the folder holding each club
