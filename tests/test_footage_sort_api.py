@@ -356,3 +356,26 @@ def test_sort_across_shooters_with_nothing_unassigned_says_so(tmp_path: Path, so
     resp = client.post(f"{base}/match/footage-sort/scan", json={"unassigned": True})
 
     assert resp.status_code == 409
+
+
+def test_scrub_strips_follow_the_scan(tmp_path: Path, source_clip: Path) -> None:
+    """The review opens as soon as the clips are read; the hover-scrub
+    strips are built after, and the view reports them as they land."""
+    from PIL import Image
+
+    _, client, _, base = _match_app(tmp_path)
+    view = _scan(client, base, _shared_folder(tmp_path, source_clip))
+
+    deadline = time.monotonic() + 60
+    while view["strips_pending"] and time.monotonic() < deadline:
+        time.sleep(0.2)
+        view = client.get(f"{base}/match/footage-sort/{view['scan_id']}").json()
+
+    assert view["strips_pending"] == 0
+    assert all(c["strip"] for c in view["clips"])
+    strip = client.get(f"{base}/match/footage-sort/{view['scan_id']}/thumbs/0/strip.jpg")
+    assert strip.status_code == 200
+    out = tmp_path / "strip.jpg"
+    out.write_bytes(strip.content)
+    with Image.open(out) as img:
+        assert img.size == (1600, 90)
