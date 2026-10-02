@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.49.0](https://github.com/mandakan/splitsmith/compare/v0.48.1...v0.49.0) (2026-10-02)
+
+
+### Features
+
+* **audit:** a beep review queue, one unconfirmed beep after the other ([#1138](https://github.com/mandakan/splitsmith/issues/1138)) ([4c2d301](https://github.com/mandakan/splitsmith/commit/4c2d301849a15ad5b2c08424ae2cec8a61cbce39))
+* **footage:** beep state per file on the chips; no beep times in the coverage table ([#1137](https://github.com/mandakan/splitsmith/issues/1137)) ([bf33d23](https://github.com/mandakan/splitsmith/commit/bf33d23ecec94669303f5b037bbe30080b258b0c))
+
 ## [0.48.1](https://github.com/mandakan/splitsmith/compare/v0.48.0...v0.48.1) (2026-10-02)
 
 
