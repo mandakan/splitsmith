@@ -18,8 +18,8 @@ Built to do two things from a single stage video: get per-shot splits for analys
 
 | | |
 |---|---|
-| ![ingest](https://raw.githubusercontent.com/mandakan/splitsmith/main/docs/screenshots/ingest.png) | **Ingest.** Drop a folder of GoPro clips; the engine auto-matches them to stages by file timestamp. |
-| ![beep review](https://raw.githubusercontent.com/mandakan/splitsmith/main/docs/screenshots/beep-review.png) | **Beep review.** Auto-snap to the start beep on each stage; low-confidence detections land in a HITL queue. |
+| ![footage sort](https://raw.githubusercontent.com/mandakan/splitsmith/main/docs/screenshots/footage-sort.png) | **Footage.** Point it at a folder, your own clips or the whole squad's. Every video lands on the shooter and stage whose scorecard was typed right after it, head cam first when several cameras caught the run. You check the list, then import. |
+| ![beep review](https://raw.githubusercontent.com/mandakan/splitsmith/main/docs/screenshots/beep-review.png) | **Beep review.** The start beep is found on every clip. You confirm them one after the other in one queue, the primaries that unlock detection first. |
 | ![audit](https://raw.githubusercontent.com/mandakan/splitsmith/main/docs/screenshots/audit.png) | **Audit.** Waveform + per-shot markers from the 3-voter ensemble. Click a marker to inspect votes; drag to fine-tune. |
 | ![compare](https://raw.githubusercontent.com/mandakan/splitsmith/main/docs/screenshots/compare.png) | **Compare.** Multi-shooter grid, all beep-aligned to t=0. Audio from one shooter, video tiles for everyone else. |
 | ![export](https://raw.githubusercontent.com/mandakan/splitsmith/main/docs/screenshots/export.png) | **Export.** Pick a preset (Final Cut bundle, YouTube match video, quick trims, compare grid) or save your own. Every card and effect is a tile, previewed on your own footage before you render. FCPXML with a marker per shot, or a rendered MP4 straight to YouTube. |
@@ -71,10 +71,48 @@ The repo ships a real Stage 3 audio sample at `tests/fixtures/stage-shots-tallmi
 
 ## The workflow
 
-1. **Ingest** -- point at a folder of raw cam files; `splitsmith ui` auto-matches them to scoreboard stages by file timestamp.
-2. **Beep review** -- the detector finds the start beep on each stage; anything below the auto-trust threshold lands in a HITL queue.
+1. **Footage** -- Add footage takes a folder (every video below it) or picked files and sorts them onto shooters and stages from the scorecard times; you review the proposal and import. See [Adding footage](#adding-footage).
+2. **Beep review** -- the detector finds the start beep on every clip; Review beeps walks the unconfirmed ones one after the other, primaries first. Confirming a primary's beep trims the stage and starts shot detection.
 3. **Audit** -- the 3-voter ensemble (envelope onsets + CLAP prompts + GBDT over hand-crafted + PANN features) emits shot times; review the waveform and drag / drop markers to fix outliers.
 4. **Export** -- pick a preset or save your own, choose the look from a gallery previewed on your footage, and generate a per-stage or whole-match FCPXML (markers per shot), a rendered MP4, or a multi-shooter Compare grid. Splits CSV ships alongside for the cull workflow.
+
+## Adding footage
+
+Footage comes in through one door: **Add footage** on the Footage page. In
+the desktop app or `splitsmith ui`, once the match is connected to SSI
+Scoreboard and its shooters are added, Add footage is the footage sort. It
+works the same for one folder of your own head-cam clips and for the
+folders your club mates shared (phone clips of each other, someone holding
+your camera, photos).
+
+1. **Pick a folder or files.** Every video below the folder is read,
+   subfolders included; photos are skipped and counted. A file already on
+   a stage is listed as imported and never added twice.
+2. **The sort proposes.** Each clip goes to the shooter and stage whose
+   scorecard was entered right after the clip started, using the time the
+   camera wrote into the file (not the file's copy date). Clips of the same
+   run from several cameras are grouped, the head cam first. Confident
+   proposals are pre-checked; anything else is listed with its reason.
+3. **Answer what it asks.** A camera whose clock is off by more than it can
+   work out asks once: name one of its clips ("which run is this?") and the
+   rest of that camera follows. Two scorecards entered seconds apart, two
+   runs on one stage, or a clip with no recording time land under "Needs
+   you". Clips nothing follows (warm-ups, other squads) are skipped.
+4. **Check and import.** Hover a thumbnail to scrub it, click it to play
+   the clip and step through the list. Change any shooter or stage, tick
+   or untick a clip or a whole shooter, then import everything or one
+   shooter at a time. The run's head cam becomes the stage's primary when
+   the stage has none; every other clip is added as a secondary camera, so
+   an existing primary is never replaced.
+5. **Beeps follow.** Beep detection queues for every imported clip. Back
+   on Overview or Footage, **Review beeps** takes you through the ones
+   waiting for your OK.
+
+A sort can be left and picked up later: Footage lists every unfinished
+sort with Continue and Discard. Each import writes a report under
+`<match>/footage_sort/` with every clip, what was decided, and by whom.
+A match without scorecards keeps the plain per-shooter import, and the
+hosted app takes uploads per shooter.
 
 How the pieces fit -- system architecture, the per-stage detection job chain, the stage status lifecycle, the share-link request path and the hosted data model -- is drawn in [`docs/architecture/DIAGRAMS.md`](docs/architecture/DIAGRAMS.md) (renders inline on GitHub; interactive versions alongside).
 
