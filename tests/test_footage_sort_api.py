@@ -62,7 +62,7 @@ def _tagged(source: Path, dest: Path, recorded: datetime) -> Path:
     return dest
 
 
-def _match_app(tmp_path: Path):  # type: ignore[no-untyped-def]
+def _match_app(tmp_path: Path, scorecards: dict[str, dict[int, int]] = SCORECARDS):  # type: ignore[no-untyped-def]
     from fastapi.testclient import TestClient
 
     from splitsmith.ui.server import create_app
@@ -71,7 +71,7 @@ def _match_app(tmp_path: Path):  # type: ignore[no-untyped-def]
     match = match_model.Match.init(root, name="Sort Test")
     match.stages = [match_model.MatchStageDefinition(stage_number=n, stage_name=f"S{n}") for n in (1, 2)]
     match.save(root)
-    for slug, by_stage in SCORECARDS.items():
+    for slug, by_stage in scorecards.items():
         match.add_shooter(root, match_model.Shooter(slug=slug, name=slug.title()))
         sroot = match_model.Match.shooter_root(root, slug)
         project = MatchProject.init(sroot, name="Sort Test")
@@ -225,3 +225,97 @@ def test_an_anchor_prechecks_the_rest_of_its_camera(tmp_path: Path, source_clip:
         "medium",
     )
     assert rest["checked"] is True
+
+
+def test_footage_added_to_the_wrong_shooter_is_sorted_and_moved(tmp_path: Path, source_clip: Path) -> None:
+    """The real sequence (2026-10-02): alice processed her own head cam,
+    then added a club mate's folder with the per-shooter Add footage while
+    she was the active shooter, so everything landed in her unassigned list.
+    Sorting the parent folder places each clip: hers onto her stage beside
+    her head cam, bob's moved to bob. Her own assigned clip stays put."""
+    _, client, root, base = _match_app(tmp_path)
+    shared = _shared_folder(tmp_path, source_clip)
+    _tagged(source_clip, shared / "head" / "VID_20260926_110010_00_001.mp4", T0 + timedelta(seconds=10))
+    first = client.post(
+        f"{base}/shooters/alice/videos/scan",
+        json={"source_dir": str(shared / "head"), "auto_assign_primary": True},
+    )
+    assert first.json()["auto_assigned"] == {"1": "raw/VID_20260926_110010_00_001.mp4"}
+    client.post(
+        f"{base}/shooters/alice/videos/scan",
+        json={"source_dir": str(shared / "from-carol"), "auto_assign_primary": False},
+    )
+
+    view = _scan(client, base, shared)
+
+    by_name = {c["filename"]: c for c in view["clips"]}
+    assert by_name["VID_20260926_110010_00_001.mp4"]["imported_by"] == "alice"
+    assert not by_name["VID_20260926_110010_00_001.mp4"]["checked"]
+    for name, shooter in (("IMG_0001.MOV", "alice"), ("IMG_0002.MOV", "bob")):
+        clip = by_name[name]
+        assert (clip["unassigned_in"], clip["proposal"]["shooter"], clip["checked"]) == (
+            "alice",
+            shooter,
+            True,
+        )
+
+    resp = client.post(f"{base}/match/footage-sort/{view['scan_id']}/import", json={})
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["not_imported"] == {"head/VID_20260926_110010_00_001.mp4": "not checked"}
+    alice = MatchProject.load(match_model.Match.shooter_root(root, "alice"))
+    bob = MatchProject.load(match_model.Match.shooter_root(root, "bob"))
+    assert [(Path(v.path).name, v.role) for v in alice.stage(1).videos] == [
+        ("VID_20260926_110010_00_001.mp4", "primary"),
+        ("IMG_0001.MOV", "secondary"),
+    ]
+    assert [(Path(v.path).name, v.role) for v in bob.stage(1).videos] == [("IMG_0002.MOV", "primary")]
+    assert alice.unassigned_videos == []
+    assert (match_model.Match.shooter_root(root, "bob") / "raw" / "IMG_0002.MOV").resolve() == (
+        shared / "from-carol" / "IMG_0002.MOV"
+    ).resolve()
+
+
+def test_per_shooter_import_leaves_a_squad_mates_run_unassigned(tmp_path: Path, source_clip: Path) -> None:
+    """Bob shoots right before alice. A clip of bob's run starts inside
+    alice's scorecard window, so the per-shooter import as alice used to
+    make it her primary (Anton's glasses on Mathias's stages, Höstfinalen
+    2026). With both shooters' scorecards it stays unassigned; alice's own
+    clip, on her next stage, is still placed."""
+    _, client, root, base = _match_app(
+        tmp_path, scorecards={"alice": {1: 600, 2: 2000}, "bob": {1: 300, 2: 1700}}
+    )
+    shared = tmp_path / "shared"
+    _tagged(source_clip, shared / "from-carol" / "IMG_0001.MOV", T0 + timedelta(seconds=200))
+    _tagged(source_clip, shared / "head" / "VID_20260926_113150_00_001.mp4", T0 + timedelta(seconds=1910))
+
+    bobs = client.post(
+        f"{base}/shooters/alice/videos/scan",
+        json={"source_dir": str(shared / "from-carol"), "auto_assign_primary": True},
+    ).json()
+    hers = client.post(
+        f"{base}/shooters/alice/videos/scan",
+        json={"source_dir": str(shared / "head"), "auto_assign_primary": True},
+    ).json()
+
+    assert bobs["auto_assigned"] == {}
+    assert hers["auto_assigned"] == {"2": "raw/VID_20260926_113150_00_001.mp4"}
+    alice = MatchProject.load(match_model.Match.shooter_root(root, "alice"))
+    assert [Path(v.path).name for v in alice.unassigned_videos] == ["IMG_0001.MOV"]
+
+
+def test_path_keys_compare_umlauts_composed() -> None:
+    """Höstfinalen 2026: the per-shooter import got the folder path typed
+    (composed "ö"), the sort listed it from disk (decomposed on macOS's
+    APFS, where both spellings open the same folder). The lookup key must
+    not depend on the spelling. Pure: on Linux the two spellings would be
+    two folders, so this checks the key, not a filesystem."""
+    import unicodedata
+
+    from splitsmith.ui.footage_sort_api import _resolved
+
+    composed = unicodedata.normalize("NFC", "/nonexistent/Höstfinalen XI - anton/IMG_5262.MOV")
+    decomposed = unicodedata.normalize("NFD", composed)
+
+    assert composed != decomposed
+    assert _resolved(composed) == _resolved(decomposed)

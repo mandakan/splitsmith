@@ -32,6 +32,7 @@ import {
   skipClip,
   sortSections,
   stageLabel,
+  whereNow,
 } from "@/lib/footageSort";
 import { matchHref } from "@/lib/matchHref";
 
@@ -283,6 +284,7 @@ function ClipTable({
                 <div className="flex flex-wrap items-center gap-1.5 text-sm text-muted">
                   {camera ? cameraLabel(camera) : null}
                   {clock ? <Chip tick="muted">{clock}</Chip> : null}
+                  {whereNow(view, clip) ? <Chip tick="muted">{whereNow(view, clip)}</Chip> : null}
                   {clip.proposal.role === "primary" && clip.proposal.reason.run_size > 1 ? (
                     <Chip tick="draw">primary</Chip>
                   ) : null}

@@ -1,7 +1,9 @@
 /**
  * IngestMoveBanner -- after an import on a multi-shooter match: "n videos
  * added to X, wrong shooter?" with one button per other shooter that
- * moves the whole batch (UX PR 6 restyle of the post-import banner).
+ * moves the whole batch (UX PR 6 restyle of the post-import banner). With
+ * ``onSort`` (local mode) it first offers to sort the clips across every
+ * shooter and stage instead: a club mate's folder is rarely one shooter's.
  */
 import { Button } from "@/components/ui/button";
 import type { MoveShooterBlocked, ShooterListEntry } from "@/lib/api";
@@ -14,6 +16,7 @@ export function IngestMoveBanner({
   blocked,
   busy,
   onMove,
+  onSort,
   onDismiss,
 }: {
   shooterName: string;
@@ -23,6 +26,7 @@ export function IngestMoveBanner({
   blocked: MoveShooterBlocked[];
   busy: boolean;
   onMove: (targetSlug: string, paths: string[]) => Promise<void>;
+  onSort?: () => void;
   onDismiss: () => void;
 }) {
   return (
@@ -30,8 +34,14 @@ export function IngestMoveBanner({
       <div className="flex flex-wrap items-center gap-3">
         <span>
           <b className="numeral font-medium text-ink">{videoPaths.length}</b> {videoPaths.length === 1 ? "video" : "videos"} added to{" "}
-          <b className="font-medium text-ink">{shooterName}</b>. <span className="text-muted">Wrong shooter? Move all to</span>
+          <b className="font-medium text-ink">{shooterName}</b>.
         </span>
+        {onSort ? (
+          <Button size="sm" disabled={busy} onClick={onSort}>
+            Sort across shooters
+          </Button>
+        ) : null}
+        <span className="text-muted">{onSort ? "Or move all to" : "Wrong shooter? Move all to"}</span>
         {shooters
           .filter((s) => s.slug !== excludeSlug)
           .map((s) => (

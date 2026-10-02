@@ -37,6 +37,7 @@ function clip(clipId: string, index: number, camera: string, over: Partial<SortC
     duration: 40,
     model: null,
     imported_by: null,
+    unassigned_in: null,
     thumbnail: false,
     checked,
     proposal: {
