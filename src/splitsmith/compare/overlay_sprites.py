@@ -25,7 +25,7 @@ the overlay stop matching.
 
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from ..overlay_text import OverlayFace, resolve_overlay_face
@@ -96,6 +96,41 @@ class TilePanel:
 
 
 @dataclass(frozen=True)
+class RaceRow:
+    """One shooter in the free square's live race, at one instant.
+
+    ``finish_seconds`` is the shooter's last shot (beep-relative) once it
+    has landed and ``None`` until then; ``first`` marks the first finisher,
+    which is also the fastest, since finishing times only grow with the
+    event clock. ``present`` false is a shooter with no trim on the stage.
+    """
+
+    label: str
+    present: bool
+    shots_fired: int
+    expected_shots: int | None
+    finish_seconds: float | None
+    first: bool = False
+
+
+@dataclass(frozen=True)
+class RaceCell:
+    """The free square's live race (2026-10-02): where it sits and its rows
+    in roster order. Rows never reorder, so a viewer's eye finds a shooter
+    where it found them a second ago.
+
+    This is cross-shooter comparison *during* the run, which
+    :class:`TilePanel` keeps out of the tiles on purpose. It is allowed
+    here because it lives in a cell no shooter fills, so it covers no
+    footage, and because the user chose it for the free square."""
+
+    row: int
+    col: int
+    stage_number: int
+    rows: tuple[RaceRow, ...]
+
+
+@dataclass(frozen=True)
 class OverlayState:
     """The whole grid's overlay content over one segment-time interval.
 
@@ -107,6 +142,7 @@ class OverlayState:
     start_seconds: float
     duration_seconds: float
     panels: tuple[TilePanel, ...]
+    race: RaceCell | None = None
 
     @property
     def end_seconds(self) -> float:
@@ -119,8 +155,16 @@ def build_overlay_states(
     *,
     head_pad_seconds: float,
     duration_seconds: float,
+    tiles: bool = True,
+    race_at: tuple[int, int] | None = None,
+    stage_number: int = 0,
 ) -> tuple[OverlayState, ...]:
     """Ordered overlay states covering the whole stage segment.
+
+    ``tiles`` false leaves every state without tile panels, for a render
+    whose only live element is the free square's race (``race_at``, the
+    free cell's ``(row, col)``). The states still step on every shot: a
+    finish is a shot, so the race changes exactly where the tiles would.
 
     The states tile ``[0, duration_seconds)`` exactly: each runs to the
     next one's start and the last is clamped to the segment end, so the
@@ -148,10 +192,52 @@ def build_overlay_states(
             OverlayState(
                 start_seconds=start,
                 duration_seconds=end - start,
-                panels=_panels_at(placements, data, event_time),
+                panels=_panels_at(placements, data, event_time) if tiles else (),
+                race=(
+                    RaceCell(
+                        row=race_at[0],
+                        col=race_at[1],
+                        stage_number=stage_number,
+                        rows=race_rows_at(placements, data, event_time),
+                    )
+                    if race_at is not None
+                    else None
+                ),
             )
         )
     return tuple(states)
+
+
+def race_rows_at(
+    placements: Sequence[TilePlacement],
+    data: Mapping[str, TileStageData],
+    event_time: float,
+) -> tuple[RaceRow, ...]:
+    """Every shooter's race row at one beep-relative instant, roster order.
+
+    A shooter has finished once their last recorded shot has fired. The
+    first finisher is marked only when two or more shooters have shots to
+    race with: a race of one has no winner worth colouring."""
+    rows: list[RaceRow] = []
+    for placement in placements:
+        tile = data.get(placement.label, _EMPTY) if placement.present else _EMPTY
+        fired = [s for s in tile.shots if s.time_from_beep <= event_time + _EPSILON]
+        finished = bool(tile.shots) and len(fired) == len(tile.shots)
+        rows.append(
+            RaceRow(
+                label=placement.label,
+                present=placement.present,
+                shots_fired=len(fired),
+                expected_shots=tile.stage_rounds.expected if tile.stage_rounds else None,
+                finish_seconds=tile.shots[-1].time_from_beep if finished else None,
+            )
+        )
+    racers = sum(1 for p in placements if p.present and data.get(p.label, _EMPTY).shots)
+    finishes = [r.finish_seconds for r in rows if r.finish_seconds is not None]
+    if racers >= 2 and finishes:
+        first = min(finishes)
+        rows = [replace(r, first=r.finish_seconds == first) for r in rows]
+    return tuple(rows)
 
 
 def _check_keys(data: Mapping[str, TileStageData]) -> None:

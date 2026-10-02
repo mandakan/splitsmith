@@ -18,6 +18,7 @@ import { CANVAS_CHOICES, gridFreeCells } from "@/pages/matchExportModel";
 const FREE_CELL_OPTIONS: ReadonlyArray<{ value: GridFreeCell; label: string }> = [
   { value: "blank", label: "Blank" },
   { value: "stage", label: "Stage card" },
+  { value: "race", label: "Live race" },
   { value: "splits", label: "Splits" },
   { value: "match", label: "Match card" },
 ];
@@ -25,6 +26,7 @@ const FREE_CELL_OPTIONS: ReadonlyArray<{ value: GridFreeCell; label: string }> =
 const FREE_CELL_HELP: Record<GridFreeCell, string> = {
   blank: "The cell no shooter fills stays black.",
   stage: "The stage's number, name, rounds and targets, on every stage.",
+  race: "Shots fired per shooter during the run, each turning into their stage time as they finish. Works with the overlay off.",
   splits: "Each shooter's draw, average and best split on the stage, the best of each marked.",
   match: "The match name, date and the shooters, on every stage.",
 };

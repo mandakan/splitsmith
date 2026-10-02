@@ -80,7 +80,8 @@ from ..overlay_html import grid_html
 from ..overlay_layout import Anchor, CellScale, ColorToken, Element, Flow, Group, Role
 from ..overlay_raster import Rasterizer
 from ..overlay_theme import OverlayTheme
-from .overlay_sprites import OverlayState, SpriteGeometry, TilePanel, TilePlacement
+from .free_cell import race_groups, row_gutter
+from .overlay_sprites import OverlayState, RaceCell, SpriteGeometry, TilePanel, TilePlacement
 
 
 def panel_groups(panel: TilePanel) -> tuple[Group, ...]:
@@ -175,10 +176,41 @@ def state_html(state: OverlayState, geometry: SpriteGeometry, *, theme: OverlayT
         )
         for panel in state.panels
     ]
+    if state.race is not None:
+        # The free square's race: a cell of its own, never a shooter's.
+        cells.append(
+            (
+                TilePlacement(label="", row=state.race.row, col=state.race.col, present=True),
+                race_groups(
+                    state.race.rows,
+                    stage_number=state.race.stage_number,
+                    gutter=row_gutter(geometry.cell_height),
+                ),
+            )
+        )
     return grid_html(cells, geometry=geometry, scale=scale, theme=theme)
 
 
-def _cache_key(geometry: SpriteGeometry, theme: OverlayTheme, panels: tuple[TilePanel, ...]) -> str:
+def _race_key(race: RaceCell | None) -> object:
+    if race is None:
+        return None
+    return {
+        "row": race.row,
+        "col": race.col,
+        "stage": race.stage_number,
+        "rows": [
+            [r.label, r.present, r.shots_fired, r.expected_shots, r.finish_seconds, r.first]
+            for r in race.rows
+        ],
+    }
+
+
+def _cache_key(
+    geometry: SpriteGeometry,
+    theme: OverlayTheme,
+    panels: tuple[TilePanel, ...],
+    race: RaceCell | None = None,
+) -> str:
     """SHA-256 over a stable JSON dump of the render *inputs* -- never the
     rendered bytes. Two states with identical geometry/theme/panels hash
     to the same key regardless of timing, so a stage where nothing changes
@@ -210,6 +242,8 @@ def _cache_key(geometry: SpriteGeometry, theme: OverlayTheme, panels: tuple[Tile
             for p in panels
         ],
     }
+    if race is not None:
+        payload["race"] = _race_key(race)
     blob = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(blob).hexdigest()
 
@@ -246,7 +280,7 @@ def write_sprite_sequence(
     written: dict[str, Path] = {}
     sequence: list[tuple[Path, float]] = []
     for state in states:
-        key = _cache_key(geometry, theme, state.panels)
+        key = _cache_key(geometry, theme, state.panels, state.race)
         path = written.get(key)
         if path is None:
             path = cache_dir / f"sprite-{key[:16]}.png"

@@ -13,6 +13,11 @@ information there, chosen once for the whole render:
   data, the rule the per-tile summary uses; a figure a shooter does not
   have is a dash, never a zero.
 - ``match`` -- the match card: its name, date and the squad.
+- ``race`` -- the live race: shots fired per shooter against the round
+  count, each turning into the shooter's stage time as they finish, the
+  first finisher's in the "good" colour. It changes during the run, so
+  it rides the overlay's sprites (:func:`race_groups`) over a plain
+  surface still, and needs no per-tile overlay to do so.
 - ``blank`` -- today's black.
 
 Pure declaration (:func:`free_cell_groups`) plus one rasterization
@@ -28,20 +33,24 @@ import io
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from PIL import Image
 
 from ..coach import statistic_splits
+from ..overlay_clock import clock_text
 from ..overlay_html import single_html
 from ..overlay_layout import Anchor, CellScale, ColorToken, Element, Flow, Group, Role
 from ..overlay_raster import Rasterizer
 from ..overlay_theme import OverlayTheme
 from ..stage_summary_data import TileStageData
 
+if TYPE_CHECKING:
+    from .overlay_sprites import RaceRow
+
 logger = logging.getLogger(__name__)
 
-FreeCellKind = Literal["blank", "stage", "splits", "match"]
+FreeCellKind = Literal["blank", "stage", "splits", "match", "race"]
 
 
 @dataclass(frozen=True)
@@ -141,8 +150,19 @@ def _line(role: Role, text: str) -> Group:
     )
 
 
-def free_cell_groups(kind: FreeCellKind, ctx: FreeCellContext) -> tuple[Group, ...]:
-    """What the free square says, as anchored groups; empty for ``blank``."""
+def row_gutter(cell_height: int) -> int:
+    """The gap between a name and its figures in the splits and race rows.
+    The shared grid gutter is a line spacing; at that width "Mathias" ran
+    straight into its number on a real render."""
+    return CellScale.for_cell(cell_height).pad * 2
+
+
+def free_cell_groups(
+    kind: FreeCellKind, ctx: FreeCellContext, *, gutter: int | None = None
+) -> tuple[Group, ...]:
+    """What the free square says, as anchored groups; empty for ``blank``
+    (and for ``race``, whose rows are the sprites' :func:`race_groups`).
+    ``gutter`` is :func:`row_gutter` for the cell being drawn."""
     if kind == "stage":
         groups = [
             _line(Role.LABEL, f"Stage {ctx.stage_number:02d}"),
@@ -182,10 +202,53 @@ def free_cell_groups(kind: FreeCellKind, ctx: FreeCellContext) -> tuple[Group, .
                         _figure(row.best, best["best"], caption=captions[2]),
                     ),
                     align="left",
+                    gap=gutter,
                 )
             )
         return tuple(groups)
     return ()
+
+
+def race_groups(
+    rows: Sequence[RaceRow], *, stage_number: int, gutter: int | None = None
+) -> tuple[Group, ...]:
+    """The live race at one instant: a header, then a row per shooter in
+    roster order. A shooter still running reads ``"9 / 16"`` (a bare
+    ``"9"`` with no round count, a dash before their first shot); a
+    finished one reads their stage time, held to the hundredth the way
+    their tile's clock holds it."""
+    names = short_names([r.label for r in rows])
+    groups = [_line(Role.LABEL, f"Stage {stage_number:02d} · Live")]
+    for row in rows:
+        if row.finish_seconds is not None:
+            value = Element(
+                role=Role.DETAIL,
+                text=f"{clock_text(row.finish_seconds)} s",
+                color=ColorToken.SPLIT_GOOD if row.first else ColorToken.INK,
+            )
+        elif row.present and row.shots_fired > 0:
+            count = (
+                f"{row.shots_fired} / {row.expected_shots}" if row.expected_shots else f"{row.shots_fired}"
+            )
+            value = Element(role=Role.DETAIL, text=count, color=ColorToken.INK)
+        else:
+            value = Element(role=Role.DETAIL, text="-", color=ColorToken.INK)
+        groups.append(
+            Group(
+                anchor=Anchor.MIDDLE_CENTER,
+                flow=Flow.GRID,
+                elements=(Element(role=Role.DETAIL, text=names[row.label]), value),
+                align="left",
+                gap=gutter,
+            )
+        )
+    return tuple(groups)
+
+
+def surface_still(*, width: int, height: int, theme: OverlayTheme) -> Image.Image:
+    """The race's base: the theme surface the other free squares are drawn
+    on, with nothing written; the sprites carry the text."""
+    return Image.new("RGB", (width, height), theme.surface)
 
 
 def build_free_cell_still(

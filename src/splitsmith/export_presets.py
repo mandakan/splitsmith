@@ -91,7 +91,7 @@ class ExportPresetBody(BaseModel):
     overlay: bool = False
     grid_overlay: bool = False
     grid_hold_seconds: float = 0.0
-    grid_free_cell: Literal["blank", "stage", "splits", "match"] = "blank"
+    grid_free_cell: Literal["blank", "stage", "splits", "match", "race"] = "blank"
     # Publish
     upload_after_render: bool = False
     upload_privacy: UploadPrivacy = "unlisted"
