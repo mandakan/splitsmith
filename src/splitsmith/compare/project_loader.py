@@ -16,6 +16,15 @@ ProbeFn = Callable[[Path], VideoMetadata]
 
 
 @dataclass(frozen=True)
+class InsetClip:
+    """A second camera small in a corner of the tile (2026-10-02)."""
+
+    trim_path: Path
+    beep_offset_in_clip: float
+    duration_seconds: float
+
+
+@dataclass(frozen=True)
 class CompareStageBundle:
     """All the per-stage facts the emitter needs from one shooter."""
 
@@ -31,6 +40,9 @@ class CompareStageBundle:
     frame_rate_den: int
     #: Mount of the camera that produced this tile, when tagged. Reporting only.
     camera_mount: str | None = None
+    #: Another of the shooter's cameras inset in the tile's corner; ``None``
+    #: when no inset was asked for or this stage has no such camera.
+    inset: InsetClip | None = None
     #: True when the requested camera was unavailable on this stage and the
     #: primary stood in. Surfaced in the run summary and the FCPXML marker.
     substituted: bool = False
@@ -150,11 +162,49 @@ def _choose_video(
     return chosen, False
 
 
+def _inset_for(
+    stage_videos: list[StageVideo],
+    chosen: StageVideo,
+    inset: str | None,
+    *,
+    trim_for: Callable[[StageVideo], Path],
+    pre_buffer: float,
+    probe: ProbeFn,
+    ensure_trim: Callable[[Path], object] | None = None,
+) -> InsetClip | None:
+    """The inset camera on this stage, chosen among the shooter's *other*
+    cameras the way the tile's camera is (``camera_select``: mount, then
+    role), so it is never the picture twice. ``None`` when nothing matches,
+    the match is ambiguous, unbeeped, or its trim is not on disk -- the
+    tile just goes without, which is what the user asked for on a stage
+    where that camera was not running."""
+    if not inset:
+        return None
+    others = [v for v in stage_videos if v is not chosen]
+    try:
+        video = camera_select.resolve_camera(others, inset)
+    except camera_select.CameraResolutionError:
+        return None
+    if video is None or video.beep_time is None:
+        return None
+    trim = trim_for(video)
+    if ensure_trim is not None:
+        ensure_trim(trim)
+    if not trim.exists():
+        return None
+    return InsetClip(
+        trim_path=trim,
+        beep_offset_in_clip=min(pre_buffer, video.beep_time),
+        duration_seconds=probe(trim).duration_seconds,
+    )
+
+
 def load_shooter(
     project_root: Path,
     label: str,
     *,
     camera: str | None = None,
+    inset: str | None = None,
     probe: ProbeFn | None = None,
 ) -> CompareShooterBundle:
     """Open ``project_root`` and build per-stage bundles for ``label``.
@@ -211,6 +261,16 @@ def load_shooter(
             frame_rate_den=meta.frame_rate_den,
             camera_mount=chosen.camera_mount,
             substituted=substituted,
+            inset=_inset_for(
+                stage.videos,
+                chosen,
+                inset,
+                trim_for=lambda v, st=stage: trim_path_for_video(
+                    project, project_root, st.stage_number, st.stage_name, v
+                ),
+                pre_buffer=pre_buffer,
+                probe=probe,
+            ),
         )
     return CompareShooterBundle(
         label=label,
@@ -227,6 +287,7 @@ def load_shooter_from_match(
     label: str,
     *,
     camera: str | None = None,
+    inset: str | None = None,
     probe: ProbeFn | None = None,
     match: Match | None = None,
     project: MatchProject | None = None,
@@ -311,6 +372,17 @@ def load_shooter_from_match(
             frame_rate_den=meta.frame_rate_den,
             camera_mount=chosen.camera_mount,
             substituted=substituted,
+            inset=_inset_for(
+                stage.videos,
+                chosen,
+                inset,
+                trim_for=lambda v, st=stage: trim_path_for_video(
+                    project, shooter_root, st.stage_number, st.stage_name, v
+                ),
+                pre_buffer=pre_buffer,
+                probe=probe,
+                ensure_trim=ensure_trim,
+            ),
         )
 
     return CompareShooterBundle(

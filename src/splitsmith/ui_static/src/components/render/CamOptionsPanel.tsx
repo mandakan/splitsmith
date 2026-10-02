@@ -31,6 +31,9 @@ export interface CamOptionsPanelProps {
   savedLabel: string;
   /** An editing timeline (FCPXML, FCP 7): offers the other angles. */
   editing: boolean;
+  /** The compare grid: each shooter's main camera is their saved one, so
+   *  the row says so instead of asking; the inset is one choice for all. */
+  grid?: boolean;
   busy?: boolean;
 }
 
@@ -56,11 +59,13 @@ export function CamOptionsPanel({
   choices,
   savedLabel,
   editing,
+  grid = false,
   busy = false,
 }: CamOptionsPanelProps) {
   if (secondaryCount <= 0) return null;
-  const cams =
-    secondaryCount === 1
+  const cams = grid
+    ? `${secondaryCount} ${secondaryCount === 1 ? "shooter" : "shooters"} with more than one camera`
+    : secondaryCount === 1
       ? "1 synced camera"
       : `${secondaryCount} synced cameras`;
   const mainOptions = [
@@ -68,31 +73,45 @@ export function CamOptionsPanel({
     ...choices,
   ];
   const insetOptions = [{ value: NONE, label: "None" }, ...choices];
+  const mainRow = grid ? (
+    <Field label="Main camera" hint={<span className="numeral">{cams}</span>}>
+      <p className="pt-1.5 text-md text-ink-2">
+        Each shooter's saved camera, set per shooter in the share dialog or
+        Compare.
+      </p>
+    </Field>
+  ) : (
+    <Field
+      label="Main camera"
+      hint={<span className="numeral">{cams}</span>}
+      help={
+        value.mainCamera === "default"
+          ? `The shooter's saved camera (${savedLabel}), set in the share dialog or Compare. A stage without it shows the primary; the sound is the main camera's.`
+          : "A stage without this camera shows the primary; the sound is the main camera's."
+      }
+    >
+      <Segmented<string>
+        label="Main camera"
+        value={value.mainCamera}
+        disabled={busy}
+        onChange={(v) => onChange({ ...value, mainCamera: v })}
+        options={mainOptions}
+      />
+    </Field>
+  );
   return (
     <>
-      <Field
-        label="Main camera"
-        hint={<span className="numeral">{cams}</span>}
-        help={
-          value.mainCamera === "default"
-            ? `The shooter's saved camera (${savedLabel}), set in the share dialog or Compare. A stage without it shows the primary; the sound is the main camera's.`
-            : "A stage without this camera shows the primary; the sound is the main camera's."
-        }
-      >
-        <Segmented<string>
-          label="Main camera"
-          value={value.mainCamera}
-          disabled={busy}
-          onChange={(v) => onChange({ ...value, mainCamera: v })}
-          options={mainOptions}
-        />
-      </Field>
+      {mainRow}
       <Field
         label="Inset"
         help={
           value.insetCamera === null
-            ? "A second camera small in a corner over the main one."
-            : "Shown on the stages that have it, and never when it is the main camera."
+            ? grid
+              ? "A second camera small in a corner of each shooter's tile."
+              : "A second camera small in a corner over the main one."
+            : grid
+              ? "In every tile whose shooter has that camera on the stage, never over their main one."
+              : "Shown on the stages that have it, and never when it is the main camera."
         }
       >
         <div className="flex flex-col gap-2">
@@ -125,7 +144,7 @@ export function CamOptionsPanel({
           ) : null}
         </div>
       </Field>
-      {editing ? (
+      {editing && !grid ? (
         <Field
           label="Other angles"
           help={

@@ -1287,6 +1287,11 @@ export interface CompareGridRequestPayload {
   overlay?: boolean;
   overlay_theme?: "splitsmith" | "clean";
   summary_hold_seconds?: number;
+  /** Another of each shooter's cameras small in a corner of their tile:
+   *  one selector (a mount or role) for the whole grid. */
+  inset_camera?: string | null;
+  inset_corner?: "top-left" | "top-right" | "bottom-left" | "bottom-right";
+  inset_size?: "small" | "medium" | "large";
   /** The YouTube sidecar (title, chapters per stage, tags, thumbnail)
    *  and, with it, the chained upload of the match-level file. */
   youtube_sidecar?: boolean;

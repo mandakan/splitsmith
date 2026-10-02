@@ -229,6 +229,13 @@ class CompareGridRequest(BaseModel):
     # MP4 (``MatchExportRequest``): title, a description with a chapter per
     # stage, tags and a thumbnail beside the grid; ``youtube_upload`` then
     # queues the same ``youtube_upload`` job on the match-level file.
+    # Another of each shooter's cameras small in a corner of their tile
+    # (2026-10-02): one selector (a mount or role) for the whole grid,
+    # resolved per shooter and stage among that shooter's other cameras.
+    # A shooter without it on a stage shows just their tile.
+    inset_camera: str | None = None
+    inset_corner: Literal["top-left", "top-right", "bottom-left", "bottom-right"] = "bottom-right"
+    inset_size: Literal["small", "medium", "large"] = "medium"
     youtube_sidecar: bool = False
     description_lead: str | None = None
     youtube_upload: bool = False

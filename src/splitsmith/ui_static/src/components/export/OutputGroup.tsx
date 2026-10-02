@@ -9,7 +9,7 @@ import { CamOptionsPanel } from "@/components/render/CamOptionsPanel";
 import { Field } from "@/components/ui/Field";
 import { Segmented } from "@/components/ui/Segmented";
 import { READ_ONLY_MIRROR_MESSAGE, type ShooterListEntry } from "@/lib/api";
-import type { CameraChoice } from "@/lib/camOptions";
+import { gridCameraChoices, gridMultiCamShooters, type CameraChoice } from "@/lib/camOptions";
 import { bareHint } from "@/lib/exportPlan";
 import type { ExportSettings } from "@/lib/exportPresets";
 import { mountLabel } from "@/lib/shareCameras";
@@ -94,6 +94,16 @@ export function OutputGroup({
             options={CANVAS_CHOICES.map((c) => ({ value: c.id, label: c.label }))}
           />
         </Field>
+        <CamOptionsPanel
+          value={camOptions}
+          onChange={(v) => patch({ camOptions: v })}
+          secondaryCount={gridMultiCamShooters(shooters)}
+          choices={gridCameraChoices(shooters)}
+          savedLabel=""
+          editing={false}
+          grid
+          busy={busy}
+        />
         <Field
           label="YouTube"
           help={

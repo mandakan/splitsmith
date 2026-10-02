@@ -7,6 +7,8 @@ import {
   camsSummary,
   DEFAULT_CAM_OPTIONS,
   fromPipLayout,
+  gridCameraChoices,
+  gridMultiCamShooters,
   syncedSecondaryCount,
 } from "./camOptions";
 
@@ -124,5 +126,27 @@ describe("camera choices", () => {
         "x",
       ),
     ).toBe("Handheld + Head cam inset");
+  });
+});
+
+describe("grid cameras", () => {
+  const cam = (mount: string | null) => ({ mount }) as never;
+  const shooters = [
+    { cameras: [cam("head"), cam("hand")] },
+    { cameras: [cam("head")] },
+    { cameras: [cam(null), cam("chest")] },
+  ];
+
+  it("offers the primary and every mount any shooter has", () => {
+    expect(gridCameraChoices(shooters).map((c) => c.value)).toEqual([
+      "primary",
+      "chest",
+      "hand",
+      "head",
+    ]);
+  });
+
+  it("counts the shooters with more than one camera", () => {
+    expect(gridMultiCamShooters(shooters)).toBe(2);
   });
 });

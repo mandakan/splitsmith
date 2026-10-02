@@ -2566,11 +2566,16 @@ def _shooter_label(
     return shooter.name or slug
 
 
+#: The tile inset's width as a share of the cell's, by the request's size.
+GRID_INSET_SCALE: dict[str, float] = {"small": 0.22, "medium": 0.30, "large": 0.40}
+
+
 def _load_compare_bundles(
     match_root: Path,
     match: match_model.Match,
     *,
     cameras: dict[str, str] | None = None,
+    inset: str | None = None,
     state: AppState | None = None,
 ) -> list[project_loader.CompareShooterBundle]:
     """Load every shooter on ``match`` as a compare-grid bundle.
@@ -2611,6 +2616,7 @@ def _load_compare_bundles(
                 slug,
                 label,
                 camera=camera,
+                inset=inset,
                 match=match,
                 project=project,
                 ensure_trim=ensure_trim,
@@ -2763,7 +2769,7 @@ def _run_compare_grid(
             for slug in match.shooters:
                 for number in requested:
                     state.materialize_audit(slug, number)
-        bundles = _load_compare_bundles(root, match, cameras=req.cameras, state=state)
+        bundles = _load_compare_bundles(root, match, cameras=req.cameras, inset=req.inset_camera, state=state)
         filtered = _filter_bundles_to_stages(bundles, requested)
         audio_project = state.shooter_project(req.audio_from) if state is not None and hosted else None
         audio_label = _shooter_label(match, root, req.audio_from, project=audio_project)
@@ -2822,6 +2828,7 @@ def _run_compare_grid(
             overlay_theme=req.overlay_theme,
             summary_hold_seconds=req.summary_hold_seconds,
             on_notice=_notice,
+            inset=mp4_grid.GridInset(corner=req.inset_corner, scale=GRID_INSET_SCALE[req.inset_size]),
         )
 
     youtube_files: list[Path] = []
@@ -15273,7 +15280,9 @@ def create_app(
             )
 
         try:
-            bundles = _load_compare_bundles(match_root, match, cameras=req.cameras, state=state)
+            bundles = _load_compare_bundles(
+                match_root, match, cameras=req.cameras, inset=req.inset_camera, state=state
+            )
         except camera_select.CameraResolutionError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 

@@ -390,6 +390,26 @@ class GridTile:
 
     row: int
     col: int
+    #: Another of the shooter's cameras small in a corner of the cell
+    #: (2026-10-02), lined up on the beep the same way: its own seek and
+    #: lead pad put its beep at ``head_pad_seconds`` too. ``None`` when the
+    #: tile has no inset on this stage.
+    inset_path: Path | None = None
+    inset_seek_seconds: float = 0.0
+    inset_lead_pad_seconds: float = 0.0
+
+
+#: Corner of the cell an inset sits in, and its width as a share of the cell's.
+InsetCorner = Literal["top-left", "top-right", "bottom-left", "bottom-right"]
+DEFAULT_INSET_SCALE = 0.30
+
+
+@dataclass(frozen=True)
+class GridInset:
+    """Where the tiles' insets sit; one look for the whole grid."""
+
+    corner: InsetCorner = "bottom-right"
+    scale: float = DEFAULT_INSET_SCALE
 
 
 @dataclass(frozen=True)
@@ -601,6 +621,7 @@ def build_stage_plans(
             # they have this stage. Resolved after the loop.
             stage_name = stage_name or bundle.stage_name
             post_beep_spans.append(bundle.duration_seconds - bundle.beep_offset_in_clip)
+            inset = bundle.inset
             tiles.append(
                 GridTile(
                     label=label,
@@ -611,6 +632,13 @@ def build_stage_plans(
                     source_duration_seconds=bundle.duration_seconds,
                     row=row,
                     col=col,
+                    inset_path=inset.trim_path if inset is not None else None,
+                    inset_seek_seconds=(
+                        max(0.0, inset.beep_offset_in_clip - head_pad_seconds) if inset is not None else 0.0
+                    ),
+                    inset_lead_pad_seconds=(
+                        max(0.0, head_pad_seconds - inset.beep_offset_in_clip) if inset is not None else 0.0
+                    ),
                 )
             )
 
@@ -1226,6 +1254,7 @@ def build_stage_command(
     overlay: StageOverlayPlan | None = None,
     hold_still_path: Path | None = None,
     lower_third: LowerThirdInput | None = None,
+    inset: GridInset | None = None,
 ) -> tuple[str, ...]:
     """Build the ffmpeg invocation rendering one grid stage.
 
@@ -1457,6 +1486,26 @@ def build_stage_command(
         lower_third_graph = (next_index, lower_third.seconds)
         next_index += 1
 
+    # The tiles' insets, video only, dead last for the reason every input
+    # above went after its predecessor: anything earlier renumbers the
+    # streams behind it and moves a shooter's audio into another's track.
+    # A plan with no insets adds nothing, so its argv does not move.
+    inset_index: list[int | None] = []
+    for tile in plan.tiles:
+        if tile.inset_path is None:
+            inset_index.append(None)
+            continue
+        args += [
+            "-ss",
+            f"{tile.inset_seek_seconds:g}",
+            "-t",
+            f"{plan.duration_seconds - tile.inset_lead_pad_seconds:g}",
+            "-i",
+            str(tile.inset_path),
+        ]
+        inset_index.append(next_index)
+        next_index += 1
+
     args += [
         "-filter_complex",
         _build_filter_graph(
@@ -1470,6 +1519,8 @@ def build_stage_command(
             hold_index=hold_index,
             early_index=early_index,
             lower_third=lower_third_graph,
+            inset_index=inset_index,
+            inset=inset,
         ),
     ]
 
@@ -1563,6 +1614,8 @@ def _build_filter_graph(
     hold_index: int | None = None,
     early_index: int | None = None,
     lower_third: tuple[int, float] | None = None,
+    inset_index: Sequence[int | None] = (),
+    inset: GridInset | None = None,
 ) -> str:
     """Scale + pad every tile to a uniform cell, then ``xstack`` the grid.
 
@@ -1640,6 +1693,35 @@ def _build_filter_graph(
             f"trim=0:{plan.duration_seconds:g}[t{slot}]"
         )
 
+    # Insets: the second camera scaled to a share of the cell's width and
+    # laid over the finished tile in its corner, inside the tile -- after
+    # the chain that puts the beep on ``head_pad``, never in it. Its own
+    # chain has the same ``tpad`` / ``setpts`` / ``fps`` / ``trim`` order
+    # for the same reason, so its beep lands where the tile's does.
+    inset = inset or GridInset()
+    tile_out = [f"t{slot}" for slot in range(len(plan.tiles))]
+    margin = max(2, round(cell_w * 0.02))
+    inset_w = max(2, round(cell_w * inset.scale / 2) * 2)
+    x = f"{margin}" if inset.corner.endswith("left") else f"W-w-{margin}"
+    y = f"{margin}" if inset.corner.startswith("top") else f"H-h-{margin}"
+    for slot, tile in enumerate(plan.tiles):
+        source = inset_index[slot] if slot < len(inset_index) else None
+        if source is None:
+            continue
+        lead = (
+            f"tpad=start_duration={tile.inset_lead_pad_seconds:g}:start_mode=add:color=black,"
+            if tile.inset_lead_pad_seconds > 0
+            else ""
+        )
+        parts.append(
+            f"[{source}:v]{lead}setpts=PTS-STARTPTS,"
+            f"scale={inset_w}:-2,setsar=1,fps={rate},"
+            f"tpad=stop_duration={plan.duration_seconds:g}:stop_mode=add:color=black,"
+            f"trim=0:{plan.duration_seconds:g}[n{slot}]"
+        )
+        parts.append(f"[t{slot}][n{slot}]overlay=x={x}:y={y}[u{slot}]")
+        tile_out[slot] = f"u{slot}"
+
     empty_cells = _unreached_cells(plan)
     for index, source in enumerate(empty_index):
         parts.append(
@@ -1651,7 +1733,7 @@ def _build_filter_graph(
             f"trim=0:{plan.duration_seconds:g}[e{index}]"
         )
 
-    stack_inputs = "".join(f"[t{slot}]" for slot in range(len(plan.tiles)))
+    stack_inputs = "".join(f"[{label}]" for label in tile_out)
     stack_inputs += "".join(f"[e{index}]" for index in range(len(empty_index)))
     placements = [(tile.row, tile.col) for tile in plan.tiles]
     placements += list(empty_cells[: len(empty_index)])
@@ -2217,6 +2299,7 @@ def render_grid_mp4(
     closing: MatchTitle | None = None,
     stage_titles: StageTitleKind = "none",
     title_duration_seconds: float = 1.5,
+    inset: GridInset | None = None,
 ) -> GridRenderResult:
     """Render every stage as a grid, then stitch them into one MP4.
 
@@ -2584,6 +2667,7 @@ def render_grid_mp4(
                 overlay=stage_overlay,
                 hold_still_path=hold_still,
                 lower_third=lower_third,
+                inset=inset,
             )
             completed = _run_ffmpeg(cmd, runner=runner)
             if completed.returncode != 0:
@@ -2663,6 +2747,8 @@ def render_grid_mp4(
 
 
 __all__ = [
+    "DEFAULT_INSET_SCALE",
+    "GridInset",
     "DEFAULT_CANVAS_HEIGHT",
     "DEFAULT_CANVAS_WIDTH",
     "FALLBACK_FRAME_RATE_DEN",
