@@ -110,15 +110,22 @@ linux:
   icon: build-resources/icons   # PNG set, 512x512 minimum
 appImage:
   artifactName: ${productName}-${version}-x86_64.${ext}
+  executableArgs: []
 deb:
   artifactName: splitsmith-desktop_${version}_amd64.${ext}
   depends: [libnss3, libgbm1, libasound2, libgtk-3-0, libxss1, libnotify4, xdg-utils]
   afterInstall: linux/postinst.sh
   afterRemove: linux/postrm.sh
-afterPack: scripts/afterPack.cjs
 ```
 
-The deb installs into `/opt/Splitsmith`. `postinst.sh` links
+A custom `afterInstall` / `afterRemove` *replaces* electron-builder's
+stock deb scripts, which are what set `chrome-sandbox` up and install
+the AppArmor profile. So `linux/postinst.sh` and `linux/postrm.sh` are
+copies of `app-builder-lib/templates/linux/after-install.tpl` and
+`after-remove.tpl` from the locked electron-builder version, with our
+lines appended, and the CI job asserts the built deb's postinst still
+contains `chrome-sandbox` and `apparmor`. The deb installs into
+`/opt/Splitsmith`. `postinst.sh` links
 `/usr/bin/splitsmith` to `/opt/Splitsmith/resources/python/bin/splitsmith`
 (the relocatable shim resolves the link back into the bundle);
 `postrm.sh` removes the link only when it still points into
@@ -158,7 +165,7 @@ A vitest file pins both templates' labels and roles.
 
 **`main.ts`.** On Linux the `BrowserWindow` gets `icon` from the bundled
 512 px PNG (GNOME and KDE show none otherwise). And before anything else
-it checks `SPLITSMITH_SANDBOX_BLOCKED` (below).
+it runs the sandbox check (below).
 
 **`updateCheck.ts`.** `feedUrl(platform)`: `darwin` returns
 `UPDATE_FEED_URL` unchanged; `linux` appends `?platform=linux`.
@@ -169,38 +176,37 @@ the menu does not offer it), the SPA, every Python module.
 
 ## The AppImage sandbox check
 
-Electron aborts before JS when its sandbox cannot start, so the check
-has to run before Electron. `scripts/afterPack.cjs` (electron-builder
-hook, Linux only) renames the packaged `splitsmith-desktop` binary to
-`splitsmith-desktop.bin` and writes `linux/launcher.sh` in its place:
+What electron-builder 26 already does (read from
+`app-builder-lib/out/targets/appimage/`): with the default `appimage`
+toolset (`0.0.0`) the AppImage's desktop entry passes `--no-sandbox`
+unconditionally, and its `AppRun` adds `--no-sandbox` whenever
+`unshare -Ur true` fails. Left alone, the AppImage runs unsandboxed
+everywhere it is launched from a desktop entry, and silently on Ubuntu
+24.04+. Both contradict decision 4.
 
-```sh
-#!/bin/sh
-here="$(dirname "$(readlink -f "$0")")"
-bin="$here/splitsmith-desktop.bin"
-if [ -z "${APPIMAGE:-}" ] || unshare -Ur true 2>/dev/null; then
-  exec "$bin" "$@"
-fi
-SPLITSMITH_SANDBOX_BLOCKED=1 exec "$bin" --no-sandbox "$@"
-```
+So:
 
-- Not an AppImage (`$APPIMAGE` unset, the .deb case): exec unchanged.
-  The deb's setuid helper and AppArmor profile handle the sandbox.
-- AppImage and `unshare -Ur true` succeeds (Arch, Debian): exec
-  unchanged; the namespace sandbox works.
-- AppImage and it fails (Ubuntu 24.04+): exec with `--no-sandbox` and
-  `SPLITSMITH_SANDBOX_BLOCKED=1`. `main.ts` checks that variable first:
-  it shows one native `dialog.showMessageBox` ("This system blocks the
-  sandbox an AppImage needs. Install the .deb from the release page
-  instead.") with a button opening the GitHub release page in the
-  browser, then `app.quit()`. It never creates a `BrowserWindow`, never
-  starts the sidecar and never loads web content, so the unsandboxed
-  process only draws a dialog.
+- `appImage.executableArgs: []` removes the unconditional flag from the
+  desktop entry.
+- `AppRun`'s fallback stays (it is not configurable), and `main.ts`
+  turns it into a refusal. A pure `sandboxBlocked({ appImage, noSandbox,
+  userNsWorks })` in `src/sandbox.ts` is true only when the process runs
+  from an AppImage (`$APPIMAGE` set), was started with `--no-sandbox`
+  (`app.commandLine.hasSwitch("no-sandbox")`), and `unshare -Ur true`
+  fails (`spawnSync`, checked only when the first two hold). When true,
+  `main.ts` shows one native `dialog.showMessageBox` ("This system blocks
+  the sandbox an AppImage needs. Install the .deb from the release page
+  instead.") with a button opening the GitHub release page, then
+  `app.quit()`. It never creates a `BrowserWindow`, never starts the
+  sidecar and never loads web content, so the unsandboxed process only
+  draws a dialog.
+- The .deb is untouched by this: `$APPIMAGE` is unset there, and its
+  binary keeps the path electron-builder's AppArmor profile attaches to.
 
-The launcher's branch logic is tested in vitest by running it as a
-subprocess against a stub `.bin` that echoes its argv and env, with a
-stub `unshare` on `PATH` that succeeds or fails, and `APPIMAGE` set or
-unset: four cases.
+A user who passes `--no-sandbox` by hand on a system where namespaces
+work gets what they asked for; the check refuses only the case the
+sandbox cannot start. `sandbox.test.ts` pins all eight input
+combinations.
 
 ## Update feed
 
@@ -272,12 +278,12 @@ Launch check (Linux job only): `--appimage-extract` the built AppImage
 banner from the app log, wait for `/api/health`, then `POST
 /api/shutdown`. That proves Electron, the packed `main.js` and the
 sidecar chain start from the AppImage's own contents, which `smoke.sh`
-alone (sidecar only) does not. It bypasses the launcher on purpose:
+alone (sidecar only) does not. It bypasses `AppRun` and passes `--no-sandbox` on purpose:
 Docker's default seccomp profile blocks `unshare`, and the
 `ubuntu-latest` host is 24.04 with restricted namespaces, so the
-launcher would correctly take the dialog branch in both places. The
-launcher's branches are covered by its vitest cases and the manual
-checklist.
+sandbox check would correctly refuse in both places. The launch check
+therefore runs with `APPIMAGE` unset. The check's branches are covered
+by `sandbox.test.ts` and the manual checklist.
 
 ## Manual verification before the first public Linux release
 
