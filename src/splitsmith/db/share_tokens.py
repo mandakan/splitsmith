@@ -36,6 +36,9 @@ class ShareToken:
     created_at: datetime
     revoked_at: datetime | None
     scope: str
+    # Per shooter, the camera this link's viewers start on; None follows
+    # each shooter's saved default.
+    cameras: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -48,6 +51,9 @@ class ResolvedShare:
     # left through this link" without also storing the raw token
     # (comparable to a hashed session id, not a bearer credential).
     share_token_id: str
+    # The link's starting cameras (``ShareTokenRow.cameras``); the coach
+    # payload hands them to the viewer's pages as ``compare_camera``.
+    cameras: dict[str, str] | None = None
 
 
 def _to_share_token(row: ShareTokenRow) -> ShareToken:
@@ -58,6 +64,7 @@ def _to_share_token(row: ShareTokenRow) -> ShareToken:
         created_at=row.created_at,
         revoked_at=row.revoked_at,
         scope=row.scope,
+        cameras=row.cameras or None,
     )
 
 
@@ -112,6 +119,30 @@ class ShareTokenStore:
             ).scalars()
             return [_to_share_token(r) for r in rows]
 
+    async def set_cameras(
+        self, share_id: str, *, match_id: str, cameras: dict[str, str] | None
+    ) -> ShareToken | None:
+        """Set which camera each shooter starts on for this link's viewers;
+        None (or empty) makes the link follow the shooters' saved defaults
+        again. None when the link is unknown or not this user's. A revoked
+        link keeps its setting (the audit trail shows what it opened on)."""
+        async with self._session_factory() as session:
+            row = (
+                await session.execute(
+                    select(ShareTokenRow).where(
+                        ShareTokenRow.user_id == self._user_id,
+                        ShareTokenRow.id == share_id,
+                        ShareTokenRow.match_id == match_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            row.cameras = dict(cameras) if cameras else None
+            await session.commit()
+            await session.refresh(row)
+            return _to_share_token(row)
+
     async def revoke(self, share_id: str, *, match_id: str) -> bool:
         async with self._session_factory() as session:
             row = (
@@ -149,5 +180,9 @@ async def resolve_share_token(session_factory: async_sessionmaker, token: str) -
         if _aware(row.expires_at) < datetime.now(UTC):
             return None
     return ResolvedShare(
-        owner_user_id=row.user_id, match_id=row.match_id, scope=row.scope, share_token_id=row.id
+        owner_user_id=row.user_id,
+        match_id=row.match_id,
+        scope=row.scope,
+        share_token_id=row.id,
+        cameras=row.cameras or None,
     )

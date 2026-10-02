@@ -1187,6 +1187,16 @@ class ShareInfo(BaseModel):
     created_at: datetime
     revoked_at: datetime | None
     scope: str
+    # Per shooter, the camera this link's viewers start on; None follows
+    # each shooter's saved default (``compare_camera``).
+    cameras: dict[str, str] | None = None
+
+
+class ShareCamerasRequest(BaseModel):
+    """Body for ``PATCH /api/match/shares/{id}/cameras``: ``{slug: selector}``
+    (a camera mount or role), or null / empty to follow the defaults."""
+
+    cameras: dict[str, str] | None = None
 
 
 class ShareListResponse(BaseModel):
@@ -1557,6 +1567,12 @@ current_match_capabilities: ContextVar[frozenset[str] | None] = ContextVar(
 # strip server-local fields (e.g. match_root, last_scanned_dir) from their
 # response payloads before returning them to anonymous viewers.
 current_share_request: ContextVar[bool] = ContextVar("splitsmith_current_share_request", default=False)
+# The share link's own starting cameras (``ShareTokenRow.cameras``), set by
+# ``_share_alias`` beside ``current_share_request``. The coach payload
+# hands a shooter's entry to the viewer's pages as ``compare_camera``.
+current_share_cameras: ContextVar[dict[str, str] | None] = ContextVar(
+    "splitsmith_current_share_cameras", default=None
+)
 # The signed-in user behind a share request, or None. Set by
 # _share_alias purely so a comment can carry an account name instead of
 # a generated handle.
@@ -7612,6 +7628,7 @@ def create_app(
                     created_at=s.created_at,
                     revoked_at=s.revoked_at,
                     scope=s.scope,
+                    cameras=s.cameras,
                 )
                 for s in shares
             ]
@@ -7650,6 +7667,48 @@ def create_app(
             created_at=s.created_at,
             revoked_at=s.revoked_at,
             scope=s.scope,
+        )
+
+    @app.patch("/api/match/shares/{share_id}/cameras", response_model=ShareInfo)
+    async def _set_match_share_cameras(share_id: str, req: ShareCamerasRequest) -> ShareInfo:
+        """Set which camera each shooter starts on for one share link.
+
+        Each entry is validated like the saved default (a mount or role some
+        stage of that shooter resolves), so a typo fails here rather than
+        quietly opening every viewer on the primary. A slug that is not a
+        shooter of the match is a 400. 404 when the link is unknown or not
+        this user's.
+        """
+        if not _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        mid = current_match_id.get()
+        if mid is None:
+            raise _no_project_error()
+        store = state.share_tokens
+        if store is None:
+            raise HTTPException(status_code=500, detail="share store unavailable")
+        cameras = {k: v for k, v in (req.cameras or {}).items() if v} or None
+        for slug, camera in (cameras or {}).items():
+            try:
+                project = await state.shooter_project_async(slug)
+            except HTTPException as exc:
+                raise HTTPException(status_code=400, detail=f"no shooter {slug!r} in this match") from exc
+            try:
+                camera_select.validate_camera(
+                    [stage.videos for stage in project.stages if not stage.skipped], camera
+                )
+            except camera_select.CameraResolutionError as exc:
+                raise HTTPException(status_code=400, detail=f"{slug}: {exc}") from exc
+        s = await store.set_cameras(share_id, match_id=mid, cameras=cameras)
+        if s is None:
+            raise HTTPException(status_code=404, detail="not found")
+        return ShareInfo(
+            id=s.id,
+            url=f"{state.public_base_url}/share/{s.token}",
+            created_at=s.created_at,
+            revoked_at=s.revoked_at,
+            scope=s.scope,
+            cameras=s.cameras,
         )
 
     @app.delete("/api/match/shares/{share_id}", status_code=204)
@@ -8330,6 +8389,7 @@ def create_app(
 
         tenant_token = current_tenant.set(state.build_tenant(resolved.owner_user_id))
         share_token = current_share_request.set(True)
+        cameras_token = current_share_cameras.set(resolved.cameras)
         scope_token = current_share_scope.set(resolved.scope)
         # Stashed on request.state (not a ContextVar) because only the two
         # OG PNG handlers need it and they already take ``request`` -- same
@@ -8354,6 +8414,7 @@ def create_app(
         finally:
             current_share_viewer.reset(viewer_token)
             current_share_scope.reset(scope_token)
+            current_share_cameras.reset(cameras_token)
             current_share_request.reset(share_token)
             current_tenant.reset(tenant_token)
 
@@ -12773,9 +12834,10 @@ def create_app(
             # the guard is hosted-only in practice.
             "version": version,
             "videos": _coach_video_entries(slug, project, stg),
-            # The shooter's saved camera for comparisons (a mount or role,
-            # ``camera_select``); the stage and Compare pages start on it.
-            "compare_camera": project.compare_camera,
+            # The camera the stage and Compare pages start on (a mount or
+            # role, ``camera_select``): a share link's own choice for this
+            # shooter when the link has one, else the shooter's saved one.
+            "compare_camera": (current_share_cameras.get() or {}).get(slug, project.compare_camera),
             "shots": coach_shots,
         }
 

@@ -27,11 +27,12 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Portal } from "@/components/ui/Portal";
-
-import { ShareCameras } from "./ShareCameras";
 import { useDialogFocus } from "@/lib/dialogFocus";
 import { api, type ShareInfo } from "@/lib/api";
+import { useShareCameraData } from "@/lib/useShareCameraData";
 import { cn } from "@/lib/utils";
+
+import { DefaultCameras, LinkCameras } from "./ShareCameras";
 
 interface ShareDialogProps {
   onClose: () => void;
@@ -57,6 +58,7 @@ export function ShareDialog({ onClose }: ShareDialogProps) {
   const [armedRevoke, setArmedRevoke] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
+  const cameraData = useShareCameraData();
   const panelRef = useRef<HTMLDivElement | null>(null);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useDialogFocus(true, panelRef, onClose);
@@ -231,6 +233,16 @@ export function ShareDialog({ onClose }: ShareDialogProps) {
                         </div>
                       ) : null}
 
+                      {live ? (
+                        <LinkCameras
+                          share={share}
+                          data={cameraData}
+                          onSaved={(updated) =>
+                            setShares((prev) => prev?.map((x) => (x.id === updated.id ? updated : x)) ?? prev)
+                          }
+                        />
+                      ) : null}
+
                       {/* Meta row: date + revoke control */}
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-xs text-muted">
@@ -282,7 +294,7 @@ export function ShareDialog({ onClose }: ShareDialogProps) {
               </div>
             ) : null}
 
-            <ShareCameras />
+            <DefaultCameras data={cameraData} />
           </CardContent>
 
           <div className="flex justify-end border-t border-rule p-4">
