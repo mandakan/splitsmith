@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -230,6 +230,47 @@ describe("Compare audio mix", () => {
     await waitFor(() => expect(tiles()).toHaveLength(2));
     await waitFor(() => expect(tiles()[0].muted).toBe(true));
     expect(tiles()[1].muted).toBe(false);
+  });
+});
+
+describe("Compare cinema and the lanes", () => {
+  it("folds the shot lanes away and back with a labelled button", async () => {
+    renderAt("/match/m1/compare/2", "/match/:matchId/compare/:stage");
+    await screen.findByTestId("compare-page");
+    const hide = await screen.findByRole("button", { name: "Hide lanes" });
+    expect(hide).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(hide);
+    expect(screen.getByRole("button", { name: "Show lanes" })).toHaveAttribute("aria-expanded", "false");
+    // The lane names (which carry the speakers) are hidden with the lanes.
+    const dock = screen.getByTestId("transport-dock");
+    // jsdom has no stylesheet: the fold is the ``hidden`` class on the lanes.
+    const lane = () => within(dock).getByRole("button", { name: "Mute Fast Shooter", hidden: true });
+    expect(lane().closest(".hidden")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show lanes" }));
+    expect(lane().closest(".hidden")).toBeNull();
+  });
+
+  it("cinema shows only the videos with a bar; L toggles the leaderboard, Esc leaves", async () => {
+    renderAt("/match/m1/compare/2", "/match/:matchId/compare/:stage");
+    const page = await screen.findByTestId("compare-page");
+    fireEvent.click(await screen.findByRole("button", { name: "Cinema" }));
+    expect(page).toHaveAttribute("data-cinema", "true");
+    expect(screen.queryByTestId("transport-dock")).toBeNull();
+    expect(screen.getByTestId("cinema-bar")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Audit" })).toBeNull();
+    // Both tiles still play, now without a frame.
+    expect(document.querySelectorAll("video[src*='/stream/']")).toHaveLength(2);
+    expect(screen.queryByTestId("cinema-board")).toBeNull();
+    fireEvent.keyDown(window, { key: "l" });
+    expect(screen.getByTestId("cinema-board")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Hide leaderboard" }));
+    expect(screen.queryByTestId("cinema-board")).toBeNull();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(page).not.toHaveAttribute("data-cinema");
+    expect(screen.getByTestId("transport-dock")).toBeInTheDocument();
+    // C goes in from the keyboard too.
+    fireEvent.keyDown(window, { key: "c" });
+    expect(page).toHaveAttribute("data-cinema", "true");
   });
 });
 
