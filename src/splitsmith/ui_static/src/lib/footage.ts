@@ -3,7 +3,7 @@
  *
  * Pure functions from the per-shooter project payloads (plus the shooter
  * list and the shell's jobs) to the coverage matrix: one row per stage,
- * one cell per shooter with its files and the primary's beep state; the
+ * one cell per shooter with its files and each file's beep state; the
  * unassigned tray; the header counts. The page renders these and owns
  * only the fetches and the writes.
  */
@@ -17,7 +17,17 @@ export interface FootageCell {
   videos: StageVideo[];
   primary: StageVideo | null;
   beep: { time: number | null; reviewed: boolean; detecting: boolean };
+  /** Each file's beep, by video id: every file has its own beep in its
+   *  own timeline, so a time means nothing at the stage level. */
+  beeps: Record<string, VideoBeep>;
 }
+
+/** One file's beep. ``detected`` and ``low`` are found but not yet
+ *  confirmed; a beep placed by hand counts as confirmed. */
+export type VideoBeep = "confirmed" | "detected" | "low" | "detecting" | "missing";
+
+/** Below this a detected beep is uncertain (the beep queue's default). */
+export const LOW_BEEP_CONFIDENCE = 0.5;
 
 export interface FootageRow {
   stageNumber: number;
@@ -40,6 +50,44 @@ function detecting(jobs: Job[], slug: string, stageNumber: number): boolean {
     (j) => isJobActive(j) && j.kind === "detect_beep" && j.shooter_slug === slug && j.stage_number === stageNumber,
   );
 }
+
+/** A detect-beep job for this file is queued or running. A job that names
+ *  no file counts for every file on its stage. */
+function detectingVideo(jobs: Job[], slug: string, stageNumber: number, videoId: string): boolean {
+  return jobs.some(
+    (j) =>
+      isJobActive(j) &&
+      j.kind === "detect_beep" &&
+      j.shooter_slug === slug &&
+      j.stage_number === stageNumber &&
+      (j.video_id == null || j.video_id === videoId),
+  );
+}
+
+export function videoBeep(video: StageVideo, detectingNow: boolean): VideoBeep {
+  if (video.beep_time != null && video.beep_reviewed) return "confirmed";
+  if (detectingNow) return "detecting";
+  if (video.beep_time == null) return "missing";
+  if (video.beep_confidence != null && video.beep_confidence < LOW_BEEP_CONFIDENCE) return "low";
+  return "detected";
+}
+
+/** The mark a file chip carries: a primary always shows its beep; a
+ *  secondary only when its beep is off (missing or uncertain), since a
+ *  secondary never holds a stage back. */
+export function chipBeepMark(video: StageVideo, beep: VideoBeep | undefined): VideoBeep | null {
+  if (beep === undefined || video.role === "ignored") return null;
+  if (video.role === "primary") return beep;
+  return beep === "missing" || beep === "low" ? beep : null;
+}
+
+export const BEEP_WORDS: Record<VideoBeep, string> = {
+  confirmed: "beep confirmed",
+  detected: "beep to confirm",
+  low: "beep uncertain",
+  detecting: "detecting beep",
+  missing: "no beep",
+};
 
 export function buildFootageRows(args: {
   projects: Record<string, MatchProject | null>;
@@ -72,6 +120,9 @@ export function buildFootageRows(args: {
             reviewed: primary?.beep_reviewed ?? false,
             detecting: detecting(jobs, s.slug, stageNumber),
           },
+          beeps: Object.fromEntries(
+            videos.map((v) => [v.video_id, videoBeep(v, detectingVideo(jobs, s.slug, stageNumber, v.video_id))]),
+          ),
         };
       });
       return { stageNumber, stageName, cells, covered: cells.length > 0 && cells.every((c) => c.primary != null) };
@@ -126,16 +177,31 @@ export function footageStats(rows: FootageRow[], unassigned: UnassignedItem[], s
   };
 }
 
-export type BeepTone = "ok" | "warn" | "none";
+export interface BeepAction {
+  label: string;
+  tone: "ok" | "warn" | "muted";
+  /** Links to the beep in Audit: there is something for the user to do. */
+  link: boolean;
+}
 
-/** The beep column: the confirmed time, an amber label while detecting
- *  or unconfirmed, a dash without a primary or a beep. */
-export function beepState(cell: FootageCell): { label: string; tone: BeepTone; confirmable: boolean } {
-  if (!cell.primary) return { label: "—", tone: "none", confirmable: false };
-  if (cell.beep.detecting) return { label: "detecting…", tone: "warn", confirmable: false };
-  if (cell.beep.time == null) return { label: "no beep", tone: "warn", confirmable: false };
-  if (!cell.beep.reviewed) return { label: `${cell.beep.time.toFixed(2)} · unconfirmed`, tone: "warn", confirmable: true };
-  return { label: cell.beep.time.toFixed(2), tone: "ok", confirmable: false };
+/** What the stage's primary beep asks of the user, worded for the line
+ *  under a cell (and the single-shooter Beep column). No time: each file
+ *  has its own beep in its own timeline. Null without a primary. */
+export function beepAction(cell: FootageCell): BeepAction | null {
+  if (!cell.primary) return null;
+  switch (cell.beeps[cell.primary.video_id]) {
+    case "detecting":
+      return { label: "Detecting beep…", tone: "muted", link: false };
+    case "missing":
+      return { label: "Place beep", tone: "warn", link: true };
+    case "detected":
+    case "low":
+      return { label: "Confirm beep", tone: "warn", link: true };
+    case "confirmed":
+      return { label: "Beep confirmed", tone: "ok", link: false };
+    default:
+      return null;
+  }
 }
 
 /** `VID_20260627_1403.MP4` -> `VID_…1403.MP4`: the first four and the

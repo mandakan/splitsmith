@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import type { Job, MatchProject, ShooterListEntry, StageVideo } from "@/lib/api";
-import { beepState, buildFootageRows, footageStats, shortName, unassignedVideos } from "@/lib/footage";
+import {
+  beepAction,
+  buildFootageRows,
+  chipBeepMark,
+  footageStats,
+  shortName,
+  unassignedVideos,
+  videoBeep,
+} from "@/lib/footage";
 
 function video(over: Partial<StageVideo>): StageVideo {
   return { path: "raw/x.mp4", role: "primary", beep_time: 5.32, beep_reviewed: true, match_timestamp: null, ...over } as StageVideo;
@@ -62,7 +70,7 @@ describe("unassignedVideos and footageStats", () => {
   });
 });
 
-describe("beepState / shortName", () => {
+describe("beep states / shortName", () => {
   const cell = (over: Partial<StageVideo> | null, detecting = false) => {
     const primary = over ? video(over) : null;
     return {
@@ -71,14 +79,50 @@ describe("beepState / shortName", () => {
       videos: primary ? [primary] : [],
       primary,
       beep: { time: primary?.beep_time ?? null, reviewed: primary?.beep_reviewed ?? false, detecting },
+      beeps: primary ? { [primary.video_id]: videoBeep(primary, detecting) } : {},
     };
   };
-  it("reads the four states", () => {
-    expect(beepState(cell(null))).toEqual({ label: "—", tone: "none", confirmable: false });
-    expect(beepState(cell({}, true)).label).toBe("detecting…");
-    expect(beepState(cell({ beep_time: null }))).toMatchObject({ label: "no beep", tone: "warn" });
-    expect(beepState(cell({ beep_time: 4.9, beep_reviewed: false }))).toEqual({ label: "4.90 · unconfirmed", tone: "warn", confirmable: true });
-    expect(beepState(cell({}))).toEqual({ label: "5.32", tone: "ok", confirmable: false });
+  it("words what the primary's beep asks of the user, never a time", () => {
+    expect(beepAction(cell(null))).toBeNull();
+    expect(beepAction(cell({ beep_time: null }, true))).toEqual({ label: "Detecting beep…", tone: "muted", link: false });
+    expect(beepAction(cell({ beep_time: null }))).toEqual({ label: "Place beep", tone: "warn", link: true });
+    expect(beepAction(cell({ beep_time: 4.9, beep_reviewed: false }))).toEqual({ label: "Confirm beep", tone: "warn", link: true });
+    expect(beepAction(cell({}))).toEqual({ label: "Beep confirmed", tone: "ok", link: false });
+  });
+  it("tells detected, uncertain and confirmed apart; a hand-placed beep is confirmed", () => {
+    expect(videoBeep(video({ beep_time: 4.9, beep_reviewed: false, beep_confidence: 0.9 }), false)).toBe("detected");
+    expect(videoBeep(video({ beep_time: 4.9, beep_reviewed: false, beep_confidence: 0.2 }), false)).toBe("low");
+    expect(videoBeep(video({ beep_time: 4.9, beep_reviewed: true }), true)).toBe("confirmed");
+    expect(videoBeep(video({ beep_time: null }), false)).toBe("missing");
+  });
+  it("marks a primary always and a secondary only when its beep is off", () => {
+    const primary = video({});
+    const secondary = video({ role: "secondary" });
+    expect(chipBeepMark(primary, "detected")).toBe("detected");
+    expect(chipBeepMark(secondary, "detected")).toBeNull();
+    expect(chipBeepMark(secondary, "confirmed")).toBeNull();
+    expect(chipBeepMark(secondary, "missing")).toBe("missing");
+    expect(chipBeepMark(secondary, "low")).toBe("low");
+    expect(chipBeepMark(video({ role: "ignored" }), "missing")).toBeNull();
+  });
+  it("counts a detect job for one file only against that file", () => {
+    const jobs = [
+      { kind: "detect_beep", status: "pending", shooter_slug: "me", stage_number: 1, video_id: "v2" },
+    ] as unknown as Job[];
+    const rows = buildFootageRows({
+      projects: {
+        me: project([
+          {
+            n: 1,
+            name: "S1",
+            videos: [video({ video_id: "v1", beep_time: null }), video({ video_id: "v2", role: "secondary", beep_time: null })],
+          },
+        ]),
+      },
+      shooters: [ME],
+      jobs,
+    });
+    expect(rows[0].cells[0].beeps).toEqual({ v1: "missing", v2: "detecting" });
   });
   it("shortens long stems only", () => {
     expect(shortName("raw/VID_20260627_1403.MP4")).toBe("VID_…1403.MP4");
