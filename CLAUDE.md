@@ -338,8 +338,10 @@ static build (``build-ffmpeg-linux.sh``, release
 ``desktop/build/FFMPEG_RELEASE``, never in ``build/bin`` (which ships
 verbatim into the bundle). The deb's ``linux/postinst.sh`` /
 ``postrm.sh`` are electron-builder's stock scripts plus
-``linux/cli-link.sh`` (the ``/usr/bin/splitsmith`` link, left alone
-when it is not ours) and must stay that way (``scripts/check-deb.sh``
+``linux/cli-link.sh`` (``/usr/bin/splitsmith``, a ``#!/bin/sh``
+wrapper rather than a link so terminal runs get the bundled ffmpeg: only
+the Electron sidecar sets ``SPLITSMITH_FFMPEG``, and the CLI looks next to
+its interpreter, not in ``resources/bin``; left alone when it is not ours) and must stay that way (``scripts/check-deb.sh``
 in CI); inside them ``${letters}`` is an electron-builder macro. The
 AppImage refuses with a dialog where the sandbox cannot start
 (``src/sandbox.ts``; ``appImage.executableArgs: []`` stops the stock
