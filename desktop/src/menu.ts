@@ -9,6 +9,7 @@ import path from "node:path";
 import { app, BrowserWindow, dialog, Menu, shell } from "electron";
 
 import { CLI_TARGET, cliLinkPlan } from "./cliLink";
+import { menuTemplate } from "./menuTemplate";
 import { CLI_RELATIVE, sidecarState } from "./sidecar";
 import { checkForUpdates } from "./updates";
 
@@ -115,41 +116,16 @@ function installCli(): void {
 }
 
 export function buildMenu(): void {
-  const template: Electron.MenuItemConstructorOptions[] = [
+  const template = menuTemplate(
+    process.platform,
     {
-      label: app.name,
-      submenu: [
-        { label: "About Splitsmith", click: showAbout },
-        { label: "Third-party notices", click: showNotices },
-        { label: "Check for updates...", click: () => void checkForUpdates({ interactive: true }) },
-        { type: "separator" },
-        { label: "Install command line tool", click: installCli },
-        { type: "separator" },
-        { role: "hide" },
-        { role: "hideOthers" },
-        { role: "unhide" },
-        { type: "separator" },
-        { role: "quit" },
-      ],
+      showAbout,
+      showNotices,
+      checkForUpdates: () => void checkForUpdates({ interactive: true }),
+      installCli,
+      openLogFolder: () => void shell.openPath(sidecarState.logDir),
     },
-    {
-      label: "File",
-      submenu: [{ label: "Open log folder", click: () => void shell.openPath(sidecarState.logDir) }, { role: "close" }],
-    },
-    { role: "editMenu" },
-    {
-      label: "View",
-      submenu: [
-        { role: "reload" },
-        { role: "resetZoom" },
-        { role: "zoomIn" },
-        { role: "zoomOut" },
-        { type: "separator" },
-        { role: "togglefullscreen" },
-        { role: "toggleDevTools" },
-      ],
-    },
-    { role: "windowMenu" },
-  ];
+    app.name,
+  );
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
