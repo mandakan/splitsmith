@@ -80,9 +80,12 @@ function Shell({ ctx }: { ctx: MatchShellOutletContext }) {
 function renderStage(
   path: string,
   shooters: ShooterListEntry[],
-  opts: { videos: CoachVideoEntry[]; shots?: CoachShot[] },
+  opts: { videos: CoachVideoEntry[]; shots?: CoachShot[]; compareCamera?: string },
 ) {
-  vi.mocked(api.getStageCoach).mockResolvedValue(makeCoach(opts.videos, opts.shots ?? []));
+  vi.mocked(api.getStageCoach).mockResolvedValue({
+    ...makeCoach(opts.videos, opts.shots ?? []),
+    compare_camera: opts.compareCamera ?? null,
+  });
   const ctx: MatchShellOutletContext = {
     project: null,
     health: null,
@@ -192,4 +195,38 @@ describe("ResultsStage camera selection", () => {
     expect(mainVideoSrcs()).toEqual(["http://localhost/trim/cam-b.mp4"]);
     expect(screen.getByRole("group", { name: /cameras/i })).toBeInTheDocument();
   });
+
+  describe("the camera holds across stages", () => {
+    const HEAD_THEN_PHONE: CoachVideoEntry[] = [
+      { path: "head.mp4", role: "primary", beep_in_clip: 5, kind: "trim" as const, mount: "head" },
+      { path: "phone.mp4", role: "secondary", beep_in_clip: 12, kind: "trim" as const, mount: "hand" },
+    ];
+    const anna = [makeShooter("anna", "Anna", [[2, "audited"], [3, "audited"]])];
+
+    it("opens on the camera chosen on an earlier stage (?cams=)", async () => {
+      renderStage("/match/m1/results/anna/2?cams=anna:hand", anna, { videos: HEAD_THEN_PHONE });
+      await screen.findByText(/steel rush/i);
+      expect(mainVideoSrcs()).toEqual(["http://localhost/trim/phone.mp4"]);
+    });
+
+    it("opens on the shooter's saved default when nothing was chosen", async () => {
+      renderStage("/match/m1/results/anna/2", anna, { videos: HEAD_THEN_PHONE, compareCamera: "hand" });
+      await screen.findByText(/steel rush/i);
+      await waitFor(() => expect(mainVideoSrcs()).toEqual(["http://localhost/trim/phone.mp4"]));
+    });
+
+    it("a pick rides on to the next stage", async () => {
+      renderStage("/match/m1/results/anna/2", anna, { videos: HEAD_THEN_PHONE });
+      await screen.findByText(/steel rush/i);
+      expect(screen.getByRole("link", { name: "Next stage" }).getAttribute("href")).not.toContain("cams=");
+      fireEvent.click(screen.getByRole("button", { name: /camera 2 of 2/i }));
+      await waitFor(() =>
+        expect(screen.getByRole("link", { name: "Next stage" })).toHaveAttribute(
+          "href",
+          "/match/m1/results/anna/3?cams=anna%3Ahand",
+        ),
+      );
+    });
+  });
 });
+

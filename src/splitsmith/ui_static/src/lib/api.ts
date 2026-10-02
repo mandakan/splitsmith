@@ -1497,6 +1497,9 @@ export interface CoachVideoEntry {
   /** What a viewer calls this camera ("Insta360 GO 3S", "Handheld",
    *  "Camera 2"); absent from servers older than 0.49.2. */
   label?: string;
+  /** The camera's mount ("head", "hand", ...); with the role it is what a
+   *  camera choice keys on across stages (``camera_select``). */
+  mount?: string | null;
 }
 
 export interface CoachStageResponse {
@@ -1512,6 +1515,9 @@ export interface CoachStageResponse {
    *  for the next patch. Always 0 in local mode, where files do not lock. */
   version: number;
   videos: CoachVideoEntry[];
+  /** The shooter's saved camera for comparisons (a mount or role); the
+   *  stage and Compare pages start on it. Absent from older servers. */
+  compare_camera?: string | null;
   shots: CoachShot[];
 }
 

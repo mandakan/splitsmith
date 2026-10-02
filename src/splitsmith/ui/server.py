@@ -12640,6 +12640,10 @@ def create_app(
                     "beep_in_clip": anchor,
                     "kind": kind,
                     "label": label,
+                    # The mount and role are what a camera choice keys on
+                    # across stages (``camera_select``): a video id names a
+                    # file on one stage, not a camera.
+                    "mount": v.camera_mount,
                 }
             )
         return out
@@ -12769,6 +12773,9 @@ def create_app(
             # the guard is hosted-only in practice.
             "version": version,
             "videos": _coach_video_entries(slug, project, stg),
+            # The shooter's saved camera for comparisons (a mount or role,
+            # ``camera_select``); the stage and Compare pages start on it.
+            "compare_camera": project.compare_camera,
             "shots": coach_shots,
         }
 
