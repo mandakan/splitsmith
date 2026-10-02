@@ -1273,6 +1273,16 @@ export interface CompareGridRequestPayload {
   overlay?: boolean;
   overlay_theme?: "splitsmith" | "clean";
   summary_hold_seconds?: number;
+  /** The YouTube sidecar (title, chapters per stage, tags, thumbnail)
+   *  and, with it, the chained upload of the match-level file. */
+  youtube_sidecar?: boolean;
+  description_lead?: string | null;
+  youtube_upload?: boolean;
+  youtube_privacy?: "unlisted" | "private" | "public";
+  youtube_playlist?: string | null;
+  youtube_playlist_id?: string | null;
+  youtube_publish_at?: string | null;
+  youtube_notify_subscribers?: boolean;
 }
 
 /** ``Job.result`` shape for a ``"compare-grid"`` job, mirrors the dict

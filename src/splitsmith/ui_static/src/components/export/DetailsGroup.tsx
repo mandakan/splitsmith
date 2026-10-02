@@ -42,10 +42,10 @@ export function DetailsGroup({
   onDesktop = false,
 }: DetailsGroupProps) {
   const single = settings.mode === "single";
-  const renderedMp4 = single && settings.outputFormat === "mp4";
+  // The grid is always a rendered MP4, so it publishes like one shooter's.
+  const renderedMp4 = (single && settings.outputFormat === "mp4") || settings.mode === "compare";
   const publishing = renderedMp4 && settings.youtube;
-  // The grid is always an MP4 and draws the match cards too.
-  const drawsCards = renderedMp4 || settings.mode === "compare";
+  const drawsCards = renderedMp4;
   const titleCard = drawsCards && (settings.renderOptions.titlePage || settings.renderOptions.closingCard);
   return (
     <>

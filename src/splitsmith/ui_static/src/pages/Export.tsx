@@ -675,6 +675,10 @@ function ExportInner({ slug }: { slug: string }) {
         render: renderOptions,
         overlay: gridOverlay,
         summaryHoldSeconds: gridHoldSeconds,
+        youtube,
+        descriptionLead,
+        uploadOptions,
+        youtubeConnected: !!youtubeSettings?.connected,
       });
       const submitted = await api.exportCompareGrid(payload);
       setJob(submitted);
@@ -895,7 +899,8 @@ function ExportInner({ slug }: { slug: string }) {
             </Section>
           ) : null}
 
-          {mode === "single" || (compare && (renderOptions.titlePage || renderOptions.closingCard)) ? (
+          {/* The grid always renders an MP4, so it publishes like one shooter's. */}
+          {mode === "single" || compare ? (
             <Section label="Details">
               <DetailsGroup
                 settings={view}

@@ -115,6 +115,14 @@ describe("export wrappers forward every declared field", () => {
       overlay: true,
       overlay_theme: "clean",
       summary_hold_seconds: 3,
+      youtube_sidecar: true,
+      description_lead: "Every stage, side by side.",
+      youtube_upload: true,
+      youtube_privacy: "private",
+      youtube_playlist: "Squad",
+      youtube_playlist_id: "PL1",
+      youtube_publish_at: "2026-10-03T08:00:00.000Z",
+      youtube_notify_subscribers: false,
     };
     const fetchMock = mockFetch();
     await api.exportCompareGrid(payload);
