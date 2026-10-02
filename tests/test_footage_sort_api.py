@@ -304,25 +304,18 @@ def test_per_shooter_import_leaves_a_squad_mates_run_unassigned(tmp_path: Path, 
     assert [Path(v.path).name for v in alice.unassigned_videos] == ["IMG_0001.MOV"]
 
 
-def test_a_folder_name_with_an_umlaut_matches_however_it_is_spelled(
-    tmp_path: Path, source_clip: Path
-) -> None:
+def test_path_keys_compare_umlauts_composed() -> None:
     """Höstfinalen 2026: the per-shooter import got the folder path typed
-    (composed "ö"), the sort listed it from disk (decomposed on macOS). The
-    clip registered under alice must still be recognised as hers."""
+    (composed "ö"), the sort listed it from disk (decomposed on macOS's
+    APFS, where both spellings open the same folder). The lookup key must
+    not depend on the spelling. Pure: on Linux the two spellings would be
+    two folders, so this checks the key, not a filesystem."""
     import unicodedata
 
-    _, client, _, base = _match_app(tmp_path)
-    composed = unicodedata.normalize("NFC", "Höstfinalen - carol")
+    from splitsmith.ui.footage_sort_api import _resolved
+
+    composed = unicodedata.normalize("NFC", "/nonexistent/Höstfinalen XI - anton/IMG_5262.MOV")
     decomposed = unicodedata.normalize("NFD", composed)
-    shared = tmp_path / "shared"
-    _tagged(source_clip, shared / decomposed / "IMG_0001.MOV", T0)
-    client.post(
-        f"{base}/shooters/alice/videos/scan",
-        json={"source_dir": str(shared / composed), "auto_assign_primary": False},
-    )
 
-    view = _scan(client, base, shared)
-
-    (clip,) = view["clips"]
-    assert clip["unassigned_in"] == "alice"
+    assert composed != decomposed
+    assert _resolved(composed) == _resolved(decomposed)
