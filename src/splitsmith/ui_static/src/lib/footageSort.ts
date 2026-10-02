@@ -105,6 +105,25 @@ export function stripFrame(x: number, width: number, frames: number): number {
   return Math.min(frames - 1, Math.max(0, Math.floor((x / width) * frames)));
 }
 
+/** Check or uncheck several clips at once (a shooter's select-all). */
+export function setCheckedMany(
+  view: SortView,
+  clipIds: string[],
+  value: boolean,
+): SortDecisions {
+  const d = current(view);
+  const checked = { ...d.checked };
+  for (const id of clipIds) checked[id] = value;
+  return { ...d, checked };
+}
+
+/** A group's select-all box: every clip checked, none, or some. */
+export function checkState(clips: SortClipView[]): "all" | "none" | "some" {
+  const n = clips.filter((c) => c.checked).length;
+  if (n === 0) return "none";
+  return n === clips.length ? "all" : "some";
+}
+
 export function importCount(view: SortView): number {
   return view.clips.filter((c) => c.checked).length;
 }

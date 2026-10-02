@@ -236,7 +236,7 @@ describe("FootageSort", () => {
     );
 
     await waitFor(() =>
-      expect(api.importFootageSort).toHaveBeenCalledWith("abc123", "copy"),
+      expect(api.importFootageSort).toHaveBeenCalledWith("abc123", "copy", undefined),
     );
     expect(
       await screen.findByText(/Mathias Axell 1, Anton Johansson 1/),
@@ -285,5 +285,54 @@ describe("FootageSort", () => {
     expect(
       await screen.findByRole("dialog", { name: "IMG_2.MOV" }),
     ).toBeInTheDocument();
+  });
+
+  it("selects or clears a shooter's clips with one box", async () => {
+    renderPage();
+
+    await userEvent.click(
+      await screen.findByRole("checkbox", {
+        name: "Select all for Anton Johansson",
+      }),
+    );
+
+    expect(api.putFootageSortDecisions).toHaveBeenCalledWith("abc123", {
+      anchors: [],
+      overrides: [],
+      checked: { "from-martin/IMG_1.MOV": false },
+    });
+  });
+
+  it("imports one shooter and keeps the review open for the rest", async () => {
+    vi.mocked(api.importFootageSort).mockResolvedValue({
+      imported: [
+        {
+          clip_id: "from-martin/IMG_1.MOV",
+          shooter: "anton",
+          stage: 2,
+          role: "primary",
+          path: "raw/IMG_1.MOV",
+        },
+      ],
+      not_imported: {},
+      report: "/m/footage_sort/abc123-report.json",
+    });
+    renderPage();
+
+    await userEvent.click(
+      await screen.findByRole("button", {
+        name: "Import 1 for Anton Johansson",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(api.importFootageSort).toHaveBeenCalledWith("abc123", "symlink", [
+        "anton",
+      ]),
+    );
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Imported 1 clip to Anton Johansson",
+    );
+    expect(screen.getByText("Mathias Axell")).toBeInTheDocument();
   });
 });

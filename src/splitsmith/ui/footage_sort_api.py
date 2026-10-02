@@ -159,6 +159,10 @@ class DecisionsRequest(BaseModel):
 
 class ImportRequest(BaseModel):
     link_mode: Literal["symlink", "copy"] = "symlink"
+    # Import only these shooters' checked clips and keep the review open
+    # (the page's per-shooter Import); ``None`` imports everything checked
+    # and closes it.
+    shooters: list[str] | None = None
 
 
 class ImportedClip(BaseModel):
@@ -622,11 +626,15 @@ async def import_scan(scan_id: str, req: ImportRequest, request: Request) -> Imp
         raise HTTPException(status_code=409, detail=f"scan is {record.status}")
     view = _view(state, record)
     paths = {c.clip.clip_id: Path(c.path) for c in record.clips}
-    chosen = [c for c in view.clips if c.checked]
+    wanted = set(req.shooters) if req.shooters is not None else None
+    chosen = [c for c in view.clips if c.checked and (wanted is None or c.proposal.shooter in wanted)]
     # Primaries before secondaries so a run's primary claims an empty stage.
     chosen.sort(key=lambda c: (c.proposal.shooter or "", c.proposal.stage or 0, c.proposal.role != "primary"))
     imported: list[ImportedClip] = []
     not_imported = {c.clip_id: "not checked" for c in view.clips if not c.checked}
+    not_imported.update(
+        {c.clip_id: "another shooter's import" for c in view.clips if c.checked and c not in chosen}
+    )
     queued: list[tuple[str, Any, int, Any]] = []
     registered = _registrations(state)
     projects: dict[str, tuple[Any, Path]] = {}
@@ -672,9 +680,16 @@ async def import_scan(scan_id: str, req: ImportRequest, request: Request) -> Imp
         for slug, project, stage_number, video in queued:
             await queue_beep(slug, project, stage_number, video)
 
-    record.status = "imported"
-    _save(state, record)
+    if wanted is None:
+        record.status = "imported"
+        _save(state, record)
+    # One report per import: a review imported shooter by shooter keeps
+    # every batch's record.
     report_path = _sort_dir(state) / f"{scan_id}-report.json"
+    n = 2
+    while report_path.exists():
+        report_path = _sort_dir(state) / f"{scan_id}-report-{n}.json"
+        n += 1
     atomic_write_json(
         report_path,
         {
