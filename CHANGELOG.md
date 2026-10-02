@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.48.0](https://github.com/mandakan/splitsmith/compare/v0.47.0...v0.48.0) (2026-10-02)
+
+
+### Features
+
+* **footage-sort:** import one shooter at a time; select all per shooter ([#1130](https://github.com/mandakan/splitsmith/issues/1130)) ([167787f](https://github.com/mandakan/splitsmith/commit/167787f896f35505aaf523d0836f7ed67c305ff2))
+* **footage:** Add footage is the footage sort; open sorts can be continued ([#1132](https://github.com/mandakan/splitsmith/issues/1132)) ([1e145d2](https://github.com/mandakan/splitsmith/commit/1e145d2eaae2a43d2a79b59e2487ed10f77c6e95))
+
 ## [0.47.0](https://github.com/mandakan/splitsmith/compare/v0.46.1...v0.47.0) (2026-10-02)
 
 
