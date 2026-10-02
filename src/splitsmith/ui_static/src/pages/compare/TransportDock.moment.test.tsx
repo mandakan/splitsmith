@@ -7,11 +7,13 @@ const baseProps = {
   shooters: [],
   maxTime: 10,
   timeSinceBeep: 2,
-  audioSlug: null,
+  muted: new Set<string>(),
+  allMuted: false,
   isPlaying: false,
   onTogglePlay: () => {},
   onScrub: () => {},
-  onPickAudio: () => {},
+  onSpeaker: () => {},
+  onToggleAll: () => {},
   onCopyMoment: () => {},
 };
 

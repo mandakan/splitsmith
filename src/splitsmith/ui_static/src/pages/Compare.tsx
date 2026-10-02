@@ -62,6 +62,16 @@ import {
   type MatchProject,
 } from "@/lib/api";
 import { angleCountText, cameraOptions } from "@/lib/cameraSwitch";
+import {
+  allMuted,
+  audibleSlugs,
+  audioFromMoment,
+  audioToMoment,
+  solo,
+  tileVolume,
+  toggleAll,
+  toggleMute,
+} from "@/lib/compareAudio";
 import { useMatchHref } from "@/lib/matchHref";
 import { momentHref, momentToSearch, parseMoment, resolveMomentView } from "@/lib/moment";
 import { isShareView } from "@/lib/shareView";
@@ -107,7 +117,8 @@ export function Compare() {
   const [bundle, setBundle] = useState<CompareStageResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [layout, setLayout] = useState<Layout>("grid");
-  const [audioSlug, setAudioSlug] = useState<string | null>(null);
+  // Shooters muted in the mix; everyone on video is heard by default.
+  const [muted, setMuted] = useState<ReadonlySet<string>>(() => new Set());
   const [visibleSlugs, setVisibleSlugs] = useState<Set<string>>(() => new Set());
   const [isPlaying, setIsPlaying] = useState(false);
   const [timeSinceBeep, setTimeSinceBeep] = useState(0);
@@ -173,11 +184,6 @@ export function Compare() {
         if (!alive) return;
         setBundle(b);
         if (b.shooters.length > 0) {
-          // Sound from the first shooter on video: a tile-less audio
-          // shooter has no master clock, so nothing would play.
-          const audible =
-            b.shooters.find((s) => s.video_ref && s.beep_offset_in_clip != null) ?? b.shooters[0];
-          setAudioSlug(audible.slug);
           setVisibleSlugs(
             new Set(b.shooters.filter((s) => s.video_ref).map((s) => s.slug)),
           );
@@ -226,9 +232,15 @@ export function Compare() {
   const playableShooters = orderedShooters.filter(
     (s) => s.video_ref && s.beep_offset_in_clip != null,
   );
-  const audioShooter = audioSlug
-    ? orderedShooters.find((s) => s.slug === audioSlug) ?? null
-    : null;
+  // The tiles on screen with video: they make up the mix, and the first
+  // of them is the clock the others follow (a shooter without a tile has
+  // no element to read time from).
+  const mixSlugs = useMemo(
+    () => playableShooters.filter((s) => visibleSlugs.has(s.slug)).map((s) => s.slug),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [playableShooters.map((s) => s.slug).join(","), visibleSlugs],
+  );
+  const clockShooter = playableShooters.find((s) => s.slug === mixSlugs[0]) ?? null;
   const maxStageTime = useMemo(
     () =>
       Math.max(
@@ -286,9 +298,9 @@ export function Compare() {
   // Sync engine: read the master's currentTime, derive time-since-beep,
   // and pull the other videos into agreement when drift > threshold.
   useEffect(() => {
-    if (!isPlaying || !audioShooter || audioShooter.beep_offset_in_clip == null)
+    if (!isPlaying || !clockShooter || clockShooter.beep_offset_in_clip == null)
       return;
-    const masterEl = videoRefs.current.get(audioShooter.slug);
+    const masterEl = videoRefs.current.get(clockShooter.slug);
     if (!masterEl) return;
 
     startedAtRef.current = Date.now();
@@ -299,12 +311,12 @@ export function Compare() {
       // metadata arrives - deriving the shared clock from that would drag
       // every tile to clip start. Skip ticks until the master is readable.
       if (masterEl.readyState < 1) return;
-      const masterBeep = effectiveBeep(audioShooter) ?? 0;
+      const masterBeep = effectiveBeep(clockShooter) ?? 0;
       const tsb = masterEl.currentTime - masterBeep;
       setTimeSinceBeep(tsb);
       // Resync slaves.
       videoRefs.current.forEach((el, slug) => {
-        if (slug === audioShooter.slug) return;
+        if (slug === clockShooter.slug) return;
         const shooter = orderedShooters.find((s) => s.slug === slug);
         if (!shooter) return;
         const beep = effectiveBeep(shooter);
@@ -330,12 +342,12 @@ export function Compare() {
         maxDriftRef.current = 0;
       }
     };
-  }, [isPlaying, audioShooter, orderedShooters, stageNumber, effectiveBeep]);
+  }, [isPlaying, clockShooter, orderedShooters, stageNumber, effectiveBeep]);
 
   // When the master pauses naturally (end of clip), reflect into state.
   useEffect(() => {
-    if (!audioShooter) return;
-    const el = videoRefs.current.get(audioShooter.slug);
+    if (!clockShooter) return;
+    const el = videoRefs.current.get(clockShooter.slug);
     if (!el) return;
     const onPause = () => setIsPlaying(false);
     const onPlay = () => setIsPlaying(true);
@@ -345,14 +357,26 @@ export function Compare() {
       el.removeEventListener("pause", onPause);
       el.removeEventListener("play", onPlay);
     };
-  }, [audioShooter, bundle]);
+  }, [clockShooter, bundle]);
 
-  // Mute toggle: only the audio shooter plays sound; others muted.
+  // The mix: every tile not muted at 1 / (number heard), so the sum of
+  // uncorrelated microphones cannot clip and a lone shooter is full level.
+  const volume = tileVolume(mixSlugs, muted);
   useEffect(() => {
     videoRefs.current.forEach((el, slug) => {
-      el.muted = slug !== audioSlug;
+      el.muted = muted.has(slug);
+      el.volume = muted.has(slug) ? 0 : volume;
     });
-  }, [audioSlug]);
+  }, [muted, volume, mixSlugs, bundle]);
+  // Click: mute or unmute one shooter. Alt-click: hear only them (again:
+  // hear everyone).
+  const onSpeaker = useCallback(
+    (slug: string, alt: boolean) =>
+      setMuted((prev) => (alt ? solo(prev, slug, mixSlugs) : toggleMute(prev, slug))),
+    [mixSlugs],
+  );
+  const onToggleAll = useCallback(() => setMuted((prev) => toggleAll(prev, mixSlugs)), [mixSlugs]);
+  const heardFirst = audibleSlugs(mixSlugs, muted)[0] ?? orderedShooters[0]?.slug;
 
   const setVideoRef = useCallback(
     (slug: string, el: HTMLVideoElement | null) => {
@@ -363,21 +387,21 @@ export function Compare() {
   );
 
   const togglePlay = useCallback(() => {
-    if (!audioShooter) return;
-    const master = videoRefs.current.get(audioShooter.slug);
+    if (!clockShooter) return;
+    const master = videoRefs.current.get(clockShooter.slug);
     if (!master) return;
     if (master.paused) {
       void master.play().catch(() => {});
       videoRefs.current.forEach((el, slug) => {
-        if (slug !== audioShooter.slug) void el.play().catch(() => {});
+        if (slug !== clockShooter.slug) void el.play().catch(() => {});
       });
     } else {
       master.pause();
       videoRefs.current.forEach((el, slug) => {
-        if (slug !== audioShooter.slug) el.pause();
+        if (slug !== clockShooter.slug) el.pause();
       });
     }
-  }, [audioShooter]);
+  }, [clockShooter]);
 
   const scrubTo = useCallback(
     (tsb: number) => {
@@ -413,7 +437,9 @@ export function Compare() {
     const slugs = new Set(bundle.shooters.map((s) => s.slug));
     const view = resolveMomentView(moment, slugs);
     if (view.who) setVisibleSlugs(new Set(view.who));
-    if (view.cam) setAudioSlug(view.cam);
+    if (view.cam || moment.mute) {
+      setMuted(audioFromMoment(bundle.shooters.map((s) => s.slug), { cam: view.cam, mute: moment.mute }));
+    }
     if (moment.v && typeof moment.v === "object") {
       const roster = new Set(bundle.shooters.map((s) => s.slug));
       const picks: Record<string, number> = {};
@@ -559,12 +585,12 @@ export function Compare() {
     if (timeSinceBeep >= maxStageTime + PLAY_ALL_TAIL_S) finishStage();
   }, [playAll, isPlaying, timeSinceBeep, maxStageTime, finishStage]);
   useEffect(() => {
-    if (!playAll || !audioShooter) return;
-    const el = videoRefs.current.get(audioShooter.slug);
+    if (!playAll || !clockShooter) return;
+    const el = videoRefs.current.get(clockShooter.slug);
     if (!el) return;
     el.addEventListener("ended", finishStage);
     return () => el.removeEventListener("ended", finishStage);
-  }, [playAll, audioShooter, bundle, finishStage]);
+  }, [playAll, clockShooter, bundle, finishStage]);
 
   // Copies a shareable moment link: current time-since-beep, the audio
   // camera, and whichever shooters are currently visible - mirrors
@@ -586,7 +612,7 @@ export function Compare() {
     }
     const moment = {
       t,
-      cam: audioSlug ?? undefined,
+      ...audioToMoment(who, muted),
       who,
       ...(Object.keys(v).length > 0 ? { v } : {}),
     };
@@ -608,7 +634,7 @@ export function Compare() {
     timeSinceBeep,
     playableShooters,
     visibleSlugs,
-    audioSlug,
+    muted,
     camIndexFor,
     location.pathname,
     shareUrl,
@@ -693,9 +719,9 @@ export function Compare() {
                 key={shooter.slug}
                 shooter={shooter}
                 visible={visibleSlugs.has(shooter.slug)}
-                isAudio={audioSlug === shooter.slug}
+                heard={!muted.has(shooter.slug)}
                 onToggleVisibility={() => toggleVisibility(shooter.slug)}
-                onPickAudio={() => setAudioSlug(shooter.slug)}
+                onSpeaker={(alt) => onSpeaker(shooter.slug, alt)}
               />
             ))}
             {/* The layout picker offers only what the shooter count allows:
@@ -713,12 +739,12 @@ export function Compare() {
           <>
             {/* Audit and Coach are operator-only surfaces (mutate state,
                 need a session): hidden on the anonymous share view (#700).
-                They land on the audio shooter, the camera being watched. */}
+                They land on the first shooter being heard. */}
             {!shareView ? (
               <Button
                 type="button"
                 onClick={() => {
-                  const target = audioSlug ?? orderedShooters[0]?.slug;
+                  const target = heardFirst;
                   if (target) navigate(href("audit", target, String(stageNumber)));
                 }}
               >
@@ -729,7 +755,7 @@ export function Compare() {
               <Button
                 type="button"
                 onClick={() => {
-                  const target = audioSlug ?? orderedShooters[0]?.slug;
+                  const target = heardFirst;
                   if (target) navigate(href("coach", target, String(stageNumber)));
                 }}
               >
@@ -826,9 +852,9 @@ export function Compare() {
                     setCamIndexBySlug((prev) => ({ ...prev, [shooter.slug]: index }))
                   }
                   previewFor={(index) => cameraPreview(shooter, index)}
-                  isAudio={audioSlug === shooter.slug}
+                  heard={!muted.has(shooter.slug)}
                   fit={layout === "stack" ? "aspect" : "fill"}
-                  onPickAudio={() => setAudioSlug(shooter.slug)}
+                  onSpeaker={(alt) => onSpeaker(shooter.slug, alt)}
                   onMount={(el) => setVideoRef(shooter.slug, el)}
                 />
               ))}
@@ -842,11 +868,13 @@ export function Compare() {
           shooters={playableShooters}
           maxTime={maxStageTime}
           timeSinceBeep={timeSinceBeep}
-          audioSlug={audioSlug}
+          muted={muted}
+          allMuted={allMuted(mixSlugs, muted)}
           isPlaying={isPlaying}
           onTogglePlay={togglePlay}
           onScrub={scrubTo}
-          onPickAudio={(slug) => setAudioSlug(slug)}
+          onSpeaker={onSpeaker}
+          onToggleAll={onToggleAll}
           momentT={urlMoment?.t ?? null}
           onCopyMoment={handleCopyMoment}
         />
@@ -1014,28 +1042,61 @@ function CompareEmptyState({
 }
 
 /* -------------------------------------------------------------------------- */
+/* Speaker toggle                                                             */
+/* -------------------------------------------------------------------------- */
+
+/** One shooter's place in the mix: click mutes or unmutes, Alt-click hears
+ *  only this shooter (again: everyone). The same control sits on the
+ *  header chip, the tile and the transport lane. */
+export function SpeakerButton({
+  name,
+  heard,
+  onSpeaker,
+}: {
+  name: string;
+  heard: boolean;
+  onSpeaker: (alt: boolean) => void;
+}) {
+  const label = `${heard ? "Mute" : "Unmute"} ${name}`;
+  return (
+    <button
+      type="button"
+      onClick={(e) => onSpeaker(e.altKey)}
+      title={`${label} (Alt-click: hear only ${name})`}
+      aria-label={label}
+      aria-pressed={heard}
+      className={cn(
+        "inline-flex size-5 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led",
+        heard ? "text-ink-2 hover:text-ink" : "text-subtle hover:text-ink",
+      )}
+    >
+      {heard ? <Volume2 className="size-3" aria-hidden /> : <VolumeX className="size-3" aria-hidden />}
+    </button>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
 /* Shooter visibility chip                                                    */
 /* -------------------------------------------------------------------------- */
 
 function ShooterChip({
   shooter,
   visible,
-  isAudio,
+  heard,
   onToggleVisibility,
-  onPickAudio,
+  onSpeaker,
 }: {
   shooter: CompareShooterRecord;
   visible: boolean;
-  isAudio: boolean;
+  heard: boolean;
   onToggleVisibility: () => void;
-  onPickAudio: () => void;
+  onSpeaker: (alt: boolean) => void;
 }) {
   return (
     <span
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full border py-0.5 pl-2.5 pr-1 text-sm",
         visible ? "border-rule-strong text-ink-2" : "border-rule text-subtle",
-        isAudio && "border-beep/60",
       )}
     >
       <button
@@ -1048,19 +1109,7 @@ function ShooterChip({
       >
         {shooter.name}
       </button>
-      <button
-        type="button"
-        onClick={onPickAudio}
-        title={isAudio ? "Audio source" : "Use as audio source"}
-        aria-label={`${shooter.name} - audio source`}
-        aria-pressed={isAudio}
-        className={cn(
-          "inline-flex size-5 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led",
-          isAudio ? "text-beep" : "text-subtle hover:text-ink",
-        )}
-      >
-        {isAudio ? <Volume2 className="size-3" aria-hidden /> : <VolumeX className="size-3" aria-hidden />}
-      </button>
+      <SpeakerButton name={shooter.name} heard={heard} onSpeaker={onSpeaker} />
     </span>
   );
 }
@@ -1096,9 +1145,9 @@ function VideoTile({
   camIndex,
   onPickCam,
   previewFor,
-  isAudio,
+  heard,
   fit,
-  onPickAudio,
+  onSpeaker,
   onMount,
 }: {
   shooter: CompareShooterRecord;
@@ -1107,9 +1156,9 @@ function VideoTile({
   camIndex: number;
   onPickCam: (index: number) => void;
   previewFor: (index: number) => CameraPreview | null;
-  isAudio: boolean;
+  heard: boolean;
   fit: "fill" | "aspect";
-  onPickAudio: () => void;
+  onSpeaker: (alt: boolean) => void;
   onMount: (el: HTMLVideoElement | null) => void;
 }) {
   const angles = angleCountText(cams);
@@ -1118,9 +1167,7 @@ function VideoTile({
       className={cn(
         "relative overflow-hidden rounded-xl border bg-bg-glow",
         fit === "fill" ? "flex min-h-0 flex-col" : "shrink-0",
-        isAudio
-          ? "border-led shadow-[0_0_0_1px_var(--color-led-deep),0_0_16px_var(--color-led-glow)]"
-          : "border-rule-strong",
+        "border-rule-strong",
       )}
     >
       <div className="flex flex-none items-center gap-2 border-b border-rule bg-surface-2 px-3 py-1.5">
@@ -1134,12 +1181,7 @@ function VideoTile({
         <span className="text-sm font-medium text-ink">{shooter.name}</span>
         <span className="ml-auto flex items-center gap-2">
           {angles ? <span className="text-sm text-muted">{angles}</span> : null}
-          {isAudio && (
-            <span className="inline-flex items-center gap-1 text-sm text-beep">
-              <Volume2 className="size-3" aria-hidden />
-              audio
-            </span>
-          )}
+          {src ? <SpeakerButton name={shooter.name} heard={heard} onSpeaker={onSpeaker} /> : null}
         </span>
       </div>
       <div className={cn("relative", fit === "fill" && "min-h-0 flex-1 bg-black")}>
@@ -1155,12 +1197,6 @@ function VideoTile({
                 ? "h-full w-full object-contain"
                 : "aspect-video w-full bg-black",
             )}
-            onClick={(e) => {
-              if (!isAudio) {
-                onPickAudio();
-                e.preventDefault();
-              }
-            }}
           />
         ) : (
           <div

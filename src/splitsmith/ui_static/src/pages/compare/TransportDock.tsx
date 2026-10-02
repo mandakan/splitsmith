@@ -5,7 +5,7 @@
  *  Scrub by dragging anywhere on the tracks or via the range slider
  *  (the keyboard-accessible control). */
 
-import { Link2, MoveLeft, MoveRight, Pause, Play, Volume2 } from "lucide-react";
+import { Link2, MoveLeft, MoveRight, Pause, Play, Volume2, VolumeX } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 
 import { type CompareShooterRecord } from "@/lib/api";
@@ -39,22 +39,28 @@ export function TransportDock({
   shooters,
   maxTime,
   timeSinceBeep,
-  audioSlug,
+  muted,
+  allMuted,
   isPlaying,
   onTogglePlay,
   onScrub,
-  onPickAudio,
+  onSpeaker,
+  onToggleAll,
   momentT,
   onCopyMoment,
 }: {
   shooters: CompareShooterRecord[];
   maxTime: number;
   timeSinceBeep: number;
-  audioSlug: string | null;
+  /** Shooters muted in the mix. */
+  muted: ReadonlySet<string>;
+  allMuted: boolean;
   isPlaying: boolean;
   onTogglePlay: () => void;
   onScrub: (tsb: number) => void;
-  onPickAudio: (slug: string) => void;
+  /** Click mutes or unmutes; Alt-click hears only that shooter. */
+  onSpeaker: (slug: string, alt: boolean) => void;
+  onToggleAll: () => void;
   /** Seconds after beep for a shared moment (?t=). Renders a labelled
    *  diamond marker on the track, positioned with the same xOf() math
    *  as the playhead. */
@@ -134,6 +140,15 @@ export function TransportDock({
         </button>
         <button
           type="button"
+          onClick={onToggleAll}
+          aria-label={allMuted ? "Unmute all" : "Mute all"}
+          title={allMuted ? "Unmute all" : "Mute all"}
+          className="inline-flex size-9 items-center justify-center rounded-md border border-rule bg-surface-3 text-muted transition-colors hover:bg-surface-4 hover:text-ink"
+        >
+          {allMuted ? <VolumeX className="size-4" /> : <Volume2 className="size-4" />}
+        </button>
+        <button
+          type="button"
           onClick={onCopyMoment}
           aria-label="Copy link at moment"
           title="Copy link at moment"
@@ -161,7 +176,7 @@ export function TransportDock({
           value={clampedT}
           onChange={(e) => onScrub(parseFloat(e.target.value))}
         />
-        <span className="hidden text-sm text-subtle lg:inline">Drag the tracks to scrub; click a lane for audio.</span>
+        <span className="hidden text-sm text-subtle lg:inline">Drag the tracks to scrub; click a name to mute it, Alt-click to hear only them.</span>
       </div>
 
       {/* Lane gutter + track SVG */}
@@ -171,19 +186,20 @@ export function TransportDock({
           style={{ width: GUTTER_W, paddingTop: RULER_H }}
         >
           {shooters.map((s, i) => {
-            const isAudio = audioSlug === s.slug;
+            const heard = !muted.has(s.slug);
             const color = TRACK_PALETTE[i % TRACK_PALETTE.length];
+            const label = `${heard ? "Mute" : "Unmute"} ${s.name}`;
             return (
               <button
                 key={s.slug}
                 type="button"
-                onClick={() => onPickAudio(s.slug)}
-                aria-pressed={isAudio}
-                aria-label={`${s.name} - use as audio source`}
-                title={`${s.name} - use as audio source`}
+                onClick={(e) => onSpeaker(s.slug, e.altKey)}
+                aria-pressed={heard}
+                aria-label={label}
+                title={`${label} (Alt-click: hear only ${s.name})`}
                 className={cn(
                   "flex items-center gap-2 rounded-md pr-3 text-left transition-colors hover:bg-surface-2",
-                  isAudio ? "text-ink" : "text-ink-2",
+                  heard ? "text-ink" : "text-subtle",
                 )}
                 style={{ height: TRACK_H }}
               >
@@ -193,7 +209,11 @@ export function TransportDock({
                   style={{ background: color }}
                 />
                 <span className="min-w-0 truncate text-sm font-medium">{s.name}</span>
-                {isAudio ? <Volume2 className="size-3 flex-none text-beep" aria-hidden /> : null}
+                {heard ? (
+                  <Volume2 className="size-3 flex-none text-ink-2" aria-hidden />
+                ) : (
+                  <VolumeX className="size-3 flex-none text-subtle" aria-hidden />
+                )}
                 <span className="numeral ml-auto text-sm text-muted">
                   {s.stage_time_seconds != null
                     ? s.stage_time_seconds.toFixed(2)
