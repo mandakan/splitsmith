@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.51.0](https://github.com/mandakan/splitsmith/compare/v0.50.0...v0.51.0) (2026-10-02)
+
+
+### Features
+
+* **compare:** camera picker in the tile header, foldable shot lanes, cinema mode ([#1148](https://github.com/mandakan/splitsmith/issues/1148)) ([079402d](https://github.com/mandakan/splitsmith/commit/079402d6c4a59ad784712f6535e81bed5683d405))
+
 ## [0.50.0](https://github.com/mandakan/splitsmith/compare/v0.49.1...v0.50.0) (2026-10-02)
 
 
