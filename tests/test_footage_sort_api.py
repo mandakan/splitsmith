@@ -489,3 +489,27 @@ def test_a_full_import_leaves_the_sort_open_while_clips_need_the_user(
     assert (len(last["imported"]), last["remaining"]) == (2, 0)
     assert client.get(f"{base}/match/footage-sort/{view['scan_id']}").json()["status"] == "imported"
     assert client.get(f"{base}/match/footage-sort").json() == []
+
+
+def test_a_stage_with_a_primary_shows_new_clips_as_secondary(tmp_path: Path, source_clip: Path) -> None:
+    """Alice's head cam is already her stage 1 primary. A phone clip of the
+    same run in a sort is shown as secondary, which is what the import will
+    make it; bob's clip, on a stage without one, is still the primary."""
+    _, client, root, base = _match_app(tmp_path)
+    shared = _shared_folder(tmp_path, source_clip)
+    _tagged(source_clip, shared / "head" / "VID_20260926_110010_00_001.mp4", T0 + timedelta(seconds=10))
+    client.post(
+        f"{base}/shooters/alice/videos/scan",
+        json={"source_dir": str(shared / "head"), "auto_assign_primary": True},
+    )
+
+    view = _scan(client, base, shared / "from-carol")
+
+    roles = {c["filename"]: c["proposal"]["role"] for c in view["clips"]}
+    assert roles == {"IMG_0001.MOV": "secondary", "IMG_0002.MOV": "primary"}
+    client.post(f"{base}/match/footage-sort/{view['scan_id']}/import", json={})
+    alice = MatchProject.load(match_model.Match.shooter_root(root, "alice"))
+    assert [(Path(v.path).name, v.role) for v in alice.stage(1).videos] == [
+        ("VID_20260926_110010_00_001.mp4", "primary"),
+        ("IMG_0001.MOV", "secondary"),
+    ]
