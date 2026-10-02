@@ -603,7 +603,7 @@ export interface ScanResponse {
   skipped: string[];
 }
 
-/** Footage sort (spec 2026-10-01): one shared folder sorted across the
+/** Footage sort (spec 2026-10-01): one folder sorted across the
  *  match's shooters. Shapes mirror ``ui/footage_sort_api.py``. */
 export type SortCameraClock = "trusted" | "fitted" | "anchored" | "needs_anchor" | "no_timestamps";
 export type SortConfidence = "high" | "medium" | "needs_you" | "skipped";
@@ -2918,6 +2918,14 @@ export const api = {
     request<{ scan_id: string }>("/api/match/footage-sort/scan", {
       method: "POST",
       json: { source_dir: sourceDir },
+    }),
+
+  /** Sort every video that sits unassigned in any shooter's project; no
+   *  folder (the Footage page's "Sort across shooters"). */
+  startFootageSortUnassigned: () =>
+    request<{ scan_id: string }>("/api/match/footage-sort/scan", {
+      method: "POST",
+      json: { unassigned: true },
     }),
 
   getFootageSort: (scanId: string) =>

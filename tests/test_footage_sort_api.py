@@ -92,8 +92,9 @@ def _match_app(tmp_path: Path, scorecards: dict[str, dict[int, int]] = SCORECARD
     return app, client, root, f"/api/matches/{mid}"
 
 
-def _scan(client, base: str, folder: Path) -> dict:  # type: ignore[no-untyped-def]
-    resp = client.post(f"{base}/match/footage-sort/scan", json={"source_dir": str(folder)})
+def _scan(client, base: str, folder: Path | None) -> dict:  # type: ignore[no-untyped-def]
+    body = {"source_dir": str(folder)} if folder is not None else {"unassigned": True}
+    resp = client.post(f"{base}/match/footage-sort/scan", json=body)
     assert resp.status_code == 200, resp.text
     scan_id = resp.json()["scan_id"]
     deadline = time.monotonic() + 30
@@ -319,3 +320,39 @@ def test_path_keys_compare_umlauts_composed() -> None:
 
     assert composed != decomposed
     assert _resolved(composed) == _resolved(decomposed)
+
+
+def test_sort_across_shooters_reads_every_unassigned_clip_without_a_folder(
+    tmp_path: Path, source_clip: Path
+) -> None:
+    """The Footage page's "Sort across shooters" sorts exactly the videos
+    unassigned in any shooter's project, wherever they came from, with no
+    folder to pick (2026-10-02: a second picker sent the user back into the
+    per-shooter import), and import places them."""
+    _, client, root, base = _match_app(tmp_path)
+    shared = _shared_folder(tmp_path, source_clip)
+    _tagged(source_clip, shared / "elsewhere" / "IMG_0099.MOV", T0 + timedelta(hours=3))
+    client.post(
+        f"{base}/shooters/alice/videos/scan",
+        json={
+            "source_paths": [str(shared / "from-carol" / n) for n in ("IMG_0001.MOV", "IMG_0002.MOV")],
+            "auto_assign_primary": False,
+        },
+    )
+
+    view = _scan(client, base, None)
+
+    assert view["status"] == "ready"
+    assert sorted(c["filename"] for c in view["clips"]) == ["IMG_0001.MOV", "IMG_0002.MOV"]
+    assert {c["proposal"]["shooter"] for c in view["clips"]} == {"alice", "bob"}
+    client.post(f"{base}/match/footage-sort/{view['scan_id']}/import", json={})
+    bob = MatchProject.load(match_model.Match.shooter_root(root, "bob"))
+    assert [Path(v.path).name for v in bob.stage(1).videos] == ["IMG_0002.MOV"]
+
+
+def test_sort_across_shooters_with_nothing_unassigned_says_so(tmp_path: Path, source_clip: Path) -> None:
+    _, client, _, base = _match_app(tmp_path)
+
+    resp = client.post(f"{base}/match/footage-sort/scan", json={"unassigned": True})
+
+    assert resp.status_code == 409

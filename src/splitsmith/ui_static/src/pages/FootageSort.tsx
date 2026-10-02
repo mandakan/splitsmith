@@ -1,6 +1,6 @@
 /**
  * Sort footage (/match/:matchId/footage-sort/:scanId, spec 2026-10-01):
- * the review of one shared folder sorted across the match's shooters.
+ * the review of one folder sorted across the match's shooters.
  * Cameras whose clock is unknown come first (one named clip sets the
  * clock), then the clips the engine would not decide, then one table per
  * shooter with the confident proposals pre-checked; leftovers and clips
