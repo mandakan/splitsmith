@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { compareVersions, parseFeed, updateDecision } from "./updateCheck";
+import { compareVersions, feedUrl, parseFeed, updateDecision, UPDATE_FEED_URL } from "./updateCheck";
 
 describe("compareVersions", () => {
   it("orders numerically per component", () => {
@@ -46,5 +46,13 @@ describe("updateDecision", () => {
   });
   it("reports unknown when there is no feed", () => {
     expect(updateDecision({ current: "0.40.1", feed: null, dismissed: null })).toEqual({ kind: "unknown" });
+  });
+});
+
+describe("feedUrl", () => {
+  it("is unchanged on macOS and asks for linux on Linux", () => {
+    expect(feedUrl("darwin")).toBe(UPDATE_FEED_URL);
+    expect(feedUrl("darwin")).toBe("https://splitsmith.app/desktop/latest.json");
+    expect(feedUrl("linux")).toBe("https://splitsmith.app/desktop/latest.json?platform=linux");
   });
 });

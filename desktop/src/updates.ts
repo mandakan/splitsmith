@@ -8,11 +8,11 @@ import path from "node:path";
 
 import { app, BrowserWindow, dialog, shell } from "electron";
 
-import { FEED_TIMEOUT_MS, UPDATE_FEED_URL, parseFeed, updateDecision, type UpdateFeed } from "./updateCheck";
+import { FEED_TIMEOUT_MS, feedUrl as platformFeedUrl, parseFeed, updateDecision, type UpdateFeed } from "./updateCheck";
 
 function feedUrl(): string {
   // Dev override so the sheet can be exercised against a local feed.
-  return process.env.SPLITSMITH_UPDATE_FEED ?? UPDATE_FEED_URL;
+  return process.env.SPLITSMITH_UPDATE_FEED ?? platformFeedUrl(process.platform);
 }
 
 function dismissedPath(): string {
