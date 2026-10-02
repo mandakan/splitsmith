@@ -297,6 +297,11 @@ select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "PTH"]
 # scripts directory is also where the team iterates on research code, so
 # accept a slightly looser rule set than ``src/`` carries.
 "scripts/*" = ["N803", "N806"]
+# NoWheel / NotYetPublished / ShaMismatch are the names the desktop Linux
+# packaging task (Task 9) and its pytest fixtures were specified with; the
+# task brief's test file imports them verbatim, so renaming to satisfy the
+# N818 `*Error` convention would break that consumed interface.
+"scripts/ci/fetch_pypi_wheel.py" = ["N818"]
 
 [tool.black]
 line-length = 110
