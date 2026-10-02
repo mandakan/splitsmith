@@ -41,12 +41,15 @@ import {
   READ_ONLY_MIRROR_MESSAGE,
   type MatchProject,
   type MoveShooterBlocked,
+  type BeepQueueItem,
   type ShooterListEntry,
   type SortSummary,
   type StageVideo,
   type VideoRole,
 } from "@/lib/api";
 import { useWindowFileDrag } from "@/lib/dragDepth";
+import { queueItemHref, queueOrder, reviewEntryText } from "@/lib/beepQueue";
+import { isJobActive } from "@/lib/jobs";
 import { openSortText } from "@/lib/footageSort";
 import { useDeploymentMode } from "@/lib/features";
 import { buildFootageRows, footageStats, unassignedVideos, type UnassignedItem } from "@/lib/footage";
@@ -150,6 +153,23 @@ function IngestInner({ slug }: { slug: string }) {
   const [ownShooters, setOwnShooters] = useState<ShooterListEntry[]>([]);
   const shooters = outletCtx?.shooters?.length ? outletCtx.shooters : ownShooters;
   const jobs = useMemo(() => outletCtx?.jobs ?? [], [outletCtx?.jobs]);
+  // The beep review queue, for the "Review beeps" line: refetched as jobs
+  // come and go, since detection fills it.
+  const [queueItems, setQueueItems] = useState<BeepQueueItem[]>([]);
+  const activeJobs = jobs.filter(isJobActive).length;
+  useEffect(() => {
+    let alive = true;
+    api
+      .getBeepQueue(false)
+      .then((q) => alive && setQueueItems(q.stages.flatMap((g) => g.items)))
+      .catch(() => {
+        /* non-fatal: no review line */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [activeJobs, slug]);
+  const beepQueue = useMemo(() => queueOrder(queueItems), [queueItems]);
   // B1: Paths from the most recent import batch. Cleared on banner dismiss
   // or after a successful move. Not persisted across reloads.
   const [lastImportedPaths, setLastImportedPaths] = useState<string[] | null>(null);
@@ -768,6 +788,14 @@ function IngestInner({ slug }: { slug: string }) {
         <p role="status" className="mb-4 text-md text-ink">
           {sortedNote}
         </p>
+      ) : null}
+      {beepQueue.length > 0 ? (
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-[10px] border border-rule bg-surface px-4 py-2.5 text-md text-ink-2">
+          <span className="flex-1">Detected beeps wait for your OK, one after the other.</span>
+          <Button size="sm" asChild>
+            <Link to={queueItemHref(beepQueue[0], href)}>{reviewEntryText(beepQueue.length)}</Link>
+          </Button>
+        </div>
       ) : null}
       {openSorts.map((s) => (
         <div key={s.scan_id} className="mb-4 flex flex-wrap items-center gap-3 rounded-[10px] border border-rule bg-surface px-4 py-2.5 text-md text-ink-2">

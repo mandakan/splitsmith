@@ -1634,6 +1634,13 @@ export function Audit() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- read once on mount
   }, []);
+  // ``?cam=<video_id>``: the beep queue lands on this camera of the stage
+  // (a pending beep, not a re-pick). Read on every change: the queue moves
+  // between stages without remounting the page.
+  const camParam = searchParams.get("cam");
+  useEffect(() => {
+    if (camParam) setBeepFocusVideoId(camParam);
+  }, [camParam]);
 
   const reloadPeaks = useCallback(() => {
     if (stageNumber == null) return;
@@ -1683,14 +1690,23 @@ export function Audit() {
   }, [chainJob, reloadProject, reloadPeaks, reloadAudit]);
 
   const handleBeepConfirmed = useCallback(
-    async (next: { slug: string; stageNumber: number } | null) => {
+    async (next: { slug: string; stageNumber: number; videoId?: string } | "done" | null) => {
       setRepick(false);
       setBeepFocusVideoId(null);
+      if (next === "done") {
+        // The beep queue is empty: back to the Overview, whose next step
+        // now says what comes after the beeps.
+        navigate(href(""));
+        return;
+      }
       await reloadProject();
       reloadPeaks();
       void reloadAudit();
       if (next && (next.slug !== slug || next.stageNumber !== stageNumber)) {
-        navigate(href("audit", next.slug, String(next.stageNumber)));
+        const cam = next.videoId ? `?cam=${encodeURIComponent(next.videoId)}` : "";
+        navigate(`${href("audit", next.slug, String(next.stageNumber))}${cam}`);
+      } else if (next?.videoId) {
+        setBeepFocusVideoId(next.videoId);
       }
     },
     [reloadProject, reloadPeaks, reloadAudit, navigate, href, slug, stageNumber],
