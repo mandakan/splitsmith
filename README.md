@@ -18,7 +18,7 @@ Built to do two things from a single stage video: get per-shot splits for analys
 
 | | |
 |---|---|
-| ![footage sort](https://raw.githubusercontent.com/mandakan/splitsmith/main/docs/screenshots/footage-sort.png) | **Footage.** Point it at a folder, your own clips or the whole squad's. Every video lands on the shooter and stage whose scorecard was typed right after it, head cam first when several cameras caught the run. You check the list, then import. |
+| ![footage sort](https://raw.githubusercontent.com/mandakan/splitsmith/main/docs/screenshots/footage-sort.png) | **Footage.** Point it at a folder or a set of files, from one camera or several. Every video lands on the shooter and stage whose scorecard was typed right after it, head cam first when several cameras caught the run. You check the list, then import. |
 | ![beep review](https://raw.githubusercontent.com/mandakan/splitsmith/main/docs/screenshots/beep-review.png) | **Beep review.** The start beep is found on every clip. You confirm them one after the other in one queue, the primaries that unlock detection first. |
 | ![audit](https://raw.githubusercontent.com/mandakan/splitsmith/main/docs/screenshots/audit.png) | **Audit.** Waveform + per-shot markers from the 3-voter ensemble. Click a marker to inspect votes; drag to fine-tune. |
 | ![compare](https://raw.githubusercontent.com/mandakan/splitsmith/main/docs/screenshots/compare.png) | **Compare.** Multi-shooter grid, all beep-aligned to t=0. Audio from one shooter, video tiles for everyone else. |
@@ -81,9 +81,9 @@ The repo ships a real Stage 3 audio sample at `tests/fixtures/stage-shots-tallmi
 Footage comes in through one door: **Add footage** on the Footage page. In
 the desktop app or `splitsmith ui`, once the match is connected to SSI
 Scoreboard and its shooters are added, Add footage is the footage sort. It
-works the same for one folder of your own head-cam clips and for the
-folders your club mates shared (phone clips of each other, someone holding
-your camera, photos).
+takes a bunch of videos from one or more sources (head cam, glasses,
+phones, in any folder layout) and works out which shooter and stage each
+one belongs to.
 
 1. **Pick a folder or files.** Every video below the folder is read,
    subfolders included; photos are skipped and counted. A file already on
