@@ -219,6 +219,24 @@ class CompareGridRequest(BaseModel):
     overlay: bool = False
     overlay_theme: ThemeName = "splitsmith"
     summary_hold_seconds: float = Field(default=0.0, ge=0.0)
+    # The YouTube sidecar and the chained upload, as for one shooter's
+    # MP4 (``MatchExportRequest``): title, a description with a chapter per
+    # stage, tags and a thumbnail beside the grid; ``youtube_upload`` then
+    # queues the same ``youtube_upload`` job on the match-level file.
+    youtube_sidecar: bool = False
+    description_lead: str | None = None
+    youtube_upload: bool = False
+    youtube_privacy: Literal["unlisted", "private", "public"] = "unlisted"
+    youtube_playlist: str | None = None
+    youtube_playlist_id: str | None = None
+    youtube_publish_at: datetime | None = None
+    youtube_notify_subscribers: bool = True
+
+    @model_validator(mode="after")
+    def _grid_upload_needs_a_sidecar(self) -> CompareGridRequest:
+        if self.youtube_upload and not self.youtube_sidecar:
+            raise ValueError("youtube_upload needs youtube_sidecar")
+        return self
 
 
 @router.get("/api/shooters/{slug}/exports/overview")

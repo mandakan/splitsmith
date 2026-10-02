@@ -521,3 +521,26 @@ def test_write_thumbnail_produces_a_1280_wide_jpeg_of_the_asked_frame(tmp_path: 
         r, g, b = img.convert("RGB").getpixel((640, 360))
     assert g > 100 and r < 80 and b < 80, (r, g, b)
     assert out.stat().st_size < 2_000_000
+
+
+def test_grid_sidecar_lists_a_chapter_per_stage_like_one_shooters() -> None:
+    """The compare grid's sidecar (#grid-youtube): same description shape
+    as one shooter's, from the grid's own chapter list, no captions."""
+    from splitsmith.youtube_sidecar import Chapter, build_grid_sidecar
+
+    sidecar = build_grid_sidecar(
+        match_name="Höstfinalen XI",
+        chapters=[
+            Chapter(start_seconds=0.0, title="Höstfinalen XI"),
+            Chapter(start_seconds=4.5, title="B100 Höger"),
+            Chapter(start_seconds=75.0, title="B6 Rear"),
+        ],
+        description_lead="Squad grid, every stage.",
+    )
+    assert sidecar.title == "Höstfinalen XI - squad grid"
+    assert sidecar.description.startswith(
+        "Squad grid, every stage.\n\nChapters:\n0:00 Höstfinalen XI\n0:04 B100 Höger\n1:15 B6 Rear"
+    )
+    assert sidecar.captions_path is None
+    assert "squad" in sidecar.tags
+    assert [c["title"] for c in sidecar.chapters] == ["Höstfinalen XI", "B100 Höger", "B6 Rear"]

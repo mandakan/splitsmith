@@ -336,3 +336,46 @@ def test_head_backdrop_is_the_first_frame_and_tail_backdrop_the_last(tmp_path: P
     head, tail = stills
     assert head[head.index("-frames:v") + 1] == "1" and "-update" not in head
     assert "-update" in tail and "-t" in tail
+
+
+# --- the YouTube chapters ------------------------------------------------------
+
+
+def test_chapters_start_each_stage_at_its_slate_and_anchor_the_title_page_at_zero(tmp_path: Path) -> None:
+    from splitsmith.youtube_sidecar import Chapter
+
+    stills: list[tuple[str, ...]] = []
+    result = mp4_grid.render_grid_mp4(
+        _driver_shooters(tmp_path),
+        audio_label="Anders",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=_ok_runner([]),
+        card_runner=_ok_runner([]),
+        still_runner=_still_runner(stills),
+        rasterizer=_FakeRasterizer(),
+        work_dir=tmp_path / "work",
+        ffmpeg_binary="/bin/ffmpeg",
+        title_page=MatchTitle(text="Bromma", duration_seconds=3.0),
+        stage_titles="slate",
+        title_duration_seconds=1.5,
+    )
+    # YouTube needs the list to start at 0:00: the title page is the match's
+    # chapter, the stage's starts where its slate does (after the title page).
+    assert result.chapters == (
+        Chapter(start_seconds=0.0, title="Bromma"),
+        Chapter(start_seconds=3.0, title=result.stages[0].stage_name),
+    )
+
+
+def test_chapters_without_cards_start_at_the_first_stage(tmp_path: Path) -> None:
+    result = mp4_grid.render_grid_mp4(
+        _driver_shooters(tmp_path),
+        audio_label="Anders",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=_ok_runner([]),
+        work_dir=tmp_path / "work",
+        ffmpeg_binary="/bin/ffmpeg",
+    )
+    assert [(c.start_seconds, c.title) for c in result.chapters] == [(0.0, result.stages[0].stage_name)]

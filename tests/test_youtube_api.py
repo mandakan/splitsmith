@@ -567,3 +567,72 @@ def test_upload_route_and_chain_forward_playlist_id(export_client, monkeypatch: 
     uploads = [j for j in _wait_for_jobs_to_drain(client) if j["kind"] == "youtube_upload"]
     assert uploads and uploads[-1]["status"] == "succeeded"
     assert seen["options"].playlist_id == "PL7"
+
+
+def test_upload_job_takes_a_match_level_render(export_client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The compare grid's render lives in ``<match>/exports``, not under a
+    shooter: the same job uploads it with ``match_scope`` and records the
+    video in that sidecar."""
+    import asyncio
+
+    from splitsmith import youtube_sidecar
+
+    from .test_ui_server import _wait_for_job
+
+    client, root = export_client
+    exports = root / "exports"
+    exports.mkdir(parents=True, exist_ok=True)
+    mp4 = exports / "squad.mp4"
+    mp4.write_bytes(b"\x00" * 2048)
+    youtube_sidecar.write_sidecar(
+        youtube_sidecar.YouTubeSidecar(title="Squad grid", description="0:00 Stage 1"),
+        youtube_sidecar.sidecar_path_for(mp4),
+    )
+    oauth.save_connection(_conn("Mine"))
+    seen = _fake_upload(monkeypatch)
+    state = client.app.state.splitsmith_state
+    job = asyncio.run(
+        state.jobs.submit(
+            kind="youtube_upload",
+            args={
+                "slug": None,
+                "match_scope": True,
+                "match_root": str(root),
+                "filename": "squad.mp4",
+                "privacy": "unlisted",
+                "again": True,
+            },
+        )
+    )
+    final = _wait_for_job(client, job.id)
+    assert final["status"] == "succeeded", final
+    assert seen["mp4"] == mp4.resolve()
+    stored = youtube_sidecar.load_sidecar(youtube_sidecar.sidecar_path_for(mp4)).upload
+    assert stored is not None and stored.video_id == "vid1"
+
+
+def test_match_level_upload_stays_inside_the_match_exports(
+    export_client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import asyncio
+
+    from .test_ui_server import _wait_for_job
+
+    client, root = export_client
+    oauth.save_connection(_conn("Mine"))
+    _fake_upload(monkeypatch)
+    state = client.app.state.splitsmith_state
+    job = asyncio.run(
+        state.jobs.submit(
+            kind="youtube_upload",
+            args={
+                "slug": None,
+                "match_scope": True,
+                "match_root": str(root),
+                "filename": "../match.json",
+                "privacy": "unlisted",
+                "again": True,
+            },
+        )
+    )
+    assert _wait_for_job(client, job.id)["status"] == "failed"

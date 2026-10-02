@@ -149,6 +149,7 @@ from .. import (
     report,
     user_config,
     video_probe,
+    youtube_sidecar,
 )
 from .. import cleanup as cleanup_module
 from .. import coach as coach_module
@@ -2823,10 +2824,16 @@ def _run_compare_grid(
             on_notice=_notice,
         )
 
+    youtube_files: list[Path] = []
+    if req.youtube_sidecar:
+        youtube_files = _write_grid_youtube_sidecar(match, req, result, plans)
+
     if state is not None and hosted:
         handle.update(progress=0.98, message="Uploading the grid...")
         with handle.timer.phase("push"):
             export_storage.push_match_export_file(state.storage, current_match_id.get(), result.output_path)
+            for extra in youtube_files:
+                export_storage.push_match_export_file(state.storage, current_match_id.get(), extra)
 
     handle.update(progress=1.0, message=f"Wrote {output_path.name}")
     handle.set_result(
@@ -2850,6 +2857,72 @@ def _run_compare_grid(
             "degradations": [{"summary": d.summary, "detail": d.detail} for d in result.degradations],
         }
     )
+
+    # The upload is its own job, as for one shooter (#1000): its own
+    # progress and cancel, and a failed upload never fails the render.
+    # ``again=True``: the render just rewrote the sidecar.
+    if req.youtube_upload and state is not None:
+        asyncio.run(
+            state.jobs.submit(
+                kind="youtube_upload",
+                args={
+                    "slug": None,
+                    "match_scope": True,
+                    "match_root": str(root),
+                    "filename": result.output_path.name,
+                    "privacy": req.youtube_privacy,
+                    "again": True,
+                    "playlist": req.youtube_playlist,
+                    "playlist_id": req.youtube_playlist_id,
+                    "publish_at": req.youtube_publish_at.isoformat() if req.youtube_publish_at else None,
+                    "notify_subscribers": req.youtube_notify_subscribers,
+                },
+            )
+        )
+
+
+def _write_grid_youtube_sidecar(
+    match: match_model.Match,
+    req: CompareGridRequest,
+    result: mp4_grid.GridRenderResult,
+    plans: list[mp4_grid.GridStagePlan],
+) -> list[Path]:
+    """Title, description with a chapter per stage, tags, a thumbnail and
+    the paste text beside the grid, as one shooter's export writes them.
+    A thumbnail grab that fails costs only the thumbnail. Returns the
+    files written, for the hosted push."""
+    output_path = result.output_path
+    written: list[Path] = []
+    thumbnail: Path | None = youtube_sidecar.thumbnail_path_for(output_path)
+    # A frame a few seconds into the first stage: the grid in action, past
+    # any slate (the chapter starts at the slate).
+    stage_chapters = [c for c in result.chapters if c.title != (match.name or "Intro")] or list(
+        result.chapters
+    )
+    first_start = stage_chapters[0].start_seconds if stage_chapters else 0.0
+    slate = req.title_duration_seconds if req.stage_titles == "slate" else 0.0
+    at = first_start + slate + min(3.0, (plans[0].duration_seconds / 3) if plans else 3.0)
+    try:
+        youtube_sidecar.write_thumbnail(
+            output_path, at, thumbnail, ffmpeg_binary=process_runtime().ffmpeg_binary
+        )
+        written.append(thumbnail)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        logger.warning("grid youtube thumbnail not written: %s", exc)
+        thumbnail = None
+    sidecar = youtube_sidecar.build_grid_sidecar(
+        match_name=match.name or "Match",
+        chapters=list(result.chapters),
+        description_lead=(req.description_lead or "").strip() or None,
+        output_video=Path(output_path.name),
+        thumbnail_path=Path(thumbnail.name) if thumbnail is not None else None,
+    )
+    sidecar_path = youtube_sidecar.sidecar_path_for(output_path)
+    youtube_sidecar.write_sidecar(sidecar, sidecar_path)
+    paste = output_path.with_name(output_path.stem + "-youtube.txt")
+    youtube_sidecar.write_paste_text(sidecar, paste)
+    written.extend([sidecar_path, paste])
+    return written
 
 
 def _run_model_download_job(handle: JobHandle) -> None:

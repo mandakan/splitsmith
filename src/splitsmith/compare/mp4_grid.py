@@ -40,6 +40,7 @@ from ..overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailab
 from ..overlay_text import FALLBACK_BUNDLED_FONT, overlay_font_file
 from ..overlay_theme import OverlayTheme, ThemeName, load_theme
 from ..runtime import FFmpegCapabilities, ffmpeg_capabilities, quote_filter_value, runtime
+from ..youtube_sidecar import Chapter
 from .layout import Layout2Up, choose_grid, grid_shape
 from .overlay_data import TileStageData, load_expected_rounds, load_overlay_data
 from .overlay_live import write_absent_sprite_sequence, write_sprite_sequence
@@ -1858,6 +1859,12 @@ class GridRenderResult:
     output_path: Path
     stages: tuple[StageOutcome, ...]
     degradations: tuple[OverlayDegradation, ...] = ()
+    #: One per rendered stage at the stage's first frame (its slate when
+    #: it has one), anchored at 0:00 by a chapter named after the match
+    #: when a title page comes first -- YouTube ignores a chapter list
+    #: that does not start at 0:00. Built from the planned durations as
+    #: the segments are laid down, the same spine the stitch plays.
+    chapters: tuple[Chapter, ...] = ()
 
     @property
     def failed(self) -> tuple[StageOutcome, ...]:
@@ -2438,6 +2445,10 @@ def render_grid_mp4(
     # comes from project.json alone, so a slate without ``--overlay``
     # still prints it (a review of #973 caught it silently absent).
     expected_rounds = load_expected_rounds(shooters) if stage_titles != "none" else {}
+    # The YouTube chapter list, laid down with the segments below.
+    elapsed = 0.0
+    chapters: list[Chapter] = []
+    match_title = title_page.text if title_page is not None else None
     try:
         if title_page is not None:
             title_segment = _card_segment(
@@ -2455,7 +2466,9 @@ def render_grid_mp4(
             )
             if title_segment is not None:
                 segments.append(title_segment)
+                elapsed += title_page.duration_seconds
         for plan in plans:
+            stage_start = elapsed
             segment = work / f"stage{plan.stage_number}{SEGMENT_SUFFIX}"
             stage_overlay: StageOverlayPlan | None = None
             hold_still: Path | None = None
@@ -2483,6 +2496,7 @@ def render_grid_mp4(
                     )
                     if slate_segment is not None:
                         segments.append(slate_segment)
+                        elapsed += card.duration_seconds
                 elif active_rasterizer is not None and card_theme is not None:
                     composed_w, composed_h = _composed_size(canvas, plan)
                     image = build_lower_third(
@@ -2583,6 +2597,10 @@ def render_grid_mp4(
                 )
                 continue
             segments.append(segment)
+            elapsed += plan.total_seconds
+            chapters.append(
+                Chapter(start_seconds=stage_start, title=plan.stage_name or f"Stage {plan.stage_number}")
+            )
             outcomes.append(StageOutcome(stage_number=plan.stage_number, stage_name=plan.stage_name, ok=True))
         if closing is not None:
             closing_segment = _card_segment(
@@ -2634,10 +2652,13 @@ def render_grid_mp4(
     if completed.returncode != 0:
         raise GridRenderError(f"concat stitch failed: {_stderr_text(completed)}")
 
+    if chapters and chapters[0].start_seconds > 0.0:
+        chapters.insert(0, Chapter(start_seconds=0.0, title=match_title or "Intro"))
     return GridRenderResult(
         output_path=output_path,
         stages=tuple(outcomes),
         degradations=degradations,
+        chapters=tuple(chapters),
     )
 
 

@@ -52,6 +52,11 @@ export function buildCompareGridPayload(input: {
    *  only alongside it. */
   overlay?: boolean;
   summaryHoldSeconds?: number;
+  /** The YouTube sidecar and the chained upload, as for one shooter. */
+  youtube?: boolean;
+  descriptionLead?: string;
+  uploadOptions?: UploadFormOptions;
+  youtubeConnected?: boolean;
 }): CompareGridRequestPayload {
   const payload: CompareGridRequestPayload = {
     stage_numbers: [...input.stageNumbers].sort((a, b) => a - b),
@@ -65,6 +70,21 @@ export function buildCompareGridPayload(input: {
     payload.overlay = true;
     const hold = input.summaryHoldSeconds ?? 0;
     if (Number.isFinite(hold) && hold > 0) payload.summary_hold_seconds = Math.min(30, hold);
+  }
+  if (input.youtube) {
+    payload.youtube_sidecar = true;
+    payload.description_lead = input.descriptionLead?.trim() || null;
+    if (input.uploadOptions?.enabled && input.youtubeConnected) {
+      const upload = rowUploadOptions(input.uploadOptions);
+      Object.assign(payload, {
+        youtube_upload: true,
+        youtube_privacy: upload.privacy,
+        youtube_playlist: upload.playlist,
+        youtube_playlist_id: upload.playlist_id,
+        youtube_publish_at: upload.publish_at,
+        youtube_notify_subscribers: upload.notify_subscribers,
+      });
+    }
   }
   return payload;
 }

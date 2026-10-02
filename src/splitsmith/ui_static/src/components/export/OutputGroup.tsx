@@ -89,6 +89,24 @@ export function OutputGroup({
             options={CANVAS_CHOICES.map((c) => ({ value: c.id, label: c.label }))}
           />
         </Field>
+        <Field
+          label="YouTube"
+          help={
+            youtube
+              ? "Writes the title, a description with a chapter per stage, tags and a thumbnail beside the grid, ready to upload."
+              : "Off: no upload sidecar."
+          }
+        >
+          <Segmented<"off" | "on">
+            label="YouTube"
+            value={youtube ? "on" : "off"}
+            onChange={(v) => patch({ youtube: v === "on" })}
+            options={[
+              { value: "off", label: "Off" },
+              { value: "on", label: "Sidecar" },
+            ]}
+          />
+        </Field>
       </>
     );
   }

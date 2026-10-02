@@ -5,7 +5,7 @@
  * a partial render is a success with the failed stages named, never a
  * failure; a short render is never reported as complete.
  */
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -180,7 +180,7 @@ function Shell({ shooters }: { shooters: ShooterListEntry[] }) {
 
 /** The option groups fold by default (spec 2026-09-15 s1); open whichever exist. */
 async function openGroups(user: ReturnType<typeof userEvent.setup>) {
-  for (const name of ["Output", "Cut", "Look"]) {
+  for (const name of ["Output", "Cut", "Look", "Details"]) {
     const btn = screen.queryByRole("button", { name: new RegExp(`^${name}$`), expanded: false });
     if (btn) await user.click(btn);
   }
@@ -261,6 +261,29 @@ describe("Export compare grid mode", () => {
     expect(screen.queryByText(/did not render/i)).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /reveal file/i }));
     expect(api.revealFile).toHaveBeenCalledWith("/m/exports/compare-grid.mp4");
+  });
+
+  it("YouTube on writes the sidecar for the grid, with the description lead", async () => {
+    vi.mocked(api.exportCompareGrid).mockResolvedValue(makeJob({ status: "running" }));
+    vi.mocked(api.pollJob).mockResolvedValue(
+      makeJob({
+        status: "succeeded",
+        result: { output_path: "/m/exports/compare-grid.mp4", stages_rendered: 2, stages_total: 2, failed: [] },
+      }),
+    );
+    const { user, grid } = await renderCompare();
+    await user.click(grid);
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: /Stage Two/i })).toBeChecked());
+    await openGroups(user);
+    const youtube = screen.getByRole("group", { name: "YouTube" });
+    await user.click(within(youtube).getByRole("button", { name: "Sidecar" }));
+    await user.type(screen.getByLabelText("Description lead"), "Every stage, side by side.");
+    await user.click(screen.getByRole("button", { name: /render grid/i }));
+
+    await waitFor(() => expect(api.exportCompareGrid).toHaveBeenCalledTimes(1));
+    expect(api.exportCompareGrid).toHaveBeenCalledWith(
+      expect.objectContaining({ youtube_sidecar: true, description_lead: "Every stage, side by side." }),
+    );
   });
 
   it("shows a partial render as a success with the failed stages named, never as a failure", async () => {

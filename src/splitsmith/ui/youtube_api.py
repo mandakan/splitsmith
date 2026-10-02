@@ -498,7 +498,7 @@ def run_youtube_upload(
     handle: Any,
     *,
     state: Any,
-    slug: str,
+    slug: str | None,
     filename: str,
     privacy: str,
     again: bool,
@@ -507,7 +507,8 @@ def run_youtube_upload(
     publish_at: str | None = None,
     notify_subscribers: bool = True,
     command_id: str | None = None,
-    match_root: Path | None = None,
+    match_root: Path | str | None = None,
+    match_scope: bool = False,
 ) -> None:
     """Job body for ``youtube_upload``. Progress is bytes sent; a cancel
     lands between chunks through ``handle.check_cancel``. Registered by
@@ -533,16 +534,45 @@ def run_youtube_upload(
     )
     handle.update(progress=0.0, message="Connecting to YouTube...")
     client, conn = _job_client(state)
-    project = state.shooter_project(slug)
-    mp4 = confine_export_filename(exports_dir_for(state, slug), filename)
+    # ``match_scope``: a match-level render (the compare grid), which lives
+    # in ``<match>/exports`` and under the match's own storage key rather
+    # than one shooter's.
+    if match_scope:
+        if match_root is None:
+            raise RuntimeError("a match-level upload needs the match root")
+        exports_dir = (Path(match_root) / "exports").resolve()
+        # Lazy, as jobs.py does: ``server`` imports this module.
+        from .server import current_match_id
+
+        match_id = current_match_id.get()
+
+        def pull(path: Path) -> bool:
+            return export_storage.pull_match_export_file(state.storage, match_id, path)
+
+        def push(path: Path) -> None:
+            export_storage.push_match_export_file(state.storage, match_id, path)
+
+    else:
+        if slug is None:
+            raise RuntimeError("a shooter upload needs the shooter")
+        project = state.shooter_project(slug)
+        exports_dir = exports_dir_for(state, slug)
+
+        def pull(path: Path) -> bool:
+            return export_storage.pull_export_file(project, path)
+
+        def push(path: Path) -> None:
+            export_storage.push_export_file(project, path)
+
+    mp4 = confine_export_filename(exports_dir, filename)
     sidecar_path = youtube_sidecar.sidecar_path_for(mp4)
     handle.update(progress=0.0, message="Fetching the render...")
-    if not export_storage.pull_export_file(project, mp4):
+    if not pull(mp4):
         raise RuntimeError(f"{filename} is not in exports/ and could not be fetched")
-    if not export_storage.pull_export_file(project, sidecar_path):
+    if not pull(sidecar_path):
         raise RuntimeError(f"{filename} has no -youtube.json sidecar")
     for optional in (youtube_sidecar.srt_path_for(mp4), youtube_sidecar.thumbnail_path_for(mp4)):
-        export_storage.pull_export_file(project, optional)
+        pull(optional)
     total = mp4.stat().st_size
 
     def on_progress(sent: int, _total: int) -> None:
@@ -552,7 +582,7 @@ def run_youtube_upload(
 
     on_video_id = None
     if command_id and match_root is not None:
-        ledger_root, ledger_id = match_root, command_id
+        ledger_root, ledger_id = Path(match_root), command_id
 
         def on_video_id(video_id: str) -> None:
             video = {
@@ -581,7 +611,7 @@ def run_youtube_upload(
         )
     except AlreadyUploadedError as exc:
         raise RuntimeError(f"already uploaded: {exc.record.url}") from exc
-    export_storage.push_export_file(project, sidecar_path)
+    push(sidecar_path)
     handle.set_result(
         {
             "video_id": record.video_id,

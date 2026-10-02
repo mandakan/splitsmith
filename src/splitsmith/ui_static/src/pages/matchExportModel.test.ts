@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { camExportFields } from "@/lib/camOptions";
 import { DEFAULT_EXPORT_SETTINGS as S } from "@/lib/exportPresets";
 import { DEFAULT_RENDER_OPTIONS, clampSeconds, matchExportFields, transitionsSupported } from "@/lib/renderOptions";
-import { rowUploadOptions } from "@/lib/youtubeRows";
+import { DEFAULT_UPLOAD_OPTIONS, rowUploadOptions } from "@/lib/youtubeRows";
 import {
   CANVAS_CHOICES,
   buildCompareGridPayload,
@@ -26,6 +26,37 @@ describe("buildCompareGridPayload", () => {
     expect(payload.canvas_width).toBe(3840);
     expect(payload.canvas_height).toBe(2160);
     expect(payload.output_name).toBe("bromma-grid");
+  });
+
+  it("publishes like one shooter: the sidecar with YouTube on, the upload only when on and connected", () => {
+    const base = { stageNumbers: [1], audioFrom: "mathias", canvas: CANVAS_CHOICES[1], outputName: "g" };
+    const off = buildCompareGridPayload({ ...base, youtube: false, descriptionLead: "x" });
+    expect(off.youtube_sidecar).toBeUndefined();
+    expect(off.youtube_upload).toBeUndefined();
+
+    const sidecarOnly = buildCompareGridPayload({
+      ...base,
+      youtube: true,
+      descriptionLead: "  Every stage.  ",
+      uploadOptions: { ...DEFAULT_UPLOAD_OPTIONS, enabled: true },
+      youtubeConnected: false,
+    });
+    expect(sidecarOnly).toMatchObject({ youtube_sidecar: true, description_lead: "Every stage." });
+    expect(sidecarOnly.youtube_upload).toBeUndefined();
+
+    const upload = buildCompareGridPayload({
+      ...base,
+      youtube: true,
+      descriptionLead: "",
+      uploadOptions: { ...DEFAULT_UPLOAD_OPTIONS, enabled: true, privacy: "private" },
+      youtubeConnected: true,
+    });
+    expect(upload).toMatchObject({
+      youtube_sidecar: true,
+      description_lead: null,
+      youtube_upload: true,
+      youtube_privacy: "private",
+    });
   });
 
   it("sends no card field until a card is on, so an untouched panel leaves the body as it was", () => {

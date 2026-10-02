@@ -855,3 +855,76 @@ def test_match_export_download_serves_confines_and_404s(match_client_with_trims:
     assert download.headers["content-type"].startswith("video/mp4")
     assert match_client_with_trims.get("/api/match/exports/file/../match.json").status_code in (400, 404)
     assert match_client_with_trims.get("/api/match/exports/file/nope.mp4").status_code == 404
+
+
+# --- YouTube: the sidecar and the chained upload ------------------------------
+
+
+def test_grid_writes_the_youtube_sidecar_and_queues_the_upload(
+    match_client_with_trims: _MatchClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The grid gets one shooter's YouTube path: a sidecar with a chapter
+    per stage beside the render, then the same ``youtube_upload`` job,
+    pointed at the match-level file."""
+    from splitsmith import youtube_sidecar
+
+    def _render_with_chapters(shooters: Any, *, audio_label: str, output_path: Path, **kwargs: Any) -> Any:
+        base = _fake_render_grid_mp4(shooters, audio_label=audio_label, output_path=output_path, **kwargs)
+        return mp4_grid_mod.GridRenderResult(
+            output_path=base.output_path,
+            stages=base.stages,
+            chapters=(
+                youtube_sidecar.Chapter(start_seconds=0.0, title="Stage 1"),
+                youtube_sidecar.Chapter(start_seconds=42.0, title="Stage 2"),
+            ),
+        )
+
+    monkeypatch.setattr(mp4_grid_mod, "render_grid_mp4", _render_with_chapters)
+    monkeypatch.setattr(
+        youtube_sidecar, "write_thumbnail", lambda _video, _at, out, **_kw: out.write_bytes(b"jpg")
+    )
+    uploads: list[dict[str, Any]] = []
+    state = match_client_with_trims.app.state.splitsmith_state
+    state.jobs.bodies.register("youtube_upload", lambda handle, **kwargs: uploads.append(kwargs))
+
+    response = match_client_with_trims.post(
+        "/api/match/compare-export",
+        json={
+            "stage_numbers": [1, 2],
+            "audio_from": "mathias",
+            "output_name": "squad",
+            "youtube_sidecar": True,
+            "description_lead": "Every stage, side by side.",
+            "youtube_upload": True,
+            "youtube_privacy": "private",
+        },
+    )
+    assert response.status_code == 200, response.text
+    job = _wait_for_job(match_client_with_trims, response.json()["id"])
+    assert job["status"] == "succeeded", job
+    output = Path(job["result"]["output_path"])
+
+    sidecar = youtube_sidecar.load_sidecar(youtube_sidecar.sidecar_path_for(output))
+    assert sidecar.title == "Compare Match - squad grid"
+    assert "0:00 Stage 1\n0:42 Stage 2" in sidecar.description
+    assert sidecar.description.startswith("Every stage, side by side.")
+    assert sidecar.thumbnail_path == "squad-thumbnail.jpg"
+    assert output.with_name("squad-youtube.txt").exists()
+
+    deadline = time.time() + 5
+    while not uploads and time.time() < deadline:
+        time.sleep(0.02)
+    assert len(uploads) == 1
+    upload = uploads[0]
+    assert upload["slug"] is None and upload["match_scope"] is True
+    assert upload["filename"] == "squad.mp4"
+    assert upload["privacy"] == "private"
+    assert Path(upload["match_root"]) / "exports" / "squad.mp4" == output
+
+
+def test_grid_upload_without_a_sidecar_is_refused(match_client_with_trims: _MatchClient) -> None:
+    response = match_client_with_trims.post(
+        "/api/match/compare-export",
+        json={"stage_numbers": [1], "audio_from": "mathias", "youtube_upload": True},
+    )
+    assert response.status_code == 422
