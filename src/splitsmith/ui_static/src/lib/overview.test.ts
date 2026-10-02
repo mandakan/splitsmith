@@ -183,6 +183,14 @@ describe("rowAction", () => {
     expect(rowAction({ ...base, status: "skipped" }, 0.5).kind).toBe("none");
     expect(rowAction({ ...base, beepConfidence: 0.3, beepReviewed: true }, 0.5).kind).toBe("audit");
   });
+
+  it("a stage whose beep is still being detected is running, not a beep to confirm", () => {
+    const base = buildOverviewRows({ triage: STOCKHOLM, shooters: ONE, leadSlug: "s1", jobs: [] })[2].lead!;
+    const waiting = { ...base, beepTime: null, beepReviewed: false };
+    expect(rowAction({ ...waiting, running: true }, 0.5).kind).toBe("running");
+    // No job left and still no beep: now it is the user's to place.
+    expect(rowAction({ ...waiting, running: false }, 0.5).kind).toBe("confirm_beep");
+  });
 });
 
 describe("formatClock", () => {

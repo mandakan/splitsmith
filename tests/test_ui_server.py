@@ -5147,6 +5147,27 @@ def test_stream_video_serves_registered_file(tmp_path: Path) -> None:
     assert resp.headers["content-type"].startswith("video/")
 
 
+def test_stream_video_serves_a_mov_as_quicktime_inline(tmp_path: Path) -> None:
+    """An iPhone .MOV must reach a <video> element as a playable video, not
+    as a download: Safari refuses application/octet-stream with an
+    attachment disposition (the beep picker's "Preview unavailable", no
+    sound, 2026-10-02). kind=proxy falls back to the source locally."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    shooter_root = tmp_path / "match" / "shooters" / "me"
+    source = tmp_path / "from-anton" / "IMG_5277.MOV"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"FAKE_MOV_BYTES")
+    project = MatchProject.load(shooter_root)
+    video = project.register_video(source, shooter_root)
+    project.save(shooter_root)
+
+    resp = client.get(f"/api/shooters/me/videos/stream?path={video.path}&kind=proxy")
+
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "video/quicktime"
+    assert resp.headers["content-disposition"].startswith("inline")
+
+
 def test_stream_video_404_on_unregistered_path(tmp_path: Path) -> None:
     """Stream endpoint refuses to serve arbitrary filesystem paths."""
     client, _ = _seed_project_with_primary(tmp_path)
