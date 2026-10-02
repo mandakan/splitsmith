@@ -85,9 +85,10 @@ psycopg and SPA sentinels, the relocatable console-script shim
 same `ubuntu:22.04` container from the same pinned sources, freetype for
 `drawtext` (the pipeline only ever names `fontfile=`, so no
 fontconfig), GPL variant. Published as our own GitHub release
-`ffmpeg-linux-x86_64-<ver>-r1` with sources attached. `fetch-ffmpeg.sh`
-reads tag, asset and sha256 per platform from `ffmpeg-pins.lock` and
-verifies with `sha256sum` on Linux, `shasum -a 256` on macOS. Bumping it
+`ffmpeg-linux-x86_64-<ver>-r1` with sources attached (the source pins
+stay in `ffmpeg-pins.lock`, shared with the macOS build). `fetch-ffmpeg.sh`
+carries tag, asset and sha256 per platform inline, in its target `case`,
+and verifies with `sha256sum` on Linux, `shasum -a 256` on macOS. Bumping it
 follows the ffmpeg change rule: render frames with
 `scripts/render_match_frames.py` and `scripts/render_grid_frames.py`
 through the Linux build and compare them with the macOS build's before
@@ -107,7 +108,9 @@ linux:
       arch: [x64]
   category: AudioVideo
   executableName: splitsmith-desktop
-  icon: build-resources/icons   # PNG set, 512x512 minimum
+  icon: build-resources/linux-icons   # PNG set, 512x512 minimum; not
+                                      # build-resources/icon.png, which
+                                      # the macOS build would pick up
 appImage:
   artifactName: ${productName}-${version}-x86_64.${ext}
   executableArgs: []
@@ -125,11 +128,20 @@ copies of `app-builder-lib/templates/linux/after-install.tpl` and
 `after-remove.tpl` from the locked electron-builder version, with our
 lines appended, and the CI job asserts the built deb's postinst still
 contains `chrome-sandbox` and `apparmor`. The deb installs into
-`/opt/Splitsmith`. `postinst.sh` links
-`/usr/bin/splitsmith` to `/opt/Splitsmith/resources/python/bin/splitsmith`
-(the relocatable shim resolves the link back into the bundle);
-`postrm.sh` removes the link only when it still points into
-`/opt/Splitsmith`. The exact depends list is settled against a clean
+`/opt/Splitsmith`. `postinst.sh` writes `/usr/bin/splitsmith` as a small
+`#!/bin/sh` wrapper (a fixed marker line, written atomically, mode 0755)
+that defaults `SPLITSMITH_FFMPEG` / `SPLITSMITH_FFPROBE` to
+`/opt/Splitsmith/resources/bin/ffmpeg` and `ffprobe` unless the caller
+set them, then execs `/opt/Splitsmith/resources/python/bin/splitsmith`.
+A plain symlink would not do: the engine looks for ffmpeg next to its
+interpreter (`resources/python/bin`), not in `resources/bin`, and only
+the Electron sidecar sets those variables, so a terminal run would fall
+back to the system ffmpeg or to none. The wrapper is ours when it
+carries the marker, and so is a link into `/opt/Splitsmith` left by an
+install from before the wrapper; both are replaced on install and
+removed by `postrm.sh`. A foreign file or link is left alone on both.
+The snippet lives in `linux/cli-link.sh`, which `build.sh` inlines into
+both scripts at a marker line. The exact depends list is settled against a clean
 Debian 12 container during implementation; the list above is the
 starting point.
 
@@ -272,11 +284,12 @@ assertion is per platform: `h264_videotoolbox` on macOS; `libx264`
 and the `drawtext` filter on Linux. The detection through the bundled
 CLI is shared.
 
-Launch check (Linux job only): `--appimage-extract` the built AppImage
-(CI has no FUSE), run `squashfs-root/splitsmith-desktop.bin
---no-sandbox` under `xvfb-run`, parse the sidecar's `SPLITSMITH_READY`
-banner from the app log, wait for `/api/health`, then `POST
-/api/shutdown`. That proves Electron, the packed `main.js` and the
+Launch check (Linux job only, `launch-check.sh`): `--appimage-extract`
+the built AppImage (CI has no FUSE), run `squashfs-root/splitsmith-desktop
+--no-sandbox` under `xvfb-run` in its own process group (`setsid`), take
+the sidecar's URL from its log (the startup health probe logs it), wait
+for `/api/health`, then kill the whole process group, which takes
+`xvfb-run`, Xvfb, Electron and the sidecar down together. That proves Electron, the packed `main.js` and the
 sidecar chain start from the AppImage's own contents, which `smoke.sh`
 alone (sidecar only) does not. It bypasses `AppRun` and passes `--no-sandbox` on purpose:
 Docker's default seccomp profile blocks `unshare`, and the
@@ -292,7 +305,7 @@ One pass per row, results recorded on the PR:
 - AppImage on Arch: opens, detects a seeded clip (`seed_demo_match.py
   --media`), renders an export.
 - AppImage on Debian 12: same.
-- .deb on Debian 12: same, plus `splitsmith --version` from a terminal
+- .deb on Debian 12: same, plus `splitsmith --help` from a terminal
   and a detection through `/usr/bin/splitsmith` that the app then sees
   (shared `~/.config/splitsmith`).
 - .deb on Ubuntu 24.04: opens with the sandbox on (no `--no-sandbox` in
