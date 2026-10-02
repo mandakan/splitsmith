@@ -359,11 +359,12 @@ desktop runs end ``action_required`` or ``failure`` with **zero jobs**
 failure. Merge it when main's CI passed on the commit it releases and the
 PR touches only the manifest, ``CHANGELOG.md``, ``pyproject.toml``,
 ``src/splitsmith/__init__.py`` and ``uv.lock``. The ``Release`` workflow
-then tags, publishes to PyPI, pushes both GHCR images and deploys
-production on Railway. The DMG is a separate local step,
-``desktop/release.sh`` (signing never leaves the Mac; notarization can
-take close to an hour), and the update feed announces a release only once
-the DMG is attached.
+then tags, publishes to PyPI, pushes both GHCR images, deploys
+production on Railway, and builds and attaches the Linux AppImage and .deb
+(``desktop-linux``, after ``publish-pypi``). The DMG is a separate local
+step, ``desktop/release.sh`` (signing never leaves the Mac; notarization
+can take close to an hour). The update feed announces per platform: macOS
+once the DMG is attached, Linux once both the AppImage and the .deb are.
 
 There are no required status checks on ``main``, so ``gh pr merge
 --auto`` merges at once. "Merge on green" means ``gh pr checks <n>
