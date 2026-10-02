@@ -2829,6 +2829,9 @@ def _run_compare_grid(
             summary_hold_seconds=req.summary_hold_seconds,
             on_notice=_notice,
             inset=mp4_grid.GridInset(corner=req.inset_corner, scale=GRID_INSET_SCALE[req.inset_size]),
+            free_cell=req.free_cell,
+            match_name=match.name or "",
+            match_date=match.match_date.isoformat() if match.match_date else None,
         )
 
     youtube_files: list[Path] = []

@@ -263,6 +263,33 @@ describe("Export compare grid mode", () => {
     expect(api.revealFile).toHaveBeenCalledWith("/m/exports/compare-grid.mp4");
   });
 
+  it("offers the free square only when a cell is free, and sends the choice", async () => {
+    vi.mocked(api.exportCompareGrid).mockResolvedValue(makeJob({ status: "running" }));
+    vi.mocked(api.pollJob).mockResolvedValue(
+      makeJob({
+        status: "succeeded",
+        result: { output_path: "/m/exports/compare-grid.mp4", stages_rendered: 2, stages_total: 2, failed: [] },
+      }),
+    );
+    const { user, grid } = await renderCompare([...SHOOTERS, makeShooter("anna", "Anna")]);
+    await user.click(grid);
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: /Stage Two/i })).toBeChecked());
+    await openGroups(user);
+    const free = screen.getByRole("group", { name: "Free square" });
+    await user.click(within(free).getByRole("button", { name: "Splits" }));
+    await user.click(screen.getByRole("button", { name: /render grid/i }));
+
+    await waitFor(() => expect(api.exportCompareGrid).toHaveBeenCalledTimes(1));
+    expect(api.exportCompareGrid).toHaveBeenCalledWith(expect.objectContaining({ free_cell: "splits" }));
+  });
+
+  it("has no free square with two shooters: their grid has no free cell", async () => {
+    const { user, grid } = await renderCompare();
+    await user.click(grid);
+    await openGroups(user);
+    expect(screen.queryByRole("group", { name: "Free square" })).not.toBeInTheDocument();
+  });
+
   it("YouTube on writes the sidecar for the grid, with the description lead", async () => {
     vi.mocked(api.exportCompareGrid).mockResolvedValue(makeJob({ status: "running" }));
     vi.mocked(api.pollJob).mockResolvedValue(

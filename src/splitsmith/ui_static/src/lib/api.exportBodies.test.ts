@@ -122,6 +122,7 @@ describe("export wrappers forward every declared field", () => {
       inset_camera: "head",
       inset_corner: "top-left",
       inset_size: "small",
+      free_cell: "splits",
       youtube_sidecar: true,
       description_lead: "Every stage, side by side.",
       youtube_upload: true,

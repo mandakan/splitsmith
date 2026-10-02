@@ -8,6 +8,7 @@ import {
   CANVAS_CHOICES,
   buildCompareGridPayload,
   buildMatchExportPayload,
+  gridFreeCells,
   summarizeGridResult,
   type MatchExportPayloadInput,
 } from "@/pages/matchExportModel";
@@ -37,6 +38,12 @@ describe("buildCompareGridPayload", () => {
         cams: { ...DEFAULT_CAM_OPTIONS, insetCamera: "head", insetCorner: "top-left", insetSize: "large" },
       }),
     ).toMatchObject({ inset_camera: "head", inset_corner: "top-left", inset_size: "large" });
+  });
+
+  it("sends the free square only when it is not black", () => {
+    const base = { stageNumbers: [1], audioFrom: "mathias", canvas: CANVAS_CHOICES[1], outputName: "g" };
+    expect(buildCompareGridPayload({ ...base, freeCell: "blank" })).toEqual(buildCompareGridPayload(base));
+    expect(buildCompareGridPayload({ ...base, freeCell: "splits" })).toMatchObject({ free_cell: "splits" });
   });
 
   it("publishes like one shooter: the sidecar with YouTube on, the upload only when on and connected", () => {
@@ -99,6 +106,12 @@ describe("buildCompareGridPayload", () => {
   it("defaults to 4K UHD as the first canvas choice", () => {
     expect(CANVAS_CHOICES[0].width).toBe(3840);
     expect(CANVAS_CHOICES[0].height).toBe(2160);
+  });
+});
+
+describe("gridFreeCells", () => {
+  it("counts the cells no shooter fills, by the server's choose_grid", () => {
+    expect([1, 2, 3, 4, 5, 8, 9, 10].map(gridFreeCells)).toEqual([0, 0, 1, 0, 4, 1, 0, 6]);
   });
 });
 
