@@ -6606,6 +6606,20 @@ def _youtube_worker_credentials() -> dict[str, str] | None:
     return {"client_id": client.client_id, "client_secret": client.client_secret, "token_key": key}
 
 
+_VIDEO_MEDIA_TYPES = {".mp4": "video/mp4", ".m4v": "video/x-m4v", ".mov": "video/quicktime"}
+
+
+def video_media_type(path: str | Path) -> str:
+    """The Content-Type a ``<video>`` element plays a camera file by.
+
+    An iPhone ``.MOV`` served as ``application/octet-stream`` (with an
+    attachment disposition) plays in Chromium, which sniffs, but not in
+    Safari: the beep picker showed "Preview unavailable" and no sound
+    (2026-10-02). Streams also go out ``inline`` for the same reason.
+    """
+    return _VIDEO_MEDIA_TYPES.get(Path(path).suffix.lower(), "application/octet-stream")
+
+
 def _hosted_mode_active() -> bool:
     """Return True when ``SPLITSMITH_MODE=hosted`` is in the environment.
 
@@ -13081,8 +13095,12 @@ def create_app(
         the path beyond "must exist + must be a file".
         """
         target = _resolve_fixture_path(path)
-        media_type = "video/mp4" if target.suffix.lower() == ".mp4" else "application/octet-stream"
-        return FileResponse(target, media_type=media_type, filename=target.name)
+        return FileResponse(
+            target,
+            media_type=video_media_type(target),
+            filename=target.name,
+            content_disposition_type="inline",
+        )
 
     def _serve_proxy(base_root: Path, video: StageVideo) -> FileResponse | None:
         """Return a FileResponse for the proxy object if it exists, else None.
@@ -13234,8 +13252,7 @@ def create_app(
                         detail=f"trimmed clip not built yet for {path}",
                     )
                 # kind=auto: fall through to source redirect below
-            source_ct = "video/mp4" if Path(raw_str).suffix.lower() == ".mp4" else "application/octet-stream"
-            return serve_media(storage, raw_str, root / raw_str, content_type=source_ct)
+            return serve_media(storage, raw_str, root / raw_str, content_type=video_media_type(raw_str))
 
         # local mode: existing disk-based serving (``web`` behaves as ``auto``:
         # the full-res trim streams fine from disk)
@@ -13269,8 +13286,12 @@ def create_app(
             # the SPA's "reconnect external storage" surface is uniform.
             ensure_source_reachable(stage.stage_number if stage is not None else None, served_path)
 
-        media_type = "video/mp4" if served_path.suffix.lower() == ".mp4" else "application/octet-stream"
-        return FileResponse(served_path, media_type=media_type, filename=served_path.name)
+        return FileResponse(
+            served_path,
+            media_type=video_media_type(served_path),
+            filename=served_path.name,
+            content_disposition_type="inline",
+        )
 
     @app.get("/api/shooters/{slug}/fs/list", response_model=FsListing)
     def fs_list(
@@ -15264,14 +15285,13 @@ def create_app(
                     if web_resp is not None:
                         return web_resp
                 # hosted mode: redirect to source key; no mirroring
-                source_ct = (
-                    "video/mp4" if Path(raw_str).suffix.lower() == ".mp4" else "application/octet-stream"
+                return serve_media(
+                    storage, raw_str, shooter_root / raw_str, content_type=video_media_type(raw_str)
                 )
-                return serve_media(storage, raw_str, shooter_root / raw_str, content_type=source_ct)
 
             # local mode: mirror-then-serve (existing behavior)
             served_path = shooter_project.resolve_video_path(shooter_root, video.path).resolve()
-            return FileResponse(served_path, media_type="video/mp4")
+            return FileResponse(served_path, media_type=video_media_type(served_path))
 
         # Non-registered path: a Compare-produced trim, addressed by the
         # logical ref grammar ``(exports|trimmed)/<name>.mp4`` - the same

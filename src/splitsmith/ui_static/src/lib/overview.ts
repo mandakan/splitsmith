@@ -69,8 +69,11 @@ const PIPELINE_KINDS = new Set(["detect_beep", "trim", "shot_detect"]);
 export function rowAction(cell: Omit<OverviewCell, "action">, _threshold: number): RowAction {
   if (cell.status === "skipped") return { kind: "none" };
   if (cell.videoCount === 0) return { kind: "add_footage" };
-  if (cell.beepTime == null || !cell.beepReviewed) return { kind: "confirm_beep" };
+  // A detect / trim / shot-detect job queued or running comes first: right
+  // after an import every stage is waiting for its beep, and a "Confirm
+  // beep" call to action there led to a picker with nothing to confirm.
   if (cell.running) return { kind: "running" };
+  if (cell.beepTime == null || !cell.beepReviewed) return { kind: "confirm_beep" };
   if (cell.audited) return { kind: "splits" };
   return { kind: "audit", accept: cell.shotCount > 0 };
 }
