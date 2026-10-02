@@ -53,6 +53,11 @@ linux:
   synopsis: Shot splits from head-cam footage
   description: Splitsmith finds the beep and every shot in IPSC head-cam footage and turns them into splits, an audit trail and rendered videos.
   maintainer: Mathias Axell <m@thias.se>
+  # Electron's WM_CLASS / Wayland app_id is app.getName(), package.json's
+  # name; the default (productName) would not match the running window.
+  desktop:
+    entry:
+      StartupWMClass: splitsmith-desktop
   extraResources:
     - from: build-resources/linux-icons/512x512.png
       to: icon.png
