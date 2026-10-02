@@ -350,4 +350,22 @@ describe("FootageSort", () => {
     );
     expect(screen.getByText("Mathias Axell")).toBeInTheDocument();
   });
+
+  it("labels every placed clip with the role the import gives it", async () => {
+    const v = view();
+    v.clips[1] = {
+      ...v.clips[1],
+      proposal: { ...v.clips[1].proposal, role: "secondary" },
+    };
+    vi.mocked(api.getFootageSort).mockResolvedValue(v);
+    renderPage();
+
+    const lone = (await screen.findByText("IMG_1.MOV")).closest(
+      "tr",
+    ) as HTMLElement;
+    const joining = screen.getByText("IMG_2.MOV").closest("tr") as HTMLElement;
+
+    expect(within(lone).getByText("primary")).toBeInTheDocument();
+    expect(within(joining).getByText("secondary")).toBeInTheDocument();
+  });
 });

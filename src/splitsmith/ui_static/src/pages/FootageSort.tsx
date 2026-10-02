@@ -433,9 +433,16 @@ function ClipTable({
                   {whereNow(view, clip) ? (
                     <Chip tick="muted">{whereNow(view, clip)}</Chip>
                   ) : null}
-                  {clip.proposal.role === "primary" &&
-                  clip.proposal.reason.run_size > 1 ? (
-                    <Chip tick="draw">primary</Chip>
+                  {/* What the import will make the clip: the stage's
+                      primary, or a secondary beside one (a lone clip is
+                      a primary too, and an existing primary is never
+                      replaced). */}
+                  {clip.proposal.role !== null && clip.imported_by === null ? (
+                    <Chip
+                      tick={clip.proposal.role === "primary" ? "draw" : "muted"}
+                    >
+                      {clip.proposal.role}
+                    </Chip>
                   ) : null}
                 </div>
               </Td>
