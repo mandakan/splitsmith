@@ -117,16 +117,19 @@ function userNsWorks(): boolean {
 
 /** A dialog and a quit; never a window, never the sidecar, never web content. */
 async function refuseUnsandboxed(): Promise<void> {
-  const { response } = await dialog.showMessageBox({
-    type: "error",
-    message: BLOCKED_MESSAGE,
-    detail: BLOCKED_DETAIL,
-    buttons: ["Open release page", "Quit"],
-    defaultId: 0,
-    cancelId: 1,
-  });
-  if (response === 0) await shell.openExternal(RELEASES_PAGE);
-  app.quit();
+  try {
+    const { response } = await dialog.showMessageBox({
+      type: "error",
+      message: BLOCKED_MESSAGE,
+      detail: BLOCKED_DETAIL,
+      buttons: ["Open release page", "Quit"],
+      defaultId: 0,
+      cancelId: 1,
+    });
+    if (response === 0) await shell.openExternal(RELEASES_PAGE).catch(() => undefined);
+  } finally {
+    app.quit();
+  }
 }
 
 /** The window icon on Linux; macOS takes it from the bundle. */
