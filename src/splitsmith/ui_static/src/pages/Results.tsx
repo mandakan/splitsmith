@@ -11,7 +11,7 @@
  * only the fetches, the share / refresh chrome and the shooter filter.
  */
 import { useEffect, useMemo, useState } from "react";
-import { Link, useOutletContext, useParams } from "react-router-dom";
+import { Link, useOutletContext, useParams, useSearchParams } from "react-router-dom";
 import { Loader2, RefreshCw } from "lucide-react";
 
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
@@ -21,6 +21,7 @@ import { SplitsTable, type SplitsHrefs } from "@/components/results/SplitsTable"
 import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/Chip";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { Segmented } from "@/components/ui/Segmented";
 import { Stat, StatStrip } from "@/components/ui/Stat";
 import { ApiError, api, type MatchProject, type SyncStatusResponse } from "@/lib/api";
 import { pickDefaultShooterSlug } from "@/lib/defaultShooter";
@@ -30,6 +31,10 @@ import { formatClock } from "@/lib/overview";
 import {
   buildSplitsRows,
   firstComparable,
+  nextSort,
+  parseSort,
+  sortParam,
+  type SplitsSortKey,
   firstPlayable,
   scoreboardTotals,
   scorecardSyncedAt,
@@ -52,6 +57,34 @@ function formatDateTime(iso: string): string {
 
 function fmt(v: number | null, digits: number): string {
   return v == null ? "—" : v.toFixed(digits);
+}
+
+// The phone has no headers to click: one picker, best first.
+const PHONE_SORTS = [
+  { value: "match", label: "Match order" },
+  { value: "draw", label: "Draw" },
+  { value: "avgSplit", label: "Avg split" },
+  { value: "fastest", label: "Fastest" },
+  { value: "shots", label: "Shots" },
+  { value: "time", label: "Time" },
+  { value: "hf", label: "HF" },
+] as const;
+
+// Marking the best per stage is a per-viewer preference, on by default.
+const MARK_BEST_KEY = "splitsmith.splits.markBest";
+function readMarkBest(): boolean {
+  try {
+    return localStorage.getItem(MARK_BEST_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+function writeMarkBest(on: boolean): void {
+  try {
+    localStorage.setItem(MARK_BEST_KEY, on ? "on" : "off");
+  } catch {
+    /* private window: the choice lasts this visit */
+  }
 }
 
 export function Results() {
@@ -175,6 +208,30 @@ export function Results() {
   const stats = useMemo(() => splitsStats(rows), [rows]);
   const totals = useMemo(() => scoreboardTotals(rows), [rows]);
   const playable = useMemo(() => firstPlayable(rows), [rows]);
+  // Every shooter showing: each stage is a group of shooter rows that the
+  // headers sort (the order rides in ?sort= so a share link keeps it) and
+  // whose best figures are marked unless the viewer turned that off.
+  const grouped = shooters.length > 1 && filterSlug == null;
+  const [searchParams, setSearchParams] = useSearchParams();
+  const sort = parseSort(searchParams.get("sort"));
+  const setSort = (next: ReturnType<typeof parseSort>) =>
+    setSearchParams(
+      (prev) => {
+        const out = new URLSearchParams(prev);
+        const value = sortParam(next);
+        if (value) out.set("sort", value);
+        else out.delete("sort");
+        return out;
+      },
+      { replace: true },
+    );
+  const onSort = (key: SplitsSortKey) => setSort(nextSort(sort, key));
+  const [markBest, setMarkBest] = useState<boolean>(() => readMarkBest());
+  const toggleMarkBest = () =>
+    setMarkBest((prev) => {
+      writeMarkBest(!prev);
+      return !prev;
+    });
   // With every shooter showing (desktop: Compare is desktop-only), Play
   // all plays the stages side by side in Compare instead of one shooter's.
   const comparable = useMemo(
@@ -324,16 +381,37 @@ export function Results() {
         <Stat label="Scored time" value={stats.scoredTime != null ? formatClock(stats.scoredTime) : "—"} tone={stats.scoredTime == null ? "dim" : "ink"} />
       </StatStrip>
 
+      {grouped ? (
+        <div className="mb-2 flex flex-wrap items-center justify-end gap-2">
+          {isMobile ? (
+            <Segmented
+              label="Sort shooters by"
+              className="mr-auto"
+              value={sort?.key ?? "match"}
+              options={PHONE_SORTS}
+              onChange={(v) => setSort(v === "match" ? null : nextSort(null, v as SplitsSortKey))}
+            />
+          ) : null}
+          <button type="button" onClick={toggleMarkBest} aria-pressed={markBest}>
+            <Chip tone={markBest ? "ok" : "neutral"} tick="fire">
+              Best per stage
+            </Chip>
+          </button>
+        </div>
+      ) : null}
+
       {isMobile ? (
-        <SplitsCards rows={rows} share={isShare} hrefs={hrefs} />
+        <SplitsCards rows={rows} share={isShare} hrefs={hrefs} grouped={grouped} sort={sort} markBest={markBest} />
       ) : (
         <SplitsTable
           rows={rows}
-          multi={shooters.length > 1}
-          filterSlug={filterSlug}
+          grouped={grouped}
           share={isShare}
           totals={totals}
           hrefs={hrefs}
+          sort={sort}
+          onSort={onSort}
+          markBest={markBest}
         />
       )}
 

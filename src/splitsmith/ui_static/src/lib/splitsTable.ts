@@ -270,3 +270,103 @@ export function scorecardSyncedAt(project: MatchProject | null): string | null {
   }
   return latest;
 }
+
+// --- per-stage sort and best marks (2026-10-02) ---------------------------
+//
+// With every shooter showing, a stage is a group of shooter rows. The
+// headers sort the shooters inside each stage; the stages themselves never
+// move. A shooter without the figure (not audited, no scorecard) always
+// sinks to the bottom of its stage, whichever way the sort runs.
+
+export type SplitsSortKey = "draw" | "avgSplit" | "fastest" | "shots" | "time" | "hf";
+
+export interface SplitsSort {
+  key: SplitsSortKey;
+  dir: "asc" | "desc";
+}
+
+/** Which way is better for each column; a first click sorts best first. */
+const BETTER: Record<SplitsSortKey, "low" | "high"> = {
+  draw: "low",
+  avgSplit: "low",
+  fastest: "low",
+  shots: "high",
+  time: "low",
+  hf: "high",
+};
+
+/** The columns whose best value per stage is marked. Shot count has no
+ *  better direction, so it sorts but is never marked. */
+export const MARKED_KEYS: readonly SplitsSortKey[] = ["draw", "avgSplit", "fastest", "time", "hf"];
+
+/** The figure a cell shows in a column, null when it shows none. Splits
+ *  and time exist only on an audited stage (the row says "not audited"
+ *  across them otherwise); HF comes from the scorecard. */
+export function cellValue(cell: SplitsCell, key: SplitsSortKey): number | null {
+  if (key === "hf") return cell.scorecard?.hit_factor ?? null;
+  if (!cell.audited) return null;
+  switch (key) {
+    case "draw":
+      return cell.draw;
+    case "avgSplit":
+      return cell.avgSplit;
+    case "fastest":
+      return cell.fastestSplit;
+    case "shots":
+      return cell.shotCount;
+    case "time":
+      return cell.timeSeconds > 0 ? cell.timeSeconds : null;
+  }
+}
+
+/** A stage's shooters in sort order; the match order when unsorted. */
+export function sortCells(cells: SplitsCell[], sort: SplitsSort | null): SplitsCell[] {
+  if (!sort) return cells;
+  const sign = sort.dir === "asc" ? 1 : -1;
+  return cells
+    .map((cell, i) => ({ cell, i, v: cellValue(cell, sort.key) }))
+    .sort((a, b) => {
+      if (a.v == null || b.v == null) return a.v == null && b.v == null ? a.i - b.i : a.v == null ? 1 : -1;
+      return (a.v - b.v) * sign || a.i - b.i;
+    })
+    .map((x) => x.cell);
+}
+
+/** A header click: best first, then reversed, then back to match order. */
+export function nextSort(current: SplitsSort | null, key: SplitsSortKey): SplitsSort | null {
+  const first: SplitsSort["dir"] = BETTER[key] === "low" ? "asc" : "desc";
+  if (current?.key !== key) return { key, dir: first };
+  if (current.dir === first) return { key, dir: first === "asc" ? "desc" : "asc" };
+  return null;
+}
+
+/** For each marked column, the shooters holding the stage's best value
+ *  (all of them on a tie). Nothing is marked when fewer than two
+ *  shooters have the figure: a best of one says nothing. */
+export function bestCells(cells: SplitsCell[]): Partial<Record<SplitsSortKey, Set<string>>> {
+  const out: Partial<Record<SplitsSortKey, Set<string>>> = {};
+  for (const key of MARKED_KEYS) {
+    const vals = cells.flatMap((c) => {
+      const v = cellValue(c, key);
+      return v == null ? [] : [{ slug: c.slug, v }];
+    });
+    if (vals.length < 2) continue;
+    const best = BETTER[key] === "low" ? Math.min(...vals.map((x) => x.v)) : Math.max(...vals.map((x) => x.v));
+    out[key] = new Set(vals.filter((x) => x.v === best).map((x) => x.slug));
+  }
+  return out;
+}
+
+const SORT_KEYS: readonly SplitsSortKey[] = ["draw", "avgSplit", "fastest", "shots", "time", "hf"];
+
+/** ``?sort=draw.asc`` round trip; anything else reads as unsorted. */
+export function parseSort(raw: string | null): SplitsSort | null {
+  if (!raw) return null;
+  const [key, dir] = raw.split(".");
+  if (!SORT_KEYS.includes(key as SplitsSortKey) || (dir !== "asc" && dir !== "desc")) return null;
+  return { key: key as SplitsSortKey, dir };
+}
+
+export function sortParam(sort: SplitsSort | null): string | null {
+  return sort ? `${sort.key}.${sort.dir}` : null;
+}
