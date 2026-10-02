@@ -713,6 +713,8 @@ export interface SortImportResult {
   imported: { clip_id: string; shooter: string; stage: number; role: string; path: string }[];
   not_imported: Record<string, string>;
   report: string;
+  /** Clips still wanting a decision; while above 0 the sort stays open. */
+  remaining: number;
 }
 
 /** Filesystem state of a registered ``raw/<name>`` symlink. ``ok`` =

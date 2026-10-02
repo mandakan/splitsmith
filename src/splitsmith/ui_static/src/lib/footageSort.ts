@@ -138,10 +138,12 @@ export function openSortText(s: SortSummary): string {
   return `Sort of ${folder}: ${s.to_review} ${s.to_review === 1 ? "clip" : "clips"} left to place`;
 }
 
-/** The summary Footage shows after a sort is imported. */
+/** The summary Footage shows after a sort is imported; clips that still
+ *  need the user keep the sort open on Footage. */
 export function importedText(
   view: SortView,
   imported: { shooter: string }[],
+  remaining = 0,
 ): string {
   const per = view.shooters
     .map(
@@ -152,7 +154,8 @@ export function importedText(
     .map(([name, n]) => `${name} ${n}`)
     .join(", ");
   const n = imported.length;
-  return `Imported ${n} ${n === 1 ? "clip" : "clips"}${per ? `: ${per}` : ""}`;
+  const left = remaining > 0 ? `. ${remaining} still need you` : "";
+  return `Imported ${n} ${n === 1 ? "clip" : "clips"}${per ? `: ${per}` : ""}${left}`;
 }
 
 export function importCount(view: SortView): number {
