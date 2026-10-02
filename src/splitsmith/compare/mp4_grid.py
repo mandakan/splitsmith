@@ -41,6 +41,7 @@ from ..overlay_text import FALLBACK_BUNDLED_FONT, overlay_font_file
 from ..overlay_theme import OverlayTheme, ThemeName, load_theme
 from ..runtime import FFmpegCapabilities, ffmpeg_capabilities, quote_filter_value, runtime
 from ..youtube_sidecar import Chapter
+from .free_cell import FreeCellContext, FreeCellKind, build_free_cell_still, free_cell_groups
 from .layout import Layout2Up, choose_grid, grid_shape
 from .overlay_data import TileStageData, load_expected_rounds, load_overlay_data
 from .overlay_live import write_absent_sprite_sequence, write_sprite_sequence
@@ -1255,6 +1256,7 @@ def build_stage_command(
     hold_still_path: Path | None = None,
     lower_third: LowerThirdInput | None = None,
     inset: GridInset | None = None,
+    free_cell_still: Path | None = None,
 ) -> tuple[str, ...]:
     """Build the ffmpeg invocation rendering one grid stage.
 
@@ -1385,16 +1387,31 @@ def build_stage_command(
 
     # Video only, and after every tile input so the tiles' own indices
     # are untouched.
+    # The first free square shows ``free_cell_still`` when there is one
+    # (``compare/free_cell``): the same input position the black source
+    # takes, so nothing behind it renumbers, and the same cell chain.
     empty_index: list[int] = []
-    for _cell in _unreached_cells(plan):
-        args += [
-            "-f",
-            "lavfi",
-            "-t",
-            f"{plan.duration_seconds:g}",
-            "-i",
-            f"color=c=black:s={cell_w}x{cell_h}:r={rate}",
-        ]
+    for cell_number, _cell in enumerate(_unreached_cells(plan)):
+        if cell_number == 0 and free_cell_still is not None:
+            args += [
+                "-loop",
+                "1",
+                "-framerate",
+                rate,
+                "-t",
+                f"{plan.duration_seconds:g}",
+                "-i",
+                str(free_cell_still),
+            ]
+        else:
+            args += [
+                "-f",
+                "lavfi",
+                "-t",
+                f"{plan.duration_seconds:g}",
+                "-i",
+                f"color=c=black:s={cell_w}x{cell_h}:r={rate}",
+            ]
         empty_index.append(next_index)
         next_index += 1
 
@@ -2275,6 +2292,44 @@ def _stderr_text(completed: subprocess.CompletedProcess) -> str:
     return detail.strip()[-2000:] or "(no output)"
 
 
+def _free_cell_still(
+    plan: GridStagePlan,
+    *,
+    kind: FreeCellKind,
+    canvas: GridCanvas,
+    theme: OverlayTheme,
+    rasterizer: Rasterizer,
+    work: Path,
+    match_name: str,
+    match_date: str | None,
+    tiles: dict[str, TileStageData],
+    expected_rounds: int | None,
+) -> Path | None:
+    """Compose this stage's free square at the cell's size; ``None`` keeps
+    the black cell (nothing to say, or the text could not be drawn)."""
+    rounds = next((t.stage_rounds for t in tiles.values() if t.stage_rounds is not None), None)
+    context = FreeCellContext(
+        stage_number=plan.stage_number,
+        stage_name=plan.stage_name,
+        match_name=match_name,
+        match_date=match_date,
+        shooters=tuple(t.label for t in plan.tiles),
+        expected_rounds=expected_rounds,
+        paper_targets=getattr(rounds, "paper_targets", None),
+        steel_targets=getattr(rounds, "steel_targets", None),
+        tiles=tiles,
+    )
+    cell_w, cell_h = _cell_size(canvas, plan)
+    image = build_free_cell_still(
+        free_cell_groups(kind, context), width=cell_w, height=cell_h, theme=theme, rasterizer=rasterizer
+    )
+    if image is None:
+        return None
+    path = work / f"free-stage{plan.stage_number}.png"
+    image.save(path)
+    return path
+
+
 def render_grid_mp4(
     shooters: Sequence[CompareShooterBundle],
     *,
@@ -2300,6 +2355,9 @@ def render_grid_mp4(
     stage_titles: StageTitleKind = "none",
     title_duration_seconds: float = 1.5,
     inset: GridInset | None = None,
+    free_cell: FreeCellKind = "blank",
+    match_name: str = "",
+    match_date: str | None = None,
 ) -> GridRenderResult:
     """Render every stage as a grid, then stitch them into one MP4.
 
@@ -2505,9 +2563,11 @@ def render_grid_mp4(
     # would simply find ``rasterizer is None`` per stage and degrade every
     # sprite to a blank canvas without anything having failed.
     cards_requested = title_page is not None or closing is not None or stage_titles != "none"
+    # A free square with something to say is drawn by the same browser.
+    free_requested = free_cell != "blank" and any(_unreached_cells(p) for p in plans)
     active_rasterizer: Rasterizer | None = rasterizer
     owned_rasterizer: ChromiumRasterizer | None = None
-    if (overlay or cards_requested) and rasterizer is None:
+    if (overlay or cards_requested or free_requested) and rasterizer is None:
         owned_rasterizer = ChromiumRasterizer()
         try:
             active_rasterizer = owned_rasterizer.__enter__()
@@ -2524,6 +2584,9 @@ def render_grid_mp4(
     outcomes: list[StageOutcome] = []
     segments: list[Path] = []
     card_theme = load_theme(overlay_theme) if cards_requested else None
+    free_theme = card_theme or (load_theme(overlay_theme) if free_requested else None)
+    free_tiles = load_overlay_data(shooters) if free_requested and free_cell == "splits" else {}
+    free_rounds = load_expected_rounds(shooters) if free_requested and free_cell == "stage" else {}
     # Read for the stage cards whether or not the overlay is on: the count
     # comes from project.json alone, so a slate without ``--overlay``
     # still prints it (a review of #973 caught it silently absent).
@@ -2659,6 +2722,29 @@ def render_grid_mp4(
                             )
                         )
                         continue
+            free_still: Path | None = None
+            if (
+                free_requested
+                and _unreached_cells(plan)
+                and active_rasterizer is not None
+                and free_theme is not None
+            ):
+                free_still = _free_cell_still(
+                    plan,
+                    kind=free_cell,
+                    canvas=canvas,
+                    theme=free_theme,
+                    rasterizer=active_rasterizer,
+                    work=work,
+                    match_name=match_name,
+                    match_date=match_date,
+                    tiles={
+                        label: data
+                        for (label, number), data in free_tiles.items()
+                        if number == plan.stage_number
+                    },
+                    expected_rounds=free_rounds.get(plan.stage_number),
+                )
             cmd = build_stage_command(
                 plan,
                 canvas=canvas,
@@ -2668,6 +2754,7 @@ def render_grid_mp4(
                 hold_still_path=hold_still,
                 lower_third=lower_third,
                 inset=inset,
+                free_cell_still=free_still,
             )
             completed = _run_ffmpeg(cmd, runner=runner)
             if completed.returncode != 0:

@@ -8,12 +8,26 @@ import { SelectField } from "@/components/export/SelectField";
 import { CamOptionsPanel } from "@/components/render/CamOptionsPanel";
 import { Field } from "@/components/ui/Field";
 import { Segmented } from "@/components/ui/Segmented";
-import { READ_ONLY_MIRROR_MESSAGE, type ShooterListEntry } from "@/lib/api";
+import { READ_ONLY_MIRROR_MESSAGE, type GridFreeCell, type ShooterListEntry } from "@/lib/api";
 import { gridCameraChoices, gridMultiCamShooters, type CameraChoice } from "@/lib/camOptions";
 import { bareHint } from "@/lib/exportPlan";
 import type { ExportSettings } from "@/lib/exportPresets";
 import { mountLabel } from "@/lib/shareCameras";
-import { CANVAS_CHOICES } from "@/pages/matchExportModel";
+import { CANVAS_CHOICES, gridFreeCells } from "@/pages/matchExportModel";
+
+const FREE_CELL_OPTIONS: ReadonlyArray<{ value: GridFreeCell; label: string }> = [
+  { value: "blank", label: "Blank" },
+  { value: "stage", label: "Stage card" },
+  { value: "splits", label: "Splits" },
+  { value: "match", label: "Match card" },
+];
+
+const FREE_CELL_HELP: Record<GridFreeCell, string> = {
+  blank: "The cell no shooter fills stays black.",
+  stage: "The stage's number, name, rounds and targets, on every stage.",
+  splits: "Each shooter's draw, average and best split on the stage, the best of each marked.",
+  match: "The match name, date and the shooters, on every stage.",
+};
 
 const DESKTOP_RENDERS_MP4 = "Your desktop renders an MP4 and uploads it.";
 
@@ -104,6 +118,17 @@ export function OutputGroup({
           grid
           busy={busy}
         />
+        {gridFreeCells(shooters.length) > 0 ? (
+          <Field label="Free square" help={FREE_CELL_HELP[settings.gridFreeCell]}>
+            <Segmented<GridFreeCell>
+              label="Free square"
+              value={settings.gridFreeCell}
+              disabled={busy}
+              onChange={(v) => patch({ gridFreeCell: v })}
+              options={FREE_CELL_OPTIONS}
+            />
+          </Field>
+        ) : null}
         <Field
           label="YouTube"
           help={

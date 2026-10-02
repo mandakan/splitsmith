@@ -87,6 +87,7 @@ import { describeRenderOptions, renderOptionsSeconds, transitionsSupported, type
 import { cn } from "@/lib/utils";
 import {
   buildCompareGridPayload,
+  gridFreeCells,
   buildMatchExportPayload,
   CANVAS_CHOICES,
   summarizeGridResult,
@@ -226,6 +227,7 @@ function ExportInner({ slug }: { slug: string }) {
     includeOverlay,
     gridOverlay,
     gridHoldSeconds,
+    gridFreeCell,
     uploadOptions,
   } = view;
   const canvas = CANVAS_CHOICES.find((c) => c.id === settings.canvas) ?? CANVAS_CHOICES[0];
@@ -681,6 +683,7 @@ function ExportInner({ slug }: { slug: string }) {
         overlay: gridOverlay,
         summaryHoldSeconds: gridHoldSeconds,
         cams: camOptions,
+        freeCell: gridFreeCells(shooters.length) > 0 ? gridFreeCell : "blank",
         youtube,
         descriptionLead,
         uploadOptions,

@@ -5,7 +5,13 @@
  * result without going through React.
  */
 
-import type { CompareGridRequestPayload, CompareGridResult, MatchExportRequestPayload, OverlayCodec } from "@/lib/api";
+import type {
+  CompareGridRequestPayload,
+  CompareGridResult,
+  GridFreeCell,
+  MatchExportRequestPayload,
+  OverlayCodec,
+} from "@/lib/api";
 import { camExportFields, type CamOptions } from "@/lib/camOptions";
 import type { TransitionKind } from "@/lib/exportPresets";
 import {
@@ -41,6 +47,16 @@ export const CANVAS_CHOICES: readonly CanvasChoice[] = [
  *  click order. The card fields travel only when a card is on: every
  *  default equals the server's own, so an untouched panel leaves the
  *  body exactly as it was before the cards existed (#973). */
+/** How many cells of the grid no shooter fills: the grid is the smallest
+ *  square (or the 2-up for two) that holds everyone, so 3 shooters leave
+ *  one on a 2x2 and 5 to 8 leave some on a 3x3. ``compare.layout.
+ *  choose_grid`` is the server's rule. */
+export function gridFreeCells(shooterCount: number): number {
+  if (shooterCount <= 2) return 0;
+  const side = Math.ceil(Math.sqrt(shooterCount));
+  return side * side - shooterCount;
+}
+
 export function buildCompareGridPayload(input: {
   stageNumbers: number[];
   audioFrom: string;
@@ -55,6 +71,8 @@ export function buildCompareGridPayload(input: {
   /** The tiles' inset (the same settings as one shooter's); sent only
    *  when one is chosen, so an untouched grid body stays as it was. */
   cams?: CamOptions;
+  /** What a cell no shooter fills shows; sent only when not black. */
+  freeCell?: GridFreeCell;
   /** The YouTube sidecar and the chained upload, as for one shooter. */
   youtube?: boolean;
   descriptionLead?: string;
@@ -79,6 +97,7 @@ export function buildCompareGridPayload(input: {
     payload.inset_corner = input.cams.insetCorner;
     payload.inset_size = input.cams.insetSize;
   }
+  if (input.freeCell && input.freeCell !== "blank") payload.free_cell = input.freeCell;
   if (input.youtube) {
     payload.youtube_sidecar = true;
     payload.description_lead = input.descriptionLead?.trim() || null;

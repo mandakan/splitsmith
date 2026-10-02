@@ -8,7 +8,7 @@
  * ``uploadOptions.publishAt``. ``applyBody`` keeps them; ``settingsToBody``
  * drops them; ``isDirty`` therefore ignores them.
  */
-import type { ExportPresetBody, OverlayCodec } from "@/lib/api";
+import type { ExportPresetBody, GridFreeCell, OverlayCodec } from "@/lib/api";
 import { DEFAULT_CAM_OPTIONS, fromPipLayout, type CamOptions } from "@/lib/camOptions";
 import type { ExportMode } from "@/lib/exportPlan";
 import {
@@ -61,6 +61,7 @@ export interface ExportSettings {
   includeOverlay: boolean;
   gridOverlay: boolean;
   gridHoldSeconds: number;
+  gridFreeCell: GridFreeCell;
   /** ``publishAt`` inside is match-specific and never stored. */
   uploadOptions: UploadFormOptions;
 }
@@ -81,6 +82,7 @@ export const DEFAULT_EXPORT_SETTINGS: ExportSettings = {
   includeOverlay: false,
   gridOverlay: false,
   gridHoldSeconds: 0,
+  gridFreeCell: "blank",
   uploadOptions: DEFAULT_UPLOAD_OPTIONS,
 };
 
@@ -120,6 +122,7 @@ export function settingsToBody(s: ExportSettings): ExportPresetBody {
     overlay: s.includeOverlay,
     grid_overlay: s.gridOverlay,
     grid_hold_seconds: finite(s.gridHoldSeconds, 0),
+    grid_free_cell: s.gridFreeCell,
     upload_after_render: s.uploadOptions.enabled,
     upload_privacy: s.uploadOptions.privacy,
     upload_playlist: s.uploadOptions.playlist,
@@ -164,6 +167,7 @@ export function applyBody(s: ExportSettings, body: ExportPresetBody): ExportSett
     includeOverlay: body.overlay,
     gridOverlay: body.grid_overlay,
     gridHoldSeconds: finite(body.grid_hold_seconds, 0),
+    gridFreeCell: body.grid_free_cell ?? "blank",
     uploadOptions: {
       ...s.uploadOptions,
       enabled: body.upload_after_render,
