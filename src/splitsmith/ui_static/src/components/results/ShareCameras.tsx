@@ -1,127 +1,76 @@
 /**
- * ShareCameras -- the share dialog's "Cameras" section: which angle each
- * shooter starts on for everyone watching the match's share links (and the
- * Compare grid and the export grid, which read the same saved default).
- * Viewers can still switch while watching. One row per shooter with more
- * than one camera, plus an "Everyone" row that sets them all at once and
- * names any shooter without that camera. Each choice saves on the spot
- * through the compare-camera route, a REVIEW write, so it works on the
- * hosted copy of a desktop match and syncs back. Derivation lives in
- * lib/shareCameras.
+ * ShareCameras -- which camera each shooter starts on for share-link
+ * viewers. Two levels, one look:
+ *
+ * - DefaultCameras: the shooters' saved defaults (``compare_camera``),
+ *   which every link without its own choice opens on, as do the Compare
+ *   grid and the export grid. Saved through the compare-camera route, a
+ *   REVIEW write, so the hosted copy of a desktop match can set it.
+ * - LinkCameras: one link's own choice per shooter (``ShareInfo.cameras``),
+ *   with "Default" to follow the saved one. Its line under the link says
+ *   what the link opens on.
+ *
+ * Viewers can always switch while watching. Each choice saves on the spot.
+ * The derivation lives in lib/shareCameras.
  */
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { Field } from "@/components/ui/Field";
 import { Label } from "@/components/ui/Label";
 import { Segmented } from "@/components/ui/Segmented";
-import { ApiError, api } from "@/lib/api";
+import { ApiError, api, type ShareInfo } from "@/lib/api";
 import {
+  DEFAULT,
   PRIMARY,
   allChoices,
   applyToAll,
   everyoneToPrimary,
-  cameraChoices,
-  currentChoice,
+  linkEveryone,
+  linkValue,
+  linkWith,
   mountLabel,
-  type ShooterCameras,
+  opensOn,
 } from "@/lib/shareCameras";
-
-interface Row extends ShooterCameras {
-  value: string;
-}
+import type { ShareCameraData, ShooterRow } from "@/lib/useShareCameraData";
 
 const MIXED = "mixed";
+const opts = (values: string[]) => values.map((v) => ({ value: v, label: v === DEFAULT ? "Default" : mountLabel(v) }));
 
-export function ShareCameras() {
-  const [rows, setRows] = useState<Row[] | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const { shooters } = await api.listMatchShooters();
-        const loaded = await Promise.all(
-          shooters.map(async (s) => {
-            const choices = cameraChoices(s.cameras ?? []);
-            const project = choices.length > 1 ? await api.getProject(s.slug).catch(() => null) : null;
-            return {
-              slug: s.slug,
-              name: s.name,
-              choices,
-              value: currentChoice(project?.compare_camera, choices, s.cameras ?? []),
-            };
-          }),
-        );
-        if (alive) setRows(loaded.filter((r) => r.choices.length > 1));
-      } catch {
-        if (alive) setRows([]);
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  if (rows === null) return <p className="text-sm text-muted">Reading cameras...</p>;
-  if (rows.length === 0) return null;
-
-  async function save(changes: { slug: string; selector: string }[]): Promise<boolean> {
-    setSaving(true);
-    setError(null);
-    try {
-      for (const c of changes) {
-        await api.setCompareCamera(c.slug, c.selector === PRIMARY ? null : c.selector);
-        setRows((prev) => prev?.map((r) => (r.slug === c.slug ? { ...r, value: c.selector } : r)) ?? prev);
-      }
-      return true;
-    } catch (e) {
-      setError(e instanceof ApiError ? e.detail : "Could not save the camera");
-      return false;
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function setOne(row: Row, selector: string) {
-    if (await save([{ slug: row.slug, selector }])) setStatus(`${row.name} starts on ${mountLabel(selector)}.`);
-  }
-
-  async function setEveryone(selector: string) {
-    if (!rows) return;
-    if (selector === PRIMARY) {
-      if (await save(everyoneToPrimary(rows))) setStatus("Everyone on their primary camera.");
-      return;
-    }
-    const { changes, without } = applyToAll(rows, selector);
-    if (!(await save(changes))) return;
-    const rest = without.length > 0 ? ` ${without.join(", ")} ${without.length === 1 ? "has" : "have"} no ${mountLabel(selector).toLowerCase()} and keep${without.length === 1 ? "s" : ""} their camera.` : "";
-    setStatus(`Everyone on ${mountLabel(selector)}.${rest}`);
-  }
-
-  const common = rows.every((r) => r.value === rows[0].value) ? rows[0].value : MIXED;
-  const options = (values: string[]) => values.map((v) => ({ value: v, label: mountLabel(v) }));
-
+/** The rows themselves: an Everyone row when there is more than one
+ *  shooter, then one per shooter, then the outcome line. */
+function CameraRows({
+  rows,
+  valueOf,
+  extra,
+  onOne,
+  onEveryone,
+  saving,
+  status,
+  error,
+}: {
+  rows: ShooterRow[];
+  valueOf: (row: ShooterRow) => string;
+  /** An option offered first on every row ("Default" for a link). */
+  extra?: string;
+  onOne: (row: ShooterRow, value: string) => void;
+  onEveryone: (value: string) => void;
+  saving: boolean;
+  status: string | null;
+  error: string | null;
+}) {
+  const values = rows.map(valueOf);
+  const common = values.every((v) => v === values[0]) ? values[0] : MIXED;
+  const lead = extra ? [extra] : [];
   return (
-    <section aria-labelledby="share-cameras-title" className="space-y-2">
-      <div>
-        <span id="share-cameras-title">
-          <Label>Cameras</Label>
-        </span>
-        <p className="mt-1 text-sm text-muted">
-          Where viewers start, on every stage. They can still switch while watching.
-        </p>
-      </div>
+    <>
       <div className="rounded-md border border-rule">
         {rows.length > 1 ? (
           <Field label="Everyone">
             <Segmented
               label="Everyone starts on"
               value={common}
-              options={options(allChoices(rows))}
-              onChange={(v) => void setEveryone(v)}
+              options={opts([...lead, ...allChoices(rows)])}
+              onChange={onEveryone}
               disabled={saving}
             />
           </Field>
@@ -130,9 +79,9 @@ export function ShareCameras() {
           <Field key={row.slug} label={row.name}>
             <Segmented
               label={`${row.name} starts on`}
-              value={row.value}
-              options={options(row.choices)}
-              onChange={(v) => void setOne(row, v)}
+              value={valueOf(row)}
+              options={opts([...lead, ...row.choices])}
+              onChange={(v) => onOne(row, v)}
               disabled={saving}
             />
           </Field>
@@ -147,6 +96,145 @@ export function ShareCameras() {
           {status}
         </p>
       ) : null}
+    </>
+  );
+}
+
+function withoutLine(without: string[], value: string): string {
+  if (without.length === 0) return "";
+  const has = without.length === 1 ? "has" : "have";
+  const keeps = without.length === 1 ? "keeps" : "keep";
+  return ` ${without.join(", ")} ${has} no ${mountLabel(value).toLowerCase()} and ${keeps} their camera.`;
+}
+
+function errorText(e: unknown): string {
+  return e instanceof ApiError ? e.detail : "Could not save the camera";
+}
+
+/** The saved defaults: what every link without its own cameras opens on. */
+export function DefaultCameras({ data }: { data: ShareCameraData }) {
+  const { rows, setDefault } = data;
+  const [status, setStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  if (rows === null) return <p className="text-sm text-muted">Reading cameras...</p>;
+  if (rows.length === 0) return null;
+
+  async function save(changes: { slug: string; selector: string }[], done: string) {
+    setSaving(true);
+    setError(null);
+    try {
+      for (const c of changes) {
+        await api.setCompareCamera(c.slug, c.selector === PRIMARY ? null : c.selector);
+        setDefault(c.slug, c.selector);
+      }
+      setStatus(done);
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section aria-labelledby="share-cameras-title" className="space-y-2">
+      <div>
+        <span id="share-cameras-title">
+          <Label>Default cameras</Label>
+        </span>
+        <p className="mt-1 text-sm text-muted">
+          Links without their own cameras open on these, on every stage. Viewers can still switch while watching.
+        </p>
+      </div>
+      <CameraRows
+        rows={rows}
+        valueOf={(r) => r.defaultValue}
+        saving={saving}
+        status={status}
+        error={error}
+        onOne={(row, v) => void save([{ slug: row.slug, selector: v }], `${row.name} starts on ${mountLabel(v)}.`)}
+        onEveryone={(v) => {
+          if (v === PRIMARY) return void save(everyoneToPrimary(rows), "Everyone on their primary camera.");
+          const { changes, without } = applyToAll(rows, v);
+          void save(changes, `Everyone on ${mountLabel(v)}.${withoutLine(without, v)}`);
+        }}
+      />
     </section>
+  );
+}
+
+/** One link's cameras: the line saying what it opens on, and its editor. */
+export function LinkCameras({
+  share,
+  data,
+  onSaved,
+}: {
+  share: ShareInfo;
+  data: ShareCameraData;
+  onSaved: (share: ShareInfo) => void;
+}) {
+  const { rows } = data;
+  const [open, setOpen] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  if (!rows || rows.length === 0) return null;
+  const link = share.cameras ?? null;
+  const line = opensOn(rows, link)
+    .map((o) => `${o.name} ${o.label}`)
+    .join(" · ");
+
+  async function save(cameras: Record<string, string> | null, done: string) {
+    setSaving(true);
+    setError(null);
+    try {
+      onSaved(await api.setShareCameras(share.id, cameras));
+      setStatus(done);
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-start justify-between gap-2">
+        <p className="min-w-0 text-sm text-muted">
+          {link ? "Opens on: " : "Opens on the default cameras: "}
+          <span className="text-ink-2">{line}</span>
+        </p>
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((o) => !o)}
+          className="flex-none text-sm text-ink-2 underline-offset-2 hover:text-ink hover:underline"
+        >
+          {open ? "Done" : "Cameras"}
+        </button>
+      </div>
+      {open ? (
+        <CameraRows
+          rows={rows}
+          valueOf={(r) => linkValue(link, r.slug)}
+          extra={DEFAULT}
+          saving={saving}
+          status={status}
+          error={error}
+          onOne={(row, v) =>
+            void save(
+              linkWith(link, row.slug, v),
+              v === DEFAULT ? `${row.name} follows the default.` : `${row.name} starts on ${mountLabel(v)}.`,
+            )
+          }
+          onEveryone={(v) => {
+            const { cameras, without } = linkEveryone(link, rows, v);
+            void save(cameras, v === DEFAULT ? "This link follows the defaults." : `Everyone on ${mountLabel(v)}.${withoutLine(without, v)}`);
+          }}
+        />
+      ) : null}
+    </div>
   );
 }

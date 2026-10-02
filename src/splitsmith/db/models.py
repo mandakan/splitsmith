@@ -579,6 +579,13 @@ class ShareTokenRow(Base):
     )
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Which camera each shooter starts on for this link's viewers:
+    # ``{slug: selector}``, a selector being a camera mount ("hand") or a
+    # role, resolved per stage like ``camera_select``. A shooter not named
+    # here, or NULL for the whole link, falls back to the shooter's saved
+    # ``compare_camera``. Viewers can still switch while watching. Generic
+    # JSON for SQLite tests; read and written whole, never queried into.
+    cameras: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     def __repr__(self) -> str:
         return (

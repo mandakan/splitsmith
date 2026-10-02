@@ -180,3 +180,32 @@ def test_created_token_resolves_with_read_scope() -> None:
     resolved = asyncio.run(resolve_share_token(sf, created.token))
     assert resolved is not None
     assert resolved.scope == "read"
+
+
+# - set_cameras(): per-link starting cameras round-trip and resolve; tenant-isolated
+def test_set_cameras_round_trips_and_resolves() -> None:
+    sf, (uid,) = _engine_with_users("a@thias.se")
+    store = ShareTokenStore(sf, user_id=uid)
+    token = asyncio.run(store.create("match-1"))
+    assert token.cameras is None
+    updated = asyncio.run(store.set_cameras(token.id, match_id="match-1", cameras={"anna": "hand"}))
+    assert updated is not None and updated.cameras == {"anna": "hand"}
+    assert asyncio.run(store.list_for_match("match-1"))[0].cameras == {"anna": "hand"}
+    resolved = asyncio.run(resolve_share_token(sf, token.token))
+    assert resolved is not None and resolved.cameras == {"anna": "hand"}
+    cleared = asyncio.run(store.set_cameras(token.id, match_id="match-1", cameras={}))
+    assert cleared is not None and cleared.cameras is None
+
+
+def test_set_cameras_on_another_users_share_returns_none() -> None:
+    sf, (uid_a, uid_b) = _engine_with_users("a@thias.se", "b@thias.se")
+    token = asyncio.run(ShareTokenStore(sf, user_id=uid_a).create("match-1"))
+    assert (
+        asyncio.run(
+            ShareTokenStore(sf, user_id=uid_b).set_cameras(
+                token.id, match_id="match-1", cameras={"anna": "hand"}
+            )
+        )
+        is None
+    )
+    assert asyncio.run(ShareTokenStore(sf, user_id=uid_a).list_for_match("match-1"))[0].cameras is None

@@ -1014,3 +1014,123 @@ def test_share_payload_capabilities_empty(
     project = client.get(_share_url(token, f"shooters/{SLUG}/project"))
     assert project.status_code == 200, project.text
     assert project.json()["capabilities"] == []
+
+
+# -- per-link starting cameras -------------------------------------------
+
+
+def _seed_two_camera_stage(db_url: str, user_email: str, match_id: str, slug: str) -> None:
+    """Stage 1 with a head-cam primary and a handheld secondary, plus an
+    audit doc so the coach route answers."""
+    from splitsmith.match_project import MatchProject, StageEntry, StageVideo
+
+    engine = create_engine(db_url)
+    sf = sessionmaker(engine)
+
+    async def _seed() -> None:
+        async with sf() as s:
+            user_id = (await s.execute(_select(User).where(User.email == user_email))).scalar_one().id
+        store = ProjectStateStore(sf, user_id=user_id)
+        project_doc, version = await store.load_project(match_id, slug)
+        project = MatchProject.model_validate(project_doc)
+        project.stages = [
+            StageEntry(
+                stage_number=1,
+                stage_name="Stage 1",
+                time_seconds=30.0,
+                videos=[
+                    StageVideo(path=Path("raw/head.mp4"), role="primary", beep_time=5.0, camera_mount="head"),
+                    StageVideo(
+                        path=Path("raw/hand.mp4"), role="secondary", beep_time=4.0, camera_mount="hand"
+                    ),
+                ],
+            )
+        ]
+        await store.save_project(match_id, slug, project.model_dump(mode="json"), expected_version=version)
+        await store.save_audit(match_id, slug, 1, {"stage_number": 1, "shots": []}, expected_version=0)
+
+    asyncio.run(_seed())
+
+
+def test_share_link_cameras_reach_only_that_links_viewers(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """Two links on one match: the one set to handheld opens its viewers on
+    the handheld (``compare_camera`` in the coach payload), the other
+    follows the shooter's saved default; the owner's own view is never
+    affected by a link."""
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    seed_match(hosted_env, "owner@example.com", MID)
+    _seed_state_docs(hosted_env, "owner@example.com", MID, SLUG)
+    _seed_two_camera_stage(hosted_env, "owner@example.com", MID, SLUG)
+    handheld = client.post(_url(MID)).json()
+    plain = client.post(_url(MID)).json()
+
+    resp = client.patch(_url(MID, f"/{handheld['id']}/cameras"), json={"cameras": {SLUG: "hand"}})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["cameras"] == {SLUG: "hand"}
+    listed = {s["id"]: s["cameras"] for s in client.get(_url(MID)).json()["shares"]}
+    assert listed == {handheld["id"]: {SLUG: "hand"}, plain["id"]: None}
+    assert client.get(f"/api/matches/{MID}/shooters/{SLUG}/stages/1/coach").json()["compare_camera"] is None
+
+    client.cookies.clear()
+    token_hand = handheld["url"].rsplit("/share/", 1)[1]
+    token_plain = plain["url"].rsplit("/share/", 1)[1]
+    body = client.get(_share_url(token_hand, f"shooters/{SLUG}/stages/1/coach")).json()
+    assert body["compare_camera"] == "hand"
+    assert [v["mount"] for v in body["videos"]] == ["head", "hand"]
+    assert (
+        client.get(_share_url(token_plain, f"shooters/{SLUG}/stages/1/coach")).json()["compare_camera"]
+        is None
+    )
+
+    # Back to following the defaults.
+    login(client, sender, "owner@example.com")
+    assert (
+        client.patch(_url(MID, f"/{handheld['id']}/cameras"), json={"cameras": None}).json()["cameras"]
+        is None
+    )
+    client.cookies.clear()
+    assert (
+        client.get(_share_url(token_hand, f"shooters/{SLUG}/stages/1/coach")).json()["compare_camera"] is None
+    )
+
+
+def test_share_link_cameras_are_validated(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    seed_match(hosted_env, "owner@example.com", MID)
+    _seed_state_docs(hosted_env, "owner@example.com", MID, SLUG)
+    _seed_two_camera_stage(hosted_env, "owner@example.com", MID, SLUG)
+    share = client.post(_url(MID)).json()
+
+    assert (
+        client.patch(_url(MID, f"/{share['id']}/cameras"), json={"cameras": {SLUG: "chest"}}).status_code
+        == 400
+    )
+    assert (
+        client.patch(_url(MID, f"/{share['id']}/cameras"), json={"cameras": {"nobody": "hand"}}).status_code
+        == 400
+    )
+    assert client.patch(_url(MID, "/unknown-id/cameras"), json={"cameras": {SLUG: "hand"}}).status_code == 404
+
+
+def test_share_link_cameras_cannot_be_set_by_another_user(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    seed_match(hosted_env, "owner@example.com", MID)
+    _seed_state_docs(hosted_env, "owner@example.com", MID, SLUG)
+    _seed_two_camera_stage(hosted_env, "owner@example.com", MID, SLUG)
+    share = client.post(_url(MID)).json()
+    client.cookies.clear()
+    login(client, sender, "intruder@example.com")
+    resp = client.patch(_url(MID, f"/{share['id']}/cameras"), json={"cameras": {SLUG: "hand"}})
+    assert resp.status_code == 404

@@ -84,3 +84,58 @@ export function allChoices(shooters: ShooterCameras[]): string[] {
 export function everyoneToPrimary(shooters: ShooterCameras[]): { slug: string; selector: string }[] {
   return shooters.map((s) => ({ slug: s.slug, selector: PRIMARY }));
 }
+
+// --- per-link cameras ----------------------------------------------------
+//
+// A share link can carry its own starting camera per shooter
+// (``ShareInfo.cameras``); a shooter it does not name starts on their
+// saved default. The editor offers "Default" for that.
+
+export const DEFAULT = "default";
+
+/** A link's choice for one shooter as an editor value. */
+export function linkValue(link: Record<string, string> | null | undefined, slug: string): string {
+  return link?.[slug] ?? DEFAULT;
+}
+
+/** The link's cameras after one shooter changes; null when nothing is
+ *  left that differs from the defaults. "Primary" is stored as the role
+ *  selector so it overrides a saved mount default. */
+export function linkWith(
+  link: Record<string, string> | null | undefined,
+  slug: string,
+  value: string,
+): Record<string, string> | null {
+  const next = { ...(link ?? {}) };
+  if (value === DEFAULT) delete next[slug];
+  else next[slug] = value;
+  return Object.keys(next).length > 0 ? next : null;
+}
+
+/** "Everyone on X" for one link: shooters that have X take it, the rest
+ *  keep what the link gives them and are named. "Default" clears the
+ *  link back to the defaults. */
+export function linkEveryone(
+  link: Record<string, string> | null | undefined,
+  shooters: ShooterCameras[],
+  value: string,
+): { cameras: Record<string, string> | null; without: string[] } {
+  if (value === DEFAULT) return { cameras: null, without: [] };
+  const { changes, without } = applyToAll(shooters, value);
+  let next: Record<string, string> | null = link ? { ...link } : null;
+  for (const c of changes) next = linkWith(next, c.slug, c.selector);
+  return { cameras: next, without };
+}
+
+/** What a link's viewers start on, shooter by shooter: the link's own
+ *  choice, else the saved default (shown as the camera it lands on). */
+export function opensOn(
+  shooters: (ShooterCameras & { defaultValue: string })[],
+  link: Record<string, string> | null | undefined,
+): { name: string; label: string; own: boolean }[] {
+  return shooters.map((s) => {
+    const own = link?.[s.slug];
+    return { name: s.name, label: mountLabel(own ?? s.defaultValue), own: own != null };
+  });
+}
+

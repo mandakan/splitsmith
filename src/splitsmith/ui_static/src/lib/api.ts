@@ -4547,6 +4547,14 @@ export const api = {
   createShare: () =>
     request<ShareInfo>("/api/match/shares", { method: "POST" }),
 
+  /** Set which camera each shooter starts on for one link's viewers;
+   *  null follows the shooters' saved defaults. */
+  setShareCameras: (shareId: string, cameras: Record<string, string> | null) =>
+    request<ShareInfo>(`/api/match/shares/${encodeURIComponent(shareId)}/cameras`, {
+      method: "PATCH",
+      json: { cameras },
+    }),
+
   /** Revoke (soft-delete) a share link by id. */
   revokeShare: (shareId: string) =>
     request<void>(`/api/match/shares/${encodeURIComponent(shareId)}`, {
@@ -5110,6 +5118,9 @@ export interface ShareInfo {
   url: string;
   created_at: string;
   revoked_at: string | null;
+  /** Per shooter, the camera this link's viewers start on (a mount or
+   *  role); null follows each shooter's saved default. */
+  cameras?: Record<string, string> | null;
 }
 
 /** Response from GET /api/match/shares. */
