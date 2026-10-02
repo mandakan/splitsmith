@@ -5,8 +5,10 @@ checkout: publish-pypi.yml bakes the YouTube OAuth client into the wheel,
 and a checkout has empty constants. PyPI's JSON can lag the upload by a
 minute, and pypi.org itself can blip right after a publish (a 5xx, a
 URLError, a socket timeout), so a missing version or a transient failure
-is retried before the job fails. Any other HTTP error (a 403, say) is not
-a transient condition and raises immediately.
+is retried before the job fails. The wheel download gets the same
+classification and budget. Any other HTTP error (a 403, say) is not a
+transient condition and raises immediately, and neither is a sha256
+mismatch.
 
     uv run --no-project python scripts/ci/fetch_pypi_wheel.py 0.53.0 build/wheel
 """
@@ -35,6 +37,23 @@ class NotYetPublished(RuntimeError):
 
 class ShaMismatch(RuntimeError):
     pass
+
+
+class DownloadFailed(RuntimeError):
+    pass
+
+
+def _transient(e: Exception, *, missing_is_transient: bool) -> str | None:
+    """The reason to retry ``e``, or None when it must propagate."""
+    if isinstance(e, urllib.error.HTTPError):
+        if 500 <= e.code < 600 or (missing_is_transient and e.code == 404):
+            return f"HTTP {e.code}"
+        return None
+    if isinstance(e, urllib.error.URLError):
+        return str(e.reason)
+    if isinstance(e, TimeoutError):
+        return str(e) or "timed out"
+    return None
 
 
 def pick_wheel(release: dict) -> tuple[str, str, str]:
@@ -68,17 +87,11 @@ def fetch(
     for i in range(attempts):
         try:
             release = get_json(JSON_URL.format(version=version))
-        except urllib.error.HTTPError as e:
-            if e.code == 404 or 500 <= e.code < 600:
-                last_reason = f"HTTP {e.code}"
-                release = None
-            else:
+        except (urllib.error.URLError, TimeoutError) as e:
+            reason = _transient(e, missing_is_transient=True)
+            if reason is None:
                 raise
-        except urllib.error.URLError as e:
-            last_reason = str(e.reason)
-            release = None
-        except TimeoutError as e:
-            last_reason = str(e) or "timed out"
+            last_reason = reason
             release = None
         if release is not None:
             break
@@ -89,7 +102,20 @@ def fetch(
             f"splitsmith {version} is not on PyPI after {attempts} attempts ({last_reason})"
         )
     name, url, sha = pick_wheel(release)
-    body = get_bytes(url)
+    body = None
+    for i in range(attempts):
+        try:
+            body = get_bytes(url)
+            break
+        except (urllib.error.URLError, TimeoutError) as e:
+            reason = _transient(e, missing_is_transient=False)
+            if reason is None:
+                raise
+            last_reason = reason
+        if i + 1 < attempts:
+            sleep(15)
+    if body is None:
+        raise DownloadFailed(f"{name}: download failed after {attempts} attempts ({last_reason})")
     got = hashlib.sha256(body).hexdigest()
     if got != sha:
         raise ShaMismatch(f"{name}: PyPI says {sha}, downloaded {got}")

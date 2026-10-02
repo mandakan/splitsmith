@@ -149,3 +149,72 @@ def test_fetch_raises_a_403_immediately_without_retrying(tmp_path: Path) -> None
             "1.2.3", tmp_path, get_json=get_json, get_bytes=lambda url: b"", attempts=5, sleep=lambda s: None
         )
     assert len(calls) == 1
+
+
+def test_fetch_retries_a_download_503_then_succeeds(tmp_path: Path) -> None:
+    body = b"wheel-bytes"
+    sha = hashlib.sha256(body).hexdigest()
+    rel = _release(_file("splitsmith-1.2.3-py3-none-any.whl", sha=sha))
+    calls: list[str] = []
+    sleeps: list[float] = []
+
+    def get_bytes(url: str) -> bytes:
+        calls.append(url)
+        if len(calls) == 1:
+            raise urllib.error.HTTPError(url, 503, "Service Unavailable", None, None)
+        return body
+
+    out = fpw.fetch(
+        "1.2.3", tmp_path, get_json=lambda url: rel, get_bytes=get_bytes, attempts=5, sleep=sleeps.append
+    )
+    assert out.read_bytes() == body
+    assert len(calls) == 2
+    assert len(sleeps) == 1
+
+
+def test_fetch_retries_a_download_urlerror_and_gives_up_after_its_attempts(tmp_path: Path) -> None:
+    rel = _release(_file("splitsmith-1.2.3-py3-none-any.whl"))
+    calls: list[str] = []
+
+    def get_bytes(url: str) -> bytes:
+        calls.append(url)
+        raise urllib.error.URLError("connection reset")
+
+    with pytest.raises(fpw.DownloadFailed):
+        fpw.fetch(
+            "1.2.3", tmp_path, get_json=lambda url: rel, get_bytes=get_bytes, attempts=3, sleep=lambda s: None
+        )
+    assert len(calls) == 3
+    assert not (tmp_path / "splitsmith-1.2.3-py3-none-any.whl").exists()
+
+
+def test_fetch_raises_a_download_403_immediately_without_retrying(tmp_path: Path) -> None:
+    rel = _release(_file("splitsmith-1.2.3-py3-none-any.whl"))
+    calls: list[str] = []
+
+    def get_bytes(url: str) -> bytes:
+        calls.append(url)
+        raise urllib.error.HTTPError(url, 403, "Forbidden", None, None)
+
+    with pytest.raises(urllib.error.HTTPError):
+        fpw.fetch(
+            "1.2.3", tmp_path, get_json=lambda url: rel, get_bytes=get_bytes, attempts=5, sleep=lambda s: None
+        )
+    assert len(calls) == 1
+    assert not (tmp_path / "splitsmith-1.2.3-py3-none-any.whl").exists()
+
+
+def test_fetch_does_not_retry_a_sha_mismatch(tmp_path: Path) -> None:
+    rel = _release(_file("splitsmith-1.2.3-py3-none-any.whl", sha="00" * 32))
+    calls: list[str] = []
+
+    def get_bytes(url: str) -> bytes:
+        calls.append(url)
+        return b"x"
+
+    with pytest.raises(fpw.ShaMismatch):
+        fpw.fetch(
+            "1.2.3", tmp_path, get_json=lambda url: rel, get_bytes=get_bytes, attempts=5, sleep=lambda s: None
+        )
+    assert len(calls) == 1
+    assert not (tmp_path / "splitsmith-1.2.3-py3-none-any.whl").exists()
