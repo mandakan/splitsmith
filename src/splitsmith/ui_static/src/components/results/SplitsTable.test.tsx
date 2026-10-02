@@ -169,15 +169,21 @@ function renderTable(opts: { share?: boolean } = {}) {
   );
 }
 
-function GroupedTable({ markBest = true }: { markBest?: boolean }) {
-  const rows = multiRows();
+function GroupedTable({
+  markBest = true,
+  share = false,
+}: {
+  markBest?: boolean;
+  share?: boolean;
+}) {
+  const rows = multiRows(share);
   const [sort, setSort] = useState<SplitsSort | null>(null);
   return (
     <MemoryRouter>
       <SplitsTable
         rows={rows}
         grouped
-        share={false}
+        share={share}
         totals={scoreboardTotals(rows)}
         hrefs={HREFS}
         sort={sort}
@@ -300,6 +306,24 @@ describe("SplitsTable", () => {
         .filter((c) => /^0\d/.test(c.textContent ?? ""))
         .map((c) => c.textContent),
     ).toEqual(["01", "02", "03–05"]);
+  });
+
+  it("share link: the same grouped table, sortable and marked, with no owner actions", () => {
+    render(<GroupedTable share />);
+    expect(shootersOf("Brass Monkey")).toEqual(["Mathias", "Anna", "Bo"]);
+    expect(within(rowOf("Bo")).getByText("no video")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Audit" })).toBeNull();
+    expect(screen.queryByText(/not audited/)).toBeNull();
+    // A stage nobody has video of folds into one line.
+    expect(
+      within(rowOf("Steel Rush")).getByText("no video"),
+    ).toBeInTheDocument();
+    expect(within(rowOf("Anna")).getByText("1.44")).toHaveClass("text-done");
+    fireEvent.click(screen.getByRole("button", { name: "Draw" }));
+    expect(shootersOf("Brass Monkey")).toEqual(["Anna", "Mathias", "Bo"]);
+    expect(
+      within(rowOf("Anna")).getByRole("link", { name: "Play stage 2 Anna" }),
+    ).toBeInTheDocument();
   });
 
   it("marks each column's best per stage, and drops the marks when off", () => {
