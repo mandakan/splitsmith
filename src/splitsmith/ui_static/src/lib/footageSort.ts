@@ -169,6 +169,16 @@ export function reasonText(view: SortView, clip: SortClipView): string {
   return r.run_size > 1 ? `${scored} · ${r.run_size} cameras on this run` : scored;
 }
 
+/** Where the file already sits, when it was imported unplaced. */
+export function whereNow(view: SortView, clip: SortClipView): string | null {
+  const owner = clip.unassigned_in;
+  if (owner === null) return null;
+  if (clip.proposal.shooter !== null && clip.proposal.shooter !== owner) {
+    return `Moves from ${shooterName(view, owner)}`;
+  }
+  return `Unassigned under ${shooterName(view, owner)}`;
+}
+
 /** The camera's clock state for its chip, or null when it needs none. */
 export function clockText(camera: SortCamera): string | null {
   switch (camera.clock) {

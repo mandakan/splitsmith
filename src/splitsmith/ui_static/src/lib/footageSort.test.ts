@@ -9,6 +9,7 @@ import {
   importCount,
   reasonText,
   resetClip,
+  whereNow,
   setChecked,
   skipClip,
   sortSections,
@@ -48,6 +49,7 @@ function clip(
     duration: 40,
     model: camera.model,
     imported_by,
+    unassigned_in: null,
     thumbnail: true,
     checked,
     proposal: {
@@ -195,5 +197,19 @@ describe("wording", () => {
   it("labels a camera by device and folder", () => {
     expect(cameraLabel(PHONE)).toBe("iPhone 17 Pro Max · from-martin");
     expect(cameraLabel(HEAD)).toBe("Action cam · head");
+  });
+});
+
+describe("whereNow", () => {
+  it("names the shooter a clip imported unplaced moves from", () => {
+    const v = view();
+    const clipOf = (unassigned_in: string | null, shooter: string | null) => ({
+      ...v.clips[0],
+      unassigned_in,
+      proposal: { ...v.clips[0].proposal, shooter },
+    });
+    expect(whereNow(v, clipOf(null, "anton"))).toBeNull();
+    expect(whereNow(v, clipOf("mathias", "anton"))).toBe("Moves from Mathias Axell");
+    expect(whereNow(v, clipOf("mathias", "mathias"))).toBe("Unassigned under Mathias Axell");
   });
 });

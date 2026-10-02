@@ -1,7 +1,9 @@
 /**
  * UnassignedPanel -- the videos not yet placed on a stage (UX PR 6). One
  * row per file with a stage picker; the name opens the clip sheet. The
- * count reads amber while anything is waiting.
+ * count reads amber while anything is waiting. With ``onSort`` (local
+ * mode, several shooters) it offers the footage sort, which places these
+ * on the right shooter and stage, moving them when they sit on the wrong one.
  */
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/Label";
@@ -16,6 +18,7 @@ export interface UnassignedPanelProps {
   onOpen: (item: UnassignedItem) => void;
   onAssign: (item: UnassignedItem, stageNumber: number) => void;
   onRemove: (item: UnassignedItem) => void;
+  onSort?: () => void;
 }
 
 function pad2(n: number): string {
@@ -29,13 +32,21 @@ function when(iso: string | null): string | null {
   return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
 
-export function UnassignedPanel({ items, stages, multi, editDenied, onOpen, onAssign, onRemove }: UnassignedPanelProps) {
+export function UnassignedPanel({ items, stages, multi, editDenied, onOpen, onAssign, onRemove, onSort }: UnassignedPanelProps) {
   return (
     <section aria-label="Unassigned videos" className="overflow-hidden rounded-[10px] border border-rule bg-surface">
       <div className="flex items-center justify-between border-b border-rule-strong px-3 py-2">
         <Label>Unassigned</Label>
         <Label tone={items.length > 0 ? "live" : "muted"}>{items.length}</Label>
       </div>
+      {items.length > 0 && onSort ? (
+        <div className="flex items-center gap-2 border-b border-rule px-3 py-2 text-sm text-muted">
+          <span className="flex-1">Club mates' footage?</span>
+          <Button size="sm" onClick={onSort}>
+            Sort across shooters
+          </Button>
+        </div>
+      ) : null}
       {items.length === 0 ? (
         <p className="px-3 py-2.5 text-sm text-muted">Every video is placed.</p>
       ) : (

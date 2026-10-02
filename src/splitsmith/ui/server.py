@@ -10499,6 +10499,13 @@ def create_app(
         auto_secondary: dict[int, list[str]] = {}
         if req.auto_assign_primary:
             suggestions = project.auto_match(root)
+            if state.storage is None:
+                # With squad mates in the match, this shooter's scorecard
+                # window also holds their runs: keep only the clips the
+                # footage sort, reading everyone's scorecards, puts here.
+                from . import footage_sort_api
+
+                suggestions = footage_sort_api.keep_this_shooters(state, slug, project, root, suggestions)
             for stage_num, suggestion in suggestions.items():
                 stage = project.stage(stage_num)
                 if suggestion.primary is not None:

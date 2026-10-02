@@ -654,6 +654,9 @@ export interface SortClipView {
   duration: number | null;
   model: string | null;
   imported_by: string | null;
+  /** The shooter whose unassigned list holds the file; import moves it when
+   *  the proposal names someone else. */
+  unassigned_in: string | null;
   thumbnail: boolean;
   checked: boolean;
   proposal: SortClipProposal;

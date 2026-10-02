@@ -49,9 +49,12 @@ files; photos (skipped, counted).
    parent folder.
 2. A `footage_sort_scan` job walks it: videos only (existing
    `VIDEO_EXTENSIONS`), skips photos, `.llc`, dotfiles. Per clip one ffprobe:
-   embedded start, duration, make/model, plus a thumbnail. Clips already
-   registered in any shooter's project (same resolved source path) are
-   marked `already_imported`.
+   embedded start, duration, make/model, plus a thumbnail. Where each file
+   is already registered is looked up live on every read (resolved path,
+   Unicode-composed: macOS lists names decomposed): on a stage it is done
+   and never imported again; unassigned (the per-shooter Add footage files
+   everything under the active shooter) it is sorted like a new file and
+   moved to the right shooter on import (0.46.1).
 3. The proposal engine (pure) assigns each clip a shooter and stage with a
    confidence and a reason, groups runs, and decides per camera whether its
    clock is trusted, fitted, or needs an anchor.
@@ -160,6 +163,16 @@ primary button, **Import N clips**. Camera clock state as a `Chip`
   `creation_time`; import registers under two shooters and assigns
   primary/secondary; hosted returns 404.
 - SPA: `lib/footageSort.test.ts` and a page test with the API mocked.
+
+## Per-shooter import in a multi-shooter match (0.46.1)
+
+Add footage still files a folder under the active shooter, but with two or
+more shooters holding scorecards its auto-assign keeps only clips the
+engine, over everyone's scorecards, puts on that shooter: a squad mate's
+run minutes earlier sits in the active shooter's window (Anton's glasses
+became Mathias's primaries in a replay of Höstfinalen XI). The import
+banner and the Unassigned panel offer "Sort across shooters", which opens
+the sort one folder above the last one added.
 
 ## Open after v1
 

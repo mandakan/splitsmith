@@ -130,11 +130,15 @@ function IngestInner({ slug }: { slug: string }) {
   const [showRelinkDialog, setShowRelinkDialog] = useState(false);
   const [busy, setBusy] = useState(false);
   const [lastScannedDir, setLastScannedDir] = useState<string | null>(null);
+  // The sort reads a parent folder: club mates' folders usually sit side by
+  // side, so start one level above the last folder added.
+  const sortStartDir = lastScannedDir ? lastScannedDir.replace(/[/\\][^/\\]+[/\\]?$/, "") || lastScannedDir : null;
   // The shooter list: the shell's when mounted under MatchShell, else our
   // own fetch (the page also refetches after a move).
   const outletCtx = useOutletContext<MatchShellOutletContext | undefined>();
   const [ownShooters, setOwnShooters] = useState<ShooterListEntry[]>([]);
   const shooters = outletCtx?.shooters?.length ? outletCtx.shooters : ownShooters;
+  const canSort = modeResolved && mode === "local" && !editDenied && shooters.length > 1;
   const jobs = useMemo(() => outletCtx?.jobs ?? [], [outletCtx?.jobs]);
   // B1: Paths from the most recent import batch. Cleared on banner dismiss
   // or after a successful move. Not persisted across reloads.
@@ -660,7 +664,7 @@ function IngestInner({ slug }: { slug: string }) {
                 Find moved videos
               </Button>
             ) : null}
-            {modeResolved && mode === "local" && !editDenied && shooters.length > 1 ? (
+            {canSort ? (
               <Button onClick={() => setShowSortFolder(true)} title="Sort club mates' folders across every shooter and stage">
                 Sort shared folder
               </Button>
@@ -706,6 +710,7 @@ function IngestInner({ slug }: { slug: string }) {
             blocked={moveBlocked}
             busy={busy}
             onMove={moveShooterBatch}
+            onSort={canSort ? () => setShowSortFolder(true) : undefined}
             onDismiss={() => {
               setLastImportedPaths(null);
               setMoveBlocked([]);
@@ -748,6 +753,7 @@ function IngestInner({ slug }: { slug: string }) {
               onOpen={openUnassigned}
               onAssign={assignUnassigned}
               onRemove={(item) => void removeOn(item.slug, item.video.path)}
+              onSort={canSort ? () => setShowSortFolder(true) : undefined}
             />
             <ShootersPanel
               shooters={shooters}
@@ -832,8 +838,8 @@ function IngestInner({ slug }: { slug: string }) {
         <FolderPicker
           slug={slug}
           title="Sort a shared folder"
-          subtitle="Every video below it is matched to a shooter and stage for you to review"
-          initialPath={lastScannedDir}
+          subtitle="Pick the folder that holds everyone's footage; every video below it is matched to a shooter and stage for you to review"
+          initialPath={sortStartDir}
           folderLabel="Sort this folder"
           onCommitFolder={async (path) => {
             const { scan_id } = await api.startFootageSort(path);

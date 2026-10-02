@@ -20,6 +20,7 @@ import logging
 import os
 import shutil
 import subprocess
+import unicodedata
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -40,7 +41,7 @@ from ..footage_sort import (
     SortClip,
     propose,
 )
-from ..match_project import VIDEO_EXTENSIONS, atomic_write_json
+from ..match_project import VIDEO_EXTENSIONS, StageAutoMatch, atomic_write_json
 from ..runtime import ENV_CONFIG_FILE
 from ..video_match import recording_start_from_tags
 
@@ -55,14 +56,26 @@ ScanStatus = Literal["scanning", "ready", "failed", "imported"]
 
 
 class ScannedClip(BaseModel):
-    """One probed video of the scan. ``imported_by`` is the shooter whose
-    project already has this file; such a clip helps fit its camera's clock
-    but is never imported twice."""
+    """One probed video of the scan. Where the file is already registered is
+    looked up live on every read (:func:`_registrations`), never stored: the
+    user imports and assigns between scan and review."""
 
     clip: SortClip
     path: str
+    # Written by scans before 0.46.1; ignored.
     imported_by: str | None = None
     thumbnail: bool = False
+
+
+class Registration(BaseModel):
+    """Where a scanned file is already registered."""
+
+    shooter: str
+    # ``StageVideo.path`` in that shooter's project.
+    video_path: str
+    # On a stage: done, never imported again. Unassigned: sorted like a new
+    # file, and moved to the right shooter on import.
+    assigned: bool
 
 
 class ScanRecord(BaseModel):
@@ -97,7 +110,10 @@ class ClipView(BaseModel):
     start: datetime | None
     duration: float | None
     model: str | None
+    # The shooter whose stage already has this file (never imported again).
     imported_by: str | None
+    # The shooter whose unassigned list holds it (import moves it as needed).
+    unassigned_in: str | None
     thumbnail: bool
     checked: bool
     proposal: ClipProposal
@@ -210,14 +226,17 @@ def _view(state: Any, record: ScanRecord) -> SortView:
     )
     by_id = {p.clip_id: p for p in proposal.clips}
     anchored = {c.key for c in proposal.cameras if c.clock == "anchored"}
+    registered = _registrations(state)
     clips = []
     for index, scanned in enumerate(record.clips):
         p = by_id[scanned.clip.clip_id]
+        reg = registered.get(_resolved(scanned.path))
+        imported_by = reg.shooter if reg is not None and reg.assigned else None
         # Pre-checked: what the engine is sure of, and what the user's own
         # anchor placed (they answered for that camera already).
         sure = p.confidence == "high" or (p.confidence == "medium" and p.camera_key in anchored)
-        default = sure and scanned.imported_by is None
-        importable = p.shooter is not None and p.stage is not None and scanned.imported_by is None
+        default = sure and imported_by is None
+        importable = p.shooter is not None and p.stage is not None and imported_by is None
         clips.append(
             ClipView(
                 clip_id=scanned.clip.clip_id,
@@ -227,7 +246,8 @@ def _view(state: Any, record: ScanRecord) -> SortView:
                 start=scanned.clip.start,
                 duration=scanned.clip.duration,
                 model=scanned.clip.model or scanned.clip.make,
-                imported_by=scanned.imported_by,
+                imported_by=imported_by,
+                unassigned_in=reg.shooter if reg is not None and not reg.assigned else None,
                 thumbnail=scanned.thumbnail,
                 checked=importable and record.checked.get(scanned.clip.clip_id, default),
                 proposal=p,
@@ -290,19 +310,88 @@ def probe_clip(path: Path, *, timeout: float = 8.0) -> dict[str, Any]:
     }
 
 
-def _registered_sources(state: Any) -> dict[Path, str]:
-    """Resolved source path -> the shooter whose project has it."""
-    out: dict[Path, str] = {}
+def _resolved(path: str | Path) -> Path:
+    """The path as a lookup key: symlinks followed, Unicode composed. macOS
+    lists names decomposed (``o`` + combining diaeresis) while a typed or
+    pasted path is composed (``ö``); both open the same file, and a club
+    mate's folder named after a match like "Höstfinalen" must match itself."""
+    try:
+        resolved = Path(path).resolve()
+    except OSError:
+        resolved = Path(path)
+    return Path(unicodedata.normalize("NFC", str(resolved)))
+
+
+def _registrations(state: Any) -> dict[Path, Registration]:
+    """Resolved source path -> where it is registered. An assigned entry
+    wins over an unassigned one for the same file."""
+    out: dict[Path, Registration] = {}
     for slug in match_model.Match.load(state.match_root).shooters:
         project = state.shooter_project(slug)
         root = state.shooter_root(slug)
-        videos = [*project.unassigned_videos, *(v for s in project.stages for v in s.videos)]
-        for video in videos:
+        entries = [(v, False) for v in project.unassigned_videos]
+        entries += [(v, True) for s in project.stages for v in s.videos]
+        for video, assigned in entries:
             try:
-                out[project.resolve_video_path(root, video.path).resolve()] = slug
+                source = _resolved(project.resolve_video_path(root, video.path))
             except OSError:
                 continue
+            if source in out and out[source].assigned and not assigned:
+                continue
+            out[source] = Registration(shooter=slug, video_path=str(video.path), assigned=assigned)
     return out
+
+
+def keep_this_shooters(
+    state: Any,
+    slug: str,
+    project: Any,
+    root: Path,
+    suggestions: dict[int, StageAutoMatch],
+) -> dict[int, StageAutoMatch]:
+    """Filter the per-shooter scan's :meth:`MatchProject.auto_match`
+    suggestions through the footage sort engine.
+
+    ``auto_match`` sees one shooter's scorecard windows, and a squad mate's
+    run minutes earlier falls in them (Höstfinalen XI 2026: Anton's glasses
+    clips auto-assigned as Mathias's primaries). With two or more shooters
+    in the match, a clip stays suggested only when the engine, over every
+    shooter's scorecards, puts it on ``slug`` with ``high`` or ``medium``
+    confidence; the rest stay unassigned for the sort. One shooter: the
+    suggestions are returned as they are.
+    """
+    cards, _ = _shooters(state)
+    if sum(1 for c in cards if c.scorecards) < 2 or not suggestions:
+        return suggestions
+    stored = [p for s in suggestions.values() for p in ([s.primary] if s.primary else []) + s.secondaries]
+    clips = []
+    for path in stored:
+        source = project.resolve_video_path(root, path)
+        meta = probe_clip(source)
+        clips.append(
+            SortClip(
+                clip_id=str(path),
+                folder=str(_resolved(source).parent),
+                filename=source.name,
+                start=meta.get("start"),
+                duration=meta.get("duration"),
+                make=meta.get("make"),
+                model=meta.get("model"),
+            )
+        )
+    proposal = propose(clips, cards, config=_config())
+    ours = {p.clip_id for p in proposal.clips if p.shooter == slug and p.confidence in ("high", "medium")}
+    kept: dict[int, StageAutoMatch] = {}
+    for stage_number, s in suggestions.items():
+        if s.primary is None:
+            secondaries = [p for p in s.secondaries if str(p) in ours]
+            if secondaries:
+                kept[stage_number] = StageAutoMatch(primary=None, secondaries=secondaries)
+            continue
+        run = [p for p in [s.primary, *s.secondaries] if str(p) in ours]
+        if run:
+            kept[stage_number] = StageAutoMatch(primary=run[0], secondaries=run[1:])
+    return kept
 
 
 def run_footage_sort_scan(handle: Any, *, state: Any, scan_id: str) -> None:
@@ -313,7 +402,6 @@ def run_footage_sort_scan(handle: Any, *, state: Any, scan_id: str) -> None:
         files = sorted(p for p in source.rglob("*") if p.is_file() and not p.name.startswith("."))
         videos = [p for p in files if p.suffix.lower() in VIDEO_EXTENSIONS]
         record.skipped_files = len(files) - len(videos)
-        registered = _registered_sources(state)
         thumbs = _sort_dir(state) / "thumbs"
         scanned: list[ScannedClip] = []
         for i, path in enumerate(videos):
@@ -340,7 +428,6 @@ def run_footage_sort_scan(handle: Any, *, state: Any, scan_id: str) -> None:
                 ScannedClip(
                     clip=clip,
                     path=str(path),
-                    imported_by=registered.get(path.resolve()),
                     thumbnail=has_thumb,
                 )
             )
@@ -353,6 +440,39 @@ def run_footage_sort_scan(handle: Any, *, state: Any, scan_id: str) -> None:
         _save(state, record)
         raise
     _save(state, record)
+
+
+def _move_unassigned(
+    state: Any,
+    source_project: Any,
+    source_root: Path,
+    target_project: Any,
+    target_root: Path,
+    reg: Registration,
+) -> Path:
+    """Move one unassigned video between shooters with
+    :func:`shooter_move.move_shooter` and return its path in the target.
+    An unassigned video has no stage, so no audit is read or written."""
+    from .shooter_move import move_shooter
+
+    def no_audit(*_: Any) -> None:
+        return None
+
+    outcome = move_shooter(
+        source_project=source_project,
+        source_root=source_root,
+        target_project=target_project,
+        target_root=target_root,
+        video_paths=[reg.video_path],
+        load_target_audit=no_audit,
+        save_target_audit=no_audit,
+        load_source_audit=no_audit,
+        clear_source_audit=no_audit,
+        storage=state.storage,
+    )
+    if outcome.blocked:
+        raise ValueError(outcome.blocked[0].reason)
+    return Path(outcome.moved[0].video_path)
 
 
 @router.post("/api/match/footage-sort/scan")
@@ -447,29 +567,44 @@ async def import_scan(scan_id: str, req: ImportRequest, request: Request) -> Imp
     imported: list[ImportedClip] = []
     not_imported = {c.clip_id: "not checked" for c in view.clips if not c.checked}
     queued: list[tuple[str, Any, int, Any]] = []
-    by_shooter: dict[str, list[ClipView]] = {}
+    registered = _registrations(state)
+    projects: dict[str, tuple[Any, Path]] = {}
+
+    def project_of(slug: str) -> tuple[Any, Path]:
+        if slug not in projects:
+            projects[slug] = (state.shooter_project(slug), state.shooter_root(slug))
+        return projects[slug]
+
     for c in chosen:
-        by_shooter.setdefault(c.proposal.shooter or "", []).append(c)
-    for slug, clips in by_shooter.items():
-        project = state.shooter_project(slug)
-        root = state.shooter_root(slug)
-        for c in clips:
-            stage_number = c.proposal.stage
-            assert stage_number is not None
-            try:
-                video = project.register_video(paths[c.clip_id], root, link_mode=req.link_mode)
-                stage = project.stage(stage_number)
-                role = "primary" if stage.primary() is None and c.proposal.role == "primary" else "secondary"
-                video = project.assign_video(video.path, to_stage_number=stage_number, role=role)
-            except (FileNotFoundError, KeyError, ValueError) as exc:
-                not_imported[c.clip_id] = str(exc)
-                continue
-            imported.append(
-                ImportedClip(
-                    clip_id=c.clip_id, shooter=slug, stage=stage_number, role=video.role, path=str(video.path)
-                )
+        slug = c.proposal.shooter
+        stage_number = c.proposal.stage
+        assert slug is not None and stage_number is not None
+        project, root = project_of(slug)
+        reg = registered.get(_resolved(paths[c.clip_id]))
+        try:
+            if reg is None:
+                video_path = project.register_video(paths[c.clip_id], root, link_mode=req.link_mode).path
+            elif reg.shooter == slug:
+                # Imported earlier under the right shooter, never placed.
+                video_path = Path(reg.video_path)
+            else:
+                # Imported earlier under the wrong shooter (the per-shooter
+                # Add footage files everything under the active one): move
+                # it through the one move path there is, then place it.
+                video_path = _move_unassigned(state, *project_of(reg.shooter), project, root, reg)
+            stage = project.stage(stage_number)
+            role = "primary" if stage.primary() is None and c.proposal.role == "primary" else "secondary"
+            video = project.assign_video(video_path, to_stage_number=stage_number, role=role)
+        except (FileNotFoundError, KeyError, ValueError) as exc:
+            not_imported[c.clip_id] = str(exc)
+            continue
+        imported.append(
+            ImportedClip(
+                clip_id=c.clip_id, shooter=slug, stage=stage_number, role=video.role, path=str(video.path)
             )
-            queued.append((slug, project, stage_number, video))
+        )
+        queued.append((slug, project, stage_number, video))
+    for project, root in projects.values():
         project.save(root)
     queue_beep = getattr(request.app.state, "auto_queue_beep", None)
     if queue_beep is not None:
