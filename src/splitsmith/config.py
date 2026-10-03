@@ -9,6 +9,8 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from .access import AccessConfig
+
 # ---------------------------------------------------------------------------
 # Pipeline data structures
 # ---------------------------------------------------------------------------
@@ -543,6 +545,7 @@ class Config(BaseModel):
     beep_windows: BeepWindowConfig = Field(default_factory=BeepWindowConfig)
     web_trim: WebTrimConfig = Field(default_factory=WebTrimConfig)
     footage_sort: FootageSortConfig = Field(default_factory=FootageSortConfig)
+    access: AccessConfig = Field(default_factory=AccessConfig)
 
     @classmethod
     def load(cls, path: Path | None) -> Config:

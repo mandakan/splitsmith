@@ -90,6 +90,7 @@ describe("AccountChip at phone width (#733)", () => {
     renderChip();
     await screen.findByTestId("account-chip");
     expect(screen.getByRole("link", { name: "Workers (admin)" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Access (admin)" })).toHaveAttribute("href", "/admin/access");
     expect(screen.getByRole("link", { name: "Account" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
   });
@@ -99,6 +100,7 @@ describe("AccountChip at phone width (#733)", () => {
     renderChip();
     await screen.findByTestId("account-chip");
     expect(screen.queryByRole("link", { name: "Workers (admin)" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Access (admin)" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Account" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
   });

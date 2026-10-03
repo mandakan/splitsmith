@@ -48,6 +48,11 @@ class User(BaseModel):
     #: The desktop token that authenticated this request, when one did.
     #: The command queue records it as the claimer (#1100).
     token_id: str | None = None
+    #: The account's access tier (spec 2026-10-03). ``None`` for the
+    #: loopback user; local mode never consults it.
+    access_tier: str | None = None
+    #: Filled by ``GET /api/me`` only, for the SPA.
+    features: list[str] = []
 
 
 class AuthBackend(Protocol):

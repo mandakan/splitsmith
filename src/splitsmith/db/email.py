@@ -1,4 +1,4 @@
-"""Pluggable e-mail transport for magic-link delivery.
+"""Pluggable e-mail transport for magic-link delivery and access mail.
 
 The auth backend (:class:`splitsmith.db.magic_link.MagicLinkAuth`) does
 not know how mail is sent -- it builds the magic-link URL and hands it to
@@ -19,6 +19,7 @@ different transports without touching the backend:
 
 from __future__ import annotations
 
+import html as _html
 import logging
 import os
 from typing import Protocol
@@ -53,6 +54,22 @@ class EmailSender(Protocol):
         how to surface it.
         """
 
+    async def send_access_granted(self, *, to: str, link: str) -> None:
+        """You're in: one sign-in link, same validity line as the magic link.
+
+        Sent when an admin approves an access request (spec 2026-10-03).
+        """
+
+    async def send_access_request_alert(
+        self, *, to: str, email: str, note: str | None, source: str, admin_url: str
+    ) -> None:
+        """To an admin; never to the requester.
+
+        Names the requesting ``email``, its ``note`` and ``source``, and
+        links to the admin page. Mailing the requester would let anyone
+        make splitsmith mail anyone.
+        """
+
 
 class ConsoleEmailSender:
     """Logs the magic link instead of sending mail.
@@ -66,6 +83,14 @@ class ConsoleEmailSender:
 
     async def send_magic_link(self, *, to: str, link: str) -> None:
         logger.info("%s %s %s", CONSOLE_MAGIC_LINK_MARKER, to, link)
+
+    async def send_access_granted(self, *, to: str, link: str) -> None:
+        logger.info("ACCESS_GRANTED %s %s", to, link)
+
+    async def send_access_request_alert(
+        self, *, to: str, email: str, note: str | None, source: str, admin_url: str
+    ) -> None:
+        logger.info("ACCESS_REQUEST %s %s %s", to, email, source)
 
 
 def _magic_link_email_body(link: str) -> tuple[str, str]:
@@ -89,6 +114,48 @@ def _magic_link_email_body(link: str) -> tuple[str, str]:
     return text, html
 
 
+def _access_granted_email_body(link: str) -> tuple[str, str]:
+    """Return ``(text, html)`` bodies for the "you're in" e-mail: one
+    sign-in link and the same validity line as the magic link."""
+    text = (
+        "You have access to Splitsmith. Sign in:\n\n"
+        f"{link}\n\n"
+        "This link is valid for 15 minutes and can be used once. "
+        "After that, sign in with your e-mail address as usual."
+    )
+    html = (
+        '<div style="font-family:system-ui,sans-serif;font-size:15px;line-height:1.5">'
+        "<p>You have access to Splitsmith.</p>"
+        f'<p><a href="{_html.escape(link)}">Sign in</a></p>'
+        '<p style="color:#666;font-size:13px">This link is valid for 15 minutes '
+        "and can be used once. After that, sign in with your e-mail address as usual.</p>"
+        "</div>"
+    )
+    return text, html
+
+
+def _access_request_alert_body(
+    *, email: str, note: str | None, source: str, admin_url: str
+) -> tuple[str, str]:
+    """Return ``(text, html)`` bodies for an admin's access-request alert.
+    ``email`` and ``note`` are whatever a stranger typed, so the HTML part
+    escapes every interpolated string."""
+    text_lines = [f"Access request from {email} (source: {source})."]
+    if note:
+        text_lines.append(f"\nNote: {note}")
+    text_lines.append(f"\nReview it: {admin_url}")
+    text = "\n".join(text_lines)
+    note_html = f"<p>Note: {_html.escape(note)}</p>" if note else ""
+    html = (
+        '<div style="font-family:system-ui,sans-serif;font-size:15px;line-height:1.5">'
+        f"<p>Access request from {_html.escape(email)} (source: {_html.escape(source)}).</p>"
+        f"{note_html}"
+        f'<p><a href="{_html.escape(admin_url)}">Review it</a></p>'
+        "</div>"
+    )
+    return text, html
+
+
 class LettermintEmailSender:
     """Sends magic links via the Lettermint HTTP API (production transport).
 
@@ -104,14 +171,13 @@ class LettermintEmailSender:
         self._from = from_address
         self._route = route
 
-    async def send_magic_link(self, *, to: str, link: str) -> None:
+    async def _send(self, *, to: str, subject: str, text: str, html: str) -> None:
         import httpx
 
-        text, html = _magic_link_email_body(link)
         payload: dict[str, object] = {
             "from": self._from,
             "to": [to],
-            "subject": "Your Splitsmith sign-in link",
+            "subject": subject,
             "text": text,
             "html": html,
         }
@@ -124,6 +190,23 @@ class LettermintEmailSender:
                 json=payload,
             )
         resp.raise_for_status()
+
+    async def send_magic_link(self, *, to: str, link: str) -> None:
+        text, html = _magic_link_email_body(link)
+        await self._send(to=to, subject="Your Splitsmith sign-in link", text=text, html=html)
+
+    async def send_access_granted(self, *, to: str, link: str) -> None:
+        text, html = _access_granted_email_body(link)
+        await self._send(to=to, subject="You have access to Splitsmith", text=text, html=html)
+
+    async def send_access_request_alert(
+        self, *, to: str, email: str, note: str | None, source: str, admin_url: str
+    ) -> None:
+        text, html = _access_request_alert_body(email=email, note=note, source=source, admin_url=admin_url)
+        # A stranger typed ``email``: keep control characters out of the
+        # subject line.
+        subject = "Splitsmith access request: " + "".join(c for c in email if c.isprintable())
+        await self._send(to=to, subject=subject, text=text, html=html)
 
 
 def build_email_sender(backend: str | None) -> EmailSender:

@@ -6,6 +6,7 @@
  * extend this file rather than scattering fetch() calls across the SPA.
  */
 
+import type { Feature } from "@/lib/access";
 import type { Anomaly } from "@/lib/anomalies";
 import { authorKey } from "@/lib/authorKey";
 
@@ -1792,6 +1793,45 @@ export function isReadOnlyMirrorError(err: unknown): boolean {
   );
 }
 
+/** What each account feature lets a user do, as the subject of a refusal
+ *  sentence. Keyed by ``lib/access``'s ``Feature``. */
+const FEATURE_WHAT: Record<Feature, string> = {
+  sync: "Syncing from the desktop app",
+  share: "Sharing",
+  create_match: "Creating matches here",
+  raw_upload: "Uploading footage here",
+  hosted_compute: "Running detection and renders here",
+};
+
+/** One line for an account refusal (spec 2026-10-03), or null when
+ *  ``err`` is not one.
+ *
+ *  ``ApiError.body`` holds the response's raw ``detail`` (see
+ *  ``request()``), so the refusal's ``{code, feature}`` is the body
+ *  itself, not nested under a ``detail`` key. */
+export function featureRefusal(err: unknown): string | null {
+  if (!(err instanceof ApiError) || err.status !== 403) return null;
+  const detail = err.body;
+  if (!detail || typeof detail !== "object") return null;
+  const { code, feature } = detail as { code?: unknown; feature?: unknown };
+  if (code === "account_disabled") return "This account is disabled.";
+  if (code === "feature_required" && typeof feature === "string" && Object.hasOwn(FEATURE_WHAT, feature)) {
+    return `${FEATURE_WHAT[feature as Feature]} is not included in this account's access.`;
+  }
+  return null;
+}
+
+/** :func:`apiErrorText` plus whether the line is an account refusal, for a
+ *  page that renders a refusal as a muted line rather than an error. */
+export interface ErrorLine {
+  text: string;
+  refusal: boolean;
+}
+
+export function errorLine(err: unknown, fallback: string): ErrorLine {
+  return { text: apiErrorText(err, fallback), refusal: featureRefusal(err) !== null };
+}
+
 /** A sentence fit to render inline in the UI for an arbitrary thrown value.
  *
  *  ``ApiError.message`` is ```${status}: ${detail}` `` and ``detail`` is
@@ -1818,11 +1858,14 @@ export function isReadOnlyMirrorError(err: unknown): boolean {
  *
  *  Non-``ApiError`` values (including plain ``Error``) get ``fallback``:
  *  their messages are internal-facing, not written for an operator.
- *  ``ApiError`` is not exported, so the ``instanceof`` test has to live in
- *  this module.
+ *  The ``instanceof`` test lives here so callers need not import the class.
  */
 export function apiErrorText(err: unknown, fallback: string): string {
   if (!(err instanceof ApiError)) return fallback;
+  // An account refusal is a structured detail, which the discriminator
+  // below would replace with ``fallback``; it has a sentence of its own.
+  const refusal = featureRefusal(err);
+  if (refusal) return refusal;
   // read_only_mirror's raw detail is a machine-readable code, not prose
   // ("Synced from..." is what the caller should see, not the literal
   // string "read_only_mirror") - map it before the general string/object
@@ -1870,6 +1913,11 @@ export interface AuthUser {
   email: string;
   display_name: string | null;
   is_admin: boolean;
+  /** Hosted access tier name, for display only; code checks ``features``
+   *  (lib/access.ts). Null for the local loopback user. */
+  access_tier: string | null;
+  /** Sorted feature names this account holds. */
+  features: string[];
 }
 
 /** Saved SSI Scoreboard identity for the operator. Returned by
@@ -3452,6 +3500,14 @@ export const api = {
       json: { email },
     }),
 
+  /** Hosted mode -- ask for access. The server answers 202 with the same
+   *  ``message`` whatever happened (known email or not). */
+  requestAccess: (email: string, note: string | null) =>
+    request<{ ok: boolean; message: string }>("/api/v1/access-requests", {
+      method: "POST",
+      json: { email, note },
+    }),
+
   /** Hosted mode -- revoke the current session + clear the cookie. */
   authLogout: () =>
     request<{ ok: true }>("/api/v1/auth/logout", { method: "POST" }),
@@ -4624,6 +4680,43 @@ export const api = {
       method: "DELETE",
     }),
 
+  /** Access requests, pending first, then newest request first (hosted
+   *  admin only; 404 locally, 403 for anyone else). */
+  adminAccessRequests: () => request<AccessRequest[]>("/api/admin/access-requests"),
+
+  /** Approve a pending request with ``tier``. 409 when already decided,
+   *  404 "not found" / "account deleted", 422 for an unknown tier. */
+  adminApproveAccessRequest: (id: string, tier: string) =>
+    request<AccessRequest>(`/api/admin/access-requests/${encodeURIComponent(id)}/approve`, {
+      method: "POST",
+      json: { tier },
+    }),
+
+  /** Decline a pending request. 409 when it is not pending. */
+  adminDeclineAccessRequest: (id: string) =>
+    request<AccessRequest>(`/api/admin/access-requests/${encodeURIComponent(id)}/decline`, {
+      method: "POST",
+    }),
+
+  /** Send an approved request's sign-in mail again. 409 unless approved. */
+  adminResendAccessRequest: (id: string) =>
+    request<AccessRequest>(`/api/admin/access-requests/${encodeURIComponent(id)}/resend`, {
+      method: "POST",
+    }),
+
+  /** Every account with its access tier. */
+  adminUsers: () => request<AdminAccount[]>("/api/admin/users"),
+
+  /** Move an account to ``tier``. 422 for an unknown tier, 404 unknown id. */
+  adminSetUserTier: (id: string, tier: string) =>
+    request<AdminAccount>(`/api/admin/users/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      json: { access_tier: tier },
+    }),
+
+  /** The tier registry and the tier a new account gets. */
+  adminAccessTiers: () => request<AccessTiers>("/api/admin/access-tiers"),
+
   // Desktop-token management (desktop-to-hosted sync MVP, #631 Task 3).
   // Operator-global (/api/me/...), hosted-only - 404s in local mode.
 
@@ -4847,6 +4940,36 @@ export interface WorkerView {
   last_wake_at: string | null;
   version: string | null;
   info: WorkerInfo | null;
+}
+
+/** One access request, mirrored from the hosted admin API. */
+export interface AccessRequest {
+  id: string;
+  email: string;
+  note: string | null;
+  source: string;
+  status: "pending" | "approved" | "declined";
+  requested_at: string;
+  last_requested_at: string;
+  decided_at: string | null;
+  decided_by: string | null;
+  tier_granted: string | null;
+  email_sent_at: string | null;
+}
+
+/** One hosted account as the admin user list shows it. */
+export interface AdminAccount {
+  id: string;
+  email: string;
+  display_name: string | null;
+  access_tier: string;
+  created_at: string;
+  is_admin: boolean;
+}
+
+export interface AccessTiers {
+  tiers: { name: string; features: string[] }[];
+  default_tier: string;
 }
 
 export interface WorkerListResponse {

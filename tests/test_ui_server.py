@@ -7479,7 +7479,9 @@ def test_create_match_manual_hosted_mode_synthesizes_path(
 
     class _StubAuth:
         user_id = "01TESTUSER0000000000000001"
-        _user = User(id=user_id, email="stub@test", display_name="Stub")
+        # A real users row always carries a tier (server default "full");
+        # without one the account gate treats the stub as disabled.
+        _user = User(id=user_id, email="stub@test", display_name="Stub", access_tier="full")
 
         async def authenticate_request(self, request):
             return self._user

@@ -482,6 +482,34 @@ production for exactly that reason. An account with a blank name still
 falls back to a generated handle; that invariant is pinned in
 ``tests/test_comments_signed_in.py`` and does not move.
 
+## Hosted access tiers (spec 2026-10-03)
+
+An account has **features** (``splitsmith.access.Feature``: ``sync``,
+``share``, ``create_match``, ``raw_upload``, ``hosted_compute``); a match
+has **capabilities** (by origin). A request needs both. A tier is a named
+feature set in ``AccessConfig`` (``config.py``, overridable through
+``SPLITSMITH_CONFIG``; ``SPLITSMITH_ACCESS_DEFAULT_TIER`` on ``serve``
+sets the tier new accounts get, validated against that registry at
+boot); ``features_for`` resolves a user (env admins get
+everything, an unknown tier gets nothing). Code checks features, never
+tier names, in Python and in the SPA. Local mode never consults access.
+The backstop is ``submit_allowed`` on ``PostgresJobBackend``, wired per
+tenant in ``_build_tenant``: no ``hosted_compute``, no job, whatever the
+kind, so a new job kind is covered with no edit. A new hosted entry point
+that creates matches, uploads or submits still declares
+``Depends(require_feature(...))`` (``ui/access_gate.py``) so the refusal
+is a clean ``feature_required`` 403, and a request handler that chains a
+job after a committed write catches ``FeatureRequiredError`` and skips
+the chain rather than reporting the write as refused. The intake
+(``POST /api/v1/access-requests`` and sign-in's blocked branch) answers
+the same bytes whatever the email's state, rate-limited or not, and
+never mails the requester: only admins are alerted. Admin routes live in
+``ui/admin_access_api.py`` with the db imports inside the functions (the
+slim local install imports it). The SPA reads ``lib/access.can`` /
+``useCan`` and maps a stray refusal with ``featureRefusal``. Deploy
+facts (worker env, ``FORWARDED_ALLOW_IPS``, the waitlist cut-over) are in
+``docs/saas-readiness/11-environment-strategy.md``.
+
 ## State doc kinds and the sync allowlist
 
 Adding a ``doc_kind`` to ``state_docs`` is not a local change. The sync

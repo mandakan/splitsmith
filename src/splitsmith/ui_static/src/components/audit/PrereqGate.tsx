@@ -5,7 +5,7 @@ import { StageTimeSection } from "@/components/StageTimeSection";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/Label";
 import {
-  ApiError,
+  apiErrorText,
   api,
   type Job,
   type MatchProject,
@@ -217,7 +217,7 @@ export function PrereqGate({
       }
     } catch (err) {
       if (ownerKeyRef.current === ownerKey) {
-        setError(err instanceof ApiError ? err.detail : String(err));
+        setError(apiErrorText(err, kind === "trim" ? "Could not start the trim." : "Could not start shot detection."));
       }
     } finally {
       if (ownerKeyRef.current === ownerKey) setJob(null);

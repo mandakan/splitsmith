@@ -217,6 +217,8 @@ function setUpApi(listJobsImpl: () => Promise<Job[]>) {
     email: "local@localhost",
     display_name: null,
     is_admin: false,
+    access_tier: "full",
+    features: ["create_match", "hosted_compute", "raw_upload", "share", "sync"],
   });
   vi.mocked(api.listMatchShooters).mockResolvedValue({
     match_root: "/root",
@@ -282,6 +284,8 @@ function setUpApiWithOrigin(
     email: "m@thias.se",
     display_name: null,
     is_admin: false,
+    access_tier: "full",
+    features: ["create_match", "hosted_compute", "raw_upload", "share", "sync"],
   });
   vi.mocked(api.listMatchShooters).mockResolvedValue({
     match_root: "/root",

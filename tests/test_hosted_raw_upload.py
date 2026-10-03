@@ -867,3 +867,75 @@ def test_recent_projects_detail_reads_from_store_after_path_wiped(hosted_client)
     assert entry["shooter_names"] == ["Anton"]
     # No upload yet, so the picker's Continue card points at Footage.
     assert entry["next_step"]["kind"] == "footage"
+
+
+# ---------------------------------------------------------------------------
+# Account backstop: the take-detect chain after a committed attach / coverage
+# edit is skipped, never a 403 for the write that landed (spec 2026-10-03).
+# ---------------------------------------------------------------------------
+
+
+def _downgrade_and_reach_the_enqueue(hosted_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sharing tier, and get past ``_queue_take_detects``' SQLite skip.
+
+    The app's engine is already built from the SQLite URL; the env var is
+    re-read only by that skip, so a Postgres-looking value makes the helper
+    reach ``submit`` (where the backstop refuses before any deferrer runs).
+    """
+    from tests.test_access_gates import set_tier
+
+    set_tier(hosted_db, "raw-tester@example.com", "sharing")
+    monkeypatch.setenv("SPLITSMITH_DATABASE_URL", "postgresql+asyncpg://unused/unused")
+
+
+@pytest.mark.parametrize("covers", [[1], [1, 2]], ids=["per-video", "sequential"])
+def test_attach_without_hosted_compute_saves_and_skips_detection(
+    hosted_client_with_match, hosted_db: str, monkeypatch: pytest.MonkeyPatch, covers: list[int]
+) -> None:
+    from tests.test_access_backstop import _job_count
+
+    client, _, match_id, slug = hosted_client_with_match
+    upload = _seed_upload(client, "take.mp4", b"take " * 1024)
+    _downgrade_and_reach_the_enqueue(hosted_db, monkeypatch)
+    # The upload (made while full) leaves its own generate_proxy row behind.
+    rows_before = _job_count(hosted_db)
+
+    resp = client.post(
+        _attach_url(match_id, slug),
+        json={"filename": upload["filename"], "size_bytes": upload["size"], "covers_stages": covers},
+    )
+
+    assert resp.status_code == 200, resp.text
+    project = _get_project(client, match_id, slug)
+    assert project["raw_videos"][0]["covers_stages"] == covers
+    stages = {s["stage_number"]: s for s in project["stages"]}
+    assert all(str(stages[n]["videos"][0]["path"]) == "raw/take.mp4" for n in covers)
+    assert _job_count(hosted_db) == rows_before
+
+
+@pytest.mark.parametrize("covers", [[1], [1, 2]], ids=["per-video", "sequential"])
+def test_coverage_edit_without_hosted_compute_saves_and_skips_detection(
+    hosted_client_with_match, hosted_db: str, monkeypatch: pytest.MonkeyPatch, covers: list[int]
+) -> None:
+    from tests.test_access_backstop import _job_count
+
+    client, _, match_id, slug = hosted_client_with_match
+    upload = _seed_upload(client, "take.mp4", b"take " * 1024)
+    attach = client.post(
+        _attach_url(match_id, slug), json={"filename": upload["filename"], "size_bytes": upload["size"]}
+    )
+    assert attach.status_code == 200, attach.text
+    _downgrade_and_reach_the_enqueue(hosted_db, monkeypatch)
+    rows_before = _job_count(hosted_db)
+
+    resp = client.patch(
+        f"/api/matches/{match_id}/shooters/{slug}/raw-videos/coverage",
+        json={"filename": "take.mp4", "covers_stages": covers},
+    )
+
+    assert resp.status_code == 200, resp.text
+    project = _get_project(client, match_id, slug)
+    assert project["raw_videos"][0]["covers_stages"] == covers
+    stages = {s["stage_number"]: s for s in project["stages"]}
+    assert all(str(stages[n]["videos"][0]["path"]) == "raw/take.mp4" for n in covers)
+    assert _job_count(hosted_db) == rows_before

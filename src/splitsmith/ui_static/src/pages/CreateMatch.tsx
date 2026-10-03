@@ -42,6 +42,7 @@ import { Brand, Kicker } from "@/components/ui";
 import { Button } from "@/components/ui/button";
 import {
   ApiError,
+  apiErrorText,
   api,
   type CreateMatchCompetitorPick,
   type CreateMatchStageDraft,
@@ -519,7 +520,7 @@ function ScoreboardVariant({
       });
     } catch (e) {
       setCreating(false);
-      onError(e instanceof ApiError ? e.detail : String(e));
+      onError(apiErrorText(e, "Could not create the match."));
     }
   }
 
@@ -1135,7 +1136,7 @@ function ManualVariant({
       });
     } catch (e) {
       setCreating(false);
-      onError(e instanceof ApiError ? e.detail : String(e));
+      onError(apiErrorText(e, "Could not create the match."));
     }
   }
 

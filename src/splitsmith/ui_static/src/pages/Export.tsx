@@ -41,10 +41,11 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Segmented } from "@/components/ui/Segmented";
 import { useConfirm } from "@/components/useConfirm";
 import {
-  ApiError,
   api,
   capabilityDenied,
+  errorLine,
   READ_ONLY_MIRROR_MESSAGE,
+  type ErrorLine,
   type CompareGridResult,
   type ExportOverview,
   type ExportPreset,
@@ -147,7 +148,7 @@ function ExportInner({ slug }: { slug: string }) {
   // null.
   const [youtubeSettings, setYoutubeSettings] = useState<YouTubeSettings | null>(null);
   const [uploadBusy, setUploadBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ErrorLine | null>(null);
   const [job, setJob] = useState<Job | null>(null);
   const [result, setResult] = useState<MatchExportResult | null>(null);
   const [gridResult, setGridResult] = useState<CompareGridResult | null>(null);
@@ -164,7 +165,7 @@ function ExportInner({ slug }: { slug: string }) {
       setOverview(ov);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorLine(e, "Could not load the export page."));
     }
     // History is secondary to the page's purpose (#629) -- a failed fetch
     // here must never surface an error toast or block the form above.
@@ -444,7 +445,7 @@ function ExportInner({ slug }: { slug: string }) {
       setActivePresetId(saved.preset_id);
       setSaveSheet(null);
     } catch (e) {
-      setError(e instanceof ApiError ? e.detail : String(e));
+      setError(errorLine(e, "Could not save the preset."));
     }
   }
 
@@ -458,7 +459,7 @@ function ExportInner({ slug }: { slug: string }) {
       setPresets((list) => list.filter((x) => x.preset_id !== id));
       if (activePresetId === id) setActivePresetId(null);
     } catch (e) {
-      setError(e instanceof ApiError ? e.detail : String(e));
+      setError(errorLine(e, "Could not delete the preset."));
     }
   }
 
@@ -498,7 +499,7 @@ function ExportInner({ slug }: { slug: string }) {
     try {
       setProject(await api.setCompareCamera(slug, next));
     } catch (e) {
-      setError(e instanceof ApiError ? e.detail : String(e));
+      setError(errorLine(e, "Could not set the Compare camera."));
     }
   }
 
@@ -593,7 +594,7 @@ function ExportInner({ slug }: { slug: string }) {
         ].join(""),
       );
     } catch (e) {
-      setError(e instanceof ApiError ? e.detail : String(e));
+      setError(errorLine(e, "Could not queue the trims."));
       if (queuedIds.length > 0) setQueuedNote(`Queued ${queuedIds.length} of ${orderedSelection.length} trim jobs.`);
     } finally {
       setQueueing(false);
@@ -622,9 +623,9 @@ function ExportInner({ slug }: { slug: string }) {
       });
       setJob(submitted);
       const final = await api.pollJob(submitted.id, setJob);
-      if (final.status === "failed") setError(final.error ?? "Upload failed");
+      if (final.status === "failed") setError({ text: final.error ?? "Upload failed", refusal: false });
     } catch (e) {
-      setError(e instanceof ApiError ? e.detail : String(e));
+      setError(errorLine(e, "Could not start the upload."));
     } finally {
       setUploadBusy(null);
       if (mountedRef.current) void reload();
@@ -695,10 +696,10 @@ function ExportInner({ slug }: { slug: string }) {
         // server and would otherwise stay as they were before the run.
         void reload();
       } else if (final.status === "failed") {
-        setError(final.error ?? "Export failed");
+        setError({ text: final.error ?? "Export failed", refusal: false });
       }
     } catch (e) {
-      setError(e instanceof ApiError ? e.detail : String(e));
+      setError(errorLine(e, "Could not start the export."));
     }
   }
 
@@ -725,10 +726,10 @@ function ExportInner({ slug }: { slug: string }) {
       if (final.status === "succeeded" && final.result) {
         setGridResult(final.result as unknown as CompareGridResult);
       } else if (final.status === "failed") {
-        setError(final.error ?? "Render failed.");
+        setError({ text: final.error ?? "Render failed.", refusal: false });
       }
     } catch (e) {
-      setError(e instanceof ApiError ? e.detail : String(e));
+      setError(errorLine(e, "Could not start the render."));
     }
   }
 
@@ -803,7 +804,8 @@ function ExportInner({ slug }: { slug: string }) {
   const gridSummary = gridResult ? summarizeGridResult(gridResult) : null;
   // A desktop request's own failure (send, list, cancel) reads as the
   // page's error line.
-  const pageError = error ?? (onDesktop ? desktop.error : null);
+  const pageError: ErrorLine | null =
+    error ?? (onDesktop && desktop.error ? { text: desktop.error, refusal: false } : null);
 
   return (
     <div className="px-7 py-5">
@@ -825,9 +827,13 @@ function ExportInner({ slug }: { slug: string }) {
         }
       />
 
-      {pageError ? (
+      {pageError?.refusal ? (
+        <p role="status" className="mb-4 text-md text-muted">
+          {pageError.text}
+        </p>
+      ) : pageError ? (
         <p role="alert" className="mb-4 rounded-md border border-destructive/45 px-3 py-2 text-md text-destructive">
-          {pageError}
+          {pageError.text}
         </p>
       ) : null}
 

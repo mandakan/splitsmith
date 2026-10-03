@@ -73,6 +73,8 @@ import {
   ApiError,
   api,
   capabilityDenied,
+  errorLine,
+  type ErrorLine,
   type AuditEvent,
   type Job,
   type MatchProject,
@@ -2300,7 +2302,7 @@ interface DetectShotsBadgeProps {
   desktop?: { busy: boolean; onRequest: () => void };
 }
 
-function DetectShotsBadge({
+export function DetectShotsBadge({
   slug,
   stageNumber,
   hasBeep,
@@ -2311,7 +2313,7 @@ function DetectShotsBadge({
 }: DetectShotsBadgeProps) {
   const confirm = useConfirm();
   const [job, setJob] = useState<Job | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ErrorLine | null>(null);
   const blocked = !hasBeep || !hasStageTime;
   const running = job != null && (job.status === "pending" || job.status === "running");
   const reason = !hasBeep
@@ -2349,7 +2351,7 @@ function DetectShotsBadge({
           if (cancelled) return;
           if (final.status === "succeeded") await onComplete();
           else if (final.status === "failed")
-            setError(final.error ?? "Shot detection failed");
+            setError({ text: final.error ?? "Shot detection failed", refusal: false });
         } finally {
           if (!cancelled) setJob(null);
         }
@@ -2368,12 +2370,12 @@ function DetectShotsBadge({
         setJob(initial);
         const final = await api.pollJob(initial.id, setJob);
         if (final.status === "failed") {
-          setError(final.error ?? "Shot detection failed");
+          setError({ text: final.error ?? "Shot detection failed", refusal: false });
           return;
         }
         await onComplete();
       } catch (err) {
-        setError(err instanceof ApiError ? err.detail : String(err));
+        setError(errorLine(err, "Could not start shot detection."));
       } finally {
         setJob(null);
       }
@@ -2408,7 +2410,7 @@ function DetectShotsBadge({
           write_overlay: false,
         });
       } catch (err) {
-        setError(err instanceof ApiError ? err.detail : String(err));
+        setError(errorLine(err, "Could not start the shots export."));
       }
     })();
   }, [slug, stageNumber]);
@@ -2468,7 +2470,11 @@ function DetectShotsBadge({
           </button>
         </>
       ) : null}
-      {error ? <span className="px-2.5 py-1 text-sm text-led-text">{error}</span> : null}
+      {error ? (
+        <span className={cn("px-2.5 py-1 text-sm", error.refusal ? "text-muted" : "text-led-text")}>
+          {error.text}
+        </span>
+      ) : null}
     </>
   );
 }
@@ -2481,7 +2487,7 @@ interface TrimNowBadgeProps {
   onProjectUpdate: (p: MatchProject) => void;
 }
 
-function TrimNowBadge({
+export function TrimNowBadge({
   slug,
   stageNumber,
   hasBeep,
@@ -2489,7 +2495,7 @@ function TrimNowBadge({
   onProjectUpdate,
 }: TrimNowBadgeProps) {
   const [job, setJob] = useState<Job | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ErrorLine | null>(null);
   const blocked = !hasBeep || !hasStageTime;
   const reason = !hasBeep
     ? "Detect or set the beep first."
@@ -2528,7 +2534,7 @@ function TrimNowBadge({
           const final = await api.pollJob(active.id, setJob);
           if (cancelled) return;
           if (final.status === "succeeded") onProjectUpdate(await api.getProject(slug));
-          else if (final.status === "failed") setError(final.error ?? "Trim failed");
+          else if (final.status === "failed") setError({ text: final.error ?? "Trim failed", refusal: false });
         } finally {
           if (!cancelled) setJob(null);
         }
@@ -2550,13 +2556,13 @@ function TrimNowBadge({
       setJob(initial);
       const final = await api.pollJob(initial.id, setJob);
       if (final.status === "failed") {
-        setError(final.error ?? "Trim failed");
+        setError({ text: final.error ?? "Trim failed", refusal: false });
         return;
       }
       const fresh = await api.getProject(slug);
       onProjectUpdate(fresh);
     } catch (err) {
-      setError(err instanceof ApiError ? err.detail : String(err));
+      setError(errorLine(err, "Could not start the trim."));
     } finally {
       setJob(null);
     }
@@ -2578,7 +2584,11 @@ function TrimNowBadge({
         <span className="numeral">{running ? `Trimming${pct != null ? ` ${pct}%` : "..."}` : "Trim now"}</span>
         <span className="ml-auto text-sm text-muted">untrimmed</span>
       </button>
-      {error ? <span className="px-2.5 py-1 text-sm text-led-text">{error}</span> : null}
+      {error ? (
+        <span className={cn("px-2.5 py-1 text-sm", error.refusal ? "text-muted" : "text-led-text")}>
+          {error.text}
+        </span>
+      ) : null}
     </>
   );
 }

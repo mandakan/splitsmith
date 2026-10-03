@@ -120,6 +120,8 @@ describe("AuthGate device-flow stash (hosted mode)", () => {
       email: "m@thias.se",
       display_name: null,
       is_admin: false,
+      access_tier: "full",
+      features: ["create_match", "hosted_compute", "raw_upload", "share", "sync"],
     });
     await renderAt("/");
     await waitFor(() =>
@@ -145,6 +147,8 @@ describe("AuthGate device-flow stash (hosted mode)", () => {
       email: "m@thias.se",
       display_name: null,
       is_admin: false,
+      access_tier: "full",
+      features: ["create_match", "hosted_compute", "raw_upload", "share", "sync"],
     });
     await renderAtStrict("/");
     await waitFor(() =>
@@ -163,6 +167,8 @@ describe("AuthGate device-flow stash (hosted mode)", () => {
       email: "m@thias.se",
       display_name: null,
       is_admin: false,
+      access_tier: "full",
+      features: ["create_match", "hosted_compute", "raw_upload", "share", "sync"],
     });
     await renderAt("/");
     await waitFor(() =>

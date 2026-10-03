@@ -27,6 +27,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
     func,
     text,
@@ -92,6 +93,12 @@ class User(Base):
     entitlement: Mapped[str] = mapped_column(String, nullable=False, default="free")
     entitlement_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # Account access tier (spec 2026-10-03): names a feature set in
+    # ``splitsmith.access.AccessConfig``. Separate from ``entitlement``,
+    # which stays reserved for billing. The server default keeps a
+    # non-ORM insert safe-for-today; the ORM always sets it explicitly.
+    access_tier: Mapped[str] = mapped_column(String, nullable=False, server_default="full")
+
     # External auth vendor link. The provider (Clerk / WorkOS /
     # Auth.js / etc.) owns the authentication; this column carries
     # the vendor's user id so we can resolve a session back to a
@@ -133,6 +140,32 @@ class User(Base):
 
     def __repr__(self) -> str:
         return f"<User id={self.id!r} email={self.email!r}>"
+
+
+class AccessRequest(Base):
+    """A request for a hosted account (spec 2026-10-03). Not under RLS,
+    like ``users``: only admin routes and the intake writer touch it."""
+
+    __tablename__ = "access_requests"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_ulid)
+    email: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="pending")
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    last_requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    decided_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    tier_granted: Mapped[str | None] = mapped_column(String, nullable=True)
+    email_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<AccessRequest id={self.id!r} email={self.email!r} status={self.status!r}>"
 
 
 class MagicLinkTokenRow(Base):

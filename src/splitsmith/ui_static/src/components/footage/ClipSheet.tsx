@@ -17,6 +17,7 @@ import { Label } from "@/components/ui/Label";
 import { Sheet } from "@/components/ui/Sheet";
 import {
   ApiError,
+  apiErrorText,
   api,
   type MatchProject,
   type RawVideoManifestEntry,
@@ -182,7 +183,7 @@ export function ClipSheet(props: ClipSheetProps) {
     try {
       await api.detectBeepForVideo(slug, currentStage, video.video_id);
     } catch (e) {
-      onError(e instanceof ApiError ? e.detail : String(e));
+      onError(apiErrorText(e, "Could not start beep detection."));
     } finally {
       setDetecting(false);
     }

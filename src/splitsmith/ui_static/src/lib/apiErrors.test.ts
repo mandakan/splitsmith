@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { api, apiErrorText } from "@/lib/api";
+import { api, apiErrorText, errorLine } from "@/lib/api";
 
 const FALLBACK = "Could not load the stage list.";
 
@@ -91,5 +91,38 @@ describe("apiErrorText", () => {
     expect(apiErrorText(null, FALLBACK)).toBe(FALLBACK);
     expect(apiErrorText(undefined, FALLBACK)).toBe(FALLBACK);
     expect(apiErrorText({ detail: "looks like one" }, FALLBACK)).toBe(FALLBACK);
+  });
+});
+
+describe("account refusals", () => {
+  it("apiErrorText names a feature_required refusal instead of the fallback", async () => {
+    const err = await thrownBy(403, "Forbidden", {
+      detail: { code: "feature_required", feature: "hosted_compute" },
+    });
+    expect(apiErrorText(err, FALLBACK)).toBe(
+      "Running detection and renders here is not included in this account's access.",
+    );
+  });
+
+  it("apiErrorText names a disabled account", async () => {
+    const err = await thrownBy(403, "Forbidden", { detail: { code: "account_disabled" } });
+    expect(apiErrorText(err, FALLBACK)).toBe("This account is disabled.");
+  });
+
+  it("errorLine marks a refusal so the page can render it muted", async () => {
+    const err = await thrownBy(403, "Forbidden", {
+      detail: { code: "feature_required", feature: "hosted_compute" },
+    });
+    expect(errorLine(err, FALLBACK)).toEqual({
+      text: "Running detection and renders here is not included in this account's access.",
+      refusal: true,
+    });
+  });
+
+  it("errorLine passes any other error through apiErrorText, not muted", async () => {
+    const err = await thrownBy(409, "Conflict", { detail: { code: "no_project" } });
+    expect(errorLine(err, FALLBACK)).toEqual({ text: FALLBACK, refusal: false });
+    const prose = await thrownBy(400, "Bad Request", { detail: "Stage time is missing." });
+    expect(errorLine(prose, FALLBACK)).toEqual({ text: "Stage time is missing.", refusal: false });
   });
 });

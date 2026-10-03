@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from "react";
 
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, apiErrorText } from "@/lib/api";
 import {
   queueStats,
   trimSamples,
@@ -276,7 +276,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
         if (err instanceof ApiError && err.detail === "upload cancelled") {
           updateOne(next.id, { status: "cancelled" });
         } else {
-          const msg = err instanceof ApiError ? err.detail : String(err);
+          const msg = apiErrorText(err, "Upload failed.");
           updateOne(next.id, { status: "error", errorMessage: msg });
         }
       } finally {

@@ -31,6 +31,7 @@ function state(jobs: Job[]): JobsState {
     pending: jobs.filter((j) => j.status === "pending"),
     failed: jobs.filter((j) => j.status === "failed" && !j.acknowledged),
     error: null,
+    retryRefusal: null,
     refresh: vi.fn(),
     acknowledge: vi.fn(),
     acknowledgeAll: vi.fn(),
@@ -69,5 +70,32 @@ describe("ProgressStrip", () => {
     expect(screen.getByRole("status")).toHaveTextContent(/failed/i);
     screen.getByRole("button", { name: /dismiss/i }).click();
     expect(dismiss).toHaveBeenCalledWith(failed);
+  });
+
+  it("a refused retry replaces the Retry action with the refusal, muted", () => {
+    const failed = job({ status: "failed", error: "boom", progress: null });
+    const text = "Running detection and renders here is not included in this account's access.";
+    render(
+      <ProgressStrip
+        state={{ ...state([failed]), retryRefusal: { jobId: failed.id, text } }}
+        onOpen={() => {}}
+        onDismissFailed={() => {}}
+      />,
+    );
+    expect(screen.getByText(text)).toHaveClass("text-muted");
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    expect(screen.getByRole("button", { name: /dismiss/i })).toBeInTheDocument();
+  });
+
+  it("a refusal for another job leaves this one's Retry alone", () => {
+    const failed = job({ status: "failed", error: "boom", progress: null });
+    render(
+      <ProgressStrip
+        state={{ ...state([failed]), retryRefusal: { jobId: "other", text: "x" } }}
+        onOpen={() => {}}
+        onDismissFailed={() => {}}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 });

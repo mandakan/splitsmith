@@ -35,7 +35,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Portal } from "@/components/ui/Portal";
 import { useConfirm } from "@/components/useConfirm";
 import {
-  ApiError,
+  apiErrorText,
   api,
   capabilityDenied,
   READ_ONLY_MIRROR_MESSAGE,
@@ -51,6 +51,7 @@ import { useWindowFileDrag } from "@/lib/dragDepth";
 import { queueItemHref, queueOrder, reviewEntryText } from "@/lib/beepQueue";
 import { isJobActive } from "@/lib/jobs";
 import { openSortText } from "@/lib/footageSort";
+import { useCan } from "@/lib/access";
 import { useDeploymentMode } from "@/lib/features";
 import { buildFootageRows, footageStats, unassignedVideos, type UnassignedItem } from "@/lib/footage";
 import { pickDefaultShooterSlug } from "@/lib/defaultShooter";
@@ -128,6 +129,10 @@ function IngestInner({ slug }: { slug: string }) {
   // with the banner's reason rather than hide: an Ingest page with no
   // controls at all would read as broken (the issue's per-surface rule).
   const editDenied = capabilityDenied(project?.capabilities, "edit");
+  // An account without raw_upload has no upload entry point on hosted
+  // (spec 2026-10-03): footage reaches it by sync from the desktop app.
+  const canUpload = useCan("raw_upload");
+  const uploadDenied = mode === "hosted" && !canUpload;
   // Default storage mode for the ingest modal. Rendered as a toggle in
   // the FolderPicker footer (add-footage call site only).
   const [storage, setStorage] = useState<StorageMode>("symlink");
@@ -191,7 +196,7 @@ function IngestInner({ slug }: { slug: string }) {
       setProject(p);
       if (p.last_scanned_dir) setLastScannedDir(p.last_scanned_dir);
     } catch (e: unknown) {
-      setError(e instanceof ApiError ? e.detail : String(e));
+      setError(apiErrorText(e, "Could not load the footage."));
     }
     // A1: Shooter list. Errors here are silent -- the strip just hides.
     try {
@@ -251,11 +256,11 @@ function IngestInner({ slug }: { slug: string }) {
       await api.discardFootageSort(scanId);
       setOpenSorts((list) => list.filter((s) => s.scan_id !== scanId));
     } catch (e: unknown) {
-      setError(e instanceof ApiError ? e.detail : String(e));
+      setError(apiErrorText(e, "Could not discard the sort."));
     }
   }
 
-  const hostedDropActive = modeResolved && mode === "hosted" && !editDenied;
+  const hostedDropActive = modeResolved && mode === "hosted" && !editDenied && !uploadDenied;
   const pageDragActive = useWindowFileDrag(hostedDropActive);
   const stagesRef = useRef<{ stage_number: number; stage_name: string }[]>([]);
   useEffect(() => {
@@ -318,7 +323,7 @@ function IngestInner({ slug }: { slug: string }) {
     try {
       await reload();
     } catch (e: unknown) {
-      setError(e instanceof ApiError ? e.detail : String(e));
+      setError(apiErrorText(e, "Could not import the footage."));
     }
   }
 
@@ -348,7 +353,7 @@ function IngestInner({ slug }: { slug: string }) {
       const { scan_id } = await api.startFootageSortUnassigned();
       navigate(href("footage-sort", scan_id));
     } catch (e: unknown) {
-      setError(e instanceof ApiError ? e.detail : String(e));
+      setError(apiErrorText(e, "Could not start the footage sort."));
     }
   }
 
@@ -395,7 +400,7 @@ function IngestInner({ slug }: { slug: string }) {
         .catch(() => {});
       outletCtx?.refresh();
     } catch (e: unknown) {
-      setError(e instanceof ApiError ? e.detail : String(e));
+      setError(apiErrorText(e, "Could not move the shooter."));
     } finally {
       setBusy(false);
     }
@@ -431,7 +436,7 @@ function IngestInner({ slug }: { slug: string }) {
         // predates the still-queued optimistic moves and would revert them.
         if (inflight.current === 1) setProject(updated);
       } catch (e: unknown) {
-        setError(e instanceof ApiError ? e.detail : String(e));
+        setError(apiErrorText(e, "Could not move the video."));
         // Optimistic state may be ahead of the server now; pull the truth back.
         void reload();
       } finally {
@@ -475,7 +480,7 @@ function IngestInner({ slug }: { slug: string }) {
         const resp = await api.removeVideo(slug, videoPath, false);
         if (inflight.current === 1) setProject(resp.project);
       } catch (e: unknown) {
-        setError(e instanceof ApiError ? e.detail : String(e));
+        setError(apiErrorText(e, "Could not remove the video."));
         // Optimistic state may be ahead of the server now; pull the truth back.
         void reload();
       } finally {
@@ -577,7 +582,7 @@ function IngestInner({ slug }: { slug: string }) {
       const updated = await api.moveAssignment(targetSlug, videoPath, toStage, role);
       setOthers((cur) => ({ ...cur, [targetSlug]: updated }));
     } catch (e: unknown) {
-      setError(e instanceof ApiError ? e.detail : String(e));
+      setError(apiErrorText(e, "Could not move the video."));
     }
   }
   async function removeOn(targetSlug: string, videoPath: string): Promise<void> {
@@ -599,7 +604,7 @@ function IngestInner({ slug }: { slug: string }) {
       const resp = await api.removeVideo(targetSlug, videoPath, false);
       setOthers((cur) => ({ ...cur, [targetSlug]: resp.project }));
     } catch (e: unknown) {
-      setError(e instanceof ApiError ? e.detail : String(e));
+      setError(apiErrorText(e, "Could not remove the video."));
     }
   }
   async function moveShooterFrom(fromSlug: string, targetSlug: string, videoPaths: string[]): Promise<void> {
@@ -618,7 +623,7 @@ function IngestInner({ slug }: { slug: string }) {
       if (targetSlug === slug) await reload();
       else setOthersTick((n) => n + 1);
     } catch (e: unknown) {
-      setError(e instanceof ApiError ? e.detail : String(e));
+      setError(apiErrorText(e, "Could not move the shooter."));
     }
   }
   async function detectBeepOn(targetSlug: string, stage: number) {
@@ -628,7 +633,7 @@ function IngestInner({ slug }: { slug: string }) {
     try {
       await api.detectBeepForVideo(targetSlug, stage, prim.video_id);
     } catch (e: unknown) {
-      setError(e instanceof ApiError ? e.detail : String(e));
+      setError(apiErrorText(e, "Could not start beep detection."));
     }
   }
   async function removeShooter(s: ShooterListEntry) {
@@ -645,7 +650,7 @@ function IngestInner({ slug }: { slug: string }) {
       await reload();
       setOthersTick((n) => n + 1);
     } catch (e: unknown) {
-      setError(e instanceof ApiError ? e.detail : String(e));
+      setError(apiErrorText(e, "Could not remove the shooter."));
     }
   }
   async function rebuildTrims(s: ShooterListEntry) {
@@ -656,7 +661,7 @@ function IngestInner({ slug }: { slug: string }) {
         setError(`No trim jobs to run for ${s.name}: every eligible angle was already cached, missing prerequisites, or already queued.`);
       }
     } catch (e: unknown) {
-      setError(e instanceof ApiError ? e.detail : String(e));
+      setError(apiErrorText(e, "Could not queue the trim caches."));
     }
   }
 
@@ -686,7 +691,7 @@ function IngestInner({ slug }: { slug: string }) {
     <div className="mb-4 flex flex-wrap items-center gap-3 rounded-[10px] border border-dashed border-rule-strong bg-surface px-4 py-2.5 text-md text-ink-2">
       <Upload className="size-4 text-muted" aria-hidden />
       {mode === "hosted" ? (
-        editDenied ? (
+        editDenied || uploadDenied ? (
           <span className="text-muted">Footage for this match is added on the desktop install and syncs here.</span>
         ) : (
           <>
@@ -734,9 +739,11 @@ function IngestInner({ slug }: { slug: string }) {
             <Chip tick="muted">{storage === "symlink" ? "Link in place" : "Copy files"}</Chip>
           </button>
         ) : null}
-        <Button size="sm" onClick={openAddFootage} disabled={editDenied}>
-          {mode === "hosted" ? "Browse files" : "Pick a folder"}
-        </Button>
+        {uploadDenied ? null : (
+          <Button size="sm" onClick={openAddFootage} disabled={editDenied}>
+            {mode === "hosted" ? "Browse files" : "Pick a folder"}
+          </Button>
+        )}
       </span>
     </div>
   );
@@ -756,9 +763,11 @@ function IngestInner({ slug }: { slug: string }) {
             <Button onClick={() => setAddShooterOpen(true)} disabled={editDenied}>
               Add shooter
             </Button>
-            <Button variant="primary" onClick={openAddFootage} disabled={!modeResolved || editDenied}>
-              Add footage
-            </Button>
+            {uploadDenied ? null : (
+              <Button variant="primary" onClick={openAddFootage} disabled={!modeResolved || editDenied}>
+                Add footage
+              </Button>
+            )}
           </>
         }
       >
@@ -922,14 +931,16 @@ function IngestInner({ slug }: { slug: string }) {
       {showAddFootage &&
         modeResolved &&
         (mode === "hosted" ? (
-          <HostedUploadModal
-            slug={slug}
-            onClose={() => setShowAddFootage(false)}
-            onImported={(imported, paths) => {
-              void afterImport(imported, paths);
-            }}
-            stages={project?.stages ?? []}
-          />
+          uploadDenied ? null : (
+            <HostedUploadModal
+              slug={slug}
+              onClose={() => setShowAddFootage(false)}
+              onImported={(imported, paths) => {
+                void afterImport(imported, paths);
+              }}
+              stages={project?.stages ?? []}
+            />
+          )
         ) : (
           <FolderPicker
             slug={slug}

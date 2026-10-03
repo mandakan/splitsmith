@@ -147,4 +147,7 @@ class DesktopTokenAuth:
                 display_name=user_row.display_name,
                 token_scope=row.scope,
                 token_id=row.id,
+                # Read from the users row on every request, never stored on
+                # the token: a tier change applies to the next request.
+                access_tier=user_row.access_tier,
             )

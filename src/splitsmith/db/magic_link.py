@@ -33,8 +33,9 @@ holds the **raw** (non-tenant) session factory, same as HostedLoopbackAuth.
 from __future__ import annotations
 
 import hashlib
+import logging
 import secrets
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -48,6 +49,8 @@ from .email import EmailSender
 from .models import MagicLinkTokenRow, SessionRow
 from .models import User as UserRow
 from .signup_policy import SignupPolicy
+
+logger = logging.getLogger(__name__)
 
 # Cookie the browser carries the raw session secret in. httpOnly + Secure
 # + SameSite=Lax are set by the route when it writes the cookie (doc 02);
@@ -123,6 +126,8 @@ class MagicLinkAuth:
         *,
         now: Callable[[], datetime] = _utcnow,
         signup_policy: SignupPolicy | None = None,
+        default_tier: str = "full",
+        on_blocked: Callable[[str], Awaitable[None]] | None = None,
     ) -> None:
         # Raw (non-tenant) factory: this backend writes users / sessions /
         # magic_link_tokens, none under RLS, and runs before any GUC.
@@ -132,6 +137,13 @@ class MagicLinkAuth:
         # Unconfigured -> open signups (local / self-host / tests). The
         # hosted deploy passes a closed policy + allowlist.
         self._signup_policy = signup_policy or SignupPolicy.open()
+        # Tier a new account starts on (spec 2026-10-03); returning users
+        # keep whatever their row says.
+        self._default_tier = default_tier
+        # Called with the normalised email when the signup policy blocks a
+        # new address (spec 2026-10-03: the hosted app records it as an
+        # access request). Its failure is logged, never surfaced.
+        self._on_blocked = on_blocked
 
     async def _email_has_account(self, email: str) -> bool:
         async with self._session_factory() as session:
@@ -166,7 +178,26 @@ class MagicLinkAuth:
         if not self._signup_policy.allows_signup(normalized) and not await self._email_has_account(
             normalized
         ):
+            if self._on_blocked is not None:
+                try:
+                    await self._on_blocked(normalized)
+                except Exception:
+                    logger.exception("recording an access request failed")
             return LoginChallenge(id="blocked", email=normalized, expires_at=now + MAGIC_LINK_TTL)
+        link, challenge = await self._mint(normalized, base_url=base_url, now=now)
+        await self._email.send_magic_link(to=normalized, link=link)
+        return challenge
+
+    async def mint_link(self, email: str, *, base_url: str) -> str:
+        """Mint a single-use sign-in link for ``email`` without sending it.
+        ``begin_login`` sends it as a sign-in mail; an access approval sends
+        it as a "you're in" mail."""
+        link, _ = await self._mint(_normalize_email(email), base_url=base_url, now=self._now())
+        return link
+
+    async def _mint(self, normalized: str, *, base_url: str, now: datetime) -> tuple[str, LoginChallenge]:
+        """Store a fresh token row for ``normalized`` and return its link
+        and handle. No policy check: callers decide who gets a link."""
         token = secrets.token_urlsafe(32)
         row = MagicLinkTokenRow(
             email=normalized,
@@ -180,8 +211,7 @@ class MagicLinkAuth:
             challenge = LoginChallenge(id=row.id, email=normalized, expires_at=row.expires_at)
 
         link = f"{base_url.rstrip('/')}/auth/callback?token={token}"
-        await self._email.send_magic_link(to=normalized, link=link)
-        return challenge
+        return link, challenge
 
     async def complete_login(
         self,
@@ -244,7 +274,9 @@ class MagicLinkAuth:
                 # re-select the row the winner committed.
                 try:
                     async with session.begin_nested():
-                        user_row = UserRow(email=link_row.email, email_verified_at=now)
+                        user_row = UserRow(
+                            email=link_row.email, email_verified_at=now, access_tier=self._default_tier
+                        )
                         session.add(user_row)
                         await session.flush()
                 except IntegrityError:
@@ -265,7 +297,12 @@ class MagicLinkAuth:
             )
             session.add(session_row)
             await session.commit()
-            user = User(id=user_row.id, email=user_row.email, display_name=user_row.display_name)
+            user = User(
+                id=user_row.id,
+                email=user_row.email,
+                display_name=user_row.display_name,
+                access_tier=user_row.access_tier,
+            )
             expires_at = now + SESSION_TTL
 
         return IssuedSession(secret=secret, expires_at=expires_at, user=user)
@@ -307,7 +344,12 @@ class MagicLinkAuth:
                 session_row.expires_at = now + SESSION_TTL
                 await session.commit()
 
-            return User(id=user_row.id, email=user_row.email, display_name=user_row.display_name)
+            return User(
+                id=user_row.id,
+                email=user_row.email,
+                display_name=user_row.display_name,
+                access_tier=user_row.access_tier,
+            )
 
     async def end_session(self, session_secret: str) -> None:
         """Revoke the session identified by ``session_secret`` (logout).

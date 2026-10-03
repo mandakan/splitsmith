@@ -29,7 +29,7 @@
  */
 
 import * as React from "react";
-import { LogOut, Server, UserCog } from "lucide-react";
+import { KeyRound, LogOut, Server, UserCog } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { IconButton, iconButtonVariants } from "@/components/ui/IconButton";
@@ -74,18 +74,32 @@ export function AccountChip({ className }: { className?: string }) {
         </span>
       )}
       {user.is_admin ? (
-        <Link
-          to="/admin/workers"
-          aria-label="Workers (admin)"
-          title="Workers (admin)"
-          className={iconButtonVariants({
-            variant: "subtle",
-            size: "sm",
-            className: "shrink-0",
-          })}
-        >
-          <Server className="size-3.5" />
-        </Link>
+        <>
+          <Link
+            to="/admin/workers"
+            aria-label="Workers (admin)"
+            title="Workers (admin)"
+            className={iconButtonVariants({
+              variant: "subtle",
+              size: "sm",
+              className: "shrink-0",
+            })}
+          >
+            <Server className="size-3.5" />
+          </Link>
+          <Link
+            to="/admin/access"
+            aria-label="Access (admin)"
+            title="Access (admin)"
+            className={iconButtonVariants({
+              variant: "subtle",
+              size: "sm",
+              className: "shrink-0",
+            })}
+          >
+            <KeyRound className="size-3.5" />
+          </Link>
+        </>
       ) : null}
       <Link
         to="/account"

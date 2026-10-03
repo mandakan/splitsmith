@@ -12,7 +12,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "@/lib/api";
+import { ApiError, api, type RecentProjectDetail } from "@/lib/api";
 import { AuthProvider } from "@/lib/auth";
 import { ModeProvider } from "@/lib/mode";
 import { ConfirmProvider } from "@/components/useConfirm";
@@ -30,6 +30,8 @@ vi.mock("@/lib/api", async (importOriginal) => {
         email: "m@thias.se",
         display_name: null,
         is_admin: false,
+        access_tier: "full",
+        features: ["create_match", "hosted_compute", "raw_upload", "share", "sync"],
       }),
       getServerFeatures: vi
         .fn()
@@ -139,5 +141,84 @@ describe("Pick chrome (#550)", () => {
     expect(screen.queryByText(/open by path/i)).toBeNull();
     expect(screen.queryByText(/import from backup/i)).toBeNull();
     expect(screen.queryByRole("button", { name: /import backup/i })).toBeNull();
+  });
+});
+
+const ALL = ["create_match", "hosted_compute", "raw_upload", "share", "sync"];
+
+function me(features: string[]) {
+  vi.mocked(api.getMe).mockResolvedValue({
+    id: "u1",
+    email: "m@thias.se",
+    display_name: null,
+    is_admin: false,
+    access_tier: "sharing",
+    features,
+  });
+}
+
+function recent(over: Partial<RecentProjectDetail>): RecentProjectDetail {
+  return {
+    path: "/p/a",
+    name: "Stockholm IPSC Open 2026",
+    last_opened_at: "2026-08-01T00:00:00Z",
+    kind: "match",
+    match_id: "m-a",
+    shooter_count: 1,
+    stage_count: 12,
+    stages_audited: 4,
+    video_count: 11,
+    match_date: null,
+    club: null,
+    last_modified_at: "2026-09-13T10:00:00Z",
+    status: "in_progress",
+    manual: false,
+    shooter_names: ["Mathias Axell"],
+    origin: "hosted",
+    next_step: null,
+    ...over,
+  };
+}
+
+describe("Pick gating by account features", () => {
+  beforeEach(() => {
+    mobile.value = false;
+    me(ALL);
+    vi.mocked(api.getRecentProjectsDetail).mockResolvedValue([]);
+  });
+
+  it("offers New match to an account that can create matches", async () => {
+    renderPick();
+    expect(await screen.findByText(/no matches yet/i)).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /new match/i })).toBeInTheDocument();
+  });
+
+  it("hides New match and points at the desktop app when the account cannot create", async () => {
+    me(["share", "sync"]);
+    renderPick();
+    expect(await screen.findByText("Matches arrive here from the desktop app.")).toBeInTheDocument();
+    const link = screen.getByRole("link", { name: "Get the desktop app" });
+    expect(link).toHaveAttribute("href", "https://splitsmith.app/#install");
+    expect(screen.queryByText(/no matches yet/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: /new match/i })).toBeNull();
+  });
+
+  it("keeps exactly one primary when New match is hidden and a match can continue", async () => {
+    me(["share", "sync"]);
+    vi.mocked(api.getRecentProjectsDetail).mockResolvedValue([
+      recent({ next_step: { kind: "audit", shooter_slug: "s_ma", stage_number: 5, stage_name: "B5 Rear" } }),
+    ]);
+    const { container } = renderPick();
+    await screen.findByRole("region", { name: /continue/i });
+    expect(container.querySelectorAll(".btn-primary")).toHaveLength(1);
+  });
+
+  it("shows a refusal as its own line, not the raw JSON detail", async () => {
+    vi.mocked(api.getRecentProjectsDetail).mockRejectedValue(
+      new ApiError(403, JSON.stringify({ code: "account_disabled" }), { code: "account_disabled" }),
+    );
+    renderPick();
+    expect(await screen.findByText("This account is disabled.")).toBeInTheDocument();
+    expect(screen.queryByText(/account_disabled/)).toBeNull();
   });
 });

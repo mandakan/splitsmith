@@ -105,10 +105,12 @@ if TYPE_CHECKING:
         PostgresYouTubeConnectionStore,
         ProjectStateStore,
     )
+    from ..db.access_requests import AccessRequestStore, AccountAccessStore
     from ..db.comments import CommentStore
     from ..db.desktop_commands import DesktopCommandStore
     from ..db.desktop_tokens import DesktopTokenRecord, DesktopTokenStore
     from ..db.device_auth import DeviceAuthStore
+    from ..db.email import EmailSender
     from ..db.share_tokens import ResolvedShare, ShareTokenStore
     from ..db.workers import WorkersStore
     from ..worker_channel import WakeChannelRegistry
@@ -161,6 +163,7 @@ from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy
 from .. import thumbnail as thumbnail_helpers
 from .. import trim as trim_module
 from .. import waveform as waveform_helpers
+from ..access import AccessConfig, Feature, FeatureRequiredError, access_config, features_for
 from ..async_bridge import run_sync
 from ..audit_data import StageExportError, audit_shots_to_engine_shots, is_kept_shot
 from ..audit_revision import REVISION_FIELD, AuditRevisionConflictError, audit_revision
@@ -235,6 +238,7 @@ from . import export_storage, stage_edit
 from . import exports as export_helpers
 from . import match_exports as match_export_helpers
 from . import shooter_move as shooter_move_module
+from .access_gate import features_of, require_feature
 from .auto_sync import (
     MATCH_SYNC_LOCK_FILE,
     OWNER_LOCK_FILE,
@@ -468,6 +472,8 @@ async def _dispatch_proxy_job(state: AppState, raw_key: str) -> None:
             video_id=raw_key,
             args={"raw_path": raw_key},
         )
+    except FeatureRequiredError as exc:
+        logger.info("generate_proxy for %s not queued: account lacks %s", raw_key, exc.feature.value)
     except Exception:  # noqa: BLE001 - proxy is an optimization; never fail the upload
         logger.exception("failed to dispatch generate_proxy for %s", raw_key)
 
@@ -1164,6 +1170,37 @@ class AuthBeginRequest(BaseModel):
     email: str
 
 
+class AccessRequestBody(BaseModel):
+    """Body of ``POST /api/v1/access-requests`` (spec 2026-10-03): the
+    login page's "Request access" form and the marketing site's waitlist
+    form. Module-level for the same reason as :class:`AuthBeginRequest`."""
+
+    email: str = Field(max_length=320)
+    note: str | None = Field(default=None, max_length=2000)  # the store keeps 500
+    hp: str | None = None  # the marketing form's honeypot
+    source: Literal["form", "waitlist"] = "form"
+
+
+# The one reply to an access request, whatever the email's state: it must
+# not tell anyone which addresses have accounts or requests.
+INTAKE_MESSAGE = "If you have access, a sign-in link is on its way. Otherwise your request has been noted."
+
+
+# The client address of the sign-in request being served, so the blocked
+# branch of ``begin_login`` (``on_blocked``, which only sees the email) can
+# charge the intake rate limits. Set by ``/api/v1/auth/begin``.
+_intake_client: ContextVar[str | None] = ContextVar("_intake_client", default=None)
+
+
+def _intake_origins() -> frozenset[str]:
+    """Origins allowed to post the access-request form cross-site (the
+    marketing site). Read per request so a test or deploy can set it."""
+    raw = os.environ.get(
+        "SPLITSMITH_ACCESS_REQUEST_ORIGINS", "https://splitsmith.app,https://www.splitsmith.app"
+    )
+    return frozenset(o.strip() for o in raw.split(",") if o.strip())
+
+
 class ShareCreateRequest(BaseModel):
     """Body for minting a link.
 
@@ -1284,6 +1321,17 @@ class AdminPatchWorkerBody(BaseModel):
     name: str | None = None
 
 
+#: What an account with no features may still reach, as (method, path):
+#: who am I, and signing a credential out (session cookie or desktop token).
+#: Method-paired so ``PATCH /api/me`` stays refused.
+_DISABLED_ALLOWED_ROUTES: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("GET", "/api/me"),
+        ("POST", "/api/v1/auth/logout"),
+        ("DELETE", "/api/device/session"),
+    }
+)
+
 # /api/* paths the auth gate lets through without resolving a user.
 # Anything else under /api/* requires ``state.auth.authenticate_request``
 # to return a non-None User -- see the ``_auth_gate`` middleware inside
@@ -1298,6 +1346,9 @@ _PUBLIC_API_PATHS: frozenset[str] = frozenset(
         # (The ``/auth/callback`` redemption is not under /api/*, so the
         # auth gate skips it by prefix.)
         "/api/v1/auth/begin",
+        # Asking for an account happens before one exists. The route
+        # answers the same 202 whatever the email's state (spec 2026-10-03).
+        "/api/v1/access-requests",
         # Self-hosted worker bring-up + wake channel: the registration /
         # worker token in the request IS the auth (checked in the handlers,
         # uniform 404 on any failure) - the session gate must not 401 a
@@ -1828,6 +1879,24 @@ class AppState:
     # ``SPLITSMITH_ADMIN_EMAILS`` by ``_apply_hosted_mode_wiring``; stays
     # empty in local mode so nobody is admin there.
     admin_emails: frozenset[str] = frozenset()
+    # Account tier registry (spec 2026-10-03). Populated from
+    # ``SPLITSMITH_CONFIG`` by ``_apply_hosted_mode_wiring``; local mode
+    # never consults it.
+    access: AccessConfig = field(default_factory=AccessConfig)
+    # Access requests and the admin's account list (spec 2026-10-03), plus
+    # the mail transport the app sends access mail through. Raw (non-tenant)
+    # session factory: requests arrive before any account exists. ``None``
+    # in local mode.
+    access_requests: AccessRequestStore | None = None
+    accounts: AccountAccessStore | None = None
+    email_sender: EmailSender | None = None
+    # Records an access request and alerts the admins when it is new. Set
+    # by ``_apply_hosted_mode_wiring``; ``None`` in local mode.
+    record_access_request: Callable[..., Awaitable[None]] | None = None
+    # Fire-and-forget tasks the app started off the request path (the
+    # access-request admin alerts). Held here so the event loop's weak
+    # reference is not the only one; each task removes itself when done.
+    background_tasks: set[asyncio.Task] = field(default_factory=set)
     # Hosted + launcher only: serve-boot pending-jobs re-check, registered
     # as a FastAPI startup handler by create_app. Runs on every cold start
     # (incl. each wake from Railway app sleeping).
@@ -6853,6 +6922,8 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     engine + session factory, the queue deferrer, and the S3 client (the
     per-user isolation is purely the S3 key prefix + the per-transaction GUC).
     """
+    from sqlalchemy import select
+
     from ..db import (
         MagicLinkAuth,
         PostgresExportPresetStore,
@@ -6869,6 +6940,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
         sessionmaker,
         tenant_session_factory,
     )
+    from ..db import User as UserRow
     from ..db.comments import CommentStore
     from ..db.desktop_commands import DesktopCommandStore
     from ..db.desktop_tokens import DesktopTokenAuth, DesktopTokenStore
@@ -6910,6 +6982,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
 
     raw_admin = os.environ.get(SPLITSMITH_ADMIN_EMAILS_ENV, "")
     state.admin_emails = frozenset(e.strip().lower() for e in raw_admin.split(",") if e.strip())
+    state.access = access_config()
 
     # ``pool_disabled=True`` because the hosted-mode boot path runs
     # multiple short-lived event loops (each worker thread's asyncio.run,
@@ -6929,6 +7002,87 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     # signups to all but an allowlist via SPLITSMITH_SIGNUPS_OPEN=false +
     # SPLITSMITH_SIGNUP_ALLOWLIST. Returning users always sign in.
     signup_policy = build_signup_policy()
+
+    from ..db.access_requests import (
+        AccessRequestStore,
+        AccountAccessStore,
+        normalize_email,
+        normalize_note,
+        valid_request_email,
+    )
+
+    state.email_sender = email_sender
+    state.access_requests = AccessRequestStore(session_factory)
+    state.accounts = AccountAccessStore(session_factory)
+
+    async def _alert_admins(email: str, note: str | None, source: str) -> None:
+        admin_url = f"{(state.public_base_url or '').rstrip('/')}/admin/access"
+        for admin in sorted(state.admin_emails):
+            try:
+                await state.email_sender.send_access_request_alert(
+                    to=admin, email=email, note=note, source=source, admin_url=admin_url
+                )
+            except Exception:
+                logger.exception("access request alert to an admin failed")
+
+    def _alert_done(task: asyncio.Task) -> None:
+        state.background_tasks.discard(task)
+        if not task.cancelled() and task.exception() is not None:
+            logger.error("access request alert task failed", exc_info=task.exception())
+
+    # Intake bounds, per app (a module-level limiter would share its counts
+    # across every app in the process and every test in one xdist worker),
+    # in-process like the comment limiter, and shared by both writers that
+    # reach a stranger's request: the form route and sign-in's blocked
+    # branch. A sign-in for an existing or allowlisted account never gets
+    # here, so its mail is never limited.
+    #
+    # - 5 an hour per client address, keyed on ``request.client.host``.
+    #   The ``uvicorn.Config`` in ``run`` (this module) keeps uvicorn's
+    #   defaults: ``proxy_headers=True`` with ``forwarded_allow_ips`` from
+    #   ``FORWARDED_ALLOW_IPS`` (else 127.0.0.1). The hosted deploy sets
+    #   ``FORWARDED_ALLOW_IPS`` on the serve service so uvicorn takes the
+    #   client address from the proxy's X-Forwarded-For; without it, the
+    #   host is the proxy's address and every caller shares one key. We
+    #   never read X-Forwarded-For by hand: anyone can send it.
+    # - 50 an hour in total: the bound that holds whatever the client
+    #   address turns out to be.
+    #
+    # Over either limit nothing is recorded and nobody is alerted; the
+    # callers answer exactly as they would otherwise.
+    intake_ip_limiter = CommentRateLimiter(limit=5, window_s=3600.0)
+    intake_global_limiter = CommentRateLimiter(limit=50, window_s=3600.0)
+
+    async def _record_and_alert(
+        email: str, *, client: str | None, source: str = "login", note: str | None = None
+    ) -> None:
+        """Record an access request; alert each admin when it is new. The
+        requester is never mailed. A malformed email or a caller over the
+        intake bounds records nothing. The alert runs as a background task,
+        so neither the form nor sign-in waits on mail (which would also let
+        response time tell a new request from a known one); a failed alert
+        is logged and never fails the request. Reads ``state.email_sender``
+        when the alert runs so a swapped transport (tests) applies."""
+        if not valid_request_email(email):
+            return
+        now = time.monotonic()
+        if not (
+            intake_ip_limiter.allow(f"ip:{client or 'unknown'}", now=now)
+            and intake_global_limiter.allow("global", now=now)
+        ):
+            return
+        if not await state.access_requests.record(email, source=source, note=note):
+            return
+        # The alert names the request as stored (lower-cased email, note
+        # stripped and capped), not as typed.
+        task = asyncio.get_running_loop().create_task(
+            _alert_admins(normalize_email(email), normalize_note(note), source)
+        )
+        state.background_tasks.add(task)
+        task.add_done_callback(_alert_done)
+
+    state.record_access_request = _record_and_alert
+
     # Composite: a magic-link session cookie (browser) or a desktop bearer
     # token (sync push, #631) either resolve to a normal tenant user, so
     # current_tenant and RLS treat them identically. The auth gate DOES
@@ -6936,15 +7090,42 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     # a sync-scoped bearer is confined to /api/sync/*. Session cookie is
     # tried first (the common case).
     state.auth = CompositeAuth(
-        MagicLinkAuth(session_factory, email_sender, signup_policy=signup_policy),
+        MagicLinkAuth(
+            session_factory,
+            email_sender,
+            signup_policy=signup_policy,
+            default_tier=state.access.default_tier,
+            on_blocked=lambda email: state.record_access_request(email, client=_intake_client.get()),
+        ),
         DesktopTokenAuth(session_factory),
     )
 
     # Anonymous resolver for the share-token public path. Uses the RAW
     # session_factory (same as auth above) - share_tokens is not RLS-scoped
     # and the call arrives before any tenant GUC is set.
+    #
+    # A link follows its owner's account: an owner with no features at all
+    # (or a deleted one) has nothing reachable through a link, so the token
+    # resolves to None and ``_share_alias`` answers its uniform 404. Any
+    # feature keeps links working (``sharing`` exists for exactly that);
+    # minting a new one is ``share``'s gate on the management routes.
     async def _resolve_share_token(token: str) -> ResolvedShare | None:
-        return await _resolve_share_token_fn(session_factory, token)
+        resolved = await _resolve_share_token_fn(session_factory, token)
+        if resolved is None:
+            return None
+        async with session_factory() as session:
+            owner = (
+                await session.execute(
+                    select(UserRow.access_tier, UserRow.email, UserRow.deleted_at).where(
+                        UserRow.id == resolved.owner_user_id
+                    )
+                )
+            ).one_or_none()
+        if owner is None or owner.deleted_at is not None:
+            return None
+        if not features_for(owner.access_tier, owner.email, state.access, state.admin_emails):
+            return None
+        return resolved
 
     state.resolve_share_token = _resolve_share_token
 
@@ -7018,6 +7199,26 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
         # injected so a fresh backend resolves the same kinds without
         # re-registration.
         tenant_factory = tenant_session_factory(session_factory, user_id)
+
+        async def _may_submit() -> bool:
+            # Read the tier per submit, not per tenant build: a downgrade
+            # applies to the next job, and a job body that chains another
+            # job (trim -> shot_detect) is checked again at that point.
+            # The raw factory: ``users`` is not under RLS.
+            async with session_factory() as session:
+                row = (
+                    await session.execute(
+                        select(UserRow.access_tier, UserRow.email, UserRow.deleted_at).where(
+                            UserRow.id == user_id
+                        )
+                    )
+                ).one_or_none()
+            if row is None or row.deleted_at is not None:
+                return False
+            return Feature.hosted_compute in features_for(
+                row.access_tier, row.email, state.access, state.admin_emails
+            )
+
         return TenantContext(
             user_id=user_id,
             recent_projects=PostgresRecentProjectsStore(tenant_factory, user_id=user_id),
@@ -7028,6 +7229,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
                 deferrer=deferrer,
                 sweep_on_boot=False,
                 bodies=state.job_bodies,
+                submit_allowed=_may_submit,
             ),
             matches_store=PostgresMatchStore(tenant_factory, user_id=user_id),
             project_state=ProjectStateStore(tenant_factory, user_id=user_id),
@@ -7042,6 +7244,15 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
         )
 
     state._build_tenant = _build_tenant
+    # The process-level registry stays as the body map and as what
+    # ``state.jobs`` returns when no tenant is pinned. In hosted mode a job
+    # must have an owner (and that owner's account check), so the fallback
+    # refuses to run one in-process.
+    if isinstance(state._jobs, JobRegistry):
+        state._jobs.submit_refusal = (
+            "hosted mode: no tenant is pinned, so there is no account to own this job; "
+            "submit through the request's or job's tenant"
+        )
     # No boot job backend / no boot restart sweep: with MagicLinkAuth there
     # is no boot user to bind one to, and an out-of-process Procrastinate
     # worker (not this API process) now owns running jobs, so failing
@@ -7670,7 +7881,7 @@ def create_app(
         )
 
     @app.post("/api/v1/auth/begin")
-    async def _auth_begin(payload: AuthBeginRequest) -> JSONResponse:
+    async def _auth_begin(payload: AuthBeginRequest, request: Request) -> JSONResponse:
         """Start a magic-link sign-in: e-mail a link to ``payload.email``.
 
         Always 200 regardless of whether the address has an account -- the
@@ -7686,8 +7897,59 @@ def create_app(
         # through the composite to backends[0]. Safe: these routes 404
         # above unless hosted mode is active, and hosted mode always
         # installs MagicLinkAuth as backends[0].
-        await state.auth.backends[0].begin_login(email, base_url=state.public_base_url)
+        # The blocked branch records an access request and charges the
+        # intake bounds against this caller (see ``_intake_client``).
+        client_token = _intake_client.set(request.client.host if request.client else None)
+        try:
+            await state.auth.backends[0].begin_login(email, base_url=state.public_base_url)
+        finally:
+            _intake_client.reset(client_token)
         return JSONResponse({"ok": True})
+
+    def _intake_cors(request: Request, response: Response) -> Response:
+        origin = request.headers.get("origin")
+        if origin and origin in _intake_origins():
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "content-type"
+            response.headers["Vary"] = "Origin"
+        return response
+
+    @app.options("/api/v1/access-requests")
+    async def _access_request_preflight(request: Request) -> Response:
+        if not _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        return _intake_cors(request, Response(status_code=204))
+
+    @app.post("/api/v1/access-requests", status_code=202)
+    async def _access_request(payload: AccessRequestBody, request: Request) -> Response:
+        """Ask for a hosted account. Always the same 202 whatever the email's
+        state, so the route cannot tell anyone which emails have accounts.
+        Nothing is ever mailed to the requester; a new request alerts the
+        admins."""
+        if not _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        # Lazy: splitsmith.db is hosted-only (a slim local install lacks it).
+        from ..db.access_requests import valid_request_email
+
+        if not valid_request_email(payload.email):
+            raise HTTPException(status_code=400, detail="a valid email is required")
+        email = payload.email.strip()
+        # Over the intake bounds (5 an hour per client address, 50 in total,
+        # shared with sign-in; see ``_record_and_alert``) nothing is recorded
+        # and the reply is the same.
+        if not payload.hp:
+            try:
+                await state.record_access_request(
+                    email,
+                    client=request.client.host if request.client else None,
+                    source=payload.source,
+                    note=payload.note,
+                )
+            except Exception:
+                # A failed write must not answer differently either.
+                logger.exception("recording an access request failed")
+        return _intake_cors(request, JSONResponse({"ok": True, "message": INTAKE_MESSAGE}, status_code=202))
 
     @app.get("/auth/callback")
     async def _auth_callback(token: str, request: Request) -> Response:
@@ -7777,7 +8039,12 @@ def create_app(
             ]
         )
 
-    @app.post("/api/match/shares", response_model=ShareInfo, status_code=201)
+    @app.post(
+        "/api/match/shares",
+        response_model=ShareInfo,
+        status_code=201,
+        dependencies=[Depends(require_feature(Feature.share))],
+    )
     async def _create_match_share(req: ShareCreateRequest = ShareCreateRequest()) -> ShareInfo:
         """Create a new share token for the current match. Returns 201."""
         if not _hosted_mode_active():
@@ -7812,7 +8079,11 @@ def create_app(
             scope=s.scope,
         )
 
-    @app.patch("/api/match/shares/{share_id}/cameras", response_model=ShareInfo)
+    @app.patch(
+        "/api/match/shares/{share_id}/cameras",
+        response_model=ShareInfo,
+        dependencies=[Depends(require_feature(Feature.share))],
+    )
     async def _set_match_share_cameras(share_id: str, req: ShareCamerasRequest) -> ShareInfo:
         """Set which camera each shooter starts on for one share link.
 
@@ -7854,7 +8125,11 @@ def create_app(
             cameras=s.cameras,
         )
 
-    @app.delete("/api/match/shares/{share_id}", status_code=204)
+    @app.delete(
+        "/api/match/shares/{share_id}",
+        status_code=204,
+        dependencies=[Depends(require_feature(Feature.share))],
+    )
     async def _delete_match_share(share_id: str) -> Response:
         """Revoke a share token. 204 on success (including already-revoked),
         404 when the share_id is unknown or not owned by this user."""
@@ -8226,6 +8501,13 @@ def create_app(
         return JSONResponse(
             status_code=503,
             content={"detail": {"code": "shutting_down", "message": str(exc)}},
+        )
+
+    @app.exception_handler(FeatureRequiredError)
+    async def _feature_required_handler(_request: Request, exc: FeatureRequiredError) -> JSONResponse:
+        """Map the job backend's account-feature backstop to the gate's 403 body."""
+        return JSONResponse(
+            status_code=403, content={"detail": {"code": "feature_required", "feature": exc.feature.value}}
         )
 
     @app.exception_handler(RequestValidationError)
@@ -8617,6 +8899,15 @@ def create_app(
         # lookup per request in hosted mode. The scope is shared with the
         # endpoint, so this propagates downstream.
         request.state.user = user
+        # Account gate (spec 2026-10-03): an account with no features keeps
+        # only "who am I" and sign-out. Read per request from the users row,
+        # so a downgrade applies to the next request.
+        if (
+            hosted
+            and not features_of(request, user)
+            and (request.method, path) not in _DISABLED_ALLOWED_ROUTES
+        ):
+            return JSONResponse(status_code=403, content={"detail": {"code": "account_disabled"}})
         # Scope gate (#719). Allowlist, not a denylist: only None (session
         # cookie, loopback user) and "full" (legacy pasted token) are
         # unrestricted. Everything else - "sync" today, and any value a
@@ -8983,7 +9274,7 @@ def create_app(
             background=BackgroundTask(shutil.rmtree, tmp, ignore_errors=True),
         )
 
-    @app.post("/api/me/projects/import")
+    @app.post("/api/me/projects/import", dependencies=[Depends(require_feature(Feature.create_match))])
     async def import_project_endpoint(
         archive: UploadFile = File(...),
         dest_root: str = Form(...),
@@ -9034,7 +9325,7 @@ def create_app(
             }
         )
 
-    @app.post("/api/me/raw/upload")
+    @app.post("/api/me/raw/upload", dependencies=[Depends(require_feature(Feature.raw_upload))])
     async def upload_raw_video(
         file: UploadFile = File(...),
         x_content_sha256: str | None = Header(default=None),
@@ -9158,7 +9449,9 @@ def create_app(
             )
         return storage
 
-    @app.post("/api/me/raw/upload/multipart/create")
+    @app.post(
+        "/api/me/raw/upload/multipart/create", dependencies=[Depends(require_feature(Feature.raw_upload))]
+    )
     def create_multipart_upload(
         req: MultipartCreateRequest,
         user: User = Depends(get_current_user),
@@ -9185,7 +9478,9 @@ def create_app(
             }
         )
 
-    @app.post("/api/me/raw/upload/multipart/part-url")
+    @app.post(
+        "/api/me/raw/upload/multipart/part-url", dependencies=[Depends(require_feature(Feature.raw_upload))]
+    )
     def sign_multipart_part(
         req: MultipartPartUrlRequest,
         user: User = Depends(get_current_user),
@@ -9201,7 +9496,9 @@ def create_app(
             raise HTTPException(status_code=500, detail=f"could not sign part: {exc}") from exc
         return JSONResponse({"url": url})
 
-    @app.post("/api/me/raw/upload/multipart/complete")
+    @app.post(
+        "/api/me/raw/upload/multipart/complete", dependencies=[Depends(require_feature(Feature.raw_upload))]
+    )
     def complete_multipart_upload(
         req: MultipartCompleteRequest,
         user: User = Depends(get_current_user),
@@ -9225,7 +9522,9 @@ def create_app(
         asyncio.run(_dispatch_proxy_job(state, key))
         return JSONResponse({"path": key, "size": size, "sha256": None, "filename": name})
 
-    @app.post("/api/me/raw/upload/multipart/abort")
+    @app.post(
+        "/api/me/raw/upload/multipart/abort", dependencies=[Depends(require_feature(Feature.raw_upload))]
+    )
     def abort_multipart_upload(
         req: MultipartAbortRequest,
         user: User = Depends(get_current_user),
@@ -9517,19 +9816,24 @@ def create_app(
                     )
                 )
                 if existing is None:
-                    asyncio.run(
-                        state.jobs.submit(
-                            kind="detect_beep",
-                            stage_number=sv.stage_number,
-                            shooter_slug=slug,
-                            video_id=sv.video_id,
-                            args={
-                                "slug": slug,
-                                "stage_number": sv.stage_number,
-                                "video_id": sv.video_id,
-                            },
+                    try:
+                        asyncio.run(
+                            state.jobs.submit(
+                                kind="detect_beep",
+                                stage_number=sv.stage_number,
+                                shooter_slug=slug,
+                                video_id=sv.video_id,
+                                args={
+                                    "slug": slug,
+                                    "stage_number": sv.stage_number,
+                                    "video_id": sv.video_id,
+                                },
+                            )
                         )
-                    )
+                    except FeatureRequiredError as exc:
+                        # The account answer is the same for every video.
+                        _log_chain_skipped("detect_beep", slug, sv.stage_number, exc)
+                        return
         else:
             # Sequential-mode: submit only the first unprocessed covered stage.
             for n in raw.covers_stages:
@@ -9554,15 +9858,18 @@ def create_app(
                 )
                 if existing is not None:
                     break  # chain already started
-                asyncio.run(
-                    state.jobs.submit(
-                        kind="detect_beep",
-                        stage_number=n,
-                        shooter_slug=slug,
-                        video_id=primary.video_id,
-                        args={"slug": slug, "stage_number": n, "video_id": primary.video_id},
+                try:
+                    asyncio.run(
+                        state.jobs.submit(
+                            kind="detect_beep",
+                            stage_number=n,
+                            shooter_slug=slug,
+                            video_id=primary.video_id,
+                            args={"slug": slug, "stage_number": n, "video_id": primary.video_id},
+                        )
                     )
-                )
+                except FeatureRequiredError as exc:
+                    _log_chain_skipped("detect_beep", slug, n, exc)
                 break
 
     @app.post("/api/shooters/{slug}/raw-videos/attach")
@@ -11090,14 +11397,24 @@ def create_app(
                 root / video.path,
             )
             return False
-        await _submit_detect_beep(slug, stage_number, video)
+        try:
+            await _submit_detect_beep(slug, stage_number, video)
+        except FeatureRequiredError as exc:
+            _log_chain_skipped("detect_beep", slug, stage_number, exc)
+            return False
         return True
 
     # Routers outside this closure (footage_sort_api) queue beeps through
     # the same hook rather than a second copy of its rules.
     app.state.auto_queue_beep = _auto_queue_beep_if_needed
 
-    @app.put("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/beep-window")
+    # Gated up front, not left to the backstop: the route writes the window
+    # and then queues the detection that is its whole point, so a refusal
+    # after the write would answer 403 for a change that committed.
+    @app.put(
+        "/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/beep-window",
+        dependencies=[Depends(require_feature(Feature.hosted_compute))],
+    )
     async def set_beep_window(
         slug: str, stage_number: int, video_id: str, body: BeepWindowRequest
     ) -> JSONResponse:
@@ -11370,7 +11687,7 @@ def create_app(
         return JSONResponse(job.model_dump(mode="json"))
 
     @app.get("/api/me", response_model=User)
-    def get_me(user: User = Depends(get_current_user)) -> User:
+    def get_me(request: Request, user: User = Depends(get_current_user)) -> User:
         """Return the operator behind this request.
 
         Local mode always resolves to the ``LoopbackAuth`` sentinel
@@ -11381,10 +11698,17 @@ def create_app(
         ``is_admin`` is derived from ``state.admin_emails`` at request
         time; it is never stored on the user record itself.
         """
-        return user.model_copy(update={"is_admin": user.email.lower() in state.admin_emails})
+        return user.model_copy(
+            update={
+                "is_admin": user.email.lower() in state.admin_emails,
+                "features": sorted(f.value for f in features_of(request, user)),
+            }
+        )
 
     @app.patch("/api/me", response_model=User)
-    async def patch_me(req: UpdateMeRequest, user: User = Depends(get_current_user)) -> User:
+    async def patch_me(
+        request: Request, req: UpdateMeRequest, user: User = Depends(get_current_user)
+    ) -> User:
         """Update the signed-in account's profile. Hosted mode only.
 
         Local mode 404s: ``LoopbackAuth``'s sentinel user has no
@@ -11413,6 +11737,7 @@ def create_app(
             update={
                 "display_name": display_name,
                 "is_admin": user.email.lower() in state.admin_emails,
+                "features": sorted(f.value for f in features_of(request, user)),
             }
         )
 
@@ -11467,7 +11792,11 @@ def create_app(
             raise HTTPException(status_code=404, detail=f"unknown job: {job_id}")
         return job
 
-    @app.post("/api/me/jobs/{job_id}/retry", response_model=Job)
+    @app.post(
+        "/api/me/jobs/{job_id}/retry",
+        response_model=Job,
+        dependencies=[Depends(require_feature(Feature.hosted_compute))],
+    )
     async def retry_job(job_id: str, user: User = Depends(get_current_user)) -> Job:
         """Re-enqueue a failed job with its original args; returns the new job.
 
@@ -11689,16 +12018,31 @@ def create_app(
             is not None
         ):
             return
-        await state.jobs.submit(
-            kind="trim",
-            stage_number=stage.stage_number,
-            shooter_slug=slug,
-            video_id=video.video_id,
-            args={
-                "slug": slug,
-                "stage_number": stage.stage_number,
-                "video_id": video.video_id,
-            },
+        try:
+            await state.jobs.submit(
+                kind="trim",
+                stage_number=stage.stage_number,
+                shooter_slug=slug,
+                video_id=video.video_id,
+                args={
+                    "slug": slug,
+                    "stage_number": stage.stage_number,
+                    "video_id": video.video_id,
+                },
+            )
+        except FeatureRequiredError as exc:
+            _log_chain_skipped("trim", slug, stage.stage_number, exc)
+
+    def _log_chain_skipped(kind: str, slug: str, stage_number: int, exc: FeatureRequiredError) -> None:
+        """A job chained after a committed write was refused by the account backstop.
+
+        The write the request made stands and the route answers with its
+        normal success; the chained job is simply not queued. Only the
+        API-side chains catch this: a job body chaining on the worker
+        lets the refusal fail the job.
+        """
+        logger.info(
+            "%s for %s stage %d not queued: account lacks %s", kind, slug, stage_number, exc.feature.value
         )
 
     def _select_candidate_on_video(video: StageVideo, time_value: float) -> None:
@@ -11772,7 +12116,10 @@ def create_app(
         # on its next sync pull (bidirectional sync design).
         if req.beep_time is not None and current_match_origin.get() != "desktop":
             await _maybe_chain_trim(slug, stage, video)
-            await _advance_sequential_chain(state, slug, project, video, stage_number)
+            try:
+                await _advance_sequential_chain(state, slug, project, video, stage_number)
+            except FeatureRequiredError as exc:
+                _log_chain_skipped("detect_beep", slug, stage_number, exc)
         return JSONResponse(project.model_dump(mode="json"))
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/beep")
@@ -11795,7 +12142,10 @@ def create_app(
         project.save(state.shooter_root(slug))
         if req.beep_time is not None:
             await _maybe_chain_trim(slug, stage, primary)
-            await _advance_sequential_chain(state, slug, project, primary, stage_number)
+            try:
+                await _advance_sequential_chain(state, slug, project, primary, stage_number)
+            except FeatureRequiredError as exc:
+                _log_chain_skipped("detect_beep", slug, stage_number, exc)
         return JSONResponse(project.model_dump(mode="json"))
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/time")
@@ -11995,12 +12345,15 @@ def create_app(
             and await state.jobs.find_active(kind="shot_detect", stage_number=stage_number, shooter_slug=slug)
             is None
         ):
-            await state.jobs.submit(
-                kind="shot_detect",
-                stage_number=stage_number,
-                shooter_slug=slug,
-                args={"slug": slug, "stage_number": stage_number},
-            )
+            try:
+                await state.jobs.submit(
+                    kind="shot_detect",
+                    stage_number=stage_number,
+                    shooter_slug=slug,
+                    args={"slug": slug, "stage_number": stage_number},
+                )
+            except FeatureRequiredError as exc:
+                _log_chain_skipped("shot_detect", slug, stage_number, exc)
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/beep/review")
     async def set_beep_reviewed(
@@ -14263,7 +14616,7 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _register_response(target.resolve(), recorded, match_id)
 
-    @app.post("/api/match/create-manual")
+    @app.post("/api/match/create-manual", dependencies=[Depends(require_feature(Feature.create_match))])
     async def create_match_manual(req: CreateMatchManualRequest) -> HealthResponse:
         """Scaffold a Match folder from the manual create-match form (#322).
 
@@ -14363,7 +14716,9 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _register_response(target.resolve(), recorded, match_id)
 
-    @app.post("/api/match/create-from-scoreboard")
+    @app.post(
+        "/api/match/create-from-scoreboard", dependencies=[Depends(require_feature(Feature.create_match))]
+    )
     async def create_match_from_scoreboard(
         req: CreateMatchScoreboardRequest,
     ) -> HealthResponse:
@@ -17676,7 +18031,7 @@ def create_app(
     # sync_api._hosted_gate).
     from .sync_api import router as sync_router
 
-    app.include_router(sync_router)
+    app.include_router(sync_router, dependencies=[Depends(require_feature(Feature.sync))])
 
     # Browser-assisted device authorization router (#719). Same lazy-import
     # / always-registered idiom as sync_router above: db imports stay
@@ -17686,6 +18041,14 @@ def create_app(
     from .device_auth_api import router as device_router
 
     app.include_router(device_router)
+
+    # Admin routes for access requests and account tiers (spec
+    # 2026-10-03). Same lazy-import / always-registered idiom as
+    # sync_router above: db imports stay inside admin_access_api.py, and
+    # every route 404s outside hosted mode (see admin_access_api._admin_gate).
+    from .admin_access_api import router as admin_access_router
+
+    app.include_router(admin_access_router)
 
     # Issue #1000: the local YouTube surface (settings, connect, upload).
     # Gated the other way round from device_router: ``_local_gate`` inside
