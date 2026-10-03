@@ -3,6 +3,15 @@ name: CI
 on:
   push:
     branches: [main]
+    # Docs and marketing-site changes build nothing these jobs ship.
+    # functions/ (the update feed, tested in desktop-unit) and the root
+    # package.json (CI's pnpm version) are deliberately not listed.
+    paths-ignore: &docs_only
+      - "site/**"
+      - "docs/**"
+      - "**/*.md"
+      - "wrangler.toml"
+      - ".github/workflows/deploy-marketing.yml"
   pull_request:
     # Default ``branches: [main]`` skips PRs whose base is a feature
     # branch (stacked PRs). Match every base so each stacked PR also
@@ -11,6 +20,7 @@ on:
     # ``labeled`` so adding ``run-slim-smoke`` to an existing PR
     # triggers a fresh run without needing a force-push.
     types: [opened, synchronize, reopened, labeled]
+    paths-ignore: *docs_only
   workflow_dispatch:
 
 jobs:
