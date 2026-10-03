@@ -15,12 +15,14 @@ import {
   type DesktopCommand,
   type DesktopPresence,
   type ExportOverview,
+  type ExportPreset,
+  type ExportPresetBody,
   type MatchCapability,
   type MatchOrigin,
   type MatchProject,
   type StageExportStatus,
 } from "@/lib/api";
-import { DEFAULT_EXPORT_SETTINGS, loadLastUsed, saveLastUsed } from "@/lib/exportPresets";
+import { DEFAULT_EXPORT_SETTINGS, loadLastUsed, saveLastUsed, settingsToBody } from "@/lib/exportPresets";
 import { ExportRoute } from "@/pages/Export";
 
 const deployment = vi.hoisted(() => ({ mode: "hosted" as "hosted" | "local" }));
@@ -168,7 +170,7 @@ function renderExport({
   origin,
   mode,
 }: {
-  capabilities: MatchCapability[];
+  capabilities: MatchCapability[] | null;
   origin: MatchOrigin;
   mode: "hosted" | "local";
 }) {
@@ -188,28 +190,65 @@ function renderExport({
       stage_statuses: [],
     },
   ];
-  function Shell() {
+  function Shell({ caps }: { caps: MatchCapability[] | null }) {
     return (
       <Outlet
-        context={{ project: project(origin), health: null, shooters, refresh: () => {}, origin, capabilities }}
+        context={{ project: project(origin), health: null, shooters, refresh: () => {}, origin, capabilities: caps }}
       />
     );
   }
-  render(
+  const tree = (caps: MatchCapability[] | null) => (
     <MemoryRouter initialEntries={["/match/m1/export/anna"]}>
       <ConfirmProvider>
         <Routes>
-          <Route path="/match/:matchId" element={<Shell />}>
+          <Route path="/match/:matchId" element={<Shell caps={caps} />}>
             <Route path="export/:slug" element={<ExportRoute />} />
           </Route>
         </Routes>
       </ConfirmProvider>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
+  const { rerender } = render(tree(capabilities));
+  // The match shell's capabilities load after the page first renders.
+  return { resolveCapabilities: (caps: MatchCapability[]) => rerender(tree(caps)) };
 }
+
+const DEFAULT_BODY = settingsToBody(DEFAULT_EXPORT_SETTINGS);
+
+function preset(id: string, name: string, body: Partial<ExportPresetBody> = {}): ExportPreset {
+  return { preset_id: id, name, builtin: true, updated_at: "2026-09-15T00:00:00Z", body: { ...DEFAULT_BODY, ...body } };
+}
+
+/** The API's built-ins, as far as these tests read them. */
+const BUILTINS: ExportPreset[] = [
+  preset("builtin:final-cut", "Final Cut bundle"),
+  preset("builtin:youtube", "YouTube match video", {
+    output_format: "mp4",
+    youtube_preset: true,
+    padding_preset: "action",
+    head_pad_seconds: 0.5,
+    tail_pad_seconds: 1,
+    title_page: true,
+    closing_card: true,
+    stage_card_style: "slate",
+    summary_hold_seconds: 3,
+    overlay: true,
+  }),
+];
+
+/** What a first YouTube render must carry: the cards and the overlay. */
+const YOUTUBE_LOOK = {
+  title_page: true,
+  closing_card: true,
+  title_kind: "slate",
+  summary_hold_seconds: 3,
+  include_overlay: true,
+  head_pad_seconds: 0.5,
+};
 
 beforeEach(() => {
   vi.mocked(api.getExportOverview).mockResolvedValue(OVERVIEW);
+  vi.mocked(api.getExportRuns).mockResolvedValue({ runs: [] });
   vi.mocked(api.getYouTubeSettings).mockResolvedValue({
     configured: true,
     connected: false,
@@ -285,6 +324,73 @@ describe("Export on a desktop-synced match", () => {
     // The stored choice is the user's, and stays as it was.
     await new Promise((r) => setTimeout(r, 350)); // past the last-used debounce
     expect(loadLastUsed(window.localStorage)?.body).toMatchObject({ mode: "trims", output_format: "fcpxml" });
+  });
+
+  it("a first request starts on the YouTube video, with its cards and overlay", async () => {
+    // A phone that once exported a hosted-native match as Final Cut: that
+    // look is the page's own and must not ride into the desktop's render.
+    vi.mocked(api.getExportPresets).mockResolvedValue({ presets: BUILTINS });
+    vi.mocked(api.requestDesktopRender).mockResolvedValue(renderCommand({ status: "pending" }));
+    saveLastUsed(window.localStorage, DEFAULT_EXPORT_SETTINGS, "builtin:final-cut");
+    renderExport({ capabilities: MIRROR_CAPABILITIES, origin: "desktop", mode: "hosted" });
+    const button = await screen.findByRole("button", { name: "Render on desktop" });
+    await waitFor(() => expect(button).toBeEnabled());
+    await waitFor(() =>
+      expect(within(screen.getByRole("group", { name: "Preset" })).getByRole("button", { name: "YouTube match video" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      ),
+    );
+    await userEvent.setup().click(button);
+    await waitFor(() => expect(api.requestDesktopRender).toHaveBeenCalled());
+    expect(vi.mocked(api.requestDesktopRender).mock.calls[0][1]).toMatchObject(YOUTUBE_LOOK);
+    // Remembered for the next request, apart from the page's own export.
+    await new Promise((r) => setTimeout(r, 350)); // past the last-used debounce
+    expect(loadLastUsed(window.localStorage, "desktop")?.presetId).toBe("builtin:youtube");
+    expect(loadLastUsed(window.localStorage)?.presetId).toBe("builtin:final-cut");
+  });
+
+  it("starts on the YouTube video when the capabilities arrive after the page", async () => {
+    vi.mocked(api.getExportPresets).mockResolvedValue({ presets: BUILTINS });
+    vi.mocked(api.requestDesktopRender).mockResolvedValue(renderCommand({ status: "pending" }));
+    // The page's own export follows this shooter's Final Cut history.
+    vi.mocked(api.getExportRuns).mockResolvedValue({
+      runs: [
+        {
+          run_id: "r1",
+          kind: "match",
+          finished_at: "2026-09-20T00:00:00Z",
+          duration_seconds: 10,
+          stage_numbers: [1, 2],
+          formats: ["fcpxml"],
+          anomaly_count: 0,
+          artifacts: [],
+        },
+      ],
+    });
+    const { resolveCapabilities } = renderExport({ capabilities: null, origin: "desktop", mode: "hosted" });
+    // Unknown capabilities: the page's own form, on its first preset.
+    await screen.findByRole("button", { name: "Export bundle" });
+    await waitFor(() =>
+      expect(within(screen.getByRole("group", { name: "Preset" })).getByRole("button", { name: "Final Cut bundle" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      ),
+    );
+    resolveCapabilities(MIRROR_CAPABILITIES);
+    const button = await screen.findByRole("button", { name: "Render on desktop" });
+    await waitFor(() => expect(button).toBeEnabled());
+    await userEvent.setup().click(button);
+    await waitFor(() => expect(api.requestDesktopRender).toHaveBeenCalled());
+    expect(vi.mocked(api.requestDesktopRender).mock.calls[0][1]).toMatchObject(YOUTUBE_LOOK);
+  });
+
+  it("a bundle preset is offered greyed, since the desktop renders the video only", async () => {
+    vi.mocked(api.getExportPresets).mockResolvedValue({ presets: BUILTINS });
+    renderExport({ capabilities: MIRROR_CAPABILITIES, origin: "desktop", mode: "hosted" });
+    await screen.findByRole("button", { name: "Render on desktop" });
+    const row = within(await screen.findByRole("group", { name: "Preset" }));
+    await waitFor(() => expect(row.getByRole("button", { name: "Final Cut bundle" })).toBeDisabled());
   });
 
   it("sends one request at a time", async () => {
