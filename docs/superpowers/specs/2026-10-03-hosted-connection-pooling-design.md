@@ -111,26 +111,40 @@ New:
 
 ```python
 class LoopEngines:
-    """One AsyncEngine per long-lived event loop, for loop-bound drivers."""
+    """One pooled AsyncEngine per *adopted* long-lived event loop."""
 
-    def __init__(self, url: str, *, echo: bool = False) -> None: ...
+    def __init__(self, url: str, *, echo: bool = False, pool_size: int = 5, max_overflow: int = 10) -> None: ...
+
+    def adopt_current_loop(self) -> AsyncEngine:
+        """Mark the running loop long-lived; its pooled engine, created on first call."""
 
     def for_current_loop(self) -> AsyncEngine:
-        """The engine bound to the running loop, created on first use."""
+        """The running loop's engine if adopted, else the shared NullPool fallback."""
 
-    async def dispose_all(self) -> None: ...
+    async def dispose_current_loop(self) -> None: ...
+    async def dispose_fallback(self) -> None: ...
 ```
 
-- For a `postgresql+asyncpg` URL, engines are keyed on the running loop
+- Only an **adopted** loop gets a pool. The two long-lived loops adopt
+  themselves at known points: the `DbRunner` on its thread's start, the
+  app loop in the hosted lifespan's startup, the worker loop at the top
+  of `queue.run_worker`. Any other loop -- a `concurrent.futures`
+  thread's `asyncio.run`, the re-entrant fallback in `run_sync`, a test's
+  own loop -- gets one shared **fallback** engine with `NullPool`, which
+  never reuses a connection and is therefore safe from every loop. That
+  fallback is exactly what the whole process used before this change,
+  so an un-adopted path is never worse than today, only not faster.
+- For a `postgresql+asyncpg` URL, adopted engines are keyed on the loop
   in a `weakref.WeakKeyDictionary` (loops are weak-referenceable, checked
-  on 3.12 / asyncpg 0.31 / SQLAlchemy 2.0.50); a closed loop's engine is
-  disposed and dropped when next seen.
-- For any other URL (SQLite in tests and `test_hosted_mode_boot`) there
-  is **one** engine, whatever loop asks. aiosqlite tolerates cross-loop
-  use, and a per-loop engine on `sqlite:///:memory:` would be a separate
-  database per loop, which the 32 tests that set
-  `SPLITSMITH_DATABASE_URL` to SQLite would not notice until they failed
-  on data that "vanished".
+  on 3.12 / asyncpg 0.31 / SQLAlchemy 2.0.50); a collected loop takes its
+  entry with it, and `dispose_current_loop` disposes explicitly on
+  shutdown, on the loop that owns the connections.
+- For any other URL (SQLite in tests and `test_hosted_mode_boot`) every
+  method returns the fallback engine: **one** `NullPool` engine, whatever
+  loop asks, which is byte for byte what the hosted wiring built before.
+  A per-loop engine on `sqlite:///:memory:` would be a separate database
+  per loop, which the 32 tests that set `SPLITSMITH_DATABASE_URL` to
+  SQLite would not notice until they failed on data that "vanished".
 - Pool settings for asyncpg engines: `pool_size=5`, `max_overflow=10`,
   `pool_pre_ping=True`, `pool_timeout=30`. No `pool_recycle`, no warm-up,
   no background ping: the pool makes no traffic the request did not ask
@@ -182,7 +196,13 @@ target thread, so without the explicit context the RLS listener's
    running on the calling thread. Blocking an async handler's loop for
    one small query is what the throwaway-thread branch already does
    today; this does not change loop-friendliness.
-2. No runner (local mode, tests that never built the hosted app) -> the
+2. The one re-entrant case -- the calling coroutine is itself running
+   *on* the runner loop (a sync state accessor reached from inside a
+   coroutine a sync handler submitted) -> the current throwaway-thread
+   behaviour, because blocking the runner on itself would deadlock. That
+   fresh loop is un-adopted and gets `LoopEngines`' NullPool fallback, so
+   it is safe, merely not pooled.
+3. No runner (local mode, tests that never built the hosted app) -> the
    current behaviour, byte for byte: `asyncio.run` with no running loop,
    the throwaway thread otherwise.
 
@@ -213,9 +233,19 @@ the same treatment through the backend methods it calls; a job body on an
 
 ```python
 engines = LoopEngines(url)
+state.db_engines = engines
 session_factory = loop_sessionmaker(engines)
-runner = DbRunner(); runner.start(); async_bridge.install_runner(runner)
+runner = get_runner()
+if runner is None or not runner.is_running:
+    runner = DbRunner(on_start=engines.adopt_current_loop, on_stop=engines.dispose_current_loop)
+    runner.start()
+    install_runner(runner)
 ```
+
+The runner is process-global: a second `create_app` in the same process
+(tests) reuses it. The hosted lifespan adopts the app loop at startup and
+disposes its engine at shutdown; `queue.run_worker` does the same for the
+worker loop.
 
 The comment block that explains `pool_disabled=True` is replaced by one
 that names the loop-binding rule and points here. The shutdown event
