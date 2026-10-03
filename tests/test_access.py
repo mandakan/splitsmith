@@ -83,7 +83,9 @@ def test_env_default_tier_unknown_fails(monkeypatch: pytest.MonkeyPatch) -> None
         access_config()
 
 
-def test_env_default_tier_applies_on_top_of_yaml_tiers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_env_default_tier_applies_on_top_of_yaml_tiers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     path = tmp_path / "c.yaml"
     path.write_text(
         "access:\n  default_tier: full\n  tiers:\n"
