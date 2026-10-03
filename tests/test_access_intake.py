@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import threading
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -48,6 +50,17 @@ def requests_list(state) -> list:  # noqa: ANN001
     return asyncio.run(state.access_requests.list())
 
 
+def drain(client: TestClient, state) -> None:  # noqa: ANN001
+    """Wait for the app's background tasks (the admin alerts) on the app's
+    own event loop."""
+
+    async def _wait() -> None:
+        while state.background_tasks:
+            await asyncio.gather(*list(state.background_tasks), return_exceptions=True)
+
+    client.portal.call(_wait)
+
+
 # ---------------------------------------------------------------------------
 # Sign-in with an unknown email
 # ---------------------------------------------------------------------------
@@ -58,6 +71,7 @@ def test_unknown_email_at_login_becomes_a_pending_request(closed_app) -> None:  
     assert client.post("/api/v1/auth/begin", json={"email": "Erik@x.se"}).status_code == 200
     [row] = requests_list(state)
     assert (row.email, row.source, row.status) == ("erik@x.se", "login", "pending")
+    drain(client, state)
     assert sender.links == []  # nothing to the requester
     assert sender.granted == []
     [alert] = sender.alerts  # one alert, to the admin
@@ -73,14 +87,16 @@ def test_unknown_email_at_login_becomes_a_pending_request(closed_app) -> None:  
 def test_allowlisted_login_records_nothing(closed_app) -> None:  # noqa: ANN001
     client, sender, state = closed_app
     login(client, sender, "me@x.se")
+    drain(client, state)
     assert requests_list(state) == []
     assert sender.alerts == []
 
 
 def test_repeat_request_does_not_realert(closed_app) -> None:  # noqa: ANN001
-    client, sender, _ = closed_app
+    client, sender, state = closed_app
     client.post("/api/v1/auth/begin", json={"email": "erik@x.se"})
     client.post("/api/v1/access-requests", json={"email": "erik@x.se", "note": "Bromma"})
+    drain(client, state)
     assert len(sender.alerts) == 1
 
 
@@ -115,6 +131,7 @@ def test_form_records_source_and_note(closed_app) -> None:  # noqa: ANN001
     client, sender, state = closed_app
     client.post("/api/v1/access-requests", json={"email": " A@X.se ", "note": "  Bromma  "})
     client.post("/api/v1/access-requests", json={"email": "b@x.se", "source": "waitlist"})
+    drain(client, state)
     rows = {r.email: r for r in requests_list(state)}
     assert (rows["a@x.se"].source, rows["a@x.se"].note) == ("form", "Bromma")
     assert rows["b@x.se"].source == "waitlist"
@@ -141,6 +158,7 @@ def test_rate_limit_is_per_app(closed_env: str) -> None:
         with TestClient(app) as client:
             for i in range(6):
                 client.post("/api/v1/access-requests", json={"email": f"r{round_}v{i}@x.se"})
+            drain(client, state)
         assert len(sender.alerts) == 5, round_
 
 
@@ -149,6 +167,7 @@ def test_honeypot_records_nothing(closed_app) -> None:  # noqa: ANN001
     resp = client.post("/api/v1/access-requests", json={"email": "bot@x.se", "hp": "filled"})
     assert resp.status_code == 202
     assert resp.json() == {"ok": True, "message": INTAKE_COPY}
+    drain(client, state)
     assert requests_list(state) == []
     assert sender.alerts == []
 
@@ -206,6 +225,40 @@ def test_alert_failure_never_fails_the_request(closed_app) -> None:  # noqa: ANN
     # Same at sign-in: the blocked branch swallows it too.
     assert client.post("/api/v1/auth/begin", json={"email": "b@x.se"}).status_code == 200
     assert len(requests_list(state)) == 2
+    drain(client, state)  # the failures are logged, not raised
+
+
+class _SlowSender(_CapturingSender):
+    """An alert that cannot finish until the test releases it."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.release = threading.Event()
+
+    async def send_access_request_alert(self, **kw: object) -> None:
+        await asyncio.to_thread(self.release.wait, 10.0)
+        self.alerts.append(kw)
+
+
+@pytest.mark.parametrize(
+    ("path", "ok"),
+    [("/api/v1/access-requests", 202), ("/api/v1/auth/begin", 200)],
+)
+def test_a_slow_alert_does_not_delay_the_response(closed_env: str, path: str, ok: int) -> None:
+    sender = _SlowSender()
+    app, state = _make_closed_app(sender)
+    with TestClient(app) as client:
+        started = time.monotonic()
+        resp = client.post(path, json={"email": "slow@x.se"})
+        elapsed = time.monotonic() - started
+        assert resp.status_code == ok
+        # The response came back while the alert was still blocked.
+        assert sender.alerts == []
+        assert elapsed < 5.0
+        assert [r.email for r in requests_list(state)] == ["slow@x.se"]
+        sender.release.set()
+        drain(client, state)
+        assert [a["email"] for a in sender.alerts] == ["slow@x.se"]
 
 
 # ---------------------------------------------------------------------------
@@ -302,3 +355,11 @@ def test_lettermint_access_granted_carries_the_link() -> None:
     assert payload["to"] == ["u@x.se"]
     assert payload["subject"] == "You have access to Splitsmith"
     assert link in payload["text"] and "tok123" in payload["html"]
+
+
+def test_store_normalisers_are_public() -> None:
+    from splitsmith.db.access_requests import normalize_email, normalize_note
+
+    assert normalize_email(" A@X.se ") == "a@x.se"
+    assert normalize_note("   ") is None
+    assert normalize_note(" x" * 600) == ("x " * 600).strip()[:500]

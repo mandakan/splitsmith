@@ -38,11 +38,11 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
-def _normalize_email(email: str) -> str:
+def normalize_email(email: str) -> str:
     return email.strip().lower()
 
 
-def _normalize_note(note: str | None) -> str | None:
+def normalize_note(note: str | None) -> str | None:
     """Strip and cap a note; an empty/whitespace-only note becomes
     ``None`` so it never sticks and blocks a later, real note from being
     recorded (the fill rule in :meth:`AccessRequestStore.record` only
@@ -130,8 +130,8 @@ class AccessRequestStore:
         An email that already has a ``User`` account writes nothing --
         it isn't missing access, so there is nothing to request.
         """
-        normalized = _normalize_email(email)
-        trimmed_note = _normalize_note(note)
+        normalized = normalize_email(email)
+        trimmed_note = normalize_note(note)
         now = self._now()
 
         async with self._session_factory() as session:

@@ -1887,6 +1887,10 @@ class AppState:
     # Records an access request and alerts the admins when it is new. Set
     # by ``_apply_hosted_mode_wiring``; ``None`` in local mode.
     record_access_request: Callable[..., Awaitable[None]] | None = None
+    # Fire-and-forget tasks the app started off the request path (the
+    # access-request admin alerts). Held here so the event loop's weak
+    # reference is not the only one; each task removes itself when done.
+    background_tasks: set[asyncio.Task] = field(default_factory=set)
     # Hosted + launcher only: serve-boot pending-jobs re-check, registered
     # as a FastAPI startup handler by create_app. Runs on every cold start
     # (incl. each wake from Railway app sleeping).
@@ -6993,24 +6997,18 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     # SPLITSMITH_SIGNUP_ALLOWLIST. Returning users always sign in.
     signup_policy = build_signup_policy()
 
-    from ..db.access_requests import AccessRequestStore, AccountAccessStore
-    from ..db.access_requests import _normalize_email as _normalize_request_email
-    from ..db.access_requests import _normalize_note as _normalize_request_note
+    from ..db.access_requests import (
+        AccessRequestStore,
+        AccountAccessStore,
+        normalize_email,
+        normalize_note,
+    )
 
     state.email_sender = email_sender
     state.access_requests = AccessRequestStore(session_factory)
     state.accounts = AccountAccessStore(session_factory)
 
-    async def _record_and_alert(email: str, *, source: str = "login", note: str | None = None) -> None:
-        """Record an access request; alert each admin when it is new. The
-        requester is never mailed. A failed alert is logged and never fails
-        the request. Reads ``state.email_sender`` per call so a swapped
-        transport (tests) applies."""
-        if not await state.access_requests.record(email, source=source, note=note):
-            return
-        # The alert names the request as stored (lower-cased email, note
-        # stripped and capped), not as typed.
-        email, note = _normalize_request_email(email), _normalize_request_note(note)
+    async def _alert_admins(email: str, note: str | None, source: str) -> None:
         admin_url = f"{(state.public_base_url or '').rstrip('/')}/admin/access"
         for admin in sorted(state.admin_emails):
             try:
@@ -7019,6 +7017,28 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
                 )
             except Exception:
                 logger.exception("access request alert to an admin failed")
+
+    def _alert_done(task: asyncio.Task) -> None:
+        state.background_tasks.discard(task)
+        if not task.cancelled() and task.exception() is not None:
+            logger.error("access request alert task failed", exc_info=task.exception())
+
+    async def _record_and_alert(email: str, *, source: str = "login", note: str | None = None) -> None:
+        """Record an access request; alert each admin when it is new. The
+        requester is never mailed. The alert runs as a background task, so
+        neither the form nor sign-in waits on mail (which would also let
+        response time tell a new request from a known one); a failed alert
+        is logged and never fails the request. Reads ``state.email_sender``
+        when the alert runs so a swapped transport (tests) applies."""
+        if not await state.access_requests.record(email, source=source, note=note):
+            return
+        # The alert names the request as stored (lower-cased email, note
+        # stripped and capped), not as typed.
+        task = asyncio.get_running_loop().create_task(
+            _alert_admins(normalize_email(email), normalize_note(note), source)
+        )
+        state.background_tasks.add(task)
+        task.add_done_callback(_alert_done)
 
     state.record_access_request = _record_and_alert
 
@@ -7822,13 +7842,14 @@ def create_app(
     # counts across every app in the process (and every test in one xdist
     # worker). Two bounds, both in-process like the comment limiter:
     #
-    # - 5 an hour per client address. ``request.client.host`` is what
-    #   uvicorn reports. The ``uvicorn.Config`` in ``run`` (this module)
-    #   keeps the defaults (``proxy_headers=True``, ``forwarded_allow_ips`` from
-    #   ``FORWARDED_ALLOW_IPS``, else 127.0.0.1), so behind a proxy that is
-    #   not on that list (Railway's edge) X-Forwarded-For is ignored and
-    #   the host is the proxy's address: every caller can share one key.
-    #   We do not read X-Forwarded-For by hand; anyone can send it.
+    # - 5 an hour per client address, keyed on ``request.client.host``.
+    #   The ``uvicorn.Config`` in ``run`` (this module) keeps uvicorn's
+    #   defaults: ``proxy_headers=True`` with ``forwarded_allow_ips`` from
+    #   ``FORWARDED_ALLOW_IPS`` (else 127.0.0.1). The hosted deploy sets
+    #   ``FORWARDED_ALLOW_IPS`` on the serve service so uvicorn takes the
+    #   client address from the proxy's X-Forwarded-For; without it, the
+    #   host is the proxy's address and every caller shares one key. We
+    #   never read X-Forwarded-For by hand: anyone can send it.
     # - 50 an hour in total: the bound that holds whatever the client
     #   address turns out to be.
     #
