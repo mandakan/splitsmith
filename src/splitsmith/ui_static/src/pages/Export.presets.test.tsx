@@ -15,6 +15,7 @@ import {
   type ExportOverview,
   type ExportPreset,
   type ExportPresetBody,
+  type ExportRun,
   type Job,
   type MatchProject,
   type ShooterListEntry,
@@ -238,8 +239,24 @@ const BUILTINS: ExportPreset[] = [
   preset("builtin:compare", "Compare grid", { mode: "compare", canvas: "hd", grid_overlay: true, grid_hold_seconds: 3 }),
 ];
 
+function matchRun(formats: string[]): ExportRun {
+  return {
+    run_id: `r-${formats[0]}`,
+    kind: "match",
+    finished_at: "2026-09-20T00:00:00Z",
+    duration_seconds: 10,
+    stage_numbers: [1, 2],
+    formats,
+    anomaly_count: 0,
+    artifacts: [],
+  };
+}
+
 beforeEach(() => {
   vi.mocked(api.getProject).mockResolvedValue(PROJECT);
+  // The shooter last exported a Final Cut bundle, so a page with nothing
+  // remembered starts there; the first-export cases below clear it.
+  vi.mocked(api.getExportRuns).mockResolvedValue({ runs: [matchRun(["fcpxml"])] });
   vi.mocked(api.getExportOverview).mockResolvedValue(OVERVIEW);
   // A tiny server: what PUT stores, the next GET lists after the built-ins.
   const saved: ExportPreset[] = [];
@@ -265,7 +282,36 @@ function toggle(name: string): HTMLElement {
 }
 
 describe("Export presets", () => {
-  it("opens on the built-ins with Final Cut bundle active and the groups closed", async () => {
+  it("a first export opens on the YouTube match video", async () => {
+    vi.mocked(api.getExportRuns).mockResolvedValue({ runs: [] });
+    await renderPage();
+    await waitFor(() => expect(choice("Preset", "YouTube match video")).toHaveAttribute("aria-pressed", "true"));
+    expect(screen.getByText(/MP4 · YouTube preset/)).toBeInTheDocument();
+    expect(noCustomPreset()).toBe(true);
+  });
+
+  it("with nothing remembered, follows the shooter's newest match export", async () => {
+    vi.mocked(api.getExportRuns).mockResolvedValue({
+      runs: [matchRun(["mp4", "youtube-sidecar"]), matchRun(["fcpxml"])],
+    });
+    await renderPage();
+    await waitFor(() => expect(choice("Preset", "YouTube match video")).toHaveAttribute("aria-pressed", "true"));
+  });
+
+  it("what was last used wins over the history", async () => {
+    vi.mocked(api.getExportRuns).mockResolvedValue({ runs: [] });
+    const { user } = await renderPage();
+    await waitFor(() => expect(choice("Preset", "YouTube match video")).toHaveAttribute("aria-pressed", "true"));
+    await user.click(choice("Preset", "Final Cut bundle"));
+    await waitFor(() =>
+      expect(JSON.parse(window.localStorage.getItem("splitsmith.export.lastUsed")!).presetId).toBe("builtin:final-cut"),
+    );
+    cleanup();
+    await renderPage();
+    await waitFor(() => expect(choice("Preset", "Final Cut bundle")).toHaveAttribute("aria-pressed", "true"));
+  });
+
+  it("after a Final Cut export, opens on the built-ins with Final Cut bundle active and the groups closed", async () => {
     await renderPage();
     await waitFor(() => expect(choice("Preset", "Final Cut bundle")).toHaveAttribute("aria-pressed", "true"));
     expect(toggle("Output")).toHaveAttribute("aria-expanded", "false");

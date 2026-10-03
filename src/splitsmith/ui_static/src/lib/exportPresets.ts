@@ -43,6 +43,55 @@ export const FORMAT_LABELS: Record<OutputFormat, string> = { fcpxml: "FCPXML", f
 export const NEW_PRESET_ID = "new";
 export const CUSTOM = "custom";
 export const LAST_USED_KEY = "splitsmith.export.lastUsed";
+/** Last-used for the request a phone sends a desktop to render. Kept
+ *  apart from the page's own: that form only ever renders a YouTube MP4,
+ *  and an FCPXML look remembered from a hosted-native match would ride
+ *  into it with every card off. */
+export const DESKTOP_LAST_USED_KEY = "splitsmith.export.lastUsed.desktopRender";
+export const YOUTUBE_PRESET_ID = "builtin:youtube";
+
+/** Which form the page is: its own export, or a request the desktop renders. */
+export type PresetContext = "own" | "desktop";
+
+function lastUsedKey(context: PresetContext): string {
+  return context === "desktop" ? DESKTOP_LAST_USED_KEY : LAST_USED_KEY;
+}
+
+/** Whether ``body`` is something the desktop can render for a phone: the
+ *  single-shooter match video, as an MP4. */
+export function rendersAsDesktopRequest(body: ExportPresetBody): boolean {
+  return body.mode === "single" && body.output_format === "mp4";
+}
+
+/** The format of the newest match export in a shooter's history (runs
+ *  are newest first), or null when there is none. Per-stage runs say
+ *  nothing about the match video and are skipped. */
+export function lastMatchFormat(runs: { kind: string; formats: string[] }[]): OutputFormat | null {
+  const run = runs.find((r) => r.kind === "match");
+  const format = run?.formats.find((f): f is OutputFormat => f === "mp4" || f === "fcpxml" || f === "fcp7xml");
+  return format ?? null;
+}
+
+/** The preset a page with nothing remembered starts on. A desktop
+ *  request starts on the YouTube match video, or the first preset it can
+ *  render. The page's own export follows the shooter's newest match
+ *  export: a timeline format starts on the first preset writing it, or
+ *  the first timeline preset (the Final Cut bundle), anything else, a first export included, on the
+ *  YouTube match video. */
+export function startingPreset<T extends { preset_id: string; body: ExportPresetBody }>(
+  presets: T[],
+  context: PresetContext,
+  lastFormat: OutputFormat | null = null,
+): T | null {
+  const youtube = presets.find((p) => p.preset_id === YOUTUBE_PRESET_ID);
+  if (context === "desktop") return youtube ?? presets.find((p) => rendersAsDesktopRequest(p.body)) ?? null;
+  if (lastFormat === "fcpxml" || lastFormat === "fcp7xml") {
+    const timelines = presets.filter((p) => p.body.mode === "single" && p.body.output_format !== "mp4");
+    const timeline = timelines.find((p) => p.body.output_format === lastFormat) ?? timelines[0];
+    if (timeline) return timeline;
+  }
+  return youtube ?? presets[0] ?? null;
+}
 
 export interface ExportSettings {
   mode: ExportMode;
@@ -248,17 +297,22 @@ export interface KeyValueStorage {
   setItem(key: string, value: string): void;
 }
 
-export function saveLastUsed(storage: KeyValueStorage, s: ExportSettings, presetId: string | null): void {
+export function saveLastUsed(
+  storage: KeyValueStorage,
+  s: ExportSettings,
+  presetId: string | null,
+  context: PresetContext = "own",
+): void {
   try {
-    storage.setItem(LAST_USED_KEY, JSON.stringify({ body: settingsToBody(s), presetId }));
+    storage.setItem(lastUsedKey(context), JSON.stringify({ body: settingsToBody(s), presetId }));
   } catch {
     // Private mode or blocked storage: the page works without it.
   }
 }
 
-export function loadLastUsed(storage: KeyValueStorage): LastUsed | null {
+export function loadLastUsed(storage: KeyValueStorage, context: PresetContext = "own"): LastUsed | null {
   try {
-    const raw = storage.getItem(LAST_USED_KEY);
+    const raw = storage.getItem(lastUsedKey(context));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<LastUsed>;
     if (!parsed || typeof parsed !== "object" || !parsed.body || typeof parsed.body !== "object") return null;

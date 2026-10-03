@@ -65,11 +65,15 @@ import {
   DEFAULT_EXPORT_SETTINGS,
   groupSummary,
   isDirty,
+  lastMatchFormat,
   loadLastUsed,
   NEW_PRESET_ID,
+  rendersAsDesktopRequest,
   saveLastUsed,
   settingsToBody,
+  startingPreset,
   type ExportSettings,
+  type PresetContext,
   type SettingsGroup,
 } from "@/lib/exportPresets";
 import {
@@ -136,6 +140,8 @@ function ExportInner({ slug }: { slug: string }) {
   const [project, setProject] = useState<MatchProject | null>(null);
   const [overview, setOverview] = useState<ExportOverview | null>(null);
   const [runs, setRuns] = useState<ExportRun[]>([]);
+  // A first visit picks its preset from the history, so it waits for it.
+  const [runsLoaded, setRunsLoaded] = useState<boolean>(false);
   // The YouTube connection: the install's channel locally, the account's
   // hosted. Null until the server answers; the row renders nothing while
   // null.
@@ -168,6 +174,7 @@ function ExportInner({ slug }: { slug: string }) {
     } catch {
       setRuns([]);
     }
+    setRunsLoaded(true);
   }, [slug]);
 
   const reloadYouTube = useCallback(async () => {
@@ -200,8 +207,14 @@ function ExportInner({ slug }: { slug: string }) {
   // The recurring half of the form is one object so a preset applies and
   // compares as a unit (lib/exportPresets). Match-specific fields stay
   // separate below and are never stored.
+  // A desktop request remembers its own last-used (``PresetContext``).
+  // The context can resolve after the first render (capabilities load
+  // with the match), so ``settingsContext`` names whose settings the form
+  // holds and an effect below swaps them when the two differ.
+  const presetContext: PresetContext = onDesktop ? "desktop" : "own";
+  const [settingsContext, setSettingsContext] = useState<PresetContext>(presetContext);
   const [settings, setSettings] = useState<ExportSettings>(() => {
-    const last = loadLastUsed(window.localStorage);
+    const last = loadLastUsed(window.localStorage, presetContext);
     return last ? applyBody(DEFAULT_EXPORT_SETTINGS, last.body) : DEFAULT_EXPORT_SETTINGS;
   });
   const patch = useCallback((p: Partial<ExportSettings>) => setSettings((s) => ({ ...s, ...p })), []);
@@ -242,7 +255,7 @@ function ExportInner({ slug }: { slug: string }) {
   // row with Custom alone and the page fully usable.
   const [presets, setPresets] = useState<ExportPreset[]>([]);
   const [activePresetId, setActivePresetId] = useState<string | null>(
-    () => loadLastUsed(window.localStorage)?.presetId ?? null,
+    () => loadLastUsed(window.localStorage, presetContext)?.presetId ?? null,
   );
   const [saveSheet, setSaveSheet] = useState<{ mode: "saveAs" | "rename"; id?: string } | null>(null);
   // The rail's preview follows the last picked Look tile and, while the
@@ -270,14 +283,28 @@ function ExportInner({ slug }: { slug: string }) {
     };
   }, []);
 
-  // First visit, nothing remembered: start on the first built-in.
-  const hadLastUsed = useRef(loadLastUsed(window.localStorage) !== null);
+  const hadLastUsed = useRef(loadLastUsed(window.localStorage, presetContext) !== null);
   useEffect(() => {
-    if (activePresetId === null && presets.length > 0 && !hadLastUsed.current) {
-      setSettings((s) => applyBody(s, presets[0].body));
-      setActivePresetId(presets[0].preset_id);
-    }
-  }, [presets, activePresetId]);
+    if (settingsContext === presetContext) return;
+    const last = loadLastUsed(window.localStorage, presetContext);
+    setSettings(last ? applyBody(DEFAULT_EXPORT_SETTINGS, last.body) : DEFAULT_EXPORT_SETTINGS);
+    setActivePresetId(last?.presetId ?? null);
+    hadLastUsed.current = last !== null;
+    setSettingsContext(presetContext);
+  }, [presetContext, settingsContext]);
+
+  // Nothing remembered: start where ``startingPreset`` says, which for
+  // the page's own export follows the shooter's newest match export
+  // (a first export starts on the YouTube video).
+  useEffect(() => {
+    if (settingsContext !== presetContext || hadLastUsed.current) return;
+    if (activePresetId !== null || presets.length === 0 || !runsLoaded) return;
+    const first = startingPreset(presets, settingsContext, lastMatchFormat(runs));
+    if (!first) return;
+    hadLastUsed.current = true;
+    setSettings((s) => applyBody(s, first.body));
+    setActivePresetId(first.preset_id);
+  }, [presets, activePresetId, settingsContext, presetContext, runsLoaded, runs]);
 
   const activePreset = presets.find((p) => p.preset_id === activePresetId) ?? null;
   const dirty = activePreset ? isDirty(settings, activePreset.body) : true;
@@ -285,9 +312,12 @@ function ExportInner({ slug }: { slug: string }) {
   // Last-used follows every change, debounced; the id it names may be a
   // preset the form has since diverged from, which the row shows as Custom.
   useEffect(() => {
-    const t = window.setTimeout(() => saveLastUsed(window.localStorage, settings, activePresetId), 300);
+    const t = window.setTimeout(
+      () => saveLastUsed(window.localStorage, settings, activePresetId, settingsContext),
+      300,
+    );
     return () => window.clearTimeout(t);
-  }, [settings, activePresetId]);
+  }, [settings, activePresetId, settingsContext]);
 
   useEffect(() => {
     if (project && !projectName) setProjectName(project.name);
@@ -380,7 +410,7 @@ function ExportInner({ slug }: { slug: string }) {
   // while the mode stayed put.
   const presetUnavailable = useCallback(
     (p: ExportPreset) =>
-      onDesktop && p.body.mode !== "single"
+      onDesktop && !rendersAsDesktopRequest(p.body)
         ? "Your desktop renders the match video only"
         : p.body.mode === "compare" && !multiShooter
           ? "The compare grid needs two or more shooters on the match"

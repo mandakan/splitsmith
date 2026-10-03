@@ -10,9 +10,11 @@ import {
   DEFAULT_EXPORT_SETTINGS,
   groupSummary,
   isDirty,
+  lastMatchFormat,
   loadLastUsed,
   saveLastUsed,
   settingsToBody,
+  startingPreset,
   type ExportSettings,
 } from "@/lib/exportPresets";
 
@@ -169,5 +171,58 @@ describe("last-used", () => {
     };
     expect(loadLastUsed(throwing)).toBeNull();
     expect(() => saveLastUsed(throwing, DEFAULT_EXPORT_SETTINGS, null)).not.toThrow();
+  });
+});
+
+describe("per-context last-used", () => {
+  it("a desktop request and the page's own export remember apart", () => {
+    const storage = new MemoryStorage();
+    saveLastUsed(storage, DEFAULT_EXPORT_SETTINGS, "builtin:final-cut");
+    expect(loadLastUsed(storage, "desktop")).toBeNull();
+    saveLastUsed(storage, applyBody(DEFAULT_EXPORT_SETTINGS, YOUTUBE), "builtin:youtube", "desktop");
+    expect(loadLastUsed(storage)?.presetId).toBe("builtin:final-cut");
+    expect(loadLastUsed(storage, "desktop")).toEqual({ body: YOUTUBE, presetId: "builtin:youtube" });
+  });
+});
+
+describe("startingPreset", () => {
+  const row = (preset_id: string, body: ExportPresetBody) => ({ preset_id, body });
+  const finalCut = row("builtin:final-cut", settingsToBody(DEFAULT_EXPORT_SETTINGS));
+  const youtube = row("builtin:youtube", YOUTUBE);
+  const ownMp4 = row("p1", { ...settingsToBody(DEFAULT_EXPORT_SETTINGS), output_format: "mp4" });
+  const ownFcp7 = row("p2", { ...settingsToBody(DEFAULT_EXPORT_SETTINGS), output_format: "fcp7xml" });
+
+  it("a first export starts on the YouTube video", () => {
+    expect(startingPreset([finalCut, youtube], "own", null)).toBe(youtube);
+    expect(startingPreset([finalCut], "own", null)).toBe(finalCut);
+    expect(startingPreset([], "own", null)).toBeNull();
+  });
+
+  it("otherwise follows the newest match export's format", () => {
+    expect(startingPreset([finalCut, youtube], "own", "mp4")).toBe(youtube);
+    expect(startingPreset([finalCut, youtube], "own", "fcpxml")).toBe(finalCut);
+    expect(startingPreset([finalCut, youtube, ownFcp7], "own", "fcp7xml")).toBe(ownFcp7);
+    // No preset writes FCP 7: the first timeline preset, still not the video.
+    expect(startingPreset([finalCut, youtube], "own", "fcp7xml")).toBe(finalCut);
+  });
+
+  it("a desktop request starts on the YouTube video, never on a bundle it cannot render", () => {
+    expect(startingPreset([finalCut, youtube, ownMp4], "desktop", "fcpxml")).toBe(youtube);
+    expect(startingPreset([finalCut, ownMp4], "desktop")).toBe(ownMp4);
+    expect(startingPreset([finalCut], "desktop")).toBeNull();
+  });
+});
+
+describe("lastMatchFormat", () => {
+  it("reads the newest match run and skips per-stage runs", () => {
+    expect(lastMatchFormat([])).toBeNull();
+    expect(
+      lastMatchFormat([
+        { kind: "stage", formats: ["trim", "fcpxml"] },
+        { kind: "match", formats: ["mp4", "youtube-sidecar"] },
+        { kind: "match", formats: ["fcpxml"] },
+      ]),
+    ).toBe("mp4");
+    expect(lastMatchFormat([{ kind: "stage", formats: ["fcpxml"] }])).toBeNull();
   });
 });
