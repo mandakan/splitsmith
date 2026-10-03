@@ -1,6 +1,6 @@
 # Hosted access tiers and access requests
 
-Date: 2026-10-03. Status: design approved in brainstorming, spec under review.
+Date: 2026-10-03. Status: implemented on feat/hosted-access-tiers (PR pending).
 
 ## Goal
 

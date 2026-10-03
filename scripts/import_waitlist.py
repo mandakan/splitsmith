@@ -13,11 +13,11 @@ database's ``access_requests`` table, run by hand against production.
 Producing the dump
 -------------------
 
-``package.json`` (in ``site/``) has ``waitlist:list`` and ``waitlist:get``
+The repo root's ``package.json`` has ``waitlist:list`` and ``waitlist:get``
 scripts, but neither alone emits the ``{email, ts}`` shape this script
 reads: ``waitlist:list`` only lists key names, and ``waitlist:get`` fetches
 one key's value at a time. Combine them with a shell loop and ``jq``, run
-from ``site/``, to build ``dump.json``:
+from the repo root, to build ``dump.json``:
 
     pnpm run waitlist:list -- --remote | jq -r '.[].name' | while read -r key; do
       email="${key#email:}"

@@ -110,6 +110,10 @@ Both `serve` and `worker` in a given environment share these. The
 | `SENTRY_DSN` | prod Sentry project DSN | staging Sentry project DSN |
 | `SPLITSMITH_ENV` | `production` (optional override) | `staging` (optional override) |
 | `SENTRY_TRACES_SAMPLE_RATE` | `0.0`-`1.0` (optional, default `0.0`) | same |
+| `SPLITSMITH_ADMIN_EMAILS` | the admin address(es), comma-separated | the same |
+| `SPLITSMITH_CONFIG` | path to a YAML file with `access: {default_tier: sharing}` (step 2 of the rollout below) | the same |
+| `SPLITSMITH_ACCESS_REQUEST_ORIGINS` | unset (default `https://splitsmith.app,https://www.splitsmith.app`) | unset |
+| `FORWARDED_ALLOW_IPS` | **`serve` only**: Railway's proxy address, or `*` when the container is reachable only through the proxy | same |
 
 The three `SPLITSMITH_YOUTUBE_*` variables enable "Connect YouTube" on the
 Account and Export pages (issue #1000, phase 2). Each account's refresh
@@ -136,6 +140,65 @@ comes from `SPLITSMITH_ENV` when set, otherwise it falls back to
 scrubbed (`send_default_pii=False` plus a `before_send` hook that drops
 cookies, the `Authorization` header, and the magic-link `token` query
 param), and cancelled jobs are logged but not raised as Sentry events.
+
+## Access tiers and the access-request intake
+
+Spec: `docs/superpowers/specs/2026-10-03-hosted-access-tiers-design.md`.
+Every account has a tier, a named set of features (`sync`, `share`,
+`create_match`, `raw_upload`, `hosted_compute`). The defaults are code:
+`full` (everything), `sharing` (`sync`, `share`), `disabled` (nothing),
+and `default_tier` is `full`, so a deploy with no config behaves as
+before. New accounts get `default_tier`; existing rows were migrated to
+`full`. Admins change a tier at `/admin/access`.
+
+- **`SPLITSMITH_CONFIG`** is a path to a YAML file, not inline YAML. The
+  image ships none, so the file has to reach the container (a Railway
+  volume, or a file added to the image). To make new accounts `sharing`:
+
+  ```yaml
+  access:
+    default_tier: sharing
+  ```
+
+  A custom tier goes under `access.tiers`; an unknown feature name or a
+  `default_tier` that names no tier fails at boot.
+- **Worker and agents need the same access config.** A job chained on the
+  worker (trim -> detect and the like) resolves the user's features from
+  the *worker's* own environment and fails closed. So when custom tiers
+  or `SPLITSMITH_ADMIN_EMAILS` admins whose tier is below `full` are in
+  use, set `SPLITSMITH_CONFIG` (with the same file) and
+  `SPLITSMITH_ADMIN_EMAILS` on the `worker` service and in every
+  self-hosted agent's environment too, or their chained jobs fail with
+  `feature_required`. With the default tiers and only `default_tier`
+  changed this does not bite: tier names resolve the same everywhere.
+- **`FORWARDED_ALLOW_IPS` on `serve`.** The intake
+  (`POST /api/v1/access-requests` and sign-in for an unknown email) is
+  limited to 5 an hour per client address and 50 an hour in total. The
+  client address is `request.client.host`, which uvicorn takes from
+  `X-Forwarded-For` only when the proxy is trusted through
+  `FORWARDED_ALLOW_IPS`. Unset, every caller shares the proxy's address
+  and the per-address limit becomes a site-wide 5 an hour.
+- **`SPLITSMITH_ACCESS_REQUEST_ORIGINS`** lists the origins allowed to post
+  the request form cross-site (CORS). The default is the marketing site;
+  override it only for a preview origin.
+- **`SPLITSMITH_ADMIN_EMAILS`** admins get every feature whatever their
+  tier, see `/admin/access`, and receive one alert mail per new request.
+  Requesters are never mailed.
+
+### Rollout
+
+1. Release the app with no access config: every account stays `full`.
+2. Set `SPLITSMITH_CONFIG` with `access: {default_tier: sharing}` on
+   staging, then prod (on `serve`, `worker` and agents, per above), and
+   `FORWARDED_ALLOW_IPS` on `serve`.
+3. Waitlist cut-over, in this order: merge the separate
+   `site/waitlist-to-app` branch (the marketing form then posts to
+   `my.splitsmith.app/api/v1/access-requests`; it must not merge before
+   the release, since `deploy-marketing` ships `site/` on every push to
+   `main`); run `scripts/import_waitlist.py` against prod (its docstring
+   has the KV dump recipe); then remove the `WAITLIST` KV binding from
+   `wrangler.toml` and the `waitlist:*` / `kv:*` scripts (and the
+   `--kv WAITLIST` on `pages:dev`) from the root `package.json`.
 
 ## DNS plan (Cloudflare zone `splitsmith.app`)
 
