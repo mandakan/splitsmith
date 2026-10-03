@@ -619,6 +619,7 @@ def test_a_phone_request_runs_on_the_desktop_and_its_result_reaches_hosted(
     job registry and run_sync. The ``shot_detect`` body is a stand-in that
     writes the shots a detection would (the ensemble has its own tests)."""
     import asyncio
+    import pprint
     import threading
     import time
 
@@ -755,7 +756,8 @@ def test_a_phone_request_runs_on_the_desktop_and_its_result_reaches_hosted(
         "poll_failures": service.core._poll_failures,
         "tracked": service.commands._tracked if service.commands else None,
     }
-    assert final["status"] == "succeeded", diagnostics
+    # A string, not the dict: pytest truncates an object's repr (#1163).
+    assert final["status"] == "succeeded", pprint.pformat(diagnostics)
     assert ran == [{"slug": SLUG, "stage_number": 1, "reset": True}]
     # A sync started after the detection ended: that is what carried it.
     all_jobs = asyncio.run(jobs.list())
