@@ -7,9 +7,12 @@ asyncpg cases, and SQLite for the round trip.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.pool import NullPool
 
 from splitsmith.db import Base, User, create_engine, sessionmaker
@@ -27,6 +30,14 @@ class _FakeEngine:
 
     async def dispose(self) -> None:
         self.disposed += 1
+
+
+class _RecordingSession:
+    """Stands in for :class:`AsyncSession`, recording the engine it was bound to."""
+
+    def __init__(self, bind: Any, **kwargs: Any) -> None:
+        self.bind = bind
+        self.kwargs = kwargs
 
 
 @pytest.fixture
@@ -111,6 +122,19 @@ def test_sqlite_url_gets_one_nullpool_engine_whatever_loop_asks(recorder: list[_
     assert recorder[0].kwargs["poolclass"] is NullPool
 
 
+def test_for_current_loop_requires_a_running_loop_even_for_sqlite() -> None:
+    """Missing-loop behaviour must be symmetric across backends: asyncpg
+    already raises outside a loop (it has to, to pick the right pool), so
+    SQLite must raise the same way instead of silently handing back the
+    fallback. Otherwise a sync-context misuse passes every SQLite test and
+    only crashes once it hits hosted (asyncpg)."""
+    engines = LoopEngines("sqlite+aiosqlite:///:memory:")
+    with pytest.raises(RuntimeError):
+        engines.for_current_loop()
+    with pytest.raises(RuntimeError):
+        engines.adopt_current_loop()
+
+
 def test_dispose_current_loop_disposes_and_forgets(recorder: list[_FakeEngine]) -> None:
     engines = LoopEngines(PG_URL)
 
@@ -141,8 +165,11 @@ def test_dispose_fallback(recorder: list[_FakeEngine]) -> None:
 
 
 def test_dead_loop_entry_is_dropped(recorder: list[_FakeEngine]) -> None:
-    """Engines are weak-keyed on the loop; a closed, collected loop takes
-    its entry with it instead of pinning a dead engine forever."""
+    """Loop entries are weak-keyed: once a collected loop's engine holds
+    no connections (this fake engine holds none), the loop's entry goes
+    with it instead of pinning a dead engine forever. A real pooled engine
+    with checked-in connections would not be collected this way -- see
+    the class docstring; adopters dispose explicitly instead."""
     import gc
 
     engines = LoopEngines(PG_URL)
@@ -155,7 +182,55 @@ def test_dead_loop_entry_is_dropped(recorder: list[_FakeEngine]) -> None:
     assert engines.adopted_count == 0
 
 
-def test_loop_sessionmaker_round_trips_on_sqlite(tmp_path) -> None:
+def test_pooled_kwargs_are_accepted_by_the_real_asyncpg_dialect() -> None:
+    """Construct-only smoke test against the real dialect (no recorder, no
+    connection attempt): confirms the pooled kwargs and the URL's query
+    string (``ssl=require&prepared_statement_cache_size=0``) are a shape
+    ``create_async_engine`` actually accepts for asyncpg, not just what our
+    fake recorder tolerates."""
+    pytest.importorskip("asyncpg")
+
+    async def _construct_and_dispose() -> None:
+        engines = LoopEngines(PG_URL)
+        engine = engines.adopt_current_loop()
+        await engine.dispose()
+
+    asyncio.run(_construct_and_dispose())
+
+
+def test_loop_sessionmaker_picks_the_engine_at_open_time(
+    recorder: list[_FakeEngine], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The factory must ask ``for_current_loop()`` *inside* ``_open`` --
+    not once when :func:`loop_sessionmaker` is called, and not via
+    ``adopt_current_loop`` (which would mark a short-lived loop long-lived
+    and hand it a doomed pool -- the #423 crash this class exists to
+    avoid). Built once, outside any loop, then called from two different
+    loops: one adopted, one not.
+    """
+    monkeypatch.setattr(engine_mod, "AsyncSession", _RecordingSession)
+    engines = LoopEngines(PG_URL)
+    factory = loop_sessionmaker(engines)  # built with no loop running
+
+    async def _adopted_bind() -> tuple[Any, Any]:
+        pooled = engines.adopt_current_loop()
+        session = factory()
+        return session.bind, pooled
+
+    async def _unadopted_bind() -> Any:
+        session = factory()
+        return session.bind
+
+    bind1, pooled1 = asyncio.run(_adopted_bind())
+    bind2 = asyncio.run(_unadopted_bind())
+
+    assert bind1 is pooled1, "an adopted loop's session binds that loop's own pooled engine"
+    assert bind2 is not bind1, "an un-adopted loop must not reuse another loop's pooled engine"
+    assert len(recorder) == 2
+    assert recorder[1].kwargs.get("poolclass") is NullPool, "the un-adopted loop gets the NullPool fallback"
+
+
+def test_loop_sessionmaker_round_trips_on_sqlite(tmp_path: Path) -> None:
     """The stores call ``factory()`` with no arguments and ``async with`` the
     result; a loop_sessionmaker factory must satisfy that unchanged."""
     url = f"sqlite+aiosqlite:///{tmp_path / 'x.sqlite'}"
@@ -181,12 +256,18 @@ def test_loop_sessionmaker_round_trips_on_sqlite(tmp_path) -> None:
         async with factory() as s:
             got = await s.get(User, uid)
             assert got is not None
-            return got.email
+            email = got.email
+        # Dispose on the same loop that opened the fallback's connections --
+        # closing it from a *different* asyncio.run afterwards would hand
+        # the close to a loop that never opened these connections, which is
+        # the asyncpg-loop-binding problem all over again, just for SQLite.
+        await engines.dispose_fallback()
+        return email
 
     assert asyncio.run(_write_then_read()) == "m@thias.se"
 
 
-def test_loop_sessionmaker_sessions_carry_the_tenant_listener(tmp_path) -> None:
+def test_loop_sessionmaker_sessions_carry_the_tenant_listener(tmp_path: Path) -> None:
     """``tenant_session_factory`` wraps a loop_sessionmaker factory the same
     way it wraps ``sessionmaker``'s: the after_begin listener is attached
     to each session it opens.
@@ -198,18 +279,21 @@ def test_loop_sessionmaker_sessions_carry_the_tenant_listener(tmp_path) -> None:
     """
     url = f"sqlite+aiosqlite:///{tmp_path / 'y.sqlite'}"
 
-    async def _after_begin_count(factory) -> int:  # noqa: ANN001
+    async def _after_begin_count(engines: LoopEngines, factory: Callable[[], AsyncSession]) -> int:
         session = factory()
         try:
             return len(list(session.sync_session.dispatch.after_begin))
         finally:
             await session.close()
+            await engines.dispose_fallback()
 
-    wrapped = tenant_session_factory(loop_sessionmaker(LoopEngines(url)), "user-1")
-    unwrapped = loop_sessionmaker(LoopEngines(url))
+    wrapped_engines = LoopEngines(url)
+    unwrapped_engines = LoopEngines(url)
+    wrapped = tenant_session_factory(loop_sessionmaker(wrapped_engines), "user-1")
+    unwrapped = loop_sessionmaker(unwrapped_engines)
 
-    assert asyncio.run(_after_begin_count(wrapped)) >= 1
-    assert asyncio.run(_after_begin_count(unwrapped)) == 0
+    assert asyncio.run(_after_begin_count(wrapped_engines, wrapped)) >= 1
+    assert asyncio.run(_after_begin_count(unwrapped_engines, unwrapped)) == 0
 
 
 def test_plain_sessionmaker_still_works() -> None:
@@ -221,5 +305,6 @@ def test_plain_sessionmaker_still_works() -> None:
     async def _open() -> None:
         async with factory() as s:
             assert s is not None
+        await engine.dispose()
 
     asyncio.run(_open())

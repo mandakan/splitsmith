@@ -95,3 +95,5 @@ def test_store_round_trips_through_wrapped_factory_on_sqlite() -> None:
     row = asyncio.run(store.get("brm-abc"))
     assert row is not None
     assert row.match_id == "brm-abc"
+
+    asyncio.run(engine.dispose())

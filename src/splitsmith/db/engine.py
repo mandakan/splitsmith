@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import weakref
 from collections.abc import Callable
+from typing import Any
 
 from sqlalchemy import event, text
 from sqlalchemy.engine import Connection
@@ -40,7 +41,7 @@ def create_engine(url: str, *, echo: bool = False, pool_disabled: bool = False) 
     the tests that drive a store through many short-lived event loops on
     purpose, and for callers that want one connection per call.
     """
-    kwargs: dict = {"echo": echo}
+    kwargs: dict[str, Any] = {"echo": echo}
     if pool_disabled:
         kwargs["poolclass"] = NullPool
     return create_async_engine(url, **kwargs)
@@ -82,6 +83,13 @@ class LoopEngines:
     is one database per connection, so they get the fallback engine from
     every method: one NullPool engine, as the hosted wiring built before.
 
+    Loop entries are weak-keyed, but that only releases a loop whose engine
+    holds no connections -- a pooled asyncpg engine with checked-in
+    connections keeps its loop key alive through the value, since each
+    connection references the loop that opened it. Adopters dispose
+    explicitly on the way out (:meth:`dispose_current_loop`) rather than
+    relying on garbage collection to reclaim a loop's engine.
+
     The pool adds no traffic of its own: no warm-up, no periodic ping, no
     ``pool_recycle``. Neon closes an idle connection after five minutes
     and suspends the compute; ``pool_pre_ping`` turns the closed
@@ -116,10 +124,15 @@ class LoopEngines:
 
     def adopt_current_loop(self) -> AsyncEngine:
         """Mark the running loop long-lived and return its pooled engine
-        (created on first call). For a non-pooled URL this is the fallback."""
+        (created on first call). For a non-pooled URL this is the fallback.
+
+        Requires a running loop even for a non-pooled URL: a caller outside
+        any loop is a misuse this must not paper over just because SQLite
+        happens not to need the loop to pick an engine.
+        """
+        loop = asyncio.get_running_loop()
         if not self._pooled:
             return self._fallback_engine()
-        loop = asyncio.get_running_loop()
         engine = self._by_loop.get(loop)
         if engine is None:
             engine = create_async_engine(
@@ -134,10 +147,14 @@ class LoopEngines:
         return engine
 
     def for_current_loop(self) -> AsyncEngine:
-        """The running loop's engine if it was adopted, else the fallback."""
+        """The running loop's engine if it was adopted, else the fallback.
+
+        Requires a running loop even for a non-pooled URL -- see
+        :meth:`adopt_current_loop`.
+        """
+        loop = asyncio.get_running_loop()
         if not self._pooled:
             return self._fallback_engine()
-        loop = asyncio.get_running_loop()
         engine = self._by_loop.get(loop)
         return engine if engine is not None else self._fallback_engine()
 
