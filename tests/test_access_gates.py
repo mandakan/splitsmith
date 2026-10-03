@@ -186,3 +186,26 @@ def test_share_management_names_the_share_feature(
     resp = getattr(client, method)(path, **kwargs)
     assert resp.status_code == 403, resp.text
     assert resp.json()["detail"] == {"code": "feature_required", "feature": "share"}
+
+
+def test_disabled_account_cannot_patch_me(hosted_app, hosted_env) -> None:  # noqa: ANN001
+    """The disabled allowlist is method-paired: GET /api/me only, never PATCH."""
+    client, sender = hosted_app
+    login(client, sender, "gone@x.se")
+    set_tier(hosted_env, "gone@x.se", "disabled")
+    resp = client.patch("/api/me", json={"display_name": "Someone"})
+    assert resp.status_code == 403, resp.text
+    assert resp.json()["detail"] == {"code": "account_disabled"}
+
+
+def test_disabled_account_can_sign_its_desktop_token_out(hosted_app, hosted_env) -> None:  # noqa: ANN001
+    """Revoking a credential is never blocked, whatever the account's tier."""
+    client, sender = hosted_app
+    login(client, sender, "gone@x.se")
+    token = client.post("/api/me/desktop-tokens", json={"name": "mac"}).json()["token"]
+    set_tier(hosted_env, "gone@x.se", "disabled")
+    client.cookies.clear()
+    headers = {"Authorization": f"Bearer {token}"}
+    assert client.delete("/api/device/session", headers=headers).status_code == 200
+    # The token is gone: the next request is anonymous.
+    assert client.get("/api/sync/fingerprints", headers=headers).status_code == 401

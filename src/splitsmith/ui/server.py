@@ -1291,8 +1291,16 @@ class AdminPatchWorkerBody(BaseModel):
 # to return a non-None User -- see the ``_auth_gate`` middleware inside
 # ``create_app``. Non-/api/* paths (SPA static, /docs) are exempt by
 # prefix, not by this list.
-#: What an account with no features may still reach: who am I, and sign out.
-_DISABLED_ALLOWED_PATHS: frozenset[str] = frozenset({"/api/me", "/api/v1/auth/logout"})
+#: What an account with no features may still reach, as (method, path):
+#: who am I, and signing a credential out (session cookie or desktop token).
+#: Method-paired so ``PATCH /api/me`` stays refused.
+_DISABLED_ALLOWED_ROUTES: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("GET", "/api/me"),
+        ("POST", "/api/v1/auth/logout"),
+        ("DELETE", "/api/device/session"),
+    }
+)
 
 _PUBLIC_API_PATHS: frozenset[str] = frozenset(
     {
@@ -8648,7 +8656,11 @@ def create_app(
         # Account gate (spec 2026-10-03): an account with no features keeps
         # only "who am I" and sign-out. Read per request from the users row,
         # so a downgrade applies to the next request.
-        if hosted and not features_of(request, user) and path not in _DISABLED_ALLOWED_PATHS:
+        if (
+            hosted
+            and not features_of(request, user)
+            and (request.method, path) not in _DISABLED_ALLOWED_ROUTES
+        ):
             return JSONResponse(status_code=403, content={"detail": {"code": "account_disabled"}})
         # Scope gate (#719). Allowlist, not a denylist: only None (session
         # cookie, loopback user) and "full" (legacy pasted token) are
