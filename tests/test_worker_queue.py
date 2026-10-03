@@ -87,9 +87,10 @@ def test_run_worker_warms_ensemble_and_inits_sentry(monkeypatch: pytest.MonkeyPa
     # Stub the ui.server symbols run_worker imports lazily.
     server = types.ModuleType("splitsmith.ui.server")
 
-    def _build_worker_state() -> object:
+    def _build_worker_state() -> types.SimpleNamespace:
         calls.append("build_worker_state")
-        return object()
+        # No per-loop engines to adopt (#1178).
+        return types.SimpleNamespace(db_engines=None)
 
     def _configure_app_logging() -> None:
         calls.append("configure_logging")
@@ -137,7 +138,7 @@ def test_run_worker_warmup_failure_is_non_fatal(monkeypatch: pytest.MonkeyPatch)
 
     calls: list[str] = []
     server = types.ModuleType("splitsmith.ui.server")
-    server.build_worker_state = lambda: object()  # type: ignore[attr-defined]
+    server.build_worker_state = lambda: types.SimpleNamespace(db_engines=None)  # type: ignore[attr-defined]
     server._configure_app_logging = lambda: None  # type: ignore[attr-defined]
 
     def _warm_boom() -> None:
@@ -180,7 +181,7 @@ def test_run_worker_defaults_to_blocking_drain(monkeypatch: pytest.MonkeyPatch) 
     import types
 
     server = types.ModuleType("splitsmith.ui.server")
-    server.build_worker_state = lambda: object()  # type: ignore[attr-defined]
+    server.build_worker_state = lambda: types.SimpleNamespace(db_engines=None)  # type: ignore[attr-defined]
     server._configure_app_logging = lambda: None  # type: ignore[attr-defined]
     server.warm_ensemble_runtime = lambda: None  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "splitsmith.ui.server", server)
@@ -223,7 +224,7 @@ def test_run_worker_one_shot_drains_and_exits(monkeypatch: pytest.MonkeyPatch) -
     import types
 
     server = types.ModuleType("splitsmith.ui.server")
-    server.build_worker_state = lambda: object()  # type: ignore[attr-defined]
+    server.build_worker_state = lambda: types.SimpleNamespace(db_engines=None)  # type: ignore[attr-defined]
     server._configure_app_logging = lambda: None  # type: ignore[attr-defined]
     server.warm_ensemble_runtime = lambda: None  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "splitsmith.ui.server", server)
@@ -295,7 +296,7 @@ def test_run_worker_retries_db_connect_then_drains(monkeypatch: pytest.MonkeyPat
     import psycopg_pool
 
     server = types.ModuleType("splitsmith.ui.server")
-    server.build_worker_state = lambda: object()  # type: ignore[attr-defined]
+    server.build_worker_state = lambda: types.SimpleNamespace(db_engines=None)  # type: ignore[attr-defined]
     server._configure_app_logging = lambda: None  # type: ignore[attr-defined]
     server.warm_ensemble_runtime = lambda: None  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "splitsmith.ui.server", server)

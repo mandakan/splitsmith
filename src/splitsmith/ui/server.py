@@ -100,6 +100,7 @@ if TYPE_CHECKING:
     # Hosted-only; imported lazily at runtime inside _apply_hosted_mode_wiring
     # so local mode stays free of the db (procrastinate/psycopg) dependency.
     from ..db import (
+        LoopEngines,
         PostgresMatchStore,
         PostgresProfileStore,
         PostgresYouTubeConnectionStore,
@@ -164,7 +165,7 @@ from .. import thumbnail as thumbnail_helpers
 from .. import trim as trim_module
 from .. import waveform as waveform_helpers
 from ..access import AccessConfig, Feature, FeatureRequiredError, access_config, features_for
-from ..async_bridge import run_sync
+from ..async_bridge import DbRunner, get_runner, install_runner, run_sync
 from ..audit_data import StageExportError, audit_shots_to_engine_shots, is_kept_shot
 from ..audit_revision import REVISION_FIELD, AuditRevisionConflictError, audit_revision
 from ..auth import AuthBackend, CompositeAuth, LoopbackAuth, User
@@ -609,7 +610,7 @@ def _submit_reconcile_steps(state: AppState, match_root: Path) -> list[Reconcile
     """Queue every step the reconciler finds missing for ``match_root``.
 
     Runs on a job worker thread (the tail of a sync), so it bridges to the
-    async registry with ``asyncio.run`` like the trim chain does. The
+    async registry with ``run_sync`` like the trim chain does. The
     caller's ContextVars carry the match, which is what scopes both the
     ``find_active`` dedupe and the submitted jobs.
     """
@@ -621,7 +622,7 @@ def _submit_reconcile_steps(state: AppState, match_root: Path) -> list[Reconcile
     queued: list[ReconcileStep] = []
     for step in steps:
         dedupe: dict[str, Any] = {"video_id": step.video_id} if step.kind == "trim" else {}
-        existing = asyncio.run(
+        existing = run_sync(
             state.jobs.find_active(
                 kind=step.kind, stage_number=step.stage_number, shooter_slug=step.slug, **dedupe
             )
@@ -633,7 +634,7 @@ def _submit_reconcile_steps(state: AppState, match_root: Path) -> list[Reconcile
             args["video_id"] = step.video_id
         key = _reconcile_key(current_match_id.get(), step.kind, step.slug, step.stage_number)
         state.reconcile_jobs[key] = (match_root, step)
-        asyncio.run(
+        run_sync(
             state.jobs.submit(
                 kind=step.kind,
                 stage_number=step.stage_number,
@@ -1906,6 +1907,11 @@ class AppState:
     # infrastructure shared across tenants, not per-user data (no RLS; the
     # unique token hash is the isolation boundary).
     workers_store: WorkersStore | None = None
+    #: Hosted only: the per-loop pooled engines (#1178). ``None`` in local
+    #: mode, which has no database. The lifespan adopts the app loop and
+    #: disposes it; the process ``DbRunner`` (``async_bridge.get_runner``)
+    #: adopts its own.
+    db_engines: LoopEngines | None = None
     # Device-flow authorizations (#719). Raw (non-tenant) session factory,
     # same as workers_store: the poll authenticates from the device code
     # alone, before any tenant is pinned. None in local mode.
@@ -2947,7 +2953,7 @@ def _run_compare_grid(
     # progress and cancel, and a failed upload never fails the render.
     # ``again=True``: the render just rewrote the sidecar.
     if req.youtube_upload and state is not None:
-        asyncio.run(
+        run_sync(
             state.jobs.submit(
                 kind="youtube_upload",
                 args={
@@ -3592,15 +3598,15 @@ def register_job_bodies(state: AppState) -> None:
             )
             # Worker callback runs in a ThreadPoolExecutor thread with
             # no event loop; bridge to the async JobBackend via
-            # ``asyncio.run``.
+            # ``run_sync``.
             if (
                 resolved.settings.shot_detect_on_beep_verified
-                and asyncio.run(
+                and run_sync(
                     state.jobs.find_active(kind="shot_detect", stage_number=stage_number, shooter_slug=slug)
                 )
                 is None
             ):
-                asyncio.run(
+                run_sync(
                     state.jobs.submit(
                         kind="shot_detect",
                         stage_number=stage_number,
@@ -3614,7 +3620,7 @@ def register_job_bodies(state: AppState) -> None:
         # Only chains on success (beep_time is set); soft-fail or manual rescue
         # both go through _advance_sequential_chain via the manual-beep endpoint.
         if take_window is not None and video.beep_time is not None and v_fresh is not None:
-            asyncio.run(_advance_sequential_chain(state, slug, fresh, v_fresh, stage_number))
+            run_sync(_advance_sequential_chain(state, slug, fresh, v_fresh, stage_number))
         # Generate the whole-take envelope peaks for the TakeOverview waveform.
         # This runs on every take-windowed detect job; the WAV and peaks JSON
         # caches make repeated calls cheap (cache-hit path). Wrapped in
@@ -3700,7 +3706,7 @@ def register_job_bodies(state: AppState) -> None:
                 v_fresh.processed["trim"] = True
                 fresh.save(root)
         # Worker callback runs in a ThreadPoolExecutor thread with no
-        # event loop; bridge to the async JobBackend via ``asyncio.run``.
+        # event loop; bridge to the async JobBackend via ``run_sync``.
         #
         # Read ``beep_reviewed`` from the freshly reloaded video, NOT the
         # snapshot captured at job start: a "Mark reviewed" click that
@@ -3713,7 +3719,7 @@ def register_job_bodies(state: AppState) -> None:
             chain_shot_detect
             and video.role == "primary"
             and beep_reviewed_now
-            and asyncio.run(
+            and run_sync(
                 state.jobs.find_active(kind="shot_detect", stage_number=stage_number, shooter_slug=slug)
             )
             is None
@@ -3732,7 +3738,7 @@ def register_job_bodies(state: AppState) -> None:
                 project_override=fresh.automation,
             )
             if resolved.settings.shot_detect_on_beep_verified:
-                asyncio.run(
+                run_sync(
                     state.jobs.submit(
                         kind="shot_detect",
                         stage_number=stage_number,
@@ -4614,7 +4620,7 @@ def register_job_bodies(state: AppState) -> None:
         # ``_run_trim``'s shot_detect chain. ``again=True`` because the
         # render just rewrote the sidecar: there is no earlier record.
         if req.youtube_upload and result.fcpxml_path.suffix.lower() == ".mp4":
-            asyncio.run(
+            run_sync(
                 state.jobs.submit(
                     kind="youtube_upload",
                     shooter_slug=slug,
@@ -6925,6 +6931,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     from sqlalchemy import select
 
     from ..db import (
+        LoopEngines,
         MagicLinkAuth,
         PostgresExportPresetStore,
         PostgresJobBackend,
@@ -6936,8 +6943,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
         ProjectStateStore,
         build_email_sender,
         build_signup_policy,
-        create_engine,
-        sessionmaker,
+        loop_sessionmaker,
         tenant_session_factory,
     )
     from ..db import User as UserRow
@@ -6984,14 +6990,20 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     state.admin_emails = frozenset(e.strip().lower() for e in raw_admin.split(",") if e.strip())
     state.access = access_config()
 
-    # ``pool_disabled=True`` because the hosted-mode boot path runs
-    # multiple short-lived event loops (each worker thread's asyncio.run,
-    # the model-prefetch submit). asyncpg connections are loop-bound; a
-    # pooled connection from one loop would crash on first reuse from the
-    # FastAPI request loop with "attached to a different loop". See
-    # ``splitsmith.db.engine.create_engine`` for the full rationale.
-    engine = create_engine(url, pool_disabled=True)
-    session_factory = sessionmaker(engine)
+    # One pooled engine per long-lived loop (#1178), replacing the NullPool
+    # that #423 introduced to survive asyncpg's loop binding. The app loop
+    # adopts itself in ``_hosted_boot_lifespan`` (the worker's in
+    # ``queue.run_worker``); every sync caller lands on the process
+    # ``DbRunner`` through ``run_sync``; any other loop gets the shared
+    # NullPool fallback. See ``splitsmith.db.engine.LoopEngines``.
+    engines = LoopEngines(url)
+    state.db_engines = engines
+    session_factory = loop_sessionmaker(engines)
+    runner = get_runner()
+    if runner is None or not runner.is_running:
+        runner = DbRunner(on_start=engines.adopt_current_loop, on_stop=engines.dispose_current_loop)
+        runner.start()
+        install_runner(runner)
 
     # Auth resolves identity from ``users`` / ``sessions`` / ``magic_link_tokens``
     # -- none under RLS -- so it holds the raw (non-tenant) session factory.
@@ -7281,7 +7293,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
             store = state.matches_store
             if store is None or not match_model.is_valid_match_id(match_id):
                 return None
-            row = asyncio.run(store.get(match_id))
+            row = run_sync(store.get(match_id))
             if row is None:
                 return None
             root = _hosted_match_work_root(row.user_id, match_id)
@@ -7470,26 +7482,33 @@ def _to_worker_view(record: Any, connected_ids: frozenset[str]) -> WorkerView:
 def _hosted_boot_lifespan(state: Any) -> Any | None:
     """Return a startup lifespan for the hosted API process, or None.
 
-    Two boot duties, both hosted-only:
+    Three boot duties, all hosted-only:
 
+    - adopt the app's event loop in :attr:`AppState.db_engines` so it gets
+      its own pooled engine (#1178), disposed when the lifespan exits (the
+      process ``DbRunner`` is shared and is not stopped here);
     - seed the singleton ``kind='railway'`` worker row when the Railway env
       config is present - a fresh deploy otherwise has an empty ``workers``
       table and the wake path is silently dead (idempotent; an existing
       row's operator-set enabled/priority is preserved);
     - fire the boot pending-jobs re-check (see ``make_boot_retrigger``).
 
-    Returns None only when neither piece applies, so callers can pass the
+    Returns None only when none of them applies, so callers can pass the
     result directly to FastAPI(lifespan=...) without branching.
     """
     from ..worker_trigger import load_railway_config
 
     workers_store = state.workers_store if load_railway_config() is not None else None
     retrigger = state.boot_retrigger
-    if workers_store is None and retrigger is None:
+    engines = state.db_engines
+    if workers_store is None and retrigger is None and engines is None:
         return None
 
     @asynccontextmanager
     async def _lifespan(_app: Any) -> AsyncIterator[None]:
+        if engines is not None:
+            # The app loop is long-lived: give it its pooled engine (#1178).
+            engines.adopt_current_loop()
         if workers_store is not None:
             await workers_store.ensure_railway_row(version=splitsmith_version)
         if retrigger is not None:
@@ -7497,7 +7516,11 @@ def _hosted_boot_lifespan(state: Any) -> Any | None:
             # stranded queue job recovers on the next visit instead of
             # waiting for the 6-hourly safety cron.
             await retrigger()
-        yield
+        try:
+            yield
+        finally:
+            if engines is not None:
+                await engines.dispose_current_loop()
 
     return _lifespan
 
@@ -7692,10 +7715,10 @@ def create_app(
     _load_env_files(project_root)
     if project_root is not None:
         # ``create_app`` runs at boot, outside any event loop. The
-        # async store call is wrapped in ``asyncio.run`` so the
+        # async store call is wrapped in ``run_sync`` so the
         # ``--project`` startup hook still drops the match into
         # recent-projects + the alias middleware.
-        asyncio.run(
+        run_sync(
             _register_match_at(
                 state,
                 project_root,
@@ -7809,7 +7832,7 @@ def create_app(
     # is missing. Runs whether or not a project is bound, so the first
     # shot-detect after the user picks a match finds the cache primed.
     # ``create_app`` runs at boot outside any event loop, so the async
-    # JobBackend submission is wrapped in ``asyncio.run`` here.
+    # JobBackend submission is wrapped in ``run_sync`` here.
     #
     # All job bodies register here, after any hosted-mode backend swap
     # above, so ``submit(kind=...)`` resolves against whichever backend is
@@ -7831,8 +7854,8 @@ def create_app(
         # kinds resolve; rows for still-unregistered dev-only kinds are
         # dropped with a warning.
         if local_journal is not None:
-            asyncio.run(resume_journaled_jobs(state.jobs, local_journal))
-        asyncio.run(_maybe_submit_model_download(state))
+            run_sync(resume_journaled_jobs(state.jobs, local_journal))
+        run_sync(_maybe_submit_model_download(state))
 
     async def get_current_user(request: Request) -> User:
         """FastAPI dependency: resolve the operator behind a request.
@@ -9518,8 +9541,8 @@ def create_app(
             raise HTTPException(status_code=500, detail=f"could not complete upload: {exc}") from exc
         # Same preview kickoff as the single-shot path. This handler is sync
         # (runs on Starlette's threadpool with no event loop), so bridge to
-        # the async dispatch via ``asyncio.run``.
-        asyncio.run(_dispatch_proxy_job(state, key))
+        # the async dispatch via ``run_sync``.
+        run_sync(_dispatch_proxy_job(state, key))
         return JSONResponse({"path": key, "size": size, "sha256": None, "filename": name})
 
     @app.post(
@@ -9761,7 +9784,7 @@ def create_app(
           / ``_run_detect_beep_for_video``).
 
         Skips videos already in ``processed["beep"]`` or with a manual
-        beep. Uses ``asyncio.run`` because sync FastAPI endpoints run
+        beep. Uses ``run_sync`` because sync FastAPI endpoints run
         in a threadpool with no active event loop. Does NOT call
         ``resolve_video_path`` - in hosted mode that would mirror a
         multi-GB object into the API container; reachability is the
@@ -9807,7 +9830,7 @@ def create_app(
             for sv in created:
                 if sv.processed.get("beep") or sv.beep_source == "manual":
                     continue
-                existing = asyncio.run(
+                existing = run_sync(
                     state.jobs.find_active(
                         kind="detect_beep",
                         stage_number=sv.stage_number,
@@ -9817,7 +9840,7 @@ def create_app(
                 )
                 if existing is None:
                     try:
-                        asyncio.run(
+                        run_sync(
                             state.jobs.submit(
                                 kind="detect_beep",
                                 stage_number=sv.stage_number,
@@ -9848,7 +9871,7 @@ def create_app(
                     continue
                 if primary.beep_time is not None:
                     continue
-                existing = asyncio.run(
+                existing = run_sync(
                     state.jobs.find_active(
                         kind="detect_beep",
                         stage_number=n,
@@ -9859,7 +9882,7 @@ def create_app(
                 if existing is not None:
                     break  # chain already started
                 try:
-                    asyncio.run(
+                    run_sync(
                         state.jobs.submit(
                             kind="detect_beep",
                             stage_number=n,
@@ -10217,7 +10240,7 @@ def create_app(
                 logger.info("take peaks: storage pull failed: %s", exc)
             if not pulled:
                 active_job = any(
-                    asyncio.run(state.jobs.find_active(kind="detect_beep", stage_number=n, shooter_slug=slug))
+                    run_sync(state.jobs.find_active(kind="detect_beep", stage_number=n, shooter_slug=slug))
                     is not None
                     for n in rv.covers_stages
                 )
@@ -18639,8 +18662,8 @@ def _print_active_jobs(app: FastAPI) -> None:
         return
     try:
         # Local ``splitsmith ui`` Ctrl-C: no loop is running, so drive the
-        # async JobBackend.list() call with ``asyncio.run``.
-        jobs = asyncio.run(state.jobs.list())
+        # async JobBackend.list() call with ``run_sync``.
+        jobs = run_sync(state.jobs.list())
     except Exception:  # pragma: no cover -- defensive: never block shutdown
         logger.warning("could not enumerate jobs on shutdown", exc_info=True)
         return

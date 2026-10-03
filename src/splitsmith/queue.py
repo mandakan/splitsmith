@@ -391,6 +391,11 @@ async def run_worker(
     )
 
     state = await asyncio.to_thread(build_worker_state)
+    if state.db_engines is not None:
+        # The worker's main loop is long-lived: pooled engine (#1178). Job
+        # bodies on ``asyncio.to_thread`` threads reach the database through
+        # ``run_sync`` -> the process DbRunner, which adopted its own loop.
+        state.db_engines.adopt_current_loop()
     _configure_app_logging()
     try:
         await asyncio.to_thread(warm_ensemble_runtime)
@@ -418,6 +423,8 @@ async def run_worker(
         logger.info("worker: drain complete (wait=%s); shutting down", wait)
     finally:
         await app.connector.close_async()
+        if state.db_engines is not None:
+            await state.db_engines.dispose_current_loop()
 
 
 async def _run_worker_until(app: Any, stop_event: asyncio.Event, options: dict[str, Any]) -> None:

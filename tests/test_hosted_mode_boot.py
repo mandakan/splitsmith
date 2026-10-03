@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import threading
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -378,3 +379,73 @@ def test_create_app_launcher_wiring_and_boot_retrigger_lifespan(
     assert any(
         "boot re-trigger" in r.message and "failed" in r.message for r in caplog.records
     ), "boot_retrigger warning not logged - lifespan may not have fired"
+
+
+def test_hosted_wiring_installs_loop_engines_and_the_process_runner(hosted_db: str) -> None:
+    from splitsmith.async_bridge import get_runner
+    from splitsmith.db import LoopEngines
+    from splitsmith.ui.server import create_app
+
+    app = create_app()
+    state = app.state.splitsmith_state
+    assert isinstance(state.db_engines, LoopEngines)
+    assert state.db_engines.pooled is False, "SQLite in tests: one NullPool engine, today's behaviour"
+    runner = get_runner()
+    assert runner is not None and runner.is_running
+
+
+def test_second_create_app_reuses_the_process_runner(hosted_db: str) -> None:
+    from splitsmith.async_bridge import get_runner
+    from splitsmith.ui.server import create_app
+
+    create_app()
+    first = get_runner()
+    create_app()
+    assert get_runner() is first
+    assert sum(1 for t in threading.enumerate() if t.name == "splitsmith-db-runner") == 1
+
+
+def test_local_mode_builds_no_engines_and_installs_no_runner(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Desktop / ``splitsmith ui``: never a Postgres engine, never a runner.
+    ``run_sync`` keeps its asyncio.run path by construction."""
+    from splitsmith.async_bridge import get_runner, install_runner
+    from splitsmith.ui.server import create_app
+
+    install_runner(None)  # a previous hosted test in this worker may have left one
+    monkeypatch.delenv("SPLITSMITH_MODE", raising=False)
+    monkeypatch.delenv("SPLITSMITH_DATABASE_URL", raising=False)
+    app = create_app()
+    assert app.state.splitsmith_state.db_engines is None
+    assert get_runner() is None
+
+
+def test_hosted_lifespan_adopts_the_app_loop_and_disposes_it_on_exit(
+    hosted_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The main loop (uvicorn's; TestClient's portal here) adopts itself at
+    startup and disposes its engine at shutdown. On SQLite both are no-ops
+    inside LoopEngines, so assert through a spy."""
+    from fastapi.testclient import TestClient
+
+    from splitsmith.ui.server import create_app
+
+    app = create_app()
+    engines = app.state.splitsmith_state.db_engines
+    calls: list[str] = []
+    orig_adopt, orig_dispose = engines.adopt_current_loop, engines.dispose_current_loop
+
+    def _adopt():  # noqa: ANN202
+        calls.append("adopt")
+        return orig_adopt()
+
+    async def _dispose() -> None:
+        calls.append("dispose")
+        await orig_dispose()
+
+    monkeypatch.setattr(engines, "adopt_current_loop", _adopt)
+    monkeypatch.setattr(engines, "dispose_current_loop", _dispose)
+    with TestClient(app):
+        assert calls == ["adopt"]
+    assert calls == ["adopt", "dispose"]
