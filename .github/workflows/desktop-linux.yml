@@ -59,6 +59,9 @@ jobs:
           echo "WHEEL=$PWD/$wheel" >> "$GITHUB_ENV"
 
       - name: Build
+        env:
+          # A tagged build must carry the baked YouTube OAuth client (the PyPI wheel has it).
+          SPLITSMITH_REQUIRE_YOUTUBE_CLIENT: ${{ inputs.release_tag != '' && '1' || '0' }}
         run: desktop/build.sh --linux ${WHEEL:+--wheel "$WHEEL"}
 
       - name: The deb kept the stock scripts
