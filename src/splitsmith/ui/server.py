@@ -18021,6 +18021,14 @@ def create_app(
 
     app.include_router(device_router)
 
+    # Admin routes for access requests and account tiers (spec
+    # 2026-10-03). Same lazy-import / always-registered idiom as
+    # sync_router above: db imports stay inside admin_access_api.py, and
+    # every route 404s outside hosted mode (see admin_access_api._admin_gate).
+    from .admin_access_api import router as admin_access_router
+
+    app.include_router(admin_access_router)
+
     # Issue #1000: the local YouTube surface (settings, connect, upload).
     # Gated the other way round from device_router: ``_local_gate`` inside
     # youtube_api works in both modes: the file under the user config dir
