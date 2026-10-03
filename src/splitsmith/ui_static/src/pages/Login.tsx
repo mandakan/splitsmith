@@ -113,10 +113,12 @@ export function Login() {
               <h1 className="font-display text-xl font-semibold text-ink">
                 Check your email
               </h1>
+              {/* The same words for every address: signups may be closed, and a
+                  blocked email gets no mail, only a recorded request. */}
               <p className="text-sm text-ink-2">
-                A sign-in link is on its way to{" "}
-                <span className="font-medium text-ink">{sentTo}</span>. The link
-                is valid for 15 minutes.
+                If you have access, a sign-in link is on its way to{" "}
+                <span className="font-medium text-ink">{sentTo}</span>. Otherwise
+                your request has been noted.
               </p>
               <button
                 type="button"

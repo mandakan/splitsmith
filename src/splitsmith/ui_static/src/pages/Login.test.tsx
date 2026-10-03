@@ -86,3 +86,25 @@ describe("Login request access", () => {
     expect(screen.getByRole("button", { name: "Send request" })).toBeEnabled();
   });
 });
+
+describe("Login sign-in sent state", () => {
+  beforeEach(() => {
+    vi.mocked(api.authBegin).mockReset();
+  });
+
+  it("shows the intake copy, never a promise that a link was sent", async () => {
+    vi.mocked(api.authBegin).mockResolvedValue(undefined as never);
+    const user = userEvent.setup();
+    renderLogin();
+    await user.type(screen.getByLabelText("Email"), "blocked@club.se");
+    await user.click(screen.getByRole("button", { name: /send sign-in link/i }));
+    const line = await screen.findByText(
+      (_, el) =>
+        el?.tagName === "P" &&
+        el.textContent ===
+          "If you have access, a sign-in link is on its way to blocked@club.se. Otherwise your request has been noted.",
+    );
+    expect(line).toBeInTheDocument();
+    expect(screen.queryByText(/valid for 15 minutes/)).toBeNull();
+  });
+});
