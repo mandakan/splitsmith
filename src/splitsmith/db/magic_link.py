@@ -123,6 +123,7 @@ class MagicLinkAuth:
         *,
         now: Callable[[], datetime] = _utcnow,
         signup_policy: SignupPolicy | None = None,
+        default_tier: str = "full",
     ) -> None:
         # Raw (non-tenant) factory: this backend writes users / sessions /
         # magic_link_tokens, none under RLS, and runs before any GUC.
@@ -132,6 +133,9 @@ class MagicLinkAuth:
         # Unconfigured -> open signups (local / self-host / tests). The
         # hosted deploy passes a closed policy + allowlist.
         self._signup_policy = signup_policy or SignupPolicy.open()
+        # Tier a new account starts on (spec 2026-10-03); returning users
+        # keep whatever their row says.
+        self._default_tier = default_tier
 
     async def _email_has_account(self, email: str) -> bool:
         async with self._session_factory() as session:
@@ -244,7 +248,9 @@ class MagicLinkAuth:
                 # re-select the row the winner committed.
                 try:
                     async with session.begin_nested():
-                        user_row = UserRow(email=link_row.email, email_verified_at=now)
+                        user_row = UserRow(
+                            email=link_row.email, email_verified_at=now, access_tier=self._default_tier
+                        )
                         session.add(user_row)
                         await session.flush()
                 except IntegrityError:
@@ -265,7 +271,12 @@ class MagicLinkAuth:
             )
             session.add(session_row)
             await session.commit()
-            user = User(id=user_row.id, email=user_row.email, display_name=user_row.display_name)
+            user = User(
+                id=user_row.id,
+                email=user_row.email,
+                display_name=user_row.display_name,
+                access_tier=user_row.access_tier,
+            )
             expires_at = now + SESSION_TTL
 
         return IssuedSession(secret=secret, expires_at=expires_at, user=user)
@@ -307,7 +318,12 @@ class MagicLinkAuth:
                 session_row.expires_at = now + SESSION_TTL
                 await session.commit()
 
-            return User(id=user_row.id, email=user_row.email, display_name=user_row.display_name)
+            return User(
+                id=user_row.id,
+                email=user_row.email,
+                display_name=user_row.display_name,
+                access_tier=user_row.access_tier,
+            )
 
     async def end_session(self, session_secret: str) -> None:
         """Revoke the session identified by ``session_secret`` (logout).

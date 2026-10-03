@@ -161,6 +161,7 @@ from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy
 from .. import thumbnail as thumbnail_helpers
 from .. import trim as trim_module
 from .. import waveform as waveform_helpers
+from ..access import AccessConfig, Feature, access_config
 from ..async_bridge import run_sync
 from ..audit_data import StageExportError, audit_shots_to_engine_shots, is_kept_shot
 from ..audit_revision import REVISION_FIELD, AuditRevisionConflictError, audit_revision
@@ -235,6 +236,7 @@ from . import export_storage, stage_edit
 from . import exports as export_helpers
 from . import match_exports as match_export_helpers
 from . import shooter_move as shooter_move_module
+from .access_gate import features_of, require_feature
 from .auto_sync import (
     MATCH_SYNC_LOCK_FILE,
     OWNER_LOCK_FILE,
@@ -1289,6 +1291,9 @@ class AdminPatchWorkerBody(BaseModel):
 # to return a non-None User -- see the ``_auth_gate`` middleware inside
 # ``create_app``. Non-/api/* paths (SPA static, /docs) are exempt by
 # prefix, not by this list.
+#: What an account with no features may still reach: who am I, and sign out.
+_DISABLED_ALLOWED_PATHS: frozenset[str] = frozenset({"/api/me", "/api/v1/auth/logout"})
+
 _PUBLIC_API_PATHS: frozenset[str] = frozenset(
     {
         "/api/health",
@@ -1828,6 +1833,10 @@ class AppState:
     # ``SPLITSMITH_ADMIN_EMAILS`` by ``_apply_hosted_mode_wiring``; stays
     # empty in local mode so nobody is admin there.
     admin_emails: frozenset[str] = frozenset()
+    # Account tier registry (spec 2026-10-03). Populated from
+    # ``SPLITSMITH_CONFIG`` by ``_apply_hosted_mode_wiring``; local mode
+    # never consults it.
+    access: AccessConfig = field(default_factory=AccessConfig)
     # Hosted + launcher only: serve-boot pending-jobs re-check, registered
     # as a FastAPI startup handler by create_app. Runs on every cold start
     # (incl. each wake from Railway app sleeping).
@@ -6910,6 +6919,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
 
     raw_admin = os.environ.get(SPLITSMITH_ADMIN_EMAILS_ENV, "")
     state.admin_emails = frozenset(e.strip().lower() for e in raw_admin.split(",") if e.strip())
+    state.access = access_config()
 
     # ``pool_disabled=True`` because the hosted-mode boot path runs
     # multiple short-lived event loops (each worker thread's asyncio.run,
@@ -6936,7 +6946,12 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     # a sync-scoped bearer is confined to /api/sync/*. Session cookie is
     # tried first (the common case).
     state.auth = CompositeAuth(
-        MagicLinkAuth(session_factory, email_sender, signup_policy=signup_policy),
+        MagicLinkAuth(
+            session_factory,
+            email_sender,
+            signup_policy=signup_policy,
+            default_tier=state.access.default_tier,
+        ),
         DesktopTokenAuth(session_factory),
     )
 
@@ -7777,7 +7792,12 @@ def create_app(
             ]
         )
 
-    @app.post("/api/match/shares", response_model=ShareInfo, status_code=201)
+    @app.post(
+        "/api/match/shares",
+        response_model=ShareInfo,
+        status_code=201,
+        dependencies=[Depends(require_feature(Feature.share))],
+    )
     async def _create_match_share(req: ShareCreateRequest = ShareCreateRequest()) -> ShareInfo:
         """Create a new share token for the current match. Returns 201."""
         if not _hosted_mode_active():
@@ -7812,7 +7832,11 @@ def create_app(
             scope=s.scope,
         )
 
-    @app.patch("/api/match/shares/{share_id}/cameras", response_model=ShareInfo)
+    @app.patch(
+        "/api/match/shares/{share_id}/cameras",
+        response_model=ShareInfo,
+        dependencies=[Depends(require_feature(Feature.share))],
+    )
     async def _set_match_share_cameras(share_id: str, req: ShareCamerasRequest) -> ShareInfo:
         """Set which camera each shooter starts on for one share link.
 
@@ -7854,7 +7878,11 @@ def create_app(
             cameras=s.cameras,
         )
 
-    @app.delete("/api/match/shares/{share_id}", status_code=204)
+    @app.delete(
+        "/api/match/shares/{share_id}",
+        status_code=204,
+        dependencies=[Depends(require_feature(Feature.share))],
+    )
     async def _delete_match_share(share_id: str) -> Response:
         """Revoke a share token. 204 on success (including already-revoked),
         404 when the share_id is unknown or not owned by this user."""
@@ -8617,6 +8645,11 @@ def create_app(
         # lookup per request in hosted mode. The scope is shared with the
         # endpoint, so this propagates downstream.
         request.state.user = user
+        # Account gate (spec 2026-10-03): an account with no features keeps
+        # only "who am I" and sign-out. Read per request from the users row,
+        # so a downgrade applies to the next request.
+        if hosted and not features_of(request, user) and path not in _DISABLED_ALLOWED_PATHS:
+            return JSONResponse(status_code=403, content={"detail": {"code": "account_disabled"}})
         # Scope gate (#719). Allowlist, not a denylist: only None (session
         # cookie, loopback user) and "full" (legacy pasted token) are
         # unrestricted. Everything else - "sync" today, and any value a
@@ -8983,7 +9016,7 @@ def create_app(
             background=BackgroundTask(shutil.rmtree, tmp, ignore_errors=True),
         )
 
-    @app.post("/api/me/projects/import")
+    @app.post("/api/me/projects/import", dependencies=[Depends(require_feature(Feature.create_match))])
     async def import_project_endpoint(
         archive: UploadFile = File(...),
         dest_root: str = Form(...),
@@ -9034,7 +9067,7 @@ def create_app(
             }
         )
 
-    @app.post("/api/me/raw/upload")
+    @app.post("/api/me/raw/upload", dependencies=[Depends(require_feature(Feature.raw_upload))])
     async def upload_raw_video(
         file: UploadFile = File(...),
         x_content_sha256: str | None = Header(default=None),
@@ -9158,7 +9191,9 @@ def create_app(
             )
         return storage
 
-    @app.post("/api/me/raw/upload/multipart/create")
+    @app.post(
+        "/api/me/raw/upload/multipart/create", dependencies=[Depends(require_feature(Feature.raw_upload))]
+    )
     def create_multipart_upload(
         req: MultipartCreateRequest,
         user: User = Depends(get_current_user),
@@ -9185,7 +9220,9 @@ def create_app(
             }
         )
 
-    @app.post("/api/me/raw/upload/multipart/part-url")
+    @app.post(
+        "/api/me/raw/upload/multipart/part-url", dependencies=[Depends(require_feature(Feature.raw_upload))]
+    )
     def sign_multipart_part(
         req: MultipartPartUrlRequest,
         user: User = Depends(get_current_user),
@@ -9201,7 +9238,9 @@ def create_app(
             raise HTTPException(status_code=500, detail=f"could not sign part: {exc}") from exc
         return JSONResponse({"url": url})
 
-    @app.post("/api/me/raw/upload/multipart/complete")
+    @app.post(
+        "/api/me/raw/upload/multipart/complete", dependencies=[Depends(require_feature(Feature.raw_upload))]
+    )
     def complete_multipart_upload(
         req: MultipartCompleteRequest,
         user: User = Depends(get_current_user),
@@ -9225,7 +9264,9 @@ def create_app(
         asyncio.run(_dispatch_proxy_job(state, key))
         return JSONResponse({"path": key, "size": size, "sha256": None, "filename": name})
 
-    @app.post("/api/me/raw/upload/multipart/abort")
+    @app.post(
+        "/api/me/raw/upload/multipart/abort", dependencies=[Depends(require_feature(Feature.raw_upload))]
+    )
     def abort_multipart_upload(
         req: MultipartAbortRequest,
         user: User = Depends(get_current_user),
@@ -11370,7 +11411,7 @@ def create_app(
         return JSONResponse(job.model_dump(mode="json"))
 
     @app.get("/api/me", response_model=User)
-    def get_me(user: User = Depends(get_current_user)) -> User:
+    def get_me(request: Request, user: User = Depends(get_current_user)) -> User:
         """Return the operator behind this request.
 
         Local mode always resolves to the ``LoopbackAuth`` sentinel
@@ -11381,10 +11422,17 @@ def create_app(
         ``is_admin`` is derived from ``state.admin_emails`` at request
         time; it is never stored on the user record itself.
         """
-        return user.model_copy(update={"is_admin": user.email.lower() in state.admin_emails})
+        return user.model_copy(
+            update={
+                "is_admin": user.email.lower() in state.admin_emails,
+                "features": sorted(f.value for f in features_of(request, user)),
+            }
+        )
 
     @app.patch("/api/me", response_model=User)
-    async def patch_me(req: UpdateMeRequest, user: User = Depends(get_current_user)) -> User:
+    async def patch_me(
+        request: Request, req: UpdateMeRequest, user: User = Depends(get_current_user)
+    ) -> User:
         """Update the signed-in account's profile. Hosted mode only.
 
         Local mode 404s: ``LoopbackAuth``'s sentinel user has no
@@ -11413,6 +11461,7 @@ def create_app(
             update={
                 "display_name": display_name,
                 "is_admin": user.email.lower() in state.admin_emails,
+                "features": sorted(f.value for f in features_of(request, user)),
             }
         )
 
@@ -11467,7 +11516,11 @@ def create_app(
             raise HTTPException(status_code=404, detail=f"unknown job: {job_id}")
         return job
 
-    @app.post("/api/me/jobs/{job_id}/retry", response_model=Job)
+    @app.post(
+        "/api/me/jobs/{job_id}/retry",
+        response_model=Job,
+        dependencies=[Depends(require_feature(Feature.hosted_compute))],
+    )
     async def retry_job(job_id: str, user: User = Depends(get_current_user)) -> Job:
         """Re-enqueue a failed job with its original args; returns the new job.
 
@@ -14263,7 +14316,7 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _register_response(target.resolve(), recorded, match_id)
 
-    @app.post("/api/match/create-manual")
+    @app.post("/api/match/create-manual", dependencies=[Depends(require_feature(Feature.create_match))])
     async def create_match_manual(req: CreateMatchManualRequest) -> HealthResponse:
         """Scaffold a Match folder from the manual create-match form (#322).
 
@@ -14363,7 +14416,9 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return _register_response(target.resolve(), recorded, match_id)
 
-    @app.post("/api/match/create-from-scoreboard")
+    @app.post(
+        "/api/match/create-from-scoreboard", dependencies=[Depends(require_feature(Feature.create_match))]
+    )
     async def create_match_from_scoreboard(
         req: CreateMatchScoreboardRequest,
     ) -> HealthResponse:
@@ -17676,7 +17731,7 @@ def create_app(
     # sync_api._hosted_gate).
     from .sync_api import router as sync_router
 
-    app.include_router(sync_router)
+    app.include_router(sync_router, dependencies=[Depends(require_feature(Feature.sync))])
 
     # Browser-assisted device authorization router (#719). Same lazy-import
     # / always-registered idiom as sync_router above: db imports stay
