@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.55.0](https://github.com/mandakan/splitsmith/compare/v0.54.0...v0.55.0) (2026-10-03)
+
+
+### Features
+
+* **hosted:** account access tiers and access requests ([#1173](https://github.com/mandakan/splitsmith/issues/1173)) ([12c9eb0](https://github.com/mandakan/splitsmith/commit/12c9eb030e788207cf8068c40557c2effe349c79))
+
+
+### Bug Fixes
+
+* **ci:** the tagged Linux desktop build uses Python 3.12, not the container's 3.10 ([#1167](https://github.com/mandakan/splitsmith/issues/1167)) ([300f7c6](https://github.com/mandakan/splitsmith/commit/300f7c687017f27f264235ba305cc303f5549a85))
+* **export:** a first export starts on the YouTube video, with its cards ([#1171](https://github.com/mandakan/splitsmith/issues/1171)) ([8a00ee9](https://github.com/mandakan/splitsmith/commit/8a00ee9dfccfad1fd166b0358a689cb4762a1535))
+* **hosted:** scope filesystem and render work to each account ([#1172](https://github.com/mandakan/splitsmith/issues/1172)) ([ad52d2f](https://github.com/mandakan/splitsmith/commit/ad52d2f2540231165d6cf37f8d64c1ede414f905))
+
+
+### Documentation
+
+* **site:** install instructions for the macOS and Linux desktop apps ([#1169](https://github.com/mandakan/splitsmith/issues/1169)) ([5714dfd](https://github.com/mandakan/splitsmith/commit/5714dfd5ac37c4ae521724e14945740597e1a9b5))
+
+
+### Build / CI
+
+* docs and marketing-site changes skip CI, the edge image and the staging deploy ([#1170](https://github.com/mandakan/splitsmith/issues/1170)) ([3e97bf5](https://github.com/mandakan/splitsmith/commit/3e97bf50dda55a2d6d8a4506cf3dd7f1bcfb5321))
+
 ## [0.54.0](https://github.com/mandakan/splitsmith/compare/v0.53.0...v0.54.0) (2026-10-03)
 
 
