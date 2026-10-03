@@ -19,6 +19,9 @@ URL = f"postgresql+asyncpg://owner:{SECRET}@db.example.com:5432/splitsmith?sslmo
 
 def test_serve_startup_line_masks_the_password(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SPLITSMITH_DATABASE_URL", URL)
+    # serve setdefaults this in os.environ; owning it here lets teardown
+    # restore it, so hosted mode never leaks into later tests on the worker.
+    monkeypatch.setenv("SPLITSMITH_MODE", "hosted")
 
     def fake_run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
         # Fail the migration so serve exits before starting a server.
