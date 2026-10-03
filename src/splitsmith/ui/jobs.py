@@ -146,6 +146,10 @@ class JobBodyRegistry:
     def __contains__(self, kind: str) -> bool:
         return kind in self._bodies
 
+    def kinds(self) -> list[str]:
+        """Every registered kind, in registration order."""
+        return list(self._bodies)
+
 
 class JobNotRetryableError(Exception):
     """Job exists but cannot be retried (not FAILED, or args unknown)."""

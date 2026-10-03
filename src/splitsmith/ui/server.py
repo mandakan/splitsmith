@@ -161,7 +161,7 @@ from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy
 from .. import thumbnail as thumbnail_helpers
 from .. import trim as trim_module
 from .. import waveform as waveform_helpers
-from ..access import AccessConfig, Feature, access_config
+from ..access import AccessConfig, Feature, FeatureRequiredError, access_config, features_for
 from ..async_bridge import run_sync
 from ..audit_data import StageExportError, audit_shots_to_engine_shots, is_kept_shot
 from ..audit_revision import REVISION_FIELD, AuditRevisionConflictError, audit_revision
@@ -6870,6 +6870,8 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     engine + session factory, the queue deferrer, and the S3 client (the
     per-user isolation is purely the S3 key prefix + the per-transaction GUC).
     """
+    from sqlalchemy import select
+
     from ..db import (
         MagicLinkAuth,
         PostgresExportPresetStore,
@@ -6886,6 +6888,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
         sessionmaker,
         tenant_session_factory,
     )
+    from ..db import User as UserRow
     from ..db.comments import CommentStore
     from ..db.desktop_commands import DesktopCommandStore
     from ..db.desktop_tokens import DesktopTokenAuth, DesktopTokenStore
@@ -7041,6 +7044,24 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
         # injected so a fresh backend resolves the same kinds without
         # re-registration.
         tenant_factory = tenant_session_factory(session_factory, user_id)
+
+        async def _may_submit() -> bool:
+            # Read the tier per submit, not per tenant build: a downgrade
+            # applies to the next job, and a job body that chains another
+            # job (trim -> shot_detect) is checked again at that point.
+            # The raw factory: ``users`` is not under RLS.
+            async with session_factory() as session:
+                row = (
+                    await session.execute(
+                        select(UserRow.access_tier, UserRow.email).where(UserRow.id == user_id)
+                    )
+                ).one_or_none()
+            if row is None:
+                return False
+            return Feature.hosted_compute in features_for(
+                row.access_tier, row.email, state.access, state.admin_emails
+            )
+
         return TenantContext(
             user_id=user_id,
             recent_projects=PostgresRecentProjectsStore(tenant_factory, user_id=user_id),
@@ -7051,6 +7072,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
                 deferrer=deferrer,
                 sweep_on_boot=False,
                 bodies=state.job_bodies,
+                submit_allowed=_may_submit,
             ),
             matches_store=PostgresMatchStore(tenant_factory, user_id=user_id),
             project_state=ProjectStateStore(tenant_factory, user_id=user_id),
@@ -8262,6 +8284,13 @@ def create_app(
         return JSONResponse(
             status_code=503,
             content={"detail": {"code": "shutting_down", "message": str(exc)}},
+        )
+
+    @app.exception_handler(FeatureRequiredError)
+    async def _feature_required_handler(_request: Request, exc: FeatureRequiredError) -> JSONResponse:
+        """Map the job backend's account-feature backstop to the gate's 403 body."""
+        return JSONResponse(
+            status_code=403, content={"detail": {"code": "feature_required", "feature": exc.feature.value}}
         )
 
     @app.exception_handler(RequestValidationError)
