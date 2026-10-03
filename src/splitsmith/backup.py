@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import shutil
 import tarfile
 import tempfile
@@ -44,6 +45,8 @@ from pydantic import BaseModel, Field
 from . import __version__
 from .export_runs import LOG_FILENAME as EXPORT_RUNS_FILE
 from .match_project import PROJECT_FILE, MatchProject
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_DIRS: tuple[str, ...] = ("audit", "scoreboard")
 OPTIONAL_DIRS: frozenset[str] = frozenset({"raw", "audio", "trimmed", "exports"})
@@ -273,24 +276,35 @@ def _add_bytes(tf: tarfile.TarFile, arcname: str, data: bytes) -> None:
 
 
 def _safe_extract(tf: tarfile.TarFile, dest: Path) -> None:
-    """Extract guarding against path-traversal entries."""
+    """Extract regular files and directories only, all inside ``dest``.
+
+    Link members (symbolic or hard) are skipped, never extracted: checking
+    each link's target on its own is not enough, because one link can
+    point through another that only exists once both are on disk. A
+    project needs no link to load (the exporter's ``raw/`` links point at
+    source footage on the machine that made the archive, which the import
+    side cannot reach anyway; relink re-creates them). Device, fifo and
+    other special members are skipped the same way. With no link on disk,
+    the per-member path check below is exact. The ``data`` extraction
+    filter, where this Python has it, is a second guard on the same rules.
+    """
     dest_resolved = dest.resolve()
     members: list[tarfile.TarInfo] = []
     for m in tf.getmembers():
         target = (dest_resolved / m.name).resolve()
         if not _is_inside(target, dest_resolved):
             raise BackupError(f"archive contains unsafe path: {m.name!r}")
-        # Block symlinks/hardlinks pointing outside the staging dir.
-        if m.issym() or m.islnk():
-            link_target = (dest_resolved / m.name).parent / (m.linkname or "")
-            try:
-                link_resolved = link_target.resolve()
-            except OSError as exc:
-                raise BackupError(f"unsafe link in archive: {m.name!r}") from exc
-            if not _is_inside(link_resolved, dest_resolved):
-                raise BackupError(f"unsafe link in archive: {m.name!r}")
+        if not (m.isfile() or m.isdir()):
+            logger.info("import skips non-regular archive member %r", m.name)
+            continue
         members.append(m)
-    tf.extractall(dest_resolved, members=members)
+    try:
+        if hasattr(tarfile, "data_filter"):
+            tf.extractall(dest_resolved, members=members, filter="data")
+        else:  # pragma: no cover - Python < 3.11.4
+            tf.extractall(dest_resolved, members=members)
+    except tarfile.FilterError as exc:
+        raise BackupError(f"archive contains unsafe member: {exc}") from exc
 
 
 def _single_top_dir(staging: Path) -> Path | None:

@@ -312,3 +312,64 @@ def test_import_endpoint_refuses_overwrite(tmp_path: Path) -> None:
         )
     assert second.status_code == 400
     assert "already exists" in second.json()["detail"]
+
+
+def _link_archive(path: Path) -> Path:
+    """A project archive whose links only lead outside once both exist:
+    ``a`` points at its own directory and ``a/b`` two levels up from
+    there, so ``a/b/escaped.txt`` would land beside the staging directory."""
+    with tarfile.open(path, "w:gz") as tf:
+        data = json.dumps({"name": "linked"}).encode()
+        info = tarfile.TarInfo("top/project.json")
+        info.size = len(data)
+        tf.addfile(info, io.BytesIO(data))
+        for name, target in (("top/a", "."), ("top/a/b", "../..")):
+            link = tarfile.TarInfo(name)
+            link.type = tarfile.SYMTYPE
+            link.linkname = target
+            tf.addfile(link)
+        payload = b"outside\n"
+        info = tarfile.TarInfo("top/a/b/escaped.txt")
+        info.size = len(payload)
+        tf.addfile(info, io.BytesIO(payload))
+    return path
+
+
+def test_import_never_writes_through_archive_links(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import tempfile
+
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(scratch))
+    archive = _link_archive(tmp_path / "linked.tar.gz")
+
+    try:
+        result = import_project(archive, tmp_path / "dest")
+    except BackupError:
+        result = None
+
+    dest = (tmp_path / "dest").resolve()
+    outside = [p for p in tmp_path.rglob("escaped.txt") if not p.resolve().is_relative_to(dest)]
+    assert outside == []
+    if result is not None:
+        assert not any(p.is_symlink() for p in result.project_root.rglob("*"))
+
+
+def test_import_drops_link_members(tmp_path: Path) -> None:
+    """A link member is never extracted; the rest of the archive is."""
+    src = tmp_path / "match"
+    _seed_project(src)
+    archive = export_project(src, tmp_path / "out").archive_path
+    linked = tmp_path / "with-link.tar.gz"
+    with tarfile.open(archive) as tin, tarfile.open(linked, "w:gz") as tout:
+        for m in tin.getmembers():
+            tout.addfile(m, tin.extractfile(m) if m.isfile() else None)
+        link = tarfile.TarInfo("match/audit/link.json")
+        link.type = tarfile.SYMTYPE
+        link.linkname = "stage1.json"
+        tout.addfile(link)
+
+    result = import_project(linked, tmp_path / "dest")
+    assert (result.project_root / "audit" / "stage1.json").is_file()
+    assert not (result.project_root / "audit" / "link.json").is_symlink()
+    assert not (result.project_root / "audit" / "link.json").exists()
