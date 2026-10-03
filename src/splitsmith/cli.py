@@ -509,6 +509,22 @@ def ui(
         console.print("\n[yellow]Stopped.[/]")
 
 
+def _redacted_db_url(db_url: str) -> str:
+    """``db_url`` with its password masked, for log lines.
+
+    The startup output lands in the platform's logs, which more people
+    can read than the database. A URL that does not parse is not echoed
+    at all rather than risk printing it verbatim.
+    """
+    from sqlalchemy.engine import make_url
+    from sqlalchemy.exc import ArgumentError
+
+    try:
+        return make_url(db_url).render_as_string(hide_password=True)
+    except ArgumentError:
+        return "(unparseable database URL)"
+
+
 @app.command()
 def serve(
     host: str = typer.Option(
@@ -578,7 +594,9 @@ def serve(
         raise typer.Exit(2)
 
     if not skip_migrations:
-        console.print(f"[green]splitsmith serve[/]: applying migrations against [bold]{db_url}[/]")
+        console.print(
+            f"[green]splitsmith serve[/]: applying migrations against [bold]{_redacted_db_url(db_url)}[/]"
+        )
         # Call ``alembic`` directly from this process's venv rather than
         # ``uv run alembic``. ``uv run`` re-syncs the project before
         # invoking the script, and without ``--no-dev`` that pulls the
