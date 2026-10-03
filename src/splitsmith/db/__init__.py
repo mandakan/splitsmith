@@ -34,6 +34,7 @@ from .magic_link import (
 )
 from .matches import PostgresMatchStore
 from .models import (
+    AccessRequest,
     Base,
     ComputeJobRow,
     DesktopTokenRow,
@@ -55,6 +56,7 @@ from .signup_policy import SignupPolicy, build_signup_policy
 from .youtube_connections import PostgresYouTubeConnectionStore
 
 __all__ = [
+    "AccessRequest",
     "Base",
     "ComputeJobRow",
     "ConsoleEmailSender",
