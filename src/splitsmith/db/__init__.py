@@ -21,6 +21,14 @@ what handlers depend on; the future ``PostgresJobBackend`` /
 this DB layer internally without leaking SQL into handler code.
 """
 
+from .access_requests import (
+    AccessRequestStore,
+    AccessRequestView,
+    AccountAccessStore,
+    AccountView,
+    AlreadyDecidedError,
+    NotFoundError,
+)
 from .email import ConsoleEmailSender, EmailSender, LettermintEmailSender, build_email_sender
 from .engine import create_engine, sessionmaker, tenant_session_factory
 from .export_presets import PostgresExportPresetStore
@@ -57,6 +65,11 @@ from .youtube_connections import PostgresYouTubeConnectionStore
 
 __all__ = [
     "AccessRequest",
+    "AccessRequestStore",
+    "AccessRequestView",
+    "AccountAccessStore",
+    "AccountView",
+    "AlreadyDecidedError",
     "Base",
     "ComputeJobRow",
     "ConsoleEmailSender",
@@ -70,6 +83,7 @@ __all__ = [
     "MagicLinkAuth",
     "MagicLinkTokenRow",
     "MatchRow",
+    "NotFoundError",
     "PostgresExportPresetStore",
     "PostgresJobBackend",
     "PostgresMatchStore",
