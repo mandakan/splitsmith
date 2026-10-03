@@ -58,6 +58,20 @@ class ExportPreviewRequest(BaseModel):
     project_name: str | None = None
 
 
+def _owner() -> str | None:
+    """``<user_id>/<match_id>`` in hosted mode, where one process and one
+    cache folder serve every account; ``None`` locally."""
+    from .server import _hosted_mode_active, current_match_id, current_tenant
+
+    if not _hosted_mode_active():
+        return None
+    tenant = current_tenant.get()
+    user_id = tenant.user_id if tenant is not None else None
+    if not user_id:
+        raise HTTPException(status_code=500, detail="hosted mode active but no authenticated tenant is bound")
+    return f"{user_id}/{current_match_id.get()}"
+
+
 class _NoRasterizer:
     """For ``card=frame``: nothing to rasterize, so no browser is launched."""
 
@@ -83,7 +97,11 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
     rt = runtime()
     cache_dir = rt.cache_dir / "export-preview"
     key = preview_key(
-        spec, slug=slug, project_updated_at=project.updated_at.isoformat(), audit=audit_digest(audit_doc)
+        spec,
+        slug=slug,
+        project_updated_at=project.updated_at.isoformat(),
+        audit=audit_digest(audit_doc),
+        owner=_owner(),
     )
     cached = cache_dir / f"{key}.png"
     if cached.exists():
