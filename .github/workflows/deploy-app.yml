@@ -22,6 +22,15 @@ name: Deploy app (Railway)
 on:
   push:
     branches: [main]
+    # Docs and marketing-site changes build nothing these jobs ship.
+    # functions/ (the update feed, tested in desktop-unit) and the root
+    # package.json (CI's pnpm version) are deliberately not listed.
+    paths-ignore:
+      - "site/**"
+      - "docs/**"
+      - "**/*.md"
+      - "wrangler.toml"
+      - ".github/workflows/deploy-marketing.yml"
   release:
     types: [published]
   workflow_dispatch:

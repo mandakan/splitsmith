@@ -34,6 +34,16 @@ on:
   push:
     branches: [main]
     tags: ['v*']
+    # Docs and marketing-site changes build nothing these jobs ship. Tag pushes and
+    # workflow_call ignore path filters, so releases always publish.
+    # functions/ (the update feed, tested in desktop-unit) and the root
+    # package.json (CI's pnpm version) are deliberately not listed.
+    paths-ignore:
+      - "site/**"
+      - "docs/**"
+      - "**/*.md"
+      - "wrangler.toml"
+      - ".github/workflows/deploy-marketing.yml"
   workflow_dispatch:
   workflow_call:
     inputs:
