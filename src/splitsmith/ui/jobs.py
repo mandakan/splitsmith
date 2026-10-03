@@ -480,6 +480,11 @@ class JobRegistry:
         # pre-#665 in-memory-only behaviour (hosted mode's default
         # registry slot, and most tests).
         self._journal = journal
+        # Set by the hosted wiring: there this registry is only the body
+        # map and the no-tenant fallback of ``AppState.jobs``, and running a
+        # job in the API process with no owner would skip the account
+        # check. ``submit`` raises ``RuntimeError`` with this message.
+        self.submit_refusal: str | None = None
         self._terminal_listeners: list[Callable[[Job], None]] = []
         self._jobs: dict[str, Job] = {}
         self._order: list[str] = []
@@ -594,6 +599,8 @@ class JobRegistry:
         re-submitting, regardless of what's ambient when the retry call
         itself is made.
         """
+        if self.submit_refusal is not None:
+            raise RuntimeError(self.submit_refusal)
         if self._shutting_down:
             raise ShutdownInProgressError("server is shutting down; no new jobs accepted")
         body = self.bodies.get(kind)

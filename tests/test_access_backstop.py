@@ -127,7 +127,7 @@ SLUG = "anna"
 OWNER = "owner@example.com"
 
 
-def _seed_trimmable_stage(db_url: str, user_email: str, source: Path) -> None:
+def _seed_trimmable_stage(db_url: str, user_email: str, source: Path, *, trimmed: bool = False) -> None:
     """A stage that passes every trim preflight: beep, stage time, source present."""
     engine = create_engine(db_url)
     sf = sessionmaker(engine)
@@ -150,7 +150,14 @@ def _seed_trimmable_stage(db_url: str, user_email: str, source: Path) -> None:
                     stage_number=1,
                     stage_name="Stage 1",
                     time_seconds=12.5,
-                    videos=[StageVideo(path=source, role="primary", beep_time=3.0)],
+                    videos=[
+                        StageVideo(
+                            path=source,
+                            role="primary",
+                            beep_time=3.0,
+                            processed={"beep": True, "trim": trimmed},
+                        )
+                    ],
                 )
             ],
         )
@@ -179,3 +186,181 @@ def test_trim_route_after_downgrade_is_refused_with_the_backstop_body(
     assert resp.status_code == 403, resp.text
     assert resp.json() == {"detail": {"code": "feature_required", "feature": "hosted_compute"}}
     assert _job_count(hosted_env) == 0
+
+
+# --- API-side chains after a committed write (fix round 1) ---------------
+
+
+def _project(client: TestClient) -> dict:
+    resp = client.get(f"/api/matches/{MID}/shooters/{SLUG}/project")
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def _downgraded_trimmable_match(
+    client, sender, hosted_env: str, tmp_path: Path, *, trimmed: bool = False  # noqa: ANN001
+) -> str:
+    login(client, sender, OWNER)
+    seed_match(hosted_env, OWNER, MID)
+    source = tmp_path / "v.mp4"
+    source.write_bytes(b"x")
+    _seed_trimmable_stage(hosted_env, OWNER, source, trimmed=trimmed)
+    set_tier(hosted_env, OWNER, "sharing")
+    return _project(client)["stages"][0]["videos"][0]["video_id"]
+
+
+def test_beep_override_saves_and_skips_the_chained_trim(
+    hosted_env: str, hosted_app: tuple[TestClient, _CapturingSender], tmp_path: Path
+) -> None:
+    client, sender = hosted_app
+    video_id = _downgraded_trimmable_match(client, sender, hosted_env, tmp_path)
+
+    resp = client.post(
+        f"/api/matches/{MID}/shooters/{SLUG}/stages/1/videos/{video_id}/beep", json={"beep_time": 4.25}
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert _project(client)["stages"][0]["videos"][0]["beep_time"] == 4.25
+    assert _job_count(hosted_env) == 0
+
+
+def test_beep_override_shim_saves_and_skips_the_chained_trim(
+    hosted_env: str, hosted_app: tuple[TestClient, _CapturingSender], tmp_path: Path
+) -> None:
+    client, sender = hosted_app
+    _downgraded_trimmable_match(client, sender, hosted_env, tmp_path)
+
+    resp = client.post(f"/api/matches/{MID}/shooters/{SLUG}/stages/1/beep", json={"beep_time": 4.25})
+
+    assert resp.status_code == 200, resp.text
+    assert _project(client)["stages"][0]["videos"][0]["beep_time"] == 4.25
+    assert _job_count(hosted_env) == 0
+
+
+@pytest.mark.parametrize("trimmed", [False, True], ids=["chains-trim", "chains-shot-detect"])
+def test_beep_review_saves_and_skips_the_chained_job(
+    hosted_env: str, hosted_app: tuple[TestClient, _CapturingSender], tmp_path: Path, trimmed: bool
+) -> None:
+    client, sender = hosted_app
+    video_id = _downgraded_trimmable_match(client, sender, hosted_env, tmp_path, trimmed=trimmed)
+
+    resp = client.post(
+        f"/api/matches/{MID}/shooters/{SLUG}/stages/1/videos/{video_id}/beep/review", json={"reviewed": True}
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert _project(client)["stages"][0]["videos"][0]["beep_reviewed"] is True
+    assert _job_count(hosted_env) == 0
+
+
+def test_beep_window_is_refused_before_it_is_written(
+    hosted_env: str, hosted_app: tuple[TestClient, _CapturingSender], tmp_path: Path
+) -> None:
+    """The route's purpose is the detection it queues: refuse up front, write nothing."""
+    client, sender = hosted_app
+    video_id = _downgraded_trimmable_match(client, sender, hosted_env, tmp_path)
+
+    resp = client.put(
+        f"/api/matches/{MID}/shooters/{SLUG}/stages/1/videos/{video_id}/beep-window",
+        json={"start_s": 1.0, "end_s": 5.0},
+    )
+
+    assert resp.status_code == 403, resp.text
+    assert resp.json() == {"detail": {"code": "feature_required", "feature": "hosted_compute"}}
+    video = _project(client)["stages"][0]["videos"][0]
+    assert video["beep_window"] is None
+    assert video["beep_time"] == 3.0
+    assert _job_count(hosted_env) == 0
+
+
+def test_auto_queue_beep_skips_without_hosted_compute(
+    hosted_env: str, hosted_app: tuple[TestClient, _CapturingSender], tmp_path: Path
+) -> None:
+    """The best-effort detect_beep hook (scan, assignment moves) reports a skip, not a 403."""
+    from splitsmith.ui.server import current_match_id, current_match_root, current_tenant
+
+    client, sender = hosted_app
+    _downgraded_trimmable_match(client, sender, hosted_env, tmp_path)
+    state = client.app.state.splitsmith_state
+    tenant = state._build_tenant(client.get("/api/me").json()["id"])
+    source = tmp_path / "fresh.mp4"
+    source.write_bytes(b"x")
+    video = StageVideo(path=source, role="primary")
+    project = MatchProject(
+        name="Anna",
+        stages=[StageEntry(stage_number=1, stage_name="Stage 1", time_seconds=12.5, videos=[video])],
+    )
+    hook = client.app.state.auto_queue_beep
+
+    async def go() -> bool:
+        t = current_tenant.set(tenant)
+        m = current_match_id.set(MID)
+        r = current_match_root.set(tmp_path / "match")
+        try:
+            return await hook(SLUG, project, 1, video)
+        finally:
+            current_match_root.reset(r)
+            current_match_id.reset(m)
+            current_tenant.reset(t)
+
+    assert asyncio.run(go()) is False
+    assert _job_count(hosted_env) == 0
+
+
+def test_deleted_account_is_refused(hosted_app, hosted_env) -> None:  # noqa: ANN001
+    from datetime import UTC, datetime
+
+    from sqlalchemy import update
+
+    client, sender = hosted_app
+    login(client, sender, "me@x.se")
+    state = client.app.state.splitsmith_state
+    tenant = state._build_tenant(client.get("/api/me").json()["id"])
+
+    async def mark_deleted() -> None:
+        engine = create_engine(hosted_env)
+        async with sessionmaker(engine)() as s:
+            await s.execute(update(User).where(User.email == "me@x.se").values(deleted_at=datetime.now(UTC)))
+            await s.commit()
+        await engine.dispose()
+
+    asyncio.run(mark_deleted())
+    with pytest.raises(FeatureRequiredError):
+        asyncio.run(tenant.jobs.submit(kind="trim"))
+
+
+def test_hosted_fallback_registry_refuses_submit(hosted_app) -> None:  # noqa: ANN001
+    """With no tenant pinned, hosted ``state.jobs`` is the in-process registry: it must not run jobs."""
+    from splitsmith.ui.server import current_tenant
+
+    client, _ = hosted_app
+    state = client.app.state.splitsmith_state
+    assert current_tenant.get() is None
+    with pytest.raises(RuntimeError, match="no tenant"):
+        asyncio.run(state.jobs.submit(kind="trim", args={}))
+
+
+@pytest.mark.parametrize("per_video", [True, False], ids=["per-video", "primary-shim"])
+def test_beep_override_skips_a_refused_take_chain(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    per_video: bool,
+) -> None:
+    """The take-chain advance (detect_beep for the next stage) is skipped, not a 403."""
+    import splitsmith.ui.server as server_mod
+
+    async def refused(*_a, **_kw) -> None:  # noqa: ANN002, ANN003
+        raise FeatureRequiredError(Feature.hosted_compute)
+
+    monkeypatch.setattr(server_mod, "_advance_sequential_chain", refused)
+    client, sender = hosted_app
+    video_id = _downgraded_trimmable_match(client, sender, hosted_env, tmp_path)
+    base = f"/api/matches/{MID}/shooters/{SLUG}/stages/1"
+    url = f"{base}/videos/{video_id}/beep" if per_video else f"{base}/beep"
+
+    resp = client.post(url, json={"beep_time": 4.25})
+
+    assert resp.status_code == 200, resp.text
+    assert _project(client)["stages"][0]["videos"][0]["beep_time"] == 4.25

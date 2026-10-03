@@ -470,6 +470,8 @@ async def _dispatch_proxy_job(state: AppState, raw_key: str) -> None:
             video_id=raw_key,
             args={"raw_path": raw_key},
         )
+    except FeatureRequiredError as exc:
+        logger.info("generate_proxy for %s not queued: account lacks %s", raw_key, exc.feature.value)
     except Exception:  # noqa: BLE001 - proxy is an optimization; never fail the upload
         logger.exception("failed to dispatch generate_proxy for %s", raw_key)
 
@@ -7053,10 +7055,12 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
             async with session_factory() as session:
                 row = (
                     await session.execute(
-                        select(UserRow.access_tier, UserRow.email).where(UserRow.id == user_id)
+                        select(UserRow.access_tier, UserRow.email, UserRow.deleted_at).where(
+                            UserRow.id == user_id
+                        )
                     )
                 ).one_or_none()
-            if row is None:
+            if row is None or row.deleted_at is not None:
                 return False
             return Feature.hosted_compute in features_for(
                 row.access_tier, row.email, state.access, state.admin_emails
@@ -7087,6 +7091,15 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
         )
 
     state._build_tenant = _build_tenant
+    # The process-level registry stays as the body map and as what
+    # ``state.jobs`` returns when no tenant is pinned. In hosted mode a job
+    # must have an owner (and that owner's account check), so the fallback
+    # refuses to run one in-process.
+    if isinstance(state._jobs, JobRegistry):
+        state._jobs.submit_refusal = (
+            "hosted mode: no tenant is pinned, so there is no account to own this job; "
+            "submit through the request's or job's tenant"
+        )
     # No boot job backend / no boot restart sweep: with MagicLinkAuth there
     # is no boot user to bind one to, and an out-of-process Procrastinate
     # worker (not this API process) now owns running jobs, so failing
@@ -11172,14 +11185,24 @@ def create_app(
                 root / video.path,
             )
             return False
-        await _submit_detect_beep(slug, stage_number, video)
+        try:
+            await _submit_detect_beep(slug, stage_number, video)
+        except FeatureRequiredError as exc:
+            _log_chain_skipped("detect_beep", slug, stage_number, exc)
+            return False
         return True
 
     # Routers outside this closure (footage_sort_api) queue beeps through
     # the same hook rather than a second copy of its rules.
     app.state.auto_queue_beep = _auto_queue_beep_if_needed
 
-    @app.put("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/beep-window")
+    # Gated up front, not left to the backstop: the route writes the window
+    # and then queues the detection that is its whole point, so a refusal
+    # after the write would answer 403 for a change that committed.
+    @app.put(
+        "/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/beep-window",
+        dependencies=[Depends(require_feature(Feature.hosted_compute))],
+    )
     async def set_beep_window(
         slug: str, stage_number: int, video_id: str, body: BeepWindowRequest
     ) -> JSONResponse:
@@ -11783,16 +11806,31 @@ def create_app(
             is not None
         ):
             return
-        await state.jobs.submit(
-            kind="trim",
-            stage_number=stage.stage_number,
-            shooter_slug=slug,
-            video_id=video.video_id,
-            args={
-                "slug": slug,
-                "stage_number": stage.stage_number,
-                "video_id": video.video_id,
-            },
+        try:
+            await state.jobs.submit(
+                kind="trim",
+                stage_number=stage.stage_number,
+                shooter_slug=slug,
+                video_id=video.video_id,
+                args={
+                    "slug": slug,
+                    "stage_number": stage.stage_number,
+                    "video_id": video.video_id,
+                },
+            )
+        except FeatureRequiredError as exc:
+            _log_chain_skipped("trim", slug, stage.stage_number, exc)
+
+    def _log_chain_skipped(kind: str, slug: str, stage_number: int, exc: FeatureRequiredError) -> None:
+        """A job chained after a committed write was refused by the account backstop.
+
+        The write the request made stands and the route answers with its
+        normal success; the chained job is simply not queued. Only the
+        API-side chains catch this: a job body chaining on the worker
+        lets the refusal fail the job.
+        """
+        logger.info(
+            "%s for %s stage %d not queued: account lacks %s", kind, slug, stage_number, exc.feature.value
         )
 
     def _select_candidate_on_video(video: StageVideo, time_value: float) -> None:
@@ -11866,7 +11904,10 @@ def create_app(
         # on its next sync pull (bidirectional sync design).
         if req.beep_time is not None and current_match_origin.get() != "desktop":
             await _maybe_chain_trim(slug, stage, video)
-            await _advance_sequential_chain(state, slug, project, video, stage_number)
+            try:
+                await _advance_sequential_chain(state, slug, project, video, stage_number)
+            except FeatureRequiredError as exc:
+                _log_chain_skipped("detect_beep", slug, stage_number, exc)
         return JSONResponse(project.model_dump(mode="json"))
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/beep")
@@ -11889,7 +11930,10 @@ def create_app(
         project.save(state.shooter_root(slug))
         if req.beep_time is not None:
             await _maybe_chain_trim(slug, stage, primary)
-            await _advance_sequential_chain(state, slug, project, primary, stage_number)
+            try:
+                await _advance_sequential_chain(state, slug, project, primary, stage_number)
+            except FeatureRequiredError as exc:
+                _log_chain_skipped("detect_beep", slug, stage_number, exc)
         return JSONResponse(project.model_dump(mode="json"))
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/time")
@@ -12089,12 +12133,15 @@ def create_app(
             and await state.jobs.find_active(kind="shot_detect", stage_number=stage_number, shooter_slug=slug)
             is None
         ):
-            await state.jobs.submit(
-                kind="shot_detect",
-                stage_number=stage_number,
-                shooter_slug=slug,
-                args={"slug": slug, "stage_number": stage_number},
-            )
+            try:
+                await state.jobs.submit(
+                    kind="shot_detect",
+                    stage_number=stage_number,
+                    shooter_slug=slug,
+                    args={"slug": slug, "stage_number": stage_number},
+                )
+            except FeatureRequiredError as exc:
+                _log_chain_skipped("shot_detect", slug, stage_number, exc)
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/beep/review")
     async def set_beep_reviewed(
