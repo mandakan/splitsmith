@@ -164,3 +164,59 @@ def test_local_create_target_still_honours_the_requested_folder(tmp_path: Path) 
     chosen = tmp_path / "picked"
     target = server._resolve_create_target(None, project_folder=str(chosen), name="Whatever")  # type: ignore[arg-type]
     assert target == chosen
+
+
+def test_hosted_import_with_bind_never_loads_env_files_from_the_archive(
+    signed_in: TestClient, hosted_env: str, tmp_path: Path
+) -> None:
+    """A bound import registers the match; in hosted mode that must not read
+    ``.env`` files out of the imported folder into the shared process."""
+    from splitsmith import match_model
+    from splitsmith.match_project import MatchProject
+
+    src = tmp_path / "src" / "imported-match"
+    match = match_model.Match.init(src, name="Imported")
+    match.shooters = ["me"]
+    match.save(src)
+    MatchProject.init(src, name="Imported")
+    (src / ".env").write_text("SPLITSMITH_IMPORT_ENV_PROBE=loaded\n")
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+        tf.add(src, arcname="imported-match")
+
+    os.environ.pop("SPLITSMITH_IMPORT_ENV_PROBE", None)
+    try:
+        resp = signed_in.post(
+            "/api/me/projects/import",
+            files={"archive": ("p.tar.gz", buf.getvalue(), "application/gzip")},
+            data={"dest_root": "/ignored", "overwrite": "false", "bind": "true"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert "SPLITSMITH_IMPORT_ENV_PROBE" not in os.environ
+    finally:
+        os.environ.pop("SPLITSMITH_IMPORT_ENV_PROBE", None)
+
+
+def test_hosted_import_with_bind_refuses_a_match_id_outside_the_shape(
+    signed_in: TestClient, hosted_env: str, tmp_path: Path
+) -> None:
+    from splitsmith import match_model
+    from splitsmith.match_project import MatchProject
+
+    src = tmp_path / "src" / "odd-match"
+    match = match_model.Match.init(src, name="Odd")
+    match.match_id = ".."
+    match.shooters = ["me"]
+    match.save(src)
+    MatchProject.init(src, name="Odd")
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+        tf.add(src, arcname="odd-match")
+
+    resp = signed_in.post(
+        "/api/me/projects/import",
+        files={"archive": ("p.tar.gz", buf.getvalue(), "application/gzip")},
+        data={"dest_root": "/ignored", "overwrite": "false", "bind": "true"},
+    )
+    assert resp.status_code == 400, resp.text
+    assert "invalid match id" in resp.text

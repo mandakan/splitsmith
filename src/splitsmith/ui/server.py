@@ -6314,6 +6314,14 @@ async def _register_match_at(
     # so the ``match_empty`` check and the registration name see the real
     # roster. ``match_id`` itself is correct in the file (assigned before
     # binding), so it keys the lookup.
+    if (
+        _hosted_mode_active()
+        and match.match_id is not None
+        and not match_model.is_valid_match_id(match.match_id)
+    ):
+        # The id becomes a folder name hosted; an imported match.json can
+        # carry any string.
+        raise HTTPException(status_code=400, detail=f"invalid match id in {resolved}: {match.match_id!r}")
     if state.project_state is not None and match.match_id:
         doc, _ = await state.project_state.load_match(match.match_id)
         if doc is not None:
@@ -6332,9 +6340,13 @@ async def _register_match_at(
     # path is gone (a redeploy wiped it). Local mode stores it too; the
     # filesystem flow there just doesn't need it.
     await state.recent_projects.record_open(resolved, name, kind="match", match_id=match.match_id)
-    loaded_env = _load_env_files(resolved)
-    if loaded_env:
-        logger.info("Loaded env from %s", ", ".join(str(p) for p in loaded_env))
+    # Local only: a match folder's .env files configure the operator's own
+    # process. Hosted serves every account from one process, and the folder
+    # may have arrived in an uploaded archive.
+    if not _hosted_mode_active():
+        loaded_env = _load_env_files(resolved)
+        if loaded_env:
+            logger.info("Loaded env from %s", ", ".join(str(p) for p in loaded_env))
     if match.match_id:
         state.matches.register(match.match_id, resolved)
         # Hosted: record the match in Postgres so a separate worker can
