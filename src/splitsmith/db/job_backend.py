@@ -42,6 +42,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from ..access import Feature, FeatureRequiredError
+from ..async_bridge import run_sync
 from ..observability import PhaseTimer, capture_job_exception, emit_job_event
 from ..ui.job_journal import rehydrate_args, to_wire_args
 from ..ui.jobs import (
@@ -162,7 +163,7 @@ class PostgresJobBackend:
         # belong to a previous API process that's gone. The worker
         # disables this -- it must not fail jobs queued for it to run.
         if sweep_on_boot:
-            asyncio.run(self._sweep_stuck_jobs_on_boot())
+            run_sync(self._sweep_stuck_jobs_on_boot())
 
     # ------------------------------------------------------------------
     # Lifecycle (sync) -- match JobRegistry semantics
@@ -606,10 +607,11 @@ class PostgresJobBackend:
         """
         try:
             now = datetime.now(UTC)
-            # Synchronous dispatch on this thread; bridge to async DB
-            # with ``asyncio.run`` per call. The worker thread has no
-            # event loop of its own.
-            row_snapshot = asyncio.run(self._begin_run(job_id, now))
+            # Synchronous dispatch on this thread; bridges to async DB
+            # through ``run_sync``, which lands on the process
+            # ``DbRunner`` in hosted mode (#1178) and on a fresh loop
+            # otherwise.
+            row_snapshot = run_sync(self._begin_run(job_id, now))
             if row_snapshot is None:
                 return
             if row_snapshot.status in (
@@ -694,15 +696,15 @@ class PostgresJobBackend:
     ) -> None:
         """Persist terminal status + timings in one write, then emit one event.
 
-        Runs on the worker thread (synchronous, bridges to async DB via
-        ``asyncio.run`` exactly like the existing finalize path -- no second
-        event loop). The timer is built once here so a body that raised
-        mid-phase still carries its partial timeline. The structured
-        ``job.completed`` / ``job.failed`` log is emitted once per job from
-        this single terminal path.
+        Runs on the worker thread (synchronous), bridges to async DB
+        through ``run_sync``, which lands on the process ``DbRunner`` in
+        hosted mode (#1178) and on a fresh loop otherwise. The timer is
+        built once here so a body that raised mid-phase still carries its
+        partial timeline. The structured ``job.completed`` / ``job.failed``
+        log is emitted once per job from this single terminal path.
         """
         timings = timer.build()
-        asyncio.run(self._finalize_run(job_id, status, error=error, timings=timings))
+        run_sync(self._finalize_run(job_id, status, error=error, timings=timings))
         event = "job.completed" if status == JobStatus.SUCCEEDED else "job.failed"
         emit_job_event(
             logger,
@@ -755,9 +757,10 @@ class PostgresJobBackend:
 
     def _patch(self, job_id: str, **kwargs) -> None:
         """Update a subset of fields (progress, message, result). Called
-        from the worker thread via :class:`JobHandle`. Bridges to async
-        DB via ``asyncio.run``."""
-        asyncio.run(self._patch_async(job_id, kwargs))
+        from the worker thread via :class:`JobHandle`. Bridges to async DB
+        through ``run_sync``, which lands on the process ``DbRunner`` in
+        hosted mode (#1178) and on a fresh loop otherwise."""
+        run_sync(self._patch_async(job_id, kwargs))
 
     async def _patch_async(self, job_id: str, kwargs: dict) -> None:
         if not kwargs:
@@ -782,7 +785,7 @@ class PostgresJobBackend:
 
     def _is_cancel_requested(self, job_id: str) -> bool:
         """Sync check called from the worker thread."""
-        return asyncio.run(self._is_cancel_requested_async(job_id))
+        return run_sync(self._is_cancel_requested_async(job_id))
 
     async def _is_cancel_requested_async(self, job_id: str) -> bool:
         async with self._session_factory() as session:
