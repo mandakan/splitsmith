@@ -66,3 +66,42 @@ def test_default_tier_must_exist() -> None:
 
 def test_config_carries_access() -> None:
     assert Config().access == AccessConfig()
+
+
+def test_env_default_tier_overrides_the_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("SPLITSMITH_CONFIG", raising=False)
+    monkeypatch.setenv("SPLITSMITH_ACCESS_DEFAULT_TIER", "sharing")
+    cfg = access_config()
+    assert cfg.default_tier == "sharing"
+    assert cfg.tiers == AccessConfig().tiers
+
+
+def test_env_default_tier_unknown_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("SPLITSMITH_CONFIG", raising=False)
+    monkeypatch.setenv("SPLITSMITH_ACCESS_DEFAULT_TIER", "platinum")
+    with pytest.raises(ValueError, match="platinum"):
+        access_config()
+
+
+def test_env_default_tier_applies_on_top_of_yaml_tiers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / "c.yaml"
+    path.write_text(
+        "access:\n  default_tier: full\n  tiers:\n"
+        "    full: [sync, share, create_match, raw_upload, hosted_compute]\n"
+        "    club: [sync, share, hosted_compute]\n"
+    )
+    monkeypatch.setenv("SPLITSMITH_CONFIG", str(path))
+    monkeypatch.setenv("SPLITSMITH_ACCESS_DEFAULT_TIER", "club")
+    cfg = access_config()
+    assert cfg.default_tier == "club"
+    assert set(cfg.tiers) == {"full", "club"}
+    # A tier the YAML replaced away is unknown, so naming it fails.
+    monkeypatch.setenv("SPLITSMITH_ACCESS_DEFAULT_TIER", "sharing")
+    with pytest.raises(ValueError, match="sharing"):
+        access_config()
+
+
+def test_blank_env_default_tier_is_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("SPLITSMITH_CONFIG", raising=False)
+    monkeypatch.setenv("SPLITSMITH_ACCESS_DEFAULT_TIER", "  ")
+    assert access_config().default_tier == "full"

@@ -67,12 +67,22 @@ def features_for(
     return config.tiers[tier]
 
 
+#: Overrides ``access.default_tier`` for new accounts. Read by ``serve``
+#: only (the one process that creates accounts), applied on top of the
+#: ``SPLITSMITH_CONFIG`` registry, and validated against it: an unknown
+#: tier fails boot.
+ENV_ACCESS_DEFAULT_TIER = "SPLITSMITH_ACCESS_DEFAULT_TIER"
+
+
 def access_config() -> AccessConfig:
-    """The registry from ``SPLITSMITH_CONFIG`` when set, else the defaults."""
+    """The registry from ``SPLITSMITH_CONFIG`` when set, else the defaults,
+    with ``SPLITSMITH_ACCESS_DEFAULT_TIER`` applied on top."""
     from .config import Config
     from .runtime import ENV_CONFIG_FILE
 
     raw = os.environ.get(ENV_CONFIG_FILE, "").strip()
-    if not raw:
-        return AccessConfig()
-    return Config.load(Path(raw).expanduser()).access
+    config = Config.load(Path(raw).expanduser()).access if raw else AccessConfig()
+    default_tier = os.environ.get(ENV_ACCESS_DEFAULT_TIER, "").strip()
+    if not default_tier:
+        return config
+    return AccessConfig.model_validate({"tiers": config.tiers, "default_tier": default_tier})

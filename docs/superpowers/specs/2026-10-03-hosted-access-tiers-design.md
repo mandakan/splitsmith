@@ -159,7 +159,9 @@ Two layers, both required.
    - `share`: `POST /api/matches/{id}/match/shares` and the share
      management writes.
 
-   Refusal is `403 {"error": "feature_required", "feature": "<name>"}`.
+   Refusal is `403 {"detail": {"code": "feature_required", "feature": "<name>"}}`;
+   a user with no features at all gets
+   `403 {"detail": {"code": "account_disabled"}}`.
    It is a clean, explainable error for the SPA, distinct from the
    match-level `read_only_mirror`.
 

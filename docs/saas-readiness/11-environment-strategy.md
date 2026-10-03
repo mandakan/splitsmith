@@ -111,7 +111,8 @@ Both `serve` and `worker` in a given environment share these. The
 | `SPLITSMITH_ENV` | `production` (optional override) | `staging` (optional override) |
 | `SENTRY_TRACES_SAMPLE_RATE` | `0.0`-`1.0` (optional, default `0.0`) | same |
 | `SPLITSMITH_ADMIN_EMAILS` | the admin address(es), comma-separated | the same |
-| `SPLITSMITH_CONFIG` | path to a YAML file with `access: {default_tier: sharing}` (step 2 of the rollout below) | the same |
+| `SPLITSMITH_ACCESS_DEFAULT_TIER` | **`serve` only**: `sharing` (step 2 of the rollout below) | the same |
+| `SPLITSMITH_CONFIG` | unset; only for custom tiers, see the caveats below | unset |
 | `SPLITSMITH_ACCESS_REQUEST_ORIGINS` | unset (default `https://splitsmith.app,https://www.splitsmith.app`) | unset |
 | `FORWARDED_ALLOW_IPS` | **`serve` only**: Railway's proxy address, or `*` when the container is reachable only through the proxy | same |
 
@@ -151,26 +152,41 @@ and `default_tier` is `full`, so a deploy with no config behaves as
 before. New accounts get `default_tier`; existing rows were migrated to
 `full`. Admins change a tier at `/admin/access`.
 
-- **`SPLITSMITH_CONFIG`** is a path to a YAML file, not inline YAML. The
+- **`SPLITSMITH_ACCESS_DEFAULT_TIER`** on `serve` is how new accounts get
+  a tier other than `full`: set it to `sharing`. Only `serve` creates
+  accounts, so the worker and agents do not need it. It applies on top of
+  whatever registry is in effect (the defaults, or the tiers a
+  `SPLITSMITH_CONFIG` file defines), and a tier name that registry does
+  not know fails boot.
+- **`SPLITSMITH_CONFIG`** is only for custom tiers, and it is not an
+  access-only knob. It is a path to a YAML file, not inline YAML; the
   image ships none, so the file has to reach the container (a Railway
-  volume, or a file added to the image). To make new accounts `sharing`:
+  volume, or a file added to the image), and a path with no file behind
+  it crashes boot. The same file also overrides the rest of `Config` for
+  that process (the coach auto-classifier thresholds, trim and footage
+  sort settings), so set it deliberately. A custom tier goes under
+  `access.tiers`:
 
   ```yaml
   access:
-    default_tier: sharing
+    tiers:
+      full: [sync, share, create_match, raw_upload, hosted_compute]
+      sharing: [sync, share]
+      club: [sync, share, hosted_compute]
   ```
 
-  A custom tier goes under `access.tiers`; an unknown feature name or a
-  `default_tier` that names no tier fails at boot.
-- **Worker and agents need the same access config.** A job chained on the
+  An unknown feature name or a `default_tier` that names no tier fails at
+  boot.
+- **Worker and agents need the same tier registry.** A job chained on the
   worker (trim -> detect and the like) resolves the user's features from
   the *worker's* own environment and fails closed. So when custom tiers
   or `SPLITSMITH_ADMIN_EMAILS` admins whose tier is below `full` are in
   use, set `SPLITSMITH_CONFIG` (with the same file) and
   `SPLITSMITH_ADMIN_EMAILS` on the `worker` service and in every
   self-hosted agent's environment too, or their chained jobs fail with
-  `feature_required`. With the default tiers and only `default_tier`
-  changed this does not bite: tier names resolve the same everywhere.
+  `feature_required`. With the default tiers and only
+  `SPLITSMITH_ACCESS_DEFAULT_TIER` set on `serve` this does not bite:
+  tier names resolve the same everywhere.
 - **`FORWARDED_ALLOW_IPS` on `serve`.** The intake
   (`POST /api/v1/access-requests` and sign-in for an unknown email) is
   limited to 5 an hour per client address and 50 an hour in total. The
@@ -188,9 +204,10 @@ before. New accounts get `default_tier`; existing rows were migrated to
 ### Rollout
 
 1. Release the app with no access config: every account stays `full`.
-2. Set `SPLITSMITH_CONFIG` with `access: {default_tier: sharing}` on
-   staging, then prod (on `serve`, `worker` and agents, per above), and
-   `FORWARDED_ALLOW_IPS` on `serve`.
+2. Set `SPLITSMITH_ACCESS_DEFAULT_TIER=sharing` and `FORWARDED_ALLOW_IPS`
+   on `serve`, staging first, then prod. New accounts are then `sharing`;
+   existing ones keep their tier. No `SPLITSMITH_CONFIG` is needed for
+   this step.
 3. Waitlist cut-over, in this order: merge the separate
    `site/waitlist-to-app` branch (the marketing form then posts to
    `my.splitsmith.app/api/v1/access-requests`; it must not merge before

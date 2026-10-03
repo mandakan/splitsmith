@@ -488,7 +488,9 @@ An account has **features** (``splitsmith.access.Feature``: ``sync``,
 ``share``, ``create_match``, ``raw_upload``, ``hosted_compute``); a match
 has **capabilities** (by origin). A request needs both. A tier is a named
 feature set in ``AccessConfig`` (``config.py``, overridable through
-``SPLITSMITH_CONFIG``); ``features_for`` resolves a user (env admins get
+``SPLITSMITH_CONFIG``; ``SPLITSMITH_ACCESS_DEFAULT_TIER`` on ``serve``
+sets the tier new accounts get, validated against that registry at
+boot); ``features_for`` resolves a user (env admins get
 everything, an unknown tier gets nothing). Code checks features, never
 tier names, in Python and in the SPA. Local mode never consults access.
 The backstop is ``submit_allowed`` on ``PostgresJobBackend``, wired per
