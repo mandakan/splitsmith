@@ -4636,6 +4636,43 @@ export const api = {
       method: "DELETE",
     }),
 
+  /** Access requests, pending first, then newest request first (hosted
+   *  admin only; 404 locally, 403 for anyone else). */
+  adminAccessRequests: () => request<AccessRequest[]>("/api/admin/access-requests"),
+
+  /** Approve a pending request with ``tier``. 409 when already decided,
+   *  404 "not found" / "account deleted", 422 for an unknown tier. */
+  adminApproveAccessRequest: (id: string, tier: string) =>
+    request<AccessRequest>(`/api/admin/access-requests/${encodeURIComponent(id)}/approve`, {
+      method: "POST",
+      json: { tier },
+    }),
+
+  /** Decline a pending request. 409 when it is not pending. */
+  adminDeclineAccessRequest: (id: string) =>
+    request<AccessRequest>(`/api/admin/access-requests/${encodeURIComponent(id)}/decline`, {
+      method: "POST",
+    }),
+
+  /** Send an approved request's sign-in mail again. 409 unless approved. */
+  adminResendAccessRequest: (id: string) =>
+    request<AccessRequest>(`/api/admin/access-requests/${encodeURIComponent(id)}/resend`, {
+      method: "POST",
+    }),
+
+  /** Every account with its access tier. */
+  adminUsers: () => request<AdminAccount[]>("/api/admin/users"),
+
+  /** Move an account to ``tier``. 422 for an unknown tier, 404 unknown id. */
+  adminSetUserTier: (id: string, tier: string) =>
+    request<AdminAccount>(`/api/admin/users/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      json: { access_tier: tier },
+    }),
+
+  /** The tier registry and the tier a new account gets. */
+  adminAccessTiers: () => request<AccessTiers>("/api/admin/access-tiers"),
+
   // Desktop-token management (desktop-to-hosted sync MVP, #631 Task 3).
   // Operator-global (/api/me/...), hosted-only - 404s in local mode.
 
@@ -4859,6 +4896,36 @@ export interface WorkerView {
   last_wake_at: string | null;
   version: string | null;
   info: WorkerInfo | null;
+}
+
+/** One access request, mirrored from the hosted admin API. */
+export interface AccessRequest {
+  id: string;
+  email: string;
+  note: string | null;
+  source: string;
+  status: "pending" | "approved" | "declined";
+  requested_at: string;
+  last_requested_at: string;
+  decided_at: string | null;
+  decided_by: string | null;
+  tier_granted: string | null;
+  email_sent_at: string | null;
+}
+
+/** One hosted account as the admin user list shows it. */
+export interface AdminAccount {
+  id: string;
+  email: string;
+  display_name: string | null;
+  access_tier: string;
+  created_at: string;
+  is_admin: boolean;
+}
+
+export interface AccessTiers {
+  tiers: { name: string; features: string[] }[];
+  default_tier: string;
 }
 
 export interface WorkerListResponse {

@@ -49,6 +49,7 @@ import { Pick } from "@/pages/Pick";
 import { TakeOverview } from "@/pages/TakeOverview";
 import { PromoteReview } from "@/pages/PromoteReview";
 import { AdminWorkers } from "@/pages/AdminWorkers";
+import { AdminAccess } from "@/pages/AdminAccess";
 import { Account } from "@/pages/Account";
 import { Results } from "@/pages/Results";
 import { ResultsStage } from "@/pages/ResultsStage";
@@ -273,6 +274,7 @@ export function App() {
               account menu and an empty sidebar. They nest directly
               under RootLayout now (#550). */}
           <Route path="admin/workers" element={<AdminWorkers />} />
+          <Route path="admin/access" element={<AdminAccess />} />
           {/* Account settings (#867). Under RootLayout for the same
               reason the admin surfaces are: server-wide, not
               project-scoped. Hosted-only - the page itself redirects to
