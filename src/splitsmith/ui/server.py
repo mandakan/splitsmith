@@ -2396,6 +2396,9 @@ class AppState:
                 )
             project = MatchProject.model_validate(doc)
             project.bind_state(store, match_id=match_id, slug=slug, version=version)
+            # The doc may carry another machine's paths (a desktop mirror's
+            # own sources and cache dirs); resolve inside the shooter root only.
+            project.confine_paths()
         else:
             project = MatchProject.load(shooter_root)
         project.bind_storage(self.storage, scope=scope)
@@ -2422,6 +2425,9 @@ class AppState:
                 )
             project = MatchProject.model_validate(doc)
             project.bind_state(store, match_id=match_id, slug=slug, version=version)
+            # The doc may carry another machine's paths (a desktop mirror's
+            # own sources and cache dirs); resolve inside the shooter root only.
+            project.confine_paths()
         else:
             project = MatchProject.load(shooter_root)
         project.bind_storage(self.storage, scope=scope)
@@ -15491,6 +15497,7 @@ def create_app(
 
             # local mode: mirror-then-serve (existing behavior)
             served_path = shooter_project.resolve_video_path(shooter_root, video.path).resolve()
+            ensure_source_reachable(stage.stage_number if stage is not None else None, served_path)
             return FileResponse(served_path, media_type=video_media_type(served_path))
 
         # Non-registered path: a Compare-produced trim, addressed by the
