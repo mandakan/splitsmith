@@ -157,3 +157,32 @@ def enforce_local_only(app: FastAPI) -> None:
         if any((method, route.path) in LOCAL_ONLY_ROUTES for method in route.methods):
             if not getattr(route.app, "_local_only_guard", False):
                 route.app = _guard(route.app)
+
+
+_STORED_DOC = (
+    "stored as a state doc; a project doc's paths are never resolved hosted "
+    "(MatchProject.confine_paths on every store-backed load)"
+)
+_CAMERAS = "maps a shooter to a camera choice, resolved against that shooter's registered videos only"
+
+#: Routes whose body (or a field of it) is typed dict / Any: there are no
+#: field names to check, so each is classified by hand with the reason its
+#: content never names a file the server reads or writes.
+UNTYPED_BODY_ROUTES: dict[tuple[str, str], str] = {
+    ("PUT", "/api/sync/matches/{match_id}/docs/match"): _STORED_DOC,
+    ("PUT", "/api/sync/matches/{match_id}/docs/project/{slug}"): _STORED_DOC,
+    ("PUT", "/api/sync/matches/{match_id}/docs/audit/{slug}/{stage_number}"): _STORED_DOC,
+    (
+        "PUT",
+        "/api/shooters/{slug}/stages/{stage_number}/audit",
+    ): "audit doc (shots and events), stored, no paths",
+    ("PATCH", "/api/match/shares/{share_id}/cameras"): _CAMERAS,
+    ("POST", "/api/match/compare-export"): _CAMERAS,
+    ("POST", "/api/shooters/{slug}/scoreboard/import"): "scoreboard JSON, parsed into scoreboard models",
+    ("POST", "/api/shooters/{slug}/scoreboard/upload"): "scoreboard JSON, parsed into scoreboard models",
+    ("POST", "/api/match/desktop-commands"): (
+        "stored for the caller's own desktop to claim; the kind is checked against COMMAND_KINDS"
+    ),
+    ("POST", "/api/sync/commands/{command_id}/complete"): "a finished command's result, stored for display",
+    ("POST", "/api/workers/register"): "worker metadata, stored; the route also needs a worker token",
+}
