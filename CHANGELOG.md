@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.56.0](https://github.com/mandakan/splitsmith/compare/v0.55.0...v0.56.0) (2026-10-03)
+
+
+### Features
+
+* **site:** the waitlist form files an access request ([#1175](https://github.com/mandakan/splitsmith/issues/1175)) ([9d7bde6](https://github.com/mandakan/splitsmith/commit/9d7bde6bf1fa0c049cfab9157c9aca35ff5d1792))
+
+
+### Bug Fixes
+
+* **serve:** mask the database password in the startup line ([#1174](https://github.com/mandakan/splitsmith/issues/1174)) ([677e001](https://github.com/mandakan/splitsmith/commit/677e0014e6efb27f8fe4da291a9889ca7d9c645c))
+
 ## [0.55.0](https://github.com/mandakan/splitsmith/compare/v0.54.0...v0.55.0) (2026-10-03)
 
 
