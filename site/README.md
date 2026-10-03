@@ -17,11 +17,11 @@ UI — see `docs/ux-redesign/06-design-system.md`.
   re-shoot them after a visible UI change
 - `og.png` — the link card, a 1200x630 render of the hero
 - `favicon.svg` — the brand mark (also inlined into the page header)
-- `../functions/api/waitlist.js` — Pages Function behind the "Request an
-  invite" form in the Hosted section (POST /api/waitlist). Hosted is
-  invite-only: only whitelisted emails can sign in, so the list is how
-  people ask. Reads/writes the `WAITLIST` KV namespace bound in
-  `wrangler.toml`; `pnpm waitlist:list` dumps it.
+- The "Request an invite" form in the Hosted section posts straight to
+  the hosted app's `POST /api/v1/access-requests` (`https://my.splitsmith.app`)
+  now that the app has that route. The Pages Function that used to serve
+  this (`functions/api/waitlist.js`) is retired; see "Waitlist backend"
+  below for the one-time migration of what it collected.
 
 ## Deploy on Cloudflare Pages
 
@@ -48,12 +48,21 @@ so `wrangler pages deploy` (without args) works from anywhere in the tree.
 
 That's it — no build, no JS bundle, no server.
 
-## Waitlist backend (Pages Function + KV)
+## Waitlist backend (retired; KV kept for the one-time migration)
 
-The "Sign in" chip in the header opens a "Hosted Splitsmith — coming
-soon" modal whose form POSTs to `/api/waitlist`. The handler lives at
-`functions/api/waitlist.js` and stores emails in the `WAITLIST` KV
-namespace bound in `wrangler.toml`.
+The invite form used to POST to `/api/waitlist`, a Pages Function
+(`functions/api/waitlist.js`) that stored emails in the `WAITLIST` KV
+namespace. That function is deleted and the form now posts directly to
+the hosted app (see above) — the app's `access_requests` table is the
+one list going forward.
+
+The `WAITLIST` KV namespace still holds every signup collected before
+the cutover. The binding in `wrangler.toml` and the `waitlist:list` /
+`waitlist:get` scripts below stay in place only until that data has
+been imported into `access_requests` with `scripts/import_waitlist.py`
+(see that script's module docstring for the exact dump + import
+commands); a follow-up commit then removes the binding and these
+scripts.
 
 **One-time bootstrap (do this once per Cloudflare account):**
 
@@ -100,12 +109,10 @@ first and let that provider handle deliverability).
 
 ## Local preview
 
-To run the marketing page with the Pages Function against a real KV
-binding locally:
-
 ```bash
-pnpm pages:dev      # serves site/ with functions/ + WAITLIST KV bound
+pnpm pages:dev      # serves site/ with functions/ bound
 ```
 
-(Without `pnpm pages:dev`, opening `site/index.html` directly works
-for the static page but the waitlist POST will fail.)
+(Without `pnpm pages:dev`, opening `site/index.html` directly still
+works: the invite form posts straight to `https://my.splitsmith.app`,
+not to a local function.)
