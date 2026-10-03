@@ -5,11 +5,7 @@
   "packageManager": "pnpm@10.30.3",
   "scripts": {
     "wrangler": "wrangler",
-    "kv:create": "wrangler kv namespace create WAITLIST",
-    "kv:create-preview": "wrangler kv namespace create WAITLIST --preview",
-    "waitlist:list": "wrangler kv key list --binding WAITLIST --prefix email:",
-    "waitlist:get": "wrangler kv key get --binding WAITLIST",
-    "pages:dev": "wrangler pages dev site --kv WAITLIST"
+    "pages:dev": "wrangler pages dev site"
   },
   "devDependencies": {
     "wrangler": "^4.131.1"
