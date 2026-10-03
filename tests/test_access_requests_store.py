@@ -155,3 +155,92 @@ def test_account_store_sets_tier_and_404s(factory) -> None:  # noqa: ANN001
     assert run(accounts.set_tier(uid, "sharing")).access_tier == "sharing"
     with pytest.raises(NotFoundError):
         run(accounts.set_tier("nope", "full"))
+
+
+def test_empty_note_does_not_block_a_later_note(factory) -> None:  # noqa: ANN001
+    store = AccessRequestStore(factory, now=Clock())
+    run(store.record("a@x.se", source="form", note=""))
+    run(store.record("a@x.se", source="form", note="real"))
+    assert run(store.list())[0].note == "real"
+
+
+def test_whitespace_only_note_does_not_block_a_later_note(factory) -> None:  # noqa: ANN001
+    store = AccessRequestStore(factory, now=Clock())
+    run(store.record("a@x.se", source="form", note="   "))
+    run(store.record("a@x.se", source="form", note="real"))
+    assert run(store.list())[0].note == "real"
+
+
+def test_set_tier_404s_on_soft_deleted_user(factory) -> None:  # noqa: ANN001
+    async def seed() -> str:
+        async with factory() as s:
+            u = User(email="a@x.se", access_tier="full", deleted_at=datetime(2026, 10, 1, tzinfo=UTC))
+            s.add(u)
+            await s.commit()
+            return u.id
+
+    uid = run(seed())
+    accounts = AccountAccessStore(factory)
+    with pytest.raises(NotFoundError):
+        run(accounts.set_tier(uid, "sharing"))
+
+
+def test_account_store_list_excludes_soft_deleted(factory) -> None:  # noqa: ANN001
+    async def seed() -> None:
+        async with factory() as s:
+            s.add(User(email="a@x.se", access_tier="full"))
+            s.add(User(email="b@x.se", access_tier="full", deleted_at=datetime(2026, 10, 1, tzinfo=UTC)))
+            await s.commit()
+
+    run(seed())
+    accounts = AccountAccessStore(factory)
+    assert [a.email for a in run(accounts.list())] == ["a@x.se"]
+
+
+def test_approve_refuses_soft_deleted_account_and_leaves_request_unchanged(factory) -> None:  # noqa: ANN001
+    store = AccessRequestStore(factory, now=Clock())
+    run(store.record("a@x.se", source="form"))
+    rid = run(store.list())[0].id
+
+    async def seed() -> None:
+        async with factory() as s:
+            s.add(User(email="a@x.se", access_tier="full", deleted_at=datetime(2026, 10, 1, tzinfo=UTC)))
+            await s.commit()
+
+    run(seed())
+    with pytest.raises(NotFoundError):
+        run(store.approve(rid, tier="sharing", admin_email="boss@x.se"))
+
+    view = run(store.get(rid))
+    assert view.status == "pending"
+    assert view.tier_granted is None
+    assert view.decided_by is None
+
+
+def test_approve_decline_get_404_on_unknown_id(factory) -> None:  # noqa: ANN001
+    store = AccessRequestStore(factory, now=Clock())
+    with pytest.raises(NotFoundError):
+        run(store.approve("nope", tier="full", admin_email="boss@x.se"))
+    with pytest.raises(NotFoundError):
+        run(store.decline("nope", admin_email="boss@x.se"))
+    with pytest.raises(NotFoundError):
+        run(store.get("nope"))
+
+
+def test_mark_email_sent_sets_timestamp_and_404s(factory) -> None:  # noqa: ANN001
+    store = AccessRequestStore(factory, now=Clock())
+    run(store.record("a@x.se", source="form"))
+    rid = run(store.list())[0].id
+    run(store.mark_email_sent(rid))
+    assert run(store.get(rid)).email_sent_at is not None
+    with pytest.raises(NotFoundError):
+        run(store.mark_email_sent("nope"))
+
+
+def test_decline_of_already_declined_request_is_refused(factory) -> None:  # noqa: ANN001
+    store = AccessRequestStore(factory, now=Clock())
+    run(store.record("a@x.se", source="form"))
+    rid = run(store.list())[0].id
+    run(store.decline(rid, admin_email="boss@x.se"))
+    with pytest.raises(AlreadyDecidedError):
+        run(store.decline(rid, admin_email="boss@x.se"))

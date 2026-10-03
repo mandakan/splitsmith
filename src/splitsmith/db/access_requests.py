@@ -42,6 +42,19 @@ def _normalize_email(email: str) -> str:
     return email.strip().lower()
 
 
+def _normalize_note(note: str | None) -> str | None:
+    """Strip and cap a note; an empty/whitespace-only note becomes
+    ``None`` so it never sticks and blocks a later, real note from being
+    recorded (the fill rule in :meth:`AccessRequestStore.record` only
+    fills when the stored note is ``None``)."""
+    if note is None:
+        return None
+    stripped = note.strip()
+    if not stripped:
+        return None
+    return stripped[:_NOTE_MAX_LENGTH]
+
+
 class AlreadyDecidedError(Exception):
     """The request is no longer pending-or-declined (it was approved)."""
 
@@ -118,7 +131,7 @@ class AccessRequestStore:
         it isn't missing access, so there is nothing to request.
         """
         normalized = _normalize_email(email)
-        trimmed_note = note[:_NOTE_MAX_LENGTH] if note is not None else None
+        trimmed_note = _normalize_note(note)
         now = self._now()
 
         async with self._session_factory() as session:
@@ -224,6 +237,20 @@ class AccessRequestStore:
             if row is None:
                 raise NotFoundError(request_id)
 
+            # An approval that would hand a tier to a soft-deleted account
+            # is refused outright, before anything is written: the request
+            # stays exactly as it was (still pending/declined, no tier,
+            # no decision stamped) rather than being flipped to "approved"
+            # with no usable account behind it. Looked up here, ahead of
+            # the status-flip UPDATE below, precisely so that check can't
+            # fire after the request has already been mutated.
+            if new_status == "approved":
+                existing_user = (
+                    await session.execute(select(User).where(User.email == row.email))
+                ).scalar_one_or_none()
+                if existing_user is not None and existing_user.deleted_at is not None:
+                    raise NotFoundError(request_id)
+
             # Race-safe status flip: a conditional UPDATE guarded on the
             # row still being in an allowed status, checked by rowcount --
             # same pattern as ``complete_login``'s token consumption, so
@@ -245,13 +272,11 @@ class AccessRequestStore:
                 raise AlreadyDecidedError(request_id)
 
             if new_status == "approved":
-                user_row = (
-                    await session.execute(select(User).where(User.email == row.email))
-                ).scalar_one_or_none()
+                user_row = existing_user
                 if user_row is None:
                     # Same race-safe create as ``complete_login``'s first
                     # sign-in: a concurrent sign-in could create the user
-                    # between our check and our insert.
+                    # between our check above and our insert.
                     try:
                         async with session.begin_nested():
                             user_row = User(email=row.email, access_tier=tier_granted)
@@ -303,7 +328,9 @@ class AccountAccessStore:
 
     async def set_tier(self, user_id: str, tier: str) -> AccountView:
         async with self._session_factory() as session:
-            row = (await session.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+            row = (
+                await session.execute(select(User).where(User.id == user_id, User.deleted_at.is_(None)))
+            ).scalar_one_or_none()
             if row is None:
                 raise NotFoundError(user_id)
             row.access_tier = tier
