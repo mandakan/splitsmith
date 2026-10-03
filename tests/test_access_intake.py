@@ -44,6 +44,8 @@ def closed_app(closed_env: str):  # noqa: ANN201
     app, state = _make_closed_app(sender)
     with TestClient(app, follow_redirects=False) as client:
         yield client, sender, state
+        # No alert task outlives the app's loop.
+        drain(client, state)
 
 
 def requests_list(state) -> list:  # noqa: ANN001
@@ -363,3 +365,121 @@ def test_store_normalisers_are_public() -> None:
     assert normalize_email(" A@X.se ") == "a@x.se"
     assert normalize_note("   ") is None
     assert normalize_note(" x" * 600) == ("x " * 600).strip()[:500]
+
+
+# ---------------------------------------------------------------------------
+# Bounds shared by sign-in and the form
+# ---------------------------------------------------------------------------
+
+
+def _client_from_header(app):  # noqa: ANN001, ANN202
+    """ASGI wrapper: take the client address from ``x-test-client`` so one
+    TestClient can speak for many addresses."""
+
+    async def wrapped(scope, receive, send):  # noqa: ANN001, ANN202
+        if scope["type"] == "http":
+            for k, v in scope["headers"]:
+                if k == b"x-test-client":
+                    scope = {**scope, "client": (v.decode(), 1)}
+        await app(scope, receive, send)
+
+    return wrapped
+
+
+def _shape(resp) -> tuple:  # noqa: ANN001
+    headers = tuple(sorted((k, v) for k, v in resp.headers.items() if k != "date"))
+    return resp.status_code, headers, resp.content
+
+
+def test_blocked_sign_ins_share_the_per_address_bound(closed_app) -> None:  # noqa: ANN001
+    client, sender, state = closed_app
+    shapes = {_shape(client.post("/api/v1/auth/begin", json={"email": f"b{i}@x.se"})) for i in range(8)}
+    drain(client, state)
+    assert len(shapes) == 1  # over the limit answers exactly the same
+    assert len(requests_list(state)) == 5
+    assert len(sender.alerts) == 5
+    assert sender.links == []
+
+
+def test_the_bound_is_combined_across_sign_in_and_the_form(closed_app) -> None:  # noqa: ANN001
+    client, sender, state = closed_app
+    for i in range(3):
+        client.post("/api/v1/access-requests", json={"email": f"f{i}@x.se"})
+        client.post("/api/v1/auth/begin", json={"email": f"l{i}@x.se"})
+    drain(client, state)
+    assert len(requests_list(state)) == 5
+    assert len(sender.alerts) == 5
+
+
+def test_blocked_sign_ins_share_the_global_bound(closed_env: str) -> None:
+    sender = _CapturingSender()
+    app, state = _make_closed_app(sender)
+    with TestClient(_client_from_header(app)) as client:
+        shapes = {
+            _shape(
+                client.post(
+                    "/api/v1/auth/begin",
+                    json={"email": f"g{i}@x.se"},
+                    headers={"x-test-client": f"10.0.0.{i}"},
+                )
+            )
+            for i in range(60)
+        }
+        drain(client, state)
+    assert len(shapes) == 1
+    assert len(requests_list(state)) == 50
+    assert len(sender.alerts) == 50
+
+
+def test_the_bound_never_limits_sign_in_mail_for_known_accounts(closed_app) -> None:  # noqa: ANN001
+    client, sender, state = closed_app
+    for i in range(6):
+        client.post("/api/v1/auth/begin", json={"email": f"b{i}@x.se"})
+    for _ in range(3):
+        login(client, sender, "me@x.se")  # allowlisted, then an existing account
+        client.cookies.clear()
+    assert [to for to, _ in sender.links] == ["me@x.se"] * 3
+
+
+# ---------------------------------------------------------------------------
+# Shape of the email and the body
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("bad", ["a b@x.se", "a@x.se\r\nBcc: c@x.se", "a\t@x.se", "a\x00@x.se", "no-at"])
+def test_form_rejects_whitespace_and_control_characters(closed_app, bad: str) -> None:  # noqa: ANN001
+    client, sender, state = closed_app
+    resp = client.post("/api/v1/access-requests", json={"email": bad})
+    assert resp.status_code == 400
+    assert resp.json() == {"detail": "a valid email is required"}
+    assert requests_list(state) == []
+
+
+@pytest.mark.parametrize("bad", ["a b@x.se", "a@x.se\r\nBcc: c@x.se", "a\x00@x.se"])
+def test_sign_in_with_a_malformed_email_records_nothing(closed_app, bad: str) -> None:  # noqa: ANN001
+    client, sender, state = closed_app
+    resp = client.post("/api/v1/auth/begin", json={"email": bad})
+    assert (resp.status_code, resp.json()) == (200, {"ok": True})  # unchanged
+    drain(client, state)
+    assert requests_list(state) == []
+    assert sender.alerts == []
+
+
+def test_valid_request_email() -> None:
+    from splitsmith.db.access_requests import valid_request_email
+
+    assert valid_request_email(" Erik@X.se ")
+    for bad in ["", "   ", "nope", "a b@x.se", "a@x.se\nx", "a\x7f@x.se", "a\u00a0@x.se"]:
+        assert not valid_request_email(bad), bad
+
+
+def test_body_fields_are_bounded(closed_app) -> None:  # noqa: ANN001
+    client, _, state = closed_app
+    long_email = "a" * 315 + "@x.se"  # 320
+    assert client.post("/api/v1/access-requests", json={"email": long_email}).status_code == 202
+    assert client.post("/api/v1/access-requests", json={"email": "a" + long_email}).status_code == 422
+    ok_note = client.post("/api/v1/access-requests", json={"email": "n@x.se", "note": "x" * 2000})
+    assert ok_note.status_code == 202
+    long_note = client.post("/api/v1/access-requests", json={"email": "m@x.se", "note": "x" * 2001})
+    assert long_note.status_code == 422
+    assert {r.email for r in requests_list(state)} == {long_email, "n@x.se"}

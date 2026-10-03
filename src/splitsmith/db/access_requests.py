@@ -42,6 +42,15 @@ def normalize_email(email: str) -> str:
     return email.strip().lower()
 
 
+def valid_request_email(email: str) -> bool:
+    """Shape check for an email asking for access (the form, sign-in's
+    blocked branch, the waitlist import): non-empty after stripping, has an
+    ``@``, and no whitespace or control character inside (no CR/LF that
+    could reach a mail header)."""
+    stripped = email.strip()
+    return bool(stripped) and "@" in stripped and all(c.isprintable() and not c.isspace() for c in stripped)
+
+
 def normalize_note(note: str | None) -> str | None:
     """Strip and cap a note; an empty/whitespace-only note becomes
     ``None`` so it never sticks and blocks a later, real note from being

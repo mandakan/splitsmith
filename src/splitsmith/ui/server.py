@@ -1175,8 +1175,8 @@ class AccessRequestBody(BaseModel):
     login page's "Request access" form and the marketing site's waitlist
     form. Module-level for the same reason as :class:`AuthBeginRequest`."""
 
-    email: str
-    note: str | None = None
+    email: str = Field(max_length=320)
+    note: str | None = Field(default=None, max_length=2000)  # the store keeps 500
     hp: str | None = None  # the marketing form's honeypot
     source: Literal["form", "waitlist"] = "form"
 
@@ -1184,6 +1184,12 @@ class AccessRequestBody(BaseModel):
 # The one reply to an access request, whatever the email's state: it must
 # not tell anyone which addresses have accounts or requests.
 INTAKE_MESSAGE = "If you have access, a sign-in link is on its way. Otherwise your request has been noted."
+
+
+# The client address of the sign-in request being served, so the blocked
+# branch of ``begin_login`` (``on_blocked``, which only sees the email) can
+# charge the intake rate limits. Set by ``/api/v1/auth/begin``.
+_intake_client: ContextVar[str | None] = ContextVar("_intake_client", default=None)
 
 
 def _intake_origins() -> frozenset[str]:
@@ -7002,6 +7008,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
         AccountAccessStore,
         normalize_email,
         normalize_note,
+        valid_request_email,
     )
 
     state.email_sender = email_sender
@@ -7023,13 +7030,47 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
         if not task.cancelled() and task.exception() is not None:
             logger.error("access request alert task failed", exc_info=task.exception())
 
-    async def _record_and_alert(email: str, *, source: str = "login", note: str | None = None) -> None:
+    # Intake bounds, per app (a module-level limiter would share its counts
+    # across every app in the process and every test in one xdist worker),
+    # in-process like the comment limiter, and shared by both writers that
+    # reach a stranger's request: the form route and sign-in's blocked
+    # branch. A sign-in for an existing or allowlisted account never gets
+    # here, so its mail is never limited.
+    #
+    # - 5 an hour per client address, keyed on ``request.client.host``.
+    #   The ``uvicorn.Config`` in ``run`` (this module) keeps uvicorn's
+    #   defaults: ``proxy_headers=True`` with ``forwarded_allow_ips`` from
+    #   ``FORWARDED_ALLOW_IPS`` (else 127.0.0.1). The hosted deploy sets
+    #   ``FORWARDED_ALLOW_IPS`` on the serve service so uvicorn takes the
+    #   client address from the proxy's X-Forwarded-For; without it, the
+    #   host is the proxy's address and every caller shares one key. We
+    #   never read X-Forwarded-For by hand: anyone can send it.
+    # - 50 an hour in total: the bound that holds whatever the client
+    #   address turns out to be.
+    #
+    # Over either limit nothing is recorded and nobody is alerted; the
+    # callers answer exactly as they would otherwise.
+    intake_ip_limiter = CommentRateLimiter(limit=5, window_s=3600.0)
+    intake_global_limiter = CommentRateLimiter(limit=50, window_s=3600.0)
+
+    async def _record_and_alert(
+        email: str, *, client: str | None, source: str = "login", note: str | None = None
+    ) -> None:
         """Record an access request; alert each admin when it is new. The
-        requester is never mailed. The alert runs as a background task, so
-        neither the form nor sign-in waits on mail (which would also let
+        requester is never mailed. A malformed email or a caller over the
+        intake bounds records nothing. The alert runs as a background task,
+        so neither the form nor sign-in waits on mail (which would also let
         response time tell a new request from a known one); a failed alert
         is logged and never fails the request. Reads ``state.email_sender``
         when the alert runs so a swapped transport (tests) applies."""
+        if not valid_request_email(email):
+            return
+        now = time.monotonic()
+        if not (
+            intake_ip_limiter.allow(f"ip:{client or 'unknown'}", now=now)
+            and intake_global_limiter.allow("global", now=now)
+        ):
+            return
         if not await state.access_requests.record(email, source=source, note=note):
             return
         # The alert names the request as stored (lower-cased email, note
@@ -7054,7 +7095,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
             email_sender,
             signup_policy=signup_policy,
             default_tier=state.access.default_tier,
-            on_blocked=lambda email: state.record_access_request(email),
+            on_blocked=lambda email: state.record_access_request(email, client=_intake_client.get()),
         ),
         DesktopTokenAuth(session_factory),
     )
@@ -7819,7 +7860,7 @@ def create_app(
         )
 
     @app.post("/api/v1/auth/begin")
-    async def _auth_begin(payload: AuthBeginRequest) -> JSONResponse:
+    async def _auth_begin(payload: AuthBeginRequest, request: Request) -> JSONResponse:
         """Start a magic-link sign-in: e-mail a link to ``payload.email``.
 
         Always 200 regardless of whether the address has an account -- the
@@ -7835,28 +7876,14 @@ def create_app(
         # through the composite to backends[0]. Safe: these routes 404
         # above unless hosted mode is active, and hosted mode always
         # installs MagicLinkAuth as backends[0].
-        await state.auth.backends[0].begin_login(email, base_url=state.public_base_url)
+        # The blocked branch records an access request and charges the
+        # intake bounds against this caller (see ``_intake_client``).
+        client_token = _intake_client.set(request.client.host if request.client else None)
+        try:
+            await state.auth.backends[0].begin_login(email, base_url=state.public_base_url)
+        finally:
+            _intake_client.reset(client_token)
         return JSONResponse({"ok": True})
-
-    # Per app, not per module: a module-level limiter would share its
-    # counts across every app in the process (and every test in one xdist
-    # worker). Two bounds, both in-process like the comment limiter:
-    #
-    # - 5 an hour per client address, keyed on ``request.client.host``.
-    #   The ``uvicorn.Config`` in ``run`` (this module) keeps uvicorn's
-    #   defaults: ``proxy_headers=True`` with ``forwarded_allow_ips`` from
-    #   ``FORWARDED_ALLOW_IPS`` (else 127.0.0.1). The hosted deploy sets
-    #   ``FORWARDED_ALLOW_IPS`` on the serve service so uvicorn takes the
-    #   client address from the proxy's X-Forwarded-For; without it, the
-    #   host is the proxy's address and every caller shares one key. We
-    #   never read X-Forwarded-For by hand: anyone can send it.
-    # - 50 an hour in total: the bound that holds whatever the client
-    #   address turns out to be.
-    #
-    # Over either limit the route still answers the same 202 and records
-    # nothing.
-    _intake_ip_limiter = CommentRateLimiter(limit=5, window_s=3600.0)
-    _intake_global_limiter = CommentRateLimiter(limit=50, window_s=3600.0)
 
     def _intake_cors(request: Request, response: Response) -> Response:
         origin = request.headers.get("origin")
@@ -7881,18 +7908,23 @@ def create_app(
         admins."""
         if not _hosted_mode_active():
             raise HTTPException(status_code=404, detail="not found")
-        email = payload.email.strip()
-        if not email or "@" not in email:
+        # Lazy: splitsmith.db is hosted-only (a slim local install lacks it).
+        from ..db.access_requests import valid_request_email
+
+        if not valid_request_email(payload.email):
             raise HTTPException(status_code=400, detail="a valid email is required")
-        ip = request.client.host if request.client else "unknown"
-        now = time.monotonic()
-        if (
-            not payload.hp
-            and _intake_ip_limiter.allow(f"ip:{ip}", now=now)
-            and _intake_global_limiter.allow("global", now=now)
-        ):
+        email = payload.email.strip()
+        # Over the intake bounds (5 an hour per client address, 50 in total,
+        # shared with sign-in; see ``_record_and_alert``) nothing is recorded
+        # and the reply is the same.
+        if not payload.hp:
             try:
-                await state.record_access_request(email, source=payload.source, note=payload.note)
+                await state.record_access_request(
+                    email,
+                    client=request.client.host if request.client else None,
+                    source=payload.source,
+                    note=payload.note,
+                )
             except Exception:
                 # A failed write must not answer differently either.
                 logger.exception("recording an access request failed")
