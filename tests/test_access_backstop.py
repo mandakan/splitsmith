@@ -364,3 +364,20 @@ def test_beep_override_skips_a_refused_take_chain(
 
     assert resp.status_code == 200, resp.text
     assert _project(client)["stages"][0]["videos"][0]["beep_time"] == 4.25
+
+
+def test_local_beep_window_is_not_gated(tmp_path: Path) -> None:
+    """Local mode never consults access: the up-front gate is a no-op there."""
+    from tests.test_ui_server import _seed_match_export_project
+
+    client, root = _seed_match_export_project(tmp_path, stage_count=1)
+    client.app.state.splitsmith_state.job_bodies.register("detect_beep", lambda handle, **_a: None)
+    primary = MatchProject.load(root / "shooters" / "me").stage(1).primary()
+    assert primary is not None
+
+    resp = client.put(
+        f"/api/shooters/me/stages/1/videos/{primary.video_id}/beep-window",
+        json={"start_s": 1.0, "end_s": 5.0},
+    )
+
+    assert resp.status_code == 200, resp.text
