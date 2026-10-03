@@ -105,10 +105,12 @@ if TYPE_CHECKING:
         PostgresYouTubeConnectionStore,
         ProjectStateStore,
     )
+    from ..db.access_requests import AccessRequestStore, AccountAccessStore
     from ..db.comments import CommentStore
     from ..db.desktop_commands import DesktopCommandStore
     from ..db.desktop_tokens import DesktopTokenRecord, DesktopTokenStore
     from ..db.device_auth import DeviceAuthStore
+    from ..db.email import EmailSender
     from ..db.share_tokens import ResolvedShare, ShareTokenStore
     from ..db.workers import WorkersStore
     from ..worker_channel import WakeChannelRegistry
@@ -1168,6 +1170,31 @@ class AuthBeginRequest(BaseModel):
     email: str
 
 
+class AccessRequestBody(BaseModel):
+    """Body of ``POST /api/v1/access-requests`` (spec 2026-10-03): the
+    login page's "Request access" form and the marketing site's waitlist
+    form. Module-level for the same reason as :class:`AuthBeginRequest`."""
+
+    email: str
+    note: str | None = None
+    hp: str | None = None  # the marketing form's honeypot
+    source: Literal["form", "waitlist"] = "form"
+
+
+# The one reply to an access request, whatever the email's state: it must
+# not tell anyone which addresses have accounts or requests.
+INTAKE_MESSAGE = "If you have access, a sign-in link is on its way. Otherwise your request has been noted."
+
+
+def _intake_origins() -> frozenset[str]:
+    """Origins allowed to post the access-request form cross-site (the
+    marketing site). Read per request so a test or deploy can set it."""
+    raw = os.environ.get(
+        "SPLITSMITH_ACCESS_REQUEST_ORIGINS", "https://splitsmith.app,https://www.splitsmith.app"
+    )
+    return frozenset(o.strip() for o in raw.split(",") if o.strip())
+
+
 class ShareCreateRequest(BaseModel):
     """Body for minting a link.
 
@@ -1313,6 +1340,9 @@ _PUBLIC_API_PATHS: frozenset[str] = frozenset(
         # (The ``/auth/callback`` redemption is not under /api/*, so the
         # auth gate skips it by prefix.)
         "/api/v1/auth/begin",
+        # Asking for an account happens before one exists. The route
+        # answers the same 202 whatever the email's state (spec 2026-10-03).
+        "/api/v1/access-requests",
         # Self-hosted worker bring-up + wake channel: the registration /
         # worker token in the request IS the auth (checked in the handlers,
         # uniform 404 on any failure) - the session gate must not 401 a
@@ -1847,6 +1877,16 @@ class AppState:
     # ``SPLITSMITH_CONFIG`` by ``_apply_hosted_mode_wiring``; local mode
     # never consults it.
     access: AccessConfig = field(default_factory=AccessConfig)
+    # Access requests and the admin's account list (spec 2026-10-03), plus
+    # the mail transport the app sends access mail through. Raw (non-tenant)
+    # session factory: requests arrive before any account exists. ``None``
+    # in local mode.
+    access_requests: AccessRequestStore | None = None
+    accounts: AccountAccessStore | None = None
+    email_sender: EmailSender | None = None
+    # Records an access request and alerts the admins when it is new. Set
+    # by ``_apply_hosted_mode_wiring``; ``None`` in local mode.
+    record_access_request: Callable[..., Awaitable[None]] | None = None
     # Hosted + launcher only: serve-boot pending-jobs re-check, registered
     # as a FastAPI startup handler by create_app. Runs on every cold start
     # (incl. each wake from Railway app sleeping).
@@ -6952,6 +6992,36 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     # signups to all but an allowlist via SPLITSMITH_SIGNUPS_OPEN=false +
     # SPLITSMITH_SIGNUP_ALLOWLIST. Returning users always sign in.
     signup_policy = build_signup_policy()
+
+    from ..db.access_requests import AccessRequestStore, AccountAccessStore
+    from ..db.access_requests import _normalize_email as _normalize_request_email
+    from ..db.access_requests import _normalize_note as _normalize_request_note
+
+    state.email_sender = email_sender
+    state.access_requests = AccessRequestStore(session_factory)
+    state.accounts = AccountAccessStore(session_factory)
+
+    async def _record_and_alert(email: str, *, source: str = "login", note: str | None = None) -> None:
+        """Record an access request; alert each admin when it is new. The
+        requester is never mailed. A failed alert is logged and never fails
+        the request. Reads ``state.email_sender`` per call so a swapped
+        transport (tests) applies."""
+        if not await state.access_requests.record(email, source=source, note=note):
+            return
+        # The alert names the request as stored (lower-cased email, note
+        # stripped and capped), not as typed.
+        email, note = _normalize_request_email(email), _normalize_request_note(note)
+        admin_url = f"{(state.public_base_url or '').rstrip('/')}/admin/access"
+        for admin in sorted(state.admin_emails):
+            try:
+                await state.email_sender.send_access_request_alert(
+                    to=admin, email=email, note=note, source=source, admin_url=admin_url
+                )
+            except Exception:
+                logger.exception("access request alert to an admin failed")
+
+    state.record_access_request = _record_and_alert
+
     # Composite: a magic-link session cookie (browser) or a desktop bearer
     # token (sync push, #631) either resolve to a normal tenant user, so
     # current_tenant and RLS treat them identically. The auth gate DOES
@@ -6964,6 +7034,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
             email_sender,
             signup_policy=signup_policy,
             default_tier=state.access.default_tier,
+            on_blocked=lambda email: state.record_access_request(email),
         ),
         DesktopTokenAuth(session_factory),
     )
@@ -7746,6 +7817,65 @@ def create_app(
         # installs MagicLinkAuth as backends[0].
         await state.auth.backends[0].begin_login(email, base_url=state.public_base_url)
         return JSONResponse({"ok": True})
+
+    # Per app, not per module: a module-level limiter would share its
+    # counts across every app in the process (and every test in one xdist
+    # worker). Two bounds, both in-process like the comment limiter:
+    #
+    # - 5 an hour per client address. ``request.client.host`` is what
+    #   uvicorn reports. The ``uvicorn.Config`` in ``run`` (this module)
+    #   keeps the defaults (``proxy_headers=True``, ``forwarded_allow_ips`` from
+    #   ``FORWARDED_ALLOW_IPS``, else 127.0.0.1), so behind a proxy that is
+    #   not on that list (Railway's edge) X-Forwarded-For is ignored and
+    #   the host is the proxy's address: every caller can share one key.
+    #   We do not read X-Forwarded-For by hand; anyone can send it.
+    # - 50 an hour in total: the bound that holds whatever the client
+    #   address turns out to be.
+    #
+    # Over either limit the route still answers the same 202 and records
+    # nothing.
+    _intake_ip_limiter = CommentRateLimiter(limit=5, window_s=3600.0)
+    _intake_global_limiter = CommentRateLimiter(limit=50, window_s=3600.0)
+
+    def _intake_cors(request: Request, response: Response) -> Response:
+        origin = request.headers.get("origin")
+        if origin and origin in _intake_origins():
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "content-type"
+            response.headers["Vary"] = "Origin"
+        return response
+
+    @app.options("/api/v1/access-requests")
+    async def _access_request_preflight(request: Request) -> Response:
+        if not _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        return _intake_cors(request, Response(status_code=204))
+
+    @app.post("/api/v1/access-requests", status_code=202)
+    async def _access_request(payload: AccessRequestBody, request: Request) -> Response:
+        """Ask for a hosted account. Always the same 202 whatever the email's
+        state, so the route cannot tell anyone which emails have accounts.
+        Nothing is ever mailed to the requester; a new request alerts the
+        admins."""
+        if not _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        email = payload.email.strip()
+        if not email or "@" not in email:
+            raise HTTPException(status_code=400, detail="a valid email is required")
+        ip = request.client.host if request.client else "unknown"
+        now = time.monotonic()
+        if (
+            not payload.hp
+            and _intake_ip_limiter.allow(f"ip:{ip}", now=now)
+            and _intake_global_limiter.allow("global", now=now)
+        ):
+            try:
+                await state.record_access_request(email, source=payload.source, note=payload.note)
+            except Exception:
+                # A failed write must not answer differently either.
+                logger.exception("recording an access request failed")
+        return _intake_cors(request, JSONResponse({"ok": True, "message": INTAKE_MESSAGE}, status_code=202))
 
     @app.get("/auth/callback")
     async def _auth_callback(token: str, request: Request) -> Response:

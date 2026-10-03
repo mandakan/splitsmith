@@ -25,9 +25,17 @@ PUBLIC_URL = "http://localhost:5174"
 class _CapturingSender:
     def __init__(self) -> None:
         self.links: list[tuple[str, str]] = []
+        self.granted: list[tuple[str, str]] = []
+        self.alerts: list[dict[str, object]] = []
 
     async def send_magic_link(self, *, to: str, link: str) -> None:
         self.links.append((to, link))
+
+    async def send_access_granted(self, *, to: str, link: str) -> None:
+        self.granted.append((to, link))
+
+    async def send_access_request_alert(self, **kw: object) -> None:
+        self.alerts.append(kw)
 
     def last_token(self) -> str:
         return parse_qs(urlparse(self.links[-1][1]).query)["token"][0]
@@ -73,8 +81,10 @@ def hosted_app(hosted_env: str) -> Iterator[tuple[TestClient, _CapturingSender]]
     sender = _CapturingSender()
     # Swap the console transport for the capturing double so the test can
     # read the emitted token. auth is a CompositeAuth; the magic-link
-    # backend is backends[0] (session cookie tried first).
+    # backend is backends[0] (session cookie tried first). The app also
+    # holds the sender itself (admin alerts, access-granted mail).
     app.state.splitsmith_state.auth.backends[0]._email = sender
+    app.state.splitsmith_state.email_sender = sender
     with TestClient(app, follow_redirects=False) as client:
         yield client, sender
 
