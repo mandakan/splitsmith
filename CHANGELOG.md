@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.54.0](https://github.com/mandakan/splitsmith/compare/v0.53.0...v0.54.0) (2026-10-03)
+
+
+### Features
+
+* **desktop:** Linux AppImage and .deb ([#1161](https://github.com/mandakan/splitsmith/issues/1161)) ([b2ad3f0](https://github.com/mandakan/splitsmith/commit/b2ad3f08240f0d86da4fbcd2115bf147ee91b8e6))
+
+
+### Bug Fixes
+
+* **desktop:** every shipped app bundles the wheel with the baked YouTube client ([#1164](https://github.com/mandakan/splitsmith/issues/1164)) ([2c72b7c](https://github.com/mandakan/splitsmith/commit/2c72b7c8d1cbe27b2981f23e86cd34e8aa156ffb))
+* **sync:** ask again when a sync ends without a command's result ([#1165](https://github.com/mandakan/splitsmith/issues/1165)) ([c7370f8](https://github.com/mandakan/splitsmith/commit/c7370f8775b9a166f61d3348385d99c1ac3d7201))
+
+
+### Build / CI
+
+* **image:** layer cache in GHCR; a cache failure falls back to a cold build ([#1166](https://github.com/mandakan/splitsmith/issues/1166)) ([e2dbeeb](https://github.com/mandakan/splitsmith/commit/e2dbeeb058ca84719b25b6c0a882eab4b3dd9190))
+
 ## [0.53.0](https://github.com/mandakan/splitsmith/compare/v0.52.0...v0.53.0) (2026-10-02)
 
 
