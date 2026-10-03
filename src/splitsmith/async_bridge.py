@@ -176,10 +176,15 @@ class DbRunner:
     def run(self, coro: Coroutine[Any, Any, _T]) -> _T:
         """Run ``coro`` on the runner loop and block until it is done.
 
-        The caller's :mod:`contextvars` context travels with the task:
-        ``asyncio.run_coroutine_threadsafe`` creates the task on the
-        target thread, which would otherwise hand the RLS listener the
-        runner thread's empty ``current_share_scope``.
+        The caller's :mod:`contextvars` context travels with the task, so
+        the RLS listener sees the caller's ``current_share_scope``.
+        ``asyncio.run_coroutine_threadsafe`` already carries it: the
+        ``call_soon_threadsafe`` handle copies the calling context and the
+        task copies it again. The explicit ``copy_context`` below is
+        belt-and-braces that keeps the guarantee visible here, not what
+        makes it hold. The load-bearing copy is the fresh-loop fallback's
+        in :func:`_run_on_fresh_loop`, because ``ThreadPoolExecutor.submit``
+        does not copy context.
         """
         if not self.is_running:
             coro.close()

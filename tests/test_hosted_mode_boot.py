@@ -526,3 +526,62 @@ def test_hosted_lifespan_disposes_when_a_boot_duty_fails(
         with TestClient(FastAPI(lifespan=lifespan)):
             pass
     assert calls == ["adopt", "retrigger", "dispose"]
+
+
+def test_rewiring_reuses_the_process_engines_so_the_runner_loop_stays_pooled(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The self-hosted agent calls ``run_worker`` once per wake in one process,
+    so ``_apply_hosted_mode_wiring`` runs once per drain. The second wiring
+    must reuse the first's ``LoopEngines``: the process ``DbRunner`` adopted
+    its loop into that object, and a fresh one would serve every job-thread
+    ``run_sync`` call from the NullPool fallback (#1178)."""
+    from typing import Any
+
+    from sqlalchemy.pool import NullPool
+
+    from splitsmith.async_bridge import get_runner
+    from splitsmith.db import engine as engine_mod
+    from splitsmith.ui.server import AppState, _apply_hosted_mode_wiring
+
+    made: list[Any] = []
+
+    class _FakeEngine:
+        def __init__(self, url: str, kwargs: dict[str, Any]) -> None:
+            self.url = url
+            self.kwargs = kwargs
+
+        async def dispose(self) -> None:
+            return None
+
+    def _fake_create(url: str, **kwargs: Any) -> _FakeEngine:
+        made.append(_FakeEngine(url, kwargs))
+        return made[-1]
+
+    monkeypatch.setattr(engine_mod, "create_async_engine", _fake_create)
+    monkeypatch.setenv("SPLITSMITH_MODE", "hosted")
+    monkeypatch.setenv("SPLITSMITH_DATABASE_URL", "postgresql+asyncpg://u:s3cret@h/db")
+    monkeypatch.setenv("SPLITSMITH_PUBLIC_URL", PUBLIC_URL)
+
+    caplog.set_level("INFO", logger="splitsmith.ui.server")
+    first = AppState()
+    _apply_hosted_mode_wiring(first, worker=True)
+    second = AppState()
+    _apply_hosted_mode_wiring(second, worker=True)
+
+    assert first.db_engines is not None and first.db_engines.pooled
+    assert second.db_engines is first.db_engines
+
+    runner = get_runner()
+    assert runner is not None and runner.is_running
+
+    async def _ask() -> Any:
+        assert second.db_engines is not None
+        return second.db_engines.for_current_loop()
+
+    on_runner = runner.run(_ask())
+    assert on_runner.kwargs.get("poolclass") is not NullPool, "runner loop fell back to NullPool"
+
+    # The wiring names the driver and whether it pooled; never the URL.
+    assert "hosted database: driver=postgresql+asyncpg pooled=True" in caplog.text
+    assert "s3cret" not in caplog.text

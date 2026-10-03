@@ -198,11 +198,13 @@ def _tenant_guc_after_begin(user_id: str) -> Callable[[Session, SessionTransacti
     Uses ``set_config(..., true)`` -- the function form of ``SET LOCAL``,
     so the value is scoped to the current transaction and cleared at its
     end. This is set *per transaction* rather than once per session on
-    purpose: under :class:`NullPool` (the hosted engine), a
-    :class:`~sqlalchemy.orm.Session` releases its connection on every
-    commit/rollback and acquires a *fresh* one for the next transaction,
-    so a session-level ``SET`` would be lost the moment a store method
-    runs a second query after a commit (e.g. ``PostgresMatchStore.upsert``'s
+    purpose: a :class:`~sqlalchemy.orm.Session`'s connection is not
+    guaranteed stable across transactions. The session releases it on
+    every commit/rollback, and the next transaction may get a different
+    one (the per-loop pool of :class:`LoopEngines` may hand back another
+    pooled connection; the NullPool fallback always opens a fresh one).
+    A session-level ``SET`` would be lost the moment a store method runs
+    a second query after a commit (e.g. ``PostgresMatchStore.upsert``'s
     IntegrityError retry). Re-setting on each ``after_begin`` guarantees
     every connection a query lands on carries the GUC.
 
@@ -230,8 +232,8 @@ def _tenant_guc_after_begin(user_id: str) -> Callable[[Session, SessionTransacti
         # matter which code path tries - including code that never heard
         # of the share ContextVars. SET TRANSACTION must precede the
         # transaction's first query, so it goes before the GUC SELECT.
-        # Same per-transaction reasoning as the GUC itself: NullPool
-        # hands each transaction a fresh connection.
+        # Same per-transaction reasoning as the GUC itself: the next
+        # transaction may run on a different connection.
         if share_request_is_read_only():
             connection.execute(text("SET TRANSACTION READ ONLY"))
         connection.execute(

@@ -80,17 +80,23 @@ def _app_conns(addrs: str, *, api: bool) -> str:
 
 
 def _wait_for_worker_connection(addrs: str) -> None:
-    """Block until the worker holds a database connection.
+    """Block until the worker is fully up: its Procrastinate ``LISTEN``
+    connection is open.
 
     ``hosted_stack`` waits for the API's health only; the worker starts
     after it. Its log is evidence about #423 only once it has touched the
-    database."""
+    database. Any worker connection is not enough: the hosted-engine
+    connection appears first and the Procrastinate pool and its LISTEN
+    connection only after the ensemble warm-up, so a slow warm-up would
+    open those sessions inside the counted window. The LISTEN is the last
+    thing the worker opens before it idles."""
     deadline = time.time() + WORKER_CONNECT_TIMEOUT_S
     while time.time() < deadline:
-        if int(_psql(f"SELECT count(*) {_app_conns(addrs, api=False)}")) >= 1:
+        listening = f"SELECT count(*) {_app_conns(addrs, api=False)} AND query LIKE 'LISTEN%'"
+        if int(_psql(listening)) >= 1:
             return
         time.sleep(1.0)
-    pytest.fail(f"the worker never connected to Postgres within {WORKER_CONNECT_TIMEOUT_S:.0f}s")
+    pytest.fail(f"the worker never started LISTENing on Postgres within {WORKER_CONNECT_TIMEOUT_S:.0f}s")
 
 
 def _sessions_started() -> int:

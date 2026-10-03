@@ -6901,6 +6901,44 @@ def _build_device_client(
     return HostedSyncClient(http=httpx.Client(base_url=base_url, headers=headers, timeout=timeout))
 
 
+#: Hosted only: the process's ``LoopEngines``, one per database URL (#1178).
+#: Process-scoped together with the ``DbRunner``, whose ``on_start`` adopts
+#: the runner loop into the engines object it was built with. The self-hosted
+#: agent wires hosted mode once per drain in one long-lived process; a fresh
+#: ``LoopEngines`` per drain would leave the runner loop un-adopted from the
+#: second drain on (every job-thread ``run_sync`` on the NullPool fallback)
+#: and orphan the first drain's pool. One URL per process is the real case.
+_process_engines: dict[str, LoopEngines] = {}
+
+
+def _process_loop_engines(url: str) -> LoopEngines:
+    """The process's ``LoopEngines`` for ``url``, created on first use, with
+    the process ``DbRunner`` started (bound to it) when none is running."""
+    from ..db import LoopEngines
+
+    engines = _process_engines.get(url)
+    if engines is None:
+        engines = LoopEngines(url)
+        _process_engines[url] = engines
+    runner = get_runner()
+    if runner is None or not runner.is_running:
+        runner = DbRunner(on_start=engines.adopt_current_loop, on_stop=engines.dispose_current_loop)
+        runner.start()
+        install_runner(runner)
+    return engines
+
+
+def _reset_process_db_state() -> None:
+    """Tests only: stop and uninstall the process ``DbRunner`` (its
+    ``on_stop`` disposes the runner loop's engine) and forget the cached
+    ``LoopEngines``, so no test inherits another's database state."""
+    runner = get_runner()
+    if runner is not None:
+        install_runner(None)
+        runner.stop()
+    _process_engines.clear()
+
+
 def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     """Wire AppState for hosted mode: a per-tenant store factory + the
     process-level resources it needs.
@@ -6931,7 +6969,6 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     from sqlalchemy import select
 
     from ..db import (
-        LoopEngines,
         MagicLinkAuth,
         PostgresExportPresetStore,
         PostgresJobBackend,
@@ -6996,14 +7033,14 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     # ``queue.run_worker``); every sync caller lands on the process
     # ``DbRunner`` through ``run_sync``; any other loop gets the shared
     # NullPool fallback. See ``splitsmith.db.engine.LoopEngines``.
-    engines = LoopEngines(url)
+    # The engines object is process-scoped, like the runner: see
+    # ``_process_loop_engines`` for why a re-wiring must reuse it.
+    engines = _process_loop_engines(url)
     state.db_engines = engines
+    # The scheme only (never the URL: it carries the password), so a URL
+    # that silently lands on the NullPool fallback is visible in the log.
+    logger.info("hosted database: driver=%s pooled=%s", url.split("://", 1)[0], engines.pooled)
     session_factory = loop_sessionmaker(engines)
-    runner = get_runner()
-    if runner is None or not runner.is_running:
-        runner = DbRunner(on_start=engines.adopt_current_loop, on_stop=engines.dispose_current_loop)
-        runner.start()
-        install_runner(runner)
 
     # Auth resolves identity from ``users`` / ``sessions`` / ``magic_link_tokens``
     # -- none under RLS -- so it holds the raw (non-tenant) session factory.
