@@ -233,9 +233,10 @@ Two hard requirements make this real rather than decorative:
 - **Every session sets `app.user_id`.** The per-user store sessions run
   through `tenant_session_factory`, which pins the GUC per transaction
   (`set_config(..., true)`, the `SET LOCAL` form) via an `after_begin`
-  listener -- re-set on each transaction because the `NullPool` engine
-  hands each transaction a fresh connection. With the GUC unset the
-  policy is fail-closed (zero rows / rejected writes).
+  listener -- re-set on each transaction because each event loop gets its
+  own ``LoopEngines`` pool (see ``Hosted database connections`` in
+  CLAUDE.md, #1178). With the GUC unset the policy is fail-closed (zero rows
+  / rejected writes).
 
 `users` is deliberately **not** under RLS: auth must resolve a user by
 email before any `app.user_id` exists, so an RLS'd `users` would break

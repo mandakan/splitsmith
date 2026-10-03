@@ -64,9 +64,10 @@ irrelevant to deliverability.
 
 Both branches use Neon's **direct** connection endpoint, not
 `-pooler`. asyncpg prepared statements do not survive PgBouncer
-transaction pooling, and the app uses `NullPool` so it does not need
-the pooler. This is the same constraint doc 02 and the deploy notes
-call out.
+transaction pooling, and the app manages its own per-loop connection
+pooling through ``LoopEngines`` (see ``Hosted database connections``
+in CLAUDE.md, #1178) so it does not need the pooler. This is the same
+constraint doc 02 and the deploy notes call out.
 
 ## Promotion flow
 
