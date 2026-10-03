@@ -20,6 +20,7 @@ from splitsmith.db import (
     sessionmaker,
 )
 from splitsmith.match_project import MatchProject, StageEntry, StageVideo
+from splitsmith.ui.server import _hosted_match_work_root
 
 # ``hosted_app`` / ``hosted_env`` are registered in conftest.py.
 from tests.hosted_helpers import _CapturingSender, login, seed_match
@@ -125,16 +126,26 @@ def test_full_tenant_is_not_refused_by_the_backstop(hosted_app) -> None:  # noqa
 MID = "brm-backstop-01"
 SLUG = "anna"
 OWNER = "owner@example.com"
+_SOURCE = Path("raw/v.mp4")
 
 
-def _seed_trimmable_stage(db_url: str, user_email: str, source: Path, *, trimmed: bool = False) -> None:
-    """A stage that passes every trim preflight: beep, stage time, source present."""
+def _seed_trimmable_stage(db_url: str, user_email: str, *, trimmed: bool = False) -> None:
+    """A stage that passes every trim preflight: beep, stage time, source present.
+
+    The source sits in the account's own working folder under a relative
+    path: a hosted project load confines paths (#1172), so an absolute
+    source elsewhere on the container would answer 424 ``source_unreachable``
+    before any gate or chain this file is about is reached.
+    """
     engine = create_engine(db_url)
     sf = sessionmaker(engine)
 
     async def _seed() -> None:
         async with sf() as s:
             user_id = (await s.execute(select(User).where(User.email == user_email))).scalar_one().id
+        source = _hosted_match_work_root(user_id, MID) / "shooters" / SLUG / _SOURCE
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_bytes(b"x")
         store = ProjectStateStore(sf, user_id=user_id)
         match = match_model.Match(
             match_id=MID,
@@ -152,7 +163,7 @@ def _seed_trimmable_stage(db_url: str, user_email: str, source: Path, *, trimmed
                     time_seconds=12.5,
                     videos=[
                         StageVideo(
-                            path=source,
+                            path=_SOURCE,
                             role="primary",
                             beep_time=3.0,
                             processed={"beep": True, "trim": trimmed},
@@ -176,9 +187,7 @@ def test_trim_route_after_downgrade_is_refused_with_the_backstop_body(
     client, sender = hosted_app
     login(client, sender, OWNER)
     seed_match(hosted_env, OWNER, MID)
-    source = tmp_path / "v.mp4"
-    source.write_bytes(b"x")
-    _seed_trimmable_stage(hosted_env, OWNER, source)
+    _seed_trimmable_stage(hosted_env, OWNER)
     set_tier(hosted_env, OWNER, "sharing")
 
     resp = client.post(f"/api/matches/{MID}/shooters/{SLUG}/stages/1/trim")
@@ -202,9 +211,7 @@ def _downgraded_trimmable_match(
 ) -> str:
     login(client, sender, OWNER)
     seed_match(hosted_env, OWNER, MID)
-    source = tmp_path / "v.mp4"
-    source.write_bytes(b"x")
-    _seed_trimmable_stage(hosted_env, OWNER, source, trimmed=trimmed)
+    _seed_trimmable_stage(hosted_env, OWNER, trimmed=trimmed)
     set_tier(hosted_env, OWNER, "sharing")
     return _project(client)["stages"][0]["videos"][0]["video_id"]
 
