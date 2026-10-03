@@ -274,10 +274,10 @@ class PostgresJobBackend:
         The worker's Procrastinate task calls this. Looks up the ``kind``
         -> body callable and drives it through the same persistence path
         the in-process executor used to. Offloaded to a thread because
-        :meth:`_run` and the :class:`JobHandle` bridge use ``asyncio.run``
-        for their DB writes, which can't run inside the worker's
-        already-running event loop; ``to_thread`` also copies the current
-        context so the ContextVars propagate.
+        :meth:`_run` and the :class:`JobHandle` bridge use ``run_sync``
+        for their DB writes, whose fresh-loop fallback can't run inside
+        the worker's already-running event loop; ``to_thread`` also
+        copies the current context so the ContextVars propagate.
 
         ``before_body`` runs on the worker thread immediately before the
         body, *inside* :meth:`_run`'s failure capture. The worker uses it
