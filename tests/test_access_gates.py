@@ -248,3 +248,61 @@ def test_disabled_account_can_sign_its_desktop_token_out(hosted_app, hosted_env)
     assert client.delete("/api/device/session", headers=headers).status_code == 200
     # The token is gone: the next request is anonymous.
     assert client.get("/api/sync/fingerprints", headers=headers).status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Share links follow the owner's account (ruling on the final review): an
+# owner with no features at all has nothing reachable through a link, so a
+# link collapses to the same 404 as an unknown token. ``sharing`` keeps it.
+# ---------------------------------------------------------------------------
+
+
+def _owner_with_comment_link(client: TestClient, sender, db_url: str) -> str:  # noqa: ANN001
+    from tests.hosted_helpers import seed_match
+    from tests.test_comments_moderation import MID, SLUG, _seed_state_docs
+
+    login(client, sender, "owner@example.com")
+    seed_match(db_url, "owner@example.com", MID)
+    _seed_state_docs(db_url, "owner@example.com", MID, SLUG)
+    created = client.post(f"/api/matches/{MID}/match/shares", json={"scope": "comment"})
+    assert created.status_code == 201, created.text
+    return created.json()["url"].rsplit("/", 1)[-1]
+
+
+def _share_status(client: TestClient, token: str) -> tuple[int, int]:
+    """(read status, comment-post status) through ``token``, anonymously."""
+    from splitsmith.ui.comments import AUTHOR_KEY_HEADER
+    from tests.test_comments_moderation import SLUG, STAGE
+
+    anon = TestClient(client.app, follow_redirects=False)
+    read = anon.get(f"/api/share/{token}/shooters/{SLUG}/stages/{STAGE}/comments")
+    write = anon.post(
+        f"/api/share/{token}/shooters/{SLUG}/stages/{STAGE}/comments",
+        json={"body": "nice draw", "anchor_t": 1.0},
+        headers={AUTHOR_KEY_HEADER: "c" * 64},
+    )
+    return read.status_code, write.status_code
+
+
+def test_disabled_owners_share_link_is_a_uniform_404(hosted_app, hosted_env) -> None:  # noqa: ANN001
+    client, sender = hosted_app
+    token = _owner_with_comment_link(client, sender, hosted_env)
+    assert _share_status(client, token) == (200, 201)
+
+    set_tier(hosted_env, "owner@example.com", "disabled")
+    anon = TestClient(client.app, follow_redirects=False)
+    unknown = anon.get("/api/share/not-a-token/match/shooters")
+    assert _share_status(client, token) == (404, 404)
+    gone = anon.get(f"/api/share/{token}/match/shooters")
+    assert gone.status_code == 404
+    assert gone.json() == unknown.json()
+
+    set_tier(hosted_env, "owner@example.com", "full")
+    assert _share_status(client, token) == (200, 201)
+
+
+def test_sharing_owners_share_link_keeps_working(hosted_app, hosted_env) -> None:  # noqa: ANN001
+    client, sender = hosted_app
+    token = _owner_with_comment_link(client, sender, hosted_env)
+    set_tier(hosted_env, "owner@example.com", "sharing")
+    assert _share_status(client, token) == (200, 201)

@@ -102,9 +102,14 @@ class AccessConfig(BaseModel):
 - An unknown feature name in YAML fails validation at boot.
 - `default_tier` must name a tier in `tiers` (validator).
 - `default_tier` is `full` so dev, tests and self-hosting are unchanged;
-  prod and staging set it to `sharing` through their config YAML.
+  prod and staging set it to `sharing` through
+  `SPLITSMITH_ACCESS_DEFAULT_TIER` on `serve` (applied on top of the
+  registry, validated at boot).
 - `disabled` doubles as revoke: with no `sync`, a desktop token stops
-  working and nothing else is reachable but `/api/me` and logout.
+  working and nothing else is reachable but `/api/me` and logout. An
+  owner with no features also takes their share links down: every
+  anonymous `/api/share/{token}/...` read and comment write answers the
+  same 404 as an unknown token until the account has a feature again.
 
 ### Storage
 

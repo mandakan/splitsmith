@@ -7103,8 +7103,29 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     # Anonymous resolver for the share-token public path. Uses the RAW
     # session_factory (same as auth above) - share_tokens is not RLS-scoped
     # and the call arrives before any tenant GUC is set.
+    #
+    # A link follows its owner's account: an owner with no features at all
+    # (or a deleted one) has nothing reachable through a link, so the token
+    # resolves to None and ``_share_alias`` answers its uniform 404. Any
+    # feature keeps links working (``sharing`` exists for exactly that);
+    # minting a new one is ``share``'s gate on the management routes.
     async def _resolve_share_token(token: str) -> ResolvedShare | None:
-        return await _resolve_share_token_fn(session_factory, token)
+        resolved = await _resolve_share_token_fn(session_factory, token)
+        if resolved is None:
+            return None
+        async with session_factory() as session:
+            owner = (
+                await session.execute(
+                    select(UserRow.access_tier, UserRow.email, UserRow.deleted_at).where(
+                        UserRow.id == resolved.owner_user_id
+                    )
+                )
+            ).one_or_none()
+        if owner is None or owner.deleted_at is not None:
+            return None
+        if not features_for(owner.access_tier, owner.email, state.access, state.admin_emails):
+            return None
+        return resolved
 
     state.resolve_share_token = _resolve_share_token
 
