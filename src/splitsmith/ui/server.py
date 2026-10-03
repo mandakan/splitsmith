@@ -1907,10 +1907,10 @@ class AppState:
     # infrastructure shared across tenants, not per-user data (no RLS; the
     # unique token hash is the isolation boundary).
     workers_store: WorkersStore | None = None
-    #: Hosted only: the per-loop pooled engines (#1178). ``None`` in local
-    #: mode, which has no database. The lifespan adopts the app loop and
-    #: disposes it; the process ``DbRunner`` (``async_bridge.get_runner``)
-    #: adopts its own.
+    # Hosted only: the per-loop pooled engines (#1178). ``None`` in local
+    # mode, which has no database. The lifespan adopts the app loop and
+    # disposes it; the process ``DbRunner`` (``async_bridge.get_runner``)
+    # adopts its own.
     db_engines: LoopEngines | None = None
     # Device-flow authorizations (#719). Raw (non-tenant) session factory,
     # same as workers_store: the poll authenticates from the device code
@@ -7507,16 +7507,17 @@ def _hosted_boot_lifespan(state: Any) -> Any | None:
     @asynccontextmanager
     async def _lifespan(_app: Any) -> AsyncIterator[None]:
         if engines is not None:
-            # The app loop is long-lived: give it its pooled engine (#1178).
+            # The app loop is long-lived: give it its pooled engine (#1178),
+            # before either boot duty touches the database.
             engines.adopt_current_loop()
-        if workers_store is not None:
-            await workers_store.ensure_railway_row(version=splitsmith_version)
-        if retrigger is not None:
-            # Cold starts include every wake from Railway app sleeping, so a
-            # stranded queue job recovers on the next visit instead of
-            # waiting for the 6-hourly safety cron.
-            await retrigger()
         try:
+            if workers_store is not None:
+                await workers_store.ensure_railway_row(version=splitsmith_version)
+            if retrigger is not None:
+                # Cold starts include every wake from Railway app sleeping, so a
+                # stranded queue job recovers on the next visit instead of
+                # waiting for the 6-hourly safety cron.
+                await retrigger()
             yield
         finally:
             if engines is not None:

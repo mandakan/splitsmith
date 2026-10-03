@@ -413,7 +413,12 @@ def test_local_mode_builds_no_engines_and_installs_no_runner(
     from splitsmith.async_bridge import get_runner, install_runner
     from splitsmith.ui.server import create_app
 
-    install_runner(None)  # a previous hosted test in this worker may have left one
+    # conftest's ``_stop_process_db_runner`` already stops any runner a
+    # previous test left; stop one here too so this test never depends on it.
+    leftover = get_runner()
+    if leftover is not None:
+        install_runner(None)
+        leftover.stop()
     monkeypatch.delenv("SPLITSMITH_MODE", raising=False)
     monkeypatch.delenv("SPLITSMITH_DATABASE_URL", raising=False)
     app = create_app()
@@ -449,3 +454,75 @@ def test_hosted_lifespan_adopts_the_app_loop_and_disposes_it_on_exit(
     with TestClient(app):
         assert calls == ["adopt"]
     assert calls == ["adopt", "dispose"]
+
+
+def _spy_on_loop_engines(engines: object, calls: list[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    orig_adopt = engines.adopt_current_loop  # type: ignore[attr-defined]
+    orig_dispose = engines.dispose_current_loop  # type: ignore[attr-defined]
+
+    def _adopt():  # noqa: ANN202
+        calls.append("adopt")
+        return orig_adopt()
+
+    async def _dispose() -> None:
+        calls.append("dispose")
+        await orig_dispose()
+
+    monkeypatch.setattr(engines, "adopt_current_loop", _adopt)
+    monkeypatch.setattr(engines, "dispose_current_loop", _dispose)
+
+
+def test_hosted_lifespan_adopts_before_the_boot_duties(
+    hosted_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Adopt precedes the first database use (the boot retrigger here), so
+    the boot duties already run on the app loop's pooled engine."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from splitsmith.ui.server import _hosted_boot_lifespan, create_app
+
+    state = create_app().state.splitsmith_state
+    calls: list[str] = []
+    _spy_on_loop_engines(state.db_engines, calls, monkeypatch)
+
+    async def _retrigger() -> None:
+        calls.append("retrigger")
+
+    state.boot_retrigger = _retrigger
+    lifespan = _hosted_boot_lifespan(state)
+    assert lifespan is not None
+    with TestClient(FastAPI(lifespan=lifespan)):
+        pass
+    assert calls == ["adopt", "retrigger", "dispose"]
+
+
+def test_hosted_lifespan_disposes_when_a_boot_duty_fails(
+    hosted_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A boot duty that raises after the adopt still disposes the engine.
+
+    This is the case that pins the lifespan's ``finally``: TestClient sends a
+    normal ``lifespan.shutdown`` even when the ``with`` body raises, so an
+    exception there never reaches the generator and cannot tell a
+    ``finally`` from code after a bare ``yield``."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from splitsmith.ui.server import _hosted_boot_lifespan, create_app
+
+    state = create_app().state.splitsmith_state
+    calls: list[str] = []
+    _spy_on_loop_engines(state.db_engines, calls, monkeypatch)
+
+    async def _retrigger() -> None:
+        calls.append("retrigger")
+        raise RuntimeError("retrigger down")
+
+    state.boot_retrigger = _retrigger
+    lifespan = _hosted_boot_lifespan(state)
+    assert lifespan is not None
+    with pytest.raises(RuntimeError, match="retrigger down"):
+        with TestClient(FastAPI(lifespan=lifespan)):
+            pass
+    assert calls == ["adopt", "retrigger", "dispose"]

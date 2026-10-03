@@ -379,3 +379,98 @@ def test_worker_command_requires_database_url(monkeypatch: pytest.MonkeyPatch) -
 
     assert result.exit_code == 2
     assert "SPLITSMITH_DATABASE_URL is not set" in result.stdout
+
+
+class _SpyEngines:
+    """Records the worker's per-loop engine calls and the loop each ran on."""
+
+    def __init__(self, calls: list[str]) -> None:
+        self.calls = calls
+        self.loops: list[object] = []
+
+    def adopt_current_loop(self) -> None:
+        import asyncio
+
+        self.calls.append("adopt")
+        self.loops.append(asyncio.get_running_loop())
+
+    async def dispose_current_loop(self) -> None:
+        import asyncio
+
+        self.calls.append("dispose")
+        self.loops.append(asyncio.get_running_loop())
+
+
+def _stub_worker_server(monkeypatch: pytest.MonkeyPatch, calls: list[str]) -> _SpyEngines:
+    import sys
+    import types
+
+    engines = _SpyEngines(calls)
+    server = types.ModuleType("splitsmith.ui.server")
+    server.build_worker_state = lambda: types.SimpleNamespace(db_engines=engines)  # type: ignore[attr-defined]
+    server._configure_app_logging = lambda: None  # type: ignore[attr-defined]
+    server.warm_ensemble_runtime = lambda: None  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "splitsmith.ui.server", server)
+
+    import splitsmith.queue as queue_mod
+
+    monkeypatch.setattr(queue_mod, "init_sentry", lambda **_k: None)
+    return engines
+
+
+def test_run_worker_adopts_its_loop_and_disposes_it_after_close(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hosted worker (#1178): the worker's main loop adopts a pooled engine
+    before the drain and disposes it after the connector closes, on that loop."""
+    import asyncio
+
+    import splitsmith.queue as queue_mod
+
+    calls: list[str] = []
+    engines = _stub_worker_server(monkeypatch, calls)
+
+    class _FakeConnector:
+        async def close_async(self) -> None:
+            calls.append("close")
+
+    class _FakeApp:
+        connector = _FakeConnector()
+
+        async def run_worker_async(self, **_kwargs: object) -> None:
+            calls.append("drain")
+
+    async def _open(_url: str, _state: object) -> _FakeApp:
+        return _FakeApp()
+
+    monkeypatch.setattr(queue_mod, "_open_app_with_retry", _open)
+
+    worker_loops: list[object] = []
+
+    async def _main() -> None:
+        worker_loops.append(asyncio.get_running_loop())
+        await run_worker(_FAKE_PG_URL)
+
+    asyncio.run(_main())
+
+    assert calls == ["adopt", "drain", "close", "dispose"]
+    assert engines.loops == [worker_loops[0], worker_loops[0]]
+
+
+def test_run_worker_disposes_its_engine_when_the_queue_open_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A boot that dies in ``_open_app_with_retry`` still disposes the engine
+    the worker loop adopted; there is no connector to close."""
+    import asyncio
+
+    import splitsmith.queue as queue_mod
+
+    calls: list[str] = []
+    _stub_worker_server(monkeypatch, calls)
+
+    async def _open(_url: str, _state: object) -> object:
+        raise OSError("pooler refused")
+
+    monkeypatch.setattr(queue_mod, "_open_app_with_retry", _open)
+
+    with pytest.raises(OSError, match="pooler refused"):
+        asyncio.run(run_worker(_FAKE_PG_URL))
+
+    assert calls == ["adopt", "dispose"]
