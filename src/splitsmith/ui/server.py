@@ -13475,7 +13475,11 @@ def create_app(
           fields and a per-row Generate affordance in the SPA. Cached
           probes / thumbnails always populate -- the budget only gates the
           first-time work.
+
+        Local mode only: it browses the machine the server runs on.
         """
+        if _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
         project = state.shooter_project(slug)
         target = Path(path).expanduser() if path else _default_start(project.last_scanned_dir)
         try:
@@ -13554,8 +13558,10 @@ def create_app(
         folder for a new project, not media to ingest.
 
         Hidden entries (dot-prefixed) and broken symlinks are skipped.
-        Permission errors surface as 403.
+        Permission errors surface as 403. Local mode only.
         """
+        if _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
         target = Path(path).expanduser() if path else _default_start(None)
         try:
             target = target.resolve(strict=True)
@@ -13598,7 +13604,10 @@ def create_app(
         Cached results are returned without re-running the binaries. Also
         surfaces resolution/codec/size so the unassigned-tray rows can show
         enough metadata for the user to identify which clip is which.
+        Local mode only, like the picker that calls it.
         """
+        if _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
         project = state.shooter_project(slug)
         # StageVideo.path is project-relative for default projects, so resolve
         # via the project root rather than process CWD before strict-resolving.
@@ -13646,8 +13655,11 @@ def create_app(
 
         Keys are 16-char hex from :func:`video_probe.source_cache_key`. We
         validate the key shape so we never accept an arbitrary path that
-        could escape the thumbs directory.
+        could escape the thumbs directory. Local mode only: the picker
+        routes above are the only writers of this cache.
         """
+        if _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
         if not cache_key.isalnum() or len(cache_key) > 32:
             raise HTTPException(status_code=400, detail="invalid thumbnail key")
         project = state.shooter_project(slug)
