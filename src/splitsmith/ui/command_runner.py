@@ -149,13 +149,16 @@ class CommandRunner:
     async def _settle_syncs(self, api: CommandApi, syncs_done: list) -> None:
         for match_id, ok, started_at, error in syncs_done:
             with self._lock:
-                waiting = [
-                    t
-                    for t in self._tracked.values()
-                    if t.match_id == match_id
-                    and t.finished_at is not None
-                    and (started_at is None or started_at >= t.finished_at)
+                pending = [
+                    t for t in self._tracked.values() if t.match_id == match_id and t.finished_at is not None
                 ]
+            waiting = [t for t in pending if started_at is None or started_at >= t.finished_at]
+            if ok and len(waiting) < len(pending):
+                # A sync that started before a result existed succeeded, and
+                # the core may count it as the push the result asked for (it
+                # dates syncs by its own clock, this runner by the jobs'), so
+                # ask again or the command waits for an unrelated change.
+                self._request_sync_now(match_id)
             for tracked in waiting:
                 tracked.outcome = (
                     ("succeeded", None)

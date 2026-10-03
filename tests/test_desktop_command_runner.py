@@ -250,10 +250,16 @@ def test_a_command_completes_only_after_a_sync_that_carried_its_result(tmp_path:
     assert synced_now == ["m1"] and api.completed == []
     finished = jobs.jobs["j1"].finished_at.timestamp()
 
-    # A sync that started before the job ended does not carry its result.
+    # A sync that started before the job ended does not carry its result,
+    # so the runner asks for another (#1163: the core may have counted that
+    # sync as the requested push and would otherwise never run one). A
+    # failed one asks for nothing: the core keeps the request for its retry.
+    runner.on_sync_done("m1", ok=False, started_at=finished - 5, error="offline")
+    asyncio.run(runner.tick(api, {"m1": root}))
+    assert api.completed == [] and synced_now == ["m1"]
     runner.on_sync_done("m1", ok=True, started_at=finished - 5, error=None)
     asyncio.run(runner.tick(api, {"m1": root}))
-    assert api.completed == []
+    assert api.completed == [] and synced_now == ["m1", "m1"]
     runner.on_sync_done("m1", ok=True, started_at=finished + 1, error=None)
     asyncio.run(runner.tick(api, {"m1": root}))
     assert api.completed == [("c1", "succeeded", None)]
