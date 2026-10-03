@@ -17,6 +17,7 @@ import { useSearchParams } from "react-router-dom";
 
 import {
   ApiError,
+  apiErrorText,
   api,
   capabilityDenied,
   type BeepQueueItem,
@@ -164,7 +165,7 @@ export function useBeepQueue() {
         // which yanked the operator back to stage 1 on every save.
         setActiveKey(nextPendingKey(next, keyOf(item)));
       } catch (e) {
-        setError(e instanceof ApiError ? e.detail : String(e));
+        setError(apiErrorText(e, "Could not confirm the beep."));
       } finally {
         setBusy(false);
       }
@@ -198,7 +199,7 @@ export function useBeepQueue() {
       // beep to review it.
       setActiveKey(keyOf(item));
     } catch (e) {
-      setError(e instanceof ApiError ? e.detail : String(e));
+      setError(apiErrorText(e, "Could not re-detect the beep."));
     } finally {
       setBusy(false);
       setRedetecting(false);

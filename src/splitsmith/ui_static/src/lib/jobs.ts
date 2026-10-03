@@ -11,7 +11,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { ApiError, api, type Job } from "@/lib/api";
+import { ApiError, api, featureRefusal, type Job } from "@/lib/api";
 
 const ACTIVE_POLL_MS = 1000;
 const IDLE_POLL_MS = 5000;
@@ -35,6 +35,9 @@ export interface JobsState {
   pending: Job[];
   failed: Job[];
   error: string | null;
+  /** A retry the server refused for the account (``feature_required``):
+   *  the job it was for and the sentence to show in place of Retry. */
+  retryRefusal: { jobId: string; text: string } | null;
   refresh: () => Promise<void>;
   acknowledge: (job: Job) => Promise<void>;
   acknowledgeAll: () => Promise<void>;
@@ -45,6 +48,7 @@ export interface JobsState {
 export function useJobs(): JobsState {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [retryRefusal, setRetryRefusal] = useState<JobsState["retryRefusal"]>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const refresh = useCallback(async () => {
@@ -107,9 +111,13 @@ export function useJobs(): JobsState {
     async (job: Job) => {
       try {
         await api.retryJob(job.id);
+        setRetryRefusal(null);
         await refresh();
-      } catch {
-        /* swallow */
+      } catch (e) {
+        // A refusal is the answer, not a glitch: show it where Retry was.
+        // Anything else stays swallowed; the next poll shows the state.
+        const text = featureRefusal(e);
+        if (text) setRetryRefusal({ jobId: job.id, text });
       }
     },
     [refresh],
@@ -126,6 +134,7 @@ export function useJobs(): JobsState {
     pending,
     failed,
     error,
+    retryRefusal,
     refresh,
     acknowledge,
     acknowledgeAll,

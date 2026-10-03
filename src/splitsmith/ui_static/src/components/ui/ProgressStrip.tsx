@@ -69,16 +69,20 @@ export function ProgressStrip({ state, onOpen, onDismissFailed }: ProgressStripP
   }
 
   const f = failed!;
+  const refused = state.retryRefusal?.jobId === f.id ? state.retryRefusal.text : null;
   return (
     <div role="status" className={BASE}>
       <i aria-hidden className="size-1.5 shrink-0 rounded-full bg-led" />
       <span className="truncate text-led-text">
         {kindLabel(f.kind)} failed{stageText(f)}
       </span>
+      {refused ? <span className="min-w-0 truncate text-muted">{refused}</span> : null}
       <span className="ml-auto flex shrink-0 gap-3">
-        <button type="button" onClick={() => void state.retry(f)} className="hover:text-ink">
-          Retry
-        </button>
+        {refused ? null : (
+          <button type="button" onClick={() => void state.retry(f)} className="hover:text-ink">
+            Retry
+          </button>
+        )}
         <button type="button" onClick={onOpen} className="hover:text-ink">
           Details
         </button>

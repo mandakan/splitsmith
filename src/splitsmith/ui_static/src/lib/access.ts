@@ -3,7 +3,7 @@
  * nothing in the SPA compares tier names. Local mode has no accounts, so
  * the loopback user can do everything.
  */
-import { ApiError, type AuthUser } from "@/lib/api";
+import type { AuthUser } from "@/lib/api";
 import { useAuthUser } from "@/lib/auth";
 import { useDeploymentMode } from "@/lib/features";
 
@@ -27,27 +27,6 @@ export function useCan(feature: Feature): boolean {
   return (resolved && mode === "local") || can(user, feature);
 }
 
-const WHAT: Record<Feature, string> = {
-  sync: "Syncing from the desktop app",
-  share: "Sharing",
-  create_match: "Creating matches here",
-  raw_upload: "Uploading footage here",
-  hosted_compute: "Running detection and renders here",
-};
-
-/** One muted line for a refusal, or null when ``err`` is not one.
- *
- *  ``ApiError.body`` holds the response's raw ``detail`` (see
- *  ``request()`` in api.ts), so the refusal's ``{code, feature}`` is the
- *  body itself, not nested under a ``detail`` key. */
-export function featureRefusal(err: unknown): string | null {
-  if (!(err instanceof ApiError) || err.status !== 403) return null;
-  const detail = err.body;
-  if (!detail || typeof detail !== "object") return null;
-  const { code, feature } = detail as { code?: unknown; feature?: unknown };
-  if (code === "account_disabled") return "This account is disabled.";
-  if (code === "feature_required" && typeof feature === "string" && Object.hasOwn(WHAT, feature)) {
-    return `${WHAT[feature as Feature]} is not included in this account's access.`;
-  }
-  return null;
-}
+// The refusal sentence lives beside ``apiErrorText`` (which maps it for
+// every page); re-exported here for callers that read access helpers.
+export { featureRefusal } from "@/lib/api";

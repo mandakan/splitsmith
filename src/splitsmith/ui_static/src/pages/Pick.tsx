@@ -31,13 +31,13 @@ import { PipelineDots } from "@/components/ui/PipelineDots";
 import { Table, Td, Th, Tr } from "@/components/ui/DataTable";
 import { useShellContextSlot } from "@/components/layout/shellChromeContext";
 import {
-  ApiError,
+  apiErrorText,
   api,
   type RecentProjectDetail,
   type ScoreboardIdentity,
   type ServerHealth,
 } from "@/lib/api";
-import { featureRefusal, useCan } from "@/lib/access";
+import { useCan } from "@/lib/access";
 import { useDeploymentMode } from "@/lib/features";
 import {
   continueHref,
@@ -72,7 +72,7 @@ const DESKTOP_APP_URL = "https://splitsmith.app/#install";
 /** The line an error renders as: an access refusal first, then the
  *  server's detail. */
 function errorText(e: unknown): string {
-  return featureRefusal(e) ?? (e instanceof ApiError ? e.detail : String(e));
+  return apiErrorText(e, "Something went wrong. Try again.");
 }
 
 export function Pick() {

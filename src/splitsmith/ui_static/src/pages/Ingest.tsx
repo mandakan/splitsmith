@@ -35,7 +35,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Portal } from "@/components/ui/Portal";
 import { useConfirm } from "@/components/useConfirm";
 import {
-  ApiError,
+  apiErrorText,
   api,
   capabilityDenied,
   READ_ONLY_MIRROR_MESSAGE,
@@ -51,7 +51,7 @@ import { useWindowFileDrag } from "@/lib/dragDepth";
 import { queueItemHref, queueOrder, reviewEntryText } from "@/lib/beepQueue";
 import { isJobActive } from "@/lib/jobs";
 import { openSortText } from "@/lib/footageSort";
-import { featureRefusal, useCan } from "@/lib/access";
+import { useCan } from "@/lib/access";
 import { useDeploymentMode } from "@/lib/features";
 import { buildFootageRows, footageStats, unassignedVideos, type UnassignedItem } from "@/lib/footage";
 import { pickDefaultShooterSlug } from "@/lib/defaultShooter";
@@ -196,7 +196,7 @@ function IngestInner({ slug }: { slug: string }) {
       setProject(p);
       if (p.last_scanned_dir) setLastScannedDir(p.last_scanned_dir);
     } catch (e: unknown) {
-      setError(featureRefusal(e) ?? (e instanceof ApiError ? e.detail : String(e)));
+      setError(apiErrorText(e, "Could not load the footage."));
     }
     // A1: Shooter list. Errors here are silent -- the strip just hides.
     try {
@@ -256,7 +256,7 @@ function IngestInner({ slug }: { slug: string }) {
       await api.discardFootageSort(scanId);
       setOpenSorts((list) => list.filter((s) => s.scan_id !== scanId));
     } catch (e: unknown) {
-      setError(featureRefusal(e) ?? (e instanceof ApiError ? e.detail : String(e)));
+      setError(apiErrorText(e, "Could not discard the sort."));
     }
   }
 
@@ -323,7 +323,7 @@ function IngestInner({ slug }: { slug: string }) {
     try {
       await reload();
     } catch (e: unknown) {
-      setError(featureRefusal(e) ?? (e instanceof ApiError ? e.detail : String(e)));
+      setError(apiErrorText(e, "Could not import the footage."));
     }
   }
 
@@ -353,7 +353,7 @@ function IngestInner({ slug }: { slug: string }) {
       const { scan_id } = await api.startFootageSortUnassigned();
       navigate(href("footage-sort", scan_id));
     } catch (e: unknown) {
-      setError(featureRefusal(e) ?? (e instanceof ApiError ? e.detail : String(e)));
+      setError(apiErrorText(e, "Could not start the footage sort."));
     }
   }
 
@@ -400,7 +400,7 @@ function IngestInner({ slug }: { slug: string }) {
         .catch(() => {});
       outletCtx?.refresh();
     } catch (e: unknown) {
-      setError(featureRefusal(e) ?? (e instanceof ApiError ? e.detail : String(e)));
+      setError(apiErrorText(e, "Could not move the shooter."));
     } finally {
       setBusy(false);
     }
@@ -436,7 +436,7 @@ function IngestInner({ slug }: { slug: string }) {
         // predates the still-queued optimistic moves and would revert them.
         if (inflight.current === 1) setProject(updated);
       } catch (e: unknown) {
-        setError(featureRefusal(e) ?? (e instanceof ApiError ? e.detail : String(e)));
+        setError(apiErrorText(e, "Could not move the video."));
         // Optimistic state may be ahead of the server now; pull the truth back.
         void reload();
       } finally {
@@ -480,7 +480,7 @@ function IngestInner({ slug }: { slug: string }) {
         const resp = await api.removeVideo(slug, videoPath, false);
         if (inflight.current === 1) setProject(resp.project);
       } catch (e: unknown) {
-        setError(featureRefusal(e) ?? (e instanceof ApiError ? e.detail : String(e)));
+        setError(apiErrorText(e, "Could not remove the video."));
         // Optimistic state may be ahead of the server now; pull the truth back.
         void reload();
       } finally {
@@ -582,7 +582,7 @@ function IngestInner({ slug }: { slug: string }) {
       const updated = await api.moveAssignment(targetSlug, videoPath, toStage, role);
       setOthers((cur) => ({ ...cur, [targetSlug]: updated }));
     } catch (e: unknown) {
-      setError(featureRefusal(e) ?? (e instanceof ApiError ? e.detail : String(e)));
+      setError(apiErrorText(e, "Could not move the video."));
     }
   }
   async function removeOn(targetSlug: string, videoPath: string): Promise<void> {
@@ -604,7 +604,7 @@ function IngestInner({ slug }: { slug: string }) {
       const resp = await api.removeVideo(targetSlug, videoPath, false);
       setOthers((cur) => ({ ...cur, [targetSlug]: resp.project }));
     } catch (e: unknown) {
-      setError(featureRefusal(e) ?? (e instanceof ApiError ? e.detail : String(e)));
+      setError(apiErrorText(e, "Could not remove the video."));
     }
   }
   async function moveShooterFrom(fromSlug: string, targetSlug: string, videoPaths: string[]): Promise<void> {
@@ -623,7 +623,7 @@ function IngestInner({ slug }: { slug: string }) {
       if (targetSlug === slug) await reload();
       else setOthersTick((n) => n + 1);
     } catch (e: unknown) {
-      setError(featureRefusal(e) ?? (e instanceof ApiError ? e.detail : String(e)));
+      setError(apiErrorText(e, "Could not move the shooter."));
     }
   }
   async function detectBeepOn(targetSlug: string, stage: number) {
@@ -633,7 +633,7 @@ function IngestInner({ slug }: { slug: string }) {
     try {
       await api.detectBeepForVideo(targetSlug, stage, prim.video_id);
     } catch (e: unknown) {
-      setError(featureRefusal(e) ?? (e instanceof ApiError ? e.detail : String(e)));
+      setError(apiErrorText(e, "Could not start beep detection."));
     }
   }
   async function removeShooter(s: ShooterListEntry) {
@@ -650,7 +650,7 @@ function IngestInner({ slug }: { slug: string }) {
       await reload();
       setOthersTick((n) => n + 1);
     } catch (e: unknown) {
-      setError(featureRefusal(e) ?? (e instanceof ApiError ? e.detail : String(e)));
+      setError(apiErrorText(e, "Could not remove the shooter."));
     }
   }
   async function rebuildTrims(s: ShooterListEntry) {
@@ -661,7 +661,7 @@ function IngestInner({ slug }: { slug: string }) {
         setError(`No trim jobs to run for ${s.name}: every eligible angle was already cached, missing prerequisites, or already queued.`);
       }
     } catch (e: unknown) {
-      setError(featureRefusal(e) ?? (e instanceof ApiError ? e.detail : String(e)));
+      setError(apiErrorText(e, "Could not queue the trim caches."));
     }
   }
 

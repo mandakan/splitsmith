@@ -55,6 +55,7 @@ import type { MatchShellOutletContext } from "@/components/match/MatchShell";
 import { Snackbar, type SnackState } from "@/components/Snackbar";
 import {
   ApiError,
+  apiErrorText,
   api,
   capabilityDenied,
   type CoachVideoEntry,
@@ -1154,7 +1155,7 @@ function UnfinishedShootersBanner({
       }
       setDoneSlugs((prev) => new Set(prev).add(slug));
     } catch (e) {
-      setErrorMsg(e instanceof ApiError ? e.detail : String(e));
+      setErrorMsg(apiErrorText(e, `${slug}: could not queue the trim caches.`));
     } finally {
       setBusySlug(null);
     }

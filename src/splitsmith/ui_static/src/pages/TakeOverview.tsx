@@ -45,13 +45,14 @@ import { StatusPill } from "@/components/ui/StatusPill";
 import { useConfirm } from "@/components/useConfirm";
 import {
   ApiError,
+  apiErrorText,
   api,
   type PeaksResult,
   type StageEntry,
   type TakeOverview as TakeOverviewData,
   type TakeOverviewStage,
 } from "@/lib/api";
-import { featureRefusal, useCan } from "@/lib/access";
+import { useCan } from "@/lib/access";
 import { useDialogFocus } from "@/lib/dialogFocus";
 import { useMatchHref } from "@/lib/matchHref";
 import { cn } from "@/lib/utils";
@@ -108,7 +109,7 @@ function TakeOverviewInner({ slug, filename }: { slug: string; filename: string 
       setOverview(o);
       setError(null);
     } catch (e) {
-      setError(featureRefusal(e) ?? (e instanceof ApiError ? e.detail : String(e)));
+      setError(apiErrorText(e, "Could not load the take."));
     }
   }, [slug, filename]);
 
@@ -237,7 +238,7 @@ function TakeOverviewInner({ slug, filename }: { slug: string; filename: string 
       discardDraft(s.stage_number);
       await loadOverview();
     } catch (e) {
-      setError(featureRefusal(e) ?? (e instanceof ApiError ? e.detail : String(e)));
+      setError(apiErrorText(e, "Could not save the beep window."));
     } finally {
       setApplyingStage(null);
     }
@@ -265,7 +266,7 @@ function TakeOverviewInner({ slug, filename }: { slug: string; filename: string 
       setPeaksState((p) => (p.kind === "ready" ? p : { kind: "pending", activeJob: true }));
       await loadOverview();
     } catch (e) {
-      setError(featureRefusal(e) ?? (e instanceof ApiError ? e.detail : String(e)));
+      setError(apiErrorText(e, "Could not start beep detection."));
     } finally {
       setQueueBusy(false);
     }
@@ -281,7 +282,7 @@ function TakeOverviewInner({ slug, filename }: { slug: string; filename: string 
       setCoverageOpen(false);
       await loadOverview();
     } catch (e) {
-      setError(featureRefusal(e) ?? (e instanceof ApiError ? e.detail : String(e)));
+      setError(apiErrorText(e, "Could not save the coverage."));
     } finally {
       setCoverageBusy(false);
     }
