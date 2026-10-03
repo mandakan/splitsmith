@@ -87,8 +87,14 @@ pyver="$(cd "$wt" && uv run --no-project python -c \
   "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")"
 [ "$pyver" = "$version" ] || die "$tag carries pyproject version $pyver, not $version"
 
+# The DMG ships the wheel PyPI serves for this version, the one with the
+# YouTube OAuth client baked in; build-runtime.sh refuses one without it.
+grep -q -- '--wheel' "$wt/desktop/build.sh" \
+  || die "$tag predates build.sh --wheel; its DMG cannot carry the baked YouTube client"
+echo "== release $tag: wheel from PyPI"
+wheel="$(uv run --no-project python "$ROOT/scripts/ci/fetch_pypi_wheel.py" "$version" "$wt/build/wheel")"
 echo "== release $tag: build (signed + notarized; notarization can take close to an hour)"
-"$wt/desktop/build.sh"
+SPLITSMITH_REQUIRE_YOUTUBE_CLIENT=1 "$wt/desktop/build.sh" --mac --wheel "$wheel"
 dmg="$wt/desktop/dist/$dmg_name"
 [ -f "$dmg" ] || die "build did not produce $dmg_name"
 

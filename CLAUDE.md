@@ -325,6 +325,15 @@ picks the newest ``v*.*.*`` release that has a ``.dmg`` attached (GitHub's
 publishes before the DMG exists). Moving the download behind a purchase
 changes that function only. No auto-update.
 
+Every shipped desktop build, DMG and Linux alike, bundles the wheel PyPI
+serves, never one built from a checkout: only ``publish-pypi.yml`` bakes
+the YouTube OAuth client in, and the 0.53.0 DMG shipped with empty
+constants. ``release.sh`` fetches it with ``scripts/ci/fetch_pypi_wheel.py``
+and passes ``build.sh --wheel``; release builds set
+``SPLITSMITH_REQUIRE_YOUTUBE_CLIENT=1``, which makes ``build-runtime.sh``
+run ``desktop/scripts/check_youtube_client.py`` and refuse a bundle
+without the client.
+
 Linux ships as an x86_64 AppImage and .deb, built by
 ``.github/workflows/desktop-linux.yml`` in ``ubuntu:22.04`` (glibc 2.35
 floor) from the wheel PyPI serves (``scripts/ci/fetch_pypi_wheel.py``),

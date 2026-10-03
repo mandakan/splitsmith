@@ -47,6 +47,12 @@ if "$PY" -c "import psycopg" 2>/dev/null; then
 fi
 "$PY" -c "import splitsmith.ui.server as s, sys; sys.exit(0 if s.STATIC_DIR.joinpath('index.html').exists() else 1)" \
   || { echo "wheel has no SPA dist" >&2; exit 1; }
+# A release build must ship the YouTube OAuth client publish-pypi bakes into
+# the wheel; a checkout-built wheel has empty constants (the 0.53.0 DMG did).
+# release.sh and desktop-linux.yml's tagged run set this; dev builds do not.
+if [ "${SPLITSMITH_REQUIRE_YOUTUBE_CLIENT:-0}" = 1 ]; then
+  "$PY" "$HERE/scripts/check_youtube_client.py"
+fi
 
 # Console scripts get an absolute shebang pointing at this build dir. Make
 # them relocatable with the sh/python polyglot pip uses: sh reads the
