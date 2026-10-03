@@ -447,11 +447,11 @@
         if (!email) { say('Enter an email first.', 'err'); return; }
         submit.disabled = true; submit.textContent = 'Sending...';
         try {
-          var res = await fetch('/api/waitlist', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: email, hp: hp }) });
+          var res = await fetch('https://my.splitsmith.app/api/v1/access-requests', { method: 'POST', mode: 'cors', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: email, hp: hp, source: 'waitlist' }) });
           var data = await res.json().catch(function () { return {}; });
-          if (res.ok) { submit.textContent = data.already ? 'Already on the list' : 'Requested'; say(data.already ? 'We already have you. You will hear from us.' : 'Thanks. We will email an invite when there is room.', 'ok'); return; }
+          if (res.ok) { submit.textContent = 'Requested'; say(data.message || 'Thanks. We will email an invite when there is room.', 'ok'); return; }
           submit.disabled = false; submit.innerHTML = label;
-          say(res.status === 429 ? 'Too many tries from this network. Wait a bit.' : data.error === 'invalid email' ? 'That email does not look right.' : 'Something went wrong. Try again?', 'err');
+          say(res.status === 429 ? 'Too many tries from this network. Wait a bit.' : res.status === 400 ? 'That email does not look right.' : 'Something went wrong. Try again?', 'err');
         } catch (err) { submit.disabled = false; submit.innerHTML = label; say('Network error. Try again?', 'err'); }
       });
     }
