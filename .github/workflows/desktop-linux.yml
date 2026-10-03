@@ -27,6 +27,13 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: write
+    env:
+      # ubuntu:22.04's python3 is 3.10 (no tomllib). A PR build runs `uv build`
+      # first, which fetches a managed interpreter that later `uv run` calls
+      # reuse; a tagged build skips it (--wheel), so the scripts' `uv run
+      # --no-project python` fell through to 3.10 and failed on v0.54.0. Set
+      # here, it also fixes a re-run that checks out an older tag.
+      UV_PYTHON: "3.12"
     steps:
       - name: Container packages
         # git before checkout, or checkout falls back to a tarball with no
