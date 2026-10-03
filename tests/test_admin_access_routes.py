@@ -173,3 +173,79 @@ def test_routes_404_in_local_mode(monkeypatch: pytest.MonkeyPatch) -> None:
         assert client.get("/api/admin/users").status_code == 404
         assert client.patch("/api/admin/users/x", json={"access_tier": "full"}).status_code == 404
         assert client.get("/api/admin/access-tiers").status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Review round 1
+# ---------------------------------------------------------------------------
+
+
+def test_wire_models_match_the_db_views() -> None:
+    """The router's wire models mirror the db views field for field; a new
+    db field must reach the wire model too."""
+    from pydantic import ValidationError
+
+    from splitsmith.db.access_requests import AccessRequestView, AccountView
+    from splitsmith.ui.admin_access_api import AdminAccessRequest, AdminAccountView
+
+    assert set(AdminAccessRequest.model_fields) == set(AccessRequestView.model_fields)
+    assert set(AdminAccountView.model_fields) - {"is_admin"} == set(AccountView.model_fields)
+    # A field the wire model does not know is refused, never dropped.
+    with pytest.raises(ValidationError):
+        AdminAccountView.model_validate(
+            {
+                "id": "u",
+                "email": "a@x.se",
+                "display_name": None,
+                "access_tier": "full",
+                "created_at": "2026-10-03T00:00:00Z",
+                "is_admin": False,
+                "surprise": 1,
+            }
+        )
+
+
+def test_bogus_status_filter_is_422(admin_app) -> None:  # noqa: ANN001
+    client, sender, _ = admin_app
+    login(client, sender, "boss@x.se")
+    assert client.get("/api/admin/access-requests", params={"status": "bogus"}).status_code == 422
+    for status in ("pending", "approved", "declined"):
+        assert client.get("/api/admin/access-requests", params={"status": status}).status_code == 200
+
+
+def test_approving_for_a_deleted_account_is_404_account_deleted(
+    admin_app, hosted_env: str
+) -> None:  # noqa: ANN001
+    from datetime import UTC, datetime
+
+    from splitsmith.db import User, create_engine, sessionmaker
+
+    client, sender, state = admin_app
+    rid = seed_request(state, "gone@x.se")
+    engine = create_engine(hosted_env)
+
+    async def _add_deleted_user() -> None:
+        async with sessionmaker(engine)() as s:
+            s.add(User(email="gone@x.se", access_tier="full", deleted_at=datetime(2026, 10, 1, tzinfo=UTC)))
+            await s.commit()
+        await engine.dispose()
+
+    asyncio.run(_add_deleted_user())
+    login(client, sender, "boss@x.se")
+    resp = client.post(f"/api/admin/access-requests/{rid}/approve", json={"tier": "full"})
+    assert (resp.status_code, resp.json()["detail"]) == (404, "account deleted")
+    unknown = client.post("/api/admin/access-requests/nope/approve", json={"tier": "full"})
+    assert (unknown.status_code, unknown.json()["detail"]) == (404, "not found")
+    assert asyncio.run(state.access_requests.get(rid)).status == "pending"
+    assert sender.granted == []
+
+
+def test_admin_sync_token_is_403(admin_app, hosted_env: str) -> None:  # noqa: ANN001
+    from tests.test_token_scope_gate import _seed_token
+
+    client, sender, _ = admin_app
+    login(client, sender, "boss@x.se")
+    token = _seed_token(hosted_env, "boss@x.se", scope="sync")
+    client.cookies.clear()  # the bearer token alone, not the session cookie
+    resp = client.get("/api/admin/access-requests", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 403

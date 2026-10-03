@@ -20,10 +20,10 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,10 @@ logger = logging.getLogger(__name__)
 
 
 class AdminAccessRequest(BaseModel):
-    """Wire shape of ``db.access_requests.AccessRequestView``."""
+    """Wire shape of ``db.access_requests.AccessRequestView`` (field set
+    pinned by ``test_wire_models_match_the_db_views``)."""
+
+    model_config = ConfigDict(extra="forbid")
 
     id: str
     email: str
@@ -52,6 +55,8 @@ class AdminAccessRequest(BaseModel):
 class AdminAccountView(BaseModel):
     """``db.access_requests.AccountView`` plus whether the account is an
     env admin (an env admin has every feature whatever its tier)."""
+
+    model_config = ConfigDict(extra="forbid")
 
     id: str
     email: str
@@ -138,7 +143,9 @@ async def _send_granted(state: Any, view: Any) -> AdminAccessRequest:
 
 
 @router.get("/access-requests", response_model=list[AdminAccessRequest])
-async def list_access_requests(request: Request, status: str | None = None) -> list[AdminAccessRequest]:
+async def list_access_requests(
+    request: Request, status: Literal["pending", "approved", "declined"] | None = None
+) -> list[AdminAccessRequest]:
     """Every request, pending first; ``?status=`` narrows to one status."""
     views = await _state(request).access_requests.list(status=status)
     return [_request_out(v) for v in views]
@@ -155,7 +162,14 @@ async def approve_access_request(request: Request, request_id: str, body: Approv
             request_id, tier=body.tier, admin_email=request.state.user.email.lower()
         )
     except NotFoundError as exc:
-        raise HTTPException(status_code=404, detail="not found") from exc
+        # The store raises NotFoundError both for an unknown id and for a
+        # request whose email belongs to a soft-deleted account; the
+        # request row existing tells the two apart.
+        try:
+            await state.access_requests.get(request_id)
+        except NotFoundError:
+            raise HTTPException(status_code=404, detail="not found") from exc
+        raise HTTPException(status_code=404, detail="account deleted") from exc
     except AlreadyDecidedError as exc:
         raise HTTPException(status_code=409, detail="already decided") from exc
     return await _send_granted(state, view)
