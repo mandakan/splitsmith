@@ -261,7 +261,7 @@ from .comments import (
     to_out,
 )
 from .exports_api import CompareGridRequest, ExportStageRequest, MatchExportRequest
-from .http_errors import ensure_source_reachable
+from .http_errors import ensure_source_reachable, source_unreachable
 from .job_journal import JobJournal, default_journal_path, resume_journaled_jobs
 from .jobs import (
     Job,
@@ -11155,7 +11155,7 @@ def create_app(
         # the API container just to decide whether to queue (#638).
         root = state.shooter_root(slug)
         if not project.source_present(root, video.path):
-            ensure_source_reachable(stage_number, root / video.path)
+            raise source_unreachable(stage_number, root / video.path)
         if video.beep_source == "manual" and not force:
             raise HTTPException(
                 status_code=409,
@@ -11190,7 +11190,7 @@ def create_app(
         # detect-beep endpoint above (#638).
         root = state.shooter_root(slug)
         if not project.source_present(root, primary.path):
-            ensure_source_reachable(stage_number, root / primary.path)
+            raise source_unreachable(stage_number, root / primary.path)
         if primary.beep_source == "manual" and not force:
             raise HTTPException(
                 status_code=409,
@@ -11241,7 +11241,7 @@ def create_app(
         # (#638).
         root = state.shooter_root(slug)
         if not project.source_present(root, video.path):
-            ensure_source_reachable(stage_number, root / video.path)
+            raise source_unreachable(stage_number, root / video.path)
         if video.beep_time is None:
             raise HTTPException(
                 status_code=400,

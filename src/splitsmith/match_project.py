@@ -2161,7 +2161,13 @@ class MatchProject(BaseModel):
         artefact can be rebuilt later. On desktop no storage is bound and
         the local file is itself the durable copy, so the flag changes
         nothing. Only the cleanup planner passes it.
+
+        A confined project (:meth:`confine_paths`) answers ``False`` for an
+        absolute or ``..`` path, as :meth:`resolve_video_path` never
+        resolves one.
         """
+        if self._confined and (video_path.is_absolute() or ".." in video_path.parts):
+            return False
         if video_path.is_absolute():
             return video_path.exists()
         if self._storage is None:

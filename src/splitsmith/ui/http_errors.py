@@ -26,7 +26,15 @@ def ensure_source_reachable(stage_number: int | None, source: Path) -> None:
     """
     if source.exists():
         return
-    raise HTTPException(
+    raise source_unreachable(stage_number, source)
+
+
+def source_unreachable(stage_number: int | None, source: Path) -> HTTPException:
+    """The structured 424 itself, for a caller that already knows the source
+    is not available (``MatchProject.source_present`` said no). Re-checking
+    ``source.exists()`` there would be wrong for a confined project, whose
+    out-of-tree path may well exist on the server's own disk."""
+    return HTTPException(
         status_code=424,
         detail={
             "code": "source_unreachable",

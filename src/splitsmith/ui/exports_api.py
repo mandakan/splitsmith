@@ -37,7 +37,7 @@ from ..compare.mp4_grid import DEFAULT_CANVAS_HEIGHT, DEFAULT_CANVAS_WIDTH
 from ..match_project import trim_blocker
 from ..overlay_theme import ThemeName
 from . import export_storage
-from .http_errors import ensure_source_reachable
+from .http_errors import source_unreachable
 
 router = APIRouter()
 
@@ -474,7 +474,7 @@ async def export_stage(
     if req.write_trim or req.write_fcpxml:
         root = state.shooter_root(slug)
         if not project.source_present(root, primary.path):
-            ensure_source_reachable(stage_number, root / primary.path)
+            raise source_unreachable(stage_number, root / primary.path)
 
     existing = await state.jobs.find_active(kind="export", stage_number=stage_number, shooter_slug=slug)
     if existing is not None:
@@ -562,10 +562,7 @@ def check_match_export(state: Any, slug: str, req: MatchExportRequest) -> None:
         # no-storage and mirror-hit cases, and ``pathlib`` drops the
         # left operand when ``primary.path`` is absolute.
         if not project.source_present(state.shooter_root(slug), primary.path):
-            ensure_source_reachable(
-                stage_number,
-                state.shooter_root(slug) / primary.path,
-            )
+            raise source_unreachable(stage_number, state.shooter_root(slug) / primary.path)
 
 
 def http_detail_text(exc: HTTPException) -> str:
