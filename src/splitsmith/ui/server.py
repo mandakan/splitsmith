@@ -6343,6 +6343,41 @@ async def _register_match_at(
     return name, match.match_id
 
 
+def _hosted_projects_root(user_id: str | None = None) -> Path:
+    """The caller's on-disk match prefix in hosted mode.
+
+    ``<SPLITSMITH_PROJECTS_DIR>/users/<user_id>/projects``. ``user_id``
+    defaults to the request's bound tenant; the auth gate pins
+    ``current_tenant`` for every authenticated hosted request before the
+    handler runs, so reaching here without one means an unauthenticated
+    request slipped through. Failing loud is preferable to silently
+    writing to a shared / wrong prefix.
+    """
+    if not user_id:
+        tenant = current_tenant.get()
+        user_id = tenant.user_id if tenant is not None else None
+    if not user_id:
+        raise HTTPException(
+            status_code=500,
+            detail="hosted mode active but no authenticated tenant is bound",
+        )
+    root = Path(os.environ.get(SPLITSMITH_PROJECTS_DIR_ENV, "").strip() or SPLITSMITH_PROJECTS_DIR_DEFAULT)
+    return root / "users" / user_id / "projects"
+
+
+def _confined_target(target: Path, root: Path) -> Path:
+    """Return ``target`` resolved, or 400 unless it lies strictly inside ``root``.
+
+    Both sides are resolved (symlinks followed), so a link under ``root``
+    that points elsewhere is refused rather than written through.
+    """
+    resolved = target.resolve()
+    base = root.resolve()
+    if resolved == base or not resolved.is_relative_to(base):
+        raise HTTPException(status_code=400, detail="match folder is outside this account's storage")
+    return resolved
+
+
 def _resolve_create_target(
     state: AppState,
     *,
@@ -6353,39 +6388,26 @@ def _resolve_create_target(
 
     - **Local mode**: ``project_folder`` is required (the user picks
       where the match lands on their disk). 400 if missing/blank.
-    - **Hosted mode**: ``project_folder`` may be omitted; the server
-      synthesises ``<SPLITSMITH_PROJECTS_DIR>/users/<user_id>/projects/<slug>/``
-      so the SPA never has to expose a host filesystem picker (#425).
-      If a hosted client *does* send a path, it's honoured -- the
-      hosted UI just doesn't expose the input.
+    - **Hosted mode**: the server always uses
+      ``<SPLITSMITH_PROJECTS_DIR>/users/<user_id>/projects/<slug>/``
+      (#425) and ignores any ``project_folder`` in the request: the
+      layout on the container's disk is the server's, not the caller's.
+      The resolved folder must stay inside that prefix.
 
     Duplicate-name dedupe is handled by the existing
     ``match_already_exists`` check downstream, so this function only
     produces a candidate path.
     """
-    if project_folder and project_folder.strip():
-        return Path(project_folder).expanduser()
-
     if not _hosted_mode_active():
+        if project_folder and project_folder.strip():
+            return Path(project_folder).expanduser()
         raise HTTPException(
             status_code=400,
             detail="project_folder is required in local mode",
         )
 
-    root = Path(os.environ.get(SPLITSMITH_PROJECTS_DIR_ENV, "").strip() or SPLITSMITH_PROJECTS_DIR_DEFAULT)
-    tenant = current_tenant.get()
-    user_id = tenant.user_id if tenant is not None else None
-    if not user_id:
-        # The auth gate pins ``current_tenant`` for every authenticated
-        # hosted request before the handler runs; reaching here without one
-        # means an unauthenticated request slipped through. Failing loud is
-        # preferable to silently writing to a shared / wrong prefix.
-        raise HTTPException(
-            status_code=500,
-            detail="hosted mode active but no authenticated tenant is bound",
-        )
-    slug = match_model._slugify(name)
-    return root / "users" / user_id / "projects" / slug
+    tenant_root = _hosted_projects_root()
+    return _confined_target(tenant_root / match_model._slugify(name), tenant_root)
 
 
 def _next_step_from_statuses(
@@ -8934,11 +8956,20 @@ def create_app(
     ) -> JSONResponse:
         """Restore an archive produced by ``GET /api/project/export``.
 
-        Extracts under ``dest_root``. When ``bind`` is true, the newly
-        imported project is bound and added to the recent-projects list
-        so the SPA can navigate straight into it.
+        Extracts under ``dest_root`` in local mode. Hosted mode ignores
+        ``dest_root`` and extracts under the caller's own projects prefix
+        (the same one ``create-manual`` uses), and the import -- including
+        an ``overwrite`` replacing an existing folder -- may only ever touch
+        a path inside it. When ``bind`` is true, the newly imported project
+        is bound and added to the recent-projects list so the SPA can
+        navigate straight into it.
         """
-        dest = Path(dest_root).expanduser()
+        within: Path | None = None
+        if _hosted_mode_active():
+            within = _hosted_projects_root(str(user.id))
+            dest = within
+        else:
+            dest = Path(dest_root).expanduser()
         tmp = Path(tempfile.mkdtemp(prefix="splitsmith-import-"))
         staged = tmp / "upload.tar.gz"
         try:
@@ -8949,7 +8980,7 @@ def create_app(
                         break
                     out.write(chunk)
             try:
-                result = backup_mod.import_project(staged, dest, overwrite=overwrite)
+                result = backup_mod.import_project(staged, dest, overwrite=overwrite, within=within)
             except backup_mod.BackupError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
         finally:

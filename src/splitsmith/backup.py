@@ -193,12 +193,17 @@ def import_project(
     dest_root: Path,
     *,
     overwrite: bool = False,
+    within: Path | None = None,
 ) -> ImportResult:
     """Extract ``archive`` into ``dest_root``.
 
     The archive must contain exactly one top-level directory holding a
     ``project.json``. Returns an :class:`ImportResult` pointing at the new
     project root.
+
+    ``within``, when given, bounds the import: the resolved target folder
+    (symlinks followed) must lie strictly inside it, checked before an
+    ``overwrite`` removes anything.
     """
     archive = archive.expanduser().resolve()
     dest_root = dest_root.expanduser().resolve()
@@ -232,6 +237,11 @@ def import_project(
                 manifest = None
 
         target = dest_root / top.name
+        if within is not None:
+            base = within.expanduser().resolve()
+            resolved = target.resolve()
+            if resolved == base or not _is_inside(resolved, base):
+                raise BackupError(f"destination is outside the allowed folder: {target}")
         if target.exists():
             if not overwrite:
                 raise BackupError(f"destination already exists: {target}")
