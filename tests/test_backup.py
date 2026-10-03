@@ -355,6 +355,21 @@ def test_import_never_writes_through_archive_links(tmp_path: Path, monkeypatch: 
         assert not any(p.is_symlink() for p in result.project_root.rglob("*"))
 
 
+def test_import_within_refuses_a_target_outside_the_bound(tmp_path: Path) -> None:
+    src = tmp_path / "match"
+    _seed_project(src)
+    archive = export_project(src, tmp_path / "out").archive_path
+    bound = tmp_path / "bound"
+    bound.mkdir()
+
+    with pytest.raises(BackupError, match="outside the allowed folder"):
+        import_project(archive, tmp_path / "elsewhere", within=bound)
+    assert not (tmp_path / "elsewhere" / "match").exists()
+
+    result = import_project(archive, bound, within=bound)
+    assert result.project_root == bound.resolve() / "match"
+
+
 def test_import_drops_link_members(tmp_path: Path) -> None:
     """A link member is never extracted; the rest of the archive is."""
     src = tmp_path / "match"

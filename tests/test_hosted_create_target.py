@@ -110,6 +110,8 @@ def test_hosted_import_refuses_a_target_that_resolves_outside_the_prefix(
 
     resp = _import(signed_in, _archive("myproj"), "/ignored", overwrite=True)
     assert resp.status_code == 400, resp.text
+    # The refusal is the bound itself, not a later failure on the link.
+    assert "outside the allowed folder" in resp.json()["detail"]
     assert (elsewhere / "keep.txt").read_text() == "keep\n"
     assert not (elsewhere / "marker.txt").exists()
 
