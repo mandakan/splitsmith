@@ -34,7 +34,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from .. import match_model
 from ..match_project import MatchProject
@@ -78,7 +78,7 @@ _SYNC_MEDIA_KEY_RE = re.compile(
 class SyncMatchCreate(BaseModel):
     """Body for ``POST /api/sync/matches``."""
 
-    match_id: str
+    match_id: str = Field(pattern=f"^{match_model.MATCH_ID_PATTERN}$")
     name: str
 
 

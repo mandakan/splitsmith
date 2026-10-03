@@ -68,6 +68,19 @@ SHOOTER_SUBDIRS = SUBDIRS  # raw / audio / trimmed / audit / exports / scoreboar
 #: so a re-open from the same disk always lands on the same id).
 MATCH_SCHEMA_VERSION = 4
 
+#: The shape of a match id hosted mode accepts: one plain path segment.
+#: Ids are ``<slug>-<hash>``, ULIDs or scoreboard numbers, all of which
+#: fit; anything else (``..``, a separator, a space) is refused where a
+#: mirror is adopted and where a request names a match, because hosted
+#: also uses the id as a folder name on the container.
+MATCH_ID_PATTERN = r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}"
+
+
+def is_valid_match_id(match_id: str) -> bool:
+    import re
+
+    return re.fullmatch(MATCH_ID_PATTERN, match_id) is not None
+
 
 def _slugify(name: str) -> str:
     """Kebab-case ``name`` for use inside a URL-safe identifier.

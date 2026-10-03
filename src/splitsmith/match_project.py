@@ -166,6 +166,9 @@ VIDEO_EXTENSIONS = {
 }
 
 PROJECT_FILE = "project.json"
+#: Folder under a shooter root that a confined project resolves an
+#: out-of-tree source path into. Never created, so the path never exists.
+UNREACHABLE_SOURCE_DIR = ".unreachable-source"
 SUBDIRS = ("raw", "audio", "trimmed", "audit", "exports", "scoreboard", "probes", "thumbs")
 
 # Bumped when the on-disk schema changes in a backwards-incompatible way.
@@ -1049,6 +1052,24 @@ class MatchProject(BaseModel):
     _state_match_id: str | None = PrivateAttr(default=None)
     _state_slug: str | None = PrivateAttr(default=None)
     _state_version: int = PrivateAttr(default=0)
+    # Hosted mode: resolve paths only inside the shooter root. Set by
+    # ``state.shooter_project`` when the doc comes from the state store
+    # (see :meth:`confine_paths`). Request-scope state, never serialized.
+    _confined: bool = PrivateAttr(default=False)
+
+    def confine_paths(self) -> None:
+        """Resolve every path this project names inside the shooter root only.
+
+        A doc in the hosted state store may carry another machine's paths:
+        a desktop mirror pushes its own absolute source paths and cache-dir
+        overrides as they are. Hosted keeps the doc as written but never
+        resolves such a path to a file on its own disk. Once confined, an
+        absolute or ``..`` video path resolves to a location under the root
+        that does not exist (it reads as an unreachable source, which is
+        what another machine's file is from here), and an absolute or
+        escaping ``*_dir`` override falls back to the default folder.
+        """
+        self._confined = True
 
     def bind_state(self, store: Any, *, match_id: str, slug: str, version: int) -> None:
         """Bind a ``ProjectStateStore`` so ``save()`` round-trips through
@@ -1218,6 +1239,11 @@ class MatchProject(BaseModel):
     def _resolve_dir(self, root: Path, override: str | None, default_subdir: str) -> Path:
         if override is None:
             return root / default_subdir
+        if self._confined:
+            candidate = Path(override)
+            if candidate.is_absolute() or ".." in candidate.parts:
+                return root / default_subdir
+            return root / candidate
         candidate = Path(override).expanduser()
         return candidate if candidate.is_absolute() else root / candidate
 
@@ -2091,7 +2117,14 @@ class MatchProject(BaseModel):
         ``storage`` is set by :meth:`bind_storage`, which the hosted
         boot calls inside ``state.shooter_project`` so every project
         load that goes through that accessor is automatically wired up.
+
+        A confined project (:meth:`confine_paths`, hosted) never resolves an
+        absolute or ``..`` path: it returns a path under ``root`` that is
+        never created, so callers see the same missing source they would
+        for any file that lives on another machine.
         """
+        if self._confined and (video_path.is_absolute() or ".." in video_path.parts):
+            return root / UNREACHABLE_SOURCE_DIR / (video_path.name or "source")
         if video_path.is_absolute():
             return video_path
         local = root / video_path
@@ -2128,7 +2161,13 @@ class MatchProject(BaseModel):
         artefact can be rebuilt later. On desktop no storage is bound and
         the local file is itself the durable copy, so the flag changes
         nothing. Only the cleanup planner passes it.
+
+        A confined project (:meth:`confine_paths`) answers ``False`` for an
+        absolute or ``..`` path, as :meth:`resolve_video_path` never
+        resolves one.
         """
+        if self._confined and (video_path.is_absolute() or ".." in video_path.parts):
+            return False
         if video_path.is_absolute():
             return video_path.exists()
         if self._storage is None:

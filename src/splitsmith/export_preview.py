@@ -92,11 +92,20 @@ def audit_digest(audit_doc: dict | None) -> str:
 PREVIEW_REVISION = 2
 
 
-def preview_key(spec: PreviewSpec, *, slug: str, project_updated_at: str, audit: str) -> str:
+def preview_key(
+    spec: PreviewSpec, *, slug: str, project_updated_at: str, audit: str, owner: str | None = None
+) -> str:
     """Content address for the cache: every input that moves the picture.
-    ``audit`` is :func:`audit_digest` of the stage's audit doc."""
+    ``audit`` is :func:`audit_digest` of the stage's audit doc. ``owner``
+    scopes the key to an account and match (hosted, where one process
+    serves every account and slugs repeat); ``None`` keeps the local key
+    exactly as it was."""
+    fields: dict[str, object] = {}
+    if owner is not None:
+        fields["owner"] = owner
     payload = json.dumps(
         {
+            **fields,
             "slug": slug,
             "card": spec.card,
             "stage": spec.stage_number,

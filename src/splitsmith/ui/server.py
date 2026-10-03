@@ -261,7 +261,7 @@ from .comments import (
     to_out,
 )
 from .exports_api import CompareGridRequest, ExportStageRequest, MatchExportRequest
-from .http_errors import ensure_source_reachable
+from .http_errors import ensure_source_reachable, source_unreachable
 from .job_journal import JobJournal, default_journal_path, resume_journaled_jobs
 from .jobs import (
     Job,
@@ -2396,6 +2396,9 @@ class AppState:
                 )
             project = MatchProject.model_validate(doc)
             project.bind_state(store, match_id=match_id, slug=slug, version=version)
+            # The doc may carry another machine's paths (a desktop mirror's
+            # own sources and cache dirs); resolve inside the shooter root only.
+            project.confine_paths()
         else:
             project = MatchProject.load(shooter_root)
         project.bind_storage(self.storage, scope=scope)
@@ -2422,6 +2425,9 @@ class AppState:
                 )
             project = MatchProject.model_validate(doc)
             project.bind_state(store, match_id=match_id, slug=slug, version=version)
+            # The doc may carry another machine's paths (a desktop mirror's
+            # own sources and cache dirs); resolve inside the shooter root only.
+            project.confine_paths()
         else:
             project = MatchProject.load(shooter_root)
         project.bind_storage(self.storage, scope=scope)
@@ -6308,6 +6314,14 @@ async def _register_match_at(
     # so the ``match_empty`` check and the registration name see the real
     # roster. ``match_id`` itself is correct in the file (assigned before
     # binding), so it keys the lookup.
+    if (
+        _hosted_mode_active()
+        and match.match_id is not None
+        and not match_model.is_valid_match_id(match.match_id)
+    ):
+        # The id becomes a folder name hosted; an imported match.json can
+        # carry any string.
+        raise HTTPException(status_code=400, detail=f"invalid match id in {resolved}: {match.match_id!r}")
     if state.project_state is not None and match.match_id:
         doc, _ = await state.project_state.load_match(match.match_id)
         if doc is not None:
@@ -6326,9 +6340,13 @@ async def _register_match_at(
     # path is gone (a redeploy wiped it). Local mode stores it too; the
     # filesystem flow there just doesn't need it.
     await state.recent_projects.record_open(resolved, name, kind="match", match_id=match.match_id)
-    loaded_env = _load_env_files(resolved)
-    if loaded_env:
-        logger.info("Loaded env from %s", ", ".join(str(p) for p in loaded_env))
+    # Local only: a match folder's .env files configure the operator's own
+    # process. Hosted serves every account from one process, and the folder
+    # may have arrived in an uploaded archive.
+    if not _hosted_mode_active():
+        loaded_env = _load_env_files(resolved)
+        if loaded_env:
+            logger.info("Loaded env from %s", ", ".join(str(p) for p in loaded_env))
     if match.match_id:
         state.matches.register(match.match_id, resolved)
         # Hosted: record the match in Postgres so a separate worker can
@@ -6343,6 +6361,56 @@ async def _register_match_at(
     return name, match.match_id
 
 
+def _hosted_projects_root(user_id: str | None = None) -> Path:
+    """The caller's on-disk match prefix in hosted mode.
+
+    ``<SPLITSMITH_PROJECTS_DIR>/users/<user_id>/projects``. ``user_id``
+    defaults to the request's bound tenant; the auth gate pins
+    ``current_tenant`` for every authenticated hosted request before the
+    handler runs, so reaching here without one means an unauthenticated
+    request slipped through. Failing loud is preferable to silently
+    writing to a shared / wrong prefix.
+    """
+    if not user_id:
+        tenant = current_tenant.get()
+        user_id = tenant.user_id if tenant is not None else None
+    if not user_id:
+        raise HTTPException(
+            status_code=500,
+            detail="hosted mode active but no authenticated tenant is bound",
+        )
+    root = Path(os.environ.get(SPLITSMITH_PROJECTS_DIR_ENV, "").strip() or SPLITSMITH_PROJECTS_DIR_DEFAULT)
+    return root / "users" / user_id / "projects"
+
+
+def _hosted_match_work_root(user_id: str, match_id: str) -> Path:
+    """The container-side working folder for one account's match (hosted).
+
+    ``<SPLITSMITH_PROJECTS_DIR>/users/<user_id>/matches/<match_id>``. Keyed
+    by account as well as id: ``matches`` is unique per ``(user_id,
+    match_id)``, so two accounts can each own a match with the same id
+    (a desktop mirror's id comes from the desktop). The folder is a cache
+    of storage and the state store, rebuilt on demand.
+    """
+    if not match_model.is_valid_match_id(match_id):
+        raise ValueError(f"invalid match id: {match_id!r}")
+    root = Path(os.environ.get(SPLITSMITH_PROJECTS_DIR_ENV, "").strip() or SPLITSMITH_PROJECTS_DIR_DEFAULT)
+    return root / "users" / user_id / "matches" / match_id
+
+
+def _confined_target(target: Path, root: Path) -> Path:
+    """Return ``target`` resolved, or 400 unless it lies strictly inside ``root``.
+
+    Both sides are resolved (symlinks followed), so a link under ``root``
+    that points elsewhere is refused rather than written through.
+    """
+    resolved = target.resolve()
+    base = root.resolve()
+    if resolved == base or not resolved.is_relative_to(base):
+        raise HTTPException(status_code=400, detail="match folder is outside this account's storage")
+    return resolved
+
+
 def _resolve_create_target(
     state: AppState,
     *,
@@ -6353,39 +6421,26 @@ def _resolve_create_target(
 
     - **Local mode**: ``project_folder`` is required (the user picks
       where the match lands on their disk). 400 if missing/blank.
-    - **Hosted mode**: ``project_folder`` may be omitted; the server
-      synthesises ``<SPLITSMITH_PROJECTS_DIR>/users/<user_id>/projects/<slug>/``
-      so the SPA never has to expose a host filesystem picker (#425).
-      If a hosted client *does* send a path, it's honoured -- the
-      hosted UI just doesn't expose the input.
+    - **Hosted mode**: the server always uses
+      ``<SPLITSMITH_PROJECTS_DIR>/users/<user_id>/projects/<slug>/``
+      (#425) and ignores any ``project_folder`` in the request: the
+      layout on the container's disk is the server's, not the caller's.
+      The resolved folder must stay inside that prefix.
 
     Duplicate-name dedupe is handled by the existing
     ``match_already_exists`` check downstream, so this function only
     produces a candidate path.
     """
-    if project_folder and project_folder.strip():
-        return Path(project_folder).expanduser()
-
     if not _hosted_mode_active():
+        if project_folder and project_folder.strip():
+            return Path(project_folder).expanduser()
         raise HTTPException(
             status_code=400,
             detail="project_folder is required in local mode",
         )
 
-    root = Path(os.environ.get(SPLITSMITH_PROJECTS_DIR_ENV, "").strip() or SPLITSMITH_PROJECTS_DIR_DEFAULT)
-    tenant = current_tenant.get()
-    user_id = tenant.user_id if tenant is not None else None
-    if not user_id:
-        # The auth gate pins ``current_tenant`` for every authenticated
-        # hosted request before the handler runs; reaching here without one
-        # means an unauthenticated request slipped through. Failing loud is
-        # preferable to silently writing to a shared / wrong prefix.
-        raise HTTPException(
-            status_code=500,
-            detail="hosted mode active but no authenticated tenant is bound",
-        )
-    slug = match_model._slugify(name)
-    return root / "users" / user_id / "projects" / slug
+    tenant_root = _hosted_projects_root()
+    return _confined_target(tenant_root / match_model._slugify(name), tenant_root)
 
 
 def _next_step_from_statuses(
@@ -6998,9 +7053,6 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     # next sign-in) is a tracked follow-up.
 
     if worker:
-        worker_root = Path(
-            os.environ.get(SPLITSMITH_PROJECTS_DIR_ENV, "").strip() or SPLITSMITH_PROJECTS_DIR_DEFAULT
-        )
 
         def _resolve_match_for_worker(match_id: str) -> Path | None:
             """Map a queued ``match_id`` to a worker-local working root.
@@ -7016,16 +7068,18 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
             ``current_match_root`` points here.
             """
             store = state.matches_store
-            if store is None:
+            if store is None or not match_model.is_valid_match_id(match_id):
                 return None
             row = asyncio.run(store.get(match_id))
             if row is None:
                 return None
-            root = worker_root / match_id
+            root = _hosted_match_work_root(row.user_id, match_id)
             root.mkdir(parents=True, exist_ok=True)
             return root
 
-        state.matches = MatchRegistry(miss_resolver=_resolve_match_for_worker)
+        # Not remembered: the same match id can belong to two accounts, and
+        # each job resolves under its own tenant.
+        state.matches = MatchRegistry(miss_resolver=_resolve_match_for_worker, remember_resolved=False)
 
 
 def build_worker_state() -> AppState:
@@ -8275,6 +8329,16 @@ def create_app(
         # middleware runs. Local mode (no ``matches_store``) skips the check
         # -- one operator, nothing to isolate.
         owner_store = state.matches_store
+        if owner_store is not None and not match_model.is_valid_match_id(match_id):
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "detail": {
+                        "code": "match_not_found",
+                        "message": f"unknown match_id {match_id!r}",
+                    }
+                },
+            )
         if owner_store is not None:
             # Hosted: a match's authoritative state is Postgres (this row) +
             # S3 (its files). The in-memory ``MatchRegistry`` is process-local
@@ -8318,12 +8382,7 @@ def create_app(
             needed = required_capability(request.method, rest)
             if needed is not None and needed not in match_capabilities:
                 return JSONResponse(status_code=403, content={"detail": "read_only_mirror"})
-            work_root = (
-                Path(
-                    os.environ.get(SPLITSMITH_PROJECTS_DIR_ENV, "").strip() or SPLITSMITH_PROJECTS_DIR_DEFAULT
-                )
-                / match_id
-            )
+            work_root = _hosted_match_work_root(owner_row.user_id, match_id)
             work_root.mkdir(parents=True, exist_ok=True)
             state.matches.register(match_id, work_root)
             match_root = work_root.resolve()
@@ -8934,11 +8993,20 @@ def create_app(
     ) -> JSONResponse:
         """Restore an archive produced by ``GET /api/project/export``.
 
-        Extracts under ``dest_root``. When ``bind`` is true, the newly
-        imported project is bound and added to the recent-projects list
-        so the SPA can navigate straight into it.
+        Extracts under ``dest_root`` in local mode. Hosted mode ignores
+        ``dest_root`` and extracts under the caller's own projects prefix
+        (the same one ``create-manual`` uses), and the import -- including
+        an ``overwrite`` replacing an existing folder -- may only ever touch
+        a path inside it. When ``bind`` is true, the newly imported project
+        is bound and added to the recent-projects list so the SPA can
+        navigate straight into it.
         """
-        dest = Path(dest_root).expanduser()
+        within: Path | None = None
+        if _hosted_mode_active():
+            within = _hosted_projects_root(str(user.id))
+            dest = within
+        else:
+            dest = Path(dest_root).expanduser()
         tmp = Path(tempfile.mkdtemp(prefix="splitsmith-import-"))
         staged = tmp / "upload.tar.gz"
         try:
@@ -8949,7 +9017,7 @@ def create_app(
                         break
                     out.write(chunk)
             try:
-                result = backup_mod.import_project(staged, dest, overwrite=overwrite)
+                result = backup_mod.import_project(staged, dest, overwrite=overwrite, within=within)
             except backup_mod.BackupError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
         finally:
@@ -11087,7 +11155,7 @@ def create_app(
         # the API container just to decide whether to queue (#638).
         root = state.shooter_root(slug)
         if not project.source_present(root, video.path):
-            ensure_source_reachable(stage_number, root / video.path)
+            raise source_unreachable(stage_number, root / video.path)
         if video.beep_source == "manual" and not force:
             raise HTTPException(
                 status_code=409,
@@ -11122,7 +11190,7 @@ def create_app(
         # detect-beep endpoint above (#638).
         root = state.shooter_root(slug)
         if not project.source_present(root, primary.path):
-            ensure_source_reachable(stage_number, root / primary.path)
+            raise source_unreachable(stage_number, root / primary.path)
         if primary.beep_source == "manual" and not force:
             raise HTTPException(
                 status_code=409,
@@ -11173,7 +11241,7 @@ def create_app(
         # (#638).
         root = state.shooter_root(slug)
         if not project.source_present(root, video.path):
-            ensure_source_reachable(stage_number, root / video.path)
+            raise source_unreachable(stage_number, root / video.path)
         if video.beep_time is None:
             raise HTTPException(
                 status_code=400,
@@ -13475,6 +13543,9 @@ def create_app(
           fields and a per-row Generate affordance in the SPA. Cached
           probes / thumbnails always populate -- the budget only gates the
           first-time work.
+
+        Local mode only (``route_scope.LOCAL_ONLY_ROUTES``): it browses the
+        machine the server runs on.
         """
         project = state.shooter_project(slug)
         target = Path(path).expanduser() if path else _default_start(project.last_scanned_dir)
@@ -13554,7 +13625,8 @@ def create_app(
         folder for a new project, not media to ingest.
 
         Hidden entries (dot-prefixed) and broken symlinks are skipped.
-        Permission errors surface as 403.
+        Permission errors surface as 403. Local mode only
+        (``route_scope.LOCAL_ONLY_ROUTES``).
         """
         target = Path(path).expanduser() if path else _default_start(None)
         try:
@@ -13598,6 +13670,7 @@ def create_app(
         Cached results are returned without re-running the binaries. Also
         surfaces resolution/codec/size so the unassigned-tray rows can show
         enough metadata for the user to identify which clip is which.
+        Local mode only, like the picker that calls it.
         """
         project = state.shooter_project(slug)
         # StageVideo.path is project-relative for default projects, so resolve
@@ -13646,7 +13719,8 @@ def create_app(
 
         Keys are 16-char hex from :func:`video_probe.source_cache_key`. We
         validate the key shape so we never accept an arbitrary path that
-        could escape the thumbs directory.
+        could escape the thumbs directory. Local mode only: the picker
+        routes above are the only writers of this cache.
         """
         if not cache_key.isalnum() or len(cache_key) > 32:
             raise HTTPException(status_code=400, detail="invalid thumbnail key")
@@ -14152,6 +14226,16 @@ def create_app(
                     target, name, kind=entry.kind or "match", match_id=entry.match_id
                 )
                 return _register_response(target, name, entry.match_id)
+            # Hosted never binds by path: ``path`` is only a key into the
+            # caller's own picker rows. Scaffolding or loading a folder the
+            # caller names would read and write the shared container's disk.
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "code": "project_path_missing",
+                    "message": f"Project path does not exist: {target}",
+                },
+            )
 
         if not target.exists():
             if not req.create:
@@ -15454,6 +15538,7 @@ def create_app(
 
             # local mode: mirror-then-serve (existing behavior)
             served_path = shooter_project.resolve_video_path(shooter_root, video.path).resolve()
+            ensure_source_reachable(stage.stage_number if stage is not None else None, served_path)
             return FileResponse(served_path, media_type=video_media_type(served_path))
 
         # Non-registered path: a Compare-produced trim, addressed by the
@@ -17646,6 +17731,13 @@ def create_app(
     from .exports_api import router as exports_router
 
     app.include_router(exports_router)
+
+    # Hosted mode serves none of the routes in route_scope.LOCAL_ONLY_ROUTES.
+    # Applied here, after every router above is included and before the SPA
+    # fallback, so the one table covers routes from every module.
+    from .route_scope import enforce_local_only
+
+    enforce_local_only(app)
 
     # ----------------------------------------------------------------------
     # Static asset serving (SPA)

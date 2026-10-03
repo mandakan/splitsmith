@@ -37,6 +37,10 @@ import asyncio
 import html
 import logging
 import math
+import threading
+from collections import OrderedDict
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
@@ -48,6 +52,7 @@ from ..audit_data import audit_shots_to_engine_shots
 from ..overlay_theme import load_theme
 from ..share_card import CompareCard, MatchCard, RosterEntry, StageCard, card_hash, stage_figures
 from ..share_card_render import cached_card_png, render_card_png
+from . import render_bound
 
 if TYPE_CHECKING:
     from contextlib import AbstractContextManager
@@ -265,6 +270,81 @@ _PNG_HEADERS = {"Cache-Control": "public, max-age=31536000"}
 _FALLBACK_PNG_HEADERS = {"Cache-Control": "public, max-age=60"}
 
 
+@contextmanager
+def _bounded_rasterizer() -> Iterator[Rasterizer]:
+    """The rasterizer factory every card render in this module goes through.
+
+    Holds one of the process-wide render slots (``render_bound``, shared
+    with the export preview) for the render: the moment / roster variants
+    rendered per fetch, a storage miss on the plain cards, and the
+    share-creation warm. When no slot is free it raises the same
+    ``RasterizerUnavailableError`` a browser-less host does, so the card is
+    the fallback plate with its short cache and is never stored: on the
+    anonymous surface a busy renderer looks like every other failure.
+    Looks ``_chromium_factory`` up at call time so a test can replace it.
+    """
+    from ..overlay_raster import RasterizerUnavailableError
+
+    try:
+        with render_bound.render_slot():
+            with _chromium_factory() as rasterizer:
+                yield rasterizer
+    except render_bound.RenderBusyError:
+        raise RasterizerUnavailableError(
+            "card renderer busy", "every render slot is in use; serving the fallback plate"
+        ) from None
+
+
+#: Rendered moment / roster cards kept in memory, so the burst of fetches a
+#: single paste produces (each unfurler fetches on its own) and a viewer
+#: reloading the same link cost one render, not one each. Keyed on the
+#: share token, the card type, the shooter slug and the card's content
+#: hash -- the hash covers everything the card shows, ``moment_t`` and the
+#: resolved roster included, so two ``who`` spellings that resolve to the
+#: same roster share an entry and a re-audit is a different key. Bounded
+#: by bytes and by entry count; least recently used goes first.
+_RENDERED_CACHE_MAX_BYTES = 16 * 1024 * 1024
+_RENDERED_CACHE_MAX_ENTRIES = 256
+_CacheKey = tuple[str, str, str | None, str]
+_rendered_cache: OrderedDict[_CacheKey, bytes] = OrderedDict()
+_rendered_cache_bytes = 0
+_rendered_cache_lock = threading.Lock()
+
+
+def _rendered_cache_get(key: _CacheKey) -> bytes | None:
+    with _rendered_cache_lock:
+        png = _rendered_cache.get(key)
+        if png is not None:
+            _rendered_cache.move_to_end(key)
+        return png
+
+
+def _rendered_cache_put(key: _CacheKey, png: bytes) -> None:
+    global _rendered_cache_bytes
+    if len(png) > _RENDERED_CACHE_MAX_BYTES:
+        return
+    with _rendered_cache_lock:
+        old = _rendered_cache.pop(key, None)
+        if old is not None:
+            _rendered_cache_bytes -= len(old)
+        _rendered_cache[key] = png
+        _rendered_cache_bytes += len(png)
+        while _rendered_cache and (
+            _rendered_cache_bytes > _RENDERED_CACHE_MAX_BYTES
+            or len(_rendered_cache) > _RENDERED_CACHE_MAX_ENTRIES
+        ):
+            _evicted_key, evicted = _rendered_cache.popitem(last=False)
+            _rendered_cache_bytes -= len(evicted)
+
+
+def clear_rendered_card_cache() -> None:
+    """Empty the in-memory card cache (tests)."""
+    global _rendered_cache_bytes
+    with _rendered_cache_lock:
+        _rendered_cache.clear()
+        _rendered_cache_bytes = 0
+
+
 def _chromium_factory() -> AbstractContextManager[Rasterizer]:
     # Lazy import breaks an import cycle with .server (share_og is imported
     # from create_app), not for local-slim's sake -- playwright is a core
@@ -309,7 +389,7 @@ def warm_match_card(state: Any, token: str) -> None:
         token=token,
         storage=state.storage,
         theme=load_theme("splitsmith"),
-        rasterizer_factory=_chromium_factory,
+        rasterizer_factory=_bounded_rasterizer,
     )
 
 
@@ -403,23 +483,32 @@ def _png_response(
         token=token,
         storage=state.storage,
         theme=load_theme("splitsmith"),
-        rasterizer_factory=_chromium_factory,
+        rasterizer_factory=_bounded_rasterizer,
         slug=slug,
     )
     headers = _FALLBACK_PNG_HEADERS if rendered.fell_back else _PNG_HEADERS
     return Response(content=rendered.png, media_type="image/png", headers=headers)
 
 
-def _uncached_png_response(state: Any, card: MatchCard | StageCard | CompareCard) -> Response:
-    """Moment-variant cards: rendered per fetch, HTTP-cached only.
+def _uncached_png_response(
+    token: str, card: MatchCard | StageCard | CompareCard, slug: str | None
+) -> Response:
+    """Moment-variant cards: never written to storage, HTTP-cached, and
+    kept in the in-process LRU above so a repeat fetch is not a render.
 
     No storage involved by design - see render_card_png's docstring. The
     plate keeps the short cache for the same reason _FALLBACK_PNG_HEADERS
-    exists on the cached path.
+    exists on the cached path, and is never kept in memory either.
     """
-    rendered = render_card_png(card, theme=load_theme("splitsmith"), rasterizer_factory=_chromium_factory)
-    headers = _FALLBACK_PNG_HEADERS if rendered.fell_back else _PNG_HEADERS
-    return Response(content=rendered.png, media_type="image/png", headers=headers)
+    key: _CacheKey = (token, type(card).__name__, slug, card_hash(card))
+    png = _rendered_cache_get(key)
+    if png is not None:
+        return Response(content=png, media_type="image/png", headers=_PNG_HEADERS)
+    rendered = render_card_png(card, theme=load_theme("splitsmith"), rasterizer_factory=_bounded_rasterizer)
+    if rendered.fell_back:
+        return Response(content=rendered.png, media_type="image/png", headers=_FALLBACK_PNG_HEADERS)
+    _rendered_cache_put(key, rendered.png)
+    return Response(content=rendered.png, media_type="image/png", headers=_PNG_HEADERS)
 
 
 def _share_token(request: Request) -> str:
@@ -461,7 +550,7 @@ def share_compare_png(stage: int, request: Request) -> Response:
     # who-only requests also skip storage: who is client-controlled with
     # combinatorial cardinality, same abuse vector as t.
     if moment_t is not None or who is not None:
-        return _uncached_png_response(state, card)
+        return _uncached_png_response(token, card, None)
     return _png_response(state, token, card, None)
 
 
@@ -475,7 +564,7 @@ def share_stage_png(slug: str, stage: int, request: Request) -> Response:
     if card is None:
         return _png_response(state, token, build_match_card(state), None)
     if moment_t is not None:
-        return _uncached_png_response(state, card)
+        return _uncached_png_response(token, card, slug)
     return _png_response(state, token, card, slug)
 
 

@@ -35,6 +35,7 @@ from ..export_preview import (
 from ..overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
 from ..overlay_theme import load_theme
 from ..runtime import runtime
+from . import render_bound
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,20 @@ class ExportPreviewRequest(BaseModel):
     tail_pad_seconds: float = Field(default=5.0, ge=0)
     #: The bundle name, as the match export's ``project_name``.
     project_name: str | None = None
+
+
+def _owner() -> str | None:
+    """``<user_id>/<match_id>`` in hosted mode, where one process and one
+    cache folder serve every account; ``None`` locally."""
+    from .server import _hosted_mode_active, current_match_id, current_tenant
+
+    if not _hosted_mode_active():
+        return None
+    tenant = current_tenant.get()
+    user_id = tenant.user_id if tenant is not None else None
+    if not user_id:
+        raise HTTPException(status_code=500, detail="hosted mode active but no authenticated tenant is bound")
+    return f"{user_id}/{current_match_id.get()}"
 
 
 class _NoRasterizer:
@@ -82,7 +97,11 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
     rt = runtime()
     cache_dir = rt.cache_dir / "export-preview"
     key = preview_key(
-        spec, slug=slug, project_updated_at=project.updated_at.isoformat(), audit=audit_digest(audit_doc)
+        spec,
+        slug=slug,
+        project_updated_at=project.updated_at.isoformat(),
+        audit=audit_digest(audit_doc),
+        owner=_owner(),
     )
     cached = cache_dir / f"{key}.png"
     if cached.exists():
@@ -105,8 +124,15 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
         if req.card == "frame":
             png = _render(_NoRasterizer())
         else:
-            with rasterizer_factory() as rasterizer:
+            # The same process-wide render bound as the share cards.
+            with render_bound.render_slot(), rasterizer_factory() as rasterizer:
                 png = _render(rasterizer)
+    except render_bound.RenderBusyError as exc:
+        raise HTTPException(
+            status_code=429,
+            detail="the preview renderer is busy",
+            headers={"Retry-After": str(render_bound.RETRY_AFTER_S)},
+        ) from exc
     except PreviewError as exc:
         raise HTTPException(status_code=exc.status, detail=exc.message) from exc
     except RasterizerUnavailableError as exc:
