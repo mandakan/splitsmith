@@ -97,7 +97,14 @@ jobs:
             type=semver,pattern={{major}}.{{minor}},value=${{ inputs.release_tag }},enable=${{ inputs.release_tag != '' }}
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != '' }}
 
+      # The layer cache lives in GHCR next to the image, not in the Actions
+      # cache: that one evicts under a shared 10 GB cap, and an index naming
+      # an evicted blob fails the whole build with BlobNotFound (2026-10-03).
+      # A cache that still cannot be read must cost a cold build, never a
+      # missing image, so a failed cached build is retried once without it.
       - name: Build and push
+        id: build
+        continue-on-error: true
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -105,8 +112,20 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true
+
+      - name: Build and push (cold, after a cache failure)
+        if: steps.build.outcome == 'failure'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          no-cache: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true
 
   publish-gpu:
     # Same gating as `publish` (skip the :edge build on release-merge commits;
@@ -147,7 +166,11 @@ jobs:
             type=semver,pattern={{major}}.{{minor}},value=${{ inputs.release_tag }},enable=${{ inputs.release_tag != '' }}
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != '' }}
 
+      # Same cache arrangement as `publish`, under its own ref so the GPU and
+      # CPU layers never share or evict a cache.
       - name: Build and push
+        id: build
+        continue-on-error: true
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -156,7 +179,18 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # Separate cache scope so the GPU and CPU image layers don't evict
-          # each other in the shared gha cache.
-          cache-from: type=gha,scope=gpu
-          cache-to: type=gha,mode=max,scope=gpu
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache-gpu
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache-gpu,mode=max,image-manifest=true,oci-mediatypes=true
+
+      - name: Build and push (cold, after a cache failure)
+        if: steps.build.outcome == 'failure'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.gpu
+          platforms: linux/amd64
+          push: true
+          no-cache: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository }}:buildcache-gpu,mode=max,image-manifest=true,oci-mediatypes=true
