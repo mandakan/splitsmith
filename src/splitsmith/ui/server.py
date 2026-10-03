@@ -9612,19 +9612,24 @@ def create_app(
                     )
                 )
                 if existing is None:
-                    asyncio.run(
-                        state.jobs.submit(
-                            kind="detect_beep",
-                            stage_number=sv.stage_number,
-                            shooter_slug=slug,
-                            video_id=sv.video_id,
-                            args={
-                                "slug": slug,
-                                "stage_number": sv.stage_number,
-                                "video_id": sv.video_id,
-                            },
+                    try:
+                        asyncio.run(
+                            state.jobs.submit(
+                                kind="detect_beep",
+                                stage_number=sv.stage_number,
+                                shooter_slug=slug,
+                                video_id=sv.video_id,
+                                args={
+                                    "slug": slug,
+                                    "stage_number": sv.stage_number,
+                                    "video_id": sv.video_id,
+                                },
+                            )
                         )
-                    )
+                    except FeatureRequiredError as exc:
+                        # The account answer is the same for every video.
+                        _log_chain_skipped("detect_beep", slug, sv.stage_number, exc)
+                        return
         else:
             # Sequential-mode: submit only the first unprocessed covered stage.
             for n in raw.covers_stages:
@@ -9649,15 +9654,18 @@ def create_app(
                 )
                 if existing is not None:
                     break  # chain already started
-                asyncio.run(
-                    state.jobs.submit(
-                        kind="detect_beep",
-                        stage_number=n,
-                        shooter_slug=slug,
-                        video_id=primary.video_id,
-                        args={"slug": slug, "stage_number": n, "video_id": primary.video_id},
+                try:
+                    asyncio.run(
+                        state.jobs.submit(
+                            kind="detect_beep",
+                            stage_number=n,
+                            shooter_slug=slug,
+                            video_id=primary.video_id,
+                            args={"slug": slug, "stage_number": n, "video_id": primary.video_id},
+                        )
                     )
-                )
+                except FeatureRequiredError as exc:
+                    _log_chain_skipped("detect_beep", slug, n, exc)
                 break
 
     @app.post("/api/shooters/{slug}/raw-videos/attach")
