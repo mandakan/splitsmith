@@ -494,6 +494,14 @@ def check_match_export(state: Any, slug: str, req: MatchExportRequest) -> None:
     reachable source. Raises ``HTTPException`` with the route's status and
     message. Shared with the desktop's ``render_upload`` start, which
     reports the message to the phone instead of raising it."""
+    from .server import _hosted_mode_active
+
+    if _hosted_mode_active():
+        # Intro / outro clips are files on the machine running the server:
+        # the operator's own disk locally, a shared container hosted.
+        for field in ("intro_path", "outro_path"):
+            if getattr(req, field):
+                raise HTTPException(status_code=400, detail=f"{field} is not available in hosted mode")
     project = state.shooter_project(slug)
     if not req.stage_numbers:
         raise HTTPException(status_code=400, detail="stage_numbers cannot be empty")

@@ -14195,6 +14195,16 @@ def create_app(
                     target, name, kind=entry.kind or "match", match_id=entry.match_id
                 )
                 return _register_response(target, name, entry.match_id)
+            # Hosted never binds by path: ``path`` is only a key into the
+            # caller's own picker rows. Scaffolding or loading a folder the
+            # caller names would read and write the shared container's disk.
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "code": "project_path_missing",
+                    "message": f"Project path does not exist: {target}",
+                },
+            )
 
         if not target.exists():
             if not req.create:
