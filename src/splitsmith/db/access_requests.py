@@ -188,6 +188,55 @@ class AccessRequestStore:
             await session.commit()
             return False
 
+    async def import_entry(self, email: str, *, requested_at: datetime, source: str = "import") -> bool:
+        """Insert a ``pending`` row carrying a historical timestamp (the
+        marketing waitlist migration). Returns ``True`` only when a new
+        row was inserted.
+
+        Unlike :meth:`record`, this never bumps an existing row's
+        ``last_requested_at`` or fills its note -- a re-run of the import
+        against the same dump must not disturb a request the admin UI (or
+        a later real request) has already touched. Both an existing
+        request and an existing account (including a soft-deleted one --
+        the same no-``deleted_at``-filter query :meth:`record` uses) are
+        skipped.
+        """
+        normalized = normalize_email(email)
+
+        async with self._session_factory() as session:
+            has_account = (
+                await session.execute(select(User.id).where(User.email == normalized))
+            ).scalar_one_or_none()
+            if has_account is not None:
+                return False
+
+            existing = (
+                await session.execute(select(AccessRequest.id).where(AccessRequest.email == normalized))
+            ).scalar_one_or_none()
+            if existing is not None:
+                return False
+
+            try:
+                async with session.begin_nested():
+                    row = AccessRequest(
+                        email=normalized,
+                        note=None,
+                        source=source,
+                        status="pending",
+                        requested_at=requested_at,
+                        last_requested_at=requested_at,
+                    )
+                    session.add(row)
+                    await session.flush()
+                await session.commit()
+                return True
+            except IntegrityError:
+                # Lost a race against a concurrent insert for the same
+                # email (another import run, or a real request arriving
+                # mid-import) -- the row exists now, so this entry is
+                # correctly not imported.
+                return False
+
     async def list(self, status: str | None = None) -> list[AccessRequestView]:
         async with self._session_factory() as session:
             stmt = select(AccessRequest)
