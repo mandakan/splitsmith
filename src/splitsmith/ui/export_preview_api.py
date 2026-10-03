@@ -35,6 +35,7 @@ from ..export_preview import (
 from ..overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
 from ..overlay_theme import load_theme
 from ..runtime import runtime
+from . import render_bound
 
 logger = logging.getLogger(__name__)
 
@@ -105,8 +106,15 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
         if req.card == "frame":
             png = _render(_NoRasterizer())
         else:
-            with rasterizer_factory() as rasterizer:
+            # The same process-wide render bound as the share cards.
+            with render_bound.render_slot(), rasterizer_factory() as rasterizer:
                 png = _render(rasterizer)
+    except render_bound.RenderBusyError as exc:
+        raise HTTPException(
+            status_code=429,
+            detail="the preview renderer is busy",
+            headers={"Retry-After": str(render_bound.RETRY_AFTER_S)},
+        ) from exc
     except PreviewError as exc:
         raise HTTPException(status_code=exc.status, detail=exc.message) from exc
     except RasterizerUnavailableError as exc:

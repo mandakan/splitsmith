@@ -133,3 +133,27 @@ def test_the_frame_needs_no_browser(client, monkeypatch: pytest.MonkeyPatch) -> 
 )
 def test_bad_bodies_are_422(client, bad: dict) -> None:
     assert client.post(ROUTE, json=bad).status_code == 422
+
+
+def test_a_saturated_renderer_is_429_and_launches_nothing(client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The preview shares the process-wide render bound with the share cards."""
+    import threading
+
+    from splitsmith.ui import render_bound
+
+    slots = threading.BoundedSemaphore(render_bound.RENDER_CONCURRENCY)
+    monkeypatch.setattr(render_bound, "_slots", slots)
+    for _ in range(render_bound.RENDER_CONCURRENCY):
+        assert slots.acquire(timeout=1)
+    r = client.post(ROUTE, json={"card": "title", "stage_number": 1, "width": 480})
+    assert r.status_code == 429, r.text
+    assert int(r.headers["retry-after"]) > 0
+    assert _StubRasterizer.launches == 0
+
+    for _ in range(render_bound.RENDER_CONCURRENCY):
+        slots.release()
+    r = client.post(ROUTE, json={"card": "title", "stage_number": 1, "width": 480})
+    assert r.status_code == 200
+    assert _StubRasterizer.launches == 1
+    for _ in range(render_bound.RENDER_CONCURRENCY):
+        assert slots.acquire(timeout=0.01)

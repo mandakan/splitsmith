@@ -52,6 +52,7 @@ from ..audit_data import audit_shots_to_engine_shots
 from ..overlay_theme import load_theme
 from ..share_card import CompareCard, MatchCard, RosterEntry, StageCard, card_hash, stage_figures
 from ..share_card_render import cached_card_png, render_card_png
+from . import render_bound
 
 if TYPE_CHECKING:
     from contextlib import AbstractContextManager
@@ -269,55 +270,29 @@ _PNG_HEADERS = {"Cache-Control": "public, max-age=31536000"}
 _FALLBACK_PNG_HEADERS = {"Cache-Control": "public, max-age=60"}
 
 
-#: At most this many card renders (each one a Chromium launch) run at once
-#: in this process, across every path that renders: the moment / roster
-#: variants rendered per fetch, a storage miss on the plain cards, and the
-#: share-creation warm. A thread semaphore rather than an asyncio one
-#: because every render runs on a worker thread (the sync route handlers in
-#: the threadpool, the warm through ``asyncio.to_thread``): Playwright's
-#: sync API refuses the event-loop thread.
-CARD_RENDER_CONCURRENCY = 2
-
-#: How long a render waits for a slot before the request is answered 503.
-#: A render takes about a second, so this absorbs a short burst without
-#: letting a queue of waiting threads build up behind a saturated bound.
-CARD_RENDER_WAIT_S = 2.0
-
-#: ``Retry-After`` on that 503, in seconds.
-CARD_RENDER_RETRY_AFTER_S = 5
-
-_render_slots = threading.BoundedSemaphore(CARD_RENDER_CONCURRENCY)
-
-
-class CardRenderBusyError(Exception):
-    """Every render slot stayed taken for ``CARD_RENDER_WAIT_S``."""
-
-
 @contextmanager
 def _bounded_rasterizer() -> Iterator[Rasterizer]:
-    """The rasterizer factory every render in this module goes through.
+    """The rasterizer factory every card render in this module goes through.
 
-    Takes a render slot before launching the browser and gives it back
-    when the render is done, whether it succeeded or raised. Looks up
-    ``_render_slots`` and ``_chromium_factory`` at call time so a test can
-    replace either.
+    Holds one of the process-wide render slots (``render_bound``, shared
+    with the export preview) for the render: the moment / roster variants
+    rendered per fetch, a storage miss on the plain cards, and the
+    share-creation warm. When no slot is free it raises the same
+    ``RasterizerUnavailableError`` a browser-less host does, so the card is
+    the fallback plate with its short cache and is never stored: on the
+    anonymous surface a busy renderer looks like every other failure.
+    Looks ``_chromium_factory`` up at call time so a test can replace it.
     """
-    slots = _render_slots
-    if not slots.acquire(timeout=CARD_RENDER_WAIT_S):
-        raise CardRenderBusyError
+    from ..overlay_raster import RasterizerUnavailableError
+
     try:
-        with _chromium_factory() as rasterizer:
-            yield rasterizer
-    finally:
-        slots.release()
-
-
-def _busy() -> HTTPException:
-    return HTTPException(
-        status_code=503,
-        detail="card renderer busy",
-        headers={"Retry-After": str(CARD_RENDER_RETRY_AFTER_S)},
-    )
+        with render_bound.render_slot():
+            with _chromium_factory() as rasterizer:
+                yield rasterizer
+    except render_bound.RenderBusyError:
+        raise RasterizerUnavailableError(
+            "card renderer busy", "every render slot is in use; serving the fallback plate"
+        ) from None
 
 
 #: Rendered moment / roster cards kept in memory, so the burst of fetches a
@@ -503,17 +478,14 @@ def _png_response(
         # 404 for everyone else.
         logger.warning("share card render unavailable: state.storage is None (token=%s)", token)
         raise HTTPException(status_code=404, detail="not found")
-    try:
-        rendered = cached_card_png(
-            card,
-            token=token,
-            storage=state.storage,
-            theme=load_theme("splitsmith"),
-            rasterizer_factory=_bounded_rasterizer,
-            slug=slug,
-        )
-    except CardRenderBusyError:
-        raise _busy() from None
+    rendered = cached_card_png(
+        card,
+        token=token,
+        storage=state.storage,
+        theme=load_theme("splitsmith"),
+        rasterizer_factory=_bounded_rasterizer,
+        slug=slug,
+    )
     headers = _FALLBACK_PNG_HEADERS if rendered.fell_back else _PNG_HEADERS
     return Response(content=rendered.png, media_type="image/png", headers=headers)
 
@@ -532,12 +504,7 @@ def _uncached_png_response(
     png = _rendered_cache_get(key)
     if png is not None:
         return Response(content=png, media_type="image/png", headers=_PNG_HEADERS)
-    try:
-        rendered = render_card_png(
-            card, theme=load_theme("splitsmith"), rasterizer_factory=_bounded_rasterizer
-        )
-    except CardRenderBusyError:
-        raise _busy() from None
+    rendered = render_card_png(card, theme=load_theme("splitsmith"), rasterizer_factory=_bounded_rasterizer)
     if rendered.fell_back:
         return Response(content=rendered.png, media_type="image/png", headers=_FALLBACK_PNG_HEADERS)
     _rendered_cache_put(key, rendered.png)

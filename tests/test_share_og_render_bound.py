@@ -2,11 +2,14 @@
 
 Every card render launches Chromium. The moment (``t``) and roster
 (``who``) variants are rendered per fetch by design (they never reach
-object storage), so ``share_og`` keeps two guards in front of the
-rasterizer: at most ``CARD_RENDER_CONCURRENCY`` renders run at once, a
-request that cannot get a slot within ``CARD_RENDER_WAIT_S`` is answered
-503 with ``Retry-After`` rather than queued, and an identical moment card
-is served from a small in-process cache instead of being rendered again.
+object storage), so two guards sit in front of the rasterizer: at most
+``render_bound.RENDER_CONCURRENCY`` renders run at once across the
+process (share cards and the export preview alike), a render that cannot
+get a slot at once does not wait for one, and an identical moment card is
+served from a small in-process cache instead of being rendered again. A
+share card that finds no free slot is served as the fallback plate with
+its short cache, the same answer as a browser-less host: every failure on
+the anonymous surface looks the same.
 
 The rasterizer is replaced by a counting fake so these tests never launch
 a browser and can count renders exactly.
@@ -22,6 +25,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from splitsmith.share_card_render import FALLBACK_PNG_PATH
+from splitsmith.ui import render_bound
 from tests.hosted_helpers import _CapturingSender, login, moto_s3_storage, seed_match
 from tests.test_share_og_routes import BUCKET, MID, SLUG, _create_share, _seed_legacy_stage_audit
 
@@ -107,22 +112,37 @@ def test_a_repeated_moment_card_is_rendered_once(
     assert fake_browser.renders == before + 3
 
 
-def test_saturated_card_renders_answer_503_with_retry_after(
+def _held_slots(monkeypatch: pytest.MonkeyPatch) -> threading.BoundedSemaphore:
+    slots = threading.BoundedSemaphore(render_bound.RENDER_CONCURRENCY)
+    monkeypatch.setattr(render_bound, "_slots", slots)
+    for _ in range(render_bound.RENDER_CONCURRENCY):
+        assert slots.acquire(timeout=1)
+    return slots
+
+
+def test_a_render_never_waits_long_for_a_slot(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A waiting render holds a threadpool thread; distinct ``?t=`` values
+    arriving faster than renders finish must not pile threads up."""
+    import time
+
+    assert render_bound.RENDER_WAIT_S <= 0.25
+    _held_slots(monkeypatch)
+    started = time.monotonic()
+    with pytest.raises(render_bound.RenderBusyError):
+        with render_bound.render_slot():
+            pass
+    assert time.monotonic() - started < render_bound.RENDER_WAIT_S + 0.2
+
+
+def test_saturated_share_cards_serve_the_fallback_plate(
     hosted_env: str,
     hosted_app_with_storage: tuple[TestClient, _CapturingSender],
     fake_browser: _CountingRasterizer,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from splitsmith.ui import share_og
-
     client, sender = hosted_app_with_storage
     _seed_owner(hosted_env, client, sender)
-
-    slots = threading.BoundedSemaphore(share_og.CARD_RENDER_CONCURRENCY)
-    monkeypatch.setattr(share_og, "_render_slots", slots)
-    monkeypatch.setattr(share_og, "CARD_RENDER_WAIT_S", 0.05)
-    for _ in range(share_og.CARD_RENDER_CONCURRENCY):
-        assert slots.acquire(timeout=1)
+    slots = _held_slots(monkeypatch)
 
     # The share-creation warm goes through the same bound: the link is
     # still created, the warm just does not render.
@@ -130,6 +150,7 @@ def test_saturated_card_renders_answer_503_with_retry_after(
     client.cookies.clear()
     assert fake_browser.renders == 0
 
+    plate = FALLBACK_PNG_PATH.read_bytes()
     busy = [
         client.get(f"/api/share/{token}/og/{SLUG}/1.png", params={"t": "1.00"}),
         client.get(f"/api/share/{token}/og/compare/1.png", params={"who": SLUG}),
@@ -138,11 +159,12 @@ def test_saturated_card_renders_answer_503_with_retry_after(
         client.get(f"/api/share/{token}/og.png"),
     ]
     for resp in busy:
-        assert resp.status_code == 503, resp.text
-        assert int(resp.headers["retry-after"]) > 0
+        assert resp.status_code == 200, resp.text
+        assert resp.content == plate
+        assert resp.headers["cache-control"] == "public, max-age=60"
     assert fake_browser.renders == 0
 
-    for _ in range(share_og.CARD_RENDER_CONCURRENCY):
+    for _ in range(render_bound.RENDER_CONCURRENCY):
         slots.release()
     resp = client.get(f"/api/share/{token}/og/{SLUG}/1.png", params={"t": "1.00"})
     assert resp.status_code == 200
@@ -163,15 +185,15 @@ def test_render_slots_are_released_after_each_render(
 
     client, sender = hosted_app_with_storage
     _seed_owner(hosted_env, client, sender)
-    slots = threading.BoundedSemaphore(share_og.CARD_RENDER_CONCURRENCY)
-    monkeypatch.setattr(share_og, "_render_slots", slots)
-    monkeypatch.setattr(share_og, "CARD_RENDER_WAIT_S", 0.05)
+    slots = threading.BoundedSemaphore(render_bound.RENDER_CONCURRENCY)
+    monkeypatch.setattr(render_bound, "_slots", slots)
     token = _create_share(client)
     client.cookies.clear()
 
-    for i in range(share_og.CARD_RENDER_CONCURRENCY * 2):
+    for i in range(render_bound.RENDER_CONCURRENCY * 2):
         resp = client.get(f"/api/share/{token}/og/{SLUG}/1.png", params={"t": f"{i + 1}.00"})
         assert resp.status_code == 200
+        assert resp.content == _FAKE_PNG
 
     @contextmanager
     def _no_browser() -> Iterator[object]:
@@ -179,8 +201,8 @@ def test_render_slots_are_released_after_each_render(
         yield  # pragma: no cover
 
     monkeypatch.setattr(share_og, "_chromium_factory", _no_browser)
-    for i in range(share_og.CARD_RENDER_CONCURRENCY * 2):
+    for i in range(render_bound.RENDER_CONCURRENCY * 2):
         resp = client.get(f"/api/share/{token}/og/{SLUG}/1.png", params={"t": f"{i + 20}.00"})
         assert resp.status_code == 200
-    for _ in range(share_og.CARD_RENDER_CONCURRENCY):
+    for _ in range(render_bound.RENDER_CONCURRENCY):
         assert slots.acquire(timeout=0.01)
