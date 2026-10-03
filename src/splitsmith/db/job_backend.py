@@ -288,8 +288,16 @@ class PostgresJobBackend:
         """
         body = self.bodies.get(kind)
         call_args = args or {}
+        # The account check runs again here, not only at submit: a job
+        # queued before a downgrade (or woken by the boot re-trigger) must
+        # not run once the account has lost ``hosted_compute``. It fails
+        # through ``_run`` like any body error, so the row ends FAILED with
+        # the refusal as its message and the body never starts.
+        refused = self._submit_allowed is not None and not await self._submit_allowed()
 
         def _ctx_fn(handle: JobHandle) -> None:
+            if refused:
+                raise FeatureRequiredError(Feature.hosted_compute)
             if before_body is not None:
                 before_body()
             body(handle, **call_args)
@@ -629,7 +637,10 @@ class PostgresJobBackend:
                 self._finalize_with_timings(job_id, kind, JobStatus.CANCELLED, timer, error=None)
                 return
             except Exception as exc:  # noqa: BLE001 -- surface as FAILED
-                capture_job_exception(exc, kind=kind, user_id=self._user_id)
+                # An account refusal is policy, not a crash: it fails the
+                # row but is not reported to Sentry.
+                if not isinstance(exc, FeatureRequiredError):
+                    capture_job_exception(exc, kind=kind, user_id=self._user_id)
                 self._finalize_with_timings(job_id, kind, JobStatus.FAILED, timer, error=str(exc))
                 return
             self._finalize_with_timings(job_id, kind, JobStatus.SUCCEEDED, timer, error=None)

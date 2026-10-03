@@ -73,6 +73,78 @@ def test_every_registered_kind_is_refused(hosted_app, hosted_env) -> None:  # no
     assert deferred == []
 
 
+def test_job_queued_before_a_downgrade_fails_without_running(hosted_env) -> None:  # noqa: ANN001
+    """The worker re-checks: a job queued while full does not run once the account lost hosted_compute."""
+    from splitsmith.ui.jobs import JobBodyRegistry, JobStatus
+
+    ran: list[str] = []
+    bodies = JobBodyRegistry()
+    bodies.register("probe", lambda handle: ran.append("probe"))
+    allowed = {"value": True}
+
+    async def deferrer(**kw):  # noqa: ANN003, ANN202
+        return None
+
+    async def may_submit() -> bool:
+        return allowed["value"]
+
+    async def go() -> tuple[str, object]:
+        engine = create_engine(hosted_env)
+        backend = PostgresJobBackend(
+            sessionmaker(engine),
+            user_id="u1",
+            deferrer=deferrer,
+            sweep_on_boot=False,
+            bodies=bodies,
+            submit_allowed=may_submit,
+        )
+        job = await backend.submit(kind="probe")
+        allowed["value"] = False
+        await backend.run_job(job_id=job.id, kind="probe")
+        after = await backend.get(job.id)
+        await engine.dispose()
+        return job.id, after
+
+    _, after = asyncio.run(go())
+    assert ran == []
+    assert after.status == JobStatus.FAILED
+    assert "hosted_compute" in (after.error or "")
+
+
+def test_job_still_allowed_runs(hosted_env) -> None:  # noqa: ANN001
+    from splitsmith.ui.jobs import JobBodyRegistry, JobStatus
+
+    ran: list[str] = []
+    bodies = JobBodyRegistry()
+    bodies.register("probe", lambda handle: ran.append("probe"))
+
+    async def deferrer(**kw):  # noqa: ANN003, ANN202
+        return None
+
+    async def yes() -> bool:
+        return True
+
+    async def go() -> object:
+        engine = create_engine(hosted_env)
+        backend = PostgresJobBackend(
+            sessionmaker(engine),
+            user_id="u1",
+            deferrer=deferrer,
+            sweep_on_boot=False,
+            bodies=bodies,
+            submit_allowed=yes,
+        )
+        job = await backend.submit(kind="probe")
+        await backend.run_job(job_id=job.id, kind="probe")
+        after = await backend.get(job.id)
+        await engine.dispose()
+        return after
+
+    after = asyncio.run(go())
+    assert ran == ["probe"]
+    assert after.status == JobStatus.SUCCEEDED
+
+
 def test_registry_lists_its_kinds() -> None:
     from splitsmith.ui.jobs import JobBodyRegistry
 
