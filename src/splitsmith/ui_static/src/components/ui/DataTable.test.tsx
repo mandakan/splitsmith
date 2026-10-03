@@ -36,4 +36,20 @@ describe("DataTable", () => {
     expect(screen.getByText("03").closest("tr")!.className).toMatch(/bg-surface-2/);
     expect(screen.getByText("1.93").className).toMatch(/text-subtle/);
   });
+
+  it("the scroller contains absolutely positioned cell content (an sr-only header) so it cannot widen the page", () => {
+    render(
+      <Table>
+        <thead>
+          <tr>
+            <Th>
+              <span className="sr-only">Actions</span>
+            </Th>
+          </tr>
+        </thead>
+      </Table>,
+    );
+    const scroller = screen.getByText("Actions").closest(".overflow-x-auto")!;
+    expect(scroller.className).toMatch(/\brelative\b/);
+  });
 });

@@ -122,6 +122,14 @@ describe("AdminAccess", () => {
     expect(api.adminUsers).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps a pending row's tier picker on one line (the table scrolls on a phone)", async () => {
+    render(<AdminAccess />);
+    const row = (await screen.findByText("new@x.se")).closest("tr")!;
+    const picker = within(row).getByRole("group", { name: "Tier for new@x.se" });
+    expect(picker.className).toMatch(/\bflex-nowrap\b/);
+    expect(picker.className).not.toMatch(/\bflex-wrap\b/);
+  });
+
   it("approves with the tier picked on the row", async () => {
     const user = userEvent.setup();
     vi.mocked(api.adminApproveAccessRequest).mockResolvedValue(req({ status: "approved" }));

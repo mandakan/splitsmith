@@ -59,6 +59,7 @@ function PendingRow({ row, tiers, busy, onApprove, onDecline }: PendingRowProps)
           options={tiers.tiers.map((t) => ({ value: t.name, label: t.name }))}
           onChange={setTier}
           disabled={busy}
+          className="flex-nowrap"
         />
       </Td>
       <Td className="whitespace-nowrap text-right">

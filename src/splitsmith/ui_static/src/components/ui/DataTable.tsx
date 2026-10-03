@@ -16,7 +16,10 @@ export function Table({
 }: React.TableHTMLAttributes<HTMLTableElement>) {
   return (
     <div className="overflow-hidden rounded-[10px] border border-rule bg-surface">
-      <div className="overflow-x-auto">
+      {/* ``relative`` makes the scroller the containing block of any
+          absolutely positioned cell content (an ``sr-only`` header label),
+          which otherwise escapes the scroll clip and widens the page. */}
+      <div className="relative overflow-x-auto">
         <table className={cn("w-full border-collapse text-[13px]", className)} {...props}>
           {children}
         </table>
