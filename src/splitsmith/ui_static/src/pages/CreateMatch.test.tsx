@@ -6,6 +6,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ApiError, api } from "@/lib/api";
 import { CreateMatch } from "@/pages/CreateMatch";
 
 vi.mock("@/lib/api", async (importOriginal) => {
@@ -15,6 +16,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
     api: {
       ...actual.api,
       getServerFeatures: vi.fn().mockResolvedValue({ lab: false, mode: "local" }),
+      createMatchManual: vi.fn(),
     },
   };
 });
@@ -53,5 +55,24 @@ describe("CreateMatch", () => {
     fireEvent.click(screen.getByRole("button", { name: "using manual setup" }));
     expect(screen.getByRole("tab", { name: /manual setup/i })).toHaveAttribute("aria-selected", "true");
     expect(screen.queryByPlaceholderText(/search matches/i)).toBeNull();
+  });
+
+  it("shows an access refusal from create as one line, not the raw detail", async () => {
+    vi.mocked(api.createMatchManual).mockRejectedValue(
+      new ApiError(403, JSON.stringify({ code: "feature_required", feature: "create_match" }), {
+        code: "feature_required",
+        feature: "create_match",
+      }),
+    );
+    renderPage();
+    fireEvent.click(screen.getByRole("tab", { name: /manual setup/i }));
+    fireEvent.change(screen.getByPlaceholderText(/draw drills/i), { target: { value: "Club night" } });
+    fireEvent.change(screen.getByPlaceholderText("~/Splitsmith/<slug>/"), { target: { value: "/m/club" } });
+    fireEvent.change(screen.getByPlaceholderText("Full name"), { target: { value: "Anna" } });
+    fireEvent.click(screen.getByRole("button", { name: /create match/i }));
+    expect(
+      await screen.findByText("Creating matches here is not included in this account's access."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/feature_required/)).toBeNull();
   });
 });

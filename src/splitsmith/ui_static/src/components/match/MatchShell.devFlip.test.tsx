@@ -58,6 +58,8 @@ beforeEach(() => {
     email: "local@localhost",
     display_name: null,
     is_admin: false,
+    access_tier: null,
+    features: ["create_match", "hosted_compute", "raw_upload", "share", "sync"],
   });
   vi.mocked(api.listMatchShooters).mockResolvedValue({
     match_root: "/root",

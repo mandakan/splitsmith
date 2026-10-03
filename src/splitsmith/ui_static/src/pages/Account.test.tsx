@@ -76,6 +76,8 @@ it("saves a display name and refreshes the session", async () => {
     email: "m@thias.se",
     display_name: "Anders Berg",
     is_admin: false,
+    access_tier: "full",
+    features: ["create_match", "hosted_compute", "raw_upload", "share", "sync"],
   });
   renderPage();
 
@@ -95,6 +97,8 @@ it("sends null when the field is cleared", async () => {
     email: "m@thias.se",
     display_name: null,
     is_admin: false,
+    access_tier: "full",
+    features: ["create_match", "hosted_compute", "raw_upload", "share", "sync"],
   });
   renderPage();
 
@@ -151,6 +155,8 @@ it("clears the saved indicator once the field changes after a successful save", 
     email: "m@thias.se",
     display_name: "Anders Berg",
     is_admin: false,
+    access_tier: "full",
+    features: ["create_match", "hosted_compute", "raw_upload", "share", "sync"],
   });
   renderPage();
 

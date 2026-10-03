@@ -1818,8 +1818,7 @@ export function isReadOnlyMirrorError(err: unknown): boolean {
  *
  *  Non-``ApiError`` values (including plain ``Error``) get ``fallback``:
  *  their messages are internal-facing, not written for an operator.
- *  ``ApiError`` is not exported, so the ``instanceof`` test has to live in
- *  this module.
+ *  The ``instanceof`` test lives here so callers need not import the class.
  */
 export function apiErrorText(err: unknown, fallback: string): string {
   if (!(err instanceof ApiError)) return fallback;
@@ -1870,6 +1869,11 @@ export interface AuthUser {
   email: string;
   display_name: string | null;
   is_admin: boolean;
+  /** Hosted access tier name, for display only; code checks ``features``
+   *  (lib/access.ts). Null for the local loopback user. */
+  access_tier: string | null;
+  /** Sorted feature names this account holds. */
+  features: string[];
 }
 
 /** Saved SSI Scoreboard identity for the operator. Returned by
@@ -3450,6 +3454,14 @@ export const api = {
     request<{ ok: true }>("/api/v1/auth/begin", {
       method: "POST",
       json: { email },
+    }),
+
+  /** Hosted mode -- ask for access. The server answers 202 with the same
+   *  ``message`` whatever happened (known email or not). */
+  requestAccess: (email: string, note: string | null) =>
+    request<{ ok: boolean; message: string }>("/api/v1/access-requests", {
+      method: "POST",
+      json: { email, note },
     }),
 
   /** Hosted mode -- revoke the current session + clear the cookie. */

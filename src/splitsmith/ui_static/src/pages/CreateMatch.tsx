@@ -49,6 +49,7 @@ import {
   type ScoreboardMatchData,
   type ScoreboardMatchRef,
 } from "@/lib/api";
+import { featureRefusal } from "@/lib/access";
 import { useDeploymentMode } from "@/lib/features";
 import { slugify } from "@/lib/slugify";
 import { cn } from "@/lib/utils";
@@ -519,7 +520,7 @@ function ScoreboardVariant({
       });
     } catch (e) {
       setCreating(false);
-      onError(e instanceof ApiError ? e.detail : String(e));
+      onError(featureRefusal(e) ?? (e instanceof ApiError ? e.detail : String(e)));
     }
   }
 
@@ -1135,7 +1136,7 @@ function ManualVariant({
       });
     } catch (e) {
       setCreating(false);
-      onError(e instanceof ApiError ? e.detail : String(e));
+      onError(featureRefusal(e) ?? (e instanceof ApiError ? e.detail : String(e)));
     }
   }
 

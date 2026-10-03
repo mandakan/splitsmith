@@ -55,6 +55,25 @@ vi.mock("@/lib/features", async (importOriginal) => {
   };
 });
 
+// The account behind a hosted page. Every feature by default; the
+// raw_upload gate tests narrow it.
+const ALL_FEATURES = ["create_match", "hosted_compute", "raw_upload", "share", "sync"];
+const account = vi.hoisted(() => ({ features: [] as string[] }));
+vi.mock("@/lib/auth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/auth")>();
+  return {
+    ...actual,
+    useAuthUser: () => ({
+      id: "u1",
+      email: "a@x.se",
+      display_name: null,
+      is_admin: false,
+      access_tier: "full",
+      features: account.features,
+    }),
+  };
+});
+
 vi.mock("@/lib/uploads", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/uploads")>();
   return { ...actual, useUploads: vi.fn() };
@@ -140,6 +159,7 @@ async function settleEffects(): Promise<void> {
 describe("Ingest empty state", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    account.features = ALL_FEATURES;
     mockUploads();
     vi.mocked(api.getProject).mockResolvedValue(emptyProject);
     vi.mocked(api.getHealth).mockResolvedValue(health);
@@ -268,5 +288,30 @@ describe("Ingest empty state", () => {
         /footage for this match is added on the desktop install and syncs here/i,
       ),
     ).not.toBeInTheDocument();
+  });
+
+  it("hosted without raw_upload offers no upload entry point and says where footage comes from", async () => {
+    vi.mocked(useDeploymentMode).mockReturnValue({ mode: "hosted", resolved: true });
+    account.features = ["share", "sync"];
+    renderIngest();
+    expect(
+      await screen.findByText(/footage for this match is added on the desktop install and syncs here/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /browse files/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^add footage$/i })).toBeNull();
+    await settleEffects();
+    const file = new File(["x"], "GH010001.MP4", { type: "video/mp4" });
+    act(() => {
+      fireEvent.drop(window, { dataTransfer: { files: [file], types: ["Files"] } });
+    });
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it("local mode keeps the picker whatever the account reads as", async () => {
+    vi.mocked(useDeploymentMode).mockReturnValue({ mode: "local", resolved: true });
+    account.features = [];
+    renderIngest();
+    expect(await screen.findByRole("button", { name: /pick a folder/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^add footage$/i })).toBeEnabled();
   });
 });

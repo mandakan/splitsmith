@@ -51,6 +51,7 @@ import {
   type TakeOverview as TakeOverviewData,
   type TakeOverviewStage,
 } from "@/lib/api";
+import { featureRefusal, useCan } from "@/lib/access";
 import { useDialogFocus } from "@/lib/dialogFocus";
 import { useMatchHref } from "@/lib/matchHref";
 import { cn } from "@/lib/utils";
@@ -84,6 +85,9 @@ export function TakeOverview() {
 function TakeOverviewInner({ slug, filename }: { slug: string; filename: string }) {
   const href = useMatchHref();
   const confirm = useConfirm();
+  // A manual beep window re-runs detection, which the server refuses an
+  // account without hosted_compute before writing; offer no handles then.
+  const canEditWindows = useCan("hosted_compute");
   const [overview, setOverview] = useState<TakeOverviewData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [peaksState, setPeaksState] = useState<PeaksState>({ kind: "loading" });
@@ -104,7 +108,7 @@ function TakeOverviewInner({ slug, filename }: { slug: string; filename: string 
       setOverview(o);
       setError(null);
     } catch (e) {
-      setError(e instanceof ApiError ? e.detail : String(e));
+      setError(featureRefusal(e) ?? (e instanceof ApiError ? e.detail : String(e)));
     }
   }, [slug, filename]);
 
@@ -233,7 +237,7 @@ function TakeOverviewInner({ slug, filename }: { slug: string; filename: string 
       discardDraft(s.stage_number);
       await loadOverview();
     } catch (e) {
-      setError(e instanceof ApiError ? e.detail : String(e));
+      setError(featureRefusal(e) ?? (e instanceof ApiError ? e.detail : String(e)));
     } finally {
       setApplyingStage(null);
     }
@@ -261,7 +265,7 @@ function TakeOverviewInner({ slug, filename }: { slug: string; filename: string 
       setPeaksState((p) => (p.kind === "ready" ? p : { kind: "pending", activeJob: true }));
       await loadOverview();
     } catch (e) {
-      setError(e instanceof ApiError ? e.detail : String(e));
+      setError(featureRefusal(e) ?? (e instanceof ApiError ? e.detail : String(e)));
     } finally {
       setQueueBusy(false);
     }
@@ -277,7 +281,7 @@ function TakeOverviewInner({ slug, filename }: { slug: string; filename: string 
       setCoverageOpen(false);
       await loadOverview();
     } catch (e) {
-      setError(e instanceof ApiError ? e.detail : String(e));
+      setError(featureRefusal(e) ?? (e instanceof ApiError ? e.detail : String(e)));
     } finally {
       setCoverageBusy(false);
     }
@@ -298,7 +302,7 @@ function TakeOverviewInner({ slug, filename }: { slug: string; filename: string 
             One recording, {stages.length}{" "}
             {stages.length === 1 ? "stage" : "stages"}. Check that each
             stage's beep search window sits over the right part of the file
-            - drag a window's edges and re-run detection when it doesn't.
+            {canEditWindows ? " - drag a window's edges and re-run detection when it doesn't." : "."}
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-3 font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-subtle tabular-nums">
             {duration > 0 && <span>{formatClock(duration)} total</span>}
@@ -384,6 +388,7 @@ function TakeOverviewInner({ slug, filename }: { slug: string; filename: string 
               conflictSet={conflictSet}
               windowFor={effectiveWindow}
               dirtyFor={isDirty}
+              editable={canEditWindows}
               onWindowChange={setDraft}
             />
           </Waveform>
@@ -491,6 +496,7 @@ function WindowLayer({
   duration,
   conflictSet,
   windowFor,
+  editable,
   dirtyFor,
   onWindowChange,
 }: {
@@ -498,6 +504,8 @@ function WindowLayer({
   duration: number;
   conflictSet: Set<number>;
   windowFor: (s: TakeOverviewStage) => TimeWindow | null;
+  /** False renders the windows read-only: no drag handles. */
+  editable: boolean;
   dirtyFor: (s: TakeOverviewStage) => boolean;
   onWindowChange: (stageNumber: number, w: TimeWindow) => void;
 }) {
@@ -656,22 +664,26 @@ function WindowLayer({
               {dirty && " - edited"}
               {conflict && !dirty && " - conflict"}
             </span>
-            <WindowHandle
-              edge="start"
-              label={`Stage ${pad2(s.stage_number)} window start, ${formatClock(w[0])} - drag or use arrow keys`}
-              onPointerDown={(e) => handlePointerDown(e, s.stage_number, "start", w)}
-              onPointerMove={(e) => handlePointerMove(e, w)}
-              onPointerUp={handlePointerUp}
-              onKeyDown={(e) => handleKeyDown(e, s.stage_number, "start", w)}
-            />
-            <WindowHandle
-              edge="end"
-              label={`Stage ${pad2(s.stage_number)} window end, ${formatClock(w[1])} - drag or use arrow keys`}
-              onPointerDown={(e) => handlePointerDown(e, s.stage_number, "end", w)}
-              onPointerMove={(e) => handlePointerMove(e, w)}
-              onPointerUp={handlePointerUp}
-              onKeyDown={(e) => handleKeyDown(e, s.stage_number, "end", w)}
-            />
+            {editable ? (
+              <>
+                <WindowHandle
+                  edge="start"
+                  label={`Stage ${pad2(s.stage_number)} window start, ${formatClock(w[0])} - drag or use arrow keys`}
+                  onPointerDown={(e) => handlePointerDown(e, s.stage_number, "start", w)}
+                  onPointerMove={(e) => handlePointerMove(e, w)}
+                  onPointerUp={handlePointerUp}
+                  onKeyDown={(e) => handleKeyDown(e, s.stage_number, "start", w)}
+                />
+                <WindowHandle
+                  edge="end"
+                  label={`Stage ${pad2(s.stage_number)} window end, ${formatClock(w[1])} - drag or use arrow keys`}
+                  onPointerDown={(e) => handlePointerDown(e, s.stage_number, "end", w)}
+                  onPointerMove={(e) => handlePointerMove(e, w)}
+                  onPointerUp={handlePointerUp}
+                  onKeyDown={(e) => handleKeyDown(e, s.stage_number, "end", w)}
+                />
+              </>
+            ) : null}
           </div>
         );
       })}

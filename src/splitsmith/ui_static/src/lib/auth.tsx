@@ -99,6 +99,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
+/** The signed-in account, or null when there is none -- including when
+ *  no ``<AuthProvider>`` is mounted, so feature gates can read it without
+ *  requiring the provider. */
+export function useAuthUser(): AuthUser | null {
+  return React.useContext(AuthContext)?.user ?? null;
+}
+
 export function useAuth(): AuthContextValue {
   const ctx = React.useContext(AuthContext);
   if (!ctx) throw new Error("useAuth must be used within <AuthProvider>");

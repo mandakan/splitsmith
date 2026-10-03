@@ -37,6 +37,7 @@ import {
   type ScoreboardIdentity,
   type ServerHealth,
 } from "@/lib/api";
+import { featureRefusal, useCan } from "@/lib/access";
 import { useDeploymentMode } from "@/lib/features";
 import {
   continueHref,
@@ -65,10 +66,20 @@ function matchHome(health: ServerHealth): string {
   return health.match_id ? `/match/${health.match_id}/` : "/";
 }
 
+/** Where an account that cannot create matches gets the desktop app. */
+const DESKTOP_APP_URL = "https://splitsmith.app/#install";
+
+/** The line an error renders as: an access refusal first, then the
+ *  server's detail. */
+function errorText(e: unknown): string {
+  return featureRefusal(e) ?? (e instanceof ApiError ? e.detail : String(e));
+}
+
 export function Pick() {
   const navigate = useNavigate();
   const { mode } = useDeploymentMode();
   const { mode: appMode } = useMode();
+  const canCreate = useCan("create_match");
   const [recents, setRecents] = useState<RecentProjectDetail[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
@@ -120,7 +131,7 @@ export function Pick() {
       }
       setRecents(await api.getRecentProjectsDetail());
     } catch (e) {
-      setError(e instanceof ApiError ? e.detail : String(e));
+      setError(errorText(e));
     } finally {
       setDeleting(null);
     }
@@ -170,7 +181,7 @@ export function Pick() {
         if (alive) setRecents(rs);
       })
       .catch((e: unknown) => {
-        if (alive) setError(e instanceof ApiError ? e.detail : String(e));
+        if (alive) setError(errorText(e));
       });
     return () => {
       alive = false;
@@ -229,7 +240,7 @@ export function Pick() {
       navigate(to && !dev ? to : postBindTarget(health), { replace: true });
     } catch (e: unknown) {
       setOpening(null);
-      setError(e instanceof ApiError ? e.detail : String(e));
+      setError(errorText(e));
     }
   }
 
@@ -243,7 +254,7 @@ export function Pick() {
       navigate(postBindTarget(health), { replace: true });
     } catch (e: unknown) {
       setOpening(null);
-      setError(e instanceof ApiError ? e.detail : String(e));
+      setError(errorText(e));
     }
   }
 
@@ -262,7 +273,7 @@ export function Pick() {
       navigate(matchHome(health), { replace: true });
     } catch (e: unknown) {
       setImporting(false);
-      setError(e instanceof ApiError ? e.detail : String(e));
+      setError(errorText(e));
     }
   }
 
@@ -308,7 +319,7 @@ export function Pick() {
           }
           actions={
             <>
-              {localFs ? (
+              {localFs && canCreate ? (
                 <Button
                   type="button"
                   onClick={() =>
@@ -329,14 +340,16 @@ export function Pick() {
                   Merge legacy
                 </Button>
               ) : null}
-              <Button
-                type="button"
-                variant={continueMatch ? "default" : "primary"}
-                onClick={() => navigate("/pick/new")}
-              >
-                New match
-                <Kbd className="border-current/40">&#8984;N</Kbd>
-              </Button>
+              {canCreate ? (
+                <Button
+                  type="button"
+                  variant={continueMatch ? "default" : "primary"}
+                  onClick={() => navigate("/pick/new")}
+                >
+                  New match
+                  <Kbd className="border-current/40">&#8984;N</Kbd>
+                </Button>
+              ) : null}
             </>
           }
         />
@@ -452,7 +465,18 @@ export function Pick() {
           </div>
         ) : filtered.length === 0 ? (
           <div className="rounded-[10px] border border-dashed border-rule-strong px-6 py-12 text-center text-md text-muted">
-            {recents.length === 0 ? "No matches yet. Create one to start adding footage." : "No matches match the filter."}
+            {recents.length > 0 ? (
+              "No matches match the filter."
+            ) : canCreate ? (
+              "No matches yet. Create one to start adding footage."
+            ) : (
+              <>
+                Matches arrive here from the desktop app.{" "}
+                <a href={DESKTOP_APP_URL} className="text-ink-2 underline underline-offset-4 hover:text-ink">
+                  Get the desktop app
+                </a>
+              </>
+            )}
           </div>
         ) : (
           <Table>
@@ -512,44 +536,46 @@ export function Pick() {
                 </Button>
               </div>
             </form>
-            <form
-              id="import-backup"
-              className="bg-surface px-3.5 py-3"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void runImport();
-              }}
-            >
-              <Label>Import backup</Label>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <input
-                  type="file"
-                  accept=".tar.gz,.tgz,application/gzip,application/x-tar"
-                  aria-label="Backup archive"
-                  onChange={(e) => setImportArchive(e.target.files?.[0] ?? null)}
-                  className="min-w-0 flex-1 text-sm text-ink-2"
-                />
-                <input
-                  type="text"
-                  value={importDest}
-                  onChange={(e) => setImportDest(e.target.value)}
-                  placeholder="Destination directory"
-                  aria-label="Destination directory"
-                  className={cn(inputClass, "min-w-[160px] flex-1 font-mono text-sm")}
-                />
-                <Button type="submit" size="sm" disabled={!importArchive || !importDest.trim() || importing}>
-                  {importing ? "Importing..." : "Import"}
-                </Button>
-              </div>
-              <label className="mt-2 flex items-center gap-2 text-sm text-muted">
-                <input
-                  type="checkbox"
-                  checked={importOverwrite}
-                  onChange={(e) => setImportOverwrite(e.target.checked)}
-                />
-                Overwrite if the target folder already exists
-              </label>
-            </form>
+            {canCreate ? (
+              <form
+                id="import-backup"
+                className="bg-surface px-3.5 py-3"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void runImport();
+                }}
+              >
+                <Label>Import backup</Label>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <input
+                    type="file"
+                    accept=".tar.gz,.tgz,application/gzip,application/x-tar"
+                    aria-label="Backup archive"
+                    onChange={(e) => setImportArchive(e.target.files?.[0] ?? null)}
+                    className="min-w-0 flex-1 text-sm text-ink-2"
+                  />
+                  <input
+                    type="text"
+                    value={importDest}
+                    onChange={(e) => setImportDest(e.target.value)}
+                    placeholder="Destination directory"
+                    aria-label="Destination directory"
+                    className={cn(inputClass, "min-w-[160px] flex-1 font-mono text-sm")}
+                  />
+                  <Button type="submit" size="sm" disabled={!importArchive || !importDest.trim() || importing}>
+                    {importing ? "Importing..." : "Import"}
+                  </Button>
+                </div>
+                <label className="mt-2 flex items-center gap-2 text-sm text-muted">
+                  <input
+                    type="checkbox"
+                    checked={importOverwrite}
+                    onChange={(e) => setImportOverwrite(e.target.checked)}
+                  />
+                  Overwrite if the target folder already exists
+                </label>
+              </form>
+            ) : null}
           </div>
         ) : null}
 
