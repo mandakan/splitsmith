@@ -38,9 +38,12 @@ Running the import
 Each entry's email is validated with the same rule the intake route uses
 (``valid_request_email``: non-empty, has an ``@``, no whitespace/control
 characters, at most 320 characters); invalid entries are skipped and
-counted. ``ts`` is accepted as either an int/float of milliseconds since
-the epoch (``Date.now()``, what the KV writer actually stores) or an ISO
-8601 string, in case an older dump used that shape. Entries are imported
+counted, as is any entry with no ``ts`` at all. ``ts`` is an ISO 8601
+string in a real dump -- the KV writer stores
+``ts: new Date().toISOString()`` (``functions/api/waitlist.js``, since
+deleted). An int/float of milliseconds since the epoch is also accepted,
+defensively, in case a dump is ever produced some other way, but it is
+not what production data actually looks like. Entries are imported
 earliest-``ts``-first per email, so where the dump has more than one
 timestamp for the same address (a resubmission before the cutover), the
 earliest one is the one kept; an email that already has a pending request
@@ -88,6 +91,9 @@ def _load_entries(path: Path) -> tuple[list[tuple[str, datetime]], int]:
     for item in raw:
         email = str(item.get("email", ""))
         if not valid_request_email(email) or len(email) > _MAX_EMAIL_LENGTH:
+            invalid += 1
+            continue
+        if "ts" not in item:
             invalid += 1
             continue
         entries.append((email, _parse_ts(item["ts"])))

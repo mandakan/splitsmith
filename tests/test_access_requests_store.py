@@ -244,3 +244,22 @@ def test_decline_of_already_declined_request_is_refused(factory) -> None:  # noq
     run(store.decline(rid, admin_email="boss@x.se"))
     with pytest.raises(AlreadyDecidedError):
         run(store.decline(rid, admin_email="boss@x.se"))
+
+
+def test_import_entry_skips_soft_deleted_account(factory) -> None:  # noqa: ANN001
+    async def seed() -> None:
+        async with factory() as s:
+            s.add(
+                User(
+                    email="gone@x.se",
+                    access_tier="full",
+                    deleted_at=datetime(2026, 10, 1, tzinfo=UTC),
+                )
+            )
+            await s.commit()
+
+    run(seed())
+    store = AccessRequestStore(factory, now=Clock())
+    requested_at = datetime(2025, 9, 27, 19, 6, 40, tzinfo=UTC)
+    assert run(store.import_entry("gone@x.se", requested_at=requested_at)) is False
+    assert run(store.list()) == []
