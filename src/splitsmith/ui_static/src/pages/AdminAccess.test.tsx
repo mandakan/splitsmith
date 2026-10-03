@@ -100,6 +100,14 @@ describe("AdminAccess", () => {
     vi.mocked(api.adminSetUserTier).mockReset();
   });
 
+  it("renders a failed load as an error line, like a failed action", async () => {
+    vi.mocked(api.adminUsers).mockRejectedValue(new ApiError(500, "Database down", "Database down"));
+    render(<AdminAccess />);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveClass("text-destructive");
+    expect(alert).not.toHaveClass("text-led-text");
+  });
+
   it("shows a non-admin no tables and fetches nothing", async () => {
     auth.user = { ...auth.user, is_admin: false };
     render(<AdminAccess />);

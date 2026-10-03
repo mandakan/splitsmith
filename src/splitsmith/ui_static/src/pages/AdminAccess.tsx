@@ -227,7 +227,7 @@ export function AdminAccess() {
       <PageHeader title="Access" back={back} />
 
       {fetchError ? (
-        <p role="alert" className="text-sm text-led-text">
+        <p role="alert" className="text-sm text-destructive">
           {fetchError}
         </p>
       ) : null}
