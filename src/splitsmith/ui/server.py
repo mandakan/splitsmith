@@ -1321,11 +1321,6 @@ class AdminPatchWorkerBody(BaseModel):
     name: str | None = None
 
 
-# /api/* paths the auth gate lets through without resolving a user.
-# Anything else under /api/* requires ``state.auth.authenticate_request``
-# to return a non-None User -- see the ``_auth_gate`` middleware inside
-# ``create_app``. Non-/api/* paths (SPA static, /docs) are exempt by
-# prefix, not by this list.
 #: What an account with no features may still reach, as (method, path):
 #: who am I, and signing a credential out (session cookie or desktop token).
 #: Method-paired so ``PATCH /api/me`` stays refused.
@@ -1337,6 +1332,11 @@ _DISABLED_ALLOWED_ROUTES: frozenset[tuple[str, str]] = frozenset(
     }
 )
 
+# /api/* paths the auth gate lets through without resolving a user.
+# Anything else under /api/* requires ``state.auth.authenticate_request``
+# to return a non-None User -- see the ``_auth_gate`` middleware inside
+# ``create_app``. Non-/api/* paths (SPA static, /docs) are exempt by
+# prefix, not by this list.
 _PUBLIC_API_PATHS: frozenset[str] = frozenset(
     {
         "/api/health",

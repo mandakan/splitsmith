@@ -119,6 +119,45 @@ def test_new_account_gets_the_default_tier(hosted_env, monkeypatch, tmp_path) ->
         assert client.get("/api/me").json()["access_tier"] == "sharing"
 
 
+def test_new_account_gets_the_env_default_tier(hosted_env, monkeypatch) -> None:  # noqa: ANN001
+    monkeypatch.setenv("SPLITSMITH_ACCESS_DEFAULT_TIER", "sharing")
+    from splitsmith.ui.server import create_app
+    from tests.hosted_helpers import _CapturingSender
+
+    app = create_app()
+    sender = _CapturingSender()
+    app.state.splitsmith_state.auth.backends[0]._email = sender
+    with TestClient(app, follow_redirects=False) as client:
+        login(client, sender, "new@x.se")
+        assert client.get("/api/me").json()["access_tier"] == "sharing"
+
+
+def test_returning_account_keeps_its_tier_when_the_default_changes(
+    hosted_env, monkeypatch  # noqa: ANN001
+) -> None:
+    """``default_tier`` applies at account creation only, never on a later sign-in."""
+    from splitsmith.ui.server import create_app
+    from tests.hosted_helpers import _CapturingSender
+
+    def boot() -> tuple[object, _CapturingSender]:
+        app = create_app()
+        sender = _CapturingSender()
+        app.state.splitsmith_state.auth.backends[0]._email = sender
+        return app, sender
+
+    monkeypatch.setenv("SPLITSMITH_ACCESS_DEFAULT_TIER", "sharing")
+    app, sender = boot()
+    with TestClient(app, follow_redirects=False) as client:
+        login(client, sender, "old@x.se")
+        assert client.get("/api/me").json()["access_tier"] == "sharing"
+    set_tier(hosted_env, "old@x.se", "full")
+
+    app, sender = boot()
+    with TestClient(app, follow_redirects=False) as client:
+        login(client, sender, "old@x.se")
+        assert client.get("/api/me").json()["access_tier"] == "full"
+
+
 def test_desktop_token_user_carries_the_tier(hosted_app, hosted_env) -> None:  # noqa: ANN001
     """A sync token of a disabled account stops at the next request."""
     client, sender = hosted_app
