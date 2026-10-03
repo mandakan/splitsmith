@@ -86,7 +86,9 @@ def test_hosted_thumbnail_route_is_not_served(signed_in_with_shooter: TestClient
     client = signed_in_with_shooter
     # Plant a cached thumbnail exactly where the route would read it, so
     # the 404 comes from the mode gate and not from a cache miss.
-    thumbs = Path(os.environ["SPLITSMITH_PROJECTS_DIR"]) / MID / "shooters" / SLUG / "thumbs"
+    assert client.get(f"/api/matches/{MID}/match/shooters").status_code == 200
+    (work_root,) = [p for p in Path(os.environ["SPLITSMITH_PROJECTS_DIR"]).rglob(MID) if p.is_dir()]
+    thumbs = work_root / "shooters" / SLUG / "thumbs"
     thumbs.mkdir(parents=True)
     key = "c72e2952421c98ff"
     (thumbs / f"{key}.jpg").write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 32)

@@ -75,15 +75,12 @@ def test_an_absolute_video_path_in_a_synced_doc_is_not_served(
 
 
 def test_a_parent_relative_video_path_is_not_served(signed_in: TestClient, tmp_path: Path) -> None:
-    import os
-
     outside = tmp_path / "outside"
     outside.mkdir()
     secret = outside / "clip.mp4"
     secret.write_bytes(SECRET)
-    shooter_root = Path(os.environ["SPLITSMITH_PROJECTS_DIR"]) / MID / "shooters" / SLUG
-    escaping = Path(os.path.relpath(secret, shooter_root))
-    assert ".." in escaping.parts
+    # Enough parents to reach / from any shooter root, then down to the file.
+    escaping = Path("../" * 40 + str(secret).lstrip("/"))
     stage = StageEntry(
         stage_number=1,
         stage_name="S1",

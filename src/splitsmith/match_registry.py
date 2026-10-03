@@ -47,8 +47,17 @@ class MatchRegistry:
     cache mutations need to be serialised).
     """
 
-    def __init__(self, *, miss_resolver: Callable[[str], Path | None] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        miss_resolver: Callable[[str], Path | None] | None = None,
+        remember_resolved: bool = True,
+    ) -> None:
         self._by_id: dict[str, Path] = {}
+        # ``False`` (the hosted worker): every resolve asks ``miss_resolver``
+        # and nothing is cached by bare id, because the same match id can
+        # belong to two accounts and each job resolves under its own tenant.
+        self._remember_resolved = remember_resolved
         self._lock = RLock()
         # Strategy used on a cache miss. ``None`` (local desktop / API
         # process) -> rescan the local recent-projects file. The hosted
@@ -124,6 +133,11 @@ class MatchRegistry:
         freshly-created match doesn't require a server restart. Raises
         :class:`MatchNotRegisteredError` if the id still doesn't resolve.
         """
+        if self._miss_resolver is not None and not self._remember_resolved:
+            fresh = self._miss_resolver(match_id)
+            if fresh is None:
+                raise MatchNotRegisteredError(match_id)
+            return Path(fresh).resolve()
         with self._lock:
             hit = self._by_id.get(match_id)
         if hit is not None:

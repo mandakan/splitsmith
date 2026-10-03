@@ -6371,6 +6371,21 @@ def _hosted_projects_root(user_id: str | None = None) -> Path:
     return root / "users" / user_id / "projects"
 
 
+def _hosted_match_work_root(user_id: str, match_id: str) -> Path:
+    """The container-side working folder for one account's match (hosted).
+
+    ``<SPLITSMITH_PROJECTS_DIR>/users/<user_id>/matches/<match_id>``. Keyed
+    by account as well as id: ``matches`` is unique per ``(user_id,
+    match_id)``, so two accounts can each own a match with the same id
+    (a desktop mirror's id comes from the desktop). The folder is a cache
+    of storage and the state store, rebuilt on demand.
+    """
+    if not match_model.is_valid_match_id(match_id):
+        raise ValueError(f"invalid match id: {match_id!r}")
+    root = Path(os.environ.get(SPLITSMITH_PROJECTS_DIR_ENV, "").strip() or SPLITSMITH_PROJECTS_DIR_DEFAULT)
+    return root / "users" / user_id / "matches" / match_id
+
+
 def _confined_target(target: Path, root: Path) -> Path:
     """Return ``target`` resolved, or 400 unless it lies strictly inside ``root``.
 
@@ -7026,9 +7041,6 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     # next sign-in) is a tracked follow-up.
 
     if worker:
-        worker_root = Path(
-            os.environ.get(SPLITSMITH_PROJECTS_DIR_ENV, "").strip() or SPLITSMITH_PROJECTS_DIR_DEFAULT
-        )
 
         def _resolve_match_for_worker(match_id: str) -> Path | None:
             """Map a queued ``match_id`` to a worker-local working root.
@@ -7044,16 +7056,18 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
             ``current_match_root`` points here.
             """
             store = state.matches_store
-            if store is None:
+            if store is None or not match_model.is_valid_match_id(match_id):
                 return None
             row = asyncio.run(store.get(match_id))
             if row is None:
                 return None
-            root = worker_root / match_id
+            root = _hosted_match_work_root(row.user_id, match_id)
             root.mkdir(parents=True, exist_ok=True)
             return root
 
-        state.matches = MatchRegistry(miss_resolver=_resolve_match_for_worker)
+        # Not remembered: the same match id can belong to two accounts, and
+        # each job resolves under its own tenant.
+        state.matches = MatchRegistry(miss_resolver=_resolve_match_for_worker, remember_resolved=False)
 
 
 def build_worker_state() -> AppState:
@@ -8303,6 +8317,16 @@ def create_app(
         # middleware runs. Local mode (no ``matches_store``) skips the check
         # -- one operator, nothing to isolate.
         owner_store = state.matches_store
+        if owner_store is not None and not match_model.is_valid_match_id(match_id):
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "detail": {
+                        "code": "match_not_found",
+                        "message": f"unknown match_id {match_id!r}",
+                    }
+                },
+            )
         if owner_store is not None:
             # Hosted: a match's authoritative state is Postgres (this row) +
             # S3 (its files). The in-memory ``MatchRegistry`` is process-local
@@ -8346,12 +8370,7 @@ def create_app(
             needed = required_capability(request.method, rest)
             if needed is not None and needed not in match_capabilities:
                 return JSONResponse(status_code=403, content={"detail": "read_only_mirror"})
-            work_root = (
-                Path(
-                    os.environ.get(SPLITSMITH_PROJECTS_DIR_ENV, "").strip() or SPLITSMITH_PROJECTS_DIR_DEFAULT
-                )
-                / match_id
-            )
+            work_root = _hosted_match_work_root(owner_row.user_id, match_id)
             work_root.mkdir(parents=True, exist_ok=True)
             state.matches.register(match_id, work_root)
             match_root = work_root.resolve()
