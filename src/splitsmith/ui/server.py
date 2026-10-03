@@ -13507,10 +13507,9 @@ def create_app(
           probes / thumbnails always populate -- the budget only gates the
           first-time work.
 
-        Local mode only: it browses the machine the server runs on.
+        Local mode only (``route_scope.LOCAL_ONLY_ROUTES``): it browses the
+        machine the server runs on.
         """
-        if _hosted_mode_active():
-            raise HTTPException(status_code=404, detail="not found")
         project = state.shooter_project(slug)
         target = Path(path).expanduser() if path else _default_start(project.last_scanned_dir)
         try:
@@ -13589,10 +13588,9 @@ def create_app(
         folder for a new project, not media to ingest.
 
         Hidden entries (dot-prefixed) and broken symlinks are skipped.
-        Permission errors surface as 403. Local mode only.
+        Permission errors surface as 403. Local mode only
+        (``route_scope.LOCAL_ONLY_ROUTES``).
         """
-        if _hosted_mode_active():
-            raise HTTPException(status_code=404, detail="not found")
         target = Path(path).expanduser() if path else _default_start(None)
         try:
             target = target.resolve(strict=True)
@@ -13637,8 +13635,6 @@ def create_app(
         enough metadata for the user to identify which clip is which.
         Local mode only, like the picker that calls it.
         """
-        if _hosted_mode_active():
-            raise HTTPException(status_code=404, detail="not found")
         project = state.shooter_project(slug)
         # StageVideo.path is project-relative for default projects, so resolve
         # via the project root rather than process CWD before strict-resolving.
@@ -13689,8 +13685,6 @@ def create_app(
         could escape the thumbs directory. Local mode only: the picker
         routes above are the only writers of this cache.
         """
-        if _hosted_mode_active():
-            raise HTTPException(status_code=404, detail="not found")
         if not cache_key.isalnum() or len(cache_key) > 32:
             raise HTTPException(status_code=400, detail="invalid thumbnail key")
         project = state.shooter_project(slug)
@@ -17689,6 +17683,13 @@ def create_app(
     from .exports_api import router as exports_router
 
     app.include_router(exports_router)
+
+    # Hosted mode serves none of the routes in route_scope.LOCAL_ONLY_ROUTES.
+    # Applied here, after every router above is included and before the SPA
+    # fallback, so the one table covers routes from every module.
+    from .route_scope import enforce_local_only
+
+    enforce_local_only(app)
 
     # ----------------------------------------------------------------------
     # Static asset serving (SPA)
