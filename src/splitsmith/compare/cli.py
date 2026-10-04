@@ -16,7 +16,7 @@ from ..overlay_theme import THEME_NAMES, ThemeName
 from . import emitter as emitter_mod
 from . import manifest as manifest_mod
 from . import mp4_grid, project_loader
-from .cards import CardOptions, title_cards
+from .cards import CardOptions, bundle_divisions, title_cards
 
 compare_app = typer.Typer(
     name="compare",
@@ -135,6 +135,11 @@ def export(
     title_page_duration: float = typer.Option(
         3.0, "--title-page-duration", help="Seconds the title page holds."
     ),
+    title_division: bool = typer.Option(
+        True,
+        "--title-division/--no-title-division",
+        help="List each shooter with their scoreboard division (e.g. 'Classic Major') on the title page.",
+    ),
     closing_card: bool = typer.Option(
         False, "--closing-card", help="Close the rendered grid with a generated card. --format mp4 only."
     ),
@@ -242,6 +247,7 @@ def export(
                 title_duration_seconds=title_duration,
                 title_page=title_page,
                 title_info=title_info,
+                title_division=title_division,
                 title_page_duration_seconds=title_page_duration,
                 closing_card=closing_card,
             ),
@@ -536,7 +542,9 @@ def _render_grid_mp4(
         console.print(f"[yellow]Note:[/] {message}")
 
     cards = cards or CardOptions()
-    title, closing = title_cards(match, cards) if match is not None else (None, None)
+    title, closing = (
+        title_cards(match, cards, divisions=bundle_divisions(bundles)) if match is not None else (None, None)
+    )
 
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=output.parent, prefix=".compare-grid-work-") as tmp:

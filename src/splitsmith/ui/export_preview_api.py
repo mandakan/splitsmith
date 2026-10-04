@@ -24,6 +24,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..division import competitor_division
 from ..export_preview import (
     PreviewCard,
     PreviewError,
@@ -52,6 +53,7 @@ class ExportPreviewRequest(BaseModel):
     stage_number: int
     width: int = Field(default=960, ge=160, le=1920)
     title_info: str | None = None
+    title_division: bool = True
     head_pad_seconds: float = Field(default=5.0, ge=0)
     tail_pad_seconds: float = Field(default=5.0, ge=0)
     #: The bundle name, as the match export's ``project_name``.
@@ -90,6 +92,7 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
         stage_number=req.stage_number,
         width=req.width,
         title_info=req.title_info,
+        title_division=competitor_division(project, root) if req.title_division else None,
         head_pad_seconds=req.head_pad_seconds,
         tail_pad_seconds=req.tail_pad_seconds,
         project_name=req.project_name,

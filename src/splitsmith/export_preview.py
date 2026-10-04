@@ -65,6 +65,9 @@ class PreviewSpec:
     stage_number: int
     width: int = 960
     title_info: str | None = None
+    #: The division line the title page would print, already resolved
+    #: (``None`` when the option is off or nothing is on record).
+    title_division: str | None = None
     head_pad_seconds: float = 5.0
     tail_pad_seconds: float = 5.0
     #: The bundle name the export would carry (``project_name`` on the
@@ -111,6 +114,7 @@ def preview_key(
             "stage": spec.stage_number,
             "width": spec.width,
             "title_info": spec.title_info,
+            "title_division": spec.title_division,
             "head": spec.head_pad_seconds,
             "tail": spec.tail_pad_seconds,
             "name": spec.project_name,
@@ -279,7 +283,9 @@ def render_preview(
     if spec.card == "frame":
         image = _compose_over(frame, None, spec, theme)
     elif spec.card in ("title", "closing"):
-        card = composition.MatchTitle(text=name, info=title_info_lines(project, extra=spec.title_info))
+        card = composition.MatchTitle(
+            text=name, info=title_info_lines(project, extra=spec.title_info, division=spec.title_division)
+        )
         image = build_card_still(card, rasterizer=rasterizer, backdrop=frame, **size)
     elif spec.card == "slate":
         slate = composition.TitleCard(

@@ -84,6 +84,7 @@ class ExportPresetBody(BaseModel):
     # Look
     title_page: bool = False
     title_page_seconds: float = 3.0
+    title_division: bool = True
     closing_card: bool = False
     stage_card_style: StageCardStyle = "none"
     stage_card_seconds: float = 1.5

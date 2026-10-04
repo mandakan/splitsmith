@@ -165,6 +165,10 @@ class MatchExportRequest(BaseModel):
     # surface an "ignored" anomaly.
     title_page: bool = False
     title_info: str | None = None
+    # The shooter's division as the scoreboard spells it ("Classic
+    # Major"), on its own line under the name. On by default; a shooter
+    # with no division on record simply gets no line.
+    title_division: bool = True
     title_page_duration_seconds: float = 3.0
     closing_card: bool = False
     # Issue #972. Hold each stage's summary (name, scoring, splits over
@@ -212,6 +216,10 @@ class CompareGridRequest(BaseModel):
     # ``lower-third`` over its head). All off by default.
     title_page: bool = False
     title_info: str | None = None
+    # The shooter's division as the scoreboard spells it ("Classic
+    # Major"), on its own line under the name. On by default; a shooter
+    # with no division on record simply gets no line.
+    title_division: bool = True
     title_page_duration_seconds: float = 3.0
     closing_card: bool = False
     stage_titles: Literal["none", "slate", "lower-third"] = "none"

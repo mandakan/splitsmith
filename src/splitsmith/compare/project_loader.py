@@ -82,11 +82,10 @@ class MissingTrim:
 class CompareShooterBundle:
     """A shooter's project + the per-stage bundles ready for export.
 
-    ``project`` is the legacy :class:`MatchProject` when this bundle came
-    from a single-shooter project; ``None`` when it came from a shooter
-    inside a merged :class:`splitsmith.match_model.Match`. The emitter
-    only reads ``label`` and ``stages_by_number``, so the optional field
-    is informational for callers that want to inspect it.
+    ``project`` is the shooter's :class:`MatchProject` as the loader read
+    it (or was handed it, hosted). ``None`` only on a bundle built by
+    hand. The emitter only reads ``label`` and ``stages_by_number``; the
+    overlay and the title page's division lines read the project.
     """
 
     label: str
@@ -388,7 +387,7 @@ def load_shooter_from_match(
     return CompareShooterBundle(
         label=label,
         project_root=shooter_root,
-        project=None,
+        project=project,
         stages_by_number=bundles,
         missing_trims=missing,
     )

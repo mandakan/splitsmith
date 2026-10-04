@@ -958,3 +958,38 @@ def test_the_inset_look_reaches_the_renderer_and_the_selector_the_loader(
     assert job["status"] == "succeeded", job
     assert captured["inset"] == mp4_grid_mod.GridInset(corner="top-left", scale=0.22)
     assert seen["inset"] == "head"
+
+
+def test_the_title_page_lists_each_shooters_division_unless_turned_off(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """On by default: one "Name · Division" line per tile under the date,
+    from each shooter's stored division. ``title_division: false`` leaves
+    the card as it was."""
+    from splitsmith.match_project import MatchProject
+
+    captured: list[dict[str, Any]] = []
+
+    def fake_render(shooters: Any, *, audio_label: str, output_path: Path, **kwargs: Any) -> Any:
+        captured.append(kwargs)
+        return _fake_render_grid_mp4(shooters, audio_label=audio_label, output_path=output_path)
+
+    monkeypatch.setattr(pl_mod.fcpxml_gen, "probe_video", _fake_probe)
+    monkeypatch.setattr(mp4_grid_mod, "render_grid_mp4", fake_render)
+    match_root = _seed_match(tmp_path, shooters=["mathias", "martin"], stage_numbers=[1])
+    for slug, division in (("mathias", "Production Optics"), ("martin", "Classic Major")):
+        _write_trims(match_root, slug=slug, stage_numbers=[1])
+        shooter_root = match_root / "shooters" / slug
+        project = MatchProject.load(shooter_root)
+        project.competitor_division = division
+        project.save(shooter_root)
+    client = _MatchClient(_match_create_app(project_root=match_root, project_name="Compare Match"))
+
+    body = {"stage_numbers": [1], "audio_from": "mathias", "title_page": True}
+    for extra in ({}, {"title_division": False}):
+        response = client.post("/api/match/compare-export", json={**body, **extra})
+        assert response.status_code == 200
+        assert _wait_for_job(client, response.json()["id"])["status"] == "succeeded"
+    with_division, without = captured[-2], captured[-1]
+    assert with_division["title_page"].info == ("Martin · Classic Major", "Mathias · Production Optics")
+    assert without["title_page"].info == ()

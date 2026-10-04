@@ -20,6 +20,7 @@ import { visibleSlots } from "./lookGallery";
 const ON: RenderOptions = {
   titlePage: true,
   titleInfo: "  Production Optics  ",
+  titleDivision: false,
   titlePageDurationSeconds: 4,
   closingCard: true,
   stageCardStyle: "slate",
@@ -43,6 +44,7 @@ describe("matchExportFields", () => {
       title_duration_seconds: 2,
       title_page: true,
       title_info: "Production Optics",
+      title_division: false,
       title_page_duration_seconds: 4,
       closing_card: true,
       summary_hold_seconds: 3,
@@ -56,12 +58,13 @@ describe("matchExportFields", () => {
     expect("summary_hold_seconds" in fields).toBe(false);
   });
 
-  it("defaults are every card off and the hold at zero", () => {
+  it("defaults are every card off, the division on and the hold at zero", () => {
     expect(matchExportFields(DEFAULT_RENDER_OPTIONS, "mp4")).toEqual({
       title_kind: "none",
       title_duration_seconds: 1.5,
       title_page: false,
       title_info: null,
+      title_division: true,
       title_page_duration_seconds: 3,
       closing_card: false,
       summary_hold_seconds: 0,
@@ -81,6 +84,7 @@ describe("gridExportFields", () => {
       title_duration_seconds: 2,
       title_page: true,
       title_info: "Production Optics",
+      title_division: false,
       title_page_duration_seconds: 4,
       closing_card: true,
     });

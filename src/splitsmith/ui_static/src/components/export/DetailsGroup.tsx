@@ -64,7 +64,7 @@ export function DetailsGroup({
         <Field
           label="Title line"
           htmlFor="export-title-info"
-          help="Under the match name on the title page and the closing card: division, level, anything."
+          help="Under the match name on the title page and the closing card: level, squad, anything."
         >
           <input
             id="export-title-info"
@@ -75,6 +75,23 @@ export function DetailsGroup({
             disabled={busy}
             onChange={(e) => patch({ renderOptions: { ...settings.renderOptions, titleInfo: e.target.value } })}
           />
+        </Field>
+      ) : null}
+      {titleCard ? (
+        <Field label="Division" help="As the scoreboard has it, power factor included: Classic Major.">
+          <label className="flex items-center gap-2 text-md text-ink-2">
+            <input
+              type="checkbox"
+              aria-label="Show division"
+              checked={settings.renderOptions.titleDivision}
+              disabled={busy}
+              onChange={(e) =>
+                patch({ renderOptions: { ...settings.renderOptions, titleDivision: e.target.checked } })
+              }
+              className="accent-[var(--color-ink)]"
+            />
+            {single ? "Under the shooter's name" : "Next to each shooter's name"}
+          </label>
         </Field>
       ) : null}
       {publishing ? (

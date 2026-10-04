@@ -26,6 +26,7 @@ const YOUTUBE: ExportPresetBody = {
   head_pad_seconds: 0.5,
   tail_pad_seconds: 1,
   title_page: true,
+  title_division: false,
   closing_card: true,
   stage_card_style: "slate",
   summary_hold_seconds: 3,
@@ -64,6 +65,16 @@ describe("settingsToBody / applyBody", () => {
     const stored = JSON.stringify(settingsToBody(s));
     expect(stored).not.toContain("Production Optics");
     expect(stored).not.toContain("2026-10-01");
+  });
+});
+
+describe("title_division", () => {
+  it("a body stored before the option shipped applies it on", () => {
+    const legacy: Partial<ExportPresetBody> = { ...YOUTUBE };
+    delete legacy.title_division;
+    const off = { ...DEFAULT_EXPORT_SETTINGS.renderOptions, titleDivision: false };
+    const applied = applyBody({ ...DEFAULT_EXPORT_SETTINGS, renderOptions: off }, legacy as ExportPresetBody);
+    expect(applied.renderOptions.titleDivision).toBe(true);
   });
 });
 

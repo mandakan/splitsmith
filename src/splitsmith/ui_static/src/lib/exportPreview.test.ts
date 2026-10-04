@@ -35,6 +35,7 @@ describe("previewBody", () => {
       stage_number: 3,
       width: 960,
       title_info: "Production Optics",
+      title_division: true,
       project_name: "Bromma - Final Cut",
       head_pad_seconds: 0.5,
       tail_pad_seconds: 1,

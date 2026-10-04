@@ -192,6 +192,7 @@ from ..config import (
     StageRounds,
 )
 from ..display_name import normalize_display_name
+from ..division import competitor_division
 from ..export_naming import slugify, stage_file_base
 from ..fixture_schema import (
     AgcState,
@@ -2981,9 +2982,11 @@ def _run_compare_grid(
                 title_duration_seconds=req.title_duration_seconds,
                 title_page=req.title_page,
                 title_info=req.title_info,
+                title_division=req.title_division,
                 title_page_duration_seconds=req.title_page_duration_seconds,
                 closing_card=req.closing_card,
             ),
+            divisions=compare_cards.bundle_divisions(filtered),
         )
         result = mp4_grid.render_grid_mp4(
             filtered,
@@ -4606,7 +4609,13 @@ def register_job_bodies(state: AppState) -> None:
                 description_lead=req.description_lead,
                 youtube_preset=req.youtube_preset,
                 title_page=req.title_page,
-                title_page_info=match_export_helpers.title_info_lines(proj, extra=req.title_info),
+                title_page_info=match_export_helpers.title_info_lines(
+                    proj,
+                    extra=req.title_info,
+                    division=(
+                        competitor_division(proj, state.shooter_root(slug)) if req.title_division else None
+                    ),
+                ),
                 title_page_duration_seconds=req.title_page_duration_seconds,
                 closing_card=req.closing_card,
                 overlay_theme=req.overlay_theme,
@@ -10845,6 +10854,7 @@ def create_app(
                 if picked is not None:
                     project.selected_shooter_id = picked.shooterId
                     project.competitor_name = picked.name
+                    project.competitor_division = picked.division
         project.save(root)
         return JSONResponse({**project.model_dump(mode="json"), "stage_times_merged": merged})
 
@@ -11061,6 +11071,7 @@ def create_app(
         # scoreboard summary doesn't have to re-fetch MatchData just to
         # render "pinned: Mathias Rinaldo" instead of an integer id.
         project.competitor_name = picked.name
+        project.competitor_division = picked.division
         project.save(root)
 
         merged = _fetch_and_merge_stage_times(root, project, ct, mid, req.competitor_id)
@@ -11134,6 +11145,7 @@ def create_app(
             try:
                 match_data = client.get_match(ct, mid)
                 project.merge_stage_rounds(match_data)
+                project.merge_competitor_division(match_data)
             except ScoreboardError:
                 pass
         merged = project.merge_stage_times(results)
