@@ -108,13 +108,20 @@ def _mark_desktop_origin(db_url: str, uid: str, match_id: str) -> None:
     asyncio.run(_flip())
 
 
+PICKER_TABLES = ("recent_projects", "state_docs", "matches")
+
+
 @pytest.fixture
 def select_counter():
-    """Count SELECT statements across every engine in the process while armed."""
+    """Count the picker's own SELECTs (its three tables) across every engine
+    in the process while armed. Filtering by table keeps auth lookups and
+    any stray background query out of the count, so the assertion is exact
+    rather than a slack-padded ceiling."""
     seen: list[str] = []
 
     def _record(conn, cursor, statement, parameters, context, executemany):  # noqa: ANN001
-        if statement.lstrip().upper().startswith("SELECT"):
+        head = statement.lstrip().upper()
+        if head.startswith("SELECT") and any(f"FROM {t}" in statement for t in PICKER_TABLES):
             seen.append(statement)
 
     event.listen(Engine, "before_cursor_execute", _record)
@@ -172,6 +179,22 @@ def test_detail_content_is_derived_from_the_batched_docs(
     assert charlie["shooter_names"] == ["Charlie shooter"]
 
 
+def test_origin_lookup_reads_only_the_recent_ids(
+    hosted_env: str, hosted_app: tuple[TestClient, _CapturingSender], select_counter: list[str]
+) -> None:
+    """The origins come from ``get_many`` over the recent ids, not ``list()``
+    over every match the user has."""
+    client, sender = hosted_app
+    login(client, sender, OWNER)
+    _create_match(client, "Alpha")
+    select_counter.clear()
+
+    _detail(client)
+
+    (matches_select,) = [s for s in select_counter if "FROM matches" in s]
+    assert "matches.match_id IN" in matches_select, matches_select
+
+
 def test_query_count_does_not_grow_with_the_number_of_matches(
     hosted_env: str, hosted_app: tuple[TestClient, _CapturingSender], select_counter: list[str]
 ) -> None:
@@ -193,7 +216,39 @@ def test_query_count_does_not_grow_with_the_number_of_matches(
     _detail(client)
     with_five = len(select_counter)
 
-    # Auth (session + user), the recent list, the docs, the match rows: a
-    # handful, and the same handful whatever the list holds.
-    assert with_three == with_five, (with_three, with_five, select_counter)
-    assert with_three <= 6, select_counter
+    # The recent list, the docs, the match rows: three, whatever the list holds.
+    assert with_three == with_five == 3, (with_three, with_five, select_counter)
+
+
+def test_two_recent_rows_for_one_match_each_keep_their_own_path_and_timestamp(
+    hosted_env: str, hosted_app: tuple[TestClient, _CapturingSender]
+) -> None:
+    """``recent_projects`` is unique per path, not per match: a legacy row
+    or a changed projects dir can leave two rows pointing at one match.
+    Each card is built from its own row (path, last_opened_at), as the
+    per-match enricher did; a batch keyed on match_id would hand both the
+    last row's."""
+    from datetime import UTC, datetime
+
+    from splitsmith.db import PostgresRecentProjectsStore
+
+    client, sender = hosted_app
+    login(client, sender, OWNER)
+    uid = _user_id(hosted_env, OWNER)
+    m1 = _create_match(client, "Alpha")
+    first_path = next(p for p in client.get("/api/me/recent-projects").json()["projects"])["path"]
+
+    store = PostgresRecentProjectsStore(sessionmaker(create_engine(hosted_env)), user_id=uid)
+    other_path = Path(first_path).parent.parent / "legacy-layout" / m1
+    asyncio.run(store.record_open(other_path, "Alpha (old path)", kind="match", match_id=m1))
+
+    cards = client.get("/api/me/recent-projects?detail=true").json()["projects"]
+    by_path = {c["path"]: c for c in cards}
+    assert set(by_path) == {first_path, str(other_path.resolve())}
+    for card in cards:
+        assert card["match_id"] == m1
+        assert card["kind"] == "match"
+    newer, older = by_path[str(other_path.resolve())], by_path[first_path]
+    assert datetime.fromisoformat(newer["last_opened_at"]).astimezone(UTC) > datetime.fromisoformat(
+        older["last_opened_at"]
+    ).astimezone(UTC)

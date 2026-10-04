@@ -6667,49 +6667,54 @@ def _enrich_recent_project(rp: user_config.RecentProject) -> RecentProjectDetail
 
 async def _hosted_picker_details(
     state: AppState, projects: list[user_config.RecentProject]
-) -> dict[str, RecentProjectDetail]:
-    """Hosted picker detail for every recent match, in two queries (#1179).
+) -> list[RecentProjectDetail | None]:
+    """Hosted picker detail for every recent row, in two queries (#1179).
 
     The recorded ``path`` is an ephemeral container working root a redeploy
     wipes, so the filesystem enricher reports the match as ``missing`` even
     though its state is safe in ``state_docs``. This loads every match's
     match / project / audit docs in one query
-    (:meth:`ProjectStateStore.load_docs_for_matches`) and every match row
-    in one more, then derives each card with :func:`_hosted_detail_from_docs`.
-    It used to be 3 + shooters round trips per match, in sequence -- 8.9 s
-    for one picker load on production.
+    (:meth:`ProjectStateStore.load_docs_for_matches`) and the recent ids'
+    match rows in one more (:meth:`PostgresMatchStore.get_many`), then
+    derives each card with :func:`_hosted_detail_from_docs`. It used to be
+    3 + shooters round trips per match, in sequence -- 8.9 s for one picker
+    load on production.
 
-    Returns ``match_id -> detail`` for the rows whose match doc exists; a
-    row that is missing (no stored ``match_id``, or a genuinely gone match)
-    is absent and the caller falls back to the filesystem enricher. Empty
-    in local mode (no state store).
+    Returns one entry per row of ``projects``, in order: the card, or
+    ``None`` where the row has no stored ``match_id`` or its match doc is
+    gone, which is the caller's cue to use the filesystem enricher. Per row,
+    not per match: ``recent_projects`` is unique on path, so two rows can
+    name one match and each card must carry its own path and timestamp.
+    All ``None`` in local mode (no state store).
     """
     if state.project_state is None:
-        return {}
+        return [None] * len(projects)
     match_ids = [rp.match_id for rp in projects if rp.match_id]
     if not match_ids:
-        return {}
+        return [None] * len(projects)
     docs = await state.project_state.load_docs_for_matches(match_ids)
     # ``matches_store`` is the tenant's authoritative registry of hosted vs.
     # mirrored ownership (#631 Task 6); a match doc with no row (which
     # shouldn't happen for a real hosted match) reads as "hosted" rather
-    # than being mislabelled a mirror.
-    origins: dict[str, str] = {}
+    # than being mislabelled a mirror. With no registry at all the card
+    # keeps its default origin, as the per-match path did.
+    origins: dict[str, str] | None = None
     if state.matches_store is not None:
-        origins = {row.match_id: row.origin for row in await state.matches_store.list()}
-    details: dict[str, RecentProjectDetail] = {}
+        origins = {row.match_id: row.origin for row in await state.matches_store.get_many(match_ids)}
+    details: list[RecentProjectDetail | None] = []
     for rp in projects:
-        if not rp.match_id:
+        bucket = docs[rp.match_id] if rp.match_id else None
+        if bucket is None or bucket.match is None:
+            details.append(None)
             continue
-        bucket = docs[rp.match_id]
-        if bucket.match is None:
-            continue
-        details[rp.match_id] = _hosted_detail_from_docs(
-            rp,
-            bucket.match,
-            origin=origins.get(rp.match_id, "hosted"),
-            project_docs=bucket.projects,
-            audit_docs=bucket.audits,
+        details.append(
+            _hosted_detail_from_docs(
+                rp,
+                bucket.match,
+                origin=None if origins is None else origins.get(rp.match_id, "hosted"),
+                project_docs=bucket.projects,
+                audit_docs=bucket.audits,
+            )
         )
     return details
 
@@ -6718,7 +6723,7 @@ def _hosted_detail_from_docs(
     rp: user_config.RecentProject,
     match_doc: dict,
     *,
-    origin: str,
+    origin: str | None,
     project_docs: dict[str, dict],
     audit_docs: dict[str, dict[int, dict]],
 ) -> RecentProjectDetail:
@@ -6728,7 +6733,8 @@ def _hosted_detail_from_docs(
     the batch loader above and any future caller derive the same card:
     counts from the match doc, names and footage from the project docs,
     the audited count averaged across shooters, ``next_step`` from the same
-    per-stage status walk as ``stages_audited``.
+    per-stage status walk as ``stages_audited``. ``origin=None`` leaves the
+    model's default in place (no match registry bound).
     """
     detail = RecentProjectDetail(
         path=rp.path,
@@ -6737,7 +6743,8 @@ def _hosted_detail_from_docs(
         kind="match",
     )
     detail.match_id = rp.match_id
-    detail.origin = origin
+    if origin is not None:
+        detail.origin = origin
     shooters = match_doc.get("shooters") or []
     detail.shooter_count = len(shooters)
     detail.stage_count = len(match_doc.get("stages") or [])
@@ -14600,8 +14607,8 @@ def create_app(
             # stored match_id / a genuinely-gone match).
             hosted = await _hosted_picker_details(state, projects)
             enriched = [
-                hosted[p.match_id] if p.match_id and p.match_id in hosted else _enrich_recent_project(p)
-                for p in projects
+                card if card is not None else _enrich_recent_project(p)
+                for p, card in zip(projects, hosted, strict=True)
             ]
             return JSONResponse({"projects": [p.model_dump(mode="json") for p in enriched]})
         return JSONResponse({"projects": [p.model_dump(mode="json") for p in projects]})

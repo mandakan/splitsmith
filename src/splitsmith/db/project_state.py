@@ -93,8 +93,9 @@ class ProjectStateStore:
     includes ``StateDocRow.user_id == self._user_id`` in its WHERE
     clause. The ``state_docs`` RLS policy enforces the same boundary at
     the DB layer; the per-method filter enforces it at the query layer.
-    Tests in ``test_project_state_store.py`` guard the invariant -- if you
-    add a method here, add an isolation test for it too.
+    Tests in ``test_project_state_store.py`` guard the invariant (and
+    ``test_project_state_batch.py`` for the batch loader) -- if you add a
+    method here, add an isolation test for it too.
 
     Each doc kind gets a thin public ``load_*`` / ``save_*`` wrapper over
     one private ``_load`` / ``_save`` keyed on ``doc_kind`` -- the wrappers
