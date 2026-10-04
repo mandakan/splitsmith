@@ -567,6 +567,15 @@ the SPA side the shell fetches the beep queue once per load and hands it
 down as ``beepQueue`` on the outlet context; the Overview reads it there
 and fetches triage once on mount (not again when the project arrives).
 
+The jobs poll (``GET /api/me/jobs``, every 5 s per open tab) carries only
+what the poll reads (#1182): hosted ``PostgresJobBackend.list`` returns
+every active job and every unacknowledged failure plus the
+``RECENT_FINISHED_RETAINED`` most recent others (never the account's whole
+history), and the route nulls ``result`` and ``timings`` on each entry. A
+job's result is read through ``GET /api/me/jobs/{id}`` (``pollJob``), so a
+new SPA surface that needs a result fetches the job, never the list;
+``tests/test_jobs_poll_payload.py`` pins both.
+
 ## State doc kinds and the sync allowlist
 
 Adding a ``doc_kind`` to ``state_docs`` is not a local change. The sync
