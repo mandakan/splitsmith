@@ -72,6 +72,7 @@ Design notes:
 from __future__ import annotations
 
 import asyncio
+import atexit
 import contextlib
 import functools
 import hashlib
@@ -7044,22 +7045,60 @@ def _build_device_client(
 #: second drain on (every job-thread ``run_sync`` on the NullPool fallback)
 #: and orphan the first drain's pool. One URL per process is the real case.
 _process_engines: dict[str, LoopEngines] = {}
+#: The ``LoopEngines`` the running process ``DbRunner`` adopted its loop into.
+_runner_engines: LoopEngines | None = None
+_runner_atexit_registered = False
 
 
-def _process_loop_engines(url: str) -> LoopEngines:
+def _stop_process_runner() -> None:
+    """``atexit``: stop the process ``DbRunner`` so its ``on_stop`` disposes
+    the runner loop's pool and each pooled connection closes with a Postgres
+    ``Terminate`` rather than an unexpected EOF (#1197). ``atexit`` runs after
+    the interpreter has joined the non-daemon threads (uvicorn's threadpool,
+    the job executor), so nothing is still using the runner."""
+    runner = get_runner()
+    if runner is not None:
+        install_runner(None)
+        runner.stop()
+
+
+def _process_loop_engines(url: str, *, application_name: str | None = None) -> LoopEngines:
     """The process's ``LoopEngines`` for ``url``, created on first use, with
-    the process ``DbRunner`` started (bound to it) when none is running."""
+    the process ``DbRunner`` started (bound to it) when none is running.
+
+    ``application_name`` applies when the engines are created; a later call
+    for the same URL reuses them whatever it passes."""
+    global _runner_engines, _runner_atexit_registered
     from ..db import LoopEngines
 
     engines = _process_engines.get(url)
+    created = engines is None
     if engines is None:
-        engines = LoopEngines(url)
+        engines = LoopEngines(url, application_name=application_name)
         _process_engines[url] = engines
     runner = get_runner()
     if runner is None or not runner.is_running:
-        runner = DbRunner(on_start=engines.adopt_current_loop, on_stop=engines.dispose_current_loop)
+        bound = engines
+        runner = DbRunner(
+            on_start=lambda: bound.adopt_current_loop("runner"), on_stop=bound.dispose_current_loop
+        )
         runner.start()
         install_runner(runner)
+        _runner_engines = engines
+        if not _runner_atexit_registered:
+            atexit.register(_stop_process_runner)
+            _runner_atexit_registered = True
+    elif created and _runner_engines is not None and _runner_engines is not engines:
+        # The runner loop stays adopted into the first URL's engines only, so
+        # every sync-path query for this one runs on the NullPool fallback
+        # while the boot line still says pooled (#1201). Drivers only: the
+        # URLs carry passwords.
+        logger.warning(
+            "a second database URL (driver=%s) reuses the DbRunner bound to another URL's "
+            "engines (driver=%s); its sync-path queries will not be pooled",
+            engines.driver,
+            _runner_engines.driver,
+        )
     return engines
 
 
@@ -7067,14 +7106,18 @@ def _reset_process_db_state() -> None:
     """Tests only: stop and uninstall the process ``DbRunner`` (its
     ``on_stop`` disposes the runner loop's engine) and forget the cached
     ``LoopEngines``, so no test inherits another's database state."""
+    global _runner_engines
     runner = get_runner()
     if runner is not None:
         install_runner(None)
         runner.stop()
     _process_engines.clear()
+    _runner_engines = None
 
 
-def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
+def _apply_hosted_mode_wiring(
+    state: AppState, *, worker: bool = False, process_name: str | None = None
+) -> None:
     """Wire AppState for hosted mode: a per-tenant store factory + the
     process-level resources it needs.
 
@@ -7170,11 +7213,14 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     # NullPool fallback. See ``splitsmith.db.engine.LoopEngines``.
     # The engines object is process-scoped, like the runner: see
     # ``_process_loop_engines`` for why a re-wiring must reuse it.
-    engines = _process_loop_engines(url)
+    # ``process_name`` is the connections' ``application_name`` prefix in
+    # ``pg_stat_activity`` (#1198); the self-hosted agent passes its own.
+    process_name = process_name or ("splitsmith-worker" if worker else "splitsmith-serve")
+    engines = _process_loop_engines(url, application_name=process_name)
     state.db_engines = engines
     # The scheme only (never the URL: it carries the password), so a URL
     # that silently lands on the NullPool fallback is visible in the log.
-    logger.info("hosted database: driver=%s pooled=%s", url.split("://", 1)[0], engines.pooled)
+    logger.info("hosted database: driver=%s pooled=%s", engines.driver, engines.pooled)
     session_factory = loop_sessionmaker(engines)
 
     # Auth resolves identity from ``users`` / ``sessions`` / ``magic_link_tokens``
@@ -7317,7 +7363,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     # ``TenantContext``. The deferrer routes per-user inside ``_defer``
     # (queue name from ``user_id``); the S3 client is stateless w.r.t. the
     # tenant (only the key prefix is per-user, see ``_tenant_s3_storage``).
-    deferrer = make_deferrer(url)
+    deferrer = make_deferrer(url, application_name=f"{process_name}-queue")
     # Operator-scoped worker registry over the RAW session factory (not a
     # tenant factory): one fleet shared by the operator, no user_id, no RLS.
     state.workers_store = WorkersStore(session_factory)
@@ -7477,7 +7523,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
         state.matches = MatchRegistry(miss_resolver=_resolve_match_for_worker, remember_resolved=False)
 
 
-def build_worker_state() -> AppState:
+def build_worker_state(*, process_name: str = "splitsmith-worker") -> AppState:
     """Build the hosted ``AppState`` a ``splitsmith worker`` runs jobs against.
 
     The headless counterpart to ``create_app``'s state wiring: no FastAPI
@@ -7491,7 +7537,7 @@ def build_worker_state() -> AppState:
     """
     state = AppState()
     state.compute = LocalComputeBackend(runtime_loader=lambda: _get_ensemble_runtime())
-    _apply_hosted_mode_wiring(state, worker=True)
+    _apply_hosted_mode_wiring(state, worker=True, process_name=process_name)
     register_job_bodies(state)
     return state
 

@@ -95,10 +95,25 @@ class LoopEngines:
     and suspends the compute; ``pool_pre_ping`` turns the closed
     connection into a silent reconnect on the next checkout. That is the
     scale-to-zero condition from the 2026-07-03 cost plan.
+
+    ``application_name`` (#1198) names every asyncpg connection in
+    ``pg_stat_activity``: the main loop's engine carries it as given, a
+    loop adopted with a ``label`` carries ``<name>-<label>`` (the hosted
+    wiring labels the ``DbRunner`` loop ``runner``), the fallback carries
+    ``<name>-unpooled``. Postgres truncates names past 63 bytes.
     """
 
-    def __init__(self, url: str, *, echo: bool = False, pool_size: int = 5, max_overflow: int = 10) -> None:
+    def __init__(
+        self,
+        url: str,
+        *,
+        echo: bool = False,
+        pool_size: int = 5,
+        max_overflow: int = 10,
+        application_name: str | None = None,
+    ) -> None:
         self._url = url
+        self._application_name = application_name
         self._echo = echo
         self._pool_size = pool_size
         self._max_overflow = max_overflow
@@ -114,17 +129,35 @@ class LoopEngines:
         return self._pooled
 
     @property
+    def driver(self) -> str:
+        """The URL's scheme (``postgresql+asyncpg``): loggable, unlike the URL,
+        which carries the password."""
+        return self._url.split("://", 1)[0]
+
+    @property
     def adopted_count(self) -> int:
         return len(self._by_loop)
 
+    def _connect_args(self, label: str | None) -> dict[str, Any]:
+        """asyncpg's startup ``application_name``; nothing for other drivers
+        (aiosqlite rejects ``server_settings``)."""
+        if not self._pooled or not self._application_name:
+            return {}
+        name = f"{self._application_name}-{label}" if label else self._application_name
+        return {"connect_args": {"server_settings": {"application_name": name}}}
+
     def _fallback_engine(self) -> AsyncEngine:
         if self._fallback is None:
-            self._fallback = create_async_engine(self._url, echo=self._echo, poolclass=NullPool)
+            self._fallback = create_async_engine(
+                self._url, echo=self._echo, poolclass=NullPool, **self._connect_args("unpooled")
+            )
         return self._fallback
 
-    def adopt_current_loop(self) -> AsyncEngine:
+    def adopt_current_loop(self, label: str | None = None) -> AsyncEngine:
         """Mark the running loop long-lived and return its pooled engine
         (created on first call). For a non-pooled URL this is the fallback.
+        ``label`` suffixes the engine's ``application_name``; it is read
+        only when the engine is created.
 
         Requires a running loop even for a non-pooled URL: a caller outside
         any loop is a misuse this must not paper over just because SQLite
@@ -142,6 +175,7 @@ class LoopEngines:
                 max_overflow=self._max_overflow,
                 pool_timeout=30,
                 pool_pre_ping=True,
+                **self._connect_args(label),
             )
             self._by_loop[loop] = engine
         return engine

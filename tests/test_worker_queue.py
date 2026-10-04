@@ -87,8 +87,10 @@ def test_run_worker_warms_ensemble_and_inits_sentry(monkeypatch: pytest.MonkeyPa
     # Stub the ui.server symbols run_worker imports lazily.
     server = types.ModuleType("splitsmith.ui.server")
 
-    def _build_worker_state() -> types.SimpleNamespace:
+    def _build_worker_state(**kwargs: object) -> types.SimpleNamespace:
         calls.append("build_worker_state")
+        # #1198: the worker names its connections.
+        assert kwargs == {"process_name": "splitsmith-worker"}
         # No per-loop engines to adopt (#1178).
         return types.SimpleNamespace(db_engines=None)
 
@@ -120,7 +122,7 @@ def test_run_worker_warms_ensemble_and_inits_sentry(monkeypatch: pytest.MonkeyPa
         async def run_worker_async(self, **_kwargs: object) -> None:
             calls.append("drain")
 
-    monkeypatch.setattr(queue_mod, "build_app", lambda _url: _FakeApp())
+    monkeypatch.setattr(queue_mod, "build_app", lambda _url, **_k: _FakeApp())
     monkeypatch.setattr(queue_mod, "register_compute_task", lambda _app, _state: None)
 
     asyncio.run(run_worker(_FAKE_PG_URL))
@@ -138,7 +140,7 @@ def test_run_worker_warmup_failure_is_non_fatal(monkeypatch: pytest.MonkeyPatch)
 
     calls: list[str] = []
     server = types.ModuleType("splitsmith.ui.server")
-    server.build_worker_state = lambda: types.SimpleNamespace(db_engines=None)  # type: ignore[attr-defined]
+    server.build_worker_state = lambda **_k: types.SimpleNamespace(db_engines=None)  # type: ignore[attr-defined]
     server._configure_app_logging = lambda: None  # type: ignore[attr-defined]
 
     def _warm_boom() -> None:
@@ -164,7 +166,7 @@ def test_run_worker_warmup_failure_is_non_fatal(monkeypatch: pytest.MonkeyPatch)
         async def run_worker_async(self, **_kwargs: object) -> None:
             calls.append("drain")
 
-    monkeypatch.setattr(queue_mod, "build_app", lambda _url: _FakeApp())
+    monkeypatch.setattr(queue_mod, "build_app", lambda _url, **_k: _FakeApp())
     monkeypatch.setattr(queue_mod, "register_compute_task", lambda _app, _state: None)
 
     asyncio.run(run_worker(_FAKE_PG_URL))
@@ -181,7 +183,7 @@ def test_run_worker_defaults_to_blocking_drain(monkeypatch: pytest.MonkeyPatch) 
     import types
 
     server = types.ModuleType("splitsmith.ui.server")
-    server.build_worker_state = lambda: types.SimpleNamespace(db_engines=None)  # type: ignore[attr-defined]
+    server.build_worker_state = lambda **_k: types.SimpleNamespace(db_engines=None)  # type: ignore[attr-defined]
     server._configure_app_logging = lambda: None  # type: ignore[attr-defined]
     server.warm_ensemble_runtime = lambda: None  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "splitsmith.ui.server", server)
@@ -205,7 +207,7 @@ def test_run_worker_defaults_to_blocking_drain(monkeypatch: pytest.MonkeyPatch) 
         async def run_worker_async(self, **kwargs: object) -> None:
             captured.update(kwargs)
 
-    monkeypatch.setattr(queue_mod, "build_app", lambda _url: _FakeApp())
+    monkeypatch.setattr(queue_mod, "build_app", lambda _url, **_k: _FakeApp())
     monkeypatch.setattr(queue_mod, "register_compute_task", lambda _app, _state: None)
 
     asyncio.run(run_worker(_FAKE_PG_URL))
@@ -224,7 +226,7 @@ def test_run_worker_one_shot_drains_and_exits(monkeypatch: pytest.MonkeyPatch) -
     import types
 
     server = types.ModuleType("splitsmith.ui.server")
-    server.build_worker_state = lambda: types.SimpleNamespace(db_engines=None)  # type: ignore[attr-defined]
+    server.build_worker_state = lambda **_k: types.SimpleNamespace(db_engines=None)  # type: ignore[attr-defined]
     server._configure_app_logging = lambda: None  # type: ignore[attr-defined]
     server.warm_ensemble_runtime = lambda: None  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "splitsmith.ui.server", server)
@@ -248,7 +250,7 @@ def test_run_worker_one_shot_drains_and_exits(monkeypatch: pytest.MonkeyPatch) -
         async def run_worker_async(self, **kwargs: object) -> None:
             captured.update(kwargs)
 
-    monkeypatch.setattr(queue_mod, "build_app", lambda _url: _FakeApp())
+    monkeypatch.setattr(queue_mod, "build_app", lambda _url, **_k: _FakeApp())
     monkeypatch.setattr(queue_mod, "register_compute_task", lambda _app, _state: None)
 
     asyncio.run(run_worker(_FAKE_PG_URL, wait=False))
@@ -296,7 +298,7 @@ def test_run_worker_retries_db_connect_then_drains(monkeypatch: pytest.MonkeyPat
     import psycopg_pool
 
     server = types.ModuleType("splitsmith.ui.server")
-    server.build_worker_state = lambda: types.SimpleNamespace(db_engines=None)  # type: ignore[attr-defined]
+    server.build_worker_state = lambda **_k: types.SimpleNamespace(db_engines=None)  # type: ignore[attr-defined]
     server._configure_app_logging = lambda: None  # type: ignore[attr-defined]
     server.warm_ensemble_runtime = lambda: None  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "splitsmith.ui.server", server)
@@ -326,7 +328,7 @@ def test_run_worker_retries_db_connect_then_drains(monkeypatch: pytest.MonkeyPat
 
     # A fresh App per attempt: _open_app_with_retry rebuilds because a
     # timed-out pool is left closed and will not re-open.
-    monkeypatch.setattr(queue_mod, "build_app", lambda _url: _FakeApp())
+    monkeypatch.setattr(queue_mod, "build_app", lambda _url, **_k: _FakeApp())
 
     async def _fast_sleep(delay: float) -> None:
         seen["sleeps"].append(delay)  # type: ignore[union-attr]
@@ -407,7 +409,7 @@ def _stub_worker_server(monkeypatch: pytest.MonkeyPatch, calls: list[str]) -> _S
 
     engines = _SpyEngines(calls)
     server = types.ModuleType("splitsmith.ui.server")
-    server.build_worker_state = lambda: types.SimpleNamespace(db_engines=engines)  # type: ignore[attr-defined]
+    server.build_worker_state = lambda **_k: types.SimpleNamespace(db_engines=engines)  # type: ignore[attr-defined]
     server._configure_app_logging = lambda: None  # type: ignore[attr-defined]
     server.warm_ensemble_runtime = lambda: None  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "splitsmith.ui.server", server)
@@ -438,7 +440,10 @@ def test_run_worker_adopts_its_loop_and_disposes_it_after_close(monkeypatch: pyt
         async def run_worker_async(self, **_kwargs: object) -> None:
             calls.append("drain")
 
-    async def _open(_url: str, _state: object) -> _FakeApp:
+    open_kwargs: list[dict[str, object]] = []
+
+    async def _open(_url: str, _state: object, **kwargs: object) -> _FakeApp:
+        open_kwargs.append(kwargs)
         return _FakeApp()
 
     monkeypatch.setattr(queue_mod, "_open_app_with_retry", _open)
@@ -453,6 +458,8 @@ def test_run_worker_adopts_its_loop_and_disposes_it_after_close(monkeypatch: pyt
 
     assert calls == ["adopt", "drain", "close", "dispose"]
     assert engines.loops == [worker_loops[0], worker_loops[0]]
+    # #1198: the queue pool is named after the process.
+    assert open_kwargs == [{"application_name": "splitsmith-worker-queue"}]
 
 
 def test_run_worker_disposes_its_engine_when_the_queue_open_fails(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -465,7 +472,7 @@ def test_run_worker_disposes_its_engine_when_the_queue_open_fails(monkeypatch: p
     calls: list[str] = []
     _stub_worker_server(monkeypatch, calls)
 
-    async def _open(_url: str, _state: object) -> object:
+    async def _open(_url: str, _state: object, **_k: object) -> object:
         raise OSError("pooler refused")
 
     monkeypatch.setattr(queue_mod, "_open_app_with_retry", _open)
@@ -474,3 +481,11 @@ def test_run_worker_disposes_its_engine_when_the_queue_open_fails(monkeypatch: p
         asyncio.run(run_worker(_FAKE_PG_URL))
 
     assert calls == ["adopt", "dispose"]
+
+
+def test_build_app_names_the_queue_connections() -> None:
+    """#1198: ``application_name`` reaches the psycopg pool's per-connection
+    kwargs, and an unnamed app sends none."""
+    named = build_app(_FAKE_PG_URL, application_name="splitsmith-worker-queue")
+    assert named.connector._pool_args["kwargs"] == {"application_name": "splitsmith-worker-queue"}
+    assert "kwargs" not in build_app(_FAKE_PG_URL).connector._pool_args

@@ -375,7 +375,9 @@ async def _run_worker_once(db_url: str, concurrency: int, *, stop_event: asyncio
     """
     from .queue import run_worker
 
-    await run_worker(db_url, concurrency=concurrency, wait=False, stop_event=stop_event)
+    await run_worker(
+        db_url, concurrency=concurrency, wait=False, stop_event=stop_event, process_name="splitsmith-agent"
+    )
 
 
 def _prepare_cache_env(state_dir: Path) -> None:

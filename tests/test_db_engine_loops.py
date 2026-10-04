@@ -182,6 +182,40 @@ def test_dead_loop_entry_is_dropped(recorder: list[_FakeEngine]) -> None:
     assert engines.adopted_count == 0
 
 
+def test_application_name_per_engine(recorder: list[_FakeEngine]) -> None:
+    """#1198: the main loop's engine carries the name as given, a labelled
+    loop ``<name>-<label>``, the fallback ``<name>-unpooled``."""
+    engines = LoopEngines(PG_URL, application_name="splitsmith-serve")
+
+    def _name(engine: Any) -> str:
+        return engine.kwargs["connect_args"]["server_settings"]["application_name"]
+
+    async def _main() -> Any:
+        return engines.adopt_current_loop()
+
+    async def _runner() -> Any:
+        return engines.adopt_current_loop("runner")
+
+    async def _other() -> Any:
+        return engines.for_current_loop()
+
+    assert _name(asyncio.run(_main())) == "splitsmith-serve"
+    assert _name(asyncio.run(_runner())) == "splitsmith-serve-runner"
+    assert _name(asyncio.run(_other())) == "splitsmith-serve-unpooled"
+
+
+def test_no_application_name_for_sqlite_or_when_unnamed(recorder: list[_FakeEngine]) -> None:
+    """aiosqlite rejects ``server_settings``; an unnamed LoopEngines sends nothing."""
+
+    async def _adopt(engines: LoopEngines) -> Any:
+        return engines.adopt_current_loop("runner")
+
+    sqlite = asyncio.run(_adopt(LoopEngines("sqlite+aiosqlite:///:memory:", application_name="x")))
+    unnamed = asyncio.run(_adopt(LoopEngines(PG_URL)))
+    assert "connect_args" not in sqlite.kwargs
+    assert "connect_args" not in unnamed.kwargs
+
+
 def test_pooled_kwargs_are_accepted_by_the_real_asyncpg_dialect() -> None:
     """Construct-only smoke test against the real dialect (no recorder, no
     connection attempt): confirms the pooled kwargs and the URL's query
@@ -191,8 +225,8 @@ def test_pooled_kwargs_are_accepted_by_the_real_asyncpg_dialect() -> None:
     pytest.importorskip("asyncpg")
 
     async def _construct_and_dispose() -> None:
-        engines = LoopEngines(PG_URL)
-        engine = engines.adopt_current_loop()
+        engines = LoopEngines(PG_URL, application_name="splitsmith-serve")
+        engine = engines.adopt_current_loop("runner")
         await engine.dispose()
 
     asyncio.run(_construct_and_dispose())
