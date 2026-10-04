@@ -339,7 +339,9 @@ export function MobileAudit() {
     // being loaded at all, since there is no defensible kind to seek into
     // before that - the seek-into-nothing case.
     if (!primaryVideo || !peaksResult) return null;
-    return api.videoStreamUrl(slug, primaryVideo.path, peaksResult.trimmed ? "trim" : "auto");
+    return peaksResult.trimmed
+      ? api.videoStreamUrl(slug, primaryVideo.path, "trim", primaryVideo.trim_version)
+      : api.videoStreamUrl(slug, primaryVideo.path, "auto");
   }, [primaryVideo, peaksResult, slug]);
 
   const handleShowVideo = useCallback(() => {

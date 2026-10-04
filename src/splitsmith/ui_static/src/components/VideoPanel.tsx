@@ -485,9 +485,9 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
                 onCanPlay={() => setStatus("ready")}
                 onPlaying={() => setStatus("ready")}
                 onSeeked={() => setStatus("ready")}
-                onWaiting={() => setStatus("buffering")}
-                onSeeking={() => setStatus("buffering")}
-                onStalled={() => setStatus("buffering")}
+                onWaiting={() => setStatus(bufferingUnlessErrored)}
+                onSeeking={() => setStatus(bufferingUnlessErrored)}
+                onStalled={() => setStatus(bufferingUnlessErrored)}
                 onTimeUpdate={onPrimaryTimeUpdate}
                 onError={(e) => {
                   setStatus("error");
@@ -544,6 +544,13 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
     );
   },
 );
+
+/** A seek on an errored element still fires ``seeking``; without this the
+ *  error overlay flips back to an endless "Buffering..." spinner. Only a
+ *  new ``src`` (``loadstart``) clears the error. */
+function bufferingUnlessErrored(status: LoadStatus): LoadStatus {
+  return status === "error" ? status : "buffering";
+}
 
 function basename(p: string): string {
   const idx = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"));

@@ -69,6 +69,7 @@ const projectWithVideo = () => ({
           role: "primary",
           path: "raw/stage3.mp4",
           processed: { beep: true, shot_detect: false, trim: false },
+          trim_version: "18f2a-3e8",
         },
       ],
     },
@@ -258,7 +259,8 @@ describe("MobileAudit", () => {
     renderPage();
     await waitFor(() => expect(screen.getByTestId("wrapped-waveform")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "Video" }));
-    expect(apiMock.videoStreamUrl).toHaveBeenCalledWith("alice", "raw/stage3.mp4", "trim");
+    // The trim's version rides along so a re-cut trim is a new URL.
+    expect(apiMock.videoStreamUrl).toHaveBeenCalledWith("alice", "raw/stage3.mp4", "trim", "18f2a-3e8");
     ctx.value = { ...ctx.value, project: null };
   });
 

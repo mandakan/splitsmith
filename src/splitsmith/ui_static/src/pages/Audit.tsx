@@ -1606,10 +1606,19 @@ export function Audit() {
   // thing because the trim can't exist without a beep.
   // proxy_ready === false means the proxy object is not in storage yet;
   // VideoPanel renders an explicit placeholder rather than a broken player.
+  // A pinned trim carries its trim_version: a re-cut (beep confirmed on
+  // the phone, another window) deletes the trim while it encodes, a seek
+  // in that window errors the player, and only a new URL - picked up when
+  // the job ends and the project reloads - remounts it.
   const videoSrc =
     activeVideo && servedPlan
       ? peaks
-        ? api.videoStreamUrl(slug, activeVideo.path, servedPlan.kind)
+        ? api.videoStreamUrl(
+            slug,
+            activeVideo.path,
+            servedPlan.kind,
+            servedPlan.kind === "trim" ? activeVideo.trim_version : null,
+          )
         : peaksError != null
           ? api.videoStreamUrl(slug, activeVideo.path)
           : ""
