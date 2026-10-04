@@ -1037,6 +1037,7 @@ export interface ExportPresetBody {
   transition_seconds: number;
   title_page: boolean;
   title_page_seconds: number;
+  title_division: boolean;
   closing_card: boolean;
   stage_card_style: "none" | "slate" | "lower-third";
   stage_card_seconds: number;
@@ -1070,6 +1071,7 @@ export interface ExportPreviewBody {
   stage_number: number;
   width?: number;
   title_info?: string | null;
+  title_division?: boolean;
   head_pad_seconds?: number;
   tail_pad_seconds?: number;
   /** The bundle name, as the match export's ``project_name``. */
@@ -1209,6 +1211,9 @@ export interface MatchExportRequestPayload {
    *  line). Other renderers surface an "ignored" anomaly. */
   title_page?: boolean;
   title_info?: string | null;
+  /** The shooter's scoreboard division ("Classic Major") on its own
+   *  line under the name. Server default on. */
+  title_division?: boolean;
   /** Seconds the title page (and the closing card) holds for. Server
    *  default 3.0. */
   title_page_duration_seconds?: number;
@@ -1284,6 +1289,8 @@ export interface CompareGridRequestPayload {
    *  All off by default. */
   title_page?: boolean;
   title_info?: string | null;
+  /** One "Name · Division" line per shooter. Server default on. */
+  title_division?: boolean;
   title_page_duration_seconds?: number;
   closing_card?: boolean;
   stage_titles?: "none" | "slate" | "lower-third";

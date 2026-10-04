@@ -161,8 +161,7 @@ class CachingScoreboardClient:
         return removed
 
     def _match_cache_path(self, content_type: int, match_id: int) -> Path:
-        params = {"content_type": content_type, "match_id": match_id}
-        return self._cache_dir / f"match_{_param_hash('match', params)}.json"
+        return _match_cache_file(self._cache_dir, content_type, match_id)
 
     def _stage_times_cache_path(self, content_type: int, match_id: int, competitor_id: int) -> Path:
         # Keep the match prefix unhashed so ``invalidate_match_stage_times``
@@ -180,6 +179,26 @@ class CachingScoreboardClient:
         if envelope is None:
             return default
         return bool(envelope.get("in_progress", default))
+
+
+def read_cached_match(project_dir: Path, content_type: int, match_id: int) -> MatchData | None:
+    """The match as the project's cache last stored it, or ``None``. Never
+    the network, and an in-progress entry counts: a caller after a fact
+    that does not change mid-match (a competitor's division) wants
+    whatever is on disk rather than a fetch."""
+    cache_dir = project_dir / SCOREBOARD_DIRNAME / CACHE_DIRNAME
+    envelope = _read_envelope(_match_cache_file(cache_dir, content_type, match_id))
+    if envelope is None:
+        return None
+    try:
+        return MatchData.model_validate(envelope["data"])
+    except (KeyError, ValueError):
+        return None
+
+
+def _match_cache_file(cache_dir: Path, content_type: int, match_id: int) -> Path:
+    params = {"content_type": content_type, "match_id": match_id}
+    return cache_dir / f"match_{_param_hash('match', params)}.json"
 
 
 def _match_prefix(content_type: int, match_id: int) -> str:

@@ -32,6 +32,7 @@ from rich.table import Table
 
 from . import camera_select, match_model, match_trims, user_config
 from .config import Config
+from .division import competitor_division
 from .match_model import (
     MATCH_FILE,
     Match,
@@ -445,6 +446,11 @@ def export(
     title_page_duration: float = typer.Option(
         3.0, "--title-page-duration", help="Seconds the title page holds."
     ),
+    title_division: bool = typer.Option(
+        True,
+        "--title-division/--no-title-division",
+        help="Print the shooter's scoreboard division (e.g. 'Classic Major') on the title page.",
+    ),
     closing_card: bool = typer.Option(
         False, "--closing-card", help="Close with a generated card (mp4 only)."
     ),
@@ -635,7 +641,11 @@ def export(
         youtube_sidecar=youtube_sidecar,
         description_lead=description_lead,
         title_page=title_page,
-        title_page_info=match_exports.title_info_lines(project, extra=title_info),
+        title_page_info=match_exports.title_info_lines(
+            project,
+            extra=title_info,
+            division=competitor_division(project, shooter_root) if title_division else None,
+        ),
         title_page_duration_seconds=title_page_duration,
         closing_card=closing_card,
         overlay_theme=overlay_theme,  # type: ignore[arg-type]

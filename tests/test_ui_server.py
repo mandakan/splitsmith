@@ -10167,3 +10167,71 @@ def test_match_export_default_main_camera_is_the_shooters_saved_one(
     assert isinstance(request, match_exports_mod.MatchExportRequestData)
     assert request.main_camera == "hand"
     assert (request.inset_camera, request.inset_corner, request.inset_size) == ("head", "top-left", "large")
+
+
+def _combined_divisions() -> tuple[dict, dict[int, str]]:
+    import json as _json
+
+    combined = _json.loads(
+        (_SCOREBOARD_FIXTURES_DIR / "match_22_27190_with_stages.json").read_text(encoding="utf-8")
+    )
+    return combined, {c["id"]: c["division"] for c in combined["competitors"]}
+
+
+def test_scoreboard_auto_pin_stores_the_competitors_division(tmp_path: Path) -> None:
+    """The division as SSI spells it is what the title page prints; the
+    auto-pin of a combined upload stores it with the pin."""
+    combined, divisions = _combined_divisions()
+    client = _MatchClient(_match_create_app(project_root=tmp_path / "match", project_name="x"))
+    body = client.post("/api/shooters/me/scoreboard/upload", json={"data": combined}).json()
+    assert body["competitor_division"] == divisions[body["selected_competitor_id"]]
+
+
+def test_scoreboard_select_shooter_stores_the_competitors_division(tmp_path: Path) -> None:
+    """A manual pin stores the division too, even when stage times are
+    unavailable offline: the pin persists, and its division with it."""
+    from splitsmith.match_project import MatchProject
+
+    _combined, divisions = _combined_divisions()
+    project_root = tmp_path / "match"
+    client = _MatchClient(_match_create_app(project_root=project_root, project_name="x"))
+    client.post("/api/shooters/me/scoreboard/upload", json={"data": _load_v1_match_fixture()})
+    client.post(
+        "/api/shooters/me/scoreboard/select-shooter",
+        json={"shooter_id": 40821, "competitor_id": 727562},
+    )
+    assert MatchProject.load(project_root / "shooters" / "me").competitor_division == divisions[727562]
+
+
+def test_match_export_title_page_carries_the_division_unless_turned_off(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """On by default, the shooter's division is its own line on the title
+    page, right under the name; ``title_division: false`` drops it."""
+    from splitsmith.ui import match_exports as match_exports_mod
+
+    client, root = _seed_match_export_project(tmp_path)
+    _stub_match_export_probe(monkeypatch)
+    project_root = next((root / "shooters").iterdir())
+    project = MatchProject.load(project_root)
+    project.competitor_name = "Martin Engström"
+    project.competitor_division = "Classic Major"
+    project.save(project_root)
+    seen: list[match_exports_mod.MatchExportRequestData] = []
+    real = match_exports_mod.export_match
+
+    def capture(*args: object, **kwargs: object) -> object:
+        seen.append(kwargs["request"])  # type: ignore[arg-type]
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(match_exports_mod, "export_match", capture)
+    for extra in ({}, {"title_division": False}):
+        resp = client.post(
+            "/api/shooters/me/export/match",
+            json={"stage_numbers": [1], "include_overlay": False, "title_page": True, **extra},
+        )
+        assert resp.status_code == 200, resp.text
+        assert _wait_for_job(client, resp.json()["id"])["status"] == "succeeded"
+    on, off = (r.title_page_info for r in seen)
+    assert on[on.index("Martin Engström") + 1] == "Classic Major"
+    assert "Classic Major" not in off

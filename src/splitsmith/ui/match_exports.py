@@ -236,16 +236,22 @@ def stage_inputs_for_project(
     return inputs
 
 
-def title_info_lines(project: MatchProject, *, extra: str | None = None) -> tuple[str, ...]:
+def title_info_lines(
+    project: MatchProject, *, extra: str | None = None, division: str | None = None
+) -> tuple[str, ...]:
     """The info lines under the match name on a generated title page
-    (issue #973): the match date, the shooter, then the caller's free
-    text. Only what the project actually carries; a blank line is never
-    printed."""
+    (issue #973): the match date, the shooter, the shooter's division,
+    then the caller's free text. Only what the project actually carries;
+    a blank line is never printed. ``division`` is the caller's to pass
+    (:func:`splitsmith.division.competitor_division`, or ``None`` when the title page should
+    not show it)."""
     lines: list[str] = []
     if project.match_date is not None:
         lines.append(project.match_date.isoformat())
     if project.competitor_name:
         lines.append(project.competitor_name)
+    if division and division.strip():
+        lines.append(division.strip())
     if extra and extra.strip():
         lines.append(extra.strip())
     return tuple(lines)

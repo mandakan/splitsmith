@@ -50,6 +50,7 @@ export function previewBody(
     stage_number: stageNumber,
     width: PREVIEW_WIDTH,
     title_info: settings.renderOptions.titleInfo.trim() || null,
+    title_division: settings.renderOptions.titleDivision,
     project_name: projectName.trim() || null,
   };
   // The timeline pads with the form's values; the grid and the trims

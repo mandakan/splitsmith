@@ -934,6 +934,12 @@ class MatchProject(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     competitor_name: str | None = None
+    # The pinned competitor's division exactly as the scoreboard spells
+    # it ("Classic Major", "Production Optics"): SSI carries the power
+    # factor in the name wherever a division allows both, so this is what
+    # a title page prints. Filled by :meth:`merge_competitor_division` on
+    # every pick and stage-times refresh; ``None`` without a scoreboard.
+    competitor_division: str | None = None
     scoreboard_match_id: str | None = None
     # SSI ``content_type`` tier for the linked match (matches the integer the
     # ``ScoreboardClient`` Protocol expects). Populated when the project is
@@ -1780,6 +1786,7 @@ class MatchProject(BaseModel):
             match_meta.get("id") or match_meta.get("match_id") or self.scoreboard_match_id
         )
         self.competitor_name = primary_competitor.get("name")
+        self.competitor_division = primary_competitor.get("division") or self.competitor_division
 
         # Overlay path: snapshot existing placeholders' videos by stage_number
         # so we can replant them into the matching scoreboard stage. If
@@ -1905,6 +1912,24 @@ class MatchProject(BaseModel):
             for v in videos:
                 v.role = "secondary"
                 self.unassigned_videos.append(v)
+
+    def merge_competitor_division(self, match_data: Any) -> bool:
+        """Record the pinned competitor's division from a parsed
+        ``MatchData``. Returns whether it changed. A competitor the match
+        does not list leaves the stored value alone; a listed one always
+        wins, so re-pinning someone else never keeps the old division.
+        """
+        from splitsmith.ui.scoreboard.models import MatchData
+
+        if self.selected_competitor_id is None:
+            return False
+        if not isinstance(match_data, MatchData):
+            match_data = MatchData.model_validate(match_data)
+        picked = next((c for c in match_data.competitors if c.id == self.selected_competitor_id), None)
+        if picked is None or picked.division == self.competitor_division:
+            return False
+        self.competitor_division = picked.division
+        return True
 
     def merge_stage_rounds(self, match_data: Any) -> int:
         """Backfill ``stage_rounds`` from a parsed ``MatchData`` without

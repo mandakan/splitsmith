@@ -157,3 +157,32 @@ def test_a_saturated_renderer_is_429_and_launches_nothing(client, monkeypatch: p
     assert _StubRasterizer.launches == 1
     for _ in range(render_bound.RENDER_CONCURRENCY):
         assert slots.acquire(timeout=0.01)
+
+
+def test_the_title_preview_carries_the_division_unless_turned_off(
+    client, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from splitsmith.match_project import MatchProject
+
+    shooter_root = tmp_path / "match" / "shooters" / "me"
+    project = MatchProject.load(shooter_root)
+    project.competitor_division = "Classic Major"
+    project.save(shooter_root)
+    pages: list[str] = []
+
+    class _Capture(_StubRasterizer):
+        def png(self, html: str, *, width: int, height: int) -> bytes:
+            pages.append(html)
+            return super().png(html, width=width, height=height)
+
+    @contextmanager
+    def _capture_factory():
+        yield _Capture()
+
+    monkeypatch.setattr(export_preview_api, "rasterizer_factory", _capture_factory)
+    body = {"card": "title", "stage_number": 1, "width": 480}
+    assert client.post(ROUTE, json=body).status_code == 200
+    assert client.post(ROUTE, json={**body, "title_division": False}).status_code == 200
+    assert len(pages) == 2, "the option must move the cache key"
+    assert "Classic Major" in pages[0]
+    assert "Classic Major" not in pages[1]

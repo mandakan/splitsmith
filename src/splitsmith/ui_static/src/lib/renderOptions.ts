@@ -22,8 +22,11 @@ export type OutputFormat = NonNullable<MatchExportRequestPayload["output_format"
 export interface RenderOptions {
   /** Open with the match title card. */
   titlePage: boolean;
-  /** Free-text line under the match name (division, level, ...). */
+  /** Free-text line under the match name (level, squad, ...). */
   titleInfo: string;
+  /** The shooter's scoreboard division under the name ("Classic Major");
+   *  on the grid, one "Name · Division" line per shooter. */
+  titleDivision: boolean;
   /** Seconds the title page and the closing card hold for. */
   titlePageDurationSeconds: number;
   /** Close with a card that repeats the title page. */
@@ -40,6 +43,7 @@ export interface RenderOptions {
 export const DEFAULT_RENDER_OPTIONS: RenderOptions = {
   titlePage: false,
   titleInfo: "",
+  titleDivision: true,
   titlePageDurationSeconds: 3,
   closingCard: false,
   stageCardStyle: "none",
@@ -88,7 +92,12 @@ export type MatchExportCardFields = Pick<
   Partial<
     Pick<
       MatchExportRequestPayload,
-      "title_page" | "title_info" | "title_page_duration_seconds" | "closing_card" | "summary_hold_seconds"
+      "title_page"
+      | "title_info"
+      | "title_division"
+      | "title_page_duration_seconds"
+      | "closing_card"
+      | "summary_hold_seconds"
     >
   >;
 
@@ -109,6 +118,7 @@ export function matchExportFields(
     ...fields,
     title_page: options.titlePage,
     title_info: options.titleInfo.trim() || null,
+    title_division: options.titleDivision,
     title_page_duration_seconds: clampSeconds(options.titlePageDurationSeconds, MIN_CARD_SECONDS),
     closing_card: options.closingCard,
     summary_hold_seconds: clampSeconds(options.summaryHoldSeconds, 0),
@@ -125,6 +135,7 @@ export function gridExportFields(
   | "title_duration_seconds"
   | "title_page"
   | "title_info"
+  | "title_division"
   | "title_page_duration_seconds"
   | "closing_card"
 > {
@@ -133,6 +144,7 @@ export function gridExportFields(
     title_duration_seconds: clampSeconds(options.stageCardDurationSeconds, MIN_CARD_SECONDS),
     title_page: options.titlePage,
     title_info: options.titleInfo.trim() || null,
+    title_division: options.titleDivision,
     title_page_duration_seconds: clampSeconds(options.titlePageDurationSeconds, MIN_CARD_SECONDS),
     closing_card: options.closingCard,
   };
