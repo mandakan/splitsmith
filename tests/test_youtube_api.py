@@ -333,7 +333,9 @@ def test_match_export_chains_an_upload_job(export_client, monkeypatch: pytest.Mo
     assert uploads[0]["status"] == "succeeded", uploads[0]
     assert seen["privacy"] == "private" and seen["again"] is True
     assert seen["mp4"].name.endswith(".mp4")
-    assert uploads[0]["result"]["url"] == "https://youtu.be/chained"
+    # The poll list carries no results (#1182); a job's result is read by id.
+    upload = client.get(f"/api/me/jobs/{uploads[0]['id']}").json()
+    assert upload["result"]["url"] == "https://youtu.be/chained"
 
 
 def test_match_export_without_the_flag_chains_nothing(export_client, monkeypatch: pytest.MonkeyPatch) -> None:

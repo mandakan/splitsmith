@@ -66,14 +66,17 @@ def _seed_rows(sf, user_id: str, rows: list[dict]) -> None:
 def test_list_keeps_active_and_unacknowledged_failures_and_only_the_recent_rest() -> None:
     sf, uid = _engine_with_user()
     backend = PostgresJobBackend(sf, user_id=uid, deferrer=_noop_deferrer(), sweep_on_boot=False)
-    old_done = [{"id": f"old-{i:03d}", "status": "succeeded"} for i in range(60)]
+    # Ids sort against creation order on purpose (the earliest row has the
+    # highest id), so an ORDER BY id -- or no ORDER BY -- fails the order
+    # assertion instead of passing by coincidence.
+    old_done = [{"id": f"old-{59 - i:03d}", "status": "succeeded"} for i in range(60)]
     rows = [
-        {"id": "ancient-failed-unacked", "status": "failed", "acknowledged": False},
-        {"id": "ancient-failed-acked", "status": "failed", "acknowledged": True},
-        {"id": "ancient-cancelled", "status": "cancelled"},
+        {"id": "zz-failed-unacked", "status": "failed", "acknowledged": False},
+        {"id": "zz-failed-acked", "status": "failed", "acknowledged": True},
+        {"id": "zz-cancelled", "status": "cancelled"},
         *old_done,
-        {"id": "pending-now", "status": "pending"},
-        {"id": "running-now", "status": "running"},
+        {"id": "ab-pending-now", "status": "pending"},
+        {"id": "aa-running-now", "status": "running"},
     ]
     _seed_rows(sf, uid, rows)
 
@@ -81,14 +84,15 @@ def test_list_keeps_active_and_unacknowledged_failures_and_only_the_recent_rest(
     ids = [j.id for j in listed]
 
     # Active jobs and unacknowledged failures are always there, however old.
-    assert {"pending-now", "running-now", "ancient-failed-unacked"} <= set(ids)
-    # The rest is capped to the most recent RECENT_FINISHED_RETAINED.
+    assert {"ab-pending-now", "aa-running-now", "zz-failed-unacked"} <= set(ids)
+    # The rest is capped to the most recently created RECENT_FINISHED_RETAINED.
     recent = [j.id for j in listed if j.id.startswith("old-")]
-    assert recent == [f"old-{i:03d}" for i in range(60 - RECENT_FINISHED_RETAINED, 60)]
-    assert "ancient-failed-acked" not in ids
-    assert "ancient-cancelled" not in ids
-    # Same order the SPA has always seen: by created_at.
-    assert ids == sorted(ids, key=lambda i: rows.index(next(r for r in rows if r["id"] == i)))
+    assert recent == [f"old-{59 - i:03d}" for i in range(60 - RECENT_FINISHED_RETAINED, 60)]
+    assert "zz-failed-acked" not in ids
+    assert "zz-cancelled" not in ids
+    # Same order the SPA has always seen: by created_at, oldest first.
+    creation_order = [r["id"] for r in rows]
+    assert ids == [i for i in creation_order if i in set(ids)]
 
 
 def test_list_returns_everything_when_under_the_cap() -> None:

@@ -97,9 +97,11 @@ _ROW_TO_JOB_FIELDS = (
 
 #: How many finished jobs beyond the active and unacknowledged-failed set
 #: :meth:`PostgresJobBackend.list` returns (#1182). The SPA's poll reads
-#: active jobs and unacknowledged failures from the list and nothing else;
-#: this margin exists so a future "recent history" surface finds something,
-#: and mirrors the local :class:`JobRegistry`'s retention in spirit.
+#: active jobs and unacknowledged failures from the list for everything it
+#: shows, plus a short tail of terminal rows: the progress strip's "done"
+#: count and the SyncCard's wait for its own job to turn terminal. Twenty
+#: covers both and mirrors the local :class:`JobRegistry`'s retention in
+#: spirit; results are read by id, never from the list.
 RECENT_FINISHED_RETAINED = 20
 
 
@@ -337,7 +339,11 @@ class PostgresJobBackend:
         This used to return every job the user ever ran, which made the
         5-second poll grow without bound (62 KB per poll on production).
         Nothing is deleted: older rows stay in the table and are reachable
-        by id through :meth:`get`.
+        by id through :meth:`get`. One edge: a job that sat pending while
+        twenty newer jobs were created and finished leaves the list the
+        moment it finishes instead of appearing as succeeded; the SPA's
+        settle detectors treat active-to-missing as settled, so nothing
+        hangs on it.
         """
         mine = ComputeJobRow.user_id == self._user_id
         must_show = or_(
