@@ -59,7 +59,11 @@ def test_share_shooters_list_makes_no_storage_calls_and_reports_no_missing_trims
 
         # Owner: the index lists the raw prefix once. The source is absent
         # from storage, so the stage is not rebuildable and counts 0 too;
-        # the discriminator between owner and share is the call list.
+        # the discriminator between owner and share is the call list. The
+        # equality is deliberate: it proves the counting hooks fire (so the
+        # share-side ``[]`` below is not vacuous) and it pins that this route
+        # stays at one storage call per prefix -- a second one is a regression
+        # to argue for, not to absorb.
         owner = client.get(f"/api/matches/{MID}/match/shooters")
         assert owner.status_code == 200, owner.text
         assert calls == ["list:raw/"], calls

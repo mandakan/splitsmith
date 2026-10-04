@@ -23,6 +23,15 @@ under that prefix re-raises, so the caller's existing
 ``source_unreachable`` skip fires for each angle instead of one HEAD per
 angle failing in turn. In local mode (no storage bound) the index is
 inert and delegates to the project's own local checks.
+
+Two things to know before reusing it. The index must be built from the
+same storage the projects it is asked about are bound to (both callers
+use ``state.storage``, which is what ``shooter_project`` binds); the trim
+key comes from the project's scope and is looked up in the index's
+storage. And the ``raw/`` listing scales with the tenant's lifetime
+uploads, not with the match: at hundreds of uploads it is one LIST page
+in place of dozens of HEADs; an account past ~10k uploads would be the
+point to prefer HEADs for a small angle count.
 """
 
 from __future__ import annotations
@@ -73,7 +82,7 @@ class StoragePresence:
                 listed = exc
             self._listed[prefix] = listed
         if isinstance(listed, BaseException):
-            raise listed
+            raise OSError(f"storage listing of {prefix!r} failed") from listed
         return key in listed
 
     def source_present(self, project: MatchProject, root: Path, video_path: Path) -> bool:

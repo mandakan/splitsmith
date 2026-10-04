@@ -305,7 +305,7 @@ def _audit_trim_targets(
     shooter_root: Path,
     stage: StageEntry,
     *,
-    presence: StoragePresence | None = None,
+    presence: StoragePresence,
 ) -> tuple[list[StageVideo], list[dict[str, Any]]]:
     """Split ``stage``'s angles into (needs an audit trim, skipped-with-reason).
 
@@ -326,11 +326,12 @@ def _audit_trim_targets(
     bytes -- the count backs ``GET /api/match/shooters``, which is mounted
     on nearly every SPA route including the anonymous share shell (#637).
 
-    ``presence`` is the request's :class:`StoragePresence` (#1180): with it,
-    existence comes from one listing per storage prefix instead of two HEADs
-    per angle. Both callers build one per request. ``None`` keeps the
-    per-angle lookups (local mode binds no storage, so it is unaffected
-    either way).
+    ``presence`` is the request's :class:`StoragePresence` (#1180): existence
+    comes from one listing per storage prefix instead of two HEADs per
+    angle. It is required, not defaulted, so a new caller cannot silently
+    bring the per-angle HEADs back; both callers build one per request
+    (``StoragePresence(None)`` in local mode, which delegates to the
+    project's own local checks).
     """
     primary = next((v for v in stage.videos if v.role == "primary"), None)
     if primary is None:
@@ -359,10 +360,7 @@ def _audit_trim_targets(
         # distinct: ``source_unreachable`` means storage raised,
         # ``source_missing`` means it answered no.
         try:
-            if presence is not None:
-                present = presence.source_present(project, shooter_root, video.path)
-            else:
-                present = project.source_present(shooter_root, video.path)
+            present = presence.source_present(project, shooter_root, video.path)
         except Exception:  # noqa: BLE001 -- defensive
             _skip(video, "source_unreachable")
             continue
@@ -370,12 +368,7 @@ def _audit_trim_targets(
             _skip(video, "source_missing")
             continue
         cache = audio_helpers.trimmed_video_path(shooter_root, stage.stage_number, video, project=project)
-        cached = (
-            presence.trim_available(project, cache)
-            if presence is not None
-            else audio_helpers.trim_available(project, cache)
-        )
-        if cached:
+        if presence.trim_available(project, cache):
             _skip(video, "already_cached")
             continue
         targets.append(video)

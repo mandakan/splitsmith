@@ -91,6 +91,26 @@ def test_trim_available_answers_from_one_listing_of_the_trimmed_prefix(tmp_path:
     assert storage.exists_calls == []
 
 
+def test_confined_project_never_probes_the_host_for_an_absolute_path(tmp_path: Path) -> None:
+    """A hosted project is confined because a mirror doc carries another
+    machine's absolute paths. The index must not resolve one against this
+    container's disk (the breach ``confine_paths`` exists to prevent) nor
+    hand it to storage as a key; it answers False like the project does."""
+    storage = CountingStorage(tmp_path / "backing")
+    project, root = _project(tmp_path, storage)
+    project.confine_paths()
+    host_file = tmp_path / "someone-elses" / "GX010001.MP4"
+    host_file.parent.mkdir(parents=True)
+    host_file.write_bytes(b"x")
+
+    presence = StoragePresence(storage)
+
+    assert presence.source_present(project, root, host_file) is False
+    assert presence.source_present(project, root, Path("../escape/raw/A.mp4")) is False
+    assert storage.exists_calls == []
+    assert storage.list_calls == []
+
+
 def test_a_key_outside_the_indexed_prefixes_falls_back_to_a_head(tmp_path: Path) -> None:
     storage = CountingStorage(tmp_path / "backing")
     storage.write_bytes("elsewhere/A.mp4", b"a")
