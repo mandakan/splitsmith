@@ -11939,8 +11939,16 @@ def create_app(
 
     @app.get("/api/me/jobs", response_model=list[Job])
     async def list_jobs(user: User = Depends(get_current_user)) -> list[Job]:
-        """Snapshot of all retained jobs (active + recently finished)."""
-        return await state.jobs.list()
+        """Snapshot of the retained jobs (active + recently finished).
+
+        This is the SPA's 5-second poll, so it carries only what the poll
+        reads (#1182): ``result`` and ``timings`` are nulled on every entry
+        -- the keys stay so the wire shape is unchanged -- and a job's result
+        is read through ``GET /api/me/jobs/{id}`` (``pollJob``), as the
+        Export page already does. Hosted, the backend also bounds the list
+        (see ``PostgresJobBackend.list``).
+        """
+        return [job.model_copy(update={"result": None, "timings": None}) for job in await state.jobs.list()]
 
     @app.get("/api/me/jobs/{job_id}", response_model=Job)
     async def get_job(job_id: str, user: User = Depends(get_current_user)) -> Job:

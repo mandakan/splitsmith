@@ -38,7 +38,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import and_, not_, or_, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from ..access import Feature, FeatureRequiredError
@@ -93,6 +93,16 @@ _ROW_TO_JOB_FIELDS = (
     "started_at",
     "finished_at",
 )
+
+
+#: How many finished jobs beyond the active and unacknowledged-failed set
+#: :meth:`PostgresJobBackend.list` returns (#1182). The SPA's poll reads
+#: active jobs and unacknowledged failures from the list for everything it
+#: shows, plus a short tail of terminal rows: the progress strip's "done"
+#: count and the SyncCard's wait for its own job to turn terminal. Twenty
+#: covers both and mirrors the local :class:`JobRegistry`'s retention in
+#: spirit; results are read by id, never from the list.
+RECENT_FINISHED_RETAINED = 20
 
 
 def _row_to_job(row: ComputeJobRow) -> Job:
@@ -320,12 +330,39 @@ class PostgresJobBackend:
         return _row_to_job(row) if row is not None else None
 
     async def list(self) -> list[Job]:
+        """The jobs the poll needs, in ``created_at`` order (#1182).
+
+        Every pending or running job and every unacknowledged failure,
+        however old -- the strip, the settle detector, the failures sheet,
+        acknowledge and retry read those -- plus the
+        :data:`RECENT_FINISHED_RETAINED` most recently created of the rest.
+        This used to return every job the user ever ran, which made the
+        5-second poll grow without bound (62 KB per poll on production).
+        Nothing is deleted: older rows stay in the table and are reachable
+        by id through :meth:`get`. One edge: a job that sat pending while
+        twenty newer jobs were created and finished leaves the list the
+        moment it finishes instead of appearing as succeeded; the SPA's
+        settle detectors treat active-to-missing as settled, so nothing
+        hangs on it.
+        """
+        mine = ComputeJobRow.user_id == self._user_id
+        must_show = or_(
+            ComputeJobRow.status.in_((JobStatus.PENDING.value, JobStatus.RUNNING.value)),
+            and_(ComputeJobRow.status == JobStatus.FAILED.value, ComputeJobRow.acknowledged.is_(False)),
+        )
+        recent_rest = (
+            select(ComputeJobRow.id)
+            .where(mine, not_(must_show))
+            .order_by(ComputeJobRow.created_at.desc())
+            .limit(RECENT_FINISHED_RETAINED)
+            .scalar_subquery()
+        )
         async with self._session_factory() as session:
             rows = (
                 (
                     await session.execute(
                         select(ComputeJobRow)
-                        .where(ComputeJobRow.user_id == self._user_id)
+                        .where(mine, or_(must_show, ComputeJobRow.id.in_(recent_rest)))
                         .order_by(ComputeJobRow.created_at)
                     )
                 )
