@@ -206,8 +206,9 @@ def test_api_shutdown_closes_its_pooled_connections_cleanly(hosted_stack: None) 
     Postgres reports a client that vanished without a Terminate as
     "unexpected EOF on client connection" at DEBUG1 only (so production's
     default log level never shows it), so the check raises the level and puts
-    ``application_name`` in the line prefix for the window. Removing the ``atexit`` hook in ``_process_loop_engines`` makes
-    the runner's connections show up here. Runs last in the module: it
+    ``application_name`` in the line prefix for the window. Removing the
+    ``atexit`` hook in ``_process_loop_engines`` makes the runner's
+    connections show up here. Runs last in the module: it
     stops the API container (the module fixture tears the stack down)."""
     cookies, sync_path, async_path = _signed_in_with_a_match("pooling-exit@example.com")
     _ping(cookies, sync_path)
