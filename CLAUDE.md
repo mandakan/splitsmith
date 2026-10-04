@@ -556,6 +556,17 @@ fact the picker needs goes into that batch, never into a per-row ``await``:
 ``tests/test_recent_projects_batch.py`` pins that the route's SELECT count
 does not grow with the number of matches.
 
+The triage grid, the triage summary and the beep queue load the bound
+match once per request through ``AppState.match_bundle`` (#1181): one
+``load_docs_for_matches`` query for every shooter's project and audit
+docs, each project bound by ``_project_from_doc`` exactly as
+``shooter_project`` binds one. A route that walks every shooter takes the
+bundle, not ``shooter_project`` in a loop; ``tests/test_match_bundle_queries.py``
+pins two ``state_docs`` SELECTs per request whatever the shooter count. On
+the SPA side the shell fetches the beep queue once per load and hands it
+down as ``beepQueue`` on the outlet context; the Overview reads it there
+and fetches triage once on mount (not again when the project arrives).
+
 ## State doc kinds and the sync allowlist
 
 Adding a ``doc_kind`` to ``state_docs`` is not a local change. The sync

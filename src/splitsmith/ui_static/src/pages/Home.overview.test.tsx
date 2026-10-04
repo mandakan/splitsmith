@@ -4,6 +4,7 @@
  * audited from the returned triage list, and a match with no footage
  * renders the empty block instead of the table.
  */
+import { useEffect, useState } from "react";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
@@ -155,7 +156,10 @@ const TRIAGE: TriageResponse = {
 function OutletCtx({ ctx }: { ctx: MatchShellOutletContext }) {
   return <Outlet context={ctx} />;
 }
-function renderHome(shooters: ShooterListEntry[] = [SHOOTER]) {
+function renderHome(
+  shooters: ShooterListEntry[] = [SHOOTER],
+  extra: Partial<MatchShellOutletContext> = {},
+) {
   const ctx: MatchShellOutletContext = {
     project: project(),
     health: null,
@@ -164,6 +168,7 @@ function renderHome(shooters: ShooterListEntry[] = [SHOOTER]) {
     origin: "hosted",
     capabilities: ["edit", "review", "share_manage"],
     jobs: [],
+    ...extra,
   };
   return render(
     <ConfirmProvider>
@@ -215,7 +220,9 @@ describe("Overview", () => {
       snippet_ready: false,
       trim_stale: false,
     });
-    vi.mocked(api.getBeepQueue).mockResolvedValue({
+    // The queue arrives on the shell's context (the shell fetched it for
+    // its badge); the Overview must not fetch it a second time (#1181).
+    const beepQueue = {
       total_items: 2,
       pending_count: 2,
       confirmed_count: 0,
@@ -231,7 +238,7 @@ describe("Overview", () => {
           ],
         },
       ],
-    } as never);
+    } as never;
     const accepted: TriageResponse = {
       ...TRIAGE,
       cells: TRIAGE.cells.map((c) =>
@@ -239,13 +246,59 @@ describe("Overview", () => {
       ),
     };
     vi.mocked(api.getTriage).mockResolvedValue(accepted);
-    renderHome();
+    renderHome([SHOOTER], { beepQueue });
 
     const primary = await screen.findByRole("link", {
       name: "Review beeps · 2 to confirm",
     });
 
     expect(primary).toHaveAttribute("href", "/match/m1/audit/s1/10?cam=pri10");
+    expect(api.getBeepQueue).not.toHaveBeenCalled();
+  });
+
+  it("fetches the triage grid once even though the project arrives after mount (#1181)", async () => {
+    // The shell's project snapshot resolves asynchronously; the grid does
+    // not derive from it, so its arrival must not refetch triage.
+    vi.mocked(api.getTriage).mockClear();
+    vi.mocked(api.getBeepQueue).mockClear();
+    function LateProject() {
+      const [proj, setProj] = useState<MatchProject | null>(null);
+      useEffect(() => {
+        const t = setTimeout(() => setProj(project()), 20);
+        return () => clearTimeout(t);
+      }, []);
+      const ctx: MatchShellOutletContext = {
+        project: proj,
+        health: null,
+        shooters: [SHOOTER],
+        refresh: () => {},
+        origin: "hosted",
+        capabilities: ["edit", "review", "share_manage"],
+        jobs: [],
+      };
+      return <Outlet context={ctx} />;
+    }
+    render(
+      <ConfirmProvider>
+        <MemoryRouter initialEntries={["/match/m1"]}>
+          <Routes>
+            <Route path="/match/:matchId" element={<LateProject />}>
+              <Route index element={<Home />} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </ConfirmProvider>,
+    );
+
+    await waitFor(() => expect(api.getTriage).toHaveBeenCalled());
+    const beforeProject = vi.mocked(api.getTriage).mock.calls.length;
+    // Wait for the project to have landed and rendered (the placeholder
+    // goes away), then flush a tick so any effect its arrival triggered
+    // has run before counting.
+    await waitFor(() => expect(screen.queryByText("Reading match state...")).toBeNull());
+    await new Promise((r) => setTimeout(r, 30));
+    expect([beforeProject, vi.mocked(api.getTriage).mock.calls.length]).toEqual([1, 1]);
+    expect(api.getBeepQueue).not.toHaveBeenCalled();
   });
 
   it("the header primary is the loop's next step and the stats count audited stages", async () => {

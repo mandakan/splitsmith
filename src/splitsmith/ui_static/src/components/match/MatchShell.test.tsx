@@ -13,7 +13,7 @@
  */
 import { useMemo, useState, type ReactNode } from "react";
 import { render, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useOutletContext } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -33,6 +33,7 @@ import {
 
 import {
   MatchShell,
+  type MatchShellOutletContext,
   toMatchRelativePath,
   viewLabelForPath,
 } from "@/components/match/MatchShell";
@@ -257,6 +258,59 @@ function renderShell() {
     </ModeProvider>,
   );
 }
+
+/** An outlet page that shows what the shell hands down as ``beepQueue``. */
+function BeepQueueProbe() {
+  const ctx = useOutletContext<MatchShellOutletContext>();
+  return (
+    <div>
+      <div data-testid="probe">{ctx.beepQueue ? `pending ${ctx.beepQueue.pending_count}` : "no queue yet"}</div>
+      <button type="button" onClick={() => ctx.refreshBeepQueue?.()}>
+        refresh queue
+      </button>
+    </div>
+  );
+}
+
+describe("beep queue on the outlet context (#1181)", () => {
+  it("hands the fetched queue to outlet pages so they need not fetch it again, and refetches on request", async () => {
+    setUpApi(() => Promise.resolve([]));
+    const queue = (pending: number) => ({
+      total_items: 3,
+      pending_count: pending,
+      confirmed_count: 3 - pending,
+      stages: [],
+      origin: "local" as const,
+      capabilities: ["edit", "review"] as MatchCapability[],
+    });
+    vi.mocked(api.getBeepQueue).mockResolvedValue(queue(3));
+    render(
+      <ModeProvider>
+        <AuthProvider>
+          <ShellChromeHarness>
+            <MemoryRouter initialEntries={["/audit/mathias/1"]}>
+              <Routes>
+                <Route element={<MatchShell />}>
+                  <Route path="/audit/:slug/:stage" element={<BeepQueueProbe />} />
+                </Route>
+              </Routes>
+            </MemoryRouter>
+          </ShellChromeHarness>
+        </AuthProvider>
+      </ModeProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("probe")).toHaveTextContent("pending 3"));
+    expect(api.getBeepQueue).toHaveBeenCalledTimes(1);
+
+    // A page confirmed a beep without starting a job: it asks the shell to
+    // refetch, and both the context and (through it) the badge move.
+    vi.mocked(api.getBeepQueue).mockResolvedValue(queue(2));
+    screen.getByRole("button", { name: "refresh queue" }).click();
+    await waitFor(() => expect(screen.getByTestId("probe")).toHaveTextContent("pending 2"));
+    expect(api.getBeepQueue).toHaveBeenCalledTimes(2);
+  });
+});
 
 /** Shared happy-path arrangement: hosted mode, one authed user, one match
  *  with one shooter, no jobs. Used by the chrome-ownership tests below and

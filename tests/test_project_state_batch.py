@@ -16,6 +16,25 @@ from splitsmith.db import Base, ProjectStateStore, User, create_engine, sessionm
 from splitsmith.db.project_state import MatchDocs
 
 
+def test_project_versions_ride_along_so_a_bundled_project_can_be_bound() -> None:
+    """A project built from the bundle is bound for ``save()`` exactly like
+    one from ``load_project``: it needs the version the doc was read at."""
+    engine, sf, (uid,) = _engine_with_users("m@thias.se")
+    store = ProjectStateStore(sf, user_id=uid)
+
+    async def _seed() -> None:
+        await store.save_match("m1", {"name": "One", "shooters": ["a"]}, expected_version=0)
+        v1 = await store.save_project("m1", "a", {"name": "A"}, expected_version=0)
+        await store.save_project("m1", "a", {"name": "A2"}, expected_version=v1)
+
+    asyncio.run(_seed())
+
+    docs = asyncio.run(store.load_docs_for_matches(["m1"]))
+
+    assert docs["m1"].projects == {"a": {"name": "A2"}}
+    assert docs["m1"].project_versions == {"a": 2}
+
+
 def _engine_with_users(*emails: str):
     engine = create_engine("sqlite+aiosqlite:///:memory:")
     session_factory = sessionmaker(engine)

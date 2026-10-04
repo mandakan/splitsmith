@@ -81,7 +81,13 @@ export function Home() {
   const activeRequests = desktop.commands.filter(isActiveCommand).length;
 
   const [triage, setTriage] = useState<TriageResponse | null>(null);
-  const [queueItems, setQueueItems] = useState<BeepQueueItem[] | null>(null);
+  // The beep review queue rides along on the shell's context: the shell
+  // already fetches it for the sidebar badge and refetches it when a job
+  // settles, so the Overview never asks for it a second time (#1181).
+  const queueItems = useMemo<BeepQueueItem[] | null>(
+    () => (ctx?.beepQueue ? ctx.beepQueue.stages.flatMap((g) => g.items) : null),
+    [ctx?.beepQueue],
+  );
   const [triageError, setTriageError] = useState<string | null>(null);
   const [filterSlug, setFilterSlug] = useState<string | null>(null);
   const [matchStages, setMatchStages] = useState<MatchStageDefinition[] | null>(null);
@@ -93,20 +99,18 @@ export function Home() {
   const loadTriage = useCallback(async () => {
     try {
       setTriage(await api.getTriage());
-      // The beep review queue rides along: the next-step button opens it.
-      api
-        .getBeepQueue(false)
-        .then((q) => setQueueItems(q.stages.flatMap((g) => g.items)))
-        .catch(() => setQueueItems(null));
       setTriageError(null);
     } catch (e) {
       setTriageError(apiErrorText(e, "Could not load the stage list."));
     }
   }, []);
 
+  // Once on mount, then on job settle (below). Not on the project's
+  // arrival: that dependency fetched the grid twice per open (#1181), and
+  // the grid does not derive from the project.
   useEffect(() => {
     void loadTriage();
-  }, [loadTriage, project?.name]);
+  }, [loadTriage]);
 
   // Refetch when a pipeline job settles: the shell's poller is the
   // signal (one poller per shell), the settled id set is the trigger.
