@@ -1776,6 +1776,17 @@ class TenantContext:
 current_tenant: ContextVar[TenantContext | None] = ContextVar("splitsmith_current_tenant", default=None)
 
 
+def _shooter_storage_scope(match_id: str | None, slug: str) -> str | None:
+    """The per-shooter prefix for derived-artifact caches (audio, trims, peaks).
+
+    ``None`` outside a ``/api/matches/{id}/`` scope. Every project loader
+    binds storage with this, with or without a state store: the keys
+    ``ui/audio`` derives depend on it, so two loaders disagreeing on the
+    scope would make the same artifact live under two keys.
+    """
+    return f"matches/{match_id}/shooters/{slug}" if match_id is not None else None
+
+
 @dataclass
 class MatchBundle:
     """Every shooter of the bound match, loaded once (#1181).
@@ -2496,7 +2507,11 @@ class AppState:
                 )
             return self._project_from_doc(slug, doc, version)
         project = MatchProject.load(shooter_root)
-        project.bind_storage(self.storage, scope=None)
+        # A disk-backed project under a ``/api/matches/{id}/`` scope still
+        # gets the per-shooter storage scope: storage without a state store
+        # is a valid configuration (local disk docs + an object store for
+        # derived artifacts), and its audio / peaks keys depend on it.
+        project.bind_storage(self.storage, scope=_shooter_storage_scope(match_id, slug))
         return project
 
     def _project_from_doc(self, slug: str, doc: dict, version: int) -> MatchProject:
@@ -2517,7 +2532,7 @@ class AppState:
         project = MatchProject.model_validate(doc)
         project.bind_state(store, match_id=match_id, slug=slug, version=version)
         project.confine_paths()
-        project.bind_storage(self.storage, scope=f"matches/{match_id}/shooters/{slug}")
+        project.bind_storage(self.storage, scope=_shooter_storage_scope(match_id, slug))
         return project
 
     def match_bundle(self, match: match_model.Match) -> MatchBundle:
@@ -2574,7 +2589,7 @@ class AppState:
                 )
             return self._project_from_doc(slug, doc, version)
         project = MatchProject.load(shooter_root)
-        project.bind_storage(self.storage, scope=None)
+        project.bind_storage(self.storage, scope=_shooter_storage_scope(match_id, slug))
         return project
 
 
