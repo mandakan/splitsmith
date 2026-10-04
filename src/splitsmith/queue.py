@@ -118,7 +118,7 @@ def _to_psycopg_dsn(sqlalchemy_url: str) -> str:
     return urlunsplit(parts._replace(query=urlencode(translated)))
 
 
-def build_app(database_url: str) -> procrastinate.App:
+def build_app(database_url: str, *, application_name: str | None = None) -> procrastinate.App:
     """Build the configured :class:`procrastinate.App`.
 
     ``database_url`` is the same ``SPLITSMITH_DATABASE_URL`` value
@@ -150,7 +150,12 @@ def build_app(database_url: str) -> procrastinate.App:
     # one land inside the window while the compute wakes; ``max_size`` keeps
     # the same runtime capacity for the drain. The always-on worker never hit
     # this because it kept the compute warm.
-    connector = procrastinate.PsycopgConnector(conninfo=dsn, min_size=1, max_size=4)
+    #
+    # ``application_name`` (#1198) names the pool's connections in
+    # ``pg_stat_activity``; ``kwargs`` is the per-connection keyword set
+    # psycopg merges into the conninfo.
+    extra: dict[str, Any] = {"kwargs": {"application_name": application_name}} if application_name else {}
+    connector = procrastinate.PsycopgConnector(conninfo=dsn, min_size=1, max_size=4, **extra)
     app = procrastinate.App(connector=connector)
     _register_smoke_tasks(app)
     return app
@@ -175,7 +180,9 @@ def _register_smoke_tasks(app: procrastinate.App) -> None:
         return payload
 
 
-def make_deferrer(database_url: str) -> Callable[..., Awaitable[None]]:
+def make_deferrer(
+    database_url: str, *, application_name: str | None = None
+) -> Callable[..., Awaitable[None]]:
     """Build the enqueue coroutine injected into :class:`PostgresJobBackend`.
 
     The returned ``deferrer(job_id, user_id, kind, args, match_id)``
@@ -199,7 +206,7 @@ def make_deferrer(database_url: str) -> Callable[..., Awaitable[None]]:
     ) -> None:
         app = cache.get("app")
         if app is None:
-            app = build_app(database_url)
+            app = build_app(database_url, application_name=application_name)
             cache["app"] = app
         queue = queue_name_for_user(user_id)
         async with app.open_async():
@@ -324,6 +331,7 @@ async def run_worker(
     queues: list[str] | None = None,
     wait: bool = True,
     stop_event: asyncio.Event | None = None,
+    process_name: str = "splitsmith-worker",
 ) -> None:
     """Run a worker that drains the job queue.
 
@@ -360,6 +368,10 @@ async def run_worker(
     handler but never chains to it, so a SIGTERM taken mid-drain would
     never reach the agent's loop.
 
+    ``process_name`` prefixes the ``application_name`` of every database
+    connection the worker opens (#1198); the self-hosted agent passes
+    ``splitsmith-agent``.
+
     ``build_worker_state`` runs its own ``asyncio.run`` calls (the auth
     bootstrap upserts the user row synchronously), so it can't run inside
     this coroutine's event loop -- it's offloaded to a worker thread,
@@ -390,7 +402,7 @@ async def run_worker(
         warm_ensemble_runtime,
     )
 
-    state = await asyncio.to_thread(build_worker_state)
+    state = await asyncio.to_thread(build_worker_state, process_name=process_name)
     engines = state.db_engines
     app: Any = None
     try:
@@ -407,7 +419,7 @@ async def run_worker(
         except Exception:  # noqa: BLE001 - warmup is best-effort; cold load is re-timed at job time
             logger.warning("ensemble warmup failed on worker boot; first shot_detect will cold-load")
         _attach_procrastinate_logging()
-        app = await _open_app_with_retry(database_url, state)
+        app = await _open_app_with_retry(database_url, state, application_name=f"{process_name}-queue")
         options: dict[str, Any] = {
             "queues": queues,
             "concurrency": concurrency,
@@ -475,6 +487,7 @@ async def _open_app_with_retry(
     database_url: str,
     state: Any,
     *,
+    application_name: str | None = None,
     attempts: int = 5,
     base_delay: float = 3.0,
 ) -> procrastinate.App:
@@ -491,7 +504,7 @@ async def _open_app_with_retry(
     """
     last_exc: Exception | None = None
     for attempt in range(1, attempts + 1):
-        app = build_app(database_url)
+        app = build_app(database_url, application_name=application_name)
         register_compute_task(app, state)
         try:
             await app.connector.open_async()

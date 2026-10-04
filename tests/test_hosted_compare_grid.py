@@ -89,7 +89,7 @@ def inline_deferrer(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
     holder: dict[str, Any] = {}
 
-    def fake_make_deferrer(_url: str):  # type: ignore[no-untyped-def]
+    def fake_make_deferrer(_url: str, **_k):  # type: ignore[no-untyped-def]
         async def _defer(
             *, job_id: str, user_id: str, kind: str, args: dict[str, Any], match_id: str | None
         ) -> None:

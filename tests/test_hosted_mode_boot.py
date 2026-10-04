@@ -16,6 +16,7 @@ import os
 import threading
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -536,7 +537,6 @@ def test_rewiring_reuses_the_process_engines_so_the_runner_loop_stays_pooled(
     must reuse the first's ``LoopEngines``: the process ``DbRunner`` adopted
     its loop into that object, and a fresh one would serve every job-thread
     ``run_sync`` call from the NullPool fallback (#1178)."""
-    from typing import Any
 
     from sqlalchemy.pool import NullPool
 
@@ -581,7 +581,125 @@ def test_rewiring_reuses_the_process_engines_so_the_runner_loop_stays_pooled(
 
     on_runner = runner.run(_ask())
     assert on_runner.kwargs.get("poolclass") is not NullPool, "runner loop fell back to NullPool"
+    # #1198: the runner loop's connections say which process and loop they serve.
+    assert (
+        on_runner.kwargs["connect_args"]["server_settings"]["application_name"] == "splitsmith-worker-runner"
+    )
 
     # The wiring names the driver and whether it pooled; never the URL.
     assert "hosted database: driver=postgresql+asyncpg pooled=True" in caplog.text
     assert "s3cret" not in caplog.text
+
+
+def _recording_engines(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
+    from splitsmith.db import engine as engine_mod
+
+    made: list[Any] = []
+
+    class _FakeEngine:
+        def __init__(self, url: str, kwargs: dict[str, Any]) -> None:
+            self.url = url
+            self.kwargs = kwargs
+            self.disposed = 0
+
+        async def dispose(self) -> None:
+            self.disposed += 1
+
+    def _fake_create(url: str, **kwargs: Any) -> _FakeEngine:
+        made.append(_FakeEngine(url, kwargs))
+        return made[-1]
+
+    monkeypatch.setattr(engine_mod, "create_async_engine", _fake_create)
+    return made
+
+
+def test_serve_wiring_names_its_engines_and_queue(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#1198: ``serve`` is ``splitsmith-serve`` on its engines and
+    ``splitsmith-serve-queue`` on the deferrer's Procrastinate pool."""
+    import splitsmith.queue as queue_mod
+    from splitsmith.ui.server import AppState, _apply_hosted_mode_wiring
+
+    _recording_engines(monkeypatch)
+    deferrer_kwargs: list[dict[str, Any]] = []
+    real_make_deferrer = queue_mod.make_deferrer
+
+    def _make_deferrer(url: str, **kwargs: Any) -> Any:
+        deferrer_kwargs.append(kwargs)
+        return real_make_deferrer(url, **kwargs)
+
+    monkeypatch.setattr(queue_mod, "make_deferrer", _make_deferrer)
+    monkeypatch.setenv("SPLITSMITH_MODE", "hosted")
+    monkeypatch.setenv("SPLITSMITH_DATABASE_URL", "postgresql+asyncpg://u:p@h/db")
+    monkeypatch.setenv("SPLITSMITH_PUBLIC_URL", PUBLIC_URL)
+
+    state = AppState()
+    _apply_hosted_mode_wiring(state)
+    assert deferrer_kwargs == [{"application_name": "splitsmith-serve-queue"}]
+
+    async def _main() -> Any:
+        assert state.db_engines is not None
+        return state.db_engines.adopt_current_loop()
+
+    main = asyncio.run(_main())
+    assert main.kwargs["connect_args"]["server_settings"]["application_name"] == "splitsmith-serve"
+
+
+def test_a_second_database_url_warns_that_the_runner_is_bound_elsewhere(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """#1201: the process ``DbRunner`` stays adopted into the first URL's
+    engines, so a second URL's sync path is unpooled. Say so, by driver only."""
+    from splitsmith.ui.server import _process_loop_engines
+
+    _recording_engines(monkeypatch)
+    caplog.set_level("INFO", logger="splitsmith.ui.server")
+    first = _process_loop_engines("postgresql+asyncpg://u:first-pw@h/db")
+    _process_loop_engines("postgresql+asyncpg://u:first-pw@h/db")
+    assert "reuses the DbRunner" not in caplog.text, "the same URL again must not warn"
+
+    second = _process_loop_engines("sqlite+aiosqlite:///second-pw.db")
+    assert second is not first
+    assert (
+        "a second database URL (driver=sqlite+aiosqlite) reuses the DbRunner bound to another URL's "
+        "engines (driver=postgresql+asyncpg)" in caplog.text
+    )
+    assert "first-pw" not in caplog.text and "second-pw" not in caplog.text
+
+    # Once, when the engines are created; the next wiring of that URL is quiet.
+    _process_loop_engines("sqlite+aiosqlite:///second-pw.db")
+    assert caplog.text.count("reuses the DbRunner") == 1
+
+
+def test_exit_stops_the_runner_and_disposes_its_pool(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#1197: an ``atexit`` hook stops the process ``DbRunner``, whose
+    ``on_stop`` disposes the runner loop's pooled engine, so its connections
+    close with a Terminate instead of dying with the interpreter."""
+    import atexit
+
+    from splitsmith.async_bridge import get_runner
+    from splitsmith.ui import server
+
+    made = _recording_engines(monkeypatch)
+    hooks: list[Any] = []
+    monkeypatch.setattr(atexit, "register", hooks.append)
+    monkeypatch.setattr(server, "_runner_atexit_registered", False)
+
+    engines = server._process_loop_engines("postgresql+asyncpg://u:p@h/db")
+    runner = get_runner()
+    assert runner is not None and runner.is_running
+    assert hooks == [server._stop_process_runner]
+
+    async def _ask() -> Any:
+        return engines.for_current_loop()
+
+    runner_engine = runner.run(_ask())
+    assert runner_engine in made and runner_engine.disposed == 0
+
+    hooks[0]()
+    assert not runner.is_running
+    assert get_runner() is None
+    assert runner_engine.disposed == 1
+
+    # Registered once per process, not once per runner a re-wiring starts.
+    server._process_loop_engines("postgresql+asyncpg://u:p@h/db")
+    assert len(hooks) == 1

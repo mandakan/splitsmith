@@ -13,6 +13,7 @@ import asyncio
 import os
 import stat
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -668,3 +669,18 @@ def test_run_worker_until_stops_gracefully_between_jobs() -> None:
 
     asyncio.run(scenario())
     assert ran == [1]
+
+
+def test_agent_drain_names_its_connections(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#1198: the agent's drains are ``splitsmith-agent`` in ``pg_stat_activity``,
+    not the Railway worker's ``splitsmith-worker``."""
+    import splitsmith.queue as queue_mod
+
+    seen: list[dict[str, Any]] = []
+
+    async def _fake_run_worker(_url: str, **kwargs: Any) -> None:
+        seen.append(kwargs)
+
+    monkeypatch.setattr(queue_mod, "run_worker", _fake_run_worker)
+    asyncio.run(agent._run_worker_once("postgresql+asyncpg://u:p@h/db", 1))
+    assert seen[0]["process_name"] == "splitsmith-agent"
