@@ -6,6 +6,7 @@
  * renders while idle. The amber dot is the page's one glow.
  */
 import type { Job } from "@/lib/api";
+import { batchProgress } from "@/lib/jobBatch";
 import { kindLabel } from "@/lib/jobLabels";
 import type { JobsState } from "@/lib/jobs";
 import { cn } from "@/lib/utils";
@@ -30,8 +31,8 @@ export function ProgressStrip({ state, onOpen, onDismissFailed }: ProgressStripP
 
   if (active.length > 0) {
     const cur = state.running[0] ?? active[0];
-    const done = state.jobs.filter((j) => j.status === "succeeded").length;
-    const total = done + active.length;
+    // The current batch, never the poll list's terminal rows (#1190).
+    const { done, total } = batchProgress(state.batch, active);
     const pct = cur.progress != null ? Math.round(cur.progress * 100) : null;
     return (
       <div role="status" className={BASE}>
