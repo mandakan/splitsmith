@@ -25,8 +25,9 @@ uses ``postgresql+asyncpg://``.
 from __future__ import annotations
 
 from collections.abc import Collection
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
@@ -74,6 +75,15 @@ _KIND_MATCH = "match"
 _KIND_PROJECT = "project"
 _KIND_AUDIT = "audit"
 _KIND_EXPORT_RUNS = "export_runs"
+
+
+@dataclass
+class MatchDocs:
+    """One match's picker-relevant docs, as :meth:`ProjectStateStore.load_docs_for_matches` groups them."""
+
+    match: dict[str, Any] | None = None
+    projects: dict[str, dict[str, Any]] = field(default_factory=dict)
+    audits: dict[str, dict[int, dict[str, Any]]] = field(default_factory=dict)
 
 
 class ProjectStateStore:
@@ -228,6 +238,45 @@ class ProjectStateStore:
         async with self._session_factory() as session:
             rows = (await session.execute(select(StateDocRow).where(*terms))).scalars().all()
         return [(row.slug, row.stage_number, row.doc) for row in rows]
+
+    async def load_docs_for_matches(self, match_ids: Collection[str]) -> dict[str, MatchDocs]:
+        """The match, project and audit docs of every match in ``match_ids``, one query.
+
+        The hosted picker (#1179) used to load 3 + shooters docs per match in
+        sequence; here the whole list comes back grouped per match so the
+        route's round trips stop growing with it. Every requested id gets an
+        entry -- ``match=None`` when the match doc is absent, which is the
+        caller's cue to fall back -- and an empty ``match_ids`` issues no
+        query. Other kinds (``export_runs``) are not loaded: the picker does
+        not read them, and they can be large.
+        """
+        ids = list(dict.fromkeys(match_ids))
+        docs = {mid: MatchDocs() for mid in ids}
+        if not ids:
+            return docs
+        async with self._session_factory() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(StateDocRow).where(
+                            StateDocRow.user_id == self._user_id,
+                            StateDocRow.match_id.in_(ids),
+                            StateDocRow.doc_kind.in_((_KIND_MATCH, _KIND_PROJECT, _KIND_AUDIT)),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        for row in rows:
+            bucket = docs[row.match_id]
+            if row.doc_kind == _KIND_MATCH:
+                bucket.match = row.doc
+            elif row.doc_kind == _KIND_PROJECT:
+                bucket.projects[row.slug] = row.doc
+            else:
+                bucket.audits.setdefault(row.slug, {})[row.stage_number] = row.doc
+        return docs
 
     async def list_doc_meta(self, match_id: str) -> list[DocMeta]:
         """Identity, version, and updated_at of every doc in a match.

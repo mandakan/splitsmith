@@ -547,6 +547,15 @@ and 11 s to open a match. A share request skips the
 ``stages_missing_trim`` count entirely (it gates a button the anonymous
 shell never renders), pinned by ``tests/test_share_shooters_presence.py``.
 
+The hosted picker (``GET /api/me/recent-projects?detail=true``) loads every
+match's detail in two queries (#1179): ``ProjectStateStore.load_docs_for_matches``
+returns the match, project and audit docs of the whole list grouped per
+match, ``PostgresMatchStore.list`` gives the origins, and
+``_hosted_detail_from_docs`` derives each card with no I/O. A new per-match
+fact the picker needs goes into that batch, never into a per-row ``await``:
+``tests/test_recent_projects_batch.py`` pins that the route's SELECT count
+does not grow with the number of matches.
+
 ## State doc kinds and the sync allowlist
 
 Adding a ``doc_kind`` to ``state_docs`` is not a local change. The sync
