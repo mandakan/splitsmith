@@ -19,6 +19,7 @@ both.
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict
@@ -165,6 +166,30 @@ class PostgresMatchStore:
                     )
                 )
             ).scalar_one_or_none()
+
+    async def get_many(self, match_ids: Collection[str]) -> list[MatchRow]:
+        """The user's rows for ``match_ids``, in one query; ids with no row are absent.
+
+        The hosted picker's origin lookup (#1179): bounded by the ids asked
+        for, where :meth:`list` would read every match the user has. An
+        empty ``match_ids`` issues no query.
+        """
+        ids = list(dict.fromkeys(match_ids))
+        if not ids:
+            return []
+        async with self._session_factory() as session:
+            return list(
+                (
+                    await session.execute(
+                        select(MatchRow).where(
+                            MatchRow.user_id == self._user_id,
+                            MatchRow.match_id.in_(ids),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
 
     async def delete(self, match_id: str) -> bool:
         """Drop the user's row for ``match_id``; return ``True`` if one went.

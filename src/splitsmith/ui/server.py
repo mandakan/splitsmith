@@ -6665,24 +6665,77 @@ def _enrich_recent_project(rp: user_config.RecentProject) -> RecentProjectDetail
     return detail
 
 
-async def _enrich_recent_project_hosted(
-    state: AppState, rp: user_config.RecentProject
-) -> RecentProjectDetail | None:
-    """Hosted picker detail, read from Postgres instead of the filesystem.
+async def _hosted_picker_details(
+    state: AppState, projects: list[user_config.RecentProject]
+) -> list[RecentProjectDetail | None]:
+    """Hosted picker detail for every recent row, in two queries (#1179).
 
     The recorded ``path`` is an ephemeral container working root a redeploy
     wipes, so the filesystem enricher reports the match as ``missing`` even
-    though its state is safe in ``state_docs``. When the row carries a
-    ``match_id`` and the match doc is present, build the detail from the
-    match + per-shooter project docs. Returns ``None`` to fall back to the
-    filesystem path (local mode, or no stored match_id / doc -- a genuinely
-    gone match).
+    though its state is safe in ``state_docs``. This loads every match's
+    match / project / audit docs in one query
+    (:meth:`ProjectStateStore.load_docs_for_matches`) and the recent ids'
+    match rows in one more (:meth:`PostgresMatchStore.get_many`), then
+    derives each card with :func:`_hosted_detail_from_docs`. It used to be
+    3 + shooters round trips per match, in sequence -- 8.9 s for one picker
+    load on production.
+
+    Returns one entry per row of ``projects``, in order: the card, or
+    ``None`` where the row has no stored ``match_id`` or its match doc is
+    gone, which is the caller's cue to use the filesystem enricher. Per row,
+    not per match: ``recent_projects`` is unique on path, so two rows can
+    name one match and each card must carry its own path and timestamp.
+    All ``None`` in local mode (no state store).
     """
-    if state.project_state is None or not rp.match_id:
-        return None
-    match_doc, _ = await state.project_state.load_match(rp.match_id)
-    if match_doc is None:
-        return None
+    if state.project_state is None:
+        return [None] * len(projects)
+    match_ids = [rp.match_id for rp in projects if rp.match_id]
+    if not match_ids:
+        return [None] * len(projects)
+    docs = await state.project_state.load_docs_for_matches(match_ids)
+    # ``matches_store`` is the tenant's authoritative registry of hosted vs.
+    # mirrored ownership (#631 Task 6); a match doc with no row (which
+    # shouldn't happen for a real hosted match) reads as "hosted" rather
+    # than being mislabelled a mirror. With no registry at all the card
+    # keeps its default origin, as the per-match path did.
+    origins: dict[str, str] | None = None
+    if state.matches_store is not None:
+        origins = {row.match_id: row.origin for row in await state.matches_store.get_many(match_ids)}
+    details: list[RecentProjectDetail | None] = []
+    for rp in projects:
+        bucket = docs[rp.match_id] if rp.match_id else None
+        if bucket is None or bucket.match is None:
+            details.append(None)
+            continue
+        details.append(
+            _hosted_detail_from_docs(
+                rp,
+                bucket.match,
+                origin=None if origins is None else origins.get(rp.match_id, "hosted"),
+                project_docs=bucket.projects,
+                audit_docs=bucket.audits,
+            )
+        )
+    return details
+
+
+def _hosted_detail_from_docs(
+    rp: user_config.RecentProject,
+    match_doc: dict,
+    *,
+    origin: str | None,
+    project_docs: dict[str, dict],
+    audit_docs: dict[str, dict[int, dict]],
+) -> RecentProjectDetail:
+    """One picker card from docs already in hand; no I/O.
+
+    The derivation the per-match enricher did, kept as a pure function so
+    the batch loader above and any future caller derive the same card:
+    counts from the match doc, names and footage from the project docs,
+    the audited count averaged across shooters, ``next_step`` from the same
+    per-stage status walk as ``stages_audited``. ``origin=None`` leaves the
+    model's default in place (no match registry bound).
+    """
     detail = RecentProjectDetail(
         path=rp.path,
         name=match_doc.get("name") or rp.name,
@@ -6690,30 +6743,22 @@ async def _enrich_recent_project_hosted(
         kind="match",
     )
     detail.match_id = rp.match_id
-    # ``matches_store`` is the tenant's authoritative registry of hosted vs.
-    # mirrored ownership (#631 Task 6); ``None`` only if a match doc exists
-    # without ever having been registered there, which shouldn't happen for
-    # a real hosted match - fall back to "hosted" rather than mislabel it
-    # a mirror.
-    if state.matches_store is not None:
-        match_row = await state.matches_store.get(rp.match_id)
-        detail.origin = match_row.origin if match_row is not None else "hosted"
+    if origin is not None:
+        detail.origin = origin
     shooters = match_doc.get("shooters") or []
     detail.shooter_count = len(shooters)
     detail.stage_count = len(match_doc.get("stages") or [])
     detail.match_date = match_doc.get("match_date")  # JSON doc -> ISO str | None
     detail.manual = match_doc.get("scoreboard_match_id") is None
 
-    # Every audit doc for the match in one query, grouped by shooter, so
-    # the card's audited count is accurate in hosted mode. This used to be
-    # hard-coded to 0 ("not worth loading for a list view"), which meant a
-    # fully-audited match still read as in-progress on the picker -- the
-    # same disk-vs-state_docs blind spot the sidebar had. One indexed query
-    # per match is cheap; a shooter with no audits gets an empty dict ->
-    # audited_count 0 (docs mode: every stage reads "ready").
-    audit_by_slug: dict[str, dict[int, dict]] = {}
-    for a_slug, stage_number, doc in await state.project_state.list_audit_docs(rp.match_id):
-        audit_by_slug.setdefault(a_slug, {})[stage_number] = doc
+    # Every audit doc for the match, grouped by shooter, so the card's
+    # audited count is accurate in hosted mode. This used to be hard-coded
+    # to 0 ("not worth loading for a list view"), which meant a fully-
+    # audited match still read as in-progress on the picker -- the same
+    # disk-vs-state_docs blind spot the sidebar had. A shooter with no
+    # audits gets an empty dict -> audited_count 0 (docs mode: every stage
+    # reads "ready").
+    audit_by_slug = audit_docs
 
     names: list[str] = []
     video_total = 0
@@ -6724,7 +6769,7 @@ async def _enrich_recent_project_hosted(
     }
     project_root = Path(rp.path)  # unused by stage_statuses in docs mode
     for slug in shooters:
-        pdoc, _ = await state.project_state.load_project(rp.match_id, slug)
+        pdoc = project_docs.get(slug)
         if pdoc is None:
             names.append(slug)
             continue
@@ -14555,14 +14600,16 @@ def create_app(
         """
         projects = await state.recent_projects.list()
         if detail:
-            enriched: list[RecentProjectDetail] = []
-            for p in projects:
-                # Hosted: resolve detail from Postgres so a redeploy-wiped
-                # working dir doesn't show the match as "missing". Falls
-                # back to the filesystem enricher (local mode, or no stored
-                # match_id / a genuinely-gone match).
-                hosted = await _enrich_recent_project_hosted(state, p)
-                enriched.append(hosted if hosted is not None else _enrich_recent_project(p))
+            # Hosted: resolve detail from Postgres so a redeploy-wiped
+            # working dir doesn't show the match as "missing" -- every
+            # match in two queries (#1179). A row the batch has no doc for
+            # falls back to the filesystem enricher (local mode, or no
+            # stored match_id / a genuinely-gone match).
+            hosted = await _hosted_picker_details(state, projects)
+            enriched = [
+                card if card is not None else _enrich_recent_project(p)
+                for p, card in zip(projects, hosted, strict=True)
+            ]
             return JSONResponse({"projects": [p.model_dump(mode="json") for p in enriched]})
         return JSONResponse({"projects": [p.model_dump(mode="json") for p in projects]})
 
