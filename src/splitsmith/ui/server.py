@@ -1777,6 +1777,24 @@ current_tenant: ContextVar[TenantContext | None] = ContextVar("splitsmith_curren
 
 
 @dataclass
+class MatchBundle:
+    """Every shooter of the bound match, loaded once (#1181).
+
+    ``projects`` is keyed by slug in match order, minus shooters whose
+    project doc is missing. ``audits`` is ``{slug: {stage_number: doc}}`` in
+    hosted mode and ``None`` in local mode, the same contract
+    :meth:`AppState.load_audit_docs` has: ``None`` tells the status helpers
+    to read audits from disk.
+    """
+
+    projects: dict[str, MatchProject]
+    audits: dict[str, dict[int, dict]] | None
+
+    def audit_docs(self, slug: str) -> dict[int, dict] | None:
+        return None if self.audits is None else self.audits.get(slug, {})
+
+
+@dataclass
 class AppState:
     """Process state. One bound Match folder at a time.
 
@@ -2466,28 +2484,75 @@ class AppState:
         """
         shooter_root = self.shooter_root(slug)
         match_id = current_match_id.get()
-        scope = f"matches/{match_id}/shooters/{slug}" if match_id is not None else None
         store = self.project_state
         if store is not None and match_id is not None:
-            # Hosted: the project doc lives in Postgres. Load it, bind the
-            # store so save() round-trips back under optimistic locking
-            # (carrying the version we just read), and bind storage for
-            # media mirroring. No project.json on disk is involved.
+            # Hosted: the project doc lives in Postgres. Load it, then bind
+            # it exactly as a bundled doc is bound (``_project_from_doc``).
             doc, version = run_sync(store.load_project(match_id, slug))
             if doc is None:
                 raise HTTPException(
                     status_code=404,
                     detail=f"shooter {slug!r} has no project document",
                 )
-            project = MatchProject.model_validate(doc)
-            project.bind_state(store, match_id=match_id, slug=slug, version=version)
-            # The doc may carry another machine's paths (a desktop mirror's
-            # own sources and cache dirs); resolve inside the shooter root only.
-            project.confine_paths()
-        else:
-            project = MatchProject.load(shooter_root)
-        project.bind_storage(self.storage, scope=scope)
+            return self._project_from_doc(slug, doc, version)
+        project = MatchProject.load(shooter_root)
+        project.bind_storage(self.storage, scope=None)
         return project
+
+    def _project_from_doc(self, slug: str, doc: dict, version: int) -> MatchProject:
+        """Bind a hosted project doc the way every hosted loader must.
+
+        The store is bound so ``save()`` round-trips back under optimistic
+        locking (carrying ``version``, the version the doc was read at);
+        the paths are confined because the doc may carry another machine's
+        (a desktop mirror's own sources and cache dirs), so they resolve
+        inside the shooter root only; storage is bound under the per-shooter
+        scope for derived-artifact caches. :meth:`shooter_project` and
+        :meth:`match_bundle` both go through here so one shooter loaded
+        alone and one loaded with its match are the same object.
+        """
+        match_id = current_match_id.get()
+        store = self.project_state
+        assert store is not None and match_id is not None  # callers are hosted-only
+        project = MatchProject.model_validate(doc)
+        project.bind_state(store, match_id=match_id, slug=slug, version=version)
+        project.confine_paths()
+        project.bind_storage(self.storage, scope=f"matches/{match_id}/shooters/{slug}")
+        return project
+
+    def match_bundle(self, match: match_model.Match) -> MatchBundle:
+        """Every shooter's project and audit docs for ``match``, in one query (#1181).
+
+        Triage, the triage summary and the beep queue each walked the match
+        shooter by shooter -- a ``state_docs`` query per project doc and
+        another per shooter's audit docs -- which is what made opening a
+        match cost 2.5-3.4 s per fetch on production. Hosted, this loads
+        them all with :meth:`ProjectStateStore.load_docs_for_matches` and
+        binds each project through :meth:`_project_from_doc`. A shooter
+        whose project doc is missing is left out, as the per-shooter loops
+        skipped it. Local mode reads each ``project.json`` from disk and
+        reports ``audits=None`` so the status helpers keep their on-disk
+        audit read, exactly as :meth:`load_audit_docs` returns ``None``.
+        """
+        match_id = current_match_id.get()
+        store = self.project_state
+        if store is None or match_id is None:
+            projects: dict[str, MatchProject] = {}
+            for slug in match.shooters:
+                try:
+                    projects[slug] = self.shooter_project(slug)
+                except (FileNotFoundError, HTTPException) as exc:
+                    logger.warning("Skipping shooter %s: %s", slug, exc)
+            return MatchBundle(projects=projects, audits=None)
+        docs = run_sync(store.load_docs_for_matches([match_id]))[match_id]
+        projects = {}
+        for slug in match.shooters:
+            doc = docs.projects.get(slug)
+            if doc is None:
+                logger.warning("Skipping shooter %s: no project document", slug)
+                continue
+            projects[slug] = self._project_from_doc(slug, doc, docs.project_versions.get(slug, 0))
+        return MatchBundle(projects=projects, audits=docs.audits)
 
     async def shooter_project_async(self, slug: str) -> MatchProject:
         """Async twin of :meth:`shooter_project`.
@@ -2499,7 +2564,6 @@ class AppState:
         """
         shooter_root = self.shooter_root(slug)
         match_id = current_match_id.get()
-        scope = f"matches/{match_id}/shooters/{slug}" if match_id is not None else None
         store = self.project_state
         if store is not None and match_id is not None:
             doc, version = await store.load_project(match_id, slug)
@@ -2508,14 +2572,9 @@ class AppState:
                     status_code=404,
                     detail=f"shooter {slug!r} has no project document",
                 )
-            project = MatchProject.model_validate(doc)
-            project.bind_state(store, match_id=match_id, slug=slug, version=version)
-            # The doc may carry another machine's paths (a desktop mirror's
-            # own sources and cache dirs); resolve inside the shooter root only.
-            project.confine_paths()
-        else:
-            project = MatchProject.load(shooter_root)
-        project.bind_storage(self.storage, scope=scope)
+            return self._project_from_doc(slug, doc, version)
+        project = MatchProject.load(shooter_root)
+        project.bind_storage(self.storage, scope=None)
         return project
 
 
@@ -15238,21 +15297,22 @@ def create_app(
         is global to the match, not per-shooter.
         """
         match_root, match = _resolve_match_context()
+        # The whole match in one query (#1181): every shooter's project doc
+        # and audit docs, instead of two queries per shooter.
+        bundle = state.match_bundle(match)
         cells: list[TriageCell] = []
         docs: list[dict | None] = []
         threshold: float | None = None
         for slug in match.shooters:
             shooter_root = match_model.Match.shooter_root(match_root, slug)
-            try:
-                legacy = state.shooter_project(slug)
-            except Exception as exc:  # noqa: BLE001 - mirror list_match_shooters's per-shooter skip
-                logger.warning("Skipping shooter %s in triage: %s", slug, exc)
+            legacy = bundle.projects.get(slug)
+            if legacy is None:
                 continue
             if threshold is None:
                 resolved = automation_settings.resolve_automation(project_override=legacy.automation)
                 threshold = resolved.settings.beep_low_confidence_threshold
             name = legacy.competitor_name or slug
-            audit_docs = state.load_audit_docs(slug)
+            audit_docs = bundle.audit_docs(slug)
             status_map = legacy.stage_statuses(shooter_root, audit_docs=audit_docs)
             for stg in legacy.stages:
                 if stg.placeholder:
@@ -15322,14 +15382,13 @@ def create_app(
         status walk that :func:`_build_triage_response` does (#823) - a
         cheap poll target for the mobile triage surface's badge."""
         _, match = _resolve_match_context()
+        bundle = state.match_bundle(match)
         docs: list[dict | None] = []
         for slug in match.shooters:
-            try:
-                legacy = state.shooter_project(slug)
-            except Exception as exc:  # noqa: BLE001 - mirror _build_triage_response's per-shooter skip
-                logger.warning("Skipping shooter %s in triage summary: %s", slug, exc)
+            legacy = bundle.projects.get(slug)
+            if legacy is None:
                 continue
-            audit_docs = state.load_audit_docs(slug)
+            audit_docs = bundle.audit_docs(slug)
             for stg in legacy.stages:
                 if stg.placeholder:
                     continue
@@ -16104,20 +16163,22 @@ def create_app(
         secondary auto-beep has a review surface at all.
         """
         match_root, match = _resolve_match_context()
+        # The whole match in one query (#1181); the threshold below and the
+        # per-shooter loop both read from it.
+        bundle = state.match_bundle(match)
         # Resolve the low-confidence threshold from any shooter's automation
         # settings; per-shooter thresholds aren't supported, the gate is
         # global to the match.
         threshold = 0.5
         for first_slug in match.shooters:
-            try:
-                proj_for_threshold = state.shooter_project(first_slug)
-                resolved = automation_settings.resolve_automation(
-                    project_override=proj_for_threshold.automation,
-                )
-                threshold = resolved.settings.beep_low_confidence_threshold
-                break
-            except Exception:  # noqa: BLE001
+            proj_for_threshold = bundle.projects.get(first_slug)
+            if proj_for_threshold is None:
                 continue
+            resolved = automation_settings.resolve_automation(
+                project_override=proj_for_threshold.automation,
+            )
+            threshold = resolved.settings.beep_low_confidence_threshold
+            break
 
         stage_lookup = {s.stage_number: s.stage_name for s in match.stages}
         groups: dict[int, BeepQueueStageGroup] = {}
@@ -16153,10 +16214,8 @@ def create_app(
             return f"{base}.m4a" in _snippet_keys and f"{base}.peaks.json" in _snippet_keys
 
         for slug in match.shooters:
-            shooter_root = match_model.Match.shooter_root(match_root, slug)
-            try:
-                proj = state.shooter_project(shooter_root.name)
-            except (FileNotFoundError, HTTPException):
+            proj = bundle.projects.get(slug)
+            if proj is None:
                 continue
             for stage in proj.stages:
                 if stage.skipped:

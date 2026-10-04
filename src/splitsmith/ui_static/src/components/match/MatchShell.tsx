@@ -48,6 +48,7 @@ import {
   api,
   capabilityDenied,
   READ_ONLY_MIRROR_MESSAGE,
+  type BeepQueueResponse,
   type Job,
   type MatchCapability,
   type MatchOrigin,
@@ -130,6 +131,12 @@ export interface MatchShellOutletContext {
    *  `origin` - origin is provenance, capabilities are the authoritative
    *  writability signal and stay in lockstep with the server's 403 guard. */
   capabilities: MatchCapability[] | null;
+  /** The shell's beep review queue, fetched once per shell load for the
+   *  sidebar badge and refetched when a job settles. Pages that need the
+   *  queue (the Overview's next-step button) read it here instead of
+   *  fetching it again (#1181). Null until the first fetch resolves;
+   *  optional because ShareShell's read-only context has none. */
+  beepQueue?: BeepQueueResponse | null;
   /** The shell's one jobs-poller snapshot (#631 Task 11's SyncCard reads
    *  this for its "a sync_match job is pending/running" check rather than
    *  running a second poller - lib/jobs.ts's "one poller per shell"
@@ -277,6 +284,7 @@ export function MatchShell() {
   );
   const [refreshKey, setRefreshKey] = useState(0);
   const [beepReviewPending, setBeepReviewPending] = useState<number>(0);
+  const [beepQueue, setBeepQueue] = useState<BeepQueueResponse | null>(null);
   // Per-shooter pages (Audit / Coach / Videos / Export) need a shooter in
   // the URL. Rather than forcing the user to the shooter list, default to
   // one -- the URL slug if present, else the shared default-shooter rule
@@ -380,7 +388,9 @@ export function MatchShell() {
     api
       .getBeepQueue()
       .then((q) => {
-        if (alive) setBeepReviewPending(q.pending_count);
+        if (!alive) return;
+        setBeepReviewPending(q.pending_count);
+        setBeepQueue(q);
       })
       .catch(() => {
         if (alive) setBeepReviewPending(0);
@@ -428,7 +438,9 @@ export function MatchShell() {
     api
       .getBeepQueue()
       .then((q) => {
-        if (alive) setBeepReviewPending(q.pending_count);
+        if (!alive) return;
+        setBeepReviewPending(q.pending_count);
+        setBeepQueue(q);
       })
       .catch(() => {
         /* keep the last known badge count */
@@ -674,6 +686,7 @@ export function MatchShell() {
               refresh: () => setRefreshKey((k) => k + 1),
               origin,
               capabilities,
+              beepQueue,
               jobs,
               jobsState,
             }}

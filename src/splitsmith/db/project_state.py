@@ -83,6 +83,10 @@ class MatchDocs:
 
     match: dict[str, Any] | None = None
     projects: dict[str, dict[str, Any]] = field(default_factory=dict)
+    #: The version each project doc was read at, so a ``MatchProject`` built
+    #: from the bundle can be bound for ``save()`` under the same optimistic
+    #: lock ``load_project`` would have given it (#1181).
+    project_versions: dict[str, int] = field(default_factory=dict)
     audits: dict[str, dict[int, dict[str, Any]]] = field(default_factory=dict)
 
 
@@ -275,6 +279,7 @@ class ProjectStateStore:
                 bucket.match = row.doc
             elif row.doc_kind == _KIND_PROJECT:
                 bucket.projects[row.slug] = row.doc
+                bucket.project_versions[row.slug] = row.version
             else:
                 bucket.audits.setdefault(row.slug, {})[row.stage_number] = row.doc
         return docs
