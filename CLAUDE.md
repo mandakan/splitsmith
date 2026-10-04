@@ -534,6 +534,19 @@ delta over 40 requests, not by connection count, which NullPool also keeps flat;
 SQLite in tests keeps one NullPool engine on purpose, a per-loop ``:memory:``
 engine would be a database per loop.
 
+Existence questions on the request path (is this source in storage? is
+this trim cached?) go through ``ui/presence.StoragePresence`` (#1180),
+one per request: it lists the tenant's ``raw/`` prefix once and each
+shooter's ``trimmed/`` prefix once and answers by set membership, with
+the same local-disk-first semantics as ``MatchProject.source_present``
+and ``audio.trim_available``. ``_audit_trim_targets`` takes it as
+``presence=``; its two callers (the shooters list, the bulk rebuild) each
+build one. A new per-angle existence check on a list route belongs on
+the index, not on ``storage.exists``: that was two R2 HEADs per angle
+and 11 s to open a match. A share request skips the
+``stages_missing_trim`` count entirely (it gates a button the anonymous
+shell never renders), pinned by ``tests/test_share_shooters_presence.py``.
+
 ## State doc kinds and the sync allowlist
 
 Adding a ``doc_kind`` to ``state_docs`` is not a local change. The sync

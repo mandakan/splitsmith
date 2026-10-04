@@ -280,6 +280,7 @@ from .jobs import (
     ShutdownInProgressError,
 )
 from .match_delete import DeletionSummary, delete_match_cascade
+from .presence import StoragePresence
 from .scoreboard import (
     CachingScoreboardClient,
     CompetitorNotInMatch,
@@ -303,6 +304,8 @@ def _audit_trim_targets(
     project: MatchProject,
     shooter_root: Path,
     stage: StageEntry,
+    *,
+    presence: StoragePresence,
 ) -> tuple[list[StageVideo], list[dict[str, Any]]]:
     """Split ``stage``'s angles into (needs an audit trim, skipped-with-reason).
 
@@ -322,6 +325,13 @@ def _audit_trim_targets(
     both metadata-only. Neither this pass nor its callers may fetch source
     bytes -- the count backs ``GET /api/match/shooters``, which is mounted
     on nearly every SPA route including the anonymous share shell (#637).
+
+    ``presence`` is the request's :class:`StoragePresence` (#1180): existence
+    comes from one listing per storage prefix instead of two HEADs per
+    angle. It is required, not defaulted, so a new caller cannot silently
+    bring the per-angle HEADs back; both callers build one per request
+    (``StoragePresence(None)`` in local mode, which delegates to the
+    project's own local checks).
     """
     primary = next((v for v in stage.videos if v.role == "primary"), None)
     if primary is None:
@@ -350,7 +360,7 @@ def _audit_trim_targets(
         # distinct: ``source_unreachable`` means storage raised,
         # ``source_missing`` means it answered no.
         try:
-            present = project.source_present(shooter_root, video.path)
+            present = presence.source_present(project, shooter_root, video.path)
         except Exception:  # noqa: BLE001 -- defensive
             _skip(video, "source_unreachable")
             continue
@@ -358,7 +368,7 @@ def _audit_trim_targets(
             _skip(video, "source_missing")
             continue
         cache = audio_helpers.trimmed_video_path(shooter_root, stage.stage_number, video, project=project)
-        if audio_helpers.trim_available(project, cache):
+        if presence.trim_available(project, cache):
             _skip(video, "already_cached")
             continue
         targets.append(video)
@@ -14924,8 +14934,16 @@ def create_app(
         match_root = state.match_root
         return match_root, state.match()
 
-    def _classify_shooter(shooter_root: Path, match: match_model.Match) -> ShooterListEntry:
-        """Build a list entry for a single shooter directory."""
+    def _classify_shooter(
+        shooter_root: Path, match: match_model.Match, presence: StoragePresence | None
+    ) -> ShooterListEntry:
+        """Build a list entry for a single shooter directory.
+
+        ``presence`` is the request's storage index (#1180), or ``None`` on
+        a share request: the ``stages_missing_trim`` count only gates the
+        Rebuild button, which the anonymous share shell never renders, so a
+        share request reports 0 and makes no storage calls at all.
+        """
         # ``shooter_root.name`` is the slug; the accessor loads the project
         # doc from Postgres (hosted) or disk (local) + binds storage.
         legacy = state.shooter_project(shooter_root.name)
@@ -14942,7 +14960,13 @@ def create_app(
         # A stage counts once however many of its angles are uncached --
         # the field is a stage count, and the CTA it drives rebuilds the
         # whole stage in one click.
-        stages_missing_trim = sum(1 for s in legacy.stages if _audit_trim_targets(legacy, shooter_root, s)[0])
+        stages_missing_trim = (
+            0
+            if presence is None
+            else sum(
+                1 for s in legacy.stages if _audit_trim_targets(legacy, shooter_root, s, presence=presence)[0]
+            )
+        )
         # Camera grouping: ``(make, model, mount)`` -> [(role, count, stages)].
         groups: dict[tuple[str | None, str | None, str | None], dict[str, Any]] = {}
         total_videos = 0
@@ -15127,11 +15151,16 @@ def create_app(
     def list_match_shooters() -> ShooterListResponse:
         """List every shooter in the currently-bound match with coverage."""
         match_root, match = _resolve_match_context()
+        # One storage index for the whole request (#1180): the raw-upload
+        # listing is shared by every shooter, the trim listing is per
+        # shooter. A share request gets none: its viewer never sees the
+        # count the index exists to compute.
+        presence = None if current_share_request.get() else StoragePresence(state.storage)
         entries: list[ShooterListEntry] = []
         for slug in match.shooters:
             shooter_root = match_model.Match.shooter_root(match_root, slug)
             try:
-                entries.append(_classify_shooter(shooter_root, match))
+                entries.append(_classify_shooter(shooter_root, match, presence))
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Skipping shooter %s: %s", slug, exc)
                 continue
@@ -15599,8 +15628,9 @@ def create_app(
 
         jobs_submitted: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
+        presence = StoragePresence(state.storage)
         for stage in proj.stages:
-            targets, stage_skips = _audit_trim_targets(proj, shooter_root, stage)
+            targets, stage_skips = _audit_trim_targets(proj, shooter_root, stage, presence=presence)
             skipped.extend(stage_skips)
             for video in targets:
                 existing = await state.jobs.find_active(
