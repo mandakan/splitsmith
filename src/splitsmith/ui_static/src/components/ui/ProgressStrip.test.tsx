@@ -24,14 +24,18 @@ function job(over: Partial<Job>): Job {
   } as Job;
 }
 
-function state(jobs: Job[]): JobsState {
+/** ``batch`` defaults to the active jobs: a batch whose first poll is now. */
+function state(jobs: Job[], batch?: string[]): JobsState {
+  const running = jobs.filter((j) => j.status === "running");
+  const pending = jobs.filter((j) => j.status === "pending");
   return {
     jobs,
-    running: jobs.filter((j) => j.status === "running"),
-    pending: jobs.filter((j) => j.status === "pending"),
+    running,
+    pending,
     failed: jobs.filter((j) => j.status === "failed" && !j.acknowledged),
     error: null,
     retryRefusal: null,
+    batch: new Set(batch ?? [...running, ...pending].map((j) => j.id)),
     refresh: vi.fn(),
     acknowledge: vi.fn(),
     acknowledgeAll: vi.fn(),
@@ -59,6 +63,34 @@ describe("ProgressStrip", () => {
     expect(screen.getByRole("status")).toHaveTextContent(/detect shots.*stage 9/i);
     expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "60");
     expect(screen.getByText(/1 of 2/)).toBeInTheDocument();
+  });
+
+  it("counts the current batch, not the old succeeded rows the poll list carries", () => {
+    // Hosted, the list keeps the 20 most recent finished jobs; none of
+    // them belongs to this two-job batch.
+    const old = Array.from({ length: 20 }, (_, i) =>
+      job({ id: `old${i}`, status: "succeeded", progress: null }),
+    );
+    const { rerender } = render(
+      <ProgressStrip
+        state={state([...old, job({}), job({ id: "j2", status: "pending" })])}
+        onOpen={() => {}}
+        onDismissFailed={() => {}}
+      />,
+    );
+    expect(screen.getByText("1 of 2")).toBeInTheDocument();
+
+    rerender(
+      <ProgressStrip
+        state={state(
+          [...old, job({ status: "succeeded" }), job({ id: "j2", status: "running" })],
+          ["j1", "j2"],
+        )}
+        onOpen={() => {}}
+        onDismissFailed={() => {}}
+      />,
+    );
+    expect(screen.getByText("2 of 2")).toBeInTheDocument();
   });
 
   it("shows a failed job until dismissed", () => {

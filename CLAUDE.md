@@ -570,8 +570,9 @@ and fetches triage once on mount (not again when the project arrives).
 The jobs poll (``GET /api/me/jobs``, every 5 s per open tab) is bounded
 (#1182): hosted ``PostgresJobBackend.list`` returns every active job and
 every unacknowledged failure plus the ``RECENT_FINISHED_RETAINED`` most
-recent others (never the account's whole history -- the strip's "done"
-count and the SyncCard's job echo are the only readers of terminal rows),
+recent others (never the account's whole history -- the SyncCard's job
+echo is the only reader of terminal rows; the strip's "N of M" counts its
+own batch, ``lib/jobBatch``, never the list's terminal rows, #1190),
 and the route nulls ``result`` and ``timings`` on each entry. A job's
 result is read through ``GET /api/me/jobs/{id}`` (``pollJob``), so a new
 SPA surface that needs a result fetches the job, never the list;

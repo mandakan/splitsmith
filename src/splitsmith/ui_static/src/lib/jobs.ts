@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ApiError, api, featureRefusal, type Job } from "@/lib/api";
+import { nextBatch } from "@/lib/jobBatch";
 
 const ACTIVE_POLL_MS = 1000;
 const IDLE_POLL_MS = 5000;
@@ -38,6 +39,9 @@ export interface JobsState {
   /** A retry the server refused for the account (``feature_required``):
    *  the job it was for and the sentence to show in place of Retry. */
   retryRefusal: { jobId: string; text: string } | null;
+  /** Ids of the strip's current batch (``lib/jobBatch``): every job seen
+   *  active since the active set was last empty. What "N of M" counts. */
+  batch: ReadonlySet<string>;
   refresh: () => Promise<void>;
   acknowledge: (job: Job) => Promise<void>;
   acknowledgeAll: () => Promise<void>;
@@ -49,6 +53,7 @@ export function useJobs(): JobsState {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [retryRefusal, setRetryRefusal] = useState<JobsState["retryRefusal"]>(null);
+  const [batch, setBatch] = useState<ReadonlySet<string>>(() => new Set());
   const abortRef = useRef<AbortController | null>(null);
 
   const refresh = useCallback(async () => {
@@ -58,6 +63,7 @@ export function useJobs(): JobsState {
     try {
       const list = await api.listJobs({ signal: controller.signal });
       setJobs(list);
+      setBatch((prev) => nextBatch(prev, stripVisible(list).filter(isJobActive)));
       setError(null);
     } catch (e) {
       if (controller.signal.aborted) return;
@@ -135,6 +141,7 @@ export function useJobs(): JobsState {
     failed,
     error,
     retryRefusal,
+    batch,
     refresh,
     acknowledge,
     acknowledgeAll,
