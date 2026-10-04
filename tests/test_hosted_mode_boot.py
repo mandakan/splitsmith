@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import threading
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -378,3 +379,209 @@ def test_create_app_launcher_wiring_and_boot_retrigger_lifespan(
     assert any(
         "boot re-trigger" in r.message and "failed" in r.message for r in caplog.records
     ), "boot_retrigger warning not logged - lifespan may not have fired"
+
+
+def test_hosted_wiring_installs_loop_engines_and_the_process_runner(hosted_db: str) -> None:
+    from splitsmith.async_bridge import get_runner
+    from splitsmith.db import LoopEngines
+    from splitsmith.ui.server import create_app
+
+    app = create_app()
+    state = app.state.splitsmith_state
+    assert isinstance(state.db_engines, LoopEngines)
+    assert state.db_engines.pooled is False, "SQLite in tests: one NullPool engine, today's behaviour"
+    runner = get_runner()
+    assert runner is not None and runner.is_running
+
+
+def test_second_create_app_reuses_the_process_runner(hosted_db: str) -> None:
+    from splitsmith.async_bridge import get_runner
+    from splitsmith.ui.server import create_app
+
+    create_app()
+    first = get_runner()
+    create_app()
+    assert get_runner() is first
+    assert sum(1 for t in threading.enumerate() if t.name == "splitsmith-db-runner") == 1
+
+
+def test_local_mode_builds_no_engines_and_installs_no_runner(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Desktop / ``splitsmith ui``: never a Postgres engine, never a runner.
+    ``run_sync`` keeps its asyncio.run path by construction."""
+    from splitsmith.async_bridge import get_runner, install_runner
+    from splitsmith.ui.server import create_app
+
+    # conftest's ``_stop_process_db_runner`` already stops any runner a
+    # previous test left; stop one here too so this test never depends on it.
+    leftover = get_runner()
+    if leftover is not None:
+        install_runner(None)
+        leftover.stop()
+    monkeypatch.delenv("SPLITSMITH_MODE", raising=False)
+    monkeypatch.delenv("SPLITSMITH_DATABASE_URL", raising=False)
+    app = create_app()
+    assert app.state.splitsmith_state.db_engines is None
+    assert get_runner() is None
+
+
+def test_hosted_lifespan_adopts_the_app_loop_and_disposes_it_on_exit(
+    hosted_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The main loop (uvicorn's; TestClient's portal here) adopts itself at
+    startup and disposes its engine at shutdown. On SQLite both are no-ops
+    inside LoopEngines, so assert through a spy."""
+    from fastapi.testclient import TestClient
+
+    from splitsmith.ui.server import create_app
+
+    app = create_app()
+    engines = app.state.splitsmith_state.db_engines
+    calls: list[str] = []
+    orig_adopt, orig_dispose = engines.adopt_current_loop, engines.dispose_current_loop
+
+    def _adopt():  # noqa: ANN202
+        calls.append("adopt")
+        return orig_adopt()
+
+    async def _dispose() -> None:
+        calls.append("dispose")
+        await orig_dispose()
+
+    monkeypatch.setattr(engines, "adopt_current_loop", _adopt)
+    monkeypatch.setattr(engines, "dispose_current_loop", _dispose)
+    with TestClient(app):
+        assert calls == ["adopt"]
+    assert calls == ["adopt", "dispose"]
+
+
+def _spy_on_loop_engines(engines: object, calls: list[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    orig_adopt = engines.adopt_current_loop  # type: ignore[attr-defined]
+    orig_dispose = engines.dispose_current_loop  # type: ignore[attr-defined]
+
+    def _adopt():  # noqa: ANN202
+        calls.append("adopt")
+        return orig_adopt()
+
+    async def _dispose() -> None:
+        calls.append("dispose")
+        await orig_dispose()
+
+    monkeypatch.setattr(engines, "adopt_current_loop", _adopt)
+    monkeypatch.setattr(engines, "dispose_current_loop", _dispose)
+
+
+def test_hosted_lifespan_adopts_before_the_boot_duties(
+    hosted_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Adopt precedes the first database use (the boot retrigger here), so
+    the boot duties already run on the app loop's pooled engine."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from splitsmith.ui.server import _hosted_boot_lifespan, create_app
+
+    state = create_app().state.splitsmith_state
+    calls: list[str] = []
+    _spy_on_loop_engines(state.db_engines, calls, monkeypatch)
+
+    async def _retrigger() -> None:
+        calls.append("retrigger")
+
+    state.boot_retrigger = _retrigger
+    lifespan = _hosted_boot_lifespan(state)
+    assert lifespan is not None
+    with TestClient(FastAPI(lifespan=lifespan)):
+        pass
+    assert calls == ["adopt", "retrigger", "dispose"]
+
+
+def test_hosted_lifespan_disposes_when_a_boot_duty_fails(
+    hosted_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A boot duty that raises after the adopt still disposes the engine.
+
+    This is the case that pins the lifespan's ``finally``: TestClient sends a
+    normal ``lifespan.shutdown`` even when the ``with`` body raises, so an
+    exception there never reaches the generator and cannot tell a
+    ``finally`` from code after a bare ``yield``."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from splitsmith.ui.server import _hosted_boot_lifespan, create_app
+
+    state = create_app().state.splitsmith_state
+    calls: list[str] = []
+    _spy_on_loop_engines(state.db_engines, calls, monkeypatch)
+
+    async def _retrigger() -> None:
+        calls.append("retrigger")
+        raise RuntimeError("retrigger down")
+
+    state.boot_retrigger = _retrigger
+    lifespan = _hosted_boot_lifespan(state)
+    assert lifespan is not None
+    with pytest.raises(RuntimeError, match="retrigger down"):
+        with TestClient(FastAPI(lifespan=lifespan)):
+            pass
+    assert calls == ["adopt", "retrigger", "dispose"]
+
+
+def test_rewiring_reuses_the_process_engines_so_the_runner_loop_stays_pooled(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The self-hosted agent calls ``run_worker`` once per wake in one process,
+    so ``_apply_hosted_mode_wiring`` runs once per drain. The second wiring
+    must reuse the first's ``LoopEngines``: the process ``DbRunner`` adopted
+    its loop into that object, and a fresh one would serve every job-thread
+    ``run_sync`` call from the NullPool fallback (#1178)."""
+    from typing import Any
+
+    from sqlalchemy.pool import NullPool
+
+    from splitsmith.async_bridge import get_runner
+    from splitsmith.db import engine as engine_mod
+    from splitsmith.ui.server import AppState, _apply_hosted_mode_wiring
+
+    made: list[Any] = []
+
+    class _FakeEngine:
+        def __init__(self, url: str, kwargs: dict[str, Any]) -> None:
+            self.url = url
+            self.kwargs = kwargs
+
+        async def dispose(self) -> None:
+            return None
+
+    def _fake_create(url: str, **kwargs: Any) -> _FakeEngine:
+        made.append(_FakeEngine(url, kwargs))
+        return made[-1]
+
+    monkeypatch.setattr(engine_mod, "create_async_engine", _fake_create)
+    monkeypatch.setenv("SPLITSMITH_MODE", "hosted")
+    monkeypatch.setenv("SPLITSMITH_DATABASE_URL", "postgresql+asyncpg://u:s3cret@h/db")
+    monkeypatch.setenv("SPLITSMITH_PUBLIC_URL", PUBLIC_URL)
+
+    caplog.set_level("INFO", logger="splitsmith.ui.server")
+    first = AppState()
+    _apply_hosted_mode_wiring(first, worker=True)
+    second = AppState()
+    _apply_hosted_mode_wiring(second, worker=True)
+
+    assert first.db_engines is not None and first.db_engines.pooled
+    assert second.db_engines is first.db_engines
+
+    runner = get_runner()
+    assert runner is not None and runner.is_running
+
+    async def _ask() -> Any:
+        assert second.db_engines is not None
+        return second.db_engines.for_current_loop()
+
+    on_runner = runner.run(_ask())
+    assert on_runner.kwargs.get("poolclass") is not NullPool, "runner loop fell back to NullPool"
+
+    # The wiring names the driver and whether it pooled; never the URL.
+    assert "hosted database: driver=postgresql+asyncpg pooled=True" in caplog.text
+    assert "s3cret" not in caplog.text

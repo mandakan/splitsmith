@@ -3,7 +3,7 @@
 import os
 import re
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -543,3 +543,34 @@ def _isolate_user_config(tmp_path_factory: pytest.TempPathFactory) -> Path:
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
+
+
+@pytest.fixture(autouse=True)
+def _stop_process_db_runner() -> Iterator[None]:
+    """Stop and uninstall the process ``DbRunner`` and forget the hosted
+    wiring's cached ``LoopEngines`` after every test (#1178).
+
+    Hosted ``create_app`` installs a process-global runner. Left alive, it
+    would carry into every later test in the same xdist worker: local-mode
+    tests would send ``run_sync`` through it instead of ``asyncio.run``, and
+    the next hosted ``create_app`` would reuse a runner whose ``on_start``
+    adopted the previous test's engines. ``install_runner(None)`` alone only
+    rebinds the global and leaves the thread running.
+    """
+    import sys
+    import threading
+
+    from splitsmith.async_bridge import get_runner, install_runner
+
+    yield
+    # Hosted wiring caches its ``LoopEngines`` per process with the runner.
+    # ``getattr``: a test may have left a stub module under that name.
+    reset = getattr(sys.modules.get("splitsmith.ui.server"), "_reset_process_db_state", None)
+    if reset is not None:
+        reset()
+    runner = get_runner()
+    if runner is not None:
+        install_runner(None)
+        runner.stop()
+    leaked = [t.name for t in threading.enumerate() if t.name == "splitsmith-db-runner" and t.is_alive()]
+    assert not leaked, f"a DbRunner thread outlived its test: {leaked}"

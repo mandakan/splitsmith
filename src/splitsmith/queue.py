@@ -391,14 +391,23 @@ async def run_worker(
     )
 
     state = await asyncio.to_thread(build_worker_state)
-    _configure_app_logging()
+    engines = state.db_engines
+    app: Any = None
     try:
-        await asyncio.to_thread(warm_ensemble_runtime)
-    except Exception:  # noqa: BLE001 - warmup is best-effort; cold load is re-timed at job time
-        logger.warning("ensemble warmup failed on worker boot; first shot_detect will cold-load")
-    _attach_procrastinate_logging()
-    app = await _open_app_with_retry(database_url, state)
-    try:
+        if engines is not None:
+            # The worker's main loop is long-lived: pooled engine (#1178). Job
+            # bodies on ``asyncio.to_thread`` threads reach the database through
+            # ``run_sync`` -> the process DbRunner, which adopted its own loop.
+            # Adopted inside the ``try`` so the ``finally`` disposes it however
+            # boot ends, a failed ``_open_app_with_retry`` included.
+            engines.adopt_current_loop()
+        _configure_app_logging()
+        try:
+            await asyncio.to_thread(warm_ensemble_runtime)
+        except Exception:  # noqa: BLE001 - warmup is best-effort; cold load is re-timed at job time
+            logger.warning("ensemble warmup failed on worker boot; first shot_detect will cold-load")
+        _attach_procrastinate_logging()
+        app = await _open_app_with_retry(database_url, state)
         options: dict[str, Any] = {
             "queues": queues,
             "concurrency": concurrency,
@@ -417,7 +426,12 @@ async def run_worker(
             await _run_worker_until(app, stop_event, options)
         logger.info("worker: drain complete (wait=%s); shutting down", wait)
     finally:
-        await app.connector.close_async()
+        try:
+            if app is not None:
+                await app.connector.close_async()
+        finally:
+            if engines is not None:
+                await engines.dispose_current_loop()
 
 
 async def _run_worker_until(app: Any, stop_event: asyncio.Event, options: dict[str, Any]) -> None:

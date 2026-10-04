@@ -251,17 +251,17 @@ def _cancel_resumable_jobs(jobs: Any) -> None:
 
     The :class:`JobBackend` API is async; ``run_embedded``'s teardown
     runs on a plain (non-async) thread, so each call is bridged through
-    ``asyncio.run``. Best-effort: any failure here is logged and
-    swallowed -- a stuck cancel must not block the shutdown path it's
-    meant to speed up.
+    ``run_sync`` (a fresh ``asyncio.run`` here: local mode installs no
+    runner). Best-effort: any failure here is logged and swallowed -- a
+    stuck cancel must not block the shutdown path it's meant to speed up.
     """
-    import asyncio
+    from ..async_bridge import run_sync
 
     for kind in _RESUMABLE_JOB_KINDS:
         try:
-            job = asyncio.run(jobs.find_active(kind=kind))
+            job = run_sync(jobs.find_active(kind=kind))
             if job is not None:
-                asyncio.run(jobs.cancel(job.id))
+                run_sync(jobs.cancel(job.id))
         except Exception:  # noqa: BLE001 -- shutdown path must never raise
             logger.warning("failed to cancel resumable job kind %r on shutdown", kind, exc_info=True)
 

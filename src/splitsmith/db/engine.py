@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import weakref
 from collections.abc import Callable
+from typing import Any
 
 from sqlalchemy import event, text
 from sqlalchemy.engine import Connection
@@ -32,20 +35,13 @@ def create_engine(url: str, *, echo: bool = False, pool_disabled: bool = False) 
     ``echo=True`` dumps every SQL statement to stdout -- useful
     for debugging; never set this in production.
 
-    ``pool_disabled=True`` uses :class:`NullPool` so every
-    ``session()`` opens a fresh DB connection and closes it on
-    release. Required when the engine is shared across multiple
-    short-lived event loops (each ``asyncio.run`` call), as is the
-    case for the hosted-mode boot path + the
-    :class:`PostgresJobBackend` worker thread pool. asyncpg
-    connections are event-loop-bound; a pooled connection created
-    in loop A and reused in loop B crashes with "attached to a
-    different loop". NullPool sidesteps the issue at the cost of a
-    per-call TCP handshake -- acceptable for the call rates here
-    (handler I/O + worker callbacks, not OLTP-style hot loops).
-    Local-mode SQLite/aiosqlite is forgiving and doesn't need this.
+    ``pool_disabled=True`` uses :class:`NullPool` so every ``session()``
+    opens a fresh DB connection and closes it on release. The hosted
+    wiring no longer uses it (see :class:`LoopEngines`); it remains for
+    the tests that drive a store through many short-lived event loops on
+    purpose, and for callers that want one connection per call.
     """
-    kwargs: dict = {"echo": echo}
+    kwargs: dict[str, Any] = {"echo": echo}
     if pool_disabled:
         kwargs["poolclass"] = NullPool
     return create_async_engine(url, **kwargs)
@@ -61,6 +57,140 @@ def sessionmaker(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
     return async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 
+_POOLED_DRIVERS = ("postgresql+asyncpg://",)
+
+
+class LoopEngines:
+    """One pooled :class:`AsyncEngine` per *adopted* event loop.
+
+    asyncpg binds a connection to the loop that created it; a pooled
+    connection handed to another loop crashes with "attached to a
+    different loop" (#423). So an engine with a real pool may only serve
+    one loop, and only a long-lived one is worth a pool. The hosted
+    process has exactly two: the main loop (uvicorn's in ``serve``, the
+    Procrastinate worker's in ``worker``) and the ``DbRunner`` loop that
+    every sync caller submits to. Each adopts itself with
+    :meth:`adopt_current_loop` and gets its own engine with
+    ``pool_size=5, max_overflow=10, pool_pre_ping=True``.
+
+    Any other loop -- a ``concurrent.futures`` thread's ``asyncio.run``,
+    the re-entrant fallback in :func:`splitsmith.async_bridge.run_sync`
+    -- gets the shared **fallback** engine, a :class:`NullPool` engine
+    that never reuses a connection and is therefore safe from every loop.
+    That is exactly what the whole hosted process used before #1178.
+
+    Non-asyncpg URLs (SQLite in tests) are not loop-bound and ``:memory:``
+    is one database per connection, so they get the fallback engine from
+    every method: one NullPool engine, as the hosted wiring built before.
+
+    Loop entries are weak-keyed, but that only releases a loop whose engine
+    holds no connections -- a pooled asyncpg engine with checked-in
+    connections keeps its loop key alive through the value, since each
+    connection references the loop that opened it. Adopters dispose
+    explicitly on the way out (:meth:`dispose_current_loop`) rather than
+    relying on garbage collection to reclaim a loop's engine.
+
+    The pool adds no traffic of its own: no warm-up, no periodic ping, no
+    ``pool_recycle``. Neon closes an idle connection after five minutes
+    and suspends the compute; ``pool_pre_ping`` turns the closed
+    connection into a silent reconnect on the next checkout. That is the
+    scale-to-zero condition from the 2026-07-03 cost plan.
+    """
+
+    def __init__(self, url: str, *, echo: bool = False, pool_size: int = 5, max_overflow: int = 10) -> None:
+        self._url = url
+        self._echo = echo
+        self._pool_size = pool_size
+        self._max_overflow = max_overflow
+        self._pooled = url.startswith(_POOLED_DRIVERS)
+        self._by_loop: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, AsyncEngine] = (
+            weakref.WeakKeyDictionary()
+        )
+        self._fallback: AsyncEngine | None = None
+
+    @property
+    def pooled(self) -> bool:
+        """Whether adopted loops get a real pool (asyncpg) or the fallback (everything else)."""
+        return self._pooled
+
+    @property
+    def adopted_count(self) -> int:
+        return len(self._by_loop)
+
+    def _fallback_engine(self) -> AsyncEngine:
+        if self._fallback is None:
+            self._fallback = create_async_engine(self._url, echo=self._echo, poolclass=NullPool)
+        return self._fallback
+
+    def adopt_current_loop(self) -> AsyncEngine:
+        """Mark the running loop long-lived and return its pooled engine
+        (created on first call). For a non-pooled URL this is the fallback.
+
+        Requires a running loop even for a non-pooled URL: a caller outside
+        any loop is a misuse this must not paper over just because SQLite
+        happens not to need the loop to pick an engine.
+        """
+        loop = asyncio.get_running_loop()
+        if not self._pooled:
+            return self._fallback_engine()
+        engine = self._by_loop.get(loop)
+        if engine is None:
+            engine = create_async_engine(
+                self._url,
+                echo=self._echo,
+                pool_size=self._pool_size,
+                max_overflow=self._max_overflow,
+                pool_timeout=30,
+                pool_pre_ping=True,
+            )
+            self._by_loop[loop] = engine
+        return engine
+
+    def for_current_loop(self) -> AsyncEngine:
+        """The running loop's engine if it was adopted, else the fallback.
+
+        Requires a running loop even for a non-pooled URL -- see
+        :meth:`adopt_current_loop`.
+        """
+        loop = asyncio.get_running_loop()
+        if not self._pooled:
+            return self._fallback_engine()
+        engine = self._by_loop.get(loop)
+        return engine if engine is not None else self._fallback_engine()
+
+    async def dispose_current_loop(self) -> None:
+        """Dispose and forget the running loop's engine; no-op if it has none.
+
+        Must run *on* that loop: asyncpg closes connections on the loop that
+        owns them.
+        """
+        if not self._pooled:
+            return
+        loop = asyncio.get_running_loop()
+        engine = self._by_loop.pop(loop, None)
+        if engine is not None:
+            await engine.dispose()
+
+    async def dispose_fallback(self) -> None:
+        engine, self._fallback = self._fallback, None
+        if engine is not None:
+            await engine.dispose()
+
+
+def loop_sessionmaker(engines: LoopEngines) -> Callable[[], AsyncSession]:
+    """A session factory that picks the current loop's engine at open time.
+
+    Same ``() -> AsyncSession`` contract as :func:`sessionmaker`'s result
+    (every store calls ``self._session_factory()`` with no arguments and
+    ``async with``-es it), same ``expire_on_commit=False``.
+    """
+
+    def _open() -> AsyncSession:
+        return AsyncSession(engines.for_current_loop(), expire_on_commit=False)
+
+    return _open
+
+
 def _tenant_guc_after_begin(user_id: str) -> Callable[[Session, SessionTransaction, Connection], None]:
     """Build an ``after_begin`` listener that pins ``app.user_id`` for the
     transaction that just began.
@@ -68,11 +198,13 @@ def _tenant_guc_after_begin(user_id: str) -> Callable[[Session, SessionTransacti
     Uses ``set_config(..., true)`` -- the function form of ``SET LOCAL``,
     so the value is scoped to the current transaction and cleared at its
     end. This is set *per transaction* rather than once per session on
-    purpose: under :class:`NullPool` (the hosted engine), a
-    :class:`~sqlalchemy.orm.Session` releases its connection on every
-    commit/rollback and acquires a *fresh* one for the next transaction,
-    so a session-level ``SET`` would be lost the moment a store method
-    runs a second query after a commit (e.g. ``PostgresMatchStore.upsert``'s
+    purpose: a :class:`~sqlalchemy.orm.Session`'s connection is not
+    guaranteed stable across transactions. The session releases it on
+    every commit/rollback, and the next transaction may get a different
+    one (the per-loop pool of :class:`LoopEngines` may hand back another
+    pooled connection; the NullPool fallback always opens a fresh one).
+    A session-level ``SET`` would be lost the moment a store method runs
+    a second query after a commit (e.g. ``PostgresMatchStore.upsert``'s
     IntegrityError retry). Re-setting on each ``after_begin`` guarantees
     every connection a query lands on carries the GUC.
 
@@ -100,8 +232,8 @@ def _tenant_guc_after_begin(user_id: str) -> Callable[[Session, SessionTransacti
         # matter which code path tries - including code that never heard
         # of the share ContextVars. SET TRANSACTION must precede the
         # transaction's first query, so it goes before the GUC SELECT.
-        # Same per-transaction reasoning as the GUC itself: NullPool
-        # hands each transaction a fresh connection.
+        # Same per-transaction reasoning as the GUC itself: the next
+        # transaction may run on a different connection.
         if share_request_is_read_only():
             connection.execute(text("SET TRANSACTION READ ONLY"))
         connection.execute(
@@ -113,7 +245,7 @@ def _tenant_guc_after_begin(user_id: str) -> Callable[[Session, SessionTransacti
 
 
 def tenant_session_factory(
-    base_factory: async_sessionmaker[AsyncSession],
+    base_factory: Callable[[], AsyncSession],
     user_id: str,
 ) -> Callable[[], AsyncSession]:
     """Wrap ``base_factory`` so every session it opens sets the

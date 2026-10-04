@@ -510,6 +510,30 @@ slim local install imports it). The SPA reads ``lib/access.can`` /
 facts (worker env, ``FORWARDED_ALLOW_IPS``, the waitlist cut-over) are in
 ``docs/saas-readiness/11-environment-strategy.md``.
 
+## Hosted database connections (#1178)
+
+asyncpg binds a connection to the event loop that created it; using it
+from another loop crashes with "attached to a different loop" (#423).
+Hosted mode therefore runs database work on exactly two long-lived
+loops per process -- the main loop (uvicorn's, or the Procrastinate
+worker's) and the ``DbRunner`` thread's (``splitsmith.async_bridge``) --
+and ``db.engine.LoopEngines`` gives each *adopted* loop its own pooled
+engine (``pool_size=5, max_overflow=10, pool_pre_ping=True``). Any other
+loop gets the shared NullPool fallback, which never reuses a connection.
+Every sync caller (the state accessors, the job backend's thread-side
+bridges, ``youtube_api``) goes through ``run_sync``, never
+``asyncio.run``: a new ``asyncio.run(<store coroutine>)`` anywhere on
+the hosted path is a per-call connection again. Local mode builds no
+engine and installs no runner, so ``run_sync`` there is ``asyncio.run``
+as before. The pool adds no traffic of its own (no warm-up, no ping, no
+``pool_recycle``): Neon closes idle connections after five minutes and
+scales to zero, and ``pre_ping`` reconnects on the next request. The
+regression gate is ``tests/test_pooling_docker.py`` (the compose stack
+is what #423 crashed on) and proves pooling by a ``pg_stat_database.sessions``
+delta over 40 requests, not by connection count, which NullPool also keeps flat;
+SQLite in tests keeps one NullPool engine on purpose, a per-loop ``:memory:``
+engine would be a database per loop.
+
 ## State doc kinds and the sync allowlist
 
 Adding a ``doc_kind`` to ``state_docs`` is not a local change. The sync

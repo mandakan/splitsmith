@@ -9677,10 +9677,12 @@ def test_hosted_boot_lifespan_runs_on_app_startup(monkeypatch) -> None:
     class _FakeState:
         boot_retrigger = staticmethod(fake_retrigger)
         workers_store = None
+        db_engines = None
 
     class _FakeStateNone:
         boot_retrigger = None
         workers_store = None
+        db_engines = None
 
     # Helper must return None when no hook is wired.
     assert _hosted_boot_lifespan(_FakeStateNone()) is None
@@ -9721,6 +9723,7 @@ def test_hosted_boot_lifespan_returned_for_seeding_alone(monkeypatch) -> None:
     class _FakeState:
         boot_retrigger = None
         workers_store = _FakeWorkersStore()
+        db_engines = None
 
     lifespan = _hosted_boot_lifespan(_FakeState())
     assert lifespan is not None

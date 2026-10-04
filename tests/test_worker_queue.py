@@ -87,9 +87,10 @@ def test_run_worker_warms_ensemble_and_inits_sentry(monkeypatch: pytest.MonkeyPa
     # Stub the ui.server symbols run_worker imports lazily.
     server = types.ModuleType("splitsmith.ui.server")
 
-    def _build_worker_state() -> object:
+    def _build_worker_state() -> types.SimpleNamespace:
         calls.append("build_worker_state")
-        return object()
+        # No per-loop engines to adopt (#1178).
+        return types.SimpleNamespace(db_engines=None)
 
     def _configure_app_logging() -> None:
         calls.append("configure_logging")
@@ -137,7 +138,7 @@ def test_run_worker_warmup_failure_is_non_fatal(monkeypatch: pytest.MonkeyPatch)
 
     calls: list[str] = []
     server = types.ModuleType("splitsmith.ui.server")
-    server.build_worker_state = lambda: object()  # type: ignore[attr-defined]
+    server.build_worker_state = lambda: types.SimpleNamespace(db_engines=None)  # type: ignore[attr-defined]
     server._configure_app_logging = lambda: None  # type: ignore[attr-defined]
 
     def _warm_boom() -> None:
@@ -180,7 +181,7 @@ def test_run_worker_defaults_to_blocking_drain(monkeypatch: pytest.MonkeyPatch) 
     import types
 
     server = types.ModuleType("splitsmith.ui.server")
-    server.build_worker_state = lambda: object()  # type: ignore[attr-defined]
+    server.build_worker_state = lambda: types.SimpleNamespace(db_engines=None)  # type: ignore[attr-defined]
     server._configure_app_logging = lambda: None  # type: ignore[attr-defined]
     server.warm_ensemble_runtime = lambda: None  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "splitsmith.ui.server", server)
@@ -223,7 +224,7 @@ def test_run_worker_one_shot_drains_and_exits(monkeypatch: pytest.MonkeyPatch) -
     import types
 
     server = types.ModuleType("splitsmith.ui.server")
-    server.build_worker_state = lambda: object()  # type: ignore[attr-defined]
+    server.build_worker_state = lambda: types.SimpleNamespace(db_engines=None)  # type: ignore[attr-defined]
     server._configure_app_logging = lambda: None  # type: ignore[attr-defined]
     server.warm_ensemble_runtime = lambda: None  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "splitsmith.ui.server", server)
@@ -295,7 +296,7 @@ def test_run_worker_retries_db_connect_then_drains(monkeypatch: pytest.MonkeyPat
     import psycopg_pool
 
     server = types.ModuleType("splitsmith.ui.server")
-    server.build_worker_state = lambda: object()  # type: ignore[attr-defined]
+    server.build_worker_state = lambda: types.SimpleNamespace(db_engines=None)  # type: ignore[attr-defined]
     server._configure_app_logging = lambda: None  # type: ignore[attr-defined]
     server.warm_ensemble_runtime = lambda: None  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "splitsmith.ui.server", server)
@@ -378,3 +379,98 @@ def test_worker_command_requires_database_url(monkeypatch: pytest.MonkeyPatch) -
 
     assert result.exit_code == 2
     assert "SPLITSMITH_DATABASE_URL is not set" in result.stdout
+
+
+class _SpyEngines:
+    """Records the worker's per-loop engine calls and the loop each ran on."""
+
+    def __init__(self, calls: list[str]) -> None:
+        self.calls = calls
+        self.loops: list[object] = []
+
+    def adopt_current_loop(self) -> None:
+        import asyncio
+
+        self.calls.append("adopt")
+        self.loops.append(asyncio.get_running_loop())
+
+    async def dispose_current_loop(self) -> None:
+        import asyncio
+
+        self.calls.append("dispose")
+        self.loops.append(asyncio.get_running_loop())
+
+
+def _stub_worker_server(monkeypatch: pytest.MonkeyPatch, calls: list[str]) -> _SpyEngines:
+    import sys
+    import types
+
+    engines = _SpyEngines(calls)
+    server = types.ModuleType("splitsmith.ui.server")
+    server.build_worker_state = lambda: types.SimpleNamespace(db_engines=engines)  # type: ignore[attr-defined]
+    server._configure_app_logging = lambda: None  # type: ignore[attr-defined]
+    server.warm_ensemble_runtime = lambda: None  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "splitsmith.ui.server", server)
+
+    import splitsmith.queue as queue_mod
+
+    monkeypatch.setattr(queue_mod, "init_sentry", lambda **_k: None)
+    return engines
+
+
+def test_run_worker_adopts_its_loop_and_disposes_it_after_close(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hosted worker (#1178): the worker's main loop adopts a pooled engine
+    before the drain and disposes it after the connector closes, on that loop."""
+    import asyncio
+
+    import splitsmith.queue as queue_mod
+
+    calls: list[str] = []
+    engines = _stub_worker_server(monkeypatch, calls)
+
+    class _FakeConnector:
+        async def close_async(self) -> None:
+            calls.append("close")
+
+    class _FakeApp:
+        connector = _FakeConnector()
+
+        async def run_worker_async(self, **_kwargs: object) -> None:
+            calls.append("drain")
+
+    async def _open(_url: str, _state: object) -> _FakeApp:
+        return _FakeApp()
+
+    monkeypatch.setattr(queue_mod, "_open_app_with_retry", _open)
+
+    worker_loops: list[object] = []
+
+    async def _main() -> None:
+        worker_loops.append(asyncio.get_running_loop())
+        await run_worker(_FAKE_PG_URL)
+
+    asyncio.run(_main())
+
+    assert calls == ["adopt", "drain", "close", "dispose"]
+    assert engines.loops == [worker_loops[0], worker_loops[0]]
+
+
+def test_run_worker_disposes_its_engine_when_the_queue_open_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A boot that dies in ``_open_app_with_retry`` still disposes the engine
+    the worker loop adopted; there is no connector to close."""
+    import asyncio
+
+    import splitsmith.queue as queue_mod
+
+    calls: list[str] = []
+    _stub_worker_server(monkeypatch, calls)
+
+    async def _open(_url: str, _state: object) -> object:
+        raise OSError("pooler refused")
+
+    monkeypatch.setattr(queue_mod, "_open_app_with_retry", _open)
+
+    with pytest.raises(OSError, match="pooler refused"):
+        asyncio.run(run_worker(_FAKE_PG_URL))
+
+    assert calls == ["adopt", "dispose"]

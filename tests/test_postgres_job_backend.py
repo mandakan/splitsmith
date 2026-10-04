@@ -910,3 +910,42 @@ def test_find_active_scopes_by_shooter_slug(tmp_path) -> None:
     )
     # A slug-less lookup must not adopt a shooter-scoped job either.
     assert asyncio.run(backend.find_active(kind="shot_detect", stage_number=3)) is None
+
+
+def test_body_side_bridges_land_on_the_installed_runner(tmp_path) -> None:
+    """``_patch`` and ``_is_cancel_requested`` are called from the job
+    thread. With a DbRunner installed they must run on its loop, not on a
+    fresh ``asyncio.run`` loop -- that is the whole point of #1178."""
+    import asyncio
+
+    from splitsmith.async_bridge import DbRunner, install_runner
+    from splitsmith.db import Base, create_engine, sessionmaker
+    from splitsmith.db.job_backend import PostgresJobBackend
+
+    seen: list[asyncio.AbstractEventLoop] = []
+    engine = create_engine(f"sqlite+aiosqlite:///{tmp_path / 'jobs.sqlite'}", pool_disabled=True)
+
+    async def _create_all() -> None:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+    asyncio.run(_create_all())
+    backend = PostgresJobBackend(sessionmaker(engine), user_id="u1", deferrer=None, sweep_on_boot=False)
+
+    original = backend._patch_async
+
+    async def _spy(job_id: str, kwargs: dict) -> None:
+        seen.append(asyncio.get_running_loop())
+        await original(job_id, kwargs)
+
+    backend._patch_async = _spy  # type: ignore[method-assign]
+
+    runner = DbRunner()
+    runner.start()
+    install_runner(runner)
+    try:
+        backend._patch("no-such-job", progress=0.5)
+        assert seen and seen[0] is runner.loop
+    finally:
+        install_runner(None)
+        runner.stop()

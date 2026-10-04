@@ -221,6 +221,8 @@ def _magic_link_login(email: str) -> tuple[str, str]:
         # One event loop for begin + complete: separate ``asyncio.run`` calls
         # would each spin a fresh loop and the second would reuse an asyncpg
         # connection bound to the first ("attached to a different loop").
+        # The production wiring now pools per loop (#1178); this helper is a
+        # standalone client and keeps NullPool deliberately.
         auth = MagicLinkAuth(sessionmaker(create_engine(HOST_DB_URL, pool_disabled=True)), cap)
         await auth.begin_login(email, base_url=API_BASE)
         assert cap.token, "capturing sender never received a magic link"

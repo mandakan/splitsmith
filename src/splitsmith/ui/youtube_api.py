@@ -23,7 +23,6 @@ Never imports ``server`` at module level (the ``device_auth_api`` idiom):
 
 from __future__ import annotations
 
-import asyncio
 import html
 import logging
 import secrets
@@ -38,6 +37,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
 from .. import youtube_sidecar
+from ..async_bridge import run_sync
 from ..sync.commands import record_command_upload
 from ..youtube import oauth, sealed
 from ..youtube.client import QuotaExceededError, YouTubeClient, default_http
@@ -181,9 +181,9 @@ async def _hosted_connection(store: PostgresYouTubeConnectionStore) -> oauth.You
 
 def _hosted_client(store: PostgresYouTubeConnectionStore, conn: oauth.YouTubeConnection) -> YouTubeClient:
     """A client whose ``invalid_grant`` clears the row, not the file. The
-    hook runs on whatever thread the token refresh happens on, never
-    inside a running loop, so ``asyncio.run`` is the right bridge."""
-    return build_client(conn, on_reauthorize=lambda: asyncio.run(store.clear()))
+    hook runs on whatever thread the token refresh happens on; ``run_sync``
+    is the bridge (the process DbRunner in hosted mode)."""
+    return build_client(conn, on_reauthorize=lambda: run_sync(store.clear()))
 
 
 async def _client_for(request: Request) -> tuple[YouTubeClient, oauth.YouTubeConnection]:
@@ -207,7 +207,7 @@ def _job_client(state: Any) -> tuple[YouTubeClient, oauth.YouTubeConnection]:
         raise oauth.NotConfiguredError(
             f"this worker has no {sealed.ENV_TOKEN_KEY}; set it or re-register the agent"
         )
-    conn = asyncio.run(_hosted_connection(store))
+    conn = run_sync(_hosted_connection(store))
     if conn is None:
         raise oauth.NotConnectedError("not connected to YouTube")
     return _hosted_client(store, conn), conn

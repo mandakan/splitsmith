@@ -30,7 +30,7 @@ from .access_requests import (
     NotFoundError,
 )
 from .email import ConsoleEmailSender, EmailSender, LettermintEmailSender, build_email_sender
-from .engine import create_engine, sessionmaker, tenant_session_factory
+from .engine import LoopEngines, create_engine, loop_sessionmaker, sessionmaker, tenant_session_factory
 from .export_presets import PostgresExportPresetStore
 from .job_backend import PostgresJobBackend
 from .magic_link import (
@@ -80,6 +80,7 @@ __all__ = [
     "IssuedSession",
     "LettermintEmailSender",
     "LoginChallenge",
+    "LoopEngines",
     "MagicLinkAuth",
     "MagicLinkTokenRow",
     "MatchRow",
@@ -103,6 +104,7 @@ __all__ = [
     "build_email_sender",
     "build_signup_policy",
     "create_engine",
+    "loop_sessionmaker",
     "new_ulid",
     "sessionmaker",
     "tenant_session_factory",
