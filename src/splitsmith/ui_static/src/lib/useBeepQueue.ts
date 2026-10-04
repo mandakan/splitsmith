@@ -13,7 +13,7 @@
  * does this with the existing ``useConfirm`` dialog.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useOutletContext, useSearchParams } from "react-router-dom";
 
 import {
   ApiError,
@@ -56,6 +56,13 @@ function nextPendingKey(
 
 export function useBeepQueue() {
   const [searchParams, setSearchParams] = useSearchParams();
+  // The match shell's outlet context, when this surface is mounted under
+  // it: the shell holds the queue the Overview and the sidebar badge read
+  // (#1181), and a confirm here can be the only signal that it moved (a
+  // desktop mirror's confirm starts no job). Typed structurally so this
+  // lib module does not import the shell component.
+  const shell = useOutletContext<{ refreshBeepQueue?: () => void } | undefined>();
+  const refreshShellQueue = shell?.refreshBeepQueue;
   const [data, setData] = useState<BeepQueueResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeKey, setActiveKey] = useState<string | null>(null);
@@ -164,13 +171,14 @@ export function useBeepQueue() {
         // pending. The old code selected ``updatedFlat[0]`` every time,
         // which yanked the operator back to stage 1 on every save.
         setActiveKey(nextPendingKey(next, keyOf(item)));
+        refreshShellQueue?.();
       } catch (e) {
         setError(apiErrorText(e, "Could not confirm the beep."));
       } finally {
         setBusy(false);
       }
     },
-    [],
+    [refreshShellQueue],
   );
 
   // Re-detect a beep from scratch. Destructive: it discards the current

@@ -2551,12 +2551,15 @@ class AppState:
         """
         match_id = current_match_id.get()
         store = self.project_state
+        # One shooter's unloadable project (a missing or corrupt doc) skips
+        # that shooter, never the match: the per-shooter loops this replaces
+        # answered for the rest, and the Overview must still render.
         if store is None or match_id is None:
             projects: dict[str, MatchProject] = {}
             for slug in match.shooters:
                 try:
                     projects[slug] = self.shooter_project(slug)
-                except (FileNotFoundError, HTTPException) as exc:
+                except Exception as exc:  # noqa: BLE001 -- isolate per shooter
                     logger.warning("Skipping shooter %s: %s", slug, exc)
             return MatchBundle(projects=projects, audits=None)
         docs = run_sync(store.load_docs_for_matches([match_id]))[match_id]
@@ -2566,7 +2569,10 @@ class AppState:
             if doc is None:
                 logger.warning("Skipping shooter %s: no project document", slug)
                 continue
-            projects[slug] = self._project_from_doc(slug, doc, docs.project_versions.get(slug, 0))
+            try:
+                projects[slug] = self._project_from_doc(slug, doc, docs.project_versions.get(slug, 0))
+            except Exception as exc:  # noqa: BLE001 -- isolate per shooter
+                logger.warning("Skipping shooter %s: %s", slug, exc)
         return MatchBundle(projects=projects, audits=docs.audits)
 
     async def shooter_project_async(self, slug: str) -> MatchProject:

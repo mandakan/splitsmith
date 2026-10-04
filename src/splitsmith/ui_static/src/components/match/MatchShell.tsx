@@ -137,6 +137,11 @@ export interface MatchShellOutletContext {
    *  fetching it again (#1181). Null until the first fetch resolves;
    *  optional because ShareShell's read-only context has none. */
   beepQueue?: BeepQueueResponse | null;
+  /** Refetch ``beepQueue`` now. For writes that change the queue without
+   *  starting a job (a beep confirmed on the phone): the shell's own
+   *  refetch triggers are the shell load and a settled job. Optional for
+   *  the same reason as ``beepQueue``. */
+  refreshBeepQueue?: () => void;
   /** The shell's one jobs-poller snapshot (#631 Task 11's SyncCard reads
    *  this for its "a sync_match job is pending/running" check rather than
    *  running a second poller - lib/jobs.ts's "one poller per shell"
@@ -285,6 +290,20 @@ export function MatchShell() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [beepReviewPending, setBeepReviewPending] = useState<number>(0);
   const [beepQueue, setBeepQueue] = useState<BeepQueueResponse | null>(null);
+  // Pages that change the queue without starting a job (a beep confirmed
+  // on the phone's review surface) call this so the badge and the
+  // Overview's next-step button do not go stale until the next shell load.
+  const refreshBeepQueue = useCallback(() => {
+    api
+      .getBeepQueue()
+      .then((q) => {
+        setBeepReviewPending(q.pending_count);
+        setBeepQueue(q);
+      })
+      .catch(() => {
+        /* keep the last known queue */
+      });
+  }, []);
   // Per-shooter pages (Audit / Coach / Videos / Export) need a shooter in
   // the URL. Rather than forcing the user to the shooter list, default to
   // one -- the URL slug if present, else the shared default-shooter rule
@@ -687,6 +706,7 @@ export function MatchShell() {
               origin,
               capabilities,
               beepQueue,
+              refreshBeepQueue,
               jobs,
               jobsState,
             }}

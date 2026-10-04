@@ -292,8 +292,11 @@ describe("Overview", () => {
 
     await waitFor(() => expect(api.getTriage).toHaveBeenCalled());
     const beforeProject = vi.mocked(api.getTriage).mock.calls.length;
-    // Let the delayed project land (20 ms) and any effect it would trigger run.
-    await new Promise((r) => setTimeout(r, 80));
+    // Wait for the project to have landed and rendered (the placeholder
+    // goes away), then flush a tick so any effect its arrival triggered
+    // has run before counting.
+    await waitFor(() => expect(screen.queryByText("Reading match state...")).toBeNull());
+    await new Promise((r) => setTimeout(r, 30));
     expect([beforeProject, vi.mocked(api.getTriage).mock.calls.length]).toEqual([1, 1]);
     expect(api.getBeepQueue).not.toHaveBeenCalled();
   });

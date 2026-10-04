@@ -130,6 +130,48 @@ def test_route_loads_the_match_in_two_state_docs_queries_whatever_the_shooter_co
     assert with_two == with_three == 2, (with_two, with_three, state_docs_selects)
 
 
+def _add_corrupt_shooter(db_url: str, uid: str, match_id: str, slug: str) -> None:
+    """A shooter whose project doc does not validate as a MatchProject."""
+    sf = sessionmaker(create_engine(db_url))
+    store = ProjectStateStore(sf, user_id=uid)
+
+    async def _seed() -> None:
+        match_doc, version = await store.load_match(match_id)
+        assert match_doc is not None
+        match_doc["shooters"] = [*match_doc["shooters"], slug]
+        await store.save_match(match_id, match_doc, expected_version=version)
+        await store.save_project(match_id, slug, {"stages": "not-a-list"}, expected_version=0)
+
+    asyncio.run(_seed())
+
+
+@pytest.mark.parametrize("route", ["match/triage", "match/triage/summary", "match/beep-queue"])
+def test_a_corrupt_project_doc_skips_that_shooter_not_the_match(
+    route: str, hosted_env: str, hosted_app: tuple[TestClient, _CapturingSender]
+) -> None:
+    """The per-shooter loops skipped a shooter whose doc would not load and
+    answered for the rest; the bundle must keep that isolation, or one bad
+    doc takes the whole Overview down."""
+    client, sender = hosted_app
+    login(client, sender, OWNER)
+    uid = _user_id(hosted_env, OWNER)
+    match_id = _create_match(client)
+    _add_shooter(hosted_env, uid, match_id, "bea")
+    _add_corrupt_shooter(hosted_env, uid, match_id, "broken")
+
+    resp = client.get(f"/api/matches/{match_id}/{route}")
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    if route == "match/triage":
+        assert {c["slug"] for c in body["cells"]} >= {"bea"}
+        assert "broken" not in {c["slug"] for c in body["cells"]}
+    elif route == "match/beep-queue":
+        assert {i["slug"] for g in body["stages"] for i in g["items"]} == {"bea"}
+    else:
+        assert body["flagged_count"] == 0
+
+
 def test_beep_queue_content_is_unchanged_by_the_bundle(
     hosted_env: str, hosted_app: tuple[TestClient, _CapturingSender]
 ) -> None:

@@ -7,7 +7,7 @@
  */
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 
 import { useBeepQueue } from "./useBeepQueue";
 import * as api from "./api";
@@ -120,5 +120,32 @@ describe("useBeepQueue", () => {
     await waitFor(() => expect(result.current.active).not.toBeNull());
     await act(() => result.current.confirm(item()));
     expect(api.api.overrideBeepForVideo).not.toHaveBeenCalled();
+  });
+
+  it("a confirmed beep asks the shell to refetch its queue (#1181)", async () => {
+    // The shell keeps the queue the Overview and the sidebar badge read;
+    // a confirm on this surface starts no job on a desktop mirror, so
+    // nothing else would tell the shell the queue moved.
+    const refreshBeepQueue = vi.fn();
+    function shellWrapper({ children }: { children: React.ReactNode }) {
+      return (
+        <MemoryRouter>
+          <Routes>
+            <Route element={<Outlet context={{ refreshBeepQueue }} />}>
+              <Route path="*" element={children} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      );
+    }
+    vi.mocked(api.api.getBeepQueue).mockResolvedValue(queue([item()]));
+    vi.mocked(api.api.confirmBeepInQueue).mockResolvedValue(queue([]));
+    const { result } = renderHook(() => useBeepQueue(), { wrapper: shellWrapper });
+    await waitFor(() => expect(result.current.active).not.toBeNull());
+    expect(refreshBeepQueue).not.toHaveBeenCalled();
+
+    await act(() => result.current.confirm(item()));
+
+    expect(refreshBeepQueue).toHaveBeenCalledTimes(1);
   });
 });
