@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.57.0](https://github.com/mandakan/splitsmith/compare/v0.56.0...v0.57.0) (2026-10-04)
+
+
+### Features
+
+* **hosted:** pooled database connections per event loop ([#1184](https://github.com/mandakan/splitsmith/issues/1184)) ([4c4f071](https://github.com/mandakan/splitsmith/commit/4c4f0719540a309f2fcb2c6404f38b9262596678))
+
+
+### Performance
+
+* **hosted:** answer source and trim presence from one listing per prefix ([#1186](https://github.com/mandakan/splitsmith/issues/1186)) ([e224250](https://github.com/mandakan/splitsmith/commit/e224250744b8102fb13ec5edeb598bea1192f79f))
+* **hosted:** load the picker's detail for every match in two queries ([#1187](https://github.com/mandakan/splitsmith/issues/1187)) ([38e1f23](https://github.com/mandakan/splitsmith/commit/38e1f23bbd2ee7facb6667c96fa74cf311361f14))
+* **hosted:** the jobs poll carries active jobs and failures, not the account's history ([#1189](https://github.com/mandakan/splitsmith/issues/1189)) ([8ae03f1](https://github.com/mandakan/splitsmith/commit/8ae03f1aae20729cbc4df177a8bfb0db459e0164))
+* **hosted:** triage and beep-queue load the match once; the SPA fetches each once per open ([#1188](https://github.com/mandakan/splitsmith/issues/1188)) ([0bfc91c](https://github.com/mandakan/splitsmith/commit/0bfc91c58332895b3c4e8b39793df391b3e1708a))
+
 ## [0.56.0](https://github.com/mandakan/splitsmith/compare/v0.55.0...v0.56.0) (2026-10-03)
 
 
