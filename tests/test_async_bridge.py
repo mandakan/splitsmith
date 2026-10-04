@@ -230,3 +230,45 @@ def test_fresh_loop_fallback_propagates_contextvars() -> None:
         assert asyncio.run(_outer()) is True
     finally:
         current_share_scope.reset(token)
+
+
+def test_on_close_runs_before_the_cancel_sweep_and_on_stop_after() -> None:
+    """``on_close`` closes resources that own tasks on the loop (#1199), so
+    it must see those tasks alive; ``on_stop`` runs after the sweep."""
+    seen: dict[str, object] = {}
+    holder: dict[str, asyncio.Task[None]] = {}
+
+    def _on_start() -> None:
+        holder["task"] = asyncio.get_running_loop().create_task(asyncio.Event().wait())
+
+    async def _on_close() -> None:
+        seen["close_saw_cancelled"] = holder["task"].cancelled()
+        seen["close_loop"] = asyncio.get_running_loop()
+
+    async def _on_stop() -> None:
+        seen["stop_saw_cancelled"] = holder["task"].cancelled()
+
+    r = DbRunner(on_start=_on_start, on_close=_on_close, on_stop=_on_stop)
+    r.start()
+    loop = r.loop
+    r.stop()
+    assert seen["close_loop"] is loop
+    assert seen["close_saw_cancelled"] is False
+    assert seen["stop_saw_cancelled"] is True
+
+
+def test_on_close_exception_is_logged_and_on_stop_still_runs(caplog: pytest.LogCaptureFixture) -> None:
+    stopped: list[bool] = []
+
+    async def _on_close() -> None:
+        raise RuntimeError("on_close boom")
+
+    async def _on_stop() -> None:
+        stopped.append(True)
+
+    r = DbRunner(on_close=_on_close, on_stop=_on_stop)
+    r.start()
+    with caplog.at_level(logging.WARNING, logger="splitsmith.async_bridge"):
+        r.stop()
+    assert "on_close failed" in caplog.text
+    assert stopped == [True]

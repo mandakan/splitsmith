@@ -58,6 +58,12 @@ class DbRunner:
     hosted wiring passes ``LoopEngines.adopt_current_loop``, so the loop
     gets its pooled engine); ``on_stop`` is awaited on the loop just
     before it closes (``LoopEngines.dispose_current_loop``).
+
+    ``on_close`` is awaited on the loop at stop, *before* the sweep that
+    cancels the loop's tasks (the hosted wiring passes
+    ``LoopEngines.close_loop_resources``): a resource that runs its own
+    tasks on the loop, like the Procrastinate deferrer's psycopg pool
+    (#1199), cannot close once those tasks are cancelled.
     """
 
     def __init__(
@@ -65,11 +71,13 @@ class DbRunner:
         *,
         on_start: Callable[[], object] | None = None,
         on_stop: Callable[[], Awaitable[None]] | None = None,
+        on_close: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         # ``object`` return, not ``None``: the hosted wiring passes
         # ``LoopEngines.adopt_current_loop``, which returns the engine.
         self._on_start = on_start
         self._on_stop = on_stop
+        self._on_close = on_close
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._ready = threading.Event()
@@ -142,18 +150,26 @@ class DbRunner:
         can still be sitting as an unprocessed callback when
         ``run_forever`` returns, because ``call_soon_threadsafe`` only
         guarantees it lands in the ready queue, not that it is drained
-        before the stop callback is noticed -- then cancel whatever tasks
-        that flush leaves on the loop (this is what turns a hanging
-        ``run()`` into ``CancelledError`` instead of a permanent hang),
-        then ``on_stop``, then close. ``on_stop`` runs *after* the cancel
-        sweep on purpose: it is the hosted wiring's engine disposal, and
-        disposing the pool while a query task is still in flight would be
-        worse than cancelling the query first.
+        before the stop callback is noticed -- then ``on_close``, then
+        cancel whatever tasks are left on the loop (this is what turns a
+        hanging ``run()`` into ``CancelledError`` instead of a permanent
+        hang), then ``on_stop``, then close. ``on_stop`` runs *after* the
+        cancel sweep on purpose: it is the hosted wiring's engine disposal,
+        and disposing the pool while a query task is still in flight would
+        be worse than cancelling the query first. ``on_close`` runs
+        *before* it because what it closes owns tasks the sweep would
+        cancel; a psycopg pool's ``close`` leaves a checked-out connection
+        to its user and closes it when it comes back.
         """
         try:
             loop.run_until_complete(asyncio.sleep(0))
         except Exception:  # noqa: BLE001 -- best-effort flush, never block shutdown
             logger.warning("DbRunner flush before shutdown failed", exc_info=True)
+        if self._on_close is not None:
+            try:
+                loop.run_until_complete(self._on_close())
+            except Exception:  # noqa: BLE001 -- shutdown must not raise out of the thread
+                logger.warning("DbRunner on_close failed", exc_info=True)
         _cancel_all_tasks(loop)
         if self._on_stop is not None:
             try:

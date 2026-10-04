@@ -342,3 +342,63 @@ def test_plain_sessionmaker_still_works() -> None:
         await engine.dispose()
 
     asyncio.run(_open())
+
+
+def test_loop_closers_run_on_dispose_and_only_for_adopted_loops(recorder: list[_FakeEngine]) -> None:
+    """Loop-bound resources ride the engines' adoption (#1199): a closer
+    needs an adopted loop and runs when that loop's resources close."""
+    engines = LoopEngines(PG_URL)
+    ran: list[str] = []
+
+    async def _cycle() -> None:
+        assert engines.is_current_loop_adopted() is False
+        with pytest.raises(RuntimeError, match="adopted"):
+            engines.on_loop_close(lambda: _record("never"))
+        engines.adopt_current_loop()
+        assert engines.is_current_loop_adopted() is True
+
+        async def _boom() -> None:
+            raise RuntimeError("closer boom")
+
+        engines.on_loop_close(lambda: _record("first"))
+        engines.on_loop_close(_boom)
+        engines.on_loop_close(lambda: _record("third"))
+        await engines.dispose_current_loop()
+        assert engines.is_current_loop_adopted() is False
+
+    async def _record(name: str) -> None:
+        ran.append(name)
+
+    asyncio.run(_cycle())
+    # In order, and a failing closer does not stop the rest or the dispose.
+    assert ran == ["first", "third"]
+    assert recorder[0].disposed == 1
+
+
+def test_close_loop_resources_runs_closers_once_without_disposing(recorder: list[_FakeEngine]) -> None:
+    engines = LoopEngines(PG_URL)
+    ran: list[str] = []
+
+    async def _record() -> None:
+        ran.append("closed")
+
+    async def _cycle() -> None:
+        engines.adopt_current_loop()
+        engines.on_loop_close(_record)
+        await engines.close_loop_resources()
+        assert engines.is_current_loop_adopted() is True
+        assert recorder[0].disposed == 0
+        await engines.dispose_current_loop()  # the closer already ran
+
+    asyncio.run(_cycle())
+    assert ran == ["closed"]
+
+
+def test_sqlite_url_never_adopts_a_loop_for_closers() -> None:
+    engines = LoopEngines("sqlite+aiosqlite:///:memory:")
+
+    async def _check() -> bool:
+        engines.adopt_current_loop()
+        return engines.is_current_loop_adopted()
+
+    assert asyncio.run(_check()) is False
