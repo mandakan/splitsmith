@@ -7338,6 +7338,28 @@ def _stage_figures_payload(doc: dict | None, project: MatchProject, stage_number
     }
 
 
+def _trim_version_for(root: Path, stage_number: int, video: StageVideo, project: MatchProject) -> str | None:
+    """Identity of the audit trim ``stream_video`` serves locally, or None.
+
+    The SPA puts it in a pinned ``kind=trim`` URL. A re-cut deletes the
+    trim before encoding the new one, so a player that seeks during the
+    encode gets a 404 and stays in error; the new trim's version is a new
+    URL, which remounts the player when the page refetches the project
+    after the job. Same resolver as the byte server, so the version always
+    names the bytes behind the URL. Local files only: no storage pull.
+    """
+    # The resolver checks exists() then stat()s; a re-cut can delete the
+    # trim in between, which is the very window this version is for.
+    try:
+        trim = audio_helpers.resolve_trim_for_read(root, stage_number, video, project=project)
+        if trim is None:
+            return None
+        st = trim.stat()
+    except OSError:
+        return None
+    return f"{st.st_mtime_ns:x}-{st.st_size:x}"
+
+
 def _proxy_ready_for(storage: Storage | None, proxy_keys: set[str], path_str: str) -> bool:
     """One honest answer for every endpoint (#821). Local mode streams
     the source directly (ready). Hosted: only ``raw/`` uploads ever get
@@ -8862,10 +8884,12 @@ def create_app(
                     # it must not take the project payload down with it.
                     doc = None
             stage_dict["figures"] = _stage_figures_payload(doc, project, int(n))
-            for video_dict in stage_dict.get("videos", []):
+            stage_videos = project.stage(int(n)).videos
+            for video_dict, video in zip(stage_dict.get("videos", []), stage_videos, strict=True):
                 video_dict["proxy_ready"] = _proxy_ready_for(
                     _storage, proxy_keys, str(video_dict.get("path", ""))
                 )
+                video_dict["trim_version"] = _trim_version_for(root, int(n), video, project)
         for video_dict in payload.get("unassigned_videos", []):
             video_dict["proxy_ready"] = _proxy_ready_for(
                 _storage, proxy_keys, str(video_dict.get("path", ""))

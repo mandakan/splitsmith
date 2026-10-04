@@ -119,6 +119,10 @@ export interface StageVideo {
   camera_model: string | null;
   /** Hosted only: the fast-scrub proxy exists in storage. Drives the "generating" badge. */
   proxy_ready?: boolean;
+  /** Identity of the local audit trim (mtime + size), null when none is on
+   *  disk. Goes into a pinned ``kind=trim`` URL so a re-cut trim is a new
+   *  URL and remounts the player instead of leaving it on a dead stream. */
+  trim_version?: string | null;
 }
 
 /** Mirror of ``splitsmith.ensemble.calibration.normalize_camera_model_key``.
@@ -3991,9 +3995,11 @@ export const api = {
     slug: string,
     videoPath: string,
     kind: "auto" | "trim" | "source" | "proxy" | "web" = "auto",
+    version?: string | null,
   ) =>
     scopeRequestPath(
-      `/api/shooters/${encodeURIComponent(slug)}/videos/stream?path=${encodeURIComponent(videoPath)}&kind=${kind}`,
+      `/api/shooters/${encodeURIComponent(slug)}/videos/stream?path=${encodeURIComponent(videoPath)}&kind=${kind}` +
+        (version ? `&v=${encodeURIComponent(version)}` : ""),
     ),
 
   /** Build a download URL for one finished export deliverable (#447 part 2).
