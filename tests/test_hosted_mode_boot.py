@@ -634,7 +634,9 @@ def test_serve_wiring_names_its_engines_and_queue(monkeypatch: pytest.MonkeyPatc
 
     state = AppState()
     _apply_hosted_mode_wiring(state)
-    assert deferrer_kwargs == [{"application_name": "splitsmith-serve-queue"}]
+    assert [k["application_name"] for k in deferrer_kwargs] == ["splitsmith-serve-queue"]
+    # #1199: the deferrer keeps its pool on the loops the engines adopted.
+    assert deferrer_kwargs[0]["loops"] is state.db_engines
 
     async def _main() -> Any:
         assert state.db_engines is not None

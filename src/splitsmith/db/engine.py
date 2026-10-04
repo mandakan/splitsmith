@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import weakref
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from sqlalchemy import event, text
@@ -19,6 +20,8 @@ from sqlalchemy.orm import Session, SessionTransaction
 from sqlalchemy.pool import NullPool
 
 from .share_guard import share_request_is_read_only
+
+logger = logging.getLogger(__name__)
 
 
 def create_engine(url: str, *, echo: bool = False, pool_disabled: bool = False) -> AsyncEngine:
@@ -101,6 +104,17 @@ class LoopEngines:
     loop adopted with a ``label`` carries ``<name>-<label>`` (the hosted
     wiring labels the ``DbRunner`` loop ``runner``), the fallback carries
     ``<name>-unpooled``. Postgres truncates names past 63 bytes.
+
+    Other loop-bound resources ride the same adoption (#1199): a caller
+    asks :meth:`is_current_loop_adopted` to decide whether a resource is
+    worth keeping open on this loop, and registers its closer with
+    :meth:`on_loop_close`. :meth:`close_loop_resources` runs the running
+    loop's closers; :meth:`dispose_current_loop` runs any left before it
+    disposes the engine, so every adopter's existing shutdown path closes
+    them with no edit. The ``DbRunner`` calls :meth:`close_loop_resources`
+    on its own, *before* it cancels the loop's tasks: a psycopg pool runs
+    worker tasks on its loop, and a pool whose workers were cancelled
+    cannot close (its ``close`` re-raises the ``CancelledError``).
     """
 
     def __init__(
@@ -122,6 +136,9 @@ class LoopEngines:
             weakref.WeakKeyDictionary()
         )
         self._fallback: AsyncEngine | None = None
+        self._closers: weakref.WeakKeyDictionary[
+            asyncio.AbstractEventLoop, list[Callable[[], Awaitable[None]]]
+        ] = weakref.WeakKeyDictionary()
 
     @property
     def pooled(self) -> bool:
@@ -192,14 +209,46 @@ class LoopEngines:
         engine = self._by_loop.get(loop)
         return engine if engine is not None else self._fallback_engine()
 
+    def is_current_loop_adopted(self) -> bool:
+        """Whether the running loop is long-lived (adopted and not yet disposed).
+
+        Always False for a non-pooled URL, which adopts nothing.
+        """
+        return self._pooled and asyncio.get_running_loop() in self._by_loop
+
+    def on_loop_close(self, closer: Callable[[], Awaitable[None]]) -> None:
+        """Register ``closer`` to be awaited when the running loop's resources
+        close (:meth:`close_loop_resources`, or :meth:`dispose_current_loop`).
+
+        The running loop must be adopted: an un-adopted loop has no shutdown
+        path that would ever run the closer.
+        """
+        if not self.is_current_loop_adopted():
+            raise RuntimeError("on_loop_close needs an adopted loop")
+        loop = asyncio.get_running_loop()
+        self._closers.setdefault(loop, []).append(closer)
+
+    async def close_loop_resources(self) -> None:
+        """Run and forget the running loop's registered closers, in
+        registration order. A failing closer is logged and does not stop
+        the others. Must run *on* that loop."""
+        closers = self._closers.pop(asyncio.get_running_loop(), [])
+        for closer in closers:
+            try:
+                await closer()
+            except Exception:  # noqa: BLE001 -- shutdown must reach every closer and the engine
+                logger.warning("closing a loop resource failed", exc_info=True)
+
     async def dispose_current_loop(self) -> None:
-        """Dispose and forget the running loop's engine; no-op if it has none.
+        """Close the running loop's resources, then dispose and forget its
+        engine; no-op if it has none.
 
         Must run *on* that loop: asyncpg closes connections on the loop that
         owns them.
         """
         if not self._pooled:
             return
+        await self.close_loop_resources()
         loop = asyncio.get_running_loop()
         engine = self._by_loop.pop(loop, None)
         if engine is not None:

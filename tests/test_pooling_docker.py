@@ -20,6 +20,10 @@ stack's live Postgres and the API + worker containers that run on it:
    API's idle connections, and the next requests still answer 200 because
    ``pool_pre_ping`` finds the dead connection at checkout and replaces it.
    Without pre_ping the first request after the termination answers 500.
+4. The queue deferrer keeps its Procrastinate pool open on a long-lived
+   loop (#1199): twenty submits start at most a pool's worth of sessions,
+   where opening a pool per submit started one each.
+5. Stopping the API closes its runner loop's pool with a Terminate (#1197).
 
 Run with ``uv run pytest -m docker -n0 tests/test_pooling_docker.py -v``.
 """
@@ -32,7 +36,14 @@ import time
 import httpx
 import pytest
 
-from .test_hosted_docker_smoke import API_BASE, _compose, _compose_env, _magic_link_login, _psql
+from .test_hosted_docker_smoke import (
+    API_BASE,
+    HOST_DB_URL,
+    _compose,
+    _compose_env,
+    _magic_link_login,
+    _psql,
+)
 
 pytestmark = pytest.mark.docker
 
@@ -197,6 +208,51 @@ def test_idle_connection_closed_by_the_server_is_reconnected_silently(hosted_sta
     _ping(cookies, async_path)
     logs = _container_logs("splitsmith")
     assert "attached to a different loop" not in logs
+
+
+def test_deferrer_reuses_one_pool_across_submits_on_a_long_lived_loop(hosted_stack: None) -> None:
+    """Twenty submits through the deferrer on an adopted loop start at most
+    ``max_size`` (4) sessions; the pre-#1199 deferrer opened and closed a
+    pool per submit, twenty sessions or more. Driven from this process
+    against the stack's Postgres, through the same ``make_deferrer`` +
+    ``LoopEngines`` pair the API wires, because no HTTP route submits a job
+    without footage. The worker pops the jobs and fails them (no
+    ``compute_jobs`` row); its own database work runs on its pooled engines
+    and starts no sessions of its own."""
+    import asyncio
+    import uuid
+
+    from splitsmith.db.engine import LoopEngines
+    from splitsmith.queue import make_deferrer
+
+    _wait_for_worker_connection()
+    engines = LoopEngines(HOST_DB_URL)
+    defer = make_deferrer(HOST_DB_URL, loops=engines)
+    user_id = "pooling-deferrer"
+
+    async def _submit(n: int) -> None:
+        for _ in range(n):
+            await defer(job_id=uuid.uuid4().hex, user_id=user_id, kind="detect_beep", args={}, match_id=None)
+
+    async def _run() -> int:
+        engines.adopt_current_loop()
+        try:
+            await _submit(1)  # open the pool before counting
+            before = await asyncio.to_thread(_sessions_started)
+            await _submit(20)
+            await asyncio.gather(_submit(5), _submit(5))
+            after = await asyncio.to_thread(_sessions_started)
+            return after - before
+        finally:
+            await engines.dispose_current_loop()
+            await engines.dispose_fallback()
+
+    started = asyncio.run(_run())
+    probes = 2
+    assert started <= probes + 4, (
+        f"{started} Postgres sessions started over 30 submits ({probes} are this test's probes); "
+        "the deferrer is opening a pool per submit"
+    )
 
 
 def test_api_shutdown_closes_its_pooled_connections_cleanly(hosted_stack: None) -> None:

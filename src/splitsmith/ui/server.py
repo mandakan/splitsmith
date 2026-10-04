@@ -7080,7 +7080,9 @@ def _process_loop_engines(url: str, *, application_name: str | None = None) -> L
     if runner is None or not runner.is_running:
         bound = engines
         runner = DbRunner(
-            on_start=lambda: bound.adopt_current_loop("runner"), on_stop=bound.dispose_current_loop
+            on_start=lambda: bound.adopt_current_loop("runner"),
+            on_close=bound.close_loop_resources,
+            on_stop=bound.dispose_current_loop,
         )
         runner.start()
         install_runner(runner)
@@ -7363,7 +7365,9 @@ def _apply_hosted_mode_wiring(
     # ``TenantContext``. The deferrer routes per-user inside ``_defer``
     # (queue name from ``user_id``); the S3 client is stateless w.r.t. the
     # tenant (only the key prefix is per-user, see ``_tenant_s3_storage``).
-    deferrer = make_deferrer(url, application_name=f"{process_name}-queue")
+    # Keeps one open Procrastinate App per long-lived loop -- the same loops
+    # ``engines`` adopted -- and closes it with that loop's engine (#1199).
+    deferrer = make_deferrer(url, application_name=f"{process_name}-queue", loops=engines)
     # Operator-scoped worker registry over the RAW session factory (not a
     # tenant factory): one fleet shared by the operator, no user_id, no RLS.
     state.workers_store = WorkersStore(session_factory)

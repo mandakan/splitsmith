@@ -44,8 +44,10 @@ import asyncio
 import contextlib
 import logging
 import re
+import threading
+import weakref
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, Protocol
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import procrastinate
@@ -180,8 +182,165 @@ def _register_smoke_tasks(app: procrastinate.App) -> None:
         return payload
 
 
+class LoopRegistry(Protocol):
+    """What the deferrer needs from :class:`splitsmith.db.engine.LoopEngines`:
+    which loops are long-lived, and a hook into their shutdown."""
+
+    def is_current_loop_adopted(self) -> bool: ...
+
+    def on_loop_close(self, closer: Callable[[], Awaitable[None]]) -> None: ...
+
+
+class _LoopApp:
+    """One long-lived loop's Procrastinate App: opened once, under ``lock``."""
+
+    __slots__ = ("app", "closed", "lock")
+
+    def __init__(self) -> None:
+        self.app: procrastinate.App | None = None
+        self.closed = False
+        self.lock = asyncio.Lock()
+
+
+class LoopDeferrers:
+    """Procrastinate Apps for one database URL, one kept open per long-lived loop (#1199).
+
+    A psycopg :class:`~psycopg_pool.AsyncConnectionPool` is bound to the loop
+    that opened it, exactly like an asyncpg connection (#423), so an open App
+    may only serve its own loop. On a loop the :class:`LoopRegistry` reports
+    adopted (the app loop, the worker loop, the ``DbRunner`` loop), the first
+    defer opens an App and every later defer on that loop reuses it; the
+    registry's shutdown hook closes it. Any other loop (a throwaway
+    ``asyncio.run``, the re-entrant ``run_sync`` fallback, or every loop when
+    there is no registry) opens a fresh App for the one defer and closes it
+    again, which is what every defer did before.
+
+    The open pool makes no traffic of its own while idle: ``min_size=1`` is
+    the floor, it has no keepalive, and Procrastinate passes psycopg_pool's
+    ``check_connection``, so a connection the server closed while idle
+    (Neon after five minutes) is found and replaced at the next checkout.
+    The pool's only timer is the ``max_idle`` shrink, which closes a
+    connection above ``min_size`` that went unused and never opens one.
+
+    Process-scoped per URL (:func:`loop_deferrers`): the self-hosted agent
+    re-wires hosted mode once per drain, and a fresh object per wiring would
+    leave the previous one's App open on the shared ``DbRunner`` loop.
+    """
+
+    def __init__(self, database_url: str, *, application_name: str | None = None) -> None:
+        self._database_url = database_url
+        self._application_name = application_name
+        self._by_loop: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, _LoopApp] = (
+            weakref.WeakKeyDictionary()
+        )
+        # The map is shared by the threads the loops run on.
+        self._map_lock = threading.Lock()
+
+    @property
+    def open_count(self) -> int:
+        return sum(1 for entry in list(self._by_loop.values()) if entry.app is not None)
+
+    async def defer(self, registry: LoopRegistry | None, **kwargs: Any) -> None:
+        """Defer :data:`RUN_COMPUTE_JOB_TASK` with ``kwargs`` from the running loop."""
+        if registry is not None and registry.is_current_loop_adopted():
+            app = await self._open_for_current_loop(registry)
+            if app is not None:
+                await _defer_on(app, **kwargs)
+                return
+        app = build_app(self._database_url, application_name=self._application_name)
+        await app.connector.open_async()
+        try:
+            await _defer_on(app, **kwargs)
+        finally:
+            await app.connector.close_async()
+
+    async def _open_for_current_loop(self, registry: LoopRegistry) -> procrastinate.App | None:
+        """The running loop's open App, opened on first use; None once the
+        loop's resources closed under a defer that was waiting for the open
+        (the caller then defers through a one-off App)."""
+        loop = asyncio.get_running_loop()
+        with self._map_lock:
+            entry = self._by_loop.get(loop)
+            created = entry is None
+            if entry is None:
+                entry = _LoopApp()
+                self._by_loop[loop] = entry
+        if created:
+            registry.on_loop_close(lambda: self._close_loop(loop, entry))
+        if entry.app is not None:
+            return entry.app
+        async with entry.lock:
+            if entry.closed:
+                return None
+            if entry.app is None:
+                # A failed open leaves the pool closed for good (see
+                # ``_open_app_with_retry``), so each attempt builds a fresh App
+                # and nothing is cached until one opens.
+                app = build_app(self._database_url, application_name=self._application_name)
+                try:
+                    await app.connector.open_async()
+                except BaseException:
+                    with contextlib.suppress(Exception):
+                        await app.connector.close_async()
+                    raise
+                entry.app = app
+            return entry.app
+
+    async def _close_loop(self, loop: asyncio.AbstractEventLoop, entry: _LoopApp) -> None:
+        with self._map_lock:
+            if self._by_loop.get(loop) is entry:
+                del self._by_loop[loop]
+        entry.closed = True
+        app, entry.app = entry.app, None
+        if app is None:
+            return
+        try:
+            await app.connector.close_async()
+        except asyncio.CancelledError:
+            # A pool whose worker tasks were cancelled re-raises their
+            # cancellation from ``close``. Only swallow it when this task is
+            # not itself being cancelled.
+            task = asyncio.current_task()
+            if task is not None and task.cancelling():
+                raise
+            logger.warning("queue deferrer pool close was interrupted by cancelled pool tasks")
+
+
+_process_deferrers: dict[str, LoopDeferrers] = {}
+_process_deferrers_lock = threading.Lock()
+
+
+def loop_deferrers(database_url: str, *, application_name: str | None = None) -> LoopDeferrers:
+    """The process's :class:`LoopDeferrers` for ``database_url``, created on
+    first use; ``application_name`` applies when it is created."""
+    with _process_deferrers_lock:
+        deferrers = _process_deferrers.get(database_url)
+        if deferrers is None:
+            deferrers = LoopDeferrers(database_url, application_name=application_name)
+            _process_deferrers[database_url] = deferrers
+        return deferrers
+
+
+async def _defer_on(
+    app: procrastinate.App,
+    *,
+    job_id: str,
+    user_id: str,
+    kind: str,
+    args: dict[str, Any],
+    match_id: str | None,
+) -> None:
+    await app.configure_task(name=RUN_COMPUTE_JOB_TASK, queue=queue_name_for_user(user_id)).defer_async(
+        job_id=job_id,
+        user_id=user_id,
+        kind=kind,
+        args=args,
+        match_id=match_id,
+    )
+
+
 def make_deferrer(
-    database_url: str, *, application_name: str | None = None
+    database_url: str, *, application_name: str | None = None, loops: LoopRegistry | None = None
 ) -> Callable[..., Awaitable[None]]:
     """Build the enqueue coroutine injected into :class:`PostgresJobBackend`.
 
@@ -189,12 +348,16 @@ def make_deferrer(
     enqueues a :data:`RUN_COMPUTE_JOB_TASK` job onto the user's queue.
     ``configure_task`` defers a task by name without registering its
     body locally -- the API process only enqueues; the worker owns the
-    implementation. The :class:`procrastinate.App` is built lazily and
-    cached on first defer so merely wiring hosted mode (e.g. against
-    SQLite, where the queue is unused) never touches Postgres; a SQLite
-    URL raises only if a job is actually submitted.
+    implementation. No App is built until a job is submitted, so merely
+    wiring hosted mode (e.g. against SQLite, where the queue is unused)
+    never touches Postgres; a SQLite URL raises only if a job is actually
+    submitted.
+
+    ``loops`` is the process's :class:`~splitsmith.db.engine.LoopEngines`:
+    a defer on a loop it adopted reuses that loop's open App (#1199); see
+    :class:`LoopDeferrers`. Without it every defer opens and closes its own.
     """
-    cache: dict[str, procrastinate.App] = {}
+    deferrers = loop_deferrers(database_url, application_name=application_name)
 
     async def _defer(
         *,
@@ -204,19 +367,9 @@ def make_deferrer(
         args: dict[str, Any],
         match_id: str | None,
     ) -> None:
-        app = cache.get("app")
-        if app is None:
-            app = build_app(database_url, application_name=application_name)
-            cache["app"] = app
-        queue = queue_name_for_user(user_id)
-        async with app.open_async():
-            await app.configure_task(name=RUN_COMPUTE_JOB_TASK, queue=queue).defer_async(
-                job_id=job_id,
-                user_id=user_id,
-                kind=kind,
-                args=args,
-                match_id=match_id,
-            )
+        # Validate before any connection is opened.
+        queue_name_for_user(user_id)
+        await deferrers.defer(loops, job_id=job_id, user_id=user_id, kind=kind, args=args, match_id=match_id)
 
     return _defer
 
