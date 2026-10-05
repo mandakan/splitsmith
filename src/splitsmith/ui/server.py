@@ -14040,9 +14040,9 @@ def create_app(
 
         - ``trim``: per-video short-GOP MP4 (``<trimmed>/stage<N>_cam_<video_id>_trimmed.mp4``);
           404 if not built yet. Frame-accurate seeking makes audit-screen scrubbing fast.
-        - ``web``: the trim's 720p faststart rendition (#1031), the file
-          hosted players stream from object storage. Falls back to the trim,
-          then the source, when absent; in local mode it behaves as ``auto``.
+        - ``web``: the trim's 720p faststart rendition (#1031). Hosted streams
+          it from object storage; local serves it from disk when it is fresh
+          (#1192). Falls back to the trim, then the source.
         - ``source``: the original camera file.
         - ``proxy``: low-res fast-seek MP4 (``raw_proxy/<name>.mp4``). In hosted mode,
           returns 425 ``preview_generating`` when the proxy object is absent - never
@@ -14126,8 +14126,9 @@ def create_app(
                 # kind=auto: fall through to source redirect below
             return serve_media(storage, raw_str, root / raw_str, content_type=video_media_type(raw_str))
 
-        # local mode: existing disk-based serving (``web`` behaves as ``auto``:
-        # the full-res trim streams fine from disk)
+        # local mode: disk-based serving. ``web`` serves the trim's fresh
+        # 720p rendition when there is one (#1192: the Audit screen scrubs
+        # it), else falls back like ``auto``; ``trim`` never substitutes.
         served_path: Path | None = None
         if kind in ("auto", "trim", "web") and stage is not None:
             # Per-video short-GOP trim is keyed per role: each angle has
@@ -14135,6 +14136,10 @@ def create_app(
             trimmed = audio_helpers.pull_trimmed_video(root, stage.stage_number, video, project=project)
             if trimmed.exists():
                 served_path = trimmed.resolve()
+                if kind == "web":
+                    web = audio_helpers.fresh_web_trim(trimmed)
+                    if web is not None:
+                        served_path = web.resolve()
             elif _is_mirror():
                 # Web-only mirror on a storage without presigned GET
                 # (#1078; FilesystemStorage in dev and tests): the anchor

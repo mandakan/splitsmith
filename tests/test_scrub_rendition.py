@@ -1,0 +1,134 @@
+"""The Audit screen scrubs the trim's 720p rendition (#1192, #1191).
+
+Local ``kind=web`` serves a *fresh* rendition from disk (non-empty, not
+older than the trim), else the trim, else the source. ``kind=trim`` never
+substitutes. ``scrub_version`` on the project payload names the same file.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+
+from splitsmith import trim as trim_module
+from splitsmith.match_project import MatchProject, StageEntry, StageVideo
+from splitsmith.ui import audio as audio_helpers
+from splitsmith.ui.server import create_app
+
+
+def _bootstrap(tmp_path: Path) -> tuple[TestClient, str, Path, Path]:
+    """A one-stage local match; returns (client, match base URL, trim path, web path).
+
+    Neither the trim nor the rendition exists yet; the source does.
+    """
+    from tests.conftest import scaffold_match
+
+    root, shooter_root = scaffold_match(tmp_path, name="Scrub Match")
+    (shooter_root / "raw").mkdir(parents=True, exist_ok=True)
+    (shooter_root / "raw" / "v.mp4").write_bytes(b"source bytes")
+    project = MatchProject.load(shooter_root)
+    project.stages = [
+        StageEntry(
+            stage_number=1,
+            stage_name="S1",
+            time_seconds=30.0,
+            videos=[StageVideo(path=Path("raw/v.mp4"), role="primary", beep_time=8.0)],
+        )
+    ]
+    project.save(shooter_root)
+    stamped = MatchProject.load(shooter_root)
+    trim = audio_helpers.trimmed_video_path(shooter_root, 1, stamped.stages[0].videos[0], project=stamped)
+    trim.parent.mkdir(parents=True, exist_ok=True)
+    app = create_app(project_root=root, project_name="Scrub Match")
+    match_id = app.state.splitsmith_state.matches.known_ids()[0]
+    return TestClient(app), f"/api/matches/{match_id}", trim, trim_module.web_trim_path(trim)
+
+
+def _age(path: Path, seconds: int) -> None:
+    """Move ``path``'s mtime ``seconds`` into the past."""
+    st = path.stat()
+    os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns - seconds * 1_000_000_000))
+
+
+def _stream(client: TestClient, base: str, kind: str) -> bytes:
+    resp = client.get(f"{base}/shooters/me/videos/stream", params={"path": "raw/v.mp4", "kind": kind})
+    assert resp.status_code == 200, resp.text
+    return resp.content
+
+
+# --- fresh_web_trim -----------------------------------------------------------
+
+
+def test_fresh_web_trim_accepts_a_rendition_cut_after_the_trim(tmp_path: Path) -> None:
+    trim = tmp_path / "stage1_cam_x_trimmed.mp4"
+    trim.write_bytes(b"trim")
+    _age(trim, 10)
+    web = trim_module.web_trim_path(trim)
+    web.write_bytes(b"web")
+    assert audio_helpers.fresh_web_trim(trim) == web
+
+
+def test_fresh_web_trim_rejects_a_rendition_older_than_the_trim(tmp_path: Path) -> None:
+    trim = tmp_path / "stage1_cam_x_trimmed.mp4"
+    web = trim_module.web_trim_path(trim)
+    web.write_bytes(b"web")
+    _age(web, 10)
+    trim.write_bytes(b"re-cut trim")
+    assert audio_helpers.fresh_web_trim(trim) is None
+
+
+def test_fresh_web_trim_rejects_an_empty_rendition(tmp_path: Path) -> None:
+    trim = tmp_path / "stage1_cam_x_trimmed.mp4"
+    trim.write_bytes(b"trim")
+    _age(trim, 10)
+    trim_module.web_trim_path(trim).write_bytes(b"")
+    assert audio_helpers.fresh_web_trim(trim) is None
+
+
+def test_fresh_web_trim_needs_the_trim(tmp_path: Path) -> None:
+    trim = tmp_path / "stage1_cam_x_trimmed.mp4"
+    trim_module.web_trim_path(trim).write_bytes(b"orphan web")
+    assert audio_helpers.fresh_web_trim(trim) is None
+
+
+# --- stream_video, local ------------------------------------------------------
+
+
+def test_local_web_kind_serves_a_fresh_rendition(tmp_path: Path) -> None:
+    client, base, trim, web = _bootstrap(tmp_path)
+    trim.write_bytes(b"trim bytes")
+    _age(trim, 10)
+    web.write_bytes(b"web bytes")
+    assert _stream(client, base, "web") == b"web bytes"
+
+
+def test_local_web_kind_serves_the_trim_when_the_rendition_is_stale(tmp_path: Path) -> None:
+    client, base, trim, web = _bootstrap(tmp_path)
+    web.write_bytes(b"old window")
+    _age(web, 10)
+    trim.write_bytes(b"re-cut trim")
+    assert _stream(client, base, "web") == b"re-cut trim"
+
+
+def test_local_web_kind_serves_the_trim_without_a_rendition(tmp_path: Path) -> None:
+    client, base, trim, _web = _bootstrap(tmp_path)
+    trim.write_bytes(b"trim bytes")
+    assert _stream(client, base, "web") == b"trim bytes"
+
+
+def test_local_web_kind_ignores_an_orphan_rendition(tmp_path: Path) -> None:
+    """No trim: the rendition has nothing to anchor it, so the source plays."""
+    client, base, _trim, web = _bootstrap(tmp_path)
+    web.write_bytes(b"orphan web")
+    assert _stream(client, base, "web") == b"source bytes"
+
+
+def test_local_trim_kind_never_serves_the_rendition(tmp_path: Path) -> None:
+    client, base, trim, web = _bootstrap(tmp_path)
+    trim.write_bytes(b"trim bytes")
+    _age(trim, 10)
+    web.write_bytes(b"web bytes")
+    assert _stream(client, base, "trim") == b"trim bytes"
+    assert _stream(client, base, "auto") == b"trim bytes"

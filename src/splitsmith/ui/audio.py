@@ -888,6 +888,30 @@ def _try_push_web_trim_to_storage(project: MatchProject | None, web: Path) -> No
         logger.info("web trim cache: push to %s failed: %s", key, exc)
 
 
+def fresh_web_trim(trimmed: Path) -> Path | None:
+    """The web rendition of the audit trim at ``trimmed`` when it is on
+    local disk and current, else ``None`` (#1192).
+
+    Current means non-empty and not older than the trim: a re-cut writes
+    the trim first and the rendition after it, so an older rendition
+    covers the previous window. No trim means no rendition either -- it
+    would have nothing to anchor it. Local files only; the one freshness
+    rule ``_ensure_web_trim``, ``stream_video?kind=web`` and the payload's
+    ``scrub_version`` share.
+    """
+    from .. import trim as trim_module
+
+    web = trim_module.web_trim_path(trimmed)
+    try:
+        web_st = web.stat()
+        trim_st = trimmed.stat()
+    except OSError:
+        return None
+    if web_st.st_size == 0 or web_st.st_mtime < trim_st.st_mtime:
+        return None
+    return web
+
+
 def _ensure_web_trim(
     project: MatchProject,
     trimmed: Path,
@@ -907,7 +931,7 @@ def _ensure_web_trim(
 
     web = trim_module.web_trim_path(trimmed)
     partial = _web_partial(web)
-    if web.exists() and web.stat().st_size > 0 and web.stat().st_mtime >= trimmed.stat().st_mtime:
+    if fresh_web_trim(trimmed) is not None:
         return web
     if web.exists():
         web.unlink()
