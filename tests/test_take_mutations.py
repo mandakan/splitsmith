@@ -178,3 +178,13 @@ def test_promote_takes_the_registration_on_the_target_stage(tmp_path: Path) -> N
     ]
     assert _beeps(project)[1] == [("primary", 100.0)]
     assert _beeps(project)[3] == [("primary", 300.0)]
+
+
+def test_a_stage_damaged_by_the_old_bug_loses_one_entry_at_a_time(tmp_path: Path) -> None:
+    """Before #1212 a role change could leave a stage holding two entries of
+    one file. Removing one must not take the other with it."""
+    stages = _take_stages()
+    stages[1].videos.append(StageVideo(path=TAKE, role="secondary", beep_time=100.0, stage_number=2))
+    project = MatchProject(name="Take", stages=stages)
+    project.remove_video(TAKE, tmp_path, stage_number=2)
+    assert _beeps(project)[2] == [("secondary", 100.0)]
