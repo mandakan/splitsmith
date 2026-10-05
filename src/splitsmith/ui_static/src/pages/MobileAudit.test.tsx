@@ -262,7 +262,7 @@ describe("MobileAudit", () => {
     await waitFor(() => expect(screen.getByTestId("wrapped-waveform")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "Video" }));
     // The trim's version rides along so a re-cut trim is a new URL.
-    expect(apiMock.videoStreamUrl).toHaveBeenCalledWith("alice", "raw/stage3.mp4", "trim", "18f2a-3e8");
+    expect(apiMock.videoStreamUrl).toHaveBeenCalledWith("alice", "raw/stage3.mp4", "trim", "18f2a-3e8", 3);
     ctx.value = { ...ctx.value, project: null };
   });
 
@@ -317,7 +317,7 @@ describe("MobileAudit scrub source", () => {
   it("streams the rendition when the server names one", async () => {
     ctx.value = { ...ctx.value, project: withRendition() };
     await openVideo();
-    expect(apiMock.videoStreamUrl).toHaveBeenCalledWith("alice", "raw/stage3.mp4", "web", "w-1");
+    expect(apiMock.videoStreamUrl).toHaveBeenCalledWith("alice", "raw/stage3.mp4", "web", "w-1", 3);
     ctx.value = { ...ctx.value, project: null };
   });
 

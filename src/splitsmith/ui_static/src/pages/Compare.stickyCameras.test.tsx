@@ -74,8 +74,8 @@ vi.mock("@/lib/api", async (importOriginal) => {
       setCompareCamera: vi.fn(),
       shooterVideoStreamUrl: (_slug: string, ref: string) =>
         `http://localhost/trim/${ref}`,
-      videoStreamUrl: (_slug: string, path: string, kind = "auto") =>
-        `http://localhost/coach/${kind}/${path}`,
+      videoStreamUrl: (_slug: string, path: string, kind = "auto", _v?: string | null, stage?: number | null) =>
+        `http://localhost/coach/${kind}/${path}${stage != null ? `#s${stage}` : ""}`,
     },
   };
 });

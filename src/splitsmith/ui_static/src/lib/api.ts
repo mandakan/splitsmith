@@ -4057,16 +4057,22 @@ export const api = {
    *  present, source otherwise. ``proxy`` serves the low-res fast-scrub
    *  proxy (or source on local mode); in hosted mode the server returns
    *  HTTP 425 when the proxy object is absent. ``web`` is the trim's
-   *  streaming rendition (hosted), falling back to trim then source. */
+   *  streaming rendition (hosted), falling back to trim then source.
+   *  ``stage`` names the stage the video belongs to: a multi-stage single
+   *  take registers one source path on several stages, each with its own
+   *  trim, and without it the server answers with the first stage's. Every
+   *  per-stage caller passes it. */
   videoStreamUrl: (
     slug: string,
     videoPath: string,
     kind: "auto" | "trim" | "source" | "proxy" | "web" = "auto",
     version?: string | null,
+    stage?: number | null,
   ) =>
     scopeRequestPath(
       `/api/shooters/${encodeURIComponent(slug)}/videos/stream?path=${encodeURIComponent(videoPath)}&kind=${kind}` +
-        (version ? `&v=${encodeURIComponent(version)}` : ""),
+        (version ? `&v=${encodeURIComponent(version)}` : "") +
+        (stage != null && Number.isFinite(stage) ? `&stage=${stage}` : ""),
     ),
 
   /** Build a download URL for one finished export deliverable (#447 part 2).

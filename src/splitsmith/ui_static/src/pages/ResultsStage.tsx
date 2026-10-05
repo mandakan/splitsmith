@@ -688,7 +688,7 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
       >
         <ResultsPlayer
           key={camIndex}
-          src={api.videoStreamUrl(slug, activeVideo.path, activeVideo.kind)}
+          src={api.videoStreamUrl(slug, activeVideo.path, activeVideo.kind, null, stage)}
           beepTime={coach.beep_time + camDelta}
           shots={displayShots}
           videoRef={videoRef}
@@ -706,7 +706,7 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
           entries={coach.videos}
           activeIndex={camIndex}
           onSelect={handleSelectCam}
-          srcFor={(e) => api.videoStreamUrl(slug, e.path, e.kind)}
+          srcFor={(e) => api.videoStreamUrl(slug, e.path, e.kind, null, stage)}
         />
         {legend}
       </div>

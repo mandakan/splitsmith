@@ -1623,11 +1623,11 @@ export function Audit() {
         ? servedPlan.kind === "trim"
           ? (() => {
               const choice = scrub.choose(activeVideo);
-              return api.videoStreamUrl(slug, activeVideo.path, choice.kind, choice.version);
+              return api.videoStreamUrl(slug, activeVideo.path, choice.kind, choice.version, stageNumber);
             })()
-          : api.videoStreamUrl(slug, activeVideo.path, servedPlan.kind, null)
+          : api.videoStreamUrl(slug, activeVideo.path, servedPlan.kind, null, stageNumber)
         : peaksError != null
-          ? api.videoStreamUrl(slug, activeVideo.path)
+          ? api.videoStreamUrl(slug, activeVideo.path, "auto", null, stageNumber)
           : ""
       : "";
 

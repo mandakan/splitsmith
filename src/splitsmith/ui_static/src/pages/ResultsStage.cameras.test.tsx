@@ -23,8 +23,8 @@ vi.mock("@/lib/api", async (importOriginal) => {
       getProject: vi.fn().mockRejectedValue(new Error("no project")),
       getMatchCoachDistributions: vi.fn().mockRejectedValue(new Error("no dist")),
       patchStageShotCoach: vi.fn(),
-      videoStreamUrl: (_slug: string, path: string, kind = "auto") =>
-        `http://localhost/${kind}/${path}`,
+      videoStreamUrl: (_slug: string, path: string, kind = "auto", _v?: string | null, stage?: number | null) =>
+        `http://localhost/${kind}/${path}${stage != null ? `#s${stage}` : ""}`,
     },
   };
 });
@@ -132,9 +132,9 @@ describe("ResultsStage camera selection", () => {
       videos: TWO_CAMS,
     });
     await screen.findByText(/steel rush/i);
-    expect(mainVideoSrcs()).toEqual(["http://localhost/trim/cam-primary.mp4"]);
+    expect(mainVideoSrcs()).toEqual(["http://localhost/trim/cam-primary.mp4#s2"]);
     fireEvent.click(screen.getByRole("button", { name: /camera 2 of 2/i }));
-    expect(mainVideoSrcs()).toEqual(["http://localhost/trim/cam-b.mp4"]);
+    expect(mainVideoSrcs()).toEqual(["http://localhost/trim/cam-b.mp4#s2"]);
   });
 
   it("opens on the camera a moment link names via ?v=", async () => {
@@ -144,7 +144,7 @@ describe("ResultsStage camera selection", () => {
       { videos: TWO_CAMS },
     );
     await screen.findByText(/steel rush/i);
-    expect(mainVideoSrcs()).toEqual(["http://localhost/trim/cam-b.mp4"]);
+    expect(mainVideoSrcs()).toEqual(["http://localhost/trim/cam-b.mp4#s2"]);
   });
 
   it("falls back to the first camera when no primary exists", async () => {
@@ -154,7 +154,7 @@ describe("ResultsStage camera selection", () => {
       ],
     });
     await screen.findByText(/steel rush/i);
-    expect(mainVideoSrcs()).toEqual(["http://localhost/source/cam-b.mp4"]);
+    expect(mainVideoSrcs()).toEqual(["http://localhost/source/cam-b.mp4#s2"]);
   });
 
   it("copies a moment link anchored to the active camera's own beep, not the primary's", async () => {
@@ -169,7 +169,7 @@ describe("ResultsStage camera selection", () => {
     await screen.findByText(/steel rush/i);
 
     fireEvent.click(screen.getByRole("button", { name: /camera 2 of 2/i }));
-    expect(mainVideoSrcs()).toEqual(["http://localhost/trim/cam-b.mp4"]);
+    expect(mainVideoSrcs()).toEqual(["http://localhost/trim/cam-b.mp4#s2"]);
 
     // Cam B's beep_in_clip is 12 - park the video 3s past it on cam B's
     // own clock, so the correct t (seconds after beep, camera-independent)
@@ -192,7 +192,7 @@ describe("ResultsStage camera selection", () => {
       { videos: TWO_CAMS },
     );
     await screen.findByText(/steel rush/i);
-    expect(mainVideoSrcs()).toEqual(["http://localhost/trim/cam-b.mp4"]);
+    expect(mainVideoSrcs()).toEqual(["http://localhost/trim/cam-b.mp4#s2"]);
     expect(screen.getByRole("group", { name: /cameras/i })).toBeInTheDocument();
   });
 
@@ -206,13 +206,13 @@ describe("ResultsStage camera selection", () => {
     it("opens on the camera chosen on an earlier stage (?cams=)", async () => {
       renderStage("/match/m1/results/anna/2?cams=anna:hand", anna, { videos: HEAD_THEN_PHONE });
       await screen.findByText(/steel rush/i);
-      expect(mainVideoSrcs()).toEqual(["http://localhost/trim/phone.mp4"]);
+      expect(mainVideoSrcs()).toEqual(["http://localhost/trim/phone.mp4#s2"]);
     });
 
     it("opens on the shooter's saved default when nothing was chosen", async () => {
       renderStage("/match/m1/results/anna/2", anna, { videos: HEAD_THEN_PHONE, compareCamera: "hand" });
       await screen.findByText(/steel rush/i);
-      await waitFor(() => expect(mainVideoSrcs()).toEqual(["http://localhost/trim/phone.mp4"]));
+      await waitFor(() => expect(mainVideoSrcs()).toEqual(["http://localhost/trim/phone.mp4#s2"]));
     });
 
     it("a pick rides on to the next stage", async () => {
