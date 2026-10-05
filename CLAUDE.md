@@ -179,17 +179,19 @@ byte path is a presigned redirect and the object exists; the clip anchor
 (Results, Coach) stays ``trim`` locally, pinned by
 ``test_get_coach_entry_kind_stays_trim_locally_with_web_file``. On the
 stream routes ``kind=web`` falls back web -> trim -> source and never
-404s, locally too, where it serves the rendition from disk only while
-``audio.fresh_web_trim`` says it is current (non-empty, not older than
-the trim). ``kind=trim`` never substitutes the rendition. The Audit
-players (``pages/Audit.tsx`` for every angle, ``pages/MobileAudit.tsx``)
-do not pin ``kind=trim`` blindly: ``lib/useScrubSource`` asks for
-``kind=web`` when the video dict carries ``scrub_version`` (same
-freshness rule, local files only, null hosted), unless
-``GlobalPrefs.full_res_scrub`` is on (the transport menu's
-"Full-resolution video") or the rendition already errored on that page
-(#1192: a 4K trim at ~150 Mbit/s stalls software decode and ends after
-~2 s in Chromium's low-end mode, #1191). The GOP stays 30: GOP 15
+404s on hosted. Locally it is the Audit players' pin: the rendition from
+disk while ``audio.fresh_web_trim`` says it is current (non-empty, not
+older than the trim), else the trim, else 404 exactly like ``kind=trim``
+-- a re-cut deletes the trim while it encodes, and a pinned player must
+error and remount then, not play the source under trim offsets.
+``kind=trim`` never substitutes the rendition. The Audit players
+(``pages/Audit.tsx`` for every angle, ``pages/MobileAudit.tsx``) do not
+pin ``kind=trim`` blindly: ``lib/useScrubSource`` asks for ``kind=web``
+when the video dict carries ``scrub_version`` (same freshness rule, local
+files only), unless ``GlobalPrefs.full_res_scrub`` is on (the transport
+menu's "Full-resolution video") or that rendition (path + version)
+already errored on the page (#1192: a 4K trim at ~150 Mbit/s stalls
+software decode and ends after ~2 s in Chromium's low-end mode, #1191). The GOP stays 30: GOP 15
 measured +35-47 % bytes for ~10 ms of seek. Hosted Compare prefers ``trimmed/<...>_web.mp4``
 over the lossless export.
 
