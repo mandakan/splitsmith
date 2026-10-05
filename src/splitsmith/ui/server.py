@@ -7880,6 +7880,29 @@ def _trim_version_for(root: Path, stage_number: int, video: StageVideo, project:
     return f"{st.st_mtime_ns:x}-{st.st_size:x}"
 
 
+def _scrub_version_for(root: Path, stage_number: int, video: StageVideo, project: MatchProject) -> str | None:
+    """Identity of the trim's fresh 720p rendition on local disk, or None (#1192).
+
+    The Audit players ask for ``kind=web`` with this in the URL when it is
+    set, and keep ``kind=trim`` otherwise. Same trim resolver as
+    :func:`_trim_version_for` and the same freshness rule as
+    ``stream_video``'s local ``kind=web`` branch
+    (:func:`audio.fresh_web_trim`), so the version names the bytes behind
+    the URL. Local files only: no storage call.
+    """
+    try:
+        trim = audio_helpers.resolve_trim_for_read(root, stage_number, video, project=project)
+        if trim is None:
+            return None
+        web = audio_helpers.fresh_web_trim(trim)
+        if web is None:
+            return None
+        st = web.stat()
+    except OSError:
+        return None
+    return f"{st.st_mtime_ns:x}-{st.st_size:x}"
+
+
 def _proxy_ready_for(storage: Storage | None, proxy_keys: set[str], path_str: str) -> bool:
     """One honest answer for every endpoint (#821). Local mode streams
     the source directly (ready). Hosted: only ``raw/`` uploads ever get
@@ -9495,6 +9518,7 @@ def create_app(
                     _storage, proxy_keys, str(video_dict.get("path", ""))
                 )
                 video_dict["trim_version"] = _trim_version_for(root, int(n), video, project)
+                video_dict["scrub_version"] = _scrub_version_for(root, int(n), video, project)
         for video_dict in payload.get("unassigned_videos", []):
             video_dict["proxy_ready"] = _proxy_ready_for(
                 _storage, proxy_keys, str(video_dict.get("path", ""))

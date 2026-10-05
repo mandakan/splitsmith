@@ -132,3 +132,56 @@ def test_local_trim_kind_never_serves_the_rendition(tmp_path: Path) -> None:
     web.write_bytes(b"web bytes")
     assert _stream(client, base, "trim") == b"trim bytes"
     assert _stream(client, base, "auto") == b"trim bytes"
+
+
+# --- scrub_version on the payload ---------------------------------------------
+
+
+def _video(client: TestClient, base: str) -> dict:
+    resp = client.get(f"{base}/shooters/me/project")
+    assert resp.status_code == 200, resp.text
+    return resp.json()["stages"][0]["videos"][0]
+
+
+def test_scrub_version_is_none_without_a_rendition(tmp_path: Path) -> None:
+    client, base, trim, _web = _bootstrap(tmp_path)
+    trim.write_bytes(b"trim bytes")
+    assert _video(client, base)["scrub_version"] is None
+
+
+def test_scrub_version_names_a_fresh_rendition(tmp_path: Path) -> None:
+    client, base, trim, web = _bootstrap(tmp_path)
+    trim.write_bytes(b"trim bytes")
+    _age(trim, 10)
+    web.write_bytes(b"web bytes")
+    st = web.stat()
+    video = _video(client, base)
+    assert video["scrub_version"] == f"{st.st_mtime_ns:x}-{st.st_size:x}"
+    assert video["scrub_version"] != video["trim_version"]
+
+
+def test_scrub_version_is_none_while_the_rendition_is_stale(tmp_path: Path) -> None:
+    """Mid re-cut: the new trim is written, its rendition is not yet."""
+    client, base, trim, web = _bootstrap(tmp_path)
+    web.write_bytes(b"old window")
+    _age(web, 10)
+    trim.write_bytes(b"re-cut trim")
+    assert _video(client, base)["scrub_version"] is None
+
+
+def test_scrub_version_is_none_for_an_orphan_rendition(tmp_path: Path) -> None:
+    client, base, _trim, web = _bootstrap(tmp_path)
+    web.write_bytes(b"orphan web")
+    assert _video(client, base)["scrub_version"] is None
+
+
+def test_scrub_version_moves_when_the_rendition_is_recut(tmp_path: Path) -> None:
+    client, base, trim, web = _bootstrap(tmp_path)
+    trim.write_bytes(b"trim bytes")
+    _age(trim, 20)
+    web.write_bytes(b"first web")
+    _age(web, 10)
+    first = _video(client, base)["scrub_version"]
+    web.write_bytes(b"other web")
+    second = _video(client, base)["scrub_version"]
+    assert first is not None and second is not None and first != second
