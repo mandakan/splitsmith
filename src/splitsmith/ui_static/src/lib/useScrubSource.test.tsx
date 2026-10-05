@@ -31,9 +31,17 @@ describe("useScrubSource", () => {
 
   it("falls back to the trim for the failed video only", async () => {
     const { result } = renderHook(() => useScrubSource());
-    act(() => result.current.markFailed("a"));
+    act(() => result.current.markFailed(cam("a")));
     expect(result.current.choose(cam("a"))).toEqual({ kind: "trim", version: "t-a" });
     expect(result.current.choose(cam("b"))).toEqual({ kind: "web", version: "w-b" });
+  });
+
+  it("a new rendition gets a fresh chance after a failure", async () => {
+    const { result } = renderHook(() => useScrubSource());
+    act(() => result.current.markFailed(cam("a")));
+    expect(result.current.choose(cam("a")).kind).toBe("trim");
+    const recut = { ...cam("a"), scrub_version: "w-a2" };
+    expect(result.current.choose(recut)).toEqual({ kind: "web", version: "w-a2" });
   });
 
   it("the switch persists and keeps every video on the trim", async () => {
