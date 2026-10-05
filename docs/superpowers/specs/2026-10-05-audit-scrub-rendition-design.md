@@ -124,3 +124,18 @@ Every test gets a mutation drill: remove the change, watch it fail.
   rendition (network tab), screenshot published as an Artifact; the
   spike's low-end-mode run repeated against the served URL.
 - **Review:** one whole-branch pass over the seams before merge.
+
+## Amendments after the whole-branch review (2026-10-05)
+
+- **Local `kind=web` 404s without a trim** (design item 1 said "never a
+  404"). A re-cut deletes the trim and its rendition while it encodes; a
+  pinned `kind=web` URL that fell through to the source played the wrong
+  frames under trim offsets with no error. Locally `web` is now a pin like
+  `trim`: rendition, else trim, else 404. Hosted is unchanged.
+- **A playback failure is remembered per rendition** (path + `scrub_version`),
+  not per video for the page's lifetime, so a re-cut rendition gets a fresh
+  chance.
+- **`scrub_version` is not gated on mode** (design item 3 said "hosted
+  reports `null`"). It is computed from local files only; no hosted path
+  leaves a fresh rendition beside a local trim today. Deferred, noted in
+  the PR.
