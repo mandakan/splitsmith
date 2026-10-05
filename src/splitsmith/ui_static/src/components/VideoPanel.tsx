@@ -52,6 +52,9 @@ interface VideoPanelProps {
   activeIndex: number;
   onActiveIndexChange: (index: number) => void;
   videoSrc: string;
+  /** Called when the primary player errors. The Audit page uses it to
+   *  fall back from the 720p rendition to the full-resolution trim. */
+  onPlaybackError?: () => void;
   /** When false the proxy is not yet available in storage; the primary
    *  player renders an explicit "Preview generating" placeholder instead
    *  of a broken video element. Undefined = ready (or local mode). */
@@ -225,6 +228,7 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
       activeIndex,
       onActiveIndexChange,
       videoSrc,
+      onPlaybackError,
       proxyReady,
       mediaOnDesktop,
       gridMode,
@@ -499,6 +503,7 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
                         ? "Network error while loading video"
                         : "Couldn't play this video",
                   );
+                  onPlaybackError?.();
                 }}
               />
             )}

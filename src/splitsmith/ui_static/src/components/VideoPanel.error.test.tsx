@@ -78,4 +78,13 @@ describe("VideoPanel playback error", () => {
     fireEvent.loadedData(fresh);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
+
+  it("reports a playback error to the page", () => {
+    const onPlaybackError = vi.fn();
+    const { container } = render(
+      <VideoPanel {...props} videoSrc="/stream?kind=web&v=w" onPlaybackError={onPlaybackError} />,
+    );
+    fireEvent.error(primaryVideo(container));
+    expect(onPlaybackError).toHaveBeenCalledTimes(1);
+  });
 });

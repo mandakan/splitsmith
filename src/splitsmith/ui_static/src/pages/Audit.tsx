@@ -90,6 +90,7 @@ import { buildAuditJson, deriveMarkers } from "@/lib/audit-doc";
 import { beepStepVideos, headerState, nextFlaggedIndex, shotRows } from "@/lib/auditStep";
 import { isJobActive } from "@/lib/jobs";
 import { planServedClip } from "@/lib/camPlayback";
+import { useScrubSource } from "@/lib/useScrubSource";
 import { computeAuditNextStep } from "@/lib/audit-next-step";
 import { useMatchHref } from "@/lib/matchHref";
 import { zoomActionForKey } from "@/lib/zoomKeys";
@@ -487,6 +488,9 @@ export function Audit() {
   // it. Secondaries have their own beep-anchored trim once built, so the
   // mapping runs through clip-local beeps - source-space deltas against
   // a trimmed clip seek past its EOF (black frame). See camPlayback.ts.
+  // The trim pin plays the 720p rendition when the server named a fresh
+  // one (see lib/scrubSource.ts); a playback error falls back per video.
+  const scrub = useScrubSource();
   const servedPlan = useMemo(
     () =>
       activeVideo
@@ -1610,15 +1614,18 @@ export function Audit() {
   // the phone, another window) deletes the trim while it encodes, a seek
   // in that window errors the player, and only a new URL - picked up when
   // the job ends and the project reloads - remounts it.
+  // A pinned trim may be served as its 720p rendition (``kind=web``,
+  // ``scrub_version``); the offset is the same, the rendition is cut from
+  // the trim.
   const videoSrc =
     activeVideo && servedPlan
       ? peaks
-        ? api.videoStreamUrl(
-            slug,
-            activeVideo.path,
-            servedPlan.kind,
-            servedPlan.kind === "trim" ? activeVideo.trim_version : null,
-          )
+        ? servedPlan.kind === "trim"
+          ? (() => {
+              const choice = scrub.choose(activeVideo);
+              return api.videoStreamUrl(slug, activeVideo.path, choice.kind, choice.version);
+            })()
+          : api.videoStreamUrl(slug, activeVideo.path, servedPlan.kind, null)
         : peaksError != null
           ? api.videoStreamUrl(slug, activeVideo.path)
           : ""
@@ -2057,6 +2064,8 @@ export function Audit() {
                     onPeekEnd={() => setPeeking(false)}
                     kAutoProgress={kAutoProgress}
                     onToggleKAuto={() => setKAutoProgress((v) => !v)}
+                    fullResVideo={scrub.fullRes}
+                    onToggleFullResVideo={scrub.available ? () => scrub.setFullRes(!scrub.fullRes) : undefined}
                     onOpenHelp={() => setShowHelp(true)}
                     menuExtra={
                       <>
@@ -2152,6 +2161,9 @@ export function Audit() {
                       activeIndex={activeVideoIndex}
                       onActiveIndexChange={setActiveVideoIndex}
                       videoSrc={videoSrc}
+                      onPlaybackError={() => {
+                        if (activeVideo && videoSrc.includes("kind=web")) scrub.markFailed(activeVideo.path);
+                      }}
                       proxyReady={activeVideo?.proxy_ready}
                       mediaOnDesktop={project?.origin === "desktop"}
                       gridMode={false}
