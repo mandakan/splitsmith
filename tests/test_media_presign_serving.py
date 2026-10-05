@@ -678,7 +678,9 @@ def test_take_web_follows_the_stage(s3_stream_client: tuple[TestClient, S3Storag
 
 @pytest.mark.parametrize("s3_stream_client", [(1, 2)], indirect=True)
 def test_take_alias_web_follows_the_stage(s3_stream_client: tuple[TestClient, S3Storage]) -> None:
-    """Compare streams through the alias route; its hosted web branch too."""
+    """The alias route's hosted ``kind=web`` branch resolves within the stage
+    too. The SPA does not send a stage on this route today (Compare's tile 0
+    streams a ``video_ref`` whose filename already names the stage)."""
     client, storage = s3_stream_client
     storage.write_bytes(_WEB_KEY, b"WEB1")
     storage.write_bytes(_WEB_KEY_2, b"WEB2")
