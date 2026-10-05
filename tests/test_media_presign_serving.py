@@ -102,7 +102,9 @@ def _seed_session(db_url: str, email: str = EMAIL) -> str:
     return secret
 
 
-def _seed_match_and_project(db_url: str, email: str, match_id: str, slug: str) -> None:
+def _seed_match_and_project(
+    db_url: str, email: str, match_id: str, slug: str, stage_numbers: tuple[int, ...] = (1,)
+) -> None:
     """Insert a MatchRow and project state doc with raw/clip.mp4 in stage 1.
 
     The video is placed in stage 1 (not unassigned_videos) so that
@@ -135,13 +137,25 @@ def _seed_match_and_project(db_url: str, email: str, match_id: str, slug: str) -
             match_id=match_id,
             name="Presign Test Match",
             shooters=[slug],
-            stages=[match_model.MatchStageDefinition(stage_number=1, stage_name="Stage 1")],
+            stages=[
+                match_model.MatchStageDefinition(stage_number=n, stage_name=f"Stage {n}")
+                for n in stage_numbers
+            ],
         )
         await store.save_match(match_id, match_doc.model_dump(mode="json"), expected_version=0)
-        video = StageVideo(path=Path("raw/clip.mp4"), role="primary", beep_time=8.0)
+        # Several stage numbers register the one source on each of them: a
+        # multi-stage single take (#1211).
         project = MatchProject(
             name="Presign Test Shooter",
-            stages=[StageEntry(stage_number=1, stage_name="Stage 1", time_seconds=0.0, videos=[video])],
+            stages=[
+                StageEntry(
+                    stage_number=n,
+                    stage_name=f"Stage {n}",
+                    time_seconds=0.0,
+                    videos=[StageVideo(path=Path("raw/clip.mp4"), role="primary", beep_time=8.0)],
+                )
+                for n in stage_numbers
+            ],
         )
         await store.save_project(match_id, slug, project.model_dump(mode="json"), expected_version=0)
         audit = {
@@ -162,7 +176,7 @@ def _seed_match_and_project(db_url: str, email: str, match_id: str, slug: str) -
 
 @pytest.fixture
 def s3_stream_client(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
 ) -> Iterator[tuple[TestClient, S3Storage]]:
     """S3-backed hosted app with raw/clip.mp4 registered in stage 1.
 
@@ -228,7 +242,7 @@ def s3_stream_client(
 
         app = server_mod.create_app()
         session_secret = _seed_session(db_url)
-        _seed_match_and_project(db_url, EMAIL, MATCH_ID, SLUG)
+        _seed_match_and_project(db_url, EMAIL, MATCH_ID, SLUG, getattr(request, "param", (1,)))
 
         from splitsmith.db import SESSION_COOKIE_NAME
 
@@ -626,3 +640,52 @@ def test_serve_media_non_presign_storage_returns_file_response(tmp_path: Path) -
     result = serve_media(stub, "some/key", local_file, content_type="video/mp4")
 
     assert isinstance(result, FileResponse)
+
+
+# ---------------------------------------------------------------------------
+# Tests: a multi-stage single take streams each stage's own clip (#1211)
+# ---------------------------------------------------------------------------
+
+_VIDEO_ID_2 = hashlib.blake2s(b"raw/clip.mp4#2", digest_size=6).hexdigest()
+_SCOPE = f"matches/{MATCH_ID}/shooters/{SLUG}/trimmed"
+_TRIM_KEY_2 = f"{_SCOPE}/stage2_cam_{_VIDEO_ID_2}_trimmed.mp4"
+_WEB_KEY_2 = f"{_SCOPE}/stage2_cam_{_VIDEO_ID_2}_web.mp4"
+
+
+@pytest.mark.parametrize("s3_stream_client", [(1, 2)], indirect=True)
+def test_take_trim_follows_the_stage(s3_stream_client: tuple[TestClient, S3Storage]) -> None:
+    client, storage = s3_stream_client
+    storage.write_bytes(_TRIM_KEY, b"TRIM1")
+    storage.write_bytes(_TRIM_KEY_2, b"TRIM2")
+
+    resp = client.get(_stream_url(SLUG), params={"path": "raw/clip.mp4", "kind": "trim", "stage": 2})
+
+    assert resp.status_code == 307
+    assert f"stage2_cam_{_VIDEO_ID_2}_trimmed.mp4" in resp.headers["location"]
+
+
+@pytest.mark.parametrize("s3_stream_client", [(1, 2)], indirect=True)
+def test_take_web_follows_the_stage(s3_stream_client: tuple[TestClient, S3Storage]) -> None:
+    client, storage = s3_stream_client
+    storage.write_bytes(_WEB_KEY, b"WEB1")
+    storage.write_bytes(_WEB_KEY_2, b"WEB2")
+
+    resp = client.get(_stream_url(SLUG), params={"path": "raw/clip.mp4", "kind": "web", "stage": 2})
+
+    assert resp.status_code == 307
+    assert f"stage2_cam_{_VIDEO_ID_2}_web.mp4" in resp.headers["location"]
+
+
+@pytest.mark.parametrize("s3_stream_client", [(1, 2)], indirect=True)
+def test_take_alias_web_follows_the_stage(s3_stream_client: tuple[TestClient, S3Storage]) -> None:
+    """The alias route's hosted ``kind=web`` branch resolves within the stage
+    too. The SPA does not send a stage on this route today (Compare's tile 0
+    streams a ``video_ref`` whose filename already names the stage)."""
+    client, storage = s3_stream_client
+    storage.write_bytes(_WEB_KEY, b"WEB1")
+    storage.write_bytes(_WEB_KEY_2, b"WEB2")
+
+    resp = client.get(_alias_stream_url(SLUG), params={"path": "raw/clip.mp4", "kind": "web", "stage": 2})
+
+    assert resp.status_code == 307
+    assert f"stage2_cam_{_VIDEO_ID_2}_web.mp4" in resp.headers["location"]

@@ -1659,14 +1659,29 @@ class MatchProject(BaseModel):
             videos=entries,
         )
 
-    def find_video(self, path: Path) -> tuple[StageEntry | None, StageVideo] | None:
+    def find_video(
+        self, path: Path, *, stage_number: int | None = None
+    ) -> tuple[StageEntry | None, StageVideo] | None:
         """Locate a video by path. Returns ``(stage_or_None, video)`` or ``None``.
 
         ``stage`` is ``None`` when the video lives in ``unassigned_videos``.
         Path comparison uses string equality on the stored value (the project
-        stores paths relative to the project root, so this is unambiguous).
+        stores paths relative to the project root).
+
+        A path is NOT unique: a multi-stage single take registers one source
+        on N stages, each with its own ``StageVideo`` (and trim). Without
+        ``stage_number`` the first registration wins, which is only right
+        when the caller needs the file and not the stage's video (#1211);
+        with it, only that stage is searched.
         """
         target = str(path)
+        if stage_number is not None:
+            for s in self.stages:
+                if s.stage_number == stage_number:
+                    for v in s.videos:
+                        if str(v.path) == target:
+                            return s, v
+            return None
         for v in self.unassigned_videos:
             if str(v.path) == target:
                 return None, v

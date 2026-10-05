@@ -21,7 +21,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
       getStageCoach: vi.fn(),
       getMatchCoachDistributions: vi.fn().mockResolvedValue(null),
       patchStageShotCoach: vi.fn(),
-      videoStreamUrl: (_slug: string, path: string, kind = "auto") => `http://localhost/${kind}/${path}`,
+      videoStreamUrl: (_slug: string, path: string, kind = "auto", _v?: string | null, stage?: number | null) => `http://localhost/${kind}/${path}${stage != null ? `#s${stage}` : ""}`,
     },
   };
 });
@@ -141,5 +141,7 @@ describe("Coach stage stream URL", () => {
       const videoElement = container.querySelector("video");
       expect(videoElement?.src).toContain("/trim/");
     });
+    // A single take shares its source across stages; the URL names this one.
+    expect(container.querySelector("video")?.src).toMatch(/#s1$/);
   });
 });

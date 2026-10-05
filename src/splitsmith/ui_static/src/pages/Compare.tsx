@@ -321,11 +321,11 @@ export function Compare() {
       const idx = camIndexFor(s.slug);
       if (idx > 0) {
         const cam = camsBySlug[s.slug][idx];
-        return api.videoStreamUrl(s.slug, cam.path, cam.kind);
+        return api.videoStreamUrl(s.slug, cam.path, cam.kind, null, stageNumber);
       }
       return s.video_ref ? api.shooterVideoStreamUrl(s.slug, s.video_ref) : null;
     },
-    [camIndexFor, camsBySlug],
+    [camIndexFor, camsBySlug, stageNumber],
   );
   const camsQueryRef = useRef(camsQuery);
   camsQueryRef.current = camsQuery;
@@ -386,9 +386,9 @@ export function Compare() {
       }
       const cam = camsBySlug[s.slug]?.[index];
       if (!cam || cam.beep_in_clip == null) return null;
-      return { src: api.videoStreamUrl(s.slug, cam.path, cam.kind), at: cam.beep_in_clip + tsb };
+      return { src: api.videoStreamUrl(s.slug, cam.path, cam.kind, null, stageNumber), at: cam.beep_in_clip + tsb };
     },
-    [camsBySlug],
+    [camsBySlug, stageNumber],
   );
 
   // Sync engine: read the master's currentTime, derive time-since-beep,

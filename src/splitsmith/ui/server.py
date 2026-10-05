@@ -14082,6 +14082,7 @@ def create_app(
         slug: str,
         path: str = Query(...),
         kind: Literal["auto", "trim", "source", "proxy", "web"] = Query("auto"),
+        stage: int | None = Query(None),
     ) -> FileResponse | RedirectResponse:
         """Serve a registered video file with HTTP Range support.
 
@@ -14107,11 +14108,16 @@ def create_app(
 
         Validates that ``path`` matches a video registered to the project
         (any stage, any role, or unassigned) so the endpoint cannot be
-        used as a generic file-read primitive.
+        used as a generic file-read primitive. ``stage`` restricts the
+        match to that stage: a multi-stage single take registers one path
+        on several stages, and each has its own trim (#1211). Without it
+        the first registration answers.
         """
         root = state.shooter_root(slug)
         project = state.shooter_project(slug)
-        located = project.find_video(Path(path))
+        # ``stage`` picks the registration: a multi-stage single take has
+        # one StageVideo, and one trim, per stage on the same path (#1211).
+        located = project.find_video(Path(path), stage_number=stage)
         if located is None:
             raise HTTPException(
                 status_code=404,
@@ -16169,6 +16175,7 @@ def create_app(
         slug: str,
         path: str = Query(...),
         kind: Literal["auto", "trim", "source", "proxy", "web"] = Query("auto"),
+        stage: int | None = Query(None),
     ) -> FileResponse | RedirectResponse:
         """Serve a video registered to any shooter in the bound match (#328).
 
@@ -16204,7 +16211,7 @@ def create_app(
         # ourselves: the lossless export under exports/ (FCPXML-grade) or
         # the audit-mode short-GOP cache under trimmed/ (compare's fallback
         # when no lossless export exists yet).
-        located = shooter_project.find_video(target)
+        located = shooter_project.find_video(target, stage_number=stage)
         if located is not None:
             stage, video = located
             storage = state.storage

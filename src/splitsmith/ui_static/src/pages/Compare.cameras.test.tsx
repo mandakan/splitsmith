@@ -59,8 +59,8 @@ vi.mock("@/lib/api", async (importOriginal) => {
       getStageCoach: vi.fn(),
       shooterVideoStreamUrl: (_slug: string, ref: string) =>
         `http://localhost/trim/${ref}`,
-      videoStreamUrl: (_slug: string, path: string, kind = "auto") =>
-        `http://localhost/coach/${kind}/${path}`,
+      videoStreamUrl: (_slug: string, path: string, kind = "auto", _v?: string | null, stage?: number | null) =>
+        `http://localhost/coach/${kind}/${path}${stage != null ? `#s${stage}` : ""}`,
     },
   };
 });
@@ -161,7 +161,7 @@ describe("Compare per-shooter camera choice", () => {
     const still = within(items[1]).getByTestId(
       "camera-preview",
     ) as HTMLVideoElement;
-    expect(still.src).toBe("http://localhost/coach/trim/anna-b.mp4");
+    expect(still.src).toBe("http://localhost/coach/trim/anna-b.mp4#s2");
     fireEvent.loadedMetadata(still);
     // The grid sits at the beep (time since beep 0): the camera's own beep.
     expect(still.currentTime).toBe(9);
@@ -169,7 +169,7 @@ describe("Compare per-shooter camera choice", () => {
     expect(tileVideo().src).toContain("/trim/");
     fireEvent.click(items[1]);
     expect(screen.queryByRole("menu")).toBeNull();
-    expect(tileVideo().src).toBe("http://localhost/coach/trim/anna-b.mp4");
+    expect(tileVideo().src).toBe("http://localhost/coach/trim/anna-b.mp4#s2");
     expect(await trigger()).toHaveAccessibleName(
       "Anna camera: iPhone 17 Pro, 2 angles",
     );

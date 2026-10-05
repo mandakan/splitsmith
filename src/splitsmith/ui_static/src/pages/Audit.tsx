@@ -89,6 +89,7 @@ import { isTypingTextTarget, useBlurOnPointerClick } from "@/lib/audit-input";
 import { buildAuditJson, deriveMarkers } from "@/lib/audit-doc";
 import { beepStepVideos, headerState, nextFlaggedIndex, shotRows } from "@/lib/auditStep";
 import { isJobActive } from "@/lib/jobs";
+import { auditVideoSrc } from "@/lib/auditVideoSrc";
 import { planServedClip } from "@/lib/camPlayback";
 import { useScrubSource } from "@/lib/useScrubSource";
 import { computeAuditNextStep } from "@/lib/audit-next-step";
@@ -1599,37 +1600,18 @@ export function Audit() {
     root.focus({ preventScroll: true });
   }, [stageNumber, editorReady]);
 
-  // Pin the served file to either trim or proxy for the lifetime of
-  // this <video> element. Without this, a background trim job that
-  // completes mid-playback would flip the server's auto-pick from
-  // proxy to trim and the browser's next Range request would fall
-  // past the (shorter) trim's EOF -- the player errors out with
-  // "source not found" and only a full reload recovers. Wait for
-  // peaks to load so we know which kind to pin to; when peaks fails
-  // (no beep yet, etc.) the server's ``auto`` still does the right
-  // thing because the trim can't exist without a beep.
-  // proxy_ready === false means the proxy object is not in storage yet;
-  // VideoPanel renders an explicit placeholder rather than a broken player.
-  // A pinned trim carries its trim_version: a re-cut (beep confirmed on
-  // the phone, another window) deletes the trim while it encodes, a seek
-  // in that window errors the player, and only a new URL - picked up when
-  // the job ends and the project reloads - remounts it.
-  // A pinned trim may be served as its 720p rendition (``kind=web``,
-  // ``scrub_version``); the offset is the same, the rendition is cut from
-  // the trim.
-  const videoSrc =
-    activeVideo && servedPlan
-      ? peaks
-        ? servedPlan.kind === "trim"
-          ? (() => {
-              const choice = scrub.choose(activeVideo);
-              return api.videoStreamUrl(slug, activeVideo.path, choice.kind, choice.version);
-            })()
-          : api.videoStreamUrl(slug, activeVideo.path, servedPlan.kind, null)
-        : peaksError != null
-          ? api.videoStreamUrl(slug, activeVideo.path)
-          : ""
-      : "";
+  // Which file the player streams: pinned per <video> element, through
+  // the scrub source for a trimmed angle, naming the stage. The rules
+  // live in lib/auditVideoSrc.ts.
+  const videoSrc = auditVideoSrc({
+    slug,
+    video: activeVideo,
+    plan: servedPlan,
+    peaksLoaded: peaks != null,
+    peaksFailed: peaksError != null,
+    stageNumber,
+    choose: scrub.choose,
+  });
 
   // The trimmed audit clip drives the waveform when present; falls back
   // to the full source peaks otherwise. Beep-editing surfaces lived
