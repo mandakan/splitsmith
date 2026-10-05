@@ -188,19 +188,15 @@ export function applyAssignmentLocally(
   videoPath: string,
   toStage: number | null,
   role: VideoRole,
+  fromStage?: number | null,
 ): MatchProject {
-  const moved =
-    project.stages
-      .flatMap((s) => s.videos ?? [])
-      .find((v) => v.path === videoPath) ??
-    (project.unassigned_videos ?? []).find((v) => v.path === videoPath) ??
-    null;
+  const moved = locateVideo(project, videoPath, fromStage);
   // Unknown path: leave the project untouched. The server will 404 and the
   // caller resyncs; guessing here would only desync the optimistic view.
   if (moved == null) return project;
 
-  const detach = (list: StageVideo[]): StageVideo[] =>
-    list.filter((v) => v.path !== videoPath);
+  // This registration only: a single take shares its path with other stages.
+  const detach = (list: StageVideo[]): StageVideo[] => list.filter((v) => v !== moved);
 
   // Back to the unassigned tray: the server clears the role to "secondary".
   if (toStage == null) {
@@ -235,6 +231,25 @@ export function applyAssignmentLocally(
 }
 
 /**
+ * The registration a Footage edit acts on, mirroring the server's
+ * ``find_video``: a multi-stage single take registers one path on several
+ * stages, so the clip names its stage. ``null`` is the tray; ``undefined``
+ * (an older caller) takes the first registration, stages before the tray.
+ */
+function locateVideo(project: MatchProject, videoPath: string, fromStage?: number | null): StageVideo | null {
+  if (fromStage === null) return (project.unassigned_videos ?? []).find((v) => v.path === videoPath) ?? null;
+  if (fromStage !== undefined) {
+    const stage = project.stages.find((s) => s.stage_number === fromStage);
+    return (stage?.videos ?? []).find((v) => v.path === videoPath) ?? null;
+  }
+  return (
+    project.stages.flatMap((s) => s.videos ?? []).find((v) => v.path === videoPath) ??
+    (project.unassigned_videos ?? []).find((v) => v.path === videoPath) ??
+    null
+  );
+}
+
+/**
  * Client-side mirror of the backend ``MatchProject.remove_video`` (project.py)
  * for the default (``reset_audit=false``) path the Ingest page uses: drop the
  * video from whichever stage or the unassigned tray holds it. The backend does
@@ -246,9 +261,11 @@ export function applyAssignmentLocally(
 export function removeVideoLocally(
   project: MatchProject,
   videoPath: string,
+  fromStage?: number | null,
 ): MatchProject {
-  const detach = (list: StageVideo[]): StageVideo[] =>
-    list.filter((v) => v.path !== videoPath);
+  const removed = locateVideo(project, videoPath, fromStage);
+  if (removed == null) return project;
+  const detach = (list: StageVideo[]): StageVideo[] => list.filter((v) => v !== removed);
   return {
     ...project,
     stages: project.stages.map((s) => ({ ...s, videos: detach(s.videos ?? []) })),

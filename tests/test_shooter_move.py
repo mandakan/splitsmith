@@ -950,3 +950,101 @@ def test_endpoint_unknown_slug_404(tmp_path: Path) -> None:
         json={"source_slug": slug_a, "target_slug": "ghost", "video_paths": []},
     )
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# A multi-stage single take moves whole (#1212)
+# ---------------------------------------------------------------------------
+
+
+def _take_on_alice(tmp_path: Path):
+    root, slug_a, slug_b = _two_shooter_match(tmp_path)
+    root_a = match_model.Match.shooter_root(root, slug_a)
+    root_b = match_model.Match.shooter_root(root, slug_b)
+    proj_a = MatchProject.load(root_a)
+    proj_b = MatchProject.load(root_b)
+    for n in (1, 2, 3):
+        _add_video_symlink(proj_a, root_a, stage_number=n, filename="TAKE.MP4", beep_time=float(n * 100))
+        _write_audit(proj_a, root_a, n, [float(n)])
+    proj_a.save(root_a)
+    return proj_a, root_a, proj_b, root_b
+
+
+def _move(proj_a, root_a, proj_b, root_b, paths):
+    load_tgt, save_tgt, load_src, clear_src = _local_audit_closures(proj_a, root_a, proj_b, root_b)
+    return move_shooter(
+        source_project=proj_a,
+        source_root=root_a,
+        target_project=proj_b,
+        target_root=root_b,
+        video_paths=paths,
+        load_target_audit=load_tgt,
+        save_target_audit=save_tgt,
+        load_source_audit=load_src,
+        clear_source_audit=clear_src,
+        storage=None,
+    )
+
+
+def test_a_take_moves_every_stage(tmp_path: Path) -> None:
+    proj_a, root_a, proj_b, root_b = _take_on_alice(tmp_path)
+
+    outcome = _move(proj_a, root_a, proj_b, root_b, ["raw/TAKE.MP4"])
+
+    assert outcome.blocked == []
+    assert sorted(m.stage_number for m in outcome.moved) == [1, 2, 3]
+    assert [v for v in proj_a.all_videos() if str(v.path) == "raw/TAKE.MP4"] == []
+    assert {n: [v.beep_time for v in proj_b.stage(n).videos] for n in (1, 2, 3)} == {
+        1: [100.0],
+        2: [200.0],
+        3: [300.0],
+    }
+    for n in (1, 2, 3):
+        assert _read_audit(proj_b, root_b, n) == {"shots": [float(n)]}
+        assert _read_audit(proj_a, root_a, n) is None
+    assert (proj_b.raw_path(root_b) / "TAKE.MP4").is_symlink()
+    assert not (proj_a.raw_path(root_a) / "TAKE.MP4").is_symlink()
+
+
+def test_a_take_with_a_blocked_stage_moves_nothing(tmp_path: Path) -> None:
+    """Splitting a take across shooters would leave stages pointing at a raw
+    file that has moved away: one blocked stage keeps the whole take."""
+    proj_a, root_a, proj_b, root_b = _take_on_alice(tmp_path)
+    _add_video_symlink(proj_b, root_b, stage_number=2, filename="BOB2.MP4")
+    _write_audit(proj_b, root_b, 2, [0.5])
+    proj_b.save(root_b)
+
+    outcome = _move(proj_a, root_a, proj_b, root_b, ["raw/TAKE.MP4"])
+
+    assert outcome.moved == []
+    assert [(b.code, b.stage_number) for b in outcome.blocked] == [("occupied_stage", 2)]
+    assert {n: [v.beep_time for v in proj_a.stage(n).videos] for n in (1, 2, 3)} == {
+        1: [100.0],
+        2: [200.0],
+        3: [300.0],
+    }
+    for n in (1, 2, 3):
+        assert _read_audit(proj_a, root_a, n) == {"shots": [float(n)]}
+    assert (proj_a.raw_path(root_a) / "TAKE.MP4").is_symlink()
+
+
+def test_a_moved_take_keeps_its_declared_stage_order(tmp_path: Path) -> None:
+    """Declared order is shooting order for a sequential take; the move must
+    not rebuild it in stage-number order (#1212 review)."""
+    proj_a, root_a, proj_b, root_b = _take_on_alice(tmp_path)
+    proj_a.attach_raw_video(
+        RawVideo(
+            original_filename="TAKE.MP4",
+            size_bytes=1,
+            sha256=None,
+            uploaded_at=datetime.now(UTC),
+            storage_path="raw/TAKE.MP4",
+            covers_stages=[3, 1, 2],
+        )
+    )
+
+    _move(proj_a, root_a, proj_b, root_b, ["raw/TAKE.MP4"])
+
+    moved = proj_b.find_raw_video("raw/TAKE.MP4")
+    assert moved is not None and moved.covers_stages == [3, 1, 2]
+    assert proj_a.find_raw_video("raw/TAKE.MP4") is None

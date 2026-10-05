@@ -6148,6 +6148,9 @@ class MoveRequest(BaseModel):
     video_path: str
     to_stage_number: int | None = None
     role: VideoRole = "secondary"
+    # The stage whose registration moves: a multi-stage single take has one
+    # per stage on the same path (#1212). None = the first registration.
+    from_stage_number: int | None = None
 
 
 class BeepOverrideRequest(BaseModel):
@@ -6413,6 +6416,8 @@ class RemoveVideoRequest(BaseModel):
 
     video_path: str
     reset_audit: bool = False
+    # The stage whose registration goes (#1212); None = the first one.
+    stage_number: int | None = None
 
 
 class FsEntry(BaseModel):
@@ -14469,15 +14474,19 @@ def create_app(
                 Path(req.video_path),
                 root,
                 reset_audit=req.reset_audit,
+                stage_number=req.stage_number,
             )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
         # Symlink under raw_dir: remove only if it's actually a symlink we
         # created. If the user pointed raw_dir at the source and the link is
-        # in fact the original file, leave it alone.
+        # in fact the original file, leave it alone. No link in the plan
+        # while another stage still registers the file.
         try:
-            if plan.raw_link_path.is_symlink():
+            if plan.raw_link_path is None:
+                pass
+            elif plan.raw_link_path.is_symlink():
                 plan.raw_link_path.unlink()
             elif plan.raw_link_path.exists():
                 # Treat as a copy splitsmith placed (link_mode="copy"). We
@@ -14607,13 +14616,16 @@ def create_app(
         root = state.shooter_root(slug)
         project = await state.shooter_project_async(slug)
         try:
-            project.assign_video(
+            moved = project.assign_video(
                 Path(req.video_path),
                 to_stage_number=req.to_stage_number,
                 role=req.role,
+                from_stage_number=req.from_stage_number,
             )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         await project.save_async(root)
 
         # Auto-queue beep on assignment to a real stage (#67). Skip when
@@ -14623,10 +14635,7 @@ def create_app(
         # SPA picks up the job via JobsPanel polling). It no longer mirrors
         # media from storage either -- see the auto-fire's preflight (#638).
         if req.to_stage_number is not None and req.role != "ignored":
-            stage = project.stage(req.to_stage_number)
-            video = next((v for v in stage.videos if str(v.path) == req.video_path), None)
-            if video is not None:
-                background.add_task(_auto_queue_beep_if_needed, slug, project, req.to_stage_number, video)
+            background.add_task(_auto_queue_beep_if_needed, slug, project, req.to_stage_number, moved)
 
         return JSONResponse(project.model_dump(mode="json"))
 
@@ -14672,6 +14681,8 @@ def create_app(
             )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         await project.save_async(root)
 
         # Auto-queue beep for the new primary (#67). swap_primary may

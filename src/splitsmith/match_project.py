@@ -726,7 +726,9 @@ class RemovalPlan(BaseModel):
     """
 
     video_path: Path  # the path that was removed (project-relative or absolute)
-    raw_link_path: Path  # symlink under raw_dir to unlink
+    # symlink under raw_dir to unlink; None while another registration of
+    # the same file remains (a multi-stage single take, #1212)
+    raw_link_path: Path | None
     audio_cache_path: Path | None = None  # WAV cache to clear if cached
     trimmed_cache_path: Path | None = None  # trimmed clip to clear if cached
     audit_path: Path | None = None  # stage audit JSON to clear when reset_audit
@@ -2293,6 +2295,7 @@ class MatchProject(BaseModel):
         *,
         to_stage_number: int | None,
         role: VideoRole = "secondary",
+        from_stage_number: int | None = None,
     ) -> StageVideo:
         """Move a video to a target stage (or back to unassigned if ``None``).
 
@@ -2307,19 +2310,35 @@ class MatchProject(BaseModel):
           where ``auto_match`` has no scoreboard timestamps to anchor on.
           Pass ``role="ignored"`` explicitly to opt out of the upgrade.
 
+        ``from_stage_number`` names the registration to move. A multi-stage
+        single take registers one path on several stages (#1212); without
+        it the first registration answers, which is only right for a path
+        registered once (or a tray item, which ``find_video`` checks first).
+
         Returns the moved ``StageVideo``. Raises ``KeyError`` if the video or
-        stage doesn't exist.
+        stage doesn't exist, and ``ValueError`` when the target stage already
+        holds another registration of the same file (two would share one
+        ``video_id``).
         """
-        located = self.find_video(path)
+        located = self.find_video(path, stage_number=from_stage_number)
         if located is None:
             raise KeyError(f"video {path} not registered with project")
         current_stage, video = located
 
-        # Detach from current location.
+        if to_stage_number is not None:
+            target = self.stage(to_stage_number)
+            if any(v is not video and str(v.path) == str(video.path) for v in target.videos):
+                raise ValueError(
+                    f"stage {to_stage_number} already has {video.path}; "
+                    "a file can be registered on a stage once"
+                )
+
+        # Detach from current location -- this registration only, never every
+        # entry that shares its path.
         if current_stage is None:
-            self.unassigned_videos = [v for v in self.unassigned_videos if str(v.path) != str(video.path)]
+            self.unassigned_videos = [v for v in self.unassigned_videos if v is not video]
         else:
-            current_stage.videos = [v for v in current_stage.videos if str(v.path) != str(video.path)]
+            current_stage.videos = [v for v in current_stage.videos if v is not video]
 
         # Reattach.
         if to_stage_number is None:
@@ -2384,15 +2403,21 @@ class MatchProject(BaseModel):
         target stage or video doesn't exist.
         """
         target = self.stage(stage_number)
-        located = self.find_video(path)
+        # The registration already on this stage wins: a multi-stage single
+        # take registers the path on other stages too (#1212), and the first
+        # of those is not the one being promoted.
+        located = self.find_video(path, stage_number=stage_number) or self.find_video(path)
         if located is None:
             raise KeyError(f"video {path} not registered with project")
+        from_stage = located[0].stage_number if located[0] is not None else None
 
         # Move-then-promote uses the standard assign_video path. If the video
         # was already on this stage, it gets pulled out and re-attached; the
         # old primary is demoted inside assign_video. New primary's processed
         # flags are reset because the audio source changed.
-        new_primary = self.assign_video(path, to_stage_number=stage_number, role="primary")
+        new_primary = self.assign_video(
+            path, to_stage_number=stage_number, role="primary", from_stage_number=from_stage
+        )
         new_primary.processed = {"beep": False, "shot_detect": False, "trim": False}
         new_primary.beep_time = None
         new_primary.beep_source = None
@@ -2438,6 +2463,7 @@ class MatchProject(BaseModel):
         root: Path,
         *,
         reset_audit: bool = False,
+        stage_number: int | None = None,
     ) -> RemovalPlan:
         """Remove a registered video and return a :class:`RemovalPlan`.
 
@@ -2452,9 +2478,15 @@ class MatchProject(BaseModel):
         preserved so a re-ingest of the same stage with a different file can
         pick up where the user left off.
 
+        ``stage_number`` names the registration to remove (a multi-stage
+        single take registers one path on several stages, #1212). The raw
+        link is planned for removal only when no other registration of the
+        path remains: ``raw_link_path`` is ``None`` while another stage
+        still streams the file.
+
         Raises ``KeyError`` if the video isn't registered with the project.
         """
-        located = self.find_video(path)
+        located = self.find_video(path, stage_number=stage_number)
         if located is None:
             raise KeyError(f"video {path} not registered with project")
         current_stage, video = located
@@ -2462,11 +2494,12 @@ class MatchProject(BaseModel):
         stage_number = current_stage.stage_number if current_stage else None
 
         if current_stage is None:
-            self.unassigned_videos = [v for v in self.unassigned_videos if str(v.path) != str(video.path)]
+            self.unassigned_videos = [v for v in self.unassigned_videos if v is not video]
         else:
-            current_stage.videos = [v for v in current_stage.videos if str(v.path) != str(video.path)]
+            current_stage.videos = [v for v in current_stage.videos if v is not video]
 
-        raw_link = self.resolve_video_path(root, video.path)
+        still_registered = any(str(v.path) == str(video.path) for v in self.all_videos())
+        raw_link = None if still_registered else self.resolve_video_path(root, video.path)
 
         # Cache files are keyed per-video for every role (stage<N>_cam_<id>.*)
         # so swapping a primary cannot alias to a previous primary's cache.
