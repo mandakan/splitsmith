@@ -314,6 +314,17 @@ describe("MobileAudit scrub source", () => {
     fireEvent.click(screen.getByRole("button", { name: "Video" }));
   }
 
+  it("an untrimmed stage streams auto, naming the stage", async () => {
+    ctx.value = { ...ctx.value, project: projectWithVideo() };
+    apiMock.getStagePeaks.mockResolvedValue({ ...peaksResult(PEAKS_SMALL), trimmed: false });
+    playback.state.playhead = 2.0; // on cand-1, a kept shot -> Video button renders
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId("wrapped-waveform")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Video" }));
+    expect(apiMock.videoStreamUrl).toHaveBeenCalledWith("alice", "raw/stage3.mp4", "auto", null, 3);
+    ctx.value = { ...ctx.value, project: null };
+  });
+
   it("streams the rendition when the server names one", async () => {
     ctx.value = { ...ctx.value, project: withRendition() };
     await openVideo();
