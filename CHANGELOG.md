@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.58.0](https://github.com/mandakan/splitsmith/compare/v0.57.0...v0.58.0) (2026-10-05)
+
+
+### Features
+
+* **export:** print the shooter's division on the title page ([#1206](https://github.com/mandakan/splitsmith/issues/1206)) ([b1028c5](https://github.com/mandakan/splitsmith/commit/b1028c57484c36befc6d5acefef36c81b55b1f10))
+
+
+### Bug Fixes
+
+* **audit:** a trim re-cut no longer leaves the player stuck on "Buffering..." ([#1196](https://github.com/mandakan/splitsmith/issues/1196)) ([825fcfc](https://github.com/mandakan/splitsmith/commit/825fcfc048d9c3d97425949a72fbb48fd8f58843))
+* **hosted:** name, stop and guard the pooled database connections ([#1204](https://github.com/mandakan/splitsmith/issues/1204)) ([1746480](https://github.com/mandakan/splitsmith/commit/1746480c6401244cf75c3ff91df6228fbeeace6d))
+* **spa:** count the progress strip's batch, not the poll list ([#1203](https://github.com/mandakan/splitsmith/issues/1203)) ([52a4cae](https://github.com/mandakan/splitsmith/commit/52a4cae6eee26131373fc1478ad64261fd7b5421))
+
+
+### Performance
+
+* **hosted:** keep the queue deferrer's pool open per long-lived loop ([#1205](https://github.com/mandakan/splitsmith/issues/1205)) ([7f38295](https://github.com/mandakan/splitsmith/commit/7f38295103c8c95182e86da1f8e3eea6642d844c))
+
+
+### Documentation
+
+* **hosted:** serve on the Neon pooler, the worker direct, statement cache on ([#1207](https://github.com/mandakan/splitsmith/issues/1207)) ([b8adec2](https://github.com/mandakan/splitsmith/commit/b8adec254479a800c57726134c898d14f13c3ec8))
+
 ## [0.57.0](https://github.com/mandakan/splitsmith/compare/v0.56.0...v0.57.0) (2026-10-04)
 
 
