@@ -83,18 +83,33 @@ describe("ClipSheet", () => {
   it("stage, role, shooter and remove call the page's writes", async () => {
     const props = renderClip();
     fireEvent.change(screen.getByLabelText("Stage"), { target: { value: "3" } });
-    await vi.waitFor(() => expect(props.onMove).toHaveBeenCalledWith(VIDEO.path, 3, "primary"));
+    await vi.waitFor(() => expect(props.onMove).toHaveBeenCalledWith(VIDEO.path, 3, "primary", 2));
     await vi.waitFor(() => expect(screen.getByRole("button", { name: "Secondary" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Secondary" }));
-    await vi.waitFor(() => expect(props.onMove).toHaveBeenCalledWith(VIDEO.path, 2, "secondary"));
+    await vi.waitFor(() => expect(props.onMove).toHaveBeenCalledWith(VIDEO.path, 2, "secondary", 2));
     await vi.waitFor(() => expect(screen.getByLabelText("Shooter")).toBeEnabled());
     fireEvent.change(screen.getByLabelText("Shooter"), { target: { value: "anna" } });
     await vi.waitFor(() => expect(props.onMoveShooter).toHaveBeenCalledWith("anna", [VIDEO.path]));
     await vi.waitFor(() => expect(screen.getByRole("button", { name: "Remove video" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Remove video" }));
-    expect(props.onRemove).toHaveBeenCalledWith(VIDEO.path);
+    expect(props.onRemove).toHaveBeenCalledWith(VIDEO.path, 2);
     fireEvent.click(screen.getByRole("button", { name: "Re-detect" }));
     await vi.waitFor(() => expect(api.detectBeepForVideo).toHaveBeenCalledWith("me", 2, "v1"));
+  });
+
+  it("a single take's clip says moving shooters moves every stage of it", () => {
+    // The take registers one file on stages 2 and 3.
+    const stages = [
+      { ...STAGES[0], videos: [VIDEO] },
+      { ...STAGES[1], videos: [{ ...VIDEO, video_id: "v3", beep_time: 61.2 }] },
+    ] as unknown as StageEntry[];
+    renderClip({ allStages: stages });
+    expect(screen.getByText("moves all 2 stages of this take")).toBeInTheDocument();
+  });
+
+  it("a clip on one stage keeps the plain shooter hint", () => {
+    renderClip({ allStages: [{ ...STAGES[0], videos: [VIDEO] }, STAGES[1]] as unknown as StageEntry[] });
+    expect(screen.getByText("moves the file")).toBeInTheDocument();
   });
 
   it("assign mode lists the unassigned files and picks one for the asking stage", () => {

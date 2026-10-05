@@ -1364,7 +1364,8 @@ export interface CompareGridResult {
 
 export interface RemovalPlan {
   video_path: string;
-  raw_link_path: string;
+  /** Null while another stage still registers the file (a single take). */
+  raw_link_path: string | null;
   audio_cache_path: string | null;
   trimmed_cache_path: string | null;
   audit_path: string | null;
@@ -2846,12 +2847,12 @@ export const api = {
       `/api/shooters/${encodeURIComponent(slug)}/fs/probe?path=${encodeURIComponent(path)}`,
     ),
 
-  removeVideo: (slug: string, videoPath: string, resetAudit = false) =>
+  removeVideo: (slug: string, videoPath: string, resetAudit = false, stageNumber?: number | null) =>
     request<RemoveVideoResponse>(
       `/api/shooters/${encodeURIComponent(slug)}/videos/remove`,
       {
         method: "POST",
-        json: { video_path: videoPath, reset_audit: resetAudit },
+        json: { video_path: videoPath, reset_audit: resetAudit, stage_number: stageNumber ?? null },
       },
     ),
 
@@ -3171,11 +3172,15 @@ export const api = {
       },
     ),
 
+  /** ``fromStageNumber`` names the registration that moves: a multi-stage
+   *  single take registers one file on several stages. Leave it off (or
+   *  null) for a tray item. */
   moveAssignment: (
     slug: string,
     videoPath: string,
     toStageNumber: number | null,
     role: VideoRole = "secondary",
+    fromStageNumber?: number | null,
   ) =>
     request<MatchProject>(
       `/api/shooters/${encodeURIComponent(slug)}/assignments/move`,
@@ -3185,6 +3190,7 @@ export const api = {
           video_path: videoPath,
           to_stage_number: toStageNumber,
           role,
+          from_stage_number: fromStageNumber ?? null,
         },
       },
     ),

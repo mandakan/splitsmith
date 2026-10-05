@@ -417,6 +417,7 @@ function IngestInner({ slug }: { slug: string }) {
     videoPath: string,
     toStage: number | null,
     role: VideoRole,
+    fromStage?: number | null,
   ): Promise<boolean> {
     if (editDenied) {
       setError(READ_ONLY_MIRROR_MESSAGE);
@@ -426,12 +427,12 @@ function IngestInner({ slug }: { slug: string }) {
     // Build on the latest state (functional update) so a burst of clicks stacks
     // correctly - each move layers onto the previous optimistic result.
     setProject((cur) =>
-      cur ? applyAssignmentLocally(cur, videoPath, toStage, role) : cur,
+      cur ? applyAssignmentLocally(cur, videoPath, toStage, role, fromStage) : cur,
     );
     inflight.current += 1;
     moveChain.current = moveChain.current.then(async () => {
       try {
-        const updated = await api.moveAssignment(slug, videoPath, toStage, role);
+        const updated = await api.moveAssignment(slug, videoPath, toStage, role, fromStage);
         // Only the last write in the burst reconciles; an earlier response
         // predates the still-queued optimistic moves and would revert them.
         if (inflight.current === 1) setProject(updated);
@@ -455,7 +456,7 @@ function IngestInner({ slug }: { slug: string }) {
   // authoritative project the backend returns (an earlier response predates the
   // later optimistic edits and would revert them). Any failure resyncs via
   // reload(). Returns a resolved promise so callers that `void` it stay simple.
-  async function removeVideo(videoPath: string): Promise<void> {
+  async function removeVideo(videoPath: string, fromStage?: number | null): Promise<void> {
     if (editDenied) {
       setError(READ_ONLY_MIRROR_MESSAGE);
       return;
@@ -473,11 +474,11 @@ function IngestInner({ slug }: { slug: string }) {
     });
     if (!ok.confirmed) return;
     setError(null);
-    setProject((cur) => (cur ? removeVideoLocally(cur, videoPath) : cur));
+    setProject((cur) => (cur ? removeVideoLocally(cur, videoPath, fromStage) : cur));
     inflight.current += 1;
     moveChain.current = moveChain.current.then(async () => {
       try {
-        const resp = await api.removeVideo(slug, videoPath, false);
+        const resp = await api.removeVideo(slug, videoPath, false, fromStage);
         if (inflight.current === 1) setProject(resp.project);
       } catch (e: unknown) {
         setError(apiErrorText(e, "Could not remove the video."));
@@ -569,9 +570,15 @@ function IngestInner({ slug }: { slug: string }) {
 
   // Writes on another shooter's clip go through the same endpoints with
   // that slug; the matrix refetches that project afterwards.
-  async function moveOn(targetSlug: string, videoPath: string, toStage: number | null, role: VideoRole): Promise<void> {
+  async function moveOn(
+    targetSlug: string,
+    videoPath: string,
+    toStage: number | null,
+    role: VideoRole,
+    fromStage?: number | null,
+  ): Promise<void> {
     if (targetSlug === slug) {
-      await moveAssignment(videoPath, toStage, role);
+      await moveAssignment(videoPath, toStage, role, fromStage);
       return;
     }
     if (editDenied) {
@@ -579,15 +586,15 @@ function IngestInner({ slug }: { slug: string }) {
       return;
     }
     try {
-      const updated = await api.moveAssignment(targetSlug, videoPath, toStage, role);
+      const updated = await api.moveAssignment(targetSlug, videoPath, toStage, role, fromStage);
       setOthers((cur) => ({ ...cur, [targetSlug]: updated }));
     } catch (e: unknown) {
       setError(apiErrorText(e, "Could not move the video."));
     }
   }
-  async function removeOn(targetSlug: string, videoPath: string): Promise<void> {
+  async function removeOn(targetSlug: string, videoPath: string, fromStage?: number | null): Promise<void> {
     if (targetSlug === slug) {
-      await removeVideo(videoPath);
+      await removeVideo(videoPath, fromStage);
       return;
     }
     if (editDenied) {
@@ -601,7 +608,7 @@ function IngestInner({ slug }: { slug: string }) {
     });
     if (!ok.confirmed) return;
     try {
-      const resp = await api.removeVideo(targetSlug, videoPath, false);
+      const resp = await api.removeVideo(targetSlug, videoPath, false, fromStage);
       setOthers((cur) => ({ ...cur, [targetSlug]: resp.project }));
     } catch (e: unknown) {
       setError(apiErrorText(e, "Could not remove the video."));
@@ -669,7 +676,7 @@ function IngestInner({ slug }: { slug: string }) {
   const openAssign = (targetSlug: string, stage: number) => setSheet({ slug: targetSlug, videoId: null, assignStage: stage });
   const openUnassigned = (item: UnassignedItem) => setSheet({ slug: item.slug, videoId: item.video.video_id, assignStage: null });
   const assignUnassigned = (item: UnassignedItem, stage: number) => {
-    void moveOn(item.slug, item.video.path, stage, "secondary");
+    void moveOn(item.slug, item.video.path, stage, "secondary", null);
     // The id changes with the stage (path + stage hash); the sheet finds
     // the clip again by path once the optimistic move has landed.
     setSheet(null);
@@ -872,7 +879,7 @@ function IngestInner({ slug }: { slug: string }) {
               editDenied={editDenied}
               onOpen={openUnassigned}
               onAssign={assignUnassigned}
-              onRemove={(item) => void removeOn(item.slug, item.video.path)}
+              onRemove={(item) => void removeOn(item.slug, item.video.path, null)}
               onSort={canSort ? () => void sortUnassigned() : undefined}
             />
             <ShootersPanel
@@ -904,8 +911,8 @@ function IngestInner({ slug }: { slug: string }) {
         busy={busy}
         editDenied={editDenied}
         auditHref={hrefs.audit}
-        onMove={(path, toStage, role) => moveOn(sheet?.slug ?? slug, path, toStage, role)}
-        onRemove={(path) => removeOn(sheet?.slug ?? slug, path)}
+        onMove={(path, toStage, role, fromStage) => moveOn(sheet?.slug ?? slug, path, toStage, role, fromStage)}
+        onRemove={(path, fromStage) => removeOn(sheet?.slug ?? slug, path, fromStage)}
         onMoveShooter={(target, paths) => moveShooterFrom(sheet?.slug ?? slug, target, paths)}
         onPickUnassigned={assignUnassigned}
         onError={setError}

@@ -49,8 +49,10 @@ export interface ClipSheetProps {
   busy: boolean;
   editDenied: boolean;
   auditHref: (slug: string, stage: number) => string;
-  onMove: (videoPath: string, toStage: number | null, role: VideoRole) => Promise<void>;
-  onRemove: (videoPath: string) => Promise<void>;
+  /** ``fromStage`` names the clip's registration: a multi-stage single
+   *  take registers one file on several stages. ``null`` is the tray. */
+  onMove: (videoPath: string, toStage: number | null, role: VideoRole, fromStage: number | null) => Promise<void>;
+  onRemove: (videoPath: string, fromStage: number | null) => Promise<void>;
   onMoveShooter: (targetSlug: string, videoPaths: string[]) => Promise<void>;
   onPickUnassigned: (item: UnassignedItem, stage: number) => void;
   onError: (msg: string | null) => void;
@@ -155,6 +157,9 @@ export function ClipSheet(props: ClipSheetProps) {
   const filename = video.path.split("/").pop() ?? video.path;
   const take = findTakeForPath(rawVideos, video.path);
   const takeName = take != null ? takeFilename(take) : null;
+  // A single take registers this file on several stages; moving it to
+  // another shooter moves every one of them.
+  const takeStageCount = allStages.filter((s) => (s.videos ?? []).some((v) => v.path === video.path)).length;
   const cameraDetail = [clip.camera?.label, clip.camera?.model, clip.camera?.mount].filter(Boolean).join(" · ");
   const coverageDirty = JSON.stringify(coverageDraft) !== JSON.stringify(coverageSaved);
   const canDetect = video.role !== "ignored" && currentStage != null && !editDenied;
@@ -162,8 +167,8 @@ export function ClipSheet(props: ClipSheetProps) {
   async function changeStage(next: string) {
     setRowBusy(true);
     try {
-      if (next === "unassigned") await onMove(video.path, null, video.role);
-      else await onMove(video.path, Number(next), video.role);
+      if (next === "unassigned") await onMove(video.path, null, video.role, currentStage);
+      else await onMove(video.path, Number(next), video.role, currentStage);
     } finally {
       setRowBusy(false);
     }
@@ -171,7 +176,7 @@ export function ClipSheet(props: ClipSheetProps) {
   async function setRole(next: VideoRole) {
     setRowBusy(true);
     try {
-      await onMove(video.path, currentStage, next);
+      await onMove(video.path, currentStage, next, currentStage);
     } finally {
       setRowBusy(false);
     }
@@ -309,12 +314,14 @@ export function ClipSheet(props: ClipSheetProps) {
                 </option>
               ))}
             </select>
-            <span className="text-sm text-muted">moves the file</span>
+            <span className="text-sm text-muted">
+              {takeStageCount > 1 ? `moves all ${takeStageCount} stages of this take` : "moves the file"}
+            </span>
           </Row>
         ) : null}
       </div>
       <div className="mt-auto flex items-center gap-2 border-t border-rule px-4 py-3">
-        <Button variant="destructive" size="sm" onClick={() => void onRemove(video.path)} disabled={locked}>
+        <Button variant="destructive" size="sm" onClick={() => void onRemove(video.path, currentStage)} disabled={locked}>
           Remove video
         </Button>
         <span className="flex-1" />
