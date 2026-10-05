@@ -182,6 +182,11 @@ def move_shooter(
             blocked.extend(group_blocks)
             continue
 
+        # Declared order is shooting order for a sequential take; the
+        # per-registration bookkeeping below rebuilds it in stage order.
+        source_rv = source_project.find_raw_video(path_str)
+        declared_order = list(source_rv.covers_stages) if source_rv is not None else None
+
         for stage, video in registrations:
             stage_number = stage.stage_number if stage is not None else None
 
@@ -255,6 +260,11 @@ def move_shooter(
                     demoted_to_secondary=demoted,
                 )
             )
+
+        if declared_order is not None:
+            target_rv = target_project.find_raw_video(path_str)
+            if target_rv is not None:
+                target_rv.covers_stages = list(dict.fromkeys([*declared_order, *target_rv.covers_stages]))
 
         # ---- Relocate raw (local mode only), once, after every registration ----
         if storage is None:

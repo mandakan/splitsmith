@@ -1026,3 +1026,25 @@ def test_a_take_with_a_blocked_stage_moves_nothing(tmp_path: Path) -> None:
     for n in (1, 2, 3):
         assert _read_audit(proj_a, root_a, n) == {"shots": [float(n)]}
     assert (proj_a.raw_path(root_a) / "TAKE.MP4").is_symlink()
+
+
+def test_a_moved_take_keeps_its_declared_stage_order(tmp_path: Path) -> None:
+    """Declared order is shooting order for a sequential take; the move must
+    not rebuild it in stage-number order (#1212 review)."""
+    proj_a, root_a, proj_b, root_b = _take_on_alice(tmp_path)
+    proj_a.attach_raw_video(
+        RawVideo(
+            original_filename="TAKE.MP4",
+            size_bytes=1,
+            sha256=None,
+            uploaded_at=datetime.now(UTC),
+            storage_path="raw/TAKE.MP4",
+            covers_stages=[3, 1, 2],
+        )
+    )
+
+    _move(proj_a, root_a, proj_b, root_b, ["raw/TAKE.MP4"])
+
+    moved = proj_b.find_raw_video("raw/TAKE.MP4")
+    assert moved is not None and moved.covers_stages == [3, 1, 2]
+    assert proj_a.find_raw_video("raw/TAKE.MP4") is None
