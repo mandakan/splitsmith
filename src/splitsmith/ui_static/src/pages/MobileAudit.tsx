@@ -46,6 +46,7 @@ import { useMatchHref } from "@/lib/matchHref";
 import { snapToPeak, type SnapPeaks } from "@/lib/peak-snap";
 import { createScrubber, type Scrubber } from "@/lib/scrub-audio";
 import { useAuditPlayback } from "@/lib/useAuditPlayback";
+import { useScrubSource } from "@/lib/useScrubSource";
 
 const PEAKS_BINS = 8192;
 
@@ -326,6 +327,9 @@ export function MobileAudit() {
     return stageEntry.videos.find((v) => v.role === "primary") ?? null;
   }, [outletCtx?.project, stageNumber]);
 
+  // The trim pin may play the 720p rendition (lib/scrubSource.ts); a
+  // playback error falls back to the trim for that video.
+  const { choose: chooseScrub, markFailed: markScrubFailed } = useScrubSource();
   const videoUrl = useMemo(() => {
     // Keyed off peaksResult.trimmed, not primaryVideo.processed.trim: the
     // audit timeline's marker times live in whatever file the server
@@ -339,10 +343,10 @@ export function MobileAudit() {
     // being loaded at all, since there is no defensible kind to seek into
     // before that - the seek-into-nothing case.
     if (!primaryVideo || !peaksResult) return null;
-    return peaksResult.trimmed
-      ? api.videoStreamUrl(slug, primaryVideo.path, "trim", primaryVideo.trim_version)
-      : api.videoStreamUrl(slug, primaryVideo.path, "auto");
-  }, [primaryVideo, peaksResult, slug]);
+    if (!peaksResult.trimmed) return api.videoStreamUrl(slug, primaryVideo.path, "auto");
+    const choice = chooseScrub(primaryVideo);
+    return api.videoStreamUrl(slug, primaryVideo.path, choice.kind, choice.version);
+  }, [primaryVideo, peaksResult, slug, chooseScrub]);
 
   const handleShowVideo = useCallback(() => {
     if (videoUrl) setVideoOpen(true);
@@ -668,6 +672,9 @@ export function MobileAudit() {
               playsInline
               className="min-h-0 flex-1"
               onLoadedMetadata={handleVideoLoadedMetadata}
+              onError={() => {
+                if (primaryVideo && videoUrl.includes("kind=web")) markScrubFailed(primaryVideo.path);
+              }}
             />
           </div>
         )}
