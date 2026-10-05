@@ -132,11 +132,18 @@ def move_shooter(
 
     # ------------------------------------------------------------------
     # Phase 1: validate all requested paths before mutating anything.
+    # A path is NOT one video: a multi-stage single take registers it on
+    # several stages, and the take moves whole (#1212) -- every
+    # registration, or none of them.
     # ------------------------------------------------------------------
-    located: list[tuple[str, object, StageVideo]] = []  # (path_str, stage_or_None, video)
+    groups: list[tuple[str, list[tuple[object, StageVideo]]]] = []  # (path_str, [(stage_or_None, video)])
+    seen: set[str] = set()
     for path_str in video_paths:
-        result = source_project.find_video(Path(path_str))
-        if result is None:
+        if path_str in seen:
+            continue
+        seen.add(path_str)
+        registrations = _registrations(source_project, path_str)
+        if not registrations:
             blocked.append(
                 MoveShooterBlocked(
                     video_path=path_str,
@@ -146,137 +153,113 @@ def move_shooter(
                 )
             )
             continue
-        stage, video = result
-        located.append((path_str, stage, video))
+        groups.append((path_str, registrations))
 
     # If any unknown paths were found, fail the entire batch before mutating.
     if any(b.code == "unknown_path" for b in blocked):
         return MoveShooterOutcome(moved=[], blocked=blocked)
 
     # ------------------------------------------------------------------
-    # Phase 2: per-video mutation.
+    # Phase 2: per path, check every registration, then move them all.
     # ------------------------------------------------------------------
-    for path_str, stage, video in located:
-        stage_number = stage.stage_number if stage is not None else None
+    for path_str, registrations in groups:
+        group_blocks = [
+            b
+            for stage, video in registrations
+            for b in _blocks_for(
+                path_str,
+                stage,
+                video,
+                source_project=source_project,
+                source_root=source_root,
+                target_project=target_project,
+                target_root=target_root,
+                load_target_audit=load_target_audit,
+                storage=storage,
+            )
+        ]
+        if group_blocks:
+            blocked.extend(group_blocks)
+            continue
 
-        # ---- Occupied-stage rule (block, not merge) ----
-        # For a primary video moving to an assigned stage: if the target
-        # stage already has a primary AND has audited shots, block.
-        if stage_number is not None and video.role == "primary":
-            target_stage = _find_target_stage(target_project, stage_number)
-            if target_stage is not None and target_stage.primary() is not None:
-                target_audit = load_target_audit(stage_number)
-                has_shots = bool(
-                    target_audit and isinstance(target_audit.get("shots"), list) and target_audit["shots"]
-                )
-                if has_shots:
-                    blocked.append(
-                        MoveShooterBlocked(
-                            video_path=path_str,
-                            stage_number=stage_number,
-                            reason=(
-                                f"target stage {stage_number} already has a primary with "
-                                "audited shots; move refused to avoid clobbering reviewed data"
-                            ),
-                            code="occupied_stage",
-                        )
-                    )
-                    continue
+        for stage, video in registrations:
+            stage_number = stage.stage_number if stage is not None else None
 
-        # ---- Filename-collision guard on target raw dir (local mode) ----
-        if storage is None and stage_number is not None:
-            name = Path(path_str).name
-            dst_raw = target_project.raw_path(target_root) / name
-            src_raw = source_project.raw_path(source_root) / name
-            if dst_raw.exists() and not _same_raw_target(dst_raw, src_raw):
-                blocked.append(
-                    MoveShooterBlocked(
-                        video_path=path_str,
+            # ---- Lift from source: this registration only ----
+            if stage is None:
+                source_project.unassigned_videos = [
+                    v for v in source_project.unassigned_videos if v is not video
+                ]
+            else:
+                stage.videos = [v for v in stage.videos if v is not video]
+
+            # ---- Insert into target (verbatim -- do NOT call assign_video) ----
+            demoted = False
+            # Capture the role before any demotion: a primary always vacates the
+            # source stage's audit, even when it lands as a secondary.
+            moved_was_primary = video.role == "primary"
+            if stage_number is None:
+                target_project.unassigned_videos.append(video)
+            else:
+                target_stage = _find_target_stage(target_project, stage_number)
+                if target_stage is None:
+                    # Target doesn't have this stage yet -- treat as a no-primary slot.
+                    from ..match_project import StageEntry
+
+                    target_stage = StageEntry(
                         stage_number=stage_number,
-                        reason=(
-                            f"target raw/{name} already exists and points to a different "
-                            "source -- would clobber an unrelated file"
-                        ),
-                        code="filename_collision",
+                        stage_name=f"Stage {stage_number}",
+                        time_seconds=0.0,
                     )
+                    target_project.stages.append(target_stage)
+                    target_project.stages.sort(key=lambda s: s.stage_number)
+
+                # Primary-collision rule: target already has a primary but no
+                # audited shots -> demote the moved video to secondary.
+                if moved_was_primary and target_stage.primary() is not None:
+                    # (We already know there are no audited shots -- the
+                    # occupied-stage block above would have stopped us.)
+                    video = video.model_copy(update={"role": "secondary"})
+                    demoted = True
+
+                target_stage.videos.append(video)
+
+            # ---- Audit doc: a moved primary always vacates the source stage ----
+            # If it stays primary on the target, carry the reviewed shots over.
+            # If it was demoted to secondary, the shots don't follow (secondaries
+            # have no stage audit) but the source audit must still be cleared --
+            # otherwise the source stage shows reviewed shots for a video that
+            # has left, which would read as work the user never has to touch but
+            # can no longer explain. (Transparency: no orphaned review state.)
+            if stage_number is not None and moved_was_primary:
+                src_audit = load_source_audit(stage_number)
+                if src_audit is not None:
+                    if not demoted:
+                        save_target_audit(stage_number, src_audit)
+                    clear_source_audit(stage_number)
+
+            # ---- Relocate path-independent derived caches (local mode only) ----
+            if storage is None and stage_number is not None:
+                _relocate_derived_caches(
+                    source_project, source_root, target_project, target_root, video, stage_number
                 )
-                continue
+            # Hosted: caches are ephemeral; jobs regenerate them.
 
-        # ---- Lift from source ----
-        if stage is None:
-            source_project.unassigned_videos = [
-                v for v in source_project.unassigned_videos if str(v.path) != path_str
-            ]
-        else:
-            stage.videos = [v for v in stage.videos if str(v.path) != path_str]
+            # ---- raw_videos[] bookkeeping ----
+            _move_raw_video_entry(source_project, target_project, video, stage_number)
 
-        # ---- Insert into target (verbatim -- do NOT call assign_video) ----
-        demoted = False
-        # Capture the role before any demotion: a primary always vacates the
-        # source stage's audit, even when it lands as a secondary.
-        moved_was_primary = video.role == "primary"
-        if stage_number is None:
-            target_project.unassigned_videos.append(video)
-        else:
-            target_stage = _find_target_stage(target_project, stage_number)
-            if target_stage is None:
-                # Target doesn't have this stage yet -- treat as a no-primary slot.
-                from ..match_project import StageEntry
-
-                target_stage = StageEntry(
+            moved.append(
+                MoveShooterResultItem(
+                    video_path=path_str,
                     stage_number=stage_number,
-                    stage_name=f"Stage {stage_number}",
-                    time_seconds=0.0,
+                    demoted_to_secondary=demoted,
                 )
-                target_project.stages.append(target_stage)
-                target_project.stages.sort(key=lambda s: s.stage_number)
+            )
 
-            # Primary-collision rule: target already has a primary but no
-            # audited shots -> demote the moved video to secondary.
-            if moved_was_primary and target_stage.primary() is not None:
-                # (We already know there are no audited shots -- the
-                # occupied-stage block above would have stopped us.)
-                video = video.model_copy(update={"role": "secondary"})
-                demoted = True
-
-            target_stage.videos.append(video)
-
-        # ---- Audit doc: a moved primary always vacates the source stage ----
-        # If it stays primary on the target, carry the reviewed shots over.
-        # If it was demoted to secondary, the shots don't follow (secondaries
-        # have no stage audit) but the source audit must still be cleared --
-        # otherwise the source stage shows reviewed shots for a video that
-        # has left, which would read as work the user never has to touch but
-        # can no longer explain. (Transparency: no orphaned review state.)
-        if stage_number is not None and moved_was_primary:
-            src_audit = load_source_audit(stage_number)
-            if src_audit is not None:
-                if not demoted:
-                    save_target_audit(stage_number, src_audit)
-                clear_source_audit(stage_number)
-
-        # ---- Relocate raw (local mode only) ----
+        # ---- Relocate raw (local mode only), once, after every registration ----
         if storage is None:
             _relocate_raw(source_project, source_root, target_project, target_root, video, path_str)
         # Hosted: no raw movement -- both shooters share the same tenant object.
-
-        # ---- Relocate path-independent derived caches (local mode only) ----
-        if storage is None and stage_number is not None:
-            _relocate_derived_caches(
-                source_project, source_root, target_project, target_root, video, stage_number
-            )
-        # Hosted: caches are ephemeral; jobs regenerate them.
-
-        # ---- raw_videos[] bookkeeping ----
-        _move_raw_video_entry(source_project, target_project, video, stage_number)
-
-        moved.append(
-            MoveShooterResultItem(
-                video_path=path_str,
-                stage_number=stage_number,
-                demoted_to_secondary=demoted,
-            )
-        )
 
     return MoveShooterOutcome(moved=moved, blocked=blocked)
 
@@ -284,6 +267,74 @@ def move_shooter(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _registrations(project: MatchProject, path_str: str) -> list[tuple[object, StageVideo]]:
+    """Every registration of ``path_str``: the tray first, then each stage."""
+    found: list[tuple[object, StageVideo]] = [
+        (None, v) for v in project.unassigned_videos if str(v.path) == path_str
+    ]
+    for stage in project.stages:
+        found.extend((stage, v) for v in stage.videos if str(v.path) == path_str)
+    return found
+
+
+def _blocks_for(
+    path_str: str,
+    stage,
+    video: StageVideo,
+    *,
+    source_project: MatchProject,
+    source_root: Path,
+    target_project: MatchProject,
+    target_root: Path,
+    load_target_audit,
+    storage,
+) -> list[MoveShooterBlocked]:
+    """Why this one registration cannot move, if it cannot. Pure checks."""
+    stage_number = stage.stage_number if stage is not None else None
+
+    # ---- Occupied-stage rule (block, not merge) ----
+    # For a primary video moving to an assigned stage: if the target
+    # stage already has a primary AND has audited shots, block.
+    if stage_number is not None and video.role == "primary":
+        target_stage = _find_target_stage(target_project, stage_number)
+        if target_stage is not None and target_stage.primary() is not None:
+            target_audit = load_target_audit(stage_number)
+            has_shots = bool(
+                target_audit and isinstance(target_audit.get("shots"), list) and target_audit["shots"]
+            )
+            if has_shots:
+                return [
+                    MoveShooterBlocked(
+                        video_path=path_str,
+                        stage_number=stage_number,
+                        reason=(
+                            f"target stage {stage_number} already has a primary with "
+                            "audited shots; move refused to avoid clobbering reviewed data"
+                        ),
+                        code="occupied_stage",
+                    )
+                ]
+
+    # ---- Filename-collision guard on target raw dir (local mode) ----
+    if storage is None and stage_number is not None:
+        name = Path(path_str).name
+        dst_raw = target_project.raw_path(target_root) / name
+        src_raw = source_project.raw_path(source_root) / name
+        if dst_raw.exists() and not _same_raw_target(dst_raw, src_raw):
+            return [
+                MoveShooterBlocked(
+                    video_path=path_str,
+                    stage_number=stage_number,
+                    reason=(
+                        f"target raw/{name} already exists and points to a different "
+                        "source -- would clobber an unrelated file"
+                    ),
+                    code="filename_collision",
+                )
+            ]
+    return []
 
 
 def _find_target_stage(project: MatchProject, stage_number: int):
