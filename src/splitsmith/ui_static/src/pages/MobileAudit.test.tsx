@@ -98,6 +98,8 @@ const apiMock = vi.hoisted(() => ({
   saveStageAudit: vi.fn(),
   stageAudioUrl: vi.fn(() => "/audio.wav"),
   videoStreamUrl: vi.fn(() => "/video.mp4"),
+  getScrubSettings: vi.fn(async () => ({ full_res_scrub: false })),
+  setScrubSettings: vi.fn(),
 }));
 vi.mock("@/lib/api", async (orig) => {
   const actual = await orig<typeof import("@/lib/api")>();
@@ -294,5 +296,44 @@ describe("MobileAudit", () => {
     const saveButton = screen.getByRole("button", { name: /save/i });
     expect(saveButton).not.toBeDisabled();
     expect(saveButton).toHaveTextContent("Save *");
+  });
+});
+
+describe("MobileAudit scrub source", () => {
+  const withRendition = () => {
+    const p = projectWithVideo();
+    Object.assign(p.stages[0].videos[0], { scrub_version: "w-1" });
+    return p;
+  };
+
+  async function openVideo() {
+    apiMock.getStagePeaks.mockResolvedValue({ ...peaksResult(PEAKS_SMALL), trimmed: true });
+    playback.state.playhead = 2.0; // on cand-1, a kept shot -> Video button renders
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId("wrapped-waveform")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Video" }));
+  }
+
+  it("streams the rendition when the server names one", async () => {
+    ctx.value = { ...ctx.value, project: withRendition() };
+    await openVideo();
+    expect(apiMock.videoStreamUrl).toHaveBeenCalledWith("alice", "raw/stage3.mp4", "web", "w-1");
+    ctx.value = { ...ctx.value, project: null };
+  });
+
+  it("falls back to the trim when the rendition errors", async () => {
+    ctx.value = { ...ctx.value, project: withRendition() };
+    apiMock.videoStreamUrl.mockImplementation(((_s: string, _p: string, kind: string) => `/video.mp4?kind=${kind}`) as never);
+    await openVideo();
+    const video = screen.getByRole("dialog", { name: "Shot video" }).querySelector("video");
+    expect(video?.getAttribute("src")).toBe("/video.mp4?kind=web");
+    fireEvent.error(video!);
+    await waitFor(() =>
+      expect(screen.getByRole("dialog", { name: "Shot video" }).querySelector("video")?.getAttribute("src")).toBe(
+        "/video.mp4?kind=trim",
+      ),
+    );
+    apiMock.videoStreamUrl.mockImplementation(() => "/video.mp4");
+    ctx.value = { ...ctx.value, project: null };
   });
 });

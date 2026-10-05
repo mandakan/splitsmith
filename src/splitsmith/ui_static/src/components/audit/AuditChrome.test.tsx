@@ -101,6 +101,22 @@ describe("TransportLine", () => {
     fireEvent.click(screen.getByRole("menuitemcheckbox"));
     expect(props.onToggleKAuto).toHaveBeenCalled();
   });
+
+  it("offers the full-resolution switch only when the page passes one", () => {
+    renderLine();
+    fireEvent.click(screen.getByRole("button", { name: "More" }));
+    expect(screen.queryByRole("menuitemcheckbox", { name: /full-resolution video/i })).toBeNull();
+  });
+
+  it("toggles full-resolution video from the overflow menu", () => {
+    const onToggleFullResVideo = vi.fn();
+    renderLine({ fullResVideo: false, onToggleFullResVideo });
+    fireEvent.click(screen.getByRole("button", { name: "More" }));
+    const item = screen.getByRole("menuitemcheckbox", { name: /full-resolution video/i });
+    expect(item).toHaveAttribute("aria-checked", "false");
+    fireEvent.click(item);
+    expect(onToggleFullResVideo).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("CurrentShotLine", () => {

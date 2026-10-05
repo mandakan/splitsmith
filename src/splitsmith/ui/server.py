@@ -5872,6 +5872,14 @@ class GlobalAutoSyncRequest(BaseModel):
     enabled: bool
 
 
+class ScrubSettingsRequest(BaseModel):
+    """Body for PUT /api/settings/scrub: the Audit full-resolution switch."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    full_res_scrub: bool
+
+
 class AutoSyncSettingRequest(BaseModel):
     """Body for PUT /api/match/sync/auto and /api/settings/auto-sync. On the
     per-match route only the fields sent change: ``enabled: null`` restores
@@ -7880,6 +7888,29 @@ def _trim_version_for(root: Path, stage_number: int, video: StageVideo, project:
     return f"{st.st_mtime_ns:x}-{st.st_size:x}"
 
 
+def _scrub_version_for(root: Path, stage_number: int, video: StageVideo, project: MatchProject) -> str | None:
+    """Identity of the trim's fresh 720p rendition on local disk, or None (#1192).
+
+    The Audit players ask for ``kind=web`` with this in the URL when it is
+    set, and keep ``kind=trim`` otherwise. Same trim resolver as
+    :func:`_trim_version_for` and the same freshness rule as
+    ``stream_video``'s local ``kind=web`` branch
+    (:func:`audio.fresh_web_trim`), so the version names the bytes behind
+    the URL. Local files only: no storage call.
+    """
+    try:
+        trim = audio_helpers.resolve_trim_for_read(root, stage_number, video, project=project)
+        if trim is None:
+            return None
+        web = audio_helpers.fresh_web_trim(trim)
+        if web is None:
+            return None
+        st = web.stat()
+    except OSError:
+        return None
+    return f"{st.st_mtime_ns:x}-{st.st_size:x}"
+
+
 def _proxy_ready_for(storage: Storage | None, proxy_keys: set[str], path_str: str) -> bool:
     """One honest answer for every endpoint (#821). Local mode streams
     the source directly (ready). Hosted: only ``raw/`` uploads ever get
@@ -8772,6 +8803,23 @@ def create_app(
         user_config.save_global_prefs(prefs)
         return JSONResponse({"global_enabled": prefs.auto_sync_enabled})
 
+    @app.get("/api/settings/scrub")
+    async def get_scrub_settings() -> JSONResponse:
+        """Whether the Audit screen scrubs the full-resolution trim (#1192)."""
+        if _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        return JSONResponse({"full_res_scrub": user_config.load_global_prefs().full_res_scrub})
+
+    @app.put("/api/settings/scrub")
+    async def put_scrub_settings(req: ScrubSettingsRequest) -> JSONResponse:
+        """The Audit transport menu's "Full-resolution video" switch."""
+        if _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        prefs = user_config.load_global_prefs()
+        prefs.full_res_scrub = req.full_res_scrub
+        user_config.save_global_prefs(prefs)
+        return JSONResponse({"full_res_scrub": prefs.full_res_scrub})
+
     @app.exception_handler(ShutdownInProgressError)
     async def _shutdown_in_progress_handler(request: Request, exc: ShutdownInProgressError) -> JSONResponse:
         """Map ShutdownInProgressError to 503 across every submit() callsite."""
@@ -9495,6 +9543,7 @@ def create_app(
                     _storage, proxy_keys, str(video_dict.get("path", ""))
                 )
                 video_dict["trim_version"] = _trim_version_for(root, int(n), video, project)
+                video_dict["scrub_version"] = _scrub_version_for(root, int(n), video, project)
         for video_dict in payload.get("unassigned_videos", []):
             video_dict["proxy_ready"] = _proxy_ready_for(
                 _storage, proxy_keys, str(video_dict.get("path", ""))
@@ -14040,9 +14089,10 @@ def create_app(
 
         - ``trim``: per-video short-GOP MP4 (``<trimmed>/stage<N>_cam_<video_id>_trimmed.mp4``);
           404 if not built yet. Frame-accurate seeking makes audit-screen scrubbing fast.
-        - ``web``: the trim's 720p faststart rendition (#1031), the file
-          hosted players stream from object storage. Falls back to the trim,
-          then the source, when absent; in local mode it behaves as ``auto``.
+        - ``web``: the trim's 720p faststart rendition (#1031). Hosted streams
+          it from object storage and falls back to the trim, then the source.
+          Local serves it from disk when it is fresh (#1192), else the trim,
+          else 404 like ``trim``: locally it is the Audit players' pin.
         - ``source``: the original camera file.
         - ``proxy``: low-res fast-seek MP4 (``raw_proxy/<name>.mp4``). In hosted mode,
           returns 425 ``preview_generating`` when the proxy object is absent - never
@@ -14126,8 +14176,12 @@ def create_app(
                 # kind=auto: fall through to source redirect below
             return serve_media(storage, raw_str, root / raw_str, content_type=video_media_type(raw_str))
 
-        # local mode: existing disk-based serving (``web`` behaves as ``auto``:
-        # the full-res trim streams fine from disk)
+        # local mode: disk-based serving. ``web`` serves the trim's fresh
+        # 720p rendition when there is one (#1192: the Audit screen scrubs
+        # it), else the trim; ``trim`` never substitutes. Both are pins: no
+        # trim is a 404, never the source. A re-cut deletes the trim while
+        # it encodes, and a pinned player must error and remount then, not
+        # play the source under trim offsets.
         served_path: Path | None = None
         if kind in ("auto", "trim", "web") and stage is not None:
             # Per-video short-GOP trim is keyed per role: each angle has
@@ -14135,6 +14189,10 @@ def create_app(
             trimmed = audio_helpers.pull_trimmed_video(root, stage.stage_number, video, project=project)
             if trimmed.exists():
                 served_path = trimmed.resolve()
+                if kind == "web":
+                    web = audio_helpers.fresh_web_trim(trimmed)
+                    if web is not None:
+                        served_path = web.resolve()
             elif _is_mirror():
                 # Web-only mirror on a storage without presigned GET
                 # (#1078; FilesystemStorage in dev and tests): the anchor
@@ -14148,7 +14206,7 @@ def create_app(
                 if web is not None:
                     served_path = web.resolve()
         if served_path is None:
-            if kind == "trim":
+            if kind == "trim" or (kind == "web" and stage is not None):
                 raise HTTPException(
                     status_code=404,
                     detail=f"trimmed clip not built yet for {path}",

@@ -29,6 +29,10 @@ export interface TransportLineProps {
   onPeekEnd: () => void;
   kAutoProgress: boolean;
   onToggleKAuto: () => void;
+  /** Full-resolution scrubbing (local mode). The item renders only when
+   *  ``onToggleFullResVideo`` is given. */
+  fullResVideo?: boolean;
+  onToggleFullResVideo?: () => void;
   onOpenHelp: () => void;
   /** Extra overflow-menu items (trim now, detect shots) from the page. */
   menuExtra?: ReactNode;
@@ -43,6 +47,7 @@ function clock(s: number): string {
 export function TransportLine(props: TransportLineProps) {
   const { isPlaying, onTogglePlay, currentTime, duration, zoom, onZoomChange, filters, counts, onFiltersChange } = props;
   const { peeking, onPeekStart, onPeekEnd, kAutoProgress, onToggleKAuto, onOpenHelp, menuExtra } = props;
+  const { fullResVideo, onToggleFullResVideo } = props;
   const [showOpen, setShowOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
 
@@ -139,6 +144,18 @@ export function TransportLine(props: TransportLineProps) {
             Auto-step to the next shot on accept
             <span className="ml-auto text-sm text-muted">{kAutoProgress ? "on" : "off"}</span>
           </button>
+          {onToggleFullResVideo ? (
+            <button
+              type="button"
+              role="menuitemcheckbox"
+              aria-checked={Boolean(fullResVideo)}
+              className={ITEM}
+              onClick={onToggleFullResVideo}
+            >
+              Full-resolution video
+              <span className="ml-auto text-sm text-muted">{fullResVideo ? "on" : "off"}</span>
+            </button>
+          ) : null}
           {menuExtra}
         </Menu>
       </span>
