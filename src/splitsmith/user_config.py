@@ -158,6 +158,9 @@ class GlobalPrefs(BaseModel):
     # Desktop auto-sync (spec 2026-09-27). One machine-level off switch;
     # the per-match flag lives in the match's auto_sync.json.
     auto_sync_enabled: bool = True
+    # The Audit screen scrubs the trim's 720p rendition (#1192); this
+    # machine-level switch brings back the full-resolution trim.
+    full_res_scrub: bool = False
 
 
 # ---------------------------------------------------------------------------

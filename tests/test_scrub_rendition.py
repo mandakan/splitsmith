@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from splitsmith import trim as trim_module
@@ -185,3 +186,32 @@ def test_scrub_version_moves_when_the_rendition_is_recut(tmp_path: Path) -> None
     web.write_bytes(b"other web")
     second = _video(client, base)["scrub_version"]
     assert first is not None and second is not None and first != second
+
+
+# --- /api/settings/scrub ------------------------------------------------------
+
+
+def test_scrub_setting_defaults_off_and_round_trips(tmp_path: Path) -> None:
+    from splitsmith import user_config
+
+    client, _base, _trim, _web = _bootstrap(tmp_path)
+    assert client.get("/api/settings/scrub").json() == {"full_res_scrub": False}
+    resp = client.put("/api/settings/scrub", json={"full_res_scrub": True})
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"full_res_scrub": True}
+    assert client.get("/api/settings/scrub").json() == {"full_res_scrub": True}
+    assert user_config.load_global_prefs().full_res_scrub is True
+
+
+def test_scrub_setting_rejects_unknown_fields(tmp_path: Path) -> None:
+    client, _base, _trim, _web = _bootstrap(tmp_path)
+    assert client.put("/api/settings/scrub", json={"full_res_scrub": True, "x": 1}).status_code == 422
+
+
+def test_scrub_setting_is_local_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from splitsmith.ui import server
+
+    client, _base, _trim, _web = _bootstrap(tmp_path)
+    monkeypatch.setattr(server, "_hosted_mode_active", lambda: True)
+    assert client.get("/api/settings/scrub").status_code == 404
+    assert client.put("/api/settings/scrub", json={"full_res_scrub": True}).status_code == 404

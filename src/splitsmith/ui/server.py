@@ -5872,6 +5872,14 @@ class GlobalAutoSyncRequest(BaseModel):
     enabled: bool
 
 
+class ScrubSettingsRequest(BaseModel):
+    """Body for PUT /api/settings/scrub: the Audit full-resolution switch."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    full_res_scrub: bool
+
+
 class AutoSyncSettingRequest(BaseModel):
     """Body for PUT /api/match/sync/auto and /api/settings/auto-sync. On the
     per-match route only the fields sent change: ``enabled: null`` restores
@@ -8794,6 +8802,23 @@ def create_app(
         prefs.auto_sync_enabled = req.enabled
         user_config.save_global_prefs(prefs)
         return JSONResponse({"global_enabled": prefs.auto_sync_enabled})
+
+    @app.get("/api/settings/scrub")
+    async def get_scrub_settings() -> JSONResponse:
+        """Whether the Audit screen scrubs the full-resolution trim (#1192)."""
+        if _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        return JSONResponse({"full_res_scrub": user_config.load_global_prefs().full_res_scrub})
+
+    @app.put("/api/settings/scrub")
+    async def put_scrub_settings(req: ScrubSettingsRequest) -> JSONResponse:
+        """The Audit transport menu's "Full-resolution video" switch."""
+        if _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        prefs = user_config.load_global_prefs()
+        prefs.full_res_scrub = req.full_res_scrub
+        user_config.save_global_prefs(prefs)
+        return JSONResponse({"full_res_scrub": prefs.full_res_scrub})
 
     @app.exception_handler(ShutdownInProgressError)
     async def _shutdown_in_progress_handler(request: Request, exc: ShutdownInProgressError) -> JSONResponse:
