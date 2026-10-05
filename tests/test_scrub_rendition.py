@@ -119,11 +119,34 @@ def test_local_web_kind_serves_the_trim_without_a_rendition(tmp_path: Path) -> N
     assert _stream(client, base, "web") == b"trim bytes"
 
 
+def _status(client: TestClient, base: str, kind: str) -> int:
+    resp = client.get(f"{base}/shooters/me/videos/stream", params={"path": "raw/v.mp4", "kind": kind})
+    return resp.status_code
+
+
 def test_local_web_kind_ignores_an_orphan_rendition(tmp_path: Path) -> None:
-    """No trim: the rendition has nothing to anchor it, so the source plays."""
+    """No trim: the rendition has nothing to anchor it. Locally ``web`` is a
+    trim pin, so it 404s like ``trim`` rather than playing the source."""
     client, base, _trim, web = _bootstrap(tmp_path)
     web.write_bytes(b"orphan web")
-    assert _stream(client, base, "web") == b"source bytes"
+    assert _status(client, base, "web") == 404
+    assert _stream(client, base, "auto") == b"source bytes"
+
+
+def test_local_web_kind_404s_while_a_trim_is_recut(tmp_path: Path) -> None:
+    """A re-cut deletes the trim and its rendition before encoding. The
+    Audit player's pinned ``kind=web`` URL must error then, as ``kind=trim``
+    does, so it remounts on the new version; serving the source would play
+    the wrong frames under trim offsets with no error at all."""
+    client, base, trim, web = _bootstrap(tmp_path)
+    trim.write_bytes(b"trim bytes")
+    _age(trim, 10)
+    web.write_bytes(b"web bytes")
+    assert _stream(client, base, "web") == b"web bytes"
+    trim.unlink()
+    web.unlink()
+    assert _status(client, base, "web") == 404
+    assert _status(client, base, "trim") == 404
 
 
 def test_local_trim_kind_never_serves_the_rendition(tmp_path: Path) -> None:

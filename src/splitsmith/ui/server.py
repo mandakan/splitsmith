@@ -14090,8 +14090,9 @@ def create_app(
         - ``trim``: per-video short-GOP MP4 (``<trimmed>/stage<N>_cam_<video_id>_trimmed.mp4``);
           404 if not built yet. Frame-accurate seeking makes audit-screen scrubbing fast.
         - ``web``: the trim's 720p faststart rendition (#1031). Hosted streams
-          it from object storage; local serves it from disk when it is fresh
-          (#1192). Falls back to the trim, then the source.
+          it from object storage and falls back to the trim, then the source.
+          Local serves it from disk when it is fresh (#1192), else the trim,
+          else 404 like ``trim``: locally it is the Audit players' pin.
         - ``source``: the original camera file.
         - ``proxy``: low-res fast-seek MP4 (``raw_proxy/<name>.mp4``). In hosted mode,
           returns 425 ``preview_generating`` when the proxy object is absent - never
@@ -14177,7 +14178,10 @@ def create_app(
 
         # local mode: disk-based serving. ``web`` serves the trim's fresh
         # 720p rendition when there is one (#1192: the Audit screen scrubs
-        # it), else falls back like ``auto``; ``trim`` never substitutes.
+        # it), else the trim; ``trim`` never substitutes. Both are pins: no
+        # trim is a 404, never the source. A re-cut deletes the trim while
+        # it encodes, and a pinned player must error and remount then, not
+        # play the source under trim offsets.
         served_path: Path | None = None
         if kind in ("auto", "trim", "web") and stage is not None:
             # Per-video short-GOP trim is keyed per role: each angle has
@@ -14202,7 +14206,7 @@ def create_app(
                 if web is not None:
                     served_path = web.resolve()
         if served_path is None:
-            if kind == "trim":
+            if kind == "trim" or (kind == "web" and stage is not None):
                 raise HTTPException(
                     status_code=404,
                     detail=f"trimmed clip not built yet for {path}",
