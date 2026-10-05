@@ -60,14 +60,31 @@ irrelevant to deliverability.
 | Lettermint | route `production`, real sends | `console` backend, links to logs only | Staging never sends real mail -- zero stray-email / reputation risk |
 | Cloudflare Pages | `splitsmith.app` (production branch `main`) | per-branch preview deploys | Built-in Pages environments |
 
-### Neon: direct connection, not the pooler
+### Neon: serve on the pooler, the worker direct (#1200)
 
-Both branches use Neon's **direct** connection endpoint, not
-`-pooler`. asyncpg prepared statements do not survive PgBouncer
-transaction pooling, and the app manages its own per-loop connection
-pooling through `LoopEngines` (see `Hosted database connections`
-in CLAUDE.md, #1178) so it does not need the pooler. This is the same
-constraint doc 02 and the deploy notes call out.
+| Process | Endpoint | Why |
+| --- | --- | --- |
+| `serve` (and every self-hosted agent, which gets serve's URL from the worker-credentials bundle) | `-pooler` | caps the connection count |
+| `worker` | direct | Procrastinate's long-lived `LISTEN` needs a session; transaction pooling breaks it |
+
+**Connection count.** The smallest Neon compute allows 112 connections
+(4 reserved). At its limits a process opens 2 x (5 + 10) pooled
+connections (`LoopEngines`, #1178), the queue pools and the NullPool
+fallback, about 38, and a deploy briefly runs two `serve`s. serve plus
+the worker plus agents can pass the direct limit. The pooler takes that
+spike instead. It costs about nothing per query (measured from staging,
+2026-10-04: 166 ms against 164 ms median for a request-shaped
+transaction, pooler against direct).
+
+**Statement cache stays on.** Neither URL carries
+`prepared_statement_cache_size=0`. Neon's PgBouncer supports
+protocol-level prepared statements, so asyncpg's cache works through
+the pooler: 250 concurrent request-shaped transactions with zero errors.
+With the cache off, every query paid two extra round trips. Removing it
+from staging's serve URL took every route 25-33 % faster server-side
+(`/api/me` 89 -> 63 ms, `recent-projects` 358 -> 250 ms,
+`match/shooters` 600 -> 424 ms). Do not add it back to fix a
+prepared-statement error without measuring that cost.
 
 ## Promotion flow
 
@@ -97,7 +114,7 @@ Both `serve` and `worker` in a given environment share these. The
 | Variable | prod | staging |
 | --- | --- | --- |
 | `SPLITSMITH_MODE` | `hosted` | `hosted` |
-| `SPLITSMITH_DATABASE_URL` | Neon `production` branch, direct endpoint | Neon `staging` branch, direct endpoint |
+| `SPLITSMITH_DATABASE_URL` | Neon `production` branch: `-pooler` on serve, direct on worker (see Neon above) | Neon `staging` branch, same split |
 | `SPLITSMITH_PUBLIC_URL` | `https://my.splitsmith.app` | `https://my.staging.splitsmith.app` |
 | `SPLITSMITH_EMAIL_BACKEND` | `lettermint` | `console` |
 | `LETTERMINT_API_TOKEN` | set | unset (console) |
@@ -241,7 +258,8 @@ R2 entirely via MCP, Railway via its MCP / CLI.
 
 1. **Neon** -- create the project; `main` is prod. Create the long-lived
    `staging` branch. Run migrations against both (`alembic upgrade head`,
-   or let `serve` migrate on boot). Use the direct connection strings.
+   or let `serve` migrate on boot). serve gets the `-pooler` string, the
+   worker the direct one; neither sets `prepared_statement_cache_size`.
 2. **R2** -- create `splitsmith-uploads-prod` and
    `splitsmith-uploads-staging` buckets + scoped S3 tokens. Leave the
    existing public `splitsmith-models` bucket alone.
