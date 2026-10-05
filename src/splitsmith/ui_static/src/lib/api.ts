@@ -124,6 +124,10 @@ export interface StageVideo {
    *  disk. Goes into a pinned ``kind=trim`` URL so a re-cut trim is a new
    *  URL and remounts the player instead of leaving it on a dead stream. */
   trim_version?: string | null;
+  /** Identity of the trim's fresh 720p rendition on local disk, null when
+   *  there is none. The Audit players stream ``kind=web`` with it instead
+   *  of the full-resolution trim (scrubbing a 4K trim stalls). */
+  scrub_version?: string | null;
 }
 
 /** Mirror of ``splitsmith.ensemble.calibration.normalize_camera_model_key``.
@@ -4895,6 +4899,12 @@ export const api = {
     request<{ global_enabled: boolean }>("/api/settings/auto-sync", {
       method: "PUT",
       json: { enabled },
+    }),
+  getScrubSettings: () => request<{ full_res_scrub: boolean }>("/api/settings/scrub"),
+  setScrubSettings: (fullRes: boolean) =>
+    request<{ full_res_scrub: boolean }>("/api/settings/scrub", {
+      method: "PUT",
+      json: { full_res_scrub: fullRes },
     }),
 
   // Device-flow approval screen (hosted browser side, #719). The desktop
