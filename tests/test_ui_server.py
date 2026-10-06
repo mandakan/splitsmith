@@ -1185,6 +1185,65 @@ def test_scan_videos_400_on_missing_dir(tmp_path: Path) -> None:
     assert resp.status_code == 400
 
 
+def _scan_paths(client, paths: list[Path]) -> dict:
+    resp = client.post(
+        "/api/shooters/me/videos/scan",
+        json={"source_paths": [str(p) for p in paths], "auto_assign_primary": False},
+    )
+    assert resp.status_code == 200
+    return resp.json()
+
+
+def test_scan_reports_a_copy_of_an_imported_clip_as_skipped(tmp_path: Path) -> None:
+    """A byte copy of a clip this shooter has is not "added" (#1233).
+
+    ``register_video`` returns the existing video for a fingerprint match;
+    the scan listed it under ``registered`` and the page said "1 video
+    added" while the shooter's count stayed put.
+    """
+    client = _MatchClient(_match_create_app(project_root=tmp_path / "match", project_name="x"))
+    original = tmp_path / "card" / "VID.mp4"
+    original.parent.mkdir()
+    original.write_bytes(b"the recording")
+    assert _scan_paths(client, [original])["registered"] == ["raw/VID.mp4"]
+
+    copy = tmp_path / "elsewhere" / "VID-copy.mp4"
+    copy.parent.mkdir()
+    copy.write_bytes(b"the recording")
+    body = _scan_paths(client, [copy])
+
+    assert body["registered"] == []
+    assert body["skipped"] == ["VID-copy.mp4: already imported for this shooter as raw/VID.mp4"]
+    assert len(client.get("/api/shooters/me/project").json()["unassigned_videos"]) == 1
+
+
+def test_scan_reports_a_rescanned_file_as_skipped(tmp_path: Path) -> None:
+    client = _MatchClient(_match_create_app(project_root=tmp_path / "match", project_name="x"))
+    vid = tmp_path / "card" / "VID.mp4"
+    vid.parent.mkdir()
+    vid.write_bytes(b"the recording")
+    _scan_paths(client, [vid])
+
+    body = _scan_paths(client, [vid])
+
+    assert body["registered"] == []
+    assert body["skipped"] == ["VID.mp4: already imported for this shooter as raw/VID.mp4"]
+
+
+def test_scan_counts_two_copies_in_one_import_once(tmp_path: Path) -> None:
+    client = _MatchClient(_match_create_app(project_root=tmp_path / "match", project_name="x"))
+    first = tmp_path / "a" / "VID.mp4"
+    second = tmp_path / "b" / "VID-copy.mp4"
+    for f in (first, second):
+        f.parent.mkdir()
+        f.write_bytes(b"the recording")
+
+    body = _scan_paths(client, [first, second])
+
+    assert body["registered"] == ["raw/VID.mp4"]
+    assert body["skipped"] == ["VID-copy.mp4: same recording as VID.mp4 in this import"]
+
+
 def test_move_assignment_endpoint(tmp_path: Path) -> None:
     """Set role to ignored, verify, then move back to a stage."""
     project_root = tmp_path / "match"
