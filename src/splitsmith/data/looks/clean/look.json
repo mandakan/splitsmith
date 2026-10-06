@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "name": "clean",
+  "label": "Clean",
+  "colors": {
+    "accent": [255, 45, 45],
+    "accent_fill": [220, 38, 38],
+    "accent_text": [255, 180, 180],
+    "ink": [255, 255, 255],
+    "ink_2": [205, 205, 205],
+    "muted": [150, 150, 150],
+    "rule": [60, 60, 60],
+    "split": [255, 220, 80],
+    "split_good": [46, 204, 113],
+    "stroke": [0, 0, 0],
+    "subtle": [128, 128, 128],
+    "surface": [0, 0, 0]
+  },
+  "fonts": {},
+  "slots": {}
+}
