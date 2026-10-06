@@ -724,3 +724,28 @@ def test_overlay_html_stays_a_leaf_and_pulls_in_no_compare_module() -> None:
         [sys.executable, "-c", probe], capture_output=True, text=True, cwd=Path(__file__).parent.parent
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_single_html_is_single_css_plus_the_fit_script_plus_the_cell() -> None:
+    from splitsmith.overlay_html import _cell_div, _fit_script, single_css
+
+    theme = load_theme("splitsmith")
+    scale = CellScale.for_cell(360)
+    groups = (
+        Group(anchor=Anchor.MIDDLE_CENTER, flow=Flow.ROW, elements=(Element(role=Role.DETAIL, text="x"),)),
+    )
+    doc = single_html(groups, width=640, height=360, scale=scale, theme=theme)
+    assert f"<style>{single_css(width=640, height=360, scale=scale, theme=theme)}</style>" in doc
+    assert _fit_script() in doc
+    assert _cell_div(groups) in doc
+
+
+def test_the_fit_script_is_the_shipped_file_with_the_floor_set_beside_it() -> None:
+    from splitsmith.overlay_html import _fit_script, fit_js
+    from splitsmith.overlay_layout import MIN_FONT_SIZE
+
+    script = _fit_script()
+    assert fit_js() in script
+    assert f"window.__splitsmithMinFont = {MIN_FONT_SIZE};" in script
+    assert "window.__splitsmithMinFont" in fit_js()
+    assert str(MIN_FONT_SIZE) not in fit_js(), "the floor is set by the caller, never baked into the file"

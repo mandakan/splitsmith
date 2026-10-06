@@ -36,6 +36,17 @@ class _FakeRasterizer:
         Image.new("RGBA", (width, height), (0, 0, 0, 0)).save(buf, format="PNG")
         return buf.getvalue()
 
+    def render_template(self, template: Path, *, context, width: int, height: int) -> bytes:
+        """A card drawn through its Look template: recorded as the JSON of
+        what it was handed, so the text assertions below read the same
+        list whichever path drew it."""
+        import json
+
+        self.calls.append(json.dumps(context.data, ensure_ascii=False))
+        buf = io.BytesIO()
+        Image.new("RGBA", (width, height), (0, 0, 0, 0)).save(buf, format="PNG")
+        return buf.getvalue()
+
 
 def _ok_runner(calls: list[tuple[str, ...]]):
     def runner(cmd, **_kwargs):

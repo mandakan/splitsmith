@@ -54,7 +54,7 @@ class StageExportRequest:
     overlay_max_height: int | None = None
     overlay_max_fps: float | None = None
     # Palette preset. ``"splitsmith"`` (default) pulls the same tokens
-    # the web UI uses out of overlay_theme.json so the overlay matches
+    # the web UI uses out of the splitsmith Look manifest so the overlay matches
     # the brand. ``"clean"`` is the neutral white-on-amber alternative.
     overlay_theme: ThemeName = "splitsmith"
     # Issue #972 (option 1). Also write ``<base>_summary.png`` and

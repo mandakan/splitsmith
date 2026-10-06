@@ -1,12 +1,16 @@
 """Generated cards for rendered output (issue #973).
 
 A match title page, a closing card, a stage slate and a stage
-lower-third are all the same operation the grid's stage summary already
-performs: declare what the card says as ``overlay_layout`` groups, turn
-that into one HTML document through ``overlay_html``, rasterize it in
-headless Chromium through an injected
-:class:`~splitsmith.overlay_raster.Rasterizer`, and composite the result
-over a backdrop. Nothing here launches a browser, shells out to ffmpeg
+lower-third are all one operation: declare what the card says as
+``overlay_layout`` groups (:func:`card_groups`), hand that declaration
+with the Look's palette and the engine stylesheet to the Look's template
+for the card's slot (:func:`card_context`, the contract in
+:mod:`splitsmith.look_template`), rasterize it in headless Chromium
+through an injected :class:`~splitsmith.overlay_raster.Rasterizer`, and
+composite the result over a backdrop. The shipped template draws the
+engine's own markup, so the default Look renders what ``overlay_html``
+renders; a user Look may draw the same data any way it likes. Nothing here
+launches a browser, shells out to ffmpeg
 or writes a file: :mod:`splitsmith.mp4_render` (and, later,
 ``compare/mp4_grid``) own the frame grab, the segment encode and the
 splice. That is what lets one module serve both renderers.
@@ -29,11 +33,13 @@ from typing import Literal
 from PIL import Image
 
 from .composition import MatchTitle, TitleCard
-from .overlay_html import single_html
+from .look_template import TemplateContext, engine_block, group_json, shared_url, theme_tokens
+from .looks import CardSlot, Look, template_for
+from .overlay_html import single_css
 from .overlay_layout import Anchor, CellScale, Element, Emphasis, Flow, Group, Role
 from .overlay_raster import Rasterizer
 from .overlay_still import DEFAULT_DIM, backdrop_from_frame
-from .overlay_theme import OverlayTheme
+from .overlay_theme import OverlayTheme, theme_for
 
 logger = logging.getLogger(__name__)
 
@@ -104,25 +110,57 @@ def card_scale(height: int) -> CellScale:
     return CellScale.for_cell(height)
 
 
+def card_context(
+    card: Card, *, slot: CardSlot, width: int, height: int, fps: float, theme: OverlayTheme
+) -> TemplateContext:
+    """What the template for ``slot`` receives: the card as data
+    (``data.card``), the engine's default declaration of it
+    (``data.groups``, from :func:`card_groups`), the palette, the canvas,
+    and the engine block a shipped template draws with."""
+    scale = card_scale(height)
+    return TemplateContext(
+        theme=theme_tokens(theme),
+        data={
+            "card": {
+                "slot": slot,
+                "text": card.text,
+                "info": list(card.info),
+                "duration_seconds": card.duration_seconds,
+            },
+            "groups": [group_json(g) for g in card_groups(card)],
+        },
+        size={"width": width, "height": height},
+        fps=fps,
+        engine=engine_block(css=single_css(width=width, height=height, scale=scale, theme=theme)),
+        assets={"shared": shared_url()},
+    )
+
+
 def _rasterize(
-    card: Card, *, width: int, height: int, theme: OverlayTheme, rasterizer: Rasterizer
+    card: Card, *, slot: CardSlot, width: int, height: int, fps: float, look: Look, rasterizer: Rasterizer
 ) -> Image.Image | None:
-    html = single_html(card_groups(card), width=width, height=height, scale=card_scale(height), theme=theme)
+    theme = theme_for(look)
+    template = template_for(look, slot)
+    context = card_context(card, slot=slot, width=width, height=height, fps=fps, theme=theme)
     try:
-        png_bytes = rasterizer.png(html, width=width, height=height)
+        png_bytes = rasterizer.render_template(template, context=context, width=width, height=height)
         with Image.open(io.BytesIO(png_bytes)) as rendered:
             return rendered.convert("RGBA")
     except Exception as exc:  # noqa: BLE001 -- one bad rasterization must not lose the render
-        logger.warning("could not rasterize the card %r (%s); it is skipped", card.text, exc)
+        logger.warning(
+            "could not rasterize the card %r through %s (%s); it is skipped", card.text, template, exc
+        )
         return None
 
 
 def build_card_still(
     card: Card,
     *,
+    slot: CardSlot,
     width: int,
     height: int,
-    theme: OverlayTheme,
+    fps: float,
+    look: Look,
     rasterizer: Rasterizer,
     backdrop: Path | None,
     blur_radius: int | None = None,
@@ -130,41 +168,40 @@ def build_card_still(
 ) -> Image.Image | None:
     """Compose a full-frame card as a ``width x height`` RGB image.
 
-    ``backdrop`` is a frame on disk -- the first visible frame of the
-    stage the card precedes -- blurred and dimmed with the stage
+    ``slot`` names the Look template that draws it (a :class:`MatchTitle`
+    is ``title_page`` or ``closing``; a slate :class:`TitleCard` is
+    ``slate``). ``backdrop`` is a frame on disk -- the first visible frame
+    of the stage the card precedes -- blurred and dimmed with the stage
     summary's own numbers (:mod:`splitsmith.overlay_still`). ``None``, or
-    a frame that cannot be read, paints the theme's ``surface`` colour
+    a frame that cannot be read, paints the Look's ``surface`` colour
     instead, so a failed frame grab costs the picture but never the card.
 
     Returns ``None`` when the text could not be rasterized; see the
     module docstring for why that skips the card rather than degrading
     it.
     """
-    text = _rasterize(card, width=width, height=height, theme=theme, rasterizer=rasterizer)
+    text = _rasterize(card, slot=slot, width=width, height=height, fps=fps, look=look, rasterizer=rasterizer)
     if text is None:
         return None
     canvas: Image.Image | None = None
     if backdrop is not None:
         canvas = backdrop_from_frame(backdrop, width=width, height=height, radius=blur_radius, dim_amount=dim)
     if canvas is None:
-        canvas = Image.new("RGB", (width, height), theme.surface)
+        canvas = Image.new("RGB", (width, height), theme_for(look).surface)
     composed = canvas.convert("RGBA")
     composed.alpha_composite(text)
     return composed.convert("RGB")
 
 
 def build_lower_third(
-    card: TitleCard,
-    *,
-    width: int,
-    height: int,
-    theme: OverlayTheme,
-    rasterizer: Rasterizer,
+    card: TitleCard, *, width: int, height: int, fps: float, look: Look, rasterizer: Rasterizer
 ) -> Image.Image | None:
     """Rasterize a lower-third as a transparent ``width x height`` RGBA
     image, for the renderer to composite over the stage's own head with
     a fade. No backdrop: the footage is the backdrop."""
-    return _rasterize(card, width=width, height=height, theme=theme, rasterizer=rasterizer)
+    return _rasterize(
+        card, slot="lower_third", width=width, height=height, fps=fps, look=look, rasterizer=rasterizer
+    )
 
 
 __all__ = [
@@ -172,6 +209,7 @@ __all__ = [
     "Card",
     "build_card_still",
     "build_lower_third",
+    "card_context",
     "card_groups",
     "card_scale",
     "lower_third_filters",

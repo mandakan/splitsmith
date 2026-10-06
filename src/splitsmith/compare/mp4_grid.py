@@ -33,12 +33,13 @@ from typing import Literal
 
 from ..composition import MatchTitle, TitleCard, TitleStyle
 from ..export_naming import stage_display_name
+from ..looks import CardSlot, Look, load_look
 from ..overlay_card import build_card_still, build_lower_third, lower_third_filters
 from ..overlay_clock import clock_common_options, clock_text, elapsed_text_option
 from ..overlay_layout import Anchor, CellScale, anchor_ffmpeg_expr
 from ..overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
 from ..overlay_text import FALLBACK_BUNDLED_FONT, overlay_font_file
-from ..overlay_theme import OverlayTheme, ThemeName, load_theme
+from ..overlay_theme import OverlayTheme, ThemeName, load_theme, theme_for
 from ..runtime import FFmpegCapabilities, ffmpeg_capabilities, quote_filter_value, runtime
 from ..youtube_sidecar import Chapter
 from .free_cell import (
@@ -2235,10 +2236,11 @@ def _card_segment(
     card: MatchTitle | TitleCard,
     *,
     name: str,
+    slot: CardSlot,
     plan: GridStagePlan,
     backdrop_at: Literal["head", "tail"],
     canvas: GridCanvas,
-    theme: OverlayTheme | None,
+    look: Look | None,
     rasterizer: Rasterizer | None,
     work: Path,
     ffmpeg_binary: str,
@@ -2253,14 +2255,21 @@ def _card_segment(
     Sized to the *composed* grid of ``plan``, not the canvas (#691): the
     stage segments are that size, and the stitch stream-copies video.
     """
-    if rasterizer is None or theme is None:
+    if rasterizer is None or look is None:
         return None
     composed_w, composed_h = _composed_size(canvas, plan)
     backdrop = _grab_card_backdrop(
         plan, at=backdrop_at, name=name, work=work, ffmpeg_binary=ffmpeg_binary, runner=still_runner
     )
     image = build_card_still(
-        card, width=composed_w, height=composed_h, theme=theme, rasterizer=rasterizer, backdrop=backdrop
+        card,
+        slot=slot,
+        width=composed_w,
+        height=composed_h,
+        fps=canvas.fps,
+        look=look,
+        rasterizer=rasterizer,
+        backdrop=backdrop,
     )
     if image is None:
         return None
@@ -2608,7 +2617,8 @@ def render_grid_mp4(
 
     outcomes: list[StageOutcome] = []
     segments: list[Path] = []
-    card_theme = load_theme(overlay_theme) if cards_requested else None
+    card_look = load_look(overlay_theme) if cards_requested else None
+    card_theme = theme_for(card_look) if card_look is not None else None
     free_theme = card_theme or (load_theme(overlay_theme) if free_requested else None)
     free_tiles = load_overlay_data(shooters) if free_requested and free_cell == "splits" else {}
     free_rounds = load_expected_rounds(shooters) if free_requested and free_cell == "stage" else {}
@@ -2625,10 +2635,11 @@ def render_grid_mp4(
             title_segment = _card_segment(
                 title_page,
                 name="title_page",
+                slot="title_page",
                 plan=plans[0],
                 backdrop_at="head",
                 canvas=canvas,
-                theme=card_theme,
+                look=card_look,
                 rasterizer=active_rasterizer,
                 work=work,
                 ffmpeg_binary=binary,
@@ -2655,10 +2666,11 @@ def render_grid_mp4(
                     slate_segment = _card_segment(
                         card,
                         name=f"slate-stage{plan.stage_number}",
+                        slot="slate",
                         plan=plan,
                         backdrop_at="head",
                         canvas=canvas,
-                        theme=card_theme,
+                        look=card_look,
                         rasterizer=active_rasterizer,
                         work=work,
                         ffmpeg_binary=binary,
@@ -2668,13 +2680,14 @@ def render_grid_mp4(
                     if slate_segment is not None:
                         segments.append(slate_segment)
                         elapsed += card.duration_seconds
-                elif active_rasterizer is not None and card_theme is not None:
+                elif active_rasterizer is not None and card_look is not None:
                     composed_w, composed_h = _composed_size(canvas, plan)
                     image = build_lower_third(
                         card,
                         width=composed_w,
                         height=composed_h,
-                        theme=card_theme,
+                        fps=canvas.fps,
+                        look=card_look,
                         rasterizer=active_rasterizer,
                     )
                     if image is not None:
@@ -2811,10 +2824,11 @@ def render_grid_mp4(
             closing_segment = _card_segment(
                 closing,
                 name="closing",
+                slot="closing",
                 plan=plans[-1],
                 backdrop_at="tail",
                 canvas=canvas,
-                theme=card_theme,
+                look=card_look,
                 rasterizer=active_rasterizer,
                 work=work,
                 ffmpeg_binary=binary,

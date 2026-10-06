@@ -46,10 +46,13 @@ from __future__ import annotations
 import logging
 import tempfile
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from playwright.sync_api import Browser, Playwright, sync_playwright
 from playwright.sync_api import Error as PlaywrightError
+
+if TYPE_CHECKING:
+    from .look_template import TemplateContext
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +67,12 @@ class Rasterizer(Protocol):
     """
 
     def png(self, html: str, *, width: int, height: int) -> bytes: ...
+
+    def render_template(self, template: Path, *, context: TemplateContext, width: int, height: int) -> bytes:
+        """A Look template (``splitsmith.look_template``) to an alpha PNG:
+        ``context`` is installed as ``window.splitsmith`` before the
+        document's scripts run, the template is rendered at ``seek(0)``."""
+        ...
 
 
 #: The headless-shell channel, not the full browser build. Verified on
@@ -91,6 +100,12 @@ DEVICE_SCALE_FACTOR = 1
 #: :func:`_unavailable`'s message so a render failure tells the operator
 #: exactly what to run rather than just that something is missing.
 INSTALL_HINT = "uv run playwright install chromium --only-shell"
+
+
+class TemplateScriptError(RuntimeError):
+    """A Look template's own script threw while the page loaded or
+    mounted. The page still screenshots (blank), so the renderer raises
+    this instead and the card is skipped rather than shipped textless."""
 
 
 class RasterizerUnavailableError(RuntimeError):
@@ -270,3 +285,46 @@ class ChromiumRasterizer:
                 return page.screenshot(type="png", omit_background=True)
             finally:
                 context.close()
+
+    def render_template(self, template: Path, *, context: TemplateContext, width: int, height: int) -> bytes:
+        """Render a Look template to a ``width`` x ``height`` alpha PNG.
+
+        ``context.init_script()`` is installed on a fresh browser context
+        so ``window.splitsmith`` exists before the document's first
+        script runs; the template is navigated to by ``file://`` URL so
+        its own relative references and the ``file://`` script URLs in
+        ``assets.shared`` resolve. After load: fonts, ``seek(0)``, fonts
+        again (a template may add a face while mounting), the fit policy
+        when the template defines it, then the same transparent
+        screenshot :meth:`png` takes.
+        """
+        if self._browser is None:
+            raise RuntimeError(
+                "ChromiumRasterizer.render_template() called outside its own 'with' block -- the browser is "
+                "only live between __enter__ and __exit__"
+            )
+        browser_context = self._browser.new_context(
+            viewport={"width": width, "height": height},
+            device_scale_factor=DEVICE_SCALE_FACTOR,
+        )
+        try:
+            browser_context.add_init_script(context.init_script())
+            page = browser_context.new_page()
+            # An exception thrown by the template's own script reaches
+            # Playwright only as a ``pageerror`` event: ``goto`` and
+            # ``screenshot`` both succeed and hand back a fully transparent
+            # PNG, which the caller would composite as a textless card.
+            # Listening before navigation turns that into the error the
+            # caller already skips the card on.
+            errors: list[str] = []
+            page.on("pageerror", lambda error: errors.append(getattr(error, "message", None) or str(error)))
+            page.goto(template.resolve().as_uri(), wait_until="load")
+            page.evaluate("document.fonts.ready")
+            page.evaluate("typeof window.seek === 'function' ? window.seek(0) : undefined")
+            page.evaluate("document.fonts.ready")
+            page.evaluate("window.__splitsmithFit && window.__splitsmithFit()")
+            if errors:
+                raise TemplateScriptError(f"{template.name}: {errors[0]}")
+            return page.screenshot(type="png", omit_background=True)
+        finally:
+            browser_context.close()

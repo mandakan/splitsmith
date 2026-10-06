@@ -162,6 +162,18 @@ tests run with ``SPLITSMITH_RENDER_CACHE=0`` (conftest) and a cache test
 passes its own. ``RenderStep`` is the per-segment progress the job maps
 onto its bar; the grid renderer has no cache yet.
 
+Cards draw through a **Look** (``splitsmith.looks``, spec 2026-10-06):
+``data/looks/<name>/look.json`` holds the palette and names one HTML
+template per card slot; ``~/.splitsmith/looks/<name>/`` shadows a shipped
+one. ``overlay_theme.load_theme`` reads the manifest, so a palette change
+is a manifest change. The shipped ``card.html`` draws the engine's own
+markup through ``_shared/cell.js`` (a port of ``overlay_html._cell_div``,
+held to it by ``tests/test_look_template.py``) and ``_shared/fit.js``
+(the one fit policy, also inlined by ``overlay_html``); a template gets
+``window.splitsmith`` from ``look_template.TemplateContext`` before its
+scripts run. The summary and the live overlay are not templates yet.
+Check pixels with the frame scripts, not argv.
+
 ## Hosted playback streams the web rendition (#1031)
 
 The audit trim (``trimmed/stage<N>_cam_<id>_trimmed.mp4``) is a

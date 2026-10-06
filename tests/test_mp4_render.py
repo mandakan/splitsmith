@@ -664,6 +664,21 @@ class _FakeRasterizer:
         Image.new("RGBA", (width, height), (0, 0, 0, 0)).save(buf, format="PNG")
         return buf.getvalue()
 
+    def render_template(self, template: Path, *, context, width: int, height: int) -> bytes:
+        """A card drawn through its Look template: recorded as the JSON of
+        what it was handed, so the text assertions below read the same
+        list whichever path drew it."""
+        import json
+
+        self.calls.append(json.dumps(context.data, ensure_ascii=False))
+        import io
+
+        from PIL import Image
+
+        buf = io.BytesIO()
+        Image.new("RGBA", (width, height), (0, 0, 0, 0)).save(buf, format="PNG")
+        return buf.getvalue()
+
 
 def _asset(tmp_path: Path, name: str, *, seconds: float = 4.0) -> composition.Asset:
     meta = _meta_30fps().model_copy(update={"duration_seconds": seconds})

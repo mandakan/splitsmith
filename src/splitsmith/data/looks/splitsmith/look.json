@@ -71,5 +71,14 @@
     "mono": "JetBrains Mono",
     "sans": "Geist"
   },
+  "label": "Splitsmith",
+  "name": "splitsmith",
+  "schema_version": 1,
+  "slots": {
+    "closing": "card.html",
+    "lower_third": "card.html",
+    "slate": "card.html",
+    "title_page": "card.html"
+  },
   "source": "src/splitsmith/ui_static/src/styles/index.css"
 }

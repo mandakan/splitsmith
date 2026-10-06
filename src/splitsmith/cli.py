@@ -25,7 +25,6 @@ from . import (
     csv_gen,
     fcpxml_gen,
     overlay_render,
-    overlay_theme,
     report,
     shot_detect,
     shot_refine,
@@ -1205,9 +1204,8 @@ def overlay(
         "splitsmith",
         "--theme",
         help=(
-            f"Color palette preset: {', '.join(overlay_theme.THEME_NAMES)}. "
-            f"'splitsmith' uses the same tokens as the web UI; 'clean' "
-            f"is the neutral white-on-amber alternative."
+            "Look (colour palette and card templates): one of the installed Looks, "
+            "'splitsmith' by default; 'clean' is the neutral white-on-amber alternative."
         ),
     ),
     summary_card: bool = typer.Option(
@@ -1235,8 +1233,7 @@ def overlay(
     """
     if codec not in overlay_render.OVERLAY_CODECS:
         raise typer.BadParameter(f"--codec must be one of {overlay_render.OVERLAY_CODECS}, got {codec!r}")
-    if theme not in overlay_theme.THEME_NAMES:
-        raise typer.BadParameter(f"--theme must be one of {overlay_theme.THEME_NAMES}, got {theme!r}")
+    _validate_theme(theme)
     overlay_render.render_overlay(
         audit_path=audit_path,
         trimmed_video_path=video,
@@ -1703,6 +1700,16 @@ def _print_files_summary(files: ReportFiles) -> None:
         for label, p in (("video", files.video), ("csv", files.csv), ("fcpxml", files.fcpxml)):
             if p:
                 console.print(f"  {label:>6}: {p}")
+
+
+def _validate_theme(name: str) -> str:
+    """``--theme`` names an installed Look (shipped or the user's)."""
+    from .looks import look_names
+
+    names = look_names()
+    if name not in names:
+        raise typer.BadParameter(f"--theme must be one of {', '.join(names)}, got {name!r}")
+    return name
 
 
 if __name__ == "__main__":
