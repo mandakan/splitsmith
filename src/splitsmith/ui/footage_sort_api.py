@@ -29,6 +29,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
 from .. import match_model, thumbnail
 from ..config import Config, FootageSortConfig
@@ -817,7 +818,8 @@ async def import_scan(scan_id: str, req: ImportRequest, request: Request) -> Imp
     )
     queued: list[tuple[str, Any, int, Any]] = []
     # A review saved before fingerprints existed reaches here unbackfilled.
-    _backfill_fingerprints(state)
+    # Off the event loop, like the per-shooter scan's (#1227).
+    await run_in_threadpool(_backfill_fingerprints, state)
     registered = _registrations(state)
     by_fingerprint = _fingerprint_registrations(state)
     fingerprints = {c.clip.clip_id: c.fingerprint for c in record.clips}

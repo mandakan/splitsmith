@@ -705,3 +705,35 @@ def test_the_per_shooter_scan_keeps_its_own_shooters_backfill(tmp_path: Path, so
     alice = MatchProject.load(alice_root)
     assert [Path(v.path).name for v in alice.all_videos()] == ["IMG_0001.MOV"]
     assert alice.all_videos()[0].fingerprint is not None
+
+
+def test_the_fingerprint_backfill_runs_off_the_event_loop(
+    tmp_path: Path, source_clip: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The backfill stats every registered source across every shooter; one
+    on a dead network mount would stall the server if an async route ran
+    it inline (#1227). Both async callers hand it to the threadpool."""
+    import asyncio
+
+    _, client, _root, base = _match_app(tmp_path)
+    shared = _shared_folder(tmp_path, source_clip)
+    first = _scan(client, base, shared)
+    copy = _copy_elsewhere(tmp_path, shared / "from-carol" / "IMG_0001.MOV", "alice-stage1.mov")
+    on_loop: list[bool] = []
+    real = MatchProject.backfill_fingerprints
+
+    def probe(self: MatchProject, root: Path) -> int:
+        try:
+            asyncio.get_running_loop()
+            on_loop.append(True)
+        except RuntimeError:
+            on_loop.append(False)
+        return real(self, root)
+
+    monkeypatch.setattr(MatchProject, "backfill_fingerprints", probe)
+
+    client.post(f"{base}/match/footage-sort/{first['scan_id']}/import", json={})
+    assert on_loop and not any(on_loop), "import_scan backfilled on the event loop"
+    on_loop.clear()
+    client.post(f"{base}/shooters/bob/videos/scan", json={"source_paths": [str(copy)]})
+    assert on_loop and not any(on_loop), "scan_videos backfilled on the event loop"
