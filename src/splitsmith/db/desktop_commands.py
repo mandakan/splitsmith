@@ -13,7 +13,8 @@ Leases: a claim holds a command until ``lease_expires_at``; a heartbeat
 extends it. A claimed command whose lease lapsed (the desktop quit or
 crashed) is claimable again, so no request is stranded by a dead desktop.
 Completing is idempotent: a terminal command stays as it is, so a desktop
-that retries a completion it already made is harmless.
+that retries a completion it already made is harmless. The one exception is
+a late success on a claimed command that was cancelled (see ``complete``).
 """
 
 from __future__ import annotations
@@ -342,7 +343,13 @@ class DesktopCommandStore:
         now: datetime | None = None,
     ) -> DesktopCommand | None:
         """Finish a command. Idempotent: an already-terminal command is
-        returned unchanged. None when unknown."""
+        returned unchanged, with one exception: a success reported for a
+        command that was claimed and then cancelled is recorded. That is a
+        holder that lost contact with hosted, not with its work (#1116):
+        the cancel ended a lapsed lease at once, but the work had already
+        happened (a YouTube upload is live), and dropping the result left
+        the phone showing "Cancelled." with nothing to open. None when
+        unknown."""
         now = now or datetime.now(UTC)
         async with self._session_factory() as session:
             row = (
@@ -352,7 +359,8 @@ class DesktopCommandStore:
             ).scalar_one_or_none()
             if row is None:
                 return None
-            if row.status not in TERMINAL_STATUSES:
+            late_success = row.status == "cancelled" and row.claimed_at is not None and status == "succeeded"
+            if row.status not in TERMINAL_STATUSES or late_success:
                 row.status = status
                 row.error = error
                 row.result = result
