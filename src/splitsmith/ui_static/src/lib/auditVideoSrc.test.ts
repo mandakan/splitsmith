@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { auditVideoSrc } from "./auditVideoSrc";
+import { auditProxyReady, auditVideoSrc } from "./auditVideoSrc";
 import { scrubSource } from "./scrubSource";
 
 type Video = { path: string; trim_version: string | null; scrub_version: string | null };
@@ -43,5 +43,38 @@ describe("auditVideoSrc", () => {
   it("has nothing to stream without a video or a plan", () => {
     expect(auditVideoSrc({ ...base, video: null })).toBe("");
     expect(auditVideoSrc({ ...base, plan: null })).toBe("");
+  });
+});
+
+describe("auditProxyReady", () => {
+  const ready = (proxy_ready: boolean) => ({
+    video: { proxy_ready },
+    plan: { kind: "trim" as const, offset: 0 },
+    peaksLoaded: true,
+    peaksFailed: false,
+  });
+
+  it("a trimmed angle plays whatever the proxy's state (#1224)", () => {
+    // The pinned scrub or trim streams its own object; a hosted match whose
+    // proxy never arrived must not hide it behind "Preview generating".
+    expect(auditProxyReady(ready(false))).toBeUndefined();
+  });
+
+  it("an untrimmed angle reports the proxy's state", () => {
+    expect(auditProxyReady({ ...ready(false), plan: { kind: "proxy", offset: 0 } })).toBe(false);
+    expect(auditProxyReady({ ...ready(true), plan: { kind: "proxy", offset: 0 } })).toBe(true);
+  });
+
+  it("says nothing before peaks name a kind", () => {
+    expect(auditProxyReady({ ...ready(false), peaksLoaded: false })).toBeUndefined();
+  });
+
+  it("reports the proxy when peaks failed and the player streams auto", () => {
+    expect(auditProxyReady({ ...ready(false), peaksLoaded: false, peaksFailed: true })).toBe(false);
+  });
+
+  it("says nothing without a video or a plan", () => {
+    expect(auditProxyReady({ ...ready(false), video: null })).toBeUndefined();
+    expect(auditProxyReady({ ...ready(false), plan: null })).toBeUndefined();
   });
 });

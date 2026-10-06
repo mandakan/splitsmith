@@ -89,7 +89,7 @@ import { isTypingTextTarget, useBlurOnPointerClick } from "@/lib/audit-input";
 import { buildAuditJson, deriveMarkers } from "@/lib/audit-doc";
 import { beepStepVideos, headerState, nextFlaggedIndex, shotRows } from "@/lib/auditStep";
 import { isJobActive } from "@/lib/jobs";
-import { auditVideoSrc } from "@/lib/auditVideoSrc";
+import { auditProxyReady, auditVideoSrc } from "@/lib/auditVideoSrc";
 import { planServedClip } from "@/lib/camPlayback";
 import { useScrubSource } from "@/lib/useScrubSource";
 import { computeAuditNextStep } from "@/lib/audit-next-step";
@@ -2146,7 +2146,12 @@ export function Audit() {
                       onPlaybackError={() => {
                         if (activeVideo && videoSrc.includes("kind=scrub")) scrub.markFailed(activeVideo);
                       }}
-                      proxyReady={activeVideo?.proxy_ready}
+                      proxyReady={auditProxyReady({
+                        video: activeVideo,
+                        plan: servedPlan,
+                        peaksLoaded: peaks != null,
+                        peaksFailed: peaksError != null,
+                      })}
                       mediaOnDesktop={project?.origin === "desktop"}
                       gridMode={false}
                       onGridModeToggle={handleGridModeToggle}
