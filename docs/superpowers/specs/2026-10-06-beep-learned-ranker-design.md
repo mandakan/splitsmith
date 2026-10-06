@@ -68,16 +68,18 @@ position would learn the trimming).
 The trainer may drop a listed feature that does not help out-of-fold. Adding one
 that is not listed is a revision of this spec.
 
-`BeepCandidate` gains `features: dict[str, float]` (default empty, so stored audit
-JSON loads unchanged). It is what the trainer reads and what the audit report
-shows.
+`BeepCandidate` gains `features: BeepFeatures | None` (a Pydantic model with the
+seven fields; default `None`, so stored project JSON loads unchanged, and older
+clients ignore the field). It is what the trainer reads and what the audit
+report shows.
 
 ## 2. Training, model choice, gate
 
 `scripts/train_beep_ranker.py`:
 
-1. **Data.** Run `detect_beep` over every manifest clip with every candidate kept:
-   `top_n_candidates=0` comes to mean "all" (the default stays 5). A candidate is
+1. **Data.** Run `detect_beep` over every manifest clip with every candidate kept
+   (the trainer passes a large `top_n_candidates`; `0` keeps its existing meaning,
+   winner only). A candidate is
    positive when its time is within the fixture's `tolerance_ms` of the labeled
    beep. Fixtures with no positive candidate (about 16) are left out of the
    ranker's training and counted as misses end to end.
@@ -88,8 +90,9 @@ shows.
 4. **Models.** Logistic regression (standardised features, class-balanced) and a
    GBDT, on the same features. **LR ships if its out-of-fold top-1 is within 2 pp
    of the GBDT's**; otherwise the GBDT ships as ONNX.
-5. **Report**, written to `src/splitsmith/data/beep_ranker_report.json` and
-   printed:
+5. **Report**, written to `tests/fixtures/beep_calibration/ranker_report.json`
+   (beside `baseline.json`; it is an evaluation record, not a shipped artifact)
+   and printed:
    - out-of-fold top-1 over reachable fixtures and end to end over all 127,
      overall and per tag (handheld, headcam, steel-prone);
    - top-N end to end;
@@ -151,7 +154,7 @@ Downstream reads confidence to answer "is the chosen beep right?": auto-trust at
 - Thresholds do not change unless the report shows a reason. If one should move,
   the PR proposes it on its own line for the user to decide.
 - `BeepCandidate.confidence`'s docstring drops the "~95 %" history and points at
-  `beep_ranker_report.json` for current bin figures.
+  `ranker_report.json` for current bin figures.
 
 ## 5. Tests
 
@@ -175,7 +178,7 @@ Downstream reads confidence to answer "is the chosen beep right?": auto-trust at
 
 Each step is its own PR and mergeable alone.
 
-1. `candidate_features`, `BeepCandidate.features`, `top_n_candidates=0`.
+1. `candidate_features`, `BeepFeatures`, `BeepCandidate.features`.
    Behaviour unchanged: features computed and exposed, ranking untouched.
 2. The trainer and the committed report. Stop here if the gate fails.
 3. The ranker and confidence head in `detect_beep`, `ranker_version`, the
