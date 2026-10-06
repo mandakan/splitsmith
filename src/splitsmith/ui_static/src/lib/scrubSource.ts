@@ -5,12 +5,14 @@
  * runs ~150 Mbit/s, which stalls software decode, a NAS, and Chromium's
  * low-end device mode (playback ends after ~2 s). Its 720p rendition is
  * cut from the trim and shares its timeline frame for frame, so offsets
- * do not change. The rendition is used only when the server named a fresh
+ * do not change. It streams through ``kind=scrub``, the pin that serves
+ * the rendition, else the trim, else 404 -- never the source. The
+ * rendition is used only when the server named a fresh
  * one (``scrub_version``), the user has not asked for full resolution,
  * and it has not already failed to play on this page.
  */
 export interface ScrubChoice {
-  kind: "web" | "trim";
+  kind: "scrub" | "trim";
   version: string | null;
 }
 
@@ -21,6 +23,6 @@ export function scrubSource(args: {
   failed: boolean;
 }): ScrubChoice {
   const { trimVersion, scrubVersion, fullRes, failed } = args;
-  if (scrubVersion && !fullRes && !failed) return { kind: "web", version: scrubVersion };
+  if (scrubVersion && !fullRes && !failed) return { kind: "scrub", version: scrubVersion };
   return { kind: "trim", version: trimVersion ?? null };
 }

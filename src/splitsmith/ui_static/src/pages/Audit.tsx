@@ -2144,7 +2144,7 @@ export function Audit() {
                       onActiveIndexChange={setActiveVideoIndex}
                       videoSrc={videoSrc}
                       onPlaybackError={() => {
-                        if (activeVideo && videoSrc.includes("kind=web")) scrub.markFailed(activeVideo);
+                        if (activeVideo && videoSrc.includes("kind=scrub")) scrub.markFailed(activeVideo);
                       }}
                       proxyReady={activeVideo?.proxy_ready}
                       mediaOnDesktop={project?.origin === "desktop"}

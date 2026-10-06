@@ -673,7 +673,7 @@ export function MobileAudit() {
               className="min-h-0 flex-1"
               onLoadedMetadata={handleVideoLoadedMetadata}
               onError={() => {
-                if (primaryVideo && videoUrl.includes("kind=web")) markScrubFailed(primaryVideo);
+                if (primaryVideo && videoUrl.includes("kind=scrub")) markScrubFailed(primaryVideo);
               }}
             />
           </div>

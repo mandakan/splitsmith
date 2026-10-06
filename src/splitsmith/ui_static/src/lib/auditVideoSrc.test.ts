@@ -21,7 +21,7 @@ const url = (q: string) => `/api/shooters/alice/videos/stream?path=raw%2Ftake.mp
 describe("auditVideoSrc", () => {
   it("a trimmed angle streams its scrub source, naming the stage", () => {
     // A single take shares its source across stages; the stage picks the trim.
-    expect(auditVideoSrc(base)).toBe(url("kind=web&v=w2&stage=2"));
+    expect(auditVideoSrc(base)).toBe(url("kind=scrub&v=w2&stage=2"));
   });
 
   it("a trimmed angle without a rendition streams the trim", () => {
