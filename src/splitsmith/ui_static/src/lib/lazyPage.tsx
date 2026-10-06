@@ -12,10 +12,17 @@
  * longer serves. That import failure triggers one full reload, which picks
  * up the new build; a sessionStorage flag keeps it to one, so a genuinely
  * broken chunk shows "This page couldn't load." with a Reload button
- * rather than a reload loop. The flag clears once any page loads, so the
- * next deploy can reload again.
+ * rather than a reload loop. With storage blocked the flag cannot be kept,
+ * so there is no reload at all -- only the message. The flag clears once
+ * any page loads, so the next deploy can reload again.
+ *
+ * The same boundary catches a page's own render error (there was no error
+ * boundary anywhere before, so one blanked the app) and says so; it
+ * resets when the location changes, so moving to another stage of the
+ * same page recovers.
  */
 import { Component, lazy, Suspense, type ComponentType, type ReactNode } from "react";
+import { useInRouterContext, useLocation } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
 
@@ -27,35 +34,40 @@ function isChunkLoadError(err: unknown): boolean {
   return /dynamically imported module|Importing a module script failed|error loading dynamically imported module/i.test(msg);
 }
 
-function readFlag(): boolean {
+/** The reload flag: set, unset, or ``null`` when storage is unavailable
+ *  (then no reload is safe -- nothing would stop a loop). */
+function readFlag(): boolean | null {
   try {
     return sessionStorage.getItem(CHUNK_RELOAD_KEY) != null;
+  } catch {
+    return null;
+  }
+}
+
+function writeFlag(on: boolean): boolean {
+  try {
+    if (on) sessionStorage.setItem(CHUNK_RELOAD_KEY, "1");
+    else sessionStorage.removeItem(CHUNK_RELOAD_KEY);
+    return true;
   } catch {
     return false;
   }
 }
 
-function writeFlag(on: boolean): void {
-  try {
-    if (on) sessionStorage.setItem(CHUNK_RELOAD_KEY, "1");
-    else sessionStorage.removeItem(CHUNK_RELOAD_KEY);
-  } catch {
-    // Storage blocked: at worst a stale tab reloads once per failure.
-  }
-}
+class PageLoadBoundary extends Component<{ children: ReactNode }, { error: unknown }> {
+  state: { error: unknown } = { error: null };
 
-class PageLoadBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
-  state = { failed: false };
-
-  static getDerivedStateFromError() {
-    return { failed: true };
+  static getDerivedStateFromError(error: unknown) {
+    return { error: error ?? new Error("page error") };
   }
 
   render() {
-    if (!this.state.failed) return this.props.children;
+    if (this.state.error == null) return this.props.children;
     return (
       <div className="flex flex-wrap items-center gap-3 px-7 py-8 text-md text-ink-2">
-        <span>This page couldn&apos;t load.</span>
+        <span>
+          {isChunkLoadError(this.state.error) ? "This page couldn't load." : "Something went wrong on this page."}
+        </span>
         <Button size="sm" onClick={() => window.location.reload()}>
           Reload
         </Button>
@@ -74,8 +86,7 @@ export function lazyPage<P extends object = Record<string, never>>(
       writeFlag(false);
       return { default: mod[name] as ComponentType<P> };
     } catch (err) {
-      if (isChunkLoadError(err) && !readFlag()) {
-        writeFlag(true);
+      if (isChunkLoadError(err) && readFlag() === false && writeFlag(true)) {
         window.location.reload();
         // Keep suspending while the page reloads.
         return new Promise<{ default: ComponentType<P> }>(() => {});
@@ -84,6 +95,14 @@ export function lazyPage<P extends object = Record<string, never>>(
     }
   });
   function LazyPage(props: P) {
+    return useInRouterContext() ? <RoutedPage {...props} /> : <Page {...props} />;
+  }
+  /** A new location remounts the boundary, so an error on one stage does
+   *  not stick to the next. */
+  function RoutedPage(props: P) {
+    return <Page key={useLocation().pathname} {...props} />;
+  }
+  function Page(props: P) {
     return (
       <PageLoadBoundary>
         <Suspense fallback={<div data-page-loading className="min-h-[40vh]" />}>

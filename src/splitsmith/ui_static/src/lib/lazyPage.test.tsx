@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { Link, MemoryRouter, Route, Routes, useParams } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CHUNK_RELOAD_KEY, lazyPage } from "@/lib/lazyPage";
@@ -68,8 +69,66 @@ describe("lazyPage", () => {
     const Page = lazyPage<{ who: string }>(() => Promise.reject(new Error("boom in module init")), "Hello");
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
     render(<Page who="anna" />);
+    expect(await screen.findByText("Something went wrong on this page.")).toBeInTheDocument();
+    expect(reload).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("words a page's own render error as such, not as a load failure", async () => {
+    function Broken(): never {
+      throw new Error("render bug");
+    }
+    const Page = lazyPage(async () => ({ Broken }), "Broken");
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    render(<Page />);
+    expect(await screen.findByText("Something went wrong on this page.")).toBeInTheDocument();
+    expect(screen.queryByText("This page couldn't load.")).toBeNull();
+    spy.mockRestore();
+  });
+
+  it("recovers when navigation moves to another stage of the same page", async () => {
+    function Stage() {
+      const { id } = useParams();
+      if (id === "2") throw new Error("stage 2 is broken");
+      return (
+        <div>
+          <p>stage {id}</p>
+        </div>
+      );
+    }
+    const Page = lazyPage(async () => ({ Stage }), "Stage");
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    render(
+      <MemoryRouter initialEntries={["/a/2"]}>
+        <Link to="/a/3">next</Link>
+        <Routes>
+          <Route path="/a/:id" element={<Page />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText("Something went wrong on this page.")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("next"));
+    expect(await screen.findByText("stage 3")).toBeInTheDocument();
+    spy.mockRestore();
+  });
+
+  it("never reloads when the reload flag cannot be stored (no loop)", async () => {
+    const getItem = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new DOMException("blocked", "SecurityError");
+    });
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("blocked", "SecurityError");
+    });
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const Page = lazyPage<{ who: string }>(
+      () => Promise.reject(new TypeError("Failed to fetch dynamically imported module: /assets/Audit-abc.js")),
+      "Hello",
+    );
+    render(<Page who="anna" />);
     expect(await screen.findByText("This page couldn't load.")).toBeInTheDocument();
     expect(reload).not.toHaveBeenCalled();
+    getItem.mockRestore();
+    setItem.mockRestore();
     spy.mockRestore();
   });
 });
