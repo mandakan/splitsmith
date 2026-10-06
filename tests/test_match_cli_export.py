@@ -184,6 +184,41 @@ def test_verb_is_registered() -> None:
     assert "export" in {c.name for c in match_cli.match_app.registered_commands}
 
 
+def test_transition_flags_reach_the_composition(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Issue #1244: ``--transition`` / ``--transition-seconds`` on ``match
+    export`` build the stage-to-stage transitions the MP4 renderer draws."""
+    root = _seed(tmp_path)
+    captured = _capture_mp4(monkeypatch)
+    result = runner.invoke(
+        app,
+        [
+            "match",
+            "export",
+            str(root),
+            "--shooter",
+            "me",
+            "--format",
+            "mp4",
+            "--transition",
+            "fade",
+            "--transition-seconds",
+            "1",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    # One seeded stage: no boundary to place, but the request carried it.
+    assert captured["comp"].transitions == ()
+    assert "--transition" in strip_ansi(runner.invoke(app, ["match", "export", "--help"]).output)
+
+
+@pytest.mark.parametrize("args", [["--transition", "nope"], ["--transition-seconds", "0"]])
+def test_bad_transition_flags_are_usage_errors(tmp_path: Path, args: list[str]) -> None:
+    root = _seed(tmp_path)
+    result = runner.invoke(app, ["match", "export", str(root), "--shooter", "me", "--format", "mp4", *args])
+    assert result.exit_code == 2, result.output
+    assert "transition" in strip_ansi(result.output)
+
+
 def test_summary_hold_reaches_the_composition(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     root = _seed(tmp_path)
     captured = _capture_mp4(monkeypatch)

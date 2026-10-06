@@ -1033,6 +1033,11 @@ export type OverlayCodec = "auto" | "hevc-alpha" | "prores-4444";
  *  ``export_presets.ExportPresetBody``; every field has a server default
  *  and unknown fields are dropped there, so the SPA never needs to
  *  migrate a stored body. */
+/** Stage-to-stage transition kinds: the two FCP effects the FCPXML emits
+ *  natively and the curated ffmpeg xfade list the MP4 renderer draws
+ *  (#1244). The server's ``composition.TransitionKind`` plus ``"none"``. */
+export type TransitionKind = "none" | "zoom" | "static" | "fade" | "fadeblack" | "dissolve" | "slideleft" | "slideright" | "circleopen" | "zoomin" | "hblur" | "smoothleft" | "wipeleft";
+
 export interface ExportPresetBody {
   schema_version?: number;
   mode: "single" | "trims" | "compare";
@@ -1049,7 +1054,7 @@ export interface ExportPresetBody {
   padding_preset: "full" | "action" | "highlight" | "custom";
   head_pad_seconds: number;
   tail_pad_seconds: number;
-  transition_kind: "none" | "zoom" | "static";
+  transition_kind: TransitionKind;
   transition_seconds: number;
   title_page: boolean;
   title_page_seconds: number;
@@ -1182,7 +1187,7 @@ export interface MatchExportRequestPayload {
    *  pair. ``"none"`` keeps today's hard cuts. Only FCPXML supports
    *  transitions today; selecting one with FCP7 XML or MP4 surfaces
    *  an anomaly note and falls back to hard cuts. */
-  transition_kind?: "none" | "zoom" | "static";
+  transition_kind?: TransitionKind;
   /** Total transition length in seconds; ignored when
    *  ``transition_kind`` is ``"none"``. Each adjacent stage's effective
    *  window must contain at least half this value of material. */
@@ -1254,7 +1259,7 @@ export interface MatchExportTemplate {
   include_overlay?: boolean;
   pip_layout?: "stacked" | "pip-corners";
   output_format?: "fcpxml" | "fcp7xml" | "mp4";
-  transition_kind?: "none" | "zoom" | "static";
+  transition_kind?: TransitionKind;
   transition_duration_seconds?: number;
   title_kind?: "none" | "slate" | "lower-third";
   title_duration_seconds?: number;

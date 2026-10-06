@@ -528,6 +528,7 @@ function ExportInner({ slug }: { slug: string }) {
     tail: mode === "single" ? tailPad : (project?.trim_post_buffer_seconds ?? 0),
     transitionKind: transitionsSupported(outputFormat) ? transitionKind : "none",
     transitionSeconds,
+    format: outputFormat,
     cardSeconds,
   });
 

@@ -103,6 +103,9 @@ export interface EstimateOptions {
   tail: number;
   transitionKind: string;
   transitionSeconds: number;
+  /** The output format: an MP4 transition is centred on the cut and adds
+   *  no time (#1244); the FCPXML estimate keeps adding one per boundary. */
+  format?: "fcpxml" | "fcp7xml" | "mp4";
   /** What the generated cards add (``renderOptionsSeconds``); the
    *  caller has already applied the mode and format rules. */
   cardSeconds?: number;
@@ -121,7 +124,7 @@ export function estimateDuration(
   for (const n of selected) duration += (times.get(n) ?? 0) + opts.head + opts.tail;
   if (opts.mode === "trims") return duration;
   const count = selected.length;
-  if (opts.mode === "single" && opts.transitionKind !== "none" && count > 1) {
+  if (opts.mode === "single" && opts.format !== "mp4" && opts.transitionKind !== "none" && count > 1) {
     duration += opts.transitionSeconds * (count - 1);
   }
   return duration + (opts.cardSeconds ?? 0);

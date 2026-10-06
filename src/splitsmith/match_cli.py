@@ -467,6 +467,18 @@ def export(
             "-- after its action (mp4 only). 0 is off."
         ),
     ),
+    transition: str = typer.Option(
+        "none",
+        "--transition",
+        help=(
+            "Transition between stages: 'none', an ffmpeg xfade (fade, fadeblack, dissolve, slideleft, "
+            "slideright, circleopen, zoomin, hblur, smoothleft, wipeleft; mp4) or an FCP effect "
+            "(zoom, static; fcpxml)."
+        ),
+    ),
+    transition_seconds: float = typer.Option(
+        0.5, "--transition-seconds", help="Length of each transition, centred on the cut."
+    ),
     intro: Path | None = typer.Option(None, "--intro", help="Video clip to play before the first stage."),
     outro: Path | None = typer.Option(None, "--outro", help="Video clip to play after the last stage."),
     youtube_preset: bool = typer.Option(
@@ -588,6 +600,17 @@ def export(
     if summary_hold < 0:
         console.print(f"[red]Error:[/] --summary-hold must not be negative, got {summary_hold:g}.")
         raise typer.Exit(code=2)
+    from .composition import FCP_KINDS, XFADE_KINDS
+
+    if transition != "none" and transition not in (*XFADE_KINDS, *FCP_KINDS):
+        console.print(
+            f"[red]Error:[/] --transition must be 'none' or one of {', '.join((*XFADE_KINDS, *FCP_KINDS))}, "
+            f"got {transition!r}."
+        )
+        raise typer.Exit(code=2)
+    if transition_seconds <= 0:
+        console.print(f"[red]Error:[/] --transition-seconds must be positive, got {transition_seconds:g}.")
+        raise typer.Exit(code=2)
     if output is not None and output.expanduser().is_dir():
         console.print(f"[red]Error:[/] --output {output} is a directory; pass the file to write.")
         raise typer.Exit(code=2)
@@ -648,6 +671,8 @@ def export(
         output_format=output_format,  # type: ignore[arg-type]
         title_kind=titles,  # type: ignore[arg-type]
         title_duration_seconds=title_duration,
+        transition_kind=transition,  # type: ignore[arg-type]
+        transition_duration_seconds=transition_seconds,
         intro_path=intro.expanduser() if intro else None,
         outro_path=outro.expanduser() if outro else None,
         youtube_preset=youtube_preset,

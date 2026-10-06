@@ -13,6 +13,7 @@ from xml.etree import ElementTree as ET
 
 import pytest
 
+from splitsmith import composition
 from splitsmith.config import OutputConfig, VideoMetadata
 from splitsmith.fcpxml_gen import FFprobeError
 from splitsmith.ui import match_exports as match_exports_mod
@@ -843,6 +844,58 @@ def test_an_xfade_kind_on_the_fcpxml_path_is_rendered_as_zoom_with_an_anomaly(tm
     )
     assert "transition dissolve is not an FCP effect; the FCPXML uses zoom" in result.anomalies
     assert "Blurs" in result.fcpxml_path.read_text() or "Zoom" in result.fcpxml_path.read_text()
+
+
+def test_mp4_export_passes_transitions_to_the_renderer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #1244: the MP4 renderer draws transitions now, so the request
+    layer hands them over instead of recording the old "ignored" anomaly."""
+    captured = _capture_mp4(monkeypatch)
+    result = match_exports_mod.export_match(
+        stages=_two_stage_inputs(tmp_path),
+        request=_card_request(
+            stage_numbers=(1, 2), output_format="mp4", transition_kind="fade", transition_duration_seconds=1.0
+        ),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    comp = captured["comp"]
+    assert comp.transitions == (
+        composition.Transition(from_stage_index=0, to_stage_index=1, kind="fade", duration_seconds=1.0),
+    )
+    assert not any("transitions ignored" in a for a in result.anomalies)
+
+
+def test_mp4_export_keeps_slates_with_transitions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A boundary into a slate is the mechanism's point; only the FCPXML
+    emitter refuses the pair."""
+    captured = _capture_mp4(monkeypatch)
+    result = match_exports_mod.export_match(
+        stages=_two_stage_inputs(tmp_path),
+        request=_card_request(
+            stage_numbers=(1, 2), output_format="mp4", transition_kind="dissolve", title_kind="slate"
+        ),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    comp = captured["comp"]
+    assert comp.stages[0].title is not None and comp.stages[0].title.style == "slate"
+    assert len(comp.transitions) == 1
+    assert not any("slate titles dropped" in a for a in result.anomalies)
+
+
+def test_fcp7xml_still_ignores_transitions(tmp_path: Path) -> None:
+    result = match_exports_mod.export_match(
+        stages=_two_stage_inputs(tmp_path),
+        request=_card_request(stage_numbers=(1, 2), output_format="fcp7xml", transition_kind="zoom"),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    assert any("transitions ignored" in a for a in result.anomalies)
 
 
 def test_fcp7xml_still_ignores_titles_and_intro(tmp_path: Path) -> None:

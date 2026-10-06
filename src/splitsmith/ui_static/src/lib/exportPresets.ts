@@ -35,6 +35,16 @@ export const TRANSITIONS: { value: TransitionKind; label: string }[] = [
   { value: "none", label: "Hard cut" },
   { value: "static", label: "Static frame" },
   { value: "zoom", label: "Zoom blur" },
+  { value: "fade", label: "Fade" },
+  { value: "fadeblack", label: "Fade through black" },
+  { value: "dissolve", label: "Dissolve" },
+  { value: "slideleft", label: "Slide left" },
+  { value: "slideright", label: "Slide right" },
+  { value: "circleopen", label: "Circle open" },
+  { value: "zoomin", label: "Zoom in" },
+  { value: "hblur", label: "Horizontal blur" },
+  { value: "smoothleft", label: "Smooth left" },
+  { value: "wipeleft", label: "Wipe left" },
 ];
 
 export const FORMAT_LABELS: Record<OutputFormat, string> = { fcpxml: "FCPXML", fcp7xml: "FCP 7 XML", mp4: "MP4" };

@@ -68,11 +68,14 @@ export function stageCardsSupported(outputFormat: OutputFormat | undefined): boo
   return outputFormat !== "fcp7xml";
 }
 
-/** Transitions exist only in the FCPXML export today; the FCP 7 XML and
- *  the MP4 record an "ignored" anomaly for one, and a slate cannot be
- *  combined with one there either. */
-export function transitionsSupported(outputFormat: OutputFormat | undefined): boolean {
-  return outputFormat === "fcpxml";
+/** The FCPXML carries transitions as FCP effects; the single-shooter MP4
+ *  draws the xfade kinds on a boundary segment (#1244). The grid MP4 and
+ *  the FCP 7 XML record an "ignored" anomaly for one. */
+export function transitionsSupported(
+  outputFormat: OutputFormat | undefined,
+  mode: "single" | "grid" = "single",
+): boolean {
+  return outputFormat === "fcpxml" || (outputFormat === "mp4" && mode === "single");
 }
 
 /** Clamp a seconds field into its sane range; NaN and blanks become the

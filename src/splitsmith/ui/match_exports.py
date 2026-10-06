@@ -601,13 +601,13 @@ def export_match(
         duration=request.transition_duration_seconds,
         stage_count=len(compositions),
     )
-    if transitions and request.output_format != "fcpxml":
+    if transitions and request.output_format == "fcp7xml":
         anomalies.append(
             f"transitions ignored: not yet supported by the "
             f"{request.output_format} renderer (issue #195 follow-ups)"
         )
         transitions = ()
-    elif transitions:
+    elif transitions and request.output_format == "fcpxml":
         # Issue #1244: the FCPXML emitter is frozen on its two .motr
         # effects; an xfade kind lowers to zoom and the response says so.
         for kind in dict.fromkeys(t.kind for t in transitions):
@@ -625,10 +625,16 @@ def export_match(
             f"{request.output_format} renderer (issue #196 follow-ups)"
         )
         titles = {}
-    if titles and transitions and any(t.style == "slate" for t in titles.values()):
+    if (
+        titles
+        and transitions
+        and request.output_format == "fcpxml"
+        and any(t.style == "slate" for t in titles.values())
+    ):
         # Mirror the emitter's guard at the request layer so the
         # response carries an explicit anomaly instead of a 500-shaped
-        # error from generate_match_fcpxml.
+        # error from generate_match_fcpxml. The MP4 renderer crossfades
+        # into a slate like into any other item (issue #1244).
         anomalies.append("slate titles dropped: cannot combine with transitions (issue #196)")
         titles = {}
     intro_segment = _resolve_segment(
