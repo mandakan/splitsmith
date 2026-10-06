@@ -928,6 +928,29 @@ class MatchAnalysis(BaseModel):
     videos: list[VideoMatchAnalysisEntry]
 
 
+def _raw_holds_source(dest: Path, source: Path) -> bool:
+    """Whether the ``raw/`` entry at ``dest`` is ``source`` (#1124).
+
+    A symlink is compared by its target. A copy (``link_mode="copy"``,
+    ``copy2`` keeps mtime) has no link back to its source, so it is
+    compared by size and whole-second mtime: two different videos copied in
+    with the same byte size and the same mtime second would be taken for
+    one, which real camera files practically never are.
+    """
+    if dest.is_symlink():
+        target = dest.readlink()
+        if not target.is_absolute():
+            target = dest.parent / target
+        return os.path.normpath(target) == os.path.normpath(source)
+    if not dest.exists():
+        return False
+    try:
+        d, s = dest.stat(), source.stat()
+    except OSError:
+        return False
+    return d.st_size == s.st_size and int(d.st_mtime) == int(s.st_mtime)
+
+
 class MatchProject(BaseModel):
     """Top-level on-disk match project."""
 
@@ -2050,9 +2073,17 @@ class MatchProject(BaseModel):
         temporarily but the project keeps working when it's plugged back in.
 
         The ``StageVideo`` is appended to ``unassigned_videos``; the caller is
-        responsible for moving it onto a stage via :meth:`assign_video`. If a
-        video at the same destination path is already registered, the existing
-        entry is returned unchanged (idempotent).
+        responsible for moving it onto a stage via :meth:`assign_video`. If
+        this same source is already registered, the existing entry is
+        returned unchanged (idempotent).
+
+        A different file that happens to share the name -- phone counters
+        repeat, and one shooter's footage can come from several people's
+        folders -- gets the next free name (``IMG_1234-2.MOV``) instead of
+        being folded into the first one (#1124). A file already sitting at
+        a name is reused only when it is this source: a symlink to it
+        (dangling while a USB cam is unplugged), or a copy of the same size
+        and mtime.
 
         Raises ``FileNotFoundError`` if the source doesn't exist or isn't a
         video file (mp4 / mov / m4v).
@@ -2065,21 +2096,12 @@ class MatchProject(BaseModel):
 
         raw_dir_abs = self.raw_path(root)
         raw_dir_abs.mkdir(parents=True, exist_ok=True)
-        dest = raw_dir_abs / source.name
+        dest, stored = self._raw_slot(source, raw_dir_abs, root)
 
-        # The path stored on the StageVideo is project-relative when raw_dir is
-        # under the project root (the common case), absolute otherwise. This
-        # keeps zip-and-share portable for default projects while letting
-        # USB-cam / scratch-SSD setups still work.
-        try:
-            stored = dest.relative_to(root)
-        except ValueError:
-            stored = dest
-
-        # Idempotency: if a video at this stored path is already registered,
-        # return it (backfilling match_timestamp if missing -- old projects
-        # didn't store it, and we'd rather populate the timeline tick on
-        # re-scan than force the user to re-register from scratch).
+        # Idempotency: if this source is already registered, return it
+        # (backfilling match_timestamp if missing -- old projects didn't
+        # store it, and we'd rather populate the timeline tick on re-scan
+        # than force the user to re-register from scratch).
         existing = self.find_video(stored)
         if existing is not None:
             video = existing[1]
@@ -2090,10 +2112,11 @@ class MatchProject(BaseModel):
                     pass
             return video
 
-        # If something is already at the destination, leave it (don't clobber
-        # what the user might have placed there themselves). Otherwise create
-        # a symlink (preferred) or a copy.
-        if not dest.exists():
+        # A slot that already holds this source is reused as it is; a free one
+        # gets a symlink (preferred) or a copy. ``_raw_slot`` never returns a
+        # slot holding a different file, so nothing the user placed there is
+        # clobbered.
+        if not dest.exists() and not dest.is_symlink():
             if link_mode == "symlink":
                 try:
                     dest.symlink_to(source)
@@ -2133,6 +2156,31 @@ class MatchProject(BaseModel):
         )
         self.unassigned_videos.append(video)
         return video
+
+    def _raw_slot(self, source: Path, raw_dir_abs: Path, root: Path) -> tuple[Path, Path]:
+        """The ``raw/`` destination for ``source`` and the path stored for it.
+
+        The first of ``<name>``, ``<stem>-2<suffix>``, ``-3``... that is
+        free (nothing on disk, nothing registered) or already holds this
+        same source. The stored path is project-relative when raw_dir is
+        under the project root (the common case), absolute otherwise: that
+        keeps zip-and-share portable for default projects while letting
+        USB-cam / scratch-SSD setups still work.
+        """
+        n = 1
+        while True:
+            name = source.name if n == 1 else f"{source.stem}-{n}{source.suffix}"
+            dest = raw_dir_abs / name
+            try:
+                stored = dest.relative_to(root)
+            except ValueError:
+                stored = dest
+            on_disk = dest.exists() or dest.is_symlink()
+            if _raw_holds_source(dest, source):
+                return dest, stored
+            if not on_disk and self.find_video(stored) is None:
+                return dest, stored
+            n += 1
 
     def resolve_video_path(self, root: Path, video_path: Path) -> Path:
         """Resolve a ``StageVideo.path`` to an absolute filesystem path,
