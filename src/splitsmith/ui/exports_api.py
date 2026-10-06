@@ -75,7 +75,7 @@ class ExportStageRequest(BaseModel):
     summary_hold_seconds: float = 3.0
     # Palette preset for the overlay text + stroke. ``"splitsmith"``
     # (default) uses the same tokens the web UI ships, mirrored into
-    # ``data/overlay_theme.json``. ``"clean"`` is the neutral
+    # ``data/looks/splitsmith/look.json``. ``"clean"`` is the neutral
     # white-on-amber alternative.
     overlay_theme: Literal["splitsmith", "clean"] = "splitsmith"
     # Multi-cam selection (issue #54). Allowlist of secondary

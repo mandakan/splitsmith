@@ -122,3 +122,13 @@ def test_the_manifest_name_must_match_its_directory(user_dir: Path) -> None:
 def test_shared_dir_holds_the_engine_scripts() -> None:
     assert looks.shared_dir().name == "_shared"
     assert looks.shared_dir().parent == looks.shipped_looks_dir()
+
+
+def test_cli_theme_accepts_an_installed_user_look(user_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``--theme`` validates against the installed Looks, not a literal pair."""
+    from splitsmith.cli import _validate_theme
+
+    _write_look(user_dir, "club")
+    assert _validate_theme("club") == "club"
+    with pytest.raises(Exception, match="nope"):
+        _validate_theme("nope")

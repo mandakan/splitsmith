@@ -158,7 +158,7 @@ def _stage(trim: Path, audit: Path, *, name: str) -> StageComposition:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
-    parser.add_argument("--theme", choices=("splitsmith", "clean"), default="splitsmith")
+    parser.add_argument("--theme", default="splitsmith", help="an installed Look name")
     parser.add_argument("--titles", choices=("slate", "lower-third"), default="slate")
     parser.add_argument("--keep-video", action="store_true")
     parser.add_argument(

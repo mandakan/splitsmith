@@ -1,28 +1,84 @@
 {
-  "schema_version": 1,
-  "name": "splitsmith",
-  "label": "Splitsmith",
-  "source": "src/splitsmith/ui_static/src/styles/index.css",
   "colors": {
-    "accent": [255, 45, 45],
-    "accent_fill": [220, 38, 38],
-    "accent_text": [255, 180, 180],
-    "ink": [244, 244, 245],
-    "ink_2": [201, 204, 210],
-    "muted": [142, 147, 155],
-    "rule": [38, 43, 51],
-    "split": [251, 191, 36],
-    "split_good": [74, 222, 128],
-    "split_slow": [255, 45, 45],
-    "stroke": [10, 11, 13],
-    "subtle": [107, 112, 121],
-    "surface": [20, 23, 28]
+    "accent": [
+      255,
+      45,
+      45
+    ],
+    "accent_fill": [
+      220,
+      38,
+      38
+    ],
+    "accent_text": [
+      255,
+      180,
+      180
+    ],
+    "ink": [
+      244,
+      244,
+      245
+    ],
+    "ink_2": [
+      201,
+      204,
+      210
+    ],
+    "muted": [
+      142,
+      147,
+      155
+    ],
+    "rule": [
+      38,
+      43,
+      51
+    ],
+    "split": [
+      251,
+      191,
+      36
+    ],
+    "split_good": [
+      74,
+      222,
+      128
+    ],
+    "split_slow": [
+      255,
+      45,
+      45
+    ],
+    "stroke": [
+      10,
+      11,
+      13
+    ],
+    "subtle": [
+      107,
+      112,
+      121
+    ],
+    "surface": [
+      20,
+      23,
+      28
+    ]
   },
-  "fonts": {"display": "Antonio", "mono": "JetBrains Mono", "sans": "Geist"},
+  "fonts": {
+    "display": "Antonio",
+    "mono": "JetBrains Mono",
+    "sans": "Geist"
+  },
+  "label": "Splitsmith",
+  "name": "splitsmith",
+  "schema_version": 1,
   "slots": {
-    "title_page": "card.html",
-    "slate": "card.html",
+    "closing": "card.html",
     "lower_third": "card.html",
-    "closing": "card.html"
-  }
+    "slate": "card.html",
+    "title_page": "card.html"
+  },
+  "source": "src/splitsmith/ui_static/src/styles/index.css"
 }

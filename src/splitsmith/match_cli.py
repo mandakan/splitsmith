@@ -509,7 +509,9 @@ def export(
         False, "--youtube-no-notify", help="Do not notify subscribers when the upload goes public."
     ),
     overlay_theme: str = typer.Option(
-        "splitsmith", "--theme", help="Overlay / card theme: 'splitsmith' or 'clean'."
+        "splitsmith",
+        "--theme",
+        help="Look (overlay and card palette, card templates): an installed Look name.",
     ),
     config_path: Path | None = typer.Option(None, "--config", help="Optional YAML config."),
 ) -> None:
@@ -541,8 +543,12 @@ def export(
     if pip_layout not in ("stacked", "pip-corners"):
         console.print(f"[red]Error:[/] --pip must be 'stacked' or 'pip-corners', got {pip_layout!r}.")
         raise typer.Exit(code=2)
-    if overlay_theme not in ("splitsmith", "clean"):
-        console.print(f"[red]Error:[/] --theme must be 'splitsmith' or 'clean', got {overlay_theme!r}.")
+    from .looks import look_names
+
+    if overlay_theme not in look_names():
+        console.print(
+            f"[red]Error:[/] --theme must be one of {', '.join(look_names())}, got {overlay_theme!r}."
+        )
         raise typer.Exit(code=2)
     yt_client: Any = None
     yt_conn = None
