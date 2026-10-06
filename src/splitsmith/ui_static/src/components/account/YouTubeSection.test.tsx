@@ -15,6 +15,9 @@ const startYouTubeConnect = vi.fn();
 const youtubeConnectStatus = vi.fn();
 const disconnectYouTube = vi.fn();
 
+const deployment = { mode: "local" as "local" | "hosted" };
+vi.mock("@/lib/features", () => ({ useDeploymentMode: () => ({ mode: deployment.mode, resolved: true }) }));
+
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
   return {
@@ -82,6 +85,10 @@ describe("YouTubeSection", () => {
     await act(async () => {
       fireEvent.click(button);
     });
+    expect(startYouTubeConnect).not.toHaveBeenCalled();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Continue to Google" }));
+    });
     expect(open).toHaveBeenCalledWith("https://accounts.google.com/x", "_blank", "noopener");
     expect(screen.getByText("Waiting for Google...")).toBeInTheDocument();
     await act(async () => {
@@ -102,6 +109,9 @@ describe("YouTubeSection", () => {
     vi.useFakeTimers();
     await act(async () => {
       fireEvent.click(button);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Continue to Google" }));
     });
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2000);
