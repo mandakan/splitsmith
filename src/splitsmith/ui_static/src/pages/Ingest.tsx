@@ -23,6 +23,7 @@ import { CamerasPanel } from "@/components/footage/CamerasPanel";
 import { ClipSheet } from "@/components/footage/ClipSheet";
 import { CoverageMatrix, type FootageHrefs } from "@/components/footage/CoverageMatrix";
 import { FootageCards } from "@/components/footage/FootageCards";
+import { IdentitySheet } from "@/components/footage/IdentitySheet";
 import { ShootersPanel } from "@/components/footage/ShootersPanel";
 import { UnassignedPanel } from "@/components/footage/UnassignedPanel";
 import { HostedUploadModal } from "@/components/HostedUploadModal";
@@ -557,6 +558,7 @@ function IngestInner({ slug }: { slug: string }) {
   // for an empty cell.
   const [sheet, setSheet] = useState<{ slug: string; videoId: string | null; assignStage: number | null } | null>(null);
   const [addShooterOpen, setAddShooterOpen] = useState(false);
+  const [identityFor, setIdentityFor] = useState<ShooterListEntry | null>(null);
   const sheetProject = sheet ? projects[sheet.slug] : null;
   // Takes the old stage-1 bug left registered wrongly, per shooter shown.
   const takeRepairs = useMemo(
@@ -946,6 +948,7 @@ function IngestInner({ slug }: { slug: string }) {
               onAdd={() => setAddShooterOpen(true)}
               onRemove={(s) => void removeShooter(s)}
               onRebuildTrims={(s) => void rebuildTrims(s)}
+              onIdentity={(s) => setIdentityFor(s)}
             />
             {clipModel ? <CamerasPanel slug={slug} cameras={clipModel.cameras} editDenied={editDenied} onSaved={handleSaved} /> : null}
           </div>
@@ -995,6 +998,13 @@ function IngestInner({ slug }: { slug: string }) {
           void reload();
           setOthersTick((n) => n + 1);
         }}
+      />
+      <IdentitySheet
+        open={identityFor != null}
+        onClose={() => setIdentityFor(null)}
+        shooter={identityFor}
+        editDenied={editDenied}
+        onChanged={() => void reload()}
       />
 
       {showRelinkDialog && modeResolved && mode === "local" ? (

@@ -23,6 +23,8 @@ export interface ShootersPanelProps {
   onAdd: () => void;
   onRemove: (shooter: ShooterListEntry) => void;
   onRebuildTrims: (shooter: ShooterListEntry) => void;
+  /** Open the identity sheet for a shooter (#1243). */
+  onIdentity: (shooter: ShooterListEntry) => void;
 }
 
 function initials(name: string): string {
@@ -35,7 +37,7 @@ function initials(name: string): string {
     .toUpperCase();
 }
 
-export function ShootersPanel({ shooters, activeSlug, editDenied, hrefs, onAdd, onRemove, onRebuildTrims }: ShootersPanelProps) {
+export function ShootersPanel({ shooters, activeSlug, editDenied, hrefs, onAdd, onRemove, onRebuildTrims, onIdentity }: ShootersPanelProps) {
   const [menuFor, setMenuFor] = useState<string | null>(null);
   return (
     <section aria-label="Shooters" className="overflow-hidden rounded-[10px] border border-rule bg-surface">
@@ -55,7 +57,11 @@ export function ShootersPanel({ shooters, activeSlug, editDenied, hrefs, onAdd, 
               current && "bg-surface-2 shadow-[inset_2px_0_0_var(--color-led)]",
             )}
           >
-            <span aria-hidden className="inline-grid size-5 shrink-0 place-items-center rounded-full bg-surface-3 font-mono text-xs text-ink-2">
+            <span
+              aria-hidden
+              className="inline-grid size-5 shrink-0 place-items-center rounded-full bg-surface-3 font-mono text-xs text-ink-2"
+              style={s.identity?.accent ? { boxShadow: `inset 0 0 0 2px ${s.identity.accent}` } : undefined}
+            >
               {initials(s.name)}
             </span>
             <Link to={hrefs.footage(s.slug)} className={cn("min-w-0 flex-1 truncate font-medium", current ? "text-ink" : "text-ink-2 hover:text-ink")}>
@@ -78,6 +84,18 @@ export function ShootersPanel({ shooters, activeSlug, editDenied, hrefs, onAdd, 
               <Link role="menuitem" className={menuItemClass} to={hrefs.audit(s.slug)}>
                 Open Audit
               </Link>
+              <button
+                type="button"
+                role="menuitem"
+                className={menuItemClass}
+                disabled={editDenied}
+                onClick={() => {
+                  setMenuFor(null);
+                  onIdentity(s);
+                }}
+              >
+                Identity&hellip;
+              </button>
               {s.stages_missing_trim > 0 ? (
                 <button
                   type="button"

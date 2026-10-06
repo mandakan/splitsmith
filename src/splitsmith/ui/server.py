@@ -76,6 +76,7 @@ import atexit
 import contextlib
 import functools
 import hashlib
+import io
 import json
 import logging
 import os
@@ -203,6 +204,7 @@ from ..fixture_schema import (
     CameraPosition,
     probe_camera_metadata,
 )
+from ..identity import LOGO_DIR, LOGO_MAX_BYTES, ShooterIdentity, logo_name
 from ..match_project import (
     STUB_AUDIT_DETECTION,
     VIDEO_EXTENSIONS,
@@ -5257,6 +5259,8 @@ class ShooterListEntry(BaseModel):
     # (primary + beep + stage_time + reachable source); stages missing those
     # prerequisites are excluded from the count.
     stages_missing_trim: int = 0
+    # The shooter's identity (#1243): accent, logo file name, club line.
+    identity: ShooterIdentity = Field(default_factory=ShooterIdentity)
     # Per-stage status for this shooter, one entry per stage in the
     # shooter's own project (same source as ``stages_audited``). The match
     # Overview pivots these across shooters into a per-stage grid.
@@ -6230,6 +6234,14 @@ class CameraModelRequest(BaseModel):
 
     make: str | None
     model: str | None
+
+
+class ShooterIdentityRequest(BaseModel):
+    """Body for PATCH /api/shooters/{slug}/identity (#1243). Only the keys
+    sent are applied; ``null`` clears one. The logo has its own routes."""
+
+    accent: str | None = None
+    club: str | None = None
 
 
 class CompareCameraRequest(BaseModel):
@@ -12919,6 +12931,86 @@ def create_app(
         project.save(state.shooter_root(slug))
         return JSONResponse(project.model_dump(mode="json"))
 
+    def _identity_logo_dir(slug: str) -> Path:
+        return state.shooter_root(slug) / LOGO_DIR
+
+    def _remove_local_logo(slug: str, name: str | None) -> None:
+        if name is None:
+            return
+        try:
+            (_identity_logo_dir(slug) / name).unlink()
+        except FileNotFoundError:
+            pass
+
+    @app.patch("/api/shooters/{slug}/identity")
+    def set_shooter_identity(slug: str, req: ShooterIdentityRequest) -> JSONResponse:
+        """Set the shooter's accent and club line (#1243). Validated by the
+        identity model itself, so a bad colour or an over-long club line
+        is a 422 that names the field and writes nothing."""
+        project = state.shooter_project(slug)
+        current = project.identity
+        fields = req.model_dump(exclude_unset=True)
+        try:
+            project.identity = ShooterIdentity(
+                accent=fields.get("accent", current.accent),
+                club=fields.get("club", current.club),
+                logo=current.logo,
+            )
+        except ValidationError as exc:
+            raise HTTPException(status_code=422, detail=exc.errors()[0]["msg"]) from exc
+        project.save(state.shooter_root(slug))
+        return JSONResponse(project.model_dump(mode="json"))
+
+    @app.post("/api/shooters/{slug}/identity/logo")
+    async def upload_shooter_logo(slug: str, file: UploadFile = File(...)) -> JSONResponse:
+        """Store the shooter's logo (#1243): a PNG, JPEG or WebP of at most
+        ``LOGO_MAX_BYTES``, content-named under ``<shooter>/identity/``
+        (hosted: under the project's storage scope as well, which is the
+        key the sync push writes), the previous logo file removed. The
+        type is sniffed, never trusted from the name: SVG can script and
+        a template loads the logo in Chromium."""
+        from PIL import Image, UnidentifiedImageError
+
+        project = state.shooter_project(slug)
+        data = await file.read(LOGO_MAX_BYTES + 1)
+        if len(data) > LOGO_MAX_BYTES:
+            raise HTTPException(status_code=413, detail=f"logo is over {LOGO_MAX_BYTES // (1024 * 1024)} MB")
+        if not data:
+            raise HTTPException(status_code=422, detail="empty file")
+        try:
+            with Image.open(io.BytesIO(data)) as image:
+                fmt = (image.format or "").upper()
+        except (UnidentifiedImageError, OSError) as exc:
+            raise HTTPException(status_code=422, detail="logo must be a PNG, JPEG or WebP image") from exc
+        ext = {"PNG": "png", "JPEG": "jpeg", "WEBP": "webp"}.get(fmt)
+        if ext is None:
+            raise HTTPException(status_code=422, detail="logo must be a PNG, JPEG or WebP image")
+        name = logo_name(data, ext)
+        previous = project.identity.logo
+        logo_dir = _identity_logo_dir(slug)
+        logo_dir.mkdir(parents=True, exist_ok=True)
+        (logo_dir / name).write_bytes(data)
+        storage = project._storage  # type: ignore[attr-defined]
+        scope = project._storage_scope  # type: ignore[attr-defined]
+        if storage is not None and scope is not None:
+            storage.write_bytes(f"{scope}/{LOGO_DIR}/{name}", data)
+        project.identity = project.identity.model_copy(update={"logo": name})
+        project.save(state.shooter_root(slug))
+        if previous != name:
+            _remove_local_logo(slug, previous)
+        return JSONResponse(project.model_dump(mode="json"))
+
+    @app.delete("/api/shooters/{slug}/identity/logo")
+    def remove_shooter_logo(slug: str) -> JSONResponse:
+        """Clear the shooter's logo (#1243) and remove the local file; a
+        hosted copy is swept by the next push's gc."""
+        project = state.shooter_project(slug)
+        previous = project.identity.logo
+        project.identity = project.identity.model_copy(update={"logo": None})
+        project.save(state.shooter_root(slug))
+        _remove_local_logo(slug, previous)
+        return JSONResponse(project.model_dump(mode="json"))
+
     @app.post("/api/shooters/{slug}/stages/camera/bulk-set")
     def bulk_set_camera(slug: str, req: BulkCameraSetRequest) -> JSONResponse:
         """Apply camera mount and/or model overrides to a batch of videos in one save.
@@ -15471,6 +15563,7 @@ def create_app(
             video_count=total_videos,
             cameras=cameras,
             stages_missing_trim=stages_missing_trim,
+            identity=legacy.identity,
             stage_statuses=[
                 StageStatusEntry(stage_number=n, status=st) for n, st in sorted(stage_status_map.items())
             ],
