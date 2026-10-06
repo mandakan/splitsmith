@@ -1526,3 +1526,23 @@ def test_the_compositions_shooters_reach_every_card(tmp_path: Path) -> None:
     for call in fake.calls:
         data = json.loads(call)
         assert data["shooters"] == [{"label": "Mathias", "accent": "#ff2d2d", "club": "PK", "logo": None}]
+
+
+def test_the_summary_hold_carries_the_shooters_accent(tmp_path: Path) -> None:
+    import dataclasses
+
+    comp = _summarised_composition(tmp_path)
+    comp = dataclasses.replace(
+        comp,
+        shooters=(composition.CompositionShooter(label="Me", accent="#abcdef", logo_path=None, club=None),),
+    )
+    fake = _FakeRasterizer()
+    mp4_render.render_mp4(
+        comp,
+        output_path=tmp_path / "m.mp4",
+        work_dir=tmp_path / "w",
+        runner=MagicMock(side_effect=_ok),
+        rasterizer=fake,
+    )
+    holds = [c for c in fake.calls if c.startswith("<!doctype html>")]
+    assert holds and all('<div class="cell" style="--accent:#abcdef">' in h for h in holds)

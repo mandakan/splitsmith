@@ -127,12 +127,22 @@ def _check_stage_keys(data: Mapping[str, TileStageData]) -> None:
             )
 
 
-def _placements_for_plan(plan: GridStagePlan) -> tuple[TilePlacement, ...]:
+def _placements_for_plan(
+    plan: GridStagePlan, accents: Mapping[str, str] | None = None
+) -> tuple[TilePlacement, ...]:
     """A plan's tiles as :class:`TilePlacement`, mirroring
     ``mp4_grid._stage_overlay_plan``'s construction so this module and the
-    sprite overlay agree on what "present" means for the same stage."""
+    sprite overlay agree on what "present" means for the same stage.
+    ``accents`` (#1243) is label -> resolved accent for the tiles whose
+    shooter has an identity; the others keep ``None``."""
     return tuple(
-        TilePlacement(label=tile.label, row=tile.row, col=tile.col, present=tile.trim_path is not None)
+        TilePlacement(
+            label=tile.label,
+            row=tile.row,
+            col=tile.col,
+            present=tile.trim_path is not None,
+            accent=(accents or {}).get(tile.label),
+        )
         for tile in plan.tiles
     )
 
@@ -471,6 +481,7 @@ def write_hold_still(
     blur_radius: int | None = None,
     dim: float = DEFAULT_DIM,
     output_path: Path | None = None,
+    accents: Mapping[str, str] | None = None,
 ) -> Path:
     """Extract this stage's freeze frames, compose the hold still, and
     save it. ``data`` is a single stage's slice keyed by label -- the same
@@ -481,7 +492,7 @@ def write_hold_still(
     into the ffmpeg graph as one more static input, the same way the
     sprite sequence already is. Nothing here touches that graph.
     """
-    placements = _placements_for_plan(plan)
+    placements = _placements_for_plan(plan, accents)
     freezes = extract_freeze_frames(
         plan,
         work_dir=work_dir,

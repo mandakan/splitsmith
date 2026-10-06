@@ -749,3 +749,39 @@ def test_the_fit_script_is_the_shipped_file_with_the_floor_set_beside_it() -> No
     assert f"window.__splitsmithMinFont = {MIN_FONT_SIZE};" in script
     assert "window.__splitsmithMinFont" in fit_js()
     assert str(MIN_FONT_SIZE) not in fit_js(), "the floor is set by the caller, never baked into the file"
+
+
+# --- per-shooter accent (slice 3, #1243) ----------------------------------------------
+
+
+def test_only_the_cell_with_an_accent_carries_the_variable() -> None:
+    """Two tiles, one accent: that wrapper sets ``--accent``; the other's
+    markup is byte for byte what it was before accents existed."""
+    from splitsmith.compare.overlay_sprites import SpriteGeometry, TilePlacement
+
+    geometry = SpriteGeometry(canvas_width=640, canvas_height=360, rows=1, cols=2)
+    tinted = TilePlacement(label="A", row=0, col=0, present=True, accent="#123456")
+    plain = TilePlacement(label="B", row=0, col=1, present=True)
+    doc = grid_html([(tinted, ()), (plain, ())], geometry=geometry, scale=SCALE, theme=THEME)
+    assert '<div style="grid-row:1;grid-column:1;--accent:#123456;">' in doc
+    assert '<div style="grid-row:1;grid-column:2;">' in doc
+
+
+def test_the_stylesheet_reads_the_accent_through_variables_that_fall_back() -> None:
+    from splitsmith.overlay_html import _style_rules
+
+    rules = _style_rules(scale=SCALE, theme=THEME)
+    cell = rules[rules.index(".cell {") : rules.index("}", rules.index(".cell {"))]
+    assert "var(--accent, transparent)" in cell, "the accent bar paints nothing when no accent is set"
+    identity = rules[rules.index(".role-identity") : rules.index("}", rules.index(".role-identity"))]
+    assert "color: var(--accent, currentColor);" in identity
+
+
+def test_single_html_puts_the_accent_on_its_one_cell() -> None:
+    groups = (
+        Group(anchor=Anchor.MIDDLE_CENTER, flow=Flow.ROW, elements=(Element(role=Role.DETAIL, text="x"),)),
+    )
+    plain = single_html(groups, width=64, height=32, scale=SCALE, theme=THEME)
+    tinted = single_html(groups, width=64, height=32, scale=SCALE, theme=THEME, accent="#abcdef")
+    assert '<div class="cell">' in plain and 'style="--accent' not in plain
+    assert '<div class="cell" style="--accent:#abcdef">' in tinted

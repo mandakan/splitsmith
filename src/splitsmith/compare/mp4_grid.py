@@ -2165,6 +2165,7 @@ def _stage_hold_still(
     ffmpeg_binary: str,
     runner: Runner,
     rasterizer: Rasterizer | None,
+    identities: Mapping[str, ResolvedIdentity] | None = None,
 ) -> Path:
     """Compose this stage's frozen summary still and return its path.
 
@@ -2210,6 +2211,7 @@ def _stage_hold_still(
         ffmpeg_binary=ffmpeg_binary,
         runner=runner,
         rasterizer=rasterizer,
+        accents={label: ident.accent for label, ident in (identities or {}).items()},
     )
 
 
@@ -2858,6 +2860,7 @@ def render_grid_mp4(
                             ffmpeg_binary=binary,
                             runner=still_runner,
                             rasterizer=active_rasterizer,
+                            identities=identities,
                         )
                     except Exception as exc:  # noqa: BLE001 -- one bad stage must not lose the match
                         detail = f"could not compose the stage summary still: {exc}"

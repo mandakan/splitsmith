@@ -109,3 +109,12 @@ def test_summary_of_a_stage_without_shots_draws_time_and_scoring_only() -> None:
     assert not any(
         e.role == Role.HEADLINE and e.caption in ("Best", "Avg", "Worst") for g in groups for e in g.elements
     )
+
+
+def test_the_summary_carries_the_shooters_accent(tmp_path: Path) -> None:
+    fake = _FakeRasterizer()
+    cell.build_summary_still(
+        _tile(), "Me", width=320, height=180, theme=THEME, rasterizer=fake, backdrop=None, accent="#abcdef"
+    )
+    (html,) = fake.calls
+    assert '<div class="cell" style="--accent:#abcdef">' in html

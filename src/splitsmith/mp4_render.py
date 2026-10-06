@@ -513,6 +513,7 @@ def _render_with_work_dir(
                 theme=theme if theme is not None else load_theme(overlay_theme),
                 rasterizer=rasterizer,
                 backdrop=backdrop,
+                accent=shooters[0].accent if shooters else None,
             )
             if image is None:
                 logger.warning(
