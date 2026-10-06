@@ -17,10 +17,14 @@ from pathlib import Path
 CHUNK = 1024 * 1024
 
 
-def clip_fingerprint(path: Path) -> str:
-    """``"<size hex>-<sha256 of head + tail>"``; raises ``OSError`` when the
-    file cannot be read. A file shorter than two chunks is hashed whole."""
+def clip_fingerprint(path: Path) -> str | None:
+    """``"<size hex>-<sha256 of head + tail>"``, or ``None`` for an empty
+    file (a failed copy is not a recording; two of them are never the same
+    clip). Raises ``OSError`` when the file cannot be read. A file shorter
+    than two chunks is hashed whole."""
     size = path.stat().st_size
+    if size == 0:
+        return None
     digest = hashlib.sha256()
     with path.open("rb") as f:
         if size <= 2 * CHUNK:
