@@ -41,6 +41,7 @@ from .async_bridge import run_sync
 from .automation import AutomationOverride
 from .config import BeepCandidate, StageData, StageRounds, VideoMatchConfig
 from .export_naming import is_match_export, stage_file_base
+from .fingerprint import clip_fingerprint
 from .storage import Storage
 from .video_match import match_videos_to_stages
 
@@ -413,6 +414,12 @@ class StageVideo(BaseModel):
     # ``camera_mount``.
     camera_make: str | None = None
     camera_model: str | None = None
+    # Content fingerprint of the source (``fingerprint.clip_fingerprint``:
+    # size + sha256 of its first and last MiB), set at registration and
+    # backfilled lazily. The same clip reaching the match from a second path
+    # is recognised by it and not imported again (#1124). ``None`` for a
+    # video registered before, until its source is reachable.
+    fingerprint: str | None = None
     # Owning stage number, stamped by MatchProject on load and by
     # assign_video / attach on every move. None while unassigned. Feeds
     # video_id so N StageVideos sharing one source file (a multi-stage
@@ -2094,6 +2101,17 @@ class MatchProject(BaseModel):
         if source.suffix.lower() not in VIDEO_EXTENSIONS:
             raise ValueError(f"not a video file: {source}")
 
+        # The same recording under another path or name is already here
+        # (#1124): return it rather than register a second copy.
+        try:
+            fingerprint: str | None = clip_fingerprint(source)
+        except OSError:
+            fingerprint = None
+        if fingerprint is not None:
+            same = next((v for v in self.all_videos() if v.fingerprint == fingerprint), None)
+            if same is not None:
+                return same
+
         raw_dir_abs = self.raw_path(root)
         raw_dir_abs.mkdir(parents=True, exist_ok=True)
         dest, stored = self._raw_slot(source, raw_dir_abs, root)
@@ -2153,6 +2171,7 @@ class MatchProject(BaseModel):
             camera_mount=mount_default,
             camera_make=probed_make,
             camera_model=probed_model,
+            fingerprint=fingerprint,
         )
         self.unassigned_videos.append(video)
         return video
@@ -2181,6 +2200,26 @@ class MatchProject(BaseModel):
             if not on_disk and self.find_video(stored) is None:
                 return dest, stored
             n += 1
+
+    def backfill_fingerprints(self, root: Path) -> int:
+        """Fill ``fingerprint`` on videos registered before it existed, from
+        each source that is reachable on this machine; returns how many were
+        filled (#1124). Local files only: an unreachable source (an
+        unplugged cam, a hosted object) stays ``None`` until a later run."""
+        filled = 0
+        for video in self.all_videos():
+            if video.fingerprint is not None:
+                continue
+            candidate = video.path if video.path.is_absolute() else root / video.path
+            try:
+                if not candidate.exists():
+                    continue
+                video.fingerprint = clip_fingerprint(candidate.resolve())
+            except OSError:
+                continue
+            if video.fingerprint is not None:
+                filled += 1
+        return filled
 
     def resolve_video_path(self, root: Path, video_path: Path) -> Path:
         """Resolve a ``StageVideo.path`` to an absolute filesystem path,

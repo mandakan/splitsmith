@@ -3688,10 +3688,10 @@ def test_shot_detect_all_endpoint_submits_per_eligible_stage(tmp_path: Path, mon
 
     src2 = tmp_path / "extra" / "VID_S2.mp4"
     src2.parent.mkdir(parents=True, exist_ok=True)
-    src2.write_bytes(b"\x00")
+    src2.write_bytes(src2.name.encode())
     project.register_video(src2, project_root)
     src3 = tmp_path / "extra" / "VID_S3.mp4"
-    src3.write_bytes(b"\x00")
+    src3.write_bytes(src3.name.encode())
     project.register_video(src3, project_root)
 
     project.stages.append(
@@ -8030,7 +8030,7 @@ def _seed_match_export_project(
         project.stages.append(StageEntry(stage_number=n, stage_name=f"Stage {n}", time_seconds=10.0))
         src = _shooter_root / "raw" / f"VID{n}.mp4"
         src.parent.mkdir(parents=True, exist_ok=True)
-        src.write_bytes(b"\x00")
+        src.write_bytes(src.name.encode())  # distinct bytes: one content is one clip
         video = project.register_video(src, project_root)
         project.assign_video(video.path, to_stage_number=n, role="primary")
         primary = project.stage(n).primary()
