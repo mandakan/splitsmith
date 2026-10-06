@@ -47,7 +47,7 @@ import io
 import logging
 import math
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
@@ -75,11 +75,17 @@ class TemplateFrames:
     width: int
     height: int
     frames: Iterator[bytes]
+    #: Releases what the load opened (the browser context). Idempotent,
+    #: and called by :meth:`close` whether or not a frame was ever pulled:
+    #: closing an unstarted generator never runs its ``finally``, and a
+    #: cached segment pulls no frame.
+    release: Callable[[], None] = lambda: None
 
     def close(self) -> None:
         close = getattr(self.frames, "close", None)
         if close is not None:
             close()
+        self.release()
 
 
 class Rasterizer(Protocol):
@@ -422,11 +428,16 @@ class ChromiumRasterizer:
     ) -> TemplateFrames:
         """Load ``template`` once and yield its frames at ``fps``: a still
         yields one frame at ``seek(0)``; an animated template yields
-        ``ceil(min(duration, max_seconds) * fps)`` frames at
-        ``seek(i / fps)``. The fit policy runs once, after the first seek
-        (layout does not change with time; opacity and transforms do).
-        A ``pageerror`` at any point raises :class:`TemplateScriptError`
-        from the iterator and closes the context.
+        ``ceil(min(duration, max_seconds) * fps)`` frames at ``seek(i /
+        fps)``, the last one taken at the end of that span (it is the
+        frame the renderers hold for the rest of the card, so it must be
+        the finished state, not one frame short of it). The fit policy
+        runs once, at the poster, before any frame is sampled: a transform
+        mid-animation inflates what ``fit.js`` measures, so fitting at
+        t=0 would shrink a long card's text below what the preview (the
+        poster) shows. A ``pageerror`` at any point raises
+        :class:`TemplateScriptError` from the iterator and closes the
+        context; :meth:`TemplateFrames.close` releases it either way.
         """
         if self._browser is None:
             raise RuntimeError(
@@ -436,29 +447,47 @@ class ChromiumRasterizer:
         browser_context, page, errors = self._open_template(
             template, context=context, width=width, height=height
         )
+        released = False
+
+        def release() -> None:
+            nonlocal released
+            if not released:
+                released = True
+                browser_context.close()
+
         try:
             duration = float(page.evaluate(self._DURATION) or 0)
             self._check(errors, template)
+            poster = page.evaluate(self._POSTER)
+            self._seek(page, float(poster or 0))
+            page.evaluate("document.fonts.ready")
+            page.evaluate("window.__splitsmithFit && window.__splitsmithFit()")
+            self._check(errors, template)
         except BaseException:
-            browser_context.close()
+            release()
             raise
         shown = min(duration, max_seconds) if duration > 0 else 0.0
         count = max(1, math.ceil(shown * fps - 1e-9)) if shown > 0 else 1
+        times = [round(index / fps, 6) for index in range(count)]
+        if shown > 0:
+            times[-1] = round(shown, 6)
 
         def generate() -> Iterator[bytes]:
             try:
-                for index in range(count):
-                    self._seek(page, round(index / fps, 6))
-                    if index == 0:
-                        page.evaluate("document.fonts.ready")
-                        page.evaluate("window.__splitsmithFit && window.__splitsmithFit()")
+                for seconds in times:
+                    self._seek(page, seconds)
                     self._check(errors, template)
                     png = page.screenshot(type="png", omit_background=True)
                     with Image.open(io.BytesIO(png)) as image:
                         yield image.convert("RGBA").tobytes()
             finally:
-                browser_context.close()
+                release()
 
         return TemplateFrames(
-            duration=duration, frame_count=count, width=width, height=height, frames=generate()
+            duration=duration,
+            frame_count=count,
+            width=width,
+            height=height,
+            frames=generate(),
+            release=release,
         )

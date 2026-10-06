@@ -171,6 +171,10 @@ class MatchExportRequest(BaseModel):
     title_division: bool = True
     title_page_duration_seconds: float = 3.0
     closing_card: bool = False
+    # Issue #1242. The Look template variant every generated card draws
+    # with; ``default`` is the still card, the shipped Look adds ``rise``.
+    # One knob for every slot until the gallery (#1246) exposes them.
+    card_variant: str = "default"
     # Issue #972. Hold each stage's summary (name, scoring, splits over
     # the blurred last frame) for this many seconds after its action in
     # the rendered MP4. 0 is off. Other renderers surface an anomaly.
@@ -222,6 +226,10 @@ class CompareGridRequest(BaseModel):
     title_division: bool = True
     title_page_duration_seconds: float = 3.0
     closing_card: bool = False
+    # Issue #1242. The Look template variant every generated card draws
+    # with; ``default`` is the still card, the shipped Look adds ``rise``.
+    # One knob for every slot until the gallery (#1246) exposes them.
+    card_variant: str = "default"
     stage_titles: Literal["none", "slate", "lower-third"] = "none"
     title_duration_seconds: float = 1.5
     # Issue #705. The splits overlay (per-tile counter and split, the

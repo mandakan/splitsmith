@@ -424,16 +424,20 @@ def _render_with_work_dir(
             )
             if motion is None:
                 continue  # logged by overlay_card; a card is its text
-            backdrop = _grab_backdrop(
-                timeline,
-                name=item.name,
-                stage_index=item.backdrop_stage_index,
-                at=item.backdrop_at,
-                work_dir=work_dir,
-                ffmpeg_binary=ffmpeg_binary,
-                runner=runner,
-            )
-            canvas = card_backdrop(backdrop, width=sequence.width, height=sequence.height, look=look)
+            try:
+                backdrop = _grab_backdrop(
+                    timeline,
+                    name=item.name,
+                    stage_index=item.backdrop_stage_index,
+                    at=item.backdrop_at,
+                    work_dir=work_dir,
+                    ffmpeg_binary=ffmpeg_binary,
+                    runner=runner,
+                )
+                canvas = card_backdrop(backdrop, width=sequence.width, height=sequence.height, look=look)
+            except BaseException:
+                motion.close()
+                raise
             still_out = work_dir / f"{item.name}.mp4"
             if not motion.animated:
                 text = first_frame_image(motion)

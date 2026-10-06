@@ -666,10 +666,15 @@ def test_render_template_frames_seeks_each_frame_and_fits_once(tmp_path: Path) -
     assert len(list(out.frames)) == 5
     page = rasterizer._browser.contexts[0].pages[0]
     seeks = [c[1] for c in page.calls if "window.seek(" in c[1]]
+    # The fit runs once, at the poster (the laid-out end state), before
+    # any frame is sampled; the last sample is the end of the shown span,
+    # not one frame short of it, since that frame is what the hold clones.
     assert [s[s.index("window.seek(") :] for s in seeks] == [
-        f"window.seek({t}) : undefined" for t in (0.0, 0.1, 0.2, 0.3, 0.4)
+        f"window.seek({t}) : undefined" for t in (0.25, 0.0, 0.1, 0.2, 0.3, 0.5)
     ]
-    assert sum("__splitsmithFit" in c[1] for c in page.calls if c[0] == "evaluate") == 1
+    fits = [i for i, c in enumerate(page.calls) if c[0] == "evaluate" and "__splitsmithFit" in c[1]]
+    first_frame_seek = next(i for i, c in enumerate(page.calls) if "window.seek(0.0)" in c[1])
+    assert len(fits) == 1 and fits[0] < first_frame_seek
     assert page.screenshots == 5
 
 
@@ -724,3 +729,31 @@ def test_engine_version_is_the_browser_version() -> None:
     browser.version = "131.0.6778.33"
     rasterizer._browser = browser
     assert rasterizer.engine_version() == "131.0.6778.33"
+
+
+def test_render_template_frames_close_without_a_frame_closes_the_context(tmp_path: Path) -> None:
+    """A cached segment never pulls a frame; closing the unstarted frames
+    must still release the browser context the load opened."""
+    rasterizer = ChromiumRasterizer()
+    rasterizer._browser = _RecordingBrowser(page_factory=_AnimatedPage)
+    out = rasterizer.render_template_frames(
+        _template(tmp_path), context=_context_fixture(), width=2, height=2, fps=10, max_seconds=3.0
+    )
+    assert not rasterizer._browser.contexts[0].closed
+    out.close()
+    assert rasterizer._browser.contexts[0].closed
+    out.close()  # idempotent
+
+
+def test_render_template_frames_samples_the_end_of_a_capped_span(tmp_path: Path) -> None:
+    rasterizer = ChromiumRasterizer()
+    rasterizer._browser = _RecordingBrowser(page_factory=_PosterPage)  # duration 2.0, poster 1.5
+    out = rasterizer.render_template_frames(
+        _template(tmp_path), context=_context_fixture(), width=2, height=2, fps=10, max_seconds=0.5
+    )
+    assert len(list(out.frames)) == 5
+    page = rasterizer._browser.contexts[0].pages[0]
+    seeks = [c[1] for c in page.calls if "window.seek(" in c[1]]
+    assert [s[s.index("window.seek(") :] for s in seeks] == [
+        f"window.seek({t}) : undefined" for t in (1.5, 0.0, 0.1, 0.2, 0.3, 0.5)
+    ]

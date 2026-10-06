@@ -302,3 +302,42 @@ def test_the_rise_variant_animates_deterministically() -> None:
     with Image.open(io.BytesIO(poster_png)) as poster:
         assert poster.convert("RGBA").getchannel("A").getbbox() is not None
     assert math.isclose(len(first) / 20, 0.7, abs_tol=0.01)
+
+
+@pytest.mark.integration
+def test_a_long_rise_cards_held_frame_is_its_poster() -> None:
+    """The clip's last frame is what the hold clones for the rest of the
+    card, and the preview shows the poster. With a roster long enough to
+    make the fit policy shrink the text, the two must agree: the fit runs
+    on the laid-out end state, and the last sample is taken at the end of
+    the rise, not one frame short of it."""
+    from PIL import Image, ImageChops
+
+    from splitsmith.composition import MatchTitle
+    from splitsmith.overlay_card import card_context
+    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+
+    look = looks.load_look("splitsmith")
+    card = MatchTitle(
+        text="Bromma Classifier",
+        info=tuple(f"Shooter {i} · Production Optics" for i in range(10)),
+        variant="rise",
+    )
+    template = looks.template_for(look, "title_page", "rise")
+    context = card_context(
+        card, slot="title_page", width=640, height=360, fps=20, theme=load_theme("splitsmith")
+    )
+    try:
+        with ChromiumRasterizer() as rasterizer:
+            poster_png = rasterizer.render_template(template, context=context, width=640, height=360)
+            out = rasterizer.render_template_frames(
+                template, context=context, width=640, height=360, fps=20, max_seconds=5.0
+            )
+            last = list(out.frames)[-1]
+    except RasterizerUnavailableError as exc:
+        pytest.skip(str(exc))
+    with Image.open(io.BytesIO(poster_png)) as poster_image:
+        poster = poster_image.convert("RGBA")
+    held = Image.frombytes("RGBA", (640, 360), last)
+    diff = ImageChops.difference(poster, held)
+    assert max(channel[1] for channel in diff.getextrema()) <= 1, "the held frame must be the poster"

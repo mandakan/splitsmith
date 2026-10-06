@@ -215,12 +215,15 @@ def card_motion(
     theme = theme_for(look)
     template = template_for(look, slot, card.variant)
     context = card_context(card, slot=slot, width=width, height=height, fps=fps, theme=theme)
+    frames: TemplateFrames | None = None
     try:
         frames = rasterizer.render_template_frames(
             template, context=context, width=width, height=height, fps=fps, max_seconds=max_seconds
         )
         digest = template_digest(template, context, fps=fps, engine_version=rasterizer.engine_version())
     except Exception as exc:  # noqa: BLE001 -- one bad template must not lose the render
+        if frames is not None:
+            frames.close()
         logger.warning("could not load the card %r through %s (%s); it is skipped", card.text, template, exc)
         return None
     return CardMotion(template=template, context=context, frames=frames, digest=digest)

@@ -2986,6 +2986,7 @@ def _run_compare_grid(
                 title_division=req.title_division,
                 title_page_duration_seconds=req.title_page_duration_seconds,
                 closing_card=req.closing_card,
+                card_variant=req.card_variant,
             ),
             divisions=compare_cards.bundle_divisions(filtered),
         )
@@ -3000,6 +3001,7 @@ def _run_compare_grid(
             closing=closing,
             stage_titles=req.stage_titles,
             title_duration_seconds=req.title_duration_seconds,
+            card_variant=req.card_variant,
             overlay=req.overlay,
             overlay_theme=req.overlay_theme,
             summary_hold_seconds=req.summary_hold_seconds,
@@ -4619,6 +4621,7 @@ def register_job_bodies(state: AppState) -> None:
                 ),
                 title_page_duration_seconds=req.title_page_duration_seconds,
                 closing_card=req.closing_card,
+                card_variant=req.card_variant,
                 overlay_theme=req.overlay_theme,
                 summary_hold_seconds=req.summary_hold_seconds,
                 shooter_label=proj.competitor_name,
