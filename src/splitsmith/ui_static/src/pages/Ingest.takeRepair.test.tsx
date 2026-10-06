@@ -122,26 +122,35 @@ describe("Footage repair of a damaged single take", () => {
 
   it("names the damaged take and repairs it", async () => {
     renderIngest();
-    const line = await screen.findByText("take.mp4 is registered wrongly on stages 01 and 02.");
+    const line = await screen.findByText(
+      "take.mp4 is listed twice on stage 02. Repair removes the extra entry; stage 01 may need its clip re-assigned.",
+    );
     const row = line.parentElement as HTMLElement;
     await userEvent.click(within(row).getByRole("button", { name: "Repair" }));
     await waitFor(() => expect(api.repairTake).toHaveBeenCalledWith("alice", "take.mp4"));
-    await waitFor(() => expect(screen.queryByText(/is registered wrongly/)).toBeNull());
+    await waitFor(() => expect(screen.queryByText(/is listed twice/)).toBeNull());
   });
 
   it("repairs by the stored file name, not the uploaded one", async () => {
     const renamed = { ...damaged, raw_videos: [{ storage_path: TAKE, original_filename: "GX010023.MP4", covers_stages: [1, 2, 3] }] };
     vi.mocked(api.getProject).mockResolvedValue(renamed as MatchProject);
     renderIngest();
-    const line = await screen.findByText("GX010023.MP4 is registered wrongly on stages 01 and 02.");
+    const line = await screen.findByText(/^GX010023\.MP4 is listed twice on stage 02\./);
     await userEvent.click(within(line.parentElement as HTMLElement).getByRole("button", { name: "Repair" }));
     await waitFor(() => expect(api.repairTake).toHaveBeenCalledWith("alice", "take.mp4"));
+  });
+
+  it("says nothing about a stage the user removed the clip from", async () => {
+    vi.mocked(api.getProject).mockResolvedValue(takeWith({ 1: [entry(1, "vid1")], 2: [entry(2, "vid2")] }));
+    renderIngest();
+    await screen.findByText("Stage 3");
+    expect(screen.queryByText(/is listed twice/)).toBeNull();
   });
 
   it("says nothing about a healthy take", async () => {
     vi.mocked(api.getProject).mockResolvedValue(healthy);
     renderIngest();
     await screen.findByText("Stage 3");
-    expect(screen.queryByText(/is registered wrongly/)).toBeNull();
+    expect(screen.queryByText(/is listed twice/)).toBeNull();
   });
 });

@@ -115,10 +115,10 @@ describe("ClipSheet", () => {
   it("a clip of a damaged take says so and offers the repair", () => {
     const onRepairTake = vi.fn();
     renderClip({
-      takeDamage: { storagePath: VIDEO.path, filename: "VID_20260627_1066.MP4", stages: [2, 3] },
+      takeDamage: { storagePath: VIDEO.path, filename: "VID_20260627_1066.MP4", stages: [2], unplaced: [] },
       onRepairTake,
     });
-    expect(screen.getByText("VID_20260627_1066.MP4 is registered wrongly on stages 02 and 03.")).toBeInTheDocument();
+    expect(screen.getByText("VID_20260627_1066.MP4 is listed twice on stage 02.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Repair take" }));
     expect(onRepairTake).toHaveBeenCalledTimes(1);
   });
