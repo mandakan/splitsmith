@@ -11447,6 +11447,12 @@ def create_app(
             # and one on a dead network mount would stall the server (#1227).
             elsewhere = await run_in_threadpool(footage_sort_api.imported_elsewhere, state, slug)
         project = state.shooter_project(slug)
+        # ``register_video`` hands back the existing entry for a file this
+        # shooter already has (same source, or a byte copy by fingerprint);
+        # that is not an import, and counting it as one told the page a
+        # video was added when none was (#1233).
+        had_before = {str(v.path) for v in project.all_videos()}
+        added_from: dict[str, str] = {}
         for entry in candidates:
             if elsewhere:
                 try:
@@ -11465,7 +11471,15 @@ def create_app(
             except (FileNotFoundError, ValueError) as exc:
                 skipped.append(f"{entry.name}: {exc}")
                 continue
-            registered.append(str(video.path))
+            stored = str(video.path)
+            if stored in had_before:
+                skipped.append(f"{entry.name}: already imported for this shooter as {stored}")
+                continue
+            if stored in added_from:
+                skipped.append(f"{entry.name}: same recording as {added_from[stored]} in this import")
+                continue
+            added_from[stored] = entry.name
+            registered.append(stored)
 
         auto_assigned: dict[int, str] = {}
         auto_secondary: dict[int, list[str]] = {}
