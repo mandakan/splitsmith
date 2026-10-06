@@ -27,17 +27,25 @@ from __future__ import annotations
 
 import io
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 from PIL import Image
 
 from .composition import MatchTitle, TitleCard
-from .look_template import TemplateContext, engine_block, group_json, shared_url, theme_tokens
+from .look_template import (
+    TemplateContext,
+    engine_block,
+    group_json,
+    shared_url,
+    template_digest,
+    theme_tokens,
+)
 from .looks import CardSlot, Look, template_for
 from .overlay_html import single_css
 from .overlay_layout import Anchor, CellScale, Element, Emphasis, Flow, Group, Role
-from .overlay_raster import Rasterizer
+from .overlay_raster import Rasterizer, TemplateFrames
 from .overlay_still import DEFAULT_DIM, backdrop_from_frame
 from .overlay_theme import OverlayTheme, theme_for
 
@@ -59,6 +67,22 @@ def lower_third_filters(input_index: int, seconds: float, *, source_label: str) 
     fade_start = max(0.0, seconds - LOWER_THIRD_FADE_SECONDS)
     return [
         f"[{input_index}:v]format=rgba,fade=t=out:st={fade_start:g}:d={LOWER_THIRD_FADE_SECONDS:g}:alpha=1[lt]",
+        f"[{source_label}][lt]overlay=0:0:enable='lt(t,{seconds:g})'[withlt]",
+    ], "withlt"
+
+
+def lower_third_clip_filters(
+    input_index: int, seconds: float, *, rate: str, source_label: str
+) -> tuple[list[str], str]:
+    """:func:`lower_third_filters` for an animated lower third: the clip
+    conformed to ``rate`` and held like a motion card, then the same
+    fade-out and the same ``enable`` window, so a still and an animated
+    lower third leave the screen identically."""
+    fade_start = max(0.0, seconds - LOWER_THIRD_FADE_SECONDS)
+    return [
+        f"[{input_index}:v]format=rgba,fps={rate},setpts=PTS-STARTPTS,"
+        f"tpad=stop_mode=clone:stop_duration={seconds:g},trim=0:{seconds:g},"
+        f"fade=t=out:st={fade_start:g}:d={LOWER_THIRD_FADE_SECONDS:g}:alpha=1[lt]",
         f"[{source_label}][lt]overlay=0:0:enable='lt(t,{seconds:g})'[withlt]",
     ], "withlt"
 
@@ -154,6 +178,97 @@ def _rasterize(
         return None
 
 
+@dataclass(frozen=True)
+class CardMotion:
+    """A card's template, loaded: still or animated, and what the segment
+    cache keys it by. ``frames`` is lazy; a cached segment never pulls
+    one, so call :meth:`close` when done either way."""
+
+    template: Path
+    context: TemplateContext
+    frames: TemplateFrames
+    digest: str
+
+    @property
+    def animated(self) -> bool:
+        return self.frames.duration > 0
+
+    def close(self) -> None:
+        self.frames.close()
+
+
+def card_motion(
+    card: Card,
+    *,
+    slot: CardSlot,
+    width: int,
+    height: int,
+    fps: float,
+    look: Look,
+    rasterizer: Rasterizer,
+    max_seconds: float,
+) -> CardMotion | None:
+    """Load the card's template and read how it renders: one frame for a
+    still, ``ceil(min(duration, max_seconds) * fps)`` for an animation.
+    Frames are rendered lazily, so a cached segment costs no frame.
+    ``None`` (logged) when the template cannot load; the card is skipped."""
+    theme = theme_for(look)
+    template = template_for(look, slot, card.variant)
+    context = card_context(card, slot=slot, width=width, height=height, fps=fps, theme=theme)
+    try:
+        frames = rasterizer.render_template_frames(
+            template, context=context, width=width, height=height, fps=fps, max_seconds=max_seconds
+        )
+        digest = template_digest(template, context, fps=fps, engine_version=rasterizer.engine_version())
+    except Exception as exc:  # noqa: BLE001 -- one bad template must not lose the render
+        logger.warning("could not load the card %r through %s (%s); it is skipped", card.text, template, exc)
+        return None
+    return CardMotion(template=template, context=context, frames=frames, digest=digest)
+
+
+def first_frame_image(motion: CardMotion) -> Image.Image | None:
+    """The still path's text layer: the template's first frame as RGBA.
+    ``None`` (logged) when rendering it raises. Closes the frames."""
+    try:
+        raw = next(iter(motion.frames.frames))
+    except Exception as exc:  # noqa: BLE001 -- one bad rasterization must not lose the render
+        logger.warning("could not rasterize the card through %s (%s); it is skipped", motion.template, exc)
+        return None
+    finally:
+        motion.close()
+    return Image.frombytes("RGBA", (motion.frames.width, motion.frames.height), raw)
+
+
+def card_backdrop(
+    backdrop: Path | None,
+    *,
+    width: int,
+    height: int,
+    look: Look,
+    blur_radius: int | None = None,
+    dim: float = DEFAULT_DIM,
+) -> Image.Image:
+    """The picture under a card: ``backdrop`` (a frame on disk, the first
+    visible frame of the stage the card precedes) blurred and dimmed with
+    the stage summary's own numbers (:mod:`splitsmith.overlay_still`);
+    ``None``, or a frame that cannot be read, paints the Look's
+    ``surface`` colour instead, so a failed frame grab costs the picture
+    but never the card."""
+    canvas: Image.Image | None = None
+    if backdrop is not None:
+        canvas = backdrop_from_frame(backdrop, width=width, height=height, radius=blur_radius, dim_amount=dim)
+    if canvas is None:
+        canvas = Image.new("RGB", (width, height), theme_for(look).surface)
+    return canvas
+
+
+def compose_card(text: Image.Image, backdrop: Image.Image) -> Image.Image:
+    """The text layer over the backdrop, as the RGB still a segment holds."""
+    composed = backdrop.convert("RGBA")
+    composed.alpha_composite(text)
+    return composed.convert("RGB")
+
+
 def build_card_still(
     card: Card,
     *,
@@ -167,15 +282,13 @@ def build_card_still(
     blur_radius: int | None = None,
     dim: float = DEFAULT_DIM,
 ) -> Image.Image | None:
-    """Compose a full-frame card as a ``width x height`` RGB image.
+    """Compose a full-frame card as a ``width x height`` RGB image, at the
+    template's poster frame (the preview's and the thumbnails' view of
+    a card; the renderers go through :func:`card_motion`).
 
     ``slot`` names the Look template that draws it (a :class:`MatchTitle`
     is ``title_page`` or ``closing``; a slate :class:`TitleCard` is
-    ``slate``). ``backdrop`` is a frame on disk -- the first visible frame
-    of the stage the card precedes -- blurred and dimmed with the stage
-    summary's own numbers (:mod:`splitsmith.overlay_still`). ``None``, or
-    a frame that cannot be read, paints the Look's ``surface`` colour
-    instead, so a failed frame grab costs the picture but never the card.
+    ``slate``); see :func:`card_backdrop` for ``backdrop``.
 
     Returns ``None`` when the text could not be rasterized; see the
     module docstring for why that skips the card rather than degrading
@@ -184,22 +297,16 @@ def build_card_still(
     text = _rasterize(card, slot=slot, width=width, height=height, fps=fps, look=look, rasterizer=rasterizer)
     if text is None:
         return None
-    canvas: Image.Image | None = None
-    if backdrop is not None:
-        canvas = backdrop_from_frame(backdrop, width=width, height=height, radius=blur_radius, dim_amount=dim)
-    if canvas is None:
-        canvas = Image.new("RGB", (width, height), theme_for(look).surface)
-    composed = canvas.convert("RGBA")
-    composed.alpha_composite(text)
-    return composed.convert("RGB")
+    canvas = card_backdrop(backdrop, width=width, height=height, look=look, blur_radius=blur_radius, dim=dim)
+    return compose_card(text, canvas)
 
 
 def build_lower_third(
     card: TitleCard, *, width: int, height: int, fps: float, look: Look, rasterizer: Rasterizer
 ) -> Image.Image | None:
     """Rasterize a lower-third as a transparent ``width x height`` RGBA
-    image, for the renderer to composite over the stage's own head with
-    a fade. No backdrop: the footage is the backdrop."""
+    image at its poster frame, for a preview to composite over a frame.
+    No backdrop: the footage is the backdrop."""
     return _rasterize(
         card, slot="lower_third", width=width, height=height, fps=fps, look=look, rasterizer=rasterizer
     )
@@ -208,10 +315,16 @@ def build_lower_third(
 __all__ = [
     "LOWER_THIRD_FADE_SECONDS",
     "Card",
+    "CardMotion",
     "build_card_still",
     "build_lower_third",
+    "card_backdrop",
     "card_context",
     "card_groups",
+    "card_motion",
     "card_scale",
+    "compose_card",
+    "first_frame_image",
+    "lower_third_clip_filters",
     "lower_third_filters",
 ]
