@@ -46,7 +46,9 @@ def test_logo_name_is_content_addressed() -> None:
     assert identity.ShooterIdentity(logo=identity.logo_name(b"abc", "webp"))
 
 
-def test_resolve_takes_the_shooters_accent_else_the_looks_series_by_slot(tmp_path: Path) -> None:
+def test_resolve_takes_the_shooters_accent_and_otherwise_none(tmp_path: Path) -> None:
+    """Ruling (#1243 review): a shooter who set nothing gets no accent, so
+    their renders stay what they were. The Look's series is opt-in."""
     look = looks.load_look("splitsmith")
     own = identity.resolve_identity(
         label="A",
@@ -57,13 +59,38 @@ def test_resolve_takes_the_shooters_accent_else_the_looks_series_by_slot(tmp_pat
         match_logo=None,
     )
     assert own.accent == "#123456"
+    for index in (0, 1, 7):
+        resolved = identity.resolve_identity(
+            label="B", identity=None, index=index, look=look, shooter_root=tmp_path, match_logo=None
+        )
+        assert resolved.accent is None
+
+
+def test_resolve_applies_the_looks_series_by_slot_only_when_asked(tmp_path: Path) -> None:
+    look = looks.load_look("splitsmith")
     series = look.accent_series
     assert len(series) >= 6
     for index in (0, 1, len(series)):
         resolved = identity.resolve_identity(
-            label="B", identity=None, index=index, look=look, shooter_root=tmp_path, match_logo=None
+            label="B",
+            identity=None,
+            index=index,
+            look=look,
+            shooter_root=tmp_path,
+            match_logo=None,
+            series_default=True,
         )
         assert resolved.accent == series[index % len(series)]
+    own = identity.resolve_identity(
+        label="A",
+        identity=identity.ShooterIdentity(accent="#123456"),
+        index=3,
+        look=look,
+        shooter_root=tmp_path,
+        match_logo=None,
+        series_default=True,
+    )
+    assert own.accent == "#123456", "the shooter's own accent beats the series"
 
 
 def test_resolve_uses_the_shooters_logo_else_the_match_logo(tmp_path: Path) -> None:
@@ -91,7 +118,13 @@ def test_a_look_without_a_series_falls_back_to_its_accent_token() -> None:
     look = looks.load_look("clean")
     stripped = look.model_copy(update={"manifest": look.manifest.model_copy(update={"accent_series": []})})
     resolved = identity.resolve_identity(
-        label="A", identity=None, index=3, look=stripped, shooter_root=None, match_logo=None
+        label="A",
+        identity=None,
+        index=3,
+        look=stripped,
+        shooter_root=None,
+        match_logo=None,
+        series_default=True,
     )
     assert resolved.accent == theme_tokens(load_theme("clean"))["accent"]
 

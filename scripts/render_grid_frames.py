@@ -371,26 +371,6 @@ def _parse_canvas(value: str) -> tuple[int, int]:
     return width, height
 
 
-def demo_identities(bundles, logo_path, *, theme: str):  # type: ignore[no-untyped-def]
-    """One identity per shooter for the demo: the Look's accent series by
-    slot (alphabetical by label, the grid's order) and one shared logo."""
-    from splitsmith.identity import ResolvedIdentity
-    from splitsmith.looks import load_look
-
-    sys.path.insert(0, str(REPO_ROOT / "scripts"))
-    from render_match_frames import demo_logo
-
-    logo = demo_logo(logo_path)
-    series = load_look(theme).accent_series
-    ordered = sorted(bundles, key=lambda b: b.label)
-    return {
-        bundle.label: ResolvedIdentity(
-            label=bundle.label, accent=series[index % len(series)], logo_path=logo, club="Bromma PK"
-        )
-        for index, bundle in enumerate(ordered)
-    }
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -516,6 +496,12 @@ def main(argv: list[str] | None = None) -> int:
         f"rendering {args.shooters} shooter(s) x {args.stages} stage(s) at {width}x{height}@"
         f"{args.fps}, overlay={args.overlay}, hold={args.summary_hold:g}s ..."
     )
+    from splitsmith.looks import load_look
+    from splitsmith.ui.identity_media import grid_identities
+
+    sys.path.insert(0, str(REPO_ROOT / "scripts"))
+    from render_match_frames import demo_logo
+
     result = mp4_grid.render_grid_mp4(
         shooters,
         audio_label=audio_label,
@@ -547,10 +533,14 @@ def main(argv: list[str] | None = None) -> int:
         stage_titles=args.titles,
         title_duration_seconds=SLATE_SECONDS,
         card_variant=args.card_variant,
-        identities=(
-            demo_identities(shooters, work / "logo.png", theme=args.overlay_theme)
-            if args.identity_demo
-            else None
+        # Through the production resolver either way, so the default frames
+        # are what an export draws for shooters who set nothing; the demo
+        # opts into the Look's slot series and a shared generated logo.
+        identities=grid_identities(
+            shooters,
+            look=load_look(args.overlay_theme),
+            match_logo=demo_logo(work / "logo.png") if args.identity_demo else None,
+            series_default=args.identity_demo,
         ),
     )
     if result.failed:

@@ -155,6 +155,14 @@ accent series by slot index and the match logo, so rendering never waits
 on identity. A match-level logo is an export Details field stored under
 the match, never in a preset.
 
+> Amended 2026-10-07 (slice 3 review ruling): the slot default is not
+> applied to production renders. A shooter who set no accent resolves to
+> `None` and renders exactly as before identities existed; the series is
+> the identity sheet's swatches and the frame scripts' `--identity-demo`
+> (`series_default=True`). Rationale: a decorative bar with no legend on
+> every existing user's summary hold, against the plan's "identity only
+> changes output when set". One flag flips it back if wanted.
+
 ## 3. Transitions in the MP4 renderers
 
 One mechanism in both `mp4_render` and `compare/mp4_grid`: the boundary

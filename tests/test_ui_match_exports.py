@@ -841,6 +841,31 @@ def test_title_info_lines_come_from_the_project(tmp_path: Path) -> None:
     assert match_exports_mod.title_info_lines(bare, extra="  ") == ()
 
 
+def test_title_info_lines_print_the_shooters_club_after_their_name(tmp_path: Path) -> None:
+    """The one place the club line (#1243) is drawn today: under the
+    shooter's name on the title page, before the division."""
+    from datetime import date
+
+    from splitsmith.identity import ShooterIdentity
+    from splitsmith.match_project import MatchProject
+
+    project = MatchProject(
+        name="Bromma",
+        competitor_name="M. Axell",
+        match_date=date(2026, 5, 1),
+        identity=ShooterIdentity(club="Bromma PK"),
+    )
+    assert match_exports_mod.title_info_lines(project, division="Production Optics") == (
+        "2026-05-01",
+        "M. Axell",
+        "Bromma PK",
+        "Production Optics",
+    )
+    assert match_exports_mod.title_info_lines(
+        MatchProject(name="B", identity=ShooterIdentity(club="PK"))
+    ) == ("PK",)
+
+
 def test_stage_inputs_for_project_reads_existing_artefacts(tmp_path: Path) -> None:
     """The one assembler the server job and the CLI verb share: per-stage
     paths under ``exports/`` and ``audit/``, clip-local beep, secondaries

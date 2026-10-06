@@ -297,7 +297,7 @@ class CompositionShooter:
     template layer draws without it."""
 
     label: str
-    accent: str
+    accent: str | None
     logo_path: Path | None
     club: str | None
 

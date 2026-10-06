@@ -44,8 +44,8 @@ def ensure_local_logo(project: MatchProject, shooter_root: Path) -> Path | None:
     local = shooter_root / LOGO_DIR / name
     if local.exists() and local.stat().st_size > 0:
         return local
-    storage = project._storage  # type: ignore[attr-defined]
-    scope = project._storage_scope  # type: ignore[attr-defined]
+    storage = project._storage
+    scope = project._storage_scope
     if storage is None or scope is None:
         return None
     key = f"{scope}/{LOGO_DIR}/{name}"
@@ -73,11 +73,12 @@ def resolved_identity_for(
     index: int,
     label: str,
     match_logo: Path | None = None,
+    series_default: bool = False,
 ) -> ResolvedIdentity:
-    """The shooter's identity as a render draws it: the Look's defaults
-    applied, the logo brought to local disk (hosted) and dropped when the
-    file is not there, so a template is never handed a path that does
-    not exist."""
+    """The shooter's identity as a render draws it: what they set (the
+    Look's slot series only when ``series_default`` asks for it), the
+    logo brought to local disk (hosted) and dropped when the file is not
+    there, so a template is never handed a path that does not exist."""
     resolved = resolve_identity(
         label=label,
         identity=project.identity,
@@ -85,18 +86,24 @@ def resolved_identity_for(
         look=look,
         shooter_root=None,
         match_logo=match_logo,
+        series_default=series_default,
     )
     logo = ensure_local_logo(project, shooter_root)
     return replace(resolved, logo_path=logo if logo is not None else match_logo)
 
 
 def grid_identities(
-    bundles: Sequence[object], *, look: Look, match_logo: Path | None = None
+    bundles: Sequence[object],
+    *,
+    look: Look,
+    match_logo: Path | None = None,
+    series_default: bool = False,
 ) -> dict[str, ResolvedIdentity]:
     """Resolved identities for a grid, keyed by tile label, the slot index
     following the grid's own order (alphabetical by label, filler tiles
     included). A bundle whose project could not be read has no identity
-    but keeps its slot, so the others' default accents do not shift."""
+    but keeps its slot, so the others' series accents (``series_default``,
+    the demo's) do not shift."""
     out: dict[str, ResolvedIdentity] = {}
     ordered = sorted(bundles, key=lambda b: b.label)  # type: ignore[attr-defined]
     for index, bundle in enumerate(ordered):
@@ -110,6 +117,7 @@ def grid_identities(
             index=index,
             label=bundle.label,  # type: ignore[attr-defined]
             match_logo=match_logo,
+            series_default=series_default,
         )
     return out
 

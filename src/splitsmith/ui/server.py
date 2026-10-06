@@ -204,7 +204,7 @@ from ..fixture_schema import (
     CameraPosition,
     probe_camera_metadata,
 )
-from ..identity import LOGO_DIR, LOGO_MAX_BYTES, ShooterIdentity, logo_name
+from ..identity import LOGO_DIR, LOGO_MAX_BYTES, LOGO_MAX_SIDE, ShooterIdentity, logo_name
 from ..looks import load_look
 from ..match_project import (
     STUB_AUDIT_DETECTION,
@@ -12990,11 +12990,18 @@ def create_app(
         try:
             with Image.open(io.BytesIO(data)) as image:
                 fmt = (image.format or "").upper()
-        except (UnidentifiedImageError, OSError) as exc:
+                side = max(image.size)
+        except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
+            # A decompression bomb is an Exception, not an OSError: without
+            # this it was a 500 (review of #1243).
             raise HTTPException(status_code=422, detail="logo must be a PNG, JPEG or WebP image") from exc
-        ext = {"PNG": "png", "JPEG": "jpeg", "WEBP": "webp"}.get(fmt)
+        # MPO is what a phone camera writes: a JPEG with a multi-picture
+        # marker. Chromium decodes it as a JPEG.
+        ext = {"PNG": "png", "JPEG": "jpeg", "MPO": "jpeg", "WEBP": "webp"}.get(fmt)
         if ext is None:
             raise HTTPException(status_code=422, detail="logo must be a PNG, JPEG or WebP image")
+        if side > LOGO_MAX_SIDE:
+            raise HTTPException(status_code=422, detail=f"logo is over {LOGO_MAX_SIDE} px on a side")
         name = logo_name(data, ext)
         previous = project.identity.logo
         logo_dir = _identity_logo_dir(slug)

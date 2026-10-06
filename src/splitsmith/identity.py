@@ -24,6 +24,10 @@ if TYPE_CHECKING:
 LOGO_DIR = "identity"
 LOGO_EXTENSIONS: tuple[str, ...] = ("png", "jpg", "jpeg", "webp")
 LOGO_MAX_BYTES = 2 * 1024 * 1024
+#: The longest side a logo may have, in pixels: a 17 KB PNG can be
+#: 12000 px square and Chromium would decode half a gigabyte of it on
+#: every card.
+LOGO_MAX_SIDE = 4096
 CLUB_MAX_CHARS = 60
 
 _HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
@@ -82,7 +86,7 @@ class ResolvedIdentity:
     """What a template draws for one shooter, defaults applied."""
 
     label: str
-    accent: str
+    accent: str | None
     logo_path: Path | None
     club: str | None
 
@@ -100,20 +104,29 @@ def resolve_identity(
     look: Look,
     shooter_root: Path | None,
     match_logo: Path | None,
+    series_default: bool = False,
 ) -> ResolvedIdentity:
-    """The shooter's choices over the Look's defaults: their accent, else
-    the Look's accent series by slot ``index`` (wrapping), else the Look's
-    ``accent`` token; their logo under ``shooter_root/identity/``, else
-    ``match_logo``; their club line or nothing."""
-    from .overlay_theme import theme_for
+    """The shooter's choices: their accent or none; their logo under
+    ``shooter_root/identity/``, else ``match_logo``; their club line or
+    nothing.
 
+    A shooter who set no accent gets ``None``, so a render with no
+    identity configured is what it was before identities existed (the
+    summary draws no bar, the name keeps its ink). The spec's slot default
+    (the Look's ``accent_series`` by ``index``, wrapping, else the Look's
+    ``accent`` token) is opt-in through ``series_default``: the frame
+    scripts' demo asks for it, production renders do not. Ruling from the
+    #1243 review, recorded in the slice 3 ledger.
+    """
     chosen = identity or ShooterIdentity()
-    if chosen.accent is not None:
-        accent = chosen.accent
-    elif look.accent_series:
-        accent = look.accent_series[index % len(look.accent_series)]
-    else:
-        accent = _hex(theme_for(look).accent)
+    accent: str | None = chosen.accent
+    if accent is None and series_default:
+        if look.accent_series:
+            accent = look.accent_series[index % len(look.accent_series)]
+        else:
+            from .overlay_theme import theme_for
+
+            accent = _hex(theme_for(look).accent)
     logo_path: Path | None = match_logo
     if chosen.logo is not None and shooter_root is not None:
         logo_path = shooter_root / LOGO_DIR / chosen.logo
@@ -125,6 +138,7 @@ __all__ = [
     "LOGO_DIR",
     "LOGO_EXTENSIONS",
     "LOGO_MAX_BYTES",
+    "LOGO_MAX_SIDE",
     "ResolvedIdentity",
     "ShooterIdentity",
     "logo_name",

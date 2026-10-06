@@ -88,6 +88,49 @@ def test_logo_upload_refuses_an_oversized_file(seeded) -> None:
     assert MatchProject.load(shooter_root).identity.logo is None
 
 
+def test_logo_upload_refuses_an_image_over_the_side_cap_and_leaves_no_file(seeded) -> None:
+    """A 17 KB PNG can be 12000 px square; Chromium would decode half a
+    gigabyte of it on every card. The cap is on pixels, not bytes."""
+    from splitsmith.identity import LOGO_DIR, LOGO_MAX_SIDE
+
+    client, shooter_root = seeded
+    wide = _png((LOGO_MAX_SIDE + 1, 8))
+    r = client.post(LOGO, files={"file": ("wide.png", wide, "image/png")})
+    assert r.status_code == 422, r.text
+    assert str(LOGO_MAX_SIDE) in r.json()["detail"]
+    assert MatchProject.load(shooter_root).identity.logo is None
+    logo_dir = shooter_root / LOGO_DIR
+    assert not logo_dir.exists() or not list(logo_dir.iterdir())
+    ok = client.post(LOGO, files={"file": ("ok.png", _png((LOGO_MAX_SIDE, 8)), "image/png")})
+    assert ok.status_code == 200, ok.text
+
+
+def test_a_decompression_bomb_is_refused_not_a_500(seeded, monkeypatch) -> None:
+    from PIL import Image
+
+    client, shooter_root = seeded
+    monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", 1000)
+    r = client.post(LOGO, files={"file": ("bomb.png", _png((300, 300)), "image/png")})
+    assert r.status_code == 422, r.text
+    assert MatchProject.load(shooter_root).identity.logo is None
+
+
+def test_a_multi_picture_jpeg_from_a_camera_is_a_jpeg(seeded) -> None:
+    """PIL reports a JPEG with an MPF marker (what phones write) as MPO;
+    refusing it as 'not a JPEG' would be a false message."""
+    from PIL import Image
+
+    client, shooter_root = seeded
+    buf = io.BytesIO()
+    first = Image.new("RGB", (16, 16), (200, 10, 10))
+    first.save(buf, format="MPO", save_all=True, append_images=[Image.new("RGB", (16, 16), (10, 10, 200))])
+    with Image.open(io.BytesIO(buf.getvalue())) as probe:
+        assert probe.format == "MPO", "the fixture must really be an MPO"
+    r = client.post(LOGO, files={"file": ("photo.jpg", buf.getvalue(), "image/jpeg")})
+    assert r.status_code == 200, r.text
+    assert MatchProject.load(shooter_root).identity.logo.endswith(".jpeg")
+
+
 def test_deleting_the_logo_clears_the_project_and_removes_the_file(seeded) -> None:
     client, shooter_root = seeded
     name = client.post(LOGO, files={"file": ("a.png", _png(), "image/png")}).json()["identity"]["logo"]

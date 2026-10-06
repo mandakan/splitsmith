@@ -10295,7 +10295,8 @@ def test_match_export_title_page_carries_the_division_unless_turned_off(
         assert resp.status_code == 200, resp.text
         assert _wait_for_job(client, resp.json()["id"])["status"] == "succeeded"
     on, off, _ = (r.title_page_info for r in seen)
-    assert on[on.index("Martin Engström") + 1] == "Classic Major"
+    # The club line (#1243) sits between the shooter's name and the division.
+    assert on[on.index("Martin Engström") + 1 :][:2] == ("PK", "Classic Major")
     assert "Classic Major" not in off
     # #1242: the Look variant is a request field, not a CLI-only knob.
     assert [r.card_variant for r in seen] == ["default", "default", "rise"]

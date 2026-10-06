@@ -11,6 +11,10 @@
   engine.mountIdentity = function (shooters, slot) {
     var withLogo = (shooters || []).filter(function (s) { return s && s.logo; });
     if (!withLogo.length) { return; }
+    // A lower third is the stage's, not one shooter's: on a grid with
+    // several logos it draws none (they would sit over the footage for
+    // the whole head); with exactly one shooter's logo it draws that one.
+    if (slot === 'lower_third' && withLogo.length !== 1) { return; }
     var size = window.splitsmith.size;
     var logoHeight = Math.round(size.height * 0.12);
     var margin = Math.round(size.height * 0.04);

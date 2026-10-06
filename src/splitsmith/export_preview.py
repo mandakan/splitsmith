@@ -329,6 +329,7 @@ def render_preview(
             theme=theme,
             rasterizer=rasterizer,
             backdrop=frame,
+            accent=shooter.accent if shooter is not None else None,
         )
     else:  # overlay
         run = OverlayRun(

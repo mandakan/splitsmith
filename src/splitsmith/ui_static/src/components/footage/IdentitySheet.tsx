@@ -13,8 +13,8 @@ import { Sheet } from "@/components/ui/Sheet";
 import { ApiError, api, type ShooterListEntry } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-/** The shipped Look's accent series: what a shooter without an accent
- *  of their own is told apart by, offered as the quick picks. */
+/** The shipped Look's accent series, offered as the quick picks (a
+ *  shooter who picks nothing gets no accent). */
 const ACCENT_SWATCHES = ["#ff2d2d", "#fbbf24", "#4ade80", "#60a5fa", "#c084fc", "#f472b6"] as const;
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
@@ -92,7 +92,7 @@ export function IdentitySheet({ open, onClose, shooter, editDenied, onChanged }:
       <div className="flex h-full flex-col">
         <div className="border-b border-rule px-3.5 py-3 text-md font-medium text-ink">{shooter.name}</div>
         <div className="flex-1 overflow-y-auto">
-          <Field label="Accent" htmlFor="identity-accent" help="Tints this shooter's summary and name; blank uses the Look's own colour for their slot.">
+          <Field label="Accent" htmlFor="identity-accent" help="Tints this shooter's summary bar and name; blank leaves the summary as the Look draws it.">
             <div className="flex flex-wrap items-center gap-2">
               {ACCENT_SWATCHES.map((hex) => (
                 <button

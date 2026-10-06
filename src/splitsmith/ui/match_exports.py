@@ -241,9 +241,10 @@ def title_info_lines(
     project: MatchProject, *, extra: str | None = None, division: str | None = None
 ) -> tuple[str, ...]:
     """The info lines under the match name on a generated title page
-    (issue #973): the match date, the shooter, the shooter's division,
-    then the caller's free text. Only what the project actually carries;
-    a blank line is never printed. ``division`` is the caller's to pass
+    (issue #973): the match date, the shooter, the shooter's club line
+    (``project.identity.club``, #1243), the shooter's division, then the
+    caller's free text. Only what the project actually carries; a blank
+    line is never printed. ``division`` is the caller's to pass
     (:func:`splitsmith.division.competitor_division`, or ``None`` when the title page should
     not show it)."""
     lines: list[str] = []
@@ -251,6 +252,8 @@ def title_info_lines(
         lines.append(project.match_date.isoformat())
     if project.competitor_name:
         lines.append(project.competitor_name)
+    if project.identity.club:
+        lines.append(project.identity.club)
     if division and division.strip():
         lines.append(division.strip())
     if extra and extra.strip():

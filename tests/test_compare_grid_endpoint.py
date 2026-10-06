@@ -716,7 +716,7 @@ def test_card_fields_default_off_and_reach_the_renderer(
     assert carded["card_variant"] == "rise"
     # #1243: every shooter with a project gets a resolved identity, keyed by label.
     assert set(carded["identities"]) == {"Mathias"}
-    assert carded["identities"]["Mathias"].accent.startswith("#")
+    assert carded["identities"]["Mathias"].accent is None, "no identity set, no accent (ruling)"
     assert carded["title_page"].variant == "rise" and carded["closing"].variant == "rise"
     assert carded["title_page"].text == match.name
     assert carded["title_page"].info == ("2026-05-01", "Level II")

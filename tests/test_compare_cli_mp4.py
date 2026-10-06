@@ -248,7 +248,6 @@ def test_mp4_render_receives_one_resolved_identity_per_shooter(
     the renderer the map keyed by tile label, so the cards and the summary
     draw it (the renderer never reads a project itself)."""
     from splitsmith.identity import ResolvedIdentity
-    from splitsmith.looks import load_look
 
     match_root = _seed_match_with_stages(tmp_path / "match", stage_count=1)
     _patch_probe(monkeypatch)
@@ -281,7 +280,7 @@ def test_mp4_render_receives_one_resolved_identity_per_shooter(
     assert set(identities) == {"Mathias"}
     resolved = identities["Mathias"]
     assert isinstance(resolved, ResolvedIdentity)
-    assert resolved.accent == load_look("splitsmith").accent_series[0]
+    assert resolved.accent is None, "nothing set, nothing drawn"
     assert resolved.logo_path is None
 
 

@@ -384,6 +384,43 @@ def test_shooter_json_drops_a_missing_or_oversized_logo_with_a_log_line(tmp_path
 
 
 @pytest.mark.integration
+def test_a_lower_third_draws_a_logo_only_when_exactly_one_shooter_has_one(tmp_path) -> None:
+    """The grid's lower third is the stage's, not one shooter's: with
+    several logos it draws none (they would sit over the footage for the
+    whole head); with exactly one it draws that one."""
+    from PIL import Image
+
+    from splitsmith.composition import TitleCard
+    from splitsmith.identity import ResolvedIdentity
+    from splitsmith.overlay_card import card_context
+    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+
+    look = looks.load_look("splitsmith")
+    template = looks.template_for(look, "lower_third")
+    card = TitleCard(text="Stage 3", duration_seconds=1.5, info=("24 rounds",))
+    logo = tmp_path / "logo-0123456789ab.png"
+    Image.new("RGBA", (64, 64), (255, 0, 0, 255)).save(logo)
+    one = (ResolvedIdentity(label="Anders", accent=None, logo_path=logo, club=None),)
+    two = one + (ResolvedIdentity(label="Bea", accent=None, logo_path=logo, club=None),)
+    theme = load_theme("splitsmith")
+
+    def render(rasterizer, shooters):  # noqa: ANN001
+        context = card_context(
+            card, slot="lower_third", width=320, height=180, fps=30, theme=theme, shooters=shooters
+        )
+        return rasterizer.render_template(template, context=context, width=320, height=180)
+
+    try:
+        with ChromiumRasterizer() as rasterizer:
+            none = render(rasterizer, ())
+            single = render(rasterizer, one)
+            several = render(rasterizer, two)
+    except RasterizerUnavailableError as exc:
+        pytest.skip(str(exc))
+    assert single != none, "one shooter with a logo: drawn"
+    assert several == none, "two shooters with logos on a lower third: none drawn"
+
+
 def test_a_shooters_logo_reaches_the_shipped_card_and_nothing_else_changes(tmp_path) -> None:
     """With a logo the card paints it top-right; a shooter without a logo
     leaves the render byte-identical to a card with no shooters at all."""

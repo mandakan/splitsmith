@@ -777,6 +777,52 @@ def test_the_stylesheet_reads_the_accent_through_variables_that_fall_back() -> N
     assert "color: var(--accent, currentColor);" in identity
 
 
+def test_the_shooters_name_really_takes_the_accent(tmp_path: Path) -> None:
+    """The stylesheet's ``.role-identity`` colour must survive the later
+    ``.emphasis-plain`` rule the same element carries (a review found it
+    did not: equal specificity, later source order). Rendered through
+    Chromium: with a green accent, green pixels appear below the accent
+    bar; with none, they do not."""
+    import io
+
+    from PIL import Image
+
+    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+
+    width, height = 320, 180
+    scale = CellScale.for_cell(height)
+    groups = (
+        Group(
+            anchor=Anchor.TOP_LEFT,
+            flow=Flow.ROW,
+            elements=(Element(role=Role.IDENTITY, text="Anders"),),
+            align="left",
+        ),
+    )
+
+    def green_pixels(png: bytes) -> int:
+        with Image.open(io.BytesIO(png)) as image:
+            rgb = image.convert("RGB").crop((0, height // 5, width, height))
+        return sum(1 for r, g, b in rgb.getdata() if g > 180 and r < 90 and b < 90)
+
+    try:
+        with ChromiumRasterizer() as rasterizer:
+            plain = rasterizer.png(
+                single_html(groups, width=width, height=height, scale=scale, theme=THEME),
+                width=width,
+                height=height,
+            )
+            tinted = rasterizer.png(
+                single_html(groups, width=width, height=height, scale=scale, theme=THEME, accent="#00ff00"),
+                width=width,
+                height=height,
+            )
+    except RasterizerUnavailableError as exc:
+        pytest.skip(str(exc))
+    assert green_pixels(plain) == 0
+    assert green_pixels(tinted) > 50, "the name is drawn in the accent"
+
+
 def test_single_html_puts_the_accent_on_its_one_cell() -> None:
     groups = (
         Group(anchor=Anchor.MIDDLE_CENTER, flow=Flow.ROW, elements=(Element(role=Role.DETAIL, text="x"),)),

@@ -228,18 +228,26 @@ def main() -> int:
             text="Stage 2: Accuracy", duration_seconds=CARD_SECONDS, style=args.titles, variant=variant
         ),
     }
-    shooters: tuple[composition.CompositionShooter, ...] = ()
-    if args.identity_demo:
-        from splitsmith.looks import load_look
+    # The shooter's identity goes through the production resolver in both
+    # cases, so the default frames are the frames an export produces for a
+    # shooter who set nothing (the pixel gate against main runs this path).
+    from splitsmith.identity import ShooterIdentity, resolve_identity
+    from splitsmith.looks import load_look
 
-        shooters = (
-            composition.CompositionShooter(
-                label="M. Axell",
-                accent=load_look(args.theme).accent_series[0],
-                logo_path=demo_logo(work / "logo.png"),
-                club="Bromma PK",
-            ),
-        )
+    resolved = resolve_identity(
+        label="M. Axell",
+        identity=ShooterIdentity(club="Bromma PK") if args.identity_demo else ShooterIdentity(),
+        index=0,
+        look=load_look(args.theme),
+        shooter_root=None,
+        match_logo=demo_logo(work / "logo.png") if args.identity_demo else None,
+        series_default=args.identity_demo,
+    )
+    shooters = (
+        composition.CompositionShooter(
+            label=resolved.label, accent=resolved.accent, logo_path=resolved.logo_path, club=resolved.club
+        ),
+    )
     comp = composition.from_stage_compositions(
         stages,
         project_name="Bromma Classifier",
@@ -247,7 +255,12 @@ def main() -> int:
         shooters=shooters,
         title_page=composition.MatchTitle(
             text="Bromma Classifier",
-            info=("2026-05-01", "M. Axell", "Production Optics"),
+            info=(
+                "2026-05-01",
+                "M. Axell",
+                *(("Bromma PK",) if args.identity_demo else ()),
+                "Production Optics",
+            ),
             duration_seconds=TITLE_PAGE_SECONDS,
             variant=variant,
         ),

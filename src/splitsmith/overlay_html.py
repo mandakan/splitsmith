@@ -551,6 +551,14 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
    ink_2, no shadow-via-emphasis" over ``.emphasis-plain``'s stroke,
    which is why it is declared here rather than beside ``.role-*``
    above. */
+/* The identity element carries ``.emphasis-plain`` too, whose ``color``
+   above would otherwise win on source order at equal specificity (the
+   identity slice's review found the name never took the accent). Same fallback
+   as ``.emphasis-plain``'s own ink, so an unset accent draws the same
+   pixels. */
+.role-identity.emphasis-plain {{
+  color: var(--accent, rgb({ink}));
+}}
 .role-label {{
   font-size: {_fit(scale.caption)};
   color: rgb({ink_2});

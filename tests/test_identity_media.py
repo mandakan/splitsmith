@@ -96,7 +96,7 @@ def test_resolved_identity_for_a_project_applies_the_look_defaults_and_the_local
     (root / LOGO_DIR / name).write_bytes(b"png")
     resolved = identity_media.resolved_identity_for(project, root, look=look, index=2, label="Anders")
     assert resolved.label == "Anders"
-    assert resolved.accent == look.accent_series[2]
+    assert resolved.accent is None, "no accent set, none drawn (ruling, #1243 review)"
     assert resolved.logo_path == root / LOGO_DIR / name
     assert resolved.club is None
     gone = MatchProject(
@@ -124,7 +124,25 @@ def test_grid_identities_index_the_accent_series_in_slot_order(tmp_path: Path) -
     ]
     identities = identity_media.grid_identities(bundles, look=look)
     assert set(identities) == {"Anders", "Zara"}, "a bundle without a project has no identity"
-    # Slot order is alphabetical by label, filler tiles included: Nobody
-    # keeps slot 1, so Zara's default accent is the series' third colour.
-    assert identities["Anders"].accent == look.accent_series[0]
-    assert identities["Zara"].accent == look.accent_series[2]
+    assert identities["Anders"].accent is None and identities["Zara"].accent is None
+    # The series is opt-in (the demo asks for it). Slot order is alphabetical
+    # by label, filler tiles included: Nobody keeps slot 1, so Zara's
+    # series accent is the third colour.
+    demo = identity_media.grid_identities(bundles, look=look, series_default=True)
+    assert demo["Anders"].accent == look.accent_series[0]
+    assert demo["Zara"].accent == look.accent_series[2]
+
+
+def test_a_project_with_no_identity_resolves_to_one_that_changes_nothing(tmp_path: Path) -> None:
+    """The production path every export takes: a shooter who never opened
+    the identity sheet renders exactly as before this feature existed, so
+    the resolved identity must carry nothing a template or the summary
+    would draw."""
+    from splitsmith.looks import load_look
+
+    for name in ("splitsmith", "clean"):
+        project = MatchProject(name="m")
+        resolved = identity_media.resolved_identity_for(
+            project, tmp_path, look=load_look(name), index=0, label="Anders"
+        )
+        assert (resolved.accent, resolved.logo_path, resolved.club) == (None, None, None)
