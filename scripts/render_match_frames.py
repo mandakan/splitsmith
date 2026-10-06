@@ -73,10 +73,12 @@ class Moment:
 
 def _moments(plan: mp4_render.TimelinePlan, *, titles: str) -> tuple[Moment, ...]:
     """Named moments from the timeline plan, so a change to a duration
-    moves the frames with it."""
+    moves the frames with it. A boundary (a transition, #1244) gets three:
+    two frames in, the middle, two frames before its end."""
     starts: dict[str, float] = {}
+    boundaries: list[tuple[float, float]] = []
     t = 0.0
-    for item in plan.items:
+    for index, item in enumerate(plan.items):
         key = (
             item.kind
             if item.kind in ("title_page", "closing")
@@ -84,6 +86,10 @@ def _moments(plan: mp4_render.TimelinePlan, *, titles: str) -> tuple[Moment, ...
         )
         starts[key] = t
         t += item.duration_seconds
+        boundary = plan.boundary_after(index)
+        if boundary is not None:
+            boundaries.append((t, boundary.duration_seconds))
+            t += boundary.duration_seconds
     moments = [
         Moment(
             "title-page-in",
@@ -115,6 +121,13 @@ def _moments(plan: mp4_render.TimelinePlan, *, titles: str) -> tuple[Moment, ...
     moments.append(
         Moment("closing", starts["closing"] + CLOSING_SECONDS / 2, "closing card over stage 2's last frame")
     )
+    two_frames = 2 / FPS
+    for n, (start, seconds) in enumerate(boundaries, start=1):
+        moments.append(Moment(f"boundary-{n}-in", start + two_frames, "the crossfade has just begun"))
+        moments.append(Moment(f"boundary-{n}-mid", start + seconds / 2, "halfway through the crossfade"))
+        moments.append(
+            Moment(f"boundary-{n}-out", start + seconds - two_frames, "the crossfade about to end")
+        )
     return tuple(moments)
 
 
@@ -160,7 +173,7 @@ def _extract(video: Path, index: int, destination: Path, *, ffmpeg: str) -> bool
     return destination.exists() and destination.stat().st_size > 0
 
 
-def _stage(trim: Path, audit: Path, *, name: str) -> StageComposition:
+def _stage(trim: Path, audit: Path, *, name: str, head_pad: float = BEEP_OFFSET_SECONDS) -> StageComposition:
     shots = audit_shots_to_engine_shots(read_audit_data(audit), beep_time_in_source=0.0)
     return StageComposition(
         stage_name=name,
@@ -168,7 +181,7 @@ def _stage(trim: Path, audit: Path, *, name: str) -> StageComposition:
         video=probe_video(trim),
         shots=shots,
         beep_offset_seconds=BEEP_OFFSET_SECONDS,
-        head_pad_seconds=BEEP_OFFSET_SECONDS,
+        head_pad_seconds=head_pad,
         tail_pad_seconds=1.0,
     )
 
@@ -179,6 +192,14 @@ def main() -> int:
     parser.add_argument("--theme", default="splitsmith", help="an installed Look name")
     parser.add_argument("--titles", choices=("slate", "lower-third"), default="slate")
     parser.add_argument("--card-variant", default="default", help="Look template variant for every card")
+    parser.add_argument(
+        "--transition",
+        default="none",
+        help="a transition between the two stages: an xfade kind (fade, dissolve, ...) or zoom / static",
+    )
+    parser.add_argument(
+        "--transition-seconds", type=float, default=1.0, help="its length, centred on the cut"
+    )
     parser.add_argument(
         "--identity-demo",
         action="store_true",
@@ -213,7 +234,11 @@ def main() -> int:
         cut_clip(source, trim, CLIP_FRAMES, ffmpeg=ffmpeg)
         audit = work / f"stage{number}.json"
         write_audit(audit, SHOTS_MS)
-        stages.append(_stage(trim, audit, name=f"Stage {number}"))
+        # A transition needs handle footage before the head pad; the
+        # synthetic beep sits 1 s in, so the demo keeps half of it as pad
+        # and the other half as handle. The default geometry is untouched.
+        head_pad = BEEP_OFFSET_SECONDS / 2 if args.transition != "none" else BEEP_OFFSET_SECONDS
+        stages.append(_stage(trim, audit, name=f"Stage {number}", head_pad=head_pad))
 
     variant = args.card_variant
     titles = {
@@ -248,11 +273,24 @@ def main() -> int:
             label=resolved.label, accent=resolved.accent, logo_path=resolved.logo_path, club=resolved.club
         ),
     )
+    transitions = (
+        (
+            composition.Transition(
+                from_stage_index=0,
+                to_stage_index=1,
+                kind=args.transition,
+                duration_seconds=args.transition_seconds,
+            ),
+        )
+        if args.transition != "none"
+        else ()
+    )
     comp = composition.from_stage_compositions(
         stages,
         project_name="Bromma Classifier",
         titles=titles,
         shooters=shooters,
+        transitions=transitions,
         title_page=composition.MatchTitle(
             text="Bromma Classifier",
             info=(

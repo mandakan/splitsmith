@@ -224,6 +224,39 @@ and never reads the client's filename. The logo syncs over the media
 channel (``identity/`` in the push plan, the hosted key rule and the
 delete route).
 
+The single-shooter MP4 draws **transitions** (#1244, spec section 3) on a
+boundary segment. ``plan_timeline`` turns the stage-indexed
+``Composition.transitions`` into ``TimelinePlan.boundaries`` between
+consecutive spine items (the last item of a stage's run, its summary
+when it has one, and the first of the next, its slate when it has one);
+a transition of d seconds is a crossfade of length d centred on the cut,
+so the timeline, the chapters and the duration estimate keep their
+length. Each neighbour gives up d/2 (``head_cut_seconds`` /
+``tail_cut_seconds`` on the item; ``_narrow_plan`` shifts a stage's plan
+and recomputes its cams) and the boundary is ``xfade`` + ``acrossfade``
+over two *edge* renders made with the item's own builder
+(``_edge_plan``: the last d/2 of effective footage plus d/2 of the
+handle the trim holds past the tail pad, and the mirror at the head; a
+card's handle is its own frame, an animated card's head edge delays its
+clip and its tail edge offsets it). The fit check reports and never
+clamps: d/2 must fit the pad (the beep and the last shot stay out of the
+fade) and the handle; a miss or a failed edge is a cut with a
+degradation. The driver prepares each item once, decides a boundary
+(edges, then the xfade) *before* encoding the item that opens it, and
+keys the boundary by its edges' cache keys, not their files (the
+cache's LRU touch re-dates them). ``KEY_VERSION`` is 3. Kinds are
+``composition.XFADE_KINDS`` (ten curated ``xfade`` names) plus the two
+FCP effects, which the MP4 maps through ``xfade_name`` and the FCPXML
+path substitutes with ``zoom`` and an anomaly; the gallery offers the
+xfade kinds to single-shooter MP4 only (``transitionsSupported(format,
+mode)``). The grid renderer still records "transitions ignored": its
+stage segment has no per-stage trim lever yet (follow-up under #1244).
+``scripts/render_match_frames.py --transition fade --transition-seconds 1``
+shows the boundary (``boundary-1-in`` / ``-mid`` / ``-out``); a lower
+third on the stage after a boundary starts in the head edge
+(``lower_third_filters(delay_seconds=)``) and continues in the trimmed
+stage (``skip_seconds=``), never restarting.
+
 ## Hosted playback streams the web rendition (#1031)
 
 The audit trim (``trimmed/stage<N>_cam_<id>_trimmed.mp4``) is a
