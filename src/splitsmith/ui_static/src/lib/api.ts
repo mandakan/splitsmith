@@ -2847,6 +2847,15 @@ export const api = {
       `/api/shooters/${encodeURIComponent(slug)}/fs/probe?path=${encodeURIComponent(path)}`,
     ),
 
+  /** Repair a single take damaged by the old stage-1 bug (see
+   *  ``lib/takeDamage``): its damaged stages are re-registered and their
+   *  beeps re-detected; undamaged stages are untouched. */
+  repairTake: (slug: string, filename: string) =>
+    request<{ repaired_stages: number[]; project: MatchProject }>(
+      `/api/shooters/${encodeURIComponent(slug)}/raw-videos/repair`,
+      { method: "POST", json: { filename } },
+    ),
+
   removeVideo: (slug: string, videoPath: string, resetAudit = false, stageNumber?: number | null) =>
     request<RemoveVideoResponse>(
       `/api/shooters/${encodeURIComponent(slug)}/videos/remove`,

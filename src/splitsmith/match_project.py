@@ -2457,6 +2457,48 @@ class MatchProject(BaseModel):
 
         return new_primary
 
+    def take_damage(self, storage_path: str) -> list[int]:
+        """Stages that list ``storage_path`` more than once (#1214), ascending.
+
+        Before #1212 a role change or move on one stage's clip of a
+        multi-stage single take detached the FIRST stage's registration
+        and appended it to the clicked stage, which then listed the file
+        twice under one ``video_id``. That is the only unambiguous trace:
+        an empty covered stage or a tray copy looks exactly like a
+        legitimate per-clip remove or unassign, neither of which updates
+        ``RawVideo.covers_stages``, so neither counts as damage here.
+        """
+        return sorted(
+            stage.stage_number
+            for stage in self.stages
+            if sum(1 for v in stage.videos if str(v.path) == storage_path) > 1
+        )
+
+    def repair_take(self, storage_path: str) -> list[int]:
+        """Drop the extra entries of ``storage_path`` on every stage that
+        lists it more than once (#1214); returns those stages.
+
+        The old bug appended the intruder, so a damaged stage's first entry
+        is its own registration (its beep, review and trim) and is kept;
+        the extras share its ``video_id``, so there are no caches of their
+        own to clear. The stage the intruder came from is left as it is --
+        it cannot be told apart from a legitimate remove.
+        """
+        damaged = set(self.take_damage(storage_path))
+        for stage in self.stages:
+            if stage.stage_number not in damaged:
+                continue
+            seen = False
+            kept: list[StageVideo] = []
+            for v in stage.videos:
+                if str(v.path) == storage_path:
+                    if seen:
+                        continue
+                    seen = True
+                kept.append(v)
+            stage.videos = kept
+        return sorted(damaged)
+
     def remove_video(
         self,
         path: Path,

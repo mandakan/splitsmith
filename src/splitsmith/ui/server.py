@@ -5670,6 +5670,12 @@ class SuggestCoverageRequest(BaseModel):
     path: str | None = None
 
 
+class TakeRepairRequest(BaseModel):
+    """Body for POST /api/shooters/{slug}/raw-videos/repair (#1214)."""
+
+    filename: str
+
+
 class CoverageEditRequest(BaseModel):
     """Body for PATCH /api/shooters/{slug}/raw-videos/coverage.
 
@@ -10403,6 +10409,35 @@ def create_app(
         if canonical is None:
             raise HTTPException(status_code=500, detail="coverage applied but raw video entry missing")
         return JSONResponse(canonical.model_dump(mode="json"))
+
+    @app.post("/api/shooters/{slug}/raw-videos/repair")
+    def repair_take(
+        slug: str,
+        body: TakeRepairRequest,
+        user: User = Depends(get_current_user),
+    ) -> JSONResponse:
+        """Repair a single take damaged by the old #1212 bug (#1214).
+
+        A stage that lists the file more than once keeps its first entry
+        (its own registration: beep, review, trim) and loses the appended
+        extras (``MatchProject.repair_take``). Nothing is re-detected and no
+        cache is touched: the extras share the kept entry's ``video_id``.
+        A healthy take is a no-op.
+
+        Response: ``{"repaired_stages": [...], "project": {...}}``. 404 when
+        ``raw/<filename>`` is not registered on the project.
+        """
+        name = _sanitize_raw_filename(body.filename)
+        storage_path = f"raw/{name}"
+        project = state.shooter_project(slug)
+        root = state.shooter_root(slug)
+        if project.find_video(Path(storage_path)) is None:
+            raise HTTPException(status_code=404, detail=f"{storage_path!r} is not registered")
+
+        repaired = project.repair_take(storage_path)
+        if repaired:
+            project.save(root)
+        return JSONResponse({"repaired_stages": repaired, "project": project.model_dump(mode="json")})
 
     @app.get("/api/shooters/{slug}/raw-videos/overview")
     def raw_video_overview(
