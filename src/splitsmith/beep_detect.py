@@ -52,6 +52,7 @@ file I/O. ``load_audio`` is provided as a thin convenience for callers.
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -59,7 +60,8 @@ import soundfile as sf
 from scipy.fft import next_fast_len
 from scipy.signal import butter, hilbert, sosfiltfilt
 
-from .config import BeepCandidate, BeepDetectConfig, BeepDetection
+from .beep_features import candidate_features
+from .config import BeepCandidate, BeepDetectConfig, BeepDetection, BeepFeatures
 
 # Rise-foot leading-edge parameters. Same definition as shot_detect (the
 # burst's own peak is the reference, so detection is insensitive to gain /
@@ -167,15 +169,27 @@ def _bandpass_envelope(
     return env
 
 
-def detect_beep(
-    audio: np.ndarray,
-    sample_rate: int,
-    config: BeepDetectConfig,
-) -> BeepDetection:
-    """Locate the start beep in ``audio`` and return its leading-edge timestamp.
+@dataclass(frozen=True)
+class _Run:
+    """One above-cutoff run that cleared ``min_duration_ms``, with what
+    ranking and the onset walk need. Internal to this module and its tests."""
 
-    Raises ``BeepNotFoundError`` if no candidate satisfies the duration/amplitude
-    thresholds.
+    audio: np.ndarray  # the search-window audio the run indexes into
+    start: int
+    end: int
+    run_peak: float
+    noise_floor: float
+    global_peak: float
+    silence_score: float
+    tonal_ratio: float
+    score: float
+    features: BeepFeatures
+
+
+def _candidate_runs(audio: np.ndarray, sample_rate: int, config: BeepDetectConfig) -> list[_Run]:
+    """Every scored run in ``audio``'s search window, in time order.
+
+    Raises ``BeepNotFoundError`` when there is none.
     """
     if audio.ndim != 1:
         raise ValueError("audio must be 1-D (mono); mix down before calling detect_beep")
@@ -198,6 +212,7 @@ def detect_beep(
     # accurate -- a wide moving-average smear shifts the apparent onset
     # earlier by ~half the smoothing window, which would otherwise blow
     # the ~15 ms tolerance the audit JSONs use.
+    # (``env_fine`` is computed by ``detect_beep``, which owns the onset walk.)
     env = _bandpass_envelope(
         audio,
         sample_rate,
@@ -205,14 +220,6 @@ def detect_beep(
         config.freq_max_hz,
         config.envelope_smoothing_ms,
     )
-    env_fine = _bandpass_envelope(
-        audio,
-        sample_rate,
-        config.freq_min_hz,
-        config.freq_max_hz,
-        _LEADING_EDGE_SMOOTHING_MS,
-    )
-
     peak_value = float(env.max())
     if peak_value <= 0.0:
         raise BeepNotFoundError("flat audio: no energy in beep band")
@@ -248,7 +255,7 @@ def detect_beep(
         config.envelope_smoothing_ms,
     )
 
-    candidates: list[tuple[int, int, float, float, float, float]] = []
+    runs: list[_Run] = []
     for s, e in zip(starts, ends, strict=True):
         if (e - s) < min_run_samples:
             continue
@@ -310,46 +317,95 @@ def detect_beep(
         saturated_silence = math.tanh(silence_score / config.silence_saturation_scale)
         score = saturated_silence * tonal_factor * dur_factor
 
-        candidates.append((s, e, run_peak, score, silence_score, tonal_ratio))
+        runs.append(
+            _Run(
+                audio=audio,
+                start=int(s),
+                end=int(e),
+                run_peak=run_peak,
+                noise_floor=noise_floor,
+                global_peak=peak_value,
+                silence_score=silence_score,
+                tonal_ratio=tonal_ratio,
+                score=score,
+                features=candidate_features(
+                    audio,
+                    sample_rate,
+                    run_start=int(s),
+                    run_end=int(e),
+                    run_peak=run_peak,
+                    noise_floor=noise_floor,
+                    global_peak=peak_value,
+                    silence_score=silence_score,
+                    tonal_ratio=tonal_ratio,
+                    band_lo_hz=config.freq_min_hz,
+                    band_hi_hz=config.freq_max_hz,
+                ),
+            )
+        )
 
-    if not candidates:
+    if not runs:
         raise BeepNotFoundError(
             f"no beep candidate of >={config.min_duration_ms} ms above "
             f"cutoff {cutoff:.4f} (peak={peak_value:.4f}, "
             f"noise_floor={noise_floor:.4f}) in [{config.freq_min_hz}, "
             f"{config.freq_max_hz}] Hz"
         )
+    return runs
+
+
+def detect_beep(
+    audio: np.ndarray,
+    sample_rate: int,
+    config: BeepDetectConfig,
+) -> BeepDetection:
+    """Locate the start beep in ``audio`` and return its leading-edge timestamp.
+
+    Raises ``BeepNotFoundError`` if no candidate satisfies the duration/amplitude
+    thresholds.
+    """
+    runs = _candidate_runs(audio, sample_rate, config)
+    window = runs[0].audio
+    noise_floor = runs[0].noise_floor
+    env_fine = _bandpass_envelope(
+        window,
+        sample_rate,
+        config.freq_min_hz,
+        config.freq_max_hz,
+        _LEADING_EDGE_SMOOTHING_MS,
+    )
 
     # Rank by composite score (highest first). Compute the rise-foot
     # leading edge for every candidate so the UI can show alternatives
     # without a second pass.
-    ranked = sorted(candidates, key=lambda c: c[3], reverse=True)
-    runner_up_score = ranked[1][3] if len(ranked) > 1 else 0.0
+    ranked = sorted(runs, key=lambda r: r.score, reverse=True)
+    runner_up_score = ranked[1].score if len(ranked) > 1 else 0.0
     ranked_models: list[BeepCandidate] = []
-    for run_start, run_end, run_peak, score, silence_score, tonal_ratio in ranked:
-        leading_idx = _rise_foot_leading_edge(env_fine, run_start, run_end, noise_floor)
-        duration_ms = (run_end - run_start) * 1000.0 / sample_rate
+    for run in ranked:
+        leading_idx = _rise_foot_leading_edge(env_fine, run.start, run.end, noise_floor)
+        duration_ms = (run.end - run.start) * 1000.0 / sample_rate
         # Confidence uses the GLOBAL runner-up's score for every
         # candidate, not the next-lower in the sorted list. The HITL
         # protocol cares about "is the winner clearly better than the
         # next-best alternative?"; a runner-up's own confidence is
         # mostly informational so the UI can colour the chip.
         confidence = candidate_confidence(
-            silence_score=silence_score,
-            tonal_score=tonal_ratio,
+            silence_score=run.silence_score,
+            tonal_score=run.tonal_ratio,
             duration_ms=duration_ms,
-            score=score,
+            score=run.score,
             runner_up_score=runner_up_score,
         )
         ranked_models.append(
             BeepCandidate(
                 time=leading_idx / sample_rate,
-                score=score,
-                peak_amplitude=run_peak,
+                score=run.score,
+                peak_amplitude=run.run_peak,
                 duration_ms=duration_ms,
-                silence_score=silence_score,
-                tonal_score=tonal_ratio,
+                silence_score=run.silence_score,
+                tonal_score=run.tonal_ratio,
                 confidence=confidence,
+                features=run.features,
             )
         )
 

@@ -95,6 +95,24 @@ class StageAnalysis(BaseModel):
     anomalies: list[str] = Field(default_factory=list)
 
 
+class BeepFeatures(BaseModel):
+    """Ranker inputs for one beep candidate (#949, spec 2026-10-06).
+
+    Computed by :func:`splitsmith.beep_features.candidate_features`, the one
+    implementation both ``detect_beep`` and the ranker's trainer use.
+    Timer-agnostic (no tone frequency, no position in the window) and
+    unchanged by recording gain.
+    """
+
+    log_silence: float
+    tonal_ratio: float
+    duration_ms: float
+    log_peak_over_floor: float
+    peak_over_global: float
+    spectral_flatness: float
+    log_spectral_prominence: float
+
+
 class BeepCandidate(BaseModel):
     """One ranked beep candidate from ``beep_detect``.
 
@@ -134,6 +152,7 @@ class BeepCandidate(BaseModel):
     silence_score: float = 0.0
     tonal_score: float = 0.0
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    features: BeepFeatures | None = None
 
 
 class BeepDetection(BaseModel):
