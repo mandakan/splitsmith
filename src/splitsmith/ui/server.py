@@ -11450,11 +11450,11 @@ def create_app(
         for entry in candidates:
             if elsewhere:
                 try:
-                    owner = elsewhere.get(clip_fingerprint(entry) or "")
+                    reason = elsewhere.get(clip_fingerprint(entry) or "")
                 except OSError:
-                    owner = None
-                if owner is not None:
-                    skipped.append(f"{entry.name}: already imported for {owner}")
+                    reason = None
+                if reason is not None:
+                    skipped.append(f"{entry.name}: {reason}")
                     continue
             try:
                 video = project.register_video(

@@ -453,22 +453,31 @@ def _backfill_fingerprints(state: Any) -> None:
 
 
 def imported_elsewhere(state: Any, slug: str) -> dict[str, str]:
-    """Content fingerprint -> display name of the *other* shooter who has
-    that recording (#1124), for the per-shooter scan: one run is one
-    shooter's, so a copy of it reaching a second shooter's import is the
-    same clip, not a new one. Backfills older videos first."""
+    """Content fingerprint -> why the per-shooter scan skips that recording
+    (#1124): another shooter already has it. One run is one shooter's, so a
+    copy of it reaching a second shooter's import is the same clip, not a
+    new one. A clip on another shooter's stage reads "already imported for
+    <name>"; one still in their unassigned tray says where it is, because
+    the fix is moving it from there (#1227). Assigned wins, as in
+    :func:`_registrations`. Backfills older videos first."""
     _backfill_fingerprints(state)
     match = match_model.Match.load(state.match_root)
-    out: dict[str, str] = {}
+    assigned: dict[str, str] = {}
+    unassigned: dict[str, str] = {}
     for other in match.shooters:
         if other == slug:
             continue
         project = state.shooter_project(other)
         name = match.load_shooter(state.match_root, other).name or other
-        for video in project.all_videos():
+        for stage in project.stages:
+            for video in stage.videos:
+                if video.fingerprint is not None:
+                    assigned.setdefault(video.fingerprint, f"already imported for {name}")
+        in_tray = f"in {name}'s unassigned clips (move it from Unassigned)"
+        for video in project.unassigned_videos:
             if video.fingerprint is not None:
-                out.setdefault(video.fingerprint, name)
-    return out
+                unassigned.setdefault(video.fingerprint, in_tray)
+    return unassigned | assigned
 
 
 def keep_this_shooters(
