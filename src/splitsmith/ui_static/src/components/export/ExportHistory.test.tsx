@@ -24,11 +24,11 @@ describe("ExportHistory", () => {
   // textContent, so a regex also matches every ancestor row and container
   // and fails with "found multiple elements". Exact matching pins the
   // leaf, which is also what makes these assertions specify the output.
-  it("renders a stage run with its stage, formats and duration", () => {
+  it("renders a stage run with its stage, formats and how long it took", () => {
     render(<ExportHistory runs={[run()]} exportFileUrl={(f) => `/dl/${f}`} />);
     expect(screen.getByText("Stage 3")).toBeInTheDocument();
     expect(screen.getByText("trim, csv")).toBeInTheDocument();
-    expect(screen.getByText("12.5s")).toBeInTheDocument();
+    expect(screen.getByText("took 13s")).toBeInTheDocument();
   });
 
   it("groups a match run's stages into one row", () => {
