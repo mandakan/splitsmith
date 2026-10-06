@@ -748,3 +748,73 @@ def test_scrub_kind_on_a_mirror_serves_the_pushed_rendition(
 
     assert resp.status_code == 307
     assert f"stage1_cam_{_VIDEO_ID}_web.mp4" in resp.headers["location"]
+
+
+def _project_videos(client: TestClient) -> list[dict]:
+    resp = client.get(f"/api/matches/{MATCH_ID}/shooters/{SLUG}/project")
+    assert resp.status_code == 200, resp.text
+    return [v for s in resp.json()["stages"] for v in s["videos"]]
+
+
+def test_hosted_scrub_version_names_a_fresh_rendition(s3_stream_client: tuple[TestClient, S3Storage]) -> None:
+    client, storage = s3_stream_client
+    storage.write_bytes(_TRIM_KEY, b"TRIMDATA")
+    storage.write_bytes(_WEB_KEY, b"WEBDATA")
+    web = storage.stat(_WEB_KEY)
+    assert web is not None and web.last_modified is not None
+
+    [video] = _project_videos(client)
+
+    assert video["scrub_version"] == f"{int(web.last_modified.timestamp() * 1e9):x}-{web.size:x}"
+
+
+def test_hosted_scrub_version_is_null_for_a_stale_or_missing_rendition(
+    s3_stream_client: tuple[TestClient, S3Storage],
+) -> None:
+    import time
+
+    client, storage = s3_stream_client
+    assert _project_videos(client)[0]["scrub_version"] is None
+    storage.write_bytes(_WEB_KEY, b"OLD WINDOW")
+    time.sleep(1.1)
+    storage.write_bytes(_TRIM_KEY, b"RE-CUT TRIM")
+    assert _project_videos(client)[0]["scrub_version"] is None
+
+
+@pytest.mark.parametrize("s3_stream_client", [(1, 2)], indirect=True)
+def test_hosted_payload_lists_trimmed_once(
+    s3_stream_client: tuple[TestClient, S3Storage], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, storage = s3_stream_client
+    storage.write_bytes(_TRIM_KEY, b"TRIMDATA")
+    storage.write_bytes(_WEB_KEY, b"WEBDATA")
+    prefixes: list[str] = []
+    real_list = type(storage).list
+
+    def counting_list(self, prefix: str):
+        prefixes.append(prefix)
+        return real_list(self, prefix)
+
+    monkeypatch.setattr(type(storage), "list", counting_list)
+
+    _project_videos(client)
+
+    assert [p for p in prefixes if p.endswith("/trimmed/")] == [
+        f"matches/{MATCH_ID}/shooters/{SLUG}/trimmed/"
+    ]
+
+
+def test_hosted_payload_survives_a_failed_listing(
+    s3_stream_client: tuple[TestClient, S3Storage], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, storage = s3_stream_client
+    real_list = type(storage).list
+
+    def failing_list(self, prefix: str):
+        if prefix.endswith("/trimmed/"):
+            raise OSError("R2 down")
+        return real_list(self, prefix)
+
+    monkeypatch.setattr(type(storage), "list", failing_list)
+
+    assert _project_videos(client)[0]["scrub_version"] is None

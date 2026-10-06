@@ -7910,12 +7910,13 @@ def _storage_fact(obj: StorageObject | None) -> tuple[int, float] | None:
 def _scrub_version_for(root: Path, stage_number: int, video: StageVideo, project: MatchProject) -> str | None:
     """Identity of the trim's fresh 720p rendition on local disk, or None (#1192).
 
-    The Audit players ask for ``kind=web`` with this in the URL when it is
+    The Audit players ask for ``kind=scrub`` with this in the URL when it is
     set, and keep ``kind=trim`` otherwise. Same trim resolver as
     :func:`_trim_version_for` and the same freshness rule as
     ``stream_video``'s local ``kind=web`` branch
     (:func:`audio.fresh_web_trim`), so the version names the bytes behind
-    the URL. Local files only: no storage call.
+    the URL. Local files only: no storage call; a storage-backed project
+    goes through :func:`_hosted_scrub_version_for`.
     """
     try:
         trim = audio_helpers.resolve_trim_for_read(root, stage_number, video, project=project)
@@ -7928,6 +7929,32 @@ def _scrub_version_for(root: Path, stage_number: int, video: StageVideo, project
     except OSError:
         return None
     return f"{st.st_mtime_ns:x}-{st.st_size:x}"
+
+
+def _hosted_scrub_version_for(
+    presence: StoragePresence, root: Path, stage_number: int, video: StageVideo, project: MatchProject
+) -> str | None:
+    """``scrub_version`` on a storage-backed project (#1209): the fresh
+    rendition from the request's presence listing, same rule as the
+    ``kind=scrub`` route. ``None`` when stale, absent or the listing failed
+    (the payload never fails on it)."""
+    local_mp4 = audio_helpers.trimmed_video_path(root, stage_number, video, project=project)
+    trim_key = audio_helpers._storage_trim_key(project, local_mp4)
+    web_key = audio_helpers._storage_trim_key(project, trim_module.web_trim_path(local_mp4))
+    if trim_key is None or web_key is None:
+        return None
+    try:
+        trim_obj = presence.object(trim_key)
+        web_obj = presence.object(web_key)
+    except OSError:
+        return None
+    if web_obj is None or web_obj.last_modified is None:
+        return None
+    if not audio_helpers.fresh_rendition(
+        _storage_fact(trim_obj), _storage_fact(web_obj), trim_required=not _is_mirror()
+    ):
+        return None
+    return f"{int(web_obj.last_modified.timestamp() * 1e9):x}-{web_obj.size:x}"
 
 
 def _proxy_ready_for(storage: Storage | None, proxy_keys: set[str], path_str: str) -> bool:
@@ -9538,6 +9565,10 @@ def create_app(
         # The status field is read-only (not on the StageEntry model);
         # PUTting it back is a no-op since model parsing ignores
         # unknown keys via Pydantic v2's default behavior.
+        # One listing of this shooter's trimmed/ prefix per request (#1209).
+        presence = (
+            StoragePresence(_storage) if _storage is not None and _storage.supports_presigned_get else None
+        )
         for stage_dict in payload.get("stages", []):
             n = stage_dict.get("stage_number")
             if n is None:
@@ -9562,7 +9593,11 @@ def create_app(
                     _storage, proxy_keys, str(video_dict.get("path", ""))
                 )
                 video_dict["trim_version"] = _trim_version_for(root, int(n), video, project)
-                video_dict["scrub_version"] = _scrub_version_for(root, int(n), video, project)
+                video_dict["scrub_version"] = (
+                    _hosted_scrub_version_for(presence, root, int(n), video, project)
+                    if presence is not None and not video.path.is_absolute()
+                    else _scrub_version_for(root, int(n), video, project)
+                )
         for video_dict in payload.get("unassigned_videos", []):
             video_dict["proxy_ready"] = _proxy_ready_for(
                 _storage, proxy_keys, str(video_dict.get("path", ""))

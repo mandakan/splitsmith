@@ -23,3 +23,29 @@ def test_fresh_rendition_rule() -> None:
     assert rule(None, (5, 101.0), trim_required=True) is False  # nothing to anchor it
     assert rule(None, (5, 101.0), trim_required=False) is True  # a mirror
     assert rule(None, (0, 101.0), trim_required=False) is False
+
+
+def test_presence_object_returns_the_listed_metadata() -> None:
+    from datetime import UTC, datetime
+
+    from splitsmith.storage import StorageObject
+    from splitsmith.ui.presence import StoragePresence
+
+    when = datetime(2026, 10, 6, tzinfo=UTC)
+
+    class Listing:
+        calls = 0
+
+        def list(self, prefix: str):
+            Listing.calls += 1
+            yield StorageObject(path=f"{prefix}a_web.mp4", size=7, last_modified=when)
+
+        def exists(self, key: str) -> bool:  # pragma: no cover - not reached
+            raise AssertionError("no HEAD for an indexed prefix")
+
+    presence = StoragePresence(Listing())  # type: ignore[arg-type]
+    obj = presence.object("m/shooters/me/trimmed/a_web.mp4")
+    assert obj is not None and (obj.size, obj.last_modified) == (7, when)
+    assert presence.object("m/shooters/me/trimmed/missing.mp4") is None
+    assert presence.has_key("m/shooters/me/trimmed/a_web.mp4") is True
+    assert Listing.calls == 1
