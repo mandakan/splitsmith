@@ -433,6 +433,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--title-page", action="store_true", help="open with a generated match title card")
     parser.add_argument("--closing-card", action="store_true", help="close with a generated card")
+    parser.add_argument("--card-variant", default="default", help="Look template variant for every card")
     args = parser.parse_args(argv)
 
     if not 1 <= args.shooters <= MAX_SHOOTERS:
@@ -505,18 +506,22 @@ def main(argv: list[str] | None = None) -> int:
         on_notice=lambda text: print(f"  notice: {text}"),
         title_page=(
             MatchTitle(
-                text="Bromma Classifier", info=("2026-05-01", "Level II"), duration_seconds=TITLE_SECONDS
+                text="Bromma Classifier",
+                info=("2026-05-01", "Level II"),
+                duration_seconds=TITLE_SECONDS,
+                variant=args.card_variant,
             )
             if args.title_page
             else None
         ),
         closing=(
-            MatchTitle(text="Bromma Classifier", duration_seconds=CLOSING_SECONDS)
+            MatchTitle(text="Bromma Classifier", duration_seconds=CLOSING_SECONDS, variant=args.card_variant)
             if args.closing_card
             else None
         ),
         stage_titles=args.titles,
         title_duration_seconds=SLATE_SECONDS,
+        card_variant=args.card_variant,
     )
     if result.failed:
         print(f"  {len(result.failed)} stage(s) failed: {result.failed}", file=sys.stderr)

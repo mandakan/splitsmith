@@ -1032,3 +1032,32 @@ def test_stage_inputs_name_an_unnamed_stage_by_its_number(tmp_path: Path) -> Non
     assert inputs[0].trimmed_path.name == "stage2_stage_trimmed.mp4"
     titles = match_exports_mod._build_uniform_titles(kind="slate", duration=1.5, stage_inputs=inputs)
     assert [t.text for t in titles.values()] == ["Stage 2", "Stage 5", "Standards"]
+
+
+def test_card_variant_reaches_every_generated_card(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """One knob (#1242): the title page, the closing card and every stage
+    title carry the requested Look variant; a request without it draws
+    the default."""
+    captured = _capture_mp4(monkeypatch)
+    match_exports_mod.export_match(
+        stages=[_one_stage_input(tmp_path)],
+        request=_card_request(title_page=True, closing_card=True, title_kind="slate", card_variant="rise"),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    comp = captured["comp"]
+    assert comp.title_page.variant == "rise" and comp.closing.variant == "rise"
+    assert all(stage.title is not None and stage.title.variant == "rise" for stage in comp.stages)
+
+    captured = _capture_mp4(monkeypatch)
+    match_exports_mod.export_match(
+        stages=[_one_stage_input(tmp_path)],
+        request=_card_request(title_page=True, title_kind="lower-third"),
+        exports_dir=tmp_path / "exports2",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    comp = captured["comp"]
+    assert comp.title_page.variant == "default"
+    assert all(stage.title is not None and stage.title.variant == "default" for stage in comp.stages)

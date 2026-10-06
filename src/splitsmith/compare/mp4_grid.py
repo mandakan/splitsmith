@@ -1175,16 +1175,23 @@ StageTitleKind = Literal["none", "slate", "lower-third"]
 
 
 def stage_card(
-    plan: GridStagePlan, *, style: TitleStyle, seconds: float, expected_rounds: int | None
+    plan: GridStagePlan,
+    *,
+    style: TitleStyle,
+    seconds: float,
+    expected_rounds: int | None,
+    variant: str = "default",
 ) -> TitleCard:
     """The generated card for one grid stage (issue #973): the stage name,
     with its round count as an info line when known -- the same shape the
-    single-shooter export builds, so the two products read alike."""
+    single-shooter export builds, so the two products read alike.
+    ``variant`` names the Look template variant that draws it (#1242)."""
     return TitleCard(
         text=plan.stage_name,
         duration_seconds=seconds,
         style=style,
         info=(f"{expected_rounds} rounds",) if expected_rounds else (),
+        variant=variant,
     )
 
 
@@ -2443,6 +2450,7 @@ def render_grid_mp4(
     closing: MatchTitle | None = None,
     stage_titles: StageTitleKind = "none",
     title_duration_seconds: float = 1.5,
+    card_variant: str = "default",
     inset: GridInset | None = None,
     free_cell: FreeCellKind = "blank",
     match_name: str = "",
@@ -2721,6 +2729,7 @@ def render_grid_mp4(
                     style=stage_titles,
                     seconds=title_duration_seconds,
                     expected_rounds=expected_rounds.get(plan.stage_number),
+                    variant=card_variant,
                 )
                 if stage_titles == "slate":
                     slate_segment = _card_segment(

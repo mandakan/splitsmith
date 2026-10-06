@@ -86,10 +86,15 @@ def _moments(plan: mp4_render.TimelinePlan, *, titles: str) -> tuple[Moment, ...
         t += item.duration_seconds
     moments = [
         Moment(
+            "title-page-in",
+            starts["title_page"] + 0.25,
+            "title page a quarter second in (the rise is mid-way with --card-variant rise)",
+        ),
+        Moment(
             "title-page",
             starts["title_page"] + TITLE_PAGE_SECONDS / 2,
             "match name over stage 1's blurred first frame",
-        )
+        ),
     ]
     if titles == "slate":
         moments.append(
@@ -160,6 +165,7 @@ def main() -> int:
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--theme", default="splitsmith", help="an installed Look name")
     parser.add_argument("--titles", choices=("slate", "lower-third"), default="slate")
+    parser.add_argument("--card-variant", default="default", help="Look template variant for every card")
     parser.add_argument("--keep-video", action="store_true")
     parser.add_argument(
         "--summary-hold",
@@ -191,11 +197,18 @@ def main() -> int:
         write_audit(audit, SHOTS_MS)
         stages.append(_stage(trim, audit, name=f"Stage {number}"))
 
+    variant = args.card_variant
     titles = {
         0: composition.TitleCard(
-            text="Stage 1: Speed", duration_seconds=CARD_SECONDS, style=args.titles, info=("24 rounds",)
+            text="Stage 1: Speed",
+            duration_seconds=CARD_SECONDS,
+            style=args.titles,
+            info=("24 rounds",),
+            variant=variant,
         ),
-        1: composition.TitleCard(text="Stage 2: Accuracy", duration_seconds=CARD_SECONDS, style=args.titles),
+        1: composition.TitleCard(
+            text="Stage 2: Accuracy", duration_seconds=CARD_SECONDS, style=args.titles, variant=variant
+        ),
     }
     comp = composition.from_stage_compositions(
         stages,
@@ -205,9 +218,10 @@ def main() -> int:
             text="Bromma Classifier",
             info=("2026-05-01", "M. Axell", "Production Optics"),
             duration_seconds=TITLE_PAGE_SECONDS,
+            variant=variant,
         ),
         closing=composition.MatchTitle(
-            text="Bromma Classifier", info=("2026-05-01",), duration_seconds=CLOSING_SECONDS
+            text="Bromma Classifier", info=("2026-05-01",), duration_seconds=CLOSING_SECONDS, variant=variant
         ),
     )
     if args.summary_hold > 0:

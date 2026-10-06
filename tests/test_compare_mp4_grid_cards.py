@@ -510,3 +510,9 @@ def test_an_animated_lower_third_is_a_clip_input_on_the_grid_stage(tmp_path: Pat
     graph = _graph_of(calls[0])
     assert "tpad=stop_mode=clone:stop_duration=2" in graph
     assert "fade=t=out:st=1.5:d=0.5:alpha=1[lt]" in graph and "enable='lt(t,2)'" in graph
+
+
+def test_stage_card_carries_the_variant_the_grid_was_asked_for() -> None:
+    card = mp4_grid.stage_card(_plan(), style="slate", seconds=1.5, expected_rounds=24, variant="rise")
+    assert card.variant == "rise"
+    assert mp4_grid.stage_card(_plan(), style="slate", seconds=1.5, expected_rounds=None).variant == "default"

@@ -333,6 +333,12 @@ class MatchExportRequestData:
     title_page_info: tuple[str, ...] = ()
     title_page_duration_seconds: float = 3.0
     closing_card: bool = False
+    # Issue #1242. The Look template variant every generated card draws
+    # with (``default`` is the still card; the shipped ``splitsmith`` Look
+    # adds ``rise``). One knob for all slots until the gallery (#1246)
+    # exposes them separately; a variant the Look lacks falls back to
+    # ``default`` with a warning in the renderer.
+    card_variant: str = "default"
     # The overlay theme also styles the cards, so the two read as one.
     overlay_theme: ThemeName = "splitsmith"
     # Issue #972. Seconds to hold each stage's summary after its action
@@ -597,6 +603,7 @@ def export_match(
         kind=request.title_kind,
         duration=request.title_duration_seconds,
         stage_inputs=stages,
+        variant=request.card_variant,
     )
     if titles and request.output_format in _RENDERERS_WITHOUT_TITLES:
         anomalies.append(
@@ -665,6 +672,7 @@ def export_match(
                 text=request.project_name,
                 info=request.title_page_info,
                 duration_seconds=request.title_page_duration_seconds,
+                variant=request.card_variant,
             )
             title_page = card if request.title_page else None
             closing = card if request.closing_card else None
@@ -857,6 +865,7 @@ def _build_uniform_titles(
     kind: TitleKind,
     duration: float,
     stage_inputs: list[MatchStageInput],
+    variant: str = "default",
 ) -> dict[int, composition.TitleCard]:
     """Expand a single ``(kind, duration)`` into one ``TitleCard`` per
     stage. Each title's text defaults to the stage name -- templating
@@ -871,6 +880,7 @@ def _build_uniform_titles(
             duration_seconds=duration,
             style=kind,
             info=(f"{stage_input.expected_rounds} rounds",) if stage_input.expected_rounds else (),
+            variant=variant,
         )
         for idx, stage_input in enumerate(stage_inputs)
     }
