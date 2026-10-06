@@ -116,6 +116,10 @@ class EvalSummary:
     topn_hits: int = 0
     not_found: int = 0
     exceptions: int = 0
+    #: Tracks whose WAV could not be loaded (a gitignored full-track WAV on
+    #: a machine without it). Counted here and nowhere else: an input that
+    #: is not there is not a miss.
+    unavailable: int = 0
     by_tag: dict[str, EvalSummary] = field(default_factory=dict)
 
     @property
@@ -260,30 +264,31 @@ def evaluate_detection(
 
 
 def summarize(results: Iterable[FixtureEvalResult]) -> EvalSummary:
-    """Aggregate per-fixture results into an overall + per-tag summary."""
+    """Aggregate per-fixture results into an overall + per-tag summary.
+
+    A track that failed to load counts only as ``unavailable``: it is out
+    of ``total`` and so out of every recall's denominator."""
     overall = EvalSummary()
     for r in results:
-        overall.total += 1
-        if r.correct_top1:
-            overall.top1_hits += 1
-        if r.correct_in_topn:
-            overall.topn_hits += 1
-        if r.error_kind == "not_found":
-            overall.not_found += 1
-        elif r.error_kind == "exception":
-            overall.exceptions += 1
-        for tag in r.tags:
-            bucket = overall.by_tag.setdefault(tag, EvalSummary())
-            bucket.total += 1
-            if r.correct_top1:
-                bucket.top1_hits += 1
-            if r.correct_in_topn:
-                bucket.topn_hits += 1
-            if r.error_kind == "not_found":
-                bucket.not_found += 1
-            elif r.error_kind == "exception":
-                bucket.exceptions += 1
+        for bucket in [overall, *(overall.by_tag.setdefault(tag, EvalSummary()) for tag in r.tags)]:
+            _tally(bucket, r)
     return overall
+
+
+def _tally(bucket: EvalSummary, r: FixtureEvalResult) -> None:
+    kind = r.error_kind or ""
+    if kind.startswith("load_failed"):
+        bucket.unavailable += 1
+        return
+    bucket.total += 1
+    if r.correct_top1:
+        bucket.top1_hits += 1
+    if r.correct_in_topn:
+        bucket.topn_hits += 1
+    if kind == "not_found":
+        bucket.not_found += 1
+    elif kind.startswith("exception"):
+        bucket.exceptions += 1
 
 
 def load_manifest(path: Path) -> BeepCalibrationManifest:

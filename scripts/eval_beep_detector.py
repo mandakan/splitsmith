@@ -189,6 +189,7 @@ def format_bucket(name: str, summary: EvalSummary) -> str:
         f"top1={summary.top1_hits:3} ({summary.recall_top1 * 100:5.1f}%)  "
         f"topN={summary.topn_hits:3} ({summary.recall_topn * 100:5.1f}%)  "
         f"miss={summary.not_found:2}  err={summary.exceptions:2}"
+        + (f"  unavailable={summary.unavailable}" if summary.unavailable else "")
     )
 
 
@@ -271,6 +272,7 @@ def main() -> None:
                 "topn_hits": overall.topn_hits,
                 "not_found": overall.not_found,
                 "exceptions": overall.exceptions,
+                "unavailable": overall.unavailable,
                 "recall_top1": overall.recall_top1,
                 "recall_topn": overall.recall_topn,
                 "by_tag": {
@@ -280,6 +282,7 @@ def main() -> None:
                         "topn_hits": s.topn_hits,
                         "not_found": s.not_found,
                         "exceptions": s.exceptions,
+                        "unavailable": s.unavailable,
                         "recall_top1": s.recall_top1,
                         "recall_topn": s.recall_topn,
                     }

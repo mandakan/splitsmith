@@ -43,7 +43,6 @@ from splitsmith.beep_calibration import (
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures"
-FULL_DIR = FIXTURES_DIR / "full"
 MANIFEST_PATH = FIXTURES_DIR / "beep_calibration" / "manifest.yaml"
 
 # Audit JSON suffixes that aren't real fixtures. Anything with one of
@@ -66,12 +65,22 @@ def is_fixture_audit_json(path: Path) -> bool:
     return not any(marker in name for marker in NON_FIXTURE_MARKERS)
 
 
-def build_entry(audit_path: Path) -> BeepFixtureEntry | None:
+def build_entry(
+    audit_path: Path,
+    *,
+    fixtures_dir: Path = FIXTURES_DIR,
+    prior: BeepFixtureEntry | None = None,
+) -> BeepFixtureEntry | None:
     """Translate one audit JSON into a manifest entry, or return None.
 
     Returns ``None`` for JSONs that aren't fixture audits (no
     ``beep_time``, missing matching WAV, etc.) -- callers should treat
     those as "skip silently".
+
+    Full-track WAVs are gitignored and usually exist on one machine only.
+    When this one has none for the fixture, ``prior`` (its entry in the
+    manifest being rebuilt) supplies the full-track fields, so a rebuild
+    elsewhere does not delete them.
     """
     audit = read_audit_json(audit_path)
     if not isinstance(audit, dict):
@@ -91,8 +100,9 @@ def build_entry(audit_path: Path) -> BeepFixtureEntry | None:
     full_wav_rel: str | None = None
     full_beep: float | None = None
     full_duration: float | None = None
-    full_sidecar = FULL_DIR / f"{stem}_full.json"
-    full_wav = FULL_DIR / f"{stem}_full.wav"
+    full_dir = fixtures_dir / "full"
+    full_sidecar = full_dir / f"{stem}_full.json"
+    full_wav = full_dir / f"{stem}_full.wav"
     fws = audit.get("fixture_window_in_source")
     if full_sidecar.exists() and full_wav.exists() and isinstance(fws, list) and len(fws) == 2:
         sidecar = read_audit_json(full_sidecar)
@@ -103,8 +113,12 @@ def build_entry(audit_path: Path) -> BeepFixtureEntry | None:
                 full_window_in_source=(float(full_window[0]), float(full_window[1])),
                 clip_beep_time=float(beep_time),
             )
-            full_wav_rel = full_wav.relative_to(FIXTURES_DIR).as_posix()
+            full_wav_rel = full_wav.relative_to(fixtures_dir).as_posix()
             full_duration = float(sidecar.get("extracted_seconds") or 0.0) or None
+    elif prior is not None and prior.full_wav:
+        full_wav_rel = prior.full_wav
+        full_beep = prior.ground_truth_in_full
+        full_duration = prior.full_duration_s
 
     tags = auto_tags(
         camera_kind=camera_kind,
@@ -116,7 +130,7 @@ def build_entry(audit_path: Path) -> BeepFixtureEntry | None:
         stem=stem,
         camera_kind=camera_kind,
         camera_id=camera_id,
-        clip_wav=clip_wav.relative_to(FIXTURES_DIR).as_posix(),
+        clip_wav=clip_wav.relative_to(fixtures_dir).as_posix(),
         ground_truth_in_clip=float(beep_time),
         tolerance_ms=tolerance_ms,
         full_wav=full_wav_rel,
@@ -136,16 +150,19 @@ def build_manifest(
 
     ``preserve_tags=True`` merges hand-edited tags from ``existing`` --
     the auto-heuristic tags are unioned with whatever the user added.
+    ``existing`` also carries full-track references whose WAVs are not on
+    this machine (see :func:`build_entry`), with or without the flag.
     """
+    prior = {e.stem: e for e in existing.fixtures} if existing is not None else {}
     prior_tags: dict[str, list[str]] = {}
-    if preserve_tags and existing is not None:
-        prior_tags = {e.stem: list(e.tags) for e in existing.fixtures}
+    if preserve_tags:
+        prior_tags = {stem: list(e.tags) for stem, e in prior.items()}
 
     entries: list[BeepFixtureEntry] = []
     for audit_path in sorted(fixtures_dir.iterdir()):
         if not is_fixture_audit_json(audit_path):
             continue
-        entry = build_entry(audit_path)
+        entry = build_entry(audit_path, fixtures_dir=fixtures_dir, prior=prior.get(audit_path.stem))
         if entry is None:
             continue
         if preserve_tags and entry.stem in prior_tags:
@@ -175,7 +192,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    existing = load_manifest(args.manifest) if args.preserve_tags else None
+    existing = load_manifest(args.manifest)
     manifest = build_manifest(preserve_tags=args.preserve_tags, existing=existing)
 
     print(f"Discovered {len(manifest.fixtures)} fixtures:")
