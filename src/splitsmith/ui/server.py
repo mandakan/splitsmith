@@ -11435,14 +11435,16 @@ def create_app(
             last_dir = candidates[0].parent.resolve() if candidates else None
 
         root = state.shooter_root(slug)
-        project = state.shooter_project(slug)
         registered: list[str] = []
         skipped: list[str] = []
         elsewhere: dict[str, str] = {}
         if state.storage is None and current_match_root.get() is not None:
             from . import footage_sort_api
 
+            # Backfills every shooter's project, this one's included, so
+            # the project loads after it or its save would undo the fill.
             elsewhere = footage_sort_api.imported_elsewhere(state, slug)
+        project = state.shooter_project(slug)
         for entry in candidates:
             if elsewhere:
                 try:

@@ -7,16 +7,19 @@ media, so these are integration tests.
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from splitsmith import match_model
 from splitsmith.match_project import MatchProject, StageEntry
+from splitsmith.ui import footage_sort_api
 
 pytestmark = pytest.mark.integration
 
@@ -627,3 +630,73 @@ def test_the_per_shooter_scan_recognises_a_clip_registered_before_fingerprints(
     resp = client.post(f"{base}/shooters/bob/videos/scan", json={"source_paths": [str(copy)]})
 
     assert resp.json()["skipped"] == ["alice-stage1.mov: already imported for Alice"]
+
+
+def _import_copy_to_stage_2(client: Any, base: str, view: dict, copy_name: str) -> Any:
+    copy = next(c["clip_id"] for c in view["clips"] if c["filename"] == copy_name)
+    client.put(
+        f"{base}/match/footage-sort/{view['scan_id']}/decisions",
+        json={"overrides": [{"clip_id": copy, "shooter": "alice", "stage": 2}], "checked": {copy: True}},
+    )
+    return client.post(f"{base}/match/footage-sort/{view['scan_id']}/import", json={}).json(), copy
+
+
+def test_a_copy_beside_its_original_in_one_scan_never_moves_the_original(
+    tmp_path: Path, source_clip: Path
+) -> None:
+    """Both arrive in the same sort; the user sends the copy to stage 2.
+    The original keeps stage 1 and the copy is reported, not imported."""
+    _, client, root, base = _match_app(tmp_path)
+    shared = _shared_folder(tmp_path, source_clip)
+    backup = shared / "backup"
+    backup.mkdir()
+    shutil.copyfile(shared / "from-carol" / "IMG_0001.MOV", backup / "IMG_0001 copy.MOV")
+    view = _scan(client, base, shared)
+
+    result, copy = _import_copy_to_stage_2(client, base, view, "IMG_0001 copy.MOV")
+
+    alice = MatchProject.load(match_model.Match.shooter_root(root, "alice"))
+    assert [Path(v.path).name for v in alice.stage(1).videos] == ["IMG_0001.MOV"]
+    assert alice.stage(2).videos == []
+    assert result["not_imported"][copy] == "already imported for alice"
+
+
+def test_a_scan_from_before_fingerprints_never_moves_a_placed_clip(tmp_path: Path, source_clip: Path) -> None:
+    """A review written by an older version has no fingerprints on its
+    clips; the import still knows the copy by its content."""
+    _, client, root, base = _match_app(tmp_path)
+    shared = _shared_folder(tmp_path, source_clip)
+    first = _scan(client, base, shared)
+    client.post(f"{base}/match/footage-sort/{first['scan_id']}/import", json={})
+    copy = _copy_elsewhere(tmp_path, shared / "from-carol" / "IMG_0001.MOV", "alice-stage1.mov")
+    view = _scan(client, base, copy.parent)
+    record_path = root / footage_sort_api.SORT_DIR / f"{view['scan_id']}.json"
+    record = json.loads(record_path.read_text())
+    for clip in record["clips"]:
+        clip.pop("fingerprint", None)
+    record_path.write_text(json.dumps(record))
+
+    _import_copy_to_stage_2(client, base, view, "alice-stage1.mov")
+
+    alice = MatchProject.load(match_model.Match.shooter_root(root, "alice"))
+    assert [Path(v.path).name for v in alice.stage(1).videos] == ["IMG_0001.MOV"]
+    assert alice.stage(2).videos == []
+
+
+def test_the_per_shooter_scan_keeps_its_own_shooters_backfill(tmp_path: Path, source_clip: Path) -> None:
+    _, client, root, base = _match_app(tmp_path)
+    shared = _shared_folder(tmp_path, source_clip)
+    first = _scan(client, base, shared)
+    client.post(f"{base}/match/footage-sort/{first['scan_id']}/import", json={})
+    alice_root = match_model.Match.shooter_root(root, "alice")
+    alice = MatchProject.load(alice_root)
+    for video in alice.all_videos():
+        video.fingerprint = None
+    alice.save(alice_root)
+    copy = _copy_elsewhere(tmp_path, shared / "from-carol" / "IMG_0001.MOV", "renamed.mov")
+
+    client.post(f"{base}/shooters/alice/videos/scan", json={"source_paths": [str(copy)]})
+
+    alice = MatchProject.load(alice_root)
+    assert [Path(v.path).name for v in alice.all_videos()] == ["IMG_0001.MOV"]
+    assert alice.all_videos()[0].fingerprint is not None

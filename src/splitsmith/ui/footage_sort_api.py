@@ -816,6 +816,8 @@ async def import_scan(scan_id: str, req: ImportRequest, request: Request) -> Imp
         {c.clip_id: "another shooter's import" for c in view.clips if c.checked and c not in chosen}
     )
     queued: list[tuple[str, Any, int, Any]] = []
+    # A review saved before fingerprints existed reaches here unbackfilled.
+    _backfill_fingerprints(state)
     registered = _registrations(state)
     by_fingerprint = _fingerprint_registrations(state)
     fingerprints = {c.clip.clip_id: c.fingerprint for c in record.clips}
@@ -831,7 +833,18 @@ async def import_scan(scan_id: str, req: ImportRequest, request: Request) -> Imp
         stage_number = c.proposal.stage
         assert slug is not None and stage_number is not None
         project, root = project_of(slug)
-        reg = _registration_of(registered, by_fingerprint, paths[c.clip_id], fingerprints.get(c.clip_id))
+        fingerprint = fingerprints.get(c.clip_id)
+        if fingerprint is None:
+            try:
+                fingerprint = clip_fingerprint(paths[c.clip_id])
+            except OSError:
+                fingerprint = None
+        reg = _registration_of(registered, by_fingerprint, paths[c.clip_id], fingerprint)
+        if reg is not None and reg.assigned:
+            # Placed already -- earlier, or by its copy earlier in this
+            # import. Assigning it here would move it off its stage.
+            not_imported[c.clip_id] = f"already imported for {reg.shooter}"
+            continue
         try:
             if reg is None:
                 video_path = project.register_video(paths[c.clip_id], root, link_mode=req.link_mode).path
@@ -849,6 +862,10 @@ async def import_scan(scan_id: str, req: ImportRequest, request: Request) -> Imp
         except (FileNotFoundError, KeyError, ValueError) as exc:
             not_imported[c.clip_id] = str(exc)
             continue
+        placed = Registration(shooter=slug, video_path=str(video.path), assigned=True)
+        registered[_resolved(paths[c.clip_id])] = placed
+        if fingerprint is not None:
+            by_fingerprint[fingerprint] = placed
         imported.append(
             ImportedClip(
                 clip_id=c.clip_id, shooter=slug, stage=stage_number, role=video.role, path=str(video.path)
