@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.60.0](https://github.com/mandakan/splitsmith/compare/v0.59.0...v0.60.0) (2026-10-06)
+
+
+### Features
+
+* **footage:** the same clip from another path reads as already imported ([#1124](https://github.com/mandakan/splitsmith/issues/1124)) ([#1226](https://github.com/mandakan/splitsmith/issues/1226)) ([295e54d](https://github.com/mandakan/splitsmith/commit/295e54db9935d10f04cefa20a649ce641fae1f49))
+
+
+### Bug Fixes
+
+* **audit:** a trimmed stage plays even when its proxy is missing ([#1224](https://github.com/mandakan/splitsmith/issues/1224)) ([#1228](https://github.com/mandakan/splitsmith/issues/1228)) ([2cf96f8](https://github.com/mandakan/splitsmith/commit/2cf96f8961c23abd1d667e46c8413b026c8436b7))
+* **footage:** the fingerprint backfill runs off the event loop ([#1227](https://github.com/mandakan/splitsmith/issues/1227)) ([#1229](https://github.com/mandakan/splitsmith/issues/1229)) ([a465e83](https://github.com/mandakan/splitsmith/commit/a465e8368775aebee83b56f4f4976cecbb98397f))
+* **footage:** two clips with the same file name both import ([#1124](https://github.com/mandakan/splitsmith/issues/1124)) ([#1225](https://github.com/mandakan/splitsmith/issues/1225)) ([a6bcba7](https://github.com/mandakan/splitsmith/commit/a6bcba79411e92d9fc88a949b934c42ed199563f))
+
+
+### Performance
+
+* **ui:** pages load on first navigation ([#1222](https://github.com/mandakan/splitsmith/issues/1222)) ([7c98dca](https://github.com/mandakan/splitsmith/commit/7c98dcab79aee831880620df3b6db8354a4795b9))
+
 ## [0.59.0](https://github.com/mandakan/splitsmith/compare/v0.58.0...v0.59.0) (2026-10-06)
 
 
