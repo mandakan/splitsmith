@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import numpy as np
 import pytest
 
+from splitsmith.beep_calibration import load_manifest
+from splitsmith.beep_detect import _candidate_runs, detect_beep, load_audio
 from splitsmith.beep_features import FEATURE_NAMES, candidate_features, feature_vector
-from splitsmith.config import BeepCandidate, BeepFeatures
+from splitsmith.config import BeepCandidate, BeepDetectConfig, BeepFeatures
 
 SR = 48_000
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 
 def _features(audio: np.ndarray, *, gain: float = 1.0) -> BeepFeatures:
@@ -87,3 +91,32 @@ def test_the_vector_follows_the_model_field_order() -> None:
 def test_a_stored_candidate_without_features_still_loads() -> None:
     old = {"time": 1.0, "score": 0.5, "peak_amplitude": 0.2, "duration_ms": 300.0}
     assert BeepCandidate.model_validate(old).features is None
+
+
+def test_detect_beep_attaches_the_features_candidate_features_computes() -> None:
+    """No skew: what the trainer reads off a candidate is exactly what a
+    direct call on the same run returns. ``detect_beep`` ranks runs by
+    score (a stable sort), so its candidates line up with the runs sorted
+    the same way."""
+    entry = load_manifest(FIXTURES / "beep_calibration" / "manifest.yaml").fixtures[1]
+    audio, sr = load_audio(FIXTURES / entry.clip_wav)
+    config = BeepDetectConfig(top_n_candidates=1000)
+
+    detection = detect_beep(audio, sr, config)
+    runs = sorted(_candidate_runs(audio, sr, config), key=lambda r: r.score, reverse=True)
+
+    assert len(detection.candidates) == len(runs) > 1
+    for candidate, run in zip(detection.candidates, runs, strict=True):
+        assert candidate.features == candidate_features(
+            run.audio,
+            sr,
+            run_start=run.start,
+            run_end=run.end,
+            run_peak=run.run_peak,
+            noise_floor=run.noise_floor,
+            global_peak=run.global_peak,
+            silence_score=run.silence_score,
+            tonal_ratio=run.tonal_ratio,
+            band_lo_hz=config.freq_min_hz,
+            band_hi_hz=config.freq_max_hz,
+        )
