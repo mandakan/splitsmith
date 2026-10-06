@@ -15,6 +15,9 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, api } from "@/lib/api";
+import { allowLazyPages } from "@/test/lazyRoutes";
+
+allowLazyPages();
 
 const getDevicePending = vi.fn();
 

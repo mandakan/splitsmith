@@ -24,6 +24,9 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api, type CompareStageResponse } from "@/lib/api";
+import { allowLazyPages } from "@/test/lazyRoutes";
+
+allowLazyPages();
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();

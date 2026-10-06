@@ -96,6 +96,9 @@ window.matchMedia =
   }) as unknown as MediaQueryList);
 
 import { api } from "@/lib/api";
+import { allowLazyPages } from "@/test/lazyRoutes";
+
+allowLazyPages();
 
 describe("AuthGate mode-resolution gate (#734)", () => {
   beforeEach(() => {
