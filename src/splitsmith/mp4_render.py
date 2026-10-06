@@ -60,7 +60,7 @@ import logging
 import subprocess
 import tempfile
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal, Protocol
 
@@ -73,6 +73,8 @@ from .composition import (
     SummaryHold,
     TitleCard,
     Transform,
+    Transition,
+    TransitionKind,
 )
 from .look_motion import MotionClipError, motion_overlay_filters, write_motion_clip
 from .looks import load_look
@@ -727,6 +729,9 @@ class _StagePlan:
     head_trim_seconds: float
     effective_seconds: float
     cam_alignments: tuple[_CamAlignment, ...]
+    #: Footage the trim holds after the effective window (the handle a
+    #: transition's tail edge reads past the tail pad, issue #1244).
+    tail_trim_seconds: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -751,10 +756,18 @@ class _StageItem:
     plan: _StagePlan
     lower_third: TitleCard | None
     kind: ItemKind = "stage"
+    #: Seconds a transition took off either end (issue #1244); the item is
+    #: encoded that much shorter and the boundary segment shows them.
+    head_cut_seconds: float = 0.0
+    tail_cut_seconds: float = 0.0
+
+    @property
+    def name(self) -> str:
+        return f"stage_{self.index:03d}"
 
     @property
     def duration_seconds(self) -> float:
-        return self.plan.effective_seconds
+        return self.plan.effective_seconds - self.head_cut_seconds - self.tail_cut_seconds
 
 
 @dataclass(frozen=True)
@@ -769,9 +782,15 @@ class _StillItem:
     kind: StillKind
     name: str
     card: Card
-    duration_seconds: float
+    card_seconds: float
     backdrop_stage_index: int | None
     backdrop_at: Literal["head", "tail"] = "head"
+    head_cut_seconds: float = 0.0
+    tail_cut_seconds: float = 0.0
+
+    @property
+    def duration_seconds(self) -> float:
+        return self.card_seconds - self.head_cut_seconds - self.tail_cut_seconds
 
 
 @dataclass(frozen=True)
@@ -783,6 +802,8 @@ class _SummaryItem:
     stage_index: int
     hold: SummaryHold
     kind: ItemKind = "summary"
+    head_cut_seconds: float = 0.0
+    tail_cut_seconds: float = 0.0
 
     @property
     def name(self) -> str:
@@ -790,7 +811,7 @@ class _SummaryItem:
 
     @property
     def duration_seconds(self) -> float:
-        return self.hold.duration_seconds
+        return self.hold.duration_seconds - self.head_cut_seconds - self.tail_cut_seconds
 
 
 @dataclass(frozen=True)
@@ -799,13 +820,35 @@ class _ClipItem:
 
     kind: ItemKind
     segment: Segment
+    head_cut_seconds: float = 0.0
+    tail_cut_seconds: float = 0.0
+
+    @property
+    def name(self) -> str:
+        return self.kind
 
     @property
     def duration_seconds(self) -> float:
-        return self.segment.asset.metadata.duration_seconds
+        return self.segment.asset.metadata.duration_seconds - self.head_cut_seconds - self.tail_cut_seconds
 
 
 SpineItem = _StageItem | _StillItem | _SummaryItem | _ClipItem
+
+
+@dataclass(frozen=True)
+class _Boundary:
+    """A transition between ``items[after_index]`` and the next item
+    (issue #1244): a crossfade of ``duration_seconds`` centred on the cut,
+    each neighbour having given up half of it (its ``tail_cut_seconds`` /
+    ``head_cut_seconds``), so the spine keeps its length."""
+
+    after_index: int
+    kind: TransitionKind
+    duration_seconds: float
+
+    @property
+    def name(self) -> str:
+        return f"boundary_{self.after_index:03d}"
 
 
 @dataclass(frozen=True)
@@ -819,10 +862,21 @@ class TimelinePlan:
     """
 
     items: tuple[SpineItem, ...]
+    boundaries: tuple[_Boundary, ...] = ()
+    #: Transitions that did not fit, worded for ``Mp4RenderResult.degradations``.
+    degradations: tuple[str, ...] = ()
 
     @property
     def duration_seconds(self) -> float:
-        return sum(item.duration_seconds for item in self.items)
+        return sum(item.duration_seconds for item in self.items) + sum(
+            b.duration_seconds for b in self.boundaries
+        )
+
+    def boundary_after(self, index: int) -> _Boundary | None:
+        for boundary in self.boundaries:
+            if boundary.after_index == index:
+                return boundary
+        return None
 
     @property
     def needs_rasterizer(self) -> bool:
@@ -861,7 +915,7 @@ def plan_timeline(composition: Composition, *, plans: list[_StagePlan] | None = 
                 kind="title_page",
                 name="title_page",
                 card=composition.title_page,
-                duration_seconds=composition.title_page.duration_seconds,
+                card_seconds=composition.title_page.duration_seconds,
                 backdrop_stage_index=0,
             )
         )
@@ -874,7 +928,7 @@ def plan_timeline(composition: Composition, *, plans: list[_StagePlan] | None = 
                     kind="slate",
                     name=f"slate_{index:03d}",
                     card=title,
-                    duration_seconds=title.duration_seconds,
+                    card_seconds=title.duration_seconds,
                     backdrop_stage_index=index,
                 )
             )
@@ -889,14 +943,137 @@ def plan_timeline(composition: Composition, *, plans: list[_StagePlan] | None = 
                 kind="closing",
                 name="closing",
                 card=composition.closing,
-                duration_seconds=composition.closing.duration_seconds,
+                card_seconds=composition.closing.duration_seconds,
                 backdrop_stage_index=len(composition.stages) - 1,
                 backdrop_at="tail",
             )
         )
     if composition.outro is not None:
         items.append(_ClipItem(kind="outro", segment=composition.outro))
-    return TimelinePlan(items=tuple(items))
+    boundaries, degradations = _place_boundaries(items, composition.transitions)
+    return TimelinePlan(items=tuple(items), boundaries=boundaries, degradations=degradations)
+
+
+def _place_boundaries(
+    items: list[SpineItem], transitions: tuple[Transition, ...]
+) -> tuple[tuple[_Boundary, ...], tuple[str, ...]]:
+    """Turn the stage-indexed transitions into spine boundaries (issue
+    #1244). A transition after stage i sits between the last item of
+    stage i's run (its summary when it has one, else the stage) and the
+    first of stage i+1's (its slate when it has one, else the stage).
+    One that does not fit (:func:`_boundary_fit`) is reported and left
+    out: a cut, never a clamped fade. The two neighbours of a placed
+    boundary are replaced in ``items`` with their cuts set."""
+    boundaries: list[_Boundary] = []
+    degradations: list[str] = []
+    for transition in sorted(transitions, key=lambda t: t.from_stage_index):
+        prev_index = _last_item_of_stage(items, transition.from_stage_index)
+        next_index = _first_item_of_stage(items, transition.to_stage_index)
+        if prev_index is None or next_index is None or next_index != prev_index + 1:
+            continue
+        half = transition.duration_seconds / 2.0
+        problem = _boundary_fit(
+            items[prev_index], items[next_index], half=half, seconds=transition.duration_seconds
+        )
+        if problem is not None:
+            degradations.append(problem)
+            continue
+        items[prev_index] = replace(items[prev_index], tail_cut_seconds=half)
+        items[next_index] = replace(items[next_index], head_cut_seconds=half)
+        boundaries.append(
+            _Boundary(
+                after_index=prev_index, kind=transition.kind, duration_seconds=transition.duration_seconds
+            )
+        )
+    return tuple(boundaries), tuple(degradations)
+
+
+def _stage_index_of(item: SpineItem) -> int | None:
+    if isinstance(item, _StageItem):
+        return item.index
+    if isinstance(item, _SummaryItem):
+        return item.stage_index
+    if isinstance(item, _StillItem) and item.kind == "slate":
+        return item.backdrop_stage_index
+    return None
+
+
+def _last_item_of_stage(items: list[SpineItem], stage_index: int) -> int | None:
+    found = [i for i, item in enumerate(items) if _stage_index_of(item) == stage_index]
+    return found[-1] if found else None
+
+
+def _first_item_of_stage(items: list[SpineItem], stage_index: int) -> int | None:
+    found = [i for i, item in enumerate(items) if _stage_index_of(item) == stage_index]
+    return found[0] if found else None
+
+
+def _boundary_fit(prev: SpineItem, nxt: SpineItem, *, half: float, seconds: float) -> str | None:
+    """Why a transition of ``seconds`` cannot sit between ``prev`` and
+    ``nxt``, or ``None`` when it can. A stage gives up ``half`` of its
+    pad (the fade must not cover the last shot or the beep) and reads
+    ``half`` of handle beyond it (footage the trim holds past the pad); a
+    card gives up ``half`` of itself and its handle is its own frame, so it
+    needs ``half`` to be at most half its length. Mirrors the FCPXML
+    emitter's wording; reports, never clamps."""
+    if isinstance(prev, _StageItem):
+        name = prev.plan.stage.name
+        pad = prev.plan.stage.tail_pad_seconds
+        if half > pad:
+            return (
+                f"transition after stage {name!r} ({seconds:g}s) exceeds the stage's tail pad ({pad:g}s); "
+                "increase the pad or shorten the transition: rendered as a cut"
+            )
+        if half > prev.plan.tail_trim_seconds:
+            return _handle_short(
+                "after", name, seconds, half, "past the tail pad", prev.plan.tail_trim_seconds
+            )
+    elif half > prev.duration_seconds / 2.0:
+        return (
+            f"transition after {prev.name} ({seconds:g}s) exceeds half the card "
+            f"({prev.duration_seconds / 2.0:g}s): rendered as a cut"
+        )
+    if isinstance(nxt, _StageItem):
+        name = nxt.plan.stage.name
+        pad = nxt.plan.stage.head_pad_seconds
+        if half > pad:
+            return (
+                f"transition before stage {name!r} ({seconds:g}s) exceeds the stage's head pad ({pad:g}s); "
+                "increase the pad or shorten the transition: rendered as a cut"
+            )
+        if half > nxt.plan.head_trim_seconds:
+            return _handle_short(
+                "before", name, seconds, half, "before the head pad", nxt.plan.head_trim_seconds
+            )
+    elif half > nxt.duration_seconds / 2.0:
+        return (
+            f"transition into {nxt.name} ({seconds:g}s) exceeds half the card "
+            f"({nxt.duration_seconds / 2.0:g}s): rendered as a cut"
+        )
+    return None
+
+
+def _handle_short(side: str, name: str, seconds: float, half: float, where: str, have: float) -> str:
+    return (
+        f"transition {side} stage {name!r} ({seconds:g}s) needs {half:g}s of footage {where} "
+        f"and the trim has {have:g}s; shorten the transition: rendered as a cut"
+    )
+
+
+def _narrow_plan(plan: _StagePlan, *, head_cut: float, tail_cut: float) -> _StagePlan:
+    """The plan for a window of the same stage: ``head_cut`` later in
+    (negative reads handle footage before the pad) and ``tail_cut``
+    shorter (negative reads past the tail pad). The cams are recomputed
+    from the new head, the same head-slip math :func:`_plan_stage` does."""
+    head_trim = plan.head_trim_seconds + head_cut
+    effective = plan.effective_seconds - head_cut - tail_cut
+    return _StagePlan(
+        stage=plan.stage,
+        head_trim_seconds=head_trim,
+        effective_seconds=effective,
+        cam_alignments=_align_cams(plan.stage, head_trim_seconds=head_trim, effective_seconds=effective),
+        tail_trim_seconds=plan.tail_trim_seconds + tail_cut,
+    )
 
 
 def _plan_stage(stage: Stage, sequence_format) -> _StagePlan:  # type: ignore[no-untyped-def]
@@ -916,6 +1093,20 @@ def _plan_stage(stage: Stage, sequence_format) -> _StagePlan:  # type: ignore[no
             f"after trim ({effective_seconds:.3f}s); reduce head/tail pad"
         )
 
+    return _StagePlan(
+        stage=stage,
+        head_trim_seconds=head_trim_seconds,
+        effective_seconds=effective_seconds,
+        cam_alignments=_align_cams(
+            stage, head_trim_seconds=head_trim_seconds, effective_seconds=effective_seconds
+        ),
+        tail_trim_seconds=tail_trim_seconds,
+    )
+
+
+def _align_cams(
+    stage: Stage, *, head_trim_seconds: float, effective_seconds: float
+) -> tuple[_CamAlignment, ...]:
     cam_alignments: list[_CamAlignment] = []
     visible_head = head_trim_seconds  # source time of the visible head in the primary
     for sec in stage.secondaries:
@@ -943,13 +1134,7 @@ def _plan_stage(stage: Stage, sequence_format) -> _StagePlan:  # type: ignore[no
                 cam_visible_seconds=max(0.0, cam_visible),
             )
         )
-
-    return _StagePlan(
-        stage=stage,
-        head_trim_seconds=head_trim_seconds,
-        effective_seconds=effective_seconds,
-        cam_alignments=tuple(cam_alignments),
-    )
+    return tuple(cam_alignments)
 
 
 # --- command construction -------------------------------------------------
