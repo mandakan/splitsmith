@@ -14,7 +14,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from splitsmith.overlay_theme import load_theme
+from splitsmith.looks import load_look
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "render_look_thumbnails.py"
 REGISTRY = Path(__file__).resolve().parent.parent / "src/splitsmith/ui_static/src/lib/lookGallery.ts"
@@ -38,11 +38,14 @@ class _StubRasterizer:
         Image.new("RGBA", (width, height), (0, 0, 0, 0)).save(buf, format="PNG")
         return buf.getvalue()
 
+    def render_template(self, template, *, context, width: int, height: int) -> bytes:
+        return self.png("", width=width, height=height)
+
 
 def test_writes_every_thumbnail_at_the_gallery_size(tmp_path: Path) -> None:
     mod = _load()
     raster = _StubRasterizer()
-    written = mod.build_thumbnails(tmp_path, rasterizer=raster, theme=load_theme("splitsmith"))
+    written = mod.build_thumbnails(tmp_path, rasterizer=raster, look=load_look("splitsmith"))
     assert sorted(p.name for p in written) == sorted(mod.THUMBNAILS)
     for path in written:
         with Image.open(path) as im:
@@ -62,6 +65,6 @@ def test_file_set_matches_the_registry() -> None:
 
 def test_transition_tiles_differ_from_each_other(tmp_path: Path) -> None:
     mod = _load()
-    mod.build_thumbnails(tmp_path, rasterizer=_StubRasterizer(), theme=load_theme("splitsmith"))
+    mod.build_thumbnails(tmp_path, rasterizer=_StubRasterizer(), look=load_look("splitsmith"))
     names = ("transition-cut.png", "transition-static.png", "transition-zoom.png")
     assert len({(tmp_path / n).read_bytes() for n in names}) == 3

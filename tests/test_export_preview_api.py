@@ -31,6 +31,11 @@ class _StubRasterizer:
         Image.new("RGBA", (width, height), (0, 0, 0, 0)).save(buf, format="PNG")
         return buf.getvalue()
 
+    def render_template(self, template, *, context, width: int, height: int) -> bytes:
+        import json
+
+        return self.png(json.dumps(context.data, ensure_ascii=False), width=width, height=height)
+
 
 @contextmanager
 def _stub_factory():

@@ -33,8 +33,8 @@ from ..export_preview import (
     preview_key,
     render_preview,
 )
+from ..looks import load_look
 from ..overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
-from ..overlay_theme import load_theme
 from ..runtime import runtime
 from . import render_bound
 
@@ -117,7 +117,7 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
                 project=project,
                 root=root,
                 audit_doc=audit_doc,
-                theme=load_theme("splitsmith"),
+                look=load_look("splitsmith"),
                 rasterizer=rasterizer,
                 ffmpeg_binary=rt.ffmpeg_binary,
                 work_dir=Path(work),

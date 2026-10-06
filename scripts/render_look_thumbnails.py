@@ -29,13 +29,14 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from splitsmith import composition  # noqa: E402
+from splitsmith.looks import Look, load_look  # noqa: E402
 from splitsmith.match_project import StageScorecard  # noqa: E402
 from splitsmith.overlay_card import build_card_still, build_lower_third, card_scale  # noqa: E402
 from splitsmith.overlay_html import single_html  # noqa: E402
 from splitsmith.overlay_raster import ChromiumRasterizer, Rasterizer  # noqa: E402
 from splitsmith.overlay_single import OverlayRun, run_groups  # noqa: E402
 from splitsmith.overlay_summary_cell import build_summary_still  # noqa: E402
-from splitsmith.overlay_theme import OverlayTheme, load_theme  # noqa: E402
+from splitsmith.overlay_theme import OverlayTheme, theme_for  # noqa: E402
 from splitsmith.stage_summary_data import TileShot, TileStageData  # noqa: E402
 
 WIDTH = 480
@@ -135,7 +136,8 @@ def _transition(kind: str, backdrop: Image.Image) -> Image.Image:
     return out
 
 
-def build_thumbnails(out: Path, *, rasterizer: Rasterizer, theme: OverlayTheme) -> list[Path]:
+def build_thumbnails(out: Path, *, rasterizer: Rasterizer, look: Look) -> list[Path]:
+    theme = theme_for(look)
     out.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
     plain = paint_backdrop()
@@ -153,21 +155,24 @@ def build_thumbnails(out: Path, *, rasterizer: Rasterizer, theme: OverlayTheme) 
         card = {
             "width": WIDTH,
             "height": HEIGHT,
-            "theme": theme,
+            "fps": 30.0,
+            "look": look,
             "rasterizer": rasterizer,
             "backdrop": backdrop_png,
         }
         save("none.png", plain)
         title = composition.MatchTitle(text=MATCH, info=("2026-06-27", "Production Optics"))
-        save("title-page.png", build_card_still(title, **card))
+        save("title-page.png", build_card_still(title, slot="title_page", **card))
         closing = composition.MatchTitle(text=MATCH, info=("2026-06-27",))
-        save("closing-card.png", build_card_still(closing, **card))
+        save("closing-card.png", build_card_still(closing, slot="closing", **card))
         slate = composition.TitleCard(text=STAGE, duration_seconds=1.5, style="slate", info=("24 rounds",))
-        save("stage-card-slate.png", build_card_still(slate, **card))
+        save("stage-card-slate.png", build_card_still(slate, slot="slate", **card))
         lower = composition.TitleCard(
             text=STAGE, duration_seconds=1.5, style="lower-third", info=("24 rounds",)
         )
-        third = build_lower_third(lower, width=WIDTH, height=HEIGHT, theme=theme, rasterizer=rasterizer)
+        third = build_lower_third(
+            lower, width=WIDTH, height=HEIGHT, fps=30.0, look=look, rasterizer=rasterizer
+        )
         if third is None:
             raise RuntimeError("lower third did not compose")
         over = plain.convert("RGBA")
@@ -195,7 +200,7 @@ def main() -> int:
     parser.add_argument("--theme", default="splitsmith", help="an installed Look name")
     args = parser.parse_args()
     with ChromiumRasterizer() as rasterizer:
-        written = build_thumbnails(args.out, rasterizer=rasterizer, theme=load_theme(args.theme))
+        written = build_thumbnails(args.out, rasterizer=rasterizer, look=load_look(args.theme))
     for path in written:
         print(path)
     return 0

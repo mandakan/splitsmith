@@ -32,6 +32,7 @@ from PIL import Image
 
 from . import composition
 from .export_naming import stage_display_name, stage_file_base
+from .looks import Look
 from .match_project import MatchProject
 from .overlay_card import build_card_still, build_lower_third, card_scale
 from .overlay_html import single_html
@@ -39,7 +40,7 @@ from .overlay_raster import Rasterizer
 from .overlay_single import OverlayRun, run_groups
 from .overlay_still import letterbox
 from .overlay_summary_cell import build_summary_still
-from .overlay_theme import OverlayTheme
+from .overlay_theme import OverlayTheme, theme_for
 from .stage_summary_data import TileShot, TileStageData, load_stage_shots
 from .ui.audio import resolve_trim_for_read
 from .ui.match_exports import title_info_lines
@@ -238,12 +239,13 @@ def render_preview(
     project: MatchProject,
     root: Path,
     audit_doc: dict | None,
-    theme: OverlayTheme,
+    look: Look,
     rasterizer: Rasterizer,
     ffmpeg_binary: str | None,
     work_dir: Path,
 ) -> bytes:
     """The PNG for ``spec``, or :class:`PreviewError` for a 404 / 409 / 503."""
+    theme = theme_for(look)
     try:
         stage = project.stage(spec.stage_number)
     except KeyError as exc:
@@ -278,7 +280,7 @@ def render_preview(
     name = spec.project_name or project.name
     label = project.competitor_name or name
     stage_label = stage_display_name(stage.stage_number, stage.stage_name)
-    size = {"width": spec.width, "height": spec.height, "theme": theme}
+    size = {"width": spec.width, "height": spec.height, "fps": 30.0, "look": look}
     image: Image.Image | None
     if spec.card == "frame":
         image = _compose_over(frame, None, spec, theme)
@@ -286,12 +288,13 @@ def render_preview(
         card = composition.MatchTitle(
             text=name, info=title_info_lines(project, extra=spec.title_info, division=spec.title_division)
         )
-        image = build_card_still(card, rasterizer=rasterizer, backdrop=frame, **size)
+        slot = "title_page" if spec.card == "title" else "closing"
+        image = build_card_still(card, slot=slot, rasterizer=rasterizer, backdrop=frame, **size)
     elif spec.card == "slate":
         slate = composition.TitleCard(
             text=stage_label, duration_seconds=1.5, style="slate", info=_rounds_info(stage)
         )
-        image = build_card_still(slate, rasterizer=rasterizer, backdrop=frame, **size)
+        image = build_card_still(slate, slot="slate", rasterizer=rasterizer, backdrop=frame, **size)
     elif spec.card == "lower-third":
         lower = composition.TitleCard(
             text=stage_label, duration_seconds=1.5, style="lower-third", info=_rounds_info(stage)
@@ -308,7 +311,15 @@ def render_preview(
             scorecard=stage.scorecard,
             stage_rounds=stage.stage_rounds,
         )
-        image = build_summary_still(tile, label, rasterizer=rasterizer, backdrop=frame, **size)
+        image = build_summary_still(
+            tile,
+            label,
+            width=spec.width,
+            height=spec.height,
+            theme=theme,
+            rasterizer=rasterizer,
+            backdrop=frame,
+        )
     else:  # overlay
         run = OverlayRun(
             start_frame=0,

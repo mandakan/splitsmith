@@ -74,6 +74,7 @@ from .composition import (
     TitleCard,
     Transform,
 )
+from .looks import load_look
 from .overlay_card import (
     LOWER_THIRD_FADE_SECONDS,
     Card,
@@ -83,7 +84,7 @@ from .overlay_card import (
 )
 from .overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
 from .overlay_summary_cell import build_summary_still
-from .overlay_theme import ThemeName, load_theme
+from .overlay_theme import ThemeName, load_theme, theme_for
 from .runtime import runtime
 from .segment_cache import SegmentCache
 
@@ -284,7 +285,9 @@ def _render_with_work_dir(
     progress: RenderProgress | None = None,
 ) -> Mp4RenderResult:
     sequence = composition.sequence
-    theme = load_theme(overlay_theme) if timeline.needs_rasterizer else None
+    look = load_look(overlay_theme) if timeline.needs_rasterizer else None
+    theme = theme_for(look) if look is not None else None
+    fps = sequence.frame_rate_num / sequence.frame_rate_den
     segments: list[tuple[Path, float]] = []
     generated = False
     total_steps = len(timeline.items) + 1
@@ -321,12 +324,13 @@ def _render_with_work_dir(
     for step, item in enumerate(timeline.items, start=1):
         if isinstance(item, _StageItem):
             lower_third: _LowerThirdInput | None = None
-            if item.lower_third is not None and rasterizer is not None and theme is not None:
+            if item.lower_third is not None and rasterizer is not None and look is not None:
                 image = build_lower_third(
                     item.lower_third,
                     width=sequence.width,
                     height=sequence.height,
-                    theme=theme,
+                    fps=fps,
+                    look=look,
                     rasterizer=rasterizer,
                 )
                 if image is not None:
@@ -347,7 +351,7 @@ def _render_with_work_dir(
                 (encode(cmd, stage_out, index=step, label=item.plan.stage.name), item.duration_seconds)
             )
         elif isinstance(item, _StillItem):
-            if rasterizer is None or theme is None:
+            if rasterizer is None or look is None:
                 continue  # already recorded as a degradation up front
             backdrop = _grab_backdrop(
                 timeline,
@@ -360,9 +364,11 @@ def _render_with_work_dir(
             )
             image = build_card_still(
                 item.card,
+                slot=item.kind,
                 width=sequence.width,
                 height=sequence.height,
-                theme=theme,
+                fps=fps,
+                look=look,
                 rasterizer=rasterizer,
                 backdrop=backdrop,
             )
@@ -628,6 +634,9 @@ class _CamAlignment:
 
 
 ItemKind = Literal["intro", "title_page", "slate", "stage", "summary", "closing", "outro"]
+StillKind = Literal["title_page", "slate", "closing"]
+"""The generated full-frame cards: a subset of :data:`ItemKind` and of
+``looks.CardSlot``, so a still item's kind names its Look template."""
 
 
 @dataclass(frozen=True)
@@ -653,7 +662,7 @@ class _StillItem:
     last stage for the closing card.
     """
 
-    kind: ItemKind
+    kind: StillKind
     name: str
     card: Card
     duration_seconds: float

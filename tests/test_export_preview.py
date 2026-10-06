@@ -16,8 +16,8 @@ from PIL import Image
 
 from splitsmith import export_preview as ep
 from splitsmith.config import StageRounds
+from splitsmith.looks import load_look
 from splitsmith.match_project import MatchProject, StageEntry, StageVideo
-from splitsmith.overlay_theme import load_theme
 
 
 class _StubRasterizer:
@@ -26,6 +26,14 @@ class _StubRasterizer:
 
     def png(self, html: str, *, width: int, height: int) -> bytes:
         self.htmls.append(html)
+        buf = io.BytesIO()
+        Image.new("RGBA", (width, height), (0, 0, 0, 0)).save(buf, format="PNG")
+        return buf.getvalue()
+
+    def render_template(self, template: Path, *, context, width: int, height: int) -> bytes:
+        import json
+
+        self.htmls.append(json.dumps(context.data, ensure_ascii=False))
         buf = io.BytesIO()
         Image.new("RGBA", (width, height), (0, 0, 0, 0)).save(buf, format="PNG")
         return buf.getvalue()
@@ -74,7 +82,7 @@ def _render(
         project=project,
         root=root,
         audit_doc=audit,
-        theme=load_theme("splitsmith"),
+        look=load_look("splitsmith"),
         rasterizer=raster or _StubRasterizer(),
         ffmpeg_binary=None,
         work_dir=tmp_path / "work",
@@ -133,7 +141,7 @@ def test_summary_label_is_the_competitor_then_the_bundle_name(tmp_path: Path) ->
         project=project,
         root=root,
         audit_doc=AUDIT,
-        theme=load_theme("splitsmith"),
+        look=load_look("splitsmith"),
         rasterizer=raster,
         ffmpeg_binary=None,
         work_dir=tmp_path / "work",
@@ -150,7 +158,7 @@ def test_slate_carries_the_stage_name_and_round_count(tmp_path: Path) -> None:
         project=project,
         root=root,
         audit_doc=None,
-        theme=load_theme("splitsmith"),
+        look=load_look("splitsmith"),
         rasterizer=raster,
         ffmpeg_binary=None,
         work_dir=tmp_path / "work",
@@ -259,7 +267,7 @@ def test_stage_card_names_an_unnamed_stage_by_number(tmp_path: Path, card: str) 
         project=project,
         root=root,
         audit_doc=None,
-        theme=load_theme("splitsmith"),
+        look=load_look("splitsmith"),
         rasterizer=raster,
         ffmpeg_binary=None,
         work_dir=tmp_path / "work",

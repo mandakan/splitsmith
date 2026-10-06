@@ -9,19 +9,29 @@ from PIL import Image
 
 from splitsmith import overlay_card
 from splitsmith.composition import MatchTitle, TitleCard
+from splitsmith.looks import load_look
 from splitsmith.overlay_layout import Anchor, Emphasis, Role
 from splitsmith.overlay_theme import load_theme
 
 THEME = load_theme("splitsmith")
+LOOK = load_look("splitsmith")
 
 
 class _FakeRasterizer:
     def __init__(self, *, fill: tuple[int, int, int, int] = (0, 0, 0, 0)) -> None:
         self.calls: list[tuple[str, int, int]] = []
+        self.template_calls: list[tuple[Path, dict, int, int]] = []
         self._fill = fill
 
     def png(self, html: str, *, width: int, height: int) -> bytes:
         self.calls.append((html, width, height))
+        return self._blank(width, height)
+
+    def render_template(self, template: Path, *, context, width: int, height: int) -> bytes:
+        self.template_calls.append((template, context.model_dump(), width, height))
+        return self._blank(width, height)
+
+    def _blank(self, width: int, height: int) -> bytes:
         buf = io.BytesIO()
         Image.new("RGBA", (width, height), self._fill).save(buf, format="PNG")
         return buf.getvalue()
@@ -30,6 +40,9 @@ class _FakeRasterizer:
 class _BoomRasterizer:
     def png(self, html: str, *, width: int, height: int) -> bytes:
         raise RuntimeError("rasterize boom")
+
+    def render_template(self, template: Path, *, context, width: int, height: int) -> bytes:
+        raise RuntimeError("template boom")
 
 
 def _frame(tmp_path: Path, color: tuple[int, int, int] = (200, 200, 200)) -> Path:
@@ -86,24 +99,33 @@ def test_still_is_canvas_sized_rgb_and_rasterizes_the_text(tmp_path: Path) -> No
     fake = _FakeRasterizer()
     still = overlay_card.build_card_still(
         MatchTitle(text="Bromma Classifier", info=("2026-05-01",)),
+        slot="title_page",
         width=320,
         height=180,
-        theme=THEME,
+        fps=30,
+        look=LOOK,
         rasterizer=fake,
         backdrop=None,
     )
     assert still is not None
     assert still.mode == "RGB"
     assert still.size == (320, 180)
-    ((html, width, height),) = fake.calls
+    ((_template, context, width, height),) = fake.template_calls
     assert (width, height) == (320, 180)
-    assert "Bromma Classifier" in html
-    assert "2026-05-01" in html
+    assert context["data"]["card"]["text"] == "Bromma Classifier"
+    assert context["data"]["card"]["info"] == ["2026-05-01"]
 
 
 def test_no_backdrop_paints_the_theme_surface(tmp_path: Path) -> None:
     still = overlay_card.build_card_still(
-        MatchTitle(text="x"), width=64, height=36, theme=THEME, rasterizer=_FakeRasterizer(), backdrop=None
+        MatchTitle(text="x"),
+        slot="closing",
+        width=64,
+        height=36,
+        fps=30,
+        look=LOOK,
+        rasterizer=_FakeRasterizer(),
+        backdrop=None,
     )
     assert still is not None
     assert still.getpixel((1, 1)) == THEME.surface
@@ -112,7 +134,14 @@ def test_no_backdrop_paints_the_theme_surface(tmp_path: Path) -> None:
 def test_backdrop_is_blurred_and_dimmed(tmp_path: Path) -> None:
     frame = _frame(tmp_path, (200, 200, 200))
     still = overlay_card.build_card_still(
-        MatchTitle(text="x"), width=64, height=36, theme=THEME, rasterizer=_FakeRasterizer(), backdrop=frame
+        MatchTitle(text="x"),
+        slot="closing",
+        width=64,
+        height=36,
+        fps=30,
+        look=LOOK,
+        rasterizer=_FakeRasterizer(),
+        backdrop=frame,
     )
     assert still is not None
     r, g, b = still.getpixel((32, 18))
@@ -125,7 +154,14 @@ def test_unreadable_backdrop_falls_back_to_the_surface(tmp_path: Path) -> None:
     bad = tmp_path / "bad.png"
     bad.write_bytes(b"not a png")
     still = overlay_card.build_card_still(
-        MatchTitle(text="x"), width=64, height=36, theme=THEME, rasterizer=_FakeRasterizer(), backdrop=bad
+        MatchTitle(text="x"),
+        slot="closing",
+        width=64,
+        height=36,
+        fps=30,
+        look=LOOK,
+        rasterizer=_FakeRasterizer(),
+        backdrop=bad,
     )
     assert still is not None
     assert still.getpixel((1, 1)) == THEME.surface
@@ -136,7 +172,14 @@ def test_rasterizer_failure_skips_the_card(tmp_path: Path) -> None:
     the still is ``None`` and the caller drops the segment -- unlike the
     summary, which keeps its blurred freeze without text."""
     still = overlay_card.build_card_still(
-        MatchTitle(text="x"), width=64, height=36, theme=THEME, rasterizer=_BoomRasterizer(), backdrop=None
+        MatchTitle(text="x"),
+        slot="title_page",
+        width=64,
+        height=36,
+        fps=30,
+        look=LOOK,
+        rasterizer=_BoomRasterizer(),
+        backdrop=None,
     )
     assert still is None
 
@@ -147,9 +190,91 @@ def test_lower_third_still_is_transparent_rgba(tmp_path: Path) -> None:
         TitleCard(text="Stage 3", duration_seconds=2.0, style="lower-third"),
         width=64,
         height=36,
-        theme=THEME,
+        fps=30,
+        look=LOOK,
         rasterizer=fake,
     )
     assert still is not None
     assert still.mode == "RGBA"
     assert still.size == (64, 36)
+
+
+# --- the Look template ---------------------------------------------------------
+
+
+def test_a_card_renders_through_the_looks_template_for_its_slot(tmp_path: Path) -> None:
+    r = _FakeRasterizer()
+    image = overlay_card.build_card_still(
+        TitleCard(text="Stage 3", duration_seconds=1.5, info=("24 rounds",)),
+        slot="slate",
+        width=640,
+        height=360,
+        fps=30,
+        look=LOOK,
+        rasterizer=r,
+        backdrop=_frame(tmp_path),
+    )
+    assert image is not None and image.size == (640, 360)
+    assert r.calls == [], "no card goes through the raw png path any more"
+    ((template, context, w, h),) = r.template_calls
+    assert template == LOOK.own_template("slate")
+    assert (w, h) == (640, 360)
+    assert context["data"]["card"] == {
+        "slot": "slate",
+        "text": "Stage 3",
+        "info": ["24 rounds"],
+        "duration_seconds": 1.5,
+    }
+    assert context["data"]["groups"][0]["elements"][0]["text"] == "Stage 3"
+    assert context["size"] == {"width": 640, "height": 360}
+    assert context["fps"] == 30
+    assert context["theme"]["ink"] == "#f4f4f5"
+    assert "html, body" in context["engine"]["css"]
+    assert context["assets"]["shared"].endswith("/_shared")
+
+
+def test_the_clean_look_falls_back_to_the_default_template_with_its_own_colours() -> None:
+    r = _FakeRasterizer()
+    overlay_card.build_card_still(
+        MatchTitle(text="x"),
+        slot="closing",
+        width=64,
+        height=32,
+        fps=30,
+        look=load_look("clean"),
+        rasterizer=r,
+        backdrop=None,
+    )
+    ((template, context, _, _),) = r.template_calls
+    assert template == LOOK.own_template("closing")
+    assert context["theme"]["ink"] == "#ffffff"
+
+
+def test_a_lower_third_uses_the_lower_third_slot_and_stays_transparent() -> None:
+    r = _FakeRasterizer()
+    image = overlay_card.build_lower_third(
+        TitleCard(text="Stage 3", duration_seconds=2.0, style="lower-third"),
+        width=64,
+        height=32,
+        fps=30,
+        look=LOOK,
+        rasterizer=r,
+    )
+    assert image is not None and image.mode == "RGBA"
+    assert r.template_calls[0][1]["data"]["card"]["slot"] == "lower_third"
+
+
+def test_a_template_that_raises_skips_the_card(tmp_path: Path, caplog) -> None:
+    """A user's broken card.html costs the card, never the render."""
+    image = overlay_card.build_card_still(
+        MatchTitle(text="x"),
+        slot="title_page",
+        width=64,
+        height=32,
+        fps=30,
+        look=LOOK,
+        rasterizer=_BoomRasterizer(),
+        backdrop=_frame(tmp_path),
+    )
+    assert image is None
+    assert "template boom" in caplog.text
