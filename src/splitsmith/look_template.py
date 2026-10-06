@@ -19,7 +19,9 @@ Pure: builds JSON-able values and a path; nothing here opens a browser.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
@@ -95,4 +97,16 @@ def shared_url() -> str:
     return shared_dir().resolve().as_uri()
 
 
-__all__ = ["TemplateContext", "engine_block", "group_json", "shared_url", "theme_tokens"]
+def template_digest(template: Path, context: TemplateContext, *, fps: float, engine_version: str) -> str:
+    """What a template render depends on, hashed: the template's bytes,
+    the whole context, the frame rate and the engine. The segment cache
+    keys a motion clip by this instead of by the clip's own content, so a
+    cached segment is found before any frame is rendered."""
+    digest = hashlib.sha256()
+    digest.update(template.read_bytes())
+    digest.update(context.init_script().encode("utf-8"))
+    digest.update(f"|fps={fps!r}|engine={engine_version}".encode())
+    return digest.hexdigest()
+
+
+__all__ = ["TemplateContext", "engine_block", "group_json", "shared_url", "template_digest", "theme_tokens"]

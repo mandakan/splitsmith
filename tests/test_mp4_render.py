@@ -651,8 +651,11 @@ def test_render_mp4_rejects_mixed_frame_rates_with_clear_message(
 class _FakeRasterizer:
     """Returns a real transparent PNG so the compositing is exercised."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, motion_seconds: float = 0.0) -> None:
         self.calls: list[str] = []
+        self.motion_seconds = motion_seconds
+        self.frame_requests: list[tuple] = []
+        self.frames_rendered = 0
 
     def png(self, html: str, *, width: int, height: int) -> bytes:
         import io
@@ -678,6 +681,34 @@ class _FakeRasterizer:
         buf = io.BytesIO()
         Image.new("RGBA", (width, height), (0, 0, 0, 0)).save(buf, format="PNG")
         return buf.getvalue()
+
+    def engine_version(self) -> str:
+        return "fake"
+
+    def render_template_frames(
+        self, template, *, context, width: int, height: int, fps: float, max_seconds: float
+    ):
+        """A still unless ``motion_seconds`` is set; frames are blank and
+        counted in ``frames_rendered`` as they are pulled."""
+        import json
+        import math
+
+        from splitsmith.overlay_raster import TemplateFrames
+
+        self.calls.append(json.dumps(context.data, ensure_ascii=False))
+        self.frame_requests.append((template, context.model_dump(), width, height, fps, max_seconds))
+        duration = self.motion_seconds
+        count = 1 if duration <= 0 else max(1, math.ceil(min(duration, max_seconds) * fps - 1e-9))
+        blank = bytes(width * height * 4)
+
+        def frames():
+            for _ in range(count):
+                self.frames_rendered += 1
+                yield blank
+
+        return TemplateFrames(
+            duration=duration, frame_count=count, width=width, height=height, frames=frames()
+        )
 
 
 def _asset(tmp_path: Path, name: str, *, seconds: float = 4.0) -> composition.Asset:
@@ -1349,3 +1380,128 @@ def test_rendered_mp4_carries_the_chapter_atoms(tmp_path: Path) -> None:
     assert float(chapters[0]["start_time"]) == pytest.approx(0.0, abs=0.001)
     assert float(chapters[1]["start_time"]) == pytest.approx(plan.items[0].duration_seconds, abs=0.001)
     assert float(chapters[1]["end_time"]) == pytest.approx(result.duration_seconds, abs=0.001)
+
+
+# --- motion cards (slice 2, #1242) ----------------------------------------------
+
+
+def _fake_clip_writer(frames, *, out: Path, fps: float, ffmpeg_binary: str):
+    """Consumes the frames and touches the file, so the renderer tests
+    never spawn ffmpeg for the clip."""
+    from splitsmith.look_motion import MotionClip
+
+    count = sum(1 for _ in frames.frames)
+    out.write_bytes(b"clip")
+    return MotionClip(path=out, seconds=count / fps, frame_count=count)
+
+
+def _command_writing(runner: MagicMock, suffix: str) -> tuple[str, ...]:
+    return next(tuple(c.args[0]) for c in runner.call_args_list if str(c.args[0][-1]).endswith(suffix))
+
+
+def test_build_motion_card_command_overlays_the_clip_on_the_backdrop_and_holds(tmp_path: Path) -> None:
+    comp = _carded_composition(tmp_path)
+    cmd = mp4_render._build_motion_card_command(
+        tmp_path / "bd.png",
+        tmp_path / "clip.mov",
+        seconds=3.0,
+        sequence=comp.sequence,
+        output_path=tmp_path / "t.mp4",
+    )
+    i_flags = [i for i, t in enumerate(cmd) if t == "-i"]
+    assert cmd[i_flags[0] + 1] == str(tmp_path / "bd.png")
+    assert cmd[i_flags[0] - 4 : i_flags[0]] == (
+        "-loop",
+        "1",
+        "-framerate",
+        mp4_render._rate_string(comp.sequence),
+    )
+    assert cmd[i_flags[1] + 1] == str(tmp_path / "clip.mov")
+    assert cmd[i_flags[2] + 1].startswith("anullsrc")
+    graph = cmd[cmd.index("-filter_complex") + 1]
+    assert "tpad=stop_mode=clone:stop_duration=3" in graph
+    assert "[0:v][motion]overlay=0:0:format=auto[withmotion]" in graph
+    assert graph.endswith("[withmotion]format=yuv420p,setsar=1[final]")
+    assert cmd[cmd.index("-t") + 1] == "3"
+    assert cmd[cmd.index("-map") + 1] == "[final]" and "2:a" in cmd
+
+
+def test_render_mp4_encodes_an_animated_card_as_a_motion_segment(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(mp4_render, "write_motion_clip", _fake_clip_writer)
+    comp = _carded_composition(tmp_path)
+    runner = MagicMock(side_effect=_ok)
+    work = tmp_path / "work"
+    fake = _FakeRasterizer(motion_seconds=0.6)
+    mp4_render.render_mp4(comp, output_path=tmp_path / "m.mp4", work_dir=work, runner=runner, rasterizer=fake)
+    title_cmd = _command_writing(runner, "title_page.mp4")
+    assert str(work / "title_page_motion.mov") in title_cmd
+    assert str(work / "title_page_backdrop.png") in title_cmd
+    assert "-loop" in title_cmd, "the backdrop still loops; the clip is the second input"
+    assert (work / "title_page_backdrop.png").exists()
+    assert fake.frames_rendered == 4 * 18, "four cards, 0.6 s at 30 fps each"
+
+
+def test_render_mp4_keeps_the_still_path_for_a_still_template(tmp_path: Path) -> None:
+    comp = _carded_composition(tmp_path)
+    runner = MagicMock(side_effect=_ok)
+    work = tmp_path / "work"
+    fake = _FakeRasterizer()
+    mp4_render.render_mp4(comp, output_path=tmp_path / "m.mp4", work_dir=work, runner=runner, rasterizer=fake)
+    title_cmd = _command_writing(runner, "title_page.mp4")
+    assert str(work / "title_page.png") in title_cmd
+    assert not any("motion.mov" in t for t in title_cmd)
+    assert fake.frames_rendered == 4
+
+
+def test_a_cached_motion_card_renders_no_frames(tmp_path: Path, monkeypatch) -> None:
+    """Second render, same inputs: the segment comes from the cache and
+    the template is loaded but no frame is rendered or piped."""
+    from splitsmith.segment_cache import SegmentCache
+
+    monkeypatch.setattr(mp4_render, "write_motion_clip", _fake_clip_writer)
+    comp = _carded_composition(tmp_path)
+    cache = SegmentCache(root=tmp_path / "cache", max_bytes=1 << 30)
+    first = _FakeRasterizer(motion_seconds=0.6)
+    mp4_render.render_mp4(
+        comp,
+        output_path=tmp_path / "m1.mp4",
+        work_dir=tmp_path / "w1",
+        runner=_writes_output([]),
+        rasterizer=first,
+        segment_cache=cache,
+    )
+    assert first.frames_rendered > 0
+    second = _FakeRasterizer(motion_seconds=0.6)
+    calls: list[list[str]] = []
+    mp4_render.render_mp4(
+        comp,
+        output_path=tmp_path / "m2.mp4",
+        work_dir=tmp_path / "w2",
+        runner=_writes_output(calls),
+        rasterizer=second,
+        segment_cache=cache,
+    )
+    assert second.frames_rendered == 0
+    assert len(second.frame_requests) == 4, "the templates were loaded to compute the keys"
+    # The backdrop grabs still run (the backdrop PNG's content is part of
+    # the key); nothing else but the stitch does.
+    assert sum(_is_concat(c) for c in calls) == 1
+    assert all(_is_concat(c) or str(c[-1]).endswith(".png") for c in calls), calls
+
+
+def test_an_animated_lower_third_is_a_clip_input_with_the_clip_filters(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(mp4_render, "write_motion_clip", _fake_clip_writer)
+    comp = _carded_composition(tmp_path, lower_third=True)
+    runner = MagicMock(side_effect=_ok)
+    work = tmp_path / "work"
+    fake = _FakeRasterizer(motion_seconds=0.4)
+    mp4_render.render_mp4(comp, output_path=tmp_path / "m.mp4", work_dir=work, runner=runner, rasterizer=fake)
+    stage_cmd = _command_writing(runner, "stage_000.mp4")
+    clip = str(work / "lower_third_000_motion.mov")
+    assert clip in stage_cmd
+    graph = stage_cmd[stage_cmd.index("-filter_complex") + 1]
+    assert "tpad=stop_mode=clone:stop_duration=1.5" in graph and "fade=t=out:st=1:d=0.5:alpha=1[lt]" in graph
+    lt_index = stage_cmd.index(clip)
+    assert (
+        stage_cmd[lt_index - 1] == "-i" and stage_cmd[lt_index - 2] != "-t"
+    ), "a clip input is not looped or cut"

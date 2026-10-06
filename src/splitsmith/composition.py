@@ -243,6 +243,9 @@ class TitleCard:
     font: str = "Helvetica"
     color: str = "1 1 1 1"
     info: tuple[str, ...] = ()
+    #: The Look template variant that draws it (``looks.DEFAULT_VARIANT``
+    #: is the still card); a variant the Look lacks falls back to default.
+    variant: str = "default"
 
 
 @dataclass(frozen=True)
@@ -264,6 +267,9 @@ class MatchTitle:
     text: str
     info: tuple[str, ...] = ()
     duration_seconds: float = 3.0
+    #: The Look template variant that draws it (``looks.DEFAULT_VARIANT``
+    #: is the still card); a variant the Look lacks falls back to default.
+    variant: str = "default"
 
 
 @dataclass(frozen=True)

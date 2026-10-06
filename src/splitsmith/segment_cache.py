@@ -38,13 +38,14 @@ import os
 import shutil
 import time
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 #: Bump when the key's recipe changes, so no entry keyed the old way hits.
-KEY_VERSION = 1
+KEY_VERSION = 2
 _SUFFIX = ".mp4"
 _STALE_PARTIAL_SECONDS = 24 * 3600
 
@@ -84,13 +85,28 @@ class SegmentCache:
     root: Path
     max_bytes: int
 
-    def key(self, argv: tuple[str, ...], *, output_path: Path, work_dir: Path) -> str:
-        """The content address of the segment ``argv`` writes to ``output_path``."""
+    def key(
+        self,
+        argv: tuple[str, ...],
+        *,
+        output_path: Path,
+        work_dir: Path,
+        virtual_inputs: Mapping[str, str] | None = None,
+    ) -> str:
+        """The content address of the segment ``argv`` writes to ``output_path``.
+
+        ``virtual_inputs`` maps an argv token (a file the encode will
+        create first, such as a motion clip) to the digest of what creates
+        it, so the key exists before the file does and a cached segment is
+        found without making the file."""
         output = str(output_path)
         parts: list[str] = [f"v{KEY_VERSION}", _binary_identity(argv[0])]
         for token in argv[1:]:
             if token == output:
                 parts.append("<output>")
+                continue
+            if virtual_inputs and token in virtual_inputs:
+                parts.append(f"virtual:{virtual_inputs[token]}")
                 continue
             candidate = Path(token)
             if candidate.is_absolute() and candidate.is_file():

@@ -25,6 +25,11 @@ ROUTE = "/api/shooters/me/export-preview"
 
 class _StubRasterizer:
     launches = 0
+    motion_seconds = 0.0
+    frames_rendered = 0
+
+    def __init__(self) -> None:
+        self.frame_requests: list[tuple] = []
 
     def png(self, html: str, *, width: int, height: int) -> bytes:
         buf = io.BytesIO()
@@ -35,6 +40,33 @@ class _StubRasterizer:
         import json
 
         return self.png(json.dumps(context.data, ensure_ascii=False), width=width, height=height)
+
+    def engine_version(self) -> str:
+        return "fake"
+
+    def render_template_frames(
+        self, template, *, context, width: int, height: int, fps: float, max_seconds: float
+    ):
+        """A still unless ``motion_seconds`` is set; frames are blank and
+        counted in ``frames_rendered`` as they are pulled."""
+        import math
+
+        from splitsmith.overlay_raster import TemplateFrames
+
+        pass
+        self.frame_requests.append((template, context.model_dump(), width, height, fps, max_seconds))
+        duration = self.motion_seconds
+        count = 1 if duration <= 0 else max(1, math.ceil(min(duration, max_seconds) * fps - 1e-9))
+        blank = bytes(width * height * 4)
+
+        def frames():
+            for _ in range(count):
+                self.frames_rendered += 1
+                yield blank
+
+        return TemplateFrames(
+            duration=duration, frame_count=count, width=width, height=height, frames=frames()
+        )
 
 
 @contextmanager

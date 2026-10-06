@@ -33,8 +33,16 @@ from typing import Literal
 
 from ..composition import MatchTitle, TitleCard, TitleStyle
 from ..export_naming import stage_display_name
+from ..look_motion import MotionClipError, motion_overlay_filters, write_motion_clip
 from ..looks import CardSlot, Look, load_look
-from ..overlay_card import build_card_still, build_lower_third, lower_third_filters
+from ..overlay_card import (
+    card_backdrop,
+    card_motion,
+    compose_card,
+    first_frame_image,
+    lower_third_clip_filters,
+    lower_third_filters,
+)
 from ..overlay_clock import clock_common_options, clock_text, elapsed_text_option
 from ..overlay_layout import Anchor, CellScale, anchor_ffmpeg_expr
 from ..overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
@@ -1155,26 +1163,35 @@ def _early_summary_filters(
 
 @dataclass(frozen=True)
 class LowerThirdInput:
-    """A rasterized lower-third PNG (composed size) and how long it shows."""
+    """A rasterized lower-third (a composed-size PNG, or with ``clip`` an
+    alpha clip from ``look_motion``) and how long it shows."""
 
     path: Path
     seconds: float
+    clip: bool = False
 
 
 StageTitleKind = Literal["none", "slate", "lower-third"]
 
 
 def stage_card(
-    plan: GridStagePlan, *, style: TitleStyle, seconds: float, expected_rounds: int | None
+    plan: GridStagePlan,
+    *,
+    style: TitleStyle,
+    seconds: float,
+    expected_rounds: int | None,
+    variant: str = "default",
 ) -> TitleCard:
     """The generated card for one grid stage (issue #973): the stage name,
     with its round count as an info line when known -- the same shape the
-    single-shooter export builds, so the two products read alike."""
+    single-shooter export builds, so the two products read alike.
+    ``variant`` names the Look template variant that draws it (#1242)."""
     return TitleCard(
         text=plan.stage_name,
         duration_seconds=seconds,
         style=style,
         info=(f"{expected_rounds} rounds",) if expected_rounds else (),
+        variant=variant,
     )
 
 
@@ -1186,9 +1203,12 @@ def build_card_segment_command(
     shooter_labels: Sequence[str],
     output_path: Path,
     ffmpeg_binary: str = "ffmpeg",
+    motion_clip: Path | None = None,
 ) -> tuple[str, ...]:
     """Hold one composed-size PNG for ``seconds`` as a segment with the
-    grid's own stream layout (issue #973).
+    grid's own stream layout (issue #973). With ``motion_clip`` (#1242)
+    the PNG is the card's backdrop and the clip, a template's alpha
+    frames, is laid over it with its last frame held to ``seconds``.
 
     A card is its own segment rather than a head extension of a stage's
     graph so the title page and the closing card do not have to hang off
@@ -1203,10 +1223,18 @@ def build_card_segment_command(
     rate = canvas.rate_string
     slots = len(shooter_labels)
     fan_out = "".join(f"[a{slot}]" for slot in range(slots))
-    graph = (
-        "[0:v]format=yuv420p,setsar=1[final];"
-        f"[1:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
-        f"asplit={slots + 1}[amix]{fan_out}"
+    audio_index = 1
+    video_parts = ["[0:v]format=yuv420p,setsar=1[final]"]
+    if motion_clip is not None:
+        audio_index = 2
+        motion_parts, label = motion_overlay_filters(1, rate=rate, seconds=seconds, source_label="0:v")
+        video_parts = [*motion_parts, f"[{label}]format=yuv420p,setsar=1[final]"]
+    graph = ";".join(
+        [
+            *video_parts,
+            f"[{audio_index}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
+            f"asplit={slots + 1}[amix]{fan_out}",
+        ]
     )
     args: list[str] = [
         ffmpeg_binary,
@@ -1218,6 +1246,10 @@ def build_card_segment_command(
         rate,
         "-i",
         str(png_path),
+    ]
+    if motion_clip is not None:
+        args += ["-i", str(motion_clip)]
+    args += [
         "-f",
         "lavfi",
         "-i",
@@ -1496,19 +1528,24 @@ def build_stage_command(
     # after its predecessor: the only index safe to occupy is the next
     # free one. Composited on the action (see ``_build_filter_graph``),
     # so a card can never reach a frame of the hold.
-    lower_third_graph: tuple[int, float] | None = None
+    lower_third_graph: tuple[int, float, bool] | None = None
     if lower_third is not None:
-        args += [
-            "-loop",
-            "1",
-            "-framerate",
-            rate,
-            "-t",
-            f"{lower_third.seconds:g}",
-            "-i",
-            str(lower_third.path),
-        ]
-        lower_third_graph = (next_index, lower_third.seconds)
+        if lower_third.clip:
+            # A clip carries its own frames and length; the graph conforms
+            # and holds it (``lower_third_clip_filters``).
+            args += ["-i", str(lower_third.path)]
+        else:
+            args += [
+                "-loop",
+                "1",
+                "-framerate",
+                rate,
+                "-t",
+                f"{lower_third.seconds:g}",
+                "-i",
+                str(lower_third.path),
+            ]
+        lower_third_graph = (next_index, lower_third.seconds, lower_third.clip)
         next_index += 1
 
     # The tiles' insets, video only, dead last for the reason every input
@@ -1638,7 +1675,7 @@ def _build_filter_graph(
     sprite_index: int | None = None,
     hold_index: int | None = None,
     early_index: int | None = None,
-    lower_third: tuple[int, float] | None = None,
+    lower_third: tuple[int, float, bool] | None = None,
     inset_index: Sequence[int | None] = (),
     inset: GridInset | None = None,
 ) -> str:
@@ -1815,8 +1852,13 @@ def _build_filter_graph(
     # and sits upstream of the tail's ``concat``, like everything else
     # that draws on the action: there is no expression to get wrong.
     if lower_third is not None:
-        lt_index, lt_seconds = lower_third
-        lt_parts, video_label = lower_third_filters(lt_index, lt_seconds, source_label=video_label)
+        lt_index, lt_seconds, lt_clip = lower_third
+        if lt_clip:
+            lt_parts, video_label = lower_third_clip_filters(
+                lt_index, lt_seconds, rate=canvas.rate_string, source_label=video_label
+            )
+        else:
+            lt_parts, video_label = lower_third_filters(lt_index, lt_seconds, source_label=video_label)
         parts.extend(lt_parts)
 
     parts.extend(_video_tail(video_label, hold_label))
@@ -2258,10 +2300,7 @@ def _card_segment(
     if rasterizer is None or look is None:
         return None
     composed_w, composed_h = _composed_size(canvas, plan)
-    backdrop = _grab_card_backdrop(
-        plan, at=backdrop_at, name=name, work=work, ffmpeg_binary=ffmpeg_binary, runner=still_runner
-    )
-    image = build_card_still(
+    motion = card_motion(
         card,
         slot=slot,
         width=composed_w,
@@ -2269,21 +2308,49 @@ def _card_segment(
         fps=canvas.fps,
         look=look,
         rasterizer=rasterizer,
-        backdrop=backdrop,
+        max_seconds=card.duration_seconds,
     )
-    if image is None:
+    if motion is None:
         return None
-    png = work / f"{name}.png"
-    image.save(png)
-    segment = work / f"{name}{SEGMENT_SUFFIX}"
-    cmd = build_card_segment_command(
-        png,
-        seconds=card.duration_seconds,
-        canvas=canvas,
-        shooter_labels=tuple(tile.label for tile in plan.tiles),
-        output_path=segment,
-        ffmpeg_binary=ffmpeg_binary,
+    backdrop = _grab_card_backdrop(
+        plan, at=backdrop_at, name=name, work=work, ffmpeg_binary=ffmpeg_binary, runner=still_runner
     )
+    canvas_image = card_backdrop(backdrop, width=composed_w, height=composed_h, look=look)
+    segment = work / f"{name}{SEGMENT_SUFFIX}"
+    if not motion.animated:
+        text = first_frame_image(motion)
+        if text is None:
+            return None
+        png = work / f"{name}.png"
+        compose_card(text, canvas_image).save(png)
+        cmd = build_card_segment_command(
+            png,
+            seconds=card.duration_seconds,
+            canvas=canvas,
+            shooter_labels=tuple(tile.label for tile in plan.tiles),
+            output_path=segment,
+            ffmpeg_binary=ffmpeg_binary,
+        )
+    else:
+        backdrop_png = work / f"{name}_backdrop.png"
+        canvas_image.save(backdrop_png)
+        clip_path = work / f"{name}_motion.mov"
+        try:
+            write_motion_clip(motion.frames, out=clip_path, fps=canvas.fps, ffmpeg_binary=ffmpeg_binary)
+        except MotionClipError as exc:
+            logger.warning("compare grid: card %s could not be drawn and is skipped: %s", name, exc)
+            return None
+        finally:
+            motion.close()
+        cmd = build_card_segment_command(
+            backdrop_png,
+            seconds=card.duration_seconds,
+            canvas=canvas,
+            shooter_labels=tuple(tile.label for tile in plan.tiles),
+            output_path=segment,
+            ffmpeg_binary=ffmpeg_binary,
+            motion_clip=clip_path,
+        )
     completed = _run_ffmpeg(cmd, runner=card_runner)
     if completed.returncode != 0:
         logger.warning(
@@ -2383,6 +2450,7 @@ def render_grid_mp4(
     closing: MatchTitle | None = None,
     stage_titles: StageTitleKind = "none",
     title_duration_seconds: float = 1.5,
+    card_variant: str = "default",
     inset: GridInset | None = None,
     free_cell: FreeCellKind = "blank",
     match_name: str = "",
@@ -2661,6 +2729,7 @@ def render_grid_mp4(
                     style=stage_titles,
                     seconds=title_duration_seconds,
                     expected_rounds=expected_rounds.get(plan.stage_number),
+                    variant=card_variant,
                 )
                 if stage_titles == "slate":
                     slate_segment = _card_segment(
@@ -2682,18 +2751,39 @@ def render_grid_mp4(
                         elapsed += card.duration_seconds
                 elif active_rasterizer is not None and card_look is not None:
                     composed_w, composed_h = _composed_size(canvas, plan)
-                    image = build_lower_third(
+                    lt_motion = card_motion(
                         card,
+                        slot="lower_third",
                         width=composed_w,
                         height=composed_h,
                         fps=canvas.fps,
                         look=card_look,
                         rasterizer=active_rasterizer,
+                        max_seconds=title_duration_seconds,
                     )
-                    if image is not None:
-                        png = work / f"lower-third-stage{plan.stage_number}.png"
-                        image.save(png)
-                        lower_third = LowerThirdInput(path=png, seconds=title_duration_seconds)
+                    if lt_motion is not None and not lt_motion.animated:
+                        image = first_frame_image(lt_motion)
+                        if image is not None:
+                            png = work / f"lower-third-stage{plan.stage_number}.png"
+                            image.save(png)
+                            lower_third = LowerThirdInput(path=png, seconds=title_duration_seconds)
+                    elif lt_motion is not None:
+                        clip_path = work / f"lower-third-stage{plan.stage_number}_motion.mov"
+                        try:
+                            write_motion_clip(
+                                lt_motion.frames, out=clip_path, fps=canvas.fps, ffmpeg_binary=binary
+                            )
+                            lower_third = LowerThirdInput(
+                                path=clip_path, seconds=title_duration_seconds, clip=True
+                            )
+                        except MotionClipError as exc:
+                            logger.warning(
+                                "compare grid: stage %d lower third could not be drawn and is dropped: %s",
+                                plan.stage_number,
+                                exc,
+                            )
+                        finally:
+                            lt_motion.close()
             # ``font_path`` is set exactly when the sprites are; naming both
             # keeps that obvious rather than asserting it.
             free_cells = _unreached_cells(plan)

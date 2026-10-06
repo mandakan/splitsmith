@@ -10284,13 +10284,15 @@ def test_match_export_title_page_carries_the_division_unless_turned_off(
         return real(*args, **kwargs)
 
     monkeypatch.setattr(match_exports_mod, "export_match", capture)
-    for extra in ({}, {"title_division": False}):
+    for extra in ({}, {"title_division": False}, {"card_variant": "rise"}):
         resp = client.post(
             "/api/shooters/me/export/match",
             json={"stage_numbers": [1], "include_overlay": False, "title_page": True, **extra},
         )
         assert resp.status_code == 200, resp.text
         assert _wait_for_job(client, resp.json()["id"])["status"] == "succeeded"
-    on, off = (r.title_page_info for r in seen)
+    on, off, _ = (r.title_page_info for r in seen)
     assert on[on.index("Martin Engström") + 1] == "Classic Major"
     assert "Classic Major" not in off
+    # #1242: the Look variant is a request field, not a CLI-only knob.
+    assert [r.card_variant for r in seen] == ["default", "default", "rise"]

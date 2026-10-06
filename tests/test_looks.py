@@ -166,3 +166,58 @@ def test_cli_theme_validator_is_defined_before_the_main_guard() -> None:
 
     source = inspect.getsource(cli)
     assert source.index("def _validate_theme") < source.index('if __name__ == "__main__"')
+
+
+# --- variants (slice 2, #1242) ---------------------------------------------------
+
+
+def test_a_bare_slot_string_is_the_default_variant() -> None:
+    clean = looks.load_look("clean")
+    assert clean.variants("slate") == ()
+    assert looks.variants_for(clean, "slate")[0] == "default"
+
+
+def test_the_shipped_splitsmith_names_a_rise_variant_for_every_card_slot() -> None:
+    look = looks.load_look("splitsmith")
+    for slot in ("title_page", "slate", "lower_third", "closing"):
+        assert look.variants(slot) == ("default", "rise"), slot
+        rise = look.own_template(slot, "rise")
+        assert rise is not None and rise.is_file()
+
+
+def test_a_user_look_may_declare_variants_as_a_map(user_dir: Path) -> None:
+    d = _write_look(user_dir, "club", slots={"slate": "slate.html"})
+    manifest = json.loads((d / "look.json").read_text(encoding="utf-8"))
+    manifest["slots"] = {"slate": {"default": "slate.html", "wipe": "wipe.html"}}
+    (d / "look.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (d / "wipe.html").write_text("<!doctype html>", encoding="utf-8")
+    club = looks.load_look("club")
+    assert club.variants("slate") == ("default", "wipe")
+    assert looks.template_for(club, "slate", "wipe") == d / "wipe.html"
+
+
+def test_a_variant_file_must_exist_and_a_variant_name_has_a_shape(user_dir: Path) -> None:
+    d = _write_look(user_dir, "club", slots={"slate": "slate.html"})
+    manifest = json.loads((d / "look.json").read_text(encoding="utf-8"))
+    manifest["slots"] = {"slate": {"default": "slate.html", "wipe": "wipe.html"}}
+    (d / "look.json").write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(looks.LookError, match="wipe.html"):
+        looks.load_look("club")
+    manifest["slots"] = {"slate": {"Bad Name": "slate.html"}}
+    (d / "look.json").write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(looks.LookError):
+        looks.load_look("club")
+
+
+def test_a_variant_the_look_lacks_comes_from_the_shipped_default_look(user_dir: Path) -> None:
+    club = looks.load_look(_write_look(user_dir, "club").name)
+    expected = looks.load_look("splitsmith").own_template("slate", "rise")
+    assert looks.template_for(club, "slate", "rise") == expected
+
+
+def test_an_unknown_variant_falls_back_to_default_with_a_warning(caplog: pytest.LogCaptureFixture) -> None:
+    look = looks.load_look("splitsmith")
+    with caplog.at_level(logging.WARNING, logger="splitsmith.looks"):
+        path = looks.template_for(look, "slate", "nope")
+    assert path == look.own_template("slate")
+    assert "nope" in caplog.text

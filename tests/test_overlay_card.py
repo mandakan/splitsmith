@@ -18,10 +18,15 @@ LOOK = load_look("splitsmith")
 
 
 class _FakeRasterizer:
-    def __init__(self, *, fill: tuple[int, int, int, int] = (0, 0, 0, 0)) -> None:
+    def __init__(
+        self, *, fill: tuple[int, int, int, int] = (0, 0, 0, 0), motion_seconds: float = 0.0
+    ) -> None:
         self.calls: list[tuple[str, int, int]] = []
         self.template_calls: list[tuple[Path, dict, int, int]] = []
         self._fill = fill
+        self.motion_seconds = motion_seconds
+        self.frame_requests: list[tuple] = []
+        self.frames_rendered = 0
 
     def png(self, html: str, *, width: int, height: int) -> bytes:
         self.calls.append((html, width, height))
@@ -30,6 +35,33 @@ class _FakeRasterizer:
     def render_template(self, template: Path, *, context, width: int, height: int) -> bytes:
         self.template_calls.append((template, context.model_dump(), width, height))
         return self._blank(width, height)
+
+    def engine_version(self) -> str:
+        return "fake"
+
+    def render_template_frames(
+        self, template, *, context, width: int, height: int, fps: float, max_seconds: float
+    ):
+        """A still unless ``motion_seconds`` is set; frames are blank and
+        counted in ``frames_rendered`` as they are pulled."""
+        import math
+
+        from splitsmith.overlay_raster import TemplateFrames
+
+        self.template_calls.append((template, context.model_dump(), width, height))
+        self.frame_requests.append((template, context.model_dump(), width, height, fps, max_seconds))
+        duration = self.motion_seconds
+        count = 1 if duration <= 0 else max(1, math.ceil(min(duration, max_seconds) * fps - 1e-9))
+        blank = bytes(width * height * 4)
+
+        def frames():
+            for _ in range(count):
+                self.frames_rendered += 1
+                yield blank
+
+        return TemplateFrames(
+            duration=duration, frame_count=count, width=width, height=height, frames=frames()
+        )
 
     def _blank(self, width: int, height: int) -> bytes:
         buf = io.BytesIO()
@@ -42,6 +74,14 @@ class _BoomRasterizer:
         raise RuntimeError("rasterize boom")
 
     def render_template(self, template: Path, *, context, width: int, height: int) -> bytes:
+        raise RuntimeError("template boom")
+
+    def engine_version(self) -> str:
+        return "fake"
+
+    def render_template_frames(
+        self, template, *, context, width: int, height: int, fps: float, max_seconds: float
+    ):
         raise RuntimeError("template boom")
 
 
@@ -221,6 +261,7 @@ def test_a_card_renders_through_the_looks_template_for_its_slot(tmp_path: Path) 
     assert (w, h) == (640, 360)
     assert context["data"]["card"] == {
         "slot": "slate",
+        "variant": "default",
         "text": "Stage 3",
         "info": ["24 rounds"],
         "duration_seconds": 1.5,
@@ -278,3 +319,95 @@ def test_a_template_that_raises_skips_the_card(tmp_path: Path, caplog) -> None:
     )
     assert image is None
     assert "template boom" in caplog.text
+
+
+def test_a_cards_variant_picks_the_looks_template_for_it() -> None:
+    r = _FakeRasterizer()
+    overlay_card.build_card_still(
+        MatchTitle(text="x", variant="rise"),
+        slot="title_page",
+        width=64,
+        height=32,
+        fps=30,
+        look=LOOK,
+        rasterizer=r,
+        backdrop=None,
+    )
+    ((template, context, _, _),) = r.template_calls
+    assert template == LOOK.own_template("title_page", "rise")
+    assert context["data"]["card"]["variant"] == "rise"
+
+
+# --- motion (slice 2, #1242) -----------------------------------------------------
+
+
+def test_card_motion_is_a_still_when_the_template_has_no_duration() -> None:
+    r = _FakeRasterizer()
+    motion = overlay_card.card_motion(
+        MatchTitle(text="x"),
+        slot="title_page",
+        width=8,
+        height=4,
+        fps=30,
+        look=LOOK,
+        rasterizer=r,
+        max_seconds=3.0,
+    )
+    assert motion is not None and not motion.animated
+    assert motion.frames.frame_count == 1
+    image = overlay_card.first_frame_image(motion)
+    assert image is not None and image.size == (8, 4) and image.mode == "RGBA"
+    assert len(motion.digest) == 64
+
+
+def test_card_motion_is_animated_when_the_template_has_a_duration() -> None:
+    r = _FakeRasterizer(motion_seconds=0.6)
+    motion = overlay_card.card_motion(
+        MatchTitle(text="x"),
+        slot="title_page",
+        width=8,
+        height=4,
+        fps=10,
+        look=LOOK,
+        rasterizer=r,
+        max_seconds=3.0,
+    )
+    assert motion is not None and motion.animated
+    assert motion.frames.frame_count == 6
+    assert r.frame_requests[0][4:] == (10, 3.0)
+
+
+def test_card_motion_is_none_when_the_template_cannot_load(caplog) -> None:
+    motion = overlay_card.card_motion(
+        MatchTitle(text="x"),
+        slot="title_page",
+        width=8,
+        height=4,
+        fps=10,
+        look=LOOK,
+        rasterizer=_BoomRasterizer(),
+        max_seconds=3.0,
+    )
+    assert motion is None
+    assert "template boom" in caplog.text
+
+
+def test_card_backdrop_and_compose_card_give_the_still_path_its_pixels(tmp_path: Path) -> None:
+    backdrop = overlay_card.card_backdrop(_frame(tmp_path, (200, 200, 200)), width=64, height=36, look=LOOK)
+    assert backdrop.mode == "RGB" and backdrop.size == (64, 36)
+    r, g, b = backdrop.getpixel((32, 18))
+    assert 0 < r < 200 and r == g == b
+    surface = overlay_card.card_backdrop(None, width=8, height=4, look=LOOK)
+    assert surface.getpixel((1, 1)) == THEME.surface
+    text = Image.new("RGBA", (8, 4), (255, 0, 0, 255))
+    assert overlay_card.compose_card(text, surface).getpixel((1, 1)) == (255, 0, 0)
+
+
+def test_lower_third_clip_filters_fade_the_clip_out_like_the_png() -> None:
+    parts, label = overlay_card.lower_third_clip_filters(3, 2.0, rate="30", source_label="base")
+    assert label == "withlt"
+    assert parts[0].startswith(
+        "[3:v]format=rgba,fps=30,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=2,trim=0:2,"
+    )
+    assert parts[0].endswith("fade=t=out:st=1.5:d=0.5:alpha=1[lt]")
+    assert parts[1] == "[base][lt]overlay=0:0:enable='lt(t,2)'[withlt]"

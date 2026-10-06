@@ -707,11 +707,14 @@ def test_card_fields_default_off_and_reach_the_renderer(
             "closing_card": True,
             "stage_titles": "slate",
             "title_duration_seconds": 2.0,
+            "card_variant": "rise",
         },
     )
     assert response.status_code == 200
     assert _wait_for_job(client, response.json()["id"])["status"] == "succeeded"
     carded = captured[-1]
+    assert carded["card_variant"] == "rise"
+    assert carded["title_page"].variant == "rise" and carded["closing"].variant == "rise"
     assert carded["title_page"].text == match.name
     assert carded["title_page"].info == ("2026-05-01", "Level II")
     assert carded["title_page"].duration_seconds == 4.0

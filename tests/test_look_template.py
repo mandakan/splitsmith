@@ -3,7 +3,9 @@ card template's parity with the Python markup."""
 
 from __future__ import annotations
 
+import io
 import json
+import math
 
 import pytest
 
@@ -236,3 +238,106 @@ def test_a_user_template_that_throws_skips_the_card_with_a_real_browser(
     except RasterizerUnavailableError as exc:
         pytest.skip(str(exc))
     assert image is None
+
+
+def test_template_digest_moves_with_every_input(tmp_path) -> None:
+    template = tmp_path / "t.html"
+    template.write_text("<!doctype html>", encoding="utf-8")
+    ctx = look_template.TemplateContext(
+        theme={"ink": "#ffffff"},
+        data={"groups": []},
+        size={"width": 64, "height": 32},
+        fps=30,
+        engine=look_template.engine_block(css="body{}"),
+        assets={"shared": look_template.shared_url()},
+    )
+    base = look_template.template_digest(template, ctx, fps=30, engine_version="v1")
+    assert base == look_template.template_digest(template, ctx, fps=30, engine_version="v1")
+    assert base != look_template.template_digest(template, ctx, fps=25, engine_version="v1")
+    assert base != look_template.template_digest(template, ctx, fps=30, engine_version="v2")
+    dark = ctx.model_copy(update={"theme": {"ink": "#000000"}})
+    assert base != look_template.template_digest(template, dark, fps=30, engine_version="v1")
+    template.write_text("<!doctype html><!-- edited -->", encoding="utf-8")
+    assert base != look_template.template_digest(template, ctx, fps=30, engine_version="v1")
+
+
+@pytest.mark.integration
+def test_the_rise_variant_animates_deterministically() -> None:
+    """``card-rise.html``: nothing painted at t=0, the whole card by the
+    end, and frame k identical across two runs (the determinism the
+    cache's digest key rests on). The poster is the end of the rise, so a
+    preview never shows the invisible first frame."""
+    from PIL import Image
+
+    from splitsmith.composition import TitleCard
+    from splitsmith.overlay_card import card_context
+    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+
+    look = looks.load_look("splitsmith")
+    card = TitleCard(text="Stage 3", duration_seconds=1.5, info=("24 rounds",), variant="rise")
+    template = looks.template_for(look, "slate", "rise")
+    assert template.name == "card-rise.html"
+    context = card_context(card, slot="slate", width=320, height=180, fps=20, theme=load_theme("splitsmith"))
+
+    def run(rasterizer: ChromiumRasterizer) -> list[bytes]:
+        out = rasterizer.render_template_frames(
+            template, context=context, width=320, height=180, fps=20, max_seconds=5.0
+        )
+        assert out.duration > 0.3
+        return list(out.frames)
+
+    try:
+        with ChromiumRasterizer() as rasterizer:
+            first = run(rasterizer)
+            second = run(rasterizer)
+            poster_png = rasterizer.render_template(template, context=context, width=320, height=180)
+    except RasterizerUnavailableError as exc:
+        pytest.skip(str(exc))
+    assert first == second
+    assert len(first) == 14, "two groups: 600 ms plus one 90 ms stagger at 20 fps"
+    start = Image.frombytes("RGBA", (320, 180), first[0])
+    end = Image.frombytes("RGBA", (320, 180), first[-1])
+    assert start.getchannel("A").getbbox() is None, "nothing is painted before the rise begins"
+    assert end.getchannel("A").getbbox() is not None, "the card is on screen at the end"
+    with Image.open(io.BytesIO(poster_png)) as poster:
+        assert poster.convert("RGBA").getchannel("A").getbbox() is not None
+    assert math.isclose(len(first) / 20, 0.7, abs_tol=0.01)
+
+
+@pytest.mark.integration
+def test_a_long_rise_cards_held_frame_is_its_poster() -> None:
+    """The clip's last frame is what the hold clones for the rest of the
+    card, and the preview shows the poster. With a roster long enough to
+    make the fit policy shrink the text, the two must agree: the fit runs
+    on the laid-out end state, and the last sample is taken at the end of
+    the rise, not one frame short of it."""
+    from PIL import Image, ImageChops
+
+    from splitsmith.composition import MatchTitle
+    from splitsmith.overlay_card import card_context
+    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+
+    look = looks.load_look("splitsmith")
+    card = MatchTitle(
+        text="Bromma Classifier",
+        info=tuple(f"Shooter {i} · Production Optics" for i in range(10)),
+        variant="rise",
+    )
+    template = looks.template_for(look, "title_page", "rise")
+    context = card_context(
+        card, slot="title_page", width=640, height=360, fps=20, theme=load_theme("splitsmith")
+    )
+    try:
+        with ChromiumRasterizer() as rasterizer:
+            poster_png = rasterizer.render_template(template, context=context, width=640, height=360)
+            out = rasterizer.render_template_frames(
+                template, context=context, width=640, height=360, fps=20, max_seconds=5.0
+            )
+            last = list(out.frames)[-1]
+    except RasterizerUnavailableError as exc:
+        pytest.skip(str(exc))
+    with Image.open(io.BytesIO(poster_png)) as poster_image:
+        poster = poster_image.convert("RGBA")
+    held = Image.frombytes("RGBA", (640, 360), last)
+    diff = ImageChops.difference(poster, held)
+    assert max(channel[1] for channel in diff.getextrema()) <= 1, "the held frame must be the poster"

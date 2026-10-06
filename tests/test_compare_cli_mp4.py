@@ -910,3 +910,45 @@ def test_unknown_titles_kind_is_refused(tmp_path: Path, monkeypatch: pytest.Monk
     result = _invoke_mp4(match_root, tmp_path / "out.mp4", "--titles", "banner")
     assert result.exit_code == 2
     assert "banner" in strip_ansi(result.output)
+
+
+def test_card_variant_reaches_the_grid_and_its_match_cards(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--card-variant`` (#1242) names the Look variant for every card the
+    grid draws: the stage cards it builds itself and the title page the
+    CLI builds for it."""
+    match_root = _seed_match_with_stages(tmp_path / "match", stage_count=1)
+    output = tmp_path / "out.mp4"
+    _patch_probe(monkeypatch)
+
+    seen: dict[str, Any] = {}
+    real_render = cli_mod.mp4_grid.render_grid_mp4
+
+    def spy(shooters, *, audio_label, output_path, **kwargs):
+        seen.update(kwargs)
+        return real_render(shooters, audio_label=audio_label, output_path=output_path, **kwargs)
+
+    monkeypatch.setattr(cli_mod.mp4_grid, "render_grid_mp4", spy)
+    monkeypatch.setattr(cli_mod.subprocess, "run", _ffmpeg_stub_factory())
+
+    result = runner.invoke(
+        app,
+        [
+            "compare",
+            "export",
+            str(match_root),
+            "--audio-from",
+            "mathias",
+            "--format",
+            "mp4",
+            "--title-page",
+            "--card-variant",
+            "rise",
+            "-o",
+            str(output),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert seen["card_variant"] == "rise"
+    assert seen["title_page"] is not None and seen["title_page"].variant == "rise"

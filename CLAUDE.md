@@ -174,6 +174,27 @@ held to it by ``tests/test_look_template.py``) and ``_shared/fit.js``
 scripts run. The summary and the live overlay are not templates yet.
 Check pixels with the frame scripts, not argv.
 
+A template that animates (``duration() > 0``) is rendered frame by frame
+(``Rasterizer.render_template_frames``, seeking ``seek(i / fps)``),
+written as a lossless alpha MOV by ``look_motion.write_motion_clip`` and
+overlaid on the card's backdrop with the last frame held
+(``motion_overlay_filters``, ``tpad=stop_mode=clone``); an animated lower
+third is the same clip through ``lower_third_clip_filters``. The segment
+cache keys that clip by ``look_template.template_digest`` (template
+bytes, context, fps, Chromium version) through
+``SegmentCache.key(virtual_inputs=...)`` and renders the frames in the
+encode's ``prepare`` step, so a cached card renders no frame. A still
+template takes the PNG path unchanged, which is what keeps the default
+variant pixel-identical. The manifest names variants per slot
+(``"slot": {"default": ..., "rise": ...}``; a bare string is ``default``),
+the IR carries ``variant`` on ``MatchTitle`` and ``TitleCard``, and
+``card_variant`` is the one knob (``--card-variant`` on ``match export``
+and ``compare export``, the request field) until #1246; a variant the Look
+lacks falls back to ``default`` with a warning. The shipped ``splitsmith``
+Look has ``default`` and ``rise`` (``card-rise.html``, Web Animations
+driven by ``seek``, ``poster()`` at the end of the rise so previews never
+show its invisible first frame).
+
 ## Hosted playback streams the web rendition (#1031)
 
 The audit trim (``trimmed/stage<N>_cam_<id>_trimmed.mp4``) is a

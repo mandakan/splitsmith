@@ -97,3 +97,25 @@ def test_eviction_clears_stale_partials_only(tmp_path: Path) -> None:
     cache.evict(keep=set())
     assert not stale.exists()
     assert fresh.exists()
+
+
+def test_a_virtual_input_is_keyed_by_its_digest_not_its_path(tmp_path: Path) -> None:
+    """A motion clip is keyed by what produced it, before it exists, so a
+    cached segment is found without rendering a frame."""
+    from splitsmith.segment_cache import KEY_VERSION
+
+    cache = SegmentCache(root=tmp_path / "c", max_bytes=10**9)
+    work_a, work_b = tmp_path / "a", tmp_path / "b"
+    clip_a, clip_b = work_a / "x_motion.mov", work_b / "x_motion.mov"
+    argv_a = ("ffmpeg", "-i", str(clip_a), str(work_a / "out.mp4"))
+    argv_b = ("ffmpeg", "-i", str(clip_b), str(work_b / "out.mp4"))
+    same = cache.key(
+        argv_a, output_path=work_a / "out.mp4", work_dir=work_a, virtual_inputs={str(clip_a): "d1"}
+    )
+    assert same == cache.key(
+        argv_b, output_path=work_b / "out.mp4", work_dir=work_b, virtual_inputs={str(clip_b): "d1"}
+    )
+    assert same != cache.key(
+        argv_b, output_path=work_b / "out.mp4", work_dir=work_b, virtual_inputs={str(clip_b): "d2"}
+    )
+    assert KEY_VERSION == 2

@@ -31,6 +31,8 @@ class CardOptions:
     title_division: bool = True
     title_page_duration_seconds: float = 3.0
     closing_card: bool = False
+    #: The Look template variant every card draws with (#1242).
+    card_variant: str = "default"
 
 
 def match_title(match: Match, *, extra: str | None = None, roster: tuple[str, ...] = ()) -> MatchTitle:
@@ -59,7 +61,12 @@ def title_cards(
         return None, None
     roster = roster_lines(divisions) if cards.title_division else ()
     card = match_title(match, extra=cards.title_info, roster=roster)
-    card = MatchTitle(text=card.text, info=card.info, duration_seconds=cards.title_page_duration_seconds)
+    card = MatchTitle(
+        text=card.text,
+        info=card.info,
+        duration_seconds=cards.title_page_duration_seconds,
+        variant=cards.card_variant,
+    )
     return (card if cards.title_page else None), (card if cards.closing_card else None)
 
 

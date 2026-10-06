@@ -143,6 +143,11 @@ def export(
     closing_card: bool = typer.Option(
         False, "--closing-card", help="Close the rendered grid with a generated card. --format mp4 only."
     ),
+    card_variant: str = typer.Option(
+        "default",
+        "--card-variant",
+        help="Look template variant for the generated cards: 'default' or, with the splitsmith Look, 'rise'.",
+    ),
 ) -> None:
     """Render a multi-shooter comparison FCPXML.
 
@@ -250,6 +255,7 @@ def export(
                 title_division=title_division,
                 title_page_duration_seconds=title_page_duration,
                 closing_card=closing_card,
+                card_variant=card_variant,
             ),
         )
         return
@@ -563,6 +569,7 @@ def _render_grid_mp4(
                 closing=closing,
                 stage_titles=cards.stage_titles,
                 title_duration_seconds=cards.title_duration_seconds,
+                card_variant=cards.card_variant,
             )
         except mp4_grid.GridRenderError as exc:
             console.print(f"[red]Error:[/] {exc}")

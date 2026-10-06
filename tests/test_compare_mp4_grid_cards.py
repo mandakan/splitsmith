@@ -27,8 +27,11 @@ CANVAS = mp4_grid.GridCanvas(640, 360, 25, 1)
 
 
 class _FakeRasterizer:
-    def __init__(self) -> None:
+    def __init__(self, *, motion_seconds: float = 0.0) -> None:
         self.calls: list[str] = []
+        self.motion_seconds = motion_seconds
+        self.frame_requests: list[tuple] = []
+        self.frames_rendered = 0
 
     def png(self, html: str, *, width: int, height: int) -> bytes:
         self.calls.append(html)
@@ -46,6 +49,34 @@ class _FakeRasterizer:
         buf = io.BytesIO()
         Image.new("RGBA", (width, height), (0, 0, 0, 0)).save(buf, format="PNG")
         return buf.getvalue()
+
+    def engine_version(self) -> str:
+        return "fake"
+
+    def render_template_frames(
+        self, template, *, context, width: int, height: int, fps: float, max_seconds: float
+    ):
+        """A still unless ``motion_seconds`` is set; frames are blank and
+        counted in ``frames_rendered`` as they are pulled."""
+        import json
+        import math
+
+        from splitsmith.overlay_raster import TemplateFrames
+
+        self.calls.append(json.dumps(context.data, ensure_ascii=False))
+        self.frame_requests.append((template, context.model_dump(), width, height, fps, max_seconds))
+        duration = self.motion_seconds
+        count = 1 if duration <= 0 else max(1, math.ceil(min(duration, max_seconds) * fps - 1e-9))
+        blank = bytes(width * height * 4)
+
+        def frames():
+            for _ in range(count):
+                self.frames_rendered += 1
+                yield blank
+
+        return TemplateFrames(
+            duration=duration, frame_count=count, width=width, height=height, frames=frames()
+        )
 
 
 def _ok_runner(calls: list[tuple[str, ...]]):
@@ -390,3 +421,98 @@ def test_chapters_without_cards_start_at_the_first_stage(tmp_path: Path) -> None
         ffmpeg_binary="/bin/ffmpeg",
     )
     assert [(c.start_seconds, c.title) for c in result.chapters] == [(0.0, result.stages[0].stage_name)]
+
+
+# --- motion cards on the grid (slice 2, #1242) --------------------------------------
+
+
+def _fake_clip_writer(frames, *, out: Path, fps: float, ffmpeg_binary: str):
+    from splitsmith.look_motion import MotionClip
+
+    count = sum(1 for _ in frames.frames)
+    out.write_bytes(b"clip")
+    return MotionClip(path=out, seconds=count / fps, frame_count=count)
+
+
+def test_card_segment_with_a_motion_clip_overlays_it_and_keeps_the_stream_layout() -> None:
+    cmd = mp4_grid.build_card_segment_command(
+        Path("/w/bd.png"),
+        seconds=1.5,
+        canvas=CANVAS,
+        shooter_labels=("A", "B"),
+        output_path=Path("/w/card.mov"),
+        motion_clip=Path("/w/card_motion.mov"),
+    )
+    i_flags = [i for i, t in enumerate(cmd) if t == "-i"]
+    assert [cmd[i + 1] for i in i_flags][:2] == ["/w/bd.png", "/w/card_motion.mov"]
+    assert cmd[i_flags[2] + 1].startswith("anullsrc")
+    graph = cmd[cmd.index("-filter_complex") + 1]
+    assert "[0:v][motion]overlay=0:0:format=auto[withmotion]" in graph
+    assert "[withmotion]format=yuv420p,setsar=1[final]" in graph
+    assert "[2:a]aformat" in graph and "asplit=3[amix][a0][a1]" in graph
+    assert cmd.count("-map") == 4
+
+
+def test_card_segment_without_a_clip_is_unchanged() -> None:
+    plain = mp4_grid.build_card_segment_command(
+        Path("/w/c.png"), seconds=1.5, canvas=CANVAS, shooter_labels=("A",), output_path=Path("/w/c.mov")
+    )
+    assert "[1:a]aformat" in plain[plain.index("-filter_complex") + 1]
+    assert "[0:v]format=yuv420p,setsar=1[final]" in plain[plain.index("-filter_complex") + 1]
+
+
+def test_an_animated_card_reaches_the_grid_as_a_motion_segment(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(mp4_grid, "write_motion_clip", _fake_clip_writer)
+    cards: list[tuple[str, ...]] = []
+    work = tmp_path / "work"
+    fake = _FakeRasterizer(motion_seconds=0.6)
+    mp4_grid.render_grid_mp4(
+        _driver_shooters(tmp_path),
+        audio_label="Anders",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=_ok_runner([]),
+        card_runner=_ok_runner(cards),
+        still_runner=_still_runner([]),
+        rasterizer=fake,
+        work_dir=work,
+        ffmpeg_binary="/bin/ffmpeg",
+        title_page=MatchTitle(text="Bromma", duration_seconds=3.0),
+    )
+    assert len(cards) == 1
+    assert str(work / "title_page_motion.mov") in cards[0]
+    assert str(work / "title_page_backdrop.png") in cards[0]
+    assert (work / "title_page_backdrop.png").exists()
+    assert fake.frames_rendered == 15, "0.6 s at the canvas's 25 fps"
+
+
+def test_an_animated_lower_third_is_a_clip_input_on_the_grid_stage(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(mp4_grid, "write_motion_clip", _fake_clip_writer)
+    calls: list[tuple[str, ...]] = []
+    work = tmp_path / "work"
+    mp4_grid.render_grid_mp4(
+        _driver_shooters(tmp_path),
+        audio_label="Anders",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=_ok_runner(calls),
+        card_runner=_ok_runner([]),
+        rasterizer=_FakeRasterizer(motion_seconds=0.4),
+        work_dir=work,
+        ffmpeg_binary="/bin/ffmpeg",
+        stage_titles="lower-third",
+        title_duration_seconds=2.0,
+    )
+    clip = str(work / "lower-third-stage1_motion.mov")
+    assert clip in calls[0]
+    index = calls[0].index(clip)
+    assert calls[0][index - 1] == "-i" and calls[0][index - 2] != "-t", "a clip input is not looped or cut"
+    graph = _graph_of(calls[0])
+    assert "tpad=stop_mode=clone:stop_duration=2" in graph
+    assert "fade=t=out:st=1.5:d=0.5:alpha=1[lt]" in graph and "enable='lt(t,2)'" in graph
+
+
+def test_stage_card_carries_the_variant_the_grid_was_asked_for() -> None:
+    card = mp4_grid.stage_card(_plan(), style="slate", seconds=1.5, expected_rounds=24, variant="rise")
+    assert card.variant == "rise"
+    assert mp4_grid.stage_card(_plan(), style="slate", seconds=1.5, expected_rounds=None).variant == "default"

@@ -454,6 +454,11 @@ def export(
     closing_card: bool = typer.Option(
         False, "--closing-card", help="Close with a generated card (mp4 only)."
     ),
+    card_variant: str = typer.Option(
+        "default",
+        "--card-variant",
+        help="Look template variant for the generated cards: 'default' or, with the splitsmith Look, 'rise'.",
+    ),
     summary_hold: float = typer.Option(
         0.0,
         "--summary-hold",
@@ -654,6 +659,7 @@ def export(
         ),
         title_page_duration_seconds=title_page_duration,
         closing_card=closing_card,
+        card_variant=card_variant,
         overlay_theme=overlay_theme,  # type: ignore[arg-type]
         summary_hold_seconds=summary_hold,
         shooter_label=shooter_label,
