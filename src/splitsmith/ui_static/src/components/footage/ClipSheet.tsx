@@ -29,6 +29,7 @@ import { shortName, type UnassignedItem } from "@/lib/footage";
 import { useSpacePlayPause } from "@/lib/keyboard";
 import { takeHref } from "@/lib/matchHref";
 import { findTakeForPath, takeFilename } from "@/lib/takes";
+import { takeDamageText, type TakeDamage } from "@/lib/takeDamage";
 import type { ClipItem } from "@/pages/ingest/model";
 import { pad2 } from "@/pages/ingest/model";
 
@@ -57,6 +58,9 @@ export interface ClipSheetProps {
   onPickUnassigned: (item: UnassignedItem, stage: number) => void;
   onError: (msg: string | null) => void;
   onReload?: (project?: MatchProject) => Promise<void>;
+  /** This clip's take was left registered wrongly by the old stage-1 bug. */
+  takeDamage?: TakeDamage | null;
+  onRepairTake?: () => void;
 }
 
 const SELECT = "min-w-0 rounded-md border border-rule-strong bg-surface-2 px-2.5 py-1.5 text-md text-ink disabled:opacity-50";
@@ -74,6 +78,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 export function ClipSheet(props: ClipSheetProps) {
   const { open, onClose, slug, shooterName, clip, assignStage, unassigned, allStages, shooters, rawVideos } = props;
   const { mediaOnDesktop, busy, editDenied, auditHref, onMove, onRemove, onMoveShooter, onPickUnassigned, onError, onReload } = props;
+  const { takeDamage, onRepairTake } = props;
   const videoRef = useRef<HTMLVideoElement>(null);
   const { matchId } = useParams<{ matchId?: string }>();
   const [rowBusy, setRowBusy] = useState(false);
@@ -237,6 +242,16 @@ export function ClipSheet(props: ClipSheetProps) {
           {cameraDetail ? <span>{cameraDetail}</span> : null}
           {video.proxy_ready === false ? <Chip tone="warn">{mediaOnDesktop ? "video on desktop" : "proxy generating"}</Chip> : null}
         </div>
+        {takeDamage ? (
+          <div className="flex flex-wrap items-center gap-3 rounded-[10px] border border-rule px-3 py-2 text-md text-ink-2">
+            <span className="flex-1">{takeDamageText(takeDamage)}</span>
+            {onRepairTake ? (
+              <Button size="sm" onClick={onRepairTake} disabled={editDenied}>
+                Repair take
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
         <Row label="Stage">
           <select
             aria-label="Stage"

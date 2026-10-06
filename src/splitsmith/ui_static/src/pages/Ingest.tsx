@@ -58,6 +58,7 @@ import { pickDefaultShooterSlug } from "@/lib/defaultShooter";
 import { useMatchHref } from "@/lib/matchHref";
 import { useUploads } from "@/lib/uploads";
 import { useIsMobile } from "@/lib/useIsMobile";
+import { damagedTakes, storedFilename, takeDamageText } from "@/lib/takeDamage";
 import { applyAssignmentLocally, buildClipModel, removeVideoLocally, type ClipItem } from "@/pages/ingest/model";
 
 type StorageMode = "symlink" | "copy";
@@ -547,6 +548,28 @@ function IngestInner({ slug }: { slug: string }) {
   const [sheet, setSheet] = useState<{ slug: string; videoId: string | null; assignStage: number | null } | null>(null);
   const [addShooterOpen, setAddShooterOpen] = useState(false);
   const sheetProject = sheet ? projects[sheet.slug] : null;
+  // Takes the old stage-1 bug left registered wrongly, per shooter shown.
+  const takeRepairs = useMemo(
+    () =>
+      Object.entries(projects).flatMap(([s, p]) =>
+        p ? damagedTakes(p).map((d) => ({ slug: s, damage: d })) : [],
+      ),
+    [projects],
+  );
+  async function repairTakeOn(targetSlug: string, filename: string): Promise<void> {
+    if (editDenied) {
+      setError(READ_ONLY_MIRROR_MESSAGE);
+      return;
+    }
+    setError(null);
+    try {
+      const resp = await api.repairTake(targetSlug, filename);
+      if (targetSlug === slug) setProject(resp.project);
+      else setOthers((cur) => ({ ...cur, [targetSlug]: resp.project }));
+    } catch (e: unknown) {
+      setError(apiErrorText(e, "Could not repair the take."));
+    }
+  }
   const sheetClip: ClipItem | null = useMemo(() => {
     if (!sheet?.videoId || !sheetProject) return null;
     // By id, not path: one source file covering several stages is one
@@ -813,6 +836,20 @@ function IngestInner({ slug }: { slug: string }) {
           </Button>
         </div>
       ) : null}
+      {takeRepairs.map(({ slug: s, damage }) => (
+        <div
+          key={`${s}:${damage.storagePath}`}
+          className="mb-4 flex flex-wrap items-center gap-3 rounded-[10px] border border-rule bg-surface px-4 py-2.5 text-md text-ink-2"
+        >
+          <span className="flex-1">
+            {shooters.length > 1 ? `${shooters.find((x) => x.slug === s)?.name ?? s}: ` : ""}
+            {takeDamageText(damage)}
+          </span>
+          <Button size="sm" onClick={() => void repairTakeOn(s, storedFilename(damage))} disabled={editDenied}>
+            Repair
+          </Button>
+        </div>
+      ))}
       {openSorts.map((s) => (
         <div key={s.scan_id} className="mb-4 flex flex-wrap items-center gap-3 rounded-[10px] border border-rule bg-surface px-4 py-2.5 text-md text-ink-2">
           <span className="flex-1">{openSortText(s)}</span>
@@ -917,6 +954,16 @@ function IngestInner({ slug }: { slug: string }) {
         onPickUnassigned={assignUnassigned}
         onError={setError}
         onReload={handleSaved}
+        takeDamage={
+          sheetClip
+            ? (takeRepairs.find((r) => r.slug === (sheet?.slug ?? slug) && r.damage.storagePath === sheetClip.video.path)
+                ?.damage ?? null)
+            : null
+        }
+        onRepairTake={() => {
+          if (sheetClip) void repairTakeOn(sheet?.slug ?? slug, sheetClip.video.path.split("/").pop() ?? "");
+          setSheet(null);
+        }}
       />
       <AddShooterSheet
         open={addShooterOpen}

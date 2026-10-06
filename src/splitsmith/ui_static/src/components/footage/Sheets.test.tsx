@@ -112,6 +112,22 @@ describe("ClipSheet", () => {
     expect(screen.getByText("moves the file")).toBeInTheDocument();
   });
 
+  it("a clip of a damaged take says so and offers the repair", () => {
+    const onRepairTake = vi.fn();
+    renderClip({
+      takeDamage: { storagePath: VIDEO.path, filename: "VID_20260627_1066.MP4", stages: [2, 3] },
+      onRepairTake,
+    });
+    expect(screen.getByText("VID_20260627_1066.MP4 is registered wrongly on stages 02 and 03.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Repair take" }));
+    expect(onRepairTake).toHaveBeenCalledTimes(1);
+  });
+
+  it("a healthy clip has no repair line", () => {
+    renderClip();
+    expect(screen.queryByRole("button", { name: "Repair take" })).toBeNull();
+  });
+
   it("assign mode lists the unassigned files and picks one for the asking stage", () => {
     const item = { slug: "me", shooterName: "Mathias", video: { ...VIDEO, path: "raw/VID_20260627_1403.MP4" }, recordedAt: null };
     const props = renderClip({ clip: null, assignStage: 3, unassigned: [item] });
