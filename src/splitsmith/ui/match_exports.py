@@ -49,7 +49,7 @@ OutputFormat = Literal["fcpxml", "fcp7xml", "mp4"]
 # variant in FCP after import. Only the FCPXML renderer emits
 # transitions today; FCP7 / MP4 ignore the request until they grow
 # transition support.
-TransitionKind = Literal["none", "zoom", "static"]
+TransitionKind = Literal["none"] | composition.TransitionKind
 # Issue #196. ``"none"`` keeps today's title-less stitching.
 # ``"slate"`` adds a pre-stage card on the spine; ``"lower-third"`` is
 # a connected text clip overlaid on the start of the primary. FCPXML
@@ -607,6 +607,12 @@ def export_match(
             f"{request.output_format} renderer (issue #195 follow-ups)"
         )
         transitions = ()
+    elif transitions:
+        # Issue #1244: the FCPXML emitter is frozen on its two .motr
+        # effects; an xfade kind lowers to zoom and the response says so.
+        for kind in dict.fromkeys(t.kind for t in transitions):
+            if composition.fcp_kind(kind)[1]:
+                anomalies.append(f"transition {kind} is not an FCP effect; the FCPXML uses zoom")
     titles = _build_uniform_titles(
         kind=request.title_kind,
         duration=request.title_duration_seconds,

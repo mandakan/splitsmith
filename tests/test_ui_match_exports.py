@@ -812,6 +812,39 @@ def test_title_page_is_an_anomaly_on_fcpxml(tmp_path: Path) -> None:
     assert result.fcpxml_path.exists()
 
 
+def _two_stage_inputs(tmp_path: Path) -> list[match_exports_mod.MatchStageInput]:
+    payload = _audit_payload([{"shot_number": 1, "ms_after_beep": 500}])
+    return [
+        match_exports_mod.MatchStageInput(
+            stage_number=n,
+            stage_name=f"Stage {n}",
+            audit_path=_make_audit(tmp_path, f"stage{n}.json", payload),
+            trimmed_path=_make_trim(tmp_path, f"stage{n}_trimmed.mp4"),
+            beep_offset_seconds=5.0,
+        )
+        for n in (1, 2)
+    ]
+
+
+def test_an_xfade_kind_on_the_fcpxml_path_is_rendered_as_zoom_with_an_anomaly(tmp_path: Path) -> None:
+    """Issue #1244, review focus 5: the frozen emitter knows zoom and
+    static only; every other kind lowers to zoom and the response says so."""
+    result = match_exports_mod.export_match(
+        stages=_two_stage_inputs(tmp_path),
+        request=_card_request(
+            stage_numbers=(1, 2),
+            output_format="fcpxml",
+            transition_kind="dissolve",
+            transition_duration_seconds=1.0,
+        ),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    assert "transition dissolve is not an FCP effect; the FCPXML uses zoom" in result.anomalies
+    assert "Blurs" in result.fcpxml_path.read_text() or "Zoom" in result.fcpxml_path.read_text()
+
+
 def test_fcp7xml_still_ignores_titles_and_intro(tmp_path: Path) -> None:
     result = match_exports_mod.export_match(
         stages=[_one_stage_input(tmp_path)],

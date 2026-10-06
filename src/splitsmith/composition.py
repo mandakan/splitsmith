@@ -178,7 +178,52 @@ class Stage:
     summary: SummaryHold | None = None
 
 
-TransitionKind = Literal["zoom", "static"]
+#: The curated ffmpeg ``xfade`` transitions the MP4 renderers offer
+#: (issue #1244), in gallery order.
+XFADE_KINDS: tuple[str, ...] = (
+    "fade",
+    "fadeblack",
+    "dissolve",
+    "slideleft",
+    "slideright",
+    "circleopen",
+    "zoomin",
+    "hblur",
+    "smoothleft",
+    "wipeleft",
+)
+#: The two kinds the FCPXML emitter draws natively (FCP's .motr effects).
+FCP_KINDS: tuple[str, ...] = ("zoom", "static")
+TransitionKind = Literal[
+    "zoom",
+    "static",
+    "fade",
+    "fadeblack",
+    "dissolve",
+    "slideleft",
+    "slideright",
+    "circleopen",
+    "zoomin",
+    "hblur",
+    "smoothleft",
+    "wipeleft",
+]
+_XFADE_FOR_FCP_KIND = {"zoom": "zoomin", "static": "fadeblack"}
+
+
+def xfade_name(kind: TransitionKind) -> str:
+    """The ``xfade`` transition an MP4 renderer draws for ``kind``: an
+    xfade kind is its own name; the two FCP effects take the nearest
+    xfade (``zoom`` -> ``zoomin``, ``static`` -> ``fadeblack``)."""
+    return _XFADE_FOR_FCP_KIND.get(kind, kind)
+
+
+def fcp_kind(kind: TransitionKind) -> tuple[Literal["zoom", "static"], bool]:
+    """The FCP effect ``kind`` lowers to and whether that is a substitution
+    (``True`` for every xfade kind: the caller reports an anomaly)."""
+    if kind == "static":
+        return "static", False
+    return "zoom", kind != "zoom"
 
 
 @dataclass(frozen=True)
@@ -656,7 +701,7 @@ def _lower_transitions(
         out.append(
             fcpxml_gen.StageTransition(
                 after_stage_index=t.from_stage_index,
-                kind=t.kind,
+                kind=fcp_kind(t.kind)[0],
                 duration_seconds=t.duration_seconds,
                 color=t.color,
             )

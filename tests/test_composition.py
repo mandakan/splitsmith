@@ -479,3 +479,34 @@ def test_summary_hold_attaches_to_its_stage(tmp_path: Path) -> None:
     assert comp.stages[0].summary is hold
     bare = composition.from_stage_compositions(_one_stage(tmp_path), project_name="m")
     assert bare.stages[0].summary is None
+
+
+def test_the_transition_catalog_is_the_curated_xfade_list_plus_the_fcp_effects() -> None:
+    """Issue #1244: the kinds are ffmpeg xfade names; the two FCP effects
+    keep their names and map to the nearest xfade for the MP4 renderers."""
+    assert composition.XFADE_KINDS == (
+        "fade",
+        "fadeblack",
+        "dissolve",
+        "slideleft",
+        "slideright",
+        "circleopen",
+        "zoomin",
+        "hblur",
+        "smoothleft",
+        "wipeleft",
+    )
+    assert composition.FCP_KINDS == ("zoom", "static")
+    assert composition.xfade_name("fade") == "fade"
+    assert composition.xfade_name("zoom") == "zoomin"
+    assert composition.xfade_name("static") == "fadeblack"
+    assert composition.fcp_kind("zoom") == ("zoom", False)
+    assert composition.fcp_kind("static") == ("static", False)
+    assert composition.fcp_kind("hblur") == ("zoom", True)
+
+
+def test_lowering_an_xfade_kind_to_fcpxml_substitutes_zoom() -> None:
+    lowered = composition._lower_transitions(
+        (composition.Transition(from_stage_index=0, to_stage_index=1, kind="dissolve", duration_seconds=1.0),)
+    )
+    assert lowered[0].kind == "zoom" and lowered[0].duration_seconds == 1.0

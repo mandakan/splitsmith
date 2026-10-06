@@ -18,6 +18,7 @@ from typing import Literal
 
 from mcp.server.fastmcp import FastMCP
 
+from ..ui import match_exports as match_export_helpers
 from . import detect_tools, export_tools, tools, write_tools
 
 
@@ -323,7 +324,7 @@ def create_server(name: str = "splitsmith") -> FastMCP:
         project_name: str | None = None,
         pip_layout: Literal["stacked", "pip-corners"] = "stacked",
         output_format: Literal["fcpxml", "fcp7xml", "mp4"] = "fcpxml",
-        transition_kind: Literal["none", "zoom", "static"] = "none",
+        transition_kind: match_export_helpers.TransitionKind = "none",
         transition_duration_seconds: float = 0.5,
         title_kind: Literal["none", "slate", "lower-third"] = "none",
         title_duration_seconds: float = 1.5,
