@@ -12,6 +12,7 @@ client actually uses).
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 from splitsmith import match_model
@@ -539,3 +540,33 @@ def test_fingerprints_route_404s_locally() -> None:
 
     with TestClient(create_app(), follow_redirects=False) as client:
         assert client.get(FINGERPRINTS_URL).status_code == 404
+
+
+# --- identity logos (slice 3, #1243) ----------------------------------------------
+
+
+def test_media_key_gate_admits_a_logo_and_refuses_other_identity_files() -> None:
+    from fastapi import HTTPException
+
+    from splitsmith.ui import sync_api
+
+    sync_api._validate_media_key("matches/m1/shooters/alice/identity/logo-0123456789ab.png", "m1")
+    sync_api._validate_media_key("matches/m1/shooters/alice/identity/logo-0123456789ab.webp", "m1")
+    for bad in (
+        "matches/m1/shooters/alice/identity/logo-0123456789ab.svg",
+        "matches/m1/shooters/alice/identity/notes.txt",
+        "matches/m1/shooters/alice/identity/logo.png",
+    ):
+        with pytest.raises(HTTPException) as info:
+            sync_api._validate_media_key(bad, "m1")
+        assert info.value.status_code == 422, bad
+
+
+def test_delete_shape_admits_a_logo_key() -> None:
+    from splitsmith.ui import sync_api
+
+    assert sync_api.deletable_media_shape("matches/m1/shooters/alice/identity/logo-0123456789ab.png")
+    assert sync_api.deletable_media_shape("matches/m1/shooters/alice/beep_review/vid1.m4a")
+    assert not sync_api.deletable_media_shape(
+        "matches/m1/shooters/alice/trimmed/stage1_cam_a_trimmed.params.json"
+    )

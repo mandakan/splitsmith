@@ -50,7 +50,7 @@ logger = logging.getLogger(__name__)
 #: from (#821 gc phase below). Mirrors the ``trimmed``/``beep_review``
 #: subdirs ``_SYNC_MEDIA_KEY_RE`` in ``sync_api.py`` admits.
 _MEDIA_KEY_LOCAL_RE = re.compile(
-    r"^matches/[^/]+/shooters/(?P<slug>[^/]+)/(?P<subdir>trimmed|beep_review)/(?P<name>[^/]+)$"
+    r"^matches/[^/]+/shooters/(?P<slug>[^/]+)/(?P<subdir>trimmed|beep_review|identity)/(?P<name>[^/]+)$"
 )
 
 
@@ -267,10 +267,13 @@ def run_push(
         # forever for reopened items. Failures keep the key in
         # sync_state so the next push retries; gc must never fail a
         # push that already moved the operator's data.
+        # A replaced logo (#1243) is the same story: content-named, so the
+        # new file is a new key and the old one's local file is gone.
         stale = [
             key
             for key in list(sync_state.items)
-            if "/beep_review/" in key and not _local_media_path(match_root, key).exists()
+            if ("/beep_review/" in key or "/identity/" in key)
+            and not _local_media_path(match_root, key).exists()
         ]
         if not full_media:
             # Web-only mirror (v1.1): a full trim whose rendition is on

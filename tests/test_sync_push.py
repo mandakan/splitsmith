@@ -893,3 +893,32 @@ def test_a_missing_rendition_stays_on_hosted_until_its_new_trim_is_there(tmp_pat
 
     # Before the push: the recorded trim (if any) is not the local one.
     assert stale_web_renditions(root, load_sync_state(root)) == []
+
+
+# --- identity logos (slice 3, #1243) ----------------------------------------------
+
+
+def test_a_replaced_logo_is_gcd_like_a_stale_snippet(tmp_path: Path) -> None:
+    """The logo is content-named: replacing it writes a new file and
+    removes the old one locally, so the old remote object must follow."""
+    from splitsmith.identity import LOGO_DIR, logo_name
+
+    root, match_id = _build_match(tmp_path)
+    shooter_root = root / "shooters" / "alice"
+    old = logo_name(b"one", "png")
+    (shooter_root / LOGO_DIR).mkdir()
+    (shooter_root / LOGO_DIR / old).write_bytes(b"one")
+    fake = _FakeHosted()
+    run_push(root, client=fake.clients())
+    old_key = f"matches/{match_id}/shooters/alice/{LOGO_DIR}/{old}"
+    assert old_key in load_sync_state(root).items
+
+    (shooter_root / LOGO_DIR / old).unlink()
+    new = logo_name(b"two", "png")
+    (shooter_root / LOGO_DIR / new).write_bytes(b"two")
+    report = run_push(root, client=fake.clients())
+    assert f"media_delete:{old_key}" in fake.calls
+    remaining = set(load_sync_state(root).items)
+    assert old_key not in remaining
+    assert f"matches/{match_id}/shooters/alice/{LOGO_DIR}/{new}" in remaining
+    assert report.media_deleted == 1
