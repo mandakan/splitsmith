@@ -818,3 +818,19 @@ def test_hosted_payload_survives_a_failed_listing(
     monkeypatch.setattr(type(storage), "list", failing_list)
 
     assert _project_videos(client)[0]["scrub_version"] is None
+
+
+def test_hosted_scrub_version_on_a_mirror_names_the_pushed_rendition(
+    s3_stream_client: tuple[TestClient, S3Storage], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A desktop mirror has no trim on R2: the payload and the ``kind=scrub``
+    route must agree that the pushed rendition alone is fresh."""
+    from splitsmith.ui import server as server_mod
+
+    client, storage = s3_stream_client
+    monkeypatch.setattr(server_mod, "_is_mirror", lambda: True)
+    storage.write_bytes(_WEB_KEY, b"PUSHED WEB")
+
+    [video] = _project_videos(client)
+
+    assert video["scrub_version"] is not None
