@@ -78,6 +78,10 @@ class _RecordingContext:
         self.closed = False
         self.viewport: dict | None = None
         self.device_scale_factor: int | None = None
+        self.init_scripts: list[str] = []
+
+    def add_init_script(self, script: str) -> None:
+        self.init_scripts.append(script)
 
     def new_page(self) -> _RecordingPage:
         page = self._page_factory()
@@ -474,3 +478,67 @@ def test_bundled_font_face_actually_loads_not_the_browsers_fallback() -> None:
         "monospace -- the exact failure mode page.set_content() causes and "
         "page.goto(file://...) fixes."
     )
+
+
+# --- Rasterizer.render_template(): the Look template contract -------------
+
+
+def _context_fixture():
+    from splitsmith.look_template import TemplateContext, engine_block, shared_url
+
+    return TemplateContext(
+        theme={"ink": "#ffffff"},
+        data={"groups": []},
+        size={"width": 64, "height": 32},
+        fps=30,
+        engine=engine_block(css="body{}"),
+        assets={"shared": shared_url()},
+    )
+
+
+def test_render_template_installs_the_context_before_navigating(tmp_path: Path) -> None:
+    """``window.splitsmith`` must exist before the template's first script
+    runs, so it goes in as an init script on the context, never as an
+    ``evaluate`` after ``goto``."""
+    template = tmp_path / "card.html"
+    template.write_text("<!doctype html><body></body>", encoding="utf-8")
+    rasterizer = ChromiumRasterizer()
+    rasterizer._browser = _RecordingBrowser()
+
+    out = rasterizer.render_template(template, context=_context_fixture(), width=64, height=32)
+
+    assert out == b"FAKE-PNG-BYTES"
+    ctx = rasterizer._browser.contexts[0]
+    assert ctx.viewport == {"width": 64, "height": 32}
+    assert ctx.init_scripts == [_context_fixture().init_script()]
+    page = ctx.pages[0]
+    assert [c[0] for c in page.calls] == [
+        "goto",
+        "evaluate",
+        "evaluate",
+        "evaluate",
+        "evaluate",
+        "screenshot",
+    ]
+    assert page.goto_url == template.resolve().as_uri()
+    assert page.calls[1] == ("evaluate", "document.fonts.ready")
+    assert "window.seek" in page.calls[2][1]
+    assert page.calls[-1] == ("screenshot", "png", True)
+    assert ctx.closed
+
+
+def test_render_template_closes_its_context_when_screenshot_raises(tmp_path: Path) -> None:
+    template = tmp_path / "card.html"
+    template.write_text("<!doctype html><body></body>", encoding="utf-8")
+    rasterizer = ChromiumRasterizer()
+    rasterizer._browser = _RecordingBrowser(page_factory=_BoomOnScreenshotPage)
+    with pytest.raises(RuntimeError, match="screenshot boom"):
+        rasterizer.render_template(template, context=_context_fixture(), width=64, height=32)
+    assert rasterizer._browser.contexts[0].closed
+
+
+def test_render_template_outside_context_manager_raises_runtime_error(tmp_path: Path) -> None:
+    with pytest.raises(RuntimeError, match="render_template"):
+        ChromiumRasterizer().render_template(
+            tmp_path / "x.html", context=_context_fixture(), width=1, height=1
+        )
