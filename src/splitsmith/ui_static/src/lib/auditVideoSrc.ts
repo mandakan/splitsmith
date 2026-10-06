@@ -36,3 +36,23 @@ export function auditVideoSrc<V extends AuditVideo>(args: {
   }
   return api.videoStreamUrl(slug, video.path, plan.kind, null, stageNumber);
 }
+
+/**
+ * The ``proxyReady`` the player is told: false only when it would stream
+ * the proxy and the proxy is not there. A pinned trim streams its own
+ * object (the rendition or the trim), so a missing proxy says nothing
+ * about it; a hosted match whose source or proxy is gone still plays its
+ * trims (#1224). Before peaks name a kind the player streams nothing and
+ * the placeholder would only flash, so it stays undefined.
+ */
+export function auditProxyReady(args: {
+  video: Pick<StageVideo, "proxy_ready"> | null | undefined;
+  plan: ServedClipPlan | null;
+  peaksLoaded: boolean;
+  peaksFailed: boolean;
+}): boolean | undefined {
+  const { video, plan, peaksLoaded, peaksFailed } = args;
+  if (!video || !plan) return undefined;
+  if (!peaksLoaded) return peaksFailed ? video.proxy_ready : undefined;
+  return plan.kind === "trim" ? undefined : video.proxy_ready;
+}
