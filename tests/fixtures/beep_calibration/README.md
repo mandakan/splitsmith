@@ -64,3 +64,7 @@ uv run python scripts/eval_beep_detector.py --track clip --json tests/fixtures/b
 
 Add `cross-bay`, `steel-fp-observed`, `low-spl`, `ro-chatter`, etc. by
 hand once a fixture is reviewed.
+* `ranker_report.json` -- committed. Out-of-fold (leave-one-match-out)
+  evaluation of the learned ranker against today's detector, with the ship
+  gate's verdict (#949, spec 2026-10-06). Regenerate with
+  `uv run python scripts/train_beep_ranker.py`.
