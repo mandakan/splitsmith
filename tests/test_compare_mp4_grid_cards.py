@@ -27,8 +27,11 @@ CANVAS = mp4_grid.GridCanvas(640, 360, 25, 1)
 
 
 class _FakeRasterizer:
-    def __init__(self) -> None:
+    def __init__(self, *, motion_seconds: float = 0.0) -> None:
         self.calls: list[str] = []
+        self.motion_seconds = motion_seconds
+        self.frame_requests: list[tuple] = []
+        self.frames_rendered = 0
 
     def png(self, html: str, *, width: int, height: int) -> bytes:
         self.calls.append(html)
@@ -46,6 +49,34 @@ class _FakeRasterizer:
         buf = io.BytesIO()
         Image.new("RGBA", (width, height), (0, 0, 0, 0)).save(buf, format="PNG")
         return buf.getvalue()
+
+    def engine_version(self) -> str:
+        return "fake"
+
+    def render_template_frames(
+        self, template, *, context, width: int, height: int, fps: float, max_seconds: float
+    ):
+        """A still unless ``motion_seconds`` is set; frames are blank and
+        counted in ``frames_rendered`` as they are pulled."""
+        import json
+        import math
+
+        from splitsmith.overlay_raster import TemplateFrames
+
+        self.calls.append(json.dumps(context.data, ensure_ascii=False))
+        self.frame_requests.append((template, context.model_dump(), width, height, fps, max_seconds))
+        duration = self.motion_seconds
+        count = 1 if duration <= 0 else max(1, math.ceil(min(duration, max_seconds) * fps - 1e-9))
+        blank = bytes(width * height * 4)
+
+        def frames():
+            for _ in range(count):
+                self.frames_rendered += 1
+                yield blank
+
+        return TemplateFrames(
+            duration=duration, frame_count=count, width=width, height=height, frames=frames()
+        )
 
 
 def _ok_runner(calls: list[tuple[str, ...]]):

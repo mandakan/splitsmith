@@ -43,12 +43,28 @@ from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableE
 # docstring above.
 
 
+def _png_2x2() -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGBA", (2, 2), (1, 2, 3, 4)).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+_PNG_2x2 = _png_2x2()
+
+
 class _RecordingPage:
     def __init__(self) -> None:
         self.calls: list[tuple] = []
         self.goto_url: str | None = None
         self.goto_file_content: str | None = None
         self.handlers: dict[str, list] = {}
+        #: Answers for ``evaluate``, matched by a needle the expression
+        #: contains, in insertion order. The renderer reads two template
+        #: facts: one expression starting ``typeof window.poster`` (the
+        #: poster, or the midpoint, computed in the page) and one starting
+        #: ``typeof window.duration``. Nothing answered means a still.
+        self.answers: dict[str, object] = {}
+        self.screenshots = 0
 
     def on(self, event: str, handler) -> None:  # noqa: ANN001 -- Playwright's own loose signature
         self.handlers.setdefault(event, []).append(handler)
@@ -60,13 +76,34 @@ class _RecordingPage:
         path = Path(url[len("file://") :])
         self.goto_file_content = path.read_text(encoding="utf-8")
 
-    def evaluate(self, expression: str):
+    def evaluate(self, expression: str, arg=None):  # noqa: ANN001
         self.calls.append(("evaluate", expression))
+        for needle, value in self.answers.items():
+            if needle in expression:
+                return value
         return None
 
     def screenshot(self, *, type: str, omit_background: bool) -> bytes:  # noqa: A002
         self.calls.append(("screenshot", type, omit_background))
-        return b"FAKE-PNG-BYTES"
+        self.screenshots += 1
+        return _PNG_2x2
+
+
+class _AnimatedPage(_RecordingPage):
+    """A 0.5 s template with no ``poster()``: the page's own expression
+    yields the midpoint."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.answers = {"typeof window.poster": 0.25, "typeof window.duration": 0.5}
+
+
+class _PosterPage(_RecordingPage):
+    """A 2 s template that names its poster frame."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.answers = {"typeof window.poster": 1.5, "typeof window.duration": 2.0}
 
 
 class _ThrowingTemplatePage(_RecordingPage):
@@ -111,6 +148,7 @@ class _RecordingBrowser:
         self._page_factory = page_factory
         self.contexts: list[_RecordingContext] = []
         self.closed = False
+        self.version = "fake-browser"
 
     def new_context(self, *, viewport: dict, device_scale_factor: int) -> _RecordingContext:
         ctx = _RecordingContext(page_factory=self._page_factory)
@@ -147,7 +185,7 @@ def test_png_writes_html_to_a_real_file_and_navigates_via_file_url() -> None:
     html = "<html><body>hello splitsmith</body></html>"
     result = rasterizer.png(html, width=640, height=360)
 
-    assert result == b"FAKE-PNG-BYTES"
+    assert result == _PNG_2x2
     browser = rasterizer._browser
     assert len(browser.contexts) == 1, "one context per png() call, not reused across calls"
     ctx = browser.contexts[0]
@@ -521,7 +559,7 @@ def test_render_template_installs_the_context_before_navigating(tmp_path: Path) 
 
     out = rasterizer.render_template(template, context=_context_fixture(), width=64, height=32)
 
-    assert out == b"FAKE-PNG-BYTES"
+    assert out == _PNG_2x2
     ctx = rasterizer._browser.contexts[0]
     assert ctx.viewport == {"width": 64, "height": 32}
     assert ctx.init_scripts == [_context_fixture().init_script()]
@@ -532,11 +570,13 @@ def test_render_template_installs_the_context_before_navigating(tmp_path: Path) 
         "evaluate",
         "evaluate",
         "evaluate",
+        "evaluate",
         "screenshot",
     ]
     assert page.goto_url == template.resolve().as_uri()
     assert page.calls[1] == ("evaluate", "document.fonts.ready")
-    assert "window.seek" in page.calls[2][1]
+    assert page.calls[2][1].startswith("typeof window.poster"), "the poster is read before the seek"
+    assert "window.seek" in page.calls[3][1]
     assert page.calls[-1] == ("screenshot", "png", True)
     assert ctx.closed
 
@@ -574,3 +614,113 @@ def test_render_template_raises_when_the_template_script_throws(tmp_path: Path) 
     page = rasterizer._browser.contexts[0].pages[0]
     assert "pageerror" in page.handlers, "the listener must be registered before goto"
     assert rasterizer._browser.contexts[0].closed
+
+
+# --- render_template_frames(): the animated half of the contract -----------
+
+
+def _template(tmp_path: Path) -> Path:
+    template = tmp_path / "card.html"
+    template.write_text("<!doctype html><body></body>", encoding="utf-8")
+    return template
+
+
+def test_render_template_seeks_to_the_poster_when_the_template_defines_one(tmp_path: Path) -> None:
+    rasterizer = ChromiumRasterizer()
+    rasterizer._browser = _RecordingBrowser(page_factory=_PosterPage)
+    rasterizer.render_template(_template(tmp_path), context=_context_fixture(), width=4, height=2)
+    page = rasterizer._browser.contexts[0].pages[0]
+    seeks = [c[1] for c in page.calls if c[0] == "evaluate" and "window.seek(" in c[1]]
+    assert len(seeks) == 1 and "window.seek(1.5)" in seeks[0]
+
+
+def test_render_template_seeks_to_the_midpoint_without_a_poster(tmp_path: Path) -> None:
+    rasterizer = ChromiumRasterizer()
+    rasterizer._browser = _RecordingBrowser(page_factory=_AnimatedPage)
+    rasterizer.render_template(_template(tmp_path), context=_context_fixture(), width=4, height=2)
+    page = rasterizer._browser.contexts[0].pages[0]
+    seeks = [c[1] for c in page.calls if "window.seek(" in c[1]]
+    assert len(seeks) == 1 and "window.seek(0.25)" in seeks[0]
+
+
+def test_render_template_frames_yields_one_frame_for_a_still(tmp_path: Path) -> None:
+    rasterizer = ChromiumRasterizer()
+    rasterizer._browser = _RecordingBrowser()
+    out = rasterizer.render_template_frames(
+        _template(tmp_path), context=_context_fixture(), width=2, height=2, fps=30, max_seconds=3.0
+    )
+    assert out.duration == 0 and out.frame_count == 1
+    frames = list(out.frames)
+    assert len(frames) == 1 and len(frames[0]) == 2 * 2 * 4
+    assert frames[0][:4] == bytes((1, 2, 3, 4))
+    assert rasterizer._browser.contexts[0].closed
+
+
+def test_render_template_frames_seeks_each_frame_and_fits_once(tmp_path: Path) -> None:
+    rasterizer = ChromiumRasterizer()
+    rasterizer._browser = _RecordingBrowser(page_factory=_AnimatedPage)
+    out = rasterizer.render_template_frames(
+        _template(tmp_path), context=_context_fixture(), width=2, height=2, fps=10, max_seconds=3.0
+    )
+    assert (out.duration, out.frame_count) == (0.5, 5)
+    assert len(list(out.frames)) == 5
+    page = rasterizer._browser.contexts[0].pages[0]
+    seeks = [c[1] for c in page.calls if "window.seek(" in c[1]]
+    assert [s[s.index("window.seek(") :] for s in seeks] == [
+        f"window.seek({t}) : undefined" for t in (0.0, 0.1, 0.2, 0.3, 0.4)
+    ]
+    assert sum("__splitsmithFit" in c[1] for c in page.calls if c[0] == "evaluate") == 1
+    assert page.screenshots == 5
+
+
+def test_render_template_frames_caps_at_max_seconds(tmp_path: Path) -> None:
+    """A template longer than the card's hold renders only the frames the
+    hold shows; the rest would be encoded and trimmed away."""
+    rasterizer = ChromiumRasterizer()
+    rasterizer._browser = _RecordingBrowser(page_factory=_PosterPage)  # duration 2.0
+    out = rasterizer.render_template_frames(
+        _template(tmp_path), context=_context_fixture(), width=2, height=2, fps=10, max_seconds=0.5
+    )
+    assert out.frame_count == 5
+    assert len(list(out.frames)) == 5
+
+
+def test_render_template_frames_closes_the_context_when_abandoned(tmp_path: Path) -> None:
+    rasterizer = ChromiumRasterizer()
+    rasterizer._browser = _RecordingBrowser(page_factory=_AnimatedPage)
+    out = rasterizer.render_template_frames(
+        _template(tmp_path), context=_context_fixture(), width=2, height=2, fps=10, max_seconds=3.0
+    )
+    next(out.frames)
+    out.close()
+    assert rasterizer._browser.contexts[0].closed
+
+
+def test_render_template_frames_raises_on_a_page_error_mid_run(tmp_path: Path) -> None:
+    """A script that throws inside ``seek`` for a later frame must fail the
+    clip, not hand ffmpeg a run of frames that stops being the card."""
+
+    class _ThrowsOnThirdSeek(_AnimatedPage):
+        def evaluate(self, expression: str, arg=None):  # noqa: ANN001
+            result = super().evaluate(expression, arg)
+            if "window.seek(0.2)" in expression:
+                for handler in self.handlers.get("pageerror", []):
+                    handler(types.SimpleNamespace(message="ReferenceError: boom at frame 3"))
+            return result
+
+    rasterizer = ChromiumRasterizer()
+    rasterizer._browser = _RecordingBrowser(page_factory=_ThrowsOnThirdSeek)
+    out = rasterizer.render_template_frames(
+        _template(tmp_path), context=_context_fixture(), width=2, height=2, fps=10, max_seconds=3.0
+    )
+    with pytest.raises(overlay_raster.TemplateScriptError, match="frame 3"):
+        list(out.frames)
+    assert rasterizer._browser.contexts[0].closed
+
+
+def test_engine_version_is_the_browser_version() -> None:
+    rasterizer = ChromiumRasterizer()
+    browser = _RecordingBrowser()
+    browser.version = "131.0.6778.33"
+    rasterizer._browser = browser
+    assert rasterizer.engine_version() == "131.0.6778.33"

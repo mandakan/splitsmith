@@ -18,10 +18,15 @@ LOOK = load_look("splitsmith")
 
 
 class _FakeRasterizer:
-    def __init__(self, *, fill: tuple[int, int, int, int] = (0, 0, 0, 0)) -> None:
+    def __init__(
+        self, *, fill: tuple[int, int, int, int] = (0, 0, 0, 0), motion_seconds: float = 0.0
+    ) -> None:
         self.calls: list[tuple[str, int, int]] = []
         self.template_calls: list[tuple[Path, dict, int, int]] = []
         self._fill = fill
+        self.motion_seconds = motion_seconds
+        self.frame_requests: list[tuple] = []
+        self.frames_rendered = 0
 
     def png(self, html: str, *, width: int, height: int) -> bytes:
         self.calls.append((html, width, height))
@@ -30,6 +35,33 @@ class _FakeRasterizer:
     def render_template(self, template: Path, *, context, width: int, height: int) -> bytes:
         self.template_calls.append((template, context.model_dump(), width, height))
         return self._blank(width, height)
+
+    def engine_version(self) -> str:
+        return "fake"
+
+    def render_template_frames(
+        self, template, *, context, width: int, height: int, fps: float, max_seconds: float
+    ):
+        """A still unless ``motion_seconds`` is set; frames are blank and
+        counted in ``frames_rendered`` as they are pulled."""
+        import math
+
+        from splitsmith.overlay_raster import TemplateFrames
+
+        self.template_calls.append((template, context.model_dump(), width, height))
+        self.frame_requests.append((template, context.model_dump(), width, height, fps, max_seconds))
+        duration = self.motion_seconds
+        count = 1 if duration <= 0 else max(1, math.ceil(min(duration, max_seconds) * fps - 1e-9))
+        blank = bytes(width * height * 4)
+
+        def frames():
+            for _ in range(count):
+                self.frames_rendered += 1
+                yield blank
+
+        return TemplateFrames(
+            duration=duration, frame_count=count, width=width, height=height, frames=frames()
+        )
 
     def _blank(self, width: int, height: int) -> bytes:
         buf = io.BytesIO()
@@ -42,6 +74,14 @@ class _BoomRasterizer:
         raise RuntimeError("rasterize boom")
 
     def render_template(self, template: Path, *, context, width: int, height: int) -> bytes:
+        raise RuntimeError("template boom")
+
+    def engine_version(self) -> str:
+        return "fake"
+
+    def render_template_frames(
+        self, template, *, context, width: int, height: int, fps: float, max_seconds: float
+    ):
         raise RuntimeError("template boom")
 
 

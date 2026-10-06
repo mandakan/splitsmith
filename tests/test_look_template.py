@@ -236,3 +236,24 @@ def test_a_user_template_that_throws_skips_the_card_with_a_real_browser(
     except RasterizerUnavailableError as exc:
         pytest.skip(str(exc))
     assert image is None
+
+
+def test_template_digest_moves_with_every_input(tmp_path) -> None:
+    template = tmp_path / "t.html"
+    template.write_text("<!doctype html>", encoding="utf-8")
+    ctx = look_template.TemplateContext(
+        theme={"ink": "#ffffff"},
+        data={"groups": []},
+        size={"width": 64, "height": 32},
+        fps=30,
+        engine=look_template.engine_block(css="body{}"),
+        assets={"shared": look_template.shared_url()},
+    )
+    base = look_template.template_digest(template, ctx, fps=30, engine_version="v1")
+    assert base == look_template.template_digest(template, ctx, fps=30, engine_version="v1")
+    assert base != look_template.template_digest(template, ctx, fps=25, engine_version="v1")
+    assert base != look_template.template_digest(template, ctx, fps=30, engine_version="v2")
+    dark = ctx.model_copy(update={"theme": {"ink": "#000000"}})
+    assert base != look_template.template_digest(template, dark, fps=30, engine_version="v1")
+    template.write_text("<!doctype html><!-- edited -->", encoding="utf-8")
+    assert base != look_template.template_digest(template, ctx, fps=30, engine_version="v1")

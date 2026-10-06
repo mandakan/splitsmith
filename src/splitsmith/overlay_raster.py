@@ -43,11 +43,16 @@ an integration test built specifically to catch that regression.
 
 from __future__ import annotations
 
+import io
 import logging
+import math
 import tempfile
+from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+from PIL import Image
 from playwright.sync_api import Browser, Playwright, sync_playwright
 from playwright.sync_api import Error as PlaywrightError
 
@@ -55,6 +60,26 @@ if TYPE_CHECKING:
     from .look_template import TemplateContext
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class TemplateFrames:
+    """One template's frames at a fixed rate: ``frame_count`` raw RGBA
+    buffers of ``width * height * 4`` bytes from ``frames``, rendered
+    lazily (a browser context stays open until the iterator is exhausted
+    or :meth:`close` is called). ``duration`` is the template's own
+    ``duration()``; a still reports 0 and one frame."""
+
+    duration: float
+    frame_count: int
+    width: int
+    height: int
+    frames: Iterator[bytes]
+
+    def close(self) -> None:
+        close = getattr(self.frames, "close", None)
+        if close is not None:
+            close()
 
 
 class Rasterizer(Protocol):
@@ -71,7 +96,27 @@ class Rasterizer(Protocol):
     def render_template(self, template: Path, *, context: TemplateContext, width: int, height: int) -> bytes:
         """A Look template (``splitsmith.look_template``) to an alpha PNG:
         ``context`` is installed as ``window.splitsmith`` before the
-        document's scripts run, the template is rendered at ``seek(0)``."""
+        document's scripts run, the template is rendered at its poster
+        (``poster()``, else the midpoint of ``duration()``, else 0)."""
+        ...
+
+    def engine_version(self) -> str:
+        """The rendering engine's version, part of every frame digest."""
+        ...
+
+    def render_template_frames(
+        self,
+        template: Path,
+        *,
+        context: TemplateContext,
+        width: int,
+        height: int,
+        fps: float,
+        max_seconds: float,
+    ) -> TemplateFrames:
+        """The template's frames at ``fps``: one at ``seek(0)`` for a
+        still, ``ceil(min(duration, max_seconds) * fps)`` for an
+        animation, rendered lazily."""
         ...
 
 
@@ -286,45 +331,134 @@ class ChromiumRasterizer:
             finally:
                 context.close()
 
-    def render_template(self, template: Path, *, context: TemplateContext, width: int, height: int) -> bytes:
-        """Render a Look template to a ``width`` x ``height`` alpha PNG.
+    _POSTER = (
+        "typeof window.poster === 'function' ? Number(window.poster()) || 0 : "
+        "(typeof window.duration === 'function' ? (Number(window.duration()) || 0) / 2 : 0)"
+    )
+    _DURATION = "typeof window.duration === 'function' ? Number(window.duration()) || 0 : 0"
 
-        ``context.init_script()`` is installed on a fresh browser context
-        so ``window.splitsmith`` exists before the document's first
-        script runs; the template is navigated to by ``file://`` URL so
-        its own relative references and the ``file://`` script URLs in
-        ``assets.shared`` resolve. After load: fonts, ``seek(0)``, fonts
-        again (a template may add a face while mounting), the fit policy
-        when the template defines it, then the same transparent
-        screenshot :meth:`png` takes.
-        """
+    def engine_version(self) -> str:
+        if self._browser is None:
+            raise RuntimeError("ChromiumRasterizer.engine_version() called outside its own 'with' block")
+        return str(self._browser.version)
+
+    def _open_template(self, template: Path, *, context: TemplateContext, width: int, height: int):  # type: ignore[no-untyped-def]
+        """A fresh context with ``window.splitsmith`` installed and the
+        template loaded past ``load`` and ``document.fonts.ready``:
+        ``(browser_context, page, errors)``, where ``errors`` collects
+        ``pageerror`` messages from before navigation on. An exception
+        thrown by the template's own script reaches Playwright only as
+        that event: ``goto`` and ``screenshot`` both succeed and hand back
+        a fully transparent PNG, which the caller would composite as a
+        textless card. Listening before navigation turns that into the
+        error the caller already skips the card on."""
         if self._browser is None:
             raise RuntimeError(
-                "ChromiumRasterizer.render_template() called outside its own 'with' block -- the browser is "
+                "ChromiumRasterizer template rendering called outside its own 'with' block -- the browser is "
                 "only live between __enter__ and __exit__"
             )
         browser_context = self._browser.new_context(
             viewport={"width": width, "height": height},
             device_scale_factor=DEVICE_SCALE_FACTOR,
         )
+        errors: list[str] = []
         try:
             browser_context.add_init_script(context.init_script())
             page = browser_context.new_page()
-            # An exception thrown by the template's own script reaches
-            # Playwright only as a ``pageerror`` event: ``goto`` and
-            # ``screenshot`` both succeed and hand back a fully transparent
-            # PNG, which the caller would composite as a textless card.
-            # Listening before navigation turns that into the error the
-            # caller already skips the card on.
-            errors: list[str] = []
             page.on("pageerror", lambda error: errors.append(getattr(error, "message", None) or str(error)))
             page.goto(template.resolve().as_uri(), wait_until="load")
             page.evaluate("document.fonts.ready")
-            page.evaluate("typeof window.seek === 'function' ? window.seek(0) : undefined")
+        except BaseException:
+            browser_context.close()
+            raise
+        return browser_context, page, errors
+
+    @staticmethod
+    def _seek(page, seconds: float) -> None:  # type: ignore[no-untyped-def]
+        page.evaluate(f"typeof window.seek === 'function' ? window.seek({seconds}) : undefined")
+
+    @staticmethod
+    def _check(errors: list[str], template: Path) -> None:
+        if errors:
+            raise TemplateScriptError(f"{template.name}: {errors[0]}")
+
+    def render_template(self, template: Path, *, context: TemplateContext, width: int, height: int) -> bytes:
+        """Render a Look template to a ``width`` x ``height`` alpha PNG at
+        its poster frame (``poster()``, else the midpoint of
+        ``duration()``, else 0: a still renders at 0). The template is
+        navigated to by ``file://`` URL so its own relative references and
+        the ``file://`` script URLs in ``assets.shared`` resolve. After
+        load: fonts, the poster seek, fonts again (a template may add a
+        face while mounting), the fit policy when the template defines
+        it, then the same transparent screenshot :meth:`png` takes.
+        """
+        if self._browser is None:
+            raise RuntimeError(
+                "ChromiumRasterizer.render_template() called outside its own 'with' block -- the browser is "
+                "only live between __enter__ and __exit__"
+            )
+        browser_context, page, errors = self._open_template(
+            template, context=context, width=width, height=height
+        )
+        try:
+            poster = page.evaluate(self._POSTER)
+            self._seek(page, float(poster or 0))
             page.evaluate("document.fonts.ready")
             page.evaluate("window.__splitsmithFit && window.__splitsmithFit()")
-            if errors:
-                raise TemplateScriptError(f"{template.name}: {errors[0]}")
+            self._check(errors, template)
             return page.screenshot(type="png", omit_background=True)
         finally:
             browser_context.close()
+
+    def render_template_frames(
+        self,
+        template: Path,
+        *,
+        context: TemplateContext,
+        width: int,
+        height: int,
+        fps: float,
+        max_seconds: float,
+    ) -> TemplateFrames:
+        """Load ``template`` once and yield its frames at ``fps``: a still
+        yields one frame at ``seek(0)``; an animated template yields
+        ``ceil(min(duration, max_seconds) * fps)`` frames at
+        ``seek(i / fps)``. The fit policy runs once, after the first seek
+        (layout does not change with time; opacity and transforms do).
+        A ``pageerror`` at any point raises :class:`TemplateScriptError`
+        from the iterator and closes the context.
+        """
+        if self._browser is None:
+            raise RuntimeError(
+                "ChromiumRasterizer.render_template_frames() called outside its own 'with' block -- the "
+                "browser is only live between __enter__ and __exit__"
+            )
+        browser_context, page, errors = self._open_template(
+            template, context=context, width=width, height=height
+        )
+        try:
+            duration = float(page.evaluate(self._DURATION) or 0)
+            self._check(errors, template)
+        except BaseException:
+            browser_context.close()
+            raise
+        shown = min(duration, max_seconds) if duration > 0 else 0.0
+        count = max(1, math.ceil(shown * fps - 1e-9)) if shown > 0 else 1
+
+        def generate() -> Iterator[bytes]:
+            try:
+                for index in range(count):
+                    self._seek(page, round(index / fps, 6))
+                    if index == 0:
+                        page.evaluate("document.fonts.ready")
+                        page.evaluate("window.__splitsmithFit && window.__splitsmithFit()")
+                    self._check(errors, template)
+                    png = page.screenshot(type="png", omit_background=True)
+                    with Image.open(io.BytesIO(png)) as image:
+                        yield image.convert("RGBA").tobytes()
+            finally:
+                browser_context.close()
+
+        return TemplateFrames(
+            duration=duration, frame_count=count, width=width, height=height, frames=generate()
+        )

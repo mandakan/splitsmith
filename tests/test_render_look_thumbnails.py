@@ -29,8 +29,11 @@ def _load():
 
 
 class _StubRasterizer:
-    def __init__(self) -> None:
+    def __init__(self, *, motion_seconds: float = 0.0) -> None:
         self.calls: list[tuple[int, int]] = []
+        self.motion_seconds = motion_seconds
+        self.frame_requests: list[tuple] = []
+        self.frames_rendered = 0
 
     def png(self, html: str, *, width: int, height: int) -> bytes:
         self.calls.append((width, height))
@@ -40,6 +43,33 @@ class _StubRasterizer:
 
     def render_template(self, template, *, context, width: int, height: int) -> bytes:
         return self.png("", width=width, height=height)
+
+    def engine_version(self) -> str:
+        return "fake"
+
+    def render_template_frames(
+        self, template, *, context, width: int, height: int, fps: float, max_seconds: float
+    ):
+        """A still unless ``motion_seconds`` is set; frames are blank and
+        counted in ``frames_rendered`` as they are pulled."""
+        import math
+
+        from splitsmith.overlay_raster import TemplateFrames
+
+        self.calls.append((width, height))
+        self.frame_requests.append((template, context.model_dump(), width, height, fps, max_seconds))
+        duration = self.motion_seconds
+        count = 1 if duration <= 0 else max(1, math.ceil(min(duration, max_seconds) * fps - 1e-9))
+        blank = bytes(width * height * 4)
+
+        def frames():
+            for _ in range(count):
+                self.frames_rendered += 1
+                yield blank
+
+        return TemplateFrames(
+            duration=duration, frame_count=count, width=width, height=height, frames=frames()
+        )
 
 
 def test_writes_every_thumbnail_at_the_gallery_size(tmp_path: Path) -> None:
