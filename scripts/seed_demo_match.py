@@ -298,6 +298,34 @@ def cut_trimmed(source: Path, dest: Path) -> None:
     subprocess.run(cmd, check=True, capture_output=True, text=True)
 
 
+def distinct_copy(source: Path, dest: Path, tag: str, *, media: bool) -> None:
+    """``source`` at ``dest`` with bytes of its own, so each copy fingerprints
+    as its own recording (#1227): two shooters filming the same stage hold
+    two clips, not one. Media is remuxed with ``tag`` as its comment (stream
+    copy, so every timestamp holds); a placeholder gets ``tag`` appended."""
+    if not media:
+        dest.write_bytes(source.read_bytes() + tag.encode())
+        return
+    cmd = [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-nostdin",
+        "-y",
+        "-i",
+        str(source),
+        "-map",
+        "0",
+        "-c",
+        "copy",
+        "-metadata",
+        f"comment={tag}",
+        str(dest),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True, text=True)
+
+
 def seed_shooter(
     root: Path,
     match: match_model.Match,
@@ -329,9 +357,9 @@ def seed_shooter(
         if media:
             render_media(own_source)
         else:
-            own_source.write_bytes(b"\x00" * 1024)  # presence only
+            own_source.write_bytes(b"\x00" * 1024 + slug.encode())  # presence only
     elif source != own_source:
-        shutil.copyfile(source, own_source)
+        distinct_copy(source, own_source, slug, media=media)
     media_rel = Path("raw/demo-source.mp4")
     project.competitor_name = name
     project.match_date = match.match_date
@@ -363,9 +391,9 @@ def seed_shooter(
     project.stages = stages
     if unassigned:
         # One file in the unassigned tray so the Footage page has something
-        # to place (a second copy of the source).
+        # to place (another recording of the same scene).
         extra = shooter_root / "raw" / "demo-extra.mp4"
-        shutil.copyfile(own_source, extra)
+        distinct_copy(own_source, extra, f"{slug}-extra", media=media)
         project.unassigned_videos = [StageVideo(path=Path("raw/demo-extra.mp4"), role="secondary")]
     project.save(shooter_root)
     if media:
