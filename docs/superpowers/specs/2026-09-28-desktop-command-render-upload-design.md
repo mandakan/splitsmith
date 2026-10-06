@@ -203,7 +203,7 @@ the primitives.
 | Upload finished, completion lost, desktop quits | on restart the re-claim hits `prior_result` and completes with the existing video; no second upload |
 | Cancel while waiting | `cancelled` at once (existing) |
 | Cancel while rendering or uploading | `cancel_requested` reaches the job at the next heartbeat; the export stops between stages, the upload between chunks |
-| Cancel after the holder's lease lapsed | `cancelled` at once; a holder that comes back gets no heartbeat and stops, and its completion leaves the row cancelled |
+| Cancel after the holder's lease lapsed | `cancelled` at once; a holder that comes back gets no heartbeat and stops, and a failure or cancel it reports leaves the row cancelled; a success it reports (the upload had finished) turns the row `succeeded` with its video (#1116) |
 | Cancel after the last chunk | the job already succeeded; the command completes `succeeded` with the video |
 | Older desktop | claims and fails it with "update the desktop app" |
 
