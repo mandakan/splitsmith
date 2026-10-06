@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.59.0](https://github.com/mandakan/splitsmith/compare/v0.58.0...v0.59.0) (2026-10-06)
+
+
+### Features
+
+* **audit:** hosted Audit scrubs the 720p rendition through kind=scrub ([#1217](https://github.com/mandakan/splitsmith/issues/1217)) ([c976a17](https://github.com/mandakan/splitsmith/commit/c976a178a76a0fd25d80d3b2f77b0c1bda0cc09b))
+* **audit:** scrub the 720p rendition instead of the 4K trim ([#1208](https://github.com/mandakan/splitsmith/issues/1208)) ([9672571](https://github.com/mandakan/splitsmith/commit/9672571530a17ae594e8713fcdc9d6c3eb1a6e8d))
+* **youtube:** explain what connecting a channel allows before the login ([#1218](https://github.com/mandakan/splitsmith/issues/1218)) ([1c37d3a](https://github.com/mandakan/splitsmith/commit/1c37d3addcd039f7fec6c59085bd7eac596ad2e6))
+
+
+### Bug Fixes
+
+* **take:** find and repair a stage that lists a take's file twice ([#1216](https://github.com/mandakan/splitsmith/issues/1216)) ([be8deb6](https://github.com/mandakan/splitsmith/commit/be8deb6ce7701564ba776a274a30b269383a476c))
+* **take:** footage edits act on the clicked stage of a single take ([#1215](https://github.com/mandakan/splitsmith/issues/1215)) ([6ccb2bd](https://github.com/mandakan/splitsmith/commit/6ccb2bd213c1185b01f97aded493a483962f51dd))
+* **take:** stream each stage's own clip from a shared single-take source ([#1213](https://github.com/mandakan/splitsmith/issues/1213)) ([77bf328](https://github.com/mandakan/splitsmith/commit/77bf328b6b80d945979606199aeb833d5df28593))
+
 ## [0.58.0](https://github.com/mandakan/splitsmith/compare/v0.57.0...v0.58.0) (2026-10-05)
 
 
