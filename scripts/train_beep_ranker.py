@@ -17,6 +17,7 @@ scikit-learn is a dev dependency; nothing under src/ imports it.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import re
@@ -55,6 +56,9 @@ class CandidateRow:
     positive: bool
     heuristic_score: float
     heuristic_confidence: float
+    # Candidate time minus the labeled beep: shows whether a wrong pick is the
+    # beep with a late onset or a different event.
+    time_error_ms: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -86,6 +90,7 @@ def clip_from_detection(entry: BeepFixtureEntry, detection: BeepDetection | None
                 positive=abs(c.time - entry.ground_truth_in_clip) <= tol_s,
                 heuristic_score=c.score,
                 heuristic_confidence=c.confidence,
+                time_error_ms=(c.time - entry.ground_truth_in_clip) * 1000.0,
             )
         )
     return Clip(stem=entry.stem, group=group, rows=rows)
@@ -114,6 +119,16 @@ AUTO_TRUST = 0.95
 
 def _fit_hook(model: Any, train: list[Clip]) -> None:
     """Test seam: called with each fold's training clips before ``fit``."""
+
+
+def _head_fit_hook(head: Any, train: list[Clip]) -> None:
+    """Test seam: called with each head fold's training clips before ``fit``."""
+
+
+def _make_head() -> Any:
+    from sklearn.linear_model import LogisticRegression
+
+    return LogisticRegression()
 
 
 def clip_logits(probs: Sequence[float]) -> list[float]:
@@ -168,7 +183,6 @@ def oof_head_confidence(clips: list[Clip], probs: dict[str, list[float]]) -> dic
     """Leave-one-match-out confidence head over [logit, margin] (spec 4).
     Target per row: it is its clip's top-1 by ``probs`` and it is positive.
     Fitted over all clips with rows, unreachable ones included."""
-    from sklearn.linear_model import LogisticRegression
 
     def table(cs: list[Clip]) -> tuple[np.ndarray, np.ndarray]:
         xs, y = [], []
@@ -184,8 +198,13 @@ def oof_head_confidence(clips: list[Clip], probs: dict[str, list[float]]) -> dic
     with_rows = [c for c in clips if c.rows and c.stem in probs]
     out: dict[str, list[float]] = {}
     for group in sorted({c.group for c in with_rows}):
-        x, y = table([c for c in with_rows if c.group != group])
-        head = LogisticRegression().fit(x, y) if len(set(y.tolist())) == 2 else None
+        train = [c for c in with_rows if c.group != group]
+        x, y = table(train)
+        head = None
+        if len(set(y.tolist())) == 2:
+            head = _make_head()
+            _head_fit_hook(head, train)
+            head.fit(x, y)
         for c in (c for c in with_rows if c.group == group):
             xc, _ = table([c])
             out[c.stem] = (
@@ -251,6 +270,24 @@ def heuristic_outcomes(
             )
         )
     return out
+
+
+def candidate_table(clip: Clip, probs: Sequence[float], limit: int = TOP_N) -> list[dict[str, Any]]:
+    """``clip``'s candidates in the model's order with both rankings and each
+    one's offset from the labeled beep (spec 2.5: a loss is shown with both
+    rankings' candidate tables). Rows are in the heuristic's order already."""
+    order = sorted(range(len(clip.rows)), key=lambda i: probs[i], reverse=True)
+    return [
+        {
+            "model_rank": rank,
+            "heuristic_rank": i + 1,
+            "model_prob": round(float(probs[i]), 4),
+            "heuristic_score": round(clip.rows[i].heuristic_score, 4),
+            "time_error_ms": round(clip.rows[i].time_error_ms, 2),
+            "positive": clip.rows[i].positive,
+        }
+        for rank, i in enumerate(order[:limit], start=1)
+    ]
 
 
 @dataclass
@@ -324,6 +361,33 @@ def _models() -> dict[str, Callable[[], Any]]:
     return {"lr": lr, "gbdt": lambda: GradientBoostingClassifier(random_state=0)}
 
 
+def _final_fit(name: str, make: Callable[[], Any], clips: list[Clip]) -> dict[str, Any]:
+    """Spec 2.7: fit on every reachable fixture and record what would ship.
+    The report's figures stay the out-of-fold ones."""
+    from splitsmith.beep_features import FEATURE_NAMES
+
+    x, y = _matrix([c for c in clips if c.reachable])
+    model = make()
+    model.fit(x, y, sample_weight=_balanced_weights(y))
+    if name == "lr":
+        pipe = model.pipeline
+        scaler, lr = pipe.named_steps["standardscaler"], pipe.named_steps["logisticregression"]
+        params = {
+            "features": list(FEATURE_NAMES),
+            "mean": [round(float(v), 8) for v in scaler.mean_],
+            "scale": [round(float(v), 8) for v in scaler.scale_],
+            "coef": [round(float(v), 8) for v in lr.coef_[0]],
+            "intercept": round(float(lr.intercept_[0]), 8),
+        }
+    else:
+        params = {
+            "features": list(FEATURE_NAMES),
+            "importances": [round(float(v), 6) for v in model.feature_importances_],
+        }
+    digest = hashlib.sha256(json.dumps(params, sort_keys=True).encode()).hexdigest()[:8]
+    return {"model_version": f"beep-ranker-{name}-{digest}", **params}
+
+
 def main() -> None:
     from splitsmith.beep_features import FEATURE_NAMES
 
@@ -350,6 +414,13 @@ def main() -> None:
         g = gate(res)
         lost = [o.stem for o, t in zip(res, today, strict=True) if t.top1 and not o.top1]
         fixed = [o.stem for o, t in zip(res, today, strict=True) if o.top1 and not t.top1]
+        by_stem = {c.stem: c for c in clips}
+        confident_wrong = [o.stem for o in res if o.confidence >= AUTO_TRUST and not o.top1]
+        tables = {
+            stem: candidate_table(by_stem[stem], probs[stem])
+            for stem in dict.fromkeys(lost + confident_wrong)
+            if stem in probs
+        }
         report["models"][name] = {
             **summary(res),
             "gate": {
@@ -358,8 +429,12 @@ def main() -> None:
                 "wrong_at_95": g.wrong_at_95,
                 "passed": g.passed,
             },
+            "reachable_top1": sum(o.top1 for o, c in zip(res, clips, strict=True) if c.reachable),
             "lost": lost,
             "fixed": fixed,
+            "confident_wrong": confident_wrong,
+            "candidate_tables": tables,
+            "final_fit": _final_fit(name, make, clips),
             "oof": {
                 c.stem: {
                     "probs": probs.get(c.stem, []),
@@ -393,7 +468,18 @@ def _print(report: dict[str, Any]) -> None:
             line(name, m)
             + f"  gate={'PASS' if m['gate']['passed'] else 'FAIL'}  wrong@0.95={m['gate']['wrong_at_95']}"
         )
+        print(
+            f"    reachable top1 {m['reachable_top1']}/{report['reachable']}"
+            f"  version {m['final_fit']['model_version']}"
+        )
         print(f"    lost {len(m['lost'])}: {', '.join(m['lost'][:6])}{' ...' if len(m['lost']) > 6 else ''}")
+        for stem in m["confident_wrong"]:
+            pick = m["candidate_tables"][stem][0]
+            near = min(m["candidate_tables"][stem], key=lambda t: abs(t["time_error_ms"]))
+            print(
+                f"    wrong@0.95 {stem}: pick {pick['time_error_ms']:+.2f} ms,"
+                f" nearest candidate {near['time_error_ms']:+.2f} ms"
+            )
         for b in m["bins"]:
             print(f"    {b['bin']:9} n={b['n']:3} right={b['right']:3}")
     print(f"winner: {report['winner']}  ship: {report['ship']}")

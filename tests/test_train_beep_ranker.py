@@ -195,3 +195,119 @@ def test_top1_counts_when_either_of_two_positive_candidates_wins() -> None:
         [clip], {clip.stem: [0.2, 0.7, 0.1]}, {clip.stem: [0.1, 0.8, 0.0]}, {clip.stem: []}
     )
     assert outcome.top1 and outcome.confidence == pytest.approx(0.8)
+
+
+class _SpyModel:
+    """Records the labels each fit saw; predicts the first feature as P."""
+
+    def __init__(self, log: list) -> None:
+        self.log = log
+        self.stems: list[str] = []
+
+    def fit(self, x, y, sample_weight=None):
+        self.log.append((sorted(set(self.stems)), [int(v) for v in y]))
+        return self
+
+    def predict_proba(self, x):
+        import numpy as np
+
+        p = np.clip(np.asarray(x)[:, 0], 0.01, 0.99)
+        return np.column_stack([1 - p, p])
+
+
+def _spy_hooks(m, monkeypatch):
+    ranker_fits: list = []
+    head_fits: list = []
+    monkeypatch.setattr(m, "_fit_hook", lambda model, train: setattr(model, "stems", [c.stem for c in train]))
+    monkeypatch.setattr(m, "_make_head", lambda: _SpyModel(head_fits))
+    monkeypatch.setattr(
+        m, "_head_fit_hook", lambda head, train: setattr(head, "stems", [c.stem for c in train])
+    )
+    return ranker_fits, head_fits
+
+
+def test_the_ranker_trains_on_reachable_clips_and_the_head_on_all(monkeypatch) -> None:
+    """Spec 2.1 and 4: an unreachable clip (no candidate at the beep) never
+    trains the ranker, but does train the confidence head, which is how
+    the head learns to stay low when nothing in a clip looks like a beep."""
+    m = _script()
+    ranker_fits, head_fits = _spy_hooks(m, monkeypatch)
+    clips = [
+        _clip(m, "stage-shots-a-2026-stage1-s0", [True, False], [0.9, 0.1]),
+        _clip(m, "stage-shots-a-2026-stage2-s0", [False, False], [0.8, 0.2]),
+        _clip(m, "stage-shots-b-2026-stage1-s0", [True, False], [0.9, 0.1]),
+        _clip(m, "stage-shots-b-2026-stage2-s0", [False, False], [0.7, 0.3]),
+    ]
+    probs = m.oof_probs(clips, lambda: _SpyModel(ranker_fits))
+    m.oof_head_confidence(clips, probs)
+
+    assert [stems for stems, _ in ranker_fits] == [
+        ["stage-shots-b-2026-stage1-s0"],
+        ["stage-shots-a-2026-stage1-s0"],
+    ]
+    assert [stems for stems, _ in head_fits] == [
+        ["stage-shots-b-2026-stage1-s0", "stage-shots-b-2026-stage2-s0"],
+        ["stage-shots-a-2026-stage1-s0", "stage-shots-a-2026-stage2-s0"],
+    ]
+
+
+def test_the_head_learns_whether_the_top1_is_right_not_whether_a_row_is_positive(monkeypatch) -> None:
+    """A positive candidate that is not its clip's top-1 is a 0 for the head:
+    the head answers "is the chosen beep right?"."""
+    m = _script()
+    _, head_fits = _spy_hooks(m, monkeypatch)
+    loser = _clip(m, "stage-shots-a-2026-stage1-s0", [False, True], [0.9, 0.1])
+    winner = _clip(m, "stage-shots-a-2026-stage2-s0", [True, False], [0.9, 0.1])
+    held = _clip(m, "stage-shots-b-2026-stage1-s0", [True, False], [0.9, 0.1])
+    probs = {c.stem: [r.features[0] for r in c.rows] for c in (loser, winner, held)}
+
+    m.oof_head_confidence([loser, winner, held], probs)
+
+    fitted_without_b = next(y for stems, y in head_fits if "stage-shots-b-2026-stage1-s0" not in stems)
+    assert fitted_without_b == [0, 0, 1, 0]
+
+
+def test_a_wrong_pick_at_exactly_the_auto_trust_threshold_fails_the_gate() -> None:
+    m = _script()
+    right = [m.ClipOutcome(stem=f"s{i}", tags=[], top1=True, topn=True, confidence=0.99) for i in range(110)]
+    edge = [m.ClipOutcome(stem="edge", tags=[], top1=False, topn=True, confidence=m.AUTO_TRUST)]
+    assert m.gate(right + edge).wrong_at_95 == 1
+
+
+def test_rows_record_how_far_each_candidate_is_from_the_truth() -> None:
+    """The report shows a wrong pick's offset, so an onset 0.2 ms outside
+    tolerance reads differently from a different event."""
+    m = _script()
+    detection = BeepDetection(
+        time=5.01519, peak_amplitude=0.1, duration_ms=300.0, candidates=[_candidate(5.01519), _candidate(2.0)]
+    )
+    rows = m.clip_from_detection(_entry(truth=5.0, tol=15.0), detection).rows
+    assert [round(r.time_error_ms, 2) for r in rows] == [15.19, -3000.0]
+    assert [r.positive for r in rows] == [False, False]
+
+
+def test_a_candidate_table_shows_both_rankings_and_the_offsets() -> None:
+    """Spec 2.5: a lost fixture is shown with both rankings' candidate tables."""
+    m = _script()
+    rows = [
+        m.CandidateRow(
+            stem="s",
+            group="g",
+            features=[0.0] * 7,
+            positive=p,
+            heuristic_score=h,
+            heuristic_confidence=0.5,
+            time_error_ms=e,
+        )
+        for p, h, e in ((True, 0.9, 2.0), (False, 0.4, 900.0), (False, 0.1, -3000.0))
+    ]
+    clip = m.Clip(stem="s", group="g", rows=rows)
+
+    table = m.candidate_table(clip, [0.2, 0.7, 0.1])
+
+    assert [(t["model_rank"], t["heuristic_rank"], t["time_error_ms"], t["positive"]) for t in table] == [
+        (1, 2, 900.0, False),
+        (2, 1, 2.0, True),
+        (3, 3, -3000.0, False),
+    ]
+    assert table[0]["model_prob"] == 0.7 and table[1]["heuristic_score"] == 0.9
