@@ -77,19 +77,19 @@
   "slots": {
     "closing": {
       "default": "card.html",
-      "rise": "card.html"
+      "rise": "card-rise.html"
     },
     "lower_third": {
       "default": "card.html",
-      "rise": "card.html"
+      "rise": "card-rise.html"
     },
     "slate": {
       "default": "card.html",
-      "rise": "card.html"
+      "rise": "card-rise.html"
     },
     "title_page": {
       "default": "card.html",
-      "rise": "card.html"
+      "rise": "card-rise.html"
     }
   },
   "source": "src/splitsmith/ui_static/src/styles/index.css"

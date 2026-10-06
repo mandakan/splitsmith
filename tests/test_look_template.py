@@ -3,7 +3,9 @@ card template's parity with the Python markup."""
 
 from __future__ import annotations
 
+import io
 import json
+import math
 
 import pytest
 
@@ -257,3 +259,46 @@ def test_template_digest_moves_with_every_input(tmp_path) -> None:
     assert base != look_template.template_digest(template, dark, fps=30, engine_version="v1")
     template.write_text("<!doctype html><!-- edited -->", encoding="utf-8")
     assert base != look_template.template_digest(template, ctx, fps=30, engine_version="v1")
+
+
+@pytest.mark.integration
+def test_the_rise_variant_animates_deterministically() -> None:
+    """``card-rise.html``: nothing painted at t=0, the whole card by the
+    end, and frame k identical across two runs (the determinism the
+    cache's digest key rests on). The poster is the end of the rise, so a
+    preview never shows the invisible first frame."""
+    from PIL import Image
+
+    from splitsmith.composition import TitleCard
+    from splitsmith.overlay_card import card_context
+    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+
+    look = looks.load_look("splitsmith")
+    card = TitleCard(text="Stage 3", duration_seconds=1.5, info=("24 rounds",), variant="rise")
+    template = looks.template_for(look, "slate", "rise")
+    assert template.name == "card-rise.html"
+    context = card_context(card, slot="slate", width=320, height=180, fps=20, theme=load_theme("splitsmith"))
+
+    def run(rasterizer: ChromiumRasterizer) -> list[bytes]:
+        out = rasterizer.render_template_frames(
+            template, context=context, width=320, height=180, fps=20, max_seconds=5.0
+        )
+        assert out.duration > 0.3
+        return list(out.frames)
+
+    try:
+        with ChromiumRasterizer() as rasterizer:
+            first = run(rasterizer)
+            second = run(rasterizer)
+            poster_png = rasterizer.render_template(template, context=context, width=320, height=180)
+    except RasterizerUnavailableError as exc:
+        pytest.skip(str(exc))
+    assert first == second
+    assert len(first) == 14, "two groups: 600 ms plus one 90 ms stagger at 20 fps"
+    start = Image.frombytes("RGBA", (320, 180), first[0])
+    end = Image.frombytes("RGBA", (320, 180), first[-1])
+    assert start.getchannel("A").getbbox() is None, "nothing is painted before the rise begins"
+    assert end.getchannel("A").getbbox() is not None, "the card is on screen at the end"
+    with Image.open(io.BytesIO(poster_png)) as poster:
+        assert poster.convert("RGBA").getchannel("A").getbbox() is not None
+    assert math.isclose(len(first) / 20, 0.7, abs_tol=0.01)
