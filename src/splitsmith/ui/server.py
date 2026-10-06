@@ -11443,7 +11443,9 @@ def create_app(
 
             # Backfills every shooter's project, this one's included, so
             # the project loads after it or its save would undo the fill.
-            elsewhere = footage_sort_api.imported_elsewhere(state, slug)
+            # Off the event loop: the backfill stats every registered source,
+            # and one on a dead network mount would stall the server (#1227).
+            elsewhere = await run_in_threadpool(footage_sort_api.imported_elsewhere, state, slug)
         project = state.shooter_project(slug)
         for entry in candidates:
             if elsewhere:
