@@ -299,8 +299,19 @@ def _render_with_work_dir(
     shooters = composition.shooters
     segments: list[tuple[Path, float]] = []
     generated = False
-    total_steps = len(timeline.items) + 1
+    # Every item, plus two edges and the boundary per transition, plus the stitch.
+    total_steps = len(timeline.items) + 3 * len(timeline.boundaries) + 1
     used_keys: set[str] = set()
+    #: The cache key each encoded (or reused) segment path came from, so a
+    #: boundary can key on its edges' identities rather than on files the
+    #: cache's own LRU touch keeps re-dating (issue #1244).
+    keys_by_path: dict[Path, str] = {}
+    step = 0
+
+    def next_step() -> int:
+        nonlocal step
+        step += 1
+        return step
 
     def report(index: int, label: str, status: Literal["encoding", "reused", "stitching"]) -> None:
         if progress is not None:
@@ -331,6 +342,7 @@ def _render_with_work_dir(
         hit = segment_cache.lookup(key)
         if hit is not None:
             report(index, label, "reused")
+            keys_by_path[hit] = key
             return hit
         if prepare is not None:
             prepare()
@@ -341,17 +353,33 @@ def _render_with_work_dir(
             _run(tuple(str(partial) if token == target else token for token in cmd), runner=runner)
             if not partial.is_file():
                 raise FFmpegError(f"ffmpeg reported success but wrote no {label} segment")
-            return segment_cache.commit(partial, key)
+            committed = segment_cache.commit(partial, key)
+            keys_by_path[committed] = key
+            return committed
         finally:
             partial.unlink(missing_ok=True)
 
     def clip_writer(motion: CardMotion, clip_path: Path) -> Callable[[], object]:
-        return lambda: write_motion_clip(motion.frames, out=clip_path, fps=fps, ffmpeg_binary=ffmpeg_binary)
+        # Idempotent: a boundary's edge and the card itself share one clip,
+        # and the frames can only be pulled from the browser once.
+        def write() -> None:
+            if not clip_path.exists():
+                write_motion_clip(motion.frames, out=clip_path, fps=fps, ffmpeg_binary=ffmpeg_binary)
 
-    for step, item in enumerate(timeline.items, start=1):
+        return write
+
+    items: list[SpineItem] = list(timeline.items)
+    live: dict[int, _Boundary] = {b.after_index: b for b in timeline.boundaries}
+    killed: list[str] = []
+    prepared: dict[int, _Prepared] = {}
+
+    def prepare(item: SpineItem) -> _Prepared:
+        """Everything an item's encode (or a boundary's edge of it) reads
+        from disk: the lower third, a card's PNG or its backdrop and motion
+        clip, a summary's still. A card that cannot be drawn is
+        ``skipped`` (logged by overlay_card; a card is its text)."""
         if isinstance(item, _StageItem):
-            lower_third: _LowerThirdInput | None = None
-            lt_motion: CardMotion | None = None
+            prep = _Prepared(primary_audio=_has_audio_stream(item.plan.stage.primary.path))
             if item.lower_third is not None and rasterizer is not None and look is not None:
                 lt_motion = card_motion(
                     item.lower_third,
@@ -364,59 +392,22 @@ def _render_with_work_dir(
                     max_seconds=item.lower_third.duration_seconds,
                     shooters=shooters,
                 )
-            if lt_motion is not None and not lt_motion.animated:
-                image = first_frame_image(lt_motion)
-                lt_motion = None
-                if image is not None:
-                    png = work_dir / f"lower_third_{item.index:03d}.png"
-                    image.save(png)
-                    lower_third = _LowerThirdInput(path=png, card=item.lower_third)
-            elif lt_motion is not None:
-                clip_path = work_dir / f"lower_third_{item.index:03d}_motion.mov"
-                lower_third = _LowerThirdInput(path=clip_path, card=item.lower_third, clip=True)
-            stage_out = work_dir / f"stage_{item.index:03d}.mp4"
-            primary_audio = _has_audio_stream(item.plan.stage.primary.path)
-            cmd = _build_stage_command(
-                item.plan,
-                sequence=sequence,
-                output_path=stage_out,
-                ffmpeg_binary=ffmpeg_binary,
-                youtube_preset=youtube_preset,
-                lower_third=lower_third,
-                primary_audio=primary_audio,
-            )
-            if lt_motion is None:
-                segment = encode(cmd, stage_out, index=step, label=item.plan.stage.name)
-            else:
-                try:
-                    segment = encode(
-                        cmd,
-                        stage_out,
-                        index=step,
-                        label=item.plan.stage.name,
-                        virtual_inputs={str(lower_third.path): lt_motion.digest},  # type: ignore[union-attr]
-                        prepare=clip_writer(lt_motion, lower_third.path),  # type: ignore[union-attr]
-                    )
-                except MotionClipError as exc:
-                    # The stage is footage; a lower third that cannot be
-                    # drawn costs the title, never the stage.
-                    logger.warning("stage %d: %s; the lower third is dropped", item.index, exc)
-                    cmd = _build_stage_command(
-                        item.plan,
-                        sequence=sequence,
-                        output_path=stage_out,
-                        ffmpeg_binary=ffmpeg_binary,
-                        youtube_preset=youtube_preset,
-                        lower_third=None,
-                        primary_audio=primary_audio,
-                    )
-                    segment = encode(cmd, stage_out, index=step, label=item.plan.stage.name)
-                finally:
-                    lt_motion.close()
-            segments.append((segment, item.duration_seconds))
-        elif isinstance(item, _StillItem):
+                if lt_motion is not None and not lt_motion.animated:
+                    image = first_frame_image(lt_motion)
+                    if image is not None:
+                        png = work_dir / f"lower_third_{item.index:03d}.png"
+                        image.save(png)
+                        prep.lower_third = _LowerThirdInput(path=png, card=item.lower_third)
+                elif lt_motion is not None:
+                    clip_path = work_dir / f"lower_third_{item.index:03d}_motion.mov"
+                    prep.lower_third = _LowerThirdInput(path=clip_path, card=item.lower_third, clip=True)
+                    prep.motion = lt_motion
+            return prep
+        if isinstance(item, _StillItem):
+            prep = _Prepared()
             if rasterizer is None or look is None:
-                continue  # already recorded as a degradation up front
+                prep.skipped = True  # already recorded as a degradation up front
+                return prep
             motion = card_motion(
                 item.card,
                 slot=item.kind,
@@ -425,11 +416,12 @@ def _render_with_work_dir(
                 fps=fps,
                 look=look,
                 rasterizer=rasterizer,
-                max_seconds=item.duration_seconds,
+                max_seconds=item.card_seconds,
                 shooters=shooters,
             )
             if motion is None:
-                continue  # logged by overlay_card; a card is its text
+                prep.skipped = True
+                return prep
             try:
                 backdrop = _grab_backdrop(
                     timeline,
@@ -444,61 +436,25 @@ def _render_with_work_dir(
             except BaseException:
                 motion.close()
                 raise
-            still_out = work_dir / f"{item.name}.mp4"
             if not motion.animated:
                 text = first_frame_image(motion)
                 if text is None:
-                    continue  # logged by overlay_card
+                    prep.skipped = True
+                    return prep
                 png = work_dir / f"{item.name}.png"
                 compose_card(text, canvas).save(png)
-                cmd = _build_still_command(
-                    png,
-                    seconds=item.duration_seconds,
-                    sequence=sequence,
-                    output_path=still_out,
-                    ffmpeg_binary=ffmpeg_binary,
-                    youtube_preset=youtube_preset,
-                )
-                segments.append(
-                    (
-                        encode(cmd, still_out, index=step, label=_step_label(item, timeline)),
-                        item.duration_seconds,
-                    )
-                )
-                generated = True
-                continue
-            backdrop_png = work_dir / f"{item.name}_backdrop.png"
-            canvas.save(backdrop_png)
-            clip_path = work_dir / f"{item.name}_motion.mov"
-            cmd = _build_motion_card_command(
-                backdrop_png,
-                clip_path,
-                seconds=item.duration_seconds,
-                sequence=sequence,
-                output_path=still_out,
-                ffmpeg_binary=ffmpeg_binary,
-                youtube_preset=youtube_preset,
-            )
-            try:
-                segment = encode(
-                    cmd,
-                    still_out,
-                    index=step,
-                    label=_step_label(item, timeline),
-                    virtual_inputs={str(clip_path): motion.digest},
-                    prepare=clip_writer(motion, clip_path),
-                )
-            except MotionClipError as exc:
-                logger.warning("%s: %s; the card is skipped", item.name, exc)
-                continue
-            finally:
-                motion.close()
-            segments.append((segment, item.duration_seconds))
-            generated = True
-        elif isinstance(item, _SummaryItem):
+                prep.png = png
+                return prep
+            prep.backdrop_png = work_dir / f"{item.name}_backdrop.png"
+            canvas.save(prep.backdrop_png)
+            prep.clip_path = work_dir / f"{item.name}_motion.mov"
+            prep.motion = motion
+            return prep
+        if isinstance(item, _SummaryItem):
             # The frame is grabbed whether or not there is a browser: the
             # blurred freeze without text is the grid's own degradation,
             # and a frame is a picture the viewer recognises.
+            prep = _Prepared()
             backdrop = _grab_backdrop(
                 timeline,
                 name=item.name,
@@ -522,32 +478,253 @@ def _render_with_work_dir(
                 logger.warning(
                     "stage %d: no frame and no text to hold the summary on; skipped", item.stage_index
                 )
-                continue
+                prep.skipped = True
+                return prep
             png = work_dir / f"{item.name}.png"
             image.save(png)
+            prep.png = png
+            return prep
+        return _Prepared()
+
+    def encode_item(item: SpineItem, prep: _Prepared) -> Path | None:
+        """The item's own segment, its cuts applied; ``None`` when the item
+        is skipped. Closes the item's motion frames."""
+        if isinstance(item, _StageItem):
+            plan = item.plan
+            if item.head_cut_seconds or item.tail_cut_seconds:
+                plan = _narrow_plan(plan, head_cut=item.head_cut_seconds, tail_cut=item.tail_cut_seconds)
+            lower_third = prep.lower_third
+            if lower_third is not None and item.head_cut_seconds:
+                lower_third = replace(lower_third, skip_seconds=item.head_cut_seconds)
+            stage_out = work_dir / f"{item.name}.mp4"
+            label = item.plan.stage.name
+
+            def command(lt: _LowerThirdInput | None) -> tuple[str, ...]:
+                return _build_stage_command(
+                    plan,
+                    sequence=sequence,
+                    output_path=stage_out,
+                    ffmpeg_binary=ffmpeg_binary,
+                    youtube_preset=youtube_preset,
+                    lower_third=lt,
+                    primary_audio=prep.primary_audio,
+                )
+
+            index = next_step()
+            if prep.motion is None or lower_third is None:
+                return encode(command(lower_third), stage_out, index=index, label=label)
+            try:
+                return encode(
+                    command(lower_third),
+                    stage_out,
+                    index=index,
+                    label=label,
+                    virtual_inputs={str(lower_third.path): prep.motion.digest},
+                    prepare=clip_writer(prep.motion, lower_third.path),
+                )
+            except MotionClipError as exc:
+                # The stage is footage; a lower third that cannot be
+                # drawn costs the title, never the stage.
+                logger.warning("stage %d: %s; the lower third is dropped", item.index, exc)
+                return encode(command(None), stage_out, index=index, label=label)
+            finally:
+                prep.motion.close()
+        if isinstance(item, _StillItem):
+            if prep.skipped:
+                return None
+            still_out = work_dir / f"{item.name}.mp4"
+            if prep.motion is None:
+                assert prep.png is not None
+                cmd = _build_still_command(
+                    prep.png,
+                    seconds=item.duration_seconds,
+                    sequence=sequence,
+                    output_path=still_out,
+                    ffmpeg_binary=ffmpeg_binary,
+                    youtube_preset=youtube_preset,
+                )
+                return encode(cmd, still_out, index=next_step(), label=_step_label(item, timeline))
+            assert prep.backdrop_png is not None and prep.clip_path is not None
+            cmd = _build_motion_card_command(
+                prep.backdrop_png,
+                prep.clip_path,
+                seconds=item.duration_seconds,
+                sequence=sequence,
+                output_path=still_out,
+                ffmpeg_binary=ffmpeg_binary,
+                youtube_preset=youtube_preset,
+                clip_offset_seconds=item.head_cut_seconds,
+            )
+            try:
+                return encode(
+                    cmd,
+                    still_out,
+                    index=next_step(),
+                    label=_step_label(item, timeline),
+                    virtual_inputs={str(prep.clip_path): prep.motion.digest},
+                    prepare=clip_writer(prep.motion, prep.clip_path),
+                )
+            except MotionClipError as exc:
+                logger.warning("%s: %s; the card is skipped", item.name, exc)
+                return None
+            finally:
+                prep.motion.close()
+        if isinstance(item, _SummaryItem):
+            if prep.skipped:
+                return None
+            assert prep.png is not None
             still_out = work_dir / f"{item.name}.mp4"
             cmd = _build_still_command(
-                png,
+                prep.png,
                 seconds=item.duration_seconds,
                 sequence=sequence,
                 output_path=still_out,
                 ffmpeg_binary=ffmpeg_binary,
                 youtube_preset=youtube_preset,
             )
-            segments.append(
-                (encode(cmd, still_out, index=step, label=_step_label(item, timeline)), item.duration_seconds)
-            )
-            generated = True
-        else:
-            clip_out = work_dir / f"{item.kind}.mp4"
-            cmd = _build_segment_command(
-                item.segment,
+            return encode(cmd, still_out, index=next_step(), label=_step_label(item, timeline))
+        clip_out = work_dir / f"{item.kind}.mp4"
+        cmd = _build_segment_command(
+            item.segment,
+            sequence=sequence,
+            output_path=clip_out,
+            ffmpeg_binary=ffmpeg_binary,
+            youtube_preset=youtube_preset,
+        )
+        return encode(cmd, clip_out, index=next_step(), label=item.kind)
+
+    def encode_edge(
+        index: int, item: SpineItem, prep: _Prepared, *, half: float, end: Literal["tail", "head"]
+    ) -> Path:
+        """A boundary's edge of ``item`` (issue #1244): ``2 * half`` seconds
+        around the cut, rendered with the item's own builder so a stage's
+        cams, overlay and lower third and a card's animation are what the
+        crossfade shows. Raises when the item cannot provide one."""
+        out = work_dir / f"edge_{index:03d}_{end}.mp4"
+        label = f"transition edge ({end} of {item.name})"
+        seconds = 2 * half
+        if isinstance(item, _StageItem):
+            plan = _edge_plan(item.plan, half=half, end=end)
+            lower_third = prep.lower_third
+            if lower_third is not None:
+                if end == "head":
+                    lower_third = replace(lower_third, delay_seconds=half)
+                else:
+                    skip = item.plan.effective_seconds - half
+                    lower_third = (
+                        replace(lower_third, skip_seconds=skip)
+                        if skip < lower_third.card.duration_seconds
+                        else None
+                    )
+            cmd = _build_stage_command(
+                plan,
                 sequence=sequence,
-                output_path=clip_out,
+                output_path=out,
                 ffmpeg_binary=ffmpeg_binary,
                 youtube_preset=youtube_preset,
+                lower_third=lower_third,
+                primary_audio=prep.primary_audio,
             )
-            segments.append((encode(cmd, clip_out, index=step, label=item.kind), item.duration_seconds))
+            if lower_third is not None and prep.motion is not None:
+                return encode(
+                    cmd,
+                    out,
+                    index=next_step(),
+                    label=label,
+                    virtual_inputs={str(lower_third.path): prep.motion.digest},
+                    prepare=clip_writer(prep.motion, lower_third.path),
+                )
+            return encode(cmd, out, index=next_step(), label=label)
+        if isinstance(item, _StillItem | _SummaryItem):
+            if prep.skipped:
+                raise _EdgeUnavailableError(f"{item.name} was skipped")
+            if prep.motion is None:
+                assert prep.png is not None
+                cmd = _build_still_command(
+                    prep.png,
+                    seconds=seconds,
+                    sequence=sequence,
+                    output_path=out,
+                    ffmpeg_binary=ffmpeg_binary,
+                    youtube_preset=youtube_preset,
+                )
+                return encode(cmd, out, index=next_step(), label=label)
+            assert (
+                isinstance(item, _StillItem) and prep.backdrop_png is not None and prep.clip_path is not None
+            )
+            cmd = _build_motion_card_command(
+                prep.backdrop_png,
+                prep.clip_path,
+                seconds=seconds,
+                sequence=sequence,
+                output_path=out,
+                ffmpeg_binary=ffmpeg_binary,
+                youtube_preset=youtube_preset,
+                clip_delay_seconds=half if end == "head" else 0.0,
+                clip_offset_seconds=item.card_seconds - half if end == "tail" else 0.0,
+            )
+            return encode(
+                cmd,
+                out,
+                index=next_step(),
+                label=label,
+                virtual_inputs={str(prep.clip_path): prep.motion.digest},
+                prepare=clip_writer(prep.motion, prep.clip_path),
+            )
+        raise _EdgeUnavailableError(f"{item.name} is a clip; it has no edge render")
+
+    ordinal = 0
+    for i, item in enumerate(items):
+        prep = prepared.pop(i) if i in prepared else prepare(item)
+        boundary = live.get(i)
+        boundary_segment: Path | None = None
+        if boundary is not None:
+            ordinal += 1
+            nxt = items[i + 1]
+            if i + 1 not in prepared:
+                prepared[i + 1] = prepare(nxt)
+            half = boundary.duration_seconds / 2.0
+            try:
+                if prep.skipped or prepared[i + 1].skipped:
+                    raise _EdgeUnavailableError("a neighbouring card was skipped")
+                tail_edge = encode_edge(i, item, prep, half=half, end="tail")
+                head_edge = encode_edge(i + 1, nxt, prepared[i + 1], half=half, end="head")
+                boundary_out = work_dir / f"{boundary.name}.mp4"
+                cmd = _build_boundary_command(
+                    tail_edge,
+                    head_edge,
+                    kind=boundary.kind,
+                    seconds=boundary.duration_seconds,
+                    sequence=sequence,
+                    output_path=boundary_out,
+                    ffmpeg_binary=ffmpeg_binary,
+                    youtube_preset=youtube_preset,
+                )
+                edge_keys = (
+                    {str(tail_edge): keys_by_path[tail_edge], str(head_edge): keys_by_path[head_edge]}
+                    if segment_cache is not None
+                    else None
+                )
+                boundary_segment = encode(
+                    cmd,
+                    boundary_out,
+                    index=next_step(),
+                    label=f"transition {ordinal}",
+                    virtual_inputs=edge_keys,
+                )
+            except (FFmpegError, MotionClipError, _EdgeUnavailableError) as exc:
+                killed.append(f"transition after {item.name} failed to render ({exc}); rendered as a cut")
+                logger.warning("%s", killed[-1])
+                del live[i]
+                items[i] = item = replace(item, tail_cut_seconds=0.0)
+                items[i + 1] = replace(nxt, head_cut_seconds=0.0)
+        segment = encode_item(item, prep)
+        if segment is not None:
+            segments.append((segment, item.duration_seconds))
+            if not isinstance(item, _StageItem):
+                generated = True
+        if boundary_segment is not None and boundary is not None:
+            segments.append((boundary_segment, boundary.duration_seconds))
             generated = True
 
     list_path = work_dir / "concat.txt"
@@ -574,7 +751,7 @@ def _render_with_work_dir(
     return Mp4RenderResult(
         output_path=output_path,
         duration_seconds=total_seconds,
-        degradations=degradations,
+        degradations=(*degradations, *timeline.degradations, *killed),
     )
 
 
@@ -1144,6 +1321,26 @@ def _align_cams(
 #: (input index, card seconds, is a clip, delay seconds, skip seconds): what
 #: the stage filter graph needs to know about its lower third.
 _LowerThirdGraph = tuple[int, float, bool, float, float]
+
+
+class _EdgeUnavailableError(Exception):
+    """A boundary's edge cannot be rendered (a skipped card, a clip item);
+    the transition becomes a cut."""
+
+
+@dataclass
+class _Prepared:
+    """What an item's encode needs on disk, made once and used by the
+    item's own segment and by any boundary edge of it (issue #1244).
+    ``motion`` is closed by the item's encode, the last user."""
+
+    primary_audio: bool = True
+    lower_third: _LowerThirdInput | None = None
+    png: Path | None = None
+    backdrop_png: Path | None = None
+    clip_path: Path | None = None
+    motion: CardMotion | None = None
+    skipped: bool = False
 
 
 @dataclass(frozen=True)

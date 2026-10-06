@@ -45,7 +45,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 #: Bump when the key's recipe changes, so no entry keyed the old way hits.
-KEY_VERSION = 2
+KEY_VERSION = 3
 _SUFFIX = ".mp4"
 _STALE_PARTIAL_SECONDS = 24 * 3600
 

@@ -986,7 +986,7 @@ def _summarised_composition(tmp_path: Path) -> composition.Composition:
 def _transitioned_composition(
     tmp_path: Path,
     *,
-    kind: str = "fade",
+    kind: str | None = "fade",
     seconds: float = 1.0,
     slates: bool = False,
     summaries: bool = False,
@@ -1034,7 +1034,13 @@ def _transitioned_composition(
         titles=titles,
         summaries=holds,
         transitions=(
-            composition.Transition(from_stage_index=0, to_stage_index=1, kind=kind, duration_seconds=seconds),  # type: ignore[arg-type]
+            (
+                composition.Transition(
+                    from_stage_index=0, to_stage_index=1, kind=kind, duration_seconds=seconds  # type: ignore[arg-type]
+                ),
+            )
+            if kind is not None
+            else ()
         ),
     )
 
@@ -1247,6 +1253,145 @@ def test_build_stage_command_threads_the_lower_third_window(tmp_path: Path) -> N
     at = skipped.index(str(png))
     assert skipped[at - 3 : at - 1] == ("-t", "3.5")
     assert "enable='between(t,0,3.5)'" in skipped[skipped.index("-filter_complex") + 1]
+
+
+def _render(tmp_path: Path, comp: composition.Composition, *, name: str, runner: Any, **kwargs: Any) -> Any:
+    return mp4_render.render_mp4(
+        comp,
+        output_path=tmp_path / f"{name}.mp4",
+        work_dir=tmp_path / f"work_{name}",
+        runner=runner,
+        **kwargs,
+    )
+
+
+def _names(calls: list[list[str]]) -> list[str]:
+    return [Path(argv[-1]).name for argv in calls]
+
+
+def _concat_names(work: Path) -> list[str]:
+    return [Path(line.split("'")[1]).name for line in (work / "concat.txt").read_text().splitlines()]
+
+
+def test_transitions_keep_the_timeline_length(tmp_path: Path) -> None:
+    """Review Focus 2: a centred fade consumes d/2 of each neighbour and
+    the boundary is d long, so the stitched length is the cut's length and
+    the chapters need no change."""
+    cut = _render(
+        tmp_path, _transitioned_composition(tmp_path, kind=None), name="cut", runner=_writes_output([])
+    )
+    fade = _render(tmp_path, _transitioned_composition(tmp_path), name="fade", runner=_writes_output([]))
+    assert fade.duration_seconds == pytest.approx(cut.duration_seconds) == pytest.approx(28.6)
+
+
+def test_render_encodes_edges_then_the_boundary_then_trimmed_neighbours(tmp_path: Path) -> None:
+    """Issue #1244: the boundary is decided (both edges and the xfade
+    encoded) before the item that opens it is encoded trimmed, so a
+    failure can still fall back to a cut."""
+    calls: list[list[str]] = []
+    _render(
+        tmp_path, _transitioned_composition(tmp_path, kind="dissolve"), name="m", runner=_writes_output(calls)
+    )
+    assert _names(calls) == [
+        "edge_000_tail.mp4",
+        "edge_001_head.mp4",
+        "boundary_000.mp4",
+        "stage_000.mp4",
+        "stage_001.mp4",
+        "m.mp4",
+    ]
+    tail, head, boundary, stage_0, stage_1, concat = calls
+    # A's effective window is source 2.0 .. 16.3; the tail edge reads 15.8 .. 16.8.
+    assert (tail[tail.index("-ss") + 1], tail[tail.index("-t") + 1]) == ("15.8", "1")
+    # B's starts at 2.0; the head edge reads 1.5 .. 2.5.
+    assert (head[head.index("-ss") + 1], head[head.index("-t") + 1]) == ("1.5", "1")
+    assert "xfade=transition=dissolve:duration=1:offset=0" in boundary[boundary.index("-filter_complex") + 1]
+    assert boundary[boundary.index("-i") + 1].endswith("edge_000_tail.mp4")
+    assert (stage_0[stage_0.index("-ss") + 1], stage_0[stage_0.index("-t") + 1]) == ("2", "13.8")
+    assert (stage_1[stage_1.index("-ss") + 1], stage_1[stage_1.index("-t") + 1]) == ("2.5", "13.8")
+    assert _concat_names(tmp_path / "work_m") == ["stage_000.mp4", "boundary_000.mp4", "stage_001.mp4"]
+    assert "-c:a" in concat, "a boundary is a generated segment: the stitch re-encodes audio"
+
+
+def test_a_failed_edge_leaves_the_neighbours_untrimmed(tmp_path: Path) -> None:
+    """Review Focus 4: an edge that ffmpeg cannot encode costs the
+    transition, never a gap; both neighbours keep their full length."""
+    calls: list[list[str]] = []
+    writing = _writes_output(calls)
+
+    def runner(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess:
+        if str(args[0][-1]).endswith("edge_000_tail.mp4"):
+            raise subprocess.CalledProcessError(1, list(args[0]), stderr="boom")
+        return writing(*args, **kwargs)
+
+    result = _render(tmp_path, _transitioned_composition(tmp_path), name="m", runner=runner)
+    assert result.degradations == (
+        "transition after stage_000 failed to render (ffmpeg failed (exit 1): boom); rendered as a cut",
+    )
+    assert _names(calls) == ["stage_000.mp4", "stage_001.mp4", "m.mp4"]
+    stage_0, stage_1, concat = calls
+    assert (stage_0[stage_0.index("-ss") + 1], stage_0[stage_0.index("-t") + 1]) == ("2", "14.3")
+    assert (stage_1[stage_1.index("-ss") + 1], stage_1[stage_1.index("-t") + 1]) == ("2", "14.3")
+    assert _concat_names(tmp_path / "work_m") == ["stage_000.mp4", "stage_001.mp4"]
+    assert "-c:a" not in concat and result.duration_seconds == pytest.approx(28.6)
+
+
+def test_a_fit_failure_reaches_the_render_result(tmp_path: Path) -> None:
+    result = _render(
+        tmp_path, _transitioned_composition(tmp_path, seconds=7.0), name="m", runner=_writes_output([])
+    )
+    assert result.degradations == (
+        "transition before stage 'B' (7s) exceeds the stage's head pad (3s); "
+        "increase the pad or shorten the transition: rendered as a cut",
+    )
+
+
+def test_a_transition_render_is_reused_from_the_cache_until_a_neighbour_changes(tmp_path: Path) -> None:
+    """The boundary keys on its two edge files and each edge on its
+    source: a repeat render stitches only; a changed source re-encodes
+    its edge, the boundary and its own segment, not the other side."""
+    import os
+
+    from splitsmith.segment_cache import SegmentCache
+
+    cache = SegmentCache(root=tmp_path / "cache", max_bytes=1 << 30)
+    comp = _transitioned_composition(tmp_path)
+    first: list[list[str]] = []
+    _render(tmp_path, comp, name="one", runner=_writes_output(first), segment_cache=cache)
+    assert len(first) == 6
+    second: list[list[str]] = []
+    _render(tmp_path, comp, name="two", runner=_writes_output(second), segment_cache=cache)
+    assert _names(second) == ["two.mp4"]
+    source = comp.stages[0].primary.path
+    source.write_bytes(source.read_bytes() + b"recut")
+    os.utime(source, (source.stat().st_atime + 10, source.stat().st_mtime + 10))
+    third: list[list[str]] = []
+    _render(tmp_path, comp, name="three", runner=_writes_output(third), segment_cache=cache)
+    # The cache writes partial files, so look at the commands: A's tail
+    # edge, the boundary and A's own segment, then the stitch; B's edge
+    # and segment stay cached.
+    third_cmds = [" ".join(argv) for argv in third]
+    assert len(third) == 4
+    assert sum("-ss 15.8 -t 1 " in cmd for cmd in third_cmds) == 1
+    assert sum("xfade=" in cmd for cmd in third_cmds) == 1
+    assert sum("-ss 2 -t 13.8 " in cmd for cmd in third_cmds) == 1
+    assert not any("-ss 2.5 -t 13.8 " in cmd or "-ss 1.5 -t 1 " in cmd for cmd in third_cmds)
+    assert _is_concat(third[-1])
+
+
+def test_a_transition_reports_three_more_progress_steps(tmp_path: Path) -> None:
+    steps: list[mp4_render.RenderStep] = []
+    _render(
+        tmp_path,
+        _transitioned_composition(tmp_path),
+        name="m",
+        runner=_writes_output([]),
+        progress=steps.append,
+    )
+    assert [s.total for s in steps] == [6] * 6
+    assert [s.index for s in steps] == [1, 2, 3, 4, 5, 6]
+    assert [s.status for s in steps] == ["encoding"] * 5 + ["stitching"]
+    assert steps[2].label == "transition 1"
 
 
 def test_plan_timeline_puts_a_summary_after_each_stage(tmp_path: Path) -> None:
