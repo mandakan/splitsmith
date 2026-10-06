@@ -123,6 +123,7 @@ def card_context(
         data={
             "card": {
                 "slot": slot,
+                "variant": card.variant,
                 "text": card.text,
                 "info": list(card.info),
                 "duration_seconds": card.duration_seconds,
@@ -140,7 +141,7 @@ def _rasterize(
     card: Card, *, slot: CardSlot, width: int, height: int, fps: float, look: Look, rasterizer: Rasterizer
 ) -> Image.Image | None:
     theme = theme_for(look)
-    template = template_for(look, slot)
+    template = template_for(look, slot, card.variant)
     context = card_context(card, slot=slot, width=width, height=height, fps=fps, theme=theme)
     try:
         png_bytes = rasterizer.render_template(template, context=context, width=width, height=height)

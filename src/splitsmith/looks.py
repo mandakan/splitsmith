@@ -39,6 +39,12 @@ CardSlot = Literal["title_page", "slate", "lower_third", "closing"]
 """The slots ``overlay_card`` renders through a template."""
 
 DEFAULT_LOOK = "splitsmith"
+DEFAULT_VARIANT = "default"
+"""The variant every slot has: the still card. A manifest's bare
+``"slot": "file.html"`` is this variant alone."""
+
+SlotVariants = dict[str, str]
+"""Variant name -> template file, for one slot."""
 
 REQUIRED_COLORS: tuple[str, ...] = (
     "ink",
@@ -84,7 +90,7 @@ class LookManifest(BaseModel):
     label: str = ""
     colors: dict[str, RGB]
     fonts: dict[str, str] = {}
-    slots: dict[str, str] = {}
+    slots: dict[str, SlotVariants] = {}
     source: str | None = None
 
     @field_validator("name")
@@ -105,14 +111,30 @@ class LookManifest(BaseModel):
                 raise ValueError(f"colour {token!r} has a channel outside 0..255: {rgb!r}")
         return value
 
+    @field_validator("slots", mode="before")
+    @classmethod
+    def _normalise_slots(cls, value: object) -> object:
+        """``"slot": "file.html"`` is shorthand for ``{"default": "file.html"}``."""
+        if not isinstance(value, dict):
+            return value
+        return {
+            slot: ({DEFAULT_VARIANT: spec} if isinstance(spec, str) else spec) for slot, spec in value.items()
+        }
+
     @field_validator("slots")
     @classmethod
-    def _slot_shape(cls, value: dict[str, str]) -> dict[str, str]:
-        for slot, file in value.items():
+    def _slot_shape(cls, value: dict[str, SlotVariants]) -> dict[str, SlotVariants]:
+        for slot, variants in value.items():
             if slot not in SLOT_NAMES:
                 raise ValueError(f"unknown slot {slot!r}; expected one of {SLOT_NAMES}")
-            if not _TEMPLATE_FILE_RE.match(file):
-                raise ValueError(f"slot {slot!r} must name a bare .html file inside the Look, got {file!r}")
+            for variant, file in variants.items():
+                if not _NAME_RE.match(variant):
+                    raise ValueError(f"slot {slot!r}: variant name {variant!r} must match {_NAME_RE.pattern}")
+                if not _TEMPLATE_FILE_RE.match(file):
+                    raise ValueError(
+                        f"slot {slot!r} variant {variant!r} must name a bare .html file inside the Look, "
+                        f"got {file!r}"
+                    )
         return value
 
 
@@ -134,11 +156,16 @@ class Look(BaseModel):
     def label(self) -> str:
         return self.manifest.label or self.manifest.name
 
-    def own_template(self, slot: str) -> Path | None:
-        """This Look's template for ``slot``, or ``None`` when it declares
-        none (see :func:`template_for` for the fallback)."""
-        file = self.manifest.slots.get(slot)
+    def own_template(self, slot: str, variant: str = DEFAULT_VARIANT) -> Path | None:
+        """This Look's template for ``slot`` in ``variant``, or ``None``
+        when it declares none (see :func:`template_for` for the fallback)."""
+        file = self.manifest.slots.get(slot, {}).get(variant)
         return None if file is None else self.root / file
+
+    def variants(self, slot: str) -> tuple[str, ...]:
+        """This Look's own variants for ``slot``, ``default`` first."""
+        names = list(self.manifest.slots.get(slot, {}))
+        return tuple(sorted(names, key=lambda n: (n != DEFAULT_VARIANT, n)))
 
 
 def shipped_looks_dir() -> Path:
@@ -170,9 +197,13 @@ def _read_look(root: Path, source: Literal["shipped", "user"]) -> Look:
         raise LookError(f"{manifest_path}: {exc.errors()[0]['msg']}") from exc
     if manifest.name != root.name:
         raise LookError(f"{manifest_path}: name {manifest.name!r} does not match its directory {root.name!r}")
-    for slot, file in manifest.slots.items():
-        if not (root / file).is_file():
-            raise LookError(f"{manifest_path}: slot {slot!r} names {file!r}, which is not in {root}")
+    for slot, variants in manifest.slots.items():
+        for variant, file in variants.items():
+            if not (root / file).is_file():
+                raise LookError(
+                    f"{manifest_path}: slot {slot!r} variant {variant!r} names {file!r}, "
+                    f"which is not in {root}"
+                )
     return Look(manifest=manifest, root=root, source=source)
 
 
@@ -236,21 +267,39 @@ def load_look(name: str) -> Look:
     raise LookNotFoundError(f"no Look named {name!r}; installed: {', '.join(look_names()) or 'none'}")
 
 
-def template_for(look: Look, slot: CardSlot) -> Path:
-    """The template that draws ``slot`` for ``look``: its own, else the
-    shipped default Look's. The shipped default declares every card
-    slot (pinned by ``tests/test_looks.py``), so this always resolves."""
-    own = look.own_template(slot)
+def _shipped_default() -> Look:
+    return _read_look(shipped_looks_dir() / DEFAULT_LOOK, "shipped")
+
+
+def variants_for(look: Look, slot: str) -> tuple[str, ...]:
+    """Every variant a card in ``slot`` may name for ``look``: its own plus
+    the shipped default Look's (the fallback), ``default`` first."""
+    names = set(look.variants(slot)) | set(_shipped_default().variants(slot))
+    return tuple(sorted(names, key=lambda n: (n != DEFAULT_VARIANT, n)))
+
+
+def template_for(look: Look, slot: CardSlot, variant: str = DEFAULT_VARIANT) -> Path:
+    """The template that draws ``slot`` in ``variant`` for ``look``: its
+    own, else the shipped default Look's; a variant neither has falls
+    back to ``default`` with a warning, so a stale or mistyped variant
+    name costs the motion and never the card. The shipped default
+    declares every card slot (pinned by ``tests/test_looks.py``), so
+    this always resolves."""
+    own = look.own_template(slot, variant)
     if own is not None:
         return own
-    fallback = _read_look(shipped_looks_dir() / DEFAULT_LOOK, "shipped").own_template(slot)
-    if fallback is None:
-        raise LookError(f"the shipped {DEFAULT_LOOK!r} Look has no template for slot {slot!r}")
-    return fallback
+    shipped = _shipped_default().own_template(slot, variant)
+    if shipped is not None:
+        return shipped
+    if variant != DEFAULT_VARIANT:
+        logger.warning("Look %s has no %r variant for slot %s; drawing the default", look.name, variant, slot)
+        return template_for(look, slot, DEFAULT_VARIANT)
+    raise LookError(f"the shipped {DEFAULT_LOOK!r} Look has no template for slot {slot!r}")
 
 
 __all__ = [
     "DEFAULT_LOOK",
+    "DEFAULT_VARIANT",
     "REQUIRED_COLORS",
     "SLOT_NAMES",
     "CardSlot",
@@ -265,4 +314,5 @@ __all__ = [
     "shipped_looks_dir",
     "template_for",
     "user_looks_dir",
+    "variants_for",
 ]

@@ -221,6 +221,7 @@ def test_a_card_renders_through_the_looks_template_for_its_slot(tmp_path: Path) 
     assert (w, h) == (640, 360)
     assert context["data"]["card"] == {
         "slot": "slate",
+        "variant": "default",
         "text": "Stage 3",
         "info": ["24 rounds"],
         "duration_seconds": 1.5,
@@ -278,3 +279,20 @@ def test_a_template_that_raises_skips_the_card(tmp_path: Path, caplog) -> None:
     )
     assert image is None
     assert "template boom" in caplog.text
+
+
+def test_a_cards_variant_picks_the_looks_template_for_it() -> None:
+    r = _FakeRasterizer()
+    overlay_card.build_card_still(
+        MatchTitle(text="x", variant="rise"),
+        slot="title_page",
+        width=64,
+        height=32,
+        fps=30,
+        look=LOOK,
+        rasterizer=r,
+        backdrop=None,
+    )
+    ((template, context, _, _),) = r.template_calls
+    assert template == LOOK.own_template("title_page", "rise")
+    assert context["data"]["card"]["variant"] == "rise"

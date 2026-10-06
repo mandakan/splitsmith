@@ -75,10 +75,22 @@
   "name": "splitsmith",
   "schema_version": 1,
   "slots": {
-    "closing": "card.html",
-    "lower_third": "card.html",
-    "slate": "card.html",
-    "title_page": "card.html"
+    "closing": {
+      "default": "card.html",
+      "rise": "card.html"
+    },
+    "lower_third": {
+      "default": "card.html",
+      "rise": "card.html"
+    },
+    "slate": {
+      "default": "card.html",
+      "rise": "card.html"
+    },
+    "title_page": {
+      "default": "card.html",
+      "rise": "card.html"
+    }
   },
   "source": "src/splitsmith/ui_static/src/styles/index.css"
 }
