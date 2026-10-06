@@ -45,7 +45,7 @@ def _add_video(
     project = MatchProject.load(shooter_root)
     src = shooter_root / "raw" / name
     src.parent.mkdir(parents=True, exist_ok=True)
-    src.write_bytes(b"\x00")
+    src.write_bytes(name.encode())  # distinct bytes: one content is one clip
     registered = project.register_video(src, project_root)
     project.assign_video(registered.path, to_stage_number=stage_number, role=role)
     added = next(v for v in project.stage(stage_number).videos if v.path == registered.path)
