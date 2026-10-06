@@ -56,6 +56,7 @@ from pathlib import Path
 
 import numpy as np
 import soundfile as sf
+from scipy.fft import next_fast_len
 from scipy.signal import butter, hilbert, sosfiltfilt
 
 from .config import BeepCandidate, BeepDetectConfig, BeepDetection
@@ -154,7 +155,11 @@ def _bandpass_envelope(
     """4th-order Butterworth bandpass + Hilbert envelope + moving-average smooth."""
     sos = butter(4, [lo, hi], btype="band", fs=sample_rate, output="sos")
     band = sosfiltfilt(sos, audio)
-    env = np.abs(hilbert(band)).astype(np.float32)
+    # The FFT inside ``hilbert`` runs at the buffer's own length unless told
+    # otherwise, and a length with a large prime factor (a 28 s clip at
+    # 48 kHz: 2^6 * 7 * 3049) is ~8x slower than the next fast one.
+    n = len(band)
+    env = np.abs(hilbert(band, N=next_fast_len(n))[:n]).astype(np.float32)
     smooth_win = max(1, int(round(sample_rate * smoothing_ms / 1000.0)))
     if smooth_win > 1:
         kernel = np.ones(smooth_win, dtype=np.float32) / smooth_win
