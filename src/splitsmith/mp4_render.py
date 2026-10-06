@@ -74,12 +74,17 @@ from .composition import (
     TitleCard,
     Transform,
 )
+from .look_motion import MotionClipError, motion_overlay_filters, write_motion_clip
 from .looks import load_look
 from .overlay_card import (
     LOWER_THIRD_FADE_SECONDS,
     Card,
-    build_card_still,
-    build_lower_third,
+    CardMotion,
+    card_backdrop,
+    card_motion,
+    compose_card,
+    first_frame_image,
+    lower_third_clip_filters,
     lower_third_filters,
 )
 from .overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
@@ -297,19 +302,34 @@ def _render_with_work_dir(
         if progress is not None:
             progress(RenderStep(index=index, total=total_steps, label=label, status=status))
 
-    def encode(cmd: tuple[str, ...], out: Path, *, index: int, label: str) -> Path:
+    def encode(
+        cmd: tuple[str, ...],
+        out: Path,
+        *,
+        index: int,
+        label: str,
+        virtual_inputs: dict[str, str] | None = None,
+        prepare: Callable[[], object] | None = None,
+    ) -> Path:
         """Run ``cmd``, or reuse its segment from the cache; the path the
-        stitch reads the segment from."""
+        stitch reads the segment from. ``prepare`` makes an input the
+        command needs (a motion clip) and runs only when the segment is
+        not cached; ``virtual_inputs`` is how the key stands in for that
+        input before it exists."""
         if segment_cache is None:
+            if prepare is not None:
+                prepare()
             report(index, label, "encoding")
             _run(cmd, runner=runner)
             return out
-        key = segment_cache.key(cmd, output_path=out, work_dir=work_dir)
+        key = segment_cache.key(cmd, output_path=out, work_dir=work_dir, virtual_inputs=virtual_inputs)
         used_keys.add(key)
         hit = segment_cache.lookup(key)
         if hit is not None:
             report(index, label, "reused")
             return hit
+        if prepare is not None:
+            prepare()
         report(index, label, "encoding")
         partial = segment_cache.partial_path(key)
         target = str(out)
@@ -321,23 +341,36 @@ def _render_with_work_dir(
         finally:
             partial.unlink(missing_ok=True)
 
+    def clip_writer(motion: CardMotion, clip_path: Path) -> Callable[[], object]:
+        return lambda: write_motion_clip(motion.frames, out=clip_path, fps=fps, ffmpeg_binary=ffmpeg_binary)
+
     for step, item in enumerate(timeline.items, start=1):
         if isinstance(item, _StageItem):
             lower_third: _LowerThirdInput | None = None
+            lt_motion: CardMotion | None = None
             if item.lower_third is not None and rasterizer is not None and look is not None:
-                image = build_lower_third(
+                lt_motion = card_motion(
                     item.lower_third,
+                    slot="lower_third",
                     width=sequence.width,
                     height=sequence.height,
                     fps=fps,
                     look=look,
                     rasterizer=rasterizer,
+                    max_seconds=item.lower_third.duration_seconds,
                 )
+            if lt_motion is not None and not lt_motion.animated:
+                image = first_frame_image(lt_motion)
+                lt_motion = None
                 if image is not None:
                     png = work_dir / f"lower_third_{item.index:03d}.png"
                     image.save(png)
                     lower_third = _LowerThirdInput(path=png, card=item.lower_third)
+            elif lt_motion is not None:
+                clip_path = work_dir / f"lower_third_{item.index:03d}_motion.mov"
+                lower_third = _LowerThirdInput(path=clip_path, card=item.lower_third, clip=True)
             stage_out = work_dir / f"stage_{item.index:03d}.mp4"
+            primary_audio = _has_audio_stream(item.plan.stage.primary.path)
             cmd = _build_stage_command(
                 item.plan,
                 sequence=sequence,
@@ -345,14 +378,52 @@ def _render_with_work_dir(
                 ffmpeg_binary=ffmpeg_binary,
                 youtube_preset=youtube_preset,
                 lower_third=lower_third,
-                primary_audio=_has_audio_stream(item.plan.stage.primary.path),
+                primary_audio=primary_audio,
             )
-            segments.append(
-                (encode(cmd, stage_out, index=step, label=item.plan.stage.name), item.duration_seconds)
-            )
+            if lt_motion is None:
+                segment = encode(cmd, stage_out, index=step, label=item.plan.stage.name)
+            else:
+                try:
+                    segment = encode(
+                        cmd,
+                        stage_out,
+                        index=step,
+                        label=item.plan.stage.name,
+                        virtual_inputs={str(lower_third.path): lt_motion.digest},  # type: ignore[union-attr]
+                        prepare=clip_writer(lt_motion, lower_third.path),  # type: ignore[union-attr]
+                    )
+                except MotionClipError as exc:
+                    # The stage is footage; a lower third that cannot be
+                    # drawn costs the title, never the stage.
+                    logger.warning("stage %d: %s; the lower third is dropped", item.index, exc)
+                    cmd = _build_stage_command(
+                        item.plan,
+                        sequence=sequence,
+                        output_path=stage_out,
+                        ffmpeg_binary=ffmpeg_binary,
+                        youtube_preset=youtube_preset,
+                        lower_third=None,
+                        primary_audio=primary_audio,
+                    )
+                    segment = encode(cmd, stage_out, index=step, label=item.plan.stage.name)
+                finally:
+                    lt_motion.close()
+            segments.append((segment, item.duration_seconds))
         elif isinstance(item, _StillItem):
             if rasterizer is None or look is None:
                 continue  # already recorded as a degradation up front
+            motion = card_motion(
+                item.card,
+                slot=item.kind,
+                width=sequence.width,
+                height=sequence.height,
+                fps=fps,
+                look=look,
+                rasterizer=rasterizer,
+                max_seconds=item.duration_seconds,
+            )
+            if motion is None:
+                continue  # logged by overlay_card; a card is its text
             backdrop = _grab_backdrop(
                 timeline,
                 name=item.name,
@@ -362,32 +433,57 @@ def _render_with_work_dir(
                 ffmpeg_binary=ffmpeg_binary,
                 runner=runner,
             )
-            image = build_card_still(
-                item.card,
-                slot=item.kind,
-                width=sequence.width,
-                height=sequence.height,
-                fps=fps,
-                look=look,
-                rasterizer=rasterizer,
-                backdrop=backdrop,
-            )
-            if image is None:
-                continue  # logged by overlay_card; a card is its text
-            png = work_dir / f"{item.name}.png"
-            image.save(png)
+            canvas = card_backdrop(backdrop, width=sequence.width, height=sequence.height, look=look)
             still_out = work_dir / f"{item.name}.mp4"
-            cmd = _build_still_command(
-                png,
+            if not motion.animated:
+                text = first_frame_image(motion)
+                if text is None:
+                    continue  # logged by overlay_card
+                png = work_dir / f"{item.name}.png"
+                compose_card(text, canvas).save(png)
+                cmd = _build_still_command(
+                    png,
+                    seconds=item.duration_seconds,
+                    sequence=sequence,
+                    output_path=still_out,
+                    ffmpeg_binary=ffmpeg_binary,
+                    youtube_preset=youtube_preset,
+                )
+                segments.append(
+                    (
+                        encode(cmd, still_out, index=step, label=_step_label(item, timeline)),
+                        item.duration_seconds,
+                    )
+                )
+                generated = True
+                continue
+            backdrop_png = work_dir / f"{item.name}_backdrop.png"
+            canvas.save(backdrop_png)
+            clip_path = work_dir / f"{item.name}_motion.mov"
+            cmd = _build_motion_card_command(
+                backdrop_png,
+                clip_path,
                 seconds=item.duration_seconds,
                 sequence=sequence,
                 output_path=still_out,
                 ffmpeg_binary=ffmpeg_binary,
                 youtube_preset=youtube_preset,
             )
-            segments.append(
-                (encode(cmd, still_out, index=step, label=_step_label(item, timeline)), item.duration_seconds)
-            )
+            try:
+                segment = encode(
+                    cmd,
+                    still_out,
+                    index=step,
+                    label=_step_label(item, timeline),
+                    virtual_inputs={str(clip_path): motion.digest},
+                    prepare=clip_writer(motion, clip_path),
+                )
+            except MotionClipError as exc:
+                logger.warning("%s: %s; the card is skipped", item.name, exc)
+                continue
+            finally:
+                motion.close()
+            segments.append((segment, item.duration_seconds))
             generated = True
         elif isinstance(item, _SummaryItem):
             # The frame is grabbed whether or not there is a browser: the
@@ -853,10 +949,12 @@ def _plan_stage(stage: Stage, sequence_format) -> _StagePlan:  # type: ignore[no
 
 @dataclass(frozen=True)
 class _LowerThirdInput:
-    """A rasterized lower-third PNG and the card that says how long it shows."""
+    """A rasterized lower-third (a PNG, or with ``clip`` an alpha clip
+    from ``look_motion``) and the card that says how long it shows."""
 
     path: Path
     card: TitleCard
+    clip: bool = False
 
 
 def _build_stage_command(
@@ -937,20 +1035,25 @@ def _build_stage_command(
             str(stage.overlay.asset.path),
         ]
 
-    lower_third_graph: tuple[int, float] | None = None
+    lower_third_graph: tuple[int, float, bool] | None = None
     if lower_third is not None:
         lower_third_index = 1 + len(plan.cam_alignments) + (1 if overlay_index is not None else 0)
-        lower_third_graph = (lower_third_index, lower_third.card.duration_seconds)
-        args += [
-            "-loop",
-            "1",
-            "-framerate",
-            _rate_string(sequence),
-            "-t",
-            f"{lower_third.card.duration_seconds:g}",
-            "-i",
-            str(lower_third.path),
-        ]
+        lower_third_graph = (lower_third_index, lower_third.card.duration_seconds, lower_third.clip)
+        if lower_third.clip:
+            # A clip carries its own frames and length; the graph conforms
+            # and holds it (``lower_third_clip_filters``).
+            args += ["-i", str(lower_third.path)]
+        else:
+            args += [
+                "-loop",
+                "1",
+                "-framerate",
+                _rate_string(sequence),
+                "-t",
+                f"{lower_third.card.duration_seconds:g}",
+                "-i",
+                str(lower_third.path),
+            ]
 
     audio_index: int | None = None
     if primary_audio:
@@ -1059,7 +1162,7 @@ def _build_stage_filter_graph(
     *,
     sequence,  # type: ignore[no-untyped-def]
     overlay_input_index: int | None,
-    lower_third: tuple[int, float] | None = None,
+    lower_third: tuple[int, float, bool] | None = None,
     audio_input_index: int | None = None,
 ) -> str:
     """Compose primary + cams + overlay into a single ``-filter_complex``.
@@ -1106,8 +1209,13 @@ def _build_stage_filter_graph(
         base_label = "withov"
 
     if lower_third is not None:
-        input_index, seconds = lower_third
-        lt_parts, base_label = lower_third_filters(input_index, seconds, source_label=base_label)
+        input_index, seconds, is_clip = lower_third
+        if is_clip:
+            lt_parts, base_label = lower_third_clip_filters(
+                input_index, seconds, rate=_rate_string(sequence), source_label=base_label
+            )
+        else:
+            lt_parts, base_label = lower_third_filters(input_index, seconds, source_label=base_label)
         parts.extend(lt_parts)
 
     parts.append(f"[{base_label}]null[final]")
@@ -1185,6 +1293,51 @@ def _build_still_command(
         "[final]",
         "-map",
         "1:a",
+        *_encode_args(sequence, youtube_preset=youtube_preset),
+        str(output_path),
+    )
+
+
+def _build_motion_card_command(
+    backdrop_png: Path,
+    clip: Path,
+    *,
+    seconds: float,
+    sequence: SequenceFormat,
+    output_path: Path,
+    ffmpeg_binary: str = "ffmpeg",
+    youtube_preset: bool = False,
+) -> tuple[str, ...]:
+    """An animated card: the template's alpha clip over its backdrop, the
+    clip's last frame held to ``seconds``, silent audio, encoded like a
+    stage. :func:`_build_still_command` with one more input."""
+    rate = _rate_string(sequence)
+    motion_parts, label = motion_overlay_filters(1, rate=rate, seconds=seconds, source_label="0:v")
+    graph = ";".join([*motion_parts, f"[{label}]format=yuv420p,setsar=1[final]"])
+    return (
+        ffmpeg_binary,
+        "-hide_banner",
+        "-y",
+        "-loop",
+        "1",
+        "-framerate",
+        rate,
+        "-i",
+        str(backdrop_png),
+        "-i",
+        str(clip),
+        "-f",
+        "lavfi",
+        "-i",
+        "anullsrc=channel_layout=stereo:sample_rate=48000",
+        "-t",
+        f"{seconds:g}",
+        "-filter_complex",
+        graph,
+        "-map",
+        "[final]",
+        "-map",
+        "2:a",
         *_encode_args(sequence, youtube_preset=youtube_preset),
         str(output_path),
     )
