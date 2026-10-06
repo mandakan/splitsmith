@@ -11,6 +11,7 @@
   document.write('<style>' + window.splitsmith.engine.css + '</style>');
   document.write('<script src="' + window.splitsmith.assets.shared + '/fit.js"><\/script>');
   document.write('<script src="' + window.splitsmith.assets.shared + '/cell.js"><\/script>');
+  document.write('<script src="' + window.splitsmith.assets.shared + '/identity.js"><\/script>');
 </script>
 </head>
 <body>
@@ -20,6 +21,7 @@
   document.addEventListener('DOMContentLoaded', function () {
     window.__splitsmithMinFont = window.splitsmith.engine.min_font_size;
     window.splitsmith.engine.mount(window.splitsmith.data.groups);
+    window.splitsmith.engine.mountIdentity(window.splitsmith.data.shooters, window.splitsmith.data.card.slot);
   });
 </script>
 </body>

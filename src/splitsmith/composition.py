@@ -290,6 +290,19 @@ class Segment:
 
 
 @dataclass(frozen=True)
+class CompositionShooter:
+    """One shooter as the templates see them (spec 2026-10-06 section 2):
+    the identity resolved against the Look by the caller, so renderers
+    read, never resolve. ``logo_path`` may name a file that is gone; the
+    template layer draws without it."""
+
+    label: str
+    accent: str | None
+    logo_path: Path | None
+    club: str | None
+
+
+@dataclass(frozen=True)
 class Composition:
     """A complete renderer-agnostic timeline (#194).
 
@@ -315,6 +328,9 @@ class Composition:
     chapter_markers: bool = False
     title_page: MatchTitle | None = None
     closing: MatchTitle | None = None
+    #: The shooters in the video (one for a single-shooter export), as
+    #: ``data.shooters`` reaches every card template (#1243).
+    shooters: tuple[CompositionShooter, ...] = ()
 
 
 # --- conversions -----------------------------------------------------------
@@ -346,6 +362,7 @@ def from_stage_compositions(
     title_page: MatchTitle | None = None,
     closing: MatchTitle | None = None,
     summaries: dict[int, SummaryHold] | None = None,
+    shooters: SequenceProto[CompositionShooter] = (),
 ) -> Composition:
     """Build a :class:`Composition` from today's ``StageComposition`` inputs.
 
@@ -443,6 +460,7 @@ def from_stage_compositions(
         chapter_markers=chapter_markers,
         title_page=title_page,
         closing=closing,
+        shooters=tuple(shooters),
     )
 
 

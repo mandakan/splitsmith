@@ -180,6 +180,28 @@ def test_summary_label_is_the_competitor_then_the_bundle_name(tmp_path: Path) ->
     assert "Club night" in raster.htmls[-1]
 
 
+def test_summary_preview_carries_the_shooters_accent_like_the_render(tmp_path: Path) -> None:
+    """The rail declares the hold exactly as the render does: an accent
+    the shooter set reaches the preview's cell, so the bar the export
+    draws is the bar the rail shows."""
+    from splitsmith.identity import ResolvedIdentity
+
+    project, root = _project(tmp_path)
+    raster = _StubRasterizer()
+    ep.render_preview(
+        ep.PreviewSpec(card="summary", stage_number=3, project_name="Club night"),
+        project=project,
+        root=root,
+        audit_doc=AUDIT,
+        look=load_look("splitsmith"),
+        rasterizer=raster,
+        ffmpeg_binary=None,
+        work_dir=tmp_path / "work",
+        shooter=ResolvedIdentity(label="M. Axell", accent="#123456", logo_path=None, club=None),
+    )
+    assert "--accent:#123456" in raster.htmls[-1]
+
+
 def test_slate_carries_the_stage_name_and_round_count(tmp_path: Path) -> None:
     project, root = _project(tmp_path)
     project.stage(3).stage_rounds = StageRounds(expected=24)

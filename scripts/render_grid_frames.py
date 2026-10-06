@@ -434,6 +434,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--title-page", action="store_true", help="open with a generated match title card")
     parser.add_argument("--closing-card", action="store_true", help="close with a generated card")
     parser.add_argument("--card-variant", default="default", help="Look template variant for every card")
+    parser.add_argument(
+        "--identity-demo",
+        action="store_true",
+        help="give every shooter an identity (the Look's accent series by slot, a generated club logo)",
+    )
     args = parser.parse_args(argv)
 
     if not 1 <= args.shooters <= MAX_SHOOTERS:
@@ -491,6 +496,12 @@ def main(argv: list[str] | None = None) -> int:
         f"rendering {args.shooters} shooter(s) x {args.stages} stage(s) at {width}x{height}@"
         f"{args.fps}, overlay={args.overlay}, hold={args.summary_hold:g}s ..."
     )
+    from splitsmith.looks import load_look
+    from splitsmith.ui.identity_media import grid_identities
+
+    sys.path.insert(0, str(REPO_ROOT / "scripts"))
+    from render_match_frames import demo_logo
+
     result = mp4_grid.render_grid_mp4(
         shooters,
         audio_label=audio_label,
@@ -522,6 +533,15 @@ def main(argv: list[str] | None = None) -> int:
         stage_titles=args.titles,
         title_duration_seconds=SLATE_SECONDS,
         card_variant=args.card_variant,
+        # Through the production resolver either way, so the default frames
+        # are what an export draws for shooters who set nothing; the demo
+        # opts into the Look's slot series and a shared generated logo.
+        identities=grid_identities(
+            shooters,
+            look=load_look(args.overlay_theme),
+            match_logo=demo_logo(work / "logo.png") if args.identity_demo else None,
+            series_default=args.identity_demo,
+        ),
     )
     if result.failed:
         print(f"  {len(result.failed)} stage(s) failed: {result.failed}", file=sys.stderr)

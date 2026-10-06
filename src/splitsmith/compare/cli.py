@@ -11,8 +11,10 @@ from rich.console import Console
 
 from .. import camera_select
 from ..export_naming import slugify
+from ..looks import load_look
 from ..match_model import Match, is_match_folder
 from ..overlay_theme import THEME_NAMES, ThemeName
+from ..ui.identity_media import grid_identities
 from . import emitter as emitter_mod
 from . import manifest as manifest_mod
 from . import mp4_grid, project_loader
@@ -570,6 +572,7 @@ def _render_grid_mp4(
                 stage_titles=cards.stage_titles,
                 title_duration_seconds=cards.title_duration_seconds,
                 card_variant=cards.card_variant,
+                identities=grid_identities(bundles, look=load_look(overlay_theme)),
             )
         except mp4_grid.GridRenderError as exc:
             console.print(f"[red]Error:[/] {exc}")

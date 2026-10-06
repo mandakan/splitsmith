@@ -255,6 +255,15 @@ export interface StageFigures {
   split_count: number;
 }
 
+/** A shooter's identity (#1243): accent, logo file name (content-named,
+ *  under the shooter's ``identity/``), club line. ``null`` means "the
+ *  Look's default", never blank. */
+export interface ShooterIdentity {
+  accent: string | null;
+  logo: string | null;
+  club: string | null;
+}
+
 export interface MatchProject {
   schema_version: number;
   name: string;
@@ -294,6 +303,9 @@ export interface MatchProject {
    *  role ("primary" / "secondary"); ``null`` means the primary. Written
    *  via ``setCompareCamera``. */
   compare_camera: string | null;
+  /** The shooter's identity (#1243); every field defaults to null. Always
+   *  sent by the server; optional here so fixtures built by hand predate it. */
+  identity?: ShooterIdentity;
   /** Registered raw source recordings (doc 05). One entry per source
    *  file; a single take covering stages 1-4 is one entry with
    *  ``covers_stages = [1, 2, 3, 4]``. StageVideo entries reference
@@ -2231,6 +2243,9 @@ export interface ShooterListEntry {
   /** Per-stage status for this shooter (one entry per stage in the
    *  shooter's own project). Drives the aggregate Overview grid. */
   stage_statuses: StageStatusEntry[];
+  /** The shooter's identity (#1243). Always sent by the server; optional
+   *  here so fixtures built by hand predate it. */
+  identity?: ShooterIdentity;
 }
 
 /** Response payload for POST /api/match/shooters/{slug}/build-trim-caches (#351). */
@@ -3262,6 +3277,30 @@ export const api = {
         json: { camera },
       },
     ),
+
+  /** Set the shooter's accent and club line (#1243). Only the keys sent
+   *  are applied; ``null`` clears one. The server validates the shape
+   *  (``#rrggbb``, at most 60 characters) and answers 422 otherwise. */
+  updateShooterIdentity: (slug: string, body: { accent?: string | null; club?: string | null }) =>
+    request<MatchProject>(`/api/shooters/${encodeURIComponent(slug)}/identity`, {
+      method: "PATCH",
+      json: body,
+    }),
+
+  /** Upload the shooter's logo (#1243): PNG, JPEG or WebP, at most 2 MB.
+   *  The server sniffs the type and names the file by its content. */
+  uploadShooterLogo: (slug: string, file: File) => {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    return request<MatchProject>(`/api/shooters/${encodeURIComponent(slug)}/identity/logo`, {
+      method: "POST",
+      body: form,
+    });
+  },
+
+  /** Clear the shooter's logo (#1243). */
+  removeShooterLogo: (slug: string) =>
+    request<MatchProject>(`/api/shooters/${encodeURIComponent(slug)}/identity/logo`, { method: "DELETE" }),
 
   /** List the camera models calibrated in the shipped artifact. The SPA
    *  presents these as the camera-model dropdown options on Ingest. */

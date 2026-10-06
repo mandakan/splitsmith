@@ -271,6 +271,9 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
     # equivalent ``row-gap`` on the same three rows the rest of this
     # stylesheet already lays out as ``grid-template-rows``.
     top_row_gap = scale.pad
+    # The accent bar's height: a hairline at small cells, a
+    # visible band at canvas size, scaled off the same pad as the gaps.
+    accent_bar = max(3, scale.pad // 4)
     return f"""
 @font-face {{
   font-family: "Splitsmith Mono";
@@ -288,6 +291,11 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
   height: 100%;
   overflow: hidden;
   box-sizing: border-box;
+  /* The shooter's accent bar: ``--accent`` is set on the cell
+     by ``grid_html`` / ``single_html`` for a shooter with an identity;
+     unset, a transparent inset shadow paints nothing, so a cell without
+     one is pixel for pixel what it was. */
+  box-shadow: inset 0 {accent_bar}px 0 0 var(--accent, transparent);
   font-family: "Splitsmith Mono", monospace;
   /* The bands stage summary (issue #683 Task 8) needs the whole cell
      height distributed between an auto-height identity row, a middle
@@ -486,6 +494,9 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
 }}
 .role-identity     {{
   font-size: {scale.identity}px;
+  /* The name takes the shooter's accent when one is set;
+     ``currentColor`` keeps the inherited ink otherwise. */
+  color: var(--accent, currentColor);
   text-overflow: ellipsis;
   /* The one place ``Antonio`` (condensed display) draws instead of the
      mono figure face: a competitor's name is the one string on the
@@ -540,6 +551,14 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
    ink_2, no shadow-via-emphasis" over ``.emphasis-plain``'s stroke,
    which is why it is declared here rather than beside ``.role-*``
    above. */
+/* The identity element carries ``.emphasis-plain`` too, whose ``color``
+   above would otherwise win on source order at equal specificity (the
+   identity slice's review found the name never took the accent). Same fallback
+   as ``.emphasis-plain``'s own ink, so an unset accent draws the same
+   pixels. */
+.role-identity.emphasis-plain {{
+  color: var(--accent, rgb({ink}));
+}}
 .role-label {{
   font-size: {_fit(scale.caption)};
   color: rgb({ink_2});
@@ -718,7 +737,7 @@ def _anchor_div(anchor: Anchor, members: Sequence[Group]) -> str:
     return f'<div class="{_anchor_classes(anchor, align)}">{groups_html}</div>'
 
 
-def _cell_div(groups: Sequence[Group]) -> str:
+def _cell_div(groups: Sequence[Group], *, style: str | None = None) -> str:
     """The ``<div class="cell">...</div>`` markup for one present tile,
     with no wrapping ``<style>`` -- shared by :func:`cell_html` (which
     wraps it with its own stylesheet so a single cell is independently
@@ -735,7 +754,8 @@ def _cell_div(groups: Sequence[Group]) -> str:
     for group in groups:
         buckets.setdefault(group.anchor, []).append(group)
     anchors_html = "".join(_anchor_div(anchor, members) for anchor, members in buckets.items())
-    return f'<div class="cell">{anchors_html}</div>'
+    style_attr = f' style="{style}"' if style else ""
+    return f'<div class="cell"{style_attr}>{anchors_html}</div>'
 
 
 def _fit_script() -> str:
@@ -833,6 +853,7 @@ def single_html(
     height: int,
     scale: CellScale,
     theme: OverlayTheme,
+    accent: str | None = None,
 ) -> str:
     """One canvas-sized cell as a whole HTML document (issue #684).
 
@@ -882,13 +903,14 @@ def single_html(
     only the single-shooter export builds is what keeps that true
     structurally rather than by anyone remembering.
     """
+    cell_style = f"--accent:{accent}" if accent else None
     return (
         "<!doctype html>\n"
         '<html><head><meta charset="utf-8"><title>overlay</title>'
         f"<style>{single_css(width=width, height=height, scale=scale, theme=theme)}</style>"
         f"{_fit_script()}"
         "</head>"
-        f"<body>{_cell_div(groups)}</body></html>"
+        f"<body>{_cell_div(groups, style=cell_style)}</body></html>"
     )
 
 
@@ -972,9 +994,9 @@ def grid_html(
     body_cells: list[str] = []
     for placement, groups in cells:
         inner = _cell_div(groups) if placement.present else '<div class="cell"></div>'
-        body_cells.append(
-            f'<div style="grid-row:{placement.row + 1};grid-column:{placement.col + 1};">{inner}</div>'
-        )
+        accent = f"--accent:{placement.accent};" if placement.accent else ""
+        position = f"grid-row:{placement.row + 1};grid-column:{placement.col + 1};{accent}"
+        body_cells.append(f'<div style="{position}">{inner}</div>')
     return (
         "<!doctype html>\n"
         '<html><head><meta charset="utf-8"><title>stage summary</title>'

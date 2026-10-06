@@ -516,3 +516,58 @@ def test_stage_card_carries_the_variant_the_grid_was_asked_for() -> None:
     card = mp4_grid.stage_card(_plan(), style="slate", seconds=1.5, expected_rounds=24, variant="rise")
     assert card.variant == "rise"
     assert mp4_grid.stage_card(_plan(), style="slate", seconds=1.5, expected_rounds=None).variant == "default"
+
+
+def test_identities_reach_the_grids_cards_in_tile_order(tmp_path: Path) -> None:
+    import json
+
+    from splitsmith.identity import ResolvedIdentity
+
+    fake = _FakeRasterizer()
+    mp4_grid.render_grid_mp4(
+        _driver_shooters(tmp_path),
+        audio_label="Anders",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=_ok_runner([]),
+        card_runner=_ok_runner([]),
+        still_runner=_still_runner([]),
+        rasterizer=fake,
+        work_dir=tmp_path / "work",
+        ffmpeg_binary="/bin/ffmpeg",
+        title_page=MatchTitle(text="Bromma"),
+        identities={"Anders": ResolvedIdentity(label="Anders", accent="#123456", logo_path=None, club="PK")},
+    )
+    data = json.loads(fake.calls[0])
+    assert data["shooters"] == [{"label": "Anders", "accent": "#123456", "club": "PK", "logo": None}]
+
+
+def test_identities_reach_the_grids_hold_as_accents(tmp_path: Path, monkeypatch) -> None:
+    """The stage hold passes each identified tile's accent to the hold
+    builder, keyed by label; nothing else about the call changes."""
+    from splitsmith.compare import overlay_summary
+    from splitsmith.identity import ResolvedIdentity
+
+    seen: dict[str, object] = {}
+
+    def spy(plan, data, geometry, **kwargs):  # noqa: ANN001
+        seen.update(kwargs)
+        out = tmp_path / "hold.png"
+        out.write_bytes(b"png")
+        return out
+
+    monkeypatch.setattr(overlay_summary, "write_hold_still", spy)
+    mp4_grid._stage_hold_still(
+        _plan(),
+        CANVAS,
+        {},
+        theme_name="splitsmith",
+        work=tmp_path,
+        ffmpeg_binary="/bin/ffmpeg",
+        runner=_ok_runner([]),
+        rasterizer=None,
+        identities={
+            "Stage 3 shooter": ResolvedIdentity(label="x", accent="#123456", logo_path=None, club=None)
+        },
+    )
+    assert seen["accents"] == {"Stage 3 shooter": "#123456"}

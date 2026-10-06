@@ -195,6 +195,35 @@ Look has ``default`` and ``rise`` (``card-rise.html``, Web Animations
 driven by ``seek``, ``poster()`` at the end of the rise so previews never
 show its invisible first frame).
 
+A shooter has an **identity** (``splitsmith.identity``, spec section 2,
+#1243): ``MatchProject.identity`` holds an optional ``#rrggbb`` accent, a
+club line and the name of a logo under ``<shooter>/identity/``
+(content-named ``logo-<12hex>.<ext>``, PNG / JPEG / WEBP, 2 MB). The
+renderers never read it raw: the request layer (the export jobs in
+``server.py``, ``match_cli``, ``compare/cli``, the preview API) resolves
+it through ``ui/identity_media.resolved_identity_for`` /
+``grid_identities`` into a ``ResolvedIdentity`` whose accent is the
+shooter's own or ``None`` and whose ``logo_path`` is a file on this disk
+or ``None`` (hosted mirrors the logo down like a trim; a missing file is
+a card without a logo, never a failed render). A shooter who set nothing
+renders exactly as before identities existed: the spec's slot default
+(the Look's ``accent_series`` by slot, alphabetical by label, filler
+tiles keep their slot) is opt-in through ``series_default`` and only the
+frame scripts' ``--identity-demo`` asks for it (a ruling from the slice
+3 review; the series is otherwise the sheet's swatches). The pixel gate
+against main runs the frame scripts' default path, which goes through
+the same resolver an export uses. ``Composition.shooters`` and
+``render_grid_mp4(identities=)`` carry it in; templates read
+``data.shooters`` and ``_shared/identity.js`` draws the logos top-right
+(a lower third only when exactly one shooter has one); the summary
+tile's accent bar and the name's colour are ``--accent`` on the cell
+wrapper, unset today's pixels; the club line prints under the shooter's
+name on the title page (``title_info_lines``). The upload sniffs the
+bytes (PNG / JPEG incl. MPO / WEBP), caps the side at ``LOGO_MAX_SIDE``
+and never reads the client's filename. The logo syncs over the media
+channel (``identity/`` in the push plan, the hosted key rule and the
+delete route).
+
 ## Hosted playback streams the web rendition (#1031)
 
 The audit trim (``trimmed/stage<N>_cam_<id>_trimmed.mp4``) is a

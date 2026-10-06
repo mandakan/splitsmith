@@ -533,9 +533,11 @@ def export(
     formats carry the stage titles FCP can draw and record the rest as
     notes.
     """
+    from .looks import load_look
     from .match_project import MatchProject
     from .mp4_render import RenderStep
     from .ui import match_exports
+    from .ui.identity_media import resolved_identity_for
 
     if output_format not in _EXPORT_FORMATS:
         console.print(
@@ -663,6 +665,9 @@ def export(
         overlay_theme=overlay_theme,  # type: ignore[arg-type]
         summary_hold_seconds=summary_hold,
         shooter_label=shooter_label,
+        shooter_identity=resolved_identity_for(
+            project, shooter_root, look=load_look(overlay_theme), index=0, label=shooter_label or project_name
+        ),
     )
     exports_dir = project.exports_path(shooter_root)
     if output is not None:

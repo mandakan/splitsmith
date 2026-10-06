@@ -137,9 +137,10 @@ describe("ShootersPanel", () => {
   it("names the shooters, offers Rebuild trims when caches are missing, and Remove", () => {
     const onRemove = vi.fn();
     const onRebuild = vi.fn();
+    const onIdentity = vi.fn();
     render(
       <MemoryRouter>
-        <ShootersPanel shooters={[ME, ANNA]} activeSlug="me" editDenied={false} hrefs={{ footage: (s) => `/m/ingest/${s}`, audit: (s) => `/m/audit/${s}` }} onAdd={vi.fn()} onRemove={onRemove} onRebuildTrims={onRebuild} />
+        <ShootersPanel shooters={[ME, ANNA]} activeSlug="me" editDenied={false} hrefs={{ footage: (s) => `/m/ingest/${s}`, audit: (s) => `/m/audit/${s}` }} onAdd={vi.fn()} onRemove={onRemove} onRebuildTrims={onRebuild} onIdentity={onIdentity} />
       </MemoryRouter>,
     );
     expect(screen.getByRole("link", { name: "Anna Berg" })).toHaveAttribute("href", "/m/ingest/anna");
@@ -147,6 +148,9 @@ describe("ShootersPanel", () => {
     expect(screen.queryByRole("menuitem", { name: /Rebuild trims/ })).toBeNull();
     fireEvent.click(screen.getByRole("menuitem", { name: /Remove/ }));
     expect(onRemove).toHaveBeenCalledWith(ME);
+    fireEvent.click(screen.getByRole("button", { name: "Mathias Axell actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Identity/ }));
+    expect(onIdentity).toHaveBeenCalledWith(ME);
     fireEvent.click(screen.getByRole("button", { name: "Anna Berg actions" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Rebuild trims (2)" }));
     expect(onRebuild).toHaveBeenCalledWith(ANNA);

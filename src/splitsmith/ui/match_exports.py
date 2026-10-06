@@ -25,6 +25,7 @@ from .. import composition, fcp7xml_render, fcpxml_gen, mp4_render, youtube_side
 from ..audit_data import StageExportError, audit_shots_to_engine_shots, read_audit_data
 from ..config import OutputConfig, StageRounds
 from ..export_naming import match_file_base, stage_display_name, stage_file_base
+from ..identity import ResolvedIdentity
 from ..match_project import MatchProject, StageScorecard
 from ..overlay_theme import ThemeName
 from ..runtime import runtime
@@ -240,9 +241,10 @@ def title_info_lines(
     project: MatchProject, *, extra: str | None = None, division: str | None = None
 ) -> tuple[str, ...]:
     """The info lines under the match name on a generated title page
-    (issue #973): the match date, the shooter, the shooter's division,
-    then the caller's free text. Only what the project actually carries;
-    a blank line is never printed. ``division`` is the caller's to pass
+    (issue #973): the match date, the shooter, the shooter's club line
+    (``project.identity.club``, #1243), the shooter's division, then the
+    caller's free text. Only what the project actually carries; a blank
+    line is never printed. ``division`` is the caller's to pass
     (:func:`splitsmith.division.competitor_division`, or ``None`` when the title page should
     not show it)."""
     lines: list[str] = []
@@ -250,6 +252,8 @@ def title_info_lines(
         lines.append(project.match_date.isoformat())
     if project.competitor_name:
         lines.append(project.competitor_name)
+    if project.identity.club:
+        lines.append(project.identity.club)
     if division and division.strip():
         lines.append(division.strip())
     if extra and extra.strip():
@@ -347,6 +351,10 @@ class MatchExportRequestData:
     # ``None`` falls back to the project name.
     summary_hold_seconds: float = 0.0
     shooter_label: str | None = None
+    # Issue #1243. The shooter's identity resolved against the Look by the
+    # caller (accent, a logo on local disk or none, club line), the one
+    # entry of ``Composition.shooters`` every card template reads.
+    shooter_identity: ResolvedIdentity | None = None
 
     def __post_init__(self) -> None:
         # A preset or a CLI call from before the inset (``pip-corners``,
@@ -693,6 +701,18 @@ def export_match(
         title_page=title_page,
         closing=closing,
         summaries=summaries,
+        shooters=(
+            (
+                composition.CompositionShooter(
+                    label=request.shooter_identity.label,
+                    accent=request.shooter_identity.accent,
+                    logo_path=request.shooter_identity.logo_path,
+                    club=request.shooter_identity.club,
+                ),
+            )
+            if request.shooter_identity is not None
+            else ()
+        ),
     )
     youtube_preset_active = request.youtube_preset and request.output_format == "mp4"
     if request.youtube_preset and request.output_format != "mp4":

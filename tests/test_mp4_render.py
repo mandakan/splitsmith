@@ -1505,3 +1505,44 @@ def test_an_animated_lower_third_is_a_clip_input_with_the_clip_filters(tmp_path:
     assert (
         stage_cmd[lt_index - 1] == "-i" and stage_cmd[lt_index - 2] != "-t"
     ), "a clip input is not looped or cut"
+
+
+def test_the_compositions_shooters_reach_every_card(tmp_path: Path) -> None:
+    import dataclasses
+    import json
+
+    comp = _carded_composition(tmp_path)
+    comp = dataclasses.replace(
+        comp,
+        shooters=(
+            composition.CompositionShooter(label="Mathias", accent="#ff2d2d", logo_path=None, club="PK"),
+        ),
+    )
+    runner = MagicMock(side_effect=_ok)
+    fake = _FakeRasterizer()
+    mp4_render.render_mp4(
+        comp, output_path=tmp_path / "m.mp4", work_dir=tmp_path / "work", runner=runner, rasterizer=fake
+    )
+    for call in fake.calls:
+        data = json.loads(call)
+        assert data["shooters"] == [{"label": "Mathias", "accent": "#ff2d2d", "club": "PK", "logo": None}]
+
+
+def test_the_summary_hold_carries_the_shooters_accent(tmp_path: Path) -> None:
+    import dataclasses
+
+    comp = _summarised_composition(tmp_path)
+    comp = dataclasses.replace(
+        comp,
+        shooters=(composition.CompositionShooter(label="Me", accent="#abcdef", logo_path=None, club=None),),
+    )
+    fake = _FakeRasterizer()
+    mp4_render.render_mp4(
+        comp,
+        output_path=tmp_path / "m.mp4",
+        work_dir=tmp_path / "w",
+        runner=MagicMock(side_effect=_ok),
+        rasterizer=fake,
+    )
+    holds = [c for c in fake.calls if c.startswith("<!doctype html>")]
+    assert holds and all('<div class="cell" style="--accent:#abcdef">' in h for h in holds)

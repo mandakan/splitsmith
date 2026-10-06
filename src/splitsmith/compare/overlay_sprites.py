@@ -62,6 +62,10 @@ class TilePlacement:
     row: int
     col: int
     present: bool
+    #: The shooter's resolved accent (#1243), a ``#rrggbb`` the cell sets
+    #: as ``--accent``; ``None`` leaves the cell's markup exactly as it
+    #: was, so a grid without identities renders the same bytes.
+    accent: str | None = None
 
 
 @dataclass(frozen=True)

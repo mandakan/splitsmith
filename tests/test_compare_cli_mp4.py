@@ -241,6 +241,49 @@ def test_mp4_render_receives_the_loaded_bundles_and_resolved_audio_label(
     assert seen["output_path"] == output
 
 
+def test_mp4_render_receives_one_resolved_identity_per_shooter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The CLI resolves each project's identity against the Look and hands
+    the renderer the map keyed by tile label, so the cards and the summary
+    draw it (the renderer never reads a project itself)."""
+    from splitsmith.identity import ResolvedIdentity
+
+    match_root = _seed_match_with_stages(tmp_path / "match", stage_count=1)
+    _patch_probe(monkeypatch)
+    seen: dict[str, Any] = {}
+    real_render = cli_mod.mp4_grid.render_grid_mp4
+
+    def spy(shooters, *, audio_label, output_path, **kwargs):
+        seen["identities"] = kwargs.get("identities")
+        return real_render(shooters, audio_label=audio_label, output_path=output_path, **kwargs)
+
+    monkeypatch.setattr(cli_mod.mp4_grid, "render_grid_mp4", spy)
+    monkeypatch.setattr(cli_mod.subprocess, "run", _ffmpeg_stub_factory())
+
+    result = runner.invoke(
+        app,
+        [
+            "compare",
+            "export",
+            str(match_root),
+            "--audio-from",
+            "mathias",
+            "--format",
+            "mp4",
+            "-o",
+            str(tmp_path / "out.mp4"),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    identities = seen["identities"]
+    assert set(identities) == {"Mathias"}
+    resolved = identities["Mathias"]
+    assert isinstance(resolved, ResolvedIdentity)
+    assert resolved.accent is None, "nothing set, nothing drawn"
+    assert resolved.logo_path is None
+
+
 # --- work dir ownership --------------------------------------------------
 
 

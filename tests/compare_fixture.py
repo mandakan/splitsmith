@@ -608,7 +608,7 @@ def build_roster(
     for spec in ROSTER[:count]:
         trim, duration_seconds = (clip_overrides or {}).get(spec.label) or clips[spec.clip]
         project_root = root / spec.label
-        write_project(project_root, spec, stages=stages)
+        project = write_project(project_root, spec, stages=stages)
         by_number: dict[int, CompareStageBundle] = {}
         for number in range(1, stages + 1):
             audit_path = project_root / "audit" / f"stage{number}.json"
@@ -628,6 +628,8 @@ def build_roster(
                 frame_rate_den=SYNTHETIC_FPS_DEN,
             )
         bundles.append(
-            CompareShooterBundle(label=spec.label, project_root=project_root, stages_by_number=by_number)
+            CompareShooterBundle(
+                label=spec.label, project_root=project_root, project=project, stages_by_number=by_number
+            )
         )
     return bundles

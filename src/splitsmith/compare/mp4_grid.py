@@ -33,6 +33,7 @@ from typing import Literal
 
 from ..composition import MatchTitle, TitleCard, TitleStyle
 from ..export_naming import stage_display_name
+from ..identity import ResolvedIdentity
 from ..look_motion import MotionClipError, motion_overlay_filters, write_motion_clip
 from ..looks import CardSlot, Look, load_look
 from ..overlay_card import (
@@ -2164,6 +2165,7 @@ def _stage_hold_still(
     ffmpeg_binary: str,
     runner: Runner,
     rasterizer: Rasterizer | None,
+    identities: Mapping[str, ResolvedIdentity] | None = None,
 ) -> Path:
     """Compose this stage's frozen summary still and return its path.
 
@@ -2209,6 +2211,7 @@ def _stage_hold_still(
         ffmpeg_binary=ffmpeg_binary,
         runner=runner,
         rasterizer=rasterizer,
+        accents={label: ident.accent for label, ident in (identities or {}).items()},
     )
 
 
@@ -2288,6 +2291,7 @@ def _card_segment(
     ffmpeg_binary: str,
     card_runner: Runner,
     still_runner: Runner,
+    identities: Mapping[str, ResolvedIdentity] | None = None,
 ) -> Path | None:
     """Compose one full-frame card and encode it as a segment; ``None``
     when it was skipped -- no rasterizer (already recorded as a
@@ -2309,6 +2313,7 @@ def _card_segment(
         look=look,
         rasterizer=rasterizer,
         max_seconds=card.duration_seconds,
+        shooters=_tile_identities(plan, identities),
     )
     if motion is None:
         return None
@@ -2358,6 +2363,16 @@ def _card_segment(
         )
         return None
     return segment
+
+
+def _tile_identities(
+    plan: GridStagePlan, identities: Mapping[str, ResolvedIdentity] | None
+) -> tuple[ResolvedIdentity, ...]:
+    """The resolved identities of this stage's tiles, in slot order, for
+    the ones the caller resolved (#1243)."""
+    if not identities:
+        return ()
+    return tuple(identities[tile.label] for tile in plan.tiles if tile.label in identities)
 
 
 def _run_ffmpeg(cmd: tuple[str, ...], *, runner: Runner) -> subprocess.CompletedProcess:
@@ -2451,6 +2466,7 @@ def render_grid_mp4(
     stage_titles: StageTitleKind = "none",
     title_duration_seconds: float = 1.5,
     card_variant: str = "default",
+    identities: Mapping[str, ResolvedIdentity] | None = None,
     inset: GridInset | None = None,
     free_cell: FreeCellKind = "blank",
     match_name: str = "",
@@ -2713,6 +2729,7 @@ def render_grid_mp4(
                 ffmpeg_binary=binary,
                 card_runner=card_runner,
                 still_runner=still_runner,
+                identities=identities,
             )
             if title_segment is not None:
                 segments.append(title_segment)
@@ -2745,6 +2762,7 @@ def render_grid_mp4(
                         ffmpeg_binary=binary,
                         card_runner=card_runner,
                         still_runner=still_runner,
+                        identities=identities,
                     )
                     if slate_segment is not None:
                         segments.append(slate_segment)
@@ -2760,6 +2778,7 @@ def render_grid_mp4(
                         look=card_look,
                         rasterizer=active_rasterizer,
                         max_seconds=title_duration_seconds,
+                        shooters=_tile_identities(plan, identities),
                     )
                     if lt_motion is not None and not lt_motion.animated:
                         image = first_frame_image(lt_motion)
@@ -2841,6 +2860,7 @@ def render_grid_mp4(
                             ffmpeg_binary=binary,
                             runner=still_runner,
                             rasterizer=active_rasterizer,
+                            identities=identities,
                         )
                     except Exception as exc:  # noqa: BLE001 -- one bad stage must not lose the match
                         detail = f"could not compose the stage summary still: {exc}"
@@ -2924,6 +2944,7 @@ def render_grid_mp4(
                 ffmpeg_binary=binary,
                 card_runner=card_runner,
                 still_runner=still_runner,
+                identities=identities,
             )
             if closing_segment is not None:
                 segments.append(closing_segment)

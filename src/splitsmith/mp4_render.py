@@ -293,6 +293,7 @@ def _render_with_work_dir(
     look = load_look(overlay_theme) if timeline.needs_rasterizer else None
     theme = theme_for(look) if look is not None else None
     fps = sequence.frame_rate_num / sequence.frame_rate_den
+    shooters = composition.shooters
     segments: list[tuple[Path, float]] = []
     generated = False
     total_steps = len(timeline.items) + 1
@@ -358,6 +359,7 @@ def _render_with_work_dir(
                     look=look,
                     rasterizer=rasterizer,
                     max_seconds=item.lower_third.duration_seconds,
+                    shooters=shooters,
                 )
             if lt_motion is not None and not lt_motion.animated:
                 image = first_frame_image(lt_motion)
@@ -421,6 +423,7 @@ def _render_with_work_dir(
                 look=look,
                 rasterizer=rasterizer,
                 max_seconds=item.duration_seconds,
+                shooters=shooters,
             )
             if motion is None:
                 continue  # logged by overlay_card; a card is its text
@@ -510,6 +513,7 @@ def _render_with_work_dir(
                 theme=theme if theme is not None else load_theme(overlay_theme),
                 rasterizer=rasterizer,
                 backdrop=backdrop,
+                accent=shooters[0].accent if shooters else None,
             )
             if image is None:
                 logger.warning(

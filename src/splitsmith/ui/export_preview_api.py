@@ -37,6 +37,7 @@ from ..looks import load_look
 from ..overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
 from ..runtime import runtime
 from . import render_bound
+from .identity_media import resolved_identity_for
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +120,13 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
                 audit_doc=audit_doc,
                 look=load_look("splitsmith"),
                 rasterizer=rasterizer,
+                shooter=resolved_identity_for(
+                    project,
+                    root,
+                    look=load_look("splitsmith"),
+                    index=0,
+                    label=project.competitor_name or project.name,
+                ),
                 ffmpeg_binary=rt.ffmpeg_binary,
                 work_dir=Path(work),
             )

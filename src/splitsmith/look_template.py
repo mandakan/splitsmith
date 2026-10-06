@@ -21,14 +21,18 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
+from .identity import LOGO_MAX_BYTES, ResolvedIdentity
 from .looks import shared_dir
 from .overlay_layout import MIN_FONT_SIZE, Element, Group
 from .overlay_theme import OverlayTheme
+
+logger = logging.getLogger(__name__)
 
 
 class TemplateContext(BaseModel):
@@ -89,6 +93,27 @@ def group_json(group: Group) -> dict[str, Any]:
     }
 
 
+def shooter_json(shooter: ResolvedIdentity | Any) -> dict[str, Any]:
+    """One shooter as ``data.shooters[i]``: label, accent, club, and the
+    logo as a ``file://`` URL when the file exists and is within
+    ``LOGO_MAX_BYTES``, else ``None`` with a warning (a missing logo costs
+    the logo, never the card). Accepts anything with those four
+    attributes (``composition.CompositionShooter`` carries the same)."""
+    logo: str | None = None
+    path = getattr(shooter, "logo_path", None)
+    if path is not None:
+        try:
+            size = Path(path).stat().st_size
+        except OSError:
+            logger.warning("identity: logo %s is missing; the card draws without it", path)
+        else:
+            if 0 < size <= LOGO_MAX_BYTES:
+                logo = Path(path).resolve().as_uri()
+            else:
+                logger.warning("identity: logo %s is %d bytes; the card draws without it", path, size)
+    return {"label": shooter.label, "accent": shooter.accent, "club": shooter.club, "logo": logo}
+
+
 def engine_block(*, css: str) -> dict[str, Any]:
     return {"css": css, "min_font_size": MIN_FONT_SIZE}
 
@@ -109,4 +134,12 @@ def template_digest(template: Path, context: TemplateContext, *, fps: float, eng
     return digest.hexdigest()
 
 
-__all__ = ["TemplateContext", "engine_block", "group_json", "shared_url", "template_digest", "theme_tokens"]
+__all__ = [
+    "TemplateContext",
+    "engine_block",
+    "group_json",
+    "shared_url",
+    "shooter_json",
+    "template_digest",
+    "theme_tokens",
+]
