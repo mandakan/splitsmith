@@ -2,12 +2,12 @@
 
 Before #1212 a role change, unassign or move on one stage's clip of a
 multi-stage single take acted on the first stage's registration. That left
-three shapes of damage: a covered stage listing the file twice (with one
-shared ``video_id``), a covered stage with no entry for the file, and a
-tray copy of the file while the take still covers stages. The repair drops
-the file's entries on every damaged stage and the tray, and lets coverage
-recreate exactly one registration per damaged stage; undamaged stages are
-not touched.
+a stage listing the file twice (with one shared ``video_id``): the old code
+appended the first stage's entry to the clicked stage. That is the only
+unambiguous shape -- an empty covered stage or a tray copy looks exactly
+like a legitimate per-clip remove or unassign, which do not update
+``covers_stages``. The repair keeps each damaged stage's first entry (its
+own registration) and drops the appended extras.
 """
 
 from __future__ import annotations
@@ -68,47 +68,48 @@ def test_a_healthy_take_has_no_damage() -> None:
     assert _take().take_damage(str(TAKE)) == []
 
 
-def test_a_role_change_damage_flags_both_stages() -> None:
+def test_a_stage_listing_the_file_twice_is_damaged() -> None:
     project = _take()
     _role_change_damage(project)
-    assert project.take_damage(str(TAKE)) == [1, 2]
+    assert project.take_damage(str(TAKE)) == [2]
 
 
-def test_an_unassigned_registration_flags_its_stage() -> None:
+def test_a_legitimate_remove_is_not_damage(tmp_path: Path) -> None:
+    """covers_stages is not updated by a per-clip remove; an empty covered
+    stage must not read as damage, or Repair would undo the user's edit."""
     project = _take()
-    stray = project.stage(3).videos.pop()
-    stray.stage_number = None
-    project.unassigned_videos.append(stray)
-    assert project.take_damage(str(TAKE)) == [3]
+    project.remove_video(TAKE, tmp_path, stage_number=3)
+    assert project.take_damage(str(TAKE)) == []
 
 
-def test_a_path_without_a_take_has_no_damage() -> None:
+def test_a_legitimate_unassign_is_not_damage() -> None:
     project = _take()
-    project.raw_videos.clear()
+    project.assign_video(TAKE, from_stage_number=3, to_stage_number=None)
+    assert project.take_damage(str(TAKE)) == []
+
+
+def test_a_move_to_an_uncovered_stage_is_not_damage() -> None:
+    project = _take(covers=(1, 2))
+    project.stage(3).videos.clear()  # stage 3 is not part of the take
+    project.assign_video(TAKE, from_stage_number=2, to_stage_number=3, role="secondary")
     assert project.take_damage(str(TAKE)) == []
 
 
 # --- repair ---------------------------------------------------------------------
 
 
-def test_repair_clears_only_the_damaged_stages() -> None:
+def test_repair_keeps_the_stage_s_own_entry() -> None:
+    """The old bug appended the intruder, so the first entry is the stage's
+    own registration, reviewed beep and all."""
     project = _take()
+    project.stage(2).videos[0].beep_reviewed = True
     _role_change_damage(project)
-    removed = project.repair_take(str(TAKE))
-    assert sorted(n for n, _ in removed) == [2, 2]
-    # Stages 1 and 2 are empty and wait for coverage to recreate them;
-    # stage 3 keeps its own entry and beep.
-    assert _beeps(project) == {1: [], 2: [], 3: [300.0]}
-
-
-def test_repair_drops_a_tray_copy() -> None:
-    project = _take()
-    stray = project.stage(3).videos.pop()
-    stray.stage_number = None
-    project.unassigned_videos.append(stray)
-    project.repair_take(str(TAKE))
-    assert project.unassigned_videos == []
-    assert _beeps(project) == {1: [100.0], 2: [200.0], 3: []}
+    assert project.repair_take(str(TAKE)) == [2]
+    kept = [v for v in project.stage(2).videos if v.path == TAKE]
+    assert [(v.beep_time, v.beep_reviewed) for v in kept] == [(200.0, True)]
+    # The stage the intruder was taken from stays empty: the repair cannot
+    # tell that apart from a legitimate remove.
+    assert _beeps(project) == {1: [], 2: [200.0], 3: [300.0]}
 
 
 def test_repair_of_a_healthy_take_changes_nothing() -> None:
@@ -120,7 +121,7 @@ def test_repair_of_a_healthy_take_changes_nothing() -> None:
 # --- route ----------------------------------------------------------------------
 
 
-def _client(tmp_path: Path, project: MatchProject) -> tuple[TestClient, str]:
+def _client(tmp_path: Path, project: MatchProject) -> tuple[TestClient, str, Path]:
     from tests.conftest import scaffold_match
 
     root, shooter_root = scaffold_match(tmp_path, name="Take")
@@ -133,34 +134,38 @@ def _client(tmp_path: Path, project: MatchProject) -> tuple[TestClient, str]:
     base.save(shooter_root)
     app = create_app(project_root=root, project_name="Take")
     match_id = app.state.splitsmith_state.matches.known_ids()[0]
-    return TestClient(app), f"/api/matches/{match_id}/shooters/me"
+    return TestClient(app), f"/api/matches/{match_id}/shooters/me", shooter_root
 
 
-def test_route_repairs_to_one_registration_per_stage(tmp_path: Path) -> None:
+def test_route_repairs_a_stage_listing_the_file_twice(tmp_path: Path) -> None:
     project = _take()
     _role_change_damage(project)
-    client, base = _client(tmp_path, project)
+    client, base, shooter_root = _client(tmp_path, project)
+    trim = shooter_root / "trimmed" / f"stage2_cam_{project.stage(2).videos[0].video_id}_trimmed.mp4"
+    trim.parent.mkdir(parents=True, exist_ok=True)
+    trim.write_bytes(b"stage 2's good trim")
 
     resp = client.post(f"{base}/raw-videos/repair", json={"filename": "take.mp4"})
 
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["repaired_stages"] == [1, 2]
+    assert body["repaired_stages"] == [2]
     stages = {s["stage_number"]: s["videos"] for s in body["project"]["stages"]}
-    assert [len(stages[n]) for n in (1, 2, 3)] == [1, 1, 1]
-    # Repaired stages wait for a fresh beep; the untouched stage keeps its own.
-    assert [stages[n][0]["beep_time"] for n in (1, 2, 3)] == [None, None, 300.0]
-    assert len({stages[n][0]["video_id"] for n in (1, 2, 3)}) == 3
+    assert [[v["beep_time"] for v in stages[n]] for n in (1, 2, 3)] == [[], [200.0], [300.0]]
+    # The kept entry shares its id with the dropped one; its trim survives.
+    assert trim.read_bytes() == b"stage 2's good trim"
+    assert MatchProject.load(shooter_root).take_damage(str(TAKE)) == []
 
 
 def test_route_on_a_healthy_take_is_a_no_op(tmp_path: Path) -> None:
-    client, base = _client(tmp_path, _take())
+    client, base, _root = _client(tmp_path, _take())
     resp = client.post(f"{base}/raw-videos/repair", json={"filename": "take.mp4"})
     assert resp.status_code == 200, resp.text
     assert resp.json()["repaired_stages"] == []
 
 
 def test_route_404s_an_unknown_file(tmp_path: Path) -> None:
-    client, base = _client(tmp_path, _take())
+    client, base, _root = _client(tmp_path, _take())
     resp = client.post(f"{base}/raw-videos/repair", json={"filename": "other.mp4"})
     assert resp.status_code == 404, resp.text
+    assert "not registered" in resp.text

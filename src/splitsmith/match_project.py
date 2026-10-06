@@ -2458,48 +2458,46 @@ class MatchProject(BaseModel):
         return new_primary
 
     def take_damage(self, storage_path: str) -> list[int]:
-        """Covered stages of a single take that do not hold exactly one
-        registration of its file (#1214), ascending.
+        """Stages that list ``storage_path`` more than once (#1214), ascending.
 
-        Before #1212 a role change, unassign or move on one stage's clip
-        acted on the first stage's registration: one stage could end up
-        listing the file twice (one shared ``video_id``) and another with
-        none. A path with no ``RawVideo`` coverage is not a take and has
-        no damage.
+        Before #1212 a role change or move on one stage's clip of a
+        multi-stage single take detached the FIRST stage's registration
+        and appended it to the clicked stage, which then listed the file
+        twice under one ``video_id``. That is the only unambiguous trace:
+        an empty covered stage or a tray copy looks exactly like a
+        legitimate per-clip remove or unassign, neither of which updates
+        ``RawVideo.covers_stages``, so neither counts as damage here.
         """
-        rv = self.find_raw_video(storage_path)
-        if rv is None or not rv.covers_stages:
-            return []
-        damaged: list[int] = []
-        for stage in self.stages:
-            if stage.stage_number not in rv.covers_stages:
-                continue
-            count = sum(1 for v in stage.videos if str(v.path) == storage_path)
-            if count != 1:
-                damaged.append(stage.stage_number)
-        return sorted(damaged)
+        return sorted(
+            stage.stage_number
+            for stage in self.stages
+            if sum(1 for v in stage.videos if str(v.path) == storage_path) > 1
+        )
 
-    def repair_take(self, storage_path: str) -> list[tuple[int, StageVideo]]:
-        """Clear a damaged take's registrations on its damaged stages (#1214).
+    def repair_take(self, storage_path: str) -> list[int]:
+        """Drop the extra entries of ``storage_path`` on every stage that
+        lists it more than once (#1214); returns those stages.
 
-        Drops every entry of the file on each stage :meth:`take_damage`
-        names, and any tray copy, so applying the take's coverage again
-        recreates exactly one registration per damaged stage. Undamaged
-        stages are not touched. Returns the removed ``(stage_number,
-        video)`` pairs so the caller can invalidate their caches; empty
-        when the take is healthy.
+        The old bug appended the intruder, so a damaged stage's first entry
+        is its own registration (its beep, review and trim) and is kept;
+        the extras share its ``video_id``, so there are no caches of their
+        own to clear. The stage the intruder came from is left as it is --
+        it cannot be told apart from a legitimate remove.
         """
         damaged = set(self.take_damage(storage_path))
-        if not damaged:
-            return []
-        removed: list[tuple[int, StageVideo]] = []
         for stage in self.stages:
             if stage.stage_number not in damaged:
                 continue
-            removed.extend((stage.stage_number, v) for v in stage.videos if str(v.path) == storage_path)
-            stage.videos = [v for v in stage.videos if str(v.path) != storage_path]
-        self.unassigned_videos = [v for v in self.unassigned_videos if str(v.path) != storage_path]
-        return removed
+            seen = False
+            kept: list[StageVideo] = []
+            for v in stage.videos:
+                if str(v.path) == storage_path:
+                    if seen:
+                        continue
+                    seen = True
+                kept.append(v)
+            stage.videos = kept
+        return sorted(damaged)
 
     def remove_video(
         self,
