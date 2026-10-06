@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { Link, MemoryRouter, Route, Routes, useParams } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -130,5 +131,29 @@ describe("lazyPage", () => {
     getItem.mockRestore();
     setItem.mockRestore();
     spy.mockRestore();
+  });
+
+  it("keeps the page mounted across a healthy navigation between stages", async () => {
+    let mounts = 0;
+    function Stage() {
+      const { id } = useParams();
+      useEffect(() => {
+        mounts += 1;
+      }, []);
+      return <p>stage {id}</p>;
+    }
+    const Page = lazyPage(async () => ({ Stage }), "Stage");
+    render(
+      <MemoryRouter initialEntries={["/a/2"]}>
+        <Link to="/a/3">next</Link>
+        <Routes>
+          <Route path="/a/:id" element={<Page />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByText("stage 2");
+    fireEvent.click(screen.getByText("next"));
+    await screen.findByText("stage 3");
+    expect(mounts).toBe(1);
   });
 });
