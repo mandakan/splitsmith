@@ -328,7 +328,7 @@ describe("MobileAudit scrub source", () => {
   it("streams the rendition when the server names one", async () => {
     ctx.value = { ...ctx.value, project: withRendition() };
     await openVideo();
-    expect(apiMock.videoStreamUrl).toHaveBeenCalledWith("alice", "raw/stage3.mp4", "web", "w-1", 3);
+    expect(apiMock.videoStreamUrl).toHaveBeenCalledWith("alice", "raw/stage3.mp4", "scrub", "w-1", 3);
     ctx.value = { ...ctx.value, project: null };
   });
 
@@ -337,7 +337,7 @@ describe("MobileAudit scrub source", () => {
     apiMock.videoStreamUrl.mockImplementation(((_s: string, _p: string, kind: string) => `/video.mp4?kind=${kind}`) as never);
     await openVideo();
     const video = screen.getByRole("dialog", { name: "Shot video" }).querySelector("video");
-    expect(video?.getAttribute("src")).toBe("/video.mp4?kind=web");
+    expect(video?.getAttribute("src")).toBe("/video.mp4?kind=scrub");
     fireEvent.error(video!);
     await waitFor(() =>
       expect(screen.getByRole("dialog", { name: "Shot video" }).querySelector("video")?.getAttribute("src")).toBe(

@@ -6,7 +6,7 @@ describe("scrubSource", () => {
   const base = { trimVersion: "t1", scrubVersion: "w1", fullRes: false, failed: false };
 
   it.each([
-    ["a fresh rendition plays", base, { kind: "web", version: "w1" }],
+    ["a fresh rendition plays", base, { kind: "scrub", version: "w1" }],
     ["no rendition keeps the trim", { ...base, scrubVersion: null }, { kind: "trim", version: "t1" }],
     ["an undefined rendition keeps the trim", { ...base, scrubVersion: undefined }, { kind: "trim", version: "t1" }],
     ["the full-resolution switch keeps the trim", { ...base, fullRes: true }, { kind: "trim", version: "t1" }],

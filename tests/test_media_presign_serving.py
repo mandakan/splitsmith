@@ -689,3 +689,148 @@ def test_take_alias_web_follows_the_stage(s3_stream_client: tuple[TestClient, S3
 
     assert resp.status_code == 307
     assert f"stage2_cam_{_VIDEO_ID_2}_web.mp4" in resp.headers["location"]
+
+
+# ---------------------------------------------------------------------------
+# Tests: kind=scrub, the hosted Audit pin (#1209)
+# ---------------------------------------------------------------------------
+
+
+def test_scrub_kind_redirects_to_a_fresh_rendition(s3_stream_client: tuple[TestClient, S3Storage]) -> None:
+    client, storage = s3_stream_client
+    storage.write_bytes(_TRIM_KEY, b"TRIMDATA")
+    storage.write_bytes(_WEB_KEY, b"WEBDATA")
+
+    resp = client.get(_stream_url(SLUG), params={"path": "raw/clip.mp4", "kind": "scrub"})
+
+    assert resp.status_code == 307
+    assert f"stage1_cam_{_VIDEO_ID}_web.mp4" in resp.headers["location"]
+
+
+def test_scrub_kind_serves_the_trim_over_a_stale_rendition(
+    s3_stream_client: tuple[TestClient, S3Storage],
+) -> None:
+    import time
+
+    client, storage = s3_stream_client
+    storage.write_bytes(_WEB_KEY, b"OLD WINDOW")
+    time.sleep(1.1)  # R2 / moto LastModified has one-second resolution
+    storage.write_bytes(_TRIM_KEY, b"RE-CUT TRIM")
+
+    resp = client.get(_stream_url(SLUG), params={"path": "raw/clip.mp4", "kind": "scrub"})
+
+    assert resp.status_code == 307
+    assert "_trimmed.mp4" in resp.headers["location"]
+
+
+def test_scrub_kind_404s_without_a_trim_on_a_native_match(
+    s3_stream_client: tuple[TestClient, S3Storage],
+) -> None:
+    """Mid re-cut: no trim yet. The pin errors; it never plays the source."""
+    client, storage = s3_stream_client
+    storage.write_bytes(_WEB_KEY, b"ORPHAN")
+
+    resp = client.get(_stream_url(SLUG), params={"path": "raw/clip.mp4", "kind": "scrub"})
+
+    assert resp.status_code == 404
+
+
+def test_scrub_kind_on_a_mirror_serves_the_pushed_rendition(
+    s3_stream_client: tuple[TestClient, S3Storage], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from splitsmith.ui import server as server_mod
+
+    client, storage = s3_stream_client
+    monkeypatch.setattr(server_mod, "_is_mirror", lambda: True)
+    storage.write_bytes(_WEB_KEY, b"PUSHED WEB")
+
+    resp = client.get(_stream_url(SLUG), params={"path": "raw/clip.mp4", "kind": "scrub"})
+
+    assert resp.status_code == 307
+    assert f"stage1_cam_{_VIDEO_ID}_web.mp4" in resp.headers["location"]
+
+
+def _project_videos(client: TestClient) -> list[dict]:
+    resp = client.get(f"/api/matches/{MATCH_ID}/shooters/{SLUG}/project")
+    assert resp.status_code == 200, resp.text
+    return [v for s in resp.json()["stages"] for v in s["videos"]]
+
+
+def test_hosted_scrub_version_names_a_fresh_rendition(s3_stream_client: tuple[TestClient, S3Storage]) -> None:
+    client, storage = s3_stream_client
+    storage.write_bytes(_TRIM_KEY, b"TRIMDATA")
+    storage.write_bytes(_WEB_KEY, b"WEBDATA")
+    web = storage.stat(_WEB_KEY)
+    assert web is not None and web.last_modified is not None
+
+    [video] = _project_videos(client)
+
+    assert video["scrub_version"] == f"{int(web.last_modified.timestamp() * 1e9):x}-{web.size:x}"
+
+
+def test_hosted_scrub_version_is_null_for_a_stale_or_missing_rendition(
+    s3_stream_client: tuple[TestClient, S3Storage],
+) -> None:
+    import time
+
+    client, storage = s3_stream_client
+    assert _project_videos(client)[0]["scrub_version"] is None
+    storage.write_bytes(_WEB_KEY, b"OLD WINDOW")
+    time.sleep(1.1)
+    storage.write_bytes(_TRIM_KEY, b"RE-CUT TRIM")
+    assert _project_videos(client)[0]["scrub_version"] is None
+
+
+@pytest.mark.parametrize("s3_stream_client", [(1, 2)], indirect=True)
+def test_hosted_payload_lists_trimmed_once(
+    s3_stream_client: tuple[TestClient, S3Storage], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, storage = s3_stream_client
+    storage.write_bytes(_TRIM_KEY, b"TRIMDATA")
+    storage.write_bytes(_WEB_KEY, b"WEBDATA")
+    prefixes: list[str] = []
+    real_list = type(storage).list
+
+    def counting_list(self, prefix: str):
+        prefixes.append(prefix)
+        return real_list(self, prefix)
+
+    monkeypatch.setattr(type(storage), "list", counting_list)
+
+    _project_videos(client)
+
+    assert [p for p in prefixes if p.endswith("/trimmed/")] == [
+        f"matches/{MATCH_ID}/shooters/{SLUG}/trimmed/"
+    ]
+
+
+def test_hosted_payload_survives_a_failed_listing(
+    s3_stream_client: tuple[TestClient, S3Storage], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, storage = s3_stream_client
+    real_list = type(storage).list
+
+    def failing_list(self, prefix: str):
+        if prefix.endswith("/trimmed/"):
+            raise OSError("R2 down")
+        return real_list(self, prefix)
+
+    monkeypatch.setattr(type(storage), "list", failing_list)
+
+    assert _project_videos(client)[0]["scrub_version"] is None
+
+
+def test_hosted_scrub_version_on_a_mirror_names_the_pushed_rendition(
+    s3_stream_client: tuple[TestClient, S3Storage], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A desktop mirror has no trim on R2: the payload and the ``kind=scrub``
+    route must agree that the pushed rendition alone is fresh."""
+    from splitsmith.ui import server as server_mod
+
+    client, storage = s3_stream_client
+    monkeypatch.setattr(server_mod, "_is_mirror", lambda: True)
+    storage.write_bytes(_WEB_KEY, b"PUSHED WEB")
+
+    [video] = _project_videos(client)
+
+    assert video["scrub_version"] is not None

@@ -40,7 +40,7 @@ import logging
 from pathlib import Path
 
 from ..match_project import MatchProject
-from ..storage import Storage
+from ..storage import Storage, StorageObject
 from . import audio as audio_helpers
 
 logger = logging.getLogger(__name__)
@@ -64,8 +64,9 @@ class StoragePresence:
 
     def __init__(self, storage: Storage | None) -> None:
         self._storage = storage
-        # prefix -> the keys under it, or the exception its listing raised.
-        self._listed: dict[str, set[str] | BaseException] = {}
+        # prefix -> the objects under it by key, or the exception its
+        # listing raised.
+        self._listed: dict[str, dict[str, StorageObject] | BaseException] = {}
 
     def has_key(self, key: str) -> bool:
         """Whether ``key`` exists in storage; raises if its prefix could not be listed."""
@@ -74,16 +75,31 @@ class StoragePresence:
         prefix = _covering_prefix(key)
         if prefix is None:
             return self._storage.exists(key)
+        return key in self._listing(prefix)
+
+    def object(self, key: str) -> StorageObject | None:
+        """The listed metadata for ``key`` (size, ``last_modified``), or
+        ``None`` when absent; raises like :meth:`has_key` on a failed
+        listing (#1209). A key under no indexed prefix falls back to one
+        ``stat``."""
+        if self._storage is None:
+            return None
+        prefix = _covering_prefix(key)
+        if prefix is None:
+            return self._storage.stat(key)
+        return self._listing(prefix).get(key)
+
+    def _listing(self, prefix: str) -> dict[str, StorageObject]:
         listed = self._listed.get(prefix)
         if listed is None:
             try:
-                listed = {obj.path for obj in self._storage.list(prefix)}
+                listed = {obj.path: obj for obj in self._storage.list(prefix)}  # type: ignore[union-attr]
             except Exception as exc:  # noqa: BLE001 -- remembered and re-raised per lookup
                 listed = exc
             self._listed[prefix] = listed
         if isinstance(listed, BaseException):
             raise OSError(f"storage listing of {prefix!r} failed") from listed
-        return key in listed
+        return listed
 
     def source_present(self, project: MatchProject, root: Path, video_path: Path) -> bool:
         """:meth:`MatchProject.source_present` answered from the index.

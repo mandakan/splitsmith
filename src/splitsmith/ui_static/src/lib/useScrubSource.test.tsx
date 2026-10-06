@@ -26,14 +26,14 @@ describe("useScrubSource", () => {
   it("chooses the rendition by default and is available locally", async () => {
     const { result } = renderHook(() => useScrubSource());
     await waitFor(() => expect(result.current.available).toBe(true));
-    expect(result.current.choose(cam("a"))).toEqual({ kind: "web", version: "w-a" });
+    expect(result.current.choose(cam("a"))).toEqual({ kind: "scrub", version: "w-a" });
   });
 
   it("falls back to the trim for the failed video only", async () => {
     const { result } = renderHook(() => useScrubSource());
     act(() => result.current.markFailed(cam("a")));
     expect(result.current.choose(cam("a"))).toEqual({ kind: "trim", version: "t-a" });
-    expect(result.current.choose(cam("b"))).toEqual({ kind: "web", version: "w-b" });
+    expect(result.current.choose(cam("b"))).toEqual({ kind: "scrub", version: "w-b" });
   });
 
   it("a new rendition gets a fresh chance after a failure", async () => {
@@ -41,7 +41,7 @@ describe("useScrubSource", () => {
     act(() => result.current.markFailed(cam("a")));
     expect(result.current.choose(cam("a")).kind).toBe("trim");
     const recut = { ...cam("a"), scrub_version: "w-a2" };
-    expect(result.current.choose(recut)).toEqual({ kind: "web", version: "w-a2" });
+    expect(result.current.choose(recut)).toEqual({ kind: "scrub", version: "w-a2" });
   });
 
   it("the switch persists and keeps every video on the trim", async () => {
@@ -71,6 +71,6 @@ describe("useScrubSource", () => {
     const { result } = renderHook(() => useScrubSource());
     await waitFor(() => expect(api.getScrubSettings).toHaveBeenCalled());
     expect(result.current.available).toBe(false);
-    expect(result.current.choose(cam("a")).kind).toBe("web");
+    expect(result.current.choose(cam("a")).kind).toBe("scrub");
   });
 });

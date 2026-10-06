@@ -97,26 +97,26 @@ def test_fresh_web_trim_needs_the_trim(tmp_path: Path) -> None:
 # --- stream_video, local ------------------------------------------------------
 
 
-def test_local_web_kind_serves_a_fresh_rendition(tmp_path: Path) -> None:
+def test_local_scrub_kind_serves_a_fresh_rendition(tmp_path: Path) -> None:
     client, base, trim, web = _bootstrap(tmp_path)
     trim.write_bytes(b"trim bytes")
     _age(trim, 10)
     web.write_bytes(b"web bytes")
-    assert _stream(client, base, "web") == b"web bytes"
+    assert _stream(client, base, "scrub") == b"web bytes"
 
 
-def test_local_web_kind_serves_the_trim_when_the_rendition_is_stale(tmp_path: Path) -> None:
+def test_local_scrub_kind_serves_the_trim_when_the_rendition_is_stale(tmp_path: Path) -> None:
     client, base, trim, web = _bootstrap(tmp_path)
     web.write_bytes(b"old window")
     _age(web, 10)
     trim.write_bytes(b"re-cut trim")
-    assert _stream(client, base, "web") == b"re-cut trim"
+    assert _stream(client, base, "scrub") == b"re-cut trim"
 
 
-def test_local_web_kind_serves_the_trim_without_a_rendition(tmp_path: Path) -> None:
+def test_local_scrub_kind_serves_the_trim_without_a_rendition(tmp_path: Path) -> None:
     client, base, trim, _web = _bootstrap(tmp_path)
     trim.write_bytes(b"trim bytes")
-    assert _stream(client, base, "web") == b"trim bytes"
+    assert _stream(client, base, "scrub") == b"trim bytes"
 
 
 def _status(client: TestClient, base: str, kind: str) -> int:
@@ -124,16 +124,25 @@ def _status(client: TestClient, base: str, kind: str) -> int:
     return resp.status_code
 
 
-def test_local_web_kind_ignores_an_orphan_rendition(tmp_path: Path) -> None:
-    """No trim: the rendition has nothing to anchor it. Locally ``web`` is a
-    trim pin, so it 404s like ``trim`` rather than playing the source."""
+def test_local_scrub_kind_ignores_an_orphan_rendition(tmp_path: Path) -> None:
+    """No trim: the rendition has nothing to anchor it. ``scrub`` is a trim
+    pin, so it 404s like ``trim`` rather than playing the source."""
     client, base, _trim, web = _bootstrap(tmp_path)
     web.write_bytes(b"orphan web")
-    assert _status(client, base, "web") == 404
+    assert _status(client, base, "scrub") == 404
     assert _stream(client, base, "auto") == b"source bytes"
 
 
-def test_local_web_kind_404s_while_a_trim_is_recut(tmp_path: Path) -> None:
+def test_local_web_kind_falls_back_to_the_source(tmp_path: Path) -> None:
+    """``web`` means the same as on hosted: the rendition, else the trim,
+    else the source -- an older client sending it still plays."""
+    client, base, trim, web = _bootstrap(tmp_path)
+    assert _stream(client, base, "web") == b"source bytes"
+    trim.write_bytes(b"trim bytes")
+    assert _stream(client, base, "web") == b"trim bytes"
+
+
+def test_local_scrub_kind_404s_while_a_trim_is_recut(tmp_path: Path) -> None:
     """A re-cut deletes the trim and its rendition before encoding. The
     Audit player's pinned ``kind=web`` URL must error then, as ``kind=trim``
     does, so it remounts on the new version; serving the source would play
@@ -142,10 +151,10 @@ def test_local_web_kind_404s_while_a_trim_is_recut(tmp_path: Path) -> None:
     trim.write_bytes(b"trim bytes")
     _age(trim, 10)
     web.write_bytes(b"web bytes")
-    assert _stream(client, base, "web") == b"web bytes"
+    assert _stream(client, base, "scrub") == b"web bytes"
     trim.unlink()
     web.unlink()
-    assert _status(client, base, "web") == 404
+    assert _status(client, base, "scrub") == 404
     assert _status(client, base, "trim") == 404
 
 

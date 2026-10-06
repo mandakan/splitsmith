@@ -4072,7 +4072,8 @@ export const api = {
    *  present, source otherwise. ``proxy`` serves the low-res fast-scrub
    *  proxy (or source on local mode); in hosted mode the server returns
    *  HTTP 425 when the proxy object is absent. ``web`` is the trim's
-   *  streaming rendition (hosted), falling back to trim then source.
+   *  streaming rendition, falling back to trim then source. ``scrub`` is
+   *  the Audit players' pin: the fresh rendition, else the trim, else 404.
    *  ``stage`` names the stage the video belongs to: a multi-stage single
    *  take registers one source path on several stages, each with its own
    *  trim, and without it the server answers with the first stage's. Every
@@ -4080,7 +4081,7 @@ export const api = {
   videoStreamUrl: (
     slug: string,
     videoPath: string,
-    kind: "auto" | "trim" | "source" | "proxy" | "web" = "auto",
+    kind: "auto" | "trim" | "source" | "proxy" | "web" | "scrub" = "auto",
     version?: string | null,
     stage?: number | null,
   ) =>
