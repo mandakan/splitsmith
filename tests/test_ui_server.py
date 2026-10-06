@@ -10275,6 +10275,9 @@ def test_match_export_title_page_carries_the_division_unless_turned_off(
     project = MatchProject.load(project_root)
     project.competitor_name = "Martin Engström"
     project.competitor_division = "Classic Major"
+    from splitsmith.identity import ShooterIdentity
+
+    project.identity = ShooterIdentity(accent="#123456", club="PK")
     project.save(project_root)
     seen: list[match_exports_mod.MatchExportRequestData] = []
     real = match_exports_mod.export_match
@@ -10296,3 +10299,7 @@ def test_match_export_title_page_carries_the_division_unless_turned_off(
     assert "Classic Major" not in off
     # #1242: the Look variant is a request field, not a CLI-only knob.
     assert [r.card_variant for r in seen] == ["default", "default", "rise"]
+    # #1243: the job resolves the shooter's identity for the cards.
+    assert seen[0].shooter_identity is not None
+    assert seen[0].shooter_identity.accent == "#123456" and seen[0].shooter_identity.club == "PK"
+    assert seen[0].shooter_identity.label == "Martin Engström"

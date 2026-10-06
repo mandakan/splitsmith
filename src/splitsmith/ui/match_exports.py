@@ -25,6 +25,7 @@ from .. import composition, fcp7xml_render, fcpxml_gen, mp4_render, youtube_side
 from ..audit_data import StageExportError, audit_shots_to_engine_shots, read_audit_data
 from ..config import OutputConfig, StageRounds
 from ..export_naming import match_file_base, stage_display_name, stage_file_base
+from ..identity import ResolvedIdentity
 from ..match_project import MatchProject, StageScorecard
 from ..overlay_theme import ThemeName
 from ..runtime import runtime
@@ -347,6 +348,10 @@ class MatchExportRequestData:
     # ``None`` falls back to the project name.
     summary_hold_seconds: float = 0.0
     shooter_label: str | None = None
+    # Issue #1243. The shooter's identity resolved against the Look by the
+    # caller (accent, a logo on local disk or none, club line), the one
+    # entry of ``Composition.shooters`` every card template reads.
+    shooter_identity: ResolvedIdentity | None = None
 
     def __post_init__(self) -> None:
         # A preset or a CLI call from before the inset (``pip-corners``,
@@ -693,6 +698,18 @@ def export_match(
         title_page=title_page,
         closing=closing,
         summaries=summaries,
+        shooters=(
+            (
+                composition.CompositionShooter(
+                    label=request.shooter_identity.label,
+                    accent=request.shooter_identity.accent,
+                    logo_path=request.shooter_identity.logo_path,
+                    club=request.shooter_identity.club,
+                ),
+            )
+            if request.shooter_identity is not None
+            else ()
+        ),
     )
     youtube_preset_active = request.youtube_preset and request.output_format == "mp4"
     if request.youtube_preset and request.output_format != "mp4":

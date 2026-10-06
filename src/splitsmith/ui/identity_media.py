@@ -13,9 +13,12 @@ from __future__ import annotations
 
 import logging
 import shutil
+from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 
-from ..identity import LOGO_DIR
+from ..identity import LOGO_DIR, ResolvedIdentity, resolve_identity
+from ..looks import Look
 from ..match_project import MatchProject
 
 logger = logging.getLogger(__name__)
@@ -62,4 +65,53 @@ def ensure_local_logo(project: MatchProject, shooter_root: Path) -> Path | None:
         return None
 
 
-__all__ = ["ensure_local_logo", "logo_storage_key"]
+def resolved_identity_for(
+    project: MatchProject,
+    shooter_root: Path,
+    *,
+    look: Look,
+    index: int,
+    label: str,
+    match_logo: Path | None = None,
+) -> ResolvedIdentity:
+    """The shooter's identity as a render draws it: the Look's defaults
+    applied, the logo brought to local disk (hosted) and dropped when the
+    file is not there, so a template is never handed a path that does
+    not exist."""
+    resolved = resolve_identity(
+        label=label,
+        identity=project.identity,
+        index=index,
+        look=look,
+        shooter_root=None,
+        match_logo=match_logo,
+    )
+    logo = ensure_local_logo(project, shooter_root)
+    return replace(resolved, logo_path=logo if logo is not None else match_logo)
+
+
+def grid_identities(
+    bundles: Sequence[object], *, look: Look, match_logo: Path | None = None
+) -> dict[str, ResolvedIdentity]:
+    """Resolved identities for a grid, keyed by tile label, the slot index
+    following the grid's own order (alphabetical by label, filler tiles
+    included). A bundle whose project could not be read has no identity
+    but keeps its slot, so the others' default accents do not shift."""
+    out: dict[str, ResolvedIdentity] = {}
+    ordered = sorted(bundles, key=lambda b: b.label)  # type: ignore[attr-defined]
+    for index, bundle in enumerate(ordered):
+        project = getattr(bundle, "project", None)
+        if project is None:
+            continue
+        out[bundle.label] = resolved_identity_for(  # type: ignore[attr-defined]
+            project,
+            bundle.project_root,  # type: ignore[attr-defined]
+            look=look,
+            index=index,
+            label=bundle.label,  # type: ignore[attr-defined]
+            match_logo=match_logo,
+        )
+    return out
+
+
+__all__ = ["ensure_local_logo", "grid_identities", "logo_storage_key", "resolved_identity_for"]

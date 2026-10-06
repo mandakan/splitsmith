@@ -84,3 +84,47 @@ def test_local_mode_without_storage_is_none_when_the_file_is_missing(tmp_path: P
     name = logo_name(b"x", "png")
     project, root = _project(tmp_path, name, None)
     assert identity_media.ensure_local_logo(project, root) is None
+
+
+def test_resolved_identity_for_a_project_applies_the_look_defaults_and_the_local_logo(tmp_path: Path) -> None:
+    from splitsmith.looks import load_look
+
+    look = load_look("splitsmith")
+    name = logo_name(b"x", "png")
+    project, root = _project(tmp_path, name, None)
+    (root / LOGO_DIR).mkdir()
+    (root / LOGO_DIR / name).write_bytes(b"png")
+    resolved = identity_media.resolved_identity_for(project, root, look=look, index=2, label="Anders")
+    assert resolved.label == "Anders"
+    assert resolved.accent == look.accent_series[2]
+    assert resolved.logo_path == root / LOGO_DIR / name
+    assert resolved.club is None
+    gone = MatchProject(
+        name="m", identity=ShooterIdentity(logo=logo_name(b"y", "png"), club="PK", accent="#123456")
+    )
+    resolved = identity_media.resolved_identity_for(gone, root, look=look, index=0, label="B")
+    assert resolved.logo_path is None, "a logo the disk does not have is not a path"
+    assert resolved.accent == "#123456" and resolved.club == "PK"
+
+
+def test_grid_identities_index_the_accent_series_in_slot_order(tmp_path: Path) -> None:
+    from splitsmith.compare.project_loader import CompareShooterBundle
+    from splitsmith.looks import load_look
+
+    look = load_look("splitsmith")
+    roots = {}
+    for label in ("Zara", "Anders"):
+        root = tmp_path / label
+        root.mkdir()
+        roots[label] = root
+    bundles = [
+        CompareShooterBundle(label="Zara", project_root=roots["Zara"], project=MatchProject(name="m")),
+        CompareShooterBundle(label="Anders", project_root=roots["Anders"], project=MatchProject(name="m")),
+        CompareShooterBundle(label="Nobody", project_root=tmp_path / "none", project=None),
+    ]
+    identities = identity_media.grid_identities(bundles, look=look)
+    assert set(identities) == {"Anders", "Zara"}, "a bundle without a project has no identity"
+    # Slot order is alphabetical by label, filler tiles included: Nobody
+    # keeps slot 1, so Zara's default accent is the series' third colour.
+    assert identities["Anders"].accent == look.accent_series[0]
+    assert identities["Zara"].accent == look.accent_series[2]

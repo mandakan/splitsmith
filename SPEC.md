@@ -179,6 +179,7 @@ Tuning notes:
 - `overlay_card.py`: declares a card in the overlay typography (`card_groups`), hands the declaration with the Look's palette to the Look's template for the card's slot (`card_context`) and composes the rasterized result over a blurred, dimmed frame (`build_card_still`, `build_lower_third`); `lower_third_filters` is the one spelling of the fade both renderers use.
 - `looks.py`: the Look directory (spec 2026-10-06): `look.json` palette tokens plus one HTML template per card slot, shipped under `data/looks/` and shadowed by `~/.splitsmith/looks/<name>/`. Pure; `overlay_theme.load_theme` reads the palette from it.
 - `look_template.py`: the template contract, `TemplateContext` (`window.splitsmith`: theme tokens, the card data and its declared groups, canvas size, fps, the engine stylesheet and the `file://` URL of the shared engine scripts `fit.js` and `cell.js`), and `template_digest`, what the segment cache keys a motion clip by.
+- `identity.py`: the per-shooter identity (`ShooterIdentity` on the project: accent, club, logo name) and its resolution against a Look (`resolve_identity` -> `ResolvedIdentity`: the Look's `accent_series` by slot when no accent is set, the logo as a path or `None`). Pure; the request layer resolves, `Composition.shooters` and `render_grid_mp4(identities=)` carry the result, templates get it as `data.shooters`.
 - `look_motion.py`: an animated template's frames as a lossless alpha MOV (`write_motion_clip`, raw RGBA piped into ffmpeg's `png` encoder) and the overlay filters that lay it on a card's backdrop with the last frame held.
 - `overlay_still.py`: the letterbox / blur / dim trio under every held still, shared by the cards, the grid's summary and the single-shooter summary.
 - `stage_summary_data.py` + `overlay_summary_cell.py`: what a stage summary knows (`TileStageData`, `load_stage_shots`) and says (`summary_groups`, the approved bands design), hoisted out of `compare/` so core code never imports from it; `build_summary_still` composes it full-frame.
@@ -293,6 +294,8 @@ The `og:image` URL carries `?v=<card_hash>` as its freshness mechanism: a
 re-audit changes the figures, which changes the hash, which changes the URL,
 so a crawler refetches instead of an object write nobody's cached copy ever
 points at.
+
+**`ui/identity_media.py`** -- the logo where a render can read it: `ensure_local_logo` mirrors a hosted logo down like a trim (best effort), `resolved_identity_for` / `grid_identities` are what every export entry point calls.
 
 **`comment_identity.py`** -- pure. Server-derived display names for
 anonymous commenters, so the client never supplies one. `derive_handle`

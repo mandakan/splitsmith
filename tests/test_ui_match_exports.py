@@ -1061,3 +1061,33 @@ def test_card_variant_reaches_every_generated_card(monkeypatch: pytest.MonkeyPat
     comp = captured["comp"]
     assert comp.title_page.variant == "default"
     assert all(stage.title is not None and stage.title.variant == "default" for stage in comp.stages)
+
+
+def test_the_shooters_identity_reaches_the_composition(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from splitsmith.composition import CompositionShooter
+    from splitsmith.identity import ResolvedIdentity
+
+    captured = _capture_mp4(monkeypatch)
+    resolved = ResolvedIdentity(label="Mathias", accent="#123456", logo_path=tmp_path / "l.png", club="PK")
+    match_exports_mod.export_match(
+        stages=[_one_stage_input(tmp_path)],
+        request=_card_request(title_page=True, shooter_identity=resolved),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    comp = captured["comp"]
+    assert comp.shooters == (
+        CompositionShooter(label="Mathias", accent="#123456", logo_path=tmp_path / "l.png", club="PK"),
+    )
+    captured = _capture_mp4(monkeypatch)
+    match_exports_mod.export_match(
+        stages=[_one_stage_input(tmp_path)],
+        request=_card_request(title_page=True),
+        exports_dir=tmp_path / "exports2",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    assert captured["comp"].shooters == ()

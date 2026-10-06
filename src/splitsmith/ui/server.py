@@ -205,6 +205,7 @@ from ..fixture_schema import (
     probe_camera_metadata,
 )
 from ..identity import LOGO_DIR, LOGO_MAX_BYTES, ShooterIdentity, logo_name
+from ..looks import load_look
 from ..match_project import (
     STUB_AUDIT_DETECTION,
     VIDEO_EXTENSIONS,
@@ -272,6 +273,7 @@ from .comments import (
 )
 from .exports_api import CompareGridRequest, ExportStageRequest, MatchExportRequest
 from .http_errors import ensure_source_reachable, source_unreachable
+from .identity_media import grid_identities, resolved_identity_for
 from .job_journal import JobJournal, default_journal_path, resume_journaled_jobs
 from .jobs import (
     Job,
@@ -3004,6 +3006,7 @@ def _run_compare_grid(
             stage_titles=req.stage_titles,
             title_duration_seconds=req.title_duration_seconds,
             card_variant=req.card_variant,
+            identities=grid_identities(filtered, look=load_look(req.overlay_theme)),
             overlay=req.overlay,
             overlay_theme=req.overlay_theme,
             summary_hold_seconds=req.summary_hold_seconds,
@@ -4627,6 +4630,13 @@ def register_job_bodies(state: AppState) -> None:
                 overlay_theme=req.overlay_theme,
                 summary_hold_seconds=req.summary_hold_seconds,
                 shooter_label=proj.competitor_name,
+                shooter_identity=resolved_identity_for(
+                    proj,
+                    state.shooter_root(slug),
+                    look=load_look(req.overlay_theme),
+                    index=0,
+                    label=proj.competitor_name or project_name,
+                ),
             )
             try:
                 result = match_export_helpers.export_match(

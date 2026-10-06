@@ -195,6 +195,25 @@ Look has ``default`` and ``rise`` (``card-rise.html``, Web Animations
 driven by ``seek``, ``poster()`` at the end of the rise so previews never
 show its invisible first frame).
 
+A shooter has an **identity** (``splitsmith.identity``, spec section 2,
+#1243): ``MatchProject.identity`` holds an optional ``#rrggbb`` accent, a
+club line and the name of a logo under ``<shooter>/identity/``
+(content-named ``logo-<12hex>.<ext>``, PNG / JPEG / WEBP, 2 MB). The
+renderers never read it raw: the request layer (the export jobs in
+``server.py``, ``match_cli``, ``compare/cli``, the preview API) resolves
+it through ``ui/identity_media.resolved_identity_for`` /
+``grid_identities`` into a ``ResolvedIdentity`` whose accent falls back
+to the Look's ``accent_series`` by slot (alphabetical by label, filler
+tiles keep their slot) and whose ``logo_path`` is a file on this disk or
+``None`` (hosted mirrors the logo down like a trim; a missing file is a
+card without a logo, never a failed render). ``Composition.shooters`` and
+``render_grid_mp4(identities=)`` carry it in; templates read
+``data.shooters`` and ``_shared/identity.js`` draws the logos top-right;
+the summary tile's accent bar is ``--accent`` on the cell wrapper, unset
+today's pixels. The logo syncs over the media channel (``identity/`` in
+the push plan, the hosted key rule and the delete route). The frame
+scripts' ``--identity-demo`` shows it.
+
 ## Hosted playback streams the web rendition (#1031)
 
 The audit trim (``trimmed/stage<N>_cam_<id>_trimmed.mp4``) is a

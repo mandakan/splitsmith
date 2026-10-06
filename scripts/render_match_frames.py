@@ -118,6 +118,19 @@ def _moments(plan: mp4_render.TimelinePlan, *, titles: str) -> tuple[Moment, ...
     return tuple(moments)
 
 
+def demo_logo(path: Path) -> Path:
+    """A club logo for the identity demo: a filled disc with two letters,
+    the kind of thing a shooter would upload."""
+    from PIL import Image, ImageDraw
+
+    image = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((8, 8, 248, 248), fill=(20, 23, 28, 255), outline=(255, 45, 45, 255), width=12)
+    draw.text((128, 128), "PK", fill=(244, 244, 245, 255), anchor="mm", font_size=120)
+    image.save(path)
+    return path
+
+
 def _run(cmd: list[str]) -> None:
     done = subprocess.run(cmd, capture_output=True, text=True)
     if done.returncode != 0:
@@ -166,6 +179,11 @@ def main() -> int:
     parser.add_argument("--theme", default="splitsmith", help="an installed Look name")
     parser.add_argument("--titles", choices=("slate", "lower-third"), default="slate")
     parser.add_argument("--card-variant", default="default", help="Look template variant for every card")
+    parser.add_argument(
+        "--identity-demo",
+        action="store_true",
+        help="give the shooter an identity (the Look's first accent, a generated club logo, a club line)",
+    )
     parser.add_argument("--keep-video", action="store_true")
     parser.add_argument(
         "--summary-hold",
@@ -210,10 +228,23 @@ def main() -> int:
             text="Stage 2: Accuracy", duration_seconds=CARD_SECONDS, style=args.titles, variant=variant
         ),
     }
+    shooters: tuple[composition.CompositionShooter, ...] = ()
+    if args.identity_demo:
+        from splitsmith.looks import load_look
+
+        shooters = (
+            composition.CompositionShooter(
+                label="M. Axell",
+                accent=load_look(args.theme).accent_series[0],
+                logo_path=demo_logo(work / "logo.png"),
+                club="Bromma PK",
+            ),
+        )
     comp = composition.from_stage_compositions(
         stages,
         project_name="Bromma Classifier",
         titles=titles,
+        shooters=shooters,
         title_page=composition.MatchTitle(
             text="Bromma Classifier",
             info=("2026-05-01", "M. Axell", "Production Optics"),

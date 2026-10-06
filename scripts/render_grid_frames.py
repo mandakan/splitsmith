@@ -371,6 +371,26 @@ def _parse_canvas(value: str) -> tuple[int, int]:
     return width, height
 
 
+def demo_identities(bundles, logo_path, *, theme: str):  # type: ignore[no-untyped-def]
+    """One identity per shooter for the demo: the Look's accent series by
+    slot (alphabetical by label, the grid's order) and one shared logo."""
+    from splitsmith.identity import ResolvedIdentity
+    from splitsmith.looks import load_look
+
+    sys.path.insert(0, str(REPO_ROOT / "scripts"))
+    from render_match_frames import demo_logo
+
+    logo = demo_logo(logo_path)
+    series = load_look(theme).accent_series
+    ordered = sorted(bundles, key=lambda b: b.label)
+    return {
+        bundle.label: ResolvedIdentity(
+            label=bundle.label, accent=series[index % len(series)], logo_path=logo, club="Bromma PK"
+        )
+        for index, bundle in enumerate(ordered)
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -434,6 +454,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--title-page", action="store_true", help="open with a generated match title card")
     parser.add_argument("--closing-card", action="store_true", help="close with a generated card")
     parser.add_argument("--card-variant", default="default", help="Look template variant for every card")
+    parser.add_argument(
+        "--identity-demo",
+        action="store_true",
+        help="give every shooter an identity (the Look's accent series by slot, a generated club logo)",
+    )
     args = parser.parse_args(argv)
 
     if not 1 <= args.shooters <= MAX_SHOOTERS:
@@ -522,6 +547,11 @@ def main(argv: list[str] | None = None) -> int:
         stage_titles=args.titles,
         title_duration_seconds=SLATE_SECONDS,
         card_variant=args.card_variant,
+        identities=(
+            demo_identities(shooters, work / "logo.png", theme=args.overlay_theme)
+            if args.identity_demo
+            else None
+        ),
     )
     if result.failed:
         print(f"  {len(result.failed)} stage(s) failed: {result.failed}", file=sys.stderr)
