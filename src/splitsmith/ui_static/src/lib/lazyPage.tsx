@@ -54,11 +54,16 @@ function writeFlag(on: boolean): boolean {
   }
 }
 
-class PageLoadBoundary extends Component<{ children: ReactNode }, { error: unknown }> {
+class PageLoadBoundary extends Component<{ children: ReactNode; resetKey: string }, { error: unknown }> {
   state: { error: unknown } = { error: null };
 
   static getDerivedStateFromError(error: unknown) {
     return { error: error ?? new Error("page error") };
+  }
+
+  componentDidUpdate(prev: { resetKey: string }) {
+    // A new location clears a failure; a healthy page is never remounted.
+    if (this.state.error != null && prev.resetKey !== this.props.resetKey) this.setState({ error: null });
   }
 
   render() {
@@ -95,18 +100,18 @@ export function lazyPage<P extends object = Record<string, never>>(
     }
   });
   function LazyPage(props: P) {
-    return useInRouterContext() ? <RoutedPage {...props} /> : <Page {...props} />;
+    return useInRouterContext() ? <RoutedPage {...props} /> : <Page resetKey="" {...props} />;
   }
-  /** A new location remounts the boundary, so an error on one stage does
-   *  not stick to the next. */
+  /** A new location clears a failed boundary, so an error on one stage
+   *  does not stick to the next. */
   function RoutedPage(props: P) {
-    return <Page key={useLocation().pathname} {...props} />;
+    return <Page resetKey={useLocation().pathname} {...props} />;
   }
-  function Page(props: P) {
+  function Page({ resetKey, ...props }: P & { resetKey: string }) {
     return (
-      <PageLoadBoundary>
+      <PageLoadBoundary resetKey={resetKey}>
         <Suspense fallback={<div data-page-loading className="min-h-[40vh]" />}>
-          <Lazy {...props} />
+          <Lazy {...(props as P)} />
         </Suspense>
       </PageLoadBoundary>
     );
