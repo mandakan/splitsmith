@@ -220,7 +220,7 @@ from ..observability import StructuredJsonFormatter, init_sentry
 from ..runtime import runtime as process_runtime
 from ..share_card import stage_figures
 from ..shot_id import ensure_shot_ids, has_usable_id
-from ..storage import Storage
+from ..storage import Storage, StorageObject
 from ..sync.auto_state import AutoRunSummary, load_auto_prefs, update_auto_prefs
 from ..sync.base import BASE_DIR as SYNC_BASE_DIR
 from ..sync.client import HostedSyncClient, SyncClientError
@@ -7899,6 +7899,14 @@ def _trim_version_for(root: Path, stage_number: int, video: StageVideo, project:
     return f"{st.st_mtime_ns:x}-{st.st_size:x}"
 
 
+def _storage_fact(obj: StorageObject | None) -> tuple[int, float] | None:
+    """``(size, mtime seconds)`` of a storage object for
+    :func:`audio.fresh_rendition`; ``None`` when absent or undated."""
+    if obj is None or obj.last_modified is None:
+        return None
+    return (obj.size, obj.last_modified.timestamp())
+
+
 def _scrub_version_for(root: Path, stage_number: int, video: StageVideo, project: MatchProject) -> str | None:
     """Identity of the trim's fresh 720p rendition on local disk, or None (#1192).
 
@@ -14117,6 +14125,32 @@ def create_app(
             return serve_media(storage, web_key, web_local, content_type="video/mp4")
         return None
 
+    def _hosted_scrub(
+        storage: Storage,
+        project: MatchProject,
+        root: Path,
+        stage: Any,
+        video: StageVideo,
+    ) -> RedirectResponse:
+        """``kind=scrub`` on hosted (#1209): the fresh rendition, else the
+        trim, else 404 -- never the source. Two ``stat`` calls, the cost of
+        the two ``exists`` the other kinds make."""
+        local_mp4 = audio_helpers.trimmed_video_path(root, stage.stage_number, video, project=project)
+        web_local = trim_module.web_trim_path(local_mp4)
+        trim_key = audio_helpers._storage_trim_key(project, local_mp4)
+        web_key = audio_helpers._storage_trim_key(project, web_local)
+        if trim_key is None or web_key is None:
+            raise HTTPException(status_code=404, detail="trimmed clip not built yet")
+        trim_obj = storage.stat(trim_key)
+        web_obj = storage.stat(web_key)
+        if audio_helpers.fresh_rendition(
+            _storage_fact(trim_obj), _storage_fact(web_obj), trim_required=not _is_mirror()
+        ):
+            return serve_media(storage, web_key, web_local, content_type="video/mp4")
+        if trim_obj is not None:
+            return serve_media(storage, trim_key, local_mp4, content_type="video/mp4")
+        raise HTTPException(status_code=404, detail="trimmed clip not built yet")
+
     @app.get("/api/shooters/{slug}/videos/stream", response_model=None)
     def stream_video(
         slug: str,
@@ -14201,6 +14235,8 @@ def create_app(
 
         if is_hosted:
             # hosted mode: resolve the R2 key and redirect; never mirror
+            if kind == "scrub" and stage is not None:
+                return _hosted_scrub(storage, project, root, stage, video)  # type: ignore[arg-type]
             if kind == "web" and stage is not None:
                 web_resp = _hosted_web_redirect(storage, project, root, stage, video)  # type: ignore[arg-type]
                 if web_resp is not None:
