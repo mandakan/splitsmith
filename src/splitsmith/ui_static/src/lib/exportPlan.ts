@@ -133,6 +133,15 @@ export function formatDuration(seconds: number): string {
   return `${m}:${String(s % 60).padStart(2, "0")}`;
 }
 
+/** How long a job took: "0.3s", "42s", then "m:ss" like a timeline's
+ *  length. A fast export rounds to nothing in ``formatDuration``. */
+export function formatElapsed(seconds: number): string {
+  const tenths = Math.round(Math.max(0, seconds) * 10) / 10;
+  if (tenths < 10) return `${tenths.toFixed(1)}s`;
+  const whole = Math.round(tenths);
+  return whole < 60 ? `${whole}s` : formatDuration(whole);
+}
+
 export interface SummaryLine {
   label: string;
   value: string;

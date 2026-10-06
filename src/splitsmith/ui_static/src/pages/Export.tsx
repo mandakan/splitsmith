@@ -1195,7 +1195,7 @@ function ResultPanel({
     <div className="mt-3 text-sm text-ink-2">
       <div className="font-medium text-done">Exported</div>
       <div className="numeral text-muted">
-        {result.stage_count} stages {"·"} {formatDuration(result.duration_seconds)}
+        {result.stage_count} stages {"·"} {formatDuration(result.duration_seconds)} timeline
         {result.anomalies.length > 0 ? <> {"·"} {result.anomalies.length} warnings</> : null}
       </div>
       {hosted ? (
