@@ -35,7 +35,9 @@ made local `kind=web` 404).
 
 ## Design
 
-### 1. Stream contract (`stream_video` and `stream_shooter_video`)
+### 1. Stream contract (`stream_video`)
+
+The alias route `stream_shooter_video` (Compare) is unchanged: no caller sends `scrub` to it.
 
 | kind | Local | Hosted |
 |---|---|---|
