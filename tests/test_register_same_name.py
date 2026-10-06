@@ -66,17 +66,17 @@ def test_the_same_source_twice_is_one_entry(tmp_path: Path) -> None:
     assert len(project.unassigned_videos) == 1
 
 
-def test_a_dangling_link_to_the_same_source_is_reused(tmp_path: Path) -> None:
-    """The USB cam is unplugged: the raw link dangles but still names this
-    source, so re-registering it must not invent ``-2``."""
+def test_a_link_left_behind_for_the_same_source_is_reused(tmp_path: Path) -> None:
+    """The entry was removed but its raw link stayed (unplugged and
+    re-plugged USB cam, a cleared tray): re-registering the same source
+    reuses the link instead of inventing ``-2``. The link is matched by its
+    target, not by size and mtime -- see the same-length clips in
+    ``test_a_third_same_name_clip_takes_the_next_free_name``, which a
+    size-and-mtime comparison of symlinked files would conflate."""
     project, root = _project(tmp_path)
     martin = _clip(tmp_path, "usb", b"martin's clip")
     first = project.register_video(martin, root)
-    project.unassigned_videos.clear()  # e.g. removed from the project, link left behind
-    moved = tmp_path / "usb-away"
-    martin.parent.rename(moved)
-    assert not (root / "raw" / "IMG_1234.MOV").exists()  # dangling
-    moved.rename(martin.parent)  # plugged back in
+    project.unassigned_videos.clear()
     again = project.register_video(martin, root)
     assert str(again.path) == str(first.path) == "raw/IMG_1234.MOV"
 

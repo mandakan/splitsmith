@@ -931,9 +931,11 @@ class MatchAnalysis(BaseModel):
 def _raw_holds_source(dest: Path, source: Path) -> bool:
     """Whether the ``raw/`` entry at ``dest`` is ``source`` (#1124).
 
-    A symlink is compared by its target, so a link that dangles while a
-    USB cam is unplugged still counts; a copy (``link_mode="copy"``,
-    ``copy2`` keeps mtime) by size and whole-second mtime.
+    A symlink is compared by its target. A copy (``link_mode="copy"``,
+    ``copy2`` keeps mtime) has no link back to its source, so it is
+    compared by size and whole-second mtime: two different videos copied in
+    with the same byte size and the same mtime second would be taken for
+    one, which real camera files practically never are.
     """
     if dest.is_symlink():
         target = dest.readlink()
