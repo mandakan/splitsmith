@@ -10,6 +10,7 @@
 import { MoreHorizontal } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
+import { YouTubeAccessSheet } from "@/components/export/YouTubeAccessSheet";
 import { useYouTubeLogin } from "@/components/export/useYouTubeLogin";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/Field";
@@ -20,6 +21,7 @@ import { api, apiErrorText, type YouTubeSettings } from "@/lib/api";
 export function YouTubeSection() {
   const [settings, setSettings] = useState<YouTubeSettings | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [sheet, setSheet] = useState<"connect" | "info" | null>(null);
   const reload = useCallback(async () => {
     try {
       setSettings(await api.getYouTubeSettings());
@@ -52,7 +54,7 @@ export function YouTubeSection() {
       </div>
       <Field
         label="Channel"
-        help="Rendered match videos upload to this channel from the Export page. splitsmith only ever uploads; it never reads your videos or comments."
+        help="Rendered match videos upload to this channel from the Export page. splitsmith only adds videos: it never deletes or edits them, or reads your comments."
         error={error}
       >
         {!settings.configured ? (
@@ -67,7 +69,7 @@ export function YouTubeSection() {
                 </Button>
               </>
             ) : (
-              <Button type="button" variant="default" size="sm" onClick={() => void connect()}>
+              <Button type="button" variant="default" size="sm" onClick={() => setSheet("connect")}>
                 Connect YouTube
               </Button>
             )}
@@ -86,6 +88,17 @@ export function YouTubeSection() {
               <MoreHorizontal className="size-4" aria-hidden />
             </Button>
             <Menu open={menuOpen} onClose={() => setMenuOpen(false)} align="left">
+              <button
+                type="button"
+                role="menuitem"
+                className={menuItemClass}
+                onClick={() => {
+                  setMenuOpen(false);
+                  setSheet("info");
+                }}
+              >
+                What splitsmith can do
+              </button>
               <button type="button" role="menuitem" className={menuItemClass} onClick={() => void disconnect()}>
                 Disconnect
               </button>
@@ -93,6 +106,18 @@ export function YouTubeSection() {
           </div>
         )}
       </Field>
+      <YouTubeAccessSheet
+        open={sheet !== null}
+        onClose={() => setSheet(null)}
+        onContinue={
+          sheet === "connect"
+            ? () => {
+                setSheet(null);
+                void connect();
+              }
+            : undefined
+        }
+      />
     </section>
   );
 }

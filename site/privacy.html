@@ -73,7 +73,7 @@
 <main>
   <span class="eyebrow">Legal</span>
   <h1>Privacy policy</h1>
-  <p class="effective">Effective 2026-09-16</p>
+  <p class="effective">Effective 2026-10-06</p>
 
   <p class="lead">Splitsmith reads the beep and every shot out of the audio your camera recorded and turns them into splits. Most of that happens on your own computer. This page says what leaves it, when, and why.</p>
 
@@ -104,27 +104,41 @@
   <h2>The marketing site</h2>
   <p>This site sets no cookies and runs no analytics. If you join the waitlist, your email address, a hashed form of your IP address (used only for rate limiting), your browser's user agent and the time are stored so we can invite you and stop abuse.</p>
 
-  <h2>YouTube</h2>
-  <p>Splitsmith can upload a rendered match video to your YouTube channel. This feature uses YouTube API Services. By using it you agree to the <a href="https://www.youtube.com/t/terms">YouTube Terms of Service</a>, and Google's handling of your data is described in the <a href="https://policies.google.com/privacy">Google Privacy Policy</a>.</p>
-  <p>When you connect a channel, Splitsmith asks Google for permission to manage your YouTube account (the <code>youtube.force-ssl</code> scope). It uses that permission for exactly four things: uploading the video you chose, attaching its caption track, setting its thumbnail, and reading your channel's name so the app can show which channel is connected.</p>
+  <h2 id="youtube">YouTube</h2>
+  <p>Splitsmith can upload a rendered match video to your YouTube channel, from the desktop app or from the hosted service. This feature uses YouTube API Services. By using it you agree to the <a href="https://www.youtube.com/t/terms">YouTube Terms of Service</a>, and Google's handling of your data is described in the <a href="https://policies.google.com/privacy">Google Privacy Policy</a>.</p>
+  <p>When you connect a channel, Google asks you to let Splitsmith "See, edit, and permanently delete your YouTube videos, ratings, comments and captions" (the <code>youtube.force-ssl</code> scope). That is the narrowest permission YouTube offers that also covers uploading captions. Splitsmith uses a small part of it.</p>
+  <p>What Splitsmith does with your channel:</p>
+  <ul>
+    <li>Uploads a video when you press Upload or choose "Upload after render", with the title, description and privacy shown on the form. A request from your phone to your desktop counts as pressing it.</li>
+    <li>Adds that video's chapter captions and thumbnail.</li>
+    <li>Lists your playlists for the picker, and creates a playlist or adds the video to one only when you choose it.</li>
+    <li>Reads your channel's name to show which channel is connected.</li>
+  </ul>
+  <p>What it never does:</p>
+  <ul>
+    <li>Delete or change a video after it is uploaded. The app has no code that does either.</li>
+    <li>Read or post comments, ratings, subscriptions, watch history or analytics.</li>
+    <li>Upload anything you did not ask it to upload.</li>
+    <li>See your Google password or use any other Google service.</li>
+  </ul>
   <p>What Splitsmith stores:</p>
   <ul>
-    <li>A refresh token for your Google account. In the desktop app it is kept in <code>~/.splitsmith/youtube.json</code> on your machine and never leaves it. If the hosted service offers YouTube upload, the token is stored encrypted on your account.</li>
+    <li>A refresh token for your Google account. In the desktop app it is kept in <code>~/.splitsmith/youtube.json</code> on your machine and never leaves it. On the hosted service it is stored on your account, encrypted.</li>
     <li>Your channel id and name, shown in the app.</li>
     <li>The id and URL of each video it uploaded, written into the export's sidecar file next to the video so the app does not upload the same file twice.</li>
   </ul>
-  <p>Splitsmith does not read your subscriptions, watch history, comments, analytics or any other YouTube data, and it does not share data obtained through YouTube API Services with anyone. Stored data is kept until you disconnect.</p>
-  <p>To disconnect, run <code>splitsmith youtube logout</code> or use the Disconnect control in the app. Either deletes the stored token. You can also revoke Splitsmith's access at any time from your <a href="https://myaccount.google.com/permissions">Google account's third-party access page</a>.</p>
+  <p>Splitsmith does not share data obtained through YouTube API Services with anyone. Stored data is kept until you disconnect.</p>
+  <p>To disconnect, run <code>splitsmith youtube logout</code> or use the Disconnect control in the app. Either deletes the stored token and asks Google to revoke it. You can also revoke Splitsmith's access at any time from your <a href="https://myaccount.google.com/permissions">Google account's third-party access page</a>.</p>
 
   <h3>How YouTube data is protected</h3>
   <p>The refresh token is sensitive data: it lets an app act on your channel. These are the mechanisms that protect it.</p>
   <ul>
     <li><strong>In transit.</strong> The desktop app talks to Google directly over HTTPS (TLS). No Splitsmith server sits in the path: the token, the video and the captions travel from your machine to Google and nowhere else. The sign-in uses PKCE and a one-time redirect to a listener on your own machine (<code>127.0.0.1</code>), so the authorisation code is never exposed to a third party.</li>
     <li><strong>At rest.</strong> The refresh token is written to <code>~/.splitsmith/youtube.json</code> with file permissions that let only your own operating-system account read it. It is not copied into match projects, exports, backups, share links or the desktop-to-hosted sync, so nothing that leaves your machine carries it. Short-lived access tokens are held in memory for the duration of an upload and never written to disk.</li>
-    <li><strong>Access.</strong> Only the software running under your account on your machine can read the token. The operator has no access to it and no copy of it.</li>
+    <li><strong>Access.</strong> Only the software running under your account on your machine can read the desktop token. The operator has no access to it and no copy of it.</li>
     <li><strong>Data minimisation.</strong> Splitsmith keeps the refresh token, your channel id and your channel name, and nothing else it obtains through the API. Each upload stores only the id and URL of the video it created.</li>
-    <li><strong>Retention and deletion.</strong> The token is kept until you disconnect. Disconnecting deletes the file and asks Google to revoke the token, so a copy that somehow survived would no longer work. Revoking Splitsmith from your Google account's third-party access page has the same effect at once, which is the right step if you believe your machine was compromised.</li>
-    <li><strong>The hosted service.</strong> The hosted service does not offer YouTube upload today and stores no Google account data. If it does in future, the token will be stored encrypted at rest with a key held outside the database, sent only over TLS, deleted when you disconnect or delete your account, and any security incident affecting it will be reported to you without undue delay and within 72 hours as the GDPR requires. This page will change first.</li>
+    <li><strong>Retention and deletion.</strong> The token is kept until you disconnect. Disconnecting deletes it and asks Google to revoke it, so a copy that somehow survived would no longer work. Revoking Splitsmith from your Google account's third-party access page has the same effect at once, which is the right step if you believe your machine or account was compromised.</li>
+    <li><strong>The hosted service.</strong> When you connect a channel on the hosted service, Google redirects back to the service over TLS and the refresh token is stored on your account, encrypted at rest with a key held outside the database, so a copy of the database alone does not reveal it. Uploads run on the service's own servers, which talk to Google over TLS. The token is deleted when you disconnect or when your account is deleted, and any security incident affecting it will be reported to you without undue delay and within 72 hours as the GDPR requires.</li>
   </ul>
 
   <h2>Your rights</h2>

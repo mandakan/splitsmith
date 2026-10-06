@@ -11,6 +11,9 @@ const youtubeConnectStatus = vi.fn();
 const disconnectYouTube = vi.fn();
 const getYouTubePlaylists = vi.fn();
 
+const deployment = { mode: "local" as "local" | "hosted" };
+vi.mock("@/lib/features", () => ({ useDeploymentMode: () => ({ mode: deployment.mode, resolved: true }) }));
+
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
   return {
@@ -84,6 +87,10 @@ describe("YouTubeConnect", () => {
     await act(async () => {
       fireEvent.click(button);
     });
+    expect(startYouTubeConnect).not.toHaveBeenCalled();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Continue to Google" }));
+    });
     expect(open).toHaveBeenCalledWith("https://accounts.google.com/x", "_blank", "noopener");
     expect(screen.getByText("Waiting for Google...")).toBeInTheDocument();
     await act(async () => {
@@ -104,6 +111,9 @@ describe("YouTubeConnect", () => {
     renderRow(settings());
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Connect YouTube" }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Continue to Google" }));
     });
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2000);
@@ -128,6 +138,24 @@ describe("YouTubeConnect", () => {
     });
     expect(disconnectYouTube).toHaveBeenCalledTimes(1);
     expect(onSettingsChange).toHaveBeenCalledTimes(1);
+  });
+
+  it("Connect explains first; Not now starts no login", () => {
+    renderRow(settings());
+    fireEvent.click(screen.getByRole("button", { name: "Connect YouTube" }));
+    expect(screen.getByRole("dialog", { name: "What connecting YouTube allows" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(startYouTubeConnect).not.toHaveBeenCalled();
+  });
+
+  it("connected: the menu reopens the explanation without a login button", () => {
+    renderRow(settings({ connected: true, channel_title: "Mine" }));
+    fireEvent.click(screen.getByRole("button", { name: "YouTube actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "What splitsmith can do" }));
+    expect(screen.getByRole("dialog", { name: "What connecting YouTube allows" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Continue to Google" })).toBeNull();
+    expect(startYouTubeConnect).not.toHaveBeenCalled();
   });
 
   it("hides the upload control when the render is not a YouTube mp4", () => {

@@ -22,6 +22,7 @@ import { MoreHorizontal } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { SelectField } from "@/components/export/SelectField";
+import { YouTubeAccessSheet } from "@/components/export/YouTubeAccessSheet";
 import { Button } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/Field";
 import { Menu, menuItemClass } from "@/components/ui/Menu";
@@ -82,6 +83,8 @@ export function YouTubeConnect({
     onOptionsChange(v === "off" ? { ...options, enabled: false } : { ...options, enabled: true, privacy: v });
   const { pending, error, connect, cancel, setError } = useYouTubeLogin(onSettingsChange);
   const [menuOpen, setMenuOpen] = useState(false);
+  // "connect" ends in Continue to Google; "info" is the read-only view.
+  const [sheet, setSheet] = useState<"connect" | "info" | null>(null);
   // The channel's playlists, fetched once the upload block turns on and
   // a channel is connected; null until then. A failed load leaves the
   // picker with None and New only, and says why under it.
@@ -168,7 +171,7 @@ export function YouTubeConnect({
               </Button>
             </>
           ) : (
-            <Button type="button" variant="default" size="sm" onClick={() => void connect()} disabled={busy}>
+            <Button type="button" variant="default" size="sm" onClick={() => setSheet("connect")} disabled={busy}>
               Connect YouTube
             </Button>
           )}
@@ -178,6 +181,18 @@ export function YouTubeConnect({
             {error}
           </p>
         ) : null}
+        <YouTubeAccessSheet
+          open={sheet !== null}
+          onClose={() => setSheet(null)}
+          onContinue={
+            sheet === "connect"
+              ? () => {
+                  setSheet(null);
+                  void connect();
+                }
+              : undefined
+          }
+        />
       </div>
     );
   }
@@ -197,11 +212,34 @@ export function YouTubeConnect({
           <MoreHorizontal className="size-4" aria-hidden />
         </Button>
         <Menu open={menuOpen} onClose={() => setMenuOpen(false)} align="left">
+          <button
+            type="button"
+            role="menuitem"
+            className={menuItemClass}
+            onClick={() => {
+              setMenuOpen(false);
+              setSheet("info");
+            }}
+          >
+            What splitsmith can do
+          </button>
           <button type="button" role="menuitem" className={menuItemClass} onClick={() => void disconnect()}>
             Disconnect
           </button>
         </Menu>
       </div>
+      <YouTubeAccessSheet
+        open={sheet !== null}
+        onClose={() => setSheet(null)}
+        onContinue={
+          sheet === "connect"
+            ? () => {
+                setSheet(null);
+                void connect();
+              }
+            : undefined
+        }
+      />
       {error ? (
         <p role="alert" className="text-sm text-destructive">
           {error}
