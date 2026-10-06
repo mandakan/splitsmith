@@ -272,3 +272,79 @@ def test_committed_manifest_references_existing_wavs(fixtures_dir: Path) -> None
             assert (
                 entry.ground_truth_in_full >= 0.0
             ), f"{entry.stem}: negative full beep time -- check fws/full window math"
+
+
+def _row(stem: str, *, error_kind: str | None = None, detected: float | None = 1.0):
+    return evaluate_detection(
+        stem=stem,
+        track="full",
+        tags=["headcam"],
+        ground_truth_s=1.0,
+        tolerance_ms=50.0,
+        detected_time_s=detected,
+        detected_score=None if detected is None else 1.0,
+        error_kind=error_kind,
+    )
+
+
+def test_summarize_leaves_unavailable_tracks_out_of_the_denominator() -> None:
+    """A full-track WAV is gitignored and lives on one machine. Elsewhere it
+    fails to load, and scoring that as a miss read 44.4 % for a set that
+    scores 60.6 % where the WAVs exist (#949)."""
+    summary = summarize([_row("a"), _row("b", error_kind="load_failed: no such file", detected=None)])
+    assert (summary.total, summary.top1_hits, summary.unavailable) == (1, 1, 1)
+    assert summary.recall_top1 == 1.0
+    assert (summary.by_tag["headcam"].total, summary.by_tag["headcam"].unavailable) == (1, 1)
+
+
+def test_summarize_counts_an_exception_with_its_message() -> None:
+    """The eval records ``exception: <message>``; an exact match never fired."""
+    summary = summarize([_row("a", error_kind="exception: division by zero", detected=None)])
+    assert (summary.total, summary.exceptions, summary.not_found) == (1, 1, 0)
+    assert summary.by_tag["headcam"].exceptions == 1
+
+
+def _build_script():
+    import importlib.util
+
+    path = Path(__file__).resolve().parent.parent / "scripts" / "build_beep_calibration.py"
+    spec = importlib.util.spec_from_file_location("build_beep_calibration", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_rebuild_keeps_full_track_references_whose_wavs_are_on_another_machine(tmp_path: Path) -> None:
+    """Full-track WAVs are gitignored. A rebuild on a machine without them
+    silently deleted every ``full_wav`` from the committed manifest (#949)."""
+    import json
+
+    (tmp_path / "full").mkdir()
+    audit = {"beep_time": 0.5, "camera": {"mount": "head", "id": "go3s"}}
+    (tmp_path / "s1.json").write_text(json.dumps(audit))
+    (tmp_path / "s1.wav").write_bytes(b"")
+    existing = BeepCalibrationManifest(
+        fixtures=[
+            BeepFixtureEntry(
+                stem="s1",
+                camera_kind="head",
+                clip_wav="s1.wav",
+                ground_truth_in_clip=0.5,
+                full_wav="full/s1_full.wav",
+                ground_truth_in_full=42.0,
+                full_duration_s=90.0,
+                tags=["headcam", "late-beep", "very-late-beep"],
+            )
+        ]
+    )
+
+    rebuilt = _build_script().build_manifest(tmp_path, existing=existing)
+
+    [entry] = rebuilt.fixtures
+    assert (entry.full_wav, entry.ground_truth_in_full, entry.full_duration_s) == (
+        "full/s1_full.wav",
+        42.0,
+        90.0,
+    )
+    assert "very-late-beep" in entry.tags
