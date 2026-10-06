@@ -97,3 +97,21 @@ def test_write_motion_clip_refuses_a_frame_of_the_wrong_size(tmp_path: Path) -> 
         look_motion.write_motion_clip(
             frames, out=tmp_path / "c.mov", fps=10, ffmpeg_binary="ffmpeg-that-is-not-run"
         )
+
+
+def test_motion_overlay_filters_can_delay_the_clip_with_transparent_padding() -> None:
+    """Issue #1244: a boundary's head edge of an animated card shows the
+    backdrop alone for d/2, then the clip starts; the padding is
+    transparent so the backdrop shows through. Unchanged without a delay."""
+    from splitsmith.look_motion import motion_overlay_filters
+
+    plain, label = motion_overlay_filters(1, rate="30", seconds=2.0, source_label="0:v")
+    assert plain[0] == (
+        "[1:v]format=rgba,fps=30,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=2,trim=0:2[motion]"
+    )
+    delayed, _ = motion_overlay_filters(1, rate="30", seconds=2.0, source_label="0:v", delay_seconds=0.5)
+    assert delayed[0] == (
+        "[1:v]format=rgba,fps=30,setpts=PTS-STARTPTS,tpad=start_duration=0.5:start_mode=add:color=black@0.0,"
+        "tpad=stop_mode=clone:stop_duration=2,trim=0:2[motion]"
+    )
+    assert delayed[1] == plain[1] and label == "withmotion"

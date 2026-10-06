@@ -75,6 +75,7 @@ from .composition import (
     Transform,
     Transition,
     TransitionKind,
+    xfade_name,
 )
 from .look_motion import MotionClipError, motion_overlay_filters, write_motion_clip
 from .looks import load_look
@@ -1140,6 +1141,11 @@ def _align_cams(
 # --- command construction -------------------------------------------------
 
 
+#: (input index, card seconds, is a clip, delay seconds, skip seconds): what
+#: the stage filter graph needs to know about its lower third.
+_LowerThirdGraph = tuple[int, float, bool, float, float]
+
+
 @dataclass(frozen=True)
 class _LowerThirdInput:
     """A rasterized lower-third (a PNG, or with ``clip`` an alpha clip
@@ -1148,6 +1154,16 @@ class _LowerThirdInput:
     path: Path
     card: TitleCard
     clip: bool = False
+    #: Issue #1244: the window opens ``delay_seconds`` late (a boundary's
+    #: head edge) or drops ``skip_seconds`` already shown (the trimmed
+    #: stage after that boundary). See ``overlay_card.lower_third_filters``.
+    delay_seconds: float = 0.0
+    skip_seconds: float = 0.0
+
+    @property
+    def shown_seconds(self) -> float:
+        """How long the looped PNG input must last: until the window closes."""
+        return self.delay_seconds + self.card.duration_seconds - self.skip_seconds
 
 
 def _build_stage_command(
@@ -1228,10 +1244,16 @@ def _build_stage_command(
             str(stage.overlay.asset.path),
         ]
 
-    lower_third_graph: tuple[int, float, bool] | None = None
+    lower_third_graph: _LowerThirdGraph | None = None
     if lower_third is not None:
         lower_third_index = 1 + len(plan.cam_alignments) + (1 if overlay_index is not None else 0)
-        lower_third_graph = (lower_third_index, lower_third.card.duration_seconds, lower_third.clip)
+        lower_third_graph = (
+            lower_third_index,
+            lower_third.card.duration_seconds,
+            lower_third.clip,
+            lower_third.delay_seconds,
+            lower_third.skip_seconds,
+        )
         if lower_third.clip:
             # A clip carries its own frames and length; the graph conforms
             # and holds it (``lower_third_clip_filters``).
@@ -1243,7 +1265,7 @@ def _build_stage_command(
                 "-framerate",
                 _rate_string(sequence),
                 "-t",
-                f"{lower_third.card.duration_seconds:g}",
+                f"{lower_third.shown_seconds:g}",
                 "-i",
                 str(lower_third.path),
             ]
@@ -1355,7 +1377,7 @@ def _build_stage_filter_graph(
     *,
     sequence,  # type: ignore[no-untyped-def]
     overlay_input_index: int | None,
-    lower_third: tuple[int, float, bool] | None = None,
+    lower_third: _LowerThirdGraph | None = None,
     audio_input_index: int | None = None,
 ) -> str:
     """Compose primary + cams + overlay into a single ``-filter_complex``.
@@ -1402,13 +1424,20 @@ def _build_stage_filter_graph(
         base_label = "withov"
 
     if lower_third is not None:
-        input_index, seconds, is_clip = lower_third
+        input_index, seconds, is_clip, lt_delay, lt_skip = lower_third
         if is_clip:
             lt_parts, base_label = lower_third_clip_filters(
-                input_index, seconds, rate=_rate_string(sequence), source_label=base_label
+                input_index,
+                seconds,
+                rate=_rate_string(sequence),
+                source_label=base_label,
+                delay_seconds=lt_delay,
+                skip_seconds=lt_skip,
             )
         else:
-            lt_parts, base_label = lower_third_filters(input_index, seconds, source_label=base_label)
+            lt_parts, base_label = lower_third_filters(
+                input_index, seconds, source_label=base_label, delay_seconds=lt_delay, skip_seconds=lt_skip
+            )
         parts.extend(lt_parts)
 
     parts.append(f"[{base_label}]null[final]")
@@ -1500,13 +1529,24 @@ def _build_motion_card_command(
     output_path: Path,
     ffmpeg_binary: str = "ffmpeg",
     youtube_preset: bool = False,
+    clip_offset_seconds: float = 0.0,
+    clip_delay_seconds: float = 0.0,
 ) -> tuple[str, ...]:
     """An animated card: the template's alpha clip over its backdrop, the
     clip's last frame held to ``seconds``, silent audio, encoded like a
-    stage. :func:`_build_still_command` with one more input."""
+    stage. :func:`_build_still_command` with one more input.
+
+    Issue #1244: ``clip_offset_seconds`` starts the clip that far in (a
+    trimmed card after a boundary, or a tail edge where the clip has
+    ended and its last frame holds); ``clip_delay_seconds`` shows the
+    backdrop alone that long before the clip begins (a head edge). Both
+    zero emits the argv this always built."""
     rate = _rate_string(sequence)
-    motion_parts, label = motion_overlay_filters(1, rate=rate, seconds=seconds, source_label="0:v")
+    motion_parts, label = motion_overlay_filters(
+        1, rate=rate, seconds=seconds, source_label="0:v", delay_seconds=clip_delay_seconds
+    )
     graph = ";".join([*motion_parts, f"[{label}]format=yuv420p,setsar=1[final]"])
+    clip_seek: tuple[str, ...] = ("-ss", f"{clip_offset_seconds:g}") if clip_offset_seconds > 0.0 else ()
     return (
         ffmpeg_binary,
         "-hide_banner",
@@ -1517,6 +1557,7 @@ def _build_motion_card_command(
         rate,
         "-i",
         str(backdrop_png),
+        *clip_seek,
         "-i",
         str(clip),
         "-f",
@@ -1534,6 +1575,57 @@ def _build_motion_card_command(
         *_encode_args(sequence, youtube_preset=youtube_preset),
         str(output_path),
     )
+
+
+def _build_boundary_command(
+    tail_edge: Path,
+    head_edge: Path,
+    *,
+    kind: TransitionKind,
+    seconds: float,
+    sequence: SequenceFormat,
+    output_path: Path,
+    ffmpeg_binary: str = "ffmpeg",
+    youtube_preset: bool = False,
+) -> tuple[str, ...]:
+    """The boundary segment (issue #1244): ``tail_edge`` (the item before
+    the cut, ``seconds`` long) crossfaded into ``head_edge`` (the item
+    after, the same length) over the whole segment with ``xfade``, the two
+    audio tracks crossfaded alike with ``acrossfade``; encoded like a
+    stage so the stitch stays a stream copy."""
+    graph = (
+        f"[0:v][1:v]xfade=transition={xfade_name(kind)}:duration={seconds:g}:offset=0,format=yuv420p[final];"
+        f"[0:a][1:a]acrossfade=d={seconds:g}:c1=tri:c2=tri[aout]"
+    )
+    return (
+        ffmpeg_binary,
+        "-hide_banner",
+        "-y",
+        "-i",
+        str(tail_edge),
+        "-i",
+        str(head_edge),
+        "-filter_complex",
+        graph,
+        "-map",
+        "[final]",
+        "-map",
+        "[aout]",
+        "-t",
+        f"{seconds:g}",
+        *_encode_args(sequence, youtube_preset=youtube_preset),
+        str(output_path),
+    )
+
+
+def _edge_plan(plan: _StagePlan, *, half: float, end: Literal["tail", "head"]) -> _StagePlan:
+    """The stage window a boundary's edge render shows (issue #1244): the
+    tail edge is the last ``half`` of the effective footage plus ``half`` of
+    the trim past the tail pad; the head edge is ``half`` of the trim before
+    the head pad plus the first ``half``. Each is ``2 * half`` long."""
+    if end == "tail":
+        return _narrow_plan(plan, head_cut=plan.effective_seconds - half, tail_cut=-half)
+    return _narrow_plan(plan, head_cut=-half, tail_cut=plan.effective_seconds - half)
 
 
 def _build_segment_command(

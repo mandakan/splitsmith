@@ -413,6 +413,51 @@ def test_lower_third_clip_filters_fade_the_clip_out_like_the_png() -> None:
     assert parts[1] == "[base][lt]overlay=0:0:enable='lt(t,2)'[withlt]"
 
 
+def test_lower_third_filters_default_window_is_unchanged() -> None:
+    """Parity: with no delay and no skip the strings are today's."""
+    parts, label = overlay_card.lower_third_filters(3, 4.0, source_label="base")
+    assert label == "withlt"
+    assert parts == [
+        "[3:v]format=rgba,fade=t=out:st=3.5:d=0.5:alpha=1[lt]",
+        "[base][lt]overlay=0:0:enable='lt(t,4)'[withlt]",
+    ]
+
+
+def test_lower_third_filters_can_start_late_or_skip_what_already_showed() -> None:
+    """Issue #1244: a boundary's head edge starts the lower third d/2 in
+    (``delay``); the trimmed stage after it continues from d/2
+    (``skip``), so the card neither restarts nor overstays."""
+    delayed, _ = overlay_card.lower_third_filters(3, 4.0, source_label="base", delay_seconds=0.5)
+    assert delayed == [
+        "[3:v]format=rgba,fade=t=out:st=4:d=0.5:alpha=1[lt]",
+        "[base][lt]overlay=0:0:enable='between(t,0.5,4.5)'[withlt]",
+    ]
+    skipped, _ = overlay_card.lower_third_filters(3, 4.0, source_label="base", skip_seconds=0.5)
+    assert skipped == [
+        "[3:v]format=rgba,fade=t=out:st=3:d=0.5:alpha=1[lt]",
+        "[base][lt]overlay=0:0:enable='between(t,0,3.5)'[withlt]",
+    ]
+
+
+def test_lower_third_clip_filters_can_start_late_or_skip_what_already_showed() -> None:
+    delayed, _ = overlay_card.lower_third_clip_filters(
+        3, 2.0, rate="30", source_label="base", delay_seconds=0.5
+    )
+    assert delayed[0] == (
+        "[3:v]format=rgba,fps=30,setpts=PTS-STARTPTS,tpad=start_duration=0.5:start_mode=add:color=black@0.0,"
+        "tpad=stop_mode=clone:stop_duration=2,trim=0:2.5,fade=t=out:st=2:d=0.5:alpha=1[lt]"
+    )
+    assert delayed[1] == "[base][lt]overlay=0:0:enable='between(t,0.5,2.5)'[withlt]"
+    skipped, _ = overlay_card.lower_third_clip_filters(
+        3, 2.0, rate="30", source_label="base", skip_seconds=0.5
+    )
+    assert skipped[0] == (
+        "[3:v]format=rgba,fps=30,trim=start=0.5,setpts=PTS-STARTPTS,"
+        "tpad=stop_mode=clone:stop_duration=1.5,trim=0:1.5,fade=t=out:st=1:d=0.5:alpha=1[lt]"
+    )
+    assert skipped[1] == "[base][lt]overlay=0:0:enable='between(t,0,1.5)'[withlt]"
+
+
 # --- identity (slice 3, #1243) -----------------------------------------------------
 
 

@@ -1136,6 +1136,119 @@ def test_narrow_plan_recomputes_the_cams_from_the_new_head_trim(tmp_path: Path) 
     assert widened.effective_seconds == pytest.approx(plan.effective_seconds + 0.5)
 
 
+def test_edge_plans_cover_half_the_cut_and_half_the_handle(tmp_path: Path) -> None:
+    """Issue #1244: a stage's tail edge is its last d/2 of effective footage
+    plus d/2 of the trim past the tail pad; the head edge is d/2 before the
+    head pad plus the first d/2. Both are d long."""
+    stage = _basic_stage(tmp_path=tmp_path, name="A", primary_name="a.mp4", head_pad=3.0, tail_pad=10.0)
+    _, plan = _build_plan(stage)
+    tail = mp4_render._edge_plan(plan, half=0.5, end="tail")
+    head = mp4_render._edge_plan(plan, half=0.5, end="head")
+    assert tail.effective_seconds == pytest.approx(1.0) and head.effective_seconds == pytest.approx(1.0)
+    assert tail.head_trim_seconds == pytest.approx(plan.head_trim_seconds + plan.effective_seconds - 0.5)
+    assert head.head_trim_seconds == pytest.approx(plan.head_trim_seconds - 0.5)
+
+
+def test_build_boundary_command_crossfades_two_equal_edges(tmp_path: Path) -> None:
+    comp = _carded_composition(tmp_path)
+    cmd = mp4_render._build_boundary_command(
+        tmp_path / "edge_003_tail.mp4",
+        tmp_path / "edge_004_head.mp4",
+        kind="zoom",
+        seconds=1.0,
+        sequence=comp.sequence,
+        output_path=tmp_path / "boundary_003.mp4",
+    )
+    assert cmd[:3] == ("ffmpeg", "-hide_banner", "-y")
+    assert cmd[3:7] == ("-i", str(tmp_path / "edge_003_tail.mp4"), "-i", str(tmp_path / "edge_004_head.mp4"))
+    graph = cmd[cmd.index("-filter_complex") + 1]
+    assert graph == (
+        "[0:v][1:v]xfade=transition=zoomin:duration=1:offset=0,format=yuv420p[final];"
+        "[0:a][1:a]acrossfade=d=1:c1=tri:c2=tri[aout]"
+    )
+    assert cmd[cmd.index("-map") :][:4] == ("-map", "[final]", "-map", "[aout]")
+    assert cmd[cmd.index("-t") + 1] == "1"
+    assert cmd[-1] == str(tmp_path / "boundary_003.mp4")
+    assert "-c:v" in cmd and cmd[cmd.index("-crf") + 1] == "20"
+
+
+def test_build_motion_card_command_can_offset_or_delay_the_clip(tmp_path: Path) -> None:
+    comp = _carded_composition(tmp_path)
+    base = mp4_render._build_motion_card_command(
+        tmp_path / "bd.png",
+        tmp_path / "clip.mov",
+        seconds=1.0,
+        sequence=comp.sequence,
+        output_path=tmp_path / "o",
+    )
+    same = mp4_render._build_motion_card_command(
+        tmp_path / "bd.png",
+        tmp_path / "clip.mov",
+        seconds=1.0,
+        sequence=comp.sequence,
+        output_path=tmp_path / "o",
+        clip_offset_seconds=0.0,
+        clip_delay_seconds=0.0,
+    )
+    assert same == base, "zero offsets change nothing"
+    offset = mp4_render._build_motion_card_command(
+        tmp_path / "bd.png",
+        tmp_path / "clip.mov",
+        seconds=1.0,
+        sequence=comp.sequence,
+        output_path=tmp_path / "o",
+        clip_offset_seconds=2.5,
+    )
+    clip_at = offset.index(str(tmp_path / "clip.mov"))
+    assert offset[clip_at - 3 : clip_at] == ("-ss", "2.5", "-i")
+    delayed = mp4_render._build_motion_card_command(
+        tmp_path / "bd.png",
+        tmp_path / "clip.mov",
+        seconds=1.0,
+        sequence=comp.sequence,
+        output_path=tmp_path / "o",
+        clip_delay_seconds=0.5,
+    )
+    graph = delayed[delayed.index("-filter_complex") + 1]
+    assert (
+        "setpts=PTS-STARTPTS,tpad=start_duration=0.5:start_mode=add:color=black@0.0,tpad=stop_mode=clone"
+        in graph
+    )
+
+
+def test_build_stage_command_threads_the_lower_third_window(tmp_path: Path) -> None:
+    stage = _basic_stage(tmp_path=tmp_path, name="A", primary_name="a.mp4")
+    comp, plan = _build_plan(stage)
+    card = composition.TitleCard(text="Stage 1", duration_seconds=4.0, style="lower-third")
+    png = tmp_path / "lt.png"
+    plain = mp4_render._build_stage_command(
+        plan,
+        sequence=comp.sequence,
+        output_path=tmp_path / "s.mp4",
+        lower_third=mp4_render._LowerThirdInput(path=png, card=card),
+    )
+    delayed = mp4_render._build_stage_command(
+        plan,
+        sequence=comp.sequence,
+        output_path=tmp_path / "s.mp4",
+        lower_third=mp4_render._LowerThirdInput(path=png, card=card, delay_seconds=0.5),
+    )
+    at = plain.index(str(png))
+    assert plain[at - 3 : at - 1] == ("-t", "4")
+    at = delayed.index(str(png))
+    assert delayed[at - 3 : at - 1] == ("-t", "4.5"), "the looped PNG lasts until the window closes"
+    assert "enable='between(t,0.5,4.5)'" in delayed[delayed.index("-filter_complex") + 1]
+    skipped = mp4_render._build_stage_command(
+        plan,
+        sequence=comp.sequence,
+        output_path=tmp_path / "s.mp4",
+        lower_third=mp4_render._LowerThirdInput(path=png, card=card, skip_seconds=0.5),
+    )
+    at = skipped.index(str(png))
+    assert skipped[at - 3 : at - 1] == ("-t", "3.5")
+    assert "enable='between(t,0,3.5)'" in skipped[skipped.index("-filter_complex") + 1]
+
+
 def test_plan_timeline_puts_a_summary_after_each_stage(tmp_path: Path) -> None:
     plan = mp4_render.plan_timeline(_summarised_composition(tmp_path))
     assert [item.kind for item in plan.items] == ["stage", "summary", "stage", "summary"]
