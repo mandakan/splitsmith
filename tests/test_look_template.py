@@ -86,31 +86,90 @@ def test_shared_url_points_at_the_shipped_engine_scripts() -> None:
     assert (looks.shared_dir() / "fit.js").is_file()
 
 
-@pytest.mark.integration
-def test_the_shipped_card_template_builds_the_markup_python_builds() -> None:
-    """``cell.js`` is a port of ``overlay_html._cell_div``. Same groups in,
-    same DOM out, through the browser's own serializer on both sides so
-    escaping differences cannot hide. Text carries every character Python
-    escapes."""
-    from playwright.sync_api import sync_playwright
-
+def _lower_third_groups() -> tuple[Group, ...]:
     from splitsmith.composition import TitleCard
     from splitsmith.overlay_card import card_groups
+
+    return card_groups(
+        TitleCard(
+            text='O\'Neil & <Sons> "Classic"',
+            duration_seconds=1.5,
+            style="lower-third",
+            info=("24 rounds", "Comstock & co"),
+        )
+    )
+
+
+def _every_field_groups() -> tuple[Group, ...]:
+    """Every declaration field ``cell.js`` reads, in one set: right, centre
+    and bottom anchors, the three flows, a divider, an empty grid, caption,
+    unit, colour, drop priorities, gap, margin_top, an align override and
+    text with every character Python escapes. A card never declares most
+    of these; the summary slot will, and ``engine.renderGroups`` is open
+    to any template."""
+    return (
+        Group(
+            anchor=Anchor.TOP_RIGHT,
+            flow=Flow.ROW,
+            elements=(
+                Element(
+                    role=Role.LABEL,
+                    text="A & <b> 'q' \"d\"",
+                    caption="cap <x>",
+                    unit="s",
+                    color=ColorToken.ACCENT_TEXT,
+                ),
+            ),
+        ),
+        Group(
+            anchor=Anchor.MIDDLE_CENTER,
+            flow=Flow.COLUMN,
+            elements=(
+                Element(role=Role.VERDICT, text="12.34", drop_priority=0),
+                Element(role=Role.DETAIL, text="x", drop_priority=3, emphasis=Emphasis.MUTED),
+            ),
+            align="right",
+            gap=6,
+            margin_top=10,
+        ),
+        Group(anchor=Anchor.MIDDLE_CENTER, flow=Flow.GRID, elements=()),
+        Group(anchor=Anchor.MIDDLE_CENTER, flow=Flow.ROW, elements=(), divider=True),
+        Group(
+            anchor=Anchor.BOTTOM_LEFT,
+            flow=Flow.ROW,
+            elements=(
+                Element(
+                    role=Role.IDENTITY, text="O'Neil", emphasis=Emphasis.PLATE, color=ColorToken.SPLIT_GOOD
+                ),
+            ),
+        ),
+        Group(
+            anchor=Anchor.BOTTOM_CENTER, flow=Flow.COLUMN, elements=(Element(role=Role.HEADLINE, text="c"),)
+        ),
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "make_groups", [_lower_third_groups, _every_field_groups], ids=["lower-third", "every-field"]
+)
+def test_the_shipped_card_template_builds_the_markup_python_builds(make_groups) -> None:
+    """``cell.js`` is a port of ``overlay_html._cell_div``. Same groups in,
+    same DOM out, through the browser's own serializer on both sides so
+    escaping differences cannot hide. The second case carries every field
+    the port reads; a review showed the card's own groups alone let a
+    broken ``fit()`` or a dropped ``data-drop-priority`` through."""
+    from playwright.sync_api import sync_playwright
+
     from splitsmith.overlay_html import _cell_div, single_css
     from splitsmith.overlay_layout import CellScale
     from splitsmith.overlay_raster import CHROMIUM_CHANNEL
 
-    card = TitleCard(
-        text='O\'Neil & <Sons> "Classic"',
-        duration_seconds=1.5,
-        style="lower-third",
-        info=("24 rounds", "Comstock & co"),
-    )
-    groups = card_groups(card)
+    groups = make_groups()
     theme = load_theme("splitsmith")
     ctx = look_template.TemplateContext(
         theme=look_template.theme_tokens(theme),
-        data={"card": {"text": card.text}, "groups": [look_template.group_json(g) for g in groups]},
+        data={"card": {"text": "parity"}, "groups": [look_template.group_json(g) for g in groups]},
         size={"width": 640, "height": 360},
         fps=30,
         engine=look_template.engine_block(
@@ -137,3 +196,43 @@ def test_the_shipped_card_template_builds_the_markup_python_builds() -> None:
         assert page.evaluate("window.duration()") == 0
         browser.close()
     assert from_js == from_python
+
+
+@pytest.mark.integration
+def test_a_user_template_that_throws_skips_the_card_with_a_real_browser(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review Focus 4 against a real page: a Look whose ``card.html`` throws
+    while mounting yields no card, never a blank one on the backdrop."""
+    from splitsmith.composition import MatchTitle
+    from splitsmith.overlay_card import build_card_still
+    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+
+    monkeypatch.setenv("SPLITSMITH_HOME", str(tmp_path))
+    manifest = json.loads((looks.shipped_looks_dir() / "clean" / "look.json").read_text(encoding="utf-8"))
+    manifest["name"] = "broken"
+    manifest["slots"] = {"title_page": "card.html"}
+    root = tmp_path / "looks" / "broken"
+    root.mkdir(parents=True)
+    (root / "look.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (root / "card.html").write_text(
+        "<!doctype html><html><body><script>"
+        "document.addEventListener('DOMContentLoaded', function () { window.splitsmith.nope.mount(); });"
+        "</script></body></html>",
+        encoding="utf-8",
+    )
+    try:
+        with ChromiumRasterizer() as rasterizer:
+            image = build_card_still(
+                MatchTitle(text="x"),
+                slot="title_page",
+                width=64,
+                height=32,
+                fps=30,
+                look=looks.load_look("broken"),
+                rasterizer=rasterizer,
+                backdrop=None,
+            )
+    except RasterizerUnavailableError as exc:
+        pytest.skip(str(exc))
+    assert image is None

@@ -212,14 +212,26 @@ def look_names() -> tuple[str, ...]:
 
 def load_look(name: str) -> Look:
     """The user's Look of this name, else the shipped one, else
-    :class:`LookNotFoundError`. A user Look that exists but is broken
-    raises :class:`LookError` rather than silently falling through to
-    the shipped one: the user asked for theirs."""
+    :class:`LookNotFoundError`.
+
+    A broken user Look that shadows a shipped one is skipped with a
+    warning and the shipped one is returned, the policy :func:`list_looks`
+    already applies: ``splitsmith`` is the default every renderer asks
+    for, and one bad file in the user directory must not fail every
+    default export. A broken user Look with no shipped namesake raises
+    :class:`LookError`, because there is nothing else the user could
+    have meant."""
     user_root = user_looks_dir() / name
-    if (user_root / MANIFEST_FILE).exists():
-        return _read_look(user_root, "user")
     shipped_root = shipped_looks_dir() / name
-    if (shipped_root / MANIFEST_FILE).exists():
+    shipped_exists = (shipped_root / MANIFEST_FILE).exists()
+    if (user_root / MANIFEST_FILE).exists():
+        try:
+            return _read_look(user_root, "user")
+        except LookError as exc:
+            if not shipped_exists:
+                raise
+            logger.warning("ignoring the user Look %s, using the shipped one: %s", name, exc)
+    if shipped_exists:
         return _read_look(shipped_root, "shipped")
     raise LookNotFoundError(f"no Look named {name!r}; installed: {', '.join(look_names()) or 'none'}")
 

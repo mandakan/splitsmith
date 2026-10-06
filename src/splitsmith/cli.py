@@ -1702,10 +1702,6 @@ def _print_files_summary(files: ReportFiles) -> None:
                 console.print(f"  {label:>6}: {p}")
 
 
-if __name__ == "__main__":
-    app()
-
-
 def _validate_theme(name: str) -> str:
     """``--theme`` names an installed Look (shipped or the user's)."""
     from .looks import look_names
@@ -1714,3 +1710,7 @@ def _validate_theme(name: str) -> str:
     if name not in names:
         raise typer.BadParameter(f"--theme must be one of {', '.join(names)}, got {name!r}")
     return name
+
+
+if __name__ == "__main__":
+    app()

@@ -132,3 +132,37 @@ def test_cli_theme_accepts_an_installed_user_look(user_dir: Path, monkeypatch: p
     assert _validate_theme("club") == "club"
     with pytest.raises(Exception, match="nope"):
         _validate_theme("nope")
+
+
+def test_a_broken_user_override_of_a_shipped_look_falls_back_to_the_shipped_one(
+    user_dir: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """``splitsmith`` is the default every renderer asks for. One bad file
+    in the user directory must not fail every default export; it is
+    skipped with a warning, exactly as ``list_looks`` skips it."""
+    d = user_dir / "splitsmith"
+    d.mkdir(parents=True)
+    (d / "look.json").write_text("{not json", encoding="utf-8")
+    with caplog.at_level(logging.WARNING, logger="splitsmith.looks"):
+        look = looks.load_look("splitsmith")
+    assert look.source == "shipped"
+    assert "splitsmith" in caplog.text
+
+
+def test_a_broken_user_only_look_still_raises(user_dir: Path) -> None:
+    d = user_dir / "club"
+    d.mkdir(parents=True)
+    (d / "look.json").write_text("{not json", encoding="utf-8")
+    with pytest.raises(looks.LookError):
+        looks.load_look("club")
+
+
+def test_cli_theme_validator_is_defined_before_the_main_guard() -> None:
+    """``python -m splitsmith.cli`` runs the app at the ``__main__`` guard;
+    a helper defined below it would be a NameError on that path."""
+    import inspect
+
+    from splitsmith import cli
+
+    source = inspect.getsource(cli)
+    assert source.index("def _validate_theme") < source.index('if __name__ == "__main__"')

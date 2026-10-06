@@ -102,6 +102,12 @@ DEVICE_SCALE_FACTOR = 1
 INSTALL_HINT = "uv run playwright install chromium --only-shell"
 
 
+class TemplateScriptError(RuntimeError):
+    """A Look template's own script threw while the page loaded or
+    mounted. The page still screenshots (blank), so the renderer raises
+    this instead and the card is skipped rather than shipped textless."""
+
+
 class RasterizerUnavailableError(RuntimeError):
     """No usable Chromium could be launched.
 
@@ -304,11 +310,21 @@ class ChromiumRasterizer:
         try:
             browser_context.add_init_script(context.init_script())
             page = browser_context.new_page()
+            # An exception thrown by the template's own script reaches
+            # Playwright only as a ``pageerror`` event: ``goto`` and
+            # ``screenshot`` both succeed and hand back a fully transparent
+            # PNG, which the caller would composite as a textless card.
+            # Listening before navigation turns that into the error the
+            # caller already skips the card on.
+            errors: list[str] = []
+            page.on("pageerror", lambda error: errors.append(getattr(error, "message", None) or str(error)))
             page.goto(template.resolve().as_uri(), wait_until="load")
             page.evaluate("document.fonts.ready")
             page.evaluate("typeof window.seek === 'function' ? window.seek(0) : undefined")
             page.evaluate("document.fonts.ready")
             page.evaluate("window.__splitsmithFit && window.__splitsmithFit()")
+            if errors:
+                raise TemplateScriptError(f"{template.name}: {errors[0]}")
             return page.screenshot(type="png", omit_background=True)
         finally:
             browser_context.close()

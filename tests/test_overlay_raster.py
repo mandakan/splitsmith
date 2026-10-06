@@ -48,6 +48,10 @@ class _RecordingPage:
         self.calls: list[tuple] = []
         self.goto_url: str | None = None
         self.goto_file_content: str | None = None
+        self.handlers: dict[str, list] = {}
+
+    def on(self, event: str, handler) -> None:  # noqa: ANN001 -- Playwright's own loose signature
+        self.handlers.setdefault(event, []).append(handler)
 
     def goto(self, url: str, *, wait_until: str | None = None) -> None:
         self.calls.append(("goto", url, wait_until))
@@ -63,6 +67,16 @@ class _RecordingPage:
     def screenshot(self, *, type: str, omit_background: bool) -> bytes:  # noqa: A002
         self.calls.append(("screenshot", type, omit_background))
         return b"FAKE-PNG-BYTES"
+
+
+class _ThrowingTemplatePage(_RecordingPage):
+    """A page whose document throws during load: Playwright reports that
+    through ``pageerror`` and never through ``goto`` or ``screenshot``."""
+
+    def goto(self, url: str, *, wait_until: str | None = None) -> None:
+        super().goto(url, wait_until=wait_until)
+        for handler in self.handlers.get("pageerror", []):
+            handler(types.SimpleNamespace(message="TypeError: window.splitsmith.nope is undefined"))
 
 
 class _BoomOnScreenshotPage(_RecordingPage):
@@ -542,3 +556,21 @@ def test_render_template_outside_context_manager_raises_runtime_error(tmp_path: 
         ChromiumRasterizer().render_template(
             tmp_path / "x.html", context=_context_fixture(), width=1, height=1
         )
+
+
+def test_render_template_raises_when_the_template_script_throws(tmp_path: Path) -> None:
+    """A broken ``card.html`` throws in the page, which Playwright reports
+    only as a ``pageerror`` event: ``goto`` and ``screenshot`` both succeed
+    and the result is a fully transparent PNG. The renderer must listen
+    for the event before navigating and refuse the blank result, so the
+    card is skipped (``overlay_card``'s policy) rather than shipped
+    textless."""
+    template = tmp_path / "card.html"
+    template.write_text("<!doctype html><body></body>", encoding="utf-8")
+    rasterizer = ChromiumRasterizer()
+    rasterizer._browser = _RecordingBrowser(page_factory=_ThrowingTemplatePage)
+    with pytest.raises(overlay_raster.TemplateScriptError, match="nope is undefined"):
+        rasterizer.render_template(template, context=_context_fixture(), width=64, height=32)
+    page = rasterizer._browser.contexts[0].pages[0]
+    assert "pageerror" in page.handlers, "the listener must be registered before goto"
+    assert rasterizer._browser.contexts[0].closed
