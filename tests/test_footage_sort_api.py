@@ -662,8 +662,8 @@ def test_a_copy_beside_its_original_in_one_scan_never_moves_the_original(
 
 
 def test_a_scan_from_before_fingerprints_never_moves_a_placed_clip(tmp_path: Path, source_clip: Path) -> None:
-    """A review written by an older version has no fingerprints on its
-    clips; the import still knows the copy by its content."""
+    """A review and a project written by an older version carry no
+    fingerprints; the import still knows the copy by its content."""
     _, client, root, base = _match_app(tmp_path)
     shared = _shared_folder(tmp_path, source_clip)
     first = _scan(client, base, shared)
@@ -675,6 +675,11 @@ def test_a_scan_from_before_fingerprints_never_moves_a_placed_clip(tmp_path: Pat
     for clip in record["clips"]:
         clip.pop("fingerprint", None)
     record_path.write_text(json.dumps(record))
+    alice_root = match_model.Match.shooter_root(root, "alice")
+    alice = MatchProject.load(alice_root)
+    for video in alice.all_videos():
+        video.fingerprint = None
+    alice.save(alice_root)
 
     _import_copy_to_stage_2(client, base, view, "alice-stage1.mov")
 
