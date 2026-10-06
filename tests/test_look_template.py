@@ -341,3 +341,84 @@ def test_a_long_rise_cards_held_frame_is_its_poster() -> None:
     held = Image.frombytes("RGBA", (640, 360), last)
     diff = ImageChops.difference(poster, held)
     assert max(channel[1] for channel in diff.getextrema()) <= 1, "the held frame must be the poster"
+
+
+# --- identity (slice 3, #1243) -----------------------------------------------------
+
+
+def test_shooter_json_carries_the_logo_as_a_file_url_when_the_file_exists(tmp_path) -> None:
+    from PIL import Image
+
+    from splitsmith.identity import ResolvedIdentity
+
+    logo = tmp_path / "logo-0123456789ab.png"
+    Image.new("RGBA", (8, 8), (255, 0, 0, 255)).save(logo)
+    out = look_template.shooter_json(
+        ResolvedIdentity(label="Anders", accent="#ff2d2d", logo_path=logo, club="Bromma PK")
+    )
+    assert out == {
+        "label": "Anders",
+        "accent": "#ff2d2d",
+        "club": "Bromma PK",
+        "logo": logo.resolve().as_uri(),
+    }
+
+
+def test_shooter_json_drops_a_missing_or_oversized_logo_with_a_log_line(tmp_path, caplog) -> None:
+    import logging
+
+    from splitsmith.identity import ResolvedIdentity
+
+    missing = ResolvedIdentity(label="A", accent="#ff2d2d", logo_path=tmp_path / "gone.png", club=None)
+    with caplog.at_level(logging.WARNING, logger="splitsmith.look_template"):
+        assert look_template.shooter_json(missing)["logo"] is None
+    assert "gone.png" in caplog.text
+    big = tmp_path / "logo-0123456789ab.png"
+    big.write_bytes(b"0" * (2 * 1024 * 1024 + 1))
+    assert (
+        look_template.shooter_json(ResolvedIdentity(label="A", accent="#ff2d2d", logo_path=big, club=None))[
+            "logo"
+        ]
+        is None
+    )
+
+
+@pytest.mark.integration
+def test_a_shooters_logo_reaches_the_shipped_card_and_nothing_else_changes(tmp_path) -> None:
+    """With a logo the card paints it top-right; a shooter without a logo
+    leaves the render byte-identical to a card with no shooters at all."""
+    from PIL import Image
+
+    from splitsmith.composition import TitleCard
+    from splitsmith.identity import ResolvedIdentity
+    from splitsmith.overlay_card import card_context
+    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+
+    look = looks.load_look("splitsmith")
+    template = looks.template_for(look, "slate")
+    card = TitleCard(text="Stage 3", duration_seconds=1.5, info=("24 rounds",))
+    logo = tmp_path / "logo-0123456789ab.png"
+    Image.new("RGBA", (64, 64), (255, 0, 0, 255)).save(logo)
+    with_logo = ResolvedIdentity(label="Anders", accent="#ff2d2d", logo_path=logo, club=None)
+    without = ResolvedIdentity(label="Anders", accent="#ff2d2d", logo_path=None, club=None)
+    theme = load_theme("splitsmith")
+
+    def render(rasterizer, shooters):  # noqa: ANN001
+        context = card_context(
+            card, slot="slate", width=320, height=180, fps=30, theme=theme, shooters=shooters
+        )
+        return rasterizer.render_template(template, context=context, width=320, height=180)
+
+    try:
+        with ChromiumRasterizer() as rasterizer:
+            none = render(rasterizer, ())
+            plain = render(rasterizer, (without,))
+            logod = render(rasterizer, (with_logo,))
+    except RasterizerUnavailableError as exc:
+        pytest.skip(str(exc))
+    assert plain == none
+    assert logod != none
+    with Image.open(io.BytesIO(logod)) as image:
+        alpha = image.convert("RGBA").getchannel("A")
+    top_right = alpha.crop((320 - 60, 0, 320, 40))
+    assert top_right.getbbox() is not None, "the logo paints in the top-right corner"

@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import io
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -34,11 +35,13 @@ from typing import Literal
 from PIL import Image
 
 from .composition import MatchTitle, TitleCard
+from .identity import ResolvedIdentity
 from .look_template import (
     TemplateContext,
     engine_block,
     group_json,
     shared_url,
+    shooter_json,
     template_digest,
     theme_tokens,
 )
@@ -135,7 +138,14 @@ def card_scale(height: int) -> CellScale:
 
 
 def card_context(
-    card: Card, *, slot: CardSlot, width: int, height: int, fps: float, theme: OverlayTheme
+    card: Card,
+    *,
+    slot: CardSlot,
+    width: int,
+    height: int,
+    fps: float,
+    theme: OverlayTheme,
+    shooters: Sequence[ResolvedIdentity] = (),
 ) -> TemplateContext:
     """What the template for ``slot`` receives: the card as data
     (``data.card``), the engine's default declaration of it
@@ -153,6 +163,7 @@ def card_context(
                 "duration_seconds": card.duration_seconds,
             },
             "groups": [group_json(g) for g in card_groups(card)],
+            "shooters": [shooter_json(shooter) for shooter in shooters],
         },
         size={"width": width, "height": height},
         fps=fps,
@@ -162,11 +173,21 @@ def card_context(
 
 
 def _rasterize(
-    card: Card, *, slot: CardSlot, width: int, height: int, fps: float, look: Look, rasterizer: Rasterizer
+    card: Card,
+    *,
+    slot: CardSlot,
+    width: int,
+    height: int,
+    fps: float,
+    look: Look,
+    rasterizer: Rasterizer,
+    shooters: Sequence[ResolvedIdentity] = (),
 ) -> Image.Image | None:
     theme = theme_for(look)
     template = template_for(look, slot, card.variant)
-    context = card_context(card, slot=slot, width=width, height=height, fps=fps, theme=theme)
+    context = card_context(
+        card, slot=slot, width=width, height=height, fps=fps, theme=theme, shooters=shooters
+    )
     try:
         png_bytes = rasterizer.render_template(template, context=context, width=width, height=height)
         with Image.open(io.BytesIO(png_bytes)) as rendered:
@@ -207,6 +228,7 @@ def card_motion(
     look: Look,
     rasterizer: Rasterizer,
     max_seconds: float,
+    shooters: Sequence[ResolvedIdentity] = (),
 ) -> CardMotion | None:
     """Load the card's template and read how it renders: one frame for a
     still, ``ceil(min(duration, max_seconds) * fps)`` for an animation.
@@ -214,7 +236,9 @@ def card_motion(
     ``None`` (logged) when the template cannot load; the card is skipped."""
     theme = theme_for(look)
     template = template_for(look, slot, card.variant)
-    context = card_context(card, slot=slot, width=width, height=height, fps=fps, theme=theme)
+    context = card_context(
+        card, slot=slot, width=width, height=height, fps=fps, theme=theme, shooters=shooters
+    )
     frames: TemplateFrames | None = None
     try:
         frames = rasterizer.render_template_frames(
@@ -284,6 +308,7 @@ def build_card_still(
     backdrop: Path | None,
     blur_radius: int | None = None,
     dim: float = DEFAULT_DIM,
+    shooters: Sequence[ResolvedIdentity] = (),
 ) -> Image.Image | None:
     """Compose a full-frame card as a ``width x height`` RGB image, at the
     template's poster frame (the preview's and the thumbnails' view of
@@ -297,7 +322,16 @@ def build_card_still(
     module docstring for why that skips the card rather than degrading
     it.
     """
-    text = _rasterize(card, slot=slot, width=width, height=height, fps=fps, look=look, rasterizer=rasterizer)
+    text = _rasterize(
+        card,
+        slot=slot,
+        width=width,
+        height=height,
+        fps=fps,
+        look=look,
+        rasterizer=rasterizer,
+        shooters=shooters,
+    )
     if text is None:
         return None
     canvas = card_backdrop(backdrop, width=width, height=height, look=look, blur_radius=blur_radius, dim=dim)
@@ -305,13 +339,27 @@ def build_card_still(
 
 
 def build_lower_third(
-    card: TitleCard, *, width: int, height: int, fps: float, look: Look, rasterizer: Rasterizer
+    card: TitleCard,
+    *,
+    width: int,
+    height: int,
+    fps: float,
+    look: Look,
+    rasterizer: Rasterizer,
+    shooters: Sequence[ResolvedIdentity] = (),
 ) -> Image.Image | None:
     """Rasterize a lower-third as a transparent ``width x height`` RGBA
     image at its poster frame, for a preview to composite over a frame.
     No backdrop: the footage is the backdrop."""
     return _rasterize(
-        card, slot="lower_third", width=width, height=height, fps=fps, look=look, rasterizer=rasterizer
+        card,
+        slot="lower_third",
+        width=width,
+        height=height,
+        fps=fps,
+        look=look,
+        rasterizer=rasterizer,
+        shooters=shooters,
     )
 
 

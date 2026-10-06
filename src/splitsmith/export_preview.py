@@ -32,6 +32,7 @@ from PIL import Image
 
 from . import composition
 from .export_naming import stage_display_name, stage_file_base
+from .identity import ResolvedIdentity
 from .looks import Look
 from .match_project import MatchProject
 from .overlay_card import build_card_still, build_lower_third, card_scale
@@ -243,8 +244,11 @@ def render_preview(
     rasterizer: Rasterizer,
     ffmpeg_binary: str | None,
     work_dir: Path,
+    shooter: ResolvedIdentity | None = None,
 ) -> bytes:
-    """The PNG for ``spec``, or :class:`PreviewError` for a 404 / 409 / 503."""
+    """The PNG for ``spec``, or :class:`PreviewError` for a 404 / 409 / 503.
+    ``shooter`` is the shooter's resolved identity (#1243), drawn on the
+    cards the way the render draws it."""
     theme = theme_for(look)
     try:
         stage = project.stage(spec.stage_number)
@@ -280,7 +284,13 @@ def render_preview(
     name = spec.project_name or project.name
     label = project.competitor_name or name
     stage_label = stage_display_name(stage.stage_number, stage.stage_name)
-    size = {"width": spec.width, "height": spec.height, "fps": 30.0, "look": look}
+    size = {
+        "width": spec.width,
+        "height": spec.height,
+        "fps": 30.0,
+        "look": look,
+        "shooters": (shooter,) if shooter is not None else (),
+    }
     image: Image.Image | None
     if spec.card == "frame":
         image = _compose_over(frame, None, spec, theme)

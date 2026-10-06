@@ -411,3 +411,67 @@ def test_lower_third_clip_filters_fade_the_clip_out_like_the_png() -> None:
     )
     assert parts[0].endswith("fade=t=out:st=1.5:d=0.5:alpha=1[lt]")
     assert parts[1] == "[base][lt]overlay=0:0:enable='lt(t,2)'[withlt]"
+
+
+# --- identity (slice 3, #1243) -----------------------------------------------------
+
+
+def test_card_context_carries_the_shooters(tmp_path: Path) -> None:
+    from splitsmith.identity import ResolvedIdentity
+
+    r = _FakeRasterizer()
+    logo = tmp_path / "logo-0123456789ab.png"
+    Image.new("RGBA", (8, 8), (0, 0, 255, 255)).save(logo)
+    overlay_card.build_card_still(
+        MatchTitle(text="x"),
+        slot="title_page",
+        width=64,
+        height=32,
+        fps=30,
+        look=LOOK,
+        rasterizer=r,
+        backdrop=None,
+        shooters=(ResolvedIdentity(label="Anders", accent="#123456", logo_path=logo, club="PK"),),
+    )
+    ((_t, context, _w, _h),) = r.template_calls
+    assert context["data"]["shooters"] == [
+        {"label": "Anders", "accent": "#123456", "club": "PK", "logo": logo.resolve().as_uri()}
+    ]
+
+
+def test_a_missing_logo_file_draws_the_card_without_it(tmp_path: Path) -> None:
+    from splitsmith.identity import ResolvedIdentity
+
+    r = _FakeRasterizer()
+    image = overlay_card.build_card_still(
+        MatchTitle(text="x"),
+        slot="title_page",
+        width=64,
+        height=32,
+        fps=30,
+        look=LOOK,
+        rasterizer=r,
+        backdrop=None,
+        shooters=(ResolvedIdentity(label="A", accent="#123456", logo_path=tmp_path / "gone.png", club=None),),
+    )
+    assert image is not None
+    assert r.template_calls[0][1]["data"]["shooters"][0]["logo"] is None
+
+
+def test_card_motion_hands_the_shooters_to_the_template() -> None:
+    from splitsmith.identity import ResolvedIdentity
+
+    r = _FakeRasterizer()
+    motion = overlay_card.card_motion(
+        MatchTitle(text="x"),
+        slot="title_page",
+        width=8,
+        height=4,
+        fps=30,
+        look=LOOK,
+        rasterizer=r,
+        max_seconds=3.0,
+        shooters=(ResolvedIdentity(label="A", accent="#123456", logo_path=None, club=None),),
+    )
+    assert motion is not None
+    assert r.frame_requests[0][1]["data"]["shooters"][0]["label"] == "A"
