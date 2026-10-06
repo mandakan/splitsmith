@@ -888,6 +888,30 @@ def _try_push_web_trim_to_storage(project: MatchProject | None, web: Path) -> No
         logger.info("web trim cache: push to %s failed: %s", key, exc)
 
 
+def fresh_rendition(
+    trim: tuple[int, float] | None,
+    web: tuple[int, float] | None,
+    *,
+    trim_required: bool,
+) -> bool:
+    """Whether a trim's web rendition is current (#1192, #1209).
+
+    Each fact is ``(size_bytes, mtime_seconds)`` or ``None`` when absent.
+    Current means present, non-empty and -- when ``trim_required`` -- the
+    trim present and the rendition not older than it: a re-cut writes the
+    trim first and the rendition after it, so an older rendition covers
+    the previous window. Equal mtimes are current (R2 timestamps have
+    one-second resolution). ``trim_required`` is false only on a mirror,
+    which has no trim on R2 by design. The one rule local files,
+    ``storage.stat`` and the presence listing all go through.
+    """
+    if web is None or web[0] == 0:
+        return False
+    if not trim_required:
+        return True
+    return trim is not None and web[1] >= trim[1]
+
+
 def fresh_web_trim(trimmed: Path) -> Path | None:
     """The web rendition of the audit trim at ``trimmed`` when it is on
     local disk and current, else ``None`` (#1192).
@@ -907,7 +931,9 @@ def fresh_web_trim(trimmed: Path) -> Path | None:
         trim_st = trimmed.stat()
     except OSError:
         return None
-    if web_st.st_size == 0 or web_st.st_mtime < trim_st.st_mtime:
+    if not fresh_rendition(
+        (trim_st.st_size, trim_st.st_mtime), (web_st.st_size, web_st.st_mtime), trim_required=True
+    ):
         return None
     return web
 
