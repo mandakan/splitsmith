@@ -194,6 +194,7 @@ from ..config import (
 from ..display_name import normalize_display_name
 from ..division import competitor_division
 from ..export_naming import slugify, stage_file_base
+from ..fingerprint import clip_fingerprint
 from ..fixture_schema import (
     AgcState,
     AudioSource,
@@ -11437,7 +11438,20 @@ def create_app(
         project = state.shooter_project(slug)
         registered: list[str] = []
         skipped: list[str] = []
+        elsewhere: dict[str, str] = {}
+        if state.storage is None and current_match_root.get() is not None:
+            from . import footage_sort_api
+
+            elsewhere = footage_sort_api.imported_elsewhere(state, slug)
         for entry in candidates:
+            if elsewhere:
+                try:
+                    owner = elsewhere.get(clip_fingerprint(entry) or "")
+                except OSError:
+                    owner = None
+                if owner is not None:
+                    skipped.append(f"{entry.name}: already imported for {owner}")
+                    continue
             try:
                 video = project.register_video(
                     entry,

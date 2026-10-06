@@ -32,6 +32,7 @@ from pydantic import BaseModel, Field
 
 from .. import match_model, thumbnail
 from ..config import Config, FootageSortConfig
+from ..fingerprint import clip_fingerprint
 from ..footage_sort import (
     Anchor,
     ClipProposal,
@@ -64,6 +65,10 @@ class ScannedClip(BaseModel):
 
     clip: SortClip
     path: str
+    # Content fingerprint (``fingerprint.clip_fingerprint``), so the same
+    # recording reaching the sort from another path reads as imported
+    # (#1124). ``None`` for an empty file or a scan from before it existed.
+    fingerprint: str | None = None
     # Written by scans before 0.46.1; ignored.
     imported_by: str | None = None
     thumbnail: bool = False
@@ -282,11 +287,12 @@ def _view(state: Any, record: ScanRecord) -> SortView:
             p.role = "secondary"
     anchored = {c.key for c in proposal.cameras if c.clock == "anchored"}
     registered = _registrations(state)
+    by_fingerprint = _fingerprint_registrations(state)
     thumbs = _sort_dir(state) / "thumbs"
     clips = []
     for index, scanned in enumerate(record.clips):
         p = by_id[scanned.clip.clip_id]
-        reg = registered.get(_resolved(scanned.path))
+        reg = _registration_of(registered, by_fingerprint, scanned.path, scanned.fingerprint)
         imported_by = reg.shooter if reg is not None and reg.assigned else None
         # Pre-checked: what the engine is sure of, and what the user's own
         # anchor placed (they answered for that camera already).
@@ -402,6 +408,68 @@ def _registrations(state: Any) -> dict[Path, Registration]:
     return out
 
 
+def _fingerprint_registrations(state: Any) -> dict[str, Registration]:
+    """Content fingerprint -> where that recording is registered (#1124), the
+    same precedence as :func:`_registrations`. Reads stored fingerprints
+    only; :func:`_backfill_fingerprints` fills older videos at scan time."""
+    out: dict[str, Registration] = {}
+    for slug in match_model.Match.load(state.match_root).shooters:
+        project = state.shooter_project(slug)
+        entries = [(v, False) for v in project.unassigned_videos]
+        entries += [(v, True) for s in project.stages for v in s.videos]
+        for video, assigned in entries:
+            if video.fingerprint is None:
+                continue
+            if video.fingerprint in out and out[video.fingerprint].assigned and not assigned:
+                continue
+            out[video.fingerprint] = Registration(shooter=slug, video_path=str(video.path), assigned=assigned)
+    return out
+
+
+def _registration_of(
+    registered: dict[Path, Registration],
+    by_fingerprint: dict[str, Registration],
+    path: str | Path,
+    fingerprint: str | None,
+) -> Registration | None:
+    """Where a file is registered: by its resolved path, else by content --
+    the same clip arriving from a second path is the same clip (#1124)."""
+    reg = registered.get(_resolved(path))
+    if reg is None and fingerprint is not None:
+        reg = by_fingerprint.get(fingerprint)
+    return reg
+
+
+def _backfill_fingerprints(state: Any) -> None:
+    """Fill fingerprints on every shooter's videos registered before they
+    existed, from sources reachable on this machine (#1124). Once per scan,
+    so a review read never hashes files."""
+    for slug in match_model.Match.load(state.match_root).shooters:
+        project = state.shooter_project(slug)
+        root = state.shooter_root(slug)
+        if project.backfill_fingerprints(root):
+            project.save(root)
+
+
+def imported_elsewhere(state: Any, slug: str) -> dict[str, str]:
+    """Content fingerprint -> display name of the *other* shooter who has
+    that recording (#1124), for the per-shooter scan: one run is one
+    shooter's, so a copy of it reaching a second shooter's import is the
+    same clip, not a new one. Backfills older videos first."""
+    _backfill_fingerprints(state)
+    match = match_model.Match.load(state.match_root)
+    out: dict[str, str] = {}
+    for other in match.shooters:
+        if other == slug:
+            continue
+        project = state.shooter_project(other)
+        name = match.load_shooter(state.match_root, other).name or other
+        for video in project.all_videos():
+            if video.fingerprint is not None:
+                out.setdefault(video.fingerprint, name)
+    return out
+
+
 def keep_this_shooters(
     state: Any,
     slug: str,
@@ -466,6 +534,7 @@ def run_footage_sort_scan(handle: Any, *, state: Any, scan_id: str) -> None:
             videos = [p for p in files if p.suffix.lower() in VIDEO_EXTENSIONS]
             record.skipped_files = len(files) - len(videos)
         thumbs = _sort_dir(state) / "thumbs"
+        _backfill_fingerprints(state)
         scanned: list[ScannedClip] = []
         for i, path in enumerate(videos):
             handle.check_cancel()
@@ -487,10 +556,15 @@ def run_footage_sort_scan(handle: Any, *, state: Any, scan_id: str) -> None:
                 has_thumb = True
             except Exception:  # noqa: BLE001 -- a thumbnail never fails the scan
                 logger.debug("footage sort: no thumbnail for %s", path, exc_info=True)
+            try:
+                fingerprint = clip_fingerprint(path)
+            except OSError:
+                fingerprint = None
             scanned.append(
                 ScannedClip(
                     clip=clip,
                     path=str(path),
+                    fingerprint=fingerprint,
                     thumbnail=has_thumb,
                 )
             )
@@ -743,6 +817,8 @@ async def import_scan(scan_id: str, req: ImportRequest, request: Request) -> Imp
     )
     queued: list[tuple[str, Any, int, Any]] = []
     registered = _registrations(state)
+    by_fingerprint = _fingerprint_registrations(state)
+    fingerprints = {c.clip.clip_id: c.fingerprint for c in record.clips}
     projects: dict[str, tuple[Any, Path]] = {}
 
     def project_of(slug: str) -> tuple[Any, Path]:
@@ -755,7 +831,7 @@ async def import_scan(scan_id: str, req: ImportRequest, request: Request) -> Imp
         stage_number = c.proposal.stage
         assert slug is not None and stage_number is not None
         project, root = project_of(slug)
-        reg = registered.get(_resolved(paths[c.clip_id]))
+        reg = _registration_of(registered, by_fingerprint, paths[c.clip_id], fingerprints.get(c.clip_id))
         try:
             if reg is None:
                 video_path = project.register_video(paths[c.clip_id], root, link_mode=req.link_mode).path

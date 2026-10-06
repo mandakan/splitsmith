@@ -513,3 +513,69 @@ def test_a_stage_with_a_primary_shows_new_clips_as_secondary(tmp_path: Path, sou
         ("VID_20260926_110010_00_001.mp4", "primary"),
         ("IMG_0001.MOV", "secondary"),
     ]
+
+
+# --- the same clip from a second path (#1124, part 2) ----------------------------
+
+
+def _copy_elsewhere(tmp_path: Path, clip: Path, name: str) -> Path:
+    """A byte-identical copy under another folder and name (a phone export
+    of a clip that also arrived from the file server)."""
+    dest = tmp_path / "second-source" / name
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(clip, dest)
+    return dest
+
+
+def test_the_same_clip_from_another_path_reads_as_already_imported(tmp_path: Path, source_clip: Path) -> None:
+    _, client, root, base = _match_app(tmp_path)
+    shared = _shared_folder(tmp_path, source_clip)
+    first = _scan(client, base, shared)
+    client.post(f"{base}/match/footage-sort/{first['scan_id']}/import", json={})
+    copy = _copy_elsewhere(tmp_path, shared / "from-carol" / "IMG_0001.MOV", "alice-stage1.mov")
+
+    again = _scan(client, base, copy.parent)
+
+    [clip] = again["clips"]
+    assert clip["imported_by"] == "alice"
+    assert clip["checked"] is False
+    resp = client.post(f"{base}/match/footage-sort/{again['scan_id']}/import", json={})
+    assert resp.json()["imported"] == []
+    alice = MatchProject.load(match_model.Match.shooter_root(root, "alice"))
+    assert len(alice.all_videos()) == 1
+
+
+def test_a_clip_registered_before_fingerprints_is_still_recognised(tmp_path: Path, source_clip: Path) -> None:
+    """Videos imported by an older version carry no fingerprint; the scan
+    backfills them from their reachable sources first."""
+    _, client, root, base = _match_app(tmp_path)
+    shared = _shared_folder(tmp_path, source_clip)
+    first = _scan(client, base, shared)
+    client.post(f"{base}/match/footage-sort/{first['scan_id']}/import", json={})
+    alice_root = match_model.Match.shooter_root(root, "alice")
+    alice = MatchProject.load(alice_root)
+    for video in alice.all_videos():
+        video.fingerprint = None
+    alice.save(alice_root)
+    copy = _copy_elsewhere(tmp_path, shared / "from-carol" / "IMG_0001.MOV", "alice-stage1.mov")
+
+    again = _scan(client, base, copy.parent)
+
+    assert [c["imported_by"] for c in again["clips"]] == ["alice"]
+    assert MatchProject.load(alice_root).all_videos()[0].fingerprint is not None
+
+
+def test_the_per_shooter_scan_skips_a_clip_another_shooter_has(tmp_path: Path, source_clip: Path) -> None:
+    _, client, root, base = _match_app(tmp_path)
+    shared = _shared_folder(tmp_path, source_clip)
+    first = _scan(client, base, shared)
+    client.post(f"{base}/match/footage-sort/{first['scan_id']}/import", json={})
+    copy = _copy_elsewhere(tmp_path, shared / "from-carol" / "IMG_0001.MOV", "alice-stage1.mov")
+
+    resp = client.post(f"{base}/shooters/bob/videos/scan", json={"source_paths": [str(copy)]})
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["registered"] == []
+    assert resp.json()["skipped"] == ["alice-stage1.mov: already imported for Alice"]
+    bob = MatchProject.load(match_model.Match.shooter_root(root, "bob"))
+    assert [Path(v.path).name for v in bob.all_videos()] == ["IMG_0002.MOV"]
