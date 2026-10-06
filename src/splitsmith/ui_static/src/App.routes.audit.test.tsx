@@ -17,6 +17,9 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { vi } from "vitest";
+import { allowLazyPages } from "@/test/lazyRoutes";
+
+allowLazyPages();
 
 const mobile = vi.hoisted(() => ({ value: false }));
 vi.mock("@/lib/useIsMobile", () => ({ useIsMobile: () => mobile.value }));

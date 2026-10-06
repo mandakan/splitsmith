@@ -20,6 +20,9 @@
  */
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import { allowLazyPages } from "@/test/lazyRoutes";
+
+allowLazyPages();
 
 /** How long /api/server/features lags /api/me here. Long enough that
  *  the catch-all's redirect (then LegacyMatchRedirect, since replaced by
