@@ -221,3 +221,21 @@ def test_an_unknown_variant_falls_back_to_default_with_a_warning(caplog: pytest.
         path = looks.template_for(look, "slate", "nope")
     assert path == look.own_template("slate")
     assert "nope" in caplog.text
+
+
+# --- accent series (slice 3, #1243) ----------------------------------------------
+
+
+def test_the_shipped_looks_carry_an_accent_series_of_hex_colours() -> None:
+    for name in ("splitsmith", "clean"):
+        series = looks.load_look(name).accent_series
+        assert len(series) >= 6 and all(len(c) == 7 and c.startswith("#") for c in series), name
+
+
+def test_an_accent_series_entry_must_be_a_hex_colour(user_dir: Path) -> None:
+    d = _write_look(user_dir, "club")
+    manifest = json.loads((d / "look.json").read_text(encoding="utf-8"))
+    manifest["accent_series"] = ["red"]
+    (d / "look.json").write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(looks.LookError):
+        looks.load_look("club")

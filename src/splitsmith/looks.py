@@ -67,6 +67,7 @@ nothing yet)."""
 MANIFEST_FILE = "look.json"
 _NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 _TEMPLATE_FILE_RE = re.compile(r"^[A-Za-z0-9_.-]+\.html$")
+_ACCENT_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 RGB = tuple[int, int, int]
 
@@ -90,6 +91,9 @@ class LookManifest(BaseModel):
     label: str = ""
     colors: dict[str, RGB]
     fonts: dict[str, str] = {}
+    #: The colours shooters without an accent of their own are told apart
+    #: by, by slot index (spec section 2). Empty falls back to ``accent``.
+    accent_series: list[str] = []
     slots: dict[str, SlotVariants] = {}
     source: str | None = None
 
@@ -110,6 +114,14 @@ class LookManifest(BaseModel):
             if any(not 0 <= channel <= 255 for channel in rgb):
                 raise ValueError(f"colour {token!r} has a channel outside 0..255: {rgb!r}")
         return value
+
+    @field_validator("accent_series")
+    @classmethod
+    def _series_shape(cls, value: list[str]) -> list[str]:
+        for colour in value:
+            if not _ACCENT_RE.match(colour):
+                raise ValueError(f"accent_series entry {colour!r} must be a #rrggbb colour")
+        return [colour.lower() for colour in value]
 
     @field_validator("slots", mode="before")
     @classmethod
@@ -155,6 +167,10 @@ class Look(BaseModel):
     @property
     def label(self) -> str:
         return self.manifest.label or self.manifest.name
+
+    @property
+    def accent_series(self) -> tuple[str, ...]:
+        return tuple(self.manifest.accent_series)
 
     def own_template(self, slot: str, variant: str = DEFAULT_VARIANT) -> Path | None:
         """This Look's template for ``slot`` in ``variant``, or ``None``

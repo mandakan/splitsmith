@@ -42,6 +42,7 @@ from .automation import AutomationOverride
 from .config import BeepCandidate, StageData, StageRounds, VideoMatchConfig
 from .export_naming import is_match_export, stage_file_base
 from .fingerprint import clip_fingerprint
+from .identity import ShooterIdentity
 from .storage import Storage
 from .video_match import match_videos_to_stages
 
@@ -972,6 +973,10 @@ class MatchProject(BaseModel):
     # a title page prints. Filled by :meth:`merge_competitor_division` on
     # every pick and stage-times refresh; ``None`` without a scoreboard.
     competitor_division: str | None = None
+    # Per-shooter identity (#1243): accent, logo file under
+    # ``<shooter>/identity/``, club line. On the project so it syncs with
+    # the ``project`` doc; the logo travels over the media channel.
+    identity: ShooterIdentity = Field(default_factory=ShooterIdentity)
     scoreboard_match_id: str | None = None
     # SSI ``content_type`` tier for the linked match (matches the integer the
     # ``ScoreboardClient`` Protocol expects). Populated when the project is
