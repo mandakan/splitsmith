@@ -2457,6 +2457,50 @@ class MatchProject(BaseModel):
 
         return new_primary
 
+    def take_damage(self, storage_path: str) -> list[int]:
+        """Covered stages of a single take that do not hold exactly one
+        registration of its file (#1214), ascending.
+
+        Before #1212 a role change, unassign or move on one stage's clip
+        acted on the first stage's registration: one stage could end up
+        listing the file twice (one shared ``video_id``) and another with
+        none. A path with no ``RawVideo`` coverage is not a take and has
+        no damage.
+        """
+        rv = self.find_raw_video(storage_path)
+        if rv is None or not rv.covers_stages:
+            return []
+        damaged: list[int] = []
+        for stage in self.stages:
+            if stage.stage_number not in rv.covers_stages:
+                continue
+            count = sum(1 for v in stage.videos if str(v.path) == storage_path)
+            if count != 1:
+                damaged.append(stage.stage_number)
+        return sorted(damaged)
+
+    def repair_take(self, storage_path: str) -> list[tuple[int, StageVideo]]:
+        """Clear a damaged take's registrations on its damaged stages (#1214).
+
+        Drops every entry of the file on each stage :meth:`take_damage`
+        names, and any tray copy, so applying the take's coverage again
+        recreates exactly one registration per damaged stage. Undamaged
+        stages are not touched. Returns the removed ``(stage_number,
+        video)`` pairs so the caller can invalidate their caches; empty
+        when the take is healthy.
+        """
+        damaged = set(self.take_damage(storage_path))
+        if not damaged:
+            return []
+        removed: list[tuple[int, StageVideo]] = []
+        for stage in self.stages:
+            if stage.stage_number not in damaged:
+                continue
+            removed.extend((stage.stage_number, v) for v in stage.videos if str(v.path) == storage_path)
+            stage.videos = [v for v in stage.videos if str(v.path) != storage_path]
+        self.unassigned_videos = [v for v in self.unassigned_videos if str(v.path) != storage_path]
+        return removed
+
     def remove_video(
         self,
         path: Path,

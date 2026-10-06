@@ -5670,6 +5670,12 @@ class SuggestCoverageRequest(BaseModel):
     path: str | None = None
 
 
+class TakeRepairRequest(BaseModel):
+    """Body for POST /api/shooters/{slug}/raw-videos/repair (#1214)."""
+
+    filename: str
+
+
 class CoverageEditRequest(BaseModel):
     """Body for PATCH /api/shooters/{slug}/raw-videos/coverage.
 
@@ -10403,6 +10409,45 @@ def create_app(
         if canonical is None:
             raise HTTPException(status_code=500, detail="coverage applied but raw video entry missing")
         return JSONResponse(canonical.model_dump(mode="json"))
+
+    @app.post("/api/shooters/{slug}/raw-videos/repair")
+    def repair_take(
+        slug: str,
+        body: TakeRepairRequest,
+        user: User = Depends(get_current_user),
+    ) -> JSONResponse:
+        """Repair a single take damaged by the old #1212 bug (#1214).
+
+        Damaged stages (``MatchProject.take_damage``: a covered stage that
+        does not hold exactly one registration of the file) lose every
+        entry of the file and their trim/audio caches, the tray copy goes,
+        and the take's coverage recreates one registration per damaged
+        stage, whose beep detection is queued. Undamaged stages, and every
+        stage audit, are kept. A healthy take is a no-op.
+
+        Response: ``{"repaired_stages": [...], "project": {...}}``. 404 when
+        no take is registered at ``raw/<filename>``.
+        """
+        name = _sanitize_raw_filename(body.filename)
+        storage_path = f"raw/{name}"
+        project = state.shooter_project(slug)
+        root = state.shooter_root(slug)
+        rv = project.find_raw_video(storage_path)
+        if rv is None:
+            raise HTTPException(status_code=404, detail=f"no take registered at {storage_path!r}")
+
+        repaired = project.take_damage(storage_path)
+        removed = project.repair_take(storage_path)
+        for stage_number, video in removed:
+            audio_helpers.invalidate_video_audit_trim(root, stage_number, video, project=project)
+        created = (
+            _apply_raw_video_coverage(project, root, storage_path, list(rv.covers_stages)) if repaired else []
+        )
+        if repaired:
+            project.save(root)
+        if created:
+            _queue_take_detects(slug, project, created)
+        return JSONResponse({"repaired_stages": repaired, "project": project.model_dump(mode="json")})
 
     @app.get("/api/shooters/{slug}/raw-videos/overview")
     def raw_video_overview(

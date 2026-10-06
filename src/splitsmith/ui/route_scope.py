@@ -109,6 +109,7 @@ HOSTED_CONFINED_ROUTES: dict[tuple[str, str], str] = {
     ("DELETE", "/api/me/raw/{filename:path}"): _RAW_KEY,
     ("POST", "/api/shooters/{slug}/raw-videos/attach"): _RAW_KEY,
     ("PATCH", "/api/shooters/{slug}/raw-videos/coverage"): "filename selects a registered raw video",
+    ("POST", "/api/shooters/{slug}/raw-videos/repair"): "filename selects a registered raw video",
     ("GET", "/api/shooters/{slug}/raw-videos/overview"): "filename selects a registered raw video",
     ("GET", "/api/shooters/{slug}/raw-videos/peaks"): _RAW_KEY,
     ("POST", "/api/shooters/{slug}/videos/suggest-coverage"): "path is only read in local mode",
