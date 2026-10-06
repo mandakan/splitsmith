@@ -584,6 +584,24 @@ def test_the_per_shooter_scan_skips_a_clip_another_shooter_has(tmp_path: Path, s
     assert [Path(v.path).name for v in bob.all_videos()] == ["IMG_0002.MOV"]
 
 
+def test_the_per_shooter_scan_says_where_an_unassigned_original_is(tmp_path: Path, source_clip: Path) -> None:
+    """The original sits in another shooter's unassigned tray: the skip
+    names the tray, because moving it from there is the fix (#1227)."""
+    _, client, root, base = _match_app(tmp_path)
+    shared = _shared_folder(tmp_path, source_clip)
+    client.post(
+        f"{base}/shooters/alice/videos/scan",
+        json={"source_dir": str(shared / "from-carol"), "auto_assign_primary": False},
+    )
+    copy = _copy_elsewhere(tmp_path, shared / "from-carol" / "IMG_0002.MOV", "bob-stage1.mov")
+
+    resp = client.post(f"{base}/shooters/bob/videos/scan", json={"source_paths": [str(copy)]})
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["registered"] == []
+    assert resp.json()["skipped"] == ["bob-stage1.mov: in Alice's unassigned clips (move it from Unassigned)"]
+
+
 def test_a_copy_of_a_clip_in_the_wrong_tray_moves_the_original(tmp_path: Path, source_clip: Path) -> None:
     """The per-shooter Add footage filed bob's clip under alice; the sort
     then meets a copy of it from another source. The import moves alice's

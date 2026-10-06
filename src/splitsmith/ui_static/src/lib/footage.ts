@@ -214,3 +214,15 @@ export function shortName(path: string): string {
   if (stem.length <= 14) return base;
   return `${stem.slice(0, 4)}…${stem.slice(-4)}${ext}`;
 }
+
+/**
+ * The per-shooter import's skipped files as one line: each entry is the
+ * server's ``<file>: <reason>``, which says where an already-imported clip
+ * is and so what to do about it (#1227). The first ``max`` are named and
+ * the rest counted, so a folder of duplicates stays one readable line.
+ */
+export function skippedSummary(skipped: string[], max = 3): string {
+  const named = skipped.slice(0, max).join("; ");
+  const rest = skipped.length - max;
+  return rest > 0 ? `${named}; and ${rest} more` : named;
+}

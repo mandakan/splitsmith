@@ -7,6 +7,7 @@ import {
   chipBeepMark,
   footageStats,
   shortName,
+  skippedSummary,
   unassignedVideos,
   videoBeep,
 } from "@/lib/footage";
@@ -127,5 +128,19 @@ describe("beep states / shortName", () => {
   it("shortens long stems only", () => {
     expect(shortName("raw/VID_20260627_1403.MP4")).toBe("VID_…1403.MP4");
     expect(shortName("raw/demo.mp4")).toBe("demo.mp4");
+  });
+});
+
+describe("skippedSummary", () => {
+  it("names each skipped file with its reason", () => {
+    expect(skippedSummary(["a.mov: already imported for Alice", "b.mov: in Bob's unassigned clips"])).toBe(
+      "a.mov: already imported for Alice; b.mov: in Bob's unassigned clips",
+    );
+  });
+
+  it("counts the rest past the first few", () => {
+    const skipped = ["a: x", "b: x", "c: x", "d: x", "e: x"];
+    expect(skippedSummary(skipped)).toBe("a: x; b: x; c: x; and 2 more");
+    expect(skippedSummary(skipped.slice(0, 3))).toBe("a: x; b: x; c: x");
   });
 });

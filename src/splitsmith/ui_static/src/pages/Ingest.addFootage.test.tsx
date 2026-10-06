@@ -5,7 +5,7 @@
  * for this call site (spec: whole-folder commits stay valid when no
  * top-level videos show - the backend scan walks recursively).
  */
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -170,6 +170,38 @@ describe("Ingest add-footage (local)", () => {
     );
     // Reloaded after import: initial load + afterImport reload.
     expect(vi.mocked(api.getProject).mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("says why each file was skipped, in the picker when nothing imported (#1227)", async () => {
+    vi.mocked(api.scanVideos).mockResolvedValue({
+      registered: [],
+      auto_assigned: {},
+      auto_secondary: {},
+      skipped: ["GH010001.MP4: in Bob's unassigned clips (move it from Unassigned)"],
+    });
+    const user = userEvent.setup();
+    renderIngest();
+    await user.click(await screen.findByRole("button", { name: /pick a folder/i }));
+    await user.click(await screen.findByRole("button", { name: /add this folder/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "No new videos. Skipped GH010001.MP4: in Bob's unassigned clips (move it from Unassigned)",
+    );
+  });
+
+  it("says why each file was skipped, on the page after a partial import (#1227)", async () => {
+    vi.mocked(api.scanVideos).mockResolvedValue({
+      registered: ["/Users/op/Movies/GH010001.MP4"],
+      auto_assigned: {},
+      auto_secondary: {},
+      skipped: ["GH010002.MP4: already imported for Bob"],
+    });
+    const user = userEvent.setup();
+    renderIngest();
+    await user.click(await screen.findByRole("button", { name: /pick a folder/i }));
+    await user.click(await screen.findByRole("button", { name: /add this folder/i }));
+    const line = await screen.findByText(/Skipped GH010002\.MP4: already imported for Bob/);
+    await user.click(within(line).getByRole("button", { name: /dismiss/i }));
+    expect(screen.queryByText(/Skipped GH010002/)).not.toBeInTheDocument();
   });
 
   it("keeps the folder commit enabled when the folder shows no direct videos (allowEmptyFolder on)", async () => {

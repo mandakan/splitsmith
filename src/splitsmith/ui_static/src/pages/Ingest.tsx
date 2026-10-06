@@ -53,7 +53,7 @@ import { isJobActive } from "@/lib/jobs";
 import { openSortText } from "@/lib/footageSort";
 import { useCan } from "@/lib/access";
 import { useDeploymentMode } from "@/lib/features";
-import { buildFootageRows, footageStats, unassignedVideos, type UnassignedItem } from "@/lib/footage";
+import { buildFootageRows, footageStats, skippedSummary, unassignedVideos, type UnassignedItem } from "@/lib/footage";
 import { pickDefaultShooterSlug } from "@/lib/defaultShooter";
 import { useMatchHref } from "@/lib/matchHref";
 import { useUploads } from "@/lib/uploads";
@@ -181,6 +181,9 @@ function IngestInner({ slug }: { slug: string }) {
   const [lastImportedPaths, setLastImportedPaths] = useState<string[] | null>(null);
   // B1: Blocked stages surfaced after a move attempt.
   const [moveBlocked, setMoveBlocked] = useState<MoveShooterBlocked[]>([]);
+  // Files the last per-shooter import skipped, with the server's reason;
+  // shown after a partial import (a full skip keeps the picker open).
+  const [skippedFiles, setSkippedFiles] = useState<string[]>([]);
   // Stage assignments are applied optimistically (instant UI) but their POSTs
   // are serialized: the backend saves the project doc under optimistic version
   // locking, so overlapping writes would 409. moveChain threads each write
@@ -316,6 +319,7 @@ function IngestInner({ slug }: { slug: string }) {
     // Reload regardless of count -- partial successes also need a refresh
     // for the user's stage tray to reflect the new videos.
     setError(null);
+    setSkippedFiles([]);
     // B1: capture the batch for the post-import banner.
     if (paths.length > 0) {
       setLastImportedPaths(paths);
@@ -339,10 +343,11 @@ function IngestInner({ slug }: { slug: string }) {
     if (result.registered.length === 0) {
       throw new Error(
         result.skipped.length > 0
-          ? `No new videos - ${result.skipped.length} skipped (already imported or unsupported)`
+          ? `No new videos. Skipped ${skippedSummary(result.skipped)}`
           : "No video files found in this folder",
       );
     }
+    setSkippedFiles(result.skipped);
   }
 
   // "Sort across shooters": every unassigned video in the match goes to
@@ -375,8 +380,13 @@ function IngestInner({ slug }: { slug: string }) {
     );
     await afterImport(result.registered.length, result.registered);
     if (result.registered.length === 0) {
-      throw new Error("Nothing imported - the selected files were skipped");
+      throw new Error(
+        result.skipped.length > 0
+          ? `Nothing imported. Skipped ${skippedSummary(result.skipped)}`
+          : "Nothing imported",
+      );
     }
+    setSkippedFiles(result.skipped);
   }
 
   async function moveShooterBatch(targetSlug: string, videoPaths: string[]) {
@@ -885,6 +895,15 @@ function IngestInner({ slug }: { slug: string }) {
         <p role="status" className="mb-4 text-sm text-live">
           {moveBlocked.length} {moveBlocked.length === 1 ? "stage" : "stages"} not moved: the destination already had reviewed footage.{" "}
           <button type="button" onClick={() => setMoveBlocked([])} className="text-ink-2 hover:text-ink">
+            Dismiss
+          </button>
+        </p>
+      ) : null}
+
+      {skippedFiles.length > 0 ? (
+        <p role="status" className="mb-4 text-sm text-ink-2">
+          Skipped {skippedSummary(skippedFiles)}.{" "}
+          <button type="button" onClick={() => setSkippedFiles([])} className="text-muted hover:text-ink">
             Dismiss
           </button>
         </p>
