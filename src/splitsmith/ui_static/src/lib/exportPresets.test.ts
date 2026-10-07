@@ -78,6 +78,20 @@ describe("title_division", () => {
   });
 });
 
+describe("made_with", () => {
+  it("is on by default, a body stored before it shipped applies it on, and off round-trips", () => {
+    expect(DEFAULT_EXPORT_SETTINGS.renderOptions.madeWith).toBe(true);
+    const legacy: Partial<ExportPresetBody> = { ...YOUTUBE };
+    delete legacy.made_with;
+    const off = { ...DEFAULT_EXPORT_SETTINGS.renderOptions, madeWith: false };
+    const applied = applyBody({ ...DEFAULT_EXPORT_SETTINGS, renderOptions: off }, legacy as ExportPresetBody);
+    expect(applied.renderOptions.madeWith).toBe(true);
+    const offSettings = { ...DEFAULT_EXPORT_SETTINGS, renderOptions: off };
+    expect(settingsToBody(offSettings).made_with).toBe(false);
+    expect(applyBody(DEFAULT_EXPORT_SETTINGS, settingsToBody(offSettings)).renderOptions.madeWith).toBe(false);
+  });
+});
+
 describe("non-finite seconds", () => {
   it("a field being edited (NaN) is stored as its default, never as NaN", () => {
     const s: ExportSettings = { ...DEFAULT_EXPORT_SETTINGS, transitionSeconds: Number.NaN, headPad: Number.NaN };

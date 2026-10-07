@@ -1066,3 +1066,25 @@ def test_per_slot_variants_reach_the_grid_cards(tmp_path: Path, monkeypatch: pyt
         json={"stage_numbers": [1], "audio_from": "mathias", "overlay_theme": "nope"},
     )
     assert refused.status_code == 422 and "splitsmith" in refused.text
+
+
+def test_the_grid_closing_card_says_made_with_splitsmith_unless_off(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: list[dict[str, Any]] = []
+
+    def fake_render(shooters: Any, *, audio_label: str, output_path: Path, **kwargs: Any) -> Any:
+        captured.append(kwargs)
+        return _fake_render_grid_mp4(shooters, audio_label=audio_label, output_path=output_path)
+
+    monkeypatch.setattr(pl_mod.fcpxml_gen, "probe_video", _fake_probe)
+    monkeypatch.setattr(mp4_grid_mod, "render_grid_mp4", fake_render)
+    match_root = _seed_match(tmp_path, shooters=["mathias"], stage_numbers=[1])
+    _write_trims(match_root, slug="mathias", stage_numbers=[1])
+    client = _MatchClient(_match_create_app(project_root=match_root, project_name="Compare Match"))
+    body = {"stage_numbers": [1], "audio_from": "mathias", "closing_card": True}
+    for extra in ({}, {"made_with": False}):
+        response = client.post("/api/match/compare-export", json={**body, **extra})
+        assert response.status_code == 200
+        assert _wait_for_job(client, response.json()["id"])["status"] == "succeeded"
+    assert [c["closing"].credit for c in captured[-2:]] == [True, False]

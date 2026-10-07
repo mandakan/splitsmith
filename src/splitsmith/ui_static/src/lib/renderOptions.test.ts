@@ -26,6 +26,7 @@ const ON: RenderOptions = {
   titleDivision: false,
   titlePageDurationSeconds: 4,
   closingCard: true,
+  madeWith: false,
   stageCardStyle: "slate",
   stageCardDurationSeconds: 2,
   summaryHoldSeconds: 3,
@@ -50,6 +51,7 @@ describe("matchExportFields", () => {
       title_division: false,
       title_page_duration_seconds: 4,
       closing_card: true,
+      made_with: false,
       summary_hold_seconds: 3,
     });
   });
@@ -70,6 +72,7 @@ describe("matchExportFields", () => {
       title_division: true,
       title_page_duration_seconds: 3,
       closing_card: false,
+      made_with: true,
       summary_hold_seconds: 0,
     });
   });
@@ -90,6 +93,7 @@ describe("gridExportFields", () => {
       title_division: false,
       title_page_duration_seconds: 4,
       closing_card: true,
+      made_with: false,
     });
     expect("summary_hold_seconds" in fields).toBe(false);
     expect("title_kind" in fields).toBe(false);

@@ -99,6 +99,8 @@ class PreviewSpec:
     #: the surface without one), or the drawn range scene ``looks preview``
     #: uses, the same on every stage and on hosted (the Look editor's switch).
     backdrop: Literal["footage", "demo"] = "footage"
+    #: "Made with splitsmith" on the closing card.
+    made_with: bool = True
     #: The event logo's content name (the branding work), for the cache key;
     #: the file itself reaches :func:`render_preview` as ``event_logo``.
     event_logo: str | None = None
@@ -155,6 +157,8 @@ def preview_key(
         fields["backdrop"] = spec.backdrop
     if spec.event_logo is not None:
         fields["event_logo"] = spec.event_logo
+    if spec.card == "closing" and spec.made_with:
+        fields["credit"] = True
     payload = json.dumps(
         {
             **fields,
@@ -385,6 +389,7 @@ def render_preview(
             info=title_info_lines(project, extra=spec.title_info, division=spec.title_division),
             variant=spec.variant,
             logo=event_logo,
+            credit=spec.card == "closing" and spec.made_with,
         )
         slot = "title_page" if spec.card == "title" else "closing"
         if moving:

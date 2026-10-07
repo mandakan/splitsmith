@@ -187,6 +187,10 @@ def card_scale(height: int) -> CellScale:
     return CellScale.for_cell(height)
 
 
+#: The closing card's credit line (``MatchTitle.credit``).
+CREDIT_TEXT = "Made with splitsmith"
+
+
 def card_context(
     card: Card,
     *,
@@ -223,6 +227,10 @@ def card_context(
         # The event's logo, a corner mark (``_shared/event.js``); its URL
         # is a ``logo`` value, which the sandbox mounts by that name.
         data["event"] = {"logo": Path(event_logo).resolve().as_uri()}
+    if getattr(card, "credit", False) and slot == "closing":
+        # "Made with splitsmith" (``_shared/credit.js``); a card without it
+        # sends no key, so its context and pixels are what they were.
+        data["credit"] = {"text": CREDIT_TEXT}
     return TemplateContext(
         theme=theme_tokens(theme),
         data=data,

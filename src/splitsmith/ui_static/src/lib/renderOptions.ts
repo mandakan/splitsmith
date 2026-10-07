@@ -32,6 +32,8 @@ export interface RenderOptions {
   titlePageDurationSeconds: number;
   /** Close with a card that repeats the title page. */
   closingCard: boolean;
+  /** "Made with splitsmith" at the bottom of the closing card. */
+  madeWith: boolean;
   /** A card per stage: a slate before it, or a lower-third over its head. */
   stageCardStyle: StageCardStyle;
   /** Seconds a stage card shows for. */
@@ -47,6 +49,7 @@ export const DEFAULT_RENDER_OPTIONS: RenderOptions = {
   titleDivision: true,
   titlePageDurationSeconds: 3,
   closingCard: false,
+  madeWith: true,
   stageCardStyle: "none",
   stageCardDurationSeconds: 1.5,
   summaryHoldSeconds: 0,
@@ -101,6 +104,7 @@ export type MatchExportCardFields = Pick<
       | "title_division"
       | "title_page_duration_seconds"
       | "closing_card"
+      | "made_with"
       | "summary_hold_seconds"
       | "title_page_variant"
       | "stage_card_variant"
@@ -132,6 +136,7 @@ export function matchExportFields(
     title_division: options.titleDivision,
     title_page_duration_seconds: clampSeconds(options.titlePageDurationSeconds, MIN_CARD_SECONDS),
     closing_card: options.closingCard,
+    made_with: options.madeWith,
     summary_hold_seconds: clampSeconds(options.summaryHoldSeconds, 0),
     ...variantFields(look, ["title_page_variant", "closing_card_variant"]),
   };
@@ -152,6 +157,7 @@ export function gridExportFields(
   | "title_division"
   | "title_page_duration_seconds"
   | "closing_card"
+  | "made_with"
   | "title_page_variant"
   | "stage_card_variant"
   | "closing_card_variant"
@@ -164,6 +170,7 @@ export function gridExportFields(
     title_division: options.titleDivision,
     title_page_duration_seconds: clampSeconds(options.titlePageDurationSeconds, MIN_CARD_SECONDS),
     closing_card: options.closingCard,
+    made_with: options.madeWith,
     ...variantFields(look, ["title_page_variant", "stage_card_variant", "closing_card_variant"]),
   };
 }

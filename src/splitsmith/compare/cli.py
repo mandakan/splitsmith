@@ -148,6 +148,11 @@ def export(
     closing_card: bool = typer.Option(
         False, "--closing-card", help="Close the rendered grid with a generated card. --format mp4 only."
     ),
+    made_with: bool = typer.Option(
+        True,
+        "--made-with/--no-made-with",
+        help="'Made with splitsmith' at the bottom of the closing card.",
+    ),
     card_variant: str = typer.Option(
         "default",
         "--card-variant",
@@ -293,6 +298,7 @@ def export(
                 title_division=title_division,
                 title_page_duration_seconds=title_page_duration,
                 closing_card=closing_card,
+                made_with=made_with,
                 card_variant=card_variant,
             ),
         )
