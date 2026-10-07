@@ -1,0 +1,56 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>starter: sting</title>
+<!--
+  A sting: drawn over the crossfade between two stages, for the whole
+  transition. It gets data.transition instead of data.card:
+    { kind, name, duration_seconds, from, to }
+  where from and to name what is either side of the cut. duration() must
+  return the transition's length: the renderer samples exactly that many
+  seconds. poster() is the moment previews show, here the middle.
+  Pick it in a Look's look.json under "transition", then use it as
+  --transition sting:<name>. Guide: docs/looks/authoring.md#stings
+-->
+<script>
+  document.write('<style>' + window.splitsmith.engine.css + '</style>');
+</script>
+<style>
+  html, body { margin: 0; background: transparent; overflow: hidden; }
+  .band { position: absolute; top: 0; bottom: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  .label {
+    font-family: "Splitsmith Display", sans-serif; font-weight: 700; text-transform: uppercase;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 85%;
+  }
+</style>
+</head>
+<body>
+<div class="band" id="band"><div class="label" id="label"></div></div>
+<script>
+  var S = window.splitsmith;
+  var W = S.size.width, H = S.size.height;
+  var seconds = Number(S.data.transition.duration_seconds) || 0.5;
+  var band = document.getElementById('band');
+  var width = Math.round(W * 0.4);
+  band.style.width = width + 'px';
+  band.style.left = -width + 'px';
+  band.style.background = S.theme.accent;
+
+  var label = document.getElementById('label');
+  label.textContent = S.data.transition.to || '';
+  label.style.color = S.theme.ink;
+  label.style.fontSize = Math.round(H * 0.07) + 'px';
+
+  // Off the left edge, across, off the right edge; centred at the middle.
+  var sweep = band.animate(
+    [{ transform: 'translateX(0)' }, { transform: 'translateX(' + (W + width) + 'px)' }],
+    { duration: seconds * 1000, easing: 'cubic-bezier(0.65, 0, 0.35, 1)', fill: 'both' }
+  );
+  sweep.pause();
+  window.duration = function () { return seconds; };
+  window.poster = function () { return seconds / 2; };
+  window.seek = function (t) { sweep.currentTime = t * 1000; };
+</script>
+</body>
+</html>

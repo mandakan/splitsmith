@@ -213,6 +213,21 @@ directory, the shipped default's standing in for one a Look lacks
 (``looks.preview_file``); the shipped previews are rendered by
 ``scripts/render_look_thumbnails.py --look-previews``.
 
+Authoring a Look (epic #1267, spec 2026-10-07): ``splitsmith looks list |
+new | check | preview`` (``looks_cli`` over ``look_tools``) and the guide
+``docs/looks/authoring.md`` with four starters in ``data/looks/_starters/``.
+``looks check`` loads every template a Look owns through
+``ChromiumRasterizer.probe_template`` against three sample cards (one
+shooter with a logo, two without, a 52-character stage name) and words what
+it saw: script errors, an animation without ``seek``, ``poster()`` outside
+``duration()``, fonts other than the two bundled faces, and text cut off by
+the canvas or a clipping ancestor (an ellipsis is fine); it reads a broken
+user Look strictly (``looks.read_look``), where ``load_look`` would fall back
+to the shipped one. The shipped Look fails its own width check on long names
+today (#1268, pinned ``xfail(strict=True)``). On hosted, Looks carry colours
+and card styles only until the sandboxed template loader (#1266) ships: a
+template is code running on our server.
+
 A shooter has an **identity** (``splitsmith.identity``, spec section 2,
 #1243): ``MatchProject.identity`` holds an optional ``#rrggbb`` accent, a
 club line and the name of a logo under ``<shooter>/identity/``

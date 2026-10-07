@@ -50,7 +50,7 @@ import tempfile
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from PIL import Image
 from playwright.sync_api import Browser, Playwright, sync_playwright
@@ -60,6 +60,22 @@ if TYPE_CHECKING:
     from .look_template import TemplateContext
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class TemplateProbe:
+    """What :meth:`ChromiumRasterizer.probe_template` saw in a loaded
+    template at its poster frame (issue #1262): the script errors, the
+    animation hooks, the first font family of every visible piece of text,
+    and text that runs past the canvas or its own clipped box (with the
+    overrun in CSS pixels). The authoring checks (``look_tools``) word it."""
+
+    errors: tuple[str, ...] = ()
+    duration: float = 0.0
+    poster: float = 0.0
+    has_seek: bool = False
+    families: tuple[str, ...] = ()
+    overflow: tuple[tuple[str, int], ...] = ()
 
 
 @dataclass
@@ -387,6 +403,102 @@ class ChromiumRasterizer:
     def _check(errors: list[str], template: Path) -> None:
         if errors:
             raise TemplateScriptError(f"{template.name}: {errors[0]}")
+
+    _PROBE = """(() => {
+      const families = new Set();
+      const overflow = [];
+      const W = window.innerWidth, H = window.innerHeight;
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      let node;
+      while ((node = walker.nextNode())) {
+        const text = node.textContent.trim();
+        if (!text) continue;
+        const el = node.parentElement;
+        if (!el || el.closest('script, style')) continue;
+        const cs = getComputedStyle(el);
+        if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+        let seen = true;
+        for (let a = el; a; a = a.parentElement) {
+          if (Number(getComputedStyle(a).opacity) === 0) { seen = false; break; }
+        }
+        if (!seen) continue;
+        families.add(cs.fontFamily.split(',')[0].trim().replace(/^["']|["']$/g, ''));
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        const full = range.getBoundingClientRect();
+        if (full.width === 0 && full.height === 0) continue;
+        // What shows is the text cut by every ancestor that clips: an
+        // ellipsized label inside a band is not text running off the card.
+        // The body and the root are not boxes: a template's
+        // ``body { overflow: hidden }`` over absolute content is 0 px tall,
+        // and the viewport is what clips there (``past`` below).
+        let r = {left: full.left, right: full.right, top: full.top, bottom: full.bottom};
+        let ellipsis = cs.textOverflow === 'ellipsis';
+        for (let a = el; a && a !== document.body && a !== document.documentElement; a = a.parentElement) {
+          const acs = getComputedStyle(a);
+          if (acs.overflow === 'visible') continue;
+          if (acs.textOverflow === 'ellipsis') ellipsis = true;
+          const c = a.getBoundingClientRect();
+          r = {left: Math.max(r.left, c.left), right: Math.min(r.right, c.right),
+               top: Math.max(r.top, c.top), bottom: Math.min(r.bottom, c.bottom)};
+        }
+        if (r.right <= r.left || r.bottom <= r.top) continue;
+        const past = Math.max(0, -r.left, r.right - W, -r.top, r.bottom - H);
+        // Cut off by a clipping ancestor: a finding, unless the text ends in
+        // an ellipsis (its own or its clipping box's), which is the template
+        // saying it is fine.
+        const cut = ellipsis ? 0 : Math.max(0, r.left - full.left, full.right - r.right,
+                                               r.top - full.top, full.bottom - r.bottom);
+        const by = Math.round(Math.max(past, cut));
+        if (by > 1) overflow.push([text.slice(0, 60), by]);
+      }
+      return {families: [...families], overflow, hasSeek: typeof window.seek === 'function'};
+    })()"""
+
+    def probe_template(
+        self, template: Path, *, context: TemplateContext, width: int, height: int
+    ) -> TemplateProbe:
+        """Load ``template`` as :meth:`render_template` does (the context,
+        fonts, the poster seek, the fit policy) and report what the
+        authoring checks need, instead of a picture: script errors from
+        any point of the load, ``duration()`` / ``poster()`` / whether
+        ``seek`` exists, the font families visible text uses, and text
+        that overruns the canvas or a clipped box. Never raises for a
+        template's own error; that is a finding, not a failure."""
+        if self._browser is None:
+            raise RuntimeError(
+                "ChromiumRasterizer.probe_template() called outside its own 'with' block -- the browser is "
+                "only live between __enter__ and __exit__"
+            )
+        browser_context, page, errors = self._open_template(
+            template, context=context, width=width, height=height
+        )
+
+        def hook(call: Callable[[], Any], default: Any) -> Any:
+            # A template's own hook that throws is a finding like a load error.
+            try:
+                return call()
+            except PlaywrightError as exc:
+                errors.append(str(exc).removeprefix("Page.evaluate: ").splitlines()[0])
+                return default
+
+        try:
+            duration = float(hook(lambda: page.evaluate(self._DURATION), 0) or 0)
+            poster = float(hook(lambda: page.evaluate(self._POSTER), 0) or 0)
+            hook(lambda: self._seek(page, poster), None)
+            page.evaluate("document.fonts.ready")
+            hook(lambda: page.evaluate("window.__splitsmithFit && window.__splitsmithFit()"), None)
+            seen = page.evaluate(self._PROBE)
+            return TemplateProbe(
+                errors=tuple(errors),
+                duration=duration,
+                poster=poster,
+                has_seek=bool(seen["hasSeek"]),
+                families=tuple(seen["families"]),
+                overflow=tuple((str(t), int(b)) for t, b in seen["overflow"]),
+            )
+        finally:
+            browser_context.close()
 
     def render_template(self, template: Path, *, context: TemplateContext, width: int, height: int) -> bytes:
         """Render a Look template to a ``width`` x ``height`` alpha PNG at

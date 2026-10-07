@@ -1,0 +1,78 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>starter: animated card</title>
+<!--
+  An animated card: the still card's layout, with each line rising into
+  place. The renderer never plays the animation in real time. It asks
+  three questions and steps through the answer frame by frame:
+    duration()  how many seconds the animation lasts (0 = a still card)
+    seek(t)     put every animation at t seconds, paused
+    poster()    the moment the previews show; the end of the rise, so a
+                preview never shows an empty first frame
+  After the animation ends its last frame holds for the rest of the card.
+  Web Animations (element.animate) made pausable is the simplest way to
+  answer seek(). Guide: docs/looks/authoring.md#animation
+-->
+<script>
+  document.write('<style>' + window.splitsmith.engine.css + '</style>');
+</script>
+<style>
+  html, body { margin: 0; background: transparent; overflow: hidden; }
+  .card {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 0.6em; text-align: center;
+  }
+  .title { font-family: "Splitsmith Display", sans-serif; font-weight: 700; line-height: 1; white-space: nowrap; }
+  .info { font-family: "Splitsmith Mono", monospace; letter-spacing: 0.04em; white-space: nowrap; }
+</style>
+</head>
+<body>
+<div class="card" id="card"></div>
+<script>
+  var S = window.splitsmith;
+  var H = S.size.height;
+  var RISE_MS = 500;      // each line's rise
+  var STAGGER_MS = 120;   // the gap between lines
+
+  var card = document.getElementById('card');
+  var lines = [S.data.card.text].concat(S.data.card.info || []);
+  lines.forEach(function (text, i) {
+    var div = document.createElement('div');
+    div.className = i === 0 ? 'title' : 'info';
+    div.textContent = text;
+    div.style.color = i === 0 ? S.theme.ink : S.theme.ink_2;
+    div.style.fontSize = Math.round(H * (i === 0 ? 0.11 : 0.035)) + 'px';
+    card.appendChild(div);
+  });
+
+  // One paused animation per line; seek() moves them all.
+  var animations = Array.prototype.map.call(card.children, function (el, i) {
+    var a = el.animate(
+      [{ opacity: 0, transform: 'translateY(0.6em)' }, { opacity: 1, transform: 'translateY(0)' }],
+      { duration: RISE_MS, delay: i * STAGGER_MS, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)', fill: 'both' }
+    );
+    a.pause();
+    return a;
+  });
+  var totalSeconds = (RISE_MS + STAGGER_MS * Math.max(0, lines.length - 1)) / 1000;
+
+  window.duration = function () { return totalSeconds; };
+  window.poster = function () { return totalSeconds; };
+  window.seek = function (t) { animations.forEach(function (a) { a.currentTime = t * 1000; }); };
+
+  window.__splitsmithFit = function () {
+    var max = S.size.width * 0.9;
+    Array.prototype.forEach.call(card.children, function (el) {
+      var size = parseFloat(el.style.fontSize);
+      while (el.scrollWidth > max && size > S.engine.min_font_size) {
+        size -= 1;
+        el.style.fontSize = size + 'px';
+      }
+    });
+  };
+</script>
+</body>
+</html>
