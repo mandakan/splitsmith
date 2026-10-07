@@ -3488,6 +3488,7 @@ def register_job_bodies(state: AppState) -> None:
                 video.beep_peak_amplitude = None
                 video.beep_duration_ms = None
                 video.beep_candidates = []
+                video.beep_ranker_version = None
                 video.beep_reviewed = False
                 video.processed["beep"] = True
                 video.beep_alignment_confidence = None
@@ -3522,6 +3523,7 @@ def register_job_bodies(state: AppState) -> None:
                 video.beep_peak_amplitude = None
                 video.beep_duration_ms = None
                 video.beep_candidates = []
+                video.beep_ranker_version = None
                 video.beep_reviewed = False
                 video.processed["beep"] = True
                 # Surface the cross-correlation confidence whenever we got one,
@@ -3565,6 +3567,7 @@ def register_job_bodies(state: AppState) -> None:
             video.beep_duration_ms = beep.duration_ms
             video.beep_confidence = beep.confidence
             video.beep_candidates = list(beep.candidates)
+            video.beep_ranker_version = getattr(beep, "ranker_version", None)
             video.beep_auto_detect_failed = False
             video.beep_alignment_confidence = None
             video.beep_alignment_delta_ms = None
@@ -3663,6 +3666,7 @@ def register_job_bodies(state: AppState) -> None:
                 v_fresh.beep_duration_ms = video.beep_duration_ms
                 v_fresh.beep_confidence = video.beep_confidence
                 v_fresh.beep_candidates = list(video.beep_candidates)
+                v_fresh.beep_ranker_version = video.beep_ranker_version
                 v_fresh.beep_reviewed = video.beep_reviewed
                 v_fresh.beep_auto_detect_failed = video.beep_auto_detect_failed
                 v_fresh.beep_alignment_confidence = video.beep_alignment_confidence
@@ -11923,6 +11927,7 @@ def create_app(
         video.beep_peak_amplitude = None
         video.beep_duration_ms = None
         video.beep_candidates = []
+        video.beep_ranker_version = None
         video.beep_reviewed = False
         video.beep_auto_detect_failed = False
         video.processed["beep"] = False
@@ -12455,6 +12460,7 @@ def create_app(
             video.beep_duration_ms = None
             video.beep_confidence = None
             video.beep_candidates = []
+            video.beep_ranker_version = None
             video.beep_auto_detect_failed = False
             video.beep_alignment_confidence = None
             video.beep_alignment_delta_ms = None
@@ -12472,6 +12478,7 @@ def create_app(
             # where the beep is, so the auto-trust gate (#219) opens.
             video.beep_confidence = 1.0
             video.beep_candidates = []
+            video.beep_ranker_version = None
             video.beep_auto_detect_failed = False
             video.beep_alignment_confidence = None
             video.beep_alignment_delta_ms = None

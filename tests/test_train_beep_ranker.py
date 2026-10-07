@@ -200,6 +200,9 @@ def test_top1_counts_when_either_of_two_positive_candidates_wins() -> None:
 class _SpyModel:
     """Records the labels each fit saw; predicts the first feature as P."""
 
+    coef_ = [[0.0, 0.0]]
+    intercept_ = [0.0]
+
     def __init__(self, log: list) -> None:
         self.log = log
         self.stems: list[str] = []
@@ -311,3 +314,45 @@ def test_a_candidate_table_shows_both_rankings_and_the_offsets() -> None:
         (3, 3, -3000.0, False),
     ]
     assert table[0]["model_prob"] == 0.7 and table[1]["heuristic_score"] == 0.9
+
+
+def test_the_final_head_is_fitted_on_every_clip_with_rows(monkeypatch) -> None:
+    """Spec 4 and the 2026-10-06 decision: the shipped head is one fit over
+    every clip's out-of-fold logits, unreachable clips included."""
+    m = _script()
+    _, head_fits = _spy_hooks(m, monkeypatch)
+    clips = [
+        _clip(m, "stage-shots-a-2026-stage1-s0", [True, False], [0.9, 0.1]),
+        _clip(m, "stage-shots-b-2026-stage1-s0", [False, False], [0.8, 0.2]),
+    ]
+    probs = {c.stem: [r.features[0] for r in c.rows] for c in clips}
+
+    head = m.fit_final_head(clips, probs)
+
+    assert head_fits[-1][0] == ["stage-shots-a-2026-stage1-s0", "stage-shots-b-2026-stage1-s0"]
+    assert head == {"coef": [0.0, 0.0], "intercept": 0.0}
+
+
+def test_collect_records_the_heuristic_ranking_whatever_the_default(tmp_path) -> None:
+    """The report's "today" column is the hand-written ranker. With the learned
+    ranker as the default, a collect that used the default would compare the
+    model against itself."""
+    import yaml
+
+    from splitsmith.beep_calibration import load_manifest as load
+    from splitsmith.beep_detect import detect_beep, load_audio
+    from splitsmith.config import BeepDetectConfig, BeepRankerConfig
+
+    fixtures = Path(__file__).resolve().parent / "fixtures"
+    entry = load(fixtures / "beep_calibration" / "manifest.yaml").fixtures[1]
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text(yaml.safe_dump({"fixtures": [entry.model_dump(exclude_none=True)]}))
+
+    [clip] = _script().collect(manifest, fixtures)
+
+    audio, sr = load_audio(fixtures / entry.clip_wav)
+    heuristic = detect_beep(
+        audio, sr, BeepDetectConfig(top_n_candidates=10_000, ranker=BeepRankerConfig(ranker="heuristic"))
+    )
+    assert [r.heuristic_score for r in clip.rows] == [c.score for c in heuristic.candidates]
+    assert [r.heuristic_confidence for r in clip.rows] == [c.confidence for c in heuristic.candidates]

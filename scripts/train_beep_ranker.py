@@ -31,7 +31,7 @@ import numpy as np
 from splitsmith.beep_calibration import BeepFixtureEntry, load_manifest
 from splitsmith.beep_detect import BeepNotFoundError, detect_beep, load_audio
 from splitsmith.beep_features import feature_vector
-from splitsmith.config import BeepDetectConfig, BeepDetection
+from splitsmith.config import BeepDetectConfig, BeepDetection, BeepRankerConfig
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures"
@@ -98,7 +98,10 @@ def clip_from_detection(entry: BeepFixtureEntry, detection: BeepDetection | None
 
 def collect(manifest_path: Path = MANIFEST_PATH, fixtures_dir: Path = FIXTURES_DIR) -> list[Clip]:
     """Every manifest fixture's clip track, every candidate kept."""
-    config = BeepDetectConfig(top_n_candidates=ALL_CANDIDATES)
+    # Rows carry today's ranking and confidence ("heuristic_*"): the learned
+    # ranker is the detector's default now, and a collect on the default would
+    # compare the model against itself.
+    config = BeepDetectConfig(top_n_candidates=ALL_CANDIDATES, ranker=BeepRankerConfig(ranker="heuristic"))
     clips = []
     for entry in load_manifest(manifest_path).fixtures:
         audio, sr = load_audio(fixtures_dir / entry.clip_wav)
@@ -179,38 +182,78 @@ def oof_probs(clips: list[Clip], make_model: Callable[[], Any]) -> dict[str, lis
     return out
 
 
+def _head_table(cs: list[Clip], probs: dict[str, list[float]]) -> tuple[np.ndarray, np.ndarray]:
+    """The confidence head's rows: [logit, margin] per candidate; target 1 when
+    the candidate is its clip's top-1 by ``probs`` and it is positive."""
+    xs, y = [], []
+    for c in cs:
+        z = clip_logits(probs[c.stem])
+        mg = margins(z)
+        best = int(np.argmax(probs[c.stem]))
+        for i, row in enumerate(c.rows):
+            xs.append([z[i], mg[i]])
+            y.append(int(i == best and row.positive))
+    return np.array(xs, dtype=np.float64), np.array(y, dtype=np.int8)
+
+
 def oof_head_confidence(clips: list[Clip], probs: dict[str, list[float]]) -> dict[str, list[float]]:
     """Leave-one-match-out confidence head over [logit, margin] (spec 4).
-    Target per row: it is its clip's top-1 by ``probs`` and it is positive.
     Fitted over all clips with rows, unreachable ones included."""
-
-    def table(cs: list[Clip]) -> tuple[np.ndarray, np.ndarray]:
-        xs, y = [], []
-        for c in cs:
-            z = clip_logits(probs[c.stem])
-            mg = margins(z)
-            best = int(np.argmax(probs[c.stem]))
-            for i, row in enumerate(c.rows):
-                xs.append([z[i], mg[i]])
-                y.append(int(i == best and row.positive))
-        return np.array(xs, dtype=np.float64), np.array(y, dtype=np.int8)
-
     with_rows = [c for c in clips if c.rows and c.stem in probs]
     out: dict[str, list[float]] = {}
     for group in sorted({c.group for c in with_rows}):
         train = [c for c in with_rows if c.group != group]
-        x, y = table(train)
+        x, y = _head_table(train, probs)
         head = None
         if len(set(y.tolist())) == 2:
             head = _make_head()
             _head_fit_hook(head, train)
             head.fit(x, y)
         for c in (c for c in with_rows if c.group == group):
-            xc, _ = table([c])
+            xc, _ = _head_table([c], probs)
             out[c.stem] = (
                 [float(p) for p in head.predict_proba(xc)[:, 1]] if head is not None else [0.0] * len(c.rows)
             )
     return out
+
+
+def fit_final_head(clips: list[Clip], probs: dict[str, list[float]]) -> dict[str, Any]:
+    """The head that ships: one fit over every clip's out-of-fold logits,
+    unreachable clips included (spec 4)."""
+    with_rows = [c for c in clips if c.rows and c.stem in probs]
+    x, y = _head_table(with_rows, probs)
+    head = _make_head()
+    _head_fit_hook(head, with_rows)
+    head.fit(x, y)
+    return {
+        "coef": [round(float(v), 8) for v in head.coef_[0]],
+        "intercept": round(float(head.intercept_[0]), 8),
+    }
+
+
+def final_head_bins(
+    clips: list[Clip], probs: dict[str, list[float]], head: dict[str, Any], thresholds: Sequence[float]
+) -> list[dict[str, Any]]:
+    """The shipped head applied to each clip's out-of-fold winner: how many
+    clear each threshold and how many of those are wrong."""
+    a, b = head["coef"]
+    winners = []
+    for c in clips:
+        if not c.rows or c.stem not in probs:
+            continue
+        z = clip_logits(probs[c.stem])
+        mg = margins(z)
+        best = int(np.argmax(probs[c.stem]))
+        conf = 1.0 / (1.0 + math.exp(-(a * z[best] + b * mg[best] + head["intercept"])))
+        winners.append((conf, c.rows[best].positive))
+    return [
+        {
+            "threshold": t,
+            "n": sum(1 for conf, _ in winners if conf >= t),
+            "wrong": sum(1 for conf, ok in winners if conf >= t and not ok),
+        }
+        for t in thresholds
+    ]
 
 
 @dataclass
@@ -444,6 +487,12 @@ def main() -> None:
                 for c in clips
             },
         }
+    # The shipped LR head (spec "Decision after the report"): one fit over all
+    # out-of-fold logits, and how it scores the out-of-fold winners.
+    lr_probs = {stem: d["probs"] for stem, d in report["models"]["lr"]["oof"].items() if d["probs"]}
+    head = fit_final_head(clips, lr_probs)
+    report["models"]["lr"]["final_fit"]["head"] = head
+    report["models"]["lr"]["final_head_bins"] = final_head_bins(clips, lr_probs, head, (0.95, 0.97, 0.99))
     lr_top1 = report["models"]["lr"]["gate"]["top1_hits"]
     gbdt_top1 = report["models"]["gbdt"]["gate"]["top1_hits"]
     winner = "lr" if (gbdt_top1 - lr_top1) / len(clips) <= 0.02 else "gbdt"
@@ -482,6 +531,8 @@ def _print(report: dict[str, Any]) -> None:
             )
         for b in m["bins"]:
             print(f"    {b['bin']:9} n={b['n']:3} right={b['right']:3}")
+    for b in report["models"]["lr"].get("final_head_bins", []):
+        print(f"  lr final head >= {b['threshold']}: n={b['n']} wrong={b['wrong']}")
     print(f"winner: {report['winner']}  ship: {report['ship']}")
 
 

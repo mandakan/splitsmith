@@ -397,6 +397,11 @@ class StageVideo(BaseModel):
     # as one-click alternatives to the auto-winner so the user rarely has to
     # type a timestamp by hand. Cleared on manual override / clear (issue #22).
     beep_candidates: list[BeepCandidate] = Field(default_factory=list)
+    # Which ranker produced ``beep_candidates`` (``BeepDetection.ranker_version``:
+    # the learned ranker's model_version, or "heuristic"). Their ``score``
+    # means a probability or the hand-written product depending on it (#949).
+    # ``None`` before #949 and whenever the candidates are cleared.
+    beep_ranker_version: str | None = None
     notes: str = ""
     # Camera mount classification (issue #143). Drives per-camera-class
     # threshold selection in the 4-voter ensemble. Stored as the bare
@@ -2516,6 +2521,7 @@ class MatchProject(BaseModel):
         new_primary.beep_peak_amplitude = None
         new_primary.beep_duration_ms = None
         new_primary.beep_candidates = []
+        new_primary.beep_ranker_version = None
         new_primary.beep_reviewed = False
         new_primary.beep_auto_detect_failed = False
         new_primary.beep_alignment_confidence = None
@@ -2660,6 +2666,7 @@ class MatchProject(BaseModel):
                     v.beep_peak_amplitude = None
                     v.beep_duration_ms = None
                     v.beep_candidates = []
+                    v.beep_ranker_version = None
                     v.beep_reviewed = False
                     v.beep_auto_detect_failed = False
                     v.beep_alignment_confidence = None

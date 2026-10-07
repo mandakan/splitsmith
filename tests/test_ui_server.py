@@ -2485,8 +2485,9 @@ def test_detect_beep_high_confidence_auto_trusts_into_beep_reviewed(tmp_path: Pa
         time = 6.5
         peak_amplitude = 0.42
         duration_ms = 350.0
-        confidence = 0.96  # above the 0.95 default threshold
+        confidence = 0.98  # above the 0.97 default threshold
         candidates: list = []
+        ranker_version = "beep-ranker-lr-test"
 
     monkeypatch.setattr(audio_helpers, "ensure_primary_audio", lambda *a, **kw: tmp_path / "z.wav")
     (tmp_path / "z.wav").write_bytes(b"\x00")
@@ -2503,8 +2504,10 @@ def test_detect_beep_high_confidence_auto_trusts_into_beep_reviewed(tmp_path: Pa
     assert resp.status_code == 200
     _wait_for_job(client, resp.json()["id"])
     primary_after = client.get("/api/shooters/me/project").json()["stages"][0]["videos"][0]
-    assert primary_after["beep_confidence"] == pytest.approx(0.96)
+    assert primary_after["beep_confidence"] == pytest.approx(0.98)
     assert primary_after["beep_reviewed"] is True
+    # Which ranker chose it rides with the stored candidates (#949).
+    assert primary_after["beep_ranker_version"] == "beep-ranker-lr-test"
 
 
 def test_detect_beep_low_confidence_leaves_beep_for_hitl(tmp_path: Path, monkeypatch) -> None:
@@ -8875,7 +8878,7 @@ def test_get_automation_returns_resolved_settings_and_provenance(tmp_path: Path)
     body = resp.json()
     assert body["settings"] == {
         "shot_detect_on_beep_verified": True,
-        "beep_low_confidence_threshold": 0.95,
+        "beep_low_confidence_threshold": 0.97,
     }
     prov = body["provenance"]["shot_detect_on_beep_verified"]
     assert prov["source"] == "global"
@@ -8884,7 +8887,7 @@ def test_get_automation_returns_resolved_settings_and_provenance(tmp_path: Path)
     assert prov["cli_value"] is None
     threshold_prov = body["provenance"]["beep_low_confidence_threshold"]
     assert threshold_prov["source"] == "global"
-    assert threshold_prov["global_value"] == 0.95
+    assert threshold_prov["global_value"] == 0.97
 
 
 def test_get_automation_reports_project_provenance_when_overridden(
@@ -9047,7 +9050,7 @@ def test_hitl_queue_lists_low_confidence_auto_beep(tmp_path: Path) -> None:
     resp = client.get("/api/shooters/me/hitl-queue")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["threshold"] == 0.95
+    assert body["threshold"] == 0.97
     assert len(body["items"]) == 1
     item = body["items"][0]
     assert item["kind"] == "beep_low_confidence"

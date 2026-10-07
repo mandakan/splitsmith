@@ -156,6 +156,7 @@ def _apply_detected_beep(video: Any, beep: Any, *, threshold: float) -> None:
     video.beep_duration_ms = beep.duration_ms
     video.beep_confidence = beep.confidence
     video.beep_candidates = list(beep.candidates)
+    video.beep_ranker_version = getattr(beep, "ranker_version", None)
     video.beep_auto_detect_failed = False
     video.beep_alignment_confidence = None
     video.beep_alignment_delta_ms = None
@@ -180,6 +181,7 @@ def _apply_beep_not_found(video: Any) -> None:
     video.beep_duration_ms = None
     video.beep_confidence = None
     video.beep_candidates = []
+    video.beep_ranker_version = None
     video.beep_auto_detect_failed = True
     video.beep_alignment_confidence = None
     video.beep_alignment_delta_ms = None
