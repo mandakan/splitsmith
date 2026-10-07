@@ -5041,8 +5041,11 @@ export const api = {
     ),
   revealLook: (name: string) =>
     request<{ revealed: string }>(`/api/looks/${encodeURIComponent(name)}/reveal`, { method: "POST" }),
-  duplicateLook: (name: string, source: string) =>
-    request<StoredLook>(`/api/looks/${encodeURIComponent(name)}/duplicate`, { method: "POST", json: { source } }),
+  duplicateLook: (name: string, source: string, label?: string) =>
+    request<StoredLook>(`/api/looks/${encodeURIComponent(name)}/duplicate`, {
+      method: "POST",
+      json: label ? { source, label } : { source },
+    }),
 
   /** The PNG for one card on one stage; rejects with an ApiError whose
    *  status the rail maps to a line (503 no browser, 409 no shots). */

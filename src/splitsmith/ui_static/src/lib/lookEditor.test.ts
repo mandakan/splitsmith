@@ -6,6 +6,7 @@ import {
   CARD_STYLE_SLOTS,
   PREVIEW_CARDS,
   TOKEN_GROUPS,
+  lookNameFor,
   sourceHints,
   contrastRatio,
   contrastWarnings,
@@ -331,5 +332,18 @@ describe("the preview's backdrop", () => {
     expect(previewRequest({ ...base, backdrop: "demo" }).backdrop).toBe("demo");
     expect("backdrop" in previewRequest({ ...base, backdrop: "footage" })).toBe(false);
     expect("backdrop" in previewRequest(base)).toBe(false);
+  });
+});
+
+
+describe("lookNameFor", () => {
+  it("turns the label someone typed into a Look name nobody has", () => {
+    expect(lookNameFor("Club red", [])).toBe("club-red");
+    expect(lookNameFor("Club red", ["club-red"])).toBe("club-red-2");
+    expect(lookNameFor("Höstfinalen XI!", [])).toBe("hostfinalen-xi");
+    expect(lookNameFor("2026 season", [])).toBe("look-2026-season");
+    expect(lookNameFor("   ", [])).toBe("my-look");
+    expect(lookNameFor("splitsmith", ["splitsmith"])).toBe("splitsmith-2");
+    expect(lookNameFor("x".repeat(50), []).length).toBeLessThanOrEqual(32);
   });
 });

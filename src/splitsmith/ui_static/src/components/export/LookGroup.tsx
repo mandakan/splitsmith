@@ -9,6 +9,7 @@ import { LookGallery } from "@/components/export/LookGallery";
 import { bareHint } from "@/lib/exportPlan";
 import type { LookFocus } from "@/lib/exportPreview";
 import type { ExportSettings } from "@/lib/exportPresets";
+import { useMatchHref } from "@/lib/matchHref";
 import { useLooks } from "@/lib/useLooks";
 
 export interface LookGroupProps {
@@ -37,6 +38,7 @@ export function LookGroup({
 }: LookGroupProps) {
   const compare = settings.mode === "compare";
   const { looks, transitions } = useLooks();
+  const href = useMatchHref();
   return (
     <>
       <LookGallery
@@ -50,15 +52,18 @@ export function LookGroup({
       }
       onHover={onHover}
       onSelect={onSelect}
-      />
-      <LookAdvanced
-        looks={looks}
-        look={settings.look}
-        onChooseLook={(look) => patch({ look })}
-        slug={slug}
-        stageNumber={stageNumber}
-        hosted={hosted}
-        busy={busy}
+      lookExtras={
+        <LookAdvanced
+          looks={looks}
+          look={settings.look}
+          onChooseLook={(look) => patch({ look })}
+          slug={slug}
+          stageNumber={stageNumber}
+          hosted={hosted}
+          busy={busy}
+          identityHref={`${href("ingest")}?identity=${encodeURIComponent(slug)}`}
+        />
+      }
       />
     </>
   );

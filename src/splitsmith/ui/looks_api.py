@@ -34,6 +34,7 @@ from pydantic import BaseModel, Field
 from ..composition import XFADE_FAMILIES
 from ..fonts import FONTS
 from ..look_store import (
+    MAX_LABEL_LENGTH,
     TEMPLATE_SLOTS,
     FolderLookStore,
     LookStore,
@@ -204,6 +205,8 @@ async def delete_own_look(name: str, request: Request) -> Response:
 
 class DuplicateLookRequest(BaseModel):
     source: str
+    #: What the person named it on the way in; the copy's own label otherwise.
+    label: str | None = Field(default=None, max_length=MAX_LABEL_LENGTH)
 
 
 @router.post("/api/looks/{name}/duplicate", status_code=201, response_model=StoredLook)
@@ -229,10 +232,15 @@ async def duplicate_look(name: str, req: DuplicateLookRequest, request: Request)
                 raise LookStoreError(str(exc)) from None
             stored = await store.get(name)
             assert stored is not None  # new_look loads the folder before it returns
+            if req.label:
+                return await store.put(name, stored.body.model_copy(update={"label": req.label}))
             return stored
         body = body_from_manifest(source.manifest)
         base = req.source if is_shipped_name(req.source) else body.base
-        return await store.put(name, body.model_copy(update={"base": base}))
+        update: dict[str, object] = {"base": base}
+        if req.label:
+            update["label"] = req.label
+        return await store.put(name, body.model_copy(update=update))
     except LookStoreError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
 

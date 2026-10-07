@@ -54,7 +54,8 @@ import { isJobActive } from "@/lib/jobs";
 import { openSortText } from "@/lib/footageSort";
 import { useCan } from "@/lib/access";
 import { useDeploymentMode } from "@/lib/features";
-import { buildFootageRows, footageStats, skippedSummary, unassignedVideos, type UnassignedItem } from "@/lib/footage";
+import {
+  identityTarget, buildFootageRows, footageStats, skippedSummary, unassignedVideos, type UnassignedItem } from "@/lib/footage";
 import { pickDefaultShooterSlug } from "@/lib/defaultShooter";
 import { useMatchHref } from "@/lib/matchHref";
 import { useUploads } from "@/lib/uploads";
@@ -559,6 +560,14 @@ function IngestInner({ slug }: { slug: string }) {
   const [sheet, setSheet] = useState<{ slug: string; videoId: string | null; assignStage: number | null } | null>(null);
   const [addShooterOpen, setAddShooterOpen] = useState(false);
   const [identityFor, setIdentityFor] = useState<ShooterListEntry | null>(null);
+  // ``?identity=<slug>``: the Look editor's "Add a logo" opens that
+  // shooter's Identity sheet here, once, and drops the parameter.
+  useEffect(() => {
+    const target = identityTarget(location.search, shooters);
+    if (!target) return;
+    setIdentityFor(target);
+    navigate({ pathname: location.pathname, search: "" }, { replace: true });
+  }, [location.search, location.pathname, shooters, navigate]);
   const sheetProject = sheet ? projects[sheet.slug] : null;
   // Takes the old stage-1 bug left registered wrongly, per shooter shown.
   const takeRepairs = useMemo(

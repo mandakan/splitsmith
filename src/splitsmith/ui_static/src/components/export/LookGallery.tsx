@@ -6,6 +6,8 @@
  * under the row. Everything it offers comes from ``lib/lookGallery``;
  * it owns no state and knows no endpoint.
  */
+import type { ReactNode } from "react";
+
 import { Seconds } from "@/components/export/Seconds";
 import { Field } from "@/components/ui/Field";
 import { Segmented } from "@/components/ui/Segmented";
@@ -42,6 +44,8 @@ export interface LookGalleryProps {
   looks: LookInfo[];
   /** The server's xfade families (#1259): the transition tiles and their directions. */
   transitions?: TransitionFamilyInfo[];
+  /** Beside the Look tiles: the way into your own Looks (``LookAdvanced``). */
+  lookExtras?: ReactNode;
 }
 
 export function LookGallery({
@@ -53,6 +57,7 @@ export function LookGallery({
   onSelect,
   looks,
   transitions = [],
+  lookExtras,
 }: LookGalleryProps) {
   const format = settings.mode === "compare" ? "mp4" : settings.outputFormat;
   return (
@@ -69,6 +74,7 @@ export function LookGallery({
           onHover={onHover}
           onSelect={onSelect}
           looks={looks}
+          extras={slot.id === "look" ? lookExtras : undefined}
         />
       ))}
     </>
@@ -87,6 +93,7 @@ function SlotRow({
   onHover,
   onSelect,
   looks,
+  extras,
 }: {
   slot: LookSlot;
   variants: LookVariant[];
@@ -97,6 +104,7 @@ function SlotRow({
   onHover?: (focus: LookFocus | null) => void;
   onSelect?: (focus: LookFocus) => void;
   looks: LookInfo[];
+  extras?: ReactNode;
 }) {
   const selectedId = slot.read(settings);
   const selected = variants.find((v) => v.id === selectedId) ?? variants[0];
@@ -168,6 +176,7 @@ function SlotRow({
             );
           })}
         </div>
+        {extras}
         {direction ? (
           <div className="sm:pt-2">
             <Segmented
