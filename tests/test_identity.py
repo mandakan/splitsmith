@@ -56,12 +56,11 @@ def test_resolve_takes_the_shooters_accent_and_otherwise_none(tmp_path: Path) ->
         index=0,
         look=look,
         shooter_root=tmp_path,
-        match_logo=None,
     )
     assert own.accent == "#123456"
     for index in (0, 1, 7):
         resolved = identity.resolve_identity(
-            label="B", identity=None, index=index, look=look, shooter_root=tmp_path, match_logo=None
+            label="B", identity=None, index=index, look=look, shooter_root=tmp_path
         )
         assert resolved.accent is None
 
@@ -77,7 +76,6 @@ def test_resolve_applies_the_looks_series_by_slot_only_when_asked(tmp_path: Path
             index=index,
             look=look,
             shooter_root=tmp_path,
-            match_logo=None,
             series_default=True,
         )
         assert resolved.accent == series[index % len(series)]
@@ -87,13 +85,14 @@ def test_resolve_applies_the_looks_series_by_slot_only_when_asked(tmp_path: Path
         index=3,
         look=look,
         shooter_root=tmp_path,
-        match_logo=None,
         series_default=True,
     )
     assert own.accent == "#123456", "the shooter's own accent beats the series"
 
 
-def test_resolve_uses_the_shooters_logo_else_the_match_logo(tmp_path: Path) -> None:
+def test_resolve_uses_the_shooters_logo_and_never_another(tmp_path: Path) -> None:
+    """A shooter's logo is theirs: with none set there is no logo, never the
+    event's or the Look's (the branding work removed that fallback)."""
     look = looks.load_look("splitsmith")
     name = identity.logo_name(b"x", "png")
     mine = identity.resolve_identity(
@@ -102,13 +101,10 @@ def test_resolve_uses_the_shooters_logo_else_the_match_logo(tmp_path: Path) -> N
         index=0,
         look=look,
         shooter_root=tmp_path,
-        match_logo=tmp_path / "match.png",
     )
     assert mine.logo_path == tmp_path / identity.LOGO_DIR / name and mine.club == "Bromma PK"
-    theirs = identity.resolve_identity(
-        label="A", identity=None, index=0, look=look, shooter_root=tmp_path, match_logo=tmp_path / "match.png"
-    )
-    assert theirs.logo_path == tmp_path / "match.png" and theirs.club is None
+    theirs = identity.resolve_identity(label="A", identity=None, index=0, look=look, shooter_root=tmp_path)
+    assert theirs.logo_path is None and theirs.club is None
 
 
 def test_a_look_without_a_series_falls_back_to_its_accent_token() -> None:
@@ -123,7 +119,6 @@ def test_a_look_without_a_series_falls_back_to_its_accent_token() -> None:
         index=3,
         look=stripped,
         shooter_root=None,
-        match_logo=None,
         series_default=True,
     )
     assert resolved.accent == theme_tokens(load_theme("clean"))["accent"]

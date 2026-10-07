@@ -99,6 +99,9 @@ class PreviewSpec:
     #: the surface without one), or the drawn range scene ``looks preview``
     #: uses, the same on every stage and on hosted (the Look editor's switch).
     backdrop: Literal["footage", "demo"] = "footage"
+    #: The event logo's content name (the branding work), for the cache key;
+    #: the file itself reaches :func:`render_preview` as ``event_logo``.
+    event_logo: str | None = None
 
     @property
     def height(self) -> int:
@@ -150,6 +153,8 @@ def preview_key(
         fields["motion"] = True
     if spec.backdrop != "footage":
         fields["backdrop"] = spec.backdrop
+    if spec.event_logo is not None:
+        fields["event_logo"] = spec.event_logo
     payload = json.dumps(
         {
             **fields,
@@ -289,6 +294,7 @@ def render_preview(
     ffmpeg_binary: str | None,
     work_dir: Path,
     shooter: ResolvedIdentity | None = None,
+    event_logo: Path | None = None,
 ) -> bytes:
     """The PNG for ``spec``, or :class:`PreviewError` for a 404 / 409 / 503.
     ``shooter`` is the shooter's resolved identity (#1243), drawn on the
@@ -378,6 +384,7 @@ def render_preview(
             text=name,
             info=title_info_lines(project, extra=spec.title_info, division=spec.title_division),
             variant=spec.variant,
+            logo=event_logo,
         )
         slot = "title_page" if spec.card == "title" else "closing"
         if moving:

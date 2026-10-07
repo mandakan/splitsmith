@@ -397,6 +397,15 @@ def _parse_canvas(value: str) -> tuple[int, int]:
     return width, height
 
 
+def _demo_logos(identities: dict, logo: Path | None) -> dict:  # type: ignore[type-arg]
+    """The demo gives every shooter a logo of their own (nothing falls back)."""
+    if logo is None:
+        return identities
+    from dataclasses import replace as _replace
+
+    return {label: _replace(identity, logo_path=logo) for label, identity in identities.items()}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -573,11 +582,9 @@ def main(argv: list[str] | None = None) -> int:
         # Through the production resolver either way, so the default frames
         # are what an export draws for shooters who set nothing; the demo
         # opts into the Look's slot series and a shared generated logo.
-        identities=grid_identities(
-            shooters,
-            look=load_look(args.overlay_theme),
-            match_logo=demo_logo(work / "logo.png") if args.identity_demo else None,
-            series_default=args.identity_demo,
+        identities=_demo_logos(
+            grid_identities(shooters, look=load_look(args.overlay_theme), series_default=args.identity_demo),
+            demo_logo(work / "logo.png") if args.identity_demo else None,
         ),
     )
     if result.failed:

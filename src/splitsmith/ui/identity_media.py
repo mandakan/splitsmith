@@ -17,8 +17,9 @@ from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
 
-from ..identity import LOGO_DIR, ResolvedIdentity, resolve_identity
+from ..identity import EVENT_LOGO_DIR, LOGO_DIR, ResolvedIdentity, resolve_identity
 from ..looks import Look
+from ..match_model import MatchBranding
 from ..match_project import MatchProject
 
 logger = logging.getLogger(__name__)
@@ -72,7 +73,6 @@ def resolved_identity_for(
     look: Look,
     index: int,
     label: str,
-    match_logo: Path | None = None,
     series_default: bool = False,
 ) -> ResolvedIdentity:
     """The shooter's identity as a render draws it: what they set (the
@@ -85,18 +85,15 @@ def resolved_identity_for(
         index=index,
         look=look,
         shooter_root=None,
-        match_logo=match_logo,
         series_default=series_default,
     )
-    logo = ensure_local_logo(project, shooter_root)
-    return replace(resolved, logo_path=logo if logo is not None else match_logo)
+    return replace(resolved, logo_path=ensure_local_logo(project, shooter_root))
 
 
 def grid_identities(
     bundles: Sequence[object],
     *,
     look: Look,
-    match_logo: Path | None = None,
     series_default: bool = False,
 ) -> dict[str, ResolvedIdentity]:
     """Resolved identities for a grid, keyed by tile label, the slot index
@@ -116,10 +113,53 @@ def grid_identities(
             look=look,
             index=index,
             label=bundle.label,  # type: ignore[attr-defined]
-            match_logo=match_logo,
             series_default=series_default,
         )
     return out
 
 
-__all__ = ["ensure_local_logo", "grid_identities", "logo_storage_key", "resolved_identity_for"]
+def event_logo_storage_key(match_id: str, name: str) -> str:
+    """The object key the push writes the event's logo under."""
+    return f"matches/{match_id}/{EVENT_LOGO_DIR}/{name}"
+
+
+def ensure_local_event_logo(
+    branding: MatchBranding, match_root: Path, *, storage: object | None, match_id: str | None
+) -> Path | None:
+    """The event's logo on local disk, or ``None``: the local file, else
+    (hosted) the pushed object copied into place. Best effort like
+    :func:`ensure_local_logo`: a card without the mark, never a failed
+    render."""
+    name = branding.event_logo
+    if name is None:
+        return None
+    local = match_root / EVENT_LOGO_DIR / name
+    if local.exists() and local.stat().st_size > 0:
+        return local
+    if storage is None or match_id is None:
+        return None
+    key = event_logo_storage_key(match_id, name)
+    try:
+        if not storage.exists(key):  # type: ignore[attr-defined]
+            return None
+        local.parent.mkdir(parents=True, exist_ok=True)
+        with storage.open_stream(key) as src, local.open("wb") as dst:  # type: ignore[attr-defined]
+            shutil.copyfileobj(src, dst)
+        return local
+    except Exception as exc:  # noqa: BLE001 -- a logo is never worth a failed render
+        logger.info("branding: event logo pull from %s failed: %s", key, exc)
+        try:
+            local.unlink()
+        except FileNotFoundError:
+            pass
+        return None
+
+
+__all__ = [
+    "ensure_local_event_logo",
+    "ensure_local_logo",
+    "event_logo_storage_key",
+    "grid_identities",
+    "logo_storage_key",
+    "resolved_identity_for",
+]

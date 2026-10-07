@@ -75,6 +75,44 @@ class ShooterIdentity(BaseModel):
         return stripped
 
 
+#: The event's own logo (the branding work): the match's, under the match
+#: root's ``identity/`` folder, content-named like a shooter's.
+EVENT_LOGO_DIR = LOGO_DIR
+EVENT_LOGO_RE = re.compile(r"^event-[0-9a-f]{12}\.(?:png|jpg|jpeg|webp)$")
+
+
+def event_logo_name(data: bytes, ext: str) -> str:
+    """The content-addressed name the event's logo is stored under."""
+    return f"event-{hashlib.sha256(data).hexdigest()[:12]}.{ext.lower()}"
+
+
+def sniff_logo(data: bytes) -> str:
+    """The extension of a logo upload (``png``, ``jpeg``, ``webp``), sniffed
+    from its bytes and checked against the size and side caps; ``ValueError``
+    with the user's reason otherwise. Never the client's file name: SVG can
+    script, and a template loads the logo in Chromium."""
+    import io
+
+    from PIL import Image, UnidentifiedImageError
+
+    if len(data) > LOGO_MAX_BYTES:
+        raise ValueError(f"The logo is over {LOGO_MAX_BYTES // (1024 * 1024)} MB.")
+    if not data:
+        raise ValueError("The file is empty.")
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            fmt = (image.format or "").upper()
+            side = max(image.size)
+    except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
+        raise ValueError("The logo must be a PNG, JPEG or WebP image.") from exc
+    ext = {"PNG": "png", "JPEG": "jpeg", "MPO": "jpeg", "WEBP": "webp"}.get(fmt)
+    if ext is None:
+        raise ValueError("The logo must be a PNG, JPEG or WebP image.")
+    if side > LOGO_MAX_SIDE:
+        raise ValueError(f"The logo is over {LOGO_MAX_SIDE} px on a side.")
+    return ext
+
+
 def logo_name(data: bytes, ext: str) -> str:
     """The content-addressed file name a logo is stored under, so a
     replaced logo is a new key and the old one can be swept."""
@@ -103,12 +141,12 @@ def resolve_identity(
     index: int,
     look: Look,
     shooter_root: Path | None,
-    match_logo: Path | None,
     series_default: bool = False,
 ) -> ResolvedIdentity:
     """The shooter's choices: their accent or none; their logo under
-    ``shooter_root/identity/``, else ``match_logo``; their club line or
-    nothing.
+    ``shooter_root/identity/`` or none (never the event's or the Look's:
+    those are other people's marks, drawn where they belong); their club
+    line or nothing.
 
     A shooter who set no accent gets ``None``, so a render with no
     identity configured is what it was before identities existed (the
@@ -127,13 +165,17 @@ def resolve_identity(
             from .overlay_theme import theme_for
 
             accent = _hex(theme_for(look).accent)
-    logo_path: Path | None = match_logo
+    logo_path: Path | None = None
     if chosen.logo is not None and shooter_root is not None:
         logo_path = shooter_root / LOGO_DIR / chosen.logo
     return ResolvedIdentity(label=label, accent=accent, logo_path=logo_path, club=chosen.club)
 
 
 __all__ = [
+    "EVENT_LOGO_DIR",
+    "EVENT_LOGO_RE",
+    "event_logo_name",
+    "sniff_logo",
     "CLUB_MAX_CHARS",
     "LOGO_DIR",
     "LOGO_EXTENSIONS",

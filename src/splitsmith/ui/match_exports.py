@@ -337,6 +337,9 @@ class MatchExportRequestData:
     # closing card repeats the title page: it is the data there is.
     title_page: bool = False
     title_page_info: tuple[str, ...] = ()
+    #: The event's logo on this disk (the branding work): a corner mark on
+    #: the title page and the closing card.
+    event_logo: Path | None = None
     title_page_duration_seconds: float = 3.0
     closing_card: bool = False
     # Issue #1242. The Look template variant every generated card draws
@@ -698,6 +701,7 @@ def export_match(
                 text=request.project_name,
                 info=request.title_page_info,
                 duration_seconds=request.title_page_duration_seconds,
+                logo=request.event_logo,
             )
             title_page = (
                 replace(card, variant=request.title_page_variant or request.card_variant)

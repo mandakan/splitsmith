@@ -16,7 +16,7 @@ from ..export_naming import slugify
 from ..looks import load_look
 from ..match_model import Match, is_match_folder
 from ..overlay_theme import THEME_NAMES, ThemeName
-from ..ui.identity_media import grid_identities
+from ..ui.identity_media import ensure_local_event_logo, grid_identities
 from ..ui.match_exports import render_segment_cache
 from . import emitter as emitter_mod
 from . import manifest as manifest_mod
@@ -502,6 +502,7 @@ def _export_from_match(
             transition_seconds=transition_seconds,
             cards=cards or CardOptions(),
             match=match,
+            event_logo=ensure_local_event_logo(match.branding, match_root, storage=None, match_id=None),
         )
         return
 
@@ -528,6 +529,7 @@ def _render_grid_mp4(
     summary_hold: float = 0.0,
     cards: CardOptions | None = None,
     match: Match | None = None,
+    event_logo: Path | None = None,
     transition: str = "none",
     transition_seconds: float = 0.5,
 ) -> None:
@@ -593,7 +595,9 @@ def _render_grid_mp4(
 
     cards = cards or CardOptions()
     title, closing = (
-        title_cards(match, cards, divisions=bundle_divisions(bundles)) if match is not None else (None, None)
+        title_cards(match, cards, divisions=bundle_divisions(bundles), event_logo=event_logo)
+        if match is not None
+        else (None, None)
     )
 
     output.parent.mkdir(parents=True, exist_ok=True)

@@ -27,7 +27,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from ..identity import LOGO_DIR
+from ..identity import EVENT_LOGO_DIR, EVENT_LOGO_RE, LOGO_DIR
 from ..match_model import load_match_or_legacy
 from ..match_project import MatchProject
 from .docs import absolute_path_videos, sanitize_project_doc
@@ -270,6 +270,21 @@ def build_push_plan(match_root: Path, *, sync_state: SyncState, full_media: bool
                     media_skipped += 1
                 else:
                     media.append(item)
+
+    # The event's logo (the branding work), under the match root's own
+    # ``identity/``: content-named, raster only, like a shooter's.
+    event_dir = match_root / EVENT_LOGO_DIR
+    if match.match_id and event_dir.is_dir():
+        for artifact in sorted(event_dir.iterdir()):
+            if not EVENT_LOGO_RE.fullmatch(artifact.name):
+                continue
+            item = _plan_media_item(
+                artifact, f"matches/{match.match_id}/{EVENT_LOGO_DIR}/{artifact.name}", sync_state
+            )
+            if item is None:
+                media_skipped += 1
+            else:
+                media.append(item)
 
     return PushPlan(
         match_id=match.match_id,

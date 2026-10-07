@@ -37,7 +37,7 @@ import dataclasses
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -268,9 +268,11 @@ def main() -> int:
         index=0,
         look=load_look(args.theme),
         shooter_root=None,
-        match_logo=demo_logo(work / "logo.png") if args.identity_demo else None,
         series_default=args.identity_demo,
     )
+    if args.identity_demo:
+        # The demo shooter has a logo of their own (nothing falls back).
+        resolved = replace(resolved, logo_path=demo_logo(work / "logo.png"))
     shooters = (
         composition.CompositionShooter(
             label=resolved.label, accent=resolved.accent, logo_path=resolved.logo_path, club=resolved.club

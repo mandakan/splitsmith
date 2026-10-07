@@ -218,6 +218,11 @@ def card_context(
         # Your brand (``look_brand``): only on the cards that draw it, so
         # every other context, and its digest, is what it always was.
         data["brand"] = brand
+    event_logo = getattr(card, "logo", None)
+    if event_logo is not None and slot in ("title_page", "closing"):
+        # The event's logo, a corner mark (``_shared/event.js``); its URL
+        # is a ``logo`` value, which the sandbox mounts by that name.
+        data["event"] = {"logo": Path(event_logo).resolve().as_uri()}
     return TemplateContext(
         theme=theme_tokens(theme),
         data=data,

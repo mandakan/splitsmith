@@ -52,6 +52,8 @@ logger = logging.getLogger(__name__)
 _MEDIA_KEY_LOCAL_RE = re.compile(
     r"^matches/[^/]+/shooters/(?P<slug>[^/]+)/(?P<subdir>trimmed|beep_review|identity)/(?P<name>[^/]+)$"
 )
+#: The event's logo (the branding work): ``matches/<id>/identity/<name>``.
+_EVENT_KEY_LOCAL_RE = re.compile(r"^matches/[^/]+/identity/(?P<name>event-[^/]+)$")
 
 
 def removable_full_trims(match_root: Path, sync_state: SyncState) -> list[str]:
@@ -110,6 +112,9 @@ def _local_media_path(match_root: Path, remote_key: str) -> Path:
     guard fails closed rather than mapping an unknown shape onto some
     real (and wrong) path that might not exist.
     """
+    event = _EVENT_KEY_LOCAL_RE.match(remote_key)
+    if event is not None:
+        return match_root / "identity" / event.group("name")
     m = _MEDIA_KEY_LOCAL_RE.match(remote_key)
     if m is None:
         return match_root

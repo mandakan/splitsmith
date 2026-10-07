@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
+from pathlib import Path
 
 from ..composition import MatchTitle
 from ..division import competitor_division, roster_lines
@@ -53,7 +54,11 @@ def match_title(match: Match, *, extra: str | None = None, roster: tuple[str, ..
 
 
 def title_cards(
-    match: Match, cards: CardOptions, *, divisions: Sequence[tuple[str, str | None]] = ()
+    match: Match,
+    cards: CardOptions,
+    *,
+    divisions: Sequence[tuple[str, str | None]] = (),
+    event_logo: Path | None = None,
 ) -> tuple[MatchTitle | None, MatchTitle | None]:
     """``(title_page, closing)`` for ``render_grid_mp4``: the same text on
     both, each held for ``title_page_duration_seconds``; ``None`` where
@@ -64,7 +69,9 @@ def title_cards(
         return None, None
     roster = roster_lines(divisions) if cards.title_division else ()
     card = match_title(match, extra=cards.title_info, roster=roster)
-    card = MatchTitle(text=card.text, info=card.info, duration_seconds=cards.title_page_duration_seconds)
+    card = MatchTitle(
+        text=card.text, info=card.info, duration_seconds=cards.title_page_duration_seconds, logo=event_logo
+    )
     title = replace(card, variant=cards.title_page_variant or cards.card_variant)
     closing = replace(card, variant=cards.closing_card_variant or cards.card_variant)
     return (title if cards.title_page else None), (closing if cards.closing_card else None)

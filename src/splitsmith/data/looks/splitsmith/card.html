@@ -13,6 +13,7 @@
   document.write('<script src="' + window.splitsmith.assets.shared + '/cell.js"><\/script>');
   document.write('<script src="' + window.splitsmith.assets.shared + '/identity.js"><\/script>');
   document.write('<script src="' + window.splitsmith.assets.shared + '/brand.js"><\/script>');
+  document.write('<script src="' + window.splitsmith.assets.shared + '/event.js"><\/script>');
 </script>
 </head>
 <body>
@@ -24,6 +25,7 @@
     window.splitsmith.engine.mount(window.splitsmith.data.groups);
     window.splitsmith.engine.mountIdentity(window.splitsmith.data.shooters, window.splitsmith.data.card.slot);
     window.splitsmith.engine.mountBrand(window.splitsmith.data.brand);
+    window.splitsmith.engine.mountEvent(window.splitsmith.data.event);
   });
 </script>
 </body>

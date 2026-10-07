@@ -1,10 +1,16 @@
 {
   "entries": [
     {
+      "id": "event-logo",
+      "date": "2026-10-07",
+      "title": "The event's logo on the title page",
+      "body": "Add the match's own logo under Branding in Details on the Export page. The title page and closing card show it above the match name."
+    },
+    {
       "id": "look-brand",
       "date": "2026-10-07",
       "title": "Your brand on the title page",
-      "body": "Add your club, personal or sponsor logo and a line to a Look under Card styles, Your brand. The title page and closing card show it above the match name."
+      "body": "Add your club, personal or sponsor logo and a line to a Look under Card styles, Your brand. The title page and closing card show it in the top left corner."
     },
     {
       "id": "club-from-scoreboard",
