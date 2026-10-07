@@ -31,7 +31,7 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from . import user_config
+from . import composition, user_config
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ PipLayout = Literal["stacked", "pip-corners"]
 InsetCorner = Literal["top-left", "top-right", "bottom-left", "bottom-right"]
 InsetSize = Literal["small", "medium", "large"]
 PaddingPreset = Literal["full", "action", "highlight", "custom"]
-TransitionKind = Literal["none", "zoom", "static"]
+TransitionKind = Literal["none"] | composition.TransitionKind
 StageCardStyle = Literal["none", "slate", "lower-third"]
 UploadPrivacy = Literal["private", "unlisted", "public"]
 

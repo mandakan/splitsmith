@@ -49,7 +49,7 @@ OutputFormat = Literal["fcpxml", "fcp7xml", "mp4"]
 # variant in FCP after import. Only the FCPXML renderer emits
 # transitions today; FCP7 / MP4 ignore the request until they grow
 # transition support.
-TransitionKind = Literal["none", "zoom", "static"]
+TransitionKind = Literal["none"] | composition.TransitionKind
 # Issue #196. ``"none"`` keeps today's title-less stitching.
 # ``"slate"`` adds a pre-stage card on the spine; ``"lower-third"`` is
 # a connected text clip overlaid on the start of the primary. FCPXML
@@ -601,12 +601,18 @@ def export_match(
         duration=request.transition_duration_seconds,
         stage_count=len(compositions),
     )
-    if transitions and request.output_format != "fcpxml":
+    if transitions and request.output_format == "fcp7xml":
         anomalies.append(
             f"transitions ignored: not yet supported by the "
             f"{request.output_format} renderer (issue #195 follow-ups)"
         )
         transitions = ()
+    elif transitions and request.output_format == "fcpxml":
+        # Issue #1244: the FCPXML emitter is frozen on its two .motr
+        # effects; an xfade kind lowers to zoom and the response says so.
+        for kind in dict.fromkeys(t.kind for t in transitions):
+            if composition.fcp_kind(kind)[1]:
+                anomalies.append(f"transition {kind} is not an FCP effect; the FCPXML uses zoom")
     titles = _build_uniform_titles(
         kind=request.title_kind,
         duration=request.title_duration_seconds,
@@ -619,10 +625,16 @@ def export_match(
             f"{request.output_format} renderer (issue #196 follow-ups)"
         )
         titles = {}
-    if titles and transitions and any(t.style == "slate" for t in titles.values()):
+    if (
+        titles
+        and transitions
+        and request.output_format == "fcpxml"
+        and any(t.style == "slate" for t in titles.values())
+    ):
         # Mirror the emitter's guard at the request layer so the
         # response carries an explicit anomaly instead of a 500-shaped
-        # error from generate_match_fcpxml.
+        # error from generate_match_fcpxml. The MP4 renderer crossfades
+        # into a slate like into any other item (issue #1244).
         anomalies.append("slate titles dropped: cannot combine with transitions (issue #196)")
         titles = {}
     intro_segment = _resolve_segment(

@@ -983,6 +983,491 @@ def _summarised_composition(tmp_path: Path) -> composition.Composition:
     )
 
 
+def _transitioned_composition(
+    tmp_path: Path,
+    *,
+    kind: str | None = "fade",
+    seconds: float = 1.0,
+    slates: bool = False,
+    summaries: bool = False,
+    head_pad: float = 3.0,
+    tail_pad: float = 10.0,
+    head_pad_b: float | None = None,
+) -> composition.Composition:
+    """Two 20 s stages with a beep at 5 s and the last shot at 6.3 s, so
+    with the default pads each stage keeps 2 s of handle before the head
+    pad and 4 s after the tail pad (effective 14.3 s); one transition
+    between them."""
+    from splitsmith.match_project import StageScorecard
+    from splitsmith.stage_summary_data import TileShot, TileStageData
+
+    stage_a = _basic_stage(
+        tmp_path=tmp_path, name="A", primary_name="a.mp4", head_pad=head_pad, tail_pad=tail_pad
+    )
+    stage_b = _basic_stage(
+        tmp_path=tmp_path,
+        name="B",
+        primary_name="b.mp4",
+        head_pad=head_pad if head_pad_b is None else head_pad_b,
+        tail_pad=tail_pad,
+    )
+    titles = None
+    if slates:
+        titles = {
+            0: composition.TitleCard(text="Stage 1", duration_seconds=1.5, style="slate"),
+            1: composition.TitleCard(text="Stage 2", duration_seconds=1.5, style="slate"),
+        }
+    holds = None
+    if summaries:
+        data = TileStageData(
+            label="Me",
+            stage_number=1,
+            shots=(TileShot(1.0, 1.0), TileShot(1.3, 0.3)),
+            stage_time_seconds=4.5,
+            scorecard=StageScorecard(hit_factor=12.0, alphas=10),
+        )
+        hold = composition.SummaryHold(data=data, label="Me", duration_seconds=3.0)
+        holds = {0: hold, 1: hold}
+    return composition.from_stage_compositions(
+        [stage_a, stage_b],
+        project_name="m",
+        titles=titles,
+        summaries=holds,
+        transitions=(
+            (
+                composition.Transition(
+                    from_stage_index=0, to_stage_index=1, kind=kind, duration_seconds=seconds  # type: ignore[arg-type]
+                ),
+            )
+            if kind is not None
+            else ()
+        ),
+    )
+
+
+def test_plan_timeline_places_a_boundary_between_a_summary_and_the_next_slate(tmp_path: Path) -> None:
+    """Issue #1244: a transition sits between the last item of a stage's
+    run and the first of the next, which are the summary hold and the
+    slate when the composition has them; each side gives up d/2."""
+    plan = mp4_render.plan_timeline(_transitioned_composition(tmp_path, slates=True, summaries=True))
+    assert [item.kind for item in plan.items] == ["slate", "stage", "summary", "slate", "stage", "summary"]
+    (boundary,) = plan.boundaries
+    assert (boundary.after_index, boundary.kind, boundary.duration_seconds) == (2, "fade", 1.0)
+    assert plan.items[2].tail_cut_seconds == 0.5 and plan.items[3].head_cut_seconds == 0.5
+    assert plan.items[2].duration_seconds == pytest.approx(2.5)
+    assert plan.items[3].duration_seconds == pytest.approx(1.0)
+    assert plan.degradations == ()
+    # A centred crossfade: the boundary is d long and each neighbour gave
+    # up d/2, so the timeline is exactly the cut's length.
+    assert plan.duration_seconds == pytest.approx(1.5 + 14.3 + 3.0 + 1.5 + 14.3 + 3.0)
+
+
+def test_plan_timeline_places_a_boundary_between_two_bare_stages(tmp_path: Path) -> None:
+    plan = mp4_render.plan_timeline(_transitioned_composition(tmp_path, kind="dissolve"))
+    (boundary,) = plan.boundaries
+    assert (boundary.after_index, boundary.kind) == (0, "dissolve")
+    assert plan.items[0].tail_cut_seconds == 0.5 and plan.items[1].head_cut_seconds == 0.5
+    assert [item.duration_seconds for item in plan.items] == [pytest.approx(13.8), pytest.approx(13.8)]
+    assert plan.duration_seconds == pytest.approx(28.6)
+
+
+def test_plan_timeline_without_transitions_has_no_boundaries_and_no_cuts(tmp_path: Path) -> None:
+    plan = mp4_render.plan_timeline(_carded_composition(tmp_path))
+    assert plan.boundaries == () and plan.degradations == ()
+    assert all(item.head_cut_seconds == item.tail_cut_seconds == 0.0 for item in plan.items)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        (
+            {"seconds": 7.0},
+            "transition before stage 'B' (7s) exceeds the stage's head pad (3s); "
+            "increase the pad or shorten the transition: rendered as a cut",
+        ),
+        (
+            {"seconds": 1.0, "head_pad_b": 5.0},
+            None,  # no handle before the pad: the boundary pads it with a held frame
+        ),
+        (
+            {"seconds": 1.0, "slates": True, "summaries": True, "head_pad_b": 5.0},
+            None,
+        ),
+    ],
+)
+def test_a_transition_that_does_not_fit_is_a_cut_and_a_degradation(
+    tmp_path: Path, kwargs: dict[str, object], message: str | None
+) -> None:
+    """Review Focus 1: the pads keep the beep and the last shot out of the
+    fade and the trim must hold the handle; a miss is reported and the
+    boundary becomes a cut, never a shorter fade. A card neighbour (the
+    third case: summary into slate) has no pad to check."""
+    plan = mp4_render.plan_timeline(_transitioned_composition(tmp_path, **kwargs))  # type: ignore[arg-type]
+    if message is None:
+        assert len(plan.boundaries) == 1 and plan.degradations == ()
+        return
+    assert plan.boundaries == ()
+    assert plan.degradations == (message,)
+    assert all(item.head_cut_seconds == item.tail_cut_seconds == 0.0 for item in plan.items)
+
+
+def test_a_transition_longer_than_a_card_is_a_cut(tmp_path: Path) -> None:
+    plan = mp4_render.plan_timeline(_transitioned_composition(tmp_path, seconds=4.0, slates=True))
+    assert plan.boundaries == ()
+    assert plan.degradations == (
+        "transition into slate_001 (4s) exceeds half the card (0.75s): rendered as a cut",
+    )
+
+
+def test_narrow_plan_recomputes_the_cams_from_the_new_head_trim(tmp_path: Path) -> None:
+    cam = SecondaryClip(
+        video_path=_make_video(tmp_path, "cam.mp4"), video=_meta_30fps(), beep_offset_seconds=4.0, label="Cam"
+    )
+    stage = _basic_stage(tmp_path=tmp_path, name="A", primary_name="a.mp4", secondaries=(cam,), head_pad=3.0)
+    _, plan = _build_plan(stage)
+    narrowed = mp4_render._narrow_plan(plan, head_cut=0.5, tail_cut=0.25)
+    assert narrowed.head_trim_seconds == pytest.approx(plan.head_trim_seconds + 0.5)
+    assert narrowed.effective_seconds == pytest.approx(plan.effective_seconds - 0.75)
+    assert narrowed.tail_trim_seconds == pytest.approx(plan.tail_trim_seconds + 0.25)
+    reference = _basic_stage(
+        tmp_path=tmp_path, name="A", primary_name="a.mp4", secondaries=(cam,), head_pad=2.5
+    )
+    _, expected = _build_plan(reference)
+    got, want = narrowed.cam_alignments[0], expected.cam_alignments[0]
+    assert (got.cam_seek_seconds, got.cam_spine_start) == (want.cam_seek_seconds, want.cam_spine_start)
+    # A negative head cut reads handle footage before the pad.
+    widened = mp4_render._narrow_plan(plan, head_cut=-0.5, tail_cut=0.0)
+    assert widened.head_trim_seconds == pytest.approx(plan.head_trim_seconds - 0.5)
+    assert widened.effective_seconds == pytest.approx(plan.effective_seconds + 0.5)
+
+
+def test_edge_plans_cover_half_the_cut_and_half_the_handle(tmp_path: Path) -> None:
+    """Issue #1244: a stage's tail edge is its last d/2 of effective footage
+    plus d/2 of the trim past the tail pad; the head edge is d/2 before the
+    head pad plus the first d/2. Both are d long."""
+    stage = _basic_stage(tmp_path=tmp_path, name="A", primary_name="a.mp4", head_pad=3.0, tail_pad=10.0)
+    _, plan = _build_plan(stage)
+    tail = mp4_render._edge_plan(plan, half=0.5, end="tail")
+    head = mp4_render._edge_plan(plan, half=0.5, end="head")
+    assert tail.effective_seconds == pytest.approx(1.0) and head.effective_seconds == pytest.approx(1.0)
+    assert tail.head_trim_seconds == pytest.approx(plan.head_trim_seconds + plan.effective_seconds - 0.5)
+    assert head.head_trim_seconds == pytest.approx(plan.head_trim_seconds - 0.5)
+
+
+def test_build_boundary_command_crossfades_two_equal_edges(tmp_path: Path) -> None:
+    comp = _carded_composition(tmp_path)
+    cmd = mp4_render._build_boundary_command(
+        tmp_path / "edge_003_tail.mp4",
+        tmp_path / "edge_004_head.mp4",
+        kind="zoom",
+        seconds=1.0,
+        sequence=comp.sequence,
+        output_path=tmp_path / "boundary_003.mp4",
+    )
+    assert cmd[:3] == ("ffmpeg", "-hide_banner", "-y")
+    assert cmd[3:7] == ("-i", str(tmp_path / "edge_003_tail.mp4"), "-i", str(tmp_path / "edge_004_head.mp4"))
+    graph = cmd[cmd.index("-filter_complex") + 1]
+    assert graph == (
+        "[0:v][1:v]xfade=transition=zoomin:duration=1:offset=0,format=yuv420p[final];"
+        "[0:a][1:a]acrossfade=d=1:c1=tri:c2=tri[aout]"
+    )
+    assert cmd[cmd.index("-map") :][:4] == ("-map", "[final]", "-map", "[aout]")
+    assert cmd[cmd.index("-t") + 1] == "1"
+    assert cmd[-1] == str(tmp_path / "boundary_003.mp4")
+    assert "-c:v" in cmd and cmd[cmd.index("-crf") + 1] == "20"
+
+
+def test_build_motion_card_command_can_offset_or_delay_the_clip(tmp_path: Path) -> None:
+    comp = _carded_composition(tmp_path)
+    base = mp4_render._build_motion_card_command(
+        tmp_path / "bd.png",
+        tmp_path / "clip.mov",
+        seconds=1.0,
+        sequence=comp.sequence,
+        output_path=tmp_path / "o",
+    )
+    same = mp4_render._build_motion_card_command(
+        tmp_path / "bd.png",
+        tmp_path / "clip.mov",
+        seconds=1.0,
+        sequence=comp.sequence,
+        output_path=tmp_path / "o",
+        clip_offset_seconds=0.0,
+        clip_delay_seconds=0.0,
+    )
+    assert same == base, "zero offsets change nothing"
+    offset = mp4_render._build_motion_card_command(
+        tmp_path / "bd.png",
+        tmp_path / "clip.mov",
+        seconds=1.0,
+        sequence=comp.sequence,
+        output_path=tmp_path / "o",
+        clip_offset_seconds=2.5,
+    )
+    assert "-ss" not in offset, "an input seek past the clip's end yields nothing; the filter clones first"
+    offset_graph = offset[offset.index("-filter_complex") + 1]
+    assert (
+        "setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=3.5,trim=start=2.5:end=3.5,setpts=PTS-STARTPTS[motion]"
+        in offset_graph
+    )
+    delayed = mp4_render._build_motion_card_command(
+        tmp_path / "bd.png",
+        tmp_path / "clip.mov",
+        seconds=1.0,
+        sequence=comp.sequence,
+        output_path=tmp_path / "o",
+        clip_delay_seconds=0.5,
+    )
+    graph = delayed[delayed.index("-filter_complex") + 1]
+    assert (
+        "setpts=PTS-STARTPTS,tpad=start_duration=0.5:start_mode=add:color=black@0.0,tpad=stop_mode=clone"
+        in graph
+    )
+
+
+def test_build_stage_command_threads_the_lower_third_window(tmp_path: Path) -> None:
+    stage = _basic_stage(tmp_path=tmp_path, name="A", primary_name="a.mp4")
+    comp, plan = _build_plan(stage)
+    card = composition.TitleCard(text="Stage 1", duration_seconds=4.0, style="lower-third")
+    png = tmp_path / "lt.png"
+    plain = mp4_render._build_stage_command(
+        plan,
+        sequence=comp.sequence,
+        output_path=tmp_path / "s.mp4",
+        lower_third=mp4_render._LowerThirdInput(path=png, card=card),
+    )
+    delayed = mp4_render._build_stage_command(
+        plan,
+        sequence=comp.sequence,
+        output_path=tmp_path / "s.mp4",
+        lower_third=mp4_render._LowerThirdInput(path=png, card=card, delay_seconds=0.5),
+    )
+    at = plain.index(str(png))
+    assert plain[at - 3 : at - 1] == ("-t", "4")
+    at = delayed.index(str(png))
+    assert delayed[at - 3 : at - 1] == ("-t", "4.5"), "the looped PNG lasts until the window closes"
+    assert "enable='between(t,0.5,4.5)'" in delayed[delayed.index("-filter_complex") + 1]
+    skipped = mp4_render._build_stage_command(
+        plan,
+        sequence=comp.sequence,
+        output_path=tmp_path / "s.mp4",
+        lower_third=mp4_render._LowerThirdInput(path=png, card=card, skip_seconds=0.5),
+    )
+    at = skipped.index(str(png))
+    assert skipped[at - 3 : at - 1] == ("-t", "3.5")
+    assert "enable='between(t,0,3.5)'" in skipped[skipped.index("-filter_complex") + 1]
+
+
+def _render(tmp_path: Path, comp: composition.Composition, *, name: str, runner: Any, **kwargs: Any) -> Any:
+    return mp4_render.render_mp4(
+        comp,
+        output_path=tmp_path / f"{name}.mp4",
+        work_dir=tmp_path / f"work_{name}",
+        runner=runner,
+        **kwargs,
+    )
+
+
+def _names(calls: list[list[str]]) -> list[str]:
+    return [Path(argv[-1]).name for argv in calls]
+
+
+def _concat_names(work: Path) -> list[str]:
+    return [Path(line.split("'")[1]).name for line in (work / "concat.txt").read_text().splitlines()]
+
+
+def test_transitions_keep_the_timeline_length(tmp_path: Path) -> None:
+    """Review Focus 2: a centred fade consumes d/2 of each neighbour and
+    the boundary is d long, so the stitched length is the cut's length and
+    the chapters need no change."""
+    cut = _render(
+        tmp_path, _transitioned_composition(tmp_path, kind=None), name="cut", runner=_writes_output([])
+    )
+    fade = _render(tmp_path, _transitioned_composition(tmp_path), name="fade", runner=_writes_output([]))
+    assert fade.duration_seconds == pytest.approx(cut.duration_seconds) == pytest.approx(28.6)
+
+
+def test_render_encodes_edges_then_the_boundary_then_trimmed_neighbours(tmp_path: Path) -> None:
+    """Issue #1244: the boundary is decided (both edges and the xfade
+    encoded) before the item that opens it is encoded trimmed, so a
+    failure can still fall back to a cut."""
+    calls: list[list[str]] = []
+    _render(
+        tmp_path, _transitioned_composition(tmp_path, kind="dissolve"), name="m", runner=_writes_output(calls)
+    )
+    assert _names(calls) == [
+        "edge_000_tail.mp4",
+        "edge_001_head.mp4",
+        "boundary_000.mp4",
+        "stage_000.mp4",
+        "stage_001.mp4",
+        "m.mp4",
+    ]
+    tail, head, boundary, stage_0, stage_1, concat = calls
+    # A's effective window is source 2.0 .. 16.3; the tail edge reads 15.8 .. 16.8.
+    assert (tail[tail.index("-ss") + 1], tail[tail.index("-t") + 1]) == ("15.8", "1")
+    # B's starts at 2.0; the head edge reads 1.5 .. 2.5.
+    assert (head[head.index("-ss") + 1], head[head.index("-t") + 1]) == ("1.5", "1")
+    assert "xfade=transition=dissolve:duration=1:offset=0" in boundary[boundary.index("-filter_complex") + 1]
+    assert boundary[boundary.index("-i") + 1].endswith("edge_000_tail.mp4")
+    assert (stage_0[stage_0.index("-ss") + 1], stage_0[stage_0.index("-t") + 1]) == ("2", "13.8")
+    assert (stage_1[stage_1.index("-ss") + 1], stage_1[stage_1.index("-t") + 1]) == ("2.5", "13.8")
+    assert _concat_names(tmp_path / "work_m") == ["stage_000.mp4", "boundary_000.mp4", "stage_001.mp4"]
+    assert "-c:a" in concat, "a boundary is a generated segment: the stitch re-encodes audio"
+
+
+def test_a_failed_edge_leaves_the_neighbours_untrimmed(tmp_path: Path) -> None:
+    """Review Focus 4: an edge that ffmpeg cannot encode costs the
+    transition, never a gap; both neighbours keep their full length."""
+    calls: list[list[str]] = []
+    writing = _writes_output(calls)
+
+    def runner(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess:
+        if str(args[0][-1]).endswith("edge_000_tail.mp4"):
+            raise subprocess.CalledProcessError(1, list(args[0]), stderr="boom")
+        return writing(*args, **kwargs)
+
+    result = _render(tmp_path, _transitioned_composition(tmp_path), name="m", runner=runner)
+    assert result.degradations == (
+        "transition after stage_000 failed to render (ffmpeg failed (exit 1): boom); rendered as a cut",
+    )
+    assert _names(calls) == ["stage_000.mp4", "stage_001.mp4", "m.mp4"]
+    stage_0, stage_1, concat = calls
+    assert (stage_0[stage_0.index("-ss") + 1], stage_0[stage_0.index("-t") + 1]) == ("2", "14.3")
+    assert (stage_1[stage_1.index("-ss") + 1], stage_1[stage_1.index("-t") + 1]) == ("2", "14.3")
+    assert _concat_names(tmp_path / "work_m") == ["stage_000.mp4", "stage_001.mp4"]
+    assert "-c:a" not in concat and result.duration_seconds == pytest.approx(28.6)
+
+
+def test_a_fit_failure_reaches_the_render_result(tmp_path: Path) -> None:
+    result = _render(
+        tmp_path, _transitioned_composition(tmp_path, seconds=7.0), name="m", runner=_writes_output([])
+    )
+    assert result.degradations == (
+        "transition before stage 'B' (7s) exceeds the stage's head pad (3s); "
+        "increase the pad or shorten the transition: rendered as a cut",
+    )
+
+
+def test_a_transition_render_is_reused_from_the_cache_until_a_neighbour_changes(tmp_path: Path) -> None:
+    """The boundary keys on its two edge files and each edge on its
+    source: a repeat render stitches only; a changed source re-encodes
+    its edge, the boundary and its own segment, not the other side."""
+    import os
+
+    from splitsmith.segment_cache import SegmentCache
+
+    cache = SegmentCache(root=tmp_path / "cache", max_bytes=1 << 30)
+    comp = _transitioned_composition(tmp_path)
+    first: list[list[str]] = []
+    _render(tmp_path, comp, name="one", runner=_writes_output(first), segment_cache=cache)
+    assert len(first) == 6
+    second: list[list[str]] = []
+    _render(tmp_path, comp, name="two", runner=_writes_output(second), segment_cache=cache)
+    assert _names(second) == ["two.mp4"]
+    source = comp.stages[0].primary.path
+    source.write_bytes(source.read_bytes() + b"recut")
+    os.utime(source, (source.stat().st_atime + 10, source.stat().st_mtime + 10))
+    third: list[list[str]] = []
+    _render(tmp_path, comp, name="three", runner=_writes_output(third), segment_cache=cache)
+    # The cache writes partial files, so look at the commands: A's tail
+    # edge, the boundary and A's own segment, then the stitch; B's edge
+    # and segment stay cached.
+    third_cmds = [" ".join(argv) for argv in third]
+    assert len(third) == 4
+    assert sum("-ss 15.8 -t 1 " in cmd for cmd in third_cmds) == 1
+    assert sum("xfade=" in cmd for cmd in third_cmds) == 1
+    assert sum("-ss 2 -t 13.8 " in cmd for cmd in third_cmds) == 1
+    assert not any("-ss 2.5 -t 13.8 " in cmd or "-ss 1.5 -t 1 " in cmd for cmd in third_cmds)
+    assert _is_concat(third[-1])
+
+
+def test_a_transition_reports_three_more_progress_steps(tmp_path: Path) -> None:
+    steps: list[mp4_render.RenderStep] = []
+    _render(
+        tmp_path,
+        _transitioned_composition(tmp_path),
+        name="m",
+        runner=_writes_output([]),
+        progress=steps.append,
+    )
+    assert [s.total for s in steps] == [6] * 6
+    assert [s.index for s in steps] == [1, 2, 3, 4, 5, 6]
+    assert [s.status for s in steps] == ["encoding"] * 5 + ["stitching"]
+    assert steps[2].label == "transition 1"
+
+
+def test_a_lower_third_shorter_than_the_cut_is_left_to_the_boundary(tmp_path: Path) -> None:
+    """Review of #1244: a 0.5 s card with a 1 s fade left the trimmed stage
+    a looped PNG with ``-t 0`` (ffmpeg: no limit, an endless encode) and a
+    shorter one a negative ``-t``. A card the head edge has shown in full
+    is dropped from the trimmed stage."""
+    card = composition.TitleCard(text="S", duration_seconds=0.5, style="lower-third")
+    lt = mp4_render._LowerThirdInput(path=tmp_path / "lt.png", card=card)
+    assert mp4_render._trimmed_lower_third(lt, head_cut=0.5) is None
+    assert mp4_render._trimmed_lower_third(lt, head_cut=0.6) is None
+    kept = mp4_render._trimmed_lower_third(lt, head_cut=0.25)
+    assert kept is not None and kept.skip_seconds == 0.25 and kept.shown_seconds == pytest.approx(0.25)
+    assert mp4_render._trimmed_lower_third(lt, head_cut=0.0) is lt
+    assert mp4_render._trimmed_lower_third(None, head_cut=0.5) is None
+
+
+def test_edge_plans_shrink_to_the_handle_the_trim_holds(tmp_path: Path) -> None:
+    """Review of #1244: at the default 5 s pads over a 5 s buffer there is
+    no footage past the pad, and requiring some made every stage-to-stage
+    transition a cut. The edge takes what the trim has; the boundary pads
+    the rest with a held frame."""
+    stage = _basic_stage(tmp_path=tmp_path, name="A", primary_name="a.mp4", head_pad=5.0, tail_pad=10.0)
+    _, plan = _build_plan(stage)
+    assert plan.head_trim_seconds == 0.0
+    assert mp4_render._edge_handle(plan, half=0.5, end="head") == 0.0
+    assert mp4_render._edge_handle(plan, half=0.5, end="tail") == 0.5
+    head = mp4_render._edge_plan(plan, half=0.5, end="head")
+    assert (head.head_trim_seconds, head.effective_seconds) == (0.0, pytest.approx(0.5))
+    tail = mp4_render._edge_plan(plan, half=0.5, end="tail")
+    assert tail.effective_seconds == pytest.approx(1.0)
+
+
+def test_build_boundary_command_pads_a_short_edge_with_a_held_frame(tmp_path: Path) -> None:
+    comp = _carded_composition(tmp_path)
+    common = {"kind": "fade", "seconds": 1.0, "sequence": comp.sequence, "output_path": tmp_path / "b.mp4"}
+    head_short = mp4_render._build_boundary_command(
+        tmp_path / "t.mp4", tmp_path / "h.mp4", head_pad_seconds=0.5, **common
+    )
+    assert head_short[head_short.index("-filter_complex") + 1] == (
+        "[1:v]tpad=start_mode=clone:start_duration=0.5[hv];[1:a]adelay=500:all=1[ha];"
+        "[0:v][hv]xfade=transition=fade:duration=1:offset=0,format=yuv420p[final];"
+        "[0:a][ha]acrossfade=d=1:c1=tri:c2=tri[aout]"
+    )
+    tail_short = mp4_render._build_boundary_command(
+        tmp_path / "t.mp4", tmp_path / "h.mp4", tail_pad_seconds=0.25, **common
+    )
+    assert tail_short[tail_short.index("-filter_complex") + 1] == (
+        "[0:v]tpad=stop_mode=clone:stop_duration=0.25[tv];[0:a]apad=pad_dur=0.25[ta];"
+        "[tv][1:v]xfade=transition=fade:duration=1:offset=0,format=yuv420p[final];"
+        "[ta][1:a]acrossfade=d=1:c1=tri:c2=tri[aout]"
+    )
+    plain = mp4_render._build_boundary_command(tmp_path / "t.mp4", tmp_path / "h.mp4", **common)
+    assert plain[plain.index("-filter_complex") + 1].startswith("[0:v][1:v]xfade=")
+
+
+def test_render_pads_a_missing_handle_instead_of_cutting(tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+    result = _render(
+        tmp_path, _transitioned_composition(tmp_path, head_pad_b=5.0), name="m", runner=_writes_output(calls)
+    )
+    assert result.degradations == ()
+    assert _names(calls)[:3] == ["edge_000_tail.mp4", "edge_001_head.mp4", "boundary_000.mp4"]
+    head = calls[1]
+    assert (head[head.index("-ss") + 1], head[head.index("-t") + 1]) == ("0", "0.5")
+    boundary = calls[2]
+    assert (
+        "[1:v]tpad=start_mode=clone:start_duration=0.5[hv]" in boundary[boundary.index("-filter_complex") + 1]
+    )
+    # B keeps its whole 5 s head pad (effective 16.3 s); the fade adds nothing.
+    assert result.duration_seconds == pytest.approx(14.3 + 16.3)
+
+
 def test_plan_timeline_puts_a_summary_after_each_stage(tmp_path: Path) -> None:
     plan = mp4_render.plan_timeline(_summarised_composition(tmp_path))
     assert [item.kind for item in plan.items] == ["stage", "summary", "stage", "summary"]

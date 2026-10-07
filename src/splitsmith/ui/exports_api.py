@@ -36,7 +36,7 @@ from .. import export_runs, youtube_sidecar
 from ..compare.mp4_grid import DEFAULT_CANVAS_HEIGHT, DEFAULT_CANVAS_WIDTH
 from ..match_project import trim_blocker
 from ..overlay_theme import ThemeName
-from . import export_storage
+from . import export_storage, match_exports
 from .http_errors import source_unreachable
 
 router = APIRouter()
@@ -134,7 +134,7 @@ class MatchExportRequest(BaseModel):
     # pair, or ``"none"`` for hard cuts. Currently only the FCPXML
     # renderer emits transitions; FCP7 / MP4 surface a "transitions
     # ignored" anomaly when set together with those formats.
-    transition_kind: Literal["none", "zoom", "static"] = "none"
+    transition_kind: match_exports.TransitionKind = "none"
     transition_duration_seconds: float = 0.5
     # Issue #196. Per-stage title cards. ``"slate"`` adds a pre-stage
     # card on the spine; ``"lower-third"`` is a connected text clip

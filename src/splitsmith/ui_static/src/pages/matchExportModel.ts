@@ -13,13 +13,13 @@ import type {
   OverlayCodec,
 } from "@/lib/api";
 import { camExportFields, type CamOptions } from "@/lib/camOptions";
+import { visibleTransitionKind } from "@/lib/lookGallery";
 import type { TransitionKind } from "@/lib/exportPresets";
 import {
   anyRenderOptionOn,
   clampSeconds,
   gridExportFields,
   matchExportFields,
-  transitionsSupported,
   type OutputFormat,
   type RenderOptions,
 } from "@/lib/renderOptions";
@@ -201,7 +201,7 @@ export function buildMatchExportPayload(input: MatchExportPayloadInput): MatchEx
     tail_pad_seconds: input.tailPad,
     ...camExportFields(input.camOptions),
     output_format: outputFormat,
-    transition_kind: transitionsSupported(outputFormat) ? input.transitionKind : "none",
+    transition_kind: visibleTransitionKind(input.transitionKind, outputFormat),
     transition_duration_seconds: clampSeconds(input.transitionSeconds, 0.1),
     ...matchExportFields(input.renderOptions, outputFormat),
     intro_path: undefined,

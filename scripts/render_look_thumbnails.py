@@ -55,6 +55,21 @@ THUMBNAILS: tuple[str, ...] = (
     "transition-cut.png",
     "transition-static.png",
     "transition-zoom.png",
+    "transition-fade.png",
+    "transition-fadeblack.png",
+    "transition-dissolve.png",
+    "transition-slideleft.png",
+    "transition-slideright.png",
+    "transition-circleopen.png",
+    "transition-zoomin.png",
+    "transition-hblur.png",
+    "transition-smoothleft.png",
+    "transition-wipeleft.png",
+)
+#: Every transition tile: the two FCP effects, the cut, and the xfade kinds
+#: the MP4 renderer draws (``composition.XFADE_KINDS``, issue #1244).
+TRANSITION_KINDS: tuple[str, ...] = tuple(
+    name[len("transition-") : -len(".png")] for name in THUMBNAILS if name.startswith("transition-")
 )
 
 MATCH = "Match title"
@@ -108,13 +123,62 @@ def _overlay(backdrop: Image.Image, *, rasterizer: Rasterizer, theme: OverlayThe
     return out.convert("RGB")
 
 
+def _xfade_mid_frame(kind: str, left: Image.Image, right: Image.Image) -> Image.Image:
+    """The xfade ``kind`` halfway through, drawn in PIL so the gallery's
+    tile shows what the boundary segment does without an ffmpeg run at
+    authoring time. Each kind reads differently at a glance; the real
+    frames come from ``scripts/render_match_frames.py --transition``."""
+    w, h = left.size
+    if kind in ("fade", "dissolve"):
+        out = Image.blend(left, right, 0.5)
+        if kind == "dissolve":
+            noise = Image.effect_noise((w, h), 96).point(lambda v: 255 if v > 128 else 0).convert("L")
+            out = Image.composite(right, left, noise)
+        return out
+    if kind == "fadeblack":
+        return Image.blend(left, Image.new("RGB", (w, h), (0, 0, 0)), 0.8)
+    if kind in ("slideleft", "slideright", "wipeleft", "smoothleft"):
+        out = left.copy()
+        if kind == "slideleft":
+            out.paste(right.crop((0, 0, w // 2, h)), (w // 2, 0))
+            out.paste(left.crop((w // 2, 0, w, h)), (0, 0))
+        elif kind == "slideright":
+            out.paste(right.crop((w // 2, 0, w, h)), (0, 0))
+            out.paste(left.crop((0, 0, w // 2, h)), (w // 2, 0))
+        elif kind == "wipeleft":  # the wipe edge past the middle: not the cut's seam
+            edge = int(w * 0.62)
+            out.paste(right.crop((edge, 0, w, h)), (edge, 0))
+        else:  # smoothleft: a soft edge
+            ramp = Image.linear_gradient("L").rotate(90, expand=True).resize((w, h))
+            out = Image.composite(left, right, ramp)
+        return out
+    if kind == "circleopen":
+        mask = Image.new("L", (w, h), 0)
+        r = min(w, h) // 3
+        ImageDraw.Draw(mask).ellipse((w // 2 - r, h // 2 - r, w // 2 + r, h // 2 + r), fill=255)
+        return Image.composite(right, left, mask.filter(ImageFilter.GaussianBlur(2)))
+    if kind == "zoomin":
+        bw, bh = int(w * 1.3), int(h * 1.3)
+        x0, y0 = (bw - w) // 2, (bh - h) // 2
+        zoomed = left.resize((bw, bh)).crop((x0, y0, x0 + w, y0 + h))
+        return Image.blend(zoomed, right, 0.5)
+    if kind == "hblur":
+        return Image.blend(
+            left.filter(ImageFilter.BoxBlur((12, 0))), right.filter(ImageFilter.BoxBlur((12, 0))), 0.5
+        )
+    raise ValueError(f"no thumbnail recipe for transition kind {kind!r}")
+
+
 def _transition(kind: str, backdrop: Image.Image) -> Image.Image:
     """Two half-frames with the transition drawn on the seam: a hard edge,
-    a desaturated held band, or a zoom-blurred band."""
+    a desaturated held band, or a zoom-blurred band for the FCP effects; a
+    mid-fade frame of the whole tile for an xfade kind."""
     left = backdrop
     # The "next stage": the same scene rolled sideways, so the seam is a
     # real discontinuity (a mirror image would be continuous at it).
     right = ImageChops.offset(backdrop, 150, 0)
+    if kind not in ("cut", "static", "zoom"):
+        return _xfade_mid_frame(kind, left, right)
     out = Image.new("RGB", (WIDTH, HEIGHT))
     half = WIDTH // 2
     out.paste(left.crop((0, 0, half, HEIGHT)), (0, 0))
@@ -189,7 +253,7 @@ def build_thumbnails(out: Path, *, rasterizer: Rasterizer, look: Look) -> list[P
         )
         save("summary-hold.png", summary)
         save("overlay.png", _overlay(plain, rasterizer=rasterizer, theme=theme))
-        for kind in ("cut", "static", "zoom"):
+        for kind in TRANSITION_KINDS:
             save(f"transition-{kind}.png", _transition(kind, plain))
     return written
 

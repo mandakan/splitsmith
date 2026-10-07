@@ -65,7 +65,23 @@ const ALL_FORMATS: OutputFormat[] = ["fcpxml", "fcp7xml", "mp4"];
 const MP4: OutputFormat[] = ["mp4"];
 const STAGE_CARD_FORMATS: OutputFormat[] = ALL_FORMATS.filter(stageCardsSupported);
 const MATCH_CARD_FORMATS: OutputFormat[] = ALL_FORMATS.filter(cardsSupported);
-const TRANSITION_FORMATS: OutputFormat[] = ALL_FORMATS.filter(transitionsSupported);
+const TRANSITION_FORMATS: OutputFormat[] = ALL_FORMATS.filter((f) => transitionsSupported(f, "single"));
+
+/** The ffmpeg xfade kinds the MP4 renderer draws (#1244), in the order
+ *  ``composition.XFADE_KINDS`` lists them; the FCPXML has no effect for
+ *  them, so they are MP4-only tiles. */
+const XFADE_VARIANTS: { id: string; name: string; thumbnail: string; help: string }[] = [
+  { id: "fade", name: "Fade", thumbnail: "transition-fade.png", help: "Fades the stage into the next." },
+  { id: "fadeblack", name: "Fade through black", thumbnail: "transition-fadeblack.png", help: "Fades to black, then into the next stage." },
+  { id: "dissolve", name: "Dissolve", thumbnail: "transition-dissolve.png", help: "A grainy dissolve into the next stage." },
+  { id: "slideleft", name: "Slide left", thumbnail: "transition-slideleft.png", help: "The next stage slides in from the right." },
+  { id: "slideright", name: "Slide right", thumbnail: "transition-slideright.png", help: "The next stage slides in from the left." },
+  { id: "circleopen", name: "Circle open", thumbnail: "transition-circleopen.png", help: "The next stage opens from the centre." },
+  { id: "zoomin", name: "Zoom in", thumbnail: "transition-zoomin.png", help: "Zooms into the stage and out into the next." },
+  { id: "hblur", name: "Horizontal blur", thumbnail: "transition-hblur.png", help: "Blurs sideways out of the stage and into the next." },
+  { id: "smoothleft", name: "Smooth left", thumbnail: "transition-smoothleft.png", help: "A soft wipe to the left." },
+  { id: "wipeleft", name: "Wipe left", thumbnail: "transition-wipeleft.png", help: "A hard wipe to the left." },
+];
 
 /** What the hold turns on at: the YouTube built-in's value. */
 export const DEFAULT_SUMMARY_HOLD_SECONDS = 3;
@@ -252,7 +268,7 @@ export const LOOK_SLOTS: readonly LookSlot[] = [
         help: "Holds the last frame of a stage before the next one starts.",
         params: [transitionSeconds],
         modes: ["single"],
-        formats: TRANSITION_FORMATS,
+        formats: ["fcpxml"],
       },
       {
         id: "zoom",
@@ -261,8 +277,14 @@ export const LOOK_SLOTS: readonly LookSlot[] = [
         help: "Zooms and blurs out of a stage and into the next.",
         params: [transitionSeconds],
         modes: ["single"],
-        formats: TRANSITION_FORMATS,
+        formats: ["fcpxml"],
       },
+      ...XFADE_VARIANTS.map((v) => ({
+        ...v,
+        params: [transitionSeconds],
+        modes: ["single"] as ExportMode[],
+        formats: ["mp4"] as OutputFormat[],
+      })),
     ],
     read: (s) => (s.transitionKind === "none" ? "cut" : s.transitionKind),
     write: (_s, id) => ({ transitionKind: id === "cut" ? "none" : (id as ExportSettings["transitionKind"]) }),
@@ -276,6 +298,21 @@ export function variantHelp(variant: LookVariant, mode: ExportMode): string {
 
 export function visibleVariants(slot: LookSlot, mode: ExportMode, format: OutputFormat): LookVariant[] {
   return slot.variants.filter((v) => v.modes.includes(mode) && v.formats.includes(format));
+}
+
+/** The kind a request sends for a stored ``transitionKind``: itself when
+ *  the transition slot can draw it for the format, else ``"none"``, so the
+ *  tile the gallery shows (Hard cut) and the render agree (#1244). A
+ *  preset saved with ``zoom`` for FCPXML is a hard cut on MP4, not a
+ *  zoomin nobody picked. */
+export function visibleTransitionKind(
+  kind: ExportSettings["transitionKind"],
+  format: OutputFormat,
+): ExportSettings["transitionKind"] {
+  if (kind === "none") return "none";
+  const transition = LOOK_SLOTS.find((s) => s.id === "transition");
+  if (!transition) return "none";
+  return visibleVariants(transition, "single", format).some((v) => v.id === kind) ? kind : "none";
 }
 
 /** A slot shows when at least one variant beyond the default can be drawn. */

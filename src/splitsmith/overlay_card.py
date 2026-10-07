@@ -61,32 +61,78 @@ Card = TitleCard | MatchTitle
 LOWER_THIRD_FADE_SECONDS = 0.5
 
 
-def lower_third_filters(input_index: int, seconds: float, *, source_label: str) -> tuple[list[str], str]:
+def _lower_third_window(
+    seconds: float, delay_seconds: float, skip_seconds: float
+) -> tuple[float, float, str]:
+    """(fade start, window end, the ``enable`` expression) for a lower third
+    shown for ``seconds`` from the segment's start; ``delay_seconds`` opens
+    the window later and ``skip_seconds`` drops what an earlier segment
+    already showed (issue #1244: a boundary's head edge starts the card
+    d/2 in, the trimmed stage after it continues from d/2). With both at
+    zero the strings are the ones every renderer emitted before."""
+    end = delay_seconds + seconds - skip_seconds
+    fade_start = max(delay_seconds, end - LOWER_THIRD_FADE_SECONDS)
+    if delay_seconds == 0.0 and skip_seconds == 0.0:
+        return fade_start, end, f"lt(t,{seconds:g})"
+    return fade_start, end, f"between(t,{delay_seconds:g},{end:g})"
+
+
+def lower_third_filters(
+    input_index: int,
+    seconds: float,
+    *,
+    source_label: str,
+    delay_seconds: float = 0.0,
+    skip_seconds: float = 0.0,
+) -> tuple[list[str], str]:
     """The two ``-filter_complex`` chains that composite a lower-third over
     ``source_label`` and the label they end on: the PNG made ``rgba`` and
     faded out over its last :data:`LOWER_THIRD_FADE_SECONDS`, then an
-    ``overlay`` disabled once ``seconds`` have passed. One spelling for
-    both renderers, so their fades cannot drift apart."""
-    fade_start = max(0.0, seconds - LOWER_THIRD_FADE_SECONDS)
+    ``overlay`` disabled once ``seconds`` have passed (the window moved by
+    ``delay_seconds`` / ``skip_seconds``, see :func:`_lower_third_window`).
+    One spelling for both renderers, so their fades cannot drift apart."""
+    fade_start, _end, enable = _lower_third_window(seconds, delay_seconds, skip_seconds)
     return [
         f"[{input_index}:v]format=rgba,fade=t=out:st={fade_start:g}:d={LOWER_THIRD_FADE_SECONDS:g}:alpha=1[lt]",
-        f"[{source_label}][lt]overlay=0:0:enable='lt(t,{seconds:g})'[withlt]",
+        f"[{source_label}][lt]overlay=0:0:enable='{enable}'[withlt]",
     ], "withlt"
 
 
 def lower_third_clip_filters(
-    input_index: int, seconds: float, *, rate: str, source_label: str
+    input_index: int,
+    seconds: float,
+    *,
+    rate: str,
+    source_label: str,
+    delay_seconds: float = 0.0,
+    skip_seconds: float = 0.0,
 ) -> tuple[list[str], str]:
     """:func:`lower_third_filters` for an animated lower third: the clip
     conformed to ``rate`` and held like a motion card, then the same
     fade-out and the same ``enable`` window, so a still and an animated
-    lower third leave the screen identically."""
-    fade_start = max(0.0, seconds - LOWER_THIRD_FADE_SECONDS)
+    lower third leave the screen identically. A ``skip`` drops the clip's
+    head after holding its last frame (so a skip past the animation still
+    shows the card); a ``delay`` pads its start with transparent frames
+    (the overlay must see a frame from t=0 or it would hold the picture)."""
+    fade_start, end, enable = _lower_third_window(seconds, delay_seconds, skip_seconds)
+    delay = (
+        f"tpad=start_duration={delay_seconds:g}:start_mode=add:color=black@0.0,"
+        if delay_seconds > 0.0
+        else ""
+    )
+    if skip_seconds > 0.0:
+        # Clone the last frame first, then skip: a skip past the clip's own
+        # length still shows that frame (review of #1244).
+        hold = (
+            f"tpad=stop_mode=clone:stop_duration={seconds:g},trim=start={skip_seconds:g}:end={seconds:g},"
+            "setpts=PTS-STARTPTS"
+        )
+    else:
+        hold = f"tpad=stop_mode=clone:stop_duration={seconds:g},trim=0:{end:g}"
     return [
-        f"[{input_index}:v]format=rgba,fps={rate},setpts=PTS-STARTPTS,"
-        f"tpad=stop_mode=clone:stop_duration={seconds:g},trim=0:{seconds:g},"
+        f"[{input_index}:v]format=rgba,fps={rate},setpts=PTS-STARTPTS,{delay}{hold},"
         f"fade=t=out:st={fade_start:g}:d={LOWER_THIRD_FADE_SECONDS:g}:alpha=1[lt]",
-        f"[{source_label}][lt]overlay=0:0:enable='lt(t,{seconds:g})'[withlt]",
+        f"[{source_label}][lt]overlay=0:0:enable='{enable}'[withlt]",
     ], "withlt"
 
 

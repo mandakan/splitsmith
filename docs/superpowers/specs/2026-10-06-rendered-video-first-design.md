@@ -181,6 +181,19 @@ the same window in both. The FCPXML path's d/2 check against head and
 tail pads is reused and reports, never clamps. The boundary segment's
 cache key is both neighbours' argv plus the transition.
 
+> Amended 2026-10-07 (slice 4, #1244): a transition of d seconds is a
+> crossfade of length d centred on the cut. The boundary segment is built
+> from two edge renders of d seconds each (the neighbour's d/2 inside the
+> cut plus d/2 of handle: the footage the trim holds past the pad, or a
+> card's own frame), so the "last d/2 of N and first d/2 of N+1" alone
+> would only fill a d/2 fade; the timeline keeps its length. Where the
+> trim holds less handle than d/2 (the default pads over the default
+> buffers hold none) the boundary holds the edge's end frame for the
+> rest, so the fit check is against the pads only. The boundary's cache
+> key is its two edges' cache keys plus the transition. The single-shooter
+> renderer ships first; the grid's stage segment needs a per-stage trim
+> lever and follows under the same issue.
+
 ## 4. Export page, Footage page, API
 
 - `GET /api/looks` lists Looks with slots, variants, parameters and

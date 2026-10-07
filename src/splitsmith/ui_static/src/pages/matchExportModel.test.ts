@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { camExportFields, DEFAULT_CAM_OPTIONS } from "@/lib/camOptions";
 import { DEFAULT_EXPORT_SETTINGS as S } from "@/lib/exportPresets";
-import { DEFAULT_RENDER_OPTIONS, clampSeconds, matchExportFields, transitionsSupported } from "@/lib/renderOptions";
+import { visibleTransitionKind } from "@/lib/lookGallery";
+import { DEFAULT_RENDER_OPTIONS, clampSeconds, matchExportFields } from "@/lib/renderOptions";
 import { DEFAULT_UPLOAD_OPTIONS, rowUploadOptions } from "@/lib/youtubeRows";
 import {
   CANVAS_CHOICES,
@@ -164,7 +165,7 @@ describe("buildMatchExportPayload", () => {
       tail_pad_seconds: base.tailPad,
       ...camExportFields(base.camOptions),
       output_format: base.outputFormat,
-      transition_kind: transitionsSupported(base.outputFormat) ? base.transitionKind : "none",
+      transition_kind: visibleTransitionKind(base.transitionKind, base.outputFormat),
       transition_duration_seconds: clampSeconds(base.transitionSeconds, 0.1),
       ...matchExportFields(base.renderOptions, base.outputFormat),
       intro_path: undefined,

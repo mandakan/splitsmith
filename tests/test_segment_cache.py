@@ -118,4 +118,4 @@ def test_a_virtual_input_is_keyed_by_its_digest_not_its_path(tmp_path: Path) -> 
     assert same != cache.key(
         argv_b, output_path=work_b / "out.mp4", work_dir=work_b, virtual_inputs={str(clip_b): "d2"}
     )
-    assert KEY_VERSION == 2
+    assert KEY_VERSION == 3

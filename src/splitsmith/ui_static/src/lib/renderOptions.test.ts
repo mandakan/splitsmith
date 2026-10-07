@@ -165,3 +165,14 @@ describe("the mappers against the gallery registry", () => {
     }
   });
 });
+
+describe("transitionsSupported by format and mode (#1244)", () => {
+  it("MP4 draws transitions for one shooter, not yet for the grid; the FCP 7 XML never", () => {
+    expect(transitionsSupported("mp4", "single")).toBe(true);
+    expect(transitionsSupported("mp4", "grid")).toBe(false);
+    expect(transitionsSupported("fcpxml", "single")).toBe(true);
+    expect(transitionsSupported("fcpxml", "grid")).toBe(true);
+    expect(transitionsSupported("fcp7xml", "single")).toBe(false);
+    expect(transitionsSupported("mp4")).toBe(true);
+  });
+});

@@ -211,7 +211,7 @@ def export_match_tool(
     project_name: str | None = None,
     pip_layout: Literal["stacked", "pip-corners"] = "stacked",
     output_format: Literal["fcpxml", "fcp7xml", "mp4"] = "fcpxml",
-    transition_kind: Literal["none", "zoom", "static"] = "none",
+    transition_kind: match_export_helpers.TransitionKind = "none",
     transition_duration_seconds: float = 0.5,
     title_kind: Literal["none", "slate", "lower-third"] = "none",
     title_duration_seconds: float = 1.5,

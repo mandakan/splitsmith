@@ -24,10 +24,15 @@ const tile = (slot: string, name: string) =>
 const groups = () => screen.getAllByRole("radiogroup").map((g) => g.getAttribute("aria-label"));
 
 describe("LookGallery", () => {
-  it("on MP4 offers every slot, each tile with its thumbnail, and the transition stays hidden", () => {
+  it("on MP4 offers every slot, each tile with its thumbnail, the transition included (#1244)", () => {
     setup({ outputFormat: "mp4" });
-    expect(groups()).toEqual(["Title page", "Stage card", "Closing card", "Stage summary", "Overlay"]);
+    expect(groups()).toEqual(["Title page", "Stage card", "Closing card", "Stage summary", "Overlay", "Transition"]);
     expect(tile("Title page", "None")).toBeChecked();
+    expect(tile("Transition", "Hard cut")).toBeChecked();
+    expect(tile("Transition", "Fade").querySelector("img")).toHaveAttribute(
+      "src",
+      expect.stringMatching(/transition-fade/),
+    );
     expect(tile("Stage card", "Slate").querySelector("img")).toHaveAttribute(
       "src",
       expect.stringMatching(/stage-card-slate/),

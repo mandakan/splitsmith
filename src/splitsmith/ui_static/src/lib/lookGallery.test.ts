@@ -15,6 +15,7 @@ import {
   thumbnailUrl,
   visibleSlots,
   visibleVariants,
+  visibleTransitionKind,
   type LookSlot,
 } from "@/lib/lookGallery";
 import type { RenderOptions } from "@/lib/renderOptions";
@@ -138,8 +139,46 @@ describe("visibility, pinned to the rules the render panel applied", () => {
   const ids = (mode: "single" | "trims" | "compare", format: "fcpxml" | "fcp7xml" | "mp4") =>
     visibleSlots(mode, format).map((s) => s.id);
 
-  it("single + MP4 offers everything but the transition", () => {
-    expect(ids("single", "mp4")).toEqual(["titlePage", "stageCard", "closingCard", "summaryHold", "overlay"]);
+  it("single + MP4 offers everything, the transition included (#1244)", () => {
+    expect(ids("single", "mp4")).toEqual([
+      "titlePage",
+      "stageCard",
+      "closingCard",
+      "summaryHold",
+      "overlay",
+      "transition",
+    ]);
+  });
+
+  it("a stored kind the format cannot draw is sent as none, so the tile and the render agree", () => {
+    expect(visibleTransitionKind("zoom", "mp4")).toBe("none");
+    expect(visibleTransitionKind("static", "mp4")).toBe("none");
+    expect(visibleTransitionKind("fade", "mp4")).toBe("fade");
+    expect(visibleTransitionKind("fade", "fcpxml")).toBe("none");
+    expect(visibleTransitionKind("zoom", "fcpxml")).toBe("zoom");
+    expect(visibleTransitionKind("zoom", "fcp7xml")).toBe("none");
+    expect(visibleTransitionKind("none", "mp4")).toBe("none");
+  });
+
+  it("the transition slot offers the xfade kinds to MP4 and the two FCP effects to FCPXML", () => {
+    expect(visibleVariants(slot("transition"), "single", "mp4").map((v) => v.id)).toEqual([
+      "cut",
+      "fade",
+      "fadeblack",
+      "dissolve",
+      "slideleft",
+      "slideright",
+      "circleopen",
+      "zoomin",
+      "hblur",
+      "smoothleft",
+      "wipeleft",
+    ]);
+    expect(visibleVariants(slot("transition"), "single", "fcpxml").map((v) => v.id)).toEqual([
+      "cut",
+      "static",
+      "zoom",
+    ]);
   });
 
   it("single + FCPXML offers the stage card, the overlay and the transition only", () => {

@@ -237,3 +237,17 @@ describe("formatElapsed", () => {
     expect(formatElapsed(3600)).toBe("60:00");
   });
 });
+
+describe("estimateDuration with an MP4 transition (#1244)", () => {
+  it("keeps the length: the fade is centred on the cut", () => {
+    const times = new Map([
+      [1, 10],
+      [2, 10],
+    ]);
+    const base = { mode: "single" as const, head: 3, tail: 2, transitionSeconds: 1, cardSeconds: 0 };
+    const faded = estimateDuration([1, 2], times, { ...base, format: "mp4", transitionKind: "fade" });
+    const cut = estimateDuration([1, 2], times, { ...base, format: "mp4", transitionKind: "none" });
+    expect(faded).toBe(cut);
+    expect(estimateDuration([1, 2], times, { ...base, format: "fcpxml", transitionKind: "zoom" })).toBe(cut + 1);
+  });
+});

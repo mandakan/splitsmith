@@ -11,10 +11,10 @@
 import type { ExportPresetBody, GridFreeCell, OverlayCodec } from "@/lib/api";
 import { DEFAULT_CAM_OPTIONS, fromPipLayout, type CamOptions } from "@/lib/camOptions";
 import type { ExportMode } from "@/lib/exportPlan";
+import { visibleTransitionKind } from "@/lib/lookGallery";
 import {
   DEFAULT_RENDER_OPTIONS,
   describeRenderOptions,
-  transitionsSupported,
   type OutputFormat,
   type RenderOptions,
 } from "@/lib/renderOptions";
@@ -35,6 +35,16 @@ export const TRANSITIONS: { value: TransitionKind; label: string }[] = [
   { value: "none", label: "Hard cut" },
   { value: "static", label: "Static frame" },
   { value: "zoom", label: "Zoom blur" },
+  { value: "fade", label: "Fade" },
+  { value: "fadeblack", label: "Fade through black" },
+  { value: "dissolve", label: "Dissolve" },
+  { value: "slideleft", label: "Slide left" },
+  { value: "slideright", label: "Slide right" },
+  { value: "circleopen", label: "Circle open" },
+  { value: "zoomin", label: "Zoom in" },
+  { value: "hblur", label: "Horizontal blur" },
+  { value: "smoothleft", label: "Smooth left" },
+  { value: "wipeleft", label: "Wipe left" },
 ];
 
 export const FORMAT_LABELS: Record<OutputFormat, string> = { fcpxml: "FCPXML", fcp7xml: "FCP 7 XML", mp4: "MP4" };
@@ -280,7 +290,7 @@ export function groupSummary(s: ExportSettings, group: SettingsGroup, ctx: Summa
       const cards = describeRenderOptions(s.renderOptions, grid ? "grid" : "single", grid ? "mp4" : s.outputFormat);
       if (cards) parts.push(cards);
       if (grid ? s.gridOverlay : s.includeOverlay) parts.push("overlay");
-      if (!grid && transitionsSupported(s.outputFormat) && s.transitionKind !== "none") {
+      if (!grid && visibleTransitionKind(s.transitionKind, s.outputFormat) !== "none") {
         parts.push(`${s.transitionKind} ${finite(s.transitionSeconds, 0.5).toFixed(1)} s`);
       }
       return parts.length > 0 ? parts.join(" · ") : "No cards";
