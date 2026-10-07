@@ -1782,3 +1782,143 @@ def test_a_sting_is_told_the_stage_names_either_side_of_a_slate() -> None:
         card=composition.MatchTitle("Cup"),
     )
     assert mp4_grid._grid_item_label(title, names) == "Cup"
+
+
+# --- the segment cache (grid) --------------------------------------------
+
+
+def _writing_runner(fail_trim: str | None = None):
+    """A fake ffmpeg that writes its output file, so the cache can keep it;
+    an encode reading ``fail_trim`` answers 1."""
+    calls: list[tuple[str, ...]] = []
+
+    def runner(cmd, **kwargs):
+        argv = tuple(str(c) for c in cmd)
+        calls.append(argv)
+        if fail_trim is not None and fail_trim in argv:
+            return subprocess.CompletedProcess(cmd, 1, b"", b"boom")
+        Path(argv[-1]).write_bytes(b"segment " + argv[-1].encode())
+        return subprocess.CompletedProcess(cmd, 0, b"", b"")
+
+    return calls, runner
+
+
+def _cached_render(tmp_path: Path, work: str, runner, cache, steps=None):
+    # Distinct trims per stage: two stages with the same command are one
+    # cache entry, which is right but not what these tests count.
+    trims = {n: Path(f"/trims/stage{n}.mp4") for n in (1, 2)}
+    shooters = _shooters(
+        {label: {n: _bundle(n, trims[n]) for n in (1, 2)} for label in ("Mathias", "Anders")}
+    )
+    return mp4_grid.render_grid_mp4(
+        shooters,
+        audio_label="Mathias",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        ffmpeg_binary="/bin/ffmpeg",
+        runner=runner,
+        work_dir=tmp_path / work,
+        segment_cache=cache,
+        progress=steps.append if steps is not None else None,
+    )
+
+
+def test_a_second_grid_render_reuses_every_stage_from_the_cache(tmp_path: Path):
+    from splitsmith.segment_cache import SegmentCache
+
+    cache = SegmentCache(root=tmp_path / "cache", max_bytes=1 << 30)
+    first_calls, first = _writing_runner()
+    _cached_render(tmp_path, "work-a", first, cache)
+    assert len(first_calls) == 3
+
+    calls, runner = _writing_runner()
+    steps: list = []
+    result = _cached_render(tmp_path, "work-b", runner, cache, steps)
+    assert len(calls) == 1 and calls[0][calls[0].index("-f") + 1] == "concat"
+    listed = (tmp_path / "work-b" / "concat.txt").read_text(encoding="utf-8")
+    assert str((tmp_path / "cache").resolve()) in listed
+    assert [(s.plan.stage_number if s.plan else None, s.status) for s in steps] == [
+        (1, "reused"),
+        (2, "reused"),
+        (None, "stitching"),
+    ]
+    assert [(s.stage_number, s.ok) for s in result.stages] == [(1, True), (2, True)]
+
+
+def test_a_stage_that_failed_is_not_cached(tmp_path: Path):
+    from splitsmith.segment_cache import SegmentCache
+
+    cache = SegmentCache(root=tmp_path / "cache", max_bytes=1 << 30)
+    _, failing = _writing_runner(fail_trim="/trims/stage1.mp4")
+    result = _cached_render(tmp_path, "work-a", failing, cache)
+    assert [(s.stage_number, s.ok) for s in result.stages] == [(1, False), (2, True)]
+    assert not list((tmp_path / "cache").glob(".*.part*"))
+
+    calls, runner = _writing_runner()
+    _cached_render(tmp_path, "work-b", runner, cache)
+    # Stage 1 encodes again (into a partial named for its key), stage 2 is reused.
+    assert len(calls) == 2 and calls[1][calls[1].index("-f") + 1] == "concat"
+
+
+def test_progress_names_every_stage_as_it_encodes_then_the_stitch(tmp_path: Path):
+    steps: list = []
+    _, runner = _writing_runner()
+    _cached_render(tmp_path, "work", runner, None, steps)
+    assert [(s.index, s.total, s.plan.stage_number if s.plan else None, s.status) for s in steps] == [
+        (0, 2, 1, "encoding"),
+        (1, 2, 2, "encoding"),
+        (2, 2, None, "stitching"),
+    ]
+
+
+def test_the_overlays_sprites_and_font_reach_the_cache_key(tmp_path: Path):
+    """The sprites are named only inside a concat list and the font only
+    inside ``drawtext``; a redrawn sprite under the same name must miss."""
+    from splitsmith.compare.overlay_sprites import write_concat_list
+    from splitsmith.segment_cache import SegmentCache
+
+    sprites = [tmp_path / "sprites" / f"s{i}.png" for i in range(2)]
+    sprites[0].parent.mkdir()
+    for sprite in sprites:
+        sprite.write_bytes(b"sprite")
+    listing = write_concat_list(
+        [(sprites[0], 1.0), (sprites[1], 1.0)], tmp_path / "list.txt", frame_rate=(30, 1)
+    )
+    font = tmp_path / "clock.ttf"
+    font.write_bytes(b"font")
+    overlay = mp4_grid.StageOverlayPlan(sprite_list_path=listing, font_path=font, font_size=40)
+    inputs = mp4_grid._overlay_inputs(overlay)
+    assert inputs == (sprites[0].resolve(), sprites[1].resolve(), font)
+    assert mp4_grid._overlay_inputs(None) == ()
+
+    cache = SegmentCache(root=tmp_path / "cache", max_bytes=1 << 30)
+    argv = ("ffmpeg", "-f", "concat", "-i", str(listing), str(tmp_path / "out.mov"))
+    before = cache.key(argv, output_path=tmp_path / "out.mov", work_dir=tmp_path, extra_inputs=inputs)
+    sprites[1].write_bytes(b"redrawn in another theme")
+    after = cache.key(argv, output_path=tmp_path / "out.mov", work_dir=tmp_path, extra_inputs=inputs)
+    assert before != after
+
+
+def test_a_relative_work_dir_is_made_absolute_when_a_cache_keys_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The cache fingerprints a work file only when its argv token is an
+    absolute path; a relative one would be keyed by its name alone, so a
+    redrawn hold still under that name would be served stale."""
+    from splitsmith.segment_cache import SegmentCache
+
+    monkeypatch.chdir(tmp_path)
+    calls, runner = _writing_runner()
+    mp4_grid.render_grid_mp4(
+        _shooters(),
+        audio_label="Mathias",
+        output_path=Path("grid.mp4"),
+        canvas=CANVAS,
+        ffmpeg_binary="/bin/ffmpeg",
+        runner=runner,
+        work_dir=Path("work"),
+        segment_cache=SegmentCache(root=tmp_path / "cache", max_bytes=1 << 30),
+    )
+    stitch = calls[-1]
+    listed = Path(stitch[stitch.index("-i") + 1])
+    assert listed.is_absolute() and listed.parent == (tmp_path / "work").resolve()

@@ -11,11 +11,13 @@ from rich.console import Console
 
 from .. import camera_select
 from ..composition import XFADE_KINDS, uniform_transitions
+from ..config import Config
 from ..export_naming import slugify
 from ..looks import load_look
 from ..match_model import Match, is_match_folder
 from ..overlay_theme import THEME_NAMES, ThemeName
 from ..ui.identity_media import grid_identities
+from ..ui.match_exports import render_segment_cache
 from . import emitter as emitter_mod
 from . import manifest as manifest_mod
 from . import mp4_grid, project_loader
@@ -541,13 +543,14 @@ def _render_grid_mp4(
     default lives beside the output: a match's worth of 4K segments should
     not have to fit on whatever filesystem backs /tmp.
 
-    ``render_grid_mp4`` has no progress callback, so progress is reported
-    by wrapping its ``runner`` hook (already part of its public signature,
-    and already how its own tests inject a fake ffmpeg) rather than
-    reaching into the engine to add one. ``build_stage_plans`` is called
-    once up front -- pure planning, no ffmpeg -- purely to learn the stage
-    count and names for the "N of M" messages; ``render_grid_mp4`` plans
-    again internally with the same inputs and so sees the same stages.
+    Progress comes through ``render_grid_mp4``'s ``progress`` hook, one
+    line per stage as it is encoded or reused from the render segment
+    cache (``match_exports.render_segment_cache``, shared with the
+    single-shooter export), then the stitch. Counting ``runner`` calls,
+    as this did before the cache, would skip a reused stage.
+    ``build_stage_plans`` is called once up front -- pure planning, no
+    ffmpeg -- for the transition count; ``render_grid_mp4`` plans again
+    internally with the same inputs and so sees the same stages.
 
     The engine decides what a feature-poor ffmpeg means for ``--overlay``
     (architecture rule 1: the CLI orchestrates, it does not own that);
@@ -570,20 +573,19 @@ def _render_grid_mp4(
         layout_2up="horizontal",
         hold_seconds=summary_hold,
     )
-    total = len(plans)
-    progress = {"calls": 0}
 
-    def _reporting_runner(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess:
-        index = progress["calls"]
-        progress["calls"] += 1
-        if index < total:
-            plan = plans[index]
-            console.print(
-                f"[cyan]Rendering[/] stage {plan.stage_number} ({plan.stage_name}) "
-                f"-- {index + 1} of {total}..."
-            )
-        else:
-            console.print(f"[cyan]Stitching[/] {total} stage(s) into {output}...")
+    def _report(step: mp4_grid.GridRenderStep) -> None:
+        if step.plan is None:
+            console.print(f"[cyan]Stitching[/] {step.total} stage(s) into {output}...")
+            return
+        verb = "Reusing" if step.status == "reused" else "Rendering"
+        console.print(
+            f"[cyan]{verb}[/] stage {step.plan.stage_number} ({step.plan.stage_name}) "
+            f"-- {step.index + 1} of {step.total}..."
+        )
+
+    def _runner(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        # Looked up per call, so a test's patched ``subprocess.run`` is the one run.
         return subprocess.run(cmd, **kwargs)  # type: ignore[arg-type]
 
     def _notice(message: str) -> None:
@@ -604,7 +606,9 @@ def _render_grid_mp4(
                 overlay=overlay,
                 overlay_theme=overlay_theme,
                 summary_hold_seconds=summary_hold,
-                runner=_reporting_runner,
+                runner=_runner,
+                progress=_report,
+                segment_cache=render_segment_cache(Config().output),
                 on_notice=_notice,
                 work_dir=Path(tmp),
                 title_page=title,

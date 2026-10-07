@@ -41,11 +41,8 @@ def _streams(path: Path, *, ffprobe: str) -> list[tuple[str, str]]:
     return [(stream["codec_type"], stream.get("tags", {}).get("handler_name", "")) for stream in streams]
 
 
-@pytest.mark.skipif(not ffmpeg_available(), reason="needs ffmpeg and ffprobe on PATH")
-def test_a_two_shooter_fade_keeps_the_length_and_every_track(tmp_path: Path) -> None:
-    ffmpeg = shutil.which("ffmpeg")
-    ffprobe = shutil.which("ffprobe")
-    assert ffmpeg and ffprobe
+def _two_shooters(tmp_path: Path, *, ffmpeg: str) -> list[CompareShooterBundle]:
+    """Two shooters, two 4 s stages each, the beep at 1 s."""
     source = tmp_path / "source.mp4"
     build_synthetic_video(source)
     shooters: list[CompareShooterBundle] = []
@@ -72,6 +69,15 @@ def test_a_two_shooter_fade_keeps_the_length_and_every_track(tmp_path: Path) -> 
         shooters.append(
             CompareShooterBundle(label=label, project_root=tmp_path / label, stages_by_number=stages)
         )
+    return shooters
+
+
+@pytest.mark.skipif(not ffmpeg_available(), reason="needs ffmpeg and ffprobe on PATH")
+def test_a_two_shooter_fade_keeps_the_length_and_every_track(tmp_path: Path) -> None:
+    ffmpeg = shutil.which("ffmpeg")
+    ffprobe = shutil.which("ffprobe")
+    assert ffmpeg and ffprobe
+    shooters = _two_shooters(tmp_path, ffmpeg=ffmpeg)
 
     def render(name: str, transitions: tuple[composition.Transition, ...]) -> mp4_grid.GridRenderResult:
         return mp4_grid.render_grid_mp4(
@@ -105,6 +111,59 @@ def test_a_two_shooter_fade_keeps_the_length_and_every_track(tmp_path: Path) -> 
         ("audio", "Mathias"),
     ]
     assert [c.start_seconds for c in fade.chapters] == [c.start_seconds for c in cut.chapters]
+
+
+@pytest.mark.skipif(not ffmpeg_available(), reason="needs ffmpeg and ffprobe on PATH")
+def test_a_second_render_through_the_segment_cache_encodes_nothing_and_matches(tmp_path: Path) -> None:
+    """The grid's segment cache: the same grid in a new temp work dir
+    reuses every stage, edge and boundary, so only the stitch runs, and
+    the stitched file is the first one's length with the same tracks."""
+    from splitsmith.segment_cache import SegmentCache
+
+    ffmpeg = shutil.which("ffmpeg")
+    ffprobe = shutil.which("ffprobe")
+    assert ffmpeg and ffprobe
+    shooters = _two_shooters(tmp_path, ffmpeg=ffmpeg)
+    cache = SegmentCache(root=tmp_path / "cache", max_bytes=1 << 30)
+    fade = (composition.Transition(from_stage_index=0, to_stage_index=1, kind="fade", duration_seconds=1.0),)
+
+    def render(name: str) -> tuple[mp4_grid.GridRenderResult, list[str], list[str]]:
+        stage_calls: list[str] = []
+        boundary_calls: list[str] = []
+
+        def counting(into: list[str]):  # type: ignore[no-untyped-def]
+            def run(cmd, **kwargs):  # type: ignore[no-untyped-def]
+                into.append(str(cmd[-1]))
+                return subprocess.run(cmd, **kwargs)
+
+            return run
+
+        result = mp4_grid.render_grid_mp4(
+            shooters,
+            audio_label="Anders",
+            output_path=tmp_path / f"{name}.mp4",
+            canvas=mp4_grid.GridCanvas(640, 360, SYNTHETIC_FPS_NUM, SYNTHETIC_FPS_DEN),
+            head_pad_seconds=0.5,
+            tail_pad_seconds=1.0,
+            ffmpeg_binary=ffmpeg,
+            runner=counting(stage_calls),
+            boundary_runner=counting(boundary_calls),
+            work_dir=tmp_path / name,
+            transitions=fade,
+            segment_cache=cache,
+        )
+        return result, stage_calls, boundary_calls
+
+    first, first_stages, first_boundaries = render("first")
+    assert first.degradations == () and all(stage.ok for stage in first.stages)
+    assert len(first_stages) == 3 and len(first_boundaries) == 3  # two edges and the boundary
+    second, second_stages, second_boundaries = render("second")
+    assert second_stages == [str(tmp_path / "second.mp4")] and second_boundaries == []
+    assert second.degradations == () and all(stage.ok for stage in second.stages)
+    assert probe_seconds(second.output_path, ffprobe=ffprobe) == pytest.approx(
+        probe_seconds(first.output_path, ffprobe=ffprobe), abs=FRAME / 2
+    )
+    assert _streams(second.output_path, ffprobe=ffprobe) == _streams(first.output_path, ffprobe=ffprobe)
 
 
 # --- stings (#1245): the clip reaches the boundary's pixels -------------------------

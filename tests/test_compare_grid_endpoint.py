@@ -16,8 +16,6 @@ shells out to ffmpeg.
 
 from __future__ import annotations
 
-import subprocess
-import sys
 import threading
 import time
 from pathlib import Path
@@ -534,7 +532,7 @@ def test_the_renderer_gets_a_scratch_dir_the_worker_owns(
     work_dir = captured["work_dir"]
     assert work_dir.name.startswith(".compare-grid-work-")
     assert not work_dir.exists()  # removed once the render returned
-    assert callable(captured["runner"])
+    assert callable(captured["progress"])
 
 
 # --- progress -----------------------------------------------------------------
@@ -562,23 +560,21 @@ def _plan(number: int) -> mp4_grid_mod.GridStagePlan:
     )
 
 
-def test_the_progress_runner_reports_each_stage_then_the_stitch() -> None:
+def test_the_progress_hook_reports_each_stage_then_the_stitch() -> None:
+    """A stage reused from the segment cache never reaches ffmpeg, so
+    counting runner calls (what this replaced) would have skipped it."""
     handle = _RecordingHandle()
     plans = tuple(_plan(n) for n in (1, 2, 3, 4))
-    calls: list[list[str]] = []
-
-    def _base(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
-        calls.append(cmd)
-        return subprocess.CompletedProcess(cmd, 0, b"", b"")
-
-    runner = server_mod._compare_grid_progress_runner(handle, plans, base_runner=_base)
-    for _ in range(len(plans) + 1):  # one per stage, then the stitch
-        assert runner(["ffmpeg"], capture_output=True).returncode == 0
+    report = server_mod._compare_grid_progress(handle)
+    for i, plan in enumerate(plans):
+        status = "reused" if i == 1 else "encoding"
+        report(mp4_grid_mod.GridRenderStep(index=i, total=4, plan=plan, status=status))
+    report(mp4_grid_mod.GridRenderStep(index=4, total=4, plan=None, status="stitching"))
 
     assert [round(p or 0, 3) for p, _ in handle.updates] == [0.05, 0.275, 0.5, 0.725, 0.95]
+    assert handle.updates[1][1] == "Reusing stage 2 (Stage 2) -- 2 of 4..."
     assert handle.updates[2][1] == "Rendering stage 3 (Stage 3) -- 3 of 4..."
     assert handle.updates[-1][1] == "Stitching 4 stage(s)..."
-    assert len(calls) == 5
 
 
 def test_the_job_snapshot_advances_while_the_render_runs(
@@ -593,9 +589,10 @@ def test_the_job_snapshot_advances_while_the_render_runs(
     release = threading.Event()
 
     def _slow_render(shooters: Any, **kwargs: Any) -> Any:
-        runner = kwargs["runner"]
-        for _ in range(2):  # two stages' worth of ffmpeg calls
-            runner([sys.executable, "-c", ""], capture_output=True)
+        assert "segment_cache" in kwargs
+        progress = kwargs["progress"]
+        for i in range(2):  # two stages encoded
+            progress(mp4_grid_mod.GridRenderStep(index=i, total=2, plan=_plan(i + 1), status="encoding"))
         reached.set()
         assert release.wait(10)
         output_path = kwargs["output_path"]
@@ -617,7 +614,7 @@ def test_the_job_snapshot_advances_while_the_render_runs(
     )
     assert response.status_code == 200
     job_id = response.json()["id"]
-    assert reached.wait(10), "the render never invoked the injected runner"
+    assert reached.wait(10), "the render never reported progress"
     snapshot = match_client_with_trims.get(f"/api/me/jobs/{job_id}").json()
     release.set()
 

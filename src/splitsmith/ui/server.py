@@ -2919,40 +2919,26 @@ def _compare_missing_trims(
     ]
 
 
-def _compare_grid_progress_runner(
-    handle: JobHandle,
-    plans: tuple[mp4_grid.GridStagePlan, ...],
-    *,
-    base_runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
-) -> Callable[..., subprocess.CompletedProcess]:
-    """Wrap ``render_grid_mp4``'s ``runner`` hook so the job reports stages.
+def _compare_grid_progress(handle: JobHandle) -> mp4_grid.GridProgress:
+    """``render_grid_mp4``'s ``progress`` hook as job updates: one per
+    stage as it is encoded or reused from the segment cache, then the
+    stitch. Without it the job sits at 5% for the whole multi-minute
+    encode and a working render looks exactly like a hung one."""
 
-    Same trick ``compare/cli.py::_render_grid_mp4`` uses for its console
-    output: the engine has no progress callback, but it does take an
-    injectable runner, and it invokes exactly one per stage followed by
-    one for the stitch. Without this the job sits at 5% for the whole
-    multi-minute encode and a working render looks exactly like a hung
-    one.
-    """
-    total = len(plans)
-    state = {"calls": 0}
+    def _report(step: mp4_grid.GridRenderStep) -> None:
+        if step.plan is None:
+            handle.update(progress=0.95, message=f"Stitching {step.total} stage(s)...")
+            return
+        verb = "Reusing" if step.status == "reused" else "Rendering"
+        handle.update(
+            progress=0.05 + 0.9 * (step.index / step.total) if step.total else 0.05,
+            message=(
+                f"{verb} stage {step.plan.stage_number} ({step.plan.stage_name}) "
+                f"-- {step.index + 1} of {step.total}..."
+            ),
+        )
 
-    def _runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
-        index = state["calls"]
-        state["calls"] += 1
-        if index < total:
-            plan = plans[index]
-            handle.update(
-                progress=0.05 + 0.9 * (index / total) if total else 0.05,
-                message=(
-                    f"Rendering stage {plan.stage_number} ({plan.stage_name}) -- {index + 1} of {total}..."
-                ),
-            )
-        else:
-            handle.update(progress=0.95, message=f"Stitching {total} stage(s)...")
-        return base_runner(cmd, **kwargs)
-
-    return _runner
+    return _report
 
 
 def _run_compare_grid(
@@ -3051,7 +3037,8 @@ def _run_compare_grid(
             output_path=output_path,
             canvas=mp4_grid.GridCanvas(width=req.canvas_width, height=req.canvas_height),
             work_dir=Path(tmp),
-            runner=_compare_grid_progress_runner(handle, plans),
+            progress=_compare_grid_progress(handle),
+            segment_cache=match_export_helpers.render_segment_cache(Config().output),
             title_page=title_page,
             closing=closing,
             stage_titles=req.stage_titles,
