@@ -33,6 +33,7 @@ from .email import ConsoleEmailSender, EmailSender, LettermintEmailSender, build
 from .engine import LoopEngines, create_engine, loop_sessionmaker, sessionmaker, tenant_session_factory
 from .export_presets import PostgresExportPresetStore
 from .job_backend import PostgresJobBackend
+from .looks import PostgresLookStore
 from .magic_link import (
     SESSION_COOKIE_NAME,
     InvalidMagicLinkError,
@@ -86,6 +87,7 @@ __all__ = [
     "MatchRow",
     "NotFoundError",
     "PostgresExportPresetStore",
+    "PostgresLookStore",
     "PostgresJobBackend",
     "PostgresMatchStore",
     "PostgresProfileStore",

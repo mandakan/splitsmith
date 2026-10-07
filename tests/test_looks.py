@@ -332,3 +332,62 @@ def test_a_user_look_shadowing_the_shipped_name_still_borrows_the_shipped_previe
     assert looks.preview_owner_root("_shipped") == looks.shipped_looks_dir() / "splitsmith"
     assert looks.preview_owner_root("foo") == user_dir / "foo"
     assert looks.preview_owner_root("nope") is None
+
+
+# --- styles, base and the user-Looks provider (#1263) ------------------------------
+
+
+def test_styles_pick_the_variant_a_slots_default_draws(user_dir: Path) -> None:
+    d = _write_look(user_dir, "club")
+    manifest = json.loads((d / "look.json").read_text(encoding="utf-8"))
+    manifest.update(base="clean", styles={"slate": "rise"})
+    (d / "look.json").write_text(json.dumps(manifest), encoding="utf-8")
+    club = looks.load_look("club")
+    shipped = looks.load_look("splitsmith")
+    assert club.manifest.base == "clean"
+    assert looks.template_for(club, "slate") == shipped.own_template("slate", "rise")
+    assert looks.template_for(club, "slate", "default") == shipped.own_template("slate", "rise")
+    assert looks.template_for(club, "title_page") == shipped.own_template("title_page")
+
+
+@pytest.mark.parametrize(
+    "styles, message",
+    [
+        ({"summary": "rise"}, "card slot"),
+        ({"slate": "Rise!"}, "variant name"),
+        ({"transition": "x"}, "card slot"),
+    ],
+)
+def test_styles_name_a_card_slot_and_a_variant_shape(user_dir: Path, styles: dict, message: str) -> None:
+    raw = json.loads((looks.shipped_looks_dir() / "clean" / "look.json").read_text(encoding="utf-8"))
+    raw.update(name="club", styles=styles)
+    with pytest.raises(ValueError, match=message):
+        looks.LookManifest.model_validate(raw)
+
+
+def test_a_provider_replaces_the_user_looks_folder_and_none_means_no_user_looks(
+    user_dir: Path, tmp_path: Path
+) -> None:
+    _write_look(user_dir, "home-look")
+    elsewhere = tmp_path / "tenant"
+    _write_look(elsewhere, "tenant-look")
+    token = looks.set_user_looks_provider(lambda: elsewhere)
+    try:
+        assert looks.user_looks_dir() == elsewhere
+        assert "tenant-look" in looks.look_names() and "home-look" not in looks.look_names()
+    finally:
+        looks.reset_user_looks_provider(token)
+    token = looks.set_user_looks_provider(lambda: None)
+    try:
+        assert looks.look_names() == ("splitsmith", "clean")
+        with pytest.raises(looks.LookNotFoundError):
+            looks.load_look("home-look")
+    finally:
+        looks.reset_user_looks_provider(token)
+    assert "home-look" in looks.look_names()
+
+
+def test_the_catalog_marks_user_looks_editable(user_dir: Path) -> None:
+    _write_look(user_dir, "club")
+    editable = {info.name: info.editable for info in looks.look_catalog()}
+    assert editable == {"splitsmith": False, "clean": False, "club": True}

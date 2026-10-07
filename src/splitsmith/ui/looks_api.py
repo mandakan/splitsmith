@@ -9,6 +9,12 @@ families' loops, #1259), by a bare
 ``<slot>-<variant>.png`` / ``.webp`` name inside that ``preview/``
 directory; anything else is the same 404, which is what keeps the
 ``{file}`` parameter harmless hosted (``route_scope.HOSTED_CONFINED_ROUTES``).
+
+``GET / PUT / DELETE /api/looks/{name}`` read and write the caller's own
+Looks through ``state.looks`` (issue #1263): the Looks folder locally, the
+account's ``user_looks`` rows hosted (the auth gate pins the tenant and
+its Looks provider before this router runs). A shipped Look is never one
+of them: it is not returned, changed or deleted here.
 """
 
 from __future__ import annotations
@@ -16,11 +22,12 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from ..composition import XFADE_FAMILIES
+from ..look_store import LookStore, LookStoreError, StoredLook, StoredLookBody, check_name
 from ..looks import PREVIEW_DIR, TRANSITIONS_OWNER, look_catalog, preview_owner_root, shipped_looks_dir
 
 router = APIRouter()
@@ -84,6 +91,47 @@ def get_look_preview(name: str, file: str) -> FileResponse:
     return FileResponse(
         path, media_type=_MEDIA[path.suffix], headers={"Cache-Control": "public, max-age=3600"}
     )
+
+
+def _store(request: Request) -> LookStore:
+    return request.app.state.splitsmith_state.looks
+
+
+def _name(name: str) -> str:
+    try:
+        return check_name(name)
+    except LookStoreError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+@router.get("/api/looks/{name}", response_model=StoredLook)
+async def get_own_look(name: str, request: Request) -> StoredLook:
+    stored = await _store(request).get(_name(name))
+    if stored is None:
+        raise HTTPException(status_code=404, detail="not found")
+    return stored
+
+
+@router.put("/api/looks/{name}", response_model=StoredLook)
+async def put_own_look(name: str, body: StoredLookBody, request: Request, response: Response) -> StoredLook:
+    store = _store(request)
+    created = await store.get(_name(name)) is None
+    try:
+        stored = await store.put(name, body)
+    except LookStoreError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    if created:
+        response.status_code = 201
+    return stored
+
+
+@router.delete("/api/looks/{name}", status_code=204)
+async def delete_own_look(name: str, request: Request) -> Response:
+    store = _store(request)
+    if await store.get(_name(name)) is None:
+        raise HTTPException(status_code=404, detail="not found")
+    await store.delete(name)
+    return Response(status_code=204)
 
 
 __all__ = ["router"]

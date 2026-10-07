@@ -892,6 +892,35 @@ class ExportPresetRow(Base):
         return f"<ExportPresetRow user_id={self.user_id!r} preset_id={self.preset_id!r}>"
 
 
+class UserLookRow(Base):
+    """One saved Look per (user, name) (issue #1263, spec 2026-10-07 s3).
+
+    Hosted counterpart to a folder under ``~/.splitsmith/looks``. A Look
+    belongs to a user, not a match, so this is its own table and never a
+    ``state_docs`` kind (which would enter the sync manifest). ``body`` is
+    the JSON dump of ``look_store.StoredLookBody``: colours, accent series,
+    card styles and the base Look, never a template.
+
+    **Multi-tenant:** the primary key leads with ``user_id`` and the
+    ``tenant_isolation`` RLS policy applies (migration e7c2a9b41d63); the
+    store filters on ``user_id`` in every statement as well.
+    """
+
+    __tablename__ = "user_looks"
+
+    user_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, nullable=False
+    )
+    name: Mapped[str] = mapped_column(String, primary_key=True, nullable=False)
+    body: Mapped[dict] = mapped_column(JSON, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return f"<UserLookRow user_id={self.user_id!r} name={self.name!r}>"
+
+
 class DesktopCommandRow(Base):
     """A request from the phone for the user's desktop to run (#1100, spec
     2026-09-28 desktop command queue).

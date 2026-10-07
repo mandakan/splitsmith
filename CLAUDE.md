@@ -228,6 +228,22 @@ today (#1268, pinned ``xfail(strict=True)``). On hosted, Looks carry colours
 and card styles only until the sandboxed template loader (#1266) ships: a
 template is code running on our server.
 
+An account's Looks (#1263) go through ``look_store.LookStore`` (``state.looks``;
+``GET / PUT / DELETE /api/looks/{name}``): ``FolderLookStore`` over the Looks
+folder locally (``put`` on a hand-made Look rewrites only the stored fields of
+its ``look.json`` and keeps its templates; a local name may shadow a shipped
+one), ``db.looks.PostgresLookStore`` over the ``user_looks`` table hosted (a
+``StoredLookBody``: label, ``base``, colours, accent series and ``styles``,
+never a template; a shipped name or a non-shipped base is refused). ``styles``
+on a manifest picks the variant a slot's ``default`` draws, which is how a
+template-less Look has card styles. Renderers never see a store: they resolve
+Looks by name through ``looks.user_looks_dir()``, and hosted sets
+``looks.set_user_looks_provider(tenant_looks_provider(tenant))`` everywhere it
+pins ``current_tenant`` (the auth gate, the share alias, the queue task), which
+materializes the account's rows as manifest-only folders under
+``user_looks_cache_root()/<user_id>/<content hash>/``. A new place that pins a
+tenant must set the provider too, or a render there sees no user Looks.
+
 A shooter has an **identity** (``splitsmith.identity``, spec section 2,
 #1243): ``MatchProject.identity`` holds an optional ``#rrggbb`` accent, a
 club line and the name of a logo under ``<shooter>/identity/``

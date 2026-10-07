@@ -194,4 +194,9 @@ UNTYPED_BODY_ROUTES: dict[tuple[str, str], str] = {
     ),
     ("POST", "/api/sync/commands/{command_id}/complete"): "a finished command's result, stored for display",
     ("POST", "/api/workers/register"): "worker metadata, stored; the route also needs a worker token",
+    ("PUT", "/api/looks/{name}"): (
+        "colour triples and card styles, validated per field (look_store.StoredLookBody); hosted, a "
+        "user_looks row materialized as look.json under the account's cache folder, the name checked "
+        "against LOOK_NAME_RE before any path is formed"
+    ),
 }
