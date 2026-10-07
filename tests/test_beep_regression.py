@@ -23,7 +23,7 @@ import pytest
 
 from splitsmith.beep_calibration import load_manifest
 from splitsmith.beep_detect import detect_beep, load_audio
-from splitsmith.config import BeepDetectConfig
+from splitsmith.config import BeepDetectConfig, BeepRankerConfig
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 CALIBRATION_DIR = FIXTURES_DIR / "beep_calibration"
@@ -49,3 +49,20 @@ def test_a_fixture_ranked_right_stays_ranked_right(stem: str) -> None:
 
     error_ms = (detected - entry.ground_truth_in_clip) * 1000.0
     assert abs(error_ms) <= entry.tolerance_ms, f"{stem}: top-1 is {error_ms:+.1f} ms from the labeled beep"
+
+
+def _pinned_heuristic() -> list[str]:
+    baseline = json.loads((CALIBRATION_DIR / "baseline_heuristic.json").read_text())
+    return sorted(r["stem"] for r in baseline["results"] if r["track"] == "clip" and r["correct_top1"])
+
+
+@pytest.mark.parametrize("stem", _pinned_heuristic()[:5])
+def test_the_heuristic_ranker_still_reproduces_today(stem: str) -> None:
+    """``ranker: heuristic`` is the escape hatch; it must stay today's detector."""
+    entry = next(e for e in load_manifest(CALIBRATION_DIR / "manifest.yaml").fixtures if e.stem == stem)
+    audio, sample_rate = load_audio(FIXTURES_DIR / entry.clip_wav)
+    config = BeepDetectConfig(ranker=BeepRankerConfig(ranker="heuristic"))
+
+    detected = detect_beep(audio, sample_rate, config).time
+
+    assert abs(detected - entry.ground_truth_in_clip) * 1000.0 <= entry.tolerance_ms

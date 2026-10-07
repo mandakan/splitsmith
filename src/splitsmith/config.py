@@ -119,30 +119,25 @@ class BeepCandidate(BaseModel):
     Surfaced to the production UI so the user can pick a different candidate
     when the auto-winner is wrong (issue #22). Fields:
 
-    * ``score`` -- composite ranking score: saturated silence-preference
-      (``tanh(run_peak / pre_window_max / silence_saturation_scale)``) tilted
-      by tonal concentration and duration match. Bounded to [0, 1). Higher =
-      stronger. Comparable only within one detection run -- nothing should
-      threshold on its absolute value.
+    * ``score`` -- what ranks the candidates. With the learned ranker (the
+      default, ``BeepRankerConfig``) it is the ranker's probability that this
+      run is the beep; with ``ranker: heuristic`` it is
+      ``tanh(silence / silence_saturation_scale) * tonal_factor * dur_factor``.
+      Comparable only within one detection run.
     * ``silence_score`` -- raw silence-preference component, kept for
-      diagnostics + threshold tuning.
+      diagnostics.
     * ``tonal_score`` -- raw tonal-concentration ratio in [0, 1]: fraction
       of the run's bandpassed energy that falls inside the IPSC timer
       fundamental band. ~1.0 for a pure tone, << 1.0 for gunshots / steel.
     * ``confidence`` -- calibrated probability in [0, 1] that this candidate
-      is the real beep. ``score`` ranks candidates; ``confidence`` is the
-      threshold-able trust value, and 0.5-0.7 lands in the HITL queue
-      (issue #219).
-
-      The ">=0.7 is right ~95 % of the time" figure from issue #220 was
-      measured on 33 fixtures. Over the 127-fixture corpus it is 88.1 %
-      (issue #949), and it was 71.0 % before the ranking term was
-      saturated -- ranking and confidence had disagreed about what a
-      strong candidate was. Note that saturation compresses
-      ``1 - runner_up_score / score``, so confidences are systematically
-      lower than pre-#949: more clips route to HITL, and the ones that
-      clear 0.7 are likelier to be right. Re-measure before quoting a
-      number here; do not assume this one still holds.
+      is the real beep: the ranker's confidence head over (its logit, its
+      margin to the best other candidate). Auto-trust and the review queue
+      threshold on it (``AutomationConfig.beep_low_confidence_threshold``).
+      Current per-bin precision is in
+      ``tests/fixtures/beep_calibration/ranker_report.json``; re-measure
+      there before quoting a number.
+    * ``features`` -- the ranker's inputs (:class:`BeepFeatures`); ``None``
+      on candidates stored before #949.
     """
 
     time: float
