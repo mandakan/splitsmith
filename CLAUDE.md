@@ -276,14 +276,21 @@ and hosted alike: navigated from ``https://look.invalid/look/<file>``, never
 ``file://``, with every request answered by ``Sandbox.handle`` through
 ``context.route``: ``/look/`` (the template's own folder, symlinks out
 refused), ``/shared/``, ``/fonts/``, and ``/file/<digest>/<name>`` for each
-file a **server-built** context field names (``engine``, ``assets`` and any
-``logo`` value; ``prepare`` rewrites those ``file://`` URLs). Never widen that
-to ``data`` at large: it carries user text, and a stage named
-``file:///proc/self/environ`` would be mounted (the test that caught it is
-``test_user_text_naming_a_file_is_never_mounted``). Everything else aborts and
+``logo`` value naming a real PNG, JPEG or WebP that is not a symlink; the
+stylesheet and ``assets`` may name files inside the mounted folders only. Never
+widen that: ``data`` carries user text (a stage named
+``file:///proc/self/environ`` would be mounted, caught by
+``test_user_text_naming_a_file_is_never_mounted``), and an own font that is a
+symlink was a way to read any file (the security review's C1; ``fonts.resolve``
+and ``own_fonts`` refuse a symlinked font). Everything else aborts and
 lands in ``TemplateProbe.blocked``, which ``looks check`` words; websockets
 are routed to nothing, service workers blocked, files capped at
-``MAX_ASSET_BYTES``. Calls into template code go through ``_TemplatePage.call``
+``MAX_ASSET_BYTES``, and the browser launches with ``_SANDBOX_SWITCHES``
+(WebRTC's UDP and DNS prefetch off, which the route cannot see: a local STUN
+listener received packets before; a V8 heap cap). A crashed renderer is a
+``TemplateScriptError``, a skipped card. Answers come back through the binding
+by a random call id, only for a call in flight, so a template cannot answer
+for the probe. Calls into template code go through ``_TemplatePage.call``
 (``wait_for_function`` over ``_GUARD_JS``, answers back through the
 ``__splitsmithDeliver`` binding), never a bare ``page.evaluate``, which waits
 forever on a stuck page. Playwright's own timeouts do not hold once a page

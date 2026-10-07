@@ -49,6 +49,7 @@ import logging
 import math
 import os
 import re
+import secrets
 import signal
 import subprocess
 import tempfile
@@ -268,6 +269,19 @@ def _unavailable(exc: Exception) -> RasterizerUnavailableError:
     )
 
 
+#: Channels a template page could reach that the sandbox's route never sees,
+#: closed for the whole browser (security review of #1266): WebRTC's ICE /
+#: STUN is UDP from the network stack (a local listener received it before
+#: this), and DNS prefetch can resolve a name a page only mentions. The heap
+#: cap bounds one template's JavaScript allocations; a renderer that dies of
+#: it is a skipped card.
+_SANDBOX_SWITCHES = (
+    "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+    "--webrtc-ip-handling-policy=disable_non_proxied_udp",
+    "--dns-prefetch-disable",
+    "--js-flags=--max-old-space-size=1024",
+)
+
 #: How long past a sandbox budget the watchdog waits before it kills the
 #: browser: Playwright's own timeout gets the first chance.
 WATCHDOG_GRACE_SECONDS = 2.0
@@ -421,7 +435,9 @@ class _TemplatePage:
     page: Any = None
     errors: list[str] = field(default_factory=list)
     delivered: dict[int, dict[str, Any]] = field(default_factory=dict)
-    calls: int = 0
+    #: The ids of calls in flight. An id is random, so a template that calls
+    #: the binding itself cannot answer for a call (review M2 of #1266).
+    pending: set[int] = field(default_factory=set)
     #: Kills the browser (the rasterizer's ``_kill_browser``); set when the
     #: page is watched, which every real one is.
     kill: Callable[[], None] | None = None
@@ -454,7 +470,9 @@ class _TemplatePage:
         except PlaywrightError as exc:
             if self.killed:
                 raise TemplateTimeoutError(message) from exc
-            raise
+            # A renderer that died (out of memory, review I1) or any other
+            # page failure is the template's, worded like a script error.
+            raise TemplateScriptError(f"{self.template.name}: {str(exc).splitlines()[0]}") from exc
         finally:
             if timer is not None:
                 timer.cancel()
@@ -466,7 +484,7 @@ class _TemplatePage:
         too, so it takes only a known call's well-formed answer."""
         if not isinstance(call_id, int) or not isinstance(payload, str) or len(payload) > 1_000_000:
             return
-        if not 0 < call_id <= self.calls:
+        if call_id not in self.pending or call_id in self.delivered:
             return
         try:
             value = json.loads(payload)
@@ -480,8 +498,8 @@ class _TemplatePage:
         ``fonts``, ``probe``) and return its value. A hook that throws is a
         :class:`_HookError`; one that does not answer within
         :data:`look_sandbox.CALL_SECONDS` a :class:`TemplateTimeoutError`."""
-        self.calls += 1
-        call_id = self.calls
+        call_id = secrets.randbelow(2**52) + 2**33
+        self.pending.add(call_id)
         try:
             with self.watched(look_sandbox.CALL_SECONDS, f"{kind} did not answer"):
                 self.page.wait_for_function(
@@ -497,8 +515,11 @@ class _TemplatePage:
         except TemplateTimeoutError:
             raise
         except PlaywrightError as exc:
-            # The guard itself threw: the template replaced what it relies on.
+            # The guard itself threw (the template replaced what it relies
+            # on), or the page crashed.
             raise _HookError(str(exc).splitlines()[0]) from exc
+        finally:
+            self.pending.discard(call_id)
         result = self.delivered.pop(call_id, None)
         if result is None:
             raise _HookError(f"{kind} gave no answer")
@@ -580,7 +601,7 @@ class ChromiumRasterizer:
         assert self._playwright is not None
         self._marker = f"--splitsmith-rasterizer={uuid.uuid4().hex}"
         self._browser = self._playwright.chromium.launch(
-            channel=self._channel, headless=self._headless, args=[self._marker]
+            channel=self._channel, headless=self._headless, args=[self._marker, *_SANDBOX_SWITCHES]
         )
 
     def _kill_browser(self) -> None:
@@ -773,6 +794,13 @@ class ChromiumRasterizer:
                 hook("fonts", None)
                 hook("fit", None)
                 seen = view.call("probe")
+            except _HookError as exc:
+                return TemplateProbe(
+                    errors=(*view.errors, str(exc)),
+                    duration=duration,
+                    poster=poster,
+                    blocked=tuple(view.sandbox.blocked),
+                )
             except TemplateTimeoutError as exc:
                 return TemplateProbe(
                     errors=(*view.errors, str(exc).removeprefix(f"{template.name}: ")),

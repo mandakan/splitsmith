@@ -414,7 +414,12 @@ def test_enter_launches_the_headless_shell_channel_not_the_full_browser(monkeypa
     assert driver.launch_kwargs["channel"] == overlay_raster.CHROMIUM_CHANNEL
     # A switch only this browser carries, which the sandbox's watchdog
     # finds it by (#1266).
-    assert len(driver.launch_args) == 1 and driver.launch_args[0].startswith("--splitsmith-rasterizer=")
+    assert driver.launch_args[0].startswith("--splitsmith-rasterizer=")
+    # Channels the sandbox's route never sees are closed at launch (review I2),
+    # and a template's heap is capped (I1).
+    assert "--force-webrtc-ip-handling-policy=disable_non_proxied_udp" in driver.launch_args
+    assert "--dns-prefetch-disable" in driver.launch_args
+    assert any(a.startswith("--js-flags=--max-old-space-size=") for a in driver.launch_args)
 
 
 def test_the_watchdog_never_matches_a_process_without_a_marker() -> None:
@@ -865,3 +870,53 @@ def test_any_other_screenshot_failure_is_not_retried() -> None:
         rasterizer.png("<html></html>", width=64, height=32)
     page = rasterizer._browser.contexts[0].pages[0]
     assert [c for c in page.calls if c[0] == "screenshot"] == [("screenshot", "png", True)]
+
+
+def test_a_crashed_renderer_is_a_skipped_card_not_a_raw_error(tmp_path: Path) -> None:
+    """Review I1: a template that runs its renderer out of memory crashes the
+    page; that is the template's failure, worded like any other."""
+    from playwright.sync_api import Error as PlaywrightError
+
+    class _CrashOnScreenshot(_RecordingPage):
+        def screenshot(
+            self, *, type: str, omit_background: bool, timeout: float | None = None
+        ) -> bytes:  # noqa: A002
+            raise PlaywrightError("Target crashed")
+
+    template = tmp_path / "card.html"
+    template.write_text("<!doctype html><body></body>", encoding="utf-8")
+    rasterizer = ChromiumRasterizer()
+    rasterizer._browser = _RecordingBrowser(page_factory=_CrashOnScreenshot)
+    with pytest.raises(overlay_raster.TemplateScriptError, match="crashed"):
+        rasterizer.render_template(template, context=_context_fixture(), width=64, height=32)
+    assert rasterizer._browser.contexts[0].closed
+
+
+def test_a_template_cannot_answer_for_a_call_it_cannot_name(tmp_path: Path) -> None:
+    """Review M2: the page can call the delivery binding too, so an answer
+    counts only for a call that is pending, by an id the page cannot guess
+    (it could otherwise hide its own overflow from ``looks check``)."""
+    rasterizer = ChromiumRasterizer()
+    rasterizer._browser = _RecordingBrowser(page_factory=_PosterPage)
+    template = tmp_path / "card.html"
+    template.write_text("<!doctype html><body></body>", encoding="utf-8")
+    view = rasterizer._open_template(template, context=_context_fixture(), width=8, height=8)
+    try:
+        ids = []
+        page = view.page
+        real = page.wait_for_function
+
+        def spy(expression, *, arg=None, polling=None, timeout=None):  # noqa: ANN001
+            ids.append(arg["id"])
+            # A guess at the next id, delivered ahead of the guard.
+            view.deliver(None, 1, json.dumps({"value": 99}))
+            view.deliver(None, ids[-1] + 1, json.dumps({"value": 99}))
+            return real(expression, arg=arg, polling=polling, timeout=timeout)
+
+        page.wait_for_function = spy
+        assert view.call("duration") == 2.0
+        assert view.call("poster") == 1.5
+        assert ids[0] > 2**32 and abs(ids[1] - ids[0]) != 1
+        assert view.delivered == {}
+    finally:
+        view.close()

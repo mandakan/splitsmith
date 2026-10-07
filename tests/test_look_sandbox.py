@@ -342,3 +342,53 @@ def test_a_logo_that_is_a_symlink_or_not_an_image_is_not_mounted(tmp_path: Path)
         _context(shooters=[{"logo": link.as_uri()}, {"logo": secret.as_uri()}, {"logo": real.as_uri()}]),
     )
     assert list(sandbox.files.values()) == [real.resolve()]
+
+
+def test_webrtc_sends_nothing_to_a_stun_server(tmp_path: Path, raster: ChromiumRasterizer) -> None:
+    """Review I2: ICE/STUN is UDP from the network stack, which the route
+    never sees. The browser is launched so a page cannot send it."""
+    import socket
+
+    udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    udp.bind(("127.0.0.1", 0))
+    udp.settimeout(0.2)
+    port = udp.getsockname()[1]
+    template = tmp_path / "rtc" / "card.html"
+    template.parent.mkdir()
+    template.write_text(
+        "<!doctype html><body><script>"
+        "window.seek = async () => {"
+        f"  const pc = new RTCPeerConnection({{iceServers: [{{urls: 'stun:127.0.0.1:{port}'}}]}});"
+        "  pc.createDataChannel('x');"
+        "  await pc.setLocalDescription(await pc.createOffer());"
+        "  await new Promise((ok) => setTimeout(ok, 1500));"
+        "};"
+        "</script></body></html>",
+        encoding="utf-8",
+    )
+    try:
+        raster.render_template(template, context=_context(), width=16, height=16)
+        got = []
+        for _ in range(5):
+            try:
+                got.append(udp.recvfrom(2048))
+            except TimeoutError:
+                pass
+        assert got == []
+    finally:
+        udp.close()
+
+
+def test_a_template_that_breaks_the_probe_is_a_finding_not_a_crash(
+    tmp_path: Path, raster: ChromiumRasterizer
+) -> None:
+    """Review M1: ``looks check`` reports a template's own error, it never raises."""
+    template = tmp_path / "evil" / "card.html"
+    template.parent.mkdir()
+    template.write_text(
+        "<!doctype html><body><p>x</p><script>document.createTreeWalker = () => { throw new Error('no'); };"
+        "</script></body></html>",
+        encoding="utf-8",
+    )
+    probe = raster.probe_template(template, context=_context(), width=64, height=32)
+    assert any("no" in e for e in probe.errors)
