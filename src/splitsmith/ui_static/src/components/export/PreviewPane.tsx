@@ -47,6 +47,7 @@ function genericFor(focus: LookFocus | null, looks: LookInfo[], settings: Export
 }
 
 export function PreviewPane({ slug, stageNumber, settings, projectName, focus, hover, enabled }: PreviewPaneProps) {
+  const { looks } = useLooks();
   const [still, setStill] = useState<string | null>(null);
   const [status, setStatus] = useState<number | null>(null);
   const [failed, setFailed] = useState(false);
@@ -56,14 +57,13 @@ export function PreviewPane({ slug, stageNumber, settings, projectName, focus, h
   const [installJob, setInstallJob] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
   const { mode } = useDeploymentMode();
-  const { looks } = useLooks();
   const urlRef = useRef<string | null>(null);
 
   const card = previewCardFor(focus);
   // One string so the effect re-runs only when the request would differ.
   const requestKey = useMemo(
-    () => (card ? JSON.stringify(previewBody(settings, card, stageNumber, projectName)) : null),
-    [card, settings, stageNumber, projectName],
+    () => (card ? JSON.stringify(previewBody(settings, card, stageNumber, projectName, looks)) : null),
+    [card, settings, stageNumber, projectName, looks],
   );
 
   useEffect(() => {

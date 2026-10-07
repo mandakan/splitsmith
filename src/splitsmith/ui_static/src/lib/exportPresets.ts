@@ -276,6 +276,8 @@ export type SettingsGroup = "output" | "cut" | "look";
 export interface SummaryContext {
   /** Synced secondary cameras on the selection (the cams line shows only with some). */
   secondaryCount: number;
+  /** The stings the chosen Look offers (``sting:<name>``), so a chosen sting reads as itself. */
+  stings?: readonly string[];
 }
 
 const CODEC_LABELS: Record<OverlayCodec, string> = {
@@ -310,7 +312,10 @@ export function groupSummary(s: ExportSettings, group: SettingsGroup, ctx: Summa
       const cards = describeRenderOptions(s.renderOptions, grid ? "grid" : "single", grid ? "mp4" : s.outputFormat);
       if (cards) parts.push(cards);
       if (grid ? s.gridOverlay : s.includeOverlay) parts.push("overlay");
-      if (visibleTransitionKind(s.transitionKind, grid ? "mp4" : s.outputFormat, grid ? "compare" : "single") !== "none") {
+      if (
+        visibleTransitionKind(s.transitionKind, grid ? "mp4" : s.outputFormat, grid ? "compare" : "single", ctx.stings ?? []) !==
+        "none"
+      ) {
         parts.push(`${s.transitionKind} ${finite(s.transitionSeconds, 0.5).toFixed(1)} s`);
       }
       return parts.length > 0 ? parts.join(" · ") : "No cards";

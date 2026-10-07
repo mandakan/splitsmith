@@ -302,8 +302,8 @@ def test_a_user_look_without_previews_borrows_the_shipped_defaults(user_dir: Pat
     _write_look(user_dir, "club")
     club = next(c for c in looks.look_catalog() if c.name == "club")
     assert club.source == "user"
-    assert club.slots["slate"][1].preview == "/api/looks/splitsmith/preview/slate-rise.png"
-    assert club.preview == "/api/looks/splitsmith/preview/look.png"
+    assert club.slots["slate"][1].preview == "/api/looks/_shipped/preview/slate-rise.png"
+    assert club.preview == "/api/looks/_shipped/preview/look.png"
     assert looks.preview_file(looks.load_look("club"), "slate", "rise") == (
         looks.shipped_looks_dir() / "splitsmith" / "preview" / "slate-rise.png"
     )
@@ -315,3 +315,20 @@ def test_a_user_look_with_its_own_preview_serves_it_from_its_own_name(user_dir: 
     (d / "preview" / "look.webp").write_bytes(b"RIFF")
     club = next(c for c in looks.look_catalog() if c.name == "club")
     assert club.preview == "/api/looks/club/preview/look.webp"
+
+
+def test_a_user_look_shadowing_the_shipped_name_still_borrows_the_shipped_previews(user_dir: Path) -> None:
+    """Review of #1246: a user ``splitsmith`` without previews, and another
+    user Look beside it, both show the shipped default's pictures, served
+    from the ``_shipped`` owner (the name ``splitsmith`` now resolves to
+    the user's directory)."""
+    _write_look(user_dir, "splitsmith")
+    _write_look(user_dir, "foo")
+    catalog = {c.name: c for c in looks.look_catalog()}
+    assert catalog["splitsmith"].source == "user"
+    assert catalog["splitsmith"].preview == "/api/looks/_shipped/preview/look.png"
+    assert catalog["splitsmith"].slots["slate"][1].preview == "/api/looks/_shipped/preview/slate-rise.png"
+    assert catalog["foo"].preview == "/api/looks/_shipped/preview/look.png"
+    assert looks.preview_owner_root("_shipped") == looks.shipped_looks_dir() / "splitsmith"
+    assert looks.preview_owner_root("foo") == user_dir / "foo"
+    assert looks.preview_owner_root("nope") is None

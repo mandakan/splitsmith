@@ -3,10 +3,10 @@
  * a Look tile previews, the request body from the form, the caption and
  * the one line per failure. Pure; ``PreviewPane`` does the fetching.
  */
-import type { ExportPreviewBody, PreviewCard } from "@/lib/api";
+import type { ExportPreviewBody, LookInfo, PreviewCard } from "@/lib/api";
 import { PADDING_PRESETS, type ExportSettings } from "@/lib/exportPresets";
 import { LOOK_SLOTS, type LookSlotId } from "@/lib/lookGallery";
-import { DEFAULT_LOOK, DEFAULT_VARIANT, nonDefault } from "@/lib/looks";
+import { BUILTIN_LOOKS, DEFAULT_LOOK, DEFAULT_VARIANT, lookChoiceOf, nonDefault, resolveLookChoice, type LookChoice } from "@/lib/looks";
 
 export interface LookFocus {
   slotId: LookSlotId;
@@ -47,7 +47,7 @@ const finite = (n: number, fallback: number) => (Number.isFinite(n) ? n : fallba
 /** The settings field whose variant a card previews with; null for the
  *  cards that have no template variant (the frame, the summary, the
  *  overlay). */
-export function variantForCard(settings: ExportSettings, card: PreviewCard): string | null {
+export function variantForCard(settings: LookChoice, card: PreviewCard): string | null {
   switch (card) {
     case "title":
       return settings.titlePageVariant;
@@ -67,6 +67,10 @@ export function previewBody(
   stageNumber: number,
   /** The bundle name field; the match cards carry it, as the export does. */
   projectName: string = "",
+  /** The installed catalog: the stored Look and variant are resolved
+   *  against it first, so a preset's uninstalled Look previews as the
+   *  default instead of a 422 (review of #1246). */
+  looks: LookInfo[] = BUILTIN_LOOKS,
 ): ExportPreviewBody {
   const body: ExportPreviewBody = {
     card,
@@ -76,9 +80,10 @@ export function previewBody(
     title_division: settings.renderOptions.titleDivision,
     project_name: projectName.trim() || null,
   };
-  const look = nonDefault(settings.look, DEFAULT_LOOK);
+  const resolved = resolveLookChoice(looks, lookChoiceOf(settings));
+  const look = nonDefault(resolved.look, DEFAULT_LOOK);
   if (look) body.look = look;
-  const variant = variantForCard(settings, card);
+  const variant = variantForCard(resolved, card);
   if (variant !== null && variant !== DEFAULT_VARIANT) body.variant = variant;
   // The timeline pads with the form's values; the grid and the trims
   // pad with the project's own buffers, which the server defaults to.

@@ -86,7 +86,7 @@ import {
   type FixTarget,
 } from "@/lib/exportPlan";
 import { useDeploymentMode } from "@/lib/features";
-import { resolveLookChoice, stingsFor } from "@/lib/looks";
+import { requestLook } from "@/lib/looks";
 import { useLooks } from "@/lib/useLooks";
 import { useMatchHref } from "@/lib/matchHref";
 import { useDesktopCommands } from "@/lib/useDesktopCommands";
@@ -125,7 +125,7 @@ export function Export() {
 
 function ExportInner({ slug }: { slug: string }) {
   const { mode: deploymentMode } = useDeploymentMode();
-  const { looks } = useLooks();
+  const looksState = useLooks();
   const hosted = deploymentMode === "hosted";
   const ctx = useOutletContext<MatchShellOutletContext>();
   const href = useMatchHref();
@@ -231,6 +231,9 @@ function ExportInner({ slug }: { slug: string }) {
     () => (onDesktop ? { ...settings, mode: "single", outputFormat: "mp4", youtube: true } : settings),
     [onDesktop, settings],
   );
+  // The Look the requests carry and the stings the transition filter admits
+  // (#1246): resolved against the catalog once it answers; Export waits for it.
+  const lookRequest = requestLook(looksState, view);
   const {
     mode,
     outputFormat,
@@ -530,13 +533,13 @@ function ExportInner({ slug }: { slug: string }) {
     mode,
     head: mode === "single" ? headPad : (project?.trim_pre_buffer_seconds ?? 0),
     tail: mode === "single" ? tailPad : (project?.trim_post_buffer_seconds ?? 0),
-    transitionKind: visibleTransitionKind(transitionKind, outputFormat),
+    transitionKind: visibleTransitionKind(transitionKind, outputFormat, "single", lookRequest.stings),
     transitionSeconds,
     format: outputFormat,
     cardSeconds,
   });
 
-  const busy = job?.status === "pending" || job?.status === "running" || queueing;
+  const busy = job?.status === "pending" || job?.status === "running" || queueing || !looksState.loaded;
   const canExport = onDesktop
     ? mode === "single" && orderedSelection.length > 0 && !!project && !desktop.busy
     : !busy && orderedSelection.length > 0 && !!project && !editDenied && (!compare || audioFrom !== "");
@@ -661,8 +664,8 @@ function ExportInner({ slug }: { slug: string }) {
         overlayCodec,
         projectName: projectName || project.name,
         uploadTarget: "desktop",
-        look: resolveLookChoice(looks, view),
-        stings: stingsFor(looks, view.look).map((s) => s.id),
+        look: lookRequest.choice,
+        stings: lookRequest.stings,
         youtubeConnected: false,
       }),
     );
@@ -692,8 +695,8 @@ function ExportInner({ slug }: { slug: string }) {
           overlayCodec,
           projectName: projectName || project.name,
           uploadTarget: "desk",
-          look: resolveLookChoice(looks, view),
-          stings: stingsFor(looks, view.look).map((s) => s.id),
+          look: lookRequest.choice,
+          stings: lookRequest.stings,
           youtubeConnected: !!youtubeSettings?.connected,
         }),
       );
@@ -726,8 +729,8 @@ function ExportInner({ slug }: { slug: string }) {
         transitionSeconds,
         cams: camOptions,
         freeCell: gridFreeCells(shooters.length) > 0 ? gridFreeCell : "blank",
-        look: resolveLookChoice(looks, view),
-        stings: stingsFor(looks, view.look).map((s) => s.id),
+        look: lookRequest.choice,
+        stings: lookRequest.stings,
         youtube,
         descriptionLead,
         uploadOptions,
@@ -790,7 +793,7 @@ function ExportInner({ slug }: { slug: string }) {
     eligible: eligibleNumbers.length,
     head: headPad,
     tail: tailPad,
-    transitionKind: visibleTransitionKind(transitionKind, outputFormat),
+    transitionKind: visibleTransitionKind(transitionKind, outputFormat, "single", lookRequest.stings),
     transitionSeconds,
     cards: describeRenderOptions(renderOptions, compare ? "grid" : "single", compare ? "mp4" : outputFormat),
     overlay: compare ? gridOverlay : includeOverlay,
@@ -804,7 +807,7 @@ function ExportInner({ slug }: { slug: string }) {
     canvas: canvas.label,
     bare: bareSelected,
   });
-  const summaryCtx = { secondaryCount };
+  const summaryCtx = { secondaryCount, stings: lookRequest.stings };
   const primaryLabel = onDesktop
     ? "Render on desktop"
     : trimsOnly

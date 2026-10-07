@@ -341,13 +341,30 @@ def preview_file(look: Look, slot: str, variant: str = DEFAULT_VARIANT) -> Path 
     ``preview/<slot>-<variant>.webp`` or ``.png``, else the shipped
     default Look's, else ``None``."""
     stem = "look" if slot == "look" else f"{slot}-{variant}"
-    for candidate in (look, _shipped_default()):
+    shipped = _shipped_default()
+    candidates = [look] if look.root == shipped.root else [look, shipped]
+    for candidate in candidates:
         for suffix in (".webp", ".png"):
             path = candidate.root / PREVIEW_DIR / f"{stem}{suffix}"
             if path.is_file():
                 return path
-        if candidate.name == DEFAULT_LOOK and candidate.source == look.source:
-            break
+    return None
+
+
+SHIPPED_OWNER = "_shipped"
+"""The owner a borrowed preview is served under: the shipped default Look
+itself, whatever a user Look of the same name shadows (no Look can be
+named this; ``_NAME_RE`` refuses a leading underscore)."""
+
+
+def preview_owner_root(owner: str) -> Path | None:
+    """The directory ``/api/looks/{owner}/preview/`` reads from: the shipped
+    default for :data:`SHIPPED_OWNER`, an installed Look's root for its
+    name, else ``None``."""
+    if owner == SHIPPED_OWNER:
+        return _shipped_default().root
+    if owner in look_names():
+        return load_look(owner).root
     return None
 
 
@@ -378,7 +395,7 @@ def _preview_url(look: Look, slot: str, variant: str) -> str | None:
     path = preview_file(look, slot, variant)
     if path is None:
         return None
-    owner = look.name if path.is_relative_to(look.root) else DEFAULT_LOOK
+    owner = look.name if path.is_relative_to(look.root) else SHIPPED_OWNER
     return f"/api/looks/{owner}/preview/{path.name}"
 
 
@@ -423,10 +440,12 @@ __all__ = [
     "LOOK_NAME_RE",
     "LookVariantInfo",
     "PREVIEW_DIR",
+    "SHIPPED_OWNER",
     "list_looks",
     "look_catalog",
     "load_look",
     "preview_file",
+    "preview_owner_root",
     "look_names",
     "shared_dir",
     "shipped_looks_dir",

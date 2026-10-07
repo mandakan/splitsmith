@@ -4,6 +4,8 @@
  */
 import { describe, expect, it } from "vitest";
 
+import type { LookInfo } from "@/lib/api";
+
 import { DEFAULT_EXPORT_SETTINGS } from "@/lib/exportPresets";
 import { previewBody, previewCaption, previewCardFor, previewLine } from "@/lib/exportPreview";
 
@@ -75,6 +77,17 @@ describe("previewCaption / previewLine", () => {
 
 
 describe("previewBody with a Look (#1246)", () => {
+  const two = [{ name: "default", preview: null }, { name: "rise", preview: null }];
+  const CLEAN: LookInfo[] = [
+    {
+      name: "clean",
+      label: "Clean",
+      source: "shipped",
+      accent_series: [],
+      preview: null,
+      slots: { title_page: two, slate: [two[0]], lower_third: [], summary: [], closing: two, transition: [] },
+    },
+  ];
   it("carries the Look and the focused slot's variant", () => {
     const settings = {
       ...DEFAULT_EXPORT_SETTINGS,
@@ -83,13 +96,32 @@ describe("previewBody with a Look (#1246)", () => {
       stageCardVariant: "default",
       closingCardVariant: "rise",
     };
-    expect(previewBody(settings, "title", 1).look).toBe("clean");
-    expect(previewBody(settings, "title", 1).variant).toBe("rise");
-    expect(previewBody(settings, "slate", 1).variant).toBeUndefined();
-    expect(previewBody(settings, "lower-third", 1).variant).toBeUndefined();
-    expect(previewBody(settings, "closing", 1).variant).toBe("rise");
-    expect(previewBody(settings, "frame", 1).variant).toBeUndefined();
+    expect(previewBody(settings, "title", 1, "", CLEAN).look).toBe("clean");
+    expect(previewBody(settings, "title", 1, "", CLEAN).variant).toBe("rise");
+    expect(previewBody(settings, "slate", 1, "", CLEAN).variant).toBeUndefined();
+    expect(previewBody(settings, "lower-third", 1, "", CLEAN).variant).toBeUndefined();
+    expect(previewBody(settings, "closing", 1, "", CLEAN).variant).toBe("rise");
+    expect(previewBody(settings, "frame", 1, "", CLEAN).variant).toBeUndefined();
     expect(previewBody(DEFAULT_EXPORT_SETTINGS, "title", 1)).not.toHaveProperty("look");
+  });
+
+  it("resolves the stored Look and variant against the catalog, so an uninstalled Look never 422s", () => {
+    const catalog: LookInfo[] = [
+      {
+        name: "clean",
+        label: "Clean",
+        source: "shipped",
+        accent_series: [],
+        preview: null,
+        slots: { title_page: [{ name: "default", preview: null }], slate: [], lower_third: [], summary: [], closing: [], transition: [] },
+      },
+    ];
+    const gone = { ...DEFAULT_EXPORT_SETTINGS, look: "club", titlePageVariant: "rise" };
+    expect(previewBody(gone, "title", 1, "", catalog)).not.toHaveProperty("look");
+    expect(previewBody(gone, "title", 1, "", catalog)).not.toHaveProperty("variant");
+    const clean = { ...DEFAULT_EXPORT_SETTINGS, look: "clean", titlePageVariant: "rise" };
+    expect(previewBody(clean, "title", 1, "", catalog).look).toBe("clean");
+    expect(previewBody(clean, "title", 1, "", catalog)).not.toHaveProperty("variant");
   });
 });
 

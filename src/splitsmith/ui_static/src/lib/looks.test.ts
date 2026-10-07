@@ -9,6 +9,7 @@ import {
   BUILTIN_LOOKS,
   DEFAULT_LOOK,
   previewSrc,
+  requestLook,
   resolveLookChoice,
   stingsFor,
   variantsFor,
@@ -111,5 +112,35 @@ describe("previewSrc", () => {
   it("is the API path, scoped like every other request, or null", () => {
     expect(previewSrc("/api/looks/splitsmith/preview/look.png")).toMatch(/\/api\/looks\/splitsmith\/preview\/look\.png$/);
     expect(previewSrc(null)).toBeNull();
+  });
+});
+
+
+describe("requestLook", () => {
+  const settings = {
+    ...DEFAULT_EXPORT_SETTINGS,
+    look: "club",
+    titlePageVariant: "rise",
+    stageCardVariant: "nope",
+    closingCardVariant: "default",
+    transitionKind: "sting:wipe" as const,
+  };
+
+  it("resolves against a loaded catalog and lists the chosen Look's stings", () => {
+    const { choice, stings } = requestLook({ looks: CATALOG, loaded: true, failed: false }, { ...settings, look: "splitsmith" });
+    expect(choice).toEqual({ look: "splitsmith", titlePageVariant: "rise", stageCardVariant: "default", closingCardVariant: "default" });
+    expect(stings).toEqual(["sting:wipe"]);
+    expect(requestLook({ looks: CATALOG, loaded: true, failed: false }, settings).stings).toEqual([]);
+  });
+
+  it("sends the stored names unresolved when the catalog could not be fetched, so the server decides", () => {
+    const { choice, stings } = requestLook({ looks: BUILTIN_LOOKS, loaded: true, failed: true }, settings);
+    expect(choice).toEqual({ look: "club", titlePageVariant: "rise", stageCardVariant: "nope", closingCardVariant: "default" });
+    expect(stings).toEqual(["sting:wipe"]);
+    expect(requestLook({ looks: BUILTIN_LOOKS, loaded: true, failed: true }, { ...settings, transitionKind: "fade" }).stings).toEqual([]);
+  });
+
+  it("keeps the stored names before the catalog answers too (the page gates Export on loaded)", () => {
+    expect(requestLook({ looks: BUILTIN_LOOKS, loaded: false, failed: false }, settings).choice.look).toBe("club");
   });
 });

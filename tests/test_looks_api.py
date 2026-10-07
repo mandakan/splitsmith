@@ -26,6 +26,15 @@ def test_get_looks_lists_the_shipped_looks(client) -> None:
     assert splitsmith["preview"] == "/api/looks/splitsmith/preview/look.png"
 
 
+def test_borrowed_previews_are_served_from_the_shipped_owner(client, tmp_path: Path, monkeypatch) -> None:
+    """Review of #1246: ``_shipped`` is the owner of every borrowed
+    preview, so a user Look shadowing ``splitsmith`` cannot hide them."""
+    monkeypatch.setenv("SPLITSMITH_HOME", str(tmp_path / "home"))
+    ok = client.get("/api/looks/_shipped/preview/look.png")
+    assert ok.status_code == 200 and ok.headers["content-type"] == "image/png"
+    assert client.get("/api/looks/_shipped/preview/nope.png").status_code == 404
+
+
 def test_preview_files_are_served_with_a_cache_header(client) -> None:
     ok = client.get("/api/looks/splitsmith/preview/slate-rise.png")
     assert ok.status_code == 200
@@ -46,3 +55,8 @@ def test_preview_files_are_served_with_a_cache_header(client) -> None:
 )
 def test_everything_else_is_404(client, path: str) -> None:
     assert client.get(path).status_code == 404, path
+
+
+def test_the_looks_routes_are_registered_once(client) -> None:
+    paths = [r.path for r in client.app.routes if getattr(r, "path", "").startswith("/api/looks")]
+    assert sorted(paths) == ["/api/looks", "/api/looks/{name}/preview/{file}"]

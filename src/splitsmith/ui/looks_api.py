@@ -3,8 +3,9 @@
 
 The catalog is :func:`splitsmith.looks.look_catalog`, read per request (a
 user may drop a Look into ``~/.splitsmith/looks`` while the app runs). A
-preview file is served only for an installed Look, by a bare
-``<slot>-<variant>.png`` / ``.webp`` name inside that Look's ``preview/``
+preview file is served only for an installed Look (or ``_shipped``, the
+shipped default a user Look borrows from), by a bare
+``<slot>-<variant>.png`` / ``.webp`` name inside that ``preview/``
 directory; anything else is the same 404, which is what keeps the
 ``{file}`` parameter harmless hosted (``route_scope.HOSTED_CONFINED_ROUTES``).
 """
@@ -17,7 +18,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
-from ..looks import PREVIEW_DIR, load_look, look_catalog, look_names
+from ..looks import PREVIEW_DIR, look_catalog, preview_owner_root
 
 router = APIRouter()
 
@@ -32,9 +33,10 @@ def get_looks() -> dict[str, Any]:
 
 @router.get("/api/looks/{name}/preview/{file}")
 def get_look_preview(name: str, file: str) -> FileResponse:
-    if name not in look_names() or not _FILE_RE.match(file):
+    root = preview_owner_root(name) if _FILE_RE.match(file) else None
+    if root is None:
         raise HTTPException(status_code=404, detail="not found")
-    path = load_look(name).root / PREVIEW_DIR / file
+    path = root / PREVIEW_DIR / file
     if not path.is_file():
         raise HTTPException(status_code=404, detail="not found")
     return FileResponse(

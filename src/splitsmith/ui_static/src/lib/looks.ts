@@ -8,7 +8,6 @@
  * warn about. ``useLooks`` fetches the catalog; everything here is data.
  */
 import { scopeRequestPath, type LookInfo, type LookVariantInfo } from "@/lib/api";
-import type { ExportSettings } from "@/lib/exportPresets";
 
 export const DEFAULT_LOOK = "splitsmith";
 export const DEFAULT_VARIANT = "default";
@@ -90,13 +89,43 @@ export function resolveLookChoice(looks: LookInfo[], settings: LookChoice): Look
   };
 }
 
+/** The catalog as a surface sees it (``useLooks``). */
+export interface LooksState {
+  looks: LookInfo[];
+  /** The fetch has answered, one way or the other. */
+  loaded: boolean;
+  /** It answered with an error: ``looks`` is the built-in catalog. */
+  failed: boolean;
+}
+
+/** What a request sends for the settings' Look under the catalog's state:
+ *  resolved against a loaded catalog; the stored names unresolved when
+ *  the catalog could not be fetched (the server validates them and says
+ *  what is installed) or has not answered yet (the page gates Export on
+ *  ``loaded``), so a chosen Look is never silently swapped for the
+ *  default (review of #1246). ``stings`` are the kinds the transition
+ *  filter admits: the chosen Look's, or the stored sting itself. */
+export function requestLook(
+  state: LooksState,
+  settings: LookChoice & { transitionKind: string },
+): { choice: LookChoice; stings: string[] } {
+  if (state.loaded && !state.failed) {
+    const choice = resolveLookChoice(state.looks, settings);
+    return { choice, stings: stingsFor(state.looks, choice.look).map((s) => s.id) };
+  }
+  return {
+    choice: lookChoiceOf(settings),
+    stings: settings.transitionKind.startsWith("sting:") ? [settings.transitionKind] : [],
+  };
+}
+
 /** An ``<img src>`` for a catalog preview path, scoped like every API request. */
 export function previewSrc(path: string | null): string | null {
   return path ? scopeRequestPath(path) : null;
 }
 
 /** The settings' Look fields alone, for callers that hold the whole settings. */
-export function lookChoiceOf(settings: ExportSettings): LookChoice {
+export function lookChoiceOf(settings: LookChoice): LookChoice {
   return {
     look: settings.look,
     titlePageVariant: settings.titlePageVariant,

@@ -99,6 +99,9 @@ describe("non-finite seconds", () => {
   it("the summaries never throw on a blank field", () => {
     const blank: ExportSettings = { ...DEFAULT_EXPORT_SETTINGS, transitionKind: "zoom", transitionSeconds: Number.NaN, headPad: Number.NaN };
     expect(groupSummary(blank, "look", { secondaryCount: 0 })).toBe("zoom 0.5 s");
+    const stung = { ...DEFAULT_EXPORT_SETTINGS, outputFormat: "mp4" as const, transitionKind: "sting:wipe" as const };
+    expect(groupSummary(stung, "look", { secondaryCount: 0, stings: ["sting:wipe"] })).toBe("sting:wipe 0.5 s");
+    expect(groupSummary(stung, "look", { secondaryCount: 0 })).toBe("No cards");
     expect(groupSummary(blank, "cut", { secondaryCount: 0 })).toBe("Full 5.0 / 5.0 s");
   });
 });

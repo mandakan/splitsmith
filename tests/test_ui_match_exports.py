@@ -1275,6 +1275,17 @@ def test_per_slot_variants_reach_their_cards_and_fall_back_to_the_knob(
     assert comp.title_page.variant == "rise" and comp.closing.variant == "default"
     assert all(stage.title is not None and stage.title.variant == "default" for stage in comp.stages)
 
+    captured = _capture_mp4(monkeypatch)
+    match_exports_mod.export_match(
+        stages=[_one_stage_input(tmp_path)],
+        request=_card_request(title_kind="lower-third", stage_card_variant="rise"),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    comp = captured["comp"]
+    assert all(stage.title is not None and stage.title.variant == "rise" for stage in comp.stages)
+
 
 def test_the_export_request_accepts_any_installed_look_and_names_them_on_a_miss() -> None:
     import pydantic

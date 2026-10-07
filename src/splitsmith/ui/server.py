@@ -18734,11 +18734,6 @@ def create_app(
 
     app.include_router(looks_router)
 
-    # The Look catalog and its preview files (spec 2026-10-06 s4, #1246).
-    from .looks_api import router as looks_router
-
-    app.include_router(looks_router)
-
     # Share-link OG card PNGs (spec 2026-08-09). Same lazy-import,
     # always-registered idiom as sync_router and device_router: every
     # route 404s outside hosted mode (see share_og._hosted_gate).
