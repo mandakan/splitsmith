@@ -788,12 +788,73 @@ def narrow_grid_plan(plan: GridStagePlan, *, head_cut: float, tail_cut: float) -
             )
         )
     hold_cut = max(0.0, min(tail_cut, plan.hold_seconds))
+    duration = plan.duration_seconds - head_cut - (tail_cut - hold_cut)
+    # A tile whose footage ended before the window would seek past its own
+    # end and hand ffmpeg no frames; in the stage it was black from its end
+    # on, so here it is filler: black, silent, the same inputs and track.
+    tiles = [
+        (
+            replace(
+                tile,
+                trim_path=None,
+                beep_offset_in_clip=0.0,
+                seek_seconds=0.0,
+                lead_pad_seconds=0.0,
+                source_duration_seconds=0.0,
+                inset_path=None,
+                inset_seek_seconds=0.0,
+                inset_lead_pad_seconds=0.0,
+            )
+            if tile.trim_path is not None and tile.seek_seconds >= tile.source_duration_seconds
+            else tile
+        )
+        for tile in tiles
+    ]
     return replace(
-        plan,
-        tiles=tuple(tiles),
-        duration_seconds=plan.duration_seconds - head_cut - (tail_cut - hold_cut),
-        hold_seconds=plan.hold_seconds - hold_cut,
+        plan, tiles=tuple(tiles), duration_seconds=duration, hold_seconds=plan.hold_seconds - hold_cut
     )
+
+
+def grid_edge_handle(plan: GridStagePlan, *, half: float, end: Literal["tail", "head"]) -> float:
+    """How much footage past the pad an edge can read, up to ``half``: at
+    the head the smallest seek among the real tiles (a lead-padded tile
+    has none); at the tail the smallest footage past the action end, and
+    none once a hold follows (the hold is a still, held by the boundary
+    just the same). The boundary holds a frame for what is missing."""
+    real = [tile for tile in plan.tiles if tile.trim_path is not None]
+    if not real:
+        return 0.0
+    if end == "head":
+        available = min(tile.seek_seconds for tile in real)
+    elif plan.hold_seconds > 0.0:
+        return 0.0
+    else:
+        available = min(
+            tile.source_duration_seconds - (tile.seek_seconds + plan.duration_seconds - tile.lead_pad_seconds)
+            for tile in real
+        )
+    return max(0.0, min(half, available))
+
+
+def grid_edge_is_hold_only(plan: GridStagePlan, *, half: float) -> bool:
+    """A tail edge that lies entirely in the hold: there is no action to
+    render, the driver makes it a still of the hold PNG."""
+    return plan.hold_seconds >= half
+
+
+def grid_edge_plan(plan: GridStagePlan, *, half: float, end: Literal["tail", "head"]) -> GridStagePlan:
+    """The stage window a boundary's edge render shows (issue #1244): at
+    the head, the handle before the pad plus the first ``half``; at the
+    tail, the last ``half`` (out of the hold first, then the action) plus
+    the handle after it. Not defined for a hold-only tail edge
+    (:func:`grid_edge_is_hold_only`)."""
+    handle = grid_edge_handle(plan, half=half, end=end)
+    if end == "head":
+        return narrow_grid_plan(plan, head_cut=-handle, tail_cut=plan.total_seconds - half)
+    if grid_edge_is_hold_only(plan, half=half):
+        raise ValueError("a tail edge inside the hold is a still of the hold, not a stage plan")
+    action_part = half - plan.hold_seconds
+    return narrow_grid_plan(plan, head_cut=plan.duration_seconds - action_part, tail_cut=-handle)
 
 
 def build_stage_plans(
