@@ -281,7 +281,7 @@ it; `looks check` says why.
 A template is code, and on splitsmith.app it would run on our servers.
 Templates now load through the sandbox described in
 [What a template can load](#what-a-template-can-load), on the desktop as on
-the server, but a Look on splitsmith.app still holds colours and card styles
-only, drawn by the shipped templates, until the sandbox has had its own
-security review. Write templates in the desktop app or the `splitsmith`
+the server, but custom templates are a desktop feature: a Look on
+splitsmith.app holds colours, fonts and card styles only, drawn by the
+shipped templates. Write templates in the desktop app or the `splitsmith`
 command line.

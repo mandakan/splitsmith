@@ -267,9 +267,15 @@ face is a catalog id or a path and every consumer takes both
 content name is what keeps the caches honest: the card PNG and the
 ``@font-face`` URL inside ``template_digest`` both move with the bytes. A copy
 of a Look (``looks.look_files``: ``looks new --from``, the editor's
-``draft_look``) carries every file but its manifest and previews. On hosted, Looks carry colours
-and card styles only until the sandbox below has had its own security review:
-a template is code running on our server.
+``draft_look``) carries every file but its manifest and previews. On hosted, Looks carry colours,
+fonts from the catalog and card styles, never a template: **custom templates
+are desktop only, by decision** (2026-10-07). A template is code; hosted would
+run it beside the database and R2 credentials, and Chromium's own OS sandbox
+cannot start on Railway (probed on staging: the platform's seccomp filter
+refuses user namespaces, ``unshare -Ur`` is denied and ``chromium_sandbox=True``
+fails to launch). Opening them on hosted would need a separate render service
+holding no secrets; do not build it, or relax any of the local-only guards
+below, without the user asking.
 
 Every template page loads in **the sandbox** (``look_sandbox``, #1266), local
 and hosted alike: navigated from ``https://look.invalid/look/<file>``, never
@@ -360,7 +366,7 @@ The template editor (#1265) is the editor's Templates tab on the desktop
 ``CodeEditor``, rules in ``lib/templateEditor``). Its routes
 (``/api/looks/{name}/templates`` GET/PUT, ``/samples``, ``/check``,
 ``/reveal``) are ``LOCAL_ONLY_ROUTES``: a template is code, hosted runs none
-of an account's until #1266. Unsaved text rides the preview and the check as
+of an account's (desktop only, see above). Unsaved text rides the preview and the check as
 ``templates`` (``look_store.TemplateEdit``, applied by ``draft_look`` /
 ``apply_template_edits``; the preview answers 403 hosted when it is set) and
 is keyed per own *file* (``editKey``): the shipped ``card.html`` draws four

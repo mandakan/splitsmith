@@ -7,8 +7,8 @@ One interface, two backends, as export presets have: :class:`LookStore`
 
 What a store holds is a :class:`StoredLookBody`: the colours, the accent
 series, each card slot's style and the Look it was made from. No
-template: hosted, an account's code never runs on our server until the
-sandboxed loader ships (#1266), so a stored Look is drawn by the shipped
+template: hosted, an account's code never runs on our server (custom
+templates are desktop only, by decision), so a stored Look is drawn by the shipped
 templates (``looks.template_for`` falls back to them). Locally a Look is
 an ordinary folder; ``put`` on one the user made by hand rewrites only
 these fields in its ``look.json`` and keeps its templates.

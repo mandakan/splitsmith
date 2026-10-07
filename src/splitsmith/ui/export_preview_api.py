@@ -130,7 +130,7 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
         from .server import _hosted_mode_active
 
         if _hosted_mode_active():
-            # A template is code; hosted runs none of an account's until #1266.
+            # A template is code; hosted runs none of an account's (desktop only).
             raise HTTPException(status_code=403, detail="template text is previewed on the desktop only")
     state = request.app.state.splitsmith_state
     project = state.shooter_project(slug)
