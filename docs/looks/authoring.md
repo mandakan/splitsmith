@@ -17,6 +17,7 @@ default Look to your own templates.
 - [Lower third](#lower-third)
 - [Stings](#stings)
 - [Logos and identity](#logos-and-identity)
+- [What a template can load](#what-a-template-can-load)
 - [Fonts](#fonts)
 - [Checking](#checking)
 - [Previewing](#previewing)
@@ -101,7 +102,7 @@ window.splitsmith = {
   size:   { width: 1920, height: 1080 },        // the frame, in CSS pixels
   fps:    30,
   engine: { css: "...", min_font_size: 12 },     // the font faces; the legibility floor
-  assets: { shared: "file:///.../_shared" },     // fit.js, cell.js, identity.js
+  assets: { shared: "https://look.invalid/shared" },     // fit.js, cell.js, identity.js
   data: {
     card: {
       slot: "title_page",                        // or slate, lower_third, closing
@@ -110,7 +111,7 @@ window.splitsmith = {
       info: ["2026-06-27", "Production Optics"], // the lines under it
       duration_seconds: 3
     },
-    shooters: [{ label: "Mathias Axell", accent: "#ff2d2d", club: "Bromma PK", logo: "file:///.../logo.png" }],
+    shooters: [{ label: "Mathias Axell", accent: "#ff2d2d", club: "Bromma PK", logo: "https://look.invalid/file/.../logo.png" }],
     groups: [ /* the shipped template's own layout; yours may ignore it */ ]
   }
 };
@@ -184,10 +185,30 @@ the Export page or with `--transition sting:<name>`.
 ## Logos and identity
 
 `data.shooters` lists the shooters a card is about, each with their label,
-accent, club line and logo, as `file://` URLs. The logo is the shooter's own,
+accent, club line and logo URL. The logo is the shooter's own,
 or the match logo. The shipped cards draw the logos top right through
 `_shared/identity.js`; a lower third shows one only when a single shooter has
 one. Your template may draw them any way it likes, or not at all.
+
+## What a template can load
+
+A template page is opened from `https://look.invalid/look/<file>`, an
+address that exists only inside the renderer. It can load:
+
+- the files in its own Look folder, by relative path (`badge.png`,
+  `img/stripes.svg`, `style.css`);
+- the engine scripts, at `window.splitsmith.assets.shared`;
+- the bundled fonts, through the `engine.css` faces;
+- the logos `window.splitsmith` names.
+
+Nothing else: no `file://` path, no path outside the Look folder, no other
+web address and no network at all. A request outside that list fails as if
+the file were missing, and `looks check` names it. A single file may be up
+to 12 MB.
+
+A template that hangs is stopped. Loading may take up to 20 s, each call to
+`duration()`, `poster()` or `seek()` up to 10 s, and an animation is sampled
+for 60 s at most. The card is then left out and the export says why.
 
 ## Fonts
 
@@ -246,8 +267,10 @@ it; `looks check` says why.
 
 ## On splitsmith.app
 
-A template is code, and on splitsmith.app it would run on our servers. Until
-templates there run in a sandbox that keeps them away from the server's files
-and the network, a Look on splitsmith.app holds colours and card styles only,
-drawn by the shipped templates. Write templates in the desktop app or the
-`splitsmith` command line.
+A template is code, and on splitsmith.app it would run on our servers.
+Templates now load through the sandbox described in
+[What a template can load](#what-a-template-can-load), on the desktop as on
+the server, but a Look on splitsmith.app still holds colours and card styles
+only, drawn by the shipped templates, until the sandbox has had its own
+security review. Write templates in the desktop app or the `splitsmith`
+command line.

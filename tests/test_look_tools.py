@@ -138,7 +138,11 @@ def test_each_defect_is_reported_with_its_level(user_dir: Path) -> None:
                 families=("Inter", "Splitsmith Display", "sans-serif"),
             ),
             "sting-wipe.html": TemplateProbe(
-                duration=1.0, poster=0.5, has_seek=False, overflow=(("Stage 7 - The Very", 38),)
+                duration=1.0,
+                poster=0.5,
+                has_seek=False,
+                overflow=(("Stage 7 - The Very", 38),),
+                blocked=("https://fonts.googleapis.com/css2?family=Inter",),
             ),
         }
     )
@@ -149,6 +153,9 @@ def test_each_defect_is_reported_with_its_level(user_dir: Path) -> None:
     assert any(level == "warn" and "poster" in msg for level, msg in found)
     assert any(level == "error" and "seek()" in msg for level, msg in found)
     assert any(level == "warn" and "38 px" in msg for level, msg in found)
+    assert any(
+        level == "warn" and "fonts.googleapis.com" in msg and "cannot load" in msg for level, msg in found
+    )
     assert report.errors >= 2
 
 
