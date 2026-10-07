@@ -34,12 +34,22 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .. import composition, export_runs, youtube_sidecar
 from ..compare.mp4_grid import DEFAULT_CANVAS_HEIGHT, DEFAULT_CANVAS_WIDTH
+from ..looks import look_names
 from ..match_project import trim_blocker
 from ..overlay_theme import ThemeName
 from . import export_storage, match_exports
 from .http_errors import source_unreachable
 
 router = APIRouter()
+
+
+def installed_look(value: str) -> str:
+    """``value`` when it names an installed Look (#1246), else ``ValueError``
+    naming the installed ones, so the 422 tells the user what exists."""
+    names = look_names()
+    if value in names:
+        return value
+    raise ValueError(f"unknown Look {value!r}; installed: {', '.join(names)}")
 
 
 class ExportStageRequest(BaseModel):
@@ -76,8 +86,14 @@ class ExportStageRequest(BaseModel):
     # Palette preset for the overlay text + stroke. ``"splitsmith"``
     # (default) uses the same tokens the web UI ships, mirrored into
     # ``data/looks/splitsmith/look.json``. ``"clean"`` is the neutral
-    # white-on-amber alternative.
-    overlay_theme: Literal["splitsmith", "clean"] = "splitsmith"
+    # white-on-amber alternative; any installed Look since #1246.
+    overlay_theme: ThemeName = "splitsmith"
+
+    @field_validator("overlay_theme")
+    @classmethod
+    def _installed_look(cls, value: str) -> str:
+        return installed_look(value)
+
     # Multi-cam selection (issue #54). Allowlist of secondary
     # ``video_id``s to ride the FCPXML / get their own lossless trim. The
     # default ``None`` means "include every secondary with a beep" -- the
@@ -112,8 +128,14 @@ class MatchExportRequest(BaseModel):
     overlay_codec: Literal["auto", "hevc-alpha", "prores-4444"] = "auto"
     overlay_max_height: int | None = None
     overlay_max_fps: float | None = None
-    overlay_theme: Literal["splitsmith", "clean"] = "splitsmith"
+    overlay_theme: ThemeName = "splitsmith"
     project_name: str | None = None
+
+    @field_validator("overlay_theme")
+    @classmethod
+    def _installed_look(cls, value: str) -> str:
+        return installed_look(value)
+
     # Issue #193. ``"stacked"`` keeps secondaries full-frame (today's
     # behaviour). ``"pip-corners"`` adds an ``<adjust-transform>`` to each
     # secondary, rotating through TR -> TL -> BR -> BL at 25% scale.
@@ -179,8 +201,12 @@ class MatchExportRequest(BaseModel):
     closing_card: bool = False
     # Issue #1242. The Look template variant every generated card draws
     # with; ``default`` is the still card, the shipped Look adds ``rise``.
-    # One knob for every slot until the gallery (#1246) exposes them.
+    # The CLI's one knob and the fallback for the per-slot fields below.
     card_variant: str = "default"
+    # Issue #1246. The gallery's per-slot choice; ``None`` is the knob.
+    title_page_variant: str | None = None
+    stage_card_variant: str | None = None
+    closing_card_variant: str | None = None
     # Issue #972. Hold each stage's summary (name, scoring, splits over
     # the blurred last frame) for this many seconds after its action in
     # the rendered MP4. 0 is off. Other renderers surface an anomaly.
@@ -234,8 +260,11 @@ class CompareGridRequest(BaseModel):
     closing_card: bool = False
     # Issue #1242. The Look template variant every generated card draws
     # with; ``default`` is the still card, the shipped Look adds ``rise``.
-    # One knob for every slot until the gallery (#1246) exposes them.
+    # The CLI's one knob and the fallback for the per-slot fields (#1246).
     card_variant: str = "default"
+    title_page_variant: str | None = None
+    stage_card_variant: str | None = None
+    closing_card_variant: str | None = None
     stage_titles: Literal["none", "slate", "lower-third"] = "none"
     title_duration_seconds: float = 1.5
     # Issue #1244: one transition between every pair of stages, the same
@@ -258,6 +287,12 @@ class CompareGridRequest(BaseModel):
     overlay: bool = False
     overlay_theme: ThemeName = "splitsmith"
     summary_hold_seconds: float = Field(default=0.0, ge=0.0)
+
+    @field_validator("overlay_theme")
+    @classmethod
+    def _installed_look(cls, value: str) -> str:
+        return installed_look(value)
+
     # The YouTube sidecar and the chained upload, as for one shooter's
     # MP4 (``MatchExportRequest``): title, a description with a chapter per
     # stage, tags and a thumbnail beside the grid; ``youtube_upload`` then

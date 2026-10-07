@@ -169,3 +169,20 @@ def test_a_sting_round_trips_and_a_malformed_kind_is_refused() -> None:
     for kind in ("sting:", "sting:Wipe", "wipe"):
         with pytest.raises(pydantic.ValidationError):
             ExportPresetBody(transition_kind=kind)
+
+
+def test_the_body_carries_the_look_and_the_per_slot_variants() -> None:
+    """Slice 6 (#1246): the Look and per-slot variants are preset fields,
+    defaulted so an older body loads; the Look is validated by shape
+    only (a preset must load on a machine without that Look)."""
+    body = ExportPresetBody()
+    assert (body.look, body.title_page_variant, body.stage_card_variant, body.closing_card_variant) == (
+        "splitsmith",
+        "default",
+        "default",
+        "default",
+    )
+    assert ExportPresetBody.model_validate({"look": "club", "title_page_variant": "rise"}).look == "club"
+    for bad in ({"look": "Not a name"}, {"stage_card_variant": "../x"}):
+        with pytest.raises(pydantic.ValidationError):
+            ExportPresetBody.model_validate(bad)

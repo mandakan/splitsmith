@@ -31,7 +31,7 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from . import composition, user_config
+from . import composition, looks, user_config
 
 logger = logging.getLogger(__name__)
 
@@ -81,11 +81,25 @@ class ExportPresetBody(BaseModel):
     tail_pad_seconds: float = 5.0
     transition_kind: TransitionKind = "none"
     transition_seconds: float = 0.5
+    # Look (#1246): the Look name and each card slot's template variant.
+    # Validated by shape only: a preset must load on a machine without
+    # that Look (the page falls back to the default when it is missing).
+    look: str = "splitsmith"
+    title_page_variant: str = "default"
+    stage_card_variant: str = "default"
+    closing_card_variant: str = "default"
 
     @field_validator("transition_kind")
     @classmethod
     def _transition_kind(cls, value: str) -> str:
         return composition.validate_transition_kind(value)
+
+    @field_validator("look", "title_page_variant", "stage_card_variant", "closing_card_variant")
+    @classmethod
+    def _look_name_shape(cls, value: str) -> str:
+        if not looks.LOOK_NAME_RE.match(value):
+            raise ValueError(f"{value!r} is not a Look or variant name ({looks.LOOK_NAME_RE.pattern})")
+        return value
 
     # Look
     title_page: bool = False

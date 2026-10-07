@@ -17,7 +17,7 @@ from __future__ import annotations
 import os
 import subprocess
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal
 
@@ -345,6 +345,10 @@ class MatchExportRequestData:
     # exposes them separately; a variant the Look lacks falls back to
     # ``default`` with a warning in the renderer.
     card_variant: str = "default"
+    # Issue #1246. The gallery's per-slot choice; ``None`` is the knob.
+    title_page_variant: str | None = None
+    stage_card_variant: str | None = None
+    closing_card_variant: str | None = None
     # The overlay theme also styles the cards, so the two read as one.
     overlay_theme: ThemeName = "splitsmith"
     # Issue #972. Seconds to hold each stage's summary after its action
@@ -619,7 +623,7 @@ def export_match(
         kind=request.title_kind,
         duration=request.title_duration_seconds,
         stage_inputs=stages,
-        variant=request.card_variant,
+        variant=request.stage_card_variant or request.card_variant,
     )
     if titles and request.output_format in _RENDERERS_WITHOUT_TITLES:
         anomalies.append(
@@ -694,10 +698,17 @@ def export_match(
                 text=request.project_name,
                 info=request.title_page_info,
                 duration_seconds=request.title_page_duration_seconds,
-                variant=request.card_variant,
             )
-            title_page = card if request.title_page else None
-            closing = card if request.closing_card else None
+            title_page = (
+                replace(card, variant=request.title_page_variant or request.card_variant)
+                if request.title_page
+                else None
+            )
+            closing = (
+                replace(card, variant=request.closing_card_variant or request.card_variant)
+                if request.closing_card
+                else None
+            )
     # Chapter markers in the output: only when the YouTube sidecar is
     # requested AND the renderer carries chapters -- FCPXML as markers
     # on the timeline, MP4 as chapter atoms in the file (#204 and its

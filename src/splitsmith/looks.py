@@ -75,6 +75,8 @@ nothing yet)."""
 
 MANIFEST_FILE = "look.json"
 _NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
+LOOK_NAME_RE = _NAME_RE
+"""The shape of a Look name and of a variant name (public for the request layer)."""
 _TEMPLATE_FILE_RE = re.compile(r"^[A-Za-z0-9_.-]+\.html$")
 _ACCENT_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
@@ -416,18 +418,14 @@ __all__ = [
     "Look",
     "LookError",
     "LookInfo",
-    "LookInfo",
     "LookManifest",
     "LookNotFoundError",
-    "LookVariantInfo",
-    "PREVIEW_DIR",
+    "LOOK_NAME_RE",
     "LookVariantInfo",
     "PREVIEW_DIR",
     "list_looks",
     "look_catalog",
-    "look_catalog",
     "load_look",
-    "preview_file",
     "preview_file",
     "look_names",
     "shared_dir",

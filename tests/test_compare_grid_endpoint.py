@@ -1029,3 +1029,43 @@ def test_the_title_page_lists_each_shooters_division_unless_turned_off(
     with_division, without = captured[-2], captured[-1]
     assert with_division["title_page"].info == ("Martin · Classic Major", "Mathias · Production Optics")
     assert without["title_page"].info == ()
+
+
+def test_per_slot_variants_reach_the_grid_cards(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Slice 6 (#1246): the title page and the closing card take their own
+    variants; the slates take the stage card's, else the knob."""
+    captured: list[dict[str, Any]] = []
+
+    def fake_render(shooters, *, audio_label, output_path, **kwargs):  # type: ignore[no-untyped-def]
+        captured.append(kwargs)
+        return _fake_render_grid_mp4(shooters, audio_label=audio_label, output_path=output_path)
+
+    monkeypatch.setattr(pl_mod.fcpxml_gen, "probe_video", _fake_probe)
+    monkeypatch.setattr(mp4_grid_mod, "render_grid_mp4", fake_render)
+    match_root = _seed_match(tmp_path, shooters=["mathias"], stage_numbers=[1, 2])
+    _write_trims(match_root, slug="mathias", stage_numbers=[1, 2])
+    client = _MatchClient(_match_create_app(project_root=match_root, project_name="Compare Match"))
+    response = client.post(
+        "/api/match/compare-export",
+        json={
+            "stage_numbers": [1, 2],
+            "audio_from": "mathias",
+            "title_page": True,
+            "closing_card": True,
+            "stage_titles": "slate",
+            "card_variant": "rise",
+            "title_page_variant": "default",
+            "stage_card_variant": "default",
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert _wait_for_job(client, response.json()["id"])["status"] == "succeeded"
+    carded = captured[-1]
+    assert carded["title_page"].variant == "default"
+    assert carded["closing"].variant == "rise", "no closing_card_variant: the knob"
+    assert carded["card_variant"] == "default", "the slates take the stage card's variant"
+    refused = client.post(
+        "/api/match/compare-export",
+        json={"stage_numbers": [1], "audio_from": "mathias", "overlay_theme": "nope"},
+    )
+    assert refused.status_code == 422 and "splitsmith" in refused.text

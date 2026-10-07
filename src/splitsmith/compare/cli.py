@@ -100,7 +100,7 @@ def export(
     overlay_theme: str = typer.Option(
         "splitsmith",
         "--overlay-theme",
-        help=f"Palette for --overlay. One of: {', '.join(THEME_NAMES)}.",
+        help=f"Look for the overlay and the cards: {', '.join(THEME_NAMES)} or an installed user Look.",
     ),
     summary_hold: float = typer.Option(
         0.0,
@@ -215,9 +215,12 @@ def export(
     # that adds --overlay and re-encodes the whole match -- is where the
     # user finds out. Rejecting a name that is never a valid theme costs
     # nothing and fails at the point the typo was made.
-    if overlay_theme not in THEME_NAMES:
+    from ..looks import look_names
+
+    if overlay_theme not in look_names():
         console.print(
-            f"[red]Error:[/] --overlay-theme must be one of {', '.join(THEME_NAMES)}, got {overlay_theme!r}."
+            f"[red]Error:[/] --overlay-theme must be an installed Look ({', '.join(look_names())}), "
+            f"got {overlay_theme!r}."
         )
         raise typer.Exit(code=2)
     if summary_hold < 0:

@@ -100,7 +100,7 @@ def export_stage_tool(
     overlay_codec: Literal["auto", "hevc-alpha", "prores-4444"] = "auto",
     overlay_max_height: int | None = None,
     overlay_max_fps: float | None = None,
-    overlay_theme: Literal["splitsmith", "clean"] = "splitsmith",
+    overlay_theme: str = "splitsmith",
 ) -> dict[str, Any]:
     """Run the per-stage export -- writes the lossless trim + CSV +
     FCPXML + report (and optional overlay) into ``<project>/exports/``.

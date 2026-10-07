@@ -8,7 +8,7 @@ server never imports a Typer module to build a title card.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from ..composition import MatchTitle
 from ..division import competitor_division, roster_lines
@@ -31,8 +31,11 @@ class CardOptions:
     title_division: bool = True
     title_page_duration_seconds: float = 3.0
     closing_card: bool = False
-    #: The Look template variant every card draws with (#1242).
+    #: The Look template variant every card draws with (#1242); the
+    #: per-slot fields (#1246) win where set.
     card_variant: str = "default"
+    title_page_variant: str | None = None
+    closing_card_variant: str | None = None
 
 
 def match_title(match: Match, *, extra: str | None = None, roster: tuple[str, ...] = ()) -> MatchTitle:
@@ -61,13 +64,10 @@ def title_cards(
         return None, None
     roster = roster_lines(divisions) if cards.title_division else ()
     card = match_title(match, extra=cards.title_info, roster=roster)
-    card = MatchTitle(
-        text=card.text,
-        info=card.info,
-        duration_seconds=cards.title_page_duration_seconds,
-        variant=cards.card_variant,
-    )
-    return (card if cards.title_page else None), (card if cards.closing_card else None)
+    card = MatchTitle(text=card.text, info=card.info, duration_seconds=cards.title_page_duration_seconds)
+    title = replace(card, variant=cards.title_page_variant or cards.card_variant)
+    closing = replace(card, variant=cards.closing_card_variant or cards.card_variant)
+    return (title if cards.title_page else None), (closing if cards.closing_card else None)
 
 
 def bundle_divisions(bundles: Sequence[CompareShooterBundle]) -> list[tuple[str, str | None]]:
