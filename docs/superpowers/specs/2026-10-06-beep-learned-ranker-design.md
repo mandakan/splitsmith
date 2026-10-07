@@ -188,6 +188,34 @@ Each step is its own PR and mergeable alone.
    result on the step-3 PR before release. Production slices wider windows than
    the fixture clips, so the corpus figures are a floor.
 
+## Decision after the report (2026-10-06)
+
+The trainer's out-of-fold report (`tests/fixtures/beep_calibration/ranker_report.json`):
+
+| | top-1 /127 | of 111 reachable | top-N | at >=0.95: n / wrong | at >=0.97: n / wrong |
+|---|---|---|---|---|---|
+| today | 65 | 65 | 105 | 10 / 0 | |
+| LR | 106 | 106 | 108 | 77 / 1 | 70 / 0 |
+| GBDT | 110 | 110 | 111 | 77 / 3 | 72 / 3 |
+
+Both models fail only the zero-wrong clause at 0.95, and only on unreachable
+fixtures, where each pick is the nearest candidate to the labeled beep (an onset
+0.19 ms outside a 15 ms tolerance, a merged run 137 ms late, another event).
+
+The user decided: **ship logistic regression, with auto-trust at 0.97.** This
+overrides two rules above, on purpose:
+
+- the 2 pp rule (section 2.4) would pick the GBDT (+3.1 pp). LR is chosen
+  because it ships as data in config, and it has zero wrong at 0.97 where the
+  GBDT has three;
+- auto-trust (`AutomationConfig.beep_low_confidence_threshold`) moves from 0.95
+  to 0.97 (section 4 said thresholds move only on the report's evidence; this
+  is that evidence). Out of fold that auto-trusts 70 fixtures with none wrong,
+  against today's 10.
+
+Step 3 therefore takes the LR branch of section 3: coefficients and the
+confidence head in `BeepRankerConfig`, no ONNX artifact.
+
 ## Out of scope
 
 - The ~16 fixtures whose beep never becomes a candidate (#949 defect 2, step 3).
