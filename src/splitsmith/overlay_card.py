@@ -110,20 +110,27 @@ def lower_third_clip_filters(
     """:func:`lower_third_filters` for an animated lower third: the clip
     conformed to ``rate`` and held like a motion card, then the same
     fade-out and the same ``enable`` window, so a still and an animated
-    lower third leave the screen identically. A ``skip`` trims the clip's
-    own head; a ``delay`` pads its start with transparent frames (the
-    overlay must see a frame from t=0 or it would hold the picture)."""
+    lower third leave the screen identically. A ``skip`` drops the clip's
+    head after holding its last frame (so a skip past the animation still
+    shows the card); a ``delay`` pads its start with transparent frames
+    (the overlay must see a frame from t=0 or it would hold the picture)."""
     fade_start, end, enable = _lower_third_window(seconds, delay_seconds, skip_seconds)
-    shown = seconds - skip_seconds
-    skip = f"trim=start={skip_seconds:g}," if skip_seconds > 0.0 else ""
     delay = (
         f"tpad=start_duration={delay_seconds:g}:start_mode=add:color=black@0.0,"
         if delay_seconds > 0.0
         else ""
     )
+    if skip_seconds > 0.0:
+        # Clone the last frame first, then skip: a skip past the clip's own
+        # length still shows that frame (review of #1244).
+        hold = (
+            f"tpad=stop_mode=clone:stop_duration={seconds:g},trim=start={skip_seconds:g}:end={seconds:g},"
+            "setpts=PTS-STARTPTS"
+        )
+    else:
+        hold = f"tpad=stop_mode=clone:stop_duration={seconds:g},trim=0:{end:g}"
     return [
-        f"[{input_index}:v]format=rgba,fps={rate},{skip}setpts=PTS-STARTPTS,{delay}"
-        f"tpad=stop_mode=clone:stop_duration={shown:g},trim=0:{end:g},"
+        f"[{input_index}:v]format=rgba,fps={rate},setpts=PTS-STARTPTS,{delay}{hold},"
         f"fade=t=out:st={fade_start:g}:d={LOWER_THIRD_FADE_SECONDS:g}:alpha=1[lt]",
         f"[{source_label}][lt]overlay=0:0:enable='{enable}'[withlt]",
     ], "withlt"

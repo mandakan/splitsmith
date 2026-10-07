@@ -123,21 +123,33 @@ def motion_overlay_filters(
     source_label: str,
     out_label: str = "withmotion",
     delay_seconds: float = 0.0,
+    offset_seconds: float = 0.0,
 ) -> tuple[list[str], str]:
     """Lay input ``input_index`` (the clip) over ``source_label`` for
     ``seconds``: conformed to ``rate``, re-based to zero, its last frame
     cloned to the end and the whole trimmed to the hold, the same shape
     the grid uses for its sprite sequence. ``delay_seconds`` (issue #1244,
     a boundary's head edge) pads the clip's start with transparent frames
-    so the backdrop shows alone until the animation begins."""
+    so the backdrop shows alone until the animation begins;
+    ``offset_seconds`` skips into the clip with its last frame held."""
     delay = (
         f"tpad=start_duration={delay_seconds:g}:start_mode=add:color=black@0.0,"
         if delay_seconds > 0.0
         else ""
     )
+    if offset_seconds > 0.0:
+        # Clone the last frame first, then skip: an offset past the clip's
+        # own length still shows that frame (an input seek would show
+        # nothing, review of #1244).
+        end = offset_seconds + seconds
+        hold = (
+            f"tpad=stop_mode=clone:stop_duration={end:g},trim=start={offset_seconds:g}:end={end:g},"
+            "setpts=PTS-STARTPTS"
+        )
+    else:
+        hold = f"tpad=stop_mode=clone:stop_duration={seconds:g},trim=0:{seconds:g}"
     return [
-        f"[{input_index}:v]format=rgba,fps={rate},setpts=PTS-STARTPTS,{delay}"
-        f"tpad=stop_mode=clone:stop_duration={seconds:g},trim=0:{seconds:g}[motion]",
+        f"[{input_index}:v]format=rgba,fps={rate},setpts=PTS-STARTPTS,{delay}{hold}[motion]",
         f"[{source_label}][motion]overlay=0:0:format=auto[{out_label}]",
     ], out_label
 

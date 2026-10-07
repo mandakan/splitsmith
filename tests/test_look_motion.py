@@ -115,3 +115,11 @@ def test_motion_overlay_filters_can_delay_the_clip_with_transparent_padding() ->
         "tpad=stop_mode=clone:stop_duration=2,trim=0:2[motion]"
     )
     assert delayed[1] == plain[1] and label == "withmotion"
+    # An offset past the clip's end must still show its last frame (a
+    # trimmed animated card after a boundary, review of #1244): clone,
+    # then trim, never an input seek.
+    offset, _ = motion_overlay_filters(1, rate="30", seconds=1.0, source_label="0:v", offset_seconds=2.5)
+    assert offset[0] == (
+        "[1:v]format=rgba,fps=30,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=3.5,"
+        "trim=start=2.5:end=3.5,setpts=PTS-STARTPTS[motion]"
+    )

@@ -88,7 +88,8 @@ import {
 import { useDeploymentMode } from "@/lib/features";
 import { useMatchHref } from "@/lib/matchHref";
 import { useDesktopCommands } from "@/lib/useDesktopCommands";
-import { describeRenderOptions, renderOptionsSeconds, transitionsSupported, type OutputFormat } from "@/lib/renderOptions";
+import { visibleTransitionKind } from "@/lib/lookGallery";
+import { describeRenderOptions, renderOptionsSeconds, type OutputFormat } from "@/lib/renderOptions";
 import { cn } from "@/lib/utils";
 import {
   buildCompareGridPayload,
@@ -526,7 +527,7 @@ function ExportInner({ slug }: { slug: string }) {
     mode,
     head: mode === "single" ? headPad : (project?.trim_pre_buffer_seconds ?? 0),
     tail: mode === "single" ? tailPad : (project?.trim_post_buffer_seconds ?? 0),
-    transitionKind: transitionsSupported(outputFormat) ? transitionKind : "none",
+    transitionKind: visibleTransitionKind(transitionKind, outputFormat),
     transitionSeconds,
     format: outputFormat,
     cardSeconds,
@@ -778,7 +779,7 @@ function ExportInner({ slug }: { slug: string }) {
     eligible: eligibleNumbers.length,
     head: headPad,
     tail: tailPad,
-    transitionKind: transitionsSupported(outputFormat) ? transitionKind : "none",
+    transitionKind: visibleTransitionKind(transitionKind, outputFormat),
     transitionSeconds,
     cards: describeRenderOptions(renderOptions, compare ? "grid" : "single", compare ? "mp4" : outputFormat),
     overlay: compare ? gridOverlay : includeOverlay,

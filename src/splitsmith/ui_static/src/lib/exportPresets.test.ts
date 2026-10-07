@@ -155,8 +155,10 @@ describe("groupSummary", () => {
     );
     const zoom = { ...DEFAULT_EXPORT_SETTINGS, transitionKind: "zoom" as const, transitionSeconds: 0.5 };
     expect(groupSummary(zoom, "look", ctx)).toBe("zoom 0.5 s");
-    // The single-shooter MP4 draws transitions since #1244; the FCP 7 XML still does not.
-    expect(groupSummary({ ...zoom, outputFormat: "mp4" }, "look", ctx)).toBe("zoom 0.5 s");
+    // The single-shooter MP4 draws the xfade kinds since #1244, never the FCP effects;
+    // the FCP 7 XML draws none.
+    expect(groupSummary({ ...zoom, outputFormat: "mp4" }, "look", ctx)).toBe("No cards");
+    expect(groupSummary({ ...zoom, transitionKind: "fade", outputFormat: "mp4" }, "look", ctx)).toBe("fade 0.5 s");
     expect(groupSummary({ ...zoom, outputFormat: "fcp7xml" }, "look", ctx)).toBe("No cards");
   });
 });

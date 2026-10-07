@@ -76,6 +76,7 @@ def _moments(plan: mp4_render.TimelinePlan, *, titles: str) -> tuple[Moment, ...
     moves the frames with it. A boundary (a transition, #1244) gets three:
     two frames in, the middle, two frames before its end."""
     starts: dict[str, float] = {}
+    shown: dict[str, float] = {}
     boundaries: list[tuple[float, float]] = []
     t = 0.0
     for index, item in enumerate(plan.items):
@@ -85,6 +86,7 @@ def _moments(plan: mp4_render.TimelinePlan, *, titles: str) -> tuple[Moment, ...
             else f"{item.kind}_{len([k for k in starts if k.startswith(item.kind)])}"
         )
         starts[key] = t
+        shown[key] = item.duration_seconds  # the item's length on the spine, cuts applied
         t += item.duration_seconds
         boundary = plan.boundary_after(index)
         if boundary is not None:
@@ -104,10 +106,10 @@ def _moments(plan: mp4_render.TimelinePlan, *, titles: str) -> tuple[Moment, ...
     ]
     if titles == "slate":
         moments.append(
-            Moment("card-1", starts["slate_0"] + CARD_SECONDS / 2, "stage 1 slate with its round count")
+            Moment("card-1", starts["slate_0"] + shown["slate_0"] / 2, "stage 1 slate with its round count")
         )
         moments.append(
-            Moment("card-2", starts["slate_1"] + CARD_SECONDS / 2, "stage 2 slate, no round count")
+            Moment("card-2", starts["slate_1"] + shown["slate_1"] / 2, "stage 2 slate, no round count")
         )
     stage_1 = starts["stage_0"]
     if "summary_0" in starts:

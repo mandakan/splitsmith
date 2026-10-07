@@ -1087,8 +1087,7 @@ def test_plan_timeline_without_transitions_has_no_boundaries_and_no_cuts(tmp_pat
         ),
         (
             {"seconds": 1.0, "head_pad_b": 5.0},
-            "transition before stage 'B' (1s) needs 0.5s of footage before the head pad "
-            "and the trim has 0s; shorten the transition: rendered as a cut",
+            None,  # no handle before the pad: the boundary pads it with a held frame
         ),
         (
             {"seconds": 1.0, "slates": True, "summaries": True, "head_pad_b": 5.0},
@@ -1205,8 +1204,12 @@ def test_build_motion_card_command_can_offset_or_delay_the_clip(tmp_path: Path) 
         output_path=tmp_path / "o",
         clip_offset_seconds=2.5,
     )
-    clip_at = offset.index(str(tmp_path / "clip.mov"))
-    assert offset[clip_at - 3 : clip_at] == ("-ss", "2.5", "-i")
+    assert "-ss" not in offset, "an input seek past the clip's end yields nothing; the filter clones first"
+    offset_graph = offset[offset.index("-filter_complex") + 1]
+    assert (
+        "setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=3.5,trim=start=2.5:end=3.5,setpts=PTS-STARTPTS[motion]"
+        in offset_graph
+    )
     delayed = mp4_render._build_motion_card_command(
         tmp_path / "bd.png",
         tmp_path / "clip.mov",
@@ -1392,6 +1395,77 @@ def test_a_transition_reports_three_more_progress_steps(tmp_path: Path) -> None:
     assert [s.index for s in steps] == [1, 2, 3, 4, 5, 6]
     assert [s.status for s in steps] == ["encoding"] * 5 + ["stitching"]
     assert steps[2].label == "transition 1"
+
+
+def test_a_lower_third_shorter_than_the_cut_is_left_to_the_boundary(tmp_path: Path) -> None:
+    """Review of #1244: a 0.5 s card with a 1 s fade left the trimmed stage
+    a looped PNG with ``-t 0`` (ffmpeg: no limit, an endless encode) and a
+    shorter one a negative ``-t``. A card the head edge has shown in full
+    is dropped from the trimmed stage."""
+    card = composition.TitleCard(text="S", duration_seconds=0.5, style="lower-third")
+    lt = mp4_render._LowerThirdInput(path=tmp_path / "lt.png", card=card)
+    assert mp4_render._trimmed_lower_third(lt, head_cut=0.5) is None
+    assert mp4_render._trimmed_lower_third(lt, head_cut=0.6) is None
+    kept = mp4_render._trimmed_lower_third(lt, head_cut=0.25)
+    assert kept is not None and kept.skip_seconds == 0.25 and kept.shown_seconds == pytest.approx(0.25)
+    assert mp4_render._trimmed_lower_third(lt, head_cut=0.0) is lt
+    assert mp4_render._trimmed_lower_third(None, head_cut=0.5) is None
+
+
+def test_edge_plans_shrink_to_the_handle_the_trim_holds(tmp_path: Path) -> None:
+    """Review of #1244: at the default 5 s pads over a 5 s buffer there is
+    no footage past the pad, and requiring some made every stage-to-stage
+    transition a cut. The edge takes what the trim has; the boundary pads
+    the rest with a held frame."""
+    stage = _basic_stage(tmp_path=tmp_path, name="A", primary_name="a.mp4", head_pad=5.0, tail_pad=10.0)
+    _, plan = _build_plan(stage)
+    assert plan.head_trim_seconds == 0.0
+    assert mp4_render._edge_handle(plan, half=0.5, end="head") == 0.0
+    assert mp4_render._edge_handle(plan, half=0.5, end="tail") == 0.5
+    head = mp4_render._edge_plan(plan, half=0.5, end="head")
+    assert (head.head_trim_seconds, head.effective_seconds) == (0.0, pytest.approx(0.5))
+    tail = mp4_render._edge_plan(plan, half=0.5, end="tail")
+    assert tail.effective_seconds == pytest.approx(1.0)
+
+
+def test_build_boundary_command_pads_a_short_edge_with_a_held_frame(tmp_path: Path) -> None:
+    comp = _carded_composition(tmp_path)
+    common = dict(kind="fade", seconds=1.0, sequence=comp.sequence, output_path=tmp_path / "b.mp4")
+    head_short = mp4_render._build_boundary_command(
+        tmp_path / "t.mp4", tmp_path / "h.mp4", head_pad_seconds=0.5, **common
+    )
+    assert head_short[head_short.index("-filter_complex") + 1] == (
+        "[1:v]tpad=start_mode=clone:start_duration=0.5[hv];[1:a]adelay=500:all=1[ha];"
+        "[0:v][hv]xfade=transition=fade:duration=1:offset=0,format=yuv420p[final];"
+        "[0:a][ha]acrossfade=d=1:c1=tri:c2=tri[aout]"
+    )
+    tail_short = mp4_render._build_boundary_command(
+        tmp_path / "t.mp4", tmp_path / "h.mp4", tail_pad_seconds=0.25, **common
+    )
+    assert tail_short[tail_short.index("-filter_complex") + 1] == (
+        "[0:v]tpad=stop_mode=clone:stop_duration=0.25[tv];[0:a]apad=pad_dur=0.25[ta];"
+        "[tv][1:v]xfade=transition=fade:duration=1:offset=0,format=yuv420p[final];"
+        "[ta][1:a]acrossfade=d=1:c1=tri:c2=tri[aout]"
+    )
+    plain = mp4_render._build_boundary_command(tmp_path / "t.mp4", tmp_path / "h.mp4", **common)
+    assert plain[plain.index("-filter_complex") + 1].startswith("[0:v][1:v]xfade=")
+
+
+def test_render_pads_a_missing_handle_instead_of_cutting(tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+    result = _render(
+        tmp_path, _transitioned_composition(tmp_path, head_pad_b=5.0), name="m", runner=_writes_output(calls)
+    )
+    assert result.degradations == ()
+    assert _names(calls)[:3] == ["edge_000_tail.mp4", "edge_001_head.mp4", "boundary_000.mp4"]
+    head = calls[1]
+    assert (head[head.index("-ss") + 1], head[head.index("-t") + 1]) == ("0", "0.5")
+    boundary = calls[2]
+    assert (
+        "[1:v]tpad=start_mode=clone:start_duration=0.5[hv]" in boundary[boundary.index("-filter_complex") + 1]
+    )
+    # B keeps its whole 5 s head pad (effective 16.3 s); the fade adds nothing.
+    assert result.duration_seconds == pytest.approx(14.3 + 16.3)
 
 
 def test_plan_timeline_puts_a_summary_after_each_stage(tmp_path: Path) -> None:

@@ -300,6 +300,21 @@ export function visibleVariants(slot: LookSlot, mode: ExportMode, format: Output
   return slot.variants.filter((v) => v.modes.includes(mode) && v.formats.includes(format));
 }
 
+/** The kind a request sends for a stored ``transitionKind``: itself when
+ *  the transition slot can draw it for the format, else ``"none"``, so the
+ *  tile the gallery shows (Hard cut) and the render agree (#1244). A
+ *  preset saved with ``zoom`` for FCPXML is a hard cut on MP4, not a
+ *  zoomin nobody picked. */
+export function visibleTransitionKind(
+  kind: ExportSettings["transitionKind"],
+  format: OutputFormat,
+): ExportSettings["transitionKind"] {
+  if (kind === "none") return "none";
+  const transition = LOOK_SLOTS.find((s) => s.id === "transition");
+  if (!transition) return "none";
+  return visibleVariants(transition, "single", format).some((v) => v.id === kind) ? kind : "none";
+}
+
 /** A slot shows when at least one variant beyond the default can be drawn. */
 export function visibleSlots(mode: ExportMode, format: OutputFormat): LookSlot[] {
   return LOOK_SLOTS.filter((slot) => visibleVariants(slot, mode, format).length > 1);

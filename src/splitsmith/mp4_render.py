@@ -493,9 +493,7 @@ def _render_with_work_dir(
             plan = item.plan
             if item.head_cut_seconds or item.tail_cut_seconds:
                 plan = _narrow_plan(plan, head_cut=item.head_cut_seconds, tail_cut=item.tail_cut_seconds)
-            lower_third = prep.lower_third
-            if lower_third is not None and item.head_cut_seconds:
-                lower_third = replace(lower_third, skip_seconds=item.head_cut_seconds)
+            lower_third = _trimmed_lower_third(prep.lower_third, head_cut=item.head_cut_seconds)
             stage_out = work_dir / f"{item.name}.mp4"
             label = item.plan.stage.name
 
@@ -699,6 +697,8 @@ def _render_with_work_dir(
                     output_path=boundary_out,
                     ffmpeg_binary=ffmpeg_binary,
                     youtube_preset=youtube_preset,
+                    tail_pad_seconds=_missing_handle(item, half=half, end="tail"),
+                    head_pad_seconds=_missing_handle(nxt, half=half, end="head"),
                 )
                 edge_keys = (
                     {str(tail_edge): keys_by_path[tail_edge], str(head_edge): keys_by_path[head_edge]}
@@ -1190,10 +1190,11 @@ def _boundary_fit(prev: SpineItem, nxt: SpineItem, *, half: float, seconds: floa
     """Why a transition of ``seconds`` cannot sit between ``prev`` and
     ``nxt``, or ``None`` when it can. A stage gives up ``half`` of its
     pad (the fade must not cover the last shot or the beep) and reads
-    ``half`` of handle beyond it (footage the trim holds past the pad); a
-    card gives up ``half`` of itself and its handle is its own frame, so it
-    needs ``half`` to be at most half its length. Mirrors the FCPXML
-    emitter's wording; reports, never clamps."""
+    reads what handle the trim holds past it (:func:`_edge_handle`; the
+    boundary pads a short handle with a held frame, so it is never a
+    reason to refuse); a card gives up ``half`` of itself and its handle is
+    its own frame, so it needs ``half`` to be at most half its length.
+    Mirrors the FCPXML emitter's wording; reports, never clamps."""
     if isinstance(prev, _StageItem):
         name = prev.plan.stage.name
         pad = prev.plan.stage.tail_pad_seconds
@@ -1201,10 +1202,6 @@ def _boundary_fit(prev: SpineItem, nxt: SpineItem, *, half: float, seconds: floa
             return (
                 f"transition after stage {name!r} ({seconds:g}s) exceeds the stage's tail pad ({pad:g}s); "
                 "increase the pad or shorten the transition: rendered as a cut"
-            )
-        if half > prev.plan.tail_trim_seconds:
-            return _handle_short(
-                "after", name, seconds, half, "past the tail pad", prev.plan.tail_trim_seconds
             )
     elif half > prev.duration_seconds / 2.0:
         return (
@@ -1219,23 +1216,12 @@ def _boundary_fit(prev: SpineItem, nxt: SpineItem, *, half: float, seconds: floa
                 f"transition before stage {name!r} ({seconds:g}s) exceeds the stage's head pad ({pad:g}s); "
                 "increase the pad or shorten the transition: rendered as a cut"
             )
-        if half > nxt.plan.head_trim_seconds:
-            return _handle_short(
-                "before", name, seconds, half, "before the head pad", nxt.plan.head_trim_seconds
-            )
     elif half > nxt.duration_seconds / 2.0:
         return (
             f"transition into {nxt.name} ({seconds:g}s) exceeds half the card "
             f"({nxt.duration_seconds / 2.0:g}s): rendered as a cut"
         )
     return None
-
-
-def _handle_short(side: str, name: str, seconds: float, half: float, where: str, have: float) -> str:
-    return (
-        f"transition {side} stage {name!r} ({seconds:g}s) needs {half:g}s of footage {where} "
-        f"and the trim has {have:g}s; shorten the transition: rendered as a cut"
-    )
 
 
 def _narrow_plan(plan: _StagePlan, *, head_cut: float, tail_cut: float) -> _StagePlan:
@@ -1735,15 +1721,20 @@ def _build_motion_card_command(
 
     Issue #1244: ``clip_offset_seconds`` starts the clip that far in (a
     trimmed card after a boundary, or a tail edge where the clip has
-    ended and its last frame holds); ``clip_delay_seconds`` shows the
-    backdrop alone that long before the clip begins (a head edge). Both
-    zero emits the argv this always built."""
+    ended and its last frame holds; a filter that clones the last frame
+    first, so an offset past the clip's end still shows it);
+    ``clip_delay_seconds`` shows the backdrop alone that long before the
+    clip begins (a head edge). Both zero emits the argv this always built."""
     rate = _rate_string(sequence)
     motion_parts, label = motion_overlay_filters(
-        1, rate=rate, seconds=seconds, source_label="0:v", delay_seconds=clip_delay_seconds
+        1,
+        rate=rate,
+        seconds=seconds,
+        source_label="0:v",
+        delay_seconds=clip_delay_seconds,
+        offset_seconds=clip_offset_seconds,
     )
     graph = ";".join([*motion_parts, f"[{label}]format=yuv420p,setsar=1[final]"])
-    clip_seek: tuple[str, ...] = ("-ss", f"{clip_offset_seconds:g}") if clip_offset_seconds > 0.0 else ()
     return (
         ffmpeg_binary,
         "-hide_banner",
@@ -1754,7 +1745,6 @@ def _build_motion_card_command(
         rate,
         "-i",
         str(backdrop_png),
-        *clip_seek,
         "-i",
         str(clip),
         "-f",
@@ -1784,16 +1774,37 @@ def _build_boundary_command(
     output_path: Path,
     ffmpeg_binary: str = "ffmpeg",
     youtube_preset: bool = False,
+    tail_pad_seconds: float = 0.0,
+    head_pad_seconds: float = 0.0,
 ) -> tuple[str, ...]:
     """The boundary segment (issue #1244): ``tail_edge`` (the item before
-    the cut, ``seconds`` long) crossfaded into ``head_edge`` (the item
-    after, the same length) over the whole segment with ``xfade``, the two
-    audio tracks crossfaded alike with ``acrossfade``; encoded like a
-    stage so the stitch stays a stream copy."""
-    graph = (
-        f"[0:v][1:v]xfade=transition={xfade_name(kind)}:duration={seconds:g}:offset=0,format=yuv420p[final];"
-        f"[0:a][1:a]acrossfade=d={seconds:g}:c1=tri:c2=tri[aout]"
-    )
+    the cut) crossfaded into ``head_edge`` (the item after) over the whole
+    ``seconds`` with ``xfade``, the two audio tracks crossfaded alike with
+    ``acrossfade``; encoded like a stage so the stitch stays a stream
+    copy. An edge whose trim had less handle than ``seconds / 2`` is
+    shorter; ``tail_pad_seconds`` holds its last frame (and pads its audio
+    with silence) and ``head_pad_seconds`` holds the head edge's first
+    frame (delaying its audio) so both inputs span the fade."""
+    parts: list[str] = []
+    tail_v, tail_a, head_v, head_a = "0:v", "0:a", "1:v", "1:a"
+    if tail_pad_seconds > 0.0:
+        parts += [
+            f"[0:v]tpad=stop_mode=clone:stop_duration={tail_pad_seconds:g}[tv]",
+            f"[0:a]apad=pad_dur={tail_pad_seconds:g}[ta]",
+        ]
+        tail_v, tail_a = "tv", "ta"
+    if head_pad_seconds > 0.0:
+        parts += [
+            f"[1:v]tpad=start_mode=clone:start_duration={head_pad_seconds:g}[hv]",
+            f"[1:a]adelay={round(head_pad_seconds * 1000)}:all=1[ha]",
+        ]
+        head_v, head_a = "hv", "ha"
+    parts += [
+        f"[{tail_v}][{head_v}]xfade=transition={xfade_name(kind)}:duration={seconds:g}:offset=0,"
+        "format=yuv420p[final]",
+        f"[{tail_a}][{head_a}]acrossfade=d={seconds:g}:c1=tri:c2=tri[aout]",
+    ]
+    graph = ";".join(parts)
     return (
         ffmpeg_binary,
         "-hide_banner",
@@ -1815,14 +1826,47 @@ def _build_boundary_command(
     )
 
 
+def _missing_handle(item: SpineItem, *, half: float, end: Literal["tail", "head"]) -> float:
+    """How much of a boundary edge the item could not supply from footage:
+    zero for a card (its handle is its own frame), ``half`` minus the
+    trim's handle for a stage."""
+    if isinstance(item, _StageItem):
+        return half - _edge_handle(item.plan, half=half, end=end)
+    return 0.0
+
+
+def _trimmed_lower_third(lower_third: _LowerThirdInput | None, *, head_cut: float) -> _LowerThirdInput | None:
+    """The lower third as the trimmed stage after a boundary shows it: what
+    the head edge has not already shown. A card the edge showed in full is
+    dropped: a looped PNG with ``-t 0`` runs forever and a negative ``-t``
+    fails the encode (review of #1244)."""
+    if lower_third is None or head_cut <= 0.0:
+        return lower_third
+    if head_cut >= lower_third.card.duration_seconds:
+        return None
+    return replace(lower_third, skip_seconds=head_cut)
+
+
+def _edge_handle(plan: _StagePlan, *, half: float, end: Literal["tail", "head"]) -> float:
+    """How much footage past the pad an edge can read: up to ``half``,
+    bounded by what the trim holds (``tail_trim_seconds`` after the
+    effective window, ``head_trim_seconds`` before it). At the default
+    pads over the default trim buffers that is nothing, and the boundary
+    pads the missing part with a held frame (review of #1244)."""
+    available = plan.tail_trim_seconds if end == "tail" else plan.head_trim_seconds
+    return max(0.0, min(half, available))
+
+
 def _edge_plan(plan: _StagePlan, *, half: float, end: Literal["tail", "head"]) -> _StagePlan:
     """The stage window a boundary's edge render shows (issue #1244): the
-    tail edge is the last ``half`` of the effective footage plus ``half`` of
-    the trim past the tail pad; the head edge is ``half`` of the trim before
-    the head pad plus the first ``half``. Each is ``2 * half`` long."""
+    tail edge is the last ``half`` of the effective footage plus the handle
+    past the tail pad; the head edge is the handle before the head pad
+    plus the first ``half``. Each is ``half + handle`` long, ``2 * half``
+    when the trim has the footage."""
+    handle = _edge_handle(plan, half=half, end=end)
     if end == "tail":
-        return _narrow_plan(plan, head_cut=plan.effective_seconds - half, tail_cut=-half)
-    return _narrow_plan(plan, head_cut=-half, tail_cut=plan.effective_seconds - half)
+        return _narrow_plan(plan, head_cut=plan.effective_seconds - half, tail_cut=-handle)
+    return _narrow_plan(plan, head_cut=-handle, tail_cut=plan.effective_seconds - half)
 
 
 def _build_segment_command(

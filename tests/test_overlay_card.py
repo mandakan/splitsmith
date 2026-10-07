@@ -451,9 +451,11 @@ def test_lower_third_clip_filters_can_start_late_or_skip_what_already_showed() -
     skipped, _ = overlay_card.lower_third_clip_filters(
         3, 2.0, rate="30", source_label="base", skip_seconds=0.5
     )
+    # Clone first, then skip: a skip past the clip's own length still shows
+    # its last frame (review of #1244).
     assert skipped[0] == (
-        "[3:v]format=rgba,fps=30,trim=start=0.5,setpts=PTS-STARTPTS,"
-        "tpad=stop_mode=clone:stop_duration=1.5,trim=0:1.5,fade=t=out:st=1:d=0.5:alpha=1[lt]"
+        "[3:v]format=rgba,fps=30,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=2,"
+        "trim=start=0.5:end=2,setpts=PTS-STARTPTS,fade=t=out:st=1:d=0.5:alpha=1[lt]"
     )
     assert skipped[1] == "[base][lt]overlay=0:0:enable='between(t,0,1.5)'[withlt]"
 

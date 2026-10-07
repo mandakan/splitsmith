@@ -235,13 +235,20 @@ length. Each neighbour gives up d/2 (``head_cut_seconds`` /
 ``tail_cut_seconds`` on the item; ``_narrow_plan`` shifts a stage's plan
 and recomputes its cams) and the boundary is ``xfade`` + ``acrossfade``
 over two *edge* renders made with the item's own builder
-(``_edge_plan``: the last d/2 of effective footage plus d/2 of the
-handle the trim holds past the tail pad, and the mirror at the head; a
-card's handle is its own frame, an animated card's head edge delays its
-clip and its tail edge offsets it). The fit check reports and never
-clamps: d/2 must fit the pad (the beep and the last shot stay out of the
-fade) and the handle; a miss or a failed edge is a cut with a
-degradation. The driver prepares each item once, decides a boundary
+(``_edge_plan``: the last d/2 of effective footage plus whatever handle
+the trim holds past the tail pad, up to d/2, and the mirror at the head;
+the boundary holds the edge's last or first frame for the rest
+(``tail_pad_seconds`` / ``head_pad_seconds`` on the boundary command), so
+the default 5 s pads over 5 s trim buffers, which leave no handle at all,
+still get a transition; a card's handle is its own frame, an animated
+card's head edge delays its clip and its tail edge offsets it, cloning
+the last frame before the skip so an offset past the animation still
+shows the card). The fit check reports and never clamps: d/2 must fit
+the pad (the beep and the last shot stay out of the fade), and a card
+must be at least d long; a miss or a failed edge is a cut with a
+degradation. A lower third the head edge showed in full is dropped from
+the trimmed stage (``_trimmed_lower_third``; a looped PNG with ``-t 0``
+runs forever). The driver prepares each item once, decides a boundary
 (edges, then the xfade) *before* encoding the item that opens it, and
 keys the boundary by its edges' cache keys, not their files (the
 cache's LRU touch re-dates them). ``KEY_VERSION`` is 3. Kinds are
