@@ -223,8 +223,14 @@ it saw: script errors, an animation without ``seek``, ``poster()`` outside
 ``duration()``, fonts other than the two bundled faces, and text cut off by
 the canvas or a clipping ancestor (an ellipsis is fine); it reads a broken
 user Look strictly (``looks.read_look``), where ``load_look`` would fall back
-to the shipped one. The shipped Look fails its own width check on long names
-today (#1268, pinned ``xfail(strict=True)``). On hosted, Looks carry colours
+to the shipped one. ``_shared/fit.js`` fits width as well as height (#1268): a line whose
+text runs past the cell's real edge is shrunk on its own (to no less than 60%
+of its size), then capped with an ellipsis, a margin in from each edge it
+crossed; text inside the cell is never touched, so every frame that fit before
+is pixel-identical (checked against main with both frame scripts). Measure
+text with a Range, not an element's box: a row's elements are as wide as the
+row a long sibling stretches. ``tests/test_look_template.py`` forbids the
+digits of the legibility floor anywhere in that file, issue numbers included. On hosted, Looks carry colours
 and card styles only until the sandboxed template loader (#1266) ships: a
 template is code running on our server.
 

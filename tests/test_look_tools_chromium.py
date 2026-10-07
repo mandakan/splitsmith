@@ -112,14 +112,13 @@ def test_the_shipped_looks_have_no_errors(
     assert errors == [], errors
 
 
-@pytest.mark.xfail(
-    strict=True, reason="#1268: the fit policy fits height only; a long stage name runs off the card"
-)
+@pytest.mark.parametrize("name", ["splitsmith", "clean"])
 def test_the_shipped_looks_pass_check_without_warnings(
-    raster, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    raster, name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """#1268: a long stage name shrinks to the card's width, then ellipsizes."""
     monkeypatch.setenv("SPLITSMITH_HOME", str(tmp_path))
-    checked = look_tools.check_look("splitsmith", prober=raster)
+    checked = look_tools.check_look(name, prober=raster)
     problems = [(i.subject, i.level, i.message) for i in checked.items if i.level != "ok"]
     assert problems == [], problems
 
