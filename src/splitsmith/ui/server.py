@@ -161,6 +161,8 @@ from .. import coach as coach_module
 from .. import coach_distributions as coach_distributions_module
 from .. import ensemble as ensemble_module
 from .. import export_presets as export_presets_module
+from .. import look_store as look_store_module
+from .. import looks as looks_module
 from .. import models as model_layer
 from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy monkeypatch points)
 from .. import thumbnail as thumbnail_helpers
@@ -1772,6 +1774,30 @@ class TenantContext:
     # user's desktop to run. ``None`` in local mode; under the
     # ``tenant_isolation`` RLS policy, so the tenant factory is load-bearing.
     desktop_commands: DesktopCommandStore | None = None
+    # The account's saved Looks (#1263): manifests only, drawn by the
+    # shipped templates. ``None`` in local mode, where ``AppState.looks``
+    # is the Looks folder.
+    looks: look_store_module.HostedLookStore | None = None
+
+
+def user_looks_cache_root() -> Path:
+    """Where hosted accounts' Looks are materialized (#1263); one folder per
+    account under it, content-named inside that."""
+    return process_runtime().cache_dir / "user-looks"
+
+
+def tenant_looks_provider(tenant: TenantContext) -> looks_module.UserLooksProvider:
+    """The ``looks.set_user_looks_provider`` answer for ``tenant``: its
+    Looks materialized under the cache, or none at all. Set wherever a
+    tenant is pinned (the auth gate, the share alias, the queue task), so a
+    renderer resolving a Look by name sees this account's and no other's."""
+
+    def provide() -> Path | None:
+        if tenant.looks is None:
+            return None
+        return tenant.looks.materialized_dir(user_looks_cache_root())
+
+    return provide
 
 
 # Per-request / per-job tenant resolved by the hosted-mode auth gate
@@ -1877,6 +1903,7 @@ class AppState:
     _scoreboard_identity: user_config.ScoreboardIdentityStore = field(
         default_factory=user_config.JsonScoreboardIdentityStore
     )
+    _looks: look_store_module.LookStore = field(default_factory=look_store_module.FolderLookStore)
     _export_presets: export_presets_module.ExportPresetStore = field(
         default_factory=export_presets_module.JsonExportPresetStore
     )
@@ -2099,6 +2126,13 @@ class AppState:
         if tenant is not None and tenant.export_presets is not None:
             return tenant.export_presets
         return self._export_presets
+
+    @property
+    def looks(self) -> look_store_module.LookStore:
+        tenant = current_tenant.get()
+        if tenant is not None and tenant.looks is not None:
+            return tenant.looks
+        return self._looks
 
     @property
     def matches_store(self) -> PostgresMatchStore | None:
@@ -7217,6 +7251,7 @@ def _apply_hosted_mode_wiring(
         MagicLinkAuth,
         PostgresExportPresetStore,
         PostgresJobBackend,
+        PostgresLookStore,
         PostgresMatchStore,
         PostgresProfileStore,
         PostgresRecentProjectsStore,
@@ -7538,6 +7573,7 @@ def _apply_hosted_mode_wiring(
             comments=CommentStore(tenant_factory, user_id=user_id),
             profile=PostgresProfileStore(tenant_factory, user_id=user_id),
             export_presets=PostgresExportPresetStore(tenant_factory, user_id=user_id),
+            looks=PostgresLookStore(tenant_factory, user_id=user_id),
             youtube=PostgresYouTubeConnectionStore(tenant_factory, user_id=user_id),
             desktop_commands=DesktopCommandStore(tenant_factory, user_id=user_id),
         )
@@ -9225,7 +9261,9 @@ def create_app(
                 viewer = None
         viewer_token = current_share_viewer.set(viewer)
 
-        tenant_token = current_tenant.set(state.build_tenant(resolved.owner_user_id))
+        owner_tenant = state.build_tenant(resolved.owner_user_id)
+        tenant_token = current_tenant.set(owner_tenant)
+        looks_token = looks_module.set_user_looks_provider(tenant_looks_provider(owner_tenant))
         share_token = current_share_request.set(True)
         cameras_token = current_share_cameras.set(resolved.cameras)
         scope_token = current_share_scope.set(resolved.scope)
@@ -9254,6 +9292,7 @@ def create_app(
             current_share_scope.reset(scope_token)
             current_share_cameras.reset(cameras_token)
             current_share_request.reset(share_token)
+            looks_module.reset_user_looks_provider(looks_token)
             current_tenant.reset(tenant_token)
 
     # ----------------------------------------------------------------------
@@ -9332,10 +9371,13 @@ def create_app(
             return JSONResponse(status_code=403, content={"detail": "token scope"})
         if not hosted:
             return await call_next(request)
-        tenant_token = current_tenant.set(state.build_tenant(user.id))
+        tenant = state.build_tenant(user.id)
+        tenant_token = current_tenant.set(tenant)
+        looks_token = looks_module.set_user_looks_provider(tenant_looks_provider(tenant))
         try:
             return await call_next(request)
         finally:
+            looks_module.reset_user_looks_provider(looks_token)
             current_tenant.reset(tenant_token)
 
     # ----------------------------------------------------------------------

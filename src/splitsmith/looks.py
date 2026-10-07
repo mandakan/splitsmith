@@ -20,9 +20,11 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Callable
+from contextvars import ContextVar, Token
 from importlib import resources
 from pathlib import Path
-from typing import Literal
+from typing import Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
@@ -91,6 +93,34 @@ class LookNotFoundError(LookError):
     """No shipped or user Look has this name."""
 
 
+def check_colors(value: dict[str, RGB]) -> dict[str, RGB]:
+    """Every required token present, every channel in 0..255 (shared with
+    ``look_store.StoredLookBody``)."""
+    missing = [token for token in REQUIRED_COLORS if token not in value]
+    if missing:
+        raise ValueError(f"missing colour tokens: {', '.join(missing)}")
+    for token, rgb in value.items():
+        if any(not 0 <= channel <= 255 for channel in rgb):
+            raise ValueError(f"colour {token!r} has a channel outside 0..255: {rgb!r}")
+    return value
+
+
+def check_accent_series(value: list[str]) -> list[str]:
+    for colour in value:
+        if not _ACCENT_RE.match(colour):
+            raise ValueError(f"accent_series entry {colour!r} must be a #rrggbb colour")
+    return [colour.lower() for colour in value]
+
+
+def check_styles(value: dict[str, str]) -> dict[str, str]:
+    for slot, variant in value.items():
+        if slot not in get_args(CardSlot):
+            raise ValueError(f"styles: {slot!r} is not a card slot; expected one of {get_args(CardSlot)}")
+        if not _NAME_RE.fullmatch(variant):
+            raise ValueError(f"styles: slot {slot!r}: variant name {variant!r} must match {_NAME_RE.pattern}")
+    return value
+
+
 class LookManifest(BaseModel):
     """``look.json``. ``extra="ignore"`` so a manifest written by a newer
     splitsmith (with fields this version does not know) still loads."""
@@ -107,6 +137,12 @@ class LookManifest(BaseModel):
     accent_series: list[str] = []
     slots: dict[str, SlotVariants] = {}
     source: str | None = None
+    #: The Look this one was made from (#1263): a record for the editor;
+    #: nothing is inherited from it at render time.
+    base: str | None = None
+    #: Per card slot, the variant a request for ``default`` draws (#1263):
+    #: the Look's card style. ``{"slate": "rise"}`` makes every slate rise.
+    styles: dict[str, str] = {}
 
     @field_validator("name")
     @classmethod
@@ -118,21 +154,17 @@ class LookManifest(BaseModel):
     @field_validator("colors")
     @classmethod
     def _required_colors(cls, value: dict[str, RGB]) -> dict[str, RGB]:
-        missing = [token for token in REQUIRED_COLORS if token not in value]
-        if missing:
-            raise ValueError(f"missing colour tokens: {', '.join(missing)}")
-        for token, rgb in value.items():
-            if any(not 0 <= channel <= 255 for channel in rgb):
-                raise ValueError(f"colour {token!r} has a channel outside 0..255: {rgb!r}")
-        return value
+        return check_colors(value)
 
     @field_validator("accent_series")
     @classmethod
     def _series_shape(cls, value: list[str]) -> list[str]:
-        for colour in value:
-            if not _ACCENT_RE.match(colour):
-                raise ValueError(f"accent_series entry {colour!r} must be a #rrggbb colour")
-        return [colour.lower() for colour in value]
+        return check_accent_series(value)
+
+    @field_validator("styles")
+    @classmethod
+    def _styles_shape(cls, value: dict[str, str]) -> dict[str, str]:
+        return check_styles(value)
 
     @field_validator("slots", mode="before")
     @classmethod
@@ -200,8 +232,32 @@ def shipped_looks_dir() -> Path:
     return Path(str(resources.files("splitsmith.data").joinpath("looks")))
 
 
+UserLooksProvider = Callable[[], "Path | None"]
+_provider: ContextVar[UserLooksProvider | None] = ContextVar("splitsmith_user_looks", default=None)
+_NO_USER_LOOKS = Path("/nonexistent/splitsmith-no-user-looks")
+
+
+def set_user_looks_provider(provider: UserLooksProvider | None) -> Token[UserLooksProvider | None]:
+    """Replace where the user's Looks come from, for this context (#1263).
+    Hosted mode sets one wherever it pins a tenant (the request middleware,
+    the share alias, the queue task) that answers the account's Looks
+    materialized from its rows, so every renderer that resolves a Look by
+    name sees that account's and no one else's. A provider that answers
+    ``None`` means no user Looks at all, never the container's own folder.
+    Reset with :func:`reset_user_looks_provider` and the returned token."""
+    return _provider.set(provider)
+
+
+def reset_user_looks_provider(token: Token[UserLooksProvider | None]) -> None:
+    _provider.reset(token)
+
+
 def user_looks_dir() -> Path:
-    """``<user_config_dir>/looks``; honours ``SPLITSMITH_HOME``. Not created here."""
+    """``<user_config_dir>/looks`` (honours ``SPLITSMITH_HOME``; not created
+    here), or what this context's provider answers."""
+    provider = _provider.get()
+    if provider is not None:
+        return provider() or _NO_USER_LOOKS
     return user_config_dir() / "looks"
 
 
@@ -318,6 +374,8 @@ def template_for(look: Look, slot: CardSlot, variant: str = DEFAULT_VARIANT) -> 
     name costs the motion and never the card. The shipped default
     declares every card slot (pinned by ``tests/test_looks.py``), so
     this always resolves."""
+    if variant == DEFAULT_VARIANT and slot in look.manifest.styles:
+        variant = look.manifest.styles[slot]
     own = look.own_template(slot, variant)
     if own is not None:
         return own
@@ -401,6 +459,8 @@ class LookInfo(BaseModel):
     name: str
     label: str
     source: Literal["shipped", "user"]
+    #: The caller may change or delete it: every user Look, never a shipped one.
+    editable: bool = False
     accent_series: list[str]
     preview: str | None
     slots: dict[str, list[LookVariantInfo]]
@@ -432,6 +492,7 @@ def look_catalog() -> list[LookInfo]:
                 name=look.name,
                 label=look.label,
                 source=look.source,
+                editable=look.source == "user",
                 accent_series=list(look.accent_series),
                 preview=_preview_url(look, "look", DEFAULT_VARIANT),
                 slots=slots,
@@ -461,7 +522,12 @@ __all__ = [
     "look_catalog",
     "load_look",
     "preview_file",
+    "check_accent_series",
+    "check_colors",
+    "check_styles",
     "read_look",
+    "reset_user_looks_provider",
+    "set_user_looks_provider",
     "preview_owner_root",
     "look_names",
     "shared_dir",

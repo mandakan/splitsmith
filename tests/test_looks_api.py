@@ -58,8 +58,19 @@ def test_everything_else_is_404(client, path: str) -> None:
 
 
 def test_the_looks_routes_are_registered_once(client) -> None:
-    paths = [r.path for r in client.app.routes if getattr(r, "path", "").startswith("/api/looks")]
-    assert sorted(paths) == ["/api/looks", "/api/looks/{name}/preview/{file}"]
+    routes = [
+        (method, r.path)
+        for r in client.app.routes
+        if getattr(r, "path", "").startswith("/api/looks")
+        for method in sorted(getattr(r, "methods", ()))
+    ]
+    assert sorted(routes) == [
+        ("DELETE", "/api/looks/{name}"),
+        ("GET", "/api/looks"),
+        ("GET", "/api/looks/{name}"),
+        ("GET", "/api/looks/{name}/preview/{file}"),
+        ("PUT", "/api/looks/{name}"),
+    ]
 
 
 def test_get_looks_lists_the_transition_families(client) -> None:
