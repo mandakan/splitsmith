@@ -86,6 +86,7 @@ import { CameraMenu, type CameraPreview } from "./compare/CameraMenu";
 import { CinemaBar } from "./compare/CinemaBar";
 import { LeaderboardRail } from "./compare/LeaderboardRail";
 import { TransportDock } from "./compare/TransportDock";
+import { identityMark } from "@/lib/identityMark";
 
 type Layout = "grid" | "row" | "stack";
 
@@ -1419,6 +1420,7 @@ function VideoTile({
           tone={undefined}
           seed={shooter.slug}
           name={shooter.name}
+          {...identityMark(shooter.slug, shooter.identity)}
         />
         <span className="text-sm font-medium text-ink">{shooter.name}</span>
         <span className="ml-auto flex min-w-0 items-center gap-2">

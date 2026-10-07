@@ -62,6 +62,8 @@ import {
 } from "@/lib/splits";
 import { useActiveShare } from "@/lib/useActiveShare";
 import { cn } from "@/lib/utils";
+import { Avatar } from "@/components/ui/AvatarStack";
+import { identityMark } from "@/lib/identityMark";
 
 function pad2(n: number): string {
   return n.toString().padStart(2, "0");
@@ -554,7 +556,12 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
         <ChevronDown aria-hidden className="pointer-events-none absolute right-0 size-3 text-subtle" />
       </span>
     ) : (
-      <span>{shooter.name}</span>
+      <span className="inline-flex items-center gap-1.5">
+        {shooter.identity?.accent || shooter.identity?.logo ? (
+          <Avatar size="xs" initials={shooter.name.slice(0, 2)} seed={shooter.slug} name={shooter.name} {...identityMark(shooter.slug, shooter.identity)} />
+        ) : null}
+        {shooter.name}
+      </span>
     )
   ) : null;
 

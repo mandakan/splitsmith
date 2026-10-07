@@ -19,6 +19,7 @@ import { Avatar } from "@/components/ui";
 import type { ShooterListEntry } from "@/lib/api";
 import { useMatchHref } from "@/lib/matchHref";
 import { cn } from "@/lib/utils";
+import { identityMark } from "@/lib/identityMark";
 
 interface Props {
   /** All shooters in the bound match. Hides itself when length <= 1. */
@@ -115,6 +116,7 @@ export function ShooterChipStrip({
               initials={chipInitials(s.name)}
               seed={s.slug}
               name={s.name}
+              {...identityMark(s.slug, s.identity)}
             />
             <span className="font-display text-[0.6875rem] font-semibold uppercase tracking-[0.06em]">
               {s.name}

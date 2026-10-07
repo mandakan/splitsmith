@@ -7,6 +7,7 @@
 import { Avatar } from "@/components/ui";
 import { Label } from "@/components/ui/Label";
 import { type CompareShooterRecord } from "@/lib/api";
+import { identityMark } from "@/lib/identityMark";
 import { splitsFromTimeline, statisticSplits } from "@/lib/splits";
 import { cn } from "@/lib/utils";
 
@@ -48,7 +49,13 @@ export function LeaderboardRail({
           <div key={row.shooter.slug} className="grid grid-cols-[1.5rem_minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1 border-b border-rule px-3 py-2.5 last:border-b-0">
             <span className={cn("numeral text-md", row.rank === 1 ? "text-led" : "text-muted")}>{row.rank}</span>
             <span className="inline-flex min-w-0 items-center gap-2">
-              <Avatar size="xs" initials={initials(row.shooter.name)} tone={undefined} seed={row.shooter.slug} />
+              <Avatar
+                size="xs"
+                initials={initials(row.shooter.name)}
+                tone={undefined}
+                seed={row.shooter.slug}
+                {...identityMark(row.shooter.slug, row.shooter.identity)}
+              />
               <span data-testid="rail-name" className="truncate text-md font-medium text-ink">
                 {row.shooter.name}
               </span>
