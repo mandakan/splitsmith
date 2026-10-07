@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "mirror-look-previews",
+      "date": "2026-10-07",
+      "title": "Look previews on synced matches",
+      "body": "On splitsmith.app, the Look editor and the Export preview now draw the cards of a match synced from the desktop app instead of staying blank."
+    },
+    {
       "id": "own-fonts",
       "date": "2026-10-07",
       "title": "Your own font in a Look",
