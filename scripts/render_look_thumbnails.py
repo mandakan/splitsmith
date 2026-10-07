@@ -20,8 +20,11 @@ from __future__ import annotations
 
 import argparse
 import io
+import shutil
+import subprocess
 import sys
 import tempfile
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
@@ -64,21 +67,31 @@ THUMBNAILS: tuple[str, ...] = (
     "transition-cut.png",
     "transition-static.png",
     "transition-zoom.png",
-    "transition-fade.png",
-    "transition-fadeblack.png",
-    "transition-dissolve.png",
-    "transition-slideleft.png",
-    "transition-slideright.png",
-    "transition-circleopen.png",
-    "transition-zoomin.png",
-    "transition-hblur.png",
-    "transition-smoothleft.png",
-    "transition-wipeleft.png",
+    "transition-fade.webp",
+    "transition-fadeblack.webp",
+    "transition-dissolve.webp",
+    "transition-slideleft.webp",
+    "transition-slideright.webp",
+    "transition-circleopen.webp",
+    "transition-zoomin.webp",
+    "transition-hblur.webp",
+    "transition-smoothleft.webp",
+    "transition-wipeleft.webp",
 )
+#: The xfade kinds whose tile is a looping clip of the real transition.
+XFADE_LOOP_KINDS: tuple[str, ...] = tuple(
+    name[len("transition-") : -len(".webp")] for name in THUMBNAILS if name.endswith(".webp")
+)
+#: The loop: a quarter second of each side held around a one second fade.
+LOOP_FPS = 12
+LOOP_FADE_SECONDS = 1.0
+LOOP_HOLD_SECONDS = 0.25
+#: ``subprocess.run``'s shape; the unit tests pass a stand-in that writes frames.
+Runner = Callable[..., subprocess.CompletedProcess]
 #: Every transition tile: the two FCP effects, the cut, and the xfade kinds
 #: the MP4 renderer draws (``composition.XFADE_KINDS``, issue #1244).
 TRANSITION_KINDS: tuple[str, ...] = tuple(
-    name[len("transition-") : -len(".png")] for name in THUMBNAILS if name.startswith("transition-")
+    name[len("transition-") :].rsplit(".", 1)[0] for name in THUMBNAILS if name.startswith("transition-")
 )
 
 MATCH = "Match title"
@@ -178,6 +191,125 @@ def _xfade_mid_frame(kind: str, left: Image.Image, right: Image.Image) -> Image.
     raise ValueError(f"no thumbnail recipe for transition kind {kind!r}")
 
 
+def xfade_loop(
+    kind: str,
+    left: Image.Image,
+    right: Image.Image,
+    *,
+    ffmpeg: str,
+    runner: Runner = subprocess.run,
+    fps: int = LOOP_FPS,
+    seconds: float = LOOP_FADE_SECONDS,
+    hold: float = LOOP_HOLD_SECONDS,
+) -> list[Image.Image]:
+    """The frames of the real ``xfade`` ``kind`` between two stills, through
+    the project ffmpeg at authoring time (#1246): ``hold`` seconds of the
+    left still, the fade, ``hold`` of the right. ``runner`` is how the
+    unit tests keep this off the shell."""
+    total = hold * 2 + seconds
+    count = round(total * fps)
+    with tempfile.TemporaryDirectory(prefix="xfade-loop-") as tmp_name:
+        tmp = Path(tmp_name)
+        left.convert("RGB").save(tmp / "left.png")
+        right.convert("RGB").save(tmp / "right.png")
+        pattern = tmp / "f-%03d.png"
+        cmd = [
+            ffmpeg,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-loop",
+            "1",
+            "-t",
+            f"{total:g}",
+            "-i",
+            str(tmp / "left.png"),
+            "-loop",
+            "1",
+            "-t",
+            f"{total:g}",
+            "-i",
+            str(tmp / "right.png"),
+            "-filter_complex",
+            f"[0:v][1:v]xfade=transition={kind}:duration={seconds:g}:offset={hold:g},fps={fps}",
+            "-frames:v",
+            str(count),
+            str(pattern),
+        ]
+        done = runner(cmd, capture_output=True)
+        if done.returncode != 0:
+            raise RuntimeError(f"xfade {kind}: ffmpeg exited {done.returncode}: {done.stderr!r}")
+        frames = []
+        for path in sorted(tmp.glob("f-*.png")):
+            with Image.open(path) as frame:
+                frames.append(frame.convert("RGB"))
+    if len(frames) != count:
+        raise RuntimeError(f"xfade {kind}: {len(frames)} frames, expected {count}")
+    return frames
+
+
+def save_loop(path: Path, frames: Sequence[Image.Image], *, fps: int = LOOP_FPS, hold_ms: int = 500) -> None:
+    """``frames`` as a looping animated WebP, the first and last frame held
+    ``hold_ms`` so the loop rests on each side of the cut."""
+    durations = [round(1000 / fps)] * len(frames)
+    durations[0] = durations[-1] = hold_ms
+    first, *rest = [f.convert("RGB") for f in frames]
+    first.save(
+        path,
+        format="WEBP",
+        save_all=True,
+        append_images=rest,
+        duration=durations,
+        loop=0,
+        quality=80,
+        method=4,
+    )
+
+
+def sting_loop(
+    name: str,
+    base_frames: Sequence[Image.Image],
+    *,
+    rasterizer: Rasterizer,
+    look: Look,
+    fps: int = LOOP_FPS,
+    seconds: float = LOOP_FADE_SECONDS,
+    hold: float = LOOP_HOLD_SECONDS,
+) -> list[Image.Image]:
+    """The sting ``name`` sampled frame by frame over the fade span of
+    ``base_frames`` (a :func:`xfade_loop` of ``fade``), as the renderer
+    lays it over a boundary."""
+    template = sting_template_for(look, name)
+    if template is None:
+        raise RuntimeError(f"the {look.name} Look has no sting {name!r}")
+    context = sting_context(
+        kind=f"sting:{name}",
+        seconds=seconds,
+        from_label=STAGE,
+        to_label="Stage 4",
+        width=WIDTH,
+        height=HEIGHT,
+        fps=float(fps),
+        theme=theme_for(look),
+        shooters=(),
+    )
+    frames = rasterizer.render_template_frames(
+        template, context=context, width=WIDTH, height=HEIGHT, fps=float(fps), max_seconds=seconds
+    )
+    out = [f.convert("RGBA") for f in base_frames]
+    start = round(hold * fps)
+    try:
+        for index, raw in enumerate(frames.frames):
+            if start + index >= len(out):
+                break
+            band = Image.frombytes("RGBA", (frames.width, frames.height), raw)
+            out[start + index].alpha_composite(band)
+    finally:
+        frames.close()
+    return out
+
+
 def _sting_frame(name: str, base: Image.Image, *, rasterizer: Rasterizer, look: Look) -> Image.Image:
     """The sting ``name`` at its poster (the band on the seam) over the
     mid-fade frame it rides, drawn by the Look's own template."""
@@ -242,8 +374,23 @@ def _transition(
     return out
 
 
-def build_thumbnails(out: Path, *, rasterizer: Rasterizer, look: Look) -> list[Path]:
+def _ffmpeg_default() -> str:
+    found = shutil.which("ffmpeg")
+    if found is None:
+        raise RuntimeError("no ffmpeg on PATH; put the project's static build first (desktop/build/bin)")
+    return found
+
+
+def build_thumbnails(
+    out: Path,
+    *,
+    rasterizer: Rasterizer,
+    look: Look,
+    ffmpeg: str | None = None,
+    runner: Runner = subprocess.run,
+) -> list[Path]:
     theme = theme_for(look)
+    ffmpeg = ffmpeg or _ffmpeg_default()
     out.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
     plain = paint_backdrop()
@@ -295,21 +442,37 @@ def build_thumbnails(out: Path, *, rasterizer: Rasterizer, look: Look) -> list[P
         )
         save("summary-hold.png", summary)
         save("overlay.png", _overlay(plain, rasterizer=rasterizer, theme=theme))
+        right = ImageChops.offset(plain, 150, 0)
         for kind in TRANSITION_KINDS:
-            save(f"transition-{kind}.png", _transition(kind, plain, rasterizer=rasterizer, look=look))
+            if kind in XFADE_LOOP_KINDS:
+                path = out / f"transition-{kind}.webp"
+                save_loop(path, xfade_loop(kind, plain, right, ffmpeg=ffmpeg, runner=runner))
+                written.append(path)
+            else:
+                save(f"transition-{kind}.png", _transition(kind, plain, rasterizer=rasterizer, look=look))
     return written
 
 
-def build_look_previews(out_root: Path, *, look: Look, rasterizer: Rasterizer) -> list[Path]:
+def build_look_previews(
+    out_root: Path,
+    *,
+    look: Look,
+    rasterizer: Rasterizer,
+    ffmpeg: str | None = None,
+    runner: Runner = subprocess.run,
+) -> list[Path]:
     """The gallery's pictures of ``look`` (issue #1246), under
     ``out_root / <look.name> / preview``: the sample card of every card
     slot in every variant the Look resolves (its own templates, the
-    shipped default's for the rest), the sting posters, and ``look.png``,
-    the title page in the default variant, as the Look's own tile."""
+    shipped default's for the rest), each sting as a looping clip over
+    the fade it rides, and ``look.png``, the title page in the default
+    variant, as the Look's own tile."""
     out = out_root / look.name / PREVIEW_DIR
     out.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
     plain = paint_backdrop()
+    ffmpeg = ffmpeg or _ffmpeg_default()
+    fade_frames: list[Image.Image] | None = None
     with tempfile.TemporaryDirectory() as tmp_name:
         backdrop_png = Path(tmp_name) / "backdrop.png"
         plain.save(backdrop_png)
@@ -360,12 +523,13 @@ def build_look_previews(out_root: Path, *, look: Look, rasterizer: Rasterizer) -
                     over = plain.convert("RGBA")
                     over.alpha_composite(third)
                     save(f"{slot}-{variant}.png", over)
-                else:  # transition: the sting at its poster over the mid-fade
-                    right = ImageChops.offset(plain, 150, 0)
-                    base = _xfade_mid_frame("fade", plain, right)
-                    save(
-                        f"{slot}-{variant}.png", _sting_frame(variant, base, rasterizer=rasterizer, look=look)
-                    )
+                else:  # transition: the sting played over the fade it rides
+                    if fade_frames is None:
+                        right = ImageChops.offset(plain, 150, 0)
+                        fade_frames = xfade_loop("fade", plain, right, ffmpeg=ffmpeg, runner=runner)
+                    path = out / f"{slot}-{variant}.webp"
+                    save_loop(path, sting_loop(variant, fade_frames, rasterizer=rasterizer, look=look))
+                    written.append(path)
         title = composition.MatchTitle(text=MATCH, info=("2026-06-27", "Production Optics"))
         save("look.png", build_card_still(title, slot="title_page", **card))
     return written
@@ -380,14 +544,17 @@ def main() -> int:
         action="store_true",
         help="also write every shipped Look's preview/ set under src/splitsmith/data/looks (#1246)",
     )
+    parser.add_argument("--ffmpeg", default=None, help="the ffmpeg for the transition loops (default: PATH)")
     args = parser.parse_args()
     with ChromiumRasterizer() as rasterizer:
-        written = build_thumbnails(args.out, rasterizer=rasterizer, look=load_look(args.theme))
+        written = build_thumbnails(
+            args.out, rasterizer=rasterizer, look=load_look(args.theme), ffmpeg=args.ffmpeg
+        )
         if args.look_previews:
             root = Path(__file__).resolve().parent.parent / "src/splitsmith/data/looks"
             for look in list_looks():
                 if look.source == "shipped":
-                    written += build_look_previews(root, look=look, rasterizer=rasterizer)
+                    written += build_look_previews(root, look=look, rasterizer=rasterizer, ffmpeg=args.ffmpeg)
     for path in written:
         print(path)
     return 0

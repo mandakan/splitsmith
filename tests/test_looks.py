@@ -284,7 +284,7 @@ def test_the_catalog_lists_every_slot_with_default_first_and_previews(user_dir: 
     assert splitsmith.slots["summary"] == []
     assert splitsmith.preview == "/api/looks/splitsmith/preview/look.png"
     assert splitsmith.slots["slate"][1].preview == "/api/looks/splitsmith/preview/slate-rise.png"
-    assert splitsmith.slots["transition"][0].preview == "/api/looks/splitsmith/preview/transition-wipe.png"
+    assert splitsmith.slots["transition"][0].preview == "/api/looks/splitsmith/preview/transition-wipe.webp"
     assert splitsmith.accent_series[0] == "#ff2d2d"
 
 

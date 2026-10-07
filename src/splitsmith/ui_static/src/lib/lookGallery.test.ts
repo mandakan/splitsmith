@@ -73,7 +73,7 @@ describe("registry shape", () => {
   });
 
   it("references every committed thumbnail and nothing else", () => {
-    const committed = import.meta.glob("../assets/look/*.png", { eager: true, import: "default" }) as Record<
+    const committed = import.meta.glob("../assets/look/*.{png,webp}", { eager: true, import: "default" }) as Record<
       string,
       string
     >;
@@ -81,7 +81,7 @@ describe("registry shape", () => {
       .map((p) => p.split("/").pop()!)
       .sort();
     expect(names).toEqual([...THUMBNAIL_FILES].sort());
-    expect(thumbnailUrl(names[0])).toMatch(/\.png$/);
+    expect(thumbnailUrl(names[0])).toMatch(/\.(png|webp)$/);
   });
 
   it("every RenderOptions field except titleInfo is written by exactly one slot or param", () => {
@@ -300,5 +300,16 @@ describe("slotsForLook (#1246)", () => {
     expect(VARIANT_FIELD.stageCard).toEqual({ field: "stageCardVariant", slot: "stage_card" });
     expect(VARIANT_FIELD.closingCard).toEqual({ field: "closingCardVariant", slot: "closing" });
     expect(VARIANT_FIELD.overlay).toBeUndefined();
+  });
+});
+
+
+describe("transition tiles (#1246)", () => {
+  it("the xfade tiles are looping WebP clips; the cut and the FCP effects stay stills", () => {
+    const transition = slot("transition");
+    for (const v of transition.variants) {
+      const still = ["cut", "static", "zoom"].includes(v.id);
+      expect(v.thumbnail.endsWith(still ? ".png" : ".webp"), v.id).toBe(true);
+    }
   });
 });

@@ -75,16 +75,16 @@ const TRANSITION_FORMATS: OutputFormat[] = ALL_FORMATS.filter((f) => transitions
  *  ``composition.XFADE_KINDS`` lists them; the FCPXML has no effect for
  *  them, so they are MP4-only tiles. */
 const XFADE_VARIANTS: { id: string; name: string; thumbnail: string; help: string }[] = [
-  { id: "fade", name: "Fade", thumbnail: "transition-fade.png", help: "Fades the stage into the next." },
-  { id: "fadeblack", name: "Fade through black", thumbnail: "transition-fadeblack.png", help: "Fades to black, then into the next stage." },
-  { id: "dissolve", name: "Dissolve", thumbnail: "transition-dissolve.png", help: "A grainy dissolve into the next stage." },
-  { id: "slideleft", name: "Slide left", thumbnail: "transition-slideleft.png", help: "The next stage slides in from the right." },
-  { id: "slideright", name: "Slide right", thumbnail: "transition-slideright.png", help: "The next stage slides in from the left." },
-  { id: "circleopen", name: "Circle open", thumbnail: "transition-circleopen.png", help: "The next stage opens from the centre." },
-  { id: "zoomin", name: "Zoom in", thumbnail: "transition-zoomin.png", help: "Zooms into the stage and out into the next." },
-  { id: "hblur", name: "Horizontal blur", thumbnail: "transition-hblur.png", help: "Blurs sideways out of the stage and into the next." },
-  { id: "smoothleft", name: "Smooth left", thumbnail: "transition-smoothleft.png", help: "A soft wipe to the left." },
-  { id: "wipeleft", name: "Wipe left", thumbnail: "transition-wipeleft.png", help: "A hard wipe to the left." },
+  { id: "fade", name: "Fade", thumbnail: "transition-fade.webp", help: "Fades the stage into the next." },
+  { id: "fadeblack", name: "Fade through black", thumbnail: "transition-fadeblack.webp", help: "Fades to black, then into the next stage." },
+  { id: "dissolve", name: "Dissolve", thumbnail: "transition-dissolve.webp", help: "A grainy dissolve into the next stage." },
+  { id: "slideleft", name: "Slide left", thumbnail: "transition-slideleft.webp", help: "The next stage slides in from the right." },
+  { id: "slideright", name: "Slide right", thumbnail: "transition-slideright.webp", help: "The next stage slides in from the left." },
+  { id: "circleopen", name: "Circle open", thumbnail: "transition-circleopen.webp", help: "The next stage opens from the centre." },
+  { id: "zoomin", name: "Zoom in", thumbnail: "transition-zoomin.webp", help: "Zooms into the stage and out into the next." },
+  { id: "hblur", name: "Horizontal blur", thumbnail: "transition-hblur.webp", help: "Blurs sideways out of the stage and into the next." },
+  { id: "smoothleft", name: "Smooth left", thumbnail: "transition-smoothleft.webp", help: "A soft wipe to the left." },
+  { id: "wipeleft", name: "Wipe left", thumbnail: "transition-wipeleft.webp", help: "A hard wipe to the left." },
 ];
 
 
@@ -394,13 +394,14 @@ export const THUMBNAIL_FILES: readonly string[] = [
   ...new Set(LOOK_SLOTS.flatMap((s) => s.variants.map((v) => v.thumbnail))),
 ];
 
-const THUMBNAILS = import.meta.glob("../assets/look/*.png", { eager: true, import: "default" }) as Record<
+const THUMBNAILS = import.meta.glob("../assets/look/*.{png,webp}", { eager: true, import: "default" }) as Record<
   string,
   string
 >;
 
 /** The bundled URL for a thumbnail file name; the glob keeps the images
- *  in the build without a runtime fetch of anything but the PNG. */
+ *  in the build without a runtime fetch of anything but the file (a PNG,
+ *  or a looping WebP for a transition, #1246). */
 export function thumbnailUrl(file: string): string {
   const hit = Object.entries(THUMBNAILS).find(([path]) => path.endsWith(`/${file}`));
   return hit ? hit[1] : "";

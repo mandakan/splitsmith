@@ -80,15 +80,40 @@ class _StubRasterizer:
         )
 
 
+def _fake_ffmpeg(cmd, **_kwargs):  # type: ignore[no-untyped-def]
+    """Stands in for ffmpeg's xfade at authoring time: writes the frames
+    the command asks for (``-frames:v N`` into the ``%03d`` pattern) as
+    blends of the two ``-i`` stills, so the unit tests never shell out."""
+    import subprocess
+
+    argv = [str(c) for c in cmd]
+    inputs = [argv[i + 1] for i, token in enumerate(argv) if token == "-i"]
+    count = int(argv[argv.index("-frames:v") + 1])
+    pattern = argv[-1]
+    graph = argv[argv.index("-filter_complex") + 1]
+    kind = graph.split("xfade=transition=", 1)[1].split(":", 1)[0]
+    from PIL import ImageChops
+
+    with Image.open(inputs[0]) as a, Image.open(inputs[1]) as b:
+        # Each kind rolls the right still by its own amount, so two kinds'
+        # loops differ as the real transitions would.
+        left, right = a.convert("RGB"), ImageChops.offset(b.convert("RGB"), sum(map(ord, kind)) % 97, 0)
+        for index in range(count):
+            Image.blend(left, right, index / max(1, count - 1)).save(pattern % (index + 1))
+    return subprocess.CompletedProcess(argv, 0, b"", b"")
+
+
 def test_writes_every_thumbnail_at_the_gallery_size(tmp_path: Path) -> None:
     mod = _load()
     raster = _StubRasterizer()
-    written = mod.build_thumbnails(tmp_path, rasterizer=raster, look=load_look("splitsmith"))
+    written = mod.build_thumbnails(
+        tmp_path, rasterizer=raster, look=load_look("splitsmith"), ffmpeg="ffmpeg", runner=_fake_ffmpeg
+    )
     assert sorted(p.name for p in written) == sorted(mod.THUMBNAILS)
     for path in written:
         with Image.open(path) as im:
             assert im.size == (mod.WIDTH, mod.HEIGHT), path.name
-            assert im.mode == "RGB"
+            assert im.mode in ("RGB", "RGBA"), path.name
     # Every text card went through the rasterizer at the tile size.
     assert raster.calls and all(c == (mod.WIDTH, mod.HEIGHT) for c in raster.calls)
 
@@ -97,16 +122,56 @@ def test_file_set_matches_the_registry() -> None:
     """The TS registry names the files; the script must write exactly those."""
     mod = _load()
     source = REGISTRY.read_text(encoding="utf-8")
-    referenced = set(re.findall(r'"([a-z0-9-]+\.png)"', source))
+    referenced = set(re.findall(r'"([a-z0-9-]+\.(?:png|webp))"', source))
     assert referenced == set(mod.THUMBNAILS)
 
 
 def test_transition_tiles_differ_from_each_other(tmp_path: Path) -> None:
     mod = _load()
-    mod.build_thumbnails(tmp_path, rasterizer=_StubRasterizer(), look=load_look("splitsmith"))
+    mod.build_thumbnails(
+        tmp_path,
+        rasterizer=_StubRasterizer(),
+        look=load_look("splitsmith"),
+        ffmpeg="ffmpeg",
+        runner=_fake_ffmpeg,
+    )
     names = [n for n in mod.THUMBNAILS if n.startswith("transition-")]
     assert len(names) == 13
     assert len({(tmp_path / n).read_bytes() for n in names}) == len(names)
+
+
+def test_the_xfade_tiles_loop_as_animated_webp(tmp_path: Path) -> None:
+    """Slice 6 (#1246): an xfade tile is the real transition between the
+    two stills, through the project ffmpeg at authoring time, saved as a
+    looping WebP: a quarter second of each side held around a one second
+    fade at 12 fps; the cut and the two FCP effects stay stills."""
+    mod = _load()
+    calls: list[list[str]] = []
+
+    def recording(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        calls.append([str(c) for c in cmd])
+        return _fake_ffmpeg(cmd, **kwargs)
+
+    mod.build_thumbnails(
+        tmp_path,
+        rasterizer=_StubRasterizer(),
+        look=load_look("splitsmith"),
+        ffmpeg="/bin/ff",
+        runner=recording,
+    )
+    webps = sorted(p.name for p in tmp_path.glob("transition-*.webp"))
+    assert webps == sorted(f"transition-{kind}.webp" for kind in mod.XFADE_LOOP_KINDS)
+    assert {p.name for p in tmp_path.glob("transition-*.png")} == {
+        "transition-cut.png",
+        "transition-static.png",
+        "transition-zoom.png",
+    }
+    with Image.open(tmp_path / "transition-fade.webp") as loop:
+        assert loop.format == "WEBP" and loop.n_frames == 18 and loop.size == (mod.WIDTH, mod.HEIGHT)
+        assert loop.info.get("loop") == 0
+    fade = next(c for c in calls if "xfade=transition=fade:" in " ".join(c))
+    assert fade[0] == "/bin/ff" and "-loop" in fade and fade[fade.index("-frames:v") + 1] == "18"
+    assert "fps=12" in " ".join(fade)
 
 
 def test_look_previews_write_one_file_per_variant_and_the_sample_tile(tmp_path: Path) -> None:
@@ -115,7 +180,9 @@ def test_look_previews_write_one_file_per_variant_and_the_sample_tile(tmp_path: 
     gets the same names through the shipped default's."""
     mod = _load()
     for name in ("splitsmith", "clean"):
-        written = mod.build_look_previews(tmp_path, look=load_look(name), rasterizer=_StubRasterizer())
+        written = mod.build_look_previews(
+            tmp_path, look=load_look(name), rasterizer=_StubRasterizer(), ffmpeg="ffmpeg", runner=_fake_ffmpeg
+        )
         assert {p.name for p in written} == {
             "look.png",
             "title_page-default.png",
@@ -126,8 +193,22 @@ def test_look_previews_write_one_file_per_variant_and_the_sample_tile(tmp_path: 
             "lower_third-rise.png",
             "closing-default.png",
             "closing-rise.png",
-            "transition-wipe.png",
+            "transition-wipe.webp",
         }
         assert all(p.parent == tmp_path / name / "preview" for p in written)
         with Image.open(tmp_path / name / "preview" / "slate-rise.png") as image:
             assert image.size == (mod.WIDTH, mod.HEIGHT)
+
+
+def test_a_sting_preview_loops_over_the_fade(tmp_path: Path) -> None:
+    """The Look's sting preview is its template sampled frame by frame
+    over the fade loop, so the gallery tile plays the sting."""
+    mod = _load()
+    raster = _StubRasterizer(motion_seconds=1.0)
+    mod.build_look_previews(
+        tmp_path, look=load_look("splitsmith"), rasterizer=raster, ffmpeg="ffmpeg", runner=_fake_ffmpeg
+    )
+    with Image.open(tmp_path / "splitsmith" / "preview" / "transition-wipe.webp") as loop:
+        assert loop.format == "WEBP" and loop.n_frames == 18
+    assert raster.frames_rendered == 12, "one second of sting at the loop's 12 fps"
+    assert raster.frame_requests[-1][4] == 12 and raster.frame_requests[-1][5] == 1.0
