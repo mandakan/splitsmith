@@ -252,7 +252,8 @@ async def duplicate_look(name: str, req: DuplicateLookRequest, request: Request)
 # --- the template editor (#1265), local only ---------------------------------
 #
 # Every route below is in ``route_scope.LOCAL_ONLY_ROUTES``: a template is
-# code, and hosted runs none of an account's until the sandbox (#1266).
+# code, and hosted runs none of an account's: custom templates are
+# desktop only, by decision (Chromium's OS sandbox cannot start on Railway).
 
 #: Swapped by tests; ``looks check``'s prober.
 prober_factory = ChromiumRasterizer

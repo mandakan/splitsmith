@@ -42,7 +42,7 @@ LOCAL_ONLY_ROUTES: frozenset[tuple[str, str]] = frozenset(
         # Opens the OS file manager.
         ("POST", "/api/files/reveal"),
         # The template editor (#1265): a template is code; hosted runs none
-        # of an account's until the sandboxed loader (#1266).
+        # of an account's. Custom templates are desktop only, by decision.
         ("GET", "/api/looks/{name}/templates"),
         ("PUT", "/api/looks/{name}/templates"),
         ("GET", "/api/looks/{name}/samples"),
