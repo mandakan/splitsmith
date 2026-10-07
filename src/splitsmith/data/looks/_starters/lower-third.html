@@ -1,0 +1,80 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>starter: lower third</title>
+<!--
+  A lower third: drawn over the first seconds of a stage, so it covers
+  only a corner and the rest of the frame stays transparent. data.card
+  carries the stage name (text) and the round count (info). It slides in
+  over half a second; the renderer fades it out at the end of the card
+  by itself, so the template only animates the way in.
+  Guide: docs/looks/authoring.md#lower-third
+-->
+<script>
+  document.write('<style>' + window.splitsmith.engine.css + '</style>');
+</script>
+<style>
+  html, body { margin: 0; background: transparent; overflow: hidden; }
+  .band {
+    position: absolute; display: flex; align-items: stretch;
+    max-width: 70%;
+  }
+  .bar { width: 6px; flex: none; }
+  .text { padding: 0.35em 0.7em; display: flex; flex-direction: column; gap: 0.2em; min-width: 0; }
+  .name { font-family: "Splitsmith Display", sans-serif; font-weight: 700; line-height: 1; white-space: nowrap; }
+  .info { font-family: "Splitsmith Mono", monospace; white-space: nowrap; }
+</style>
+</head>
+<body>
+<div class="band" id="band">
+  <div class="bar" id="bar"></div>
+  <div class="text" id="text"></div>
+</div>
+<script>
+  var S = window.splitsmith;
+  var H = S.size.height;
+  var band = document.getElementById('band');
+  band.style.left = Math.round(H * 0.05) + 'px';
+  band.style.bottom = Math.round(H * 0.08) + 'px';
+  band.style.background = S.theme.surface + 'e6';   // the surface colour at 90 %
+  document.getElementById('bar').style.background = S.theme.accent;
+
+  var text = document.getElementById('text');
+  // Not `var name`: a global `name` is the browser's own window.name.
+  var nameEl = document.createElement('div');
+  nameEl.className = 'name';
+  nameEl.textContent = S.data.card.text;
+  nameEl.style.color = S.theme.ink;
+  nameEl.style.fontSize = Math.round(H * 0.06) + 'px';
+  text.appendChild(nameEl);
+  (S.data.card.info || []).forEach(function (line) {
+    var div = document.createElement('div');
+    div.className = 'info';
+    div.textContent = line;
+    div.style.color = S.theme.muted;
+    div.style.fontSize = Math.round(H * 0.026) + 'px';
+    text.appendChild(div);
+  });
+
+  var slide = band.animate(
+    [{ opacity: 0, transform: 'translateX(-2em)' }, { opacity: 1, transform: 'translateX(0)' }],
+    { duration: 500, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)', fill: 'both' }
+  );
+  slide.pause();
+  window.duration = function () { return 0.5; };
+  window.poster = function () { return 0.5; };
+  window.seek = function (t) { slide.currentTime = t * 1000; };
+
+  // Keep the band inside 70 % of the width: shrink the name, not the frame.
+  window.__splitsmithFit = function () {
+    var max = S.size.width * 0.7 - 40;
+    var size = parseFloat(nameEl.style.fontSize);
+    while (nameEl.scrollWidth > max && size > S.engine.min_font_size) {
+      size -= 1;
+      nameEl.style.fontSize = size + 'px';
+    }
+  };
+</script>
+</body>
+</html>

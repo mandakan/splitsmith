@@ -234,6 +234,12 @@ def _read_look(root: Path, source: Literal["shipped", "user"]) -> Look:
     return Look(manifest=manifest, root=root, source=source)
 
 
+def read_look(root: Path, source: Literal["shipped", "user"]) -> Look:
+    """The Look in ``root``, or :class:`LookError` naming what is wrong: the
+    strict read ``looks check`` uses, with no shipped fallback (#1262)."""
+    return _read_look(root, source)
+
+
 def _candidate_dirs(base: Path) -> list[Path]:
     if not base.is_dir():
         return []
@@ -455,6 +461,7 @@ __all__ = [
     "look_catalog",
     "load_look",
     "preview_file",
+    "read_look",
     "preview_owner_root",
     "look_names",
     "shared_dir",

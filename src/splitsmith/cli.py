@@ -59,6 +59,7 @@ console = Console()
 
 from .compare.cli import compare_app  # noqa: E402
 from .lab_cli import app as _lab_app  # noqa: E402
+from .looks_cli import looks_app  # noqa: E402
 from .match_cli import match_app  # noqa: E402
 from .model_cli import fetch_models as _fetch_models  # noqa: E402
 from .youtube.cli import youtube_app  # noqa: E402
@@ -67,6 +68,7 @@ app.add_typer(_lab_app, name="lab")
 app.add_typer(compare_app, name="compare")
 app.add_typer(match_app, name="match")
 app.add_typer(youtube_app, name="youtube")
+app.add_typer(looks_app, name="looks")
 app.command("fetch-models")(_fetch_models)
 
 
