@@ -27,8 +27,25 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from ..composition import XFADE_FAMILIES
-from ..look_store import LookStore, LookStoreError, StoredLook, StoredLookBody, check_name
-from ..looks import PREVIEW_DIR, TRANSITIONS_OWNER, look_catalog, preview_owner_root, shipped_looks_dir
+from ..look_store import (
+    FolderLookStore,
+    LookStore,
+    LookStoreError,
+    StoredLook,
+    StoredLookBody,
+    body_from_manifest,
+    check_name,
+    is_shipped_name,
+)
+from ..looks import (
+    PREVIEW_DIR,
+    TRANSITIONS_OWNER,
+    LookError,
+    load_look,
+    look_catalog,
+    preview_owner_root,
+    shipped_looks_dir,
+)
 
 router = APIRouter()
 
@@ -132,6 +149,41 @@ async def delete_own_look(name: str, request: Request) -> Response:
         raise HTTPException(status_code=404, detail="not found")
     await store.delete(name)
     return Response(status_code=204)
+
+
+class DuplicateLookRequest(BaseModel):
+    source: str
+
+
+@router.post("/api/looks/{name}/duplicate", status_code=201, response_model=StoredLook)
+async def duplicate_look(name: str, req: DuplicateLookRequest, request: Request) -> StoredLook:
+    """A new Look ``name`` copied from the installed Look ``source`` (#1264).
+    Locally the copy is a folder with the source's templates (``looks new
+    --from``); hosted it is a manifest whose base is the source's shipped
+    Look, its colours and styles copied."""
+    store = _store(request)
+    if await store.get(_name(name)) is not None:
+        raise HTTPException(status_code=409, detail=f"a Look named {name!r} already exists")
+    try:
+        source = load_look(req.source)
+    except LookError:
+        raise HTTPException(status_code=404, detail=f"no Look named {req.source!r}") from None
+    try:
+        if isinstance(store, FolderLookStore):
+            from ..look_tools import LookToolError, new_look
+
+            try:
+                new_look(name, from_look=req.source)
+            except LookToolError as exc:
+                raise LookStoreError(str(exc)) from None
+            stored = await store.get(name)
+            assert stored is not None  # new_look loads the folder before it returns
+            return stored
+        body = body_from_manifest(source.manifest)
+        base = req.source if is_shipped_name(req.source) else body.base
+        return await store.put(name, body.model_copy(update={"base": base}))
+    except LookStoreError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
 
 
 __all__ = ["router"]

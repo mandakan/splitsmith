@@ -4,6 +4,7 @@
  * is ``lib/lookGallery``'s; this maps the page's bare-stage hints onto
  * the slots.
  */
+import { LookAdvanced } from "@/components/export/LookAdvanced";
 import { LookGallery } from "@/components/export/LookGallery";
 import { bareHint } from "@/lib/exportPlan";
 import type { LookFocus } from "@/lib/exportPreview";
@@ -17,13 +18,28 @@ export interface LookGroupProps {
   bareSelected: number;
   onHover?: (focus: LookFocus | null) => void;
   onSelect?: (focus: LookFocus) => void;
+  /** The Advanced row's editor previews on this shooter's stage (#1264). */
+  slug: string;
+  stageNumber: number;
+  hosted: boolean;
 }
 
-export function LookGroup({ settings, patch, busy, bareSelected, onHover, onSelect }: LookGroupProps) {
+export function LookGroup({
+  settings,
+  patch,
+  busy,
+  bareSelected,
+  onHover,
+  onSelect,
+  slug,
+  stageNumber,
+  hosted,
+}: LookGroupProps) {
   const compare = settings.mode === "compare";
   const { looks, transitions } = useLooks();
   return (
-    <LookGallery
+    <>
+      <LookGallery
       looks={looks}
       transitions={transitions}
       settings={settings}
@@ -34,6 +50,16 @@ export function LookGroup({ settings, patch, busy, bareSelected, onHover, onSele
       }
       onHover={onHover}
       onSelect={onSelect}
-    />
+      />
+      <LookAdvanced
+        looks={looks}
+        look={settings.look}
+        onChooseLook={(look) => patch({ look })}
+        slug={slug}
+        stageNumber={stageNumber}
+        hosted={hosted}
+        busy={busy}
+      />
+    </>
   );
 }

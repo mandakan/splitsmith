@@ -175,3 +175,27 @@ def test_a_throwing_hook_is_a_finding_not_a_crash(raster, tmp_path: Path, script
         height=360,
     )
     assert any(expected in e for e in probe.errors), probe.errors
+
+
+def test_render_template_at_a_time_seeks_there_instead_of_the_poster(raster, tmp_path: Path) -> None:
+    """The Look editor's slider (#1264): ``at`` is where the template is
+    seeked; without it the poster is."""
+    import io
+
+    from PIL import Image
+
+    page = _page(
+        tmp_path,
+        "fade.html",
+        "<div id='b' style='position:absolute;inset:0;background:#fff;opacity:0'></div><script>"
+        "window.duration = () => 1; window.poster = () => 1;"
+        "window.seek = (t) => { document.getElementById('b').style.opacity = String(t); };</script>",
+    )
+
+    def alpha(png: bytes) -> int:
+        with Image.open(io.BytesIO(png)) as im:
+            return im.convert("RGBA").getpixel((10, 10))[3]
+
+    ctx = _context()
+    assert alpha(raster.render_template(page, context=ctx, width=64, height=36)) == 255
+    assert alpha(raster.render_template(page, context=ctx, width=64, height=36, at=0.0)) == 0

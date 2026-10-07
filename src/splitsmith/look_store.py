@@ -41,6 +41,7 @@ from .looks import (
     LOOK_NAME_RE,
     MANIFEST_FILE,
     RGB,
+    Look,
     LookError,
     LookManifest,
     check_accent_series,
@@ -225,6 +226,23 @@ class FolderLookStore:
             shutil.rmtree(root)
 
 
+def draft_look(saved: Look, body: StoredLookBody, work: Path) -> Look:
+    """``saved`` with ``body``'s fields in place of its own, written under
+    ``work`` with a copy of every template it names: what the Look editor
+    previews before Save (#1264). Nothing of ``saved`` is touched."""
+    raw = {**saved.manifest.model_dump(mode="json", exclude={"source"}), **_body_fields(body)}
+    root = work / saved.name
+    root.mkdir(parents=True, exist_ok=True)
+    for variants in saved.manifest.slots.values():
+        for file in variants.values():
+            shutil.copyfile(saved.root / file, root / file)
+    (root / MANIFEST_FILE).write_text(_dump(raw), encoding="utf-8")
+    try:
+        return read_look(root, "user")
+    except LookError as exc:
+        raise LookStoreError(str(exc)) from None
+
+
 def materialize(stored: Iterable[StoredLook], cache_root: Path) -> Path:
     """Write ``stored`` as manifest-only Look folders under a directory of
     ``cache_root`` named by their content, and return it. The same Looks
@@ -263,6 +281,7 @@ __all__ = [
     "StoredLookBody",
     "body_from_manifest",
     "check_name",
+    "draft_look",
     "is_shipped_name",
     "manifest_for",
     "materialize",
