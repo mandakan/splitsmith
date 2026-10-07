@@ -25,7 +25,7 @@ import logging
 from importlib.resources import files
 from pathlib import Path
 
-from .fonts import FONTS
+from .fonts import FONTS, is_font_path
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +111,13 @@ def resolve_overlay_face(font_name: str | None) -> OverlayFace:
     """
     if font_name is None:
         return FALLBACK_BUNDLED_FONT
+    if is_font_path(font_name):
+        # A Look's own file (#1272): already on disk, content-named, and
+        # what the cards' ``@font-face`` points at too.
+        path = Path(font_name)
+        if not path.is_file():
+            raise OverlayRenderError(f"the Look's font file is gone: {path}")
+        return path
     key = font_name.lower()
     if key not in _BUNDLED_FONTS:
         raise OverlayRenderError(f"unknown font_name {font_name!r}; available: {', '.join(_BUNDLED_FONTS)}")

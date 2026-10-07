@@ -109,6 +109,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .fonts import font as bundled_font
+from .fonts import is_font_path
 from .overlay_clock import border_width
 from .overlay_layout import MIN_FONT_SIZE, Anchor, CellScale, ColorToken, Element, Flow, Group, Role
 from .overlay_theme import OverlayTheme
@@ -224,6 +225,22 @@ def _fit(px: int) -> str:
     return f"calc(var(--fit-scale, 1) * {px}px)"
 
 
+#: The weight range an own font file (#1272) is declared for: the user's
+#: file is usually one weight, and declaring the whole range makes
+#: Chromium draw it as is wherever a template asks for bold.
+OWN_FONT_WEIGHT = "100 900"
+
+
+def _face_source(value: str) -> tuple[str, str, str]:
+    """``(url, format, weight)`` for a theme's face: a catalog id's bundled
+    file, or a Look's own file by its absolute path."""
+    if is_font_path(value):
+        path = Path(value)
+        return path.as_uri(), "opentype" if path.suffix == ".otf" else "truetype", OWN_FONT_WEIGHT
+    face = bundled_font(value)
+    return font_face_url(face.file), "truetype", face.weight
+
+
 def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
     """The shared stylesheet for one cell's declared content.
 
@@ -235,10 +252,8 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
     """
     # The Look's faces (#1272) under the two family names every template
     # draws with; the defaults are exactly the files and weights before.
-    mono_face = bundled_font(theme.mono_font)
-    display_face = bundled_font(theme.display_font)
-    mono_url = font_face_url(mono_face.file)
-    display_url = font_face_url(display_face.file)
+    mono_url, mono_format, mono_weight = _face_source(theme.mono_font)
+    display_url, display_format, display_weight = _face_source(theme.display_font)
     ink = _rgb(theme.ink)
     ink_2 = _rgb(theme.ink_2)
     rule_color = _rgb(theme.rule)
@@ -282,13 +297,13 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
     return f"""
 @font-face {{
   font-family: "Splitsmith Mono";
-  src: url("{mono_url}") format("truetype");
-  font-weight: {mono_face.weight};
+  src: url("{mono_url}") format("{mono_format}");
+  font-weight: {mono_weight};
 }}
 @font-face {{
   font-family: "Splitsmith Display";
-  src: url("{display_url}") format("truetype");
-  font-weight: {display_face.weight};
+  src: url("{display_url}") format("{display_format}");
+  font-weight: {display_weight};
 }}
 .cell {{
   position: relative;

@@ -25,9 +25,9 @@ import re
 import tempfile
 from importlib import resources
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -66,6 +66,7 @@ from ..looks import (
     variants_for,
 )
 from ..overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+from ..own_fonts import MAX_FONT_BYTES, OwnFont, OwnFontError, list_fonts, own_font_path, save_font
 from ..runtime import runtime
 
 router = APIRouter()
@@ -422,6 +423,59 @@ def reveal_look(name: str) -> dict[str, str]:
     look = _own_look(name)
     server._reveal_in_file_manager(look.root)
     return {"revealed": str(look.root)}
+
+
+# --- a Look's own fonts (#1272 step 2) ---------------------------------------
+#
+# Local only, like the template routes: hosted has no account assets for a
+# font yet, and ``db.looks`` refuses a Look that names one.
+
+
+class OwnFontInfo(BaseModel):
+    #: What ``fonts`` in the Look's body names it by.
+    value: str
+    family: str
+    #: Where the editor's sample loads it from.
+    url: str
+
+
+def _font_info(name: str, font: OwnFont) -> OwnFontInfo:
+    return OwnFontInfo(value=font.value, family=font.family, url=f"/api/looks/{name}/fonts/{font.file}")
+
+
+@router.get("/api/looks/{name}/fonts", response_model=list[OwnFontInfo])
+def list_own_fonts(name: str) -> list[OwnFontInfo]:
+    look = _own_look(name)
+    return [_font_info(look.name, font) for font in list_fonts(look.root)]
+
+
+@router.post("/api/looks/{name}/fonts", status_code=201, response_model=OwnFontInfo)
+async def upload_own_font(name: str, file: Annotated[UploadFile, File()]) -> OwnFontInfo:
+    """Store a TTF or OTF in the Look's ``fonts/`` folder (``own_fonts``):
+    sniffed and opened with FreeType, never trusted by its name."""
+    look = _own_look(name)
+    data = await file.read(MAX_FONT_BYTES + 1)
+    if len(data) > MAX_FONT_BYTES:
+        raise HTTPException(status_code=413, detail="The font is larger than 2 MB.")
+    try:
+        font = save_font(look.root, data)
+    except OwnFontError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    return _font_info(look.name, font)
+
+
+@router.get("/api/looks/{name}/fonts/{file}")
+def get_own_font(name: str, file: str) -> FileResponse:
+    """One of the Look's own font files, by its content name only."""
+    look = _own_look(name)
+    path = own_font_path(look.root, file)
+    if path is None:
+        raise HTTPException(status_code=404, detail="not found")
+    return FileResponse(
+        path,
+        media_type="font/otf" if path.suffix == ".otf" else "font/ttf",
+        headers={"Cache-Control": "private, max-age=86400", "X-Content-Type-Options": "nosniff"},
+    )
 
 
 __all__ = ["router"]

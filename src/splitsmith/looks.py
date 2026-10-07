@@ -290,6 +290,19 @@ def _read_look(root: Path, source: Literal["shipped", "user"]) -> Look:
     return Look(manifest=manifest, root=root, source=source)
 
 
+def look_files(root: Path) -> dict[str, Path]:
+    """Every file of the Look folder ``root`` but its manifest and its
+    ``preview/`` pictures, by path relative to ``root``: the templates and
+    whatever they load beside them (an image, a stylesheet, its own fonts).
+    What a copy of the Look carries, whether ``looks new --from`` or the
+    editor's draft."""
+    return {
+        str(path.relative_to(root)): path
+        for path in sorted(root.rglob("*"))
+        if path.is_file() and path.name != MANIFEST_FILE and path.relative_to(root).parts[0] != PREVIEW_DIR
+    }
+
+
 def read_look(root: Path, source: Literal["shipped", "user"]) -> Look:
     """The Look in ``root``, or :class:`LookError` naming what is wrong: the
     strict read ``looks check`` uses, with no shipped fallback (#1262)."""
@@ -502,6 +515,7 @@ def look_catalog() -> list[LookInfo]:
 
 
 __all__ = [
+    "look_files",
     "DEFAULT_LOOK",
     "DEFAULT_VARIANT",
     "REQUIRED_COLORS",

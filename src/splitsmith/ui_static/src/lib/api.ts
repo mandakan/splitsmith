@@ -1134,6 +1134,16 @@ export interface FontInfo {
   url: string;
 }
 
+/** A font file of the Look's own (#1272), desktop only. */
+export interface OwnFontInfo {
+  /** What the Look's ``fonts`` names it by: ``own:font-<hash>.ttf``. */
+  value: string;
+  /** The family the file declares. */
+  family: string;
+  /** ``/api/looks/<name>/fonts/<file>``, for a sample. */
+  url: string;
+}
+
 export interface StoredLook {
   name: string;
   updated_at: string;
@@ -4996,6 +5006,15 @@ export const api = {
   putLook: (name: string, body: StoredLookBody) =>
     request<StoredLook>(`/api/looks/${encodeURIComponent(name)}`, { method: "PUT", json: body }),
   deleteLook: (name: string) => request<void>(`/api/looks/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  /** A Look's own font files (#1272), local only. */
+  listOwnFonts: (name: string) => request<OwnFontInfo[]>(`/api/looks/${encodeURIComponent(name)}/fonts`),
+  /** Upload a TTF or OTF of at most 2 MB into the Look; the server sniffs
+   *  it and names the file by its content. */
+  uploadOwnFont: (name: string, file: File) => {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    return request<OwnFontInfo>(`/api/looks/${encodeURIComponent(name)}/fonts`, { method: "POST", body: form });
+  },
   /** The template editor (#1265), local only. */
   listTemplates: (name: string) =>
     request<{ templates: TemplateInfo[]; starters: { name: string; content: string }[] }>(

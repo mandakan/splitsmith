@@ -29,6 +29,9 @@ from tests.hosted_helpers import _CapturingSender, login
 #: The local-only routes, spelled out here rather than read from the
 #: table, so dropping one from the table fails this file.
 EXPECTED_LOCAL_ONLY: set[tuple[str, str]] = {
+    ("GET", "/api/looks/{name}/fonts"),
+    ("POST", "/api/looks/{name}/fonts"),
+    ("GET", "/api/looks/{name}/fonts/{file}"),
     ("GET", "/api/shooters/{slug}/fs/list"),
     ("GET", "/api/fs/list-dirs"),
     ("GET", "/api/shooters/{slug}/fs/probe"),

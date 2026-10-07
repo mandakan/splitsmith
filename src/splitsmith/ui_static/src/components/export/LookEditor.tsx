@@ -16,6 +16,7 @@ import {
   ApiError,
   api,
   type LookInfo,
+  type OwnFontInfo,
   type PreviewCard,
   type CheckFinding,
   type StoredLookBody,
@@ -27,6 +28,7 @@ import {
   TOKEN_GROUPS,
   contrastWarnings,
   draftErrors,
+  fontUploadRefusal,
   hexToRgb,
   isDirty,
   previewRequest,
@@ -36,7 +38,7 @@ import {
   styleOptions,
   type LookDraft,
 } from "@/lib/lookEditor";
-import { FontPicker } from "@/components/export/FontPicker";
+import { FontPicker, type OwnFonts } from "@/components/export/FontPicker";
 import { PaletteSuggestions } from "@/components/export/PaletteSuggestions";
 import { TemplateEditor } from "@/components/export/TemplateEditor";
 import { editsList, type TemplateEdits } from "@/lib/templateEditor";
@@ -248,6 +250,7 @@ export function LookEditor({
             </>
           ) : tab === "styles" ? (
             <CardStyles
+              name={name}
               draft={draft}
               setDraft={setDraft}
               info={info}
@@ -449,18 +452,51 @@ function Palette({
   );
 }
 
+/** The Look's own font files and their upload (#1272), desktop only. */
+function useOwnFonts(name: string, hosted: boolean): OwnFonts | undefined {
+  const [list, setList] = useState<OwnFontInfo[]>([]);
+  useEffect(() => {
+    if (hosted) return;
+    let live = true;
+    api
+      .listOwnFonts(name)
+      .then((f) => live && setList(f))
+      .catch(() => live && setList([]));
+    return () => {
+      live = false;
+    };
+  }, [name, hosted]);
+  if (hosted) return undefined;
+  return {
+    fonts: list,
+    upload: async (file: File) => {
+      let added: OwnFontInfo;
+      try {
+        added = await api.uploadOwnFont(name, file);
+      } catch (err) {
+        throw new Error(fontUploadRefusal(err), { cause: err });
+      }
+      setList((prev) => (prev.some((f) => f.value === added.value) ? prev : [...prev, added]));
+      return added;
+    },
+  };
+}
+
 function CardStyles({
+  name,
   draft,
   setDraft,
   info,
   hosted,
 }: {
+  name: string;
   draft: LookDraft;
   setDraft: (d: LookDraft) => void;
   info: LookInfo | undefined;
   hosted: boolean;
 }) {
   const { fonts = [] } = useLooks();
+  const own = useOwnFonts(name, hosted);
   return (
     <div className="flex flex-col">
       {CARD_STYLE_SLOTS.map(({ slot, label }) => (
@@ -487,7 +523,7 @@ function CardStyles({
           ? " On splitsmith.app a Look picks from the shipped templates."
           : ""}
       </p>
-      <FontPicker draft={draft} setDraft={setDraft} fonts={fonts} />
+      <FontPicker draft={draft} setDraft={setDraft} fonts={fonts} own={hosted ? undefined : own} />
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { ApiError, type LookInfo } from "@/lib/api";
 import {
+  fontUploadRefusal,
   CARD_STYLE_SLOTS,
   PREVIEW_CARDS,
   TOKEN_GROUPS,
@@ -285,5 +286,13 @@ describe("fonts", () => {
     expect(chosen.fonts).toEqual({ display: "bebas-neue" });
     expect(isDirty(withFonts, chosen)).toBe(true);
     expect(setFont(chosen, "display", "antonio", FONT_DEFAULTS).fonts).toEqual({});
+  });
+});
+
+describe("fontUploadRefusal", () => {
+  it("is the server's reason without its status code", () => {
+    const err = new ApiError(422, "This is a WOFF font. Upload the TTF or OTF file it was made from.");
+    expect(fontUploadRefusal(err)).toBe("This is a WOFF font. Upload the TTF or OTF file it was made from.");
+    expect(fontUploadRefusal(new TypeError("Failed to fetch"))).toBe("The font could not be added. Try again.");
   });
 });

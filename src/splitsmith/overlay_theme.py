@@ -133,7 +133,7 @@ class OverlayTheme:
 def theme_for(look: Look) -> OverlayTheme:
     """The palette a Look declares (``look.json``'s ``colors``)."""
     c = look.manifest.colors
-    faces = resolve_fonts(look.manifest.fonts)
+    faces = resolve_fonts(look.manifest.fonts, root=look.root)
     return OverlayTheme(
         name=look.name,
         ink=c["ink"],
