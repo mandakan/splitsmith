@@ -3305,6 +3305,10 @@ def render_grid_mp4(
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     work = work_dir or output_path.parent / ".compare-grid-work"
+    if segment_cache is not None:
+        # The cache fingerprints a work file only through an absolute argv
+        # token; a relative one would be keyed by its name alone.
+        work = work.resolve()
     work.mkdir(parents=True, exist_ok=True)
 
     # Read once for the whole run, not per stage: every read opens the

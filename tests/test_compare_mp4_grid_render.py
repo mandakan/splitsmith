@@ -1897,3 +1897,28 @@ def test_the_overlays_sprites_and_font_reach_the_cache_key(tmp_path: Path):
     sprites[1].write_bytes(b"redrawn in another theme")
     after = cache.key(argv, output_path=tmp_path / "out.mov", work_dir=tmp_path, extra_inputs=inputs)
     assert before != after
+
+
+def test_a_relative_work_dir_is_made_absolute_when_a_cache_keys_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The cache fingerprints a work file only when its argv token is an
+    absolute path; a relative one would be keyed by its name alone, so a
+    redrawn hold still under that name would be served stale."""
+    from splitsmith.segment_cache import SegmentCache
+
+    monkeypatch.chdir(tmp_path)
+    calls, runner = _writing_runner()
+    mp4_grid.render_grid_mp4(
+        _shooters(),
+        audio_label="Mathias",
+        output_path=Path("grid.mp4"),
+        canvas=CANVAS,
+        ffmpeg_binary="/bin/ffmpeg",
+        runner=runner,
+        work_dir=Path("work"),
+        segment_cache=SegmentCache(root=tmp_path / "cache", max_bytes=1 << 30),
+    )
+    stitch = calls[-1]
+    listed = Path(stitch[stitch.index("-i") + 1])
+    assert listed.is_absolute() and listed.parent == (tmp_path / "work").resolve()
