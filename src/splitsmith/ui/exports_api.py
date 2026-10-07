@@ -30,9 +30,9 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
-from .. import export_runs, youtube_sidecar
+from .. import composition, export_runs, youtube_sidecar
 from ..compare.mp4_grid import DEFAULT_CANVAS_HEIGHT, DEFAULT_CANVAS_WIDTH
 from ..match_project import trim_blocker
 from ..overlay_theme import ThemeName
@@ -136,6 +136,12 @@ class MatchExportRequest(BaseModel):
     # ignored" anomaly when set together with those formats.
     transition_kind: match_exports.TransitionKind = "none"
     transition_duration_seconds: float = Field(0.5, gt=0)
+
+    @field_validator("transition_kind")
+    @classmethod
+    def _transition_kind(cls, value: str) -> str:
+        return composition.validate_transition_kind(value)
+
     # Issue #196. Per-stage title cards. ``"slate"`` adds a pre-stage
     # card on the spine; ``"lower-third"`` is a connected text clip
     # overlaid on the start of the primary. FCPXML only today;
@@ -237,6 +243,12 @@ class CompareGridRequest(BaseModel):
     # boundary segments.
     transition_kind: match_exports.TransitionKind = "none"
     transition_duration_seconds: float = Field(0.5, gt=0)
+
+    @field_validator("transition_kind")
+    @classmethod
+    def _transition_kind(cls, value: str) -> str:
+        return composition.validate_transition_kind(value)
+
     # Issue #705. The splits overlay (per-tile counter and split, the
     # running clock) in the grid's own typography, and the end-of-stage
     # summary hold in seconds. The hold needs the overlay: it is drawn

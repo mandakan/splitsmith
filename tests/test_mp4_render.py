@@ -2055,3 +2055,208 @@ def test_the_summary_hold_carries_the_shooters_accent(tmp_path: Path) -> None:
     )
     holds = [c for c in fake.calls if c.startswith("<!doctype html>")]
     assert holds and all('<div class="cell" style="--accent:#abcdef">' in h for h in holds)
+
+
+# --- stings (issue #1245) ---------------------------------------------------------------
+
+
+def _sting_render(
+    tmp_path: Path,
+    *,
+    kind: str = "sting:wipe",
+    rasterizer: Any = None,
+    name: str = "m",
+    head_pad_b: float | None = None,
+    comp: composition.Composition | None = None,
+    **kwargs: Any,
+) -> tuple[Any, list[list[str]], Any]:
+    """Two stages with one ``kind`` transition rendered through the fake
+    runner and a fake rasterizer whose sting animates for 1 s."""
+    calls: list[list[str]] = []
+    fake = _FakeRasterizer(motion_seconds=1.0) if rasterizer is None else rasterizer
+    if comp is None:
+        comp = _transitioned_composition(tmp_path, kind=kind, head_pad_b=head_pad_b)
+    result = _render(tmp_path, comp, name=name, runner=_writes_output(calls), rasterizer=fake, **kwargs)
+    return result, calls, fake
+
+
+def _boundary_argv(calls: list[list[str]]) -> list[str]:
+    return next(argv for argv in calls if argv[-1].endswith("boundary_000.mp4"))
+
+
+def _inputs(argv: list[str]) -> list[str]:
+    return [argv[i + 1] for i, token in enumerate(argv) if token == "-i"]
+
+
+def test_build_boundary_command_lays_a_sting_clip_over_the_fade(tmp_path: Path) -> None:
+    """Issue #1245: the clip is a third input laid over the crossfaded
+    video for the whole boundary before the final pixel format; without
+    a clip the argv is slice 4's, byte for byte."""
+    comp = _carded_composition(tmp_path)
+    args: dict[str, Any] = {
+        "seconds": 1.0,
+        "sequence": comp.sequence,
+        "output_path": tmp_path / "boundary_003.mp4",
+    }
+    base = mp4_render._build_boundary_command(
+        tmp_path / "t.mp4", tmp_path / "h.mp4", kind="sting:wipe", **args
+    )
+    plain = mp4_render._build_boundary_command(tmp_path / "t.mp4", tmp_path / "h.mp4", kind="fade", **args)
+    assert base == plain, "a sting without its clip is the fade it rides"
+    stung = mp4_render._build_boundary_command(
+        tmp_path / "t.mp4", tmp_path / "h.mp4", kind="sting:wipe", sting_clip=tmp_path / "s.mov", **args
+    )
+    assert _inputs(stung) == [str(tmp_path / "t.mp4"), str(tmp_path / "h.mp4"), str(tmp_path / "s.mov")]
+    rate = mp4_render._rate_string(comp.sequence)
+    assert stung[stung.index("-filter_complex") + 1] == (
+        "[0:v][1:v]xfade=transition=fade:duration=1:offset=0[xf];"
+        f"[2:v]format=rgba,fps={rate},setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=1,trim=0:1[motion];"
+        "[xf][motion]overlay=0:0:format=auto[stung];"
+        "[stung]format=yuv420p[final];"
+        "[0:a][1:a]acrossfade=d=1:c1=tri:c2=tri[aout]"
+    )
+    assert stung[stung.index("-map") :][:4] == ("-map", "[final]", "-map", "[aout]")
+    assert stung[stung.index("-t") + 1] == "1"
+
+
+def test_a_sting_adds_the_clip_input_and_overlay_to_the_boundary_only(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(mp4_render, "write_motion_clip", _fake_clip_writer)
+    result, calls, fake = _sting_render(tmp_path)
+    assert result.degradations == ()
+    clip = tmp_path / "work_m" / "boundary_000_sting.mov"
+    boundary = _boundary_argv(calls)
+    assert _inputs(boundary)[2] == str(clip)
+    graph = boundary[boundary.index("-filter_complex") + 1]
+    assert "xfade=transition=fade:duration=1:offset=0[xf]" in graph
+    assert "[xf][motion]overlay=0:0:format=auto[stung];[stung]format=yuv420p[final]" in graph
+    assert clip.exists(), "the clip is written before the boundary encodes"
+    assert fake.frames_rendered == 30, "one second of sting at 30 fps, rendered once"
+    others = [argv for argv in calls if argv is not boundary]
+    assert others and not any(token.endswith("_sting.mov") for argv in others for token in argv)
+    assert _names(calls) == [
+        "edge_000_tail.mp4",
+        "edge_001_head.mp4",
+        "boundary_000.mp4",
+        "stage_000.mp4",
+        "stage_001.mp4",
+        "m.mp4",
+    ]
+
+
+def test_a_sting_overlays_the_whole_boundary_when_an_edge_is_padded(tmp_path: Path, monkeypatch) -> None:
+    """Review Focus 1: B's head pad equals its beep offset, so its trim
+    holds no handle and the boundary clones the head edge's first frame
+    for half the fade; the sting still runs from the boundary's t=0."""
+    monkeypatch.setattr(mp4_render, "write_motion_clip", _fake_clip_writer)
+    result, calls, _ = _sting_render(tmp_path, head_pad_b=5.0)
+    assert result.degradations == ()
+    graph = _boundary_argv(calls)[_boundary_argv(calls).index("-filter_complex") + 1]
+    assert "[1:v]tpad=start_mode=clone:start_duration=0.5[hv]" in graph
+    assert ",trim=0:1[motion]" in graph and "start_duration=0.5:start_mode=add" not in graph
+
+
+def test_a_sting_the_look_lacks_is_a_fade_with_a_degradation(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(mp4_render, "write_motion_clip", _fake_clip_writer)
+    result, calls, fake = _sting_render(tmp_path, kind="sting:nope")
+    assert result.degradations == (
+        "sting nope is not in the splitsmith Look; transition after stage_000 rendered as a fade",
+    )
+    boundary = _boundary_argv(calls)
+    assert len(_inputs(boundary)) == 2
+    graph = boundary[boundary.index("-filter_complex") + 1]
+    assert "xfade=transition=fade:duration=1:offset=0,format=yuv420p[final]" in graph
+    assert fake.frames_rendered == 0
+    assert result.duration_seconds == pytest.approx(28.6)
+
+
+def test_a_sting_without_a_browser_is_a_fade_with_a_degradation(tmp_path: Path, monkeypatch) -> None:
+    """No rasterizer at all (the preflight found no Chromium): the
+    boundary is still a fade, named as such, never a crash."""
+    from splitsmith.overlay_raster import RasterizerUnavailableError
+
+    class _NoChromium:
+        def __enter__(self):  # type: ignore[no-untyped-def]
+            raise RasterizerUnavailableError("no browser", "no Chromium on this host")
+
+        def __exit__(self, *exc: object) -> None:
+            pass
+
+    monkeypatch.setattr(mp4_render, "ChromiumRasterizer", _NoChromium)
+    calls: list[list[str]] = []
+    comp = _transitioned_composition(tmp_path, kind="sting:wipe")
+    result = _render(tmp_path, comp, name="m", runner=_writes_output(calls))
+    assert result.degradations == (
+        "generated cards and summaries skipped: no Chromium on this host",
+        "sting wipe: no browser to draw it; transition after stage_000 rendered as a fade",
+    )
+    assert len(_inputs(_boundary_argv(calls))) == 2
+
+
+def test_a_sting_whose_frames_fail_becomes_a_cut(tmp_path: Path, monkeypatch) -> None:
+    """Review Focus 2: a template that throws on its second frame leaves
+    no clip and costs the transition, never the render."""
+    import dataclasses
+
+    from splitsmith.look_motion import MotionClipError
+
+    class _Breaking(_FakeRasterizer):
+        def render_template_frames(self, template, *, context, width, height, fps, max_seconds):
+            frames = super().render_template_frames(
+                template, context=context, width=width, height=height, fps=fps, max_seconds=max_seconds
+            )
+            blank = bytes(width * height * 4)
+
+            def broken():  # type: ignore[no-untyped-def]
+                yield blank
+                raise RuntimeError("boom on frame 2")
+
+            return dataclasses.replace(frames, frames=broken())
+
+    def writer_that_wraps(frames, *, out: Path, fps: float, ffmpeg_binary: str):  # type: ignore[no-untyped-def]
+        # ``write_motion_clip``'s contract: the template's own failure is the
+        # clip's, as MotionClipError, and no file is left behind.
+        try:
+            for _ in frames.frames:
+                pass
+        except Exception as exc:  # noqa: BLE001
+            out.unlink(missing_ok=True)
+            raise MotionClipError(f"{out.name}: {exc}") from exc
+        out.write_bytes(b"clip")
+
+    monkeypatch.setattr(mp4_render, "write_motion_clip", writer_that_wraps)
+    result, calls, _ = _sting_render(tmp_path, rasterizer=_Breaking(motion_seconds=1.0))
+    assert result.degradations == (
+        "transition after stage_000 failed to render (boundary_000_sting.mov: boom on frame 2); "
+        "rendered as a cut",
+    )
+    assert _names(calls) == [
+        "edge_000_tail.mp4",
+        "edge_001_head.mp4",
+        "stage_000.mp4",
+        "stage_001.mp4",
+        "m.mp4",
+    ]
+    assert not (tmp_path / "work_m" / "boundary_000_sting.mov").exists()
+    assert result.duration_seconds == pytest.approx(28.6)
+
+
+def test_a_cached_boundary_with_a_sting_renders_no_frame(tmp_path: Path, monkeypatch) -> None:
+    """The clip is a virtual input keyed by the template digest: a repeat
+    render pulls no frame, and a different kind is a different boundary."""
+    import dataclasses
+
+    from splitsmith.segment_cache import SegmentCache
+
+    monkeypatch.setattr(mp4_render, "write_motion_clip", _fake_clip_writer)
+    cache = SegmentCache(root=tmp_path / "cache", max_bytes=1 << 30)
+    comp = _transitioned_composition(tmp_path, kind="sting:wipe")
+    _, first, fake_one = _sting_render(tmp_path, name="one", comp=comp, segment_cache=cache)
+    assert len(first) == 6 and fake_one.frames_rendered == 30
+    _, second, fake_two = _sting_render(tmp_path, name="two", comp=comp, segment_cache=cache)
+    assert _names(second) == ["two.mp4"] and fake_two.frames_rendered == 0
+    faded = dataclasses.replace(
+        comp, transitions=tuple(dataclasses.replace(t, kind="fade") for t in comp.transitions)
+    )
+    _, third, _ = _sting_render(tmp_path, name="three", comp=faded, segment_cache=cache)
+    assert sum("xfade=" in " ".join(argv) for argv in third) == 1, "a fade is not the sting's boundary"
+    assert len(third) == 2, "the edges and stages are the same segments: only the boundary and the stitch"

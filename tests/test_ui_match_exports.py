@@ -846,6 +846,40 @@ def test_an_xfade_kind_on_the_fcpxml_path_is_rendered_as_zoom_with_an_anomaly(tm
     assert "Blurs" in result.fcpxml_path.read_text() or "Zoom" in result.fcpxml_path.read_text()
 
 
+def test_a_sting_on_the_fcpxml_path_is_rendered_as_zoom_with_an_anomaly(tmp_path: Path) -> None:
+    """Issue #1245: a sting is a Look template over the MP4 boundary; the
+    FCPXML emitter has no such thing and substitutes zoom, saying so."""
+    result = match_exports_mod.export_match(
+        stages=_two_stage_inputs(tmp_path),
+        request=_card_request(
+            stage_numbers=(1, 2),
+            output_format="fcpxml",
+            transition_kind="sting:wipe",
+            transition_duration_seconds=1.0,
+        ),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    assert "transition sting:wipe is not an FCP effect; the FCPXML uses zoom" in result.anomalies
+
+
+def test_a_malformed_transition_kind_is_refused_by_the_request_model() -> None:
+    """Issue #1245: ``TransitionKind`` is an open string now; the grammar
+    check keeps the old ``Literal``'s refusals."""
+    import pydantic
+
+    from splitsmith.ui import exports_api
+
+    for kind in ("sting:", "sting:Wipe", "wipe"):
+        with pytest.raises(pydantic.ValidationError):
+            exports_api.MatchExportRequest(stage_numbers=[1, 2], transition_kind=kind)
+        with pytest.raises(pydantic.ValidationError):
+            exports_api.CompareGridRequest(stage_numbers=[1, 2], audio_from="a", transition_kind=kind)
+    accepted = exports_api.MatchExportRequest(stage_numbers=[1, 2], transition_kind="sting:wipe")
+    assert accepted.transition_kind == "sting:wipe"
+
+
 def test_mp4_export_passes_transitions_to_the_renderer(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

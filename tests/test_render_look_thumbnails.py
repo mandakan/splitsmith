@@ -42,6 +42,14 @@ class _StubRasterizer:
         return buf.getvalue()
 
     def render_template(self, template, *, context, width: int, height: int) -> bytes:
+        if "transition" in context.data:
+            # A sting tile: the template paints its band, the stub a square,
+            # so the tile differs from the fade it rides as the real one does.
+            buf = io.BytesIO()
+            image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            image.paste((255, 45, 45, 255), (width // 3, 0, 2 * width // 3, height))
+            image.save(buf, format="PNG")
+            return buf.getvalue()
         return self.png("", width=width, height=height)
 
     def engine_version(self) -> str:
@@ -97,5 +105,5 @@ def test_transition_tiles_differ_from_each_other(tmp_path: Path) -> None:
     mod = _load()
     mod.build_thumbnails(tmp_path, rasterizer=_StubRasterizer(), look=load_look("splitsmith"))
     names = [n for n in mod.THUMBNAILS if n.startswith("transition-")]
-    assert len(names) == 13
+    assert len(names) == 14
     assert len({(tmp_path / n).read_bytes() for n in names}) == len(names)

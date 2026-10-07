@@ -394,3 +394,14 @@ def test_export_match_rejects_stage_without_beep(tmp_path: Path) -> None:
     project.save(root)
     with pytest.raises(ValueError, match="no primary or no beep"):
         export_tools.export_match_tool(str(root), stage_numbers=[1])
+
+
+def test_export_match_rejects_a_transition_kind_outside_the_grammar(tmp_path: Path) -> None:
+    """Review of #1245: ``TransitionKind`` is an open string, so the MCP
+    schema no longer refuses a bad kind; the IR does, before any ffmpeg."""
+    root, _src = _seed_export_project(tmp_path)
+    for kind in ("bogus", "sting:"):
+        with pytest.raises(ValueError, match="transition kind"):
+            export_tools.export_match_tool(
+                str(root), stage_numbers=[1], output_format="mp4", transition_kind=kind
+            )

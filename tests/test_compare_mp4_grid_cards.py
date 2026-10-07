@@ -742,3 +742,41 @@ def test_a_head_edges_lower_third_opens_at_the_stage_start_not_half_a_fade_late(
     assert "enable='lt(t,1.5)'" in head_graph, "no handle: the card opens on the edge's first frame"
     boundary_graph = edges[2][edges[2].index("-filter_complex") + 1]
     assert "[1:v]tpad=start_mode=clone:start_duration=0.5[hv]" in boundary_graph
+
+
+# --- stings (#1245) ----------------------------------------------------------------
+
+
+def test_boundary_segment_lays_a_sting_clip_over_the_fade(tmp_path: Path) -> None:
+    """Issue #1245: the sting clip is a third input laid over the crossfaded
+    video for the whole boundary, before the final pixel format, with the
+    audio graph untouched; without a clip the argv is slice 4's."""
+    labels = ("Anders", "Bea")
+    common = {"seconds": 1.0, "canvas": CANVAS, "shooter_labels": labels, "output_path": tmp_path / "b.mov"}
+    plain = mp4_grid.build_boundary_segment_command(
+        tmp_path / "t.mov", tmp_path / "h.mov", kind="fade", **common
+    )
+    bare = mp4_grid.build_boundary_segment_command(
+        tmp_path / "t.mov", tmp_path / "h.mov", kind="sting:wipe", **common
+    )
+    assert bare == plain, "a sting without its clip is the fade it rides"
+    stung = mp4_grid.build_boundary_segment_command(
+        tmp_path / "t.mov", tmp_path / "h.mov", kind="sting:wipe", sting_clip=tmp_path / "s.mov", **common
+    )
+    inputs = [stung[i + 1] for i, token in enumerate(stung) if token == "-i"]
+    assert inputs == [str(tmp_path / "t.mov"), str(tmp_path / "h.mov"), str(tmp_path / "s.mov")]
+    graph = stung[stung.index("-filter_complex") + 1]
+    assert graph.startswith(
+        "[0:v][1:v]xfade=transition=fade:duration=1:offset=0[xf];"
+        f"[2:v]format=rgba,fps={CANVAS.rate_string},setpts=PTS-STARTPTS,"
+        "tpad=stop_mode=clone:stop_duration=1,trim=0:1[motion];"
+        "[xf][motion]overlay=0:0:format=auto[stung];"
+        "[stung]format=yuv420p[final];"
+        "[0:a:0][1:a:0]acrossfade=d=1:c1=tri:c2=tri,"
+    )
+    assert stung.index("-t") < stung.index("-filter_complex")
+    assert (
+        stung[stung.index("-filter_complex") :]
+        == plain[plain.index("-filter_complex") :][:1] + stung[stung.index("-filter_complex") + 1 :]
+    )
+    assert stung[stung.index("-map") :] == plain[plain.index("-map") :], "maps, names and codecs unchanged"

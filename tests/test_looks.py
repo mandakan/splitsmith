@@ -239,3 +239,32 @@ def test_an_accent_series_entry_must_be_a_hex_colour(user_dir: Path) -> None:
     (d / "look.json").write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(looks.LookError):
         looks.load_look("club")
+
+
+# --- stings (slice 5, #1245) --------------------------------------------------------
+
+
+def test_the_shipped_look_declares_the_wipe_sting() -> None:
+    look = looks.load_look("splitsmith")
+    path = looks.sting_template_for(look, "wipe")
+    assert path is not None and path.name == "sting-wipe.html" and path.is_file()
+    assert look.variants("transition") == ("wipe",)
+
+
+def test_a_missing_sting_is_none_not_a_fallback(user_dir: Path) -> None:
+    """A sting the Look lacks falls back to the shipped Look's sting of
+    that name and to nothing else: the renderer decides on a fade."""
+    club = looks.load_look(_write_look(user_dir, "club").name)
+    assert looks.sting_template_for(club, "nope") is None
+    shipped = looks.load_look("splitsmith").own_template("transition", "wipe")
+    assert looks.sting_template_for(club, "wipe") == shipped
+
+
+def test_a_user_look_may_declare_its_own_sting(user_dir: Path) -> None:
+    d = _write_look(user_dir, "club")
+    manifest = json.loads((d / "look.json").read_text(encoding="utf-8"))
+    manifest["slots"] = {"transition": {"wipe": "my-wipe.html"}}
+    (d / "look.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (d / "my-wipe.html").write_text("<!doctype html>", encoding="utf-8")
+    club = looks.load_look("club")
+    assert looks.sting_template_for(club, "wipe") == d / "my-wipe.html"

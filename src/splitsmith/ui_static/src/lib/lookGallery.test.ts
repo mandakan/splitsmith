@@ -158,6 +158,10 @@ describe("visibility, pinned to the rules the render panel applied", () => {
     expect(visibleTransitionKind("zoom", "fcpxml")).toBe("zoom");
     expect(visibleTransitionKind("zoom", "fcp7xml")).toBe("none");
     expect(visibleTransitionKind("none", "mp4")).toBe("none");
+    expect(visibleTransitionKind("sting:wipe", "mp4")).toBe("sting:wipe");
+    expect(visibleTransitionKind("sting:wipe", "mp4", "compare")).toBe("sting:wipe");
+    expect(visibleTransitionKind("sting:wipe", "fcpxml")).toBe("none");
+    expect(visibleTransitionKind("sting:nope", "mp4")).toBe("none");
   });
 
   it("the transition slot offers the xfade kinds to MP4 and the two FCP effects to FCPXML", () => {
@@ -173,6 +177,7 @@ describe("visibility, pinned to the rules the render panel applied", () => {
       "hblur",
       "smoothleft",
       "wipeleft",
+      "sting:wipe",
     ]);
     expect(visibleVariants(slot("transition"), "single", "fcpxml").map((v) => v.id)).toEqual([
       "cut",

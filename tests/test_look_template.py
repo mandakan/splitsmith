@@ -459,3 +459,132 @@ def test_a_shooters_logo_reaches_the_shipped_card_and_nothing_else_changes(tmp_p
         alpha = image.convert("RGBA").getchannel("A")
     top_right = alpha.crop((320 - 60, 0, 320, 40))
     assert top_right.getbbox() is not None, "the logo paints in the top-right corner"
+
+
+@pytest.mark.integration
+def test_the_shipped_sting_shows_one_logo_only_when_the_shooters_share_it(tmp_path) -> None:
+    """Issue #1245, review focus 5: the wipe carries the logo when every
+    shooter with a logo has the same one (one shooter; the match logo
+    folded into each), and the next item's label when they differ."""
+    import io
+
+    from PIL import Image
+
+    from splitsmith.identity import ResolvedIdentity
+    from splitsmith.look_sting import sting_context
+    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+    from splitsmith.overlay_theme import theme_for
+
+    def logo(name: str, colour: tuple[int, int, int]):  # type: ignore[no-untyped-def]
+        path = tmp_path / name
+        Image.new("RGB", (64, 64), colour).save(path)
+        return path
+
+    green = logo("green.png", (0, 255, 0))
+    other = logo("blue.png", (0, 0, 255))
+    look = looks.load_look("splitsmith")
+    template = looks.sting_template_for(look, "wipe")
+    assert template is not None
+    cases = {
+        "one": [ResolvedIdentity("A", "#ff2d2d", green, None)],
+        "shared": [ResolvedIdentity("A", "#ff2d2d", green, None), ResolvedIdentity("B", None, green, None)],
+        "different": [
+            ResolvedIdentity("A", "#ff2d2d", green, None),
+            ResolvedIdentity("B", None, other, None),
+        ],
+    }
+    counts: dict[str, int] = {}
+    try:
+        with ChromiumRasterizer() as rasterizer:
+            for name, shooters in cases.items():
+                ctx = sting_context(
+                    kind="sting:wipe",
+                    seconds=1.0,
+                    from_label="Stage 01",
+                    to_label="Stage 02",
+                    width=640,
+                    height=360,
+                    fps=30,
+                    theme=theme_for(look),
+                    shooters=shooters,
+                )
+                png = rasterizer.render_template(template, context=ctx, width=640, height=360)
+                with Image.open(io.BytesIO(png)) as im:
+                    raw = im.convert("RGBA").tobytes()
+                pixels = (raw[i : i + 4] for i in range(0, len(raw), 4))
+                counts[name] = sum(1 for r, g, b, a in pixels if a > 200 and g > 200 and r < 80 and b < 80)
+    except RasterizerUnavailableError as exc:
+        pytest.skip(f"no Chromium: {exc}")
+    assert counts["one"] > 100 and counts["shared"] > 100, counts
+    assert counts["different"] == 0, counts
+
+
+def test_the_shipped_sting_names_only_fonts_the_engine_declares() -> None:
+    """Review of #1245: the template loads the engine stylesheet for its
+    font faces, so every family it names must be one of them, or the
+    label draws in whatever the host has and the pixels stop being
+    deterministic across machines."""
+    import re
+
+    from splitsmith.overlay_html import single_css
+    from splitsmith.overlay_layout import CellScale
+
+    look = looks.load_look("splitsmith")
+    template = looks.sting_template_for(look, "wipe")
+    assert template is not None
+    css = single_css(width=640, height=360, scale=CellScale.for_cell(360), theme=load_theme("splitsmith"))
+    declared = set(re.findall(r'@font-face\s*\{[^}]*font-family:\s*"([^"]+)"', css))
+    assert declared, "the engine declares its faces"
+    named = set()
+    for value in re.findall(r"font-family:\s*([^;]+);", template.read_text(encoding="utf-8")):
+        named |= set(re.findall(r'"([^"]+)"', value))
+    assert named and named <= declared, (named, declared)
+
+
+@pytest.mark.integration
+def test_the_shipped_sting_keeps_a_long_label_inside_the_band(tmp_path) -> None:
+    """Review of #1245: a long stage name must not spill across the
+    footage either side of the band. At the poster the band sits in the
+    middle of the frame; the outer columns stay free of the label's ink."""
+    import io
+
+    from PIL import Image
+
+    from splitsmith.look_sting import sting_context
+    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+    from splitsmith.overlay_theme import theme_for
+
+    look = looks.load_look("splitsmith")
+    template = looks.sting_template_for(look, "wipe")
+    assert template is not None
+    ctx = sting_context(
+        kind="sting:wipe",
+        seconds=1.0,
+        from_label="Stage 6",
+        to_label="Stage 7 - The Very Long Corridor Of Doom And Despair",
+        width=640,
+        height=360,
+        fps=30,
+        theme=theme_for(look),
+        shooters=(),
+    )
+    try:
+        with ChromiumRasterizer() as rasterizer:
+            png = rasterizer.render_template(template, context=ctx, width=640, height=360)
+    except RasterizerUnavailableError as exc:
+        pytest.skip(f"no Chromium: {exc}")
+    with Image.open(io.BytesIO(png)) as im:
+        rgba = im.convert("RGBA")
+        width, height = rgba.size
+        raw = rgba.tobytes()
+    ink_outside = 0
+    ink_total = 0
+    for y in range(height):
+        for x in range(width):
+            r, g, b, a = raw[(y * width + x) * 4 : (y * width + x) * 4 + 4]
+            if a > 200 and r > 200 and g > 200 and b > 200:
+                ink_total += 1
+                if x < width * 0.15 or x > width * 0.85:
+                    ink_outside += 1
+    assert ink_total > 50, "the label is drawn"
+    assert ink_outside == 0, f"{ink_outside} label pixels outside the band's reach"

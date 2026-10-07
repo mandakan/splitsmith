@@ -83,6 +83,19 @@ const XFADE_VARIANTS: { id: string; name: string; thumbnail: string; help: strin
   { id: "wipeleft", name: "Wipe left", thumbnail: "transition-wipeleft.png", help: "A hard wipe to the left." },
 ];
 
+/** The stings the shipped Look offers (#1245): a Look template drawn over
+ *  the boundary's fade by the MP4 renderers. The id is the request's
+ *  ``transition_kind``; the gallery API (#1246) will take these from the
+ *  Look's ``transition`` slot. */
+const STING_VARIANTS: { id: string; name: string; thumbnail: string; help: string }[] = [
+  {
+    id: "sting:wipe",
+    name: "Logo wipe",
+    thumbnail: "transition-sting-wipe.png",
+    help: "An accent band sweeps across the cut carrying the logo, or the next stage's name.",
+  },
+];
+
 /** What the hold turns on at: the YouTube built-in's value. */
 export const DEFAULT_SUMMARY_HOLD_SECONDS = 3;
 
@@ -279,7 +292,7 @@ export const LOOK_SLOTS: readonly LookSlot[] = [
         modes: ["single"],
         formats: ["fcpxml"],
       },
-      ...XFADE_VARIANTS.map((v) => ({
+      ...[...XFADE_VARIANTS, ...STING_VARIANTS].map((v) => ({
         ...v,
         params: [transitionSeconds],
         modes: ["single", "compare"] as ExportMode[],

@@ -75,10 +75,13 @@ from .composition import (
     Transform,
     Transition,
     TransitionKind,
+    is_sting,
+    sting_name,
     xfade_name,
 )
 from .look_motion import MotionClipError, motion_overlay_filters, write_motion_clip
-from .looks import load_look
+from .look_sting import sting_motion, sting_overlay_filters
+from .looks import load_look, sting_template_for
 from .overlay_card import (
     LOWER_THIRD_FADE_SECONDS,
     Card,
@@ -367,6 +370,32 @@ def _render_with_work_dir(
                 write_motion_clip(motion.frames, out=clip_path, fps=fps, ffmpeg_binary=ffmpeg_binary)
 
         return write
+
+    def sting_for_boundary(
+        kind: str, before: SpineItem, after: SpineItem, *, seconds: float
+    ) -> tuple[CardMotion | None, str]:
+        """The sting ``kind`` names, loaded for this boundary, or ``None``
+        and the reason (no browser, not in the Look, failed to load)."""
+        name = sting_name(kind)
+        if look is None or rasterizer is None:
+            return None, f"sting {name}: no browser to draw it"
+        if sting_template_for(look, name) is None:
+            return None, f"sting {name} is not in the {look.name} Look"
+        motion = sting_motion(
+            look,
+            kind,
+            seconds=seconds,
+            from_label=_item_label(before, timeline),
+            to_label=_item_label(after, timeline),
+            width=sequence.width,
+            height=sequence.height,
+            fps=fps,
+            rasterizer=rasterizer,
+            shooters=shooters,
+        )
+        if motion is None:
+            return None, f"sting {name} failed to load from the {look.name} Look"
+        return motion, ""
 
     items: list[SpineItem] = list(timeline.items)
     live: dict[int, _Boundary] = {b.after_index: b for b in timeline.boundaries}
@@ -687,6 +716,20 @@ def _render_with_work_dir(
             if i + 1 not in prepared:
                 prepared[i + 1] = prepare(nxt)
             half = boundary.duration_seconds / 2.0
+            kind = boundary.kind
+            sting: CardMotion | None = None
+            sting_clip: Path | None = None
+            if is_sting(kind):
+                # Issue #1245: the sting's template, or the fade it rides
+                # with a note saying why. The frames are lazy: nothing is
+                # drawn until the boundary turns out not to be cached.
+                sting, reason = sting_for_boundary(kind, item, nxt, seconds=boundary.duration_seconds)
+                if sting is None:
+                    killed.append(f"{reason}; transition after {item.name} rendered as a fade")
+                    logger.warning("%s", killed[-1])
+                    kind = "fade"
+                else:
+                    sting_clip = work_dir / f"{boundary.name}_sting.mov"
             try:
                 if prep.skipped or prepared[i + 1].skipped:
                     raise _EdgeUnavailableError("a neighbouring card was skipped")
@@ -696,7 +739,7 @@ def _render_with_work_dir(
                 cmd = _build_boundary_command(
                     tail_edge,
                     head_edge,
-                    kind=boundary.kind,
+                    kind=kind,
                     seconds=boundary.duration_seconds,
                     sequence=sequence,
                     output_path=boundary_out,
@@ -704,18 +747,26 @@ def _render_with_work_dir(
                     youtube_preset=youtube_preset,
                     tail_pad_seconds=_missing_handle(item, half=half, end="tail"),
                     head_pad_seconds=_missing_handle(nxt, half=half, end="head"),
+                    sting_clip=sting_clip,
                 )
                 edge_keys = (
                     {str(tail_edge): keys_by_path[tail_edge], str(head_edge): keys_by_path[head_edge]}
                     if segment_cache is not None
                     else None
                 )
+                if edge_keys is not None and sting is not None and sting_clip is not None:
+                    edge_keys[str(sting_clip)] = sting.digest
                 boundary_segment = encode(
                     cmd,
                     boundary_out,
                     index=next_step(),
                     label=f"transition {ordinal}",
                     virtual_inputs=edge_keys,
+                    prepare=(
+                        clip_writer(sting, sting_clip)
+                        if sting is not None and sting_clip is not None
+                        else None
+                    ),
                 )
             except (FFmpegError, MotionClipError, _EdgeUnavailableError) as exc:
                 killed.append(f"transition after {item.name} failed to render ({exc}); rendered as a cut")
@@ -723,6 +774,9 @@ def _render_with_work_dir(
                 del live[i]
                 items[i] = item = replace(item, tail_cut_seconds=0.0)
                 items[i + 1] = replace(nxt, head_cut_seconds=0.0)
+            finally:
+                if sting is not None:
+                    sting.close()
         segment = encode_item(item, prep)
         if segment is not None:
             segments.append((segment, item.duration_seconds))
@@ -758,6 +812,20 @@ def _render_with_work_dir(
         duration_seconds=total_seconds,
         degradations=(*degradations, *timeline.degradations, *killed),
     )
+
+
+def _item_label(item: SpineItem, timeline: TimelinePlan) -> str:
+    """What a sting template is told is on either side of its cut (issue
+    #1245): a stage by its name, a card by its text, a summary by its
+    stage's name, a clip by its kind."""
+    if isinstance(item, _StageItem):
+        return item.plan.stage.name
+    if isinstance(item, _StillItem):
+        return item.card.text
+    if isinstance(item, _SummaryItem):
+        stage = timeline.stage(item.stage_index)
+        return stage.plan.stage.name if stage is not None else item.hold.label
+    return item.kind
 
 
 def _step_label(item: _StillItem | _SummaryItem, timeline: TimelinePlan) -> str:
@@ -1067,7 +1135,7 @@ class TimelinePlan:
             isinstance(item, _StillItem | _SummaryItem)
             or (isinstance(item, _StageItem) and item.lower_third is not None)
             for item in self.items
-        )
+        ) or any(is_sting(b.kind) for b in self.boundaries)
 
     @property
     def has_generated_segments(self) -> bool:
@@ -1781,6 +1849,7 @@ def _build_boundary_command(
     youtube_preset: bool = False,
     tail_pad_seconds: float = 0.0,
     head_pad_seconds: float = 0.0,
+    sting_clip: Path | None = None,
 ) -> tuple[str, ...]:
     """The boundary segment (issue #1244): ``tail_edge`` (the item before
     the cut) crossfaded into ``head_edge`` (the item after) over the whole
@@ -1789,7 +1858,11 @@ def _build_boundary_command(
     copy. An edge whose trim had less handle than ``seconds / 2`` is
     shorter; ``tail_pad_seconds`` holds its last frame (and pads its audio
     with silence) and ``head_pad_seconds`` holds the head edge's first
-    frame (delaying its audio) so both inputs span the fade."""
+    frame (delaying its audio) so both inputs span the fade.
+
+    ``sting_clip`` (issue #1245) is the sting's alpha clip, a third input
+    laid over the crossfaded video for the whole boundary before the
+    final pixel format; without it the argv is exactly what it was."""
     parts: list[str] = []
     tail_v, tail_a, head_v, head_a = "0:v", "0:a", "1:v", "1:a"
     if tail_pad_seconds > 0.0:
@@ -1804,20 +1877,23 @@ def _build_boundary_command(
             f"[1:a]adelay={round(head_pad_seconds * 1000)}:all=1[ha]",
         ]
         head_v, head_a = "hv", "ha"
-    parts += [
-        f"[{tail_v}][{head_v}]xfade=transition={xfade_name(kind)}:duration={seconds:g}:offset=0,"
-        "format=yuv420p[final]",
-        f"[{tail_a}][{head_a}]acrossfade=d={seconds:g}:c1=tri:c2=tri[aout]",
-    ]
+    xfade = f"[{tail_v}][{head_v}]xfade=transition={xfade_name(kind)}:duration={seconds:g}:offset=0"
+    inputs = ["-i", str(tail_edge), "-i", str(head_edge)]
+    if sting_clip is None:
+        parts.append(f"{xfade},format=yuv420p[final]")
+    else:
+        sting_parts, stung = sting_overlay_filters(
+            2, rate=_rate_string(sequence), seconds=seconds, source_label="xf"
+        )
+        parts += [f"{xfade}[xf]", *sting_parts, f"[{stung}]format=yuv420p[final]"]
+        inputs += ["-i", str(sting_clip)]
+    parts.append(f"[{tail_a}][{head_a}]acrossfade=d={seconds:g}:c1=tri:c2=tri[aout]")
     graph = ";".join(parts)
     return (
         ffmpeg_binary,
         "-hide_banner",
         "-y",
-        "-i",
-        str(tail_edge),
-        "-i",
-        str(head_edge),
+        *inputs,
         "-filter_complex",
         graph,
         "-map",

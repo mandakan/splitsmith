@@ -31,12 +31,23 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
-from ..composition import MatchTitle, TitleCard, TitleStyle, Transition, TransitionKind, xfade_name
+from ..composition import (
+    MatchTitle,
+    TitleCard,
+    TitleStyle,
+    Transition,
+    TransitionKind,
+    is_sting,
+    sting_name,
+    xfade_name,
+)
 from ..export_naming import stage_display_name
 from ..identity import ResolvedIdentity
 from ..look_motion import MotionClipError, motion_overlay_filters, write_motion_clip
-from ..looks import CardSlot, Look, load_look
+from ..look_sting import sting_motion, sting_overlay_filters
+from ..looks import CardSlot, Look, load_look, sting_template_for
 from ..overlay_card import (
+    CardMotion,
     card_backdrop,
     card_motion,
     compose_card,
@@ -1642,6 +1653,7 @@ def build_boundary_segment_command(
     ffmpeg_binary: str = "ffmpeg",
     tail_pad_seconds: float = 0.0,
     head_pad_seconds: float = 0.0,
+    sting_clip: Path | None = None,
 ) -> tuple[str, ...]:
     """The boundary segment (issue #1244): ``tail_edge`` crossfaded into
     ``head_edge`` over ``seconds`` with ``xfade``, and every one of the
@@ -1651,7 +1663,11 @@ def build_boundary_segment_command(
     carries. An edge whose trims had less handle than ``seconds / 2`` is
     shorter; ``tail_pad_seconds`` holds its last frame (silence on every
     track) and ``head_pad_seconds`` holds the head edge's first frame
-    (delaying every track) so both inputs span the fade."""
+    (delaying every track) so both inputs span the fade.
+
+    ``sting_clip`` (issue #1245) is the sting's alpha clip, a third input
+    laid over the crossfaded video for the whole boundary before the
+    final pixel format; without it the argv is exactly what it was."""
     rate = canvas.rate_string
     tracks = len(shooter_labels) + 1
     parts: list[str] = []
@@ -1662,10 +1678,14 @@ def build_boundary_segment_command(
     if head_pad_seconds > 0.0:
         parts.append(f"[1:v]tpad=start_mode=clone:start_duration={head_pad_seconds:g}[hv]")
         head_v = "hv"
-    parts.append(
-        f"[{tail_v}][{head_v}]xfade=transition={xfade_name(kind)}:duration={seconds:g}:offset=0,"
-        "format=yuv420p[final]"
-    )
+    xfade = f"[{tail_v}][{head_v}]xfade=transition={xfade_name(kind)}:duration={seconds:g}:offset=0"
+    inputs = ["-i", str(tail_edge), "-i", str(head_edge)]
+    if sting_clip is None:
+        parts.append(f"{xfade},format=yuv420p[final]")
+    else:
+        sting_parts, stung = sting_overlay_filters(2, rate=rate, seconds=seconds, source_label="xf")
+        parts += [f"{xfade}[xf]", *sting_parts, f"[{stung}]format=yuv420p[final]"]
+        inputs += ["-i", str(sting_clip)]
     for k in range(tracks):
         tail_a, head_a = f"0:a:{k}", f"1:a:{k}"
         if tail_pad_seconds > 0.0:
@@ -1682,10 +1702,7 @@ def build_boundary_segment_command(
         ffmpeg_binary,
         "-hide_banner",
         "-y",
-        "-i",
-        str(tail_edge),
-        "-i",
-        str(head_edge),
+        *inputs,
         "-t",
         f"{seconds:g}",
         "-filter_complex",
@@ -2949,6 +2966,19 @@ def _free_cell_still(
     return path
 
 
+def _grid_item_label(item: GridItem, stage_names: Sequence[str]) -> str:
+    """What a sting template is told is on either side of its cut (issue
+    #1245): a stage by its name, a match card by its text, a slate (whose
+    card the driver builds later) by the name of the stage it opens."""
+    if isinstance(item, GridStageItem):
+        return item.plan.stage_name
+    if item.card is not None:
+        return item.card.text
+    if item.stage_index is not None and 0 <= item.stage_index < len(stage_names):
+        return stage_names[item.stage_index]
+    return item.name
+
+
 class _EdgeFailedError(Exception):
     """A boundary's edge or the boundary itself could not be rendered; the
     transition becomes a cut."""
@@ -3221,11 +3251,13 @@ def render_grid_mp4(
     # would simply find ``rasterizer is None`` per stage and degrade every
     # sprite to a blank canvas without anything having failed.
     cards_requested = title_page is not None or closing is not None or stage_titles != "none"
+    # A sting (#1245) is a Look template drawn by the same browser.
+    sting_requested = any(is_sting(t.kind) for t in transitions)
     # A free square with something to say is drawn by the same browser.
     free_requested = free_cell != "blank" and any(_unreached_cells(p) for p in plans)
     active_rasterizer: Rasterizer | None = rasterizer
     owned_rasterizer: ChromiumRasterizer | None = None
-    if (overlay or cards_requested or free_requested) and rasterizer is None:
+    if (overlay or cards_requested or free_requested or sting_requested) and rasterizer is None:
         owned_rasterizer = ChromiumRasterizer()
         try:
             active_rasterizer = owned_rasterizer.__enter__()
@@ -3241,7 +3273,7 @@ def render_grid_mp4(
 
     outcomes: list[StageOutcome] = []
     segments: list[Path] = []
-    card_look = load_look(overlay_theme) if cards_requested else None
+    card_look = load_look(overlay_theme) if cards_requested or sting_requested else None
     card_theme = theme_for(card_look) if card_look is not None else None
     free_theme = card_theme or (load_theme(overlay_theme) if free_requested else None)
     free_tiles = load_overlay_data(shooters) if free_requested and free_cell == "splits" else {}
@@ -3273,6 +3305,36 @@ def render_grid_mp4(
     pending_half = 0.0
     last_boundary: GridBoundary | None = None
     run_starts: dict[int, float] = {}
+
+    def sting_for_boundary(
+        kind: str, before: GridItem, after: GridItem, *, seconds: float
+    ) -> tuple[CardMotion | None, str]:
+        """The sting ``kind`` names, loaded for this boundary, or ``None``
+        and the reason (no browser, not in the Look, failed to load)."""
+        name = sting_name(kind)
+        if card_look is None or active_rasterizer is None:
+            return None, f"sting {name}: no browser to draw it"
+        if sting_template_for(card_look, name) is None:
+            return None, f"sting {name} is not in the {card_look.name} Look"
+        stage_names = [plan.stage_name for plan in plans]
+        shooters_seen = (
+            tuple(identities[label] for label in labels_tuple if label in identities) if identities else ()
+        )
+        motion = sting_motion(
+            card_look,
+            kind,
+            seconds=seconds,
+            from_label=_grid_item_label(before, stage_names),
+            to_label=_grid_item_label(after, stage_names),
+            width=canvas.width,
+            height=canvas.height,
+            fps=canvas.fps,
+            rasterizer=active_rasterizer,
+            shooters=shooters_seen,
+        )
+        if motion is None:
+            return None, f"sting {name} failed to load from the {card_look.name} Look"
+        return motion, ""
 
     def note_cut(after: int, reason: str) -> None:
         """A boundary that cannot be built becomes a cut: both neighbours
@@ -3581,14 +3643,30 @@ def render_grid_mp4(
                 if i + 1 not in prepared:
                     prepared[i + 1] = prepare(nxt)
                 half = boundary.duration_seconds / 2.0
+                kind = boundary.kind
+                sting: CardMotion | None = None
+                sting_clip: Path | None = None
+                if is_sting(kind):
+                    # Issue #1245: the sting's template, or the fade it
+                    # rides with a note saying why.
+                    sting, reason = sting_for_boundary(kind, item, nxt, seconds=boundary.duration_seconds)
+                    if sting is None:
+                        text = f"{reason}; transition after {item.name} rendered as a fade"
+                        logger.warning("compare grid: %s", text)
+                        transition_notes.append(OverlayDegradation(summary=text, detail=text))
+                        kind = "fade"
+                    else:
+                        sting_clip = work / f"{boundary.name}_sting.mov"
                 try:
                     tail_edge = encode_edge(item, prep, half=half, end="tail")
                     head_edge = encode_edge(nxt, prepared[i + 1], half=half, end="head")
+                    if sting is not None and sting_clip is not None:
+                        write_motion_clip(sting.frames, out=sting_clip, fps=canvas.fps, ffmpeg_binary=binary)
                     boundary_out = work / f"{boundary.name}{SEGMENT_SUFFIX}"
                     cmd = build_boundary_segment_command(
                         tail_edge,
                         head_edge,
-                        kind=boundary.kind,
+                        kind=kind,
                         seconds=boundary.duration_seconds,
                         canvas=canvas,
                         shooter_labels=labels_tuple,
@@ -3596,15 +3674,19 @@ def render_grid_mp4(
                         ffmpeg_binary=binary,
                         tail_pad_seconds=_grid_missing_handle(item, half=half, end="tail"),
                         head_pad_seconds=_grid_missing_handle(nxt, half=half, end="head"),
+                        sting_clip=sting_clip,
                     )
                     completed = _run_ffmpeg(cmd, runner=boundary_runner)
                     if completed.returncode != 0:
                         raise _EdgeFailedError(_stderr_text(completed))
                     boundary_segment = boundary_out
-                except _EdgeFailedError as exc:
+                except (_EdgeFailedError, MotionClipError) as exc:
                     note_cut(i, str(exc))
                     item = items[i]
                     boundary = None
+                finally:
+                    if sting is not None:
+                        sting.close()
             # The chapter sits where the cut was: the boundary before this
             # run is already in ``elapsed`` and half of it belongs to the
             # previous item.
