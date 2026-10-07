@@ -2487,6 +2487,7 @@ def test_detect_beep_high_confidence_auto_trusts_into_beep_reviewed(tmp_path: Pa
         duration_ms = 350.0
         confidence = 0.98  # above the 0.97 default threshold
         candidates: list = []
+        ranker_version = "beep-ranker-lr-test"
 
     monkeypatch.setattr(audio_helpers, "ensure_primary_audio", lambda *a, **kw: tmp_path / "z.wav")
     (tmp_path / "z.wav").write_bytes(b"\x00")
@@ -2505,6 +2506,8 @@ def test_detect_beep_high_confidence_auto_trusts_into_beep_reviewed(tmp_path: Pa
     primary_after = client.get("/api/shooters/me/project").json()["stages"][0]["videos"][0]
     assert primary_after["beep_confidence"] == pytest.approx(0.98)
     assert primary_after["beep_reviewed"] is True
+    # Which ranker chose it rides with the stored candidates (#949).
+    assert primary_after["beep_ranker_version"] == "beep-ranker-lr-test"
 
 
 def test_detect_beep_low_confidence_leaves_beep_for_hitl(tmp_path: Path, monkeypatch) -> None:

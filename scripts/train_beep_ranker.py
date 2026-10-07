@@ -31,7 +31,7 @@ import numpy as np
 from splitsmith.beep_calibration import BeepFixtureEntry, load_manifest
 from splitsmith.beep_detect import BeepNotFoundError, detect_beep, load_audio
 from splitsmith.beep_features import feature_vector
-from splitsmith.config import BeepDetectConfig, BeepDetection
+from splitsmith.config import BeepDetectConfig, BeepDetection, BeepRankerConfig
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures"
@@ -98,7 +98,10 @@ def clip_from_detection(entry: BeepFixtureEntry, detection: BeepDetection | None
 
 def collect(manifest_path: Path = MANIFEST_PATH, fixtures_dir: Path = FIXTURES_DIR) -> list[Clip]:
     """Every manifest fixture's clip track, every candidate kept."""
-    config = BeepDetectConfig(top_n_candidates=ALL_CANDIDATES)
+    # Rows carry today's ranking and confidence ("heuristic_*"): the learned
+    # ranker is the detector's default now, and a collect on the default would
+    # compare the model against itself.
+    config = BeepDetectConfig(top_n_candidates=ALL_CANDIDATES, ranker=BeepRankerConfig(ranker="heuristic"))
     clips = []
     for entry in load_manifest(manifest_path).fixtures:
         audio, sr = load_audio(fixtures_dir / entry.clip_wav)

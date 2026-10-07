@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from splitsmith.beep_calibration import load_manifest
 from splitsmith.beep_detect import _candidate_runs, _learned_scores, detect_beep, load_audio
@@ -69,8 +70,8 @@ def test_equal_probabilities_score_equally() -> None:
 
 
 def test_the_arithmetic_is_the_trainers() -> None:
-    """A lone run's margin is its logit plus the clamp (the trainer's rule),
-    and the head reads (logit, margin) in that order."""
+    """A lone run's margin is its clamped logit plus the clamp (the trainer's
+    rule), and the head reads (logit, margin) in that order."""
     import math
 
     ranker = BeepRankerConfig()
@@ -79,9 +80,56 @@ def test_the_arithmetic_is_the_trainers() -> None:
     z = ranker.intercept + sum(
         c * (v - m) / s for c, v, m, s in zip(ranker.coef, x, ranker.mean, ranker.scale, strict=True)
     )
-    z = max(-10.0, min(10.0, z))
+    zc = max(-10.0, min(10.0, z))
     a, b = ranker.head_coef
-    expected_conf = 1.0 / (1.0 + math.exp(-(a * z + b * (z + 10.0) + ranker.head_intercept)))
+    expected_conf = 1.0 / (1.0 + math.exp(-(a * zc + b * (zc + 10.0) + ranker.head_intercept)))
     [(prob, conf)] = _learned_scores([run], ranker)
-    assert prob == 1.0 / (1.0 + math.exp(-z))
+    # The probability ranks unclamped (predict_proba); only the head reads the clamp.
+    assert prob == pytest.approx(1.0 / (1.0 + math.exp(-z)), abs=1e-15)
     assert abs(conf - expected_conf) < 1e-12
+
+
+def test_runtime_scores_equal_sklearn_and_the_trainers_rules() -> None:
+    """Independent of _learned_scores' own formula: rebuild the shipped ranker
+    as an sklearn pipeline and apply the trainer's clip_logits / margins."""
+    import importlib.util
+    import sys
+
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import StandardScaler
+
+    from splitsmith.beep_features import feature_vector
+
+    path = Path(__file__).resolve().parent.parent / "scripts" / "train_beep_ranker.py"
+    spec = importlib.util.spec_from_file_location("train_beep_ranker", path)
+    trainer = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = trainer
+    spec.loader.exec_module(trainer)
+
+    ranker = BeepRankerConfig()
+    scaler = StandardScaler()
+    scaler.mean_, scaler.scale_ = np.array(ranker.mean), np.array(ranker.scale)
+    scaler.n_features_in_ = len(ranker.mean)
+    lr = LogisticRegression()
+    lr.coef_, lr.intercept_ = np.array([ranker.coef]), np.array([ranker.intercept])
+    lr.classes_ = np.array([0, 1])
+    pipe = make_pipeline(scaler, lr)
+
+    e = MANIFEST.fixtures[1]
+    audio, sr = load_audio(FIXTURES / e.clip_wav)
+    runs = _candidate_runs(audio, sr, BeepDetectConfig())
+    x = np.array([feature_vector(r.features) for r in runs])
+    probs = pipe.predict_proba(x)[:, 1]
+    z = trainer.clip_logits(probs)
+    mg = trainer.margins(z)
+    a, b = ranker.head_coef
+    expected = [
+        (float(p), 1.0 / (1.0 + np.exp(-(a * zi + b * mi + ranker.head_intercept))))
+        for p, zi, mi in zip(probs, z, mg, strict=True)
+    ]
+
+    got = _learned_scores(runs, ranker)
+    assert len(got) == len(expected) > 1
+    for (gp, gc), (ep, ec) in zip(got, expected, strict=True):
+        assert abs(gp - ep) < 1e-9 and abs(gc - ec) < 1e-6

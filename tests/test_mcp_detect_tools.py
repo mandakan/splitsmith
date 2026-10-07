@@ -159,6 +159,20 @@ def test_detect_beep_high_confidence_auto_trusts_into_reviewed(tmp_path: Path) -
     assert result["auto_trust_threshold"] == 0.97
 
 
+def test_detect_beep_records_which_ranker_chose_the_beep(tmp_path: Path) -> None:
+    """Stored candidate scores mean a probability or a heuristic product
+    depending on the ranker (#949); the video says which."""
+    root = tmp_path / "match"
+    _build_project(root, stages=[_stage_with_primary(root)])
+    primary_id = MatchProject.load(root).stages[0].videos[0].video_id
+    fake = _fake_detection(confidence=0.5).model_copy(update={"ranker_version": "beep-ranker-lr-test"})
+
+    with patch("splitsmith.mcp.detect_tools.audio_helpers.detect_video_beep", return_value=fake):
+        detect_tools.detect_beep_for_video(str(root), stage_number=1, video_id=primary_id)
+
+    assert MatchProject.load(root).stages[0].videos[0].beep_ranker_version == "beep-ranker-lr-test"
+
+
 def test_detect_beep_low_confidence_lands_in_hitl(tmp_path: Path) -> None:
     root = tmp_path / "match"
     _build_project(root, stages=[_stage_with_primary(root)])

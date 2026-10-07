@@ -365,27 +365,34 @@ LOGIT_CLAMP = 10.0
 
 
 def _sigmoid(z: float) -> float:
-    return 1.0 / (1.0 + math.exp(-z))
+    if z >= 0.0:
+        return 1.0 / (1.0 + math.exp(-z))
+    e = math.exp(z)
+    return e / (1.0 + e)
 
 
 def _learned_scores(runs: list[_Run], ranker: BeepRankerConfig) -> list[tuple[float, float]]:
     """(probability, confidence) per run, in ``runs`` order, with the trainer's
-    exact arithmetic: a standardised linear logit clamped to +/-LOGIT_CLAMP,
-    its probability for ranking, and the confidence head over (logit, margin
-    to the best other run's logit)."""
-    logits = []
+    exact arithmetic: the probability of the standardised linear logit ranks
+    (unclamped, as ``predict_proba``), and the confidence head reads the logit
+    clamped to +/-LOGIT_CLAMP and its margin to the best other run's clamped
+    logit (``clip_logits`` / ``margins``)."""
+    raw = []
     for run in runs:
         x = feature_vector(run.features)
-        z = ranker.intercept + sum(
-            c * (v - m) / s for c, v, m, s in zip(ranker.coef, x, ranker.mean, ranker.scale, strict=True)
+        raw.append(
+            ranker.intercept
+            + sum(
+                c * (v - m) / s for c, v, m, s in zip(ranker.coef, x, ranker.mean, ranker.scale, strict=True)
+            )
         )
-        logits.append(max(-LOGIT_CLAMP, min(LOGIT_CLAMP, z)))
+    clamped = [max(-LOGIT_CLAMP, min(LOGIT_CLAMP, z)) for z in raw]
     a, b = ranker.head_coef
     out = []
-    for i, z in enumerate(logits):
-        others = [o for j, o in enumerate(logits) if j != i]
+    for i, z in enumerate(clamped):
+        others = [o for j, o in enumerate(clamped) if j != i]
         margin = z - (max(others) if others else -LOGIT_CLAMP)
-        out.append((_sigmoid(z), _sigmoid(a * z + b * margin + ranker.head_intercept)))
+        out.append((_sigmoid(raw[i]), _sigmoid(a * z + b * margin + ranker.head_intercept)))
     return out
 
 

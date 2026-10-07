@@ -22,8 +22,8 @@ def test_automation_settings_defaults() -> None:
 
 
 def test_a_beep_is_auto_trusted_from_097() -> None:
-    """The learned beep ranker (#949): out of fold over 127 fixtures, 70 beeps
-    clear 0.97 and none is wrong (ranker_report.json)."""
+    """The learned beep ranker (#949): out of fold over 127 fixtures, 69 beeps
+    clear 0.97 under the shipped head and none is wrong (ranker_report.json)."""
     assert AutomationSettings().beep_low_confidence_threshold == 0.97
 
 

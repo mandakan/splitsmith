@@ -331,3 +331,28 @@ def test_the_final_head_is_fitted_on_every_clip_with_rows(monkeypatch) -> None:
 
     assert head_fits[-1][0] == ["stage-shots-a-2026-stage1-s0", "stage-shots-b-2026-stage1-s0"]
     assert head == {"coef": [0.0, 0.0], "intercept": 0.0}
+
+
+def test_collect_records_the_heuristic_ranking_whatever_the_default(tmp_path) -> None:
+    """The report's "today" column is the hand-written ranker. With the learned
+    ranker as the default, a collect that used the default would compare the
+    model against itself."""
+    import yaml
+
+    from splitsmith.beep_calibration import load_manifest as load
+    from splitsmith.beep_detect import detect_beep, load_audio
+    from splitsmith.config import BeepDetectConfig, BeepRankerConfig
+
+    fixtures = Path(__file__).resolve().parent / "fixtures"
+    entry = load(fixtures / "beep_calibration" / "manifest.yaml").fixtures[1]
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text(yaml.safe_dump({"fixtures": [entry.model_dump(exclude_none=True)]}))
+
+    [clip] = _script().collect(manifest, fixtures)
+
+    audio, sr = load_audio(fixtures / entry.clip_wav)
+    heuristic = detect_beep(
+        audio, sr, BeepDetectConfig(top_n_candidates=10_000, ranker=BeepRankerConfig(ranker="heuristic"))
+    )
+    assert [r.heuristic_score for r in clip.rows] == [c.score for c in heuristic.candidates]
+    assert [r.heuristic_confidence for r in clip.rows] == [c.confidence for c in heuristic.candidates]

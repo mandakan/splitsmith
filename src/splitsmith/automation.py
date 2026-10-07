@@ -86,9 +86,11 @@ class AutomationSettings(BaseSettings):
     Field use surfaced too many incorrectly-auto-trusted beeps on
     recursive-scan ingests, so the default was raised to 0.95 pending
     a re-calibration with more data. That re-calibration came with the
-    learned beep ranker (#949): out of fold over 127 fixtures, 70 beeps
-    clear 0.97 and none is wrong (``tests/fixtures/beep_calibration/
-    ranker_report.json``), so the default is 0.97.
+    learned beep ranker (#949): out of fold over 127 fixtures, 69 beeps
+    clear 0.97 under the shipped head and none is wrong
+    (``tests/fixtures/beep_calibration/ranker_report.json``,
+    ``final_head_bins``; pinned by ``tests/test_beep_ranker_config.py``),
+    so the default is 0.97.
     """
 
 
