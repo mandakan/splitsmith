@@ -182,6 +182,7 @@ export function isDirty(saved: LookDraft, draft: LookDraft): boolean {
       styles: Object.fromEntries(
         Object.entries(d.styles).sort(([a], [b]) => a.localeCompare(b)),
       ),
+      fonts: Object.fromEntries(Object.entries(d.fonts ?? {}).sort(([a], [b]) => a.localeCompare(b))),
     });
   return norm(saved) !== norm(draft);
 }
@@ -256,4 +257,25 @@ export function serialQueue(opts: { retries?: number; retryDelayMs?: number } = 
     tail = result.catch(() => undefined);
     return result;
   };
+}
+
+/** The face each font role draws with when a Look names none (``splitsmith.fonts.DEFAULTS``). */
+export const FONT_DEFAULTS: Record<string, string> = { display: "antonio", mono: "jetbrains-mono" };
+
+export const FONT_ROLES: { role: "display" | "mono"; label: string; help: string }[] = [
+  { role: "display", label: "Titles", help: "Match and stage names, shooter names" },
+  { role: "mono", label: "Figures", help: "Times, splits, counts and the clock" },
+];
+
+/** ``draft`` with ``role`` drawn in ``fontId``; the role's default is stored as no entry. */
+export function setFont(
+  draft: LookDraft,
+  role: string,
+  fontId: string,
+  defaults: Record<string, string> = FONT_DEFAULTS,
+): LookDraft {
+  const fonts = { ...(draft.fonts ?? {}) };
+  if (defaults[role] === fontId) delete fonts[role];
+  else fonts[role] = fontId;
+  return { ...draft, fonts };
 }

@@ -25,6 +25,8 @@ import logging
 from importlib.resources import files
 from pathlib import Path
 
+from .fonts import FONTS
+
 logger = logging.getLogger(__name__)
 
 
@@ -45,6 +47,8 @@ class OverlayRenderError(RuntimeError):
 _BUNDLED_FONTS: dict[str, str] = {
     "splitsmith-mono": "JetBrainsMono-Bold.ttf",
     "splitsmith-display": "Antonio-VariableFont.ttf",
+    # Every face a Look may choose, by its ``splitsmith.fonts`` id (#1272).
+    **{face.id: face.file for face in FONTS},
 }
 
 

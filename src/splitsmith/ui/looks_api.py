@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import re
 import tempfile
+from importlib import resources
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from ..composition import XFADE_FAMILIES
+from ..fonts import FONTS
 from ..look_store import (
     TEMPLATE_SLOTS,
     FolderLookStore,
@@ -105,12 +107,41 @@ def transition_catalog() -> list[TransitionFamilyInfo]:
     return out
 
 
+class FontInfo(BaseModel):
+    """One bundled face a Look may choose (#1272), with the URL its sample
+    loads from."""
+
+    id: str
+    label: str
+    role: str
+    help: str
+    url: str
+
+
+def font_catalog() -> list[FontInfo]:
+    return [
+        FontInfo(id=f.id, label=f.label, role=f.role, help=f.help, url=f"/api/looks/fonts/{f.id}")
+        for f in FONTS
+    ]
+
+
 @router.get("/api/looks")
 def get_looks() -> dict[str, Any]:
     return {
         "looks": [info.model_dump() for info in look_catalog()],
         "transitions": [info.model_dump() for info in transition_catalog()],
+        "fonts": [info.model_dump() for info in font_catalog()],
     }
+
+
+@router.get("/api/looks/fonts/{font_id}")
+def get_font(font_id: str) -> FileResponse:
+    """A bundled face's file, by its catalog id only (the editor's samples)."""
+    face = next((f for f in FONTS if f.id == font_id), None)
+    if face is None:
+        raise HTTPException(status_code=404, detail="not found")
+    path = Path(str(resources.files("splitsmith.data").joinpath("fonts").joinpath(face.file)))
+    return FileResponse(path, media_type="font/ttf", headers={"Cache-Control": "public, max-age=86400"})
 
 
 @router.get("/api/looks/{name}/preview/{file}")

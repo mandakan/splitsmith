@@ -36,10 +36,11 @@ import {
   styleOptions,
   type LookDraft,
 } from "@/lib/lookEditor";
+import { FontPicker } from "@/components/export/FontPicker";
 import { PaletteSuggestions } from "@/components/export/PaletteSuggestions";
 import { TemplateEditor } from "@/components/export/TemplateEditor";
 import { editsList, type TemplateEdits } from "@/lib/templateEditor";
-import { refreshLooks } from "@/lib/useLooks";
+import { refreshLooks, useLooks } from "@/lib/useLooks";
 import { cn } from "@/lib/utils";
 
 export const GUIDE_URL =
@@ -459,6 +460,7 @@ function CardStyles({
   info: LookInfo | undefined;
   hosted: boolean;
 }) {
+  const { fonts = [] } = useLooks();
   return (
     <div className="flex flex-col">
       {CARD_STYLE_SLOTS.map(({ slot, label }) => (
@@ -485,6 +487,7 @@ function CardStyles({
           ? " On splitsmith.app a Look picks from the shipped templates."
           : ""}
       </p>
+      <FontPicker draft={draft} setDraft={setDraft} fonts={fonts} />
     </div>
   );
 }

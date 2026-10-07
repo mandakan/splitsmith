@@ -176,8 +176,20 @@ def test_the_clock_and_the_sprites_resolve_the_same_bundled_face(theme_name):
     # counter and a clock in two different typefaces, with the clock's own
     # face varying by host (measured: DejaVu Sans Mono Bold on the dev box,
     # whatever a CI runner happens to carry elsewhere).
-    face = sp.theme_font_face(load_theme(theme_name))
-    assert face == "splitsmith-mono"
+    # Since #1272 a Look chooses the face; the invariant is unchanged: the
+    # clock's file is the one the sprites' ``@font-face`` mono rule loads.
+    from splitsmith import fonts
+    from splitsmith.overlay_html import single_css
+    from splitsmith.overlay_layout import CellScale
+    from splitsmith.overlay_text import _BUNDLED_FONTS
+
+    theme = load_theme(theme_name)
+    face = sp.theme_font_face(theme)
+    clock_file = _BUNDLED_FONTS[face]
+    assert clock_file == fonts.font(theme.mono_font).file == "JetBrainsMono-Bold.ttf"
+    css = single_css(width=640, height=360, scale=CellScale.for_cell(360), theme=theme)
+    mono_rule = css.split('font-family: "Splitsmith Mono";', 1)[1].split("}", 1)[0]
+    assert clock_file in mono_rule
 
 
 # --- the sprite cache and the rasterizer seam -------------------------

@@ -108,6 +108,7 @@ from importlib.resources import files
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .fonts import font as bundled_font
 from .overlay_clock import border_width
 from .overlay_layout import MIN_FONT_SIZE, Anchor, CellScale, ColorToken, Element, Flow, Group, Role
 from .overlay_theme import OverlayTheme
@@ -232,8 +233,12 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
     is independently valid HTML a test can inspect without also holding
     a whole document.
     """
-    mono_url = font_face_url(FONT_FILES["mono"])
-    display_url = font_face_url(FONT_FILES["display"])
+    # The Look's faces (#1272) under the two family names every template
+    # draws with; the defaults are exactly the files and weights before.
+    mono_face = bundled_font(theme.mono_font)
+    display_face = bundled_font(theme.display_font)
+    mono_url = font_face_url(mono_face.file)
+    display_url = font_face_url(display_face.file)
     ink = _rgb(theme.ink)
     ink_2 = _rgb(theme.ink_2)
     rule_color = _rgb(theme.rule)
@@ -278,12 +283,12 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
 @font-face {{
   font-family: "Splitsmith Mono";
   src: url("{mono_url}") format("truetype");
-  font-weight: 700;
+  font-weight: {mono_face.weight};
 }}
 @font-face {{
   font-family: "Splitsmith Display";
   src: url("{display_url}") format("truetype");
-  font-weight: 400 700;
+  font-weight: {display_face.weight};
 }}
 .cell {{
   position: relative;

@@ -61,8 +61,13 @@ def _hex(rgb: tuple[int, int, int]) -> str:
 
 
 def theme_tokens(theme: OverlayTheme) -> dict[str, str]:
-    """Every palette field as ``#rrggbb``, plus the derived ``shadow``."""
-    tokens = {f.name: _hex(getattr(theme, f.name)) for f in dataclasses.fields(theme) if f.name != "name"}
+    """Every palette field as ``#rrggbb``, plus the derived ``shadow``. The
+    font ids are not colours; a template draws them through the family
+    names the engine stylesheet declares."""
+    not_colours = {"name", "display_font", "mono_font"}
+    tokens = {
+        f.name: _hex(getattr(theme, f.name)) for f in dataclasses.fields(theme) if f.name not in not_colours
+    }
     tokens["shadow"] = _hex(theme.shadow)
     return tokens
 

@@ -230,7 +230,23 @@ crossed; text inside the cell is never touched, so every frame that fit before
 is pixel-identical (checked against main with both frame scripts). Measure
 text with a Range, not an element's box: a row's elements are as wide as the
 row a long sibling stretches. ``tests/test_look_template.py`` forbids the
-digits of the legibility floor anywhere in that file, issue numbers included. On hosted, Looks carry colours
+digits of the legibility floor anywhere in that file, issue numbers included.
+
+A Look chooses its faces (#1272) from the bundled catalog ``splitsmith.fonts``
+(open-licensed files in ``data/fonts/`` beside their licences): one per role,
+``display`` and ``mono``. Templates never name a file; they draw ``"Splitsmith
+Display"`` / ``"Splitsmith Mono"``, and ``overlay_html._style_rules`` points
+those family names at the theme's ``display_font`` / ``mono_font`` ids
+(``theme_for`` resolves ``look.json``'s ``fonts`` by id or family label, an
+unknown one falling back to the role's default, so the shipped manifest's
+``"Antonio"`` and ``"sans": "Geist"`` still load). The ffmpeg clock reads the
+mono id too, both renderers (``theme_font_face``, ``overlay_render``), so the
+counter and the clock never disagree. The defaults are today's files and
+weights byte for byte, which is what keeps every default frame identical. A
+stored Look's ``fonts`` is validated strictly (``fonts.check``) and copies
+normalize to ids (``body_from_manifest``); ``theme_tokens`` skips the font ids,
+which are not colours. ``GET /api/looks/fonts/{id}`` serves a face by catalog
+id for the editor's samples (``FontPicker``). On hosted, Looks carry colours
 and card styles only until the sandboxed template loader (#1266) ships: a
 template is code running on our server.
 

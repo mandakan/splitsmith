@@ -37,6 +37,8 @@ from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from .fonts import check as check_fonts
+from .fonts import normalize as normalize_fonts
 from .looks import (
     DEFAULT_VARIANT,
     LOOK_NAME_RE,
@@ -72,6 +74,13 @@ class StoredLookBody(BaseModel):
     colors: dict[str, RGB]
     accent_series: list[str] = []
     styles: dict[str, str] = {}
+    #: A face per role from the bundled catalog (``splitsmith.fonts``, #1272).
+    fonts: dict[str, str] = {}
+
+    @field_validator("fonts")
+    @classmethod
+    def _fonts(cls, value: dict[str, str]) -> dict[str, str]:
+        return check_fonts(value)
 
     @field_validator("base")
     @classmethod
@@ -150,6 +159,9 @@ def body_from_manifest(manifest: LookManifest) -> StoredLookBody:
         colors=manifest.colors,
         accent_series=manifest.accent_series,
         styles=manifest.styles,
+        # A manifest may name a family or a role the catalog lacks (the
+        # shipped one says "Antonio" and "sans"); the stored body keeps ids.
+        fonts=normalize_fonts(manifest.fonts),
     )
 
 

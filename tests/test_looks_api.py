@@ -67,6 +67,7 @@ def test_the_looks_routes_are_registered_once(client) -> None:
     assert sorted(routes) == [
         ("DELETE", "/api/looks/{name}"),
         ("GET", "/api/looks"),
+        ("GET", "/api/looks/fonts/{font_id}"),
         ("GET", "/api/looks/{name}"),
         ("GET", "/api/looks/{name}/preview/{file}"),
         ("GET", "/api/looks/{name}/samples"),

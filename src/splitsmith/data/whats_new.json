@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "look-fonts",
+      "date": "2026-10-07",
+      "title": "Choose your Look's fonts",
+      "body": "Pick the title and figure faces under Card styles in the Look editor; the cards, the stage summary and the running clock all draw with them."
+    },
+    {
       "id": "long-names-fit",
       "date": "2026-10-07",
       "title": "Long stage names fit the cards",

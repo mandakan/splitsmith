@@ -25,6 +25,7 @@ function fetchLooks(): Promise<LooksState> {
         (r): LooksState => ({
           looks: r.looks.length > 0 ? r.looks : BUILTIN_LOOKS,
           transitions: r.transitions ?? [],
+          fonts: r.fonts ?? [],
           loaded: true,
           failed: false,
         }),
