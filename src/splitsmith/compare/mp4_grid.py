@@ -31,7 +31,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
-from ..composition import MatchTitle, TitleCard, TitleStyle, Transition, TransitionKind
+from ..composition import MatchTitle, TitleCard, TitleStyle, Transition, TransitionKind, xfade_name
 from ..export_naming import stage_display_name
 from ..identity import ResolvedIdentity
 from ..look_motion import MotionClipError, motion_overlay_filters, write_motion_clip
@@ -1578,6 +1578,92 @@ def build_card_segment_command(
     ]
     for slot in range(slots):
         args += ["-map", f"[a{slot}]"]
+    track_labels = audio_track_labels(shooter_labels)
+    args += list(_disposition_args(track_labels, 0))
+    args += list(_track_naming_args(track_labels))
+    args += [
+        "-r",
+        rate,
+        "-c:v",
+        "libx264",
+        "-preset",
+        "medium",
+        "-crf",
+        "20",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        SEGMENT_AUDIO_CODEC,
+        str(output_path),
+    ]
+    return tuple(args)
+
+
+def build_boundary_segment_command(
+    tail_edge: Path,
+    head_edge: Path,
+    *,
+    kind: TransitionKind,
+    seconds: float,
+    canvas: GridCanvas,
+    shooter_labels: Sequence[str],
+    output_path: Path,
+    ffmpeg_binary: str = "ffmpeg",
+    tail_pad_seconds: float = 0.0,
+    head_pad_seconds: float = 0.0,
+) -> tuple[str, ...]:
+    """The boundary segment (issue #1244): ``tail_edge`` crossfaded into
+    ``head_edge`` over ``seconds`` with ``xfade``, and every one of the
+    grid's N+1 audio tracks (the mix, then one per shooter, a filler's
+    being silence) crossfaded by stream index with ``acrossfade``, so the
+    stitch sees the layout, names and dispositions every other segment
+    carries. An edge whose trims had less handle than ``seconds / 2`` is
+    shorter; ``tail_pad_seconds`` holds its last frame (silence on every
+    track) and ``head_pad_seconds`` holds the head edge's first frame
+    (delaying every track) so both inputs span the fade."""
+    rate = canvas.rate_string
+    tracks = len(shooter_labels) + 1
+    parts: list[str] = []
+    tail_v, head_v = "0:v", "1:v"
+    if tail_pad_seconds > 0.0:
+        parts.append(f"[0:v]tpad=stop_mode=clone:stop_duration={tail_pad_seconds:g}[tv]")
+        tail_v = "tv"
+    if head_pad_seconds > 0.0:
+        parts.append(f"[1:v]tpad=start_mode=clone:start_duration={head_pad_seconds:g}[hv]")
+        head_v = "hv"
+    parts.append(
+        f"[{tail_v}][{head_v}]xfade=transition={xfade_name(kind)}:duration={seconds:g}:offset=0,"
+        "format=yuv420p[final]"
+    )
+    for k in range(tracks):
+        tail_a, head_a = f"0:a:{k}", f"1:a:{k}"
+        if tail_pad_seconds > 0.0:
+            parts.append(f"[0:a:{k}]apad=pad_dur={tail_pad_seconds:g}[t{k}]")
+            tail_a = f"t{k}"
+        if head_pad_seconds > 0.0:
+            parts.append(f"[1:a:{k}]adelay={round(head_pad_seconds * 1000)}:all=1[h{k}]")
+            head_a = f"h{k}"
+        parts.append(
+            f"[{tail_a}][{head_a}]acrossfade=d={seconds:g}:c1=tri:c2=tri,"
+            f"aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[x{k}]"
+        )
+    args: list[str] = [
+        ffmpeg_binary,
+        "-hide_banner",
+        "-y",
+        "-i",
+        str(tail_edge),
+        "-i",
+        str(head_edge),
+        "-t",
+        f"{seconds:g}",
+        "-filter_complex",
+        ";".join(parts),
+        "-map",
+        "[final]",
+    ]
+    for k in range(tracks):
+        args += ["-map", f"[x{k}]"]
     track_labels = audio_track_labels(shooter_labels)
     args += list(_disposition_args(track_labels, 0))
     args += list(_track_naming_args(track_labels))

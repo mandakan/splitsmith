@@ -571,3 +571,77 @@ def test_identities_reach_the_grids_hold_as_accents(tmp_path: Path, monkeypatch)
         },
     )
     assert seen["accents"] == {"Stage 3 shooter": "#123456"}
+
+
+# --- the boundary segment (#1244) ----------------------------------------------
+
+
+def test_boundary_segment_crossfades_the_video_and_every_audio_track(tmp_path: Path) -> None:
+    """Review Focus 4: the grid's segments carry the mix plus one track per
+    shooter (a filler's is silence); the boundary crossfades each pair by
+    stream index, so the stitch sees the same layout, names and
+    dispositions as every other segment."""
+    labels = ("Anders", "Bea", "Mathias")
+    cmd = mp4_grid.build_boundary_segment_command(
+        tmp_path / "edge-tail.mov",
+        tmp_path / "edge-head.mov",
+        kind="zoom",
+        seconds=1.0,
+        canvas=CANVAS,
+        shooter_labels=labels,
+        output_path=tmp_path / "boundary-002.mov",
+    )
+    assert cmd[:3] == ("ffmpeg", "-hide_banner", "-y")
+    assert cmd[3:7] == ("-i", str(tmp_path / "edge-tail.mov"), "-i", str(tmp_path / "edge-head.mov"))
+    graph = cmd[cmd.index("-filter_complex") + 1]
+    assert graph == (
+        "[0:v][1:v]xfade=transition=zoomin:duration=1:offset=0,format=yuv420p[final];"
+        "[0:a:0][1:a:0]acrossfade=d=1:c1=tri:c2=tri,"
+        "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[x0];"
+        "[0:a:1][1:a:1]acrossfade=d=1:c1=tri:c2=tri,"
+        "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[x1];"
+        "[0:a:2][1:a:2]acrossfade=d=1:c1=tri:c2=tri,"
+        "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[x2];"
+        "[0:a:3][1:a:3]acrossfade=d=1:c1=tri:c2=tri,"
+        "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[x3]"
+    )
+    maps = [cmd[i + 1] for i, token in enumerate(cmd) if token == "-map"]
+    assert maps == ["[final]", "[x0]", "[x1]", "[x2]", "[x3]"]
+    card = mp4_grid.build_card_segment_command(
+        tmp_path / "c.png", seconds=1.0, canvas=CANVAS, shooter_labels=labels, output_path=tmp_path / "c.mov"
+    )
+    tail_of = lambda c: c[c.index("-disposition:a:0") :]  # noqa: E731
+    assert (
+        tail_of(cmd)[:-1] == tail_of(card)[:-1]
+    ), "same dispositions, names, rate and codecs as a card segment"
+    assert cmd[cmd.index("-t") + 1] == "1" and cmd[-1].endswith("boundary-002.mov")
+
+
+def test_boundary_segment_pads_a_short_edge_with_a_held_frame_on_every_track(tmp_path: Path) -> None:
+    labels = ("Anders", "Bea")
+    common = {
+        "kind": "fade",
+        "seconds": 1.0,
+        "canvas": CANVAS,
+        "shooter_labels": labels,
+        "output_path": tmp_path / "b.mov",
+    }
+    head_short = mp4_grid.build_boundary_segment_command(
+        tmp_path / "t.mov", tmp_path / "h.mov", head_pad_seconds=0.5, **common
+    )
+    graph = head_short[head_short.index("-filter_complex") + 1]
+    assert graph.startswith(
+        "[1:v]tpad=start_mode=clone:start_duration=0.5[hv];"
+        "[0:v][hv]xfade=transition=fade:duration=1:offset=0,format=yuv420p[final];"
+        "[1:a:0]adelay=500:all=1[h0];[0:a:0][h0]acrossfade=d=1:c1=tri:c2=tri,"
+    )
+    assert "[1:a:2]adelay=500:all=1[h2];[0:a:2][h2]acrossfade" in graph
+    tail_short = mp4_grid.build_boundary_segment_command(
+        tmp_path / "t.mov", tmp_path / "h.mov", tail_pad_seconds=0.25, **common
+    )
+    graph = tail_short[tail_short.index("-filter_complex") + 1]
+    assert graph.startswith(
+        "[0:v]tpad=stop_mode=clone:stop_duration=0.25[tv];"
+        "[tv][1:v]xfade=transition=fade:duration=1:offset=0,format=yuv420p[final];"
+        "[0:a:0]apad=pad_dur=0.25[t0];[t0][1:a:0]acrossfade=d=1:c1=tri:c2=tri,"
+    )
