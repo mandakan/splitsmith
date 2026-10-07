@@ -1,5 +1,9 @@
 // The overlay's fit policy (issue #683 F1): shrink a cell's middle band
-// to fit its track, then drop elements by data-drop-priority. Loaded
+// to fit its track, then drop elements by data-drop-priority. Then the
+// width: an element whose box runs past the cell (a 52-character
+// stage name on a card's slate or lower third) is shrunk on its own and
+// then ellipsized; see fitWidth. A cell that fits is left exactly as it
+// was. Loaded
 // inline by overlay_html._fit_script() and by file URL from a Look's
 // card template. The legibility floor comes from
 // window.__splitsmithMinFont, which the caller sets before calling
@@ -91,7 +95,79 @@ window.__splitsmithFit = function () {
       }
     }
   }
+  // Width: an element whose box runs past the cell's safe area (a long
+  // name on a card) is shrunk on its own, to no less than WIDTH_FLOOR of
+  // its size (a title at the legibility floor reads as a footnote), and
+  // what still does not fit keeps its start and ends in an ellipsis. Its
+  // neighbours keep their size. The safe area keeps a title off the frame
+  // edge; an element inside it is never touched, so a cell that fits draws
+  // exactly as it did.
+  var WIDTH_FLOOR = 0.6;
+  // The text's own extent, not the element's box: a row's elements can
+  // be as wide as the row a long sibling stretches, while their text is
+  // short. A range ignores clipping, so a nowrap line inside an
+  // overflow-hidden value still measures its whole length.
+  function textRect(el) {
+    var range = document.createRange();
+    range.selectNodeContents(el);
+    return range.getBoundingClientRect();
+  }
+  // Only text past the cell's real edge is a problem; a line the design
+  // set close to the edge (a lower third's inset) stays where it is.
+  function pastEdge(el, cell) {
+    var r = textRect(el);
+    return r.width > 0 && (r.left < cell.left - 0.5 || r.right > cell.right + 0.5);
+  }
+  // Where an overflowing line must end up: a margin in from each edge it
+  // crossed, so a title never touches the frame, and its own start on a
+  // side it did not cross.
+  function target(r, cell) {
+    var margin = Math.max(8, (cell.right - cell.left) * 0.025);
+    return {
+      left: r.left < cell.left ? cell.left + margin : Math.max(cell.left, Math.min(r.left, cell.left + margin)),
+      right: r.right > cell.right ? cell.right - margin : Math.min(cell.right, Math.max(r.right, cell.right - margin)),
+    };
+  }
+  function inside(el, box) {
+    var r = textRect(el);
+    return r.left >= box.left - 0.5 && r.right <= box.right + 0.5;
+  }
+  function scaleValues(values, bases, factor) {
+    values.forEach(function (value, i) { value.style.fontSize = bases[i] * factor + 'px'; });
+  }
+  function fitWidth(cell) {
+    var edges = cell.getBoundingClientRect();
+    if (!(edges.width > 0)) { return; }
+    cell.querySelectorAll('.el').forEach(function (el) {
+      if (getComputedStyle(el).display === 'none' || !pastEdge(el, edges)) { return; }
+      var box = target(textRect(el), edges);
+      var values = Array.prototype.slice.call(el.querySelectorAll('.value'));
+      var bases = values.map(function (v) { return parseFloat(getComputedStyle(v).fontSize) || 0; });
+      var smallest = Math.min.apply(null, bases.filter(function (b) { return b > 0; }).concat([Infinity]));
+      var lo = smallest === Infinity ? 1 : Math.min(1, Math.max(WIDTH_FLOOR, window.__splitsmithMinFont / smallest));
+      var hi = 1;
+      scaleValues(values, bases, lo);
+      if (inside(el, box)) {
+        for (var i = 0; i < 14; i++) {
+          var mid = (lo + hi) / 2;
+          scaleValues(values, bases, mid);
+          if (inside(el, box)) { lo = mid; } else { hi = mid; }
+        }
+        scaleValues(values, bases, lo);
+        return;
+      }
+      // At WIDTH_FLOOR and still too long: keep its start, end in "...".
+      var r = textRect(el);
+      el.style.maxWidth = Math.max(0, box.right - Math.max(r.left, box.left)) + 'px';
+      el.style.minWidth = '0';
+      values.forEach(function (value) { value.style.textOverflow = 'ellipsis'; });
+    });
+  }
   document.querySelectorAll('.cell').forEach(function (cell) {
+    fitHeight(cell);
+    fitWidth(cell);
+  });
+  function fitHeight(cell) {
     var stack = cell.querySelector('.anchor-middle-center');
     if (!stack) { return; }
     var available = availableHeight(cell);
@@ -100,5 +176,5 @@ window.__splitsmithFit = function () {
     shrinkToFit(stack, available);
     if (fits(stack, available)) { return; }
     dropUntilFit(stack, available);
-  });
+  }
 };
