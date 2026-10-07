@@ -19,6 +19,8 @@ of them: it is not returned, changed or deleted here.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import tempfile
 from importlib import resources
@@ -64,6 +66,7 @@ from ..looks import (
     variants_for,
 )
 from ..overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+from ..runtime import runtime
 
 router = APIRouter()
 
@@ -353,10 +356,45 @@ class CheckRequest(BaseModel):
     templates: list[TemplateEdit] = Field(default_factory=list, max_length=32)
 
 
+#: Bump when the same files would check differently.
+CHECK_CACHE_VERSION = 1
+
+
+def _folder_digest(root: Path) -> str:
+    """Every file of a Look folder, by relative path and bytes."""
+    digest = hashlib.sha256(f"v{CHECK_CACHE_VERSION}".encode())
+    for path in sorted(p for p in root.rglob("*") if p.is_file()):
+        digest.update(str(path.relative_to(root)).encode("utf-8") + b"\0")
+        digest.update(path.read_bytes() + b"\0")
+    return digest.hexdigest()
+
+
 @router.post("/api/looks/{name}/check")
 def check_draft(name: str, req: CheckRequest) -> dict[str, Any]:
-    """``looks check`` on the Look as the editor holds it, unsaved."""
+    """``looks check`` on the Look as the editor holds it, unsaved. The saved
+    Look (no draft, no template text: the Export page's preflight, #1276) is
+    cached by the folder's content, so choosing a Look again launches no
+    browser and any edit to its files checks it again."""
     look = _own_look(name)
+    cached: Path | None = None
+    if req.draft is None and not req.templates:
+        cached = runtime().cache_dir / "look-check" / f"{_folder_digest(look.root)}.json"
+        if cached.is_file():
+            try:
+                return json.loads(cached.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                pass
+    result = _check(name, look, req)
+    if cached is not None:
+        try:
+            cached.parent.mkdir(parents=True, exist_ok=True)
+            cached.write_text(json.dumps(result), encoding="utf-8")
+        except OSError:
+            pass
+    return result
+
+
+def _check(name: str, look: Look, req: CheckRequest) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="looks-check-draft-") as work:
         try:
             draft = draft_look(look, req.draft, Path(work), req.templates)
