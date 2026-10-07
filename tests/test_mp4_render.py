@@ -1430,7 +1430,7 @@ def test_edge_plans_shrink_to_the_handle_the_trim_holds(tmp_path: Path) -> None:
 
 def test_build_boundary_command_pads_a_short_edge_with_a_held_frame(tmp_path: Path) -> None:
     comp = _carded_composition(tmp_path)
-    common = dict(kind="fade", seconds=1.0, sequence=comp.sequence, output_path=tmp_path / "b.mp4")
+    common = {"kind": "fade", "seconds": 1.0, "sequence": comp.sequence, "output_path": tmp_path / "b.mp4"}
     head_short = mp4_render._build_boundary_command(
         tmp_path / "t.mp4", tmp_path / "h.mp4", head_pad_seconds=0.5, **common
     )
