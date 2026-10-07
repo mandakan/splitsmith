@@ -257,3 +257,15 @@ def test_an_animated_cards_digest_moves_with_the_own_font(
     a = digest(_look(tmp_path, monkeypatch, display=first.value))
     b = digest(_look(tmp_path, monkeypatch, display=second.value))
     assert a != b
+
+
+def test_an_own_font_that_is_a_symlink_is_never_used(tmp_path: Path) -> None:
+    """Review C1 of #1286: ``fonts/font-<hex>.ttf -> /proc/self/environ`` was
+    resolved to the target and named in the engine stylesheet."""
+    (tmp_path / "fonts").mkdir()
+    secret = tmp_path / "secret.txt"
+    secret.write_text("TOKEN=hunter2", encoding="utf-8")
+    (tmp_path / "fonts" / "font-0123456789ab.ttf").symlink_to(secret)
+    assert fonts.resolve({"display": "own:font-0123456789ab.ttf"}, root=tmp_path) == fonts.DEFAULTS
+    assert own_fonts.own_font_path(tmp_path, "font-0123456789ab.ttf") is None
+    assert own_fonts.list_fonts(tmp_path) == []

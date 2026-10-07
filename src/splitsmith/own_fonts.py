@@ -98,7 +98,7 @@ def list_fonts(root: Path) -> list[OwnFont]:
         return []
     out: list[OwnFont] = []
     for path in sorted(folder.iterdir()):
-        if not OWN_FILE_RE.fullmatch(path.name) or not path.is_file():
+        if not OWN_FILE_RE.fullmatch(path.name) or not path.is_file() or path.is_symlink():
             continue
         try:
             family = _family(path.read_bytes())
@@ -114,7 +114,7 @@ def own_font_path(root: Path, file: str) -> Path | None:
     if not OWN_FILE_RE.fullmatch(file):
         return None
     path = root / OWN_DIR / file
-    return path if path.is_file() else None
+    return path if path.is_file() and not path.is_symlink() else None
 
 
 __all__ = ["MAX_FONT_BYTES", "OwnFont", "OwnFontError", "list_fonts", "own_font_path", "save_font"]

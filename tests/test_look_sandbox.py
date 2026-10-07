@@ -303,3 +303,42 @@ def test_a_template_error_is_still_a_template_script_error(
     )
     with pytest.raises(TemplateScriptError, match="nope"):
         raster.render_template(template, context=_context(), width=16, height=16)
+
+
+# --- the security review of #1286 ----------------------------------------------------------
+
+
+def test_the_stylesheet_and_assets_never_mount_a_file_outside_the_mounted_folders(tmp_path: Path) -> None:
+    """Only a ``logo`` value earns a ``/file/`` mount. A stylesheet naming
+    another file (an own font that is a symlink resolved to
+    ``/proc/self/environ``, review C1) must stay unloadable."""
+    template = tmp_path / "look" / "card.html"
+    template.parent.mkdir()
+    template.write_text("<p>hi</p>", encoding="utf-8")
+    secret = tmp_path / "secret.txt"
+    secret.write_text("TOKEN=hunter2", encoding="utf-8")
+    ctx = _context().model_copy(
+        update={
+            "engine": engine_block(css=f'@font-face {{ src: url("{secret.as_uri()}"); }}'),
+            "assets": {"shared": shared_url(), "x": secret.as_uri()},
+        }
+    )
+    sandbox, out = look_sandbox.prepare(template, ctx)
+    assert sandbox.files == {}
+    assert secret.as_uri() in out.engine["css"]
+
+
+def test_a_logo_that_is_a_symlink_or_not_an_image_is_not_mounted(tmp_path: Path) -> None:
+    template = tmp_path / "look" / "card.html"
+    template.parent.mkdir()
+    template.write_text("<p>hi</p>", encoding="utf-8")
+    secret = tmp_path / "secret.txt"
+    secret.write_text("TOKEN=hunter2", encoding="utf-8")
+    link = tmp_path / "logo-1.png"
+    link.symlink_to(secret)
+    real = _png(tmp_path / "logo-2.png")
+    sandbox, _ = look_sandbox.prepare(
+        template,
+        _context(shooters=[{"logo": link.as_uri()}, {"logo": secret.as_uri()}, {"logo": real.as_uri()}]),
+    )
+    assert list(sandbox.files.values()) == [real.resolve()]

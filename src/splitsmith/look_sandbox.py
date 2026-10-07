@@ -10,14 +10,15 @@ request through Playwright routing:
   images, stylesheets, own fonts), never outside it;
 - ``/shared/<path>``: the engine scripts (``fit.js``, ``cell.js``, ...);
 - ``/fonts/<path>``: the bundled faces;
-- ``/file/<digest>/<name>``: each file a **server-built** field of the
-  context names by ``file://`` URL, rewritten here to a virtual URL: the
-  engine stylesheet (a Look's own font), the ``assets`` block, and every
-  ``logo`` value (a shooter's or the match's). Nothing else: the context's
-  ``data`` also carries what users typed (a stage name, a club line), and a
-  stage named ``file:///proc/self/environ`` must stay a string the page
-  cannot load. The template cannot add a mount either: the context is built
-  before it runs.
+- ``/file/<digest>/<name>``: each ``logo`` value (a shooter's or the
+  match's), rewritten here to a virtual URL, and only when it names a real
+  PNG, JPEG or WebP file that is not a symlink. Nothing else earns one: the
+  context's ``data`` also carries what users typed (a stage name, a club
+  line), so a stage named ``file:///proc/self/environ`` stays a string the
+  page cannot load, and the engine stylesheet names fonts inside the mounted
+  folders only (a Look's own font is under ``/look/``; one that is a symlink
+  out was a way to read any file, review C1). The template cannot add a
+  mount either: the context is built before it runs.
 
 Everything else is aborted: another path, another host, any network, and a
 ``file://`` load (Chromium refuses those from an ``https`` page). A file
@@ -63,6 +64,8 @@ TEMPLATE_SECONDS = 300.0
 MAX_ANIMATION_SECONDS = 60.0
 
 _FILE_URL = re.compile(r"file://[^\"'\s)\\<>]+")
+#: What a ``logo`` value may name (``identity``'s upload writes these).
+_LOGO_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 
 
 def _bundled_fonts_dir() -> Path:
@@ -159,7 +162,10 @@ def prepare(template: Path, context: TemplateContext) -> tuple[Sandbox, Template
     }
     sandbox = Sandbox(template=template.resolve(), mounts=mounts)
 
-    def rewrite(match: re.Match[str]) -> str:
+    def mounted(match: re.Match[str]) -> str:
+        # A file inside a mounted folder (a bundled font, an engine script,
+        # the Look's own image or font) by its mount; anything else stays
+        # the file URL it was, which the page cannot load.
         url = match.group(0)
         path = Path(url2pathname(unquote(urlsplit(url).path))).resolve()
         for name, root in mounts.items():
@@ -167,35 +173,35 @@ def prepare(template: Path, context: TemplateContext) -> tuple[Sandbox, Template
                 return f"{ORIGIN}/{name}"
             if _within(path, root):
                 return f"{ORIGIN}/{name}/{path.relative_to(root).as_posix()}"
-        if path.is_file():
-            key = f"/file/{hashlib.sha256(str(path).encode()).hexdigest()[:16]}/{path.name}"
-            sandbox.files[key] = path
-            return f"{ORIGIN}{key}"
         return url
 
-    def within_mounts(match: re.Match[str]) -> str:
-        # User text may name a mounted (public) file harmlessly; it never
-        # earns a ``/file/`` mount of its own.
+    def logo(match: re.Match[str]) -> str:
+        # The one field that earns a ``/file/`` mount: a server-built logo
+        # path, and only a real image file, never a symlink (review C1).
         url = match.group(0)
-        path = Path(url2pathname(unquote(urlsplit(url).path))).resolve()
-        if any(path == root or _within(path, root) for root in mounts.values()):
-            return rewrite(match)
-        return url
+        raw = Path(url2pathname(unquote(urlsplit(url).path)))
+        rewritten = mounted(match)
+        if rewritten != url:
+            return rewritten
+        if raw.is_symlink() or raw.suffix.lower() not in _LOGO_SUFFIXES or not raw.is_file():
+            return url
+        path = raw.resolve()
+        key = f"/file/{hashlib.sha256(str(path).encode()).hexdigest()[:16]}/{path.name}"
+        sandbox.files[key] = path
+        return f"{ORIGIN}{key}"
 
-    def walk(value: Any, *, trusted: bool) -> Any:
+    def walk(value: Any, *, in_logo: bool = False) -> Any:
         if isinstance(value, str):
-            return _FILE_URL.sub(rewrite if trusted else within_mounts, value)
+            return _FILE_URL.sub(logo if in_logo else mounted, value)
         if isinstance(value, list):
-            return [walk(item, trusted=trusted) for item in value]
+            return [walk(item, in_logo=in_logo) for item in value]
         if isinstance(value, dict):
-            return {key: walk(item, trusted=trusted or key == "logo") for key, item in value.items()}
+            return {key: walk(item, in_logo=in_logo or key == "logo") for key, item in value.items()}
         return value
 
     raw = context.model_dump()
-    raw["engine"] = walk(raw["engine"], trusted=True)
-    raw["assets"] = walk(raw["assets"], trusted=True)
-    raw["data"] = walk(raw["data"], trusted=False)
-    raw["theme"] = walk(raw["theme"], trusted=False)
+    for part in ("engine", "assets", "data", "theme"):
+        raw[part] = walk(raw[part])
     return sandbox, TemplateContext.model_validate(raw)
 
 

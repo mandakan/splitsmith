@@ -147,8 +147,12 @@ def resolve(declared: dict[str, object], *, root: Path | None = None) -> dict[st
         file = own_file(value)
         if file is None:
             out[role] = value
-        elif root is not None and (root / OWN_DIR / file).is_file():
-            out[role] = str((root / OWN_DIR / file).resolve())
+        elif root is not None:
+            # Never a symlink: a link to /proc/self/environ would put that
+            # file in the engine stylesheet (security review of #1266).
+            candidate = root / OWN_DIR / file
+            if candidate.is_file() and not candidate.is_symlink():
+                out[role] = str(candidate.resolve())
     return out
 
 
