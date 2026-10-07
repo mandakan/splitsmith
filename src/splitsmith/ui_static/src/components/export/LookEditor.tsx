@@ -39,6 +39,7 @@ import {
   styleOptions,
   type LookDraft,
 } from "@/lib/lookEditor";
+import { BrandPicker } from "@/components/export/BrandPicker";
 import { FontPicker, type OwnFonts } from "@/components/export/FontPicker";
 import { PaletteSuggestions } from "@/components/export/PaletteSuggestions";
 import { TemplateEditor } from "@/components/export/TemplateEditor";
@@ -523,6 +524,19 @@ function CardStyles({
   const own = useOwnFonts(name, hosted);
   return (
     <div className="flex flex-col">
+      <BrandPicker
+        name={name}
+        draft={draft}
+        setDraft={setDraft}
+        hosted={hosted}
+        upload={async (file) => {
+          try {
+            return await api.uploadBrandLogo(name, file);
+          } catch (err) {
+            throw new Error(fontUploadRefusal(err), { cause: err });
+          }
+        }}
+      />
       {CARD_STYLE_SLOTS.map(({ slot, label }) => (
         <div
           key={slot}

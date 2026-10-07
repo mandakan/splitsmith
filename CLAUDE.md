@@ -303,6 +303,18 @@ template renders were pixel-identical to the old ``file://`` path at the
 switch; ``overlay_raster.png`` (our own overlay HTML) still navigates by
 ``file://`` and is not sandboxed.
 
+A Look carries **your brand** (the branding work): ``look.json``'s ``brand``
+(``looks.LookBrand``: a content-named ``brand-<12hex>.<ext>`` in the Look's
+``brand/`` folder, written by ``look_brand.save_brand_logo`` with the shooter
+logo's checks, and a line). ``look_brand.brand_json`` hands it to the title
+page and the closing card only, as ``data.brand``; a Look without one sends no
+key, so its contexts, digests and pixels are what they were (checked against
+main for every shipped card). ``_shared/brand.js`` draws it as the centrepiece
+and moves the cell below it. The upload and serve routes are local only, and
+``db.looks._check_hosted`` refuses a brand *logo* (the line is fine) until Looks
+have a file store. It is the video maker's brand, never a shooter's: a shooter's
+logo stays theirs and nothing falls back between the two.
+
 An account's Looks (#1263) go through ``look_store.LookStore`` (``state.looks``;
 ``GET / PUT / DELETE /api/looks/{name}``): ``FolderLookStore`` over the Looks
 folder locally (``put`` on a hand-made Look rewrites only the stored fields of

@@ -27,7 +27,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Literal, get_args
 
-from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from .user_config import user_config_dir
 
@@ -122,6 +122,31 @@ def check_styles(value: dict[str, str]) -> dict[str, str]:
     return value
 
 
+#: A Look's own brand logo lives in this folder of the Look, named by content.
+BRAND_DIR = "brand"
+BRAND_FILE_RE = re.compile(r"brand-[0-9a-f]{12}\.(?:png|jpg|jpeg|webp)")
+BRAND_LINE_MAX = 60
+
+
+class LookBrand(BaseModel):
+    """``look.json``'s ``brand``: the logo and line the title page and the
+    closing card draw as their centrepiece (``look_brand``)."""
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    #: A file in the Look's ``brand/`` folder, ``brand-<12hex>.<ext>``.
+    logo: str | None = None
+    #: A line under the logo: a club, a sponsor, a name.
+    line: str = Field(default="", max_length=BRAND_LINE_MAX)
+
+    @field_validator("logo")
+    @classmethod
+    def _logo_shape(cls, value: str | None) -> str | None:
+        if value is not None and not BRAND_FILE_RE.fullmatch(value):
+            raise ValueError(f"brand logo {value!r} is not a file this Look stores (brand-<hash>.png)")
+        return value
+
+
 class LookManifest(BaseModel):
     """``look.json``. ``extra="ignore"`` so a manifest written by a newer
     splitsmith (with fields this version does not know) still loads."""
@@ -144,6 +169,8 @@ class LookManifest(BaseModel):
     #: Per card slot, the variant a request for ``default`` draws (#1263):
     #: the Look's card style. ``{"slate": "rise"}`` makes every slate rise.
     styles: dict[str, str] = {}
+    #: Your brand (the branding work): ``None`` draws the cards as before.
+    brand: LookBrand | None = None
 
     @field_validator("name")
     @classmethod
@@ -532,6 +559,9 @@ def look_catalog() -> list[LookInfo]:
 
 
 __all__ = [
+    "BRAND_DIR",
+    "BRAND_FILE_RE",
+    "LookBrand",
     "look_fingerprint",
     "look_files",
     "DEFAULT_LOOK",

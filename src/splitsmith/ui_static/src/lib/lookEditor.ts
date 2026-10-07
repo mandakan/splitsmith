@@ -218,6 +218,7 @@ export function isDirty(saved: LookDraft, draft: LookDraft): boolean {
         Object.entries(d.styles).sort(([a], [b]) => a.localeCompare(b)),
       ),
       fonts: Object.fromEntries(Object.entries(d.fonts ?? {}).sort(([a], [b]) => a.localeCompare(b))),
+      brand: d.brand && (d.brand.logo || d.brand.line) ? { logo: d.brand.logo ?? null, line: d.brand.line } : null,
     });
   return norm(saved) !== norm(draft);
 }

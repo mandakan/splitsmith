@@ -12,6 +12,7 @@
   document.write('<script src="' + window.splitsmith.assets.shared + '/fit.js"><\/script>');
   document.write('<script src="' + window.splitsmith.assets.shared + '/cell.js"><\/script>');
   document.write('<script src="' + window.splitsmith.assets.shared + '/identity.js"><\/script>');
+  document.write('<script src="' + window.splitsmith.assets.shared + '/brand.js"><\/script>');
 </script>
 </head>
 <body>
@@ -22,6 +23,7 @@
     window.__splitsmithMinFont = window.splitsmith.engine.min_font_size;
     window.splitsmith.engine.mount(window.splitsmith.data.groups);
     window.splitsmith.engine.mountIdentity(window.splitsmith.data.shooters, window.splitsmith.data.card.slot);
+    window.splitsmith.engine.mountBrand(window.splitsmith.data.brand);
   });
 </script>
 </body>
