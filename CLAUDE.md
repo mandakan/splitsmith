@@ -79,7 +79,9 @@ A green suite over a change is evidence the change didn't break anything known -
 
 ## Detection pipeline
 
-Beep detection runs inside per-stage derived search windows for multi-stage single-take videos (ffmpeg extracts the window's audio via -ss/-t; results are offset back to source-absolute). The shot-detection pipeline is a 3-voter ensemble, not raw signal processing:
+Beep detection runs inside per-stage derived search windows for multi-stage single-take videos (ffmpeg extracts the window's audio via -ss/-t; results are offset back to source-absolute). Its candidates are ranked by a logistic regression over seven per-run features (``beep_features.candidate_features``, the one implementation both runtime and trainer use), and confidence is a calibrated head over (logit, margin) (#949, spec 2026-10-06). The numbers are ``BeepRankerConfig`` defaults in ``config.py``, pasted from ``ranker_report.json``'s ``models.lr.final_fit``; ``tests/test_beep_ranker_config.py`` fails on any drift. To retrain after adding fixtures: rebuild the manifest, run ``scripts/train_beep_ranker.py``, paste the new ``final_fit``, regenerate ``baseline.json`` (``scripts/eval_beep_detector.py --track clip --json ...``) and list every newly wrong fixture in the PR. ``ranker: heuristic`` is the old hand-written product, kept as the escape hatch. The remaining misses are fixtures whose beep is never a candidate (run merging, late onsets), not ranking.
+
+The shot-detection pipeline is a 3-voter ensemble, not raw signal processing:
 
 - **Voter A** -- ``splitsmith.shot_detect`` envelope onsets, gated at the
   auto-calibrated ``min_confidence`` floor (the lowest positive-shot

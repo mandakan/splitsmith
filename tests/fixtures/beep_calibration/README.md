@@ -68,3 +68,6 @@ hand once a fixture is reviewed.
   evaluation of the learned ranker against today's detector, with the ship
   gate's verdict (#949, spec 2026-10-06). Regenerate with
   `uv run python scripts/train_beep_ranker.py`.
+* `baseline_heuristic.json` -- committed. The last run of the hand-written
+  ranker (`ranker: heuristic`) before the learned one became the default
+  (#949); `test_beep_regression.py` keeps that escape hatch honest on it.

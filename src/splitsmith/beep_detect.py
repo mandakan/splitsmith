@@ -15,9 +15,16 @@ Strategy:
    ``global_peak`` is held in reserve for cases where a gunshot dominates
    the band; ``min_abs_peak`` is a sub-noise sanity floor.
 
-3. **Composite scoring**: each candidate is ranked by
-   ``tanh(silence_score / silence_saturation_scale) * tonal_score *
-   dur_factor`` where:
+3. **Ranking**: every run gets seven timer-agnostic features
+   (``beep_features.candidate_features``: silence preference, tonal ratio,
+   duration, prominence over the floor, loudness relative to the window,
+   spectral flatness and prominence). By default a logistic regression
+   fitted on the labelled corpus (``BeepRankerConfig``, #949) turns them into
+   a probability that ranks the candidates, and a confidence head over
+   (logit, margin to the best other candidate) gives each one's confidence.
+   ``ranker: heuristic`` keeps the earlier hand-written product,
+   ``tanh(silence_score / silence_saturation_scale) * tonal_factor *
+   dur_factor``, with ``candidate_confidence``:
 
    * ``silence_score = run_peak / (max envelope in pre-silence window)``.
      IPSC beeps are preceded by ~3 s of "Are you ready / Stand by" + a
@@ -25,14 +32,12 @@ Strategy:
    * ``tonal_score = energy_in_3_kHz_band / energy_in_full_band``,
      in [0, 1]. The IPSC timer emits a near-pure ~3.0-3.3 kHz tone;
      gunshots, steel rings, and RO chatter spread energy across the
-     full 2-5 kHz band. ``tonal_weight`` controls how strongly this
-     component tilts the ranking. ``dur_factor`` ramps
-     0 -> 1 between ``dur_match_min_ms`` and ``dur_match_full_ms``,
-     squared, demoting short transients.
+     full 2-5 kHz band. ``dur_factor`` ramps 0 -> 1 between
+     ``dur_match_min_ms`` and ``dur_match_full_ms``, squared.
 
-   The silence term is the only unbounded one, so it is saturated before
-   the product. Raw, it scales with absolute loudness and decides the
-   ranking by itself -- which is how gunshots outrank beeps (issue #949).
+   Multiplying hand-picked factors let one of them decide the ranking
+   (loudness, until #950 saturated it); learning the combination from the
+   corpus took top-1 from 51 % to 84 % out of fold (#949).
 
 4. **Adaptive rise-foot leading edge**: walk backward from the run's peak
    while the envelope stays above ``max(peak * RISE_FOOT_FRAC, noise_floor
