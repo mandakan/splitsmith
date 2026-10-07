@@ -315,6 +315,14 @@ mark, the line beside the logo, and never moves the card's text. The upload and 
 have a file store. It is the video maker's brand, never a shooter's: a shooter's
 logo stays theirs and nothing falls back between the two.
 
+The closing card ends with **"Made with splitsmith"** unless turned off
+(``MatchTitle.credit``, drawn by ``_shared/credit.js`` from ``data.credit``,
+which ``card_context`` sets on the ``closing`` slot only). The switch is
+``made_with``, on by default on every request body, ``ExportPresetBody``,
+``CardOptions``, ``MatchExportRequestData``, the preview request and both
+CLIs (``--no-made-with``); it joins the preview cache key only on a closing
+card that draws it. A closing card with it off is the card it always was.
+
 An account's Looks (#1263) go through ``look_store.LookStore`` (``state.looks``;
 ``GET / PUT / DELETE /api/looks/{name}``): ``FolderLookStore`` over the Looks
 folder locally (``put`` on a hand-made Look rewrites only the stored fields of

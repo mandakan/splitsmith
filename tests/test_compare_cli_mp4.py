@@ -909,6 +909,10 @@ def test_card_flags_reach_the_renderer(tmp_path: Path, monkeypatch: pytest.Monke
     assert title.text == "Compare Match"
     assert title.info == ("Level II",)
     assert captured["closing"].text == "Compare Match"
+    assert captured["closing"].credit is True and title.credit is False
+    result = _invoke_mp4(match_root, tmp_path / "out2.mp4", "--closing-card", "--no-made-with")
+    assert result.exit_code == 0, result.output
+    assert captured["closing"].credit is False
 
 
 def test_title_page_carries_the_match_date_when_known(

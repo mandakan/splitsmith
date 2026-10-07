@@ -460,9 +460,11 @@ class MatchTitle:
     #: The Look template variant that draws it (``looks.DEFAULT_VARIANT``
     #: is the still card); a variant the Look lacks falls back to default.
     variant: str = "default"
-    #: The event's own logo, a file on this disk (the branding work): a
-    #: corner mark on the title page and the closing card.
+    #: The event's own logo, a file on this disk (the branding work): the
+    #: centrepiece of the title page and the closing card.
     logo: Path | None = None
+    #: "Made with splitsmith" at the bottom; drawn on the closing card only.
+    credit: bool = False
 
 
 @dataclass(frozen=True)

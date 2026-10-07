@@ -106,6 +106,8 @@ class ExportPresetBody(BaseModel):
     title_page_seconds: float = 3.0
     title_division: bool = True
     closing_card: bool = False
+    #: "Made with splitsmith" on the closing card (on unless turned off).
+    made_with: bool = True
     stage_card_style: StageCardStyle = "none"
     stage_card_seconds: float = 1.5
     summary_hold_seconds: float = 0.0

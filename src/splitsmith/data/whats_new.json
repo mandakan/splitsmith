@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "made-with-credit",
+      "date": "2026-10-07",
+      "title": "Made with splitsmith on the closing card",
+      "body": "The closing card now ends with a small Made with splitsmith line. Turn it off under Credit in Details on the Export page; your choice is kept with your presets."
+    },
+    {
       "id": "event-logo",
       "date": "2026-10-07",
       "title": "The event's logo on the title page",

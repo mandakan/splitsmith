@@ -120,7 +120,8 @@ def test_mp4_export_forwards_the_cards_and_reports_the_timeline(
     comp = captured["comp"]
     assert comp.title_page.text == "Bromma Classifier"
     assert comp.title_page.info == ("2026-05-01", "M. Axell", "Production Optics")
-    assert comp.closing is not None
+    assert comp.closing is not None and comp.closing.credit is True
+    assert comp.title_page.credit is False
     assert comp.stages[0].title.style == "slate"
     assert comp.stages[0].title.duration_seconds == 2.0
     assert out.exists()

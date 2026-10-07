@@ -342,6 +342,8 @@ class MatchExportRequestData:
     event_logo: Path | None = None
     title_page_duration_seconds: float = 3.0
     closing_card: bool = False
+    #: "Made with splitsmith" at the bottom of the closing card.
+    made_with: bool = True
     # Issue #1242. The Look template variant every generated card draws
     # with (``default`` is the still card; the shipped ``splitsmith`` Look
     # adds ``rise``). One knob for all slots until the gallery (#1246)
@@ -709,7 +711,11 @@ def export_match(
                 else None
             )
             closing = (
-                replace(card, variant=request.closing_card_variant or request.card_variant)
+                replace(
+                    card,
+                    variant=request.closing_card_variant or request.card_variant,
+                    credit=request.made_with,
+                )
                 if request.closing_card
                 else None
             )

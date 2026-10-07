@@ -78,6 +78,7 @@ export function previewBody(
     width: PREVIEW_WIDTH,
     title_info: settings.renderOptions.titleInfo.trim() || null,
     title_division: settings.renderOptions.titleDivision,
+    made_with: settings.renderOptions.madeWith,
     project_name: projectName.trim() || null,
   };
   const resolved = resolveLookChoice(looks, lookChoiceOf(settings));

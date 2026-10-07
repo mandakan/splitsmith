@@ -72,6 +72,7 @@ const matchPayload: Required<MatchExportRequestPayload> = {
   title_division: false,
   title_page_duration_seconds: 3,
   closing_card: true,
+  made_with: false,
   summary_hold_seconds: 3,
 };
 
@@ -122,6 +123,7 @@ describe("export wrappers forward every declared field", () => {
       title_division: false,
       title_page_duration_seconds: 3,
       closing_card: true,
+      made_with: false,
       stage_titles: "slate",
       title_duration_seconds: 1.5,
       overlay: true,

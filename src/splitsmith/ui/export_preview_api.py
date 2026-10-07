@@ -60,6 +60,8 @@ class ExportPreviewRequest(BaseModel):
     width: int = Field(default=960, ge=160, le=1920)
     title_info: str | None = None
     title_division: bool = True
+    #: "Made with splitsmith" on the closing card.
+    made_with: bool = True
     head_pad_seconds: float = Field(default=5.0, ge=0)
     tail_pad_seconds: float = Field(default=5.0, ge=0)
     #: The bundle name, as the match export's ``project_name``.
@@ -152,6 +154,7 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
         motion=req.motion,
         backdrop=req.backdrop,
         event_logo=event_logo.name if event_logo is not None else None,
+        made_with=req.made_with,
         draft=(
             None
             if req.draft is None and not req.templates

@@ -199,6 +199,8 @@ class MatchExportRequest(BaseModel):
     title_division: bool = True
     title_page_duration_seconds: float = 3.0
     closing_card: bool = False
+    #: "Made with splitsmith" at the bottom of the closing card.
+    made_with: bool = True
     # Issue #1242. The Look template variant every generated card draws
     # with; ``default`` is the still card, the shipped Look adds ``rise``.
     # The CLI's one knob and the fallback for the per-slot fields below.
@@ -258,6 +260,8 @@ class CompareGridRequest(BaseModel):
     title_division: bool = True
     title_page_duration_seconds: float = 3.0
     closing_card: bool = False
+    #: "Made with splitsmith" at the bottom of the closing card.
+    made_with: bool = True
     # Issue #1242. The Look template variant every generated card draws
     # with; ``default`` is the still card, the shipped Look adds ``rise``.
     # The CLI's one knob and the fallback for the per-slot fields (#1246).

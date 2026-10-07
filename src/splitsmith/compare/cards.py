@@ -32,6 +32,8 @@ class CardOptions:
     title_division: bool = True
     title_page_duration_seconds: float = 3.0
     closing_card: bool = False
+    #: "Made with splitsmith" at the bottom of the closing card.
+    made_with: bool = True
     #: The Look template variant every card draws with (#1242); the
     #: per-slot fields (#1246) win where set.
     card_variant: str = "default"
@@ -73,7 +75,7 @@ def title_cards(
         text=card.text, info=card.info, duration_seconds=cards.title_page_duration_seconds, logo=event_logo
     )
     title = replace(card, variant=cards.title_page_variant or cards.card_variant)
-    closing = replace(card, variant=cards.closing_card_variant or cards.card_variant)
+    closing = replace(card, variant=cards.closing_card_variant or cards.card_variant, credit=cards.made_with)
     return (title if cards.title_page else None), (closing if cards.closing_card else None)
 
 

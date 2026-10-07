@@ -1067,6 +1067,7 @@ export interface ExportPresetBody {
   title_page_seconds: number;
   title_division: boolean;
   closing_card: boolean;
+  made_with: boolean;
   stage_card_style: "none" | "slate" | "lower-third";
   stage_card_seconds: number;
   summary_hold_seconds: number;
@@ -1216,6 +1217,8 @@ export interface ExportPreviewBody {
   width?: number;
   title_info?: string | null;
   title_division?: boolean;
+  /** "Made with splitsmith" on the closing card. Server default on. */
+  made_with?: boolean;
   head_pad_seconds?: number;
   tail_pad_seconds?: number;
   /** The bundle name, as the match export's ``project_name``. */
@@ -1376,6 +1379,8 @@ export interface MatchExportRequestPayload {
   title_page_duration_seconds?: number;
   /** Close the rendered MP4 with a generated card. */
   closing_card?: boolean;
+  /** "Made with splitsmith" on the closing card. Server default on. */
+  made_with?: boolean;
   /** The Look (#1246): any installed Look name; the server default. */
   overlay_theme?: string;
   /** Per-slot template variants (#1246); unset means the server's ``card_variant`` knob. */
@@ -1459,6 +1464,8 @@ export interface CompareGridRequestPayload {
   title_division?: boolean;
   title_page_duration_seconds?: number;
   closing_card?: boolean;
+  /** "Made with splitsmith" on the closing card. Server default on. */
+  made_with?: boolean;
   stage_titles?: "none" | "slate" | "lower-third";
   title_duration_seconds?: number;
   /** Issue #705. The splits overlay (per-tile counter and split, the

@@ -96,6 +96,21 @@ export function DetailsGroup({
           </label>
         </Field>
       ) : null}
+      {drawsCards && settings.renderOptions.closingCard ? (
+        <Field label="Credit" help="A small line and mark at the bottom of the closing card.">
+          <label className="flex items-center gap-2 text-md text-ink-2">
+            <input
+              type="checkbox"
+              aria-label="Made with splitsmith"
+              checked={settings.renderOptions.madeWith}
+              disabled={busy}
+              onChange={(e) => patch({ renderOptions: { ...settings.renderOptions, madeWith: e.target.checked } })}
+              className="accent-[var(--color-ink)]"
+            />
+            Made with splitsmith
+          </label>
+        </Field>
+      ) : null}
       {publishing ? (
         <Field
           label="Description"
