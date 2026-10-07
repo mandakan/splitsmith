@@ -1033,25 +1033,12 @@ export type OverlayCodec = "auto" | "hevc-alpha" | "prores-4444";
  *  ``export_presets.ExportPresetBody``; every field has a server default
  *  and unknown fields are dropped there, so the SPA never needs to
  *  migrate a stored body. */
-/** Stage-to-stage transition kinds: the two FCP effects the FCPXML emits
- *  natively, the curated ffmpeg xfade list the MP4 renderer draws (#1244)
- *  and a Look sting, ``sting:<name>`` (#1245). The server's
- *  ``composition.TransitionKind`` plus ``"none"``. */
-export type TransitionKind =
-  | "none"
-  | "zoom"
-  | "static"
-  | "fade"
-  | "fadeblack"
-  | "dissolve"
-  | "slideleft"
-  | "slideright"
-  | "circleopen"
-  | "zoomin"
-  | "hblur"
-  | "smoothleft"
-  | "wipeleft"
-  | `sting:${string}`;
+/** Stage-to-stage transition kinds: ``"none"``, the two FCP effects the
+ *  FCPXML emits natively, an ffmpeg xfade name from the server's list
+ *  (``GET /api/looks`` ``transitions``, #1259) or a Look sting,
+ *  ``sting:<name>`` (#1245). Open on purpose: the server owns the list and
+ *  validates it; the gallery admits only what the catalog offers. */
+export type TransitionKind = string;
 
 export interface ExportPresetBody {
   schema_version?: number;
@@ -1118,6 +1105,17 @@ export interface LookInfo {
   accent_series: string[];
   preview: string | null;
   slots: Record<string, LookVariantInfo[]>;
+}
+
+/** One ffmpeg xfade family as the gallery shows it (#1259): a tile, its
+ *  directions (the first is what picking the tile selects) and a looping
+ *  preview. */
+export interface TransitionFamilyInfo {
+  id: string;
+  label: string;
+  help: string;
+  preview: string | null;
+  directions: { name: string; kind: string }[];
 }
 
 export type PreviewCard = "frame" | "title" | "slate" | "lower-third" | "summary" | "closing" | "overlay";
@@ -4900,7 +4898,7 @@ export const api = {
 
   getExportPresets: () => request<{ presets: ExportPreset[] }>("/api/settings/export-presets"),
   /** The installed Looks with their slots, variants and previews (#1246). */
-  listLooks: () => request<{ looks: LookInfo[] }>("/api/looks"),
+  listLooks: () => request<{ looks: LookInfo[]; transitions?: TransitionFamilyInfo[] }>("/api/looks"),
 
   /** The PNG for one card on one stage; rejects with an ApiError whose
    *  status the rail maps to a line (503 no browser, 409 no shots). */

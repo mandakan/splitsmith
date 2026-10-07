@@ -85,8 +85,8 @@ export function buildCompareGridPayload(input: {
   transitionSeconds?: number;
   /** The resolved Look choice (#1246); sent whenever given. */
   look?: LookChoice;
-  /** The stings the chosen Look offers (``sting:<name>``), for the kind filter. */
-  stings?: readonly string[];
+  /** The MP4 kinds the catalog offers (``requestLook``), for the kind filter. */
+  kinds?: readonly string[];
 }): CompareGridRequestPayload {
   const payload: CompareGridRequestPayload = {
     stage_numbers: [...input.stageNumbers].sort((a, b) => a - b),
@@ -95,7 +95,7 @@ export function buildCompareGridPayload(input: {
     canvas_height: input.canvas.height,
     output_name: input.outputName,
   };
-  const transition = visibleTransitionKind(input.transitionKind ?? "none", "mp4", "compare", input.stings ?? []);
+  const transition = visibleTransitionKind(input.transitionKind ?? "none", "mp4", "compare", input.kinds ?? []);
   if (transition !== "none") {
     payload.transition_kind = transition;
     payload.transition_duration_seconds = clampSeconds(input.transitionSeconds ?? 0.5, 0.1);
@@ -201,8 +201,8 @@ export interface MatchExportPayloadInput {
   youtubeConnected: boolean;
   /** The resolved Look choice (#1246); omitted, the server's defaults. */
   look?: LookChoice;
-  /** The stings the chosen Look offers (``sting:<name>``), for the kind filter. */
-  stings?: readonly string[];
+  /** The MP4 kinds the catalog offers (``requestLook``), for the kind filter. */
+  kinds?: readonly string[];
 }
 
 /** The single-shooter match-export request body, for either the desk
@@ -223,7 +223,7 @@ export function buildMatchExportPayload(input: MatchExportPayloadInput): MatchEx
     tail_pad_seconds: input.tailPad,
     ...camExportFields(input.camOptions),
     output_format: outputFormat,
-    transition_kind: visibleTransitionKind(input.transitionKind, outputFormat, "single", input.stings ?? []),
+    transition_kind: visibleTransitionKind(input.transitionKind, outputFormat, "single", input.kinds ?? []),
     transition_duration_seconds: clampSeconds(input.transitionSeconds, 0.1),
     ...matchExportFields(input.renderOptions, outputFormat, input.look),
     ...(input.look && nonDefault(input.look.look, DEFAULT_LOOK) ? { overlay_theme: input.look.look } : {}),

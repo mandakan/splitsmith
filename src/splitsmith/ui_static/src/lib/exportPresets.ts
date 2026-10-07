@@ -31,23 +31,6 @@ export const PADDING_PRESETS: Record<Exclude<PaddingPreset, "custom">, { label: 
     highlight: { label: "Highlight", head: 1.5, tail: 2.0 },
   };
 
-export const TRANSITIONS: { value: TransitionKind; label: string }[] = [
-  { value: "none", label: "Hard cut" },
-  { value: "static", label: "Static frame" },
-  { value: "zoom", label: "Zoom blur" },
-  { value: "fade", label: "Fade" },
-  { value: "fadeblack", label: "Fade through black" },
-  { value: "dissolve", label: "Dissolve" },
-  { value: "slideleft", label: "Slide left" },
-  { value: "slideright", label: "Slide right" },
-  { value: "circleopen", label: "Circle open" },
-  { value: "zoomin", label: "Zoom in" },
-  { value: "hblur", label: "Horizontal blur" },
-  { value: "smoothleft", label: "Smooth left" },
-  { value: "wipeleft", label: "Wipe left" },
-  { value: "sting:wipe", label: "Logo wipe" },
-];
-
 export const FORMAT_LABELS: Record<OutputFormat, string> = { fcpxml: "FCPXML", fcp7xml: "FCP 7 XML", mp4: "MP4" };
 
 /** The sentinel id the API creates under, and the row's "edited" state. */
@@ -276,8 +259,10 @@ export type SettingsGroup = "output" | "cut" | "look";
 export interface SummaryContext {
   /** Synced secondary cameras on the selection (the cams line shows only with some). */
   secondaryCount: number;
-  /** The stings the chosen Look offers (``sting:<name>``), so a chosen sting reads as itself. */
-  stings?: readonly string[];
+  /** The MP4 kinds the catalog offers (``requestLook``), so a chosen one reads as itself. */
+  kinds?: readonly string[];
+  /** What the page calls a kind ("Wind up"); unset, the kind itself. */
+  transitionLabel?: (kind: string) => string;
 }
 
 const CODEC_LABELS: Record<OverlayCodec, string> = {
@@ -313,10 +298,11 @@ export function groupSummary(s: ExportSettings, group: SettingsGroup, ctx: Summa
       if (cards) parts.push(cards);
       if (grid ? s.gridOverlay : s.includeOverlay) parts.push("overlay");
       if (
-        visibleTransitionKind(s.transitionKind, grid ? "mp4" : s.outputFormat, grid ? "compare" : "single", ctx.stings ?? []) !==
+        visibleTransitionKind(s.transitionKind, grid ? "mp4" : s.outputFormat, grid ? "compare" : "single", ctx.kinds ?? []) !==
         "none"
       ) {
-        parts.push(`${s.transitionKind} ${finite(s.transitionSeconds, 0.5).toFixed(1)} s`);
+        const label = ctx.transitionLabel ? ctx.transitionLabel(s.transitionKind) : s.transitionKind;
+        parts.push(`${label} ${finite(s.transitionSeconds, 0.5).toFixed(1)} s`);
       }
       return parts.length > 0 ? parts.join(" · ") : "No cards";
     }

@@ -15,7 +15,10 @@ import {
   transitionsSupported,
   type RenderOptions,
 } from "./renderOptions";
-import { visibleSlots } from "./lookGallery";
+import { DEFAULT_EXPORT_SETTINGS } from "./exportPresets";
+import { slotsForLook, visibleSlots } from "./lookGallery";
+import { BUILTIN_LOOKS } from "./looks";
+import { FAMILIES } from "@/test/transitionFamilies";
 
 const ON: RenderOptions = {
   titlePage: true,
@@ -156,7 +159,9 @@ describe("the mappers against the gallery registry", () => {
   it("never emit a card field the gallery hides for the format", () => {
     for (const format of ["fcpxml", "fcp7xml", "mp4"] as const) {
       const fields = matchExportFields(ON, format);
-      const slots = new Set(visibleSlots("single", format).map((s) => s.id));
+      const slots = new Set(
+        visibleSlots("single", format, slotsForLook(BUILTIN_LOOKS, DEFAULT_EXPORT_SETTINGS, FAMILIES)).map((s) => s.id),
+      );
       expect("title_page" in fields, format).toBe(slots.has("titlePage"));
       expect("closing_card" in fields, format).toBe(slots.has("closingCard"));
       expect("summary_hold_seconds" in fields, format).toBe(slots.has("summaryHold"));

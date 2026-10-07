@@ -32,10 +32,12 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from splitsmith import composition  # noqa: E402
+from splitsmith.composition import XFADE_FAMILIES  # noqa: E402
 from splitsmith.look_sting import sting_context  # noqa: E402
 from splitsmith.looks import (  # noqa: E402
     CARD_PREVIEW_SLOTS,
     PREVIEW_DIR,
+    TRANSITIONS_OWNER,
     Look,
     list_looks,
     load_look,
@@ -67,20 +69,6 @@ THUMBNAILS: tuple[str, ...] = (
     "transition-cut.png",
     "transition-static.png",
     "transition-zoom.png",
-    "transition-fade.webp",
-    "transition-fadeblack.webp",
-    "transition-dissolve.webp",
-    "transition-slideleft.webp",
-    "transition-slideright.webp",
-    "transition-circleopen.webp",
-    "transition-zoomin.webp",
-    "transition-hblur.webp",
-    "transition-smoothleft.webp",
-    "transition-wipeleft.webp",
-)
-#: The xfade kinds whose tile is a looping clip of the real transition.
-XFADE_LOOP_KINDS: tuple[str, ...] = tuple(
-    name[len("transition-") : -len(".webp")] for name in THUMBNAILS if name.endswith(".webp")
 )
 #: The loop: a quarter second of each side held around a one second fade.
 LOOP_FPS = 12
@@ -88,8 +76,8 @@ LOOP_FADE_SECONDS = 1.0
 LOOP_HOLD_SECONDS = 0.25
 #: ``subprocess.run``'s shape; the unit tests pass a stand-in that writes frames.
 Runner = Callable[..., subprocess.CompletedProcess]
-#: Every transition tile: the two FCP effects, the cut, and the xfade kinds
-#: the MP4 renderer draws (``composition.XFADE_KINDS``, issue #1244).
+#: The bundled transition tiles: the cut and the two FCP effects. The xfade
+#: families' looping previews ship with the Looks (issue #1259).
 TRANSITION_KINDS: tuple[str, ...] = tuple(
     name[len("transition-") :].rsplit(".", 1)[0] for name in THUMBNAILS if name.startswith("transition-")
 )
@@ -146,49 +134,12 @@ def _overlay(backdrop: Image.Image, *, rasterizer: Rasterizer, theme: OverlayThe
 
 
 def _xfade_mid_frame(kind: str, left: Image.Image, right: Image.Image) -> Image.Image:
-    """The xfade ``kind`` halfway through, drawn in PIL so the gallery's
-    tile shows what the boundary segment does without an ffmpeg run at
-    authoring time. Each kind reads differently at a glance; the real
-    frames come from ``scripts/render_match_frames.py --transition``."""
-    w, h = left.size
-    if kind in ("fade", "dissolve"):
-        out = Image.blend(left, right, 0.5)
-        if kind == "dissolve":
-            noise = Image.effect_noise((w, h), 96).point(lambda v: 255 if v > 128 else 0).convert("L")
-            out = Image.composite(right, left, noise)
-        return out
-    if kind == "fadeblack":
-        return Image.blend(left, Image.new("RGB", (w, h), (0, 0, 0)), 0.8)
-    if kind in ("slideleft", "slideright", "wipeleft", "smoothleft"):
-        out = left.copy()
-        if kind == "slideleft":
-            out.paste(right.crop((0, 0, w // 2, h)), (w // 2, 0))
-            out.paste(left.crop((w // 2, 0, w, h)), (0, 0))
-        elif kind == "slideright":
-            out.paste(right.crop((w // 2, 0, w, h)), (0, 0))
-            out.paste(left.crop((0, 0, w // 2, h)), (w // 2, 0))
-        elif kind == "wipeleft":  # the wipe edge past the middle: not the cut's seam
-            edge = int(w * 0.62)
-            out.paste(right.crop((edge, 0, w, h)), (edge, 0))
-        else:  # smoothleft: a soft edge
-            ramp = Image.linear_gradient("L").rotate(90, expand=True).resize((w, h))
-            out = Image.composite(left, right, ramp)
-        return out
-    if kind == "circleopen":
-        mask = Image.new("L", (w, h), 0)
-        r = min(w, h) // 3
-        ImageDraw.Draw(mask).ellipse((w // 2 - r, h // 2 - r, w // 2 + r, h // 2 + r), fill=255)
-        return Image.composite(right, left, mask.filter(ImageFilter.GaussianBlur(2)))
-    if kind == "zoomin":
-        bw, bh = int(w * 1.3), int(h * 1.3)
-        x0, y0 = (bw - w) // 2, (bh - h) // 2
-        zoomed = left.resize((bw, bh)).crop((x0, y0, x0 + w, y0 + h))
-        return Image.blend(zoomed, right, 0.5)
-    if kind == "hblur":
-        return Image.blend(
-            left.filter(ImageFilter.BoxBlur((12, 0))), right.filter(ImageFilter.BoxBlur((12, 0))), 0.5
-        )
-    raise ValueError(f"no thumbnail recipe for transition kind {kind!r}")
+    """Halfway through a plain ``fade``: the frame a sting's poster rides.
+    The xfade families' own previews are real ffmpeg loops
+    (:func:`build_transition_previews`)."""
+    if kind != "fade":
+        raise ValueError(f"no still recipe for transition kind {kind!r}; the families loop through ffmpeg")
+    return Image.blend(left, right, 0.5)
 
 
 def xfade_loop(
@@ -442,14 +393,28 @@ def build_thumbnails(
         )
         save("summary-hold.png", summary)
         save("overlay.png", _overlay(plain, rasterizer=rasterizer, theme=theme))
-        right = ImageChops.offset(plain, 150, 0)
         for kind in TRANSITION_KINDS:
-            if kind in XFADE_LOOP_KINDS:
-                path = out / f"transition-{kind}.webp"
-                save_loop(path, xfade_loop(kind, plain, right, ffmpeg=ffmpeg, runner=runner))
-                written.append(path)
-            else:
-                save(f"transition-{kind}.png", _transition(kind, plain, rasterizer=rasterizer, look=look))
+            save(f"transition-{kind}.png", _transition(kind, plain, rasterizer=rasterizer, look=look))
+    return written
+
+
+def build_transition_previews(
+    out_root: Path, *, ffmpeg: str | None = None, runner: Runner = subprocess.run
+) -> list[Path]:
+    """One looping preview per xfade family (issue #1259), its first
+    direction through the project ffmpeg, under
+    ``out_root / _transitions / preview / <family>.webp``; ``GET /api/looks``
+    names them and the Looks preview route serves them."""
+    ffmpeg = ffmpeg or _ffmpeg_default()
+    out = out_root / TRANSITIONS_OWNER / PREVIEW_DIR
+    out.mkdir(parents=True, exist_ok=True)
+    plain = paint_backdrop()
+    right = ImageChops.offset(plain, 150, 0)
+    written: list[Path] = []
+    for family in XFADE_FAMILIES:
+        path = out / f"{family.id}.webp"
+        save_loop(path, xfade_loop(family.directions[0].kind, plain, right, ffmpeg=ffmpeg, runner=runner))
+        written.append(path)
     return written
 
 
@@ -542,7 +507,8 @@ def main() -> int:
     parser.add_argument(
         "--look-previews",
         action="store_true",
-        help="also write every shipped Look's preview/ set under src/splitsmith/data/looks (#1246)",
+        help="also write every shipped Look's preview/ set and the transition families' loops under "
+        "src/splitsmith/data/looks (#1246, #1259)",
     )
     parser.add_argument("--ffmpeg", default=None, help="the ffmpeg for the transition loops (default: PATH)")
     args = parser.parse_args()
@@ -555,6 +521,7 @@ def main() -> int:
             for look in list_looks():
                 if look.source == "shipped":
                     written += build_look_previews(root, look=look, rasterizer=rasterizer, ffmpeg=args.ffmpeg)
+            written += build_transition_previews(root, ffmpeg=args.ffmpeg)
     for path in written:
         print(path)
     return 0

@@ -100,7 +100,11 @@ describe("non-finite seconds", () => {
     const blank: ExportSettings = { ...DEFAULT_EXPORT_SETTINGS, transitionKind: "zoom", transitionSeconds: Number.NaN, headPad: Number.NaN };
     expect(groupSummary(blank, "look", { secondaryCount: 0 })).toBe("zoom 0.5 s");
     const stung = { ...DEFAULT_EXPORT_SETTINGS, outputFormat: "mp4" as const, transitionKind: "sting:wipe" as const };
-    expect(groupSummary(stung, "look", { secondaryCount: 0, stings: ["sting:wipe"] })).toBe("sting:wipe 0.5 s");
+    expect(groupSummary(stung, "look", { secondaryCount: 0, kinds: ["sting:wipe"] })).toBe("sting:wipe 0.5 s");
+    const wind = { ...stung, transitionKind: "vuwind" };
+    expect(
+      groupSummary(wind, "look", { secondaryCount: 0, kinds: ["vuwind"], transitionLabel: () => "Wind up" }),
+    ).toBe("Wind up 0.5 s");
     expect(groupSummary(stung, "look", { secondaryCount: 0 })).toBe("No cards");
     expect(groupSummary(blank, "cut", { secondaryCount: 0 })).toBe("Full 5.0 / 5.0 s");
   });
@@ -161,10 +165,14 @@ describe("groupSummary", () => {
     // The single-shooter MP4 draws the xfade kinds since #1244, never the FCP effects;
     // the FCP 7 XML draws none.
     expect(groupSummary({ ...zoom, outputFormat: "mp4" }, "look", ctx)).toBe("No cards");
-    expect(groupSummary({ ...zoom, transitionKind: "fade", outputFormat: "mp4" }, "look", ctx)).toBe("fade 0.5 s");
+    expect(groupSummary({ ...zoom, transitionKind: "fade", outputFormat: "mp4" }, "look", { ...ctx, kinds: ["fade"] })).toBe(
+      "fade 0.5 s",
+    );
+    // Without the catalog's kinds an xfade is not drawn (#1259).
+    expect(groupSummary({ ...zoom, transitionKind: "fade", outputFormat: "mp4" }, "look", ctx)).toBe("No cards");
     expect(groupSummary({ ...zoom, outputFormat: "fcp7xml" }, "look", ctx)).toBe("No cards");
     // The grid draws the xfade kinds too (#1244); its summary names them.
-    expect(groupSummary({ ...zoom, mode: "compare", transitionKind: "fade", transitionSeconds: 1 }, "look", ctx)).toContain(
+    expect(groupSummary({ ...zoom, mode: "compare", transitionKind: "fade", transitionSeconds: 1 }, "look", { ...ctx, kinds: ["fade", "dissolve", "slideleft", "wipeleft"] })).toContain(
       "fade 1.0 s",
     );
   });

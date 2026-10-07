@@ -10,7 +10,7 @@ import typer
 from rich.console import Console
 
 from .. import camera_select
-from ..composition import uniform_transitions
+from ..composition import XFADE_KINDS, uniform_transitions
 from ..export_naming import slugify
 from ..looks import load_look
 from ..match_model import Match, is_match_folder
@@ -155,9 +155,9 @@ def export(
         "none",
         "--transition",
         help=(
-            "Transition between stages (--format mp4): 'none', an ffmpeg xfade (fade, fadeblack, "
-            "dissolve, slideleft, slideright, circleopen, zoomin, hblur, smoothleft, wipeleft) or a Look "
-            "sting ('sting:wipe')."
+            "Transition between stages (--format mp4): 'none', an ffmpeg xfade ("
+            + ", ".join(XFADE_KINDS)
+            + ") or a Look sting ('sting:wipe')."
         ),
     ),
     transition_seconds: float = typer.Option(

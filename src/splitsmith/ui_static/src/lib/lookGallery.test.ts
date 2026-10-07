@@ -22,6 +22,7 @@ import {
   type LookSlot,
 } from "@/lib/lookGallery";
 import { BUILTIN_LOOKS } from "@/lib/looks";
+import { FAMILIES, FAMILY_KINDS } from "@/test/transitionFamilies";
 import type { RenderOptions } from "@/lib/renderOptions";
 
 const ASSETS = resolve(__dirname, "../assets/look");
@@ -173,7 +174,7 @@ describe("read / write", () => {
 
 describe("visibility, pinned to the rules the render panel applied", () => {
   const ids = (mode: "single" | "trims" | "compare", format: "fcpxml" | "fcp7xml" | "mp4") =>
-    visibleSlots(mode, format).map((s) => s.id);
+    visibleSlots(mode, format, slotsForLook(BUILTIN_LOOKS, DEFAULT_EXPORT_SETTINGS, FAMILIES)).map((s) => s.id);
 
   it("single + MP4 offers everything, the transition included (#1244)", () => {
     expect(ids("single", "mp4")).toEqual([
@@ -189,8 +190,9 @@ describe("visibility, pinned to the rules the render panel applied", () => {
   it("a stored kind the format cannot draw is sent as none, so the tile and the render agree", () => {
     expect(visibleTransitionKind("zoom", "mp4")).toBe("none");
     expect(visibleTransitionKind("static", "mp4")).toBe("none");
-    expect(visibleTransitionKind("fade", "mp4")).toBe("fade");
-    expect(visibleTransitionKind("fade", "fcpxml")).toBe("none");
+    expect(visibleTransitionKind("fade", "mp4", "single", FAMILY_KINDS)).toBe("fade");
+    expect(visibleTransitionKind("fade", "mp4")).toBe("none");
+    expect(visibleTransitionKind("fade", "fcpxml", "single", FAMILY_KINDS)).toBe("none");
     expect(visibleTransitionKind("zoom", "fcpxml")).toBe("zoom");
     expect(visibleTransitionKind("zoom", "fcp7xml")).toBe("none");
     expect(visibleTransitionKind("none", "mp4")).toBe("none");
@@ -200,25 +202,12 @@ describe("visibility, pinned to the rules the render panel applied", () => {
     expect(visibleTransitionKind("sting:nope", "mp4", "single", ["sting:wipe"])).toBe("none");
   });
 
-  it("the transition slot offers the xfade kinds to MP4 and the two FCP effects to FCPXML", () => {
-    expect(visibleVariants(slot("transition"), "single", "mp4").map((v) => v.id)).toEqual([
-      "cut",
-      "fade",
-      "fadeblack",
-      "dissolve",
-      "slideleft",
-      "slideright",
-      "circleopen",
-      "zoomin",
-      "hblur",
-      "smoothleft",
-      "wipeleft",
-    ]);
-    expect(visibleVariants(slot("transition"), "single", "fcpxml").map((v) => v.id)).toEqual([
-      "cut",
-      "static",
-      "zoom",
-    ]);
+  it("the transition slot offers the server's families to MP4 and the two FCP effects to FCPXML", () => {
+    const transition = slotsForLook(BUILTIN_LOOKS, DEFAULT_EXPORT_SETTINGS, FAMILIES).find((s) => s.id === "transition")!;
+    expect(visibleVariants(transition, "single", "mp4").map((v) => v.id)).toEqual(["cut", "fade", "slide", "wind", "circle"]);
+    expect(visibleVariants(transition, "compare", "mp4").map((v) => v.id)).toEqual(["cut", "fade", "slide", "wind", "circle"]);
+    expect(visibleVariants(transition, "single", "fcpxml").map((v) => v.id)).toEqual(["cut", "static", "zoom"]);
+    expect(transition.variants.find((v) => v.id === "wind")!.previewUrl).toBe("/api/looks/_transitions/preview/wind.webp");
   });
 
   it("single + FCPXML offers the stage card, the overlay and the transition only", () => {
@@ -231,7 +220,7 @@ describe("visibility, pinned to the rules the render panel applied", () => {
 
   it("compare offers the match cards, the stage card, the grid overlay and the transition, never the hold", () => {
     expect(ids("compare", "mp4")).toEqual(["titlePage", "stageCard", "closingCard", "overlay", "transition"]);
-    expect(visibleTransitionKind("fade", "mp4", "compare")).toBe("fade");
+    expect(visibleTransitionKind("fade", "mp4", "compare", FAMILY_KINDS)).toBe("fade");
     expect(visibleTransitionKind("zoom", "mp4", "compare")).toBe("none");
   });
 
@@ -310,6 +299,63 @@ describe("transition tiles (#1246)", () => {
     for (const v of transition.variants) {
       const still = ["cut", "static", "zoom"].includes(v.id);
       expect(v.thumbnail.endsWith(still ? ".png" : ".webp"), v.id).toBe(true);
+    }
+  });
+});
+
+
+describe("transition families (#1259)", () => {
+  const S = DEFAULT_EXPORT_SETTINGS;
+  const transition = () => slotsForLook(BUILTIN_LOOKS, S, FAMILIES).find((s) => s.id === "transition")!;
+
+  it("a stored kind reads as its family's tile, an old preset's included", () => {
+    expect(transition().read({ ...S, transitionKind: "vuwind" })).toBe("wind");
+    expect(transition().read({ ...S, transitionKind: "slideleft" })).toBe("slide");
+    expect(transition().read({ ...S, transitionKind: "fade" })).toBe("fade");
+    expect(transition().read({ ...S, transitionKind: "none" })).toBe("cut");
+    expect(transition().read({ ...S, transitionKind: "zoom" })).toBe("zoom");
+  });
+
+  it("picking a family selects its first direction, and keeps the direction already picked", () => {
+    expect(transition().write({ ...S, transitionKind: "fade" }, "wind")).toEqual({ transitionKind: "hlwind" });
+    expect(transition().write({ ...S, transitionKind: "vuwind" }, "wind")).toEqual({ transitionKind: "vuwind" });
+    expect(transition().write({ ...S, transitionKind: "vuwind" }, "slide")).toEqual({ transitionKind: "slideleft" });
+    expect(transition().write(S, "cut")).toEqual({ transitionKind: "none" });
+    expect(transition().write(S, "zoom")).toEqual({ transitionKind: "zoom" });
+  });
+
+  it("a family tile carries its directions for the Direction control", () => {
+    const wind = transition().variants.find((v) => v.id === "wind")!;
+    expect(wind.directions!.map((d) => d.name)).toEqual(["left", "right", "up", "down"]);
+    expect(transition().variants.find((v) => v.id === "fade")!.directions).toHaveLength(1);
+  });
+
+  it("without the server's families the MP4 transition row is hidden, never a list of its own", () => {
+    expect(visibleSlots("single", "mp4").map((s) => s.id)).not.toContain("transition");
+  });
+});
+
+
+describe("a stored transition without the catalog (review of #1259)", () => {
+  it("a stored kind keeps its tile while the server's families are not there, so it can be changed or cut", () => {
+    const stored = { ...DEFAULT_EXPORT_SETTINGS, look: "splitsmith", transitionKind: "vuwind" };
+    const transition = visibleSlots("single", "mp4", slotsForLook(BUILTIN_LOOKS, stored, [])).find((s) => s.id === "transition");
+    expect(transition).toBeDefined();
+    expect(visibleVariants(transition!, "single", "mp4").map((v) => [v.id, v.name])).toEqual([
+      ["cut", "Hard cut"],
+      ["vuwind", "vuwind"],
+    ]);
+    expect(transition!.read(stored)).toBe("vuwind");
+    expect(transition!.write(stored, "cut")).toEqual({ transitionKind: "none" });
+  });
+
+  it("no stray tile once the families are there, or for the cut and the FCP effects", () => {
+    const stored = { ...DEFAULT_EXPORT_SETTINGS, transitionKind: "vuwind" };
+    const loaded = slotsForLook(BUILTIN_LOOKS, stored, FAMILIES).find((s) => s.id === "transition")!;
+    expect(loaded.variants.filter((v) => v.id === "vuwind")).toEqual([]);
+    for (const kind of ["none", "zoom", "static"]) {
+      const slot = slotsForLook(BUILTIN_LOOKS, { ...stored, transitionKind: kind }, []).find((s) => s.id === "transition")!;
+      expect(slot.variants.map((v) => v.id)).toEqual(["cut", "static", "zoom"]);
     }
   });
 });

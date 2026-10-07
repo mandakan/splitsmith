@@ -31,6 +31,7 @@ from rich.console import Console
 from rich.table import Table
 
 from . import camera_select, match_model, match_trims, user_config
+from .composition import XFADE_KINDS
 from .config import Config
 from .division import competitor_division
 from .match_model import (
@@ -471,9 +472,9 @@ def export(
         "none",
         "--transition",
         help=(
-            "Transition between stages: 'none', an ffmpeg xfade (fade, fadeblack, dissolve, slideleft, "
-            "slideright, circleopen, zoomin, hblur, smoothleft, wipeleft; mp4), a Look sting "
-            "('sting:wipe'; mp4) or an FCP effect (zoom, static; fcpxml)."
+            "Transition between stages: 'none', an ffmpeg xfade (mp4: "
+            + ", ".join(XFADE_KINDS)
+            + "), a Look sting ('sting:wipe'; mp4) or an FCP effect (zoom, static; fcpxml)."
         ),
     ),
     transition_seconds: float = typer.Option(

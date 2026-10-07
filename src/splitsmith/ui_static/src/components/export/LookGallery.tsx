@@ -9,7 +9,7 @@
 import { Seconds } from "@/components/export/Seconds";
 import { Field } from "@/components/ui/Field";
 import { Segmented } from "@/components/ui/Segmented";
-import type { LookInfo } from "@/lib/api";
+import type { LookInfo, TransitionFamilyInfo } from "@/lib/api";
 import type { LookFocus } from "@/lib/exportPreview";
 import type { ExportSettings } from "@/lib/exportPresets";
 import {
@@ -40,13 +40,24 @@ export interface LookGalleryProps {
   /** The installed Looks (#1246): the Look tiles, each card slot's Style
    *  and the chosen Look's stings come from it. */
   looks: LookInfo[];
+  /** The server's xfade families (#1259): the transition tiles and their directions. */
+  transitions?: TransitionFamilyInfo[];
 }
 
-export function LookGallery({ settings, patch, busy, bareHints, onHover, onSelect, looks }: LookGalleryProps) {
+export function LookGallery({
+  settings,
+  patch,
+  busy,
+  bareHints,
+  onHover,
+  onSelect,
+  looks,
+  transitions = [],
+}: LookGalleryProps) {
   const format = settings.mode === "compare" ? "mp4" : settings.outputFormat;
   return (
     <>
-      {visibleSlots(settings.mode, format, slotsForLook(looks, settings)).map((slot) => (
+      {visibleSlots(settings.mode, format, slotsForLook(looks, settings, transitions)).map((slot) => (
         <SlotRow
           key={slot.id}
           slot={slot}
@@ -104,6 +115,19 @@ function SlotRow({
           write: (value: string) => patch({ [styleField.field]: value } as Partial<ExportSettings>),
         }
       : null;
+  // A transition family's direction (#1259), under its tile while it is picked.
+  const directions = selected.directions ?? [];
+  const direction =
+    directions.length > 1
+      ? {
+          value: (directions.find((d) => d.kind === settings.transitionKind) ?? directions[0]).name,
+          options: directions.map((d) => ({ value: d.name, label: capitalise(d.name) })),
+          write: (value: string) => {
+            const hit = directions.find((d) => d.name === value);
+            if (hit) patch({ transitionKind: hit.kind });
+          },
+        }
+      : null;
   return (
     <Field label={slot.label} help={on && bareHint ? `${help} ${bareHint}` : help}>
       <div className="flex flex-wrap items-start gap-3">
@@ -144,6 +168,17 @@ function SlotRow({
             );
           })}
         </div>
+        {direction ? (
+          <div className="sm:pt-2">
+            <Segmented
+              label={`${slot.label} direction`}
+              value={direction.value}
+              options={direction.options}
+              onChange={direction.write}
+              disabled={busy}
+            />
+          </div>
+        ) : null}
         {style ? (
           <div className="sm:pt-2">
             <Segmented

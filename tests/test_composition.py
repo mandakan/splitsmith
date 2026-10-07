@@ -482,9 +482,13 @@ def test_summary_hold_attaches_to_its_stage(tmp_path: Path) -> None:
 
 
 def test_the_transition_catalog_is_the_curated_xfade_list_plus_the_fcp_effects() -> None:
-    """Issue #1244: the kinds are ffmpeg xfade names; the two FCP effects
-    keep their names and map to the nearest xfade for the MP4 renderers."""
-    assert composition.XFADE_KINDS == (
+    """Issues #1244, #1259: the kinds are ffmpeg xfade names, derived from
+    the families; every kind a preset or a script may have stored before
+    the families existed is still one; the two FCP effects keep their
+    names and map to the nearest xfade for the MP4 renderers."""
+    kinds = composition.XFADE_KINDS
+    assert len(kinds) == len(set(kinds))
+    for kind in (
         "fade",
         "fadeblack",
         "dissolve",
@@ -495,7 +499,59 @@ def test_the_transition_catalog_is_the_curated_xfade_list_plus_the_fcp_effects()
         "hblur",
         "smoothleft",
         "wipeleft",
-    )
+    ):
+        assert kind in kinds, kind
+    for kind in (
+        "fadewhite",
+        "radial",
+        "circleclose",
+        "pixelize",
+        "squeezeh",
+        "squeezev",
+        "coverleft",
+        "revealdown",
+        "hlwind",
+        "vdwind",
+        "slideup",
+        "wipedown",
+    ):
+        assert kind in kinds, kind
+    for skipped in (
+        "diagtl",
+        "hlslice",
+        "distance",
+        "rectcrop",
+        "circlecrop",
+        "fadegrays",
+        "fadefast",
+        "custom",
+    ):
+        assert skipped not in kinds, skipped
+    assert [f.id for f in composition.XFADE_FAMILIES] == [
+        "fade",
+        "fadeblack",
+        "fadewhite",
+        "dissolve",
+        "slide",
+        "smooth",
+        "wipe",
+        "cover",
+        "reveal",
+        "wind",
+        "circle",
+        "radial",
+        "zoomin",
+        "hblur",
+        "pixelize",
+        "squeeze",
+    ]
+    family, direction = composition.xfade_family("vuwind")
+    assert (family.id, direction.name) == ("wind", "up")
+    family, direction = composition.xfade_family("circleclose")
+    assert (family.id, direction.name, family.directions[0].kind) == ("circle", "close", "circleopen")
+    assert composition.xfade_family("sting:wipe") is None and composition.xfade_family("zoom") is None
+    for kind in ("hlwind", "squeezev", "radial"):
+        assert composition.validate_transition_kind(kind) == kind
     assert composition.FCP_KINDS == ("zoom", "static")
     assert composition.xfade_name("fade") == "fade"
     assert composition.xfade_name("zoom") == "zoomin"

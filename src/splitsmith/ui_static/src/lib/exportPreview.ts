@@ -5,7 +5,7 @@
  */
 import type { ExportPreviewBody, LookInfo, PreviewCard } from "@/lib/api";
 import { PADDING_PRESETS, type ExportSettings } from "@/lib/exportPresets";
-import { LOOK_SLOTS, type LookSlotId } from "@/lib/lookGallery";
+import { LOOK_SLOTS, type LookSlot, type LookSlotId } from "@/lib/lookGallery";
 import { BUILTIN_LOOKS, DEFAULT_LOOK, DEFAULT_VARIANT, lookChoiceOf, nonDefault, resolveLookChoice, type LookChoice } from "@/lib/looks";
 
 export interface LookFocus {
@@ -94,10 +94,16 @@ export function previewBody(
   return body;
 }
 
-export function previewCaption(focus: LookFocus | null, stageNumber: number): string {
+export function previewCaption(
+  focus: LookFocus | null,
+  stageNumber: number,
+  /** The gallery's slots (``slotsForLook``): the transition families and
+   *  stings live there, not in the static table (review of #1259). */
+  slots: readonly LookSlot[] = LOOK_SLOTS,
+): string {
   const stage = `Stage ${String(stageNumber).padStart(2, "0")}`;
   if (focus === null) return stage;
-  const slot = LOOK_SLOTS.find((s) => s.id === focus.slotId);
+  const slot = slots.find((s) => s.id === focus.slotId);
   const variant = slot?.variants.find((v) => v.id === focus.variantId);
   if (!slot || !variant) return stage;
   if (slot.id === "transition") return variant.name;

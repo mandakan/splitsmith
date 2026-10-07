@@ -20,8 +20,15 @@ function fetchLooks(): Promise<LooksState> {
   if (!pending) {
     pending = api
       .listLooks()
-      .then((r): LooksState => ({ looks: r.looks.length > 0 ? r.looks : BUILTIN_LOOKS, loaded: true, failed: false }))
-      .catch((): LooksState => ({ looks: BUILTIN_LOOKS, loaded: true, failed: true }))
+      .then(
+        (r): LooksState => ({
+          looks: r.looks.length > 0 ? r.looks : BUILTIN_LOOKS,
+          transitions: r.transitions ?? [],
+          loaded: true,
+          failed: false,
+        }),
+      )
+      .catch((): LooksState => ({ looks: BUILTIN_LOOKS, transitions: [], loaded: true, failed: true }))
       .then((state) => {
         settled = state;
         pending = null;
@@ -32,7 +39,7 @@ function fetchLooks(): Promise<LooksState> {
 }
 
 export function useLooks(): LooksState {
-  const [state, setState] = useState<LooksState>(() => settled ?? { looks: BUILTIN_LOOKS, loaded: false, failed: false });
+  const [state, setState] = useState<LooksState>(() => settled ?? { looks: BUILTIN_LOOKS, transitions: [], loaded: false, failed: false });
   useEffect(() => {
     let alive = true;
     void fetchLooks().then((s) => {

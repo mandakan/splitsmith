@@ -10,7 +10,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/Label";
-import { ApiError, api, type LookInfo } from "@/lib/api";
+import { ApiError, api, type LookInfo, type TransitionFamilyInfo } from "@/lib/api";
 import { useDeploymentMode } from "@/lib/features";
 import { previewBody, previewCaption, previewCardFor, previewLine, type LookFocus } from "@/lib/exportPreview";
 import type { ExportSettings } from "@/lib/exportPresets";
@@ -37,9 +37,14 @@ export interface PreviewPaneProps {
   enabled: boolean;
 }
 
-function genericFor(focus: LookFocus | null, looks: LookInfo[], settings: ExportSettings): string | null {
+function genericFor(
+  focus: LookFocus | null,
+  looks: LookInfo[],
+  settings: ExportSettings,
+  transitions: TransitionFamilyInfo[],
+): string | null {
   if (!focus) return null;
-  const variant = slotsForLook(looks, settings)
+  const variant = slotsForLook(looks, settings, transitions)
     .find((s) => s.id === focus.slotId)
     ?.variants.find((v) => v.id === focus.variantId);
   if (!variant) return null;
@@ -47,7 +52,7 @@ function genericFor(focus: LookFocus | null, looks: LookInfo[], settings: Export
 }
 
 export function PreviewPane({ slug, stageNumber, settings, projectName, focus, hover, enabled }: PreviewPaneProps) {
-  const { looks } = useLooks();
+  const { looks, transitions } = useLooks();
   const [still, setStill] = useState<string | null>(null);
   const [status, setStatus] = useState<number | null>(null);
   const [failed, setFailed] = useState(false);
@@ -135,10 +140,10 @@ export function PreviewPane({ slug, stageNumber, settings, projectName, focus, h
   );
 
   if (!enabled) return null;
-  const hovering = genericFor(hover, looks, settings);
-  const generic = card === null ? genericFor(focus, looks, settings) : null;
+  const hovering = genericFor(hover, looks, settings, transitions);
+  const generic = card === null ? genericFor(focus, looks, settings, transitions) : null;
   const src = hovering ?? generic ?? still;
-  const caption = previewCaption(hover ?? focus, stageNumber);
+  const caption = previewCaption(hover ?? focus, stageNumber, slotsForLook(looks, settings, transitions));
   return (
     <div className="border-b border-rule">
       <div className="flex items-center justify-between px-3.5 py-2">

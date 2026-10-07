@@ -357,12 +357,21 @@ itself, whatever a user Look of the same name shadows (no Look can be
 named this; ``_NAME_RE`` refuses a leading underscore)."""
 
 
+TRANSITIONS_OWNER = "_transitions"
+"""The owner the xfade families' looping previews are served under
+(issue #1259): ``data/looks/_transitions/preview/<family>.webp``. Not a
+Look; the leading underscore keeps it out of :func:`list_looks`."""
+
+
 def preview_owner_root(owner: str) -> Path | None:
     """The directory ``/api/looks/{owner}/preview/`` reads from: the shipped
-    default for :data:`SHIPPED_OWNER`, an installed Look's root for its
-    name, else ``None``."""
+    default for :data:`SHIPPED_OWNER`, the transition previews for
+    :data:`TRANSITIONS_OWNER`, an installed Look's root for its name, else
+    ``None``."""
     if owner == SHIPPED_OWNER:
         return _shipped_default().root
+    if owner == TRANSITIONS_OWNER:
+        return shipped_looks_dir() / TRANSITIONS_OWNER
     if owner in look_names():
         return load_look(owner).root
     return None
@@ -441,6 +450,7 @@ __all__ = [
     "LookVariantInfo",
     "PREVIEW_DIR",
     "SHIPPED_OWNER",
+    "TRANSITIONS_OWNER",
     "list_looks",
     "look_catalog",
     "load_look",

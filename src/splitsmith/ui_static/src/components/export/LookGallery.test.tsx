@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from "vitest";
 import { LookGallery } from "@/components/export/LookGallery";
 import type { LookInfo } from "@/lib/api";
 import { DEFAULT_EXPORT_SETTINGS, type ExportSettings } from "@/lib/exportPresets";
+import { FAMILIES } from "@/test/transitionFamilies";
 
 const CATALOG: LookInfo[] = [
   {
@@ -45,7 +46,9 @@ const CATALOG: LookInfo[] = [
 
 function mount(settings: ExportSettings, looks: LookInfo[] = CATALOG) {
   const patch = vi.fn();
-  render(<LookGallery settings={settings} patch={patch} busy={false} bareHints={{}} looks={looks} />);
+  render(
+    <LookGallery settings={settings} patch={patch} busy={false} bareHints={{}} looks={looks} transitions={FAMILIES} />,
+  );
   return patch;
 }
 
@@ -87,7 +90,41 @@ describe("LookGallery with a catalog", () => {
   it("offers the Look's sting among the transitions with its API preview", () => {
     mount(MP4);
     const transitions = screen.getByRole("radiogroup", { name: "Transition" });
-    const sting = within(transitions).getByRole("radio", { name: "Wipe" });
+    const sting = within(transitions).getByRole("radio", { name: "Wipe sting" });
     expect(sting.querySelector("img")?.getAttribute("src")).toContain("/api/looks/splitsmith/preview/transition-wipe.png");
+  });
+});
+
+
+describe("transition families (#1259)", () => {
+  it("offers the families as tiles with their looping previews", () => {
+    mount(MP4);
+    const row = screen.getByRole("radiogroup", { name: "Transition" });
+    expect(within(row).getAllByRole("radio").map((r) => r.textContent)).toEqual([
+      "Hard cut",
+      "Fade",
+      "Slide",
+      "Wind",
+      "Circle",
+      "Wipe sting",
+    ]);
+    expect(within(row).getByRole("radio", { name: "Wind" }).querySelector("img")?.getAttribute("src")).toContain(
+      "/api/looks/_transitions/preview/wind.webp",
+    );
+  });
+
+  it("shows a Direction under a family with more than one, and writes the kind", async () => {
+    const user = userEvent.setup();
+    const patch = mount({ ...MP4, transitionKind: "hlwind" });
+    const direction = screen.getByRole("group", { name: "Transition direction" });
+    expect(within(direction).getAllByRole("button").map((b) => b.textContent)).toEqual(["Left", "Right", "Up", "Down"]);
+    expect(within(direction).getByRole("button", { name: "Left" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(within(direction).getByRole("button", { name: "Up" }));
+    expect(patch).toHaveBeenCalledWith({ transitionKind: "vuwind" });
+  });
+
+  it("shows no Direction for a single-kind family or the cut", () => {
+    mount({ ...MP4, transitionKind: "fade" });
+    expect(screen.queryByRole("group", { name: "Transition direction" })).toBeNull();
   });
 });
