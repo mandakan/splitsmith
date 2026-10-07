@@ -69,8 +69,13 @@ def test_the_looks_routes_are_registered_once(client) -> None:
         ("GET", "/api/looks"),
         ("GET", "/api/looks/{name}"),
         ("GET", "/api/looks/{name}/preview/{file}"),
+        ("GET", "/api/looks/{name}/samples"),
+        ("GET", "/api/looks/{name}/templates"),
+        ("POST", "/api/looks/{name}/check"),
         ("POST", "/api/looks/{name}/duplicate"),
+        ("POST", "/api/looks/{name}/reveal"),
         ("PUT", "/api/looks/{name}"),
+        ("PUT", "/api/looks/{name}/templates"),
     ]
 
 

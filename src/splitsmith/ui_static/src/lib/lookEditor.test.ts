@@ -242,3 +242,27 @@ describe("serialQueue", () => {
     expect(await queue(async () => "after")).toBe("after");
   });
 });
+
+describe("previewRequest with templates", () => {
+  it("draws the variant being edited with the unsaved text", () => {
+    const d = draft();
+    const templates = [{ slot: "slate", variant: "rise", content: "<p>x</p>" }];
+    const base = { card: "slate" as const, look: "club", draft: d, stageNumber: 1, width: 960, at: null, sting: null };
+    expect(previewRequest({ ...base, variant: "rise", templates })).toEqual({
+      card: "slate",
+      stage_number: 1,
+      width: 960,
+      look: "club",
+      draft: d,
+      variant: "rise",
+      templates,
+    });
+    expect(previewRequest({ ...base, variant: "default", templates: [] })).toEqual({
+      card: "slate",
+      stage_number: 1,
+      width: 960,
+      look: "club",
+      draft: d,
+    });
+  });
+});

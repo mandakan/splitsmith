@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "template-editor",
+      "date": "2026-10-07",
+      "title": "Write your own card templates",
+      "body": "In the desktop app, the Look editor's Templates tab edits a card's HTML with a live preview, the data it receives and a check that names the broken line."
+    },
+    {
       "id": "look-editor",
       "date": "2026-10-07",
       "title": "Make your own Look",

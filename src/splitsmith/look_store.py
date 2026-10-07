@@ -38,9 +38,11 @@ from typing import Protocol
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .looks import (
+    DEFAULT_VARIANT,
     LOOK_NAME_RE,
     MANIFEST_FILE,
     RGB,
+    STING_SLOT,
     Look,
     LookError,
     LookManifest,
@@ -226,17 +228,77 @@ class FolderLookStore:
             shutil.rmtree(root)
 
 
-def draft_look(saved: Look, body: StoredLookBody, work: Path) -> Look:
-    """``saved`` with ``body``'s fields in place of its own, written under
-    ``work`` with a copy of every template it names: what the Look editor
-    previews before Save (#1264). Nothing of ``saved`` is touched."""
-    raw = {**saved.manifest.model_dump(mode="json", exclude={"source"}), **_body_fields(body)}
+#: The largest template the editor saves; a card is a page of HTML, not a bundle.
+MAX_TEMPLATE_BYTES = 256_000
+TEMPLATE_SLOTS: tuple[str, ...] = ("title_page", "slate", "lower_third", "closing", STING_SLOT)
+
+
+class TemplateEdit(BaseModel):
+    """One template's text for a slot and variant (the template editor, #1265)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    slot: str
+    variant: str
+    content: str = Field(max_length=MAX_TEMPLATE_BYTES)
+
+    @field_validator("slot")
+    @classmethod
+    def _slot(cls, value: str) -> str:
+        if value not in TEMPLATE_SLOTS:
+            raise ValueError(f"{value!r} is not a template slot; expected one of {TEMPLATE_SLOTS}")
+        return value
+
+    @field_validator("variant")
+    @classmethod
+    def _variant(cls, value: str) -> str:
+        if not LOOK_NAME_RE.fullmatch(value):
+            raise ValueError(f"{value!r} is not a variant name ({LOOK_NAME_RE.pattern})")
+        return value
+
+
+def template_file(slots: dict[str, dict[str, str]], slot: str, variant: str) -> str:
+    """The file a Look's ``slot`` / ``variant`` is written to: the one its
+    manifest already names, else ``<slot>-<variant>.html``."""
+    return slots.get(slot, {}).get(variant) or f"{slot}-{variant}.html"
+
+
+def apply_template_edits(root: Path, edits: Iterable[TemplateEdit]) -> None:
+    """Write each edit's text into the Look folder ``root`` and name it in
+    ``look.json``. The caller validates the folder after (``read_look``)."""
+    manifest_path = root / MANIFEST_FILE
+    raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+    slots: dict[str, dict[str, str]] = {
+        slot: ({DEFAULT_VARIANT: spec} if isinstance(spec, str) else dict(spec))
+        for slot, spec in (raw.get("slots") or {}).items()
+    }
+    for e in edits:
+        file = template_file(slots, e.slot, e.variant)
+        _write_atomic(root / file, e.content)
+        slots.setdefault(e.slot, {})[e.variant] = file
+    raw["slots"] = slots
+    _write_atomic(manifest_path, _dump(raw))
+
+
+def draft_look(
+    saved: Look, body: StoredLookBody | None, work: Path, edits: Iterable[TemplateEdit] = ()
+) -> Look:
+    """``saved`` with ``body``'s fields in place of its own (``None`` keeps
+    them) and ``edits``' template text, written under ``work`` beside a copy
+    of every template it names: what the Look and template editors preview
+    and check before Save (#1264, #1265). Nothing of ``saved`` is touched."""
+    raw = saved.manifest.model_dump(mode="json", exclude={"source"})
+    if body is not None:
+        raw.update(_body_fields(body))
     root = work / saved.name
     root.mkdir(parents=True, exist_ok=True)
     for variants in saved.manifest.slots.values():
         for file in variants.values():
             shutil.copyfile(saved.root / file, root / file)
     (root / MANIFEST_FILE).write_text(_dump(raw), encoding="utf-8")
+    edits = list(edits)
+    if edits:
+        apply_template_edits(root, edits)
     try:
         return read_look(root, "user")
     except LookError as exc:
@@ -281,7 +343,12 @@ __all__ = [
     "StoredLookBody",
     "body_from_manifest",
     "check_name",
+    "MAX_TEMPLATE_BYTES",
+    "TEMPLATE_SLOTS",
+    "TemplateEdit",
+    "apply_template_edits",
     "draft_look",
+    "template_file",
     "is_shipped_name",
     "manifest_for",
     "materialize",

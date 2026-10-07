@@ -324,8 +324,24 @@ def check_look(name: str, *, prober: Prober) -> CheckReport:
         except LookError as exc:
             return CheckReport(name, None, "missing", (CheckItem("look", "error", str(exc)),))
         raise AssertionError("unreachable: a Look that loads has a folder")  # pragma: no cover
+    return check_folder(name, root, source, prober=prober)  # type: ignore[arg-type]
+
+
+def sample_contexts(look: Look, slot: str, variant: str, work: Path) -> list[tuple[str, TemplateContext]]:
+    """What a ``slot`` / ``variant`` template of ``look`` receives in each
+    sample case ``looks check`` runs (the template editor's data panel,
+    #1265). The sample logo is written under ``work``."""
+    logo = _sample_logo(work)
+    return [
+        (case, _context(look, slot, variant, text, shooters)) for case, text, shooters in _cases(slot, logo)
+    ]
+
+
+def check_folder(name: str, root: Path, source: Literal["shipped", "user"], *, prober: Prober) -> CheckReport:
+    """:func:`check_look` on the Look folder ``root`` itself: the template
+    editor checks an unsaved draft written to a temporary folder (#1265)."""
     try:
-        look = read_look(root, source)  # type: ignore[arg-type]
+        look = read_look(root, source)
     except LookError as exc:
         return CheckReport(name, root, source, (CheckItem(MANIFEST_FILE, "error", str(exc)),))
 
@@ -528,9 +544,11 @@ __all__ = [
     "PREVIEW_WIDTH",
     "PreviewResult",
     "STARTERS",
+    "check_folder",
     "check_look",
     "new_look",
     "preview_look",
+    "sample_contexts",
     "strict_look",
     "template_for",
 ]

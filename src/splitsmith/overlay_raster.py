@@ -46,6 +46,7 @@ from __future__ import annotations
 import io
 import logging
 import math
+import re
 import tempfile
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
@@ -60,6 +61,16 @@ if TYPE_CHECKING:
     from .look_template import TemplateContext
 
 logger = logging.getLogger(__name__)
+
+
+def describe_page_error(error: object, template_name: str) -> str:
+    """A ``pageerror`` as the author needs it: its message, led by the line in
+    the template when the stack's first frame in that file names one (the
+    template editor and ``looks check``, #1265)."""
+    message = getattr(error, "message", None) or str(error)
+    stack = getattr(error, "stack", None) or ""
+    hit = re.search(rf"{re.escape(template_name)}:(\d+):\d+", stack)
+    return f"line {hit.group(1)}: {message}" if hit else message
 
 
 @dataclass(frozen=True)
@@ -387,7 +398,7 @@ class ChromiumRasterizer:
         try:
             browser_context.add_init_script(context.init_script())
             page = browser_context.new_page()
-            page.on("pageerror", lambda error: errors.append(getattr(error, "message", None) or str(error)))
+            page.on("pageerror", lambda error: errors.append(describe_page_error(error, template.name)))
             page.goto(template.resolve().as_uri(), wait_until="load")
             page.evaluate("document.fonts.ready")
         except BaseException:

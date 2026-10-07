@@ -8058,6 +8058,40 @@ def _proxy_ready_for(storage: Storage | None, proxy_keys: set[str], path_str: st
     return proxy_key_for(path_str) in proxy_keys
 
 
+def _reveal_in_file_manager(resolved: Path) -> None:
+    """Launch the OS file manager for ``resolved``, surfacing failures.
+
+    Without surfacing, a headless / minimal Linux install (no
+    ``xdg-open``) or a Wayland session without DBUS silently
+    swallows the click. Raising on nonzero exit lets the SPA toast.
+    ``explorer /select`` is opted out because it returns 1 even on
+    a successful selection -- treating that as failure would always
+    toast on Windows.
+    """
+    if sys.platform == "darwin":
+        cmd = ["open", "-R", str(resolved)]
+        check_exit = True
+    elif sys.platform.startswith("win"):
+        cmd = ["explorer", f"/select,{resolved}"]
+        check_exit = False
+    else:
+        # xdg-open doesn't support file selection; opening the parent
+        # is the closest cross-distro behaviour.
+        parent = resolved.parent if resolved.is_file() else resolved
+        cmd = ["xdg-open", str(parent)]
+        check_exit = True
+    try:
+        proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"failed to launch file manager: {exc}") from exc
+    if check_exit and proc.returncode != 0:
+        stderr = (proc.stderr or "").strip() or f"exit {proc.returncode}"
+        raise HTTPException(
+            status_code=500,
+            detail=f"file manager refused to open {resolved}: {stderr}",
+        )
+
+
 def create_app(
     *,
     project_root: Path | None = None,
@@ -15039,39 +15073,6 @@ def create_app(
             for e in entries
         ]
         return JSONResponse({"templates": payload})
-
-    def _reveal_in_file_manager(resolved: Path) -> None:
-        """Launch the OS file manager for ``resolved``, surfacing failures.
-
-        Without surfacing, a headless / minimal Linux install (no
-        ``xdg-open``) or a Wayland session without DBUS silently
-        swallows the click. Raising on nonzero exit lets the SPA toast.
-        ``explorer /select`` is opted out because it returns 1 even on
-        a successful selection -- treating that as failure would always
-        toast on Windows.
-        """
-        if sys.platform == "darwin":
-            cmd = ["open", "-R", str(resolved)]
-            check_exit = True
-        elif sys.platform.startswith("win"):
-            cmd = ["explorer", f"/select,{resolved}"]
-            check_exit = False
-        else:
-            # xdg-open doesn't support file selection; opening the parent
-            # is the closest cross-distro behaviour.
-            parent = resolved.parent if resolved.is_file() else resolved
-            cmd = ["xdg-open", str(parent)]
-            check_exit = True
-        try:
-            proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
-        except OSError as exc:
-            raise HTTPException(status_code=500, detail=f"failed to launch file manager: {exc}") from exc
-        if check_exit and proc.returncode != 0:
-            stderr = (proc.stderr or "").strip() or f"exit {proc.returncode}"
-            raise HTTPException(
-                status_code=500,
-                detail=f"file manager refused to open {resolved}: {stderr}",
-            )
 
     @app.post("/api/files/reveal")
     def reveal_file(req: RevealRequest) -> JSONResponse:

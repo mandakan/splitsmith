@@ -6,7 +6,7 @@
  * offers, the name a duplicate gets, and the preview requests. The sheet
  * maps these to primitives and owns no rule.
  */
-import { ApiError, type ExportPreviewBody, type LookInfo, type PreviewCard, type Rgb, type StoredLookBody } from "@/lib/api";
+import { ApiError, type ExportPreviewBody, type LookInfo, type PreviewCard, type Rgb, type StoredLookBody, type TemplateEdit } from "@/lib/api";
 
 export type LookDraft = StoredLookBody;
 
@@ -214,6 +214,10 @@ export function previewRequest(args: {
   width: number;
   at: number | null;
   sting: string | null;
+  /** A card's template variant other than the Look's default (the template editor). */
+  variant?: string;
+  /** The template editor's unsaved text. */
+  templates?: TemplateEdit[];
 }): ExportPreviewBody {
   const body: ExportPreviewBody = {
     card: args.card,
@@ -223,7 +227,9 @@ export function previewRequest(args: {
     draft: args.draft,
   };
   if (args.card === "sting" && args.sting) body.variant = args.sting;
+  else if (args.variant && args.variant !== "default") body.variant = args.variant;
   if (args.at !== null) body.at = args.at;
+  if (args.templates && args.templates.length > 0) body.templates = args.templates;
   return body;
 }
 
