@@ -36,7 +36,7 @@ from .identity import ResolvedIdentity
 from .look_sting import sting_context
 from .looks import Look, sting_template_for
 from .match_project import MatchProject
-from .overlay_card import build_card_still, build_lower_third, card_scale
+from .overlay_card import build_card_still, build_lower_third, card_backdrop, card_motion, card_scale
 from .overlay_html import single_html
 from .overlay_raster import Rasterizer
 from .overlay_single import OverlayRun, run_groups
@@ -92,6 +92,9 @@ class PreviewSpec:
     #: Content digest of an unsaved Look draft drawn in place of ``look``
     #: (#1264); part of the cache key only, the Look object is the caller's.
     draft: str | None = None
+    #: An animated template previews as a looping WebP of its own frames
+    #: (#1249); a still one, or a card no template draws, stays a PNG.
+    motion: bool = False
 
     @property
     def height(self) -> int:
@@ -129,6 +132,8 @@ def preview_key(
         fields["at"] = spec.at
     if spec.draft is not None:
         fields["draft"] = spec.draft
+    if spec.motion:
+        fields["motion"] = True
     payload = json.dumps(
         {
             **fields,
@@ -273,6 +278,8 @@ def render_preview(
     ``shooter`` is the shooter's resolved identity (#1243), drawn on the
     cards the way the render draws it."""
     theme = theme_for(look)
+    # A time on the slider is a still of that moment; motion is the whole run.
+    moving = spec.motion and spec.at is None
     if spec.at is not None:
         rasterizer = _AtTime(rasterizer, spec.at)
     try:
@@ -334,6 +341,10 @@ def render_preview(
             theme=theme,
             shooters=size["shooters"],  # type: ignore[arg-type]
         )
+        if moving:
+            webp = _sting_motion(template, context, spec, rasterizer, frame, theme)
+            if webp is not None:
+                return webp
         try:
             layer = rasterizer.render_template(
                 template, context=context, width=spec.width, height=spec.height
@@ -348,6 +359,12 @@ def render_preview(
             variant=spec.variant,
         )
         slot = "title_page" if spec.card == "title" else "closing"
+        if moving:
+            webp = _card_motion(
+                card, slot, spec, look, rasterizer, size["shooters"], frame, theme, lower=False
+            )
+            if webp is not None:
+                return webp
         image = build_card_still(card, slot=slot, rasterizer=rasterizer, backdrop=frame, **size)
     elif spec.card == "slate":
         slate = composition.TitleCard(
@@ -357,6 +374,12 @@ def render_preview(
             info=_rounds_info(stage),
             variant=spec.variant,
         )
+        if moving:
+            webp = _card_motion(
+                slate, "slate", spec, look, rasterizer, size["shooters"], frame, theme, lower=False
+            )
+            if webp is not None:
+                return webp
         image = build_card_still(slate, slot="slate", rasterizer=rasterizer, backdrop=frame, **size)
     elif spec.card == "lower-third":
         lower = composition.TitleCard(
@@ -366,6 +389,12 @@ def render_preview(
             info=_rounds_info(stage),
             variant=spec.variant,
         )
+        if moving:
+            webp = _card_motion(
+                lower, "lower_third", spec, look, rasterizer, size["shooters"], frame, theme, lower=True
+            )
+            if webp is not None:
+                return webp
         third = build_lower_third(lower, rasterizer=rasterizer, **size)
         image = None if third is None else _compose_over(frame, _to_png(third), spec, theme)
     elif spec.card == "summary":
@@ -403,6 +432,100 @@ def render_preview(
     if image is None:
         raise PreviewError(503, "the card could not be rasterized")
     return _to_png(image)
+
+
+#: The moving preview's frame rate and how long it holds the last frame
+#: before it loops: enough to read the motion, small enough to post.
+MOTION_FPS = 12
+MOTION_HOLD_MS = 1200
+
+
+def _webp(frames: list[Image.Image]) -> bytes:
+    durations = [round(1000 / MOTION_FPS)] * len(frames)
+    durations[-1] = MOTION_HOLD_MS
+    buf = io.BytesIO()
+    frames[0].save(
+        buf,
+        format="WEBP",
+        save_all=True,
+        append_images=frames[1:],
+        duration=durations,
+        loop=0,
+        quality=80,
+        method=4,
+    )
+    return buf.getvalue()
+
+
+def _layers(raw_frames, width: int, height: int) -> list[Image.Image]:  # type: ignore[no-untyped-def]
+    return [Image.frombytes("RGBA", (width, height), raw) for raw in raw_frames]
+
+
+def _card_motion(
+    card: composition.TitleCard | composition.MatchTitle,
+    slot: str,
+    spec: PreviewSpec,
+    look: Look,
+    rasterizer: Rasterizer,
+    shooters,  # type: ignore[no-untyped-def]
+    frame: Path | None,
+    theme: OverlayTheme,
+    *,
+    lower: bool,
+) -> bytes | None:
+    """The card's template frames over the backdrop its still uses, as a
+    looping WebP; ``None`` for a still template (the PNG path draws it)."""
+    motion = card_motion(
+        card,
+        slot=slot,  # type: ignore[arg-type]
+        width=spec.width,
+        height=spec.height,
+        fps=MOTION_FPS,
+        look=look,
+        rasterizer=rasterizer,
+        max_seconds=card.duration_seconds,
+        shooters=shooters,
+    )
+    if motion is None:
+        return None
+    try:
+        if not motion.animated:
+            return None
+        layers = _layers(motion.frames.frames, spec.width, spec.height)
+    finally:
+        motion.close()
+    if lower:
+        base = _compose_over(frame, None, spec, theme).convert("RGBA")
+    else:
+        base = card_backdrop(frame, width=spec.width, height=spec.height, look=look).convert("RGBA")
+    return _webp([Image.alpha_composite(base, layer).convert("RGB") for layer in layers])
+
+
+def _sting_motion(  # type: ignore[no-untyped-def]
+    template: Path,
+    context,
+    spec: PreviewSpec,
+    rasterizer: Rasterizer,
+    frame: Path | None,
+    theme: OverlayTheme,
+) -> bytes | None:
+    """The sting's frames over the stage's frame, as a looping WebP."""
+    frames = rasterizer.render_template_frames(
+        template,
+        context=context,
+        width=spec.width,
+        height=spec.height,
+        fps=MOTION_FPS,
+        max_seconds=STING_PREVIEW_SECONDS,
+    )
+    try:
+        if frames.duration <= 0:
+            return None
+        layers = _layers(frames.frames, spec.width, spec.height)
+    finally:
+        frames.close()
+    base = _compose_over(frame, None, spec, theme).convert("RGBA")
+    return _webp([Image.alpha_composite(base, layer).convert("RGB") for layer in layers])
 
 
 class _AtTime:

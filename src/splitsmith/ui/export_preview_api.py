@@ -70,6 +70,8 @@ class ExportPreviewRequest(BaseModel):
     #: place, and a time into the template instead of its poster.
     draft: StoredLookBody | None = None
     at: float | None = Field(default=None, ge=0, le=60)
+    #: An animated template as a looping WebP of its frames (#1249).
+    motion: bool = False
     #: The template editor's unsaved text (#1265); local only.
     templates: list[TemplateEdit] = Field(default_factory=list, max_length=32)
 
@@ -124,6 +126,7 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
         look=req.look,
         variant=req.variant,
         at=req.at,
+        motion=req.motion,
         draft=(
             None
             if req.draft is None and not req.templates
@@ -147,9 +150,11 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
         audit=audit_digest(audit_doc),
         owner=_owner(),
     )
+    # A moving preview is a WebP, a still a PNG; the key says which was asked.
+    for candidate in (cache_dir / f"{key}.png", cache_dir / f"{key}.webp"):
+        if candidate.exists():
+            return _image(candidate.read_bytes())
     cached = cache_dir / f"{key}.png"
-    if cached.exists():
-        return _png(cached.read_bytes())
 
     def _look(work: Path) -> Look:
         saved = load_look(req.look)
@@ -200,13 +205,20 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
         raise HTTPException(
             status_code=503, detail="the preview needs a browser: Playwright could not launch Chromium"
         ) from exc
+    if _is_webp(png):
+        cached = cached.with_suffix(".webp")
     try:
         cache_dir.mkdir(parents=True, exist_ok=True)
         cached.write_bytes(png)
     except OSError as exc:
         logger.warning("could not cache the export preview (%s)", exc)
-    return _png(png)
+    return _image(png)
 
 
-def _png(data: bytes) -> Response:
-    return Response(content=data, media_type="image/png", headers={"Cache-Control": "no-store"})
+def _is_webp(data: bytes) -> bool:
+    return data[:4] == b"RIFF" and data[8:12] == b"WEBP"
+
+
+def _image(data: bytes) -> Response:
+    media = "image/webp" if _is_webp(data) else "image/png"
+    return Response(content=data, media_type=media, headers={"Cache-Control": "no-store"})

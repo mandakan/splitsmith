@@ -57,12 +57,13 @@ class _StubRasterizer:
         self.frame_requests.append((template, context.model_dump(), width, height, fps, max_seconds))
         duration = self.motion_seconds
         count = 1 if duration <= 0 else max(1, math.ceil(min(duration, max_seconds) * fps - 1e-9))
-        blank = bytes(width * height * 4)
 
         def frames():
-            for _ in range(count):
+            # Each frame differs (a moving template's do), so an encoder that
+            # merges identical frames still sees the motion.
+            for i in range(count):
                 self.frames_rendered += 1
-                yield blank
+                yield bytes([255, 255, 255, min(255, 40 * i)]) * (width * height)
 
         return TemplateFrames(
             duration=duration, frame_count=count, width=width, height=height, frames=frames()
@@ -235,3 +236,49 @@ def test_the_preview_takes_the_look_and_the_variant(client) -> None:
     assert _StubRasterizer.launches == 3, "three keys, three renders"
     refused = client.post(ROUTE, json={"card": "title", "stage_number": 1, "look": "nope"})
     assert refused.status_code == 422 and "splitsmith" in refused.text
+
+
+# --- moving previews (#1249) ---------------------------------------------------------------
+
+
+def test_an_animated_card_previews_as_a_looping_webp(client) -> None:
+    _StubRasterizer.motion_seconds = 0.5
+    try:
+        r = client.post(ROUTE, json={"card": "title", "stage_number": 1, "width": 480, "motion": True})
+    finally:
+        _StubRasterizer.motion_seconds = 0.0
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == "image/webp"
+    with Image.open(io.BytesIO(r.content)) as im:
+        assert im.size == (480, 270)
+        assert getattr(im, "n_frames", 1) > 1
+        assert im.info.get("loop") == 0
+
+
+def test_a_still_card_stays_a_png_even_when_motion_is_asked(client) -> None:
+    r = client.post(ROUTE, json={"card": "slate", "stage_number": 1, "width": 480, "motion": True})
+    assert r.status_code == 200 and r.headers["content-type"] == "image/png"
+
+
+@pytest.mark.parametrize("card", ["frame", "summary", "overlay"])
+def test_cards_without_a_template_never_move(client, card: str) -> None:
+    _StubRasterizer.motion_seconds = 0.5
+    try:
+        r = client.post(ROUTE, json={"card": card, "stage_number": 1, "width": 480, "motion": True})
+    finally:
+        _StubRasterizer.motion_seconds = 0.0
+    assert r.status_code == 200 and r.headers["content-type"] == "image/png"
+
+
+def test_motion_and_still_are_cached_apart(client) -> None:
+    _StubRasterizer.motion_seconds = 0.5
+    try:
+        body = {"card": "closing", "stage_number": 1, "width": 480}
+        still = client.post(ROUTE, json=body)
+        moving = client.post(ROUTE, json={**body, "motion": True})
+        again = client.post(ROUTE, json={**body, "motion": True})
+    finally:
+        _StubRasterizer.motion_seconds = 0.0
+    assert still.headers["content-type"] == "image/png"
+    assert moving.headers["content-type"] == "image/webp" and again.content == moving.content
+    assert _StubRasterizer.launches == 2

@@ -91,8 +91,13 @@ export function previewBody(
     body.head_pad_seconds = finite(settings.headPad, PADDING_PRESETS.full.head);
     body.tail_pad_seconds = finite(settings.tailPad, PADDING_PRESETS.full.tail);
   }
+  // A card a template draws previews moving when its template animates
+  // (#1249); the server answers a still card with the PNG it always did.
+  if (MOVING_CARDS.has(card)) body.motion = true;
   return body;
 }
+
+const MOVING_CARDS: ReadonlySet<PreviewCard> = new Set(["title", "slate", "lower-third", "closing"]);
 
 export function previewCaption(
   focus: LookFocus | null,
