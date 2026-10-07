@@ -45,6 +45,7 @@ export const TRANSITIONS: { value: TransitionKind; label: string }[] = [
   { value: "hblur", label: "Horizontal blur" },
   { value: "smoothleft", label: "Smooth left" },
   { value: "wipeleft", label: "Wipe left" },
+  { value: "sting:wipe", label: "Logo wipe" },
 ];
 
 export const FORMAT_LABELS: Record<OutputFormat, string> = { fcpxml: "FCPXML", fcp7xml: "FCP 7 XML", mp4: "MP4" };

@@ -29,7 +29,12 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from splitsmith import composition  # noqa: E402
-from splitsmith.looks import Look, load_look  # noqa: E402
+from splitsmith.look_sting import sting_context  # noqa: E402
+from splitsmith.looks import (  # noqa: E402
+    Look,
+    load_look,
+    sting_template_for,  # noqa: E402
+)
 from splitsmith.match_project import StageScorecard  # noqa: E402
 from splitsmith.overlay_card import build_card_still, build_lower_third, card_scale  # noqa: E402
 from splitsmith.overlay_html import single_html  # noqa: E402
@@ -65,6 +70,7 @@ THUMBNAILS: tuple[str, ...] = (
     "transition-hblur.png",
     "transition-smoothleft.png",
     "transition-wipeleft.png",
+    "transition-sting-wipe.png",
 )
 #: Every transition tile: the two FCP effects, the cut, and the xfade kinds
 #: the MP4 renderer draws (``composition.XFADE_KINDS``, issue #1244).
@@ -169,14 +175,47 @@ def _xfade_mid_frame(kind: str, left: Image.Image, right: Image.Image) -> Image.
     raise ValueError(f"no thumbnail recipe for transition kind {kind!r}")
 
 
-def _transition(kind: str, backdrop: Image.Image) -> Image.Image:
+def _sting_frame(name: str, base: Image.Image, *, rasterizer: Rasterizer, look: Look) -> Image.Image:
+    """The sting ``name`` at its poster (the band on the seam) over the
+    mid-fade frame it rides, drawn by the Look's own template."""
+    template = sting_template_for(look, name)
+    if template is None:
+        raise RuntimeError(f"the {look.name} Look has no sting {name!r}")
+    context = sting_context(
+        kind=f"sting:{name}",
+        seconds=1.0,
+        from_label=STAGE,
+        to_label="Stage 4",
+        width=WIDTH,
+        height=HEIGHT,
+        fps=30.0,
+        theme=theme_for(look),
+        shooters=(),
+    )
+    png = rasterizer.render_template(template, context=context, width=WIDTH, height=HEIGHT)
+    out = base.convert("RGBA")
+    with Image.open(io.BytesIO(png)) as band:
+        out.alpha_composite(band.convert("RGBA"))
+    return out
+
+
+def _transition(
+    kind: str, backdrop: Image.Image, *, rasterizer: Rasterizer | None = None, look: Look | None = None
+) -> Image.Image:
     """Two half-frames with the transition drawn on the seam: a hard edge,
     a desaturated held band, or a zoom-blurred band for the FCP effects; a
-    mid-fade frame of the whole tile for an xfade kind."""
+    mid-fade frame of the whole tile for an xfade kind; the Look's sting at
+    its poster over that mid-fade for ``sting-<name>`` (#1245)."""
     left = backdrop
     # The "next stage": the same scene rolled sideways, so the seam is a
     # real discontinuity (a mirror image would be continuous at it).
     right = ImageChops.offset(backdrop, 150, 0)
+    if kind.startswith("sting-"):
+        if rasterizer is None or look is None:
+            raise RuntimeError("a sting tile needs the rasterizer and the Look")
+        return _sting_frame(
+            kind[len("sting-") :], _xfade_mid_frame("fade", left, right), rasterizer=rasterizer, look=look
+        )
     if kind not in ("cut", "static", "zoom"):
         return _xfade_mid_frame(kind, left, right)
     out = Image.new("RGB", (WIDTH, HEIGHT))
@@ -254,7 +293,7 @@ def build_thumbnails(out: Path, *, rasterizer: Rasterizer, look: Look) -> list[P
         save("summary-hold.png", summary)
         save("overlay.png", _overlay(plain, rasterizer=rasterizer, theme=theme))
         for kind in TRANSITION_KINDS:
-            save(f"transition-{kind}.png", _transition(kind, plain))
+            save(f"transition-{kind}.png", _transition(kind, plain, rasterizer=rasterizer, look=look))
     return written
 
 

@@ -1034,9 +1034,24 @@ export type OverlayCodec = "auto" | "hevc-alpha" | "prores-4444";
  *  and unknown fields are dropped there, so the SPA never needs to
  *  migrate a stored body. */
 /** Stage-to-stage transition kinds: the two FCP effects the FCPXML emits
- *  natively and the curated ffmpeg xfade list the MP4 renderer draws
- *  (#1244). The server's ``composition.TransitionKind`` plus ``"none"``. */
-export type TransitionKind = "none" | "zoom" | "static" | "fade" | "fadeblack" | "dissolve" | "slideleft" | "slideright" | "circleopen" | "zoomin" | "hblur" | "smoothleft" | "wipeleft";
+ *  natively, the curated ffmpeg xfade list the MP4 renderer draws (#1244)
+ *  and a Look sting, ``sting:<name>`` (#1245). The server's
+ *  ``composition.TransitionKind`` plus ``"none"``. */
+export type TransitionKind =
+  | "none"
+  | "zoom"
+  | "static"
+  | "fade"
+  | "fadeblack"
+  | "dissolve"
+  | "slideleft"
+  | "slideright"
+  | "circleopen"
+  | "zoomin"
+  | "hblur"
+  | "smoothleft"
+  | "wipeleft"
+  | `sting:${string}`;
 
 export interface ExportPresetBody {
   schema_version?: number;

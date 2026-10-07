@@ -197,7 +197,8 @@ def main() -> int:
     parser.add_argument(
         "--transition",
         default="none",
-        help="a transition between the two stages: an xfade kind (fade, dissolve, ...) or zoom / static",
+        help="a transition between the two stages: an xfade kind (fade, dissolve, ...), zoom / static, "
+        "or a Look sting (sting:wipe)",
     )
     parser.add_argument(
         "--transition-seconds", type=float, default=1.0, help="its length, centred on the cut"

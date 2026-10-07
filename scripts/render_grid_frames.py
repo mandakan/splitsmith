@@ -463,7 +463,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--transition",
         default="none",
-        help="a transition between stages: an xfade kind (fade, dissolve, ...) or zoom / static",
+        help="a transition between stages: an xfade kind (fade, dissolve, ...), zoom / static, or a Look "
+        "sting (sting:wipe)",
     )
     parser.add_argument(
         "--transition-seconds", type=float, default=1.0, help="its length, centred on the cut"
