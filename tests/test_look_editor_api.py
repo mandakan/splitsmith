@@ -153,6 +153,17 @@ def test_duplicate_a_shipped_look_locally_keeps_its_templates(client) -> None:
     assert client.post("/api/looks/club/duplicate", json={"source": "splitsmith"}).status_code == 409
 
 
+def test_duplicate_takes_the_label_the_person_typed(client) -> None:
+    """The way in names the Look before it exists (UX pass): the copy is
+    stored under that label, not "<source> copy"."""
+    r = client.post("/api/looks/club-red/duplicate", json={"source": "splitsmith", "label": "Röda klubben"})
+    assert r.status_code == 201, r.text
+    assert r.json()["body"]["label"] == "Röda klubben"
+    assert client.get("/api/looks/club-red").json()["body"]["label"] == "Röda klubben"
+    too_long = client.post("/api/looks/club-x/duplicate", json={"source": "splitsmith", "label": "x" * 61})
+    assert too_long.status_code == 422
+
+
 def test_duplicate_refuses_an_unknown_source(client) -> None:
     assert client.post("/api/looks/club/duplicate", json={"source": "nope"}).status_code == 404
 

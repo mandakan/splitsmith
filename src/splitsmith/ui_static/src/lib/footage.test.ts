@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Job, MatchProject, ShooterListEntry, StageVideo } from "@/lib/api";
 import {
+  identityTarget,
   beepAction,
   buildFootageRows,
   chipBeepMark,
@@ -142,5 +143,19 @@ describe("skippedSummary", () => {
     const skipped = ["a: x", "b: x", "c: x", "d: x", "e: x"];
     expect(skippedSummary(skipped)).toBe("a: x; b: x; c: x; and 2 more");
     expect(skippedSummary(skipped.slice(0, 3))).toBe("a: x; b: x; c: x");
+  });
+});
+
+
+describe("identityTarget", () => {
+  const shooters = [
+    { slug: "s_1", name: "Mathias" },
+    { slug: "s_2", name: "Anna" },
+  ];
+  it("opens the Identity sheet the Look editor's logo link names, once the shooter is listed", () => {
+    expect(identityTarget("?identity=s_2", shooters)?.name).toBe("Anna");
+    expect(identityTarget("?identity=s_9", shooters)).toBeNull();
+    expect(identityTarget("", shooters)).toBeNull();
+    expect(identityTarget("?identity=s_1", [])).toBeNull();
   });
 });

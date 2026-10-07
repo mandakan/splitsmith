@@ -65,6 +65,11 @@ export interface LookEditorProps {
   hosted: boolean;
   /** After a delete: the page picks another Look. */
   onDeleted: () => void;
+  /** Made on the way in just now: until it is saved, backing out is Discard,
+   *  which removes it without asking, not Delete. */
+  isNew?: boolean;
+  /** The shooter's Identity sheet, for the palette's "Add a logo". */
+  identityHref?: string;
 }
 
 const titleCase = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -78,8 +83,12 @@ export function LookEditor({
   stageNumber,
   hosted,
   onDeleted,
+  isNew = false,
+  identityHref,
 }: LookEditorProps) {
   const confirm = useConfirm();
+  const [everSaved, setEverSaved] = useState(false);
+  const discardable = isNew && !everSaved;
   const [saved, setSaved] = useState<StoredLookBody | null>(null);
   const [draft, setDraft] = useState<LookDraft | null>(null);
   const [tab, setTab] = useState<Tab>("palette");
@@ -168,6 +177,7 @@ export function LookEditor({
         setReloadKey((k) => k + 1);
       }
       await refreshLooks();
+      setEverSaved(true);
     } catch (e) {
       setProblem(
         e instanceof ApiError ? e.message : "The Look could not be saved.",
@@ -178,11 +188,13 @@ export function LookEditor({
   };
 
   const remove = async () => {
-    const answer = await confirm({
-      title: `Delete the Look "${draft?.label || name}"?`,
-      confirmLabel: "Delete",
-    });
-    if (!answer.confirmed) return;
+    if (!discardable) {
+      const answer = await confirm({
+        title: `Delete the Look "${draft?.label || name}"?`,
+        confirmLabel: "Delete",
+      });
+      if (!answer.confirmed) return;
+    }
     try {
       await api.deleteLook(name);
       await refreshLooks();
@@ -213,7 +225,7 @@ export function LookEditor({
           }
         />
         <span className="text-sm text-muted">
-          {name} · {dirty ? "draft, not saved" : "saved"}
+          {discardable ? "new Look; Close keeps it, Discard removes it" : dirty ? "changes not saved" : "saved"}
         </span>
       </div>
       {errors.label ? (
@@ -249,6 +261,7 @@ export function LookEditor({
                 slug={slug}
                 stageNumber={stageNumber}
                 hosted={hosted}
+                identityHref={identityHref}
               />
               <Palette
                 draft={draft}
@@ -315,7 +328,7 @@ export function LookEditor({
           onClick={() => void remove()}
           disabled={!draft}
         >
-          Delete Look
+          {discardable ? "Discard" : "Delete Look"}
         </Button>
         {problem && draft ? (
           <p role="alert" className="text-sm text-destructive">

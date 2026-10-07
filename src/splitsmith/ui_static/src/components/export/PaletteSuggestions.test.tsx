@@ -104,5 +104,20 @@ describe("PaletteSuggestions", () => {
     render(<PaletteSuggestions draft={DRAFT} setDraft={vi.fn()} slug="me" stageNumber={2} />);
     expect(await screen.findByText(/this shooter has no logo yet/i)).toBeTruthy();
   });
+
+  it("links a shooter with no logo straight to their Identity sheet", async () => {
+    vi.mocked(api.paletteSources).mockResolvedValue({ footage: [], average: null, logo: [] });
+    render(
+      <PaletteSuggestions
+        draft={DRAFT}
+        setDraft={vi.fn()}
+        slug="me"
+        stageNumber={2}
+        identityHref="/match/m1/ingest?identity=me"
+      />,
+    );
+    const link = await screen.findByRole("link", { name: "Add a logo" });
+    expect(link.getAttribute("href")).toBe("/match/m1/ingest?identity=me");
+  });
 });
 

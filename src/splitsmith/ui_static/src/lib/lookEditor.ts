@@ -176,6 +176,24 @@ export function setStyle(
 }
 
 /** ``<source>-copy`` (then ``-copy-2`` ...), shortened to fit a Look name. */
+/** The Look name (a folder name, ``[a-z][a-z0-9_-]{0,31}``) for a label
+ *  someone typed on the way in, one no installed Look has. */
+export function lookNameFor(label: string, taken: readonly string[]): string {
+  let base = label
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  if (!base) base = "my-look";
+  if (!/^[a-z]/.test(base)) base = `look-${base}`;
+  for (let i = 1; ; i += 1) {
+    const suffix = i === 1 ? "" : `-${i}`;
+    const name = `${base.slice(0, 32 - suffix.length).replace(/-+$/, "")}${suffix}`;
+    if (NAME.test(name) && !taken.includes(name)) return name;
+  }
+}
+
 export function duplicateName(
   source: string,
   taken: readonly string[],

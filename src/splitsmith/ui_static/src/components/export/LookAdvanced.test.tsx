@@ -98,25 +98,43 @@ afterEach(() => {
 });
 
 describe("LookAdvanced", () => {
-  it("offers Edit only on your own Look", () => {
+  it("offers Make your own, and Edit only on your own Look", () => {
     renderRow({ look: "splitsmith" });
-    expect(screen.queryByRole("button", { name: "Edit Look…" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Duplicate Look…" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Edit this Look" })).toBeNull();
+    expect(screen.getByRole("button", { name: /Make your own Look/ })).toBeTruthy();
     expect(screen.getByRole("link", { name: "How Looks work" }).getAttribute("href")).toMatch(/authoring\.md$/);
   });
 
-  it("duplicates the chosen Look, selects the copy and opens the editor on it", async () => {
-    const { onChooseLook } = renderRow({ look: "splitsmith" });
-    fireEvent.click(screen.getByRole("button", { name: "Duplicate Look…" }));
-    await waitFor(() => expect(api.duplicateLook).toHaveBeenCalledWith("splitsmith-copy", "splitsmith"));
+  it("names the new Look and its start before anything is saved, then opens the editor on it", async () => {
+    const { onChooseLook } = renderRow({ look: "club" });
+    fireEvent.click(screen.getByRole("button", { name: /Make your own Look/ }));
+    const start = await screen.findByRole("dialog", { name: "Make your own Look" });
+    expect(api.duplicateLook).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Club red" } });
+    fireEvent.click(screen.getByRole("radio", { name: /Splitsmith/ }));
+    expect(start).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(api.duplicateLook).toHaveBeenCalledWith("club-red", "splitsmith", "Club red"));
     expect(refreshLooks).toHaveBeenCalled();
-    expect(onChooseLook).toHaveBeenCalledWith("splitsmith-copy");
-    expect(await screen.findByRole("dialog", { name: "Edit Look splitsmith-copy" })).toBeTruthy();
+    expect(onChooseLook).toHaveBeenCalledWith("club-red");
+    expect(await screen.findByRole("dialog", { name: "Edit Look club-red" })).toBeTruthy();
+  });
+
+  it("discards a new Look nobody saved, without asking", async () => {
+    renderRow({ look: "splitsmith" });
+    fireEvent.click(screen.getByRole("button", { name: /Make your own Look/ }));
+    await screen.findByRole("dialog", { name: "Make your own Look" });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    await screen.findByLabelText("Highlight colour");
+    expect(screen.queryByRole("button", { name: "Delete Look" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    await waitFor(() => expect(api.deleteLook).toHaveBeenCalledWith("my-look"));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: /Edit Look/ })).toBeNull());
   });
 
   it("saves an edited colour and previews the draft first", async () => {
     renderRow();
-    fireEvent.click(screen.getByRole("button", { name: "Edit Look…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit this Look" }));
     const accent = (await screen.findByLabelText("Highlight colour")) as HTMLInputElement;
     const save = screen.getByRole("button", { name: "Save Look" }) as HTMLButtonElement;
     expect(save.disabled).toBe(true);
@@ -137,7 +155,7 @@ describe("LookAdvanced", () => {
 
   it("disables Save while the name is too long and says why", async () => {
     renderRow();
-    fireEvent.click(screen.getByRole("button", { name: "Edit Look…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit this Look" }));
     const label = (await screen.findByLabelText("Look name")) as HTMLInputElement;
     fireEvent.change(label, { target: { value: "x".repeat(61) } });
     expect((screen.getByRole("button", { name: "Save Look" }) as HTMLButtonElement).disabled).toBe(true);
@@ -146,7 +164,7 @@ describe("LookAdvanced", () => {
 
   it("stores a card style choice", async () => {
     renderRow();
-    fireEvent.click(screen.getByRole("button", { name: "Edit Look…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit this Look" }));
     await screen.findByLabelText("Highlight colour");
     fireEvent.click(screen.getByRole("button", { name: "Card styles" }));
     const group = screen.getByRole("group", { name: "Title page style" });
@@ -158,7 +176,7 @@ describe("LookAdvanced", () => {
 
   it("has no template tab on splitsmith.app and says why under Card styles", async () => {
     renderRow({ hosted: true });
-    fireEvent.click(screen.getByRole("button", { name: "Edit Look…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit this Look" }));
     await screen.findByLabelText("Highlight colour");
     expect(screen.queryByRole("button", { name: /Templates/ })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Card styles" }));

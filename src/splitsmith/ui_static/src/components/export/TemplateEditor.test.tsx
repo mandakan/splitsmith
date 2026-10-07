@@ -87,7 +87,7 @@ async function openTemplates() {
       <LookAdvanced looks={[club]} look="club" onChooseLook={vi.fn()} slug="me" stageNumber={1} hosted={false} busy={false} />
     </ConfirmProvider>,
   );
-  fireEvent.click(screen.getByRole("button", { name: "Edit Look…" }));
+  fireEvent.click(screen.getByRole("button", { name: "Edit this Look" }));
   await screen.findByLabelText("Highlight colour");
   fireEvent.click(screen.getByRole("button", { name: "Templates (HTML)" }));
   return (await screen.findByLabelText("Title page template")) as HTMLTextAreaElement;

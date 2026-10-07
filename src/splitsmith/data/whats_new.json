@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "make-your-own-look",
+      "date": "2026-10-07",
+      "title": "Make your own Look",
+      "body": "Pick Make your own beside the Looks on the Export page, name it and choose what it starts from. Discard removes a new Look you changed your mind about."
+    },
+    {
       "id": "look-editor-preview",
       "date": "2026-10-07",
       "title": "A clearer Look editor",

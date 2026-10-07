@@ -35,6 +35,8 @@ export interface PaletteSuggestionsProps {
   stageNumber: number;
   /** Footage is sampled from trims on this disk, which hosted has none of. */
   hosted?: boolean;
+  /** The shooter's Identity sheet on the Footage page, for "Add a logo". */
+  identityHref?: string;
 }
 
 function Strip({ colors, series }: { colors: Rgb[]; series: string[] }) {
@@ -92,7 +94,14 @@ function Card({
   );
 }
 
-export function PaletteSuggestions({ draft, setDraft, slug, stageNumber, hosted = false }: PaletteSuggestionsProps) {
+export function PaletteSuggestions({
+  draft,
+  setDraft,
+  slug,
+  stageNumber,
+  hosted = false,
+  identityHref,
+}: PaletteSuggestionsProps) {
   const [source, setSource] = useState<Source>("colour");
   const [seed, setSeed] = useState<string>(rgbToHex(draft.colors.accent ?? [255, 45, 45]));
   const [footage, setFootage] = useState<Swatch[]>([]);
@@ -174,6 +183,13 @@ export function PaletteSuggestions({ draft, setDraft, slug, stageNumber, hosted 
           {hints.map((h) => (
             <li key={h}>{h}</li>
           ))}
+          {logo.length === 0 && identityHref ? (
+            <li>
+              <a className="text-led-text underline-offset-4 hover:underline" href={identityHref}>
+                Add a logo
+              </a>
+            </li>
+          ) : null}
         </ul>
       ) : null}
       {applied ? (
