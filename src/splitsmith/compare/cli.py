@@ -193,6 +193,12 @@ def export(
     if transition_seconds <= 0:
         console.print(f"[red]Error:[/] --transition-seconds must be positive, got {transition_seconds:g}.")
         raise typer.Exit(code=2)
+    if transition != "none" and output_format != "mp4":
+        console.print(
+            "[red]Error:[/] --transition requires --format mp4 -- the FCPXML grid has no transitions, so "
+            "it would silently do nothing."
+        )
+        raise typer.Exit(code=2)
     if output_format == "mp4" and not (source.is_dir() and is_match_folder(source)):
         console.print(
             "[red]Error:[/] --format mp4 requires SOURCE to be a merged match folder, not a manifest."

@@ -734,6 +734,16 @@ def test_card_fields_default_off_and_reach_the_renderer(
     assert [(t.from_stage_index, t.kind, t.duration_seconds) for t in faded["transitions"]] == [
         (0, "fade", 1.0)
     ]
+    refused = client.post(
+        "/api/match/compare-export",
+        json={
+            "stage_numbers": [1, 2],
+            "audio_from": "mathias",
+            "transition_kind": "fade",
+            "transition_duration_seconds": 0,
+        },
+    )
+    assert refused.status_code == 422
     # #1243: every shooter with a project gets a resolved identity, keyed by label.
     assert set(carded["identities"]) == {"Mathias"}
     assert carded["identities"]["Mathias"].accent is None, "no identity set, no accent (ruling)"

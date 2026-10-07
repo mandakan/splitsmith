@@ -703,3 +703,42 @@ def test_a_transition_into_a_slate_trims_the_slate_and_the_stage_before_it(tmp_p
         (0.0, "Stage 1"),
         (1.5 + 11.5, "Stage 2"),
     ]
+
+
+def test_a_head_edges_lower_third_opens_at_the_stage_start_not_half_a_fade_late(tmp_path: Path) -> None:
+    """Review of #1244: the head edge's timeline starts ``handle`` before
+    the stage, and the boundary prepends the rest of the half; the lower
+    third therefore opens ``handle`` into the edge. With no footage before
+    the pad (beep on the pad) that is at once, not half a fade late."""
+    from splitsmith import composition
+    from tests.test_compare_mp4_grid_render import _shooters as _two_stage_shooters
+
+    edges: list[tuple[str, ...]] = []
+    mp4_grid.render_grid_mp4(
+        _two_stage_shooters(),
+        audio_label="Mathias",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        head_pad_seconds=2.0,  # the fixture's beep: seek 0, no handle
+        runner=_ok_runner([]),
+        card_runner=_ok_runner([]),
+        boundary_runner=_ok_runner(edges),
+        still_runner=_still_runner([]),
+        rasterizer=_FakeRasterizer(),
+        work_dir=tmp_path / "work",
+        ffmpeg_binary="/bin/ffmpeg",
+        stage_titles="lower-third",
+        title_duration_seconds=1.5,
+        transitions=(
+            composition.Transition(from_stage_index=0, to_stage_index=1, kind="fade", duration_seconds=1.0),
+        ),
+    )
+    assert [c[-1].rsplit("/", 1)[-1] for c in edges] == [
+        "edge-stage1-tail.mov",
+        "edge-stage2-head.mov",
+        "boundary-000.mov",
+    ]
+    head_graph = edges[1][edges[1].index("-filter_complex") + 1]
+    assert "enable='lt(t,1.5)'" in head_graph, "no handle: the card opens on the edge's first frame"
+    boundary_graph = edges[2][edges[2].index("-filter_complex") + 1]
+    assert "[1:v]tpad=start_mode=clone:start_duration=0.5[hv]" in boundary_graph

@@ -160,6 +160,10 @@ describe("groupSummary", () => {
     expect(groupSummary({ ...zoom, outputFormat: "mp4" }, "look", ctx)).toBe("No cards");
     expect(groupSummary({ ...zoom, transitionKind: "fade", outputFormat: "mp4" }, "look", ctx)).toBe("fade 0.5 s");
     expect(groupSummary({ ...zoom, outputFormat: "fcp7xml" }, "look", ctx)).toBe("No cards");
+    // The grid draws the xfade kinds too (#1244); its summary names them.
+    expect(groupSummary({ ...zoom, mode: "compare", transitionKind: "fade", transitionSeconds: 1 }, "look", ctx)).toContain(
+      "fade 1.0 s",
+    );
   });
 });
 

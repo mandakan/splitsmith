@@ -1407,3 +1407,63 @@ def test_a_head_cut_moves_the_clocks_by_the_cut(tmp_path):
     assert listed_seconds(narrowed.sprite_list_path) == pytest.approx(
         listed_seconds(full.sprite_list_path) - 0.5, abs=0.04
     )
+
+
+def test_states_never_start_before_the_segment_when_the_head_pad_is_negative(tmp_path):
+    """A tail edge's segment starts long after the beep (its head pad is
+    negative): the shots before it fold into the opening state and only
+    the ones inside the window start a state of their own."""
+    from splitsmith.compare.overlay_sprites import TilePlacement, build_overlay_states
+
+    data = mp4_grid._overlay_data_for_stage(mp4_grid.load_overlay_data(_shooters(tmp_path)), 1)
+    placements = (
+        TilePlacement(label="Anders", row=0, col=0, present=True),
+        TilePlacement(label="Mathias", row=0, col=1, present=True),
+    )
+    # Anders shoots at 0.9 / 1.4 / 2.1, Mathias at 1.0 / 1.6 / 2.4; a window
+    # 1.2 s after the beep, half a second long.
+    states = build_overlay_states(placements, data, head_pad_seconds=-1.2, duration_seconds=0.5)
+    assert [round(s.start_seconds, 3) for s in states] == [0.0, 0.2, 0.4]
+    opening = {p.label: p.shots_fired for p in states[0].panels}
+    assert opening == {"Anders": 1, "Mathias": 1}
+
+
+def test_a_tail_edge_keeps_the_tiles_overlay_and_clocks(tmp_path):
+    """Review of #1244: a tail edge's window lies past every tile's footage,
+    so its tiles are filler for ffmpeg; the overlay must still know the
+    tiles are there (their counters, splits and held clocks), built from
+    the source plan's presence and the edge's own, negative, head pad."""
+    shooters = _shooters(tmp_path)
+    (plan,) = mp4_grid.build_stage_plans(
+        shooters, audio_label="Anders", head_pad_seconds=1.0, tail_pad_seconds=0.5
+    )
+    data = mp4_grid.load_overlay_data(shooters)
+    edge = mp4_grid.grid_edge_plan(plan, half=0.5, end="tail")
+    assert all(tile.trim_path is None for tile in edge.tiles), "past every tile's footage"
+    variant = mp4_grid.overlay_plan_for(edge, source=plan)
+    assert [tile.trim_path is not None for tile in variant.tiles] == [True, True]
+    head_pad = mp4_grid.head_pad_of(plan) - (plan.duration_seconds - 0.5)
+    assert head_pad < 0
+    overlay = mp4_grid._stage_overlay_plan(
+        variant,
+        CANVAS,
+        data,
+        theme_name="splitsmith",
+        font_path=tmp_path / "font.ttf",
+        head_pad_seconds=head_pad,
+        work=tmp_path / "edge",
+        rasterizer=None,
+        list_suffix="-tail",
+    )
+    assert len(overlay.clocks) == 2
+    assert all(c.start_seconds == pytest.approx(head_pad) for c in overlay.clocks)
+    assert all(
+        c.freeze_seconds is not None and c.freeze_seconds < 0 for c in overlay.clocks
+    ), "held from the first frame"
+    durations = [
+        float(line.split()[1])
+        for line in overlay.sprite_list_path.read_text().splitlines()
+        if line.startswith("duration")
+    ]
+    assert durations and all(d >= 0 for d in durations)
+    assert overlay.sprite_list_path.name == "sprites-stage1-tail.txt"

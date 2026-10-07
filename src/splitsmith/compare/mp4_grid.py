@@ -815,6 +815,18 @@ def narrow_grid_plan(plan: GridStagePlan, *, head_cut: float, tail_cut: float) -
     )
 
 
+def overlay_plan_for(variant: GridStagePlan, *, source: GridStagePlan) -> GridStagePlan:
+    """``variant`` (a narrowed or edge plan) with the tiles' presence taken
+    from ``source``: a tile whose footage ended before the window is
+    filler for ffmpeg, but its counters, splits and held clock are still
+    on the overlay, as they were in the stage (review of #1244)."""
+    tiles = tuple(
+        replace(tile, trim_path=original.trim_path)
+        for tile, original in zip(variant.tiles, source.tiles, strict=True)
+    )
+    return replace(variant, tiles=tiles)
+
+
 def grid_edge_handle(plan: GridStagePlan, *, half: float, end: Literal["tail", "head"]) -> float:
     """How much footage past the pad an edge can read, up to ``half``: at
     the head the smallest seek among the real tiles (a lead-padded tile
@@ -2948,7 +2960,6 @@ class _GridPrep:
     files, or a stage's lower third, hold still and free-cell still."""
 
     assets: _CardAssets | None = None
-    skipped: bool = False
     lower_third: LowerThirdInput | None = None
     hold_still: Path | None = None
     free_still: Path | None = None
@@ -3260,6 +3271,7 @@ def render_grid_mp4(
     ]
     prepared: dict[int, _GridPrep] = {}
     pending_half = 0.0
+    last_boundary: GridBoundary | None = None
     run_starts: dict[int, float] = {}
 
     def note_cut(after: int, reason: str) -> None:
@@ -3272,22 +3284,26 @@ def render_grid_mp4(
         logger.warning("compare grid: %s", text)
         transition_notes.append(OverlayDegradation(summary=text, detail=text))
 
-    def overlay_for(plan: GridStagePlan, *, original: bool, list_suffix: str) -> StageOverlayPlan | None:
-        """The stage's overlay plan for one plan variant: the original takes
-        the render's head pad (byte-identical to the no-transition render),
-        a narrowed or edge plan takes its own recovered head pad so the
-        clocks and sprite states move with the cut."""
+    def overlay_for(
+        plan: GridStagePlan, *, source: GridStagePlan, head_pad: float | None, list_suffix: str
+    ) -> StageOverlayPlan | None:
+        """The stage's overlay plan for one plan variant: the original
+        (``head_pad`` None) takes the render's head pad, byte-identical to
+        the no-transition render; a narrowed or edge plan takes its own
+        head pad (negative for a tail edge) and the source's tile presence,
+        so the clocks and sprite states move with the cut and a tile the
+        window has no footage of still shows its figures."""
         free_cells = _unreached_cells(plan)
         race_at = free_cells[0] if race and free_cells and active_rasterizer is not None else None
         if not ((overlay or race_at is not None) and font_path is not None):
             return None
         stage_overlay = _stage_overlay_plan(
-            plan,
+            plan if head_pad is None else overlay_plan_for(plan, source=source),
             canvas,
             overlay_data,
             theme_name=overlay_theme,
             font_path=font_path,
-            head_pad_seconds=head_pad_seconds if original else head_pad_of(plan),
+            head_pad_seconds=head_pad_seconds if head_pad is None else head_pad,
             work=work,
             rasterizer=active_rasterizer,
             tiles=overlay,
@@ -3367,7 +3383,7 @@ def render_grid_mp4(
                 still_runner=still_runner,
                 identities=identities,
             )
-            return _GridPrep(assets=assets, skipped=assets is None)
+            return _GridPrep(assets=assets)
         plan = item.plan
         prep = _GridPrep()
         if stage_titles == "lower-third" and active_rasterizer is not None and card_look is not None:
@@ -3463,7 +3479,7 @@ def render_grid_mp4(
         *,
         lower_third: LowerThirdInput | None,
         output: Path,
-        original: bool,
+        head_pad: float | None,
         list_suffix: str,
     ) -> tuple[str, ...]:
         return build_stage_command(
@@ -3472,7 +3488,9 @@ def render_grid_mp4(
             output_path=output,
             ffmpeg_binary=binary,
             overlay=(
-                overlay_for(plan, original=original, list_suffix=list_suffix) if prep.has_overlay else None
+                overlay_for(plan, source=item.plan, head_pad=head_pad, list_suffix=list_suffix)
+                if prep.has_overlay
+                else None
             ),
             hold_still_path=prep.hold_still if plan.hold_seconds > 0 else None,
             lower_third=lower_third,
@@ -3522,22 +3540,30 @@ def render_grid_mp4(
             )
         else:
             edge_plan = grid_edge_plan(plan, half=half, end=end)
+            handle = grid_edge_handle(plan, half=half, end=end)
             lower_third = prep.lower_third
             if lower_third is not None:
                 if end == "head":
-                    lower_third = replace(lower_third, delay_seconds=half)
+                    # The edge starts ``handle`` before the stage (the boundary
+                    # prepends the rest of the half), so the card opens then.
+                    lower_third = replace(lower_third, delay_seconds=handle)
                 else:
                     skip = plan.duration_seconds - (half - plan.hold_seconds)
                     lower_third = (
                         replace(lower_third, skip_seconds=skip) if skip < lower_third.seconds else None
                     )
+            edge_head_pad = (
+                head_pad_of(plan) + handle
+                if end == "head"
+                else head_pad_of(plan) - (plan.duration_seconds - (half - plan.hold_seconds))
+            )
             cmd = stage_command(
                 item,
                 prep,
                 edge_plan,
                 lower_third=lower_third,
                 output=out,
-                original=False,
+                head_pad=edge_head_pad,
                 list_suffix=f"-{end}",
             )
         completed = _run_ffmpeg(cmd, runner=boundary_runner)
@@ -3633,7 +3659,7 @@ def render_grid_mp4(
                         plan,
                         lower_third=lower_third,
                         output=work / f"{item.name}{SEGMENT_SUFFIX}",
-                        original=not cut,
+                        head_pad=head_pad_of(item.plan) - item.head_cut_seconds if cut else None,
                         list_suffix="-cut" if cut else "",
                     )
                     completed = _run_ffmpeg(cmd, runner=runner)
@@ -3663,21 +3689,29 @@ def render_grid_mp4(
             pending_half = 0.0
             if segment is None:
                 # The item is gone; a boundary on either side of it must not
-                # stay: the one into it is already in the list, the one out
-                # of it has its neighbour trimmed.
+                # stay: the one into it is already in the list and counted,
+                # the one out of it has its neighbour trimmed.
                 if boundary is not None:
                     note_cut(i, f"{item.name} was not rendered")
-                if i > 0 and segments and segments[-1].name.startswith("boundary-"):
+                if last_boundary is not None and segments and segments[-1].name.startswith("boundary-"):
                     segments.pop()
-                    note = f"transition into {item.name} dropped: the item was not rendered"
+                    elapsed -= last_boundary.duration_seconds
+                    note = (
+                        f"transition into {item.name} dropped: the item was not rendered, and "
+                        f"{items[i - 1].name}'s last {last_boundary.duration_seconds / 2.0:g}s went with it"
+                    )
+                    logger.warning("compare grid: %s", note)
                     transition_notes.append(OverlayDegradation(summary=note, detail=note))
+                last_boundary = None
                 continue
             segments.append(segment)
             elapsed += item.duration_seconds
+            last_boundary = None
             if boundary_segment is not None and boundary is not None:
                 segments.append(boundary_segment)
                 elapsed += boundary.duration_seconds
                 pending_half = boundary.duration_seconds / 2.0
+                last_boundary = boundary
     finally:
         # Closed as soon as the stage loop is done, not held open through
         # the final concat/stitch below -- the stitch is ffmpeg-only and

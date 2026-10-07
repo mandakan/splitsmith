@@ -135,7 +135,7 @@ class MatchExportRequest(BaseModel):
     # renderer emits transitions; FCP7 / MP4 surface a "transitions
     # ignored" anomaly when set together with those formats.
     transition_kind: match_exports.TransitionKind = "none"
-    transition_duration_seconds: float = 0.5
+    transition_duration_seconds: float = Field(0.5, gt=0)
     # Issue #196. Per-stage title cards. ``"slate"`` adds a pre-stage
     # card on the spine; ``"lower-third"`` is a connected text clip
     # overlaid on the start of the primary. FCPXML only today;
@@ -236,7 +236,7 @@ class CompareGridRequest(BaseModel):
     # kinds the single-shooter MP4 draws; the grid renders them on its own
     # boundary segments.
     transition_kind: match_exports.TransitionKind = "none"
-    transition_duration_seconds: float = 0.5
+    transition_duration_seconds: float = Field(0.5, gt=0)
     # Issue #705. The splits overlay (per-tile counter and split, the
     # running clock) in the grid's own typography, and the end-of-stage
     # summary hold in seconds. The hold needs the overlay: it is drawn

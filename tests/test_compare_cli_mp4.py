@@ -1056,3 +1056,26 @@ def test_a_bad_transition_kind_is_a_usage_error(tmp_path: Path, monkeypatch: pyt
     )
     assert result.exit_code == 2, result.output
     assert "transition" in strip_ansi(result.output)
+
+
+def test_a_transition_with_the_fcpxml_grid_is_refused_like_every_mp4_only_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    match_root = _seed_match_with_stages(tmp_path / "match", stage_count=2)
+    _patch_probe(monkeypatch)
+    result = runner.invoke(
+        app,
+        [
+            "compare",
+            "export",
+            str(match_root),
+            "--audio-from",
+            "mathias",
+            "-o",
+            str(tmp_path / "o.fcpxml"),
+            "--transition",
+            "fade",
+        ],
+    )
+    assert result.exit_code == 2, result.output
+    assert "--transition requires --format mp4" in strip_ansi(result.output)

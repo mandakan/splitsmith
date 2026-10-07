@@ -1630,3 +1630,39 @@ def test_a_transition_that_does_not_fit_reaches_the_grid_result(tmp_path: Path):
         "transition after stage 'Stage 1' (3s) exceeds the stage's hold and tail pad (0.5s); "
         "lengthen the hold or the pad, or shorten the transition: rendered as a cut"
     )
+
+
+def test_a_stage_that_fails_after_a_boundary_keeps_elapsed_and_the_chapters_honest(tmp_path: Path):
+    """Review of #1244: the boundary into a stage that then fails is
+    dropped from the stitch, so the running total must give its length
+    back or every later chapter lands late; the note says what the
+    previous stage lost."""
+
+    def failing_stage_2(cmd, **kwargs):
+        if str(cmd[-1]).endswith("stage2.mov"):
+            return subprocess.CompletedProcess(cmd, 1, b"", b"boom")
+        return _ok(cmd, **kwargs)
+
+    calls, runner = _recorder(failing_stage_2)
+    _, boundary_runner = _recorder()
+    work = tmp_path / "work"
+    three = {label: {1: _bundle(1), 2: _bundle(2), 3: _bundle(3)} for label in ("Mathias", "Anders")}
+    result = mp4_grid.render_grid_mp4(
+        _shooters(three),
+        audio_label="Mathias",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=runner,
+        boundary_runner=boundary_runner,
+        work_dir=work,
+        ffmpeg_binary="/bin/ffmpeg",
+        transitions=(
+            composition.Transition(from_stage_index=0, to_stage_index=1, kind="fade", duration_seconds=1.0),
+        ),
+    )
+    names = [line.rsplit("/", 1)[-1].rstrip("'") for line in (work / "concat.txt").read_text().splitlines()]
+    assert names == ["stage1.mov", "stage3.mov"]
+    # Stage 1 was encoded 11.0 s long (its tail went to the dropped boundary).
+    assert [(c.start_seconds, c.title) for c in result.chapters] == [(0.0, "Stage 1"), (11.0, "Stage 3")]
+    (note,) = result.degradations
+    assert "stage2" in note.summary and "stage1" in note.summary and "0.5" in note.summary

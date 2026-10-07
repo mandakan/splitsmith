@@ -606,7 +606,12 @@ def _render_with_work_dir(
             lower_third = prep.lower_third
             if lower_third is not None:
                 if end == "head":
-                    lower_third = replace(lower_third, delay_seconds=half)
+                    # The edge starts ``handle`` before the stage (the boundary
+                    # holds a frame for the rest of the half), so the card
+                    # opens then, not half a fade late.
+                    lower_third = replace(
+                        lower_third, delay_seconds=_edge_handle(item.plan, half=half, end="head")
+                    )
                 else:
                     skip = item.plan.effective_seconds - half
                     lower_third = (
