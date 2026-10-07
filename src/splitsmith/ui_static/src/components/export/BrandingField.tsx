@@ -1,9 +1,9 @@
 /**
  * BrandingField -- the Branding row under Export, Details (the branding
  * work). Your brand (a club, a personal brand, a sponsor) lives in the Look
- * and is set in the Look editor; this row says so. The event's own logo, a
- * small corner mark on the title page and the closing card, is the match's
- * and rarely used, so it is one compact optional control.
+ * and is set in the Look editor; this row says so. The event's own logo,
+ * the centrepiece of the title page and the closing card above the match
+ * name, is the match's and rarely used, so it is one compact optional control.
  */
 import { useId, useState } from "react";
 
@@ -32,7 +32,13 @@ export function BrandingField({ busy }: { busy: boolean }) {
       setShown(true);
       setVersion((v) => v + 1);
     } catch (err) {
-      setRefused(err instanceof ApiError ? err.detail : err instanceof Error ? err.message : String(err));
+      setRefused(
+        err instanceof ApiError
+          ? err.detail
+          : err instanceof Error
+            ? err.message
+            : String(err),
+      );
     } finally {
       setWorking(false);
     }
@@ -46,7 +52,11 @@ export function BrandingField({ busy }: { busy: boolean }) {
       setHasLogo(false);
       setShown(false);
     } catch (err) {
-      setRefused(err instanceof ApiError ? err.detail : "The event logo could not be removed.");
+      setRefused(
+        err instanceof ApiError
+          ? err.detail
+          : "The event logo could not be removed.",
+      );
     } finally {
       setWorking(false);
     }
@@ -59,7 +69,9 @@ export function BrandingField({ busy }: { busy: boolean }) {
       help="Your brand (a club, a personal brand, a sponsor) is part of the Look: set it in the Look editor under Card styles, Your brand."
     >
       <div className="flex flex-wrap items-center gap-3">
-        <span className="text-sm text-muted">Event logo (optional), a small corner mark:</span>
+        <span className="text-sm text-muted">
+          Event logo (optional), above the match name:
+        </span>
         {shown ? (
           <img
             key={version}
@@ -93,8 +105,14 @@ export function BrandingField({ busy }: { busy: boolean }) {
           />
         </label>
         {hasLogo ? (
-          <Button variant="ghost" size="sm" onClick={() => void remove()} disabled={busy || working}>
-            Remove event logo
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label="Remove event logo"
+            onClick={() => void remove()}
+            disabled={busy || working}
+          >
+            Remove
           </Button>
         ) : null}
       </div>

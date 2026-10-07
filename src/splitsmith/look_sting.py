@@ -6,8 +6,8 @@ animated cards use, :mod:`splitsmith.look_motion`) and composited over the
 boundary's own crossfade, a plain ``fade`` of the same length, before the
 segment's final ``format=yuv420p``. The template sees the transition
 (``data.transition``: kind, name, duration, the labels either side of the
-cut) and the shooters the cards see (``data.shooters``, the match logo
-already folded in by ``identity.resolve_identity``), and sizes its
+cut) and the shooters the cards see (``data.shooters``, each with only
+its own logo), and sizes its
 animation to the duration: ``duration()`` returns it, ``seek(t)`` drives
 it, and the renderer samples ``ceil(duration * fps)`` frames.
 

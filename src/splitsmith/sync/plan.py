@@ -276,7 +276,7 @@ def build_push_plan(match_root: Path, *, sync_state: SyncState, full_media: bool
     event_dir = match_root / EVENT_LOGO_DIR
     if match.match_id and event_dir.is_dir():
         for artifact in sorted(event_dir.iterdir()):
-            if not EVENT_LOGO_RE.match(artifact.name):
+            if not EVENT_LOGO_RE.fullmatch(artifact.name):
                 continue
             item = _plan_media_item(
                 artifact, f"matches/{match.match_id}/{EVENT_LOGO_DIR}/{artifact.name}", sync_state

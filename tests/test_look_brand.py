@@ -1,5 +1,5 @@
 """Your brand in a Look (the branding work, PR 2): a logo and a line kept in
-the Look, drawn as the centrepiece of the title page and the closing card.
+the Look, drawn as a corner mark (top-left) on the title page and the closing card.
 Desktop first: the logo is a file in the Look's ``brand/`` folder; hosted
 refuses one until Looks have an asset store."""
 
@@ -137,9 +137,9 @@ def test_a_look_without_a_brand_sends_the_context_it_always_did(
     assert "brand" not in ctx.data
 
 
-def test_the_brand_is_the_title_pages_centrepiece(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A real render: the logo's red fills the top centre, and the card's
-    text moves below it."""
+def test_the_brand_is_the_title_pages_corner_mark(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A real render: the logo's red sits top-left, the centre stays clear,
+    and the card's text stays where it was."""
     from splitsmith import look_tools
     from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
 
@@ -161,11 +161,13 @@ def test_the_brand_is_the_title_pages_centrepiece(tmp_path: Path, monkeypatch: p
             without = render(plain)
     except RasterizerUnavailableError as exc:
         pytest.skip(f"no Chromium: {exc}")
-    r, g, b, a = with_brand.getpixel((640, 130))
+    r, g, b, a = with_brand.getpixel((70, 70))
     assert a > 200 and r > 180 and g < 80 and b < 80, (r, g, b, a)
-    assert without.getpixel((640, 130))[3] == 0
+    assert without.getpixel((70, 70))[3] == 0
+    assert with_brand.getpixel((640, 130))[3] == 0  # the centre is the event's
+    assert with_brand.getpixel((1210, 70)) == without.getpixel((1210, 70))  # the shooters' corner
 
-    # The card's white title text moved down, below the brand block.
+    # The card's white title text did not move.
     def title_top(im: Image.Image) -> int:
         px = im.load()
         for y in range(im.height):
@@ -175,7 +177,7 @@ def test_the_brand_is_the_title_pages_centrepiece(tmp_path: Path, monkeypatch: p
                     return y
         return im.height
 
-    assert title_top(with_brand) > title_top(without) + 40
+    assert title_top(with_brand) == title_top(without)
 
 
 # --- the routes (local only) --------------------------------------------------------------

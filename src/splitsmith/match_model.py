@@ -247,7 +247,7 @@ class MatchBranding(BaseModel):
     @field_validator("event_logo")
     @classmethod
     def _event_logo_shape(cls, value: str | None) -> str | None:
-        if value is not None and not EVENT_LOGO_RE.match(value):
+        if value is not None and not EVENT_LOGO_RE.fullmatch(value):
             raise ValueError(f"event logo {value!r} is not a file the match stores (event-<hash>.png)")
         return value
 

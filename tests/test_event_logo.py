@@ -1,7 +1,7 @@
 """The event's own logo (the branding work, PR 3): set once per match, kept
 as ``<match>/identity/event-<12hex>.<ext>`` and ``match.json``'s
-``branding.event_logo``, synced like a shooter's logo, and drawn as a corner
-mark on the title page and the closing card (your brand is the centrepiece;
+``branding.event_logo``, synced like a shooter's logo, and drawn as the
+centrepiece on the title page and the closing card (your brand is the corner mark;
 a shooter's logo is never replaced by it)."""
 
 from __future__ import annotations
@@ -37,6 +37,11 @@ def _png(colour: tuple[int, int, int] = (20, 200, 60)) -> bytes:
 # --- the match --------------------------------------------------------------------------
 
 
+def test_an_event_logo_name_with_a_trailing_newline_is_refused() -> None:
+    with pytest.raises(ValueError):
+        match_model.MatchBranding(event_logo="event-0123456789ab.png\n")
+
+
 def test_the_match_names_its_event_logo_by_content() -> None:
     branding = match_model.MatchBranding(event_logo="event-0123456789ab.png")
     assert branding.event_logo == "event-0123456789ab.png"
@@ -66,6 +71,8 @@ def test_the_event_logo_is_uploaded_served_and_removed(client) -> None:
     served = http.get(url)
     assert served.status_code == 200 and served.content == _png()
     assert served.headers["x-content-type-options"] == "nosniff"
+    # Same URL, new bytes after a replace: the browser must revalidate.
+    assert "no-cache" in served.headers["cache-control"]
     # A new logo replaces the file; removing clears both.
     r2 = http.post(url, files={"file": ("y.png", _png((200, 20, 20)), "image/png")})
     assert not (root / EVENT_LOGO_DIR / name).exists()
@@ -163,12 +170,10 @@ def test_a_shooter_never_falls_back_to_a_match_logo() -> None:
     assert "match_logo" not in inspect.signature(identity_media.resolved_identity_for).parameters
 
 
-def test_the_event_logo_is_a_corner_mark_on_the_title_page(tmp_path: Path) -> None:
+def _render_title(tmp_path: Path, logo: Path | None, brand: dict | None = None) -> Image.Image:
     from splitsmith import looks
     from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
 
-    logo = tmp_path / "event-0123456789ab.png"
-    logo.write_bytes(_png((20, 200, 60)))
     theme = load_theme("splitsmith")
     look = looks.load_look("splitsmith")
     ctx = card_context(
@@ -179,6 +184,8 @@ def test_the_event_logo_is_a_corner_mark_on_the_title_page(tmp_path: Path) -> No
         fps=30,
         theme=theme,
     )
+    if brand is not None:
+        ctx.data["brand"] = brand
     try:
         with ChromiumRasterizer() as raster:
             png = raster.render_template(
@@ -186,10 +193,70 @@ def test_the_event_logo_is_a_corner_mark_on_the_title_page(tmp_path: Path) -> No
             )
     except RasterizerUnavailableError as exc:
         pytest.skip(f"no Chromium: {exc}")
-    im = Image.open(io.BytesIO(png)).convert("RGBA")
-    r, g, b, a = im.getpixel((70, 70))
+    return Image.open(io.BytesIO(png)).convert("RGBA")
+
+
+def _title_top(im: Image.Image) -> int:
+    px = im.load()
+    for y in range(im.height):
+        for x in range(0, im.width, 2):
+            r, g, b, a = px[x, y]
+            if a > 200 and r > 230 and g > 230 and b > 230:
+                return y
+    return im.height
+
+
+def test_the_event_logo_is_the_title_pages_centrepiece(tmp_path: Path) -> None:
+    logo = tmp_path / "event-0123456789ab.png"
+    logo.write_bytes(_png((20, 200, 60)))
+    im = _render_title(tmp_path, logo)
+    plain = _render_title(tmp_path, None)
+    r, g, b, a = im.getpixel((640, 130))
     assert a > 200 and g > 150 and r < 80, (r, g, b, a)
-    assert im.getpixel((1210, 70))[3] == 0  # not top-right: that is the shooters' corner
+    assert im.getpixel((70, 70))[3] == 0  # top-left is your brand's
+    assert im.getpixel((1210, 70))[3] == 0  # top-right is the shooters'
+    assert _title_top(im) > _title_top(plain) + 40  # the text moved below it
+
+
+def test_your_brand_and_the_event_logo_share_the_title_page(tmp_path: Path) -> None:
+    event = tmp_path / "event-0123456789ab.png"
+    event.write_bytes(_png((20, 200, 60)))
+    brand = tmp_path / "brand-0123456789ab.png"
+    brand.write_bytes(_png((220, 30, 30)))
+    im = _render_title(tmp_path, event, {"logo": brand.resolve().as_uri(), "line": "Bromma PK"})
+    r, g, b, a = im.getpixel((70, 70))
+    assert a > 200 and r > 180 and g < 80, (r, g, b, a)
+    r, g, b, a = im.getpixel((640, 130))
+    assert a > 200 and g > 150 and r < 80, (r, g, b, a)
+
+
+def _half_clear_png(colour: tuple[int, int, int]) -> bytes:
+    """Left half fully transparent, right half ``colour``."""
+    im = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+    for x in range(32, 64):
+        for y in range(64):
+            im.putpixel((x, y), (*colour, 255))
+    buf = io.BytesIO()
+    im.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def test_logos_keep_their_transparency_on_the_card(tmp_path: Path) -> None:
+    """The event logo (centre) and your brand (corner) are drawn with their
+    alpha: a transparent half leaves the card clear behind it."""
+    event = tmp_path / "event-0123456789ab.png"
+    event.write_bytes(_half_clear_png((20, 200, 60)))
+    brand = tmp_path / "brand-0123456789ab.png"
+    brand.write_bytes(_half_clear_png((220, 30, 30)))
+    im = _render_title(tmp_path, event, {"logo": brand.resolve().as_uri()})
+    # Event logo: 173 px square centred on x=640 from y=58.
+    assert im.getpixel((600, 140))[3] == 0, im.getpixel((600, 140))
+    r, g, b, a = im.getpixel((690, 140))
+    assert a > 200 and g > 150 and r < 80, (r, g, b, a)
+    # Brand: 86 px square at (29, 29).
+    assert im.getpixel((45, 70))[3] == 0, im.getpixel((45, 70))
+    r, g, b, a = im.getpixel((100, 70))
+    assert a > 200 and r > 180 and g < 80, (r, g, b, a)
 
 
 # --- the event logo reaches every export ------------------------------------------------
@@ -245,10 +312,15 @@ def test_the_title_preview_draws_the_event_logo(tmp_path: Path, monkeypatch: pyt
     runtime_module._clear_runtime_cache()
     _Recorder.calls = []
     http, root = _seed_match_export_project(tmp_path, stage_count=1)
+    body = {"card": "title", "stage_number": 1, "width": 480}
+    assert http.post("/api/shooters/me/export-preview", json=body).status_code == 200
+    assert "event" not in _Recorder.calls[-1]["data"]
+    before = len(_Recorder.calls)
     url = f"/api/matches/{match_model.Match.load(root).match_id}/match/branding/event-logo"
     assert http.post(url, files={"file": ("e.png", _png(), "image/png")}).status_code == 200
-    r = http.post("/api/shooters/me/export-preview", json={"card": "title", "stage_number": 1, "width": 480})
+    r = http.post("/api/shooters/me/export-preview", json=body)
     assert r.status_code == 200, r.text
+    assert len(_Recorder.calls) > before  # rendered again, not the cached card
     name = match_model.Match.load(root).branding.event_logo
     assert _Recorder.calls[-1]["data"]["event"] == {"logo": (root / EVENT_LOGO_DIR / name).resolve().as_uri()}
     runtime_module._clear_runtime_cache()

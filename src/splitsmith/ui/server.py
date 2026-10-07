@@ -13208,7 +13208,7 @@ def create_app(
 
     # --- the event's logo (the branding work) -------------------------------
     #
-    # The match's own mark, a corner of the title page and the closing card.
+    # The match's own logo, the centrepiece of the title page and the closing card.
     # Kept as ``<match>/identity/event-<hash>.<ext>``; hosted, also under
     # ``matches/<id>/identity/`` (the push writes the same key from the
     # desktop). An edit, so a desktop mirror refuses it like any other.
@@ -13257,7 +13257,7 @@ def create_app(
         return FileResponse(
             path,
             media_type=media,
-            headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, max-age=3600"},
+            headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-cache"},
         )
 
     @app.delete("/api/match/branding/event-logo")

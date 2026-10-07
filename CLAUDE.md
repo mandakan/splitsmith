@@ -309,8 +309,8 @@ A Look carries **your brand** (the branding work): ``look.json``'s ``brand``
 logo's checks, and a line). ``look_brand.brand_json`` hands it to the title
 page and the closing card only, as ``data.brand``; a Look without one sends no
 key, so its contexts, digests and pixels are what they were (checked against
-main for every shipped card). ``_shared/brand.js`` draws it as the centrepiece
-and moves the cell below it. The upload and serve routes are local only, and
+main for every shipped card). ``_shared/brand.js`` draws it as a top-left corner
+mark, the line beside the logo, and never moves the card's text. The upload and serve routes are local only, and
 ``db.looks._check_hosted`` refuses a brand *logo* (the line is fine) until Looks
 have a file store. It is the video maker's brand, never a shooter's: a shooter's
 logo stays theirs and nothing falls back between the two.
@@ -416,12 +416,12 @@ place of the initials) through ``lib/identityMark``, whose URL carries the
 content-named file so a new logo is a new URL; with neither it renders as before.
 
 Three logos, and none stands in for another: the shooter's (top-right,
-above), **your brand** (``LookBrand`` on a Look, the centrepiece of the
+above), **your brand** (``LookBrand`` on a Look, the top-left mark on the
 title page and the closing card) and the **event logo**, the match's own
 (``Match.branding.event_logo``, ``event-<12hex>.<ext>`` in
 ``<match>/identity/``, routes ``/api/match/branding/event-logo``; the
-Export page's Branding row under Details). The event logo is a small
-top-left mark on those two cards only (``MatchTitle.logo`` ->
+Export page's Branding row under Details). The event logo is the
+centrepiece of those two cards only, above the match name, which moves below it (``MatchTitle.logo`` ->
 ``data.event`` -> ``_shared/event.js``); the old match-logo fallback for a
 shooter without one is gone. It syncs at match level
 (``matches/{id}/identity/event-*``: the push plan, the gc's
