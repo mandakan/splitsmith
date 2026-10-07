@@ -4,7 +4,8 @@
 The catalog is :func:`splitsmith.looks.look_catalog`, read per request (a
 user may drop a Look into ``~/.splitsmith/looks`` while the app runs). A
 preview file is served only for an installed Look (or ``_shipped``, the
-shipped default a user Look borrows from), by a bare
+shipped default a user Look borrows from, or ``_transitions``, the xfade
+families' loops, #1259), by a bare
 ``<slot>-<variant>.png`` / ``.webp`` name inside that ``preview/``
 directory; anything else is the same 404, which is what keeps the
 ``{file}`` parameter harmless hosted (``route_scope.HOSTED_CONFINED_ROUTES``).

@@ -5,6 +5,9 @@
 import { describe, expect, it } from "vitest";
 
 import type { LookInfo } from "@/lib/api";
+import { slotsForLook } from "@/lib/lookGallery";
+import { BUILTIN_LOOKS } from "@/lib/looks";
+import { FAMILIES } from "@/test/transitionFamilies";
 
 import { DEFAULT_EXPORT_SETTINGS } from "@/lib/exportPresets";
 import { previewBody, previewCaption, previewCardFor, previewLine } from "@/lib/exportPreview";
@@ -129,5 +132,15 @@ describe("previewBody with a Look (#1246)", () => {
 describe("previewCardFor with the Look slot (#1246)", () => {
   it("a Look tile previews the title page in the chosen Look", () => {
     expect(previewCardFor({ slotId: "look", variantId: "club" })).toBe("title");
+  });
+});
+
+
+describe("previewCaption with the catalog's slots (review of #1259)", () => {
+  it("a transition family tile captions with its name, a card with its stage", () => {
+    const slots = slotsForLook(BUILTIN_LOOKS, DEFAULT_EXPORT_SETTINGS, FAMILIES);
+    expect(previewCaption({ slotId: "transition", variantId: "wind" }, 3, slots)).toBe("Wind");
+    expect(previewCaption({ slotId: "transition", variantId: "fade" }, 3, slots)).toBe("Fade");
+    expect(previewCaption({ slotId: "stageCard", variantId: "slate" }, 3, slots)).toBe("Slate · Stage 03");
   });
 });

@@ -334,3 +334,28 @@ describe("transition families (#1259)", () => {
     expect(visibleSlots("single", "mp4").map((s) => s.id)).not.toContain("transition");
   });
 });
+
+
+describe("a stored transition without the catalog (review of #1259)", () => {
+  it("a stored kind keeps its tile while the server's families are not there, so it can be changed or cut", () => {
+    const stored = { ...DEFAULT_EXPORT_SETTINGS, look: "splitsmith", transitionKind: "vuwind" };
+    const transition = visibleSlots("single", "mp4", slotsForLook(BUILTIN_LOOKS, stored, [])).find((s) => s.id === "transition");
+    expect(transition).toBeDefined();
+    expect(visibleVariants(transition!, "single", "mp4").map((v) => [v.id, v.name])).toEqual([
+      ["cut", "Hard cut"],
+      ["vuwind", "vuwind"],
+    ]);
+    expect(transition!.read(stored)).toBe("vuwind");
+    expect(transition!.write(stored, "cut")).toEqual({ transitionKind: "none" });
+  });
+
+  it("no stray tile once the families are there, or for the cut and the FCP effects", () => {
+    const stored = { ...DEFAULT_EXPORT_SETTINGS, transitionKind: "vuwind" };
+    const loaded = slotsForLook(BUILTIN_LOOKS, stored, FAMILIES).find((s) => s.id === "transition")!;
+    expect(loaded.variants.filter((v) => v.id === "vuwind")).toEqual([]);
+    for (const kind of ["none", "zoom", "static"]) {
+      const slot = slotsForLook(BUILTIN_LOOKS, { ...stored, transitionKind: kind }, []).find((s) => s.id === "transition")!;
+      expect(slot.variants.map((v) => v.id)).toEqual(["cut", "static", "zoom"]);
+    }
+  });
+});

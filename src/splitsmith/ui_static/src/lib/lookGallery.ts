@@ -363,7 +363,7 @@ function transitionTileId(kind: string, transitions: readonly TransitionFamilyIn
  *  ``LOOK_SLOTS`` unchanged. */
 export function slotsForLook(
   looks: LookInfo[],
-  settings: Pick<ExportSettings, "look">,
+  settings: Pick<ExportSettings, "look"> & Partial<Pick<ExportSettings, "transitionKind">>,
   transitions: readonly TransitionFamilyInfo[] = [],
 ): LookSlot[] {
   const look = visibleLook(looks, settings.look);
@@ -389,10 +389,31 @@ export function slotsForLook(
     formats: ["mp4"],
   }));
   const slots = LOOK_SLOTS.map((slot): LookSlot => {
-    if (slot.id !== "transition" || families.length + stings.length === 0) return slot;
+    if (slot.id !== "transition") return slot;
+    // A stored kind the catalog does not list (it has not answered, or it
+    // failed) keeps a tile of its own, so the request's transition stays
+    // visible and can be changed or cut (review of #1259).
+    const kind = settings.transitionKind ?? "none";
+    const known = kind === "none" || [...slot.variants, ...families, ...stings].some((v) => v.id === kind);
+    const owned = transitionFamily(kind, transitions) !== null;
+    const stray: LookVariant[] =
+      known || owned
+        ? []
+        : [
+            {
+              id: kind,
+              name: kind,
+              thumbnail: "none.png",
+              help: "The transition this export was set to; its tile appears with the others once the list loads.",
+              params: [transitionSeconds],
+              modes: ["single", "compare"],
+              formats: ["mp4"],
+            },
+          ];
+    if (families.length + stings.length + stray.length === 0) return slot;
     return {
       ...slot,
-      variants: [...slot.variants, ...families, ...stings],
+      variants: [...slot.variants, ...families, ...stings, ...stray],
       read: (s) => transitionTileId(s.transitionKind, transitions),
       write: (s, id) => {
         const family = transitions.find((f) => f.id === id);

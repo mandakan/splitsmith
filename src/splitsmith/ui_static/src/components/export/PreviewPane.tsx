@@ -143,7 +143,7 @@ export function PreviewPane({ slug, stageNumber, settings, projectName, focus, h
   const hovering = genericFor(hover, looks, settings, transitions);
   const generic = card === null ? genericFor(focus, looks, settings, transitions) : null;
   const src = hovering ?? generic ?? still;
-  const caption = previewCaption(hover ?? focus, stageNumber);
+  const caption = previewCaption(hover ?? focus, stageNumber, slotsForLook(looks, settings, transitions));
   return (
     <div className="border-b border-rule">
       <div className="flex items-center justify-between px-3.5 py-2">
