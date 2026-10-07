@@ -598,6 +598,8 @@ function DraftPreview({
           sting,
           variant: focus && focus.card === c ? focus.variant : undefined,
           templates,
+          // The big preview plays the animation (#1249); thumbnails stay stills.
+          motion: width >= 960,
         }),
         signal,
       ),

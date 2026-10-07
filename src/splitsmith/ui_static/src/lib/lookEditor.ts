@@ -219,6 +219,8 @@ export function previewRequest(args: {
   variant?: string;
   /** The template editor's unsaved text. */
   templates?: TemplateEdit[];
+  /** The whole animation as a looping WebP; ignored once a time is set. */
+  motion?: boolean;
 }): ExportPreviewBody {
   const body: ExportPreviewBody = {
     card: args.card,
@@ -231,6 +233,7 @@ export function previewRequest(args: {
   else if (args.variant && args.variant !== "default") body.variant = args.variant;
   if (args.at !== null) body.at = args.at;
   if (args.templates && args.templates.length > 0) body.templates = args.templates;
+  if (args.motion && args.at === null) body.motion = true;
   return body;
 }
 

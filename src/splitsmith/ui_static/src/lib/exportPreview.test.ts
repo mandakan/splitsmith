@@ -44,9 +44,19 @@ describe("previewBody", () => {
       project_name: "Bromma - Final Cut",
       head_pad_seconds: 0.5,
       tail_pad_seconds: 1,
+      motion: true,
     });
     expect(previewBody(DEFAULT_EXPORT_SETTINGS, "frame", 1).title_info).toBeNull();
     expect(previewBody(DEFAULT_EXPORT_SETTINGS, "frame", 1, "  ").project_name).toBeNull();
+  });
+
+  it("asks for motion on the cards a template draws, and only those (#1249)", () => {
+    for (const card of ["title", "slate", "lower-third", "closing"] as const) {
+      expect(previewBody(DEFAULT_EXPORT_SETTINGS, card, 1).motion).toBe(true);
+    }
+    for (const card of ["frame", "summary", "overlay"] as const) {
+      expect(previewBody(DEFAULT_EXPORT_SETTINGS, card, 1).motion).toBeUndefined();
+    }
   });
 
   it("uses the project's own buffers for the pads outside single mode", () => {

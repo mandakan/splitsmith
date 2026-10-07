@@ -575,7 +575,12 @@ the project's ``updated_at`` and the audit version. 503 is no browser,
 needs a ``previewCardFor`` case or it previews as the frame. The request carries ``look`` and ``variant``
 (#1246, the focused slot's, only when not the defaults); both are in the
 cache key, and an animated template previews at its ``poster()`` through
-``render_template``.
+``render_template``, or, with ``motion`` (#1249, what the rail and the
+editor's big preview ask for), as a looping animated WebP of its own frames at
+``MOTION_FPS`` over the backdrop its still uses, the last frame held; a still
+template answers the PNG it always did, so ``motion`` is safe to ask for on any
+card a template draws. The response's type follows the bytes (``_image``), and
+the cache keeps ``<key>.png`` or ``<key>.webp`` accordingly.
 
 ## YouTube upload (#1000)
 

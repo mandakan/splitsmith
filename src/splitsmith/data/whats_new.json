@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "moving-previews",
+      "date": "2026-10-07",
+      "title": "Previews that move",
+      "body": "An animated card or sting now plays in the Export page's preview and in the Look editor, looping, on your own footage."
+    },
+    {
       "id": "look-preflight",
       "date": "2026-10-07",
       "title": "Broken templates show before you export",

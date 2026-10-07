@@ -245,6 +245,15 @@ describe("serialQueue", () => {
   });
 });
 
+describe("previewRequest motion", () => {
+  it("asks the big preview for motion until a time is set (#1249)", () => {
+    const base = { card: "title" as const, look: "club", draft: draft(), stageNumber: 1, width: 960, sting: null };
+    expect(previewRequest({ ...base, at: null, motion: true }).motion).toBe(true);
+    expect(previewRequest({ ...base, at: 0.4, motion: true }).motion).toBeUndefined();
+    expect(previewRequest({ ...base, at: null }).motion).toBeUndefined();
+  });
+});
+
 describe("previewRequest with templates", () => {
   it("draws the variant being edited with the unsaved text", () => {
     const d = draft();

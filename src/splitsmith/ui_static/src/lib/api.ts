@@ -1217,6 +1217,8 @@ export interface ExportPreviewBody {
   at?: number;
   /** The template editor's unsaved text (#1265); local only. */
   templates?: TemplateEdit[];
+  /** An animated template as a looping WebP (#1249); a still stays a PNG. */
+  motion?: boolean;
 }
 
 export interface ExportStageRequestPayload {
