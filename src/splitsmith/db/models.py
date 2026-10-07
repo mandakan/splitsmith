@@ -15,6 +15,9 @@ generate ids client-side without a round-trip.
 
 from __future__ import annotations
 
+import os
+import threading
+import time
 from datetime import datetime
 
 import ulid
@@ -42,11 +45,36 @@ class Base(DeclarativeBase):
     live schema."""
 
 
+_ULID_LOCK = threading.Lock()
+_ULID_LAST: tuple[int, int] = (0, 0)
+_ULID_MAX_RANDOM = (1 << 80) - 1
+
+
 def new_ulid() -> str:
     """Generate a fresh ULID string. Picked over UUID4 for the same
     reason doc 02 calls out: sortable by creation time, URL-safe,
-    same 128 bits of entropy."""
-    return str(ulid.ULID())
+    same 128 bits of entropy.
+
+    Monotonic within the process: ids made in the same millisecond (or after
+    the clock steps back) take the last one's random part plus one. The
+    clock is read once per id; ``python-ulid`` reads it twice, and a
+    millisecond boundary between the two reads gave an id the old timestamp
+    with fresh random bytes, which could sort before the id made just
+    before it (a CI flake)."""
+    global _ULID_LAST
+    with _ULID_LOCK:
+        now = time.time_ns() // 1_000_000
+        last_ms, last_random = _ULID_LAST
+        if now <= last_ms:
+            now = last_ms
+            random_part = last_random + 1
+            if random_part > _ULID_MAX_RANDOM:
+                now += 1
+                random_part = int.from_bytes(os.urandom(10), "big")
+        else:
+            random_part = int.from_bytes(os.urandom(10), "big")
+        _ULID_LAST = (now, random_part)
+    return str(ulid.ULID(now.to_bytes(6, "big") + random_part.to_bytes(10, "big")))
 
 
 class User(Base):

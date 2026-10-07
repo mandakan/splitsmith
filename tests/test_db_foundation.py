@@ -46,6 +46,30 @@ def test_new_ulid_returns_distinct_sortable_ids() -> None:
     assert a < b  # second call is strictly later in lexicographic order
 
 
+def test_new_ulid_stays_ordered_across_a_millisecond_boundary(monkeypatch) -> None:
+    """The flake CI hit: python-ulid reads the clock once for the timestamp
+    and again for the randomness, so a millisecond boundary between the two
+    gave an id the old timestamp with fresh random bytes, sorting it before
+    the id made just before it. Pinned here: the clock ticks over between the
+    second id's reads, and the random bytes are chosen to expose it."""
+    import os
+    import time
+
+    ms = 1_700_000_000_000
+    ticks = iter([ms, ms, ms, ms + 1] + [ms + 1] * 20)
+    monkeypatch.setattr(time, "time_ns", lambda: next(ticks) * 1_000_000)
+    noise = iter([b"\xff" * 10, b"\x00" * 10] + [b"\x11" * 10] * 20)
+    monkeypatch.setattr(os, "urandom", lambda n: next(noise)[:n])
+    a = new_ulid()
+    b = new_ulid()
+    assert a < b
+
+
+def test_new_ulid_is_ordered_in_a_tight_loop() -> None:
+    ids = [new_ulid() for _ in range(2000)]
+    assert ids == sorted(ids) and len(set(ids)) == len(ids)
+
+
 def test_user_round_trip_against_sqlite_in_memory() -> None:
     """Insert a user, commit, read it back by email. Proves the
     engine + model + session machinery actually works end-to-end

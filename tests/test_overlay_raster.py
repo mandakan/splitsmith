@@ -757,3 +757,39 @@ def test_render_template_frames_samples_the_end_of_a_capped_span(tmp_path: Path)
     assert [s[s.index("window.seek(") :] for s in seeks] == [
         f"window.seek({t}) : undefined" for t in (1.5, 0.0, 0.1, 0.2, 0.3, 0.5)
     ]
+
+
+# --- a transient screenshot failure (the CI flake on main, Oct 2026) ------------------------
+
+
+class _FlakyScreenshotPage(_RecordingPage):
+    """Chromium's transient "Unable to capture screenshot" once, then a PNG."""
+
+    def screenshot(self, *, type: str, omit_background: bool) -> bytes:  # noqa: A002
+        from playwright.sync_api import Error as PlaywrightError
+
+        self.calls.append(("screenshot", type, omit_background))
+        if self.screenshots == 0:
+            self.screenshots += 1
+            raise PlaywrightError(
+                "Page.screenshot: Protocol error (Page.captureScreenshot): Unable to capture screenshot"
+            )
+        self.screenshots += 1
+        return _PNG_2x2
+
+
+def test_png_retries_a_transient_screenshot_failure_once() -> None:
+    rasterizer = ChromiumRasterizer()
+    rasterizer._browser = _RecordingBrowser(page_factory=_FlakyScreenshotPage)
+    assert rasterizer.png("<html></html>", width=64, height=32) == _PNG_2x2
+    page = rasterizer._browser.contexts[0].pages[0]
+    assert page.screenshots == 2
+
+
+def test_any_other_screenshot_failure_is_not_retried() -> None:
+    rasterizer = ChromiumRasterizer()
+    rasterizer._browser = _RecordingBrowser(page_factory=_BoomOnScreenshotPage)
+    with pytest.raises(RuntimeError, match="screenshot boom"):
+        rasterizer.png("<html></html>", width=64, height=32)
+    page = rasterizer._browser.contexts[0].pages[0]
+    assert [c for c in page.calls if c[0] == "screenshot"] == [("screenshot", "png", True)]
