@@ -14,7 +14,9 @@ import {
   previewRequest,
   rgbToHex,
   setStyle,
+  FONT_DEFAULTS,
   serialQueue,
+  setFont,
   styleOptions,
   type LookDraft,
 } from "@/lib/lookEditor";
@@ -264,5 +266,15 @@ describe("previewRequest with templates", () => {
       look: "club",
       draft: d,
     });
+  });
+});
+
+describe("fonts", () => {
+  it("is dirty when a face changes, and a role's default is stored as no entry", () => {
+    const withFonts = { ...draft(), fonts: {} };
+    const chosen = setFont(withFonts, "display", "bebas-neue", FONT_DEFAULTS);
+    expect(chosen.fonts).toEqual({ display: "bebas-neue" });
+    expect(isDirty(withFonts, chosen)).toBe(true);
+    expect(setFont(chosen, "display", "antonio", FONT_DEFAULTS).fonts).toEqual({});
   });
 });

@@ -36,6 +36,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .fonts import resolve as resolve_fonts
 from .looks import Look, LookError, LookNotFoundError, load_look
 
 ThemeName = str
@@ -113,6 +114,12 @@ class OverlayTheme:
     #: Dimmer label grey than :attr:`muted` (``--color-subtle``), for
     #: captions that must sit below a value without competing with it.
     subtle: RGB
+    #: The Look's faces by role (``splitsmith.fonts`` ids, #1272): what
+    #: ``"Splitsmith Display"`` and ``"Splitsmith Mono"`` draw with, in the
+    #: cards and in the clock. The defaults are the faces every Look drew
+    #: before a Look could choose.
+    display_font: str = "antonio"
+    mono_font: str = "jetbrains-mono"
 
     @property
     def shadow(self) -> RGB:
@@ -126,6 +133,7 @@ class OverlayTheme:
 def theme_for(look: Look) -> OverlayTheme:
     """The palette a Look declares (``look.json``'s ``colors``)."""
     c = look.manifest.colors
+    faces = resolve_fonts(look.manifest.fonts)
     return OverlayTheme(
         name=look.name,
         ink=c["ink"],
@@ -140,6 +148,8 @@ def theme_for(look: Look) -> OverlayTheme:
         ink_2=c["ink_2"],
         surface=c["surface"],
         subtle=c["subtle"],
+        display_font=faces["display"],
+        mono_font=faces["mono"],
     )
 
 

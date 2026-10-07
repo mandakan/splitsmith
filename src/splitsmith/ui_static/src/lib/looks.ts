@@ -7,7 +7,13 @@
  * Look lacks is sent as ``default`` rather than a name the server would
  * warn about. ``useLooks`` fetches the catalog; everything here is data.
  */
-import { scopeRequestPath, type LookInfo, type LookVariantInfo, type TransitionFamilyInfo } from "@/lib/api";
+import {
+  scopeRequestPath,
+  type FontInfo,
+  type LookInfo,
+  type LookVariantInfo,
+  type TransitionFamilyInfo,
+} from "@/lib/api";
 
 export const DEFAULT_LOOK = "splitsmith";
 export const DEFAULT_VARIANT = "default";
@@ -94,6 +100,8 @@ export interface LooksState {
   looks: LookInfo[];
   /** The ffmpeg xfade families the server offers (#1259); empty until it answers. */
   transitions: TransitionFamilyInfo[];
+  /** The bundled faces a Look may choose (#1272); empty until it answers. */
+  fonts?: FontInfo[];
   /** The fetch has answered, one way or the other. */
   loaded: boolean;
   /** It answered with an error: ``looks`` is the built-in catalog. */

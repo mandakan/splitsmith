@@ -1120,6 +1120,18 @@ export interface StoredLookBody {
   accent_series: string[];
   /** Card slot -> the variant its ``default`` draws; absent is ``default``. */
   styles: Record<string, string>;
+  /** Font role -> a bundled face id (#1272); absent is the role's default. */
+  fonts?: Record<string, string>;
+}
+
+/** One bundled face a Look may choose (#1272). */
+export interface FontInfo {
+  id: string;
+  label: string;
+  role: "display" | "mono";
+  help: string;
+  /** ``/api/looks/fonts/<id>``: the face's file, for a sample. */
+  url: string;
 }
 
 export interface StoredLook {
@@ -4973,7 +4985,8 @@ export const api = {
     request<WhatsNewPayload>("/api/whats-new/seen", { method: "POST", json: { ids } }),
 
   /** The installed Looks with their slots, variants and previews (#1246). */
-  listLooks: () => request<{ looks: LookInfo[]; transitions?: TransitionFamilyInfo[] }>("/api/looks"),
+  listLooks: () =>
+    request<{ looks: LookInfo[]; transitions?: TransitionFamilyInfo[]; fonts?: FontInfo[] }>("/api/looks"),
   /** The caller's own Looks (#1263, #1264); a shipped Look is a 404 here. */
   getLook: (name: string) => request<StoredLook>(`/api/looks/${encodeURIComponent(name)}`),
   putLook: (name: string, body: StoredLookBody) =>

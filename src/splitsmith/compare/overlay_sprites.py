@@ -394,8 +394,9 @@ def theme_font_face(theme: OverlayTheme) -> OverlayFace:
     can express one now -- a bundled face and an ``@font-face`` rule
     naming it), and every caller already has a theme in hand.
     """
-    del theme  # see the docstring: one bundled face, both halves, every theme
-    return resolve_overlay_face("splitsmith-mono")
+    # A Look chooses its mono face now (#1272): a bundled file both halves
+    # load, the ``@font-face`` rule and this ``drawtext`` path alike.
+    return resolve_overlay_face(theme.mono_font)
 
 
 def quantize_durations(

@@ -580,11 +580,9 @@ def render_overlay(
     # it has to be a real path that outlives the encode -- not a temp
     # file from ``importlib.resources.as_file``.
     with tempfile.TemporaryDirectory(prefix="splitsmith-overlay-") as work:
-        # One bundled face for every theme. A theme decides colour, never
-        # the typeface -- see ``compare.overlay_sprites.theme_font_face``
-        # for the measurement behind that: only one of the overlay's two
-        # halves could ever honour a per-theme face deterministically.
-        font_path = overlay_font_file(resolve_overlay_face("splitsmith-mono"), Path(work))
+        # The Look's mono face, the one its cards' figures draw with
+        # (#1272): both halves load the same bundled file.
+        font_path = overlay_font_file(resolve_overlay_face(palette.mono_font), Path(work))
         capabilities = ffmpeg_capabilities(ffmpeg_binary, font_path=font_path, runner=probe_runner)
         clock_filter: str | None = None
         if capabilities.drawtext:
