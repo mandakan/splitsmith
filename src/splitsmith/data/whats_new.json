@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "club-from-scoreboard",
+      "date": "2026-10-07",
+      "title": "Club line from the scoreboard",
+      "body": "Linking a shooter to their scoreboard entry now fills their club line for the cards, unless you already typed one."
+    },
+    {
       "id": "make-your-own-look",
       "date": "2026-10-07",
       "title": "Make your own Look",
