@@ -21,6 +21,18 @@ def test_automation_settings_defaults() -> None:
     assert s.shot_detect_on_beep_verified is True
 
 
+def test_a_beep_is_auto_trusted_from_097() -> None:
+    """The learned beep ranker (#949): out of fold over 127 fixtures, 70 beeps
+    clear 0.97 and none is wrong (ranker_report.json)."""
+    assert AutomationSettings().beep_low_confidence_threshold == 0.97
+
+
+def test_a_users_own_threshold_still_wins(tmp_path: Path) -> None:
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text("automation:\n  beep_low_confidence_threshold: 0.9\n", encoding="utf-8")
+    assert automation.load_global(cfg).beep_low_confidence_threshold == 0.9
+
+
 def test_automation_settings_loads_from_yaml(tmp_path: Path) -> None:
     """The global YAML's ``automation`` block populates fields."""
     cfg = tmp_path / "config.yaml"

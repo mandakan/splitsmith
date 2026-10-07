@@ -69,7 +69,7 @@ class AutomationSettings(BaseSettings):
     shot_detect_on_beep_verified: bool = True
     """When the user marks a beep reviewed, fire shot detection."""
 
-    beep_low_confidence_threshold: float = 0.95
+    beep_low_confidence_threshold: float = 0.97
     """Minimum auto-detector confidence in [0, 1] required to auto-trust a beep.
 
     Joins issue #219: an auto-detected beep with confidence at or above
@@ -85,7 +85,10 @@ class AutomationSettings(BaseSettings):
     labelled fixture set (~95% top-1 precision in the ``>= 0.7`` band).
     Field use surfaced too many incorrectly-auto-trusted beeps on
     recursive-scan ingests, so the default was raised to 0.95 pending
-    a re-calibration with more data.
+    a re-calibration with more data. That re-calibration came with the
+    learned beep ranker (#949): out of fold over 127 fixtures, 70 beeps
+    clear 0.97 and none is wrong (``tests/fixtures/beep_calibration/
+    ranker_report.json``), so the default is 0.97.
     """
 
 

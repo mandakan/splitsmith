@@ -8875,7 +8875,7 @@ def test_get_automation_returns_resolved_settings_and_provenance(tmp_path: Path)
     body = resp.json()
     assert body["settings"] == {
         "shot_detect_on_beep_verified": True,
-        "beep_low_confidence_threshold": 0.95,
+        "beep_low_confidence_threshold": 0.97,
     }
     prov = body["provenance"]["shot_detect_on_beep_verified"]
     assert prov["source"] == "global"
@@ -8884,7 +8884,7 @@ def test_get_automation_returns_resolved_settings_and_provenance(tmp_path: Path)
     assert prov["cli_value"] is None
     threshold_prov = body["provenance"]["beep_low_confidence_threshold"]
     assert threshold_prov["source"] == "global"
-    assert threshold_prov["global_value"] == 0.95
+    assert threshold_prov["global_value"] == 0.97
 
 
 def test_get_automation_reports_project_provenance_when_overridden(

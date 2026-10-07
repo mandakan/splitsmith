@@ -314,9 +314,9 @@ export function Audit() {
   // Resolved automation: feeds the CamSyncPill's "needs sync" gate so it
   // reads from the same threshold the HITL queue uses. Server-resolved
   // (CLI > project > global > default); we only consume the result.
-  // Falls back to the in-code AutomationSettings default (0.95) until
+  // Falls back to the in-code AutomationSettings default (0.97) until
   // the request lands.
-  const [beepLowConfThreshold, setBeepLowConfThreshold] = useState(0.95);
+  const [beepLowConfThreshold, setBeepLowConfThreshold] = useState(0.97);
   useEffect(() => {
     let alive = true;
     api
