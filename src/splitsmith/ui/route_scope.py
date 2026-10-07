@@ -194,6 +194,11 @@ UNTYPED_BODY_ROUTES: dict[tuple[str, str], str] = {
     ),
     ("POST", "/api/sync/commands/{command_id}/complete"): "a finished command's result, stored for display",
     ("POST", "/api/workers/register"): "worker metadata, stored; the route also needs a worker token",
+    ("POST", "/api/shooters/{slug}/export-preview"): (
+        "the draft is a StoredLookBody (colour triples and card styles, validated per field) written as "
+        "look.json into a temporary folder beside copies of the saved Look's own templates; hosted Looks "
+        "own none, so no account-supplied file is read or run"
+    ),
     ("PUT", "/api/looks/{name}"): (
         "colour triples and card styles, validated per field (look_store.StoredLookBody); hosted, a "
         "user_looks row materialized as look.json under the account's cache folder, the name checked "

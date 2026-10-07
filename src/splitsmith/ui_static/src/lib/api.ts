@@ -1102,9 +1102,30 @@ export interface LookInfo {
   name: string;
   label: string;
   source: "shipped" | "user";
+  /** The caller may change or delete it (#1263): every user Look, never a shipped one. */
+  editable?: boolean;
   accent_series: string[];
   preview: string | null;
   slots: Record<string, LookVariantInfo[]>;
+}
+
+/** An RGB triple, as ``look.json`` stores a colour. */
+export type Rgb = [number, number, number];
+
+/** What an account edits of a Look without code (``look_store.StoredLookBody``, #1263). */
+export interface StoredLookBody {
+  label: string;
+  base: string | null;
+  colors: Record<string, Rgb>;
+  accent_series: string[];
+  /** Card slot -> the variant its ``default`` draws; absent is ``default``. */
+  styles: Record<string, string>;
+}
+
+export interface StoredLook {
+  name: string;
+  updated_at: string;
+  body: StoredLookBody;
 }
 
 /** One ffmpeg xfade family as the gallery shows it (#1259): a tile, its
@@ -1118,7 +1139,7 @@ export interface TransitionFamilyInfo {
   directions: { name: string; kind: string }[];
 }
 
-export type PreviewCard = "frame" | "title" | "slate" | "lower-third" | "summary" | "closing" | "overlay";
+export type PreviewCard = "frame" | "title" | "slate" | "lower-third" | "summary" | "closing" | "overlay" | "sting";
 
 /** Body of ``POST /api/shooters/{slug}/export-preview`` (spec 2026-09-15
  *  s3). The server ignores unknown fields, so the mapper output may ride
@@ -1133,9 +1154,13 @@ export interface ExportPreviewBody {
   tail_pad_seconds?: number;
   /** The bundle name, as the match export's ``project_name``. */
   project_name?: string | null;
-  /** The Look and the card's template variant (#1246). */
+  /** The Look and the card's template variant (#1246); a sting's name for ``sting``. */
   look?: string;
   variant?: string;
+  /** The Look editor (#1264): an unsaved draft drawn in place of ``look``. */
+  draft?: StoredLookBody;
+  /** Seconds into the template instead of its poster. */
+  at?: number;
 }
 
 export interface ExportStageRequestPayload {
@@ -4899,6 +4924,13 @@ export const api = {
   getExportPresets: () => request<{ presets: ExportPreset[] }>("/api/settings/export-presets"),
   /** The installed Looks with their slots, variants and previews (#1246). */
   listLooks: () => request<{ looks: LookInfo[]; transitions?: TransitionFamilyInfo[] }>("/api/looks"),
+  /** The caller's own Looks (#1263, #1264); a shipped Look is a 404 here. */
+  getLook: (name: string) => request<StoredLook>(`/api/looks/${encodeURIComponent(name)}`),
+  putLook: (name: string, body: StoredLookBody) =>
+    request<StoredLook>(`/api/looks/${encodeURIComponent(name)}`, { method: "PUT", json: body }),
+  deleteLook: (name: string) => request<void>(`/api/looks/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  duplicateLook: (name: string, source: string) =>
+    request<StoredLook>(`/api/looks/${encodeURIComponent(name)}/duplicate`, { method: "POST", json: { source } }),
 
   /** The PNG for one card on one stage; rejects with an ApiError whose
    *  status the rail maps to a line (503 no browser, 409 no shots). */

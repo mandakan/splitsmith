@@ -15,6 +15,7 @@ none). Reads the project and the audit doc; writes nothing to either.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import tempfile
 from collections.abc import Callable
@@ -33,7 +34,8 @@ from ..export_preview import (
     preview_key,
     render_preview,
 )
-from ..looks import load_look
+from ..look_store import LookStoreError, StoredLookBody, draft_look
+from ..looks import Look, load_look
 from ..overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
 from ..runtime import runtime
 from . import render_bound
@@ -63,6 +65,10 @@ class ExportPreviewRequest(BaseModel):
     #: The Look and the card's template variant (#1246).
     look: str = "splitsmith"
     variant: str = "default"
+    #: The Look editor (#1264): an unsaved draft of ``look`` drawn in its
+    #: place, and a time into the template instead of its poster.
+    draft: StoredLookBody | None = None
+    at: float | None = Field(default=None, ge=0, le=60)
 
     @field_validator("look")
     @classmethod
@@ -108,6 +114,12 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
         project_name=req.project_name,
         look=req.look,
         variant=req.variant,
+        at=req.at,
+        draft=(
+            None
+            if req.draft is None
+            else hashlib.sha256(req.draft.model_dump_json().encode("utf-8")).hexdigest()
+        ),
     )
     rt = runtime()
     cache_dir = rt.cache_dir / "export-preview"
@@ -122,19 +134,29 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
     if cached.exists():
         return _png(cached.read_bytes())
 
+    def _look(work: Path) -> Look:
+        saved = load_look(req.look)
+        if req.draft is None:
+            return saved
+        try:
+            return draft_look(saved, req.draft, work / "draft")
+        except LookStoreError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+
     def _render(rasterizer: Rasterizer) -> bytes:
         with tempfile.TemporaryDirectory(prefix="export-preview-") as work:
+            look = _look(Path(work))
             return render_preview(
                 spec,
                 project=project,
                 root=root,
                 audit_doc=audit_doc,
-                look=load_look(req.look),
+                look=look,
                 rasterizer=rasterizer,
                 shooter=resolved_identity_for(
                     project,
                     root,
-                    look=load_look(req.look),
+                    look=look,
                     index=0,
                     label=project.competitor_name or project.name,
                 ),

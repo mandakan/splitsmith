@@ -965,6 +965,9 @@ function ExportInner({ slug }: { slug: string }) {
                 bareSelected={bareSelected}
                 onHover={setLookHover}
                 onSelect={setLookFocus}
+                slug={compare ? audioFrom || slug : slug}
+                stageNumber={orderedSelection[0] ?? 0}
+                hosted={hosted}
               />
             </Section>
           ) : null}

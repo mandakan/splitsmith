@@ -244,6 +244,22 @@ materializes the account's rows as manifest-only folders under
 ``user_looks_cache_root()/<user_id>/<content hash>/``. A new place that pins a
 tenant must set the provider too, or a render there sees no user Looks.
 
+The Look editor (#1264) is the Export page Look group's Advanced row
+(``components/export/LookAdvanced`` -> ``LookEditor``, rules in
+``lib/lookEditor``): Duplicate copies server-side first
+(``POST /api/looks/{name}/duplicate``: ``looks new --from`` locally, so a
+hand-made Look keeps its templates; a manifest on the source's shipped base
+hosted), then the sheet edits the copy. Its draft previews through the
+export-preview route's ``draft`` (``look_store.draft_look``: the saved
+Look's manifest with the draft's fields, beside copies of its own
+templates) and ``at`` (``render_template(at=)``; the preview's
+``_AtTime`` wrapper), plus a ``sting`` card; both fields join the cache key
+only when set. The strip renders one card at a time
+(``lookEditor.serialQueue``): the server's render bound answers 429 to a
+second preview in flight. Contrast is a warning; only invalid fields block
+Save. ``refreshLooks()`` re-fetches the catalog for every mounted surface
+after a write.
+
 A shooter has an **identity** (``splitsmith.identity``, spec section 2,
 #1243): ``MatchProject.identity`` holds an optional ``#rrggbb`` accent, a
 club line and the name of a logo under ``<shooter>/identity/``

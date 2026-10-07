@@ -33,7 +33,8 @@ from PIL import Image
 from . import composition
 from .export_naming import stage_display_name, stage_file_base
 from .identity import ResolvedIdentity
-from .looks import Look
+from .look_sting import sting_context
+from .looks import Look, sting_template_for
 from .match_project import MatchProject
 from .overlay_card import build_card_still, build_lower_third, card_scale
 from .overlay_html import single_html
@@ -48,7 +49,12 @@ from .ui.match_exports import title_info_lines
 
 logger = logging.getLogger(__name__)
 
-PreviewCard = Literal["frame", "title", "slate", "lower-third", "summary", "closing", "overlay"]
+PreviewCard = Literal["frame", "title", "slate", "lower-third", "summary", "closing", "overlay", "sting"]
+"""``sting`` is the Look's sting ``variant`` over the stage's head frame (#1264)."""
+
+#: How long the sting card's transition lasts in a preview; the editor's
+#: slider scrubs it.
+STING_PREVIEW_SECONDS = 1.0
 
 #: The tail grab's window, the renderer's own (``mp4_render._BACKDROP_WINDOW_SECONDS``).
 TAIL_WINDOW_SECONDS = 0.5
@@ -80,6 +86,12 @@ class PreviewSpec:
     #: request carries them; the Look object itself is the caller's.
     look: str = "splitsmith"
     variant: str = "default"
+    #: Seconds into the template instead of its poster (the Look editor's
+    #: slider, #1264); ``None`` is the poster.
+    at: float | None = None
+    #: Content digest of an unsaved Look draft drawn in place of ``look``
+    #: (#1264); part of the cache key only, the Look object is the caller's.
+    draft: str | None = None
 
     @property
     def height(self) -> int:
@@ -112,6 +124,11 @@ def preview_key(
     fields: dict[str, object] = {}
     if owner is not None:
         fields["owner"] = owner
+    # Only when set, so every key from before the editor stays as it was.
+    if spec.at is not None:
+        fields["at"] = spec.at
+    if spec.draft is not None:
+        fields["draft"] = spec.draft
     payload = json.dumps(
         {
             **fields,
@@ -256,6 +273,8 @@ def render_preview(
     ``shooter`` is the shooter's resolved identity (#1243), drawn on the
     cards the way the render draws it."""
     theme = theme_for(look)
+    if spec.at is not None:
+        rasterizer = _AtTime(rasterizer, spec.at)
     try:
         stage = project.stage(spec.stage_number)
     except KeyError as exc:
@@ -300,6 +319,28 @@ def render_preview(
     image: Image.Image | None
     if spec.card == "frame":
         image = _compose_over(frame, None, spec, theme)
+    elif spec.card == "sting":
+        template = sting_template_for(look, spec.variant)
+        if template is None:
+            raise PreviewError(404, f"the Look has no {spec.variant!r} sting")
+        context = sting_context(
+            kind=f"sting:{spec.variant}",
+            seconds=STING_PREVIEW_SECONDS,
+            from_label=stage_label,
+            to_label=stage_display_name(stage.stage_number + 1, ""),
+            width=spec.width,
+            height=spec.height,
+            fps=30.0,
+            theme=theme,
+            shooters=size["shooters"],  # type: ignore[arg-type]
+        )
+        try:
+            layer = rasterizer.render_template(
+                template, context=context, width=spec.width, height=spec.height
+            )
+        except Exception as exc:  # noqa: BLE001 -- the preview says why, never a traceback
+            raise PreviewError(503, f"the sting could not be drawn: {exc}") from exc
+        image = _compose_over(frame, layer, spec, theme)
     elif spec.card in ("title", "closing"):
         card = composition.MatchTitle(
             text=name,
@@ -362,6 +403,26 @@ def render_preview(
     if image is None:
         raise PreviewError(503, "the card could not be rasterized")
     return _to_png(image)
+
+
+class _AtTime:
+    """A rasterizer whose templates render at ``at`` seconds, not their
+    poster (the Look editor's slider). Everything else passes through."""
+
+    def __init__(self, inner: Rasterizer, at: float) -> None:
+        self._inner = inner
+        self._at = at
+
+    def png(self, html: str, *, width: int, height: int) -> bytes:
+        return self._inner.png(html, width=width, height=height)
+
+    def render_template(self, template: Path, *, context, width: int, height: int) -> bytes:  # type: ignore[no-untyped-def]
+        return self._inner.render_template(  # type: ignore[call-arg]
+            template, context=context, width=width, height=height, at=self._at
+        )
+
+    def __getattr__(self, name: str):  # type: ignore[no-untyped-def]
+        return getattr(self._inner, name)
 
 
 def _to_png(image: Image.Image) -> bytes:

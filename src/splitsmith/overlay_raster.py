@@ -500,10 +500,19 @@ class ChromiumRasterizer:
         finally:
             browser_context.close()
 
-    def render_template(self, template: Path, *, context: TemplateContext, width: int, height: int) -> bytes:
+    def render_template(
+        self,
+        template: Path,
+        *,
+        context: TemplateContext,
+        width: int,
+        height: int,
+        at: float | None = None,
+    ) -> bytes:
         """Render a Look template to a ``width`` x ``height`` alpha PNG at
         its poster frame (``poster()``, else the midpoint of
-        ``duration()``, else 0: a still renders at 0). The template is
+        ``duration()``, else 0: a still renders at 0), or at ``at`` seconds
+        when given (the Look editor's time slider, #1264). The template is
         navigated to by ``file://`` URL so its own relative references and
         the ``file://`` script URLs in ``assets.shared`` resolve. After
         load: fonts, the poster seek, fonts again (a template may add a
@@ -519,8 +528,8 @@ class ChromiumRasterizer:
             template, context=context, width=width, height=height
         )
         try:
-            poster = page.evaluate(self._POSTER)
-            self._seek(page, float(poster or 0))
+            seconds = at if at is not None else float(page.evaluate(self._POSTER) or 0)
+            self._seek(page, seconds)
             page.evaluate("document.fonts.ready")
             page.evaluate("window.__splitsmithFit && window.__splitsmithFit()")
             self._check(errors, template)
