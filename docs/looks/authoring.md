@@ -17,6 +17,7 @@ default Look to your own templates.
 - [Lower third](#lower-third)
 - [Stings](#stings)
 - [Logos and identity](#logos-and-identity)
+- [Your brand](#your-brand)
 - [What a template can load](#what-a-template-can-load)
 - [Fonts](#fonts)
 - [Checking](#checking)
@@ -189,6 +190,16 @@ accent, club line and logo URL. The logo is the shooter's own,
 or the match logo. The shipped cards draw the logos top right through
 `_shared/identity.js`; a lower third shows one only when a single shooter has
 one. Your template may draw them any way it likes, or not at all.
+
+## Your brand
+
+`look.json`'s `brand` is the Look's own brand: a logo (a file in the Look's
+`brand/` folder) and a line. The title page and the closing card receive it as
+`window.splitsmith.data.brand` (`{ logo, line }`, the logo already a URL the
+page can load) and the shipped cards draw it above the match name through
+`_shared/brand.js` (`engine.mountBrand`). Other cards, and Looks without a
+brand, receive no `brand` at all. Set it in the Look editor under Card styles,
+Your brand.
 
 ## What a template can load
 

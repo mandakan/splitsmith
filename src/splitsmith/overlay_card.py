@@ -39,6 +39,7 @@ from PIL import Image
 
 from .composition import MatchTitle, TitleCard
 from .identity import ResolvedIdentity
+from .look_brand import brand_json
 from .look_template import (
     TemplateContext,
     engine_block,
@@ -195,25 +196,31 @@ def card_context(
     fps: float,
     theme: OverlayTheme,
     shooters: Sequence[ResolvedIdentity] = (),
+    brand: dict[str, str | None] | None = None,
 ) -> TemplateContext:
     """What the template for ``slot`` receives: the card as data
     (``data.card``), the engine's default declaration of it
     (``data.groups``, from :func:`card_groups`), the palette, the canvas,
     and the engine block a shipped template draws with."""
     scale = card_scale(height)
+    data: dict[str, object] = {
+        "card": {
+            "slot": slot,
+            "variant": card.variant,
+            "text": card.text,
+            "info": list(card.info),
+            "duration_seconds": card.duration_seconds,
+        },
+        "groups": [group_json(g) for g in card_groups(card)],
+        "shooters": [shooter_json(shooter) for shooter in shooters],
+    }
+    if brand is not None:
+        # Your brand (``look_brand``): only on the cards that draw it, so
+        # every other context, and its digest, is what it always was.
+        data["brand"] = brand
     return TemplateContext(
         theme=theme_tokens(theme),
-        data={
-            "card": {
-                "slot": slot,
-                "variant": card.variant,
-                "text": card.text,
-                "info": list(card.info),
-                "duration_seconds": card.duration_seconds,
-            },
-            "groups": [group_json(g) for g in card_groups(card)],
-            "shooters": [shooter_json(shooter) for shooter in shooters],
-        },
+        data=data,
         size={"width": width, "height": height},
         fps=fps,
         engine=engine_block(css=single_css(width=width, height=height, scale=scale, theme=theme)),
@@ -282,7 +289,14 @@ def _rasterize(
     theme = theme_for(look)
     template = template_for(look, slot, card.variant)
     context = card_context(
-        card, slot=slot, width=width, height=height, fps=fps, theme=theme, shooters=shooters
+        card,
+        slot=slot,
+        width=width,
+        height=height,
+        fps=fps,
+        theme=theme,
+        shooters=shooters,
+        brand=brand_json(look, slot),
     )
     try:
         png_bytes = rasterizer.render_template(template, context=context, width=width, height=height)
@@ -334,7 +348,14 @@ def card_motion(
     theme = theme_for(look)
     template = template_for(look, slot, card.variant)
     context = card_context(
-        card, slot=slot, width=width, height=height, fps=fps, theme=theme, shooters=shooters
+        card,
+        slot=slot,
+        width=width,
+        height=height,
+        fps=fps,
+        theme=theme,
+        shooters=shooters,
+        brand=brand_json(look, slot),
     )
     frames: TemplateFrames | None = None
     try:

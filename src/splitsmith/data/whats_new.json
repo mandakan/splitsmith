@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "look-brand",
+      "date": "2026-10-07",
+      "title": "Your brand on the title page",
+      "body": "Add your club, personal or sponsor logo and a line to a Look under Card styles, Your brand. The title page and closing card show it above the match name."
+    },
+    {
       "id": "club-from-scoreboard",
       "date": "2026-10-07",
       "title": "Club line from the scoreboard",

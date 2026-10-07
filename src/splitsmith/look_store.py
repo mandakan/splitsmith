@@ -46,6 +46,7 @@ from .looks import (
     RGB,
     STING_SLOT,
     Look,
+    LookBrand,
     LookError,
     LookManifest,
     check_accent_series,
@@ -77,6 +78,8 @@ class StoredLookBody(BaseModel):
     styles: dict[str, str] = {}
     #: A face per role from the bundled catalog (``splitsmith.fonts``, #1272).
     fonts: dict[str, str] = {}
+    #: Your brand on the title page and the closing card (``look_brand``).
+    brand: LookBrand | None = None
 
     @field_validator("fonts")
     @classmethod
@@ -150,7 +153,8 @@ def manifest_for(name: str, body: StoredLookBody) -> dict[str, object]:
 
 
 def _body_fields(body: StoredLookBody) -> dict[str, object]:
-    return body.model_dump(mode="json")
+    # No brand writes no key, so a Look saved without one reads as before.
+    return body.model_dump(mode="json", exclude={"brand"} if body.brand is None else set())
 
 
 def body_from_manifest(manifest: LookManifest) -> StoredLookBody:
@@ -163,6 +167,7 @@ def body_from_manifest(manifest: LookManifest) -> StoredLookBody:
         # A manifest may name a family or a role the catalog lacks (the
         # shipped one says "Antonio" and "sans"); the stored body keeps ids.
         fonts=normalize_fonts(manifest.fonts),
+        brand=manifest.brand,
     )
 
 

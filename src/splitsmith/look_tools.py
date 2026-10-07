@@ -31,6 +31,7 @@ from PIL import Image, ImageDraw
 
 from . import composition
 from .identity import ResolvedIdentity
+from .look_brand import brand_json
 from .look_sting import sting_context
 from .look_template import TemplateContext
 from .looks import (
@@ -253,6 +254,7 @@ def _context(
         fps=CHECK_FPS,
         theme=theme,
         shooters=shooters,
+        brand=brand_json(look, slot),
     )
 
 

@@ -33,6 +33,8 @@ from pydantic import BaseModel, Field
 
 from ..composition import XFADE_FAMILIES
 from ..fonts import FONTS
+from ..identity import LOGO_MAX_BYTES
+from ..look_brand import BrandError, save_brand_logo
 from ..look_store import (
     MAX_LABEL_LENGTH,
     TEMPLATE_SLOTS,
@@ -51,6 +53,8 @@ from ..look_store import (
 )
 from ..look_tools import STARTERS, check_folder, sample_contexts
 from ..looks import (
+    BRAND_DIR,
+    BRAND_FILE_RE,
     DEFAULT_LOOK,
     DEFAULT_VARIANT,
     MANIFEST_FILE,
@@ -484,6 +488,49 @@ def get_own_font(name: str, file: str) -> FileResponse:
     return FileResponse(
         path,
         media_type="font/otf" if path.suffix == ".otf" else "font/ttf",
+        headers={"Cache-Control": "private, max-age=86400", "X-Content-Type-Options": "nosniff"},
+    )
+
+
+# --- your brand (the branding work) -------------------------------------------
+#
+# Local only, like the font routes: hosted Looks have no file store yet.
+
+
+class BrandLogoInfo(BaseModel):
+    #: What ``brand.logo`` in the Look's body names it by.
+    logo: str
+    #: Where the editor shows it from.
+    url: str
+
+
+@router.post("/api/looks/{name}/brand-logo", status_code=201, response_model=BrandLogoInfo)
+def upload_brand_logo(name: str, file: Annotated[UploadFile, File()]) -> BrandLogoInfo:
+    """Store a PNG, JPEG or WebP in the Look's ``brand/`` folder
+    (``look_brand``): sniffed and sized, never trusted by its name. Saving
+    the Look with ``brand.logo`` naming it is what puts it on the cards."""
+    look = _own_look(name)
+    data = file.file.read(LOGO_MAX_BYTES + 1)
+    try:
+        logo = save_brand_logo(look.root, data)
+    except BrandError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    return BrandLogoInfo(logo=logo, url=f"/api/looks/{look.name}/brand/{logo}")
+
+
+@router.get("/api/looks/{name}/brand/{file}")
+def get_brand_logo(name: str, file: str) -> FileResponse:
+    """One of the Look's brand logos, by its content name only."""
+    look = _own_look(name)
+    if not BRAND_FILE_RE.fullmatch(file):
+        raise HTTPException(status_code=404, detail="not found")
+    path = look.root / BRAND_DIR / file
+    if path.is_symlink() or not path.is_file():
+        raise HTTPException(status_code=404, detail="not found")
+    media = {".png": "image/png", ".webp": "image/webp"}.get(path.suffix, "image/jpeg")
+    return FileResponse(
+        path,
+        media_type=media,
         headers={"Cache-Control": "private, max-age=86400", "X-Content-Type-Options": "nosniff"},
     )
 

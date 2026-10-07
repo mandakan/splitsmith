@@ -1122,6 +1122,8 @@ export interface StoredLookBody {
   styles: Record<string, string>;
   /** Font role -> a bundled face id (#1272); absent is the role's default. */
   fonts?: Record<string, string>;
+  /** Your brand on the title page and the closing card; absent or null is none. */
+  brand?: { logo: string | null; line: string } | null;
 }
 
 /** One bundled face a Look may choose (#1272). */
@@ -5008,6 +5010,15 @@ export const api = {
   putLook: (name: string, body: StoredLookBody) =>
     request<StoredLook>(`/api/looks/${encodeURIComponent(name)}`, { method: "PUT", json: body }),
   deleteLook: (name: string) => request<void>(`/api/looks/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  /** Store a brand logo in the Look (local only): PNG, JPEG or WebP up to 2 MB. */
+  uploadBrandLogo: (name: string, file: File) => {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    return request<{ logo: string; url: string }>(`/api/looks/${encodeURIComponent(name)}/brand-logo`, {
+      method: "POST",
+      body: form,
+    });
+  },
   /** A Look's own font files (#1272), local only. */
   listOwnFonts: (name: string) => request<OwnFontInfo[]>(`/api/looks/${encodeURIComponent(name)}/fonts`),
   /** Upload a TTF or OTF of at most 2 MB into the Look; the server sniffs
