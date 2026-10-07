@@ -10,6 +10,7 @@ import typer
 from rich.console import Console
 
 from .. import camera_select
+from ..composition import uniform_transitions
 from ..export_naming import slugify
 from ..looks import load_look
 from ..match_model import Match, is_match_folder
@@ -150,6 +151,17 @@ def export(
         "--card-variant",
         help="Look template variant for the generated cards: 'default' or, with the splitsmith Look, 'rise'.",
     ),
+    transition: str = typer.Option(
+        "none",
+        "--transition",
+        help=(
+            "Transition between stages (--format mp4): 'none' or an ffmpeg xfade (fade, fadeblack, "
+            "dissolve, slideleft, slideright, circleopen, zoomin, hblur, smoothleft, wipeleft)."
+        ),
+    ),
+    transition_seconds: float = typer.Option(
+        0.5, "--transition-seconds", help="Length of each transition, centred on the cut."
+    ),
 ) -> None:
     """Render a multi-shooter comparison FCPXML.
 
@@ -169,6 +181,17 @@ def export(
     """
     if output_format not in ("fcpxml", "mp4"):
         console.print(f"[red]Error:[/] --format must be 'fcpxml' or 'mp4', got {output_format!r}.")
+        raise typer.Exit(code=2)
+    from ..composition import FCP_KINDS, XFADE_KINDS
+
+    if transition != "none" and transition not in (*XFADE_KINDS, *FCP_KINDS):
+        console.print(
+            f"[red]Error:[/] --transition must be 'none' or one of {', '.join((*XFADE_KINDS, *FCP_KINDS))}, "
+            f"got {transition!r}."
+        )
+        raise typer.Exit(code=2)
+    if transition_seconds <= 0:
+        console.print(f"[red]Error:[/] --transition-seconds must be positive, got {transition_seconds:g}.")
         raise typer.Exit(code=2)
     if output_format == "mp4" and not (source.is_dir() and is_match_folder(source)):
         console.print(
@@ -249,6 +272,8 @@ def export(
             overlay=overlay,
             overlay_theme=overlay_theme,  # type: ignore[arg-type]  # validated above against THEME_NAMES
             summary_hold=summary_hold,
+            transition=transition,
+            transition_seconds=transition_seconds,
             cards=CardOptions(
                 stage_titles=titles,  # type: ignore[arg-type]  # validated above against _TITLE_KINDS
                 title_duration_seconds=title_duration,
@@ -392,6 +417,8 @@ def _export_from_match(
     overlay_theme: ThemeName = "splitsmith",
     summary_hold: float = 0.0,
     cards: CardOptions | None = None,
+    transition: str = "none",
+    transition_seconds: float = 0.5,
 ) -> None:
     """Render the compare export directly from a merged Match."""
     match = Match.load(match_root)
@@ -460,6 +487,8 @@ def _export_from_match(
             overlay=overlay,
             overlay_theme=overlay_theme,
             summary_hold=summary_hold,
+            transition=transition,
+            transition_seconds=transition_seconds,
             cards=cards or CardOptions(),
             match=match,
         )
@@ -488,6 +517,8 @@ def _render_grid_mp4(
     summary_hold: float = 0.0,
     cards: CardOptions | None = None,
     match: Match | None = None,
+    transition: str = "none",
+    transition_seconds: float = 0.5,
 ) -> None:
     """Render the grid straight to MP4, owning the scratch work dir.
 
@@ -573,6 +604,7 @@ def _render_grid_mp4(
                 title_duration_seconds=cards.title_duration_seconds,
                 card_variant=cards.card_variant,
                 identities=grid_identities(bundles, look=load_look(overlay_theme)),
+                transitions=uniform_transitions(transition, transition_seconds, len(plans)),
             )
         except mp4_grid.GridRenderError as exc:
             console.print(f"[red]Error:[/] {exc}")

@@ -107,6 +107,8 @@ describe("export wrappers forward every declared field", () => {
     const payload: Required<CompareGridRequestPayload> = {
       stage_numbers: [1],
       audio_from: "mathias",
+      transition_kind: "fade",
+      transition_duration_seconds: 1,
       cameras: { mathias: "gopro" },
       canvas_width: 1920,
       canvas_height: 1080,

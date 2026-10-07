@@ -1300,6 +1300,9 @@ export type GridFreeCell = "blank" | "stage" | "splits" | "match" | "race";
 export interface CompareGridRequestPayload {
   stage_numbers: number[];
   audio_from: string;
+  /** #1244: one transition between every pair of stages, MP4 only. */
+  transition_kind?: TransitionKind;
+  transition_duration_seconds?: number;
   cameras?: Record<string, string>;
   canvas_width?: number;
   canvas_height?: number;

@@ -181,6 +181,7 @@ from ..comment_identity import (
 )
 from ..compare import cards as compare_cards
 from ..compare import mp4_grid, project_loader
+from ..composition import uniform_transitions
 from ..compute import ComputeBackend, LocalComputeBackend
 from ..config import (
     BeepDetectConfig,
@@ -3007,6 +3008,7 @@ def _run_compare_grid(
             title_duration_seconds=req.title_duration_seconds,
             card_variant=req.card_variant,
             identities=grid_identities(filtered, look=load_look(req.overlay_theme)),
+            transitions=uniform_transitions(req.transition_kind, req.transition_duration_seconds, len(plans)),
             overlay=req.overlay,
             overlay_theme=req.overlay_theme,
             summary_hold_seconds=req.summary_hold_seconds,

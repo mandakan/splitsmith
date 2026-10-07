@@ -258,7 +258,7 @@ export const LOOK_SLOTS: readonly LookSlot[] = [
         thumbnail: "transition-cut.png",
         help: "Stages follow each other on the next frame.",
         params: [],
-        modes: ["single"],
+        modes: ["single", "compare"],
         formats: TRANSITION_FORMATS,
       },
       {
@@ -282,7 +282,7 @@ export const LOOK_SLOTS: readonly LookSlot[] = [
       ...XFADE_VARIANTS.map((v) => ({
         ...v,
         params: [transitionSeconds],
-        modes: ["single"] as ExportMode[],
+        modes: ["single", "compare"] as ExportMode[],
         formats: ["mp4"] as OutputFormat[],
       })),
     ],
@@ -308,11 +308,12 @@ export function visibleVariants(slot: LookSlot, mode: ExportMode, format: Output
 export function visibleTransitionKind(
   kind: ExportSettings["transitionKind"],
   format: OutputFormat,
+  mode: "single" | "compare" = "single",
 ): ExportSettings["transitionKind"] {
   if (kind === "none") return "none";
   const transition = LOOK_SLOTS.find((s) => s.id === "transition");
   if (!transition) return "none";
-  return visibleVariants(transition, "single", format).some((v) => v.id === kind) ? kind : "none";
+  return visibleVariants(transition, mode, format).some((v) => v.id === kind) ? kind : "none";
 }
 
 /** A slot shows when at least one variant beyond the default can be drawn. */

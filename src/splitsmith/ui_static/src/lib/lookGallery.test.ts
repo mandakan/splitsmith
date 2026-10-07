@@ -189,8 +189,10 @@ describe("visibility, pinned to the rules the render panel applied", () => {
     expect(ids("single", "fcp7xml")).toEqual(["overlay"]);
   });
 
-  it("compare offers the match cards, the stage card and the grid overlay, never the hold or a transition", () => {
-    expect(ids("compare", "mp4")).toEqual(["titlePage", "stageCard", "closingCard", "overlay"]);
+  it("compare offers the match cards, the stage card, the grid overlay and the transition, never the hold", () => {
+    expect(ids("compare", "mp4")).toEqual(["titlePage", "stageCard", "closingCard", "overlay", "transition"]);
+    expect(visibleTransitionKind("fade", "mp4", "compare")).toBe("fade");
+    expect(visibleTransitionKind("zoom", "mp4", "compare")).toBe("none");
   });
 
   it("trims offers nothing", () => {

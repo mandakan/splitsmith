@@ -50,9 +50,10 @@ describe("LookGallery", () => {
     expect(groups()).toEqual(["Overlay"]);
   });
 
-  it("on the grid offers the cards and the grid overlay with its hold, never the summary", () => {
+  it("on the grid offers the cards, the grid overlay with its hold and the transition, never the summary", () => {
     setup({ mode: "compare", gridOverlay: true, gridHoldSeconds: 2 });
-    expect(groups()).toEqual(["Title page", "Stage card", "Closing card", "Overlay"]);
+    expect(groups()).toEqual(["Title page", "Stage card", "Closing card", "Overlay", "Transition"]);
+    expect(tile("Transition", "Hard cut")).toBeChecked();
     expect(tile("Overlay", "Shot counter")).toBeChecked();
     expect(screen.getByLabelText("Grid summary hold seconds")).toHaveValue(2);
     expect(screen.getByText(/Per-tile shot counter/)).toBeInTheDocument();

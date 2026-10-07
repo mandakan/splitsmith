@@ -715,6 +715,8 @@ function ExportInner({ slug }: { slug: string }) {
         render: renderOptions,
         overlay: gridOverlay,
         summaryHoldSeconds: gridHoldSeconds,
+        transitionKind,
+        transitionSeconds,
         cams: camOptions,
         freeCell: gridFreeCells(shooters.length) > 0 ? gridFreeCell : "blank",
         youtube,

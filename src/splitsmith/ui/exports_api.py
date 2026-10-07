@@ -232,6 +232,11 @@ class CompareGridRequest(BaseModel):
     card_variant: str = "default"
     stage_titles: Literal["none", "slate", "lower-third"] = "none"
     title_duration_seconds: float = 1.5
+    # Issue #1244: one transition between every pair of stages, the same
+    # kinds the single-shooter MP4 draws; the grid renders them on its own
+    # boundary segments.
+    transition_kind: match_exports.TransitionKind = "none"
+    transition_duration_seconds: float = 0.5
     # Issue #705. The splits overlay (per-tile counter and split, the
     # running clock) in the grid's own typography, and the end-of-stage
     # summary hold in seconds. The hold needs the overlay: it is drawn

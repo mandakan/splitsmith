@@ -68,14 +68,14 @@ export function stageCardsSupported(outputFormat: OutputFormat | undefined): boo
   return outputFormat !== "fcp7xml";
 }
 
-/** The FCPXML carries transitions as FCP effects; the single-shooter MP4
- *  draws the xfade kinds on a boundary segment (#1244). The grid MP4 and
- *  the FCP 7 XML record an "ignored" anomaly for one. */
+/** The FCPXML carries transitions as FCP effects; both MP4 renderers
+ *  draw the xfade kinds on a boundary segment (#1244). The FCP 7 XML
+ *  records an "ignored" anomaly for one. */
 export function transitionsSupported(
   outputFormat: OutputFormat | undefined,
-  mode: "single" | "grid" = "single",
+  _mode: "single" | "grid" = "single",
 ): boolean {
-  return outputFormat === "fcpxml" || (outputFormat === "mp4" && mode === "single");
+  return outputFormat === "fcpxml" || outputFormat === "mp4";
 }
 
 /** Clamp a seconds field into its sane range; NaN and blanks become the
