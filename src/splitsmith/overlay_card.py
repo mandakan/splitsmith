@@ -205,12 +205,12 @@ def card_context(
     scale = card_scale(height)
     data: dict[str, object] = {
         "card": {
-                "slot": slot,
-                "variant": card.variant,
-                "text": card.text,
-                "info": list(card.info),
-                "duration_seconds": card.duration_seconds,
-            },
+            "slot": slot,
+            "variant": card.variant,
+            "text": card.text,
+            "info": list(card.info),
+            "duration_seconds": card.duration_seconds,
+        },
         "groups": [group_json(g) for g in card_groups(card)],
         "shooters": [shooter_json(shooter) for shooter in shooters],
     }
