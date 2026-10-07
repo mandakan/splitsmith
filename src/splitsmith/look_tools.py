@@ -49,7 +49,7 @@ from .looks import (
     variants_for,
 )
 from .overlay_card import build_card_still, build_lower_third, card_context
-from .overlay_raster import Rasterizer, TemplateProbe
+from .overlay_raster import Rasterizer, TemplateProbe, TemplateScriptError
 from .overlay_theme import theme_for
 
 #: The starter templates ``looks new --starter`` copies (``data/looks/_starters/``).
@@ -131,6 +131,20 @@ def _label(name: str) -> str:
     return name.replace("-", " ").replace("_", " ").capitalize()
 
 
+def strict_look(name: str) -> Look:
+    """The Look ``name`` as the authoring commands see it: the user's folder
+    when there is one, read strictly (a broken one is a
+    :class:`LookToolError` naming its manifest, never the shipped Look of
+    the same name drawn in its place), else the shipped one."""
+    root = user_looks_dir() / name
+    try:
+        if root.is_dir():
+            return read_look(root, "user")
+        return load_look(name)
+    except LookError as exc:
+        raise LookToolError(f"{root / MANIFEST_FILE}: {exc}" if root.is_dir() else str(exc)) from None
+
+
 def new_look(name: str, *, from_look: str | None = None, starter: str | None = None) -> Path:
     """Make ``~/.splitsmith/looks/<name>``: a copy of ``from_look`` (its
     manifest and every template it owns), or a Look whose slots hold the
@@ -156,7 +170,7 @@ def new_look(name: str, *, from_look: str | None = None, starter: str | None = N
         manifest.update(name=name, label=_label(name), slots=_STARTER_SLOTS[starter])
         files = {STARTERS[starter]: shipped_looks_dir() / "_starters" / STARTERS[starter]}
     else:
-        source = load_look(from_look or DEFAULT_LOOK)
+        source = strict_look(from_look or DEFAULT_LOOK)
         manifest = source.manifest.model_dump(exclude={"source"})
         manifest.update(name=name, label=_label(name))
         files = {
@@ -411,6 +425,15 @@ def _contact_sheet(images: list[tuple[str, Path]], out: Path) -> Path:
     return path
 
 
+@dataclass(frozen=True)
+class PreviewResult:
+    """What ``preview_look`` wrote (the contact sheet last) and the cards a
+    template's own error left out, as ``"<slot> / <variant>"``."""
+
+    written: tuple[Path, ...]
+    skipped: tuple[str, ...] = ()
+
+
 def preview_look(
     name: str,
     *,
@@ -418,16 +441,18 @@ def preview_look(
     out: Path,
     shooters: Sequence[ResolvedIdentity] = (),
     backdrop: Image.Image | None = None,
-) -> list[Path]:
+) -> PreviewResult:
     """Render every card variant and sting the Look ``name`` resolves (its
     own templates, the shipped default's for the rest) to
     ``<slot>-<variant>.png`` under ``out``, plus ``contact-sheet.png``.
     ``backdrop`` is the frame behind the cards (a stage's, from the CLI);
-    ``None`` paints the demo scene."""
-    look = load_look(name)
+    ``None`` paints the demo scene. A broken user Look raises
+    :class:`LookToolError` before anything is written."""
+    look = strict_look(name)
     out.mkdir(parents=True, exist_ok=True)
     frame = (backdrop or _demo_backdrop()).convert("RGB").resize((PREVIEW_WIDTH, PREVIEW_HEIGHT))
     written: list[tuple[str, Path]] = []
+    skipped: list[str] = []
     with tempfile.TemporaryDirectory(prefix="looks-preview-") as tmp:
         frame_png = Path(tmp) / "frame.png"
         frame.save(frame_png)
@@ -459,6 +484,7 @@ def preview_look(
                         shooters=shooters,
                     )
                 if image is None:
+                    skipped.append(f"{slot} / {variant}")
                     continue
                 path = out / f"{slot}-{variant}.png"
                 image.convert("RGB").save(path)
@@ -478,15 +504,19 @@ def preview_look(
                 theme=theme_for(look),
                 shooters=shooters,
             )
-            png = rasterizer.render_template(
-                template, context=context, width=PREVIEW_WIDTH, height=PREVIEW_HEIGHT
-            )
+            try:
+                png = rasterizer.render_template(
+                    template, context=context, width=PREVIEW_WIDTH, height=PREVIEW_HEIGHT
+                )
+            except TemplateScriptError:
+                skipped.append(f"sting / {variant}")
+                continue
             path = out / f"{STING_SLOT}-{variant}.png"
             _over(frame, png).save(path)
             written.append((f"sting / {variant}", path))
     paths = [path for _, path in written]
     paths.append(_contact_sheet(written, out))
-    return paths
+    return PreviewResult(tuple(paths), tuple(skipped))
 
 
 __all__ = [
@@ -496,9 +526,11 @@ __all__ = [
     "LookToolError",
     "PREVIEW_HEIGHT",
     "PREVIEW_WIDTH",
+    "PreviewResult",
     "STARTERS",
     "check_look",
     "new_look",
     "preview_look",
+    "strict_look",
     "template_for",
 ]

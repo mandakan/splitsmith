@@ -122,3 +122,56 @@ def test_the_shipped_looks_pass_check_without_warnings(
     checked = look_tools.check_look("splitsmith", prober=raster)
     problems = [(i.subject, i.level, i.message) for i in checked.items if i.level != "ok"]
     assert problems == [], problems
+
+
+def test_the_probe_sees_long_text_under_a_hidden_body_and_respects_ellipsis_and_opacity(
+    raster, tmp_path: Path
+) -> None:
+    ctx = _context()
+    line = '<div style="position: absolute; left: 20px; white-space: nowrap; font-size: 60px">' + "W" * 80
+    # Every starter has ``body { overflow: hidden }`` with absolute content: the body is
+    # 0 px tall, and clipping against it hid every overrun (the slice-1 review).
+    hidden_body = raster.probe_template(
+        _page(tmp_path, "hidden.html", f"<style>body{{margin:0;overflow:hidden}}</style>{line}</div>"),
+        context=ctx,
+        width=640,
+        height=360,
+    )
+    assert hidden_body.overflow and hidden_body.overflow[0][1] > 100
+    ellipsized = raster.probe_template(
+        _page(
+            tmp_path,
+            "ellipsis.html",
+            '<div style="width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">'
+            "<span>" + "W" * 80 + "</span></div>",
+        ),
+        context=ctx,
+        width=640,
+        height=360,
+    )
+    assert ellipsized.overflow == ()
+    invisible = raster.probe_template(
+        _page(tmp_path, "invisible.html", f'<div style="opacity: 0">{line}</div></div>'),
+        context=ctx,
+        width=640,
+        height=360,
+    )
+    assert invisible.overflow == ()
+
+
+@pytest.mark.parametrize(
+    "script, expected",
+    [
+        ("window.duration = () => { throw new Error('bad duration'); };", "bad duration"),
+        ("window.duration = () => 1; window.seek = () => { throw new Error('bad seek'); };", "bad seek"),
+        ("window.__splitsmithFit = () => { throw new Error('bad fit'); };", "bad fit"),
+    ],
+)
+def test_a_throwing_hook_is_a_finding_not_a_crash(raster, tmp_path: Path, script: str, expected: str) -> None:
+    probe = raster.probe_template(
+        _page(tmp_path, "hook.html", f"<p>ok</p><script>{script}</script>"),
+        context=_context(),
+        width=640,
+        height=360,
+    )
+    assert any(expected in e for e in probe.errors), probe.errors

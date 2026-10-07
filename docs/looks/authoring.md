@@ -220,7 +220,9 @@ Look club-red  ~/.splitsmith/looks/club-red  user
 | `runs past the card` | Shrink long text in `__splitsmithFit`, or ellipsize it |
 | `look.json: ...` | The manifest does not load; the message names the field |
 
-The exit code is 1 when there is an error, so it fits in a script.
+The exit code is 1 when there is an error, so it fits in a script, and 2
+when it could not run at all (no Chromium). `new` and `preview` exit 2 on a
+request they refuse, such as a name that is taken or a broken `look.json`.
 
 ## Previewing
 
@@ -228,6 +230,8 @@ The exit code is 1 when there is an error, so it fits in a script.
 draws to `./<name>-preview/`: one PNG each and `contact-sheet.png`. Add
 `--project <shooter project folder> --stage <n>` to draw them over that
 stage's own frame, with that shooter's identity.
+A card whose template fails is left out of the preview with a line naming
+it; `looks check` says why.
 
 ## On splitsmith.app
 

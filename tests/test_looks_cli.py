@@ -82,3 +82,15 @@ def test_preview_writes_the_cards_and_names_the_contact_sheet(
     assert result.exit_code == 0, result.output
     assert (out / "contact-sheet.png").is_file() and (out / "slate-default.png").is_file()
     assert "contact-sheet.png" in result.output
+
+
+def test_preview_of_a_broken_user_look_exits_2_naming_the_manifest(
+    home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _use(monkeypatch, _Raster())
+    root = home / "looks" / "clean"
+    root.mkdir(parents=True)
+    (root / "look.json").write_text("{not json", encoding="utf-8")
+    result = runner.invoke(app, ["looks", "preview", "clean", "--out", str(home / "out")])
+    assert result.exit_code == 2 and "look.json" in result.output
+    assert not (home / "out").exists()

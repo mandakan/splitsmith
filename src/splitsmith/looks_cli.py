@@ -126,8 +126,8 @@ def preview_command(
 ) -> None:
     """Render every card style and sting of the Look to PNGs and a contact sheet."""
     try:
-        load_look(name)
-    except LookError as exc:
+        look_tools.strict_look(name)
+    except LookToolError as exc:
         console.print(f"[red]Error:[/] {exc}")
         raise typer.Exit(code=2) from None
     if (project is None) != (stage is None):
@@ -140,14 +140,19 @@ def preview_command(
         backdrop, shooters = _stage_frame(project, stage, name)
     try:
         with open_chromium() as rasterizer:
-            written = look_tools.preview_look(
+            result = look_tools.preview_look(
                 name, rasterizer=rasterizer, out=target, backdrop=backdrop, shooters=shooters
             )
     except RasterizerUnavailableError as exc:
         console.print(f"[red]Error:[/] {exc.detail}\nInstall it with: {INSTALL_HINT}")
         raise typer.Exit(code=2) from None
+    for subject in result.skipped:
+        console.print(
+            f"[yellow]Left out {subject}:[/] its template failed; splitsmith looks check {name} says why"
+        )
     console.print(
-        f"Wrote {len(written) - 1} cards to {target}; the contact sheet is {target / 'contact-sheet.png'}"
+        f"Wrote {len(result.written) - 1} cards to {target}; "
+        f"the contact sheet is {target / 'contact-sheet.png'}"
     )
 
 

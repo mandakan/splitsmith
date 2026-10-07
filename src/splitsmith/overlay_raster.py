@@ -50,7 +50,7 @@ import tempfile
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from PIL import Image
 from playwright.sync_api import Browser, Playwright, sync_playwright
@@ -416,7 +416,12 @@ class ChromiumRasterizer:
         const el = node.parentElement;
         if (!el || el.closest('script, style')) continue;
         const cs = getComputedStyle(el);
-        if (cs.display === 'none' || cs.visibility === 'hidden' || Number(cs.opacity) === 0) continue;
+        if (cs.display === 'none' || cs.visibility === 'hidden') continue;
+        let seen = true;
+        for (let a = el; a; a = a.parentElement) {
+          if (Number(getComputedStyle(a).opacity) === 0) { seen = false; break; }
+        }
+        if (!seen) continue;
         families.add(cs.fontFamily.split(',')[0].trim().replace(/^["']|["']$/g, ''));
         const range = document.createRange();
         range.selectNodeContents(node);
@@ -424,18 +429,24 @@ class ChromiumRasterizer:
         if (full.width === 0 && full.height === 0) continue;
         // What shows is the text cut by every ancestor that clips: an
         // ellipsized label inside a band is not text running off the card.
+        // The body and the root are not boxes: a template's
+        // ``body { overflow: hidden }`` over absolute content is 0 px tall,
+        // and the viewport is what clips there (``past`` below).
         let r = {left: full.left, right: full.right, top: full.top, bottom: full.bottom};
-        for (let a = el; a && a !== document.documentElement; a = a.parentElement) {
-          if (getComputedStyle(a).overflow === 'visible') continue;
+        let ellipsis = cs.textOverflow === 'ellipsis';
+        for (let a = el; a && a !== document.body && a !== document.documentElement; a = a.parentElement) {
+          const acs = getComputedStyle(a);
+          if (acs.overflow === 'visible') continue;
+          if (acs.textOverflow === 'ellipsis') ellipsis = true;
           const c = a.getBoundingClientRect();
           r = {left: Math.max(r.left, c.left), right: Math.min(r.right, c.right),
                top: Math.max(r.top, c.top), bottom: Math.min(r.bottom, c.bottom)};
         }
         if (r.right <= r.left || r.bottom <= r.top) continue;
         const past = Math.max(0, -r.left, r.right - W, -r.top, r.bottom - H);
-        // Cut off by a clipping ancestor: a finding, unless the text itself
-        // ends in an ellipsis, which is the template saying it is fine.
-        const ellipsis = cs.textOverflow === 'ellipsis';
+        // Cut off by a clipping ancestor: a finding, unless the text ends in
+        // an ellipsis (its own or its clipping box's), which is the template
+        // saying it is fine.
         const cut = ellipsis ? 0 : Math.max(0, r.left - full.left, full.right - r.right,
                                                r.top - full.top, full.bottom - r.bottom);
         const by = Math.round(Math.max(past, cut));
@@ -462,12 +473,21 @@ class ChromiumRasterizer:
         browser_context, page, errors = self._open_template(
             template, context=context, width=width, height=height
         )
+
+        def hook(call: Callable[[], Any], default: Any) -> Any:
+            # A template's own hook that throws is a finding like a load error.
+            try:
+                return call()
+            except PlaywrightError as exc:
+                errors.append(str(exc).removeprefix("Page.evaluate: ").splitlines()[0])
+                return default
+
         try:
-            duration = float(page.evaluate(self._DURATION) or 0)
-            poster = float(page.evaluate(self._POSTER) or 0)
-            self._seek(page, poster)
+            duration = float(hook(lambda: page.evaluate(self._DURATION), 0) or 0)
+            poster = float(hook(lambda: page.evaluate(self._POSTER), 0) or 0)
+            hook(lambda: self._seek(page, poster), None)
             page.evaluate("document.fonts.ready")
-            page.evaluate("window.__splitsmithFit && window.__splitsmithFit()")
+            hook(lambda: page.evaluate("window.__splitsmithFit && window.__splitsmithFit()"), None)
             seen = page.evaluate(self._PROBE)
             return TemplateProbe(
                 errors=tuple(errors),

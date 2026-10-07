@@ -213,7 +213,7 @@ def test_preview_renders_every_card_variant_and_sting_and_a_contact_sheet(
 ) -> None:
     look_tools.new_look("club", from_look="splitsmith")
     out = tmp_path / "out"
-    written = look_tools.preview_look("club", rasterizer=_Raster(), out=out)
+    written = look_tools.preview_look("club", rasterizer=_Raster(), out=out).written
     names = sorted(p.name for p in written)
     assert names == sorted(
         [
@@ -233,3 +233,31 @@ def test_preview_renders_every_card_variant_and_sting_and_a_contact_sheet(
         assert im.size == (look_tools.PREVIEW_WIDTH, look_tools.PREVIEW_HEIGHT) and im.mode == "RGB"
     with Image.open(out / "contact-sheet.png") as sheet:
         assert sheet.width > look_tools.PREVIEW_WIDTH
+
+
+def test_preview_refuses_a_broken_user_look_instead_of_drawing_the_shipped_one(user_dir: Path) -> None:
+    root = user_dir / "clean"
+    root.mkdir(parents=True)
+    (root / "look.json").write_text("{not json", encoding="utf-8")
+    with pytest.raises(look_tools.LookToolError, match="look.json"):
+        look_tools.preview_look("clean", rasterizer=_Raster(), out=user_dir / "out")
+
+
+class _ThrowingRaster(_Raster):
+    def render_template(self, template: Path, *, context, width: int, height: int) -> bytes:
+        from splitsmith.overlay_raster import TemplateScriptError
+
+        raise TemplateScriptError(f"{template.name}: boom")
+
+    def render_template_frames(self, template, *, context, width, height, fps, max_seconds):
+        from splitsmith.overlay_raster import TemplateScriptError
+
+        raise TemplateScriptError(f"{template.name}: boom")
+
+
+def test_preview_names_every_card_and_sting_a_throwing_template_left_out(user_dir: Path) -> None:
+    look_tools.new_look("club", from_look="splitsmith")
+    result = look_tools.preview_look("club", rasterizer=_ThrowingRaster(), out=user_dir / "out")
+    assert "sting / wipe" in result.skipped
+    assert "title_page / default" in result.skipped
+    assert not any(p.name == "transition-wipe.png" for p in result.written)
