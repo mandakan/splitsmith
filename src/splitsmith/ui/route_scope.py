@@ -41,6 +41,13 @@ LOCAL_ONLY_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("POST", "/api/shooters/{slug}/project/settings"),
         # Opens the OS file manager.
         ("POST", "/api/files/reveal"),
+        # The template editor (#1265): a template is code; hosted runs none
+        # of an account's until the sandboxed loader (#1266).
+        ("GET", "/api/looks/{name}/templates"),
+        ("PUT", "/api/looks/{name}/templates"),
+        ("GET", "/api/looks/{name}/samples"),
+        ("POST", "/api/looks/{name}/check"),
+        ("POST", "/api/looks/{name}/reveal"),
         ("POST", "/api/shooters/{slug}/videos/reveal"),
         # Merges legacy project folders named by path.
         ("POST", "/api/match/merge/plan"),

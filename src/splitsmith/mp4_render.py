@@ -92,6 +92,7 @@ from .overlay_card import (
     first_frame_image,
     lower_third_clip_filters,
     lower_third_filters,
+    with_card_failures,
 )
 from .overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
 from .overlay_summary_cell import build_summary_still
@@ -145,6 +146,7 @@ class Mp4RenderResult:
     degradations: tuple[str, ...] = ()
 
 
+@with_card_failures(lambda r, notes: replace(r, degradations=(*r.degradations, *notes)))
 def render_mp4(
     composition: Composition,
     *,

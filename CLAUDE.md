@@ -260,6 +260,19 @@ second preview in flight. Contrast is a warning; only invalid fields block
 Save. ``refreshLooks()`` re-fetches the catalog for every mounted surface
 after a write.
 
+The template editor (#1265) is the editor's Templates tab on the desktop
+(``components/export/TemplateEditor``, CodeMirror 6 lazy-loaded through
+``CodeEditor``, rules in ``lib/templateEditor``). Its routes
+(``/api/looks/{name}/templates`` GET/PUT, ``/samples``, ``/check``,
+``/reveal``) are ``LOCAL_ONLY_ROUTES``: a template is code, hosted runs none
+of an account's until #1266. Unsaved text rides the preview and the check as
+``templates`` (``look_store.TemplateEdit``, applied by ``draft_look`` /
+``apply_template_edits``; the preview answers 403 hosted when it is set) and
+is keyed per own *file* (``editKey``): the shipped ``card.html`` draws four
+cards, and the tab says so (``sharedWith``). A borrowed slot is written to
+``<slot>-<variant>.html`` and named in ``look.json`` on first save. Page
+errors carry the template's line (``describe_page_error``).
+
 A shooter has an **identity** (``splitsmith.identity``, spec section 2,
 #1243): ``MatchProject.identity`` holds an optional ``#rrggbb`` accent, a
 club line and the name of a logo under ``<shooter>/identity/``

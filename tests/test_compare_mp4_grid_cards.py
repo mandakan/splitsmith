@@ -780,3 +780,32 @@ def test_boundary_segment_lays_a_sting_clip_over_the_fade(tmp_path: Path) -> Non
         == plain[plain.index("-filter_complex") :][:1] + stung[stung.index("-filter_complex") + 1 :]
     )
     assert stung[stung.index("-map") :] == plain[plain.index("-map") :], "maps, names and codecs unchanged"
+
+
+def test_a_card_whose_template_fails_is_named_in_the_degradations(tmp_path: Path) -> None:
+    """A broken template used to drop its card with only a log line (#1265 review)."""
+    from splitsmith.overlay_raster import TemplateScriptError
+
+    class _Broken(_FakeRasterizer):
+        def render_template_frames(self, template, *, context, width, height, fps, max_seconds):
+            if context.data["card"]["slot"] == "title_page":
+                raise TemplateScriptError(f"{Path(template).name}: line 4: boom")
+            return super().render_template_frames(
+                template, context=context, width=width, height=height, fps=fps, max_seconds=max_seconds
+            )
+
+    result = mp4_grid.render_grid_mp4(
+        _driver_shooters(tmp_path),
+        audio_label="Anders",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=_ok_runner([]),
+        card_runner=_ok_runner([]),
+        still_runner=_still_runner([]),
+        rasterizer=_Broken(),
+        work_dir=tmp_path / "work",
+        ffmpeg_binary="/bin/ffmpeg",
+        title_page=MatchTitle(text="Bromma", info=("2026-05-01",), duration_seconds=3.0),
+    )
+    notes = [d for d in result.degradations if "line 4: boom" in d.detail]
+    assert len(notes) == 1 and "left out" in notes[0].summary, result.degradations

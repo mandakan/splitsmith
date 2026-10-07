@@ -38,6 +38,12 @@ EXPECTED_LOCAL_ONLY: set[tuple[str, str]] = {
     ("POST", "/api/shooters/{slug}/videos/relink/apply"),
     ("POST", "/api/shooters/{slug}/project/settings"),
     ("POST", "/api/files/reveal"),
+    # The template editor (#1265): local only until the sandbox (#1266).
+    ("GET", "/api/looks/{name}/templates"),
+    ("PUT", "/api/looks/{name}/templates"),
+    ("GET", "/api/looks/{name}/samples"),
+    ("POST", "/api/looks/{name}/check"),
+    ("POST", "/api/looks/{name}/reveal"),
     ("POST", "/api/shooters/{slug}/videos/reveal"),
     ("POST", "/api/match/merge/plan"),
     ("POST", "/api/match/merge/execute"),

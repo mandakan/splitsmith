@@ -20,32 +20,48 @@ of them: it is not returned, changed or deleted here.
 from __future__ import annotations
 
 import re
+import tempfile
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..composition import XFADE_FAMILIES
 from ..look_store import (
+    TEMPLATE_SLOTS,
     FolderLookStore,
     LookStore,
     LookStoreError,
     StoredLook,
     StoredLookBody,
+    TemplateEdit,
+    apply_template_edits,
     body_from_manifest,
     check_name,
+    draft_look,
     is_shipped_name,
+    template_file,
 )
+from ..look_tools import STARTERS, check_folder, sample_contexts
 from ..looks import (
+    DEFAULT_LOOK,
+    DEFAULT_VARIANT,
+    MANIFEST_FILE,
     PREVIEW_DIR,
     TRANSITIONS_OWNER,
+    Look,
     LookError,
     load_look,
     look_catalog,
     preview_owner_root,
+    read_look,
     shipped_looks_dir,
+    user_looks_dir,
+    variants_for,
 )
+from ..overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
 
 router = APIRouter()
 
@@ -184,6 +200,159 @@ async def duplicate_look(name: str, req: DuplicateLookRequest, request: Request)
         return await store.put(name, body.model_copy(update={"base": base}))
     except LookStoreError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+# --- the template editor (#1265), local only ---------------------------------
+#
+# Every route below is in ``route_scope.LOCAL_ONLY_ROUTES``: a template is
+# code, and hosted runs none of an account's until the sandbox (#1266).
+
+#: Swapped by tests; ``looks check``'s prober.
+prober_factory = ChromiumRasterizer
+
+
+def _own_look(name: str) -> Look:
+    """The user's own Look folder ``name``, strictly read; 404 otherwise."""
+    folder = user_looks_dir() / _name(name)
+    if not folder.is_dir():
+        raise HTTPException(status_code=404, detail=f"no Look of yours named {name!r}")
+    try:
+        return read_look(folder, "user")
+    except LookError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+
+class TemplateInfo(BaseModel):
+    slot: str
+    variant: str
+    #: The Look's own file, or the shipped default's it borrows.
+    file: str
+    own: bool
+    content: str
+
+
+class StarterInfo(BaseModel):
+    name: str
+    content: str
+
+
+class TemplatesPayload(BaseModel):
+    templates: list[TemplateInfo]
+    starters: list[StarterInfo]
+
+
+@router.get("/api/looks/{name}/templates", response_model=TemplatesPayload)
+def list_templates(name: str) -> TemplatesPayload:
+    look = _own_look(name)
+    shipped = read_look(shipped_looks_dir() / DEFAULT_LOOK, "shipped")
+    templates: list[TemplateInfo] = []
+    for slot in TEMPLATE_SLOTS:
+        for variant in variants_for(look, slot):
+            own = look.own_template(slot, variant)
+            path = own or shipped.own_template(slot, variant)
+            if path is None:
+                continue
+            templates.append(
+                TemplateInfo(
+                    slot=slot,
+                    variant=variant,
+                    file=path.name,
+                    own=own is not None,
+                    content=path.read_text(encoding="utf-8"),
+                )
+            )
+    starters_dir = shipped_looks_dir() / "_starters"
+    starters = [
+        StarterInfo(name=starter, content=(starters_dir / file).read_text(encoding="utf-8"))
+        for starter, file in sorted(STARTERS.items())
+    ]
+    return TemplatesPayload(templates=templates, starters=starters)
+
+
+@router.put("/api/looks/{name}/templates", response_model=TemplateInfo)
+def save_template(name: str, edit: TemplateEdit) -> TemplateInfo:
+    """Write one template into the Look's folder, naming it in ``look.json``
+    when the slot was borrowed; a folder that no longer reads is rolled back."""
+    look = _own_look(name)
+    manifest_path = look.root / MANIFEST_FILE
+    before = manifest_path.read_text(encoding="utf-8")
+    target = look.root / template_file(look.manifest.slots, edit.slot, edit.variant)
+    previous = target.read_text(encoding="utf-8") if target.is_file() else None
+    try:
+        apply_template_edits(look.root, [edit])
+        read_look(look.root, "user")
+    except (LookError, OSError, ValueError) as exc:
+        manifest_path.write_text(before, encoding="utf-8")
+        if previous is None:
+            target.unlink(missing_ok=True)
+        else:
+            target.write_text(previous, encoding="utf-8")
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    return TemplateInfo(
+        slot=edit.slot, variant=edit.variant, file=target.name, own=True, content=edit.content
+    )
+
+
+class SampleCase(BaseModel):
+    case: str
+    #: ``window.splitsmith`` as the template receives it, without the
+    #: engine stylesheet (fonts, long and the same for every case).
+    context: dict[str, Any]
+
+
+@router.get("/api/looks/{name}/samples")
+def template_samples(name: str, slot: str, variant: str = DEFAULT_VARIANT) -> dict[str, list[SampleCase]]:
+    try:
+        TemplateEdit(slot=slot, variant=variant, content="")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    look = _own_look(name)
+    with tempfile.TemporaryDirectory(prefix="looks-samples-") as work:
+        contexts = sample_contexts(look, slot, variant, Path(work))
+        cases = []
+        for case, context in contexts:
+            dumped = context.model_dump(mode="json")
+            dumped["engine"] = {k: v for k, v in dumped["engine"].items() if k != "css"}
+            cases.append(SampleCase(case=case, context=dumped))
+    return {"cases": cases}
+
+
+class CheckRequest(BaseModel):
+    draft: StoredLookBody | None = None
+    templates: list[TemplateEdit] = Field(default_factory=list, max_length=32)
+
+
+@router.post("/api/looks/{name}/check")
+def check_draft(name: str, req: CheckRequest) -> dict[str, Any]:
+    """``looks check`` on the Look as the editor holds it, unsaved."""
+    look = _own_look(name)
+    with tempfile.TemporaryDirectory(prefix="looks-check-draft-") as work:
+        try:
+            draft = draft_look(look, req.draft, Path(work), req.templates)
+        except LookStoreError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        try:
+            with prober_factory() as prober:
+                report = check_folder(name, draft.root, "user", prober=prober)
+        except RasterizerUnavailableError as exc:
+            raise HTTPException(
+                status_code=503, detail="checking needs a browser: Playwright could not launch Chromium"
+            ) from exc
+    return {
+        "items": [{"subject": i.subject, "level": i.level, "message": i.message} for i in report.items],
+        "errors": report.errors,
+        "warnings": report.warnings,
+    }
+
+
+@router.post("/api/looks/{name}/reveal")
+def reveal_look(name: str) -> dict[str, str]:
+    """Open the Look's folder in the system's file manager."""
+    from . import server
+
+    look = _own_look(name)
+    server._reveal_in_file_manager(look.root)
+    return {"revealed": str(look.root)}
 
 
 __all__ = ["router"]

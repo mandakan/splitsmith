@@ -17,7 +17,9 @@ import {
   api,
   type LookInfo,
   type PreviewCard,
+  type CheckFinding,
   type StoredLookBody,
+  type TemplateEdit,
 } from "@/lib/api";
 import {
   CARD_STYLE_SLOTS,
@@ -34,6 +36,8 @@ import {
   styleOptions,
   type LookDraft,
 } from "@/lib/lookEditor";
+import { TemplateEditor } from "@/components/export/TemplateEditor";
+import { editsList, type TemplateEdits } from "@/lib/templateEditor";
 import { refreshLooks } from "@/lib/useLooks";
 import { cn } from "@/lib/utils";
 
@@ -76,6 +80,14 @@ export function LookEditor({
   const [tab, setTab] = useState<Tab>("palette");
   const [problem, setProblem] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // The template editor's unsaved text and the card it is on (#1265).
+  const [edits, setEdits] = useState<TemplateEdits>({});
+  const [focus, setFocus] = useState<{ card: PreviewCard; variant: string } | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  // Template errors the check found on Save; set means the next Save is
+  // "Save anyway". Any change to the draft asks again.
+  const [failing, setFailing] = useState<CheckFinding[] | null>(null);
+  useEffect(() => setFailing(null), [edits, draft]);
 
   useEffect(() => {
     if (!open) return;
@@ -83,6 +95,8 @@ export function LookEditor({
     setSaved(null);
     setDraft(null);
     setProblem(null);
+    setEdits({});
+    setFocus(null);
     api
       .getLook(name)
       .then((stored) => {
@@ -107,7 +121,8 @@ export function LookEditor({
     () => (draft ? contrastWarnings(draft.colors) : []),
     [draft],
   );
-  const dirty = saved !== null && draft !== null && isDirty(saved, draft);
+  const bodyDirty = saved !== null && draft !== null && isDirty(saved, draft);
+  const dirty = bodyDirty || Object.keys(edits).length > 0;
   const canSave = dirty && Object.keys(errors).length === 0 && !saving;
 
   const save = async () => {
@@ -115,9 +130,38 @@ export function LookEditor({
     setSaving(true);
     setProblem(null);
     try {
-      const stored = await api.putLook(name, draft);
-      setSaved(stored.body);
-      setDraft(stored.body);
+      const templates = editsList(edits);
+      if (templates.length > 0 && failing === null) {
+        // A template that throws is left out of every export: say so before
+        // it is saved, and let the author save work in progress anyway.
+        let errors: CheckFinding[] = [];
+        try {
+          errors = (await api.checkLook(name, draft, templates)).items.filter((i) => i.level === "error");
+        } catch (e) {
+          errors = [
+            {
+              subject: "check",
+              level: "error",
+              message: e instanceof ApiError ? `could not check: ${e.message}` : "could not check the templates",
+            },
+          ];
+        }
+        if (errors.length > 0) {
+          setFailing(errors);
+          return;
+        }
+      }
+      setFailing(null);
+      if (bodyDirty) {
+        const stored = await api.putLook(name, draft);
+        setSaved(stored.body);
+        setDraft(stored.body);
+      }
+      for (const edit of editsList(edits)) await api.saveTemplate(name, edit);
+      if (Object.keys(edits).length > 0) {
+        setEdits({});
+        setReloadKey((k) => k + 1);
+      }
       await refreshLooks();
     } catch (e) {
       setProblem(
@@ -205,7 +249,18 @@ export function LookEditor({
               hosted={hosted}
             />
           ) : (
-            <Templates name={name} hosted={hosted} />
+            hosted ? (
+              <Templates name={name} hosted={hosted} />
+            ) : (
+              <TemplateEditor
+                name={name}
+                draft={draft}
+                edits={edits}
+                setEdits={setEdits}
+                onFocus={setFocus}
+                reloadKey={reloadKey}
+              />
+            )
           )}
         </div>
         {draft ? (
@@ -215,9 +270,26 @@ export function LookEditor({
             info={info}
             slug={slug}
             stageNumber={stageNumber}
+            templates={editsList(edits)}
+            focus={tab === "templates" ? focus : null}
           />
         ) : null}
       </div>
+      {failing ? (
+        <div role="alert" className="border-t border-rule px-4 py-2 text-sm">
+          <p className="text-destructive">
+            These templates fail, and the card would be left out of an export. Fix them, or save anyway to keep
+            working on them.
+          </p>
+          <ul className="mt-1">
+            {failing.map((f, i) => (
+              <li key={`${f.subject}-${i}`} className="text-muted">
+                <span className="numeral">{f.subject}</span>: {f.message}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       <div className="flex items-center gap-2 border-t border-rule px-4 py-3">
         <Button
           variant="destructive"
@@ -241,7 +313,7 @@ export function LookEditor({
           onClick={() => void save()}
           disabled={!canSave}
         >
-          {saving ? "Saving…" : "Save Look"}
+          {saving ? "Saving…" : failing ? "Save anyway" : "Save Look"}
         </Button>
       </div>
     </Sheet>
@@ -460,14 +532,19 @@ function DraftPreview({
   info,
   slug,
   stageNumber,
+  templates,
+  focus,
 }: {
   name: string;
   draft: LookDraft;
   info: LookInfo | undefined;
   slug: string;
   stageNumber: number;
+  templates: TemplateEdit[];
+  /** The template editor's card and style: the big preview follows it. */
+  focus: { card: PreviewCard; variant: string } | null;
 }) {
-  const sting = info?.slots.transition?.[0]?.name ?? null;
+  const sting = focus?.card === "sting" ? focus.variant : (info?.slots.transition?.[0]?.name ?? null);
   const cards = PREVIEW_CARDS.filter(
     (c) => c.card !== "sting" || sting !== null,
   );
@@ -479,7 +556,14 @@ function DraftPreview({
   const urls = useRef<string[]>([]);
   // One render at a time: the server answers 429 to a second in flight.
   const queue = useRef(serialQueue()).current;
+  useEffect(() => {
+    if (focus) {
+      setCard(focus.card);
+      setAt(null);
+    }
+  }, [focus]);
   const current = cards.find((c) => c.card === card) ?? cards[0];
+  const templatesKey = JSON.stringify(templates);
 
   useEffect(
     () => () => {
@@ -497,7 +581,17 @@ function DraftPreview({
     const blob = await queue(() =>
       api.exportPreview(
         slug,
-        previewRequest({ card: c, look: name, draft, stageNumber, width, at: time, sting }),
+        previewRequest({
+          card: c,
+          look: name,
+          draft,
+          stageNumber,
+          width,
+          at: time,
+          sting,
+          variant: focus && focus.card === c ? focus.variant : undefined,
+          templates,
+        }),
         signal,
       ),
     );
@@ -517,9 +611,11 @@ function DraftPreview({
         .catch((e: unknown) => {
           if (!controller.signal.aborted)
             setFailed(
-              e instanceof ApiError
-                ? e.message
-                : "The preview could not be drawn.",
+              e instanceof ApiError && e.status === 503 && /rasteriz/.test(e.message)
+                ? "This card's template failed to draw; Check under Templates says why."
+                : e instanceof ApiError
+                  ? e.message
+                  : "The preview could not be drawn.",
             );
         });
     }, DRAFT_PREVIEW_DEBOUNCE_MS);
@@ -528,7 +624,7 @@ function DraftPreview({
       window.clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchStill reads these
-  }, [current.card, at, draft, name, slug, stageNumber]);
+  }, [current.card, at, draft, name, slug, stageNumber, templatesKey, focus]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -545,7 +641,7 @@ function DraftPreview({
       window.clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchStill reads these
-  }, [draft, name, slug, stageNumber, sting]);
+  }, [draft, name, slug, stageNumber, sting, templatesKey]);
 
   return (
     <div className="flex min-w-0 flex-col gap-2">

@@ -16,6 +16,7 @@ none). Reads the project and the audit doc; writes nothing to either.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import tempfile
 from collections.abc import Callable
@@ -34,7 +35,7 @@ from ..export_preview import (
     preview_key,
     render_preview,
 )
-from ..look_store import LookStoreError, StoredLookBody, draft_look
+from ..look_store import LookStoreError, StoredLookBody, TemplateEdit, draft_look
 from ..looks import Look, load_look
 from ..overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
 from ..runtime import runtime
@@ -69,6 +70,8 @@ class ExportPreviewRequest(BaseModel):
     #: place, and a time into the template instead of its poster.
     draft: StoredLookBody | None = None
     at: float | None = Field(default=None, ge=0, le=60)
+    #: The template editor's unsaved text (#1265); local only.
+    templates: list[TemplateEdit] = Field(default_factory=list, max_length=32)
 
     @field_validator("look")
     @classmethod
@@ -99,6 +102,12 @@ class _NoRasterizer:
 
 @router.post("/api/shooters/{slug}/export-preview")
 def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Response:
+    if req.templates:
+        from .server import _hosted_mode_active
+
+        if _hosted_mode_active():
+            # A template is code; hosted runs none of an account's until #1266.
+            raise HTTPException(status_code=403, detail="template text is previewed on the desktop only")
     state = request.app.state.splitsmith_state
     project = state.shooter_project(slug)
     root = state.shooter_root(slug)
@@ -117,8 +126,16 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
         at=req.at,
         draft=(
             None
-            if req.draft is None
-            else hashlib.sha256(req.draft.model_dump_json().encode("utf-8")).hexdigest()
+            if req.draft is None and not req.templates
+            else hashlib.sha256(
+                json.dumps(
+                    {
+                        "draft": None if req.draft is None else req.draft.model_dump(mode="json"),
+                        "templates": [t.model_dump() for t in req.templates],
+                    },
+                    sort_keys=True,
+                ).encode("utf-8")
+            ).hexdigest()
         ),
     )
     rt = runtime()
@@ -136,10 +153,10 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
 
     def _look(work: Path) -> Look:
         saved = load_look(req.look)
-        if req.draft is None:
+        if req.draft is None and not req.templates:
             return saved
         try:
-            return draft_look(saved, req.draft, work / "draft")
+            return draft_look(saved, req.draft, work / "draft", req.templates)
         except LookStoreError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
 

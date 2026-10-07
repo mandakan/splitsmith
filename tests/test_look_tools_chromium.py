@@ -199,3 +199,12 @@ def test_render_template_at_a_time_seeks_there_instead_of_the_poster(raster, tmp
     ctx = _context()
     assert alpha(raster.render_template(page, context=ctx, width=64, height=36)) == 255
     assert alpha(raster.render_template(page, context=ctx, width=64, height=36, at=0.0)) == 0
+
+
+def test_a_script_error_names_its_line_in_the_template(raster, tmp_path: Path) -> None:
+    """The template editor shows where the template broke (#1265)."""
+    page = _page(
+        tmp_path, "lined.html", "<p>ok</p>\n<script>\nvar a = 1;\nundefined.forEach(x => x);\n</script>"
+    )
+    probe = raster.probe_template(page, context=_context(), width=640, height=360)
+    assert probe.errors and probe.errors[0].startswith("line 4: "), probe.errors

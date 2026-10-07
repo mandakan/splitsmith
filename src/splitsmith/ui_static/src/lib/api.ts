@@ -1128,6 +1128,30 @@ export interface StoredLook {
   body: StoredLookBody;
 }
 
+/** One template of a Look as the template editor lists it (#1265). */
+export interface TemplateInfo {
+  slot: string;
+  variant: string;
+  /** The Look's own file, or the shipped default's it borrows. */
+  file: string;
+  own: boolean;
+  content: string;
+}
+
+/** Unsaved template text for a slot and variant. */
+export interface TemplateEdit {
+  slot: string;
+  variant: string;
+  content: string;
+}
+
+/** One ``looks check`` finding. */
+export interface CheckFinding {
+  subject: string;
+  level: "ok" | "warn" | "error";
+  message: string;
+}
+
 /** One What's new entry (``data/whats_new.json``). */
 export interface WhatsNewEntry {
   id: string;
@@ -1179,6 +1203,8 @@ export interface ExportPreviewBody {
   draft?: StoredLookBody;
   /** Seconds into the template instead of its poster. */
   at?: number;
+  /** The template editor's unsaved text (#1265); local only. */
+  templates?: TemplateEdit[];
 }
 
 export interface ExportStageRequestPayload {
@@ -4953,6 +4979,24 @@ export const api = {
   putLook: (name: string, body: StoredLookBody) =>
     request<StoredLook>(`/api/looks/${encodeURIComponent(name)}`, { method: "PUT", json: body }),
   deleteLook: (name: string) => request<void>(`/api/looks/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  /** The template editor (#1265), local only. */
+  listTemplates: (name: string) =>
+    request<{ templates: TemplateInfo[]; starters: { name: string; content: string }[] }>(
+      `/api/looks/${encodeURIComponent(name)}/templates`,
+    ),
+  saveTemplate: (name: string, edit: TemplateEdit) =>
+    request<TemplateInfo>(`/api/looks/${encodeURIComponent(name)}/templates`, { method: "PUT", json: edit }),
+  templateSamples: (name: string, slot: string, variant: string) =>
+    request<{ cases: { case: string; context: Record<string, unknown> }[] }>(
+      `/api/looks/${encodeURIComponent(name)}/samples?slot=${encodeURIComponent(slot)}&variant=${encodeURIComponent(variant)}`,
+    ),
+  checkLook: (name: string, draft: StoredLookBody | null, templates: TemplateEdit[]) =>
+    request<{ items: CheckFinding[]; errors: number; warnings: number }>(
+      `/api/looks/${encodeURIComponent(name)}/check`,
+      { method: "POST", json: { draft, templates } },
+    ),
+  revealLook: (name: string) =>
+    request<{ revealed: string }>(`/api/looks/${encodeURIComponent(name)}/reveal`, { method: "POST" }),
   duplicateLook: (name: string, source: string) =>
     request<StoredLook>(`/api/looks/${encodeURIComponent(name)}/duplicate`, { method: "POST", json: { source } }),
 
