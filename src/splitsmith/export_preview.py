@@ -117,14 +117,24 @@ PREVIEW_REVISION = 2
 
 
 def preview_key(
-    spec: PreviewSpec, *, slug: str, project_updated_at: str, audit: str, owner: str | None = None
+    spec: PreviewSpec,
+    *,
+    slug: str,
+    project_updated_at: str,
+    audit: str,
+    owner: str | None = None,
+    look_fingerprint: str | None = None,
 ) -> str:
     """Content address for the cache: every input that moves the picture.
     ``audit`` is :func:`audit_digest` of the stage's audit doc. ``owner``
     scopes the key to an account and match (hosted, where one process
     serves every account and slugs repeat); ``None`` keeps the local key
-    exactly as it was."""
+    exactly as it was. ``look_fingerprint`` is the user Look's folder
+    (``looks.look_fingerprint``): a Look is named here, so without it a
+    saved change to its colours or fonts would serve the card from before."""
     fields: dict[str, object] = {}
+    if look_fingerprint is not None:
+        fields["look_fingerprint"] = look_fingerprint
     if owner is not None:
         fields["owner"] = owner
     # Only when set, so every key from before the editor stays as it was.

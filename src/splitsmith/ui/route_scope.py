@@ -48,6 +48,10 @@ LOCAL_ONLY_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("GET", "/api/looks/{name}/samples"),
         ("POST", "/api/looks/{name}/check"),
         ("POST", "/api/looks/{name}/reveal"),
+        # A Look's own font files (#1272): no hosted account assets yet.
+        ("GET", "/api/looks/{name}/fonts"),
+        ("POST", "/api/looks/{name}/fonts"),
+        ("GET", "/api/looks/{name}/fonts/{file}"),
         ("POST", "/api/shooters/{slug}/videos/reveal"),
         # Merges legacy project folders named by path.
         ("POST", "/api/match/merge/plan"),

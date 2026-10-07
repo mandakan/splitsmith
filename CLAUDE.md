@@ -255,7 +255,19 @@ weights byte for byte, which is what keeps every default frame identical. A
 stored Look's ``fonts`` is validated strictly (``fonts.check``) and copies
 normalize to ids (``body_from_manifest``); ``theme_tokens`` skips the font ids,
 which are not colours. ``GET /api/looks/fonts/{id}`` serves a face by catalog
-id for the editor's samples (``FontPicker``). On hosted, Looks carry colours
+id for the editor's samples (``FontPicker``). A desktop Look may also name its
+own file (step 2): ``own:font-<12hex>.ttf|otf`` in the Look's ``fonts/``,
+written by ``own_fonts.save_font`` (2 MB, bytes sniffed, WOFF and collections
+refused, opened with Pillow's FreeType, which is what ``drawtext`` reads with),
+uploaded through ``/api/looks/{name}/fonts`` (local only, in
+``LOCAL_ONLY_ROUTES``; ``db.looks._check_hosted`` refuses an ``own:`` value).
+``fonts.resolve(root=)`` turns it into the file's absolute path, so a theme's
+face is a catalog id or a path and every consumer takes both
+(``overlay_html._face_source``, ``overlay_text.resolve_overlay_face``). The
+content name is what keeps the caches honest: the card PNG and the
+``@font-face`` URL inside ``template_digest`` both move with the bytes. A copy
+of a Look (``looks.look_files``: ``looks new --from``, the editor's
+``draft_look``) carries every file but its manifest and previews. On hosted, Looks carry colours
 and card styles only until the sandboxed template loader (#1266) ships: a
 template is code running on our server.
 

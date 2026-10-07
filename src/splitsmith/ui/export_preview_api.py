@@ -36,7 +36,7 @@ from ..export_preview import (
     render_preview,
 )
 from ..look_store import LookStoreError, StoredLookBody, TemplateEdit, draft_look
-from ..looks import Look, load_look
+from ..looks import Look, load_look, look_fingerprint
 from ..overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
 from ..runtime import runtime
 from . import render_bound
@@ -79,6 +79,13 @@ class ExportPreviewRequest(BaseModel):
     @classmethod
     def _installed_look(cls, value: str) -> str:
         return installed_look(value)
+
+
+def _look_fingerprint(name: str) -> str | None:
+    """A user (or hosted account) Look's folder fingerprint for the cache
+    key; ``None`` for a shipped Look, which changes only with a release."""
+    look = load_look(name)
+    return None if look.source == "shipped" else look_fingerprint(look.root)
 
 
 def _owner() -> str | None:
@@ -149,6 +156,7 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
         project_updated_at=project.updated_at.isoformat(),
         audit=audit_digest(audit_doc),
         owner=_owner(),
+        look_fingerprint=_look_fingerprint(req.look),
     )
     # A moving preview is a WebP, a still a PNG; the key says which was asked.
     for candidate in (cache_dir / f"{key}.png", cache_dir / f"{key}.webp"):

@@ -21,6 +21,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from ..async_bridge import run_sync
+from ..fonts import own_file
 from ..look_store import (
     LookStoreError,
     StoredLook,
@@ -39,6 +40,8 @@ def _check_hosted(name: str, body: StoredLookBody) -> None:
         raise LookStoreError(f"{name!r} is a shipped Look; pick another name")
     if body.base is not None and not is_shipped_name(body.base):
         raise LookStoreError(f"base {body.base!r} is not a shipped Look")
+    if any(own_file(value) is not None for value in body.fonts.values()):
+        raise LookStoreError("fonts: a Look's own font file is desktop only for now; pick a bundled face")
     base = load_look(body.base or DEFAULT_LOOK)
     for slot, variant in body.styles.items():
         if variant not in variants_for(base, slot):

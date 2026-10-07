@@ -17,6 +17,7 @@ file named, rather than in the middle of a render.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -290,6 +291,35 @@ def _read_look(root: Path, source: Literal["shipped", "user"]) -> Look:
     return Look(manifest=manifest, root=root, source=source)
 
 
+def look_files(root: Path) -> dict[str, Path]:
+    """Every file of the Look folder ``root`` but its manifest and its
+    ``preview/`` pictures, by path relative to ``root``: the templates and
+    whatever they load beside them (an image, a stylesheet, its own fonts).
+    What a copy of the Look carries, whether ``looks new --from`` or the
+    editor's draft."""
+    return {
+        str(path.relative_to(root)): path
+        for path in sorted(root.rglob("*"))
+        if path.is_file() and path.name != MANIFEST_FILE and path.relative_to(root).parts[0] != PREVIEW_DIR
+    }
+
+
+def look_fingerprint(root: Path) -> str:
+    """What a render of the Look folder ``root`` depends on, cheaply: every
+    file :func:`look_files` lists and the manifest, by relative path, size
+    and modification time. A Save rewrites ``look.json`` and an own font is
+    a new content-named file, so either moves it. For cache keys that would
+    otherwise know a Look only by its name."""
+    digest = hashlib.sha256()
+    for rel, path in sorted({**look_files(root), MANIFEST_FILE: root / MANIFEST_FILE}.items()):
+        try:
+            st = path.stat()
+        except OSError:
+            continue
+        digest.update(f"{rel}\0{st.st_size}\0{st.st_mtime_ns}\n".encode())
+    return digest.hexdigest()
+
+
 def read_look(root: Path, source: Literal["shipped", "user"]) -> Look:
     """The Look in ``root``, or :class:`LookError` naming what is wrong: the
     strict read ``looks check`` uses, with no shipped fallback (#1262)."""
@@ -502,6 +532,8 @@ def look_catalog() -> list[LookInfo]:
 
 
 __all__ = [
+    "look_fingerprint",
+    "look_files",
     "DEFAULT_LOOK",
     "DEFAULT_VARIANT",
     "REQUIRED_COLORS",

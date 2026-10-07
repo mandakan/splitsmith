@@ -51,6 +51,7 @@ from .looks import (
     check_accent_series,
     check_colors,
     check_styles,
+    look_files,
     read_look,
     shipped_looks_dir,
     user_looks_dir,
@@ -304,9 +305,11 @@ def draft_look(
         raw.update(_body_fields(body))
     root = work / saved.name
     root.mkdir(parents=True, exist_ok=True)
-    for variants in saved.manifest.slots.values():
-        for file in variants.values():
-            shutil.copyfile(saved.root / file, root / file)
+    # Every file, not only the templates: a template may load an image
+    # beside it, and the Look's own fonts resolve under its root (#1272).
+    for file, src in look_files(saved.root).items():
+        (root / file).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, root / file)
     (root / MANIFEST_FILE).write_text(_dump(raw), encoding="utf-8")
     edits = list(edits)
     if edits:

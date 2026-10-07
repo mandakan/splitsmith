@@ -270,6 +270,12 @@ export const FONT_ROLES: { role: "display" | "mono"; label: string; help: string
   { role: "mono", label: "Figures", help: "Times, splits, counts and the clock" },
 ];
 
+/** What the editor says when a font upload is refused: the server's reason
+ *  (it words every refusal for the user), never its status code. */
+export function fontUploadRefusal(err: unknown): string {
+  return err instanceof ApiError ? err.detail : "The font could not be added. Try again.";
+}
+
 /** ``draft`` with ``role`` drawn in ``fontId``; the role's default is stored as no entry. */
 export function setFont(
   draft: LookDraft,

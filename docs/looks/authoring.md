@@ -191,10 +191,21 @@ one. Your template may draw them any way it likes, or not at all.
 
 ## Fonts
 
-Two faces load: `Splitsmith Display` (Antonio) and `Splitsmith Mono`
-(JetBrains Mono), declared by `engine.css`. Any other family name falls back
-to a system font, which differs between machines, and `looks check` warns
-about it. The `fonts` field in `look.json` is accepted but not used.
+Two family names load: `Splitsmith Display` and `Splitsmith Mono`, declared
+by `engine.css`. Draw with those names and your template follows whatever
+faces the Look chooses. Any other family name falls back to a system font,
+which differs between machines, and `looks check` warns about it.
+
+`look.json`'s `fonts` picks a face per role (`display`, `mono`): a bundled one
+by id (`antonio`, `bebas-neue`, `oswald`, `barlow-condensed`;
+`jetbrains-mono`, `roboto-mono`, `ibm-plex-mono`) or, on the desktop, a font
+file of the Look's own. Add one in the Look editor under Card styles, Fonts,
+Add a font file: a TTF or OTF of up to 2 MB, which lands in the Look's
+`fonts/` folder named by its content and is named in `look.json` as
+`"own:font-<hash>.ttf"`. Both roles may use it; the clock in the overlay
+draws with the `mono` face too. WOFF files and font collections are refused,
+because ffmpeg draws the clock from the same file. The font's licence is
+yours to hold: use one you may use in published video.
 
 ## Checking
 

@@ -37,11 +37,11 @@ from .looks import (
     DEFAULT_LOOK,
     LOOK_NAME_RE,
     MANIFEST_FILE,
-    PREVIEW_DIR,
     STING_SLOT,
     Look,
     LookError,
     load_look,
+    look_files,
     read_look,
     shipped_looks_dir,
     sting_template_for,
@@ -175,16 +175,9 @@ def new_look(name: str, *, from_look: str | None = None, starter: str | None = N
         manifest = source.manifest.model_dump(exclude={"source"})
         manifest.update(name=name, label=_label(name))
         # The whole folder, not only the templates the manifest names: a
-        # template may load an image or a stylesheet beside it. Not its
-        # previews (pictures of the source, under the copy's name) and not
-        # the manifest, which is written fresh below.
-        files = {
-            str(path.relative_to(source.root)): path
-            for path in sorted(source.root.rglob("*"))
-            if path.is_file()
-            and path.name != MANIFEST_FILE
-            and path.relative_to(source.root).parts[0] != PREVIEW_DIR
-        }
+        # template may load an image or a stylesheet beside it. Its previews
+        # are pictures of the source, and the manifest is written fresh below.
+        files = look_files(source.root)
     root.mkdir(parents=True)
     try:
         for file, src in files.items():

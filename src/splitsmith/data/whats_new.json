@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "own-fonts",
+      "date": "2026-10-07",
+      "title": "Your own font in a Look",
+      "body": "Add a TTF or OTF file under Card styles, Fonts in the Look editor and use it for titles or figures, the clock included. Desktop app only."
+    },
+    {
       "id": "grid-render-cache",
       "date": "2026-10-07",
       "title": "Faster second renders of a compare grid",
