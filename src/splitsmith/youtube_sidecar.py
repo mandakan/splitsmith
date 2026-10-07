@@ -251,6 +251,10 @@ def compute_chapters(composition: Composition) -> list[Chapter]:
         chapters.append(Chapter(start_seconds=start, title=stage.name or f"Stage {stage_idx + 1}"))
         cursor += _stage_spine_duration(composition, stage_idx)
     if composition.outro is not None:
+        # The match summary and the closing card add no chapter of their own:
+        # YouTube drops every chapter when one is under ten seconds.
+        if composition.match_summary is not None:
+            cursor += composition.match_summary.duration_seconds
         if composition.closing is not None:
             cursor += composition.closing.duration_seconds
         chapters.append(Chapter(start_seconds=cursor, title=_segment_label(composition.outro)))

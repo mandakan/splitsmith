@@ -33,8 +33,10 @@ from ..export_preview import (
     PreviewError,
     PreviewSpec,
     audit_digest,
+    match_summary_for,
     preview_key,
     render_preview,
+    summary_digest,
 )
 from ..look_store import LookStoreError, StoredLookBody, TemplateEdit, draft_look
 from ..looks import Look, load_look, look_fingerprint
@@ -60,6 +62,9 @@ class ExportPreviewRequest(BaseModel):
     width: int = Field(default=960, ge=160, le=1920)
     title_info: str | None = None
     title_division: bool = True
+    #: The export's stage selection, in its order: the match summary card
+    #: summarises these, as the video will. ``None`` is every stage.
+    stage_numbers: list[int] | None = None
     #: "Made with splitsmith" on the closing card.
     made_with: bool = True
     head_pad_seconds: float = Field(default=5.0, ge=0)
@@ -135,13 +140,36 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
     state = request.app.state.splitsmith_state
     project = state.shooter_project(slug)
     root = state.shooter_root(slug)
-    audit_doc, _audit_version = state.load_audit(slug, req.stage_number)
+    stage_number = req.stage_number
+    match_summary = None
+    if req.card == "match_summary" and project.stages:
+        # The selected stages' audits, as the export reads them; the card sits
+        # on the last one's final frame whichever stage the rail has in focus.
+        known = {s.stage_number for s in project.stages}
+        chosen = (
+            [s.stage_number for s in project.stages]
+            if req.stage_numbers is None
+            else [n for n in req.stage_numbers if n in known]
+        )
+        if chosen:
+            name = req.project_name or project.name
+            with tempfile.TemporaryDirectory(prefix="match-summary-") as summary_work:
+                match_summary = match_summary_for(
+                    project,
+                    {n: state.load_audit(slug, n)[0] for n in chosen},
+                    title=name,
+                    label=project.competitor_name or name,
+                    work_dir=Path(summary_work),
+                    stage_numbers=chosen,
+                )
+            stage_number = chosen[-1]
+    audit_doc, _audit_version = state.load_audit(slug, stage_number)
     # The event's logo (the branding work), brought to this disk like a
     # shooter's; the title page and the closing card draw it.
     event_logo = _event_logo(state) if req.card in ("title", "closing") else None
     spec = PreviewSpec(
         card=req.card,
-        stage_number=req.stage_number,
+        stage_number=stage_number,
         width=req.width,
         title_info=req.title_info,
         title_division=competitor_division(project, root) if req.title_division else None,
@@ -155,6 +183,7 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
         backdrop=req.backdrop,
         event_logo=event_logo.name if event_logo is not None else None,
         made_with=req.made_with,
+        summary_digest=summary_digest(match_summary) if match_summary is not None else None,
         draft=(
             None
             if req.draft is None and not req.templates
@@ -214,6 +243,7 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
                 ffmpeg_binary=rt.ffmpeg_binary,
                 work_dir=Path(work),
                 event_logo=event_logo,
+                match_summary=match_summary,
             )
 
     try:

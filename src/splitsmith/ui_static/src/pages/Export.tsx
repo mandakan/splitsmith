@@ -1047,6 +1047,7 @@ function ExportInner({ slug }: { slug: string }) {
             <PreviewPane
               slug={compare ? audioFrom || slug : slug}
               stageNumber={orderedSelection[0] ?? 0}
+              stageNumbers={orderedSelection}
               settings={view}
               projectName={projectName || project?.name || ""}
               focus={lookFocus}

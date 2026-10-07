@@ -37,6 +37,8 @@ export function previewCardFor(focus: LookFocus | null): PreviewCard | null {
       return focus.variantId === "lower-third" ? "lower-third" : "slate";
     case "summaryHold":
       return "summary";
+    case "matchSummary":
+      return "match_summary";
     case "overlay":
       return "overlay";
   }
@@ -71,6 +73,9 @@ export function previewBody(
    *  against it first, so a preset's uninstalled Look previews as the
    *  default instead of a 422 (review of #1246). */
   looks: LookInfo[] = BUILTIN_LOOKS,
+  /** The export's stage selection, in order: the match summary card
+   *  summarises exactly these, as the video will. */
+  stageNumbers?: readonly number[],
 ): ExportPreviewBody {
   const body: ExportPreviewBody = {
     card,
@@ -95,6 +100,7 @@ export function previewBody(
   // A card a template draws previews moving when its template animates
   // (#1249); the server answers a still card with the PNG it always did.
   if (MOVING_CARDS.has(card)) body.motion = true;
+  if (card === "match_summary" && stageNumbers) body.stage_numbers = [...stageNumbers];
   return body;
 }
 
@@ -112,7 +118,8 @@ export function previewCaption(
   const slot = slots.find((s) => s.id === focus.slotId);
   const variant = slot?.variants.find((v) => v.id === focus.variantId);
   if (!slot || !variant) return stage;
-  if (slot.id === "transition") return variant.name;
+  // A transition, and the match summary (the whole match), name no stage.
+  if (slot.id === "transition" || (slot.id === "matchSummary" && variant.id !== "none")) return variant.name;
   return `${variant.name} · ${stage}`;
 }
 

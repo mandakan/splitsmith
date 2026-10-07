@@ -321,6 +321,20 @@ mark, the line beside the logo, and never moves the card's text. The upload and 
 have a file store. It is the video maker's brand, never a shooter's: a shooter's
 logo stays theirs and nothing falls back between the two.
 
+The single-shooter MP4 can close with a **match summary** (spec
+``2026-10-07-match-summary-design``): ``match_summary.build_match_summary``
+reads the same ``TileStageData`` the stage summary hold does and the same
+rules (``statistic_splits``, the draw is the first split), never sums stage
+times and never shows a match %. It is ``Composition.match_summary``, a
+``_MatchSummaryItem`` on the spine after the last stage's summary and before
+the closing card, drawn by ``build_match_summary_still`` (engine HTML over
+the last stage's blurred tail frame, like the stage summary; not a Look
+template). It adds no chapter: YouTube drops every chapter when one is under
+ten seconds. The preview's ``match_summary`` card is built from every
+stage's audit by ``export_preview.match_summary_for`` and keyed by
+``summary_digest``, since the preview's own key reads one stage's audit.
+The grid has none yet.
+
 The closing card ends with **"Made with splitsmith"** unless turned off
 (``MatchTitle.credit``, drawn by ``_shared/credit.js`` from ``data.credit``,
 which ``card_context`` sets on the ``closing`` slot only). The switch is

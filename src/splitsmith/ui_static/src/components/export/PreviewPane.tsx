@@ -35,6 +35,8 @@ export interface PreviewPaneProps {
   hover: LookFocus | null;
   /** False hides the pane (trims mode, no stage selected). */
   enabled: boolean;
+  /** The export's stage selection, in order (the match summary card). */
+  stageNumbers?: readonly number[];
 }
 
 function genericFor(
@@ -51,7 +53,16 @@ function genericFor(
   return previewSrc(variant.previewUrl ?? null) ?? thumbnailUrl(variant.thumbnail);
 }
 
-export function PreviewPane({ slug, stageNumber, settings, projectName, focus, hover, enabled }: PreviewPaneProps) {
+export function PreviewPane({
+  slug,
+  stageNumber,
+  settings,
+  projectName,
+  focus,
+  hover,
+  enabled,
+  stageNumbers,
+}: PreviewPaneProps) {
   const { looks, transitions } = useLooks();
   const [still, setStill] = useState<string | null>(null);
   const [status, setStatus] = useState<number | null>(null);
@@ -67,8 +78,9 @@ export function PreviewPane({ slug, stageNumber, settings, projectName, focus, h
   const card = previewCardFor(focus);
   // One string so the effect re-runs only when the request would differ.
   const requestKey = useMemo(
-    () => (card ? JSON.stringify(previewBody(settings, card, stageNumber, projectName, looks)) : null),
-    [card, settings, stageNumber, projectName, looks],
+    () =>
+      card ? JSON.stringify(previewBody(settings, card, stageNumber, projectName, looks, stageNumbers)) : null,
+    [card, settings, stageNumber, projectName, looks, stageNumbers],
   );
 
   useEffect(() => {

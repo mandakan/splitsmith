@@ -24,6 +24,7 @@ import io
 import json
 import logging
 import subprocess
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -36,6 +37,7 @@ from .identity import ResolvedIdentity
 from .look_sting import sting_context
 from .looks import Look, sting_template_for
 from .match_project import MatchProject
+from .match_summary import MatchSummary, build_match_summary, build_match_summary_still
 from .overlay_card import build_card_still, build_lower_third, card_backdrop, card_motion, card_scale
 from .overlay_html import single_html
 from .overlay_raster import Rasterizer
@@ -49,7 +51,9 @@ from .ui.match_exports import title_info_lines
 
 logger = logging.getLogger(__name__)
 
-PreviewCard = Literal["frame", "title", "slate", "lower-third", "summary", "closing", "overlay", "sting"]
+PreviewCard = Literal[
+    "frame", "title", "slate", "lower-third", "summary", "match_summary", "closing", "overlay", "sting"
+]
 """``sting`` is the Look's sting ``variant`` over the stage's head frame (#1264)."""
 
 #: How long the sting card's transition lasts in a preview; the editor's
@@ -101,6 +105,9 @@ class PreviewSpec:
     backdrop: Literal["footage", "demo"] = "footage"
     #: "Made with splitsmith" on the closing card.
     made_with: bool = True
+    #: Digest of the match summary the caller built from every stage's audit;
+    #: the cache key's only view of the stages this request does not name.
+    summary_digest: str | None = None
     #: The event logo's content name (the branding work), for the cache key;
     #: the file itself reaches :func:`render_preview` as ``event_logo``.
     event_logo: str | None = None
@@ -159,6 +166,8 @@ def preview_key(
         fields["event_logo"] = spec.event_logo
     if spec.card == "closing" and spec.made_with:
         fields["credit"] = True
+    if spec.summary_digest is not None:
+        fields["summary"] = spec.summary_digest
     payload = json.dumps(
         {
             **fields,
@@ -257,6 +266,52 @@ def _shots(audit_doc: dict | None, work_dir: Path) -> tuple[TileShot, ...]:
     return load_stage_shots(path)
 
 
+def match_summary_for(
+    project: MatchProject,
+    audit_docs: Mapping[int, dict | None],
+    *,
+    title: str,
+    label: str,
+    work_dir: Path,
+    stage_numbers: Sequence[int] | None = None,
+) -> MatchSummary:
+    """The match summary the export would draw, from each stage's audit doc
+    (the preview reads docs, not files, so each is written to ``work_dir``
+    and read back through the export's own loader). ``stage_numbers`` is
+    the export's selection, in its order; ``None`` is every stage."""
+    stages: list[tuple[str, TileStageData]] = []
+    by_number = {stage.stage_number: stage for stage in project.stages}
+    chosen = (
+        list(project.stages)
+        if stage_numbers is None
+        else [by_number[n] for n in stage_numbers if n in by_number]
+    )
+    for stage in chosen:
+        folder = work_dir / f"stage{stage.stage_number}"
+        folder.mkdir(parents=True, exist_ok=True)
+        stages.append(
+            (
+                # The name the export prints (``match_exports``): "Stage N" for a blank one.
+                stage_display_name(stage.stage_number, stage.stage_name),
+                TileStageData(
+                    label=label,
+                    stage_number=stage.stage_number,
+                    shots=_shots(audit_docs.get(stage.stage_number), folder),
+                    stage_time_seconds=stage.time_seconds if stage.time_seconds > 0 else None,
+                    stage_time_is_manual=stage.time_seconds_manual,
+                    scorecard=stage.scorecard,
+                    stage_rounds=stage.stage_rounds,
+                ),
+            )
+        )
+    return build_match_summary(stages, title=title, label=label)
+
+
+def summary_digest(summary: MatchSummary) -> str:
+    """A stable digest of everything the card prints."""
+    return hashlib.sha256(repr(summary).encode()).hexdigest()[:16]
+
+
 def _surface(spec: PreviewSpec, theme: OverlayTheme) -> Image.Image:
     return Image.new("RGB", (spec.width, spec.height), theme.surface)
 
@@ -299,6 +354,7 @@ def render_preview(
     work_dir: Path,
     shooter: ResolvedIdentity | None = None,
     event_logo: Path | None = None,
+    match_summary: MatchSummary | None = None,
 ) -> bytes:
     """The PNG for ``spec``, or :class:`PreviewError` for a 404 / 409 / 503.
     ``shooter`` is the shooter's resolved identity (#1243), drawn on the
@@ -323,7 +379,7 @@ def render_preview(
     # shots: with none, its tail is the beep plus the pad, never the
     # stage time (``mp4_render``'s ``last_local``).
     last_shot = shots[-1].time_from_beep if shots else 0.0
-    at: Literal["head", "tail"] = "tail" if spec.card in ("summary", "closing") else "head"
+    at: Literal["head", "tail"] = "tail" if spec.card in ("summary", "match_summary", "closing") else "head"
     if spec.card == "overlay":
         seconds = beep + last_shot
     elif at == "head":
@@ -430,6 +486,17 @@ def render_preview(
                 return webp
         third = build_lower_third(lower, rasterizer=rasterizer, **size)
         image = None if third is None else _compose_over(frame, _to_png(third), spec, theme)
+    elif spec.card == "match_summary":
+        if match_summary is None:
+            raise PreviewError(409, "the match summary needs the match's stages")
+        image = build_match_summary_still(
+            match_summary,
+            width=spec.width,
+            height=spec.height,
+            theme=theme,
+            rasterizer=rasterizer,
+            backdrop=frame,
+        )
     elif spec.card == "summary":
         tile = TileStageData(
             label=label,

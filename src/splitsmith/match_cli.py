@@ -465,6 +465,14 @@ def export(
         "--card-variant",
         help="Look template variant for the generated cards: 'default' or, with the splitsmith Look, 'rise'.",
     ),
+    match_summary: bool = typer.Option(
+        False,
+        "--match-summary",
+        help="Close with a match summary card: match-wide figures and a row per stage (mp4 only).",
+    ),
+    match_summary_seconds: float = typer.Option(
+        6.0, "--match-summary-seconds", help="Seconds the match summary holds."
+    ),
     summary_hold: float = typer.Option(
         0.0,
         "--summary-hold",
@@ -606,6 +614,12 @@ def export(
     if summary_hold < 0:
         console.print(f"[red]Error:[/] --summary-hold must not be negative, got {summary_hold:g}.")
         raise typer.Exit(code=2)
+    if match_summary and not 0.5 <= match_summary_seconds <= 30.0:
+        console.print(
+            "[red]Error:[/] --match-summary-seconds must be between 0.5 and 30, "
+            f"got {match_summary_seconds:g}."
+        )
+        raise typer.Exit(code=2)
     from .composition import validate_transition_kind
 
     try:
@@ -645,7 +659,7 @@ def export(
     # read when a summary is asked for -- the roster file is not part of
     # an ordinary export and must not be able to fail one.
     shooter_label: str | None = project.competitor_name
-    if summary_hold > 0 and not shooter_label:
+    if (summary_hold > 0 or match_summary) and not shooter_label:
         try:
             shooter_label = match.load_shooter(match_path, slug).name
         except (OSError, KeyError, ValueError):
@@ -696,6 +710,8 @@ def export(
         card_variant=card_variant,
         overlay_theme=overlay_theme,  # type: ignore[arg-type]
         summary_hold_seconds=summary_hold,
+        match_summary=match_summary,
+        match_summary_seconds=match_summary_seconds,
         shooter_label=shooter_label,
         shooter_identity=resolved_identity_for(
             project, shooter_root, look=load_look(overlay_theme), index=0, label=shooter_label or project_name

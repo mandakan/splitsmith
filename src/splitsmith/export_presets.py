@@ -111,6 +111,9 @@ class ExportPresetBody(BaseModel):
     stage_card_style: StageCardStyle = "none"
     stage_card_seconds: float = 1.5
     summary_hold_seconds: float = 0.0
+    #: The match summary card after the last stage, and its hold.
+    match_summary: bool = False
+    match_summary_seconds: float = 6.0
     overlay: bool = False
     grid_overlay: bool = False
     grid_hold_seconds: float = 0.0

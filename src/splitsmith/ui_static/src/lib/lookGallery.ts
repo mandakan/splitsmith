@@ -25,7 +25,15 @@ import {
   type OutputFormat,
 } from "@/lib/renderOptions";
 
-export type LookSlotId = "look" | "titlePage" | "stageCard" | "closingCard" | "summaryHold" | "overlay" | "transition";
+export type LookSlotId =
+  | "look"
+  | "titlePage"
+  | "stageCard"
+  | "closingCard"
+  | "summaryHold"
+  | "matchSummary"
+  | "overlay"
+  | "transition";
 
 export interface LookParam {
   /** Unique within the variant; becomes the input id. */
@@ -209,6 +217,32 @@ export const LOOK_SLOTS: readonly LookSlot[] = [
     // still "on", or the input would vanish under the cursor.
     read: (s) => (s.renderOptions.summaryHoldSeconds <= 0 ? "none" : "on"),
     write: (s, id) => render(s, { summaryHoldSeconds: id === "on" ? DEFAULT_SUMMARY_HOLD_SECONDS : 0 }),
+  },
+  {
+    id: "matchSummary",
+    label: "Match summary",
+    variants: [
+      none("The video ends after the last stage.", ["single"], MP4),
+      {
+        id: "on",
+        name: "Match summary",
+        thumbnail: "match-summary.png",
+        help: "After the last stage: match-wide figures and a row per stage.",
+        params: [
+          {
+            id: "match-summary-seconds",
+            label: "Match summary seconds",
+            min: MIN_CARD_SECONDS,
+            read: (s) => s.renderOptions.matchSummarySeconds,
+            write: (s, n) => render(s, { matchSummarySeconds: n }),
+          },
+        ],
+        modes: ["single"],
+        formats: MP4,
+      },
+    ],
+    read: (s) => (s.renderOptions.matchSummary ? "on" : "none"),
+    write: (s, id) => render(s, { matchSummary: id === "on" }),
   },
   {
     id: "overlay",

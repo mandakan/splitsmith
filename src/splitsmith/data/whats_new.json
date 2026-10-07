@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "match-summary",
+      "date": "2026-10-07",
+      "title": "A match summary at the end of the video",
+      "body": "Turn on Match summary under Look on the Export page: after the last stage, your average split, best draw, hits and a row per stage."
+    },
+    {
       "id": "made-with-credit",
       "date": "2026-10-07",
       "title": "Made with splitsmith on the closing card",

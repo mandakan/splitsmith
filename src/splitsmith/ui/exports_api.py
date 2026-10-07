@@ -213,6 +213,10 @@ class MatchExportRequest(BaseModel):
     # the blurred last frame) for this many seconds after its action in
     # the rendered MP4. 0 is off. Other renderers surface an anomaly.
     summary_hold_seconds: float = 0.0
+    # The match summary card after the last stage (spec
+    # 2026-10-07-match-summary-design); rendered MP4 only, an anomaly elsewhere.
+    match_summary: bool = False
+    match_summary_seconds: float = Field(default=6.0, ge=0.5, le=30.0)
     # Issue #1000. Chain a ``youtube_upload`` job onto this export. Needs
     # the sidecar (it is the upload's metadata) and a rendered MP4.
     youtube_upload: bool = False

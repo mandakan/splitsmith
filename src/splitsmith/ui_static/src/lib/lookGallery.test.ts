@@ -182,6 +182,7 @@ describe("visibility, pinned to the rules the render panel applied", () => {
       "stageCard",
       "closingCard",
       "summaryHold",
+      "matchSummary",
       "overlay",
       "transition",
     ]);
