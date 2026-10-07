@@ -342,7 +342,13 @@ name on the title page (``title_info_lines``). The upload sniffs the
 bytes (PNG / JPEG incl. MPO / WEBP), caps the side at ``LOGO_MAX_SIDE``
 and never reads the client's filename. The logo syncs over the media
 channel (``identity/`` in the push plan, the hosted key rule and the
-delete route).
+delete route). The roster shows it too (#1249): ``GET
+/api/shooters/{slug}/identity/logo`` serves the logo (``ensure_local_logo``,
+``nosniff``) and is on the share GET allowlist (the logo is in every video a
+share shows; the alias binds it to that match's shooters), the compare payload
+carries ``identity``, and ``Avatar`` takes ``accent`` (a ring) and ``logo`` (in
+place of the initials) through ``lib/identityMark``, whose URL carries the
+content-named file so a new logo is a new URL; with neither it renders as before.
 
 The single-shooter MP4 draws **transitions** (#1244, spec section 3) on a
 boundary segment. ``plan_timeline`` turns the stage-indexed

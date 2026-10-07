@@ -277,7 +277,7 @@ from .comments import (
 )
 from .exports_api import CompareGridRequest, ExportStageRequest, MatchExportRequest
 from .http_errors import ensure_source_reachable, source_unreachable
-from .identity_media import grid_identities, resolved_identity_for
+from .identity_media import ensure_local_logo, grid_identities, resolved_identity_for
 from .job_journal import JobJournal, default_journal_path, resume_journaled_jobs
 from .jobs import (
     Job,
@@ -1416,6 +1416,8 @@ _SHARE_PATH_RE = re.compile(
     r"|shooters/[^/]+/stages/[0-9]+/comments"
     r"|shooters/[^/]+/coach/distributions"
     r"|shooters/[^/]+/videos/stream"
+    # The shooter's logo (#1249): already in every video the share shows.
+    r"|shooters/[^/]+/identity/logo"
     r"|match/stage/[0-9]+/compare"
     # Same registry as the "shooters/[^/]+/videos/stream" shape above -
     # this alternative also reaches the registered-video branch of
@@ -5457,6 +5459,8 @@ class CompareShooterRecord(BaseModel):
     duration_seconds: float | None
     stage_time_seconds: float | None
     shots: list[CompareShotPoint]
+    # The shooter's identity (#1249): the roster draws their accent and logo.
+    identity: ShooterIdentity | None = None
 
 
 class CompareStageResponse(BaseModel):
@@ -13121,6 +13125,28 @@ def create_app(
             _remove_local_logo(slug, previous)
         return JSONResponse(project.model_dump(mode="json"))
 
+    @app.get("/api/shooters/{slug}/identity/logo")
+    def get_shooter_logo(slug: str) -> FileResponse:
+        """The shooter's logo (#1249): for the Compare roster, the shooter
+        chips and the share views. On the share GET allowlist: the logo is
+        already drawn into every video the share shows, and the alias binds
+        the request to that match's shooters. Content-named and sniffed on
+        upload (PNG, JPEG, WebP, never SVG); served with ``nosniff``."""
+        project = state.shooter_project(slug)
+        path = ensure_local_logo(project, state.shooter_root(slug))
+        if path is None or not path.is_file():
+            raise HTTPException(status_code=404, detail="no logo")
+        media = {".png": "image/png", ".jpeg": "image/jpeg", ".jpg": "image/jpeg", ".webp": "image/webp"}.get(
+            path.suffix.lower()
+        )
+        if media is None:
+            raise HTTPException(status_code=404, detail="no logo")
+        return FileResponse(
+            path,
+            media_type=media,
+            headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, max-age=3600"},
+        )
+
     @app.delete("/api/shooters/{slug}/identity/logo")
     def remove_shooter_logo(slug: str) -> JSONResponse:
         """Clear the shooter's logo (#1243) and remove the local file; a
@@ -16384,6 +16410,7 @@ def create_app(
                     duration_seconds=duration_seconds,
                     stage_time_seconds=(stage.time_seconds if stage is not None else None),
                     shots=shots,
+                    identity=legacy.identity,
                 )
             )
 

@@ -793,6 +793,7 @@ _SHARE_WHITELIST_INSTANCES = [
     f"shooters/{SLUG}/stages/1/comments",
     f"shooters/{SLUG}/coach/distributions",
     f"shooters/{SLUG}/videos/stream",
+    f"shooters/{SLUG}/identity/logo",
     "match/stage/1/compare",
     f"match/shooters/{SLUG}/videos/stream",
     "og.png",

@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "identity-everywhere",
+      "date": "2026-10-07",
+      "title": "Club colours on Compare and shared pages",
+      "body": "A shooter's accent and logo now mark them on Compare, in the shooter chips and on the Splits pages, shared links included."
+    },
+    {
       "id": "moving-previews",
       "date": "2026-10-07",
       "title": "Previews that move",

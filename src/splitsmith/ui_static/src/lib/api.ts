@@ -2495,6 +2495,8 @@ export interface CompareShooterRecord {
   duration_seconds: number | null;
   stage_time_seconds: number | null;
   shots: CompareShotPoint[];
+  /** The shooter's identity (#1249): the roster draws their accent and logo. */
+  identity?: ShooterIdentity | null;
 }
 
 export interface CompareStageResponse {
