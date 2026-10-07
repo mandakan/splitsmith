@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "grid-render-cache",
+      "date": "2026-10-07",
+      "title": "Faster second renders of a compare grid",
+      "body": "Rendering a compare grid again reuses every stage, card and transition that did not change, as a single shooter's video already did."
+    },
+    {
       "id": "identity-everywhere",
       "date": "2026-10-07",
       "title": "Club colours on Compare and shared pages",

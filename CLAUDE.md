@@ -162,7 +162,16 @@ Bump ``segment_cache.KEY_VERSION`` when the recipe changes. The job and
 the CLI get the cache through ``match_exports.render_segment_cache``;
 tests run with ``SPLITSMITH_RENDER_CACHE=0`` (conftest) and a cache test
 passes its own. ``RenderStep`` is the per-segment progress the job maps
-onto its bar; the grid renderer has no cache yet.
+onto its bar. The grid renderer shares the cache
+(``render_grid_mp4(segment_cache=)``, its ``.mov`` segments keep their
+suffix): it renders into a fresh temp dir, so the key writes the work dir
+as ``<work>`` in tokens and in small work files (the sprite concat list),
+and the files ffmpeg reads with no token of their own (every sprite the
+list names, the clock's font in ``drawtext``) reach it as
+``extra_inputs`` through ``_overlay_inputs``; a new indirect input goes
+there. Its progress is ``GridRenderStep`` through ``progress=``, one per
+stage, encoded or reused, then the stitch; never count ``runner`` calls,
+a reused stage makes none.
 
 Cards draw through a **Look** (``splitsmith.looks``, spec 2026-10-06):
 ``data/looks/<name>/look.json`` holds the palette and names one HTML

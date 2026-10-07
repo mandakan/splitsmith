@@ -62,6 +62,7 @@ from ..overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailab
 from ..overlay_text import FALLBACK_BUNDLED_FONT, overlay_font_file
 from ..overlay_theme import OverlayTheme, ThemeName, load_theme, theme_for
 from ..runtime import FFmpegCapabilities, ffmpeg_capabilities, quote_filter_value, runtime
+from ..segment_cache import SegmentCache
 from ..youtube_sidecar import Chapter
 from .free_cell import (
     FreeCellContext,
@@ -2821,10 +2822,12 @@ def _encode_card(
     runner: Runner,
     clip_offset_seconds: float = 0.0,
     clip_delay_seconds: float = 0.0,
+    encoder: _GridEncoder | None = None,
 ) -> Path | None:
-    """Encode ``assets`` as a ``seconds``-long segment named ``name``;
+    """Encode ``assets`` as a ``seconds``-long segment named ``name``
+    (through ``encoder``, so through the segment cache when it has one);
     ``None`` (logged) when ffmpeg refused."""
-    segment = work_path = assets.png.parent / f"{name}{SEGMENT_SUFFIX}"
+    work_path = assets.png.parent / f"{name}{SEGMENT_SUFFIX}"
     cmd = build_card_segment_command(
         assets.png,
         seconds=seconds,
@@ -2836,12 +2839,9 @@ def _encode_card(
         clip_offset_seconds=clip_offset_seconds,
         clip_delay_seconds=clip_delay_seconds,
     )
-    completed = _run_ffmpeg(cmd, runner=runner)
-    if completed.returncode != 0:
-        logger.warning(
-            "compare grid: card %s failed to encode and is skipped: %s", name, _stderr_text(completed)
-        )
-        return None
+    segment, error = (encoder or _GridEncoder(None, assets.png.parent)).encode(cmd, work_path, runner=runner)
+    if segment is None:
+        logger.warning("compare grid: card %s failed to encode and is skipped: %s", name, error)
     return segment
 
 
@@ -2899,6 +2899,104 @@ def _tile_identities(
     if not identities:
         return ()
     return tuple(identities[tile.label] for tile in plan.tiles if tile.label in identities)
+
+
+@dataclass(frozen=True)
+class GridRenderStep:
+    """One step of a grid render, for a progress line: a stage's segment
+    (``plan``) being encoded or reused from the segment cache, or the
+    stitch (``plan`` is ``None``). ``index`` counts stages from 0 in plan
+    order and is ``total`` for the stitch. Cards, edges and boundaries
+    are not steps; the CLIs' "stage N of M" counts stages."""
+
+    index: int
+    total: int
+    plan: GridStagePlan | None
+    status: Literal["encoding", "reused", "stitching"]
+
+
+GridProgress = Callable[[GridRenderStep], None]
+
+
+class _GridEncoder:
+    """Runs a segment's ffmpeg command, or reuses the segment from the
+    segment cache (:mod:`splitsmith.segment_cache`); with no cache it runs
+    the command as written. ``keys_by_path`` is the key each segment came
+    from, so a boundary keys on its edges' identities rather than on
+    files the cache's own LRU touch re-dates."""
+
+    def __init__(self, cache: SegmentCache | None, work: Path) -> None:
+        self.cache = cache
+        self.work = work
+        self.used_keys: set[str] = set()
+        self.keys_by_path: dict[Path, str] = {}
+
+    def encode(
+        self,
+        cmd: tuple[str, ...],
+        out: Path,
+        *,
+        runner: Runner,
+        extra_inputs: Sequence[Path] = (),
+        virtual_inputs: Mapping[str, str] | None = None,
+        report: Callable[[Literal["encoding", "reused"]], None] | None = None,
+    ) -> tuple[Path | None, str]:
+        """The segment's path, or ``None`` and ffmpeg's complaint."""
+        if self.cache is None:
+            if report is not None:
+                report("encoding")
+            completed = _run_ffmpeg(cmd, runner=runner)
+            return (out, "") if completed.returncode == 0 else (None, _stderr_text(completed))
+        key = self.cache.key(
+            cmd,
+            output_path=out,
+            work_dir=self.work,
+            virtual_inputs=virtual_inputs,
+            extra_inputs=extra_inputs,
+        )
+        self.used_keys.add(key)
+        hit = self.cache.lookup(key, suffix=out.suffix)
+        if hit is not None:
+            if report is not None:
+                report("reused")
+            self.keys_by_path[hit] = key
+            return hit, ""
+        if report is not None:
+            report("encoding")
+        partial = self.cache.partial_path(key, suffix=out.suffix)
+        target = str(out)
+        try:
+            completed = _run_ffmpeg(
+                tuple(str(partial) if token == target else token for token in cmd), runner=runner
+            )
+            if completed.returncode != 0:
+                return None, _stderr_text(completed)
+            if not partial.is_file():
+                return None, f"ffmpeg reported success but wrote no {out.name}"
+            committed = self.cache.commit(partial, key, suffix=out.suffix)
+            self.keys_by_path[committed] = key
+            return committed, ""
+        finally:
+            partial.unlink(missing_ok=True)
+
+
+def _overlay_inputs(overlay: StageOverlayPlan | None) -> tuple[Path, ...]:
+    """The files a stage's overlay reads that are not argv tokens: every
+    sprite its concat list names, and the clock's font (named inside the
+    ``drawtext`` filter). The segment cache keys on their bytes."""
+    if overlay is None:
+        return ()
+    sprites: list[Path] = []
+    try:
+        lines = overlay.sprite_list_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        lines = []
+    for line in lines:
+        if line.startswith("file '") and line.endswith("'"):
+            sprite = Path(line[len("file '") : -1])
+            if sprite not in sprites:
+                sprites.append(sprite)
+    return (*sprites, overlay.font_path)
 
 
 def _run_ffmpeg(cmd: tuple[str, ...], *, runner: Runner) -> subprocess.CompletedProcess:
@@ -3047,6 +3145,8 @@ def render_grid_mp4(
     match_name: str = "",
     match_date: str | None = None,
     transitions: Sequence[Transition] = (),
+    segment_cache: SegmentCache | None = None,
+    progress: GridProgress | None = None,
 ) -> GridRenderResult:
     """Render every stage as a grid, then stitch them into one MP4.
 
@@ -3147,6 +3247,15 @@ def render_grid_mp4(
     debugged from, and skipping cleanup keeps a successful render from
     deleting a caller's own directory. Callers that want it gone should
     pass a path they own.
+
+    ``segment_cache`` keeps every encoded segment (stages, cards, edges,
+    boundaries) by the content of its command, as the single-shooter
+    render does: a second render of the same grid encodes nothing that
+    did not change and the stitch reads the rest from the cache. The
+    sprites and the clock's font reach the key as ``extra_inputs``
+    (:func:`_overlay_inputs`); the rasterizer still draws them each run.
+    ``progress`` hears each stage as it is encoded or reused, then the
+    stitch; a reused stage never reaches ``runner``.
     """
     # Before the canvas, the binary or anything else: this is a caller
     # error, not a render outcome, and it costs nothing to say so first.
@@ -3279,6 +3388,14 @@ def render_grid_mp4(
 
     outcomes: list[StageOutcome] = []
     segments: list[Path] = []
+    encoder = _GridEncoder(segment_cache, work)
+
+    def report(
+        index: int, plan: GridStagePlan | None, status: Literal["encoding", "reused", "stitching"]
+    ) -> None:
+        if progress is not None:
+            progress(GridRenderStep(index=index, total=len(plans), plan=plan, status=status))
+
     card_look = load_look(overlay_theme) if cards_requested or sting_requested else None
     card_theme = theme_for(card_look) if card_look is not None else None
     free_theme = card_theme or (load_theme(overlay_theme) if free_requested else None)
@@ -3549,22 +3666,26 @@ def render_grid_mp4(
         output: Path,
         head_pad: float | None,
         list_suffix: str,
-    ) -> tuple[str, ...]:
-        return build_stage_command(
+    ) -> tuple[tuple[str, ...], tuple[Path, ...]]:
+        """The stage's command and the files it reads that are not argv
+        tokens (:func:`_overlay_inputs`)."""
+        stage_overlay = (
+            overlay_for(plan, source=item.plan, head_pad=head_pad, list_suffix=list_suffix)
+            if prep.has_overlay
+            else None
+        )
+        cmd = build_stage_command(
             plan,
             canvas=canvas,
             output_path=output,
             ffmpeg_binary=binary,
-            overlay=(
-                overlay_for(plan, source=item.plan, head_pad=head_pad, list_suffix=list_suffix)
-                if prep.has_overlay
-                else None
-            ),
+            overlay=stage_overlay,
             hold_still_path=prep.hold_still if plan.hold_seconds > 0 else None,
             lower_third=lower_third,
             inset=inset,
             free_cell_still=prep.free_still,
         )
+        return cmd, _overlay_inputs(stage_overlay)
 
     def encode_edge(item: GridItem, prep: _GridPrep, *, half: float, end: Literal["tail", "head"]) -> Path:
         """A boundary's edge of ``item`` (issue #1244): ``2 * half`` seconds
@@ -3586,6 +3707,7 @@ def render_grid_mp4(
                 runner=boundary_runner,
                 clip_delay_seconds=half if end == "head" else 0.0,
                 clip_offset_seconds=item.card_seconds - half if end == "tail" else 0.0,
+                encoder=encoder,
             )
             if segment is None:
                 raise _EdgeFailedError(f"{name} failed to encode")
@@ -3593,6 +3715,7 @@ def render_grid_mp4(
         if prep.failed is not None:
             raise _EdgeFailedError(prep.failed)
         plan = item.plan
+        extra: tuple[Path, ...] = ()
         if end == "tail" and grid_edge_is_hold_only(plan, half=half):
             # The whole edge lies in the hold: a still of the hold PNG, the
             # same N+1 silent tracks a card segment carries.
@@ -3625,7 +3748,7 @@ def render_grid_mp4(
                 if end == "head"
                 else head_pad_of(plan) - (plan.duration_seconds - (half - plan.hold_seconds))
             )
-            cmd = stage_command(
+            cmd, extra = stage_command(
                 item,
                 prep,
                 edge_plan,
@@ -3634,10 +3757,10 @@ def render_grid_mp4(
                 head_pad=edge_head_pad,
                 list_suffix=f"-{end}",
             )
-        completed = _run_ffmpeg(cmd, runner=boundary_runner)
-        if completed.returncode != 0:
-            raise _EdgeFailedError(_stderr_text(completed))
-        return out
+        edge, error = encoder.encode(cmd, out, runner=boundary_runner, extra_inputs=extra)
+        if edge is None:
+            raise _EdgeFailedError(error)
+        return edge
 
     try:
         for i, item in enumerate(items):
@@ -3682,10 +3805,19 @@ def render_grid_mp4(
                         head_pad_seconds=_grid_missing_handle(nxt, half=half, end="head"),
                         sting_clip=sting_clip,
                     )
-                    completed = _run_ffmpeg(cmd, runner=boundary_runner)
-                    if completed.returncode != 0:
-                        raise _EdgeFailedError(_stderr_text(completed))
-                    boundary_segment = boundary_out
+                    edge_keys = (
+                        {
+                            str(tail_edge): encoder.keys_by_path[tail_edge],
+                            str(head_edge): encoder.keys_by_path[head_edge],
+                        }
+                        if segment_cache is not None
+                        else None
+                    )
+                    boundary_segment, error = encoder.encode(
+                        cmd, boundary_out, runner=boundary_runner, virtual_inputs=edge_keys
+                    )
+                    if boundary_segment is None:
+                        raise _EdgeFailedError(error)
                 except (_EdgeFailedError, MotionClipError) as exc:
                     note_cut(i, str(exc))
                     item = items[i]
@@ -3712,6 +3844,7 @@ def render_grid_mp4(
                         ffmpeg_binary=binary,
                         runner=card_runner,
                         clip_offset_seconds=item.head_cut_seconds,
+                        encoder=encoder,
                     )
             else:
                 stage_start = run_starts.pop(item.index, elapsed - pending_half)
@@ -3741,7 +3874,7 @@ def render_grid_mp4(
                             if item.head_cut_seconds >= lower_third.seconds
                             else replace(lower_third, skip_seconds=item.head_cut_seconds)
                         )
-                    cmd = stage_command(
+                    cmd, extra = stage_command(
                         item,
                         prep,
                         plan,
@@ -3750,19 +3883,23 @@ def render_grid_mp4(
                         head_pad=head_pad_of(item.plan) - item.head_cut_seconds if cut else None,
                         list_suffix="-cut" if cut else "",
                     )
-                    completed = _run_ffmpeg(cmd, runner=runner)
-                    if completed.returncode != 0:
+                    segment, error = encoder.encode(
+                        cmd,
+                        work / f"{item.name}{SEGMENT_SUFFIX}",
+                        runner=runner,
+                        extra_inputs=extra,
+                        report=lambda status, n=item.index, p=item.plan: report(n, p, status),
+                    )
+                    if segment is None:
                         outcomes.append(
                             StageOutcome(
                                 stage_number=item.plan.stage_number,
                                 stage_name=item.plan.stage_name,
                                 ok=False,
-                                error=_stderr_text(completed),
+                                error=error,
                             )
                         )
-                        segment = None
                     else:
-                        segment = work / f"{item.name}{SEGMENT_SUFFIX}"
                         chapters.append(
                             Chapter(
                                 start_seconds=stage_start,
@@ -3781,7 +3918,7 @@ def render_grid_mp4(
                 # the one out of it has its neighbour trimmed.
                 if boundary is not None:
                     note_cut(i, f"{item.name} was not rendered")
-                if last_boundary is not None and segments and segments[-1].name.startswith("boundary-"):
+                if last_boundary is not None and segments:
                     segments.pop()
                     elapsed -= last_boundary.duration_seconds
                     note = (
@@ -3830,9 +3967,12 @@ def render_grid_mp4(
         ffmpeg_binary=binary,
         audio_labels=labels,
     )
+    report(len(plans), None, "stitching")
     completed = _run_ffmpeg(concat_cmd, runner=runner)
     if completed.returncode != 0:
         raise GridRenderError(f"concat stitch failed: {_stderr_text(completed)}")
+    if segment_cache is not None:
+        segment_cache.evict(keep=encoder.used_keys)
 
     if chapters and chapters[0].start_seconds > 0.0:
         chapters.insert(0, Chapter(start_seconds=0.0, title=match_title or "Intro"))
@@ -3861,8 +4001,10 @@ __all__ = [
     "SEGMENT_SUFFIX",
     "SUMMARY_HOLD_WARN_SECONDS",
     "GridCanvas",
+    "GridProgress",
     "GridRenderError",
     "GridRenderResult",
+    "GridRenderStep",
     "GridStagePlan",
     "GridTile",
     "LowerThirdInput",
