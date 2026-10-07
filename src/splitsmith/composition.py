@@ -36,6 +36,7 @@ Out of scope here, tracked in sibling issues:
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence as SequenceProto
 from dataclasses import dataclass
 from pathlib import Path
@@ -194,27 +195,55 @@ XFADE_KINDS: tuple[str, ...] = (
 )
 #: The two kinds the FCPXML emitter draws natively (FCP's .motr effects).
 FCP_KINDS: tuple[str, ...] = ("zoom", "static")
-TransitionKind = Literal[
-    "zoom",
-    "static",
-    "fade",
-    "fadeblack",
-    "dissolve",
-    "slideleft",
-    "slideright",
-    "circleopen",
-    "zoomin",
-    "hblur",
-    "smoothleft",
-    "wipeleft",
-]
+#: A transition kind (issue #1245): an xfade name (``XFADE_KINDS``), an FCP
+#: effect (``FCP_KINDS``) or ``sting:<name>`` where ``<name>`` is a variant
+#: of the Look's ``transition`` slot. Open on purpose: the Look decides
+#: which stings exist, so the type is ``str`` and
+#: :func:`validate_transition_kind` is the grammar check every request
+#: surface (the Pydantic bodies, the presets, both CLIs) runs.
+TransitionKind = str
+STING_PREFIX = "sting:"
+STING_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 _XFADE_FOR_FCP_KIND = {"zoom": "zoomin", "static": "fadeblack"}
+
+
+def is_sting(kind: str) -> bool:
+    """Whether ``kind`` names a Look sting (``sting:<name>``)."""
+    return kind.startswith(STING_PREFIX)
+
+
+def sting_name(kind: str) -> str:
+    """The sting's name (the ``transition`` slot variant) in ``kind``."""
+    if not is_sting(kind):
+        raise ValueError(f"{kind!r} is not a sting kind")
+    return kind[len(STING_PREFIX) :]
+
+
+def validate_transition_kind(kind: str, *, allow_none: bool = True) -> str:
+    """``kind`` when it is ``"none"`` (unless ``allow_none`` is off), an
+    xfade name, an FCP effect or a well-formed ``sting:<name>``; else
+    ``ValueError`` naming the grammar. Whether the sting exists is the
+    Look's business at render time (a missing one is a fade plus a
+    degradation), not the request's."""
+    if kind == "none" and allow_none:
+        return kind
+    if kind in XFADE_KINDS or kind in FCP_KINDS:
+        return kind
+    if is_sting(kind) and STING_NAME_RE.match(sting_name(kind)):
+        return kind
+    raise ValueError(
+        f"transition kind {kind!r} is not 'none', an xfade ({', '.join(XFADE_KINDS)}), an FCP effect "
+        f"({', '.join(FCP_KINDS)}) or 'sting:<name>' (lower-case letters, digits, '-' and '_')"
+    )
 
 
 def xfade_name(kind: TransitionKind) -> str:
     """The ``xfade`` transition an MP4 renderer draws for ``kind``: an
     xfade kind is its own name; the two FCP effects take the nearest
-    xfade (``zoom`` -> ``zoomin``, ``static`` -> ``fadeblack``)."""
+    xfade (``zoom`` -> ``zoomin``, ``static`` -> ``fadeblack``); a sting
+    rides a plain ``fade`` under its template (issue #1245)."""
+    if is_sting(kind):
+        return "fade"
     return _XFADE_FOR_FCP_KIND.get(kind, kind)
 
 
@@ -224,7 +253,7 @@ def uniform_transitions(kind: str, duration_seconds: float, stage_count: int) ->
     if kind == "none" or stage_count < 2:
         return ()
     return tuple(
-        Transition(from_stage_index=i, to_stage_index=i + 1, kind=kind, duration_seconds=duration_seconds)  # type: ignore[arg-type]
+        Transition(from_stage_index=i, to_stage_index=i + 1, kind=kind, duration_seconds=duration_seconds)
         for i in range(stage_count - 1)
     )
 
@@ -756,8 +785,12 @@ __all__ = [
     "TitleStyle",
     "Transform",
     "Transition",
+    "STING_PREFIX",
     "TransitionKind",
     "from_stage_compositions",
+    "is_sting",
     "render_fcpxml",
+    "sting_name",
     "to_stage_compositions",
+    "validate_transition_kind",
 ]

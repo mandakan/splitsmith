@@ -1058,6 +1058,30 @@ def test_a_bad_transition_kind_is_a_usage_error(tmp_path: Path, monkeypatch: pyt
     assert "transition" in strip_ansi(result.output)
 
 
+def test_a_sting_kind_passes_the_cli_check_and_a_malformed_one_does_not(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #1245: ``--transition sting:wipe`` is a valid kind; ``sting:``
+    alone is the usage error ``nope`` is."""
+    match_root = _seed_match_with_stages(tmp_path / "match", stage_count=2)
+    _patch_probe(monkeypatch)
+    captured: dict[str, Any] = {}
+
+    def fake_render(*args: Any, **kwargs: Any) -> mp4_grid.GridRenderResult:
+        captured.update(kwargs)
+        return mp4_grid.GridRenderResult(output_path=kwargs["output_path"], stages=())
+
+    monkeypatch.setattr(cli_mod.mp4_grid, "render_grid_mp4", fake_render)
+    base = ["compare", "export", str(match_root), "--audio-from", "mathias", "--format", "mp4", "-o"]
+    base.append(str(tmp_path / "out.mp4"))
+    base.append("--transition")
+    result = runner.invoke(app, [*base, "sting:"])
+    assert result.exit_code == 2, result.output
+    result = runner.invoke(app, [*base, "sting:wipe"])
+    assert result.exit_code == 0, result.output
+    assert [t.kind for t in captured["transitions"]] == ["sting:wipe"]
+
+
 def test_a_transition_with_the_fcpxml_grid_is_refused_like_every_mp4_only_flag(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

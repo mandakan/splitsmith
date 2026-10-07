@@ -49,7 +49,9 @@ OutputFormat = Literal["fcpxml", "fcp7xml", "mp4"]
 # variant in FCP after import. Only the FCPXML renderer emits
 # transitions today; FCP7 / MP4 ignore the request until they grow
 # transition support.
-TransitionKind = Literal["none"] | composition.TransitionKind
+#: ``"none"`` or a ``composition.TransitionKind`` (an open string since
+#: #1245; the Pydantic bodies validate it with ``validate_transition_kind``).
+TransitionKind = composition.TransitionKind
 # Issue #196. ``"none"`` keeps today's title-less stitching.
 # ``"slate"`` adds a pre-stage card on the spine; ``"lower-third"`` is
 # a connected text clip overlaid on the start of the primary. FCPXML

@@ -510,3 +510,37 @@ def test_lowering_an_xfade_kind_to_fcpxml_substitutes_zoom() -> None:
         (composition.Transition(from_stage_index=0, to_stage_index=1, kind="dissolve", duration_seconds=1.0),)
     )
     assert lowered[0].kind == "zoom" and lowered[0].duration_seconds == 1.0
+
+
+def test_sting_kinds_parse_and_ride_a_fade() -> None:
+    """Issue #1245: ``sting:<name>`` names a variant of the Look's
+    ``transition`` slot; the MP4 renderers lay it over a fade and the
+    FCPXML emitter substitutes zoom like any xfade kind."""
+    assert composition.is_sting("sting:wipe")
+    assert not composition.is_sting("fade")
+    assert composition.sting_name("sting:wipe") == "wipe"
+    assert composition.xfade_name("sting:wipe") == "fade"
+    assert composition.fcp_kind("sting:wipe") == ("zoom", True)
+    with pytest.raises(ValueError):
+        composition.sting_name("fade")
+
+
+@pytest.mark.parametrize(
+    "kind", ["none", "fade", "zoom", "static", "wipeleft", "sting:wipe", "sting:logo-2", "sting:a_b"]
+)
+def test_validate_transition_kind_accepts_the_grammar(kind: str) -> None:
+    assert composition.validate_transition_kind(kind) == kind
+
+
+@pytest.mark.parametrize(
+    "kind",
+    ["", "sting:", "sting:Wipe", "sting:a b", "sting:-x", "wipe", "fade:", "Sting:wipe", "sting:" + "x" * 33],
+)
+def test_validate_transition_kind_refuses_everything_else(kind: str) -> None:
+    with pytest.raises(ValueError, match="transition kind"):
+        composition.validate_transition_kind(kind)
+
+
+def test_validate_transition_kind_can_refuse_none() -> None:
+    with pytest.raises(ValueError):
+        composition.validate_transition_kind("none", allow_none=False)

@@ -472,8 +472,8 @@ def export(
         "--transition",
         help=(
             "Transition between stages: 'none', an ffmpeg xfade (fade, fadeblack, dissolve, slideleft, "
-            "slideright, circleopen, zoomin, hblur, smoothleft, wipeleft; mp4) or an FCP effect "
-            "(zoom, static; fcpxml)."
+            "slideright, circleopen, zoomin, hblur, smoothleft, wipeleft; mp4), a Look sting "
+            "('sting:wipe'; mp4) or an FCP effect (zoom, static; fcpxml)."
         ),
     ),
     transition_seconds: float = typer.Option(
@@ -600,14 +600,13 @@ def export(
     if summary_hold < 0:
         console.print(f"[red]Error:[/] --summary-hold must not be negative, got {summary_hold:g}.")
         raise typer.Exit(code=2)
-    from .composition import FCP_KINDS, XFADE_KINDS
+    from .composition import validate_transition_kind
 
-    if transition != "none" and transition not in (*XFADE_KINDS, *FCP_KINDS):
-        console.print(
-            f"[red]Error:[/] --transition must be 'none' or one of {', '.join((*XFADE_KINDS, *FCP_KINDS))}, "
-            f"got {transition!r}."
-        )
-        raise typer.Exit(code=2)
+    try:
+        validate_transition_kind(transition)
+    except ValueError as exc:
+        console.print(f"[red]Error:[/] --transition: {exc}.")
+        raise typer.Exit(code=2) from None
     if transition_seconds <= 0:
         console.print(f"[red]Error:[/] --transition-seconds must be positive, got {transition_seconds:g}.")
         raise typer.Exit(code=2)

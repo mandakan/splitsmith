@@ -29,7 +29,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from . import composition, user_config
 
@@ -48,7 +48,7 @@ PipLayout = Literal["stacked", "pip-corners"]
 InsetCorner = Literal["top-left", "top-right", "bottom-left", "bottom-right"]
 InsetSize = Literal["small", "medium", "large"]
 PaddingPreset = Literal["full", "action", "highlight", "custom"]
-TransitionKind = Literal["none"] | composition.TransitionKind
+TransitionKind = composition.TransitionKind  # "none" or a kind; validated below (#1245)
 StageCardStyle = Literal["none", "slate", "lower-third"]
 UploadPrivacy = Literal["private", "unlisted", "public"]
 
@@ -81,6 +81,12 @@ class ExportPresetBody(BaseModel):
     tail_pad_seconds: float = 5.0
     transition_kind: TransitionKind = "none"
     transition_seconds: float = 0.5
+
+    @field_validator("transition_kind")
+    @classmethod
+    def _transition_kind(cls, value: str) -> str:
+        return composition.validate_transition_kind(value)
+
     # Look
     title_page: bool = False
     title_page_seconds: float = 3.0

@@ -13,6 +13,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pydantic
 import pytest
 
 from splitsmith import export_presets as ep
@@ -159,3 +160,12 @@ def test_json_store_survives_a_corrupt_file(tmp_path: Path, monkeypatch: pytest.
     assert asyncio.run(store.list()) == []
     asyncio.run(store.put(_preset("p1")))
     assert [p.preset_id for p in asyncio.run(store.list())] == ["p1"]
+
+
+def test_a_sting_round_trips_and_a_malformed_kind_is_refused() -> None:
+    """Issue #1245: the kind is an open string with a grammar, validated
+    where the old ``Literal`` refused anything unknown."""
+    assert ExportPresetBody(transition_kind="sting:wipe").transition_kind == "sting:wipe"
+    for kind in ("sting:", "sting:Wipe", "wipe"):
+        with pytest.raises(pydantic.ValidationError):
+            ExportPresetBody(transition_kind=kind)
