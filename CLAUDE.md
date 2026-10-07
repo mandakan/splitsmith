@@ -294,6 +294,13 @@ is keyed per own *file* (``editKey``): the shipped ``card.html`` draws four
 cards, and the tab says so (``sharedWith``). A borrowed slot is written to
 ``<slot>-<variant>.html`` and named in ``look.json`` on first save. Page
 errors carry the template's line (``describe_page_error``).
+The Export rail's ``LookHealth`` (#1276) checks the chosen Look when it is
+your own and the app is local, through the same check route without a draft;
+that case is cached under ``cache_dir/look-check`` by every file of the Look's
+folder (``_folder_digest``), so choosing a Look again launches no browser and
+any edit checks again. A draft or template text is never cached. Failures are
+grouped by message (``lib/lookHealth``): one broken ``card.html`` is one line
+naming the four cards it draws. It never blocks Export.
 
 Palette suggestions (#1273) sit at the top of the Palette tab
 (``components/export/PaletteSuggestions``); every rule is in the pure

@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "look-preflight",
+      "date": "2026-10-07",
+      "title": "Broken templates show before you export",
+      "body": "When your own Look has a template that fails, the Export page says which cards would be left out before you render, with the line that broke."
+    },
+    {
       "id": "look-fonts",
       "date": "2026-10-07",
       "title": "Choose your Look's fonts",

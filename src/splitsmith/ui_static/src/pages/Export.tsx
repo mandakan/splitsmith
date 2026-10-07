@@ -29,6 +29,7 @@ import { DetailsGroup } from "@/components/export/DetailsGroup";
 import { ExportHistory } from "@/components/export/ExportHistory";
 import { ExportWarnings } from "@/components/export/ExportWarnings";
 import { LookGroup } from "@/components/export/LookGroup";
+import { LookHealth } from "@/components/export/LookHealth";
 import { OutputGroup } from "@/components/export/OutputGroup";
 import { PresetRow } from "@/components/export/PresetRow";
 import { PreviewPane } from "@/components/export/PreviewPane";
@@ -1052,6 +1053,7 @@ function ExportInner({ slug }: { slug: string }) {
               hover={lookHover}
               enabled={!trimsOnly && orderedSelection.length > 0}
             />
+            <LookHealth look={view.look} looks={looksState.looks} hosted={hosted} />
             <dl>
               {lines.map((l) => (
                 <div key={l.label} className="flex justify-between gap-3 border-b border-rule px-3.5 py-1.5 text-md">
