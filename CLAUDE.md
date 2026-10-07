@@ -268,11 +268,19 @@ runs forever). The driver prepares each item once, decides a boundary
 (edges, then the xfade) *before* encoding the item that opens it, and
 keys the boundary by its edges' cache keys, not their files (the
 cache's LRU touch re-dates them). ``KEY_VERSION`` is 3. Kinds are
-``composition.XFADE_KINDS`` (ten curated ``xfade`` names) plus the two
-FCP effects, which the MP4 maps through ``xfade_name`` and the FCPXML
-path substitutes with ``zoom`` and an anomaly; the gallery offers the
-xfade kinds to single-shooter MP4 only (``transitionsSupported(format,
-mode)``). The grid draws them too (``compare/mp4_grid``):
+the curated ``xfade`` names plus the two FCP effects, which the MP4 maps
+through ``xfade_name`` and the FCPXML path substitutes with ``zoom`` and
+an anomaly. ``composition.XFADE_FAMILIES`` (#1259) is the one list: a
+family is a gallery tile with one or more directions (Wind: ``hlwind``,
+``hrwind``, ``vuwind``, ``vdwind``), ``XFADE_KINDS``, the request
+validation and both CLIs' help derive from it, ``GET /api/looks`` serves
+it as ``transitions`` with a looping preview per family
+(``data/looks/_transitions/preview/<family>.webp``, the ``_transitions``
+owner of the preview route), and ``tests/test_xfade_kinds_integration.py``
+pins every kind against the ffmpeg on PATH (CI's FFmpeg 6.1 is the
+oldest the project meets). A new transition is one family entry plus
+``render_look_thumbnails.py --look-previews``; the SPA has no list of its
+own. The grid draws them too (``compare/mp4_grid``):
 ``plan_grid_spine`` places the same boundaries between its items (a
 stage's segment is action plus hold; a slate when present),
 ``narrow_grid_plan`` rebuilds every tile's seek and lead pad from the cut
@@ -403,9 +411,18 @@ registry of slots, variants, thumbnails, parameters and which mode and
 format can draw each; ``components/export/LookGallery.tsx`` renders it
 and owns nothing. A new effect is one registry entry plus one thumbnail
 from ``scripts/render_look_thumbnails.py`` (Chromium once, at authoring
-time; the gallery never rasterizes; the xfade tiles are looping WebP
-clips of the real transition through the project ffmpeg, the cut and
-the FCP effects stills). ``lookGallery.test.ts`` pins the per-format
+time; the gallery never rasterizes; the cut and the FCP effects are
+bundled stills, the xfade families come from the server with looping
+WebP clips of the real transition through the project ffmpeg).
+``slotsForLook(looks, settings, transitions)`` turns the families into
+the transition tiles: a stored kind reads as its family, picking a family
+keeps the direction already chosen or takes its first, and a family with
+more than one direction shows a Direction ``Segmented`` under it. The
+kind filter (``visibleTransitionKind``) admits on MP4 only what
+``requestLook`` lists: the server's kinds and the chosen Look's stings,
+or the stored kind itself while the catalog is not there. The rail and
+the group summary name a kind with ``transitionLabel`` ("Wind up", a
+sting as "Wipe sting"). ``lookGallery.test.ts`` pins the per-format
 visibility table and that every committed thumbnail is referenced;
 ``renderOptions.test.ts`` pins that the mappers never send a field the
 registry hides. The installed Looks reach it through ``lib/looks.ts``

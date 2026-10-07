@@ -17,8 +17,10 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
-from ..looks import PREVIEW_DIR, look_catalog, preview_owner_root
+from ..composition import XFADE_FAMILIES
+from ..looks import PREVIEW_DIR, TRANSITIONS_OWNER, look_catalog, preview_owner_root, shipped_looks_dir
 
 router = APIRouter()
 
@@ -26,9 +28,48 @@ _FILE_RE = re.compile(r"^[a-z0-9_-]+\.(png|webp)$")
 _MEDIA = {".png": "image/png", ".webp": "image/webp"}
 
 
+class TransitionDirectionInfo(BaseModel):
+    name: str
+    kind: str
+
+
+class TransitionFamilyInfo(BaseModel):
+    """One xfade family as the gallery shows it (issue #1259): a tile, its
+    directions (the first is what the tile selects) and a looping preview."""
+
+    id: str
+    label: str
+    help: str
+    preview: str | None
+    directions: list[TransitionDirectionInfo]
+
+
+def transition_catalog() -> list[TransitionFamilyInfo]:
+    """``composition.XFADE_FAMILIES`` with each family's preview URL."""
+    previews = shipped_looks_dir() / TRANSITIONS_OWNER / PREVIEW_DIR
+    out: list[TransitionFamilyInfo] = []
+    for family in XFADE_FAMILIES:
+        file = f"{family.id}.webp"
+        out.append(
+            TransitionFamilyInfo(
+                id=family.id,
+                label=family.label,
+                help=family.help,
+                preview=(
+                    f"/api/looks/{TRANSITIONS_OWNER}/preview/{file}" if (previews / file).is_file() else None
+                ),
+                directions=[TransitionDirectionInfo(name=d.name, kind=d.kind) for d in family.directions],
+            )
+        )
+    return out
+
+
 @router.get("/api/looks")
 def get_looks() -> dict[str, Any]:
-    return {"looks": [info.model_dump() for info in look_catalog()]}
+    return {
+        "looks": [info.model_dump() for info in look_catalog()],
+        "transitions": [info.model_dump() for info in transition_catalog()],
+    }
 
 
 @router.get("/api/looks/{name}/preview/{file}")

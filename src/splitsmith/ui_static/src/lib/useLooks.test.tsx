@@ -30,13 +30,13 @@ describe("useLooks", () => {
     await waitFor(() => expect(c.result.current.loaded).toBe(true));
     expect(api.listLooks).toHaveBeenCalledTimes(1);
     expect(a.result.current.looks[0].label).toBe("Fetched");
-    expect(b.result.current).toEqual({ looks, loaded: true, failed: false });
+    expect(b.result.current).toEqual({ looks, transitions: [], loaded: true, failed: false });
   });
 
   it("reports a failed fetch and keeps the built-in catalog", async () => {
     vi.mocked(api.listLooks).mockRejectedValue(new Error("offline"));
     const { result } = renderHook(() => useLooks());
     await waitFor(() => expect(result.current.loaded).toBe(true));
-    expect(result.current).toEqual({ looks: BUILTIN_LOOKS, loaded: true, failed: true });
+    expect(result.current).toEqual({ looks: BUILTIN_LOOKS, transitions: [], loaded: true, failed: true });
   });
 });

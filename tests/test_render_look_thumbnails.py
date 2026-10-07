@@ -136,15 +136,16 @@ def test_transition_tiles_differ_from_each_other(tmp_path: Path) -> None:
         runner=_fake_ffmpeg,
     )
     names = [n for n in mod.THUMBNAILS if n.startswith("transition-")]
-    assert len(names) == 13
+    assert len(names) == 3
     assert len({(tmp_path / n).read_bytes() for n in names}) == len(names)
 
 
-def test_the_xfade_tiles_loop_as_animated_webp(tmp_path: Path) -> None:
-    """Slice 6 (#1246): an xfade tile is the real transition between the
-    two stills, through the project ffmpeg at authoring time, saved as a
-    looping WebP: a quarter second of each side held around a one second
-    fade at 12 fps; the cut and the two FCP effects stay stills."""
+def test_every_transition_family_gets_a_looping_preview(tmp_path: Path) -> None:
+    """Issue #1259: one looping WebP per family, its first direction through
+    the project ffmpeg, under the ``_transitions`` owner the Looks route
+    serves; the bundled tiles are the cut and the two FCP effects only."""
+    from splitsmith import composition
+
     mod = _load()
     calls: list[list[str]] = []
 
@@ -152,26 +153,30 @@ def test_the_xfade_tiles_loop_as_animated_webp(tmp_path: Path) -> None:
         calls.append([str(c) for c in cmd])
         return _fake_ffmpeg(cmd, **kwargs)
 
-    mod.build_thumbnails(
-        tmp_path,
-        rasterizer=_StubRasterizer(),
-        look=load_look("splitsmith"),
-        ffmpeg="/bin/ff",
-        runner=recording,
-    )
-    webps = sorted(p.name for p in tmp_path.glob("transition-*.webp"))
-    assert webps == sorted(f"transition-{kind}.webp" for kind in mod.XFADE_LOOP_KINDS)
-    assert {p.name for p in tmp_path.glob("transition-*.png")} == {
+    written = mod.build_transition_previews(tmp_path, ffmpeg="/bin/ff", runner=recording)
+    out = tmp_path / "_transitions" / "preview"
+    assert sorted(p.name for p in written) == sorted(f"{f.id}.webp" for f in composition.XFADE_FAMILIES)
+    assert all(p.parent == out for p in written)
+    with Image.open(out / "wind.webp") as loop:
+        assert loop.format == "WEBP" and loop.n_frames == 18 and loop.size == (mod.WIDTH, mod.HEIGHT)
+        assert loop.info.get("loop") == 0
+    wind = next(c for c in calls if "xfade=transition=hlwind:" in " ".join(c))
+    assert wind[0] == "/bin/ff" and wind[wind.index("-frames:v") + 1] == "18"
+    assert [n for n in mod.THUMBNAILS if n.startswith("transition-")] == [
         "transition-cut.png",
         "transition-static.png",
         "transition-zoom.png",
-    }
-    with Image.open(tmp_path / "transition-fade.webp") as loop:
-        assert loop.format == "WEBP" and loop.n_frames == 18 and loop.size == (mod.WIDTH, mod.HEIGHT)
-        assert loop.info.get("loop") == 0
-    fade = next(c for c in calls if "xfade=transition=fade:" in " ".join(c))
-    assert fade[0] == "/bin/ff" and "-loop" in fade and fade[fade.index("-frames:v") + 1] == "18"
-    assert "fps=12" in " ".join(fade)
+    ]
+
+
+def test_the_shipped_transition_previews_cover_every_family() -> None:
+    from splitsmith import composition
+    from splitsmith.looks import shipped_looks_dir
+
+    out = shipped_looks_dir() / "_transitions" / "preview"
+    assert sorted(p.name for p in out.glob("*.webp")) == sorted(
+        f"{f.id}.webp" for f in composition.XFADE_FAMILIES
+    )
 
 
 def test_look_previews_write_one_file_per_variant_and_the_sample_tile(tmp_path: Path) -> None:

@@ -7,7 +7,7 @@
  * Look lacks is sent as ``default`` rather than a name the server would
  * warn about. ``useLooks`` fetches the catalog; everything here is data.
  */
-import { scopeRequestPath, type LookInfo, type LookVariantInfo } from "@/lib/api";
+import { scopeRequestPath, type LookInfo, type LookVariantInfo, type TransitionFamilyInfo } from "@/lib/api";
 
 export const DEFAULT_LOOK = "splitsmith";
 export const DEFAULT_VARIANT = "default";
@@ -92,10 +92,44 @@ export function resolveLookChoice(looks: LookInfo[], settings: LookChoice): Look
 /** The catalog as a surface sees it (``useLooks``). */
 export interface LooksState {
   looks: LookInfo[];
+  /** The ffmpeg xfade families the server offers (#1259); empty until it answers. */
+  transitions: TransitionFamilyInfo[];
   /** The fetch has answered, one way or the other. */
   loaded: boolean;
   /** It answered with an error: ``looks`` is the built-in catalog. */
   failed: boolean;
+}
+
+/** The family and direction an xfade kind belongs to, or null. */
+export function transitionFamily(
+  kind: string,
+  transitions: readonly TransitionFamilyInfo[],
+): { family: TransitionFamilyInfo; direction: { name: string; kind: string } } | null {
+  for (const family of transitions) {
+    const direction = family.directions.find((d) => d.kind === kind);
+    if (direction) return { family, direction };
+  }
+  return null;
+}
+
+/** What a sting is called on its tile and the rail: "<Name> sting", so it
+ *  never shares a name with an xfade family (the shipped ``wipe`` sting
+ *  beside the Wipe family, #1259). */
+export function stingLabel(name: string): string {
+  return `${name.charAt(0).toUpperCase()}${name.slice(1).replace(/[-_]/g, " ")} sting`;
+}
+
+const FCP_LABELS: Record<string, string> = { zoom: "Zoom blur", static: "Static frame", none: "Hard cut" };
+
+/** What the page calls a stored kind: the family label and, when the
+ *  family has more than one, its direction ("Wind up"); a sting by its
+ *  name; an unknown kind as itself. */
+export function transitionLabel(kind: string, transitions: readonly TransitionFamilyInfo[]): string {
+  if (FCP_LABELS[kind]) return FCP_LABELS[kind];
+  if (kind.startsWith("sting:")) return stingLabel(kind.slice("sting:".length));
+  const hit = transitionFamily(kind, transitions);
+  if (!hit) return kind;
+  return hit.family.directions.length > 1 ? `${hit.family.label} ${hit.direction.name}` : hit.family.label;
 }
 
 /** What a request sends for the settings' Look under the catalog's state:
@@ -103,19 +137,26 @@ export interface LooksState {
  *  the catalog could not be fetched (the server validates them and says
  *  what is installed) or has not answered yet (the page gates Export on
  *  ``loaded``), so a chosen Look is never silently swapped for the
- *  default (review of #1246). ``stings`` are the kinds the transition
- *  filter admits: the chosen Look's, or the stored sting itself. */
+ *  default (review of #1246). ``kinds`` are the transitions the kind
+ *  filter admits: the server's xfade kinds and the chosen Look's stings, or
+ *  the stored kind itself when the catalog is not there (#1259). */
 export function requestLook(
   state: LooksState,
   settings: LookChoice & { transitionKind: string },
-): { choice: LookChoice; stings: string[] } {
+): { choice: LookChoice; kinds: string[] } {
   if (state.loaded && !state.failed) {
     const choice = resolveLookChoice(state.looks, settings);
-    return { choice, stings: stingsFor(state.looks, choice.look).map((s) => s.id) };
+    return {
+      choice,
+      kinds: [
+        ...state.transitions.flatMap((f) => f.directions.map((d) => d.kind)),
+        ...stingsFor(state.looks, choice.look).map((s) => s.id),
+      ],
+    };
   }
   return {
     choice: lookChoiceOf(settings),
-    stings: settings.transitionKind.startsWith("sting:") ? [settings.transitionKind] : [],
+    kinds: settings.transitionKind === "none" ? [] : [settings.transitionKind],
   };
 }
 

@@ -449,7 +449,7 @@ describe("Export presets", () => {
     cleanup();
     await renderPage();
     // The Look summary and the rail both name it; the point is the page rendered.
-    expect(screen.getAllByText("zoom 0.5 s").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Zoom blur 0.5 s").length).toBeGreaterThan(0);
   });
 
   it("the rail previews the selected tile on the first selected stage", async () => {

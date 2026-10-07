@@ -13,10 +13,10 @@
  * table, and ``renderOptions.test.ts`` pins that the mappers never emit
  * a field the registry hides.
  */
-import type { LookInfo } from "@/lib/api";
+import type { LookInfo, TransitionFamilyInfo } from "@/lib/api";
 import type { ExportMode } from "@/lib/exportPlan";
 import type { ExportSettings } from "@/lib/exportPresets";
-import { stingsFor, visibleLook, type LookChoice, type LookSlotName } from "@/lib/looks";
+import { stingLabel, stingsFor, transitionFamily, visibleLook, type LookChoice, type LookSlotName } from "@/lib/looks";
 import {
   cardsSupported,
   MIN_CARD_SECONDS,
@@ -45,6 +45,8 @@ export interface LookVariant {
   thumbnail: string;
   /** A catalog preview (``/api/looks/...``, #1246) for a variant the Look draws. */
   previewUrl?: string | null;
+  /** A transition family's directions (#1259); more than one shows a Direction control. */
+  directions?: { name: string; kind: string }[];
   /** One line under the row while this variant is selected; a function
    *  when the wording differs by mode (the grid's overlay has a hold and
    *  no codec). */
@@ -71,21 +73,6 @@ const STAGE_CARD_FORMATS: OutputFormat[] = ALL_FORMATS.filter(stageCardsSupporte
 const MATCH_CARD_FORMATS: OutputFormat[] = ALL_FORMATS.filter(cardsSupported);
 const TRANSITION_FORMATS: OutputFormat[] = ALL_FORMATS.filter((f) => transitionsSupported(f, "single"));
 
-/** The ffmpeg xfade kinds the MP4 renderer draws (#1244), in the order
- *  ``composition.XFADE_KINDS`` lists them; the FCPXML has no effect for
- *  them, so they are MP4-only tiles. */
-const XFADE_VARIANTS: { id: string; name: string; thumbnail: string; help: string }[] = [
-  { id: "fade", name: "Fade", thumbnail: "transition-fade.webp", help: "Fades the stage into the next." },
-  { id: "fadeblack", name: "Fade through black", thumbnail: "transition-fadeblack.webp", help: "Fades to black, then into the next stage." },
-  { id: "dissolve", name: "Dissolve", thumbnail: "transition-dissolve.webp", help: "A grainy dissolve into the next stage." },
-  { id: "slideleft", name: "Slide left", thumbnail: "transition-slideleft.webp", help: "The next stage slides in from the right." },
-  { id: "slideright", name: "Slide right", thumbnail: "transition-slideright.webp", help: "The next stage slides in from the left." },
-  { id: "circleopen", name: "Circle open", thumbnail: "transition-circleopen.webp", help: "The next stage opens from the centre." },
-  { id: "zoomin", name: "Zoom in", thumbnail: "transition-zoomin.webp", help: "Zooms into the stage and out into the next." },
-  { id: "hblur", name: "Horizontal blur", thumbnail: "transition-hblur.webp", help: "Blurs sideways out of the stage and into the next." },
-  { id: "smoothleft", name: "Smooth left", thumbnail: "transition-smoothleft.webp", help: "A soft wipe to the left." },
-  { id: "wipeleft", name: "Wipe left", thumbnail: "transition-wipeleft.webp", help: "A hard wipe to the left." },
-];
 
 
 /** What the hold turns on at: the YouTube built-in's value. */
@@ -284,12 +271,6 @@ export const LOOK_SLOTS: readonly LookSlot[] = [
         modes: ["single"],
         formats: ["fcpxml"],
       },
-      ...XFADE_VARIANTS.map((v) => ({
-        ...v,
-        params: [transitionSeconds],
-        modes: ["single", "compare"] as ExportMode[],
-        formats: ["mp4"] as OutputFormat[],
-      })),
     ],
     read: (s) => (s.transitionKind === "none" ? "cut" : s.transitionKind),
     write: (_s, id) => ({ transitionKind: id === "cut" ? "none" : (id as ExportSettings["transitionKind"]) }),
@@ -314,14 +295,17 @@ export function visibleTransitionKind(
   kind: ExportSettings["transitionKind"],
   format: OutputFormat,
   mode: "single" | "compare" = "single",
-  /** The stings the chosen Look offers (``sting:<name>`` ids, #1246). */
-  stings: readonly string[] = [],
+  /** The MP4 kinds the catalog offers: the server's xfade kinds and the
+   *  chosen Look's stings (``requestLook``, #1246, #1259). */
+  admitted: readonly string[] = [],
 ): ExportSettings["transitionKind"] {
   if (kind === "none") return "none";
-  if (kind.startsWith("sting:")) return format === "mp4" && stings.includes(kind) ? kind : "none";
   const transition = LOOK_SLOTS.find((s) => s.id === "transition");
-  if (!transition) return "none";
-  return visibleVariants(transition, mode, format).some((v) => v.id === kind) ? kind : "none";
+  if (transition?.variants.some((v) => v.id === kind)) {
+    // The FCP effects: drawn only where the static table says.
+    return visibleVariants(transition, mode, format).some((v) => v.id === kind) ? kind : "none";
+  }
+  return format === "mp4" && admitted.includes(kind) ? kind : "none";
 }
 
 /** A slot shows when at least one variant beyond the default can be drawn. */
@@ -340,8 +324,6 @@ export const VARIANT_FIELD: Partial<Record<LookSlotId, { field: keyof LookChoice
   stageCard: { field: "stageCardVariant", slot: "stage_card" },
   closingCard: { field: "closingCardVariant", slot: "closing" },
 };
-
-const capitalise = (name: string) => name.charAt(0).toUpperCase() + name.slice(1).replace(/[-_]/g, " ");
 
 /** The Look tiles: one per installed Look, first in the group (#1246). */
 function lookSlot(looks: LookInfo[]): LookSlot {
@@ -366,16 +348,39 @@ function lookSlot(looks: LookInfo[]): LookSlot {
   };
 }
 
+/** The transition tile a stored kind selects: its family (#1259), else
+ *  the kind itself (a sting, an FCP effect), ``cut`` for none. */
+function transitionTileId(kind: string, transitions: readonly TransitionFamilyInfo[]): string {
+  if (kind === "none") return "cut";
+  return transitionFamily(kind, transitions)?.family.id ?? kind;
+}
+
 /** The gallery's slots for the installed catalog and the chosen Look
  *  (#1246): the static table, the Look tiles first when more than one
- *  Look is installed, and the chosen Look's stings among the transitions
- *  (MP4, both modes) with their catalog previews. With the built-in
- *  catalog alone this is ``LOOK_SLOTS`` unchanged. */
-export function slotsForLook(looks: LookInfo[], settings: Pick<ExportSettings, "look">): LookSlot[] {
+ *  Look is installed, and among the transitions the server's xfade
+ *  families (#1259) and the chosen Look's stings (MP4, both modes) with
+ *  their catalog previews. With the built-in catalog alone this is
+ *  ``LOOK_SLOTS`` unchanged. */
+export function slotsForLook(
+  looks: LookInfo[],
+  settings: Pick<ExportSettings, "look">,
+  transitions: readonly TransitionFamilyInfo[] = [],
+): LookSlot[] {
   const look = visibleLook(looks, settings.look);
+  const families: LookVariant[] = transitions.map((f) => ({
+    id: f.id,
+    name: f.label,
+    thumbnail: "none.png",
+    previewUrl: f.preview,
+    help: f.help,
+    params: [transitionSeconds],
+    modes: ["single", "compare"],
+    formats: ["mp4"],
+    directions: f.directions,
+  }));
   const stings: LookVariant[] = stingsFor(looks, look).map((s) => ({
     id: s.id,
-    name: capitalise(s.name),
+    name: stingLabel(s.name),
     thumbnail: "none.png",
     previewUrl: s.preview,
     help: "A band from the Look sweeps across the cut over a fade.",
@@ -383,9 +388,21 @@ export function slotsForLook(looks: LookInfo[], settings: Pick<ExportSettings, "
     modes: ["single", "compare"],
     formats: ["mp4"],
   }));
-  const slots = LOOK_SLOTS.map((slot) =>
-    slot.id === "transition" && stings.length > 0 ? { ...slot, variants: [...slot.variants, ...stings] } : slot,
-  );
+  const slots = LOOK_SLOTS.map((slot): LookSlot => {
+    if (slot.id !== "transition" || families.length + stings.length === 0) return slot;
+    return {
+      ...slot,
+      variants: [...slot.variants, ...families, ...stings],
+      read: (s) => transitionTileId(s.transitionKind, transitions),
+      write: (s, id) => {
+        const family = transitions.find((f) => f.id === id);
+        if (!family) return slot.write(s, id);
+        // Keep the direction when the tile is already this family's.
+        const keep = family.directions.some((d) => d.kind === s.transitionKind);
+        return { transitionKind: keep ? s.transitionKind : family.directions[0].kind };
+      },
+    };
+  });
   return looks.length > 1 ? [lookSlot(looks), ...slots] : slots;
 }
 

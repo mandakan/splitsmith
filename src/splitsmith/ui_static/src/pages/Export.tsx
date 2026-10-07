@@ -86,7 +86,7 @@ import {
   type FixTarget,
 } from "@/lib/exportPlan";
 import { useDeploymentMode } from "@/lib/features";
-import { requestLook } from "@/lib/looks";
+import { requestLook, transitionLabel } from "@/lib/looks";
 import { useLooks } from "@/lib/useLooks";
 import { useMatchHref } from "@/lib/matchHref";
 import { useDesktopCommands } from "@/lib/useDesktopCommands";
@@ -231,7 +231,7 @@ function ExportInner({ slug }: { slug: string }) {
     () => (onDesktop ? { ...settings, mode: "single", outputFormat: "mp4", youtube: true } : settings),
     [onDesktop, settings],
   );
-  // The Look the requests carry and the stings the transition filter admits
+  // The Look the requests carry and the transition kinds the filter admits
   // (#1246): resolved against the catalog once it answers; Export waits for it.
   const lookRequest = requestLook(looksState, view);
   const {
@@ -533,7 +533,7 @@ function ExportInner({ slug }: { slug: string }) {
     mode,
     head: mode === "single" ? headPad : (project?.trim_pre_buffer_seconds ?? 0),
     tail: mode === "single" ? tailPad : (project?.trim_post_buffer_seconds ?? 0),
-    transitionKind: visibleTransitionKind(transitionKind, outputFormat, "single", lookRequest.stings),
+    transitionKind: visibleTransitionKind(transitionKind, outputFormat, "single", lookRequest.kinds),
     transitionSeconds,
     format: outputFormat,
     cardSeconds,
@@ -665,7 +665,7 @@ function ExportInner({ slug }: { slug: string }) {
         projectName: projectName || project.name,
         uploadTarget: "desktop",
         look: lookRequest.choice,
-        stings: lookRequest.stings,
+        kinds: lookRequest.kinds,
         youtubeConnected: false,
       }),
     );
@@ -696,7 +696,7 @@ function ExportInner({ slug }: { slug: string }) {
           projectName: projectName || project.name,
           uploadTarget: "desk",
           look: lookRequest.choice,
-          stings: lookRequest.stings,
+          kinds: lookRequest.kinds,
           youtubeConnected: !!youtubeSettings?.connected,
         }),
       );
@@ -730,7 +730,7 @@ function ExportInner({ slug }: { slug: string }) {
         cams: camOptions,
         freeCell: gridFreeCells(shooters.length) > 0 ? gridFreeCell : "blank",
         look: lookRequest.choice,
-        stings: lookRequest.stings,
+        kinds: lookRequest.kinds,
         youtube,
         descriptionLead,
         uploadOptions,
@@ -793,7 +793,8 @@ function ExportInner({ slug }: { slug: string }) {
     eligible: eligibleNumbers.length,
     head: headPad,
     tail: tailPad,
-    transitionKind: visibleTransitionKind(transitionKind, outputFormat, "single", lookRequest.stings),
+    transitionKind: visibleTransitionKind(transitionKind, outputFormat, "single", lookRequest.kinds),
+    transitionLabel: transitionLabel(transitionKind, looksState.transitions),
     transitionSeconds,
     cards: describeRenderOptions(renderOptions, compare ? "grid" : "single", compare ? "mp4" : outputFormat),
     overlay: compare ? gridOverlay : includeOverlay,
@@ -807,7 +808,11 @@ function ExportInner({ slug }: { slug: string }) {
     canvas: canvas.label,
     bare: bareSelected,
   });
-  const summaryCtx = { secondaryCount, stings: lookRequest.stings };
+  const summaryCtx = {
+    secondaryCount,
+    kinds: lookRequest.kinds,
+    transitionLabel: (kind: string) => transitionLabel(kind, looksState.transitions),
+  };
   const primaryLabel = onDesktop
     ? "Render on desktop"
     : trimsOnly

@@ -21,10 +21,11 @@ export interface LookGroupProps {
 
 export function LookGroup({ settings, patch, busy, bareSelected, onHover, onSelect }: LookGroupProps) {
   const compare = settings.mode === "compare";
-  const { looks } = useLooks();
+  const { looks, transitions } = useLooks();
   return (
     <LookGallery
       looks={looks}
+      transitions={transitions}
       settings={settings}
       patch={patch}
       busy={busy}

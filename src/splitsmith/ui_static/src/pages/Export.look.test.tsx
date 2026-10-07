@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConfirmProvider } from "@/components/useConfirm";
 import { api, type ExportOverview, type Job, type LookInfo, type MatchProject, type ShooterListEntry, type StageExportStatus } from "@/lib/api";
 import { resetLooksForTests } from "@/lib/useLooks";
+import { FAMILIES } from "@/test/transitionFamilies";
 import { Export } from "@/pages/Export";
 
 vi.mock("@/lib/api", async (importOriginal) => {
@@ -252,7 +253,7 @@ const LOOKS: LookInfo[] = [
 
 beforeEach(() => {
   resetLooksForTests();
-  vi.mocked(api.listLooks).mockResolvedValue({ looks: LOOKS });
+  vi.mocked(api.listLooks).mockResolvedValue({ looks: LOOKS, transitions: FAMILIES });
   vi.mocked(api.exportPreview).mockResolvedValue(new Blob([new Uint8Array([137, 80, 78, 71])], { type: "image/png" }));
   vi.mocked(api.getProject).mockResolvedValue(PROJECT);
   vi.mocked(api.getExportOverview).mockResolvedValue(OVERVIEW);
@@ -282,9 +283,9 @@ describe("Export's Look group from the catalog", () => {
     ]);
     await user.click(tile("Title page", "Title page"));
     await user.click(choice("Title page style", "Rise"));
-    await user.click(tile("Transition", "Wipe"));
+    await user.click(tile("Transition", "Wipe sting"));
     // The rail names the sting, not a cut (review of #1246).
-    expect(screen.getByText(/sting:wipe 0\.5 s/)).toBeInTheDocument();
+    expect(screen.getByText(/Wipe sting 0\.5 s/)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /export bundle/i }));
     await waitFor(() => expect(api.exportMatch).toHaveBeenCalledTimes(1));
@@ -299,10 +300,10 @@ describe("Export's Look group from the catalog", () => {
     await waitFor(() => expect(screen.getByRole("radiogroup", { name: "Look" })).toBeInTheDocument());
     await user.click(tile("Title page", "Title page"));
     await user.click(choice("Title page style", "Rise"));
-    await user.click(tile("Transition", "Wipe"));
+    await user.click(tile("Transition", "Wipe sting"));
     await user.click(tile("Look", "Clean"));
     expect(screen.queryByRole("group", { name: "Title page style" })).toBeNull();
-    expect(within(screen.getByRole("radiogroup", { name: "Transition" })).queryByRole("radio", { name: "Wipe" })).toBeNull();
+    expect(within(screen.getByRole("radiogroup", { name: "Transition" })).queryByRole("radio", { name: "Wipe sting" })).toBeNull();
 
     await waitFor(() => {
       const bodies = vi.mocked(api.exportPreview).mock.calls.map((c) => c[1]);
@@ -314,5 +315,17 @@ describe("Export's Look group from the catalog", () => {
     expect(body.overlay_theme).toBe("clean");
     expect("title_page_variant" in body).toBe(false);
     expect(body.transition_kind).toBe("none");
+  });
+
+  it("a transition family and its direction reach the rail and the request (#1259)", async () => {
+    const { user } = await renderPage();
+    await user.selectOptions(screen.getByLabelText("Timeline format"), "mp4");
+    await waitFor(() => expect(screen.getByRole("radiogroup", { name: "Transition" })).toBeInTheDocument());
+    await user.click(tile("Transition", "Wind"));
+    await user.click(choice("Transition direction", "Up"));
+    expect(screen.getByText(/Wind up 0\.5 s/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /export bundle/i }));
+    await waitFor(() => expect(api.exportMatch).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(api.exportMatch).mock.calls[0][1].transition_kind).toBe("vuwind");
   });
 });

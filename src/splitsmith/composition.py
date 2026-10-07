@@ -179,20 +179,118 @@ class Stage:
     summary: SummaryHold | None = None
 
 
+@dataclass(frozen=True)
+class XfadeDirection:
+    """One direction of a transition family: its label and the ffmpeg
+    ``xfade`` name it renders as."""
+
+    name: str
+    kind: str
+
+
+@dataclass(frozen=True)
+class XfadeFamily:
+    """A gallery tile (issue #1259): one look, in one or more directions.
+    ``directions[0]`` is what picking the tile selects and what its
+    preview shows."""
+
+    id: str
+    label: str
+    help: str
+    directions: tuple[XfadeDirection, ...]
+
+
+def _four(prefix: str, *, suffix: str = "") -> tuple[XfadeDirection, ...]:
+    return tuple(XfadeDirection(d, f"{prefix}{d}{suffix}") for d in ("left", "right", "up", "down"))
+
+
 #: The curated ffmpeg ``xfade`` transitions the MP4 renderers offer
-#: (issue #1244), in gallery order.
-XFADE_KINDS: tuple[str, ...] = (
-    "fade",
-    "fadeblack",
-    "dissolve",
-    "slideleft",
-    "slideright",
-    "circleopen",
-    "zoomin",
-    "hblur",
-    "smoothleft",
-    "wipeleft",
+#: (issues #1244, #1259), in gallery order: the one list. ``XFADE_KINDS``,
+#: the request validation, both CLIs' help and ``GET /api/looks`` derive
+#: from it; every name exists in FFmpeg 6.1 and later (CI's, the hosted
+#: image's and the desktop's builds), pinned by a real-ffmpeg test.
+XFADE_FAMILIES: tuple[XfadeFamily, ...] = (
+    XfadeFamily("fade", "Fade", "Fades the stage into the next.", (XfadeDirection("default", "fade"),)),
+    XfadeFamily(
+        "fadeblack",
+        "Fade through black",
+        "Fades to black, then into the next stage.",
+        (XfadeDirection("default", "fadeblack"),),
+    ),
+    XfadeFamily(
+        "fadewhite",
+        "Flash",
+        "A white flash between the stages.",
+        (XfadeDirection("default", "fadewhite"),),
+    ),
+    XfadeFamily(
+        "dissolve",
+        "Dissolve",
+        "A grainy dissolve into the next stage.",
+        (XfadeDirection("default", "dissolve"),),
+    ),
+    XfadeFamily("slide", "Slide", "The next stage slides in, pushing this one out.", _four("slide")),
+    XfadeFamily("smooth", "Smooth", "A soft-edged wipe.", _four("smooth")),
+    XfadeFamily("wipe", "Wipe", "A hard-edged wipe.", _four("wipe")),
+    XfadeFamily("cover", "Cover", "The next stage slides in over this one.", _four("cover")),
+    XfadeFamily("reveal", "Reveal", "This stage slides away, revealing the next.", _four("reveal")),
+    XfadeFamily(
+        "wind",
+        "Wind",
+        "This stage blows away in streaks.",
+        (
+            XfadeDirection("left", "hlwind"),
+            XfadeDirection("right", "hrwind"),
+            XfadeDirection("up", "vuwind"),
+            XfadeDirection("down", "vdwind"),
+        ),
+    ),
+    XfadeFamily(
+        "circle",
+        "Circle",
+        "A circle opens onto the next stage, or closes on this one.",
+        (XfadeDirection("open", "circleopen"), XfadeDirection("close", "circleclose")),
+    ),
+    XfadeFamily(
+        "radial", "Radial", "A clock hand sweeps the next stage in.", (XfadeDirection("default", "radial"),)
+    ),
+    XfadeFamily(
+        "zoomin",
+        "Zoom in",
+        "Zooms into the stage and out into the next.",
+        (XfadeDirection("default", "zoomin"),),
+    ),
+    XfadeFamily(
+        "hblur",
+        "Horizontal blur",
+        "Blurs sideways out of the stage and into the next.",
+        (XfadeDirection("default", "hblur"),),
+    ),
+    XfadeFamily(
+        "pixelize",
+        "Pixelize",
+        "Breaks into blocks and re-forms as the next stage.",
+        (XfadeDirection("default", "pixelize"),),
+    ),
+    XfadeFamily(
+        "squeeze",
+        "Squeeze",
+        "This stage squeezes to a line, the next stretches out of it.",
+        (XfadeDirection("horizontal", "squeezeh"), XfadeDirection("vertical", "squeezev")),
+    ),
 )
+XFADE_KINDS: tuple[str, ...] = tuple(d.kind for f in XFADE_FAMILIES for d in f.directions)
+
+
+def xfade_family(kind: str) -> tuple[XfadeFamily, XfadeDirection] | None:
+    """The family and direction an xfade ``kind`` belongs to, or ``None``."""
+    for family in XFADE_FAMILIES:
+        for direction in family.directions:
+            if direction.kind == kind:
+                return family, direction
+    return None
+
+
 #: The two kinds the FCPXML emitter draws natively (FCP's .motr effects).
 FCP_KINDS: tuple[str, ...] = ("zoom", "static")
 #: A transition kind (issue #1245): an xfade name (``XFADE_KINDS``), an FCP
@@ -793,6 +891,10 @@ __all__ = [
     "Transform",
     "Transition",
     "STING_PREFIX",
+    "XFADE_FAMILIES",
+    "XFADE_KINDS",
+    "XfadeDirection",
+    "XfadeFamily",
     "TransitionKind",
     "from_stage_compositions",
     "is_sting",
@@ -800,4 +902,5 @@ __all__ = [
     "sting_name",
     "to_stage_compositions",
     "validate_transition_kind",
+    "xfade_family",
 ]

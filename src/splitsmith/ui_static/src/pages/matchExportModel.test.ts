@@ -286,7 +286,9 @@ describe("summarizeGridResult", () => {
 describe("buildCompareGridPayload transitions (#1244)", () => {
   const base = { stageNumbers: [1, 2], audioFrom: "me", canvas: { width: 1920, height: 1080 } as never, outputName: "g" };
   it("sends the kind and its seconds when one is chosen, nothing otherwise", () => {
-    const faded = buildCompareGridPayload({ ...base, transitionKind: "fade", transitionSeconds: 1 });
+    const faded = buildCompareGridPayload({ ...base, transitionKind: "fade", transitionSeconds: 1, kinds: ["fade"] });
+    // A kind the catalog does not offer is not sent (#1259).
+    expect("transition_kind" in buildCompareGridPayload({ ...base, transitionKind: "fade", transitionSeconds: 1 })).toBe(false);
     expect(faded.transition_kind).toBe("fade");
     expect(faded.transition_duration_seconds).toBe(1);
     const cut = buildCompareGridPayload(base);

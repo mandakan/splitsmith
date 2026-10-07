@@ -159,6 +159,8 @@ export function summaryLines(args: {
   head: number;
   tail: number;
   transitionKind: string;
+  /** What the rail calls the transition ("Wind up"); unset, the kind itself (#1259). */
+  transitionLabel?: string;
   transitionSeconds: number;
   /** ``describeRenderOptions`` for the mode and format; null is off. */
   cards: string | null;
@@ -195,7 +197,10 @@ export function summaryLines(args: {
   lines.push(
     args.transitionKind === "none"
       ? { label: "Transitions", value: "cut", dim: true }
-      : { label: "Transitions", value: `${args.transitionKind} ${args.transitionSeconds.toFixed(1)} s` },
+      : {
+          label: "Transitions",
+          value: `${args.transitionLabel ?? args.transitionKind} ${args.transitionSeconds.toFixed(1)} s`,
+        },
   );
   lines.push(cards);
   lines.push(args.overlay ? { label: "Overlay", value: "on" } : { label: "Overlay", value: "off", dim: true });

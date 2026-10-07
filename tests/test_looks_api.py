@@ -60,3 +60,20 @@ def test_everything_else_is_404(client, path: str) -> None:
 def test_the_looks_routes_are_registered_once(client) -> None:
     paths = [r.path for r in client.app.routes if getattr(r, "path", "").startswith("/api/looks")]
     assert sorted(paths) == ["/api/looks", "/api/looks/{name}/preview/{file}"]
+
+
+def test_get_looks_lists_the_transition_families(client) -> None:
+    """Issue #1259: the families come from the one list, each with its
+    directions (the first is what the tile selects) and a looping preview
+    the preview route serves."""
+    from splitsmith import composition
+
+    transitions = client.get("/api/looks").json()["transitions"]
+    assert [t["id"] for t in transitions] == [f.id for f in composition.XFADE_FAMILIES]
+    wind = next(t for t in transitions if t["id"] == "wind")
+    assert wind["label"] == "Wind"
+    assert [d["kind"] for d in wind["directions"]] == ["hlwind", "hrwind", "vuwind", "vdwind"]
+    for family in transitions:
+        assert family["preview"] == f"/api/looks/_transitions/preview/{family['id']}.webp", family["id"]
+        served = client.get(family["preview"])
+        assert served.status_code == 200 and served.headers["content-type"] == "image/webp", family["id"]

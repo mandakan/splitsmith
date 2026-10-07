@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import type { LookInfo } from "@/lib/api";
 import { DEFAULT_EXPORT_SETTINGS } from "@/lib/exportPresets";
+import { FAMILIES, FAMILY_KINDS } from "@/test/transitionFamilies";
 import {
   BUILTIN_LOOKS,
   DEFAULT_LOOK,
@@ -12,6 +13,9 @@ import {
   requestLook,
   resolveLookChoice,
   stingsFor,
+  transitionFamily,
+  stingLabel,
+  transitionLabel,
   variantsFor,
   visibleLook,
   visibleVariant,
@@ -123,24 +127,43 @@ describe("requestLook", () => {
     titlePageVariant: "rise",
     stageCardVariant: "nope",
     closingCardVariant: "default",
-    transitionKind: "sting:wipe" as const,
+    transitionKind: "sting:wipe",
   };
+  const loaded = { looks: CATALOG, transitions: FAMILIES, loaded: true, failed: false };
 
-  it("resolves against a loaded catalog and lists the chosen Look's stings", () => {
-    const { choice, stings } = requestLook({ looks: CATALOG, loaded: true, failed: false }, { ...settings, look: "splitsmith" });
+  it("resolves against a loaded catalog and admits the server's kinds and the chosen Look's stings", () => {
+    const { choice, kinds } = requestLook(loaded, { ...settings, look: "splitsmith" });
     expect(choice).toEqual({ look: "splitsmith", titlePageVariant: "rise", stageCardVariant: "default", closingCardVariant: "default" });
-    expect(stings).toEqual(["sting:wipe"]);
-    expect(requestLook({ looks: CATALOG, loaded: true, failed: false }, settings).stings).toEqual([]);
+    expect(kinds).toEqual([...FAMILY_KINDS, "sting:wipe"]);
+    expect(requestLook(loaded, settings).kinds).toEqual(FAMILY_KINDS);
   });
 
   it("sends the stored names unresolved when the catalog could not be fetched, so the server decides", () => {
-    const { choice, stings } = requestLook({ looks: BUILTIN_LOOKS, loaded: true, failed: true }, settings);
+    const failed = { looks: BUILTIN_LOOKS, transitions: [], loaded: true, failed: true };
+    const { choice, kinds } = requestLook(failed, settings);
     expect(choice).toEqual({ look: "club", titlePageVariant: "rise", stageCardVariant: "nope", closingCardVariant: "default" });
-    expect(stings).toEqual(["sting:wipe"]);
-    expect(requestLook({ looks: BUILTIN_LOOKS, loaded: true, failed: true }, { ...settings, transitionKind: "fade" }).stings).toEqual([]);
+    expect(kinds).toEqual(["sting:wipe"]);
+    expect(requestLook(failed, { ...settings, transitionKind: "vuwind" }).kinds).toEqual(["vuwind"]);
+    expect(requestLook(failed, { ...settings, transitionKind: "none" }).kinds).toEqual([]);
   });
 
   it("keeps the stored names before the catalog answers too (the page gates Export on loaded)", () => {
-    expect(requestLook({ looks: BUILTIN_LOOKS, loaded: false, failed: false }, settings).choice.look).toBe("club");
+    const pending = { looks: BUILTIN_LOOKS, transitions: [], loaded: false, failed: false };
+    expect(requestLook(pending, settings).choice.look).toBe("club");
+  });
+});
+
+describe("transitionLabel / transitionFamily (#1259)", () => {
+  it("names a kind by its family and direction, a sting by its name, the FCP effects and the cut", () => {
+    expect(transitionLabel("vuwind", FAMILIES)).toBe("Wind up");
+    expect(transitionLabel("slideleft", FAMILIES)).toBe("Slide left");
+    expect(transitionLabel("fade", FAMILIES)).toBe("Fade");
+    expect(transitionLabel("sting:wipe", FAMILIES)).toBe("Wipe sting");
+    expect(stingLabel("logo-wipe")).toBe("Logo wipe sting");
+    expect(transitionLabel("zoom", FAMILIES)).toBe("Zoom blur");
+    expect(transitionLabel("none", FAMILIES)).toBe("Hard cut");
+    expect(transitionLabel("radial", [])).toBe("radial");
+    expect(transitionFamily("circleclose", FAMILIES)?.family.id).toBe("circle");
+    expect(transitionFamily("zoom", FAMILIES)).toBeNull();
   });
 });

@@ -32,10 +32,12 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from splitsmith import composition  # noqa: E402
+from splitsmith.composition import XFADE_FAMILIES  # noqa: E402
 from splitsmith.look_sting import sting_context  # noqa: E402
 from splitsmith.looks import (  # noqa: E402
     CARD_PREVIEW_SLOTS,
     PREVIEW_DIR,
+    TRANSITIONS_OWNER,
     Look,
     list_looks,
     load_look,
@@ -67,20 +69,6 @@ THUMBNAILS: tuple[str, ...] = (
     "transition-cut.png",
     "transition-static.png",
     "transition-zoom.png",
-    "transition-fade.webp",
-    "transition-fadeblack.webp",
-    "transition-dissolve.webp",
-    "transition-slideleft.webp",
-    "transition-slideright.webp",
-    "transition-circleopen.webp",
-    "transition-zoomin.webp",
-    "transition-hblur.webp",
-    "transition-smoothleft.webp",
-    "transition-wipeleft.webp",
-)
-#: The xfade kinds whose tile is a looping clip of the real transition.
-XFADE_LOOP_KINDS: tuple[str, ...] = tuple(
-    name[len("transition-") : -len(".webp")] for name in THUMBNAILS if name.endswith(".webp")
 )
 #: The loop: a quarter second of each side held around a one second fade.
 LOOP_FPS = 12
@@ -442,14 +430,28 @@ def build_thumbnails(
         )
         save("summary-hold.png", summary)
         save("overlay.png", _overlay(plain, rasterizer=rasterizer, theme=theme))
-        right = ImageChops.offset(plain, 150, 0)
         for kind in TRANSITION_KINDS:
-            if kind in XFADE_LOOP_KINDS:
-                path = out / f"transition-{kind}.webp"
-                save_loop(path, xfade_loop(kind, plain, right, ffmpeg=ffmpeg, runner=runner))
-                written.append(path)
-            else:
-                save(f"transition-{kind}.png", _transition(kind, plain, rasterizer=rasterizer, look=look))
+            save(f"transition-{kind}.png", _transition(kind, plain, rasterizer=rasterizer, look=look))
+    return written
+
+
+def build_transition_previews(
+    out_root: Path, *, ffmpeg: str | None = None, runner: Runner = subprocess.run
+) -> list[Path]:
+    """One looping preview per xfade family (issue #1259), its first
+    direction through the project ffmpeg, under
+    ``out_root / _transitions / preview / <family>.webp``; ``GET /api/looks``
+    names them and the Looks preview route serves them."""
+    ffmpeg = ffmpeg or _ffmpeg_default()
+    out = out_root / TRANSITIONS_OWNER / PREVIEW_DIR
+    out.mkdir(parents=True, exist_ok=True)
+    plain = paint_backdrop()
+    right = ImageChops.offset(plain, 150, 0)
+    written: list[Path] = []
+    for family in XFADE_FAMILIES:
+        path = out / f"{family.id}.webp"
+        save_loop(path, xfade_loop(family.directions[0].kind, plain, right, ffmpeg=ffmpeg, runner=runner))
+        written.append(path)
     return written
 
 
@@ -555,6 +557,7 @@ def main() -> int:
             for look in list_looks():
                 if look.source == "shipped":
                     written += build_look_previews(root, look=look, rasterizer=rasterizer, ffmpeg=args.ffmpeg)
+            written += build_transition_previews(root, ffmpeg=args.ffmpeg)
     for path in written:
         print(path)
     return 0
