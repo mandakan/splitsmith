@@ -33,6 +33,7 @@ import { Link } from "react-router-dom";
 
 import { AccountChip } from "@/components/AccountChip";
 import { HostedAccountChip } from "@/components/account/HostedAccountChip";
+import { WhatsNewButton } from "@/components/whatsNew/WhatsNew";
 import { Brand, ModeSwitch } from "@/components/ui";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { cn } from "@/lib/utils";
@@ -77,6 +78,8 @@ export function GlobalBar({ onCrumbSlot }: GlobalBarProps = {}) {
           className="ml-3 flex min-w-0 flex-1 items-center"
         />
       )}
+      {/* Desktop only: the phone bar has no room (#733); the sheet still opens itself. */}
+      {isMobile ? null : <WhatsNewButton />}
       <ModeSwitch size="sm" />
       <HostedAccountChip />
       <AccountChip />

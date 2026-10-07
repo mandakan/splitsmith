@@ -62,6 +62,7 @@ from .project_state import ProjectStateStore, StateConflictError
 from .recent_projects import PostgresRecentProjectsStore
 from .scoreboard_identity import PostgresScoreboardIdentityStore
 from .signup_policy import SignupPolicy, build_signup_policy
+from .whats_new import PostgresWhatsNewStore
 from .youtube_connections import PostgresYouTubeConnectionStore
 
 __all__ = [
@@ -88,6 +89,7 @@ __all__ = [
     "NotFoundError",
     "PostgresExportPresetStore",
     "PostgresLookStore",
+    "PostgresWhatsNewStore",
     "PostgresJobBackend",
     "PostgresMatchStore",
     "PostgresProfileStore",
