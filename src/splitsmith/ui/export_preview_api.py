@@ -22,6 +22,7 @@ import tempfile
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -74,6 +75,8 @@ class ExportPreviewRequest(BaseModel):
     motion: bool = False
     #: The template editor's unsaved text (#1265); local only.
     templates: list[TemplateEdit] = Field(default_factory=list, max_length=32)
+    #: The Look editor's backdrop switch: this stage's footage or the demo scene.
+    backdrop: Literal["footage", "demo"] = "footage"
 
     @field_validator("look")
     @classmethod
@@ -134,6 +137,7 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
         variant=req.variant,
         at=req.at,
         motion=req.motion,
+        backdrop=req.backdrop,
         draft=(
             None
             if req.draft is None and not req.templates

@@ -4,6 +4,7 @@
  * templates live; the draft previewed on this match's stage before Save.
  * Rules live in ``lib/lookEditor``; this maps them to primitives.
  */
+import { Loader2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -228,7 +229,9 @@ export function LookEditor({
           options={[
             { value: "palette", label: "Palette" },
             { value: "styles", label: "Card styles" },
-            { value: "templates", label: "Templates" },
+            // Templates are code: the desktop runs a Look's own, hosted does
+            // not (yet), and Card styles says so there.
+            ...(hosted ? [] : [{ value: "templates" as const, label: "Templates (HTML)" }]),
           ]}
         />
       </div>
@@ -240,7 +243,13 @@ export function LookEditor({
             </p>
           ) : tab === "palette" ? (
             <>
-              <PaletteSuggestions draft={draft} setDraft={setDraft} slug={slug} stageNumber={stageNumber} />
+              <PaletteSuggestions
+                draft={draft}
+                setDraft={setDraft}
+                slug={slug}
+                stageNumber={stageNumber}
+                hosted={hosted}
+              />
               <Palette
                 draft={draft}
                 setDraft={setDraft}
@@ -280,6 +289,7 @@ export function LookEditor({
             stageNumber={stageNumber}
             templates={editsList(edits)}
             focus={tab === "templates" ? focus : null}
+            hosted={hosted}
           />
         ) : null}
       </div>
@@ -361,13 +371,14 @@ function Palette({
                   <div className="flex items-center gap-3">
                     <input
                       type="color"
-                      aria-label={t.token}
+                      aria-label={`${t.label} colour`}
                       value={rgb ? rgbToHex(rgb) : "#000000"}
                       onChange={(e) => setColour(t.token, e.target.value)}
                       className="h-7 w-9 shrink-0 cursor-pointer rounded border border-rule-strong bg-transparent"
                     />
-                    <span className="w-28 shrink-0 text-md text-ink">
-                      {t.token}
+                    <span className="flex w-32 shrink-0 flex-col">
+                      <span className="text-md text-ink">{t.label}</span>
+                      <span className="numeral text-sm text-subtle">{t.token}</span>
                     </span>
                     <span className="numeral w-20 shrink-0 text-sm text-muted">
                       {rgb ? rgbToHex(rgb) : "unset"}
@@ -379,7 +390,7 @@ function Palette({
                       {error}
                     </p>
                   ) : warning ? (
-                    <p className="mt-1 text-sm text-muted">{warning.message}</p>
+                    <p className="mt-1 text-sm text-live">{warning.message}</p>
                   ) : null}
                 </li>
               );
@@ -569,7 +580,28 @@ function Templates({ name, hosted }: { name: string; hosted: boolean }) {
   );
 }
 
-function DraftPreview({
+/** How long editing must pause before the big preview asks for its
+ *  animation: an animated render is dozens of frames, and the server cannot
+ *  cancel one the editor has moved past, so every change while it runs
+ *  would wait behind it. */
+export const MOTION_IDLE_MS = 1500;
+/** The thumbnails redraw once editing pauses, after the big preview. */
+export const THUMBS_DEBOUNCE_MS = 900;
+
+function Spinner({ className }: { className?: string }) {
+  return <Loader2 className={cn("animate-spin", className)} aria-hidden />;
+}
+
+const wait = (ms: number, signal: AbortSignal) =>
+  new Promise<void>((resolve, reject) => {
+    const timer = window.setTimeout(resolve, ms);
+    signal.addEventListener("abort", () => {
+      window.clearTimeout(timer);
+      reject(new DOMException("aborted", "AbortError"));
+    });
+  });
+
+export function DraftPreview({
   name,
   draft,
   info,
@@ -577,6 +609,7 @@ function DraftPreview({
   stageNumber,
   templates,
   focus,
+  hosted = false,
 }: {
   name: string;
   draft: LookDraft;
@@ -586,15 +619,22 @@ function DraftPreview({
   templates: TemplateEdit[];
   /** The template editor's card and style: the big preview follows it. */
   focus: { card: PreviewCard; variant: string } | null;
+  /** Hosted has no footage on its disk, so it starts on the demo scene. */
+  hosted?: boolean;
 }) {
+  const [backdrop, setBackdrop] = useState<"footage" | "demo">(hosted ? "demo" : "footage");
   const sting = focus?.card === "sting" ? focus.variant : (info?.slots.transition?.[0]?.name ?? null);
-  const cards = PREVIEW_CARDS.filter(
-    (c) => c.card !== "sting" || sting !== null,
-  );
+  const cards = PREVIEW_CARDS.filter((c) => c.card !== "sting" || sting !== null);
   const [card, setCard] = useState<PreviewCard>("title");
   const [at, setAt] = useState<number | null>(null);
   const [big, setBig] = useState<string | null>(null);
+  const [moving, setMoving] = useState(false);
+  // What the big preview is doing now: drawing its still, adding the
+  // animation, or nothing. Shown over the last picture, never instead of it.
+  const [phase, setPhase] = useState<"still" | "motion" | null>(null);
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
+  const [thumbBusy, setThumbBusy] = useState<Record<string, boolean>>({});
+  const [thumbFailed, setThumbFailed] = useState<Record<string, boolean>>({});
   const [failed, setFailed] = useState<string | null>(null);
   const urls = useRef<string[]>([]);
   // One render at a time: the server answers 429 to a second in flight.
@@ -615,11 +655,12 @@ function DraftPreview({
     [],
   );
 
-  const fetchStill = async (
+  const fetchCard = async (
     c: PreviewCard,
     width: number,
     time: number | null,
     signal: AbortSignal,
+    motion: boolean,
   ) => {
     const blob = await queue(() =>
       api.exportPreview(
@@ -634,8 +675,8 @@ function DraftPreview({
           sting,
           variant: focus && focus.card === c ? focus.variant : undefined,
           templates,
-          // The big preview plays the animation (#1249); thumbnails stay stills.
-          motion: width >= 960,
+          motion,
+          backdrop,
         }),
         signal,
       ),
@@ -647,69 +688,133 @@ function DraftPreview({
 
   useEffect(() => {
     const controller = new AbortController();
+    const { signal } = controller;
+    setPhase("still");
     const timer = window.setTimeout(() => {
-      fetchStill(current.card, 960, at, controller.signal)
-        .then((url) => {
-          setBig(url);
+      void (async () => {
+        try {
+          // The still first: a change shows in about a second.
+          const still = await fetchCard(current.card, 960, at, signal, false);
+          if (signal.aborted) return;
+          setBig(still);
+          setMoving(false);
           setFailed(null);
-        })
-        .catch((e: unknown) => {
-          if (!controller.signal.aborted)
-            setFailed(
-              e instanceof ApiError && e.status === 503 && /rasteriz/.test(e.message)
-                ? "This card's template failed to draw; Check under Templates says why."
-                : e instanceof ApiError
-                  ? e.message
-                  : "The preview could not be drawn.",
-            );
-        });
+          // Then the animation, once editing has paused.
+          if (current.animated && at === null) {
+            setPhase(null);
+            await wait(MOTION_IDLE_MS, signal);
+            setPhase("motion");
+            const clip = await fetchCard(current.card, 960, null, signal, true);
+            if (signal.aborted) return;
+            setBig(clip);
+            setMoving(true);
+          }
+          setPhase(null);
+        } catch (e: unknown) {
+          if (signal.aborted) return;
+          setPhase(null);
+          setFailed(
+            e instanceof ApiError && e.status === 503 && /rasteriz/.test(e.message)
+              ? "This card's template failed to draw; Check under Templates says why."
+              : e instanceof ApiError
+                ? e.message
+                : "The preview could not be drawn.",
+          );
+        }
+      })();
     }, DRAFT_PREVIEW_DEBOUNCE_MS);
     return () => {
       controller.abort();
       window.clearTimeout(timer);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchStill reads these
-  }, [current.card, at, draft, name, slug, stageNumber, templatesKey, focus]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchCard reads these
+  }, [current.card, at, draft, name, slug, stageNumber, templatesKey, focus, backdrop]);
 
   useEffect(() => {
     const controller = new AbortController();
+    setThumbBusy(Object.fromEntries(cards.map((c) => [c.card, true])));
     const timer = window.setTimeout(() => {
       cards.forEach((c) => {
-        fetchStill(c.card, 240, null, controller.signal)
-          .then((url) => setThumbs((t) => ({ ...t, [c.card]: url })))
-          .catch(() => undefined);
+        fetchCard(c.card, 240, null, controller.signal, false)
+          .then((url) => {
+            setThumbs((t) => ({ ...t, [c.card]: url }));
+            setThumbFailed((f) => ({ ...f, [c.card]: false }));
+          })
+          .catch(() => {
+            if (!controller.signal.aborted) setThumbFailed((f) => ({ ...f, [c.card]: true }));
+          })
+          .finally(() => {
+            if (!controller.signal.aborted) setThumbBusy((b) => ({ ...b, [c.card]: false }));
+          });
       });
-      // After the big preview's request, which shares the debounce.
-    }, DRAFT_PREVIEW_DEBOUNCE_MS + 50);
+    }, THUMBS_DEBOUNCE_MS);
     return () => {
       controller.abort();
       window.clearTimeout(timer);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchStill reads these
-  }, [draft, name, slug, stageNumber, sting, templatesKey]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchCard reads these
+  }, [draft, name, slug, stageNumber, sting, templatesKey, backdrop]);
+
+  const status =
+    phase === "still"
+      ? big
+        ? "Updating preview…"
+        : "Drawing the preview…"
+      : phase === "motion"
+        ? "Adding the animation…"
+        : null;
 
   return (
     <div className="flex min-w-0 flex-col gap-2">
-      <div className="flex items-baseline justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <Label>Preview</Label>
-        <span className="text-sm text-muted">
-          Stage{" "}
-          <span className="numeral">
-            {String(stageNumber).padStart(2, "0")}
-          </span>{" "}
-          of this match, the draft Look
-        </span>
+        <Segmented<"footage" | "demo">
+          label="Preview backdrop"
+          value={backdrop}
+          onChange={setBackdrop}
+          options={[
+            { value: "footage", label: "This match" },
+            { value: "demo", label: "Demo scene" },
+          ]}
+        />
       </div>
-      <div className="aspect-video w-full overflow-hidden rounded-md border border-rule bg-bg">
+      <p className="text-sm text-muted">
+        {current.label},{" "}
+        {backdrop === "demo" ? (
+          "over the demo scene"
+        ) : (
+          <>
+            over stage <span className="numeral">{String(stageNumber).padStart(2, "0")}</span> of this match
+          </>
+        )}
+      </p>
+      <div className="relative aspect-video w-full overflow-hidden rounded-md border border-rule bg-bg">
         {big ? (
           <img
             src={big}
             alt={`${current.label} preview`}
-            className="h-full w-full object-contain"
+            className={cn(
+              "h-full w-full object-contain transition-opacity",
+              phase === "still" ? "opacity-50" : "opacity-100",
+            )}
           />
         ) : null}
+        {status ? (
+          <div
+            role="status"
+            className={cn(
+              "absolute flex items-center gap-2 text-sm text-ink",
+              big
+                ? "bottom-2 left-2 rounded-md bg-bg/80 px-2 py-1"
+                : "inset-0 justify-center",
+            )}
+          >
+            <Spinner className="size-4" />
+            {status}
+          </div>
+        ) : null}
       </div>
-      {failed ? <p className="text-sm text-muted">{failed}</p> : null}
+      {failed ? <p className="text-sm text-destructive">{failed}</p> : null}
       {current.animated ? (
         <div className="flex items-center gap-3">
           <input
@@ -722,11 +827,18 @@ function DraftPreview({
             onChange={(e) => setAt(Number(e.target.value))}
             className="flex-1"
           />
-          <span className="numeral w-24 text-right text-sm text-muted">
-            {at === null
-              ? "poster"
-              : `${at.toFixed(2)} / ${current.seconds.toFixed(1)} s`}
+          <span className="numeral w-28 text-right text-sm text-muted">
+            {at !== null
+              ? `${at.toFixed(2)} / ${current.seconds.toFixed(1)} s`
+              : moving
+                ? "playing"
+                : "still frame"}
           </span>
+          {at !== null ? (
+            <Button variant="ghost" size="sm" onClick={() => setAt(null)}>
+              Play
+            </Button>
+          ) : null}
         </div>
       ) : null}
       <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
@@ -740,19 +852,27 @@ function DraftPreview({
               setAt(null);
             }}
             className={cn(
-              "flex flex-col gap-1 rounded-md border p-1 text-left",
-              c.card === current.card
-                ? "border-led"
-                : "border-rule hover:border-rule-strong",
+              "flex cursor-pointer flex-col gap-1 rounded-md border p-1 text-left transition-colors",
+              "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-led",
+              c.card === current.card ? "border-led" : "border-rule hover:border-rule-strong hover:bg-surface-2",
             )}
           >
-            <span className="aspect-video w-full overflow-hidden rounded-sm bg-bg">
+            <span className="relative aspect-video w-full overflow-hidden rounded-sm bg-bg">
               {thumbs[c.card] ? (
                 <img
                   src={thumbs[c.card]}
                   alt=""
-                  className="h-full w-full object-cover"
+                  className={cn("h-full w-full object-cover", thumbBusy[c.card] && "opacity-40")}
                 />
+              ) : null}
+              {thumbBusy[c.card] ? (
+                <span className="absolute inset-0 flex items-center justify-center">
+                  <Spinner className="size-3.5 text-muted" />
+                </span>
+              ) : thumbFailed[c.card] ? (
+                <span className="absolute inset-0 flex items-center justify-center text-sm text-destructive">
+                  failed
+                </span>
               ) : null}
             </span>
             <span className="text-sm text-muted">{c.label}</span>

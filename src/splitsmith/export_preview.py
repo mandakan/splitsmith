@@ -95,6 +95,10 @@ class PreviewSpec:
     #: An animated template previews as a looping WebP of its own frames
     #: (#1249); a still one, or a card no template draws, stays a PNG.
     motion: bool = False
+    #: What the card is drawn over: this stage's footage (its trim's frame,
+    #: the surface without one), or the drawn range scene ``looks preview``
+    #: uses, the same on every stage and on hosted (the Look editor's switch).
+    backdrop: Literal["footage", "demo"] = "footage"
 
     @property
     def height(self) -> int:
@@ -144,6 +148,8 @@ def preview_key(
         fields["draft"] = spec.draft
     if spec.motion:
         fields["motion"] = True
+    if spec.backdrop != "footage":
+        fields["backdrop"] = spec.backdrop
     payload = json.dumps(
         {
             **fields,
@@ -315,7 +321,12 @@ def render_preview(
     else:
         seconds = beep + last_shot + spec.tail_pad_seconds
     frame: Path | None = None
-    if trim is not None and ffmpeg_binary:
+    if spec.backdrop == "demo":
+        from .look_tools import demo_backdrop
+
+        frame = work_dir / "demo.png"
+        demo_backdrop().save(frame)
+    elif trim is not None and ffmpeg_binary:
         frame = grab_frame(
             trim, seconds=seconds, at=at, ffmpeg_binary=ffmpeg_binary, out=work_dir / "frame.png"
         )

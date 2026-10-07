@@ -282,3 +282,24 @@ def test_motion_and_still_are_cached_apart(client) -> None:
     assert still.headers["content-type"] == "image/png"
     assert moving.headers["content-type"] == "image/webp" and again.content == moving.content
     assert _StubRasterizer.launches == 2
+
+
+def test_the_demo_backdrop_paints_the_range_scene_instead_of_the_footage(client) -> None:
+    """The Look editor's backdrop switch: the same neutral range picture for
+    every stage, on hosted and where this disk holds no trim."""
+    import io
+
+    from PIL import Image
+
+    plain = client.post(ROUTE, json={"card": "frame", "stage_number": 1, "width": 480})
+    demo = client.post(ROUTE, json={"card": "frame", "stage_number": 1, "width": 480, "backdrop": "demo"})
+    assert plain.status_code == demo.status_code == 200
+    with Image.open(io.BytesIO(demo.content)) as im:
+        ground = im.convert("RGB").getpixel((240, 260))
+    with Image.open(io.BytesIO(plain.content)) as im:
+        surface = im.convert("RGB").getpixel((240, 260))
+    assert ground != surface
+    assert abs(ground[0] - 96) < 20 and abs(ground[1] - 84) < 20 and abs(ground[2] - 66) < 20
+    assert (
+        client.post(ROUTE, json={"card": "frame", "stage_number": 1, "backdrop": "moon"}).status_code == 422
+    )

@@ -80,4 +80,29 @@ describe("PaletteSuggestions", () => {
     expect(screen.getByRole("button", { name: "Use the Logo #0a3cc8 palette" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Use the Logo #ffffff palette" })).toBeNull();
   });
+
+  it("shows which suggestion is in use and acknowledges a click at once", async () => {
+    vi.mocked(api.paletteSources).mockResolvedValue({ footage: [], average: null, logo: [] });
+    let draft = DRAFT;
+    const setDraft = vi.fn((d: StoredLookBody) => {
+      draft = d;
+    });
+    const { rerender } = render(<PaletteSuggestions draft={draft} setDraft={setDraft} slug="me" stageNumber={2} />);
+    await waitFor(() => expect(api.paletteSources).toHaveBeenCalled());
+    const triadic = screen.getByRole("button", { name: /Use the Triadic palette/ });
+    expect(triadic.textContent).toMatch(/Apply/);
+    fireEvent.click(triadic);
+    rerender(<PaletteSuggestions draft={draft} setDraft={setDraft} slug="me" stageNumber={2} />);
+    expect(screen.getByRole("status").textContent).toMatch(/Applied Triadic/);
+    const applied = screen.getByRole("button", { name: /Use the Triadic palette/ });
+    expect(applied.getAttribute("aria-pressed")).toBe("true");
+    expect(applied.textContent).toMatch(/In use/);
+  });
+
+  it("says why a source is off, in words, not only in a tooltip", async () => {
+    vi.mocked(api.paletteSources).mockResolvedValue({ footage: [], average: null, logo: [] });
+    render(<PaletteSuggestions draft={DRAFT} setDraft={vi.fn()} slug="me" stageNumber={2} />);
+    expect(await screen.findByText(/this shooter has no logo yet/i)).toBeTruthy();
+  });
 });
+

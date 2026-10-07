@@ -88,8 +88,8 @@ async function openTemplates() {
     </ConfirmProvider>,
   );
   fireEvent.click(screen.getByRole("button", { name: "Edit Look…" }));
-  await screen.findByLabelText("accent");
-  fireEvent.click(screen.getByRole("button", { name: "Templates" }));
+  await screen.findByLabelText("Highlight colour");
+  fireEvent.click(screen.getByRole("button", { name: "Templates (HTML)" }));
   return (await screen.findByLabelText("Title page template")) as HTMLTextAreaElement;
 }
 

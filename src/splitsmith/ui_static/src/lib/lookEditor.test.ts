@@ -6,6 +6,7 @@ import {
   CARD_STYLE_SLOTS,
   PREVIEW_CARDS,
   TOKEN_GROUPS,
+  sourceHints,
   contrastRatio,
   contrastWarnings,
   draftErrors,
@@ -294,5 +295,41 @@ describe("fontUploadRefusal", () => {
     const err = new ApiError(422, "This is a WOFF font. Upload the TTF or OTF file it was made from.");
     expect(fontUploadRefusal(err)).toBe("This is a WOFF font. Upload the TTF or OTF file it was made from.");
     expect(fontUploadRefusal(new TypeError("Failed to fetch"))).toBe("The font could not be added. Try again.");
+  });
+});
+
+
+describe("the colour rows read in plain words", () => {
+  it("names every token for a person, keeping the token for template authors", () => {
+    const tokens = TOKEN_GROUPS.flatMap((g) => g.tokens);
+    for (const t of tokens) {
+      expect(t.label).toBeTruthy();
+      expect(t.label).not.toMatch(/_/);
+      expect(t.label).not.toBe(t.token);
+    }
+    expect(tokens.find((t) => t.token === "ink")?.label).toBe("Main text");
+  });
+});
+
+describe("sourceHints", () => {
+  it("says why a suggestion source is off, and nothing when all are on", () => {
+    expect(sourceHints({ footage: 0, logo: 0, hosted: false })).toEqual([
+      "This footage: no trimmed footage of this stage on this machine.",
+      "Club logo: this shooter has no logo yet. Add one under Footage, Shooters, Identity.",
+    ]);
+    expect(sourceHints({ footage: 0, logo: 2, hosted: true })).toEqual([
+      "This footage: footage is sampled in the desktop app.",
+    ]);
+    expect(sourceHints({ footage: 3, logo: 1, hosted: false })).toEqual([]);
+  });
+});
+
+
+describe("the preview's backdrop", () => {
+  const base = { card: "title" as const, look: "club", draft: { label: "Club", base: "splitsmith", colors: {}, accent_series: [], styles: {} }, stageNumber: 2, width: 960, at: null, sting: null };
+  it("asks for the demo scene only when chosen, so a footage request is the body it always was", () => {
+    expect(previewRequest({ ...base, backdrop: "demo" }).backdrop).toBe("demo");
+    expect("backdrop" in previewRequest({ ...base, backdrop: "footage" })).toBe(false);
+    expect("backdrop" in previewRequest(base)).toBe(false);
   });
 });

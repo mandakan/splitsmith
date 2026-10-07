@@ -6,15 +6,18 @@
  * into the footage. Choosing one replaces the draft's colours and accent
  * series; nothing is saved until Save. Rules live in ``lib/palette``.
  */
-import { useEffect, useMemo, useState } from "react";
+import { Check } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/Label";
 import { Segmented } from "@/components/ui/Segmented";
 import { api, type Rgb, type StoredLookBody } from "@/lib/api";
-import { hexToRgb, rgbToHex } from "@/lib/lookEditor";
+import { hexToRgb, rgbToHex, sourceHints } from "@/lib/lookEditor";
+import { cn } from "@/lib/utils";
 import {
   READY_MADE,
+  isApplied,
   SCHEMES,
   footageAccents,
   paletteFrom,
@@ -30,6 +33,8 @@ export interface PaletteSuggestionsProps {
   setDraft: (draft: StoredLookBody) => void;
   slug: string;
   stageNumber: number;
+  /** Footage is sampled from trims on this disk, which hosted has none of. */
+  hosted?: boolean;
 }
 
 function Strip({ colors, series }: { colors: Rgb[]; series: string[] }) {
@@ -47,23 +52,47 @@ function Strip({ colors, series }: { colors: Rgb[]; series: string[] }) {
   );
 }
 
-function Card({ s, help, onUse }: { s: Suggestion; help?: string; onUse: (s: Suggestion) => void }) {
+function Card({
+  s,
+  help,
+  inUse,
+  onUse,
+}: {
+  s: Suggestion;
+  help?: string;
+  inUse: boolean;
+  onUse: (s: Suggestion) => void;
+}) {
   const c = s.colors;
   return (
     <button
       type="button"
       onClick={() => onUse(s)}
       aria-label={`Use the ${s.label} palette`}
-      className="flex flex-col items-start gap-1.5 rounded-md border border-rule p-2 text-left hover:border-rule-strong"
+      aria-pressed={inUse}
+      className={cn(
+        "group flex cursor-pointer flex-col items-start gap-1.5 rounded-md border bg-surface p-2 text-left transition-colors",
+        "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-led",
+        inUse ? "border-led" : "border-rule hover:border-rule-strong hover:bg-surface-2",
+      )}
     >
-      <span className="text-md text-ink">{s.label}</span>
+      <span className="flex w-full items-baseline justify-between gap-2">
+        <span className="text-md text-ink">{s.label}</span>
+        {inUse ? (
+          <span className="flex items-center gap-1 text-sm text-ink">
+            <Check className="size-3.5" aria-hidden /> In use
+          </span>
+        ) : (
+          <span className="text-sm text-muted group-hover:text-ink group-focus-visible:text-ink">Apply</span>
+        )}
+      </span>
       {help ? <span className="text-sm text-muted">{help}</span> : null}
       <Strip colors={[c.accent, c.accent_fill, c.split, c.split_good, c.split_slow]} series={s.series} />
     </button>
   );
 }
 
-export function PaletteSuggestions({ draft, setDraft, slug, stageNumber }: PaletteSuggestionsProps) {
+export function PaletteSuggestions({ draft, setDraft, slug, stageNumber, hosted = false }: PaletteSuggestionsProps) {
   const [source, setSource] = useState<Source>("colour");
   const [seed, setSeed] = useState<string>(rgbToHex(draft.colors.accent ?? [255, 45, 45]));
   const [footage, setFootage] = useState<Swatch[]>([]);
@@ -86,7 +115,18 @@ export function PaletteSuggestions({ draft, setDraft, slug, stageNumber }: Palet
     };
   }, [slug, stageNumber]);
 
-  const use = (s: Suggestion) => setDraft({ ...draft, colors: s.colors, accent_series: s.series });
+  // What the last click did, said at once: the preview takes a moment to
+  // catch up, and a click with no answer reads as a click that missed.
+  const [applied, setApplied] = useState<string | null>(null);
+  const clear = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(clear.current), []);
+  const use = (s: Suggestion) => {
+    setDraft({ ...draft, colors: s.colors, accent_series: s.series });
+    setApplied(s.label);
+    window.clearTimeout(clear.current);
+    clear.current = window.setTimeout(() => setApplied(null), 5000);
+  };
+  const hints = sourceHints({ footage: footage.length, logo: logo.length, hosted });
   const weak = useMemo(() => weakAccent(draft.colors, footage, average), [draft.colors, footage, average]);
 
   const suggestions: { s: Suggestion; help?: string }[] = useMemo(() => {
@@ -123,13 +163,24 @@ export function PaletteSuggestions({ draft, setDraft, slug, stageNumber }: Palet
               value: "footage",
               label: "This footage",
               disabled: footage.length === 0,
-              title: "No trimmed footage of this stage on this machine",
             },
-            { value: "logo", label: "Club logo", disabled: logo.length === 0, title: "This shooter has no logo" },
+            { value: "logo", label: "Club logo", disabled: logo.length === 0 },
             { value: "ready", label: "Ready-made" },
           ]}
         />
       </div>
+      {hints.length > 0 ? (
+        <ul className="text-sm text-subtle">
+          {hints.map((h) => (
+            <li key={h}>{h}</li>
+          ))}
+        </ul>
+      ) : null}
+      {applied ? (
+        <p role="status" className="text-sm text-ink">
+          Applied {applied}. The preview is updating; Save keeps it.
+        </p>
+      ) : null}
       {weak ? (
         <div role="status" className="flex flex-wrap items-center gap-2 text-sm text-muted">
           <span>{weak.message}</span>
@@ -158,7 +209,7 @@ export function PaletteSuggestions({ draft, setDraft, slug, stageNumber }: Palet
       ) : null}
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         {suggestions.map(({ s, help }) => (
-          <Card key={s.id + s.label} s={s} help={help} onUse={use} />
+          <Card key={s.id + s.label} s={s} help={help} inUse={isApplied(s, draft)} onUse={use} />
         ))}
       </div>
     </section>
