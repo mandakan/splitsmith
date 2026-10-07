@@ -74,6 +74,8 @@ const matchPayload: Required<MatchExportRequestPayload> = {
   closing_card: true,
   made_with: false,
   summary_hold_seconds: 3,
+  match_summary: true,
+  match_summary_seconds: 6,
 };
 
 describe("export wrappers forward every declared field", () => {

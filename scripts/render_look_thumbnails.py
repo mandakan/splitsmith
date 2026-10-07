@@ -25,6 +25,7 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from pathlib import Path
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
@@ -45,6 +46,7 @@ from splitsmith.looks import (  # noqa: E402
     variants_for,
 )
 from splitsmith.match_project import StageScorecard  # noqa: E402
+from splitsmith.match_summary import build_match_summary, build_match_summary_still  # noqa: E402
 from splitsmith.overlay_card import build_card_still, build_lower_third, card_scale  # noqa: E402
 from splitsmith.overlay_html import single_html  # noqa: E402
 from splitsmith.overlay_raster import ChromiumRasterizer, Rasterizer  # noqa: E402
@@ -65,6 +67,7 @@ THUMBNAILS: tuple[str, ...] = (
     "stage-card-slate.png",
     "stage-card-lower-third.png",
     "summary-hold.png",
+    "match-summary.png",
     "overlay.png",
     "transition-cut.png",
     "transition-static.png",
@@ -121,6 +124,15 @@ def _sample_tile() -> TileStageData:
         stage_time_seconds=18.42,
         scorecard=StageScorecard(hit_factor=6.21, alphas=14, charlies=3, deltas=1, misses=0),
     )
+
+
+def _sample_match():
+    names = ("Standards", "Long range", "Speed shoot", "Classifier", "Field course", "The finale")
+    stages = []
+    for i, name in enumerate(names):
+        tile = _sample_tile()
+        stages.append((name, replace(tile, stage_number=i + 1, stage_time_seconds=12.4 + i * 3.1)))
+    return build_match_summary(stages, title=MATCH, label=SHOOTER)
 
 
 def _overlay(backdrop: Image.Image, *, rasterizer: Rasterizer, theme: OverlayTheme) -> Image.Image:
@@ -392,6 +404,17 @@ def build_thumbnails(
             backdrop=backdrop_png,
         )
         save("summary-hold.png", summary)
+        save(
+            "match-summary.png",
+            build_match_summary_still(
+                _sample_match(),
+                width=WIDTH,
+                height=HEIGHT,
+                theme=theme,
+                rasterizer=rasterizer,
+                backdrop=backdrop_png,
+            ),
+        )
         save("overlay.png", _overlay(plain, rasterizer=rasterizer, theme=theme))
         for kind in TRANSITION_KINDS:
             save(f"transition-{kind}.png", _transition(kind, plain, rasterizer=rasterizer, look=look))

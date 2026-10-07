@@ -92,6 +92,24 @@ describe("made_with", () => {
   });
 });
 
+describe("match_summary", () => {
+  it("is off by default, a body stored before it shipped applies it off, and on round-trips", () => {
+    expect(DEFAULT_EXPORT_SETTINGS.renderOptions.matchSummary).toBe(false);
+    const legacy: Partial<ExportPresetBody> = { ...YOUTUBE };
+    delete legacy.match_summary;
+    delete legacy.match_summary_seconds;
+    const applied = applyBody(DEFAULT_EXPORT_SETTINGS, legacy as ExportPresetBody);
+    expect(applied.renderOptions.matchSummary).toBe(false);
+    expect(applied.renderOptions.matchSummarySeconds).toBe(6);
+    const on = {
+      ...DEFAULT_EXPORT_SETTINGS,
+      renderOptions: { ...DEFAULT_EXPORT_SETTINGS.renderOptions, matchSummary: true, matchSummarySeconds: 8 },
+    };
+    const back = applyBody(DEFAULT_EXPORT_SETTINGS, settingsToBody(on)).renderOptions;
+    expect([back.matchSummary, back.matchSummarySeconds]).toEqual([true, 8]);
+  });
+});
+
 describe("non-finite seconds", () => {
   it("a field being edited (NaN) is stored as its default, never as NaN", () => {
     const s: ExportSettings = { ...DEFAULT_EXPORT_SETTINGS, transitionSeconds: Number.NaN, headPad: Number.NaN };

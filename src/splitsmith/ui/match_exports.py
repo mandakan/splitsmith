@@ -27,6 +27,7 @@ from ..config import OutputConfig, StageRounds
 from ..export_naming import match_file_base, stage_display_name, stage_file_base
 from ..identity import ResolvedIdentity
 from ..match_project import MatchProject, StageScorecard
+from ..match_summary import DEFAULT_MATCH_SUMMARY_SECONDS, MatchSummary, build_match_summary
 from ..overlay_theme import ThemeName
 from ..runtime import runtime
 from ..segment_cache import SegmentCache
@@ -362,6 +363,10 @@ class MatchExportRequestData:
     # ``None`` falls back to the project name.
     summary_hold_seconds: float = 0.0
     shooter_label: str | None = None
+    # The match summary card after the last stage (spec
+    # 2026-10-07-match-summary-design); rendered MP4 only.
+    match_summary: bool = False
+    match_summary_seconds: float = DEFAULT_MATCH_SUMMARY_SECONDS
     # Issue #1243. The shooter's identity resolved against the Look by the
     # caller (accent, a logo on local disk or none, club line), the one
     # entry of ``Composition.shooters`` every card template reads.
@@ -686,6 +691,37 @@ def export_match(
                     label=label,
                     duration_seconds=request.summary_hold_seconds,
                 )
+    # The match summary card (spec 2026-10-07-match-summary-design): every
+    # stage's figures, read the way the stage summary reads them.
+    match_summary: MatchSummary | None = None
+    if request.match_summary:
+        if request.output_format != "mp4":
+            anomalies.append(
+                f"match summary ignored: only the mp4 renderer draws it "
+                f"(current renderer: {request.output_format})"
+            )
+        else:
+            label = request.shooter_label or request.project_name
+            match_summary = build_match_summary(
+                [
+                    (
+                        stage_input.stage_name,
+                        TileStageData(
+                            label=label,
+                            stage_number=stage_input.stage_number,
+                            shots=load_stage_shots(stage_input.audit_path),
+                            stage_time_seconds=stage_input.stage_time_seconds,
+                            stage_time_is_manual=stage_input.stage_time_is_manual,
+                            scorecard=stage_input.scorecard,
+                            stage_rounds=stage_input.stage_rounds,
+                        ),
+                    )
+                    for stage_input in stages
+                ],
+                title=request.project_name,
+                label=label,
+                duration_seconds=request.match_summary_seconds,
+            )
     # Generated match cards (issue #973): only the MP4 renderer draws
     # them. Same text on both; the closing card repeats the title page.
     title_page: composition.MatchTitle | None = None
@@ -736,6 +772,7 @@ def export_match(
         title_page=title_page,
         closing=closing,
         summaries=summaries,
+        match_summary=match_summary,
         shooters=(
             (
                 composition.CompositionShooter(

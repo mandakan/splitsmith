@@ -82,6 +82,7 @@ from .composition import (
 from .look_motion import MotionClipError, motion_overlay_filters, write_motion_clip
 from .look_sting import sting_motion, sting_overlay_filters
 from .looks import load_look, sting_template_for
+from .match_summary import MatchSummary, build_match_summary_still
 from .overlay_card import (
     LOWER_THIRD_FADE_SECONDS,
     Card,
@@ -515,6 +516,33 @@ def _render_with_work_dir(
             image.save(png)
             prep.png = png
             return prep
+        if isinstance(item, _MatchSummaryItem):
+            prep = _Prepared()
+            backdrop = _grab_backdrop(
+                timeline,
+                name=item.name,
+                stage_index=item.stage_index,
+                at="tail",
+                work_dir=work_dir,
+                ffmpeg_binary=ffmpeg_binary,
+                runner=runner,
+            )
+            image = build_match_summary_still(
+                item.summary,
+                width=sequence.width,
+                height=sequence.height,
+                theme=theme if theme is not None else load_theme(overlay_theme),
+                rasterizer=rasterizer,
+                backdrop=backdrop,
+            )
+            if image is None:
+                logger.warning("no frame and no text to hold the match summary on; skipped")
+                prep.skipped = True
+                return prep
+            png = work_dir / f"{item.name}.png"
+            image.save(png)
+            prep.png = png
+            return prep
         return _Prepared()
 
     def encode_item(item: SpineItem, prep: _Prepared) -> Path | None:
@@ -598,7 +626,7 @@ def _render_with_work_dir(
                 return None
             finally:
                 prep.motion.close()
-        if isinstance(item, _SummaryItem):
+        if isinstance(item, _SummaryItem | _MatchSummaryItem):
             if prep.skipped:
                 return None
             assert prep.png is not None
@@ -669,7 +697,7 @@ def _render_with_work_dir(
                     prepare=clip_writer(prep.motion, lower_third.path),
                 )
             return encode(cmd, out, index=next_step(), label=label)
-        if isinstance(item, _StillItem | _SummaryItem):
+        if isinstance(item, _StillItem | _SummaryItem | _MatchSummaryItem):
             if prep.skipped:
                 raise _EdgeUnavailableError(f"{item.name} was skipped")
             if prep.motion is None:
@@ -827,12 +855,16 @@ def _item_label(item: SpineItem, timeline: TimelinePlan) -> str:
     if isinstance(item, _SummaryItem):
         stage = timeline.stage(item.stage_index)
         return stage.plan.stage.name if stage is not None else item.hold.label
+    if isinstance(item, _MatchSummaryItem):
+        return "Match summary"
     return item.kind
 
 
-def _step_label(item: _StillItem | _SummaryItem, timeline: TimelinePlan) -> str:
+def _step_label(item: _StillItem | _SummaryItem | _MatchSummaryItem, timeline: TimelinePlan) -> str:
     """A card's progress label: the stage it belongs to by its own name
     (``Stage 3 slate``), never the zero-based segment index."""
+    if isinstance(item, _MatchSummaryItem):
+        return "match summary"
     if isinstance(item, _SummaryItem):
         stage = timeline.stage(item.stage_index)
         return f"{stage.plan.stage.name} summary" if stage is not None else "summary"
@@ -995,7 +1027,7 @@ class _CamAlignment:
     cam_visible_seconds: float  # how long the cam shows on the spine
 
 
-ItemKind = Literal["intro", "title_page", "slate", "stage", "summary", "closing", "outro"]
+ItemKind = Literal["intro", "title_page", "slate", "stage", "summary", "match_summary", "closing", "outro"]
 StillKind = Literal["title_page", "slate", "closing"]
 """The generated full-frame cards: a subset of :data:`ItemKind` and of
 ``looks.CardSlot``, so a still item's kind names its Look template."""
@@ -1068,6 +1100,27 @@ class _SummaryItem:
 
 
 @dataclass(frozen=True)
+class _MatchSummaryItem:
+    """The match summary card (spec 2026-10-07-match-summary-design): a
+    still of the last stage's final frame, blurred and dimmed like a stage
+    summary's, with the match's figures and stage table composed over it."""
+
+    summary: MatchSummary
+    stage_index: int
+    kind: ItemKind = "match_summary"
+    head_cut_seconds: float = 0.0
+    tail_cut_seconds: float = 0.0
+
+    @property
+    def name(self) -> str:
+        return "match_summary"
+
+    @property
+    def duration_seconds(self) -> float:
+        return self.summary.duration_seconds - self.head_cut_seconds - self.tail_cut_seconds
+
+
+@dataclass(frozen=True)
 class _ClipItem:
     """An intro / outro clip, re-encoded to the sequence."""
 
@@ -1085,7 +1138,7 @@ class _ClipItem:
         return self.segment.asset.metadata.duration_seconds - self.head_cut_seconds - self.tail_cut_seconds
 
 
-SpineItem = _StageItem | _StillItem | _SummaryItem | _ClipItem
+SpineItem = _StageItem | _StillItem | _SummaryItem | _MatchSummaryItem | _ClipItem
 
 
 @dataclass(frozen=True)
@@ -1134,7 +1187,7 @@ class TimelinePlan:
     @property
     def needs_rasterizer(self) -> bool:
         return any(
-            isinstance(item, _StillItem | _SummaryItem)
+            isinstance(item, _StillItem | _SummaryItem | _MatchSummaryItem)
             or (isinstance(item, _StageItem) and item.lower_third is not None)
             for item in self.items
         ) or any(is_sting(b.kind) for b in self.boundaries)
@@ -1190,6 +1243,10 @@ def plan_timeline(composition: Composition, *, plans: list[_StagePlan] | None = 
         items.append(_StageItem(index=index, plan=plan, lower_third=lower_third))
         if stage.summary is not None:
             items.append(_SummaryItem(stage_index=index, hold=stage.summary))
+    if composition.match_summary is not None and composition.stages:
+        items.append(
+            _MatchSummaryItem(summary=composition.match_summary, stage_index=len(composition.stages) - 1)
+        )
     if composition.closing is not None:
         items.append(
             _StillItem(

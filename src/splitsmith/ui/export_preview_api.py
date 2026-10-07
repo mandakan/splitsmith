@@ -33,8 +33,10 @@ from ..export_preview import (
     PreviewError,
     PreviewSpec,
     audit_digest,
+    match_summary_for,
     preview_key,
     render_preview,
+    summary_digest,
 )
 from ..look_store import LookStoreError, StoredLookBody, TemplateEdit, draft_look
 from ..looks import Look, load_look, look_fingerprint
@@ -135,13 +137,28 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
     state = request.app.state.splitsmith_state
     project = state.shooter_project(slug)
     root = state.shooter_root(slug)
-    audit_doc, _audit_version = state.load_audit(slug, req.stage_number)
+    stage_number = req.stage_number
+    match_summary = None
+    if req.card == "match_summary" and project.stages:
+        # Every stage's audit, as the export reads them; the card sits on the
+        # last stage's final frame whichever stage the rail has in focus.
+        name = req.project_name or project.name
+        with tempfile.TemporaryDirectory(prefix="match-summary-") as summary_work:
+            match_summary = match_summary_for(
+                project,
+                {s.stage_number: state.load_audit(slug, s.stage_number)[0] for s in project.stages},
+                title=name,
+                label=project.competitor_name or name,
+                work_dir=Path(summary_work),
+            )
+        stage_number = project.stages[-1].stage_number
+    audit_doc, _audit_version = state.load_audit(slug, stage_number)
     # The event's logo (the branding work), brought to this disk like a
     # shooter's; the title page and the closing card draw it.
     event_logo = _event_logo(state) if req.card in ("title", "closing") else None
     spec = PreviewSpec(
         card=req.card,
-        stage_number=req.stage_number,
+        stage_number=stage_number,
         width=req.width,
         title_info=req.title_info,
         title_division=competitor_division(project, root) if req.title_division else None,
@@ -155,6 +172,7 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
         backdrop=req.backdrop,
         event_logo=event_logo.name if event_logo is not None else None,
         made_with=req.made_with,
+        summary_digest=summary_digest(match_summary) if match_summary is not None else None,
         draft=(
             None
             if req.draft is None and not req.templates
@@ -214,6 +232,7 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
                 ffmpeg_binary=rt.ffmpeg_binary,
                 work_dir=Path(work),
                 event_logo=event_logo,
+                match_summary=match_summary,
             )
 
     try:

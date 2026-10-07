@@ -4699,6 +4699,8 @@ def register_job_bodies(state: AppState) -> None:
                 closing_card_variant=req.closing_card_variant,
                 overlay_theme=req.overlay_theme,
                 summary_hold_seconds=req.summary_hold_seconds,
+                match_summary=req.match_summary,
+                match_summary_seconds=req.match_summary_seconds,
                 shooter_label=proj.competitor_name,
                 shooter_identity=resolved_identity_for(
                     proj,

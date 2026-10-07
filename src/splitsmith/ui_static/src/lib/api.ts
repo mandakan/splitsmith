@@ -1071,6 +1071,8 @@ export interface ExportPresetBody {
   stage_card_style: "none" | "slate" | "lower-third";
   stage_card_seconds: number;
   summary_hold_seconds: number;
+  match_summary: boolean;
+  match_summary_seconds: number;
   overlay: boolean;
   grid_overlay: boolean;
   grid_hold_seconds: number;
@@ -1206,7 +1208,16 @@ export interface TransitionFamilyInfo {
   directions: { name: string; kind: string }[];
 }
 
-export type PreviewCard = "frame" | "title" | "slate" | "lower-third" | "summary" | "closing" | "overlay" | "sting";
+export type PreviewCard =
+  | "frame"
+  | "title"
+  | "slate"
+  | "lower-third"
+  | "summary"
+  | "match_summary"
+  | "closing"
+  | "overlay"
+  | "sting";
 
 /** Body of ``POST /api/shooters/{slug}/export-preview`` (spec 2026-09-15
  *  s3). The server ignores unknown fields, so the mapper output may ride
@@ -1391,6 +1402,10 @@ export interface MatchExportRequestPayload {
    *  the blurred last frame -- for this many seconds after its action in
    *  the rendered MP4. 0 (the server default) is off. */
   summary_hold_seconds?: number;
+  /** The match summary card after the last stage, and its hold (MP4
+   *  only). Server default off, 6 s. */
+  match_summary?: boolean;
+  match_summary_seconds?: number;
 }
 
 /** Body of a single export template (issue #198). Mirrors the dialog's

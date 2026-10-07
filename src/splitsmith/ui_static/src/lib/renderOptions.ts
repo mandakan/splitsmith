@@ -41,6 +41,10 @@ export interface RenderOptions {
   /** Seconds to hold each stage's summary after its action; 0 is off.
    *  Single-shooter export only -- the grid's hold is #705's. */
   summaryHoldSeconds: number;
+  /** The match summary card after the last stage (single-shooter MP4). */
+  matchSummary: boolean;
+  /** Seconds the match summary holds. */
+  matchSummarySeconds: number;
 }
 
 export const DEFAULT_RENDER_OPTIONS: RenderOptions = {
@@ -53,6 +57,8 @@ export const DEFAULT_RENDER_OPTIONS: RenderOptions = {
   stageCardStyle: "none",
   stageCardDurationSeconds: 1.5,
   summaryHoldSeconds: 0,
+  matchSummary: false,
+  matchSummarySeconds: 6,
 };
 
 /** The shortest hold a card can have; below this a card is a flash. */
@@ -106,6 +112,8 @@ export type MatchExportCardFields = Pick<
       | "closing_card"
       | "made_with"
       | "summary_hold_seconds"
+      | "match_summary"
+      | "match_summary_seconds"
       | "title_page_variant"
       | "stage_card_variant"
       | "closing_card_variant"
@@ -138,6 +146,8 @@ export function matchExportFields(
     closing_card: options.closingCard,
     made_with: options.madeWith,
     summary_hold_seconds: clampSeconds(options.summaryHoldSeconds, 0),
+    match_summary: options.matchSummary,
+    match_summary_seconds: clampSeconds(options.matchSummarySeconds, MIN_CARD_SECONDS),
     ...variantFields(look, ["title_page_variant", "closing_card_variant"]),
   };
 }
@@ -202,7 +212,8 @@ export function anyRenderOptionOn(options: RenderOptions): boolean {
     options.titlePage ||
     options.closingCard ||
     options.stageCardStyle !== "none" ||
-    options.summaryHoldSeconds > 0
+    options.summaryHoldSeconds > 0 ||
+    options.matchSummary
   );
 }
 
@@ -225,6 +236,7 @@ export function describeRenderOptions(
   if (cards && surface === "single" && options.summaryHoldSeconds > 0) {
     parts.push(`summary ${clampSeconds(options.summaryHoldSeconds, 0)} s`);
   }
+  if (cards && surface === "single" && options.matchSummary) parts.push("match summary");
   if (cards && options.closingCard) parts.push("closing");
   return parts.length > 0 ? parts.join(" · ") : null;
 }
@@ -250,5 +262,8 @@ export function renderOptionsSeconds(
   if (options.titlePage) seconds += titleSeconds;
   if (options.closingCard) seconds += titleSeconds;
   if (surface === "single") seconds += clampSeconds(options.summaryHoldSeconds, 0) * stageCount;
+  if (surface === "single" && options.matchSummary) {
+    seconds += clampSeconds(options.matchSummarySeconds, MIN_CARD_SECONDS);
+  }
   return seconds;
 }

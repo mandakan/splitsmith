@@ -30,6 +30,8 @@ const ON: RenderOptions = {
   stageCardStyle: "slate",
   stageCardDurationSeconds: 2,
   summaryHoldSeconds: 3,
+  matchSummary: true,
+  matchSummarySeconds: 0.2,
 };
 
 describe("cardsSupported", () => {
@@ -53,6 +55,8 @@ describe("matchExportFields", () => {
       closing_card: true,
       made_with: false,
       summary_hold_seconds: 3,
+      match_summary: true,
+      match_summary_seconds: 0.5,
     });
   });
 
@@ -74,6 +78,8 @@ describe("matchExportFields", () => {
       closing_card: false,
       made_with: true,
       summary_hold_seconds: 0,
+      match_summary: false,
+      match_summary_seconds: 6,
     });
   });
 
@@ -130,7 +136,7 @@ describe("stageCardsSupported", () => {
 describe("describeRenderOptions", () => {
   it("names what is on in render order and nothing the format cannot draw", () => {
     expect(describeRenderOptions(DEFAULT_RENDER_OPTIONS, "single", "mp4")).toBeNull();
-    expect(describeRenderOptions(ON, "single", "mp4")).toBe("title page · slate · summary 3 s · closing");
+    expect(describeRenderOptions(ON, "single", "mp4")).toBe("title page · slate · summary 3 s · match summary · closing");
     expect(describeRenderOptions(ON, "grid", "mp4")).toBe("title page · slate · closing");
     expect(describeRenderOptions(ON, "single", "fcpxml")).toBe("slate");
     expect(describeRenderOptions(ON, "single", "fcp7xml")).toBeNull();
@@ -139,8 +145,8 @@ describe("describeRenderOptions", () => {
 });
 
 describe("renderOptionsSeconds", () => {
-  it("adds a slate per stage, the match cards once each and a summary per stage", () => {
-    expect(renderOptionsSeconds(ON, 3, "single", "mp4")).toBe(3 * 2 + 4 + 4 + 3 * 3);
+  it("adds a slate per stage, the match cards once each, a summary per stage and the match summary", () => {
+    expect(renderOptionsSeconds(ON, 3, "single", "mp4")).toBe(3 * 2 + 4 + 4 + 3 * 3 + 0.5);
     expect(renderOptionsSeconds(ON, 3, "grid", "mp4")).toBe(3 * 2 + 4 + 4);
     expect(renderOptionsSeconds(ON, 3, "single", "fcpxml")).toBe(3 * 2);
     expect(renderOptionsSeconds(ON, 3, "single", "fcp7xml")).toBe(0);

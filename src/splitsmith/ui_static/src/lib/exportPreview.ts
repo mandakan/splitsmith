@@ -37,6 +37,8 @@ export function previewCardFor(focus: LookFocus | null): PreviewCard | null {
       return focus.variantId === "lower-third" ? "lower-third" : "slate";
     case "summaryHold":
       return "summary";
+    case "matchSummary":
+      return "match_summary";
     case "overlay":
       return "overlay";
   }
@@ -112,7 +114,8 @@ export function previewCaption(
   const slot = slots.find((s) => s.id === focus.slotId);
   const variant = slot?.variants.find((v) => v.id === focus.variantId);
   if (!slot || !variant) return stage;
-  if (slot.id === "transition") return variant.name;
+  // A transition, and the match summary (the whole match), name no stage.
+  if (slot.id === "transition" || (slot.id === "matchSummary" && variant.id !== "none")) return variant.name;
   return `${variant.name} · ${stage}`;
 }
 

@@ -40,11 +40,14 @@ import re
 from collections.abc import Sequence as SequenceProto
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from . import fcpxml_gen
 from .config import OutputConfig, Shot, VideoMetadata
 from .stage_summary_data import TileStageData
+
+if TYPE_CHECKING:
+    from .match_summary import MatchSummary
 
 
 @dataclass(frozen=True)
@@ -526,6 +529,9 @@ class Composition:
     #: The shooters in the video (one for a single-shooter export), as
     #: ``data.shooters`` reaches every card template (#1243).
     shooters: tuple[CompositionShooter, ...] = ()
+    #: The match summary card after the last stage, before ``closing``
+    #: (spec 2026-10-07-match-summary-design); only the MP4 renderer draws it.
+    match_summary: MatchSummary | None = None
 
 
 # --- conversions -----------------------------------------------------------
@@ -558,6 +564,7 @@ def from_stage_compositions(
     closing: MatchTitle | None = None,
     summaries: dict[int, SummaryHold] | None = None,
     shooters: SequenceProto[CompositionShooter] = (),
+    match_summary: MatchSummary | None = None,
 ) -> Composition:
     """Build a :class:`Composition` from today's ``StageComposition`` inputs.
 
@@ -656,6 +663,7 @@ def from_stage_compositions(
         title_page=title_page,
         closing=closing,
         shooters=tuple(shooters),
+        match_summary=match_summary,
     )
 
 

@@ -21,6 +21,8 @@ describe("previewCardFor", () => {
     expect(previewCardFor({ slotId: "stageCard", variantId: "slate" })).toBe("slate");
     expect(previewCardFor({ slotId: "stageCard", variantId: "lower-third" })).toBe("lower-third");
     expect(previewCardFor({ slotId: "summaryHold", variantId: "on" })).toBe("summary");
+    expect(previewCardFor({ slotId: "matchSummary", variantId: "on" })).toBe("match_summary");
+    expect(previewCardFor({ slotId: "matchSummary", variantId: "none" })).toBe("frame");
     expect(previewCardFor({ slotId: "overlay", variantId: "on" })).toBe("overlay");
     expect(previewCardFor({ slotId: "transition", variantId: "zoom" })).toBeNull();
     expect(previewCardFor({ slotId: "transition", variantId: "cut" })).toBeNull();
@@ -79,6 +81,8 @@ describe("previewCaption / previewLine", () => {
     expect(previewCaption({ slotId: "stageCard", variantId: "slate" }, 3)).toBe("Slate · Stage 03");
     expect(previewCaption({ slotId: "overlay", variantId: "on" }, 12)).toBe("Shot counter · Stage 12");
     expect(previewCaption({ slotId: "transition", variantId: "zoom" }, 1)).toBe("Zoom blur");
+    // The match summary is the whole match, not the stage in focus.
+    expect(previewCaption({ slotId: "matchSummary", variantId: "on" }, 2)).toBe("Match summary");
   });
 
   it("has one line per failure", () => {

@@ -82,7 +82,7 @@ def _moments(plan: mp4_render.TimelinePlan, *, titles: str) -> tuple[Moment, ...
     for index, item in enumerate(plan.items):
         key = (
             item.kind
-            if item.kind in ("title_page", "closing")
+            if item.kind in ("title_page", "closing", "match_summary")
             else f"{item.kind}_{len([k for k in starts if k.startswith(item.kind)])}"
         )
         starts[key] = t
@@ -120,6 +120,14 @@ def _moments(plan: mp4_render.TimelinePlan, *, titles: str) -> tuple[Moment, ...
     moments.append(
         Moment("stage-1-mid", stage_1 + BEEP_OFFSET_SECONDS + 2.0, "action; a lower-third has faded out")
     )
+    if "match_summary" in starts:
+        moments.append(
+            Moment(
+                "match-summary",
+                starts["match_summary"] + shown["match_summary"] / 2,
+                "the match summary over the last stage's blurred final frame",
+            )
+        )
     moments.append(
         Moment("closing", starts["closing"] + CLOSING_SECONDS / 2, "closing card over stage 2's last frame")
     )
@@ -209,6 +217,12 @@ def main() -> int:
         help="give the shooter an identity (the Look's first accent, a generated club logo, a club line)",
     )
     parser.add_argument("--keep-video", action="store_true")
+    parser.add_argument(
+        "--match-summary",
+        type=float,
+        default=0.0,
+        help="seconds to hold the match summary after the last stage; 0 is off",
+    )
     parser.add_argument(
         "--summary-hold",
         type=float,
@@ -331,6 +345,32 @@ def main() -> int:
         comp = dataclasses.replace(
             comp,
             stages=tuple(dataclasses.replace(s, summary=summaries[i]) for i, s in enumerate(comp.stages)),
+        )
+    if args.match_summary > 0:
+        from splitsmith.match_project import StageScorecard
+        from splitsmith.match_summary import build_match_summary
+        from splitsmith.stage_summary_data import TileStageData, load_stage_shots
+
+        tiles = [
+            (
+                s.name,
+                TileStageData(
+                    label="M. Axell",
+                    stage_number=i + 1,
+                    shots=load_stage_shots(work / f"stage{i + 1}.json"),
+                    stage_time_seconds=4.5 + i,
+                    scorecard=StageScorecard(
+                        hit_factor=12.0 - i, stage_pct=91.5 - 4 * i, alphas=6, charlies=1, deltas=1, misses=0
+                    ),
+                ),
+            )
+            for i, s in enumerate(comp.stages)
+        ]
+        comp = dataclasses.replace(
+            comp,
+            match_summary=build_match_summary(
+                tiles, title="Bromma Classifier", label="M. Axell", duration_seconds=args.match_summary
+            ),
         )
     plan = mp4_render.plan_timeline(comp)
     rendered = work / "match.mp4"
