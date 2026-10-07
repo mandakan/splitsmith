@@ -37,6 +37,8 @@ describe("previewBody", () => {
       title_info: "Production Optics",
       title_division: true,
       project_name: "Bromma - Final Cut",
+      look: "splitsmith",
+      variant: "default",
       head_pad_seconds: 0.5,
       tail_pad_seconds: 1,
     });
@@ -70,5 +72,24 @@ describe("previewCaption / previewLine", () => {
     expect(previewLine(409)).toBe("Overlay needs audited shots");
     expect(previewLine(500)).toBe("No preview");
     expect(previewLine(null)).toBe("No preview");
+  });
+});
+
+
+describe("previewBody with a Look (#1246)", () => {
+  it("carries the Look and the focused slot's variant", () => {
+    const settings = {
+      ...DEFAULT_EXPORT_SETTINGS,
+      look: "clean",
+      titlePageVariant: "rise",
+      stageCardVariant: "default",
+      closingCardVariant: "rise",
+    };
+    expect(previewBody(settings, "title", 1).look).toBe("clean");
+    expect(previewBody(settings, "title", 1).variant).toBe("rise");
+    expect(previewBody(settings, "slate", 1).variant).toBe("default");
+    expect(previewBody(settings, "lower-third", 1).variant).toBe("default");
+    expect(previewBody(settings, "closing", 1).variant).toBe("rise");
+    expect(previewBody(settings, "frame", 1).variant).toBeUndefined();
   });
 });

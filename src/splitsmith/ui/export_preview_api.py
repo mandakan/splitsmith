@@ -22,7 +22,7 @@ from contextlib import AbstractContextManager
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, Response
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ..division import competitor_division
 from ..export_preview import (
@@ -37,6 +37,7 @@ from ..looks import load_look
 from ..overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
 from ..runtime import runtime
 from . import render_bound
+from .exports_api import installed_look
 from .identity_media import resolved_identity_for
 
 logger = logging.getLogger(__name__)
@@ -59,6 +60,14 @@ class ExportPreviewRequest(BaseModel):
     tail_pad_seconds: float = Field(default=5.0, ge=0)
     #: The bundle name, as the match export's ``project_name``.
     project_name: str | None = None
+    #: The Look and the card's template variant (#1246).
+    look: str = "splitsmith"
+    variant: str = "default"
+
+    @field_validator("look")
+    @classmethod
+    def _installed_look(cls, value: str) -> str:
+        return installed_look(value)
 
 
 def _owner() -> str | None:
@@ -97,6 +106,8 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
         head_pad_seconds=req.head_pad_seconds,
         tail_pad_seconds=req.tail_pad_seconds,
         project_name=req.project_name,
+        look=req.look,
+        variant=req.variant,
     )
     rt = runtime()
     cache_dir = rt.cache_dir / "export-preview"
@@ -118,12 +129,12 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
                 project=project,
                 root=root,
                 audit_doc=audit_doc,
-                look=load_look("splitsmith"),
+                look=load_look(req.look),
                 rasterizer=rasterizer,
                 shooter=resolved_identity_for(
                     project,
                     root,
-                    look=load_look("splitsmith"),
+                    look=load_look(req.look),
                     index=0,
                     label=project.competitor_name or project.name,
                 ),

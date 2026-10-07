@@ -116,6 +116,13 @@ export interface ExportSettings {
   tailPad: number;
   transitionKind: TransitionKind;
   transitionSeconds: number;
+  /** The Look (#1246) and each card slot's template variant; a preset
+   *  stores them, the page resolves them against the installed catalog
+   *  (``lib/looks``) before they reach a request. */
+  look: string;
+  titlePageVariant: string;
+  stageCardVariant: string;
+  closingCardVariant: string;
   /** ``titleInfo`` inside is match-specific and never stored. */
   renderOptions: RenderOptions;
   includeOverlay: boolean;
@@ -138,6 +145,10 @@ export const DEFAULT_EXPORT_SETTINGS: ExportSettings = {
   tailPad: PADDING_PRESETS.full.tail,
   transitionKind: "none",
   transitionSeconds: 0.5,
+  look: "splitsmith",
+  titlePageVariant: "default",
+  stageCardVariant: "default",
+  closingCardVariant: "default",
   renderOptions: DEFAULT_RENDER_OPTIONS,
   includeOverlay: false,
   gridOverlay: false,
@@ -173,6 +184,10 @@ export function settingsToBody(s: ExportSettings): ExportPresetBody {
     tail_pad_seconds: finite(s.tailPad, PADDING_PRESETS.full.tail),
     transition_kind: s.transitionKind,
     transition_seconds: finite(s.transitionSeconds, 0.5),
+    look: s.look,
+    title_page_variant: s.titlePageVariant,
+    stage_card_variant: s.stageCardVariant,
+    closing_card_variant: s.closingCardVariant,
     title_page: s.renderOptions.titlePage,
     title_page_seconds: finite(s.renderOptions.titlePageDurationSeconds, D.titlePageDurationSeconds),
     title_division: s.renderOptions.titleDivision,
@@ -216,6 +231,10 @@ export function applyBody(s: ExportSettings, body: ExportPresetBody): ExportSett
     tailPad: finite(body.tail_pad_seconds, PADDING_PRESETS.full.tail),
     transitionKind: body.transition_kind,
     transitionSeconds: finite(body.transition_seconds, 0.5),
+    look: body.look ?? "splitsmith",
+    titlePageVariant: body.title_page_variant ?? "default",
+    stageCardVariant: body.stage_card_variant ?? "default",
+    closingCardVariant: body.closing_card_variant ?? "default",
     renderOptions: {
       ...s.renderOptions,
       titlePage: body.title_page,

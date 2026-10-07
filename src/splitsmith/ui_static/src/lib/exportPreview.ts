@@ -38,6 +38,23 @@ export function previewCardFor(focus: LookFocus | null): PreviewCard | null {
 
 const finite = (n: number, fallback: number) => (Number.isFinite(n) ? n : fallback);
 
+/** The settings field whose variant a card previews with; null for the
+ *  cards that have no template variant (the frame, the summary, the
+ *  overlay). */
+export function variantForCard(settings: ExportSettings, card: PreviewCard): string | null {
+  switch (card) {
+    case "title":
+      return settings.titlePageVariant;
+    case "closing":
+      return settings.closingCardVariant;
+    case "slate":
+    case "lower-third":
+      return settings.stageCardVariant;
+    default:
+      return null;
+  }
+}
+
 export function previewBody(
   settings: ExportSettings,
   card: PreviewCard,
@@ -52,7 +69,10 @@ export function previewBody(
     title_info: settings.renderOptions.titleInfo.trim() || null,
     title_division: settings.renderOptions.titleDivision,
     project_name: projectName.trim() || null,
+    look: settings.look,
   };
+  const variant = variantForCard(settings, card);
+  if (variant !== null) body.variant = variant;
   // The timeline pads with the form's values; the grid and the trims
   // pad with the project's own buffers, which the server defaults to.
   if (settings.mode === "single") {

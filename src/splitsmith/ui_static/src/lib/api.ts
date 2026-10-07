@@ -1071,6 +1071,11 @@ export interface ExportPresetBody {
   tail_pad_seconds: number;
   transition_kind: TransitionKind;
   transition_seconds: number;
+  /** The Look and each card slot's template variant (#1246). */
+  look: string;
+  title_page_variant: string;
+  stage_card_variant: string;
+  closing_card_variant: string;
   title_page: boolean;
   title_page_seconds: number;
   title_division: boolean;
@@ -1112,6 +1117,9 @@ export interface ExportPreviewBody {
   tail_pad_seconds?: number;
   /** The bundle name, as the match export's ``project_name``. */
   project_name?: string | null;
+  /** The Look and the card's template variant (#1246). */
+  look?: string;
+  variant?: string;
 }
 
 export interface ExportStageRequestPayload {
