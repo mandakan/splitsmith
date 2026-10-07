@@ -73,6 +73,9 @@ export function previewBody(
    *  against it first, so a preset's uninstalled Look previews as the
    *  default instead of a 422 (review of #1246). */
   looks: LookInfo[] = BUILTIN_LOOKS,
+  /** The export's stage selection, in order: the match summary card
+   *  summarises exactly these, as the video will. */
+  stageNumbers?: readonly number[],
 ): ExportPreviewBody {
   const body: ExportPreviewBody = {
     card,
@@ -97,6 +100,7 @@ export function previewBody(
   // A card a template draws previews moving when its template animates
   // (#1249); the server answers a still card with the PNG it always did.
   if (MOVING_CARDS.has(card)) body.motion = true;
+  if (card === "match_summary" && stageNumbers) body.stage_numbers = [...stageNumbers];
   return body;
 }
 

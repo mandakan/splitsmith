@@ -24,7 +24,7 @@ import io
 import json
 import logging
 import subprocess
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -273,17 +273,26 @@ def match_summary_for(
     title: str,
     label: str,
     work_dir: Path,
+    stage_numbers: Sequence[int] | None = None,
 ) -> MatchSummary:
     """The match summary the export would draw, from each stage's audit doc
     (the preview reads docs, not files, so each is written to ``work_dir``
-    and read back through the export's own loader)."""
+    and read back through the export's own loader). ``stage_numbers`` is
+    the export's selection, in its order; ``None`` is every stage."""
     stages: list[tuple[str, TileStageData]] = []
-    for stage in project.stages:
+    by_number = {stage.stage_number: stage for stage in project.stages}
+    chosen = (
+        list(project.stages)
+        if stage_numbers is None
+        else [by_number[n] for n in stage_numbers if n in by_number]
+    )
+    for stage in chosen:
         folder = work_dir / f"stage{stage.stage_number}"
         folder.mkdir(parents=True, exist_ok=True)
         stages.append(
             (
-                stage.stage_name,
+                # The name the export prints (``match_exports``): "Stage N" for a blank one.
+                stage_display_name(stage.stage_number, stage.stage_name),
                 TileStageData(
                     label=label,
                     stage_number=stage.stage_number,

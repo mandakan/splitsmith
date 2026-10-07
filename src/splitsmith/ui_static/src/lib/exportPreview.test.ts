@@ -30,6 +30,12 @@ describe("previewCardFor", () => {
 });
 
 describe("previewBody", () => {
+  it("sends the export's stage selection with the match summary, and only with it", () => {
+    const body = previewBody(DEFAULT_EXPORT_SETTINGS, "match_summary", 3, "", undefined, [3, 5]);
+    expect(body.stage_numbers).toEqual([3, 5]);
+    expect("stage_numbers" in previewBody(DEFAULT_EXPORT_SETTINGS, "title", 3, "", undefined, [3, 5])).toBe(false);
+  });
+
   it("carries the title line, the pads and the width from the form", () => {
     const s = {
       ...DEFAULT_EXPORT_SETTINGS,

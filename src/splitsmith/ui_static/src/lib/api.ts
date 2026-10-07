@@ -1230,6 +1230,8 @@ export interface ExportPreviewBody {
   title_division?: boolean;
   /** "Made with splitsmith" on the closing card. Server default on. */
   made_with?: boolean;
+  /** The export's stage selection (the match summary card only). */
+  stage_numbers?: number[];
   head_pad_seconds?: number;
   tail_pad_seconds?: number;
   /** The bundle name, as the match export's ``project_name``. */

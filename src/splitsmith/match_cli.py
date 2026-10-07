@@ -614,6 +614,12 @@ def export(
     if summary_hold < 0:
         console.print(f"[red]Error:[/] --summary-hold must not be negative, got {summary_hold:g}.")
         raise typer.Exit(code=2)
+    if match_summary and not 0.5 <= match_summary_seconds <= 30.0:
+        console.print(
+            "[red]Error:[/] --match-summary-seconds must be between 0.5 and 30, "
+            f"got {match_summary_seconds:g}."
+        )
+        raise typer.Exit(code=2)
     from .composition import validate_transition_kind
 
     try:

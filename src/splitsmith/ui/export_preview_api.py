@@ -62,6 +62,9 @@ class ExportPreviewRequest(BaseModel):
     width: int = Field(default=960, ge=160, le=1920)
     title_info: str | None = None
     title_division: bool = True
+    #: The export's stage selection, in its order: the match summary card
+    #: summarises these, as the video will. ``None`` is every stage.
+    stage_numbers: list[int] | None = None
     #: "Made with splitsmith" on the closing card.
     made_with: bool = True
     head_pad_seconds: float = Field(default=5.0, ge=0)
@@ -140,18 +143,26 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
     stage_number = req.stage_number
     match_summary = None
     if req.card == "match_summary" and project.stages:
-        # Every stage's audit, as the export reads them; the card sits on the
-        # last stage's final frame whichever stage the rail has in focus.
-        name = req.project_name or project.name
-        with tempfile.TemporaryDirectory(prefix="match-summary-") as summary_work:
-            match_summary = match_summary_for(
-                project,
-                {s.stage_number: state.load_audit(slug, s.stage_number)[0] for s in project.stages},
-                title=name,
-                label=project.competitor_name or name,
-                work_dir=Path(summary_work),
-            )
-        stage_number = project.stages[-1].stage_number
+        # The selected stages' audits, as the export reads them; the card sits
+        # on the last one's final frame whichever stage the rail has in focus.
+        known = {s.stage_number for s in project.stages}
+        chosen = (
+            [s.stage_number for s in project.stages]
+            if req.stage_numbers is None
+            else [n for n in req.stage_numbers if n in known]
+        )
+        if chosen:
+            name = req.project_name or project.name
+            with tempfile.TemporaryDirectory(prefix="match-summary-") as summary_work:
+                match_summary = match_summary_for(
+                    project,
+                    {n: state.load_audit(slug, n)[0] for n in chosen},
+                    title=name,
+                    label=project.competitor_name or name,
+                    work_dir=Path(summary_work),
+                    stage_numbers=chosen,
+                )
+            stage_number = chosen[-1]
     audit_doc, _audit_version = state.load_audit(slug, stage_number)
     # The event's logo (the branding work), brought to this disk like a
     # shooter's; the title page and the closing card draw it.

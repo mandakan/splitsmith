@@ -68,7 +68,9 @@ class MatchSummary:
     avg_split: float | None
     best_draw: float | None
     rounds: int | None
-    hits: dict[str, int] | None
+    #: Per count, the sum over the stages that reported it; ``None`` where
+    #: no stage did (printed "-", never 0).
+    hits: dict[str, int | None] | None
     #: How many stages each figure stands on, for :func:`coverage_lines`.
     split_stages: int
     scored_stages: int
@@ -94,7 +96,7 @@ def build_match_summary(
     rounds = 0
     split_stages = 0
     scored_stages = 0
-    hits = dict.fromkeys(HIT_KEYS, 0)
+    hits: dict[str, int | None] = dict.fromkeys(HIT_KEYS)
     any_dq = False
     for name, tile in stages:
         card = tile.scorecard
@@ -112,10 +114,14 @@ def build_match_summary(
         if scored:
             assert card is not None
             counts = [getattr(card, field) for field in _HIT_FIELDS]
-            if any(c is not None for c in counts) or card.hit_factor is not None:
+            # A stage stands behind the hit sums only when it reported a count;
+            # a field no stage reported stays ``None``, as the stage summary
+            # leaves an absent count out rather than drawing a zero.
+            if any(c is not None for c in counts):
                 scored_stages += 1
                 for key, count in zip(HIT_KEYS, counts, strict=True):
-                    hits[key] += count or 0
+                    if count is not None:
+                        hits[key] = (hits[key] or 0) + count
         rows.append(
             MatchSummaryRow(
                 number=tile.stage_number,
@@ -145,13 +151,19 @@ def build_match_summary(
 
 
 def coverage_lines(summary: MatchSummary) -> list[str]:
-    """Say how much of the match a figure stands on, when it is not all of it."""
+    """The card's notes: how much of the match a figure stands on when it is
+    not all of it, what the table's ``*`` means, and any DQ."""
     lines: list[str] = []
     total = summary.stage_count
     if 0 < summary.split_stages < total:
         lines.append(f"Splits from {summary.split_stages} of {total} stages")
     if 0 < summary.scored_stages < total:
         lines.append(f"Scores from {summary.scored_stages} of {total} stages")
+    if any(row.time_is_manual and row.time_seconds is not None for row in summary.rows):
+        lines.append("* stage time entered by hand")
+    dq = [str(row.number) for row in summary.rows if row.dq]
+    if dq:
+        lines.append(f"DQ on stage{'s' if len(dq) > 1 else ''} {', '.join(dq)}")
     return lines
 
 
@@ -184,7 +196,9 @@ def headline_figures(summary: MatchSummary) -> list[tuple[str, str]]:
         ("Rounds", DASH if summary.rounds is None else str(summary.rounds)),
     ]
     if summary.hits is not None:
-        figures.extend((key, str(summary.hits[key])) for key in HIT_KEYS)
+        figures.extend(
+            (key, DASH if summary.hits[key] is None else str(summary.hits[key])) for key in HIT_KEYS
+        )
     return figures
 
 
@@ -209,7 +223,8 @@ def match_summary_html(summary: MatchSummary, *, width: int, height: int, theme:
     columns = 1 if summary.stage_count <= ROWS_PER_COLUMN else 2
     per_column = max(1, math.ceil(summary.stage_count / columns))
     # The table takes what is left under the header and the strip.
-    table_top = pad_y + title_px * 1.3 + figure_px * 1.2 + caption_px * 1.6 + note_px * 2.4
+    note_lines = max(2, len(coverage_lines(summary)))
+    table_top = pad_y + title_px * 1.3 + figure_px * 1.2 + caption_px * 1.6 + note_px * 1.2 * note_lines
     table_height = height - pad_y - table_top
     column_gap = round(width * 0.04)
     column_width = (width - 2 * pad_x - (columns - 1) * column_gap) / columns

@@ -8,7 +8,7 @@ from __future__ import annotations
 import pytest
 
 from splitsmith.match_project import StageScorecard
-from splitsmith.match_summary import build_match_summary, coverage_lines, row_cells
+from splitsmith.match_summary import build_match_summary, coverage_lines, headline_figures, row_cells
 from splitsmith.stage_summary_data import TileShot, TileStageData
 
 
@@ -80,13 +80,6 @@ def test_a_dq_stage_says_dq_and_its_scoring_stays_out_of_the_hits() -> None:
     assert summary.hits == {"A": 10, "C": 2, "D": 1, "M": 0, "NS": 0, "P": 0}
     assert row_cells(summary.rows[1])[3] == "DQ"
     assert summary.dq is True
-
-
-def test_nothing_sums_the_stage_times() -> None:
-    summary = build_match_summary(
-        [("One", _tile(1, time=10.0)), ("Two", _tile(2, time=11.0))], title="M", label="Mathias"
-    )
-    assert not any(hasattr(summary, name) for name in ("total_time", "match_pct", "total_seconds"))
 
 
 def _long_match(n: int):
@@ -311,6 +304,10 @@ def test_the_preview_draws_the_whole_match_summary(tmp_path, monkeypatch: pytest
     assert r.headers["content-type"] == "image/png"
     assert [row.number for row in drawn[-1].rows] == [1, 2]
     assert drawn[-1].title == "Final Cut"
+    # The export's own selection: the card the video will carry.
+    r = http.post("/api/shooters/me/export-preview", json={**body, "stage_numbers": [2]})
+    assert r.status_code == 200, r.text
+    assert [row.number for row in drawn[-1].rows] == [2]
     runtime_module._clear_runtime_cache()
 
 
@@ -329,3 +326,81 @@ def test_the_preview_key_moves_with_the_summary() -> None:
     }
     assert len(keys) == 2
     assert preview_key(base, slug="me", project_updated_at="t", audit="x") not in keys
+
+
+def test_a_count_no_scorecard_reported_is_a_dash_not_a_zero() -> None:
+    hf_only = StageScorecard(hit_factor=5.0)
+    partial = StageScorecard(hit_factor=6.0, alphas=10, charlies=2)
+    summary = build_match_summary([("One", _tile(1, card=hf_only))], title="M", label="X")
+    assert summary.hits is None
+    assert coverage_lines(summary) == []
+    summary = build_match_summary(
+        [("One", _tile(1, card=partial)), ("Two", _tile(2, card=hf_only))], title="M", label="X"
+    )
+    assert summary.hits == {"A": 10, "C": 2, "D": None, "M": None, "NS": None, "P": None}
+    figures = dict(headline_figures(summary))
+    assert figures["A"] == "10" and figures["D"] == "-"
+    # Only the stage that reported counts stands behind them.
+    assert coverage_lines(summary) == ["Scores from 1 of 2 stages"]
+
+
+def test_a_manual_time_and_a_dq_are_explained_on_the_card() -> None:
+    dq = CARD.model_copy(update={"dq": True})
+    manual = TileStageData(label="X", stage_number=1, stage_time_seconds=9.0, stage_time_is_manual=True)
+    summary = build_match_summary(
+        [("One", manual), ("Two", _tile(2, time=11.0, card=dq))], title="M", label="X"
+    )
+    lines = coverage_lines(summary)
+    assert "* stage time entered by hand" in lines
+    assert "DQ on stage 2" in lines
+
+
+def test_the_render_encodes_the_match_summary_before_the_closing_card(tmp_path) -> None:
+    from dataclasses import replace
+    from unittest.mock import MagicMock
+
+    from splitsmith import composition, mp4_render
+
+    from .test_mp4_render import _FakeRasterizer, _ok, _summarised_composition
+
+    comp = _summarised_composition(tmp_path)
+    summary = build_match_summary(
+        [("Up <b>the</b> hill", _tile(1, shots=_shots(1.4, 0.2), time=14.21, card=CARD))],
+        title="Stockholm Open",
+        label="Me",
+        duration_seconds=6.0,
+    )
+    comp = replace(
+        comp,
+        match_summary=summary,
+        closing=composition.MatchTitle(text="Stockholm Open", duration_seconds=3.0),
+    )
+    runner = MagicMock(side_effect=_ok)
+    work = tmp_path / "work"
+    fake = _FakeRasterizer()
+    result = mp4_render.render_mp4(
+        comp, output_path=tmp_path / "m.mp4", work_dir=work, runner=runner, rasterizer=fake
+    )
+    names = [line.rsplit("/", 1)[-1].rstrip("'") for line in (work / "concat.txt").read_text().splitlines()]
+    assert names[-2:] == ["match_summary.mp4", "closing.mp4"]
+    html = next(call for call in fake.calls if "Stockholm Open" in call and "Avg split" in call)
+    assert "&lt;b&gt;" in html and "<b>" not in html
+    grabs = [c.args[0] for c in runner.call_args_list if c.args[0][-1].endswith("match_summary_backdrop.png")]
+    assert len(grabs) == 1
+    assert result.duration_seconds == pytest.approx(46.0 + 6.0 + 3.0)
+
+
+@pytest.mark.parametrize("seconds", ["0", "-1", "31"])
+def test_the_cli_refuses_a_hold_the_encode_cannot_make(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, seconds: str
+) -> None:
+    from splitsmith.cli import app
+
+    from .test_match_cli_export import _capture_mp4, _seed, runner
+
+    root = _seed(tmp_path)
+    captured = _capture_mp4(monkeypatch)
+    args = ["match", "export", str(root), "--shooter", "me", "--format", "mp4", "--match-summary"]
+    result = runner.invoke(app, [*args, "--match-summary-seconds", seconds])
+    assert result.exit_code != 0
+    assert "comp" not in captured
