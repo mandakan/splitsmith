@@ -1102,6 +1102,24 @@ export interface ExportPreset {
   body: ExportPresetBody;
 }
 
+/** One template variant of a Look slot as ``GET /api/looks`` lists it (#1246). */
+export interface LookVariantInfo {
+  name: string;
+  /** ``/api/looks/<owner>/preview/<file>`` or null when no Look has a picture. */
+  preview: string | null;
+}
+
+/** One installed Look (#1246). ``slots`` has every slot name; a card slot
+ *  lists ``default`` first; ``transition`` lists the stings. */
+export interface LookInfo {
+  name: string;
+  label: string;
+  source: "shipped" | "user";
+  accent_series: string[];
+  preview: string | null;
+  slots: Record<string, LookVariantInfo[]>;
+}
+
 export type PreviewCard = "frame" | "title" | "slate" | "lower-third" | "summary" | "closing" | "overlay";
 
 /** Body of ``POST /api/shooters/{slug}/export-preview`` (spec 2026-09-15
@@ -1263,6 +1281,12 @@ export interface MatchExportRequestPayload {
   title_page_duration_seconds?: number;
   /** Close the rendered MP4 with a generated card. */
   closing_card?: boolean;
+  /** The Look (#1246): any installed Look name; the server default. */
+  overlay_theme?: string;
+  /** Per-slot template variants (#1246); unset means the server's ``card_variant`` knob. */
+  title_page_variant?: string | null;
+  stage_card_variant?: string | null;
+  closing_card_variant?: string | null;
   /** Issue #972. Hold each stage's summary -- name, scoring, splits over
    *  the blurred last frame -- for this many seconds after its action in
    *  the rendered MP4. 0 (the server default) is off. */
@@ -1347,7 +1371,12 @@ export interface CompareGridRequestPayload {
    *  hold needs the overlay on; the server refuses the pair otherwise
    *  with a 400. */
   overlay?: boolean;
-  overlay_theme?: "splitsmith" | "clean";
+  /** The Look (#1246): any installed Look name. */
+  overlay_theme?: string;
+  /** Per-slot template variants (#1246); unset means the ``card_variant`` knob. */
+  title_page_variant?: string | null;
+  stage_card_variant?: string | null;
+  closing_card_variant?: string | null;
   summary_hold_seconds?: number;
   /** Another of each shooter's cameras small in a corner of their tile:
    *  one selector (a mount or role) for the whole grid. */
@@ -2611,7 +2640,7 @@ export function currentShareTokenFromLocation(): string | null {
  *  unnecessary. */
 const MATCH_SCOPED_PREFIXES = ["/api/shooters/", "/api/match/"];
 
-function scopeRequestPath(path: string): string {
+export function scopeRequestPath(path: string): string {
   if (!MATCH_SCOPED_PREFIXES.some((p) => path.startsWith(p))) return path;
   const shareToken = currentShareTokenFromLocation();
   if (shareToken) {
@@ -4870,6 +4899,8 @@ export const api = {
   // Export presets (spec 2026-09-15 s1): both modes, per user hosted.
 
   getExportPresets: () => request<{ presets: ExportPreset[] }>("/api/settings/export-presets"),
+  /** The installed Looks with their slots, variants and previews (#1246). */
+  listLooks: () => request<{ looks: LookInfo[] }>("/api/looks"),
 
   /** The PNG for one card on one stage; rejects with an ApiError whose
    *  status the rail maps to a line (503 no browser, 409 no shots). */

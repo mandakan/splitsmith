@@ -176,3 +176,32 @@ describe("transitionsSupported by format and mode (#1244)", () => {
     expect(transitionsSupported("mp4")).toBe(true);
   });
 });
+
+
+describe("the Look choice on the mappers (#1246)", () => {
+  const choice = { look: "clean", titlePageVariant: "rise", stageCardVariant: "default", closingCardVariant: "rise" };
+
+  it("matchExportFields sends the match-card variants where cards go and the stage card's where stage cards go", () => {
+    const mp4 = matchExportFields(ON, "mp4", choice);
+    expect(mp4.title_page_variant).toBe("rise");
+    expect(mp4.stage_card_variant).toBe("default");
+    expect(mp4.closing_card_variant).toBe("rise");
+    const fcpxml = matchExportFields(ON, "fcpxml", choice);
+    expect(fcpxml.stage_card_variant).toBe("default");
+    expect("title_page_variant" in fcpxml).toBe(false);
+    expect("closing_card_variant" in fcpxml).toBe(false);
+    const fcp7 = matchExportFields(ON, "fcp7xml", choice);
+    expect("stage_card_variant" in fcp7).toBe(false);
+    expect(matchExportFields(ON, "mp4")).not.toHaveProperty("title_page_variant");
+  });
+
+  it("gridExportFields sends all three", () => {
+    const fields = gridExportFields(ON, choice);
+    expect([fields.title_page_variant, fields.stage_card_variant, fields.closing_card_variant]).toEqual([
+      "rise",
+      "default",
+      "rise",
+    ]);
+    expect(gridExportFields(ON)).not.toHaveProperty("title_page_variant");
+  });
+});

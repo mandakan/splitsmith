@@ -15,6 +15,7 @@
  */
 
 import type { CompareGridRequestPayload, MatchExportRequestPayload } from "./api";
+import type { LookChoice } from "./looks";
 
 export type StageCardStyle = "none" | "slate" | "lower-third";
 export type OutputFormat = NonNullable<MatchExportRequestPayload["output_format"]>;
@@ -101,6 +102,9 @@ export type MatchExportCardFields = Pick<
       | "title_page_duration_seconds"
       | "closing_card"
       | "summary_hold_seconds"
+      | "title_page_variant"
+      | "stage_card_variant"
+      | "closing_card_variant"
     >
   >;
 
@@ -111,11 +115,14 @@ export type MatchExportCardFields = Pick<
 export function matchExportFields(
   options: RenderOptions,
   outputFormat: OutputFormat | undefined,
+  /** The resolved Look choice (#1246); omitted, no variant field is sent. */
+  look?: LookChoice,
 ): MatchExportCardFields {
   const fields: MatchExportCardFields = {
     title_kind: stageCardsSupported(outputFormat) ? options.stageCardStyle : "none",
     title_duration_seconds: clampSeconds(options.stageCardDurationSeconds, MIN_CARD_SECONDS),
   };
+  if (look && stageCardsSupported(outputFormat)) fields.stage_card_variant = look.stageCardVariant;
   if (!cardsSupported(outputFormat)) return fields;
   return {
     ...fields,
@@ -125,6 +132,7 @@ export function matchExportFields(
     title_page_duration_seconds: clampSeconds(options.titlePageDurationSeconds, MIN_CARD_SECONDS),
     closing_card: options.closingCard,
     summary_hold_seconds: clampSeconds(options.summaryHoldSeconds, 0),
+    ...(look ? { title_page_variant: look.titlePageVariant, closing_card_variant: look.closingCardVariant } : {}),
   };
 }
 
@@ -132,6 +140,8 @@ export function matchExportFields(
  *  rendered MP4. The summary hold is not the grid's (#705). */
 export function gridExportFields(
   options: RenderOptions,
+  /** The resolved Look choice (#1246); omitted, no variant field is sent. */
+  look?: LookChoice,
 ): Pick<
   CompareGridRequestPayload,
   | "stage_titles"
@@ -141,6 +151,9 @@ export function gridExportFields(
   | "title_division"
   | "title_page_duration_seconds"
   | "closing_card"
+  | "title_page_variant"
+  | "stage_card_variant"
+  | "closing_card_variant"
 > {
   return {
     stage_titles: options.stageCardStyle,
@@ -150,6 +163,13 @@ export function gridExportFields(
     title_division: options.titleDivision,
     title_page_duration_seconds: clampSeconds(options.titlePageDurationSeconds, MIN_CARD_SECONDS),
     closing_card: options.closingCard,
+    ...(look
+      ? {
+          title_page_variant: look.titlePageVariant,
+          stage_card_variant: look.stageCardVariant,
+          closing_card_variant: look.closingCardVariant,
+        }
+      : {}),
   };
 }
 

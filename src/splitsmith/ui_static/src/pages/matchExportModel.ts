@@ -12,6 +12,7 @@ import type {
   MatchExportRequestPayload,
   OverlayCodec,
 } from "@/lib/api";
+import type { LookChoice } from "@/lib/looks";
 import { camExportFields, type CamOptions } from "@/lib/camOptions";
 import { visibleTransitionKind } from "@/lib/lookGallery";
 import type { TransitionKind } from "@/lib/exportPresets";
@@ -82,6 +83,8 @@ export function buildCompareGridPayload(input: {
    *  draw the kind, so an untouched body stays as it was. */
   transitionKind?: TransitionKind;
   transitionSeconds?: number;
+  /** The resolved Look choice (#1246); sent whenever given. */
+  look?: LookChoice;
 }): CompareGridRequestPayload {
   const payload: CompareGridRequestPayload = {
     stage_numbers: [...input.stageNumbers].sort((a, b) => a - b),
@@ -95,7 +98,10 @@ export function buildCompareGridPayload(input: {
     payload.transition_kind = transition;
     payload.transition_duration_seconds = clampSeconds(input.transitionSeconds ?? 0.5, 0.1);
   }
-  if (input.render && anyRenderOptionOn(input.render)) Object.assign(payload, gridExportFields(input.render));
+  if (input.look) payload.overlay_theme = input.look.look;
+  if (input.render && anyRenderOptionOn(input.render)) {
+    Object.assign(payload, gridExportFields(input.render, input.look));
+  }
   if (input.overlay) {
     payload.overlay = true;
     const hold = input.summaryHoldSeconds ?? 0;
@@ -190,6 +196,8 @@ export interface MatchExportPayloadInput {
    *  render and upload, which only makes sense as an MP4 that uploads. */
   uploadTarget: "desk" | "desktop";
   youtubeConnected: boolean;
+  /** The resolved Look choice (#1246); omitted, the server's defaults. */
+  look?: LookChoice;
 }
 
 /** The single-shooter match-export request body, for either the desk
@@ -212,7 +220,8 @@ export function buildMatchExportPayload(input: MatchExportPayloadInput): MatchEx
     output_format: outputFormat,
     transition_kind: visibleTransitionKind(input.transitionKind, outputFormat),
     transition_duration_seconds: clampSeconds(input.transitionSeconds, 0.1),
-    ...matchExportFields(input.renderOptions, outputFormat),
+    ...matchExportFields(input.renderOptions, outputFormat, input.look),
+    ...(input.look ? { overlay_theme: input.look.look } : {}),
     intro_path: undefined,
     outro_path: undefined,
     youtube_sidecar: youtube,

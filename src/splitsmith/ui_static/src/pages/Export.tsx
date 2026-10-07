@@ -86,6 +86,8 @@ import {
   type FixTarget,
 } from "@/lib/exportPlan";
 import { useDeploymentMode } from "@/lib/features";
+import { resolveLookChoice } from "@/lib/looks";
+import { useLooks } from "@/lib/useLooks";
 import { useMatchHref } from "@/lib/matchHref";
 import { useDesktopCommands } from "@/lib/useDesktopCommands";
 import { visibleTransitionKind } from "@/lib/lookGallery";
@@ -123,6 +125,7 @@ export function Export() {
 
 function ExportInner({ slug }: { slug: string }) {
   const { mode: deploymentMode } = useDeploymentMode();
+  const { looks } = useLooks();
   const hosted = deploymentMode === "hosted";
   const ctx = useOutletContext<MatchShellOutletContext>();
   const href = useMatchHref();
@@ -658,6 +661,7 @@ function ExportInner({ slug }: { slug: string }) {
         overlayCodec,
         projectName: projectName || project.name,
         uploadTarget: "desktop",
+        look: resolveLookChoice(looks, settings),
         youtubeConnected: false,
       }),
     );
@@ -687,6 +691,7 @@ function ExportInner({ slug }: { slug: string }) {
           overlayCodec,
           projectName: projectName || project.name,
           uploadTarget: "desk",
+          look: resolveLookChoice(looks, settings),
           youtubeConnected: !!youtubeSettings?.connected,
         }),
       );
@@ -719,6 +724,7 @@ function ExportInner({ slug }: { slug: string }) {
         transitionSeconds,
         cams: camOptions,
         freeCell: gridFreeCells(shooters.length) > 0 ? gridFreeCell : "blank",
+        look: resolveLookChoice(looks, settings),
         youtube,
         descriptionLead,
         uploadOptions,
