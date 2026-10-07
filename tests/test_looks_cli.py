@@ -94,3 +94,75 @@ def test_preview_of_a_broken_user_look_exits_2_naming_the_manifest(
     result = runner.invoke(app, ["looks", "preview", "clean", "--out", str(home / "out")])
     assert result.exit_code == 2 and "look.json" in result.output
     assert not (home / "out").exists()
+
+
+# --- review notes from the slice-1 review (housekeeping) -------------------------------------
+
+
+def test_new_prints_the_guide_as_a_link_that_exists_outside_the_repo(home: Path) -> None:
+    result = runner.invoke(app, ["looks", "new", "club", "--from", "splitsmith"])
+    assert result.exit_code == 0, result.output
+    assert "https://" in result.output and "authoring.md" in result.output
+    assert "Guide: docs/" not in result.output
+
+
+def test_check_reports_a_missing_look_without_needing_a_browser(
+    home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from splitsmith.overlay_raster import RasterizerUnavailableError
+
+    @contextmanager
+    def missing():  # type: ignore[no-untyped-def]
+        raise RasterizerUnavailableError("no browser", "Chromium is not installed")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(looks_cli, "open_chromium", missing)
+    result = runner.invoke(app, ["looks", "check", "nope"])
+    assert result.exit_code == 1, result.output
+    assert "no Look named 'nope'" in result.output
+
+
+def _project(tmp_path: Path, *, beep: float | None) -> Path:
+    from splitsmith.match_project import MatchProject, StageEntry, StageVideo
+    from tests.conftest import scaffold_match
+
+    _root, shooter_root = scaffold_match(tmp_path / "proj")
+    project = MatchProject.load(shooter_root)
+    project.stages = [
+        StageEntry(
+            stage_number=1,
+            stage_name="K-vallen",
+            time_seconds=20.0,
+            videos=[StageVideo(path=Path("raw/v.mp4"), role="primary", beep_time=beep)],
+        )
+    ]
+    project.save(shooter_root)
+    return shooter_root
+
+
+@pytest.mark.parametrize(
+    "beep, says",
+    [(None, "has no confirmed beep"), (5.0, "No trim for stage 1 on this disk")],
+)
+def test_preview_on_a_stage_says_why_it_falls_back_to_the_demo_scene(
+    home: Path, monkeypatch: pytest.MonkeyPatch, beep: float | None, says: str
+) -> None:
+    _use(monkeypatch, _Raster())
+    shooter = _project(home, beep=beep)
+    out = home / "out"
+    result = runner.invoke(
+        app, ["looks", "preview", "clean", "--out", str(out), "--project", str(shooter), "--stage", "1"]
+    )
+    assert result.exit_code == 0, result.output
+    assert says in result.output
+    assert (out / "contact-sheet.png").is_file()
+
+
+def test_preview_refuses_a_stage_the_project_lacks(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _use(monkeypatch, _Raster())
+    shooter = _project(home, beep=5.0)
+    result = runner.invoke(
+        app,
+        ["looks", "preview", "clean", "--out", str(home / "o"), "--project", str(shooter), "--stage", "9"],
+    )
+    assert result.exit_code == 2 and "stage 9" in result.output

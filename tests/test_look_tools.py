@@ -261,3 +261,19 @@ def test_preview_names_every_card_and_sting_a_throwing_template_left_out(user_di
     assert "sting / wipe" in result.skipped
     assert "title_page / default" in result.skipped
     assert not any(p.name == "transition-wipe.png" for p in result.written)
+
+
+def test_new_from_a_look_copies_its_other_files_but_not_its_previews(user_dir: Path) -> None:
+    """A Look whose template loads ``badge.png`` or ``style.css`` beside it
+    lost them on a copy: only the manifest's templates came along."""
+    source = look_tools.new_look("source", starter="still")
+    (source / "img").mkdir()
+    (source / "img" / "badge.png").write_bytes(b"png bytes")
+    (source / "style.css").write_text("body { }", encoding="utf-8")
+    (source / "preview").mkdir()
+    (source / "preview" / "look.png").write_bytes(b"old preview")
+    copy = look_tools.new_look("copy", from_look="source")
+    assert (copy / "img" / "badge.png").read_bytes() == b"png bytes"
+    assert (copy / "style.css").is_file() and (copy / "still.html").is_file()
+    assert not (copy / "preview").exists()
+    assert json.loads((copy / "look.json").read_text(encoding="utf-8"))["name"] == "copy"

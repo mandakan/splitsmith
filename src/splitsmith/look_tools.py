@@ -37,6 +37,7 @@ from .looks import (
     DEFAULT_LOOK,
     LOOK_NAME_RE,
     MANIFEST_FILE,
+    PREVIEW_DIR,
     STING_SLOT,
     Look,
     LookError,
@@ -173,14 +174,21 @@ def new_look(name: str, *, from_look: str | None = None, starter: str | None = N
         source = strict_look(from_look or DEFAULT_LOOK)
         manifest = source.manifest.model_dump(exclude={"source"})
         manifest.update(name=name, label=_label(name))
+        # The whole folder, not only the templates the manifest names: a
+        # template may load an image or a stylesheet beside it. Not its
+        # previews (pictures of the source, under the copy's name) and not
+        # the manifest, which is written fresh below.
         files = {
-            file: source.root / file
-            for variants in source.manifest.slots.values()
-            for file in variants.values()
+            str(path.relative_to(source.root)): path
+            for path in sorted(source.root.rglob("*"))
+            if path.is_file()
+            and path.name != MANIFEST_FILE
+            and path.relative_to(source.root).parts[0] != PREVIEW_DIR
         }
     root.mkdir(parents=True)
     try:
         for file, src in files.items():
+            (root / file).parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(src, root / file)
         (root / MANIFEST_FILE).write_text(
             json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
