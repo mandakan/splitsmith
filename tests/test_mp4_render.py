@@ -2093,7 +2093,11 @@ def test_build_boundary_command_lays_a_sting_clip_over_the_fade(tmp_path: Path) 
     video for the whole boundary before the final pixel format; without
     a clip the argv is slice 4's, byte for byte."""
     comp = _carded_composition(tmp_path)
-    args = dict(seconds=1.0, sequence=comp.sequence, output_path=tmp_path / "boundary_003.mp4")
+    args: dict[str, Any] = {
+        "seconds": 1.0,
+        "sequence": comp.sequence,
+        "output_path": tmp_path / "boundary_003.mp4",
+    }
     base = mp4_render._build_boundary_command(
         tmp_path / "t.mp4", tmp_path / "h.mp4", kind="sting:wipe", **args
     )

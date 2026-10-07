@@ -1666,3 +1666,102 @@ def test_a_stage_that_fails_after_a_boundary_keeps_elapsed_and_the_chapters_hone
     assert [(c.start_seconds, c.title) for c in result.chapters] == [(0.0, "Stage 1"), (11.0, "Stage 3")]
     (note,) = result.degradations
     assert "stage2" in note.summary and "stage1" in note.summary and "0.5" in note.summary
+
+
+# --- stings (#1245) ----------------------------------------------------------------
+
+
+def _sting_grid(tmp_path: Path, *, kind: str = "sting:wipe", rasterizer=None, boundary_inner=_ok):
+    from tests.test_compare_mp4_grid_cards import _FakeRasterizer
+
+    calls, runner = _recorder()
+    edges, boundary_runner = _recorder(boundary_inner)
+    work = tmp_path / "work"
+    fake = _FakeRasterizer(motion_seconds=1.0) if rasterizer is None else rasterizer
+    result = mp4_grid.render_grid_mp4(
+        _shooters(),
+        audio_label="Mathias",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=runner,
+        boundary_runner=boundary_runner,
+        rasterizer=fake,
+        work_dir=work,
+        ffmpeg_binary="/bin/ffmpeg",
+        transitions=(
+            composition.Transition(from_stage_index=0, to_stage_index=1, kind=kind, duration_seconds=1.0),
+        ),
+    )
+    return result, calls, edges, fake, work
+
+
+def test_a_sting_boundary_takes_the_clip_on_the_boundary_runner_only(tmp_path: Path, monkeypatch) -> None:
+    """Issue #1245: the clip is written before the boundary encodes and is
+    an input of that segment alone; the stages, the edges and the
+    progress runner are untouched; the sting spans the boundary from its
+    first frame even though the tail edge is padded with a held frame."""
+    from tests.test_compare_mp4_grid_cards import _fake_clip_writer
+
+    monkeypatch.setattr(mp4_grid, "write_motion_clip", _fake_clip_writer)
+    result, calls, edges, fake, work = _sting_grid(tmp_path)
+    assert result.degradations == ()
+    assert [c[-1].rsplit("/", 1)[-1] for c in calls] == ["stage1.mov", "stage2.mov", "grid.mp4"]
+    assert [c[-1].rsplit("/", 1)[-1] for c in edges] == [
+        "edge-stage1-tail.mov",
+        "edge-stage2-head.mov",
+        "boundary-000.mov",
+    ]
+    boundary = edges[2]
+    clip = work / "boundary-000_sting.mov"
+    inputs = [boundary[i + 1] for i, token in enumerate(boundary) if token == "-i"]
+    assert inputs[2] == str(clip) and clip.exists()
+    graph = boundary[boundary.index("-filter_complex") + 1]
+    assert graph.startswith("[0:v]tpad=stop_mode=clone:stop_duration=0.5[tv];[tv][1:v]xfade=transition=fade")
+    assert (
+        ",trim=0:1[motion];[xf][motion]overlay=0:0:format=auto[stung];[stung]format=yuv420p[final]" in graph
+    )
+    assert "start_mode=add" not in graph
+    assert fake.frames_rendered == 30
+    assert not any(token.endswith("_sting.mov") for cmd in (*calls, edges[0], edges[1]) for token in cmd)
+    names = [line.rsplit("/", 1)[-1].rstrip("'") for line in (work / "concat.txt").read_text().splitlines()]
+    assert names == ["stage1.mov", "boundary-000.mov", "stage2.mov"]
+
+
+def test_a_sting_the_look_lacks_is_a_fade_on_the_grid(tmp_path: Path, monkeypatch) -> None:
+    from tests.test_compare_mp4_grid_cards import _fake_clip_writer
+
+    monkeypatch.setattr(mp4_grid, "write_motion_clip", _fake_clip_writer)
+    result, _calls, edges, fake, _work = _sting_grid(tmp_path, kind="sting:nope")
+    (note,) = result.degradations
+    assert (
+        note.summary == "sting nope is not in the splitsmith Look; transition after stage1 rendered as a fade"
+    )
+    boundary = edges[2]
+    assert len([t for t in boundary if t == "-i"]) == 2
+    assert (
+        "xfade=transition=fade:duration=1:offset=0,format=yuv420p[final]"
+        in boundary[boundary.index("-filter_complex") + 1]
+    )
+    assert fake.frames_rendered == 0
+
+
+def test_a_sting_whose_frames_fail_is_a_cut_on_the_grid(tmp_path: Path, monkeypatch) -> None:
+    from splitsmith.look_motion import MotionClipError
+
+    def writer_that_fails(frames, *, out: Path, fps: float, ffmpeg_binary: str):
+        frames.close()
+        out.unlink(missing_ok=True)
+        raise MotionClipError(f"{out.name}: boom on frame 2")
+
+    monkeypatch.setattr(mp4_grid, "write_motion_clip", writer_that_fails)
+    result, calls, edges, _fake, work = _sting_grid(tmp_path)
+    (note,) = result.degradations
+    assert note.summary == (
+        "transition after stage1 failed to render (boundary-000_sting.mov: boom on frame 2); "
+        "rendered as a cut"
+    )
+    assert [c[-1].rsplit("/", 1)[-1] for c in edges] == ["edge-stage1-tail.mov", "edge-stage2-head.mov"]
+    assert _video_ss_t(calls[0], "/trims/s.mp4") == ("1", "11.5")
+    assert _video_ss_t(calls[1], "/trims/s.mp4") == ("1", "11.5")
+    assert not (work / "boundary-000_sting.mov").exists()
+    assert all(stage.ok for stage in result.stages)
