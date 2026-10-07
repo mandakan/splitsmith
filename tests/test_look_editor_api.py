@@ -101,6 +101,20 @@ def test_the_draft_and_the_time_move_the_cache_key(client) -> None:
     assert _Recorder.calls[-1]["at"] == 0.4 and _Recorder.calls[0]["at"] is None
 
 
+def test_saving_a_look_moves_its_plain_previews_key(client) -> None:
+    """The rail previews a saved Look with no draft; after Save (a new colour,
+    a new font) it must draw again, not serve the card from before."""
+    _put_club(client)
+    body = {"card": "title", "stage_number": 1, "width": 480, "look": "club"}
+    client.post(ROUTE, json=body)
+    client.post(ROUTE, json=body)
+    assert len(_Recorder.calls) == 1
+    _put_club(client, colors={**_draft()["colors"], "accent": [10, 200, 30]})
+    client.post(ROUTE, json=body)
+    assert len(_Recorder.calls) == 2
+    assert _Recorder.calls[-1]["theme"]["accent"] == "#0ac81e"
+
+
 def test_the_sting_card_draws_the_looks_sting_with_the_transition(client) -> None:
     r = client.post(
         ROUTE, json={"card": "sting", "stage_number": 1, "width": 480, "variant": "wipe", "at": 0.5}

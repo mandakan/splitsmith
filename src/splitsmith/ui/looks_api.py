@@ -450,11 +450,13 @@ def list_own_fonts(name: str) -> list[OwnFontInfo]:
 
 
 @router.post("/api/looks/{name}/fonts", status_code=201, response_model=OwnFontInfo)
-async def upload_own_font(name: str, file: Annotated[UploadFile, File()]) -> OwnFontInfo:
+def upload_own_font(name: str, file: Annotated[UploadFile, File()]) -> OwnFontInfo:
     """Store a TTF or OTF in the Look's ``fonts/`` folder (``own_fonts``):
     sniffed and opened with FreeType, never trusted by its name."""
     look = _own_look(name)
-    data = await file.read(MAX_FONT_BYTES + 1)
+    # Sync on purpose: FastAPI runs it on its threadpool, so FreeType
+    # opening the file never blocks the event loop.
+    data = file.file.read(MAX_FONT_BYTES + 1)
     if len(data) > MAX_FONT_BYTES:
         raise HTTPException(status_code=413, detail="The font is larger than 2 MB.")
     try:

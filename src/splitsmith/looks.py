@@ -17,6 +17,7 @@ file named, rather than in the middle of a render.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -303,6 +304,22 @@ def look_files(root: Path) -> dict[str, Path]:
     }
 
 
+def look_fingerprint(root: Path) -> str:
+    """What a render of the Look folder ``root`` depends on, cheaply: every
+    file :func:`look_files` lists and the manifest, by relative path, size
+    and modification time. A Save rewrites ``look.json`` and an own font is
+    a new content-named file, so either moves it. For cache keys that would
+    otherwise know a Look only by its name."""
+    digest = hashlib.sha256()
+    for rel, path in sorted({**look_files(root), MANIFEST_FILE: root / MANIFEST_FILE}.items()):
+        try:
+            st = path.stat()
+        except OSError:
+            continue
+        digest.update(f"{rel}\0{st.st_size}\0{st.st_mtime_ns}\n".encode())
+    return digest.hexdigest()
+
+
 def read_look(root: Path, source: Literal["shipped", "user"]) -> Look:
     """The Look in ``root``, or :class:`LookError` naming what is wrong: the
     strict read ``looks check`` uses, with no shipped fallback (#1262)."""
@@ -515,6 +532,7 @@ def look_catalog() -> list[LookInfo]:
 
 
 __all__ = [
+    "look_fingerprint",
     "look_files",
     "DEFAULT_LOOK",
     "DEFAULT_VARIANT",
