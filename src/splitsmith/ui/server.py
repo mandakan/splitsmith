@@ -208,7 +208,16 @@ from ..fixture_schema import (
     CameraPosition,
     probe_camera_metadata,
 )
-from ..identity import LOGO_DIR, LOGO_MAX_BYTES, LOGO_MAX_SIDE, ShooterIdentity, logo_name
+from ..identity import (
+    EVENT_LOGO_DIR,
+    LOGO_DIR,
+    LOGO_MAX_BYTES,
+    LOGO_MAX_SIDE,
+    ShooterIdentity,
+    event_logo_name,
+    logo_name,
+    sniff_logo,
+)
 from ..looks import load_look
 from ..match_project import (
     STUB_AUDIT_DETECTION,
@@ -277,7 +286,13 @@ from .comments import (
 )
 from .exports_api import CompareGridRequest, ExportStageRequest, MatchExportRequest
 from .http_errors import ensure_source_reachable, source_unreachable
-from .identity_media import ensure_local_logo, grid_identities, resolved_identity_for
+from .identity_media import (
+    ensure_local_event_logo,
+    ensure_local_logo,
+    event_logo_storage_key,
+    grid_identities,
+    resolved_identity_for,
+)
 from .job_journal import JobJournal, default_journal_path, resume_journaled_jobs
 from .jobs import (
     Job,
@@ -3030,6 +3045,12 @@ def _run_compare_grid(
                 closing_card_variant=req.closing_card_variant,
             ),
             divisions=compare_cards.bundle_divisions(filtered),
+            event_logo=ensure_local_event_logo(
+                match.branding,
+                root,
+                storage=state.storage if state is not None else None,
+                match_id=match.match_id,
+            ),
         )
         result = mp4_grid.render_grid_mp4(
             filtered,
@@ -4636,6 +4657,7 @@ def register_job_bodies(state: AppState) -> None:
 
             project_name = req.project_name or proj.name or "match"
             request_data = match_export_helpers.MatchExportRequestData(
+                event_logo=_current_event_logo(state),
                 stage_numbers=tuple(req.stage_numbers),
                 head_pad_seconds=req.head_pad_seconds,
                 tail_pad_seconds=req.tail_pad_seconds,
@@ -8091,6 +8113,18 @@ def _club_for(match_data: object, competitor_id: int | None) -> str | None:
         if competitor.id == competitor_id:
             return competitor.club
     return None
+
+
+def _current_event_logo(state: AppState) -> Path | None:
+    """The bound match's event logo on this disk, for a render (the
+    branding work); ``None`` without a match, a logo, or the file, which
+    is a card without the corner mark, never a failed render."""
+    try:
+        match_root = state.match_root
+        match = state.match()
+    except HTTPException:
+        return None
+    return ensure_local_event_logo(match.branding, match_root, storage=state.storage, match_id=match.match_id)
 
 
 def create_app(
@@ -13171,6 +13205,72 @@ def create_app(
         project.save(state.shooter_root(slug))
         _remove_local_logo(slug, previous)
         return JSONResponse(project.model_dump(mode="json"))
+
+    # --- the event's logo (the branding work) -------------------------------
+    #
+    # The match's own mark, a corner of the title page and the closing card.
+    # Kept as ``<match>/identity/event-<hash>.<ext>``; hosted, also under
+    # ``matches/<id>/identity/`` (the push writes the same key from the
+    # desktop). An edit, so a desktop mirror refuses it like any other.
+
+    def _event_logo_response(match: match_model.Match) -> JSONResponse:
+        return JSONResponse({"event_logo": match.branding.event_logo})
+
+    @app.post("/api/match/branding/event-logo")
+    async def upload_event_logo(file: UploadFile = File(...)) -> JSONResponse:
+        """Store the event's logo: a PNG, JPEG or WebP, sniffed and capped
+        like a shooter's (``identity.sniff_logo``), never trusted by name;
+        the previous file is removed."""
+        match_root, match = _resolve_match_context()
+        data = await file.read(LOGO_MAX_BYTES + 1)
+        try:
+            ext = sniff_logo(data)
+        except ValueError as exc:
+            status = 413 if len(data) > LOGO_MAX_BYTES else 422
+            raise HTTPException(status_code=status, detail=str(exc)) from None
+        name = event_logo_name(data, ext)
+        previous = match.branding.event_logo
+        folder = match_root / EVENT_LOGO_DIR
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / name).write_bytes(data)
+        if state.storage is not None and match.match_id:
+            state.storage.write_bytes(event_logo_storage_key(match.match_id, name), data)
+        match.branding = match.branding.model_copy(update={"event_logo": name})
+        match.save(match_root)
+        if previous and previous != name:
+            (folder / previous).unlink(missing_ok=True)
+        return _event_logo_response(match)
+
+    @app.get("/api/match/branding/event-logo")
+    def get_event_logo() -> FileResponse:
+        """The event's logo, for the Branding row. Content-named and sniffed
+        on upload; served with ``nosniff``."""
+        match_root, match = _resolve_match_context()
+        path = ensure_local_event_logo(
+            match.branding, match_root, storage=state.storage, match_id=match.match_id
+        )
+        if path is None or not path.is_file():
+            raise HTTPException(status_code=404, detail="no event logo")
+        media = {".png": "image/png", ".jpeg": "image/jpeg", ".jpg": "image/jpeg", ".webp": "image/webp"}.get(
+            path.suffix.lower(), "application/octet-stream"
+        )
+        return FileResponse(
+            path,
+            media_type=media,
+            headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, max-age=3600"},
+        )
+
+    @app.delete("/api/match/branding/event-logo")
+    def remove_event_logo() -> JSONResponse:
+        """Clear the event's logo and remove the local file; a hosted copy is
+        swept by the next push's gc."""
+        match_root, match = _resolve_match_context()
+        previous = match.branding.event_logo
+        match.branding = match.branding.model_copy(update={"event_logo": None})
+        match.save(match_root)
+        if previous:
+            (match_root / EVENT_LOGO_DIR / previous).unlink(missing_ok=True)
+        return _event_logo_response(match)
 
     @app.post("/api/shooters/{slug}/stages/camera/bulk-set")
     def bulk_set_camera(slug: str, req: BulkCameraSetRequest) -> JSONResponse:

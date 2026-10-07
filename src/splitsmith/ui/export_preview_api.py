@@ -22,7 +22,7 @@ import tempfile
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -42,7 +42,7 @@ from ..overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailab
 from ..runtime import runtime
 from . import render_bound
 from .exports_api import installed_look
-from .identity_media import resolved_identity_for
+from .identity_media import ensure_local_event_logo, resolved_identity_for
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +91,16 @@ def _look_fingerprint(name: str) -> str | None:
     return None if look.source == "shipped" else look_fingerprint(look.root)
 
 
+def _event_logo(state: Any) -> Path | None:
+    """The bound match's event logo on this disk, or ``None``."""
+    try:
+        match_root = state.match_root
+        match = state.match()
+    except HTTPException:
+        return None
+    return ensure_local_event_logo(match.branding, match_root, storage=state.storage, match_id=match.match_id)
+
+
 def _owner() -> str | None:
     """``<user_id>/<match_id>`` in hosted mode, where one process and one
     cache folder serve every account; ``None`` locally."""
@@ -124,6 +134,9 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
     project = state.shooter_project(slug)
     root = state.shooter_root(slug)
     audit_doc, _audit_version = state.load_audit(slug, req.stage_number)
+    # The event's logo (the branding work), brought to this disk like a
+    # shooter's; the title page and the closing card draw it.
+    event_logo = _event_logo(state) if req.card in ("title", "closing") else None
     spec = PreviewSpec(
         card=req.card,
         stage_number=req.stage_number,
@@ -138,6 +151,7 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
         at=req.at,
         motion=req.motion,
         backdrop=req.backdrop,
+        event_logo=event_logo.name if event_logo is not None else None,
         draft=(
             None
             if req.draft is None and not req.templates
@@ -196,6 +210,7 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
                 ),
                 ffmpeg_binary=rt.ffmpeg_binary,
                 work_dir=Path(work),
+                event_logo=event_logo,
             )
 
     try:

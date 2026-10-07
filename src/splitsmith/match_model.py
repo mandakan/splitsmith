@@ -32,10 +32,11 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field, PrivateAttr
+from pydantic import BaseModel, Field, PrivateAttr, field_validator
 
 from .async_bridge import run_sync
 from .config import StageRounds
+from .identity import EVENT_LOGO_RE
 from .match_project import (
     PROJECT_FILE,
     SUBDIRS,
@@ -236,6 +237,21 @@ class Shooter(BaseModel):
         atomic_write_json(shooter_root / SHOOTER_FILE, self.model_dump(mode="json"))
 
 
+class MatchBranding(BaseModel):
+    """The event's own marks on the match (the branding work): its logo,
+    drawn as a corner mark on the title page and the closing card. A file
+    under ``<match>/identity/``, content-named, synced like a shooter's logo."""
+
+    event_logo: str | None = None
+
+    @field_validator("event_logo")
+    @classmethod
+    def _event_logo_shape(cls, value: str | None) -> str | None:
+        if value is not None and not EVENT_LOGO_RE.match(value):
+            raise ValueError(f"event logo {value!r} is not a file the match stores (event-<hash>.png)")
+        return value
+
+
 class Match(BaseModel):
     """Top-level on-disk match (lives at ``<match-root>/match.json``).
 
@@ -271,6 +287,8 @@ class Match(BaseModel):
     next_stage_number: int | None = None
     #: Ordered list of shooter slugs (= subdir names under ``shooters/``).
     shooters: list[str] = Field(default_factory=list)
+    #: The event's logo (the branding work).
+    branding: MatchBranding = Field(default_factory=MatchBranding)
 
     # Hosted-mode state-doc binding (state refactor). When set, ``save()``
     # persists the match doc to the ``state_docs`` table via the bound

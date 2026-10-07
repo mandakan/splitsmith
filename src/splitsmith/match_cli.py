@@ -550,7 +550,7 @@ def export(
     from .match_project import MatchProject
     from .mp4_render import RenderStep
     from .ui import match_exports
-    from .ui.identity_media import resolved_identity_for
+    from .ui.identity_media import ensure_local_event_logo, resolved_identity_for
 
     if output_format not in _EXPORT_FORMATS:
         console.print(
@@ -661,6 +661,7 @@ def export(
 
     project_name = project.name or match.name or "match"
     request = match_exports.MatchExportRequestData(
+        event_logo=ensure_local_event_logo(match.branding, match_path, storage=None, match_id=None),
         stage_numbers=tuple(stage_numbers),
         head_pad_seconds=head_pad,
         tail_pad_seconds=tail_pad,

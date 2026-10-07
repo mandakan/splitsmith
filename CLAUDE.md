@@ -415,6 +415,20 @@ carries ``identity``, and ``Avatar`` takes ``accent`` (a ring) and ``logo`` (in
 place of the initials) through ``lib/identityMark``, whose URL carries the
 content-named file so a new logo is a new URL; with neither it renders as before.
 
+Three logos, and none stands in for another: the shooter's (top-right,
+above), **your brand** (``LookBrand`` on a Look, the centrepiece of the
+title page and the closing card) and the **event logo**, the match's own
+(``Match.branding.event_logo``, ``event-<12hex>.<ext>`` in
+``<match>/identity/``, routes ``/api/match/branding/event-logo``; the
+Export page's Branding row under Details). The event logo is a small
+top-left mark on those two cards only (``MatchTitle.logo`` ->
+``data.event`` -> ``_shared/event.js``); the old match-logo fallback for a
+shooter without one is gone. It syncs at match level
+(``matches/{id}/identity/event-*``: the push plan, the gc's
+``_EVENT_KEY_LOCAL_RE`` and the hosted key rule move together), and every
+renderer resolves it through ``identity_media.ensure_local_event_logo``,
+which mirrors it down on hosted and answers ``None`` when it is missing.
+
 The single-shooter MP4 draws **transitions** (#1244, spec section 3) on a
 boundary segment. ``plan_timeline`` turns the stage-indexed
 ``Composition.transitions`` into ``TimelinePlan.boundaries`` between
@@ -488,8 +502,7 @@ alone or an unknown closed kind is still a 422 / usage error, and
 renderers decide a sting while deciding the boundary (``sting_for_boundary``
 in each driver): ``look_sting.sting_motion`` loads the template with
 ``data.transition`` (kind, name, duration, the labels either side of the
-cut) and ``data.shooters`` (the identities the cards see, the match logo
-already folded in), the clip is written with ``write_motion_clip`` and
+cut) and ``data.shooters`` (the identities the cards see), the clip is written with ``write_motion_clip`` and
 laid over the boundary's ``fade`` (``xfade_name`` of a sting) through
 ``sting_overlay_filters`` for the whole segment from its first frame,
 whatever handle the edges had; the single-shooter cache keys it by
@@ -498,8 +511,8 @@ frame. A sting the Look lacks, or one with no browser, is a fade plus a
 degradation naming it; frames that fail are a cut like any failed
 boundary. Without a sting every argv is unchanged. The shipped
 ``sting-wipe.html`` sweeps an accent band across the seam carrying a logo
-when the shooters have exactly one distinct logo between them (one
-shooter's own, or the match logo folded into each) or the next item's
+when the shooters have exactly one distinct logo between them (each
+shooter's own; no other logo stands in for one) or the next item's
 name, clipped to the band in the bundled display face;
 ``window.duration()`` returns the transition's length, so the renderer
 samples exactly the boundary. The FCPXML path substitutes zoom with an

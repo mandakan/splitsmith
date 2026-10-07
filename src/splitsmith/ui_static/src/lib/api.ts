@@ -2737,6 +2737,12 @@ export function currentShareTokenFromLocation(): string | null {
  *  unnecessary. */
 const MATCH_SCOPED_PREFIXES = ["/api/shooters/", "/api/match/"];
 
+/** The event logo's URL for an ``<img>`` (the branding work); ``version``
+ *  busts the browser cache after a change. */
+export function eventLogoUrl(version: number): string {
+  return `${scopeRequestPath("/api/match/branding/event-logo")}?v=${version}`;
+}
+
 export function scopeRequestPath(path: string): string {
   if (!MATCH_SCOPED_PREFIXES.some((p) => path.startsWith(p))) return path;
   const shareToken = currentShareTokenFromLocation();
@@ -3454,6 +3460,15 @@ export const api = {
       body: form,
     });
   },
+
+  /** The event's own logo (the branding work): PNG, JPEG or WebP, 2 MB. */
+  uploadEventLogo: (file: File) => {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    return request<{ event_logo: string | null }>("/api/match/branding/event-logo", { method: "POST", body: form });
+  },
+  removeEventLogo: () =>
+    request<{ event_logo: string | null }>("/api/match/branding/event-logo", { method: "DELETE" }),
 
   /** Clear the shooter's logo (#1243). */
   removeShooterLogo: (slug: string) =>

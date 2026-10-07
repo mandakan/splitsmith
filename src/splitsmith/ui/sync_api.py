@@ -66,10 +66,12 @@ router = APIRouter(prefix="/api/sync")
 # identity/ holds the shooter's logo (#1243): content-named, raster only,
 # exactly the shape ``identity.ShooterIdentity`` admits.
 _SYNC_MEDIA_KEY_RE = re.compile(
-    r"^matches/(?P<match_id>[A-Za-z0-9._-]+)/shooters/[A-Za-z0-9_-]+/"
+    r"^matches/(?P<match_id>[A-Za-z0-9._-]+)/(?:shooters/[A-Za-z0-9_-]+/"
     r"(?:trimmed/[A-Za-z0-9._-]+\.(?:mp4|json)"
     r"|beep_review/[A-Za-z0-9._-]+\.(?:m4a|json)"
-    r"|identity/logo-[0-9a-f]{12}\.(?:png|jpe?g|webp))$"
+    r"|identity/logo-[0-9a-f]{12}\.(?:png|jpe?g|webp))"
+    # The event's logo (the branding work): the one match-level media file.
+    r"|identity/event-[0-9a-f]{12}\.(?:png|jpe?g|webp))$"
 )
 
 

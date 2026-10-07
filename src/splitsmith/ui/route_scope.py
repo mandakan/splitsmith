@@ -115,6 +115,10 @@ HOSTED_CONFINED_ROUTES: dict[tuple[str, str], str] = {
         "rows only, never a folder"
     ),
     ("POST", "/api/me/raw/upload"): "uploaded file name goes through _sanitize_raw_filename",
+    ("POST", "/api/match/branding/event-logo"): (
+        "the upload's bytes are sniffed (PNG / JPEG / WEBP) and stored under a content-derived name in the "
+        "bound match's identity/ folder; the client's filename is never read"
+    ),
     ("POST", "/api/shooters/{slug}/identity/logo"): (
         "the upload's bytes are sniffed (PNG / JPEG / WEBP) and stored under a content-derived name; "
         "the client's filename is never read"

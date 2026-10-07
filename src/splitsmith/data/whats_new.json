@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "event-logo",
+      "date": "2026-10-07",
+      "title": "The event's logo in the corner",
+      "body": "Add the match's own logo under Branding in Details on the Export page. It shows small in the top left corner of the title page and closing card."
+    },
+    {
       "id": "look-brand",
       "date": "2026-10-07",
       "title": "Your brand on the title page",

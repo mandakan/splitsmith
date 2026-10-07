@@ -5,6 +5,7 @@
  * publish options inside YouTubeConnect are preset-owned; they live here
  * because this is where publishing is expected to be found.
  */
+import { BrandingField } from "@/components/export/BrandingField";
 import { YouTubeConnect } from "@/components/export/YouTubeConnect";
 import { Field, inputClass } from "@/components/ui/Field";
 import type { YouTubeSettings } from "@/lib/api";
@@ -77,6 +78,7 @@ export function DetailsGroup({
           />
         </Field>
       ) : null}
+      {titleCard ? <BrandingField busy={busy} /> : null}
       {titleCard ? (
         <Field label="Division" help="As the scoreboard has it, power factor included: Classic Major.">
           <label className="flex items-center gap-2 text-md text-ink-2">
