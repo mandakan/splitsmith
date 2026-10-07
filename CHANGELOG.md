@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.62.0](https://github.com/mandakan/splitsmith/compare/v0.61.0...v0.62.0) (2026-10-07)
+
+
+### Features
+
+* **looks:** a Look editor that says what it is doing ([#1290](https://github.com/mandakan/splitsmith/issues/1290)) ([c7f05e1](https://github.com/mandakan/splitsmith/commit/c7f05e1f20d7f9ac1a28937a873bc47faa42feba))
+* **looks:** Make your own Look, from the Look row ([#1291](https://github.com/mandakan/splitsmith/issues/1291)) ([36b16c1](https://github.com/mandakan/splitsmith/commit/36b16c167c1651aaeb893d5d11e7643b3f803eb6))
+
+
+### Bug Fixes
+
+* **hosted:** Look previews on a desktop mirror were refused as edits ([#1287](https://github.com/mandakan/splitsmith/issues/1287)) ([e3790a5](https://github.com/mandakan/splitsmith/commit/e3790a5b055939a20c7f68487c88c7a6136ea447))
+
 ## [0.61.0](https://github.com/mandakan/splitsmith/compare/v0.60.0...v0.61.0) (2026-10-07)
 
 
