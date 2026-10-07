@@ -28,7 +28,9 @@ looks_app = typer.Typer(
     add_completion=False,
 )
 console = Console(soft_wrap=True)
-GUIDE = "docs/looks/authoring.md"
+#: The authoring guide, as a link: the repo path does not exist in a wheel
+#: or the desktop app.
+GUIDE = "https://github.com/mandakan/splitsmith/blob/main/docs/looks/authoring.md"
 _LEVEL_STYLE = {"ok": "green", "warn": "yellow", "error": "red"}
 
 
@@ -103,8 +105,8 @@ def _print_report(report: CheckReport) -> None:
 def check_command(name: str = typer.Argument(..., help="The Look to check.")) -> None:
     """Load every template the Look owns in Chromium against sample cards and report problems."""
     try:
-        with open_chromium() as rasterizer:
-            report = look_tools.check_look(name, prober=rasterizer)
+        with _LazyProber() as prober:
+            report = look_tools.check_look(name, prober=prober)
     except RasterizerUnavailableError as exc:
         console.print(f"[red]Error:[/] {exc.detail}\nInstall it with: {INSTALL_HINT}")
         raise typer.Exit(code=2) from None
@@ -156,6 +158,28 @@ def preview_command(
     )
 
 
+class _LazyProber:
+    """Opens Chromium on the first template it probes, so a Look that is
+    missing or whose manifest does not read is reported with no browser."""
+
+    def __init__(self) -> None:
+        self._context = None
+        self._rasterizer = None
+
+    def __enter__(self) -> _LazyProber:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        if self._context is not None:
+            self._context.__exit__(*exc)
+
+    def probe_template(self, template: Path, *, context, width: int, height: int):  # type: ignore[no-untyped-def]
+        if self._rasterizer is None:
+            self._context = open_chromium()
+            self._rasterizer = self._context.__enter__()
+        return self._rasterizer.probe_template(template, context=context, width=width, height=height)
+
+
 def _stage_frame(project_root: Path, stage: int, look_name: str):  # type: ignore[no-untyped-def]
     """The stage's first visible frame and the shooter's identity, as the
     export would draw them."""
@@ -175,8 +199,16 @@ def _stage_frame(project_root: Path, stage: int, look_name: str):  # type: ignor
         console.print(f"[red]Error:[/] {project_root} stage {stage}: {exc}")
         raise typer.Exit(code=2) from None
     trim, beep = _trim_for(project, project_root, stage)
+    primary = project.stage(stage).primary()
     image = None
-    if trim is not None and runtime().ffmpeg_binary:
+    why = None
+    if primary is None or primary.beep_time is None:
+        why = f"Stage {stage} has no confirmed beep yet"
+    elif trim is None:
+        why = f"No trim for stage {stage} on this disk"
+    elif not runtime().ffmpeg_binary:
+        why = "No ffmpeg on this machine"
+    else:
         with tempfile.TemporaryDirectory(prefix="looks-frame-") as tmp:
             frame = grab_frame(
                 trim, seconds=beep, at="head", ffmpeg_binary=runtime().ffmpeg_binary, out=Path(tmp) / "f.png"
@@ -184,8 +216,10 @@ def _stage_frame(project_root: Path, stage: int, look_name: str):  # type: ignor
             if frame is not None:
                 with Image.open(frame) as im:
                     image = im.convert("RGB")
+            else:
+                why = f"Could not read a frame of stage {stage}'s trim"
     if image is None:
-        console.print(f"[yellow]No trim for stage {stage} on this disk; previewing on the demo scene.[/]")
+        console.print(f"[yellow]{why}; previewing on the demo scene.[/]")
     identity = resolved_identity_for(
         project,
         project_root,

@@ -63,6 +63,22 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+#: Chromium's transient screenshot failure: a compositor frame was not ready.
+#: It cleared on a second try every time it was seen (a CI flake, Oct 2026).
+_TRANSIENT_SCREENSHOT = "Unable to capture screenshot"
+
+
+def _screenshot(page) -> bytes:  # type: ignore[no-untyped-def]
+    """The page as a transparent PNG; Chromium's transient "Unable to capture
+    screenshot" is tried once more, every other error is raised as is."""
+    try:
+        return page.screenshot(type="png", omit_background=True)
+    except PlaywrightError as exc:
+        if _TRANSIENT_SCREENSHOT not in str(exc):
+            raise
+        return page.screenshot(type="png", omit_background=True)
+
+
 def describe_page_error(error: object, template_name: str) -> str:
     """A ``pageerror`` as the author needs it: its message, led by the line in
     the template when the stack's first frame in that file names one (the
@@ -360,7 +376,7 @@ class ChromiumRasterizer:
                 # never went through ``overlay_html`` at all (e.g. a
                 # test's own hand-built document).
                 page.evaluate("window.__splitsmithFit && window.__splitsmithFit()")
-                return page.screenshot(type="png", omit_background=True)
+                return _screenshot(page)
             finally:
                 context.close()
 
@@ -544,7 +560,7 @@ class ChromiumRasterizer:
             page.evaluate("document.fonts.ready")
             page.evaluate("window.__splitsmithFit && window.__splitsmithFit()")
             self._check(errors, template)
-            return page.screenshot(type="png", omit_background=True)
+            return _screenshot(page)
         finally:
             browser_context.close()
 
@@ -609,7 +625,7 @@ class ChromiumRasterizer:
                 for seconds in times:
                     self._seek(page, seconds)
                     self._check(errors, template)
-                    png = page.screenshot(type="png", omit_background=True)
+                    png = _screenshot(page)
                     with Image.open(io.BytesIO(png)) as image:
                         yield image.convert("RGBA").tobytes()
             finally:

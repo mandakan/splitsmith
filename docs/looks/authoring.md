@@ -25,7 +25,7 @@ default Look to your own templates.
 ## Make one
 
 ```sh
-splitsmith looks new club-red --from splitsmith   # a copy of a Look, templates included
+splitsmith looks new club-red --from splitsmith   # a copy of a Look, every file but its previews
 splitsmith looks new club-red --starter still     # or a minimal Look around one starter
 splitsmith looks check club-red                   # validate it
 splitsmith looks preview club-red                 # render every card to PNGs
