@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.63.0](https://github.com/mandakan/splitsmith/compare/v0.62.0...v0.63.0) (2026-10-07)
+
+
+### Features
+
+* **identity:** a shooter's club line from the scoreboard ([#1292](https://github.com/mandakan/splitsmith/issues/1292)) ([bc25281](https://github.com/mandakan/splitsmith/commit/bc25281c670b4c17ec3b6291513f665a6622f707))
+* **looks:** "Made with splitsmith" on the closing card ([#1296](https://github.com/mandakan/splitsmith/issues/1296)) ([4904ca3](https://github.com/mandakan/splitsmith/commit/4904ca37306137ba493378f56e986662abf696b8))
+* **looks:** event logo as the centrepiece, your brand in the corner ([#1295](https://github.com/mandakan/splitsmith/issues/1295)) ([e454875](https://github.com/mandakan/splitsmith/commit/e4548755c92464fb384980e5aaa490d3f52f35cc))
+* **looks:** your brand on the title page and the closing card ([#1293](https://github.com/mandakan/splitsmith/issues/1293)) ([02841be](https://github.com/mandakan/splitsmith/commit/02841bef190691eb1d5dbc3ab38249aff17c561c))
+
+
+### Documentation
+
+* custom Look templates are desktop only ([#1297](https://github.com/mandakan/splitsmith/issues/1297)) ([90d596d](https://github.com/mandakan/splitsmith/commit/90d596d7a5b30a12686796cbb398761b829b80a6))
+
 ## [0.62.0](https://github.com/mandakan/splitsmith/compare/v0.61.0...v0.62.0) (2026-10-07)
 
 
