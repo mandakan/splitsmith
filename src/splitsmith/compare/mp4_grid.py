@@ -755,6 +755,47 @@ def plan_grid_spine(
     return GridSpine(items=tuple(items), boundaries=tuple(boundaries), degradations=tuple(degradations))
 
 
+def narrow_grid_plan(plan: GridStagePlan, *, head_cut: float, tail_cut: float) -> GridStagePlan:
+    """The same stage ``head_cut`` seconds later in and ``tail_cut`` shorter
+    (issue #1244). The head pad shrinks by the cut and every real tile's
+    seek and lead pad (and its inset's) are rebuilt from it, so the beep
+    stays on the pad; the tail cut comes out of the hold first, then the
+    action. Negative cuts widen the window (an edge's handle). Zero cuts
+    return an equal plan."""
+    if head_cut == 0.0 and tail_cut == 0.0:
+        return plan
+    old_pad = head_pad_of(plan)
+    new_pad = old_pad - head_cut
+    tiles: list[GridTile] = []
+    for tile in plan.tiles:
+        if tile.trim_path is None:
+            tiles.append(tile)
+            continue
+        if tile.inset_path is not None:
+            # The inset's own beep, recovered through the same invariant.
+            inset_beep = old_pad - tile.inset_lead_pad_seconds + tile.inset_seek_seconds
+            inset_seek = max(0.0, inset_beep - new_pad)
+            inset_lead = max(0.0, new_pad - inset_beep)
+        else:
+            inset_seek, inset_lead = 0.0, 0.0
+        tiles.append(
+            replace(
+                tile,
+                seek_seconds=max(0.0, tile.beep_offset_in_clip - new_pad),
+                lead_pad_seconds=max(0.0, new_pad - tile.beep_offset_in_clip),
+                inset_seek_seconds=inset_seek,
+                inset_lead_pad_seconds=inset_lead,
+            )
+        )
+    hold_cut = max(0.0, min(tail_cut, plan.hold_seconds))
+    return replace(
+        plan,
+        tiles=tuple(tiles),
+        duration_seconds=plan.duration_seconds - head_cut - (tail_cut - hold_cut),
+        hold_seconds=plan.hold_seconds - hold_cut,
+    )
+
+
 def build_stage_plans(
     shooters: Sequence[CompareShooterBundle],
     *,

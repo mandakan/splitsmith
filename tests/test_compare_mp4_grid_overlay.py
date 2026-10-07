@@ -1364,3 +1364,46 @@ def test_the_probe_does_not_go_through_the_progress_runner(tmp_path):
     assert len(calls) == 2  # one stage, one stitch -- nothing else
     assert all(cmd[0] == "/bin/ffmpeg" for cmd in calls)
     assert "-filter_complex" in calls[0]
+
+
+def test_a_head_cut_moves_the_clocks_by_the_cut(tmp_path):
+    """Review Focus 2 (#1244): a stage trimmed by a transition starts half
+    a second later, so its clocks start and freeze half a second earlier
+    in segment time and the sprite states span the shorter action; the
+    overlay plan is built from the narrowed plan and its recovered head
+    pad, nothing else."""
+    shooters = _shooters(tmp_path)
+    (plan,) = mp4_grid.build_stage_plans(
+        shooters, audio_label="Anders", head_pad_seconds=1.0, tail_pad_seconds=0.5
+    )
+    data = mp4_grid.load_overlay_data(shooters)
+
+    def overlay(stage_plan, name):
+        return mp4_grid._stage_overlay_plan(
+            stage_plan,
+            CANVAS,
+            data,
+            theme_name="splitsmith",
+            font_path=tmp_path / "font.ttf",
+            head_pad_seconds=mp4_grid.head_pad_of(stage_plan),
+            work=tmp_path / name,  # the sprite list is named by stage number: one dir per plan
+            rasterizer=None,
+        )
+
+    full = overlay(plan, "full")
+    narrowed_plan = mp4_grid.narrow_grid_plan(plan, head_cut=0.5, tail_cut=0.0)
+    narrowed = overlay(narrowed_plan, "narrowed")
+    assert [c.start_seconds for c in full.clocks] == [pytest.approx(1.0)] * len(full.clocks)
+    assert [c.start_seconds for c in narrowed.clocks] == [pytest.approx(0.5)] * len(full.clocks)
+    for before, after in zip(full.clocks, narrowed.clocks, strict=True):
+        assert after.freeze_seconds == pytest.approx(before.freeze_seconds - 0.5)
+        assert after.final_text == before.final_text
+
+    def listed_seconds(path):
+        return sum(
+            float(line.split()[1]) for line in path.read_text().splitlines() if line.startswith("duration")
+        )
+
+    assert listed_seconds(narrowed.sprite_list_path) == pytest.approx(
+        listed_seconds(full.sprite_list_path) - 0.5, abs=0.04
+    )
