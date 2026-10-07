@@ -645,3 +645,61 @@ def test_boundary_segment_pads_a_short_edge_with_a_held_frame_on_every_track(tmp
         "[tv][1:v]xfade=transition=fade:duration=1:offset=0,format=yuv420p[final];"
         "[0:a:0]apad=pad_dur=0.25[t0];[t0][1:a:0]acrossfade=d=1:c1=tri:c2=tri,"
     )
+
+
+# --- a transition into a slate (#1244) -----------------------------------------
+
+
+def test_a_transition_into_a_slate_trims_the_slate_and_the_stage_before_it(tmp_path: Path) -> None:
+    """The slate after a boundary is encoded half a second shorter on the
+    card runner; its head edge (a second of the same still) and the
+    boundary go through the boundary runner; the chapter stays at the cut."""
+    from splitsmith import composition
+    from tests.test_compare_mp4_grid_render import _shooters as _two_stage_shooters
+
+    calls: list[tuple[str, ...]] = []
+    cards: list[tuple[str, ...]] = []
+    edges: list[tuple[str, ...]] = []
+    work = tmp_path / "work"
+    result = mp4_grid.render_grid_mp4(
+        _two_stage_shooters(),
+        audio_label="Mathias",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=_ok_runner(calls),
+        card_runner=_ok_runner(cards),
+        boundary_runner=_ok_runner(edges),
+        still_runner=_still_runner([]),
+        rasterizer=_FakeRasterizer(),
+        work_dir=work,
+        ffmpeg_binary="/bin/ffmpeg",
+        stage_titles="slate",
+        title_duration_seconds=1.5,
+        transitions=(
+            composition.Transition(from_stage_index=0, to_stage_index=1, kind="fade", duration_seconds=1.0),
+        ),
+    )
+    assert result.degradations == ()
+    assert _concat_names(work) == [
+        "slate-stage1.mov",
+        "stage1.mov",
+        "boundary-001.mov",
+        "slate-stage2.mov",
+        "stage2.mov",
+    ]
+    assert [c[-1].rsplit("/", 1)[-1] for c in cards] == ["slate-stage1.mov", "slate-stage2.mov"]
+    assert cards[0][cards[0].index("-t") + 1] == "1.5"
+    assert (
+        cards[1][cards[1].index("-t") + 1] == "1"
+    ), "the slate after the boundary gave up its first half second"
+    assert [c[-1].rsplit("/", 1)[-1] for c in edges] == [
+        "edge-stage1-tail.mov",
+        "edge-slate-stage2-head.mov",
+        "boundary-001.mov",
+    ]
+    assert edges[1][edges[1].index("-t") + 1] == "1", "a card's edge is the still for the whole fade"
+    assert len(calls) == 3
+    assert [(c.start_seconds, c.title) for c in result.chapters] == [
+        (0.0, "Stage 1"),
+        (1.5 + 11.5, "Stage 2"),
+    ]
