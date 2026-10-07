@@ -1889,6 +1889,15 @@ class MatchProject(BaseModel):
                 v.role = "secondary"
                 self.unassigned_videos.append(v)
 
+    def adopt_scoreboard_club(self, club: str | None) -> bool:
+        """Fill an empty club line with the scoreboard competitor's club.
+        Never overwrites one the user typed; ``True`` when it changed."""
+        value = (club or "").strip()
+        if not value or (self.identity.club or "").strip():
+            return False
+        self.identity = self.identity.model_copy(update={"club": value[:80]})
+        return True
+
     def populate_from_match_data(
         self,
         match_data: Any,

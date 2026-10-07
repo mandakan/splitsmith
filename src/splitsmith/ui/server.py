@@ -8083,6 +8083,16 @@ def _reveal_in_file_manager(resolved: Path) -> None:
         )
 
 
+def _club_for(match_data: object, competitor_id: int | None) -> str | None:
+    """The scoreboard club of ``competitor_id`` in ``match_data``, if any."""
+    if competitor_id is None:
+        return None
+    for competitor in getattr(match_data, "competitors", None) or []:
+        if competitor.id == competitor_id:
+            return competitor.club
+    return None
+
+
 def create_app(
     *,
     project_root: Path | None = None,
@@ -9426,6 +9436,21 @@ def create_app(
     def _local_match_path(root: Path) -> Path:
         """Resolve ``<root>/scoreboard/match.json`` (offline source path)."""
         return root / DEFAULT_SCOREBOARD_DIRNAME / DEFAULT_MATCH_FILENAME
+
+    def _adopt_club_from_scoreboard(
+        project: MatchProject, client_root: Path, content_type: int, match_id: int, competitor_id: int
+    ) -> None:
+        """Fill a shooter's empty club line from their scoreboard competitor,
+        best effort: a link never fails because the club could not be read."""
+        if (project.identity.club or "").strip():
+            return
+        try:
+            with _resolve_scoreboard_client(client_root) as client:
+                match_data = client.get_match(content_type, match_id)
+        except (ScoreboardError, OSError):
+            logger.info("scoreboard club for competitor %s could not be read", competitor_id, exc_info=True)
+            return
+        project.adopt_scoreboard_club(_club_for(match_data, competitor_id))
 
     def _resolve_scoreboard_client(root: Path) -> ScoreboardClient:
         """Pick the concrete ``ScoreboardClient`` for this shooter root.
@@ -11105,6 +11130,7 @@ def create_app(
                     project.selected_shooter_id = picked.shooterId
                     project.competitor_name = picked.name
                     project.competitor_division = picked.division
+                    project.adopt_scoreboard_club(picked.club)
         project.save(root)
         return JSONResponse({**project.model_dump(mode="json"), "stage_times_merged": merged})
 
@@ -11322,6 +11348,7 @@ def create_app(
         # render "pinned: Mathias Rinaldo" instead of an integer id.
         project.competitor_name = picked.name
         project.competitor_division = picked.division
+        project.adopt_scoreboard_club(picked.club)
         project.save(root)
 
         merged = _fetch_and_merge_stage_times(root, project, ct, mid, req.competitor_id)
@@ -15515,6 +15542,7 @@ def create_app(
             legacy.scoreboard_content_type = req.content_type
             legacy.selected_shooter_id = pick.selected_shooter_id
             legacy.selected_competitor_id = pick.selected_competitor_id
+            legacy.adopt_scoreboard_club(_club_for(match_data, pick.selected_competitor_id))
             try:
                 legacy.populate_from_match_data(match_data, overwrite=False)
             except ScoreboardImportConflictError as exc:
@@ -15978,6 +16006,14 @@ def create_app(
             # legacy.competitor_name is already req.name from above.
             legacy.selected_shooter_id = req.selected_shooter_id
             legacy.selected_competitor_id = req.selected_competitor_id
+            if legacy.scoreboard_match_id and legacy.scoreboard_content_type is not None:
+                _adopt_club_from_scoreboard(
+                    legacy,
+                    match_root,
+                    legacy.scoreboard_content_type,
+                    int(legacy.scoreboard_match_id),
+                    req.selected_competitor_id,
+                )
         legacy.save(shooter_root)
         if (
             req.selected_competitor_id is not None
@@ -16088,6 +16124,14 @@ def create_app(
             shooter_root = state.shooter_root(link.slug)
             legacy.selected_shooter_id = link.shooter_id
             legacy.selected_competitor_id = link.competitor_id
+            if legacy.scoreboard_match_id and legacy.scoreboard_content_type is not None:
+                _adopt_club_from_scoreboard(
+                    legacy,
+                    shooter_root.parent.parent,
+                    legacy.scoreboard_content_type,
+                    int(legacy.scoreboard_match_id),
+                    link.competitor_id,
+                )
             legacy.save(shooter_root)
             if legacy.scoreboard_match_id and legacy.scoreboard_content_type is not None:
                 try:
