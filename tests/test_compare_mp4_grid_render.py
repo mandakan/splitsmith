@@ -1765,3 +1765,20 @@ def test_a_sting_whose_frames_fail_is_a_cut_on_the_grid(tmp_path: Path, monkeypa
     assert _video_ss_t(calls[1], "/trims/s.mp4") == ("1", "11.5")
     assert not (work / "boundary-000_sting.mov").exists()
     assert all(stage.ok for stage in result.stages)
+
+
+def test_a_sting_is_told_the_stage_names_either_side_of_a_slate() -> None:
+    """The slate's card is built later by the driver, so the item carries
+    none; the sting's ``to`` label is the stage the slate opens, never the
+    segment's file name."""
+    names = ["Stage 1", "Stage 2"]
+    slate = mp4_grid.GridCardItem(kind="slate", name="slate-stage2", card_seconds=1.5, stage_index=1)
+    assert mp4_grid._grid_item_label(slate, names) == "Stage 2"
+    title = mp4_grid.GridCardItem(
+        kind="title_page",
+        name="title-page",
+        card_seconds=3.0,
+        stage_index=0,
+        card=composition.MatchTitle("Cup"),
+    )
+    assert mp4_grid._grid_item_label(title, names) == "Cup"

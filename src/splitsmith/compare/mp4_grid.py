@@ -2966,12 +2966,17 @@ def _free_cell_still(
     return path
 
 
-def _grid_item_label(item: GridItem) -> str:
+def _grid_item_label(item: GridItem, stage_names: Sequence[str]) -> str:
     """What a sting template is told is on either side of its cut (issue
-    #1245): a stage by its name, a card by its text."""
+    #1245): a stage by its name, a match card by its text, a slate (whose
+    card the driver builds later) by the name of the stage it opens."""
     if isinstance(item, GridStageItem):
         return item.plan.stage_name
-    return item.card.text if item.card is not None else item.name
+    if item.card is not None:
+        return item.card.text
+    if item.stage_index is not None and 0 <= item.stage_index < len(stage_names):
+        return stage_names[item.stage_index]
+    return item.name
 
 
 class _EdgeFailedError(Exception):
@@ -3311,6 +3316,7 @@ def render_grid_mp4(
             return None, f"sting {name}: no browser to draw it"
         if sting_template_for(card_look, name) is None:
             return None, f"sting {name} is not in the {card_look.name} Look"
+        stage_names = [plan.stage_name for plan in plans]
         shooters_seen = (
             tuple(identities[label] for label in labels_tuple if label in identities) if identities else ()
         )
@@ -3318,8 +3324,8 @@ def render_grid_mp4(
             card_look,
             kind,
             seconds=seconds,
-            from_label=_grid_item_label(before),
-            to_label=_grid_item_label(after),
+            from_label=_grid_item_label(before, stage_names),
+            to_label=_grid_item_label(after, stage_names),
             width=canvas.width,
             height=canvas.height,
             fps=canvas.fps,

@@ -275,6 +275,36 @@ third on the stage after a boundary starts in the head edge
 (``lower_third_filters(delay_seconds=)``) and continues in the trimmed
 stage (``skip_seconds=``), never restarting.
 
+A **sting** (#1245) is a transition kind ``sting:<name>`` where ``<name>``
+is a variant of the Look's ``transition`` slot (``look.json``:
+``"transition": {"wipe": "sting-wipe.html"}``; ``looks.sting_template_for``
+resolves it against the Look and the shipped default, with no fallback to
+another variant). ``TransitionKind`` is therefore an open ``str``;
+``composition.validate_transition_kind`` is the one grammar check and the
+request bodies, ``ExportPresetBody`` and both CLIs run it, so ``sting:``
+alone or an unknown closed kind is still a 422 / usage error. Both
+renderers decide a sting while deciding the boundary (``sting_for_boundary``
+in each driver): ``look_sting.sting_motion`` loads the template with
+``data.transition`` (kind, name, duration, the labels either side of the
+cut) and ``data.shooters`` (the identities the cards see, the match logo
+already folded in), the clip is written with ``write_motion_clip`` and
+laid over the boundary's ``fade`` (``xfade_name`` of a sting) through
+``sting_overlay_filters`` for the whole segment from its first frame,
+whatever handle the edges had; the single-shooter cache keys it by
+``template_digest`` as a virtual input, so a cached boundary renders no
+frame. A sting the Look lacks, or one with no browser, is a fade plus a
+degradation naming it; frames that fail are a cut like any failed
+boundary. Without a sting every argv is unchanged. The shipped
+``sting-wipe.html`` sweeps an accent band across the seam carrying the one
+logo the shooters share (``distinct logos == 1``) or the next item's name;
+``window.duration()`` returns the transition's length, so the renderer
+samples exactly the boundary. The FCPXML path substitutes zoom with an
+anomaly; the gallery tile is ``sting:wipe`` (MP4, both modes), its
+thumbnail the template at its poster over the mid-fade
+(``scripts/render_look_thumbnails.py``, Chromium at authoring time).
+``scripts/render_match_frames.py --transition sting:wipe --identity-demo``
+and the grid script show it.
+
 ## Hosted playback streams the web rendition (#1031)
 
 The audit trim (``trimmed/stage<N>_cam_<id>_trimmed.mp4``) is a

@@ -196,6 +196,19 @@ cache key is both neighbours' argv plus the transition.
 > the cut head pad, the hold cut before the action) and a boundary that
 > crossfades each of its N+1 tracks.
 
+> Amended 2026-10-07 (slice 5, #1245): a sting is `sting:<name>` where
+> `<name>` is a variant of the Look manifest's `transition` slot (the
+> `sting_*.html` files in the layout above are those variants; the shipped
+> Look declares `"transition": {"wipe": "sting-wipe.html"}`). The sting
+> rides a `fade` of the transition's length and is laid over the boundary
+> segment's crossfaded video for the whole segment; a sting the Look (and
+> the shipped default) lacks is a fade with a degradation, never an error,
+> and `TransitionKind` is an open string validated by
+> `composition.validate_transition_kind`. The template receives
+> `data.transition` (kind, name, duration, the labels either side of the
+> cut) and `data.shooters`; the shipped wipe carries the one logo the
+> shooters share or the next item's name.
+
 ## 4. Export page, Footage page, API
 
 - `GET /api/looks` lists Looks with slots, variants, parameters and
