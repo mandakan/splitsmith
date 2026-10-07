@@ -995,3 +995,87 @@ def test_card_variant_reaches_the_grid_and_its_match_cards(
     assert result.exit_code == 0, result.output
     assert seen["card_variant"] == "rise"
     assert seen["title_page"] is not None and seen["title_page"].variant == "rise"
+
+
+# --- transitions (#1244) -----------------------------------------------------
+
+
+def test_transition_flags_reach_the_grid_renderer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from splitsmith import composition
+
+    match_root = _seed_match_with_stages(tmp_path / "match", stage_count=2)
+    _patch_probe(monkeypatch)
+    captured: dict[str, Any] = {}
+
+    def fake_render(*args: Any, **kwargs: Any) -> mp4_grid.GridRenderResult:
+        captured.update(kwargs)
+        return mp4_grid.GridRenderResult(output_path=kwargs["output_path"], stages=())
+
+    monkeypatch.setattr(cli_mod.mp4_grid, "render_grid_mp4", fake_render)
+    result = runner.invoke(
+        app,
+        [
+            "compare",
+            "export",
+            str(match_root),
+            "--audio-from",
+            "mathias",
+            "--format",
+            "mp4",
+            "-o",
+            str(tmp_path / "out.mp4"),
+            "--transition",
+            "fade",
+            "--transition-seconds",
+            "1",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["transitions"] == (
+        composition.Transition(from_stage_index=0, to_stage_index=1, kind="fade", duration_seconds=1.0),
+    )
+    assert "--transition" in strip_ansi(runner.invoke(app, ["compare", "export", "--help"]).output)
+
+
+def test_a_bad_transition_kind_is_a_usage_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    match_root = _seed_match_with_stages(tmp_path / "match", stage_count=2)
+    _patch_probe(monkeypatch)
+    result = runner.invoke(
+        app,
+        [
+            "compare",
+            "export",
+            str(match_root),
+            "--audio-from",
+            "mathias",
+            "--format",
+            "mp4",
+            "--transition",
+            "nope",
+        ],
+    )
+    assert result.exit_code == 2, result.output
+    assert "transition" in strip_ansi(result.output)
+
+
+def test_a_transition_with_the_fcpxml_grid_is_refused_like_every_mp4_only_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    match_root = _seed_match_with_stages(tmp_path / "match", stage_count=2)
+    _patch_probe(monkeypatch)
+    result = runner.invoke(
+        app,
+        [
+            "compare",
+            "export",
+            str(match_root),
+            "--audio-from",
+            "mathias",
+            "-o",
+            str(tmp_path / "o.fcpxml"),
+            "--transition",
+            "fade",
+        ],
+    )
+    assert result.exit_code == 2, result.output
+    assert "--transition requires --format mp4" in strip_ansi(result.output)

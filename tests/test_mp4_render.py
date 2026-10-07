@@ -993,6 +993,7 @@ def _transitioned_composition(
     head_pad: float = 3.0,
     tail_pad: float = 10.0,
     head_pad_b: float | None = None,
+    lower_thirds: bool = False,
 ) -> composition.Composition:
     """Two 20 s stages with a beep at 5 s and the last shot at 6.3 s, so
     with the default pads each stage keeps 2 s of handle before the head
@@ -1012,10 +1013,11 @@ def _transitioned_composition(
         tail_pad=tail_pad,
     )
     titles = None
-    if slates:
+    if slates or lower_thirds:
+        style = "slate" if slates else "lower-third"
         titles = {
-            0: composition.TitleCard(text="Stage 1", duration_seconds=1.5, style="slate"),
-            1: composition.TitleCard(text="Stage 2", duration_seconds=1.5, style="slate"),
+            0: composition.TitleCard(text="Stage 1", duration_seconds=1.5, style=style),
+            1: composition.TitleCard(text="Stage 2", duration_seconds=1.5, style=style),
         }
     holds = None
     if summaries:
@@ -1466,6 +1468,28 @@ def test_render_pads_a_missing_handle_instead_of_cutting(tmp_path: Path) -> None
     )
     # B keeps its whole 5 s head pad (effective 16.3 s); the fade adds nothing.
     assert result.duration_seconds == pytest.approx(14.3 + 16.3)
+
+
+def test_a_head_edges_lower_third_opens_at_the_stage_start_not_half_a_fade_late(tmp_path: Path) -> None:
+    """Review of the grid slice, same line here: the lower third opens
+    ``handle`` into the head edge (the boundary prepends the rest), so a
+    stage with no footage before its pad shows the card from the edge's
+    first frame rather than half a fade late."""
+    calls: list[list[str]] = []
+    _render(
+        tmp_path,
+        _transitioned_composition(tmp_path, head_pad_b=5.0, lower_thirds=True),
+        name="m",
+        runner=_writes_output(calls),
+        rasterizer=_FakeRasterizer(),
+    )
+    head_edge = next(c for c in calls if c[-1].endswith("edge_001_head.mp4"))
+    graph = head_edge[head_edge.index("-filter_complex") + 1]
+    assert "enable='lt(t,1.5)'" in graph
+    trimmed = next(c for c in calls if c[-1].endswith("stage_001.mp4"))
+    assert (
+        "enable='between(t,0,1)'" in trimmed[trimmed.index("-filter_complex") + 1]
+    ), "continues from 0.5 s in"
 
 
 def test_plan_timeline_puts_a_summary_after_each_stage(tmp_path: Path) -> None:

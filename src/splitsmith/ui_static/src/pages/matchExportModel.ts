@@ -78,6 +78,10 @@ export function buildCompareGridPayload(input: {
   descriptionLead?: string;
   uploadOptions?: UploadFormOptions;
   youtubeConnected?: boolean;
+  /** #1244: the transition between stages; sent only when the grid can
+   *  draw the kind, so an untouched body stays as it was. */
+  transitionKind?: TransitionKind;
+  transitionSeconds?: number;
 }): CompareGridRequestPayload {
   const payload: CompareGridRequestPayload = {
     stage_numbers: [...input.stageNumbers].sort((a, b) => a - b),
@@ -86,6 +90,11 @@ export function buildCompareGridPayload(input: {
     canvas_height: input.canvas.height,
     output_name: input.outputName,
   };
+  const transition = visibleTransitionKind(input.transitionKind ?? "none", "mp4", "compare");
+  if (transition !== "none") {
+    payload.transition_kind = transition;
+    payload.transition_duration_seconds = clampSeconds(input.transitionSeconds ?? 0.5, 0.1);
+  }
   if (input.render && anyRenderOptionOn(input.render)) Object.assign(payload, gridExportFields(input.render));
   if (input.overlay) {
     payload.overlay = true;

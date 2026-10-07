@@ -256,8 +256,19 @@ cache's LRU touch re-dates them). ``KEY_VERSION`` is 3. Kinds are
 FCP effects, which the MP4 maps through ``xfade_name`` and the FCPXML
 path substitutes with ``zoom`` and an anomaly; the gallery offers the
 xfade kinds to single-shooter MP4 only (``transitionsSupported(format,
-mode)``). The grid renderer still records "transitions ignored": its
-stage segment has no per-stage trim lever yet (follow-up under #1244).
+mode)``). The grid draws them too (``compare/mp4_grid``):
+``plan_grid_spine`` places the same boundaries between its items (a
+stage's segment is action plus hold; a slate when present),
+``narrow_grid_plan`` rebuilds every tile's seek and lead pad from the cut
+head pad (the beep stays on it; the overlay plan is built from the
+narrowed plan so clocks and sprites move with it) and takes a tail cut
+from the hold first, ``grid_edge_plan`` reads the handle every real
+tile's trim holds (a tile with no footage in the window becomes filler,
+a tail edge inside the hold is a still of it), and
+``build_boundary_segment_command`` crossfades the video and each of the
+N+1 tracks by stream index. Edges and boundaries go through
+``boundary_runner``, never ``runner``, so the CLIs' "stage N of M" stays
+honest. ``scripts/render_grid_frames.py --transition fade`` shows it.
 ``scripts/render_match_frames.py --transition fade --transition-seconds 1``
 shows the boundary (``boundary-1-in`` / ``-mid`` / ``-out``); a lower
 third on the stage after a boundary starts in the head edge

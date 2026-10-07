@@ -682,8 +682,8 @@ def test_card_fields_default_off_and_reach_the_renderer(
 
     monkeypatch.setattr(pl_mod.fcpxml_gen, "probe_video", _fake_probe)
     monkeypatch.setattr(mp4_grid_mod, "render_grid_mp4", fake_render)
-    match_root = _seed_match(tmp_path, shooters=["mathias"], stage_numbers=[1])
-    _write_trims(match_root, slug="mathias", stage_numbers=[1])
+    match_root = _seed_match(tmp_path, shooters=["mathias"], stage_numbers=[1, 2])
+    _write_trims(match_root, slug="mathias", stage_numbers=[1, 2])
     match = match_model.Match.load(match_root)
     match.match_date = date(2026, 5, 1)
     match.save(match_root)
@@ -708,12 +708,42 @@ def test_card_fields_default_off_and_reach_the_renderer(
             "stage_titles": "slate",
             "title_duration_seconds": 2.0,
             "card_variant": "rise",
+            "transition_kind": "fade",
+            "transition_duration_seconds": 1.0,
         },
     )
     assert response.status_code == 200
     assert _wait_for_job(client, response.json()["id"])["status"] == "succeeded"
     carded = captured[-1]
     assert carded["card_variant"] == "rise"
+    # #1244: the grid draws transitions too, one per pair of selected stages:
+    # none for one stage, one for two.
+    assert carded["transitions"] == ()
+    response = client.post(
+        "/api/match/compare-export",
+        json={
+            "stage_numbers": [1, 2],
+            "audio_from": "mathias",
+            "transition_kind": "fade",
+            "transition_duration_seconds": 1.0,
+        },
+    )
+    assert response.status_code == 200
+    assert _wait_for_job(client, response.json()["id"])["status"] == "succeeded"
+    faded = captured[-1]
+    assert [(t.from_stage_index, t.kind, t.duration_seconds) for t in faded["transitions"]] == [
+        (0, "fade", 1.0)
+    ]
+    refused = client.post(
+        "/api/match/compare-export",
+        json={
+            "stage_numbers": [1, 2],
+            "audio_from": "mathias",
+            "transition_kind": "fade",
+            "transition_duration_seconds": 0,
+        },
+    )
+    assert refused.status_code == 422
     # #1243: every shooter with a project gets a resolved identity, keyed by label.
     assert set(carded["identities"]) == {"Mathias"}
     assert carded["identities"]["Mathias"].accent is None, "no identity set, no accent (ruling)"

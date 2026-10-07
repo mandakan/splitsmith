@@ -289,11 +289,13 @@ def _state_starts(
             key = round(shot.time_from_beep, _EVENT_PRECISION)
             buckets[key] = max(buckets.get(key, shot.time_from_beep), shot.time_from_beep)
     # 0.0 is the opening state, already covered; a shot at or past the
-    # segment end has nowhere to be drawn.
+    # segment end has nowhere to be drawn, and one before the segment
+    # starts (a boundary edge's window, whose head pad is negative, #1244)
+    # is folded into the opening state.
     starts = {0.0} | {
         head_pad_seconds + event
         for event in buckets.values()
-        if event > 0.0 and head_pad_seconds + event < duration_seconds
+        if event > 0.0 and 0.0 < head_pad_seconds + event < duration_seconds
     }
     return sorted(starts)
 

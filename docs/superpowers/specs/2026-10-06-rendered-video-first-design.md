@@ -191,8 +191,10 @@ cache key is both neighbours' argv plus the transition.
 > buffers hold none) the boundary holds the edge's end frame for the
 > rest, so the fit check is against the pads only. The boundary's cache
 > key is its two edges' cache keys plus the transition. The single-shooter
-> renderer ships first; the grid's stage segment needs a per-stage trim
-> lever and follows under the same issue.
+> renderer shipped first (PR #1255); the grid followed with a plan-level
+> trim (`narrow_grid_plan`: every tile's seek and lead pad rebuilt from
+> the cut head pad, the hold cut before the action) and a boundary that
+> crossfades each of its N+1 tracks.
 
 ## 4. Export page, Footage page, API
 

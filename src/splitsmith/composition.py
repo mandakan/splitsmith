@@ -218,6 +218,17 @@ def xfade_name(kind: TransitionKind) -> str:
     return _XFADE_FOR_FCP_KIND.get(kind, kind)
 
 
+def uniform_transitions(kind: str, duration_seconds: float, stage_count: int) -> tuple[Transition, ...]:
+    """One ``kind`` transition of ``duration_seconds`` between every pair of
+    consecutive stages; none for ``"none"`` or fewer than two stages."""
+    if kind == "none" or stage_count < 2:
+        return ()
+    return tuple(
+        Transition(from_stage_index=i, to_stage_index=i + 1, kind=kind, duration_seconds=duration_seconds)  # type: ignore[arg-type]
+        for i in range(stage_count - 1)
+    )
+
+
 def fcp_kind(kind: TransitionKind) -> tuple[Literal["zoom", "static"], bool]:
     """The FCP effect ``kind`` lowers to and whether that is a substitution
     (``True`` for every xfade kind: the caller reports an anomaly)."""

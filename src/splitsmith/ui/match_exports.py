@@ -844,17 +844,7 @@ def _build_uniform_transitions(
     """Expand a single ``(kind, duration)`` choice into N-1 transitions
     (one between each consecutive stage pair). Returns ``()`` for the
     no-op cases (kind == ``"none"`` or fewer than two stages)."""
-    if kind == "none" or stage_count < 2:
-        return ()
-    return tuple(
-        composition.Transition(
-            from_stage_index=i,
-            to_stage_index=i + 1,
-            kind=kind,
-            duration_seconds=duration,
-        )
-        for i in range(stage_count - 1)
-    )
+    return composition.uniform_transitions(kind, duration, stage_count)
 
 
 def _resolve_segment(

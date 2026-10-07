@@ -571,3 +571,174 @@ def test_identities_reach_the_grids_hold_as_accents(tmp_path: Path, monkeypatch)
         },
     )
     assert seen["accents"] == {"Stage 3 shooter": "#123456"}
+
+
+# --- the boundary segment (#1244) ----------------------------------------------
+
+
+def test_boundary_segment_crossfades_the_video_and_every_audio_track(tmp_path: Path) -> None:
+    """Review Focus 4: the grid's segments carry the mix plus one track per
+    shooter (a filler's is silence); the boundary crossfades each pair by
+    stream index, so the stitch sees the same layout, names and
+    dispositions as every other segment."""
+    labels = ("Anders", "Bea", "Mathias")
+    cmd = mp4_grid.build_boundary_segment_command(
+        tmp_path / "edge-tail.mov",
+        tmp_path / "edge-head.mov",
+        kind="zoom",
+        seconds=1.0,
+        canvas=CANVAS,
+        shooter_labels=labels,
+        output_path=tmp_path / "boundary-002.mov",
+    )
+    assert cmd[:3] == ("ffmpeg", "-hide_banner", "-y")
+    assert cmd[3:7] == ("-i", str(tmp_path / "edge-tail.mov"), "-i", str(tmp_path / "edge-head.mov"))
+    graph = cmd[cmd.index("-filter_complex") + 1]
+    assert graph == (
+        "[0:v][1:v]xfade=transition=zoomin:duration=1:offset=0,format=yuv420p[final];"
+        "[0:a:0][1:a:0]acrossfade=d=1:c1=tri:c2=tri,"
+        "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[x0];"
+        "[0:a:1][1:a:1]acrossfade=d=1:c1=tri:c2=tri,"
+        "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[x1];"
+        "[0:a:2][1:a:2]acrossfade=d=1:c1=tri:c2=tri,"
+        "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[x2];"
+        "[0:a:3][1:a:3]acrossfade=d=1:c1=tri:c2=tri,"
+        "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[x3]"
+    )
+    maps = [cmd[i + 1] for i, token in enumerate(cmd) if token == "-map"]
+    assert maps == ["[final]", "[x0]", "[x1]", "[x2]", "[x3]"]
+    card = mp4_grid.build_card_segment_command(
+        tmp_path / "c.png", seconds=1.0, canvas=CANVAS, shooter_labels=labels, output_path=tmp_path / "c.mov"
+    )
+    tail_of = lambda c: c[c.index("-disposition:a:0") :]  # noqa: E731
+    assert (
+        tail_of(cmd)[:-1] == tail_of(card)[:-1]
+    ), "same dispositions, names, rate and codecs as a card segment"
+    assert cmd[cmd.index("-t") + 1] == "1" and cmd[-1].endswith("boundary-002.mov")
+
+
+def test_boundary_segment_pads_a_short_edge_with_a_held_frame_on_every_track(tmp_path: Path) -> None:
+    labels = ("Anders", "Bea")
+    common = {
+        "kind": "fade",
+        "seconds": 1.0,
+        "canvas": CANVAS,
+        "shooter_labels": labels,
+        "output_path": tmp_path / "b.mov",
+    }
+    head_short = mp4_grid.build_boundary_segment_command(
+        tmp_path / "t.mov", tmp_path / "h.mov", head_pad_seconds=0.5, **common
+    )
+    graph = head_short[head_short.index("-filter_complex") + 1]
+    assert graph.startswith(
+        "[1:v]tpad=start_mode=clone:start_duration=0.5[hv];"
+        "[0:v][hv]xfade=transition=fade:duration=1:offset=0,format=yuv420p[final];"
+        "[1:a:0]adelay=500:all=1[h0];[0:a:0][h0]acrossfade=d=1:c1=tri:c2=tri,"
+    )
+    assert "[1:a:2]adelay=500:all=1[h2];[0:a:2][h2]acrossfade" in graph
+    tail_short = mp4_grid.build_boundary_segment_command(
+        tmp_path / "t.mov", tmp_path / "h.mov", tail_pad_seconds=0.25, **common
+    )
+    graph = tail_short[tail_short.index("-filter_complex") + 1]
+    assert graph.startswith(
+        "[0:v]tpad=stop_mode=clone:stop_duration=0.25[tv];"
+        "[tv][1:v]xfade=transition=fade:duration=1:offset=0,format=yuv420p[final];"
+        "[0:a:0]apad=pad_dur=0.25[t0];[t0][1:a:0]acrossfade=d=1:c1=tri:c2=tri,"
+    )
+
+
+# --- a transition into a slate (#1244) -----------------------------------------
+
+
+def test_a_transition_into_a_slate_trims_the_slate_and_the_stage_before_it(tmp_path: Path) -> None:
+    """The slate after a boundary is encoded half a second shorter on the
+    card runner; its head edge (a second of the same still) and the
+    boundary go through the boundary runner; the chapter stays at the cut."""
+    from splitsmith import composition
+    from tests.test_compare_mp4_grid_render import _shooters as _two_stage_shooters
+
+    calls: list[tuple[str, ...]] = []
+    cards: list[tuple[str, ...]] = []
+    edges: list[tuple[str, ...]] = []
+    work = tmp_path / "work"
+    result = mp4_grid.render_grid_mp4(
+        _two_stage_shooters(),
+        audio_label="Mathias",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=_ok_runner(calls),
+        card_runner=_ok_runner(cards),
+        boundary_runner=_ok_runner(edges),
+        still_runner=_still_runner([]),
+        rasterizer=_FakeRasterizer(),
+        work_dir=work,
+        ffmpeg_binary="/bin/ffmpeg",
+        stage_titles="slate",
+        title_duration_seconds=1.5,
+        transitions=(
+            composition.Transition(from_stage_index=0, to_stage_index=1, kind="fade", duration_seconds=1.0),
+        ),
+    )
+    assert result.degradations == ()
+    assert _concat_names(work) == [
+        "slate-stage1.mov",
+        "stage1.mov",
+        "boundary-001.mov",
+        "slate-stage2.mov",
+        "stage2.mov",
+    ]
+    assert [c[-1].rsplit("/", 1)[-1] for c in cards] == ["slate-stage1.mov", "slate-stage2.mov"]
+    assert cards[0][cards[0].index("-t") + 1] == "1.5"
+    assert (
+        cards[1][cards[1].index("-t") + 1] == "1"
+    ), "the slate after the boundary gave up its first half second"
+    assert [c[-1].rsplit("/", 1)[-1] for c in edges] == [
+        "edge-stage1-tail.mov",
+        "edge-slate-stage2-head.mov",
+        "boundary-001.mov",
+    ]
+    assert edges[1][edges[1].index("-t") + 1] == "1", "a card's edge is the still for the whole fade"
+    assert len(calls) == 3
+    assert [(c.start_seconds, c.title) for c in result.chapters] == [
+        (0.0, "Stage 1"),
+        (1.5 + 11.5, "Stage 2"),
+    ]
+
+
+def test_a_head_edges_lower_third_opens_at_the_stage_start_not_half_a_fade_late(tmp_path: Path) -> None:
+    """Review of #1244: the head edge's timeline starts ``handle`` before
+    the stage, and the boundary prepends the rest of the half; the lower
+    third therefore opens ``handle`` into the edge. With no footage before
+    the pad (beep on the pad) that is at once, not half a fade late."""
+    from splitsmith import composition
+    from tests.test_compare_mp4_grid_render import _shooters as _two_stage_shooters
+
+    edges: list[tuple[str, ...]] = []
+    mp4_grid.render_grid_mp4(
+        _two_stage_shooters(),
+        audio_label="Mathias",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        head_pad_seconds=2.0,  # the fixture's beep: seek 0, no handle
+        runner=_ok_runner([]),
+        card_runner=_ok_runner([]),
+        boundary_runner=_ok_runner(edges),
+        still_runner=_still_runner([]),
+        rasterizer=_FakeRasterizer(),
+        work_dir=tmp_path / "work",
+        ffmpeg_binary="/bin/ffmpeg",
+        stage_titles="lower-third",
+        title_duration_seconds=1.5,
+        transitions=(
+            composition.Transition(from_stage_index=0, to_stage_index=1, kind="fade", duration_seconds=1.0),
+        ),
+    )
+    assert [c[-1].rsplit("/", 1)[-1] for c in edges] == [
+        "edge-stage1-tail.mov",
+        "edge-stage2-head.mov",
+        "boundary-000.mov",
+    ]
+    head_graph = edges[1][edges[1].index("-filter_complex") + 1]
+    assert "enable='lt(t,1.5)'" in head_graph, "no handle: the card opens on the edge's first frame"
+    boundary_graph = edges[2][edges[2].index("-filter_complex") + 1]
+    assert "[1:v]tpad=start_mode=clone:start_duration=0.5[hv]" in boundary_graph

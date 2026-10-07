@@ -290,7 +290,7 @@ export function groupSummary(s: ExportSettings, group: SettingsGroup, ctx: Summa
       const cards = describeRenderOptions(s.renderOptions, grid ? "grid" : "single", grid ? "mp4" : s.outputFormat);
       if (cards) parts.push(cards);
       if (grid ? s.gridOverlay : s.includeOverlay) parts.push("overlay");
-      if (!grid && visibleTransitionKind(s.transitionKind, s.outputFormat) !== "none") {
+      if (visibleTransitionKind(s.transitionKind, grid ? "mp4" : s.outputFormat, grid ? "compare" : "single") !== "none") {
         parts.push(`${s.transitionKind} ${finite(s.transitionSeconds, 0.5).toFixed(1)} s`);
       }
       return parts.length > 0 ? parts.join(" · ") : "No cards";
