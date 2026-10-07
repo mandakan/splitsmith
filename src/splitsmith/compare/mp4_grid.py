@@ -31,7 +31,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
-from ..composition import MatchTitle, TitleCard, TitleStyle
+from ..composition import MatchTitle, TitleCard, TitleStyle, Transition, TransitionKind
 from ..export_naming import stage_display_name
 from ..identity import ResolvedIdentity
 from ..look_motion import MotionClipError, motion_overlay_filters, write_motion_clip
@@ -543,6 +543,216 @@ class GridStagePlan:
           after one 3s-short segment, ``-9000ms`` after three.
         """
         return self.duration_seconds + self.hold_seconds
+
+
+# --- the spine and its boundaries (issue #1244) ----------------------------------------
+
+
+@dataclass(frozen=True)
+class GridStageItem:
+    """One stage's segment on the spine: the action and its hold.
+    ``head_cut_seconds`` / ``tail_cut_seconds`` are what a transition on
+    either side took off; the item is encoded that much shorter and the
+    boundary segment shows them."""
+
+    index: int
+    plan: GridStagePlan
+    head_cut_seconds: float = 0.0
+    tail_cut_seconds: float = 0.0
+    kind: Literal["stage"] = "stage"
+
+    @property
+    def name(self) -> str:
+        return f"stage{self.plan.stage_number}"
+
+    @property
+    def duration_seconds(self) -> float:
+        return self.plan.total_seconds - self.head_cut_seconds - self.tail_cut_seconds
+
+
+@dataclass(frozen=True)
+class GridCardItem:
+    """A generated card segment on the spine. ``stage_index`` is the stage a
+    slate precedes (and whose head frame backs it); the title page and
+    the closing card carry the index of the stage their backdrop comes
+    from. ``card`` is the match title for the title page and the closing
+    card; a slate's card is built by the driver from the plan."""
+
+    kind: Literal["title_page", "slate", "closing"]
+    name: str
+    card_seconds: float
+    stage_index: int | None
+    card: MatchTitle | None = None
+    head_cut_seconds: float = 0.0
+    tail_cut_seconds: float = 0.0
+
+    @property
+    def duration_seconds(self) -> float:
+        return self.card_seconds - self.head_cut_seconds - self.tail_cut_seconds
+
+
+GridItem = GridStageItem | GridCardItem
+
+
+@dataclass(frozen=True)
+class GridBoundary:
+    """A transition between ``items[after_index]`` and the next item: a
+    crossfade of ``duration_seconds`` centred on the cut, each neighbour
+    having given up half of it, so the spine keeps its length."""
+
+    after_index: int
+    kind: TransitionKind
+    duration_seconds: float
+
+    @property
+    def name(self) -> str:
+        return f"boundary-{self.after_index:03d}"
+
+
+@dataclass(frozen=True)
+class GridSpine:
+    items: tuple[GridItem, ...]
+    boundaries: tuple[GridBoundary, ...] = ()
+    degradations: tuple[str, ...] = ()
+
+    @property
+    def duration_seconds(self) -> float:
+        return sum(i.duration_seconds for i in self.items) + sum(b.duration_seconds for b in self.boundaries)
+
+    def boundary_after(self, index: int) -> GridBoundary | None:
+        for boundary in self.boundaries:
+            if boundary.after_index == index:
+                return boundary
+        return None
+
+
+def head_pad_of(plan: GridStagePlan) -> float:
+    """The head pad the plan was built with, recovered from any real tile
+    through the tile invariant ``lead + (beep - seek) == head_pad``; 0 when
+    every tile is filler (nothing to place)."""
+    for tile in plan.tiles:
+        if tile.trim_path is not None:
+            return tile.lead_pad_seconds + tile.beep_offset_in_clip - tile.seek_seconds
+    return 0.0
+
+
+def grid_boundary_fit(
+    prev: GridItem, nxt: GridItem, *, half: float, seconds: float, tail_pad_seconds: float
+) -> str | None:
+    """Why a transition of ``seconds`` cannot sit between ``prev`` and
+    ``nxt``, or ``None``. A stage before the cut gives up ``half`` of its
+    hold and tail pad (the last shot stays out of the fade); one after
+    gives up ``half`` of its head pad (the beep stays out); a card gives up
+    ``half`` of itself and must be at least ``2 * half`` long. Reports,
+    never clamps; the handle past the pad is never a reason (the
+    boundary holds a frame for what the trims lack)."""
+    if isinstance(prev, GridStageItem):
+        room = prev.plan.hold_seconds + tail_pad_seconds
+        if half > room:
+            return (
+                f"transition after stage {prev.plan.stage_name!r} ({seconds:g}s) exceeds the stage's hold "
+                f"and tail pad ({room:g}s); lengthen the hold or the pad, or shorten the transition: "
+                "rendered as a cut"
+            )
+    elif half > prev.duration_seconds / 2.0:
+        return (
+            f"transition after {prev.name} ({seconds:g}s) exceeds half the card "
+            f"({prev.duration_seconds / 2.0:g}s): rendered as a cut"
+        )
+    if isinstance(nxt, GridStageItem):
+        pad = head_pad_of(nxt.plan)
+        if half > pad:
+            return (
+                f"transition before stage {nxt.plan.stage_name!r} ({seconds:g}s) exceeds the stage's "
+                f"head pad ({pad:g}s); increase the pad or shorten the transition: rendered as a cut"
+            )
+    elif half > nxt.duration_seconds / 2.0:
+        return (
+            f"transition into {nxt.name} ({seconds:g}s) exceeds half the card "
+            f"({nxt.duration_seconds / 2.0:g}s): rendered as a cut"
+        )
+    return None
+
+
+def plan_grid_spine(
+    plans: Sequence[GridStagePlan],
+    *,
+    title_page: MatchTitle | None,
+    closing: MatchTitle | None,
+    stage_titles: str,
+    title_duration_seconds: float,
+    transitions: Sequence[Transition],
+    tail_pad_seconds: float,
+) -> GridSpine:
+    """The spine the driver walks (issue #1244): title page, per stage a
+    slate when ``stage_titles == "slate"`` and the stage, the closing card;
+    then the stage-indexed ``transitions`` placed as boundaries between
+    the last item of stage i (the stage, hold included) and the first of
+    stage i+1 (its slate when it has one). A transition that does not fit
+    is reported and left out."""
+    items: list[GridItem] = []
+    if title_page is not None:
+        items.append(
+            GridCardItem(
+                kind="title_page",
+                name="title_page",
+                card_seconds=title_page.duration_seconds,
+                stage_index=0,
+                card=title_page,
+            )
+        )
+    first_of_stage: dict[int, int] = {}
+    last_of_stage: dict[int, int] = {}
+    for index, plan in enumerate(plans):
+        if stage_titles == "slate":
+            first_of_stage[index] = len(items)
+            items.append(
+                GridCardItem(
+                    kind="slate",
+                    name=f"slate-stage{plan.stage_number}",
+                    card_seconds=title_duration_seconds,
+                    stage_index=index,
+                )
+            )
+        first_of_stage.setdefault(index, len(items))
+        last_of_stage[index] = len(items)
+        items.append(GridStageItem(index=index, plan=plan))
+    if closing is not None:
+        items.append(
+            GridCardItem(
+                kind="closing",
+                name="closing",
+                card_seconds=closing.duration_seconds,
+                stage_index=len(plans) - 1,
+                card=closing,
+            )
+        )
+    boundaries: list[GridBoundary] = []
+    degradations: list[str] = []
+    for transition in sorted(transitions, key=lambda t: t.from_stage_index):
+        prev_index = last_of_stage.get(transition.from_stage_index)
+        next_index = first_of_stage.get(transition.to_stage_index)
+        if prev_index is None or next_index is None or next_index != prev_index + 1:
+            continue
+        half = transition.duration_seconds / 2.0
+        problem = grid_boundary_fit(
+            items[prev_index],
+            items[next_index],
+            half=half,
+            seconds=transition.duration_seconds,
+            tail_pad_seconds=tail_pad_seconds,
+        )
+        if problem is not None:
+            degradations.append(problem)
+            continue
+        items[prev_index] = replace(items[prev_index], tail_cut_seconds=half)
+        items[next_index] = replace(items[next_index], head_cut_seconds=half)
+        boundaries.append(
+            GridBoundary(
+                after_index=prev_index, kind=transition.kind, duration_seconds=transition.duration_seconds
+            )
+        )
+    return GridSpine(items=tuple(items), boundaries=tuple(boundaries), degradations=tuple(degradations))
 
 
 def build_stage_plans(
