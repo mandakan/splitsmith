@@ -1,0 +1,106 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>sting wipe</title>
+<script>
+  // The shipped sting (#1245): an accent band sweeps across the cut,
+  // opaque at the seam, carrying the logo the shooters share or, when
+  // they have none in common, the name of what comes next. The engine
+  // stylesheet is loaded for its font faces; nothing of the cell markup
+  // is used. seek() drives the Web Animations frame by frame.
+  document.write('<style>' + window.splitsmith.engine.css + '</style>');
+</script>
+<style>
+  html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; }
+  .sting-band {
+    position: absolute; top: -12%; height: 124%;
+    display: flex; align-items: center; justify-content: center;
+    will-change: transform;
+  }
+  .sting-content {
+    width: 100%; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .sting-content img { height: 34%; width: auto; max-width: 70%; object-fit: contain; }
+  .sting-label {
+    font-family: "Antonio", "Geist", sans-serif; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.08em; white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+<script>
+(function () {
+  var S = window.splitsmith;
+  var size = S.size;
+  var transition = S.data.transition || {};
+  var shooters = S.data.shooters || [];
+  var seconds = Math.max(0.1, Number(transition.duration_seconds) || 0.5);
+  var accent = (shooters[0] && shooters[0].accent) || S.theme.accent;
+  var logos = [];
+  shooters.forEach(function (s) {
+    if (s && s.logo && logos.indexOf(s.logo) < 0) { logos.push(s.logo); }
+  });
+  var SKEW = 12;
+  var animations = [];
+
+  document.addEventListener('DOMContentLoaded', function () {
+    var bandWidth = Math.round(size.width * 0.36);
+    var margin = Math.round(size.height * 0.25);  // the skew's horizontal reach, generously
+    var band = document.createElement('div');
+    band.className = 'sting-band';
+    band.style.width = bandWidth + 'px';
+    band.style.left = (-bandWidth - margin) + 'px';
+    band.style.background = accent;
+    var content = document.createElement('div');
+    content.className = 'sting-content';
+    content.style.transform = 'skewX(' + SKEW + 'deg)';
+    if (logos.length === 1) {
+      var img = document.createElement('img');
+      img.src = logos[0];
+      img.alt = '';
+      content.appendChild(img);
+    } else {
+      var label = document.createElement('div');
+      label.className = 'sting-label';
+      label.textContent = transition.to || '';
+      label.style.color = S.theme.ink;
+      label.style.fontSize = Math.round(size.height * 0.07) + 'px';
+      content.appendChild(label);
+    }
+    band.appendChild(content);
+    document.body.appendChild(band);
+    // Off the left edge to off the right edge, centred on the frame at the
+    // midpoint (the seam), the easing symmetric so the centre is reached
+    // exactly halfway.
+    var travel = size.width + bandWidth + 2 * margin;
+    var sweep = band.animate(
+      [
+        { transform: 'translateX(0) skewX(' + (-SKEW) + 'deg)' },
+        { transform: 'translateX(' + travel + 'px) skewX(' + (-SKEW) + 'deg)' }
+      ],
+      { duration: seconds * 1000, easing: 'cubic-bezier(0.65, 0, 0.35, 1)', fill: 'both' }
+    );
+    var reveal = content.animate(
+      [
+        { opacity: 0, offset: 0 },
+        { opacity: 1, offset: 0.3 },
+        { opacity: 1, offset: 0.7 },
+        { opacity: 0, offset: 1 }
+      ],
+      { duration: seconds * 1000, fill: 'both' }
+    );
+    animations = [sweep, reveal];
+    animations.forEach(function (a) { a.pause(); });
+  });
+
+  window.duration = function () { return seconds; };
+  window.poster = function () { return seconds / 2; };
+  window.seek = function (t) {
+    animations.forEach(function (a) { a.currentTime = t * 1000; });
+  };
+})();
+</script>
+</body>
+</html>

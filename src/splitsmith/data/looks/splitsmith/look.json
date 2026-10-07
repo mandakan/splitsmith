@@ -98,6 +98,9 @@
     "title_page": {
       "default": "card.html",
       "rise": "card-rise.html"
+    },
+    "transition": {
+      "wipe": "sting-wipe.html"
     }
   },
   "source": "src/splitsmith/ui_static/src/styles/index.css"

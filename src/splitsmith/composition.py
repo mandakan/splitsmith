@@ -203,7 +203,7 @@ FCP_KINDS: tuple[str, ...] = ("zoom", "static")
 #: surface (the Pydantic bodies, the presets, both CLIs) runs.
 TransitionKind = str
 STING_PREFIX = "sting:"
-STING_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
+STING_NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")  # the shape of a Look variant name
 _XFADE_FOR_FCP_KIND = {"zoom": "zoomin", "static": "fadeblack"}
 
 

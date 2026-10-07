@@ -30,10 +30,13 @@ from .user_config import user_config_dir
 
 logger = logging.getLogger(__name__)
 
-SLOT_NAMES: tuple[str, ...] = ("title_page", "slate", "lower_third", "summary", "closing")
+SLOT_NAMES: tuple[str, ...] = ("title_page", "slate", "lower_third", "summary", "closing", "transition")
 """Every slot a manifest may name. ``summary`` is reserved: no renderer
 reads it in this slice, the stage summary still composes through
-``overlay_summary_cell``."""
+``overlay_summary_cell``. ``transition`` holds the Look's stings (issue
+#1245): each variant is a ``sting:<variant>`` transition kind."""
+
+STING_SLOT = "transition"
 
 CardSlot = Literal["title_page", "slate", "lower_third", "closing"]
 """The slots ``overlay_card`` renders through a template."""
@@ -313,11 +316,23 @@ def template_for(look: Look, slot: CardSlot, variant: str = DEFAULT_VARIANT) -> 
     raise LookError(f"the shipped {DEFAULT_LOOK!r} Look has no template for slot {slot!r}")
 
 
+def sting_template_for(look: Look, name: str) -> Path | None:
+    """The template for the sting ``name`` (issue #1245): the Look's own
+    ``transition`` variant, else the shipped default Look's, else ``None``.
+    No fallback to another variant: a sting the Look lacks is a plain
+    fade, decided by the renderer, which records a degradation."""
+    own = look.own_template(STING_SLOT, name)
+    if own is not None:
+        return own
+    return _shipped_default().own_template(STING_SLOT, name)
+
+
 __all__ = [
     "DEFAULT_LOOK",
     "DEFAULT_VARIANT",
     "REQUIRED_COLORS",
     "SLOT_NAMES",
+    "STING_SLOT",
     "CardSlot",
     "Look",
     "LookError",
@@ -328,6 +343,7 @@ __all__ = [
     "look_names",
     "shared_dir",
     "shipped_looks_dir",
+    "sting_template_for",
     "template_for",
     "user_looks_dir",
     "variants_for",
