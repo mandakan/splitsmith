@@ -12,6 +12,8 @@ export type LookDraft = StoredLookBody;
 
 export interface TokenRow {
   token: string;
+  /** What the editor calls it; the token stays visible for template authors. */
+  label: string;
   /** Where the colour shows, in a phrase. */
   help: string;
   /** Not every Look has it; the renderer has a fallback. */
@@ -22,37 +24,52 @@ export const TOKEN_GROUPS: { group: string; tokens: TokenRow[] }[] = [
   {
     group: "Text",
     tokens: [
-      { token: "ink", help: "Names, figures, the main card text" },
-      { token: "ink_2", help: "Secondary lines: the date, the division" },
-      { token: "muted", help: "Labels such as SCORING and SPLITS" },
-      { token: "subtle", help: "Faint helper text" },
+      { token: "ink", label: "Main text", help: "Names, figures, the main card text" },
+      { token: "ink_2", label: "Second line", help: "Secondary lines: the date, the division" },
+      { token: "muted", label: "Labels", help: "Labels such as SCORING and SPLITS" },
+      { token: "subtle", label: "Faint text", help: "Faint helper text" },
     ],
   },
   {
     group: "Surfaces",
     tokens: [
-      { token: "surface", help: "The card backdrop when there is no frame" },
-      { token: "rule", help: "Hairlines between bands" },
-      { token: "stroke", help: "The outline behind text on footage" },
+      { token: "surface", label: "Backdrop", help: "The card backdrop when there is no frame" },
+      { token: "rule", label: "Lines", help: "Hairlines between bands" },
+      { token: "stroke", label: "Text outline", help: "The outline behind text on footage" },
     ],
   },
   {
     group: "Accent",
     tokens: [
-      { token: "accent", help: "The brand colour: rules, the sting band" },
-      { token: "accent_fill", help: "Filled badges (DQ)" },
-      { token: "accent_text", help: "Text on the accent fill" },
+      { token: "accent", label: "Highlight", help: "The brand colour: rules, the sting band" },
+      { token: "accent_fill", label: "Badge", help: "Filled badges (DQ)" },
+      { token: "accent_text", label: "Badge text", help: "Text on the badge colour" },
     ],
   },
   {
     group: "Splits",
     tokens: [
-      { token: "split", help: "The current split" },
-      { token: "split_good", help: "A fast split, Alphas" },
-      { token: "split_slow", help: "A slow split, misses", optional: true },
+      { token: "split", label: "Split", help: "The current split" },
+      { token: "split_good", label: "Fast split", help: "A fast split, Alphas" },
+      { token: "split_slow", label: "Slow split", help: "A slow split, misses", optional: true },
     ],
   },
 ];
+
+/** Why each palette suggestion source that has nothing to offer is off,
+ *  worded for the line under the source buttons (a tooltip alone is
+ *  invisible on touch and easy to miss). */
+export function sourceHints({ footage, logo, hosted }: { footage: number; logo: number; hosted: boolean }): string[] {
+  const hints: string[] = [];
+  if (footage === 0)
+    hints.push(
+      hosted
+        ? "This footage: footage is sampled in the desktop app."
+        : "This footage: no trimmed footage of this stage on this machine.",
+    );
+  if (logo === 0) hints.push("Club logo: this shooter has no logo yet. Add one under Footage, Shooters, Identity.");
+  return hints;
+}
 
 const REQUIRED = TOKEN_GROUPS.flatMap((g) =>
   g.tokens.filter((t) => !t.optional).map((t) => t.token),
@@ -221,6 +238,8 @@ export function previewRequest(args: {
   templates?: TemplateEdit[];
   /** The whole animation as a looping WebP; ignored once a time is set. */
   motion?: boolean;
+  /** Draw over this stage's footage (the default) or the demo range scene. */
+  backdrop?: "footage" | "demo";
 }): ExportPreviewBody {
   const body: ExportPreviewBody = {
     card: args.card,
@@ -234,6 +253,7 @@ export function previewRequest(args: {
   if (args.at !== null) body.at = args.at;
   if (args.templates && args.templates.length > 0) body.templates = args.templates;
   if (args.motion && args.at === null) body.motion = true;
+  if (args.backdrop === "demo") body.backdrop = "demo";
   return body;
 }
 

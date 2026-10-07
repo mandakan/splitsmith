@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "look-editor-preview",
+      "date": "2026-10-07",
+      "title": "A clearer Look editor",
+      "body": "The preview now says when it is updating and shows a still before the animation, colours have plain names, and a demo scene lets you compare Looks without footage."
+    },
+    {
       "id": "mirror-look-previews",
       "date": "2026-10-07",
       "title": "Look previews on synced matches",

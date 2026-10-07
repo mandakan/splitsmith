@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { Rgb } from "@/lib/api";
 import { contrastRatio } from "@/lib/lookEditor";
 import {
+  isApplied,
   READY_MADE,
   SCHEMES,
   accentSeries,
@@ -128,5 +129,16 @@ describe("ready-made palettes", () => {
       expect(Object.keys(BASE).every((t) => p.colors[t])).toBe(true);
       expect(contrastRatio(p.colors.accent_text, p.colors.accent_fill)).toBeGreaterThanOrEqual(4.5);
     }
+  });
+});
+
+
+describe("isApplied", () => {
+  const colors = { accent: [255, 45, 45] as Rgb, split: [251, 191, 36] as Rgb };
+  it("is true only when every colour and the series match the draft", () => {
+    const s = { id: "x", label: "X", colors, series: ["#ff2d2d"] };
+    expect(isApplied(s, { colors: { ...colors, ink: [1, 2, 3] as Rgb }, accent_series: ["#ff2d2d"] })).toBe(true);
+    expect(isApplied(s, { colors: { ...colors, accent: [255, 45, 46] as Rgb }, accent_series: ["#ff2d2d"] })).toBe(false);
+    expect(isApplied(s, { colors, accent_series: [] })).toBe(false);
   });
 });

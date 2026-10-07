@@ -32,6 +32,20 @@ export interface Suggestion {
   series: string[];
 }
 
+/** Whether ``draft`` already carries suggestion ``s``: every colour the
+ *  suggestion sets and its accent series, so the card can say "In use". */
+export function isApplied(
+  s: Suggestion,
+  draft: { colors: Record<string, Rgb>; accent_series: string[] },
+): boolean {
+  const same = (a: Rgb | undefined, b: Rgb) => !!a && a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
+  return (
+    Object.entries(s.colors).every(([token, rgb]) => same(draft.colors[token], rgb)) &&
+    s.series.length === draft.accent_series.length &&
+    s.series.every((hex, i) => hex.toLowerCase() === draft.accent_series[i]?.toLowerCase())
+  );
+}
+
 // --- colour maths ------------------------------------------------------------------------
 
 export function rgbToHsl([r, g, b]: Rgb): [number, number, number] {

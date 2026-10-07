@@ -117,7 +117,7 @@ describe("LookAdvanced", () => {
   it("saves an edited colour and previews the draft first", async () => {
     renderRow();
     fireEvent.click(screen.getByRole("button", { name: "Edit Look…" }));
-    const accent = (await screen.findByLabelText("accent")) as HTMLInputElement;
+    const accent = (await screen.findByLabelText("Highlight colour")) as HTMLInputElement;
     const save = screen.getByRole("button", { name: "Save Look" }) as HTMLButtonElement;
     expect(save.disabled).toBe(true);
     fireEvent.change(accent, { target: { value: "#0ac81e" } });
@@ -147,7 +147,7 @@ describe("LookAdvanced", () => {
   it("stores a card style choice", async () => {
     renderRow();
     fireEvent.click(screen.getByRole("button", { name: "Edit Look…" }));
-    await screen.findByLabelText("accent");
+    await screen.findByLabelText("Highlight colour");
     fireEvent.click(screen.getByRole("button", { name: "Card styles" }));
     const group = screen.getByRole("group", { name: "Title page style" });
     fireEvent.click(group.querySelector("button:nth-child(2)") as HTMLButtonElement);
@@ -156,11 +156,12 @@ describe("LookAdvanced", () => {
     expect(vi.mocked(api.putLook).mock.calls[0][1].styles).toEqual({ title_page: "rise" });
   });
 
-  it("explains the template editor's absence on splitsmith.app", async () => {
+  it("has no template tab on splitsmith.app and says why under Card styles", async () => {
     renderRow({ hosted: true });
     fireEvent.click(screen.getByRole("button", { name: "Edit Look…" }));
-    await screen.findByLabelText("accent");
-    fireEvent.click(screen.getByRole("button", { name: "Templates" }));
-    expect(screen.getByText(/runs code on our servers/)).toBeTruthy();
+    await screen.findByLabelText("Highlight colour");
+    expect(screen.queryByRole("button", { name: /Templates/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Card styles" }));
+    expect(screen.getByText(/picks from the shipped templates/)).toBeTruthy();
   });
 });

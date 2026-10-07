@@ -408,7 +408,7 @@ def check_folder(name: str, root: Path, source: Literal["shipped", "user"], *, p
 # --- preview -------------------------------------------------------------------------
 
 
-def _demo_backdrop() -> Image.Image:
+def demo_backdrop() -> Image.Image:
     """A range-like scene: a sky gradient over a ground band and three
     target silhouettes; enough for the card's blur to have something to
     blur, nothing anyone mistakes for footage."""
@@ -478,7 +478,7 @@ def preview_look(
     :class:`LookToolError` before anything is written."""
     look = strict_look(name)
     out.mkdir(parents=True, exist_ok=True)
-    frame = (backdrop or _demo_backdrop()).convert("RGB").resize((PREVIEW_WIDTH, PREVIEW_HEIGHT))
+    frame = (backdrop or demo_backdrop()).convert("RGB").resize((PREVIEW_WIDTH, PREVIEW_HEIGHT))
     written: list[tuple[str, Path]] = []
     skipped: list[str] = []
     with tempfile.TemporaryDirectory(prefix="looks-preview-") as tmp:

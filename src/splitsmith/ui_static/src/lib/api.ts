@@ -1227,6 +1227,8 @@ export interface ExportPreviewBody {
   at?: number;
   /** The template editor's unsaved text (#1265); local only. */
   templates?: TemplateEdit[];
+  /** The Look editor's backdrop switch: the demo range scene instead of this stage's footage. */
+  backdrop?: "footage" | "demo";
   /** An animated template as a looping WebP (#1249); a still stays a PNG. */
   motion?: boolean;
 }
