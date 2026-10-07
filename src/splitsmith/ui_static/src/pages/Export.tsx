@@ -27,6 +27,7 @@ import { DesktopCommandLine } from "@/components/desktop/DesktopCommandLine";
 import { CutGroup } from "@/components/export/CutGroup";
 import { DetailsGroup } from "@/components/export/DetailsGroup";
 import { ExportHistory } from "@/components/export/ExportHistory";
+import { ExportWarnings } from "@/components/export/ExportWarnings";
 import { LookGroup } from "@/components/export/LookGroup";
 import { OutputGroup } from "@/components/export/OutputGroup";
 import { PresetRow } from "@/components/export/PresetRow";
@@ -1222,6 +1223,7 @@ function ResultPanel({
         {result.stage_count} stages {"·"} {formatDuration(result.duration_seconds)} timeline
         {result.anomalies.length > 0 ? <> {"·"} {result.anomalies.length} warnings</> : null}
       </div>
+      <ExportWarnings anomalies={result.anomalies} />
       {hosted ? (
         // Hosted: the bundle lives in object storage, not on a local disk to
         // reveal. Download each file (FCPXML + the media it references).

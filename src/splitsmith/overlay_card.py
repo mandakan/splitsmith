@@ -25,12 +25,15 @@ card.
 
 from __future__ import annotations
 
+import functools
 import io
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, ParamSpec, TypeVar
 
 from PIL import Image
 
@@ -218,6 +221,53 @@ def card_context(
     )
 
 
+_failures: ContextVar[list[str] | None] = ContextVar("splitsmith_card_failures", default=None)
+
+
+@contextmanager
+def card_failures() -> Iterator[list[str]]:
+    """Collect, for the length of a render, every card a template's error
+    left out, worded for the result's degradations. Without this a broken
+    template dropped its card with only a log line and the export reported
+    success (#1265). Nested renders each get their own list."""
+    notes: list[str] = []
+    token = _failures.set(notes)
+    try:
+        yield notes
+    finally:
+        _failures.reset(token)
+
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+def with_card_failures(
+    add: Callable[[_R, list[str]], _R],
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
+    """Run a renderer inside :func:`card_failures` and hand its result and
+    the failures to ``add`` (which puts them on the result's degradations)."""
+
+    def wrap(render: Callable[_P, _R]) -> Callable[_P, _R]:
+        @functools.wraps(render)
+        def run(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+            with card_failures() as failed:
+                result = render(*args, **kwargs)
+            return add(result, failed) if failed else result
+
+        return run
+
+    return wrap
+
+
+def _note_failure(what: str, template: Path, exc: BaseException) -> None:
+    notes = _failures.get()
+    if notes is None:
+        return
+    reason = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
+    notes.append(f"{what} was left out: its template {template.name} failed ({reason})")
+
+
 def _rasterize(
     card: Card,
     *,
@@ -242,6 +292,7 @@ def _rasterize(
         logger.warning(
             "could not rasterize the card %r through %s (%s); it is skipped", card.text, template, exc
         )
+        _note_failure(f"the {slot.replace('_', ' ')} card {card.text!r}", template, exc)
         return None
 
 
@@ -295,6 +346,7 @@ def card_motion(
         if frames is not None:
             frames.close()
         logger.warning("could not load the card %r through %s (%s); it is skipped", card.text, template, exc)
+        _note_failure(f"the {slot.replace('_', ' ')} card {card.text!r}", template, exc)
         return None
     return CardMotion(template=template, context=context, frames=frames, digest=digest)
 
@@ -306,6 +358,7 @@ def first_frame_image(motion: CardMotion) -> Image.Image | None:
         raw = next(iter(motion.frames.frames))
     except Exception as exc:  # noqa: BLE001 -- one bad rasterization must not lose the render
         logger.warning("could not rasterize the card through %s (%s); it is skipped", motion.template, exc)
+        _note_failure("a card", motion.template, exc)
         return None
     finally:
         motion.close()

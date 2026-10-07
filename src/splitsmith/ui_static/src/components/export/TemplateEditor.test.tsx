@@ -95,6 +95,7 @@ async function openTemplates() {
 
 describe("TemplateEditor", () => {
   it("edits a borrowed template, previews the unsaved text and saves it", async () => {
+    vi.mocked(api.checkLook).mockResolvedValue({ items: [], errors: 0, warnings: 0 });
     const editor = await openTemplates();
     expect(editor.value).toBe("<p>shipped title</p>");
     expect(screen.getByText(/Borrowed: card.html/)).toBeTruthy();
@@ -143,5 +144,26 @@ describe("TemplateEditor", () => {
       },
       { timeout: DRAFT_PREVIEW_DEBOUNCE_MS + 1500 },
     );
+  });
+
+  it("checks before saving and asks before saving a template that fails", async () => {
+    const editor = await openTemplates();
+    fireEvent.change(editor, { target: { value: "<script>BOOM</script>" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Look" }));
+    expect(await screen.findByRole("button", { name: "Save anyway" })).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain("line 3: boom");
+    expect(api.saveTemplate).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Save anyway" }));
+    await waitFor(() => expect(api.saveTemplate).toHaveBeenCalled());
+  });
+
+  it("asks again once the text changes after a failed check", async () => {
+    const editor = await openTemplates();
+    fireEvent.change(editor, { target: { value: "<script>BOOM</script>" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Look" }));
+    await screen.findByRole("button", { name: "Save anyway" });
+    fireEvent.change(editor, { target: { value: "<script>BOOM 2</script>" } });
+    expect(screen.queryByRole("button", { name: "Save anyway" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Save Look" })).toBeTruthy();
   });
 });

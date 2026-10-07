@@ -2260,3 +2260,28 @@ def test_a_cached_boundary_with_a_sting_renders_no_frame(tmp_path: Path, monkeyp
     _, third, _ = _sting_render(tmp_path, name="three", comp=faded, segment_cache=cache)
     assert sum("xfade=" in " ".join(argv) for argv in third) == 1, "a fade is not the sting's boundary"
     assert len(third) == 2, "the edges and stages are the same segments: only the boundary and the stitch"
+
+
+def test_a_card_whose_template_fails_is_named_in_the_degradations(tmp_path: Path) -> None:
+    """A broken template used to drop its card with only a log line; the
+    export reported success with the card missing (#1265 review)."""
+    from splitsmith.overlay_raster import TemplateScriptError
+
+    class _Broken(_FakeRasterizer):
+        def render_template_frames(self, template, *, context, width, height, fps, max_seconds):
+            if context.data["card"]["slot"] == "title_page":
+                raise TemplateScriptError(f"{Path(template).name}: line 4: boom")
+            return super().render_template_frames(
+                template, context=context, width=width, height=height, fps=fps, max_seconds=max_seconds
+            )
+
+    comp = _carded_composition(tmp_path)
+    result = mp4_render.render_mp4(
+        comp,
+        output_path=tmp_path / "m.mp4",
+        work_dir=tmp_path / "work",
+        runner=MagicMock(side_effect=_ok),
+        rasterizer=_Broken(),
+    )
+    notes = [d for d in result.degradations if "line 4: boom" in d]
+    assert len(notes) == 1 and "left out" in notes[0], result.degradations

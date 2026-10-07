@@ -17,6 +17,7 @@ import {
   api,
   type LookInfo,
   type PreviewCard,
+  type CheckFinding,
   type StoredLookBody,
   type TemplateEdit,
 } from "@/lib/api";
@@ -83,6 +84,10 @@ export function LookEditor({
   const [edits, setEdits] = useState<TemplateEdits>({});
   const [focus, setFocus] = useState<{ card: PreviewCard; variant: string } | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  // Template errors the check found on Save; set means the next Save is
+  // "Save anyway". Any change to the draft asks again.
+  const [failing, setFailing] = useState<CheckFinding[] | null>(null);
+  useEffect(() => setFailing(null), [edits, draft]);
 
   useEffect(() => {
     if (!open) return;
@@ -125,6 +130,28 @@ export function LookEditor({
     setSaving(true);
     setProblem(null);
     try {
+      const templates = editsList(edits);
+      if (templates.length > 0 && failing === null) {
+        // A template that throws is left out of every export: say so before
+        // it is saved, and let the author save work in progress anyway.
+        let errors: CheckFinding[] = [];
+        try {
+          errors = (await api.checkLook(name, draft, templates)).items.filter((i) => i.level === "error");
+        } catch (e) {
+          errors = [
+            {
+              subject: "check",
+              level: "error",
+              message: e instanceof ApiError ? `could not check: ${e.message}` : "could not check the templates",
+            },
+          ];
+        }
+        if (errors.length > 0) {
+          setFailing(errors);
+          return;
+        }
+      }
+      setFailing(null);
       if (bodyDirty) {
         const stored = await api.putLook(name, draft);
         setSaved(stored.body);
@@ -248,6 +275,21 @@ export function LookEditor({
           />
         ) : null}
       </div>
+      {failing ? (
+        <div role="alert" className="border-t border-rule px-4 py-2 text-sm">
+          <p className="text-destructive">
+            These templates fail, and the card would be left out of an export. Fix them, or save anyway to keep
+            working on them.
+          </p>
+          <ul className="mt-1">
+            {failing.map((f, i) => (
+              <li key={`${f.subject}-${i}`} className="text-muted">
+                <span className="numeral">{f.subject}</span>: {f.message}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       <div className="flex items-center gap-2 border-t border-rule px-4 py-3">
         <Button
           variant="destructive"
@@ -271,7 +313,7 @@ export function LookEditor({
           onClick={() => void save()}
           disabled={!canSave}
         >
-          {saving ? "Saving…" : "Save Look"}
+          {saving ? "Saving…" : failing ? "Save anyway" : "Save Look"}
         </Button>
       </div>
     </Sheet>

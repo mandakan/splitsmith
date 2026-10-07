@@ -54,6 +54,7 @@ from ..overlay_card import (
     first_frame_image,
     lower_third_clip_filters,
     lower_third_filters,
+    with_card_failures,
 )
 from ..overlay_clock import clock_common_options, clock_text, elapsed_text_option
 from ..overlay_layout import Anchor, CellScale, anchor_ffmpeg_expr
@@ -3009,6 +3010,11 @@ def _grid_missing_handle(item: GridItem, *, half: float, end: Literal["tail", "h
     return 0.0
 
 
+@with_card_failures(
+    lambda r, notes: replace(
+        r, degradations=(*r.degradations, *(OverlayDegradation(summary=n, detail=n) for n in notes))
+    )
+)
 def render_grid_mp4(
     shooters: Sequence[CompareShooterBundle],
     *,
