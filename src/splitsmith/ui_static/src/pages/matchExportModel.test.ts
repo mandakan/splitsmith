@@ -324,8 +324,10 @@ describe("the Look on the payloads (#1246)", () => {
     expect(payload.overlay_theme).toBe("clean");
     expect(payload.title_page_variant).toBe("rise");
     expect(payload.stage_card_variant).toBe("rise");
-    expect(payload.closing_card_variant).toBe("default");
+    expect(payload).not.toHaveProperty("closing_card_variant");
     expect(buildMatchExportPayload(base)).not.toHaveProperty("overlay_theme");
+    const defaults = { look: "splitsmith", titlePageVariant: "default", stageCardVariant: "default", closingCardVariant: "default" };
+    expect(buildMatchExportPayload({ ...base, look: defaults })).toEqual(buildMatchExportPayload(base));
     const xml = buildMatchExportPayload({ ...base, look, outputFormat: "fcp7xml" });
     expect(xml.overlay_theme).toBe("clean");
     expect(xml).not.toHaveProperty("stage_card_variant");
@@ -339,5 +341,7 @@ describe("the Look on the payloads (#1246)", () => {
     const carded = buildCompareGridPayload({ ...base, look, render: { ...DEFAULT_RENDER_OPTIONS, titlePage: true } });
     expect(carded.title_page_variant).toBe("rise");
     expect(buildCompareGridPayload(base)).not.toHaveProperty("overlay_theme");
+    const defaults = { look: "splitsmith", titlePageVariant: "default", stageCardVariant: "default", closingCardVariant: "default" };
+    expect(buildCompareGridPayload({ ...base, look: defaults })).toEqual(buildCompareGridPayload(base));
   });
 });

@@ -86,7 +86,7 @@ import {
   type FixTarget,
 } from "@/lib/exportPlan";
 import { useDeploymentMode } from "@/lib/features";
-import { resolveLookChoice } from "@/lib/looks";
+import { resolveLookChoice, stingsFor } from "@/lib/looks";
 import { useLooks } from "@/lib/useLooks";
 import { useMatchHref } from "@/lib/matchHref";
 import { useDesktopCommands } from "@/lib/useDesktopCommands";
@@ -661,7 +661,8 @@ function ExportInner({ slug }: { slug: string }) {
         overlayCodec,
         projectName: projectName || project.name,
         uploadTarget: "desktop",
-        look: resolveLookChoice(looks, settings),
+        look: resolveLookChoice(looks, view),
+        stings: stingsFor(looks, view.look).map((s) => s.id),
         youtubeConnected: false,
       }),
     );
@@ -691,7 +692,8 @@ function ExportInner({ slug }: { slug: string }) {
           overlayCodec,
           projectName: projectName || project.name,
           uploadTarget: "desk",
-          look: resolveLookChoice(looks, settings),
+          look: resolveLookChoice(looks, view),
+          stings: stingsFor(looks, view.look).map((s) => s.id),
           youtubeConnected: !!youtubeSettings?.connected,
         }),
       );
@@ -724,7 +726,8 @@ function ExportInner({ slug }: { slug: string }) {
         transitionSeconds,
         cams: camOptions,
         freeCell: gridFreeCells(shooters.length) > 0 ? gridFreeCell : "blank",
-        look: resolveLookChoice(looks, settings),
+        look: resolveLookChoice(looks, view),
+        stings: stingsFor(looks, view.look).map((s) => s.id),
         youtube,
         descriptionLead,
         uploadOptions,

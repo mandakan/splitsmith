@@ -74,7 +74,6 @@ THUMBNAILS: tuple[str, ...] = (
     "transition-hblur.png",
     "transition-smoothleft.png",
     "transition-wipeleft.png",
-    "transition-sting-wipe.png",
 )
 #: Every transition tile: the two FCP effects, the cut, and the xfade kinds
 #: the MP4 renderer draws (``composition.XFADE_KINDS``, issue #1244).

@@ -12,7 +12,7 @@ import type {
   MatchExportRequestPayload,
   OverlayCodec,
 } from "@/lib/api";
-import type { LookChoice } from "@/lib/looks";
+import { DEFAULT_LOOK, nonDefault, type LookChoice } from "@/lib/looks";
 import { camExportFields, type CamOptions } from "@/lib/camOptions";
 import { visibleTransitionKind } from "@/lib/lookGallery";
 import type { TransitionKind } from "@/lib/exportPresets";
@@ -85,6 +85,8 @@ export function buildCompareGridPayload(input: {
   transitionSeconds?: number;
   /** The resolved Look choice (#1246); sent whenever given. */
   look?: LookChoice;
+  /** The stings the chosen Look offers (``sting:<name>``), for the kind filter. */
+  stings?: readonly string[];
 }): CompareGridRequestPayload {
   const payload: CompareGridRequestPayload = {
     stage_numbers: [...input.stageNumbers].sort((a, b) => a - b),
@@ -93,12 +95,13 @@ export function buildCompareGridPayload(input: {
     canvas_height: input.canvas.height,
     output_name: input.outputName,
   };
-  const transition = visibleTransitionKind(input.transitionKind ?? "none", "mp4", "compare");
+  const transition = visibleTransitionKind(input.transitionKind ?? "none", "mp4", "compare", input.stings ?? []);
   if (transition !== "none") {
     payload.transition_kind = transition;
     payload.transition_duration_seconds = clampSeconds(input.transitionSeconds ?? 0.5, 0.1);
   }
-  if (input.look) payload.overlay_theme = input.look.look;
+  const theme = input.look && nonDefault(input.look.look, DEFAULT_LOOK);
+  if (theme) payload.overlay_theme = theme;
   if (input.render && anyRenderOptionOn(input.render)) {
     Object.assign(payload, gridExportFields(input.render, input.look));
   }
@@ -198,6 +201,8 @@ export interface MatchExportPayloadInput {
   youtubeConnected: boolean;
   /** The resolved Look choice (#1246); omitted, the server's defaults. */
   look?: LookChoice;
+  /** The stings the chosen Look offers (``sting:<name>``), for the kind filter. */
+  stings?: readonly string[];
 }
 
 /** The single-shooter match-export request body, for either the desk
@@ -218,10 +223,10 @@ export function buildMatchExportPayload(input: MatchExportPayloadInput): MatchEx
     tail_pad_seconds: input.tailPad,
     ...camExportFields(input.camOptions),
     output_format: outputFormat,
-    transition_kind: visibleTransitionKind(input.transitionKind, outputFormat),
+    transition_kind: visibleTransitionKind(input.transitionKind, outputFormat, "single", input.stings ?? []),
     transition_duration_seconds: clampSeconds(input.transitionSeconds, 0.1),
     ...matchExportFields(input.renderOptions, outputFormat, input.look),
-    ...(input.look ? { overlay_theme: input.look.look } : {}),
+    ...(input.look && nonDefault(input.look.look, DEFAULT_LOOK) ? { overlay_theme: input.look.look } : {}),
     intro_path: undefined,
     outro_path: undefined,
     youtube_sidecar: youtube,

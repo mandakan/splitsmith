@@ -13,6 +13,12 @@ import type { ExportSettings } from "@/lib/exportPresets";
 export const DEFAULT_LOOK = "splitsmith";
 export const DEFAULT_VARIANT = "default";
 
+/** A request carries a Look field only when it is not the default, so
+ *  an untouched form sends the body it always sent and the server's
+ *  own defaults (the ``card_variant`` knob, the default Look) apply. */
+export const nonDefault = (value: string, fallback: string): string | undefined =>
+  value === fallback ? undefined : value;
+
 /** The settings fields a request's Look choice is resolved from. */
 export interface LookChoice {
   look: string;

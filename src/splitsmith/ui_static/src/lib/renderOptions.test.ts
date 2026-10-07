@@ -184,22 +184,24 @@ describe("the Look choice on the mappers (#1246)", () => {
   it("matchExportFields sends the match-card variants where cards go and the stage card's where stage cards go", () => {
     const mp4 = matchExportFields(ON, "mp4", choice);
     expect(mp4.title_page_variant).toBe("rise");
-    expect(mp4.stage_card_variant).toBe("default");
+    expect("stage_card_variant" in mp4).toBe(false);
     expect(mp4.closing_card_variant).toBe("rise");
-    const fcpxml = matchExportFields(ON, "fcpxml", choice);
-    expect(fcpxml.stage_card_variant).toBe("default");
-    expect("title_page_variant" in fcpxml).toBe(false);
-    expect("closing_card_variant" in fcpxml).toBe(false);
-    const fcp7 = matchExportFields(ON, "fcp7xml", choice);
+    const stage = matchExportFields(ON, "fcpxml", { ...choice, stageCardVariant: "rise" });
+    expect(stage.stage_card_variant).toBe("rise");
+    expect("title_page_variant" in stage).toBe(false);
+    expect("closing_card_variant" in stage).toBe(false);
+    const fcp7 = matchExportFields(ON, "fcp7xml", { ...choice, stageCardVariant: "rise" });
     expect("stage_card_variant" in fcp7).toBe(false);
     expect(matchExportFields(ON, "mp4")).not.toHaveProperty("title_page_variant");
+    const defaults = { look: "splitsmith", titlePageVariant: "default", stageCardVariant: "default", closingCardVariant: "default" };
+    expect(matchExportFields(ON, "mp4", defaults)).toEqual(matchExportFields(ON, "mp4"));
   });
 
   it("gridExportFields sends all three", () => {
     const fields = gridExportFields(ON, choice);
     expect([fields.title_page_variant, fields.stage_card_variant, fields.closing_card_variant]).toEqual([
       "rise",
-      "default",
+      undefined,
       "rise",
     ]);
     expect(gridExportFields(ON)).not.toHaveProperty("title_page_variant");

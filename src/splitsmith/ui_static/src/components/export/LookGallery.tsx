@@ -8,9 +8,13 @@
  */
 import { Seconds } from "@/components/export/Seconds";
 import { Field } from "@/components/ui/Field";
+import { Segmented } from "@/components/ui/Segmented";
+import type { LookInfo } from "@/lib/api";
 import type { LookFocus } from "@/lib/exportPreview";
 import type { ExportSettings } from "@/lib/exportPresets";
 import {
+  VARIANT_FIELD,
+  slotsForLook,
   thumbnailUrl,
   variantHelp,
   visibleSlots,
@@ -19,6 +23,7 @@ import {
   type LookSlotId,
   type LookVariant,
 } from "@/lib/lookGallery";
+import { previewSrc, variantsFor, visibleVariant } from "@/lib/looks";
 import { cn } from "@/lib/utils";
 
 export interface LookGalleryProps {
@@ -32,13 +37,16 @@ export interface LookGalleryProps {
   onHover?: (focus: LookFocus | null) => void;
   /** A tile was picked; the rail previews it on this match. */
   onSelect?: (focus: LookFocus) => void;
+  /** The installed Looks (#1246): the Look tiles, each card slot's Style
+   *  and the chosen Look's stings come from it. */
+  looks: LookInfo[];
 }
 
-export function LookGallery({ settings, patch, busy, bareHints, onHover, onSelect }: LookGalleryProps) {
+export function LookGallery({ settings, patch, busy, bareHints, onHover, onSelect, looks }: LookGalleryProps) {
   const format = settings.mode === "compare" ? "mp4" : settings.outputFormat;
   return (
     <>
-      {visibleSlots(settings.mode, format).map((slot) => (
+      {visibleSlots(settings.mode, format, slotsForLook(looks, settings)).map((slot) => (
         <SlotRow
           key={slot.id}
           slot={slot}
@@ -49,11 +57,14 @@ export function LookGallery({ settings, patch, busy, bareHints, onHover, onSelec
           bareHint={bareHints[slot.id] ?? null}
           onHover={onHover}
           onSelect={onSelect}
+          looks={looks}
         />
       ))}
     </>
   );
 }
+
+const capitalise = (name: string) => name.charAt(0).toUpperCase() + name.slice(1).replace(/[-_]/g, " ");
 
 function SlotRow({
   slot,
@@ -64,6 +75,7 @@ function SlotRow({
   bareHint,
   onHover,
   onSelect,
+  looks,
 }: {
   slot: LookSlot;
   variants: LookVariant[];
@@ -73,12 +85,25 @@ function SlotRow({
   bareHint: string | null;
   onHover?: (focus: LookFocus | null) => void;
   onSelect?: (focus: LookFocus) => void;
+  looks: LookInfo[];
 }) {
   const selectedId = slot.read(settings);
   const selected = variants.find((v) => v.id === selectedId) ?? variants[0];
   const on = selected.id !== slot.variants[0].id;
   const params = selected.params.filter((p) => !p.modes || p.modes.includes(settings.mode));
   const help = variantHelp(selected, settings.mode);
+  // The card's template variant (#1246): a Style under the tiles while
+  // the card is on and the chosen Look has more than one to offer.
+  const styleField = VARIANT_FIELD[slot.id];
+  const styles = styleField ? variantsFor(looks, settings.look, styleField.slot) : [];
+  const style =
+    styleField && on && styles.length > 1
+      ? {
+          value: visibleVariant(looks, settings.look, styleField.slot, settings[styleField.field]),
+          options: styles.map((v) => ({ value: v.name, label: capitalise(v.name) })),
+          write: (value: string) => patch({ [styleField.field]: value } as Partial<ExportSettings>),
+        }
+      : null;
   return (
     <Field label={slot.label} help={on && bareHint ? `${help} ${bareHint}` : help}>
       <div className="flex flex-wrap items-start gap-3">
@@ -107,7 +132,7 @@ function SlotRow({
                 )}
               >
                 <img
-                  src={thumbnailUrl(v.thumbnail)}
+                  src={previewSrc(v.previewUrl ?? null) ?? thumbnailUrl(v.thumbnail)}
                   alt=""
                   className="aspect-video w-full rounded-sm bg-surface-3 object-cover"
                 />
@@ -119,6 +144,17 @@ function SlotRow({
             );
           })}
         </div>
+        {style ? (
+          <div className="sm:pt-2">
+            <Segmented
+              label={`${slot.label} style`}
+              value={style.value}
+              options={style.options}
+              onChange={style.write}
+              disabled={busy}
+            />
+          </div>
+        ) : null}
         {params.length > 0 ? (
           <div className="flex flex-wrap items-center gap-3 sm:pt-2">
             {params.map((p) => (

@@ -105,7 +105,7 @@ def test_transition_tiles_differ_from_each_other(tmp_path: Path) -> None:
     mod = _load()
     mod.build_thumbnails(tmp_path, rasterizer=_StubRasterizer(), look=load_look("splitsmith"))
     names = [n for n in mod.THUMBNAILS if n.startswith("transition-")]
-    assert len(names) == 14
+    assert len(names) == 13
     assert len({(tmp_path / n).read_bytes() for n in names}) == len(names)
 
 

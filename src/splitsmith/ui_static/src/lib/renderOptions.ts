@@ -15,7 +15,7 @@
  */
 
 import type { CompareGridRequestPayload, MatchExportRequestPayload } from "./api";
-import type { LookChoice } from "./looks";
+import { DEFAULT_VARIANT, nonDefault, type LookChoice } from "./looks";
 
 export type StageCardStyle = "none" | "slate" | "lower-third";
 export type OutputFormat = NonNullable<MatchExportRequestPayload["output_format"]>;
@@ -122,7 +122,8 @@ export function matchExportFields(
     title_kind: stageCardsSupported(outputFormat) ? options.stageCardStyle : "none",
     title_duration_seconds: clampSeconds(options.stageCardDurationSeconds, MIN_CARD_SECONDS),
   };
-  if (look && stageCardsSupported(outputFormat)) fields.stage_card_variant = look.stageCardVariant;
+  const stageVariant = look && nonDefault(look.stageCardVariant, DEFAULT_VARIANT);
+  if (stageVariant && stageCardsSupported(outputFormat)) fields.stage_card_variant = stageVariant;
   if (!cardsSupported(outputFormat)) return fields;
   return {
     ...fields,
@@ -132,7 +133,7 @@ export function matchExportFields(
     title_page_duration_seconds: clampSeconds(options.titlePageDurationSeconds, MIN_CARD_SECONDS),
     closing_card: options.closingCard,
     summary_hold_seconds: clampSeconds(options.summaryHoldSeconds, 0),
-    ...(look ? { title_page_variant: look.titlePageVariant, closing_card_variant: look.closingCardVariant } : {}),
+    ...variantFields(look, ["title_page_variant", "closing_card_variant"]),
   };
 }
 
@@ -163,14 +164,28 @@ export function gridExportFields(
     title_division: options.titleDivision,
     title_page_duration_seconds: clampSeconds(options.titlePageDurationSeconds, MIN_CARD_SECONDS),
     closing_card: options.closingCard,
-    ...(look
-      ? {
-          title_page_variant: look.titlePageVariant,
-          stage_card_variant: look.stageCardVariant,
-          closing_card_variant: look.closingCardVariant,
-        }
-      : {}),
+    ...variantFields(look, ["title_page_variant", "stage_card_variant", "closing_card_variant"]),
   };
+}
+
+const VARIANT_SOURCE = {
+  title_page_variant: "titlePageVariant",
+  stage_card_variant: "stageCardVariant",
+  closing_card_variant: "closingCardVariant",
+} as const;
+
+/** The named variant fields of ``look`` that are not the default. */
+function variantFields(
+  look: LookChoice | undefined,
+  names: readonly (keyof typeof VARIANT_SOURCE)[],
+): Partial<Record<keyof typeof VARIANT_SOURCE, string>> {
+  const out: Partial<Record<keyof typeof VARIANT_SOURCE, string>> = {};
+  if (!look) return out;
+  for (const name of names) {
+    const value = nonDefault(look[VARIANT_SOURCE[name]], DEFAULT_VARIANT);
+    if (value) out[name] = value;
+  }
+  return out;
 }
 
 /** True when any card or hold is on -- what a summary line or a "reset"

@@ -37,8 +37,6 @@ describe("previewBody", () => {
       title_info: "Production Optics",
       title_division: true,
       project_name: "Bromma - Final Cut",
-      look: "splitsmith",
-      variant: "default",
       head_pad_seconds: 0.5,
       tail_pad_seconds: 1,
     });
@@ -87,9 +85,17 @@ describe("previewBody with a Look (#1246)", () => {
     };
     expect(previewBody(settings, "title", 1).look).toBe("clean");
     expect(previewBody(settings, "title", 1).variant).toBe("rise");
-    expect(previewBody(settings, "slate", 1).variant).toBe("default");
-    expect(previewBody(settings, "lower-third", 1).variant).toBe("default");
+    expect(previewBody(settings, "slate", 1).variant).toBeUndefined();
+    expect(previewBody(settings, "lower-third", 1).variant).toBeUndefined();
     expect(previewBody(settings, "closing", 1).variant).toBe("rise");
     expect(previewBody(settings, "frame", 1).variant).toBeUndefined();
+    expect(previewBody(DEFAULT_EXPORT_SETTINGS, "title", 1)).not.toHaveProperty("look");
+  });
+});
+
+
+describe("previewCardFor with the Look slot (#1246)", () => {
+  it("a Look tile previews the title page in the chosen Look", () => {
+    expect(previewCardFor({ slotId: "look", variantId: "club" })).toBe("title");
   });
 });

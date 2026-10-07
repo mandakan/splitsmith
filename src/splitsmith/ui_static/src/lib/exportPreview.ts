@@ -6,6 +6,7 @@
 import type { ExportPreviewBody, PreviewCard } from "@/lib/api";
 import { PADDING_PRESETS, type ExportSettings } from "@/lib/exportPresets";
 import { LOOK_SLOTS, type LookSlotId } from "@/lib/lookGallery";
+import { DEFAULT_LOOK, DEFAULT_VARIANT, nonDefault } from "@/lib/looks";
 
 export interface LookFocus {
   slotId: LookSlotId;
@@ -18,11 +19,16 @@ export const PREVIEW_WIDTH = 960;
  *  null where only the generic thumbnail can show (transitions). */
 export function previewCardFor(focus: LookFocus | null): PreviewCard | null {
   if (focus === null) return "frame";
+  // The Look tiles (#1246) are not in the static table: a Look previews
+  // as the title page in the chosen Look.
+  if (focus.slotId === "look") return "title";
   const slot = LOOK_SLOTS.find((s) => s.id === focus.slotId);
   if (!slot) return "frame";
   if (slot.id === "transition") return null;
   if (focus.variantId === slot.variants[0].id) return "frame";
   switch (slot.id) {
+    case "look":
+      return "title";
     case "titlePage":
       return "title";
     case "closingCard":
@@ -69,10 +75,11 @@ export function previewBody(
     title_info: settings.renderOptions.titleInfo.trim() || null,
     title_division: settings.renderOptions.titleDivision,
     project_name: projectName.trim() || null,
-    look: settings.look,
   };
+  const look = nonDefault(settings.look, DEFAULT_LOOK);
+  if (look) body.look = look;
   const variant = variantForCard(settings, card);
-  if (variant !== null) body.variant = variant;
+  if (variant !== null && variant !== DEFAULT_VARIANT) body.variant = variant;
   // The timeline pads with the form's values; the grid and the trims
   // pad with the project's own buffers, which the server defaults to.
   if (settings.mode === "single") {

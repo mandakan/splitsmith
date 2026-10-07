@@ -13,8 +13,10 @@
  * table, and ``renderOptions.test.ts`` pins that the mappers never emit
  * a field the registry hides.
  */
+import type { LookInfo } from "@/lib/api";
 import type { ExportMode } from "@/lib/exportPlan";
 import type { ExportSettings } from "@/lib/exportPresets";
+import { stingsFor, visibleLook, type LookChoice, type LookSlotName } from "@/lib/looks";
 import {
   cardsSupported,
   MIN_CARD_SECONDS,
@@ -23,7 +25,7 @@ import {
   type OutputFormat,
 } from "@/lib/renderOptions";
 
-export type LookSlotId = "titlePage" | "stageCard" | "closingCard" | "summaryHold" | "overlay" | "transition";
+export type LookSlotId = "look" | "titlePage" | "stageCard" | "closingCard" | "summaryHold" | "overlay" | "transition";
 
 export interface LookParam {
   /** Unique within the variant; becomes the input id. */
@@ -39,8 +41,10 @@ export interface LookParam {
 export interface LookVariant {
   id: string;
   name: string;
-  /** File under ``assets/look/``. */
+  /** File under ``assets/look/``; the fallback when ``previewUrl`` is unset. */
   thumbnail: string;
+  /** A catalog preview (``/api/looks/...``, #1246) for a variant the Look draws. */
+  previewUrl?: string | null;
   /** One line under the row while this variant is selected; a function
    *  when the wording differs by mode (the grid's overlay has a hold and
    *  no codec). */
@@ -83,18 +87,6 @@ const XFADE_VARIANTS: { id: string; name: string; thumbnail: string; help: strin
   { id: "wipeleft", name: "Wipe left", thumbnail: "transition-wipeleft.png", help: "A hard wipe to the left." },
 ];
 
-/** The stings the shipped Look offers (#1245): a Look template drawn over
- *  the boundary's fade by the MP4 renderers. The id is the request's
- *  ``transition_kind``; the gallery API (#1246) will take these from the
- *  Look's ``transition`` slot. */
-const STING_VARIANTS: { id: string; name: string; thumbnail: string; help: string }[] = [
-  {
-    id: "sting:wipe",
-    name: "Logo wipe",
-    thumbnail: "transition-sting-wipe.png",
-    help: "An accent band sweeps across the cut carrying the logo, or the next stage's name.",
-  },
-];
 
 /** What the hold turns on at: the YouTube built-in's value. */
 export const DEFAULT_SUMMARY_HOLD_SECONDS = 3;
@@ -292,7 +284,7 @@ export const LOOK_SLOTS: readonly LookSlot[] = [
         modes: ["single"],
         formats: ["fcpxml"],
       },
-      ...[...XFADE_VARIANTS, ...STING_VARIANTS].map((v) => ({
+      ...XFADE_VARIANTS.map((v) => ({
         ...v,
         params: [transitionSeconds],
         modes: ["single", "compare"] as ExportMode[],
@@ -322,16 +314,79 @@ export function visibleTransitionKind(
   kind: ExportSettings["transitionKind"],
   format: OutputFormat,
   mode: "single" | "compare" = "single",
+  /** The stings the chosen Look offers (``sting:<name>`` ids, #1246). */
+  stings: readonly string[] = [],
 ): ExportSettings["transitionKind"] {
   if (kind === "none") return "none";
+  if (kind.startsWith("sting:")) return format === "mp4" && stings.includes(kind) ? kind : "none";
   const transition = LOOK_SLOTS.find((s) => s.id === "transition");
   if (!transition) return "none";
   return visibleVariants(transition, mode, format).some((v) => v.id === kind) ? kind : "none";
 }
 
 /** A slot shows when at least one variant beyond the default can be drawn. */
-export function visibleSlots(mode: ExportMode, format: OutputFormat): LookSlot[] {
-  return LOOK_SLOTS.filter((slot) => visibleVariants(slot, mode, format).length > 1);
+export function visibleSlots(
+  mode: ExportMode,
+  format: OutputFormat,
+  slots: readonly LookSlot[] = LOOK_SLOTS,
+): LookSlot[] {
+  return slots.filter((slot) => visibleVariants(slot, mode, format).length > 1);
+}
+
+/** Which settings field and which catalog slot a card slot's Style
+ *  control reads and writes (#1246); the other slots have no Style. */
+export const VARIANT_FIELD: Partial<Record<LookSlotId, { field: keyof LookChoice; slot: LookSlotName }>> = {
+  titlePage: { field: "titlePageVariant", slot: "title_page" },
+  stageCard: { field: "stageCardVariant", slot: "stage_card" },
+  closingCard: { field: "closingCardVariant", slot: "closing" },
+};
+
+const capitalise = (name: string) => name.charAt(0).toUpperCase() + name.slice(1).replace(/[-_]/g, " ");
+
+/** The Look tiles: one per installed Look, first in the group (#1246). */
+function lookSlot(looks: LookInfo[]): LookSlot {
+  return {
+    id: "look",
+    label: "Look",
+    variants: looks.map((l) => ({
+      id: l.name,
+      name: l.label,
+      thumbnail: "none.png",
+      previewUrl: l.preview,
+      help:
+        l.source === "user"
+          ? "A Look installed under ~/.splitsmith/looks: its palette and templates draw every card."
+          : "The shipped palette and templates.",
+      params: [],
+      modes: ALL_MODES,
+      formats: ALL_FORMATS,
+    })),
+    read: (s) => visibleLook(looks, s.look),
+    write: (_s, id) => ({ look: id }),
+  };
+}
+
+/** The gallery's slots for the installed catalog and the chosen Look
+ *  (#1246): the static table, the Look tiles first when more than one
+ *  Look is installed, and the chosen Look's stings among the transitions
+ *  (MP4, both modes) with their catalog previews. With the built-in
+ *  catalog alone this is ``LOOK_SLOTS`` unchanged. */
+export function slotsForLook(looks: LookInfo[], settings: Pick<ExportSettings, "look">): LookSlot[] {
+  const look = visibleLook(looks, settings.look);
+  const stings: LookVariant[] = stingsFor(looks, look).map((s) => ({
+    id: s.id,
+    name: capitalise(s.name),
+    thumbnail: "none.png",
+    previewUrl: s.preview,
+    help: "A band from the Look sweeps across the cut over a fade.",
+    params: [transitionSeconds],
+    modes: ["single", "compare"],
+    formats: ["mp4"],
+  }));
+  const slots = LOOK_SLOTS.map((slot) =>
+    slot.id === "transition" && stings.length > 0 ? { ...slot, variants: [...slot.variants, ...stings] } : slot,
+  );
+  return looks.length > 1 ? [lookSlot(looks), ...slots] : slots;
 }
 
 /** Every thumbnail the registry references, for the coverage test and the script. */
