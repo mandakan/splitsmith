@@ -129,6 +129,10 @@ HOSTED_CONFINED_ROUTES: dict[tuple[str, str], str] = {
     ),
     ("POST", "/api/shooters/{slug}/exports/youtube-upload"): "confine_export_filename keeps it in exports/",
     ("POST", "/api/shooters/{slug}/export/match"): "hosted refuses intro_path / outro_path (400)",
+    ("GET", "/api/looks/{name}/preview/{file}"): (
+        "name must be an installed Look and file a bare <slot>-<variant>.png|webp inside that Look's "
+        "preview/ directory; anything else is 404 (looks_api)"
+    ),
 }
 
 

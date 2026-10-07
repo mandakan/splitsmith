@@ -37,6 +37,12 @@ reads it in this slice, the stage summary still composes through
 #1245): each variant is a ``sting:<variant>`` transition kind."""
 
 STING_SLOT = "transition"
+PREVIEW_DIR = "preview"
+"""Where a Look keeps the gallery's pictures of it (issue #1246):
+``<slot>-<variant>.png`` (or ``.webp``) per template variant and
+``look.png`` for the Look itself. A Look without one borrows the
+shipped default's, as it borrows its templates."""
+CARD_PREVIEW_SLOTS: tuple[str, ...] = ("title_page", "slate", "lower_third", "closing", "transition")
 
 CardSlot = Literal["title_page", "slate", "lower_third", "closing"]
 """The slots ``overlay_card`` renders through a template."""
@@ -327,6 +333,79 @@ def sting_template_for(look: Look, name: str) -> Path | None:
     return _shipped_default().own_template(STING_SLOT, name)
 
 
+def preview_file(look: Look, slot: str, variant: str = DEFAULT_VARIANT) -> Path | None:
+    """The picture the gallery shows for ``variant`` of ``slot`` in ``look``
+    (``slot`` ``"look"`` is the Look's own sample tile): the Look's
+    ``preview/<slot>-<variant>.webp`` or ``.png``, else the shipped
+    default Look's, else ``None``."""
+    stem = "look" if slot == "look" else f"{slot}-{variant}"
+    for candidate in (look, _shipped_default()):
+        for suffix in (".webp", ".png"):
+            path = candidate.root / PREVIEW_DIR / f"{stem}{suffix}"
+            if path.is_file():
+                return path
+        if candidate.name == DEFAULT_LOOK and candidate.source == look.source:
+            break
+    return None
+
+
+class LookVariantInfo(BaseModel):
+    """One template variant of a slot as the gallery sees it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    #: ``/api/looks/<owner>/preview/<file>``, the Look whose file it is.
+    preview: str | None
+
+
+class LookInfo(BaseModel):
+    """One installed Look as ``GET /api/looks`` lists it (issue #1246)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    label: str
+    source: Literal["shipped", "user"]
+    accent_series: list[str]
+    preview: str | None
+    slots: dict[str, list[LookVariantInfo]]
+
+
+def _preview_url(look: Look, slot: str, variant: str) -> str | None:
+    path = preview_file(look, slot, variant)
+    if path is None:
+        return None
+    owner = look.name if path.is_relative_to(look.root) else DEFAULT_LOOK
+    return f"/api/looks/{owner}/preview/{path.name}"
+
+
+def look_catalog() -> list[LookInfo]:
+    """Every installed Look with every slot's variants (the Look's own and
+    the shipped default's, as :func:`variants_for` resolves them) and the
+    preview each one shows; in :func:`list_looks` order."""
+    out: list[LookInfo] = []
+    for look in list_looks():
+        slots = {
+            slot: [
+                LookVariantInfo(name=variant, preview=_preview_url(look, slot, variant))
+                for variant in variants_for(look, slot)
+            ]
+            for slot in SLOT_NAMES
+        }
+        out.append(
+            LookInfo(
+                name=look.name,
+                label=look.label,
+                source=look.source,
+                accent_series=list(look.accent_series),
+                preview=_preview_url(look, "look", DEFAULT_VARIANT),
+                slots=slots,
+            )
+        )
+    return out
+
+
 __all__ = [
     "DEFAULT_LOOK",
     "DEFAULT_VARIANT",
@@ -336,10 +415,20 @@ __all__ = [
     "CardSlot",
     "Look",
     "LookError",
+    "LookInfo",
+    "LookInfo",
     "LookManifest",
     "LookNotFoundError",
+    "LookVariantInfo",
+    "PREVIEW_DIR",
+    "LookVariantInfo",
+    "PREVIEW_DIR",
     "list_looks",
+    "look_catalog",
+    "look_catalog",
     "load_look",
+    "preview_file",
+    "preview_file",
     "look_names",
     "shared_dir",
     "shipped_looks_dir",

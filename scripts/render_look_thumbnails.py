@@ -31,9 +31,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from splitsmith import composition  # noqa: E402
 from splitsmith.look_sting import sting_context  # noqa: E402
 from splitsmith.looks import (  # noqa: E402
+    CARD_PREVIEW_SLOTS,
+    PREVIEW_DIR,
     Look,
+    list_looks,
     load_look,
-    sting_template_for,  # noqa: E402
+    sting_template_for,
+    variants_for,
 )
 from splitsmith.match_project import StageScorecard  # noqa: E402
 from splitsmith.overlay_card import build_card_still, build_lower_third, card_scale  # noqa: E402
@@ -297,13 +301,94 @@ def build_thumbnails(out: Path, *, rasterizer: Rasterizer, look: Look) -> list[P
     return written
 
 
+def build_look_previews(out_root: Path, *, look: Look, rasterizer: Rasterizer) -> list[Path]:
+    """The gallery's pictures of ``look`` (issue #1246), under
+    ``out_root / <look.name> / preview``: the sample card of every card
+    slot in every variant the Look resolves (its own templates, the
+    shipped default's for the rest), the sting posters, and ``look.png``,
+    the title page in the default variant, as the Look's own tile."""
+    out = out_root / look.name / PREVIEW_DIR
+    out.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = []
+    plain = paint_backdrop()
+    with tempfile.TemporaryDirectory() as tmp_name:
+        backdrop_png = Path(tmp_name) / "backdrop.png"
+        plain.save(backdrop_png)
+
+        def save(name: str, image: Image.Image | None) -> None:
+            if image is None:
+                raise RuntimeError(f"{look.name}/{name}: the card did not compose")
+            path = out / name
+            image.convert("RGB").save(path, optimize=True)
+            written.append(path)
+
+        card = {
+            "width": WIDTH,
+            "height": HEIGHT,
+            "fps": 30.0,
+            "look": look,
+            "rasterizer": rasterizer,
+            "backdrop": backdrop_png,
+        }
+        for slot in CARD_PREVIEW_SLOTS:
+            for variant in variants_for(look, slot):
+                if slot == "title_page":
+                    title = composition.MatchTitle(
+                        text=MATCH, info=("2026-06-27", "Production Optics"), variant=variant
+                    )
+                    save(f"{slot}-{variant}.png", build_card_still(title, slot="title_page", **card))
+                elif slot == "closing":
+                    closing = composition.MatchTitle(text=MATCH, info=("2026-06-27",), variant=variant)
+                    save(f"{slot}-{variant}.png", build_card_still(closing, slot="closing", **card))
+                elif slot == "slate":
+                    slate = composition.TitleCard(
+                        text=STAGE, duration_seconds=1.5, style="slate", info=("24 rounds",), variant=variant
+                    )
+                    save(f"{slot}-{variant}.png", build_card_still(slate, slot="slate", **card))
+                elif slot == "lower_third":
+                    lower = composition.TitleCard(
+                        text=STAGE,
+                        duration_seconds=1.5,
+                        style="lower-third",
+                        info=("24 rounds",),
+                        variant=variant,
+                    )
+                    third = build_lower_third(
+                        lower, width=WIDTH, height=HEIGHT, fps=30.0, look=look, rasterizer=rasterizer
+                    )
+                    if third is None:
+                        raise RuntimeError(f"{look.name}: lower third {variant} did not compose")
+                    over = plain.convert("RGBA")
+                    over.alpha_composite(third)
+                    save(f"{slot}-{variant}.png", over)
+                else:  # transition: the sting at its poster over the mid-fade
+                    right = ImageChops.offset(plain, 150, 0)
+                    base = _xfade_mid_frame("fade", plain, right)
+                    save(
+                        f"{slot}-{variant}.png", _sting_frame(variant, base, rasterizer=rasterizer, look=look)
+                    )
+        title = composition.MatchTitle(text=MATCH, info=("2026-06-27", "Production Optics"))
+        save("look.png", build_card_still(title, slot="title_page", **card))
+    return written
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--theme", default="splitsmith", help="an installed Look name")
+    parser.add_argument(
+        "--look-previews",
+        action="store_true",
+        help="also write every shipped Look's preview/ set under src/splitsmith/data/looks (#1246)",
+    )
     args = parser.parse_args()
     with ChromiumRasterizer() as rasterizer:
         written = build_thumbnails(args.out, rasterizer=rasterizer, look=load_look(args.theme))
+        if args.look_previews:
+            root = Path(__file__).resolve().parent.parent / "src/splitsmith/data/looks"
+            for look in list_looks():
+                if look.source == "shipped":
+                    written += build_look_previews(root, look=look, rasterizer=rasterizer)
     for path in written:
         print(path)
     return 0

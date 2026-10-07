@@ -107,3 +107,27 @@ def test_transition_tiles_differ_from_each_other(tmp_path: Path) -> None:
     names = [n for n in mod.THUMBNAILS if n.startswith("transition-")]
     assert len(names) == 14
     assert len({(tmp_path / n).read_bytes() for n in names}) == len(names)
+
+
+def test_look_previews_write_one_file_per_variant_and_the_sample_tile(tmp_path: Path) -> None:
+    """Slice 6 (#1246): the shipped Look's ``preview/`` set, drawn through
+    the Look's own templates; a Look without templates of its own (clean)
+    gets the same names through the shipped default's."""
+    mod = _load()
+    for name in ("splitsmith", "clean"):
+        written = mod.build_look_previews(tmp_path, look=load_look(name), rasterizer=_StubRasterizer())
+        assert {p.name for p in written} == {
+            "look.png",
+            "title_page-default.png",
+            "title_page-rise.png",
+            "slate-default.png",
+            "slate-rise.png",
+            "lower_third-default.png",
+            "lower_third-rise.png",
+            "closing-default.png",
+            "closing-rise.png",
+            "transition-wipe.png",
+        }
+        assert all(p.parent == tmp_path / name / "preview" for p in written)
+        with Image.open(tmp_path / name / "preview" / "slate-rise.png") as image:
+            assert image.size == (mod.WIDTH, mod.HEIGHT)
