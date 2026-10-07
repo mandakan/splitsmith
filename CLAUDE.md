@@ -282,7 +282,10 @@ resolves it against the Look and the shipped default, with no fallback to
 another variant). ``TransitionKind`` is therefore an open ``str``;
 ``composition.validate_transition_kind`` is the one grammar check and the
 request bodies, ``ExportPresetBody`` and both CLIs run it, so ``sting:``
-alone or an unknown closed kind is still a 422 / usage error. Both
+alone or an unknown closed kind is still a 422 / usage error, and
+``Transition.__post_init__`` runs it again so a caller that skipped them
+(the MCP tool annotates the open string) never puts text into
+``xfade=transition=``. Both
 renderers decide a sting while deciding the boundary (``sting_for_boundary``
 in each driver): ``look_sting.sting_motion`` loads the template with
 ``data.transition`` (kind, name, duration, the labels either side of the
@@ -295,8 +298,10 @@ whatever handle the edges had; the single-shooter cache keys it by
 frame. A sting the Look lacks, or one with no browser, is a fade plus a
 degradation naming it; frames that fail are a cut like any failed
 boundary. Without a sting every argv is unchanged. The shipped
-``sting-wipe.html`` sweeps an accent band across the seam carrying the one
-logo the shooters share (``distinct logos == 1``) or the next item's name;
+``sting-wipe.html`` sweeps an accent band across the seam carrying a logo
+when the shooters have exactly one distinct logo between them (one
+shooter's own, or the match logo folded into each) or the next item's
+name, clipped to the band in the bundled display face;
 ``window.duration()`` returns the transition's length, so the renderer
 samples exactly the boundary. The FCPXML path substitutes zoom with an
 anomaly; the gallery tile is ``sting:wipe`` (MP4, both modes), its

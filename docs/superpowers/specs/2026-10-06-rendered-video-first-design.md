@@ -206,8 +206,9 @@ cache key is both neighbours' argv plus the transition.
 > and `TransitionKind` is an open string validated by
 > `composition.validate_transition_kind`. The template receives
 > `data.transition` (kind, name, duration, the labels either side of the
-> cut) and `data.shooters`; the shipped wipe carries the one logo the
-> shooters share or the next item's name.
+> cut) and `data.shooters`; the shipped wipe carries a logo when the
+> shooters have exactly one distinct logo between them (one shooter's
+> own, or the match logo folded into each), else the next item's name.
 
 ## 4. Export page, Footage page, API
 

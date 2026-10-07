@@ -233,7 +233,7 @@ def validate_transition_kind(kind: str, *, allow_none: bool = True) -> str:
         return kind
     raise ValueError(
         f"transition kind {kind!r} is not 'none', an xfade ({', '.join(XFADE_KINDS)}), an FCP effect "
-        f"({', '.join(FCP_KINDS)}) or 'sting:<name>' (lower-case letters, digits, '-' and '_')"
+        f"({', '.join(FCP_KINDS)}) or 'sting:<name>' (a letter, then letters, digits, '-' and '_')"
     )
 
 
@@ -292,6 +292,13 @@ class Transition:
     kind: TransitionKind = "zoom"
     duration_seconds: float = 0.5
     color: str | None = None  # reserved for future colour-bearing kinds
+
+    def __post_init__(self) -> None:
+        # The IR is the last gate before ``kind`` reaches ffmpeg's filter
+        # graph (``xfade=transition=<kind>``): a caller that skipped the
+        # request validators (the MCP tool annotates the open string) is
+        # refused here, with the same message (review of #1245).
+        validate_transition_kind(self.kind, allow_none=False)
 
 
 TitleStyle = Literal["slate", "lower-third"]

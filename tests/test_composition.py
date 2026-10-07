@@ -544,3 +544,18 @@ def test_validate_transition_kind_refuses_everything_else(kind: str) -> None:
 def test_validate_transition_kind_can_refuse_none() -> None:
     with pytest.raises(ValueError):
         composition.validate_transition_kind("none", allow_none=False)
+
+
+def test_a_transition_refuses_a_kind_outside_the_grammar() -> None:
+    """Review of #1245: the IR is the last gate before ffmpeg's filter
+    graph, so a caller that skipped the request validators (the MCP tool
+    annotates the open string) still cannot put arbitrary text into
+    ``xfade=transition=``."""
+    for kind in ("bogus", "sting:", "none", "fade[x];movie=/etc/passwd"):
+        with pytest.raises(ValueError, match="transition kind"):
+            composition.Transition(from_stage_index=0, to_stage_index=1, kind=kind)
+    with pytest.raises(ValueError, match="transition kind"):
+        composition.uniform_transitions("bogus", 1.0, 2)
+    assert (
+        composition.Transition(from_stage_index=0, to_stage_index=1, kind="sting:wipe").kind == "sting:wipe"
+    )
