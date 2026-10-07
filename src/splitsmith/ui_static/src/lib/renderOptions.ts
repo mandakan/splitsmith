@@ -15,6 +15,7 @@
  */
 
 import type { CompareGridRequestPayload, MatchExportRequestPayload } from "./api";
+import { DEFAULT_VARIANT, nonDefault, type LookChoice } from "./looks";
 
 export type StageCardStyle = "none" | "slate" | "lower-third";
 export type OutputFormat = NonNullable<MatchExportRequestPayload["output_format"]>;
@@ -101,6 +102,9 @@ export type MatchExportCardFields = Pick<
       | "title_page_duration_seconds"
       | "closing_card"
       | "summary_hold_seconds"
+      | "title_page_variant"
+      | "stage_card_variant"
+      | "closing_card_variant"
     >
   >;
 
@@ -111,11 +115,15 @@ export type MatchExportCardFields = Pick<
 export function matchExportFields(
   options: RenderOptions,
   outputFormat: OutputFormat | undefined,
+  /** The resolved Look choice (#1246); omitted, no variant field is sent. */
+  look?: LookChoice,
 ): MatchExportCardFields {
   const fields: MatchExportCardFields = {
     title_kind: stageCardsSupported(outputFormat) ? options.stageCardStyle : "none",
     title_duration_seconds: clampSeconds(options.stageCardDurationSeconds, MIN_CARD_SECONDS),
   };
+  const stageVariant = look && nonDefault(look.stageCardVariant, DEFAULT_VARIANT);
+  if (stageVariant && stageCardsSupported(outputFormat)) fields.stage_card_variant = stageVariant;
   if (!cardsSupported(outputFormat)) return fields;
   return {
     ...fields,
@@ -125,6 +133,7 @@ export function matchExportFields(
     title_page_duration_seconds: clampSeconds(options.titlePageDurationSeconds, MIN_CARD_SECONDS),
     closing_card: options.closingCard,
     summary_hold_seconds: clampSeconds(options.summaryHoldSeconds, 0),
+    ...variantFields(look, ["title_page_variant", "closing_card_variant"]),
   };
 }
 
@@ -132,6 +141,8 @@ export function matchExportFields(
  *  rendered MP4. The summary hold is not the grid's (#705). */
 export function gridExportFields(
   options: RenderOptions,
+  /** The resolved Look choice (#1246); omitted, no variant field is sent. */
+  look?: LookChoice,
 ): Pick<
   CompareGridRequestPayload,
   | "stage_titles"
@@ -141,6 +152,9 @@ export function gridExportFields(
   | "title_division"
   | "title_page_duration_seconds"
   | "closing_card"
+  | "title_page_variant"
+  | "stage_card_variant"
+  | "closing_card_variant"
 > {
   return {
     stage_titles: options.stageCardStyle,
@@ -150,7 +164,28 @@ export function gridExportFields(
     title_division: options.titleDivision,
     title_page_duration_seconds: clampSeconds(options.titlePageDurationSeconds, MIN_CARD_SECONDS),
     closing_card: options.closingCard,
+    ...variantFields(look, ["title_page_variant", "stage_card_variant", "closing_card_variant"]),
   };
+}
+
+const VARIANT_SOURCE = {
+  title_page_variant: "titlePageVariant",
+  stage_card_variant: "stageCardVariant",
+  closing_card_variant: "closingCardVariant",
+} as const;
+
+/** The named variant fields of ``look`` that are not the default. */
+function variantFields(
+  look: LookChoice | undefined,
+  names: readonly (keyof typeof VARIANT_SOURCE)[],
+): Partial<Record<keyof typeof VARIANT_SOURCE, string>> {
+  const out: Partial<Record<keyof typeof VARIANT_SOURCE, string>> = {};
+  if (!look) return out;
+  for (const name of names) {
+    const value = nonDefault(look[VARIANT_SOURCE[name]], DEFAULT_VARIANT);
+    if (value) out[name] = value;
+  }
+  return out;
 }
 
 /** True when any card or hold is on -- what a summary line or a "reset"

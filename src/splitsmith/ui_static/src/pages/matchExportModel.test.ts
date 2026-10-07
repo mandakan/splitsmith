@@ -296,3 +296,52 @@ describe("buildCompareGridPayload transitions (#1244)", () => {
     expect("transition_kind" in hidden).toBe(false);
   });
 });
+
+
+describe("the Look on the payloads (#1246)", () => {
+  const look = { look: "clean", titlePageVariant: "rise", stageCardVariant: "rise", closingCardVariant: "default" };
+
+  it("the match export carries overlay_theme and the variants its format draws", () => {
+    const base: MatchExportPayloadInput = {
+      stageNumbers: [1],
+      headPad: S.headPad,
+      tailPad: S.tailPad,
+      camOptions: S.camOptions,
+      outputFormat: "mp4",
+      transitionKind: S.transitionKind,
+      transitionSeconds: S.transitionSeconds,
+      renderOptions: S.renderOptions,
+      youtube: false,
+      descriptionLead: "",
+      uploadOptions: S.uploadOptions,
+      includeOverlay: false,
+      overlayCodec: S.overlayCodec,
+      projectName: "M",
+      uploadTarget: "desk",
+      youtubeConnected: false,
+    };
+    const payload = buildMatchExportPayload({ ...base, look });
+    expect(payload.overlay_theme).toBe("clean");
+    expect(payload.title_page_variant).toBe("rise");
+    expect(payload.stage_card_variant).toBe("rise");
+    expect(payload).not.toHaveProperty("closing_card_variant");
+    expect(buildMatchExportPayload(base)).not.toHaveProperty("overlay_theme");
+    const defaults = { look: "splitsmith", titlePageVariant: "default", stageCardVariant: "default", closingCardVariant: "default" };
+    expect(buildMatchExportPayload({ ...base, look: defaults })).toEqual(buildMatchExportPayload(base));
+    const xml = buildMatchExportPayload({ ...base, look, outputFormat: "fcp7xml" });
+    expect(xml.overlay_theme).toBe("clean");
+    expect(xml).not.toHaveProperty("stage_card_variant");
+  });
+
+  it("the grid carries overlay_theme with the choice and the variants only with a card on", () => {
+    const base = { stageNumbers: [1], audioFrom: "a", canvas: CANVAS_CHOICES[0], outputName: "g" };
+    const plain = buildCompareGridPayload({ ...base, look });
+    expect(plain.overlay_theme).toBe("clean");
+    expect(plain).not.toHaveProperty("title_page_variant");
+    const carded = buildCompareGridPayload({ ...base, look, render: { ...DEFAULT_RENDER_OPTIONS, titlePage: true } });
+    expect(carded.title_page_variant).toBe("rise");
+    expect(buildCompareGridPayload(base)).not.toHaveProperty("overlay_theme");
+    const defaults = { look: "splitsmith", titlePageVariant: "default", stageCardVariant: "default", closingCardVariant: "default" };
+    expect(buildCompareGridPayload({ ...base, look: defaults })).toEqual(buildCompareGridPayload(base));
+  });
+});

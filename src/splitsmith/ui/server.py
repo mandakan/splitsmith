@@ -2992,6 +2992,8 @@ def _run_compare_grid(
                 title_page_duration_seconds=req.title_page_duration_seconds,
                 closing_card=req.closing_card,
                 card_variant=req.card_variant,
+                title_page_variant=req.title_page_variant,
+                closing_card_variant=req.closing_card_variant,
             ),
             divisions=compare_cards.bundle_divisions(filtered),
         )
@@ -3006,7 +3008,7 @@ def _run_compare_grid(
             closing=closing,
             stage_titles=req.stage_titles,
             title_duration_seconds=req.title_duration_seconds,
-            card_variant=req.card_variant,
+            card_variant=req.stage_card_variant or req.card_variant,
             identities=grid_identities(filtered, look=load_look(req.overlay_theme)),
             transitions=uniform_transitions(req.transition_kind, req.transition_duration_seconds, len(plans)),
             overlay=req.overlay,
@@ -4629,6 +4631,9 @@ def register_job_bodies(state: AppState) -> None:
                 title_page_duration_seconds=req.title_page_duration_seconds,
                 closing_card=req.closing_card,
                 card_variant=req.card_variant,
+                title_page_variant=req.title_page_variant,
+                stage_card_variant=req.stage_card_variant,
+                closing_card_variant=req.closing_card_variant,
                 overlay_theme=req.overlay_theme,
                 summary_hold_seconds=req.summary_hold_seconds,
                 shooter_label=proj.competitor_name,
@@ -18723,6 +18728,11 @@ def create_app(
     from .export_preview_api import router as export_preview_router
 
     app.include_router(export_preview_router)
+
+    # The Look catalog and its preview files (spec 2026-10-06 s4, #1246).
+    from .looks_api import router as looks_router
+
+    app.include_router(looks_router)
 
     # Share-link OG card PNGs (spec 2026-08-09). Same lazy-import,
     # always-registered idiom as sync_router and device_router: every

@@ -37,6 +37,12 @@ reads it in this slice, the stage summary still composes through
 #1245): each variant is a ``sting:<variant>`` transition kind."""
 
 STING_SLOT = "transition"
+PREVIEW_DIR = "preview"
+"""Where a Look keeps the gallery's pictures of it (issue #1246):
+``<slot>-<variant>.png`` (or ``.webp``) per template variant and
+``look.png`` for the Look itself. A Look without one borrows the
+shipped default's, as it borrows its templates."""
+CARD_PREVIEW_SLOTS: tuple[str, ...] = ("title_page", "slate", "lower_third", "closing", "transition")
 
 CardSlot = Literal["title_page", "slate", "lower_third", "closing"]
 """The slots ``overlay_card`` renders through a template."""
@@ -69,6 +75,8 @@ nothing yet)."""
 
 MANIFEST_FILE = "look.json"
 _NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
+LOOK_NAME_RE = _NAME_RE
+"""The shape of a Look name and of a variant name (public for the request layer)."""
 _TEMPLATE_FILE_RE = re.compile(r"^[A-Za-z0-9_.-]+\.html$")
 _ACCENT_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
@@ -327,6 +335,96 @@ def sting_template_for(look: Look, name: str) -> Path | None:
     return _shipped_default().own_template(STING_SLOT, name)
 
 
+def preview_file(look: Look, slot: str, variant: str = DEFAULT_VARIANT) -> Path | None:
+    """The picture the gallery shows for ``variant`` of ``slot`` in ``look``
+    (``slot`` ``"look"`` is the Look's own sample tile): the Look's
+    ``preview/<slot>-<variant>.webp`` or ``.png``, else the shipped
+    default Look's, else ``None``."""
+    stem = "look" if slot == "look" else f"{slot}-{variant}"
+    shipped = _shipped_default()
+    candidates = [look] if look.root == shipped.root else [look, shipped]
+    for candidate in candidates:
+        for suffix in (".webp", ".png"):
+            path = candidate.root / PREVIEW_DIR / f"{stem}{suffix}"
+            if path.is_file():
+                return path
+    return None
+
+
+SHIPPED_OWNER = "_shipped"
+"""The owner a borrowed preview is served under: the shipped default Look
+itself, whatever a user Look of the same name shadows (no Look can be
+named this; ``_NAME_RE`` refuses a leading underscore)."""
+
+
+def preview_owner_root(owner: str) -> Path | None:
+    """The directory ``/api/looks/{owner}/preview/`` reads from: the shipped
+    default for :data:`SHIPPED_OWNER`, an installed Look's root for its
+    name, else ``None``."""
+    if owner == SHIPPED_OWNER:
+        return _shipped_default().root
+    if owner in look_names():
+        return load_look(owner).root
+    return None
+
+
+class LookVariantInfo(BaseModel):
+    """One template variant of a slot as the gallery sees it."""
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    #: ``/api/looks/<owner>/preview/<file>``, the Look whose file it is.
+    preview: str | None
+
+
+class LookInfo(BaseModel):
+    """One installed Look as ``GET /api/looks`` lists it (issue #1246)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    label: str
+    source: Literal["shipped", "user"]
+    accent_series: list[str]
+    preview: str | None
+    slots: dict[str, list[LookVariantInfo]]
+
+
+def _preview_url(look: Look, slot: str, variant: str) -> str | None:
+    path = preview_file(look, slot, variant)
+    if path is None:
+        return None
+    owner = look.name if path.is_relative_to(look.root) else SHIPPED_OWNER
+    return f"/api/looks/{owner}/preview/{path.name}"
+
+
+def look_catalog() -> list[LookInfo]:
+    """Every installed Look with every slot's variants (the Look's own and
+    the shipped default's, as :func:`variants_for` resolves them) and the
+    preview each one shows; in :func:`list_looks` order."""
+    out: list[LookInfo] = []
+    for look in list_looks():
+        slots = {
+            slot: [
+                LookVariantInfo(name=variant, preview=_preview_url(look, slot, variant))
+                for variant in variants_for(look, slot)
+            ]
+            for slot in SLOT_NAMES
+        }
+        out.append(
+            LookInfo(
+                name=look.name,
+                label=look.label,
+                source=look.source,
+                accent_series=list(look.accent_series),
+                preview=_preview_url(look, "look", DEFAULT_VARIANT),
+                slots=slots,
+            )
+        )
+    return out
+
+
 __all__ = [
     "DEFAULT_LOOK",
     "DEFAULT_VARIANT",
@@ -336,10 +434,18 @@ __all__ = [
     "CardSlot",
     "Look",
     "LookError",
+    "LookInfo",
     "LookManifest",
     "LookNotFoundError",
+    "LOOK_NAME_RE",
+    "LookVariantInfo",
+    "PREVIEW_DIR",
+    "SHIPPED_OWNER",
     "list_looks",
+    "look_catalog",
     "load_look",
+    "preview_file",
+    "preview_owner_root",
     "look_names",
     "shared_dir",
     "shipped_looks_dir",

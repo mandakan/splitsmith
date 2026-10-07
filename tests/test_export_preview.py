@@ -9,6 +9,7 @@ once with synthetic media under the integration marker.
 from __future__ import annotations
 
 import io
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -326,3 +327,39 @@ def test_stage_card_names_an_unnamed_stage_by_number(tmp_path: Path, card: str) 
         work_dir=tmp_path / "work",
     )
     assert "Stage 3" in raster.htmls[-1]
+
+
+def test_preview_key_moves_with_the_look_and_the_variant() -> None:
+    """Slice 6 (#1246): a rise title page and the default one on the same
+    stage are two cache entries, as are two Looks."""
+    base = ep.PreviewSpec(card="title", stage_number=1)
+    key = ep.preview_key(base, slug="me", project_updated_at="t", audit="a")
+    rise = ep.preview_key(replace(base, variant="rise"), slug="me", project_updated_at="t", audit="a")
+    clean = ep.preview_key(replace(base, look="clean"), slug="me", project_updated_at="t", audit="a")
+    assert len({key, rise, clean}) == 3
+
+
+def test_the_variant_reaches_the_cards_template(tmp_path: Path) -> None:
+    """The rasterizer is handed the Look's rise template for a rise
+    preview; ``render_template`` draws it at its poster, so the preview
+    is the finished card, never its invisible first frame."""
+    project, root = _project(tmp_path)
+    seen: list[str] = []
+
+    class _Recording(_StubRasterizer):
+        def render_template(self, template, *, context, width, height):
+            seen.append(template.name)
+            return super().render_template(template, context=context, width=width, height=height)
+
+    for card in ("title", "slate", "lower-third", "closing"):
+        ep.render_preview(
+            ep.PreviewSpec(card=card, stage_number=3, variant="rise"),
+            project=project,
+            root=root,
+            audit_doc=None,
+            look=load_look("splitsmith"),
+            rasterizer=_Recording(),
+            ffmpeg_binary=None,
+            work_dir=tmp_path / "work",
+        )
+    assert seen == ["card-rise.html"] * 4

@@ -8,19 +8,55 @@ import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import type { LookInfo } from "@/lib/api";
 import { DEFAULT_EXPORT_SETTINGS, type ExportSettings } from "@/lib/exportPresets";
 import {
   LOOK_SLOTS,
   THUMBNAIL_FILES,
+  VARIANT_FIELD,
+  slotsForLook,
   thumbnailUrl,
   visibleSlots,
   visibleVariants,
   visibleTransitionKind,
   type LookSlot,
 } from "@/lib/lookGallery";
+import { BUILTIN_LOOKS } from "@/lib/looks";
 import type { RenderOptions } from "@/lib/renderOptions";
 
 const ASSETS = resolve(__dirname, "../assets/look");
+const CATALOG: LookInfo[] = [
+  {
+    name: "splitsmith",
+    label: "Splitsmith",
+    source: "shipped",
+    accent_series: [],
+    preview: "/api/looks/splitsmith/preview/look.png",
+    slots: {
+      title_page: [{ name: "default", preview: null }, { name: "rise", preview: "/api/looks/splitsmith/preview/title_page-rise.png" }],
+      slate: [{ name: "default", preview: null }, { name: "rise", preview: null }],
+      lower_third: [{ name: "default", preview: null }, { name: "rise", preview: null }],
+      summary: [],
+      closing: [{ name: "default", preview: null }, { name: "rise", preview: null }],
+      transition: [{ name: "wipe", preview: "/api/looks/splitsmith/preview/transition-wipe.png" }],
+    },
+  },
+  {
+    name: "club",
+    label: "Club",
+    source: "user",
+    accent_series: [],
+    preview: null,
+    slots: {
+      title_page: [{ name: "default", preview: null }],
+      slate: [{ name: "default", preview: null }],
+      lower_third: [{ name: "default", preview: null }],
+      summary: [],
+      closing: [{ name: "default", preview: null }],
+      transition: [],
+    },
+  },
+];
 const slot = (id: LookSlot["id"]) => LOOK_SLOTS.find((s) => s.id === id)!;
 const apply = (s: ExportSettings, p: Partial<ExportSettings>): ExportSettings => ({ ...s, ...p });
 
@@ -37,7 +73,7 @@ describe("registry shape", () => {
   });
 
   it("references every committed thumbnail and nothing else", () => {
-    const committed = import.meta.glob("../assets/look/*.png", { eager: true, import: "default" }) as Record<
+    const committed = import.meta.glob("../assets/look/*.{png,webp}", { eager: true, import: "default" }) as Record<
       string,
       string
     >;
@@ -45,7 +81,7 @@ describe("registry shape", () => {
       .map((p) => p.split("/").pop()!)
       .sort();
     expect(names).toEqual([...THUMBNAIL_FILES].sort());
-    expect(thumbnailUrl(names[0])).toMatch(/\.png$/);
+    expect(thumbnailUrl(names[0])).toMatch(/\.(png|webp)$/);
   });
 
   it("every RenderOptions field except titleInfo is written by exactly one slot or param", () => {
@@ -158,10 +194,10 @@ describe("visibility, pinned to the rules the render panel applied", () => {
     expect(visibleTransitionKind("zoom", "fcpxml")).toBe("zoom");
     expect(visibleTransitionKind("zoom", "fcp7xml")).toBe("none");
     expect(visibleTransitionKind("none", "mp4")).toBe("none");
-    expect(visibleTransitionKind("sting:wipe", "mp4")).toBe("sting:wipe");
-    expect(visibleTransitionKind("sting:wipe", "mp4", "compare")).toBe("sting:wipe");
-    expect(visibleTransitionKind("sting:wipe", "fcpxml")).toBe("none");
-    expect(visibleTransitionKind("sting:nope", "mp4")).toBe("none");
+    expect(visibleTransitionKind("sting:wipe", "mp4", "single", ["sting:wipe"])).toBe("sting:wipe");
+    expect(visibleTransitionKind("sting:wipe", "mp4", "compare", ["sting:wipe"])).toBe("sting:wipe");
+    expect(visibleTransitionKind("sting:wipe", "fcpxml", "single", ["sting:wipe"])).toBe("none");
+    expect(visibleTransitionKind("sting:nope", "mp4", "single", ["sting:wipe"])).toBe("none");
   });
 
   it("the transition slot offers the xfade kinds to MP4 and the two FCP effects to FCPXML", () => {
@@ -177,7 +213,6 @@ describe("visibility, pinned to the rules the render panel applied", () => {
       "hblur",
       "smoothleft",
       "wipeleft",
-      "sting:wipe",
     ]);
     expect(visibleVariants(slot("transition"), "single", "fcpxml").map((v) => v.id)).toEqual([
       "cut",
@@ -211,5 +246,70 @@ describe("visibility, pinned to the rules the render panel applied", () => {
       "slate",
       "lower-third",
     ]);
+  });
+});
+
+
+describe("slotsForLook (#1246)", () => {
+  const S = DEFAULT_EXPORT_SETTINGS;
+  const idsFor = (looks: LookInfo[], mode: "single" | "compare", format: "fcpxml" | "mp4") =>
+    visibleSlots(mode, format, slotsForLook(looks, S)).map((s) => s.id);
+
+  it("with the built-in catalog alone the table is the one pinned above", () => {
+    expect(idsFor(BUILTIN_LOOKS, "single", "mp4")).toEqual(visibleSlots("single", "mp4").map((s) => s.id));
+    expect(idsFor(BUILTIN_LOOKS, "single", "fcpxml")).toEqual(visibleSlots("single", "fcpxml").map((s) => s.id));
+    expect(slotsForLook(BUILTIN_LOOKS, S).find((s) => s.id === "transition")!.variants.map((v) => v.id)).toEqual(
+      LOOK_SLOTS.find((s) => s.id === "transition")!.variants.map((v) => v.id),
+    );
+  });
+
+  it("a second installed Look puts the Look tiles first, with their previews", () => {
+    expect(idsFor(CATALOG, "single", "mp4")[0]).toBe("look");
+    expect(idsFor(CATALOG, "single", "fcpxml")[0]).toBe("look");
+    const look = slotsForLook(CATALOG, S)[0];
+    expect(look.variants.map((v) => [v.id, v.name, v.previewUrl])).toEqual([
+      ["splitsmith", "Splitsmith", "/api/looks/splitsmith/preview/look.png"],
+      ["club", "Club", null],
+    ]);
+    expect(look.read(S)).toBe("splitsmith");
+    expect(look.read({ ...S, look: "gone" })).toBe("splitsmith");
+    expect(look.write(S, "club")).toEqual({ look: "club" });
+  });
+
+  it("the selected Look's stings join the transition tiles on MP4, both modes, never on FCPXML", () => {
+    const transition = slotsForLook(CATALOG, S).find((s) => s.id === "transition")!;
+    const sting = transition.variants.find((v) => v.id === "sting:wipe")!;
+    expect(sting.previewUrl).toBe("/api/looks/splitsmith/preview/transition-wipe.png");
+    expect(visibleVariants(transition, "single", "mp4").map((v) => v.id)).toContain("sting:wipe");
+    expect(visibleVariants(transition, "compare", "mp4").map((v) => v.id)).toContain("sting:wipe");
+    expect(visibleVariants(transition, "single", "fcpxml").map((v) => v.id)).not.toContain("sting:wipe");
+    const club = slotsForLook(CATALOG, { ...S, look: "club" }).find((s) => s.id === "transition")!;
+    expect(club.variants.map((v) => v.id)).not.toContain("sting:wipe");
+  });
+
+  it("visibleTransitionKind admits a sting only when the Look offers it", () => {
+    expect(visibleTransitionKind("sting:wipe", "mp4", "single", ["sting:wipe"])).toBe("sting:wipe");
+    expect(visibleTransitionKind("sting:wipe", "mp4", "compare", ["sting:wipe"])).toBe("sting:wipe");
+    expect(visibleTransitionKind("sting:wipe", "mp4", "single", [])).toBe("none");
+    expect(visibleTransitionKind("sting:wipe", "fcpxml", "single", ["sting:wipe"])).toBe("none");
+    expect(visibleTransitionKind("sting:other", "mp4", "single", ["sting:wipe"])).toBe("none");
+  });
+
+  it("names the settings field and the catalog slot each card slot's Style writes", () => {
+    expect(VARIANT_FIELD.titlePage).toEqual({ field: "titlePageVariant", slot: "title_page" });
+    expect(VARIANT_FIELD.stageCard).toEqual({ field: "stageCardVariant", slot: "stage_card" });
+    expect(VARIANT_FIELD.closingCard).toEqual({ field: "closingCardVariant", slot: "closing" });
+    expect(VARIANT_FIELD.overlay).toBeUndefined();
+  });
+});
+
+
+describe("transition tiles (#1246)", () => {
+  it("the xfade tiles are looping WebP clips; the cut and the FCP effects stay stills", () => {
+    const transition = slot("transition");
+    for (const v of transition.variants) {
+      const still = ["cut", "static", "zoom"].includes(v.id);
+      expect(v.thumbnail.endsWith(still ? ".png" : ".webp"), v.id).toBe(true);
+    }
   });
 });

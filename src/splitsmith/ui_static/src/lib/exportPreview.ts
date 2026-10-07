@@ -3,9 +3,10 @@
  * a Look tile previews, the request body from the form, the caption and
  * the one line per failure. Pure; ``PreviewPane`` does the fetching.
  */
-import type { ExportPreviewBody, PreviewCard } from "@/lib/api";
+import type { ExportPreviewBody, LookInfo, PreviewCard } from "@/lib/api";
 import { PADDING_PRESETS, type ExportSettings } from "@/lib/exportPresets";
 import { LOOK_SLOTS, type LookSlotId } from "@/lib/lookGallery";
+import { BUILTIN_LOOKS, DEFAULT_LOOK, DEFAULT_VARIANT, lookChoiceOf, nonDefault, resolveLookChoice, type LookChoice } from "@/lib/looks";
 
 export interface LookFocus {
   slotId: LookSlotId;
@@ -18,11 +19,16 @@ export const PREVIEW_WIDTH = 960;
  *  null where only the generic thumbnail can show (transitions). */
 export function previewCardFor(focus: LookFocus | null): PreviewCard | null {
   if (focus === null) return "frame";
+  // The Look tiles (#1246) are not in the static table: a Look previews
+  // as the title page in the chosen Look.
+  if (focus.slotId === "look") return "title";
   const slot = LOOK_SLOTS.find((s) => s.id === focus.slotId);
   if (!slot) return "frame";
   if (slot.id === "transition") return null;
   if (focus.variantId === slot.variants[0].id) return "frame";
   switch (slot.id) {
+    case "look":
+      return "title";
     case "titlePage":
       return "title";
     case "closingCard":
@@ -38,12 +44,33 @@ export function previewCardFor(focus: LookFocus | null): PreviewCard | null {
 
 const finite = (n: number, fallback: number) => (Number.isFinite(n) ? n : fallback);
 
+/** The settings field whose variant a card previews with; null for the
+ *  cards that have no template variant (the frame, the summary, the
+ *  overlay). */
+export function variantForCard(settings: LookChoice, card: PreviewCard): string | null {
+  switch (card) {
+    case "title":
+      return settings.titlePageVariant;
+    case "closing":
+      return settings.closingCardVariant;
+    case "slate":
+    case "lower-third":
+      return settings.stageCardVariant;
+    default:
+      return null;
+  }
+}
+
 export function previewBody(
   settings: ExportSettings,
   card: PreviewCard,
   stageNumber: number,
   /** The bundle name field; the match cards carry it, as the export does. */
   projectName: string = "",
+  /** The installed catalog: the stored Look and variant are resolved
+   *  against it first, so a preset's uninstalled Look previews as the
+   *  default instead of a 422 (review of #1246). */
+  looks: LookInfo[] = BUILTIN_LOOKS,
 ): ExportPreviewBody {
   const body: ExportPreviewBody = {
     card,
@@ -53,6 +80,11 @@ export function previewBody(
     title_division: settings.renderOptions.titleDivision,
     project_name: projectName.trim() || null,
   };
+  const resolved = resolveLookChoice(looks, lookChoiceOf(settings));
+  const look = nonDefault(resolved.look, DEFAULT_LOOK);
+  if (look) body.look = look;
+  const variant = variantForCard(resolved, card);
+  if (variant !== null && variant !== DEFAULT_VARIANT) body.variant = variant;
   // The timeline pads with the form's values; the grid and the trims
   // pad with the project's own buffers, which the server defaults to.
   if (settings.mode === "single") {

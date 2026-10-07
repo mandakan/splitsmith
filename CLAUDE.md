@@ -187,13 +187,29 @@ encode's ``prepare`` step, so a cached card renders no frame. A still
 template takes the PNG path unchanged, which is what keeps the default
 variant pixel-identical. The manifest names variants per slot
 (``"slot": {"default": ..., "rise": ...}``; a bare string is ``default``),
-the IR carries ``variant`` on ``MatchTitle`` and ``TitleCard``, and
-``card_variant`` is the one knob (``--card-variant`` on ``match export``
-and ``compare export``, the request field) until #1246; a variant the Look
+the IR carries ``variant`` on ``MatchTitle`` and ``TitleCard``.
+``card_variant`` is the CLI's one knob (``--card-variant`` on ``match
+export`` and ``compare export``) and the fallback; the request bodies
+carry a variant per slot since #1246 (``title_page_variant``,
+``stage_card_variant`` for the slate and the lower third together,
+``closing_card_variant``; ``None`` is the knob), threaded by
+``match_exports`` and ``compare/cards.CardOptions``. A variant the Look
 lacks falls back to ``default`` with a warning. The shipped ``splitsmith``
 Look has ``default`` and ``rise`` (``card-rise.html``, Web Animations
 driven by ``seek``, ``poster()`` at the end of the rise so previews never
-show its invisible first frame).
+show its invisible first frame). ``overlay_theme`` on every request is any
+installed Look name (``overlay_theme.ThemeName`` is ``str``), validated
+against ``looks.look_names()`` by ``exports_api.installed_look`` with the
+installed set in the 422; ``ExportPresetBody.look`` and its three
+``*_variant`` fields are validated by shape only, so a preset loads on a
+machine without that Look and the page falls back to the default. The
+catalog is ``looks.look_catalog()`` (``GET /api/looks`` in
+``ui/looks_api.py``: every installed Look with every slot's variants and
+the preview each resolves to) and ``GET /api/looks/{name}/preview/{file}``
+serves a bare ``<slot>-<variant>.png|webp`` from the Look's ``preview/``
+directory, the shipped default's standing in for one a Look lacks
+(``looks.preview_file``); the shipped previews are rendered by
+``scripts/render_look_thumbnails.py --look-previews``.
 
 A shooter has an **identity** (``splitsmith.identity``, spec section 2,
 #1243): ``MatchProject.identity`` holds an optional ``#rrggbb`` accent, a
@@ -387,13 +403,27 @@ registry of slots, variants, thumbnails, parameters and which mode and
 format can draw each; ``components/export/LookGallery.tsx`` renders it
 and owns nothing. A new effect is one registry entry plus one thumbnail
 from ``scripts/render_look_thumbnails.py`` (Chromium once, at authoring
-time; the gallery never rasterizes). ``lookGallery.test.ts`` pins the
-per-format visibility table and that every committed thumbnail is
-referenced; ``renderOptions.test.ts`` pins that the mappers never send a
-field the registry hides. Transitions live in Look (FCPXML only, sent
-as ``none`` elsewhere) and the title line in Details. A slot whose
-seconds field is being edited reads NaN and must still count as on, or
-the input vanishes under the cursor (``summaryHold.read``).
+time; the gallery never rasterizes; the xfade tiles are looping WebP
+clips of the real transition through the project ffmpeg, the cut and
+the FCP effects stills). ``lookGallery.test.ts`` pins the per-format
+visibility table and that every committed thumbnail is referenced;
+``renderOptions.test.ts`` pins that the mappers never send a field the
+registry hides. The installed Looks reach it through ``lib/looks.ts``
+(the pure reader of ``GET /api/looks``: ``visibleLook``,
+``visibleVariant``, ``stingsFor``, ``resolveLookChoice``) and
+``useLooks`` (fetched once; ``BUILTIN_LOOKS`` until it answers):
+``slotsForLook(looks, settings)`` folds the catalog into the static
+table, the Look tiles first when more than one Look is installed, a
+Style (``Segmented``, ``VARIANT_FIELD``) under a card that is on when the
+chosen Look has more than one template variant, and the Look's stings
+among the transitions with their catalog previews. A Look field rides a
+request only when it is not the default (``nonDefault``), so an
+untouched form sends the body it always sent; a stored Look no longer
+installed, or a variant the Look lacks, is resolved before any request.
+Transitions live in Look (FCPXML only, sent as ``none`` elsewhere) and
+the title line in Details. A slot whose seconds field is being edited
+reads NaN and must still count as on, or the input vanishes under the
+cursor (``summaryHold.read``).
 
 The rail's preview (spec s3) is ``POST /api/shooters/{slug}/export-preview``
 -> PNG, engine ``export_preview.render_preview``: it declares the card
@@ -405,7 +435,10 @@ Cached under ``cache_dir/export-preview`` by a content key that includes
 the project's ``updated_at`` and the audit version. 503 is no browser,
 409 is the overlay without shots; the SPA maps each to one muted line in
 ``PreviewPane`` and never blocks the Export button. A new Look variant
-needs a ``previewCardFor`` case or it previews as the frame.
+needs a ``previewCardFor`` case or it previews as the frame. The request carries ``look`` and ``variant``
+(#1246, the focused slot's, only when not the defaults); both are in the
+cache key, and an animated template previews at its ``poster()`` through
+``render_template``.
 
 ## YouTube upload (#1000)
 

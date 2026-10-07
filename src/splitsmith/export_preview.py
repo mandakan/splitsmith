@@ -76,6 +76,10 @@ class PreviewSpec:
     #: match export); the match cards read it, the project's own name is
     #: only the fallback.
     project_name: str | None = None
+    #: The Look and the card's template variant (#1246), as the export
+    #: request carries them; the Look object itself is the caller's.
+    look: str = "splitsmith"
+    variant: str = "default"
 
     @property
     def height(self) -> int:
@@ -120,6 +124,8 @@ def preview_key(
             "head": spec.head_pad_seconds,
             "tail": spec.tail_pad_seconds,
             "name": spec.project_name,
+            "look": spec.look,
+            "variant": spec.variant,
             "project": project_updated_at,
             "audit": audit,
             "revision": PREVIEW_REVISION,
@@ -296,18 +302,28 @@ def render_preview(
         image = _compose_over(frame, None, spec, theme)
     elif spec.card in ("title", "closing"):
         card = composition.MatchTitle(
-            text=name, info=title_info_lines(project, extra=spec.title_info, division=spec.title_division)
+            text=name,
+            info=title_info_lines(project, extra=spec.title_info, division=spec.title_division),
+            variant=spec.variant,
         )
         slot = "title_page" if spec.card == "title" else "closing"
         image = build_card_still(card, slot=slot, rasterizer=rasterizer, backdrop=frame, **size)
     elif spec.card == "slate":
         slate = composition.TitleCard(
-            text=stage_label, duration_seconds=1.5, style="slate", info=_rounds_info(stage)
+            text=stage_label,
+            duration_seconds=1.5,
+            style="slate",
+            info=_rounds_info(stage),
+            variant=spec.variant,
         )
         image = build_card_still(slate, slot="slate", rasterizer=rasterizer, backdrop=frame, **size)
     elif spec.card == "lower-third":
         lower = composition.TitleCard(
-            text=stage_label, duration_seconds=1.5, style="lower-third", info=_rounds_info(stage)
+            text=stage_label,
+            duration_seconds=1.5,
+            style="lower-third",
+            info=_rounds_info(stage),
+            variant=spec.variant,
         )
         third = build_lower_third(lower, rasterizer=rasterizer, **size)
         image = None if third is None else _compose_over(frame, _to_png(third), spec, theme)

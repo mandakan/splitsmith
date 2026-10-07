@@ -35,16 +35,17 @@ CSS alone will not reach it.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
 
 from .looks import Look, LookError, LookNotFoundError, load_look
 
-ThemeName = Literal["splitsmith", "clean"]
-"""The typed pair the export API accepts today. The CLI and the renderers
-take any installed Look (``load_theme`` accepts any name); widening the
-API is #1246."""
+ThemeName = str
+"""A Look name (#1246): any installed Look, shipped or the user's. The
+request layer validates it against ``looks.look_names()``; the CLI and
+the renderers load whatever name they are given."""
 
-THEME_NAMES: tuple[ThemeName, ...] = ("splitsmith", "clean")
+THEME_NAMES: tuple[str, ...] = ("splitsmith", "clean")
+"""The two shipped Looks, for help text; the installed set is
+``looks.look_names()``."""
 
 RGB = tuple[int, int, int]
 

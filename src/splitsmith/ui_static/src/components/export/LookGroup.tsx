@@ -8,6 +8,7 @@ import { LookGallery } from "@/components/export/LookGallery";
 import { bareHint } from "@/lib/exportPlan";
 import type { LookFocus } from "@/lib/exportPreview";
 import type { ExportSettings } from "@/lib/exportPresets";
+import { useLooks } from "@/lib/useLooks";
 
 export interface LookGroupProps {
   settings: ExportSettings;
@@ -20,8 +21,10 @@ export interface LookGroupProps {
 
 export function LookGroup({ settings, patch, busy, bareSelected, onHover, onSelect }: LookGroupProps) {
   const compare = settings.mode === "compare";
+  const { looks } = useLooks();
   return (
     <LookGallery
+      looks={looks}
       settings={settings}
       patch={patch}
       busy={busy}

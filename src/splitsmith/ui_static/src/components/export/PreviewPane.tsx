@@ -10,11 +10,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/Label";
-import { ApiError, api } from "@/lib/api";
+import { ApiError, api, type LookInfo } from "@/lib/api";
 import { useDeploymentMode } from "@/lib/features";
 import { previewBody, previewCaption, previewCardFor, previewLine, type LookFocus } from "@/lib/exportPreview";
 import type { ExportSettings } from "@/lib/exportPresets";
-import { LOOK_SLOTS, thumbnailUrl } from "@/lib/lookGallery";
+import { slotsForLook, thumbnailUrl } from "@/lib/lookGallery";
+import { previewSrc } from "@/lib/looks";
+import { useLooks } from "@/lib/useLooks";
 
 export const PREVIEW_DEBOUNCE_MS = 400;
 /** How often the pane asks after the renderer install it started. */
@@ -35,13 +37,17 @@ export interface PreviewPaneProps {
   enabled: boolean;
 }
 
-function genericFor(focus: LookFocus | null): string | null {
+function genericFor(focus: LookFocus | null, looks: LookInfo[], settings: ExportSettings): string | null {
   if (!focus) return null;
-  const variant = LOOK_SLOTS.find((s) => s.id === focus.slotId)?.variants.find((v) => v.id === focus.variantId);
-  return variant ? thumbnailUrl(variant.thumbnail) : null;
+  const variant = slotsForLook(looks, settings)
+    .find((s) => s.id === focus.slotId)
+    ?.variants.find((v) => v.id === focus.variantId);
+  if (!variant) return null;
+  return previewSrc(variant.previewUrl ?? null) ?? thumbnailUrl(variant.thumbnail);
 }
 
 export function PreviewPane({ slug, stageNumber, settings, projectName, focus, hover, enabled }: PreviewPaneProps) {
+  const { looks } = useLooks();
   const [still, setStill] = useState<string | null>(null);
   const [status, setStatus] = useState<number | null>(null);
   const [failed, setFailed] = useState(false);
@@ -56,8 +62,8 @@ export function PreviewPane({ slug, stageNumber, settings, projectName, focus, h
   const card = previewCardFor(focus);
   // One string so the effect re-runs only when the request would differ.
   const requestKey = useMemo(
-    () => (card ? JSON.stringify(previewBody(settings, card, stageNumber, projectName)) : null),
-    [card, settings, stageNumber, projectName],
+    () => (card ? JSON.stringify(previewBody(settings, card, stageNumber, projectName, looks)) : null),
+    [card, settings, stageNumber, projectName, looks],
   );
 
   useEffect(() => {
@@ -129,8 +135,8 @@ export function PreviewPane({ slug, stageNumber, settings, projectName, focus, h
   );
 
   if (!enabled) return null;
-  const hovering = genericFor(hover);
-  const generic = card === null ? genericFor(focus) : null;
+  const hovering = genericFor(hover, looks, settings);
+  const generic = card === null ? genericFor(focus, looks, settings) : null;
   const src = hovering ?? generic ?? still;
   const caption = previewCaption(hover ?? focus, stageNumber);
   return (

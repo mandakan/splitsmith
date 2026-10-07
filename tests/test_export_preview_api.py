@@ -223,3 +223,15 @@ def test_the_title_preview_carries_the_division_unless_turned_off(
     assert len(pages) == 2, "the option must move the cache key"
     assert "Classic Major" in pages[0]
     assert "Classic Major" not in pages[1]
+
+
+def test_the_preview_takes_the_look_and_the_variant(client) -> None:
+    """Slice 6 (#1246): ``look`` and ``variant`` ride the body and the
+    cache key; an unknown Look is a 422 that names the installed ones."""
+    default = client.post(ROUTE, json={"card": "title", "stage_number": 1, "width": 480})
+    rise = client.post(ROUTE, json={"card": "title", "stage_number": 1, "width": 480, "variant": "rise"})
+    clean = client.post(ROUTE, json={"card": "title", "stage_number": 1, "width": 480, "look": "clean"})
+    assert default.status_code == rise.status_code == clean.status_code == 200
+    assert _StubRasterizer.launches == 3, "three keys, three renders"
+    refused = client.post(ROUTE, json={"card": "title", "stage_number": 1, "look": "nope"})
+    assert refused.status_code == 422 and "splitsmith" in refused.text

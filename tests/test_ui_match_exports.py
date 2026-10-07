@@ -1236,3 +1236,74 @@ def test_the_shooters_identity_reaches_the_composition(
         probe=_stub_probe,
     )
     assert captured["comp"].shooters == ()
+
+
+def test_per_slot_variants_reach_their_cards_and_fall_back_to_the_knob(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Slice 6 (#1246): each card slot has its own variant field; ``None``
+    means the ``card_variant`` knob the CLI sets."""
+    captured = _capture_mp4(monkeypatch)
+    match_exports_mod.export_match(
+        stages=[_one_stage_input(tmp_path)],
+        request=_card_request(
+            title_page=True,
+            closing_card=True,
+            title_kind="slate",
+            card_variant="rise",
+            stage_card_variant="default",
+        ),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    comp = captured["comp"]
+    assert comp.title_page.variant == "rise" and comp.closing.variant == "rise"
+    assert all(stage.title is not None and stage.title.variant == "default" for stage in comp.stages)
+
+    captured = _capture_mp4(monkeypatch)
+    match_exports_mod.export_match(
+        stages=[_one_stage_input(tmp_path)],
+        request=_card_request(
+            title_page=True, closing_card=True, title_kind="slate", title_page_variant="rise"
+        ),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    comp = captured["comp"]
+    assert comp.title_page.variant == "rise" and comp.closing.variant == "default"
+    assert all(stage.title is not None and stage.title.variant == "default" for stage in comp.stages)
+
+    captured = _capture_mp4(monkeypatch)
+    match_exports_mod.export_match(
+        stages=[_one_stage_input(tmp_path)],
+        request=_card_request(title_kind="lower-third", stage_card_variant="rise"),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    comp = captured["comp"]
+    assert all(stage.title is not None and stage.title.variant == "rise" for stage in comp.stages)
+
+
+def test_the_export_request_accepts_any_installed_look_and_names_them_on_a_miss() -> None:
+    import pydantic
+
+    from splitsmith.ui import exports_api
+
+    assert exports_api.MatchExportRequest(stage_numbers=[1], overlay_theme="clean").overlay_theme == "clean"
+    with pytest.raises(pydantic.ValidationError, match="splitsmith, clean"):
+        exports_api.MatchExportRequest(stage_numbers=[1], overlay_theme="nope")
+    with pytest.raises(pydantic.ValidationError, match="splitsmith, clean"):
+        exports_api.CompareGridRequest(stage_numbers=[1], audio_from="a", overlay_theme="nope")
+    with pytest.raises(pydantic.ValidationError, match="splitsmith, clean"):
+        exports_api.ExportStageRequest(overlay_theme="nope")
+    request = exports_api.MatchExportRequest(
+        stage_numbers=[1], title_page_variant="rise", stage_card_variant="default"
+    )
+    assert (request.title_page_variant, request.stage_card_variant, request.closing_card_variant) == (
+        "rise",
+        "default",
+        None,
+    )

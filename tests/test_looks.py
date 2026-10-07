@@ -268,3 +268,67 @@ def test_a_user_look_may_declare_its_own_sting(user_dir: Path) -> None:
     (d / "my-wipe.html").write_text("<!doctype html>", encoding="utf-8")
     club = looks.load_look("club")
     assert looks.sting_template_for(club, "wipe") == d / "my-wipe.html"
+
+
+# --- the catalog (slice 6, #1246) ----------------------------------------------------
+
+
+def test_the_catalog_lists_every_slot_with_default_first_and_previews(user_dir: Path) -> None:
+    catalog = looks.look_catalog()
+    assert [c.name for c in catalog][:2] == ["splitsmith", "clean"]
+    splitsmith = catalog[0]
+    assert splitsmith.label == "Splitsmith" and splitsmith.source == "shipped"
+    assert set(splitsmith.slots) == set(looks.SLOT_NAMES)
+    assert [v.name for v in splitsmith.slots["slate"]] == ["default", "rise"]
+    assert [v.name for v in splitsmith.slots["transition"]] == ["wipe"]
+    assert splitsmith.slots["summary"] == []
+    assert splitsmith.preview == "/api/looks/splitsmith/preview/look.png"
+    assert splitsmith.slots["slate"][1].preview == "/api/looks/splitsmith/preview/slate-rise.png"
+    assert splitsmith.slots["transition"][0].preview == "/api/looks/splitsmith/preview/transition-wipe.webp"
+    assert splitsmith.accent_series[0] == "#ff2d2d"
+
+
+def test_every_shipped_look_resolves_a_preview_for_every_variant() -> None:
+    for look in looks.list_looks():
+        if look.source != "shipped":
+            continue
+        assert looks.preview_file(look, "look", "default") is not None, look.name
+        for slot in ("title_page", "slate", "lower_third", "closing", "transition"):
+            for variant in looks.variants_for(look, slot):
+                assert looks.preview_file(look, slot, variant) is not None, (look.name, slot, variant)
+
+
+def test_a_user_look_without_previews_borrows_the_shipped_defaults(user_dir: Path) -> None:
+    _write_look(user_dir, "club")
+    club = next(c for c in looks.look_catalog() if c.name == "club")
+    assert club.source == "user"
+    assert club.slots["slate"][1].preview == "/api/looks/_shipped/preview/slate-rise.png"
+    assert club.preview == "/api/looks/_shipped/preview/look.png"
+    assert looks.preview_file(looks.load_look("club"), "slate", "rise") == (
+        looks.shipped_looks_dir() / "splitsmith" / "preview" / "slate-rise.png"
+    )
+
+
+def test_a_user_look_with_its_own_preview_serves_it_from_its_own_name(user_dir: Path) -> None:
+    d = _write_look(user_dir, "club")
+    (d / "preview").mkdir()
+    (d / "preview" / "look.webp").write_bytes(b"RIFF")
+    club = next(c for c in looks.look_catalog() if c.name == "club")
+    assert club.preview == "/api/looks/club/preview/look.webp"
+
+
+def test_a_user_look_shadowing_the_shipped_name_still_borrows_the_shipped_previews(user_dir: Path) -> None:
+    """Review of #1246: a user ``splitsmith`` without previews, and another
+    user Look beside it, both show the shipped default's pictures, served
+    from the ``_shipped`` owner (the name ``splitsmith`` now resolves to
+    the user's directory)."""
+    _write_look(user_dir, "splitsmith")
+    _write_look(user_dir, "foo")
+    catalog = {c.name: c for c in looks.look_catalog()}
+    assert catalog["splitsmith"].source == "user"
+    assert catalog["splitsmith"].preview == "/api/looks/_shipped/preview/look.png"
+    assert catalog["splitsmith"].slots["slate"][1].preview == "/api/looks/_shipped/preview/slate-rise.png"
+    assert catalog["foo"].preview == "/api/looks/_shipped/preview/look.png"
+    assert looks.preview_owner_root("_shipped") == looks.shipped_looks_dir() / "splitsmith"
+    assert looks.preview_owner_root("foo") == user_dir / "foo"
+    assert looks.preview_owner_root("nope") is None
