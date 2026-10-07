@@ -27,6 +27,7 @@ The font test is the one that matters most: see
 from __future__ import annotations
 
 import io
+import json
 import types
 from pathlib import Path
 
@@ -34,7 +35,7 @@ import pytest
 from PIL import Image
 from playwright.sync_api import Error as PlaywrightError
 
-from splitsmith import overlay_raster
+from splitsmith import look_sandbox, overlay_raster
 from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
 
 # --- recording doubles for Playwright's Browser/BrowserContext/Page -------
@@ -69,9 +70,11 @@ class _RecordingPage:
     def on(self, event: str, handler) -> None:  # noqa: ANN001 -- Playwright's own loose signature
         self.handlers.setdefault(event, []).append(handler)
 
-    def goto(self, url: str, *, wait_until: str | None = None) -> None:
+    def goto(self, url: str, *, wait_until: str | None = None, timeout: float | None = None) -> None:
         self.calls.append(("goto", url, wait_until))
         self.goto_url = url
+        if url.startswith(look_sandbox.ORIGIN):
+            return  # a template: the sandbox answers its requests, not a file read
         assert url.startswith("file://"), f"expected a file:// URL, got {url!r}"
         path = Path(url[len("file://") :])
         self.goto_file_content = path.read_text(encoding="utf-8")
@@ -83,7 +86,36 @@ class _RecordingPage:
                 return value
         return None
 
-    def screenshot(self, *, type: str, omit_background: bool) -> bytes:  # noqa: A002
+    #: What each guarded hook (``overlay_raster._GUARD_JS``) is recorded as,
+    #: in the words the page-side expressions use.
+    _HOOK_TEXT = {
+        "duration": "typeof window.duration === 'function' ? Number(window.duration()) || 0 : 0",
+        "poster": "typeof window.poster === 'function' ? Number(window.poster()) || 0 : 0",
+        "fit": "window.__splitsmithFit && window.__splitsmithFit()",
+        "fonts": "document.fonts.ready",
+        "probe": "probe",
+    }
+    binding = None
+
+    def wait_for_function(self, expression: str, *, arg=None, polling=None, timeout=None):  # noqa: ANN001
+        """The sandbox's bounded call (#1266): answered like ``evaluate`` and
+        delivered through the exposed binding, as the page's guard does."""
+        kind = arg["kind"]
+        text = (
+            f"typeof window.seek === 'function' ? window.seek({arg['arg']}) : undefined"
+            if kind == "seek"
+            else self._HOOK_TEXT[kind]
+        )
+        value = self.evaluate(text)
+        self.binding(None, arg["id"], json.dumps({"value": value}))
+        return True
+
+    def wait_for_timeout(self, ms: float) -> None:
+        return None
+
+    def screenshot(
+        self, *, type: str, omit_background: bool, timeout: float | None = None
+    ) -> bytes:  # noqa: A002
         self.calls.append(("screenshot", type, omit_background))
         self.screenshots += 1
         return _PNG_2x2
@@ -110,14 +142,16 @@ class _ThrowingTemplatePage(_RecordingPage):
     """A page whose document throws during load: Playwright reports that
     through ``pageerror`` and never through ``goto`` or ``screenshot``."""
 
-    def goto(self, url: str, *, wait_until: str | None = None) -> None:
+    def goto(self, url: str, *, wait_until: str | None = None, timeout: float | None = None) -> None:
         super().goto(url, wait_until=wait_until)
         for handler in self.handlers.get("pageerror", []):
             handler(types.SimpleNamespace(message="TypeError: window.splitsmith.nope is undefined"))
 
 
 class _BoomOnScreenshotPage(_RecordingPage):
-    def screenshot(self, *, type: str, omit_background: bool) -> bytes:  # noqa: A002
+    def screenshot(
+        self, *, type: str, omit_background: bool, timeout: float | None = None
+    ) -> bytes:  # noqa: A002
         self.calls.append(("screenshot", type, omit_background))
         raise RuntimeError("screenshot boom")
 
@@ -130,12 +164,26 @@ class _RecordingContext:
         self.viewport: dict | None = None
         self.device_scale_factor: int | None = None
         self.init_scripts: list[str] = []
+        self.routes: list[tuple[str, object]] = []
+        self.socket_routes: list[str] = []
+        self.bindings: dict[str, object] = {}
+        self.options: dict = {}
 
     def add_init_script(self, script: str) -> None:
         self.init_scripts.append(script)
 
+    def route(self, pattern: str, handler) -> None:  # noqa: ANN001
+        self.routes.append((pattern, handler))
+
+    def route_web_socket(self, pattern: str, handler) -> None:  # noqa: ANN001
+        self.socket_routes.append(pattern)
+
+    def expose_binding(self, name: str, callback) -> None:  # noqa: ANN001
+        self.bindings[name] = callback
+
     def new_page(self) -> _RecordingPage:
         page = self._page_factory()
+        page.binding = self.bindings.get("__splitsmithDeliver")
         self.pages.append(page)
         return page
 
@@ -150,15 +198,19 @@ class _RecordingBrowser:
         self.closed = False
         self.version = "fake-browser"
 
-    def new_context(self, *, viewport: dict, device_scale_factor: int) -> _RecordingContext:
+    def new_context(self, *, viewport: dict, device_scale_factor: int, **options) -> _RecordingContext:
         ctx = _RecordingContext(page_factory=self._page_factory)
         ctx.viewport = viewport
         ctx.device_scale_factor = device_scale_factor
+        ctx.options = options
         self.contexts.append(ctx)
         return ctx
 
     def close(self) -> None:
         self.closed = True
+
+    def is_connected(self) -> bool:
+        return not self.closed
 
 
 # --- Rasterizer.png(): structure, determinism, the font-loading contract --
@@ -292,7 +344,7 @@ class _RecordingDriver:
         self._launch_exc = launch_exc
         self.chromium = self
 
-    def launch(self, *, channel: str, headless: bool):
+    def launch(self, *, channel: str, headless: bool, args: list[str] | None = None):
         raise self._launch_exc
 
     def stop(self) -> None:
@@ -331,8 +383,9 @@ class _RecordingLaunchDriver:
         self.launch_kwargs: dict[str, object] | None = None
         self.chromium = self
 
-    def launch(self, *, channel: str, headless: bool) -> object:
+    def launch(self, *, channel: str, headless: bool, args: list[str] | None = None) -> object:
         self.launch_kwargs = {"channel": channel, "headless": headless}
+        self.launch_args = args
         return self._browser
 
     def stop(self) -> None:
@@ -359,6 +412,15 @@ def test_enter_launches_the_headless_shell_channel_not_the_full_browser(monkeypa
 
     assert driver.launch_kwargs == {"channel": "chromium-headless-shell", "headless": True}
     assert driver.launch_kwargs["channel"] == overlay_raster.CHROMIUM_CHANNEL
+    # A switch only this browser carries, which the sandbox's watchdog
+    # finds it by (#1266).
+    assert len(driver.launch_args) == 1 and driver.launch_args[0].startswith("--splitsmith-rasterizer=")
+
+
+def test_the_watchdog_never_matches_a_process_without_a_marker() -> None:
+    """An empty marker (no browser launched) must not match every process."""
+    assert overlay_raster._pids_with("") == []
+    assert overlay_raster._pids_with("--splitsmith-rasterizer=0000-not-running") == []
 
 
 class _StoppableDriver:
@@ -372,6 +434,9 @@ class _StoppableDriver:
 class _BoomOnCloseBrowser:
     def close(self) -> None:
         raise RuntimeError("browser close boom")
+
+    def is_connected(self) -> bool:
+        return True
 
 
 def test_exit_still_stops_playwright_when_browser_close_raises() -> None:
@@ -562,7 +627,12 @@ def test_render_template_installs_the_context_before_navigating(tmp_path: Path) 
     assert out == _PNG_2x2
     ctx = rasterizer._browser.contexts[0]
     assert ctx.viewport == {"width": 64, "height": 32}
-    assert ctx.init_scripts == [_context_fixture().init_script()]
+    # The context the page sees names the engine scripts on the sandbox's
+    # origin (#1266), never by ``file://``.
+    assert len(ctx.init_scripts) == 1
+    assert f"{look_sandbox.ORIGIN}/shared" in ctx.init_scripts[0] and "file://" not in ctx.init_scripts[0]
+    assert ctx.routes and ctx.routes[0][0] == "**/*" and ctx.socket_routes == ["**/*"]
+    assert ctx.options == {"service_workers": "block"}
     page = ctx.pages[0]
     assert [c[0] for c in page.calls] == [
         "goto",
@@ -573,7 +643,7 @@ def test_render_template_installs_the_context_before_navigating(tmp_path: Path) 
         "evaluate",
         "screenshot",
     ]
-    assert page.goto_url == template.resolve().as_uri()
+    assert page.goto_url == f"{look_sandbox.ORIGIN}/look/card.html"
     assert page.calls[1] == ("evaluate", "document.fonts.ready")
     assert page.calls[2][1].startswith("typeof window.poster"), "the poster is read before the seek"
     assert "window.seek" in page.calls[3][1]
@@ -765,7 +835,9 @@ def test_render_template_frames_samples_the_end_of_a_capped_span(tmp_path: Path)
 class _FlakyScreenshotPage(_RecordingPage):
     """Chromium's transient "Unable to capture screenshot" once, then a PNG."""
 
-    def screenshot(self, *, type: str, omit_background: bool) -> bytes:  # noqa: A002
+    def screenshot(
+        self, *, type: str, omit_background: bool, timeout: float | None = None
+    ) -> bytes:  # noqa: A002
         from playwright.sync_api import Error as PlaywrightError
 
         self.calls.append(("screenshot", type, omit_background))

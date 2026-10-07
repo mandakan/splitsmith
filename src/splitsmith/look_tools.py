@@ -293,6 +293,17 @@ def _judge(subject: str, results: list[tuple[str, TemplateProbe]]) -> list[Check
                 "falls back to a system font",
             )
         )
+    refused = sorted({url for _, probe in results for url in probe.blocked})
+    if refused:
+        shown = ", ".join(refused[:3]) + (f" and {len(refused) - 3} more" if len(refused) > 3 else "")
+        items.append(
+            CheckItem(
+                subject,
+                "warn",
+                f"asks for {shown}, which a Look cannot load: a template reaches only the files in its "
+                "own folder, the shared engine scripts and the bundled fonts, never the network",
+            )
+        )
     for case, probe in results:
         if probe.overflow:
             text, by = probe.overflow[0]

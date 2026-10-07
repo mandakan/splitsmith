@@ -268,8 +268,33 @@ content name is what keeps the caches honest: the card PNG and the
 ``@font-face`` URL inside ``template_digest`` both move with the bytes. A copy
 of a Look (``looks.look_files``: ``looks new --from``, the editor's
 ``draft_look``) carries every file but its manifest and previews. On hosted, Looks carry colours
-and card styles only until the sandboxed template loader (#1266) ships: a
-template is code running on our server.
+and card styles only until the sandbox below has had its own security review:
+a template is code running on our server.
+
+Every template page loads in **the sandbox** (``look_sandbox``, #1266), local
+and hosted alike: navigated from ``https://look.invalid/look/<file>``, never
+``file://``, with every request answered by ``Sandbox.handle`` through
+``context.route``: ``/look/`` (the template's own folder, symlinks out
+refused), ``/shared/``, ``/fonts/``, and ``/file/<digest>/<name>`` for each
+file a **server-built** context field names (``engine``, ``assets`` and any
+``logo`` value; ``prepare`` rewrites those ``file://`` URLs). Never widen that
+to ``data`` at large: it carries user text, and a stage named
+``file:///proc/self/environ`` would be mounted (the test that caught it is
+``test_user_text_naming_a_file_is_never_mounted``). Everything else aborts and
+lands in ``TemplateProbe.blocked``, which ``looks check`` words; websockets
+are routed to nothing, service workers blocked, files capped at
+``MAX_ASSET_BYTES``. Calls into template code go through ``_TemplatePage.call``
+(``wait_for_function`` over ``_GUARD_JS``, answers back through the
+``__splitsmithDeliver`` binding), never a bare ``page.evaluate``, which waits
+forever on a stuck page. Playwright's own timeouts do not hold once a page
+sticks mid-call either (measured), so ``_TemplatePage.watched`` arms a
+watchdog that SIGKILLs the rasterizer's browser, found by the
+``--splitsmith-rasterizer=<uuid>`` switch it launched with (``_pids_with``:
+``/proc``, else ``ps``), and ``_live_browser`` relaunches it; the caller gets
+``TemplateTimeoutError``. Budgets live in ``look_sandbox``. The 27 shipped
+template renders were pixel-identical to the old ``file://`` path at the
+switch; ``overlay_raster.png`` (our own overlay HTML) still navigates by
+``file://`` and is not sandboxed.
 
 An account's Looks (#1263) go through ``look_store.LookStore`` (``state.looks``;
 ``GET / PUT / DELETE /api/looks/{name}``): ``FolderLookStore`` over the Looks
