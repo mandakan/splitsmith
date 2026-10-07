@@ -228,6 +228,22 @@ cache key is both neighbours' argv plus the transition.
   existing per-shooter upload path.
 - Nothing changes on the phone surfaces.
 
+> Amended 2026-10-07 (slice 6, #1246): the request fields are
+> `overlay_theme` (any installed Look name; the existing field kept its
+> name) and `title_page_variant` / `stage_card_variant` /
+> `closing_card_variant` (`None` meaning the CLI's `card_variant` knob;
+> the stage card's variant serves the slate and the lower third). The
+> preset fields are `look`, `title_page_variant`, `stage_card_variant`,
+> `closing_card_variant`. A Look's previews live in its `preview/`
+> directory as `<slot>-<variant>.png|webp` plus `look.png`; a Look
+> without one borrows the shipped default's, as it borrows templates;
+> `GET /api/looks` carries the resolved preview URL per variant. The
+> page sends a Look field only when it is not the default, and resolves
+> a stored Look no longer installed (or a variant the Look lacks) to
+> the default before a request. The looping transition previews are
+> animated WebP: the xfade kinds through the project ffmpeg, a sting
+> through Chromium over the fade it rides, both at authoring time.
+
 ## 5. Testing
 
 - `splitsmith.looks`: manifest validation, listing precedence (user over
