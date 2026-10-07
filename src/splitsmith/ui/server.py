@@ -168,6 +168,7 @@ from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy
 from .. import thumbnail as thumbnail_helpers
 from .. import trim as trim_module
 from .. import waveform as waveform_helpers
+from .. import whats_new as whats_new_module
 from ..access import AccessConfig, Feature, FeatureRequiredError, access_config, features_for
 from ..async_bridge import DbRunner, get_runner, install_runner, run_sync
 from ..audit_data import StageExportError, audit_shots_to_engine_shots, is_kept_shot
@@ -1778,6 +1779,9 @@ class TenantContext:
     # shipped templates. ``None`` in local mode, where ``AppState.looks``
     # is the Looks folder.
     looks: look_store_module.HostedLookStore | None = None
+    # The What's new ids the account has seen. ``None`` in local mode, where
+    # ``AppState.whats_new`` is the prefs file.
+    whats_new: whats_new_module.WhatsNewStore | None = None
 
 
 def user_looks_cache_root() -> Path:
@@ -1904,6 +1908,7 @@ class AppState:
         default_factory=user_config.JsonScoreboardIdentityStore
     )
     _looks: look_store_module.LookStore = field(default_factory=look_store_module.FolderLookStore)
+    _whats_new: whats_new_module.WhatsNewStore = field(default_factory=whats_new_module.PrefsWhatsNewStore)
     _export_presets: export_presets_module.ExportPresetStore = field(
         default_factory=export_presets_module.JsonExportPresetStore
     )
@@ -2126,6 +2131,13 @@ class AppState:
         if tenant is not None and tenant.export_presets is not None:
             return tenant.export_presets
         return self._export_presets
+
+    @property
+    def whats_new(self) -> whats_new_module.WhatsNewStore:
+        tenant = current_tenant.get()
+        if tenant is not None and tenant.whats_new is not None:
+            return tenant.whats_new
+        return self._whats_new
 
     @property
     def looks(self) -> look_store_module.LookStore:
@@ -7256,6 +7268,7 @@ def _apply_hosted_mode_wiring(
         PostgresProfileStore,
         PostgresRecentProjectsStore,
         PostgresScoreboardIdentityStore,
+        PostgresWhatsNewStore,
         PostgresYouTubeConnectionStore,
         ProjectStateStore,
         build_email_sender,
@@ -7574,6 +7587,7 @@ def _apply_hosted_mode_wiring(
             profile=PostgresProfileStore(tenant_factory, user_id=user_id),
             export_presets=PostgresExportPresetStore(tenant_factory, user_id=user_id),
             looks=PostgresLookStore(tenant_factory, user_id=user_id),
+            whats_new=PostgresWhatsNewStore(tenant_factory, user_id=user_id),
             youtube=PostgresYouTubeConnectionStore(tenant_factory, user_id=user_id),
             desktop_commands=DesktopCommandStore(tenant_factory, user_id=user_id),
         )
@@ -18764,8 +18778,10 @@ def create_app(
     # Export presets (spec 2026-09-15 s1): one router for both modes; the
     # store behind ``state.export_presets`` is what differs.
     from .export_presets_api import router as export_presets_router
+    from .whats_new_api import router as whats_new_router
 
     app.include_router(export_presets_router)
+    app.include_router(whats_new_router)
 
     # Sort a shared footage folder across shooters (spec 2026-10-01).
     # Local only: every route 404s hosted.

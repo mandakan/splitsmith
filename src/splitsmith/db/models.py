@@ -98,6 +98,10 @@ class User(Base):
     # which stays reserved for billing. The server default keeps a
     # non-ORM insert safe-for-today; the ORM always sets it explicitly.
     access_tier: Mapped[str] = mapped_column(String, nullable=False, server_default="full")
+    # The What's new entry ids (and ``chip:<key>`` dismissals) this account
+    # has seen; ``None`` until its first visit after the feature shipped
+    # (``splitsmith.whats_new``). Written only by ``db.whats_new``.
+    whats_new_seen: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
 
     # External auth vendor link. The provider (Clerk / WorkOS /
     # Auth.js / etc.) owns the authentication; this column carries

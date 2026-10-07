@@ -1128,6 +1128,24 @@ export interface StoredLook {
   body: StoredLookBody;
 }
 
+/** One What's new entry (``data/whats_new.json``). */
+export interface WhatsNewEntry {
+  id: string;
+  /** ``YYYY-MM-DD``. */
+  date: string;
+  title: string;
+  body: string;
+  /** The feature's "New" chip key, or null. */
+  chip: string | null;
+}
+
+/** ``GET /api/whats-new``: the entries and what this user has seen. */
+export interface WhatsNewPayload {
+  entries: WhatsNewEntry[];
+  /** Entry ids and ``chip:<key>`` dismissals. */
+  seen: string[];
+}
+
 /** One ffmpeg xfade family as the gallery shows it (#1259): a tile, its
  *  directions (the first is what picking the tile selects) and a looping
  *  preview. */
@@ -4922,6 +4940,12 @@ export const api = {
   // Export presets (spec 2026-09-15 s1): both modes, per user hosted.
 
   getExportPresets: () => request<{ presets: ExportPreset[] }>("/api/settings/export-presets"),
+  /** What's new: the entries and what this user has seen. */
+  getWhatsNew: () => request<WhatsNewPayload>("/api/whats-new"),
+  /** Mark entries (or ``chip:<key>``) seen; answers the new state. */
+  markWhatsNewSeen: (ids: string[]) =>
+    request<WhatsNewPayload>("/api/whats-new/seen", { method: "POST", json: { ids } }),
+
   /** The installed Looks with their slots, variants and previews (#1246). */
   listLooks: () => request<{ looks: LookInfo[]; transitions?: TransitionFamilyInfo[] }>("/api/looks"),
   /** The caller's own Looks (#1263, #1264); a shipped Look is a 404 here. */

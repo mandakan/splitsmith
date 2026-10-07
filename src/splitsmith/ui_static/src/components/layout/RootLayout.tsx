@@ -23,6 +23,7 @@ import { useMemo, useState } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 
 import { GlobalBar } from "@/components/layout/GlobalBar";
+import { WhatsNewSheet } from "@/components/whatsNew/WhatsNew";
 import {
   ShellChromeProvider,
   type ShellAccent,
@@ -115,6 +116,9 @@ export function RootLayout() {
           />
         </header>
         <Outlet />
+        {/* Opens itself once when something is unseen; share pages sit
+            outside RootLayout, so an anonymous viewer never gets it. */}
+        <WhatsNewSheet />
       </div>
     </ShellChromeProvider>
   );

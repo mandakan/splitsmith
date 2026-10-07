@@ -161,6 +161,9 @@ class GlobalPrefs(BaseModel):
     # The Audit screen scrubs the trim's 720p rendition (#1192); this
     # machine-level switch brings back the full-resolution trim.
     full_res_scrub: bool = False
+    # The What's new entry ids this install has seen (``splitsmith.whats_new``);
+    # ``None`` until the first visit after the feature shipped.
+    whats_new_seen: list[str] | None = None
 
 
 # ---------------------------------------------------------------------------

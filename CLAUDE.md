@@ -383,6 +383,22 @@ thumbnail the template at its poster over the mid-fade
 ``scripts/render_match_frames.py --transition sting:wipe --identity-demo``
 and the grid script show it.
 
+## What's new (in-app release notes)
+
+Every user-facing change adds its entry to ``src/splitsmith/data/whats_new.json``
+**in the same PR**: the app's What's new sheet is the only place most users
+learn a feature exists, and release-please's changelog is commit subjects,
+not user copy. Use the ``whats-new`` skill (``.claude/skills/whats-new``):
+it says when an entry is needed and the house style; ``tests/test_whats_new.py``
+fails an entry that breaks the mechanical rules (length, ASCII, no dash
+punctuation, no issue numbers, no hype). Seen-ness is a set of entry ids
+(``GlobalPrefs.whats_new_seen`` locally, ``users.whats_new_seen`` hosted), so
+an id is never renamed; a user with no matches starts with everything seen
+(``whats_new.first_seen``). The sheet (``components/whatsNew``) opens itself
+once per session when something is unseen and lives in ``RootLayout``, so
+share pages never show it; a feature's ``<NewChip feature=...>`` shows for 60
+days or until ``dismissNewChip`` is called where the feature is used.
+
 ## Hosted playback streams the web rendition (#1031)
 
 The audit trim (``trimmed/stage<N>_cam_<id>_trimmed.mp4``) is a

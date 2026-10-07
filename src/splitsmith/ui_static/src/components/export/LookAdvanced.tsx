@@ -9,10 +9,12 @@ import { useState } from "react";
 import { GUIDE_URL, LookEditor } from "@/components/export/LookEditor";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/Label";
+import { NewChip } from "@/components/whatsNew/WhatsNew";
 import { ApiError, api, type LookInfo } from "@/lib/api";
 import { duplicateName } from "@/lib/lookEditor";
 import { DEFAULT_LOOK } from "@/lib/looks";
 import { refreshLooks } from "@/lib/useLooks";
+import { dismissNewChip } from "@/lib/useWhatsNew";
 
 export interface LookAdvancedProps {
   looks: LookInfo[];
@@ -41,6 +43,7 @@ export function LookAdvanced({
   const editable = current?.editable === true;
 
   const duplicate = async () => {
+    dismissNewChip("look-editor");
     const name = duplicateName(
       look,
       looks.map((l) => l.name),
@@ -63,7 +66,10 @@ export function LookAdvanced({
 
   return (
     <div className="flex flex-col gap-2 border-t border-rule px-3.5 py-3">
-      <Label>Advanced</Label>
+      <div className="flex items-center gap-2">
+        <Label>Advanced</Label>
+        <NewChip feature="look-editor" />
+      </div>
       <div className="flex flex-wrap items-center gap-2">
         <Button
           variant="default"
@@ -77,7 +83,10 @@ export function LookAdvanced({
           <Button
             variant="default"
             size="sm"
-            onClick={() => setEditing(look)}
+            onClick={() => {
+              dismissNewChip("look-editor");
+              setEditing(look);
+            }}
             disabled={busy}
           >
             Edit Look…

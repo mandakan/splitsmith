@@ -1,0 +1,59 @@
+{
+  "entries": [
+    {
+      "id": "look-editor",
+      "date": "2026-10-07",
+      "title": "Make your own Look",
+      "body": "Duplicate a Look under Look, Advanced on the Export page, pick its colours and card styles, and see it on your own footage before you save.",
+      "chip": "look-editor"
+    },
+    {
+      "id": "stage-transitions",
+      "date": "2026-10-07",
+      "title": "Transitions between stages",
+      "body": "An MP4 can cross from one stage to the next with a fade, a wipe or a dozen other moves, each with a direction. The compare grid gets them too."
+    },
+    {
+      "id": "stings",
+      "date": "2026-10-07",
+      "title": "Stings in your colours",
+      "body": "A sting sweeps a band in your Look's colours across the cut between stages, carrying the club logo when there is one. Pick Wipe sting under transitions."
+    },
+    {
+      "id": "rise-cards",
+      "date": "2026-10-07",
+      "title": "Cards that rise into place",
+      "body": "Choose the Rise style for the title page, the stage slates, the lower third or the closing card, and their lines animate in."
+    },
+    {
+      "id": "shooter-identity",
+      "date": "2026-10-07",
+      "title": "Your club colour and logo",
+      "body": "Give each shooter an accent colour, a club line and a logo on the Footage page. The cards, the sting and the stage summary use them."
+    },
+    {
+      "id": "beep-ranker",
+      "date": "2026-10-07",
+      "title": "A better beep finder",
+      "body": "The first beep suggested for a stage is now the right one far more often, so there is less to confirm by hand."
+    },
+    {
+      "id": "smoother-scrubbing",
+      "date": "2026-10-06",
+      "title": "Smoother scrubbing in Audit",
+      "body": "Audit plays a lighter 720p copy of each trim, so seeking stays quick on long 4K clips."
+    },
+    {
+      "id": "known-clips",
+      "date": "2026-10-06",
+      "title": "Clips you already imported",
+      "body": "Adding a clip again, even from another folder, is recognised and skipped, and the import says why it skipped each file."
+    },
+    {
+      "id": "title-division",
+      "date": "2026-10-05",
+      "title": "Your division on the title page",
+      "body": "The title page prints the shooter's division as the scoreboard has it. Turn it off under Details on the Export page."
+    }
+  ]
+}
