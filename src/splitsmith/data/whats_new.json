@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "palette-suggestions",
+      "date": "2026-10-07",
+      "title": "Palettes that stand out on your footage",
+      "body": "The Look editor suggests full palettes from one colour, from your club logo, from ready-made range palettes, or from what stands out on this match's own footage."
+    },
+    {
       "id": "template-editor",
       "date": "2026-10-07",
       "title": "Write your own card templates",

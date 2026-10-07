@@ -18779,10 +18779,12 @@ def create_app(
     # Export presets (spec 2026-09-15 s1): one router for both modes; the
     # store behind ``state.export_presets`` is what differs.
     from .export_presets_api import router as export_presets_router
+    from .palette_api import router as palette_router
     from .whats_new_api import router as whats_new_router
 
     app.include_router(export_presets_router)
     app.include_router(whats_new_router)
+    app.include_router(palette_router)
 
     # Sort a shared footage folder across shooters (spec 2026-10-01).
     # Local only: every route 404s hosted.

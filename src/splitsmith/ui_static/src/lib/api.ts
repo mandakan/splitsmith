@@ -4995,6 +4995,12 @@ export const api = {
       `/api/looks/${encodeURIComponent(name)}/check`,
       { method: "POST", json: { draft, templates } },
     ),
+  /** The colours the palette suggestions are chosen against (#1273). */
+  paletteSources: (slug: string, stageNumbers: number[]) =>
+    request<{ footage: { rgb: Rgb; share: number }[]; average: Rgb | null; logo: { rgb: Rgb; share: number }[] }>(
+      `/api/shooters/${encodeURIComponent(slug)}/palette-sources`,
+      { method: "POST", json: { stage_numbers: stageNumbers } },
+    ),
   revealLook: (name: string) =>
     request<{ revealed: string }>(`/api/looks/${encodeURIComponent(name)}/reveal`, { method: "POST" }),
   duplicateLook: (name: string, source: string) =>

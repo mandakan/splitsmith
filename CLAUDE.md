@@ -273,6 +273,19 @@ cards, and the tab says so (``sharedWith``). A borrowed slot is written to
 ``<slot>-<variant>.html`` and named in ``look.json`` on first save. Page
 errors carry the template's line (``describe_page_error``).
 
+Palette suggestions (#1273) sit at the top of the Palette tab
+(``components/export/PaletteSuggestions``); every rule is in the pure
+``lib/palette`` (schemes from one colour, the footage ranking, the weak-accent
+warning, the grid accent series, the ready-made set). The server only
+measures: ``palette_sources`` (a deterministic k-means over two frames per
+stage from the trim on this disk, merging near-identical clusters, plus the
+logo's colours) behind ``POST /api/shooters/{slug}/palette-sources``; a
+hosted container has no trims, so its footage is empty and the source is
+disabled. "Stands out" is OKLCh hue separation from the footage's tinted
+swatches, not raw colour distance: a saturated green is far from dull grass
+in OKLab and still reads as the grass. Choosing a suggestion replaces the
+draft's colours and accent series; the neutrals stay.
+
 A shooter has an **identity** (``splitsmith.identity``, spec section 2,
 #1243): ``MatchProject.identity`` holds an optional ``#rrggbb`` accent, a
 club line and the name of a logo under ``<shooter>/identity/``

@@ -36,6 +36,7 @@ import {
   styleOptions,
   type LookDraft,
 } from "@/lib/lookEditor";
+import { PaletteSuggestions } from "@/components/export/PaletteSuggestions";
 import { TemplateEditor } from "@/components/export/TemplateEditor";
 import { editsList, type TemplateEdits } from "@/lib/templateEditor";
 import { refreshLooks } from "@/lib/useLooks";
@@ -235,12 +236,15 @@ export function LookEditor({
               {problem ?? "Loading the Look…"}
             </p>
           ) : tab === "palette" ? (
-            <Palette
-              draft={draft}
-              setDraft={setDraft}
-              errors={errors}
-              warnings={warnings}
-            />
+            <>
+              <PaletteSuggestions draft={draft} setDraft={setDraft} slug={slug} stageNumber={stageNumber} />
+              <Palette
+                draft={draft}
+                setDraft={setDraft}
+                errors={errors}
+                warnings={warnings}
+              />
+            </>
           ) : tab === "styles" ? (
             <CardStyles
               draft={draft}
