@@ -200,6 +200,9 @@ def test_top1_counts_when_either_of_two_positive_candidates_wins() -> None:
 class _SpyModel:
     """Records the labels each fit saw; predicts the first feature as P."""
 
+    coef_ = [[0.0, 0.0]]
+    intercept_ = [0.0]
+
     def __init__(self, log: list) -> None:
         self.log = log
         self.stems: list[str] = []
@@ -311,3 +314,20 @@ def test_a_candidate_table_shows_both_rankings_and_the_offsets() -> None:
         (3, 3, -3000.0, False),
     ]
     assert table[0]["model_prob"] == 0.7 and table[1]["heuristic_score"] == 0.9
+
+
+def test_the_final_head_is_fitted_on_every_clip_with_rows(monkeypatch) -> None:
+    """Spec 4 and the 2026-10-06 decision: the shipped head is one fit over
+    every clip's out-of-fold logits, unreachable clips included."""
+    m = _script()
+    _, head_fits = _spy_hooks(m, monkeypatch)
+    clips = [
+        _clip(m, "stage-shots-a-2026-stage1-s0", [True, False], [0.9, 0.1]),
+        _clip(m, "stage-shots-b-2026-stage1-s0", [False, False], [0.8, 0.2]),
+    ]
+    probs = {c.stem: [r.features[0] for r in c.rows] for c in clips}
+
+    head = m.fit_final_head(clips, probs)
+
+    assert head_fits[-1][0] == ["stage-shots-a-2026-stage1-s0", "stage-shots-b-2026-stage1-s0"]
+    assert head == {"coef": [0.0, 0.0], "intercept": 0.0}

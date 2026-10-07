@@ -313,7 +313,14 @@
           1.71163268,
           4.43937241
         ],
-        "intercept": -2.8992192
+        "intercept": -2.8992192,
+        "head": {
+          "coef": [
+            0.37122929,
+            0.50651822
+          ],
+          "intercept": -2.62298459
+        }
       },
       "oof": {
         "beep-test": {
@@ -5886,7 +5893,24 @@
             false
           ]
         }
-      }
+      },
+      "final_head_bins": [
+        {
+          "threshold": 0.95,
+          "n": 76,
+          "wrong": 1
+        },
+        {
+          "threshold": 0.97,
+          "n": 69,
+          "wrong": 0
+        },
+        {
+          "threshold": 0.99,
+          "n": 56,
+          "wrong": 0
+        }
+      ]
     },
     "gbdt": {
       "all": {
