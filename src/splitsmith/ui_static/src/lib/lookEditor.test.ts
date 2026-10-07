@@ -87,7 +87,7 @@ describe("errors and warnings", () => {
   });
 
   it("names the field: a long label, a missing token, a bad accent", () => {
-    const { split_good: _gone, ...missing } = COLORS;
+    const missing = Object.fromEntries(Object.entries(COLORS).filter(([token]) => token !== "split_good")) as LookDraft["colors"];
     const errors = draftErrors(
       draft({
         label: "x".repeat(61),
