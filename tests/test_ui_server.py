@@ -3061,6 +3061,81 @@ def test_shot_detect_reset_records_a_delete_for_every_shot_it_wipes(tmp_path: Pa
     assert kinds.index("marker_deleted") < kinds.index("shot_detect_run")
 
 
+def test_shot_detect_reset_drops_auto_regions_and_keeps_manual_ones(tmp_path: Path, monkeypatch) -> None:
+    """Stage events (spec 2026-10-08): a reset re-detect wipes the shots the
+    seeder's proposals sat between, so the untouched ``auto`` proposals go
+    and the stage may be seeded afresh; a region the user drew stays."""
+    import json as _json
+
+    import numpy as np
+    import soundfile as sf
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    _shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    primary.beep_time = 5.0
+    project.stages[0].time_seconds = 10.0
+    project.save(_shooter_root)
+    project.resolve_video_path(_shooter_root, primary.path).resolve().write_bytes(b"S")
+
+    audio_dir = _shooter_root / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    wav = audio_dir / "stage1_audit.wav"
+    sf.write(wav, np.zeros(48_000, dtype="float32"), 48_000)
+    trimmed_dir = _shooter_root / "trimmed"
+    trimmed_dir.mkdir(parents=True, exist_ok=True)
+    (trimmed_dir / "stage1_trimmed.mp4").write_bytes(b"\x00")
+
+    from splitsmith import ensemble as ensemble_module
+    from splitsmith.ui import audio as audio_helpers
+    from splitsmith.ui import server as server_module
+
+    class FakeAudit:
+        audio_path = wav
+        beep_in_clip = 5.0
+        trimmed = True
+
+    monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda *a, **kw: FakeAudit())
+    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda: None)
+    fake_result = _fake_ensemble_result(
+        [{"time": 5.5, "confidence": 0.8, "ensemble_score": 3.0, "kept": True}],
+        consensus=2,
+    )
+    monkeypatch.setattr(ensemble_module, "detect_shots_ensemble", lambda *a, **kw: fake_result)
+
+    manual = {"id": "evt-2", "kind": "movement", "start": 0.2, "end": 0.9, "source": "manual"}
+    saved = client.put(
+        "/api/shooters/me/stages/1/audit",
+        json={
+            "stage_number": 1,
+            "beep_time": 5.0,
+            "shots": [
+                {"shot_number": 1, "candidate_number": 4, "time": 5.5, "source": "detected"},
+                {"shot_number": 2, "candidate_number": 9, "time": 6.5, "source": "detected"},
+            ],
+            "events": [
+                {"id": "evt-1", "kind": "reload", "start": 0.5, "end": 1.5, "source": "auto"},
+                manual,
+            ],
+            "events_seeded": True,
+            "audit_events": [{"ts": "2026-08-12T12:00:00Z", "kind": "save", "payload": {}}],
+        },
+    )
+    assert saved.status_code == 200, saved.text
+
+    resp = client.post("/api/shooters/me/stages/1/shot-detect?reset=true")
+    assert resp.status_code == 200
+    final = _wait_for_job(client, resp.json()["id"])
+    assert final["status"] == "succeeded", final
+
+    doc = _json.loads((_shooter_root / "audit" / "stage1.json").read_text(encoding="utf-8"))
+    assert doc["events"] == [manual]
+    assert "events_seeded" not in doc
+
+
 def test_shot_detect_without_reset_records_no_deletes(tmp_path: Path, monkeypatch) -> None:
     """The other half of #842's guard: a non-reset run supersedes nothing,
     so it must not claim to have deleted anything. ``shots[]`` is only

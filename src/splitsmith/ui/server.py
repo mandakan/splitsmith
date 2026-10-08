@@ -4104,6 +4104,16 @@ def register_job_bodies(state: AppState) -> None:
                 # merge then reads as "keep" and re-adopts from the other side.
                 reset_deletions = _reset_deletion_events(doc.get("shots"))
                 doc["shots"] = []
+                # Stage events (spec 2026-10-08): the seeder's untouched
+                # proposals sat over gaps this wipe supersedes, so they go
+                # and the stage may seed again; a region the user drew or
+                # edited (``manual``) describes the run and stays.
+                stage_events = doc.get(events_module.EVENTS_FIELD)
+                if isinstance(stage_events, list):
+                    doc[events_module.EVENTS_FIELD] = [
+                        e for e in stage_events if not (isinstance(e, dict) and e.get("source") == "auto")
+                    ]
+                doc.pop(events_module.EVENTS_SEEDED_FIELD, None)
             seeded_shots = False
             if not doc.get("shots"):
                 kept = [c for c in result.candidates if c.kept]
@@ -13366,7 +13376,7 @@ def create_app(
             # minter (see _may_mint_shot_ids) - a client-supplied id is still
             # kept, so a shot the SPA added arrives with its own identity.
             ensure_shot_ids(shot_dicts, mint=_may_mint_shot_ids())
-            coach_module.classify_intervals_in_dicts(shot_dicts, coach_module.auto_classify_config())
+            _classify_doc(payload, stage_number, coach_module.auto_classify_config())
         # Sync merge unions audit_events by id (bidirectional sync
         # slice); the SPA authors events without one, so stamp them here
         # at the save boundary.
@@ -13445,7 +13455,7 @@ def create_app(
                 # that must not mint a second id for a legacy shot the desktop
                 # will stamp itself. See _may_mint_shot_ids.
                 ensure_shot_ids(shots, mint=_may_mint_shot_ids())
-                coach_module.classify_intervals_in_dicts(shots, coach_module.auto_classify_config())
+                _classify_doc(payload, stage_number, coach_module.auto_classify_config())
                 if any(not s.get("interval_class") for s in kept):
                     raise HTTPException(status_code=409, detail="not_fully_classified")
                 events = payload.setdefault("audit_events", [])
@@ -13692,6 +13702,24 @@ def create_app(
             raise HTTPException(
                 status_code=422, detail=f"stage {stage_number}: invalid events: {exc}"
             ) from exc
+
+    def _classify_doc(payload: dict[str, Any], stage_number: int, cfg: CoachAutoClassifyConfig) -> None:
+        """Run the auto-classifier over the doc's shots against the doc's own
+        stage events (spec 2026-10-08), in place.
+
+        The one classification path for every audit-doc writer: a writer
+        that classified region-blind would flip a reload region's gap back
+        to ``movement`` on the next unrelated save. A corrupt events list is
+        the coach GET's 422, raised before the caller saves anything.
+        """
+        shots = payload.get("shots")
+        if not isinstance(shots, list):
+            return
+        coach_module.classify_intervals_in_dicts(
+            [s for s in shots if isinstance(s, dict)],
+            cfg,
+            events=_coach_events(payload, stage_number),
+        )
 
     def _coach_capacity(slug: str, project: MatchProject) -> int | None:
         """The magazine capacity of the shooter's division, or None.
@@ -13953,8 +13981,7 @@ def create_app(
                 raise AuditRevisionConflictError(f"stage {stage_number} audit changed since it was loaded")
             stored[events_module.EVENTS_FIELD] = [e.model_dump(exclude_none=True) for e in req.events]
             stored[events_module.EVENTS_SEEDED_FIELD] = True
-            shots = [s for s in stored.get("shots") or [] if isinstance(s, dict)]
-            coach_module.classify_intervals_in_dicts(shots, cfg, events=req.events)
+            _classify_doc(stored, stage_number, cfg)
             stored.setdefault("audit_events", []).append(
                 {
                     "id": _new_event_id(),
@@ -13979,7 +14006,7 @@ def create_app(
             shots = payload.get("shots") or []
             if not isinstance(shots, list):
                 raise HTTPException(status_code=500, detail="audit shots is not a list")
-            coach_module.classify_intervals_in_dicts(shots, cfg)
+            _classify_doc(payload, stage_number, cfg)
             events = list(payload.get("audit_events") or [])
             events.append(
                 {
@@ -14034,7 +14061,7 @@ def create_app(
             # auto verdict; this is a no-op for every other patch because the
             # classifier only rewrites unset/auto entries and manual patches
             # set interval_class_source="manual" on the target shot itself.
-            coach_module.classify_intervals_in_dicts([s for s in shots if isinstance(s, dict)], cfg)
+            _classify_doc(payload, stage_number, cfg)
 
             events = list(payload.get("audit_events") or [])
             events.append(

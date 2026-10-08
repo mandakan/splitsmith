@@ -894,3 +894,93 @@ def test_put_events_unknown_stage_is_404(tmp_path: Path) -> None:
     assert resp.status_code == 404
     # The route's own 404 (the stage lookup), not a missing route's "Not Found".
     assert "no stage 9" in resp.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Every audit-doc writer classifies against the doc's regions (final review #1)
+# ---------------------------------------------------------------------------
+
+
+def _stage_with_a_manual_reload(tmp_path: Path) -> tuple[TestClient, Path, str]:
+    """Three shots whose last gap (2.3 s) is ``movement`` by the thresholds
+    and under the reload hint, so no proposal is seeded; a manual reload
+    region over it makes the classifier say ``reload``. Every writer below
+    must keep that verdict."""
+    client, audit_file, base = _bootstrap(tmp_path)
+    _write_shots(audit_file, [1000, 1300, 3600])
+    v = _coach(client, base)["_version"]
+    resp = client.put(
+        f"{base}/shooters/me/stages/1/events",
+        json={
+            "events": [{"id": "evt-1", "kind": "reload", "start": 1.6, "end": 3.0, "source": "manual"}],
+            "_version": v,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["shots"][2]["interval_class"] == "reload"
+    return client, audit_file, base
+
+
+def _stored_class(audit_file: Path, index: int) -> str | None:
+    shots = sorted(_read(audit_file)["shots"], key=lambda s: s["ms_after_beep"])
+    return shots[index].get("interval_class")
+
+
+def test_first_read_auto_classes_a_sub_hint_gap_as_movement(tmp_path: Path) -> None:
+    """A 2.0-2.5 s gap with no region over it is plain ``movement``: under
+    the reload hint, so the seeder proposes nothing and the heal is the
+    region-blind rule's verdict."""
+    client, audit_file, base = _bootstrap(tmp_path)
+    _write_shots(audit_file, [1000, 1300, 3600])
+    body = _coach(client, base)
+    assert body["events"] == []
+    assert body["shots"][2]["interval_class"] == "movement"
+    assert body["shots"][2]["interval_class_source"] == "auto"
+    assert body["shots"][2]["stale"] is False
+    assert _stored_class(audit_file, 2) == "movement"
+
+
+def test_reclassify_keeps_a_region_derived_reload(tmp_path: Path) -> None:
+    client, audit_file, base = _stage_with_a_manual_reload(tmp_path)
+    resp = client.post(f"{base}/shooters/me/stages/1/coach/reclassify")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["shots"][2]["interval_class"] == "reload"
+    assert resp.json()["shots"][2]["stale"] is False
+    assert _stored_class(audit_file, 2) == "reload"
+
+
+def test_audit_put_keeps_a_region_derived_reload(tmp_path: Path) -> None:
+    client, audit_file, base = _stage_with_a_manual_reload(tmp_path)
+    doc = client.get(f"{base}/shooters/me/stages/1/audit").json()
+    resp = client.put(f"{base}/shooters/me/stages/1/audit", json=doc)
+    assert resp.status_code == 200, resp.text
+    assert _stored_class(audit_file, 2) == "reload"
+    assert _coach(client, base)["shots"][2]["stale"] is False
+
+
+def test_accept_keeps_a_region_derived_reload(tmp_path: Path) -> None:
+    client, audit_file, base = _stage_with_a_manual_reload(tmp_path)
+    resp = client.post(f"{base}/shooters/me/stages/1/audit/accept")
+    assert resp.status_code == 200, resp.text
+    assert _stored_class(audit_file, 2) == "reload"
+
+
+def test_coach_patch_keeps_a_region_derived_reload(tmp_path: Path) -> None:
+    client, audit_file, base = _stage_with_a_manual_reload(tmp_path)
+    resp = client.patch(f"{base}/shooters/me/stages/1/shots/1/coach", json={"coaching_note": "x"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["shots"][2]["interval_class"] == "reload"
+    assert resp.json()["shots"][2]["stale"] is False
+    assert _stored_class(audit_file, 2) == "reload"
+
+
+def test_reclassify_with_corrupt_events_is_a_422_and_leaves_the_doc(tmp_path: Path) -> None:
+    client, audit_file, base = _bootstrap(tmp_path)
+    doc = _read(audit_file)
+    doc["events"] = [{"id": "evt-1", "kind": "nap", "start": 1.0, "end": 2.0, "source": "manual"}]
+    audit_file.write_text(json.dumps(doc) + "\n", encoding="utf-8")
+    before = audit_file.read_text(encoding="utf-8")
+    resp = client.post(f"{base}/shooters/me/stages/1/coach/reclassify")
+    assert resp.status_code == 422, resp.text
+    assert "invalid events" in resp.json()["detail"]
+    assert audit_file.read_text(encoding="utf-8") == before
