@@ -541,6 +541,46 @@ def test_share_coach_read_classifies_in_memory_without_persisting(
     client.cookies.clear()
 
 
+def test_share_coach_read_strips_event_notes(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """Stage events (spec 2026-10-08): the share surface reaches the coach
+    GET, so a region's ``note`` -- private text like ``coaching_note`` --
+    is stripped there, while the region itself still reaches the viewer
+    and an owner read keeps the note."""
+    token = _setup_shared_match(hosted_env, hosted_app)
+    doc = {
+        "stage_number": 1,
+        "shots": [{"shot_number": 1, "ms_after_beep": 1500}, {"shot_number": 2, "ms_after_beep": 1800}],
+        "events": [
+            {
+                "id": "evt-1",
+                "kind": "reload",
+                "start": 0.4,
+                "end": 1.2,
+                "source": "manual",
+                "note": "private!",
+            }
+        ],
+        "events_seeded": True,
+    }
+    _seed_stage_audit(hosted_env, "owner@example.com", MID, SLUG, doc)
+
+    client, sender = hosted_app
+    resp = client.get(_share_url(token, f"shooters/{SLUG}/stages/1/coach"))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["events"] == [
+        {"id": "evt-1", "kind": "reload", "start": 0.4, "end": 1.2, "source": "manual"}
+    ]
+
+    login(client, sender, "owner@example.com")
+    owner_resp = client.get(f"/api/matches/{MID}/shooters/{SLUG}/stages/1/coach")
+    assert owner_resp.status_code == 200, owner_resp.text
+    assert owner_resp.json()["events"][0]["note"] == "private!"
+    client.cookies.clear()
+
+
 # -- stage compare (#700 task 3) -----------------------------------------
 
 

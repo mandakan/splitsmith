@@ -70,9 +70,13 @@ class StageEvent(BaseModel):
     A reload's handles mean hand off the grip -> gun back on target (the
     full manipulation cost), not the mechanical magazine change. Ids are
     ``evt-<n>`` and never reused within a stage (the ``cand-<n>`` rule).
+
+    The stored shape ignores unknown keys: the desktop app and the CLI share
+    ``~/.splitsmith``, so a doc a newer version wrote must still load on an
+    older one. The events PUT's request model forbids them instead.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     id: str
     kind: EventKind

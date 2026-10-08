@@ -6405,13 +6405,21 @@ class CoachShotPatchRequest(BaseModel):
     """
 
 
+class StageEventIn(StageEvent):
+    """One region as the events PUT accepts it: the stored ``StageEvent``
+    ignores unknown keys so a newer version's doc loads, but a request body
+    that carries one is a client bug and is refused."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class StageEventsPutRequest(BaseModel):
     """The whole event list for one stage (spec 2026-10-08) plus the audit
     revision the client loaded; a stale one is a 409 like the audit PUT."""
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    events: list[StageEvent]
+    events: list[StageEventIn]
     revision: str | None = Field(default=None, alias=REVISION_FIELD)
 
 
@@ -13794,8 +13802,11 @@ def create_app(
         cfg: CoachAutoClassifyConfig,
         version: int,
         *,
+        capacity: int | None,
         stored_revision: str | None = None,
     ) -> dict[str, Any]:
+        # ``capacity`` is the caller's ``_coach_capacity`` (a roster lookup
+        # for an older scoreboard-pinned project), computed once per request.
         # ``stored_revision`` is the stored doc's ``_version`` when ``payload``
         # carries in-memory changes that were not saved (a mirror's seed, a
         # lost save race); otherwise ``payload`` is what is stored.
@@ -13861,7 +13872,7 @@ def create_app(
         summary = events_module.stage_event_summary(
             [shot_out["time_from_beep"] for shot_out in coach_shots],
             stage_events,
-            _coach_capacity(slug, project),
+            capacity,
         )
         return {
             "stage_number": stg.stage_number,
@@ -13882,7 +13893,12 @@ def create_app(
             # shooter when the link has one, else the shooter's saved one.
             "compare_camera": (current_share_cameras.get() or {}).get(slug, project.compare_camera),
             "shots": coach_shots,
-            "events": [e.model_dump(exclude_none=True) for e in stage_events],
+            # A region's ``note`` is private text, like ``coaching_note``: the
+            # share surface reaches this route (``_SHARE_PATH_RE``), so strip it.
+            "events": [
+                e.model_dump(exclude_none=True, exclude={"note"} if current_share_request.get() else None)
+                for e in stage_events
+            ],
             "event_summary": summary.model_dump(),
             # The stored audit doc's content revision, what the events PUT
             # compares against (the audit route's ``_version``).
@@ -13919,11 +13935,10 @@ def create_app(
             # does not persist them must still hand back the stored doc's
             # ``_version``, or the events PUT would 409 on every attempt.
             stored_revision = audit_revision(payload)
+            capacity = _coach_capacity(slug, project)
             # Stage events (spec 2026-10-08): reload proposals are seeded
             # once per stage, before the heal so it classifies against them.
-            seeded = events_module.seed_doc(
-                payload, hint_min_s=cfg.reload_hint_min_s, capacity=_coach_capacity(slug, project)
-            )
+            seeded = events_module.seed_doc(payload, hint_min_s=cfg.reload_hint_min_s, capacity=capacity)
             healed = coach_module.heal_unclassified(
                 payload.get("shots"), cfg, events=_coach_events(payload, stage_number)
             )
@@ -13951,7 +13966,15 @@ def create_app(
                     pass
         return JSONResponse(
             _build_coach_response(
-                slug, payload, beep_in_clip, stg, project, cfg, version, stored_revision=stored_revision
+                slug,
+                payload,
+                beep_in_clip,
+                stg,
+                project,
+                cfg,
+                version,
+                capacity=capacity,
+                stored_revision=stored_revision,
             )
         )
 
@@ -13966,6 +13989,9 @@ def create_app(
             project.stage(stage_number)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        # #843: a NaN ``end`` passes every field bound (``NaN <= start`` is
+        # false), persists, and then makes every coach GET of the stage 500.
+        _reject_non_finite([e.model_dump() for e in req.events], what="stage events")
         try:
             events_module.validate_lanes(req.events)
         except ValueError as exc:
@@ -13992,7 +14018,18 @@ def create_app(
             )
             state.save_audit(slug, stage_number, stored, version=version)
             payload, version, beep_in_clip, stg, project = _load_audit_for_coach(slug, stage_number)
-        return JSONResponse(_build_coach_response(slug, payload, beep_in_clip, stg, project, cfg, version))
+        return JSONResponse(
+            _build_coach_response(
+                slug,
+                payload,
+                beep_in_clip,
+                stg,
+                project,
+                cfg,
+                version,
+                capacity=_coach_capacity(slug, project),
+            )
+        )
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/coach/reclassify")
     def reclassify_stage_coach(slug: str, stage_number: int) -> JSONResponse:
@@ -14018,7 +14055,18 @@ def create_app(
             )
             payload["audit_events"] = events
             version = _coach_save(slug, stage_number, payload, version)
-        return JSONResponse(_build_coach_response(slug, payload, beep_in_clip, stg, project, cfg, version))
+        return JSONResponse(
+            _build_coach_response(
+                slug,
+                payload,
+                beep_in_clip,
+                stg,
+                project,
+                cfg,
+                version,
+                capacity=_coach_capacity(slug, project),
+            )
+        )
 
     def _apply_shot_coach_patch(
         slug: str,
@@ -14078,7 +14126,18 @@ def create_app(
             )
             payload["audit_events"] = events
             version = _coach_save(slug, stage_number, payload, version)
-        return JSONResponse(_build_coach_response(slug, payload, beep_in_clip, stg, project, cfg, version))
+        return JSONResponse(
+            _build_coach_response(
+                slug,
+                payload,
+                beep_in_clip,
+                stg,
+                project,
+                cfg,
+                version,
+                capacity=_coach_capacity(slug, project),
+            )
+        )
 
     @app.patch("/api/shooters/{slug}/stages/{stage_number}/shots/{shot_number}/coach")
     def patch_stage_shot_coach(

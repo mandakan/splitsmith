@@ -730,6 +730,25 @@ def test_get_coach_version_is_the_stored_docs_revision(
     assert body["_version"] == audit_revision(stored)
 
 
+def test_get_coach_resolves_the_capacity_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The seed and the summary share one capacity lookup per GET: for an
+    older scoreboard-pinned project each lookup reads the roster."""
+    from splitsmith import events as events_module
+
+    calls: list[str | None] = []
+    real = events_module.capacity_for
+
+    def counting(division: str | None) -> int | None:
+        calls.append(division)
+        return real(division)
+
+    monkeypatch.setattr(events_module, "capacity_for", counting)
+    client, audit_file, base = _bootstrap(tmp_path, division="Production Optics")
+    _write_shots(audit_file, _po_shots_with_a_reload_gap())
+    assert client.get(f"{base}/shooters/me/stages/1/coach").status_code == 200
+    assert calls == ["Production Optics"]
+
+
 def test_get_coach_corrupt_events_are_a_422(tmp_path: Path) -> None:
     client, audit_file, base = _bootstrap(tmp_path)
     doc = json.loads(audit_file.read_text(encoding="utf-8"))
@@ -863,6 +882,68 @@ def test_put_events_rejects_end_before_start(tmp_path: Path) -> None:
         json={"events": [{"id": "evt-1", "kind": "reload", "start": 2.0, "end": 2.0, "source": "manual"}]},
     )
     assert resp.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        '{"id": "evt-1", "kind": "reload", "start": 1.0, "end": NaN, "source": "manual"}',
+        '{"id": "evt-1", "kind": "reload", "start": 1.0, "end": Infinity, "source": "manual"}',
+        '{"id": "evt-1", "kind": "reload", "start": Infinity, "end": NaN, "source": "manual"}',
+    ],
+)
+def test_put_events_rejects_a_non_finite_number_before_saving(tmp_path: Path, event: str) -> None:
+    """#843 again: ``json.loads`` accepts ``NaN`` / ``Infinity`` and ``end``
+    has no bound a NaN fails, so the doc saved and every later coach GET
+    500'd. The guard runs before the lock, so the stage keeps its doc."""
+    client, audit_file, base = _bootstrap(tmp_path)
+    _coach(client, base)
+    before = audit_file.read_text(encoding="utf-8")
+    resp = client.put(
+        f"{base}/shooters/me/stages/1/events",
+        content='{"events": [' + event + "]}",
+        headers={"content-type": "application/json"},
+    )
+    assert resp.status_code == 422, resp.text
+    assert audit_file.read_text(encoding="utf-8") == before
+    assert client.get(f"{base}/shooters/me/stages/1/coach").status_code == 200
+
+
+def test_put_events_rejects_an_unknown_field_on_the_request(tmp_path: Path) -> None:
+    """The stored shape ignores unknown keys (a newer version's doc must load
+    on an older one); the request body still refuses them."""
+    client, _audit, base = _bootstrap(tmp_path)
+    resp = client.put(
+        f"{base}/shooters/me/stages/1/events",
+        json={
+            "events": [
+                {
+                    "id": "evt-1",
+                    "kind": "reload",
+                    "start": 1.0,
+                    "end": 2.0,
+                    "source": "manual",
+                    "colour": "red",
+                }
+            ]
+        },
+    )
+    assert resp.status_code == 422, resp.text
+
+
+def test_get_coach_loads_a_doc_whose_events_carry_an_unknown_field(tmp_path: Path) -> None:
+    client, audit_file, base = _bootstrap(tmp_path)
+    doc = _read(audit_file)
+    doc["events"] = [
+        {"id": "evt-1", "kind": "reload", "start": 1.0, "end": 2.0, "source": "manual", "colour": "red"}
+    ]
+    doc["events_seeded"] = True
+    audit_file.write_text(json.dumps(doc) + "\n", encoding="utf-8")
+    resp = client.get(f"{base}/shooters/me/stages/1/coach")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["events"] == [
+        {"id": "evt-1", "kind": "reload", "start": 1.0, "end": 2.0, "source": "manual"}
+    ]
 
 
 def test_put_events_stale_version_is_a_409_version_conflict(tmp_path: Path) -> None:

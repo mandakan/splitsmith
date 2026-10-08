@@ -138,6 +138,9 @@ def _capacity_warning(
 def stage_event_summary(
     shot_times: Sequence[float], events: Sequence[StageEvent], capacity: int | None
 ) -> StageEventSummary:
+    # Sorted here, as ``lib/events.ts`` does: the capacity segmentation walks
+    # shots in time order.
+    shot_times = sorted(shot_times)
     figs = reload_figures(events)
     reloads = [e for e in events if e.kind == "reload"]
     return StageEventSummary(

@@ -9,11 +9,15 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from splitsmith.config import StageEvent
+from splitsmith.config import Config, DivisionCapacityConfig, StageEvent
 from splitsmith.events import (
+    capacity_config,
+    capacity_for,
     events_from_doc,
     next_event_id,
     reload_figures,
+    seed_doc,
+    seed_events,
     shot_is_moving,
     shot_times_from_doc,
     stage_event_summary,
@@ -81,11 +85,20 @@ def test_stage_event_end_must_follow_start() -> None:
         StageEvent(id="evt-1", kind="reload", start=-0.1, end=1.0, source="manual")
 
 
-def test_stage_event_rejects_unknown_fields() -> None:
-    with pytest.raises(ValidationError):
-        StageEvent.model_validate(
-            {"id": "evt-1", "kind": "reload", "start": 1.0, "end": 2.0, "source": "manual", "colour": "red"}
-        )
+def test_stage_event_ignores_unknown_fields() -> None:
+    """A doc a newer version wrote loads on an older one (the desktop app and
+    the CLI share ``~/.splitsmith``); the events PUT's request model is what
+    refuses an unknown key (``tests/test_coach_api.py``)."""
+    event = StageEvent.model_validate(
+        {"id": "evt-1", "kind": "reload", "start": 1.0, "end": 2.0, "source": "manual", "colour": "red"}
+    )
+    assert event.model_dump(exclude_none=True) == {
+        "id": "evt-1",
+        "kind": "reload",
+        "start": 1.0,
+        "end": 2.0,
+        "source": "manual",
+    }
 
 
 def test_next_event_id_only_grows() -> None:
@@ -117,8 +130,14 @@ def test_events_from_doc_and_shot_times() -> None:
         events_from_doc({"events": [{"id": "evt-1", "kind": "nap", "start": 1, "end": 2, "source": "auto"}]})
 
 
-from splitsmith.config import Config, DivisionCapacityConfig  # noqa: E402  (keep with the other imports)
-from splitsmith.events import capacity_config, capacity_for, seed_doc, seed_events  # noqa: E402
+def test_stage_event_summary_sorts_its_shot_times() -> None:
+    """Parity of contract with ``lib/events.ts``: the capacity segmentation
+    walks shots in time order, whatever order the caller passes them in."""
+    reload = _events([{"id": "evt-1", "kind": "reload", "start": 1.0, "end": 2.0, "source": "manual"}])
+    ordered = [0.1, 0.2, 0.3, 0.4, 5.0]
+    shuffled = [5.0, 0.1, 0.2, 0.3, 0.4]
+    assert stage_event_summary(ordered, reload, 2).capacity_warning == "4 shots without a reload"
+    assert stage_event_summary(shuffled, reload, 2) == stage_event_summary(ordered, reload, 2)
 
 
 def _quick(start: float, n: int, split: float = 0.3) -> list[float]:
