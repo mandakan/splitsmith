@@ -24,10 +24,19 @@ def _disable_auto_beep(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SPLITSMITH_AUTO_BEEP_DISABLED", "1")
 
 
-def _bootstrap(tmp_path: Path, *, division: str | None = None) -> tuple[TestClient, Path, str]:
+def _bootstrap(
+    tmp_path: Path, *, division: str | None = None, pinned_competitor: int | None = None
+) -> tuple[TestClient, Path, str]:
     """Returns ``(client, audit_file, url_base)`` -- url_base is the
     ``/api/matches/{match_id}`` prefix that every shooter-scoped URL
-    in this module needs after Tier 1 step 3 of doc 10."""
+    in this module needs after Tier 1 step 3 of doc 10.
+
+    ``pinned_competitor`` pins that competitor of the scoreboard fixture
+    match (22/27190) and drops the match file into the shooter's
+    ``scoreboard/``, with no stored division: an older project whose
+    division only its scoreboard files know."""
+    import shutil
+
     from tests.conftest import scaffold_match
 
     root, shooter_root = scaffold_match(tmp_path, name="Coach Match")
@@ -42,6 +51,13 @@ def _bootstrap(tmp_path: Path, *, division: str | None = None) -> tuple[TestClie
         )
     ]
     project.competitor_division = division
+    if pinned_competitor is not None:
+        project.scoreboard_match_id = "27190"
+        project.scoreboard_content_type = 22
+        project.selected_competitor_id = pinned_competitor
+        (shooter_root / "scoreboard").mkdir(exist_ok=True)
+        fixture = Path(__file__).parent / "fixtures" / "scoreboard" / "match_22_27190.json"
+        shutil.copy(fixture, shooter_root / "scoreboard" / "match.json")
     project.save(shooter_root)
 
     audit_dir = shooter_root / "audit"
@@ -721,3 +737,41 @@ def test_get_coach_corrupt_events_are_a_422(tmp_path: Path) -> None:
     resp = client.get(f"{base}/shooters/me/stages/1/coach")
     assert resp.status_code == 422, resp.text
     assert "invalid events" in resp.json()["detail"]
+
+
+def _po_shots_past_capacity_without_a_hinted_gap() -> list[int]:
+    """20 shots, no gap over the 2.5 s hint: 14 quick, a 1.0 s gap, 6 quick.
+    Production Optics holds 15 + 1, so the seeder must place a reload by
+    capacity alone -- in the longest gap of the window, after shot 14."""
+    first = [1200 + i * 300 for i in range(14)]
+    rest = [first[-1] + 1000 + i * 300 for i in range(6)]
+    return first + rest
+
+
+def test_get_coach_seeds_by_division_capacity_when_no_gap_is_hinted(tmp_path: Path) -> None:
+    client, audit_file, base = _bootstrap(tmp_path, division="Production Optics")
+    shots = _po_shots_past_capacity_without_a_hinted_gap()
+    _write_shots(audit_file, shots)
+
+    body = client.get(f"{base}/shooters/me/stages/1/coach").json()
+    assert [(e["kind"], e["source"]) for e in body["events"]] == [("reload", "auto")]
+    assert body["events"][0]["start"] == pytest.approx(shots[13] / 1000)
+    assert body["events"][0]["end"] == pytest.approx(shots[14] / 1000)
+    assert body["event_summary"]["capacity_warning"] is None
+
+    # The user deletes the proposal: 20 shots on one magazine is over capacity.
+    stored = _read(audit_file)
+    stored["events"] = []
+    audit_file.write_text(json.dumps(stored) + "\n", encoding="utf-8")
+    body2 = client.get(f"{base}/shooters/me/stages/1/coach").json()
+    assert body2["events"] == []
+    assert body2["event_summary"]["capacity_warning"] == "20 shots without a reload"
+
+
+def test_get_coach_capacity_from_the_scoreboard_files_of_an_older_project(tmp_path: Path) -> None:
+    """No stored division: ``competitor_division`` reads the shooter's
+    dropped match file, so the route must hand it the shooter directory."""
+    client, audit_file, base = _bootstrap(tmp_path, pinned_competitor=727539)  # Production Optics
+    _write_shots(audit_file, _po_shots_past_capacity_without_a_hinted_gap())
+    body = client.get(f"{base}/shooters/me/stages/1/coach").json()
+    assert [e["kind"] for e in body["events"]] == ["reload"]
