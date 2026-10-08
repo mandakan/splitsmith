@@ -41,6 +41,7 @@ from ..export_preview import (
 )
 from ..look_store import LookStoreError, StoredLookBody, TemplateEdit, draft_look
 from ..looks import Look, load_look, look_fingerprint
+from ..overlay_hud import OverlayStyleFields
 from ..overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
 from ..runtime import runtime
 from ..shooter_book import identity_digest, load_snapshot
@@ -56,7 +57,7 @@ router = APIRouter()
 rasterizer_factory: Callable[[], AbstractContextManager[Rasterizer]] = ChromiumRasterizer
 
 
-class ExportPreviewRequest(BaseModel):
+class ExportPreviewRequest(OverlayStyleFields, BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     card: PreviewCard
@@ -189,6 +190,8 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
         variant=req.variant,
         at=req.at,
         motion=req.motion,
+        overlay_variant=req.overlay_variant,
+        overlay_options=req.hud_options(),
         backdrop=req.backdrop,
         event_logo=event_logo.name if event_logo is not None else None,
         made_with=req.made_with,

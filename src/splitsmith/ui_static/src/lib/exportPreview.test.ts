@@ -168,3 +168,35 @@ describe("previewCaption with the catalog's slots (review of #1259)", () => {
     expect(previewCaption({ slotId: "stageCard", variantId: "slate" }, 3, slots)).toBe("Slate · Stage 03");
   });
 });
+
+describe("previewBody with an overlay style (template HUD)", () => {
+  const catalog: LookInfo[] = [
+    {
+      ...BUILTIN_LOOKS[0],
+      slots: { ...BUILTIN_LOOKS[0].slots, overlay: [{ name: "plate", preview: null, positions: ["bottom-left"] }] },
+    },
+  ];
+  const plate = {
+    ...DEFAULT_EXPORT_SETTINGS,
+    includeOverlay: true,
+    overlayStyle: { ...DEFAULT_EXPORT_SETTINGS.overlayStyle, variant: "plate", classLabels: false },
+  };
+
+  it("previews the chosen style moving", () => {
+    const body = previewBody(plate, "overlay", 1, "", catalog);
+    expect(body.overlay_variant).toBe("plate");
+    expect(body.overlay_class_labels).toBe(false);
+    expect(body.motion).toBe(true);
+  });
+
+  it("previews Classic as the still it always was", () => {
+    const body = previewBody(DEFAULT_EXPORT_SETTINGS, "overlay", 1, "", catalog);
+    expect(body).not.toHaveProperty("overlay_variant");
+    expect(body).not.toHaveProperty("motion");
+  });
+
+  it("a style the catalog lacks previews as Classic, and other cards never carry it", () => {
+    expect(previewBody(plate, "overlay", 1, "", BUILTIN_LOOKS)).not.toHaveProperty("overlay_variant");
+    expect(previewBody(plate, "slate", 1, "", catalog)).not.toHaveProperty("overlay_variant");
+  });
+});

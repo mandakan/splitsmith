@@ -77,6 +77,11 @@ const matchPayload: Required<MatchExportRequestPayload> = {
   summary_hold_seconds: 3,
   match_summary: true,
   match_summary_seconds: 6,
+  overlay_variant: "plate",
+  overlay_speed_colors: false,
+  overlay_class_labels: false,
+  overlay_landing: false,
+  overlay_position: "top-right",
 };
 
 describe("export wrappers forward every declared field", () => {

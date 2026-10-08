@@ -199,6 +199,34 @@ function SlotRow({
             />
           </div>
         ) : null}
+        {on && selected.choice ? (
+          <div className="sm:pt-2">
+            <Segmented
+              label={selected.choice.label}
+              value={selected.choice.read(settings)}
+              options={selected.choice.options}
+              onChange={(value) => selected.choice && patch(selected.choice.write(settings, value))}
+              disabled={busy}
+            />
+          </div>
+        ) : null}
+        {on && selected.toggles && selected.toggles.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-3 sm:pt-2">
+            {selected.toggles.map((t) => (
+              <label key={t.id} className="flex items-center gap-2 text-md text-ink-2">
+                <input
+                  type="checkbox"
+                  aria-label={t.label}
+                  checked={t.read(settings)}
+                  disabled={busy}
+                  onChange={(e) => patch(t.write(settings, e.target.checked))}
+                  className="accent-[var(--color-ink)]"
+                />
+                {t.label}
+              </label>
+            ))}
+          </div>
+        ) : null}
         {params.length > 0 ? (
           <div className="flex flex-wrap items-center gap-3 sm:pt-2">
             {params.map((p) => (

@@ -375,3 +375,62 @@ describe("a stored transition without the catalog (review of #1259)", () => {
     }
   });
 });
+
+describe("overlay styles in the gallery (template HUD)", () => {
+  const catalog: LookInfo[] = [
+    {
+      ...BUILTIN_LOOKS[0],
+      slots: {
+        ...BUILTIN_LOOKS[0].slots,
+        overlay: [
+          { name: "plate", preview: "/api/looks/splitsmith/preview/overlay-plate.webp", positions: ["bottom-left", "top-right"] },
+          { name: "timeline", preview: null, positions: [] },
+        ],
+      },
+    },
+  ];
+  const overlaySlot = (settings: ExportSettings) => slotsForLook(catalog, settings).find((s) => s.id === "overlay")!;
+
+  it("shows Classic and the Look's styles to one shooter, never to the grid", () => {
+    const slot = overlaySlot(DEFAULT_EXPORT_SETTINGS);
+    expect(visibleVariants(slot, "single", "mp4").map((v) => v.name)).toEqual(["None", "Classic", "Plate", "Timeline"]);
+    expect(visibleVariants(slot, "compare", "mp4").map((v) => v.name)).toEqual(["None", "Shot counter"]);
+    expect(visibleVariants(slot, "single", "fcpxml").map((v) => v.id)).toContain("style:plate");
+  });
+
+  it("reads and writes the overlay and its style together", () => {
+    const slot = overlaySlot(DEFAULT_EXPORT_SETTINGS);
+    const picked = { ...DEFAULT_EXPORT_SETTINGS, ...slot.write(DEFAULT_EXPORT_SETTINGS, "style:plate") };
+    expect(picked.includeOverlay).toBe(true);
+    expect(picked.overlayStyle.variant).toBe("plate");
+    expect(slot.read(picked)).toBe("style:plate");
+    const classic = { ...picked, ...slot.write(picked, "on") };
+    expect(classic.overlayStyle.variant).toBe("default");
+    expect(slot.read(classic)).toBe("on");
+    expect(slot.read({ ...picked, ...slot.write(picked, "none") })).toBe("none");
+    // A stored style the Look lacks reads as Classic, never as an empty selection.
+    expect(slot.read({ ...picked, overlayStyle: { ...picked.overlayStyle, variant: "gone" } })).toBe("on");
+  });
+
+  it("a style carries the three toggles and a position only when it declares some", () => {
+    const slot = overlaySlot(DEFAULT_EXPORT_SETTINGS);
+    const plate = slot.variants.find((v) => v.id === "style:plate")!;
+    const timeline = slot.variants.find((v) => v.id === "style:timeline")!;
+    expect(plate.toggles?.map((t) => t.label)).toEqual(["Speed colours", "Class labels", "Landing"]);
+    expect(plate.choice?.options.map((o) => o.value)).toEqual(["bottom-left", "top-right"]);
+    expect(timeline.choice).toBeUndefined();
+    const s = { ...DEFAULT_EXPORT_SETTINGS, ...slot.write(DEFAULT_EXPORT_SETTINGS, "style:plate") };
+    expect(plate.choice!.read(s)).toBe("bottom-left");
+    const moved = { ...s, ...plate.choice!.write(s, "top-right") };
+    expect(moved.overlayStyle.position).toBe("top-right");
+    const quiet = { ...moved, ...plate.toggles![0].write(moved, false) };
+    expect(quiet.overlayStyle.speedColors).toBe(false);
+    expect(plate.toggles![0].read(quiet)).toBe(false);
+  });
+
+  it("without styles in the catalog the overlay slot is as it was", () => {
+    expect(slotsForLook(BUILTIN_LOOKS, DEFAULT_EXPORT_SETTINGS).find((s) => s.id === "overlay")).toBe(
+      LOOK_SLOTS.find((s) => s.id === "overlay"),
+    );
+  });
+});

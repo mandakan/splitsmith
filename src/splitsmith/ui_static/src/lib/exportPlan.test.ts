@@ -153,6 +153,12 @@ describe("summaryLines", () => {
     expect(lines[2]).toEqual({ label: "Transitions", value: "cut", dim: true });
     expect(lines[3]).toEqual({ label: "Cards", value: "off", dim: true });
   });
+  it("names the overlay style when one is chosen", () => {
+    const on = summaryLines({ ...base, mode: "single", overlay: true });
+    expect(on.find((l) => l.label === "Overlay")).toEqual({ label: "Overlay", value: "on" });
+    const plate = summaryLines({ ...base, mode: "single", overlay: true, overlayStyle: "Plate" });
+    expect(plate.find((l) => l.label === "Overlay")).toEqual({ label: "Overlay", value: "Plate" });
+  });
   it("names the cards, the cams and YouTube only when the mode and format offer them", () => {
     const lines = summaryLines({ ...base, mode: "single", cards: "title page · slate", cams: "Handheld + Head cam inset", youtube: true });
     expect(lines.map((l) => l.label)).toEqual(["Stages", "Padding", "Transitions", "Cards", "Overlay", "Cameras", "YouTube"]);

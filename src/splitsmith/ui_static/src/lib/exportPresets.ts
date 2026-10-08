@@ -13,6 +13,13 @@ import { DEFAULT_CAM_OPTIONS, fromPipLayout, type CamOptions } from "@/lib/camOp
 import type { ExportMode } from "@/lib/exportPlan";
 import { visibleTransitionKind } from "@/lib/lookGallery";
 import {
+  DEFAULT_OVERLAY_STYLE,
+  overlayStyleBody,
+  overlayStyleLabel,
+  styleFromBody,
+  type OverlayStyle,
+} from "@/lib/overlayStyle";
+import {
   DEFAULT_RENDER_OPTIONS,
   describeRenderOptions,
   type OutputFormat,
@@ -109,6 +116,9 @@ export interface ExportSettings {
   /** ``titleInfo`` inside is match-specific and never stored. */
   renderOptions: RenderOptions;
   includeOverlay: boolean;
+  /** Which of the Look's HUD styles draws the overlay, and its toggles
+   *  (``lib/overlayStyle``); one shooter's overlay only. */
+  overlayStyle: OverlayStyle;
   gridOverlay: boolean;
   gridHoldSeconds: number;
   gridFreeCell: GridFreeCell;
@@ -134,6 +144,7 @@ export const DEFAULT_EXPORT_SETTINGS: ExportSettings = {
   closingCardVariant: "default",
   renderOptions: DEFAULT_RENDER_OPTIONS,
   includeOverlay: false,
+  overlayStyle: DEFAULT_OVERLAY_STYLE,
   gridOverlay: false,
   gridHoldSeconds: 0,
   gridFreeCell: "blank",
@@ -183,6 +194,7 @@ export function settingsToBody(s: ExportSettings): ExportPresetBody {
     match_summary: s.renderOptions.matchSummary,
     match_summary_seconds: finite(s.renderOptions.matchSummarySeconds, D.matchSummarySeconds),
     overlay: s.includeOverlay,
+    ...overlayStyleBody(s.overlayStyle),
     grid_overlay: s.gridOverlay,
     grid_hold_seconds: finite(s.gridHoldSeconds, 0),
     grid_free_cell: s.gridFreeCell,
@@ -237,6 +249,7 @@ export function applyBody(s: ExportSettings, body: ExportPresetBody): ExportSett
       matchSummarySeconds: finite(body.match_summary_seconds ?? D.matchSummarySeconds, D.matchSummarySeconds),
     },
     includeOverlay: body.overlay,
+    overlayStyle: styleFromBody(body),
     gridOverlay: body.grid_overlay,
     gridHoldSeconds: finite(body.grid_hold_seconds, 0),
     gridFreeCell: body.grid_free_cell ?? "blank",
@@ -304,7 +317,10 @@ export function groupSummary(s: ExportSettings, group: SettingsGroup, ctx: Summa
       const parts: string[] = [];
       const cards = describeRenderOptions(s.renderOptions, grid ? "grid" : "single", grid ? "mp4" : s.outputFormat);
       if (cards) parts.push(cards);
-      if (grid ? s.gridOverlay : s.includeOverlay) parts.push("overlay");
+      if (grid ? s.gridOverlay : s.includeOverlay) {
+        const style = grid ? DEFAULT_OVERLAY_STYLE.variant : s.overlayStyle.variant;
+        parts.push(style === DEFAULT_OVERLAY_STYLE.variant ? "overlay" : `${overlayStyleLabel(style)} overlay`);
+      }
       if (
         visibleTransitionKind(s.transitionKind, grid ? "mp4" : s.outputFormat, grid ? "compare" : "single", ctx.kinds ?? []) !==
         "none"
