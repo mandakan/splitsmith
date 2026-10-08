@@ -1,0 +1,351 @@
+# Stage events and the lane editor
+
+Date: 2026-10-08
+Status: approved design, awaiting implementation plan
+Wireframe: https://art.urdr.dev/lane-editor-wireframe (private)
+
+## Why
+
+Splitsmith classifies every gap between two shots with one word
+(`interval_class`: `first_shot / split / transition / movement / reload /
+activation`). That partition is what the time budget sums and what the
+split statistics filter on, and it stays. It cannot say two things a
+coach needs:
+
+1. **Where inside a gap the reload was.** A 2.8 s gap that is "move
+   1.2 s, reload overlapping 1.0 s, settle 0.6 s" is one word. The reload
+   itself -- hand off the grip to gun back on target -- is unmeasured,
+   and whether it was hidden inside the movement or stuck out past it is
+   the number nobody else gives.
+2. **Movement that spans shots.** Shooting on the move puts splits inside
+   a movement. The interval model has no way to mark the movement at all
+   without mislabelling the splits.
+
+This spec adds **stage events**: regions on the stage's timeline, in
+lanes per kind, edited on the Coach page under the video, consumed by the
+statistics, the renderers and the exports.
+
+## Decisions taken during brainstorming
+
+- Regions are a per-stage list on the audit doc, independent of shots
+  (not a sub-span on the shot dict, not shot-anchored).
+- A reload region's handles mean **hand leaves the grip -> gun back on
+  target**: the full manipulation cost. The mechanical reload (mag out ->
+  mag seated) is not modelled.
+- Regions **hint** the auto-classifier for one case only; they never own
+  a class. A split fired inside a movement region stays `split` and feeds
+  the split statistics, tagged `moving`.
+- The time budget keeps its gap partition. A region-based budget is a
+  possible later view, not part of this work.
+- The Coach player uses the scrub rendition through `useScrubSource`; the
+  existing full-resolution switch is exposed on the lane editor too, so
+  deciding later is deleting a menu entry.
+- Tier 1 (a strip per gap) is skipped: it cannot express movement across
+  shots. The first cut is a minimal lane editor.
+
+## Model
+
+### `StageEvent` (`config.py`, next to `Shot`)
+
+```
+id:     str                     # "evt-<n>", unique per stage, never reused
+kind:   Literal["movement", "reload", "activation"]
+start:  float                   # seconds from beep, like time_from_beep
+end:    float                   # > start
+source: IntervalClassSource     # "auto" | "manual"
+note:   str | None = None
+```
+
+Validator: `end > start`. Lane rule (validated by `events.validate_lanes`,
+not by the model, because it is a property of the list): two events of
+the same kind never overlap; across kinds anything goes. A clamped edge
+is the editor's behaviour, a rejected PUT is the server's.
+
+### On the audit doc
+
+The audit JSON is dict-shaped (`shots` is a list of dicts; `coach.py`
+reads and writes them by field name). Two new top-level keys:
+
+- `events`: list of `StageEvent`-shaped dicts, default `[]`. Every
+  existing doc loads unchanged.
+- `events_seeded`: bool, default false. Set when the seeder has run once
+  for this stage, so deleting every proposal does not resurrect them.
+
+Ids follow the `cand-<n>` rule (#842): the counter only grows, an id is
+never reassigned, so the event log can reference an event after it is
+gone. The counter is the max id seen in the list plus one; no separate
+field.
+
+Nothing new in `state_docs`: the audit doc is already a pullable kind,
+versions through `audit_revision`, and every writer goes through
+`_audit_rmw()`. A new `doc_kind` would need the sync allowlist in two
+places and a merge rule; this needs none of it.
+
+### Derived, never stored
+
+- Per shot: `moving: bool` -- the shot's `time_from_beep` falls inside a
+  movement region (inclusive at both ends).
+- Per reload region: `ReloadFigure {duration, moving, overhang}` --
+  `moving` when any movement region overlaps it; `overhang = reload.end -
+  movement.end` against the overlapping movement with the latest end,
+  `None` when standing. Positive overhang is time the reload cost;
+  zero or negative means it was hidden in the movement.
+- Per stage: `StageEventSummary {movement_s, moving_shots, reloads,
+  reload_avg_s, overhang_s}` where `overhang_s` is the sum of positive
+  overhangs.
+- Capacity check: in a division with a capacity, more than `capacity + 1`
+  shots between two reload regions (or before the first) is impossible;
+  the summary carries `capacity_warning: str | None` ("17 shots without a
+  reload") for the Coach card.
+
+### Coupling to the interval classifier
+
+`classify_intervals_in_dicts` and `classify_intervals_in_models` gain an
+`events` argument. One rule: a gap whose auto-class would be `movement`
+(gap > `transition_max_s`) and which overlaps a reload region
+auto-classes `reload`. Manual classes still win, as today.
+`splitsmith match reclassify` passes the stored events, so a manual
+reload region keeps its gap on `reload` through a threshold change.
+
+## Pure modules
+
+### `splitsmith/events.py`
+
+No I/O; the Python twin of `lib/events.ts`. Both load the same fixture
+JSON under `tests/fixtures/events/` and the test files mirror each other
+case for case.
+
+- `validate_lanes(events) -> None` (raises `ValueError` naming the pair).
+- `next_event_id(events) -> str`.
+- `shot_is_moving(time_from_beep, events) -> bool`.
+- `reload_figures(events) -> list[ReloadFigure]`.
+- `stage_event_summary(shots, events, capacity) -> StageEventSummary`.
+- `seed_events(shots, config, capacity) -> list[StageEvent]` (below).
+- `capacity_for(division: str | None) -> int | None`.
+
+### Capacity table
+
+The division string as SSI spells it already carries the power factor
+where a division allows both ("Classic Major", "Classic Minor"), and
+`division.competitor_division` resolves it without the network. The
+table is keyed on that string, exact match after whitespace
+normalisation; an unknown string gives `None` and no capacity seed.
+
+| Division string      | capacity |
+|----------------------|----------|
+| Production           | 15       |
+| Production Optics    | 15       |
+| Classic Minor        | 10       |
+| Classic Major        | 8        |
+| Revolver Minor       | 8        |
+| Revolver Major       | 6        |
+| Open, Standard (any) | none     |
+
+The table is data in `config.py` (`DivisionCapacityConfig`, overridable
+through `SPLITSMITH_CONFIG` like the classifier thresholds) because rule
+books change and a user may shoot a regional variant.
+
+### Seeding rule
+
+Runs once per stage (`events_seeded`), only for `reload`. Movement is
+never seeded: a gap says nothing about whether the shooter moved.
+
+Shooters commonly start with one round chambered on top of a full
+magazine, and a reload with retention or a chambered round restores that
+state, so `capacity + 1` is the **latest possible** reload position
+everywhere and never over-constrains. It is a bound, not a count.
+
+```
+hinted(gap)  := gap > reload_hint_min_s          (2.50 s default)
+window       := gaps after shots [first .. first + capacity]   # capacity + 1 shots
+repeat while shots remain:
+    if capacity is None:
+        seed every hinted gap; stop
+    pick in window: the first hinted gap, else the longest gap
+    seed it (source auto, spanning the whole gap)
+    first := the shot after the seeded gap
+```
+
+With no capacity the hint alone decides, as it does today for the badge.
+A seed spans the whole gap; the user tightens the handles. A touched
+proposal becomes `manual`.
+
+## API
+
+### `GET /api/stages/{n}/coach`
+
+Adds to the existing payload:
+
+- `events: StageEvent[]`
+- per shot: `moving: bool`
+- `event_summary: StageEventSummary`
+- on each `videos[]` entry: `trim_version`, `scrub_version` -- the same
+  two fields `StageVideo` carries, from the request's `StoragePresence`
+  listing, so the SPA's `useScrubSource.choose` can tell a fresh
+  rendition from a stale one.
+
+Seeds on first read when the audit has shots, `events` is empty and
+`events_seeded` is false; the write goes under `_audit_rmw()` and sets the
+flag. The share surface reaches none of this (the coach GET is not in
+`_SHARE_PATH_RE`); share consumers get the reload and moving figures
+through `stages[].figures` on the project payload.
+
+### `PUT /api/stages/{n}/events`
+
+Body `{events: StageEvent[], _version: str}`. Replaces the whole list.
+`validate_lanes` failure is a 422 naming the pair. A stale `_version` is a
+409 `version_conflict`, the same shape as the audit PUT; the page reloads.
+Writes under `_audit_rmw()`. It is a match write under
+`/api/matches/{id}/`, so auto-sync's dirty middleware marks the match with
+no change. Not in `_SHARE_WRITE_ROUTES`. Local and hosted alike; hosted
+needs no feature beyond what opening the Coach page already needs.
+
+## SPA
+
+### Coach page
+
+- The player adopts `useScrubSource`: `choose(video)` where it pins
+  `primary.kind` today, `markFailed` as its `error` handler. A
+  `source`-kind video (no trim yet) is left alone; the hook is for the
+  trim/rendition pair.
+- Under the video: `components/coach/LaneEditor.tsx`. Beside the video:
+  the selected-region card, which replaces `ShotEditor` while a region is
+  selected and gives it back on deselect (one card level per view).
+- The stat strip gains **On the move** (shots) and **Overhang** (s,
+  amber: it is reload-hued, not a warning).
+- The lane editor's overflow menu gets **Full-resolution video**, bound to
+  the same hook as Audit's `TransportLine` entry, shown only when
+  `scrub.available` (local mode).
+- `lib/events.ts` holds every derivation (moving flags, reload figures,
+  summary, clamp rules, snap); the page maps results to primitives.
+
+### `LaneEditor`
+
+Stage-long strip, beep at x = 0, stage time at the right edge, ruler on
+top. Lanes: **Shots** (read-only; the audit's shots as ticks, a hollow cap
+on a shot inside a movement region), **Movement**, **Reload**,
+**Activation**. Playhead across all lanes follows `video.currentTime`;
+clicking the ruler seeks.
+
+Interactions, all on `MarkerLayer`'s conventions (pointer capture, a
+travel threshold before a press becomes a drag -- wider for touch -- Esc
+restores the pre-drag state):
+
+- Press-and-drag on empty lane space creates a region; release commits.
+  Under the threshold it is a click, which seeks.
+- Drag an edge to resize, the body to move. **While an edge drags the
+  video seeks to that edge's time.** Body drag seeks to the leading edge.
+  A time pill follows the handle (time, frame number).
+- Snap within ~8 px to a shot time or the beep; Alt skips. Neighbours in
+  the same lane clamp; a region never overlaps another in its lane.
+- Selected region: `[` `]` nudge start, `{` `}` nudge end, by one frame
+  (`1 / fps` of the primary video); Shift for 100 ms; Delete removes.
+- While a reload region is selected, an overhang bracket is drawn from
+  the enclosing movement's end to the reload's end, labelled with the
+  signed difference.
+- Auto proposals render with a dashed outline and an `AUTO ?` label.
+- No zoom, no multi-select, no copy in this cut. At 16 s over ~900 px one
+  pixel is ~18 ms; coarse placement by drag, fine by nudge.
+
+Every edit PUTs the whole list with `_version`; a 409 reloads.
+
+There is no separate mobile Coach page; under the phone breakpoint the
+Coach page renders the same component read-only, with a region list under it (one row
+per region: kind chip, range or duration, moving-shot count or overhang).
+Editing stays on the desktop, where there is a frame to judge from.
+
+Visual budget: regions use the budget chip ticks (`movement` beep-cyan,
+`reload` live-amber, `activation` ink-2), the playhead is `--color-led`
+(current position), proposals are dashed outlines, nothing is a coloured
+fill at full opacity. Built from `components/ui` primitives; the lane
+geometry is inline SVG.
+
+## Rendering and export
+
+### Overlay (single and grid)
+
+The renderer reads `events` through `stage_summary_data` the way it reads
+`interval_class`. Two elements, both region-driven and both **Look
+gallery slots** (`lib/lookGallery.ts` entries with thumbnails from
+`scripts/render_look_thumbnails.py`), off by default:
+
+- **Reload chip** beside the clock in the lower third: amber outline,
+  `RELOAD` plus the elapsed figure counting up from `start`, holding its
+  final value through a 0.4 s fade so a 1.42 s reload reads as "1.42".
+  Enable expression `between(t, start, end + fade)` on the stage's own
+  filter graph, upstream of the hold `concat` like the lower third, so it
+  can never reach a summary frame.
+- **Stage bar** under the clock: the stage as a thin bar with movement and
+  reload bands and the playhead's progress.
+
+Grid: the chip per tile, the bar on the audio-source tile only. A render
+that does not pick either slot has a byte-identical argv (pinned).
+
+### Summary card
+
+The Splits band gains `Reloads N`, `Reload avg`, `Overhang` when a reload
+region exists, and the split figures appear as two rows, `Static` and
+`Moving`, when both populations exist. A stage with no events renders
+exactly as today (pinned). `share_card.stage_figures` stays on
+`statistic_splits` and grows no reload figure in this cut.
+
+### CSV, FCPXML, Compare
+
+- CSV: `moving` on each shot row; `events.csv` beside it (`id, kind,
+  start, end, duration, source, note`).
+- FCPXML: each region as a marker with duration on the stage clip, kind
+  in the marker's value, so the editor can navigate to it. No burnt-in
+  chrome. Compare export: markers on the audio-source shooter's clip only.
+
+## Testing
+
+Mutation drill on every new test: delete the behaviour, watch it fail,
+restore it. A test that passes against the pre-change code is not a test.
+
+- `tests/test_events.py`: `validate_lanes` (same-kind overlap rejected,
+  cross-kind allowed, touching edges allowed); `shot_is_moving` inclusive
+  ends; `reload_figures` standing / hidden (negative overhang) / positive
+  overhang / two movements overlapping one reload (latest end wins);
+  `stage_event_summary` sums; `capacity_for` on the SSI strings including
+  an unknown one; the seeder over fixtures: a PO stage with a reload at
+  shot 12 on a movement (hint wins inside the window), a Classic Minor
+  stage (window of 11), an Open stage (hint only), the `capacity + 1` edge
+  (16 shots then a reload, no false early seed), and a PO stage of 14
+  shots (no seed). Classifier: a 2.8 s gap flips to `reload` only when a
+  reload region overlaps it; a manual class wins; a split inside a
+  movement stays `split`.
+- Routes: `PUT /events` under the probe lock from
+  `test_audit_lock_wiring.py`; 422 on a lane overlap naming the pair; 409
+  on a stale `_version`; the share surface 404s the PUT and the coach
+  GET; the GET seeds once and `events_seeded` stops a second seed after
+  the user deletes everything; a `test_match_bundle_queries`-style count
+  that the GET adds no `state_docs` SELECT; the `videos[]` entries carry
+  `scrub_version` from the presence listing.
+- Renderer: argv tests for the chip's and bar's enable expressions and
+  their position upstream of the hold `concat`; the zero-slot render's
+  argv is byte-identical; `scripts/render_match_frames.py` and
+  `scripts/render_grid_frames.py` grow `--events`, and the frames are
+  looked at before the slot ships (a green argv test proves nothing about
+  pixels).
+- Summary card: a stage with no events renders exactly as before (pixel
+  fixture); a stage with a reload shows the three figures; static and
+  moving rows appear only when both populations exist.
+- SPA: `lib/events.test.ts` over the shared fixture JSON, case for case
+  with `test_events.py`; `LaneEditor.test.tsx` with pointer events the
+  way `MarkerLayer.test.tsx` does it -- create, click-under-threshold
+  seeks, resize seeks the video to the edge, snap and Alt, clamp against
+  a neighbour, Esc restores, keyboard nudges by one frame, Delete; a
+  Coach page test that the player's source comes from `useScrubSource`
+  and that the overflow entry toggles `setFullRes`; `lookGallery.test.ts`
+  pins the two new slots' per-format visibility and that their thumbnails
+  are referenced.
+
+## Out of scope
+
+- Movement seeding or any video-derived proposal (the vision detector is
+  not there).
+- Zoom, multi-select, copy, undo beyond Esc.
+- A region-based time budget.
+- Reload figures on the share card.
+- Phone-side editing or a desktop command to re-seed.
+- The mechanical reload as a sub-marker.
