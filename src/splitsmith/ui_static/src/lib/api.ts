@@ -1507,6 +1507,27 @@ export type CoachIntervalClass =
   | "activation";
 export type CoachIntervalClassSource = "auto" | "manual";
 
+/** Stage events (spec 2026-10-08): regions on the stage timeline in
+ *  seconds from the beep, one lane per kind. A reload's handles mean hand
+ *  off the grip -> gun back on target. */
+export type StageEventKind = "movement" | "reload" | "activation";
+export interface StageEvent {
+  id: string;
+  kind: StageEventKind;
+  start: number;
+  end: number;
+  source: CoachIntervalClassSource;
+  note?: string | null;
+}
+export interface StageEventSummary {
+  movement_s: number;
+  moving_shots: number;
+  reloads: number;
+  reload_avg_s: number | null;
+  overhang_s: number;
+  capacity_warning: string | null;
+}
+
 export interface CoachShot {
   /** Stable shot id (#844) -- what ``patchStageShotCoach`` addresses the
    *  by-id route with. ``null`` when the stored doc has no usable id for
@@ -1529,6 +1550,8 @@ export interface CoachShot {
   coaching_note: string | null;
   stale: boolean;
   reload_hint: boolean;
+  /** Inside a movement region; absent from servers before 0.6x. */
+  moving?: boolean;
 }
 
 export interface CoachVideoEntry {
@@ -1552,6 +1575,14 @@ export interface CoachVideoEntry {
   /** The camera's mount ("head", "hand", ...); with the role it is what a
    *  camera choice keys on across stages (``camera_select``). */
   mount?: string | null;
+  /** Identity of the local audit trim (mtime + size), null when none is on
+   *  disk. Goes into a pinned ``kind=trim`` URL so a re-cut trim is a new
+   *  URL and remounts the player instead of leaving it on a dead stream. */
+  trim_version?: string | null;
+  /** Identity of the trim's fresh 720p rendition on local disk, null when
+   *  there is none. The Audit players stream ``kind=web`` with it instead
+   *  of the full-resolution trim (scrubbing a 4K trim stalls). */
+  scrub_version?: string | null;
 }
 
 export interface CoachStageResponse {
@@ -1571,6 +1602,10 @@ export interface CoachStageResponse {
    *  stage and Compare pages start on it. Absent from older servers. */
   compare_camera?: string | null;
   shots: CoachShot[];
+  events?: StageEvent[];
+  event_summary?: StageEventSummary;
+  /** audit_revision of the stored doc; what putStageEvents sends back */
+  _version?: string;
 }
 
 /** One bin of a Coach histogram (#163). ``lo`` inclusive, ``hi`` exclusive. */
@@ -4208,6 +4243,12 @@ export const api = {
       {
         method: "POST",
       },
+    ),
+
+  putStageEvents: (slug: string, stageNumber: number, events: StageEvent[], version: string | null | undefined) =>
+    request<CoachStageResponse>(
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/events`,
+      { method: "PUT", json: { events, _version: version ?? null } },
     ),
 
   /** Patch one shot's coach annotation (#844).
