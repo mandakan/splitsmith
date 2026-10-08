@@ -391,3 +391,40 @@ def test_the_catalog_marks_user_looks_editable(user_dir: Path) -> None:
     _write_look(user_dir, "club")
     editable = {info.name: info.editable for info in looks.look_catalog()}
     assert editable == {"splitsmith": False, "clean": False, "club": True}
+
+
+# --- the overlay slot (template HUD, spec 2026-10-08) ------------------------
+
+
+def _manifest(name: str, slots: dict) -> dict:
+    shipped = looks.load_look("splitsmith").manifest
+    return {"name": name, "colors": {k: list(v) for k, v in shipped.colors.items()}, "slots": slots}
+
+
+def test_overlay_is_a_slot_and_default_means_classic(user_dir: Path) -> None:
+    assert "overlay" in looks.SLOT_NAMES and looks.OVERLAY_SLOT == "overlay"
+    splitsmith = looks.load_look("splitsmith")
+    assert looks.overlay_template_for(splitsmith, "default") is None
+
+
+def test_a_manifest_cannot_name_a_template_for_the_classic_overlay(user_dir: Path) -> None:
+    with pytest.raises(ValueError, match="Classic"):
+        looks.LookManifest.model_validate(_manifest("mine", {"overlay": {"default": "hud.html"}}))
+    with pytest.raises(ValueError, match="Classic"):
+        looks.LookManifest.model_validate(_manifest("mine", {"overlay": "hud.html"}))
+
+
+def test_a_look_without_the_slot_borrows_the_shipped_overlay_template(user_dir: Path) -> None:
+    clean = looks.load_look("clean")
+    template = looks.overlay_template_for(clean, "plate")
+    assert template is not None and template.name == "hud-plate.html"
+    assert template.parent == looks.shipped_looks_dir() / "splitsmith"
+
+
+def test_an_overlay_variant_no_look_has_is_none(user_dir: Path) -> None:
+    assert looks.overlay_template_for(looks.load_look("splitsmith"), "nope") is None
+
+
+def test_the_catalog_lists_the_overlay_variants(user_dir: Path) -> None:
+    splitsmith = next(c for c in looks.look_catalog() if c.name == "splitsmith")
+    assert [v.name for v in splitsmith.slots["overlay"]] == ["plate"]

@@ -44,6 +44,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from splitsmith import overlay_render  # noqa: E402
+from splitsmith.overlay_hud import HUD_POSITIONS, HudOptions  # noqa: E402
 from tests.compare_fixture import cut_clip, write_audit  # noqa: E402
 from tests.synthetic_media import (  # noqa: E402
     SYNTHETIC_FPS_DEN,
@@ -138,6 +139,13 @@ def main() -> int:
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--theme", choices=("splitsmith", "clean"), default="splitsmith")
     parser.add_argument("--keep-video", action="store_true")
+    parser.add_argument(
+        "--overlay-variant", default="default", help="overlay style: default (Classic) or a template"
+    )
+    parser.add_argument("--overlay-position", default=None, choices=HUD_POSITIONS)
+    parser.add_argument("--no-speed-colors", action="store_true")
+    parser.add_argument("--no-class-labels", action="store_true")
+    parser.add_argument("--no-landing", action="store_true")
     args = parser.parse_args()
 
     if not ffmpeg_available():
@@ -169,6 +177,13 @@ def main() -> int:
         codec="prores-4444",
         theme=args.theme,
         ffmpeg_binary=ffmpeg,
+        variant=args.overlay_variant,
+        hud_options=HudOptions(
+            speed_colors=not args.no_speed_colors,
+            class_labels=not args.no_class_labels,
+            landing=not args.no_landing,
+            position=args.overlay_position,
+        ),
     )
 
     composed = work / "composed.mp4"

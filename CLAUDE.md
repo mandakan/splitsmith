@@ -150,6 +150,23 @@ encodes go through their own runner hooks (``card_runner``,
 and ``scripts/render_grid_frames.py`` with their card flags; look at the
 frames, a green argv test proves nothing about pixels.
 
+The live overlay has **template styles** (spec
+``2026-10-08-template-hud-overlay-design``): a Look's ``overlay`` slot names
+HUD templates (``plate`` ships first); ``default`` is always Classic, the
+engine path (run-length PNGs and the ``drawtext`` clock), and a manifest
+cannot name a file for it. ``render_overlay(variant=...)`` sends a template
+variant through ``overlay_hud_render``: the template draws clock, counter
+and split per frame through ``seek(t)`` and declares ``settle()``, the
+seconds it moves after the last shot; ``overlay_hud.hud_frame_plan`` renders
+only the beep to ``last shot + settle`` and holds a frame either side. The
+data (splits, coach classes, speed tiers) is computed in ``overlay_hud``,
+never in a template. The MOV is cached in the render segment cache by the
+template digest and left untouched on a hit (the MP4 keys on its mtime). A
+template failure or an unknown variant draws Classic and lands in
+``degraded``; no browser is still ``OverlayRenderError``. Classic's argv
+and pixels never change for any of this; check with
+``scripts/render_overlay_frames.py`` against main.
+
 The single-shooter render keeps every encoded segment in
 ``segment_cache`` (``<cache_dir>/render-segments``, LRU past
 ``OutputConfig.render_cache_gb``), keyed on the segment's ffmpeg argv

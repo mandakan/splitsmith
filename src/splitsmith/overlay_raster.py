@@ -56,7 +56,7 @@ import tempfile
 import threading
 import time
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -183,6 +183,20 @@ class Rasterizer(Protocol):
         """The template's frames at ``fps``: one at ``seek(0)`` for a
         still, ``ceil(min(duration, max_seconds) * fps)`` for an
         animation, rendered lazily."""
+        ...
+
+    def render_template_timeline(
+        self,
+        template: Path,
+        *,
+        context: TemplateContext,
+        width: int,
+        height: int,
+        plan: Callable[[float], Sequence[float]],
+    ) -> TemplateFrames:
+        """A template HUD's frames: ``plan`` gets the template's ``settle()``
+        and answers the clip times to render; one RGBA buffer per time,
+        rendered lazily."""
         ...
 
 
@@ -334,6 +348,10 @@ _POSTER_JS = (
     "typeof window.poster === 'function' ? Number(window.poster()) || 0 : "
     "(typeof window.duration === 'function' ? (Number(window.duration()) || 0) / 2 : 0)"
 )
+_HUD_JS = (
+    "({seek: typeof window.seek === 'function', "
+    "settle: typeof window.settle === 'function' ? Number(window.settle()) : null})"
+)
 _PROBE_JS = """(() => {
       const families = new Set();
       const overflow = [];
@@ -402,6 +420,9 @@ _GUARD_JS = (
     + """),
       poster: () => ("""
     + _POSTER_JS
+    + """),
+      hud: () => ("""
+    + _HUD_JS
     + """),
       seek: (t) => typeof window.seek === 'function'
         ? Promise.resolve(window.seek(t)).then(() => null) : null,
@@ -668,7 +689,7 @@ class ChromiumRasterizer:
         with tempfile.TemporaryDirectory(prefix="splitsmith-overlay-raster-") as tmp:
             html_path = Path(tmp) / "summary.html"
             html_path.write_text(html, encoding="utf-8")
-            context = self._browser.new_context(
+            context = self._live_browser().new_context(
                 viewport={"width": width, "height": height},
                 device_scale_factor=DEVICE_SCALE_FACTOR,
             )
@@ -939,6 +960,91 @@ class ChromiumRasterizer:
         return TemplateFrames(
             duration=duration,
             frame_count=count,
+            width=width,
+            height=height,
+            frames=generate(),
+            release=release,
+        )
+
+    def render_template_timeline(
+        self,
+        template: Path,
+        *,
+        context: TemplateContext,
+        width: int,
+        height: int,
+        plan: Callable[[float], Sequence[float]],
+    ) -> TemplateFrames:
+        """Load a template HUD once and render it at the times ``plan``
+        answers. The template must define ``seek(t)`` and ``settle()``
+        (seconds it keeps moving after the last shot); ``plan`` gets that
+        settle. Fonts, a seek to 0 and the fit policy run once before any
+        frame, as for a card. The budget is
+        :data:`look_sandbox.HUD_LOAD_SECONDS` plus
+        :data:`look_sandbox.HUD_FRAME_SECONDS` per frame, so a long stage
+        gets the time it needs and a stuck one still stops. A hook that
+        throws or overruns raises :class:`TemplateScriptError` and closes
+        the context; :meth:`TemplateFrames.close` releases it either way."""
+        if self._browser is None:
+            raise RuntimeError(
+                "ChromiumRasterizer.render_template_timeline() called outside its own 'with' block -- the "
+                "browser is only live between __enter__ and __exit__"
+            )
+        started = time.monotonic()
+        view = self._open_template(template, context=context, width=width, height=height)
+        released = False
+
+        def release() -> None:
+            nonlocal released
+            if not released:
+                released = True
+                view.close()
+
+        try:
+            hooks = view.call("hud") or {}
+            self._check(view.errors, template)
+            if not hooks.get("seek"):
+                raise TemplateScriptError(f"{template.name}: an overlay template must define seek(t)")
+            settle = hooks.get("settle")
+            if settle is None or not math.isfinite(float(settle)) or float(settle) < 0:
+                raise TemplateScriptError(
+                    f"{template.name}: an overlay template must define settle() returning seconds >= 0"
+                )
+            view.call("fonts")
+            view.call("seek", 0.0)
+            view.call("fonts")
+            view.call("fit")
+            self._check(view.errors, template)
+            times = [float(t) for t in plan(float(settle))]
+        except _HookError as exc:
+            release()
+            raise TemplateScriptError(f"{template.name}: {exc}") from exc
+        except BaseException:
+            release()
+            raise
+        budget = look_sandbox.HUD_LOAD_SECONDS + len(times) * look_sandbox.HUD_FRAME_SECONDS
+
+        def generate() -> Iterator[bytes]:
+            try:
+                for seconds in times:
+                    if time.monotonic() - started > budget:
+                        raise TemplateTimeoutError(
+                            f"{template.name}: {len(times)} frames took longer than {budget:g} s"
+                        )
+                    try:
+                        view.call("seek", seconds)
+                    except _HookError as exc:
+                        raise TemplateScriptError(f"{template.name}: {exc}") from exc
+                    self._check(view.errors, template)
+                    png = view.screenshot()
+                    with Image.open(io.BytesIO(png)) as image:
+                        yield image.convert("RGBA").tobytes()
+            finally:
+                release()
+
+        return TemplateFrames(
+            duration=float(settle),
+            frame_count=len(times),
             width=width,
             height=height,
             frames=generate(),

@@ -43,8 +43,10 @@ from PIL import Image, ImageFont
 
 from .config import VideoMetadata
 from .fcpxml_gen import probe_video
+from .looks import DEFAULT_VARIANT, load_look, overlay_template_for
 from .overlay_clock import clock_common_options, clock_text, elapsed_text_option
 from .overlay_html import single_html
+from .overlay_hud import HudOptions
 from .overlay_layout import Anchor, CellScale, anchor_ffmpeg_expr
 from .overlay_raster import (
     INSTALL_HINT,
@@ -56,6 +58,7 @@ from .overlay_single import build_overlay_runs, run_groups
 from .overlay_text import OverlayRenderError, overlay_font_file, resolve_overlay_face
 from .overlay_theme import ThemeName, load_theme
 from .runtime import Runner, _probe, _probe_text, ffmpeg_capabilities, quote_filter_value
+from .segment_cache import SegmentCache
 
 logger = logging.getLogger(__name__)
 
@@ -494,6 +497,10 @@ def render_overlay(
     theme: ThemeName = "splitsmith",
     rasterizer: Rasterizer | None = None,
     probe_runner: Runner = subprocess.run,
+    variant: str | None = None,
+    hud_options: HudOptions | None = None,
+    segment_cache: SegmentCache | None = None,
+    degraded: list[str] | None = None,
 ) -> Path:
     """Render an alpha overlay MOV alongside a trimmed clip.
 
@@ -534,6 +541,17 @@ def render_overlay(
         encoder's stub. And a fake here is the only way to exercise a
         build without ``drawtext``, which no ffmpeg on any machine in
         this project actually is.
+    ``variant``: the Look's ``overlay`` variant. ``None`` or ``"default"``
+        is Classic, this function's own path, unchanged. A template
+        variant draws the whole HUD through the template
+        (``overlay_hud_render``); a template failure, or a variant the
+        Look cannot resolve, draws Classic and appends a line to
+        ``degraded``.
+    ``hud_options``: the template HUD's toggles and position; ignored by
+        Classic.
+    ``segment_cache``: where a template HUD's MOV is cached; ignored by
+        Classic, which has no cache.
+    ``degraded``: collects one export-report line per fallback.
 
     Returns the written ``output_path``.
     """
@@ -561,6 +579,41 @@ def render_overlay(
     rate_num, rate_den = _capped_frame_rate(probe.frame_rate_num, probe.frame_rate_den, max_fps)
     fps = rate_num / rate_den
     duration_seconds = probe.duration_seconds
+
+    if variant is not None and variant != DEFAULT_VARIANT:
+        from .overlay_hud_render import HudFallbackError, render_hud_overlay
+
+        template = overlay_template_for(load_look(theme), variant)
+        if template is None:
+            note = f"overlay style {variant!r} is not in Look {theme!r}; drew Classic"
+            logger.warning(note)
+            if degraded is not None:
+                degraded.append(note)
+        else:
+            try:
+                with _rasterizer_for(rasterizer) as active:
+                    return render_hud_overlay(
+                        template=template,
+                        audit_path=audit_path,
+                        output_path=output_path,
+                        beep_offset_seconds=beep_offset_seconds,
+                        duration_seconds=duration_seconds,
+                        width=width,
+                        height=height,
+                        rate_num=rate_num,
+                        rate_den=rate_den,
+                        codec=resolved_codec,
+                        ffmpeg_binary=ffmpeg_binary,
+                        theme=load_theme(theme),
+                        options=hud_options or HudOptions(),
+                        rasterizer=active,
+                        segment_cache=segment_cache,
+                    )
+            except HudFallbackError as exc:
+                note = f"overlay style {variant!r} fell back to Classic: {exc}"
+                logger.warning(note)
+                if degraded is not None:
+                    degraded.append(note)
 
     scale = CellScale.for_cell(height)
     palette = load_theme(theme)

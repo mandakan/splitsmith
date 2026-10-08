@@ -1,0 +1,132 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="splitsmith-positions" content="bottom-left,top-left,top-right,bottom-right">
+<title>hud plate</title>
+<script>
+  // The shipped Plate HUD (spec 2026-10-08): the clock on a dark plate with
+  // a progress line, the shot count, and the last split as a chip with its
+  // class and speed. seek(t) draws any instant from the stage data alone;
+  // nothing reads the wall clock, so every frame is reproducible. The engine
+  // stylesheet is loaded for its font faces only.
+  document.write('<style>' + window.splitsmith.engine.css + '</style>');
+</script>
+<style>
+  html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; }
+  #hud { position: absolute; display: flex; align-items: stretch; gap: 0.9vh; }
+  #hud.bottom-left { left: 3.5vh; bottom: 4vh; }
+  #hud.top-left { left: 3.5vh; top: 3.5vh; }
+  #hud.top-right { right: 3.5vh; top: 3.5vh; flex-direction: row-reverse; }
+  #hud.bottom-right { right: 3.5vh; bottom: 4vh; flex-direction: row-reverse; }
+  .plate {
+    position: relative; overflow: hidden; border-radius: 1.2vh;
+    padding: 0.9vh 2.6vh; display: flex; flex-direction: column; justify-content: flex-end;
+  }
+  .label {
+    font-family: "Splitsmith Display", sans-serif; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.14em; font-size: 1.9vh; line-height: 2.6vh; height: 2.6vh; white-space: nowrap;
+  }
+  .num {
+    font-family: "Splitsmith Mono", monospace; font-weight: 700;
+    font-variant-numeric: tabular-nums; line-height: 1; white-space: nowrap;
+  }
+  #clock { font-size: 9.6vh; }
+  #count { font-size: 5.8vh; transform-origin: 50% 100%; }
+  #count small { font-size: 0.6em; }
+  #bar { position: absolute; left: 0; bottom: 0; height: 0.6vh; width: 0; }
+  #chip { align-self: flex-end; border-left: 0.8vh solid transparent; }
+  #split { font-size: 5.2vh; }
+</style>
+</head>
+<body>
+<div id="hud">
+  <div class="plate" id="clockPlate">
+    <div class="label" id="clockLabel">Time</div>
+    <div class="num" id="clock">0.00</div>
+    <div id="bar"></div>
+  </div>
+  <div class="plate" id="countPlate">
+    <div class="label">Shots</div>
+    <div class="num" id="count"></div>
+  </div>
+  <div class="plate" id="chip">
+    <div class="label" id="chipLabel"></div>
+    <div class="num" id="split"></div>
+  </div>
+</div>
+<script>
+(function () {
+  var s = window.splitsmith;
+  var theme = s.theme, stage = s.data.stage, opts = s.data.options;
+  var shots = stage.shots, beep = stage.beep, rounds = stage.rounds;
+  var PUNCH = 0.22, CHIP_IN = 0.18, BEEP_GLOW = 0.4, LANDING = 0.6;
+  var PLATE_ALPHA = 0.86;
+
+  function el(id) { return document.getElementById(id); }
+  function clamp(x) { return Math.max(0, Math.min(1, x)); }
+  function easeOut(x) { x = clamp(x); return 1 - Math.pow(1 - x, 3); }
+  function rgb(hex) {
+    var n = parseInt(hex.slice(1), 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+  function plate(k) {
+    // The surface tone, lit towards the accent by k (0..1).
+    var a = rgb(theme.surface), b = rgb(theme.accent_fill || theme.accent);
+    var c = a.map(function (v, i) { return Math.round(v + (b[i] - v) * k); });
+    return 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + PLATE_ALPHA + ')';
+  }
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+  function tierColour(tier) {
+    if (!opts.speed_colors || !tier) return theme.split;
+    return tier === 'good' ? theme.split_good : tier === 'slow' ? theme.accent : theme.split;
+  }
+
+  var hud = el('hud');
+  hud.className = opts.position || 'bottom-left';
+  hud.style.color = theme.ink;
+  document.querySelectorAll('.label').forEach(function (l) { l.style.color = theme.ink_2; });
+  ['clockPlate', 'countPlate', 'chip'].forEach(function (id) { el(id).style.background = plate(0); });
+  el('bar').style.background = theme.accent;
+  if (!opts.class_labels) el('chipLabel').style.display = 'none';
+
+  window.settle = function () {
+    return opts.landing ? LANDING : Math.max(PUNCH, CHIP_IN);
+  };
+
+  window.seek = function (t) {
+    var n = 0;
+    while (n < shots.length && shots[n].t <= t) n++;
+    var last = n ? shots[n - 1] : null;
+    var landed = n === shots.length && n > 0 ? t - last.t : -1;
+    var running = landed >= 0 ? stage.stage_time : Math.max(0, t - beep);
+    var since = last ? t - last.t : Infinity;
+
+    el('clock').textContent = running.toFixed(2);
+    el('bar').style.width = (rounds ? 100 * n / rounds : 0) + '%';
+    var landing = opts.landing && landed >= 0;
+    el('clockLabel').textContent = landing ? 'Stage time' : 'Time';
+    var flash = landing ? Math.max(0, 1 - landed / LANDING) : 0;
+    el('clockPlate').style.background = plate(flash);
+    var glow = t >= beep && t - beep < BEEP_GLOW ? 1 - (t - beep) / BEEP_GLOW : 0;
+    el('clockPlate').style.boxShadow = glow > 0 ? 'inset 0 0 0 ' + (0.4 * glow) + 'vh ' + theme.accent : 'none';
+
+    var punch = since < PUNCH ? 1 + 0.15 * (1 - easeOut(since / PUNCH)) : 1;
+    el('count').style.transform = 'scale(' + punch + ')';
+    el('count').innerHTML = pad2(n) + '<small>/' + rounds + '</small>';
+
+    var chip = el('chip');
+    if (!last) { chip.style.visibility = 'hidden'; return; }
+    chip.style.visibility = 'visible';
+    var k = easeOut(since / CHIP_IN);
+    chip.style.opacity = k;
+    chip.style.transform = 'translateX(' + (-3 * (1 - k)) + 'vh)';
+    chip.style.borderLeftColor = tierColour(last.tier);
+    el('chipLabel').textContent = last.label || '';
+    el('split').textContent = last.split.toFixed(2);
+    el('split').style.color = tierColour(last.tier);
+  };
+})();
+</script>
+</body>
+</html>
