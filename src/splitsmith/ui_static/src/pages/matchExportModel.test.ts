@@ -347,3 +347,38 @@ describe("the Look on the payloads (#1246)", () => {
     expect(buildCompareGridPayload({ ...base, look: defaults })).toEqual(buildCompareGridPayload(base));
   });
 });
+
+describe("the overlay style on the match export (template HUD)", () => {
+  const base: MatchExportPayloadInput = {
+    stageNumbers: [1],
+    headPad: S.headPad,
+    tailPad: S.tailPad,
+    camOptions: S.camOptions,
+    outputFormat: "mp4",
+    transitionKind: S.transitionKind,
+    transitionSeconds: S.transitionSeconds,
+    renderOptions: S.renderOptions,
+    youtube: false,
+    descriptionLead: "",
+    uploadOptions: S.uploadOptions,
+    includeOverlay: true,
+    overlayCodec: S.overlayCodec,
+    projectName: "M",
+    uploadTarget: "desk",
+    youtubeConnected: false,
+  };
+  const plate = { ...S.overlayStyle, variant: "plate", landing: false };
+
+  it("carries a chosen style with the overlay on", () => {
+    const payload = buildMatchExportPayload({ ...base, overlayStyle: plate });
+    expect(payload.overlay_variant).toBe("plate");
+    expect(payload.overlay_landing).toBe(false);
+  });
+
+  it("sends the body it always sent for Classic or with the overlay off", () => {
+    expect(buildMatchExportPayload({ ...base, overlayStyle: S.overlayStyle })).toEqual(buildMatchExportPayload(base));
+    expect(buildMatchExportPayload({ ...base, includeOverlay: false, overlayStyle: plate })).not.toHaveProperty(
+      "overlay_variant",
+    );
+  });
+});

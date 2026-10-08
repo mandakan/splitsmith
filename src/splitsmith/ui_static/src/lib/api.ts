@@ -1070,7 +1070,19 @@ export type OverlayCodec = "auto" | "hevc-alpha" | "prores-4444";
  *  validates it; the gallery admits only what the catalog offers. */
 export type TransitionKind = string;
 
-export interface ExportPresetBody {
+/** The overlay style (template HUD, spec 2026-10-08) as every body that
+ *  draws an overlay carries it: the match export, the preview, a preset.
+ *  Unset is Classic with every toggle on; ``lib/overlayStyle`` sends the
+ *  fields only when a style is chosen. */
+export interface OverlayStyleBody {
+  overlay_variant?: string;
+  overlay_speed_colors?: boolean;
+  overlay_class_labels?: boolean;
+  overlay_landing?: boolean;
+  overlay_position?: string | null;
+}
+
+export interface ExportPresetBody extends OverlayStyleBody {
   schema_version?: number;
   mode: "single" | "trims" | "compare";
   output_format: "fcpxml" | "fcp7xml" | "mp4";
@@ -1128,6 +1140,9 @@ export interface LookVariantInfo {
   name: string;
   /** ``/api/looks/<owner>/preview/<file>`` or null when no Look has a picture. */
   preview: string | null;
+  /** An overlay style's positions, its default first; empty or absent for a
+   *  style that places itself and every other slot. */
+  positions?: string[];
 }
 
 /** One installed Look (#1246). ``slots`` has every slot name; a card slot
@@ -1253,7 +1268,7 @@ export type PreviewCard =
 /** Body of ``POST /api/shooters/{slug}/export-preview`` (spec 2026-09-15
  *  s3). The server ignores unknown fields, so the mapper output may ride
  *  along; only these move the picture. */
-export interface ExportPreviewBody {
+export interface ExportPreviewBody extends OverlayStyleBody {
   card: PreviewCard;
   stage_number: number;
   width?: number;
@@ -1329,7 +1344,7 @@ export interface ExportStageResult {
 /** Match-level stitched-FCPXML export (issue #171). The selected stages
  *  must already have a lossless trim + audit shots; the match export
  *  composes from those without re-encoding. */
-export interface MatchExportRequestPayload {
+export interface MatchExportRequestPayload extends OverlayStyleBody {
   stage_numbers: number[];
   /** Seconds of footage kept before the beep in each stage. Clamped
    *  server-side to the project's pre-buffer (default 5.0). */

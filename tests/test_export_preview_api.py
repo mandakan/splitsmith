@@ -69,6 +69,21 @@ class _StubRasterizer:
             duration=duration, frame_count=count, width=width, height=height, frames=frames()
         )
 
+    def render_template_timeline(self, template, *, context, width: int, height: int, plan):  # noqa: ANN001
+        """A HUD: one distinct frame per planned time (a fixed settle)."""
+        from splitsmith.overlay_raster import TemplateFrames
+
+        times = list(plan(0.5))
+        self.frame_requests.append((template, context.model_dump(), width, height))
+
+        def frames():
+            for i, _ in enumerate(times):
+                yield bytes([255, 255, 255, min(255, 10 * i)]) * (width * height)
+
+        return TemplateFrames(
+            duration=0.5, frame_count=len(times), width=width, height=height, frames=frames()
+        )
+
 
 @contextmanager
 def _stub_factory():
@@ -303,3 +318,20 @@ def test_the_demo_backdrop_paints_the_range_scene_instead_of_the_footage(client)
     assert (
         client.post(ROUTE, json={"card": "frame", "stage_number": 1, "backdrop": "moon"}).status_code == 422
     )
+
+
+# --- overlay styles (template HUD, slice 3) ------------------------------------
+
+
+def test_an_overlay_style_previews_as_a_loop_and_keys_apart_from_classic(client) -> None:
+    body = {"card": "overlay", "stage_number": 1, "width": 480, "motion": True}
+    classic = client.post(ROUTE, json=body)
+    styled = client.post(ROUTE, json={**body, "overlay_variant": "plate", "overlay_position": "top-left"})
+    assert classic.status_code == styled.status_code == 200, styled.text
+    assert classic.headers["content-type"] == "image/png"
+    assert styled.headers["content-type"] == "image/webp"
+    with Image.open(io.BytesIO(styled.content)) as im:
+        assert getattr(im, "n_frames", 1) > 1
+    assert _StubRasterizer.launches == 2, "a style is its own cache entry"
+    refused = client.post(ROUTE, json={**body, "overlay_position": "middle"})
+    assert refused.status_code == 422

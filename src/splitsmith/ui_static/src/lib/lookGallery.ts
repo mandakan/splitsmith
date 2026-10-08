@@ -17,6 +17,7 @@ import type { LookInfo, TransitionFamilyInfo } from "@/lib/api";
 import type { ExportMode } from "@/lib/exportPlan";
 import type { ExportSettings } from "@/lib/exportPresets";
 import { stingLabel, stingsFor, transitionFamily, visibleLook, type LookChoice, type LookSlotName } from "@/lib/looks";
+import { DEFAULT_OVERLAY_STYLE, overlayStyleLabel, overlayStylesFor, type OverlayStyle } from "@/lib/overlayStyle";
 import {
   cardsSupported,
   MIN_CARD_SECONDS,
@@ -46,6 +47,23 @@ export interface LookParam {
   modes?: ExportMode[];
 }
 
+/** An on/off parameter under a variant's tile (an overlay style's toggles). */
+export interface LookToggle {
+  id: string;
+  label: string;
+  read(s: ExportSettings): boolean;
+  write(s: ExportSettings, on: boolean): Partial<ExportSettings>;
+}
+
+/** A closed choice under a variant's tile (an overlay style's position). */
+export interface LookChoiceParam {
+  id: string;
+  label: string;
+  options: { value: string; label: string }[];
+  read(s: ExportSettings): string;
+  write(s: ExportSettings, value: string): Partial<ExportSettings>;
+}
+
 export interface LookVariant {
   id: string;
   name: string;
@@ -60,6 +78,10 @@ export interface LookVariant {
    *  no codec). */
   help: string | ((mode: ExportMode) => string);
   params: LookParam[];
+  /** On/off parameters beside ``params`` (an overlay style's toggles). */
+  toggles?: LookToggle[];
+  /** A closed choice beside them (an overlay style's position). */
+  choice?: LookChoiceParam;
   modes: ExportMode[];
   formats: OutputFormat[];
 }
@@ -392,6 +414,108 @@ function lookSlot(looks: LookInfo[]): LookSlot {
   };
 }
 
+/** The overlay style tile ids: ``style:<name>``, apart from ``none`` / ``on``. */
+const STYLE_PREFIX = "style:";
+
+/** One line per shipped style; a Look's own style gets the generic line. */
+const STYLE_HELP: Record<string, string> = {
+  plate: "Clock, shot count and split on plates in one corner; the count punches on each shot.",
+  pips: "A pip per round fills as the shots land; the split shows large and fades.",
+  ticker: "A rail with the clock and the last four splits with their classes.",
+  timeline: "A lower-third band whose track drops a tick at every shot.",
+  minimal: "A small clock; each split flashes in the middle of the frame.",
+};
+
+const POSITION_LABELS: Record<string, string> = {
+  "top-left": "Top left",
+  "top-right": "Top right",
+  "bottom-left": "Bottom left",
+  "bottom-right": "Bottom right",
+};
+
+const styled = (s: ExportSettings, patch: Partial<OverlayStyle>): Partial<ExportSettings> => ({
+  overlayStyle: { ...s.overlayStyle, ...patch },
+});
+
+const STYLE_TOGGLES: LookToggle[] = [
+  {
+    id: "speed-colors",
+    label: "Speed colours",
+    read: (s) => s.overlayStyle.speedColors,
+    write: (s, on) => styled(s, { speedColors: on }),
+  },
+  {
+    id: "class-labels",
+    label: "Class labels",
+    read: (s) => s.overlayStyle.classLabels,
+    write: (s, on) => styled(s, { classLabels: on }),
+  },
+  {
+    id: "landing",
+    label: "Landing",
+    read: (s) => s.overlayStyle.landing,
+    write: (s, on) => styled(s, { landing: on }),
+  },
+];
+
+/** The overlay slot with the chosen Look's HUD styles beside Classic, for
+ *  one shooter; the grid keeps its own counter. Without styles in the
+ *  catalog this is the static slot unchanged. */
+function overlaySlotFor(slot: LookSlot, looks: LookInfo[], look: string): LookSlot {
+  const styles = overlayStylesFor(looks, look);
+  if (styles.length === 0) return slot;
+  const [none, counter] = slot.variants;
+  const tiles: LookVariant[] = styles.map((style) => {
+    const positions = style.positions ?? [];
+    return {
+      id: `${STYLE_PREFIX}${style.name}`,
+      name: overlayStyleLabel(style.name),
+      thumbnail: "overlay.png",
+      previewUrl: style.preview,
+      help: `${STYLE_HELP[style.name] ?? "A HUD drawn by the Look with motion on every shot."} Renders slower than Classic.`,
+      params: [],
+      toggles: STYLE_TOGGLES,
+      choice:
+        positions.length > 0
+          ? {
+              id: "position",
+              label: "Overlay position",
+              options: positions.map((p) => ({ value: p, label: POSITION_LABELS[p] ?? p })),
+              read: (s) =>
+                s.overlayStyle.position !== null && positions.includes(s.overlayStyle.position)
+                  ? s.overlayStyle.position
+                  : positions[0],
+              write: (s, value) => styled(s, { position: value === positions[0] ? null : value }),
+            }
+          : undefined,
+      modes: ["single"],
+      formats: counter.formats,
+    };
+  });
+  const names = new Set(styles.map((v) => v.name));
+  return {
+    ...slot,
+    variants: [
+      none,
+      { ...counter, name: "Classic", modes: ["single"] },
+      { ...counter, modes: ["compare"] },
+      ...tiles,
+    ],
+    read: (s) => {
+      if (s.mode === "compare" || !s.includeOverlay) return slot.read(s);
+      return names.has(s.overlayStyle.variant) ? `${STYLE_PREFIX}${s.overlayStyle.variant}` : "on";
+    },
+    write: (s, id) => {
+      if (s.mode === "compare") return slot.write(s, id);
+      if (id.startsWith(STYLE_PREFIX)) {
+        return { includeOverlay: true, ...styled(s, { variant: id.slice(STYLE_PREFIX.length) }) };
+      }
+      const variant = DEFAULT_OVERLAY_STYLE.variant;
+      return { ...slot.write(s, id), ...(id === "on" ? styled(s, { variant }) : {}) };
+    },
+  };
+}
+
 /** The transition tile a stored kind selects: its family (#1259), else
  *  the kind itself (a sting, an FCP effect), ``cut`` for none. */
 function transitionTileId(kind: string, transitions: readonly TransitionFamilyInfo[]): string {
@@ -433,6 +557,7 @@ export function slotsForLook(
     formats: ["mp4"],
   }));
   const slots = LOOK_SLOTS.map((slot): LookSlot => {
+    if (slot.id === "overlay") return overlaySlotFor(slot, looks, settings.look);
     if (slot.id !== "transition") return slot;
     // A stored kind the catalog does not list (it has not answered, or it
     // failed) keeps a tile of its own, so the request's transition stays

@@ -7,6 +7,7 @@ import type { ExportPreviewBody, LookInfo, PreviewCard } from "@/lib/api";
 import type { ExportMode } from "@/lib/exportPlan";
 import { PADDING_PRESETS, type ExportSettings } from "@/lib/exportPresets";
 import { LOOK_SLOTS, type LookSlot, type LookSlotId } from "@/lib/lookGallery";
+import { overlayStyleFields, visibleOverlayStyle } from "@/lib/overlayStyle";
 import { BUILTIN_LOOKS, DEFAULT_LOOK, DEFAULT_VARIANT, lookChoiceOf, nonDefault, resolveLookChoice, type LookChoice } from "@/lib/looks";
 
 export interface LookFocus {
@@ -104,6 +105,12 @@ export function previewBody(
   // A card a template draws previews moving when its template animates
   // (#1249); the server answers a still card with the PNG it always did.
   if (MOVING_CARDS.has(card)) body.motion = true;
+  // One shooter's overlay in a HUD style previews as a loop of this stage;
+  // Classic stays the still it always was.
+  if (card === "overlay" && settings.mode === "single") {
+    const style = overlayStyleFields(visibleOverlayStyle(looks, resolved.look, settings.overlayStyle));
+    if (style.overlay_variant) Object.assign(body, style, { motion: true });
+  }
   if (card === "match_summary" && stageNumbers) body.stage_numbers = [...stageNumbers];
   return body;
 }

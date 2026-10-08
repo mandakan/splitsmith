@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "overlay-styles",
+      "date": "2026-10-08",
+      "title": "Overlay styles with motion",
+      "body": "Pick Plate, Pips, Ticker, Timeline or Minimal under Overlay in Look on the Export page: the clock, shot count and splits animate on every shot and land on the stage time."
+    },
+    {
       "id": "your-brand-and-shooter-book",
       "date": "2026-10-08",
       "title": "Your brand and your shooter book",

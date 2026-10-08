@@ -363,3 +363,84 @@ def test_the_variant_reaches_the_cards_template(tmp_path: Path) -> None:
             work_dir=tmp_path / "work",
         )
     assert seen == ["card-rise.html"] * 4
+
+
+# --- overlay styles (template HUD, slice 3) ------------------------------------
+
+
+class _HudRasterizer(_StubRasterizer):
+    """The stub plus a HUD timeline: ``plan`` gets a fixed settle; one
+    blank frame per planned time."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.timelines: list[dict] = []
+
+    def render_template_timeline(self, template, *, context, width: int, height: int, plan):  # noqa: ANN001
+        from splitsmith.overlay_raster import TemplateFrames
+
+        times = list(plan(0.5))
+        self.timelines.append({"template": template, "data": context.data, "times": times})
+        blank = bytes(width * height * 4)
+        return TemplateFrames(
+            duration=0.5,
+            frame_count=len(times),
+            width=width,
+            height=height,
+            frames=iter([blank] * len(times)),
+        )
+
+
+def test_an_overlay_style_previews_as_a_loop_of_the_stage(tmp_path: Path) -> None:
+    from splitsmith.overlay_hud import HudOptions
+
+    raster = _HudRasterizer()
+    spec = ep.PreviewSpec(
+        card="overlay",
+        stage_number=3,
+        width=480,
+        motion=True,
+        overlay_variant="plate",
+        overlay_options=HudOptions(position="top-right"),
+    )
+    data = _render(tmp_path, spec, audit=AUDIT, raster=raster)
+    with Image.open(io.BytesIO(data)) as image:
+        assert image.format == "WEBP"
+    (timeline,) = raster.timelines
+    assert timeline["template"].name == "hud-plate.html"
+    assert timeline["data"]["options"]["position"] == "top-right"
+    times = timeline["times"]
+    stage = timeline["data"]["stage"]
+    assert times[0] < stage["beep"] and times[-1] > stage["shots"][-1]["t"] + 0.5, "beep through the landing"
+    assert raster.htmls == [], "Classic drew nothing"
+
+
+def test_an_overlay_style_still_is_one_frame_after_a_shot(tmp_path: Path) -> None:
+    raster = _HudRasterizer()
+    spec = ep.PreviewSpec(card="overlay", stage_number=3, width=480, overlay_variant="pips")
+    png = _render(tmp_path, spec, audit=AUDIT, raster=raster)
+    assert _png_size(png) == (480, 270)
+    (timeline,) = raster.timelines
+    assert len(timeline["times"]) == 1 and timeline["times"][0] > timeline["data"]["stage"]["shots"][-1]["t"]
+
+
+def test_an_unknown_overlay_style_previews_as_classic(tmp_path: Path) -> None:
+    raster = _HudRasterizer()
+    spec = ep.PreviewSpec(card="overlay", stage_number=3, width=480, overlay_variant="nope")
+    _render(tmp_path, spec, audit=AUDIT, raster=raster)
+    assert raster.timelines == [] and "3/3" in raster.htmls[-1]
+
+
+def test_the_overlay_style_moves_the_key_only_on_an_overlay_card() -> None:
+    from splitsmith.overlay_hud import HudOptions
+
+    def key(spec: ep.PreviewSpec) -> str:
+        return ep.preview_key(spec, slug="me", project_updated_at="t", audit="a")
+
+    classic = ep.PreviewSpec(card="overlay", stage_number=3)
+    styled = replace(classic, overlay_variant="plate")
+    assert key(classic) == key(replace(classic, overlay_options=HudOptions(landing=False)))
+    assert key(styled) != key(classic)
+    assert key(styled) != key(replace(styled, overlay_options=HudOptions(landing=False)))
+    slate = ep.PreviewSpec(card="slate", stage_number=3)
+    assert key(slate) == key(replace(slate, overlay_variant="plate"))

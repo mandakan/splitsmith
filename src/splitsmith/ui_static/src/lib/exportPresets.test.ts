@@ -225,6 +225,36 @@ describe("groupSummary", () => {
   });
 });
 
+describe("the overlay style", () => {
+  const ctx = { secondaryCount: 0 };
+  const plate = {
+    ...DEFAULT_EXPORT_SETTINGS,
+    includeOverlay: true,
+    overlayStyle: { variant: "plate", speedColors: false, classLabels: true, landing: false, position: "top-right" },
+  };
+
+  it("round-trips through a preset and makes the form dirty when it changes", () => {
+    const body = settingsToBody(plate);
+    expect(body.overlay_variant).toBe("plate");
+    expect(body.overlay_position).toBe("top-right");
+    expect(applyBody(DEFAULT_EXPORT_SETTINGS, body).overlayStyle).toEqual(plate.overlayStyle);
+    expect(isDirty({ ...plate, overlayStyle: { ...plate.overlayStyle, landing: true } }, body)).toBe(true);
+  });
+
+  it("a body stored before styles shipped applies Classic", () => {
+    const old = { ...YOUTUBE } as Record<string, unknown>;
+    for (const k of ["overlay_variant", "overlay_speed_colors", "overlay_class_labels", "overlay_landing", "overlay_position"]) {
+      delete old[k];
+    }
+    expect(applyBody(plate, old as unknown as ExportPresetBody).overlayStyle).toEqual(DEFAULT_EXPORT_SETTINGS.overlayStyle);
+  });
+
+  it("names the style in the look summary", () => {
+    expect(groupSummary(plate, "look", ctx)).toBe("Plate overlay");
+    expect(groupSummary({ ...plate, mode: "compare", gridOverlay: true }, "look", ctx)).toBe("overlay");
+  });
+});
+
 describe("last-used", () => {
   it("round-trips the body and the active preset id", () => {
     const storage = new MemoryStorage();

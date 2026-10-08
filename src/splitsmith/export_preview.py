@@ -25,7 +25,7 @@ import json
 import logging
 import subprocess
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
@@ -35,12 +35,13 @@ from . import composition
 from .export_naming import stage_display_name, stage_file_base
 from .identity import ResolvedIdentity
 from .look_sting import sting_context
-from .looks import Look, sting_template_for
+from .looks import Look, overlay_template_for, sting_template_for
 from .match_project import MatchProject
 from .match_summary import MatchSummary, build_match_summary, build_match_summary_still
 from .overlay_card import build_card_still, build_lower_third, card_backdrop, card_motion, card_scale
 from .overlay_html import single_html
-from .overlay_raster import Rasterizer
+from .overlay_hud import HudOptions, declared_positions, hud_options_data, hud_stage_data, resolve_position
+from .overlay_raster import Rasterizer, TemplateScriptError
 from .overlay_single import OverlayRun, run_groups
 from .overlay_still import letterbox
 from .overlay_summary_cell import build_summary_still
@@ -119,6 +120,10 @@ class PreviewSpec:
     #: The event logo's content name (the branding work), for the cache key;
     #: the file itself reaches :func:`render_preview` as ``event_logo``.
     event_logo: str | None = None
+    #: The overlay style (template HUD) an ``overlay`` card draws;
+    #: ``default`` is Classic. In the cache key only when a style is chosen.
+    overlay_variant: str = "default"
+    overlay_options: HudOptions = field(default_factory=HudOptions)
 
     @property
     def height(self) -> int:
@@ -180,6 +185,11 @@ def preview_key(
         fields["book_identity"] = spec.book_identity
     if spec.account_brand is not None:
         fields["account_brand"] = spec.account_brand
+    if spec.card == "overlay" and spec.overlay_variant != "default":
+        fields["overlay_style"] = {
+            "variant": spec.overlay_variant,
+            "options": spec.overlay_options.model_dump(),
+        }
     payload = json.dumps(
         {
             **fields,
@@ -534,6 +544,11 @@ def render_preview(
             accent=shooter.accent if shooter is not None else None,
         )
     else:  # overlay
+        styled = _hud_preview(
+            spec, look=look, shots=shots, rasterizer=rasterizer, frame=frame, theme=theme, moving=moving
+        )
+        if styled is not None:
+            return styled
         run = OverlayRun(
             start_frame=0,
             frame_count=1,
@@ -571,6 +586,82 @@ def _webp(frames: list[Image.Image]) -> bytes:
         method=4,
     )
     return buf.getvalue()
+
+
+#: Where the beep sits in a HUD preview's own timeline, and how long the
+#: loop shows either side of what it plays.
+HUD_PREVIEW_BEEP = 0.3
+HUD_PREVIEW_LEAD = 0.25
+HUD_PREVIEW_TAIL = 0.4
+#: The loop plays the first few shots, then cuts to the last one and the landing.
+HUD_PREVIEW_OPENING_SHOTS = 3
+
+
+def _hud_preview(
+    spec: PreviewSpec,
+    *,
+    look: Look,
+    shots: Sequence[TileShot],
+    rasterizer: Rasterizer,
+    frame: Path | None,
+    theme: OverlayTheme,
+    moving: bool,
+) -> bytes | None:
+    """An overlay style over the stage's frame: moving, a loop of the
+    opening shots then the last shot and the landing; still, the settled
+    HUD. ``None`` for Classic, a style the Look cannot resolve, or a
+    template that fails: the caller draws Classic, as the export would."""
+    if spec.overlay_variant == "default":
+        return None
+    template = overlay_template_for(look, spec.overlay_variant)
+    if template is None:
+        return None
+    # Deferred: overlay_hud_render builds on the renderer's encoder module.
+    from .overlay_hud_render import hud_context
+
+    stage = hud_stage_data(shots, beep_in_clip=HUD_PREVIEW_BEEP)
+    position = resolve_position(spec.overlay_options.position, declared_positions(template))
+    context = hud_context(
+        stage=stage,
+        options=hud_options_data(spec.overlay_options, position),
+        theme=theme,
+        width=spec.width,
+        height=spec.height,
+        fps=float(MOTION_FPS),
+    )
+    times_of_shots = [shot["t"] for shot in stage["shots"]]
+    step = 1 / MOTION_FPS
+
+    def span(start: float, end: float) -> list[float]:
+        count = max(1, int((end - start) / step) + 1)
+        return [round(start + i * step, 6) for i in range(count)]
+
+    def plan(settle: float) -> list[float]:
+        last = times_of_shots[-1]
+        if not moving:
+            return [round(last + settle, 6)]
+        if len(times_of_shots) <= HUD_PREVIEW_OPENING_SHOTS + 1:
+            return span(HUD_PREVIEW_BEEP - HUD_PREVIEW_LEAD, last + settle + HUD_PREVIEW_TAIL)
+        opening = times_of_shots[HUD_PREVIEW_OPENING_SHOTS - 1] + 0.5
+        return span(HUD_PREVIEW_BEEP - HUD_PREVIEW_LEAD, opening) + span(
+            last - HUD_PREVIEW_LEAD, last + settle + HUD_PREVIEW_TAIL
+        )
+
+    try:
+        rendered = rasterizer.render_template_timeline(
+            template, context=context, width=spec.width, height=spec.height, plan=plan
+        )
+        try:
+            layers = _layers(rendered.frames, rendered.width, rendered.height)
+        finally:
+            rendered.close()
+    except TemplateScriptError:
+        return None
+    base = _compose_over(frame, None, spec, theme).convert("RGBA")
+    images = [Image.alpha_composite(base, layer).convert("RGB") for layer in layers]
+    if moving:
+        return _webp(images)
+    return _to_png(images[-1])
 
 
 def _layers(raw_frames, width: int, height: int) -> list[Image.Image]:  # type: ignore[no-untyped-def]

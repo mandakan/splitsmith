@@ -13,6 +13,7 @@ import type {
   OverlayCodec,
 } from "@/lib/api";
 import { DEFAULT_LOOK, nonDefault, type LookChoice } from "@/lib/looks";
+import { overlayStyleFields, type OverlayStyle } from "@/lib/overlayStyle";
 import { camExportFields, type CamOptions } from "@/lib/camOptions";
 import { visibleTransitionKind } from "@/lib/lookGallery";
 import type { TransitionKind } from "@/lib/exportPresets";
@@ -194,6 +195,9 @@ export interface MatchExportPayloadInput {
   uploadOptions: UploadFormOptions;
   includeOverlay: boolean;
   overlayCodec: OverlayCodec;
+  /** The overlay style, resolved against the catalog (``lib/overlayStyle``);
+   *  carried only with the overlay on and a style chosen. */
+  overlayStyle?: OverlayStyle;
   projectName: string;
   /** "desk" posts an export here; "desktop" asks the linked desktop to
    *  render and upload, which only makes sense as an MP4 that uploads. */
@@ -241,6 +245,7 @@ export function buildMatchExportPayload(input: MatchExportPayloadInput): MatchEx
     youtube_publish_at: upload.publish_at,
     youtube_notify_subscribers: upload.notify_subscribers,
     include_overlay: input.includeOverlay,
+    ...(input.includeOverlay && input.overlayStyle ? overlayStyleFields(input.overlayStyle) : {}),
     overlay_codec: input.overlayCodec,
     overlay_max_height: null,
     overlay_max_fps: null,

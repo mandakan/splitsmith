@@ -89,6 +89,7 @@ import {
 } from "@/lib/exportPlan";
 import { useDeploymentMode } from "@/lib/features";
 import { requestLook, transitionLabel } from "@/lib/looks";
+import { visibleOverlayStyle } from "@/lib/overlayStyle";
 import { useLooks } from "@/lib/useLooks";
 import { useMatchHref } from "@/lib/matchHref";
 import { useDesktopCommands } from "@/lib/useDesktopCommands";
@@ -236,6 +237,12 @@ function ExportInner({ slug }: { slug: string }) {
   // The Look the requests carry and the transition kinds the filter admits
   // (#1246): resolved against the catalog once it answers; Export waits for it.
   const lookRequest = requestLook(looksState, view);
+  // The overlay style the request carries: resolved like the Look once the
+  // catalog answers, the stored one (the server falls back) when it cannot.
+  const overlayStyle =
+    looksState.loaded && !looksState.failed
+      ? visibleOverlayStyle(looksState.looks, lookRequest.choice.look, view.overlayStyle)
+      : view.overlayStyle;
   const {
     mode,
     outputFormat,
@@ -664,6 +671,7 @@ function ExportInner({ slug }: { slug: string }) {
         uploadOptions: { ...uploadOptions, enabled: true },
         includeOverlay,
         overlayCodec,
+        overlayStyle,
         projectName: projectName || project.name,
         uploadTarget: "desktop",
         look: lookRequest.choice,
@@ -695,6 +703,7 @@ function ExportInner({ slug }: { slug: string }) {
           uploadOptions,
           includeOverlay,
           overlayCodec,
+          overlayStyle,
           projectName: projectName || project.name,
           uploadTarget: "desk",
           look: lookRequest.choice,
