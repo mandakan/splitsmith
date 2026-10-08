@@ -25,9 +25,12 @@ from pathlib import Path
 from PIL import Image
 
 from .coach import statistic_splits
+from .match_project import StageScorecard
 from .overlay_html import _face_source
+from .overlay_layout import Anchor, CellScale, Element, Emphasis, Flow, Group, Role
 from .overlay_raster import Rasterizer
 from .overlay_still import DEFAULT_DIM, backdrop_from_frame
+from .overlay_summary_cell import _band_gap_extra, _counts_gap, _sgrid_gap, count_elements
 from .overlay_theme import RGB, OverlayTheme
 from .stage_summary_data import TileStageData
 
@@ -165,6 +168,100 @@ def coverage_lines(summary: MatchSummary) -> list[str]:
     if dq:
         lines.append(f"DQ on stage{'s' if len(dq) > 1 else ''} {', '.join(dq)}")
     return lines
+
+
+def _coverage(covered: int, total: int) -> Element | None:
+    """The note beside a band when its figures stand on part of the match."""
+    if 0 < covered < total:
+        return Element(role=Role.LABEL, text=f"({covered} of {total} stages)")
+    return None
+
+
+def match_summary_groups(
+    summary: MatchSummary,
+    label: str,
+    *,
+    scale: CellScale,
+    cell_width: int,
+    cell_height: int,
+) -> tuple[Group, ...]:
+    """One shooter's tile on the grid's match summary (spec
+    2026-10-08-grid-match-summary-design), in the stage summary hold's bands
+    (:func:`splitsmith.overlay_summary_cell.summary_groups`) so the two read
+    as one family: the name (a ``DQ`` plate when DQ'd on any stage), then
+    **Scoring** (the counts summed over the stages that reported each) and
+    **Splits** (Avg, Best draw, Rounds), each with "N of M stages" when it
+    stands on part of the match. No ranking, no summed time, never a zero
+    for a count nobody reported. A shooter with nothing recorded is a name.
+    """
+    identity: list[Element] = [Element(role=Role.IDENTITY, text=label)]
+    if summary.dq:
+        identity.append(Element(role=Role.VERDICT, text="DQ", emphasis=Emphasis.PLATE))
+    groups: list[Group] = [Group(anchor=Anchor.TOP_CENTER, flow=Flow.ROW, elements=tuple(identity), align="left")]
+    total = summary.stage_count
+
+    scoring = False
+    if summary.hits is not None:
+        hits = summary.hits
+        totals = StageScorecard(
+            alphas=hits["A"],
+            charlies=hits["C"],
+            deltas=hits["D"],
+            misses=hits["M"],
+            no_shoots=hits["NS"],
+            procedurals=hits["P"],
+        )
+        counts = count_elements(totals)
+        if counts:
+            scoring = True
+            head = [Element(role=Role.LABEL, text="Scoring", drop_priority=len(counts))]
+            note = _coverage(summary.scored_stages, total)
+            if note is not None:
+                head.append(note)
+            groups.append(Group(anchor=Anchor.MIDDLE_CENTER, flow=Flow.ROW, elements=tuple(head), align="left"))
+            groups.append(
+                Group(
+                    anchor=Anchor.MIDDLE_CENTER,
+                    flow=Flow.ROW,
+                    elements=tuple(counts),
+                    align="left",
+                    gap=_counts_gap(scale),
+                )
+            )
+
+    # All three or none, "-" for one that was never read, so the columns of
+    # every tile on the card line up.
+    splits: list[Element] = []
+    if any(v is not None for v in (summary.avg_split, summary.best_draw, summary.rounds)):
+        splits = [
+            Element(role=Role.HEADLINE, text=_num(summary.avg_split), caption="Avg"),
+            Element(role=Role.HEADLINE, text=_num(summary.best_draw), caption="Best draw"),
+            Element(role=Role.HEADLINE, text=DASH if summary.rounds is None else str(summary.rounds), caption="Rounds"),
+        ]
+    if splits:
+        head = [Element(role=Role.LABEL, text="Splits")]
+        note = _coverage(summary.split_stages, total)
+        if note is not None:
+            head.append(note)
+        groups.append(
+            Group(
+                anchor=Anchor.MIDDLE_CENTER,
+                flow=Flow.ROW,
+                elements=tuple(head),
+                align="left",
+                margin_top=_band_gap_extra(cell_height) if scoring else None,
+            )
+        )
+        groups.append(
+            Group(
+                anchor=Anchor.MIDDLE_CENTER,
+                flow=Flow.GRID,
+                elements=tuple(splits),
+                align="left",
+                gap=_sgrid_gap(cell_width),
+            )
+        )
+    return tuple(groups)
 
 
 def _num(value: float | None, digits: int = 2) -> str:
@@ -356,6 +453,58 @@ th:nth-child(5), td:nth-child(5) {{ width: 3.9em; }}
 <div class="strip">{figures}</div>
 <div class="notes">{notes}</div>
 <div class="tables">{tables}</div>
+</body></html>"""
+
+
+def match_summary_strip_html(title: str, *, width: int, height: int, theme: OverlayTheme) -> str:
+    """The grid card's title strip: "Match summary" and the match name on one
+    line, ``height`` tall, so the card does not read as one more stage hold."""
+    mono_url, mono_format, mono_weight = _face_source(theme.mono_font)
+    display_url, display_format, display_weight = _face_source(theme.display_font)
+    pad_x = round(width * 0.03)
+    title_px = round(height * 0.5)
+    label_px = round(height * 0.3)
+    return f"""<!doctype html>
+<html><head><meta charset="utf-8"><style>
+@font-face {{
+  font-family: "Splitsmith Mono";
+  src: url("{mono_url}") format("{mono_format}");
+  font-weight: {mono_weight};
+}}
+@font-face {{
+  font-family: "Splitsmith Display";
+  src: url("{display_url}") format("{display_format}");
+  font-weight: {display_weight};
+}}
+html, body {{ margin: 0; width: {width}px; height: {height}px; background: transparent; overflow: hidden; }}
+body {{
+  box-sizing: border-box;
+  padding: 0 {pad_x}px;
+  display: flex;
+  align-items: center;
+  gap: {pad_x}px;
+  color: {_css_rgb(theme.ink)};
+}}
+.label {{
+  font-family: "Splitsmith Mono", monospace;
+  font-size: {label_px}px;
+  color: {_css_rgb(theme.ink_2)};
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}}
+.title {{
+  font-family: "Splitsmith Display", sans-serif;
+  font-size: {title_px}px;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}}
+</style></head><body>
+<div class="label">Match summary</div>
+<div class="title">{html.escape(title)}</div>
 </body></html>"""
 
 

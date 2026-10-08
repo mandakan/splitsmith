@@ -589,9 +589,10 @@ class GridCardItem:
     slate precedes (and whose head frame backs it); the title page and
     the closing card carry the index of the stage their backdrop comes
     from. ``card`` is the match title for the title page and the closing
-    card; a slate's card is built by the driver from the plan."""
+    card; a slate's card is built by the driver from the plan, the match
+    summary's still from every stage's data (``card`` stays ``None``)."""
 
-    kind: Literal["title_page", "slate", "closing"]
+    kind: Literal["title_page", "slate", "match_summary", "closing"]
     name: str
     card_seconds: float
     stage_index: int | None
@@ -696,9 +697,11 @@ def plan_grid_spine(
     title_duration_seconds: float,
     transitions: Sequence[Transition],
     tail_pad_seconds: float,
+    match_summary_seconds: float = 0.0,
 ) -> GridSpine:
     """The spine the driver walks (issue #1244): title page, per stage a
-    slate when ``stage_titles == "slate"`` and the stage, the closing card;
+    slate when ``stage_titles == "slate"`` and the stage, the match summary
+    when ``match_summary_seconds`` is positive, the closing card;
     then the stage-indexed ``transitions`` placed as boundaries between
     the last item of stage i (the stage, hold included) and the first of
     stage i+1 (its slate when it has one). A transition that does not fit
@@ -730,6 +733,15 @@ def plan_grid_spine(
         first_of_stage.setdefault(index, len(items))
         last_of_stage[index] = len(items)
         items.append(GridStageItem(index=index, plan=plan))
+    if match_summary_seconds > 0 and plans:
+        items.append(
+            GridCardItem(
+                kind="match_summary",
+                name="match_summary",
+                card_seconds=match_summary_seconds,
+                stage_index=len(plans) - 1,
+            )
+        )
     if closing is not None:
         items.append(
             GridCardItem(
@@ -3147,6 +3159,7 @@ def render_grid_mp4(
     transitions: Sequence[Transition] = (),
     segment_cache: SegmentCache | None = None,
     progress: GridProgress | None = None,
+    match_summary_seconds: float = 0.0,
 ) -> GridRenderResult:
     """Render every stage as a grid, then stitch them into one MP4.
 
@@ -3256,6 +3269,12 @@ def render_grid_mp4(
     (:func:`_overlay_inputs`); the rasterizer still draws them each run.
     ``progress`` hears each stage as it is encoded or reused, then the
     stitch; a reused stage never reaches ``runner``.
+
+    ``match_summary_seconds`` above zero adds the match summary (spec
+    2026-10-08-grid-match-summary-design): one card after the last stage,
+    before the closing card, every shooter's match figures in their own
+    slot over their own last frame. It reads the shot data itself, so it
+    does not need ``overlay``; with no browser it is the frames alone.
     """
     # Before the canvas, the binary or anything else: this is a caller
     # error, not a render outcome, and it costs nothing to say so first.
@@ -3372,11 +3391,15 @@ def render_grid_mp4(
     cards_requested = title_page is not None or closing is not None or stage_titles != "none"
     # A sting (#1245) is a Look template drawn by the same browser.
     sting_requested = any(is_sting(t.kind) for t in transitions)
+    # The match summary's text is drawn by the same browser.
+    match_summary_requested = match_summary_seconds > 0
     # A free square with something to say is drawn by the same browser.
     free_requested = free_cell != "blank" and any(_unreached_cells(p) for p in plans)
     active_rasterizer: Rasterizer | None = rasterizer
     owned_rasterizer: ChromiumRasterizer | None = None
-    if (overlay or cards_requested or free_requested or sting_requested) and rasterizer is None:
+    if (
+        overlay or cards_requested or free_requested or sting_requested or match_summary_requested
+    ) and rasterizer is None:
         owned_rasterizer = ChromiumRasterizer()
         try:
             active_rasterizer = owned_rasterizer.__enter__()
@@ -3422,6 +3445,7 @@ def render_grid_mp4(
         title_duration_seconds=title_duration_seconds,
         transitions=transitions,
         tail_pad_seconds=tail_pad_seconds,
+        match_summary_seconds=match_summary_seconds,
     )
     items: list[GridItem] = list(spine.items)
     live: dict[int, GridBoundary] = {b.after_index: b for b in spine.boundaries}
@@ -3539,11 +3563,56 @@ def render_grid_mp4(
             )
         return None
 
+    def match_summary_assets() -> _CardAssets | None:
+        """The match summary's still, at the composed size of the last
+        stage (every plan shares the grid: the stream layout check above).
+        ``None`` (logged) when it could not be saved: the card is skipped."""
+        from .overlay_summary import (
+            build_match_summary_grid_still,
+            extract_match_summary_freezes,
+            grid_match_summaries,
+        )
+
+        plan = plans[-1]
+        title = match_name or (title_page.text if title_page else closing.text if closing else "")
+        summaries = grid_match_summaries(
+            plans,
+            overlay_data or load_overlay_data(shooters),
+            title=title,
+            duration_seconds=match_summary_seconds,
+        )
+        freezes = extract_match_summary_freezes(
+            plans, work_dir=work / "match-summary", ffmpeg_binary=binary, runner=still_runner
+        )
+        composed_w, composed_h = _composed_size(canvas, plan)
+        still = build_match_summary_grid_still(
+            plan,
+            summaries,
+            freezes,
+            width=composed_w,
+            height=composed_h,
+            title=title,
+            theme=load_theme(overlay_theme),
+            rasterizer=active_rasterizer,
+            accents={
+                label: ident.accent for label, ident in (identities or {}).items() if ident.accent is not None
+            },
+        )
+        png = work / "match_summary.png"
+        try:
+            still.save(png)
+        except OSError as exc:
+            logger.warning("compare grid: the match summary could not be saved and is skipped: %s", exc)
+            return None
+        return _CardAssets(png=png)
+
     def prepare(item: GridItem) -> _GridPrep:
         """Everything an item's encodes read from disk, made once: a card's
         files, or a stage's lower third, hold still and free-cell still. A
         hold still that cannot be composed fails the stage (``failed``),
         as it always did; a card that cannot be drawn is ``skipped``."""
+        if isinstance(item, GridCardItem) and item.kind == "match_summary":
+            return _GridPrep(assets=match_summary_assets())
         if isinstance(item, GridCardItem):
             plan = plans[item.stage_index if item.stage_index is not None else 0]
             card: MatchTitle | TitleCard
@@ -3558,6 +3627,7 @@ def render_grid_mp4(
             else:
                 assert item.card is not None
                 card = item.card
+            assert item.kind != "match_summary"
             assets = _card_assets(
                 card,
                 name=item.name,
