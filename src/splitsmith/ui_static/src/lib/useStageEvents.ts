@@ -5,8 +5,9 @@
  * (``commit=false``) only moves local state, a commit is debounced (a held
  * arrow key is one PUT), and PUTs run one at a time: a commit queued behind
  * one in flight sends the revision that one returned instead of 409ing on
- * the one it started from. A 409 reloads the payload and drops whatever was
- * queued behind it, since that list was built on the stale revision.
+ * the one it started from, and a response never overwrites a newer local
+ * edit. A 409 reloads the payload and drops whatever was queued behind it or
+ * still in the debounce, since that list was built on the stale revision.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -59,12 +60,19 @@ export function useStageEvents(
         if (seq <= droppedThroughRef.current) return;
         try {
           const res = await api.putStageEvents(slug, stage, next, revisionRef.current);
-          // A newer commit is queued: keep its local list, take only the revision.
-          if (seq === seqRef.current) apply(res);
+          // A newer edit is queued or still in the debounce: keep its local
+          // list, take only the revision.
+          if (seq === seqRef.current && pendingRef.current === null) apply(res);
           else revisionRef.current = res._version;
         } catch (e) {
           if (e instanceof ApiError && e.status === 409) {
+            // Everything built on the stale revision goes: queued PUTs and
+            // the edit still in the debounce, which would otherwise PUT
+            // with the reloaded revision and overwrite the conflicting write.
             droppedThroughRef.current = seqRef.current;
+            if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+            timerRef.current = null;
+            pendingRef.current = null;
             try {
               apply(await api.getStageCoach(slug, stage));
             } catch (e2) {

@@ -93,6 +93,37 @@ describe("useStageEvents", () => {
     expect(vi.mocked(api.putStageEvents).mock.calls[1][3]).toBe("v2");
   });
 
+  it("a PUT resolving while a newer edit waits in the debounce keeps the edit and takes only the revision", async () => {
+    const { result } = setup();
+    let finishFirst: (c: CoachStageResponse) => void = () => {};
+    vi.mocked(api.putStageEvents)
+      .mockImplementationOnce(() => new Promise((r) => { finishFirst = r; }))
+      .mockResolvedValueOnce(coach([ev("evt-1", 1.4, 2)], "v3"));
+    act(() => result.current.change([ev("evt-1", 1.1, 2)], true));
+    await settle(); // A goes out
+    act(() => result.current.change([ev("evt-1", 1.4, 2)], true)); // B waits in the debounce
+    await act(async () => { finishFirst(coach([ev("evt-1", 1.1, 2)], "v2")); });
+    expect(result.current.events[0].start).toBe(1.4);
+    await settle();
+    expect(api.putStageEvents).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(api.putStageEvents).mock.calls[1][3]).toBe("v2");
+  });
+
+  it("a 409 also cancels an edit still waiting in the debounce", async () => {
+    const { result } = setup();
+    let failFirst: (e: unknown) => void = () => {};
+    vi.mocked(api.putStageEvents).mockImplementationOnce(() => new Promise((_r, j) => { failFirst = j; }));
+    vi.mocked(api.getStageCoach).mockResolvedValue(coach([ev("evt-9", 5, 6)], "v9"));
+    act(() => result.current.change([ev("evt-1", 1.1, 2)], true));
+    await settle(); // A goes out
+    act(() => result.current.change([ev("evt-1", 1.4, 2)], true)); // B waits in the debounce
+    await act(async () => { failFirst(new ApiError(409, "version_conflict", { code: "version_conflict" })); });
+    await settle();
+    await settle();
+    expect(api.putStageEvents).toHaveBeenCalledTimes(1);
+    expect(result.current.events.map((e) => e.id)).toEqual(["evt-9"]);
+  });
+
   it("a 409 reloads the payload and drops a commit queued behind it", async () => {
     const { result, onError } = setup();
     let failFirst: (e: unknown) => void = () => {};

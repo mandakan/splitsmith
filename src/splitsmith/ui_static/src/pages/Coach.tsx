@@ -51,6 +51,7 @@ import { Stat, StatStrip } from "@/components/ui/Stat";
 import {
   ApiError,
   api,
+  capabilityDenied,
   type CoachIntervalClass,
   type CoachMatchDistributions,
   type CoachShot,
@@ -943,9 +944,10 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
       ? Math.min(...coach.shots.map((s) => s.time_absolute))
       : 0;
   const span = Math.max(0.0001, maxAbs - minAbs);
-  // events is desktop-owned: a desktop-origin mirror refuses the PUT, and
-  // the phone has no room for handles. Both read the lanes and the list.
-  const eventsReadOnly = isMobile || project.origin === "desktop";
+  // events is desktop-owned: a mirror has no edit capability and the PUT
+  // 403s, and the phone has no room for handles. Both read the lanes and
+  // the list.
+  const eventsReadOnly = isMobile || capabilityDenied(project.capabilities, "edit");
   const selectedEvent = eventsReadOnly ? null : (events.find((e) => e.id === selectedEventId) ?? null);
   const stageSeconds = project.stages.find((s) => s.stage_number === stage)?.time_seconds ?? 0;
   const lastShot = coach.shots.length > 0 ? Math.max(...coach.shots.map((s) => s.time_from_beep)) : 0;

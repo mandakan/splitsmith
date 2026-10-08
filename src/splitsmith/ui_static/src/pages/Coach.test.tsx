@@ -224,8 +224,24 @@ describe("stage events on the Coach page", () => {
     expect(screen.getByRole("region", { name: "Shot 1" })).toBeInTheDocument();
   });
 
+  it("a local match is editable: the handles show", async () => {
+    // capabilities_for_origin("local") on the server.
+    vi.mocked(api.getProject).mockResolvedValue({ name: "M", competitor_name: "Anna", origin: "local",
+      capabilities: ["edit", "review"],
+      stages: [{ stage_number: 1, stage_name: "Stage One", time_seconds: 16.2 }] } as never);
+    vi.mocked(api.getStageCoach).mockResolvedValue(
+      makeCoachWithEvents([makeShot(1, "c1")], [{ id: "evt-1", kind: "reload", start: 8.05, end: 9.47, source: "auto" }]),
+    );
+    renderCoachRoute();
+    expect(await screen.findByTestId("handle-evt-1-start")).toBeInTheDocument();
+    expect(screen.getByTestId("handle-evt-1-end")).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Regions" })).toBeNull();
+  });
+
   it("a desktop-origin mirror shows the lanes read-only with the list and never writes", async () => {
+    // What a hosted mirror's GET .../project carries: capabilities_for_origin("desktop") has no edit.
     vi.mocked(api.getProject).mockResolvedValue({ name: "M", competitor_name: "Anna", origin: "desktop",
+      capabilities: ["review", "share_manage", "comment_write"],
       stages: [{ stage_number: 1, stage_name: "Stage One", time_seconds: 16.2 }] } as never);
     vi.mocked(api.getStageCoach).mockResolvedValue(
       makeCoachWithEvents([makeShot(1, "c1")], [{ id: "evt-1", kind: "reload", start: 8.05, end: 9.47, source: "auto" }]),
