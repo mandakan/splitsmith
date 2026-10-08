@@ -4,7 +4,7 @@
  * both run ``tests/fixtures/events/cases.json`` case for case, so a rule
  * that changes here changes there in the same change. Pure, no React.
  */
-import type { StageEvent, StageEventSummary } from "@/lib/api";
+import type { StageEvent, StageEventKind, StageEventSummary } from "@/lib/api";
 
 /** Shortest region the editor produces; a handle dragged past its partner stops here. */
 export const MIN_EVENT_S = 0.05;
@@ -39,6 +39,13 @@ export function nextEventId(events: Pick<StageEvent, "id">[]): string {
     if (m) high = Math.max(high, Number(m[1]));
   }
   return `evt-${high + 1}`;
+}
+
+/** ``id`` moved to ``kind``'s lane as a manual region; null when it is unknown or would overlap there. */
+export function withKind(events: StageEvent[], id: string, kind: StageEventKind): StageEvent[] | null {
+  if (!events.some((e) => e.id === id)) return null;
+  const next = events.map((e) => (e.id === id ? { ...e, kind, source: "manual" as const } : e));
+  return validateLanes(next) ? null : next;
 }
 
 export function shotIsMoving(t: number, events: StageEvent[]): boolean {

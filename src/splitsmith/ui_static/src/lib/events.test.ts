@@ -15,6 +15,7 @@ import {
   summarize,
   timeFromX,
   validateLanes,
+  withKind,
 } from "./events";
 
 interface Case {
@@ -78,9 +79,13 @@ describe("events fixture parity", () => {
   });
 });
 
-const ev = (id: string, kind: StageEvent["kind"], start: number, end: number): StageEvent => ({
-  id, kind, start, end, source: "manual",
-});
+const ev = (
+  id: string,
+  kind: StageEvent["kind"],
+  start: number,
+  end: number,
+  source: StageEvent["source"] = "manual",
+): StageEvent => ({ id, kind, start, end, source });
 
 describe("editor helpers", () => {
   it("nextEventId only grows and ignores foreign ids", () => {
@@ -111,6 +116,13 @@ describe("editor helpers", () => {
     expect(snapTime(4.33, [1.21, 4.35, 9.0], 0.05)).toBe(4.35);
     expect(snapTime(4.2, [1.21, 4.35, 9.0], 0.05)).toBe(4.2);
     expect(snapTime(4.34, [4.3, 4.35], 0.05)).toBe(4.35);
+  });
+
+  it("withKind moves a region to another lane as manual, or refuses an overlap there", () => {
+    const events = [ev("evt-1", "movement", 1, 3), ev("evt-2", "reload", 2, 4, "auto"), ev("evt-3", "activation", 5, 6)];
+    expect(withKind(events, "evt-2", "activation")?.find((e) => e.id === "evt-2")).toEqual({ ...events[1], kind: "activation", source: "manual" });
+    expect(withKind(events, "evt-2", "movement")).toBeNull();
+    expect(withKind(events, "evt-9", "movement")).toBeNull();
   });
 
   it("timeFromX maps and clamps", () => {

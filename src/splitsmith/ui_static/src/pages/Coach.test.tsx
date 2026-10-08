@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { CoachShot, CoachStageResponse } from "@/lib/api";
+import { ApiError, type CoachShot, type CoachStageResponse, type StageEvent } from "@/lib/api";
 
 import { Coach } from "@/pages/Coach";
 
@@ -21,6 +21,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
       getStageCoach: vi.fn(),
       getMatchCoachDistributions: vi.fn().mockResolvedValue(null),
       patchStageShotCoach: vi.fn(),
+      putStageEvents: vi.fn(),
       videoStreamUrl: (_slug: string, path: string, kind = "auto", _v?: string | null, stage?: number | null) => `http://localhost/${kind}/${path}${stage != null ? `#s${stage}` : ""}`,
     },
   };
@@ -143,5 +144,104 @@ describe("Coach stage stream URL", () => {
     });
     // A single take shares its source across stages; the URL names this one.
     expect(container.querySelector("video")?.src).toMatch(/#s1$/);
+  });
+});
+
+function makeCoachWithEvents(shots: CoachShot[], events: StageEvent[], version = "aaaaaaaaaaaaaaaa"): CoachStageResponse {
+  return { ...makeCoach(shots), events, _version: version,
+    event_summary: { movement_s: 0, moving_shots: 0, reloads: events.filter((e) => e.kind === "reload").length,
+      reload_avg_s: null, overhang_s: 0.31, capacity_warning: null } };
+}
+
+function renderCoachRoute() {
+  return render(<MemoryRouter initialEntries={["/match/m1/coach/anna/1"]}><Routes>
+    <Route path="/match/:matchId/coach/:slug/:stage" element={<Coach />} /></Routes></MemoryRouter>);
+}
+
+describe("stage events on the Coach page", () => {
+  beforeEach(() => {
+    vi.mocked(api.putStageEvents).mockReset();
+    vi.mocked(api.getStageCoach).mockReset();
+    HTMLElement.prototype.setPointerCapture = vi.fn();
+    HTMLElement.prototype.hasPointerCapture = vi.fn(() => true);
+    HTMLElement.prototype.releasePointerCapture = vi.fn();
+  });
+
+  it("renders the lane editor with the payload's events and the stat strip figures", async () => {
+    vi.mocked(api.getProject).mockResolvedValue({ name: "M", competitor_name: "Anna",
+      stages: [{ stage_number: 1, stage_name: "Stage One", time_seconds: 16.2 }] } as never);
+    vi.mocked(api.getStageCoach).mockResolvedValue(
+      makeCoachWithEvents([makeShot(1, "c1"), makeShot(2, "c2")], [{ id: "evt-1", kind: "reload", start: 8.05, end: 9.47, source: "auto" }]),
+    );
+    render(<MemoryRouter initialEntries={["/match/m1/coach/anna/1"]}><Routes>
+      <Route path="/match/:matchId/coach/:slug/:stage" element={<Coach />} /></Routes></MemoryRouter>);
+    expect(await screen.findByTestId("event-evt-1")).toHaveAttribute("data-source", "auto");
+    expect(screen.getByText("Overhang")).toBeInTheDocument();
+    expect(screen.getByText("+0.31")).toBeInTheDocument();
+  });
+
+  it("deleting the selected region PUTs the list with _version and applies the response", async () => {
+    vi.mocked(api.getProject).mockResolvedValue({ name: "M", competitor_name: "Anna",
+      stages: [{ stage_number: 1, stage_name: "Stage One", time_seconds: 16.2 }] } as never);
+    const first = makeCoachWithEvents([makeShot(1, "c1")], [{ id: "evt-1", kind: "reload", start: 8.05, end: 9.47, source: "auto" }], "v1v1v1v1v1v1v1v1");
+    vi.mocked(api.getStageCoach).mockResolvedValue(first);
+    vi.mocked(api.putStageEvents).mockResolvedValue(makeCoachWithEvents([makeShot(1, "c1")], [], "v2v2v2v2v2v2v2v2"));
+    render(<MemoryRouter initialEntries={["/match/m1/coach/anna/1"]}><Routes>
+      <Route path="/match/:matchId/coach/:slug/:stage" element={<Coach />} /></Routes></MemoryRouter>);
+    fireEvent.click(await screen.findByTestId("event-evt-1"));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(api.putStageEvents).toHaveBeenCalledWith("anna", 1, [], "v1v1v1v1v1v1v1v1"));
+    await waitFor(() => expect(screen.queryByTestId("event-evt-1")).toBeNull());
+  });
+
+  it("a 409 on the PUT reloads the coach payload", async () => {
+    vi.mocked(api.getProject).mockResolvedValue({ name: "M", competitor_name: "Anna",
+      stages: [{ stage_number: 1, stage_name: "Stage One", time_seconds: 16.2 }] } as never);
+    const stale = makeCoachWithEvents([makeShot(1, "c1")], [{ id: "evt-1", kind: "reload", start: 8.05, end: 9.47, source: "auto" }], "old");
+    const fresh = makeCoachWithEvents([makeShot(1, "c1")], [{ id: "evt-2", kind: "movement", start: 1, end: 2, source: "manual" }], "new");
+    vi.mocked(api.getStageCoach).mockResolvedValueOnce(stale).mockResolvedValueOnce(fresh);
+    vi.mocked(api.putStageEvents).mockRejectedValue(new ApiError(409, "version_conflict", { code: "version_conflict" }));
+    render(<MemoryRouter initialEntries={["/match/m1/coach/anna/1"]}><Routes>
+      <Route path="/match/:matchId/coach/:slug/:stage" element={<Coach />} /></Routes></MemoryRouter>);
+    fireEvent.click(await screen.findByTestId("event-evt-1"));
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    expect(await screen.findByTestId("event-evt-2")).toBeInTheDocument();
+    expect(api.getStageCoach).toHaveBeenCalledTimes(2);
+  });
+
+  it("the region card replaces the shot editor until a shot is picked again", async () => {
+    vi.mocked(api.getProject).mockResolvedValue({ name: "M", competitor_name: "Anna",
+      stages: [{ stage_number: 1, stage_name: "Stage One", time_seconds: 16.2 }] } as never);
+    vi.mocked(api.getStageCoach).mockResolvedValue(
+      makeCoachWithEvents([makeShot(1, "c1")], [{ id: "evt-1", kind: "reload", start: 8.05, end: 9.47, source: "auto" }]),
+    );
+    const { container } = renderCoachRoute();
+    fireEvent.click(await screen.findByTestId("event-evt-1"));
+    expect(screen.getByRole("region", { name: "Region" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Shot 1" })).toBeNull();
+    fireEvent.click(container.querySelector<HTMLElement>('[data-shot-number="1"]')!);
+    expect(screen.queryByRole("region", { name: "Region" })).toBeNull();
+    expect(screen.getByRole("region", { name: "Shot 1" })).toBeInTheDocument();
+  });
+
+  it("a desktop-origin mirror shows the lanes read-only with the list and never writes", async () => {
+    vi.mocked(api.getProject).mockResolvedValue({ name: "M", competitor_name: "Anna", origin: "desktop",
+      stages: [{ stage_number: 1, stage_name: "Stage One", time_seconds: 16.2 }] } as never);
+    vi.mocked(api.getStageCoach).mockResolvedValue(
+      makeCoachWithEvents([makeShot(1, "c1")], [{ id: "evt-1", kind: "reload", start: 8.05, end: 9.47, source: "auto" }]),
+    );
+    renderCoachRoute();
+    fireEvent.click(await screen.findByTestId("event-evt-1"));
+    expect(screen.queryByTestId("handle-evt-1-start")).toBeNull();
+    expect(screen.queryByTestId("handle-evt-1-end")).toBeNull();
+    // No region card, so no Delete / kind control to reach.
+    expect(screen.queryByRole("region", { name: "Region" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+    // The keyboard path is closed too.
+    fireEvent.keyDown(screen.getByTestId("lane-editor"), { key: "Delete" });
+    // The read-only list stands in for the card.
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    await new Promise((r) => setTimeout(r, 400));
+    expect(api.putStageEvents).not.toHaveBeenCalled();
   });
 });

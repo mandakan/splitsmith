@@ -37,6 +37,9 @@ import {
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 
 import { CoachShotTable } from "@/components/coach/CoachShotTable";
+import { EventCard } from "@/components/coach/EventCard";
+import { EventList } from "@/components/coach/EventList";
+import { LaneEditor } from "@/components/coach/LaneEditor";
 import { ShotEditor } from "@/components/coach/ShotEditor";
 import { TimeBudgetBar } from "@/components/coach/TimeBudgetBar";
 import { TimeBudgetCard } from "@/components/coach/TimeBudgetCard";
@@ -54,8 +57,11 @@ import {
   type CoachStageResponse,
   type MatchProject,
 } from "@/lib/api";
+import { withKind } from "@/lib/events";
 import { useSpacePlayPause } from "@/lib/keyboard";
 import { useMatchHref } from "@/lib/matchHref";
+import { useIsMobile } from "@/lib/useIsMobile";
+import { useStageEvents } from "@/lib/useStageEvents";
 import { cn } from "@/lib/utils";
 import {
   INTERVAL_LABEL,
@@ -756,6 +762,16 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
     coachVersionRef.current = next?.version;
     setCoach(next);
   }, []);
+  // Regions (spec 2026-10-08): ``apply`` wraps applyCoach and is what every
+  // coach response goes through, so the events' revision moves with it.
+  const {
+    events,
+    selectedId: selectedEventId,
+    select: selectEvent,
+    apply,
+    change: changeEvents,
+  } = useStageEvents(slug, stage, applyCoach, setError);
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     let alive = true;
@@ -770,7 +786,7 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
         ]);
         if (!alive) return;
         setProject(p);
-        applyCoach(c);
+        apply(c);
         setBaselines(baselinesFromMatchDistributions(dist));
         setDistributions(dist);
         if (c && c.shots.length > 0) {
@@ -783,7 +799,7 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
     return () => {
       alive = false;
     };
-  }, [applyCoach, slug, stage]);
+  }, [apply, slug, stage]);
 
   useEffect(() => {
     if (!coach || activeShotNumber == null) return;
@@ -836,13 +852,13 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
     setReclassifying(true);
     try {
       const c = await api.reclassifyStageCoach(slug, stage);
-      applyCoach(c);
+      apply(c);
     } catch (e) {
       setError(e instanceof ApiError ? e.detail : String(e));
     } finally {
       setReclassifying(false);
     }
-  }, [applyCoach, slug, stage]);
+  }, [apply, slug, stage]);
 
   const patchShot = useCallback(
     async (
@@ -857,18 +873,23 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
           patch,
           coachVersionRef.current,
         );
-        applyCoach(c);
+        apply(c);
       } catch (e) {
         setError(e instanceof ApiError ? e.detail : String(e));
       }
     },
-    [applyCoach, slug, stage],
+    [apply, slug, stage],
   );
 
-  const seekToShot = useCallback((shot: CoachShot) => {
-    setActiveShotNumber(shot.shot_number);
-    if (videoRef.current) videoRef.current.currentTime = shot.time_absolute;
-  }, []);
+  const seekToShot = useCallback(
+    (shot: CoachShot) => {
+      // Picking a shot brings its editor back in place of the region card.
+      selectEvent(null);
+      setActiveShotNumber(shot.shot_number);
+      if (videoRef.current) videoRef.current.currentTime = shot.time_absolute;
+    },
+    [selectEvent],
+  );
 
   const togglePlay = useCallback(() => {
     const v = videoRef.current;
@@ -922,6 +943,18 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
       ? Math.min(...coach.shots.map((s) => s.time_absolute))
       : 0;
   const span = Math.max(0.0001, maxAbs - minAbs);
+  // events is desktop-owned: a desktop-origin mirror refuses the PUT, and
+  // the phone has no room for handles. Both read the lanes and the list.
+  const eventsReadOnly = isMobile || project.origin === "desktop";
+  const selectedEvent = eventsReadOnly ? null : (events.find((e) => e.id === selectedEventId) ?? null);
+  const stageSeconds = project.stages.find((s) => s.stage_number === stage)?.time_seconds ?? 0;
+  const lastShot = coach.shots.length > 0 ? Math.max(...coach.shots.map((s) => s.time_from_beep)) : 0;
+  const stageTime = stageSeconds > 0 ? stageSeconds : lastShot + 1;
+  const tFromBeep = currentTime - coach.beep_time;
+  const seekFromBeep = (t: number) => {
+    if (videoRef.current) videoRef.current.currentTime = coach.beep_time + t;
+  };
+  const summary = coach.event_summary;
   const selectShotNumber = (n: number) => {
     const shot = coach.shots.find((s) => s.shot_number === n);
     if (shot) seekToShot(shot);
@@ -955,6 +988,7 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
               </Chip>
             ) : null}
             {!budget.classified && coach.shots.length > 0 ? <Chip tick="muted">unclassified</Chip> : null}
+            {summary?.capacity_warning ? <Chip tone="warn">{summary.capacity_warning}</Chip> : null}
           </span>
         }
         actions={
@@ -970,6 +1004,15 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
           </>
         }
       />
+
+      {summary ? (
+        <StatStrip className="mb-4">
+          <Stat label="On the move" value={String(summary.moving_shots)} unit={summary.moving_shots === 1 ? "shot" : "shots"} />
+          {summary.reloads > 0 ? (
+            <Stat label="Overhang" value={`${summary.overhang_s >= 0 ? "+" : ""}${summary.overhang_s.toFixed(2)}`} unit="s" />
+          ) : null}
+        </StatStrip>
+      ) : null}
 
       {coach.shots.length > 0 ? <TimeBudgetCard budget={budget} onSelectShot={selectShotNumber} className="mb-4" /> : null}
 
@@ -1025,7 +1068,37 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
             </div>
           </div>
 
-          {activeShot ? (
+          <LaneEditor
+            shots={coach.shots}
+            events={events}
+            stageTime={stageTime}
+            currentTime={tFromBeep}
+            selectedId={selectedEventId}
+            readOnly={eventsReadOnly}
+            onSelect={selectEvent}
+            onSeek={seekFromBeep}
+            onChange={changeEvents}
+          />
+          {eventsReadOnly ? <EventList events={events} shots={coach.shots} /> : null}
+
+          {selectedEvent ? (
+            <EventCard
+              event={selectedEvent}
+              events={events}
+              onKind={(kind) => {
+                const next = withKind(events, selectedEvent.id, kind);
+                if (next) changeEvents(next, true);
+              }}
+              onDelete={() => {
+                changeEvents(
+                  events.filter((e) => e.id !== selectedEvent.id),
+                  true,
+                );
+                selectEvent(null);
+              }}
+              onDone={() => selectEvent(null)}
+            />
+          ) : activeShot ? (
             <ShotEditor
               shot={activeShot}
               tier={gapTier(activeShot.split, activeShot.interval_class, baselines)}
