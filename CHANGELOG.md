@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.64.0](https://github.com/mandakan/splitsmith/compare/v0.63.0...v0.64.0) (2026-10-08)
+
+
+### Features
+
+* **compare:** a match summary card on the grid MP4 ([#1300](https://github.com/mandakan/splitsmith/issues/1300)) ([406fe4e](https://github.com/mandakan/splitsmith/commit/406fe4ed5623c60db2245cf625a1f16dfb52c17d))
+* **export:** a match summary card at the end of the video ([#1298](https://github.com/mandakan/splitsmith/issues/1298)) ([3e46937](https://github.com/mandakan/splitsmith/commit/3e46937156216c5c0c7834791f90d1aab09cf3c1))
+* **hosted:** the shooter book and account brand on splitsmith.app ([#1302](https://github.com/mandakan/splitsmith/issues/1302)) ([d51b550](https://github.com/mandakan/splitsmith/commit/d51b5502c15c92fb30648b9c7e05880cc85fa328))
+* **identity:** You, your brand and the shooter book (local) ([#1301](https://github.com/mandakan/splitsmith/issues/1301)) ([31d2c2f](https://github.com/mandakan/splitsmith/commit/31d2c2f78b570e744bd8512cbe55b4ba2948feeb))
+
 ## [0.63.0](https://github.com/mandakan/splitsmith/compare/v0.62.0...v0.63.0) (2026-10-07)
 
 
