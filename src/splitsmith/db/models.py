@@ -953,6 +953,63 @@ class UserLookRow(Base):
         return f"<UserLookRow user_id={self.user_id!r} name={self.name!r}>"
 
 
+class ShooterBookRow(Base):
+    """One shooter's look in a user's shooter book, keyed by SSI shooter id
+    (spec 2026-10-08-account-identity-and-shooter-book-design).
+
+    Hosted counterpart to ``<user config>/account/shooter_book.json``. Its
+    own table, not a ``state_docs`` kind: the book belongs to a user, not a
+    match, and must stay out of the sync manifest. ``identity`` is the JSON
+    dump of ``identity.ShooterIdentity`` (its logo a content name under the
+    user's ``account/files/`` in storage), re-validated on read.
+
+    **Multi-tenant:** the primary key leads with ``user_id`` and the
+    ``tenant_isolation`` RLS policy applies; the store filters on
+    ``user_id`` in every statement as well.
+    """
+
+    __tablename__ = "shooter_book"
+
+    user_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, nullable=False
+    )
+    shooter_id: Mapped[int] = mapped_column(Integer, primary_key=True, nullable=False)
+    identity: Mapped[dict] = mapped_column(JSON, nullable=False)
+    label: Mapped[str | None] = mapped_column(String, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return f"<ShooterBookRow user_id={self.user_id!r} shooter_id={self.shooter_id!r}>"
+
+
+class AccountProfileRow(Base):
+    """A user's account profile (spec 2026-10-08): their brand (the JSON dump
+    of ``looks.LookBrand``, its logo a content name under ``account/brand/``
+    in storage) and when the shooter book was filled from their matches.
+
+    **Multi-tenant:** keyed by ``user_id``; the ``tenant_isolation`` RLS
+    policy applies and the store filters on ``user_id``.
+    """
+
+    __tablename__ = "account_profiles"
+
+    user_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, nullable=False
+    )
+    brand: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    #: Set once the shooter book was seeded from the user's matches; the
+    #: backfill never runs twice.
+    backfilled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return f"<AccountProfileRow user_id={self.user_id!r}>"
+
+
 class DesktopCommandRow(Base):
     """A request from the phone for the user's desktop to run (#1100, spec
     2026-09-28 desktop command queue).

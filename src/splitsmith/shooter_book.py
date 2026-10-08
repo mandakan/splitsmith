@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -29,7 +29,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from . import user_config
 from .async_bridge import run_sync
-from .identity import ShooterIdentity, logo_name, sniff_logo
+from .identity import _LOGO_RE, ShooterIdentity, logo_name, sniff_logo
 
 logger = logging.getLogger(__name__)
 
@@ -157,6 +157,49 @@ async def save_identity(
     )
 
 
+@dataclass(frozen=True)
+class BackfillCandidate:
+    """One shooter as an existing match has them, for the one-time fill:
+    ``read_logo`` returns the logo's bytes (or ``None``) only when called."""
+
+    shooter_id: int
+    identity: ShooterIdentity
+    label: str | None
+    updated_at: datetime
+    read_logo: Callable[[], bytes | None]
+
+
+async def backfill(store: ShooterBookStore, candidates: Sequence[BackfillCandidate]) -> int:
+    """Seed the book from existing matches (spec 2026-10-08): per SSI shooter
+    id, the most recently updated match that set a look; an id the book
+    already holds is left as it is (the user's own edits win). Writes no
+    match. The number of entries written."""
+    latest: dict[int, BackfillCandidate] = {}
+    for candidate in candidates:
+        if not is_set(candidate.identity):
+            continue
+        held = latest.get(candidate.shooter_id)
+        if held is None or candidate.updated_at > held.updated_at:
+            latest[candidate.shooter_id] = candidate
+    written = 0
+    for sid, candidate in latest.items():
+        if await store.get(sid) is not None:
+            continue
+        logo_bytes = None
+        if candidate.identity.logo is not None:
+            try:
+                logo_bytes = candidate.read_logo()
+            except Exception as exc:  # noqa: BLE001 -- the look without its logo is still worth keeping
+                logger.info("shooter book: could not read a logo for %s (%s)", sid, exc)
+        await save_identity(
+            store, shooter_id=sid, identity=candidate.identity, label=candidate.label, logo_bytes=logo_bytes
+        )
+        written += 1
+    if written:
+        logger.info("shooter book: filled %d entries from existing matches", written)
+    return written
+
+
 def load_snapshot(store: ShooterBookStore | None) -> BookSnapshot:
     """The book for one export, from sync code (a job thread, a CLI). A store
     that fails to read is an empty book, logged: a render never fails on it."""
@@ -177,11 +220,34 @@ def _safe_file(folder: Path, name: str) -> Path | None:
     return path
 
 
-class JsonShooterBookStore:
-    """The local book: one JSON file and a folder of content-named logos."""
+BACKFILL_MARKER = ".backfilled"
 
-    def __init__(self, root: Path | None = None) -> None:
+
+class JsonShooterBookStore:
+    """The local book: one JSON file and a folder of content-named logos.
+    With a ``backfill_source`` (the app's own store), the first read fills it
+    once from the matches on this machine, marked by a file beside it."""
+
+    def __init__(
+        self,
+        root: Path | None = None,
+        *,
+        backfill_source: Callable[[], Awaitable[Sequence[BackfillCandidate]]] | None = None,
+    ) -> None:
         self._root = root
+        self._backfill_source = backfill_source
+
+    async def _ensure_backfilled(self) -> None:
+        folder = self._dir()
+        if self._backfill_source is None or folder is None or (folder / BACKFILL_MARKER).exists():
+            return
+        try:
+            await backfill(self, await self._backfill_source())
+        except Exception as exc:  # noqa: BLE001 -- a fill that fails is retried on the next start
+            logger.warning("shooter book: the fill from existing matches failed (%s)", exc)
+            return
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / BACKFILL_MARKER).write_text(_now().isoformat())
 
     def _dir(self) -> Path | None:
         return self._root if self._root is not None else account_dir()
@@ -222,6 +288,7 @@ class JsonShooterBookStore:
         user_config._atomic_write_text(folder / BOOK_FILENAME, json.dumps(payload, indent=2))
 
     async def list(self) -> list[ShooterBookEntry]:
+        await self._ensure_backfilled()
         entries = self._load()
         return [entries[k] for k in sorted(entries)]
 
@@ -255,9 +322,12 @@ class JsonShooterBookStore:
 
     async def logo_file(self, name: str) -> Path | None:
         folder = self._dir()
-        return _safe_file(folder / FILES_DIRNAME, name) if folder is not None else None
+        if folder is None or not _LOGO_RE.match(name or ""):
+            return None
+        return _safe_file(folder / FILES_DIRNAME, name)
 
     async def snapshot(self) -> BookSnapshot:
+        await self._ensure_backfilled()
         entries = self._load()
         logos: dict[str, Path] = {}
         for entry in entries.values():
@@ -296,7 +366,10 @@ class EmptyShooterBookStore:
 
 
 __all__ = [
+    "BACKFILL_MARKER",
     "EMPTY_BOOK",
+    "BackfillCandidate",
+    "backfill",
     "BookSnapshot",
     "EmptyShooterBookStore",
     "JsonShooterBookStore",
