@@ -24,7 +24,7 @@ def _disable_auto_beep(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SPLITSMITH_AUTO_BEEP_DISABLED", "1")
 
 
-def _bootstrap(tmp_path: Path) -> tuple[TestClient, Path, str]:
+def _bootstrap(tmp_path: Path, *, division: str | None = None) -> tuple[TestClient, Path, str]:
     """Returns ``(client, audit_file, url_base)`` -- url_base is the
     ``/api/matches/{match_id}`` prefix that every shooter-scoped URL
     in this module needs after Tier 1 step 3 of doc 10."""
@@ -41,6 +41,7 @@ def _bootstrap(tmp_path: Path) -> tuple[TestClient, Path, str]:
             videos=[StageVideo(path=Path("raw/v.mp4"), role="primary", beep_time=5.0)],
         )
     ]
+    project.competitor_division = division
     project.save(shooter_root)
 
     audit_dir = shooter_root / "audit"
@@ -54,7 +55,9 @@ def _bootstrap(tmp_path: Path) -> tuple[TestClient, Path, str]:
             {"shot_number": 1, "ms_after_beep": 1500, "source": "detected"},
             {"shot_number": 2, "ms_after_beep": 1800, "source": "detected"},  # 0.30 -> split
             {"shot_number": 3, "ms_after_beep": 3300, "source": "detected"},  # 1.50 -> transition
-            {"shot_number": 4, "ms_after_beep": 5900, "source": "detected"},  # 2.60 -> movement
+            # 2.60 -> hinted: the first GET seeds a reload region over the
+            # gap, so the heal says reload rather than movement.
+            {"shot_number": 4, "ms_after_beep": 5900, "source": "detected"},
         ],
     }
     audit_file.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
@@ -88,7 +91,7 @@ def test_get_coach_backfills_classes_on_first_read(tmp_path: Path) -> None:
         "first_shot",
         "split",
         "transition",
-        "movement",
+        "reload",
     ]
     for s in body["shots"]:
         assert s["interval_class_source"] == "auto"
@@ -101,7 +104,7 @@ def test_get_coach_backfills_classes_on_first_read(tmp_path: Path) -> None:
         "first_shot",
         "split",
         "transition",
-        "movement",
+        "reload",
     ]
     assert not any(e.get("kind") == "coach_reclassify" for e in stored.get("audit_events") or [])
 
@@ -135,7 +138,7 @@ def test_get_coach_heal_survives_slim_install(tmp_path: Path, monkeypatch: pytes
         "first_shot",
         "split",
         "transition",
-        "movement",
+        "reload",
     ]
 
 
@@ -588,3 +591,133 @@ def test_get_coach_carries_the_saved_compare_camera(tmp_path: Path) -> None:
     assert resp.status_code == 200, resp.text
     body = client.get(f"{base}/shooters/me/stages/1/coach").json()
     assert body["compare_camera"] == "primary"
+
+
+# ---------------------------------------------------------------------------
+# Stage events on the coach payload (spec 2026-10-08)
+# ---------------------------------------------------------------------------
+
+
+def _write_shots(audit_file: Path, ms: list[int]) -> None:
+    doc = json.loads(audit_file.read_text(encoding="utf-8"))
+    doc["shots"] = [
+        {"shot_number": i + 1, "ms_after_beep": m, "source": "detected"} for i, m in enumerate(ms)
+    ]
+    doc.pop("events", None)
+    doc.pop("events_seeded", None)
+    audit_file.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+
+
+def _po_shots_with_a_reload_gap() -> list[int]:
+    quick = [1200 + i * 300 for i in range(12)]
+    after = [quick[-1] + 3200 + i * 300 for i in range(4)]
+    return quick + after
+
+
+def test_get_coach_seeds_a_reload_proposal_once(tmp_path: Path) -> None:
+    client, audit_file, base = _bootstrap(tmp_path, division="Production Optics")
+    _write_shots(audit_file, _po_shots_with_a_reload_gap())
+
+    body = client.get(f"{base}/shooters/me/stages/1/coach").json()
+    assert [(e["kind"], e["source"]) for e in body["events"]] == [("reload", "auto")]
+    assert body["events"][0]["start"] == pytest.approx(12 * 0.3 + 0.9)  # the 12th shot, 1.2 + 11*0.3
+    assert body["events"][0]["id"] == "evt-1"
+    assert body["event_summary"]["reloads"] == 1
+    assert body["event_summary"]["capacity_warning"] is None
+    assert all(s["moving"] is False for s in body["shots"])
+    assert isinstance(body["_version"], str) and len(body["_version"]) == 16
+
+    stored = json.loads(audit_file.read_text(encoding="utf-8"))
+    assert stored["events_seeded"] is True
+    assert len(stored["events"]) == 1
+
+    # The user deletes the proposal; the next read does not resurrect it.
+    stored["events"] = []
+    audit_file.write_text(json.dumps(stored) + "\n", encoding="utf-8")
+    body2 = client.get(f"{base}/shooters/me/stages/1/coach").json()
+    assert body2["events"] == []
+
+
+def test_get_coach_without_a_division_seeds_from_the_hint_alone(tmp_path: Path) -> None:
+    client, audit_file, base = _bootstrap(tmp_path)
+    _write_shots(audit_file, [1000, 1300, 4000, 4300, 7200])  # two gaps over 2.5 s
+    body = client.get(f"{base}/shooters/me/stages/1/coach").json()
+    assert [e["kind"] for e in body["events"]] == ["reload", "reload"]
+
+
+def test_get_coach_marks_moving_shots_and_sums_the_summary(tmp_path: Path) -> None:
+    client, audit_file, base = _bootstrap(tmp_path)
+    _write_shots(audit_file, [1000, 1300, 2500, 2800, 6000])
+    doc = json.loads(audit_file.read_text(encoding="utf-8"))
+    doc["events"] = [
+        {"id": "evt-1", "kind": "movement", "start": 2.0, "end": 3.0, "source": "manual"},
+        {"id": "evt-2", "kind": "movement", "start": 3.4, "end": 5.0, "source": "manual"},
+        {"id": "evt-3", "kind": "reload", "start": 3.6, "end": 5.4, "source": "manual"},
+    ]
+    doc["events_seeded"] = True
+    audit_file.write_text(json.dumps(doc) + "\n", encoding="utf-8")
+    body = client.get(f"{base}/shooters/me/stages/1/coach").json()
+    assert [s["moving"] for s in body["shots"]] == [False, False, True, True, False]
+    summary = body["event_summary"]
+    assert summary["moving_shots"] == 2
+    assert summary["movement_s"] == pytest.approx(2.6)
+    assert summary["overhang_s"] == pytest.approx(0.4)
+    # The 3.2 s gap before shot 5 overlaps the reload region -> auto reload.
+    assert body["shots"][4]["interval_class"] == "reload"
+    assert body["shots"][4]["interval_class_source"] == "auto"
+    # ...and that verdict is not "stale" against the region-blind rule.
+    assert body["shots"][4]["stale"] is False
+
+
+def test_get_coach_video_entries_carry_trim_and_scrub_versions(tmp_path: Path) -> None:
+    client, base = _bootstrap_legacy_trim(tmp_path, stage_numbers=(1,))
+    body = client.get(f"{base}/shooters/me/stages/1/coach").json()
+    primary = body["videos"][0]
+    assert primary["kind"] == "trim"
+    assert isinstance(primary["trim_version"], str) and primary["trim_version"]
+    assert primary["scrub_version"] is None  # no _web.mp4 beside the trim in this fixture
+
+
+def test_get_coach_source_video_has_null_versions(tmp_path: Path) -> None:
+    client, _audit, base = _bootstrap(tmp_path)
+    primary = client.get(f"{base}/shooters/me/stages/1/coach").json()["videos"][0]
+    assert primary["kind"] == "source"
+    assert primary["trim_version"] is None
+    assert primary["scrub_version"] is None
+
+
+def test_get_coach_version_is_the_stored_docs_revision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``_version`` names the stored doc. An owner read saves its seed, so
+    it is the saved doc's; a mirror read seeds in memory only, never
+    persists, and still hands back the stored doc's revision -- else the
+    events PUT would 409 against it forever."""
+    from splitsmith.audit_revision import audit_revision
+    from splitsmith.ui import server as server_module
+
+    client, audit_file, base = _bootstrap(tmp_path)
+    _write_shots(audit_file, [1000, 1300, 4000])
+    before = _read(audit_file)
+
+    monkeypatch.setattr(server_module, "_is_mirror", lambda: True)
+    body = client.get(f"{base}/shooters/me/stages/1/coach").json()
+    assert [e["kind"] for e in body["events"]] == ["reload"]  # served in memory
+    assert _read(audit_file) == before  # neither the seed nor the heal persisted
+    assert body["_version"] == audit_revision(before)
+
+    monkeypatch.setattr(server_module, "_is_mirror", lambda: False)
+    body = client.get(f"{base}/shooters/me/stages/1/coach").json()
+    stored = _read(audit_file)
+    assert stored["events_seeded"] is True
+    assert body["_version"] == audit_revision(stored)
+
+
+def test_get_coach_corrupt_events_are_a_422(tmp_path: Path) -> None:
+    client, audit_file, base = _bootstrap(tmp_path)
+    doc = json.loads(audit_file.read_text(encoding="utf-8"))
+    doc["events"] = [{"id": "evt-1", "kind": "nap", "start": 1.0, "end": 2.0, "source": "manual"}]
+    audit_file.write_text(json.dumps(doc) + "\n", encoding="utf-8")
+    resp = client.get(f"{base}/shooters/me/stages/1/coach")
+    assert resp.status_code == 422, resp.text
+    assert "invalid events" in resp.json()["detail"]

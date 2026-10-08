@@ -218,3 +218,26 @@ def test_triage_content_is_unchanged_by_the_bundle(
     assert cells[("bea", 2)]["status"] == "ready"  # footage and a time, no audit yet
     assert cells[("bea", 2)]["shot_count"] == 0
     assert resp.json()["flagged_count"] == 0
+
+
+def test_coach_get_adds_no_state_docs_query_for_events(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+    state_docs_selects: list[str],
+) -> None:
+    """Stage events ride the audit doc the coach GET already loads: seeding,
+    moving flags and the summary add no ``state_docs`` read."""
+    client, sender = hosted_app
+    login(client, sender, OWNER)
+    uid = _user_id(hosted_env, OWNER)
+    match_id = _create_match(client)
+    _add_shooter(hosted_env, uid, match_id, "bea")
+    path = f"/api/matches/{match_id}/shooters/bea/stages/1/coach"
+    first = _count(client, state_docs_selects, path)  # seeds and saves
+    second = _count(client, state_docs_selects, path)  # steady state
+    assert second <= first
+    # The route made 10 before stage events (measured on the branch head
+    # before the coach GET learned about them). Events add none; the video
+    # versions' roster lookup is paid for by ``_video_trim_anchor`` now
+    # resolving the shooter root once instead of twice, hence 9.
+    assert second <= 9, (first, second, state_docs_selects)

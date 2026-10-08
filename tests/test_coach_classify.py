@@ -165,6 +165,12 @@ def test_unannotated_never_stale(cfg: CoachAutoClassifyConfig) -> None:
     assert is_classification_stale(shot, gap_s=0.3, config=cfg) is False
 
 
+def test_region_derived_reload_is_stale_only_without_the_region(cfg: CoachAutoClassifyConfig) -> None:
+    shot = _shot(2, 4500, interval_class="reload", interval_class_source="auto")
+    assert is_classification_stale(shot, gap_s=3.0, config=cfg, reload_overlap=True) is False
+    assert is_classification_stale(shot, gap_s=3.0, config=cfg) is True
+
+
 # ---------------------------------------------------------------------------
 # Edit handling
 # ---------------------------------------------------------------------------

@@ -392,6 +392,7 @@ def is_classification_stale(
     *,
     gap_s: float | None,
     config: CoachAutoClassifyConfig,
+    reload_overlap: bool = False,
 ) -> bool:
     """Return True iff the stored auto-classification disagrees with what
     the rule would assign now. Computed on read; never persisted.
@@ -400,6 +401,10 @@ def is_classification_stale(
     verdict differs from the user's pick) so the UI can show a hint, but
     the caller decides whether to act on it. For shots with no class
     set, returns False.
+
+    ``reload_overlap`` is whether the gap overlaps a reload region
+    (:func:`gap_overlaps_reload`); without it a region-derived auto
+    ``reload`` would read as stale against the region-blind rule.
     """
     if isinstance(shot, Shot):
         cls = shot.interval_class
@@ -407,7 +412,7 @@ def is_classification_stale(
         cls = shot.get(FIELD_INTERVAL_CLASS)
     if cls is None:
         return False
-    return _classify_gap(gap_s, config) != cls
+    return _classify_gap(gap_s, config, reload_overlap=reload_overlap) != cls
 
 
 def _sort_key(pair: tuple[int, dict[str, Any]]) -> tuple[float, int, int]:

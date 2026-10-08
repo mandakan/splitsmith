@@ -159,6 +159,7 @@ from .. import cleanup as cleanup_module
 from .. import coach as coach_module
 from .. import coach_distributions as coach_distributions_module
 from .. import ensemble as ensemble_module
+from .. import events as events_module
 from .. import export_presets as export_presets_module
 from .. import models as model_layer
 from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy monkeypatch points)
@@ -189,6 +190,7 @@ from ..config import (
     IntervalClass,
     IntervalClassSource,
     Shot,
+    StageEvent,
     StageRounds,
 )
 from ..display_name import normalize_display_name
@@ -13581,9 +13583,9 @@ def create_app(
         """``_video_clip_anchor`` before the web-rendition step: the
         anchor, ``"trim"`` or ``"source"``, and the new-keyed trim path
         the kind was measured against (``None`` for source)."""
-        resolved = audio_helpers.resolve_trim_for_read(
-            state.shooter_root(slug), stage_number, video, project=project
-        )
+        # One roster lookup (a state_docs SELECT hosted) for both resolvers.
+        root = state.shooter_root(slug)
+        resolved = audio_helpers.resolve_trim_for_read(root, stage_number, video, project=project)
         if resolved is not None:
             if video.beep_time is None:
                 return (None, "trim", resolved)
@@ -13597,9 +13599,7 @@ def create_app(
         # legacy-keyed trim is missed by BOTH the pull and this check, so
         # bytes and anchor degrade consistently to the source path, and
         # the next worker trim job re-cuts under the new key.
-        trimmed = audio_helpers.trimmed_video_path(
-            state.shooter_root(slug), stage_number, video, project=project
-        )
+        trimmed = audio_helpers.trimmed_video_path(root, stage_number, video, project=project)
         if audio_helpers.trim_available(project, trimmed):
             if video.beep_time is None:
                 return (None, "trim", trimmed)
@@ -13641,6 +13641,13 @@ def create_app(
         )
         ordered_videos = ([primary] if primary is not None else []) + secondaries
         labels = camera_labels(ordered_videos)
+        root = state.shooter_root(slug)
+        # One listing of this shooter's trimmed/ prefix per request, as in
+        # ``get_project`` (#1209).
+        _storage = state.storage
+        presence = (
+            StoragePresence(_storage) if _storage is not None and _storage.supports_presigned_get else None
+        )
         out: list[dict[str, Any]] = []
         for v, label in zip(ordered_videos, labels, strict=True):
             anchor, kind = _video_clip_anchor(slug, project, stg.stage_number, v)
@@ -13655,9 +13662,42 @@ def create_app(
                     # across stages (``camera_select``): a video id names a
                     # file on one stage, not a camera.
                     "mount": v.camera_mount,
+                    # The same pins ``get_project`` gives the Audit players:
+                    # None for both when no trim exists (``kind == "source"``).
+                    "trim_version": _trim_version_for(root, stg.stage_number, v, project),
+                    "scrub_version": (
+                        _hosted_scrub_version_for(presence, root, stg.stage_number, v, project)
+                        if presence is not None and not v.path.is_absolute()
+                        else _scrub_version_for(root, stg.stage_number, v, project)
+                    ),
                 }
             )
         return out
+
+    def _coach_events(payload: dict[str, Any], stage_number: int) -> list[StageEvent]:
+        """The doc's stage events; a corrupt list is a 422, not a 500."""
+        try:
+            return events_module.events_from_doc(payload)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422, detail=f"stage {stage_number}: invalid events: {exc}"
+            ) from exc
+
+    def _coach_capacity(slug: str, project: MatchProject) -> int | None:
+        """The magazine capacity of the shooter's division, or None.
+
+        ``competitor_division`` reads the shooter directory only for a
+        scoreboard-pinned project with no stored division; resolving it
+        otherwise would cost a roster lookup (a state_docs SELECT hosted)
+        for nothing.
+        """
+        needs_dir = (
+            not project.competitor_division
+            and project.selected_competitor_id is not None
+            and bool(project.scoreboard_match_id)
+        )
+        project_dir = state.shooter_root(slug) if needs_dir else None
+        return events_module.capacity_for(competitor_division(project, project_dir))
 
     def _load_audit_for_coach(
         slug: str,
@@ -13715,7 +13755,12 @@ def create_app(
         project: MatchProject,
         cfg: CoachAutoClassifyConfig,
         version: int,
+        *,
+        stored_revision: str | None = None,
     ) -> dict[str, Any]:
+        # ``stored_revision`` is the stored doc's ``_version`` when ``payload``
+        # carries in-memory changes that were not saved (a mirror's seed, a
+        # lost save race); otherwise ``payload`` is what is stored.
         # Coach plays the same clip the audit screen serves -- typically
         # the project-local trimmed MP4 -- so every "absolute" time must
         # be in the served clip's coordinate system. Anchoring on
@@ -13728,6 +13773,7 @@ def create_app(
             (s for s in raw_shots if isinstance(s, dict) and "ms_after_beep" in s),
             key=lambda s: float(s.get("ms_after_beep", 0)),
         )
+        stage_events = _coach_events(payload, stg.stage_number)
         coach_shots: list[dict[str, Any]] = []
         prev_ms: float | None = None
         for s in ordered:
@@ -13737,11 +13783,13 @@ def create_app(
             if prev_ms is None:
                 gap_s = None
                 split = time_from_beep  # draw
+                overlap = False
             else:
                 gap_s = (ms - prev_ms) / 1000.0
                 split = gap_s
+                overlap = coach_module.gap_overlaps_reload(prev_ms / 1000.0, time_from_beep, stage_events)
             prev_ms = ms
-            stale = coach_module.is_classification_stale(s, gap_s=gap_s, config=cfg)
+            stale = coach_module.is_classification_stale(s, gap_s=gap_s, config=cfg, reload_overlap=overlap)
             reload_hint = coach_module.reload_hinted(gap_s, cfg)
             coach_shots.append(
                 {
@@ -13770,6 +13818,13 @@ def create_app(
                     "reload_hint": reload_hint,
                 }
             )
+        for shot_out in coach_shots:
+            shot_out["moving"] = events_module.shot_is_moving(shot_out["time_from_beep"], stage_events)
+        summary = events_module.stage_event_summary(
+            [shot_out["time_from_beep"] for shot_out in coach_shots],
+            stage_events,
+            _coach_capacity(slug, project),
+        )
         return {
             "stage_number": stg.stage_number,
             "stage_name": stg.stage_name,
@@ -13789,6 +13844,11 @@ def create_app(
             # shooter when the link has one, else the shooter's saved one.
             "compare_camera": (current_share_cameras.get() or {}).get(slug, project.compare_camera),
             "shots": coach_shots,
+            "events": [e.model_dump(exclude_none=True) for e in stage_events],
+            "event_summary": summary.model_dump(),
+            # The stored audit doc's content revision, what the events PUT
+            # compares against (the audit route's ``_version``).
+            REVISION_FIELD: stored_revision if stored_revision is not None else audit_revision(payload),
         }
 
     @app.get("/api/shooters/{slug}/stages/{stage_number}/coach")
@@ -13798,8 +13858,9 @@ def create_app(
         A legacy audit doc with unclassified shots is healed on first read
         so every consumer sees fully-classified data - see ``stale`` for
         whether the current rule disagrees with a stored (possibly manual)
-        class. Owner reads persist the heal; share-token reads classify
-        in-memory only and never write back. The client can also call
+        class. Owner reads persist the heal and the one-time reload seed;
+        share-token reads and desktop-origin mirrors compute both in-memory
+        only and never write back. The client can also call
         ``POST /coach/reclassify`` to force-persist the rule's verdict onto
         unset/auto entries. Returns ``200 null`` when the stage has no
         audit JSON yet (a normal pre-audit state); 404 is reserved for
@@ -13816,6 +13877,18 @@ def create_app(
         with _audit_rmw():
             payload, version, beep_in_clip, stg, project = _load_audit_for_coach(slug, stage_number)
             cfg = coach_module.auto_classify_config()
+            # Taken before the seed and heal mutate ``payload``: a read that
+            # does not persist them must still hand back the stored doc's
+            # ``_version``, or the events PUT would 409 on every attempt.
+            stored_revision = audit_revision(payload)
+            # Stage events (spec 2026-10-08): reload proposals are seeded
+            # once per stage, before the heal so it classifies against them.
+            seeded = events_module.seed_doc(
+                payload, hint_min_s=cfg.reload_hint_min_s, capacity=_coach_capacity(slug, project)
+            )
+            healed = coach_module.heal_unclassified(
+                payload.get("shots"), cfg, events=_coach_events(payload, stage_number)
+            )
             # #775: heal legacy docs on read so consumers (Results, share view,
             # statistic_splits) always see a fully classified stage. Owners get
             # the heal persisted; share-token readers are read-only, so the
@@ -13823,9 +13896,13 @@ def create_app(
             # itself lives in ``coach.heal_unclassified`` (#780) - this is the
             # only one of its four callers that persists, and it keys the write
             # off the return value so an untouched doc costs no version bump.
-            if coach_module.heal_unclassified(payload.get("shots"), cfg) and not current_share_request.get():
+            # Neither is persisted on a desktop-origin mirror (spec
+            # 2026-10-08): ``events`` is desktop-owned, and a heal saved
+            # there would carry the in-memory seed with it.
+            if (healed or seeded) and not current_share_request.get() and not _is_mirror():
                 try:
                     version = _coach_save(slug, stage_number, payload, version)
+                    stored_revision = audit_revision(payload)
                 except _state_conflict_excs():
                     # A concurrent writer won the version race; serve the
                     # in-memory heal and let the next read persist it.
@@ -13834,7 +13911,11 @@ def create_app(
                     # has no db extras, and an unguarded import here 500ed
                     # every heal-triggering coach GET.
                     pass
-        return JSONResponse(_build_coach_response(slug, payload, beep_in_clip, stg, project, cfg, version))
+        return JSONResponse(
+            _build_coach_response(
+                slug, payload, beep_in_clip, stg, project, cfg, version, stored_revision=stored_revision
+            )
+        )
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/coach/reclassify")
     def reclassify_stage_coach(slug: str, stage_number: int) -> JSONResponse:
