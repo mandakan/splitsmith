@@ -21,7 +21,7 @@ from splitsmith.coach import (
     reload_hinted,
     statistic_splits,
 )
-from splitsmith.config import CoachAutoClassifyConfig, Shot
+from splitsmith.config import CoachAutoClassifyConfig, Shot, StageEvent
 
 
 @pytest.fixture
@@ -427,3 +427,57 @@ def test_auto_classify_config_reads_the_env_yaml(tmp_path, monkeypatch) -> None:
     assert split_stat_split_max() == 0.7
     shots = [_Gap(1.5), _Gap(0.7), _Gap(0.8)]
     assert statistic_splits(shots) == [0.7]
+
+
+# ---------------------------------------------------------------------------
+# Reload regions hint the auto-classifier (spec 2026-10-08)
+# ---------------------------------------------------------------------------
+
+
+def _reload(start: float, end: float) -> StageEvent:
+    return StageEvent(id="evt-1", kind="reload", start=start, end=end, source="manual")
+
+
+def test_long_gap_overlapping_a_reload_region_classes_reload(cfg: CoachAutoClassifyConfig) -> None:
+    shots = [_shot(1, 1000), _shot(2, 3800)]  # 2.8 s gap -> movement by the thresholds
+    classify_intervals_in_dicts(shots, cfg, events=[_reload(1.9, 3.2)])
+    assert shots[1]["interval_class"] == "reload"
+    assert shots[1]["interval_class_source"] == "auto"
+
+
+def test_long_gap_without_a_reload_region_stays_movement(cfg: CoachAutoClassifyConfig) -> None:
+    shots = [_shot(1, 1000), _shot(2, 3800)]
+    classify_intervals_in_dicts(shots, cfg, events=[_reload(4.0, 5.0)])  # elsewhere
+    assert shots[1]["interval_class"] == "movement"
+
+
+def test_split_inside_a_reload_region_stays_split(cfg: CoachAutoClassifyConfig) -> None:
+    # Review focus 1: a region spanning a shot must not relabel its splits.
+    shots = [_shot(1, 1000), _shot(2, 1300), _shot(3, 1600)]
+    classify_intervals_in_dicts(shots, cfg, events=[_reload(0.9, 1.7)])
+    assert [s["interval_class"] for s in shots] == ["first_shot", "split", "split"]
+
+
+def test_transition_inside_a_reload_region_stays_transition(cfg: CoachAutoClassifyConfig) -> None:
+    shots = [_shot(1, 1000), _shot(2, 2500)]  # 1.5 s -> transition
+    classify_intervals_in_dicts(shots, cfg, events=[_reload(1.2, 2.3)])
+    assert shots[1]["interval_class"] == "transition"
+
+
+def test_manual_class_wins_over_the_region_hint(cfg: CoachAutoClassifyConfig) -> None:
+    shots = [_shot(1, 1000), _shot(2, 3800, interval_class="activation", interval_class_source="manual")]
+    classify_intervals_in_dicts(shots, cfg, events=[_reload(1.9, 3.2)])
+    assert shots[1]["interval_class"] == "activation"
+
+
+def test_models_path_takes_the_same_hint(cfg: CoachAutoClassifyConfig) -> None:
+    shots = [_model_shot(1, 1.0), _model_shot(2, 3.8)]
+    out = classify_intervals_in_models(shots, cfg, events=[_reload(1.9, 3.2)])
+    assert out[1].interval_class == "reload"
+    assert out[1].interval_class_source == "auto"
+
+
+def test_heal_passes_events_through(cfg: CoachAutoClassifyConfig) -> None:
+    shots = [_shot(1, 1000), _shot(2, 3800)]
+    assert heal_unclassified(shots, cfg, events=[_reload(1.9, 3.2)]) is True
+    assert shots[1]["interval_class"] == "reload"

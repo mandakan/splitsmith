@@ -33,6 +33,7 @@ from rich.table import Table
 from . import camera_select, match_model, match_trims, user_config
 from .config import Config
 from .division import competitor_division
+from .events import events_from_doc
 from .match_model import (
     MATCH_FILE,
     Match,
@@ -798,8 +799,15 @@ def reclassify(
         shots = doc.get("shots")
         if not isinstance(shots, list) or not shots:
             continue
+        try:
+            stage_events = events_from_doc(doc)
+        except ValueError as exc:
+            typer.echo(f"stage {entry.stage_number}: skipping events hint, {exc}", err=True)
+            stage_events = []
         before = Counter(s.get("interval_class") or "unset" for s in shots if isinstance(s, dict))
-        coach_module.classify_intervals_in_dicts([s for s in shots if isinstance(s, dict)], cfg)
+        coach_module.classify_intervals_in_dicts(
+            [s for s in shots if isinstance(s, dict)], cfg, events=stage_events
+        )
         after = Counter(s.get("interval_class") or "unset" for s in shots if isinstance(s, dict))
         moved = sum((after - before).values())
         moved_total += moved
