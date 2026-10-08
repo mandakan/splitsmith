@@ -276,3 +276,104 @@ def test_changed_template_bytes_miss_the_cache(tmp_path: Path, monkeypatch: pyte
     again = _FakeRasterizer()
     _render(tmp_path, again, variant="plate", segment_cache=cache)
     assert again.rendered > 0
+
+
+# --- the shipped Plate, through real Chromium and ffmpeg ------------------------
+
+import subprocess as _subprocess  # noqa: E402
+
+from splitsmith.overlay_raster import ChromiumRasterizer  # noqa: E402
+from tests.synthetic_media import ffmpeg_available  # noqa: E402
+
+
+def _frame_at(mov: Path, index: int, out: Path) -> Image.Image:
+    _subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-loglevel",
+            "error",
+            "-i",
+            str(mov),
+            "-vf",
+            f"select=eq(n\\,{index})",
+            "-frames:v",
+            "1",
+            "-pix_fmt",
+            "rgba",
+            str(out),
+        ],
+        check=True,
+    )
+    return Image.open(out).convert("RGBA")
+
+
+def _alpha_in(image: Image.Image, box: tuple[int, int, int, int]) -> int:
+    return max(image.crop(box).getchannel("A").getdata())
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(not ffmpeg_available(), reason="needs ffmpeg")
+def test_plate_renders_a_stage_into_a_mov_the_trim_s_length(tmp_path: Path) -> None:
+    meta = VideoMetadata(width=640, height=360, duration_seconds=3.0, frame_rate_num=30, frame_rate_den=1)
+    out = tmp_path / "overlay.mov"
+    with ChromiumRasterizer() as rasterizer:
+        overlay_render.render_overlay(
+            audit_path=_audit(tmp_path),
+            trimmed_video_path=tmp_path / "trim.mp4",
+            output_path=out,
+            beep_offset_seconds=1.0,
+            probe=meta,
+            codec="prores-4444",
+            rasterizer=rasterizer,
+            variant="plate",
+        )
+    frames = _subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-count_frames",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=nb_read_frames",
+            "-of",
+            "csv=p=0",
+            str(out),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert int(frames) == 90
+    # Bottom-left plate: drawn before the beep (the counter reads 00/03) and after a shot.
+    bottom_left = (0, 220, 320, 360)
+    top_right = (400, 0, 640, 140)
+    pre_beep = _frame_at(out, 10, tmp_path / "pre.png")
+    after_shot = _frame_at(out, 50, tmp_path / "shot.png")
+    assert _alpha_in(pre_beep, bottom_left) > 200
+    assert _alpha_in(after_shot, bottom_left) > 200
+    assert _alpha_in(after_shot, top_right) == 0, "nothing drawn outside the HUD's corner"
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(not ffmpeg_available(), reason="needs ffmpeg")
+def test_plate_honours_the_position(tmp_path: Path) -> None:
+    meta = VideoMetadata(width=640, height=360, duration_seconds=2.0, frame_rate_num=30, frame_rate_den=1)
+    out = tmp_path / "overlay.mov"
+    with ChromiumRasterizer() as rasterizer:
+        overlay_render.render_overlay(
+            audit_path=_audit(tmp_path),
+            trimmed_video_path=tmp_path / "trim.mp4",
+            output_path=out,
+            beep_offset_seconds=1.0,
+            probe=meta,
+            codec="prores-4444",
+            rasterizer=rasterizer,
+            variant="plate",
+            hud_options=HudOptions(position="top-right"),
+        )
+    frame = _frame_at(out, 50, tmp_path / "f.png")
+    assert _alpha_in(frame, (400, 0, 640, 140)) > 200
+    assert _alpha_in(frame, (0, 220, 320, 360)) == 0
