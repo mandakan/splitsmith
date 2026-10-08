@@ -10,6 +10,7 @@ import {
   enclosingMovement,
   nextEventId,
   reloadFigures,
+  rulerLabels,
   shotIsMoving,
   snapTime,
   summarize,
@@ -130,5 +131,24 @@ describe("editor helpers", () => {
     expect(timeFromX(-10, 900, 16.2)).toBe(0);
     expect(timeFromX(2000, 900, 16.2)).toBe(16.2);
     expect(timeFromX(10, 0, 16.2)).toBe(0);
+  });
+});
+
+describe("rulerLabels", () => {
+  it("keeps the beep and stage-time labels clear at the Coach page's desktop width", () => {
+    // 32.12 s over 475 px (the 1280 px Coach page): a fixed 2 s step put "2"
+    // on top of "Beep" and "30" on top of "32.12".
+    expect(rulerLabels(32.12, 475)).toEqual([4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28]);
+  });
+
+  it("widens the step on a narrow strip so labels never crowd", () => {
+    const labels = rulerLabels(32.12, 280);
+    expect(labels).toEqual([10, 15, 20, 25]);
+    const gaps = labels.slice(1).map((s, i) => (s - labels[i]) * (280 / 32.12));
+    expect(Math.min(...gaps)).toBeGreaterThanOrEqual(28);
+  });
+
+  it("labels nothing before the strip is measured", () => {
+    expect(rulerLabels(32.12, 0)).toEqual([]);
   });
 });

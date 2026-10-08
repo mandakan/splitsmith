@@ -12,12 +12,12 @@
  * nudge commits.
  */
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Kbd } from "@/components/ui/Kbd";
 import { Label } from "@/components/ui/Label";
 import type { StageEvent, StageEventKind } from "@/lib/api";
-import { enclosingMovement, shotIsMoving, snapTime, timeFromX } from "@/lib/events";
+import { enclosingMovement, rulerLabels, shotIsMoving, snapTime, timeFromX } from "@/lib/events";
 import { cn } from "@/lib/utils";
 
 import {
@@ -71,6 +71,17 @@ export function LaneEditor(props: LaneEditorProps) {
   // The list as last emitted: a drag frame reads it before the parent re-renders.
   const eventsRef = useRef(events);
   eventsRef.current = events;
+  // Measured so the ruler labels can space themselves (and stay off "Beep" and the stage time).
+  const [stripWidth, setStripWidth] = useState(0);
+  useEffect(() => {
+    const el = stripRef.current;
+    if (!el) return;
+    const write = () => setStripWidth(el.getBoundingClientRect().width);
+    write();
+    const ro = new ResizeObserver(write);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const duration = Math.max(stageTime, 0.001);
   const pct = (t: number) => `${(Math.min(Math.max(t, 0), duration) / duration) * 100}%`;
@@ -198,8 +209,7 @@ export function LaneEditor(props: LaneEditorProps) {
     }
   };
 
-  const rulerLabels: number[] = [];
-  for (let s = 2; s < duration - 0.9; s += 2) rulerLabels.push(s);
+  const labels = rulerLabels(duration, stripWidth);
   const ticks: number[] = [];
   for (let s = 1; s < duration; s += 1) ticks.push(s);
   const selected = events.find((x) => x.id === selectedId);
@@ -239,7 +249,7 @@ export function LaneEditor(props: LaneEditorProps) {
               <span key={s} className="absolute bottom-0 h-1 w-px bg-rule" style={{ left: pct(s) }} />
             ))}
             <Label className="absolute left-0 top-0 text-beep">Beep</Label>
-            {rulerLabels.map((s) => (
+            {labels.map((s) => (
               <span key={s} className="numeral absolute top-0 -translate-x-1/2 text-xs text-muted" style={{ left: pct(s) }}>
                 {s}
               </span>

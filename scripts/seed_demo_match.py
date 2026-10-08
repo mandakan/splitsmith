@@ -338,6 +338,7 @@ def seed_shooter(
     media: bool,
     unassigned: bool = False,
     time_scale: float = 1.0,
+    division: str | None = None,
 ) -> None:
     """One shooter: project with a primary per ``footage`` stage, audit docs per ``audits``.
 
@@ -347,6 +348,8 @@ def seed_shooter(
     shooter's own ``raw/`` (ingest writes shooter-relative paths, and an
     absolute path trips the sync card); ``None`` writes a placeholder.
     ``time_scale`` multiplies every stage time (a faster shooter).
+    ``division`` is the SSI division string; a known one gives the Coach
+    page a magazine capacity, so its reload seed picks one gap per window.
     """
     match.add_shooter(root, match_model.Shooter(slug=slug, name=name))
     shooter_root = match_model.Match.shooter_root(root, slug)
@@ -363,6 +366,7 @@ def seed_shooter(
     media_rel = Path("raw/demo-source.mp4")
     project.competitor_name = name
     project.match_date = match.match_date
+    project.competitor_division = division
     stages: list[StageEntry] = []
     for number, stage_name, secs in STAGES:
         videos: list[StageVideo] = []
@@ -445,6 +449,7 @@ def main(root: Path, *, media: bool = False) -> None:
         audits=lead_audits,
         media=media,
         unassigned=True,
+        division="Production Optics",
     )
 
     # Second shooter: footage on 2-5, audited 2-4, detected on 5, faster.

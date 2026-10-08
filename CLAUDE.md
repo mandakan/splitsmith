@@ -497,6 +497,68 @@ production for exactly that reason. An account with a blank name still
 falls back to a generated handle; that invariant is pinned in
 ``tests/test_comments_signed_in.py`` and does not move.
 
+## Stage events (spec 2026-10-08)
+
+Movement, reload and activation are **regions** (``events`` on the stage
+audit doc, ``config.StageEvent``, seconds from beep), independent of
+shots: a movement may span several shots, which the per-gap
+``interval_class`` cannot say. The two views coexist: the gap partition
+is still what the time budget sums and ``statistic_splits`` filters on;
+the regions only *hint* the auto-classifier (a gap over
+``transition_max_s`` overlapping a reload region auto-classes ``reload``,
+``coach.gap_overlaps_reload``) and never own a class.
+``is_classification_stale`` takes the same ``reload_overlap`` input as
+the classifier, or a region-derived ``reload`` would report stale. Every
+figure (per-shot ``moving``, ``reload_figures`` with the **overhang** =
+reload end minus the enclosing movement's end, ``stage_event_summary``)
+is derived, never stored, by ``splitsmith/events.py`` and its TS twin
+``lib/events.ts``, which run ``tests/fixtures/events/cases.json`` case
+for case -- a rule changes on both sides or not at all. A reload's
+handles mean hand off the grip -> gun back on target.
+
+Seeding (``events.seed_doc``) runs once per stage (``events_seeded``) on
+the coach GET, reload only, never movement: every hinted gap
+(``reload_hint_min_s``), or with a division capacity
+(``DivisionCapacityConfig``, keyed on the SSI string so the power factor
+rides in the name) the first hinted gap in a ``capacity + 1``-shot
+window, else the longest. ``capacity + 1`` is a bound, not a count:
+shooters start with one chambered. The seed and the heal are persisted
+under one condition in ``get_stage_coach``: an owner read that is not a
+mirror. The GET's ``_version`` is the revision of the doc *as stored*
+(taken before the in-memory seed and heal), so a mirror or share read
+still hands out a ``_version`` the PUT accepts.
+
+``PUT /api/shooters/{slug}/stages/{n}/events`` replaces the list under
+``_audit_rmw()`` with the audit revision check (409 ``version_conflict``;
+422 ``lane_overlap`` names both ids) and returns the coach payload with
+the saved doc's revision. It is **not** in ``_REVIEW_ROUTES``: ``events``
+is desktop-owned, ``sync.merge.merge_audit_doc`` keeps local's copy, so
+a hosted write on a mirror would be silently overwritten by the next
+sync. A desktop-origin mirror answers 403 ``read_only_mirror`` and the
+SPA renders the editor read-only on
+``capabilityDenied(project.capabilities, "edit")`` (and on the phone);
+a hosted-native match keeps the PUT. Every PUT appends an
+``audit_events`` entry, which is why the SPA saves on commit only
+(release or keyboard nudge) through a 350 ms debounce in
+``lib/useStageEvents.ts``: PUTs run one at a time with the revision the
+previous one returned, a 409 reloads the coach payload and drops
+anything pending, and a response that lands while a newer edit is
+pending takes only the revision. Never save per drag frame.
+
+The coach payload carries ``events``, ``event_summary``, ``_version``,
+per-shot ``moving`` and per-video ``trim_version`` / ``scrub_version``;
+the Coach player goes through ``useScrubSource`` like Audit, and the
+lane editor's "Full-resolution video" entry is the same
+``GlobalPrefs.full_res_scrub``. ``components/coach/LaneEditor`` owns the
+DOM only; geometry (clamp, snap, ``MIN_EVENT_S``) is ``lib/events.ts``.
+Pointer rules: a lane click seeks to the press point
+snapped to the nearest shot (a ruler click does not snap), a click on
+empty lane space deselects, a region being created stops at its
+same-lane neighbours, ``pointercancel`` undoes like Esc. Arrows nudge
+(bracket keys sit behind AltGr on Nordic layouts). Rendering, the
+summary card and CSV/FCPXML markers are part 2 of the plan, not yet
+built.
+
 ## Hosted access tiers (spec 2026-10-03)
 
 An account has **features** (``splitsmith.access.Feature``: ``sync``,

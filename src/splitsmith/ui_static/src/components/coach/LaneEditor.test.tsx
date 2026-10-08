@@ -48,6 +48,14 @@ const lastCommit = (onChange: ReturnType<typeof vi.fn>) =>
   [...onChange.mock.calls].reverse().find((c) => c[1] === true)?.[0] as StageEvent[] | undefined;
 
 describe("LaneEditor", () => {
+  it("labels the ruler for the measured strip width, clear of the beep and stage-time labels", () => {
+    render(<Harness />);
+    const ruler = screen.getByTestId("lane-ruler");
+    const labels = [...ruler.querySelectorAll("span.numeral")].map((n) => n.textContent);
+    // 1000 px over 10 s: a 1 s step, "1" (100 px) clears "Beep", "9" (900 px) does not reach "10.00".
+    expect(labels).toEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9", "10.00"]);
+  });
+
   it("creates a region by dragging empty lane space and seeks the moving edge", () => {
     const onChange = vi.fn();
     const onSeek = vi.fn();

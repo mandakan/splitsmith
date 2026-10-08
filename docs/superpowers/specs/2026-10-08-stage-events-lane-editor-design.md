@@ -204,8 +204,14 @@ Body `{events: StageEvent[], _version: str}`. Replaces the whole list.
 409 `version_conflict`, the same shape as the audit PUT; the page reloads.
 Writes under `_audit_rmw()`. It is a match write under
 `/api/matches/{id}/`, so auto-sync's dirty middleware marks the match with
-no change. Not in `_SHARE_WRITE_ROUTES`. Local and hosted alike; hosted
-needs no feature beyond what opening the Coach page already needs.
+no change. Not in `_SHARE_WRITE_ROUTES`, and not in `_REVIEW_ROUTES`:
+`events` is a desktop-owned field. On hosted a desktop-origin mirror
+answers 403 `read_only_mirror` (the existing gate), because
+`sync.merge.merge_audit_doc` keeps local's copy and a hosted write there
+would be overwritten by the desktop's next sync; a hosted-native match
+keeps the PUT. The SPA renders the editor read-only wherever
+`capabilityDenied(project.capabilities, "edit")` holds, so a mirror never
+offers an edit it would refuse.
 
 ## SPA
 
@@ -239,7 +245,9 @@ travel threshold before a press becomes a drag -- wider for touch -- Esc
 restores the pre-drag state):
 
 - Press-and-drag on empty lane space creates a region; release commits.
-  Under the threshold it is a click, which seeks.
+  Under the threshold it is a click, which seeks. A lane click seeks to
+  the press point snapped to the nearest shot; the ruler click does not
+  snap.
 - Drag an edge to resize, the body to move. **While an edge drags the
   video seeks to that edge's time.** Body drag seeks to the leading edge.
   A time pill follows the handle (time, frame number).
