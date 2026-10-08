@@ -11,7 +11,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from ..composition import MatchTitle
+from ..composition import BrandMark, MatchTitle
 from ..division import competitor_division, roster_lines
 from ..match_model import Match
 from ..match_project import MatchProject
@@ -34,6 +34,9 @@ class CardOptions:
     closing_card: bool = False
     #: "Made with splitsmith" at the bottom of the closing card.
     made_with: bool = True
+    #: Your account's brand on the title page and the closing card, for a
+    #: Look without one of its own (spec 2026-10-08).
+    account_brand: bool = True
     #: The Look template variant every card draws with (#1242); the
     #: per-slot fields (#1246) win where set.
     card_variant: str = "default"
@@ -63,6 +66,7 @@ def title_cards(
     *,
     divisions: Sequence[tuple[str, str | None]] = (),
     event_logo: Path | None = None,
+    brand: BrandMark | None = None,
 ) -> tuple[MatchTitle | None, MatchTitle | None]:
     """``(title_page, closing)`` for ``render_grid_mp4``: the same text on
     both, each held for ``title_page_duration_seconds``; ``None`` where
@@ -74,7 +78,11 @@ def title_cards(
     roster = roster_lines(divisions) if cards.title_division else ()
     card = match_title(match, extra=cards.title_info, roster=roster)
     card = MatchTitle(
-        text=card.text, info=card.info, duration_seconds=cards.title_page_duration_seconds, logo=event_logo
+        text=card.text,
+        info=card.info,
+        duration_seconds=cards.title_page_duration_seconds,
+        logo=event_logo,
+        brand=brand if cards.account_brand else None,
     )
     title = replace(card, variant=cards.title_page_variant or cards.card_variant)
     closing = replace(card, variant=cards.closing_card_variant or cards.card_variant, credit=cards.made_with)

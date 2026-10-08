@@ -18,6 +18,7 @@ import hashlib
 import io
 from pathlib import Path
 
+from .composition import BrandMark
 from .identity import LOGO_MAX_BYTES, LOGO_MAX_SIDE
 from .looks import BRAND_DIR, BRAND_FILE_RE, Look
 
@@ -73,17 +74,28 @@ def brand_path(look: Look) -> Path | None:
     return path
 
 
-def brand_json(look: Look | None, slot: str) -> dict[str, str | None] | None:
+def brand_json(
+    look: Look | None, slot: str, fallback: BrandMark | None = None
+) -> dict[str, str | None] | None:
     """``data.brand`` for a card of ``slot``: the logo's URL and the line,
-    on the title page and the closing card of a Look that has a brand;
-    ``None`` everywhere else, which leaves the context as it always was."""
-    if look is None or slot not in BRAND_SLOTS:
+    on the title page and the closing card of a Look that has a brand; else
+    ``fallback``, the account's brand (spec 2026-10-08), as a whole: a
+    Look's brand is never mixed with the account's. ``None`` everywhere else,
+    which leaves the context as it always was."""
+    if slot not in BRAND_SLOTS:
         return None
-    brand = look.manifest.brand
-    if brand is None or (not brand.logo and not brand.line):
+    brand = look.manifest.brand if look is not None else None
+    if brand is not None and (brand.logo or brand.line):
+        path = brand_path(look) if look is not None else None
+        return {"logo": path.resolve().as_uri() if path is not None else None, "line": brand.line or None}
+    if fallback is None or (fallback.logo_path is None and not fallback.line):
         return None
-    path = brand_path(look)
-    return {"logo": path.resolve().as_uri() if path is not None else None, "line": brand.line or None}
+    logo = fallback.logo_path
+    if logo is not None and (logo.is_symlink() or not logo.is_file()):
+        logo = None
+    if logo is None and not fallback.line:
+        return None
+    return {"logo": logo.resolve().as_uri() if logo is not None else None, "line": fallback.line or None}
 
 
 __all__ = ["BRAND_SLOTS", "BrandError", "brand_json", "brand_path", "save_brand_logo"]

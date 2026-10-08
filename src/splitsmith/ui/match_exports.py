@@ -345,6 +345,9 @@ class MatchExportRequestData:
     closing_card: bool = False
     #: "Made with splitsmith" at the bottom of the closing card.
     made_with: bool = True
+    #: Your account's brand, resolved by the caller (spec 2026-10-08); the
+    #: cards draw it when the Look has no brand of its own.
+    account_brand: composition.BrandMark | None = None
     # Issue #1242. The Look template variant every generated card draws
     # with (``default`` is the still card; the shipped ``splitsmith`` Look
     # adds ``rise``). One knob for all slots until the gallery (#1246)
@@ -740,6 +743,7 @@ def export_match(
                 info=request.title_page_info,
                 duration_seconds=request.title_page_duration_seconds,
                 logo=request.event_logo,
+                brand=request.account_brand,
             )
             title_page = (
                 replace(card, variant=request.title_page_variant or request.card_variant)

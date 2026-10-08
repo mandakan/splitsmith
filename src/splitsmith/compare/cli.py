@@ -10,6 +10,7 @@ import typer
 from rich.console import Console
 
 from .. import camera_select
+from ..account_profile import JsonAccountProfileStore, load_brand
 from ..composition import XFADE_KINDS, uniform_transitions
 from ..config import Config
 from ..export_naming import slugify
@@ -153,6 +154,11 @@ def export(
         True,
         "--made-with/--no-made-with",
         help="'Made with splitsmith' at the bottom of the closing card.",
+    ),
+    account_brand: bool = typer.Option(
+        True,
+        "--account-brand/--no-account-brand",
+        help="Your account's brand on the title page and the closing card, when the Look has none.",
     ),
     card_variant: str = typer.Option(
         "default",
@@ -318,6 +324,7 @@ def export(
                 title_page_duration_seconds=title_page_duration,
                 closing_card=closing_card,
                 made_with=made_with,
+                account_brand=account_brand,
                 card_variant=card_variant,
                 match_summary_seconds=match_summary_seconds if match_summary else 0.0,
             ),
@@ -621,7 +628,13 @@ def _render_grid_mp4(
 
     cards = cards or CardOptions()
     title, closing = (
-        title_cards(match, cards, divisions=bundle_divisions(bundles), event_logo=event_logo)
+        title_cards(
+            match,
+            cards,
+            divisions=bundle_divisions(bundles),
+            event_logo=event_logo,
+            brand=load_brand(JsonAccountProfileStore()),
+        )
         if match is not None
         else (None, None)
     )

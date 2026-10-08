@@ -201,6 +201,9 @@ class MatchExportRequest(BaseModel):
     closing_card: bool = False
     #: "Made with splitsmith" at the bottom of the closing card.
     made_with: bool = True
+    #: Your account's brand on the title page and the closing card, for a
+    #: Look without one of its own (spec 2026-10-08).
+    account_brand: bool = True
     # Issue #1242. The Look template variant every generated card draws
     # with; ``default`` is the still card, the shipped Look adds ``rise``.
     # The CLI's one knob and the fallback for the per-slot fields below.
@@ -266,6 +269,9 @@ class CompareGridRequest(BaseModel):
     closing_card: bool = False
     #: "Made with splitsmith" at the bottom of the closing card.
     made_with: bool = True
+    #: Your account's brand on the title page and the closing card, for a
+    #: Look without one of its own (spec 2026-10-08).
+    account_brand: bool = True
     # Issue #1242. The Look template variant every generated card draws
     # with; ``default`` is the still card, the shipped Look adds ``rise``.
     # The CLI's one knob and the fallback for the per-slot fields (#1246).

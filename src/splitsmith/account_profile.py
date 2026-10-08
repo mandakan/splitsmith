@@ -67,6 +67,17 @@ async def resolve_brand(store: AccountProfileStore) -> BrandMark | None:
     return BrandMark(logo_path=logo, line=brand.line or None)
 
 
+def brand_digest(brand: BrandMark) -> str:
+    """A cache-key token for the brand a card draws: the logo's content name
+    (the file is content-named) and the line."""
+    import hashlib
+
+    payload = json.dumps(
+        {"logo": brand.logo_path.name if brand.logo_path else None, "line": brand.line}, sort_keys=True
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
 def load_brand(store: AccountProfileStore | None) -> BrandMark | None:
     """:func:`resolve_brand` from sync code; a store that fails to read is no
     brand, logged, never a failed render."""
@@ -140,6 +151,7 @@ __all__ = [
     "AccountProfile",
     "AccountProfileStore",
     "EmptyAccountProfileStore",
+    "brand_digest",
     "JsonAccountProfileStore",
     "load_brand",
     "resolve_brand",

@@ -108,6 +108,8 @@ class ExportPresetBody(BaseModel):
     closing_card: bool = False
     #: "Made with splitsmith" on the closing card (on unless turned off).
     made_with: bool = True
+    #: Your account's brand on the cards (on unless turned off).
+    account_brand: bool = True
     stage_card_style: StageCardStyle = "none"
     stage_card_seconds: float = 1.5
     summary_hold_seconds: float = 0.0

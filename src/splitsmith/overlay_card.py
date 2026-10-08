@@ -309,7 +309,7 @@ def _rasterize(
         fps=fps,
         theme=theme,
         shooters=shooters,
-        brand=brand_json(look, slot),
+        brand=brand_json(look, slot, getattr(card, "brand", None)),
     )
     try:
         png_bytes = rasterizer.render_template(template, context=context, width=width, height=height)
@@ -368,7 +368,7 @@ def card_motion(
         fps=fps,
         theme=theme,
         shooters=shooters,
-        brand=brand_json(look, slot),
+        brand=brand_json(look, slot, getattr(card, "brand", None)),
     )
     frames: TemplateFrames | None = None
     try:

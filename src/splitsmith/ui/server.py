@@ -3075,11 +3075,17 @@ def _run_compare_grid(
                 title_page_duration_seconds=req.title_page_duration_seconds,
                 closing_card=req.closing_card,
                 made_with=req.made_with,
+                account_brand=req.account_brand,
                 card_variant=req.card_variant,
                 title_page_variant=req.title_page_variant,
                 closing_card_variant=req.closing_card_variant,
             ),
             divisions=compare_cards.bundle_divisions(filtered),
+            brand=account_profile_module.load_brand(
+                state.account_profile
+                if state is not None
+                else account_profile_module.JsonAccountProfileStore()
+            ),
             event_logo=ensure_local_event_logo(
                 match.branding,
                 root,
@@ -4734,6 +4740,9 @@ def register_job_bodies(state: AppState) -> None:
                 title_page_duration_seconds=req.title_page_duration_seconds,
                 closing_card=req.closing_card,
                 made_with=req.made_with,
+                account_brand=(
+                    account_profile_module.load_brand(state.account_profile) if req.account_brand else None
+                ),
                 card_variant=req.card_variant,
                 title_page_variant=req.title_page_variant,
                 stage_card_variant=req.stage_card_variant,
