@@ -15,6 +15,7 @@ from splitsmith.compare.overlay_summary import (
     _placements_for_plan,
     extract_match_summary_freezes,
     grid_match_summaries,
+    match_summary_cell_scale,
     match_summary_strip_height,
 )
 from splitsmith.composition import MatchTitle
@@ -275,7 +276,7 @@ def test_tiles_keep_their_splits_inside_the_cell_at_every_grid_size(
     }
     plans = [replace(plan, stage_number=n, stage_name=f"Stage {n}") for n in range(1, 13)]
     summaries = grid_match_summaries(plans, data, title="M", duration_seconds=6.0)
-    scale = summary_scale(geometry.cell_height)
+    scale = match_summary_cell_scale(geometry)
     cells = [
         (
             p,
@@ -441,3 +442,10 @@ def test_the_match_summary_alone_launches_the_browser(
     # No overlay, no other card: the summary's own text still needs the browser.
     assert len(entered) == 1
     assert any("Rounds" in html for html in entered[0].calls)
+
+
+def test_a_tall_cell_sizes_its_tile_as_a_16_by_9_one() -> None:
+    two_up = SpriteGeometry(canvas_width=1920, canvas_height=972, rows=1, cols=2)
+    assert match_summary_cell_scale(two_up) == summary_scale(540)
+    two_by_two = SpriteGeometry(canvas_width=1920, canvas_height=972, rows=2, cols=2)
+    assert match_summary_cell_scale(two_by_two) == summary_scale(486)

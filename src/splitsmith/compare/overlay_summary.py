@@ -522,6 +522,14 @@ def match_summary_strip_height(height: int, rows: int) -> int:
     return height - rows * ((height - height // 10) // rows)
 
 
+def match_summary_cell_scale(geometry: SpriteGeometry) -> CellScale:
+    """The type scale of a match summary tile: the stage hold's, but for a
+    cell no taller than 16:9 of its width. A 2-up grid's cells are nearly
+    square, and sizing their figures by height alone ran three split columns
+    into each other; every wider cell (2x2 and up) is unchanged."""
+    return _summary_scale(min(geometry.cell_height, geometry.cell_width * 9 // 16))
+
+
 def grid_match_summaries(
     plans: Sequence[GridStagePlan],
     data: Mapping[tuple[str, int], TileStageData],
@@ -617,7 +625,7 @@ def build_match_summary_grid_still(
             )
     canvas = Image.new("RGBA", (width, height), (0, 0, 0, 255))
     if rasterizer is not None:
-        scale = _summary_scale(geometry.cell_height)
+        scale = match_summary_cell_scale(geometry)
         cells: list[tuple[TilePlacement, tuple[Group, ...]]] = [
             (
                 placement,
