@@ -28,6 +28,7 @@ from typing import Any
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from . import camera_select, match_model, match_trims, user_config
@@ -802,7 +803,10 @@ def reclassify(
         try:
             stage_events = events_from_doc(doc)
         except ValueError as exc:
-            typer.echo(f"stage {entry.stage_number}: skipping events hint, {exc}", err=True)
+            console.print(
+                f"[yellow]note[/] stage {entry.stage_number}: skipping events hint, {escape(str(exc))}",
+                soft_wrap=True,
+            )
             stage_events = []
         before = Counter(s.get("interval_class") or "unset" for s in shots if isinstance(s, dict))
         coach_module.classify_intervals_in_dicts(

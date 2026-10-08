@@ -391,6 +391,27 @@ def test_reclassify_rejudges_auto_intervals_and_keeps_manual_ones(tmp_path: Path
     assert written["audit_events"][-1]["kind"] == "coach_reclassify"
 
 
+def test_reclassify_notes_a_corrupt_events_list_and_classifies_without_it(tmp_path: Path) -> None:
+    root = _seed(tmp_path)
+    audit = root / "shooters" / "me" / "audit" / "stage1.json"
+    doc = json.loads(audit.read_text())
+    doc["shots"] = [
+        {"shot_number": 1, "ms_after_beep": 1500},
+        {"shot_number": 2, "ms_after_beep": 3800},  # 2.3 s: movement
+    ]
+    doc["events"] = [{"id": "evt-1", "kind": "nap", "start": 1.0, "end": 2.0, "source": "manual"}]
+    audit.write_text(json.dumps(doc))
+
+    result = runner.invoke(app, ["match", "reclassify", str(root), "--shooter", "me"])
+    assert result.exit_code == 0, result.output
+    text = strip_ansi(result.output)
+    assert "note stage 1: skipping events hint" in text
+    # The validation detail keeps its bracketed parts rather than being
+    # swallowed as rich markup.
+    assert "[type=" in text
+    assert [s["interval_class"] for s in json.loads(audit.read_text())["shots"]] == ["first_shot", "movement"]
+
+
 # --- --youtube-upload (issue #1000) -----------------------------------------
 
 

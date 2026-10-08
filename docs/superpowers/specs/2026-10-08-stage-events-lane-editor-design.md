@@ -161,12 +161,20 @@ window       := gaps after shots [first .. first + capacity]   # capacity + 1 sh
 repeat while shots remain:
     if capacity is None:
         seed every hinted gap; stop
-    pick in window: the first hinted gap, else the longest gap
+    required := a shot exists at index first + capacity + 1
+    pick in window: the first hinted gap, else (only if required) the longest gap
+    if nothing picked: stop
     seed it (source auto, spanning the whole gap)
     first := the shot after the seeded gap
 ```
 
-With no capacity the hint alone decides, as it does today for the badge.
+The `required` guard keeps a stage that fits in one magazine (a 14-shot
+Production Optics stage) free of a capacity proposal: the longest gap is
+seeded only when the shots run past the bound. With no capacity the hint
+alone decides, as it does today for the badge. A reset re-detection
+drops the `auto` regions and `events_seeded` (manual regions stay), so a
+stage with no surviving manual region is seeded again over the new
+shots.
 A seed spans the whole gap; the user tightens the handles. A touched
 proposal becomes `manual`.
 
@@ -193,14 +201,27 @@ flag. Like the heal, the seed is persisted only for an owner read, and
 never on a mirror (`_is_mirror()`): `events` is a desktop-owned field --
 `sync.merge.merge_audit_doc` starts from a deep copy of local, so local's
 events stand on every pull and a hosted write would only trip the
-non-whitelisted-change note. The share surface reaches none of this (the coach GET is not in
-`_SHARE_PATH_RE`); share consumers get the reload and moving figures
-through `stages[].figures` on the project payload.
+non-whitelisted-change note. The share surface does reach the coach GET
+(`_SHARE_PATH_RE` admits `shooters/{slug}/stages/{n}/coach`): a share
+read seeds and heals in memory only, and the response strips
+`events[].note` as it strips `coaching_note` and `improvement_flag`. The
+PUT is not on the share surface. Share cards and pages get the reload
+and moving figures through `stages[].figures` on the project payload.
+
+The GET seeds but does not re-classify stored shots against a fresh
+seed. Every audit-doc writer that classifies (the audit PUT, triage
+accept, the coach PATCH, `POST /coach/reclassify`, the events PUT) does
+so against the doc's own events through one helper (`_classify_doc`), so
+a region-derived `reload` survives any later save.
 
 ### `PUT /api/shooters/{slug}/stages/{n}/events` (under `/api/matches/{id}/`)
 
 Body `{events: StageEvent[], _version: str}`. Replaces the whole list.
-`validate_lanes` failure is a 422 naming the pair. A stale `_version` is a
+`validate_lanes` failure is a 422 naming the pair. A `NaN` or `Infinity`
+anywhere in the body is a 422 before the lock (`_reject_non_finite`, as
+the audit PUT; #843). The request refuses unknown keys on an event; the
+stored `StageEvent` ignores them, so a doc a newer version wrote still
+loads. A stale `_version` is a
 409 `version_conflict`, the same shape as the audit PUT; the page reloads.
 Writes under `_audit_rmw()`. It is a match write under
 `/api/matches/{id}/`, so auto-sync's dirty middleware marks the match with
@@ -247,12 +268,16 @@ restores the pre-drag state):
 - Press-and-drag on empty lane space creates a region; release commits.
   Under the threshold it is a click, which seeks. A lane click seeks to
   the press point snapped to the nearest shot; the ruler click does not
-  snap. A click on empty lane space also clears the selection. A region
+  snap. A snap that would land inside a same-lane region is dropped for
+  the raw press time, so a create never starts inside a neighbour. A
+  click on empty lane space also clears the selection. A region
   being created stops at its same-lane neighbours.
 - `pointercancel` undoes the gesture like Esc.
 - Drag an edge to resize, the body to move. **While an edge drags the
   video seeks to that edge's time.** Body drag seeks to the leading edge.
-  A time pill follows the handle (time, frame number).
+  A time pill follows the handle (time, frame number), and the moving
+  edge during a create; both count from the beep, the frame at the
+  nudge `fps`.
 - Snap within ~8 px to a shot time or the beep; Alt skips. Neighbours in
   the same lane clamp; a region never overlaps another in its lane.
 - Selected region, editor focused: ArrowLeft / ArrowRight nudge the start
@@ -341,8 +366,10 @@ restore it. A test that passes against the pre-change code is not a test.
   movement stays `split`.
 - Routes: `PUT /events` under the probe lock from
   `test_audit_lock_wiring.py`; 422 on a lane overlap naming the pair; 409
-  on a stale `_version`; the share surface 404s the PUT and the coach
-  GET; the GET seeds once and `events_seeded` stops a second seed after
+  on a stale `_version`; 422 on a non-finite number with the doc
+  untouched; the share surface 404s the PUT and its coach GET strips
+  `events[].note`; a region-derived `reload` survives the Reclassify
+  route, the audit PUT, triage accept and the coach PATCH; the GET seeds once and `events_seeded` stops a second seed after
   the user deletes everything; a `test_match_bundle_queries`-style count
   that the GET adds no `state_docs` SELECT; the `videos[]` entries carry
   `scrub_version` from the presence listing.
