@@ -1011,3 +1011,21 @@ def test_render_template_timeline_budget_grows_with_the_frames(
     )
     with pytest.raises(overlay_raster.TemplateTimeoutError, match="10 frames"):
         list(out.frames)
+
+
+def test_png_relaunches_a_browser_the_watchdog_killed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A template HUD that sticks gets its browser killed; the Classic
+    fallback then draws through ``png()`` on the same rasterizer, which
+    must relaunch rather than fail on the dead browser."""
+    rasterizer = ChromiumRasterizer()
+    dead = _RecordingBrowser()
+    dead.closed = True
+    rasterizer._browser = dead
+    fresh = _RecordingBrowser()
+
+    def relaunch() -> None:
+        rasterizer._browser = fresh
+
+    monkeypatch.setattr(rasterizer, "_launch", relaunch)
+    rasterizer.png("<html><body>x</body></html>", width=8, height=8)
+    assert dead.contexts == [] and len(fresh.contexts) == 1

@@ -154,3 +154,12 @@ def test_page_size_caps_at_1080_lines_and_keeps_even_sides() -> None:
     assert hud_page_size(1280, 720) == (1280, 720)
     assert hud_page_size(3840, 2160) == (1920, 1080)
     assert hud_page_size(2704, 1520) == (1920, 1080)
+
+
+def test_a_shot_before_the_beep_is_placed_at_the_beep() -> None:
+    """An audit can carry a negative ``ms_after_beep``. The frame plan holds
+    seek(0) for every pre-beep frame, so a shot drawn before the beep would
+    pop in part-way through its animation at the beep frame. Classic clamps
+    the same case; here the shot lands on the beep."""
+    data = hud_stage_data([_shot(-0.12, -0.12, "first_shot"), _shot(0.4, 0.52, "split")], beep_in_clip=1.0)
+    assert [s["t"] for s in data["shots"]] == [1.0, 1.4]

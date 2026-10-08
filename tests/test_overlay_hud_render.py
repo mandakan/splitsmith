@@ -87,6 +87,7 @@ class _Encoder:
     def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
         self.calls: list[list[str]] = []
         self.piped: list[int] = []
+        self.kills = 0
         encoder = self
 
         class Stdin:
@@ -112,7 +113,7 @@ class _Encoder:
                 return 0
 
             def kill(self) -> None:
-                return None
+                encoder.kills += 1
 
         def popen(cmd: list[str], **_: Any) -> Proc:
             encoder.calls.append(cmd)
@@ -377,3 +378,18 @@ def test_plate_honours_the_position(tmp_path: Path) -> None:
     frame = _frame_at(out, 50, tmp_path / "f.png")
     assert _alpha_in(frame, (400, 0, 640, 140)) > 200
     assert _alpha_in(frame, (0, 220, 320, 360)) == 0
+
+
+def test_a_failed_cached_render_kills_the_encoder_and_leaves_no_partial(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The fake encoder writes its output when reaped, as a real one flushes
+    on exit: without the kill and the discard, a truncated MOV would sit in
+    the cache root."""
+    encoder = _Encoder(monkeypatch)
+    cache = SegmentCache(root=tmp_path / "cache", max_bytes=10**9)
+    degraded: list[str] = []
+    _render(tmp_path, _FakeRasterizer(fail_at=4), variant="plate", segment_cache=cache, degraded=degraded)
+    assert encoder.kills == 1
+    assert degraded and "fell back to Classic" in degraded[0]
+    assert sorted(p.name for p in cache.root.iterdir()) == []

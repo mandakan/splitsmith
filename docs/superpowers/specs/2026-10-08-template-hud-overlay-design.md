@@ -100,8 +100,9 @@ draw, a reload, an activation and an unclassified shot have no tier
 three shots on the stage has no median and its shots no tier (a median of two
 says nothing).
 
-`data.options`: `speed_colors`, `class_labels`, `landing`, `position` (resolved:
-never `None`).
+`data.options`: `speed_colors`, `class_labels`, `landing`, `position` (resolved
+against what the template declares; `None` only for a template that declares no
+positions and places itself).
 
 The theme, fonts, size and fps reach the template as for the cards
 (`TemplateContext`); the shared `_shared/` scripts are mounted.

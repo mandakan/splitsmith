@@ -689,7 +689,7 @@ class ChromiumRasterizer:
         with tempfile.TemporaryDirectory(prefix="splitsmith-overlay-raster-") as tmp:
             html_path = Path(tmp) / "summary.html"
             html_path.write_text(html, encoding="utf-8")
-            context = self._browser.new_context(
+            context = self._live_browser().new_context(
                 viewport={"width": width, "height": height},
                 device_scale_factor=DEVICE_SCALE_FACTOR,
             )

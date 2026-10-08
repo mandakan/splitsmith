@@ -97,14 +97,16 @@ def speed_tiers(shots: Sequence[TileShot]) -> list[SpeedTier | None]:
 
 def hud_stage_data(shots: Sequence[TileShot], *, beep_in_clip: float) -> dict[str, Any]:
     """``data.stage``: the beep and every shot in clip seconds, each with
-    its split, class, label and tier. Numbers are rounded to the
-    microsecond so float noise never moves a cache key."""
+    its split, class, label and tier. A shot the audit places before the
+    beep is drawn at the beep: the HUD is static before it (the frame plan
+    holds one frame there), as Classic clamps the same case. Numbers are
+    rounded to the microsecond so float noise never moves a cache key."""
     tiers = speed_tiers(shots)
     return {
         "beep": round(beep_in_clip, 6),
         "shots": [
             {
-                "t": round(beep_in_clip + shot.time_from_beep, 6),
+                "t": round(beep_in_clip + max(0.0, shot.time_from_beep), 6),
                 "split": round(shot.split, 6),
                 "cls": shot.interval_class,
                 "label": CLASS_LABELS.get(shot.interval_class) if shot.interval_class else None,
