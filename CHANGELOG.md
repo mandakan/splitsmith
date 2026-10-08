@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.64.1](https://github.com/mandakan/splitsmith/compare/v0.64.0...v0.64.1) (2026-10-08)
+
+
+### Bug Fixes
+
+* **identity:** the roster and title page show the shooter book's look ([#1303](https://github.com/mandakan/splitsmith/issues/1303)) ([53f2c2c](https://github.com/mandakan/splitsmith/commit/53f2c2c486d89f5974f6c8ed8c59f5cbd2dcc913))
+
 ## [0.64.0](https://github.com/mandakan/splitsmith/compare/v0.63.0...v0.64.0) (2026-10-08)
 
 
