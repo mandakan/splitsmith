@@ -61,6 +61,7 @@ import { useMatchHref } from "@/lib/matchHref";
 import { useUploads } from "@/lib/uploads";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { damagedTakes, storedFilename, takeDamageText } from "@/lib/takeDamage";
+import { pinBody } from "@/lib/you";
 import { applyAssignmentLocally, buildClipModel, removeVideoLocally, type ClipItem } from "@/pages/ingest/model";
 
 type StorageMode = "symlink" | "copy";
@@ -974,7 +975,7 @@ function IngestInner({ slug }: { slug: string }) {
               onThisIsMe={(s) => {
                 if (s.selected_shooter_id == null) return;
                 void api
-                  .putScoreboardIdentity({ shooter_id: s.selected_shooter_id, display_name: s.name })
+                  .putScoreboardIdentity(pinBody({ shooterId: s.selected_shooter_id, name: s.name }, me))
                   .then(setMe)
                   .catch(() => undefined);
               }}

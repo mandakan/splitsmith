@@ -2177,6 +2177,11 @@ export interface ScoreboardIdentity {
   base_url: string | null;
 }
 
+/** ``PUT /api/me/scoreboard-identity``: replaces the pin whole (build it
+ *  with ``lib/you.pinBody``). */
+export type ScoreboardPin = Omit<ScoreboardIdentity, "display_name" | "division" | "club" | "base_url"> &
+  Partial<Pick<ScoreboardIdentity, "display_name" | "division" | "club" | "base_url">>;
+
 /** One entry from ``GET /api/me/recent-projects``. ``last_opened_at``
  *  is an ISO-8601 UTC timestamp the picker uses to sort. ``path`` is
  *  resolved server-side; we don't normalise it client-side. ``kind``
@@ -4042,7 +4047,7 @@ export const api = {
     request<ScoreboardIdentity | null>("/api/me/scoreboard-identity"),
 
   /** Pin yourself: your SSI shooter id (and the name it was found under). */
-  putScoreboardIdentity: (body: { shooter_id: number; display_name?: string | null; club?: string | null; division?: string | null }) =>
+  putScoreboardIdentity: (body: ScoreboardPin) =>
     request<ScoreboardIdentity>("/api/me/scoreboard-identity", { method: "PUT", json: body }),
 
   clearScoreboardIdentity: () => request<{ ok: boolean }>("/api/me/scoreboard-identity", { method: "DELETE" }),

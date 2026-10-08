@@ -686,6 +686,7 @@ def export(
         raise typer.Exit(code=1) from exc
 
     project_name = project.name or match.name or "match"
+    book = load_snapshot(JsonShooterBookStore())
     request = match_exports.MatchExportRequestData(
         event_logo=ensure_local_event_logo(match.branding, match_path, storage=None, match_id=None),
         stage_numbers=tuple(stage_numbers),
@@ -710,6 +711,7 @@ def export(
             project,
             extra=title_info,
             division=competitor_division(project, shooter_root) if title_division else None,
+            book=book,
         ),
         title_page_duration_seconds=title_page_duration,
         closing_card=closing_card,
@@ -727,7 +729,7 @@ def export(
             look=load_look(overlay_theme),
             index=0,
             label=shooter_label or project_name,
-            book=load_snapshot(JsonShooterBookStore()),
+            book=book,
         ),
     )
     exports_dir = project.exports_path(shooter_root)

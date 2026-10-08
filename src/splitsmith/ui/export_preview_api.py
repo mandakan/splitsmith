@@ -257,6 +257,7 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
                 event_logo=event_logo,
                 match_summary=match_summary,
                 brand=brand,
+                book=book,
             )
 
     try:

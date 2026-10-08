@@ -17,6 +17,7 @@ what it always was. Never a ``state_docs`` kind.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -188,7 +189,8 @@ async def backfill(store: ShooterBookStore, candidates: Sequence[BackfillCandida
         logo_bytes = None
         if candidate.identity.logo is not None:
             try:
-                logo_bytes = candidate.read_logo()
+                # Off the event loop: hosted, this is a storage read.
+                logo_bytes = await asyncio.to_thread(candidate.read_logo)
             except Exception as exc:  # noqa: BLE001 -- the look without its logo is still worth keeping
                 logger.info("shooter book: could not read a logo for %s (%s)", sid, exc)
         await save_identity(

@@ -494,7 +494,10 @@ fall back to the local files on a hosted server. The book fills once from the
 account's existing matches (``account_backfill``; most recent wins, entries the
 book already holds are kept; ``account_profiles.backfilled_at`` hosted, a
 ``.backfilled`` marker locally). Never a ``state_docs`` kind, not synced
-between desktop and hosted, and no share route reads either.
+between desktop and hosted, and no share route reads either: the roster (the
+shooters list, Compare's payload, the logo route) and the title page's club line
+show the look the video draws (``identity_media.effective_identity``) through
+``_roster_book``, which is the empty book on a share request.
 
 The single-shooter MP4 draws **transitions** (#1244, spec section 3) on a
 boundary segment. ``plan_timeline`` turns the stage-indexed

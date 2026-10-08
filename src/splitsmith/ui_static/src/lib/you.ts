@@ -4,13 +4,31 @@
  * shooter id on your scoreboard identity; a shooter is you only by that id,
  * never by name.
  */
-import type { IdentitySource, ScoreboardIdentity, ShooterIdentity } from "@/lib/api";
+import type { IdentitySource, ScoreboardIdentity, ScoreboardPin, ShooterIdentity } from "@/lib/api";
 
 export const YOU_FEATURE = "your-brand-and-shooter-book";
 
 /** Whether this match's shooter is you. A shooter with no SSI id never is. */
 export function isYou(selectedShooterId: number | null | undefined, me: ScoreboardIdentity | null): boolean {
   return me !== null && selectedShooterId != null && selectedShooterId === me.shooter_id;
+}
+
+/** The body that pins a shooter as you. The pin is replaced whole, so what
+ *  it already knows is carried over: the club and division when it is the
+ *  same shooter (a roster pin knows neither), the scoreboard address always.
+ *  A different shooter takes only what was found with them. */
+export function pinBody(
+  shooter: { shooterId: number; name: string; club?: string | null; division?: string | null },
+  me: ScoreboardIdentity | null,
+): ScoreboardPin {
+  const same = me !== null && me.shooter_id === shooter.shooterId;
+  return {
+    shooter_id: shooter.shooterId,
+    display_name: shooter.name,
+    club: shooter.club ?? (same ? me.club : null),
+    division: shooter.division ?? (same ? me.division : null),
+    base_url: me?.base_url ?? null,
+  };
 }
 
 /** The identity sheet's line on where a shooter's look comes from.

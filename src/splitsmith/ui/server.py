@@ -291,6 +291,7 @@ from .comments import (
 from .exports_api import CompareGridRequest, ExportStageRequest, MatchExportRequest
 from .http_errors import ensure_source_reachable, source_unreachable
 from .identity_media import (
+    effective_identity,
     ensure_local_event_logo,
     ensure_local_logo,
     event_logo_storage_key,
@@ -4708,6 +4709,7 @@ def register_job_bodies(state: AppState) -> None:
                 raise RuntimeError(f"{exc} (disappeared mid-flight)") from exc
 
             project_name = req.project_name or proj.name or "match"
+            book = shooter_book_module.load_snapshot(state.shooter_book)
             request_data = match_export_helpers.MatchExportRequestData(
                 event_logo=_current_event_logo(state),
                 stage_numbers=tuple(req.stage_numbers),
@@ -4740,6 +4742,7 @@ def register_job_bodies(state: AppState) -> None:
                     division=(
                         competitor_division(proj, state.shooter_root(slug)) if req.title_division else None
                     ),
+                    book=book,
                 ),
                 title_page_duration_seconds=req.title_page_duration_seconds,
                 closing_card=req.closing_card,
@@ -4762,7 +4765,7 @@ def register_job_bodies(state: AppState) -> None:
                     look=load_look(req.overlay_theme),
                     index=0,
                     label=proj.competitor_name or project_name,
-                    book=shooter_book_module.load_snapshot(state.shooter_book),
+                    book=book,
                 ),
             )
             try:
@@ -13247,6 +13250,15 @@ def create_app(
                 logger.warning("identity: could not copy the book's logo into %s (%s)", slug, exc)
         return entry.model_copy(update={"logo": logo})
 
+    def _roster_book() -> shooter_book_module.BookSnapshot:
+        """The shooter book the roster reads (the shooters list, Compare's
+        payload, the logo route), so the ring shows the look the video draws.
+        A share request reads none: the book is the owner's account data and
+        no share route reads it."""
+        if current_share_request.get():
+            return shooter_book_module.EMPTY_BOOK
+        return shooter_book_module.load_snapshot(state.shooter_book)
+
     def _identity_view(project: MatchProject) -> dict[str, Any]:
         """The identity sheet's view: where the look comes from and what it is."""
         book = shooter_book_module.load_snapshot(state.shooter_book)
@@ -13363,7 +13375,12 @@ def create_app(
         the request to that match's shooters. Content-named and sniffed on
         upload (PNG, JPEG, WebP, never SVG); served with ``nosniff``."""
         project = state.shooter_project(slug)
-        path = ensure_local_logo(project, state.shooter_root(slug))
+        book = _roster_book()
+        if identity_source(project, book) == "book":
+            entry = book.get(project.selected_shooter_id)
+            path = book.logo_path(entry) if entry is not None else None
+        else:
+            path = ensure_local_logo(project, state.shooter_root(slug))
         if path is None or not path.is_file():
             raise HTTPException(status_code=404, detail="no logo")
         media = {".png": "image/png", ".jpeg": "image/jpeg", ".jpg": "image/jpeg", ".webp": "image/webp"}.get(
@@ -15879,7 +15896,10 @@ def create_app(
         return match_root, state.match()
 
     def _classify_shooter(
-        shooter_root: Path, match: match_model.Match, presence: StoragePresence | None
+        shooter_root: Path,
+        match: match_model.Match,
+        presence: StoragePresence | None,
+        book: shooter_book_module.BookSnapshot = shooter_book_module.EMPTY_BOOK,
     ) -> ShooterListEntry:
         """Build a list entry for a single shooter directory.
 
@@ -15976,7 +15996,7 @@ def create_app(
             video_count=total_videos,
             cameras=cameras,
             stages_missing_trim=stages_missing_trim,
-            identity=legacy.identity,
+            identity=effective_identity(legacy, book),
             stage_statuses=[
                 StageStatusEntry(stage_number=n, status=st) for n, st in sorted(stage_status_map.items())
             ],
@@ -16101,11 +16121,12 @@ def create_app(
         # shooter. A share request gets none: its viewer never sees the
         # count the index exists to compute.
         presence = None if current_share_request.get() else StoragePresence(state.storage)
+        book = _roster_book()
         entries: list[ShooterListEntry] = []
         for slug in match.shooters:
             shooter_root = match_model.Match.shooter_root(match_root, slug)
             try:
-                entries.append(_classify_shooter(shooter_root, match, presence))
+                entries.append(_classify_shooter(shooter_root, match, presence, book))
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Skipping shooter %s: %s", slug, exc)
                 continue
@@ -16650,6 +16671,7 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
         records: list[CompareShooterRecord] = []
+        book = _roster_book()
         for slug in match.shooters:
             shooter_root = match_model.Match.shooter_root(match_root, slug)
             try:
@@ -16725,7 +16747,7 @@ def create_app(
                     duration_seconds=duration_seconds,
                     stage_time_seconds=(stage.time_seconds if stage is not None else None),
                     shots=shots,
-                    identity=legacy.identity,
+                    identity=effective_identity(legacy, book),
                 )
             )
 
