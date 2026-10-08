@@ -33,13 +33,24 @@ from .user_config import user_config_dir
 
 logger = logging.getLogger(__name__)
 
-SLOT_NAMES: tuple[str, ...] = ("title_page", "slate", "lower_third", "summary", "closing", "transition")
+SLOT_NAMES: tuple[str, ...] = (
+    "title_page",
+    "slate",
+    "lower_third",
+    "summary",
+    "closing",
+    "transition",
+    "overlay",
+)
 """Every slot a manifest may name. ``summary`` is reserved: no renderer
 reads it in this slice, the stage summary still composes through
 ``overlay_summary_cell``. ``transition`` holds the Look's stings (issue
-#1245): each variant is a ``sting:<variant>`` transition kind."""
+#1245): each variant is a ``sting:<variant>`` transition kind.
+``overlay`` holds the template HUDs (spec 2026-10-08): its ``default`` is
+the engine's Classic overlay and can never name a file."""
 
 STING_SLOT = "transition"
+OVERLAY_SLOT = "overlay"
 PREVIEW_DIR = "preview"
 """Where a Look keeps the gallery's pictures of it (issue #1246):
 ``<slot>-<variant>.png`` (or ``.webp``) per template variant and
@@ -210,6 +221,11 @@ class LookManifest(BaseModel):
         for slot, variants in value.items():
             if slot not in SLOT_NAMES:
                 raise ValueError(f"unknown slot {slot!r}; expected one of {SLOT_NAMES}")
+            if slot == OVERLAY_SLOT and DEFAULT_VARIANT in variants:
+                raise ValueError(
+                    "slot 'overlay': 'default' is the engine's Classic overlay and cannot name a template; "
+                    "give the template a variant name"
+                )
             for variant, file in variants.items():
                 if not _NAME_RE.match(variant):
                     raise ValueError(f"slot {slot!r}: variant name {variant!r} must match {_NAME_RE.pattern}")
@@ -456,6 +472,19 @@ def sting_template_for(look: Look, name: str) -> Path | None:
     return _shipped_default().own_template(STING_SLOT, name)
 
 
+def overlay_template_for(look: Look, variant: str) -> Path | None:
+    """The template that draws the live HUD in ``variant`` for ``look``:
+    the Look's own, else the shipped default Look's. ``None`` for
+    ``default`` (Classic, drawn by the engine) and for a variant neither
+    has; the renderer draws Classic then and notes why."""
+    if variant == DEFAULT_VARIANT:
+        return None
+    own = look.own_template(OVERLAY_SLOT, variant)
+    if own is not None:
+        return own
+    return _shipped_default().own_template(OVERLAY_SLOT, variant)
+
+
 def preview_file(look: Look, slot: str, variant: str = DEFAULT_VARIANT) -> Path | None:
     """The picture the gallery shows for ``variant`` of ``slot`` in ``look``
     (``slot`` ``"look"`` is the Look's own sample tile): the Look's
@@ -568,6 +597,7 @@ __all__ = [
     "DEFAULT_VARIANT",
     "REQUIRED_COLORS",
     "SLOT_NAMES",
+    "OVERLAY_SLOT",
     "STING_SLOT",
     "CardSlot",
     "Look",
@@ -594,6 +624,7 @@ __all__ = [
     "look_names",
     "shared_dir",
     "shipped_looks_dir",
+    "overlay_template_for",
     "sting_template_for",
     "template_for",
     "user_looks_dir",
