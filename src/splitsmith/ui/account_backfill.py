@@ -106,9 +106,11 @@ def hosted_backfill_source(matches_store: Any, project_state: Any, storage: Any)
                     continue
                 logo = project.identity.logo
 
-                def read(key: str | None = (
-                    f"matches/{match_id}/shooters/{slug}/{LOGO_DIR}/{logo}" if logo else None
-                )) -> bytes | None:
+                def read(
+                    key: str | None = (
+                        f"matches/{match_id}/shooters/{slug}/{LOGO_DIR}/{logo}" if logo else None
+                    ),
+                ) -> bytes | None:
                     if key is None or storage is None or not storage.exists(key):
                         return None
                     return storage.read_bytes(key)
