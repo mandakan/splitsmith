@@ -63,6 +63,14 @@ TEMPLATE_SECONDS = 300.0
 #: The longest animation the renderer samples, whatever ``duration()`` says.
 MAX_ANIMATION_SECONDS = 60.0
 
+#: A template HUD (spec 2026-10-08) loads within this, then gets
+#: HUD_FRAME_SECONDS per frame it renders: its total grows with the live
+#: span, so a long field course is never refused the way a card's fixed
+#: MAX_ANIMATION_SECONDS would refuse it. Measured: about 0.05 s a frame at
+#: 1080p (#1305); a template slower than 1 s a frame is broken, not slow.
+HUD_LOAD_SECONDS = 30.0
+HUD_FRAME_SECONDS = 1.0
+
 _FILE_URL = re.compile(r"file://[^\"'\s)\\<>]+")
 #: What a ``logo`` value may name (``identity``'s upload writes these).
 _LOGO_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".webp"})
@@ -207,6 +215,8 @@ def prepare(template: Path, context: TemplateContext) -> tuple[Sandbox, Template
 
 __all__ = [
     "CALL_SECONDS",
+    "HUD_FRAME_SECONDS",
+    "HUD_LOAD_SECONDS",
     "HOST",
     "LOAD_SECONDS",
     "MAX_ANIMATION_SECONDS",

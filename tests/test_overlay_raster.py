@@ -94,6 +94,7 @@ class _RecordingPage:
         "fit": "window.__splitsmithFit && window.__splitsmithFit()",
         "fonts": "document.fonts.ready",
         "probe": "probe",
+        "hud": "typeof window.settle",
     }
     binding = None
 
@@ -920,3 +921,93 @@ def test_a_template_cannot_answer_for_a_call_it_cannot_name(tmp_path: Path) -> N
         assert view.delivered == {}
     finally:
         view.close()
+
+
+# --- render_template_timeline(): the template HUD ------------------------------
+
+
+class _HudPage(_RecordingPage):
+    """A HUD template: ``seek`` and a 0.2 s ``settle``."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.answers = {"typeof window.settle": {"seek": True, "settle": 0.2}}
+
+
+class _NoSettlePage(_RecordingPage):
+    def __init__(self) -> None:
+        super().__init__()
+        self.answers = {"typeof window.settle": {"seek": True, "settle": None}}
+
+
+class _NoSeekPage(_RecordingPage):
+    def __init__(self) -> None:
+        super().__init__()
+        self.answers = {"typeof window.settle": {"seek": False, "settle": 0.0}}
+
+
+def test_render_template_timeline_hands_settle_to_the_plan_and_seeks_its_times(tmp_path: Path) -> None:
+    rasterizer = ChromiumRasterizer()
+    rasterizer._browser = _RecordingBrowser(page_factory=_HudPage)
+    asked: list[float] = []
+
+    def plan(settle: float) -> list[float]:
+        asked.append(settle)
+        return [0.0, 1.0, 1.1]
+
+    out = rasterizer.render_template_timeline(
+        _template(tmp_path), context=_context_fixture(), width=2, height=2, plan=plan
+    )
+    assert asked == [0.2]
+    assert (out.duration, out.frame_count) == (0.2, 3)
+    frames = list(out.frames)
+    assert len(frames) == 3 and all(len(f) == 2 * 2 * 4 for f in frames)
+    page = rasterizer._browser.contexts[0].pages[0]
+    seeks = [c[1] for c in page.calls if "window.seek(" in c[1]]
+    # One seek at 0 to lay out and fit, then one per planned time.
+    assert [s[s.index("window.seek(") :] for s in seeks] == [
+        f"window.seek({t}) : undefined" for t in (0.0, 0.0, 1.0, 1.1)
+    ]
+    assert page.screenshots == 3
+    assert rasterizer._browser.contexts[0].closed
+
+
+def test_render_template_timeline_refuses_a_template_without_settle(tmp_path: Path) -> None:
+    rasterizer = ChromiumRasterizer()
+    rasterizer._browser = _RecordingBrowser(page_factory=_NoSettlePage)
+    with pytest.raises(overlay_raster.TemplateScriptError, match="settle"):
+        rasterizer.render_template_timeline(
+            _template(tmp_path), context=_context_fixture(), width=2, height=2, plan=lambda s: [0.0]
+        )
+    assert rasterizer._browser.contexts[0].closed
+
+
+def test_render_template_timeline_refuses_a_template_without_seek(tmp_path: Path) -> None:
+    rasterizer = ChromiumRasterizer()
+    rasterizer._browser = _RecordingBrowser(page_factory=_NoSeekPage)
+    with pytest.raises(overlay_raster.TemplateScriptError, match="seek"):
+        rasterizer.render_template_timeline(
+            _template(tmp_path), context=_context_fixture(), width=2, height=2, plan=lambda s: [0.0]
+        )
+
+
+def test_render_template_timeline_budget_grows_with_the_frames(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The card's fixed budget would refuse a long course; the HUD's grows
+    with the frames, and is still a hard stop."""
+    rasterizer = ChromiumRasterizer()
+    rasterizer._browser = _RecordingBrowser(page_factory=_HudPage)
+    clock = iter([0.0] + [0.5 * i for i in range(1, 400)])
+    monkeypatch.setattr(overlay_raster.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(look_sandbox, "HUD_LOAD_SECONDS", 0.0)
+    monkeypatch.setattr(look_sandbox, "HUD_FRAME_SECONDS", 0.4)
+    out = rasterizer.render_template_timeline(
+        _template(tmp_path),
+        context=_context_fixture(),
+        width=2,
+        height=2,
+        plan=lambda s: [0.1 * i for i in range(10)],
+    )
+    with pytest.raises(overlay_raster.TemplateTimeoutError, match="10 frames"):
+        list(out.frames)
