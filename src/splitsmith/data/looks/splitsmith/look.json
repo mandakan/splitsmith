@@ -92,7 +92,11 @@
       "rise": "card-rise.html"
     },
     "overlay": {
-      "plate": "hud-plate.html"
+      "minimal": "hud-minimal.html",
+      "pips": "hud-pips.html",
+      "plate": "hud-plate.html",
+      "ticker": "hud-ticker.html",
+      "timeline": "hud-timeline.html"
     },
     "slate": {
       "default": "card.html",

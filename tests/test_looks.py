@@ -427,4 +427,4 @@ def test_an_overlay_variant_no_look_has_is_none(user_dir: Path) -> None:
 
 def test_the_catalog_lists_the_overlay_variants(user_dir: Path) -> None:
     splitsmith = next(c for c in looks.look_catalog() if c.name == "splitsmith")
-    assert [v.name for v in splitsmith.slots["overlay"]] == ["plate"]
+    assert [v.name for v in splitsmith.slots["overlay"]] == ["minimal", "pips", "plate", "ticker", "timeline"]
