@@ -466,6 +466,36 @@ shooter without one is gone. It syncs at match level
 renderer resolves it through ``identity_media.ensure_local_event_logo``,
 which mirrors it down on hosted and answers ``None`` when it is missing.
 
+**You, your brand and the shooter book** (spec
+``2026-10-08-account-identity-and-shooter-book-design``). "You" is the existing
+``ScoreboardIdentity.shooter_id``. The **shooter book** (``shooter_book``) keeps
+a shooter's look per account keyed by SSI shooter id, never by name:
+``identity_media.identity_source`` takes the match's own record when it sets
+anything (as a whole), else the book's entry for ``selected_shooter_id``, else
+nothing, so an empty book renders exactly as before. Renderers never read a
+store: the request layer loads ``load_snapshot(state.shooter_book)`` once per
+export and passes ``book=`` to ``resolved_identity_for`` / ``grid_identities``
+(every export job, the preview, the palette route, both CLIs). Identity edits
+write the book (``scope="book"``, the default; ``"match"`` keeps an edit here;
+an empty look removes the entry); an edit to a shooter whose match sets nothing
+starts from the book's look, logo copied in; ``use-book`` is refused when the
+book has nothing to fall back to. The account's **brand** (``AccountProfile``,
+the shape of ``LookBrand``) is ``MatchTitle.brand``, resolved by the request
+layer like the event logo; ``look_brand.brand_json`` draws the Look's brand when
+it has one, else the account's, as a whole. ``account_brand`` (default on) on
+every request body, the preset and both CLIs turns it off. The preview key gains
+``book_identity`` / ``account_brand`` only when the card draws them. Stores:
+``JsonShooterBookStore`` / ``JsonAccountProfileStore`` under ``<user
+config>/account/`` locally; hosted ``db.account_identity`` (tables
+``shooter_book`` and ``account_profiles`` under RLS, files in the tenant's own
+storage prefix at ``account/files/`` and ``account/brand/``, mirrored into the
+cache by content name). ``AppState.shooter_book`` / ``account_profile`` never
+fall back to the local files on a hosted server. The book fills once from the
+account's existing matches (``account_backfill``; most recent wins, entries the
+book already holds are kept; ``account_profiles.backfilled_at`` hosted, a
+``.backfilled`` marker locally). Never a ``state_docs`` kind, not synced
+between desktop and hosted, and no share route reads either.
+
 The single-shooter MP4 draws **transitions** (#1244, spec section 3) on a
 boundary segment. ``plan_timeline`` turns the stage-indexed
 ``Composition.transitions`` into ``TimelinePlan.boundaries`` between
