@@ -26,9 +26,22 @@ class _Prober:
     def __exit__(self, *exc) -> None:
         return None
 
-    def probe_template(self, template: Path, *, context, width: int, height: int) -> TemplateProbe:
+    def probe_template(
+        self, template: Path, *, context, width: int, height: int, at: float | None = None
+    ) -> TemplateProbe:
         broken = "BOOM" in template.read_text(encoding="utf-8")
         return TemplateProbe(errors=("line 2: boom",) if broken else (), families=("Splitsmith Display",))
+
+    def render_template_timeline(
+        self, template: Path, *, context, width: int, height: int, plan
+    ):  # noqa: ANN001
+        """A HUD that is still everywhere: the same frame at every time."""
+        from splitsmith.overlay_raster import TemplateFrames
+
+        times = list(plan(0.0))
+        return TemplateFrames(
+            duration=0.0, frame_count=len(times), width=1, height=1, frames=iter([b"x"] * len(times))
+        )
 
 
 @pytest.fixture

@@ -166,6 +166,12 @@ template failure or an unknown variant draws Classic and lands in
 ``degraded``; no browser is still ``OverlayRenderError``. Classic's argv
 and pixels never change for any of this; check with
 ``scripts/render_overlay_frames.py`` against main.
+``looks check`` runs a HUD template on three sample stages
+(``look_tools.hud_samples``: twelve rounds with classes, thirty-two, none
+classified), probed at rest mid-stage and landed, and renders frames either
+side of the live span to catch motion the frame plan would freeze; the
+``hud`` starter is the minimal template and ``docs/looks/authoring.md``
+documents the contract.
 
 The single-shooter render keeps every encoded segment in
 ``segment_cache`` (``<cache_dir>/render-segments``, LRU past

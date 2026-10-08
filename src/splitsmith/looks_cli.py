@@ -8,8 +8,9 @@ The work is ``splitsmith.look_tools``; this file only prints.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
+from types import TracebackType
 
 import typer
 from rich.console import Console
@@ -163,21 +164,35 @@ class _LazyProber:
     missing or whose manifest does not read is reported with no browser."""
 
     def __init__(self) -> None:
-        self._context = None
-        self._rasterizer = None
+        self._context: AbstractContextManager[ChromiumRasterizer] | None = None
+        self._rasterizer: ChromiumRasterizer | None = None
 
     def __enter__(self) -> _LazyProber:
         return self
 
-    def __exit__(self, *exc: object) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
         if self._context is not None:
-            self._context.__exit__(*exc)
+            self._context.__exit__(exc_type, exc, tb)
 
-    def probe_template(self, template: Path, *, context, width: int, height: int):  # type: ignore[no-untyped-def]
+    def _browser(self) -> ChromiumRasterizer:
         if self._rasterizer is None:
-            self._context = open_chromium()
-            self._rasterizer = self._context.__enter__()
-        return self._rasterizer.probe_template(template, context=context, width=width, height=height)
+            context = open_chromium()
+            self._rasterizer = context.__enter__()
+            self._context = context
+        return self._rasterizer
+
+    def probe_template(self, template: Path, *, context, width: int, height: int, at=None):  # type: ignore[no-untyped-def]
+        return self._browser().probe_template(template, context=context, width=width, height=height, at=at)
+
+    def render_template_timeline(self, template: Path, *, context, width: int, height: int, plan):  # type: ignore[no-untyped-def]
+        return self._browser().render_template_timeline(
+            template, context=context, width=width, height=height, plan=plan
+        )
 
 
 def _stage_frame(project_root: Path, stage: int, look_name: str):  # type: ignore[no-untyped-def]
