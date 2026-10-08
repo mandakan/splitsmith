@@ -9,14 +9,17 @@ a rule that changes here changes there in the same change.
 
 from __future__ import annotations
 
+import os
 import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Final
 
 from pydantic import BaseModel
 
-from .config import StageEvent
+from .config import Config, DivisionCapacityConfig, StageEvent
+from .runtime import ENV_CONFIG_FILE
 
 EVENTS_FIELD: Final = "events"
 EVENTS_SEEDED_FIELD: Final = "events_seeded"
@@ -145,3 +148,78 @@ def stage_event_summary(
         overhang_s=sum(f.overhang for f in figs if f.overhang is not None and f.overhang > 0),
         capacity_warning=_capacity_warning(shot_times, reloads, capacity),
     )
+
+
+def capacity_config() -> DivisionCapacityConfig:
+    """The capacity table, from ``SPLITSMITH_CONFIG`` when set (the same
+    accessor shape as ``coach.auto_classify_config``)."""
+    raw = os.environ.get(ENV_CONFIG_FILE, "").strip()
+    if not raw:
+        return DivisionCapacityConfig()
+    return Config.load(Path(raw).expanduser()).division_capacity
+
+
+def _norm_division(division: str) -> str:
+    return " ".join(division.split()).casefold()
+
+
+def capacity_for(division: str | None, config: DivisionCapacityConfig | None = None) -> int | None:
+    if not division:
+        return None
+    table = {_norm_division(k): v for k, v in (config or capacity_config()).capacities.items()}
+    return table.get(_norm_division(division))
+
+
+def seed_events(shot_times: Sequence[float], *, hint_min_s: float, capacity: int | None) -> list[StageEvent]:
+    """Propose ``reload`` regions, each spanning a whole gap, ``source="auto"``.
+
+    Without a capacity: every gap over the hint. With one: ``capacity + 1``
+    shots fit before a reload is forced, so from shot ``first`` the reload
+    sits in one of the gaps after shots ``first .. first + capacity``; the
+    first hinted gap in that window wins, else the longest; then the window
+    advances to the shot after the seed. Movement is never seeded.
+    """
+    times = sorted(shot_times)
+    gaps = [times[i + 1] - times[i] for i in range(len(times) - 1)]
+    seeds: list[StageEvent] = []
+
+    def _seed(g: int) -> None:
+        seeds.append(
+            StageEvent(
+                id=next_event_id(seeds), kind="reload", start=times[g], end=times[g + 1], source="auto"
+            )
+        )
+
+    if capacity is None:
+        for g, gap in enumerate(gaps):
+            if gap > hint_min_s:
+                _seed(g)
+        return seeds
+
+    first = 0
+    while first < len(gaps):
+        window = range(first, min(first + capacity, len(gaps) - 1) + 1)
+        required = first + capacity <= len(gaps) - 1  # a shot beyond capacity + 1 exists
+        hinted = [g for g in window if gaps[g] > hint_min_s]
+        if hinted:
+            chosen = hinted[0]
+        elif required:
+            chosen = max(window, key=lambda g: gaps[g])
+        else:
+            break
+        _seed(chosen)
+        first = chosen + 1
+    return seeds
+
+
+def seed_doc(doc: dict[str, Any], *, hint_min_s: float, capacity: int | None) -> bool:
+    """Seed once per stage. Returns True when the doc changed."""
+    if doc.get(EVENTS_SEEDED_FIELD) or doc.get(EVENTS_FIELD):
+        return False
+    times = shot_times_from_doc(doc)
+    if not times:
+        return False
+    seeds = seed_events(times, hint_min_s=hint_min_s, capacity=capacity)
+    doc[EVENTS_FIELD] = [e.model_dump(exclude_none=True) for e in seeds]
+    doc[EVENTS_SEEDED_FIELD] = True
+    return True

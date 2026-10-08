@@ -546,6 +546,27 @@ class CoachAutoClassifyConfig(BaseModel):
     reload_hint_min_s: float = Field(default=2.50, gt=0.0)
 
 
+class DivisionCapacityConfig(BaseModel):
+    """Magazine capacity per division, keyed on the division string as SSI
+    spells it (the power factor is in the name where it matters:
+    "Classic Major"). ``capacity + 1`` is the most rounds a shooter can
+    fire before a reload (one chambered on a full magazine), and that is a
+    bound the seeder uses, never a count. Open and Standard have no entry.
+    A YAML override replaces the table.
+    """
+
+    capacities: dict[str, int] = Field(
+        default_factory=lambda: {
+            "Production": 15,
+            "Production Optics": 15,
+            "Classic Minor": 10,
+            "Classic Major": 8,
+            "Revolver Minor": 8,
+            "Revolver Major": 6,
+        }
+    )
+
+
 class BeepWindowConfig(BaseModel):
     """Search-window derivation for multi-stage single-take videos.
 
@@ -571,6 +592,7 @@ class Config(BaseModel):
     video_match: VideoMatchConfig = Field(default_factory=VideoMatchConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
     coach_auto_classify: CoachAutoClassifyConfig = Field(default_factory=CoachAutoClassifyConfig)
+    division_capacity: DivisionCapacityConfig = Field(default_factory=DivisionCapacityConfig)
     beep_windows: BeepWindowConfig = Field(default_factory=BeepWindowConfig)
     web_trim: WebTrimConfig = Field(default_factory=WebTrimConfig)
     footage_sort: FootageSortConfig = Field(default_factory=FootageSortConfig)
