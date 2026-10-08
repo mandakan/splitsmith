@@ -22,7 +22,7 @@ import io
 import json
 import shutil
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Protocol
@@ -38,6 +38,7 @@ from .looks import (
     DEFAULT_LOOK,
     LOOK_NAME_RE,
     MANIFEST_FILE,
+    OVERLAY_SLOT,
     STING_SLOT,
     Look,
     LookError,
@@ -51,8 +52,10 @@ from .looks import (
     variants_for,
 )
 from .overlay_card import build_card_still, build_lower_third, card_context
-from .overlay_raster import Rasterizer, TemplateProbe, TemplateScriptError
+from .overlay_hud import HudOptions, declared_positions, hud_options_data, hud_stage_data, resolve_position
+from .overlay_raster import Rasterizer, TemplateFrames, TemplateProbe, TemplateScriptError
 from .overlay_theme import theme_for
+from .stage_summary_data import TileShot
 
 #: The starter templates ``looks new --starter`` copies (``data/looks/_starters/``).
 STARTERS: dict[str, str] = {
@@ -60,12 +63,17 @@ STARTERS: dict[str, str] = {
     "animated": "animated.html",
     "lower-third": "lower-third.html",
     "sting": "sting.html",
+    "hud": "hud.html",
 }
+#: The starters the template editor offers as replacement text: the card and
+#: sting templates it edits. An overlay style is not edited there.
+EDITOR_STARTERS: tuple[str, ...] = ("animated", "lower-third", "still", "sting")
 _STARTER_SLOTS: dict[str, dict[str, object]] = {
     "still": {"title_page": "still.html", "slate": "still.html", "closing": "still.html"},
     "animated": {"title_page": "animated.html", "slate": "animated.html", "closing": "animated.html"},
     "lower-third": {"lower_third": "lower-third.html"},
     "sting": {STING_SLOT: {"sting": "sting.html"}},
+    "hud": {OVERLAY_SLOT: {"hud": "hud.html"}},
 }
 CARD_SLOTS: tuple[Literal["title_page", "slate", "lower_third", "closing"], ...] = (
     "title_page",
@@ -99,8 +107,18 @@ class LookToolError(ValueError):
 
 class Prober(Protocol):
     def probe_template(
-        self, template: Path, *, context: TemplateContext, width: int, height: int
+        self, template: Path, *, context: TemplateContext, width: int, height: int, at: float | None = None
     ) -> TemplateProbe: ...
+
+    def render_template_timeline(
+        self,
+        template: Path,
+        *,
+        context: TemplateContext,
+        width: int,
+        height: int,
+        plan: Callable[[float], Sequence[float]],
+    ) -> TemplateFrames: ...
 
 
 @dataclass(frozen=True)
@@ -322,6 +340,125 @@ def _judge(subject: str, results: list[tuple[str, TemplateProbe]]) -> list[Check
     return items
 
 
+#: Where the beep sits in a HUD sample's clip time.
+HUD_SAMPLE_BEEP = 1.0
+#: How long after the last shot a HUD is probed landed: past any landing.
+HUD_LANDED_AFTER = 2.0
+#: How far past ``settle()`` the stillness check looks for motion.
+HUD_STILL_AFTER = 0.7
+
+
+def _hud_stage(gaps: Sequence[tuple[str | None, float]]) -> list[TileShot]:
+    shots: list[TileShot] = []
+    elapsed = 0.0
+    for cls, split in gaps:
+        elapsed = round(elapsed + split, 6)
+        shots.append(TileShot(time_from_beep=elapsed, split=split, interval_class=cls))  # type: ignore[arg-type]
+    return shots
+
+
+def hud_samples() -> list[tuple[str, list[TileShot]]]:
+    """The stages ``looks check`` runs a HUD template on: twelve rounds with
+    every class a stage has, thirty-two (a long row of anything per round),
+    and eight with no class data (an audit from before classes)."""
+    twelve = [("first_shot", 1.12), ("split", 0.24), ("split", 0.26), ("transition", 0.71), ("split", 0.22)]
+    twelve += [("split", 0.25), ("reload", 1.64), ("split", 0.27), ("movement", 1.9), ("split", 0.23)]
+    twelve += [("transition", 0.66), ("split", 0.25)]
+    long = [("first_shot", 1.0)] + [("split", 0.26)] * 31
+    bare: list[tuple[str | None, float]] = [(None, 1.05)]
+    bare += [(None, 0.3)] * 7
+    return [
+        ("12 rounds", _hud_stage(twelve)),
+        ("32 rounds", _hud_stage(long)),
+        ("no class data", _hud_stage(bare)),
+    ]
+
+
+def _hud_context(look: Look, template: Path, shots: Sequence[TileShot]) -> TemplateContext:
+    # Deferred: overlay_hud_render builds on the renderer's encoder module.
+    from .overlay_hud_render import hud_context
+
+    stage = hud_stage_data(shots, beep_in_clip=HUD_SAMPLE_BEEP)
+    position = resolve_position(None, declared_positions(template))
+    return hud_context(
+        stage=stage,
+        options=hud_options_data(HudOptions(), position),
+        theme=theme_for(look),
+        width=CHECK_WIDTH,
+        height=CHECK_HEIGHT,
+        fps=CHECK_FPS,
+    )
+
+
+def _check_hud(subject: str, look: Look, template: Path, prober: Prober) -> list[CheckItem]:
+    """A HUD template's findings: what the card checks look for, probed
+    mid-stage and landed on every sample stage, then whether it is still
+    where the renderer holds one frame (before the beep, after settle())."""
+    results: list[tuple[str, TemplateProbe]] = []
+    contexts: list[tuple[str, TemplateContext, list[TileShot]]] = []
+    for case, shots in hud_samples():
+        context = _hud_context(look, template, shots)
+        contexts.append((case, context, shots))
+        # Mid-stage at rest: just before the shot that ends the longest gap,
+        # so a shot effect caught mid-way is never mistaken for a layout fault.
+        _gap, index = max(
+            (shots[i + 1].time_from_beep - shots[i].time_from_beep, i) for i in range(len(shots) - 1)
+        )
+        mid = HUD_SAMPLE_BEEP + shots[index + 1].time_from_beep - 0.02
+        landed = HUD_SAMPLE_BEEP + shots[-1].time_from_beep + HUD_LANDED_AFTER
+        for moment, at in (("mid-stage", mid), ("landed", landed)):
+            probe = prober.probe_template(
+                template, context=context, width=CHECK_WIDTH, height=CHECK_HEIGHT, at=at
+            )
+            results.append((f"{case}, {moment}", probe))
+    items = _judge(subject, results)
+    if any(item.level == "error" for item in items):
+        return items
+
+    _, context, shots = contexts[0]
+    last = HUD_SAMPLE_BEEP + shots[-1].time_from_beep
+    settled: list[float] = []
+
+    def plan(settle: float) -> list[float]:
+        settled.append(settle)
+        end = last + settle
+        return [0.0, HUD_SAMPLE_BEEP - 0.02, end, end + HUD_STILL_AFTER]
+
+    try:
+        rendered = prober.render_template_timeline(
+            template, context=context, width=CHECK_WIDTH, height=CHECK_HEIGHT, plan=plan
+        )
+        try:
+            before, at_beep, at_settle, later = list(rendered.frames)
+        finally:
+            rendered.close()
+    except TemplateScriptError as exc:
+        message = str(exc).removeprefix(f"{template.name}: ")
+        return [item for item in items if item.level != "ok"] + [CheckItem(subject, "error", message)]
+
+    still: list[CheckItem] = []
+    if before != at_beep:
+        still.append(
+            CheckItem(
+                subject,
+                "warn",
+                "moves before the beep: the video holds one frame there, so that motion never plays",
+            )
+        )
+    if at_settle != later:
+        still.append(
+            CheckItem(
+                subject,
+                "warn",
+                f"still moves after settle() ({settled[0]:g} s past the last shot): the video holds "
+                "that frame, so the motion freezes part-way; return a longer settle()",
+            )
+        )
+    if still:
+        return [item for item in items if item.level != "ok"] + still
+    return items
+
+
 def check_look(name: str, *, prober: Prober) -> CheckReport:
     """Validate the Look ``name`` (the user's folder when there is one, even
     when it shadows a shipped Look, else the shipped one) and probe every
@@ -381,6 +518,10 @@ def check_folder(name: str, root: Path, source: Literal["shipped", "user"], *, p
             own = look.own_template(STING_SLOT, variant)
             if own is not None:
                 targets.append((STING_SLOT, variant, own))
+        for variant in look.variants(OVERLAY_SLOT):
+            own = look.own_template(OVERLAY_SLOT, variant)
+            if own is not None:
+                items.extend(_check_hud(f"{OVERLAY_SLOT} {variant} {own.name}", look, own, prober))
         for target_slot, variant, template in targets:
             subject = f"{target_slot} {variant} {template.name}"
             results = [
@@ -557,6 +698,7 @@ __all__ = [
     "PREVIEW_HEIGHT",
     "PREVIEW_WIDTH",
     "PreviewResult",
+    "EDITOR_STARTERS",
     "STARTERS",
     "check_folder",
     "check_look",

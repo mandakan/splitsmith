@@ -779,10 +779,11 @@ class ChromiumRasterizer:
             raise TemplateScriptError(f"{template.name}: {errors[0]}")
 
     def probe_template(
-        self, template: Path, *, context: TemplateContext, width: int, height: int
+        self, template: Path, *, context: TemplateContext, width: int, height: int, at: float | None = None
     ) -> TemplateProbe:
         """Load ``template`` as :meth:`render_template` does (the context,
-        fonts, the poster seek, the fit policy) and report what the
+        fonts, the poster seek, the fit policy; ``at`` seeks there instead of
+        the poster, for a template HUD probed mid-stage) and report what the
         authoring checks need, instead of a picture: script errors from
         any point of the load, ``duration()`` / ``poster()`` / whether
         ``seek`` exists, the font families visible text uses, text that
@@ -811,7 +812,7 @@ class ChromiumRasterizer:
             try:
                 duration = float(hook("duration", 0) or 0)
                 poster = float(hook("poster", 0) or 0)
-                hook("seek", None, poster)
+                hook("seek", None, poster if at is None else at)
                 hook("fonts", None)
                 hook("fit", None)
                 seen = view.call("probe")

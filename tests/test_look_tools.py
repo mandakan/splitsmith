@@ -48,6 +48,7 @@ def test_new_from_a_shipped_look_copies_its_manifest_and_templates(user_dir: Pat
         ("animated", {"title_page", "slate", "closing"}),
         ("lower-third", {"lower_third"}),
         ("sting", {"transition"}),
+        ("hud", {"overlay"}),
     ],
 )
 def test_new_from_a_starter_is_a_loadable_look_with_the_starter_in_its_slots(
@@ -78,18 +79,49 @@ def test_new_refuses_an_existing_look_a_shipped_name_and_a_bad_name(user_dir: Pa
 
 
 class _Prober:
-    """Answers every probe with ``probe``, or per template file name."""
+    """Answers every probe with ``probe``, or per template file name. A HUD
+    timeline draws the same frame at every time unless the file is in
+    ``moves`` (``"before"`` / ``"after"`` the live span) or ``refuses``
+    (the template lacks a hook)."""
 
     def __init__(
-        self, probe: TemplateProbe | None = None, by_file: dict[str, TemplateProbe] | None = None
+        self,
+        probe: TemplateProbe | None = None,
+        by_file: dict[str, TemplateProbe] | None = None,
+        moves: dict[str, str] | None = None,
+        refuses: dict[str, str] | None = None,
     ) -> None:
         self.probe = probe or TemplateProbe()
         self.by_file = by_file or {}
+        self.moves = moves or {}
+        self.refuses = refuses or {}
         self.calls: list[tuple[str, dict]] = []
+        self.probed_at: list[tuple[str, float | None]] = []
+        self.timelines: list[tuple[str, list[float]]] = []
 
-    def probe_template(self, template: Path, *, context, width: int, height: int) -> TemplateProbe:
+    def probe_template(
+        self, template: Path, *, context, width: int, height: int, at: float | None = None
+    ) -> TemplateProbe:
         self.calls.append((template.name, context.data))
+        self.probed_at.append((template.name, at))
         return self.by_file.get(template.name, self.probe)
+
+    def render_template_timeline(
+        self, template: Path, *, context, width: int, height: int, plan
+    ):  # noqa: ANN001
+        from splitsmith.overlay_raster import TemplateFrames, TemplateScriptError
+
+        if template.name in self.refuses:
+            raise TemplateScriptError(f"{template.name}: {self.refuses[template.name]}")
+        times = list(plan(0.5))
+        self.timelines.append((template.name, times))
+        frames = [bytes([0]) * 4] * len(times)
+        moved = self.moves.get(template.name)
+        if moved == "before":
+            frames[1] = bytes([9]) * 4
+        elif moved == "after":
+            frames[-1] = bytes([9]) * 4
+        return TemplateFrames(duration=0.5, frame_count=len(times), width=1, height=1, frames=iter(frames))
 
 
 def _levels(report: look_tools.CheckReport) -> list[tuple[str, str]]:
@@ -102,7 +134,16 @@ def test_a_clean_look_checks_ok_and_probes_every_own_template_with_every_sample(
     report = look_tools.check_look("club", prober=prober)
     assert report.errors == 0 and report.warnings == 0
     files = {name for name, _ in prober.calls}
-    assert files == {"card.html", "card-rise.html", "sting-wipe.html"}
+    assert files == {
+        "card.html",
+        "card-rise.html",
+        "sting-wipe.html",
+        "hud-minimal.html",
+        "hud-pips.html",
+        "hud-plate.html",
+        "hud-ticker.html",
+        "hud-timeline.html",
+    }
     # Every card slot and variant, with each sample case; the sting with its own.
     samples = {
         json.dumps(data.get("card", data.get("transition")), sort_keys=True) for _, data in prober.calls
@@ -110,8 +151,54 @@ def test_a_clean_look_checks_ok_and_probes_every_own_template_with_every_sample(
     assert len(samples) >= 8
     texts = [data["card"]["text"] for _, data in prober.calls if "card" in data]
     assert any(len(t) > 40 for t in texts), "a long stage name is among the samples"
-    shooters = [len(data["shooters"]) for _, data in prober.calls]
+    shooters = [len(data["shooters"]) for _, data in prober.calls if "shooters" in data]
     assert 2 in shooters and 1 in shooters
+
+
+def test_an_overlay_style_is_probed_on_three_stages_mid_stage_and_landed(user_dir: Path) -> None:
+    """A HUD template gets stage data, not a card: twelve rounds with
+    classes, thirty-two rounds, and a stage with no class data, each probed
+    mid-stage and after the landing, plus one stillness timeline."""
+    look_tools.new_look("club", from_look="splitsmith")
+    prober = _Prober()
+    report = look_tools.check_look("club", prober=prober)
+    assert report.errors == 0 and report.warnings == 0
+    stages = [data["stage"] for name, data in prober.calls if name == "hud-plate.html"]
+    assert sorted(stage["rounds"] for stage in stages) == [8, 8, 12, 12, 32, 32]
+    assert any(all(shot["cls"] is None for shot in stage["shots"]) for stage in stages)
+    times = [at for name, at in prober.probed_at if name == "hud-plate.html"]
+    assert all(at is not None for at in times) and len(set(times)) > 1
+    (timeline,) = [t for name, t in prober.timelines if name == "hud-plate.html"]
+    assert len(timeline) == 4, "two frames either side of the live span"
+    assert any(item.subject.startswith("overlay plate") and item.level == "ok" for item in report.items)
+
+
+def test_an_overlay_style_that_moves_outside_its_live_span_is_a_warning(user_dir: Path) -> None:
+    look_tools.new_look("club", from_look="splitsmith")
+    prober = _Prober(moves={"hud-pips.html": "before", "hud-ticker.html": "after"})
+    report = look_tools.check_look("club", prober=prober)
+    found = {
+        (item.subject.split()[1], item.level): item.message
+        for item in report.items
+        if item.subject.startswith("overlay")
+    }
+    assert "before the beep" in found[("pips", "warn")]
+    assert "settle()" in found[("ticker", "warn")]
+    assert ("pips", "ok") not in found and ("plate", "ok") in found
+
+
+def test_an_overlay_style_without_its_hooks_is_an_error(user_dir: Path) -> None:
+    look_tools.new_look("club", from_look="splitsmith")
+    prober = _Prober(
+        refuses={"hud-minimal.html": "an overlay template must define settle() returning seconds >= 0"}
+    )
+    report = look_tools.check_look("club", prober=prober)
+    errors = [item for item in report.items if item.level == "error"]
+    assert (
+        len(errors) == 1
+        and errors[0].subject.startswith("overlay minimal")
+        and "settle()" in errors[0].message
+    )
 
 
 def test_a_borrowed_template_is_named_not_probed(user_dir: Path) -> None:

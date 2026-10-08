@@ -51,7 +51,7 @@ from ..look_store import (
     is_shipped_name,
     template_file,
 )
-from ..look_tools import STARTERS, check_folder, sample_contexts
+from ..look_tools import EDITOR_STARTERS, STARTERS, check_folder, sample_contexts
 from ..looks import (
     BRAND_DIR,
     BRAND_FILE_RE,
@@ -313,6 +313,7 @@ def list_templates(name: str) -> TemplatesPayload:
     starters = [
         StarterInfo(name=starter, content=(starters_dir / file).read_text(encoding="utf-8"))
         for starter, file in sorted(STARTERS.items())
+        if starter in EDITOR_STARTERS
     ]
     return TemplatesPayload(templates=templates, starters=starters)
 

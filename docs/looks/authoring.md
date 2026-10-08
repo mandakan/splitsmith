@@ -2,7 +2,7 @@
 
 A Look decides how a rendered video's generated cards look: the title page,
 the stage slates, the lower third, the closing card and the stings between
-stages. It is a folder with a `look.json` (colours and which template draws
+stages, and the overlay styles that draw the live clock, count and splits. It is a folder with a `look.json` (colours and which template draws
 which card) and HTML templates. This guide takes you from a copy of the
 default Look to your own templates.
 
@@ -16,6 +16,7 @@ default Look to your own templates.
 - [Animation](#animation)
 - [Lower third](#lower-third)
 - [Stings](#stings)
+- [Overlay styles](#overlay-styles)
 - [Logos and identity](#logos-and-identity)
 - [Your brand](#your-brand)
 - [What a template can load](#what-a-template-can-load)
@@ -39,7 +40,7 @@ same name as a shipped Look replaces it. Pick a Look on the Export page, or
 with `--theme <name>` on `match export` and `--overlay-theme <name>` on
 `compare export`.
 
-Four starters ship, each a short commented template:
+Five starters ship, each a short commented template:
 
 | Starter | What it is |
 |---|---|
@@ -47,6 +48,7 @@ Four starters ship, each a short commented template:
 | `animated` | The same card, its lines rising into place |
 | `lower-third` | A band over the first seconds of a stage |
 | `sting` | A band swept across the cut between stages |
+| `hud` | An overlay style: the clock, the count and the last split in a corner |
 
 ## look.json
 
@@ -183,6 +185,60 @@ data.transition = { kind: "sting:wipe", name: "wipe", duration_seconds: 1, from:
 that long. Name the sting under `transition` in `look.json`, then choose it on
 the Export page or with `--transition sting:<name>`.
 
+## Overlay styles
+
+An overlay style draws the live HUD over the footage for the whole stage: the
+clock, the shot count and the splits, in place of the engine's own Classic
+overlay. Name it under `overlay` in `look.json` (`default` is always Classic
+and cannot name a file), then pick it under Overlay in Look on the Export page
+or with `--overlay-variant <name>` on `splitsmith overlay`.
+
+```json
+"overlay": { "plate": "hud-plate.html", "corner": "hud-corner.html" }
+```
+
+The renderer asks two questions and draws only the frames it needs:
+
+- `seek(t)` draws the HUD at `t` seconds of the trimmed clip.
+- `settle()` returns how many seconds after the last shot the HUD keeps
+  moving (a landing animation, a fade). `0` means it stops on the last shot.
+
+Before the beep, and after the last shot plus `settle()`, the video holds a
+single frame, so the HUD must be still there: anything that moves before the
+beep never plays, and anything still moving after `settle()` freezes
+part-way. `looks check` compares frames on both sides and says so.
+
+Instead of `data.card` the template gets the stage and the export's options:
+
+```js
+data.stage = {
+  beep: 5.0,                 // where the beep is, in clip seconds
+  shots: [{ t: 6.12, split: 1.12, cls: "first_shot", label: "Draw", tier: null }, ...],
+  stage_time: 7.75,
+  rounds: 12,
+}
+data.options = { speed_colors: true, class_labels: true, landing: true, position: "bottom-left" }
+```
+
+Read the numbers; never compute a split, a class or a speed in the template.
+`tier` is `good`, `normal` or `slow` against this stage's median for that
+class, and `null` for a draw, a reload and an unclassified shot. Honour the
+three toggles: draw a split in one colour when `speed_colors` is off, leave
+the class out when `class_labels` is off, and skip the landing moment when
+`landing` is off.
+
+A style that can sit in more than one corner says which in its own markup,
+its default first; `options.position` is then one of them:
+
+```html
+<meta name="splitsmith-positions" content="bottom-left,top-left,top-right,bottom-right">
+```
+
+A style without the tag places itself and `position` is `null`. The page
+renders at most 1080 lines tall and a larger video scales it up, so size
+text in `vh`. A HUD has no 60 s limit: it gets its load time plus a second
+for every frame of the stage, however long the course.
+
 ## Logos and identity
 
 `data.shooters` lists the shooters a card is about, each with their label,
@@ -219,7 +275,7 @@ to 12 MB.
 
 A template that hangs is stopped. Loading may take up to 20 s, each call to
 `duration()`, `poster()` or `seek()` up to 10 s, and an animation is sampled
-for 60 s at most. The card is then left out and the export says why.
+for 60 s at most (an overlay style is given as long as its stage needs). The card is then left out and the export says why.
 
 ## Fonts
 
@@ -243,7 +299,9 @@ yours to hold: use one you may use in published video.
 
 `splitsmith looks check <name>` loads every template your Look owns in
 Chromium against three sample cards: one shooter with a logo, two shooters
-without, and a 52-character stage name. Stings get the transition instead.
+without, and a 52-character stage name. Stings get the transition instead. An overlay style runs on three sample
+stages (twelve rounds, thirty-two, and one with no class data), probed
+mid-stage and after the landing.
 
 ```text
 Look club-red  ~/.splitsmith/looks/club-red  user
@@ -261,6 +319,9 @@ Look club-red  ~/.splitsmith/looks/club-red  user
 | `poster() ... outside duration()` | Previews would show a frame the video never reaches |
 | `names <family>` | Use `Splitsmith Display` or `Splitsmith Mono` |
 | `runs past the card` | Shrink long text in `__splitsmithFit`, or ellipsize it |
+| `must define seek(t)` / `settle()` | An overlay style needs both hooks |
+| `moves before the beep` | An overlay style must be still until the beep |
+| `still moves after settle()` | Return a longer `settle()`, or end the motion sooner |
 | `look.json: ...` | The manifest does not load; the message names the field |
 
 The exit code is 1 when there is an error, so it fits in a script, and 2

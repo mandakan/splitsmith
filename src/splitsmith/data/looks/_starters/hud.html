@@ -1,0 +1,79 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="splitsmith-positions" content="bottom-left,top-left,top-right,bottom-right">
+<title>starter: overlay style</title>
+<!--
+  An overlay style: the live HUD over the footage, drawn here instead of
+  by the engine's Classic overlay. The renderer asks two questions and
+  draws the frames it needs:
+    seek(t)     draw the HUD at t seconds of clip time
+    settle()    seconds after the last shot the HUD keeps moving (0 = it
+                stops on the last shot)
+  Before the beep and after the last shot plus settle() the video holds a
+  single frame, so the HUD must be still there.
+  Everything is in window.splitsmith.data:
+    stage.beep        the beep, in clip seconds
+    stage.shots[]     t (clip seconds), split, cls, label ("Draw",
+                      "Split", ...), tier ("good" / "normal" / "slow", or
+                      null for a draw, a reload or an unclassified shot)
+    stage.stage_time  the stage time; stage.rounds the shot count
+    options           speed_colors, class_labels, landing, position
+  Never compute a split or a speed yourself; read them. The meta tag above
+  lists the positions this style can take, its default first.
+  Guide: docs/looks/authoring.md#overlay-styles
+-->
+<script>
+  document.write('<style>' + window.splitsmith.engine.css + '</style>');
+</script>
+<style>
+  html, body { margin: 0; background: transparent; overflow: hidden; }
+  #hud {
+    position: absolute; display: flex; gap: 2vh; align-items: baseline;
+    font-family: "Splitsmith Mono", monospace; font-weight: 700; white-space: nowrap;
+    text-shadow: 0 0.3vh 1.2vh rgba(0, 0, 0, 0.6);
+  }
+  #hud.bottom-left { left: 4vh; bottom: 4vh; }
+  #hud.top-left { left: 4vh; top: 4vh; }
+  #hud.top-right { right: 4vh; top: 4vh; }
+  #hud.bottom-right { right: 4vh; bottom: 4vh; }
+  #clock { font-size: 8vh; }
+  #count, #split { font-size: 4.5vh; }
+</style>
+</head>
+<body>
+<div id="hud"><span id="clock">0.00</span><span id="count"></span><span id="split"></span></div>
+<script>
+  var S = window.splitsmith;
+  var stage = S.data.stage, options = S.data.options;
+  var POP = 0.2;  // seconds the newest split takes to fade in
+
+  document.getElementById('hud').className = options.position || 'bottom-left';
+  document.getElementById('hud').style.color = S.theme.ink;
+
+  function colour(shot) {
+    if (!options.speed_colors || !shot.tier) return S.theme.split;
+    return shot.tier === 'good' ? S.theme.split_good : shot.tier === 'slow' ? S.theme.accent : S.theme.split;
+  }
+
+  window.settle = function () { return POP; };
+
+  window.seek = function (t) {
+    var n = 0;
+    while (n < stage.shots.length && stage.shots[n].t <= t) n++;
+    var last = n ? stage.shots[n - 1] : null;
+    var done = n === stage.shots.length && n > 0;
+    var clock = done ? stage.stage_time : Math.max(0, t - stage.beep);
+    document.getElementById('clock').textContent = clock.toFixed(2);
+    document.getElementById('count').textContent = n + '/' + stage.rounds;
+    var split = document.getElementById('split');
+    if (!last) { split.textContent = ''; return; }
+    var label = options.class_labels && last.label ? last.label + ' ' : '';
+    split.textContent = label + last.split.toFixed(2);
+    split.style.color = colour(last);
+    split.style.opacity = Math.min(1, (t - last.t) / POP);
+  };
+</script>
+</body>
+</html>
