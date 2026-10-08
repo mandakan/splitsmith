@@ -26,15 +26,18 @@ the same name, or one spelled two ways, would put the wrong logo on a stranger.
 
 ## What the account holds
 
-`AccountIdentity`, one per account:
-
-- `shooter_id: int | None`: your SSI shooter id.
-- `identity: ShooterIdentity`: your accent, club line and logo (the existing
-  model; the logo a content-named file, the existing checks).
-- `brand: Brand | None`: your maker brand, a logo (content-named, the
+- **You**: the existing `ScoreboardIdentity` (`user_config`, the
+  `/api/me/scoreboard-identity` routes, a local file and a per-user hosted
+  store), whose `shooter_id` is your SSI shooter id. It already serves as the
+  default "me" when a scoreboard is imported; nothing new is stored for it.
+- **Your look as a shooter**: your own shooter book entry (below), keyed by
+  that id.
+- **Your brand**: `AccountProfile.brand`, a logo (content-named, the
   `look_brand` checks) and a line, the same shape as `LookBrand`.
 
-Set on the Account page, in a new "You" section:
+Set in a "You" section: on the Account page hosted, and on a new local "You"
+page (the Account page is hosted only; local mode reaches "You" from the
+Matches page header):
 
 - **Shooter**: search the shooter index by name (the existing `find_shooter`,
   through an account-level route not tied to a match) and pick yourself; or,
@@ -107,11 +110,11 @@ repeated, and nothing is written to a match.
 Per account, never a `state_docs` kind (a per-match kind would enter the sync
 manifest; the export presets follow the same rule):
 
-- **Local**: `~/.splitsmith/account/identity.json` and
+- **Local**: `~/.splitsmith/account/profile.json` and
   `~/.splitsmith/account/shooter_book.json`, the files under
   `~/.splitsmith/account/files/` (content-named; symlinks refused, as for
   fonts and brand logos).
-- **Hosted**: an `account_identity` row and a `shooter_book` table keyed by
+- **Hosted**: an `account_profiles` row and a `shooter_book` table keyed by
   `(user_id, shooter_id)`; the files in R2 under the user's own prefix
   (`users/<user_id>/account/<name>`), mirrored to local disk at render time
   like a shooter logo (`ensure_local_*`), a missing file a card without it.
@@ -131,9 +134,13 @@ later step, decided with public profiles.
 - Roster (Footage page): the "You" mark; "This is me" on a shooter's menu.
 - Identity sheet: the source line, "Only this match", "Use shooter book".
 - Export page, Details: "Your brand" checkbox; remembered in presets.
-- `GET/PUT /api/me/identity`, `POST/DELETE /api/me/identity/{logo,brand-logo}`,
-  `GET /api/me/shooter-book`, `DELETE /api/me/shooter-book/{shooter_id}`,
-  `GET /api/me/shooter-search?q=`.
+- `GET/PUT /api/me/profile` (the brand line), `POST/DELETE
+  /api/me/profile/brand-logo`, `GET /api/me/shooter-book`, `PUT
+  /api/me/shooter-book/{shooter_id}` (accent, club), `POST/DELETE
+  /api/me/shooter-book/{shooter_id}/logo`, `DELETE
+  /api/me/shooter-book/{shooter_id}`, `GET /api/me/shooter-search?q=` (the
+  live shooter index, not tied to a match). "You" itself stays on
+  `/api/me/scoreboard-identity`.
 - CLIs: `--no-account-brand` on `match export` and `compare export`; the book
   and the account identity apply to CLI renders too, read from the local files.
 - What's new: one entry.
