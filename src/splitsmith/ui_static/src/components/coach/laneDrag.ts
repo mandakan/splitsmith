@@ -82,14 +82,12 @@ export function dragFrame(
   }
   // Body: no snap, the length is kept.
   const len = before.end - before.start;
-  const s = Math.min(Math.max(t - drag.grabOffsetT, 0), Math.max(duration - len, 0));
-  let { start, end } = clampToLane(base, drag.id, s, s + len);
-  if (end - start < len) {
-    // A neighbour stopped one edge: keep it and carry the length to the other.
-    if (start > s) end = start + len;
-    else start = end - len;
-  }
-  return { events: replace(current, touched({ ...before, start, end })), seek: start };
+  // The region slides inside the free gap it started in: [previous end, next start - len].
+  const lane = base.filter((x) => x.kind === before.kind && x.id !== before.id);
+  const lo = Math.max(0, ...lane.filter((x) => x.end <= before.start).map((x) => x.end));
+  const hi = Math.min(duration, ...lane.filter((x) => x.start >= before.end).map((x) => x.start)) - len;
+  const start = Math.min(Math.max(t - drag.grabOffsetT, lo), Math.max(hi, lo));
+  return { events: replace(current, touched({ ...before, start, end: start + len })), seek: start };
 }
 
 /** The list Esc restores: the region as it stood, or without the one being created. */

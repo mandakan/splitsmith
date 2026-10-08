@@ -134,6 +134,54 @@ describe("LaneEditor", () => {
     expect(onSeek).toHaveBeenLastCalledWith(expect.closeTo(4.3, 2));
   });
 
+  it("a body dragged left past a neighbour stops at the neighbour's end", () => {
+    const onChange = vi.fn();
+    render(
+      <Harness initial={[ev("evt-1", "movement", 1, 3), ev("evt-2", "movement", 4, 5)]} selectedId="evt-2" onChange={onChange} />,
+    );
+    const body = screen.getByTestId("event-evt-2");
+    fireEvent.pointerDown(body, { pointerId: 9, clientX: 400, clientY: 10, button: 0 });
+    fireEvent.pointerMove(body, { pointerId: 9, clientX: 150, clientY: 10, altKey: true });
+    fireEvent.pointerUp(body, { pointerId: 9, clientX: 150, clientY: 10, altKey: true });
+    const e = lastCommit(onChange)!.find((x) => x.id === "evt-2")!;
+    expect(e.start).toBeCloseTo(3.0, 3);
+    expect(e.end).toBeCloseTo(4.0, 3);
+  });
+
+  it("a body dragged right past a neighbour stops at the neighbour's start", () => {
+    const onChange = vi.fn();
+    render(
+      <Harness initial={[ev("evt-1", "movement", 1, 2), ev("evt-2", "movement", 4, 6)]} selectedId="evt-1" onChange={onChange} />,
+    );
+    const body = screen.getByTestId("event-evt-1");
+    fireEvent.pointerDown(body, { pointerId: 10, clientX: 100, clientY: 10, button: 0 });
+    fireEvent.pointerMove(body, { pointerId: 10, clientX: 550, clientY: 10, altKey: true });
+    fireEvent.pointerUp(body, { pointerId: 10, clientX: 550, clientY: 10, altKey: true });
+    const e = lastCommit(onChange)!.find((x) => x.id === "evt-1")!;
+    expect(e.end).toBeCloseTo(4.0, 3);
+    expect(e.start).toBeCloseTo(3.0, 3);
+  });
+
+  it("keys pressed inside the menu slot never reach the editor", () => {
+    const onChange = vi.fn();
+    render(
+      <LaneEditor
+        shots={SHOTS}
+        events={[ev("evt-1", "reload", 4, 5)]}
+        stageTime={STAGE}
+        currentTime={0}
+        selectedId="evt-1"
+        onSelect={vi.fn()}
+        onSeek={vi.fn()}
+        onChange={onChange}
+        menu={<button data-testid="menu-trigger">More</button>}
+      />,
+    );
+    const trigger = screen.getByTestId("menu-trigger");
+    for (const key of ["ArrowRight", "ArrowLeft", "Delete", "Backspace"]) fireEvent.keyDown(trigger, { key });
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it("Escape restores the pre-drag region and commits nothing new", () => {
     const onChange = vi.fn();
     render(<Harness initial={[ev("evt-1", "reload", 4, 5)]} selectedId="evt-1" onChange={onChange} />);

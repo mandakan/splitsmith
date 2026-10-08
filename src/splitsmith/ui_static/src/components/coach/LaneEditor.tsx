@@ -178,6 +178,9 @@ export function LaneEditor(props: LaneEditorProps) {
   }, []);
 
   const handleKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    // Only keys aimed at the editor itself: the menu slot's keys bubble here too (React
+    // bubbles through portals), and an arrow there must not nudge -- each nudge is a save.
+    if (e.target !== e.currentTarget) return;
     if (readOnly || !selectedId || dragRef.current) return;
     const current = eventsRef.current;
     if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
