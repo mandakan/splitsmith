@@ -82,7 +82,8 @@ A new module builds the template's `data` from the audit and the trim's probe.
 Templates never compute a split, a class or a tier; all five read the same
 numbers and the tests pin them in Python.
 
-`data.stage`:
+`data.stage` (shots read through `stage_summary_data.load_stage_shots`, the
+same accepted, time-sorted, healed shots the stage summary draws):
 
 - `beep`: the beep in clip seconds.
 - `shots`: per kept shot, in time order: `t` (clip seconds), `split` (shot 1's
@@ -90,9 +91,11 @@ numbers and the tests pin them in Python.
   `coach.heal_unclassified`, `None` when the audit has none), `tier`.
 - `stage_time`: last shot minus beep. `rounds`: the shot count.
 
-`tier` is `good`, `normal` or `slow`: the split against this stage's median for
+`tier` is `good`, `normal` or `slow` (drawn in the theme's `split_good`,
+`split` and `accent`): the split against this stage's median for
 its class (below 0.93x is `good`, above 1.12x is `slow`, the mockup's cutoffs,
-named constants). The draw, a reload and an unclassified shot have no tier
+named constants). Only `split`, `transition` and `movement` are tiered: the
+draw, a reload, an activation and an unclassified shot have no tier
 (`None`), so a reload is never "slow" beside a split. A class with fewer than
 three shots on the stage has no median and its shots no tier (a median of two
 says nothing).
@@ -118,7 +121,8 @@ template that moves outside that span (it compares two frames on either side).
 
 `render_overlay` with a template variant:
 
-- one frame at `seek(beep)`, held for every frame before the beep;
+- one frame at `seek(0)`, held for every frame before the beep (the template
+  is static there, so any pre-beep time draws the same);
 - every frame from the beep to `last shot + settle()`, at the trim's fps (or
   `overlay_max_fps`);
 - the last of those held to the end.
@@ -136,19 +140,23 @@ the watchdog, as for the cards.
 
 ### Cache
 
-The HUD MOV is cached under `cache_dir/overlay-hud`, keyed by content: the
-audit revision, the trim's probe (size, fps, duration), the variant, the
-options, `template_digest`, the codec settings and the ffmpeg identity. A hit is
+The HUD MOV is cached in the render segment cache (`segment_cache`, the
+`render-segments` LRU the MP4 already uses, so one size cap covers both). The
+key is the encode's argv with its stdin input standing for the template's
+`template_digest` (the template bytes and the whole context: stage data,
+options, theme, size, fps) plus the frame count, and the ffmpeg identity the
+cache already adds. A hit is
 copied to `<base>_overlay.mov` only when that file's bytes differ, so a
 re-export leaves the MOV's mtime alone and the MP4 segment cache key with it.
-Bump a `HUD_KEY_VERSION` when the recipe changes. Classic has no cache and no
+Bump `overlay_hud.HUD_KEY_VERSION` when the recipe changes. Classic has no cache and no
 new code on its path: same argv, same pixels.
 
 ### Failure
 
-No browser, a script error, a timeout or a crashed renderer falls back to
-Classic for that stage, with a line in the export report naming the variant and
-the reason. An export never fails because of the HUD.
+A script error, a timeout, a crashed renderer or a variant the Look cannot
+resolve falls back to Classic for that stage, with a line in the export report naming the variant and
+the reason. An export never fails because of the HUD. No browser at all is not a fallback:
+Classic needs Chromium too, and that stays today's `OverlayRenderError`.
 
 ### Hosted
 
@@ -205,7 +213,7 @@ frame at the third shot.
 
 - `render_look_thumbnails.py --look-previews` writes `overlay-<variant>.webp`
   from a sample stage; the gallery never rasterizes.
-- `render_match_frames.py --overlay-variant <name>` (and the position and
+- `render_overlay_frames.py --overlay-variant <name>` (and the position and
   toggle flags) writes frames at the beep, mid-stage, a reload and the landing.
 - `looks check` probes overlay templates with three sample stages (12 rounds;
   32 rounds; no class data) and words a missing `seek` or `settle`, motion
