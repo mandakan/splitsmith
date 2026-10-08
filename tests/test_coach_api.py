@@ -775,3 +775,110 @@ def test_get_coach_capacity_from_the_scoreboard_files_of_an_older_project(tmp_pa
     _write_shots(audit_file, _po_shots_past_capacity_without_a_hinted_gap())
     body = client.get(f"{base}/shooters/me/stages/1/coach").json()
     assert [e["kind"] for e in body["events"]] == ["reload"]
+
+
+# ---------------------------------------------------------------------------
+# PUT stage events (spec 2026-10-08)
+# ---------------------------------------------------------------------------
+
+
+def _coach(client, base: str) -> dict:
+    return client.get(f"{base}/shooters/me/stages/1/coach").json()
+
+
+def test_put_events_replaces_the_list_and_returns_the_coach_payload(tmp_path: Path) -> None:
+    client, audit_file, base = _bootstrap(tmp_path)
+    before = _coach(client, base)
+    events = [
+        {"id": "evt-1", "kind": "movement", "start": 1.4, "end": 3.0, "source": "manual"},
+        {"id": "evt-2", "kind": "reload", "start": 2.0, "end": 3.4, "source": "manual", "note": "slow"},
+    ]
+    resp = client.put(
+        f"{base}/shooters/me/stages/1/events", json={"events": events, "_version": before["_version"]}
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["events"] == events
+    assert body["_version"] != before["_version"]
+    assert body["event_summary"]["reloads"] == 1
+    assert "shots" in body and "videos" in body
+
+    stored = json.loads(audit_file.read_text(encoding="utf-8"))
+    assert stored["events"] == events
+    assert stored["events_seeded"] is True
+    assert stored["audit_events"][-1]["kind"] == "events_save"
+    assert stored["audit_events"][-1]["payload"] == {"count": 2}
+
+
+def test_put_events_reclassifies_the_overlapped_gap(tmp_path: Path) -> None:
+    client, audit_file, base = _bootstrap(tmp_path)
+    # 2.3 s gap: movement by the thresholds, but under the 2.5 s reload hint,
+    # so the GET's seeder leaves it alone and the classifier sees no region yet.
+    _write_shots(audit_file, [1000, 1300, 3600])
+    assert _coach(client, base)["shots"][2]["interval_class"] == "movement"
+    v = _coach(client, base)["_version"]
+    resp = client.put(
+        f"{base}/shooters/me/stages/1/events",
+        json={
+            "events": [{"id": "evt-1", "kind": "reload", "start": 1.6, "end": 3.0, "source": "manual"}],
+            "_version": v,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["shots"][2]["interval_class"] == "reload"
+
+
+def test_put_events_rejects_a_lane_overlap_naming_both(tmp_path: Path) -> None:
+    client, _audit, base = _bootstrap(tmp_path)
+    v = _coach(client, base)["_version"]
+    resp = client.put(
+        f"{base}/shooters/me/stages/1/events",
+        json={
+            "events": [
+                {"id": "evt-1", "kind": "movement", "start": 1.0, "end": 3.0, "source": "manual"},
+                {"id": "evt-2", "kind": "movement", "start": 2.5, "end": 4.0, "source": "manual"},
+            ],
+            "_version": v,
+        },
+    )
+    assert resp.status_code == 422, resp.text
+    detail = resp.json()["detail"]
+    assert detail["code"] == "lane_overlap"
+    assert "evt-1" in detail["message"] and "evt-2" in detail["message"]
+
+
+def test_put_events_rejects_end_before_start(tmp_path: Path) -> None:
+    client, _audit, base = _bootstrap(tmp_path)
+    resp = client.put(
+        f"{base}/shooters/me/stages/1/events",
+        json={"events": [{"id": "evt-1", "kind": "reload", "start": 2.0, "end": 2.0, "source": "manual"}]},
+    )
+    assert resp.status_code == 422
+
+
+def test_put_events_stale_version_is_a_409_version_conflict(tmp_path: Path) -> None:
+    client, _audit, base = _bootstrap(tmp_path)
+    _coach(client, base)
+    resp = client.put(
+        f"{base}/shooters/me/stages/1/events", json={"events": [], "_version": "0000000000000000"}
+    )
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"]["code"] == "version_conflict"
+
+
+def test_put_events_with_no_shots_still_saves(tmp_path: Path) -> None:
+    # Review focus 3: a movement drawn before detection ran.
+    client, audit_file, base = _bootstrap(tmp_path)
+    _write_shots(audit_file, [])
+    resp = client.put(
+        f"{base}/shooters/me/stages/1/events",
+        json={"events": [{"id": "evt-1", "kind": "movement", "start": 1.0, "end": 2.0, "source": "manual"}]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["events"][0]["id"] == "evt-1"
+    assert resp.json()["event_summary"]["moving_shots"] == 0
+
+
+def test_put_events_unknown_stage_is_404(tmp_path: Path) -> None:
+    client, _audit, base = _bootstrap(tmp_path)
+    assert client.put(f"{base}/shooters/me/stages/9/events", json={"events": []}).status_code == 404

@@ -199,3 +199,20 @@ def test_the_shot_id_migration_stamps_under_the_lock(tmp_path: Path, monkeypatch
     monkeypatch.setattr(run_mod, "atomic_write_json", spy)
     assert run_mod.migrate_shot_ids(project_root, audit_lock=probe) == 1
     assert held == [True]
+
+
+def test_events_put_and_coach_get_seed_hold_the_lock(tmp_path: Path, monkeypatch) -> None:
+    client, _ = _seed_match_export_project(tmp_path, stage_count=1)
+    _, loads, saves = _probe_saves(client.app.state.splitsmith_state, monkeypatch)
+    body = client.get("/api/shooters/me/stages/1/coach")
+    assert body.status_code == 200, body.text
+    resp = client.put(
+        "/api/shooters/me/stages/1/events",
+        json={
+            "events": [{"id": "evt-1", "kind": "movement", "start": 0.2, "end": 0.9, "source": "manual"}],
+            "_version": body.json()["_version"],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    assert all(saves), saves
+    assert loads[-1] is True

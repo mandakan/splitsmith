@@ -6395,6 +6395,16 @@ class CoachShotPatchRequest(BaseModel):
     """
 
 
+class StageEventsPutRequest(BaseModel):
+    """The whole event list for one stage (spec 2026-10-08) plus the audit
+    revision the client loaded; a stale one is a 409 like the audit PUT."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    events: list[StageEvent]
+    revision: str | None = Field(default=None, alias=REVISION_FIELD)
+
+
 class CleanupRequest(BaseModel):
     """Body for POST /api/project/cleanup.
 
@@ -13916,6 +13926,46 @@ def create_app(
                 slug, payload, beep_in_clip, stg, project, cfg, version, stored_revision=stored_revision
             )
         )
+
+    @app.put("/api/shooters/{slug}/stages/{stage_number}/events")
+    def put_stage_events(slug: str, stage_number: int, req: StageEventsPutRequest) -> JSONResponse:
+        """Replace the stage's event list (spec 2026-10-08) and re-classify
+        its shots against it. A lane overlap is a 422 ``lane_overlap``; a
+        ``_version`` that no longer matches the stored doc is the audit
+        PUT's 409 ``version_conflict``. Returns the coach payload."""
+        project = state.shooter_project(slug)
+        try:
+            project.stage(stage_number)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        try:
+            events_module.validate_lanes(req.events)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422, detail={"code": "lane_overlap", "message": str(exc)}
+            ) from exc
+        cfg = coach_module.auto_classify_config()
+        with _audit_rmw():
+            stored, version = state.load_audit(slug, stage_number)
+            if stored is None:
+                raise HTTPException(status_code=404, detail=f"no audit JSON yet for stage {stage_number}")
+            if req.revision is not None and req.revision != audit_revision(stored):
+                raise AuditRevisionConflictError(f"stage {stage_number} audit changed since it was loaded")
+            stored[events_module.EVENTS_FIELD] = [e.model_dump(exclude_none=True) for e in req.events]
+            stored[events_module.EVENTS_SEEDED_FIELD] = True
+            shots = [s for s in stored.get("shots") or [] if isinstance(s, dict)]
+            coach_module.classify_intervals_in_dicts(shots, cfg, events=req.events)
+            stored.setdefault("audit_events", []).append(
+                {
+                    "id": _new_event_id(),
+                    "ts": _now_iso(),
+                    "kind": "events_save",
+                    "payload": {"count": len(req.events)},
+                }
+            )
+            state.save_audit(slug, stage_number, stored, version=version)
+            payload, version, beep_in_clip, stg, project = _load_audit_for_coach(slug, stage_number)
+        return JSONResponse(_build_coach_response(slug, payload, beep_in_clip, stg, project, cfg, version))
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/coach/reclassify")
     def reclassify_stage_coach(slug: str, stage_number: int) -> JSONResponse:
