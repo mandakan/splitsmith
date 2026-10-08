@@ -36,6 +36,7 @@ from .. import composition, export_runs, youtube_sidecar
 from ..compare.mp4_grid import DEFAULT_CANVAS_HEIGHT, DEFAULT_CANVAS_WIDTH
 from ..looks import look_names
 from ..match_project import trim_blocker
+from ..overlay_hud import OverlayStyleFields
 from ..overlay_theme import ThemeName
 from . import export_storage, match_exports
 from .http_errors import source_unreachable
@@ -52,7 +53,7 @@ def installed_look(value: str) -> str:
     raise ValueError(f"unknown Look {value!r}; installed: {', '.join(names)}")
 
 
-class ExportStageRequest(BaseModel):
+class ExportStageRequest(OverlayStyleFields, BaseModel):
     """Body for POST /api/stages/{n}/export.
 
     Each toggle defaults True; turning one off skips that artefact while
@@ -104,7 +105,7 @@ class ExportStageRequest(BaseModel):
     secondary_video_ids: list[str] | None = None
 
 
-class MatchExportRequest(BaseModel):
+class MatchExportRequest(OverlayStyleFields, BaseModel):
     """Body for POST /api/match/export (issue #171).
 
     Stitches the listed stages into one FCPXML, in the order given. Each

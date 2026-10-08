@@ -428,3 +428,14 @@ def test_an_overlay_variant_no_look_has_is_none(user_dir: Path) -> None:
 def test_the_catalog_lists_the_overlay_variants(user_dir: Path) -> None:
     splitsmith = next(c for c in looks.look_catalog() if c.name == "splitsmith")
     assert [v.name for v in splitsmith.slots["overlay"]] == ["minimal", "pips", "plate", "ticker", "timeline"]
+
+
+def test_the_catalog_lists_the_positions_of_each_overlay_style(user_dir: Path) -> None:
+    """The gallery offers a position only for a style that declares some,
+    in the template's own order (its default first)."""
+    splitsmith = next(c for c in looks.look_catalog() if c.name == "splitsmith")
+    positions = {v.name: v.positions for v in splitsmith.slots["overlay"]}
+    assert positions["plate"] == ["bottom-left", "top-left", "top-right", "bottom-right"]
+    assert positions["ticker"] == ["top-right", "top-left"]
+    assert positions["timeline"] == [] and positions["minimal"] == []
+    assert all(v.positions == [] for v in splitsmith.slots["slate"])

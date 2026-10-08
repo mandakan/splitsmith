@@ -535,6 +535,9 @@ class LookVariantInfo(BaseModel):
     name: str
     #: ``/api/looks/<owner>/preview/<file>``, the Look whose file it is.
     preview: str | None
+    #: An overlay style's positions, its default first; empty for a style
+    #: that places itself and for every other slot.
+    positions: list[str] = []
 
 
 class LookInfo(BaseModel):
@@ -560,15 +563,32 @@ def _preview_url(look: Look, slot: str, variant: str) -> str | None:
     return f"/api/looks/{owner}/preview/{path.name}"
 
 
+def _positions(look: Look, slot: str, variant: str) -> list[str]:
+    if slot != OVERLAY_SLOT:
+        return []
+    template = overlay_template_for(look, variant)
+    if template is None:
+        return []
+    # Deferred: overlay_hud imports this module for the variant grammar.
+    from .overlay_hud import declared_positions
+
+    return list(declared_positions(template))
+
+
 def look_catalog() -> list[LookInfo]:
     """Every installed Look with every slot's variants (the Look's own and
-    the shipped default's, as :func:`variants_for` resolves them) and the
-    preview each one shows; in :func:`list_looks` order."""
+    the shipped default's, as :func:`variants_for` resolves them), the
+    preview each one shows and, for an overlay style, the positions it
+    declares; in :func:`list_looks` order."""
     out: list[LookInfo] = []
     for look in list_looks():
         slots = {
             slot: [
-                LookVariantInfo(name=variant, preview=_preview_url(look, slot, variant))
+                LookVariantInfo(
+                    name=variant,
+                    preview=_preview_url(look, slot, variant),
+                    positions=_positions(look, slot, variant),
+                )
                 for variant in variants_for(look, slot)
             ]
             for slot in SLOT_NAMES

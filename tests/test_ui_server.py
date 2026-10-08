@@ -10307,3 +10307,112 @@ def test_match_export_title_page_carries_the_division_unless_turned_off(
     assert seen[0].shooter_identity is not None
     assert seen[0].shooter_identity.accent == "#123456" and seen[0].shooter_identity.club == "PK"
     assert seen[0].shooter_identity.label == "Martin Engström"
+
+
+# --- overlay styles through the endpoints (template HUD, slice 3) --------------
+
+
+def test_export_stage_forwards_the_overlay_style(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from splitsmith import overlay_render
+
+    client, _root = _seed_match_export_project(tmp_path, stage_count=1)
+    seen: dict[str, object] = {}
+
+    def fake_render(**kwargs: object) -> Path:
+        seen.update(kwargs)
+        out = kwargs["output_path"]
+        assert isinstance(out, Path)
+        out.write_bytes(b"mov")
+        return out
+
+    monkeypatch.setattr(overlay_render, "render_overlay", fake_render)
+    resp = client.post(
+        "/api/shooters/me/stages/1/export",
+        json={
+            "write_trim": False,
+            "write_csv": False,
+            "write_fcpxml": False,
+            "write_report": False,
+            "write_overlay": True,
+            "overlay_variant": "ticker",
+            "overlay_class_labels": False,
+            "overlay_position": "top-left",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    assert _wait_for_job(client, resp.json()["id"])["status"] == "succeeded"
+    assert seen["variant"] == "ticker"
+    from splitsmith.overlay_hud import HudOptions
+
+    options = seen["hud_options"]
+    assert isinstance(options, HudOptions)
+    assert options.class_labels is False and options.position == "top-left"
+
+
+@pytest.mark.parametrize(
+    ("record", "request_style", "redraws"),
+    [
+        (None, {}, False),
+        (None, {"overlay_variant": "plate"}, True),
+        ("plate", {}, True),
+        ("plate", {"overlay_variant": "plate"}, False),
+        ("plate", {"overlay_variant": "plate", "overlay_landing": False}, True),
+        (None, {"overlay_speed_colors": False}, False),
+    ],
+)
+def test_match_export_redraws_an_overlay_only_when_its_record_differs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    record: str | None,
+    request_style: dict,
+    redraws: bool,
+) -> None:
+    """An overlay on disk is reused only when it was drawn the way this
+    export asks; one without a record is read as Classic defaults, so an
+    untouched form still reuses it, and Classic ignores the style toggles."""
+    import json as _json
+
+    from splitsmith import overlay_render
+    from splitsmith.overlay_hud import HudOptions, overlay_settings
+    from splitsmith.ui import exports as exports_mod
+
+    client, root = _seed_match_export_project(tmp_path, stage_count=1)
+    _stub_match_export_probe(monkeypatch)
+    exports_dir = root / "shooters" / "me" / "exports"
+    (exports_dir / "stage1_stage-1_overlay.mov").write_bytes(b"old")
+    if record is not None:
+        settings = overlay_settings(
+            look="splitsmith",
+            variant=record,
+            options=HudOptions(),
+            codec="auto",
+            max_height=None,
+            max_fps=None,
+        )
+        (exports_dir / "stage1_stage-1_overlay.json").write_text(_json.dumps(settings))
+    calls: list[exports_mod.StageExportRequest] = []
+    real = exports_mod.export_stage
+
+    def capture(**kwargs: object) -> object:
+        request = kwargs["request"]
+        assert isinstance(request, exports_mod.StageExportRequest)
+        calls.append(request)
+        return real(**kwargs)
+
+    def fake_render(**kwargs: object) -> Path:
+        out = kwargs["output_path"]
+        assert isinstance(out, Path)
+        out.write_bytes(b"new")
+        return out
+
+    monkeypatch.setattr(exports_mod, "export_stage", capture)
+    monkeypatch.setattr(overlay_render, "render_overlay", fake_render)
+    resp = client.post(
+        "/api/shooters/me/export/match",
+        json={"stage_numbers": [1], "include_overlay": True, **request_style},
+    )
+    assert resp.status_code == 200, resp.text
+    _wait_for_job(client, resp.json()["id"])
+    assert bool(calls) is redraws
+    if redraws:
+        assert calls[0].overlay_variant == request_style.get("overlay_variant", "default")
