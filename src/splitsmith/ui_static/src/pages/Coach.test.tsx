@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError, type CoachShot, type CoachStageResponse, type StageEvent } from "@/lib/api";
+import { ApiError, type CoachShot, type CoachStageResponse, type CoachVideoEntry, type StageEvent } from "@/lib/api";
 
 import { Coach } from "@/pages/Coach";
 
@@ -22,8 +22,18 @@ vi.mock("@/lib/api", async (importOriginal) => {
       getMatchCoachDistributions: vi.fn().mockResolvedValue(null),
       patchStageShotCoach: vi.fn(),
       putStageEvents: vi.fn(),
+      getScrubSettings: vi.fn().mockResolvedValue({ full_res_scrub: false }),
+      setScrubSettings: vi.fn().mockResolvedValue({ full_res_scrub: true }),
       videoStreamUrl: (_slug: string, path: string, kind = "auto", _v?: string | null, stage?: number | null) => `http://localhost/${kind}/${path}${stage != null ? `#s${stage}` : ""}`,
     },
+  };
+});
+
+vi.mock("@/lib/features", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/features")>();
+  return {
+    ...actual,
+    useDeploymentMode: () => ({ mode: "local", resolved: true }),
   };
 });
 
@@ -259,5 +269,65 @@ describe("stage events on the Coach page", () => {
     expect(screen.getAllByRole("listitem")).toHaveLength(1);
     await new Promise((r) => setTimeout(r, 400));
     expect(api.putStageEvents).not.toHaveBeenCalled();
+  });
+});
+
+describe("Coach player source", () => {
+  const PROJECT = {
+    name: "M",
+    competitor_name: "Anna",
+    stages: [{ stage_number: 1, stage_name: "Stage One", time_seconds: 16.2 }],
+  };
+
+  function renderRoute() {
+    return render(
+      <MemoryRouter initialEntries={["/match/m1/coach/anna/1"]}>
+        <Routes>
+          <Route path="/match/:matchId/coach/:slug/:stage" element={<Coach />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  const trimCoach = (overrides: Partial<CoachVideoEntry>): CoachStageResponse => ({
+    ...makeCoach([makeShot(1, "c1")]),
+    videos: [{ path: "trimmed/stage1.mp4", role: "primary", beep_in_clip: 5, kind: "trim", trim_version: "t1", scrub_version: "s1", ...overrides }],
+  });
+
+  it("streams the scrub rendition when the trim has a fresh one", async () => {
+    vi.mocked(api.getProject).mockResolvedValue(PROJECT as never);
+    vi.mocked(api.getStageCoach).mockResolvedValue(trimCoach({}));
+    const { container } = renderRoute();
+    await screen.findByTestId("lane-editor");
+    expect(container.querySelector("video")?.getAttribute("src")).toContain("/scrub/");
+  });
+
+  it("falls back to the trim after the rendition errors", async () => {
+    vi.mocked(api.getProject).mockResolvedValue(PROJECT as never);
+    vi.mocked(api.getStageCoach).mockResolvedValue(trimCoach({}));
+    const { container } = renderRoute();
+    await screen.findByTestId("lane-editor");
+    fireEvent.error(container.querySelector("video")!);
+    await waitFor(() => expect(container.querySelector("video")?.getAttribute("src")).toContain("/trim/"));
+  });
+
+  it("a source-kind primary is left alone", async () => {
+    // Review focus 5.
+    vi.mocked(api.getProject).mockResolvedValue(PROJECT as never);
+    vi.mocked(api.getStageCoach).mockResolvedValue(trimCoach({ kind: "source", trim_version: null, scrub_version: null }));
+    const { container } = renderRoute();
+    await screen.findByTestId("lane-editor");
+    expect(container.querySelector("video")?.getAttribute("src")).toContain("/source/");
+  });
+
+  it("the lane editor menu toggles full-resolution video through the scrub settings", async () => {
+    vi.mocked(api.getProject).mockResolvedValue(PROJECT as never);
+    vi.mocked(api.getStageCoach).mockResolvedValue(trimCoach({}));
+    const { container } = renderRoute();
+    await screen.findByTestId("lane-editor");
+    fireEvent.click(await screen.findByRole("button", { name: "More" }));
+    fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: /Full-resolution video/ }));
+    expect(api.setScrubSettings).toHaveBeenCalledWith(true);
+    await waitFor(() => expect(container.querySelector("video")?.getAttribute("src")).toContain("/trim/"));
   });
 });

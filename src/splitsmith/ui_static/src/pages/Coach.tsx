@@ -23,6 +23,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Loader2,
+  MoreHorizontal,
   Pause,
   Play,
 } from "lucide-react";
@@ -46,6 +47,7 @@ import { TimeBudgetCard } from "@/components/coach/TimeBudgetCard";
 import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/Chip";
 import { Label } from "@/components/ui/Label";
+import { Menu, menuItemClass } from "@/components/ui/Menu";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Stat, StatStrip } from "@/components/ui/Stat";
 import {
@@ -62,6 +64,7 @@ import { withKind } from "@/lib/events";
 import { useSpacePlayPause } from "@/lib/keyboard";
 import { useMatchHref } from "@/lib/matchHref";
 import { useIsMobile } from "@/lib/useIsMobile";
+import { useScrubSource } from "@/lib/useScrubSource";
 import { useStageEvents } from "@/lib/useStageEvents";
 import { cn } from "@/lib/utils";
 import {
@@ -747,6 +750,8 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [noteDraft, setNoteDraft] = useState("");
+  const [moreOpen, setMoreOpen] = useState(false);
+  const scrub = useScrubSource();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const shotListRef = useRef<HTMLDivElement | null>(null);
   // Guard value for the positional shot PATCH (#844). A ref rather than
@@ -933,8 +938,14 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
 
   const activeShot =
     coach.shots.find((s) => s.shot_number === activeShotNumber) ?? null;
-  const primary = coach.videos.find((v) => v.role === "primary");
-  const streamUrl = primary ? api.videoStreamUrl(slug, primary.path, primary.kind, null, stage) : null;
+  const primary = coach.videos.find((v) => v.role === "primary") ?? null;
+  const scrubChoice = primary?.kind === "trim" ? scrub.choose(primary) : null;
+  const playingScrub = scrubChoice?.kind === "scrub";
+  const streamUrl = primary
+    ? primary.kind !== "trim"
+      ? api.videoStreamUrl(slug, primary.path, primary.kind, null, stage)
+      : api.videoStreamUrl(slug, primary.path, scrubChoice!.kind, scrubChoice!.version, stage)
+    : null;
   const maxAbs =
     coach.shots.length > 0
       ? Math.max(...coach.shots.map((s) => s.time_absolute))
@@ -1033,6 +1044,9 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
                 }
                 onPlay={() => setIsPlaying(true)}
                 onPause={() => setIsPlaying(false)}
+                onError={() => {
+                  if (primary && playingScrub) scrub.markFailed(primary);
+                }}
                 className="aspect-video w-full bg-black"
               />
             ) : (
@@ -1080,6 +1094,35 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
             onSelect={selectEvent}
             onSeek={seekFromBeep}
             onChange={changeEvents}
+            menu={
+              scrub.available ? (
+                <span className="relative shrink-0">
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    aria-label="More"
+                    aria-haspopup="menu"
+                    aria-expanded={moreOpen}
+                    onClick={() => setMoreOpen((v) => !v)}
+                  >
+                    <MoreHorizontal className="size-4" aria-hidden />
+                  </Button>
+                  <Menu open={moreOpen} onClose={() => setMoreOpen(false)} align="right">
+                    <button
+                      type="button"
+                      role="menuitemcheckbox"
+                      aria-checked={scrub.fullRes}
+                      className={menuItemClass}
+                      onClick={() => scrub.setFullRes(!scrub.fullRes)}
+                    >
+                      Full-resolution video
+                      <span className="ml-auto text-sm text-muted">{scrub.fullRes ? "on" : "off"}</span>
+                    </button>
+                  </Menu>
+                </span>
+              ) : undefined
+            }
           />
           {eventsReadOnly ? <EventList events={events} shots={coach.shots} /> : null}
 
