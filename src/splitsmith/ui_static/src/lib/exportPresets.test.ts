@@ -110,6 +110,21 @@ describe("match_summary", () => {
   });
 });
 
+describe("account_brand", () => {
+  it("is on by default, a body stored before it shipped applies it on, and off round-trips", () => {
+    expect(DEFAULT_EXPORT_SETTINGS.renderOptions.accountBrand).toBe(true);
+    const legacy: Partial<ExportPresetBody> = { ...YOUTUBE };
+    delete legacy.account_brand;
+    expect(applyBody(DEFAULT_EXPORT_SETTINGS, legacy as ExportPresetBody).renderOptions.accountBrand).toBe(true);
+    const off = {
+      ...DEFAULT_EXPORT_SETTINGS,
+      renderOptions: { ...DEFAULT_EXPORT_SETTINGS.renderOptions, accountBrand: false },
+    };
+    expect(settingsToBody(off).account_brand).toBe(false);
+    expect(applyBody(DEFAULT_EXPORT_SETTINGS, settingsToBody(off)).renderOptions.accountBrand).toBe(false);
+  });
+});
+
 describe("non-finite seconds", () => {
   it("a field being edited (NaN) is stored as its default, never as NaN", () => {
     const s: ExportSettings = { ...DEFAULT_EXPORT_SETTINGS, transitionSeconds: Number.NaN, headPad: Number.NaN };

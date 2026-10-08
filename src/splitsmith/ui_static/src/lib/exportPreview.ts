@@ -87,6 +87,7 @@ export function previewBody(
     title_info: settings.renderOptions.titleInfo.trim() || null,
     title_division: settings.renderOptions.titleDivision,
     made_with: settings.renderOptions.madeWith,
+    account_brand: settings.renderOptions.accountBrand,
     project_name: projectName.trim() || null,
   };
   const resolved = resolveLookChoice(looks, lookChoiceOf(settings));

@@ -43,7 +43,7 @@ import {
   type MatchProject,
   type MoveShooterBlocked,
   type BeepQueueItem,
-  type ShooterListEntry,
+  type ScoreboardIdentity, type ShooterListEntry,
   type SortSummary,
   type StageVideo,
   type VideoRole,
@@ -560,6 +560,18 @@ function IngestInner({ slug }: { slug: string }) {
   const [sheet, setSheet] = useState<{ slug: string; videoId: string | null; assignStage: number | null } | null>(null);
   const [addShooterOpen, setAddShooterOpen] = useState(false);
   const [identityFor, setIdentityFor] = useState<ShooterListEntry | null>(null);
+  // You (spec 2026-10-08): the roster marks the shooter with your SSI id.
+  const [me, setMe] = useState<ScoreboardIdentity | null>(null);
+  useEffect(() => {
+    let alive = true;
+    api.getScoreboardIdentity().then(
+      (id) => alive && setMe(id),
+      () => undefined,
+    );
+    return () => {
+      alive = false;
+    };
+  }, []);
   // ``?identity=<slug>``: the Look editor's "Add a logo" opens that
   // shooter's Identity sheet here, once, and drops the parameter.
   useEffect(() => {
@@ -958,6 +970,14 @@ function IngestInner({ slug }: { slug: string }) {
               onRemove={(s) => void removeShooter(s)}
               onRebuildTrims={(s) => void rebuildTrims(s)}
               onIdentity={(s) => setIdentityFor(s)}
+              me={me}
+              onThisIsMe={(s) => {
+                if (s.selected_shooter_id == null) return;
+                void api
+                  .putScoreboardIdentity({ shooter_id: s.selected_shooter_id, display_name: s.name })
+                  .then(setMe)
+                  .catch(() => undefined);
+              }}
             />
             {clipModel ? <CamerasPanel slug={slug} cameras={clipModel.cameras} editDenied={editDenied} onSaved={handleSaved} /> : null}
           </div>

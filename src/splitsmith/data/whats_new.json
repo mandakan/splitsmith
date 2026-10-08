@@ -1,6 +1,13 @@
 {
   "entries": [
     {
+      "id": "your-brand-and-shooter-book",
+      "date": "2026-10-08",
+      "title": "Your brand and your shooter book",
+      "body": "Set your brand once on the new You page and it marks every video you render. A shooter's colour, club and logo now follow them from match to match.",
+      "chip": "your-brand-and-shooter-book"
+    },
+    {
       "id": "match-summary",
       "date": "2026-10-07",
       "title": "A match summary at the end of the video",

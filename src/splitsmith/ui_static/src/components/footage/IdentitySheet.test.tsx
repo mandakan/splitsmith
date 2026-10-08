@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ShooterListEntry } from "@/lib/api";
 
@@ -14,10 +14,29 @@ vi.mock("@/lib/api", async (orig) => {
       updateShooterIdentity: vi.fn().mockResolvedValue({ name: "p" }),
       uploadShooterLogo: vi.fn().mockResolvedValue({ name: "p" }),
       removeShooterLogo: vi.fn().mockResolvedValue({ name: "p" }),
+      getShooterIdentityView: vi.fn(),
+      useShooterBook: vi.fn(),
+      putShooterBookEntry: vi.fn().mockResolvedValue({}),
+      uploadShooterBookLogo: vi.fn().mockResolvedValue({}),
+      removeShooterBookLogo: vi.fn().mockResolvedValue({}),
     },
   };
 });
 const { api } = await import("@/lib/api");
+
+/** What GET /identity answers: the shooter's own record by default. */
+function viewOf(shooter: ShooterListEntry, source: "match" | "book" | "none" = "match", shooterId: number | null = null) {
+  vi.mocked(api.getShooterIdentityView).mockResolvedValue({
+    source,
+    identity: shooter.identity ?? { accent: null, logo: null, club: null },
+    shooter_id: shooterId,
+  });
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  viewOf(ME, "none");
+});
 
 const ME = {
   slug: "me",
@@ -38,7 +57,11 @@ describe("IdentitySheet", () => {
     fireEvent.change(screen.getByLabelText("Club"), { target: { value: "  Bromma PK " } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await vi.waitFor(() =>
-      expect(api.updateShooterIdentity).toHaveBeenCalledWith("me", { accent: "#4ade80", club: "Bromma PK" }),
+      expect(api.updateShooterIdentity).toHaveBeenCalledWith("me", {
+        accent: "#4ade80",
+        club: "Bromma PK",
+        scope: "book",
+      }),
     );
     expect(api.uploadShooterLogo).not.toHaveBeenCalled();
     await vi.waitFor(() => expect(onChanged).toHaveBeenCalled());
@@ -54,20 +77,84 @@ describe("IdentitySheet", () => {
 
   it("uploads a chosen logo and removes an existing one on request", async () => {
     const onChanged = vi.fn();
+    viewOf(WITH_LOGO, "match");
     const { unmount } = render(
       <IdentitySheet open onClose={vi.fn()} shooter={WITH_LOGO} editDenied={false} onChanged={onChanged} />,
     );
-    expect(screen.getByText("logo-0123456789ab.png")).toBeInTheDocument();
+    expect(await screen.findByText("logo-0123456789ab.png")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Remove" }));
     expect(screen.getByText("No logo")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await vi.waitFor(() => expect(api.removeShooterLogo).toHaveBeenCalledWith("me"));
+    await vi.waitFor(() => expect(api.removeShooterLogo).toHaveBeenCalledWith("me", "book"));
     unmount();
+    viewOf(ME, "none");
 
     render(<IdentitySheet open onClose={vi.fn()} shooter={ME} editDenied={false} onChanged={onChanged} />);
     const file = new File([new Uint8Array([137, 80, 78, 71])], "club.png", { type: "image/png" });
     fireEvent.change(screen.getByLabelText("Logo file"), { target: { files: [file] } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await vi.waitFor(() => expect(api.uploadShooterLogo).toHaveBeenCalledWith("me", file));
+    await vi.waitFor(() => expect(api.uploadShooterLogo).toHaveBeenCalledWith("me", file, "book"));
+  });
+
+  it("edits a look from the shooter book in the book, so this match keeps following it", async () => {
+    const booked = { ...ME, selected_shooter_id: 42 } as unknown as ShooterListEntry;
+    vi.mocked(api.getShooterIdentityView).mockResolvedValue({
+      source: "book",
+      identity: { accent: "#60a5fa", logo: null, club: "Bromma PK" },
+      shooter_id: 42,
+    });
+    render(<IdentitySheet open onClose={vi.fn()} shooter={booked} editDenied={false} onChanged={vi.fn()} />);
+    expect(await screen.findByText(/From your shooter book/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Club")).toHaveValue("Bromma PK");
+    fireEvent.click(screen.getByRole("button", { name: "Accent #4ade80" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await vi.waitFor(() =>
+      expect(api.putShooterBookEntry).toHaveBeenCalledWith(42, {
+        accent: "#4ade80",
+        club: "Bromma PK",
+        label: "Mathias Axell",
+      }),
+    );
+    expect(api.updateShooterIdentity).not.toHaveBeenCalled();
+  });
+
+  it("only this match keeps the edit here", async () => {
+    const booked = { ...ME, selected_shooter_id: 42 } as unknown as ShooterListEntry;
+    vi.mocked(api.getShooterIdentityView).mockResolvedValue({
+      source: "book",
+      identity: { accent: "#60a5fa", logo: null, club: null },
+      shooter_id: 42,
+    });
+    render(<IdentitySheet open onClose={vi.fn()} shooter={booked} editDenied={false} onChanged={vi.fn()} />);
+    await screen.findByText(/From your shooter book/);
+    fireEvent.click(screen.getByLabelText("Only this match"));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await vi.waitFor(() =>
+      expect(api.updateShooterIdentity).toHaveBeenCalledWith("me", { accent: "#60a5fa", club: null, scope: "match" }),
+    );
+    expect(api.putShooterBookEntry).not.toHaveBeenCalled();
+  });
+
+  it("use shooter book drops this match's record", async () => {
+    const own = { ...WITH_LOGO, selected_shooter_id: 42 } as unknown as ShooterListEntry;
+    viewOf(own, "match", 42);
+    vi.mocked(api.useShooterBook).mockResolvedValue({
+      source: "book",
+      identity: { accent: "#c084fc", logo: null, club: null },
+      shooter_id: 42,
+    });
+    const onChanged = vi.fn();
+    render(<IdentitySheet open onClose={vi.fn()} shooter={own} editDenied={false} onChanged={onChanged} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Use shooter book" }));
+    await vi.waitFor(() => expect(api.useShooterBook).toHaveBeenCalledWith("me"));
+    expect(await screen.findByText(/From your shooter book/)).toBeInTheDocument();
+    expect(onChanged).toHaveBeenCalled();
+  });
+
+  it("a shooter with no scoreboard id gets no book controls", async () => {
+    render(<IdentitySheet open onClose={vi.fn()} shooter={ME} editDenied={false} onChanged={vi.fn()} />);
+    expect(await screen.findByText(/Link this shooter's scoreboard entry/)).toBeInTheDocument();
+    expect(screen.queryByLabelText("Only this match")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Use shooter book" })).toBeNull();
   });
 });
