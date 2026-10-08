@@ -13196,6 +13196,12 @@ def create_app(
         sid = project.selected_shooter_id
         if sid is None:
             return
+        try:
+            await _write_book(project, slug, sid)
+        except Exception as exc:  # noqa: BLE001 -- the match was saved; the book is the extra
+            logger.warning("shooter book: %s's look was saved to the match but not the book (%s)", slug, exc)
+
+    async def _write_book(project: MatchProject, slug: str, sid: int) -> None:
         logo_bytes: bytes | None = None
         if project.identity.logo is not None:
             local = ensure_local_logo(project, state.shooter_root(slug))
@@ -13252,7 +13258,7 @@ def create_app(
             "shooter_id": project.selected_shooter_id,
             # Whether the book holds a look for this shooter ("Use shooter
             # book" has something to fall back to) and whether this server
-            # keeps a book at all (hosted does not yet).
+            # keeps a book at all (one with no store answers an empty one).
             "book_entry": shooter_book_module.is_set(book.get(project.selected_shooter_id)),
             "book_available": not isinstance(state.shooter_book, shooter_book_module.EmptyShooterBookStore),
         }

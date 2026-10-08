@@ -113,3 +113,36 @@ def test_the_app_store_fills_from_the_recent_matches(tmp_path: Path, monkeypatch
     assert json.loads((user_config.user_config_dir() / "account" / "shooter_book.json").read_text())[
         "entries"
     ]
+
+
+def test_a_local_fill_that_fails_leaves_no_marker_and_is_tried_again(tmp_path: Path) -> None:
+    attempts: list[int] = []
+
+    async def source():
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise RuntimeError("unreadable")
+        return []
+
+    store = JsonShooterBookStore(tmp_path / "account", backfill_source=source)
+    asyncio.run(store.list())
+    assert not (tmp_path / "account" / BACKFILL_MARKER).exists()
+    asyncio.run(store.list())
+    assert (tmp_path / "account" / BACKFILL_MARKER).exists() and attempts == [1, 1]
+
+
+def test_a_book_that_cannot_be_written_never_fails_the_identity_edit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from splitsmith import shooter_book
+
+    from .test_shooter_book_writes import IDENTITY, _seed
+
+    client, shooter_root = _seed(tmp_path)
+
+    async def down(*args, **kwargs):
+        raise RuntimeError("database unreachable")
+
+    monkeypatch.setattr(shooter_book, "save_identity", down)
+    assert client.patch(IDENTITY, json={"club": "Bromma"}).status_code == 200
+    assert MatchProject.load(shooter_root).identity.club == "Bromma"

@@ -226,3 +226,153 @@ def test_save_identity_through_the_hosted_store_copies_the_logo(tmp_path: Path) 
     run(save_identity(a, shooter_id=42, identity=ShooterIdentity(logo=name), label="A", logo_bytes=_png()))
     assert run(a.get(42)).identity.logo == name
     assert run(a.logo_file(name)) is not None
+
+
+# --- review fixes -------------------------------------------------------------------
+
+
+async def _file_db_user(tmp_path: Path, *, backfill_source=None):
+    """One user over a file database, built in the loop the test races in,
+    so concurrent sessions really interleave (a second loop serializes them)."""
+    engine = create_engine(f"sqlite+aiosqlite:///{tmp_path / 'db.sqlite'}")
+    sf = sessionmaker(engine)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    async with sf() as s:
+        user = User(email="a@example.com")
+        s.add(user)
+        await s.commit()
+        await s.refresh(user)
+        uid = user.id
+    storage = FilesystemStorage(tmp_path / "bucket" / "users" / uid)
+    book = PostgresShooterBookStore(
+        sf, user_id=uid, storage=storage, cache_dir=tmp_path / "cache", backfill_source=backfill_source
+    )
+    return book, PostgresAccountProfileStore(sf, user_id=uid, storage=storage, cache_dir=tmp_path / "cache")
+
+
+def test_two_first_reads_at_once_both_succeed(tmp_path: Path) -> None:
+    async def source():
+        # Yield, so both reads pass the "not filled yet" check before either
+        # records the fill.
+        await asyncio.sleep(0.05)
+        return []
+
+    async def race():
+        book, _ = await _file_db_user(tmp_path, backfill_source=source)
+        return await asyncio.gather(book.list(), book.list(), return_exceptions=True)
+
+    results = run(race())
+    assert not [r for r in results if isinstance(r, BaseException)], results
+
+
+def test_a_brand_saved_during_the_first_fill_succeeds(tmp_path: Path) -> None:
+    async def source():
+        await asyncio.sleep(0.05)
+        return []
+
+    async def race():
+        book, profile = await _file_db_user(tmp_path, backfill_source=source)
+        fill = asyncio.create_task(book.list())
+        await asyncio.sleep(0.01)
+        # The fill has checked and waits on its source: the save inserts the
+        # profile row first, and the fill's marker must update it, not insert.
+        await profile.save(AccountProfile(brand=LookBrand(line="L")))
+        results = await asyncio.gather(fill, return_exceptions=True)
+        return results, await profile.load()
+
+    results, loaded = run(race())
+    assert not [r for r in results if isinstance(r, BaseException)], results
+    assert loaded.brand.line == "L", "the fill's marker kept the brand"
+
+
+def test_a_profile_saved_twice_at_once_both_succeed(tmp_path: Path) -> None:
+    async def race():
+        _, profile = await _file_db_user(tmp_path)
+        return await asyncio.gather(
+            profile.save(AccountProfile(brand=LookBrand(line="A"))),
+            profile.save(AccountProfile(brand=LookBrand(line="B"))),
+            return_exceptions=True,
+        )
+
+    results = run(race())
+    assert not [r for r in results if isinstance(r, BaseException)], results
+
+
+def test_a_storage_error_on_a_logo_saves_the_rest_and_marks_the_fill(tmp_path: Path) -> None:
+    from splitsmith.identity import logo_name
+
+    calls: list[int] = []
+
+    async def source():
+        calls.append(1)
+        return [_candidate(42, "Club", 1, logo=logo_name(_png(), "png"), data=_png())]
+
+    (a, _), _, _ = _users(tmp_path, backfill_source=source)
+
+    class _StorageDownError(Exception):
+        """Not an OSError or ValueError: what botocore raises."""
+
+    def boom(path: str, data: bytes) -> None:
+        raise _StorageDownError("endpoint unreachable")
+
+    a._storage.write_bytes = boom  # type: ignore[union-attr,method-assign]
+    entries = run(a.list())
+    assert [(e.shooter_id, e.identity.club, e.identity.logo) for e in entries] == [(42, "Club", None)]
+    run(a.list())
+    assert calls == [1], "a logo that could not be stored does not rerun the fill on every read"
+
+
+def test_the_mirror_never_serves_a_symlink_from_its_cache(tmp_path: Path) -> None:
+    (a, _), _, (a_id, _) = _users(tmp_path)
+    name = run(a.put_logo(_png()))
+    secret = tmp_path / "secret.png"
+    secret.write_bytes(b"not yours")
+    cache = tmp_path / "cache" / "account" / a_id / "files"
+    cache.mkdir(parents=True)
+    (cache / name).symlink_to(secret)
+    path = run(a.logo_file(name))
+    assert path is None or (not path.is_symlink() and path.read_bytes() == _png())
+
+
+def test_names_that_are_not_content_names_are_refused(tmp_path: Path) -> None:
+    (a, prof), _, _ = _users(tmp_path)
+    for bad in (".hidden.png", "logo.png", "brand-0123456789ab.png"):
+        assert run(a.logo_file(bad)) is None, bad
+    for bad in ("../brand-0123456789ab.png", "logo-0123456789ab.png", ".x"):
+        assert run(prof.brand_file(bad)) is None, bad
+
+
+def test_the_hosted_source_reads_each_logo_from_its_match_key(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    from splitsmith.db.project_state import MatchDocs
+    from splitsmith.identity import logo_name
+    from splitsmith.ui.account_backfill import hosted_backfill_source
+
+    storage = FilesystemStorage(tmp_path / "bucket")
+    names = {}
+    for slug, colour in (("me", (1, 2, 3)), ("anna", (9, 8, 7))):
+        import io as _io
+
+        from PIL import Image
+
+        buf = _io.BytesIO()
+        Image.new("RGB", (8, 8), colour).save(buf, format="PNG")
+        names[slug] = (logo_name(buf.getvalue(), "png"), buf.getvalue())
+        storage.write_bytes(f"matches/m1/shooters/{slug}/identity/{names[slug][0]}", buf.getvalue())
+
+    def doc(sid: int, slug: str) -> dict:
+        return {"name": "M", "selected_shooter_id": sid, "identity": {"club": slug, "logo": names[slug][0]}}
+
+    class _Matches:
+        async def list(self):
+            return [SimpleNamespace(match_id="m1")]
+
+    class _State:
+        async def load_docs_for_matches(self, ids):
+            return {"m1": MatchDocs(projects={"me": doc(42, "me"), "anna": doc(7, "anna")})}
+
+    found = {c.shooter_id: c for c in run(hosted_backfill_source(_Matches(), _State(), storage)())}
+    assert found[42].read_logo() == names["me"][1]
+    assert found[7].read_logo() == names["anna"][1]

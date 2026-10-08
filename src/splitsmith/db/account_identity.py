@@ -17,15 +17,18 @@ test per method.
 from __future__ import annotations
 
 import logging
+import os
+import tempfile
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from ..account_profile import AccountProfile
-from ..identity import ShooterIdentity, logo_name, sniff_logo
+from ..identity import _LOGO_RE, ShooterIdentity, logo_name, sniff_logo
 from ..look_brand import BrandError, check_brand_logo
 from ..looks import BRAND_FILE_RE, LookBrand
 from ..shooter_book import (
@@ -68,20 +71,51 @@ def _mirror(storage: Storage | None, key: str, cache: Path, name: str) -> Path |
         if not storage.exists(key):
             return None
         data = storage.read_bytes(key)
+        cache.mkdir(parents=True, exist_ok=True)
+        # A temp file of its own, so two mirrors of the same logo at once
+        # (a render's snapshot and a logo GET) never trip over each other.
+        fd, tmp_name = tempfile.mkstemp(prefix=f".{name}.", dir=cache)
+        with os.fdopen(fd, "wb") as out:
+            out.write(data)
+        target = cache / name
+        if target.is_symlink():
+            target.unlink()
+        Path(tmp_name).replace(target)
     except Exception as exc:  # noqa: BLE001 -- a logo is never worth a failed render
-        logger.info("account files: could not read %s (%s)", key, exc)
+        logger.info("account files: could not mirror %s (%s)", key, exc)
         return None
-    cache.mkdir(parents=True, exist_ok=True)
-    partial = cache / f".{name}.part"
-    partial.write_bytes(data)
-    partial.replace(cache / name)
-    return cache / name
+    return target
 
 
 async def _profile_row(session, user_id: str) -> AccountProfileRow | None:  # type: ignore[no-untyped-def]
     return (
         await session.execute(select(AccountProfileRow).where(AccountProfileRow.user_id == user_id))
     ).scalar_one_or_none()
+
+
+async def _upsert_profile(
+    session_factory: async_sessionmaker, user_id: str, apply: Callable[[AccountProfileRow], None]
+) -> None:
+    """Apply ``apply`` to the user's profile row, inserting it when there is
+    none. Two first writes at once (the fill's marker and a brand save, or two
+    first reads) both find no row; the one whose insert loses reads the row
+    the other wrote and updates it instead of failing."""
+    for attempt in range(2):
+        async with session_factory() as session:
+            row = await _profile_row(session, user_id)
+            if row is None:
+                row = AccountProfileRow(user_id=user_id)
+                apply(row)
+                session.add(row)
+            else:
+                apply(row)
+            try:
+                await session.commit()
+                return
+            except IntegrityError:
+                await session.rollback()
+                if attempt:
+                    raise
 
 
 class PostgresShooterBookStore:
@@ -115,13 +149,14 @@ class PostgresShooterBookStore:
         except Exception as exc:  # noqa: BLE001 -- a fill that fails is retried on the next read
             logger.warning("shooter book: the fill from existing matches failed (%s)", exc)
             return
-        async with self._session_factory() as session:
-            row = await _profile_row(session, self._user_id)
-            if row is None:
-                session.add(AccountProfileRow(user_id=self._user_id, backfilled_at=datetime.now(UTC)))
-            else:
-                row.backfilled_at = datetime.now(UTC)
-            await session.commit()
+
+        def mark(row: AccountProfileRow) -> None:
+            row.backfilled_at = row.backfilled_at or datetime.now(UTC)
+
+        try:
+            await _upsert_profile(self._session_factory, self._user_id, mark)
+        except Exception as exc:  # noqa: BLE001 -- the read never fails on its bookkeeping
+            logger.warning("shooter book: could not record the fill (%s); it may run again", exc)
 
     # -- reads ------------------------------------------------------------------
 
@@ -171,7 +206,7 @@ class PostgresShooterBookStore:
         return BookSnapshot(entries={e.shooter_id: e.identity for e in entries}, logos=logos)
 
     async def logo_file(self, name: str) -> Path | None:
-        if not name or "/" in name or name.startswith("."):
+        if not _LOGO_RE.match(name or ""):
             return None
         return _mirror(self._storage, f"{FILES_KEY}/{name}", self._cache, name)
 
@@ -243,14 +278,12 @@ class PostgresAccountProfileStore:
 
     async def save(self, profile: AccountProfile) -> None:
         brand = profile.brand.model_dump(mode="json") if profile.brand is not None else None
-        async with self._session_factory() as session:
-            row = await _profile_row(session, self._user_id)
-            if row is None:
-                session.add(AccountProfileRow(user_id=self._user_id, brand=brand))
-            else:
-                row.brand = brand
-                row.updated_at = datetime.now(UTC)
-            await session.commit()
+
+        def apply(row: AccountProfileRow) -> None:
+            row.brand = brand
+            row.updated_at = datetime.now(UTC)
+
+        await _upsert_profile(self._session_factory, self._user_id, apply)
 
     async def put_brand_logo(self, data: bytes) -> str:
         name = check_brand_logo(data)

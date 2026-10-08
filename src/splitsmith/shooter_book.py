@@ -140,7 +140,7 @@ async def save_identity(
     if identity.logo is not None and logo_bytes is not None:
         try:
             logo = await store.put_logo(logo_bytes)
-        except (OSError, ValueError) as exc:
+        except Exception as exc:  # noqa: BLE001 -- storage errors are their own types (botocore)
             logger.warning("shooter book: the logo for %s was not saved (%s)", shooter_id, exc)
     elif identity.logo is not None:
         # The match's file is not on this disk: keep the book's own copy of
