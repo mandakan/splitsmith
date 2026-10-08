@@ -172,13 +172,16 @@ proposal becomes `manual`.
 
 ## API
 
-### `GET /api/stages/{n}/coach`
+### `GET /api/shooters/{slug}/stages/{n}/coach` (under `/api/matches/{id}/`)
 
 Adds to the existing payload:
 
 - `events: StageEvent[]`
 - per shot: `moving: bool`
 - `event_summary: StageEventSummary`
+- `_version`: `audit_revision` of the stored doc, which is what the events
+  PUT sends back (the coach payload's integer `version` is the hosted row
+  version and stays)
 - on each `videos[]` entry: `trim_version`, `scrub_version` -- the same
   two fields `StageVideo` carries, from the request's `StoragePresence`
   listing, so the SPA's `useScrubSource.choose` can tell a fresh
@@ -186,11 +189,15 @@ Adds to the existing payload:
 
 Seeds on first read when the audit has shots, `events` is empty and
 `events_seeded` is false; the write goes under `_audit_rmw()` and sets the
-flag. The share surface reaches none of this (the coach GET is not in
+flag. Like the heal, the seed is persisted only for an owner read, and
+never on a mirror (`_is_mirror()`): `events` is a desktop-owned field --
+`sync.merge.merge_audit_doc` starts from a deep copy of local, so local's
+events stand on every pull and a hosted write would only trip the
+non-whitelisted-change note. The share surface reaches none of this (the coach GET is not in
 `_SHARE_PATH_RE`); share consumers get the reload and moving figures
 through `stages[].figures` on the project payload.
 
-### `PUT /api/stages/{n}/events`
+### `PUT /api/shooters/{slug}/stages/{n}/events` (under `/api/matches/{id}/`)
 
 Body `{events: StageEvent[], _version: str}`. Replaces the whole list.
 `validate_lanes` failure is a 422 naming the pair. A stale `_version` is a
@@ -238,8 +245,11 @@ restores the pre-drag state):
   A time pill follows the handle (time, frame number).
 - Snap within ~8 px to a shot time or the beep; Alt skips. Neighbours in
   the same lane clamp; a region never overlaps another in its lane.
-- Selected region: `[` `]` nudge start, `{` `}` nudge end, by one frame
-  (`1 / fps` of the primary video); Shift for 100 ms; Delete removes.
+- Selected region, editor focused: ArrowLeft / ArrowRight nudge the start
+  by one frame (`1 / fps` of the primary video, 30 when unknown),
+  Shift+Arrow nudges the end, Alt+Arrow moves by 100 ms; Delete or
+  Backspace removes. Arrows rather than brackets: bracket keys sit behind
+  AltGr on Nordic layouts.
 - While a reload region is selected, an overhang bracket is drawn from
   the enclosing movement's end to the reload's end, labelled with the
   signed difference.
@@ -247,7 +257,8 @@ restores the pre-drag state):
 - No zoom, no multi-select, no copy in this cut. At 16 s over ~900 px one
   pixel is ~18 ms; coarse placement by drag, fine by nudge.
 
-Every edit PUTs the whole list with `_version`; a 409 reloads.
+Every edit PUTs the whole list with `_version`; a 409 reloads the coach
+payload. Nudges commit after 350 ms idle so a held key is one PUT.
 
 There is no separate mobile Coach page; under the phone breakpoint the
 Coach page renders the same component read-only, with a region list under it (one row
