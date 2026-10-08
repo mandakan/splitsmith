@@ -37,11 +37,13 @@ from splitsmith.composition import XFADE_FAMILIES  # noqa: E402
 from splitsmith.look_sting import sting_context  # noqa: E402
 from splitsmith.looks import (  # noqa: E402
     CARD_PREVIEW_SLOTS,
+    OVERLAY_SLOT,
     PREVIEW_DIR,
     TRANSITIONS_OWNER,
     Look,
     list_looks,
     load_look,
+    overlay_template_for,
     sting_template_for,
     variants_for,
 )
@@ -49,6 +51,14 @@ from splitsmith.match_project import StageScorecard  # noqa: E402
 from splitsmith.match_summary import build_match_summary, build_match_summary_still  # noqa: E402
 from splitsmith.overlay_card import build_card_still, build_lower_third, card_scale  # noqa: E402
 from splitsmith.overlay_html import single_html  # noqa: E402
+from splitsmith.overlay_hud import (  # noqa: E402
+    HudOptions,
+    declared_positions,
+    hud_options_data,
+    hud_stage_data,
+    resolve_position,
+)
+from splitsmith.overlay_hud_render import hud_context  # noqa: E402
 from splitsmith.overlay_raster import ChromiumRasterizer, Rasterizer  # noqa: E402
 from splitsmith.overlay_single import OverlayRun, run_groups  # noqa: E402
 from splitsmith.overlay_summary_cell import build_summary_still  # noqa: E402
@@ -78,6 +88,20 @@ THUMBNAILS: tuple[str, ...] = (
 LOOP_FPS = 12
 LOOP_FADE_SECONDS = 1.0
 LOOP_HOLD_SECONDS = 0.25
+#: The sample stage a HUD style's tile plays: the draw, a pair, a
+#: transition, a pair. (class, split) per shot.
+HUD_SAMPLE: tuple[tuple[str, float], ...] = (
+    ("first_shot", 1.05),
+    ("split", 0.24),
+    ("split", 0.27),
+    ("transition", 0.68),
+    ("split", 0.23),
+    ("split", 0.25),
+)
+#: Where the beep sits in the tile's loop, and how long the loop runs on
+#: past the HUD's own settle() so the landing rests before it repeats.
+HUD_LOOP_BEEP = 0.3
+HUD_LOOP_TAIL = 0.6
 #: ``subprocess.run``'s shape; the unit tests pass a stand-in that writes frames.
 Runner = Callable[..., subprocess.CompletedProcess]
 #: The bundled transition tiles: the cut and the two FCP effects. The xfade
@@ -359,6 +383,49 @@ def _sting_frame(name: str, base: Image.Image, *, rasterizer: Rasterizer, look: 
     return out
 
 
+def hud_loop(
+    variant: str, backdrop: Image.Image, *, rasterizer: Rasterizer, look: Look, fps: int = LOOP_FPS
+) -> list[Image.Image]:
+    """The overlay style ``variant`` run over :data:`HUD_SAMPLE` from the
+    beep through its landing, frame by frame at ``fps``, over ``backdrop``:
+    the same template, data and options an export draws."""
+    template = overlay_template_for(look, variant)
+    if template is None:
+        raise RuntimeError(f"the {look.name} Look has no overlay style {variant!r}")
+    shots: list[TileShot] = []
+    elapsed = 0.0
+    for cls, split in HUD_SAMPLE:
+        elapsed = round(elapsed + split, 6)
+        shots.append(TileShot(time_from_beep=elapsed, split=split, interval_class=cls))  # type: ignore[arg-type]
+    stage = hud_stage_data(shots, beep_in_clip=HUD_LOOP_BEEP)
+    position = resolve_position(None, declared_positions(template))
+    context = hud_context(
+        stage=stage,
+        options=hud_options_data(HudOptions(), position),
+        theme=theme_for(look),
+        width=WIDTH,
+        height=HEIGHT,
+        fps=float(fps),
+    )
+
+    def plan(settle: float) -> list[float]:
+        end = stage["shots"][-1]["t"] + settle + HUD_LOOP_TAIL
+        return [round(i / fps, 6) for i in range(int(end * fps) + 1)]
+
+    rendered = rasterizer.render_template_timeline(
+        template, context=context, width=WIDTH, height=HEIGHT, plan=plan
+    )
+    out: list[Image.Image] = []
+    try:
+        for raw in rendered.frames:
+            frame = backdrop.convert("RGBA")
+            frame.alpha_composite(Image.frombytes("RGBA", (rendered.width, rendered.height), raw))
+            out.append(frame)
+    finally:
+        rendered.close()
+    return out
+
+
 def _transition(
     kind: str, backdrop: Image.Image, *, rasterizer: Rasterizer | None = None, look: Look | None = None
 ) -> Image.Image:
@@ -516,7 +583,8 @@ def build_look_previews(
     ``out_root / <look.name> / preview``: the sample card of every card
     slot in every variant the Look resolves (its own templates, the
     shipped default's for the rest), each sting as a looping clip over
-    the fade it rides, and ``look.png``, the title page in the default
+    the fade it rides, each overlay style as a looping clip of a sample
+    stage, and ``look.png``, the title page in the default
     variant, as the Look's own tile."""
     out = out_root / look.name / PREVIEW_DIR
     out.mkdir(parents=True, exist_ok=True)
@@ -581,6 +649,10 @@ def build_look_previews(
                     path = out / f"{slot}-{variant}.webp"
                     save_loop(path, sting_loop(variant, fade_frames, rasterizer=rasterizer, look=look))
                     written.append(path)
+        for variant in variants_for(look, OVERLAY_SLOT):
+            path = out / f"{OVERLAY_SLOT}-{variant}.webp"
+            save_loop(path, hud_loop(variant, plain, rasterizer=rasterizer, look=look))
+            written.append(path)
         title = composition.MatchTitle(text=MATCH, info=("2026-06-27", "Production Optics"))
         save("look.png", build_card_still(title, slot="title_page", **card))
     return written

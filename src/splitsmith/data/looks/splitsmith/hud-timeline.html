@@ -1,0 +1,134 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>hud timeline</title>
+<script>
+  // The shipped Timeline HUD (spec 2026-10-08): a lower-third band with
+  // the clock at the left, the count at the right, and a track that fills
+  // with time and drops a tick at every shot; the newest split floats
+  // above its tick. It places itself (no positions). seek(t) draws any
+  // instant from the stage data alone; nothing reads the wall clock. The
+  // engine stylesheet is loaded for its font faces only.
+  document.write('<style>' + window.splitsmith.engine.css + '</style>');
+</script>
+<style>
+  html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; }
+  .shade { text-shadow: 0 0 0.45vh rgba(0, 0, 0, 0.7), 0 0.35vh 1.4vh rgba(0, 0, 0, 0.55); }
+  .num {
+    font-family: "Splitsmith Mono", monospace; font-weight: 700;
+    font-variant-numeric: tabular-nums; line-height: 1; white-space: nowrap;
+  }
+  .label {
+    font-family: "Splitsmith Display", sans-serif; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.14em; white-space: nowrap;
+  }
+  #band { position: absolute; left: 0; right: 0; bottom: 0; height: 17vh; }
+  #clock { position: absolute; left: 5vh; bottom: 3.9vh; font-size: 8.2vh; }
+  #count { position: absolute; right: 5vh; bottom: 3.9vh; font-size: 5.7vh; }
+  #track { position: absolute; left: 22%; right: 14%; bottom: 6.4vh; height: 0.9vh; border-radius: 0.45vh; }
+  #fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 0.45vh; }
+  .tick { position: absolute; top: -1.6vh; width: 0.55vh; height: 4.1vh; margin-left: -0.27vh; transform-origin: 50% 100%; }
+  #tag {
+    position: absolute; bottom: 3.9vh; padding: 0.4vh 1.2vh; border-radius: 0.7vh; text-align: center;
+  }
+  #tag .label { font-size: 1.6vh; }
+  #tag .num { font-size: 3.9vh; }
+  #stamp { position: absolute; left: 0; right: 0; top: 34%; text-align: center; opacity: 0; }
+  #stamp .label { font-size: 2.5vh; letter-spacing: 0.3em; }
+  #stamp .num { font-size: 16vh; }
+</style>
+</head>
+<body>
+<div id="band"></div>
+<div class="num shade" id="clock">0.00</div>
+<div class="num shade" id="count"></div>
+<div id="track"><div id="fill"></div></div>
+<div id="stamp"><div class="label shade">Stage time</div><div class="num shade" id="stampValue"></div></div>
+<script>
+(function () {
+  var s = window.splitsmith;
+  var theme = s.theme, stage = s.data.stage, opts = s.data.options;
+  var shots = stage.shots, beep = stage.beep, rounds = stage.rounds;
+  var span = stage.stage_time > 0 ? stage.stage_time : 1;
+  var DROP = 0.2, TAG_IN = 0.2, STAMP_DELAY = 0.2, STAMP_IN = 0.35;
+
+  function el(id) { return document.getElementById(id); }
+  function clamp(x) { return Math.max(0, Math.min(1, x)); }
+  function easeOut(x) { x = clamp(x); return 1 - Math.pow(1 - x, 3); }
+  function backOut(x) { x = clamp(x); var c = 1.9; return 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2); }
+  function rgba(hex, a) {
+    var n = parseInt(hex.slice(1), 16);
+    return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
+  }
+  function tierColour(tier) {
+    if (!opts.speed_colors || !tier) return theme.split;
+    return tier === 'good' ? theme.split_good : tier === 'slow' ? theme.accent : theme.split;
+  }
+  function at(shot) { return 100 * clamp((shot.t - beep) / span) + '%'; }
+
+  document.body.style.color = theme.ink;
+  el('band').style.background =
+    'linear-gradient(0deg, ' + rgba(theme.surface, 0.88) + ', ' + rgba(theme.surface, 0) + ')';
+  el('track').style.background = rgba(theme.ink, 0.22);
+  el('fill').style.background = theme.ink;
+  el('stampValue').textContent = stage.stage_time.toFixed(2);
+  var ticks = shots.map(function (shot) {
+    var tick = document.createElement('div');
+    tick.className = 'tick';
+    tick.style.left = at(shot);
+    tick.style.background = theme.accent;
+    el('track').appendChild(tick);
+    return tick;
+  });
+  var tag = document.createElement('div');
+  tag.id = 'tag';
+  tag.innerHTML = '<div class="label"></div><div class="num"></div>';
+  tag.style.background = rgba(theme.surface, 0.9);
+  tag.firstChild.style.color = theme.ink_2;
+  if (!opts.class_labels) tag.firstChild.style.display = 'none';
+  el('track').appendChild(tag);
+
+  window.settle = function () {
+    return opts.landing ? Math.max(DROP, STAMP_DELAY + STAMP_IN) : Math.max(DROP, TAG_IN);
+  };
+
+  window.seek = function (t) {
+    var n = 0;
+    while (n < shots.length && shots[n].t <= t) n++;
+    var last = n ? shots[n - 1] : null;
+    var landed = n === shots.length && n > 0 ? t - last.t : -1;
+    var landing = opts.landing && landed >= 0;
+    var since = last ? t - last.t : Infinity;
+    var running = landed >= 0 ? stage.stage_time : Math.max(0, t - beep);
+
+    el('clock').textContent = running.toFixed(2);
+    el('count').textContent = n + '/' + rounds;
+    el('fill').style.width = 100 * clamp(running / span) + '%';
+    for (var i = 0; i < ticks.length; i++) {
+      var age = t - shots[i].t;
+      ticks[i].style.opacity = age < 0 ? 0 : 1;
+      ticks[i].style.transform = 'scaleY(' + (age < 0 ? 0 : backOut(age / DROP)) + ')';
+    }
+
+    if (!last || landing) {
+      tag.style.opacity = 0;
+    } else {
+      var k = easeOut(since / TAG_IN);
+      tag.style.opacity = k;
+      tag.style.left = at(last);
+      tag.style.transform = 'translate(-50%, ' + 2 * (1 - k) + 'vh)';
+      tag.firstChild.textContent = last.label || '';
+      tag.lastChild.textContent = last.split.toFixed(2);
+      tag.lastChild.style.color = tierColour(last.tier);
+    }
+
+    var stamp = el('stamp');
+    var sk = landing ? (landed - STAMP_DELAY) / STAMP_IN : 0;
+    stamp.style.opacity = clamp(sk);
+    stamp.style.transform = 'scale(' + (1.4 - 0.4 * backOut(sk)) + ')';
+  };
+})();
+</script>
+</body>
+</html>

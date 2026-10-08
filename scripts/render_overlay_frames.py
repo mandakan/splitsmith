@@ -169,6 +169,7 @@ def main() -> int:
     write_audit(audit, SHOTS_MS)
 
     overlay = work / "overlay.mov"
+    degraded: list[str] = []
     overlay_render.render_overlay(
         audit_path=audit,
         trimmed_video_path=trim,
@@ -184,7 +185,10 @@ def main() -> int:
             landing=not args.no_landing,
             position=args.overlay_position,
         ),
+        degraded=degraded,
     )
+    for note in degraded:
+        print(f"FELL BACK: {note}")
 
     composed = work / "composed.mp4"
     _composite(trim, overlay, composed, ffmpeg=ffmpeg)

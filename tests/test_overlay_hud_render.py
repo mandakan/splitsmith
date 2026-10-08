@@ -393,3 +393,83 @@ def test_a_failed_cached_render_kills_the_encoder_and_leaves_no_partial(
     assert encoder.kills == 1
     assert degraded and "fell back to Classic" in degraded[0]
     assert sorted(p.name for p in cache.root.iterdir()) == []
+
+
+# --- every shipped style, through real Chromium --------------------------------
+
+SHIPPED_STYLES = ("plate", "pips", "ticker", "timeline", "minimal")
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(not ffmpeg_available(), reason="needs ffmpeg")
+@pytest.mark.parametrize("variant", SHIPPED_STYLES)
+def test_every_shipped_style_renders_without_falling_back(tmp_path: Path, variant: str) -> None:
+    meta = VideoMetadata(width=640, height=360, duration_seconds=3.0, frame_rate_num=30, frame_rate_den=1)
+    out = tmp_path / "overlay.mov"
+    degraded: list[str] = []
+    with ChromiumRasterizer() as rasterizer:
+        overlay_render.render_overlay(
+            audit_path=_audit(tmp_path),
+            trimmed_video_path=tmp_path / "trim.mp4",
+            output_path=out,
+            beep_offset_seconds=1.0,
+            probe=meta,
+            codec="prores-4444",
+            rasterizer=rasterizer,
+            variant=variant,
+            degraded=degraded,
+        )
+    assert degraded == []
+    after_shot = _frame_at(out, 50, tmp_path / "shot.png")
+    assert after_shot.getchannel("A").getbbox() is not None, "the HUD drew something after a shot"
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("landing", [True, False])
+@pytest.mark.parametrize("variant", SHIPPED_STYLES)
+def test_every_shipped_style_is_still_outside_its_live_span(variant: str, landing: bool) -> None:
+    """The frame plan holds one frame before the beep and one after
+    ``last shot + settle()``; a template that moves there would freeze
+    mid-motion. Two instants either side must draw the same pixels."""
+    from splitsmith.looks import load_look, overlay_template_for
+    from splitsmith.overlay_hud import hud_options_data, hud_stage_data
+    from splitsmith.overlay_hud_render import hud_context
+    from splitsmith.overlay_theme import theme_for
+    from splitsmith.stage_summary_data import TileShot
+
+    look = load_look("splitsmith")
+    template = overlay_template_for(look, variant)
+    assert template is not None
+    shots = [
+        TileShot(time_from_beep=1.1, split=1.1, interval_class="first_shot"),
+        TileShot(time_from_beep=1.35, split=0.25, interval_class="split"),
+        TileShot(time_from_beep=1.62, split=0.27, interval_class="split"),
+        TileShot(time_from_beep=1.86, split=0.24, interval_class="split"),
+    ]
+    stage = hud_stage_data(shots, beep_in_clip=1.0)
+    context = hud_context(
+        stage=stage,
+        options=hud_options_data(HudOptions(landing=landing), None),
+        theme=theme_for(look),
+        width=320,
+        height=180,
+        fps=30.0,
+    )
+    settled: list[float] = []
+
+    def plan(settle: float) -> list[float]:
+        settled.append(settle)
+        end = stage["shots"][-1]["t"] + settle
+        return [0.0, 0.99, end, end + 0.7]
+
+    with ChromiumRasterizer() as rasterizer:
+        rendered = rasterizer.render_template_timeline(
+            template, context=context, width=320, height=180, plan=plan
+        )
+        try:
+            before, at_beep, settled_frame, later = list(rendered.frames)
+        finally:
+            rendered.close()
+    assert settled and settled[0] >= 0
+    assert before == at_beep, f"{variant} moves before the beep"
+    assert settled_frame == later, f"{variant} still moves after settle() (landing={landing})"
