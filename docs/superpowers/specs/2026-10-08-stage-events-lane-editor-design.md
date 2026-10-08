@@ -247,7 +247,9 @@ restores the pre-drag state):
 - Press-and-drag on empty lane space creates a region; release commits.
   Under the threshold it is a click, which seeks. A lane click seeks to
   the press point snapped to the nearest shot; the ruler click does not
-  snap.
+  snap. A click on empty lane space also clears the selection. A region
+  being created stops at its same-lane neighbours.
+- `pointercancel` undoes the gesture like Esc.
 - Drag an edge to resize, the body to move. **While an edge drags the
   video seeks to that edge's time.** Body drag seeks to the leading edge.
   A time pill follows the handle (time, frame number).
@@ -272,6 +274,10 @@ There is no separate mobile Coach page; under the phone breakpoint the
 Coach page renders the same component read-only, with a region list under it (one row
 per region: kind chip, range or duration, moving-shot count or overhang).
 Editing stays on the desktop, where there is a frame to judge from.
+As shipped, the Coach route itself is behind `DesktopGate` (`App.tsx`),
+so a phone gets the desktop-only notice and never reaches this read-only
+view until a phone Coach surface exists; the read-only rendering serves a
+hosted mirror in a desktop browser today.
 
 Visual budget: regions use the budget chip ticks (`movement` beep-cyan,
 `reload` live-amber, `activation` ink-2), the playhead is `--color-led`

@@ -536,8 +536,11 @@ is desktop-owned, ``sync.merge.merge_audit_doc`` keeps local's copy, so
 a hosted write on a mirror would be silently overwritten by the next
 sync. A desktop-origin mirror answers 403 ``read_only_mirror`` and the
 SPA renders the editor read-only on
-``capabilityDenied(project.capabilities, "edit")`` (and on the phone);
-a hosted-native match keeps the PUT. Every PUT appends an
+``capabilityDenied(project.capabilities, "edit")``; a hosted-native
+match keeps the PUT. The read-only rendering serves a hosted mirror (a
+desktop browser) and ``isMobile``, but the Coach route sits behind
+``DesktopGate`` in ``App.tsx``, so a phone never reaches it until a
+phone Coach surface exists. Every PUT appends an
 ``audit_events`` entry, which is why the SPA saves on commit only
 (release or keyboard nudge) through a 350 ms debounce in
 ``lib/useStageEvents.ts``: PUTs run one at a time with the revision the
