@@ -60,8 +60,6 @@ def test_share_scope_capability_sets() -> None:
         ("PATCH", "shooters/anna/stages/3/shots/by-id/manual-t6500/coach", REVIEW),
         # The full stage audit PUT (#631 Task 6).
         ("PUT", "shooters/anna/stages/3/audit", REVIEW),
-        # The lane editor's whole-list PUT (spec 2026-10-08).
-        ("PUT", "shooters/anna/stages/3/events", REVIEW),
         # The comment routes on the anonymous share surface (Task 5
         # fix-round-1, finding 1): mapped explicitly so a comment-scoped
         # token's admitted write is not refused with a 403 among 404s.
@@ -106,12 +104,13 @@ def test_share_scope_capability_sets() -> None:
         ("POST", "shooters/anna/stages/3/audit", EDIT),
         ("PUT", "shooters/anna/stages/3/audit/", EDIT),
         ("PUT", "shooters/anna/stages/3/audit/extra", EDIT),
-        ("POST", "shooters/anna/stages/3/events", EDIT),
-        ("PUT", "shooters/anna/stages/3/events/", EDIT),
         ("PUT", "shooters/anna/stages/x/audit", EDIT),
         # A shot id outside [A-Za-z0-9._-] is not addressable by id.
         ("PATCH", "shooters/anna/stages/3/shots/by-id/bad id/coach", EDIT),
         ("PATCH", "shooters/anna/stages/3/shots/by-id//coach", EDIT),
+        # The stage events PUT (spec 2026-10-08) is desktop-owned, so it is
+        # not a review route: a mirror must refuse it.
+        ("PUT", "shooters/anna/stages/3/events", EDIT),
         # Unlisted writes require EDIT - new routes fail over-restricted,
         # never silently writable.
         ("POST", "match/shooters", EDIT),
@@ -134,7 +133,6 @@ def test_required_capability(method: str, rest: str, expected: str | None) -> No
         ("PATCH", "shooters/anna/stages/3/shots/by-id/cand-2/coach\n"),
         ("POST", "shooters/anna/stages/3/coach/reclassify\n"),
         ("PUT", "shooters/anna/stages/3/audit\n"),
-        ("PUT", "shooters/anna/stages/3/events\n"),
         ("POST", "shooters/anna/stages/3/comments\n"),
         ("DELETE", "shooters/anna/stages/3/comments/01J000000000000000000000\n"),
         ("DELETE", "match/comments\n"),

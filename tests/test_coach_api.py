@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from splitsmith.audit_revision import audit_revision
 from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 from splitsmith.ui.server import create_app
 
@@ -809,6 +810,14 @@ def test_put_events_replaces_the_list_and_returns_the_coach_payload(tmp_path: Pa
     assert stored["audit_events"][-1]["kind"] == "events_save"
     assert stored["audit_events"][-1]["payload"] == {"count": 2}
 
+    # The served ``_version`` is the saved doc's revision, so the editor's
+    # next save goes through rather than 409ing.
+    assert body["_version"] == audit_revision(stored)
+    again = client.put(
+        f"{base}/shooters/me/stages/1/events", json={"events": events[:1], "_version": body["_version"]}
+    )
+    assert again.status_code == 200, again.text
+
 
 def test_put_events_reclassifies_the_overlapped_gap(tmp_path: Path) -> None:
     client, audit_file, base = _bootstrap(tmp_path)
@@ -881,4 +890,7 @@ def test_put_events_with_no_shots_still_saves(tmp_path: Path) -> None:
 
 def test_put_events_unknown_stage_is_404(tmp_path: Path) -> None:
     client, _audit, base = _bootstrap(tmp_path)
-    assert client.put(f"{base}/shooters/me/stages/9/events", json={"events": []}).status_code == 404
+    resp = client.put(f"{base}/shooters/me/stages/9/events", json={"events": []})
+    assert resp.status_code == 404
+    # The route's own 404 (the stage lookup), not a missing route's "Not Found".
+    assert "no stage 9" in resp.json()["detail"]

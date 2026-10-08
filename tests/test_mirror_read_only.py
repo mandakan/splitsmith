@@ -1339,3 +1339,63 @@ def test_hosted_audit_put_does_not_serialize_on_the_process_lock_but_still_409s_
         assert conflict.status_code == 409, conflict.text
     finally:
         state.audit_lock = real_lock
+
+
+# Stage events (spec 2026-10-08) are desktop-owned.
+
+_EVENTS = [{"id": "evt-1", "kind": "reload", "start": 1.0, "end": 2.0, "source": "auto"}]
+
+
+def _audit_doc_with_events() -> dict:
+    doc = legacy_audit_doc(6.5)
+    doc["events"] = copy.deepcopy(_EVENTS)
+    doc["events_seeded"] = True
+    return doc
+
+
+def test_mirror_events_put_is_refused_and_leaves_the_doc_alone(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """``sync.merge.merge_audit_doc`` keeps the desktop's ``events``, so a
+    lane edit saved on a mirror would be overwritten by the next sync. The
+    gate refuses it instead of accepting an edit that cannot last."""
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    match_id = "01JMIRREVENTSPUT00000001"
+    seed_mirror_stage_with_audit(client, match_id, "mirror-events", _audit_doc_with_events())
+    before = client.get(alias_url(match_id, "shooters/alice/stages/1/audit"))
+    assert before.status_code == 200, before.text
+
+    resp = client.put(
+        alias_url(match_id, "shooters/alice/stages/1/events"),
+        json={
+            "events": [{"id": "evt-1", "kind": "movement", "start": 0.5, "end": 1.5, "source": "manual"}],
+            "_version": before.json()["_version"],
+        },
+    )
+    assert resp.status_code == 403, resp.text
+    assert resp.json() == {"detail": "read_only_mirror"}
+
+    after = client.get(alias_url(match_id, "shooters/alice/stages/1/audit")).json()
+    for key in ("events", "events_seeded", "audit_events"):
+        assert after.get(key) == before.json().get(key), key
+    assert after["events"] == _EVENTS
+
+
+def test_native_match_events_put_is_allowed(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """A hosted-native match has no desktop to own ``events``: the PUT saves."""
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    match_id = "native-events-put"
+    seed_match(hosted_env, "owner@example.com", match_id)
+    _seed_native_stage_with_audit(
+        hosted_env, "owner@example.com", match_id, "Native Events", _audit_doc_with_events()
+    )
+    events = [{"id": "evt-1", "kind": "movement", "start": 0.5, "end": 1.5, "source": "manual"}]
+    resp = client.put(alias_url(match_id, "shooters/alice/stages/1/events"), json={"events": events})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["events"] == events

@@ -118,8 +118,10 @@ _REVIEW_ROUTES: tuple[tuple[str, re.Pattern[str]], ...] = (
     # to mint a non-convergent id on a mirror at that save boundary; this
     # entry is what makes the path reachable at all.
     ("PUT", re.compile(r"\Ashooters/[^/]+/stages/\d+/audit\Z")),
-    # Stage events (spec 2026-10-08): the lane editor's whole-list PUT.
-    ("PUT", re.compile(r"\Ashooters/[^/]+/stages/\d+/events\Z")),
+    # Deliberately absent: the stage events PUT (spec 2026-10-08).
+    # ``events`` is desktop-owned - ``sync.merge.merge_audit_doc`` keeps the
+    # local copy - so a lane edit on a mirror would be overwritten by the
+    # desktop's next sync. It falls through to EDIT and a mirror 403s.
     # The desktop command queue (#1100): a phone asks the desktop to run
     # something and may cancel it. A request is not an edit of the mirror;
     # its effect arrives through sync like every other review action.
