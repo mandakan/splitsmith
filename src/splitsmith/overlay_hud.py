@@ -1,0 +1,216 @@
+"""What a template HUD is told, and which frames it draws (spec
+``2026-10-08-template-hud-overlay-design``).
+
+Pure: no browser, no ffmpeg, no file but a template read as text. A
+template never computes a split, a class or a speed tier; it reads them
+from ``data.stage``, so every HUD variant shows the same numbers and the
+numbers are pinned here, in Python.
+
+The frame plan is the other half. A HUD is static before the beep and
+after ``last shot + settle()``, so only the span between needs a render
+per frame; the stretches either side are one frame held. That is the
+whole cost model of the template path: about one browser frame per output
+frame of live stage, and nothing for the pads.
+"""
+
+from __future__ import annotations
+
+import math
+import re
+from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from statistics import median
+from typing import Any, Literal, get_args
+
+from pydantic import BaseModel, ConfigDict
+
+from .stage_summary_data import TileShot
+
+HudPosition = Literal["top-left", "top-right", "bottom-left", "bottom-right"]
+HUD_POSITIONS: tuple[HudPosition, ...] = get_args(HudPosition)
+
+SpeedTier = Literal["good", "normal", "slow"]
+
+#: A split below this fraction of its class's median on the stage is good.
+GOOD_BELOW = 0.93
+#: Above this fraction it is slow.
+SLOW_ABOVE = 1.12
+#: A median of fewer shots says nothing; such a class carries no tiers.
+MIN_CLASS_SHOTS = 3
+#: The classes a speed reads for. The draw, a reload and an activation are
+#: their own events, never "slow" beside a split.
+TIERED_CLASSES = frozenset({"split", "transition", "movement"})
+
+CLASS_LABELS: dict[str, str] = {
+    "first_shot": "Draw",
+    "split": "Split",
+    "transition": "Transition",
+    "movement": "Movement",
+    "reload": "Reload",
+    "activation": "Activation",
+}
+
+#: Bump when anything about how a HUD MOV is made changes and the
+#: template digest would not show it (the frame plan, the encode).
+HUD_KEY_VERSION = 1
+
+#: The page renders at most this many lines; a larger output is scaled up
+#: by ffmpeg. Measured on the spike (#1305): a 4K page costs twice a 1080p
+#: one per frame, and the HUD is type and flat plates.
+HUD_MAX_PAGE_HEIGHT = 1080
+
+_POSITIONS_META = re.compile(
+    r"""<meta\s+name=["']splitsmith-positions["']\s+content=["']([^"']*)["']""", re.IGNORECASE
+)
+
+
+class HudOptions(BaseModel):
+    """The shared toggles every template HUD honours."""
+
+    model_config = ConfigDict(frozen=True)
+
+    speed_colors: bool = True
+    class_labels: bool = True
+    landing: bool = True
+    #: ``None`` is the variant's own default (the first position it declares).
+    position: HudPosition | None = None
+
+
+def speed_tiers(shots: Sequence[TileShot]) -> list[SpeedTier | None]:
+    """Each shot's tier against this stage's median for its class."""
+    by_class: dict[str, list[float]] = {}
+    for shot in shots:
+        if shot.interval_class in TIERED_CLASSES:
+            by_class.setdefault(shot.interval_class, []).append(shot.split)
+    medians = {cls: median(values) for cls, values in by_class.items() if len(values) >= MIN_CLASS_SHOTS}
+    tiers: list[SpeedTier | None] = []
+    for shot in shots:
+        middle = medians.get(shot.interval_class) if shot.interval_class else None
+        if middle is None or middle <= 0:
+            tiers.append(None)
+            continue
+        ratio = shot.split / middle
+        tiers.append("good" if ratio < GOOD_BELOW else "slow" if ratio > SLOW_ABOVE else "normal")
+    return tiers
+
+
+def hud_stage_data(shots: Sequence[TileShot], *, beep_in_clip: float) -> dict[str, Any]:
+    """``data.stage``: the beep and every shot in clip seconds, each with
+    its split, class, label and tier. Numbers are rounded to the
+    microsecond so float noise never moves a cache key."""
+    tiers = speed_tiers(shots)
+    return {
+        "beep": round(beep_in_clip, 6),
+        "shots": [
+            {
+                "t": round(beep_in_clip + shot.time_from_beep, 6),
+                "split": round(shot.split, 6),
+                "cls": shot.interval_class,
+                "label": CLASS_LABELS.get(shot.interval_class) if shot.interval_class else None,
+                "tier": tier,
+            }
+            for shot, tier in zip(shots, tiers, strict=True)
+        ],
+        "stage_time": round(shots[-1].time_from_beep, 6) if shots else 0.0,
+        "rounds": len(shots),
+    }
+
+
+def declared_positions(template: Path) -> tuple[HudPosition, ...]:
+    """The positions a template supports, from its
+    ``<meta name="splitsmith-positions">`` tag, in its order (the first is
+    its default). Read as text: no browser."""
+    match = _POSITIONS_META.search(template.read_text(encoding="utf-8"))
+    if match is None:
+        return ()
+    names = [name.strip() for name in match.group(1).split(",")]
+    return tuple(name for name in names if name in HUD_POSITIONS)
+
+
+def resolve_position(requested: HudPosition | None, declared: Sequence[HudPosition]) -> HudPosition | None:
+    """The position a render uses: the request when the template declares
+    it, else the template's default; ``None`` for a template that declares
+    none (it places itself)."""
+    if not declared:
+        return None
+    if requested in declared:
+        return requested
+    return declared[0]
+
+
+def hud_options_data(options: HudOptions, position: HudPosition | None) -> dict[str, Any]:
+    """``data.options``, with the position already resolved."""
+    return {
+        "speed_colors": options.speed_colors,
+        "class_labels": options.class_labels,
+        "landing": options.landing,
+        "position": position,
+    }
+
+
+@dataclass(frozen=True)
+class HudFrame:
+    """One rendered frame: the clip time it seeks to and how many output
+    frames it fills."""
+
+    seek: float
+    count: int
+
+
+def hud_frame_plan(
+    *, frame_count: int, fps: float, beep: float, last_shot: float, settle: float
+) -> tuple[HudFrame, ...]:
+    """Which frames a template HUD renders. Frame ``i`` sits at ``i / fps``.
+    Frames before the beep are one frame at ``seek(0)`` held; every frame
+    from the first at or after the beep through the first at or after
+    ``max(beep, last_shot) + settle`` is rendered; the last rendered frame
+    is held to the end. Counts always sum to ``frame_count``."""
+    if frame_count <= 0:
+        return ()
+    first_live = max(0, math.ceil(beep * fps - 1e-9))
+    if first_live >= frame_count:
+        return (HudFrame(seek=0.0, count=frame_count),)
+    end = max(beep, last_shot) + max(0.0, settle)
+    last_live = min(frame_count - 1, max(first_live, math.ceil(end * fps - 1e-9)))
+    plan: list[HudFrame] = []
+    if first_live > 0:
+        plan.append(HudFrame(seek=0.0, count=first_live))
+    plan.extend(HudFrame(seek=round(i / fps, 6), count=1) for i in range(first_live, last_live + 1))
+    tail = frame_count - 1 - last_live
+    if tail > 0:
+        plan[-1] = HudFrame(seek=plan[-1].seek, count=1 + tail)
+    return tuple(plan)
+
+
+def hud_page_size(width: int, height: int) -> tuple[int, int]:
+    """The page a HUD renders at: the output size, capped at
+    :data:`HUD_MAX_PAGE_HEIGHT` lines with the aspect kept and both sides
+    even (yuv formats need them even)."""
+    if height <= HUD_MAX_PAGE_HEIGHT:
+        return width, height
+    scaled = round(width * HUD_MAX_PAGE_HEIGHT / height)
+    return scaled - scaled % 2, HUD_MAX_PAGE_HEIGHT
+
+
+__all__ = [
+    "CLASS_LABELS",
+    "GOOD_BELOW",
+    "HUD_KEY_VERSION",
+    "HUD_MAX_PAGE_HEIGHT",
+    "HUD_POSITIONS",
+    "HudFrame",
+    "HudOptions",
+    "HudPosition",
+    "MIN_CLASS_SHOTS",
+    "SLOW_ABOVE",
+    "SpeedTier",
+    "TIERED_CLASSES",
+    "declared_positions",
+    "hud_frame_plan",
+    "hud_options_data",
+    "hud_page_size",
+    "hud_stage_data",
+    "resolve_position",
+    "speed_tiers",
+]
