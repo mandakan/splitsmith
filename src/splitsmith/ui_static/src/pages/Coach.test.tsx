@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { ApiError, type CoachShot, type CoachStageResponse, type CoachVideoEntry, type StageEvent } from "@/lib/api";
+import { COMMIT_DEBOUNCE_MS } from "@/lib/useStageEvents";
 
 import { Coach } from "@/pages/Coach";
 
@@ -257,7 +258,14 @@ describe("stage events on the Coach page", () => {
       makeCoachWithEvents([makeShot(1, "c1")], [{ id: "evt-1", kind: "reload", start: 8.05, end: 9.47, source: "auto" }]),
     );
     renderCoachRoute();
-    fireEvent.click(await screen.findByTestId("event-evt-1"));
+    const region = await screen.findByTestId("event-evt-1");
+    // Fake timers from here: a write would wait out the commit debounce, and
+    // advancing past it is deterministic where a real sleep flakes under load.
+    vi.useFakeTimers();
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    fireEvent.click(region);
     expect(screen.queryByTestId("handle-evt-1-start")).toBeNull();
     expect(screen.queryByTestId("handle-evt-1-end")).toBeNull();
     // No region card, so no Delete / kind control to reach.
@@ -267,7 +275,9 @@ describe("stage events on the Coach page", () => {
     fireEvent.keyDown(screen.getByTestId("lane-editor"), { key: "Delete" });
     // The read-only list stands in for the card.
     expect(screen.getAllByRole("listitem")).toHaveLength(1);
-    await new Promise((r) => setTimeout(r, 400));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(COMMIT_DEBOUNCE_MS * 2);
+    });
     expect(api.putStageEvents).not.toHaveBeenCalled();
   });
 });

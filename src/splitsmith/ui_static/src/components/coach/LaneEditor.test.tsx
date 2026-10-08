@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { StageEvent } from "@/lib/api";
+import { validateLanes } from "@/lib/events";
 
 import { LaneEditor } from "./LaneEditor";
 
@@ -238,6 +239,76 @@ describe("LaneEditor", () => {
     fireEvent.pointerMove(lane, { pointerId: 8, clientX: 600, clientY: 10 });
     fireEvent.pointerUp(lane, { pointerId: 8, clientX: 600, clientY: 10 });
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("a press whose snap lands inside a same-lane neighbour anchors on the raw press, never overlapping it", () => {
+    const onChange = vi.fn();
+    render(<Harness initial={[ev("evt-1", "reload", 4, 6.02)]} onChange={onChange} />);
+    const lane = screen.getByTestId("lane-reload");
+    // 6.05 s is outside evt-1, but 5 px from the shot at 6.0, which is inside it.
+    fireEvent.pointerDown(lane, { pointerId: 9, clientX: 605, clientY: 10, button: 0 });
+    fireEvent.pointerMove(lane, { pointerId: 9, clientX: 640, clientY: 10 });
+    fireEvent.pointerMove(lane, { pointerId: 9, clientX: 680, clientY: 10, altKey: true });
+    fireEvent.pointerUp(lane, { pointerId: 9, clientX: 680, clientY: 10, altKey: true });
+    const committed = lastCommit(onChange)!;
+    expect(validateLanes(committed)).toBeNull();
+    const created = committed.find((x) => x.id === "evt-2")!;
+    expect(created.start).toBeCloseTo(6.05, 3);
+    expect(created.end).toBeCloseTo(6.8, 3);
+  });
+
+  it("a click on empty lane space clears the selection", () => {
+    render(<Harness initial={[ev("evt-1", "reload", 4, 5)]} selectedId="evt-1" />);
+    expect(screen.getByTestId("event-evt-1")).toHaveAttribute("aria-selected", "true");
+    const lane = screen.getByTestId("lane-movement");
+    fireEvent.pointerDown(lane, { pointerId: 10, clientX: 800, clientY: 10, button: 0 });
+    fireEvent.pointerUp(lane, { pointerId: 10, clientX: 800, clientY: 10 });
+    expect(screen.getByTestId("event-evt-1")).toHaveAttribute("aria-selected", "false");
+  });
+
+  it("a region being created stops at its same-lane neighbour", () => {
+    const onChange = vi.fn();
+    render(<Harness initial={[ev("evt-1", "movement", 5, 6)]} onChange={onChange} />);
+    const lane = screen.getByTestId("lane-movement");
+    fireEvent.pointerDown(lane, { pointerId: 11, clientX: 400, clientY: 10, button: 0 });
+    fireEvent.pointerMove(lane, { pointerId: 11, clientX: 450, clientY: 10, altKey: true });
+    fireEvent.pointerMove(lane, { pointerId: 11, clientX: 850, clientY: 10, altKey: true });
+    fireEvent.pointerUp(lane, { pointerId: 11, clientX: 850, clientY: 10, altKey: true });
+    const created = lastCommit(onChange)!.find((x) => x.id === "evt-2")!;
+    expect(created.start).toBeCloseTo(4.0, 3);
+    expect(created.end).toBeCloseTo(5.0, 3);
+  });
+
+  it("pointercancel undoes the gesture like Escape", () => {
+    const onChange = vi.fn();
+    render(<Harness initial={[ev("evt-1", "reload", 4, 5)]} selectedId="evt-1" onChange={onChange} />);
+    const handle = screen.getByTestId("handle-evt-1-end");
+    fireEvent.pointerDown(handle, { pointerId: 12, clientX: 500, clientY: 10, button: 0 });
+    fireEvent.pointerMove(handle, { pointerId: 12, clientX: 700, clientY: 10, altKey: true });
+    expect(screen.getByTestId("event-evt-1")).toHaveAttribute("data-end", "7");
+    fireEvent.pointerCancel(handle, { pointerId: 12 });
+    expect(onChange.mock.calls.filter((c) => c[1] === true)).toHaveLength(0);
+    expect(screen.getByTestId("event-evt-1")).toHaveAttribute("data-end", "5");
+  });
+
+  it("labels an auto proposal and not a manual region", () => {
+    render(<Harness initial={[ev("evt-1", "reload", 4, 5, "auto"), ev("evt-2", "movement", 1, 2)]} />);
+    expect(screen.getByTestId("auto-evt-1")).toHaveTextContent("Auto ?");
+    expect(screen.queryByTestId("auto-evt-2")).toBeNull();
+  });
+
+  it("a time pill with the frame number follows the moving edge and goes on release", () => {
+    render(<Harness initial={[ev("evt-1", "reload", 4, 5)]} selectedId="evt-1" />);
+    expect(screen.queryByTestId("drag-pill")).toBeNull();
+    const handle = screen.getByTestId("handle-evt-1-end");
+    fireEvent.pointerDown(handle, { pointerId: 13, clientX: 500, clientY: 10, button: 0 });
+    fireEvent.pointerMove(handle, { pointerId: 13, clientX: 540, clientY: 10, altKey: true });
+    const pill = screen.getByTestId("drag-pill");
+    expect(pill).toHaveTextContent("5.40 s");
+    expect(pill).toHaveTextContent("f 270"); // 5.4 s at 50 fps
+    expect(pill).toHaveStyle({ left: "54%" });
+    fireEvent.pointerUp(handle, { pointerId: 13, clientX: 540, clientY: 10, altKey: true });
+    expect(screen.queryByTestId("drag-pill")).toBeNull();
   });
 
   it("clicking the ruler seeks and draws the playhead at currentTime", () => {

@@ -73,6 +73,8 @@ export function LaneEditor(props: LaneEditorProps) {
   eventsRef.current = events;
   // Measured so the ruler labels can space themselves (and stay off "Beep" and the stage time).
   const [stripWidth, setStripWidth] = useState(0);
+  // The time pill: where the drag's moving edge (the seek target) stands, null between drags.
+  const [pill, setPill] = useState<number | null>(null);
   useEffect(() => {
     const el = stripRef.current;
     if (!el) return;
@@ -117,8 +119,14 @@ export function LaneEditor(props: LaneEditorProps) {
     };
     if (init.mode !== "create") onSelect(init.id);
   };
-  const startCreate = (e: ReactPointerEvent<HTMLElement>, kind: StageEventKind) =>
-    begin(e, { mode: "create", kind, anchorT: maybeSnap(tAt(e.clientX), e.altKey), id: null });
+  const startCreate = (e: ReactPointerEvent<HTMLElement>, kind: StageEventKind) => {
+    // A shot just inside a neighbour's edge must not pull the anchor into
+    // that neighbour: the create's clamp only sees regions on either side.
+    const raw = tAt(e.clientX);
+    const snapped = maybeSnap(raw, e.altKey);
+    const inside = eventsRef.current.some((x) => x.kind === kind && x.start < snapped && snapped < x.end);
+    begin(e, { mode: "create", kind, anchorT: inside ? raw : snapped, id: null });
+  };
   const startEdge = (e: ReactPointerEvent<HTMLElement>, id: string, edge: "start" | "end") => {
     const before = eventsRef.current.find((x) => x.id === id);
     if (before) begin(e, { mode: "edge", edge, id, before });
@@ -147,6 +155,7 @@ export function LaneEditor(props: LaneEditorProps) {
     if (drag.mode === "create" && frame.id) drag.id = frame.id;
     emit(frame.events, false);
     onSeek(frame.seek);
+    setPill(frame.seek);
   };
 
   const handleUp = (e: ReactPointerEvent<HTMLElement>) => {
@@ -154,6 +163,7 @@ export function LaneEditor(props: LaneEditorProps) {
     if (drag?.pointerId !== e.pointerId) return;
     release(drag);
     dragRef.current = null;
+    setPill(null);
     if (!drag.moved) {
       // A click on empty lane space seeks there and clears the selection.
       if (drag.mode === "create") {
@@ -172,6 +182,7 @@ export function LaneEditor(props: LaneEditorProps) {
     if (!drag) return;
     release(drag);
     dragRef.current = null;
+    setPill(null);
     const restored = cancelFrame(drag, eventsRef.current);
     if (restored) emit(restored, false);
   };
@@ -307,6 +318,15 @@ export function LaneEditor(props: LaneEditorProps) {
                     )}
                     style={{ left: pct(x.start), width: pct(x.end - x.start) }}
                   >
+                    {x.source === "auto" && (
+                      <Label
+                        tone="ink"
+                        data-testid={`auto-${x.id}`}
+                        className="pointer-events-none absolute inset-x-2 top-1/2 block -translate-y-1/2 truncate"
+                      >
+                        Auto ?
+                      </Label>
+                    )}
                     {!readOnly &&
                       (["start", "end"] as const).map((edge) => (
                         <span
@@ -332,6 +352,15 @@ export function LaneEditor(props: LaneEditorProps) {
             className="pointer-events-none absolute inset-y-0 w-px bg-led"
             style={{ left: pct(currentTime) }}
           />
+          {pill !== null && (
+            <span
+              data-testid="drag-pill"
+              className="numeral pointer-events-none absolute top-0 z-10 -translate-x-1/2 whitespace-nowrap rounded border border-rule-strong bg-surface px-1 text-xs text-ink"
+              style={{ left: pct(pill) }}
+            >
+              {pill.toFixed(2)} s <span className="text-muted">f {Math.round(pill * fps)}</span>
+            </span>
+          )}
         </div>
       </div>
       {!readOnly && (
