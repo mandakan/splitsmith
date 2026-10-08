@@ -1,0 +1,121 @@
+{
+  "_note": "Shared by tests/test_events.py and ui_static/src/lib/events.test.ts. Times in seconds from beep. Add a case here, never only on one side.",
+  "cases": [
+    {
+      "name": "po_reload_on_the_move",
+      "capacity": 15,
+      "shots": [1.21, 1.52, 1.98, 2.27, 2.71, 3.02, 4.35, 4.71, 5.12, 5.48, 6.42, 6.70, 7.08, 7.36,
+                10.62, 10.91, 11.40, 11.69, 12.20, 12.51, 13.00, 13.30, 15.90, 16.20],
+      "events": [
+        {"id": "evt-1", "kind": "movement", "start": 3.40, "end": 6.10, "source": "manual"},
+        {"id": "evt-2", "kind": "movement", "start": 7.60, "end": 9.16, "source": "manual"},
+        {"id": "evt-3", "kind": "reload",   "start": 8.05, "end": 9.47, "source": "manual"},
+        {"id": "evt-4", "kind": "movement", "start": 13.60, "end": 15.60, "source": "manual"}
+      ],
+      "expect": {
+        "moving": [false, false, false, false, false, false, true, true, true, true, false, false, false, false,
+                   false, false, false, false, false, false, false, false, false, false],
+        "reloads": [{"event_id": "evt-3", "duration": 1.42, "moving": true, "overhang": 0.31}],
+        "summary": {"movement_s": 6.26, "moving_shots": 4, "reloads": 1, "reload_avg_s": 1.42, "overhang_s": 0.31, "capacity_warning": null}
+      }
+    },
+    {
+      "name": "standing_reload_hidden_none",
+      "capacity": 15,
+      "shots": [1.0, 1.3, 1.6, 4.9, 5.2],
+      "events": [
+        {"id": "evt-1", "kind": "reload", "start": 1.9, "end": 3.9, "source": "manual"}
+      ],
+      "expect": {
+        "moving": [false, false, false, false, false],
+        "reloads": [{"event_id": "evt-1", "duration": 2.0, "moving": false, "overhang": null}],
+        "summary": {"movement_s": 0.0, "moving_shots": 0, "reloads": 1, "reload_avg_s": 2.0, "overhang_s": 0.0, "capacity_warning": null}
+      }
+    },
+    {
+      "name": "reload_hidden_inside_movement_negative_overhang",
+      "capacity": null,
+      "shots": [1.0, 1.3, 6.0, 6.3],
+      "events": [
+        {"id": "evt-1", "kind": "movement", "start": 1.5, "end": 5.8, "source": "manual"},
+        {"id": "evt-2", "kind": "reload",   "start": 2.0, "end": 3.6, "source": "manual"}
+      ],
+      "expect": {
+        "moving": [false, false, false, false],
+        "reloads": [{"event_id": "evt-2", "duration": 1.6, "moving": true, "overhang": -2.2}],
+        "summary": {"movement_s": 4.3, "moving_shots": 0, "reloads": 1, "reload_avg_s": 1.6, "overhang_s": 0.0, "capacity_warning": null}
+      }
+    },
+    {
+      "name": "two_movements_overlap_one_reload_latest_end_wins",
+      "capacity": null,
+      "shots": [1.0, 7.0],
+      "events": [
+        {"id": "evt-1", "kind": "movement", "start": 1.2, "end": 3.0, "source": "manual"},
+        {"id": "evt-2", "kind": "movement", "start": 3.5, "end": 5.0, "source": "manual"},
+        {"id": "evt-3", "kind": "reload",   "start": 2.5, "end": 5.5, "source": "manual"}
+      ],
+      "expect": {
+        "moving": [false, false],
+        "reloads": [{"event_id": "evt-3", "duration": 3.0, "moving": true, "overhang": 0.5}],
+        "summary": {"movement_s": 3.3, "moving_shots": 0, "reloads": 1, "reload_avg_s": 3.0, "overhang_s": 0.5, "capacity_warning": null}
+      }
+    },
+    {
+      "name": "event_past_last_shot_and_inclusive_ends",
+      "capacity": null,
+      "shots": [1.0, 2.0, 3.0],
+      "events": [
+        {"id": "evt-1", "kind": "movement", "start": 2.0, "end": 3.0, "source": "auto"},
+        {"id": "evt-2", "kind": "reload",   "start": 3.2, "end": 4.9, "source": "auto"}
+      ],
+      "expect": {
+        "moving": [false, true, true],
+        "reloads": [{"event_id": "evt-2", "duration": 1.7, "moving": false, "overhang": null}],
+        "summary": {"movement_s": 1.0, "moving_shots": 2, "reloads": 1, "reload_avg_s": 1.7, "overhang_s": 0.0, "capacity_warning": null}
+      }
+    },
+    {
+      "name": "capacity_warning_no_reload_regions",
+      "capacity": 10,
+      "shots": [1.0, 1.3, 1.6, 1.9, 2.2, 2.5, 2.8, 3.1, 3.4, 3.7, 4.0, 4.3],
+      "events": [],
+      "expect": {
+        "moving": [false, false, false, false, false, false, false, false, false, false, false, false],
+        "reloads": [],
+        "summary": {"movement_s": 0.0, "moving_shots": 0, "reloads": 0, "reload_avg_s": null, "overhang_s": 0.0, "capacity_warning": "12 shots without a reload"}
+      }
+    },
+    {
+      "name": "capacity_plus_one_is_allowed",
+      "capacity": 10,
+      "shots": [1.0, 1.3, 1.6, 1.9, 2.2, 2.5, 2.8, 3.1, 3.4, 3.7, 4.0],
+      "events": [],
+      "expect": {
+        "moving": [false, false, false, false, false, false, false, false, false, false, false],
+        "reloads": [],
+        "summary": {"movement_s": 0.0, "moving_shots": 0, "reloads": 0, "reload_avg_s": null, "overhang_s": 0.0, "capacity_warning": null}
+      }
+    }
+  ],
+  "lane_violations": [
+    {
+      "name": "same_kind_overlap",
+      "events": [
+        {"id": "evt-1", "kind": "movement", "start": 1.0, "end": 3.0, "source": "manual"},
+        {"id": "evt-2", "kind": "movement", "start": 2.5, "end": 4.0, "source": "manual"}
+      ],
+      "mentions": ["evt-1", "evt-2"]
+    }
+  ],
+  "lane_ok": [
+    {
+      "name": "touching_edges_and_cross_kind",
+      "events": [
+        {"id": "evt-1", "kind": "movement", "start": 1.0, "end": 3.0, "source": "manual"},
+        {"id": "evt-2", "kind": "movement", "start": 3.0, "end": 4.0, "source": "manual"},
+        {"id": "evt-3", "kind": "reload",   "start": 2.0, "end": 3.5, "source": "manual"}
+      ]
+    }
+  ]
+}

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .access import AccessConfig
 
@@ -57,6 +57,35 @@ IntervalClass = Literal[
 ]
 
 IntervalClassSource = Literal["auto", "manual"]
+
+# Stage events (spec 2026-10-08): regions on the stage timeline, one lane
+# per kind. Independent of shots -- a movement may span several shots,
+# which the per-gap ``interval_class`` cannot say.
+EventKind = Literal["movement", "reload", "activation"]
+
+
+class StageEvent(BaseModel):
+    """One region on the stage timeline, in seconds from the beep.
+
+    A reload's handles mean hand off the grip -> gun back on target (the
+    full manipulation cost), not the mechanical magazine change. Ids are
+    ``evt-<n>`` and never reused within a stage (the ``cand-<n>`` rule).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    kind: EventKind
+    start: float = Field(ge=0.0)
+    end: float
+    source: IntervalClassSource
+    note: str | None = None
+
+    @model_validator(mode="after")
+    def _end_after_start(self) -> StageEvent:
+        if self.end <= self.start:
+            raise ValueError(f"event {self.id}: end ({self.end}) must be after start ({self.start})")
+        return self
 
 
 class Shot(BaseModel):
