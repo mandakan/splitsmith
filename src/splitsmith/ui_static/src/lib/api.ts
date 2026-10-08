@@ -391,6 +391,36 @@ export type ScoreboardErrorDetail =
   | StageTimesOfflinePureMatchDataDetail
   | CompetitorNotInMatchDetail;
 
+/** Your brand (spec 2026-10-08): ``GET /api/me/profile``. */
+export interface AccountProfileView {
+  brand: { logo: string | null; line: string };
+}
+
+/** One shooter in your shooter book, keyed by SSI shooter id. */
+export interface ShooterBookEntryView {
+  shooter_id: number;
+  label: string | null;
+  identity: ShooterIdentity;
+  updated_at: string;
+}
+
+/** Where a shooter's look comes from: ``GET /api/shooters/{slug}/identity``. */
+export type IdentitySource = "match" | "book" | "none";
+
+export interface ShooterIdentityView {
+  source: IdentitySource;
+  identity: ShooterIdentity;
+  shooter_id: number | null;
+  /** The book holds a look for this shooter ("Use shooter book" has one). */
+  book_entry: boolean;
+  /** This server keeps a shooter book (hosted does not yet). */
+  book_available: boolean;
+}
+
+/** ``scope`` on an identity edit: ``book`` also saves it to the shooter
+ *  book, ``match`` keeps it to this match. */
+export type IdentityScope = "book" | "match";
+
 /** One row in the ``GET /api/scoreboard/shooter/search`` array. */
 export interface ScoreboardShooterRef {
   shooterId: number;
@@ -1068,6 +1098,7 @@ export interface ExportPresetBody {
   title_division: boolean;
   closing_card: boolean;
   made_with: boolean;
+  account_brand?: boolean;
   stage_card_style: "none" | "slate" | "lower-third";
   stage_card_seconds: number;
   summary_hold_seconds: number;
@@ -1230,6 +1261,8 @@ export interface ExportPreviewBody {
   title_division?: boolean;
   /** "Made with splitsmith" on the closing card. Server default on. */
   made_with?: boolean;
+  /** Your brand from the You page on the cards. Server default on. */
+  account_brand?: boolean;
   /** The export's stage selection (the match summary card only). */
   stage_numbers?: number[];
   head_pad_seconds?: number;
@@ -1394,6 +1427,8 @@ export interface MatchExportRequestPayload {
   closing_card?: boolean;
   /** "Made with splitsmith" on the closing card. Server default on. */
   made_with?: boolean;
+  /** Your brand from the You page on the cards. Server default on. */
+  account_brand?: boolean;
   /** The Look (#1246): any installed Look name; the server default. */
   overlay_theme?: string;
   /** Per-slot template variants (#1246); unset means the server's ``card_variant`` knob. */
@@ -1483,6 +1518,8 @@ export interface CompareGridRequestPayload {
   closing_card?: boolean;
   /** "Made with splitsmith" on the closing card. Server default on. */
   made_with?: boolean;
+  /** Your brand from the You page on the cards. Server default on. */
+  account_brand?: boolean;
   /** Every shooter's match figures in their own tile before the closing card. */
   match_summary?: boolean;
   match_summary_seconds?: number;
@@ -3471,7 +3508,10 @@ export const api = {
   /** Set the shooter's accent and club line (#1243). Only the keys sent
    *  are applied; ``null`` clears one. The server validates the shape
    *  (``#rrggbb``, at most 60 characters) and answers 422 otherwise. */
-  updateShooterIdentity: (slug: string, body: { accent?: string | null; club?: string | null }) =>
+  updateShooterIdentity: (
+    slug: string,
+    body: { accent?: string | null; club?: string | null; scope?: IdentityScope },
+  ) =>
     request<MatchProject>(`/api/shooters/${encodeURIComponent(slug)}/identity`, {
       method: "PATCH",
       json: body,
@@ -3479,9 +3519,10 @@ export const api = {
 
   /** Upload the shooter's logo (#1243): PNG, JPEG or WebP, at most 2 MB.
    *  The server sniffs the type and names the file by its content. */
-  uploadShooterLogo: (slug: string, file: File) => {
+  uploadShooterLogo: (slug: string, file: File, scope: IdentityScope = "book") => {
     const form = new FormData();
     form.append("file", file, file.name);
+    form.append("scope", scope);
     return request<MatchProject>(`/api/shooters/${encodeURIComponent(slug)}/identity/logo`, {
       method: "POST",
       body: form,
@@ -3498,8 +3539,20 @@ export const api = {
     request<{ event_logo: string | null }>("/api/match/branding/event-logo", { method: "DELETE" }),
 
   /** Clear the shooter's logo (#1243). */
-  removeShooterLogo: (slug: string) =>
-    request<MatchProject>(`/api/shooters/${encodeURIComponent(slug)}/identity/logo`, { method: "DELETE" }),
+  removeShooterLogo: (slug: string, scope: IdentityScope = "book") =>
+    request<MatchProject>(`/api/shooters/${encodeURIComponent(slug)}/identity/logo?scope=${scope}`, {
+      method: "DELETE",
+    }),
+
+  /** Where this shooter's look comes from, and what a render draws. */
+  getShooterIdentityView: (slug: string) =>
+    request<ShooterIdentityView>(`/api/shooters/${encodeURIComponent(slug)}/identity`),
+
+  /** Drop this match's own record so the shooter book applies again. */
+  useShooterBook: (slug: string) =>
+    request<ShooterIdentityView>(`/api/shooters/${encodeURIComponent(slug)}/identity/use-book`, {
+      method: "POST",
+    }),
 
   /** List the camera models calibrated in the shipped artifact. The SPA
    *  presents these as the camera-model dropdown options on Ingest. */
@@ -3987,6 +4040,46 @@ export const api = {
    *  failed request in DevTools. */
   getScoreboardIdentity: () =>
     request<ScoreboardIdentity | null>("/api/me/scoreboard-identity"),
+
+  /** Pin yourself: your SSI shooter id (and the name it was found under). */
+  putScoreboardIdentity: (body: { shooter_id: number; display_name?: string | null; club?: string | null; division?: string | null }) =>
+    request<ScoreboardIdentity>("/api/me/scoreboard-identity", { method: "PUT", json: body }),
+
+  clearScoreboardIdentity: () => request<{ ok: boolean }>("/api/me/scoreboard-identity", { method: "DELETE" }),
+
+  /** Find yourself in the live shooter index, no match needed. */
+  searchShooterIndex: (q: string) =>
+    request<ScoreboardShooterRef[]>(`/api/me/shooter-search?q=${encodeURIComponent(q)}`),
+
+  getAccountProfile: () => request<AccountProfileView>("/api/me/profile"),
+
+  putAccountProfile: (body: { brand_line: string }) =>
+    request<AccountProfileView>("/api/me/profile", { method: "PUT", json: body }),
+
+  uploadAccountBrandLogo: (file: File) => {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    return request<AccountProfileView>("/api/me/profile/brand-logo", { method: "POST", body: form });
+  },
+
+  removeAccountBrandLogo: () => request<AccountProfileView>("/api/me/profile/brand-logo", { method: "DELETE" }),
+
+  getShooterBook: () => request<{ entries: ShooterBookEntryView[] }>("/api/me/shooter-book"),
+
+  putShooterBookEntry: (shooterId: number, body: { accent?: string | null; club?: string | null; label?: string | null }) =>
+    request<ShooterBookEntryView>(`/api/me/shooter-book/${shooterId}`, { method: "PUT", json: body }),
+
+  deleteShooterBookEntry: (shooterId: number) =>
+    request<{ ok: boolean }>(`/api/me/shooter-book/${shooterId}`, { method: "DELETE" }),
+
+  uploadShooterBookLogo: (shooterId: number, file: File) => {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    return request<ShooterBookEntryView>(`/api/me/shooter-book/${shooterId}/logo`, { method: "POST", body: form });
+  },
+
+  removeShooterBookLogo: (shooterId: number) =>
+    request<ShooterBookEntryView>(`/api/me/shooter-book/${shooterId}/logo`, { method: "DELETE" }),
 
   /** Recent-projects list, most-recent first. Drives the picker. */
   getRecentProjects: () =>

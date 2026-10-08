@@ -34,6 +34,8 @@ export interface RenderOptions {
   closingCard: boolean;
   /** "Made with splitsmith" at the bottom of the closing card. */
   madeWith: boolean;
+  /** Your brand from the You page on the title page and the closing card. */
+  accountBrand: boolean;
   /** A card per stage: a slate before it, or a lower-third over its head. */
   stageCardStyle: StageCardStyle;
   /** Seconds a stage card shows for. */
@@ -54,6 +56,7 @@ export const DEFAULT_RENDER_OPTIONS: RenderOptions = {
   titlePageDurationSeconds: 3,
   closingCard: false,
   madeWith: true,
+  accountBrand: true,
   stageCardStyle: "none",
   stageCardDurationSeconds: 1.5,
   summaryHoldSeconds: 0,
@@ -111,6 +114,7 @@ export type MatchExportCardFields = Pick<
       | "title_page_duration_seconds"
       | "closing_card"
       | "made_with"
+      | "account_brand"
       | "summary_hold_seconds"
       | "match_summary"
       | "match_summary_seconds"
@@ -145,6 +149,7 @@ export function matchExportFields(
     title_page_duration_seconds: clampSeconds(options.titlePageDurationSeconds, MIN_CARD_SECONDS),
     closing_card: options.closingCard,
     made_with: options.madeWith,
+    account_brand: options.accountBrand,
     summary_hold_seconds: clampSeconds(options.summaryHoldSeconds, 0),
     match_summary: options.matchSummary,
     match_summary_seconds: clampSeconds(options.matchSummarySeconds, MIN_CARD_SECONDS),
@@ -168,7 +173,7 @@ export function gridExportFields(
   | "title_division"
   | "title_page_duration_seconds"
   | "closing_card"
-  | "made_with"
+  | "made_with" | "account_brand"
   | "match_summary"
   | "match_summary_seconds"
   | "title_page_variant"
@@ -184,6 +189,7 @@ export function gridExportFields(
     title_page_duration_seconds: clampSeconds(options.titlePageDurationSeconds, MIN_CARD_SECONDS),
     closing_card: options.closingCard,
     made_with: options.madeWith,
+    account_brand: options.accountBrand,
     match_summary: options.matchSummary,
     match_summary_seconds: clampSeconds(options.matchSummarySeconds, MIN_CARD_SECONDS),
     ...variantFields(look, ["title_page_variant", "stage_card_variant", "closing_card_variant"]),

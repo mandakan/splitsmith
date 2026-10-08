@@ -10,12 +10,14 @@ import typer
 from rich.console import Console
 
 from .. import camera_select
+from ..account_profile import JsonAccountProfileStore, load_brand
 from ..composition import XFADE_KINDS, uniform_transitions
 from ..config import Config
 from ..export_naming import slugify
 from ..looks import load_look
 from ..match_model import Match, is_match_folder
 from ..overlay_theme import THEME_NAMES, ThemeName
+from ..shooter_book import JsonShooterBookStore, load_snapshot
 from ..ui.identity_media import ensure_local_event_logo, grid_identities
 from ..ui.match_exports import render_segment_cache
 from . import emitter as emitter_mod
@@ -152,6 +154,11 @@ def export(
         True,
         "--made-with/--no-made-with",
         help="'Made with splitsmith' at the bottom of the closing card.",
+    ),
+    account_brand: bool = typer.Option(
+        True,
+        "--account-brand/--no-account-brand",
+        help="Your account's brand on the title page and the closing card, when the Look has none.",
     ),
     card_variant: str = typer.Option(
         "default",
@@ -317,6 +324,7 @@ def export(
                 title_page_duration_seconds=title_page_duration,
                 closing_card=closing_card,
                 made_with=made_with,
+                account_brand=account_brand,
                 card_variant=card_variant,
                 match_summary_seconds=match_summary_seconds if match_summary else 0.0,
             ),
@@ -620,7 +628,13 @@ def _render_grid_mp4(
 
     cards = cards or CardOptions()
     title, closing = (
-        title_cards(match, cards, divisions=bundle_divisions(bundles), event_logo=event_logo)
+        title_cards(
+            match,
+            cards,
+            divisions=bundle_divisions(bundles),
+            event_logo=event_logo,
+            brand=load_brand(JsonAccountProfileStore()),
+        )
         if match is not None
         else (None, None)
     )
@@ -645,7 +659,9 @@ def _render_grid_mp4(
                 stage_titles=cards.stage_titles,
                 title_duration_seconds=cards.title_duration_seconds,
                 card_variant=cards.card_variant,
-                identities=grid_identities(bundles, look=load_look(overlay_theme)),
+                identities=grid_identities(
+                    bundles, look=load_look(overlay_theme), book=load_snapshot(JsonShooterBookStore())
+                ),
                 transitions=uniform_transitions(transition, transition_seconds, len(plans)),
                 match_name=match.name if match is not None else "",
                 match_summary_seconds=cards.match_summary_seconds,

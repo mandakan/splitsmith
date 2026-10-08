@@ -52,6 +52,7 @@ describe("previewBody", () => {
       title_info: "Production Optics",
       title_division: true,
       made_with: true,
+      account_brand: true,
       project_name: "Bromma - Final Cut",
       head_pad_seconds: 0.5,
       tail_pad_seconds: 1,

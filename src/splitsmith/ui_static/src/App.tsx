@@ -54,6 +54,7 @@ const PromoteReview = lazyPage(() => import("@/pages/PromoteReview"), "PromoteRe
 const AdminWorkers = lazyPage(() => import("@/pages/AdminWorkers"), "AdminWorkers");
 const AdminAccess = lazyPage(() => import("@/pages/AdminAccess"), "AdminAccess");
 const Account = lazyPage(() => import("@/pages/Account"), "Account");
+const You = lazyPage(() => import("@/pages/You"), "You");
 const Results = lazyPage(() => import("@/pages/Results"), "Results");
 const ResultsStage = lazyPage(() => import("@/pages/ResultsStage"), "ResultsStage");
 const Review = lazyPage(() => import("@/pages/Review"), "Review");
@@ -283,6 +284,8 @@ export function App() {
               project-scoped. Hosted-only - the page itself redirects to
               /pick in local mode. */}
           <Route path="account" element={<Account />} />
+          {/* You (spec 2026-10-08): both modes, not project-scoped. */}
+          <Route path="you" element={<You />} />
           {/* Device-flow approval screen (#719). Under RootLayout so it
               carries the account chip -- the operator needs to see which
               account they are approving for. */}

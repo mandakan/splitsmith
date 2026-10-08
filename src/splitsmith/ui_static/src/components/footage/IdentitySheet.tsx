@@ -3,15 +3,19 @@
  * accent that tells their tile and summary apart, the logo the cards
  * draw, and a club line. Saves through PATCH /identity and the logo
  * routes; a shooter who never opens this renders with the Look's
- * defaults.
+ * defaults. Since the shooter book (spec 2026-10-08) it says where the
+ * look comes from: a look from the book is edited in the book (so this
+ * match keeps following it), "Only this match" keeps an edit here, and
+ * "Use shooter book" drops this match's own record.
  */
 import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Field, inputClass } from "@/components/ui/Field";
 import { Sheet } from "@/components/ui/Sheet";
-import { ApiError, api, type ShooterListEntry } from "@/lib/api";
+import { ApiError, api, type IdentitySource, type ShooterListEntry } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { sourceLine } from "@/lib/you";
 
 /** The shipped Look's accent series, offered as the quick picks (a
  *  shooter who picks nothing gets no accent). */
@@ -36,15 +40,43 @@ export function IdentitySheet({ open, onClose, shooter, editDenied, onChanged }:
   const [preview, setPreview] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [source, setSource] = useState<IdentitySource>("none");
+  const [bookEntry, setBookEntry] = useState(false);
+  const [bookAvailable, setBookAvailable] = useState(false);
+  const [shownLogo, setShownLogo] = useState<string | null>(null);
+  const [onlyThisMatch, setOnlyThisMatch] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) return;
     setAccent(shooter?.identity?.accent ?? "");
     setClub(shooter?.identity?.club ?? "");
+    setShownLogo(shooter?.identity?.logo ?? null);
+    setSource("none");
+    setBookEntry(false);
+    setBookAvailable(false);
     setFile(null);
     setRemoveLogo(false);
+    setOnlyThisMatch(false);
     setError(null);
+    if (!shooter) return;
+    let alive = true;
+    // What a render draws for this shooter: the match's record or the book's.
+    api
+      .getShooterIdentityView(shooter.slug)
+      .then((view) => {
+        if (!alive) return;
+        setSource(view.source);
+        setBookEntry(view.book_entry);
+        setBookAvailable(view.book_available);
+        setAccent(view.identity.accent ?? "");
+        setClub(view.identity.club ?? "");
+        setShownLogo(view.identity.logo);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
   }, [open, shooter]);
 
   useEffect(() => {
@@ -58,8 +90,13 @@ export function IdentitySheet({ open, onClose, shooter, editDenied, onChanged }:
   }, [file]);
 
   if (!shooter) return null;
-  const currentLogo = shooter.identity?.logo ?? null;
+  const currentLogo = shownLogo;
   const accentValid = accent === "" || HEX.test(accent);
+  const shooterId = shooter.selected_shooter_id;
+  // A look from the book is edited in the book, so this match keeps
+  // following it; "Only this match" writes a record here instead.
+  const editBook = source === "book" && shooterId != null && !onlyThisMatch;
+  const scope = onlyThisMatch ? "match" : "book";
 
   const save = async () => {
     if (!accentValid) {
@@ -68,15 +105,25 @@ export function IdentitySheet({ open, onClose, shooter, editDenied, onChanged }:
     }
     setSaving(true);
     setError(null);
+    const fields = {
+      accent: accent === "" ? null : accent.toLowerCase(),
+      club: club.trim() === "" ? null : club.trim(),
+    };
     try {
-      await api.updateShooterIdentity(shooter.slug, {
-        accent: accent === "" ? null : accent.toLowerCase(),
-        club: club.trim() === "" ? null : club.trim(),
-      });
-      if (file) {
-        await api.uploadShooterLogo(shooter.slug, file);
-      } else if (removeLogo && currentLogo) {
-        await api.removeShooterLogo(shooter.slug);
+      if (editBook && shooterId != null) {
+        await api.putShooterBookEntry(shooterId, { ...fields, label: shooter.name });
+        if (file) {
+          await api.uploadShooterBookLogo(shooterId, file);
+        } else if (removeLogo && currentLogo) {
+          await api.removeShooterBookLogo(shooterId);
+        }
+      } else {
+        await api.updateShooterIdentity(shooter.slug, { ...fields, scope });
+        if (file) {
+          await api.uploadShooterLogo(shooter.slug, file, scope);
+        } else if (removeLogo && currentLogo) {
+          await api.removeShooterLogo(shooter.slug, scope);
+        }
       }
       onChanged();
       onClose();
@@ -92,6 +139,34 @@ export function IdentitySheet({ open, onClose, shooter, editDenied, onChanged }:
       <div className="flex h-full flex-col">
         <div className="border-b border-rule px-3.5 py-3 text-md font-medium text-ink">{shooter.name}</div>
         <div className="flex-1 overflow-y-auto">
+          <div className="flex items-start justify-between gap-3 border-b border-rule px-3.5 py-2.5">
+            <p className="text-sm text-muted" data-testid="identity-source">
+              {sourceLine(source, shooterId != null, bookAvailable)}
+            </p>
+            {source === "match" && shooterId != null && bookEntry ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={editDenied || saving}
+                onClick={() => {
+                  setSaving(true);
+                  api
+                    .useShooterBook(shooter.slug)
+                    .then((view) => {
+                      setSource(view.source);
+                      setAccent(view.identity.accent ?? "");
+                      setClub(view.identity.club ?? "");
+                      setShownLogo(view.identity.logo);
+                      onChanged();
+                    })
+                    .catch((e: unknown) => setError(e instanceof ApiError ? e.message : "Could not switch."))
+                    .finally(() => setSaving(false));
+                }}
+              >
+                Use shooter book
+              </Button>
+            ) : null}
+          </div>
           <Field label="Accent" htmlFor="identity-accent" help="Tints this shooter's summary bar and name; blank leaves the summary as the Look draws it.">
             <div className="flex flex-wrap items-center gap-2">
               {ACCENT_SWATCHES.map((hex) => (
@@ -169,6 +244,17 @@ export function IdentitySheet({ open, onClose, shooter, editDenied, onChanged }:
               onChange={(e) => setClub(e.target.value)}
             />
           </Field>
+          {shooterId != null && bookAvailable ? (
+            <label className="flex items-center gap-2 px-3.5 py-2.5 text-md text-ink-2">
+              <input
+                type="checkbox"
+                checked={onlyThisMatch}
+                disabled={editDenied}
+                onChange={(e) => setOnlyThisMatch(e.target.checked)}
+              />
+              Only this match
+            </label>
+          ) : null}
           {error ? <p className="px-3.5 py-2 text-sm text-led-text">{error}</p> : null}
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-rule px-3.5 py-3">

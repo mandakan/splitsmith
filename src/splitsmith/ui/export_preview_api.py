@@ -27,6 +27,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from ..account_profile import brand_digest, load_brand
 from ..division import competitor_division
 from ..export_preview import (
     PreviewCard,
@@ -42,9 +43,10 @@ from ..look_store import LookStoreError, StoredLookBody, TemplateEdit, draft_loo
 from ..looks import Look, load_look, look_fingerprint
 from ..overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
 from ..runtime import runtime
+from ..shooter_book import identity_digest, load_snapshot
 from . import render_bound
 from .exports_api import installed_look
-from .identity_media import ensure_local_event_logo, resolved_identity_for
+from .identity_media import ensure_local_event_logo, identity_source, resolved_identity_for
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +69,8 @@ class ExportPreviewRequest(BaseModel):
     stage_numbers: list[int] | None = None
     #: "Made with splitsmith" on the closing card.
     made_with: bool = True
+    #: Your account's brand on the title page and the closing card.
+    account_brand: bool = True
     head_pad_seconds: float = Field(default=5.0, ge=0)
     tail_pad_seconds: float = Field(default=5.0, ge=0)
     #: The bundle name, as the match export's ``project_name``.
@@ -167,6 +171,11 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
     # The event's logo (the branding work), brought to this disk like a
     # shooter's; the title page and the closing card draw it.
     event_logo = _event_logo(state) if req.card in ("title", "closing") else None
+    book = load_snapshot(state.shooter_book)
+    brand = (
+        load_brand(state.account_profile) if req.account_brand and req.card in ("title", "closing") else None
+    )
+    book_entry = book.get(project.selected_shooter_id) if identity_source(project, book) == "book" else None
     spec = PreviewSpec(
         card=req.card,
         stage_number=stage_number,
@@ -184,6 +193,8 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
         event_logo=event_logo.name if event_logo is not None else None,
         made_with=req.made_with,
         summary_digest=summary_digest(match_summary) if match_summary is not None else None,
+        book_identity=identity_digest(book_entry) if book_entry is not None else None,
+        account_brand=brand_digest(brand) if brand is not None else None,
         draft=(
             None
             if req.draft is None and not req.templates
@@ -239,11 +250,13 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
                     look=look,
                     index=0,
                     label=project.competitor_name or project.name,
+                    book=book,
                 ),
                 ffmpeg_binary=rt.ffmpeg_binary,
                 work_dir=Path(work),
                 event_logo=event_logo,
                 match_summary=match_summary,
+                brand=brand,
             )
 
     try:

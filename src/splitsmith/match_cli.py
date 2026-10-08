@@ -460,6 +460,11 @@ def export(
         "--made-with/--no-made-with",
         help="'Made with splitsmith' at the bottom of the closing card.",
     ),
+    account_brand: bool = typer.Option(
+        True,
+        "--account-brand/--no-account-brand",
+        help="Your account's brand on the title page and the closing card, when the Look has none.",
+    ),
     card_variant: str = typer.Option(
         "default",
         "--card-variant",
@@ -559,9 +564,11 @@ def export(
     formats carry the stage titles FCP can draw and record the rest as
     notes.
     """
+    from .account_profile import JsonAccountProfileStore, load_brand
     from .looks import load_look
     from .match_project import MatchProject
     from .mp4_render import RenderStep
+    from .shooter_book import JsonShooterBookStore, load_snapshot
     from .ui import match_exports
     from .ui.identity_media import ensure_local_event_logo, resolved_identity_for
 
@@ -707,6 +714,7 @@ def export(
         title_page_duration_seconds=title_page_duration,
         closing_card=closing_card,
         made_with=made_with,
+        account_brand=load_brand(JsonAccountProfileStore()) if account_brand else None,
         card_variant=card_variant,
         overlay_theme=overlay_theme,  # type: ignore[arg-type]
         summary_hold_seconds=summary_hold,
@@ -714,7 +722,12 @@ def export(
         match_summary_seconds=match_summary_seconds,
         shooter_label=shooter_label,
         shooter_identity=resolved_identity_for(
-            project, shooter_root, look=load_look(overlay_theme), index=0, label=shooter_label or project_name
+            project,
+            shooter_root,
+            look=load_look(overlay_theme),
+            index=0,
+            label=shooter_label or project_name,
+            book=load_snapshot(JsonShooterBookStore()),
         ),
     )
     exports_dir = project.exports_path(shooter_root)

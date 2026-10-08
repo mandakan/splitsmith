@@ -442,6 +442,17 @@ class TitleCard:
 
 
 @dataclass(frozen=True)
+class BrandMark:
+    """The video maker's brand from their account (spec 2026-10-08): a logo
+    on this disk and a line, resolved by the request layer like the event
+    logo. Drawn on the title page and the closing card when the Look has no
+    brand of its own (``look_brand.brand_json``)."""
+
+    logo_path: Path | None = None
+    line: str | None = None
+
+
+@dataclass(frozen=True)
 class MatchTitle:
     """A generated full-frame card for the match itself (issue #973).
 
@@ -468,6 +479,8 @@ class MatchTitle:
     logo: Path | None = None
     #: "Made with splitsmith" at the bottom; drawn on the closing card only.
     credit: bool = False
+    #: The account's brand, for a Look without one; ``None`` draws none.
+    brand: BrandMark | None = None
 
 
 @dataclass(frozen=True)

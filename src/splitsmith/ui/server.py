@@ -142,6 +142,7 @@ from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
 from .. import __version__ as splitsmith_version
+from .. import account_profile as account_profile_module
 from .. import automation as automation_settings
 from .. import backup as backup_mod
 from .. import (
@@ -164,6 +165,7 @@ from .. import export_presets as export_presets_module
 from .. import look_store as look_store_module
 from .. import looks as looks_module
 from .. import models as model_layer
+from .. import shooter_book as shooter_book_module
 from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy monkeypatch points)
 from .. import thumbnail as thumbnail_helpers
 from .. import trim as trim_module
@@ -291,6 +293,7 @@ from .identity_media import (
     ensure_local_logo,
     event_logo_storage_key,
     grid_identities,
+    identity_source,
     resolved_identity_for,
 )
 from .job_journal import JobJournal, default_journal_path, resume_journaled_jobs
@@ -1788,6 +1791,11 @@ class TenantContext:
     # local mode, where ``youtube_api`` reads the file under the user
     # config dir instead.
     youtube: PostgresYouTubeConnectionStore | None = None
+    # The account's shooter book and profile (spec 2026-10-08). Hosted builds
+    # one per tenant; ``AppState`` never falls back to the local files for a
+    # hosted request, so a container's own disk is never read as an account.
+    shooter_book: shooter_book_module.ShooterBookStore | None = None
+    account_profile: account_profile_module.AccountProfileStore | None = None
     # The desktop command queue (#1100): requests the phone makes for the
     # user's desktop to run. ``None`` in local mode; under the
     # ``tenant_isolation`` RLS policy, so the tenant factory is load-bearing.
@@ -1928,6 +1936,12 @@ class AppState:
     _whats_new: whats_new_module.WhatsNewStore = field(default_factory=whats_new_module.PrefsWhatsNewStore)
     _export_presets: export_presets_module.ExportPresetStore = field(
         default_factory=export_presets_module.JsonExportPresetStore
+    )
+    _shooter_book: shooter_book_module.ShooterBookStore = field(
+        default_factory=shooter_book_module.JsonShooterBookStore
+    )
+    _account_profile: account_profile_module.AccountProfileStore = field(
+        default_factory=account_profile_module.JsonAccountProfileStore
     )
     # Hosted-mode factory: build a :class:`TenantContext` for a ``user_id``.
     # ``None`` in local mode. Set by ``_apply_hosted_mode_wiring``; called
@@ -2141,6 +2155,26 @@ class AppState:
     @scoreboard_identity.setter
     def scoreboard_identity(self, value: user_config.ScoreboardIdentityStore) -> None:
         self._scoreboard_identity = value
+
+    @property
+    def shooter_book(self) -> shooter_book_module.ShooterBookStore:
+        """The account's shooter book: the tenant's hosted, the local files
+        locally, and an empty one for a hosted request with no tenant."""
+        tenant = current_tenant.get()
+        if tenant is not None:
+            return tenant.shooter_book or shooter_book_module.EmptyShooterBookStore()
+        if self._build_tenant is not None:
+            return shooter_book_module.EmptyShooterBookStore()
+        return self._shooter_book
+
+    @property
+    def account_profile(self) -> account_profile_module.AccountProfileStore:
+        tenant = current_tenant.get()
+        if tenant is not None:
+            return tenant.account_profile or account_profile_module.EmptyAccountProfileStore()
+        if self._build_tenant is not None:
+            return account_profile_module.EmptyAccountProfileStore()
+        return self._account_profile
 
     @property
     def export_presets(self) -> export_presets_module.ExportPresetStore:
@@ -3041,11 +3075,17 @@ def _run_compare_grid(
                 title_page_duration_seconds=req.title_page_duration_seconds,
                 closing_card=req.closing_card,
                 made_with=req.made_with,
+                account_brand=req.account_brand,
                 card_variant=req.card_variant,
                 title_page_variant=req.title_page_variant,
                 closing_card_variant=req.closing_card_variant,
             ),
             divisions=compare_cards.bundle_divisions(filtered),
+            brand=account_profile_module.load_brand(
+                state.account_profile
+                if state is not None
+                else account_profile_module.JsonAccountProfileStore()
+            ),
             event_logo=ensure_local_event_logo(
                 match.branding,
                 root,
@@ -3066,7 +3106,13 @@ def _run_compare_grid(
             stage_titles=req.stage_titles,
             title_duration_seconds=req.title_duration_seconds,
             card_variant=req.stage_card_variant or req.card_variant,
-            identities=grid_identities(filtered, look=load_look(req.overlay_theme)),
+            identities=grid_identities(
+                filtered,
+                look=load_look(req.overlay_theme),
+                book=shooter_book_module.load_snapshot(
+                    state.shooter_book if state is not None else shooter_book_module.JsonShooterBookStore()
+                ),
+            ),
             transitions=uniform_transitions(req.transition_kind, req.transition_duration_seconds, len(plans)),
             overlay=req.overlay,
             overlay_theme=req.overlay_theme,
@@ -4694,6 +4740,9 @@ def register_job_bodies(state: AppState) -> None:
                 title_page_duration_seconds=req.title_page_duration_seconds,
                 closing_card=req.closing_card,
                 made_with=req.made_with,
+                account_brand=(
+                    account_profile_module.load_brand(state.account_profile) if req.account_brand else None
+                ),
                 card_variant=req.card_variant,
                 title_page_variant=req.title_page_variant,
                 stage_card_variant=req.stage_card_variant,
@@ -4709,6 +4758,7 @@ def register_job_bodies(state: AppState) -> None:
                     look=load_look(req.overlay_theme),
                     index=0,
                     label=proj.competitor_name or project_name,
+                    book=shooter_book_module.load_snapshot(state.shooter_book),
                 ),
             )
             try:
@@ -6323,10 +6373,13 @@ class CameraModelRequest(BaseModel):
 
 class ShooterIdentityRequest(BaseModel):
     """Body for PATCH /api/shooters/{slug}/identity (#1243). Only the keys
-    sent are applied; ``null`` clears one. The logo has its own routes."""
+    sent are applied; ``null`` clears one. The logo has its own routes.
+    ``scope`` (spec 2026-10-08): ``book`` also saves the result to the
+    shooter book under the shooter's SSI id; ``match`` keeps it here only."""
 
     accent: str | None = None
     club: str | None = None
+    scope: Literal["book", "match"] = "book"
 
 
 class CompareCameraRequest(BaseModel):
@@ -13113,13 +13166,103 @@ def create_app(
         except FileNotFoundError:
             pass
 
+    async def _save_to_book(project: MatchProject, slug: str) -> None:
+        """Write the shooter's identity to the shooter book under their SSI
+        id (spec 2026-10-08): the whole record, the logo copied into the
+        book's own files (same content name); an identity that sets nothing
+        removes the entry. No SSI id, nothing: the book never keys by name."""
+        sid = project.selected_shooter_id
+        if sid is None:
+            return
+        logo_bytes: bytes | None = None
+        if project.identity.logo is not None:
+            local = ensure_local_logo(project, state.shooter_root(slug))
+            try:
+                logo_bytes = local.read_bytes() if local is not None else None
+            except OSError as exc:
+                logger.warning("shooter book: could not read %s's logo (%s); saved without it", slug, exc)
+        await shooter_book_module.save_identity(
+            state.shooter_book,
+            shooter_id=sid,
+            identity=project.identity,
+            label=project.competitor_name or project.name,
+            logo_bytes=logo_bytes,
+        )
+
+    def _book_seeded_identity(project: MatchProject, slug: str) -> ShooterIdentity:
+        """What an edit starts from: the match's own record, or, when it sets
+        nothing, the book's look the sheet showed (its logo copied into this
+        match's ``identity/``), so an edit kept to this match never drops
+        what the user did not touch."""
+        own = project.identity
+        if shooter_book_module.is_set(own):
+            return own
+        book = shooter_book_module.load_snapshot(state.shooter_book)
+        entry = book.get(project.selected_shooter_id)
+        if not shooter_book_module.is_set(entry):
+            return own
+        assert entry is not None
+        logo = None
+        source = book.logo_path(entry)
+        if entry.logo is not None and source is not None:
+            target = _identity_logo_dir(slug) / entry.logo
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                data = source.read_bytes()
+                target.write_bytes(data)
+                storage = project._storage  # type: ignore[attr-defined]
+                storage_scope = project._storage_scope  # type: ignore[attr-defined]
+                if storage is not None and storage_scope is not None:
+                    storage.write_bytes(f"{storage_scope}/{LOGO_DIR}/{entry.logo}", data)
+                logo = entry.logo
+            except OSError as exc:
+                logger.warning("identity: could not copy the book's logo into %s (%s)", slug, exc)
+        return entry.model_copy(update={"logo": logo})
+
+    def _identity_view(project: MatchProject) -> dict[str, Any]:
+        """The identity sheet's view: where the look comes from and what it is."""
+        book = shooter_book_module.load_snapshot(state.shooter_book)
+        source = identity_source(project, book)
+        effective = project.identity if source != "book" else book.get(project.selected_shooter_id)
+        return {
+            "source": source,
+            "identity": (effective or ShooterIdentity()).model_dump(mode="json"),
+            "shooter_id": project.selected_shooter_id,
+            # Whether the book holds a look for this shooter ("Use shooter
+            # book" has something to fall back to) and whether this server
+            # keeps a book at all (hosted does not yet).
+            "book_entry": shooter_book_module.is_set(book.get(project.selected_shooter_id)),
+            "book_available": not isinstance(state.shooter_book, shooter_book_module.EmptyShooterBookStore),
+        }
+
+    @app.get("/api/shooters/{slug}/identity")
+    def get_shooter_identity(slug: str) -> JSONResponse:
+        """Where this shooter's look comes from (``match``, ``book`` or
+        ``none``) and the identity a render draws for them."""
+        return JSONResponse(_identity_view(state.shooter_project(slug)))
+
+    @app.post("/api/shooters/{slug}/identity/use-book")
+    def use_shooter_book(slug: str) -> JSONResponse:
+        """Drop this match's own record so the shooter book applies again.
+        The book is not touched. Refused (409) when the book holds no look for
+        this shooter: dropping the record would leave them with nothing."""
+        project = state.shooter_project(slug)
+        book = shooter_book_module.load_snapshot(state.shooter_book)
+        if not shooter_book_module.is_set(book.get(project.selected_shooter_id)):
+            raise HTTPException(status_code=409, detail="The shooter book has no look for this shooter.")
+        previous = project.identity.logo
+        project.identity = ShooterIdentity()
+        project.save(state.shooter_root(slug))
+        _remove_local_logo(slug, previous)
+        return JSONResponse(_identity_view(project))
+
     @app.patch("/api/shooters/{slug}/identity")
     def set_shooter_identity(slug: str, req: ShooterIdentityRequest) -> JSONResponse:
         """Set the shooter's accent and club line (#1243). Validated by the
         identity model itself, so a bad colour or an over-long club line
         is a 422 that names the field and writes nothing."""
         project = state.shooter_project(slug)
-        current = project.identity
+        current = _book_seeded_identity(project, slug)
         fields = req.model_dump(exclude_unset=True)
         try:
             project.identity = ShooterIdentity(
@@ -13130,10 +13273,14 @@ def create_app(
         except ValidationError as exc:
             raise HTTPException(status_code=422, detail=exc.errors()[0]["msg"]) from exc
         project.save(state.shooter_root(slug))
+        if req.scope == "book":
+            run_sync(_save_to_book(project, slug))
         return JSONResponse(project.model_dump(mode="json"))
 
     @app.post("/api/shooters/{slug}/identity/logo")
-    async def upload_shooter_logo(slug: str, file: UploadFile = File(...)) -> JSONResponse:
+    async def upload_shooter_logo(
+        slug: str, file: UploadFile = File(...), scope: Literal["book", "match"] = Form("book")
+    ) -> JSONResponse:
         """Store the shooter's logo (#1243): a PNG, JPEG or WebP of at most
         ``LOGO_MAX_BYTES``, content-named under ``<shooter>/identity/``
         (hosted: under the project's storage scope as well, which is the
@@ -13169,13 +13316,15 @@ def create_app(
         logo_dir.mkdir(parents=True, exist_ok=True)
         (logo_dir / name).write_bytes(data)
         storage = project._storage  # type: ignore[attr-defined]
-        scope = project._storage_scope  # type: ignore[attr-defined]
-        if storage is not None and scope is not None:
-            storage.write_bytes(f"{scope}/{LOGO_DIR}/{name}", data)
+        storage_scope = project._storage_scope  # type: ignore[attr-defined]
+        if storage is not None and storage_scope is not None:
+            storage.write_bytes(f"{storage_scope}/{LOGO_DIR}/{name}", data)
         project.identity = project.identity.model_copy(update={"logo": name})
         project.save(state.shooter_root(slug))
         if previous != name:
             _remove_local_logo(slug, previous)
+        if scope == "book":
+            await _save_to_book(project, slug)
         return JSONResponse(project.model_dump(mode="json"))
 
     @app.get("/api/shooters/{slug}/identity/logo")
@@ -13201,7 +13350,7 @@ def create_app(
         )
 
     @app.delete("/api/shooters/{slug}/identity/logo")
-    def remove_shooter_logo(slug: str) -> JSONResponse:
+    def remove_shooter_logo(slug: str, scope: Literal["book", "match"] = "book") -> JSONResponse:
         """Clear the shooter's logo (#1243) and remove the local file; a
         hosted copy is swept by the next push's gc."""
         project = state.shooter_project(slug)
@@ -13209,6 +13358,8 @@ def create_app(
         project.identity = project.identity.model_copy(update={"logo": None})
         project.save(state.shooter_root(slug))
         _remove_local_logo(slug, previous)
+        if scope == "book":
+            run_sync(_save_to_book(project, slug))
         return JSONResponse(project.model_dump(mode="json"))
 
     # --- the event's logo (the branding work) -------------------------------
@@ -18942,10 +19093,12 @@ def create_app(
     # Export presets (spec 2026-09-15 s1): one router for both modes; the
     # store behind ``state.export_presets`` is what differs.
     from .export_presets_api import router as export_presets_router
+    from .me_identity_api import router as me_identity_router
     from .palette_api import router as palette_router
     from .whats_new_api import router as whats_new_router
 
     app.include_router(export_presets_router)
+    app.include_router(me_identity_router)
     app.include_router(whats_new_router)
     app.include_router(palette_router)
 

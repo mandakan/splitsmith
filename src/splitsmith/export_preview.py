@@ -108,6 +108,13 @@ class PreviewSpec:
     #: Digest of the match summary the caller built from every stage's audit;
     #: the cache key's only view of the stages this request does not name.
     summary_digest: str | None = None
+    #: The shooter book identity the card draws, when it comes from the book
+    #: (``shooter_book.identity_digest``): a book edit touches no project, so
+    #: the project's timestamp cannot move the key. ``None`` keeps it as it was.
+    book_identity: str | None = None
+    #: The account brand the card draws (``account_profile.brand_digest``);
+    #: ``None`` keeps the key as it was.
+    account_brand: str | None = None
     #: The event logo's content name (the branding work), for the cache key;
     #: the file itself reaches :func:`render_preview` as ``event_logo``.
     event_logo: str | None = None
@@ -168,6 +175,10 @@ def preview_key(
         fields["credit"] = True
     if spec.summary_digest is not None:
         fields["summary"] = spec.summary_digest
+    if spec.book_identity is not None:
+        fields["book_identity"] = spec.book_identity
+    if spec.account_brand is not None:
+        fields["account_brand"] = spec.account_brand
     payload = json.dumps(
         {
             **fields,
@@ -355,6 +366,7 @@ def render_preview(
     shooter: ResolvedIdentity | None = None,
     event_logo: Path | None = None,
     match_summary: MatchSummary | None = None,
+    brand: composition.BrandMark | None = None,
 ) -> bytes:
     """The PNG for ``spec``, or :class:`PreviewError` for a 404 / 409 / 503.
     ``shooter`` is the shooter's resolved identity (#1243), drawn on the
@@ -446,6 +458,7 @@ def render_preview(
             variant=spec.variant,
             logo=event_logo,
             credit=spec.card == "closing" and spec.made_with,
+            brand=brand,
         )
         slot = "title_page" if spec.card == "title" else "closing"
         if moving:

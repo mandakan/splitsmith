@@ -123,6 +123,14 @@ HOSTED_CONFINED_ROUTES: dict[tuple[str, str], str] = {
         "the upload's bytes are sniffed (PNG / JPEG / WEBP) and stored under a content-derived name; "
         "the client's filename is never read"
     ),
+    ("POST", "/api/me/profile/brand-logo"): (
+        "the account's own store (an empty, write-refusing one hosted until it has a file store); the bytes "
+        "are sniffed and stored under a content-derived name, the client's filename is never read"
+    ),
+    ("POST", "/api/me/shooter-book/{shooter_id}/logo"): (
+        "the account's own book (an empty, write-refusing one hosted until it has a file store); the bytes "
+        "are sniffed and stored under a content-derived name, the client's filename is never read"
+    ),
     ("POST", "/api/me/raw/upload/multipart/create"): _RAW_KEY,
     ("POST", "/api/me/raw/upload/multipart/part-url"): _RAW_KEY,
     ("POST", "/api/me/raw/upload/multipart/complete"): _RAW_KEY,

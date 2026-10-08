@@ -111,6 +111,24 @@ export function DetailsGroup({
           </label>
         </Field>
       ) : null}
+      {drawsCards && (settings.renderOptions.titlePage || settings.renderOptions.closingCard) ? (
+        <Field
+          label="Brand"
+          help="Your brand from the You page, top-left on the title page and the closing card. A Look with its own brand shows that instead."
+        >
+          <label className="flex items-center gap-2 text-md text-ink-2">
+            <input
+              type="checkbox"
+              aria-label="Your brand"
+              checked={settings.renderOptions.accountBrand}
+              disabled={busy}
+              onChange={(e) => patch({ renderOptions: { ...settings.renderOptions, accountBrand: e.target.checked } })}
+              className="accent-[var(--color-ink)]"
+            />
+            Your brand
+          </label>
+        </Field>
+      ) : null}
       {publishing ? (
         <Field
           label="Description"
