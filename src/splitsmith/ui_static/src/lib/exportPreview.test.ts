@@ -23,6 +23,8 @@ describe("previewCardFor", () => {
     expect(previewCardFor({ slotId: "summaryHold", variantId: "on" })).toBe("summary");
     expect(previewCardFor({ slotId: "matchSummary", variantId: "on" })).toBe("match_summary");
     expect(previewCardFor({ slotId: "matchSummary", variantId: "none" })).toBe("frame");
+    // The grid's card is a tile per shooter; the pane shows its thumbnail.
+    expect(previewCardFor({ slotId: "matchSummary", variantId: "on" }, "compare")).toBeNull();
     expect(previewCardFor({ slotId: "overlay", variantId: "on" })).toBe("overlay");
     expect(previewCardFor({ slotId: "transition", variantId: "zoom" })).toBeNull();
     expect(previewCardFor({ slotId: "transition", variantId: "cut" })).toBeNull();

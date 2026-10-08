@@ -197,7 +197,9 @@ def match_summary_groups(
     identity: list[Element] = [Element(role=Role.IDENTITY, text=label)]
     if summary.dq:
         identity.append(Element(role=Role.VERDICT, text="DQ", emphasis=Emphasis.PLATE))
-    groups: list[Group] = [Group(anchor=Anchor.TOP_CENTER, flow=Flow.ROW, elements=tuple(identity), align="left")]
+    groups: list[Group] = [
+        Group(anchor=Anchor.TOP_CENTER, flow=Flow.ROW, elements=tuple(identity), align="left")
+    ]
     total = summary.stage_count
 
     scoring = False
@@ -218,7 +220,9 @@ def match_summary_groups(
             note = _coverage(summary.scored_stages, total)
             if note is not None:
                 head.append(note)
-            groups.append(Group(anchor=Anchor.MIDDLE_CENTER, flow=Flow.ROW, elements=tuple(head), align="left"))
+            groups.append(
+                Group(anchor=Anchor.MIDDLE_CENTER, flow=Flow.ROW, elements=tuple(head), align="left")
+            )
             groups.append(
                 Group(
                     anchor=Anchor.MIDDLE_CENTER,
@@ -236,7 +240,11 @@ def match_summary_groups(
         splits = [
             Element(role=Role.HEADLINE, text=_num(summary.avg_split), caption="Avg"),
             Element(role=Role.HEADLINE, text=_num(summary.best_draw), caption="Best draw"),
-            Element(role=Role.HEADLINE, text=DASH if summary.rounds is None else str(summary.rounds), caption="Rounds"),
+            Element(
+                role=Role.HEADLINE,
+                text=DASH if summary.rounds is None else str(summary.rounds),
+                caption="Rounds",
+            ),
         ]
     if splits:
         head = [Element(role=Role.LABEL, text="Splits")]

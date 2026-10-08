@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
 import tempfile
 from dataclasses import replace
 from pathlib import Path
@@ -127,14 +126,14 @@ def test_the_spine_puts_the_match_summary_after_the_last_stage_before_the_closin
     from tests.test_compare_mp4_grid_hold import _plan
 
     plans = [_plan(), replace(_plan(), stage_number=4, stage_name="Stage 4")]
-    kwargs = dict(
-        title_page=None,
-        closing=MatchTitle(text="Bromma", duration_seconds=2.0),
-        stage_titles="none",
-        title_duration_seconds=1.5,
-        transitions=(),
-        tail_pad_seconds=0.5,
-    )
+    kwargs = {
+        "title_page": None,
+        "closing": MatchTitle(text="Bromma", duration_seconds=2.0),
+        "stage_titles": "none",
+        "title_duration_seconds": 1.5,
+        "transitions": (),
+        "tail_pad_seconds": 0.5,
+    }
     spine = mp4_grid.plan_grid_spine(plans, match_summary_seconds=6.0, **kwargs)
     assert [item.name for item in spine.items] == ["stage3", "stage4", "match_summary", "closing"]
     summary = spine.items[2]
@@ -206,7 +205,10 @@ def test_a_shooter_missing_the_last_stage_sits_on_their_latest_footage(tmp_path:
     assert freezes["Ann"].name.startswith("freeze-stage3-")
     assert freezes["Bo"].name.startswith("freeze-stage4-") and freezes["Cy"].name.startswith("freeze-stage4-")
     nobody = replace(first, tiles=tuple(replace(t, trim_path=None) for t in first.tiles))
-    assert extract_match_summary_freezes([nobody], work_dir=tmp_path, ffmpeg_binary="x", runner=_ok_runner([])) == {}
+    assert (
+        extract_match_summary_freezes([nobody], work_dir=tmp_path, ffmpeg_binary="x", runner=_ok_runner([]))
+        == {}
+    )
 
 
 def test_every_shooter_counts_every_rendered_stage() -> None:
@@ -246,7 +248,9 @@ _PROBE = """
 
 
 @pytest.mark.parametrize(("labels", "rows", "cols"), [(2, 1, 2), (4, 2, 2), (16, 4, 4)])
-def test_tiles_keep_their_splits_inside_the_cell_at_every_grid_size(labels: int, rows: int, cols: int) -> None:
+def test_tiles_keep_their_splits_inside_the_cell_at_every_grid_size(
+    labels: int, rows: int, cols: int
+) -> None:
     from playwright.sync_api import Error as PlaywrightError
     from playwright.sync_api import sync_playwright
 
@@ -254,7 +258,6 @@ def test_tiles_keep_their_splits_inside_the_cell_at_every_grid_size(labels: int,
     from splitsmith.overlay_html import grid_html
     from splitsmith.overlay_raster import CHROMIUM_CHANNEL, DEVICE_SCALE_FACTOR
     from splitsmith.overlay_theme import load_theme
-
     from tests.test_compare_mp4_grid_hold import _plan
 
     names = tuple(f"Shooter Number {i} Longname" for i in range(labels))
@@ -277,7 +280,10 @@ def test_tiles_keep_their_splits_inside_the_cell_at_every_grid_size(labels: int,
         (
             p,
             match_summary_groups(
-                summaries[p.label], p.label, scale=scale, cell_width=geometry.cell_width,
+                summaries[p.label],
+                p.label,
+                scale=scale,
+                cell_width=geometry.cell_width,
                 cell_height=geometry.cell_height,
             ),
         )
@@ -305,4 +311,99 @@ def test_tiles_keep_their_splits_inside_the_cell_at_every_grid_size(labels: int,
     # The splits are never dropped and nothing shown leaves its cell or is cut.
     assert all(v["shown"] for v in splits), splits
     shown = [v for v in values if v["shown"]]
-    assert all(v["inside"] and not v["clipped"] for v in shown), [v for v in shown if not v["inside"] or v["clipped"]]
+    assert all(v["inside"] and not v["clipped"] for v in shown), [
+        v for v in shown if not v["inside"] or v["clipped"]
+    ]
+
+
+# --- the request, the job and the CLI ---------------------------------------------
+
+
+def test_the_grid_request_defaults_off_and_bounds_the_hold() -> None:
+    from pydantic import ValidationError
+
+    from splitsmith.ui.exports_api import CompareGridRequest
+
+    req = CompareGridRequest(stage_numbers=[1], audio_from="a")
+    assert (req.match_summary, req.match_summary_seconds) == (False, 6.0)
+    for bad in (0.0, 0.4, 31.0):
+        with pytest.raises(ValidationError):
+            CompareGridRequest(
+                stage_numbers=[1], audio_from="a", match_summary=True, match_summary_seconds=bad
+            )
+
+
+def test_the_grid_job_threads_the_match_summary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from typing import Any
+
+    from tests.test_compare_grid_endpoint import (
+        _fake_probe,
+        _fake_render_grid_mp4,
+        _match_create_app,
+        _MatchClient,
+        _seed_match,
+        _wait_for_job,
+        _write_trims,
+        mp4_grid_mod,
+        pl_mod,
+    )
+
+    captured: list[dict[str, Any]] = []
+
+    def fake_render(shooters: Any, *, audio_label: str, output_path: Path, **kwargs: Any) -> Any:
+        captured.append(kwargs)
+        return _fake_render_grid_mp4(shooters, audio_label=audio_label, output_path=output_path)
+
+    monkeypatch.setattr(pl_mod.fcpxml_gen, "probe_video", _fake_probe)
+    monkeypatch.setattr(mp4_grid_mod, "render_grid_mp4", fake_render)
+    match_root = _seed_match(tmp_path, shooters=["mathias"], stage_numbers=[1])
+    _write_trims(match_root, slug="mathias", stage_numbers=[1])
+    client = _MatchClient(_match_create_app(project_root=match_root, project_name="Compare Match"))
+    body = {"stage_numbers": [1], "audio_from": "mathias"}
+    for extra in ({}, {"match_summary": True, "match_summary_seconds": 8}):
+        response = client.post("/api/match/compare-export", json={**body, **extra})
+        assert response.status_code == 200
+        assert _wait_for_job(client, response.json()["id"])["status"] == "succeeded"
+    assert [c["match_summary_seconds"] for c in captured[-2:]] == [0.0, 8.0]
+
+
+def test_the_compare_cli_threads_the_match_summary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tests.test_compare_cli_mp4 import _capture_render, _invoke_mp4, _patch_probe, _seed_match_with_stages
+
+    match_root = _seed_match_with_stages(tmp_path / "match", stage_count=1)
+    _patch_probe(monkeypatch)
+    captured = _capture_render(monkeypatch)
+    result = _invoke_mp4(match_root, tmp_path / "out.mp4")
+    assert result.exit_code == 0, result.output
+    assert captured["match_summary_seconds"] == 0.0
+    result = _invoke_mp4(match_root, tmp_path / "out.mp4", "--match-summary", "--match-summary-seconds", "9")
+    assert result.exit_code == 0, result.output
+    assert captured["match_summary_seconds"] == 9.0
+    assert captured["match_name"] == "Compare Match"
+
+
+@pytest.mark.parametrize("seconds", ["0", "-1", "31"])
+def test_the_compare_cli_refuses_a_hold_the_encode_cannot_make(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seconds: str
+) -> None:
+    from tests.test_compare_cli_mp4 import _capture_render, _invoke_mp4, _patch_probe, _seed_match_with_stages
+
+    match_root = _seed_match_with_stages(tmp_path / "match", stage_count=1)
+    _patch_probe(monkeypatch)
+    captured = _capture_render(monkeypatch)
+    result = _invoke_mp4(
+        match_root, tmp_path / "out.mp4", "--match-summary", "--match-summary-seconds", seconds
+    )
+    assert result.exit_code == 2
+    assert captured == {}
+
+
+def test_the_compare_cli_refuses_the_match_summary_on_fcpxml(tmp_path: Path) -> None:
+    from splitsmith.cli import app
+    from tests.test_compare_cli_mp4 import _seed_match_with_stages, runner
+
+    match_root = _seed_match_with_stages(tmp_path / "match", stage_count=1)
+    args = ["compare", "export", str(match_root), "--audio-from", "mathias", "--match-summary"]
+    result = runner.invoke(app, [*args, "-o", str(tmp_path / "out.fcpxml")])
+    assert result.exit_code == 2
+    assert "--match-summary" in result.output

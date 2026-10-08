@@ -68,6 +68,7 @@ THUMBNAILS: tuple[str, ...] = (
     "stage-card-lower-third.png",
     "summary-hold.png",
     "match-summary.png",
+    "match-summary-grid.png",
     "overlay.png",
     "transition-cut.png",
     "transition-static.png",
@@ -133,6 +134,67 @@ def _sample_match():
         tile = _sample_tile()
         stages.append((name, replace(tile, stage_number=i + 1, stage_time_seconds=12.4 + i * 3.1)))
     return build_match_summary(stages, title=MATCH, label=SHOOTER)
+
+
+def _match_summary_grid(backdrop_png: Path, *, rasterizer: Rasterizer, theme: OverlayTheme) -> Image.Image:
+    """Four shooters' tiles on the grid's match summary, drawn at twice the
+    thumbnail's size and scaled down: at 480x270 a 2x2 cell is smaller than any
+    export's, and the fit policy would drop half of what the card says."""
+    from splitsmith.compare.mp4_grid import GridStagePlan, GridTile
+    from splitsmith.compare.overlay_summary import build_match_summary_grid_still
+
+    labels = ("A. Shooter", "B. Shooter", "C. Shooter", "D. Shooter")
+    tiles = tuple(
+        GridTile(
+            label=label,
+            trim_path=backdrop_png,
+            beep_offset_in_clip=0.0,
+            seek_seconds=0.0,
+            lead_pad_seconds=0.0,
+            source_duration_seconds=1.0,
+            row=i // 2,
+            col=i % 2,
+        )
+        for i, label in enumerate(labels)
+    )
+    plan = GridStagePlan(
+        stage_number=1,
+        stage_name=STAGE,
+        tiles=tiles,
+        duration_seconds=1.0,
+        audio_label=labels[0],
+        rows=2,
+        cols=2,
+    )
+    base = _sample_match()
+    summaries = {}
+    for i, label in enumerate(labels):
+        stages = [
+            (
+                row.name,
+                replace(
+                    _sample_tile(),
+                    label=label,
+                    stage_number=row.number,
+                    shots=tuple(
+                        replace(shot, split=round(shot.split + i * 0.03, 2)) for shot in _sample_tile().shots
+                    ),
+                ),
+            )
+            for row in base.rows
+        ]
+        summaries[label] = build_match_summary(stages, title=MATCH, label=label)
+    still = build_match_summary_grid_still(
+        plan,
+        summaries,
+        dict.fromkeys(labels, backdrop_png),
+        width=WIDTH * 2,
+        height=HEIGHT * 2,
+        title=MATCH,
+        theme=theme,
+        rasterizer=rasterizer,
+    )
+    return still.resize((WIDTH, HEIGHT), Image.Resampling.LANCZOS)
 
 
 def _overlay(backdrop: Image.Image, *, rasterizer: Rasterizer, theme: OverlayTheme) -> Image.Image:
@@ -415,6 +477,7 @@ def build_thumbnails(
                 backdrop=backdrop_png,
             ),
         )
+        save("match-summary-grid.png", _match_summary_grid(backdrop_png, rasterizer=rasterizer, theme=theme))
         save("overlay.png", _overlay(plain, rasterizer=rasterizer, theme=theme))
         for kind in TRANSITION_KINDS:
             save(f"transition-{kind}.png", _transition(kind, plain, rasterizer=rasterizer, look=look))

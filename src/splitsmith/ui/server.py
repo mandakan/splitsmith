@@ -3076,6 +3076,7 @@ def _run_compare_grid(
             free_cell=req.free_cell,
             match_name=match.name or "",
             match_date=match.match_date.isoformat() if match.match_date else None,
+            match_summary_seconds=req.match_summary_seconds if req.match_summary else 0.0,
         )
 
     youtube_files: list[Path] = []

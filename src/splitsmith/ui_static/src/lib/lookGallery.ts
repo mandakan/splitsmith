@@ -100,6 +100,14 @@ const titleSeconds: LookParam = {
   write: (s, n) => render(s, { titlePageDurationSeconds: n }),
 };
 
+const matchSummarySeconds: LookParam = {
+  id: "match-summary-seconds",
+  label: "Match summary seconds",
+  min: MIN_CARD_SECONDS,
+  read: (s) => s.renderOptions.matchSummarySeconds,
+  write: (s, n) => render(s, { matchSummarySeconds: n }),
+};
+
 const stageSeconds: LookParam = {
   id: "stage-seconds",
   label: "Stage card seconds",
@@ -222,22 +230,24 @@ export const LOOK_SLOTS: readonly LookSlot[] = [
     id: "matchSummary",
     label: "Match summary",
     variants: [
-      none("The video ends after the last stage.", ["single"], MP4),
+      none("The video ends after the last stage.", ALL_MODES, MP4),
       {
         id: "on",
         name: "Match summary",
         thumbnail: "match-summary.png",
         help: "After the last stage: match-wide figures and a row per stage.",
-        params: [
-          {
-            id: "match-summary-seconds",
-            label: "Match summary seconds",
-            min: MIN_CARD_SECONDS,
-            read: (s) => s.renderOptions.matchSummarySeconds,
-            write: (s, n) => render(s, { matchSummarySeconds: n }),
-          },
-        ],
+        params: [matchSummarySeconds],
         modes: ["single"],
+        formats: MP4,
+      },
+      // The grid's own card: one tile per shooter, so its own thumbnail.
+      {
+        id: "on",
+        name: "Match summary",
+        thumbnail: "match-summary-grid.png",
+        help: "After the last stage: each shooter's match figures in their own tile.",
+        params: [matchSummarySeconds],
+        modes: ["compare"],
         formats: MP4,
       },
     ],

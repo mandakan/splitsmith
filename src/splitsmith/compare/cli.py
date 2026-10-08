@@ -170,6 +170,17 @@ def export(
     transition_seconds: float = typer.Option(
         0.5, "--transition-seconds", help="Length of each transition, centred on the cut."
     ),
+    match_summary: bool = typer.Option(
+        False,
+        "--match-summary",
+        help=(
+            "End on a match summary card: every shooter's match figures in their own tile, "
+            "before any closing card. --format mp4 only."
+        ),
+    ),
+    match_summary_seconds: float = typer.Option(
+        6.0, "--match-summary-seconds", help="Seconds the match summary holds."
+    ),
 ) -> None:
     """Render a multi-shooter comparison FCPXML.
 
@@ -238,10 +249,17 @@ def export(
         raise typer.Exit(code=2)
     # Same rule as --overlay: the FCPXML grid ships clean tiles by decision,
     # and a card flag it would silently drop is refused by name instead.
-    if (titles != "none" or title_page or closing_card) and output_format != "mp4":
+    if (titles != "none" or title_page or closing_card or match_summary) and output_format != "mp4":
         console.print(
-            "[red]Error:[/] --titles, --title-page and --closing-card require --format mp4 -- "
-            "the FCPXML grid carries no generated cards, so they would silently do nothing."
+            "[red]Error:[/] --titles, --title-page, --closing-card and --match-summary require "
+            "--format mp4 -- the FCPXML grid carries no generated cards, so they would silently "
+            "do nothing."
+        )
+        raise typer.Exit(code=2)
+    if match_summary and not 0.5 <= match_summary_seconds <= 30.0:
+        console.print(
+            "[red]Error:[/] --match-summary-seconds must be between 0.5 and 30, "
+            f"got {match_summary_seconds:g}."
         )
         raise typer.Exit(code=2)
     # A hold with no overlay is a contradiction, not a no-op: the summary
@@ -300,6 +318,7 @@ def export(
                 closing_card=closing_card,
                 made_with=made_with,
                 card_variant=card_variant,
+                match_summary_seconds=match_summary_seconds if match_summary else 0.0,
             ),
         )
         return
@@ -628,6 +647,8 @@ def _render_grid_mp4(
                 card_variant=cards.card_variant,
                 identities=grid_identities(bundles, look=load_look(overlay_theme)),
                 transitions=uniform_transitions(transition, transition_seconds, len(plans)),
+                match_name=match.name if match is not None else "",
+                match_summary_seconds=cards.match_summary_seconds,
             )
         except mp4_grid.GridRenderError as exc:
             console.print(f"[red]Error:[/] {exc}")

@@ -333,7 +333,16 @@ template). It adds no chapter: YouTube drops every chapter when one is under
 ten seconds. The preview's ``match_summary`` card is built from every
 stage's audit by ``export_preview.match_summary_for`` and keyed by
 ``summary_digest``, since the preview's own key reads one stage's audit.
-The grid has none yet.
+The grid's (spec ``2026-10-08-grid-match-summary-design``) is a
+``GridCardItem`` of kind ``match_summary`` (``render_grid_mp4(
+match_summary_seconds=)``, 0 is off): a title strip over the grid, each
+shooter's tile declared by ``match_summary.match_summary_groups`` in the
+stage hold's bands and drawn by ``grid_html``, over their own tail frame on
+the last stage that has footage of them
+(``overlay_summary.extract_match_summary_freezes``). It reads
+``load_overlay_data`` itself, so it never needs the overlay; there is no
+ranking between shooters, as on the stage hold. The rail preview cannot draw
+it (the route previews one shooter), so the pane shows its gallery thumbnail.
 
 The closing card ends with **"Made with splitsmith"** unless turned off
 (``MatchTitle.credit``, drawn by ``_shared/credit.js`` from ``data.credit``,

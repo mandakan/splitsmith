@@ -48,7 +48,8 @@ function genericFor(
   if (!focus) return null;
   const variant = slotsForLook(looks, settings, transitions)
     .find((s) => s.id === focus.slotId)
-    ?.variants.find((v) => v.id === focus.variantId);
+    // A slot can name one variant id per mode (the match summary's grid tile).
+    ?.variants.find((v) => v.id === focus.variantId && v.modes.includes(settings.mode));
   if (!variant) return null;
   return previewSrc(variant.previewUrl ?? null) ?? thumbnailUrl(variant.thumbnail);
 }
@@ -75,7 +76,7 @@ export function PreviewPane({
   const { mode } = useDeploymentMode();
   const urlRef = useRef<string | null>(null);
 
-  const card = previewCardFor(focus);
+  const card = previewCardFor(focus, settings.mode);
   // One string so the effect re-runs only when the request would differ.
   const requestKey = useMemo(
     () =>

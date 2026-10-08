@@ -153,7 +153,8 @@ export function matchExportFields(
 }
 
 /** The request-body fields for the compare grid, which is always a
- *  rendered MP4. The summary hold is not the grid's (#705). */
+ *  rendered MP4. The summary hold is not the grid's (#705); the match
+ *  summary is, as a tile per shooter. */
 export function gridExportFields(
   options: RenderOptions,
   /** The resolved Look choice (#1246); omitted, no variant field is sent. */
@@ -168,6 +169,8 @@ export function gridExportFields(
   | "title_page_duration_seconds"
   | "closing_card"
   | "made_with"
+  | "match_summary"
+  | "match_summary_seconds"
   | "title_page_variant"
   | "stage_card_variant"
   | "closing_card_variant"
@@ -181,6 +184,8 @@ export function gridExportFields(
     title_page_duration_seconds: clampSeconds(options.titlePageDurationSeconds, MIN_CARD_SECONDS),
     closing_card: options.closingCard,
     made_with: options.madeWith,
+    match_summary: options.matchSummary,
+    match_summary_seconds: clampSeconds(options.matchSummarySeconds, MIN_CARD_SECONDS),
     ...variantFields(look, ["title_page_variant", "stage_card_variant", "closing_card_variant"]),
   };
 }
@@ -236,14 +241,14 @@ export function describeRenderOptions(
   if (cards && surface === "single" && options.summaryHoldSeconds > 0) {
     parts.push(`summary ${clampSeconds(options.summaryHoldSeconds, 0)} s`);
   }
-  if (cards && surface === "single" && options.matchSummary) parts.push("match summary");
+  if (cards && options.matchSummary) parts.push("match summary");
   if (cards && options.closingCard) parts.push("closing");
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
 /** Seconds the cards add to a timeline of `stageCount` stages: a slate
- *  per stage, the title page, the closing card and, on the single-
- *  shooter export, one summary hold per stage. A lower-third rides the
+ *  per stage, the title page, the match summary, the closing card and, on
+ *  the single-shooter export, one summary hold per stage. A lower-third rides the
  *  stage's own head and adds nothing. Mirrors what the two renderers
  *  put on the spine; the estimate is a status line, not a promise. */
 export function renderOptionsSeconds(
@@ -262,8 +267,6 @@ export function renderOptionsSeconds(
   if (options.titlePage) seconds += titleSeconds;
   if (options.closingCard) seconds += titleSeconds;
   if (surface === "single") seconds += clampSeconds(options.summaryHoldSeconds, 0) * stageCount;
-  if (surface === "single" && options.matchSummary) {
-    seconds += clampSeconds(options.matchSummarySeconds, MIN_CARD_SECONDS);
-  }
+  if (options.matchSummary) seconds += clampSeconds(options.matchSummarySeconds, MIN_CARD_SECONDS);
   return seconds;
 }

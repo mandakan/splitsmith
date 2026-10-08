@@ -16,9 +16,10 @@ A tile, as bands like the stage summary hold's:
 - Name row: the shooter's name, a `DQ` plate when they were DQ'd on any stage.
 - **Scoring**: A, C, D, M, NS, P summed over the stages that reported each count
   (an unreported count is left out, never 0), colour-coded and plated as the
-  stage hold's counts are; then "Scored N of M" when not every stage was.
-- **Splits**: Avg split, Best draw, Rounds; then "Splits from N of M" when not
-  every stage had splits.
+  stage hold's counts are. "(N of M stages)" beside the band's label when not
+  every stage was scored.
+- **Splits**: Avg split, Best draw, Rounds, all three or none ("-" for one
+  never read, so every tile's columns line up), with the same note.
 
 The figures are `match_summary.build_match_summary` per shooter, over that
 shooter's `TileStageData` on every rendered stage (a stage with none counts as
@@ -28,8 +29,8 @@ splits are never dropped.
 
 ## How it is drawn
 
-- `overlay_summary_cell.match_summary_groups(summary, label, ...)` declares the
-  tile, beside `summary_groups`; `overlay_html.grid_html` draws it, so the fit
+- `match_summary.match_summary_groups(summary, label, ...)` declares the tile
+  in `summary_groups`' bands; `overlay_html.grid_html` draws it, so the fit
   policy, the per-cell clip and the identity accent come with it.
 - The cells sit in a geometry `rows x cols` over the composed height less the
   strip (`strip = H - rows * ((H - H // 10) // rows)`), pasted below the strip.
@@ -47,9 +48,10 @@ splits are never dropped.
 `match_summary: bool = False` and `match_summary_seconds: float = 6.0` (0.5 to 30)
 on `render_grid_mp4`, the compare grid request, the grid job, `compare export`
 (`--match-summary`, `--match-summary-seconds`). The preset already carries both.
-The gallery tile is shown in grid mode with its own grid thumbnail. The grid has
-no rail preview for any card, so none here. The What's new entry is edited, not
-duplicated.
+The gallery tile is shown in grid mode with its own grid thumbnail. The
+rail preview previews one shooter, so in grid mode the match summary tile shows
+its gallery thumbnail there instead of a render. The What's new entry is edited,
+not duplicated.
 
 ## Tests
 

@@ -114,8 +114,13 @@ def test_writes_every_thumbnail_at_the_gallery_size(tmp_path: Path) -> None:
         with Image.open(path) as im:
             assert im.size == (mod.WIDTH, mod.HEIGHT), path.name
             assert im.mode in ("RGB", "RGBA"), path.name
-    # Every text card went through the rasterizer at the tile size.
-    assert raster.calls and all(c == (mod.WIDTH, mod.HEIGHT) for c in raster.calls)
+    # Every text card went through the rasterizer at the tile size, but the
+    # grid's match summary: two renders stacked (its title strip and the
+    # cells below it) at twice the tile, scaled down to it.
+    assert raster.calls
+    parts = [c for c in raster.calls if c != (mod.WIDTH, mod.HEIGHT)]
+    assert len(parts) == 2 and all(w == 2 * mod.WIDTH for w, _h in parts)
+    assert sum(h for _w, h in parts) == 2 * mod.HEIGHT
 
 
 def test_file_set_matches_the_registry() -> None:

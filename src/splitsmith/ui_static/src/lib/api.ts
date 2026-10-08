@@ -1483,6 +1483,9 @@ export interface CompareGridRequestPayload {
   closing_card?: boolean;
   /** "Made with splitsmith" on the closing card. Server default on. */
   made_with?: boolean;
+  /** Every shooter's match figures in their own tile before the closing card. */
+  match_summary?: boolean;
+  match_summary_seconds?: number;
   stage_titles?: "none" | "slate" | "lower-third";
   title_duration_seconds?: number;
   /** Issue #705. The splits overlay (per-tile counter and split, the

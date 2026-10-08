@@ -126,6 +126,8 @@ describe("export wrappers forward every declared field", () => {
       title_page_duration_seconds: 3,
       closing_card: true,
       made_with: false,
+      match_summary: true,
+      match_summary_seconds: 7,
       stage_titles: "slate",
       title_duration_seconds: 1.5,
       overlay: true,

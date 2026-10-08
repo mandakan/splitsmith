@@ -53,6 +53,7 @@ from pathlib import Path
 
 from PIL import Image
 
+from ..match_summary import MatchSummary, build_match_summary, match_summary_groups, match_summary_strip_html
 from ..overlay_html import grid_html
 from ..overlay_layout import CellScale, Group
 from ..overlay_raster import Rasterizer
@@ -65,7 +66,6 @@ from ..overlay_still import DEFAULT_DIM
 from ..overlay_still import apply_blur as _apply_blur
 from ..overlay_still import dim as _dim
 from ..overlay_still import letterbox as _letterbox
-from ..match_summary import MatchSummary, build_match_summary, match_summary_groups, match_summary_strip_html
 from ..overlay_summary_cell import count_elements, summary_groups, summary_scale, time_text_for
 from ..overlay_theme import OverlayTheme
 from .mp4_grid import GridStagePlan, Runner
@@ -598,7 +598,9 @@ def build_match_summary_grid_still(
     drawn by ``grid_html`` like the stage hold. No browser, or a failed
     rasterization: the frames alone (logged), as the hold degrades."""
     strip = match_summary_strip_height(height, plan.rows)
-    geometry = SpriteGeometry(canvas_width=width, canvas_height=height - strip, rows=plan.rows, cols=plan.cols)
+    geometry = SpriteGeometry(
+        canvas_width=width, canvas_height=height - strip, rows=plan.rows, cols=plan.cols
+    )
     radius = max(8, geometry.cell_height // 60)
     grid = Image.new("RGBA", (geometry.canvas_width, geometry.canvas_height), (0, 0, 0, 255))
     # Every shooter is in the match, footage on the last stage or not.
@@ -619,15 +621,17 @@ def build_match_summary_grid_still(
         cells: list[tuple[TilePlacement, tuple[Group, ...]]] = [
             (
                 placement,
-                match_summary_groups(
-                    summaries[placement.label],
-                    placement.label,
-                    scale=scale,
-                    cell_width=geometry.cell_width,
-                    cell_height=geometry.cell_height,
-                )
-                if placement.label in summaries
-                else (),
+                (
+                    match_summary_groups(
+                        summaries[placement.label],
+                        placement.label,
+                        scale=scale,
+                        cell_width=geometry.cell_width,
+                        cell_height=geometry.cell_height,
+                    )
+                    if placement.label in summaries
+                    else ()
+                ),
             )
             for placement in placements
         ]
@@ -642,7 +646,10 @@ def build_match_summary_grid_still(
                 width=width,
                 height=strip,
             )
-            with Image.open(io.BytesIO(cells_png)) as cells_image, Image.open(io.BytesIO(strip_png)) as strip_image:
+            with (
+                Image.open(io.BytesIO(cells_png)) as cells_image,
+                Image.open(io.BytesIO(strip_png)) as strip_image,
+            ):
                 grid.alpha_composite(cells_image.convert("RGBA"))
                 canvas.alpha_composite(strip_image.convert("RGBA"))
         except Exception as exc:  # noqa: BLE001 -- the frames alone are still a card

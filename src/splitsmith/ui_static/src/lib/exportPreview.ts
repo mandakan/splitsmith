@@ -4,6 +4,7 @@
  * the one line per failure. Pure; ``PreviewPane`` does the fetching.
  */
 import type { ExportPreviewBody, LookInfo, PreviewCard } from "@/lib/api";
+import type { ExportMode } from "@/lib/exportPlan";
 import { PADDING_PRESETS, type ExportSettings } from "@/lib/exportPresets";
 import { LOOK_SLOTS, type LookSlot, type LookSlotId } from "@/lib/lookGallery";
 import { BUILTIN_LOOKS, DEFAULT_LOOK, DEFAULT_VARIANT, lookChoiceOf, nonDefault, resolveLookChoice, type LookChoice } from "@/lib/looks";
@@ -16,8 +17,10 @@ export interface LookFocus {
 export const PREVIEW_WIDTH = 960;
 
 /** The server card for a tile; the frame for an off tile or no tile;
- *  null where only the generic thumbnail can show (transitions). */
-export function previewCardFor(focus: LookFocus | null): PreviewCard | null {
+ *  null where only the generic thumbnail can show (transitions, and the
+ *  grid's match summary, which the preview route cannot draw: it previews
+ *  one shooter, and the grid's card is a tile per shooter). */
+export function previewCardFor(focus: LookFocus | null, mode: ExportMode = "single"): PreviewCard | null {
   if (focus === null) return "frame";
   // The Look tiles (#1246) are not in the static table: a Look previews
   // as the title page in the chosen Look.
@@ -38,7 +41,7 @@ export function previewCardFor(focus: LookFocus | null): PreviewCard | null {
     case "summaryHold":
       return "summary";
     case "matchSummary":
-      return "match_summary";
+      return mode === "compare" ? null : "match_summary";
     case "overlay":
       return "overlay";
   }
