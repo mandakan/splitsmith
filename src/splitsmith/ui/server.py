@@ -293,6 +293,7 @@ from .identity_media import (
     ensure_local_logo,
     event_logo_storage_key,
     grid_identities,
+    identity_source,
     resolved_identity_for,
 )
 from .job_journal import JobJournal, default_journal_path, resume_journaled_jobs
@@ -6363,10 +6364,13 @@ class CameraModelRequest(BaseModel):
 
 class ShooterIdentityRequest(BaseModel):
     """Body for PATCH /api/shooters/{slug}/identity (#1243). Only the keys
-    sent are applied; ``null`` clears one. The logo has its own routes."""
+    sent are applied; ``null`` clears one. The logo has its own routes.
+    ``scope`` (spec 2026-10-08): ``book`` also saves the result to the
+    shooter book under the shooter's SSI id; ``match`` keeps it here only."""
 
     accent: str | None = None
     club: str | None = None
+    scope: Literal["book", "match"] = "book"
 
 
 class CompareCameraRequest(BaseModel):
@@ -13153,6 +13157,57 @@ def create_app(
         except FileNotFoundError:
             pass
 
+    async def _save_to_book(project: MatchProject, slug: str) -> None:
+        """Write the shooter's identity to the shooter book under their SSI
+        id (spec 2026-10-08): the whole record, the logo copied into the
+        book's own files (same content name); an identity that sets nothing
+        removes the entry. No SSI id, nothing: the book never keys by name."""
+        sid = project.selected_shooter_id
+        if sid is None:
+            return
+        logo_bytes: bytes | None = None
+        if project.identity.logo is not None:
+            local = ensure_local_logo(project, state.shooter_root(slug))
+            try:
+                logo_bytes = local.read_bytes() if local is not None else None
+            except OSError as exc:
+                logger.warning("shooter book: could not read %s's logo (%s); saved without it", slug, exc)
+        await shooter_book_module.save_identity(
+            state.shooter_book,
+            shooter_id=sid,
+            identity=project.identity,
+            label=project.competitor_name or project.name,
+            logo_bytes=logo_bytes,
+        )
+
+    def _identity_view(project: MatchProject) -> dict[str, Any]:
+        """The identity sheet's view: where the look comes from and what it is."""
+        book = shooter_book_module.load_snapshot(state.shooter_book)
+        source = identity_source(project, book)
+        effective = project.identity if source != "book" else book.get(project.selected_shooter_id)
+        return {
+            "source": source,
+            "identity": (effective or ShooterIdentity()).model_dump(mode="json"),
+            "shooter_id": project.selected_shooter_id,
+        }
+
+    @app.get("/api/shooters/{slug}/identity")
+    def get_shooter_identity(slug: str) -> JSONResponse:
+        """Where this shooter's look comes from (``match``, ``book`` or
+        ``none``) and the identity a render draws for them."""
+        return JSONResponse(_identity_view(state.shooter_project(slug)))
+
+    @app.post("/api/shooters/{slug}/identity/use-book")
+    def use_shooter_book(slug: str) -> JSONResponse:
+        """Drop this match's own record so the shooter book applies again.
+        The book is not touched."""
+        project = state.shooter_project(slug)
+        previous = project.identity.logo
+        project.identity = ShooterIdentity()
+        project.save(state.shooter_root(slug))
+        _remove_local_logo(slug, previous)
+        return JSONResponse(_identity_view(project))
+
     @app.patch("/api/shooters/{slug}/identity")
     def set_shooter_identity(slug: str, req: ShooterIdentityRequest) -> JSONResponse:
         """Set the shooter's accent and club line (#1243). Validated by the
@@ -13170,10 +13225,14 @@ def create_app(
         except ValidationError as exc:
             raise HTTPException(status_code=422, detail=exc.errors()[0]["msg"]) from exc
         project.save(state.shooter_root(slug))
+        if req.scope == "book":
+            run_sync(_save_to_book(project, slug))
         return JSONResponse(project.model_dump(mode="json"))
 
     @app.post("/api/shooters/{slug}/identity/logo")
-    async def upload_shooter_logo(slug: str, file: UploadFile = File(...)) -> JSONResponse:
+    async def upload_shooter_logo(
+        slug: str, file: UploadFile = File(...), scope: Literal["book", "match"] = Form("book")
+    ) -> JSONResponse:
         """Store the shooter's logo (#1243): a PNG, JPEG or WebP of at most
         ``LOGO_MAX_BYTES``, content-named under ``<shooter>/identity/``
         (hosted: under the project's storage scope as well, which is the
@@ -13209,13 +13268,15 @@ def create_app(
         logo_dir.mkdir(parents=True, exist_ok=True)
         (logo_dir / name).write_bytes(data)
         storage = project._storage  # type: ignore[attr-defined]
-        scope = project._storage_scope  # type: ignore[attr-defined]
-        if storage is not None and scope is not None:
-            storage.write_bytes(f"{scope}/{LOGO_DIR}/{name}", data)
+        storage_scope = project._storage_scope  # type: ignore[attr-defined]
+        if storage is not None and storage_scope is not None:
+            storage.write_bytes(f"{storage_scope}/{LOGO_DIR}/{name}", data)
         project.identity = project.identity.model_copy(update={"logo": name})
         project.save(state.shooter_root(slug))
         if previous != name:
             _remove_local_logo(slug, previous)
+        if scope == "book":
+            await _save_to_book(project, slug)
         return JSONResponse(project.model_dump(mode="json"))
 
     @app.get("/api/shooters/{slug}/identity/logo")
@@ -13241,7 +13302,7 @@ def create_app(
         )
 
     @app.delete("/api/shooters/{slug}/identity/logo")
-    def remove_shooter_logo(slug: str) -> JSONResponse:
+    def remove_shooter_logo(slug: str, scope: Literal["book", "match"] = "book") -> JSONResponse:
         """Clear the shooter's logo (#1243) and remove the local file; a
         hosted copy is swept by the next push's gc."""
         project = state.shooter_project(slug)
@@ -13249,6 +13310,8 @@ def create_app(
         project.identity = project.identity.model_copy(update={"logo": None})
         project.save(state.shooter_root(slug))
         _remove_local_logo(slug, previous)
+        if scope == "book":
+            run_sync(_save_to_book(project, slug))
         return JSONResponse(project.model_dump(mode="json"))
 
     # --- the event's logo (the branding work) -------------------------------

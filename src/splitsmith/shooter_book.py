@@ -121,6 +121,36 @@ class ShooterBookStore(Protocol):
     async def snapshot(self) -> BookSnapshot: ...
 
 
+async def save_identity(
+    store: ShooterBookStore,
+    *,
+    shooter_id: int,
+    identity: ShooterIdentity,
+    label: str | None,
+    logo_bytes: bytes | None,
+) -> None:
+    """Write a shooter's whole identity to the book (spec 2026-10-08): the
+    logo stored in the book's own files from ``logo_bytes`` (same content
+    name as the match's); an identity that sets nothing removes the entry.
+    A logo that cannot be stored is left out, logged; the rest is saved."""
+    if not is_set(identity):
+        await store.delete(shooter_id)
+        return
+    logo = None
+    if identity.logo is not None and logo_bytes is not None:
+        try:
+            logo = await store.put_logo(logo_bytes)
+        except ValueError as exc:
+            logger.warning("shooter book: the logo for %s was not saved (%s)", shooter_id, exc)
+    await store.put(
+        ShooterBookEntry(
+            shooter_id=shooter_id,
+            identity=identity.model_copy(update={"logo": logo}),
+            label=(label or "")[:LABEL_MAX] or None,
+        )
+    )
+
+
 def load_snapshot(store: ShooterBookStore | None) -> BookSnapshot:
     """The book for one export, from sync code (a job thread, a CLI). A store
     that fails to read is an empty book, logged: a render never fails on it."""
@@ -270,4 +300,5 @@ __all__ = [
     "identity_digest",
     "is_set",
     "load_snapshot",
+    "save_identity",
 ]
