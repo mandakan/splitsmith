@@ -48,11 +48,12 @@ from __future__ import annotations
 import io
 import logging
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from PIL import Image
 
+from ..match_summary import MatchSummary, build_match_summary, match_summary_groups, match_summary_strip_html
 from ..overlay_html import grid_html
 from ..overlay_layout import CellScale, Group
 from ..overlay_raster import Rasterizer
@@ -513,3 +514,156 @@ def write_hold_still(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     still.save(out_path)
     return out_path
+
+
+def match_summary_strip_height(height: int, rows: int) -> int:
+    """The grid match summary's title strip: about a tenth of the frame,
+    whatever is left once the cells below it divide evenly into ``rows``."""
+    return height - rows * ((height - height // 10) // rows)
+
+
+def match_summary_cell_scale(geometry: SpriteGeometry) -> CellScale:
+    """The type scale of a match summary tile: the stage hold's, but for a
+    cell no taller than 16:9 of its width. A 2-up grid's cells are nearly
+    square, and sizing their figures by height alone ran three split columns
+    into each other; every wider cell (2x2 and up) is unchanged."""
+    return _summary_scale(min(geometry.cell_height, geometry.cell_width * 9 // 16))
+
+
+def grid_match_summaries(
+    plans: Sequence[GridStagePlan],
+    data: Mapping[tuple[str, int], TileStageData],
+    *,
+    title: str,
+    duration_seconds: float,
+) -> dict[str, MatchSummary]:
+    """Each shooter's match figures over every rendered stage, keyed by
+    label. A stage with no data for a shooter still counts as a stage, so
+    "N of M stages" has the same M for everyone."""
+    labels = [tile.label for tile in plans[0].tiles] if plans else []
+    return {
+        label: build_match_summary(
+            [
+                (
+                    plan.stage_name,
+                    data.get((label, plan.stage_number))
+                    or TileStageData(label=label, stage_number=plan.stage_number),
+                )
+                for plan in plans
+            ],
+            title=title,
+            label=label,
+            duration_seconds=duration_seconds,
+        )
+        for label in labels
+    }
+
+
+def extract_match_summary_freezes(
+    plans: Sequence[GridStagePlan],
+    *,
+    work_dir: Path,
+    ffmpeg_binary: str,
+    runner: Runner,
+) -> dict[str, Path]:
+    """Each shooter's backdrop for the match summary: their tile's last frame
+    on the last rendered stage that has footage of them. A shooter with no
+    footage anywhere has none (a black cell)."""
+    latest: dict[str, int] = {}
+    for index, plan in enumerate(plans):
+        for tile in plan.tiles:
+            if tile.trim_path is not None:
+                latest[tile.label] = index
+    freezes: dict[str, Path] = {}
+    for index in sorted(set(latest.values())):
+        plan = plans[index]
+        wanted = tuple(t for t in plan.tiles if latest.get(t.label) == index)
+        freezes.update(
+            extract_freeze_frames(
+                replace(plan, tiles=wanted), work_dir=work_dir, ffmpeg_binary=ffmpeg_binary, runner=runner
+            )
+        )
+    return freezes
+
+
+def build_match_summary_grid_still(
+    plan: GridStagePlan,
+    summaries: Mapping[str, MatchSummary],
+    freezes: Mapping[str, Path],
+    *,
+    width: int,
+    height: int,
+    title: str,
+    theme: OverlayTheme,
+    rasterizer: Rasterizer | None,
+    accents: Mapping[str, str] | None = None,
+    dim: float = DEFAULT_DIM,
+) -> Image.Image:
+    """The grid's match summary (spec 2026-10-08-grid-match-summary-design)
+    as a ``width x height`` RGB still: the title strip, then every shooter in
+    their slot of ``plan``'s grid over their own blurred freeze, their tile
+    declared by :func:`splitsmith.match_summary.match_summary_groups` and
+    drawn by ``grid_html`` like the stage hold. No browser, or a failed
+    rasterization: the frames alone (logged), as the hold degrades."""
+    strip = match_summary_strip_height(height, plan.rows)
+    geometry = SpriteGeometry(
+        canvas_width=width, canvas_height=height - strip, rows=plan.rows, cols=plan.cols
+    )
+    radius = max(8, geometry.cell_height // 60)
+    grid = Image.new("RGBA", (geometry.canvas_width, geometry.canvas_height), (0, 0, 0, 255))
+    # Every shooter is in the match, footage on the last stage or not.
+    placements = tuple(replace(p, present=True) for p in _placements_for_plan(plan, accents))
+    for placement in placements:
+        freeze_path = freezes.get(placement.label)
+        if freeze_path is None:
+            continue
+        cell_image = _prepare_cell(freeze_path, geometry, radius=radius, dim=dim)
+        if cell_image is not None:
+            grid.paste(
+                cell_image.convert("RGBA"),
+                (placement.col * geometry.cell_width, placement.row * geometry.cell_height),
+            )
+    canvas = Image.new("RGBA", (width, height), (0, 0, 0, 255))
+    if rasterizer is not None:
+        scale = match_summary_cell_scale(geometry)
+        cells: list[tuple[TilePlacement, tuple[Group, ...]]] = [
+            (
+                placement,
+                (
+                    match_summary_groups(
+                        summaries[placement.label],
+                        placement.label,
+                        scale=scale,
+                        cell_width=geometry.cell_width,
+                        cell_height=geometry.cell_height,
+                    )
+                    if placement.label in summaries
+                    else ()
+                ),
+            )
+            for placement in placements
+        ]
+        try:
+            cells_png = rasterizer.png(
+                grid_html(cells, geometry=geometry, scale=scale, theme=theme),
+                width=geometry.canvas_width,
+                height=geometry.canvas_height,
+            )
+            strip_png = rasterizer.png(
+                match_summary_strip_html(title, width=width, height=strip, theme=theme),
+                width=width,
+                height=strip,
+            )
+            with (
+                Image.open(io.BytesIO(cells_png)) as cells_image,
+                Image.open(io.BytesIO(strip_png)) as strip_image,
+            ):
+                grid.alpha_composite(cells_image.convert("RGBA"))
+                canvas.alpha_composite(strip_image.convert("RGBA"))
+        except Exception as exc:  # noqa: BLE001 -- the frames alone are still a card
+            logger.warning(
+                "compare grid: could not rasterize the match summary (%s); the still composes without text",
+                exc,
+            )
+    canvas.paste(grid, (0, strip))
+    return canvas.convert("RGB")

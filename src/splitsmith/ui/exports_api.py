@@ -275,6 +275,10 @@ class CompareGridRequest(BaseModel):
     closing_card_variant: str | None = None
     stage_titles: Literal["none", "slate", "lower-third"] = "none"
     title_duration_seconds: float = 1.5
+    #: Every shooter's match figures in their own tile, after the last
+    #: stage and before the closing card (spec 2026-10-08).
+    match_summary: bool = False
+    match_summary_seconds: float = Field(6.0, ge=0.5, le=30)
     # Issue #1244: one transition between every pair of stages, the same
     # kinds the single-shooter MP4 draws; the grid renders them on its own
     # boundary segments.

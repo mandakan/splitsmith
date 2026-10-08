@@ -129,6 +129,7 @@ def _moments(
     slate_seconds: float = 0.0,
     closing_seconds: float = 0.0,
     transition_seconds: float = 0.0,
+    match_summary_seconds: float = 0.0,
 ) -> list[tuple[int, Moment]]:
     """Every ``(stage number, moment)`` the render should be sampled at.
 
@@ -262,6 +263,10 @@ def _moments(
                     ),
                 )
             )
+    match_summary_frames = round(match_summary_seconds * fps)
+    if match_summary_frames:
+        out.append((stages, Moment("match-summary", pos + match_summary_frames // 2, "the match summary")))
+        pos += match_summary_frames
     if closing_frames:
         out.append((stages, Moment("closing", pos + closing_frames // 2, "the closing card")))
     return out
@@ -468,6 +473,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--title-page", action="store_true", help="open with a generated match title card")
     parser.add_argument("--closing-card", action="store_true", help="close with a generated card")
+    parser.add_argument(
+        "--match-summary",
+        type=float,
+        default=0.0,
+        metavar="SECONDS",
+        help="end on the match summary card for this long, before any closing card",
+    )
     parser.add_argument("--card-variant", default="default", help="Look template variant for every card")
     parser.add_argument(
         "--transition",
@@ -579,6 +591,8 @@ def main(argv: list[str] | None = None) -> int:
         stage_titles=args.titles,
         title_duration_seconds=SLATE_SECONDS,
         card_variant=args.card_variant,
+        match_name="Bromma Classifier",
+        match_summary_seconds=args.match_summary,
         # Through the production resolver either way, so the default frames
         # are what an export draws for shooters who set nothing; the demo
         # opts into the Look's slot series and a shared generated logo.
@@ -599,6 +613,7 @@ def main(argv: list[str] | None = None) -> int:
         slate_seconds=SLATE_SECONDS if args.titles == "slate" else 0.0,
         closing_seconds=CLOSING_SECONDS if args.closing_card else 0.0,
         transition_seconds=args.transition_seconds if args.transition != "none" else 0.0,
+        match_summary_seconds=args.match_summary,
     )
     written = 0
     for stage, moment in moments:

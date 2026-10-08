@@ -39,6 +39,8 @@ class CardOptions:
     card_variant: str = "default"
     title_page_variant: str | None = None
     closing_card_variant: str | None = None
+    #: Seconds of the match summary card before the closing card; 0 is off.
+    match_summary_seconds: float = 0.0
 
 
 def match_title(match: Match, *, extra: str | None = None, roster: tuple[str, ...] = ()) -> MatchTitle:

@@ -219,8 +219,23 @@ describe("visibility, pinned to the rules the render panel applied", () => {
     expect(ids("single", "fcp7xml")).toEqual(["overlay"]);
   });
 
-  it("compare offers the match cards, the stage card, the grid overlay and the transition, never the hold", () => {
-    expect(ids("compare", "mp4")).toEqual(["titlePage", "stageCard", "closingCard", "overlay", "transition"]);
+  it("compare offers the match cards, the stage card, the match summary, the grid overlay and the transition, never the hold", () => {
+    expect(ids("compare", "mp4")).toEqual([
+      "titlePage",
+      "stageCard",
+      "closingCard",
+      "matchSummary",
+      "overlay",
+      "transition",
+    ]);
+    // The grid's tile has its own thumbnail: a tile per shooter.
+    const slot = visibleSlots("compare", "mp4", slotsForLook(BUILTIN_LOOKS, DEFAULT_EXPORT_SETTINGS, FAMILIES)).find(
+      (s) => s.id === "matchSummary",
+    );
+    expect(visibleVariants(slot!, "compare", "mp4").map((v) => v.thumbnail)).toEqual([
+      "none.png",
+      "match-summary-grid.png",
+    ]);
     expect(visibleTransitionKind("fade", "mp4", "compare", FAMILY_KINDS)).toBe("fade");
     expect(visibleTransitionKind("zoom", "mp4", "compare")).toBe("none");
   });

@@ -100,6 +100,8 @@ describe("gridExportFields", () => {
       title_page_duration_seconds: 4,
       closing_card: true,
       made_with: false,
+      match_summary: true,
+      match_summary_seconds: 0.5,
     });
     expect("summary_hold_seconds" in fields).toBe(false);
     expect("title_kind" in fields).toBe(false);
@@ -137,7 +139,7 @@ describe("describeRenderOptions", () => {
   it("names what is on in render order and nothing the format cannot draw", () => {
     expect(describeRenderOptions(DEFAULT_RENDER_OPTIONS, "single", "mp4")).toBeNull();
     expect(describeRenderOptions(ON, "single", "mp4")).toBe("title page · slate · summary 3 s · match summary · closing");
-    expect(describeRenderOptions(ON, "grid", "mp4")).toBe("title page · slate · closing");
+    expect(describeRenderOptions(ON, "grid", "mp4")).toBe("title page · slate · match summary · closing");
     expect(describeRenderOptions(ON, "single", "fcpxml")).toBe("slate");
     expect(describeRenderOptions(ON, "single", "fcp7xml")).toBeNull();
     expect(describeRenderOptions({ ...ON, stageCardStyle: "lower-third" }, "single", "fcpxml")).toBe("lower third");
@@ -147,7 +149,7 @@ describe("describeRenderOptions", () => {
 describe("renderOptionsSeconds", () => {
   it("adds a slate per stage, the match cards once each, a summary per stage and the match summary", () => {
     expect(renderOptionsSeconds(ON, 3, "single", "mp4")).toBe(3 * 2 + 4 + 4 + 3 * 3 + 0.5);
-    expect(renderOptionsSeconds(ON, 3, "grid", "mp4")).toBe(3 * 2 + 4 + 4);
+    expect(renderOptionsSeconds(ON, 3, "grid", "mp4")).toBe(3 * 2 + 4 + 4 + 0.5);
     expect(renderOptionsSeconds(ON, 3, "single", "fcpxml")).toBe(3 * 2);
     expect(renderOptionsSeconds(ON, 3, "single", "fcp7xml")).toBe(0);
     expect(renderOptionsSeconds(ON, 0, "single", "mp4")).toBe(0);
