@@ -142,6 +142,7 @@ from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
 from .. import __version__ as splitsmith_version
+from .. import account_profile as account_profile_module
 from .. import automation as automation_settings
 from .. import backup as backup_mod
 from .. import (
@@ -164,6 +165,7 @@ from .. import export_presets as export_presets_module
 from .. import look_store as look_store_module
 from .. import looks as looks_module
 from .. import models as model_layer
+from .. import shooter_book as shooter_book_module
 from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy monkeypatch points)
 from .. import thumbnail as thumbnail_helpers
 from .. import trim as trim_module
@@ -1788,6 +1790,11 @@ class TenantContext:
     # local mode, where ``youtube_api`` reads the file under the user
     # config dir instead.
     youtube: PostgresYouTubeConnectionStore | None = None
+    # The account's shooter book and profile (spec 2026-10-08). Hosted builds
+    # one per tenant; ``AppState`` never falls back to the local files for a
+    # hosted request, so a container's own disk is never read as an account.
+    shooter_book: shooter_book_module.ShooterBookStore | None = None
+    account_profile: account_profile_module.AccountProfileStore | None = None
     # The desktop command queue (#1100): requests the phone makes for the
     # user's desktop to run. ``None`` in local mode; under the
     # ``tenant_isolation`` RLS policy, so the tenant factory is load-bearing.
@@ -1928,6 +1935,12 @@ class AppState:
     _whats_new: whats_new_module.WhatsNewStore = field(default_factory=whats_new_module.PrefsWhatsNewStore)
     _export_presets: export_presets_module.ExportPresetStore = field(
         default_factory=export_presets_module.JsonExportPresetStore
+    )
+    _shooter_book: shooter_book_module.ShooterBookStore = field(
+        default_factory=shooter_book_module.JsonShooterBookStore
+    )
+    _account_profile: account_profile_module.AccountProfileStore = field(
+        default_factory=account_profile_module.JsonAccountProfileStore
     )
     # Hosted-mode factory: build a :class:`TenantContext` for a ``user_id``.
     # ``None`` in local mode. Set by ``_apply_hosted_mode_wiring``; called
@@ -2141,6 +2154,26 @@ class AppState:
     @scoreboard_identity.setter
     def scoreboard_identity(self, value: user_config.ScoreboardIdentityStore) -> None:
         self._scoreboard_identity = value
+
+    @property
+    def shooter_book(self) -> shooter_book_module.ShooterBookStore:
+        """The account's shooter book: the tenant's hosted, the local files
+        locally, and an empty one for a hosted request with no tenant."""
+        tenant = current_tenant.get()
+        if tenant is not None:
+            return tenant.shooter_book or shooter_book_module.EmptyShooterBookStore()
+        if self._build_tenant is not None:
+            return shooter_book_module.EmptyShooterBookStore()
+        return self._shooter_book
+
+    @property
+    def account_profile(self) -> account_profile_module.AccountProfileStore:
+        tenant = current_tenant.get()
+        if tenant is not None:
+            return tenant.account_profile or account_profile_module.EmptyAccountProfileStore()
+        if self._build_tenant is not None:
+            return account_profile_module.EmptyAccountProfileStore()
+        return self._account_profile
 
     @property
     def export_presets(self) -> export_presets_module.ExportPresetStore:
@@ -3066,7 +3099,13 @@ def _run_compare_grid(
             stage_titles=req.stage_titles,
             title_duration_seconds=req.title_duration_seconds,
             card_variant=req.stage_card_variant or req.card_variant,
-            identities=grid_identities(filtered, look=load_look(req.overlay_theme)),
+            identities=grid_identities(
+                filtered,
+                look=load_look(req.overlay_theme),
+                book=shooter_book_module.load_snapshot(
+                    state.shooter_book if state is not None else shooter_book_module.JsonShooterBookStore()
+                ),
+            ),
             transitions=uniform_transitions(req.transition_kind, req.transition_duration_seconds, len(plans)),
             overlay=req.overlay,
             overlay_theme=req.overlay_theme,
@@ -4709,6 +4748,7 @@ def register_job_bodies(state: AppState) -> None:
                     look=load_look(req.overlay_theme),
                     index=0,
                     label=proj.competitor_name or project_name,
+                    book=shooter_book_module.load_snapshot(state.shooter_book),
                 ),
             )
             try:

@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from ..looks import DEFAULT_LOOK, load_look
 from ..palette_sources import RGB, Swatch, average_colour, dominant_colours, logo_colours, stage_frames
 from ..runtime import runtime
+from ..shooter_book import load_snapshot
 from .identity_media import resolved_identity_for
 
 router = APIRouter()
@@ -43,7 +44,12 @@ def palette_sources(slug: str, req: PaletteSourcesRequest, request: Request) -> 
                 stage_frames(project, root, number, ffmpeg_binary=runtime().ffmpeg_binary, work=Path(work))
             )
     identity = resolved_identity_for(
-        project, root, look=load_look(DEFAULT_LOOK), index=0, label=project.competitor_name or project.name
+        project,
+        root,
+        look=load_look(DEFAULT_LOOK),
+        index=0,
+        label=project.competitor_name or project.name,
+        book=load_snapshot(state.shooter_book),
     )
     return PaletteSources(
         footage=dominant_colours(frames),

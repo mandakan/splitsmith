@@ -90,6 +90,15 @@ class BookSnapshot:
 EMPTY_BOOK = BookSnapshot()
 
 
+def identity_digest(identity: ShooterIdentity) -> str:
+    """A short content address for a book identity, for a cache key that the
+    project's own timestamp cannot move (a book edit touches no match)."""
+    import hashlib
+
+    payload = json.dumps(identity.model_dump(mode="json"), sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
 class ShooterBookStore(Protocol):
     async def list(self) -> list[ShooterBookEntry]: ...
 
@@ -258,6 +267,7 @@ __all__ = [
     "ShooterBookEntry",
     "ShooterBookStore",
     "account_dir",
+    "identity_digest",
     "is_set",
     "load_snapshot",
 ]

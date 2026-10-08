@@ -16,6 +16,7 @@ from ..export_naming import slugify
 from ..looks import load_look
 from ..match_model import Match, is_match_folder
 from ..overlay_theme import THEME_NAMES, ThemeName
+from ..shooter_book import JsonShooterBookStore, load_snapshot
 from ..ui.identity_media import ensure_local_event_logo, grid_identities
 from ..ui.match_exports import render_segment_cache
 from . import emitter as emitter_mod
@@ -645,7 +646,9 @@ def _render_grid_mp4(
                 stage_titles=cards.stage_titles,
                 title_duration_seconds=cards.title_duration_seconds,
                 card_variant=cards.card_variant,
-                identities=grid_identities(bundles, look=load_look(overlay_theme)),
+                identities=grid_identities(
+                    bundles, look=load_look(overlay_theme), book=load_snapshot(JsonShooterBookStore())
+                ),
                 transitions=uniform_transitions(transition, transition_seconds, len(plans)),
                 match_name=match.name if match is not None else "",
                 match_summary_seconds=cards.match_summary_seconds,

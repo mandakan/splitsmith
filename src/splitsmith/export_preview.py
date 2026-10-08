@@ -108,6 +108,10 @@ class PreviewSpec:
     #: Digest of the match summary the caller built from every stage's audit;
     #: the cache key's only view of the stages this request does not name.
     summary_digest: str | None = None
+    #: The shooter book identity the card draws, when it comes from the book
+    #: (``shooter_book.identity_digest``): a book edit touches no project, so
+    #: the project's timestamp cannot move the key. ``None`` keeps it as it was.
+    book_identity: str | None = None
     #: The event logo's content name (the branding work), for the cache key;
     #: the file itself reaches :func:`render_preview` as ``event_logo``.
     event_logo: str | None = None
@@ -168,6 +172,8 @@ def preview_key(
         fields["credit"] = True
     if spec.summary_digest is not None:
         fields["summary"] = spec.summary_digest
+    if spec.book_identity is not None:
+        fields["book_identity"] = spec.book_identity
     payload = json.dumps(
         {
             **fields,

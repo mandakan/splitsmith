@@ -562,6 +562,7 @@ def export(
     from .looks import load_look
     from .match_project import MatchProject
     from .mp4_render import RenderStep
+    from .shooter_book import JsonShooterBookStore, load_snapshot
     from .ui import match_exports
     from .ui.identity_media import ensure_local_event_logo, resolved_identity_for
 
@@ -714,7 +715,12 @@ def export(
         match_summary_seconds=match_summary_seconds,
         shooter_label=shooter_label,
         shooter_identity=resolved_identity_for(
-            project, shooter_root, look=load_look(overlay_theme), index=0, label=shooter_label or project_name
+            project,
+            shooter_root,
+            look=load_look(overlay_theme),
+            index=0,
+            label=shooter_label or project_name,
+            book=load_snapshot(JsonShooterBookStore()),
         ),
     )
     exports_dir = project.exports_path(shooter_root)
