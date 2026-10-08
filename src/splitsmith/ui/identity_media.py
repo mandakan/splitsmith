@@ -16,11 +16,13 @@ import shutil
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
+from typing import Literal
 
 from ..identity import EVENT_LOGO_DIR, LOGO_DIR, ResolvedIdentity, resolve_identity
 from ..looks import Look
 from ..match_model import MatchBranding
 from ..match_project import MatchProject
+from ..shooter_book import EMPTY_BOOK, BookSnapshot, is_set
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +68,20 @@ def ensure_local_logo(project: MatchProject, shooter_root: Path) -> Path | None:
         return None
 
 
+IdentitySource = Literal["match", "book", "none"]
+
+
+def identity_source(project: MatchProject, book: BookSnapshot = EMPTY_BOOK) -> IdentitySource:
+    """Where a shooter's look comes from (spec 2026-10-08): the match's own
+    record when it sets anything, as a whole; else the shooter book's entry
+    for their SSI shooter id; else nothing. Never matched by name."""
+    if is_set(project.identity):
+        return "match"
+    if book.get(project.selected_shooter_id) is not None:
+        return "book"
+    return "none"
+
+
 def resolved_identity_for(
     project: MatchProject,
     shooter_root: Path,
@@ -74,11 +90,25 @@ def resolved_identity_for(
     index: int,
     label: str,
     series_default: bool = False,
+    book: BookSnapshot = EMPTY_BOOK,
 ) -> ResolvedIdentity:
     """The shooter's identity as a render draws it: what they set (the
     Look's slot series only when ``series_default`` asks for it), the
     logo brought to local disk (hosted) and dropped when the file is not
-    there, so a template is never handed a path that does not exist."""
+    there, so a template is never handed a path that does not exist.
+    A match that sets nothing reads the shooter ``book`` instead
+    (:func:`identity_source`); an empty book is today's render."""
+    if identity_source(project, book) == "book":
+        entry = book.get(project.selected_shooter_id)
+        resolved = resolve_identity(
+            label=label,
+            identity=entry,
+            index=index,
+            look=look,
+            shooter_root=None,
+            series_default=series_default,
+        )
+        return replace(resolved, logo_path=book.logo_path(entry) if entry is not None else None)
     resolved = resolve_identity(
         label=label,
         identity=project.identity,
@@ -95,6 +125,7 @@ def grid_identities(
     *,
     look: Look,
     series_default: bool = False,
+    book: BookSnapshot = EMPTY_BOOK,
 ) -> dict[str, ResolvedIdentity]:
     """Resolved identities for a grid, keyed by tile label, the slot index
     following the grid's own order (alphabetical by label, filler tiles
@@ -114,6 +145,7 @@ def grid_identities(
             index=index,
             label=bundle.label,  # type: ignore[attr-defined]
             series_default=series_default,
+            book=book,
         )
     return out
 
