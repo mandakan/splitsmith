@@ -31,7 +31,9 @@ from ..match_summary import DEFAULT_MATCH_SUMMARY_SECONDS, MatchSummary, build_m
 from ..overlay_theme import ThemeName
 from ..runtime import runtime
 from ..segment_cache import SegmentCache
+from ..shooter_book import EMPTY_BOOK, BookSnapshot
 from ..stage_summary_data import TileStageData, load_stage_shots
+from .identity_media import effective_identity
 
 PipLayout = Literal["stacked", "pip-corners"]
 InsetSize = Literal["small", "medium", "large"]
@@ -241,11 +243,16 @@ def stage_inputs_for_project(
 
 
 def title_info_lines(
-    project: MatchProject, *, extra: str | None = None, division: str | None = None
+    project: MatchProject,
+    *,
+    extra: str | None = None,
+    division: str | None = None,
+    book: BookSnapshot = EMPTY_BOOK,
 ) -> tuple[str, ...]:
     """The info lines under the match name on a generated title page
     (issue #973): the match date, the shooter, the shooter's club line
-    (``project.identity.club``, #1243), the shooter's division, then the
+    (their identity's, #1243: the match's own record, else the shooter
+    ``book``'s, as the cards draw it), the shooter's division, then the
     caller's free text. Only what the project actually carries; a blank
     line is never printed. ``division`` is the caller's to pass
     (:func:`splitsmith.division.competitor_division`, or ``None`` when the title page should
@@ -255,8 +262,9 @@ def title_info_lines(
         lines.append(project.match_date.isoformat())
     if project.competitor_name:
         lines.append(project.competitor_name)
-    if project.identity.club:
-        lines.append(project.identity.club)
+    club = effective_identity(project, book).club
+    if club:
+        lines.append(club)
     if division and division.strip():
         lines.append(division.strip())
     if extra and extra.strip():

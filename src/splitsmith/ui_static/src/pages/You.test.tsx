@@ -66,6 +66,7 @@ describe("You", () => {
         display_name: "Mathias Axell",
         club: "Bromma PK",
         division: "Production Optics",
+        base_url: null,
       }),
     );
     // Pinned: your look appears, keyed by your id.

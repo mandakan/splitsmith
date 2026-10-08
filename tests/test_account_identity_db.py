@@ -7,6 +7,7 @@ prefix."""
 from __future__ import annotations
 
 import asyncio
+import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -376,3 +377,58 @@ def test_the_hosted_source_reads_each_logo_from_its_match_key(tmp_path: Path) ->
     found = {c.shooter_id: c for c in run(hosted_backfill_source(_Matches(), _State(), storage)())}
     assert found[42].read_logo() == names["me"][1]
     assert found[7].read_logo() == names["anna"][1]
+
+
+class _ThreadRecordingStorage:
+    """Storage that notes the thread of every call: a call on the event
+    loop's own thread stalls every other request on that worker."""
+
+    def __init__(self, inner: FilesystemStorage) -> None:
+        self._inner = inner
+        self.threads: list[tuple[str, int]] = []
+
+    def __getattr__(self, name: str):
+        attr = getattr(self._inner, name)
+        if not callable(attr):
+            return attr
+
+        def call(*args, **kwargs):
+            self.threads.append((name, threading.get_ident()))
+            return attr(*args, **kwargs)
+
+        return call
+
+
+def test_storage_calls_never_run_on_the_event_loop(tmp_path: Path) -> None:
+    from splitsmith.identity import logo_name
+    from splitsmith.shooter_book import backfill
+
+    (a, profile), _, (a_id, _b_id) = _users(tmp_path)
+    storage = _ThreadRecordingStorage(FilesystemStorage(tmp_path / "bucket" / "users" / a_id))
+    a._storage = storage
+    profile._storage = storage
+    read_on: list[int] = []
+
+    def read_logo() -> bytes:
+        read_on.append(threading.get_ident())
+        return _png()
+
+    async def scenario() -> int:
+        name = await a.put_logo(_png())
+        assert await a.logo_file(name) is not None, "a cold cache mirrors from storage"
+        brand = await profile.put_brand_logo(_png())
+        assert await profile.brand_file(brand) is not None
+        candidate = BackfillCandidate(
+            shooter_id=99,
+            identity=ShooterIdentity(club="X", logo=logo_name(_png(), "png")),
+            label="X",
+            updated_at=datetime(2026, 10, 1, tzinfo=UTC),
+            read_logo=read_logo,
+        )
+        assert await backfill(a, [candidate]) == 1
+        return threading.get_ident()
+
+    loop_thread = run(scenario())
+    assert {"write_bytes", "read_bytes"} <= {n for n, _ in storage.threads}
+    assert all(t != loop_thread for _, t in storage.threads), storage.threads
+    assert read_on and all(t != loop_thread for t in read_on)

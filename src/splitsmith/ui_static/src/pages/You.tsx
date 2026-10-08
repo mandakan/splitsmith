@@ -21,7 +21,7 @@ import {
 import { useDeploymentMode } from "@/lib/features";
 import { dismissNewChip } from "@/lib/useWhatsNew";
 import { cn } from "@/lib/utils";
-import { YOU_FEATURE, sortBook } from "@/lib/you";
+import { YOU_FEATURE, pinBody, sortBook } from "@/lib/you";
 
 const ACCENT_SWATCHES = ["#ff2d2d", "#fbbf24", "#4ade80", "#60a5fa", "#c084fc", "#f472b6"] as const;
 const HEX = /^#[0-9a-fA-F]{6}$/;
@@ -84,12 +84,7 @@ function YouShooter({ me, onChange }: { me: ScoreboardIdentity | null; onChange:
     setBusy(true);
     try {
       onChange(
-        await api.putScoreboardIdentity({
-          shooter_id: ref.shooterId,
-          display_name: ref.name,
-          club: ref.club,
-          division: ref.division,
-        }),
+        await api.putScoreboardIdentity(pinBody(ref, me)),
       );
       setResults(null);
       setQ("");

@@ -45,6 +45,7 @@ from .overlay_single import OverlayRun, run_groups
 from .overlay_still import letterbox
 from .overlay_summary_cell import build_summary_still
 from .overlay_theme import OverlayTheme, theme_for
+from .shooter_book import EMPTY_BOOK, BookSnapshot
 from .stage_summary_data import TileShot, TileStageData, load_stage_shots
 from .ui.audio import resolve_trim_for_read
 from .ui.match_exports import title_info_lines
@@ -367,10 +368,12 @@ def render_preview(
     event_logo: Path | None = None,
     match_summary: MatchSummary | None = None,
     brand: composition.BrandMark | None = None,
+    book: BookSnapshot = EMPTY_BOOK,
 ) -> bytes:
     """The PNG for ``spec``, or :class:`PreviewError` for a 404 / 409 / 503.
     ``shooter`` is the shooter's resolved identity (#1243), drawn on the
-    cards the way the render draws it."""
+    cards the way the render draws it; ``book`` is the shooter book the
+    title page's club line reads, as the render's does."""
     theme = theme_for(look)
     # A time on the slider is a still of that moment; motion is the whole run.
     moving = spec.motion and spec.at is None
@@ -454,7 +457,7 @@ def render_preview(
     elif spec.card in ("title", "closing"):
         card = composition.MatchTitle(
             text=name,
-            info=title_info_lines(project, extra=spec.title_info, division=spec.title_division),
+            info=title_info_lines(project, extra=spec.title_info, division=spec.title_division, book=book),
             variant=spec.variant,
             logo=event_logo,
             credit=spec.card == "closing" and spec.made_with,

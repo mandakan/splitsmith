@@ -16,6 +16,7 @@ test per method.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import tempfile
@@ -208,7 +209,7 @@ class PostgresShooterBookStore:
     async def logo_file(self, name: str) -> Path | None:
         if not _LOGO_RE.match(name or ""):
             return None
-        return _mirror(self._storage, f"{FILES_KEY}/{name}", self._cache, name)
+        return await asyncio.to_thread(_mirror, self._storage, f"{FILES_KEY}/{name}", self._cache, name)
 
     # -- writes -----------------------------------------------------------------
 
@@ -252,7 +253,7 @@ class PostgresShooterBookStore:
         if self._storage is None:
             raise ValueError("This server has no file store for logos.")
         name = logo_name(data, ext)
-        self._storage.write_bytes(f"{FILES_KEY}/{name}", data)
+        await asyncio.to_thread(self._storage.write_bytes, f"{FILES_KEY}/{name}", data)
         return name
 
 
@@ -289,13 +290,13 @@ class PostgresAccountProfileStore:
         name = check_brand_logo(data)
         if self._storage is None:
             raise BrandError("This server has no file store for logos.")
-        self._storage.write_bytes(f"{BRAND_KEY}/{name}", data)
+        await asyncio.to_thread(self._storage.write_bytes, f"{BRAND_KEY}/{name}", data)
         return name
 
     async def brand_file(self, name: str) -> Path | None:
         if not BRAND_FILE_RE.fullmatch(name or ""):
             return None
-        return _mirror(self._storage, f"{BRAND_KEY}/{name}", self._cache, name)
+        return await asyncio.to_thread(_mirror, self._storage, f"{BRAND_KEY}/{name}", self._cache, name)
 
 
 __all__ = ["PostgresAccountProfileStore", "PostgresShooterBookStore"]

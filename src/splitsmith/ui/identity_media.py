@@ -18,7 +18,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Literal
 
-from ..identity import EVENT_LOGO_DIR, LOGO_DIR, ResolvedIdentity, resolve_identity
+from ..identity import EVENT_LOGO_DIR, LOGO_DIR, ResolvedIdentity, ShooterIdentity, resolve_identity
 from ..looks import Look
 from ..match_model import MatchBranding
 from ..match_project import MatchProject
@@ -80,6 +80,16 @@ def identity_source(project: MatchProject, book: BookSnapshot = EMPTY_BOOK) -> I
     if is_set(book.get(project.selected_shooter_id)):
         return "book"
     return "none"
+
+
+def effective_identity(project: MatchProject, book: BookSnapshot = EMPTY_BOOK) -> ShooterIdentity:
+    """The look :func:`identity_source` picks, as the roster shows it: the
+    match's own record, else the book's entry, else the (empty) record."""
+    if identity_source(project, book) == "book":
+        entry = book.get(project.selected_shooter_id)
+        if entry is not None:
+            return entry
+    return project.identity
 
 
 def resolved_identity_for(
