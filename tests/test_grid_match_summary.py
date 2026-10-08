@@ -407,3 +407,37 @@ def test_the_compare_cli_refuses_the_match_summary_on_fcpxml(tmp_path: Path) -> 
     result = runner.invoke(app, [*args, "-o", str(tmp_path / "out.fcpxml")])
     assert result.exit_code == 2
     assert "--match-summary" in result.output
+
+
+def test_the_match_summary_alone_launches_the_browser(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.test_compare_mp4_grid_cards import CANVAS, _FakeRasterizer, _ok_runner
+    from tests.test_compare_mp4_grid_hold import _driver_shooters, _still_runner
+
+    entered: list[_FakeRasterizer] = []
+
+    class _Browser:
+        def __enter__(self) -> _FakeRasterizer:
+            entered.append(_FakeRasterizer())
+            return entered[-1]
+
+        def __exit__(self, *exc: object) -> None:
+            pass
+
+    monkeypatch.setattr(mp4_grid, "ChromiumRasterizer", _Browser)
+    mp4_grid.render_grid_mp4(
+        _driver_shooters(tmp_path),
+        audio_label="Anders",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=_ok_runner([]),
+        card_runner=_ok_runner([]),
+        still_runner=_still_runner([]),
+        work_dir=tmp_path / "work",
+        ffmpeg_binary="/bin/ffmpeg",
+        match_summary_seconds=6.0,
+    )
+    # No overlay, no other card: the summary's own text still needs the browser.
+    assert len(entered) == 1
+    assert any("Rounds" in html for html in entered[0].calls)
