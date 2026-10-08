@@ -1210,6 +1210,24 @@ def overlay(
             "'splitsmith' by default; 'clean' is the neutral white-on-amber alternative."
         ),
     ),
+    overlay_variant: str = typer.Option(
+        "default",
+        "--overlay-variant",
+        help=(
+            "Overlay style: 'default' is Classic (fast); a template style such as 'plate' draws the "
+            "whole HUD with motion and renders slower."
+        ),
+    ),
+    overlay_position: str | None = typer.Option(
+        None, "--overlay-position", help="Template styles: top-left, top-right, bottom-left or bottom-right."
+    ),
+    speed_colors: bool = typer.Option(
+        True, "--speed-colors/--no-speed-colors", help="Colour splits by speed."
+    ),
+    class_labels: bool = typer.Option(
+        True, "--class-labels/--no-class-labels", help="Show draw, split, transition and reload labels."
+    ),
+    landing: bool = typer.Option(True, "--landing/--no-landing", help="The landing moment on the last shot."),
     summary_card: bool = typer.Option(
         False,
         "--summary-card",
@@ -1236,6 +1254,21 @@ def overlay(
     if codec not in overlay_render.OVERLAY_CODECS:
         raise typer.BadParameter(f"--codec must be one of {overlay_render.OVERLAY_CODECS}, got {codec!r}")
     _validate_theme(theme)
+    from .config import Config
+    from .looks import DEFAULT_VARIANT, OVERLAY_SLOT, load_look, variants_for
+    from .overlay_hud import HUD_POSITIONS, HudOptions
+    from .ui.match_exports import render_segment_cache
+
+    styles = (DEFAULT_VARIANT, *variants_for(load_look(theme), OVERLAY_SLOT))
+    if overlay_variant not in styles:
+        raise typer.BadParameter(
+            f"--overlay-variant must be one of {', '.join(styles)}, got {overlay_variant!r}"
+        )
+    if overlay_position is not None and overlay_position not in HUD_POSITIONS:
+        raise typer.BadParameter(
+            f"--overlay-position must be one of {', '.join(HUD_POSITIONS)}, got {overlay_position!r}"
+        )
+    degraded: list[str] = []
     overlay_render.render_overlay(
         audit_path=audit_path,
         trimmed_video_path=video,
@@ -1246,7 +1279,18 @@ def overlay(
         max_fps=max_fps,
         theme=theme,  # type: ignore[arg-type]
         ffmpeg_binary=runtime().ffmpeg_binary,
+        variant=overlay_variant,
+        hud_options=HudOptions(
+            speed_colors=speed_colors,
+            class_labels=class_labels,
+            landing=landing,
+            position=overlay_position,  # type: ignore[arg-type]
+        ),
+        segment_cache=render_segment_cache(Config.load(None).output),
+        degraded=degraded,
     )
+    for note in degraded:
+        console.print(f"[yellow]{note}[/]")
     console.print(f"[green]Wrote[/] {output}")
     if summary_card:
         from .audit_data import read_audit_data

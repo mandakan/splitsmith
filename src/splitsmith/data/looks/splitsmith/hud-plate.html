@@ -21,7 +21,7 @@
   #hud.bottom-right { right: 3.5vh; bottom: 4vh; flex-direction: row-reverse; }
   .plate {
     position: relative; overflow: hidden; border-radius: 1.2vh;
-    padding: 0.9vh 2.6vh; display: flex; flex-direction: column; justify-content: center;
+    padding: 0.9vh 2.6vh; display: flex; flex-direction: column; justify-content: flex-end;
   }
   .label {
     font-family: "Splitsmith Display", sans-serif; font-weight: 700; text-transform: uppercase;
@@ -32,7 +32,7 @@
     font-variant-numeric: tabular-nums; line-height: 1; white-space: nowrap;
   }
   #clock { font-size: 9.6vh; }
-  #count { font-size: 5.8vh; transform-origin: 50% 70%; }
+  #count { font-size: 5.8vh; transform-origin: 50% 100%; }
   #count small { font-size: 0.6em; }
   #bar { position: absolute; left: 0; bottom: 0; height: 0.6vh; width: 0; }
   #chip { align-self: flex-end; border-left: 0.8vh solid transparent; }
@@ -61,7 +61,7 @@
   var theme = s.theme, stage = s.data.stage, opts = s.data.options;
   var shots = stage.shots, beep = stage.beep, rounds = stage.rounds;
   var PUNCH = 0.22, CHIP_IN = 0.18, BEEP_GLOW = 0.4, LANDING = 0.6;
-  var PLATE_ALPHA = 0.72;
+  var PLATE_ALPHA = 0.86;
 
   function el(id) { return document.getElementById(id); }
   function clamp(x) { return Math.max(0, Math.min(1, x)); }
@@ -111,7 +111,7 @@
     var glow = t >= beep && t - beep < BEEP_GLOW ? 1 - (t - beep) / BEEP_GLOW : 0;
     el('clockPlate').style.boxShadow = glow > 0 ? 'inset 0 0 0 ' + (0.4 * glow) + 'vh ' + theme.accent : 'none';
 
-    var punch = since < PUNCH ? 1 + 0.3 * (1 - easeOut(since / PUNCH)) : 1;
+    var punch = since < PUNCH ? 1 + 0.15 * (1 - easeOut(since / PUNCH)) : 1;
     el('count').style.transform = 'scale(' + punch + ')';
     el('count').innerHTML = pad2(n) + '<small>/' + rounds + '</small>';
 

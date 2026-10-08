@@ -1133,6 +1133,10 @@ def test_overlay_cli_forwards_its_flags_to_render_overlay(
         theme: str = "splitsmith",
         rasterizer: Any = None,
         probe_runner: Any = None,
+        variant: str | None = None,
+        hud_options: Any = None,
+        segment_cache: Any = None,
+        degraded: list[str] | None = None,
     ) -> Path:
         captured.update(
             audit_path=audit_path,
@@ -1202,6 +1206,10 @@ def test_overlay_cli_defaults_theme_to_splitsmith_when_omitted(
         theme: str = "splitsmith",
         rasterizer: Any = None,
         probe_runner: Any = None,
+        variant: str | None = None,
+        hud_options: Any = None,
+        segment_cache: Any = None,
+        degraded: list[str] | None = None,
     ) -> Path:
         captured["theme"] = theme
         output_path.write_bytes(b"")
@@ -1221,3 +1229,57 @@ def test_overlay_cli_defaults_theme_to_splitsmith_when_omitted(
 
     assert result.exit_code == 0, result.output
     assert captured["theme"] == "splitsmith"
+
+
+def test_overlay_cli_passes_the_hud_options_through(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, Any] = {}
+
+    def fake_render(**kwargs: Any) -> Path:
+        seen.update(kwargs)
+        kwargs["degraded"].append("overlay style 'plate' fell back to Classic: boom")
+        return kwargs["output_path"]
+
+    monkeypatch.setattr(overlay_render, "render_overlay", fake_render)
+    result = CliRunner().invoke(
+        app,
+        [
+            "overlay",
+            "--audit",
+            str(_write_audit(tmp_path)),
+            "--video",
+            str(tmp_path / "t.mp4"),
+            "--output",
+            str(tmp_path / "o.mov"),
+            "--overlay-variant",
+            "plate",
+            "--overlay-position",
+            "top-right",
+            "--no-speed-colors",
+            "--no-landing",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert seen["variant"] == "plate"
+    assert seen["hud_options"].model_dump() == {
+        "speed_colors": False,
+        "class_labels": True,
+        "landing": False,
+        "position": "top-right",
+    }
+    assert "fell back to Classic" in result.output
+
+
+def test_overlay_cli_refuses_an_unknown_variant_and_position(tmp_path: Path) -> None:
+    base = [
+        "overlay",
+        "--audit",
+        str(_write_audit(tmp_path)),
+        "--video",
+        str(tmp_path / "t.mp4"),
+        "--output",
+        str(tmp_path / "o.mov"),
+    ]
+    bad_variant = CliRunner().invoke(app, [*base, "--overlay-variant", "nope"])
+    assert bad_variant.exit_code != 0 and "plate" in bad_variant.output
+    bad_position = CliRunner().invoke(app, [*base, "--overlay-position", "middle"])
+    assert bad_position.exit_code != 0 and "bottom-left" in bad_position.output
