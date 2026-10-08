@@ -91,6 +91,9 @@
       "default": "card.html",
       "rise": "card-rise.html"
     },
+    "overlay": {
+      "plate": "hud-plate.html"
+    },
     "slate": {
       "default": "card.html",
       "rise": "card-rise.html"

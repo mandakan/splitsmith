@@ -414,7 +414,6 @@ def test_a_manifest_cannot_name_a_template_for_the_classic_overlay(user_dir: Pat
         looks.LookManifest.model_validate(_manifest("mine", {"overlay": "hud.html"}))
 
 
-@pytest.mark.xfail(reason="hud-plate.html lands in Task 4", strict=True)
 def test_a_look_without_the_slot_borrows_the_shipped_overlay_template(user_dir: Path) -> None:
     clean = looks.load_look("clean")
     template = looks.overlay_template_for(clean, "plate")
@@ -426,7 +425,6 @@ def test_an_overlay_variant_no_look_has_is_none(user_dir: Path) -> None:
     assert looks.overlay_template_for(looks.load_look("splitsmith"), "nope") is None
 
 
-@pytest.mark.xfail(reason="hud-plate.html lands in Task 4", strict=True)
 def test_the_catalog_lists_the_overlay_variants(user_dir: Path) -> None:
     splitsmith = next(c for c in looks.look_catalog() if c.name == "splitsmith")
     assert [v.name for v in splitsmith.slots["overlay"]] == ["plate"]
