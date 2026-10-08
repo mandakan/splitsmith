@@ -13,8 +13,10 @@ export function isYou(selectedShooterId: number | null | undefined, me: Scoreboa
   return me !== null && selectedShooterId != null && selectedShooterId === me.shooter_id;
 }
 
-/** The identity sheet's line on where a shooter's look comes from. */
-export function sourceLine(source: IdentitySource, hasShooterId: boolean): string {
+/** The identity sheet's line on where a shooter's look comes from.
+ *  ``bookAvailable`` false (a server with no book yet) promises nothing. */
+export function sourceLine(source: IdentitySource, hasShooterId: boolean, bookAvailable = true): string {
+  if (!bookAvailable) return source === "match" ? "Set for this match." : "Nothing set for this match.";
   if (source === "book") return "From your shooter book: the same in every match.";
   if (source === "match") {
     return hasShooterId

@@ -140,8 +140,14 @@ async def save_identity(
     if identity.logo is not None and logo_bytes is not None:
         try:
             logo = await store.put_logo(logo_bytes)
-        except ValueError as exc:
+        except (OSError, ValueError) as exc:
             logger.warning("shooter book: the logo for %s was not saved (%s)", shooter_id, exc)
+    elif identity.logo is not None:
+        # The match's file is not on this disk: keep the book's own copy of
+        # the same logo rather than wiping it.
+        existing = await store.get(shooter_id)
+        if existing is not None and existing.identity.logo == identity.logo:
+            logo = identity.logo
     await store.put(
         ShooterBookEntry(
             shooter_id=shooter_id,

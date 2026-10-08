@@ -77,7 +77,7 @@ def identity_source(project: MatchProject, book: BookSnapshot = EMPTY_BOOK) -> I
     for their SSI shooter id; else nothing. Never matched by name."""
     if is_set(project.identity):
         return "match"
-    if book.get(project.selected_shooter_id) is not None:
+    if is_set(book.get(project.selected_shooter_id)):
         return "book"
     return "none"
 

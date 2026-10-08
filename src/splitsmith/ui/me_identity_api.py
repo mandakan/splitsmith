@@ -21,7 +21,7 @@ from ..account_profile import AccountProfile, AccountProfileStore, EmptyAccountP
 from ..identity import CLUB_MAX_CHARS, LOGO_MAX_BYTES, ShooterIdentity
 from ..look_brand import BrandError
 from ..looks import BRAND_LINE_MAX, LookBrand
-from ..shooter_book import EmptyShooterBookStore, ShooterBookEntry, ShooterBookStore
+from ..shooter_book import EmptyShooterBookStore, ShooterBookEntry, ShooterBookStore, is_set
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +143,15 @@ class BookEntryBody(BaseModel):
     label: str | None = None
 
 
+async def _put_or_drop(store: ShooterBookStore, entry: ShooterBookEntry) -> None:
+    """Store ``entry``, or remove it when it sets nothing: an empty entry
+    would read as "from your shooter book" over nothing."""
+    if is_set(entry.identity):
+        await store.put(entry)
+    else:
+        await store.delete(entry.shooter_id)
+
+
 def _entry_json(entry: ShooterBookEntry) -> dict[str, object]:
     return {
         "shooter_id": entry.shooter_id,
@@ -177,7 +186,7 @@ async def put_shooter_book_entry(shooter_id: int, body: BookEntryBody, request: 
         identity=identity,
         label=fields.get("label", current.label if current is not None else None),
     )
-    await store.put(entry)
+    await _put_or_drop(store, entry)
     return JSONResponse(_entry_json(entry))
 
 
@@ -219,7 +228,7 @@ async def remove_shooter_book_logo(shooter_id: int, request: Request) -> JSONRes
     if current is None:
         raise HTTPException(status_code=404, detail="no such entry")
     entry = current.model_copy(update={"identity": current.identity.model_copy(update={"logo": None})})
-    await store.put(entry)
+    await _put_or_drop(store, entry)
     return JSONResponse(_entry_json(entry))
 
 

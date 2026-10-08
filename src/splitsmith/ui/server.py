@@ -13189,6 +13189,36 @@ def create_app(
             logo_bytes=logo_bytes,
         )
 
+    def _book_seeded_identity(project: MatchProject, slug: str) -> ShooterIdentity:
+        """What an edit starts from: the match's own record, or, when it sets
+        nothing, the book's look the sheet showed (its logo copied into this
+        match's ``identity/``), so an edit kept to this match never drops
+        what the user did not touch."""
+        own = project.identity
+        if shooter_book_module.is_set(own):
+            return own
+        book = shooter_book_module.load_snapshot(state.shooter_book)
+        entry = book.get(project.selected_shooter_id)
+        if not shooter_book_module.is_set(entry):
+            return own
+        assert entry is not None
+        logo = None
+        source = book.logo_path(entry)
+        if entry.logo is not None and source is not None:
+            target = _identity_logo_dir(slug) / entry.logo
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                data = source.read_bytes()
+                target.write_bytes(data)
+                storage = project._storage  # type: ignore[attr-defined]
+                storage_scope = project._storage_scope  # type: ignore[attr-defined]
+                if storage is not None and storage_scope is not None:
+                    storage.write_bytes(f"{storage_scope}/{LOGO_DIR}/{entry.logo}", data)
+                logo = entry.logo
+            except OSError as exc:
+                logger.warning("identity: could not copy the book's logo into %s (%s)", slug, exc)
+        return entry.model_copy(update={"logo": logo})
+
     def _identity_view(project: MatchProject) -> dict[str, Any]:
         """The identity sheet's view: where the look comes from and what it is."""
         book = shooter_book_module.load_snapshot(state.shooter_book)
@@ -13198,6 +13228,11 @@ def create_app(
             "source": source,
             "identity": (effective or ShooterIdentity()).model_dump(mode="json"),
             "shooter_id": project.selected_shooter_id,
+            # Whether the book holds a look for this shooter ("Use shooter
+            # book" has something to fall back to) and whether this server
+            # keeps a book at all (hosted does not yet).
+            "book_entry": shooter_book_module.is_set(book.get(project.selected_shooter_id)),
+            "book_available": not isinstance(state.shooter_book, shooter_book_module.EmptyShooterBookStore),
         }
 
     @app.get("/api/shooters/{slug}/identity")
@@ -13209,8 +13244,12 @@ def create_app(
     @app.post("/api/shooters/{slug}/identity/use-book")
     def use_shooter_book(slug: str) -> JSONResponse:
         """Drop this match's own record so the shooter book applies again.
-        The book is not touched."""
+        The book is not touched. Refused (409) when the book holds no look for
+        this shooter: dropping the record would leave them with nothing."""
         project = state.shooter_project(slug)
+        book = shooter_book_module.load_snapshot(state.shooter_book)
+        if not shooter_book_module.is_set(book.get(project.selected_shooter_id)):
+            raise HTTPException(status_code=409, detail="The shooter book has no look for this shooter.")
         previous = project.identity.logo
         project.identity = ShooterIdentity()
         project.save(state.shooter_root(slug))
@@ -13223,7 +13262,7 @@ def create_app(
         identity model itself, so a bad colour or an over-long club line
         is a 422 that names the field and writes nothing."""
         project = state.shooter_project(slug)
-        current = project.identity
+        current = _book_seeded_identity(project, slug)
         fields = req.model_dump(exclude_unset=True)
         try:
             project.identity = ShooterIdentity(

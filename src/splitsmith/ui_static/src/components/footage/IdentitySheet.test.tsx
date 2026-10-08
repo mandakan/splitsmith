@@ -30,6 +30,8 @@ function viewOf(shooter: ShooterListEntry, source: "match" | "book" | "none" = "
     source,
     identity: shooter.identity ?? { accent: null, logo: null, club: null },
     shooter_id: shooterId,
+    book_entry: source !== "none",
+    book_available: true,
   });
 }
 
@@ -102,6 +104,8 @@ describe("IdentitySheet", () => {
       source: "book",
       identity: { accent: "#60a5fa", logo: null, club: "Bromma PK" },
       shooter_id: 42,
+      book_entry: true,
+      book_available: true,
     });
     render(<IdentitySheet open onClose={vi.fn()} shooter={booked} editDenied={false} onChanged={vi.fn()} />);
     expect(await screen.findByText(/From your shooter book/)).toBeInTheDocument();
@@ -124,6 +128,8 @@ describe("IdentitySheet", () => {
       source: "book",
       identity: { accent: "#60a5fa", logo: null, club: null },
       shooter_id: 42,
+      book_entry: true,
+      book_available: true,
     });
     render(<IdentitySheet open onClose={vi.fn()} shooter={booked} editDenied={false} onChanged={vi.fn()} />);
     await screen.findByText(/From your shooter book/);
@@ -142,6 +148,8 @@ describe("IdentitySheet", () => {
       source: "book",
       identity: { accent: "#c084fc", logo: null, club: null },
       shooter_id: 42,
+      book_entry: true,
+      book_available: true,
     });
     const onChanged = vi.fn();
     render(<IdentitySheet open onClose={vi.fn()} shooter={own} editDenied={false} onChanged={onChanged} />);
@@ -156,5 +164,33 @@ describe("IdentitySheet", () => {
     expect(await screen.findByText(/Link this shooter's scoreboard entry/)).toBeInTheDocument();
     expect(screen.queryByLabelText("Only this match")).toBeNull();
     expect(screen.queryByRole("button", { name: "Use shooter book" })).toBeNull();
+  });
+
+  it("offers Use shooter book only when the book has a look for this shooter", async () => {
+    const own = { ...WITH_LOGO, selected_shooter_id: 42 } as unknown as ShooterListEntry;
+    vi.mocked(api.getShooterIdentityView).mockResolvedValue({
+      source: "match",
+      identity: { accent: "#fbbf24", logo: null, club: null },
+      shooter_id: 42,
+      book_entry: false,
+      book_available: true,
+    });
+    render(<IdentitySheet open onClose={vi.fn()} shooter={own} editDenied={false} onChanged={vi.fn()} />);
+    await screen.findByText(/Set for this match/);
+    expect(screen.queryByRole("button", { name: "Use shooter book" })).toBeNull();
+  });
+
+  it("promises no book where the server keeps none", async () => {
+    const own = { ...WITH_LOGO, selected_shooter_id: 42 } as unknown as ShooterListEntry;
+    vi.mocked(api.getShooterIdentityView).mockResolvedValue({
+      source: "match",
+      identity: { accent: "#fbbf24", logo: null, club: null },
+      shooter_id: 42,
+      book_entry: false,
+      book_available: false,
+    });
+    render(<IdentitySheet open onClose={vi.fn()} shooter={own} editDenied={false} onChanged={vi.fn()} />);
+    expect(await screen.findByText("Set for this match.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Only this match")).toBeNull();
   });
 });

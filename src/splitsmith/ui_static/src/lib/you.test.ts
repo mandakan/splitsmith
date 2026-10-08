@@ -21,6 +21,8 @@ describe("sourceLine", () => {
     expect(sourceLine("match", true)).toMatch(/updates your shooter book/);
     expect(sourceLine("match", false)).toMatch(/Link this shooter's scoreboard entry/);
     expect(sourceLine("none", false)).toMatch(/Link this shooter's scoreboard entry/);
+    expect(sourceLine("match", true, false)).toBe("Set for this match.");
+    expect(sourceLine("none", true, false)).not.toMatch(/book/);
     for (const line of [sourceLine("book", true), sourceLine("none", true)]) {
       expect(line).toMatch(/^[ -~]+$/);
       expect(line).not.toMatch(/ - |--/);

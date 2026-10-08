@@ -41,6 +41,8 @@ export function IdentitySheet({ open, onClose, shooter, editDenied, onChanged }:
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [source, setSource] = useState<IdentitySource>("none");
+  const [bookEntry, setBookEntry] = useState(false);
+  const [bookAvailable, setBookAvailable] = useState(false);
   const [shownLogo, setShownLogo] = useState<string | null>(null);
   const [onlyThisMatch, setOnlyThisMatch] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -51,6 +53,8 @@ export function IdentitySheet({ open, onClose, shooter, editDenied, onChanged }:
     setClub(shooter?.identity?.club ?? "");
     setShownLogo(shooter?.identity?.logo ?? null);
     setSource("none");
+    setBookEntry(false);
+    setBookAvailable(false);
     setFile(null);
     setRemoveLogo(false);
     setOnlyThisMatch(false);
@@ -63,6 +67,8 @@ export function IdentitySheet({ open, onClose, shooter, editDenied, onChanged }:
       .then((view) => {
         if (!alive) return;
         setSource(view.source);
+        setBookEntry(view.book_entry);
+        setBookAvailable(view.book_available);
         setAccent(view.identity.accent ?? "");
         setClub(view.identity.club ?? "");
         setShownLogo(view.identity.logo);
@@ -135,9 +141,9 @@ export function IdentitySheet({ open, onClose, shooter, editDenied, onChanged }:
         <div className="flex-1 overflow-y-auto">
           <div className="flex items-start justify-between gap-3 border-b border-rule px-3.5 py-2.5">
             <p className="text-sm text-muted" data-testid="identity-source">
-              {sourceLine(source, shooterId != null)}
+              {sourceLine(source, shooterId != null, bookAvailable)}
             </p>
-            {source === "match" && shooterId != null ? (
+            {source === "match" && shooterId != null && bookEntry ? (
               <Button
                 size="sm"
                 variant="ghost"
@@ -238,7 +244,7 @@ export function IdentitySheet({ open, onClose, shooter, editDenied, onChanged }:
               onChange={(e) => setClub(e.target.value)}
             />
           </Field>
-          {shooterId != null ? (
+          {shooterId != null && bookAvailable ? (
             <label className="flex items-center gap-2 px-3.5 py-2.5 text-md text-ink-2">
               <input
                 type="checkbox"

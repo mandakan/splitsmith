@@ -411,6 +411,10 @@ export interface ShooterIdentityView {
   source: IdentitySource;
   identity: ShooterIdentity;
   shooter_id: number | null;
+  /** The book holds a look for this shooter ("Use shooter book" has one). */
+  book_entry: boolean;
+  /** This server keeps a shooter book (hosted does not yet). */
+  book_available: boolean;
 }
 
 /** ``scope`` on an identity edit: ``book`` also saves it to the shooter
