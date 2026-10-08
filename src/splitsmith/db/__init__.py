@@ -29,6 +29,7 @@ from .access_requests import (
     AlreadyDecidedError,
     NotFoundError,
 )
+from .account_identity import PostgresAccountProfileStore, PostgresShooterBookStore
 from .email import ConsoleEmailSender, EmailSender, LettermintEmailSender, build_email_sender
 from .engine import LoopEngines, create_engine, loop_sessionmaker, sessionmaker, tenant_session_factory
 from .export_presets import PostgresExportPresetStore
@@ -87,7 +88,9 @@ __all__ = [
     "MagicLinkTokenRow",
     "MatchRow",
     "NotFoundError",
+    "PostgresAccountProfileStore",
     "PostgresExportPresetStore",
+    "PostgresShooterBookStore",
     "PostgresLookStore",
     "PostgresWhatsNewStore",
     "PostgresJobBackend",

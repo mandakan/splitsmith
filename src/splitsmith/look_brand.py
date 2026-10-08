@@ -32,9 +32,9 @@ class BrandError(ValueError):
     """An upload refused, with the reason in the user's words."""
 
 
-def save_brand_logo(root: Path, data: bytes) -> str:
-    """Check ``data`` and store it in ``root``'s ``brand/`` folder, named by
-    its content; the file name ``look.json``'s ``brand.logo`` names."""
+def check_brand_logo(data: bytes) -> str:
+    """Check ``data`` as a brand logo; the content name it is stored under
+    (``brand-<12hex>.<ext>``). ``BrandError`` with the user's reason."""
     from PIL import Image, UnidentifiedImageError
 
     if len(data) > LOGO_MAX_BYTES:
@@ -51,7 +51,13 @@ def save_brand_logo(root: Path, data: bytes) -> str:
         raise BrandError("The logo must be a PNG, JPEG or WebP image.")
     if side > LOGO_MAX_SIDE:
         raise BrandError(f"The logo is over {LOGO_MAX_SIDE} px on a side.")
-    name = f"brand-{hashlib.sha256(data).hexdigest()[:12]}.{ext}"
+    return f"brand-{hashlib.sha256(data).hexdigest()[:12]}.{ext}"
+
+
+def save_brand_logo(root: Path, data: bytes) -> str:
+    """Check ``data`` and store it in ``root``'s ``brand/`` folder, named by
+    its content; the file name ``look.json``'s ``brand.logo`` names."""
+    name = check_brand_logo(data)
     folder = root / BRAND_DIR
     folder.mkdir(parents=True, exist_ok=True)
     target = folder / name
@@ -98,4 +104,4 @@ def brand_json(
     return {"logo": logo.resolve().as_uri() if logo is not None else None, "line": fallback.line or None}
 
 
-__all__ = ["BRAND_SLOTS", "BrandError", "brand_json", "brand_path", "save_brand_logo"]
+__all__ = ["BRAND_SLOTS", "BrandError", "brand_json", "brand_path", "check_brand_logo", "save_brand_logo"]

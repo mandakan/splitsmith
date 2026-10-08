@@ -261,6 +261,8 @@ from . import exports as export_helpers
 from . import match_exports as match_export_helpers
 from . import shooter_move as shooter_move_module
 from .access_gate import features_of, require_feature
+from .account_backfill import hosted_backfill_source
+from .account_backfill import local_backfill_source as _local_backfill_source
 from .auto_sync import (
     MATCH_SYNC_LOCK_FILE,
     OWNER_LOCK_FILE,
@@ -1938,7 +1940,9 @@ class AppState:
         default_factory=export_presets_module.JsonExportPresetStore
     )
     _shooter_book: shooter_book_module.ShooterBookStore = field(
-        default_factory=shooter_book_module.JsonShooterBookStore
+        default_factory=lambda: shooter_book_module.JsonShooterBookStore(
+            backfill_source=_local_backfill_source
+        )
     )
     _account_profile: account_profile_module.AccountProfileStore = field(
         default_factory=account_profile_module.JsonAccountProfileStore
@@ -7332,6 +7336,7 @@ def _apply_hosted_mode_wiring(
 
     from ..db import (
         MagicLinkAuth,
+        PostgresAccountProfileStore,
         PostgresExportPresetStore,
         PostgresJobBackend,
         PostgresLookStore,
@@ -7339,6 +7344,7 @@ def _apply_hosted_mode_wiring(
         PostgresProfileStore,
         PostgresRecentProjectsStore,
         PostgresScoreboardIdentityStore,
+        PostgresShooterBookStore,
         PostgresWhatsNewStore,
         PostgresYouTubeConnectionStore,
         ProjectStateStore,
@@ -7637,6 +7643,9 @@ def _apply_hosted_mode_wiring(
                 row.access_tier, row.email, state.access, state.admin_emails
             )
 
+        tenant_storage = _tenant_s3_storage(s3_client, s3_bucket, user_id)
+        tenant_matches = PostgresMatchStore(tenant_factory, user_id=user_id)
+        tenant_state = ProjectStateStore(tenant_factory, user_id=user_id)
         return TenantContext(
             user_id=user_id,
             recent_projects=PostgresRecentProjectsStore(tenant_factory, user_id=user_id),
@@ -7649,9 +7658,9 @@ def _apply_hosted_mode_wiring(
                 bodies=state.job_bodies,
                 submit_allowed=_may_submit,
             ),
-            matches_store=PostgresMatchStore(tenant_factory, user_id=user_id),
-            project_state=ProjectStateStore(tenant_factory, user_id=user_id),
-            storage=_tenant_s3_storage(s3_client, s3_bucket, user_id),
+            matches_store=tenant_matches,
+            project_state=tenant_state,
+            storage=tenant_storage,
             share_tokens=ShareTokenStore(tenant_factory, user_id=user_id),
             desktop_tokens=DesktopTokenStore(tenant_factory, user_id=user_id),
             comments=CommentStore(tenant_factory, user_id=user_id),
@@ -7661,6 +7670,19 @@ def _apply_hosted_mode_wiring(
             whats_new=PostgresWhatsNewStore(tenant_factory, user_id=user_id),
             youtube=PostgresYouTubeConnectionStore(tenant_factory, user_id=user_id),
             desktop_commands=DesktopCommandStore(tenant_factory, user_id=user_id),
+            # The account's shooter book and brand (spec 2026-10-08): rows
+            # under RLS, files in the tenant's own storage prefix, mirrored
+            # into this container's cache by content name.
+            shooter_book=PostgresShooterBookStore(
+                tenant_factory,
+                user_id=user_id,
+                storage=tenant_storage,
+                cache_dir=process_runtime().cache_dir,
+                backfill_source=hosted_backfill_source(tenant_matches, tenant_state, tenant_storage),
+            ),
+            account_profile=PostgresAccountProfileStore(
+                tenant_factory, user_id=user_id, storage=tenant_storage, cache_dir=process_runtime().cache_dir
+            ),
         )
 
     state._build_tenant = _build_tenant
@@ -13174,6 +13196,12 @@ def create_app(
         sid = project.selected_shooter_id
         if sid is None:
             return
+        try:
+            await _write_book(project, slug, sid)
+        except Exception as exc:  # noqa: BLE001 -- the match was saved; the book is the extra
+            logger.warning("shooter book: %s's look was saved to the match but not the book (%s)", slug, exc)
+
+    async def _write_book(project: MatchProject, slug: str, sid: int) -> None:
         logo_bytes: bytes | None = None
         if project.identity.logo is not None:
             local = ensure_local_logo(project, state.shooter_root(slug))
@@ -13230,7 +13258,7 @@ def create_app(
             "shooter_id": project.selected_shooter_id,
             # Whether the book holds a look for this shooter ("Use shooter
             # book" has something to fall back to) and whether this server
-            # keeps a book at all (hosted does not yet).
+            # keeps a book at all (one with no store answers an empty one).
             "book_entry": shooter_book_module.is_set(book.get(project.selected_shooter_id)),
             "book_available": not isinstance(state.shooter_book, shooter_book_module.EmptyShooterBookStore),
         }
