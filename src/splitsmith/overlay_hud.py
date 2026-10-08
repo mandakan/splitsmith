@@ -23,8 +23,9 @@ from pathlib import Path
 from statistics import median
 from typing import Any, Literal, get_args
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
+from .looks import DEFAULT_VARIANT, LOOK_NAME_RE
 from .stage_summary_data import TileShot
 
 HudPosition = Literal["top-left", "top-right", "bottom-left", "bottom-right"]
@@ -75,6 +76,70 @@ class HudOptions(BaseModel):
     landing: bool = True
     #: ``None`` is the variant's own default (the first position it declares).
     position: HudPosition | None = None
+
+
+class OverlayStyleFields(BaseModel):
+    """The overlay style as every body that draws an overlay carries it:
+    the stage and match export requests, and the export preset. Validated
+    by shape only, as a preset's Look is, so a body loads on a machine
+    without that style; a style the Look lacks draws Classic with a note."""
+
+    #: The Look's ``overlay`` variant; ``default`` is Classic.
+    overlay_variant: str = DEFAULT_VARIANT
+    overlay_speed_colors: bool = True
+    overlay_class_labels: bool = True
+    overlay_landing: bool = True
+    overlay_position: HudPosition | None = None
+
+    @field_validator("overlay_variant")
+    @classmethod
+    def _variant_shape(cls, value: str) -> str:
+        if not LOOK_NAME_RE.match(value):
+            raise ValueError(f"{value!r} is not an overlay style name ({LOOK_NAME_RE.pattern})")
+        return value
+
+    def hud_options(self) -> HudOptions:
+        return HudOptions(
+            speed_colors=self.overlay_speed_colors,
+            class_labels=self.overlay_class_labels,
+            landing=self.overlay_landing,
+            position=self.overlay_position,
+        )
+
+
+def overlay_settings(
+    *,
+    look: str,
+    variant: str,
+    options: HudOptions,
+    codec: str,
+    max_height: int | None,
+    max_fps: float | None,
+) -> dict[str, Any]:
+    """What an overlay MOV was drawn with, as recorded beside it and
+    compared before a match export reuses it. Classic draws none of the
+    template options, so they are left out of a Classic record: toggling
+    them with Classic chosen never forces a re-render."""
+    return {
+        "look": look,
+        "variant": variant,
+        "options": options.model_dump() if variant != DEFAULT_VARIANT else {},
+        "codec": codec,
+        "max_height": max_height,
+        "max_fps": max_fps,
+    }
+
+
+#: What an overlay rendered before the record existed is taken to be: the
+#: defaults, so an untouched form reuses it exactly as before.
+LEGACY_OVERLAY_SETTINGS: dict[str, Any] = overlay_settings(
+    look="splitsmith",
+    variant=DEFAULT_VARIANT,
+    options=HudOptions(),
+    codec="auto",
+    max_height=None,
+    max_fps=None,
+)
 
 
 def speed_tiers(shots: Sequence[TileShot]) -> list[SpeedTier | None]:
@@ -204,6 +269,8 @@ __all__ = [
     "HudFrame",
     "HudOptions",
     "HudPosition",
+    "LEGACY_OVERLAY_SETTINGS",
+    "OverlayStyleFields",
     "MIN_CLASS_SHOTS",
     "SLOW_ABOVE",
     "SpeedTier",
@@ -213,6 +280,7 @@ __all__ = [
     "hud_options_data",
     "hud_page_size",
     "hud_stage_data",
+    "overlay_settings",
     "resolve_position",
     "speed_tiers",
 ]

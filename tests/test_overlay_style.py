@@ -1,0 +1,79 @@
+"""The overlay style on request bodies and presets (template HUD, slice 3)."""
+
+from __future__ import annotations
+
+import pytest
+from pydantic import BaseModel, ValidationError
+
+from splitsmith.export_presets import ExportPresetBody
+from splitsmith.overlay_hud import HudOptions, OverlayStyleFields, overlay_settings
+from splitsmith.ui.exports_api import ExportStageRequest, MatchExportRequest
+
+
+class _Body(OverlayStyleFields, BaseModel):
+    pass
+
+
+def test_the_defaults_are_classic_with_every_toggle_on() -> None:
+    body = _Body()
+    assert body.overlay_variant == "default"
+    assert body.hud_options() == HudOptions()
+
+
+def test_the_fields_become_hud_options() -> None:
+    body = _Body(
+        overlay_variant="plate",
+        overlay_speed_colors=False,
+        overlay_class_labels=False,
+        overlay_landing=False,
+        overlay_position="top-right",
+    )
+    assert body.hud_options() == HudOptions(
+        speed_colors=False, class_labels=False, landing=False, position="top-right"
+    )
+
+
+@pytest.mark.parametrize("bad", [{"overlay_variant": "Not A Name"}, {"overlay_position": "middle"}])
+def test_a_malformed_style_is_refused(bad: dict) -> None:
+    with pytest.raises(ValidationError):
+        _Body(**bad)
+
+
+@pytest.mark.parametrize("model", [ExportStageRequest, MatchExportRequest, ExportPresetBody])
+def test_every_body_that_draws_an_overlay_carries_the_style(model: type[BaseModel]) -> None:
+    extra = {"stage_numbers": [1]} if model is MatchExportRequest else {}
+    body = model(overlay_variant="pips", overlay_position="bottom-left", **extra)
+    assert body.overlay_variant == "pips"  # type: ignore[attr-defined]
+    assert body.hud_options().position == "bottom-left"  # type: ignore[attr-defined]
+
+
+def test_a_preset_saved_before_the_style_loads_as_classic() -> None:
+    body = ExportPresetBody.model_validate({"overlay": True})
+    assert body.overlay_variant == "default" and body.hud_options() == HudOptions()
+
+
+def test_classic_settings_ignore_the_template_options() -> None:
+    """Toggling speed colours with Classic chosen must not invalidate a
+    Classic overlay on disk: Classic draws none of them."""
+    common = {"look": "splitsmith", "codec": "auto", "max_height": None, "max_fps": None}
+    plain = overlay_settings(variant="default", options=HudOptions(), **common)
+    toggled = overlay_settings(variant="default", options=HudOptions(speed_colors=False), **common)
+    assert plain == toggled
+    styled = overlay_settings(variant="plate", options=HudOptions(), **common)
+    assert styled != plain
+    assert styled != overlay_settings(variant="plate", options=HudOptions(landing=False), **common)
+
+
+def test_classic_settings_equal_what_an_unrecorded_overlay_is_taken_to_be() -> None:
+    """An overlay rendered before the record existed is read as the
+    defaults, so an untouched form still reuses it."""
+    from splitsmith.overlay_hud import LEGACY_OVERLAY_SETTINGS
+
+    assert LEGACY_OVERLAY_SETTINGS == overlay_settings(
+        look="splitsmith",
+        variant="default",
+        options=HudOptions(),
+        codec="auto",
+        max_height=None,
+        max_fps=None,
+    )

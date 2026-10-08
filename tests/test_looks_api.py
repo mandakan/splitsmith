@@ -22,6 +22,7 @@ def test_get_looks_lists_the_shipped_looks(client) -> None:
     assert splitsmith["slots"]["title_page"][1] == {
         "name": "rise",
         "preview": "/api/looks/splitsmith/preview/title_page-rise.png",
+        "positions": [],
     }
     assert splitsmith["preview"] == "/api/looks/splitsmith/preview/look.png"
 

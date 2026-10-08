@@ -236,6 +236,7 @@ from ..match_project import (
 from ..match_registry import MatchRegistry
 from ..mp4_render import RenderStep
 from ..observability import StructuredJsonFormatter, init_sentry
+from ..overlay_hud import overlay_settings
 from ..runtime import runtime as process_runtime
 from ..share_card import stage_figures
 from ..shot_id import ensure_shot_ids, has_usable_id
@@ -4387,6 +4388,8 @@ def register_job_bodies(state: AppState) -> None:
                         overlay_max_height=req.overlay_max_height,
                         overlay_max_fps=req.overlay_max_fps,
                         overlay_theme=req.overlay_theme,
+                        overlay_variant=req.overlay_variant,
+                        overlay_options=req.hud_options(),
                         write_summary_card=req.write_summary_card,
                         summary_hold_seconds=req.summary_hold_seconds,
                     ),
@@ -4402,6 +4405,7 @@ def register_job_bodies(state: AppState) -> None:
                     scorecard=stg.scorecard,
                     shooter_label=proj.competitor_name or proj.name,
                     stage_time_is_manual=stg.time_seconds_manual,
+                    segment_cache=match_export_helpers.render_segment_cache(Config().output),
                 )
         except StageExportError as exc:
             # Surface as a job failure with the exporter's own message so
@@ -4596,22 +4600,28 @@ def register_job_bodies(state: AppState) -> None:
                 secondary_trims_present = all(
                     (exports_dir / f"{base}_cam_{vid}_trimmed.mp4").exists() for vid in wanted_secondary_ids
                 )
-                # Treat any non-default overlay format option as "force re-render"
-                # so the dialog's codec / max-height / max-fps choices actually
-                # apply when a stale overlay sits on disk. With all defaults we
-                # keep the legacy "skip if present" behaviour for fast re-stitching.
-                overlay_format_overridden = (
-                    req.overlay_codec != "auto"
-                    or req.overlay_max_height is not None
-                    or req.overlay_max_fps is not None
-                    or req.overlay_theme != "splitsmith"
-                )
-                # Pull a cached overlay only when we'd actually reuse it -- a
-                # format override forces a re-render, so don't waste the download.
-                if req.include_overlay and not overlay_format_overridden:
-                    export_storage.pull_export_file(proj, overlay_target)
+                # An overlay on disk is reused only when its record says it was
+                # drawn the way this export asks (Look, style, options, format).
+                # One without a record predates them and reads as the defaults,
+                # so an untouched form re-stitches without a re-render, as before.
+                overlay_record = export_helpers.overlay_settings_file(exports_dir, base)
+                overlay_reusable = False
+                if req.include_overlay:
+                    export_storage.pull_export_file(proj, overlay_record)
+                    wanted = overlay_settings(
+                        look=req.overlay_theme,
+                        variant=req.overlay_variant,
+                        options=req.hud_options(),
+                        codec=req.overlay_codec,
+                        max_height=req.overlay_max_height,
+                        max_fps=req.overlay_max_fps,
+                    )
+                    overlay_reusable = export_helpers.read_overlay_settings(overlay_record) == wanted
+                    # Pull the MOV only when it would be reused.
+                    if overlay_reusable:
+                        export_storage.pull_export_file(proj, overlay_target)
                 overlay_missing = req.include_overlay and (
-                    not overlay_target.exists() or overlay_format_overridden
+                    not overlay_target.exists() or not overlay_reusable
                 )
 
                 needs_per_stage = not trimmed_path.exists() or not secondary_trims_present or overlay_missing
@@ -4656,6 +4666,8 @@ def register_job_bodies(state: AppState) -> None:
                                 overlay_max_height=req.overlay_max_height,
                                 overlay_max_fps=req.overlay_max_fps,
                                 overlay_theme=req.overlay_theme,
+                                overlay_variant=req.overlay_variant,
+                                overlay_options=req.hud_options(),
                             ),
                             audit_path=audit_dir / f"stage{stage_number}.json",
                             exports_dir=exports_dir,
@@ -4666,6 +4678,7 @@ def register_job_bodies(state: AppState) -> None:
                             post_buffer_seconds=proj.trim_post_buffer_seconds,
                             config=Config(),
                             secondaries=secondaries_in,
+                            segment_cache=match_export_helpers.render_segment_cache(Config().output),
                         )
                     except StageExportError as exc:
                         raise RuntimeError(f"stage {stage_number}: {exc}") from exc

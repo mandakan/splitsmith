@@ -32,6 +32,7 @@ from typing import Any, Literal, Protocol
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from . import composition, looks, user_config
+from .overlay_hud import OverlayStyleFields
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ StageCardStyle = Literal["none", "slate", "lower-third"]
 UploadPrivacy = Literal["private", "unlisted", "public"]
 
 
-class ExportPresetBody(BaseModel):
+class ExportPresetBody(OverlayStyleFields, BaseModel):
     """The recurring settings. Defaults equal the Export page's own."""
 
     model_config = ConfigDict(extra="ignore")

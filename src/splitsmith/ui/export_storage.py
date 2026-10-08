@@ -130,6 +130,8 @@ def push_stage_export_outputs(project: MatchProject | None, result: StageExportR
         result.fcpxml_path,
         result.report_path,
         result.overlay_path,
+        # What the overlay was drawn with, read before a match export reuses it.
+        result.overlay_settings_path,
         result.summary_card_path,
         # The card's still sits beside its MOV under the same stem (#972).
         result.summary_card_path.with_suffix(".png") if result.summary_card_path is not None else None,
