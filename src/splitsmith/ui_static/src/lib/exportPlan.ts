@@ -165,6 +165,8 @@ export function summaryLines(args: {
   /** ``describeRenderOptions`` for the mode and format; null is off. */
   cards: string | null;
   overlay: boolean;
+  /** The overlay style's name ("Plate"); unset reads "on" (Classic). */
+  overlayStyle?: string;
   /** The camera choice in words (``camsSummary``); null hides the line
    *  (the shooter has no second camera, or the mode does not take them). */
   cams: string | null;
@@ -203,7 +205,9 @@ export function summaryLines(args: {
         },
   );
   lines.push(cards);
-  lines.push(args.overlay ? { label: "Overlay", value: "on" } : { label: "Overlay", value: "off", dim: true });
+  lines.push(
+    args.overlay ? { label: "Overlay", value: args.overlayStyle ?? "on" } : { label: "Overlay", value: "off", dim: true },
+  );
   if (args.cams !== null) lines.push({ label: "Cameras", value: args.cams });
   if (args.youtube !== null) {
     lines.push(args.youtube ? { label: "YouTube", value: "preset + sidecar" } : { label: "YouTube", value: "off", dim: true });

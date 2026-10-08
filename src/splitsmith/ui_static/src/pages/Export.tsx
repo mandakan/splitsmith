@@ -89,7 +89,7 @@ import {
 } from "@/lib/exportPlan";
 import { useDeploymentMode } from "@/lib/features";
 import { requestLook, transitionLabel } from "@/lib/looks";
-import { visibleOverlayStyle } from "@/lib/overlayStyle";
+import { DEFAULT_OVERLAY_STYLE, overlayStyleLabel, visibleOverlayStyle } from "@/lib/overlayStyle";
 import { useLooks } from "@/lib/useLooks";
 import { useMatchHref } from "@/lib/matchHref";
 import { useDesktopCommands } from "@/lib/useDesktopCommands";
@@ -809,6 +809,10 @@ function ExportInner({ slug }: { slug: string }) {
     transitionSeconds,
     cards: describeRenderOptions(renderOptions, compare ? "grid" : "single", compare ? "mp4" : outputFormat),
     overlay: compare ? gridOverlay : includeOverlay,
+    overlayStyle:
+      !compare && overlayStyle.variant !== DEFAULT_OVERLAY_STYLE.variant
+        ? overlayStyleLabel(overlayStyle.variant)
+        : undefined,
     cams:
       mode === "single" && secondaryCount > 0
         ? camsSummary(camOptions, camChoices, project?.compare_camera ? mountLabel(project.compare_camera) : "Primary")
