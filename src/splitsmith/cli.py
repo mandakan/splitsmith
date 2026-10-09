@@ -1230,6 +1230,16 @@ def overlay(
         True, "--class-labels/--no-class-labels", help="Show draw, split, transition and reload labels."
     ),
     landing: bool = typer.Option(True, "--landing/--no-landing", help="The landing moment on the last shot."),
+    reload_chip: bool = typer.Option(
+        False,
+        "--reload-chip/--no-reload-chip",
+        help="Template styles: a chip timing each confirmed reload.",
+    ),
+    stage_bar: bool = typer.Option(
+        False,
+        "--stage-bar/--no-stage-bar",
+        help="Template styles: confirmed movement and reload regions on a stage bar.",
+    ),
     summary_card: bool = typer.Option(
         False,
         "--summary-card",
@@ -1286,6 +1296,8 @@ def overlay(
             speed_colors=speed_colors,
             class_labels=class_labels,
             landing=landing,
+            reload_chip=reload_chip,
+            stage_bar=stage_bar,
             position=overlay_position,  # type: ignore[arg-type]
         ),
         segment_cache=render_segment_cache(Config.load(None).output),
@@ -1296,7 +1308,7 @@ def overlay(
     console.print(f"[green]Wrote[/] {output}")
     if summary_card:
         from .audit_data import read_audit_data
-        from .stage_summary_data import TileStageData, load_stage_shots
+        from .stage_summary_data import TileStageData, load_stage_reloads, load_stage_shots
         from .summary_card import SummaryCardError, render_summary_card
 
         stem = output.stem.removesuffix("_overlay")
@@ -1309,6 +1321,7 @@ def overlay(
                     stage_number=int(audit_doc.get("stage_number", 0)) if isinstance(audit_doc, dict) else 0,
                     shots=load_stage_shots(audit_path),
                     stage_time_seconds=float(stage_time) if stage_time else None,
+                    reloads=load_stage_reloads(audit_path),
                 ),
                 label=summary_label,
                 trimmed_video_path=video,

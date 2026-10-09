@@ -93,7 +93,15 @@ Five starters ship, each a short commented template:
   | `split` | The current split |
   | `split_good` | A fast split, Alphas |
 
-  `split_slow` is optional. A template reads them as `#rrggbb` strings.
+  These are optional and default when left out:
+
+  | Token | Default | Where it shows |
+  |---|---|---|
+  | `reload` | `#FBBF24` | The reload chip and reload bands on an overlay's stage bar |
+  | `movement` | `#06B6D4` | Movement bands on an overlay's stage bar |
+
+  A template reads them as `#rrggbb` strings. Keep `reload` and `movement`
+  apart from `accent`: red is the brand and the slow split, not an event.
 - `accent_series` colours shooters who have not set an accent of their own,
   by grid tile.
 - `slots` names a template per card: `title_page`, `slate`, `lower_third`,
@@ -222,20 +230,54 @@ Instead of `data.card` the template gets the stage and the export's options:
 ```js
 data.stage = {
   beep: 5.0,                 // where the beep is, in clip seconds
-  shots: [{ t: 6.12, split: 1.12, cls: "first_shot", label: "Draw", tier: null }, ...],
+  shots: [{ t: 6.12, split: 1.12, cls: "first_shot", label: "Draw", tier: null, moving: false }, ...],
   stage_time: 7.75,
   rounds: 12,
+  events: [{ kind: "movement", start: 7.2, end: 8.9 }, ...],   // clip seconds
+  reloads: [{ start: 9.05, end: 10.47, duration: 1.42, overhang: null }, ...],
 }
-data.options = { speed_colors: false, class_labels: true, landing: true, position: "bottom-left" }
+data.options = {
+  speed_colors: false, class_labels: true, landing: true, position: "bottom-left",
+  reload_chip: false, stage_bar: false,
+}
 ```
 
-Read the numbers; never compute a split, a class or a speed in the template.
+Read the numbers; never compute a split, a class, a speed or a region's
+length in the template.
 `tier` is `good`, `normal` or `slow` against this stage's median for that
 class, and `null` for a draw, a reload and an unclassified shot. Honour the
 three toggles: draw a split in one colour when `speed_colors` is off (the
 default), leave
 the class out when `class_labels` is off, and skip the landing moment when
 `landing` is off.
+
+`events` and `reloads` hold the stage's **confirmed** regions only, the ones
+a person kept on the Coach page; an automatic proposal never reaches a
+template. Both lists are always there and empty when there is nothing:
+
+- `events[]` is every confirmed region, in clip seconds: `kind` is
+  `movement`, `reload` or `activation`.
+- `reloads[]` is the reloads again, with `duration` (seconds, already
+  measured) and `overhang`: seconds from the end of the last movement it
+  overlaps to the reload's end (negative when it finished on the move), or
+  `null` when it overlaps no movement.
+- `shots[].moving` is true for a shot fired inside a confirmed movement.
+
+Two more toggles, both off unless the exporter turns them on:
+
+- `reload_chip`: while a reload runs (`start <= t < end`), show a chip that
+  counts `t - start` up; then hold `duration` while it fades out over about
+  0.4 s. Draw nothing when the toggle is off.
+- `stage_bar`: a thin bar under the clock that fills with time, with a band
+  per region drawn as the fill reaches it (`reload` and `movement` colours,
+  `muted` for an activation). Draw nothing when the toggle is off.
+
+With either toggle off, or no confirmed regions, the page must be exactly
+the page it would be without them: create the chip and the bar only when
+there is something to draw. A reload can end after the last shot; return a
+`settle()` long enough to finish the chip's count and fade
+(`reload.end + fade - last shot`), and clamp a band to the bar. The shipped
+styles all do this; `hud-timeline.html` is the shortest to read.
 
 A style that can sit in more than one corner says which in its own markup,
 its default first; `options.position` is then one of them:
@@ -311,7 +353,9 @@ yours to hold: use one you may use in published video.
 Chromium against three sample cards: one shooter with a logo, two shooters
 without, and a 52-character stage name. Stings get the transition instead. An overlay style runs on three sample
 stages (twelve rounds, thirty-two, and one with no class data), probed
-mid-stage and after the landing.
+mid-stage and after the landing, with `reload_chip` and `stage_bar` on. The
+twelve-round stage carries a confirmed reload, movement and activation, and
+is also probed half-way through the reload, while the chip is up.
 
 ```text
 Look club-red  ~/.splitsmith/looks/club-red  user

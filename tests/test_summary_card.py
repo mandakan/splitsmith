@@ -197,6 +197,7 @@ def test_overlay_verb_writes_the_card_beside_the_overlay(
                 "stage_number": 1,
                 "stage_time_seconds": 8.0,
                 "shots": [{"shot_number": 1, "candidate_number": 1, "ms_after_beep": 500}],
+                "events": [{"id": "evt-1", "kind": "reload", "start": 1.0, "end": 2.25, "source": "manual"}],
             }
         ),
         encoding="utf-8",
@@ -235,6 +236,8 @@ def test_overlay_verb_writes_the_card_beside_the_overlay(
     data = captured["data"]
     assert data.stage_time_seconds == 8.0
     assert [s.time_from_beep for s in data.shots] == [0.5]
+    # The confirmed reload reaches the card's reload row.
+    assert [(r.event_id, r.duration) for r in data.reloads] == [("evt-1", 1.25)]
     # Joined across newlines: on a narrow CI terminal rich would otherwise
     # wrap the path mid-name and the assertion would fail for the wrong
     # reason (#617).

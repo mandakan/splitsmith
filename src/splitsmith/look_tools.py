@@ -32,6 +32,7 @@ from typing import Literal, Protocol
 from PIL import Image, ImageDraw
 
 from . import composition
+from .config import StageEvent
 from .identity import ResolvedIdentity
 from .look_brand import brand_json
 from .look_sting import sting_context
@@ -440,32 +441,61 @@ def _hud_stage(gaps: Sequence[tuple[str | None, float]]) -> list[TileShot]:
     return shots
 
 
-def hud_samples() -> list[tuple[str, list[TileShot]]]:
+@dataclass(frozen=True)
+class HudSample:
+    """One stage ``looks check`` runs a HUD template on: its shots and its
+    confirmed regions (seconds from the beep, like the shots)."""
+
+    name: str
+    shots: list[TileShot]
+    events: tuple[StageEvent, ...] = ()
+
+
+def _region(n: int, kind: str, start: float, end: float) -> StageEvent:
+    return StageEvent.model_validate(
+        {"id": f"evt-{n}", "kind": kind, "start": start, "end": end, "source": "manual"}
+    )
+
+
+def hud_samples() -> list[HudSample]:
     """The stages ``looks check`` runs a HUD template on: twelve rounds with
-    every class a stage has, thirty-two (a long row of anything per round),
-    and eight with no class data (an audit from before classes)."""
+    every class a stage has and a confirmed reload on the move, a second
+    movement and an activation in the gaps those classes name, thirty-two (a long row of anything per
+    round), and eight with no class data (an audit from before classes)."""
     twelve = [("first_shot", 1.12), ("split", 0.24), ("split", 0.26), ("transition", 0.71), ("split", 0.22)]
     twelve += [("split", 0.25), ("reload", 1.64), ("split", 0.27), ("movement", 1.9), ("split", 0.23)]
     twelve += [("transition", 0.66), ("split", 0.25)]
     long = [("first_shot", 1.0)] + [("split", 0.26)] * 31
     bare: list[tuple[str | None, float]] = [(None, 1.05)]
     bare += [(None, 0.3)] * 7
+    # Shot 6 lands at 2.80 s, 7 at 4.44, 8 at 4.71, 9 at 6.61, 10 at 6.84, 11 at 7.50.
+    # The reload is on the move and ends after the movement (overhang
+    # +0.15), so the check runs a template's split-band path: the stage bar
+    # cuts a reload on the move into its half of the bar.
+    regions = (
+        _region(1, "reload", 2.95, 4.25),
+        _region(2, "movement", 3.0, 4.1),
+        _region(3, "movement", 4.85, 6.45),
+        _region(4, "activation", 7.0, 7.3),
+    )
     return [
-        ("12 rounds", _hud_stage(twelve)),
-        ("32 rounds", _hud_stage(long)),
-        ("no class data", _hud_stage(bare)),
+        HudSample("12 rounds", _hud_stage(twelve), regions),
+        HudSample("32 rounds", _hud_stage(long)),
+        HudSample("no class data", _hud_stage(bare)),
     ]
 
 
-def _hud_context(look: Look, template: Path, shots: Sequence[TileShot]) -> TemplateContext:
+def _hud_context(look: Look, template: Path, sample: HudSample) -> TemplateContext:
     # Deferred: overlay_hud_render builds on the renderer's encoder module.
     from .overlay_hud_render import hud_context
 
-    stage = hud_stage_data(shots, beep_in_clip=HUD_SAMPLE_BEEP)
+    stage = hud_stage_data(sample.shots, beep_in_clip=HUD_SAMPLE_BEEP, events=sample.events)
     position = resolve_position(None, declared_positions(template))
+    # Both region toggles on: a check with them off would never draw the
+    # chip or the stage bar, and a stage without regions draws neither.
     return hud_context(
         stage=stage,
-        options=hud_options_data(HudOptions(), position),
+        options=hud_options_data(HudOptions(reload_chip=True, stage_bar=True), position),
         theme=theme_for(look),
         width=CHECK_WIDTH,
         height=CHECK_HEIGHT,
@@ -479,8 +509,9 @@ def _check_hud(subject: str, look: Look, template: Path, prober: Prober) -> list
     where the renderer holds one frame (before the beep, after settle())."""
     results: list[tuple[str, TemplateProbe]] = []
     contexts: list[tuple[str, TemplateContext, list[TileShot]]] = []
-    for case, shots in hud_samples():
-        context = _hud_context(look, template, shots)
+    for sample in hud_samples():
+        case, shots = sample.name, sample.shots
+        context = _hud_context(look, template, sample)
         contexts.append((case, context, shots))
         # Mid-stage at rest: just before the shot that ends the longest gap,
         # so a shot effect caught mid-way is never mistaken for a layout fault.
@@ -489,7 +520,12 @@ def _check_hud(subject: str, look: Look, template: Path, prober: Prober) -> list
         )
         mid = HUD_SAMPLE_BEEP + shots[index + 1].time_from_beep - 0.02
         landed = HUD_SAMPLE_BEEP + shots[-1].time_from_beep + HUD_LANDED_AFTER
-        for moment, at in (("mid-stage", mid), ("landed", landed)):
+        moments = [("mid-stage", mid), ("landed", landed)]
+        # Half-way through the first reload: the reload chip is up.
+        reloads = [e for e in sample.events if e.kind == "reload"]
+        if reloads:
+            moments.append(("mid-reload", HUD_SAMPLE_BEEP + (reloads[0].start + reloads[0].end) / 2))
+        for moment, at in moments:
             probe = prober.probe_template(
                 template, context=context, width=CHECK_WIDTH, height=CHECK_HEIGHT, at=at
             )

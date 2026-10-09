@@ -946,6 +946,75 @@ def test_fcp7xml_still_ignores_titles_and_intro(tmp_path: Path) -> None:
     assert any("intro ignored" in a for a in result.anomalies)
 
 
+# --- stage events: confirmed region markers (spec 2026-10-08, part 2) -----
+
+
+def _stage_input_with_events(tmp_path: Path, events: list[dict]) -> match_exports_mod.MatchStageInput:
+    payload = _audit_payload([{"shot_number": 1, "ms_after_beep": 9000}])
+    payload["events"] = events
+    audit = _make_audit(tmp_path, "stage1_events.json", payload)
+    return match_exports_mod.MatchStageInput(
+        stage_number=1,
+        stage_name="Stage 1",
+        audit_path=audit,
+        trimmed_path=_make_trim(tmp_path, "stage1_events_trimmed.mp4"),
+        beep_offset_seconds=5.0,
+    )
+
+
+def test_export_match_fcpxml_carries_a_confirmed_region_marker(tmp_path: Path) -> None:
+    events = [{"id": "evt-1", "kind": "reload", "start": 8.05, "end": 9.47, "source": "manual"}]
+    result = match_exports_mod.export_match(
+        stages=[_stage_input_with_events(tmp_path, events)],
+        request=_card_request(output_format="fcpxml"),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    assert "Reload 1.42" in result.fcpxml_path.read_text(encoding="utf-8")
+
+
+def test_export_match_fcp7xml_carries_a_confirmed_region_marker(tmp_path: Path) -> None:
+    events = [{"id": "evt-1", "kind": "reload", "start": 8.05, "end": 9.47, "source": "manual"}]
+    result = match_exports_mod.export_match(
+        stages=[_stage_input_with_events(tmp_path, events)],
+        request=_card_request(output_format="fcp7xml"),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    root = ET.fromstring(result.fcpxml_path.read_bytes())
+    names = [m.findtext("name") for m in root.findall(".//marker")]
+    assert "Reload 1.42" in names
+
+
+def test_export_match_fcpxml_an_auto_only_region_gives_no_marker(tmp_path: Path) -> None:
+    events = [{"id": "evt-1", "kind": "reload", "start": 8.05, "end": 9.47, "source": "auto"}]
+    result = match_exports_mod.export_match(
+        stages=[_stage_input_with_events(tmp_path, events)],
+        request=_card_request(output_format="fcpxml"),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    text = result.fcpxml_path.read_text(encoding="utf-8")
+    assert "Reload" not in text
+
+
+def test_export_match_fcp7xml_an_auto_only_region_gives_no_marker(tmp_path: Path) -> None:
+    events = [{"id": "evt-1", "kind": "reload", "start": 8.05, "end": 9.47, "source": "auto"}]
+    result = match_exports_mod.export_match(
+        stages=[_stage_input_with_events(tmp_path, events)],
+        request=_card_request(output_format="fcp7xml"),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    root = ET.fromstring(result.fcpxml_path.read_bytes())
+    names = [m.findtext("name") for m in root.findall(".//marker")]
+    assert "Reload 1.42" not in names
+
+
 def test_title_info_lines_come_from_the_project(tmp_path: Path) -> None:
     from datetime import date
 
@@ -1079,6 +1148,30 @@ def test_summary_hold_label_falls_back_to_the_project_name(
         probe=_stub_probe,
     )
     assert captured["comp"].stages[0].summary.label == "Bromma Classifier"
+
+
+def test_summary_hold_carries_the_stages_confirmed_reloads(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The hold's tile carries the confirmed reloads the summary's reload
+    row draws; an auto proposal never reaches it (spec 2026-10-08, part 2)."""
+    captured = _capture_mp4(monkeypatch)
+    stage = _one_stage_input(tmp_path)
+    doc = json.loads(stage.audit_path.read_text())
+    doc["events"] = [
+        {"id": "evt-1", "kind": "reload", "start": 1.0, "end": 2.25, "source": "manual"},
+        {"id": "evt-2", "kind": "reload", "start": 3.0, "end": 4.0, "source": "auto"},
+    ]
+    stage.audit_path.write_text(json.dumps(doc))
+    match_exports_mod.export_match(
+        stages=[stage],
+        request=_card_request(summary_hold_seconds=3.0),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    hold = captured["comp"].stages[0].summary
+    assert [(r.event_id, r.duration) for r in hold.data.reloads] == [("evt-1", 1.25)]
 
 
 def test_summary_hold_off_by_default(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

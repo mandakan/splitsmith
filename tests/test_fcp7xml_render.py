@@ -14,7 +14,7 @@ from xml.etree import ElementTree as ET
 import pytest
 
 from splitsmith import composition, fcp7xml_render
-from splitsmith.config import Shot, VideoMetadata
+from splitsmith.config import Shot, StageEvent, VideoMetadata
 from splitsmith.fcpxml_gen import (
     PipPlacement,
     SecondaryClip,
@@ -398,6 +398,142 @@ def test_markers_outside_visible_window_are_dropped(tmp_path: Path) -> None:
     root = _render(stages, tmp_path)
     markers = root.findall(".//clipitem/marker")
     assert len(markers) == 1
+
+
+# --- region markers (spec 2026-10-08, part 2) -----------------------------
+
+
+def test_region_marker_in_out_frames_for_a_reload(tmp_path: Path) -> None:
+    """A 1.42s reload starting 8.05s after the beep (beep at 5.0s) ->
+    clip-local 13.05s-14.47s = frames 392-434 at 30fps. ``tail_pad_seconds``
+    is generous so the whole 20s clip stays visible and the region isn't
+    itself the thing deciding the window (that's the next test)."""
+    primary = _make_video(tmp_path, "a.mp4")
+    stages = [
+        StageComposition(
+            stage_name="A",
+            video_path=primary,
+            video=_meta_30fps(),
+            shots=[],
+            beep_offset_seconds=5.0,
+            head_pad_seconds=5.0,
+            tail_pad_seconds=20.0,
+            events=(StageEvent(id="evt-1", kind="reload", start=8.05, end=9.47, source="manual"),),
+        )
+    ]
+    root = _render(stages, tmp_path)
+    markers = root.findall(".//track[1]/clipitem/marker")
+    assert len(markers) == 1
+    assert markers[0].findtext("in") == "392"
+    assert markers[0].findtext("out") == "434"
+    assert markers[0].findtext("name") == "Reload 1.42"
+
+
+def test_region_marker_values_for_movement_and_activation(tmp_path: Path) -> None:
+    primary = _make_video(tmp_path, "a.mp4")
+    stages = [
+        StageComposition(
+            stage_name="A",
+            video_path=primary,
+            video=_meta_30fps(),
+            shots=[],
+            beep_offset_seconds=5.0,
+            head_pad_seconds=5.0,
+            tail_pad_seconds=20.0,
+            events=(
+                StageEvent(id="evt-1", kind="movement", start=1.0, end=3.0, source="manual"),
+                StageEvent(id="evt-2", kind="activation", start=4.0, end=4.5, source="manual"),
+            ),
+        )
+    ]
+    root = _render(stages, tmp_path)
+    markers = root.findall(".//track[1]/clipitem/marker")
+    names = [m.findtext("name") for m in markers]
+    assert names == ["Movement", "Activation"]
+
+
+def test_region_marker_outside_visible_window_is_dropped(tmp_path: Path) -> None:
+    """Mirrors ``test_markers_outside_visible_window_are_dropped`` for a
+    region: tight tail pad collapses the window, so a region starting
+    well past it is skipped."""
+    primary = _make_video(tmp_path, "a.mp4")
+    stages = [
+        StageComposition(
+            stage_name="A",
+            video_path=primary,
+            video=_meta_30fps(),
+            shots=[_shot(1, 1.0, 1.0)],
+            beep_offset_seconds=5.0,
+            head_pad_seconds=5.0,
+            tail_pad_seconds=0.0,
+            events=(StageEvent(id="evt-1", kind="movement", start=14.5, end=14.8, source="manual"),),
+        )
+    ]
+    root = _render(stages, tmp_path)
+    markers = root.findall(".//clipitem/marker")
+    assert all(m.findtext("name") != "Movement" for m in markers)
+
+
+def test_region_marker_end_clamps_to_the_visible_window(tmp_path: Path) -> None:
+    """A region that starts inside the visible window but runs past its
+    end (9.0s to 30.0s, beep at 0s, a generous tail pad keeping the whole
+    20s clip visible) is not dropped -- its out-frame clamps to the
+    window's own end (frame 600 = 20.0s at 30fps) instead of overrunning
+    it."""
+    primary = _make_video(tmp_path, "a.mp4")
+    stages = [
+        StageComposition(
+            stage_name="A",
+            video_path=primary,
+            video=_meta_30fps(),
+            shots=[],
+            beep_offset_seconds=0.0,
+            head_pad_seconds=0.0,
+            tail_pad_seconds=20.0,
+            events=(StageEvent(id="evt-1", kind="movement", start=9.0, end=30.0, source="manual"),),
+        )
+    ]
+    root = _render(stages, tmp_path)
+    markers = [m for m in root.findall(".//track[1]/clipitem/marker") if m.findtext("name") == "Movement"]
+    assert len(markers) == 1
+    assert markers[0].findtext("in") == "270"
+    assert markers[0].findtext("out") == "600"
+
+
+def test_region_marker_end_clamps_to_a_window_shorter_than_the_clip(tmp_path: Path) -> None:
+    """The window, not the clip: a 10 s tail pad over the 20 s clip ends the
+    visible window at frame 300, so a region from 9.0 s to 30.0 s goes out
+    there. Clamping to the clip's end would give 600."""
+    primary = _make_video(tmp_path, "a.mp4")
+    stages = [
+        StageComposition(
+            stage_name="A",
+            video_path=primary,
+            video=_meta_30fps(),
+            shots=[],
+            beep_offset_seconds=0.0,
+            head_pad_seconds=0.0,
+            tail_pad_seconds=10.0,
+            events=(StageEvent(id="evt-1", kind="movement", start=9.0, end=30.0, source="manual"),),
+        )
+    ]
+    root = _render(stages, tmp_path)
+    markers = [m for m in root.findall(".//track[1]/clipitem/marker") if m.findtext("name") == "Movement"]
+    assert len(markers) == 1
+    assert markers[0].findtext("in") == "270"
+    assert markers[0].findtext("out") == "300"
+
+
+# No byte-identity self-pin here on purpose, for the same reason as the
+# fcpxml_gen tests' equivalent comments: a stage built with ``events=()``
+# vs one that omits ``events`` reduce to the same empty tuple, so comparing
+# their rendered bytes to each other cannot catch a mutant that
+# unconditionally emits a region marker -- both sides would grow the same
+# spurious marker and still match. The no-regions case is instead pinned
+# by the pre-existing, unmodified ``test_markers_land_at_clip_local_frames``
+# (``assert len(markers) == 2`` with no ``events`` argument at all, over
+# ``track[1]/clipitem/marker`` -- every marker on the primary): an exact
+# count that fails under the same "always emit a marker" mutant.
 
 
 # --- PiP via Basic Motion -------------------------------------------------

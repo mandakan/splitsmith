@@ -369,8 +369,15 @@ def _summary_cells(
             cells.append((placement, ()))
             continue
         tile = data.get(placement.label)
+        # ``split_rows=False``: grid cells are compared side by side, so
+        # every one keeps the combined split row (spec 2026-10-08, part 2).
         groups = _cell_groups(
-            tile, placement.label, scale=scale, cell_width=cell_width, cell_height=cell_height
+            tile,
+            placement.label,
+            scale=scale,
+            cell_width=cell_width,
+            cell_height=cell_height,
+            split_rows=False,
         )
         cells.append((placement, groups))
     return cells
@@ -452,7 +459,8 @@ def build_hold_still(
             cell_width=geometry.cell_width,
             cell_height=geometry.cell_height,
         )
-        html = grid_html(cells, geometry=geometry, scale=scale, theme=theme)
+        # Each cell's table rows fit their own columns, as the single card's do.
+        html = grid_html(cells, geometry=geometry, scale=scale, theme=theme, fit_columns=True)
         try:
             png_bytes = rasterizer.png(html, width=geometry.canvas_width, height=geometry.canvas_height)
             with Image.open(io.BytesIO(png_bytes)) as overlay_image:

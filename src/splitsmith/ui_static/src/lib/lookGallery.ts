@@ -464,6 +464,18 @@ const STYLE_TOGGLES: LookToggle[] = [
     read: (s) => s.overlayStyle.landing,
     write: (s, on) => styled(s, { landing: on }),
   },
+  {
+    id: "reload-chip",
+    label: "Reload chip",
+    read: (s) => s.overlayStyle.reloadChip,
+    write: (s, on) => styled(s, { reloadChip: on }),
+  },
+  {
+    id: "stage-bar",
+    label: "Stage bar",
+    read: (s) => s.overlayStyle.stageBar,
+    write: (s, on) => styled(s, { stageBar: on }),
+  },
 ];
 
 /** The overlay slot with the chosen Look's HUD styles beside Classic, for

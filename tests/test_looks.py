@@ -110,6 +110,33 @@ def test_a_manifest_must_carry_every_required_colour(user_dir: Path) -> None:
         looks.load_look("club")
 
 
+def test_a_look_without_the_event_colours_loads_with_the_defaults(user_dir: Path) -> None:
+    from splitsmith.look_template import theme_tokens
+    from splitsmith.overlay_theme import load_theme
+
+    _write_look(user_dir, "club")
+    colors = json.loads((user_dir / "club" / "look.json").read_text(encoding="utf-8"))["colors"]
+    assert "reload" not in colors and "movement" not in colors
+    theme = load_theme("club")
+    assert theme.reload == (251, 191, 36) and theme.movement == (6, 182, 212)
+    tokens = theme_tokens(theme)
+    assert tokens["reload"] == "#fbbf24" and tokens["movement"] == "#06b6d4"
+    assert "reload" not in looks.REQUIRED_COLORS and "movement" not in looks.REQUIRED_COLORS
+
+
+def test_a_look_can_choose_its_event_colours(user_dir: Path) -> None:
+    from splitsmith.overlay_theme import load_theme
+
+    colors = json.loads((looks.shipped_looks_dir() / "clean" / "look.json").read_text(encoding="utf-8"))[
+        "colors"
+    ]
+    colors["reload"] = [255, 0, 0]
+    _write_look(user_dir, "club", colors=colors)
+    theme = load_theme("club")
+    assert theme.reload == (255, 0, 0)
+    assert theme.movement == (6, 182, 212)
+
+
 def test_the_manifest_name_must_match_its_directory(user_dir: Path) -> None:
     d = _write_look(user_dir, "club")
     manifest = json.loads((d / "look.json").read_text(encoding="utf-8"))

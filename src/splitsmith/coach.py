@@ -22,7 +22,7 @@ from __future__ import annotations
 import os
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Final, Protocol, get_args
+from typing import Any, Final, Protocol, TypeVar, get_args
 
 from .config import (
     CoachAutoClassifyConfig,
@@ -222,6 +222,9 @@ class SplitStatInterval(Protocol):
     def interval_class(self) -> IntervalClass | None: ...
 
 
+_Interval = TypeVar("_Interval", bound=SplitStatInterval)
+
+
 def statistic_splits(
     shots: Sequence[SplitStatInterval],
     *,
@@ -245,14 +248,27 @@ def statistic_splits(
 
     Partial classification (#775): the save endpoint and the coach GET
     both run the auto-classifier, so an audited stage is fully classified
-    for every shot that has ``ms_after_beep``. The ``any`` branch below is
-    therefore all-or-nothing in practice; shots without ``ms_after_beep``
-    never reach this function (audit_shots_to_engine_shots drops them).
+    for every shot that has ``ms_after_beep``. The ``any`` branch in
+    :func:`statistic_split_shots` is therefore all-or-nothing in practice;
+    shots without ``ms_after_beep`` never reach this function
+    (audit_shots_to_engine_shots drops them).
     """
+    return [s.split for s in statistic_split_shots(shots, split_max=split_max)]
+
+
+def statistic_split_shots(
+    shots: Sequence[_Interval],
+    *,
+    split_max: float | None = None,
+) -> list[_Interval]:
+    """The shots whose split :func:`statistic_splits` selects, in order -- the
+    same rule, handing back the shots themselves so a caller can partition
+    the selection by something else the shot carries (the stage summary's
+    static and moving rows split it by ``TileShot.moving``)."""
     if any(s.interval_class is not None for s in shots):
-        return [s.split for s in shots if s.interval_class == "split"]
+        return [s for s in shots if s.interval_class == "split"]
     cutoff = split_max if split_max is not None else split_stat_split_max()
-    return [s.split for i, s in enumerate(shots) if i > 0 and s.split <= cutoff]
+    return [s for i, s in enumerate(shots) if i > 0 and s.split <= cutoff]
 
 
 def classify_intervals_in_dicts(

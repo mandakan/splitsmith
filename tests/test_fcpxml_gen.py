@@ -22,6 +22,7 @@ from splitsmith.config import (
     OutputConfig,
     Shot,
     SplitColorThresholds,
+    StageEvent,
     VideoMetadata,
 )
 from splitsmith.fcpxml_gen import (
@@ -65,6 +66,16 @@ def _meta_2997() -> VideoMetadata:
         duration_seconds=20.0,
         frame_rate_num=30000,
         frame_rate_den=1001,
+    )
+
+
+def _meta_24fps() -> VideoMetadata:
+    return VideoMetadata(
+        width=1920,
+        height=1080,
+        duration_seconds=20.0,
+        frame_rate_num=24,
+        frame_rate_den=1,
     )
 
 
@@ -217,6 +228,147 @@ def test_2997_frame_alignment_uses_rational_duration(tmp_path: Path) -> None:
     assert marker.attrib["start"] == "180180/30000s"
     # Sanity: the unreduced fraction equals the mathematical 6.006s exactly.
     assert Fraction(180180, 30000) == Fraction(180, 1) * Fraction(1001, 30000)
+
+
+# --- generate_fcpxml: region markers (spec 2026-10-08, part 2) ------------
+
+
+def test_generate_fcpxml_region_marker_reload_frame_aligned_24fps(tmp_path: Path) -> None:
+    """A 1.42s reload starting 8.05s after the beep, beep at 5.0s clip-local
+    -> region starts at clip-local 13.05s = 313.2 frames -> 313 at 24fps;
+    the end (14.47s = 347.28 -> 347) minus the start frame gives a 34-frame
+    duration."""
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"")
+    out = tmp_path / "v.fcpxml"
+    events = [StageEvent(id="evt-1", kind="reload", start=8.05, end=9.47, source="manual")]
+    generate_fcpxml(
+        video_path=video,
+        video=_meta_24fps(),
+        shots=[],
+        beep_offset_seconds=5.0,
+        output_path=out,
+        project_name="v",
+        config=OutputConfig(),
+        events=events,
+    )
+    root = ET.fromstring(out.read_bytes())
+    marker = root.find(".//marker")
+    assert marker is not None
+    assert marker.attrib["start"] == "313/24s"
+    assert marker.attrib["duration"] == "34/24s"
+    assert marker.attrib["value"] == "Reload 1.42"
+
+
+def test_generate_fcpxml_region_marker_reload_frame_aligned_2997fps(tmp_path: Path) -> None:
+    """Same reload at 29.97fps (frame_rate_num=30000, frame_rate_den=1001):
+    the start/duration stay rational with the 1001 denominator intact
+    (FCP convention -- not reduced to a smaller fraction)."""
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"")
+    out = tmp_path / "v.fcpxml"
+    events = [StageEvent(id="evt-1", kind="reload", start=8.05, end=9.47, source="manual")]
+    generate_fcpxml(
+        video_path=video,
+        video=_meta_2997(),
+        shots=[],
+        beep_offset_seconds=5.0,
+        output_path=out,
+        project_name="v",
+        config=OutputConfig(),
+        events=events,
+    )
+    root = ET.fromstring(out.read_bytes())
+    marker = root.find(".//marker")
+    assert marker is not None
+    assert marker.attrib["start"] == "391391/30000s"
+    assert marker.attrib["duration"] == "43043/30000s"
+    assert marker.attrib["value"] == "Reload 1.42"
+    # Sanity: start is the mathematically exact 391 * (1001/30000)s.
+    assert Fraction(391391, 30000) == Fraction(391, 1) * Fraction(1001, 30000)
+
+
+def test_generate_fcpxml_region_marker_movement_and_activation_values(tmp_path: Path) -> None:
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"")
+    out = tmp_path / "v.fcpxml"
+    events = [
+        StageEvent(id="evt-1", kind="movement", start=1.0, end=3.0, source="manual"),
+        StageEvent(id="evt-2", kind="activation", start=4.0, end=4.5, source="manual"),
+    ]
+    generate_fcpxml(
+        video_path=video,
+        video=_meta_30fps(),
+        shots=[],
+        beep_offset_seconds=5.0,
+        output_path=out,
+        project_name="v",
+        config=OutputConfig(),
+        events=events,
+    )
+    root = ET.fromstring(out.read_bytes())
+    markers = root.findall(".//marker")
+    assert len(markers) == 2
+    assert markers[0].attrib["value"] == "Movement"
+    assert markers[1].attrib["value"] == "Activation"
+
+
+def test_generate_fcpxml_drops_region_marker_outside_clip(tmp_path: Path) -> None:
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"")
+    out = tmp_path / "v.fcpxml"
+    # Clip is 20s; a region starting at clip-local 25s must be dropped.
+    events = [StageEvent(id="evt-1", kind="movement", start=20.0, end=21.0, source="manual")]
+    generate_fcpxml(
+        video_path=video,
+        video=_meta_30fps(),
+        shots=[],
+        beep_offset_seconds=5.0,
+        output_path=out,
+        project_name="v",
+        config=OutputConfig(),
+        events=events,
+    )
+    root = ET.fromstring(out.read_bytes())
+    assert root.findall(".//marker") == []
+
+
+def test_generate_fcpxml_clamps_region_end_to_the_clip_duration(tmp_path: Path) -> None:
+    """A region that starts inside the clip but runs past its end (9.0s to
+    30.0s on a 20s clip, beep at 0s) is not dropped -- its end clamps to
+    the clip's own duration (20.0s = frame 600) instead of claiming a
+    duration FCP would reject for overrunning the asset."""
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"")
+    out = tmp_path / "v.fcpxml"
+    events = [StageEvent(id="evt-1", kind="movement", start=9.0, end=30.0, source="manual")]
+    generate_fcpxml(
+        video_path=video,
+        video=_meta_30fps(),
+        shots=[],
+        beep_offset_seconds=0.0,
+        output_path=out,
+        project_name="v",
+        config=OutputConfig(),
+        events=events,
+    )
+    root = ET.fromstring(out.read_bytes())
+    markers = root.findall(".//marker")
+    assert len(markers) == 1
+    assert markers[0].attrib["start"] == "270/30s"  # 9.0s * 30fps
+    assert markers[0].attrib["duration"] == "330/30s"  # (20.0 - 9.0)s * 30fps, clamped
+    assert markers[0].attrib["value"] == "Movement"
+
+
+# No byte-identity self-pin here on purpose: a call with ``events=()`` vs
+# one that omits ``events`` entirely both reduce to the same empty list, so
+# comparing their output to each other cannot catch a mutant that
+# unconditionally injects a marker regardless of ``events`` -- both sides
+# would grow the same spurious marker and still match. The no-regions case
+# is instead pinned by the pre-existing, unmodified
+# ``test_generate_fcpxml_minimal_structure`` (``assert len(markers) == 2``
+# with no ``events`` argument at all): that exact-count assertion fails
+# under the "always append a marker" mutant described in review.
 
 
 def test_tag_source_application_writes_bplist_via_xattr(
@@ -891,6 +1043,144 @@ def test_match_fcpxml_drops_markers_outside_trimmed_window(tmp_path: Path) -> No
     assert len(markers) == 2
     assert "Shot 2" in markers[0].attrib["value"]
     assert "Shot 3" in markers[1].attrib["value"]
+
+
+def test_match_fcpxml_region_marker_on_primary_clip(tmp_path: Path) -> None:
+    """A confirmed region on a match stage becomes a marker on the primary
+    clip with duration spanning the region, same as the single-stage path."""
+    video = _make_video(tmp_path, "v.mp4")
+    out = tmp_path / "match.fcpxml"
+    events = [StageEvent(id="evt-1", kind="reload", start=1.0, end=2.42, source="manual")]
+    generate_match_fcpxml(
+        stages=[
+            StageComposition(
+                stage_name="v",
+                video_path=video,
+                video=_meta_30fps(),
+                shots=[_shot(1, time_from_beep=0.4, split=0.4)],
+                beep_offset_seconds=5.0,
+                head_pad_seconds=0.5,
+                tail_pad_seconds=1.0,
+                events=events,
+            )
+        ],
+        output_path=out,
+        project_name="match",
+        config=OutputConfig(),
+    )
+    root = ET.fromstring(out.read_bytes())
+    markers = root.findall(".//spine/asset-clip/marker")
+    region_markers = [m for m in markers if m.attrib["value"] == "Reload 1.42"]
+    assert len(region_markers) == 1
+    assert region_markers[0].attrib["start"] == "180/30s"  # (5.0+1.0)s * 30fps
+    assert region_markers[0].attrib["duration"] != "1/30s"  # spans the region, not one frame
+
+
+def test_match_fcpxml_drops_region_marker_outside_trimmed_window(tmp_path: Path) -> None:
+    """Mirrors ``test_match_fcpxml_drops_markers_outside_trimmed_window`` for
+    a region: a confirmed region whose start falls outside the visible
+    window is dropped."""
+    video = _make_video(tmp_path, "v.mp4")
+    out = tmp_path / "v.fcpxml"
+    # Clip is 20s; a region starting at clip-local 25s (beep 5.0 + 20.0) is
+    # well past the trimmed/visible window and must be dropped.
+    events = [StageEvent(id="evt-1", kind="movement", start=20.0, end=20.5, source="manual")]
+    generate_match_fcpxml(
+        stages=[
+            StageComposition(
+                stage_name="v",
+                video_path=video,
+                video=_meta_30fps(),
+                shots=[_shot(2, time_from_beep=0.4, split=1.0)],
+                beep_offset_seconds=5.0,
+                head_pad_seconds=0.5,
+                tail_pad_seconds=1.0,
+                events=events,
+            )
+        ],
+        output_path=out,
+        project_name="match",
+        config=OutputConfig(),
+    )
+    root = ET.fromstring(out.read_bytes())
+    markers = root.findall(".//spine/asset-clip/marker")
+    assert all(m.attrib["value"] != "Movement" for m in markers)
+
+
+def test_match_fcpxml_clamps_region_end_to_the_visible_window(tmp_path: Path) -> None:
+    """A region that starts inside the visible window but runs past its
+    end (9.0s to 30.0s, beep at 0s, a generous tail pad keeping the whole
+    20s clip visible) is not dropped -- its end clamps to the window's own
+    end (20.0s) instead of overrunning it."""
+    video = _make_video(tmp_path, "v.mp4")
+    out = tmp_path / "v.fcpxml"
+    events = [StageEvent(id="evt-1", kind="movement", start=9.0, end=30.0, source="manual")]
+    generate_match_fcpxml(
+        stages=[
+            StageComposition(
+                stage_name="v",
+                video_path=video,
+                video=_meta_30fps(),
+                shots=[],
+                beep_offset_seconds=0.0,
+                head_pad_seconds=0.0,
+                tail_pad_seconds=20.0,
+                events=events,
+            )
+        ],
+        output_path=out,
+        project_name="match",
+        config=OutputConfig(),
+    )
+    root = ET.fromstring(out.read_bytes())
+    markers = [m for m in root.findall(".//spine/asset-clip/marker") if m.attrib["value"] == "Movement"]
+    assert len(markers) == 1
+    assert markers[0].attrib["start"] == "270/30s"  # 9.0s * 30fps
+    assert markers[0].attrib["duration"] == "330/30s"  # (20.0 - 9.0)s * 30fps, clamped
+
+
+def test_match_fcpxml_clamps_region_end_to_a_window_shorter_than_the_clip(tmp_path: Path) -> None:
+    """The window, not the clip: a 10 s tail pad over the 20 s clip ends the
+    visible window at 10.0 s, so a region from 9.0 s to 30.0 s runs one
+    second (30/30s). Clamping to the clip's end would give 330/30s."""
+    video = _make_video(tmp_path, "v.mp4")
+    out = tmp_path / "v.fcpxml"
+    events = [StageEvent(id="evt-1", kind="movement", start=9.0, end=30.0, source="manual")]
+    generate_match_fcpxml(
+        stages=[
+            StageComposition(
+                stage_name="v",
+                video_path=video,
+                video=_meta_30fps(),
+                shots=[],
+                beep_offset_seconds=0.0,
+                head_pad_seconds=0.0,
+                tail_pad_seconds=10.0,
+                events=events,
+            )
+        ],
+        output_path=out,
+        project_name="match",
+        config=OutputConfig(),
+    )
+    root = ET.fromstring(out.read_bytes())
+    markers = [m for m in root.findall(".//spine/asset-clip/marker") if m.attrib["value"] == "Movement"]
+    assert len(markers) == 1
+    assert markers[0].attrib["start"] == "270/30s"
+    assert markers[0].attrib["duration"] == "30/30s"  # (10.0 - 9.0)s * 30fps
+
+
+# No byte-identity self-pin here on purpose, for the same reason noted by
+# ``generate_fcpxml``'s equivalent comment above: comparing a stage built
+# with ``events=()`` against one that omits ``events`` cannot catch a
+# mutant that unconditionally injects a marker, since both sides reduce to
+# the same empty list and would grow the same spurious marker together.
+# The no-regions case is instead pinned by the pre-existing, unmodified
+# ``test_match_fcpxml_drops_markers_outside_trimmed_window`` (``assert
+# len(markers) == 2`` with no ``events`` argument at all, over
+# ``root.findall(".//spine/asset-clip/marker")`` -- every marker on the
+# primary, region or shot): an exact count that fails under the same
+# "always append a marker" mutant.
 
 
 def test_match_fcpxml_secondary_alignment_with_head_trim(tmp_path: Path) -> None:

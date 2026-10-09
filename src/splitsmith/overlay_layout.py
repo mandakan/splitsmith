@@ -298,6 +298,13 @@ class Group:
     #: them to read as two bands rather than one long list, and this is
     #: the one boundary in that stack that wants the bigger of the two.
     margin_top: int | None = None
+    #: A ``GRID``'s column count. ``None`` (the default) is one column per
+    #: element, which is what every grid did before this field existed.
+    #: The stage summary's split rows set it so rows of different lengths
+    #: (Static / Moving / the Draw and reload row) share one set of columns;
+    #: such a row also aligns its cells on their last baseline
+    #: (``overlay_html._group_style``).
+    columns: int | None = None
 
 
 @dataclass(frozen=True)

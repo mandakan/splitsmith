@@ -192,6 +192,7 @@ def export_stage_tool(
         "stage_number": result.stage_number,
         "trimmed_video_path": _path_or_none(result.trimmed_video_path),
         "csv_path": _path_or_none(result.csv_path),
+        "events_csv_path": _path_or_none(result.events_csv_path),
         "fcpxml_path": _path_or_none(result.fcpxml_path),
         "report_path": _path_or_none(result.report_path),
         "overlay_path": _path_or_none(result.overlay_path),
@@ -269,6 +270,8 @@ def export_match_tool(
     exports_dir = project.exports_path(root)
     audit_dir = project.audit_path(root)
     stages_input: list[match_export_helpers.MatchStageInput] = []
+    stale_overlays: list[str] = []
+    stale_stages: list[int] = []
     for stage_number in stage_numbers:
         try:
             stage = project.stage(stage_number)
@@ -319,7 +322,24 @@ def export_match_tool(
         if include_overlay:
             candidate = exports_dir / f"{base}_overlay.mov"
             if candidate.exists():
-                overlay_path = candidate
+                # Stitched only when its record says it was drawn from the
+                # audit as it stands: this tool cannot redraw it (it has no
+                # style to draw with), so a stale one is left out and said so.
+                # Look, style and options are deliberately not compared: this
+                # tool asks for none, so whatever style was drawn is wanted.
+                record = export_helpers.read_overlay_settings(
+                    export_helpers.overlay_settings_file(exports_dir, base)
+                )
+                current = export_helpers.overlay_audit_revision(audit_path)
+                if current is not None and record is not None and record.get("audit_revision") == current:
+                    overlay_path = candidate
+                else:
+                    stale_stages.append(stage_number)
+                    stale_overlays.append(
+                        f"stage {stage_number}: overlay at {candidate} was drawn from an older audit "
+                        "(or has no record of which) -- left out; call export_stage with "
+                        "write_overlay=True to draw it again"
+                    )
         stages_input.append(
             match_export_helpers.MatchStageInput(
                 stage_number=stage_number,
@@ -360,7 +380,16 @@ def export_match_tool(
         "output_path": str(result.fcpxml_path),
         "stage_count": result.stage_count,
         "duration_seconds": result.duration_seconds,
-        "anomalies": list(result.anomalies),
+        # A left-out overlay is said once, here, not again by the composer's
+        # generic "overlay not available" line for that stage.
+        "anomalies": [
+            *stale_overlays,
+            *(
+                a
+                for a in result.anomalies
+                if not any(a.startswith(f"stage {n}: overlay not available") for n in stale_stages)
+            ),
+        ],
     }
 
 

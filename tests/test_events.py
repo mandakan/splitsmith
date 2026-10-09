@@ -13,6 +13,8 @@ from splitsmith.config import Config, DivisionCapacityConfig, StageEvent
 from splitsmith.events import (
     capacity_config,
     capacity_for,
+    confirmed,
+    confirmed_from_doc,
     events_from_doc,
     next_event_id,
     reload_figures,
@@ -254,3 +256,54 @@ def test_seed_doc_runs_once_and_only_with_shots() -> None:
     doc["events"] = []  # the user deleted the proposal
     assert seed_doc(doc, hint_min_s=2.5, capacity=15) is False
     assert doc["events"] == []
+
+
+def test_confirmed_keeps_manual_regions_in_order_and_drops_proposals() -> None:
+    events = _events(
+        [
+            {"id": "evt-1", "kind": "reload", "start": 1.0, "end": 2.0, "source": "auto"},
+            {"id": "evt-2", "kind": "movement", "start": 3.0, "end": 4.0, "source": "manual"},
+            {"id": "evt-3", "kind": "reload", "start": 5.0, "end": 6.0, "source": "auto"},
+            {"id": "evt-4", "kind": "reload", "start": 0.5, "end": 0.8, "source": "manual"},
+        ]
+    )
+    assert [e.id for e in confirmed(events)] == ["evt-2", "evt-4"]
+    assert confirmed([]) == []
+
+
+def test_confirmed_from_doc_keeps_only_manual_regions() -> None:
+    doc = {
+        "events": [
+            {"id": "evt-1", "kind": "reload", "start": 1.0, "end": 2.0, "source": "auto"},
+            {"id": "evt-2", "kind": "movement", "start": 3.0, "end": 4.0, "source": "manual"},
+        ]
+    }
+    assert [e.id for e in confirmed_from_doc(doc)] == ["evt-2"]
+
+
+def test_confirmed_from_doc_with_no_events_field_is_empty() -> None:
+    assert confirmed_from_doc({"shots": []}) == []
+
+
+def test_confirmed_from_doc_tolerates_a_non_dict_doc() -> None:
+    assert confirmed_from_doc(None) == []
+    assert confirmed_from_doc([]) == []
+    assert confirmed_from_doc("not a doc") == []
+    assert confirmed_from_doc(42) == []
+
+
+def test_confirmed_from_doc_tolerates_end_before_start() -> None:
+    doc = {"events": [{"id": "evt-1", "kind": "reload", "start": 5.0, "end": 1.0, "source": "manual"}]}
+    assert confirmed_from_doc(doc) == []
+
+
+def test_confirmed_from_doc_tolerates_a_non_dict_event_entry() -> None:
+    doc = {"events": [42, "not an event"]}
+    assert confirmed_from_doc(doc) == []
+
+
+def test_confirmed_from_doc_logs_with_the_given_context(caplog: pytest.LogCaptureFixture) -> None:
+    doc = {"events": [{"id": "evt-1", "kind": "reload", "start": 5.0, "end": 1.0, "source": "manual"}]}
+    with caplog.at_level("WARNING"):
+        confirmed_from_doc(doc, log_context="stage1.json")
+    assert any("stage1.json" in rec.message for rec in caplog.records)

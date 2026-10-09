@@ -9,6 +9,7 @@ a rule that changes here changes there in the same change.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from collections.abc import Iterable, Sequence
@@ -20,6 +21,8 @@ from pydantic import BaseModel
 
 from .config import Config, DivisionCapacityConfig, StageEvent
 from .runtime import ENV_CONFIG_FILE
+
+logger = logging.getLogger(__name__)
 
 EVENTS_FIELD: Final = "events"
 EVENTS_SEEDED_FIELD: Final = "events_seeded"
@@ -81,6 +84,50 @@ def events_from_doc(doc: dict[str, Any]) -> list[StageEvent]:
     return [StageEvent.model_validate(e) for e in raw]
 
 
+def confirmed(events: Sequence[StageEvent]) -> list[StageEvent]:
+    """The regions a rendered or exported output may show: the ones the
+    user confirmed (``source == "manual"``), in their stored order. An auto
+    proposal is a guess nobody looked at; the Coach page shows it, a video
+    or an export never does (spec 2026-10-08, part 2)."""
+    return [e for e in events if e.source == "manual"]
+
+
+def region_marker_label(event: StageEvent) -> str:
+    """An editor marker's name for a confirmed region: ``Reload 1.42`` /
+    ``Movement`` / ``Activation`` (spec 2026-10-08, part 2). A reload's
+    label carries its duration; the other two kinds don't -- the marker's
+    own duration already shows the span. The FCPXML and FCP7 XML exports
+    both name their region markers through this."""
+    if event.kind == "reload":
+        return f"Reload {event.end - event.start:.2f}"
+    if event.kind == "movement":
+        return "Movement"
+    return "Activation"
+
+
+def confirmed_from_doc(doc: Any, *, log_context: str = "") -> list[StageEvent]:
+    """``confirmed(events_from_doc(doc))``, tolerant of a missing, corrupt
+    or wrongly-shaped events list.
+
+    Every rendered or exported surface that reads confirmed regions off an
+    audit doc goes through this (spec 2026-10-08, part 2) instead of
+    re-deriving the same try/except: a bad doc -- not a dict, an event
+    with ``end <= start``, a non-object entry -- degrades to no regions
+    (the conservative read: under-report rather than invent) instead of
+    failing the whole render or export. ``log_context`` names the file or
+    stage in the one warning this logs, e.g. an audit path's name; omit it
+    for a caller with nothing more specific to say.
+    """
+    if not isinstance(doc, dict):
+        return []
+    try:
+        return confirmed(events_from_doc(doc))
+    except (ValueError, TypeError) as exc:
+        where = f"{log_context}: " if log_context else ""
+        logger.warning("%sunreadable stage events, treating as none: %s", where, exc)
+        return []
+
+
 def shot_times_from_doc(doc: dict[str, Any]) -> list[float]:
     """Kept shots' times from the beep, ascending."""
     times = [
@@ -110,6 +157,12 @@ def reload_figures(events: Sequence[StageEvent]) -> list[ReloadFigure]:
         else:
             out.append(ReloadFigure(r.id, r.end - r.start, False, None))
     return out
+
+
+def positive_overhang_s(figures: Sequence[ReloadFigure]) -> float:
+    """The stage's overhang: the positive overhangs summed. A hidden reload
+    (zero or negative) costs nothing and a standing one has none."""
+    return sum(f.overhang for f in figures if f.overhang is not None and f.overhang > 0)
 
 
 def _capacity_warning(
@@ -148,7 +201,7 @@ def stage_event_summary(
         moving_shots=sum(1 for t in shot_times if shot_is_moving(t, events)),
         reloads=len(figs),
         reload_avg_s=(sum(f.duration for f in figs) / len(figs)) if figs else None,
-        overhang_s=sum(f.overhang for f in figs if f.overhang is not None and f.overhang > 0),
+        overhang_s=positive_overhang_s(figs),
         capacity_warning=_capacity_warning(shot_times, reloads, capacity),
     )
 

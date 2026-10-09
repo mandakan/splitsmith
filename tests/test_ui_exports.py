@@ -105,9 +105,13 @@ def test_export_stage_writes_csv_and_report(tmp_path: Path) -> None:
         "peak_amplitude",
         "confidence",
         "notes",
+        "moving",
     ]
     assert rows[1][0] == "1"
     assert rows[2][0] == "2"
+    # No confirmed regions on this stage -- moving is false throughout.
+    assert rows[1][-1] == "false"
+    assert rows[2][-1] == "false"
 
 
 def test_export_stage_missing_audit_no_longer_refuses(tmp_path: Path) -> None:
@@ -799,6 +803,29 @@ def test_summary_card_is_written_beside_the_overlay(tmp_path: Path, monkeypatch:
     assert not result.export_failures
 
 
+def test_summary_card_carries_the_stages_confirmed_reloads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from splitsmith import summary_card
+
+    captured: dict[str, Any] = {}
+
+    def fake_render(**kwargs: Any) -> summary_card.SummaryCardResult:
+        captured.update(kwargs)
+        return summary_card.SummaryCardResult(png_path=kwargs["png_path"], mov_path=kwargs["mov_path"])
+
+    monkeypatch.setattr(exports_mod.summary_card, "render_summary_card", fake_render)
+    audit_path, exports_dir = _seed_stage_with_trim(tmp_path)
+    doc = json.loads(audit_path.read_text())
+    doc["events"] = [
+        {"id": "evt-1", "kind": "reload", "start": 1.0, "end": 2.25, "source": "manual"},
+        {"id": "evt-2", "kind": "reload", "start": 3.0, "end": 4.0, "source": "auto"},
+    ]
+    audit_path.write_text(json.dumps(doc))
+    _export(audit_path, exports_dir)
+    assert [(r.event_id, r.duration) for r in captured["data"].reloads] == [("evt-1", 1.25)]
+
+
 def test_summary_card_skips_without_shots(tmp_path: Path) -> None:
     audit_path, exports_dir = _seed_stage_with_trim(tmp_path, shots=False)
     result = _export(audit_path, exports_dir)
@@ -973,3 +1000,414 @@ def test_read_overlay_settings_takes_a_missing_record_as_the_defaults(tmp_path: 
     broken = tmp_path / "broken.json"
     broken.write_text("{not json")
     assert exports_mod.read_overlay_settings(broken) is None
+
+
+@pytest.mark.parametrize("variant", ["default", "plate"])
+def test_the_record_holds_the_audit_revision_read_before_the_render(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, variant: str
+) -> None:
+    """An edit that lands while the overlay renders was never drawn, so the
+    record names the audit as it stood when the render began: the next
+    match export sees the edit as a change and draws again."""
+    from splitsmith import overlay_render
+
+    audit_path, exports_dir = _seed_stage_with_trim(tmp_path)
+    before = exports_mod.overlay_audit_revision(audit_path)
+    assert before is not None
+
+    def render_while_editing(**kwargs: Any) -> Path:
+        doc = json.loads(audit_path.read_text(encoding="utf-8"))
+        doc["shots"][0]["ms_after_beep"] = 640
+        audit_path.write_text(json.dumps(doc), encoding="utf-8")
+        kwargs["output_path"].write_bytes(b"mov")
+        return kwargs["output_path"]
+
+    monkeypatch.setattr(overlay_render, "render_overlay", render_while_editing)
+    exports_mod.export_stage(
+        request=exports_mod.StageExportRequest(
+            stage_number=1,
+            write_trim=False,
+            write_csv=False,
+            write_fcpxml=False,
+            write_report=False,
+            write_overlay=True,
+            overlay_variant=variant,
+        ),
+        audit_path=audit_path,
+        exports_dir=exports_dir,
+        source_video_path=None,
+        pre_buffer_seconds=5.0,
+        post_buffer_seconds=5.0,
+        stage_data=StageData(
+            stage_number=1,
+            stage_name="Stage 1 -- H1",
+            time_seconds=8.0,
+            scorecard_updated_at=datetime(2026, 5, 2, 14, 30, tzinfo=UTC),
+        ),
+        beep_time_in_source=10.0,
+        config=Config(),
+    )
+    record = json.loads((exports_dir / "stage1_stage-1-h1_overlay.json").read_text())
+    assert record["audit_revision"] == before
+    assert exports_mod.overlay_audit_revision(audit_path) != before
+
+
+def test_the_audit_revision_is_none_for_an_unreadable_audit(tmp_path: Path) -> None:
+    broken = tmp_path / "stage1.json"
+    broken.write_text("{not json", encoding="utf-8")
+    assert exports_mod.overlay_audit_revision(broken) is None
+    # A missing audit is zero shots, a real state with a real revision.
+    assert exports_mod.overlay_audit_revision(tmp_path / "absent.json") is not None
+
+
+# --- stage events: moving column, events.csv, FCPXML region markers -------
+# (spec 2026-10-08, part 2)
+
+
+def _event(event_id: str, kind: str, start: float, end: float, source: str = "manual") -> dict:
+    return {"id": event_id, "kind": kind, "start": start, "end": end, "source": source}
+
+
+def test_export_stage_moving_column_true_inside_a_confirmed_movement_region(tmp_path: Path) -> None:
+    audit_path = tmp_path / "stage1.json"
+    doc = _audit_payload(
+        shots=[
+            {"shot_number": 1, "candidate_number": 1, "time": 5.5, "ms_after_beep": 500},
+            {"shot_number": 2, "candidate_number": 2, "time": 9.0, "ms_after_beep": 4000},
+        ]
+    )
+    doc["events"] = [_event("evt-1", "movement", 3.0, 6.0, source="manual")]
+    audit_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    exports_dir = tmp_path / "exports"
+    result = exports_mod.export_stage(
+        request=exports_mod.StageExportRequest(
+            stage_number=1, write_trim=False, write_csv=True, write_fcpxml=False, write_report=False
+        ),
+        audit_path=audit_path,
+        exports_dir=exports_dir,
+        source_video_path=None,
+        pre_buffer_seconds=5.0,
+        post_buffer_seconds=5.0,
+        stage_data=StageData(
+            stage_number=1,
+            stage_name="Stage 1 -- H1",
+            time_seconds=8.0,
+            scorecard_updated_at=datetime(2026, 5, 2, 14, 30, tzinfo=UTC),
+        ),
+        beep_time_in_source=10.0,
+        config=Config(),
+    )
+    assert result.csv_path is not None
+    rows = list(csv.reader(result.csv_path.open()))
+    assert rows[0][-1] == "moving"
+    # Shot 1 at 0.5s is outside [3.0, 6.0]; shot 2 at 4.0s is inside.
+    assert rows[1][-1] == "false"
+    assert rows[2][-1] == "true"
+
+    events_csv = exports_dir / "stage1_stage-1-h1_events.csv"
+    assert events_csv.exists()
+    events_rows = list(csv.reader(events_csv.open()))
+    assert events_rows[0] == ["id", "kind", "start", "end", "duration", "source", "note"]
+    assert events_rows[1] == ["evt-1", "movement", "3.000", "6.000", "3.000", "manual", ""]
+
+
+def test_export_stage_with_no_confirmed_regions_writes_no_events_csv(tmp_path: Path) -> None:
+    audit_path = tmp_path / "stage1.json"
+    audit_path.write_text(
+        json.dumps(
+            _audit_payload(
+                shots=[{"shot_number": 1, "candidate_number": 1, "time": 5.5, "ms_after_beep": 500}]
+            )
+        ),
+        encoding="utf-8",
+    )
+    exports_dir = tmp_path / "exports"
+    exports_mod.export_stage(
+        request=exports_mod.StageExportRequest(
+            stage_number=1, write_trim=False, write_csv=True, write_fcpxml=False, write_report=False
+        ),
+        audit_path=audit_path,
+        exports_dir=exports_dir,
+        source_video_path=None,
+        pre_buffer_seconds=5.0,
+        post_buffer_seconds=5.0,
+        stage_data=StageData(
+            stage_number=1,
+            stage_name="Stage 1 -- H1",
+            time_seconds=8.0,
+            scorecard_updated_at=datetime(2026, 5, 2, 14, 30, tzinfo=UTC),
+        ),
+        beep_time_in_source=10.0,
+        config=Config(),
+    )
+    assert not (exports_dir / "stage1_stage-1-h1_events.csv").exists()
+
+
+def test_export_stage_an_auto_only_proposal_writes_nothing_new(tmp_path: Path) -> None:
+    """An unconfirmed auto proposal must not surface anywhere: moving stays
+    false and no events.csv is written, the same as no events at all."""
+    audit_path = tmp_path / "stage1.json"
+    doc = _audit_payload(
+        shots=[{"shot_number": 1, "candidate_number": 1, "time": 9.0, "ms_after_beep": 4000}]
+    )
+    doc["events"] = [_event("evt-1", "movement", 3.0, 6.0, source="auto")]
+    audit_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    exports_dir = tmp_path / "exports"
+    result = exports_mod.export_stage(
+        request=exports_mod.StageExportRequest(
+            stage_number=1, write_trim=False, write_csv=True, write_fcpxml=False, write_report=False
+        ),
+        audit_path=audit_path,
+        exports_dir=exports_dir,
+        source_video_path=None,
+        pre_buffer_seconds=5.0,
+        post_buffer_seconds=5.0,
+        stage_data=StageData(
+            stage_number=1,
+            stage_name="Stage 1 -- H1",
+            time_seconds=8.0,
+            scorecard_updated_at=datetime(2026, 5, 2, 14, 30, tzinfo=UTC),
+        ),
+        beep_time_in_source=10.0,
+        config=Config(),
+    )
+    assert result.csv_path is not None
+    rows = list(csv.reader(result.csv_path.open()))
+    assert rows[1][-1] == "false"  # shot at 4.0s is inside the region, but it's only auto
+    assert not (exports_dir / "stage1_stage-1-h1_events.csv").exists()
+
+
+def test_export_stage_fcpxml_carries_a_confirmed_region_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from splitsmith import fcpxml_gen as fcpxml_mod
+    from splitsmith.config import VideoMetadata
+
+    def fake_probe(_path: Path) -> VideoMetadata:
+        return VideoMetadata(
+            width=1920, height=1080, duration_seconds=20.0, frame_rate_num=30, frame_rate_den=1
+        )
+
+    monkeypatch.setattr(fcpxml_mod, "probe_video", fake_probe)
+
+    audit_path = tmp_path / "stage1.json"
+    doc = _audit_payload(
+        shots=[{"shot_number": 1, "candidate_number": 1, "time": 9.0, "ms_after_beep": 4000}]
+    )
+    doc["events"] = [_event("evt-1", "reload", 8.05, 9.47, source="manual")]
+    audit_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    exports_dir = tmp_path / "exports"
+    exports_dir.mkdir(parents=True)
+    # A stale lossless trim stands in for a real one (write_trim=False
+    # takes the "candidate" branch in export_stage).
+    (exports_dir / "stage1_stage-1-h1_trimmed.mp4").write_bytes(b"")
+
+    result = exports_mod.export_stage(
+        request=exports_mod.StageExportRequest(
+            stage_number=1, write_trim=False, write_csv=False, write_fcpxml=True, write_report=False
+        ),
+        audit_path=audit_path,
+        exports_dir=exports_dir,
+        source_video_path=None,
+        pre_buffer_seconds=5.0,
+        post_buffer_seconds=5.0,
+        stage_data=StageData(
+            stage_number=1,
+            stage_name="Stage 1 -- H1",
+            time_seconds=8.0,
+            scorecard_updated_at=datetime(2026, 5, 2, 14, 30, tzinfo=UTC),
+        ),
+        beep_time_in_source=10.0,
+        config=Config(),
+    )
+    assert result.fcpxml_path is not None
+    text = result.fcpxml_path.read_text(encoding="utf-8")
+    assert "Reload 1.42" in text
+
+
+def test_export_stage_fcpxml_with_no_confirmed_regions_matches_output_without_any(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Byte-identity pin: a stage with an unconfirmed (auto) region writes
+    an FCPXML identical to a stage with no events at all."""
+    from splitsmith import fcpxml_gen as fcpxml_mod
+    from splitsmith.config import VideoMetadata
+
+    def fake_probe(_path: Path) -> VideoMetadata:
+        return VideoMetadata(
+            width=1920, height=1080, duration_seconds=20.0, frame_rate_num=30, frame_rate_den=1
+        )
+
+    monkeypatch.setattr(fcpxml_mod, "probe_video", fake_probe)
+
+    exports_dir = tmp_path / "exports"
+    exports_dir.mkdir(parents=True)
+    audit_path = exports_dir / "audit.json"
+    (exports_dir / "stage1_stage-1-h1_trimmed.mp4").write_bytes(b"")
+
+    def _run(doc: dict) -> bytes:
+        audit_path.write_text(json.dumps(doc), encoding="utf-8")
+        result = exports_mod.export_stage(
+            request=exports_mod.StageExportRequest(
+                stage_number=1, write_trim=False, write_csv=False, write_fcpxml=True, write_report=False
+            ),
+            audit_path=audit_path,
+            exports_dir=exports_dir,
+            source_video_path=None,
+            pre_buffer_seconds=5.0,
+            post_buffer_seconds=5.0,
+            stage_data=StageData(
+                stage_number=1,
+                stage_name="Stage 1 -- H1",
+                time_seconds=8.0,
+                scorecard_updated_at=datetime(2026, 5, 2, 14, 30, tzinfo=UTC),
+            ),
+            beep_time_in_source=10.0,
+            config=Config(),
+        )
+        assert result.fcpxml_path is not None
+        return result.fcpxml_path.read_bytes()
+
+    shots = [{"shot_number": 1, "candidate_number": 1, "time": 9.0, "ms_after_beep": 4000}]
+    doc_no_events = _audit_payload(shots=shots)
+    doc_auto_only = _audit_payload(shots=shots)
+    doc_auto_only["events"] = [_event("evt-1", "reload", 8.05, 9.47, source="auto")]
+
+    bytes_no_events = _run(doc_no_events)
+    bytes_auto_only = _run(doc_auto_only)
+    assert bytes_no_events == bytes_auto_only
+
+
+@pytest.mark.parametrize(
+    "corrupt_events",
+    [
+        pytest.param(
+            [{"id": "evt-1", "kind": "movement", "start": 6.0, "end": 3.0, "source": "manual"}],
+            id="end_before_start",
+        ),
+        pytest.param({"not": "a list"}, id="a_dict_instead_of_a_list"),
+        pytest.param(42, id="an_int_instead_of_a_list"),
+    ],
+)
+def test_export_stage_corrupt_events_field_exports_moving_false_and_no_events_csv(
+    tmp_path: Path, corrupt_events: object
+) -> None:
+    """A malformed ``events`` field -- an event with ``end < start``, the
+    field holding a dict instead of a list, or an int -- must not fail
+    the export. It degrades to no confirmed regions: ``moving`` reads
+    false for every shot (including one that would have fallen inside the
+    bad region had it been valid) and no ``events.csv`` is written."""
+    audit_path = tmp_path / "stage1.json"
+    doc = _audit_payload(
+        shots=[{"shot_number": 1, "candidate_number": 1, "time": 9.0, "ms_after_beep": 4000}]
+    )
+    doc["events"] = corrupt_events
+    audit_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    exports_dir = tmp_path / "exports"
+    result = exports_mod.export_stage(
+        request=exports_mod.StageExportRequest(
+            stage_number=1, write_trim=False, write_csv=True, write_fcpxml=False, write_report=False
+        ),
+        audit_path=audit_path,
+        exports_dir=exports_dir,
+        source_video_path=None,
+        pre_buffer_seconds=5.0,
+        post_buffer_seconds=5.0,
+        stage_data=StageData(
+            stage_number=1,
+            stage_name="Stage 1 -- H1",
+            time_seconds=8.0,
+            scorecard_updated_at=datetime(2026, 5, 2, 14, 30, tzinfo=UTC),
+        ),
+        beep_time_in_source=10.0,
+        config=Config(),
+    )
+    assert result.csv_path is not None
+    rows = list(csv.reader(result.csv_path.open()))
+    assert rows[1][-1] == "false"
+    assert result.events_csv_path is None
+    assert not (exports_dir / "stage1_stage-1-h1_events.csv").exists()
+
+
+def test_export_stage_records_events_csv_path_on_the_result(tmp_path: Path) -> None:
+    """``events_csv_path`` on the result surfaces the file the same way
+    ``csv_path`` / ``fcpxml_path`` do, so a caller can offer it as a
+    download without re-deriving the filename."""
+    audit_path = tmp_path / "stage1.json"
+    doc = _audit_payload(
+        shots=[{"shot_number": 1, "candidate_number": 1, "time": 9.0, "ms_after_beep": 4000}]
+    )
+    doc["events"] = [_event("evt-1", "movement", 3.0, 6.0, source="manual")]
+    audit_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    exports_dir = tmp_path / "exports"
+    result = exports_mod.export_stage(
+        request=exports_mod.StageExportRequest(
+            stage_number=1, write_trim=False, write_csv=True, write_fcpxml=False, write_report=False
+        ),
+        audit_path=audit_path,
+        exports_dir=exports_dir,
+        source_video_path=None,
+        pre_buffer_seconds=5.0,
+        post_buffer_seconds=5.0,
+        stage_data=StageData(
+            stage_number=1,
+            stage_name="Stage 1 -- H1",
+            time_seconds=8.0,
+            scorecard_updated_at=datetime(2026, 5, 2, 14, 30, tzinfo=UTC),
+        ),
+        beep_time_in_source=10.0,
+        config=Config(),
+    )
+    assert result.events_csv_path == exports_dir / "stage1_stage-1-h1_events.csv"
+    assert result.events_csv_path.exists()
+
+
+def test_export_stage_removes_a_stale_events_csv_when_regions_are_dropped(tmp_path: Path) -> None:
+    """A re-export after the user deletes the stage's last confirmed
+    region must not leave the previous run's events.csv behind -- a
+    download route serving it would hand out a region that no longer
+    exists (#review: important finding 1)."""
+    audit_path = tmp_path / "stage1.json"
+    exports_dir = tmp_path / "exports"
+
+    def _export() -> exports_mod.StageExportResult:
+        return exports_mod.export_stage(
+            request=exports_mod.StageExportRequest(
+                stage_number=1, write_trim=False, write_csv=True, write_fcpxml=False, write_report=False
+            ),
+            audit_path=audit_path,
+            exports_dir=exports_dir,
+            source_video_path=None,
+            pre_buffer_seconds=5.0,
+            post_buffer_seconds=5.0,
+            stage_data=StageData(
+                stage_number=1,
+                stage_name="Stage 1 -- H1",
+                time_seconds=8.0,
+                scorecard_updated_at=datetime(2026, 5, 2, 14, 30, tzinfo=UTC),
+            ),
+            beep_time_in_source=10.0,
+            config=Config(),
+        )
+
+    shots = [{"shot_number": 1, "candidate_number": 1, "time": 9.0, "ms_after_beep": 4000}]
+    doc_with_region = _audit_payload(shots=shots)
+    doc_with_region["events"] = [_event("evt-1", "movement", 3.0, 6.0, source="manual")]
+    audit_path.write_text(json.dumps(doc_with_region), encoding="utf-8")
+    first = _export()
+    events_csv = exports_dir / "stage1_stage-1-h1_events.csv"
+    assert first.events_csv_path == events_csv
+    assert events_csv.exists()
+
+    # The user deleted the region; re-export with none left.
+    doc_without_region = _audit_payload(shots=shots)
+    doc_without_region["events"] = []
+    audit_path.write_text(json.dumps(doc_without_region), encoding="utf-8")
+    second = _export()
+    assert second.events_csv_path is None
+    assert not events_csv.exists()

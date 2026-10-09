@@ -28,6 +28,9 @@ import tempfile
 from pathlib import Path
 from typing import Any, Literal
 
+from .audit_data import read_audit_data
+from .config import StageEvent
+from .events import confirmed_from_doc
 from .look_template import TemplateContext, engine_block, shared_url, template_digest, theme_tokens
 from .overlay_html import single_css
 from .overlay_hud import (
@@ -55,6 +58,14 @@ _CACHEABLE_SUFFIXES = (".mov", ".mp4")
 
 class HudFallbackError(Exception):
     """The template could not draw this stage; draw Classic instead."""
+
+
+def _confirmed_regions(audit_path: Path) -> list[StageEvent]:
+    """The stage's confirmed regions. A corrupt events list must not fail a
+    render (one bad doc, a 12-stage export): it draws with no regions, as
+    the Coach GET tolerates a legacy doc. Thin path wrapper over
+    ``events.confirmed_from_doc``, the shared tolerant reader."""
+    return confirmed_from_doc(read_audit_data(audit_path), log_context=audit_path.name)
 
 
 def hud_context(
@@ -121,7 +132,7 @@ def render_hud_overlay(
     fps = rate_num / rate_den
     frame_count = max(0, int(round(duration_seconds * fps)))
     page_width, page_height = hud_page_size(width, height)
-    stage = hud_stage_data(shots, beep_in_clip=beep_offset_seconds)
+    stage = hud_stage_data(shots, beep_in_clip=beep_offset_seconds, events=_confirmed_regions(audit_path))
     position = resolve_position(options.position, declared_positions(template))
     context = hud_context(
         stage=stage,

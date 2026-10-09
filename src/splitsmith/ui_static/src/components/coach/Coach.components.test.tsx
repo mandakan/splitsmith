@@ -76,7 +76,7 @@ describe("EventCard", () => {
   const events = [E("evt-1", "movement", 7.6, 9.16), E("evt-2", "reload", 8.05, 9.47)];
 
   it("shows start, end, duration, the enclosing movement and the overhang for a reload", () => {
-    render(<EventCard event={events[1]} events={events} onKind={vi.fn()} onDelete={vi.fn()} onDone={vi.fn()} />);
+    render(<EventCard event={events[1]} events={events} onKind={vi.fn()} onKeep={vi.fn()} onDelete={vi.fn()} onDone={vi.fn()} />);
     const card = screen.getByRole("region", { name: "Region" });
     expect(within(card).getByText("8.05")).toBeInTheDocument();
     expect(within(card).getByText("9.47")).toBeInTheDocument();
@@ -88,17 +88,17 @@ describe("EventCard", () => {
 
   it("a standing reload shows no overhang row; a movement shows neither", () => {
     const standing = [E("evt-2", "reload", 8.05, 9.47)];
-    const { rerender } = render(<EventCard event={standing[0]} events={standing} onKind={vi.fn()} onDelete={vi.fn()} onDone={vi.fn()} />);
+    const { rerender } = render(<EventCard event={standing[0]} events={standing} onKind={vi.fn()} onKeep={vi.fn()} onDelete={vi.fn()} onDone={vi.fn()} />);
     expect(screen.queryByText("Overhang")).toBeNull();
     expect(screen.getByText("Standing")).toBeInTheDocument();
-    rerender(<EventCard event={events[0]} events={events} onKind={vi.fn()} onDelete={vi.fn()} onDone={vi.fn()} />);
+    rerender(<EventCard event={events[0]} events={events} onKind={vi.fn()} onKeep={vi.fn()} onDelete={vi.fn()} onDone={vi.fn()} />);
     expect(screen.queryByText("Overhang")).toBeNull();
     expect(screen.queryByText("During")).toBeNull();
   });
 
   it("changes kind, deletes and closes", () => {
     const onKind = vi.fn(); const onDelete = vi.fn(); const onDone = vi.fn();
-    render(<EventCard event={events[1]} events={events} onKind={onKind} onDelete={onDelete} onDone={onDone} />);
+    render(<EventCard event={events[1]} events={events} onKind={onKind} onKeep={vi.fn()} onDelete={onDelete} onDone={onDone} />);
     fireEvent.click(screen.getByRole("button", { name: "Activation" }));
     expect(onKind).toHaveBeenCalledWith("activation");
     fireEvent.click(screen.getByRole("button", { name: "Delete" }));
@@ -108,14 +108,27 @@ describe("EventCard", () => {
   });
 
   it("disables a kind whose lane the region would overlap", () => {
-    render(<EventCard event={events[1]} events={events} onKind={vi.fn()} onDelete={vi.fn()} onDone={vi.fn()} />);
+    render(<EventCard event={events[1]} events={events} onKind={vi.fn()} onKeep={vi.fn()} onDelete={vi.fn()} onDone={vi.fn()} />);
     expect(screen.getByRole("button", { name: "Movement" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Activation" })).toBeEnabled();
   });
 
+  it("offers Keep left of Delete on an auto proposal only", () => {
+    const onKeep = vi.fn();
+    const auto = [E("evt-3", "reload", 13.3, 15.9, "auto")];
+    const { rerender } = render(<EventCard event={auto[0]} events={auto} onKind={vi.fn()} onKeep={onKeep} onDelete={vi.fn()} onDone={vi.fn()} />);
+    const buttons = within(screen.getByRole("region", { name: "Region" })).getAllByRole("button").map((b) => b.textContent);
+    expect(buttons.indexOf("Keep")).toBeGreaterThanOrEqual(0);
+    expect(buttons.indexOf("Keep")).toBeLessThan(buttons.indexOf("Delete"));
+    fireEvent.click(screen.getByRole("button", { name: "Keep" }));
+    expect(onKeep).toHaveBeenCalledTimes(1);
+    rerender(<EventCard event={events[1]} events={events} onKind={vi.fn()} onKeep={onKeep} onDelete={vi.fn()} onDone={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Keep" })).toBeNull();
+  });
+
   it("names an auto proposal as such", () => {
     const auto = [E("evt-3", "reload", 13.3, 15.9, "auto")];
-    render(<EventCard event={auto[0]} events={auto} onKind={vi.fn()} onDelete={vi.fn()} onDone={vi.fn()} />);
+    render(<EventCard event={auto[0]} events={auto} onKind={vi.fn()} onKeep={vi.fn()} onDelete={vi.fn()} onDone={vi.fn()} />);
     expect(screen.getByText("Proposed")).toBeInTheDocument();
   });
 });

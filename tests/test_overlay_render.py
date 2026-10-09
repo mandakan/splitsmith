@@ -1264,9 +1264,40 @@ def test_overlay_cli_passes_the_hud_options_through(tmp_path: Path, monkeypatch:
         "speed_colors": False,
         "class_labels": True,
         "landing": False,
+        "reload_chip": False,
+        "stage_bar": False,
         "position": "top-right",
     }
     assert "fell back to Classic" in result.output
+
+
+def test_overlay_cli_turns_on_the_reload_chip_and_the_stage_bar(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: dict[str, Any] = {}
+
+    def fake_render(**kwargs: Any) -> Path:
+        seen.update(kwargs)
+        return kwargs["output_path"]
+
+    monkeypatch.setattr(overlay_render, "render_overlay", fake_render)
+    base = [
+        "overlay",
+        "--audit",
+        str(_write_audit(tmp_path)),
+        "--video",
+        str(tmp_path / "t.mp4"),
+        "--output",
+        str(tmp_path / "o.mov"),
+        "--overlay-variant",
+        "timeline",
+    ]
+    result = CliRunner().invoke(app, [*base, "--reload-chip", "--stage-bar"])
+    assert result.exit_code == 0, result.output
+    assert seen["hud_options"].reload_chip is True and seen["hud_options"].stage_bar is True
+    result = CliRunner().invoke(app, [*base, "--reload-chip"])
+    assert result.exit_code == 0, result.output
+    assert seen["hud_options"].reload_chip is True and seen["hud_options"].stage_bar is False
 
 
 def test_overlay_cli_refuses_an_unknown_variant_and_position(tmp_path: Path) -> None:

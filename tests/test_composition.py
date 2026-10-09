@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from splitsmith import composition, fcpxml_gen
-from splitsmith.config import OutputConfig, Shot, VideoMetadata
+from splitsmith.config import OutputConfig, Shot, StageEvent, VideoMetadata
 from splitsmith.fcpxml_gen import (
     PipPlacement,
     SecondaryClip,
@@ -207,6 +207,44 @@ def test_from_stage_compositions_captures_overlay(tmp_path: Path) -> None:
     assert ov.transform is None
 
 
+def test_from_stage_compositions_captures_events(tmp_path: Path) -> None:
+    """Confirmed regions on a ``StageComposition`` reach the IR unchanged
+    (spec 2026-10-08, part 2) -- the IR stores them beep-relative, the same
+    units as ``StageEvent.start``/``.end``, and does not precompute
+    clip-local time the way it does for ``Marker``."""
+    primary = _make_video(tmp_path, "primary.mp4")
+    events = (StageEvent(id="evt-1", kind="reload", start=8.05, end=9.47, source="manual"),)
+    stage_comp = StageComposition(
+        stage_name="s1",
+        video_path=primary,
+        video=_meta_30fps(),
+        shots=[_shot(1, 0.5, 0.5)],
+        beep_offset_seconds=5.0,
+        head_pad_seconds=5.0,
+        tail_pad_seconds=5.0,
+        events=events,
+    )
+    comp = composition.from_stage_compositions([stage_comp], project_name="match")
+    assert comp.stages[0].events == events
+
+
+def test_from_stage_compositions_defaults_events_to_empty(tmp_path: Path) -> None:
+    """A stage built before this field existed (no ``events`` passed)
+    still builds, with an empty tuple on the IR."""
+    primary = _make_video(tmp_path, "primary.mp4")
+    stage_comp = StageComposition(
+        stage_name="s1",
+        video_path=primary,
+        video=_meta_30fps(),
+        shots=[_shot(1, 0.5, 0.5)],
+        beep_offset_seconds=5.0,
+        head_pad_seconds=5.0,
+        tail_pad_seconds=5.0,
+    )
+    comp = composition.from_stage_compositions([stage_comp], project_name="match")
+    assert comp.stages[0].events == ()
+
+
 # --- render_fcpxml byte-equivalence ---------------------------------------
 
 
@@ -246,6 +284,45 @@ def test_render_fcpxml_single_stage_matches_generate_fcpxml(tmp_path: Path) -> N
 
     # Single-stage path uses generate_fcpxml directly so the bytes match.
     assert _read(legacy_out) == _read(ir_out)
+
+
+def test_render_fcpxml_single_stage_with_events_matches_generate_fcpxml(tmp_path: Path) -> None:
+    """Same byte-equivalence pin as above, with a confirmed region present
+    -- the bridge must thread ``events`` through to ``generate_fcpxml``
+    too, not just ``shots``."""
+    video = _make_video(tmp_path, "v.mp4")
+    legacy_out = tmp_path / "legacy.fcpxml"
+    ir_out = tmp_path / "ir.fcpxml"
+
+    shots = [_shot(1, 1.42, 1.42)]
+    events = (StageEvent(id="evt-1", kind="reload", start=8.05, end=9.47, source="manual"),)
+    generate_fcpxml(
+        video_path=video,
+        video=_meta_30fps(),
+        shots=shots,
+        beep_offset_seconds=5.0,
+        output_path=legacy_out,
+        project_name="v",
+        config=OutputConfig(),
+        events=events,
+    )
+
+    stage_comp = StageComposition(
+        stage_name="v",
+        video_path=video,
+        video=_meta_30fps(),
+        shots=shots,
+        beep_offset_seconds=5.0,
+        head_pad_seconds=999.0,
+        tail_pad_seconds=999.0,
+        events=events,
+    )
+    comp = composition.from_stage_compositions([stage_comp], project_name="v")
+    composition.render_fcpxml(comp, output_path=ir_out, config=OutputConfig())
+
+    assert _read(legacy_out) == _read(ir_out)
+    # Sanity: the region marker actually made it into both files.
+    assert b"Reload 1.42" in _read(legacy_out)
 
 
 def test_render_fcpxml_match_path_matches_generate_match_fcpxml(tmp_path: Path) -> None:
@@ -405,6 +482,29 @@ def test_to_stage_compositions_recovers_secondaries_without_pip(tmp_path: Path) 
     assert len(lowered) == 1
     sec = lowered[0].secondaries[0]
     assert sec.pip is None
+
+
+def test_to_stage_compositions_recovers_events(tmp_path: Path) -> None:
+    """Confirmed regions round-trip through the IR unchanged -- the bridge
+    that lets ``render_fcpxml`` reuse ``generate_match_fcpxml`` carries
+    them back down to a ``StageComposition``."""
+    primary = _make_video(tmp_path, "primary.mp4")
+    events = (StageEvent(id="evt-1", kind="movement", start=1.0, end=3.0, source="manual"),)
+    stages = [
+        StageComposition(
+            stage_name="s1",
+            video_path=primary,
+            video=_meta_30fps(),
+            shots=[_shot(1, 1.0, 1.0)],
+            beep_offset_seconds=5.0,
+            head_pad_seconds=5.0,
+            tail_pad_seconds=5.0,
+            events=events,
+        )
+    ]
+    comp = composition.from_stage_compositions(stages, project_name="match")
+    lowered = composition.to_stage_compositions(comp)
+    assert lowered[0].events == events
 
 
 # --- generated cards (issue #973) -----------------------------------------

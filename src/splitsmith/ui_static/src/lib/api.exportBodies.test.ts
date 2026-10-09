@@ -81,6 +81,8 @@ const matchPayload: Required<MatchExportRequestPayload> = {
   overlay_speed_colors: false,
   overlay_class_labels: false,
   overlay_landing: false,
+  overlay_reload_chip: true,
+  overlay_stage_bar: true,
   overlay_position: "top-right",
 };
 

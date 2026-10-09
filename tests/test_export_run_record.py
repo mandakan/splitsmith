@@ -395,6 +395,51 @@ def test_a_stage_export_records_a_run(tmp_path: Path, monkeypatch) -> None:
     assert 0.0 < run["duration_seconds"] < 5.0
 
 
+def test_a_stage_export_with_a_confirmed_region_records_events_csv_as_an_artifact(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """events.csv (spec 2026-10-08, part 2) must reach the run's recorded
+    artifacts the same way the splits CSV does -- under kind "csv" (reused
+    rather than a new ``ArtifactKind`` literal, see ``server.py``), so the
+    SPA's export history can offer it as a download."""
+    client, project_root = _seed_match_export_project(tmp_path, stage_count=1)
+    shooter_root = project_root / "shooters" / "me"
+
+    audit_path = shooter_root / "audit" / "stage1.json"
+    doc = json.loads(audit_path.read_text(encoding="utf-8"))
+    doc["events"] = [{"id": "evt-1", "kind": "movement", "start": 0.0, "end": 1.0, "source": "manual"}]
+    audit_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    monkeypatch.setattr(trim, "trim_video", _fake_trim_video)
+    from .test_ui_server import _wait_for_job
+
+    resp = client.post(
+        "/api/shooters/me/stages/1/export",
+        json={
+            "write_trim": True,
+            "write_csv": True,
+            "write_fcpxml": False,
+            "write_report": False,
+            "write_overlay": False,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    final = _wait_for_job(client, resp.json()["id"])
+    assert final["status"] == "succeeded", final
+
+    doc = json.loads((shooter_root / "export_runs.json").read_text(encoding="utf-8"))
+    run = doc["runs"][0]
+    kinds = [a["kind"] for a in run["artifacts"]]
+    assert kinds == ["trim", "csv", "csv"]
+    csv_filenames = {a["filename"] for a in run["artifacts"] if a["kind"] == "csv"}
+    assert any(name.endswith("_splits.csv") for name in csv_filenames)
+    assert any(name.endswith("_events.csv") for name in csv_filenames)
+    # The job's own result names the file and its summary says it shipped.
+    assert final["result"]["events_csv"] in csv_filenames
+    assert final["result"]["events_csv"].endswith("_events.csv")
+    assert final["message"].startswith("Done: trim, csv, events")
+
+
 def test_a_failed_stage_export_records_nothing(tmp_path: Path, monkeypatch) -> None:
     """The record describes a completed run. A job that raises (here: the
     trim writer produces no clip at all) must leave no history line."""

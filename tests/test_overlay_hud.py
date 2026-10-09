@@ -6,9 +6,11 @@ from pathlib import Path
 
 import pytest
 
+from splitsmith.config import StageEvent
 from splitsmith.overlay_hud import (
     HudFrame,
     HudOptions,
+    OverlayStyleFields,
     declared_positions,
     hud_frame_plan,
     hud_options_data,
@@ -57,7 +59,14 @@ def test_stage_data_is_in_clip_time_with_labels_and_rounded_numbers() -> None:
     assert data["rounds"] == 7
     assert data["stage_time"] == pytest.approx(4.52)
     first, slow = data["shots"][0], data["shots"][3]
-    assert first == {"t": 6.1, "split": 1.1, "cls": "first_shot", "label": "Draw", "tier": None}
+    assert first == {
+        "t": 6.1,
+        "split": 1.1,
+        "cls": "first_shot",
+        "label": "Draw",
+        "tier": None,
+        "moving": False,
+    }
     assert slow["t"] == pytest.approx(7.4) and slow["label"] == "Split" and slow["tier"] == "slow"
     assert data["shots"][5]["label"] == "Reload"
     # Rounded so float noise never moves a cache key.
@@ -65,7 +74,14 @@ def test_stage_data_is_in_clip_time_with_labels_and_rounded_numbers() -> None:
 
 
 def test_stage_data_without_shots_is_an_empty_stage() -> None:
-    assert hud_stage_data([], beep_in_clip=1.0) == {"beep": 1.0, "shots": [], "stage_time": 0.0, "rounds": 0}
+    assert hud_stage_data([], beep_in_clip=1.0) == {
+        "beep": 1.0,
+        "shots": [],
+        "stage_time": 0.0,
+        "rounds": 0,
+        "events": [],
+        "reloads": [],
+    }
 
 
 def test_declared_positions_reads_the_meta_tag_in_order(tmp_path: Path) -> None:
@@ -97,6 +113,8 @@ def test_options_data_carries_the_resolved_position() -> None:
         "speed_colors": False,
         "class_labels": True,
         "landing": True,
+        "reload_chip": False,
+        "stage_bar": False,
         "position": "bottom-left",
     }
 
@@ -163,3 +181,68 @@ def test_a_shot_before_the_beep_is_placed_at_the_beep() -> None:
     the same case; here the shot lands on the beep."""
     data = hud_stage_data([_shot(-0.12, -0.12, "first_shot"), _shot(0.4, 0.52, "split")], beep_in_clip=1.0)
     assert [s["t"] for s in data["shots"]] == [1.0, 1.4]
+
+
+# --- stage events (spec 2026-10-08, part 2) -------------------------------------
+
+
+def _event(ident: str, kind: str, start: float, end: float, source: str = "manual") -> StageEvent:
+    return StageEvent(id=ident, kind=kind, start=start, end=end, source=source)  # type: ignore[arg-type]
+
+
+EVENT_SHOTS = [
+    _shot(1.20, 1.20, "first_shot"),
+    _shot(4.35, 3.15, "movement"),
+    _shot(7.90, 3.55, "split"),
+    _shot(9.60, 1.70, "reload"),
+]
+
+
+def test_confirmed_regions_reach_the_stage_in_clip_seconds() -> None:
+    events = [_event("evt-1", "movement", 3.4, 6.1), _event("evt-2", "reload", 8.05, 9.47)]
+    data = hud_stage_data(EVENT_SHOTS, beep_in_clip=2.0, events=events)
+    assert data["events"] == [
+        {"kind": "movement", "start": 5.4, "end": 8.1},
+        {"kind": "reload", "start": 10.05, "end": 11.47},
+    ]
+    (reload,) = data["reloads"]
+    assert reload["start"] == 10.05 and reload["end"] == 11.47
+    assert reload["duration"] == 1.42
+    assert reload["overhang"] is None, "a standing reload has no overhang"
+    assert [s["moving"] for s in data["shots"]] == [False, True, False, False]
+
+
+def test_a_reload_inside_a_movement_carries_its_overhang() -> None:
+    events = [_event("evt-1", "movement", 3.4, 9.0), _event("evt-2", "reload", 8.05, 9.47)]
+    (reload,) = hud_stage_data(EVENT_SHOTS, beep_in_clip=2.0, events=events)["reloads"]
+    assert reload["overhang"] == 0.47
+
+
+def test_proposals_never_reach_the_stage() -> None:
+    """Only confirmed regions render; an auto reload is a guess nobody
+    looked at. ``render_hud_overlay`` filters through ``events.confirmed``,
+    and ``hud_stage_data`` applies the same rule so no caller can leak one."""
+    data = hud_stage_data(
+        EVENT_SHOTS,
+        beep_in_clip=2.0,
+        events=[_event("evt-1", "reload", 8.05, 9.47, "auto"), _event("evt-2", "movement", 3.4, 6.1, "auto")],
+    )
+    assert data["events"] == [] and data["reloads"] == []
+    assert all(s["moving"] is False for s in data["shots"])
+
+
+def test_a_stage_without_events_still_carries_the_keys() -> None:
+    data = hud_stage_data(EVENT_SHOTS, beep_in_clip=2.0)
+    assert data["events"] == [] and data["reloads"] == []
+    assert all(s["moving"] is False for s in data["shots"])
+
+
+def test_the_two_event_toggles_default_off_and_ride_the_style_fields() -> None:
+    assert HudOptions().reload_chip is False and HudOptions().stage_bar is False
+    fields = OverlayStyleFields()
+    assert fields.overlay_reload_chip is False and fields.overlay_stage_bar is False
+    assert OverlayStyleFields(overlay_reload_chip=True).hud_options().reload_chip is True
+    assert OverlayStyleFields(overlay_stage_bar=True).hud_options().stage_bar is True
+    assert OverlayStyleFields(overlay_reload_chip=True).hud_options().stage_bar is False
+    data = hud_options_data(HudOptions(reload_chip=True, stage_bar=True), None)
+    assert data["reload_chip"] is True and data["stage_bar"] is True

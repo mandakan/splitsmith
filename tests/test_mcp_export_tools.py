@@ -122,6 +122,7 @@ def test_export_stage_calls_helper_and_returns_paths(tmp_path: Path) -> None:
             "stage_number": 1,
             "trimmed_video_path": root / "exports" / "stage1_k-vallen_trimmed.mp4",
             "csv_path": root / "exports" / "stage1_k-vallen_splits.csv",
+            "events_csv_path": root / "exports" / "stage1_k-vallen_events.csv",
             "fcpxml_path": root / "exports" / "stage1_k-vallen.fcpxml",
             "report_path": root / "exports" / "stage1_k-vallen_report.txt",
             "overlay_path": None,
@@ -143,6 +144,7 @@ def test_export_stage_calls_helper_and_returns_paths(tmp_path: Path) -> None:
     assert kwargs["exports_dir"].name == "exports"
     assert kwargs["beep_time_in_source"] == 5.0
     assert result["fcpxml_path"].endswith("stage1_k-vallen.fcpxml")
+    assert result["events_csv_path"].endswith("stage1_k-vallen_events.csv")
     assert result["shots_written"] == 2
     assert result["anomalies"] == []
 
@@ -249,6 +251,7 @@ def test_export_stage_includes_secondaries_with_beep(tmp_path: Path) -> None:
             "stage_number": 1,
             "trimmed_video_path": None,
             "csv_path": None,
+            "events_csv_path": None,
             "fcpxml_path": None,
             "report_path": None,
             "overlay_path": None,
@@ -405,3 +408,103 @@ def test_export_match_rejects_a_transition_kind_outside_the_grammar(tmp_path: Pa
             export_tools.export_match_tool(
                 str(root), stage_numbers=[1], output_format="mp4", transition_kind=kind
             )
+
+
+def _export_match_with_overlay_on_disk(tmp_path: Path, *, record: str) -> tuple[Path, object, dict]:
+    """Seed a stage with a trim and an overlay MOV, write the overlay's
+    settings record as ``record`` says (``current`` / ``stale`` / ``none``),
+    and run the MCP match export with the composer mocked."""
+    from splitsmith.overlay_hud import HudOptions, overlay_settings
+    from splitsmith.ui import exports as exports_mod
+
+    root, _src = _seed_export_project(tmp_path)
+    audit_path = _make_audit_json(root / "audit", 1)
+    exports_dir = root / "exports"
+    exports_dir.mkdir(exist_ok=True)
+    (exports_dir / "stage1_k-vallen_trimmed.mp4").write_bytes(b"FAKE_TRIMMED_MP4")
+    overlay = exports_dir / "stage1_k-vallen_overlay.mov"
+    overlay.write_bytes(b"FAKE_OVERLAY")
+    if record != "none":
+        settings = overlay_settings(
+            look="splitsmith",
+            variant="default",
+            options=HudOptions(),
+            codec="auto",
+            max_height=None,
+            max_fps=None,
+            audit_revision=exports_mod.overlay_audit_revision(audit_path),
+        )
+        (exports_dir / "stage1_k-vallen_overlay.json").write_text(json.dumps(settings))
+    if record == "stale":
+        doc = json.loads(audit_path.read_text())
+        doc["shots"][0]["ms_after_beep"] = 640
+        audit_path.write_text(json.dumps(doc))
+    fake_result = type(
+        "FakeMatchResult",
+        (),
+        {
+            "fcpxml_path": exports_dir / "match.fcpxml",
+            "stage_count": 1,
+            "duration_seconds": 1.0,
+            # What the composer says for a stage handed no overlay.
+            "anomalies": (
+                []
+                if record == "current"
+                else [
+                    "stage 1: overlay not available -- run the per-stage Generate "
+                    "with the Overlay toggle enabled"
+                ]
+            ),
+        },
+    )()
+    with patch(
+        "splitsmith.mcp.export_tools.match_export_helpers.export_match",
+        return_value=fake_result,
+    ) as mock_export:
+        result = export_tools.export_match_tool(str(root), stage_numbers=[1], include_overlay=True)
+    return overlay, mock_export.call_args.kwargs["stages"][0], result
+
+
+def test_export_match_reuses_an_overlay_drawn_from_the_current_audit(tmp_path: Path) -> None:
+    overlay, stage_input, result = _export_match_with_overlay_on_disk(tmp_path, record="current")
+    assert stage_input.overlay_path == overlay
+    assert result["anomalies"] == []
+
+
+@pytest.mark.parametrize("record", ["stale", "none"])
+def test_export_match_drops_an_overlay_the_audit_has_moved_past(tmp_path: Path, record: str) -> None:
+    """An overlay drawn from an older audit (or with no record to say which)
+    would show the old shots: it is not stitched, and the result says why.
+    Before, any ``_overlay.mov`` on disk was stitched unchecked."""
+    _overlay, stage_input, result = _export_match_with_overlay_on_disk(tmp_path, record=record)
+    assert stage_input.overlay_path is None
+    assert any("older audit" in a and "export_stage" in a for a in result["anomalies"])
+    assert not any("overlay not available" in a for a in result["anomalies"]), "said once, not twice"
+
+
+def test_export_match_drops_a_legacy_overlay_over_an_unreadable_audit(tmp_path: Path) -> None:
+    """No record and an audit that will not parse both read as no revision;
+    they must not agree into stitching the overlay."""
+    root, _src = _seed_export_project(tmp_path)
+    (root / "audit").mkdir(exist_ok=True)
+    (root / "audit" / "stage1.json").write_text("{not json")
+    exports_dir = root / "exports"
+    exports_dir.mkdir(exist_ok=True)
+    (exports_dir / "stage1_k-vallen_trimmed.mp4").write_bytes(b"FAKE_TRIMMED_MP4")
+    (exports_dir / "stage1_k-vallen_overlay.mov").write_bytes(b"FAKE_OVERLAY")
+    fake_result = type(
+        "FakeMatchResult",
+        (),
+        {
+            "fcpxml_path": exports_dir / "m.fcpxml",
+            "stage_count": 1,
+            "duration_seconds": 1.0,
+            "anomalies": [],
+        },
+    )()
+    with patch(
+        "splitsmith.mcp.export_tools.match_export_helpers.export_match",
+        return_value=fake_result,
+    ) as mock_export:
+        export_tools.export_match_tool(str(root), stage_numbers=[1], include_overlay=True)
+    assert mock_export.call_args.kwargs["stages"][0].overlay_path is None

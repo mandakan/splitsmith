@@ -4456,6 +4456,8 @@ def register_job_bodies(state: AppState) -> None:
             bits.append(f"{n} secondary trim{'s' if n != 1 else ''}")
         if result.csv_path is not None:
             bits.append("csv")
+        if result.events_csv_path is not None:
+            bits.append("events")
         if result.fcpxml_path is not None:
             bits.append("fcpxml")
         if result.report_path is not None:
@@ -4497,6 +4499,13 @@ def register_job_bodies(state: AppState) -> None:
         for produced, artifact_kind in (
             (result.trimmed_video_path, "trim"),
             (result.csv_path, "csv"),
+            # events.csv reuses kind "csv" rather than a new ArtifactKind
+            # literal: an unrecognised kind is a ``_record_export_run``
+            # ValidationError (swallowed, so the run loses its whole
+            # artifact record) and older desktops drop an unknown kind on
+            # read -- "csv" is already a safe, understood kind for a
+            # small text deliverable beside the splits CSV.
+            (result.events_csv_path, "csv"),
             (result.fcpxml_path, "fcpxml"),
             (result.report_path, "report"),
             (result.overlay_path, "overlay"),
@@ -4540,6 +4549,7 @@ def register_job_bodies(state: AppState) -> None:
                 "stage_number": stage_number,
                 "trimmed_video": _name(result.trimmed_video_path),
                 "csv": _name(result.csv_path),
+                "events_csv": _name(result.events_csv_path),
                 "fcpxml": _name(result.fcpxml_path),
                 "report": _name(result.report_path),
                 "overlay": _name(result.overlay_path),
@@ -4577,6 +4587,11 @@ def register_job_bodies(state: AppState) -> None:
         compose_start = 0.20 if renders_mp4 else 0.92
         per_stage_share = (compose_start - 0.05) / max(1, n)
 
+        # Stages whose overlay on disk nothing vouches for: its record did not
+        # match (style or audit) and the redraw wrote none. The MOV stays on
+        # disk (a transient failure never deletes a render) but is not
+        # stitched; the value is the reason, surfaced as an anomaly.
+        overlay_withheld: dict[int, str] = {}
         with handle.timer.phase("per_stage"):
             for idx, stage_number in enumerate(req.stage_numbers):
                 handle.check_cancel()
@@ -4613,13 +4628,17 @@ def register_job_bodies(state: AppState) -> None:
                     (exports_dir / f"{base}_cam_{vid}_trimmed.mp4").exists() for vid in wanted_secondary_ids
                 )
                 # An overlay on disk is reused only when its record says it was
-                # drawn the way this export asks (Look, style, options, format).
-                # One without a record predates them and reads as the defaults,
-                # so an untouched form re-stitches without a re-render, as before.
+                # drawn the way this export asks (Look, style, options, format)
+                # from the audit as it stands now (materialised above). One
+                # without a record cannot say which audit it shows and is drawn
+                # again.
                 overlay_record = export_helpers.overlay_settings_file(exports_dir, base)
                 overlay_reusable = False
                 if req.include_overlay:
                     export_storage.pull_export_file(proj, overlay_record)
+                    current_revision = export_helpers.overlay_audit_revision(
+                        audit_dir / f"stage{stage_number}.json"
+                    )
                     wanted = overlay_settings(
                         look=req.overlay_theme,
                         variant=req.overlay_variant,
@@ -4627,8 +4646,12 @@ def register_job_bodies(state: AppState) -> None:
                         codec=req.overlay_codec,
                         max_height=req.overlay_max_height,
                         max_fps=req.overlay_max_fps,
+                        audit_revision=current_revision,
                     )
-                    overlay_reusable = export_helpers.read_overlay_settings(overlay_record) == wanted
+                    overlay_reusable = (
+                        current_revision is not None
+                        and export_helpers.read_overlay_settings(overlay_record) == wanted
+                    )
                     # Pull the MOV only when it would be reused.
                     if overlay_reusable:
                         export_storage.pull_export_file(proj, overlay_target)
@@ -4698,6 +4721,12 @@ def register_job_bodies(state: AppState) -> None:
                     # on this worker -- push them so other workers + the API
                     # download path see them. No-op in local mode.
                     export_storage.push_stage_export_outputs(proj, recut)
+                    if overlay_missing and recut.overlay_settings_path is None and overlay_target.exists():
+                        reason = next(
+                            (r for r in recut.export_failures if r.startswith("overlay not written")),
+                            "overlay not written",
+                        )
+                        overlay_withheld[stage_number] = reason
                 else:
                     handle.update(
                         progress=0.02 + idx * per_stage_share,
@@ -4732,6 +4761,14 @@ def register_job_bodies(state: AppState) -> None:
                 )
             except ValueError as exc:
                 raise RuntimeError(f"{exc} (disappeared mid-flight)") from exc
+            stages_input = [
+                (
+                    replace(stage_in, overlay_path=None)
+                    if stage_in.stage_number in overlay_withheld
+                    else stage_in
+                )
+                for stage_in in stages_input
+            ]
 
             project_name = req.project_name or proj.name or "match"
             book = shooter_book_module.load_snapshot(state.shooter_book)
@@ -4802,6 +4839,22 @@ def register_job_bodies(state: AppState) -> None:
                     segment_cache=match_export_helpers.render_segment_cache(Config().output),
                     progress=_render_step,
                 )
+                # A withheld overlay says why in place of the composer's
+                # generic "overlay not available" line for that stage.
+                result.anomalies[:] = [
+                    *(
+                        f"stage {n}: overlay left out -- the one on disk was drawn from an older "
+                        f"audit or style and could not be drawn again ({why})"
+                        for n, why in overlay_withheld.items()
+                    ),
+                    *(
+                        a
+                        for a in result.anomalies
+                        if not any(
+                            a.startswith(f"stage {n}: overlay not available") for n in overlay_withheld
+                        )
+                    ),
+                ]
             except match_export_helpers.MatchExportError as exc:
                 raise RuntimeError(str(exc)) from exc
 
@@ -8100,6 +8153,27 @@ def _stage_figures_payload(doc: dict | None, project: MatchProject, stage_number
         "fastest_split": min(splits) if splits else None,
         "shot_count": len(shots),
         "split_count": fig.split_count,
+        **_stage_region_figures(doc, stage_number),
+    }
+
+
+def _stage_region_figures(doc: dict, stage_number: int) -> dict:
+    """Region figures for ``stages[].figures`` (spec 2026-10-08, part 2):
+    confirmed regions only (``events.confirmed_from_doc``), all four
+    ``None`` when the stage has none. ``overhang_s`` is ``None`` unless a
+    reload overlaps a movement (a standing reload measures no overhang;
+    the summary card omits it on the same condition). No capacity: the
+    capacity warning is a Coach-page hint, not a shared figure."""
+    confirmed = events_module.confirmed_from_doc(doc, log_context=f"stage {stage_number}")
+    if not confirmed:
+        return {"moving_shots": None, "reloads": None, "reload_avg_s": None, "overhang_s": None}
+    summary = events_module.stage_event_summary(events_module.shot_times_from_doc(doc), confirmed, None)
+    moving_reload = any(f.overhang is not None for f in events_module.reload_figures(confirmed))
+    return {
+        "moving_shots": summary.moving_shots,
+        "reloads": summary.reloads,
+        "reload_avg_s": summary.reload_avg_s,
+        "overhang_s": summary.overhang_s if moving_reload else None,
     }
 
 

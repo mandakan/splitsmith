@@ -412,11 +412,26 @@ describe("overlay styles in the gallery (template HUD)", () => {
     expect(slot.read({ ...picked, overlayStyle: { ...picked.overlayStyle, variant: "gone" } })).toBe("on");
   });
 
-  it("a style carries the three toggles and a position only when it declares some", () => {
+  it("a style carries the five toggles and a position only when it declares some; Classic carries none", () => {
     const slot = overlaySlot(DEFAULT_EXPORT_SETTINGS);
     const plate = slot.variants.find((v) => v.id === "style:plate")!;
     const timeline = slot.variants.find((v) => v.id === "style:timeline")!;
-    expect(plate.toggles?.map((t) => t.label)).toEqual(["Speed colours", "Class labels", "Landing"]);
+    const classic = slot.variants.find((v) => v.id === "on")!;
+    expect(plate.toggles?.map((t) => t.label)).toEqual([
+      "Speed colours",
+      "Class labels",
+      "Landing",
+      "Reload chip",
+      "Stage bar",
+    ]);
+    expect(timeline.toggles?.map((t) => t.label)).toEqual([
+      "Speed colours",
+      "Class labels",
+      "Landing",
+      "Reload chip",
+      "Stage bar",
+    ]);
+    expect(classic.toggles).toBeUndefined();
     expect(plate.choice?.options.map((o) => o.value)).toEqual(["bottom-left", "top-right"]);
     expect(timeline.choice).toBeUndefined();
     const s = { ...DEFAULT_EXPORT_SETTINGS, ...slot.write(DEFAULT_EXPORT_SETTINGS, "style:plate") };
@@ -427,6 +442,12 @@ describe("overlay styles in the gallery (template HUD)", () => {
     const coloured = { ...moved, ...plate.toggles![0].write(moved, true) };
     expect(coloured.overlayStyle.speedColors).toBe(true);
     expect(plate.toggles![0].read(coloured)).toBe(true);
+    const reloaded = { ...moved, ...plate.toggles![3].write(moved, true) };
+    expect(reloaded.overlayStyle.reloadChip).toBe(true);
+    expect(plate.toggles![3].read(reloaded)).toBe(true);
+    const barred = { ...moved, ...plate.toggles![4].write(moved, true) };
+    expect(barred.overlayStyle.stageBar).toBe(true);
+    expect(plate.toggles![4].read(barred)).toBe(true);
   });
 
   it("explains speed colours in full: off, on, the comparison and its limits", () => {

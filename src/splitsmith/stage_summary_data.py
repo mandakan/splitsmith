@@ -16,10 +16,12 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from .audit_data import audit_shots_to_engine_shots, read_audit_data
 from .coach import heal_unclassified
-from .config import IntervalClass, StageRounds
+from .config import IntervalClass, StageEvent, StageRounds
+from .events import ReloadFigure, confirmed_from_doc, reload_figures, shot_is_moving
 from .match_project import StageScorecard, is_stub_audit
 
 logger = logging.getLogger(__name__)
@@ -46,11 +48,16 @@ class TileShot:
     (#772): the split statistics need it to tell a split from a reload.
     ``None`` means unclassified, and the statistics fall back to a
     threshold rule - see :func:`splitsmith.coach.statistic_splits`.
+
+    ``moving`` is true when the shot falls inside a confirmed movement
+    region (``events.shot_is_moving`` over ``events.confirmed``); the stage
+    summary splits its statistics into static and moving rows by it.
     """
 
     time_from_beep: float
     split: float
     interval_class: IntervalClass | None = None
+    moving: bool = False
 
 
 @dataclass(frozen=True)
@@ -70,6 +77,10 @@ class TileStageData:
     stage_time_is_manual: bool = False
     scorecard: StageScorecard | None = None
     stage_rounds: StageRounds | None = None
+    #: The stage's confirmed reloads, in time order
+    #: (:func:`load_stage_reloads`). Empty when there are none, which is
+    #: every stage nobody marked up: the summary then draws no reload row.
+    reloads: tuple[ReloadFigure, ...] = ()
 
     @property
     def shot_count(self) -> int:
@@ -82,6 +93,28 @@ class TileStageData:
     @property
     def last_shot_time(self) -> float | None:
         return self.shots[-1].time_from_beep if self.shots else None
+
+
+def _confirmed_events(audit_data: dict[str, Any], audit_path: Path) -> list[StageEvent]:
+    """The doc's confirmed regions. A corrupt events list must not cost the
+    stage its shots (one bad doc, a 12-stage render): it reads as none, the
+    way the HUD render and the export preview treat it
+    (``events.confirmed_from_doc``)."""
+    return confirmed_from_doc(audit_data, log_context=f"stage summary: {audit_path}")
+
+
+def load_stage_reloads(audit_path: Path) -> tuple[ReloadFigure, ...]:
+    """This stage's confirmed reloads as :class:`~splitsmith.events.ReloadFigure`
+    records (duration, overhang against an overlapping confirmed movement).
+    An auto proposal is never here. Missing, unreadable or corrupt reads as
+    none."""
+    try:
+        audit_data = read_audit_data(audit_path)
+    except Exception:  # noqa: BLE001 -- load_stage_shots already says why this file is unreadable
+        return ()
+    if not isinstance(audit_data, dict):
+        return ()
+    return tuple(reload_figures(_confirmed_events(audit_data, audit_path)))
 
 
 def load_stage_shots(audit_path: Path) -> tuple[TileShot, ...]:
@@ -134,6 +167,7 @@ def load_stage_shots(audit_path: Path) -> tuple[TileShot, ...]:
         # here because this path never writes back.
         heal_unclassified(audit_data.get("shots"))
         engine_shots = audit_shots_to_engine_shots(audit_data, beep_time_in_source=0.0)
+        regions = _confirmed_events(audit_data, audit_path)
     except Exception as exc:  # noqa: BLE001 -- one bad file must not fail the render
         logger.warning(
             "stage summary: unreadable audit %s (%s); rendering this stage without shots",
@@ -154,9 +188,10 @@ def load_stage_shots(audit_path: Path) -> tuple[TileShot, ...]:
                 time_from_beep=shot.time_from_beep,
                 split=split,
                 interval_class=shot.interval_class,
+                moving=shot_is_moving(shot.time_from_beep, regions),
             )
         )
     return tuple(shots)
 
 
-__all__ = ["TileShot", "TileStageData", "load_stage_shots"]
+__all__ = ["TileShot", "TileStageData", "load_stage_reloads", "load_stage_shots"]

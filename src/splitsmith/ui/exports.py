@@ -15,13 +15,16 @@ the production UI is that the user-audited shots are the truth.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from .. import csv_gen, fcpxml_gen, overlay_render, report, summary_card, trim
-from ..audit_data import audit_shots_to_engine_shots, read_audit_data
-from ..config import Config, ReportFiles, StageAnalysis, StageData
+from ..audit_data import StageExportError, audit_shots_to_engine_shots, read_audit_data
+from ..audit_revision import audit_revision
+from ..config import Config, ReportFiles, StageAnalysis, StageData, StageEvent
+from ..events import confirmed_from_doc
 from ..export_naming import stage_file_base
 from ..looks import DEFAULT_VARIANT
 from ..match_project import StageScorecard
@@ -29,7 +32,9 @@ from ..overlay_hud import LEGACY_OVERLAY_SETTINGS, HudOptions, overlay_settings
 from ..overlay_render import OverlayCodec
 from ..overlay_theme import ThemeName
 from ..segment_cache import SegmentCache
-from ..stage_summary_data import TileStageData, load_stage_shots
+from ..stage_summary_data import TileStageData, load_stage_reloads, load_stage_shots
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -127,6 +132,11 @@ class StageExportResult:
     # ``<base>_overlay.json``: what the overlay MOV was drawn with
     # (:func:`overlay_settings`), written beside it on every render.
     overlay_settings_path: Path | None = None
+    # ``<base>_events.csv``: the stage's confirmed regions (spec
+    # 2026-10-08, part 2). ``None`` when the stage has none -- a re-export
+    # that drops its last confirmed region deletes a stale file rather
+    # than leaving ``None`` here with the old CSV still on disk.
+    events_csv_path: Path | None = None
 
 
 def overlay_settings_file(exports_dir: Path, base: str) -> Path:
@@ -134,11 +144,25 @@ def overlay_settings_file(exports_dir: Path, base: str) -> Path:
     return exports_dir / f"{base}_overlay.json"
 
 
+def overlay_audit_revision(audit_path: Path) -> str | None:
+    """The revision of the audit doc at ``audit_path``, as an overlay's
+    settings record holds it. The one computation for the writer
+    (:func:`export_stage`) and every reuse check, so a hosted
+    materialisation and a local read agree. A missing doc is zero shots and
+    has a revision; an unreadable one is ``None``, which a reuse check takes
+    as "draw again"."""
+    try:
+        return audit_revision(read_audit_data(audit_path))
+    except StageExportError:
+        return None
+
+
 def read_overlay_settings(path: Path) -> dict[str, Any] | None:
     """The settings an overlay MOV was drawn with. A missing record is an
-    overlay rendered before records existed, read as the defaults
-    (:data:`LEGACY_OVERLAY_SETTINGS`); an unreadable one is ``None``, which
-    no request matches, so the overlay is drawn again."""
+    overlay rendered before records existed (:data:`LEGACY_OVERLAY_SETTINGS`,
+    which carries no audit revision and so matches no request); an
+    unreadable one is ``None``, which no request matches either. Either
+    way the overlay is drawn again."""
     if not path.exists():
         return dict(LEGACY_OVERLAY_SETTINGS)
     try:
@@ -146,6 +170,14 @@ def read_overlay_settings(path: Path) -> dict[str, Any] | None:
     except (OSError, ValueError):
         return None
     return value if isinstance(value, dict) else None
+
+
+def _confirmed_regions(audit_data: dict[str, Any], audit_path: Path) -> list[StageEvent]:
+    """The stage's confirmed regions only (spec 2026-10-08, part 2). A
+    corrupt events list must not fail the whole export -- it reads as
+    none, the same tolerance the HUD render and the stage summary give a
+    legacy or malformed doc (``events.confirmed_from_doc``)."""
+    return confirmed_from_doc(audit_data, log_context=audit_path.name)
 
 
 def export_stage(
@@ -198,6 +230,8 @@ def export_stage(
     # clip + FCPXML spine do not. ``report.detect_anomalies`` already
     # surfaces "No shots detected in the stage window" for this case so
     # the audit trail stays clean.
+
+    regions = _confirmed_regions(audit_data, audit_path)
 
     exports_dir.mkdir(parents=True, exist_ok=True)
     base = stage_file_base(stage_data.stage_number, stage_data.stage_name)
@@ -307,10 +341,22 @@ def export_stage(
                 secondary_trimmed[sec.video_id] = sec_target
 
     csv_path: Path | None = None
+    events_csv_path: Path | None = None
     if request.write_csv:
         if shots:
             csv_path = exports_dir / f"{base}_splits.csv"
-            csv_gen.write_splits_csv(shots, csv_path)
+            csv_gen.write_splits_csv(shots, csv_path, events=regions)
+            # events.csv rides the same write_csv gate -- only written when
+            # the stage has confirmed regions (spec 2026-10-08, part 2). A
+            # re-export that drops the stage's last confirmed region must
+            # not leave the previous run's events.csv behind as a stale
+            # artefact nobody asked for any more.
+            candidate_events_csv = exports_dir / f"{base}_events.csv"
+            if regions:
+                csv_gen.write_events_csv(regions, candidate_events_csv)
+                events_csv_path = candidate_events_csv
+            else:
+                candidate_events_csv.unlink(missing_ok=True)
         else:
             skip_reasons.append("csv not written: no shots audited")
 
@@ -348,6 +394,9 @@ def export_stage(
                     "Re-run Generate with the Trim toggle enabled."
                 )
         else:
+            # Read before the render: an edit that lands while it runs was
+            # never drawn and must read as a change to the next reuse check.
+            drawn_revision = overlay_audit_revision(audit_path)
             try:
                 overlay_render.render_overlay(
                     audit_path=audit_path,
@@ -377,6 +426,7 @@ def export_stage(
                             codec=request.overlay_codec,
                             max_height=request.overlay_max_height,
                             max_fps=request.overlay_max_fps,
+                            audit_revision=drawn_revision,
                         ),
                         sort_keys=True,
                     ),
@@ -431,6 +481,7 @@ def export_stage(
                         stage_time_seconds=stage_data.time_seconds if stage_data.time_seconds > 0 else None,
                         stage_time_is_manual=stage_time_is_manual,
                         scorecard=scorecard,
+                        reloads=load_stage_reloads(audit_path),
                     ),
                     label=label,
                     trimmed_video_path=card_source,
@@ -527,6 +578,7 @@ def export_stage(
                     overlay_path=fcp_overlay_path,
                     overlay_video=overlay_meta,
                     secondaries=fcp_secondaries or None,
+                    events=regions,
                 )
             except (fcpxml_gen.FFprobeError, OSError) as exc:
                 skip_reasons.append(f"fcpxml not written: {exc}")
@@ -572,4 +624,5 @@ def export_stage(
         export_failures=list(skip_reasons),
         summary_card_path=summary_card_path,
         overlay_settings_path=overlay_settings_path,
+        events_csv_path=events_csv_path if events_csv_path is not None and events_csv_path.exists() else None,
     )

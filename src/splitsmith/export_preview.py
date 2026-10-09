@@ -32,6 +32,8 @@ from typing import Literal
 from PIL import Image
 
 from . import composition
+from .config import StageEvent
+from .events import confirmed_from_doc, reload_figures
 from .export_naming import stage_display_name, stage_file_base
 from .identity import ResolvedIdentity
 from .logo_placeholder import PLACEHOLDER_REVISION
@@ -144,10 +146,22 @@ def audit_digest(audit_doc: dict | None) -> str:
     return hashlib.sha256(json.dumps(audit_doc, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
 
+def _confirmed_regions(audit_doc: dict | None) -> list[StageEvent]:
+    """The stage's confirmed regions, the way ``overlay_hud_render``'s
+    ``_confirmed_regions(audit_path)`` reads them -- here from the
+    already-loaded doc rather than a file. A corrupt events list must not
+    fail a preview: draw with no regions, as the Coach GET's in-memory
+    heal tolerates a legacy doc (``events.confirmed_from_doc``)."""
+    return confirmed_from_doc(audit_doc, log_context="preview")
+
+
 #: Bump when the same inputs draw a different picture, or a cached still
 #: from before the change outlives it. 2: a blank stage name reads
-#: "Stage N" on the slate and the lower-third.
-PREVIEW_REVISION = 2
+#: "Stage N" on the slate and the lower-third. 3: the stage summary draws
+#: confirmed reloads and static / moving split rows. 4: the summary's
+#: table rows fit their own columns (``fit.js`` ``fitColumns``), which no
+#: other key input sees: ``_shared/`` scripts are not in any digest.
+PREVIEW_REVISION = 4
 
 
 def preview_key(
@@ -539,6 +553,7 @@ def render_preview(
             stage_time_is_manual=stage.time_seconds_manual,
             scorecard=stage.scorecard,
             stage_rounds=stage.stage_rounds,
+            reloads=tuple(reload_figures(_confirmed_regions(audit_doc))),
         )
         image = build_summary_still(
             tile,
@@ -552,7 +567,14 @@ def render_preview(
         )
     else:  # overlay
         styled = _hud_preview(
-            spec, look=look, shots=shots, rasterizer=rasterizer, frame=frame, theme=theme, moving=moving
+            spec,
+            look=look,
+            shots=shots,
+            rasterizer=rasterizer,
+            frame=frame,
+            theme=theme,
+            moving=moving,
+            audit_doc=audit_doc,
         )
         if styled is not None:
             return styled
@@ -613,6 +635,7 @@ def _hud_preview(
     frame: Path | None,
     theme: OverlayTheme,
     moving: bool,
+    audit_doc: dict | None,
 ) -> bytes | None:
     """An overlay style over the stage's frame: moving, a loop of the
     opening shots then the last shot and the landing; still, the settled
@@ -626,7 +649,7 @@ def _hud_preview(
     # Deferred: overlay_hud_render builds on the renderer's encoder module.
     from .overlay_hud_render import hud_context
 
-    stage = hud_stage_data(shots, beep_in_clip=HUD_PREVIEW_BEEP)
+    stage = hud_stage_data(shots, beep_in_clip=HUD_PREVIEW_BEEP, events=_confirmed_regions(audit_doc))
     position = resolve_position(spec.overlay_options.position, declared_positions(template))
     context = hud_context(
         stage=stage,

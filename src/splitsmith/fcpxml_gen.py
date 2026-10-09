@@ -22,14 +22,15 @@ from __future__ import annotations
 import json
 import plistlib
 import subprocess
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
 from fractions import Fraction
 from pathlib import Path
 from typing import Literal
 from xml.etree import ElementTree as ET
 
-from .config import OutputConfig, Shot, SplitColorThresholds, VideoMetadata
+from .config import OutputConfig, Shot, SplitColorThresholds, StageEvent, VideoMetadata
+from .events import region_marker_label
 
 PipCorner = Literal["top-right", "top-left", "bottom-right", "bottom-left"]
 
@@ -326,6 +327,7 @@ def generate_fcpxml(
     overlay_path: Path | None = None,
     overlay_video: VideoMetadata | None = None,
     secondaries: list[SecondaryClip] | None = None,
+    events: Sequence[StageEvent] = (),
 ) -> None:
     """Write a minimal FCPXML 1.10 timeline for the trimmed video.
 
@@ -336,6 +338,13 @@ def generate_fcpxml(
     Each entry in ``shots`` must have ``time_from_beep`` set; shot times are
     converted to clip-local time via ``beep_offset + time_from_beep`` and
     rationalized against the source frame duration.
+
+    ``events``: the stage's **confirmed** regions only (spec 2026-10-08,
+    part 2) -- callers filter with ``events.confirmed`` before passing them
+    here; this function does not re-filter by ``source``. Each becomes one
+    marker on the primary clip with ``duration`` spanning the region, value
+    ``Reload 1.42`` / ``Movement`` / ``Activation``. Empty by default, so a
+    stage with no confirmed regions emits exactly as before.
 
     ``overlay_path``: optional pre-rendered alpha MOV (issue #45) to place
     on V2 as a connected clip. When the file exists the timeline gets a
@@ -624,6 +633,31 @@ def generate_fcpxml(
             },
         )
 
+    # Region markers (spec 2026-10-08, part 2). ``events`` is already the
+    # caller's confirmed-only list; a region whose start falls outside the
+    # clip is dropped, the same rule as a shot marker above. A region whose
+    # end runs past the clip has its end clamped to the clip's own duration
+    # rather than emitting a marker FCP would reject for overrunning the
+    # asset -- the user still sees the region start, just not a range that
+    # claims frames that don't exist on this clip.
+    for event in events:
+        start_clip_local = beep_offset_seconds + event.start
+        end_clip_local = min(beep_offset_seconds + event.end, video.duration_seconds)
+        if not 0.0 <= start_clip_local < video.duration_seconds:
+            continue
+        start_frames = round(start_clip_local / fd_seconds)
+        end_frames = round(end_clip_local / fd_seconds)
+        region_duration_frames = max(1, end_frames - start_frames)
+        ET.SubElement(
+            asset_clip,
+            "marker",
+            {
+                "start": _frame_aligned_str(start_frames, fd_num, fd_den),
+                "duration": _frame_aligned_str(region_duration_frames, fd_num, fd_den),
+                "value": region_marker_label(event),
+            },
+        )
+
     ET.indent(fcpxml, space="    ")
     tree_bytes = ET.tostring(fcpxml, encoding="utf-8", xml_declaration=True)
     # Inject the FCPXML DOCTYPE (ElementTree does not emit it).
@@ -779,6 +813,11 @@ class StageComposition:
     overlay_path: Path | None = None
     overlay_video: VideoMetadata | None = None
     secondaries: tuple[SecondaryClip, ...] = ()
+    #: This stage's confirmed regions only (spec 2026-10-08, part 2) --
+    #: the composer filters with ``events.confirmed`` before building this.
+    #: Empty by default, so a stage built before this field existed still
+    #: emits exactly as before.
+    events: tuple[StageEvent, ...] = ()
 
 
 def generate_match_fcpxml(
@@ -1555,6 +1594,29 @@ def generate_match_fcpxml(
                     "start": _frame_aligned_str(frames, fd_num, fd_den),
                     "duration": frame_duration_str,
                     "value": _marker_label(shot, config.split_color_thresholds),
+                },
+            )
+
+        # Region markers (spec 2026-10-08, part 2). ``stage.events`` is
+        # already confirmed-only; same drop-outside-window rule as shots.
+        # A region whose end runs past the visible window has its end
+        # clamped to the window's own end rather than claiming spine time
+        # outside what this stage occupies.
+        for event in stage.events:
+            region_start_seconds = stage.beep_offset_seconds + event.start
+            region_end_seconds = min(stage.beep_offset_seconds + event.end, eff_end_seconds)
+            if not head_trim_seconds_for_window <= region_start_seconds < eff_end_seconds:
+                continue
+            start_frames = round(region_start_seconds / fd_seconds)
+            end_frames = round(region_end_seconds / fd_seconds)
+            region_duration_frames = max(1, end_frames - start_frames)
+            ET.SubElement(
+                primary_clip,
+                "marker",
+                {
+                    "start": _frame_aligned_str(start_frames, fd_num, fd_den),
+                    "duration": _frame_aligned_str(region_duration_frames, fd_num, fd_den),
+                    "value": region_marker_label(event),
                 },
             )
 

@@ -722,7 +722,14 @@ def _group_style(group: Group) -> str:
     """
     parts: list[str] = []
     if group.flow is Flow.GRID:
-        parts.append(f"grid-template-columns: repeat({max(1, len(group.elements))}, 1fr)")
+        columns = group.columns if group.columns is not None else len(group.elements)
+        parts.append(f"grid-template-columns: repeat({max(1, columns)}, 1fr)")
+        if group.columns is not None:
+            # A grid with a set column count is one row of a table (the
+            # stage summary's Static / Moving rows): its cells sit on their
+            # last baseline, so a caption-less row label or figure lines
+            # up with the captioned figures beside it.
+            parts.append("align-items: last baseline")
     if group.gap is not None:
         parts.append(f"gap: {_fit(group.gap)}")
     if group.margin_top is not None:
@@ -778,7 +785,7 @@ def _cell_div(groups: Sequence[Group], *, style: str | None = None) -> str:
     return f'<div class="cell"{style_attr}>{anchors_html}</div>'
 
 
-def _fit_script() -> str:
+def _fit_script(*, fit_columns: bool = False) -> str:
     """The one piece of *measurement* this pipeline hands to the browser
     instead of doing in Python (issue #683 F1's fit policy).
 
@@ -823,13 +830,24 @@ def _fit_script() -> str:
        instead, and empty the whole counts row before this loop ever
        reaches hit factor or time.
 
+    ``fit_columns`` turns on a third step, between the two above and the
+    width step: shrink the band until no grid column's text overflows
+    its own column (``fitColumns`` in ``fit.js``). Only the stage
+    summary asks for it (:func:`single_html` / :func:`grid_html`'s
+    ``fit_columns``): a portrait card's quarter columns otherwise clip
+    ``1.42`` to ``1.4``. The live race and the free cell keep the old
+    policy, their rows change text frame to frame.
+
     Called by :mod:`splitsmith.overlay_raster` after
     ``document.fonts.ready`` resolves, never before: a shrink measured
     against the browser's fallback system font's metrics would pick the
     wrong factor the instant the bundled face actually loads and
     reflows everything under it.
     """
-    return f"<script>window.__splitsmithMinFont = {MIN_FONT_SIZE};</script>\n<script>\n{fit_js()}</script>"
+    flags = f"window.__splitsmithMinFont = {MIN_FONT_SIZE};"
+    if fit_columns:
+        flags += " window.__splitsmithFitColumns = true;"
+    return f"<script>{flags}</script>\n<script>\n{fit_js()}</script>"
 
 
 def fit_js() -> str:
@@ -874,6 +892,7 @@ def single_html(
     scale: CellScale,
     theme: OverlayTheme,
     accent: str | None = None,
+    fit_columns: bool = False,
 ) -> str:
     """One canvas-sized cell as a whole HTML document (issue #684).
 
@@ -902,6 +921,7 @@ def single_html(
 
     Carries the fit-policy ``<script>`` for the same reason both siblings
     do -- see :func:`_fit_script`.
+    ``fit_columns`` turns on its column step (the stage summary's card).
 
     **One rule here overrides the shared stylesheet, and only here.** The
     single-shooter overlay draws its counter and split through this
@@ -928,7 +948,7 @@ def single_html(
         "<!doctype html>\n"
         '<html><head><meta charset="utf-8"><title>overlay</title>'
         f"<style>{single_css(width=width, height=height, scale=scale, theme=theme)}</style>"
-        f"{_fit_script()}"
+        f"{_fit_script(fit_columns=fit_columns)}"
         "</head>"
         f"<body>{_cell_div(groups, style=cell_style)}</body></html>"
     )
@@ -964,6 +984,7 @@ def grid_html(
     geometry: SpriteGeometry,
     scale: CellScale,
     theme: OverlayTheme,
+    fit_columns: bool = False,
 ) -> str:
     """A whole canvas-sized grid of declared cells as one HTML document.
 
@@ -997,6 +1018,8 @@ def grid_html(
     ``window.__splitsmithFit``; :mod:`splitsmith.overlay_raster` is what
     actually calls it, after webfonts are loaded and before the
     screenshot.
+    ``fit_columns`` turns on its column step (the stage summary's hold;
+    never the live sprites, whose rows change text frame to frame).
     """
     style = _style_rules(scale=scale, theme=theme)
     grid_style = (
@@ -1021,7 +1044,7 @@ def grid_html(
         "<!doctype html>\n"
         '<html><head><meta charset="utf-8"><title>stage summary</title>'
         f"<style>{style}\n{grid_style}</style>"
-        f"{_fit_script()}"
+        f"{_fit_script(fit_columns=fit_columns)}"
         "</head>"
         f'<body><div class="grid">{"".join(body_cells)}</div></body></html>'
     )

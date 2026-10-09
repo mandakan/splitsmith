@@ -263,6 +263,34 @@ def test_stub_audit_is_treated_as_no_audit(tmp_path):
     assert tile.has_shots is False
 
 
+@pytest.mark.parametrize("with_project", [False, True])
+def test_confirmed_reloads_and_movement_reach_the_grid_tile(tmp_path, with_project):
+    """The grid hold's summary reads the same confirmed regions as the
+    single-shooter card: reloads on the tile, ``moving`` on each shot.
+    Both of ``_load_tile``'s returns (with and without a project) carry
+    them; an auto proposal reaches neither."""
+    root = tmp_path / "ann"
+    if with_project:
+        _write_project(root)
+    audit = _write_audit(
+        root, 1, [1200, 1450, 1700, 2900], classes=["first_shot", "split", "split", "reload"]
+    )
+    doc = json.loads(audit.read_text())
+    doc["events"] = [
+        {"id": "evt-1", "kind": "movement", "start": 1.3, "end": 1.8, "source": "manual"},
+        {"id": "evt-2", "kind": "reload", "start": 1.7, "end": 2.8, "source": "manual"},
+        {"id": "evt-3", "kind": "reload", "start": 0.1, "end": 0.2, "source": "auto"},
+    ]
+    audit.write_text(json.dumps(doc))
+    tile = overlay_data.load_overlay_data([_bundle(tmp_path, "ann", audit=audit)])[("ann", 1)]
+    # Proves which of the two returns ran.
+    assert (tile.stage_time_seconds is not None) is with_project
+    assert [s.moving for s in tile.shots] == [False, True, True, False]
+    (reload_,) = tile.reloads
+    assert reload_.event_id == "evt-2"
+    assert reload_.overhang == pytest.approx(1.0)
+
+
 def test_scoring_comes_off_the_project_on_disk(tmp_path):
     root = tmp_path / "ann"
     card = StageScorecard(hit_factor=6.5, stage_points=80.0, stage_pct=91.25)
