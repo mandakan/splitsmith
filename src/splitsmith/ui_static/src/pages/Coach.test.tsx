@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { ApiError, type CoachShot, type CoachStageResponse, type CoachVideoEntry, type StageEvent } from "@/lib/api";
 import { summarize } from "@/lib/events";
@@ -22,6 +22,14 @@ vi.mock("@/lib/api", async (importOriginal) => {
       getProject: vi.fn(),
       getStageCoach: vi.fn(),
       getMatchCoachDistributions: vi.fn().mockResolvedValue(null),
+      getStagePeaks: vi.fn().mockResolvedValue({
+        duration: 20,
+        sample_rate: 8000,
+        bins: 4,
+        peaks: [0.1, 0.5, 0.2, 0.1],
+        beep_time: null,
+        trimmed: true,
+      }),
       patchStageShotCoach: vi.fn(),
       putStageEvents: vi.fn(),
       getScrubSettings: vi.fn().mockResolvedValue({ full_res_scrub: false }),
@@ -547,12 +555,14 @@ describe("Coach player source", () => {
     expect(container.querySelector("video")?.getAttribute("src")).toContain("/source/");
   });
 
-  it("the lane editor menu toggles full-resolution video through the scrub settings", async () => {
+  it("the timeline band's options menu toggles full-resolution video through the scrub settings", async () => {
+    // The "More" menu that used to live on the lane editor itself moved onto
+    // the shared Timeline band (spec 2026-10-09); the switch is unchanged.
     vi.mocked(api.getProject).mockResolvedValue(PROJECT as never);
     vi.mocked(api.getStageCoach).mockResolvedValue(trimCoach({}));
     const { container } = renderRoute();
     await screen.findByTestId("lane-editor");
-    fireEvent.click(await screen.findByRole("button", { name: "More" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Timeline options" }));
     fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: /Full-resolution video/ }));
     expect(api.setScrubSettings).toHaveBeenCalledWith(true);
     await waitFor(() => expect(container.querySelector("video")?.getAttribute("src")).toContain("/trim/"));
@@ -577,5 +587,125 @@ describe("match coach time budget rows", () => {
     const budget = await screen.findByRole("region", { name: "Time budget by stage" });
     const link = await within(budget).findByRole("link", { name: "Stage 2" });
     expect(link.getAttribute("href")).toMatch(/\/coach\/anna\/2$/);
+  });
+});
+
+describe("Coach stage timeline band", () => {
+  // The band needs a real zoom pipeline test (clicking Zoom in), which needs
+  // a non-zero viewport: jsdom's clientWidth is 0 by default, same stub as
+  // components/timeline/Timeline.test.tsx.
+  let widthSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    widthSpy = vi.spyOn(Element.prototype, "clientWidth", "get").mockReturnValue(1000);
+    vi.mocked(api.getStagePeaks).mockReset();
+    vi.mocked(api.getStagePeaks).mockResolvedValue({
+      duration: 20,
+      sample_rate: 8000,
+      bins: 4,
+      peaks: [0.1, 0.5, 0.2, 0.1],
+      beep_time: 2,
+      trimmed: true,
+    });
+  });
+
+  afterEach(() => {
+    widthSpy.mockRestore();
+  });
+
+  function renderCoachTimeline(stages: { stage_number: number; time_seconds: number }[] = [{ stage_number: 1, time_seconds: 20 }]) {
+    vi.mocked(api.getProject).mockResolvedValue({
+      name: "M",
+      competitor_name: "Anna",
+      stages: stages.map((s) => ({ stage_number: s.stage_number, stage_name: `Stage ${s.stage_number}`, time_seconds: s.time_seconds })),
+    } as unknown as Awaited<ReturnType<typeof api.getProject>>);
+    vi.mocked(api.getStageCoach).mockImplementation((_slug: string, stageNumber: number) =>
+      Promise.resolve({ ...makeCoach([makeShot(1, "c1")]), stage_number: stageNumber }),
+    );
+    return render(
+      <MemoryRouter initialEntries={["/match/m1/coach/anna/1"]}>
+        <Routes>
+          <Route path="/match/:matchId/coach/:slug/:stage" element={<Coach />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+
+  it("draws the lanes and an audio track in a full-width timeline band", async () => {
+    renderCoachTimeline();
+    const band = await screen.findByTestId("timeline");
+    expect(within(band).getByText("Audio")).toBeInTheDocument();
+    expect(within(band).getByText("Reload")).toBeInTheDocument();
+    expect(within(band).getByTestId("lane-editor")).toBeInTheDocument();
+    // The band is outside the two-column grid: no ancestor carries the
+    // 380 px column template.
+    expect(band.closest("[class*='380px']")).toBeNull();
+  });
+
+  it("shows No audio when the peaks request fails, and the lanes still work", async () => {
+    vi.mocked(api.getStagePeaks).mockReset();
+    vi.mocked(api.getStagePeaks).mockRejectedValue(new ApiError(404, "no trim"));
+    renderCoachTimeline();
+    expect(await screen.findByText("No audio")).toBeInTheDocument();
+    expect(screen.getByTestId("lane-editor")).toBeInTheDocument();
+  });
+
+  // This pins the per-stage remount CoachStage's own `key` already does
+  // (Coach.tsx's top-level `Coach()`, `key={`${slug}-${stage}`}`): there is
+  // no explicit zoom reset in CoachStageInner for it to pin instead. It
+  // fails if that key stops covering the stage number (verified by hand:
+  // temporarily dropping the stage from the key reproduces the fresh-mount
+  // `useState<Zoom>(null)` as a stale one-time init instead, and this test
+  // fails because the second "timeline" is the *same* Timeline instance
+  // carrying zoom 1.5 forward).
+  it("starts each stage at Fit", async () => {
+    renderCoachTimeline([
+      { stage_number: 1, time_seconds: 20 },
+      { stage_number: 2, time_seconds: 20 },
+    ]);
+    const band = await screen.findByTestId("timeline");
+    fireEvent.click(within(band).getByRole("button", { name: "Zoom in" }));
+    expect(within(band).getByText("1.5x")).toBeInTheDocument();
+    // Navigate to the next stage with the page's own next-stage control. It
+    // is rendered through Button asChild + Link, so its accessible role is
+    // "link", not "button".
+    fireEvent.click(screen.getByRole("link", { name: "Next stage" }));
+    const next = await screen.findByTestId("timeline");
+    expect(within(next).getByRole("button", { name: "Fit" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("draws an empty audio track while peaks are loading, never flashing No audio", async () => {
+    let resolvePeaks: (p: Awaited<ReturnType<typeof api.getStagePeaks>>) => void = () => {};
+    vi.mocked(api.getStagePeaks).mockReset();
+    vi.mocked(api.getStagePeaks).mockImplementation(
+      () => new Promise((resolve) => {
+        resolvePeaks = resolve;
+      }),
+    );
+    renderCoachTimeline();
+    const band = await screen.findByTestId("timeline");
+    expect(within(band).getByTestId("lane-editor")).toBeInTheDocument();
+    expect(screen.queryByText("No audio")).toBeNull();
+    await act(async () => {
+      resolvePeaks({ duration: 20, sample_rate: 8000, bins: 4, peaks: [0.1, 0.5, 0.2, 0.1], beep_time: 2, trimmed: true });
+    });
+    expect(screen.queryByText("No audio")).toBeNull();
+  });
+
+  it("shows No audio once the peaks request has settled without any", async () => {
+    let rejectPeaks: (e: unknown) => void = () => {};
+    vi.mocked(api.getStagePeaks).mockReset();
+    vi.mocked(api.getStagePeaks).mockImplementation(
+      () => new Promise((_resolve, reject) => {
+        rejectPeaks = reject;
+      }),
+    );
+    renderCoachTimeline();
+    await screen.findByTestId("timeline");
+    expect(screen.queryByText("No audio")).toBeNull();
+    await act(async () => {
+      rejectPeaks(new ApiError(404, "no trim"));
+    });
+    expect(await screen.findByText("No audio")).toBeInTheDocument();
   });
 });

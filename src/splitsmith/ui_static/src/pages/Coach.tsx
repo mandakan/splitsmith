@@ -23,7 +23,6 @@ import {
   ArrowLeft,
   ArrowRight,
   Loader2,
-  MoreHorizontal,
   Pause,
   Play,
 } from "lucide-react";
@@ -40,15 +39,17 @@ import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { CoachShotTable } from "@/components/coach/CoachShotTable";
 import { EventCard } from "@/components/coach/EventCard";
 import { EventList } from "@/components/coach/EventList";
-import { LaneEditor } from "@/components/coach/LaneEditor";
+import { LANE_ROWS, LaneEditor, LaneHints } from "@/components/coach/LaneEditor";
 import { SaveNotice } from "@/components/coach/SaveNotice";
 import { ShotEditor } from "@/components/coach/ShotEditor";
 import { TimeBudgetBar } from "@/components/coach/TimeBudgetBar";
 import { TimeBudgetCard } from "@/components/coach/TimeBudgetCard";
+import { Timeline } from "@/components/timeline/Timeline";
+import { WaveformTrack } from "@/components/timeline/WaveformTrack";
 import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/Chip";
 import { Label } from "@/components/ui/Label";
-import { Menu, menuItemClass } from "@/components/ui/Menu";
+import { menuItemClass } from "@/components/ui/Menu";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Stat, StatStrip } from "@/components/ui/Stat";
 import {
@@ -60,10 +61,12 @@ import {
   type CoachShot,
   type CoachStageResponse,
   type MatchProject,
+  type PeaksResult,
 } from "@/lib/api";
 import { keepEvent, summarize, withKind } from "@/lib/events";
 import { useSpacePlayPause } from "@/lib/keyboard";
 import { useMatchHref } from "@/lib/matchHref";
+import { type Zoom } from "@/lib/timelineView";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { useScrubSource } from "@/lib/useScrubSource";
 import { useStageEvents } from "@/lib/useStageEvents";
@@ -77,6 +80,10 @@ import {
 } from "@/lib/splits";
 import { ShotRuler } from "@/components/results/ShotRuler";
 import { BUDGET_LABEL, BUDGET_TICK, matchBudget, timeBudget } from "@/lib/timeBudget";
+
+/** Peaks bins for the Coach audio track; same request shape as Audit's
+ *  "Load peaks" effect, a wider bin count since Coach stages run longer. */
+const PEAK_BINS = 4000;
 
 export function Coach() {
   // Slug carried by ShooterScopedRoute (#353 phase 1) -- present whenever
@@ -753,7 +760,9 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [noteDraft, setNoteDraft] = useState("");
-  const [moreOpen, setMoreOpen] = useState(false);
+  const [timelineZoom, setTimelineZoom] = useState<Zoom>(null);
+  const [peaks, setPeaks] = useState<PeaksResult | null>(null);
+  const [peaksLoading, setPeaksLoading] = useState(true);
   const scrub = useScrubSource();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const shotListRef = useRef<HTMLDivElement | null>(null);
@@ -816,6 +825,31 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
       alive = false;
     };
   }, [apply, slug, stage]);
+
+  // Load peaks for the band's audio track (same shape as Audit.tsx's "Load
+  // peaks" effect). A failure just means no waveform -- the track renders
+  // "No audio" for null peaks once the request has settled -- never a page
+  // error. peaksLoading keeps the track an empty placeholder while the
+  // request is in flight, so "No audio" never flashes before a slow
+  // response has had a chance to resolve.
+  useEffect(() => {
+    let alive = true;
+    setPeaksLoading(true);
+    api
+      .getStagePeaks(slug, stage, PEAK_BINS)
+      .then((p) => {
+        if (alive) setPeaks(p);
+      })
+      .catch(() => {
+        if (alive) setPeaks(null);
+      })
+      .finally(() => {
+        if (alive) setPeaksLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [slug, stage]);
 
   useEffect(() => {
     if (!coach || activeShotNumber == null) return;
@@ -991,6 +1025,12 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
   const seekFromBeep = (t: number) => {
     if (videoRef.current) videoRef.current.currentTime = coach.beep_time + t;
   };
+  // coach.beep_time is the coach response's own clip anchor (the same
+  // trim-vs-source anchor the video stream uses); peaks.beep_time is the
+  // audit audio's beep in its own clip. The two agree in the normal case
+  // and can only differ when they resolve to different clips, so the
+  // measured one wins when it is there.
+  const audioBeep = peaks?.beep_time ?? coach.beep_time;
   const summary = coach.event_summary
     ? { ...localSummary, capacity_warning: coach.event_summary.capacity_warning }
     : undefined;
@@ -1056,149 +1096,176 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
       {coach.shots.length > 0 ? <TimeBudgetCard budget={budget} onSelectShot={selectShotNumber} className="mb-4" /> : null}
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
-        <div className="flex flex-col gap-4">
-          <div className="overflow-hidden rounded-[10px] border border-rule bg-surface">
-            {streamUrl ? (
-              <video
-                ref={videoRef}
-                src={streamUrl}
-                controls={false}
-                preload="metadata"
-                playsInline
-                onTimeUpdate={(e) =>
-                  setCurrentTime((e.target as HTMLVideoElement).currentTime)
-                }
-                onPlay={() => setIsPlaying(true)}
-                onPause={() => setIsPlaying(false)}
-                onError={() => {
-                  if (primary && playingScrub) scrub.markFailed(primary);
-                }}
-                className="aspect-video w-full bg-black"
-              />
-            ) : (
-              <div className="flex aspect-video items-center justify-center bg-surface-2 text-md text-muted">
-                No primary video
-              </div>
-            )}
-            <div className="flex items-center gap-3 border-t border-rule px-3 py-2">
-              <Button
-                type="button"
-                size="icon"
-                onClick={togglePlay}
-                aria-label={isPlaying ? "Pause" : "Play"}
-                aria-pressed={isPlaying}
-                className="rounded-full"
-              >
-                {isPlaying ? <Pause className="size-4" aria-hidden /> : <Play className="size-4 fill-current" aria-hidden />}
-              </Button>
-              <span className="numeral text-md text-ink-2">{currentTime.toFixed(2)} s</span>
-              {activeShot ? (
-                <span className="numeral text-sm text-muted">
-                  shot {pad2(activeShot.shot_number)} at {activeShot.time_absolute.toFixed(2)} s
-                </span>
-              ) : null}
+        <div className="overflow-hidden rounded-[10px] border border-rule bg-surface">
+          {streamUrl ? (
+            <video
+              ref={videoRef}
+              src={streamUrl}
+              controls={false}
+              preload="metadata"
+              playsInline
+              onTimeUpdate={(e) =>
+                setCurrentTime((e.target as HTMLVideoElement).currentTime)
+              }
+              onPlay={() => setIsPlaying(true)}
+              onPause={() => setIsPlaying(false)}
+              onError={() => {
+                if (primary && playingScrub) scrub.markFailed(primary);
+              }}
+              className="aspect-video w-full bg-black"
+            />
+          ) : (
+            <div className="flex aspect-video items-center justify-center bg-surface-2 text-md text-muted">
+              No primary video
             </div>
-            <div className="border-t border-rule px-3 py-2">
-              <ShotRuler
-                shots={coach.shots}
-                minAbs={minAbs}
-                span={span}
-                activeShotNumber={activeShotNumber}
-                onSeek={seekToShot}
-                baselines={baselines}
-              />
-            </div>
+          )}
+          <div className="flex items-center gap-3 border-t border-rule px-3 py-2">
+            <Button
+              type="button"
+              size="icon"
+              onClick={togglePlay}
+              aria-label={isPlaying ? "Pause" : "Play"}
+              aria-pressed={isPlaying}
+              className="rounded-full"
+            >
+              {isPlaying ? <Pause className="size-4" aria-hidden /> : <Play className="size-4 fill-current" aria-hidden />}
+            </Button>
+            <span className="numeral text-md text-ink-2">{currentTime.toFixed(2)} s</span>
+            {activeShot ? (
+              <span className="numeral text-sm text-muted">
+                shot {pad2(activeShot.shot_number)} at {activeShot.time_absolute.toFixed(2)} s
+              </span>
+            ) : null}
           </div>
-
-          <LaneEditor
-            shots={coach.shots}
-            events={events}
-            stageTime={stageTime}
-            currentTime={tFromBeep}
-            selectedId={selectedEventId}
-            readOnly={eventsReadOnly}
-            onSelect={selectEvent}
-            onSeek={seekFromBeep}
-            onChange={changeEvents}
-            onCancel={cancelEvents}
-            menu={
-              scrub.available ? (
-                <span className="relative shrink-0">
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    aria-label="More"
-                    aria-haspopup="menu"
-                    aria-expanded={moreOpen}
-                    onClick={() => setMoreOpen((v) => !v)}
-                  >
-                    <MoreHorizontal className="size-4" aria-hidden />
-                  </Button>
-                  <Menu open={moreOpen} onClose={() => setMoreOpen(false)} align="right">
-                    <button
-                      type="button"
-                      role="menuitemcheckbox"
-                      aria-checked={scrub.fullRes}
-                      className={menuItemClass}
-                      onClick={() => scrub.setFullRes(!scrub.fullRes)}
-                    >
-                      Full-resolution video
-                      <span className="ml-auto text-sm text-muted">{scrub.fullRes ? "on" : "off"}</span>
-                    </button>
-                  </Menu>
-                </span>
-              ) : undefined
-            }
-          />
-          {saveIssue ? <SaveNotice issue={saveIssue} busy={regionSaveBusy} onRetry={retrySave} onDismiss={dismissSaveIssue} /> : null}
-          {eventsReadOnly ? <EventList events={events} shots={coach.shots} /> : null}
-
-          {selectedEvent ? (
-            <EventCard
-              event={selectedEvent}
-              events={events}
-              onKind={(kind) => {
-                const next = withKind(events, selectedEvent.id, kind);
-                if (next) changeEvents(next, true);
-              }}
-              onKeep={() => changeEvents(keepEvent(events, selectedEvent.id), true)}
-              onDelete={() => {
-                changeEvents(
-                  events.filter((e) => e.id !== selectedEvent.id),
-                  true,
-                );
-                selectEvent(null);
-              }}
-              onDone={() => selectEvent(null)}
+          <div className="border-t border-rule px-3 py-2">
+            <ShotRuler
+              shots={coach.shots}
+              minAbs={minAbs}
+              span={span}
+              activeShotNumber={activeShotNumber}
+              onSeek={seekToShot}
+              baselines={baselines}
             />
-          ) : activeShot ? (
-            <ShotEditor
-              shot={activeShot}
-              tier={gapTier(activeShot.split, activeShot.interval_class, baselines)}
-              noteDraft={noteDraft}
-              onNoteChange={setNoteDraft}
-              onSave={() =>
-                void patchShot(activeShot, {
-                  coaching_note: noteDraft || null,
-                })
-              }
-              onClassify={(cls) =>
-                void patchShot(activeShot, {
-                  interval_class: cls,
-                  interval_class_source: "manual",
-                })
-              }
-              onToggleFlag={() =>
-                void patchShot(activeShot, {
-                  improvement_flag: !activeShot.improvement_flag,
-                })
-              }
-            />
-          ) : null}
+          </div>
         </div>
 
         <CoachShotTable shots={coach.shots} activeShotNumber={activeShotNumber} baselines={baselines} onSelect={seekToShot} />
+      </div>
+
+      <div className="mt-4 flex flex-col gap-4">
+        <div>
+          <Timeline
+            duration={stageTime}
+            origin={0}
+            fps={30}
+            currentTime={tFromBeep}
+            playing={isPlaying}
+            onSeek={seekFromBeep}
+            zoom={timelineZoom}
+            onZoomChange={setTimelineZoom}
+            menuExtra={
+              scrub.available ? (
+                <button
+                  type="button"
+                  role="menuitemcheckbox"
+                  aria-checked={scrub.fullRes}
+                  className={menuItemClass}
+                  onClick={() => scrub.setFullRes(!scrub.fullRes)}
+                >
+                  Full-resolution video
+                  <span className="ml-auto text-sm text-muted">{scrub.fullRes ? "on" : "off"}</span>
+                </button>
+              ) : undefined
+            }
+            tracks={[
+              {
+                id: "audio",
+                rows: [{ label: "Audio", height: 56 }],
+                seekable: true,
+                render: (geom) =>
+                  peaksLoading ? (
+                    // Nothing drawn yet: "No audio" would otherwise flash on
+                    // every stage load before a normal-latency request has
+                    // had a chance to resolve.
+                    <div style={{ height: 56 }} />
+                  ) : (
+                    <WaveformTrack
+                      peaks={peaks?.peaks ?? null}
+                      clipDuration={peaks?.duration ?? 0}
+                      from={audioBeep}
+                      to={audioBeep + stageTime}
+                      geom={geom}
+                      height={56}
+                    />
+                  ),
+              },
+              {
+                id: "lanes",
+                rows: LANE_ROWS,
+                render: () => (
+                  <LaneEditor
+                    shots={coach.shots}
+                    events={events}
+                    stageTime={stageTime}
+                    currentTime={tFromBeep}
+                    selectedId={selectedEventId}
+                    readOnly={eventsReadOnly}
+                    onSelect={selectEvent}
+                    onSeek={seekFromBeep}
+                    onChange={changeEvents}
+                    onCancel={cancelEvents}
+                  />
+                ),
+              },
+            ]}
+          />
+          <LaneHints readOnly={eventsReadOnly} />
+        </div>
+        {saveIssue ? <SaveNotice issue={saveIssue} busy={regionSaveBusy} onRetry={retrySave} onDismiss={dismissSaveIssue} /> : null}
+        {eventsReadOnly ? <EventList events={events} shots={coach.shots} /> : null}
+
+        {selectedEvent ? (
+          <EventCard
+            event={selectedEvent}
+            events={events}
+            onKind={(kind) => {
+              const next = withKind(events, selectedEvent.id, kind);
+              if (next) changeEvents(next, true);
+            }}
+            onKeep={() => changeEvents(keepEvent(events, selectedEvent.id), true)}
+            onDelete={() => {
+              changeEvents(
+                events.filter((e) => e.id !== selectedEvent.id),
+                true,
+              );
+              selectEvent(null);
+            }}
+            onDone={() => selectEvent(null)}
+          />
+        ) : activeShot ? (
+          <ShotEditor
+            shot={activeShot}
+            tier={gapTier(activeShot.split, activeShot.interval_class, baselines)}
+            noteDraft={noteDraft}
+            onNoteChange={setNoteDraft}
+            onSave={() =>
+              void patchShot(activeShot, {
+                coaching_note: noteDraft || null,
+              })
+            }
+            onClassify={(cls) =>
+              void patchShot(activeShot, {
+                interval_class: cls,
+                interval_class_source: "manual",
+              })
+            }
+            onToggleFlag={() =>
+              void patchShot(activeShot, {
+                improvement_flag: !activeShot.improvement_flag,
+              })
+            }
+          />
+        ) : null}
       </div>
     </div>
   );

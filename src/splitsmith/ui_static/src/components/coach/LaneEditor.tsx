@@ -12,14 +12,20 @@
  * nudge commits. A release or nudge that lands back on the pre-gesture list
  * (by value, ``laneDrag.sameEvents``) commits nothing: a release still ends
  * the live gesture through ``onCancel``, same as Esc or pointercancel (#1325).
+ *
+ * The editor is a track inside the shared Timeline band (spec
+ * 2026-10-09): the band owns the ruler, the playhead and the gutter
+ * labels (``LANE_ROWS``), so this root is the strip itself, positioned as
+ * a percentage of the band's zoomed content width exactly as it was a
+ * percentage of its own measured width before.
  */
-import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 
 import { Kbd } from "@/components/ui/Kbd";
 import { Label } from "@/components/ui/Label";
 import type { StageEvent, StageEventKind } from "@/lib/api";
-import { enclosingMovement, rulerLabels, shotIsMoving, snapTime, timeFromX } from "@/lib/events";
+import { enclosingMovement, shotIsMoving, snapTime, timeFromX } from "@/lib/events";
 import { cn } from "@/lib/utils";
 
 import {
@@ -36,6 +42,14 @@ import {
 } from "./laneDrag";
 
 export { DRAG_THRESHOLD_PX, LANES, SNAP_PX, TOUCH_DRAG_THRESHOLD_PX } from "./laneDrag";
+
+/** Gutter rows for the Timeline band: Shots, then one per lane, current heights (h-8 / h-9). */
+export const LANE_ROWS: { label: string; height: number }[] = [
+  { label: "Shots", height: 32 },
+  { label: "Movement", height: 36 },
+  { label: "Reload", height: 36 },
+  { label: "Activation", height: 36 },
+];
 
 const LANE_LABEL: Record<StageEventKind, string> = { movement: "Movement", reload: "Reload", activation: "Activation" };
 // Budget hues (Chip TICK): movement beep, reload live, activation ink-2.
@@ -68,42 +82,28 @@ export interface LaneEditorProps {
    * over and nothing will commit it.
    */
   onCancel?: () => void;
-  /** Optional overflow-menu slot rendered at the strip's top right. */
-  menu?: ReactNode;
 }
 
 export function LaneEditor(props: LaneEditorProps) {
-  const { shots, events, stageTime, fps = 30, currentTime, selectedId, readOnly = false } = props;
-  const { onSelect, onSeek, onChange, onCancel, menu } = props;
+  const { shots, events, stageTime, fps = 30, selectedId, readOnly = false } = props;
+  const { onSelect, onSeek, onChange, onCancel } = props;
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const stripRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<Drag | null>(null);
   // The list as last emitted: a drag frame reads it before the parent re-renders.
   const eventsRef = useRef(events);
   eventsRef.current = events;
-  // Measured so the ruler labels can space themselves (and stay off "Beep" and the stage time).
-  const [stripWidth, setStripWidth] = useState(0);
   // The time pill: where the drag's moving edge (the seek target) stands, null between drags.
   const [pill, setPill] = useState<number | null>(null);
-  useEffect(() => {
-    const el = stripRef.current;
-    if (!el) return;
-    const write = () => setStripWidth(el.getBoundingClientRect().width);
-    write();
-    const ro = new ResizeObserver(write);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
 
   const duration = Math.max(stageTime, 0.001);
   const pct = (t: number) => `${(Math.min(Math.max(t, 0), duration) / duration) * 100}%`;
   const tAt = (clientX: number) => {
-    const rect = stripRef.current?.getBoundingClientRect();
+    const rect = rootRef.current?.getBoundingClientRect();
     return rect ? timeFromX(clientX - rect.left, rect.width, duration) : 0;
   };
   const maybeSnap = (t: number, alt: boolean) => {
     if (alt) return t;
-    const width = Math.max(stripRef.current?.getBoundingClientRect().width ?? 0, 1);
+    const width = Math.max(rootRef.current?.getBoundingClientRect().width ?? 0, 1);
     return snapTime(t, [0, ...shots.map((s) => s.time_from_beep)], (SNAP_PX / width) * duration);
   };
   const emit = (next: StageEvent[], commit: boolean) => {
@@ -223,8 +223,10 @@ export function LaneEditor(props: LaneEditorProps) {
   }, []);
 
   const handleKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
-    // Only keys aimed at the editor itself: the menu slot's keys bubble here too (React
-    // bubbles through portals), and an arrow there must not nudge -- each nudge is a save.
+    // Only keys aimed at the root itself: a focusable descendant (a region, a
+    // handle, a future control inside the strip) bubbles its keydown here too,
+    // and an arrow or Delete there must not nudge or delete the selection --
+    // each nudge is a save, so only the root's own keys drive it.
     if (e.target !== e.currentTarget) return;
     if (readOnly || !selectedId || dragRef.current) return;
     const current = eventsRef.current;
@@ -245,9 +247,6 @@ export function LaneEditor(props: LaneEditorProps) {
     }
   };
 
-  const labels = rulerLabels(duration, stripWidth);
-  const ticks: number[] = [];
-  for (let s = 1; s < duration; s += 1) ticks.push(s);
   const selected = events.find((x) => x.id === selectedId);
   const overhangOf = selected?.kind === "reload" ? enclosingMovement(selected, events) : null;
 
@@ -257,150 +256,111 @@ export function LaneEditor(props: LaneEditorProps) {
       data-testid="lane-editor"
       tabIndex={0}
       onKeyDown={handleKeyDown}
-      className="rounded-[10px] border border-rule bg-surface-2 outline-none focus-visible:ring-2 focus-visible:ring-led"
+      className="relative outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-led"
     >
-      <div className="flex items-center justify-between px-3 pt-2">
-        <Label>Lanes</Label>
-        {menu}
-      </div>
-      <div className="grid grid-cols-[5.5rem_1fr] px-3 py-2">
-        <div className="flex flex-col">
-          <div className="h-5" />
-          <div className="flex h-8 items-center">
-            <Label>Shots</Label>
-          </div>
-          {LANES.map((kind) => (
-            <div key={kind} className="flex h-9 items-center">
-              <Label>{LANE_LABEL[kind]}</Label>
-            </div>
-          ))}
-        </div>
-        <div ref={stripRef} className="relative">
-          <div
-            data-testid="lane-ruler"
-            className="relative h-5 cursor-pointer border-b border-rule"
-            onClick={(e) => onSeek(tAt(e.clientX))}
-          >
-            {ticks.map((s) => (
-              <span key={s} className="absolute bottom-0 h-1 w-px bg-rule" style={{ left: pct(s) }} />
-            ))}
-            <Label className="absolute left-0 top-0 text-beep">Beep</Label>
-            {labels.map((s) => (
-              <span key={s} className="numeral absolute top-0 -translate-x-1/2 text-xs text-muted" style={{ left: pct(s) }}>
-                {s}
-              </span>
-            ))}
-            <span className="numeral absolute right-0 top-0 text-xs text-muted">{stageTime.toFixed(2)}</span>
-          </div>
-          <div className="relative h-8">
-            {shots.map((shot) => {
-              const moving = shotIsMoving(shot.time_from_beep, events);
-              return (
-                <span
-                  key={shot.shot_number}
-                  data-testid={`shot-${shot.shot_number}`}
-                  data-moving={String(moving)}
-                  className="absolute bottom-1.5 top-1.5 w-px bg-done"
-                  style={{ left: pct(shot.time_from_beep) }}
-                >
-                  {moving && (
-                    <span className="absolute -top-1 left-1/2 size-[5px] -translate-x-1/2 rounded-full border border-beep" />
-                  )}
-                </span>
-              );
-            })}
-          </div>
-          {LANES.map((kind) => (
-            <div
-              key={kind}
-              data-testid={`lane-${kind}`}
-              className={cn("relative h-9 border-t border-rule/60", !readOnly && "cursor-crosshair")}
-              onPointerDown={readOnly ? undefined : (e) => startCreate(e, kind)}
-              onPointerMove={readOnly ? undefined : handleMove}
-              onPointerUp={readOnly ? undefined : handleUp}
-              onPointerCancel={readOnly ? undefined : () => cancelDrag()}
-            >
-              {events
-                .filter((x) => x.kind === kind)
-                .map((x) => (
-                  <div
-                    key={x.id}
-                    role="option"
-                    aria-selected={selectedId === x.id}
-                    aria-label={LANE_LABEL[kind]}
-                    data-testid={`event-${x.id}`}
-                    data-source={x.source}
-                    data-start={x.start}
-                    data-end={x.end}
-                    onClick={() => onSelect(x.id)}
-                    onPointerDown={readOnly ? undefined : (e) => startBody(e, x.id)}
-                    className={cn(
-                      "absolute bottom-1.5 top-1.5 rounded border",
-                      LANE_FILL[kind],
-                      x.source === "auto" && "border-dashed bg-transparent",
-                      selectedId === x.id && "ring-1 ring-ink",
-                      !readOnly && "cursor-grab",
-                    )}
-                    style={{ left: pct(x.start), width: pct(x.end - x.start) }}
-                  >
-                    {x.source === "auto" && (
-                      <Label
-                        tone="ink"
-                        data-testid={`auto-${x.id}`}
-                        // Runs past a short region rather than truncating to "A...".
-                        className="pointer-events-none absolute left-2 top-1/2 block -translate-y-1/2 whitespace-nowrap"
-                      >
-                        Auto ?
-                      </Label>
-                    )}
-                    {!readOnly &&
-                      (["start", "end"] as const).map((edge) => (
-                        <span
-                          key={edge}
-                          data-testid={`handle-${x.id}-${edge}`}
-                          onPointerDown={(e) => startEdge(e, x.id, edge)}
-                          className={cn(
-                            "absolute top-1/2 h-4 w-2 -translate-y-1/2 cursor-ew-resize rounded-sm",
-                            edge === "start" ? "-left-1" : "-right-1",
-                            HANDLE_FILL[kind],
-                          )}
-                        />
-                      ))}
-                  </div>
-                ))}
-              {kind === "reload" && selected && overhangOf && (
-                <OverhangBracket from={overhangOf.end} to={selected.end} pct={pct} />
-              )}
-            </div>
-          ))}
-          <div
-            data-testid="playhead"
-            className="pointer-events-none absolute inset-y-0 w-px bg-led"
-            style={{ left: pct(currentTime) }}
-          />
-          {pill !== null && (
+      <div className="relative h-8">
+        {shots.map((shot) => {
+          const moving = shotIsMoving(shot.time_from_beep, events);
+          return (
             <span
-              data-testid="drag-pill"
-              className="numeral pointer-events-none absolute top-0 z-10 -translate-x-1/2 whitespace-nowrap rounded border border-rule-strong bg-surface px-1 text-xs text-ink"
-              style={{ left: pct(pill) }}
+              key={shot.shot_number}
+              data-testid={`shot-${shot.shot_number}`}
+              data-moving={String(moving)}
+              className="absolute bottom-1.5 top-1.5 w-px bg-done"
+              style={{ left: pct(shot.time_from_beep) }}
             >
-              {pill.toFixed(2)} s <span className="text-muted">f {Math.round(pill * fps)}</span>
+              {moving && <span className="absolute -top-1 left-1/2 size-[5px] -translate-x-1/2 rounded-full border border-beep" />}
             </span>
-          )}
-        </div>
+          );
+        })}
       </div>
-      {!readOnly && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 pb-2 text-xs text-muted">
-          <span>Drag empty lane to add</span>
-          <span>Drag edge to resize, body to move</span>
-          <span>
-            <Kbd>Arrows</Kbd> nudge a frame, <Kbd>Shift</Kbd> end, <Kbd>Alt</Kbd> 100 ms
-          </span>
-          <span>
-            <Kbd>Alt</Kbd>-drag skips snap, <Kbd>Esc</Kbd> cancels, <Kbd>Del</Kbd> removes
-          </span>
+      {LANES.map((kind) => (
+        <div
+          key={kind}
+          data-testid={`lane-${kind}`}
+          className={cn("relative h-9 border-t border-rule/60", !readOnly && "cursor-crosshair")}
+          onPointerDown={readOnly ? undefined : (e) => startCreate(e, kind)}
+          onPointerMove={readOnly ? undefined : handleMove}
+          onPointerUp={readOnly ? undefined : handleUp}
+          onPointerCancel={readOnly ? undefined : () => cancelDrag()}
+        >
+          {events
+            .filter((x) => x.kind === kind)
+            .map((x) => (
+              <div
+                key={x.id}
+                role="option"
+                aria-selected={selectedId === x.id}
+                aria-label={LANE_LABEL[kind]}
+                data-testid={`event-${x.id}`}
+                data-source={x.source}
+                data-start={x.start}
+                data-end={x.end}
+                onClick={() => onSelect(x.id)}
+                onPointerDown={readOnly ? undefined : (e) => startBody(e, x.id)}
+                className={cn(
+                  "absolute bottom-1.5 top-1.5 rounded border",
+                  LANE_FILL[kind],
+                  x.source === "auto" && "border-dashed bg-transparent",
+                  selectedId === x.id && "ring-1 ring-ink",
+                  !readOnly && "cursor-grab",
+                )}
+                style={{ left: pct(x.start), width: pct(x.end - x.start) }}
+              >
+                {x.source === "auto" && (
+                  <Label
+                    tone="ink"
+                    data-testid={`auto-${x.id}`}
+                    // Runs past a short region rather than truncating to "A...".
+                    className="pointer-events-none absolute left-2 top-1/2 block -translate-y-1/2 whitespace-nowrap"
+                  >
+                    Auto ?
+                  </Label>
+                )}
+                {!readOnly &&
+                  (["start", "end"] as const).map((edge) => (
+                    <span
+                      key={edge}
+                      data-testid={`handle-${x.id}-${edge}`}
+                      onPointerDown={(e) => startEdge(e, x.id, edge)}
+                      className={cn(
+                        "absolute top-1/2 h-4 w-2 -translate-y-1/2 cursor-ew-resize rounded-sm",
+                        edge === "start" ? "-left-1" : "-right-1",
+                        HANDLE_FILL[kind],
+                      )}
+                    />
+                  ))}
+              </div>
+            ))}
+          {kind === "reload" && selected && overhangOf && <OverhangBracket from={overhangOf.end} to={selected.end} pct={pct} />}
         </div>
+      ))}
+      {pill !== null && (
+        <span
+          data-testid="drag-pill"
+          className="numeral pointer-events-none absolute top-0 z-10 -translate-x-1/2 whitespace-nowrap rounded border border-rule-strong bg-surface px-1 text-xs text-ink"
+          style={{ left: pct(pill) }}
+        >
+          {pill.toFixed(2)} s <span className="text-muted">f {Math.round(pill * fps)}</span>
+        </span>
       )}
+    </div>
+  );
+}
+
+/** The lane editor's control hints, drawn by the page under the Timeline band. */
+export function LaneHints({ readOnly }: { readOnly?: boolean }) {
+  if (readOnly) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 pb-2 text-xs text-muted">
+      <span>Drag empty lane to add</span>
+      <span>Drag edge to resize, body to move</span>
+      <span>
+        <Kbd>Arrows</Kbd> nudge a frame, <Kbd>Shift</Kbd> end, <Kbd>Alt</Kbd> 100 ms
+      </span>
+      <span>
+        <Kbd>Alt</Kbd>-drag skips snap, <Kbd>Esc</Kbd> cancels, <Kbd>Del</Kbd> removes
+      </span>
     </div>
   );
 }

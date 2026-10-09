@@ -149,28 +149,3 @@ export function timeFromX(x: number, width: number, duration: number): number {
   if (width <= 0 || duration <= 0) return 0;
   return Math.min(Math.max(x / width, 0), 1) * duration;
 }
-
-/** Ruler label steps, seconds: the first that leaves RULER_LABEL_MIN_PX between labels wins. */
-const RULER_STEPS = [1, 2, 5, 10, 15, 30, 60, 120];
-const RULER_LABEL_MIN_PX = 28;
-/** Kept clear for the "Beep" label at x = 0 and the stage-time label at the right edge. */
-const RULER_LEFT_RESERVE_PX = 44;
-const RULER_RIGHT_RESERVE_PX = 48;
-
-/**
- * Second marks to label on the lane ruler at ``widthPx``. The step widens
- * until labels sit at least RULER_LABEL_MIN_PX apart, and a label that would
- * run into the beep label or the stage-time label is dropped. An unmeasured
- * strip (``widthPx <= 0``) labels nothing.
- */
-export function rulerLabels(duration: number, widthPx: number): number[] {
-  if (duration <= 0 || widthPx <= 0) return [];
-  const pxPerS = widthPx / duration;
-  const step = RULER_STEPS.find((s) => s * pxPerS >= RULER_LABEL_MIN_PX) ?? RULER_STEPS[RULER_STEPS.length - 1];
-  const out: number[] = [];
-  for (let s = step; s < duration; s += step) {
-    const x = s * pxPerS;
-    if (x >= RULER_LEFT_RESERVE_PX && x <= widthPx - RULER_RIGHT_RESERVE_PX) out.push(s);
-  }
-  return out;
-}

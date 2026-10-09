@@ -1167,9 +1167,31 @@ state reverts to the last valid list. Never save per drag frame.
 The coach payload carries ``events``, ``event_summary``, ``_version``,
 per-shot ``moving`` and per-video ``trim_version`` / ``scrub_version``;
 the Coach player goes through ``useScrubSource`` like Audit, and the
-lane editor's "Full-resolution video" entry is the same
+timeline band's options menu's "Full-resolution video" entry is the same
 ``GlobalPrefs.full_res_scrub``. ``components/coach/LaneEditor`` owns the
 DOM only; geometry (clamp, snap, ``MIN_EVENT_S``) is ``lib/events.ts``.
+On Coach the lanes are a track of the shared timeline band
+(``components/timeline/Timeline``, spec 2026-10-09): the band owns the
+ruler, the playhead, zoom (``lib/timelineView``: ``null`` is Fit, a
+multiplier up to 16x, never narrower than the viewport), the wheel rules
+(a plain wheel is the page's unless ``splitsmith.timeline.wheelZooms`` is
+on; a horizontal wheel over the band is always consumed) and
+follow-playhead, which never scrolls while a pointer is down in the band.
+The follow rule depends on ``playing``: while playing it keeps the
+playhead in the middle 80 % (the edge-triggered rule); while paused it
+only brings an off-screen playhead into view and never re-centres one
+already on screen, since a paused seek's ``currentTime`` can land after
+pointerup already cleared (Coach's arrives through the video's async
+``timeupdate``). Either way a zoom or a resize keeps its anchor: a
+resize recomputes ``scrollLeft`` to hold the left edge's time, which is
+why Cmd/Ctrl+B and a window resize never move the visible window at a
+zoom. A track positions by percentage of the band's content div, so the
+editor's pointer maths reads its own rect and needs no zoom code; a new
+track does the same. A track can also be ``seekable`` (Coach's Audio
+track is), which seeks on a row click through the content div's rect
+like the ruler, no snap. ``WaveformTrack`` draws only the visible window
+into a viewport-sized canvas, never a full-content one. Audit and the
+beep step move onto the band next.
 Pointer rules: a lane click seeks to the press point
 snapped to the nearest shot (a ruler click does not snap), unless the
 snap would land inside a same-lane region (then the raw press time), a

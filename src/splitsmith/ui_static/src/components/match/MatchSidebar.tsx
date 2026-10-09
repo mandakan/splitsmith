@@ -25,6 +25,7 @@ import { type JobsState } from "@/lib/jobs";
 import { countsAsDone } from "@/lib/stageStatus";
 import { Label } from "@/components/ui/Label";
 import { StageDot } from "@/components/ui/StageDot";
+import { modKeyLabel } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { FOOTAGE_HINT, NAV_GROUP_LABEL, matchNavItems, type MatchNavGroup } from "./navItems";
 
@@ -161,7 +162,7 @@ export function MatchSidebar({
           type="button"
           onClick={onCollapseToggle}
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          title={`${collapsed ? "Expand sidebar" : "Collapse sidebar"} (${modKeyLabel()}+B)`}
           className="inline-flex size-7 items-center justify-center rounded-md text-muted transition-colors hover:bg-surface-2 hover:text-ink"
         >
           {collapsed ? (
