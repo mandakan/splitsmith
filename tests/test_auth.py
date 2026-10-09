@@ -109,6 +109,7 @@ _ME_ROUTES_REQUIRING_AUTH: list[tuple[str, str, str]] = [
     ("POST", "/api/me/profile/brand-logo", "/api/me/profile/brand-logo"),
     ("DELETE", "/api/me/profile/brand-logo", "/api/me/profile/brand-logo"),
     ("GET", "/api/me/shooter-book", "/api/me/shooter-book"),
+    ("GET", "/api/me/shooters", "/api/me/shooters"),
     ("PUT", "/api/me/shooter-book/{shooter_id}", "/api/me/shooter-book/42"),
     ("DELETE", "/api/me/shooter-book/{shooter_id}", "/api/me/shooter-book/42"),
     ("GET", "/api/me/shooter-book/{shooter_id}/logo", "/api/me/shooter-book/42/logo"),
