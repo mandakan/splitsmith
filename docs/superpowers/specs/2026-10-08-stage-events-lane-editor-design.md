@@ -463,7 +463,8 @@ HUD style tiles only, where they already live.
 
 No cache change: the HUD MOV's key hashes the whole template context, so
 event data reaches it as soon as it is in `data.stage`. `HUD_KEY_VERSION`
-stays, since the frame plan does not change.
+stays: the frame plan only changes through `settle()`, which the template
+digest covers.
 
 The authoring guide documents the new `data.stage` fields, the two options
 and the two palette tokens; `splitsmith looks check` exercises a sample

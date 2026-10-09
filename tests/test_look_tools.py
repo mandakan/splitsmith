@@ -164,13 +164,38 @@ def test_an_overlay_style_is_probed_on_three_stages_mid_stage_and_landed(user_di
     report = look_tools.check_look("club", prober=prober)
     assert report.errors == 0 and report.warnings == 0
     stages = [data["stage"] for name, data in prober.calls if name == "hud-plate.html"]
-    assert sorted(stage["rounds"] for stage in stages) == [8, 8, 12, 12, 32, 32]
+    # The twelve-round stage carries regions, so it is also probed mid-reload.
+    assert sorted(stage["rounds"] for stage in stages) == [8, 8, 12, 12, 12, 32, 32]
     assert any(all(shot["cls"] is None for shot in stage["shots"]) for stage in stages)
     times = [at for name, at in prober.probed_at if name == "hud-plate.html"]
     assert all(at is not None for at in times) and len(set(times)) > 1
     (timeline,) = [t for name, t in prober.timelines if name == "hud-plate.html"]
     assert len(timeline) == 4, "two frames either side of the live span"
     assert any(item.subject.startswith("overlay plate") and item.level == "ok" for item in report.items)
+
+
+def test_an_overlay_style_is_checked_on_a_stage_with_regions_and_the_toggles_on(user_dir: Path) -> None:
+    """A check with the region toggles off, or on a stage without confirmed
+    regions, would never run a template's reload chip or stage bar."""
+    samples = look_tools.hud_samples()
+    with_regions = [s for s in samples if s.events]
+    assert with_regions, "a sample stage carries confirmed regions"
+    kinds = {e.kind for s in with_regions for e in s.events}
+    assert {"reload", "movement"} <= kinds and all(
+        e.source == "manual" for s in with_regions for e in s.events
+    )
+
+    look_tools.new_look("club", from_look="splitsmith")
+    prober = _Prober()
+    look_tools.check_look("club", prober=prober)
+    calls = [data for name, data in prober.calls if name == "hud-ticker.html"]
+    assert all(data["options"]["reload_chip"] and data["options"]["stage_bar"] for data in calls)
+    staged = [data["stage"] for data in calls if data["stage"]["reloads"]]
+    assert staged and all(data["stage"]["events"] for data in calls if data["stage"]["rounds"] == 12)
+    # One probe lands inside the reload, where the chip is up.
+    (reload,) = staged[0]["reloads"]
+    times = [at for name, at in prober.probed_at if name == "hud-ticker.html"]
+    assert any(at is not None and reload["start"] < at < reload["end"] for at in times)
 
 
 def test_an_overlay_style_that_moves_outside_its_live_span_is_a_warning(user_dir: Path) -> None:

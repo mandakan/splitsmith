@@ -19,7 +19,11 @@
                       "Split", ...), tier ("good" / "normal" / "slow", or
                       null for a draw, a reload or an unclassified shot)
     stage.stage_time  the stage time; stage.rounds the shot count
-    options           speed_colors, class_labels, landing, position
+    stage.events[]    confirmed regions: kind ("movement", "reload",
+                      "activation"), start, end (clip seconds); shots[].moving
+    stage.reloads[]   start, end, duration, overhang (null when standing)
+    options           speed_colors, class_labels, landing, position,
+                      reload_chip, stage_bar (draw nothing when off)
   Never compute a split or a speed yourself; read them. The meta tag above
   lists the positions this style can take, its default first.
   Guide: docs/looks/authoring.md#overlay-styles
