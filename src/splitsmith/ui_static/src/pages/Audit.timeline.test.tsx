@@ -217,6 +217,21 @@ describe("Audit on the timeline band", () => {
     expect(within(shots).getByTestId("shot-list-scroll")).toHaveClass("min-h-0", "flex-1", "overflow-y-auto");
   });
 
+  it("raises the top row's floor when the stage has a second camera", async () => {
+    const p = project();
+    const primary = p.stages[0].videos[0];
+    p.stages[0].videos.push({ ...primary, video_id: "v2", role: "secondary", path: "raw/stage3-b.mp4" });
+    apiMock.getProject.mockResolvedValue(p);
+    renderPage();
+    await screen.findByTestId("timeline");
+    await screen.findByText(/Synced to primary beep/i);
+    const grid = document.querySelector('[class*="lg:grid-cols-[minmax(0,1fr)_380px]"]') as HTMLElement;
+    // The secondary strip and the sync row cost about 150 px, so the floor
+    // grows by that much and the primary tile keeps a usable height.
+    expect(grid).toHaveClass("lg:h-[max(450px,calc(100dvh-560px))]");
+    expect(grid).not.toHaveClass("lg:h-[max(300px,calc(100dvh-560px))]");
+  });
+
   it("adds a manual marker on a double-click in the audio row", async () => {
     renderPage();
     const band = await screen.findByTestId("timeline");

@@ -16,13 +16,16 @@ const video = {
   beep_reviewed: true,
 } as unknown as StageVideo;
 
-function renderColumn() {
+const cam = (n: number): StageVideo =>
+  ({ ...video, video_id: `v${n}`, role: "secondary", path: `raw/cam${n}.mp4`, beep_time: 6.2 }) as StageVideo;
+
+function renderColumn(videos: StageVideo[] = [video]) {
   render(
     <MultiCamColumn
-      videos={[video]}
+      videos={videos}
       activeIndex={0}
       onActiveIndexChange={vi.fn()}
-      camSyncStates={["synced"]}
+      camSyncStates={videos.map(() => "synced")}
       primaryBeepTime={6}
       onStartSync={vi.fn()}
       onPromote={vi.fn()}
@@ -57,6 +60,23 @@ describe("MultiCamColumn", () => {
     // ratio and cap and flexes into the remaining height, so the video
     // letterboxes instead of setting the row's height.
     expect(aside).toHaveClass("flex-col", "lg:h-full", "lg:min-h-0");
-    expect(tile).toHaveClass("lg:aspect-auto", "lg:max-h-none", "lg:flex-1", "lg:min-h-0");
+    expect(tile).toHaveClass("lg:aspect-auto", "lg:max-h-none", "lg:flex-1", "lg:min-h-[200px]");
+  });
+
+  it.each([
+    [2, "cam-strip"],
+    [3, "cam-thumb-row"],
+  ])("with %i cameras the tile flexes and keeps its 200 px backstop", (n, secondaryId) => {
+    const videos = [video, ...Array.from({ length: n - 1 }, (_, i) => cam(i + 2))];
+    const { aside, tile } = renderColumn(videos);
+    expect(tile).toHaveClass("lg:flex-1", "lg:min-h-[200px]");
+    expect(tile).not.toHaveClass("lg:min-h-0");
+    // Every fixed-height sibling holds its size, so the tile is what gives.
+    const siblings = Array.from(aside.children).filter((c) => c !== tile);
+    expect(siblings).toHaveLength(4);
+    for (const s of siblings) expect(s).toHaveClass("shrink-0");
+    expect(screen.getByTestId(secondaryId)).toHaveClass("shrink-0");
+    expect(screen.getByTestId("cam-sync-row")).toHaveClass("shrink-0");
+    expect(screen.getByTestId("cam-transport")).toHaveClass("shrink-0");
   });
 });

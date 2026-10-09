@@ -17,6 +17,12 @@
  *   2 cams -> 16:9 primary + 92h secondary strip below.
  *   3+ cams -> 16:9 primary + thumbnail row (~72h each) below.
  *
+ * On lg the column fills Audit's bounded top row: every sibling of the
+ * primary tile (header, strip or thumb row, sync row, transport) is
+ * `shrink-0`, so the tile is what flexes, and it never drops below
+ * 200 px (Audit raises the row's floor when there is more than one
+ * camera so the backstop is not what holds it).
+ *
  * The "Focus / Grid" segmented control at the top hints that an equal
  * 2x2 grid mode is available -- the host owns the Grid modal (see
  * CamGridModal). The shared transport (play / pause / loop / step
@@ -92,7 +98,7 @@ export function MultiCamColumn({
       className={cn("flex w-full min-w-0 shrink-0 flex-col gap-2 lg:h-full lg:min-h-0", className)}
     >
       {/* Column header: kicker + Focus/Grid segmented + cam-count tag */}
-      <div className="flex items-center gap-2 px-0.5">
+      <div className="flex shrink-0 items-center gap-2 px-0.5">
         <span className="font-mono text-[0.5625rem] font-bold uppercase tracking-[0.14em] tabular-nums text-subtle">
           Cameras · {pad2(count)}
         </span>
@@ -125,7 +131,7 @@ export function MultiCamColumn({
           Audit page keeps owning the ref + secondary plumbing. */}
       <div
         data-testid="cam-primary-tile"
-        className="relative aspect-video max-h-[max(240px,calc(100dvh-620px))] w-full overflow-hidden lg:aspect-auto lg:max-h-none lg:min-h-0 lg:flex-1 rounded-2xl border border-rule-strong bg-surface shadow-[inset_0_1px_0_rgba(255,255,255,0.02),0_18px_36px_-24px_rgba(0,0,0,0.7)] [&_video]:object-contain"
+        className="relative aspect-video max-h-[max(240px,calc(100dvh-620px))] w-full overflow-hidden lg:aspect-auto lg:max-h-none lg:min-h-[200px] lg:flex-1 rounded-2xl border border-rule-strong bg-surface shadow-[inset_0_1px_0_rgba(255,255,255,0.02),0_18px_36px_-24px_rgba(0,0,0,0.7)] [&_video]:object-contain"
       >
         <span
           className="absolute left-2.5 top-2 z-[2] inline-flex items-center gap-1.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.12em] text-led-text"
@@ -162,7 +168,8 @@ export function MultiCamColumn({
       ) : null}
       {count >= 3 ? (
         <div
-          className="grid gap-1.5"
+          data-testid="cam-thumb-row"
+          className="grid shrink-0 gap-1.5"
           style={{ gridTemplateColumns: `repeat(${secondaries.length}, minmax(0, 1fr))` }}
         >
           {secondaries.map((cam, i) => (
@@ -190,7 +197,7 @@ export function MultiCamColumn({
       {/* Transport footer. Single source of playback truth for the
           audit page -- it used to live in a floating bay; now it docks here so
           the operator can scrub without ever leaving the column. */}
-      <div className="flex items-center gap-2 rounded-md border border-rule bg-surface-2 px-2.5 py-1.5">
+      <div data-testid="cam-transport" className="flex shrink-0 items-center gap-2 rounded-md border border-rule bg-surface-2 px-2.5 py-1.5">
         <button
           type="button"
           onClick={onTogglePlay}
@@ -276,7 +283,7 @@ function CamStrip({
       ? cam.beep_time - primaryBeepTime
       : null;
   return (
-    <div className="relative h-[92px] w-full overflow-hidden rounded-2xl border border-rule bg-surface">
+    <div data-testid="cam-strip" className="relative h-[92px] w-full shrink-0 overflow-hidden rounded-2xl border border-rule bg-surface">
       <span className="absolute left-2 top-1.5 z-[2] inline-flex items-center gap-1.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.1em] text-ink-2">
         <span
           aria-hidden
@@ -410,7 +417,7 @@ function CamSyncRow({
     ? deltas.reduce((m, d) => (Math.abs(d) > Math.abs(m) ? d : m), 0)
     : 0;
   return (
-    <div className="flex items-center gap-2 rounded-md border border-rule bg-surface px-2.5 py-1.5">
+    <div data-testid="cam-sync-row" className="flex shrink-0 items-center gap-2 rounded-md border border-rule bg-surface px-2.5 py-1.5">
       <span
         aria-hidden
         className="inline-block size-1.5 rounded-full bg-done shadow-[0_0_6px_var(--color-done-glow)]"

@@ -1998,9 +1998,24 @@ export function Audit() {
                     video left, the shot list right. Everything else runs
                     full width under it. On lg the row's height is bounded
                     by the viewport so the band below it stays on a laptop
-                    screen: the video letterboxes into what is left and the
-                    shot list scrolls inside its column. */}
-                <div className="grid gap-4 lg:h-[max(300px,calc(100dvh-560px))] lg:grid-cols-[minmax(0,1fr)_380px] lg:grid-rows-[minmax(0,1fr)]">
+                    screen: the primary tile flexes into what is left and
+                    the shot list scrolls inside its column. VideoPanel's
+                    `fill` (h-full, object-contain) applies at every width,
+                    so the video letterboxes inside the tile below lg too.
+                    The row's floor follows the camera count: a second
+                    camera adds about 150 px of fixed chrome (the secondary
+                    strip or thumb row, the sync row, a taller header and
+                    two gaps, measured at 1440 wide), so several cameras
+                    take a 450 px floor and the primary tile keeps about
+                    250 px. */}
+                <div
+                  className={cn(
+                    "grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:grid-rows-[minmax(0,1fr)]",
+                    videos.length > 1
+                      ? "lg:h-[max(450px,calc(100dvh-560px))]"
+                      : "lg:h-[max(300px,calc(100dvh-560px))]",
+                  )}
+                >
                   <MultiCamColumn
                     videos={videos}
                     activeIndex={activeVideoIndex}
