@@ -257,9 +257,17 @@ six-label ruler and `TransportLine`'s `ZoomControls`.
    fixed-380px branch were removed once that was clear); `ShotList` is
    unchanged. A follow-up review found the first cap, `max-h-[55vh]`,
    meant the video and the band could never both be on screen at
-   1440x900; the cap is now `max-h-[max(240px,calc(100dvh-620px))]`, a
-   height-aware cap that leaves room for the band below it with a floor
-   so the video never collapses on a short viewport. A further
+   1440x900. Capping the tile alone did not move the band either: the
+   shot list set the row's height and the `<video>` overflowed its tile.
+   On lg the top row's height is now bounded instead,
+   `lg:h-[max(300px,calc(100dvh-560px))]` with one `minmax(0,1fr)` row:
+   the camera column fills it, the primary tile flexes into what the
+   column's header and transport leave (`VideoPanel`'s `fill`: the
+   `<video>` is `h-full object-contain`, letterboxed), and `ShotList`
+   fills its column and scrolls inside it. At 1440x900 the band starts
+   at y=673 with its ruler and audio row on screen; at 1440x1080 the
+   video grows from 270 to 450 px tall. Below lg the tile keeps the old
+   16:9 tile under `max-h-[max(240px,calc(100dvh-620px))]`. A further
    follow-up, not yet done: moving `TransportLine` into the band header
    would reclaim more of that height for the video.
 2. **Domain and origin.** The band's domain is the clip, `[0,

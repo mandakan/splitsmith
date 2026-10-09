@@ -1996,8 +1996,11 @@ export function Audit() {
               <div className="flex flex-col gap-4">
                 {/* Top row (the owner's layout, 2026-10-09, as Coach): the
                     video left, the shot list right. Everything else runs
-                    full width under it. */}
-                <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
+                    full width under it. On lg the row's height is bounded
+                    by the viewport so the band below it stays on a laptop
+                    screen: the video letterboxes into what is left and the
+                    shot list scrolls inside its column. */}
+                <div className="grid gap-4 lg:h-[max(300px,calc(100dvh-560px))] lg:grid-cols-[minmax(0,1fr)_380px] lg:grid-rows-[minmax(0,1fr)]">
                   <MultiCamColumn
                     videos={videos}
                     activeIndex={activeVideoIndex}
@@ -2065,10 +2068,17 @@ export function Audit() {
                           />
                         );
                       }}
-                      className="size-full [&_video]:!max-h-full [&_video]:!w-full"
+                      fill
+                      className="size-full"
                     />
                   </MultiCamColumn>
-                  <ShotList rows={rows} beep={auditBeep} currentMarkerId={focusedMarkerId ?? currentShot?.id ?? null} onJump={jumpToMarker} />
+                  <ShotList
+                    rows={rows}
+                    beep={auditBeep}
+                    currentMarkerId={focusedMarkerId ?? currentShot?.id ?? null}
+                    onJump={jumpToMarker}
+                    className="lg:h-full"
+                  />
                 </div>
 
                 <div className="min-w-0 overflow-hidden rounded-[10px] border border-rule bg-surface">

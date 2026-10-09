@@ -70,6 +70,10 @@ interface VideoPanelProps {
   onSecondaryBuffering: (path: string, buffering: boolean) => void;
   onPrimaryTimeUpdate?: () => void;
   className?: string;
+  /** The panel fills a parent of definite height (Audit's primary tile):
+   *  the single-mode cell and the <video> take that height, letterboxed,
+   *  instead of sizing the video by its width. */
+  fill?: boolean;
   /** Hide VideoPanel's own header row (tab switcher + Grid/Single toggle).
    *  The PiPBay supplies its own chrome and the bay IS the grid layout --
    *  surfacing a "Grid/Single" toggle inside it would be nested UI. */
@@ -237,6 +241,7 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
       onSecondaryBuffering,
       onPrimaryTimeUpdate,
       className,
+      fill = false,
       showHeader = true,
       renderCamOverlay,
     },
@@ -428,6 +433,7 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
         <div
           className={cn(
             "grid gap-2",
+            fill && !showGrid && "h-full",
             showGrid && syncableSecondaries.length >= 2
               ? "grid-cols-3"
               : showGrid
@@ -435,7 +441,7 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
               : "grid-cols-1",
           )}
         >
-          <div className="relative overflow-hidden rounded-md bg-black">
+          <div className={cn("relative overflow-hidden rounded-md bg-black", fill && !showGrid && "h-full")}>
             {showGrid ? (
               <div className="absolute left-2 top-2 z-10 rounded bg-black/60 px-2 py-0.5 text-xs text-white/80">
                 Primary
@@ -480,8 +486,9 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
                 playsInline
                 controls={false}
                 className={cn(
-                  "block h-auto w-full",
-                  showGrid ? "max-h-[40vh]" : "max-h-[60vh]",
+                  fill && !showGrid
+                    ? "block h-full w-full object-contain"
+                    : ["block h-auto w-full", showGrid ? "max-h-[40vh]" : "max-h-[60vh]"],
                 )}
                 data-active-path={active.path}
                 onLoadStart={() => setStatus("loading")}

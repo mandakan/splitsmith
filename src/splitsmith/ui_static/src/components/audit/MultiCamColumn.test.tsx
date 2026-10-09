@@ -43,11 +43,20 @@ function renderColumn() {
 }
 
 describe("MultiCamColumn", () => {
-  it("fills the cell with a 16:9 primary tile capped by the viewport height", () => {
+  it("below lg, fills the cell with a 16:9 primary tile capped by the viewport height", () => {
     const { aside, tile } = renderColumn();
     expect(aside.style.width).toBe("");
     expect(aside).toHaveClass("w-full");
     expect(tile.style.height).toBe("");
     expect(tile).toHaveClass("aspect-video", "w-full", "max-h-[max(240px,calc(100dvh-620px))]");
+  });
+
+  it("on lg, fills the row's height and gives the primary tile what is left", () => {
+    const { aside, tile } = renderColumn();
+    // The column follows the bounded top row; the tile drops its aspect
+    // ratio and cap and flexes into the remaining height, so the video
+    // letterboxes instead of setting the row's height.
+    expect(aside).toHaveClass("flex-col", "lg:h-full", "lg:min-h-0");
+    expect(tile).toHaveClass("lg:aspect-auto", "lg:max-h-none", "lg:flex-1", "lg:min-h-0");
   });
 });

@@ -198,6 +198,25 @@ describe("Audit on the timeline band", () => {
     expect(within(cols[0] as HTMLElement).getByTestId("cam-primary-tile")).toHaveClass("aspect-video");
   });
 
+  it("bounds the top row on lg so the band stays on a laptop screen", async () => {
+    renderPage();
+    await screen.findByTestId("timeline");
+    const grid = document.querySelector('[class*="lg:grid-cols-[minmax(0,1fr)_380px]"]') as HTMLElement;
+    // The row's height, not the shot list's length, sets where the band
+    // starts: one row track that may shrink below its content.
+    expect(grid).toHaveClass("lg:h-[max(300px,calc(100dvh-560px))]", "lg:grid-rows-[minmax(0,1fr)]");
+    expect(grid).not.toHaveClass("lg:items-start");
+    const [video, shots] = Array.from(grid.children) as HTMLElement[];
+    expect(video).toHaveClass("lg:h-full");
+    // The video's height follows the tile (letterboxed), not its width.
+    expect(video.querySelector("video")).toHaveClass("h-full", "w-full", "object-contain");
+    expect(video.querySelector("video")).not.toHaveClass("h-auto");
+    // The shot list fills its column and scrolls inside it.
+    expect(shots).toHaveAttribute("aria-label", "Shots");
+    expect(shots).toHaveClass("lg:h-full", "min-h-0", "flex-col");
+    expect(within(shots).getByTestId("shot-list-scroll")).toHaveClass("min-h-0", "flex-1", "overflow-y-auto");
+  });
+
   it("adds a manual marker on a double-click in the audio row", async () => {
     renderPage();
     const band = await screen.findByTestId("timeline");

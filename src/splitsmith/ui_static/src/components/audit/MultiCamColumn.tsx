@@ -89,7 +89,7 @@ export function MultiCamColumn({
   return (
     <aside
       aria-label={`Cameras (${count})`}
-      className={cn("flex w-full min-w-0 shrink-0 flex-col gap-2", className)}
+      className={cn("flex w-full min-w-0 shrink-0 flex-col gap-2 lg:h-full lg:min-h-0", className)}
     >
       {/* Column header: kicker + Focus/Grid segmented + cam-count tag */}
       <div className="flex items-center gap-2 px-0.5">
@@ -125,7 +125,7 @@ export function MultiCamColumn({
           Audit page keeps owning the ref + secondary plumbing. */}
       <div
         data-testid="cam-primary-tile"
-        className="relative aspect-video max-h-[max(240px,calc(100dvh-620px))] w-full overflow-hidden rounded-2xl border border-rule-strong bg-surface shadow-[inset_0_1px_0_rgba(255,255,255,0.02),0_18px_36px_-24px_rgba(0,0,0,0.7)] [&_video]:object-contain"
+        className="relative aspect-video max-h-[max(240px,calc(100dvh-620px))] w-full overflow-hidden lg:aspect-auto lg:max-h-none lg:min-h-0 lg:flex-1 rounded-2xl border border-rule-strong bg-surface shadow-[inset_0_1px_0_rgba(255,255,255,0.02),0_18px_36px_-24px_rgba(0,0,0,0.7)] [&_video]:object-contain"
       >
         <span
           className="absolute left-2.5 top-2 z-[2] inline-flex items-center gap-1.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.12em] text-led-text"
