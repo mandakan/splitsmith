@@ -75,10 +75,13 @@ def test_use_book_clears_the_match_record_only(tmp_path: Path) -> None:
     client, shooter_root = _seed(tmp_path)
     client.patch(IDENTITY, json={"accent": "#ff2d2d"})
     client.patch(IDENTITY, json={"accent": "#00ff00", "scope": "match"})
+    # The book wins over the match's own record (spec 2026-10-09): an older
+    # client's "only this match" edit is stored and drawn under the book.
+    assert MatchProject.load(shooter_root).identity.accent == "#00ff00"
     view = client.get(IDENTITY).json()
     assert view == {
-        "source": "match",
-        "identity": {"accent": "#00ff00", "logo": None, "club": None},
+        "source": "book",
+        "identity": {"accent": "#ff2d2d", "logo": None, "club": None},
         "shooter_id": SID,
         "book_entry": True,
         "book_available": True,

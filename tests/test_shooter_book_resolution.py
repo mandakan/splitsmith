@@ -39,13 +39,29 @@ def test_an_unset_match_identity_reads_the_book(tmp_path: Path) -> None:
     assert identity_media.identity_source(project, book) == "book"
 
 
-def test_the_match_identity_wins_as_a_whole_record(tmp_path: Path) -> None:
+def test_the_book_wins_over_an_old_match_record(tmp_path: Path) -> None:
+    """Spec 2026-10-09: no per-match overrides. A shooter's look is edited
+    on the Shooters page, in the book; an old match record must not keep
+    drawing over it."""
     book = _book(tmp_path, accent="#aa0000", club="Bromma", logo=BOOK_LOGO)
     project = MatchProject(name="m", selected_shooter_id=42, identity=ShooterIdentity(accent="#00ff00"))
     resolved = _resolve(project, tmp_path, book)
-    # The match set an accent only: the book's club and logo are not borrowed.
-    assert (resolved.accent, resolved.club, resolved.logo_path) == ("#00ff00", None, None)
+    assert (resolved.accent, resolved.club, resolved.logo_path) == (
+        "#aa0000",
+        "Bromma",
+        tmp_path / "files" / BOOK_LOGO,
+    )
+    assert identity_media.identity_source(project, book) == "book"
+    assert identity_media.effective_identity(project, book).accent == "#aa0000"
+
+
+def test_a_match_record_still_applies_when_the_book_has_no_entry(tmp_path: Path) -> None:
+    book = _book(tmp_path, accent="#aa0000")
+    project = MatchProject(name="m", selected_shooter_id=7, identity=ShooterIdentity(accent="#00ff00"))
+    assert _resolve(project, tmp_path, book).accent == "#00ff00"
     assert identity_media.identity_source(project, book) == "match"
+    no_id = MatchProject(name="m", identity=ShooterIdentity(club="PK"))
+    assert identity_media.identity_source(no_id, book) == "match"
 
 
 def test_no_ssi_id_never_reads_the_book(tmp_path: Path) -> None:

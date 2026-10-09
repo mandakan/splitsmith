@@ -67,12 +67,13 @@ def test_the_roster_shows_the_book_look_when_the_match_sets_nothing(tmp_path: Pa
     assert r.status_code == 200 and r.content == _png()
 
 
-def test_the_match_own_look_wins_as_a_whole(tmp_path: Path) -> None:
+def test_the_book_wins_over_the_matchs_own_look(tmp_path: Path) -> None:
+    """Spec 2026-10-09: the roster shows what the video draws, and the book
+    wins over an old match record."""
     own = ShooterIdentity(accent="#00ff00")
     client, _ = _seed(tmp_path, own=own)
-    assert _roster_identity(client) == own.model_dump(mode="json")
-    assert _compare_identity(client) == own.model_dump(mode="json")
-    assert client.get("/api/shooters/me/identity/logo").status_code == 404
+    assert _roster_identity(client)["accent"] != "#00ff00"
+    assert _compare_identity(client)["accent"] != "#00ff00"
 
 
 def test_a_share_request_never_reads_the_owner_book(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -96,6 +97,7 @@ def test_the_title_page_club_line_reads_the_book() -> None:
     project = MatchProject(name="m", competitor_name="Mathias Axell", selected_shooter_id=SID)
     book = BookSnapshot(entries={SID: ShooterIdentity(club="Bromma PK")})
     assert "Bromma PK" in title_info_lines(project, book=book)
-    # The match's own record wins as a whole, club or not.
-    project.identity = ShooterIdentity(accent="#00ff00")
-    assert "Bromma PK" not in title_info_lines(project, book=book)
+    # The book wins over the match's own record (spec 2026-10-09).
+    project.identity = ShooterIdentity(accent="#00ff00", club="Old club")
+    assert "Bromma PK" in title_info_lines(project, book=book)
+    assert "Old club" not in title_info_lines(project, book=book)
