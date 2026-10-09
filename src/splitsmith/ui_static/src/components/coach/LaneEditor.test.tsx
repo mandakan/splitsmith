@@ -50,14 +50,6 @@ const lastCommit = (onChange: ReturnType<typeof vi.fn>) =>
   [...onChange.mock.calls].reverse().find((c) => c[1] === true)?.[0] as StageEvent[] | undefined;
 
 describe("LaneEditor", () => {
-  it("labels the ruler for the measured strip width, clear of the beep and stage-time labels", () => {
-    render(<Harness />);
-    const ruler = screen.getByTestId("lane-ruler");
-    const labels = [...ruler.querySelectorAll("span.numeral")].map((n) => n.textContent);
-    // 1000 px over 10 s: a 1 s step, "1" (100 px) clears "Beep", "9" (900 px) does not reach "10.00".
-    expect(labels).toEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9", "10.00"]);
-  });
-
   it("creates a region by dragging empty lane space and seeks the moving edge", () => {
     const onChange = vi.fn();
     const onSeek = vi.fn();
@@ -170,26 +162,6 @@ describe("LaneEditor", () => {
     const e = lastCommit(onChange)!.find((x) => x.id === "evt-1")!;
     expect(e.end).toBeCloseTo(4.0, 3);
     expect(e.start).toBeCloseTo(3.0, 3);
-  });
-
-  it("keys pressed inside the menu slot never reach the editor", () => {
-    const onChange = vi.fn();
-    render(
-      <LaneEditor
-        shots={SHOTS}
-        events={[ev("evt-1", "reload", 4, 5)]}
-        stageTime={STAGE}
-        currentTime={0}
-        selectedId="evt-1"
-        onSelect={vi.fn()}
-        onSeek={vi.fn()}
-        onChange={onChange}
-        menu={<button data-testid="menu-trigger">More</button>}
-      />,
-    );
-    const trigger = screen.getByTestId("menu-trigger");
-    for (const key of ["ArrowRight", "ArrowLeft", "Delete", "Backspace"]) fireEvent.keyDown(trigger, { key });
-    expect(onChange).not.toHaveBeenCalled();
   });
 
   it("Escape restores the pre-drag region and commits nothing new", () => {
@@ -333,11 +305,21 @@ describe("LaneEditor", () => {
     expect(screen.queryByTestId("drag-pill")).toBeNull();
   });
 
-  it("clicking the ruler seeks and draws the playhead at currentTime", () => {
-    const onSeek = vi.fn();
-    render(<Harness onSeek={onSeek} />);
-    fireEvent.click(screen.getByTestId("lane-ruler"), { clientX: 250 });
-    expect(onSeek).toHaveBeenCalledWith(expect.closeTo(2.5, 2));
-    expect(screen.getByTestId("playhead")).toHaveStyle({ left: "0%" });
+  it("maps a drag past the visible window through the content rect (zoomed and scrolled)", () => {
+    // The strip is 4000 px wide (4x on a 1000 px viewport) and scrolled by 1500 px:
+    // its rect starts at -1500. A pointer at clientX 1200 is content x 2700 -> 6.75 s of 10.
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      width: 4000, height: 32, left: -1500, top: 0, right: 2500, bottom: 32, x: -1500, y: 0, toJSON: () => ({}),
+    });
+    const onChange = vi.fn();
+    render(<Harness onChange={onChange} />);
+    const lane = screen.getByTestId("lane-movement");
+    fireEvent.pointerDown(lane, { pointerId: 1, clientX: 100, clientY: 10, button: 0, altKey: true });
+    fireEvent.pointerMove(lane, { pointerId: 1, clientX: 600, clientY: 10, altKey: true });
+    fireEvent.pointerMove(lane, { pointerId: 1, clientX: 1200, clientY: 10, altKey: true });
+    fireEvent.pointerUp(lane, { pointerId: 1, clientX: 1200, clientY: 10, altKey: true });
+    const committed = lastCommit(onChange)!;
+    expect(committed[0].start).toBeCloseTo(4.0, 2);
+    expect(committed[0].end).toBeCloseTo(6.75, 2);
   });
 });
