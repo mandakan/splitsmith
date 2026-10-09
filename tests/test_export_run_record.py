@@ -434,6 +434,10 @@ def test_a_stage_export_with_a_confirmed_region_records_events_csv_as_an_artifac
     csv_filenames = {a["filename"] for a in run["artifacts"] if a["kind"] == "csv"}
     assert any(name.endswith("_splits.csv") for name in csv_filenames)
     assert any(name.endswith("_events.csv") for name in csv_filenames)
+    # The job's own result names the file and its summary says it shipped.
+    assert final["result"]["events_csv"] in csv_filenames
+    assert final["result"]["events_csv"].endswith("_events.csv")
+    assert final["message"].startswith("Done: trim, csv, events")
 
 
 def test_a_failed_stage_export_records_nothing(tmp_path: Path, monkeypatch) -> None:
