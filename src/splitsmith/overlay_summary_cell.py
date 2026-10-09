@@ -534,7 +534,11 @@ def build_summary_still(
     if rasterizer is not None:
         scale = summary_scale(height)
         groups = summary_groups(tile, label, scale=scale, cell_width=width, cell_height=height)
-        html = single_html(groups, width=width, height=height, scale=scale, theme=theme, accent=accent)
+        # The summary's table rows fit their own columns (fit.js
+        # ``fitColumns``): a portrait card otherwise clips 1.42 to "1.4".
+        html = single_html(
+            groups, width=width, height=height, scale=scale, theme=theme, accent=accent, fit_columns=True
+        )
         try:
             png_bytes = rasterizer.png(html, width=width, height=height)
             with Image.open(io.BytesIO(png_bytes)) as rendered:

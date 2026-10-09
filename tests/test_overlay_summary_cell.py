@@ -517,3 +517,92 @@ def test_a_short_row_keeps_the_bands_four_columns(tmp_path: Path) -> None:
     reload_row = groups[-1]
     assert [e.caption for e in reload_row.elements] == ["Reloads", "Reload avg", "Overhang"]
     assert "grid-template-columns: repeat(4, 1fr)" in _group_div(reload_row)
+
+
+# --- portrait columns: no figure is cut to its column (fit.js fitColumns) --
+
+#: Every visible grid-row figure or caption whose text is wider than its
+#: own column, or a caption that wrapped: what ``overflow: hidden`` would
+#: cut to a plausible wrong figure ("1.4" for 1.42).
+_COLUMN_OVERFLOWS_JS = """() => {
+  const out = [];
+  document.querySelectorAll('.group.flow-grid > .el').forEach((el) => {
+    if (getComputedStyle(el).display === 'none') { return; }
+    const width = el.getBoundingClientRect().width;
+    Array.from(el.children).forEach((child) => {
+      const range = document.createRange();
+      range.selectNodeContents(child);
+      const wrapped = child.classList.contains('caption') && range.getClientRects().length > 1;
+      if (range.getBoundingClientRect().width > width + 0.5 || wrapped) { out.push(child.textContent); }
+    });
+  });
+  return out;
+}"""
+
+
+def _column_overflows(html: str, *, width: int, height: int, tmp_path: Path) -> list[str]:
+    """Lay ``html`` out in the real browser exactly as ``ChromiumRasterizer.png``
+    does (file URL, fonts ready, the fit policy run), then measure."""
+    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+
+    page_path = tmp_path / "summary.html"
+    page_path.write_text(html, encoding="utf-8")
+    try:
+        with ChromiumRasterizer() as rasterizer:
+            context = rasterizer._live_browser().new_context(viewport={"width": width, "height": height})
+            try:
+                page = context.new_page()
+                page.goto(page_path.resolve().as_uri(), wait_until="load")
+                page.evaluate("document.fonts.ready")
+                page.evaluate("window.__splitsmithFit && window.__splitsmithFit()")
+                return page.evaluate(_COLUMN_OVERFLOWS_JS)
+            finally:
+                context.close()
+    except RasterizerUnavailableError as exc:
+        pytest.skip(str(exc))
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(("width", "height"), [(1080, 1920), (720, 1280)])
+@pytest.mark.parametrize("events", [None, [_MOVE_1, _MOVE_2, _RELOAD]])
+def test_a_portrait_card_draws_every_figure_whole(
+    tmp_path: Path, width: int, height: int, events: list[dict] | None
+) -> None:
+    """A portrait card's quarter columns are narrower than a headline
+    figure at full size: the card shrinks until each figure fits its own
+    column, rather than cutting 1.42 to "1.4" and +0.31 to "+0.". The HTML
+    is the one ``build_summary_still`` hands the rasterizer."""
+    fake = _FakeRasterizer()
+    tile = _events_tile(_audit(tmp_path, events))
+    cell.build_summary_still(
+        tile, "Me", width=width, height=height, theme=THEME, rasterizer=fake, backdrop=None
+    )
+    (html,) = fake.calls
+    assert _column_overflows(html, width=width, height=height, tmp_path=tmp_path) == []
+
+
+def test_the_stage_summary_asks_for_the_column_fit_and_the_live_race_does_not(tmp_path: Path) -> None:
+    """The column step is opt-in per document: the single card and the
+    grid hold ask for it; the live sprites, whose rows change text frame
+    to frame, keep the old policy."""
+    from splitsmith.compare import overlay_summary as grid
+    from splitsmith.compare.overlay_sprites import SpriteGeometry, TilePlacement
+    from splitsmith.overlay_html import grid_html
+
+    flag = "window.__splitsmithFitColumns = true;"
+    single, hold = _FakeRasterizer(), _FakeRasterizer()
+    tile = _events_tile(_audit(tmp_path, [_RELOAD]))
+    cell.build_summary_still(
+        tile, "Me", width=1080, height=1920, theme=THEME, rasterizer=single, backdrop=None
+    )
+    geometry = SpriteGeometry(canvas_width=1920, canvas_height=1080, rows=1, cols=1)
+    grid.build_hold_still(
+        [TilePlacement(label="Me", row=0, col=0, present=True)],
+        {"Me": tile},
+        {},
+        geometry,
+        theme=THEME,
+        rasterizer=hold,
+    )
+    assert flag in single.calls[0] and flag in hold.calls[0]
+    assert flag not in grid_html([], geometry=geometry, scale=cell.summary_scale(1080), theme=THEME)

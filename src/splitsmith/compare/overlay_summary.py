@@ -459,7 +459,8 @@ def build_hold_still(
             cell_width=geometry.cell_width,
             cell_height=geometry.cell_height,
         )
-        html = grid_html(cells, geometry=geometry, scale=scale, theme=theme)
+        # Each cell's table rows fit their own columns, as the single card's do.
+        html = grid_html(cells, geometry=geometry, scale=scale, theme=theme, fit_columns=True)
         try:
             png_bytes = rasterizer.png(html, width=geometry.canvas_width, height=geometry.canvas_height)
             with Image.open(io.BytesIO(png_bytes)) as overlay_image:

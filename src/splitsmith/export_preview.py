@@ -153,8 +153,10 @@ def _confirmed_regions(audit_doc: dict | None) -> list[StageEvent]:
 #: Bump when the same inputs draw a different picture, or a cached still
 #: from before the change outlives it. 2: a blank stage name reads
 #: "Stage N" on the slate and the lower-third. 3: the stage summary draws
-#: confirmed reloads and static / moving split rows.
-PREVIEW_REVISION = 3
+#: confirmed reloads and static / moving split rows. 4: the summary's
+#: table rows fit their own columns (``fit.js`` ``fitColumns``), which no
+#: other key input sees: ``_shared/`` scripts are not in any digest.
+PREVIEW_REVISION = 4
 
 
 def preview_key(

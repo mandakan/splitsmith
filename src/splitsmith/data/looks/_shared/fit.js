@@ -3,7 +3,8 @@
 // width: an element whose box runs past the cell (a 52-character
 // stage name on a card's slate or lower third) is shrunk on its own and
 // then ellipsized; see fitWidth. A cell that fits is left exactly as it
-// was. Loaded
+// was. Opt-in, a third step between the two: no grid column's text
+// overflows its own column (see fitColumns). Loaded
 // inline by overlay_html._fit_script() and by file URL from a Look's
 // card template. The legibility floor comes from
 // window.__splitsmithMinFont, which the caller sets before calling
@@ -163,8 +164,53 @@ window.__splitsmithFit = function () {
       values.forEach(function (value) { value.style.textOverflow = 'ellipsis'; });
     });
   }
+  // Columns: a figure in a table row (the stage summary's Best / Avg /
+  // Worst / Draw, its reload row) is as wide as its own column, not the
+  // cell, and its value's overflow: hidden cuts what does not fit: in a
+  // portrait card "1.42" drew as "1.4", a plausible wrong figure. So the
+  // band shrinks, uniformly as fitHeight does, until every grid column's
+  // text fits its column on one line, floored at the legibility floor.
+  // Opt-in per document (window.__splitsmithFitColumns, set by the stage
+  // summary's HTML only): the live race and the free cell share this
+  // file, and their rows change text frame to frame, where a per-frame
+  // rescale would make the table jump. A band whose columns fit is left
+  // exactly as it was.
+  function columnOverflows(stack) {
+    var els = stack.querySelectorAll('.group.flow-grid > .el');
+    for (var i = 0; i < els.length; i++) {
+      var el = els[i];
+      if (getComputedStyle(el).display === 'none') { continue; }
+      var width = el.getBoundingClientRect().width;
+      for (var j = 0; j < el.children.length; j++) {
+        var child = el.children[j];
+        var range = document.createRange();
+        range.selectNodeContents(child);
+        if (range.getBoundingClientRect().width > width + 0.5) { return true; }
+        // A value is nowrap; a caption is plain text, so a caption that
+        // wrapped ("Reload / avg") has more than one line box.
+        if (child.classList.contains('caption') && range.getClientRects().length > 1) { return true; }
+      }
+    }
+    return false;
+  }
+  function fitColumns(cell) {
+    if (!window.__splitsmithFitColumns) { return; }
+    var stack = cell.querySelector('.anchor-middle-center');
+    if (!stack || !columnOverflows(stack)) { return; }
+    var hi = parseFloat(stack.style.getPropertyValue('--fit-scale')) || 1;
+    var lo = hi * floorFactor(stack);
+    stack.style.setProperty('--fit-scale', String(lo));
+    if (columnOverflows(stack)) { return; }
+    for (var i = 0; i < 14; i++) {
+      var mid = (lo + hi) / 2;
+      stack.style.setProperty('--fit-scale', String(mid));
+      if (columnOverflows(stack)) { hi = mid; } else { lo = mid; }
+    }
+    stack.style.setProperty('--fit-scale', String(lo));
+  }
   document.querySelectorAll('.cell').forEach(function (cell) {
     fitHeight(cell);
+    fitColumns(cell);
     fitWidth(cell);
   });
   function fitHeight(cell) {
