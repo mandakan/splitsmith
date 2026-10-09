@@ -29,6 +29,7 @@ function Harness(props: Partial<React.ComponentProps<typeof LaneEditor>> & { ini
         setEvents(next);
         props.onChange?.(next, commit);
       }}
+      onCancel={props.onCancel}
       readOnly={props.readOnly}
     />
   );
@@ -289,6 +290,27 @@ describe("LaneEditor", () => {
     fireEvent.pointerCancel(handle, { pointerId: 12 });
     expect(onChange.mock.calls.filter((c) => c[1] === true)).toHaveLength(0);
     expect(screen.getByTestId("event-evt-1")).toHaveAttribute("data-end", "5");
+  });
+
+  it("Escape and pointercancel end the live gesture after emitting the restored list (#1322)", () => {
+    const calls: string[] = [];
+    const onChange = vi.fn((_next: StageEvent[], commit: boolean) => calls.push(commit ? "commit" : "frame"));
+    const onCancel = vi.fn(() => calls.push("cancel"));
+    render(<Harness initial={[ev("evt-1", "reload", 4, 5)]} selectedId="evt-1" onChange={onChange} onCancel={onCancel} />);
+    const handle = screen.getByTestId("handle-evt-1-end");
+    fireEvent.pointerDown(handle, { pointerId: 13, clientX: 500, clientY: 10, button: 0 });
+    fireEvent.pointerMove(handle, { pointerId: 13, clientX: 700, clientY: 10, altKey: true });
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(calls).toEqual(["frame", "frame", "cancel"]);
+    fireEvent.pointerDown(handle, { pointerId: 14, clientX: 500, clientY: 10, button: 0 });
+    fireEvent.pointerMove(handle, { pointerId: 14, clientX: 700, clientY: 10, altKey: true });
+    fireEvent.pointerCancel(handle, { pointerId: 14 });
+    expect(calls.slice(3)).toEqual(["frame", "frame", "cancel"]);
+    // A release commits and is not a cancel.
+    fireEvent.pointerDown(handle, { pointerId: 15, clientX: 500, clientY: 10, button: 0 });
+    fireEvent.pointerMove(handle, { pointerId: 15, clientX: 700, clientY: 10, altKey: true });
+    fireEvent.pointerUp(handle, { pointerId: 15, clientX: 700, clientY: 10, altKey: true });
+    expect(calls.slice(6)).toEqual(["frame", "commit"]);
   });
 
   it("labels an auto proposal and not a manual region", () => {
