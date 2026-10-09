@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "end-screen",
+      "date": "2026-10-09",
+      "title": "A closing card made for YouTube end screens",
+      "body": "Pick the End screen style for the closing card under Look on the Export page. It holds 10 seconds and leaves the right side free for YouTube's subscribe and next video elements."
+    },
+    {
       "id": "logo-spots",
       "date": "2026-10-09",
       "title": "Logos that make a video look finished",

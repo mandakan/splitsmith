@@ -6,14 +6,15 @@
  * the default, as on the server (``logo_spots.DEFAULT_LOGO_SPOTS``).
  */
 
-export type LogoSpot = "wipe" | "summaries" | "thumbnail";
-export const LOGO_SPOTS: readonly LogoSpot[] = ["summaries", "thumbnail", "wipe"];
+export type LogoSpot = "wipe" | "summaries" | "thumbnail" | "watermark";
+export const LOGO_SPOTS: readonly LogoSpot[] = ["summaries", "thumbnail", "watermark", "wipe"];
 
-export type LogoPreset = "cards" | "polished" | "custom";
+export type LogoPreset = "cards" | "polished" | "everything" | "custom";
 
 const PRESET_SPOTS: Record<Exclude<LogoPreset, "custom">, readonly LogoSpot[]> = {
   cards: [],
   polished: ["summaries", "thumbnail", "wipe"],
+  everything: ["summaries", "thumbnail", "watermark", "wipe"],
 };
 
 export const DEFAULT_LOGO_SPOTS: readonly LogoSpot[] = PRESET_SPOTS.polished;
@@ -27,6 +28,10 @@ export const SPOT_COPY: Record<LogoSpot, { label: string; help: string }> = {
   summaries: {
     label: "Shooter logo on the summaries",
     help: "Small, top right of the stage summary and the match summary, where the slates put it.",
+  },
+  watermark: {
+    label: "Your brand over the footage",
+    help: "Small and see-through in a top corner of every stage, for videos you repost off YouTube. Single-shooter videos only; on YouTube the channel watermark does this.",
   },
   thumbnail: {
     label: "A designed thumbnail",
@@ -48,6 +53,7 @@ export function presetFor(spots: readonly LogoSpot[]): LogoPreset {
   const key = normalizeSpots(spots).join(",");
   if (key === PRESET_SPOTS.cards.join(",")) return "cards";
   if (key === PRESET_SPOTS.polished.join(",")) return "polished";
+  if (key === PRESET_SPOTS.everything.join(",")) return "everything";
   return "custom";
 }
 
@@ -64,6 +70,7 @@ export function toggleSpot(spots: readonly LogoSpot[], spot: LogoSpot, on: boole
 const EXTRA: Record<LogoSpot, string> = {
   summaries: "the shooter's logo on the summaries",
   thumbnail: "a designed thumbnail",
+  watermark: "your brand over the footage",
   wipe: "your brand on the wipe between stages",
 };
 

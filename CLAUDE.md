@@ -400,7 +400,17 @@ clip (``youtube_sidecar.action_frame_source``, so no HUD is burnt in; the grid
 takes its render's frame), with ``data.thumbnail`` (title, lines),
 ``data.shooters``, ``data.brand`` and ``data.event``. No browser or a failed
 template is the plain frame it always was plus an anomaly; a thumbnail never
-fails an export.
+fails an export. ``watermark`` (only in ``everything``) lays your brand
+(``look_brand.brand_logo_path``, the same rule as the wipe's), small and 80 %
+opaque, over every stage segment and its transition edges through one more
+looped input on ``_build_stage_command`` (``_prepare_watermark`` writes
+``watermark.png`` once into the work dir, so the cache keys it by content);
+``Composition.watermark_corner`` is top right when the request's HUD is top
+left. Single shooter only: the grid's tiles carry a clock and a counter in both
+top corners. The closing card's ``end-screen`` style (``card-end-screen.html``)
+keeps the right of the frame clear for YouTube's end screen elements and holds
+at least ``composition.END_SCREEN_SECONDS`` (``closing_seconds``, both
+renderers' request layers).
 
 The closing card ends with **"Made with splitsmith"** unless turned off
 (``MatchTitle.credit``, drawn by ``_shared/credit.js`` from ``data.credit``,

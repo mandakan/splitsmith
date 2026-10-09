@@ -207,7 +207,9 @@ def test_a_bare_slot_string_is_the_default_variant() -> None:
 def test_the_shipped_splitsmith_names_a_rise_variant_for_every_card_slot() -> None:
     look = looks.load_look("splitsmith")
     for slot in ("title_page", "slate", "lower_third", "closing"):
-        assert look.variants(slot) == ("default", "rise"), slot
+        # The closing card alone also has the YouTube end screen.
+        expected = ("default", "end-screen", "rise") if slot == "closing" else ("default", "rise")
+        assert look.variants(slot) == expected, slot
         rise = look.own_template(slot, "rise")
         assert rise is not None and rise.is_file()
 

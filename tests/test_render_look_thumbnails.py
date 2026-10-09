@@ -223,6 +223,7 @@ def test_look_previews_write_one_file_per_variant_and_the_sample_tile(tmp_path: 
             "lower_third-default.png",
             "lower_third-rise.png",
             "closing-default.png",
+            "closing-end-screen.png",
             "closing-rise.png",
             "transition-wipe.webp",
             "overlay-minimal.webp",

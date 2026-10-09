@@ -359,6 +359,8 @@ class MatchExportRequestData:
     account_brand: composition.BrandMark | None = None
     #: Where logos go beyond the cards (``logo_spots``); empty draws none.
     logo_spots: frozenset[str] = frozenset()
+    #: Where the ``watermark`` spot goes: top right when the HUD is top left.
+    watermark_corner: Literal["top-left", "top-right"] = "top-left"
     # Issue #1242. The Look template variant every generated card draws
     # with (``default`` is the still card; the shipped ``splitsmith`` Look
     # adds ``rise``). One knob for all slots until the gallery (#1246)
@@ -802,11 +804,15 @@ def export_match(
                 if request.title_page
                 else None
             )
+            closing_variant = request.closing_card_variant or request.card_variant
             closing = (
                 replace(
                     card,
-                    variant=request.closing_card_variant or request.card_variant,
+                    variant=closing_variant,
                     credit=request.made_with,
+                    duration_seconds=composition.closing_seconds(
+                        closing_variant, request.title_page_duration_seconds
+                    ),
                 )
                 if request.closing_card
                 else None
@@ -843,6 +849,7 @@ def export_match(
         ),
         logo_spots=request.logo_spots,
         brand=request.account_brand,
+        watermark_corner=request.watermark_corner,
     )
     youtube_preset_active = request.youtube_preset and request.output_format == "mp4"
     if request.youtube_preset and request.output_format != "mp4":

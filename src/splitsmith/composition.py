@@ -457,6 +457,20 @@ class BrandMark:
     line: str | None = None
 
 
+#: The closing card's YouTube end screen style (``card-end-screen.html``):
+#: the right of the frame is left clear for YouTube's end screen elements,
+#: which need at least 5 s and at most the last 20 s of a video.
+END_SCREEN_VARIANT = "end-screen"
+#: The least an end screen holds, whatever the card duration asks.
+END_SCREEN_SECONDS = 10.0
+
+
+def closing_seconds(variant: str, seconds: float) -> float:
+    """How long the closing card holds: ``seconds``, or at least
+    :data:`END_SCREEN_SECONDS` for the end screen style."""
+    return max(seconds, END_SCREEN_SECONDS) if variant == END_SCREEN_VARIANT else seconds
+
+
 @dataclass(frozen=True)
 class MatchTitle:
     """A generated full-frame card for the match itself (issue #973).
@@ -556,6 +570,9 @@ class Composition:
     #: The account's brand for the spots that draw it (the wipe), when the
     #: Look has none of its own; the cards carry theirs on ``MatchTitle``.
     brand: BrandMark | None = None
+    #: Where the ``watermark`` spot puts your brand over the footage; the
+    #: request layer moves it right when the HUD sits top left.
+    watermark_corner: Literal["top-left", "top-right"] = "top-left"
 
 
 # --- conversions -----------------------------------------------------------
@@ -591,6 +608,7 @@ def from_stage_compositions(
     match_summary: MatchSummary | None = None,
     logo_spots: frozenset[str] = frozenset(),
     brand: BrandMark | None = None,
+    watermark_corner: Literal["top-left", "top-right"] = "top-left",
 ) -> Composition:
     """Build a :class:`Composition` from today's ``StageComposition`` inputs.
 
@@ -693,6 +711,7 @@ def from_stage_compositions(
         match_summary=match_summary,
         logo_spots=frozenset(logo_spots),
         brand=brand,
+        watermark_corner=watermark_corner,
     )
 
 

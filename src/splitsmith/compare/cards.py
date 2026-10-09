@@ -11,7 +11,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from ..composition import BrandMark, MatchTitle
+from ..composition import BrandMark, MatchTitle, closing_seconds
 from ..division import competitor_division, roster_lines
 from ..match_model import Match
 from ..match_project import MatchProject
@@ -87,7 +87,13 @@ def title_cards(
         brand=brand if cards.account_brand else None,
     )
     title = replace(card, variant=cards.title_page_variant or cards.card_variant)
-    closing = replace(card, variant=cards.closing_card_variant or cards.card_variant, credit=cards.made_with)
+    closing_variant = cards.closing_card_variant or cards.card_variant
+    closing = replace(
+        card,
+        variant=closing_variant,
+        credit=cards.made_with,
+        duration_seconds=closing_seconds(closing_variant, cards.title_page_duration_seconds),
+    )
     return (title if cards.title_page else None), (closing if cards.closing_card else None)
 
 

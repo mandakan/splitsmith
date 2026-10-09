@@ -221,6 +221,7 @@ def test_a_clean_look_checks_ok_and_probes_every_own_template_with_every_sample(
     assert files == {
         "card.html",
         "card-rise.html",
+        "card-end-screen.html",
         "sting-wipe.html",
         "hud-minimal.html",
         "hud-pips.html",
@@ -441,6 +442,7 @@ def test_preview_renders_every_card_variant_and_sting_and_a_contact_sheet(
             "lower_third-default.png",
             "lower_third-rise.png",
             "closing-default.png",
+            "closing-end-screen.png",
             "closing-rise.png",
             "transition-wipe.png",
             "contact-sheet.png",

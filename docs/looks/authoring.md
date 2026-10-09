@@ -316,6 +316,14 @@ data.thumbnail = { title: "Höstfinalen XI", lines: ["Mathias Axell"] }
 plus `data.shooters`, `data.brand` and `data.event` as the cards get them. A
 thumbnail is seen small: keep it to a few words in big type.
 
+## The end screen
+
+The shipped Look's closing card has an `end-screen` style
+(`card-end-screen.html`): everything sits in the left two fifths so the right of
+the frame stays clear for YouTube's end screen elements, and the renderer holds
+the closing card at least 10 seconds when it is chosen. A Look's own closing
+`end-screen` variant gets the same hold.
+
 ## Your brand
 
 `look.json`'s `brand` is the Look's own brand: a logo (a file in the Look's
