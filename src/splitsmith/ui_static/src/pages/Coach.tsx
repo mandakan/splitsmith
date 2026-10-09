@@ -776,6 +776,7 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
     select: selectEvent,
     apply,
     change: changeEvents,
+    cancel: cancelEvents,
   } = useStageEvents(slug, stage, applyCoach, setError);
   const isMobile = useIsMobile();
 
@@ -1094,6 +1095,7 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
             onSelect={selectEvent}
             onSeek={seekFromBeep}
             onChange={changeEvents}
+            onCancel={cancelEvents}
             menu={
               scrub.available ? (
                 <span className="relative shrink-0">

@@ -1114,11 +1114,32 @@ phone Coach surface exists. Every PUT appends an
 ``audit_events`` entry, which is why the SPA saves on commit only
 (release or keyboard nudge) through a 350 ms debounce in
 ``lib/useStageEvents.ts``: PUTs run one at a time with the revision the
-previous one returned, a 409 reloads the coach payload and drops
-anything pending, and a response that lands while a newer edit is
-pending or a drag is live (frames sent, no commit yet) takes only the
-revision. A commit whose lanes overlap never goes out: local state
-reverts to the last valid list. Never save per drag frame.
+previous one returned. A coach response, the PUT's own or a foreign
+one through ``apply`` (shot PATCH, reclassify), never replaces the local
+list while a local edit is outstanding (in the debounce, in flight or in
+a 409's reload, owed a re-send, or under a live drag). While one is, a
+foreign response whose regions differ from the ones this tab last saw
+from the server (another writer's) takes only the payload and is
+*withheld*: its revision and regions wait, so an edit in flight 409s on
+its own revision and is discarded rather than overwrite those regions;
+one with the same regions advances. A withheld response is cleared by a
+409's reload or by a later foreign response that is adopted (both
+arrived after it); a successful PUT's answer does not clear it, since a
+PUT sent on a revision read before the withhold and still accepted was
+written before the withheld write. When nothing
+is outstanding any more (a PUT's answer, a 409's decision, a non-409
+failure, an Esc / pointercancel via ``LaneEditor`` ``onCancel``, an
+overlapping release) the list catches up, adopting a withheld response
+first, so an Esc shows another writer's regions at once and the next
+edit saves on the newest revision. A 409 reloads and stops anything
+queued; when the reload's regions equal the ones the
+failed PUT started from (the revision moved for something else, e.g. a
+shot PATCH), the newest local list is re-sent once on the fresh
+revision (a live drag's release carries it, a cancel sends it),
+otherwise, or on a second 409, the server's list wins, a live drag's
+release is dropped, and ``onDiscard`` fires once (the seam for the
+inline notice). A commit whose lanes overlap never goes out: local
+state reverts to the last valid list. Never save per drag frame.
 
 The coach payload carries ``events``, ``event_summary``, ``_version``,
 per-shot ``moving`` and per-video ``trim_version`` / ``scrub_version``;

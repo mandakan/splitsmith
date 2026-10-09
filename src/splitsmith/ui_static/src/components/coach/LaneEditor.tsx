@@ -58,13 +58,19 @@ export interface LaneEditorProps {
   onSeek: (tFromBeep: number) => void;
   /** Live during a drag (commit=false), once on release / per nudge (commit=true). */
   onChange: (events: StageEvent[], commit: boolean) => void;
+  /**
+   * A drag ended without a commit (Esc, pointercancel), called after the
+   * restored list goes out through ``onChange(..., false)``: the live
+   * gesture is over and nothing will commit it.
+   */
+  onCancel?: () => void;
   /** Optional overflow-menu slot rendered at the strip's top right. */
   menu?: ReactNode;
 }
 
 export function LaneEditor(props: LaneEditorProps) {
   const { shots, events, stageTime, fps = 30, currentTime, selectedId, readOnly = false } = props;
-  const { onSelect, onSeek, onChange, menu } = props;
+  const { onSelect, onSeek, onChange, onCancel, menu } = props;
   const rootRef = useRef<HTMLDivElement | null>(null);
   const stripRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<Drag | null>(null);
@@ -185,6 +191,7 @@ export function LaneEditor(props: LaneEditorProps) {
     setPill(null);
     const restored = cancelFrame(drag, eventsRef.current);
     if (restored) emit(restored, false);
+    onCancel?.();
   };
   const cancelRef = useRef(cancelDrag);
   cancelRef.current = cancelDrag;
