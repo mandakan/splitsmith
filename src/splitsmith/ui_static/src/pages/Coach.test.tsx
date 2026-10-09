@@ -3,6 +3,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
 import { ApiError, type CoachShot, type CoachStageResponse, type CoachVideoEntry, type StageEvent } from "@/lib/api";
+import { summarize } from "@/lib/events";
 import { COMMIT_DEBOUNCE_MS } from "@/lib/useStageEvents";
 
 import { Coach } from "@/pages/Coach";
@@ -181,14 +182,102 @@ describe("stage events on the Coach page", () => {
   it("renders the lane editor with the payload's events and the stat strip figures", async () => {
     vi.mocked(api.getProject).mockResolvedValue({ name: "M", competitor_name: "Anna",
       stages: [{ stage_number: 1, stage_name: "Stage One", time_seconds: 16.2 }] } as never);
+    // The strip now computes from these events (summarize, #1324), not the
+    // mocked event_summary below: a movement region overlapping the reload
+    // gives an overhang of 9.47 - 9.16 = 0.31, same as the hardcoded figure
+    // makeCoachWithEvents used to send, so the two cannot be told apart by
+    // this assertion alone -- the parity test below is what pins it.
     vi.mocked(api.getStageCoach).mockResolvedValue(
-      makeCoachWithEvents([makeShot(1, "c1"), makeShot(2, "c2")], [{ id: "evt-1", kind: "reload", start: 8.05, end: 9.47, source: "auto" }]),
+      makeCoachWithEvents(
+        [makeShot(1, "c1"), makeShot(2, "c2")],
+        [
+          { id: "evt-0", kind: "movement", start: 7.6, end: 9.16, source: "manual" },
+          { id: "evt-1", kind: "reload", start: 8.05, end: 9.47, source: "auto" },
+        ],
+      ),
     );
     render(<MemoryRouter initialEntries={["/match/m1/coach/anna/1"]}><Routes>
       <Route path="/match/:matchId/coach/:slug/:stage" element={<Coach />} /></Routes></MemoryRouter>);
     expect(await screen.findByTestId("event-evt-1")).toHaveAttribute("data-source", "auto");
     expect(screen.getByText("Overhang")).toBeInTheDocument();
     expect(screen.getByText("+0.31")).toBeInTheDocument();
+  });
+
+  it("ignores a stale server moving/overhang figure and computes it from the local events; capacity_warning still comes from the server", async () => {
+    vi.mocked(api.getProject).mockResolvedValue({ name: "M", competitor_name: "Anna",
+      stages: [{ stage_number: 1, stage_name: "Stage One", time_seconds: 16.2 }] } as never);
+    const movement: StageEvent = { id: "evt-0", kind: "movement", start: 7.6, end: 9.16, source: "manual" };
+    const reload: StageEvent = { id: "evt-1", kind: "reload", start: 8.05, end: 9.47, source: "auto" };
+    const shots = [makeShot(1, "c1"), makeShot(2, "c2")];
+    // The TS twin of the server's own ``events.stage_event_summary`` (all
+    // regions, no capacity) for this exact list -- what the real server
+    // response would carry.
+    const real = summarize(shots.map((s) => s.time_from_beep), [movement, reload], null);
+    expect(real.overhang_s).toBeCloseTo(0.31);
+    const coach = makeCoachWithEvents(shots, [movement, reload], "v1v1v1v1v1v1v1v1");
+    coach.event_summary = {
+      // A stale server figure (e.g. computed before an edit landed): if the
+      // page read this instead of the local events, it would show 9.99, not
+      // the real 0.31.
+      ...real,
+      moving_shots: 7,
+      overhang_s: 9.99,
+      capacity_warning: "9 shots without a reload",
+    };
+    vi.mocked(api.getStageCoach).mockResolvedValue(coach);
+    renderCoachRoute();
+    expect(await screen.findByText("+0.31")).toBeInTheDocument();
+    expect(screen.queryByText("+9.99")).toBeNull();
+    // Neither shot (t=1, t=2) falls inside the movement region (7.6-9.16),
+    // so the real, locally-computed count is 0 -- not the server's stale 7.
+    const onMove = screen.getByText("On the move").parentElement!;
+    expect(within(onMove).getByText("0")).toBeInTheDocument();
+    expect(within(onMove).queryByText("7")).toBeNull();
+    // capacity_warning has no local source (the SPA has no division
+    // capacity), so it still comes straight from the server payload.
+    expect(screen.getByText("9 shots without a reload")).toBeInTheDocument();
+  });
+
+  it("a nudge updates the stat strip before its PUT resolves", async () => {
+    vi.mocked(api.getProject).mockResolvedValue({ name: "M", competitor_name: "Anna",
+      stages: [{ stage_number: 1, stage_name: "Stage One", time_seconds: 16.2 }] } as never);
+    vi.mocked(api.getStageCoach).mockResolvedValue(
+      makeCoachWithEvents(
+        [makeShot(1, "c1"), makeShot(2, "c2")],
+        [
+          { id: "evt-0", kind: "movement", start: 7.6, end: 9.16, source: "manual" },
+          { id: "evt-1", kind: "reload", start: 8.05, end: 9.47, source: "auto" },
+        ],
+        "v1v1v1v1v1v1v1v1",
+      ),
+    );
+    // Never resolves: proves the strip's new figure appears without waiting
+    // on the PUT, let alone its answer.
+    vi.mocked(api.putStageEvents).mockImplementation(() => new Promise(() => {}));
+    renderCoachRoute();
+    expect(await screen.findByText("+0.31")).toBeInTheDocument();
+    // Selecting the region opens the region card, which shows its own
+    // "Overhang" readout alongside the strip's -- scope to the strip (the
+    // container that also holds "On the move") so the two are not conflated.
+    const strip = screen.getByText("On the move").closest("div")!.parentElement!;
+    const region = await screen.findByTestId("event-evt-1");
+    fireEvent.click(region);
+    vi.useFakeTimers();
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    // Shift+ArrowRight moves the reload's end one frame later (1/30 s),
+    // widening the overhang from 0.31 to ~0.34.
+    fireEvent.keyDown(screen.getByTestId("lane-editor"), { key: "ArrowRight", shiftKey: true });
+    expect(within(strip).getByText("+0.34")).toBeInTheDocument();
+    expect(within(strip).queryByText("+0.31")).toBeNull();
+    // Still true once the debounce fires the (unresolved) PUT.
+    expect(api.putStageEvents).not.toHaveBeenCalled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(COMMIT_DEBOUNCE_MS);
+    });
+    expect(api.putStageEvents).toHaveBeenCalledTimes(1);
+    expect(within(strip).getByText("+0.34")).toBeInTheDocument();
   });
 
   it("deleting the selected region PUTs the list with _version and applies the response", async () => {
