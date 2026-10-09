@@ -186,8 +186,12 @@ export function LaneEditor(props: LaneEditorProps) {
     if (drag.mode === "create" && drag.id === null) return;
     if (sameEvents(eventsRef.current, drag.startEvents)) {
       // Travelled past the threshold but landed back on the pre-gesture list
-      // (a body or edge drag that ends where it started): no commit, but the
-      // live gesture is still over, exactly as a cancel ends it (#1325).
+      // (a body or edge drag that ends where it started): no commit. A
+      // no-op never confirms a proposal, so an ``auto`` region's mid-drag
+      // ``touched()`` flip to ``manual`` is undone too -- restored exactly
+      // as Esc would -- and the live gesture ends the same way (#1325).
+      const restored = cancelFrame(drag, eventsRef.current);
+      if (restored) emit(restored, false);
       onCancel?.();
       return;
     }

@@ -42,16 +42,20 @@ export const touched = (e: StageEvent): StageEvent => (e.source === "auto" ? { .
 const replace = (events: StageEvent[], next: StageEvent) => events.map((e) => (e.id === next.id ? next : e));
 
 /**
- * Same list by value: a drag or nudge that ends up exactly where its gesture
- * started is a no-op and must not commit (#1325). ``replace`` keeps order
- * and length, so index-for-index is enough; a genuine create (a longer
- * list) or delete never compares equal here.
+ * Same list by position: a drag or nudge that ends up exactly where its
+ * gesture started is a no-op and must not commit (#1325), even though
+ * ``touched()`` runs unconditionally inside ``dragFrame``'s edge/body
+ * branches and inside ``nudge`` and may have flipped an ``auto`` region to
+ * ``manual`` along the way -- a no-op never confirms a proposal, so
+ * ``source`` is deliberately not compared. ``replace`` keeps order and
+ * length, so index-for-index is enough; a genuine create (a longer list) or
+ * delete never compares equal here.
  */
 export function sameEvents(a: StageEvent[], b: StageEvent[]): boolean {
   if (a.length !== b.length) return false;
   return a.every((x, i) => {
     const y = b[i];
-    return x.id === y.id && x.kind === y.kind && x.start === y.start && x.end === y.end && x.source === y.source;
+    return x.id === y.id && x.kind === y.kind && x.start === y.start && x.end === y.end;
   });
 }
 
