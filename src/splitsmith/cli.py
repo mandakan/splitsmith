@@ -1228,6 +1228,16 @@ def overlay(
         True, "--class-labels/--no-class-labels", help="Show draw, split, transition and reload labels."
     ),
     landing: bool = typer.Option(True, "--landing/--no-landing", help="The landing moment on the last shot."),
+    reload_chip: bool = typer.Option(
+        False,
+        "--reload-chip/--no-reload-chip",
+        help="Template styles: a chip timing each confirmed reload.",
+    ),
+    stage_bar: bool = typer.Option(
+        False,
+        "--stage-bar/--no-stage-bar",
+        help="Template styles: confirmed movement and reload regions on a stage bar.",
+    ),
     summary_card: bool = typer.Option(
         False,
         "--summary-card",
@@ -1284,6 +1294,8 @@ def overlay(
             speed_colors=speed_colors,
             class_labels=class_labels,
             landing=landing,
+            reload_chip=reload_chip,
+            stage_bar=stage_bar,
             position=overlay_position,  # type: ignore[arg-type]
         ),
         segment_cache=render_segment_cache(Config.load(None).output),
