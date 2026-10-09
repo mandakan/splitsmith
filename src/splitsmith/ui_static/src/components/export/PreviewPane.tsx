@@ -6,6 +6,8 @@
  * A failure is one muted line, never an error banner; nothing here
  * touches the Export button.
  */
+import { LogoSpotsSwitch } from "@/components/export/LogoSpotsSwitch";
+import { LOGO_SPOT_CARDS, useLogoSpots } from "@/lib/logoSpots";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -77,11 +79,14 @@ export function PreviewPane({
   const urlRef = useRef<string | null>(null);
 
   const card = previewCardFor(focus, settings.mode);
+  const [logoSpots, setLogoSpots] = useLogoSpots();
   // One string so the effect re-runs only when the request would differ.
   const requestKey = useMemo(
     () =>
-      card ? JSON.stringify(previewBody(settings, card, stageNumber, projectName, looks, stageNumbers)) : null,
-    [card, settings, stageNumber, projectName, looks, stageNumbers],
+      card
+        ? JSON.stringify(previewBody(settings, card, stageNumber, projectName, looks, stageNumbers, logoSpots))
+        : null,
+    [card, settings, stageNumber, projectName, looks, stageNumbers, logoSpots],
   );
 
   useEffect(() => {
@@ -166,6 +171,7 @@ export function PreviewPane({
       <div className="aspect-video w-full bg-surface-3">
         {src ? <img src={src} alt={caption} className="size-full object-cover" /> : null}
       </div>
+      {card !== null && LOGO_SPOT_CARDS.has(card) ? <LogoSpotsSwitch on={logoSpots} onChange={setLogoSpots} /> : null}
       {failed && !hovering && card !== null ? (
         <p className="px-3.5 py-1.5 text-sm text-muted">{previewLine(status)}</p>
       ) : null}

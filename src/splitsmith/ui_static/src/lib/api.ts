@@ -1297,6 +1297,8 @@ export interface ExportPreviewBody extends OverlayStyleBody {
   backdrop?: "footage" | "demo";
   /** An animated template as a looping WebP (#1249); a still stays a PNG. */
   motion?: boolean;
+  /** A labelled placeholder in every logo spot no logo fills (previews only). */
+  logo_placeholders?: boolean;
 }
 
 export interface ExportStageRequestPayload {

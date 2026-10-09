@@ -335,3 +335,70 @@ def test_an_overlay_style_previews_as_a_loop_and_keys_apart_from_classic(client)
     assert _StubRasterizer.launches == 2, "a style is its own cache entry"
     refused = client.post(ROUTE, json={**body, "overlay_position": "middle"})
     assert refused.status_code == 422
+
+
+def _capture_data(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
+    """The ``data`` of every template the preview renders, in order."""
+    import json
+
+    seen: list[dict] = []
+
+    class _Capture(_StubRasterizer):
+        def render_template(self, template, *, context, width: int, height: int) -> bytes:
+            seen.append(json.loads(json.dumps(context.data, default=str)))
+            return super().render_template(template, context=context, width=width, height=height)
+
+    @contextmanager
+    def _capture_factory():
+        yield _Capture()
+
+    monkeypatch.setattr(export_preview_api, "rasterizer_factory", _capture_factory)
+    return seen
+
+
+def _logos(data: dict) -> dict[str, str | None]:
+    shooters = data.get("shooters") or []
+    return {
+        "shooter": shooters[0].get("logo") if shooters else None,
+        "brand": (data.get("brand") or {}).get("logo"),
+        "event": (data.get("event") or {}).get("logo"),
+    }
+
+
+def test_logo_placeholders_fill_every_empty_logo_spot_on_the_title_page(
+    client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nothing set: without placeholders the title page draws no logo; with
+    them every spot it has (the shooter's corner, your brand, the event's
+    centre) holds a placeholder, and the two are cached apart."""
+    seen = _capture_data(monkeypatch)
+    body = {"card": "title", "stage_number": 1, "width": 480}
+    assert client.post(ROUTE, json=body).status_code == 200
+    assert client.post(ROUTE, json={**body, "logo_placeholders": True}).status_code == 200
+    assert len(seen) == 2, "the option must move the cache key"
+    assert _logos(seen[0]) == {"shooter": None, "brand": None, "event": None}
+    filled = _logos(seen[1])
+    assert all(v is not None and "placeholder-" in v for v in filled.values()), filled
+    assert len(set(filled.values())) == 3, "each spot says whose logo goes there"
+
+
+def test_a_slate_gets_only_the_shooters_placeholder(client, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = _capture_data(monkeypatch)
+    body = {"card": "slate", "stage_number": 1, "width": 480, "logo_placeholders": True}
+    assert client.post(ROUTE, json=body).status_code == 200
+    logos = _logos(seen[0])
+    assert logos["shooter"] is not None and "placeholder-" in logos["shooter"]
+    assert logos["brand"] is None and logos["event"] is None
+
+
+def test_no_brand_placeholder_when_the_brand_is_turned_off(client, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = _capture_data(monkeypatch)
+    body = {
+        "card": "closing",
+        "stage_number": 1,
+        "width": 480,
+        "logo_placeholders": True,
+        "account_brand": False,
+    }
+    assert client.post(ROUTE, json=body).status_code == 200
+    assert _logos(seen[0])["brand"] is None

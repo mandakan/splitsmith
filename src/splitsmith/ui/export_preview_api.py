@@ -15,6 +15,7 @@ none). Reads the project and the audit doc; writes nothing to either.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import logging
@@ -27,7 +28,9 @@ from typing import Any, Literal
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from .. import logo_placeholder
 from ..account_profile import brand_digest, load_brand
+from ..composition import BrandMark
 from ..division import competitor_division
 from ..export_preview import (
     PreviewCard,
@@ -39,6 +42,8 @@ from ..export_preview import (
     render_preview,
     summary_digest,
 )
+from ..identity import ResolvedIdentity
+from ..logo_placeholder import placeholder_logo
 from ..look_store import LookStoreError, StoredLookBody, TemplateEdit, draft_look
 from ..looks import Look, load_look, look_fingerprint
 from ..overlay_hud import OverlayStyleFields
@@ -89,6 +94,10 @@ class ExportPreviewRequest(OverlayStyleFields, BaseModel):
     templates: list[TemplateEdit] = Field(default_factory=list, max_length=32)
     #: The Look editor's backdrop switch: this stage's footage or the demo scene.
     backdrop: Literal["footage", "demo"] = "footage"
+    #: Draw a labelled placeholder in every logo spot no logo fills (the
+    #: shooter's, your brand, the event's), so the preview shows where each
+    #: goes. Previews only; an export never draws one.
+    logo_placeholders: bool = False
 
     @field_validator("look")
     @classmethod
@@ -101,6 +110,14 @@ def _look_fingerprint(name: str) -> str | None:
     key; ``None`` for a shipped Look, which changes only with a release."""
     look = load_look(name)
     return None if look.source == "shipped" else look_fingerprint(look.root)
+
+
+def _with_placeholder(shooter: ResolvedIdentity, placeholder_dir: Path | None) -> ResolvedIdentity:
+    """The shooter as the preview draws them: a placeholder in place of a
+    logo they have not set, when placeholders were asked for."""
+    if placeholder_dir is None or shooter.logo_path is not None:
+        return shooter
+    return dataclasses.replace(shooter, logo_path=placeholder_logo(logo_placeholder.SHOOTER, placeholder_dir))
 
 
 def _event_logo(state: Any) -> Path | None:
@@ -177,6 +194,17 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
         load_brand(state.account_profile) if req.account_brand and req.card in ("title", "closing") else None
     )
     book_entry = book.get(project.selected_shooter_id) if identity_source(project, book) == "book" else None
+    rt = runtime()
+    placeholders = req.logo_placeholders and req.card != "frame"
+    placeholder_dir = rt.cache_dir / "logo-placeholders"
+    if placeholders and req.card in ("title", "closing"):
+        if event_logo is None:
+            event_logo = placeholder_logo(logo_placeholder.EVENT, placeholder_dir)
+        if req.account_brand and (brand is None or brand.logo_path is None):
+            brand = BrandMark(
+                logo_path=placeholder_logo(logo_placeholder.BRAND, placeholder_dir),
+                line=brand.line if brand is not None else None,
+            )
     spec = PreviewSpec(
         card=req.card,
         stage_number=stage_number,
@@ -198,6 +226,7 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
         summary_digest=summary_digest(match_summary) if match_summary is not None else None,
         book_identity=identity_digest(book_entry) if book_entry is not None else None,
         account_brand=brand_digest(brand) if brand is not None else None,
+        logo_placeholders=placeholders,
         draft=(
             None
             if req.draft is None and not req.templates
@@ -212,7 +241,6 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
             ).hexdigest()
         ),
     )
-    rt = runtime()
     cache_dir = rt.cache_dir / "export-preview"
     key = preview_key(
         spec,
@@ -247,13 +275,16 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
                 audit_doc=audit_doc,
                 look=look,
                 rasterizer=rasterizer,
-                shooter=resolved_identity_for(
-                    project,
-                    root,
-                    look=look,
-                    index=0,
-                    label=project.competitor_name or project.name,
-                    book=book,
+                shooter=_with_placeholder(
+                    resolved_identity_for(
+                        project,
+                        root,
+                        look=look,
+                        index=0,
+                        label=project.competitor_name or project.name,
+                        book=book,
+                    ),
+                    placeholder_dir if placeholders else None,
                 ),
                 ffmpeg_binary=rt.ffmpeg_binary,
                 work_dir=Path(work),

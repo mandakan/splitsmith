@@ -200,3 +200,17 @@ describe("previewBody with an overlay style (template HUD)", () => {
     expect(previewBody(plate, "slate", 1, "", catalog)).not.toHaveProperty("overlay_variant");
   });
 });
+
+describe("previewBody logo spots", () => {
+  it("asks for placeholders only when the switch is on and the card has a logo spot", () => {
+    const on = (card: Parameters<typeof previewBody>[1]) =>
+      previewBody(DEFAULT_EXPORT_SETTINGS, card, 1, "", BUILTIN_LOOKS, undefined, true).logo_placeholders;
+    expect(on("title")).toBe(true);
+    expect(on("slate")).toBe(true);
+    expect(on("lower-third")).toBe(true);
+    expect(on("closing")).toBe(true);
+    expect(on("overlay")).toBeUndefined();
+    expect(on("summary")).toBeUndefined();
+    expect(previewBody(DEFAULT_EXPORT_SETTINGS, "title", 1).logo_placeholders).toBeUndefined();
+  });
+});

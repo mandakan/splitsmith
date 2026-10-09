@@ -3,6 +3,7 @@
  * a Look tile previews, the request body from the form, the caption and
  * the one line per failure. Pure; ``PreviewPane`` does the fetching.
  */
+import { LOGO_SPOT_CARDS } from "@/lib/logoSpots";
 import type { ExportPreviewBody, LookInfo, PreviewCard } from "@/lib/api";
 import type { ExportMode } from "@/lib/exportPlan";
 import { PADDING_PRESETS, type ExportSettings } from "@/lib/exportPresets";
@@ -80,6 +81,8 @@ export function previewBody(
   /** The export's stage selection, in order: the match summary card
    *  summarises exactly these, as the video will. */
   stageNumbers?: readonly number[],
+  /** "Show where logos go": placeholders in the card's empty logo spots. */
+  logoSpots = false,
 ): ExportPreviewBody {
   const body: ExportPreviewBody = {
     card,
@@ -112,6 +115,7 @@ export function previewBody(
     if (style.overlay_variant) Object.assign(body, style, { motion: true });
   }
   if (card === "match_summary" && stageNumbers) body.stage_numbers = [...stageNumbers];
+  if (logoSpots && LOGO_SPOT_CARDS.has(card)) body.logo_placeholders = true;
   return body;
 }
 
