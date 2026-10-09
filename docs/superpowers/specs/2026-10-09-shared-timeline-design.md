@@ -187,3 +187,31 @@ One sub-issue on #1321, three PRs merged in order, each verified with
   compare grid.
 - A minimap track; the scrollbar and `ShotRuler` cover it for now.
 - Multi-cam video in the band.
+
+## As built (PR 1)
+
+PR 1 shipped `lib/timelineView.ts` (pure geometry), `lib/timelinePrefs.ts`
+(the per-browser switches), `components/timeline/{Timeline,WaveformTrack,
+types}.tsx`, the lane editor rebuilt as a track (`LANE_ROWS`, `LaneHints`),
+Coach wired onto the band with an Audio track (empty while peaks load,
+"No audio" once they settle without any), and the Cmd/Ctrl+B sidebar
+shortcut.
+
+Rulings:
+
+1. **Waveform drawing.** `WaveformTrack` draws a viewport-sized canvas
+   from `columnPeaks` (column c is one content pixel from `scrollLeft`);
+   `Waveform.tsx` is untouched. Audit moves to `WaveformTrack` in PR 2
+   and Review keeps `Waveform`. Reason: Chromium caps a canvas side at
+   32767 device px.
+2. **Below-fit zoom.** The timeline never shows content narrower than
+   the viewport: 1x and below is Fit. Audit inherits this in PR 2.
+3. **Coach domain.** The band spans `[0, stageTime]` from the beep; the
+   waveform shows the matching clip slice.
+4. **Follow playhead.** The band scrolls only when the playhead moves: a
+   zoom keeps its anchor, and turning Follow on does not jump until the
+   playhead next moves.
+5. **Peaks loading.** While peaks load the Audio track is empty; "No
+   audio" shows only once the request has settled without peaks.
+6. **Per-stage reset.** The Coach band needs no explicit per-stage reset:
+   the page's `CoachStage` is keyed per stage.

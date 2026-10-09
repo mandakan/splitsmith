@@ -1165,6 +1165,19 @@ the Coach player goes through ``useScrubSource`` like Audit, and the
 lane editor's "Full-resolution video" entry is the same
 ``GlobalPrefs.full_res_scrub``. ``components/coach/LaneEditor`` owns the
 DOM only; geometry (clamp, snap, ``MIN_EVENT_S``) is ``lib/events.ts``.
+On Coach the lanes are a track of the shared timeline band
+(``components/timeline/Timeline``, spec 2026-10-09): the band owns the
+ruler, the playhead, zoom (``lib/timelineView``: ``null`` is Fit, a
+multiplier up to 16x, never narrower than the viewport), the wheel rules
+(a plain wheel is the page's unless ``splitsmith.timeline.wheelZooms`` is
+on; a horizontal wheel over the band is always consumed) and
+follow-playhead, which never scrolls while a pointer is down in the band.
+Follow scrolls only when the playhead moves, so a zoom keeps its anchor.
+A track positions by percentage of the band's content div, so the
+editor's pointer maths reads its own rect and needs no zoom code; a new
+track does the same. ``WaveformTrack`` draws only the visible window
+into a viewport-sized canvas, never a full-content one. Audit and the
+beep step move onto the band next.
 Pointer rules: a lane click seeks to the press point
 snapped to the nearest shot (a ruler click does not snap), unless the
 snap would land inside a same-lane region (then the raw press time), a
