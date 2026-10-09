@@ -7,11 +7,17 @@
  * It fetches the video's own peaks, owns the band's zoom, and renders a
  * Candidates row (one pin per candidate; click picks it) over a seekable
  * Audio row (the whole source as a WaveformTrack, the chosen beep as its
- * beepTime overlay). The band's domain is the peaks' own clip time
- * ("local"); picks are source seconds. ``offset = videoBeepTime -
- * peaks.beep_time`` bridges the two, mirroring BeepWaveformPicker's rule
- * (BeepSection.tsx ~821-824): zero when the peaks are the full source,
- * equal to a cached trim's start otherwise.
+ * beepTime overlay). The preview <video> and the band play the same
+ * clip, so every seek (scrub, candidate click, park) just reads/writes
+ * that one shared clip-local time -- there is no conversion between
+ * them. Only a *pick*, the value handed to `onPick`, is source seconds:
+ * ``offset = videoBeepTime - peaks.beep_time`` converts clip-local to
+ * source there, mirroring BeepWaveformPicker's rule (BeepSection.tsx
+ * ~821-824). The peaks route serves the full source today, so this
+ * offset is 0 in practice; it exists for BeepWaveformPicker's other
+ * case (a cached trim, where the peaks' clip starts partway into the
+ * source) in case this component ever serves that case too -- it does
+ * not itself detect or special-case it.
  *
  * A press-and-drag on the Audio row seeks the preview video live
  * (Timeline's onSeek, once per frame); the release picks that time
@@ -43,6 +49,14 @@ export interface BeepTimelineProps {
   candidates: BeepCandidate[];
   /** The preview <video>; the band seeks it and reads its time and play state. */
   mediaRef: React.RefObject<HTMLVideoElement | null>;
+  /**
+   * Called with a source-seconds pick: a scrub release, or a candidate
+   * click (always the candidate's own `time`, including a `detected`
+   * one -- this never passes `null` for "back to the detector's own
+   * time"). BeepStep (Task 2) is the one that treats a pick within 5 ms
+   * of the detected candidate as "no override" and clears its draft
+   * back to `null`.
+   */
   onPick: (sourceTime: number) => void;
   onError?: (message: string) => void;
 }
@@ -51,10 +65,6 @@ const CANDIDATES_ROW_H = 22;
 const AUDIO_ROW_H = 120;
 /** Source <-> local tolerance for "is this candidate the chosen one". */
 const SELECTED_EPS = 0.005;
-
-function clampPct(v: number): number {
-  return Math.min(Math.max(v, 0), 100);
-}
 
 export function BeepTimeline({
   slug,
@@ -129,6 +139,14 @@ export function BeepTimeline({
   // changing the mediaRef object itself or firing any prop change this
   // component would otherwise depend on -- so this re-checks after every
   // render instead, and is a no-op whenever the element hasn't changed.
+  //
+  // This still can't see a remount that happens entirely inside
+  // BeepPreview (a sibling) without BeepTimeline itself re-rendering --
+  // e.g. its own error/Retry swapping the <video> it owns. Nothing here
+  // runs until *this* component's next render, so the listeners stay on
+  // the dead element until then. Seeks (handleSeek, the candidate click,
+  // park) are unaffected: they read `mediaRef.current` fresh every time,
+  // not whichever element these listeners are attached to.
   const attachedElRef = useRef<HTMLVideoElement | null>(null);
   const detachRef = useRef<() => void>(() => {});
   // No deps array is deliberate here, not an omission: [mediaRef] (the
@@ -149,18 +167,35 @@ export function BeepTimeline({
     const onTimeUpdate = () => setLocalTime(el.currentTime);
     const onPlay = () => setPlaying(true);
     const onPause = () => setPlaying(false);
+    const onEnded = () => setPlaying(false);
     el.addEventListener("timeupdate", onTimeUpdate);
     el.addEventListener("play", onPlay);
     el.addEventListener("pause", onPause);
+    el.addEventListener("ended", onEnded);
     setLocalTime(el.currentTime);
     setPlaying(!el.paused);
     detachRef.current = () => {
       el.removeEventListener("timeupdate", onTimeUpdate);
       el.removeEventListener("play", onPlay);
       el.removeEventListener("pause", onPause);
+      el.removeEventListener("ended", onEnded);
     };
   });
-  useEffect(() => () => detachRef.current(), []);
+  // StrictMode (main.tsx wraps <App> in it) double-invokes effects on
+  // mount: run every effect, run every cleanup, run every effect again.
+  // The cleanup below must drop attachedElRef back to null, not just
+  // detach -- otherwise the replayed effect above sees `el ===
+  // attachedElRef.current` (still the same element, never reset) and
+  // bails out, leaving the listeners detached for good. A real unmount
+  // doesn't care either way, since nothing reads these refs again.
+  useEffect(
+    () => () => {
+      detachRef.current();
+      detachRef.current = () => {};
+      attachedElRef.current = null;
+    },
+    [],
+  );
 
   // timeupdate is browser-throttled to a few Hz; rAF gives the playhead
   // ~60 Hz while playing so it doesn't stutter against the static waveform.
@@ -221,6 +256,10 @@ export function BeepTimeline({
         <div className="relative size-full">
           {candidates.map((c) => {
             const local = c.time - offset;
+            // A candidate outside the clip (the offset carried it past
+            // either edge) has nowhere honest to sit -- hide it rather
+            // than pin it to an edge it isn't actually at.
+            if (local < 0 || local > peaks.duration) return null;
             const selected = chosenSource != null && Math.abs(c.time - chosenSource) < SELECTED_EPS;
             const fromOrigin = local - origin;
             return (
@@ -241,7 +280,7 @@ export function BeepTimeline({
                   "absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-[1.5px]",
                   selected ? "border-led bg-led" : "border-rule-strong bg-surface-2",
                 )}
-                style={{ left: `${clampPct((local / peaks.duration) * 100)}%` }}
+                style={{ left: `${(local / peaks.duration) * 100}%` }}
               />
             );
           })}

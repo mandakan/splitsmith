@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { useRef } from "react";
+import { StrictMode, useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PeaksResult } from "@/lib/api";
@@ -61,6 +61,43 @@ function audioRow() {
   return screen.getByTestId("waveform-track").parentElement!.parentElement!;
 }
 
+/**
+ * jsdom has no rAF timing. Stub it on top of fake timers so a scheduled
+ * frame becomes a pending timer `vi.runOnlyPendingTimers()` can flush --
+ * copied from Timeline.test.tsx's own helper, needed here only for the
+ * "picks only once on a drag's release" test, which has to observe
+ * whether each individual drag frame picks (it must not), not just the
+ * final value.
+ */
+function stubRequestAnimationFrame() {
+  const realRaf = window.requestAnimationFrame;
+  const realCaf = window.cancelAnimationFrame;
+  let nextHandle = 1;
+  const timeouts = new Map<number, ReturnType<typeof setTimeout>>();
+  window.requestAnimationFrame = (cb: FrameRequestCallback) => {
+    const handle = nextHandle++;
+    timeouts.set(
+      handle,
+      setTimeout(() => {
+        timeouts.delete(handle);
+        cb(performance.now());
+      }, 0),
+    );
+    return handle;
+  };
+  window.cancelAnimationFrame = (handle: number) => {
+    const t = timeouts.get(handle);
+    if (t !== undefined) {
+      clearTimeout(t);
+      timeouts.delete(handle);
+    }
+  };
+  return () => {
+    window.requestAnimationFrame = realRaf;
+    window.cancelAnimationFrame = realCaf;
+  };
+}
+
 beforeEach(() => {
   vi.mocked(api.getVideoPeaks).mockReset();
   vi.spyOn(Element.prototype, "clientWidth", "get").mockReturnValue(VIEWPORT);
@@ -118,16 +155,36 @@ describe("BeepTimeline", () => {
     });
 
     it("picks only once on a drag's release, not per move", async () => {
+      // A single move can't tell "picks once on release" apart from "picks
+      // once per frame" (one move, after mockClear, happens to produce one
+      // call either way). Several moves, each one's frame actually
+      // drained before the next, can: a per-frame-pick bug would call
+      // onPick after *every* drained move, not just the last.
       vi.mocked(api.getVideoPeaks).mockResolvedValue(peaksFixture());
       const onPick = vi.fn();
       render(<Harness videoId="v1" onPick={onPick} />);
       await screen.findByTestId("waveform-track");
       const row = audioRow();
 
-      fireEvent.pointerDown(row, { pointerId: 1, button: 0, clientX: 250 });
-      onPick.mockClear();
-      fireEvent.pointerMove(row, { pointerId: 1, clientX: 600 });
-      fireEvent.pointerUp(row, { pointerId: 1, clientX: 600 });
+      vi.useFakeTimers();
+      const restoreRaf = stubRequestAnimationFrame();
+      try {
+        fireEvent.pointerDown(row, { pointerId: 1, button: 0, clientX: 250 });
+        expect(onPick).not.toHaveBeenCalled();
+
+        fireEvent.pointerMove(row, { pointerId: 1, clientX: 400 });
+        act(() => vi.runOnlyPendingTimers());
+        expect(onPick).not.toHaveBeenCalled();
+
+        fireEvent.pointerMove(row, { pointerId: 1, clientX: 600 });
+        act(() => vi.runOnlyPendingTimers());
+        expect(onPick).not.toHaveBeenCalled();
+
+        fireEvent.pointerUp(row, { pointerId: 1, clientX: 600 });
+      } finally {
+        restoreRaf();
+        vi.useRealTimers();
+      }
 
       expect(onPick).toHaveBeenCalledTimes(1);
       expect(onPick.mock.calls[0][0]).toBeCloseTo(6.0, 2);
@@ -233,6 +290,19 @@ describe("BeepTimeline", () => {
       rerender(<Harness videoId="v1" onPick={vi.fn()} />);
       expect(video.currentTime).toBeCloseTo(7, 2);
     });
+
+    it("does not re-park when draftSourceTime changes without a videoId switch", async () => {
+      vi.mocked(api.getVideoPeaks).mockResolvedValue(peaksFixture({ beep_time: 4 }));
+      const { rerender } = render(<Harness videoId="v1" />);
+      await screen.findByTestId("waveform-track");
+      const video = screen.getByTestId("preview-video") as HTMLVideoElement;
+      expect(video.currentTime).toBeCloseTo(4, 2);
+
+      // A new draft arrives (the operator picked something earlier, or a
+      // sibling control set it) -- same videoId, no refetch, so no re-park.
+      rerender(<Harness videoId="v1" draftSourceTime={9} />);
+      expect(video.currentTime).toBeCloseTo(4, 2);
+    });
   });
 
   describe("switching videoId", () => {
@@ -318,5 +388,26 @@ describe("BeepTimeline", () => {
 
       expect(screen.getByTestId("timeline-playhead")).toHaveStyle({ left: "400px" });
     });
+  });
+
+  it("keeps its media listeners live under StrictMode's double-invoked effects", async () => {
+    // main.tsx wraps <App> in <StrictMode>, which mounts, cleans up, and
+    // mounts again on purpose (dev only) to shake out effects that don't
+    // tolerate being re-run. The cleanup effect must leave the listener
+    // effect able to re-attach, not just have detached once.
+    vi.mocked(api.getVideoPeaks).mockResolvedValue(peaksFixture());
+    render(
+      <StrictMode>
+        <Harness videoId="v1" />
+      </StrictMode>,
+    );
+    await screen.findByTestId("waveform-track");
+    const video = screen.getByTestId("preview-video") as HTMLVideoElement;
+
+    fireEvent(video, new Event("play"));
+    video.currentTime = 6;
+    fireEvent(video, new Event("timeupdate"));
+
+    expect(screen.getByTestId("timeline-playhead")).toHaveStyle({ left: "600px" });
   });
 });
