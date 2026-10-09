@@ -103,7 +103,10 @@ describe("You", () => {
   it("sends every other shooter's look to the Shooters page and anchors the brand", async () => {
     vi.mocked(api.getScoreboardIdentity).mockResolvedValue(ME);
     const { container } = renderYou();
-    expect(await screen.findByRole("link", { name: "Shooters" })).toHaveAttribute("href", "/shooters");
+    const links = await screen.findAllByRole("link", { name: "Shooters" });
+    expect(links.length).toBeGreaterThan(0);
+    for (const link of links) expect(link).toHaveAttribute("href", "/shooters");
+    expect(screen.getByRole("img", { name: /Where the logos go/ })).toBeInTheDocument();
     expect(container.querySelector("section#brand")).not.toBeNull();
   });
 

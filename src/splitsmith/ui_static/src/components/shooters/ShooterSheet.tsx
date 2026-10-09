@@ -9,6 +9,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { LogoGuide } from "@/components/shooters/LogoGuide";
 import { Avatar } from "@/components/ui/AvatarStack";
 import { Field, inputClass } from "@/components/ui/Field";
 import { Sheet } from "@/components/ui/Sheet";
@@ -132,9 +133,12 @@ export function ShooterSheet({ open, onClose, shooter, onChanged }: ShooterSheet
           </div>
         </div>
         <div className="flex-1 overflow-y-auto">
+          <div className="border-b border-rule px-3.5 py-3">
+            <LogoGuide shooter={shownLogo} highlight="shooter" />
+          </div>
           <Field
-            label="Logo"
-            help="PNG, JPEG or WebP, at most 2 MB. Drawn top-right on the title page, the slates and the closing card."
+            label="Shooter logo"
+            help="Often their club badge. Top right on their title page, stage slates and closing card. PNG, JPEG or WebP, at most 2 MB."
           >
             <div className="flex items-center gap-3">
               {shownLogo ? (
