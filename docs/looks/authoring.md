@@ -28,7 +28,8 @@ default Look to your own templates.
 ## Make one
 
 ```sh
-splitsmith looks new club-red --from splitsmith   # a copy of a Look, every file but its previews
+splitsmith looks new club-red --from splitsmith   # a shipped Look's colours, fonts and styles
+splitsmith looks new club-red --from splitsmith --templates   # ...and its templates, to edit by hand
 splitsmith looks new club-red --starter still     # or a minimal Look around one starter
 splitsmith looks check club-red                   # validate it
 splitsmith looks preview club-red                 # render every card to PNGs
@@ -36,7 +37,15 @@ splitsmith looks list                             # what is installed
 ```
 
 Your Looks live in `~/.splitsmith/looks/<name>/`. A folder there with the
-same name as a shipped Look replaces it. Pick a Look on the Export page, or
+same name as a shipped Look replaces it.
+
+A copy of a shipped Look names no templates of its own, so every card it
+draws is the current shipped template and a new release reaches it. Copy
+them with `--templates` only when you mean to edit them; a copy you never
+edit freezes the cards at the day you made it. `splitsmith looks check`
+warns about such a copy once the shipped template has moved on, and
+`splitsmith looks refresh <name>` removes every unedited copy (an edited
+file is never touched). A copy of your own Look carries every file. Pick a Look on the Export page, or
 with `--theme <name>` on `match export` and `--overlay-theme <name>` on
 `compare export`.
 

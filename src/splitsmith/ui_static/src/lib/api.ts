@@ -5240,6 +5240,12 @@ export const api = {
       `/api/looks/${encodeURIComponent(name)}/check`,
       { method: "POST", json: { draft, templates } },
     ),
+  /** Your Look's unedited copies of an older shipped template (local only). */
+  outdatedLookTemplates: (name: string) =>
+    request<{ files: string[] }>(`/api/looks/${encodeURIComponent(name)}/outdated`),
+  /** Drop those copies so the cards draw the current shipped templates. */
+  refreshLookTemplates: (name: string) =>
+    request<{ files: string[] }>(`/api/looks/${encodeURIComponent(name)}/refresh`, { method: "POST" }),
   /** The colours the palette suggestions are chosen against (#1273). */
   paletteSources: (slug: string, stageNumbers: number[]) =>
     request<{ footage: { rgb: Rgb; share: number }[]; average: Rgb | null; logo: { rgb: Rgb; share: number }[] }>(

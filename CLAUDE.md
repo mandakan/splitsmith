@@ -290,7 +290,17 @@ face is a catalog id or a path and every consumer takes both
 content name is what keeps the caches honest: the card PNG and the
 ``@font-face`` URL inside ``template_digest`` both move with the bytes. A copy
 of a Look (``looks.look_files``: ``looks new --from``, the editor's
-``draft_look``) carries every file but its manifest and previews. On hosted, Looks carry colours,
+``draft_look``) carries every file but its manifest and previews, except a
+copy of a *shipped* Look, which names no template (``slots`` empty, ``base``
+set) so it draws the current shipped ones; ``--templates`` copies them. A
+copied ``card.html`` froze the cards before the brand, the event logo and
+the credit. ``data/looks/_history.json`` (every version of every shipped
+template by sha256, from git: ``scripts/record_template_history.py``, and
+``tests/test_look_tools.py`` fails until a changed template is recorded)
+lets ``look_tools.outdated_copies`` recognise an unedited copy of an older
+version; ``looks check`` warns, the Export rail's ``LookHealth`` offers "Use
+the current cards", and ``looks refresh`` / ``POST /api/looks/{name}/refresh``
+(local only) drop every unedited copy and its slot entries. On hosted, Looks carry colours,
 fonts from the catalog and card styles, never a template: **custom templates
 are desktop only, by decision** (2026-10-07). A template is code; hosted would
 run it beside the database and R2 credentials, and Chromium's own OS sandbox

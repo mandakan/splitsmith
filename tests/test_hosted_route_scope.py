@@ -49,6 +49,8 @@ EXPECTED_LOCAL_ONLY: set[tuple[str, str]] = {
     ("GET", "/api/looks/{name}/samples"),
     ("POST", "/api/looks/{name}/check"),
     ("POST", "/api/looks/{name}/reveal"),
+    ("GET", "/api/looks/{name}/outdated"),
+    ("POST", "/api/looks/{name}/refresh"),
     ("POST", "/api/shooters/{slug}/videos/reveal"),
     ("POST", "/api/match/merge/plan"),
     ("POST", "/api/match/merge/execute"),
