@@ -9,7 +9,9 @@
  *
  * Every ``onChange(events, true)`` is a server write upstream, so drag
  * frames go out with ``commit=false`` and only a release or a keyboard
- * nudge commits.
+ * nudge commits. A release or nudge that lands back on the pre-gesture list
+ * (by value, ``laneDrag.sameEvents``) commits nothing: a release still ends
+ * the live gesture through ``onCancel``, same as Esc or pointercancel (#1325).
  */
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
@@ -28,6 +30,7 @@ import {
   cancelFrame,
   dragFrame,
   nudge,
+  sameEvents,
   type Drag,
   type DragInit,
 } from "./laneDrag";
@@ -59,9 +62,10 @@ export interface LaneEditorProps {
   /** Live during a drag (commit=false), once on release / per nudge (commit=true). */
   onChange: (events: StageEvent[], commit: boolean) => void;
   /**
-   * A drag ended without a commit (Esc, pointercancel), called after the
-   * restored list goes out through ``onChange(..., false)``: the live
-   * gesture is over and nothing will commit it.
+   * A drag ended without a commit (Esc, pointercancel, or a release that
+   * landed back on the pre-gesture list, #1325), called after any restored
+   * list goes out through ``onChange(..., false)``: the live gesture is
+   * over and nothing will commit it.
    */
   onCancel?: () => void;
   /** Optional overflow-menu slot rendered at the strip's top right. */
@@ -122,6 +126,7 @@ export function LaneEditor(props: LaneEditorProps) {
       startY: e.clientY,
       thresholdPx: e.pointerType === "touch" ? TOUCH_DRAG_THRESHOLD_PX : DRAG_THRESHOLD_PX,
       moved: false,
+      startEvents: eventsRef.current,
     };
     if (init.mode !== "create") onSelect(init.id);
   };
@@ -179,6 +184,17 @@ export function LaneEditor(props: LaneEditorProps) {
       return;
     }
     if (drag.mode === "create" && drag.id === null) return;
+    if (sameEvents(eventsRef.current, drag.startEvents)) {
+      // Travelled past the threshold but landed back on the pre-gesture list
+      // (a body or edge drag that ends where it started): no commit. A
+      // no-op never confirms a proposal, so an ``auto`` region's mid-drag
+      // ``touched()`` flip to ``manual`` is undone too -- restored exactly
+      // as Esc would -- and the live gesture ends the same way (#1325).
+      const restored = cancelFrame(drag, eventsRef.current);
+      if (restored) emit(restored, false);
+      onCancel?.();
+      return;
+    }
     emit(eventsRef.current, true);
     if (drag.mode === "create") onSelect(drag.id);
   };
@@ -216,7 +232,9 @@ export function LaneEditor(props: LaneEditorProps) {
       e.preventDefault();
       const dir = e.key === "ArrowLeft" ? -1 : 1;
       const next = nudge(current, selectedId, dir, { alt: e.altKey, shift: e.shiftKey }, fps);
-      if (next) emit(next, true);
+      // A clamp (a neighbour, or the 0 floor / stage-time ceiling) can leave the
+      // region exactly where it was: that nudge commits nothing (#1325).
+      if (next && !sameEvents(next, current)) emit(next, true);
     } else if ((e.key === "Delete" || e.key === "Backspace") && current.some((x) => x.id === selectedId)) {
       e.preventDefault();
       emit(
