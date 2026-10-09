@@ -401,3 +401,102 @@ restore it. A test that passes against the pre-change code is not a test.
 - Reload figures on the share card.
 - Phone-side editing or a desktop command to re-seed.
 - The mechanical reload as a sub-marker.
+
+## Part 2 as built: rendering on the template HUD (amended 2026-10-09)
+
+The "Rendering and export" section above predates the template HUD engine
+(overlay styles, #1306-#1311). The overlay paragraphs are replaced by this
+section; the summary card, CSV, FCPXML and share paragraphs are refined by
+it. Where the two disagree, this section wins.
+
+### Confirmed regions only
+
+Every rendered or exported output (overlay, summary card, `events.csv`,
+FCPXML markers, share figures) reads **confirmed** regions only:
+`source == "manual"`. An auto proposal is a guess the user has not looked
+at, and a video or an export must never show a region nobody confirmed
+(the conservative rule: under-report rather than invent). The Coach page
+keeps showing proposals, dashed, as before.
+
+So that confirming does not require moving a handle, the region card gains
+**Keep** on an auto proposal: it flips `source` to `manual` and changes
+nothing else. Dragging, nudging or changing the kind already confirm.
+
+Movement regions are never seeded, so `moving` flags and the moving-split
+figures are unaffected by this rule in practice.
+
+### Overlay: data the HUD styles draw
+
+The template HUD receives its stage through `overlay_hud.hud_stage_data`.
+It gains, from confirmed regions only:
+
+- `events`: `[{kind, start, end}]` in clip seconds (beep-offset like `shots[].t`).
+- `reloads`: `[{start, end, duration, overhang}]` in clip seconds, from
+  `events.reload_figures` (`overhang` is `null` for a standing reload).
+  Templates never re-derive a figure.
+- each shot gains `moving: bool`.
+
+`HudOptions` / `OverlayStyleFields` gain two toggles, both **off** by
+default: `reload_chip` (`overlay_reload_chip`) and `stage_bar`
+(`overlay_stage_bar`). They ride the existing seam unchanged: preset body,
+export and preview requests, `lib/overlayStyle.ts`, `STYLE_TOGGLES` in
+`lib/lookGallery.ts`. A stage with no confirmed regions draws exactly as
+today whatever the toggles say.
+
+The palette gains two optional colours, `reload` (default `#FBBF24`, the
+budget amber) and `movement` (default `#06B6D4`, the budget cyan), in
+`OverlayTheme` and `look.json`'s `colors`; a Look without them loads with
+the defaults. Red stays the brand.
+
+All five shipped styles (Plate, Pips, Ticker, Timeline, Minimal) draw both:
+
+- **Reload chip**: while `start <= t < end + 0.4` for a reload, a chip near
+  the clock reads `RELOAD` and the elapsed reload time counting up from
+  `start`, holding the final duration through a 0.4 s fade.
+- **Stage bar**: a thin bar spanning the stage with movement and reload
+  bands and the elapsed portion filled. Timeline draws the bands on its
+  existing track; the other four place a thin bar under their clock.
+
+Classic (the drawtext path) and the compare grid (sprite overlay, no
+template styles) do not draw either in this cut; the toggles sit under the
+HUD style tiles only, where they already live.
+
+No cache change: the HUD MOV's key hashes the whole template context, so
+event data reaches it as soon as it is in `data.stage`. `HUD_KEY_VERSION`
+stays, since the frame plan does not change.
+
+The authoring guide documents the new `data.stage` fields, the two options
+and the two palette tokens; `splitsmith looks check` exercises a sample
+stage that carries a movement and a reload, so a custom style is checked
+against them. `scripts/render_overlay_frames.py` gains `--reload-chip`,
+`--stage-bar` and a synthetic stage with regions; its frames are looked at
+before the other four styles are done.
+
+### Summary card
+
+When the stage has confirmed reloads, the Splits band gains a row: Reloads,
+Reload avg, Overhang (positive overhangs summed, as on the Coach page).
+When both static and moving splits exist, the split figures appear as two
+rows, Static and Moving. A stage with no confirmed regions renders
+byte-identically to today. Single-shooter and grid holds share
+`summary_groups`, so both get it; the match summary card does not change.
+
+### CSV
+
+`moving` is appended as the last column of the splits CSV;
+`read_splits_csv` accepts the old header and the new one. An `events.csv`
+(`id, kind, start, end, duration, source, note`) is written beside it when
+the stage has confirmed regions.
+
+### FCPXML
+
+Single-stage and match FCPXML (and the FCP7 XML) carry each confirmed
+region as a marker with duration on the stage clip, value
+`Reload 1.42` / `Movement` / `Activation`. The compare export does not
+carry per-shot markers today and does not carry regions either.
+
+### Share figures
+
+`stages[].figures` on the project payload gains `moving_shots`,
+`reloads`, `reload_avg_s`, `overhang_s` from confirmed regions (`null`
+when the stage has none). The share card does not change.
