@@ -477,10 +477,19 @@ before the other four styles are done.
 
 When the stage has confirmed reloads, the Splits band gains a row: Reloads,
 Reload avg, Overhang (positive overhangs summed, as on the Coach page).
-When both static and moving splits exist, the split figures appear as two
-rows, Static and Moving. A stage with no confirmed regions renders
-byte-identically to today. Single-shooter and grid holds share
-`summary_groups`, so both get it; the match summary card does not change.
+Overhang is omitted when every reload is standing: nothing was measured,
+and the card never draws a figure that was not (the Coach page shows
+`+0.00` there). When both static and moving splits exist, the split
+figures appear as two rows, Static and Moving, on a single-shooter card
+that is landscape or square and at least 480 px tall; a narrower or
+shorter card keeps the one combined row, because the fit would otherwise
+drop the Scoring figures or clip the Draw beside the reload count. A
+stage with no confirmed regions renders byte-identically to today.
+Single-shooter and grid holds share `summary_groups`, but the grid hold
+passes `split_rows=False`: its cells are compared side by side, so every
+cell keeps one combined Best/Avg/Worst/Draw row (and the same size as
+its neighbours), while a cell with confirmed reloads still gains the
+reload row. The match summary card does not change.
 
 ### CSV
 

@@ -350,8 +350,8 @@ def test_static_moving_and_a_reload_share_the_last_row_with_the_draw(tmp_path: P
 
 
 def test_a_short_cell_keeps_one_split_row_and_the_reload_row(tmp_path: Path) -> None:
-    """A 3x3 grid cell at 1080p (360 px) cannot fit separate Static and
-    Moving rows without the fit dropping the Scoring figures, so it keeps
+    """A 640x360 card cannot fit separate Static and Moving rows without
+    the fit dropping the Scoring figures, so it keeps
     the one Best/Avg/Worst/Draw row over every split; the reload row stays
     (it is the first thing such a cell may drop)."""
     tile = _events_tile(_audit(tmp_path, [_MOVE_1, _MOVE_2, _RELOAD]))
@@ -377,16 +377,83 @@ def test_only_moving_splits_keep_one_row(tmp_path: Path) -> None:
 
 
 def test_the_split_rows_partition_exactly_the_statistic_splits(tmp_path: Path) -> None:
-    """Static and moving are ``statistic_splits``' own selection, split by
-    ``moving``: a movement-classed interval on the move is not a moving
-    split."""
+    """The Static and Moving rows are ``statistic_splits``' own selection,
+    split by ``moving``: a movement-classed interval on the move is not a
+    moving split, and nothing outside the selection reaches either row."""
     from splitsmith.coach import statistic_splits
 
     tile = _events_tile(_audit(tmp_path, [_MOVE_1]))
     static = [s.split for s in tile.shots if s.interval_class == "split" and not s.moving]
     moving = [s.split for s in tile.shots if s.interval_class == "split" and s.moving]
     assert sorted(static + moving) == sorted(statistic_splits(tile.shots))
-    assert [s.time_from_beep for s in tile.shots if s.moving] == pytest.approx([4.35, 4.66, 4.98])
+
+    def stats(xs: list[float]) -> list[str]:
+        return [f"{min(xs):.2f}", f"{sum(xs) / len(xs):.2f}", f"{max(xs):.2f}"]
+
+    static_row, moving_row, _draw = _splits_rows(_groups(tile))
+    assert [text for _, text in static_row[1:]] == stats(static)
+    assert [text for _, text in moving_row[1:]] == stats(moving)
+
+
+def test_the_grid_hold_keeps_one_comparable_split_row(tmp_path: Path) -> None:
+    """Grid cells compare shooters, so every cell keeps the combined
+    Best/Avg/Worst/Draw row whatever its size; a marked-up shooter still
+    gains the reload row. The single-shooter card at the same size splits."""
+    tile = _events_tile(_audit(tmp_path, [_MOVE_1, _MOVE_2, _RELOAD]))
+    grid = cell.summary_groups(
+        tile, "Me", scale=cell.summary_scale(540), cell_width=960, cell_height=540, split_rows=False
+    )
+    assert _splits_rows(grid) == [
+        [("Best", "0.22"), ("Avg", "0.26"), ("Worst", "0.32"), ("Draw", "1.10")],
+        [("Reloads", "1"), ("Reload avg", "1.42"), ("Overhang", "+0.31")],
+    ]
+    single = cell.summary_groups(tile, "Me", scale=cell.summary_scale(540), cell_width=960, cell_height=540)
+    assert _splits_rows(single)[0][0] == (None, "Static")
+
+
+def test_the_grid_hold_still_declares_no_static_or_moving_row(tmp_path: Path) -> None:
+    from splitsmith.compare import overlay_summary as grid
+    from splitsmith.compare.overlay_sprites import SpriteGeometry, TilePlacement
+
+    fake = _FakeRasterizer()
+    tile = _events_tile(_audit(tmp_path, [_MOVE_1, _MOVE_2, _RELOAD]))
+    grid.build_hold_still(
+        [TilePlacement(label="Me", row=0, col=0, present=True)],
+        {"Me": tile},
+        {},
+        SpriteGeometry(canvas_width=1920, canvas_height=1080, rows=1, cols=1),
+        theme=THEME,
+        rasterizer=fake,
+    )
+    (html,) = fake.calls
+    assert ">Static<" not in html and ">Moving<" not in html
+    assert ">Reloads<" in html and ">+0.31<" in html
+
+
+@pytest.mark.parametrize(("width", "height"), [(1080, 1920), (720, 1280), (1080, 1081)])
+def test_a_narrow_card_keeps_one_split_row_and_the_reload_row_on_its_own(
+    tmp_path: Path, width: int, height: int
+) -> None:
+    """A portrait card has too little width for a fourth column of figures
+    beside a row label: the Draw would clip beside the reload count and
+    read as one number. It keeps the one-row layout, the reload row on its
+    own line."""
+    tile = _events_tile(_audit(tmp_path, [_MOVE_1, _MOVE_2, _RELOAD]))
+    groups = cell.summary_groups(
+        tile, "Me", scale=cell.summary_scale(height), cell_width=width, cell_height=height
+    )
+    assert _splits_rows(groups) == [
+        [("Best", "0.22"), ("Avg", "0.26"), ("Worst", "0.32"), ("Draw", "1.10")],
+        [("Reloads", "1"), ("Reload avg", "1.42"), ("Overhang", "+0.31")],
+    ]
+
+
+def test_a_square_card_splits(tmp_path: Path) -> None:
+    tile = _events_tile(_audit(tmp_path, [_MOVE_1]))
+    groups = cell.summary_groups(
+        tile, "Me", scale=cell.summary_scale(1080), cell_width=1080, cell_height=1080
+    )
+    assert _splits_rows(groups)[0][0] == (None, "Static")
 
 
 def test_an_unclassified_stage_partitions_the_threshold_fallback(tmp_path: Path) -> None:

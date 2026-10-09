@@ -327,7 +327,7 @@ def main() -> int:
     )
     if args.summary_hold > 0:
         from splitsmith.match_project import StageScorecard
-        from splitsmith.stage_summary_data import TileStageData, load_stage_shots
+        from splitsmith.stage_summary_data import TileStageData, load_stage_reloads, load_stage_shots
 
         summaries = {}
         for index in range(len(stages)):
@@ -338,6 +338,7 @@ def main() -> int:
                     shots=load_stage_shots(work / f"stage{index + 1}.json"),
                     stage_time_seconds=4.5,
                     scorecard=StageScorecard(hit_factor=12.0, alphas=6, charlies=1, deltas=1, misses=0),
+                    reloads=load_stage_reloads(work / f"stage{index + 1}.json"),
                 ),
                 label="M. Axell",
                 duration_seconds=args.summary_hold,

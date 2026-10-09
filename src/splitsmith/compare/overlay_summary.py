@@ -369,8 +369,15 @@ def _summary_cells(
             cells.append((placement, ()))
             continue
         tile = data.get(placement.label)
+        # ``split_rows=False``: grid cells are compared side by side, so
+        # every one keeps the combined split row (spec 2026-10-08, part 2).
         groups = _cell_groups(
-            tile, placement.label, scale=scale, cell_width=cell_width, cell_height=cell_height
+            tile,
+            placement.label,
+            scale=scale,
+            cell_width=cell_width,
+            cell_height=cell_height,
+            split_rows=False,
         )
         cells.append((placement, groups))
     return cells

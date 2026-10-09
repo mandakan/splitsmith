@@ -227,10 +227,21 @@ _SPLIT_COLUMNS = 4
 #: the caption size, ``cell_h / 20``) only allows that from about 420 px;
 #: below it the fit drops the Scoring band's figures to make room, which
 #: breaks the two bands' equal weight. Measured with real Chromium on a
-#: full scorecard (2026-10-09); 480 leaves a margin. A 2x2 grid at 1080p
-#: (540 px cells) and every single-shooter canvas from 540p up qualify; a
-#: 3x3 grid at 1080p (360 px) keeps one Best / Avg / Worst / Draw row.
+#: full scorecard (2026-10-09); 480 leaves a margin. Every landscape
+#: single-shooter canvas from 540p up qualifies. (Grid cells never split:
+#: the grid hold passes ``split_rows=False``.)
 _SPLIT_ROWS_MIN_CELL_HEIGHT = 480
+
+
+def _fits_split_rows(cell_width: int, cell_height: int) -> bool:
+    """Whether a single-shooter card has room for Static and Moving rows:
+    tall enough (:data:`_SPLIT_ROWS_MIN_CELL_HEIGHT`) and at least as wide
+    as tall. A portrait card's four columns are already too narrow for a
+    figure each (the plain row clips there too); with the Draw beside the
+    reload count a clipped ``1.1`` next to ``1`` reads as ``1.11``, a
+    plausible wrong figure, so a narrow card keeps one row and the reload
+    row on its own line."""
+    return cell_height >= _SPLIT_ROWS_MIN_CELL_HEIGHT and cell_width >= cell_height
 
 
 def _split_stat_elements(splits: list[float]) -> list[Element]:
@@ -285,6 +296,7 @@ def summary_groups(
     scale: CellScale,
     cell_width: int,
     cell_height: int,
+    split_rows: bool = True,
 ) -> tuple[Group, ...]:
     """What one cell says, as anchored groups rather than an ordered list.
 
@@ -314,10 +326,17 @@ def summary_groups(
 
     Confirmed stage events (spec 2026-10-08, part 2) add to the Splits
     band only: Static and Moving rows in place of the one Best/Avg/Worst
-    row when both kinds of split exist and the cell is tall enough, and a
+    row when both kinds of split exist, ``split_rows`` is on and the cell
+    is tall and wide enough (:func:`_fits_split_rows`), and a
     Reloads / Reload avg / Overhang row when the stage has a confirmed
     reload. A stage without confirmed regions declares exactly the groups
     it did before (pinned in ``tests/test_overlay_summary_cell.py``).
+
+    ``split_rows=False`` is the compare grid's hold: its cells sit side by
+    side to be compared, so every one keeps the combined Best/Avg/Worst
+    row (a static-only figure beside a neighbour's combined one is not a
+    comparison) and is not shrunk by two extra rows its neighbours lack.
+    The reload row still appears; it is that shooter's own fact.
     """
     scorecard = tile.scorecard if tile is not None else None
     # Narrowed to a real ``StageScorecard`` (not just a bool) so the reads
@@ -429,7 +448,7 @@ def summary_groups(
     # Stage events (spec 2026-10-08, part 2): when the selection holds both
     # static and moving splits (``TileShot.moving``, confirmed movement
     # regions only) and the cell is tall enough
-    # (:data:`_SPLIT_ROWS_MIN_CELL_HEIGHT`) the Best/Avg/Worst row becomes a
+    # (:func:`_fits_split_rows`) the Best/Avg/Worst row becomes a
     # Static and a Moving row, and the Draw moves down to the last row;
     # confirmed reloads add Reloads / Reload avg / Overhang to that last row
     # (their own row under Best/Avg/Worst/Draw otherwise). Every row then
@@ -441,7 +460,7 @@ def summary_groups(
         static = [shot.split for shot in selected if not shot.moving]
         moving = [shot.split for shot in selected if shot.moving]
         draw = Element(role=Role.HEADLINE, text=f"{tile.shots[0].split:.2f}", caption="Draw")
-        if static and moving and cell_height >= _SPLIT_ROWS_MIN_CELL_HEIGHT:
+        if static and moving and split_rows and _fits_split_rows(cell_width, cell_height):
             rows.append([Element(role=Role.LABEL, text="Static"), *_split_stat_elements(static)])
             # No captions: the Moving figures sit under the Static row's.
             rows.append(
