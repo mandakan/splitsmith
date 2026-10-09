@@ -2,7 +2,8 @@
  * The lane editor's one-line save notice: a region edit that did not reach
  * the server says so here instead of vanishing or replacing the page. A
  * conflict's discard is muted (nothing to do, the stage was reloaded); any
- * other failure is the destructive text with a Retry.
+ * other failure is the destructive text with a Retry, and the server's own
+ * message sits in the line's tooltip for diagnosis, not in the copy.
  */
 import { X } from "lucide-react";
 
@@ -11,10 +12,13 @@ import type { SaveIssue } from "@/lib/useStageEvents";
 
 export function SaveNotice({
   issue,
+  busy,
   onRetry,
   onDismiss,
 }: {
   issue: SaveIssue;
+  /** A region edit is outstanding: Retry would do nothing until it settles. */
+  busy: boolean;
   onRetry: () => void;
   onDismiss: () => void;
 }) {
@@ -25,13 +29,22 @@ export function SaveNotice({
       data-testid="region-save-notice"
       className="flex min-h-9 items-center gap-2 px-1 text-sm"
     >
-      <p className={failed ? "min-w-0 flex-1 truncate text-destructive" : "min-w-0 flex-1 truncate text-muted"}>
+      <p
+        title={failed ? issue.message : undefined}
+        className={failed ? "min-w-0 flex-1 truncate text-destructive" : "min-w-0 flex-1 truncate text-muted"}
+      >
         {failed
-          ? `Your last region change was not saved: ${issue.message}`
+          ? "Your last region change was not saved."
           : "Your last region change was not saved. The stage changed elsewhere and was reloaded."}
       </p>
       {failed ? (
-        <Button type="button" size="sm" onClick={onRetry}>
+        <Button
+          type="button"
+          size="sm"
+          onClick={onRetry}
+          disabled={busy}
+          title={busy ? "Wait for the current region change to save" : undefined}
+        >
           Retry
         </Button>
       ) : null}

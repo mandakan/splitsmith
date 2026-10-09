@@ -783,6 +783,7 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
     issue: saveIssue,
     retry: retrySave,
     dismiss: dismissSaveIssue,
+    busy: regionSaveBusy,
   } = useStageEvents(slug, stage, applyCoach);
   const isMobile = useIsMobile();
 
@@ -1132,7 +1133,7 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
               ) : undefined
             }
           />
-          {saveIssue ? <SaveNotice issue={saveIssue} onRetry={retrySave} onDismiss={dismissSaveIssue} /> : null}
+          {saveIssue ? <SaveNotice issue={saveIssue} busy={regionSaveBusy} onRetry={retrySave} onDismiss={dismissSaveIssue} /> : null}
           {eventsReadOnly ? <EventList events={events} shots={coach.shots} /> : null}
 
           {selectedEvent ? (

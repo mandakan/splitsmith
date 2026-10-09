@@ -25,7 +25,8 @@
  * response or a reload, and both clear it.
  *
  * The list catches up with the server's when nothing is outstanding any
- * more: after a PUT's response, a 409's decision or a non-409 failure, on a
+ * more: after a PUT's response, a 409's decision, a non-409 failure or a
+ * 409 whose reload failed, on a
  * cancelled drag (Esc, pointercancel), and on a release that overlaps or was
  * drawn on discarded regions. Catching up first adopts a withheld response
  * -- its payload again, its revision and its regions; nothing local is
@@ -86,6 +87,8 @@ export interface StageEvents {
   retry: () => void;
   /** Hide the issue (and give up a failed save's list). */
   dismiss: () => void;
+  /** A region edit is outstanding (a drag, the debounce, a PUT in flight): ``retry`` would do nothing. */
+  busy: boolean;
 }
 
 /** Same regions in any order: a reload is compared with the stored list by content. */
@@ -147,16 +150,25 @@ export function useStageEvents(
   onDiscardRef.current = onDiscard;
   const putRef = useRef<(next: StageEvent[]) => void>(() => {});
 
-  const settle = useCallback((seq: number) => {
-    settledRef.current = Math.max(settledRef.current, seq);
-  }, []);
-
   // A local edit is under the pointer, in the debounce, or in flight (a PUT
   // or its 409's reload). An owed re-send needs no clause: it exists only
   // while the drag is live.
   const outstanding = useCallback(
     () => liveRef.current || pendingRef.current !== null || settledRef.current < seqRef.current,
     [],
+  );
+  // ``outstanding`` as render state, for the notice's Retry (a no-op while
+  // true). Re-read wherever one of its refs moves: a commit or drag frame,
+  // a cancel, the debounce firing, a PUT queued, settled or dropped.
+  const [busy, setBusy] = useState(false);
+  const syncBusy = useCallback(() => setBusy(outstanding()), [outstanding]);
+
+  const settle = useCallback(
+    (seq: number) => {
+      settledRef.current = Math.max(settledRef.current, seq);
+      syncBusy();
+    },
+    [syncBusy],
   );
 
   // The local list catches up with the server's once no local edit is
@@ -242,7 +254,8 @@ export function useStageEvents(
     if (timerRef.current !== null) window.clearTimeout(timerRef.current);
     timerRef.current = null;
     pendingRef.current = null;
-  }, []);
+    syncBusy();
+  }, [syncBusy]);
 
   // A 409 on PUT ``seq``. Runs inside the PUT chain, so no other PUT is in flight.
   const conflict = useCallback(
@@ -258,8 +271,14 @@ export function useStageEvents(
       try {
         fresh = await api.getStageCoach(slug, stage);
       } catch (e2) {
+        // The newest local list, read before the catch-up resets it.
+        const unsaved = goodRef.current;
         settle(seq);
-        failed(goodRef.current, base, e2);
+        // The edit is not saved, so the screen must not show it as saved:
+        // revert as a non-409 failure does (a no-op while a commit made
+        // during the reload is still outstanding). ``retry`` puts it back.
+        catchUp();
+        failed(unsaved, base, e2);
         return;
       }
       // The reload is the newest state there is: it supersedes anything withheld.
@@ -287,12 +306,13 @@ export function useStageEvents(
       adopt(fresh);
       discarded();
     },
-    [adopt, discarded, failed, settle, slug, stage, stopQueued],
+    [adopt, catchUp, discarded, failed, settle, slug, stage, stopQueued],
   );
 
   const put = useCallback(
     (next: StageEvent[]) => {
       const seq = ++seqRef.current;
+      syncBusy();
       chainRef.current = chainRef.current.then(async () => {
         if (seq <= droppedThroughRef.current) {
           settle(seq);
@@ -320,11 +340,11 @@ export function useStageEvents(
         }
       });
     },
-    [adopt, catchUp, conflict, failed, settle, slug, stage],
+    [adopt, catchUp, conflict, failed, settle, slug, stage, syncBusy],
   );
   putRef.current = put;
 
-  const change = useCallback(
+  const changeInner = useCallback(
     (next: StageEvent[], commit: boolean) => {
       if (!commit) {
         liveRef.current = true;
@@ -362,6 +382,13 @@ export function useStageEvents(
     },
     [catchUp, put],
   );
+  const change = useCallback(
+    (next: StageEvent[], commit: boolean) => {
+      changeInner(next, commit);
+      syncBusy();
+    },
+    [changeInner, syncBusy],
+  );
 
   const cancel = useCallback(() => {
     if (!liveRef.current) return;
@@ -374,7 +401,8 @@ export function useStageEvents(
     // A response that landed during the drag, or a discarding reload: its
     // regions are the restored list the editor just emitted, as stored.
     catchUp();
-  }, [catchUp, put]);
+    syncBusy();
+  }, [catchUp, put, syncBusy]);
 
   const retry = useCallback(() => {
     const f = failedRef.current;
@@ -409,5 +437,5 @@ export function useStageEvents(
     [],
   );
 
-  return { events, selectedId, select: setSelectedId, apply, change, cancel, issue, retry, dismiss };
+  return { events, selectedId, select: setSelectedId, apply, change, cancel, issue, retry, dismiss, busy };
 }

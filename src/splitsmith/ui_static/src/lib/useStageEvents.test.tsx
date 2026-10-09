@@ -911,6 +911,37 @@ describe("useStageEvents: a save problem is an issue the page shows, with a retr
     expect(onDiscard).not.toHaveBeenCalled();
   });
 
+  it("a 409 whose reload fails reverts the list to the server's, and retry puts the edit back", async () => {
+    const { result } = setupIssue();
+    vi.mocked(api.putStageEvents).mockRejectedValueOnce(conflict()).mockImplementationOnce(() => new Promise(() => {}));
+    vi.mocked(api.getStageCoach).mockRejectedValueOnce(new ApiError(503, "Service Unavailable", {}));
+    act(() => result.current.change([ev("evt-1", 1.1, 2)], true));
+    await settle();
+    // Not saved, so not shown as saved.
+    expect(result.current.events).toEqual([ev("evt-1", 1, 2)]);
+    act(() => result.current.retry());
+    expect(result.current.events).toEqual([ev("evt-1", 1.1, 2)]);
+  });
+
+  it("busy follows an outstanding edit: a drag, the debounce, the PUT in flight", async () => {
+    const { result } = setupIssue();
+    let finish: (c: CoachStageResponse) => void = () => {};
+    vi.mocked(api.putStageEvents).mockImplementationOnce(() => new Promise((r) => { finish = r; }));
+    expect(result.current.busy).toBe(false);
+    act(() => result.current.change([ev("evt-1", 1.05, 2)], false));
+    expect(result.current.busy).toBe(true);
+    act(() => result.current.change([ev("evt-1", 1, 2)], false));
+    act(() => result.current.cancel());
+    expect(result.current.busy).toBe(false);
+    act(() => result.current.change([ev("evt-1", 1.1, 2)], true));
+    expect(result.current.busy).toBe(true);
+    await settle();
+    expect(api.putStageEvents).toHaveBeenCalledTimes(1);
+    expect(result.current.busy).toBe(true);
+    await act(async () => { finish(coach([ev("evt-1", 1.1, 2)], "v2")); });
+    expect(result.current.busy).toBe(false);
+  });
+
   it("retry after another writer's regions arrived discards instead of overwriting them", async () => {
     const { result, onDiscard } = setupIssue();
     vi.mocked(api.putStageEvents).mockRejectedValueOnce(boom());
