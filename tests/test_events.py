@@ -13,6 +13,7 @@ from splitsmith.config import Config, DivisionCapacityConfig, StageEvent
 from splitsmith.events import (
     capacity_config,
     capacity_for,
+    confirmed,
     events_from_doc,
     next_event_id,
     reload_figures,
@@ -254,3 +255,16 @@ def test_seed_doc_runs_once_and_only_with_shots() -> None:
     doc["events"] = []  # the user deleted the proposal
     assert seed_doc(doc, hint_min_s=2.5, capacity=15) is False
     assert doc["events"] == []
+
+
+def test_confirmed_keeps_manual_regions_in_order_and_drops_proposals() -> None:
+    events = _events(
+        [
+            {"id": "evt-1", "kind": "reload", "start": 1.0, "end": 2.0, "source": "auto"},
+            {"id": "evt-2", "kind": "movement", "start": 3.0, "end": 4.0, "source": "manual"},
+            {"id": "evt-3", "kind": "reload", "start": 5.0, "end": 6.0, "source": "auto"},
+            {"id": "evt-4", "kind": "reload", "start": 0.5, "end": 0.8, "source": "manual"},
+        ]
+    )
+    assert [e.id for e in confirmed(events)] == ["evt-2", "evt-4"]
+    assert confirmed([]) == []

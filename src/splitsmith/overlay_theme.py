@@ -50,6 +50,12 @@ THEME_NAMES: tuple[str, ...] = ("splitsmith", "clean")
 
 RGB = tuple[int, int, int]
 
+#: The two event colours a Look may set and need not (spec 2026-10-08,
+#: part 2): the Coach budget's amber and cyan. Not in
+#: ``looks.REQUIRED_COLORS``, so every Look written before them loads.
+DEFAULT_RELOAD: RGB = (251, 191, 36)
+DEFAULT_MOVEMENT: RGB = (6, 182, 212)
+
 
 class OverlayThemeError(RuntimeError):
     """Raised when the design-system JSON is missing or malformed."""
@@ -120,6 +126,11 @@ class OverlayTheme:
     #: before a Look could choose.
     display_font: str = "antonio"
     mono_font: str = "jetbrains-mono"
+    #: A confirmed reload's chip and bar band (``look.json`` ``reload``,
+    #: optional).
+    reload: RGB = DEFAULT_RELOAD
+    #: A confirmed movement's bar band (``look.json`` ``movement``, optional).
+    movement: RGB = DEFAULT_MOVEMENT
 
     @property
     def shadow(self) -> RGB:
@@ -150,6 +161,8 @@ def theme_for(look: Look) -> OverlayTheme:
         subtle=c["subtle"],
         display_font=faces["display"],
         mono_font=faces["mono"],
+        reload=c.get("reload", DEFAULT_RELOAD),
+        movement=c.get("movement", DEFAULT_MOVEMENT),
     )
 
 

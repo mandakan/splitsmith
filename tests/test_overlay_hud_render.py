@@ -26,19 +26,17 @@ def _meta(duration: float = 2.0) -> VideoMetadata:
     return VideoMetadata(width=W, height=H, duration_seconds=duration, frame_rate_num=10, frame_rate_den=1)
 
 
-def _audit(tmp_path: Path) -> Path:
+def _audit(tmp_path: Path, events: Any = None) -> Path:
     audit = tmp_path / "stage1.json"
-    audit.write_text(
-        json.dumps(
-            {
-                "shots": [
-                    {"shot_number": i + 1, "candidate_number": i + 1, "ms_after_beep": ms}
-                    for i, ms in enumerate([300, 550, 800])
-                ]
-            }
-        ),
-        encoding="utf-8",
-    )
+    doc: dict[str, Any] = {
+        "shots": [
+            {"shot_number": i + 1, "candidate_number": i + 1, "ms_after_beep": ms}
+            for i, ms in enumerate([300, 550, 800])
+        ]
+    }
+    if events is not None:
+        doc["events"] = events
+    audit.write_text(json.dumps(doc), encoding="utf-8")
     return audit
 
 
@@ -126,11 +124,11 @@ class _Encoder:
         monkeypatch.setattr(overlay_render.shutil, "which", lambda _b: sys.executable)
 
 
-def _render(tmp_path: Path, rasterizer: _FakeRasterizer, **kwargs: Any) -> Path:
+def _render(tmp_path: Path, rasterizer: _FakeRasterizer, *, events: Any = None, **kwargs: Any) -> Path:
     kwargs.setdefault("probe", _meta())
     kwargs.setdefault("beep_offset_seconds", 1.0)
     return overlay_render.render_overlay(
-        audit_path=_audit(tmp_path),
+        audit_path=_audit(tmp_path, events),
         trimmed_video_path=tmp_path / "trim.mp4",
         output_path=tmp_path / "overlay.mov",
         codec="prores-4444",
@@ -172,8 +170,52 @@ def test_the_options_and_position_reach_the_template(tmp_path: Path, monkeypatch
         "speed_colors": False,
         "class_labels": False,
         "landing": False,
+        "reload_chip": False,
+        "stage_bar": False,
         "position": "top-right",
     }
+
+
+_MOVEMENT = {"id": "evt-1", "kind": "movement", "start": 0.2, "end": 0.6, "source": "manual"}
+_PROPOSAL = {"id": "evt-2", "kind": "reload", "start": 0.6, "end": 0.75, "source": "auto"}
+
+
+def test_confirmed_regions_from_the_audit_reach_the_template(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _Encoder(monkeypatch)
+    fake = _FakeRasterizer()
+    _render(tmp_path, fake, events=[_MOVEMENT, _PROPOSAL], variant="plate")
+    stage = fake.timelines[0]["context"].data["stage"]
+    assert stage["events"] == [{"kind": "movement", "start": 1.2, "end": 1.6}]
+    assert stage["reloads"] == [], "an auto proposal never renders"
+    assert [s["moving"] for s in stage["shots"]] == [True, True, False]
+
+
+def test_a_corrupt_events_list_renders_without_regions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _Encoder(monkeypatch)
+    fake = _FakeRasterizer()
+    inverted = {"id": "evt-1", "kind": "reload", "start": 0.6, "end": 0.2, "source": "manual"}
+    _render(tmp_path, fake, events=[inverted], variant="plate")
+    (timeline,) = fake.timelines
+    stage = timeline["context"].data["stage"]
+    assert stage["events"] == [] and stage["reloads"] == [] and stage["rounds"] == 3
+
+
+def test_confirming_a_region_misses_the_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The HUD key hashes the whole context, so a confirmed region reaches
+    it with no key change of its own; a proposal does not move it."""
+    encoder = _Encoder(monkeypatch)
+    cache = SegmentCache(root=tmp_path / "cache", max_bytes=10**9)
+    _render(tmp_path, _FakeRasterizer(), events=[_PROPOSAL], variant="plate", segment_cache=cache)
+    proposal_only = _FakeRasterizer()
+    _render(tmp_path, proposal_only, variant="plate", segment_cache=cache)
+    assert proposal_only.rendered == 0, "a proposal is invisible, so the key is unchanged"
+    confirmed = _FakeRasterizer()
+    _render(tmp_path, confirmed, events=[_MOVEMENT], variant="plate", segment_cache=cache)
+    assert confirmed.rendered > 0 and len(encoder.calls) == 2
 
 
 def test_a_tall_output_renders_a_1080_page_and_scales_in_ffmpeg(
@@ -473,3 +515,29 @@ def test_every_shipped_style_is_still_outside_its_live_span(variant: str, landin
     assert settled and settled[0] >= 0
     assert before == at_beep, f"{variant} moves before the beep"
     assert settled_frame == later, f"{variant} still moves after settle() (landing={landing})"
+
+
+def test_the_hud_digest_moves_when_a_confirmed_region_is_added() -> None:
+    from splitsmith.config import StageEvent
+    from splitsmith.look_template import template_digest
+    from splitsmith.overlay_hud import hud_options_data, hud_stage_data
+    from splitsmith.overlay_hud_render import hud_context
+    from splitsmith.overlay_theme import load_theme
+    from splitsmith.stage_summary_data import TileShot
+
+    shots = [TileShot(time_from_beep=t, split=t, interval_class=None) for t in (0.3, 0.55, 0.8)]
+    template = overlay_render.overlay_template_for(overlay_render.load_look("splitsmith"), "plate")
+
+    def digest(events: list[StageEvent]) -> str:
+        ctx = hud_context(
+            stage=hud_stage_data(shots, beep_in_clip=1.0, events=events),
+            options=hud_options_data(HudOptions(), "bottom-left"),
+            theme=load_theme("splitsmith"),
+            width=W,
+            height=H,
+            fps=10.0,
+        )
+        return template_digest(template, ctx, fps=10.0, engine_version="x")
+
+    region = StageEvent.model_validate(_MOVEMENT)
+    assert digest([]) != digest([region])

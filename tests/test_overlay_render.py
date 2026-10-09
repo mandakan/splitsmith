@@ -1264,6 +1264,8 @@ def test_overlay_cli_passes_the_hud_options_through(tmp_path: Path, monkeypatch:
         "speed_colors": False,
         "class_labels": True,
         "landing": False,
+        "reload_chip": False,
+        "stage_bar": False,
         "position": "top-right",
     }
     assert "fell back to Classic" in result.output

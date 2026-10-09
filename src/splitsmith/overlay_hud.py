@@ -25,6 +25,8 @@ from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from .config import StageEvent
+from .events import confirmed, reload_figures, shot_is_moving
 from .looks import DEFAULT_VARIANT, LOOK_NAME_RE
 from .stage_summary_data import TileShot
 
@@ -74,6 +76,12 @@ class HudOptions(BaseModel):
     speed_colors: bool = True
     class_labels: bool = True
     landing: bool = True
+    #: Draw a chip counting a confirmed reload's time (spec 2026-10-08,
+    #: part 2). Off by default; a stage without confirmed regions draws
+    #: exactly as before whatever these say.
+    reload_chip: bool = False
+    #: Draw a thin stage bar with the movement and reload bands.
+    stage_bar: bool = False
     #: ``None`` is the variant's own default (the first position it declares).
     position: HudPosition | None = None
 
@@ -89,6 +97,8 @@ class OverlayStyleFields(BaseModel):
     overlay_speed_colors: bool = True
     overlay_class_labels: bool = True
     overlay_landing: bool = True
+    overlay_reload_chip: bool = False
+    overlay_stage_bar: bool = False
     overlay_position: HudPosition | None = None
 
     @field_validator("overlay_variant")
@@ -103,6 +113,8 @@ class OverlayStyleFields(BaseModel):
             speed_colors=self.overlay_speed_colors,
             class_labels=self.overlay_class_labels,
             landing=self.overlay_landing,
+            reload_chip=self.overlay_reload_chip,
+            stage_bar=self.overlay_stage_bar,
             position=self.overlay_position,
         )
 
@@ -160,27 +172,56 @@ def speed_tiers(shots: Sequence[TileShot]) -> list[SpeedTier | None]:
     return tiers
 
 
-def hud_stage_data(shots: Sequence[TileShot], *, beep_in_clip: float) -> dict[str, Any]:
+def _clip(beep_in_clip: float, seconds_from_beep: float) -> float:
+    return round(beep_in_clip + max(0.0, seconds_from_beep), 6)
+
+
+def hud_stage_data(
+    shots: Sequence[TileShot], *, beep_in_clip: float, events: Sequence[StageEvent] = ()
+) -> dict[str, Any]:
     """``data.stage``: the beep and every shot in clip seconds, each with
-    its split, class, label and tier. A shot the audit places before the
-    beep is drawn at the beep: the HUD is static before it (the frame plan
-    holds one frame there), as Classic clamps the same case. Numbers are
-    rounded to the microsecond so float noise never moves a cache key."""
+    its split, class, label, tier and whether it was fired moving. A shot
+    the audit places before the beep is drawn at the beep: the HUD is
+    static before it (the frame plan holds one frame there), as Classic
+    clamps the same case. Numbers are rounded to the microsecond so float
+    noise never moves a cache key.
+
+    ``events`` and ``reloads`` come from confirmed regions only
+    (``events.confirmed``; a proposal is dropped here as well, so no caller
+    can leak one), in clip seconds. A reload's duration and overhang are
+    ``events.reload_figures``', so a template never re-derives one. Both
+    keys are always present, empty without confirmed regions."""
+    regions = confirmed(events)
+    by_id = {e.id: e for e in regions}
     tiers = speed_tiers(shots)
     return {
         "beep": round(beep_in_clip, 6),
         "shots": [
             {
-                "t": round(beep_in_clip + max(0.0, shot.time_from_beep), 6),
+                "t": _clip(beep_in_clip, shot.time_from_beep),
                 "split": round(shot.split, 6),
                 "cls": shot.interval_class,
                 "label": CLASS_LABELS.get(shot.interval_class) if shot.interval_class else None,
                 "tier": tier,
+                "moving": shot_is_moving(shot.time_from_beep, regions),
             }
             for shot, tier in zip(shots, tiers, strict=True)
         ],
         "stage_time": round(shots[-1].time_from_beep, 6) if shots else 0.0,
         "rounds": len(shots),
+        "events": [
+            {"kind": e.kind, "start": _clip(beep_in_clip, e.start), "end": _clip(beep_in_clip, e.end)}
+            for e in regions
+        ],
+        "reloads": [
+            {
+                "start": _clip(beep_in_clip, by_id[fig.event_id].start),
+                "end": _clip(beep_in_clip, by_id[fig.event_id].end),
+                "duration": round(fig.duration, 6),
+                "overhang": None if fig.overhang is None else round(fig.overhang, 6),
+            }
+            for fig in reload_figures(regions)
+        ],
     }
 
 
@@ -212,6 +253,8 @@ def hud_options_data(options: HudOptions, position: HudPosition | None) -> dict[
         "speed_colors": options.speed_colors,
         "class_labels": options.class_labels,
         "landing": options.landing,
+        "reload_chip": options.reload_chip,
+        "stage_bar": options.stage_bar,
         "position": position,
     }
 

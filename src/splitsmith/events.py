@@ -81,6 +81,14 @@ def events_from_doc(doc: dict[str, Any]) -> list[StageEvent]:
     return [StageEvent.model_validate(e) for e in raw]
 
 
+def confirmed(events: Sequence[StageEvent]) -> list[StageEvent]:
+    """The regions a rendered or exported output may show: the ones the
+    user confirmed (``source == "manual"``), in their stored order. An auto
+    proposal is a guess nobody looked at; the Coach page shows it, a video
+    or an export never does (spec 2026-10-08, part 2)."""
+    return [e for e in events if e.source == "manual"]
+
+
 def shot_times_from_doc(doc: dict[str, Any]) -> list[float]:
     """Kept shots' times from the beep, ascending."""
     times = [

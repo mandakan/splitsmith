@@ -62,6 +62,9 @@ def test_classic_settings_ignore_the_template_options() -> None:
     styled = overlay_settings(variant="plate", options=HudOptions(), **common)
     assert styled != plain
     assert styled != overlay_settings(variant="plate", options=HudOptions(landing=False), **common)
+    assert styled != overlay_settings(variant="plate", options=HudOptions(reload_chip=True), **common)
+    assert styled != overlay_settings(variant="plate", options=HudOptions(stage_bar=True), **common)
+    assert plain == overlay_settings(variant="default", options=HudOptions(stage_bar=True), **common)
 
 
 def test_classic_settings_equal_what_an_unrecorded_overlay_is_taken_to_be() -> None:
