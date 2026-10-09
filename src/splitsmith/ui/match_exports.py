@@ -425,6 +425,41 @@ def render_segment_cache(config: OutputConfig) -> SegmentCache | None:
     )
 
 
+def _write_thumbnail_card(comp: composition.Composition, request: MatchExportRequestData, out: Path) -> str:
+    """Write the thumbnail card (the ``thumbnail`` logo spot) to ``out``:
+    ``""`` when written, else why not, and the caller grabs the plain frame."""
+    from ..look_brand import brand_mark_json
+    from ..looks import load_look
+    from ..overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+    from ..thumbnail_card import ThumbnailData, ThumbnailError, grab_frame, render_thumbnail_card
+
+    source = youtube_sidecar.action_frame_source(comp)
+    if source is None:
+        return "no stage to take a frame from"
+    look = load_look(request.overlay_theme)
+    title = comp.title_page.text if comp.title_page is not None else request.project_name
+    label = request.shooter_label or (comp.shooters[0].label if comp.shooters else None)
+    data = ThumbnailData(
+        title=title,
+        lines=(label,) if label else (),
+        shooters=comp.shooters,
+        brand=brand_mark_json(look, request.account_brand),
+        event_logo=request.event_logo,
+    )
+    frame = out.with_name(out.stem + "-frame.png")
+    try:
+        grab_frame(source[0], source[1], frame, ffmpeg_binary=runtime().ffmpeg_binary)
+        with ChromiumRasterizer() as rasterizer:
+            render_thumbnail_card(frame, out, data, look=look, rasterizer=rasterizer)
+    except RasterizerUnavailableError:
+        return "no browser to draw the card"
+    except (OSError, subprocess.CalledProcessError, ThumbnailError) as exc:
+        return str(exc).splitlines()[0] if str(exc) else type(exc).__name__
+    finally:
+        frame.unlink(missing_ok=True)
+    return ""
+
+
 def export_match(
     *,
     stages: list[MatchStageInput],
@@ -852,12 +887,20 @@ def export_match(
         if request.output_format == "mp4":
             candidate = output_path.with_name(output_path.stem + "-thumbnail.jpg")
             try:
-                youtube_sidecar.write_thumbnail(
-                    output_path,
-                    youtube_sidecar.thumbnail_time_seconds(comp),
-                    candidate,
-                    ffmpeg_binary=runtime().ffmpeg_binary,
+                card_note = (
+                    _write_thumbnail_card(comp, request, candidate)
+                    if "thumbnail" in request.logo_spots
+                    else "off"
                 )
+                if card_note != "":
+                    if card_note != "off":
+                        anomalies.append(f"youtube thumbnail is a frame of the video: {card_note}")
+                    youtube_sidecar.write_thumbnail(
+                        output_path,
+                        youtube_sidecar.thumbnail_time_seconds(comp),
+                        candidate,
+                        ffmpeg_binary=runtime().ffmpeg_binary,
+                    )
                 thumbnail_path = candidate
             except (OSError, subprocess.CalledProcessError) as exc:
                 detail = (

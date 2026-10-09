@@ -302,6 +302,20 @@ or the match logo. The shipped cards draw the logos top right through
 `_shared/identity.js`; a lower third shows one only when a single shooter has
 one. Your template may draw them any way it likes, or not at all.
 
+## The thumbnail
+
+The `thumbnail` slot draws the YouTube thumbnail (with the Logos row's "A
+designed thumbnail", on by default). The renderer lays the template over a
+sharp 1280x720 action frame, so draw on a transparent page and darken what
+your text needs. It gets:
+
+```js
+data.thumbnail = { title: "Höstfinalen XI", lines: ["Mathias Axell"] }
+```
+
+plus `data.shooters`, `data.brand` and `data.event` as the cards get them. A
+thumbnail is seen small: keep it to a few words in big type.
+
 ## Your brand
 
 `look.json`'s `brand` is the Look's own brand: a logo (a file in the Look's

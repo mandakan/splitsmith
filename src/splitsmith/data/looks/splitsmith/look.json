@@ -102,6 +102,9 @@
       "default": "card.html",
       "rise": "card-rise.html"
     },
+    "thumbnail": {
+      "default": "thumbnail.html"
+    },
     "title_page": {
       "default": "card.html",
       "rise": "card-rise.html"

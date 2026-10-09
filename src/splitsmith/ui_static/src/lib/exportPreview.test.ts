@@ -53,7 +53,7 @@ describe("previewBody", () => {
       title_division: true,
       made_with: true,
       account_brand: true,
-      logo_spots: ["summaries", "wipe"],
+      logo_spots: ["summaries", "thumbnail", "wipe"],
       project_name: "Bromma - Final Cut",
       head_pad_seconds: 0.5,
       tail_pad_seconds: 1,

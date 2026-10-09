@@ -127,11 +127,12 @@ describe("account_brand", () => {
 
 describe("logo_spots", () => {
   it("is Polished by default, a body stored before it shipped applies Polished, and a choice round-trips", () => {
-    expect(DEFAULT_EXPORT_SETTINGS.renderOptions.logoSpots).toEqual(["summaries", "wipe"]);
+    expect(DEFAULT_EXPORT_SETTINGS.renderOptions.logoSpots).toEqual(["summaries", "thumbnail", "wipe"]);
     const legacy: Partial<ExportPresetBody> = { ...YOUTUBE };
     delete legacy.logo_spots;
     expect(applyBody(DEFAULT_EXPORT_SETTINGS, legacy as ExportPresetBody).renderOptions.logoSpots).toEqual([
       "summaries",
+      "thumbnail",
       "wipe",
     ]);
     const cards = {

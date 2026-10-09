@@ -6,14 +6,14 @@
  * the default, as on the server (``logo_spots.DEFAULT_LOGO_SPOTS``).
  */
 
-export type LogoSpot = "wipe" | "summaries";
-export const LOGO_SPOTS: readonly LogoSpot[] = ["summaries", "wipe"];
+export type LogoSpot = "wipe" | "summaries" | "thumbnail";
+export const LOGO_SPOTS: readonly LogoSpot[] = ["summaries", "thumbnail", "wipe"];
 
 export type LogoPreset = "cards" | "polished" | "custom";
 
 const PRESET_SPOTS: Record<Exclude<LogoPreset, "custom">, readonly LogoSpot[]> = {
   cards: [],
-  polished: ["summaries", "wipe"],
+  polished: ["summaries", "thumbnail", "wipe"],
 };
 
 export const DEFAULT_LOGO_SPOTS: readonly LogoSpot[] = PRESET_SPOTS.polished;
@@ -27,6 +27,10 @@ export const SPOT_COPY: Record<LogoSpot, { label: string; help: string }> = {
   summaries: {
     label: "Shooter logo on the summaries",
     help: "Small, top right of the stage summary and the match summary, where the slates put it.",
+  },
+  thumbnail: {
+    label: "A designed thumbnail",
+    help: "The YouTube thumbnail becomes a card over an action frame: the match name large, your brand and the logos.",
   },
 };
 
@@ -57,13 +61,18 @@ export function toggleSpot(spots: readonly LogoSpot[], spot: LogoSpot, on: boole
   return normalizeSpots(on ? [...rest, spot] : rest);
 }
 
+const EXTRA: Record<LogoSpot, string> = {
+  summaries: "the shooter's logo on the summaries",
+  thumbnail: "a designed thumbnail",
+  wipe: "your brand on the wipe between stages",
+};
+
 /** One line under the control: what this choice puts in the video. */
 export function logoPlanHelp(spots: readonly LogoSpot[]): string {
   const chosen = normalizeSpots(spots);
   const base = "Logos always sit on the title page, the stage slates and the closing card.";
   if (chosen.length === 0) return `${base} Nowhere else.`;
-  const extras = chosen.map((spot) =>
-    spot === "wipe" ? "your brand on the wipe between stages" : "the shooter's logo on the summaries",
-  );
-  return `${base} Also ${extras.join(" and ")}.`;
+  const extras = chosen.map((spot) => EXTRA[spot]);
+  const list = extras.length > 1 ? `${extras.slice(0, -1).join(", ")} and ${extras[extras.length - 1]}` : extras[0];
+  return `${base} Also ${list}.`;
 }

@@ -19,29 +19,29 @@ const pressed = (name: string) => screen.getByRole("button", { name }).getAttrib
 
 describe("LogoPlanField", () => {
   it("shows Polished for the default and says what it adds", () => {
-    render(<Harness start={["summaries", "wipe"]} />);
+    render(<Harness start={["summaries", "thumbnail", "wipe"]} />);
     expect(pressed("Polished")).toBe("true");
     expect(screen.queryByLabelText("Your brand on the wipe")).toBeNull();
-    expect(screen.getByText(/Also the shooter's logo on the summaries and your brand on the wipe/)).toBeInTheDocument();
+    expect(screen.getByText(/Also the shooter's logo on the summaries, a designed thumbnail and your brand on the wipe/)).toBeInTheDocument();
   });
 
   it("Cards only clears every spot", () => {
-    render(<Harness start={["summaries", "wipe"]} />);
+    render(<Harness start={["summaries", "thumbnail", "wipe"]} />);
     fireEvent.click(screen.getByRole("button", { name: "Cards only" }));
     expect(screen.getByTestId("spots")).toHaveTextContent(/^$/);
     expect(screen.getByText(/Nowhere else\./)).toBeInTheDocument();
   });
 
   it("Choose keeps the spots and opens one checkbox per spot", () => {
-    render(<Harness start={["summaries", "wipe"]} />);
+    render(<Harness start={["summaries", "thumbnail", "wipe"]} />);
     fireEvent.click(screen.getByRole("button", { name: "Choose" }));
     expect(pressed("Choose")).toBe("true");
     fireEvent.click(screen.getByLabelText("Your brand on the wipe"));
-    expect(screen.getByTestId("spots")).toHaveTextContent(/^summaries$/);
+    expect(screen.getByTestId("spots")).toHaveTextContent(/^summaries,thumbnail$/);
     // Ticking it back to the Polished set keeps Choose open.
     fireEvent.click(screen.getByLabelText("Your brand on the wipe"));
     expect(pressed("Choose")).toBe("true");
-    expect(screen.getByTestId("spots")).toHaveTextContent("summaries,wipe");
+    expect(screen.getByTestId("spots")).toHaveTextContent("summaries,thumbnail,wipe");
   });
 
   it("opens on Choose for a set no preset names", () => {

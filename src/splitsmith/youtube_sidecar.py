@@ -422,6 +422,7 @@ def _marker_caption(marker: Marker) -> str:
 __all__ = [
     "Chapter",
     "YouTubeSidecar",
+    "action_frame_source",
     "build_sidecar",
     "write_sidecar",
     "write_srt",
@@ -447,6 +448,18 @@ def thumbnail_time_seconds(composition: Composition) -> float:
     start, head_trim = _stage_spine_window(composition, 0, cursor)
     first_shot = min((m.time_seconds for m in stage.markers), default=stage.beep_offset_seconds)
     return start + max(0.0, first_shot - head_trim)
+
+
+def action_frame_source(composition: Composition) -> tuple[Path, float] | None:
+    """The first stage's own clip and the time in it of its first shot (the
+    beep, for a stage with no shot): the thumbnail card's backdrop, taken
+    from the footage rather than the render, so no overlay is burnt into it.
+    ``None`` without a stage."""
+    if not composition.stages:
+        return None
+    stage = composition.stages[0]
+    first_shot = min((m.time_seconds for m in stage.markers), default=stage.beep_offset_seconds)
+    return stage.primary.path, first_shot
 
 
 def write_thumbnail(
