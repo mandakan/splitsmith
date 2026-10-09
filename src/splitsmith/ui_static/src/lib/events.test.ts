@@ -8,6 +8,7 @@ import type { StageEvent, StageEventSummary } from "@/lib/api";
 import {
   clampToLane,
   enclosingMovement,
+  keepEvent,
   nextEventId,
   reloadFigures,
   rulerLabels,
@@ -124,6 +125,15 @@ describe("editor helpers", () => {
     expect(withKind(events, "evt-2", "activation")?.find((e) => e.id === "evt-2")).toEqual({ ...events[1], kind: "activation", source: "manual" });
     expect(withKind(events, "evt-2", "movement")).toBeNull();
     expect(withKind(events, "evt-9", "movement")).toBeNull();
+  });
+
+  it("keepEvent confirms one proposal and changes nothing else", () => {
+    const auto: StageEvent = { ...ev("evt-2", "reload", 2, 4, "auto"), note: "late grip" };
+    const events = [ev("evt-1", "movement", 1, 3), auto];
+    const next = keepEvent(events, "evt-2");
+    expect(next).toEqual([events[0], { ...auto, source: "manual" }]);
+    expect(next[0]).toBe(events[0]);
+    expect(events[1].source).toBe("auto");
   });
 
   it("timeFromX maps and clamps", () => {

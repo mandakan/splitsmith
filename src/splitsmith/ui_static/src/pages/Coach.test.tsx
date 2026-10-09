@@ -205,6 +205,23 @@ describe("stage events on the Coach page", () => {
     await waitFor(() => expect(screen.queryByTestId("event-evt-1")).toBeNull());
   });
 
+  it("Keep on a proposal PUTs the list with that region manual and every other field unchanged", async () => {
+    vi.mocked(api.getProject).mockResolvedValue({ name: "M", competitor_name: "Anna",
+      stages: [{ stage_number: 1, stage_name: "Stage One", time_seconds: 16.2 }] } as never);
+    const move: StageEvent = { id: "evt-1", kind: "movement", start: 7.6, end: 9.16, source: "manual" };
+    const auto: StageEvent = { id: "evt-2", kind: "reload", start: 8.05, end: 9.47, source: "auto", note: "late grip" };
+    vi.mocked(api.getStageCoach).mockResolvedValue(makeCoachWithEvents([makeShot(1, "c1")], [move, auto], "v1v1v1v1v1v1v1v1"));
+    vi.mocked(api.putStageEvents).mockResolvedValue(
+      makeCoachWithEvents([makeShot(1, "c1")], [move, { ...auto, source: "manual" }], "v2v2v2v2v2v2v2v2"));
+    renderCoachRoute();
+    fireEvent.click(await screen.findByTestId("event-evt-2"));
+    fireEvent.click(await screen.findByRole("button", { name: "Keep" }));
+    await waitFor(() => expect(api.putStageEvents).toHaveBeenCalledTimes(1));
+    expect(api.putStageEvents).toHaveBeenCalledWith("anna", 1, [move, { ...auto, source: "manual" }], "v1v1v1v1v1v1v1v1");
+    await waitFor(() => expect(screen.getByTestId("event-evt-2")).toHaveAttribute("data-source", "manual"));
+    expect(screen.queryByRole("button", { name: "Keep" })).toBeNull();
+  });
+
   it("a 409 on the PUT reloads the coach payload", async () => {
     vi.mocked(api.getProject).mockResolvedValue({ name: "M", competitor_name: "Anna",
       stages: [{ stage_number: 1, stage_name: "Stage One", time_seconds: 16.2 }] } as never);

@@ -253,6 +253,13 @@ export interface StageFigures {
   fastest_split: number | null;
   shot_count: number;
   split_count: number;
+  /** Region figures from confirmed regions only (spec 2026-10-08, part 2);
+   *  all null when the stage has none. `overhang_s` is null unless a
+   *  reload overlaps a movement. Optional: an older server omits them. */
+  moving_shots?: number | null;
+  reloads?: number | null;
+  reload_avg_s?: number | null;
+  overhang_s?: number | null;
 }
 
 /** A shooter's identity (#1243): accent, logo file name (content-named,

@@ -60,7 +60,7 @@ import {
   type CoachStageResponse,
   type MatchProject,
 } from "@/lib/api";
-import { withKind } from "@/lib/events";
+import { keepEvent, withKind } from "@/lib/events";
 import { useSpacePlayPause } from "@/lib/keyboard";
 import { useMatchHref } from "@/lib/matchHref";
 import { useIsMobile } from "@/lib/useIsMobile";
@@ -1134,6 +1134,7 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
                 const next = withKind(events, selectedEvent.id, kind);
                 if (next) changeEvents(next, true);
               }}
+              onKeep={() => changeEvents(keepEvent(events, selectedEvent.id), true)}
               onDelete={() => {
                 changeEvents(
                   events.filter((e) => e.id !== selectedEvent.id),
