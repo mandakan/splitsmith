@@ -226,7 +226,9 @@ async def remove_shooter_book_logo(shooter_id: int, request: Request) -> JSONRes
     _writable(store)
     current = await store.get(shooter_id)
     if current is None:
-        raise HTTPException(status_code=404, detail="no such entry")
+        # Nothing to remove is already the result: the Shooters sheet clears
+        # a look that came from a match record, which the book never held.
+        return JSONResponse(_entry_json(ShooterBookEntry(shooter_id=shooter_id, identity=ShooterIdentity())))
     entry = current.model_copy(update={"identity": current.identity.model_copy(update={"logo": None})})
     await _put_or_drop(store, entry)
     return JSONResponse(_entry_json(entry))

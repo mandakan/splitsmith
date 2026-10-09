@@ -667,7 +667,7 @@ export function MatchShell() {
           extras={
             <div className="flex flex-col gap-1">
               <div className="flex items-center gap-2 px-1 py-1">
-                <AccountMenu />
+                <AccountMenu align="left" />
                 <HostedAccountChip />
                 <AccountChip />
                 <div className="flex-1" />

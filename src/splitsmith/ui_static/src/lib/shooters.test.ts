@@ -36,6 +36,7 @@ describe("shooters", () => {
 
   it("says why a shooter without an SSI id cannot be edited", () => {
     const guest = row({ shooter_id: null, match_id: "m1", slug: "guest", match_count: 1 });
+    expect(rowNote({ ...guest, source: "none" })).toMatch(/^In Höstfinalen XI\./);
     expect(canEdit(guest)).toBe(false);
     expect(rowNote(guest)).toMatch(/^Set in Höstfinalen XI\. Link them to the scoreboard/);
     expect(rowKey(guest)).toBe("m-m1-guest");

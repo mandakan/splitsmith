@@ -74,7 +74,7 @@ describe("Shooters", () => {
     expect(screen.getByText("You")).toBeInTheDocument();
     expect(screen.getByText("3 matches")).toBeInTheDocument();
     expect(screen.getByText("1 match · no look set")).toBeInTheDocument();
-    expect(screen.getByText(/^Set in Höstfinalen XI\./)).toBeInTheDocument();
+    expect(screen.getByText(/^In Höstfinalen XI\. Link them to the scoreboard/)).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "Edit" })).toHaveLength(2);
   });
 

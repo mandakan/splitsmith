@@ -5,7 +5,7 @@
  * links here hosted, the Matches header locally. Rules live in `lib/you`.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
 import { Field, inputClass } from "@/components/ui/Field";
@@ -337,6 +337,13 @@ function YourBrand({ profile, onSaved }: { profile: AccountProfileView | null; o
 
 export function You() {
   const { mode } = useDeploymentMode();
+  // The account menu's Branding links to ``/you#brand``; a client-side
+  // navigation never does the browser's anchor scroll, so do it here.
+  const { hash } = useLocation();
+  useEffect(() => {
+    if (!hash) return;
+    document.getElementById(decodeURIComponent(hash.slice(1)))?.scrollIntoView({ block: "start" });
+  }, [hash]);
   const [me, setMe] = useState<ScoreboardIdentity | null>(null);
   const [profile, setProfile] = useState<AccountProfileView | null>(null);
   const [book, setBook] = useState<ShooterBookEntryView[]>([]);

@@ -251,8 +251,8 @@ def title_info_lines(
 ) -> tuple[str, ...]:
     """The info lines under the match name on a generated title page
     (issue #973): the match date, the shooter, the shooter's club line
-    (their identity's, #1243: the match's own record, else the shooter
-    ``book``'s, as the cards draw it), the shooter's division, then the
+    (their identity's, #1243: the shooter ``book``'s, else the match's
+    own record, as the cards draw it), the shooter's division, then the
     caller's free text. Only what the project actually carries; a blank
     line is never printed. ``division`` is the caller's to pass
     (:func:`splitsmith.division.competitor_division`, or ``None`` when the title page should

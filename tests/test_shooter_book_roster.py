@@ -72,8 +72,10 @@ def test_the_book_wins_over_the_matchs_own_look(tmp_path: Path) -> None:
     wins over an old match record."""
     own = ShooterIdentity(accent="#00ff00")
     client, _ = _seed(tmp_path, own=own)
-    assert _roster_identity(client)["accent"] != "#00ff00"
-    assert _compare_identity(client)["accent"] != "#00ff00"
+    book = _roster_identity(client)
+    assert book["accent"] != "#00ff00" and book["logo"] is not None
+    assert _compare_identity(client) == book
+    assert client.get("/api/shooters/me/identity/logo").status_code == 200
 
 
 def test_a_share_request_never_reads_the_owner_book(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

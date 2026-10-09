@@ -20,6 +20,17 @@ import { cn } from "@/lib/utils";
 const ACCENT_SWATCHES = ["#ff2d2d", "#fbbf24", "#4ade80", "#60a5fa", "#c084fc", "#f472b6"] as const;
 const HEX = /^#[0-9a-fA-F]{6}$/;
 const CLUB_MAX = 60;
+/** A logo URL already served from the book; anything else (a match's own
+ *  record, which the videos draw while the book has no entry) is copied
+ *  into the book on the first save, or saving would drop it. */
+const BOOK_LOGO = "/api/me/shooter-book/";
+
+async function copyIntoBook(shooterId: number, url: string): Promise<void> {
+  const response = await fetch(url);
+  if (!response.ok) return;
+  const blob = await response.blob();
+  await api.uploadShooterBookLogo(shooterId, new File([blob], "logo", { type: blob.type }));
+}
 
 /** The shooter the sheet edits, as the caller knows them. */
 export interface SheetShooter {
@@ -49,6 +60,10 @@ export function ShooterSheet({ open, onClose, shooter, onChanged }: ShooterSheet
   const [error, setError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
+  // Reset when the sheet opens or turns to another shooter, never because
+  // the caller re-rendered: the Footage page rebuilds ``shooter`` on every
+  // jobs poll, and keying on the object wiped what was being typed.
+  const shooterId = shooter?.shooterId ?? null;
   useEffect(() => {
     if (!open || !shooter) return;
     setAccent(shooter.accent ?? "");
@@ -56,7 +71,8 @@ export function ShooterSheet({ open, onClose, shooter, onChanged }: ShooterSheet
     setFile(null);
     setRemoveLogo(false);
     setError(null);
-  }, [open, shooter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reset per opening and per shooter only
+  }, [open, shooterId]);
 
   useEffect(() => {
     if (!file) {
@@ -87,6 +103,9 @@ export function ShooterSheet({ open, onClose, shooter, onChanged }: ShooterSheet
       });
       if (file) await api.uploadShooterBookLogo(shooter.shooterId, file);
       else if (removeLogo && shooter.logoUrl) await api.removeShooterBookLogo(shooter.shooterId);
+      else if (shooter.logoUrl && !shooter.logoUrl.startsWith(BOOK_LOGO)) {
+        await copyIntoBook(shooter.shooterId, shooter.logoUrl);
+      }
       onChanged();
       onClose();
     } catch (e) {

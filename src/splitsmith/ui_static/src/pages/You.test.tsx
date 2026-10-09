@@ -117,3 +117,17 @@ describe("You", () => {
     expect(await screen.findByRole("link", { name: /Matches/ })).toHaveAttribute("href", "/pick");
   });
 });
+
+describe("You #brand", () => {
+  it("scrolls to the brand section when opened from the account menu's Branding", async () => {
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    render(
+      <MemoryRouter initialEntries={["/you#brand"]}>
+        <You />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(scroll).toHaveBeenCalled());
+    expect((scroll.mock.contexts[0] as Element).id).toBe("brand");
+  });
+});

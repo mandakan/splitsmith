@@ -66,7 +66,9 @@ def test_shooter_book_entries_round_trip(client) -> None:
     assert client.delete(f"{BOOK}/42").status_code == 200
     assert client.get(BOOK).json() == {"entries": []}
     assert client.get(f"{BOOK}/42/logo").status_code == 404
-    assert client.delete(f"{BOOK}/42/logo").status_code == 404
+    # Removing a logo that is not there is already the result (spec 2026-10-09).
+    assert client.delete(f"{BOOK}/42/logo").status_code == 200
+    assert client.get(BOOK).json() == {"entries": []}
 
 
 def test_a_bad_book_value_is_refused(client) -> None:

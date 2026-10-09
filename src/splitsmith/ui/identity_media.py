@@ -87,7 +87,7 @@ def identity_source(project: MatchProject, book: BookSnapshot = EMPTY_BOOK) -> I
 
 def effective_identity(project: MatchProject, book: BookSnapshot = EMPTY_BOOK) -> ShooterIdentity:
     """The look :func:`identity_source` picks, as the roster shows it: the
-    match's own record, else the book's entry, else the (empty) record."""
+    book's entry, else the match's own record (possibly empty)."""
     if identity_source(project, book) == "book":
         entry = book.get(project.selected_shooter_id)
         if entry is not None:

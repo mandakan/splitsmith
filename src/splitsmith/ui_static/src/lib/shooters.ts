@@ -22,7 +22,8 @@ export function canEdit(row: ShooterRosterRow): boolean {
 /** The line under a shooter's name. */
 export function rowNote(row: ShooterRosterRow): string {
   if (row.shooter_id === null) {
-    return `Set in ${row.last_match_name}. Link them to the scoreboard to give them a look of their own.`;
+    const where = row.source === "none" ? `In ${row.last_match_name}` : `Set in ${row.last_match_name}`;
+    return `${where}. Link them to the scoreboard to give them a look of their own.`;
   }
   const matches = `${row.match_count} ${row.match_count === 1 ? "match" : "matches"}`;
   if (row.source === "none") return `${matches} · no look set`;

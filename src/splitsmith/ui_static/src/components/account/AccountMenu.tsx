@@ -23,7 +23,7 @@ interface Me {
   logo: string | null;
 }
 
-export function AccountMenu({ className }: { className?: string }) {
+export function AccountMenu({ className, align = "right" }: { className?: string; align?: "left" | "right" }) {
   const { mode, resolved } = useDeploymentMode();
   const { status } = useAuth();
   const [open, setOpen] = useState(false);
@@ -73,7 +73,7 @@ export function AccountMenu({ className }: { className?: string }) {
         <Avatar initials={me.name ? initials(me.name) : "?"} tone="you" size="sm" logo={me.logo} name={me.name ?? "You"} />
         <ChevronDown className="size-3.5" aria-hidden />
       </button>
-      <Menu open={open} onClose={close} align="right" className="min-w-44">
+      <Menu open={open} onClose={close} align={align} className="min-w-44">
         {items.map((item) => (
           <Link key={item.to} to={item.to} role="menuitem" className={menuItemClass} onClick={close}>
             {item.label}

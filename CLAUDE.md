@@ -524,9 +524,10 @@ renders exactly as before. Renderers never read a
 store: the request layer loads ``load_snapshot(state.shooter_book)`` once per
 export and passes ``book=`` to ``resolved_identity_for`` / ``grid_identities``
 (every export job, the preview, the palette route, both CLIs). Identity edits
-write the book (``scope="book"``, the default; ``"match"`` keeps an edit here;
-an empty look removes the entry); an edit to a shooter whose match sets nothing
-starts from the book's look, logo copied in; ``use-book`` is refused when the
+write the book (``scope="book"``, the default; ``"match"`` writes only this
+match's record, which the book now draws over; an empty look removes the
+entry); an edit starts from the look the videos draw (the book's, logo copied
+in, else the match's own); ``use-book`` is refused when the
 book has nothing to fall back to. The account's **brand** (``AccountProfile``,
 the shape of ``LookBrand``) is ``MatchTitle.brand``, resolved by the request
 layer like the event logo; ``look_brand.brand_json`` draws the Look's brand when
