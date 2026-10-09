@@ -749,6 +749,8 @@ the title line in Details. A slot whose seconds field is being edited
 reads NaN and must still count as on, or the input vanishes under the
 cursor (``summaryHold.read``).
 
+Both previews (the rail and the Look editor) can draw **logo placeholders**: ``logo_placeholders`` on the request fills every logo spot no logo fills (the shooter's corner, your brand, the event's centre; title, slate, lower third, closing) with a labelled dashed square from ``logo_placeholder`` (a content-named PNG under ``cache_dir/logo-placeholders``), keyed apart by ``PLACEHOLDER_REVISION``. The switch is the viewer's (``lib/logoSpots``, on by default); no export path ever asks for it.
+
 The rail's preview (spec s3) is ``POST /api/shooters/{slug}/export-preview``
 -> PNG, engine ``export_preview.render_preview``: it declares the card
 exactly as ``ui/match_exports.py`` does and composes it through the

@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "logo-spots-in-previews",
+      "date": "2026-10-09",
+      "title": "See where each logo goes",
+      "body": "The Export preview and the Look editor mark every logo spot with a dashed square until a logo is set: the shooter's, your brand and the event's. Turn it off with Show where logos go."
+    },
+    {
       "id": "look-copies-stay-current",
       "date": "2026-10-09",
       "title": "Copied Looks keep up with new card features",
