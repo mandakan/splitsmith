@@ -11,6 +11,7 @@
 import type { ExportPresetBody, GridFreeCell, OverlayCodec } from "@/lib/api";
 import { DEFAULT_CAM_OPTIONS, fromPipLayout, type CamOptions } from "@/lib/camOptions";
 import type { ExportMode } from "@/lib/exportPlan";
+import { DEFAULT_LOGO_SPOTS, normalizeSpots } from "@/lib/logoPlan";
 import { visibleTransitionKind } from "@/lib/lookGallery";
 import {
   DEFAULT_OVERLAY_STYLE,
@@ -188,6 +189,7 @@ export function settingsToBody(s: ExportSettings): ExportPresetBody {
     closing_card: s.renderOptions.closingCard,
     made_with: s.renderOptions.madeWith,
     account_brand: s.renderOptions.accountBrand,
+    logo_spots: normalizeSpots(s.renderOptions.logoSpots),
     stage_card_style: s.renderOptions.stageCardStyle,
     stage_card_seconds: finite(s.renderOptions.stageCardDurationSeconds, D.stageCardDurationSeconds),
     summary_hold_seconds: finite(s.renderOptions.summaryHoldSeconds, D.summaryHoldSeconds),
@@ -242,6 +244,7 @@ export function applyBody(s: ExportSettings, body: ExportPresetBody): ExportSett
       closingCard: body.closing_card,
       madeWith: body.made_with ?? D.madeWith,
       accountBrand: body.account_brand ?? D.accountBrand,
+      logoSpots: body.logo_spots === undefined ? [...D.logoSpots] : normalizeSpots(body.logo_spots),
       stageCardStyle: body.stage_card_style,
       stageCardDurationSeconds: finite(body.stage_card_seconds, D.stageCardDurationSeconds),
       summaryHoldSeconds: finite(body.summary_hold_seconds, D.summaryHoldSeconds),
@@ -268,7 +271,14 @@ export function applyBody(s: ExportSettings, body: ExportPresetBody): ExportSett
  *  anything the SPA does not know are ignored on both sides. */
 export function bodiesEqual(a: ExportPresetBody, b: ExportPresetBody): boolean {
   const keys = Object.keys(settingsToBody(DEFAULT_EXPORT_SETTINGS)) as (keyof ExportPresetBody)[];
-  return keys.every((k) => a[k] === b[k]);
+  return keys.every((k) => comparable(k, a[k]) === comparable(k, b[k]));
+}
+
+/** A field as the equality reads it: the logo spots are a list, and a body
+ *  stored before they shipped reads as the default it applies as. */
+function comparable(key: keyof ExportPresetBody, value: unknown): unknown {
+  if (key !== "logo_spots") return value;
+  return normalizeSpots((value as unknown[] | undefined) ?? DEFAULT_LOGO_SPOTS).join(",");
 }
 
 export function isDirty(s: ExportSettings, body: ExportPresetBody): boolean {

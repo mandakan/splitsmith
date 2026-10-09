@@ -90,6 +90,14 @@ def brand_json(
     which leaves the context as it always was."""
     if slot not in BRAND_SLOTS:
         return None
+    return brand_mark_json(look, fallback)
+
+
+def brand_mark_json(look: Look | None, fallback: BrandMark | None = None) -> dict[str, str | None] | None:
+    """The brand as a template draws it, whatever the slot: the Look's when
+    it has one, else ``fallback`` (the account's), as a whole; ``None`` when
+    neither has a logo or a line. :func:`brand_json` gates it to the cards;
+    the sting asks for it directly when the ``wipe`` logo spot is on."""
     brand = look.manifest.brand if look is not None else None
     if brand is not None and (brand.logo or brand.line):
         path = brand_path(look) if look is not None else None
@@ -104,4 +112,12 @@ def brand_json(
     return {"logo": logo.resolve().as_uri() if logo is not None else None, "line": fallback.line or None}
 
 
-__all__ = ["BRAND_SLOTS", "BrandError", "brand_json", "brand_path", "check_brand_logo", "save_brand_logo"]
+__all__ = [
+    "BRAND_SLOTS",
+    "BrandError",
+    "brand_json",
+    "brand_mark_json",
+    "brand_path",
+    "check_brand_logo",
+    "save_brand_logo",
+]

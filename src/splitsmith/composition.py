@@ -550,6 +550,12 @@ class Composition:
     #: The match summary card after the last stage, before ``closing``
     #: (spec 2026-10-07-match-summary-design); only the MP4 renderer draws it.
     match_summary: MatchSummary | None = None
+    #: Where logos go beyond the cards (``logo_spots``): empty draws what the
+    #: renderers always drew; the request layer sends the export's choice.
+    logo_spots: frozenset[str] = frozenset()
+    #: The account's brand for the spots that draw it (the wipe), when the
+    #: Look has none of its own; the cards carry theirs on ``MatchTitle``.
+    brand: BrandMark | None = None
 
 
 # --- conversions -----------------------------------------------------------
@@ -583,6 +589,8 @@ def from_stage_compositions(
     summaries: dict[int, SummaryHold] | None = None,
     shooters: SequenceProto[CompositionShooter] = (),
     match_summary: MatchSummary | None = None,
+    logo_spots: frozenset[str] = frozenset(),
+    brand: BrandMark | None = None,
 ) -> Composition:
     """Build a :class:`Composition` from today's ``StageComposition`` inputs.
 
@@ -683,6 +691,8 @@ def from_stage_compositions(
         closing=closing,
         shooters=tuple(shooters),
         match_summary=match_summary,
+        logo_spots=frozenset(logo_spots),
+        brand=brand,
     )
 
 

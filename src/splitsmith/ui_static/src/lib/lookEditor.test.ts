@@ -352,7 +352,8 @@ describe("previewRequest logo spots", () => {
   it("asks for placeholders on a card with a logo spot when the switch is on", () => {
     const base = { look: "club", draft: draft(), stageNumber: 1, width: 960, sting: null, at: null };
     expect(previewRequest({ ...base, card: "title", logoSpots: true }).logo_placeholders).toBe(true);
-    expect(previewRequest({ ...base, card: "sting", logoSpots: true }).logo_placeholders).toBeUndefined();
+    expect(previewRequest({ ...base, card: "sting", logoSpots: true }).logo_placeholders).toBe(true);
+    expect(previewRequest({ ...base, card: "overlay", logoSpots: true }).logo_placeholders).toBeUndefined();
     expect(previewRequest({ ...base, card: "title" }).logo_placeholders).toBeUndefined();
   });
 });

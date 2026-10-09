@@ -3072,6 +3072,9 @@ def _run_compare_grid(
         handle.timer.phase("render"),
         tempfile.TemporaryDirectory(dir=output_dir, prefix=".compare-grid-work-") as tmp,
     ):
+        account_brand = account_profile_module.load_brand(
+            state.account_profile if state is not None else account_profile_module.JsonAccountProfileStore()
+        )
         title_page, closing = compare_cards.title_cards(
             match,
             compare_cards.CardOptions(
@@ -3089,11 +3092,7 @@ def _run_compare_grid(
                 closing_card_variant=req.closing_card_variant,
             ),
             divisions=compare_cards.bundle_divisions(filtered),
-            brand=account_profile_module.load_brand(
-                state.account_profile
-                if state is not None
-                else account_profile_module.JsonAccountProfileStore()
-            ),
+            brand=account_brand,
             event_logo=ensure_local_event_logo(
                 match.branding,
                 root,
@@ -3131,6 +3130,8 @@ def _run_compare_grid(
             match_name=match.name or "",
             match_date=match.match_date.isoformat() if match.match_date else None,
             match_summary_seconds=req.match_summary_seconds if req.match_summary else 0.0,
+            logo_spots=frozenset(req.logo_spots),
+            brand=account_brand if req.account_brand else None,
         )
 
     youtube_files: list[Path] = []
@@ -4812,6 +4813,7 @@ def register_job_bodies(state: AppState) -> None:
                 account_brand=(
                     account_profile_module.load_brand(state.account_profile) if req.account_brand else None
                 ),
+                logo_spots=frozenset(req.logo_spots),
                 card_variant=req.card_variant,
                 title_page_variant=req.title_page_variant,
                 stage_card_variant=req.stage_card_variant,

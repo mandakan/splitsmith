@@ -2285,3 +2285,87 @@ def test_a_card_whose_template_fails_is_named_in_the_degradations(tmp_path: Path
     )
     notes = [d for d in result.degradations if "line 4: boom" in d]
     assert len(notes) == 1 and "left out" in notes[0], result.degradations
+
+
+# --- logo spots (spec 2026-10-09) -------------------------------------------------
+
+
+def _green_logo(tmp_path: Path) -> Path:
+    from PIL import Image
+
+    path = tmp_path / "logo-green.png"
+    Image.new("RGBA", (64, 64), (0, 255, 0, 255)).save(path)
+    return path
+
+
+def _sting_brand(fake: Any) -> list[Any]:
+    """What each sting frame request's data said about the brand."""
+    return [request[1]["data"].get("brand") for request in fake.frame_requests]
+
+
+def test_the_wipe_spot_hands_the_sting_your_brand(tmp_path: Path, monkeypatch) -> None:
+    import dataclasses
+
+    monkeypatch.setattr(mp4_render, "write_motion_clip", _fake_clip_writer)
+    logo = _green_logo(tmp_path)
+    comp = dataclasses.replace(
+        _transitioned_composition(tmp_path, kind="sting:wipe"),
+        logo_spots=frozenset({"wipe"}),
+        brand=composition.BrandMark(logo_path=logo, line="Bulletbard"),
+    )
+    _result, _calls, fake = _sting_render(tmp_path, comp=comp)
+    assert _sting_brand(fake) == [{"logo": logo.resolve().as_uri(), "line": "Bulletbard"}]
+
+
+def test_without_the_wipe_spot_the_sting_context_is_as_before(tmp_path: Path, monkeypatch) -> None:
+    import dataclasses
+
+    monkeypatch.setattr(mp4_render, "write_motion_clip", _fake_clip_writer)
+    comp = dataclasses.replace(
+        _transitioned_composition(tmp_path, kind="sting:wipe"),
+        logo_spots=frozenset({"summaries"}),
+        brand=composition.BrandMark(logo_path=_green_logo(tmp_path), line=None),
+    )
+    _result, _calls, fake = _sting_render(tmp_path, comp=comp)
+    assert fake.frame_requests and all("brand" not in r[1]["data"] for r in fake.frame_requests)
+
+
+def _hold_pixels(tmp_path: Path, spots: frozenset[str]) -> Any:
+    import dataclasses
+
+    from PIL import Image
+
+    comp = dataclasses.replace(
+        _summarised_composition(tmp_path),
+        shooters=(
+            composition.CompositionShooter(
+                label="Me", accent=None, logo_path=_green_logo(tmp_path), club=None
+            ),
+        ),
+        logo_spots=spots,
+    )
+    work = tmp_path / ("w-" + "-".join(sorted(spots)))
+    mp4_render.render_mp4(
+        comp,
+        output_path=tmp_path / "m.mp4",
+        work_dir=work,
+        runner=MagicMock(side_effect=_ok),
+        rasterizer=_FakeRasterizer(),
+    )
+    stills = sorted(p for p in work.glob("*.png") if "summary" in p.name)
+    assert stills, sorted(p.name for p in work.iterdir())
+    with Image.open(stills[0]) as image:
+        return image.convert("RGB").copy()
+
+
+def test_the_summaries_spot_puts_the_shooters_logo_top_right(tmp_path: Path) -> None:
+    image = _hold_pixels(tmp_path, frozenset({"summaries"}))
+    side = round(image.height * 0.09)
+    margin = round(image.height * 0.04)
+    assert image.getpixel((image.width - margin - side // 2, margin + side // 2)) == (0, 255, 0)
+
+
+def test_without_the_summaries_spot_the_hold_has_no_logo(tmp_path: Path) -> None:
+    image = _hold_pixels(tmp_path, frozenset())
+    greens = sum(1 for r, g, b in image.getdata() if g > 200 and r < 60 and b < 60)
+    assert greens == 0

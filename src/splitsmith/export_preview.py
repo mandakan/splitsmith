@@ -37,6 +37,8 @@ from .events import confirmed_from_doc, reload_figures
 from .export_naming import stage_display_name, stage_file_base
 from .identity import ResolvedIdentity
 from .logo_placeholder import PLACEHOLDER_REVISION
+from .logo_spots import paste_logo
+from .look_brand import brand_mark_json
 from .look_sting import sting_context
 from .looks import Look, overlay_template_for, sting_template_for
 from .match_project import MatchProject
@@ -131,10 +133,21 @@ class PreviewSpec:
     #: placeholder (``logo_placeholder``): the Look editor's and the rail's
     #: "where the logos go". Never part of an export.
     logo_placeholders: bool = False
+    #: The export's logo spots (``logo_spots``): the wipe draws your brand,
+    #: the summaries the shooter's logo. In the key only on a card they touch.
+    logo_spots: frozenset[str] = frozenset()
 
     @property
     def height(self) -> int:
         return self.width * 9 // 16
+
+
+#: The logo spots each preview card draws; every other card ignores them.
+_SPOTS_BY_CARD: dict[str, frozenset[str]] = {
+    "sting": frozenset({"wipe"}),
+    "summary": frozenset({"summaries"}),
+    "match_summary": frozenset({"summaries"}),
+}
 
 
 def audit_digest(audit_doc: dict | None) -> str:
@@ -206,6 +219,9 @@ def preview_key(
         fields["account_brand"] = spec.account_brand
     if spec.logo_placeholders:
         fields["logo_placeholders"] = PLACEHOLDER_REVISION
+    touched = spec.logo_spots & _SPOTS_BY_CARD.get(spec.card, frozenset())
+    if touched:
+        fields["logo_spots"] = sorted(touched)
     if spec.card == "overlay" and spec.overlay_variant != "default":
         fields["overlay_style"] = {
             "variant": spec.overlay_variant,
@@ -456,6 +472,8 @@ def render_preview(
         "look": look,
         "shooters": (shooter,) if shooter is not None else (),
     }
+    # The ``summaries`` logo spot, as the render pastes it.
+    summary_logo = shooter.logo_path if shooter is not None and "summaries" in spec.logo_spots else None
     image: Image.Image | None
     if spec.card == "frame":
         image = _compose_over(frame, None, spec, theme)
@@ -473,6 +491,7 @@ def render_preview(
             fps=30.0,
             theme=theme,
             shooters=size["shooters"],  # type: ignore[arg-type]
+            brand=brand_mark_json(look, brand) if "wipe" in spec.logo_spots else None,
         )
         if moving:
             webp = _sting_motion(template, context, spec, rasterizer, frame, theme)
@@ -544,6 +563,8 @@ def render_preview(
             rasterizer=rasterizer,
             backdrop=frame,
         )
+        if image is not None:
+            image = paste_logo(image, summary_logo)
     elif spec.card == "summary":
         tile = TileStageData(
             label=label,
@@ -565,6 +586,8 @@ def render_preview(
             backdrop=frame,
             accent=shooter.accent if shooter is not None else None,
         )
+        if image is not None:
+            image = paste_logo(image, summary_logo)
     else:  # overlay
         styled = _hud_preview(
             spec,

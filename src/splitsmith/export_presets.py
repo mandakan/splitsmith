@@ -32,6 +32,7 @@ from typing import Any, Literal, Protocol
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from . import composition, looks, user_config
+from .logo_spots import DEFAULT_LOGO_SPOTS, LOGO_SPOTS
 from .overlay_hud import OverlayStyleFields
 
 logger = logging.getLogger(__name__)
@@ -111,6 +112,15 @@ class ExportPresetBody(OverlayStyleFields, BaseModel):
     made_with: bool = True
     #: Your account's brand on the cards (on unless turned off).
     account_brand: bool = True
+    #: Where logos go beyond the cards (``logo_spots``). A spot this version
+    #: does not know (a preset saved by a newer one) is dropped, not refused.
+    logo_spots: list[str] = Field(default_factory=lambda: [str(s) for s in sorted(DEFAULT_LOGO_SPOTS)])
+
+    @field_validator("logo_spots")
+    @classmethod
+    def _known_spots(cls, value: list[str]) -> list[str]:
+        return sorted({spot for spot in value if spot in LOGO_SPOTS})
+
     stage_card_style: StageCardStyle = "none"
     stage_card_seconds: float = 1.5
     summary_hold_seconds: float = 0.0

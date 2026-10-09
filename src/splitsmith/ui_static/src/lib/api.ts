@@ -9,6 +9,7 @@
 import type { Feature } from "@/lib/access";
 import type { Anomaly } from "@/lib/anomalies";
 import { authorKey } from "@/lib/authorKey";
+import type { LogoSpot } from "@/lib/logoPlan";
 
 export type VideoRole = "primary" | "secondary" | "ignored";
 /** ``"aligned"`` means the in-stream beep detector failed on a secondary
@@ -1120,6 +1121,8 @@ export interface ExportPresetBody extends OverlayStyleBody {
   closing_card: boolean;
   made_with: boolean;
   account_brand?: boolean;
+  /** Where logos go beyond the cards; a preset saved before it has none. */
+  logo_spots?: LogoSpot[];
   stage_card_style: "none" | "slate" | "lower-third";
   stage_card_seconds: number;
   summary_hold_seconds: number;
@@ -1287,6 +1290,8 @@ export interface ExportPreviewBody extends OverlayStyleBody {
   made_with?: boolean;
   /** Your brand from the You page on the cards. Server default on. */
   account_brand?: boolean;
+  /** Where logos go beyond the cards. Server default: Polished. */
+  logo_spots?: LogoSpot[];
   /** The export's stage selection (the match summary card only). */
   stage_numbers?: number[];
   head_pad_seconds?: number;
@@ -1455,6 +1460,8 @@ export interface MatchExportRequestPayload extends OverlayStyleBody {
   made_with?: boolean;
   /** Your brand from the You page on the cards. Server default on. */
   account_brand?: boolean;
+  /** Where logos go beyond the cards. Server default: Polished. */
+  logo_spots?: LogoSpot[];
   /** The Look (#1246): any installed Look name; the server default. */
   overlay_theme?: string;
   /** Per-slot template variants (#1246); unset means the server's ``card_variant`` knob. */
@@ -1546,6 +1553,8 @@ export interface CompareGridRequestPayload {
   made_with?: boolean;
   /** Your brand from the You page on the cards. Server default on. */
   account_brand?: boolean;
+  /** Where logos go beyond the cards. Server default: Polished. */
+  logo_spots?: LogoSpot[];
   /** Every shooter's match figures in their own tile before the closing card. */
   match_summary?: boolean;
   match_summary_seconds?: number;

@@ -53,6 +53,7 @@ from pathlib import Path
 
 from PIL import Image
 
+from ..logo_spots import paste_logo
 from ..match_summary import MatchSummary, build_match_summary, match_summary_groups, match_summary_strip_html
 from ..overlay_html import grid_html
 from ..overlay_layout import CellScale, Group
@@ -393,6 +394,7 @@ def build_hold_still(
     rasterizer: Rasterizer | None = None,
     blur_radius: int | None = None,
     dim: float = DEFAULT_DIM,
+    logos: Mapping[str, Path] | None = None,
 ) -> Image.Image:
     """Compose the geometry-sized RGB stage summary still. Since #691 the
     production caller passes the composed grid size here, not the render
@@ -474,7 +476,32 @@ def build_hold_still(
         else:
             canvas.alpha_composite(overlay_rgba)
 
-    return canvas.convert("RGB")
+    return _paste_tile_logos(canvas.convert("RGB"), placements, geometry, logos).convert("RGB")
+
+
+def _paste_tile_logos(
+    canvas: Image.Image,
+    placements: Sequence[TilePlacement],
+    geometry: SpriteGeometry,
+    logos: Mapping[str, Path] | None,
+    *,
+    top: int = 0,
+) -> Image.Image:
+    """Each present shooter's logo in the top right of their own tile (the
+    ``summaries`` logo spot); ``top`` is where the grid starts on the canvas.
+    No logos leaves the still as it was."""
+    for placement in placements:
+        logo = (logos or {}).get(placement.label)
+        if logo is None or not placement.present:
+            continue
+        box = (
+            placement.col * geometry.cell_width,
+            top + placement.row * geometry.cell_height,
+            geometry.cell_width,
+            geometry.cell_height,
+        )
+        canvas = paste_logo(canvas, logo, box=box)
+    return canvas
 
 
 def write_hold_still(
@@ -491,6 +518,7 @@ def write_hold_still(
     dim: float = DEFAULT_DIM,
     output_path: Path | None = None,
     accents: Mapping[str, str] | None = None,
+    logos: Mapping[str, Path] | None = None,
 ) -> Path:
     """Extract this stage's freeze frames, compose the hold still, and
     save it. ``data`` is a single stage's slice keyed by label -- the same
@@ -517,6 +545,7 @@ def write_hold_still(
         rasterizer=rasterizer,
         blur_radius=blur_radius,
         dim=dim,
+        logos=logos,
     )
     out_path = output_path or work_dir / f"summary-stage{plan.stage_number}.png"
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -606,6 +635,7 @@ def build_match_summary_grid_still(
     rasterizer: Rasterizer | None,
     accents: Mapping[str, str] | None = None,
     dim: float = DEFAULT_DIM,
+    logos: Mapping[str, Path] | None = None,
 ) -> Image.Image:
     """The grid's match summary (spec 2026-10-08-grid-match-summary-design)
     as a ``width x height`` RGB still: the title strip, then every shooter in
@@ -674,4 +704,4 @@ def build_match_summary_grid_still(
                 exc,
             )
     canvas.paste(grid, (0, strip))
-    return canvas.convert("RGB")
+    return _paste_tile_logos(canvas.convert("RGB"), placements, geometry, logos, top=strip)

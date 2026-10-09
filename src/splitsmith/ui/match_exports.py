@@ -357,6 +357,8 @@ class MatchExportRequestData:
     #: Your account's brand, resolved by the caller (spec 2026-10-08); the
     #: cards draw it when the Look has no brand of its own.
     account_brand: composition.BrandMark | None = None
+    #: Where logos go beyond the cards (``logo_spots``); empty draws none.
+    logo_spots: frozenset[str] = frozenset()
     # Issue #1242. The Look template variant every generated card draws
     # with (``default`` is the still card; the shipped ``splitsmith`` Look
     # adds ``rise``). One knob for all slots until the gallery (#1246)
@@ -804,6 +806,8 @@ def export_match(
             if request.shooter_identity is not None
             else ()
         ),
+        logo_spots=request.logo_spots,
+        brand=request.account_brand,
     )
     youtube_preset_active = request.youtube_preset and request.output_format == "mp4"
     if request.youtube_preset and request.output_format != "mp4":

@@ -377,6 +377,23 @@ the last stage that has footage of them
 ranking between shooters, as on the stage hold. The rail preview cannot draw
 it (the route previews one shooter), so the pane shows its gallery thumbnail.
 
+**Logo spots** (``logo_spots``, spec 2026-10-09): beyond the cards, an export
+may put a logo in more places, chosen per export by the Export page's Logos row
+(``lib/logoPlan``: Cards only, Polished, Choose), ``--logos`` on both CLIs and
+``logo_spots`` on every request body, the preset and the preview request.
+``polished`` (``wipe`` + ``summaries``) is the default of all of those; the
+renderers' own default (``Composition.logo_spots``, ``render_grid_mp4(logo_spots=)``)
+is empty, so a caller that says nothing draws what it always drew. ``wipe``
+hands the sting ``data.brand`` (``look_brand.brand_mark_json``: the Look's
+brand, else ``Composition.brand`` / the grid's ``brand``, the account's when
+``account_brand`` is on) and the shipped wipe carries it over the shooter's
+logo; ``summaries`` pastes the shooter's logo top right on the stage summary
+and the match summary, and on the grid in each shooter's own tile, with Pillow
+(``logo_spots.paste_logo``), so it needs no browser and reaches the segment
+cache through the still's bytes. Each logo keeps one corner everywhere (brand
+top left, shooter top right, event centre). A stored preset drops a spot it
+does not know; the request bodies refuse one.
+
 The closing card ends with **"Made with splitsmith"** unless turned off
 (``MatchTitle.credit``, drawn by ``_shared/credit.js`` from ``data.credit``,
 which ``card_context`` sets on the ``closing`` slot only). The switch is

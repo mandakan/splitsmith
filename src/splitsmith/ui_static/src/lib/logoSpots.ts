@@ -8,8 +8,17 @@
 import { useSyncExternalStore } from "react";
 
 const KEY = "splitsmith.preview.logoSpots";
-/** The cards that have a logo spot (identity, brand or event). */
-export const LOGO_SPOT_CARDS: ReadonlySet<string> = new Set(["title", "slate", "lower-third", "closing"]);
+/** The cards that have a logo spot (identity, brand or event); the sting and
+ *  the summaries have one through the export's logo spots (``lib/logoPlan``). */
+export const LOGO_SPOT_CARDS: ReadonlySet<string> = new Set([
+  "title",
+  "slate",
+  "lower-third",
+  "closing",
+  "sting",
+  "summary",
+  "match_summary",
+]);
 
 const listeners = new Set<() => void>();
 
