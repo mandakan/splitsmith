@@ -13,11 +13,19 @@
  * outstanding: in the debounce, in flight (or in a 409's reload), owed to a
  * re-send, or under the pointer. While an edit is outstanding, a foreign
  * response whose regions differ from the ones this tab last saw from the
- * server (another writer's) takes only the payload, not the revision: the
- * edit then 409s on its own revision and is discarded rather than overwrite
- * those regions. The list catches up with the server's when
- * the last of those settles; a cancelled drag (Esc, pointercancel) adopts it
- * then, a release supersedes it with its own PUT.
+ * server (another writer's) takes only the payload and is withheld: its
+ * revision and regions wait, so the edit 409s on its own revision and is
+ * discarded rather than overwrite those regions. Any later answer of our own
+ * (a PUT's response, a 409's reload) supersedes the withheld one.
+ *
+ * The list catches up with the server's when nothing is outstanding any
+ * more: after a PUT's response, a 409's decision or a non-409 failure, on a
+ * cancelled drag (Esc, pointercancel), and on a release that overlaps or was
+ * drawn on discarded regions. Catching up first adopts a withheld response
+ * (its revision and regions become current; nothing local is pending to
+ * overwrite them), so an Esc shows another writer's regions at once and the
+ * next edit saves on their revision. A release supersedes the server's list
+ * with its own PUT.
  *
  * A 409 reloads the payload and stops whatever was queued behind it or still
  * in the debounce, since that work was built on the stale revision. When the
@@ -100,6 +108,9 @@ export function useStageEvents(
   const resendRef = useRef(false);
   // The last list known to pass the lane rule: the server's, or a valid commit.
   const goodRef = useRef<StageEvent[]>([]);
+  // A foreign response with another writer's regions, held back while a
+  // local edit was outstanding (see ``apply``).
+  const withheldRef = useRef<CoachStageResponse | null>(null);
   const onDiscardRef = useRef(onDiscard);
   onDiscardRef.current = onDiscard;
   const putRef = useRef<(next: StageEvent[]) => void>(() => {});
@@ -116,18 +127,30 @@ export function useStageEvents(
     [],
   );
 
-  // The local list catches up with the server's once no local edit is outstanding.
+  // The local list catches up with the server's once no local edit is
+  // outstanding, adopting a withheld foreign response first: with nothing
+  // local pending, its revision and regions are simply the current ones.
   const catchUp = useCallback(() => {
     if (outstanding()) return;
+    const withheld = withheldRef.current;
+    if (withheld) {
+      // Its payload already went to ``applyCoach`` when it arrived, and
+      // nothing has reached ``applyCoach`` since (an own answer clears it).
+      withheldRef.current = null;
+      revisionRef.current = withheld._version;
+      serverEventsRef.current = withheld.events ?? [];
+    }
     const list = serverEventsRef.current;
     goodRef.current = list;
     setEvents(list);
     setSelectedId((id) => (id && list.some((e) => e.id === id) ? id : null));
   }, [outstanding]);
 
-  // Our own answers (a PUT's response, a 409's reload): authoritative, always advance.
+  // Our own answers (a PUT's response, a 409's reload): authoritative, always
+  // advance, and supersede a withheld foreign response.
   const adopt = useCallback(
     (next: CoachStageResponse | null) => {
+      withheldRef.current = null;
       applyCoach(next);
       revisionRef.current = next?._version;
       serverEventsRef.current = next?.events ?? [];
@@ -138,13 +161,16 @@ export function useStageEvents(
 
   // A foreign response (a shot PATCH, a reclassify). While a local edit is
   // outstanding, one carrying regions other than the ones this tab last saw
-  // from the server (another writer's) takes only the payload: advancing the
-  // revision would let the edit overwrite those regions without a 409. The
-  // edit then 409s on the revision it started from and is discarded.
+  // from the server (another writer's) takes only the payload and is
+  // withheld: advancing the revision would let the edit overwrite those
+  // regions without a 409. The edit then 409s on the revision it started
+  // from and is discarded; if it ends without a round trip instead, the next
+  // catch-up adopts the withheld response.
   const apply = useCallback(
     (next: CoachStageResponse | null) => {
-      if (outstanding() && !sameEvents(next?.events ?? [], serverEventsRef.current)) {
+      if (next && outstanding() && !sameEvents(next.events ?? [], serverEventsRef.current)) {
         applyCoach(next);
+        withheldRef.current = next;
         return;
       }
       adopt(next);
@@ -225,11 +251,13 @@ export function useStageEvents(
           }
           resendRef.current = false;
           settle(seq);
+          // The edit is not saved; a withheld response, if any, is current now.
+          catchUp();
           onError(e instanceof ApiError ? e.detail : String(e));
         }
       });
     },
-    [adopt, conflict, onError, settle, slug, stage],
+    [adopt, catchUp, conflict, onError, settle, slug, stage],
   );
   putRef.current = put;
 

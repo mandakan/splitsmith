@@ -536,6 +536,90 @@ describe("useStageEvents: an in-flight save never reverts or drops an edit (#132
     expect(api.putStageEvents).toHaveBeenCalledWith("anna", 1, [ev("evt-1", 1.1, 2)], "v6");
   });
 
+  // Fix round 3: a withheld response is applied once nothing is outstanding.
+  const putOnV6 = () =>
+    vi.mocked(api.putStageEvents).mockImplementation(async (_s, _n, events, version) => {
+      if (version !== "v6") throw conflict();
+      return coach(events, "v7");
+    });
+
+  it("another writer's region withheld during a drag shows on Esc, and the next edit saves on its revision", async () => {
+    const { result, onDiscard } = setupWithDiscard();
+    putOnV6();
+    act(() => result.current.change([ev("evt-1", 1.3, 2)], false)); // a drag
+    act(() => result.current.apply(withEvt5())); // withheld: the drag is outstanding
+    act(() => result.current.change([ev("evt-1", 1, 2)], false)); // Esc emits the restored list
+    act(() => result.current.cancel());
+    expect(result.current.events.map((e) => e.id)).toEqual(["evt-1", "evt-5"]);
+    const next = [ev("evt-1", 1.5, 2), ev("evt-5", 7, 8)];
+    act(() => result.current.change(next, true)); // a fresh edit with nothing outstanding
+    await settle();
+    expect(api.putStageEvents).toHaveBeenCalledTimes(1);
+    expect(api.putStageEvents).toHaveBeenLastCalledWith("anna", 1, next, "v6");
+    expect(result.current.events).toEqual(next);
+    expect(onDiscard).not.toHaveBeenCalled();
+  });
+
+  it("another writer's region withheld during a drag shows after a release that overlaps, and the next edit saves", async () => {
+    const { result, onDiscard } = setupWithDiscard();
+    putOnV6();
+    act(() => result.current.change([ev("evt-1", 1.3, 2)], false));
+    act(() => result.current.apply(withEvt5()));
+    act(() => result.current.change([ev("evt-1", 1, 2), ev("evt-2", 1.5, 3)], true)); // overlaps: never goes out
+    expect(result.current.events.map((e) => e.id)).toEqual(["evt-1", "evt-5"]);
+    const next = [ev("evt-1", 1.5, 2), ev("evt-5", 7, 8)];
+    act(() => result.current.change(next, true));
+    await settle();
+    expect(api.putStageEvents).toHaveBeenCalledTimes(1);
+    expect(api.putStageEvents).toHaveBeenLastCalledWith("anna", 1, next, "v6");
+    expect(onDiscard).not.toHaveBeenCalled();
+  });
+
+  it("another writer's region withheld while a PUT is in flight shows when that PUT fails with a non-409 error", async () => {
+    const { result, onError, onDiscard } = setupWithDiscard();
+    let failFirst: (e: unknown) => void = () => {};
+    vi.mocked(api.putStageEvents)
+      .mockImplementationOnce(() => new Promise((_r, j) => { failFirst = j; }))
+      .mockImplementation(async (_s, _n, events, version) => {
+        if (version !== "v6") throw conflict();
+        return coach(events, "v7");
+      });
+    act(() => result.current.change([ev("evt-1", 1.1, 2)], true));
+    await settle(); // in flight on v1
+    act(() => result.current.apply(withEvt5())); // withheld
+    await act(async () => { failFirst(new ApiError(500, "boom")); });
+    expect(onError).toHaveBeenCalledWith("boom");
+    expect(result.current.events.map((e) => e.id)).toEqual(["evt-1", "evt-5"]);
+    const next = [ev("evt-1", 1.5, 2), ev("evt-5", 7, 8)];
+    act(() => result.current.change(next, true));
+    await settle();
+    expect(api.putStageEvents).toHaveBeenLastCalledWith("anna", 1, next, "v6");
+    expect(onDiscard).not.toHaveBeenCalled();
+  });
+
+  it("a 409's reload supersedes a withheld response: the next edit saves on the reload's revision", async () => {
+    const { result } = setupWithDiscard();
+    let failFirst: (e: unknown) => void = () => {};
+    vi.mocked(api.putStageEvents)
+      .mockImplementationOnce(() => new Promise((_r, j) => { failFirst = j; }))
+      .mockImplementation(async (_s, _n, events, version) => {
+        if (version !== "v8") throw conflict();
+        return coach(events, "v9");
+      });
+    const newer = coach([ev("evt-1", 1, 2), ev("evt-5", 7, 8), ev("evt-6", 9, 9.5)], "v8");
+    vi.mocked(api.getStageCoach).mockResolvedValue(newer);
+    act(() => result.current.change([ev("evt-1", 1.1, 2)], true));
+    await settle(); // in flight on v1
+    act(() => result.current.apply(withEvt5())); // withheld at v6
+    await act(async () => { failFirst(conflict()); }); // reload: v8, discard
+    expect(result.current.events.map((e) => e.id)).toEqual(["evt-1", "evt-5", "evt-6"]);
+    const next = [ev("evt-1", 1.5, 2), ev("evt-5", 7, 8), ev("evt-6", 9, 9.5)];
+    act(() => result.current.change(next, true));
+    await settle();
+    expect(api.putStageEvents).toHaveBeenLastCalledWith("anna", 1, next, "v8");
+    expect(result.current.events).toEqual(next);
+  });
+
   it("a commit made during a 409's reload, then a drag and Esc, is sent once", async () => {
     const { result } = setupWithDiscard();
     let finishReload: (c: CoachStageResponse) => void = () => {};
