@@ -1089,18 +1089,23 @@ phone Coach surface exists. Every PUT appends an
 ``audit_events`` entry, which is why the SPA saves on commit only
 (release or keyboard nudge) through a 350 ms debounce in
 ``lib/useStageEvents.ts``: PUTs run one at a time with the revision the
-previous one returned. Every coach response, the PUT's own or a foreign
-one through ``apply`` (shot PATCH, reclassify), takes the payload, the
-revision and the server's regions, but the local list catches up only
-when no local edit is outstanding (in the debounce, in flight or in a
-409's reload, or under a live drag); an Esc / pointercancel ends the
-drag (``LaneEditor`` ``onCancel``) and catches up. While an edit is
-outstanding, a foreign response whose regions differ from the ones this
-tab last saw from the server (another writer's) takes only the payload,
-never the revision: the edit then 409s on the revision it started from
-and goes down the discard path below, rather than overwrite those
-regions. A response with the same regions advances as usual. A 409 reloads and
-stops anything queued; when the reload's regions equal the ones the
+previous one returned. A coach response, the PUT's own or a foreign
+one through ``apply`` (shot PATCH, reclassify), never replaces the local
+list while a local edit is outstanding (in the debounce, in flight or in
+a 409's reload, owed a re-send, or under a live drag). While one is, a
+foreign response whose regions differ from the ones this tab last saw
+from the server (another writer's) takes only the payload and is
+*withheld*: its revision and regions wait, so an edit in flight 409s on
+its own revision and is discarded rather than overwrite those regions;
+one with the same regions advances. Only a 409's reload clears a
+withheld response; a successful PUT's answer does not (a withheld
+response that outlives a successful PUT is newer than it). When nothing
+is outstanding any more (a PUT's answer, a 409's decision, a non-409
+failure, an Esc / pointercancel via ``LaneEditor`` ``onCancel``, an
+overlapping release) the list catches up, adopting a withheld response
+first, so an Esc shows another writer's regions at once and the next
+edit saves on the newest revision. A 409 reloads and stops anything
+queued; when the reload's regions equal the ones the
 failed PUT started from (the revision moved for something else, e.g. a
 shot PATCH), the newest local list is re-sent once on the fresh
 revision (a live drag's release carries it, a cancel sends it),
