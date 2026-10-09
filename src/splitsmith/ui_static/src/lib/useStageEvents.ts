@@ -44,6 +44,16 @@
  * on discarded regions is dropped, a cancel adopts the reload. A commit
  * whose lanes overlap never goes out: local state reverts to the last valid
  * list rather than drift ahead of the server.
+ *
+ * Nothing is lost without a word: ``issue`` is the one save problem the page
+ * shows under the lane editor. A conflict that discarded an edit sets
+ * ``discarded``; any other failed save (a non-409, or a 409 whose reload
+ * failed) sets ``failed`` and remembers the list it carried, which ``retry``
+ * re-sends through the same PUT chain. A retry first checks that the regions
+ * are still the ones the failed PUT started from: if a foreign response has
+ * since replaced them, sending the old list would overwrite another writer's
+ * regions without a 409, so the edit is discarded instead, as a 409 would.
+ * The next successful PUT clears the issue, as does ``dismiss``.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -51,6 +61,9 @@ import { ApiError, api, type CoachStageResponse, type StageEvent } from "@/lib/a
 import { validateLanes } from "@/lib/events";
 
 export const COMMIT_DEBOUNCE_MS = 350;
+
+/** The last region save's problem, until a save succeeds or it is dismissed. */
+export type SaveIssue = { kind: "discarded" } | { kind: "failed"; message: string };
 
 export interface StageEvents {
   events: StageEvent[];
@@ -67,6 +80,12 @@ export interface StageEvents {
   change: (next: StageEvent[], commit: boolean) => void;
   /** The LaneEditor's ``onCancel``: a drag ended without a commit (Esc, pointercancel). */
   cancel: () => void;
+  /** The save problem to show, or null. One at a time: a newer one replaces it. */
+  issue: SaveIssue | null;
+  /** Re-send the list a ``failed`` save carried; a no-op while an edit is outstanding. */
+  retry: () => void;
+  /** Hide the issue (and give up a failed save's list). */
+  dismiss: () => void;
 }
 
 /** Same regions in any order: a reload is compared with the stored list by content. */
@@ -86,10 +105,16 @@ export function useStageEvents(
   slug: string,
   stage: number,
   applyCoach: (next: CoachStageResponse | null) => void,
-  onError: (message: string) => void,
+  onError?: (message: string) => void,
   onDiscard?: () => void,
 ): StageEvents {
   const [events, setEvents] = useState<StageEvent[]>([]);
+  const [issue, setIssue] = useState<SaveIssue | null>(null);
+  // The list a failed save (a non-409, or a 409 whose reload failed) carried and the regions it started
+  // from: what ``retry`` re-sends, and what it checks is still current.
+  const failedRef = useRef<{ list: StageEvent[]; base: StageEvent[] } | null>(null);
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const revisionRef = useRef<string | undefined>(undefined);
   // The regions as stored at ``revisionRef``: what the local list catches up
@@ -197,6 +222,21 @@ export function useStageEvents(
     [adopt, applyCoach, outstanding],
   );
 
+  // A conflict dropped a local edit: one notice, however often it is reported.
+  const discarded = useCallback(() => {
+    failedRef.current = null;
+    setIssue({ kind: "discarded" });
+    onDiscardRef.current?.();
+  }, []);
+
+  // A save failed for any reason but a decided 409: keep the list for ``retry``.
+  const failed = useCallback((list: StageEvent[], base: StageEvent[], e: unknown) => {
+    const message = e instanceof ApiError ? e.detail : String(e);
+    failedRef.current = { list, base };
+    setIssue({ kind: "failed", message });
+    onErrorRef.current?.(message);
+  }, []);
+
   const stopQueued = useCallback(() => {
     droppedThroughRef.current = seqRef.current;
     if (timerRef.current !== null) window.clearTimeout(timerRef.current);
@@ -219,7 +259,7 @@ export function useStageEvents(
         fresh = await api.getStageCoach(slug, stage);
       } catch (e2) {
         settle(seq);
-        onError(e2 instanceof ApiError ? e2.detail : String(e2));
+        failed(goodRef.current, base, e2);
         return;
       }
       // The reload is the newest state there is: it supersedes anything withheld.
@@ -245,9 +285,9 @@ export function useStageEvents(
       settle(seqRef.current);
       if (liveRef.current) dropGestureRef.current = true;
       adopt(fresh);
-      onDiscardRef.current?.();
+      discarded();
     },
-    [adopt, onError, settle, slug, stage, stopQueued],
+    [adopt, discarded, failed, settle, slug, stage, stopQueued],
   );
 
   const put = useCallback(
@@ -264,6 +304,8 @@ export function useStageEvents(
           const res = await api.putStageEvents(slug, stage, next, revisionRef.current);
           resendRef.current = false;
           settle(seq);
+          failedRef.current = null;
+          setIssue(null);
           adopt(res);
         } catch (e) {
           if (e instanceof ApiError && e.status === 409) {
@@ -274,11 +316,11 @@ export function useStageEvents(
           settle(seq);
           // The edit is not saved; a withheld response, if any, is current now.
           catchUp();
-          onError(e instanceof ApiError ? e.detail : String(e));
+          failed(next, base, e);
         }
       });
     },
-    [adopt, catchUp, conflict, onError, settle, slug, stage],
+    [adopt, catchUp, conflict, failed, settle, slug, stage],
   );
   putRef.current = put;
 
@@ -334,6 +376,28 @@ export function useStageEvents(
     catchUp();
   }, [catchUp, put]);
 
+  const retry = useCallback(() => {
+    const f = failedRef.current;
+    if (!f || outstanding()) return;
+    if (!sameEvents(serverEventsRef.current, f.base)) {
+      // Another writer's regions arrived since: the old list would overwrite
+      // them without a 409, so it goes the way a 409 would send it.
+      catchUp();
+      discarded();
+      return;
+    }
+    // The issue stays shown until the PUT answers: a success clears it, a failure replaces it.
+    failedRef.current = null;
+    goodRef.current = f.list;
+    setEvents(f.list);
+    put(f.list);
+  }, [catchUp, discarded, outstanding, put]);
+
+  const dismiss = useCallback(() => {
+    failedRef.current = null;
+    setIssue(null);
+  }, []);
+
   // Leaving the stage inside the debounce still saves the edit.
   useEffect(
     () => () => {
@@ -345,5 +409,5 @@ export function useStageEvents(
     [],
   );
 
-  return { events, selectedId, select: setSelectedId, apply, change, cancel };
+  return { events, selectedId, select: setSelectedId, apply, change, cancel, issue, retry, dismiss };
 }
