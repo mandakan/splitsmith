@@ -1,6 +1,6 @@
 # Shooters page and the account menu
 
-Date: 2026-10-09. Status: approved in conversation, awaiting spec review.
+Date: 2026-10-09. Status: approved; built (the plan lists three deviations).
 
 ## Why
 

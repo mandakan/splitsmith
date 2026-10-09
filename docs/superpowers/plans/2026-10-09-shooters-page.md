@@ -16,6 +16,11 @@ branch at the end.
   shows the logo and accent as drawn. Cost: the user cannot see a card
   from the sheet; the Export preview with logo spots covers it.
 
+- **Footage keeps a shortcut**: its shooter menu's "Identity" becomes
+  "Edit look" and opens the same book-only sheet, instead of going away:
+  the Look editor's "Add a logo" deep-links there (`?identity=<slug>`).
+  The match-level `IdentitySheet` is deleted. Cost: one more entry point.
+
 ## Tasks
 
 1. **The book wins** (`ui/identity_media.py`): `identity_source` returns

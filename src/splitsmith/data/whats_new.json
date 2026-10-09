@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "shooters-page",
+      "date": "2026-10-09",
+      "title": "A Shooters page and your account menu",
+      "body": "Set each shooter's logo, colour and club once on the new Shooters page, from the account menu at the top right. Every match follows, and a shooter chip in a match opens it too."
+    },
+    {
       "id": "logo-spots-in-previews",
       "date": "2026-10-09",
       "title": "See where each logo goes",
