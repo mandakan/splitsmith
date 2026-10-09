@@ -650,6 +650,14 @@ describe("Coach stage timeline band", () => {
     expect(screen.getByTestId("lane-editor")).toBeInTheDocument();
   });
 
+  // This pins the per-stage remount CoachStage's own `key` already does
+  // (Coach.tsx's top-level `Coach()`, `key={`${slug}-${stage}`}`): there is
+  // no explicit zoom reset in CoachStageInner for it to pin instead. It
+  // fails if that key stops covering the stage number (verified by hand:
+  // temporarily dropping the stage from the key reproduces the fresh-mount
+  // `useState<Zoom>(null)` as a stale one-time init instead, and this test
+  // fails because the second "timeline" is the *same* Timeline instance
+  // carrying zoom 1.5 forward).
   it("starts each stage at Fit", async () => {
     renderCoachTimeline([
       { stage_number: 1, time_seconds: 20 },
@@ -664,5 +672,40 @@ describe("Coach stage timeline band", () => {
     fireEvent.click(screen.getByRole("link", { name: "Next stage" }));
     const next = await screen.findByTestId("timeline");
     expect(within(next).getByRole("button", { name: "Fit" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("draws an empty audio track while peaks are loading, never flashing No audio", async () => {
+    let resolvePeaks: (p: Awaited<ReturnType<typeof api.getStagePeaks>>) => void = () => {};
+    vi.mocked(api.getStagePeaks).mockReset();
+    vi.mocked(api.getStagePeaks).mockImplementation(
+      () => new Promise((resolve) => {
+        resolvePeaks = resolve;
+      }),
+    );
+    renderCoachTimeline();
+    const band = await screen.findByTestId("timeline");
+    expect(within(band).getByTestId("lane-editor")).toBeInTheDocument();
+    expect(screen.queryByText("No audio")).toBeNull();
+    await act(async () => {
+      resolvePeaks({ duration: 20, sample_rate: 8000, bins: 4, peaks: [0.1, 0.5, 0.2, 0.1], beep_time: 2, trimmed: true });
+    });
+    expect(screen.queryByText("No audio")).toBeNull();
+  });
+
+  it("shows No audio once the peaks request has settled without any", async () => {
+    let rejectPeaks: (e: unknown) => void = () => {};
+    vi.mocked(api.getStagePeaks).mockReset();
+    vi.mocked(api.getStagePeaks).mockImplementation(
+      () => new Promise((_resolve, reject) => {
+        rejectPeaks = reject;
+      }),
+    );
+    renderCoachTimeline();
+    await screen.findByTestId("timeline");
+    expect(screen.queryByText("No audio")).toBeNull();
+    await act(async () => {
+      rejectPeaks(new ApiError(404, "no trim"));
+    });
+    expect(await screen.findByText("No audio")).toBeInTheDocument();
   });
 });

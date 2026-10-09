@@ -762,6 +762,7 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
   const [noteDraft, setNoteDraft] = useState("");
   const [timelineZoom, setTimelineZoom] = useState<Zoom>(null);
   const [peaks, setPeaks] = useState<PeaksResult | null>(null);
+  const [peaksLoading, setPeaksLoading] = useState(true);
   const scrub = useScrubSource();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const shotListRef = useRef<HTMLDivElement | null>(null);
@@ -798,11 +799,6 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
   const isMobile = useIsMobile();
 
   useEffect(() => {
-    // Every stage starts its timeline band at Fit (CoachStage above keys the
-    // whole subtree on slug + stage, which already remounts this state from
-    // scratch; the explicit reset here is the belt that holds if that key
-    // ever stops covering it).
-    setTimelineZoom(null);
     let alive = true;
     (async () => {
       try {
@@ -831,10 +827,14 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
   }, [apply, slug, stage]);
 
   // Load peaks for the band's audio track (same shape as Audit.tsx's "Load
-  // peaks" effect). A failure just means no waveform -- WaveformTrack draws
-  // "No audio" for null peaks -- never a page error.
+  // peaks" effect). A failure just means no waveform -- the track renders
+  // "No audio" for null peaks once the request has settled -- never a page
+  // error. peaksLoading keeps the track an empty placeholder while the
+  // request is in flight, so "No audio" never flashes before a slow
+  // response has had a chance to resolve.
   useEffect(() => {
     let alive = true;
+    setPeaksLoading(true);
     api
       .getStagePeaks(slug, stage, PEAK_BINS)
       .then((p) => {
@@ -842,6 +842,9 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
       })
       .catch(() => {
         if (alive) setPeaks(null);
+      })
+      .finally(() => {
+        if (alive) setPeaksLoading(false);
       });
     return () => {
       alive = false;
@@ -1022,9 +1025,11 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
   const seekFromBeep = (t: number) => {
     if (videoRef.current) videoRef.current.currentTime = coach.beep_time + t;
   };
-  // The waveform's own clip may have a different beep than the one the
-  // coach payload carries (peaks come from the trim, coach.beep_time from
-  // the audit); the measured one wins when it is there.
+  // coach.beep_time is the coach response's own clip anchor (the same
+  // trim-vs-source anchor the video stream uses); peaks.beep_time is the
+  // audit audio's beep in its own clip. The two agree in the normal case
+  // and can only differ when they resolve to different clips, so the
+  // measured one wins when it is there.
   const audioBeep = peaks?.beep_time ?? coach.beep_time;
   const summary = coach.event_summary
     ? { ...localSummary, capacity_warning: coach.event_summary.capacity_warning }
@@ -1150,7 +1155,6 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
       <div className="mt-4 flex flex-col gap-4">
         <div>
           <Timeline
-            key={stage}
             duration={stageTime}
             origin={0}
             fps={30}
@@ -1176,16 +1180,22 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
               {
                 id: "audio",
                 rows: [{ label: "Audio", height: 56 }],
-                render: (geom) => (
-                  <WaveformTrack
-                    peaks={peaks?.peaks ?? null}
-                    clipDuration={peaks?.duration ?? 0}
-                    from={audioBeep}
-                    to={audioBeep + stageTime}
-                    geom={geom}
-                    height={56}
-                  />
-                ),
+                render: (geom) =>
+                  peaksLoading ? (
+                    // Nothing drawn yet: "No audio" would otherwise flash on
+                    // every stage load before a normal-latency request has
+                    // had a chance to resolve.
+                    <div style={{ height: 56 }} />
+                  ) : (
+                    <WaveformTrack
+                      peaks={peaks?.peaks ?? null}
+                      clipDuration={peaks?.duration ?? 0}
+                      from={audioBeep}
+                      to={audioBeep + stageTime}
+                      geom={geom}
+                      height={56}
+                    />
+                  ),
               },
               {
                 id: "lanes",
