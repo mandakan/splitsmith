@@ -120,6 +120,12 @@ def reload_figures(events: Sequence[StageEvent]) -> list[ReloadFigure]:
     return out
 
 
+def positive_overhang_s(figures: Sequence[ReloadFigure]) -> float:
+    """The stage's overhang: the positive overhangs summed. A hidden reload
+    (zero or negative) costs nothing and a standing one has none."""
+    return sum(f.overhang for f in figures if f.overhang is not None and f.overhang > 0)
+
+
 def _capacity_warning(
     shot_times: Sequence[float], reloads: Sequence[StageEvent], capacity: int | None
 ) -> str | None:
@@ -156,7 +162,7 @@ def stage_event_summary(
         moving_shots=sum(1 for t in shot_times if shot_is_moving(t, events)),
         reloads=len(figs),
         reload_avg_s=(sum(f.duration for f in figs) / len(figs)) if figs else None,
-        overhang_s=sum(f.overhang for f in figs if f.overhang is not None and f.overhang > 0),
+        overhang_s=positive_overhang_s(figs),
         capacity_warning=_capacity_warning(shot_times, reloads, capacity),
     )
 

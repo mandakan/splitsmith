@@ -33,7 +33,7 @@ from PIL import Image
 
 from . import composition
 from .config import StageEvent
-from .events import confirmed, events_from_doc
+from .events import confirmed, events_from_doc, reload_figures
 from .export_naming import stage_display_name, stage_file_base
 from .identity import ResolvedIdentity
 from .look_sting import sting_context
@@ -158,8 +158,9 @@ def _confirmed_regions(audit_doc: dict | None) -> list[StageEvent]:
 
 #: Bump when the same inputs draw a different picture, or a cached still
 #: from before the change outlives it. 2: a blank stage name reads
-#: "Stage N" on the slate and the lower-third.
-PREVIEW_REVISION = 2
+#: "Stage N" on the slate and the lower-third. 3: the stage summary draws
+#: confirmed reloads and static / moving split rows.
+PREVIEW_REVISION = 3
 
 
 def preview_key(
@@ -549,6 +550,7 @@ def render_preview(
             stage_time_is_manual=stage.time_seconds_manual,
             scorecard=stage.scorecard,
             stage_rounds=stage.stage_rounds,
+            reloads=tuple(reload_figures(_confirmed_regions(audit_doc))),
         )
         image = build_summary_still(
             tile,

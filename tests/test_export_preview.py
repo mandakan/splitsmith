@@ -164,6 +164,36 @@ def test_the_cards_carry_the_bundle_name_the_export_would(tmp_path: Path) -> Non
     assert "Bromma Classifier - Final Cut" in raster.htmls[-1]
 
 
+def test_summary_preview_draws_the_confirmed_reload_row_like_the_render(tmp_path: Path) -> None:
+    """The rail's summary declares the reload row the export draws, from
+    the confirmed reloads only."""
+    project, root = _project(tmp_path)
+    audit = {
+        **AUDIT,
+        "events": [
+            {"id": "evt-1", "kind": "reload", "start": 1.7, "end": 2.95, "source": "manual"},
+            {"id": "evt-2", "kind": "reload", "start": 0.1, "end": 0.3, "source": "auto"},
+        ],
+    }
+    htmls = []
+    for doc in (audit, AUDIT):
+        raster = _StubRasterizer()
+        ep.render_preview(
+            ep.PreviewSpec(card="summary", stage_number=3, project_name="Club night"),
+            project=project,
+            root=root,
+            audit_doc=doc,
+            look=load_look("splitsmith"),
+            rasterizer=raster,
+            ffmpeg_binary=None,
+            work_dir=tmp_path / f"work-{len(htmls)}",
+        )
+        htmls.append(raster.htmls[-1])
+    with_reload, without = htmls
+    assert ">Reloads<" in with_reload and ">1.25<" in with_reload
+    assert ">Reloads<" not in without
+
+
 def test_summary_label_is_the_competitor_then_the_bundle_name(tmp_path: Path) -> None:
     project, root = _project(tmp_path)
     project.competitor_name = None

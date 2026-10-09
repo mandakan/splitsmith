@@ -1306,7 +1306,7 @@ def overlay(
     console.print(f"[green]Wrote[/] {output}")
     if summary_card:
         from .audit_data import read_audit_data
-        from .stage_summary_data import TileStageData, load_stage_shots
+        from .stage_summary_data import TileStageData, load_stage_reloads, load_stage_shots
         from .summary_card import SummaryCardError, render_summary_card
 
         stem = output.stem.removesuffix("_overlay")
@@ -1319,6 +1319,7 @@ def overlay(
                     stage_number=int(audit_doc.get("stage_number", 0)) if isinstance(audit_doc, dict) else 0,
                     shots=load_stage_shots(audit_path),
                     stage_time_seconds=float(stage_time) if stage_time else None,
+                    reloads=load_stage_reloads(audit_path),
                 ),
                 label=summary_label,
                 trimmed_video_path=video,

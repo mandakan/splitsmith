@@ -722,7 +722,14 @@ def _group_style(group: Group) -> str:
     """
     parts: list[str] = []
     if group.flow is Flow.GRID:
-        parts.append(f"grid-template-columns: repeat({max(1, len(group.elements))}, 1fr)")
+        columns = group.columns if group.columns is not None else len(group.elements)
+        parts.append(f"grid-template-columns: repeat({max(1, columns)}, 1fr)")
+        if group.columns is not None:
+            # A grid with a set column count is one row of a table (the
+            # stage summary's Static / Moving rows): its cells sit on their
+            # last baseline, so a caption-less row label or figure lines
+            # up with the captioned figures beside it.
+            parts.append("align-items: last baseline")
     if group.gap is not None:
         parts.append(f"gap: {_fit(group.gap)}")
     if group.margin_top is not None:

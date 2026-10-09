@@ -1081,6 +1081,30 @@ def test_summary_hold_label_falls_back_to_the_project_name(
     assert captured["comp"].stages[0].summary.label == "Bromma Classifier"
 
 
+def test_summary_hold_carries_the_stages_confirmed_reloads(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The hold's tile carries the confirmed reloads the summary's reload
+    row draws; an auto proposal never reaches it (spec 2026-10-08, part 2)."""
+    captured = _capture_mp4(monkeypatch)
+    stage = _one_stage_input(tmp_path)
+    doc = json.loads(stage.audit_path.read_text())
+    doc["events"] = [
+        {"id": "evt-1", "kind": "reload", "start": 1.0, "end": 2.25, "source": "manual"},
+        {"id": "evt-2", "kind": "reload", "start": 3.0, "end": 4.0, "source": "auto"},
+    ]
+    stage.audit_path.write_text(json.dumps(doc))
+    match_exports_mod.export_match(
+        stages=[stage],
+        request=_card_request(summary_hold_seconds=3.0),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    hold = captured["comp"].stages[0].summary
+    assert [(r.event_id, r.duration) for r in hold.data.reloads] == [("evt-1", 1.25)]
+
+
 def test_summary_hold_off_by_default(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     captured = _capture_mp4(monkeypatch)
     match_exports_mod.export_match(

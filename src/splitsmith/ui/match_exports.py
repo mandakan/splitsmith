@@ -32,7 +32,7 @@ from ..overlay_theme import ThemeName
 from ..runtime import runtime
 from ..segment_cache import SegmentCache
 from ..shooter_book import EMPTY_BOOK, BookSnapshot
-from ..stage_summary_data import TileStageData, load_stage_shots
+from ..stage_summary_data import TileStageData, load_stage_reloads, load_stage_shots
 from .identity_media import effective_identity
 
 PipLayout = Literal["stacked", "pip-corners"]
@@ -698,6 +698,7 @@ def export_match(
                         stage_time_is_manual=stage_input.stage_time_is_manual,
                         scorecard=stage_input.scorecard,
                         stage_rounds=stage_input.stage_rounds,
+                        reloads=load_stage_reloads(stage_input.audit_path),
                     ),
                     label=label,
                     duration_seconds=request.summary_hold_seconds,

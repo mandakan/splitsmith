@@ -799,6 +799,29 @@ def test_summary_card_is_written_beside_the_overlay(tmp_path: Path, monkeypatch:
     assert not result.export_failures
 
 
+def test_summary_card_carries_the_stages_confirmed_reloads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from splitsmith import summary_card
+
+    captured: dict[str, Any] = {}
+
+    def fake_render(**kwargs: Any) -> summary_card.SummaryCardResult:
+        captured.update(kwargs)
+        return summary_card.SummaryCardResult(png_path=kwargs["png_path"], mov_path=kwargs["mov_path"])
+
+    monkeypatch.setattr(exports_mod.summary_card, "render_summary_card", fake_render)
+    audit_path, exports_dir = _seed_stage_with_trim(tmp_path)
+    doc = json.loads(audit_path.read_text())
+    doc["events"] = [
+        {"id": "evt-1", "kind": "reload", "start": 1.0, "end": 2.25, "source": "manual"},
+        {"id": "evt-2", "kind": "reload", "start": 3.0, "end": 4.0, "source": "auto"},
+    ]
+    audit_path.write_text(json.dumps(doc))
+    _export(audit_path, exports_dir)
+    assert [(r.event_id, r.duration) for r in captured["data"].reloads] == [("evt-1", 1.25)]
+
+
 def test_summary_card_skips_without_shots(tmp_path: Path) -> None:
     audit_path, exports_dir = _seed_stage_with_trim(tmp_path, shots=False)
     result = _export(audit_path, exports_dir)

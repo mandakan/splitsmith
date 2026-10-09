@@ -28,7 +28,8 @@ from pathlib import Path
 
 from PIL import Image
 
-from .coach import statistic_splits
+from .coach import statistic_split_shots
+from .events import ReloadFigure, positive_overhang_s
 from .match_project import StageScorecard
 from .overlay_html import single_html
 from .overlay_layout import Anchor, CellScale, ColorToken, Element, Emphasis, Flow, Group, Role
@@ -215,6 +216,68 @@ def _band_gap_extra(cell_height: int) -> int:
     return max(0, between_bands - within_band)
 
 
+#: The Splits band's column count once it runs to more than one row: a
+#: Static / Moving row is a label and three figures, the last row the Draw
+#: and up to three reload figures.
+_SPLIT_COLUMNS = 4
+
+#: The shortest cell that gets separate Static and Moving rows. The two
+#: rows and the Draw row below them need the band at about 0.58 of its
+#: full size, and the fit policy's legibility floor (``MIN_FONT_SIZE`` over
+#: the caption size, ``cell_h / 20``) only allows that from about 420 px;
+#: below it the fit drops the Scoring band's figures to make room, which
+#: breaks the two bands' equal weight. Measured with real Chromium on a
+#: full scorecard (2026-10-09); 480 leaves a margin. A 2x2 grid at 1080p
+#: (540 px cells) and every single-shooter canvas from 540p up qualify; a
+#: 3x3 grid at 1080p (360 px) keeps one Best / Avg / Worst / Draw row.
+_SPLIT_ROWS_MIN_CELL_HEIGHT = 480
+
+
+def _split_stat_elements(splits: list[float]) -> list[Element]:
+    """Best / Avg / Worst over ``splits``; nothing when there are none."""
+    if not splits:
+        return []
+    return [
+        Element(role=Role.HEADLINE, text=f"{min(splits):.2f}", caption="Best"),
+        Element(role=Role.HEADLINE, text=f"{sum(splits) / len(splits):.2f}", caption="Avg"),
+        Element(role=Role.HEADLINE, text=f"{max(splits):.2f}", caption="Worst"),
+    ]
+
+
+def _unlit_fault_count(counts: list[Element]) -> int:
+    """How many of the counts row's elements sit in the unlit-fault tier
+    (:data:`_TIER_UNLIT_FAULT`): a zero fault, which drops first."""
+    return sum(1 for e in counts if e.color is ColorToken.ACCENT_TEXT and e.emphasis is not Emphasis.PLATE)
+
+
+def _reload_elements(reloads: tuple[ReloadFigure, ...], *, first_priority: int) -> list[Element]:
+    """Reloads / Reload avg / Overhang for the stage's confirmed reloads.
+
+    Overhang is the positive overhangs summed and signed (``+0.31``), the
+    Coach page's figure (``events.positive_overhang_s``). It is drawn only
+    when some reload overlapped a movement: a standing reload has no
+    overhang at all, and the summary never draws a figure that was not
+    measured. Nothing at all without a confirmed reload.
+
+    Drop priorities run from ``first_priority`` right to left, so a cell
+    that must give up part of the row loses the overhang first and the
+    count last."""
+    if not reloads:
+        return []
+    avg = sum(r.duration for r in reloads) / len(reloads)
+    declared = [
+        (str(len(reloads)), "Reloads"),
+        (f"{avg:.2f}", "Reload avg"),
+    ]
+    if any(r.overhang is not None for r in reloads):
+        declared.append((f"+{positive_overhang_s(reloads):.2f}", "Overhang"))
+    last = first_priority + len(declared) - 1
+    return [
+        Element(role=Role.HEADLINE, text=text, caption=caption, drop_priority=last - index)
+        for index, (text, caption) in enumerate(declared)
+    ]
+
+
 def summary_groups(
     tile: TileStageData | None,
     label: str,
@@ -248,6 +311,13 @@ def summary_groups(
     A tile with no audit and no scorecard yields just the identity group
     -- that cell is the control the hold's pixel checks measure against,
     so it must stay text-free apart from the name.
+
+    Confirmed stage events (spec 2026-10-08, part 2) add to the Splits
+    band only: Static and Moving rows in place of the one Best/Avg/Worst
+    row when both kinds of split exist and the cell is tall enough, and a
+    Reloads / Reload avg / Overhang row when the stage has a confirmed
+    reload. A stage without confirmed regions declares exactly the groups
+    it did before (pinned in ``tests/test_overlay_summary_cell.py``).
     """
     scorecard = tile.scorecard if tile is not None else None
     # Narrowed to a real ``StageScorecard`` (not just a bool) so the reads
@@ -276,6 +346,21 @@ def summary_groups(
     stack: list[Group] = []
 
     counts = count_elements(active_scorecard) if active_scorecard is not None else []
+    # The reload row (confirmed reloads only) is the first thing a cell too
+    # small for everything gives up after the unlit faults: it is neither a
+    # split nor a scoring input. Its figures take the drop priorities right
+    # after the unlit faults' tier and every later count moves up past
+    # them. Without a reload nothing is renumbered.
+    reload_row = _reload_elements(tile.reloads, first_priority=_unlit_fault_count(counts))
+    if reload_row:
+        counts = [
+            (
+                replace(e, drop_priority=e.drop_priority + len(reload_row))
+                if e.drop_priority is not None and e.drop_priority >= _unlit_fault_count(counts)
+                else e
+            )
+            for e in counts
+        ]
     time_text = time_text_for(tile)
     hf_text = (
         f"{active_scorecard.hit_factor:.2f}"
@@ -294,9 +379,10 @@ def summary_groups(
         # policy ever reaches hit factor/time, and the "Scoring" label
         # itself is the last thing this module will ever offer to drop
         # on the Scoring side -- see ``overlay_html._fit_script``. Never
-        # assigned to anything in the Splits band; F1's rule 2 is "never
-        # the splits", so nothing below this block ever sets one.
-        next_priority = len(counts)
+        # assigned to a split figure; F1's rule 2 is "never the splits".
+        # The reload row is the one droppable thing in the Splits band
+        # (see ``reload_row`` above).
+        next_priority = len(counts) + len(reload_row)
         working: list[Element] = []
         if hf_text is not None:
             working.append(Element(role=Role.HEADLINE, text=hf_text, unit="HF", drop_priority=next_priority))
@@ -336,19 +422,42 @@ def summary_groups(
     # Splits: Best/Avg/Worst/Draw, only what can actually be computed --
     # "Best"/"Avg"/"Worst" need at least one split-classed interval
     # (transitions, movement and reloads are the run's dead time, not its
-    # shooting - issue #772; ``statistic_splits`` owns the rule and the
+    # shooting - issue #772; ``statistic_split_shots`` owns the rule and the
     # unclassified fallback); "Draw" needs only the draw itself. Never
     # invented, per the module's own rule.
-    splits: list[Element] = []
+    #
+    # Stage events (spec 2026-10-08, part 2): when the selection holds both
+    # static and moving splits (``TileShot.moving``, confirmed movement
+    # regions only) and the cell is tall enough
+    # (:data:`_SPLIT_ROWS_MIN_CELL_HEIGHT`) the Best/Avg/Worst row becomes a
+    # Static and a Moving row, and the Draw moves down to the last row;
+    # confirmed reloads add Reloads / Reload avg / Overhang to that last row
+    # (their own row under Best/Avg/Worst/Draw otherwise). Every row then
+    # shares four columns so the figures line up. A stage with neither
+    # declares exactly what it did before: one grid, one column per element.
+    rows: list[list[Element]] = []
     if tile.has_shots:
-        rest = statistic_splits(tile.shots)
-        if rest:
-            splits.append(Element(role=Role.HEADLINE, text=f"{min(rest):.2f}", caption="Best"))
-            splits.append(Element(role=Role.HEADLINE, text=f"{sum(rest) / len(rest):.2f}", caption="Avg"))
-            splits.append(Element(role=Role.HEADLINE, text=f"{max(rest):.2f}", caption="Worst"))
-        splits.append(Element(role=Role.HEADLINE, text=f"{tile.shots[0].split:.2f}", caption="Draw"))
+        selected = statistic_split_shots(tile.shots)
+        static = [shot.split for shot in selected if not shot.moving]
+        moving = [shot.split for shot in selected if shot.moving]
+        draw = Element(role=Role.HEADLINE, text=f"{tile.shots[0].split:.2f}", caption="Draw")
+        if static and moving and cell_height >= _SPLIT_ROWS_MIN_CELL_HEIGHT:
+            rows.append([Element(role=Role.LABEL, text="Static"), *_split_stat_elements(static)])
+            # No captions: the Moving figures sit under the Static row's.
+            rows.append(
+                [
+                    Element(role=Role.LABEL, text="Moving"),
+                    *(replace(e, caption=None) for e in _split_stat_elements(moving)),
+                ]
+            )
+            rows.append([draw, *reload_row])
+        else:
+            rows.append([*_split_stat_elements([shot.split for shot in selected]), draw])
+            if reload_row:
+                rows.append(reload_row)
+    columns = _SPLIT_COLUMNS if len(rows) > 1 else None
 
-    if splits:
+    if rows:
         stack.append(
             Group(
                 anchor=Anchor.MIDDLE_CENTER,
@@ -358,15 +467,17 @@ def summary_groups(
                 margin_top=_band_gap_extra(cell_height) if scoring_present else None,
             )
         )
-        stack.append(
-            Group(
-                anchor=Anchor.MIDDLE_CENTER,
-                flow=Flow.GRID,
-                elements=tuple(splits),
-                align="left",
-                gap=_sgrid_gap(cell_width),
+        for row in rows:
+            stack.append(
+                Group(
+                    anchor=Anchor.MIDDLE_CENTER,
+                    flow=Flow.GRID,
+                    elements=tuple(row),
+                    align="left",
+                    gap=_sgrid_gap(cell_width),
+                    columns=columns,
+                )
             )
-        )
 
     groups.extend(stack)
     return tuple(groups)

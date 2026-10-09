@@ -30,7 +30,7 @@ from ..overlay_hud import LEGACY_OVERLAY_SETTINGS, HudOptions, overlay_settings
 from ..overlay_render import OverlayCodec
 from ..overlay_theme import ThemeName
 from ..segment_cache import SegmentCache
-from ..stage_summary_data import TileStageData, load_stage_shots
+from ..stage_summary_data import TileStageData, load_stage_reloads, load_stage_shots
 
 
 @dataclass(frozen=True)
@@ -450,6 +450,7 @@ def export_stage(
                         stage_time_seconds=stage_data.time_seconds if stage_data.time_seconds > 0 else None,
                         stage_time_is_manual=stage_time_is_manual,
                         scorecard=scorecard,
+                        reloads=load_stage_reloads(audit_path),
                     ),
                     label=label,
                     trimmed_video_path=card_source,
