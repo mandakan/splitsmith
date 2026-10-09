@@ -61,6 +61,7 @@ import {
 } from "@/lib/api";
 import { isJobActive, useJobs, type JobsState } from "@/lib/jobs";
 import { useMode } from "@/lib/mode";
+import { isTypingTextTarget } from "@/lib/audit-input";
 import { pickDefaultShooterSlug } from "@/lib/defaultShooter";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { deriveStageStatus, isNextUpCandidate } from "@/lib/stageStatus";
@@ -239,6 +240,27 @@ export function MatchShell() {
       return next;
     });
   }, []);
+  // Cmd/Ctrl+B toggles the sidebar from anywhere on the page -- the full-
+  // width timeline band (shared-timeline #1352) needs the room this frees
+  // up, and the shortcut should work without first clicking the collapse
+  // button. Swallowed while typing in a text field; never fires with Alt
+  // or Shift held so it doesn't collide with other chords.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (isTypingTextTarget(e.target)) return;
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        !e.altKey &&
+        !e.shiftKey &&
+        e.key.toLowerCase() === "b"
+      ) {
+        e.preventDefault();
+        toggleSidebar();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [toggleSidebar]);
 
   // Mobile shell (< md): sidebar is replaced by the MobileNav drawer.
   // Drawer state is ephemeral - never persisted.
