@@ -1,14 +1,15 @@
 /**
- * TransportLine -- the one row under the Audit waveform (UX PR 5, spec
- * s4.4): play, clock, zoom, the "show" summary that opens the marker
- * filter menu, then the overflow menu (auto-step preference, trim /
- * detect actions the page passes in) and help. Replaces the toolbar's
- * five filter pills, the zoom cluster and the auto-step pill.
+ * TransportLine -- the row above the Audit timeline band (UX PR 5, spec
+ * s4.4): play, clock, the "show" summary that opens the marker filter
+ * menu, then the overflow menu (auto-step preference, trim / detect
+ * actions the page passes in) and help. Replaces the toolbar's five
+ * filter pills and the auto-step pill. Zoom is the band's own header
+ * (shared timeline, #1352).
  */
 import { useState, type ReactNode } from "react";
 import { MoreHorizontal, Pause, Play } from "lucide-react";
 
-import { MAX_ZOOM, MIN_ZOOM, ZOOM_STEP, type MarkerFilters } from "@/components/AuditControls";
+import type { MarkerFilters } from "@/components/AuditControls";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/Kbd";
 import { Menu, menuItemClass as ITEM } from "@/components/ui/Menu";
@@ -19,8 +20,6 @@ export interface TransportLineProps {
   onTogglePlay: () => void;
   currentTime: number;
   duration: number;
-  zoom: number | null;
-  onZoomChange: (zoom: number | null) => void;
   filters: MarkerFilters;
   counts: { detected: number; rejected: number; manual: number; beep: number };
   onFiltersChange: (next: MarkerFilters) => void;
@@ -45,17 +44,12 @@ function clock(s: number): string {
 }
 
 export function TransportLine(props: TransportLineProps) {
-  const { isPlaying, onTogglePlay, currentTime, duration, zoom, onZoomChange, filters, counts, onFiltersChange } = props;
+  const { isPlaying, onTogglePlay, currentTime, duration, filters, counts, onFiltersChange } = props;
   const { peeking, onPeekStart, onPeekEnd, kAutoProgress, onToggleKAuto, onOpenHelp, menuExtra } = props;
   const { fullResVideo, onToggleFullResVideo } = props;
   const [showOpen, setShowOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
 
-  const zoomIn = () => onZoomChange(Math.min(MAX_ZOOM, (zoom ?? 1) * ZOOM_STEP));
-  const zoomOut = () => {
-    const next = (zoom ?? 1) / ZOOM_STEP;
-    onZoomChange(next <= MIN_ZOOM ? null : next);
-  };
   const toggle = (key: keyof MarkerFilters) => onFiltersChange({ ...filters, [key]: !filters[key] });
 
   return (
@@ -73,16 +67,6 @@ export function TransportLine(props: TransportLineProps) {
       <span className="numeral shrink-0 whitespace-nowrap text-ink-2">
         {clock(currentTime)} / {clock(duration)}
       </span>
-      <span aria-hidden className="mx-1 h-4 w-px bg-rule-strong" />
-      <Button type="button" size="sm" onClick={zoomOut} aria-label="Zoom out">
-        &minus;
-      </Button>
-      <Button type="button" size="sm" onClick={() => onZoomChange(null)} aria-label="Fit" aria-pressed={zoom == null}>
-        fit
-      </Button>
-      <Button type="button" size="sm" onClick={zoomIn} aria-label="Zoom in">
-        +
-      </Button>
       <span aria-hidden className="mx-1 h-4 w-px bg-rule-strong" />
       <span className="relative min-w-0">
         <Button

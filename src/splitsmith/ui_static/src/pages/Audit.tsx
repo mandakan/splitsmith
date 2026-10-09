@@ -53,7 +53,6 @@ import {
   DEFAULT_FILTERS,
   type MarkerFilters,
   visibleKindsFromFilters,
-  zoomToPixelsPerSecond,
 } from "@/components/AuditControls";
 import { HelpOverlay } from "@/components/HelpOverlay";
 import { useConfirm } from "@/components/useConfirm";
@@ -61,7 +60,8 @@ import { MarkerLayer, type AuditMarker } from "@/components/MarkerLayer";
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
 import { VideoPanel } from "@/components/VideoPanel";
 import { DesktopCommandLine } from "@/components/desktop/DesktopCommandLine";
-import { Waveform, type WaveformView } from "@/components/Waveform";
+import { Timeline, type TimelineTrack } from "@/components/timeline/Timeline";
+import { WaveformTrack } from "@/components/timeline/WaveformTrack";
 import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/Chip";
 import { Kbd } from "@/components/ui/Kbd";
@@ -94,9 +94,9 @@ import { planServedClip } from "@/lib/camPlayback";
 import { useScrubSource } from "@/lib/useScrubSource";
 import { computeAuditNextStep } from "@/lib/audit-next-step";
 import { useMatchHref } from "@/lib/matchHref";
-import { zoomActionForKey } from "@/lib/zoomKeys";
 import { snapToPeak, type SnapPeaks } from "@/lib/peak-snap";
 import { deriveStageStatus } from "@/lib/stageStatus";
+import type { Zoom } from "@/lib/timelineView";
 import { cn } from "@/lib/utils";
 
 const PEAK_BINS = 1500;
@@ -251,36 +251,10 @@ export function Audit() {
   // Momentary "peek": true while the user holds the peek button or the p key.
   // Adds "rejected" to visibleKinds without touching the sticky filter chip.
   const [peeking, setPeeking] = useState(false);
-  // ``null`` = fit-to-width; numeric multiplier scales pixels-per-second
-  // relative to fit. Reset on stage change.
-  const [zoom, setZoom] = useState<number | null>(null);
-  // Scroll-host geometry reported by <Waveform>. AnomalyPins lives outside
-  // the scroll host (its overflow-y-hidden would clip the seam-straddling
-  // pins), so it needs this to place pins correctly under zoom + scroll.
-  const [waveView, setWaveView] = useState<WaveformView | null>(null);
-  // Callback ref so we attach the ResizeObserver exactly when the
-  // wrapper mounts. A useEffect-based ref + ``[]`` deps wouldn't fire
-  // again once peaks load and the conditional render finally inserts
-  // the div, so viewportWidth would stay at 0 and zoom would be a
-  // no-op (zoomToPixelsPerSecond returns null when viewport is 0).
-  const [waveformViewport, setWaveformViewport] = useState(0);
-  const waveformObserverRef = useRef<ResizeObserver | null>(null);
-  const waveformWrapperRef = useCallback((el: HTMLDivElement | null) => {
-    waveformObserverRef.current?.disconnect();
-    if (!el) {
-      waveformObserverRef.current = null;
-      return;
-    }
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const w = Math.floor(entry.contentRect.width);
-        if (w > 0) setWaveformViewport(w);
-      }
-    });
-    observer.observe(el);
-    setWaveformViewport(Math.floor(el.getBoundingClientRect().width));
-    waveformObserverRef.current = observer;
-  }, []);
+  // The timeline band's zoom: ``null`` = Fit, else a multiple of Fit. The
+  // band clamps it and owns the + / - / 0 keys and the wheel. Reset on
+  // stage change.
+  const [zoom, setZoom] = useState<Zoom>(null);
   const rafRef = useRef<number | null>(null);
 
   // ShooterScopedRoute redirects to /shooters when slug is missing, so by
@@ -1177,11 +1151,6 @@ export function Audit() {
     [handleScrub, keptShots],
   );
 
-  const pixelsPerSecond = useMemo(
-    () => zoomToPixelsPerSecond(zoom, waveformViewport, peaks?.duration ?? 0),
-    [zoom, waveformViewport, peaks],
-  );
-
   // ---- Save flow (Step 5) ------------------------------------------------
 
   const performSave = useCallback(
@@ -1368,20 +1337,8 @@ export function Audit() {
           return;
         }
       }
-      // Waveform zoom: + / 0 / - (Cmd+1/2/3 kept as aliases). See
-      // lib/zoomKeys for why the chords alone were not enough (Safari).
-      const zoomAction = zoomActionForKey(e);
-      if (zoomAction) {
-        e.preventDefault();
-        if (zoomAction === "fit") setZoom(null);
-        else if (zoomAction === "in")
-          setZoom((z) => Math.min(16, (z ?? 1) * 1.5));
-        else setZoom((z) => {
-          const next = (z ?? 1) / 1.5;
-          return next <= 0.25 ? null : next;
-        });
-        return;
-      }
+      // Zoom (+ / 0 / -, Cmd+1/2/3 as aliases) is the timeline band's own
+      // window listener; the page does not answer those keys.
       // Alt+Arrow nudges the focused marker (or the current shot) by
       // detector resolution; Alt+Shift+Arrow is sample-precise (~1 ms).
       // We also scrub the playhead to the new position so the user
@@ -1842,6 +1799,73 @@ export function Audit() {
   const currentFlag = currentShot ? (rows.all.find((r) => r.marker.id === currentShot.id)?.flag ?? null) : null;
   const shotAtPlayhead = keptShots.some((s) => Math.abs(s.time - currentTime) < 0.05);
 
+  // The band's tracks, all in clip seconds (the band's domain is the clip,
+  // its ruler zero the beep). Pins go on their own Flags row at their
+  // content x: the band scrolls the row, so the pins need no view of their
+  // own. The audio track holds the waveform and MarkerLayer in one wrapper,
+  // which is the parent MarkerLayer measures for drags.
+  const auditTracks = (dp: PeaksResult): TimelineTrack[] => {
+    const tracks: TimelineTrack[] = [];
+    if (anomalies.some((a) => a.time != null)) {
+      tracks.push({
+        id: "flags",
+        rows: [{ label: "Flags", height: 18 }],
+        render: (geom) => (
+          <div className="pointer-events-none absolute inset-x-0 top-1/2 h-0">
+            <AnomalyPins
+              anomalies={anomalies}
+              duration={dp.duration}
+              view={{ contentWidth: geom.contentWidth, viewportWidth: geom.contentWidth, scrollLeft: 0 }}
+              onJump={(a) => {
+                if (a.time != null) handleScrub(a.time);
+              }}
+            />
+          </div>
+        ),
+      });
+    }
+    tracks.push({
+      id: "audio",
+      rows: [{ label: "Audio", height: 140 }],
+      seekable: true,
+      onDoubleClick: handleAddManual,
+      render: (geom) => (
+        <div data-testid="audit-audio-track" className="relative h-full">
+          <WaveformTrack
+            peaks={dp.peaks}
+            clipDuration={dp.duration}
+            from={0}
+            to={dp.duration}
+            geom={geom}
+            height={140}
+            beepTime={filters.beep ? auditBeep : null}
+            timerStopTime={
+              filters.beep && auditBeep != null && stage && stage.time_seconds > 0
+                ? auditBeep + stage.time_seconds
+                : null
+            }
+            loopRegion={loopRegion}
+          />
+          <MarkerLayer
+            markers={markers}
+            duration={dp.duration}
+            focusedId={focusedMarkerId}
+            onFocusChange={setFocusedMarkerId}
+            onClick={handleMarkerClick}
+            onDelete={handleMarkerDelete}
+            onTimeChange={handleMarkerTimeChange}
+            onTimeChangeBegin={handleMarkerTimeChangeBegin}
+            onTimeChangeCommit={handleMarkerTimeChangeCommit}
+            visibleKinds={visibleKinds}
+            forcedVisibleId={forcedVisibleId}
+            snapPeaks={snapPeaks ?? undefined}
+          />
+        </div>
+      ),
+    });
+    return tracks;
+  };
+
   return (
     <div
       ref={editorRootRef}
@@ -1968,163 +1992,11 @@ export function Audit() {
             ) : null}
 
             {!prereqShouldShow && displayPeaks ? (
-              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
-                <div className="min-w-0 overflow-hidden rounded-[10px] border border-rule bg-surface">
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-rule px-3 py-2">
-                    <Label tone="ink">{chips?.camera ?? "Head cam"}</Label>
-                    <Label>
-                      {displayPeaks.peaks.length} peaks &middot; {displayPeaks.duration.toFixed(2)} s
-                    </Label>
-                    {peaksLoading ? (
-                      <Label tone="live" aria-live="polite">
-                        Loading
-                      </Label>
-                    ) : null}
-                    <span className="ml-auto flex flex-wrap gap-3 text-sm text-muted">
-                      <Legend className="bg-beep" label="Beep" />
-                      <Legend className="border border-beep bg-transparent" label="Timer stop" />
-                      <Legend className="bg-ink-2" label="Shot" />
-                      <Legend className="bg-manual" label="Manual" />
-                      <Legend className="border border-rule-strong bg-transparent" label="Rejected" />
-                      <Legend className="bg-live" label="Flag" />
-                      <Legend className="bg-led" label="Current" />
-                    </span>
-                  </div>
-                  <div className="relative bg-bg px-3 py-3" ref={waveformWrapperRef}>
-                    <Waveform
-                      peaks={displayPeaks.peaks}
-                      duration={displayPeaks.duration}
-                      currentTime={currentTime}
-                      beepTime={filters.beep ? auditBeep : null}
-                      timerStopTime={
-                        filters.beep && auditBeep != null && stage && stage.time_seconds > 0
-                          ? auditBeep + stage.time_seconds
-                          : null
-                      }
-                      loopRegion={loopRegion}
-                      pixelsPerSecond={pixelsPerSecond}
-                      onScrub={handleScrub}
-                      onDoubleClick={handleAddManual}
-                      onViewChange={setWaveView}
-                      height={180}
-                    >
-                      <MarkerLayer
-                        markers={markers}
-                        duration={displayPeaks.duration}
-                        focusedId={focusedMarkerId}
-                        onFocusChange={setFocusedMarkerId}
-                        onClick={handleMarkerClick}
-                        onDelete={handleMarkerDelete}
-                        onTimeChange={handleMarkerTimeChange}
-                        onTimeChangeBegin={handleMarkerTimeChangeBegin}
-                        onTimeChangeCommit={handleMarkerTimeChangeCommit}
-                        visibleKinds={visibleKinds}
-                        forcedVisibleId={forcedVisibleId}
-                        snapPeaks={snapPeaks ?? undefined}
-                      />
-                    </Waveform>
-                    {/* Anomaly pins sit on the seam above the waveform bars.
-                        `inset-x-3` matches the wrapper's px-3 so the overlay's
-                        left edge aligns with the Waveform's scroll host. */}
-                    <div aria-hidden className="pointer-events-none absolute inset-x-3 top-0 z-10 h-0">
-                      <AnomalyPins
-                        anomalies={anomalies}
-                        duration={displayPeaks.duration}
-                        view={waveView}
-                        onJump={(a) => {
-                          if (a.time != null) handleScrub(a.time);
-                        }}
-                      />
-                    </div>
-                  </div>
-                  <div className="numeral flex justify-between border-t border-rule px-3 py-1 text-xs text-subtle">
-                    {Array.from({ length: 6 }, (_, i) => (
-                      <span key={i}>{((i / 5) * displayPeaks.duration).toFixed(2)}</span>
-                    ))}
-                  </div>
-                  <TransportLine
-                    isPlaying={isPlaying}
-                    onTogglePlay={togglePlay}
-                    currentTime={currentTime}
-                    duration={displayPeaks.duration}
-                    zoom={zoom}
-                    onZoomChange={setZoom}
-                    filters={filters}
-                    counts={{
-                      detected: detectedCount,
-                      rejected: rejectedCount,
-                      manual: manualCount,
-                      beep: auditBeep != null ? 1 : 0,
-                    }}
-                    onFiltersChange={setFilters}
-                    peeking={peeking}
-                    onPeekStart={() => setPeeking(true)}
-                    onPeekEnd={() => setPeeking(false)}
-                    kAutoProgress={kAutoProgress}
-                    onToggleKAuto={() => setKAutoProgress((v) => !v)}
-                    fullResVideo={scrub.fullRes}
-                    onToggleFullResVideo={scrub.available ? () => scrub.setFullRes(!scrub.fullRes) : undefined}
-                    onOpenHelp={() => setShowHelp(true)}
-                    menuExtra={
-                      <>
-                        {peaks && !peaks.trimmed ? (
-                          <TrimNowBadge
-                            slug={slug}
-                            stageNumber={stage.stage_number}
-                            hasBeep={primary.beep_time != null}
-                            hasStageTime={stage.time_seconds > 0}
-                            onProjectUpdate={(p) => {
-                              setProject(p);
-                              reloadPeaks();
-                            }}
-                          />
-                        ) : null}
-                        {peaks && peaks.trimmed ? (
-                          <DetectShotsBadge
-                            slug={slug}
-                            stageNumber={stage.stage_number}
-                            hasBeep={primary.beep_time != null}
-                            hasStageTime={stage.time_seconds > 0}
-                            hasCandidates={markers.length > 0}
-                            onComplete={reloadAudit}
-                            desktop={
-                              desktopMirror
-                                ? {
-                                    busy: stageCommand != null && isActiveCommand(stageCommand),
-                                    onRequest: () => void desktop.requestRedetect(slug, stage.stage_number),
-                                  }
-                                : undefined
-                            }
-                          />
-                        ) : null}
-                      </>
-                    }
-                  />
-                  {stageCommand ? (
-                    <DesktopCommandLine
-                      command={stageCommand}
-                      presence={desktop.presence}
-                      onCancel={(id) => void desktop.cancel(id)}
-                      className="py-1"
-                    />
-                  ) : null}
-                  {desktop.error ? <p className="py-1 text-sm text-led-text">{desktop.error}</p> : null}
-                  <CurrentShotLine
-                    shots={keptShots}
-                    currentIndex={currentShotIndex}
-                    beep={auditBeep}
-                    onStep={stepShot}
-                    flag={currentFlag}
-                    onNoteChange={handleNoteChange}
-                    onReject={() => {
-                      if (currentShot) handleMarkerDelete(currentShot);
-                    }}
-                    onAddHere={() => handleAddManual(currentTime)}
-                    canAddHere={!shotAtPlayhead}
-                  />
-                </div>
-
-                <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-4">
+                {/* Top row (the owner's layout, 2026-10-09, as Coach): the
+                    video left, the shot list right. Everything else runs
+                    full width under it. */}
+                <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
                   <MultiCamColumn
                     videos={videos}
                     activeIndex={activeVideoIndex}
@@ -2196,6 +2068,129 @@ export function Audit() {
                     />
                   </MultiCamColumn>
                   <ShotList rows={rows} beep={auditBeep} currentMarkerId={focusedMarkerId ?? currentShot?.id ?? null} onJump={jumpToMarker} />
+                </div>
+
+                <div className="min-w-0 overflow-hidden rounded-[10px] border border-rule bg-surface">
+                  {/* No bottom rule: TransportLine draws its own top one. */}
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2">
+                    <Label tone="ink">{chips?.camera ?? "Head cam"}</Label>
+                    <Label>
+                      {displayPeaks.peaks.length} peaks &middot; {displayPeaks.duration.toFixed(2)} s
+                    </Label>
+                    {peaksLoading ? (
+                      <Label tone="live" aria-live="polite">
+                        Loading
+                      </Label>
+                    ) : null}
+                    <span className="ml-auto flex flex-wrap gap-3 text-sm text-muted">
+                      <Legend className="bg-beep" label="Beep" />
+                      <Legend className="border border-beep bg-transparent" label="Timer stop" />
+                      <Legend className="bg-ink-2" label="Shot" />
+                      <Legend className="bg-manual" label="Manual" />
+                      <Legend className="border border-rule-strong bg-transparent" label="Rejected" />
+                      <Legend className="bg-live" label="Flag" />
+                      <Legend className="bg-led" label="Current" />
+                    </span>
+                  </div>
+                  <TransportLine
+                    isPlaying={isPlaying}
+                    onTogglePlay={togglePlay}
+                    currentTime={currentTime}
+                    duration={displayPeaks.duration}
+                    filters={filters}
+                    counts={{
+                      detected: detectedCount,
+                      rejected: rejectedCount,
+                      manual: manualCount,
+                      beep: auditBeep != null ? 1 : 0,
+                    }}
+                    onFiltersChange={setFilters}
+                    peeking={peeking}
+                    onPeekStart={() => setPeeking(true)}
+                    onPeekEnd={() => setPeeking(false)}
+                    kAutoProgress={kAutoProgress}
+                    onToggleKAuto={() => setKAutoProgress((v) => !v)}
+                    fullResVideo={scrub.fullRes}
+                    onToggleFullResVideo={scrub.available ? () => scrub.setFullRes(!scrub.fullRes) : undefined}
+                    onOpenHelp={() => setShowHelp(true)}
+                    menuExtra={
+                      <>
+                        {peaks && !peaks.trimmed ? (
+                          <TrimNowBadge
+                            slug={slug}
+                            stageNumber={stage.stage_number}
+                            hasBeep={primary.beep_time != null}
+                            hasStageTime={stage.time_seconds > 0}
+                            onProjectUpdate={(p) => {
+                              setProject(p);
+                              reloadPeaks();
+                            }}
+                          />
+                        ) : null}
+                        {peaks && peaks.trimmed ? (
+                          <DetectShotsBadge
+                            slug={slug}
+                            stageNumber={stage.stage_number}
+                            hasBeep={primary.beep_time != null}
+                            hasStageTime={stage.time_seconds > 0}
+                            hasCandidates={markers.length > 0}
+                            onComplete={reloadAudit}
+                            desktop={
+                              desktopMirror
+                                ? {
+                                    busy: stageCommand != null && isActiveCommand(stageCommand),
+                                    onRequest: () => void desktop.requestRedetect(slug, stage.stage_number),
+                                  }
+                                : undefined
+                            }
+                          />
+                        ) : null}
+                      </>
+                    }
+                  />
+                </div>
+
+                <Timeline
+                  title="Waveform"
+                  duration={displayPeaks.duration}
+                  origin={auditBeep ?? 0}
+                  fps={30}
+                  currentTime={currentTime}
+                  playing={isPlaying}
+                  onSeek={handleScrub}
+                  zoom={zoom}
+                  onZoomChange={setZoom}
+                  tracks={auditTracks(displayPeaks)}
+                />
+
+                {stageCommand || desktop.error ? (
+                  <div>
+                    {stageCommand ? (
+                      <DesktopCommandLine
+                        command={stageCommand}
+                        presence={desktop.presence}
+                        onCancel={(id) => void desktop.cancel(id)}
+                        className="py-1"
+                      />
+                    ) : null}
+                    {desktop.error ? <p className="py-1 text-sm text-led-text">{desktop.error}</p> : null}
+                  </div>
+                ) : null}
+                {/* CurrentShotLine draws its own top rule; the card's border replaces it. */}
+                <div className="overflow-hidden rounded-[10px] border border-rule [&>div]:border-t-0">
+                  <CurrentShotLine
+                    shots={keptShots}
+                    currentIndex={currentShotIndex}
+                    beep={auditBeep}
+                    onStep={stepShot}
+                    flag={currentFlag}
+                    onNoteChange={handleNoteChange}
+                    onReject={() => {
+                      if (currentShot) handleMarkerDelete(currentShot);
+                    }}
+                    onAddHere={() => handleAddManual(currentTime)}
+                    canAddHere={!shotAtPlayhead}
+                  />
                 </div>
               </div>
             ) : !prereqShouldShow && peaksLoading ? (
