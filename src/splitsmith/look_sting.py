@@ -55,23 +55,29 @@ def sting_context(
     fps: float,
     theme: OverlayTheme,
     shooters: Sequence[Any] = (),
+    brand: dict[str, str | None] | None = None,
 ) -> TemplateContext:
     """What a ``transition`` slot template receives as ``window.splitsmith``:
     the transition as data, the shooters as the cards see them, the
     palette, the canvas and the engine block (its stylesheet, so a sting
-    can draw in the overlay's typography)."""
+    can draw in the overlay's typography). ``brand`` is the video maker's
+    (``look_brand.brand_mark_json``), sent only when the ``wipe`` logo spot
+    is on and there is one, so every other sting's context is as it was."""
+    data: dict[str, Any] = {
+        "transition": {
+            "kind": kind,
+            "name": sting_name(kind),
+            "duration_seconds": seconds,
+            "from": from_label,
+            "to": to_label,
+        },
+        "shooters": [shooter_json(shooter) for shooter in shooters],
+    }
+    if brand is not None:
+        data["brand"] = brand
     return TemplateContext(
         theme=theme_tokens(theme),
-        data={
-            "transition": {
-                "kind": kind,
-                "name": sting_name(kind),
-                "duration_seconds": seconds,
-                "from": from_label,
-                "to": to_label,
-            },
-            "shooters": [shooter_json(shooter) for shooter in shooters],
-        },
+        data=data,
         size={"width": width, "height": height},
         fps=fps,
         engine=engine_block(
@@ -93,6 +99,7 @@ def sting_motion(
     fps: float,
     rasterizer: Rasterizer,
     shooters: Sequence[Any] = (),
+    brand: dict[str, str | None] | None = None,
 ) -> CardMotion | None:
     """Load the sting ``kind`` names and read how it renders over
     ``seconds``: frames are rendered lazily (a cached boundary pulls
@@ -113,6 +120,7 @@ def sting_motion(
         fps=fps,
         theme=theme_for(look),
         shooters=shooters,
+        brand=brand,
     )
     frames: TemplateFrames | None = None
     try:

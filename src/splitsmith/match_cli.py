@@ -467,6 +467,15 @@ def export(
         "--account-brand/--no-account-brand",
         help="Your account's brand on the title page and the closing card, when the Look has none.",
     ),
+    logos: str = typer.Option(
+        "polished",
+        "--logos",
+        help=(
+            "Where logos go beyond the title page, slates and closing card: 'polished' (your brand on "
+            "the wipe between stages, the shooter's logo on the summaries), 'cards' (only the cards), "
+            "'everything', or spots separated by commas (wipe,summaries)."
+        ),
+    ),
     card_variant: str = typer.Option(
         "default",
         "--card-variant",
@@ -636,6 +645,13 @@ def export(
     except ValueError as exc:
         console.print(f"[red]Error:[/] --transition: {exc}.")
         raise typer.Exit(code=2) from None
+    from .logo_spots import parse_logo_spots
+
+    try:
+        spots = parse_logo_spots(logos)
+    except ValueError as exc:
+        console.print(f"[red]Error:[/] --logos: {exc}.")
+        raise typer.Exit(code=2) from None
     if transition_seconds <= 0:
         console.print(f"[red]Error:[/] --transition-seconds must be positive, got {transition_seconds:g}.")
         raise typer.Exit(code=2)
@@ -719,6 +735,7 @@ def export(
         closing_card=closing_card,
         made_with=made_with,
         account_brand=load_brand(JsonAccountProfileStore()) if account_brand else None,
+        logo_spots=spots,
         card_variant=card_variant,
         overlay_theme=overlay_theme,  # type: ignore[arg-type]
         summary_hold_seconds=summary_hold,

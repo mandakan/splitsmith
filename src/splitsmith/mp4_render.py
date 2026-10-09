@@ -79,6 +79,8 @@ from .composition import (
     sting_name,
     xfade_name,
 )
+from .logo_spots import paste_logo
+from .look_brand import brand_mark_json
 from .look_motion import MotionClipError, motion_overlay_filters, write_motion_clip
 from .look_sting import sting_motion, sting_overlay_filters
 from .looks import load_look, sting_template_for
@@ -303,6 +305,11 @@ def _render_with_work_dir(
     theme = theme_for(look) if look is not None else None
     fps = sequence.frame_rate_num / sequence.frame_rate_den
     shooters = composition.shooters
+    # The logo spots beyond the cards (``logo_spots``): the shooter's logo on
+    # the summaries (one shooter here), your brand on the wipe.
+    summary_logo = (
+        shooters[0].logo_path if "summaries" in composition.logo_spots and len(shooters) == 1 else None
+    )
     segments: list[tuple[Path, float]] = []
     generated = False
     # Every item, plus two edges and the boundary per transition, plus the stitch.
@@ -395,6 +402,7 @@ def _render_with_work_dir(
             fps=fps,
             rasterizer=rasterizer,
             shooters=shooters,
+            brand=brand_mark_json(look, composition.brand) if "wipe" in composition.logo_spots else None,
         )
         if motion is None:
             return None, f"sting {name} failed to load from the {look.name} Look"
@@ -512,6 +520,7 @@ def _render_with_work_dir(
                 )
                 prep.skipped = True
                 return prep
+            image = paste_logo(image, summary_logo)
             png = work_dir / f"{item.name}.png"
             image.save(png)
             prep.png = png
@@ -539,6 +548,7 @@ def _render_with_work_dir(
                 logger.warning("no frame and no text to hold the match summary on; skipped")
                 prep.skipped = True
                 return prep
+            image = paste_logo(image, summary_logo)
             png = work_dir / f"{item.name}.png"
             image.save(png)
             prep.png = png

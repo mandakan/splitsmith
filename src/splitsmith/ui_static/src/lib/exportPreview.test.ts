@@ -53,6 +53,7 @@ describe("previewBody", () => {
       title_division: true,
       made_with: true,
       account_brand: true,
+      logo_spots: ["summaries", "wipe"],
       project_name: "Bromma - Final Cut",
       head_pad_seconds: 0.5,
       tail_pad_seconds: 1,
@@ -210,7 +211,9 @@ describe("previewBody logo spots", () => {
     expect(on("lower-third")).toBe(true);
     expect(on("closing")).toBe(true);
     expect(on("overlay")).toBeUndefined();
-    expect(on("summary")).toBeUndefined();
+    expect(on("summary")).toBe(true);
+    expect(on("sting")).toBe(true);
+    expect(on("frame")).toBeUndefined();
     expect(previewBody(DEFAULT_EXPORT_SETTINGS, "title", 1).logo_placeholders).toBeUndefined();
   });
 });

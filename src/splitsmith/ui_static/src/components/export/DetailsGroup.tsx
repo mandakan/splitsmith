@@ -6,6 +6,7 @@
  * because this is where publishing is expected to be found.
  */
 import { BrandingField } from "@/components/export/BrandingField";
+import { LogoPlanField } from "@/components/export/LogoPlanField";
 import { YouTubeConnect } from "@/components/export/YouTubeConnect";
 import { Field, inputClass } from "@/components/ui/Field";
 import type { YouTubeSettings } from "@/lib/api";
@@ -111,10 +112,20 @@ export function DetailsGroup({
           </label>
         </Field>
       ) : null}
-      {drawsCards && (settings.renderOptions.titlePage || settings.renderOptions.closingCard) ? (
+      {drawsCards ? (
+        <LogoPlanField
+          spots={settings.renderOptions.logoSpots}
+          busy={busy}
+          onChange={(logoSpots) => patch({ renderOptions: { ...settings.renderOptions, logoSpots } })}
+        />
+      ) : null}
+      {drawsCards &&
+      (settings.renderOptions.titlePage ||
+        settings.renderOptions.closingCard ||
+        settings.renderOptions.logoSpots.includes("wipe")) ? (
         <Field
           label="Brand"
-          help="Your brand from the You page, top-left on the title page and the closing card. A Look with its own brand shows that instead."
+          help="Your brand from the You page, top-left on the title page and the closing card, and on the wipe when Logos puts it there. A Look with its own brand shows that instead."
         >
           <label className="flex items-center gap-2 text-md text-ink-2">
             <input

@@ -3,6 +3,7 @@
  * a Look tile previews, the request body from the form, the caption and
  * the one line per failure. Pure; ``PreviewPane`` does the fetching.
  */
+import { normalizeSpots } from "@/lib/logoPlan";
 import { LOGO_SPOT_CARDS } from "@/lib/logoSpots";
 import type { ExportPreviewBody, LookInfo, PreviewCard } from "@/lib/api";
 import type { ExportMode } from "@/lib/exportPlan";
@@ -92,6 +93,7 @@ export function previewBody(
     title_division: settings.renderOptions.titleDivision,
     made_with: settings.renderOptions.madeWith,
     account_brand: settings.renderOptions.accountBrand,
+    logo_spots: normalizeSpots(settings.renderOptions.logoSpots),
     project_name: projectName.trim() || null,
   };
   const resolved = resolveLookChoice(looks, lookChoiceOf(settings));

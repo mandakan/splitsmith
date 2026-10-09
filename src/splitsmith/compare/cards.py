@@ -44,6 +44,8 @@ class CardOptions:
     closing_card_variant: str | None = None
     #: Seconds of the match summary card before the closing card; 0 is off.
     match_summary_seconds: float = 0.0
+    #: Where logos go beyond the cards (``logo_spots``); empty draws none.
+    logo_spots: frozenset[str] = frozenset()
 
 
 def match_title(match: Match, *, extra: str | None = None, roster: tuple[str, ...] = ()) -> MatchTitle:

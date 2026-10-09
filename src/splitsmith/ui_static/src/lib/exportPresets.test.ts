@@ -125,6 +125,29 @@ describe("account_brand", () => {
   });
 });
 
+describe("logo_spots", () => {
+  it("is Polished by default, a body stored before it shipped applies Polished, and a choice round-trips", () => {
+    expect(DEFAULT_EXPORT_SETTINGS.renderOptions.logoSpots).toEqual(["summaries", "wipe"]);
+    const legacy: Partial<ExportPresetBody> = { ...YOUTUBE };
+    delete legacy.logo_spots;
+    expect(applyBody(DEFAULT_EXPORT_SETTINGS, legacy as ExportPresetBody).renderOptions.logoSpots).toEqual([
+      "summaries",
+      "wipe",
+    ]);
+    const cards = {
+      ...DEFAULT_EXPORT_SETTINGS,
+      renderOptions: { ...DEFAULT_EXPORT_SETTINGS.renderOptions, logoSpots: [] },
+    };
+    expect(settingsToBody(cards).logo_spots).toEqual([]);
+    expect(applyBody(DEFAULT_EXPORT_SETTINGS, settingsToBody(cards)).renderOptions.logoSpots).toEqual([]);
+  });
+
+  it("drops a spot a newer version saved", () => {
+    const body = { ...settingsToBody(DEFAULT_EXPORT_SETTINGS), logo_spots: ["wipe", "hologram"] };
+    expect(applyBody(DEFAULT_EXPORT_SETTINGS, body as ExportPresetBody).renderOptions.logoSpots).toEqual(["wipe"]);
+  });
+});
+
 describe("non-finite seconds", () => {
   it("a field being edited (NaN) is stored as its default, never as NaN", () => {
     const s: ExportSettings = { ...DEFAULT_EXPORT_SETTINGS, transitionSeconds: Number.NaN, headPad: Number.NaN };

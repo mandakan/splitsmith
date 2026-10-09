@@ -34,6 +34,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .. import composition, export_runs, youtube_sidecar
 from ..compare.mp4_grid import DEFAULT_CANVAS_HEIGHT, DEFAULT_CANVAS_WIDTH
+from ..logo_spots import DEFAULT_LOGO_SPOTS, LogoSpot
 from ..looks import look_names
 from ..match_project import trim_blocker
 from ..overlay_hud import OverlayStyleFields
@@ -205,6 +206,8 @@ class MatchExportRequest(OverlayStyleFields, BaseModel):
     #: Your account's brand on the title page and the closing card, for a
     #: Look without one of its own (spec 2026-10-08).
     account_brand: bool = True
+    #: Where logos go beyond the cards (``logo_spots``); polished by default.
+    logo_spots: list[LogoSpot] = Field(default_factory=lambda: sorted(DEFAULT_LOGO_SPOTS))
     # Issue #1242. The Look template variant every generated card draws
     # with; ``default`` is the still card, the shipped Look adds ``rise``.
     # The CLI's one knob and the fallback for the per-slot fields below.
@@ -273,6 +276,8 @@ class CompareGridRequest(BaseModel):
     #: Your account's brand on the title page and the closing card, for a
     #: Look without one of its own (spec 2026-10-08).
     account_brand: bool = True
+    #: Where logos go beyond the cards (``logo_spots``); polished by default.
+    logo_spots: list[LogoSpot] = Field(default_factory=lambda: sorted(DEFAULT_LOGO_SPOTS))
     # Issue #1242. The Look template variant every generated card draws
     # with; ``default`` is the still card, the shipped Look adds ``rise``.
     # The CLI's one knob and the fallback for the per-slot fields (#1246).

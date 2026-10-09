@@ -15,6 +15,7 @@
  */
 
 import type { CompareGridRequestPayload, MatchExportRequestPayload } from "./api";
+import { DEFAULT_LOGO_SPOTS, normalizeSpots, type LogoSpot } from "./logoPlan";
 import { DEFAULT_VARIANT, nonDefault, type LookChoice } from "./looks";
 
 export type StageCardStyle = "none" | "slate" | "lower-third";
@@ -36,6 +37,8 @@ export interface RenderOptions {
   madeWith: boolean;
   /** Your brand from the You page on the title page and the closing card. */
   accountBrand: boolean;
+  /** Where logos go beyond the cards (``lib/logoPlan``); Polished by default. */
+  logoSpots: LogoSpot[];
   /** A card per stage: a slate before it, or a lower-third over its head. */
   stageCardStyle: StageCardStyle;
   /** Seconds a stage card shows for. */
@@ -57,6 +60,7 @@ export const DEFAULT_RENDER_OPTIONS: RenderOptions = {
   closingCard: false,
   madeWith: true,
   accountBrand: true,
+  logoSpots: [...DEFAULT_LOGO_SPOTS],
   stageCardStyle: "none",
   stageCardDurationSeconds: 1.5,
   summaryHoldSeconds: 0,
@@ -115,6 +119,7 @@ export type MatchExportCardFields = Pick<
       | "closing_card"
       | "made_with"
       | "account_brand"
+      | "logo_spots"
       | "summary_hold_seconds"
       | "match_summary"
       | "match_summary_seconds"
@@ -150,6 +155,7 @@ export function matchExportFields(
     closing_card: options.closingCard,
     made_with: options.madeWith,
     account_brand: options.accountBrand,
+    logo_spots: normalizeSpots(options.logoSpots),
     summary_hold_seconds: clampSeconds(options.summaryHoldSeconds, 0),
     match_summary: options.matchSummary,
     match_summary_seconds: clampSeconds(options.matchSummarySeconds, MIN_CARD_SECONDS),
@@ -174,6 +180,7 @@ export function gridExportFields(
   | "title_page_duration_seconds"
   | "closing_card"
   | "made_with" | "account_brand"
+  | "logo_spots"
   | "match_summary"
   | "match_summary_seconds"
   | "title_page_variant"
@@ -190,6 +197,7 @@ export function gridExportFields(
     closing_card: options.closingCard,
     made_with: options.madeWith,
     account_brand: options.accountBrand,
+    logo_spots: normalizeSpots(options.logoSpots),
     match_summary: options.matchSummary,
     match_summary_seconds: clampSeconds(options.matchSummarySeconds, MIN_CARD_SECONDS),
     ...variantFields(look, ["title_page_variant", "stage_card_variant", "closing_card_variant"]),

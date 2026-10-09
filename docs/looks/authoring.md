@@ -199,7 +199,10 @@ data.transition = { kind: "sting:wipe", name: "wipe", duration_seconds: 1, from:
 ```
 
 `duration()` must return `duration_seconds`: the renderer samples exactly
-that long. Name the sting under `transition` in `look.json`, then choose it on
+that long. When the export puts your brand on the wipe (the Logos row's
+"Your brand on the wipe", on by default) a sting also gets `data.brand`, the
+same `{ logo, line }` the cards get; the shipped wipe carries that logo in
+place of the shooter's. Name the sting under `transition` in `look.json`, then choose it on
 the Export page or with `--transition sting:<name>`.
 
 ## Overlay styles
@@ -305,8 +308,9 @@ one. Your template may draw them any way it likes, or not at all.
 `brand/` folder) and a line. The title page and the closing card receive it as
 `window.splitsmith.data.brand` (`{ logo, line }`, the logo already a URL the
 page can load) and the shipped cards draw it above the match name through
-`_shared/brand.js` (`engine.mountBrand`). Other cards, and Looks without a
-brand, receive no `brand` at all. Set it in the Look editor under Card styles,
+`_shared/brand.js` (`engine.mountBrand`). Other cards (and a sting unless the
+export puts the brand on the wipe), and Looks without a brand, receive no
+`brand` at all. Set it in the Look editor under Card styles,
 Your brand.
 
 ## What a template can load

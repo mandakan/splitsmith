@@ -44,6 +44,7 @@ from ..export_preview import (
 )
 from ..identity import ResolvedIdentity
 from ..logo_placeholder import placeholder_logo
+from ..logo_spots import DEFAULT_LOGO_SPOTS, LogoSpot
 from ..look_store import LookStoreError, StoredLookBody, TemplateEdit, draft_look
 from ..looks import Look, load_look, look_fingerprint
 from ..overlay_hud import OverlayStyleFields
@@ -98,6 +99,9 @@ class ExportPreviewRequest(OverlayStyleFields, BaseModel):
     #: shooter's, your brand, the event's), so the preview shows where each
     #: goes. Previews only; an export never draws one.
     logo_placeholders: bool = False
+    #: The export's logo spots: the sting preview draws your brand with
+    #: ``wipe``, the summaries the shooter's logo with ``summaries``.
+    logo_spots: list[LogoSpot] = Field(default_factory=lambda: sorted(DEFAULT_LOGO_SPOTS))
 
     @field_validator("look")
     @classmethod
@@ -190,15 +194,16 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
     # shooter's; the title page and the closing card draw it.
     event_logo = _event_logo(state) if req.card in ("title", "closing") else None
     book = load_snapshot(state.shooter_book)
-    brand = (
-        load_brand(state.account_profile) if req.account_brand and req.card in ("title", "closing") else None
-    )
+    spots = frozenset(req.logo_spots)
+    # The cards draw your brand; the sting draws it with the wipe spot on.
+    brand_cards = ("title", "closing", "sting") if "wipe" in spots else ("title", "closing")
+    brand = load_brand(state.account_profile) if req.account_brand and req.card in brand_cards else None
     book_entry = book.get(project.selected_shooter_id) if identity_source(project, book) == "book" else None
     rt = runtime()
     placeholders = req.logo_placeholders and req.card != "frame"
     placeholder_dir = rt.cache_dir / "logo-placeholders"
-    if placeholders and req.card in ("title", "closing"):
-        if event_logo is None:
+    if placeholders and req.card in brand_cards:
+        if event_logo is None and req.card != "sting":
             event_logo = placeholder_logo(logo_placeholder.EVENT, placeholder_dir)
         if req.account_brand and (brand is None or brand.logo_path is None):
             brand = BrandMark(
@@ -227,6 +232,7 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
         book_identity=identity_digest(book_entry) if book_entry is not None else None,
         account_brand=brand_digest(brand) if brand is not None else None,
         logo_placeholders=placeholders,
+        logo_spots=spots,
         draft=(
             None
             if req.draft is None and not req.templates

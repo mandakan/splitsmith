@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Literal
 
 from ..composition import (
+    BrandMark,
     MatchTitle,
     TitleCard,
     TitleStyle,
@@ -43,6 +44,7 @@ from ..composition import (
 )
 from ..export_naming import stage_display_name
 from ..identity import ResolvedIdentity
+from ..look_brand import brand_mark_json
 from ..look_motion import MotionClipError, motion_overlay_filters, write_motion_clip
 from ..look_sting import sting_motion, sting_overlay_filters
 from ..looks import CardSlot, Look, load_look, sting_template_for
@@ -2640,6 +2642,7 @@ def _stage_hold_still(
     runner: Runner,
     rasterizer: Rasterizer | None,
     identities: Mapping[str, ResolvedIdentity] | None = None,
+    logos: Mapping[str, Path] | None = None,
 ) -> Path:
     """Compose this stage's frozen summary still and return its path.
 
@@ -2686,6 +2689,7 @@ def _stage_hold_still(
         runner=runner,
         rasterizer=rasterizer,
         accents={label: ident.accent for label, ident in (identities or {}).items()},
+        logos=logos,
     )
 
 
@@ -3160,6 +3164,8 @@ def render_grid_mp4(
     segment_cache: SegmentCache | None = None,
     progress: GridProgress | None = None,
     match_summary_seconds: float = 0.0,
+    logo_spots: frozenset[str] = frozenset(),
+    brand: BrandMark | None = None,
 ) -> GridRenderResult:
     """Render every stage as a grid, then stitch them into one MP4.
 
@@ -3457,6 +3463,13 @@ def render_grid_mp4(
     last_boundary: GridBoundary | None = None
     run_starts: dict[int, float] = {}
 
+    # The ``summaries`` logo spot: each shooter's logo in their own tile.
+    summary_logos = (
+        {label: ident.logo_path for label, ident in (identities or {}).items() if ident.logo_path is not None}
+        if "summaries" in logo_spots
+        else None
+    )
+
     def sting_for_boundary(
         kind: str, before: GridItem, after: GridItem, *, seconds: float
     ) -> tuple[CardMotion | None, str]:
@@ -3482,6 +3495,7 @@ def render_grid_mp4(
             fps=canvas.fps,
             rasterizer=active_rasterizer,
             shooters=shooters_seen,
+            brand=brand_mark_json(card_look, brand) if "wipe" in logo_spots else None,
         )
         if motion is None:
             return None, f"sting {name} failed to load from the {card_look.name} Look"
@@ -3597,6 +3611,7 @@ def render_grid_mp4(
             accents={
                 label: ident.accent for label, ident in (identities or {}).items() if ident.accent is not None
             },
+            logos=summary_logos,
         )
         png = work / "match_summary.png"
         try:
@@ -3723,6 +3738,7 @@ def render_grid_mp4(
                     runner=still_runner,
                     rasterizer=active_rasterizer,
                     identities=identities,
+                    logos=summary_logos,
                 )
             except Exception as exc:  # noqa: BLE001 -- one bad stage must not lose the match
                 prep.failed = f"could not compose the stage summary still: {exc}"
