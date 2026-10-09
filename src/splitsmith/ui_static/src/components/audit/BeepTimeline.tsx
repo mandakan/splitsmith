@@ -35,7 +35,6 @@ import { cn } from "@/lib/utils";
 export interface BeepCandidate {
   time: number;
   detected: boolean;
-  label?: string;
 }
 
 export interface BeepTimelineProps {
@@ -117,7 +116,7 @@ export function BeepTimeline({
         // immediately auditions it instead of wherever the video last
         // happened to be (BeepWaveformPicker's rule, carried over).
         const off = videoBeepRef.current != null && p.beep_time != null ? videoBeepRef.current - p.beep_time : 0;
-        const local = draftRef.current != null ? draftRef.current - off : p.beep_time ?? 0;
+        const local = Math.max(0, draftRef.current != null ? draftRef.current - off : p.beep_time ?? 0);
         setLocalTime(local);
         const el = mediaRef.current;
         if (el) el.currentTime = local;
@@ -283,12 +282,11 @@ export function BeepTimeline({
             // than pin it to an edge it isn't actually at.
             if (local < 0 || local > peaks.duration) return null;
             const selected = chosenSource != null && Math.abs(c.time - chosenSource) < SELECTED_EPS;
-            const fromOrigin = local - origin;
             return (
               <button
                 key={c.time}
                 type="button"
-                aria-label={`Candidate ${fromOrigin.toFixed(2)} s`}
+                aria-label={`Candidate ${c.time.toFixed(2)} s`}
                 aria-pressed={selected}
                 onClick={() => {
                   // Seek the preview too, so the operator sees the frame
@@ -300,7 +298,7 @@ export function BeepTimeline({
                 }}
                 className={cn(
                   "absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-[1.5px]",
-                  selected ? "border-led bg-led" : "border-rule-strong bg-surface-2",
+                  selected ? "border-beep bg-beep" : "border-rule-strong bg-surface-2",
                 )}
                 style={{ left: `${(local / peaks.duration) * 100}%` }}
               />

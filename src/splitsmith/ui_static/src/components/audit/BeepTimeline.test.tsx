@@ -233,11 +233,31 @@ describe("BeepTimeline", () => {
     const selected = screen.getByRole("button", { name: "Candidate 9.50 s" });
     expect(selected).toHaveAttribute("aria-pressed", "true");
     expect(unselected).toHaveAttribute("aria-pressed", "false");
+    // The pin uses the beep colour, the same one the dashed chosen-time
+    // line on the waveform draws with -- not the destructive/led red,
+    // which would read as "reject this" next to a line that means
+    // "this is the beep".
+    expect(selected.className).toContain("border-beep bg-beep");
+    expect(unselected.className).not.toContain("border-beep bg-beep");
 
     fireEvent.click(unselected);
     expect(onPick).toHaveBeenCalledWith(3);
     const video = screen.getByTestId("preview-video") as HTMLVideoElement;
     expect(video.currentTime).toBeCloseTo(3, 2);
+  });
+
+  it("names a pin by its source seconds, not seconds from the band's origin", async () => {
+    // origin = peaks.beep_time = 5; offset = videoBeepTime(12) - 5 = 7.
+    // A candidate at source 20 sits at local 13, 8 s from the origin --
+    // the accessible name must read the source time (20.00), the same
+    // number the candidate list beside it shows, not that 8.00.
+    vi.mocked(api.getVideoPeaks).mockResolvedValue(peaksFixture({ duration: 20, beep_time: 5 }));
+    const candidates: BeepCandidate[] = [{ time: 20, detected: false }];
+    render(<Harness videoId="v1" videoBeepTime={12} candidates={candidates} />);
+    await screen.findByTestId("waveform-track");
+
+    expect(screen.getByRole("button", { name: "Candidate 20.00 s" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Candidate 8.00 s" })).not.toBeInTheDocument();
   });
 
   it("clamps a pick to >= 0 source seconds when the offset would carry it negative", async () => {
@@ -282,6 +302,16 @@ describe("BeepTimeline", () => {
       const video = screen.getByTestId("preview-video") as HTMLVideoElement;
       // offset = 12 - 5 = 7; draft 9.5 -> local 2.5.
       expect(video.currentTime).toBeCloseTo(2.5, 2);
+    });
+
+    it("floors the park at 0 when the offset would carry it negative", async () => {
+      // offset = videoBeepTime(10) - peaks.beep_time(2) = 8; draft 3 ->
+      // local -5 unfloored. The spec's "As built" rule is 0, not -5.
+      vi.mocked(api.getVideoPeaks).mockResolvedValue(peaksFixture({ beep_time: 2 }));
+      render(<Harness videoId="v1" videoBeepTime={10} draftSourceTime={3} />);
+      await screen.findByTestId("waveform-track");
+      const video = screen.getByTestId("preview-video") as HTMLVideoElement;
+      expect(video.currentTime).toBe(0);
     });
 
     it("does not re-park on an unrelated re-render (only once per peaks load)", async () => {
