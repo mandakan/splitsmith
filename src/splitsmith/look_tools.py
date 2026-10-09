@@ -376,8 +376,8 @@ def _region(n: int, kind: str, start: float, end: float) -> StageEvent:
 
 def hud_samples() -> list[HudSample]:
     """The stages ``looks check`` runs a HUD template on: twelve rounds with
-    every class a stage has and a confirmed reload, movement and activation
-    in the gaps those classes name, thirty-two (a long row of anything per
+    every class a stage has and a confirmed reload on the move, a second
+    movement and an activation in the gaps those classes name, thirty-two (a long row of anything per
     round), and eight with no class data (an audit from before classes)."""
     twelve = [("first_shot", 1.12), ("split", 0.24), ("split", 0.26), ("transition", 0.71), ("split", 0.22)]
     twelve += [("split", 0.25), ("reload", 1.64), ("split", 0.27), ("movement", 1.9), ("split", 0.23)]
@@ -386,10 +386,14 @@ def hud_samples() -> list[HudSample]:
     bare: list[tuple[str | None, float]] = [(None, 1.05)]
     bare += [(None, 0.3)] * 7
     # Shot 6 lands at 2.80 s, 7 at 4.44, 8 at 4.71, 9 at 6.61, 10 at 6.84, 11 at 7.50.
+    # The reload is on the move and ends after the movement (overhang
+    # +0.15), so the check runs a template's split-band path: the stage bar
+    # cuts a reload on the move into its half of the bar.
     regions = (
         _region(1, "reload", 2.95, 4.25),
-        _region(2, "movement", 4.85, 6.45),
-        _region(3, "activation", 7.0, 7.3),
+        _region(2, "movement", 3.0, 4.1),
+        _region(3, "movement", 4.85, 6.45),
+        _region(4, "activation", 7.0, 7.3),
     )
     return [
         HudSample("12 rounds", _hud_stage(twelve), regions),

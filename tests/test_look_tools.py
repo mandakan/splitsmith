@@ -198,6 +198,18 @@ def test_an_overlay_style_is_checked_on_a_stage_with_regions_and_the_toggles_on(
     assert any(at is not None and reload["start"] < at < reload["end"] for at in times)
 
 
+def test_the_sample_reload_is_on_the_move_so_the_split_band_path_runs() -> None:
+    """Every shipped style cuts a reload on the move into its half of the
+    stage bar; a sample whose reload never overlaps a movement would never
+    run that path in a custom template. The mid-reload probe lands inside
+    the movement too, and the reload outlasts it (a positive overhang)."""
+    (sample,) = [s for s in look_tools.hud_samples() if s.events]
+    reload = next(e for e in sample.events if e.kind == "reload")
+    mid = (reload.start + reload.end) / 2
+    movements = [e for e in sample.events if e.kind == "movement"]
+    assert any(m.start < mid < m.end and m.end < reload.end for m in movements)
+
+
 def test_an_overlay_style_that_moves_outside_its_live_span_is_a_warning(user_dir: Path) -> None:
     look_tools.new_look("club", from_look="splitsmith")
     prober = _Prober(moves={"hud-pips.html": "before", "hud-ticker.html": "after"})
