@@ -61,7 +61,7 @@ import {
   type CoachStageResponse,
   type MatchProject,
 } from "@/lib/api";
-import { keepEvent, withKind } from "@/lib/events";
+import { keepEvent, summarize, withKind } from "@/lib/events";
 import { useSpacePlayPause } from "@/lib/keyboard";
 import { useMatchHref } from "@/lib/matchHref";
 import { useIsMobile } from "@/lib/useIsMobile";
@@ -917,6 +917,20 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
   useSpacePlayPause(togglePlay);
 
   const budget = useMemo(() => timeBudget(coach?.shots ?? [], distributions), [coach, distributions]);
+  // Moving-shot and reload/overhang figures come from the hook's local
+  // ``events`` list (spec #1324), not the server's ``event_summary``: a
+  // nudge or a drag release updates the strip before its PUT resolves.
+  // ``summarize`` is the TS twin of the server's ``events.stage_event_summary``,
+  // called the same way the server builds it in ``_build_coach_response``
+  // (every region, not confirmed-only) so the figures do not jump when the
+  // response lands. ``capacity_warning`` stays server-side: it needs the
+  // division capacity, which the SPA never receives. Computed above the
+  // early returns below: a hook cannot be conditional on ``coach`` being
+  // loaded yet.
+  const localSummary = useMemo(
+    () => summarize(coach?.shots.map((s) => s.time_from_beep) ?? [], events, null),
+    [coach, events],
+  );
 
   if (error) {
     return (
@@ -975,7 +989,9 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
   const seekFromBeep = (t: number) => {
     if (videoRef.current) videoRef.current.currentTime = coach.beep_time + t;
   };
-  const summary = coach.event_summary;
+  const summary = coach.event_summary
+    ? { ...localSummary, capacity_warning: coach.event_summary.capacity_warning }
+    : undefined;
   const selectShotNumber = (n: number) => {
     const shot = coach.shots.find((s) => s.shot_number === n);
     if (shot) seekToShot(shot);
