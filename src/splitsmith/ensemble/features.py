@@ -362,6 +362,91 @@ def compute_hand_features(
     return out
 
 
+# Stage-relative block (spec 2026-10-09): each source column minus the
+# median over the stage's likely shots, so a camera or firmware that
+# shifts every shot's level or timbre moves the reference with it.
+_REL_LOG_SOURCES: tuple[str, ...] = (
+    "peak_amp",
+    "rms_post",
+    "tail_amp",
+    "peak_floor_ratio",
+    "spectral_flatness",
+    "spectral_peak_ratio",
+    "rms_ratio",
+    "attack",
+)
+_REL_LIN_HAND_SOURCES: tuple[str, ...] = ("ratio_1_20", "ratio_5_20")
+_REL_LIN_TIMBRE_SOURCES: tuple[str, ...] = ("spectral_centroid_hz", "high_band_db")
+REL_FEATURE_NAMES: tuple[str, ...] = tuple(
+    f"rel_{s}"
+    for s in (
+        *_REL_LOG_SOURCES,
+        *_REL_LIN_HAND_SOURCES,
+        "gunshot_prob",
+        "clap_diff",
+        *_REL_LIN_TIMBRE_SOURCES,
+        *(f"clap_sim_{i:02d}" for i in range(len(CLAP_PROMPTS))),
+    )
+)
+REL_FEATURE_DIM: int = len(REL_FEATURE_NAMES)
+_REF_FALLBACK_FRACTION: float = 0.3
+_REF_FALLBACK_MIN: int = 3
+_HAND_INDEX: dict[str, int] = {name: i for i, name in enumerate(_HAND_FEATURE_NAMES)}
+
+
+def reference_indices(confidences: np.ndarray, expected_rounds: int | None) -> np.ndarray:
+    """Indices of the stage's likely shots: the top-K candidates by detector confidence.
+
+    ``K`` is ``expected_rounds`` when known, else ``max(3, round(0.3 * N))``,
+    always clamped to ``[1, N]``. A stable sort keeps tied confidences in
+    candidate order so two runs of the same stage agree.
+    """
+    n = int(confidences.size)
+    if n == 0:
+        return np.zeros(0, dtype=np.int64)
+    if expected_rounds is not None:
+        k = int(expected_rounds)
+    else:
+        k = max(_REF_FALLBACK_MIN, int(round(_REF_FALLBACK_FRACTION * n)))
+    k = min(max(k, 1), n)
+    return np.argsort(-confidences, kind="stable")[:k]
+
+
+def stage_relative_features(
+    hand: np.ndarray,
+    clap_sims: np.ndarray,
+    clap_diff: np.ndarray,
+    gunshot_prob: np.ndarray,
+    expected_rounds: int | None,
+) -> np.ndarray:
+    """Per-candidate ``(N, REL_FEATURE_DIM)`` block relative to the stage's likely shots.
+
+    All rows must come from one stage (one detector universe). Log-scale
+    sources take ``log(x) - median(log(ref))``; linear ones ``x - median(ref)``.
+    A NaN source is excluded from the median and its own value is 0.
+    """
+    n = hand.shape[0]
+    out = np.zeros((n, REL_FEATURE_DIM), dtype=np.float64)
+    if n == 0:
+        return out
+    ref = reference_indices(hand[:, _HAND_INDEX["confidence"]], expected_rounds)
+    sources: list[np.ndarray] = [
+        np.log(np.maximum(hand[:, _HAND_INDEX[s]], 1e-9)) for s in _REL_LOG_SOURCES
+    ]
+    sources += [hand[:, _HAND_INDEX[s]] for s in _REL_LIN_HAND_SOURCES]
+    sources += [np.asarray(gunshot_prob, dtype=np.float64), np.asarray(clap_diff, dtype=np.float64)]
+    sources += [hand[:, _HAND_INDEX[s]] for s in _REL_LIN_TIMBRE_SOURCES]
+    sources += [np.asarray(clap_sims[:, i], dtype=np.float64) for i in range(clap_sims.shape[1])]
+    for j, col in enumerate(sources):
+        ref_vals = col[ref]
+        ref_vals = ref_vals[~np.isnan(ref_vals)]
+        if ref_vals.size == 0:
+            continue
+        rel = col - float(np.median(ref_vals))
+        out[:, j] = np.where(np.isnan(rel), 0.0, rel)
+    return out
+
+
 def _build_clap_runtime_torch() -> ClapRuntime:
     """Construct a torch-backed :class:`ClapRuntime`. Dev / contributor path."""
     import torch
