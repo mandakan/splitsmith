@@ -15,17 +15,21 @@
  * response whose regions differ from the ones this tab last saw from the
  * server (another writer's) takes only the payload and is withheld: its
  * revision and regions wait, so the edit 409s on its own revision and is
- * discarded rather than overwrite those regions. Any later answer of our own
- * (a PUT's response, a 409's reload) supersedes the withheld one.
+ * discarded rather than overwrite those regions. Only a 409's reload clears
+ * a withheld response (it is the newest state); a successful PUT's answer
+ * does not, since a withheld response that outlives a successful PUT is
+ * newer than it (had that foreign write reached the server first, the PUT
+ * would have 409'd).
  *
  * The list catches up with the server's when nothing is outstanding any
  * more: after a PUT's response, a 409's decision or a non-409 failure, on a
  * cancelled drag (Esc, pointercancel), and on a release that overlaps or was
  * drawn on discarded regions. Catching up first adopts a withheld response
- * (its revision and regions become current; nothing local is pending to
- * overwrite them), so an Esc shows another writer's regions at once and the
- * next edit saves on their revision. A release supersedes the server's list
- * with its own PUT.
+ * -- its payload again, its revision and its regions; nothing local is
+ * pending to overwrite them -- so an Esc shows another writer's regions at
+ * once, a shot PATCH answered before our own PUT's older answer still wins,
+ * and the next edit saves on the newest revision. A release supersedes the
+ * server's list with its own PUT.
  *
  * A 409 reloads the payload and stops whatever was queued behind it or still
  * in the debounce, since that work was built on the stale revision. When the
@@ -134,9 +138,10 @@ export function useStageEvents(
     if (outstanding()) return;
     const withheld = withheldRef.current;
     if (withheld) {
-      // Its payload already went to ``applyCoach`` when it arrived, and
-      // nothing has reached ``applyCoach`` since (an own answer clears it).
+      // Its payload went to ``applyCoach`` when it arrived, but a PUT's
+      // older answer may have reached it since: send it again.
       withheldRef.current = null;
+      applyCoach(withheld);
       revisionRef.current = withheld._version;
       serverEventsRef.current = withheld.events ?? [];
     }
@@ -144,13 +149,16 @@ export function useStageEvents(
     goodRef.current = list;
     setEvents(list);
     setSelectedId((id) => (id && list.some((e) => e.id === id) ? id : null));
-  }, [outstanding]);
+  }, [applyCoach, outstanding]);
 
   // Our own answers (a PUT's response, a 409's reload): authoritative, always
-  // advance, and supersede a withheld foreign response.
+  // advance. They do not clear a withheld foreign response: one that outlives
+  // a successful PUT is newer than its answer (had the foreign write reached
+  // the server first, the PUT would have 409'd), so the catch-up still adopts
+  // it. Only a 409's reload, which is newer than anything withheld, clears it
+  // (in ``conflict``).
   const adopt = useCallback(
     (next: CoachStageResponse | null) => {
-      withheldRef.current = null;
       applyCoach(next);
       revisionRef.current = next?._version;
       serverEventsRef.current = next?.events ?? [];
@@ -203,6 +211,8 @@ export function useStageEvents(
         onError(e2 instanceof ApiError ? e2.detail : String(e2));
         return;
       }
+      // The reload is the newest state there is: it supersedes anything withheld.
+      withheldRef.current = null;
       if (mayResend && fresh && sameEvents(fresh.events ?? [], base)) {
         // The revision moved for something else (a shot PATCH, a
         // reclassify): the regions are as the edit found them, so it still

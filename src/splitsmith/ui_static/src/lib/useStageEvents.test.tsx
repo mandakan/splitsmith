@@ -597,6 +597,30 @@ describe("useStageEvents: an in-flight save never reverts or drops an edit (#132
     expect(onDiscard).not.toHaveBeenCalled();
   });
 
+  it("a shot PATCH landing on top of our successful PUT, answered first, is kept over the PUT's older answer", async () => {
+    const { result, applyCoach } = setupWithDiscard();
+    let finishPut: (c: CoachStageResponse) => void = () => {};
+    vi.mocked(api.putStageEvents)
+      .mockImplementationOnce(() => new Promise((r) => { finishPut = r; }))
+      .mockImplementation(async (_s, _n, events, version) => {
+        if (version !== "v3") throw conflict();
+        return coach(events, "v4");
+      });
+    act(() => result.current.change([ev("evt-1", 1.1, 2)], true));
+    await settle(); // the server stores it as v2; its answer is delayed
+    const patched = { ...coach([ev("evt-1", 1.1, 2)], "v3"), version: 7 }; // the PATCH on top: v3
+    act(() => result.current.apply(patched)); // arrives first, withheld (its regions are not the base)
+    await act(async () => { finishPut(coach([ev("evt-1", 1.1, 2)], "v2")); });
+    // The page shows the PATCH's payload, not the PUT's older one ...
+    expect(applyCoach).toHaveBeenLastCalledWith(patched);
+    expect(result.current.events).toEqual([ev("evt-1", 1.1, 2)]);
+    // ... and the next edit saves on v3 without a 409.
+    act(() => result.current.change([ev("evt-1", 1.2, 2)], true));
+    await settle();
+    expect(api.putStageEvents).toHaveBeenCalledTimes(2);
+    expect(api.putStageEvents).toHaveBeenLastCalledWith("anna", 1, [ev("evt-1", 1.2, 2)], "v3");
+  });
+
   it("a 409's reload supersedes a withheld response: the next edit saves on the reload's revision", async () => {
     const { result } = setupWithDiscard();
     let failFirst: (e: unknown) => void = () => {};
