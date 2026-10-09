@@ -23,6 +23,7 @@ import {
   clampZoom,
   contentWidth,
   followScroll,
+  revealScroll,
   rulerTicks,
   wheelAction,
   zoomAround,
@@ -42,6 +43,8 @@ export interface TimelineTrack {
   /** Gutter labels, one per row, and each row's height in px; the track spans their sum. */
   rows: { label: string; height: number }[];
   render: (geom: TimelineGeom) => ReactNode;
+  /** A click on the track's row seeks through the content div's rect, no snap, like the ruler. */
+  seekable?: boolean;
 }
 
 export interface TimelineProps {
@@ -51,6 +54,8 @@ export interface TimelineProps {
   origin?: number;
   fps?: number;
   currentTime: number;
+  /** Whether the page's video is playing; changes the follow rule (see the follow effect below). */
+  playing?: boolean;
   onSeek: (t: number) => void;
   tracks: TimelineTrack[];
   zoom: Zoom;
@@ -61,7 +66,19 @@ export interface TimelineProps {
 }
 
 export function Timeline(props: TimelineProps) {
-  const { duration, origin = 0, fps = 30, currentTime, onSeek, tracks, zoom, onZoomChange, menuExtra, title = "Timeline" } = props;
+  const {
+    duration,
+    origin = 0,
+    fps = 30,
+    currentTime,
+    playing = false,
+    onSeek,
+    tracks,
+    zoom,
+    onZoomChange,
+    menuExtra,
+    title = "Timeline",
+  } = props;
   const hostRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const [viewport, setViewport] = useState(0);
@@ -75,7 +92,24 @@ export function Timeline(props: TimelineProps) {
   useLayoutEffect(() => {
     const host = hostRef.current;
     if (!host) return;
-    const measure = () => setViewport(host.clientWidth);
+    const measure = () => {
+      const newViewport = host.clientWidth;
+      setViewport((prevViewport) => {
+        // A resize (the sidebar toggle, a window resize) changes viewport,
+        // which changes content = round(viewport * zoom) at the same zoom,
+        // while scrollLeft keeps its raw px -- that moves the visible
+        // window's left edge. Keep the left edge's time fixed instead: the
+        // layout effect below, keyed on content, applies pendingScroll once
+        // the new content width has committed.
+        const zoom = live.current.zoom;
+        if (zoom !== null && prevViewport > 0 && newViewport > 0) {
+          const oldContent = contentWidth(zoom, prevViewport);
+          const newContent = contentWidth(zoom, newViewport);
+          if (oldContent > 0) pendingScroll.current = (host.scrollLeft * newContent) / oldContent;
+        }
+        return newViewport;
+      });
+    };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(host);
@@ -195,12 +229,24 @@ export function Timeline(props: TimelineProps) {
   useEffect(() => {
     const host = hostRef.current;
     if (!host || !follow || pointerDown.current) return;
-    const next = followScroll(x(currentTime), host.scrollLeft, viewport, content);
+    const playheadPx = x(currentTime);
+    // While playing, the playhead moves continuously, so the edge-triggered
+    // 10 % rule is right: it only moves once the playhead nears the edge.
+    // While paused, currentTime changes in one jump (a seek), and that jump
+    // can land after pointerDown.current already cleared -- Coach's
+    // currentTime arrives through the video's async timeupdate, which fires
+    // after a click or drag's pointerup. revealScroll only brings an
+    // off-screen playhead into view; it never re-centres a playhead that
+    // landed on screen, so a paused click or drag release near the edge
+    // does not yank the view out from under the pointer that placed it.
+    const next = playing
+      ? followScroll(playheadPx, host.scrollLeft, viewport, content)
+      : revealScroll(playheadPx, host.scrollLeft, viewport, content);
     if (next !== null) host.scrollLeft = next;
     // Keyed on currentTime alone, deliberately: a zoom or a resize changes
     // content/viewport without the playhead moving, and must not re-run
-    // this and fight the scroll that zoom just anchored. follow itself is
-    // read fresh whenever this does run, so switching it on causes no
+    // this and fight the scroll that zoom just anchored. follow and playing
+    // are read fresh whenever this does run, so switching either causes no
     // jump until the playhead next moves.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentTime]);
@@ -264,7 +310,7 @@ export function Timeline(props: TimelineProps) {
             Fit
           </Button>
           <span className="numeral w-10 text-right text-sm text-muted" aria-live="polite">
-            {zoom === null ? "Fit" : `${zoom.toFixed(1)}x`}
+            {zoom === null ? "" : `${zoom.toFixed(1)}x`}
           </span>
           <span className="relative shrink-0">
             <Button
@@ -338,7 +384,12 @@ export function Timeline(props: TimelineProps) {
               ))}
             </div>
             {tracks.map((track) => (
-              <div key={track.id} className="relative" style={{ height: track.rows.reduce((a, r) => a + r.height, 0) }}>
+              <div
+                key={track.id}
+                className={track.seekable ? "relative cursor-pointer" : "relative"}
+                style={{ height: track.rows.reduce((a, r) => a + r.height, 0) }}
+                onClick={track.seekable ? (e) => onSeek(tAt(e.clientX)) : undefined}
+              >
                 {track.render(geom)}
               </div>
             ))}

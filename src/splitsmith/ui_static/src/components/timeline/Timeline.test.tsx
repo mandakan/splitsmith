@@ -9,7 +9,13 @@ import { Timeline } from "./Timeline";
 
 const VIEWPORT = 1000;
 
-function Harness(props: { currentTime?: number; onSeek?: (t: number) => void; initialZoom?: Zoom; onZoom?: (z: Zoom) => void }) {
+function Harness(props: {
+  currentTime?: number;
+  onSeek?: (t: number) => void;
+  initialZoom?: Zoom;
+  onZoom?: (z: Zoom) => void;
+  playing?: boolean;
+}) {
   const [zoom, setZoom] = React.useState<Zoom>(props.initialZoom ?? null);
   return (
     <Timeline
@@ -17,13 +23,17 @@ function Harness(props: { currentTime?: number; onSeek?: (t: number) => void; in
       origin={0}
       fps={30}
       currentTime={props.currentTime ?? 0}
+      playing={props.playing}
       onSeek={props.onSeek ?? vi.fn()}
       zoom={zoom}
       onZoomChange={(z) => {
         setZoom(z);
         props.onZoom?.(z);
       }}
-      tracks={[{ id: "a", rows: [{ label: "Audio", height: 40 }], render: () => <div data-testid="track-a" /> }]}
+      tracks={[
+        { id: "a", rows: [{ label: "Audio", height: 40 }], render: () => <div data-testid="track-a" />, seekable: true },
+        { id: "b", rows: [{ label: "Shots", height: 40 }], render: () => <div data-testid="track-b" /> },
+      ]}
     />
   );
 }
@@ -145,18 +155,111 @@ describe("Timeline", () => {
     expect(screen.getByTestId("timeline-playhead")).toHaveStyle({ left: "800px" });
   });
 
-  it("follows the playhead while playing, but not while a pointer is down in the band", () => {
-    const { rerender } = render(<Harness initialZoom={4} currentTime={0} />);
+  it("while playing, follows with the edge rule, but not while a pointer is down in the band", () => {
+    const { rerender } = render(<Harness initialZoom={4} currentTime={0} playing />);
     const host = screen.getByTestId("timeline-host");
     // 4000 px of content: t = 9.5 s is at 3800 px, outside the first window.
     fireEvent.pointerDown(screen.getByTestId("track-a"), { pointerId: 1, button: 0 });
-    rerender(<Harness initialZoom={4} currentTime={9.5} />);
+    rerender(<Harness initialZoom={4} currentTime={9.5} playing />);
     expect(host.scrollLeft).toBe(0);
     act(() => {
       window.dispatchEvent(new Event("pointerup"));
     });
-    rerender(<Harness initialZoom={4} currentTime={9.6} />);
+    rerender(<Harness initialZoom={4} currentTime={9.6} playing />);
     expect(host.scrollLeft).toBeGreaterThan(0);
+  });
+
+  it("while paused, a seek that lands inside the visible window does not recentre (I1)", () => {
+    // Regression for: Coach's currentTime arrives async (timeupdate) after a
+    // seek, i.e. after pointerup already cleared pointerDown -- so a lane or
+    // ruler click used to hit the playing edge-rule's 10 % margin and jump
+    // the view even though the clicked time is already on screen. At zoom 4
+    // (4000 px content, 1000 px viewport) a ruler click at viewport x 950
+    // seeks to t = 2.375 s, whose playhead (950 px) is inside [0, 1000].
+    function PausedHarness() {
+      const [currentTime, setCurrentTime] = React.useState(0);
+      const [zoom, setZoom] = React.useState<Zoom>(4);
+      return (
+        <Timeline
+          duration={10}
+          origin={0}
+          fps={30}
+          currentTime={currentTime}
+          playing={false}
+          onSeek={setCurrentTime}
+          zoom={zoom}
+          onZoomChange={setZoom}
+          tracks={[{ id: "a", rows: [{ label: "Audio", height: 40 }], render: () => <div data-testid="track-a" /> }]}
+        />
+      );
+    }
+    render(<PausedHarness />);
+    const host = screen.getByTestId("timeline-host");
+    fireEvent.click(screen.getByTestId("timeline-ruler"), { clientX: 950 });
+    expect(host.scrollLeft).toBe(0);
+  });
+
+  it("while paused, a seek fully off-screen scrolls the playhead into view (I1)", () => {
+    function PausedHarness() {
+      const [currentTime, setCurrentTime] = React.useState(0);
+      const [zoom, setZoom] = React.useState<Zoom>(4);
+      return (
+        <Timeline
+          duration={10}
+          origin={0}
+          fps={30}
+          currentTime={currentTime}
+          playing={false}
+          onSeek={setCurrentTime}
+          zoom={zoom}
+          onZoomChange={setZoom}
+          tracks={[{ id: "a", rows: [{ label: "Audio", height: 40 }], render: () => <div data-testid="track-a" /> }]}
+        />
+      );
+    }
+    render(<PausedHarness />);
+    const host = screen.getByTestId("timeline-host");
+    // t = 9.975 s -> playhead at 3990 px, wholly outside [0, 1000].
+    fireEvent.click(screen.getByTestId("timeline-ruler"), { clientX: 3990 });
+    expect(host.scrollLeft).toBe(3000);
+  });
+
+  it("keeps the left-edge time anchored when a resize changes the viewport while zoomed (I2)", () => {
+    let capturedCb: ResizeObserverCallback | null = null;
+    class CapturingResizeObserver {
+      constructor(cb: ResizeObserverCallback) {
+        capturedCb = cb;
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal("ResizeObserver", CapturingResizeObserver);
+    const widthSpy = vi.spyOn(Element.prototype, "clientWidth", "get").mockReturnValue(1000);
+    render(<Harness initialZoom={4} />);
+    const host = screen.getByTestId("timeline-host");
+    // content 4000 px, pxPerSec 400: scrollLeft 500 is left-edge time 1.25 s.
+    host.scrollLeft = 500;
+    // The sidebar opens: viewport narrows to 500 px.
+    widthSpy.mockReturnValue(500);
+    act(() => {
+      capturedCb?.([] as unknown as ResizeObserverEntry[], {} as ResizeObserver);
+    });
+    // content becomes round(500 * 4) = 2000 px, pxPerSec 200: scrollLeft 250
+    // keeps the same 1.25 s left edge.
+    expect(screen.getByTestId("timeline-content").style.width).toBe("2000px");
+    expect(host.scrollLeft).toBeCloseTo(250, 0);
+    vi.unstubAllGlobals();
+  });
+
+  it("seeks from a click on a seekable track row, but not a non-seekable one (M5)", () => {
+    const onSeek = vi.fn();
+    render(<Harness onSeek={onSeek} />);
+    fireEvent.click(screen.getByTestId("track-a"), { clientX: 437 });
+    expect(onSeek).toHaveBeenCalledWith(expect.closeTo(4.37, 3));
+    onSeek.mockClear();
+    fireEvent.click(screen.getByTestId("track-b"), { clientX: 437 });
+    expect(onSeek).not.toHaveBeenCalled();
   });
 
   it("anchors a Ctrl+wheel zoom under the pointer even with follow on", () => {

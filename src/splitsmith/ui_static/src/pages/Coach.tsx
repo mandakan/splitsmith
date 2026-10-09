@@ -1159,6 +1159,7 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
             origin={0}
             fps={30}
             currentTime={tFromBeep}
+            playing={isPlaying}
             onSeek={seekFromBeep}
             zoom={timelineZoom}
             onZoomChange={setTimelineZoom}
@@ -1180,6 +1181,7 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
               {
                 id: "audio",
                 rows: [{ label: "Audio", height: 56 }],
+                seekable: true,
                 render: (geom) =>
                   peaksLoading ? (
                     // Nothing drawn yet: "No audio" would otherwise flash on

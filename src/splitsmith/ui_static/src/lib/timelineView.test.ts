@@ -7,6 +7,7 @@ import {
   columnPeaks,
   contentWidth,
   followScroll,
+  revealScroll,
   rulerTicks,
   wheelAction,
   zoomAround,
@@ -164,6 +165,21 @@ describe("followScroll", () => {
     expect(followScroll(950, 0, 1000, 4000)).toBe(450);
     expect(followScroll(3990, 2000, 1000, 4000)).toBe(3000);
     expect(followScroll(10, 500, 1000, 4000)).toBe(0);
+  });
+});
+
+describe("revealScroll", () => {
+  it("does nothing at Fit, or while the playhead is anywhere in the visible window", () => {
+    expect(revealScroll(500, 0, 1000, 1000)).toBeNull();
+    expect(revealScroll(0, 0, 1000, 4000)).toBeNull();
+    expect(revealScroll(1000, 0, 1000, 4000)).toBeNull();
+    expect(revealScroll(999, 0, 1000, 4000)).toBeNull();
+  });
+
+  it("centres the playhead once it is wholly outside the window, clamped to the content", () => {
+    expect(revealScroll(1001, 0, 1000, 4000)).toBe(501);
+    expect(revealScroll(-1, 1000, 1000, 4000)).toBe(0);
+    expect(revealScroll(3990, 0, 1000, 4000)).toBe(3000);
   });
 });
 

@@ -138,6 +138,19 @@ export function followScroll(playheadPx: number, scrollLeft: number, viewportPx:
 }
 
 /**
+ * New scrollLeft when the playhead is wholly outside the visible window
+ * [scrollLeft, scrollLeft + viewportPx], else null. Used while paused: a
+ * seek from off the band (e.g. the shot table) should bring the playhead
+ * into view, but a click or drag release inside the band must never move
+ * the view out from under the pointer that just placed it there.
+ */
+export function revealScroll(playheadPx: number, scrollLeft: number, viewportPx: number, contentPx: number): number | null {
+  if (contentPx <= viewportPx || viewportPx <= 0) return null;
+  if (playheadPx >= scrollLeft && playheadPx <= scrollLeft + viewportPx) return null;
+  return Math.min(Math.max(playheadPx - viewportPx / 2, 0), contentPx - viewportPx);
+}
+
+/**
  * Loudest peak under each of ``columns`` viewport columns. The track shows
  * clip seconds [from, to] across ``contentPx`` and is scrolled by
  * ``scrollLeft``; peaks are ``peaks.length`` bins over ``clipDuration``.
