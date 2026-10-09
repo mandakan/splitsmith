@@ -1097,9 +1097,11 @@ foreign response whose regions differ from the ones this tab last saw
 from the server (another writer's) takes only the payload and is
 *withheld*: its revision and regions wait, so an edit in flight 409s on
 its own revision and is discarded rather than overwrite those regions;
-one with the same regions advances. Only a 409's reload clears a
-withheld response; a successful PUT's answer does not (a withheld
-response that outlives a successful PUT is newer than it). When nothing
+one with the same regions advances. A withheld response is cleared by a
+409's reload or by a later foreign response that is adopted (both
+arrived after it); a successful PUT's answer does not clear it, since a
+PUT sent on a revision read before the withhold and still accepted was
+written before the withheld write. When nothing
 is outstanding any more (a PUT's answer, a 409's decision, a non-409
 failure, an Esc / pointercancel via ``LaneEditor`` ``onCancel``, an
 overlapping release) the list catches up, adopting a withheld response
