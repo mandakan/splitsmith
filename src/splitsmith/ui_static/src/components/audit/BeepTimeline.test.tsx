@@ -390,6 +390,45 @@ describe("BeepTimeline", () => {
     });
   });
 
+  describe("Space toggles play/pause", () => {
+    function stubPlayPause(video: HTMLVideoElement) {
+      let paused = true;
+      Object.defineProperty(video, "paused", { get: () => paused, configurable: true });
+      video.play = vi.fn(() => {
+        paused = false;
+        return Promise.resolve();
+      });
+      video.pause = vi.fn(() => {
+        paused = true;
+      });
+      return video;
+    }
+
+    it("plays then pauses the preview on Space, once peaks have loaded", async () => {
+      vi.mocked(api.getVideoPeaks).mockResolvedValue(peaksFixture());
+      render(<Harness videoId="v1" />);
+      await screen.findByTestId("waveform-track");
+      const video = stubPlayPause(screen.getByTestId("preview-video") as HTMLVideoElement);
+
+      fireEvent.keyDown(document.body, { code: "Space" });
+      expect(video.play).toHaveBeenCalledTimes(1);
+      expect(video.pause).not.toHaveBeenCalled();
+
+      fireEvent.keyDown(document.body, { code: "Space" });
+      expect(video.pause).toHaveBeenCalledTimes(1);
+    });
+
+    it("does nothing while peaks are still loading", async () => {
+      vi.mocked(api.getVideoPeaks).mockReturnValue(new Promise(() => {}));
+      render(<Harness videoId="v1" />);
+      expect(screen.getByText("Loading audio")).toBeInTheDocument();
+      const video = stubPlayPause(screen.getByTestId("preview-video") as HTMLVideoElement);
+
+      fireEvent.keyDown(document.body, { code: "Space" });
+      expect(video.play).not.toHaveBeenCalled();
+    });
+  });
+
   it("keeps its media listeners live under StrictMode's double-invoked effects", async () => {
     // main.tsx wraps <App> in <StrictMode>, which mounts, cleans up, and
     // mounts again on purpose (dev only) to shake out effects that don't

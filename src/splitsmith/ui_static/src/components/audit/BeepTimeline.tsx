@@ -28,6 +28,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Timeline, type TimelineTrack } from "@/components/timeline/Timeline";
 import { WaveformTrack } from "@/components/timeline/WaveformTrack";
 import { api, type PeaksResult } from "@/lib/api";
+import { useSpacePlayPause } from "@/lib/keyboard";
 import type { Zoom } from "@/lib/timelineView";
 import { cn } from "@/lib/utils";
 
@@ -212,6 +213,18 @@ export function BeepTimeline({
   }, [playing, mediaRef]);
 
   const offset = videoBeepTime != null && peaks?.beep_time != null ? videoBeepTime - peaks.beep_time : 0;
+
+  // Space -> play/pause the preview, the same window-level hook every
+  // other Splitsmith media surface wires (BeepSection's old picker
+  // included). Gated on peaks being loaded, same as the old picker, so
+  // Space falls through to the browser default while this is still
+  // loading or failed.
+  useSpacePlayPause(() => {
+    const el = mediaRef.current;
+    if (!el) return;
+    if (el.paused) void el.play().catch(() => {});
+    else el.pause();
+  }, peaks != null);
 
   // Source seconds never go negative (BeepWaveformPicker's rule): an
   // offset bigger than the local pick is a confirmed-beep/peaks-beep
