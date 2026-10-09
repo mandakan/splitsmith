@@ -55,7 +55,13 @@ def test_a_preset_saved_before_the_style_loads_as_classic() -> None:
 def test_classic_settings_ignore_the_template_options() -> None:
     """Toggling speed colours with Classic chosen must not invalidate a
     Classic overlay on disk: Classic draws none of them."""
-    common = {"look": "splitsmith", "codec": "auto", "max_height": None, "max_fps": None}
+    common = {
+        "look": "splitsmith",
+        "codec": "auto",
+        "max_height": None,
+        "max_fps": None,
+        "audit_revision": "r",
+    }
     plain = overlay_settings(variant="default", options=HudOptions(), **common)
     toggled = overlay_settings(variant="default", options=HudOptions(speed_colors=False), **common)
     assert plain == toggled
@@ -67,16 +73,33 @@ def test_classic_settings_ignore_the_template_options() -> None:
     assert plain == overlay_settings(variant="default", options=HudOptions(stage_bar=True), **common)
 
 
-def test_classic_settings_equal_what_an_unrecorded_overlay_is_taken_to_be() -> None:
-    """An overlay rendered before the record existed is read as the
-    defaults, so an untouched form still reuses it."""
+def test_an_unrecorded_overlay_matches_no_request() -> None:
+    """Changed on purpose (stage events, Task 1b). An overlay rendered before
+    the record existed used to read as the defaults, so an untouched form
+    reused it. It carries no audit revision and cannot vouch for the shots
+    it shows, so it now matches no request: every such overlay is drawn
+    once more."""
     from splitsmith.overlay_hud import LEGACY_OVERLAY_SETTINGS
 
-    assert LEGACY_OVERLAY_SETTINGS == overlay_settings(
-        look="splitsmith",
-        variant="default",
-        options=HudOptions(),
-        codec="auto",
-        max_height=None,
-        max_fps=None,
-    )
+    assert LEGACY_OVERLAY_SETTINGS["audit_revision"] is None
+    for revision in ("none", "0123456789abcdef"):
+        assert LEGACY_OVERLAY_SETTINGS != overlay_settings(
+            look="splitsmith",
+            variant="default",
+            options=HudOptions(),
+            codec="auto",
+            max_height=None,
+            max_fps=None,
+            audit_revision=revision,
+        )
+
+
+def test_the_record_carries_the_audit_revision_for_every_style() -> None:
+    """Classic as well as a template style: a shot edit moves what either
+    draws, so the revision sits outside the template-only options gate."""
+    common = {"look": "splitsmith", "codec": "auto", "max_height": None, "max_fps": None}
+    for variant in ("default", "plate"):
+        a = overlay_settings(variant=variant, options=HudOptions(), audit_revision="aaaa", **common)
+        b = overlay_settings(variant=variant, options=HudOptions(), audit_revision="bbbb", **common)
+        assert a["audit_revision"] == "aaaa"
+        assert a != b

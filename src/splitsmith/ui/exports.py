@@ -20,7 +20,8 @@ from pathlib import Path
 from typing import Any
 
 from .. import csv_gen, fcpxml_gen, overlay_render, report, summary_card, trim
-from ..audit_data import audit_shots_to_engine_shots, read_audit_data
+from ..audit_data import StageExportError, audit_shots_to_engine_shots, read_audit_data
+from ..audit_revision import audit_revision
 from ..config import Config, ReportFiles, StageAnalysis, StageData
 from ..export_naming import stage_file_base
 from ..looks import DEFAULT_VARIANT
@@ -134,11 +135,25 @@ def overlay_settings_file(exports_dir: Path, base: str) -> Path:
     return exports_dir / f"{base}_overlay.json"
 
 
+def overlay_audit_revision(audit_path: Path) -> str | None:
+    """The revision of the audit doc at ``audit_path``, as an overlay's
+    settings record holds it. The one computation for the writer
+    (:func:`export_stage`) and every reuse check, so a hosted
+    materialisation and a local read agree. A missing doc is zero shots and
+    has a revision; an unreadable one is ``None``, which a reuse check takes
+    as "draw again"."""
+    try:
+        return audit_revision(read_audit_data(audit_path))
+    except StageExportError:
+        return None
+
+
 def read_overlay_settings(path: Path) -> dict[str, Any] | None:
     """The settings an overlay MOV was drawn with. A missing record is an
-    overlay rendered before records existed, read as the defaults
-    (:data:`LEGACY_OVERLAY_SETTINGS`); an unreadable one is ``None``, which
-    no request matches, so the overlay is drawn again."""
+    overlay rendered before records existed (:data:`LEGACY_OVERLAY_SETTINGS`,
+    which carries no audit revision and so matches no request); an
+    unreadable one is ``None``, which no request matches either. Either
+    way the overlay is drawn again."""
     if not path.exists():
         return dict(LEGACY_OVERLAY_SETTINGS)
     try:
@@ -348,6 +363,9 @@ def export_stage(
                     "Re-run Generate with the Trim toggle enabled."
                 )
         else:
+            # Read before the render: an edit that lands while it runs was
+            # never drawn and must read as a change to the next reuse check.
+            drawn_revision = overlay_audit_revision(audit_path)
             try:
                 overlay_render.render_overlay(
                     audit_path=audit_path,
@@ -377,6 +395,7 @@ def export_stage(
                             codec=request.overlay_codec,
                             max_height=request.overlay_max_height,
                             max_fps=request.overlay_max_fps,
+                            audit_revision=drawn_revision,
                         ),
                         sort_keys=True,
                     ),

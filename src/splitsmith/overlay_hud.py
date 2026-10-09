@@ -127,11 +127,17 @@ def overlay_settings(
     codec: str,
     max_height: int | None,
     max_fps: float | None,
+    audit_revision: str | None,
 ) -> dict[str, Any]:
     """What an overlay MOV was drawn with, as recorded beside it and
     compared before a match export reuses it. Classic draws none of the
     template options, so they are left out of a Classic record: toggling
-    them with Classic chosen never forces a re-render."""
+    them with Classic chosen never forces a re-render.
+
+    ``audit_revision`` is the revision of the audit doc the overlay was drawn
+    from (``ui.exports.overlay_audit_revision``), for every style: a shot
+    edit or a confirmed region moves what any style draws, so an overlay is
+    never reused across an audit change."""
     return {
         "look": look,
         "variant": variant,
@@ -139,11 +145,13 @@ def overlay_settings(
         "codec": codec,
         "max_height": max_height,
         "max_fps": max_fps,
+        "audit_revision": audit_revision,
     }
 
 
 #: What an overlay rendered before the record existed is taken to be: the
-#: defaults, so an untouched form reuses it exactly as before.
+#: defaults with no audit revision. It cannot say which audit it was drawn
+#: from, so it matches no request and is drawn again once.
 LEGACY_OVERLAY_SETTINGS: dict[str, Any] = overlay_settings(
     look="splitsmith",
     variant=DEFAULT_VARIANT,
@@ -151,6 +159,7 @@ LEGACY_OVERLAY_SETTINGS: dict[str, Any] = overlay_settings(
     codec="auto",
     max_height=None,
     max_fps=None,
+    audit_revision=None,
 )
 
 

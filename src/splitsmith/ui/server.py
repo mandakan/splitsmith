@@ -4613,13 +4613,17 @@ def register_job_bodies(state: AppState) -> None:
                     (exports_dir / f"{base}_cam_{vid}_trimmed.mp4").exists() for vid in wanted_secondary_ids
                 )
                 # An overlay on disk is reused only when its record says it was
-                # drawn the way this export asks (Look, style, options, format).
-                # One without a record predates them and reads as the defaults,
-                # so an untouched form re-stitches without a re-render, as before.
+                # drawn the way this export asks (Look, style, options, format)
+                # from the audit as it stands now (materialised above). One
+                # without a record cannot say which audit it shows and is drawn
+                # again.
                 overlay_record = export_helpers.overlay_settings_file(exports_dir, base)
                 overlay_reusable = False
                 if req.include_overlay:
                     export_storage.pull_export_file(proj, overlay_record)
+                    current_revision = export_helpers.overlay_audit_revision(
+                        audit_dir / f"stage{stage_number}.json"
+                    )
                     wanted = overlay_settings(
                         look=req.overlay_theme,
                         variant=req.overlay_variant,
@@ -4627,8 +4631,12 @@ def register_job_bodies(state: AppState) -> None:
                         codec=req.overlay_codec,
                         max_height=req.overlay_max_height,
                         max_fps=req.overlay_max_fps,
+                        audit_revision=current_revision,
                     )
-                    overlay_reusable = export_helpers.read_overlay_settings(overlay_record) == wanted
+                    overlay_reusable = (
+                        current_revision is not None
+                        and export_helpers.read_overlay_settings(overlay_record) == wanted
+                    )
                     # Pull the MOV only when it would be reused.
                     if overlay_reusable:
                         export_storage.pull_export_file(proj, overlay_target)

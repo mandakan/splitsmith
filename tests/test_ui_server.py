@@ -6,7 +6,7 @@ import asyncio
 import json
 import sys
 import threading
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from unittest.mock import patch
 
@@ -10427,12 +10427,16 @@ def test_export_stage_forwards_the_overlay_style(tmp_path: Path, monkeypatch: py
 @pytest.mark.parametrize(
     ("record", "request_style", "redraws"),
     [
-        (None, {}, False),
+        # No record: an overlay from before records existed cannot vouch
+        # for the audit it was drawn from, so it is always drawn again.
+        (None, {}, True),
         (None, {"overlay_variant": "plate"}, True),
+        (None, {"overlay_speed_colors": False}, True),
+        ("default", {}, False),
+        ("default", {"overlay_speed_colors": False}, False),
         ("plate", {}, True),
         ("plate", {"overlay_variant": "plate"}, False),
         ("plate", {"overlay_variant": "plate", "overlay_landing": False}, True),
-        (None, {"overlay_speed_colors": False}, False),
     ],
 )
 def test_match_export_redraws_an_overlay_only_when_its_record_differs(
@@ -10443,8 +10447,8 @@ def test_match_export_redraws_an_overlay_only_when_its_record_differs(
     redraws: bool,
 ) -> None:
     """An overlay on disk is reused only when it was drawn the way this
-    export asks; one without a record is read as Classic defaults, so an
-    untouched form still reuses it, and Classic ignores the style toggles."""
+    export asks, from the audit as it stands; one without a record is drawn
+    again, and Classic ignores the style toggles."""
     import json as _json
 
     from splitsmith import overlay_render
@@ -10463,6 +10467,9 @@ def test_match_export_redraws_an_overlay_only_when_its_record_differs(
             codec="auto",
             max_height=None,
             max_fps=None,
+            audit_revision=exports_mod.overlay_audit_revision(
+                root / "shooters" / "me" / "audit" / "stage1.json"
+            ),
         )
         (exports_dir / "stage1_stage-1_overlay.json").write_text(_json.dumps(settings))
     calls: list[exports_mod.StageExportRequest] = []
@@ -10491,3 +10498,95 @@ def test_match_export_redraws_an_overlay_only_when_its_record_differs(
     assert bool(calls) is redraws
     if redraws:
         assert calls[0].overlay_variant == request_style.get("overlay_variant", "default")
+
+
+def _run_overlay_match_export(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, request_style: dict
+) -> list[object]:
+    """One match export with the overlay on; returns the per-stage export
+    calls it made (empty when the overlay on disk was reused)."""
+    from splitsmith import overlay_render
+    from splitsmith.ui import exports as exports_mod
+
+    calls: list[object] = []
+    real = exports_mod.export_stage
+
+    def capture(**kwargs: object) -> object:
+        calls.append(kwargs["request"])
+        return real(**kwargs)
+
+    def fake_render(**kwargs: object) -> Path:
+        out = kwargs["output_path"]
+        assert isinstance(out, Path)
+        out.write_bytes(b"drawn")
+        return out
+
+    monkeypatch.setattr(exports_mod, "export_stage", capture)
+    monkeypatch.setattr(overlay_render, "render_overlay", fake_render)
+    resp = client.post(
+        "/api/shooters/me/export/match",
+        json={"stage_numbers": [1], "include_overlay": True, **request_style},
+    )
+    assert resp.status_code == 200, resp.text
+    assert _wait_for_job(client, resp.json()["id"])["status"] == "succeeded"
+    return calls
+
+
+def _edit_shot_time(doc: dict) -> None:
+    doc["shots"][0]["ms_after_beep"] = 640
+
+
+def _confirm_a_region(doc: dict) -> None:
+    doc["events"] = [{"id": "evt-1", "kind": "reload", "start": 0.6, "end": 1.9, "source": "manual"}]
+
+
+@pytest.mark.parametrize("request_style", [{}, {"overlay_variant": "plate"}], ids=["classic", "plate"])
+@pytest.mark.parametrize("edit", [_edit_shot_time, _confirm_a_region], ids=["shot-time", "confirmed-region"])
+def test_match_export_redraws_an_overlay_when_its_audit_changed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request_style: dict, edit: Callable[[dict], None]
+) -> None:
+    """The settings record carries the audit revision the overlay was drawn
+    from: an unchanged audit reuses the MOV, an edited one draws it again,
+    whatever the style. Before, a shot edit or a confirmed region shipped the
+    old overlay because the record held only the style."""
+    import json as _json
+
+    client, root = _seed_match_export_project(tmp_path, stage_count=1)
+    _stub_match_export_probe(monkeypatch)
+    audit_path = root / "shooters" / "me" / "audit" / "stage1.json"
+
+    assert _run_overlay_match_export(client, monkeypatch, request_style), "first export draws"
+    assert _run_overlay_match_export(client, monkeypatch, request_style) == [], "unchanged audit reuses"
+
+    doc = _json.loads(audit_path.read_text(encoding="utf-8"))
+    edit(doc)
+    audit_path.write_text(_json.dumps(doc), encoding="utf-8")
+    assert _run_overlay_match_export(client, monkeypatch, request_style), "edited audit redraws"
+    assert _run_overlay_match_export(client, monkeypatch, request_style) == [], "and then reuses again"
+
+
+def test_match_export_never_reuses_a_legacy_overlay_over_an_unreadable_audit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A record-less overlay reads as no audit revision, and so does an audit
+    that will not parse: the two must not agree into a reuse. The per-stage
+    export runs and reports the broken audit instead of stitching an
+    overlay nothing vouches for."""
+    from splitsmith.ui import exports as exports_mod
+
+    client, root = _seed_match_export_project(tmp_path, stage_count=1)
+    _stub_match_export_probe(monkeypatch)
+    (root / "shooters" / "me" / "exports" / "stage1_stage-1_overlay.mov").write_bytes(b"old")
+    (root / "shooters" / "me" / "audit" / "stage1.json").write_text("{not json", encoding="utf-8")
+    calls: list[object] = []
+    real = exports_mod.export_stage
+
+    def capture(**kwargs: object) -> object:
+        calls.append(kwargs["request"])
+        return real(**kwargs)
+
+    monkeypatch.setattr(exports_mod, "export_stage", capture)
+    resp = client.post("/api/shooters/me/export/match", json={"stage_numbers": [1], "include_overlay": True})
+    assert resp.status_code == 200, resp.text
+    assert _wait_for_job(client, resp.json()["id"])["status"] == "failed"
+    assert calls, "the per-stage export ran rather than reusing the overlay"

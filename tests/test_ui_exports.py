@@ -973,3 +973,61 @@ def test_read_overlay_settings_takes_a_missing_record_as_the_defaults(tmp_path: 
     broken = tmp_path / "broken.json"
     broken.write_text("{not json")
     assert exports_mod.read_overlay_settings(broken) is None
+
+
+@pytest.mark.parametrize("variant", ["default", "plate"])
+def test_the_record_holds_the_audit_revision_read_before_the_render(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, variant: str
+) -> None:
+    """An edit that lands while the overlay renders was never drawn, so the
+    record names the audit as it stood when the render began: the next
+    match export sees the edit as a change and draws again."""
+    from splitsmith import overlay_render
+
+    audit_path, exports_dir = _seed_stage_with_trim(tmp_path)
+    before = exports_mod.overlay_audit_revision(audit_path)
+    assert before is not None
+
+    def render_while_editing(**kwargs: Any) -> Path:
+        doc = json.loads(audit_path.read_text(encoding="utf-8"))
+        doc["shots"][0]["ms_after_beep"] = 640
+        audit_path.write_text(json.dumps(doc), encoding="utf-8")
+        kwargs["output_path"].write_bytes(b"mov")
+        return kwargs["output_path"]
+
+    monkeypatch.setattr(overlay_render, "render_overlay", render_while_editing)
+    exports_mod.export_stage(
+        request=exports_mod.StageExportRequest(
+            stage_number=1,
+            write_trim=False,
+            write_csv=False,
+            write_fcpxml=False,
+            write_report=False,
+            write_overlay=True,
+            overlay_variant=variant,
+        ),
+        audit_path=audit_path,
+        exports_dir=exports_dir,
+        source_video_path=None,
+        pre_buffer_seconds=5.0,
+        post_buffer_seconds=5.0,
+        stage_data=StageData(
+            stage_number=1,
+            stage_name="Stage 1 -- H1",
+            time_seconds=8.0,
+            scorecard_updated_at=datetime(2026, 5, 2, 14, 30, tzinfo=UTC),
+        ),
+        beep_time_in_source=10.0,
+        config=Config(),
+    )
+    record = json.loads((exports_dir / "stage1_stage-1-h1_overlay.json").read_text())
+    assert record["audit_revision"] == before
+    assert exports_mod.overlay_audit_revision(audit_path) != before
+
+
+def test_the_audit_revision_is_none_for_an_unreadable_audit(tmp_path: Path) -> None:
+    broken = tmp_path / "stage1.json"
+    broken.write_text("{not json", encoding="utf-8")
+    assert exports_mod.overlay_audit_revision(broken) is None
+    # A missing audit is zero shots, a real state with a real revision.
+    assert exports_mod.overlay_audit_revision(tmp_path / "absent.json") is not None

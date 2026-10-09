@@ -269,6 +269,7 @@ def export_match_tool(
     exports_dir = project.exports_path(root)
     audit_dir = project.audit_path(root)
     stages_input: list[match_export_helpers.MatchStageInput] = []
+    stale_overlays: list[str] = []
     for stage_number in stage_numbers:
         try:
             stage = project.stage(stage_number)
@@ -319,7 +320,21 @@ def export_match_tool(
         if include_overlay:
             candidate = exports_dir / f"{base}_overlay.mov"
             if candidate.exists():
-                overlay_path = candidate
+                # Stitched only when its record says it was drawn from the
+                # audit as it stands: this tool cannot redraw it (it has no
+                # style to draw with), so a stale one is left out and said so.
+                record = export_helpers.read_overlay_settings(
+                    export_helpers.overlay_settings_file(exports_dir, base)
+                )
+                current = export_helpers.overlay_audit_revision(audit_path)
+                if current is not None and record is not None and record.get("audit_revision") == current:
+                    overlay_path = candidate
+                else:
+                    stale_overlays.append(
+                        f"stage {stage_number}: overlay at {candidate} was drawn from an older audit "
+                        "(or has no record of which) -- left out; call export_stage with "
+                        "write_overlay=True to draw it again"
+                    )
         stages_input.append(
             match_export_helpers.MatchStageInput(
                 stage_number=stage_number,
@@ -360,7 +375,7 @@ def export_match_tool(
         "output_path": str(result.fcpxml_path),
         "stage_count": result.stage_count,
         "duration_seconds": result.duration_seconds,
-        "anomalies": list(result.anomalies),
+        "anomalies": [*stale_overlays, *result.anomalies],
     }
 
 
