@@ -45,6 +45,26 @@ function overlayPct(t: number | null | undefined, from: number, to: number): num
   return ((t - from) / span) * 100;
 }
 
+/**
+ * Left/width percent of (from, to) for a region, clamping each endpoint to
+ * the window instead of discarding the whole region when one end falls
+ * outside it (matches `components/Waveform.tsx`'s canvas draw) -- null only
+ * when the clamped region is empty (wholly outside, or from >= to).
+ */
+function loopOverlayPct(
+  region: { start: number; end: number } | null | undefined,
+  from: number,
+  to: number,
+): { left: number; width: number } | null {
+  if (!region) return null;
+  const span = to - from;
+  if (span <= 0) return null;
+  const start = Math.min(Math.max(region.start, from), to);
+  const end = Math.min(Math.max(region.end, from), to);
+  if (end <= start) return null;
+  return { left: ((start - from) / span) * 100, width: ((end - start) / span) * 100 };
+}
+
 export function WaveformTrack({
   peaks,
   clipDuration,
@@ -84,17 +104,15 @@ export function WaveformTrack({
 
   const beepPct = overlayPct(beepTime, from, to);
   const timerStopPct = overlayPct(timerStopTime, from, to);
-  const loopStartPct = loopRegion ? overlayPct(loopRegion.start, from, to) : null;
-  const loopEndPct = loopRegion ? overlayPct(loopRegion.end, from, to) : null;
-  const showLoop = loopStartPct !== null && loopEndPct !== null && loopEndPct > loopStartPct;
+  const loop = loopOverlayPct(loopRegion, from, to);
 
   return (
     <div className="relative" style={{ height }}>
-      {showLoop ? (
+      {loop ? (
         <div
           data-testid="wave-loop"
           className="pointer-events-none absolute inset-y-0 bg-beep/10"
-          style={{ left: `${loopStartPct}%`, width: `${(loopEndPct as number) - (loopStartPct as number)}%` }}
+          style={{ left: `${loop.left}%`, width: `${loop.width}%` }}
         />
       ) : null}
       {peaks ? (
@@ -117,8 +135,8 @@ export function WaveformTrack({
       {timerStopPct !== null ? (
         <div
           data-testid="wave-timer-stop"
-          className="pointer-events-none absolute inset-y-0 border-l border-dotted border-beep"
-          style={{ left: `${timerStopPct}%`, borderLeftWidth: "1.5px" }}
+          className="pointer-events-none absolute inset-y-0 border-l-[1.5px] border-dotted border-beep"
+          style={{ left: `${timerStopPct}%` }}
         />
       ) : null}
     </div>

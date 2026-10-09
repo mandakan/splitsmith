@@ -71,6 +71,55 @@ describe("WaveformTrack overlays", () => {
     expect(loop.style.width).toBe("20%");
   });
 
+  it("clamps a loop region straddling `from` to draw from 0% to its end", () => {
+    render(
+      <WaveformTrack
+        peaks={[0.5]}
+        clipDuration={10}
+        from={0}
+        to={10}
+        geom={geom(1)}
+        height={56}
+        loopRegion={{ start: -2, end: 4 }}
+      />,
+    );
+    const loop = screen.getByTestId("wave-loop");
+    expect(loop.style.left).toBe("0%");
+    expect(loop.style.width).toBe("40%");
+  });
+
+  it("clamps a loop region straddling `to` to draw to 100%", () => {
+    render(
+      <WaveformTrack
+        peaks={[0.5]}
+        clipDuration={10}
+        from={0}
+        to={10}
+        geom={geom(1)}
+        height={56}
+        loopRegion={{ start: 8, end: 14 }}
+      />,
+    );
+    const loop = screen.getByTestId("wave-loop");
+    expect(loop.style.left).toBe("80%");
+    expect(loop.style.width).toBe("20%");
+  });
+
+  it("renders nothing for a loop region wholly outside [from, to]", () => {
+    render(
+      <WaveformTrack
+        peaks={[0.5]}
+        clipDuration={10}
+        from={0}
+        to={10}
+        geom={geom(1)}
+        height={56}
+        loopRegion={{ start: 12, end: 14 }}
+      />,
+    );
+    expect(screen.queryByTestId("wave-loop")).not.toBeInTheDocument();
+  });
+
   it("renders no overlays when every value is null", () => {
     render(
       <WaveformTrack
