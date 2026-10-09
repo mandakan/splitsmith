@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "stage-list-keeps-your-page",
+      "date": "2026-10-09",
+      "title": "The stage list keeps you where you are",
+      "body": "Picking a stage in the left bar on Coach, Splits, Export or Compare now opens that stage there, for the shooter you are looking at, instead of always going to Audit."
+    },
+    {
       "id": "end-screen",
       "date": "2026-10-09",
       "title": "A closing card made for YouTube end screens",
