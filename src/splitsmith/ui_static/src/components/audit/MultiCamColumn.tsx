@@ -1,9 +1,10 @@
 /* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
- * MultiCamColumn -- the Audit page's camera column. By default a fixed
- * 380px column; with ``fill`` (the Audit top row's left cell since the
- * shared timeline, #1352) it takes the cell's width with a 16:9 primary.
- * The notes below describe the fixed column.
+ * MultiCamColumn -- the Audit page's camera column. Audit (the top row's
+ * left cell, the shared timeline, #1352) is its only renderer: the column
+ * is `w-full` and the primary tile is a 16:9 box as wide as the column,
+ * height-capped (the video letterboxes inside it). Secondary tiles keep
+ * their fixed size.
  *
  * Replaces the floating a floating bay. Video lives in a fixed structural slot
  * so the waveform owns the left column and there's no overlap with the
@@ -12,9 +13,9 @@
  * waveform around.
  *
  * Layout strategy:
- *   1 cam  -> single 380x220 primary tile.
- *   2 cams -> 380x180 primary + 92h secondary strip below.
- *   3+ cams -> 380x180 primary + thumbnail row (~72h each) below.
+ *   1 cam  -> single 16:9 primary tile.
+ *   2 cams -> 16:9 primary + 92h secondary strip below.
+ *   3+ cams -> 16:9 primary + thumbnail row (~72h each) below.
  *
  * The "Focus / Grid" segmented control at the top hints that an equal
  * 2x2 grid mode is available -- the host owns the Grid modal (see
@@ -29,10 +30,6 @@ import type { ReactNode } from "react";
 import { CamSyncPill, type CamSyncState } from "@/components/audit/CamSyncPill";
 import type { StageVideo } from "@/lib/api";
 import { cn } from "@/lib/utils";
-
-const COLUMN_WIDTH = 380;
-const PRIMARY_HEIGHT_SOLO = 220;
-const PRIMARY_HEIGHT_MULTI = 180;
 
 export type CamLayout = "focus" | "grid";
 
@@ -61,13 +58,6 @@ export interface MultiCamColumnProps {
    *  own the <video> ref + secondary refs map). */
   children: ReactNode;
   className?: string;
-  /**
-   * Fill the host's cell instead of the fixed 380 px column: the column is
-   * `w-full` and the primary tile is a 16:9 box as wide as the column,
-   * capped at 55 % of the viewport height (the video letterboxes inside
-   * it). Secondary tiles keep their size. Off, nothing changes.
-   */
-  fill?: boolean;
 }
 
 export function MultiCamColumn({
@@ -89,24 +79,17 @@ export function MultiCamColumn({
   onStepFrame,
   children,
   className,
-  fill = false,
 }: MultiCamColumnProps) {
   const count = videos.length;
   if (count === 0) return null;
   const primary = videos[0];
   const secondaries = videos.slice(1);
-  const primaryHeight = count === 1 ? PRIMARY_HEIGHT_SOLO : PRIMARY_HEIGHT_MULTI;
   const primarySyncState = camSyncStates[0] ?? "no_beep";
 
   return (
     <aside
       aria-label={`Cameras (${count})`}
-      style={fill ? undefined : { width: COLUMN_WIDTH }}
-      className={cn(
-        "flex shrink-0 flex-col gap-2",
-        fill && "w-full min-w-0",
-        className,
-      )}
+      className={cn("flex w-full min-w-0 shrink-0 flex-col gap-2", className)}
     >
       {/* Column header: kicker + Focus/Grid segmented + cam-count tag */}
       <div className="flex items-center gap-2 px-0.5">
@@ -142,11 +125,7 @@ export function MultiCamColumn({
           Audit page keeps owning the ref + secondary plumbing. */}
       <div
         data-testid="cam-primary-tile"
-        style={fill ? undefined : { height: primaryHeight }}
-        className={cn(
-          "relative overflow-hidden rounded-2xl border border-rule-strong bg-surface shadow-[inset_0_1px_0_rgba(255,255,255,0.02),0_18px_36px_-24px_rgba(0,0,0,0.7)]",
-          fill && "aspect-video max-h-[max(240px,calc(100dvh-620px))] w-full [&_video]:object-contain",
-        )}
+        className="relative aspect-video max-h-[max(240px,calc(100dvh-620px))] w-full overflow-hidden rounded-2xl border border-rule-strong bg-surface shadow-[inset_0_1px_0_rgba(255,255,255,0.02),0_18px_36px_-24px_rgba(0,0,0,0.7)] [&_video]:object-contain"
       >
         <span
           className="absolute left-2.5 top-2 z-[2] inline-flex items-center gap-1.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.12em] text-led-text"

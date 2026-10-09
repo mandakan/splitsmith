@@ -244,13 +244,24 @@ Rulings:
 
 ## As built (PR 2)
 
-Audit moved onto the band. The top row (video left, `ShotList` right)
-is unchanged; the band, its own ruler and zoom replace Audit's static
+Audit moved onto the band. The top row is now video left, `ShotList`
+right; before this PR the waveform sat left of a stacked video + list
+column on the right, so the row's shape itself changed, not just what
+sits under it. The band, its own ruler and zoom replace Audit's static
 six-label ruler and `TransportLine`'s `ZoomControls`.
 
-1. **Layout.** `MultiCamColumn fill` fills the top row's left cell (a
-   16:9 tile capped at `max-h-[55vh]`, letterboxed) instead of the
-   fixed 380 px column it used outside Audit; `ShotList` is unchanged.
+1. **Layout.** `MultiCamColumn` fills the top row's left cell with a
+   16:9 tile, letterboxed. Audit is `MultiCamColumn`'s only renderer, so
+   there was never a separate fixed-width column to fall back to --
+   filling the cell is its one behaviour (the `fill` prop and the dead
+   fixed-380px branch were removed once that was clear); `ShotList` is
+   unchanged. A follow-up review found the first cap, `max-h-[55vh]`,
+   meant the video and the band could never both be on screen at
+   1440x900; the cap is now `max-h-[max(240px,calc(100dvh-620px))]`, a
+   height-aware cap that leaves room for the band below it with a floor
+   so the video never collapses on a short viewport. A further
+   follow-up, not yet done: moving `TransportLine` into the band header
+   would reclaim more of that height for the video.
 2. **Domain and origin.** The band's domain is the clip, `[0,
    peaks.duration]` in clip seconds (not beep-relative times); the
    ruler's zero is the beep through `Timeline`'s `origin` prop

@@ -16,7 +16,7 @@ const video = {
   beep_reviewed: true,
 } as unknown as StageVideo;
 
-function renderColumn(fill?: boolean) {
+function renderColumn() {
   render(
     <MultiCamColumn
       videos={[video]}
@@ -35,7 +35,6 @@ function renderColumn(fill?: boolean) {
       onTogglePlay={vi.fn()}
       onToggleLoop={vi.fn()}
       onStepFrame={vi.fn()}
-      fill={fill}
     >
       <video />
     </MultiCamColumn>,
@@ -43,16 +42,9 @@ function renderColumn(fill?: boolean) {
   return { aside: screen.getByRole("complementary"), tile: screen.getByTestId("cam-primary-tile") };
 }
 
-describe("MultiCamColumn fill", () => {
-  it("keeps the fixed 380 px column and tile height without fill", () => {
-    const { aside, tile } = renderColumn();
-    expect(aside.style.width).toBe("380px");
-    expect(tile.style.height).toBe("220px");
-    expect(tile).not.toHaveClass("aspect-video");
-  });
-
+describe("MultiCamColumn", () => {
   it("fills the cell with a 16:9 primary tile capped by the viewport height", () => {
-    const { aside, tile } = renderColumn(true);
+    const { aside, tile } = renderColumn();
     expect(aside.style.width).toBe("");
     expect(aside).toHaveClass("w-full");
     expect(tile.style.height).toBe("");

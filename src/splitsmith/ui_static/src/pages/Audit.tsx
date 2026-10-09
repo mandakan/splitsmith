@@ -1999,7 +1999,6 @@ export function Audit() {
                     full width under it. */}
                 <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
                   <MultiCamColumn
-                    fill
                     videos={videos}
                     activeIndex={activeVideoIndex}
                     onActiveIndexChange={setActiveVideoIndex}
