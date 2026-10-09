@@ -1,6 +1,6 @@
 # Voter C: stage-relative features
 
-Date: 2026-10-09. Status: draft, for review.
+Date: 2026-10-09. Status: approved.
 
 ## Why
 
@@ -43,6 +43,18 @@ Running-relative adds nothing on top of stage-relative and is left out.
   `scripts/build_ensemble_artifacts.py`, as `beep_features` already is for the beep ranker.
 - Headcam and handheld both get the new columns (handheld is neutral to slightly better; one layout
   keeps the code simple).
+- **Accepted trade (user, 2026-10-09):** GO 3S precision on Blacksmith 2026, held out, drops from
+  0.918 to about 0.81 to 0.83, in exchange for surviving camera audio changes. Recorded in the PR and
+  in `docs/cameras.md` under the GO 3S, so it can be revisited.
+
+## Reverting
+
+Code and artifacts change together (the ONNX input width ties them), so the revert is a `git revert`
+of the PR: it restores the old feature code and the old shipped artifacts in one step, and the width
+guard catches any mix. No config switch keeps both feature paths alive; that would mean shipping and
+maintaining two artifact sets. If the trade needs revisiting without a full revert, the cheaper levers
+are a per-camera-class choice of layout (headcam only) or dropping the relative columns that cost the
+GO 3S precision, each a retrain.
 
 ## Design
 
@@ -102,7 +114,7 @@ Measured by the build's own held-out report and by the engine over every fixture
 - Handheld leave-one-match-out F1 not below today's by more than 0.005.
 - In-app mode (with round counts), per-fixture comparison: every newly worse fixture listed in the PR,
   and headcam errors (FP + FN) not above the post-#1355 artifacts.
-- `docs/cameras.md` updated with what changed for each camera.
+- `docs/cameras.md` updated with what changed for each camera, including the GO 3S precision trade.
 
 ## Testing
 
