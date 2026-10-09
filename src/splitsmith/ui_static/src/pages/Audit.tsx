@@ -1972,6 +1972,7 @@ export function Audit() {
                     ) : null}
                     <span className="ml-auto flex flex-wrap gap-3 text-sm text-muted">
                       <Legend className="bg-beep" label="Beep" />
+                      <Legend className="border border-beep bg-transparent" label="Timer stop" />
                       <Legend className="bg-ink-2" label="Shot" />
                       <Legend className="bg-manual" label="Manual" />
                       <Legend className="border border-rule-strong bg-transparent" label="Rejected" />
@@ -1985,6 +1986,11 @@ export function Audit() {
                       duration={displayPeaks.duration}
                       currentTime={currentTime}
                       beepTime={filters.beep ? auditBeep : null}
+                      timerStopTime={
+                        filters.beep && auditBeep != null && stage && stage.time_seconds > 0
+                          ? auditBeep + stage.time_seconds
+                          : null
+                      }
                       loopRegion={loopRegion}
                       pixelsPerSecond={pixelsPerSecond}
                       onScrub={handleScrub}

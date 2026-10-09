@@ -1,7 +1,7 @@
 """Human-readable per-stage analysis reports + anomaly flagging.
 
 Anomaly rules (from SPEC.md):
-- Beep-to-last-shot window differs from official ``stage.time_seconds`` by >500 ms.
+- Beep-to-last-shot window differs from the timer's ``stage.time_seconds`` by >100 ms.
 - Any split <80 ms (likely double-detection of a single shot).
 - Any split >3 s within the stage window (likely a missed shot, or a long transition).
 - Shot count outside a "typical IPSC stage" band (informational, not a hard error).
@@ -29,7 +29,8 @@ from pydantic import BaseModel
 from .config import ReportFiles, Shot, SplitColorThresholds, StageAnalysis
 
 # Anomaly thresholds.
-_OFFICIAL_TIME_TOLERANCE_S = 0.500  # beep -> last shot vs stage.time_seconds
+_OFFICIAL_TIME_TOLERANCE_S = 0.100  # beep -> last shot vs stage.time_seconds
+_TIMER_MATCH_S = 0.050  # a kept shot this close to the timer's stop is the one it caught
 _DOUBLE_DETECTION_MAX_S = 0.080  # min legitimate split
 _LONG_PAUSE_MAX_S = 3.000  # split above this is suspicious within the stage window
 _SLOW_DRAW_S = 1.500  # shot 1 split greater than this gets a slow-draw note
@@ -64,6 +65,56 @@ class Anomaly(BaseModel):
     time: float | None = None
 
 
+def _shot_range(first: int, last: int) -> str:
+    return f"shot {first}" if first == last else f"shots {first} to {last}"
+
+
+def _stage_time_mismatch(shots: list[Shot], stage_time: float) -> Anomaly | None:
+    """The timer (the scorecard's stage time) against beep -> last kept
+    shot. Past the tolerance one end of the audit is wrong, and the flag
+    says which to look at: shots after the one the timer caught, a final
+    shot the audit missed, or the beep. A flag on extra shots anchors on
+    the first of them; a timer past the last shot anchors where the timer
+    stopped, on no shot."""
+    last = shots[-1]
+    delta = last.time_from_beep - stage_time
+    if abs(delta) <= _OFFICIAL_TIME_TOLERANCE_S + 1e-9:
+        return None
+    if delta < 0:
+        return Anomaly(
+            kind="stage_time_mismatch",
+            severity="warn",
+            message=(
+                f"Timer stopped {-delta:.2f} s after the last shot ({stage_time:.2f} s): "
+                f"look for a missed final shot, or a beep placed too late."
+            ),
+            time=stage_time,
+        )
+    head = f"Last shot is {delta:.2f} s after the timer stopped ({stage_time:.2f} s)"
+    caught = min(shots[:-1], key=lambda s: abs(s.time_from_beep - stage_time), default=None)
+    if caught is None or abs(caught.time_from_beep - stage_time) > _TIMER_MATCH_S:
+        return Anomaly(
+            kind="stage_time_mismatch",
+            severity="warn",
+            message=f"{head}: the last shot may be extra, or the beep placed too early.",
+            shot_number=last.shot_number,
+            time=last.time_from_beep,
+        )
+    extra = [s for s in shots if s.time_from_beep > caught.time_from_beep]
+    plural = len(extra) > 1
+    return Anomaly(
+        kind="stage_time_mismatch",
+        severity="warn",
+        message=(
+            f"{head}. Shot {caught.shot_number} matches the timer: "
+            f"{'are' if plural else 'is'} {_shot_range(extra[0].shot_number, extra[-1].shot_number)} "
+            f"extra (an echo or steel)?"
+        ),
+        shot_number=extra[0].shot_number,
+        time=extra[0].time_from_beep,
+    )
+
+
 def detect_anomalies_structured(
     shots: list[Shot],
     beep_time: float,  # noqa: ARG001 -- kept for symmetry with caller; absolute beep time
@@ -82,22 +133,9 @@ def detect_anomalies_structured(
         )
         return anomalies
 
-    last_after_beep = shots[-1].time_from_beep
-    delta = last_after_beep - stage_time
-    if abs(delta) > _OFFICIAL_TIME_TOLERANCE_S:
-        anomalies.append(
-            Anomaly(
-                kind="stage_time_mismatch",
-                severity="warn",
-                message=(
-                    f"Last detected shot is {abs(delta) * 1000:.0f} ms "
-                    f"{'after' if delta > 0 else 'before'} official stage time "
-                    f"({last_after_beep:.3f} s vs {stage_time:.3f} s)."
-                ),
-                shot_number=shots[-1].shot_number,
-                time=last_after_beep,
-            )
-        )
+    mismatch = _stage_time_mismatch(shots, stage_time)
+    if mismatch is not None:
+        anomalies.append(mismatch)
 
     for s in shots[1:]:  # shot 1's "split" is the draw, not a real split
         if s.split < _DOUBLE_DETECTION_MAX_S:
