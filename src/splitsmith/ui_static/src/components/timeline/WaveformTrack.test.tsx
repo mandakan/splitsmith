@@ -1,5 +1,5 @@
 import { render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { WaveformTrack } from "./WaveformTrack";
 
@@ -33,5 +33,98 @@ describe("WaveformTrack", () => {
   it("says there is no audio when peaks are missing", () => {
     render(<WaveformTrack peaks={null} clipDuration={0} from={0} to={10} geom={geom(1)} height={56} />);
     expect(screen.getByText("No audio")).toBeInTheDocument();
+  });
+});
+
+describe("WaveformTrack overlays", () => {
+  beforeEach(() => {
+    const ctx = { setTransform: vi.fn(), clearRect: vi.fn(), fillRect: vi.fn(), fillStyle: "" };
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(ctx as unknown as CanvasRenderingContext2D);
+  });
+
+  it("positions the beep line at the right percentage", () => {
+    render(<WaveformTrack peaks={[0.5]} clipDuration={10} from={0} to={10} geom={geom(1)} height={56} beepTime={2.5} />);
+    expect(screen.getByTestId("wave-beep").style.left).toBe("25%");
+  });
+
+  it("positions the timer-stop line at the right percentage", () => {
+    render(
+      <WaveformTrack peaks={[0.5]} clipDuration={10} from={0} to={10} geom={geom(1)} height={56} timerStopTime={8} />,
+    );
+    expect(screen.getByTestId("wave-timer-stop").style.left).toBe("80%");
+  });
+
+  it("positions the loop region at the right left and width", () => {
+    render(
+      <WaveformTrack
+        peaks={[0.5]}
+        clipDuration={10}
+        from={0}
+        to={10}
+        geom={geom(1)}
+        height={56}
+        loopRegion={{ start: 2, end: 4 }}
+      />,
+    );
+    const loop = screen.getByTestId("wave-loop");
+    expect(loop.style.left).toBe("20%");
+    expect(loop.style.width).toBe("20%");
+  });
+
+  it("renders no overlays when every value is null", () => {
+    render(
+      <WaveformTrack
+        peaks={[0.5]}
+        clipDuration={10}
+        from={0}
+        to={10}
+        geom={geom(1)}
+        height={56}
+        beepTime={null}
+        timerStopTime={null}
+        loopRegion={null}
+      />,
+    );
+    expect(screen.queryByTestId("wave-beep")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("wave-timer-stop")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("wave-loop")).not.toBeInTheDocument();
+  });
+
+  it("renders no overlays when every value is outside [from, to]", () => {
+    render(
+      <WaveformTrack
+        peaks={[0.5]}
+        clipDuration={10}
+        from={0}
+        to={10}
+        geom={geom(1)}
+        height={56}
+        beepTime={15}
+        timerStopTime={-1}
+        loopRegion={{ start: 12, end: 14 }}
+      />,
+    );
+    expect(screen.queryByTestId("wave-beep")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("wave-timer-stop")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("wave-loop")).not.toBeInTheDocument();
+  });
+
+  it("marks every overlay pointer-events-none", () => {
+    render(
+      <WaveformTrack
+        peaks={[0.5]}
+        clipDuration={10}
+        from={0}
+        to={10}
+        geom={geom(1)}
+        height={56}
+        beepTime={2.5}
+        timerStopTime={8}
+        loopRegion={{ start: 2, end: 4 }}
+      />,
+    );
+    expect(screen.getByTestId("wave-beep").className).toMatch(/pointer-events-none/);
+    expect(screen.getByTestId("wave-timer-stop").className).toMatch(/pointer-events-none/);
+    expect(screen.getByTestId("wave-loop").className).toMatch(/pointer-events-none/);
   });
 });
