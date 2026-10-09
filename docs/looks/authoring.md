@@ -88,7 +88,6 @@ Five starters ship, each a short commented template:
 
   | Token | Default | Where it shows |
   |---|---|---|
-  | `split_slow` | | A slow split |
   | `reload` | `#FBBF24` | The reload chip and reload bands on an overlay's stage bar |
   | `movement` | `#06B6D4` | Movement bands on an overlay's stage bar |
 

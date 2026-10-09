@@ -1115,11 +1115,21 @@ Reload avg / Overhang; Overhang is omitted when every reload is standing
 single-shooter cell that is landscape or square and >= 480 px tall
 (``_SPLIT_ROWS_MIN_CELL_HEIGHT``); grid holds pass ``split_rows=False``
 so cells stay comparable, and keep the reload row. No confirmed regions
-renders byte-identically to before. Exports: the splits CSV gains
+renders byte-identically to before. Both summary stills (and only they)
+set ``fit_columns`` on ``single_html`` / ``grid_html``: ``fit.js``'s
+``fitColumns`` shrinks the band until no grid column's text overflows its
+column, which is what keeps a portrait card from cutting 1.42 to "1.4";
+landscape and grid holds were pixel-identical under it. The live race
+does not opt in (its rows change text per frame). A ``fit.js`` change
+reaches the summary PNG by content, the preview only through
+``PREVIEW_REVISION``. Exports: the splits CSV gains
 ``moving`` as its last column (``read_splits_csv`` takes both headers);
 ``<base>_events.csv`` is written only with confirmed regions and deleted,
-locally and in hosted storage, when a re-export has none. Region markers
-(``Reload 1.42`` / ``Movement`` / ``Activation``, with duration) go on
+locally and in hosted storage, when a re-export that writes the splits
+CSV (``write_csv`` and shots, the CSV gate) has none; outside that gate
+a prior file stays, as the splits CSV does. Region markers
+(``Reload 1.42`` / ``Movement`` / ``Activation``, with duration, named by
+``events.region_marker_label``) go on
 the stage clip in single-stage and match FCPXML and FCP7 XML, clamped to
 the visible window; compare carries none. ``stages[].figures`` on the
 project payload carries ``moving_shots``, ``reloads``, ``reload_avg_s``,
