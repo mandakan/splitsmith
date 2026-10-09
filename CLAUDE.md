@@ -1094,7 +1094,12 @@ one through ``apply`` (shot PATCH, reclassify), takes the payload, the
 revision and the server's regions, but the local list catches up only
 when no local edit is outstanding (in the debounce, in flight or in a
 409's reload, or under a live drag); an Esc / pointercancel ends the
-drag (``LaneEditor`` ``onCancel``) and catches up. A 409 reloads and
+drag (``LaneEditor`` ``onCancel``) and catches up. While an edit is
+outstanding, a foreign response whose regions differ from the ones this
+tab last saw from the server (another writer's) takes only the payload,
+never the revision: the edit then 409s on the revision it started from
+and goes down the discard path below, rather than overwrite those
+regions. A response with the same regions advances as usual. A 409 reloads and
 stops anything queued; when the reload's regions equal the ones the
 failed PUT started from (the revision moved for something else, e.g. a
 shot PATCH), the newest local list is re-sent once on the fresh
