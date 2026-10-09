@@ -693,6 +693,32 @@ def test_timeline_stage_bar_draws_one_band_per_confirmed_region_as_it_happens() 
     assert landed["chip"] is None
 
 
+@pytest.mark.integration
+def test_plate_reload_chip_keeps_even_padding_with_the_stage_bar_on() -> None:
+    """The stage bar pads the foot of the clock and count plates to make
+    room for itself; the reload chip is a plate too, but has no bar to make
+    room for, so its padding stays even."""
+    with ChromiumRasterizer() as rasterizer:
+        view = _timeline_view(
+            rasterizer, events=[_TL_MOVEMENT, _TL_RELOAD], variant="plate", reload_chip=True, stage_bar=True
+        )
+        try:
+            view.call("seek", 1.0 + 3.55)
+            padding = view.page.evaluate(
+                "() => { const s = getComputedStyle(document.getElementById('reloadChip'));"
+                " return [s.paddingTop, s.paddingBottom]; }"
+            )
+            clock = view.page.evaluate(
+                "() => { const s = getComputedStyle(document.getElementById('clockPlate'));"
+                " return [s.paddingTop, s.paddingBottom]; }"
+            )
+            assert view.errors == []
+        finally:
+            view.close()
+    assert padding[0] == padding[1]
+    assert clock[0] != clock[1], "the clock plate still makes room for the bar"
+
+
 def _rgb(text: str) -> tuple[int, ...]:
     return tuple(int(part) for part in text.removeprefix("rgb(").removesuffix(")").split(","))
 
