@@ -3,6 +3,11 @@
  * size of the viewport (a full-content canvas passes Chromium's 32767 px
  * side limit at high zoom), held in view with `sticky`. Bars are the
  * loudest peak under each column (`lib/timelineView.columnPeaks`).
+ *
+ * The beep line, the timer-stop line and the loop region (the ones
+ * `components/Waveform.tsx` draws on its canvas) are DOM overlays here
+ * instead: percent of (from, to), so they need no redraw on scroll and
+ * stay correct under the sticky canvas without their own pixel math.
  */
 import { useEffect, useRef } from "react";
 
@@ -19,6 +24,12 @@ export interface WaveformTrackProps {
   to: number;
   geom: TimelineGeom;
   height: number;
+  /** The beep, clip seconds (same axis as from/to). Null/undefined = no line. */
+  beepTime?: number | null;
+  /** Where the timer stopped (beep + stage time), clip seconds. Null/undefined = no line. */
+  timerStopTime?: number | null;
+  /** The loop-mode region, clip seconds. Null/undefined = no shading. */
+  loopRegion?: { start: number; end: number } | null;
 }
 
 function cssVar(name: string, fallback: string): string {
@@ -26,7 +37,45 @@ function cssVar(name: string, fallback: string): string {
   return v || fallback;
 }
 
-export function WaveformTrack({ peaks, clipDuration, from, to, geom, height }: WaveformTrackProps) {
+/** Percent of (from, to), or null when t is null/undefined or outside the window. */
+function overlayPct(t: number | null | undefined, from: number, to: number): number | null {
+  if (t == null) return null;
+  const span = to - from;
+  if (span <= 0 || t < from || t > to) return null;
+  return ((t - from) / span) * 100;
+}
+
+/**
+ * Left/width percent of (from, to) for a region, clamping each endpoint to
+ * the window instead of discarding the whole region when one end falls
+ * outside it (matches `components/Waveform.tsx`'s canvas draw) -- null only
+ * when the clamped region is empty (wholly outside, or from >= to).
+ */
+function loopOverlayPct(
+  region: { start: number; end: number } | null | undefined,
+  from: number,
+  to: number,
+): { left: number; width: number } | null {
+  if (!region) return null;
+  const span = to - from;
+  if (span <= 0) return null;
+  const start = Math.min(Math.max(region.start, from), to);
+  const end = Math.min(Math.max(region.end, from), to);
+  if (end <= start) return null;
+  return { left: ((start - from) / span) * 100, width: ((end - start) / span) * 100 };
+}
+
+export function WaveformTrack({
+  peaks,
+  clipDuration,
+  from,
+  to,
+  geom,
+  height,
+  beepTime,
+  timerStopTime,
+  loopRegion,
+}: WaveformTrackProps) {
   const ref = useRef<HTMLCanvasElement | null>(null);
   const { contentWidth, viewportWidth, scrollLeft } = geom;
 
@@ -53,15 +102,43 @@ export function WaveformTrack({ peaks, clipDuration, from, to, geom, height }: W
     }
   }, [peaks, clipDuration, from, to, contentWidth, viewportWidth, scrollLeft, height]);
 
-  if (!peaks) {
-    return (
-      <div
-        className="sticky left-0 flex items-center px-2 text-sm text-muted"
-        style={{ width: viewportWidth || "100%", height }}
-      >
-        No audio
-      </div>
-    );
-  }
-  return <canvas ref={ref} data-testid="waveform-track" className="pointer-events-none sticky left-0 block" />;
+  const beepPct = overlayPct(beepTime, from, to);
+  const timerStopPct = overlayPct(timerStopTime, from, to);
+  const loop = loopOverlayPct(loopRegion, from, to);
+
+  return (
+    <div className="relative" style={{ height }}>
+      {loop ? (
+        <div
+          data-testid="wave-loop"
+          className="pointer-events-none absolute inset-y-0 bg-beep/10"
+          style={{ left: `${loop.left}%`, width: `${loop.width}%` }}
+        />
+      ) : null}
+      {peaks ? (
+        <canvas ref={ref} data-testid="waveform-track" className="pointer-events-none sticky left-0 block" />
+      ) : (
+        <div
+          className="sticky left-0 flex items-center px-2 text-sm text-muted"
+          style={{ width: viewportWidth || "100%", height }}
+        >
+          No audio
+        </div>
+      )}
+      {beepPct !== null ? (
+        <div
+          data-testid="wave-beep"
+          className="pointer-events-none absolute inset-y-0 border-l border-dashed border-beep"
+          style={{ left: `${beepPct}%` }}
+        />
+      ) : null}
+      {timerStopPct !== null ? (
+        <div
+          data-testid="wave-timer-stop"
+          className="pointer-events-none absolute inset-y-0 border-l-[1.5px] border-dotted border-beep"
+          style={{ left: `${timerStopPct}%` }}
+        />
+      ) : null}
+    </div>
+  );
 }

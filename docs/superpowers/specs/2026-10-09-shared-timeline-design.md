@@ -241,3 +241,71 @@ Rulings:
    nothing at Fit (the button alone says "Fit"; the readout would
    otherwise double it) and keeps its width so the header does not
    shift when a number appears at a zoom.
+
+## As built (PR 2)
+
+Audit moved onto the band. The top row is now video left, `ShotList`
+right; before this PR the waveform sat left of a stacked video + list
+column on the right, so the row's shape itself changed, not just what
+sits under it. The band, its own ruler and zoom replace Audit's static
+six-label ruler and `TransportLine`'s `ZoomControls`.
+
+1. **Layout.** `MultiCamColumn` fills the top row's left cell with a
+   16:9 tile, letterboxed. Audit is `MultiCamColumn`'s only renderer, so
+   there was never a separate fixed-width column to fall back to --
+   filling the cell is its one behaviour (the `fill` prop and the dead
+   fixed-380px branch were removed once that was clear); `ShotList` is
+   unchanged. A follow-up review found the first cap, `max-h-[55vh]`,
+   meant the video and the band could never both be on screen at
+   1440x900. Capping the tile alone did not move the band either: the
+   shot list set the row's height and the `<video>` overflowed its tile.
+   On lg the top row's height is now bounded instead,
+   `lg:h-[max(300px,calc(100dvh-560px))]` with one `minmax(0,1fr)` row:
+   the camera column fills it, the primary tile flexes into what the
+   column's header and transport leave (`VideoPanel`'s `fill`: the
+   `<video>` is `h-full object-contain`, letterboxed), and `ShotList`
+   fills its column and scrolls inside it. At 1440x900 the band starts
+   at y=673 with its ruler and audio row on screen; at 1440x1080 the
+   video grows from 270 to 450 px tall. Below lg the tile keeps the old
+   16:9 tile under `max-h-[max(240px,calc(100dvh-620px))]`. A further
+   follow-up, not yet done: moving `TransportLine` into the band header
+   would reclaim more of that height for the video.
+2. **Domain and origin.** The band's domain is the clip, `[0,
+   peaks.duration]` in clip seconds (not beep-relative times); the
+   ruler's zero is the beep through `Timeline`'s `origin` prop
+   (`auditBeep ?? 0`). Markers, pins and the loop region already carry
+   clip seconds, so nothing converts.
+3. **Tracks.** Two tracks: a Flags row (18 px, only rendered when an
+   anomaly has a time) carrying `AnomalyPins` pinned to the row's
+   mid-line with `z-10` so its glow paints over the audio row below;
+   and a 140 px seekable Audio row holding `WaveformTrack` and
+   `MarkerLayer` in one wrapper div, which is the parent `MarkerLayer`
+   measures for drags. The audio track's `onDoubleClick` is
+   `handleAddManual(t, shiftKey)`, which is how a double-click on
+   empty waveform still adds a manual marker, snapped to the nearest
+   peak unless Shift is held; both the scrub press and the
+   double-click ignore `[data-audit-marker]`, so a marker's own drag
+   and delete keep working inside a seekable track.
+4. **Scrub and overlays.** Press-and-drag on the Audio row scrubs
+   through `Timeline`'s shared scrub handling (one in flight,
+   rAF-throttled, `onSeek` read through a ref so a drag started before
+   a re-render still calls the latest handler); `WaveformTrack` draws
+   the beep (dashed), timer-stop (dotted, only once a stage time
+   exists) and the loop region (clamped to the visible window) as DOM
+   overlays rather than baking them into the canvas.
+5. **Pins.** `AnomalyPins` renders at the Flags row's own geometry
+   (`contentWidth` from `geom`, `scrollLeft` 0 -- the row scrolls with
+   the band, so the pins need no independent view) and are labelled
+   buttons, not `aria-hidden`, now that they sit in a keyboard-reachable
+   track instead of floating over the old ruler.
+6. **Review Focus 5 was wrong.** The review brief assumed Audit's top
+   row rendered before peaks loaded and asked whether the band would
+   change that. It does not: Audit has always gated the whole
+   video+list+band region on `displayPeaks` and shown only "Computing
+   waveform..." before peaks arrive (`!prereqShouldShow && displayPeaks
+   ? ... : null`), on the band exactly as before it existed. No
+   behaviour changed.
+7. **`TransportLine`.** Keeps transport, filters, legend and its own
+   overflow menu (Full-resolution video, Trim now / Detect shots);
+   `ZoomControls` is gone from it, moved into the band header like
+   Coach's.

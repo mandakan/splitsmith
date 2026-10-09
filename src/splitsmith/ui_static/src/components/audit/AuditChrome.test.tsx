@@ -68,8 +68,6 @@ describe("TransportLine", () => {
       onTogglePlay: vi.fn(),
       currentTime: 7.29,
       duration: 42.13,
-      zoom: null,
-      onZoomChange: vi.fn(),
       filters: DEFAULT_FILTERS,
       counts: { detected: 30, rejected: 89, manual: 0, beep: 1 },
       onFiltersChange: vi.fn(),
@@ -93,10 +91,12 @@ describe("TransportLine", () => {
     expect(props.onFiltersChange).toHaveBeenCalledWith({ ...DEFAULT_FILTERS, rejected: true });
   });
 
-  it("zooms in from fit and the overflow menu toggles auto-step", () => {
+  // Zoom moved to the timeline band's header (#1352); "steps with the
+  // buttons and returns to Fit" in components/timeline/Timeline.test.tsx
+  // covers Zoom in from Fit to 1.5x, and Audit.timeline.test.tsx the page.
+  it("has no zoom controls; the overflow menu toggles auto-step", () => {
     const props = renderLine();
-    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
-    expect(props.onZoomChange).toHaveBeenCalledWith(1.5);
+    expect(screen.queryByRole("button", { name: /zoom|fit/i })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "More" }));
     fireEvent.click(screen.getByRole("menuitemcheckbox"));
     expect(props.onToggleKAuto).toHaveBeenCalled();

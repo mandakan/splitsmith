@@ -7,36 +7,34 @@ export interface AnomalyPinsProps {
   anomalies: Anomaly[];
   duration: number;
   onJump: (anomaly: Anomaly) => void;
-  /** Scroll-host geometry from ``<Waveform onViewChange>``. Under zoom the
-   *  waveform content is wider than the visible window and scrolls inside
-   *  its own host; this overlay sits *outside* that host (it would be
-   *  clipped by its overflow-y-hidden), so it needs the geometry to map
-   *  time -> viewport-x. Null (pre-measure) falls back to fit-mode
-   *  percentages, which are only correct at fit zoom. */
+  /** Geometry that maps time -> x: ``x = time / duration * contentWidth -
+   *  scrollLeft``, kept half a pin inside ``[0, viewportWidth]``. The
+   *  timeline band's Flags row always passes ``viewportWidth =
+   *  contentWidth`` and ``scrollLeft = 0`` (the row is the band's own
+   *  content, which scrolls the row for it), so every pin is already
+   *  inside the viewport and only the edge clamp below ever applies. Null
+   *  falls back to percentages of the overlay's width. */
   view?: WaveformView | null;
 }
 
-/** Half the pin glyph width -- a pin whose center is within this margin of
- *  the visible window's edge is still partially visible, so keep it. */
+/** Half the pin glyph width -- used to keep a pin half inside the row's
+ *  edges (see ``view`` above). */
 const PIN_HALF_PX = 9;
 
 /**
- * Anomaly pins for the waveform timeline. Renders as an absolute overlay
- * with zero height anchored to the *top edge* of the bars wrapper, so
- * each pin (with `-translate-y-1/2`) straddles the border between the
- * legend header above and the waveform bars below -- exactly the design.
+ * Anomaly pins for the Audit timeline band's Flags row. Each pin is
+ * centred (`-translate-x-1/2 -translate-y-1/2`) on its x and on the
+ * overlay's top edge, so the caller places a zero-height overlay across
+ * the row's middle:
  *
- * Caller positions the overlay; this component just lays out the pin
- * buttons inside it. Expected wrapper:
- *
- *     <div className="pointer-events-none absolute inset-x-4 top-0 h-0 z-10">
- *       <AnomalyPins ... />
+ *     <div className="pointer-events-none absolute inset-x-0 top-1/2 z-10 h-0">
+ *       <AnomalyPins view={{ contentWidth, viewportWidth: contentWidth, scrollLeft: 0 }} ... />
  *     </div>
  *
- * The wrapper's left edge must align with the scroll host's left edge
- * (inset-x-4 vs the Waveform wrapper's px-4) so the pixel positions
- * computed from ``view`` line up with the bars. Pins scrolled out of the
- * visible window are dropped, mirroring the scroll host's own clipping.
+ * The row lives inside the band's zoomed content, so a ``view`` as wide
+ * as the content places each pin at its content x and the band's scroll
+ * carries it; nothing here tracks scroll. Pins are kept half a pin inside
+ * the row's edges. z-10 lets a pin's glow paint over the audio row.
  *
  * Stage-level anomalies (count band, no shots) have no `time` and are
  * filtered out here -- those still surface in the chip strip above the
@@ -53,8 +51,10 @@ export function AnomalyPins({ anomalies, duration, onJump, view }: AnomalyPinsPr
         let left: string;
         if (view && view.viewportWidth > 0) {
           const x = ((a.time as number) / duration) * view.contentWidth - view.scrollLeft;
-          if (x < -PIN_HALF_PX || x > view.viewportWidth + PIN_HALF_PX) return null;
-          left = `${x}px`;
+          // Half a pin in from each edge: a pin at t=0 is not half clipped,
+          // and one at t=duration does not overhang (and widen the scroll).
+          const clamped = Math.min(Math.max(x, PIN_HALF_PX), view.viewportWidth - PIN_HALF_PX);
+          left = `${clamped}px`;
         } else {
           left = `${((a.time as number) / duration) * 100}%`;
         }

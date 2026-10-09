@@ -19,6 +19,8 @@ export interface ShotListProps {
   onJump: (marker: AuditMarker) => void;
   /** The beep's clip time: the origin of the first kept shot's split (the draw). */
   beep?: number | null;
+  /** Sizes the section; a bounded height scrolls the rows inside it. */
+  className?: string;
 }
 
 const GRID = "grid grid-cols-[30px_54px_58px_44px_minmax(0,1fr)] items-center gap-2";
@@ -62,7 +64,7 @@ function Row({ row, split, current, onJump }: { row: ShotRow; split: number | nu
   );
 }
 
-export function ShotList({ rows, currentMarkerId, onJump, beep = null }: ShotListProps) {
+export function ShotList({ rows, currentMarkerId, onJump, beep = null, className }: ShotListProps) {
   const listRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!currentMarkerId) return;
@@ -84,7 +86,10 @@ export function ShotList({ rows, currentMarkerId, onJump, beep = null }: ShotLis
   }
 
   return (
-    <section aria-label="Shots" className="overflow-hidden rounded-[10px] border border-rule bg-surface">
+    <section
+      aria-label="Shots"
+      className={cn("flex min-h-0 flex-col overflow-hidden rounded-[10px] border border-rule bg-surface", className)}
+    >
       <div className={cn(GRID, "border-b border-rule-strong px-3 py-2")}>
         <Label>#</Label>
         <Label className="text-right">T</Label>
@@ -92,7 +97,7 @@ export function ShotList({ rows, currentMarkerId, onJump, beep = null }: ShotLis
         <Label className="text-right">Conf</Label>
         <span />
       </div>
-      <div ref={listRef} className="max-h-[60vh] overflow-y-auto">
+      <div ref={listRef} data-testid="shot-list-scroll" className="max-h-[60vh] min-h-0 flex-1 overflow-y-auto">
         {rows.flagged.length > 0 ? (
           <>
             <div className="border-b border-rule bg-surface-2 px-3 py-1.5">
