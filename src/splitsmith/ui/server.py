@@ -14660,7 +14660,15 @@ def create_app(
             capacity = _coach_capacity(slug, project)
             # Stage events (spec 2026-10-08): reload proposals are seeded
             # once per stage, before the heal so it classifies against them.
-            seeded = events_module.seed_doc(payload, hint_min_s=cfg.reload_hint_min_s, capacity=capacity)
+            # An earlier seeder's untouched proposals are replaced, and the
+            # shots classified again against the new ones: an auto ``reload``
+            # class on a gap the old proposal covered would otherwise stay.
+            reseeding = events_module.reseedable(payload)
+            seeded = events_module.seed_doc(
+                payload, hint_min_s=cfg.reload_hint_min_s, capacity=capacity, min_reload_s=cfg.reload_min_s
+            )
+            if seeded and reseeding:
+                _classify_doc(payload, stage_number, cfg)
             healed = coach_module.heal_unclassified(
                 payload.get("shots"), cfg, events=_coach_events(payload, stage_number)
             )
@@ -14728,7 +14736,7 @@ def create_app(
             if req.revision is not None and req.revision != audit_revision(stored):
                 raise AuditRevisionConflictError(f"stage {stage_number} audit changed since it was loaded")
             stored[events_module.EVENTS_FIELD] = [e.model_dump(exclude_none=True) for e in req.events]
-            stored[events_module.EVENTS_SEEDED_FIELD] = True
+            stored[events_module.EVENTS_SEEDED_FIELD] = events_module.SEED_VERSION
             _classify_doc(stored, stage_number, cfg)
             stored.setdefault("audit_events", []).append(
                 {

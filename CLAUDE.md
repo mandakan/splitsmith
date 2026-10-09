@@ -1086,14 +1086,19 @@ is derived, never stored, by ``splitsmith/events.py`` and its TS twin
 for case -- a rule changes on both sides or not at all. A reload's
 handles mean hand off the grip -> gun back on target.
 
-Seeding (``events.seed_doc``) runs once per stage (``events_seeded``) on
-the coach GET, reload only, never movement: every hinted gap
-(``reload_hint_min_s``), or with a division capacity
-(``DivisionCapacityConfig``, keyed on the SSI string so the power factor
-rides in the name) the first hinted gap in a ``capacity + 1``-shot
-window, else the longest, and only when a shot beyond that window
-exists. ``capacity + 1`` is a bound, not a count: shooters start with
-one chambered. A reset re-detection (``_merge_detection_into``) drops
+Seeding (``events.seed_doc``) runs once per stage (``events_seeded``,
+which holds ``events.SEED_VERSION``) on the coach GET, reload only, never
+movement: every hinted gap (``reload_hint_min_s``), or with a division
+capacity (``DivisionCapacityConfig``, keyed on the SSI string so the power
+factor rides in the name) the round count decides: the fewest reloads that
+keep every run within ``capacity + 1`` shots, in the longest gaps those
+runs allow, each gap at least ``reload_min_s`` (any gap when no such
+placement exists); a stage one magazine holds gets none. ``capacity + 1``
+is a bound, not a count: shooters start with one chambered. A stage an
+older seeder proposed (``events_seeded`` below the version) whose events
+are all untouched proposals is seeded again on the next owner read, and
+its shots classified again against the new regions; a manual region or
+deleted proposals keep the stage as it is. A reset re-detection (``_merge_detection_into``) drops
 the ``auto`` regions and ``events_seeded`` and keeps ``manual`` ones, so
 a stage with no surviving manual region seeds afresh over the new
 shots. The GET seeds but never re-classifies stored shots against the

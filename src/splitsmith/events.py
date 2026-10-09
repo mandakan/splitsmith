@@ -26,6 +26,10 @@ logger = logging.getLogger(__name__)
 
 EVENTS_FIELD: Final = "events"
 EVENTS_SEEDED_FIELD: Final = "events_seeded"
+#: What ``events_seeded`` holds after seeding. 2: a capacity places the
+#: fewest reloads the round count forces, in the longest gaps (version 1,
+#: stored as ``True``, took the first long gap in each magazine's window).
+SEED_VERSION: Final = 2
 #: Shortest region the editor will produce; a handle dragged past its
 #: partner stops here rather than inverting.
 MIN_EVENT_S: Final = 0.05
@@ -226,14 +230,23 @@ def capacity_for(division: str | None, config: DivisionCapacityConfig | None = N
     return table.get(_norm_division(division))
 
 
-def seed_events(shot_times: Sequence[float], *, hint_min_s: float, capacity: int | None) -> list[StageEvent]:
+def seed_events(
+    shot_times: Sequence[float],
+    *,
+    hint_min_s: float,
+    capacity: int | None,
+    min_reload_s: float = 0.6,
+) -> list[StageEvent]:
     """Propose ``reload`` regions, each spanning a whole gap, ``source="auto"``.
 
-    Without a capacity: every gap over the hint. With one: ``capacity + 1``
-    shots fit before a reload is forced, so from shot ``first`` the reload
-    sits in one of the gaps after shots ``first .. first + capacity``; the
-    first hinted gap in that window wins, else the longest; then the window
-    advances to the shot after the seed. Movement is never seeded.
+    Without a capacity: every gap over the hint. With one, the round count
+    decides: at most ``capacity + 1`` shots fit between reloads (one
+    chambered on a full magazine; a bound, not a count), so the proposals
+    are the fewest reloads that keep every run of shots within it, placed
+    in the longest gaps those runs allow. Only a gap of at least
+    ``min_reload_s`` can hold a reload; when no placement exists over those
+    gaps, any gap may. A stage that fits in one magazine gets none, however
+    long its gaps. Movement is never seeded.
     """
     times = sorted(shot_times)
     gaps = [times[i + 1] - times[i] for i in range(len(times) - 1)]
@@ -252,30 +265,70 @@ def seed_events(shot_times: Sequence[float], *, hint_min_s: float, capacity: int
                 _seed(g)
         return seeds
 
-    first = 0
-    while first < len(gaps):
-        window = range(first, min(first + capacity, len(gaps) - 1) + 1)
-        required = first + capacity <= len(gaps) - 1  # a shot beyond capacity + 1 exists
-        hinted = [g for g in window if gaps[g] > hint_min_s]
-        if hinted:
-            chosen = hinted[0]
-        elif required:
-            chosen = max(window, key=lambda g: gaps[g])
-        else:
-            break
-        _seed(chosen)
-        first = chosen + 1
+    chosen = _fewest_reloads(gaps, capacity + 1, min_reload_s)
+    if chosen is None:
+        chosen = _fewest_reloads(gaps, capacity + 1, 0.0) or []
+    for g in chosen:
+        _seed(g)
     return seeds
 
 
-def seed_doc(doc: dict[str, Any], *, hint_min_s: float, capacity: int | None) -> bool:
-    """Seed once per stage. Returns True when the doc changed."""
-    if doc.get(EVENTS_SEEDED_FIELD) or doc.get(EVENTS_FIELD):
+def _fewest_reloads(gaps: Sequence[float], run_max: int, min_gap: float) -> list[int] | None:
+    """The gap indices (gap ``g`` follows shot ``g + 1``) of the fewest
+    reloads that leave no run of more than ``run_max`` shots, each in a gap
+    of at least ``min_gap``; among those, the placement with the longest
+    gaps in total. ``[]`` when every shot fits one run, ``None`` when no
+    placement exists over the allowed gaps."""
+    shots = len(gaps) + 1
+    if shots <= run_max:
+        return []
+    allowed = [g for g, gap in enumerate(gaps) if gap >= min_gap]
+    # best[g]: (reloads, -total gap, path) for a placement whose last reload
+    # is gap g, every run before it within ``run_max``.
+    best: dict[int, tuple[int, float, list[int]]] = {}
+    for g in allowed:
+        candidates: list[tuple[int, float, list[int]]] = []
+        if g + 1 <= run_max:
+            candidates.append((1, -gaps[g], [g]))
+        for p, (count, neg_total, path) in best.items():
+            if p < g and g - p <= run_max:
+                candidates.append((count + 1, neg_total - gaps[g], [*path, g]))
+        if candidates:
+            best[g] = min(candidates, key=lambda c: (c[0], c[1]))
+    finals = [entry for g, entry in best.items() if shots - (g + 1) <= run_max]
+    if not finals:
+        return None
+    return min(finals, key=lambda c: (c[0], c[1]))[2]
+
+
+def reseedable(doc: dict[str, Any]) -> bool:
+    """True when an earlier seeder's proposals stand untouched: seeded by a
+    version before :data:`SEED_VERSION`, with proposals and nothing else. A
+    region the user drew, kept or edited, or proposals they deleted, keep
+    the stage as it is."""
+    seeded = doc.get(EVENTS_SEEDED_FIELD)
+    events = doc.get(EVENTS_FIELD)
+    if not seeded or seeded == SEED_VERSION or not isinstance(events, list) or not events:
+        return False
+    return all(isinstance(e, dict) and e.get("source") == "auto" for e in events)
+
+
+def seed_doc(
+    doc: dict[str, Any], *, hint_min_s: float, capacity: int | None, min_reload_s: float = 0.6
+) -> bool:
+    """Seed once per stage, or again over an earlier seeder's untouched
+    proposals (:func:`reseedable`). Returns True when the doc changed."""
+    again = reseedable(doc)
+    if not again and (doc.get(EVENTS_SEEDED_FIELD) or doc.get(EVENTS_FIELD)):
         return False
     times = shot_times_from_doc(doc)
     if not times:
         return False
-    seeds = seed_events(times, hint_min_s=hint_min_s, capacity=capacity)
-    doc[EVENTS_FIELD] = [e.model_dump(exclude_none=True) for e in seeds]
-    doc[EVENTS_SEEDED_FIELD] = True
+    seeds = seed_events(times, hint_min_s=hint_min_s, capacity=capacity, min_reload_s=min_reload_s)
+    events = [e.model_dump(exclude_none=True) for e in seeds]
+    if again and events == doc.get(EVENTS_FIELD):
+        doc[EVENTS_SEEDED_FIELD] = SEED_VERSION
+        return True
+    doc[EVENTS_FIELD] = events
+    doc[EVENTS_SEEDED_FIELD] = SEED_VERSION
     return True

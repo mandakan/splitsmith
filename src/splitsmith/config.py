@@ -635,6 +635,9 @@ class CoachAutoClassifyConfig(BaseModel):
     # transition_max_s < gap -> "movement". The UI surfaces a "could be
     # reload?" hint when the gap exceeds reload_hint_min_s.
     reload_hint_min_s: float = Field(default=2.50, gt=0.0)
+    # The shortest gap a proposed reload may sit in, when the division's
+    # magazine capacity places the proposals: nobody reloads in 0.3 s.
+    reload_min_s: float = Field(default=0.60, gt=0.0)
 
 
 class DivisionCapacityConfig(BaseModel):
