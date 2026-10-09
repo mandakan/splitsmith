@@ -1080,9 +1080,52 @@ click on empty lane space deselects, a region being created stops at its
 same-lane neighbours, ``pointercancel`` undoes like Esc. Auto proposals
 are dashed with an ``AUTO ?`` label; a time pill (seconds and frame
 number from the beep) follows the drag's seek target. Arrows nudge
-(bracket keys sit behind AltGr on Nordic layouts). Rendering, the
-summary card and CSV/FCPXML markers are part 2 of the plan, not yet
-built.
+(bracket keys sit behind AltGr on Nordic layouts).
+
+Part 2 (rendering and export; the spec's "Part 2 as built" section wins
+over its older "Rendering and export" text). Every rendered or exported
+output -- overlay, summary card, ``events.csv``, FCPXML markers, share
+figures -- reads **confirmed** regions only (``source == "manual"``)
+through ``events.confirmed_from_doc``, which degrades a corrupt list to
+none; a new consumer calls it, never re-derives the rule. The Coach page
+alone shows proposals. **Keep** on the region card (``default`` button,
+auto proposals only) commits ``lib/events.keepEvent``: ``source`` to
+``manual``, nothing else; dragging, nudging or changing kind confirm too.
+
+HUD contract (``overlay_hud.hud_stage_data``): ``data.stage.events``
+(``{kind, start, end}``, clip seconds like ``shots[].t``),
+``data.stage.reloads`` (``{start, end, duration, overhang}``, overhang
+``null`` standing; templates never re-derive a figure), ``shots[].moving``,
+``options.reload_chip`` / ``options.stage_bar`` (both off by default, on
+the existing style-toggle seam), palette ``reload`` (``#FBBF24``) and
+``movement`` (``#06B6D4``) in ``OverlayTheme`` / ``look.json``, optional.
+All five template styles draw both; Classic (drawtext) and the compare
+grid's sprite overlay draw neither. A reload on the move draws split on
+the stage bar (reload in the top half, the movement under it). HUD
+helpers stay inline in each template: ``_shared/`` scripts are not in
+``template_digest``, so an edit there would not invalidate a cached MOV.
+The overlay's ``<base>_overlay.json`` record carries the audit revision
+for every style (``ui/exports.overlay_audit_revision``), so any audit
+edit redraws; a legacy record never matches, and a failed redraw drops
+that stage's overlay with an anomaly rather than reusing the stale one.
+
+Summary card: with confirmed reloads the Splits band gains Reloads /
+Reload avg / Overhang; Overhang is omitted when every reload is standing
+(never a drawn ``+0.00``). Static / Moving split rows need a
+single-shooter cell that is landscape or square and >= 480 px tall
+(``_SPLIT_ROWS_MIN_CELL_HEIGHT``); grid holds pass ``split_rows=False``
+so cells stay comparable, and keep the reload row. No confirmed regions
+renders byte-identically to before. Exports: the splits CSV gains
+``moving`` as its last column (``read_splits_csv`` takes both headers);
+``<base>_events.csv`` is written only with confirmed regions and deleted,
+locally and in hosted storage, when a re-export has none. Region markers
+(``Reload 1.42`` / ``Movement`` / ``Activation``, with duration) go on
+the stage clip in single-stage and match FCPXML and FCP7 XML, clamped to
+the visible window; compare carries none. ``stages[].figures`` on the
+project payload carries ``moving_shots``, ``reloads``, ``reload_avg_s``,
+``overhang_s`` (``_stage_region_figures``): all ``null`` with no
+confirmed region, ``overhang_s`` ``null`` unless a reload overlaps a
+movement, and no capacity warning (a Coach hint, not a shared figure).
 
 ## Hosted access tiers (spec 2026-10-03)
 
