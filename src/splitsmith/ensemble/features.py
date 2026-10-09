@@ -90,6 +90,11 @@ _HAND_FEATURE_NAMES: tuple[str, ...] = (
     # Real shots are robust to small perturbations; FPs barely clearing the
     # smoothed-envelope threshold drop out under one or more.
     "tta_agreement",
+    # Timbre that drifts with camera and firmware (spec 2026-10-09): the
+    # 40 ms starting 2 ms after the candidate. NaN when the window does
+    # not fit; voter_c_feature_matrix zeroes them after the relative block.
+    "spectral_centroid_hz",
+    "high_band_db",
 )
 
 # Onset window for spectral features (issue #108): 50 ms gives ~20 Hz
@@ -230,6 +235,28 @@ def _spectral_flatness_and_peak_ratio(seg: np.ndarray, sr: int) -> tuple[float, 
     return flatness, peak_ratio
 
 
+_TIMBRE_OFFSET_S: float = 0.002
+_TIMBRE_WINDOW_S: float = 0.040
+_TIMBRE_NFFT: int = 4096
+_TIMBRE_BAND_HZ: tuple[float, float] = (200.0, 16000.0)
+_HIGH_BAND_LO_HZ: float = 4000.0
+
+
+def _centroid_and_high_band(segment: np.ndarray, sample_rate: int) -> tuple[float, float]:
+    """Spectral centroid (Hz) and energy above 4 kHz relative to 200 Hz-16 kHz (dB)."""
+    if segment.size < 64:
+        return float("nan"), float("nan")
+    spec = np.abs(np.fft.rfft(segment * np.hanning(segment.size), _TIMBRE_NFFT)) ** 2
+    freqs = np.fft.rfftfreq(_TIMBRE_NFFT, 1.0 / sample_rate)
+    band = (freqs >= _TIMBRE_BAND_HZ[0]) & (freqs <= _TIMBRE_BAND_HZ[1])
+    total = float(spec[band].sum())
+    if total <= 0.0:
+        return float("nan"), float("nan")
+    centroid = float((freqs[band] * spec[band]).sum() / total)
+    high = float(spec[freqs >= _HIGH_BAND_LO_HZ].sum())
+    return centroid, float(10.0 * np.log10(high / total + 1e-12))
+
+
 def compute_hand_features(
     audio: np.ndarray,
     sample_rate: int,
@@ -327,6 +354,11 @@ def compute_hand_features(
         out[k, 14] = flatness
         out[k, 15] = peak_ratio
         out[k, 16] = float(tta_agreement[k])
+
+        t_lo = idx + int(round(_TIMBRE_OFFSET_S * sample_rate))
+        t_hi = t_lo + int(round(_TIMBRE_WINDOW_S * sample_rate))
+        segment = audio[t_lo:t_hi].astype(np.float64) if t_hi <= n else np.zeros(0)
+        out[k, 17], out[k, 18] = _centroid_and_high_band(segment, sample_rate)
     return out
 
 
