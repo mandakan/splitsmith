@@ -4577,6 +4577,11 @@ def register_job_bodies(state: AppState) -> None:
         compose_start = 0.20 if renders_mp4 else 0.92
         per_stage_share = (compose_start - 0.05) / max(1, n)
 
+        # Stages whose overlay on disk nothing vouches for: its record did not
+        # match (style or audit) and the redraw wrote none. The MOV stays on
+        # disk (a transient failure never deletes a render) but is not
+        # stitched; the value is the reason, surfaced as an anomaly.
+        overlay_withheld: dict[int, str] = {}
         with handle.timer.phase("per_stage"):
             for idx, stage_number in enumerate(req.stage_numbers):
                 handle.check_cancel()
@@ -4706,6 +4711,12 @@ def register_job_bodies(state: AppState) -> None:
                     # on this worker -- push them so other workers + the API
                     # download path see them. No-op in local mode.
                     export_storage.push_stage_export_outputs(proj, recut)
+                    if overlay_missing and recut.overlay_settings_path is None and overlay_target.exists():
+                        reason = next(
+                            (r for r in recut.export_failures if r.startswith("overlay not written")),
+                            "overlay not written",
+                        )
+                        overlay_withheld[stage_number] = reason
                 else:
                     handle.update(
                         progress=0.02 + idx * per_stage_share,
@@ -4740,6 +4751,14 @@ def register_job_bodies(state: AppState) -> None:
                 )
             except ValueError as exc:
                 raise RuntimeError(f"{exc} (disappeared mid-flight)") from exc
+            stages_input = [
+                (
+                    replace(stage_in, overlay_path=None)
+                    if stage_in.stage_number in overlay_withheld
+                    else stage_in
+                )
+                for stage_in in stages_input
+            ]
 
             project_name = req.project_name or proj.name or "match"
             book = shooter_book_module.load_snapshot(state.shooter_book)
@@ -4810,6 +4829,22 @@ def register_job_bodies(state: AppState) -> None:
                     segment_cache=match_export_helpers.render_segment_cache(Config().output),
                     progress=_render_step,
                 )
+                # A withheld overlay says why in place of the composer's
+                # generic "overlay not available" line for that stage.
+                result.anomalies[:] = [
+                    *(
+                        f"stage {n}: overlay left out -- the one on disk was drawn from an older "
+                        f"audit or style and could not be drawn again ({why})"
+                        for n, why in overlay_withheld.items()
+                    ),
+                    *(
+                        a
+                        for a in result.anomalies
+                        if not any(
+                            a.startswith(f"stage {n}: overlay not available") for n in overlay_withheld
+                        )
+                    ),
+                ]
             except match_export_helpers.MatchExportError as exc:
                 raise RuntimeError(str(exc)) from exc
 

@@ -10590,3 +10590,48 @@ def test_match_export_never_reuses_a_legacy_overlay_over_an_unreadable_audit(
     assert resp.status_code == 200, resp.text
     assert _wait_for_job(client, resp.json()["id"])["status"] == "failed"
     assert calls, "the per-stage export ran rather than reusing the overlay"
+
+
+def test_a_failed_overlay_redraw_never_ships_the_stale_overlay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The audit moved, so the overlay is drawn again; when that draw fails
+    the old MOV stays on disk (never deleted on a transient failure) but is
+    not stitched, and the result says why. Before, it shipped silently."""
+    import json as _json
+
+    from splitsmith import overlay_render
+    from splitsmith.ui import match_exports as match_mod
+
+    client, root = _seed_match_export_project(tmp_path, stage_count=1)
+    _stub_match_export_probe(monkeypatch)
+    assert _run_overlay_match_export(client, monkeypatch, {}), "first export draws"
+    stale = root / "shooters" / "me" / "exports" / "stage1_stage-1_overlay.mov"
+    assert stale.exists()
+
+    audit_path = root / "shooters" / "me" / "audit" / "stage1.json"
+    doc = _json.loads(audit_path.read_text(encoding="utf-8"))
+    _edit_shot_time(doc)
+    audit_path.write_text(_json.dumps(doc), encoding="utf-8")
+
+    def failing_render(**_kwargs: object) -> Path:
+        raise overlay_render.OverlayRenderError("ffmpeg went away")
+
+    stitched: list[object] = []
+    real_export_match = match_mod.export_match
+
+    def capture_match(**kwargs: object) -> object:
+        stitched.extend(kwargs["stages"])  # type: ignore[arg-type]
+        return real_export_match(**kwargs)
+
+    monkeypatch.setattr(overlay_render, "render_overlay", failing_render)
+    monkeypatch.setattr(match_mod, "export_match", capture_match)
+    resp = client.post("/api/shooters/me/export/match", json={"stage_numbers": [1], "include_overlay": True})
+    assert resp.status_code == 200, resp.text
+    job = _wait_for_job(client, resp.json()["id"])
+    assert job["status"] == "succeeded", job
+    assert [s.overlay_path for s in stitched] == [None]  # type: ignore[attr-defined]
+    assert stale.exists(), "a rendered file is never deleted on a failed redraw"
+    anomalies = job["result"]["anomalies"]
+    assert any("stage 1: overlay left out" in a and "ffmpeg went away" in a for a in anomalies), anomalies
+    assert not any("stage 1: overlay not available" in a for a in anomalies), anomalies

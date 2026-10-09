@@ -443,7 +443,15 @@ def _export_match_with_overlay_on_disk(tmp_path: Path, *, record: str) -> tuple[
             "fcpxml_path": exports_dir / "match.fcpxml",
             "stage_count": 1,
             "duration_seconds": 1.0,
-            "anomalies": [],
+            # What the composer says for a stage handed no overlay.
+            "anomalies": (
+                []
+                if record == "current"
+                else [
+                    "stage 1: overlay not available -- run the per-stage Generate "
+                    "with the Overlay toggle enabled"
+                ]
+            ),
         },
     )()
     with patch(
@@ -468,6 +476,7 @@ def test_export_match_drops_an_overlay_the_audit_has_moved_past(tmp_path: Path, 
     _overlay, stage_input, result = _export_match_with_overlay_on_disk(tmp_path, record=record)
     assert stage_input.overlay_path is None
     assert any("older audit" in a and "export_stage" in a for a in result["anomalies"])
+    assert not any("overlay not available" in a for a in result["anomalies"]), "said once, not twice"
 
 
 def test_export_match_drops_a_legacy_overlay_over_an_unreadable_audit(tmp_path: Path) -> None:
