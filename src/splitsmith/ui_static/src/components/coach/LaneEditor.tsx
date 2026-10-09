@@ -329,7 +329,8 @@ export function LaneEditor(props: LaneEditorProps) {
                       <Label
                         tone="ink"
                         data-testid={`auto-${x.id}`}
-                        className="pointer-events-none absolute inset-x-2 top-1/2 block -translate-y-1/2 truncate"
+                        // Runs past a short region rather than truncating to "A...".
+                        className="pointer-events-none absolute left-2 top-1/2 block -translate-y-1/2 whitespace-nowrap"
                       >
                         Auto ?
                       </Label>

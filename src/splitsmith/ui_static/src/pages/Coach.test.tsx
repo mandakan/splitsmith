@@ -558,3 +558,24 @@ describe("Coach player source", () => {
     await waitFor(() => expect(container.querySelector("video")?.getAttribute("src")).toContain("/trim/"));
   });
 });
+
+describe("match coach time budget rows", () => {
+  it("names a stage without a name and links it to that stage's coach", async () => {
+    vi.mocked(api.getProject).mockResolvedValue({
+      name: "M",
+      competitor_name: "Anna",
+      stages: [{ stage_number: 2, stage_name: "", time_seconds: 28.4 }],
+    } as unknown as Awaited<ReturnType<typeof api.getProject>>);
+    vi.mocked(api.getStageCoach).mockResolvedValue({ ...makeCoach([makeShot(1, "c1"), makeShot(2, "c2")]), stage_number: 2 });
+    render(
+      <MemoryRouter initialEntries={["/match/m1/coach/anna"]}>
+        <Routes>
+          <Route path="/match/:matchId/coach/:slug" element={<Coach />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const budget = await screen.findByRole("region", { name: "Time budget by stage" });
+    const link = await within(budget).findByRole("link", { name: "Stage 2" });
+    expect(link.getAttribute("href")).toMatch(/\/coach\/anna\/2$/);
+  });
+});
