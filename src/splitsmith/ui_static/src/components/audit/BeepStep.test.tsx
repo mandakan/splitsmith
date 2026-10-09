@@ -45,6 +45,21 @@ vi.mock("@/components/audit/BeepTimeline", () => ({
           candidate {c.time}
         </button>
       ))}
+      {props.candidates
+        .filter((c) => c.detected)
+        .map((c) => (
+          // A pick 3 ms off the detected candidate's own time -- still
+          // "within 5 ms" of it, never exactly equal, so BeepStep's own
+          // epsilon match (not a `===`) is what has to clear the draft.
+          <button
+            key={`near-${c.time}`}
+            type="button"
+            data-testid="timeline-pick-near-detected"
+            onClick={() => props.onPick(c.time + 0.003)}
+          >
+            near detected
+          </button>
+        ))}
     </div>
   ),
 }));
@@ -219,10 +234,21 @@ describe("BeepStep", () => {
     fireEvent.click(radios[1]);
     expect(radios[1]).toHaveAttribute("aria-checked", "true");
     // The timeline reports a pick at the detected time -- same as clicking
-    // its own row -- and that clears the draft back to "no override".
+    // its own row -- and that clears the draft back to "no override". The
+    // prop BeepStep hands back down to the band must itself be null: a
+    // naive `onPick={setDraft}` would echo 5.32 here (and item.beep_time
+    // is also 5.32) and still pass selectedTime/aria-checked/confirm
+    // assertions, since draft=5.32 and draft=null both read as "the
+    // detected time" everywhere else.
     fireEvent.click(screen.getByTestId(`timeline-pick-${item().beep_time}`));
+    expect(
+      JSON.parse(screen.getByTestId("timeline-props").textContent!),
+    ).toMatchObject({ draftSourceTime: null });
     expect(radios[0]).toHaveAttribute("aria-checked", "true");
     expect(radios[1]).toHaveAttribute("aria-checked", "false");
+    // The operator's-own-pick row only renders for a draft that isn't one
+    // of the listed candidates; a cleared draft must not show it.
+    expect(screen.queryByText("picked on the timeline")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Confirm & next/ }));
     await vi.waitFor(() =>
       expect(state.confirm).toHaveBeenCalledWith(
@@ -231,6 +257,23 @@ describe("BeepStep", () => {
       ),
     );
     await vi.waitFor(() => expect(onConfirmed).toHaveBeenCalledWith("done"));
+  });
+
+  it("a pick 3 ms from the detected time also clears the draft", () => {
+    const state = hookState([item()]);
+    renderStep(state);
+    const radios = screen.getAllByRole("radio");
+    fireEvent.click(radios[1]);
+    expect(radios[1]).toHaveAttribute("aria-checked", "true");
+
+    fireEvent.click(screen.getByTestId("timeline-pick-near-detected"));
+
+    expect(
+      JSON.parse(screen.getByTestId("timeline-props").textContent!),
+    ).toMatchObject({ draftSourceTime: null });
+    expect(radios[0]).toHaveAttribute("aria-checked", "true");
+    expect(radios[1]).toHaveAttribute("aria-checked", "false");
+    expect(screen.queryByText("picked on the timeline")).not.toBeInTheDocument();
   });
 
   it("the timeline renders outside the two-column grid, after it, with the preview left and candidates right", () => {
