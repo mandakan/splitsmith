@@ -76,6 +76,7 @@ import atexit
 import contextlib
 import functools
 import hashlib
+import io
 import json
 import logging
 import os
@@ -141,6 +142,7 @@ from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
 from .. import __version__ as splitsmith_version
+from .. import account_profile as account_profile_module
 from .. import automation as automation_settings
 from .. import backup as backup_mod
 from .. import (
@@ -161,11 +163,15 @@ from .. import coach_distributions as coach_distributions_module
 from .. import ensemble as ensemble_module
 from .. import events as events_module
 from .. import export_presets as export_presets_module
+from .. import look_store as look_store_module
+from .. import looks as looks_module
 from .. import models as model_layer
+from .. import shooter_book as shooter_book_module
 from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy monkeypatch points)
 from .. import thumbnail as thumbnail_helpers
 from .. import trim as trim_module
 from .. import waveform as waveform_helpers
+from .. import whats_new as whats_new_module
 from ..access import AccessConfig, Feature, FeatureRequiredError, access_config, features_for
 from ..async_bridge import DbRunner, get_runner, install_runner, run_sync
 from ..audit_data import StageExportError, audit_shots_to_engine_shots, is_kept_shot
@@ -181,6 +187,7 @@ from ..comment_identity import (
 )
 from ..compare import cards as compare_cards
 from ..compare import mp4_grid, project_loader
+from ..composition import uniform_transitions
 from ..compute import ComputeBackend, LocalComputeBackend
 from ..config import (
     BeepDetectConfig,
@@ -205,6 +212,17 @@ from ..fixture_schema import (
     CameraPosition,
     probe_camera_metadata,
 )
+from ..identity import (
+    EVENT_LOGO_DIR,
+    LOGO_DIR,
+    LOGO_MAX_BYTES,
+    LOGO_MAX_SIDE,
+    ShooterIdentity,
+    event_logo_name,
+    logo_name,
+    sniff_logo,
+)
+from ..looks import load_look
 from ..match_project import (
     STUB_AUDIT_DETECTION,
     VIDEO_EXTENSIONS,
@@ -220,6 +238,7 @@ from ..match_project import (
 from ..match_registry import MatchRegistry
 from ..mp4_render import RenderStep
 from ..observability import StructuredJsonFormatter, init_sentry
+from ..overlay_hud import overlay_settings
 from ..runtime import runtime as process_runtime
 from ..share_card import stage_figures
 from ..shot_id import ensure_shot_ids, has_usable_id
@@ -245,6 +264,8 @@ from . import exports as export_helpers
 from . import match_exports as match_export_helpers
 from . import shooter_move as shooter_move_module
 from .access_gate import features_of, require_feature
+from .account_backfill import hosted_backfill_source
+from .account_backfill import local_backfill_source as _local_backfill_source
 from .auto_sync import (
     MATCH_SYNC_LOCK_FILE,
     OWNER_LOCK_FILE,
@@ -272,6 +293,15 @@ from .comments import (
 )
 from .exports_api import CompareGridRequest, ExportStageRequest, MatchExportRequest
 from .http_errors import ensure_source_reachable, source_unreachable
+from .identity_media import (
+    effective_identity,
+    ensure_local_event_logo,
+    ensure_local_logo,
+    event_logo_storage_key,
+    grid_identities,
+    identity_source,
+    resolved_identity_for,
+)
 from .job_journal import JobJournal, default_journal_path, resume_journaled_jobs
 from .jobs import (
     Job,
@@ -1410,6 +1440,8 @@ _SHARE_PATH_RE = re.compile(
     r"|shooters/[^/]+/stages/[0-9]+/comments"
     r"|shooters/[^/]+/coach/distributions"
     r"|shooters/[^/]+/videos/stream"
+    # The shooter's logo (#1249): already in every video the share shows.
+    r"|shooters/[^/]+/identity/logo"
     r"|match/stage/[0-9]+/compare"
     # Same registry as the "shooters/[^/]+/videos/stream" shape above -
     # this alternative also reaches the registered-video branch of
@@ -1765,10 +1797,42 @@ class TenantContext:
     # local mode, where ``youtube_api`` reads the file under the user
     # config dir instead.
     youtube: PostgresYouTubeConnectionStore | None = None
+    # The account's shooter book and profile (spec 2026-10-08). Hosted builds
+    # one per tenant; ``AppState`` never falls back to the local files for a
+    # hosted request, so a container's own disk is never read as an account.
+    shooter_book: shooter_book_module.ShooterBookStore | None = None
+    account_profile: account_profile_module.AccountProfileStore | None = None
     # The desktop command queue (#1100): requests the phone makes for the
     # user's desktop to run. ``None`` in local mode; under the
     # ``tenant_isolation`` RLS policy, so the tenant factory is load-bearing.
     desktop_commands: DesktopCommandStore | None = None
+    # The account's saved Looks (#1263): manifests only, drawn by the
+    # shipped templates. ``None`` in local mode, where ``AppState.looks``
+    # is the Looks folder.
+    looks: look_store_module.HostedLookStore | None = None
+    # The What's new ids the account has seen. ``None`` in local mode, where
+    # ``AppState.whats_new`` is the prefs file.
+    whats_new: whats_new_module.WhatsNewStore | None = None
+
+
+def user_looks_cache_root() -> Path:
+    """Where hosted accounts' Looks are materialized (#1263); one folder per
+    account under it, content-named inside that."""
+    return process_runtime().cache_dir / "user-looks"
+
+
+def tenant_looks_provider(tenant: TenantContext) -> looks_module.UserLooksProvider:
+    """The ``looks.set_user_looks_provider`` answer for ``tenant``: its
+    Looks materialized under the cache, or none at all. Set wherever a
+    tenant is pinned (the auth gate, the share alias, the queue task), so a
+    renderer resolving a Look by name sees this account's and no other's."""
+
+    def provide() -> Path | None:
+        if tenant.looks is None:
+            return None
+        return tenant.looks.materialized_dir(user_looks_cache_root())
+
+    return provide
 
 
 # Per-request / per-job tenant resolved by the hosted-mode auth gate
@@ -1874,8 +1938,18 @@ class AppState:
     _scoreboard_identity: user_config.ScoreboardIdentityStore = field(
         default_factory=user_config.JsonScoreboardIdentityStore
     )
+    _looks: look_store_module.LookStore = field(default_factory=look_store_module.FolderLookStore)
+    _whats_new: whats_new_module.WhatsNewStore = field(default_factory=whats_new_module.PrefsWhatsNewStore)
     _export_presets: export_presets_module.ExportPresetStore = field(
         default_factory=export_presets_module.JsonExportPresetStore
+    )
+    _shooter_book: shooter_book_module.ShooterBookStore = field(
+        default_factory=lambda: shooter_book_module.JsonShooterBookStore(
+            backfill_source=_local_backfill_source
+        )
+    )
+    _account_profile: account_profile_module.AccountProfileStore = field(
+        default_factory=account_profile_module.JsonAccountProfileStore
     )
     # Hosted-mode factory: build a :class:`TenantContext` for a ``user_id``.
     # ``None`` in local mode. Set by ``_apply_hosted_mode_wiring``; called
@@ -2091,11 +2165,45 @@ class AppState:
         self._scoreboard_identity = value
 
     @property
+    def shooter_book(self) -> shooter_book_module.ShooterBookStore:
+        """The account's shooter book: the tenant's hosted, the local files
+        locally, and an empty one for a hosted request with no tenant."""
+        tenant = current_tenant.get()
+        if tenant is not None:
+            return tenant.shooter_book or shooter_book_module.EmptyShooterBookStore()
+        if self._build_tenant is not None:
+            return shooter_book_module.EmptyShooterBookStore()
+        return self._shooter_book
+
+    @property
+    def account_profile(self) -> account_profile_module.AccountProfileStore:
+        tenant = current_tenant.get()
+        if tenant is not None:
+            return tenant.account_profile or account_profile_module.EmptyAccountProfileStore()
+        if self._build_tenant is not None:
+            return account_profile_module.EmptyAccountProfileStore()
+        return self._account_profile
+
+    @property
     def export_presets(self) -> export_presets_module.ExportPresetStore:
         tenant = current_tenant.get()
         if tenant is not None and tenant.export_presets is not None:
             return tenant.export_presets
         return self._export_presets
+
+    @property
+    def whats_new(self) -> whats_new_module.WhatsNewStore:
+        tenant = current_tenant.get()
+        if tenant is not None and tenant.whats_new is not None:
+            return tenant.whats_new
+        return self._whats_new
+
+    @property
+    def looks(self) -> look_store_module.LookStore:
+        tenant = current_tenant.get()
+        if tenant is not None and tenant.looks is not None:
+            return tenant.looks
+        return self._looks
 
     @property
     def matches_store(self) -> PostgresMatchStore | None:
@@ -2868,40 +2976,26 @@ def _compare_missing_trims(
     ]
 
 
-def _compare_grid_progress_runner(
-    handle: JobHandle,
-    plans: tuple[mp4_grid.GridStagePlan, ...],
-    *,
-    base_runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
-) -> Callable[..., subprocess.CompletedProcess]:
-    """Wrap ``render_grid_mp4``'s ``runner`` hook so the job reports stages.
+def _compare_grid_progress(handle: JobHandle) -> mp4_grid.GridProgress:
+    """``render_grid_mp4``'s ``progress`` hook as job updates: one per
+    stage as it is encoded or reused from the segment cache, then the
+    stitch. Without it the job sits at 5% for the whole multi-minute
+    encode and a working render looks exactly like a hung one."""
 
-    Same trick ``compare/cli.py::_render_grid_mp4`` uses for its console
-    output: the engine has no progress callback, but it does take an
-    injectable runner, and it invokes exactly one per stage followed by
-    one for the stitch. Without this the job sits at 5% for the whole
-    multi-minute encode and a working render looks exactly like a hung
-    one.
-    """
-    total = len(plans)
-    state = {"calls": 0}
+    def _report(step: mp4_grid.GridRenderStep) -> None:
+        if step.plan is None:
+            handle.update(progress=0.95, message=f"Stitching {step.total} stage(s)...")
+            return
+        verb = "Reusing" if step.status == "reused" else "Rendering"
+        handle.update(
+            progress=0.05 + 0.9 * (step.index / step.total) if step.total else 0.05,
+            message=(
+                f"{verb} stage {step.plan.stage_number} ({step.plan.stage_name}) "
+                f"-- {step.index + 1} of {step.total}..."
+            ),
+        )
 
-    def _runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
-        index = state["calls"]
-        state["calls"] += 1
-        if index < total:
-            plan = plans[index]
-            handle.update(
-                progress=0.05 + 0.9 * (index / total) if total else 0.05,
-                message=(
-                    f"Rendering stage {plan.stage_number} ({plan.stage_name}) -- {index + 1} of {total}..."
-                ),
-            )
-        else:
-            handle.update(progress=0.95, message=f"Stitching {total} stage(s)...")
-        return base_runner(cmd, **kwargs)
-
-    return _runner
+    return _report
 
 
 def _run_compare_grid(
@@ -2988,8 +3082,24 @@ def _run_compare_grid(
                 title_division=req.title_division,
                 title_page_duration_seconds=req.title_page_duration_seconds,
                 closing_card=req.closing_card,
+                made_with=req.made_with,
+                account_brand=req.account_brand,
+                card_variant=req.card_variant,
+                title_page_variant=req.title_page_variant,
+                closing_card_variant=req.closing_card_variant,
             ),
             divisions=compare_cards.bundle_divisions(filtered),
+            brand=account_profile_module.load_brand(
+                state.account_profile
+                if state is not None
+                else account_profile_module.JsonAccountProfileStore()
+            ),
+            event_logo=ensure_local_event_logo(
+                match.branding,
+                root,
+                storage=state.storage if state is not None else None,
+                match_id=match.match_id,
+            ),
         )
         result = mp4_grid.render_grid_mp4(
             filtered,
@@ -2997,11 +3107,21 @@ def _run_compare_grid(
             output_path=output_path,
             canvas=mp4_grid.GridCanvas(width=req.canvas_width, height=req.canvas_height),
             work_dir=Path(tmp),
-            runner=_compare_grid_progress_runner(handle, plans),
+            progress=_compare_grid_progress(handle),
+            segment_cache=match_export_helpers.render_segment_cache(Config().output),
             title_page=title_page,
             closing=closing,
             stage_titles=req.stage_titles,
             title_duration_seconds=req.title_duration_seconds,
+            card_variant=req.stage_card_variant or req.card_variant,
+            identities=grid_identities(
+                filtered,
+                look=load_look(req.overlay_theme),
+                book=shooter_book_module.load_snapshot(
+                    state.shooter_book if state is not None else shooter_book_module.JsonShooterBookStore()
+                ),
+            ),
+            transitions=uniform_transitions(req.transition_kind, req.transition_duration_seconds, len(plans)),
             overlay=req.overlay,
             overlay_theme=req.overlay_theme,
             summary_hold_seconds=req.summary_hold_seconds,
@@ -3010,6 +3130,7 @@ def _run_compare_grid(
             free_cell=req.free_cell,
             match_name=match.name or "",
             match_date=match.match_date.isoformat() if match.match_date else None,
+            match_summary_seconds=req.match_summary_seconds if req.match_summary else 0.0,
         )
 
     youtube_files: list[Path] = []
@@ -3479,6 +3600,7 @@ def register_job_bodies(state: AppState) -> None:
                 video.beep_peak_amplitude = None
                 video.beep_duration_ms = None
                 video.beep_candidates = []
+                video.beep_ranker_version = None
                 video.beep_reviewed = False
                 video.processed["beep"] = True
                 video.beep_alignment_confidence = None
@@ -3513,6 +3635,7 @@ def register_job_bodies(state: AppState) -> None:
                 video.beep_peak_amplitude = None
                 video.beep_duration_ms = None
                 video.beep_candidates = []
+                video.beep_ranker_version = None
                 video.beep_reviewed = False
                 video.processed["beep"] = True
                 # Surface the cross-correlation confidence whenever we got one,
@@ -3556,6 +3679,7 @@ def register_job_bodies(state: AppState) -> None:
             video.beep_duration_ms = beep.duration_ms
             video.beep_confidence = beep.confidence
             video.beep_candidates = list(beep.candidates)
+            video.beep_ranker_version = getattr(beep, "ranker_version", None)
             video.beep_auto_detect_failed = False
             video.beep_alignment_confidence = None
             video.beep_alignment_delta_ms = None
@@ -3654,6 +3778,7 @@ def register_job_bodies(state: AppState) -> None:
                 v_fresh.beep_duration_ms = video.beep_duration_ms
                 v_fresh.beep_confidence = video.beep_confidence
                 v_fresh.beep_candidates = list(video.beep_candidates)
+                v_fresh.beep_ranker_version = video.beep_ranker_version
                 v_fresh.beep_reviewed = video.beep_reviewed
                 v_fresh.beep_auto_detect_failed = video.beep_auto_detect_failed
                 v_fresh.beep_alignment_confidence = video.beep_alignment_confidence
@@ -4275,6 +4400,8 @@ def register_job_bodies(state: AppState) -> None:
                         overlay_max_height=req.overlay_max_height,
                         overlay_max_fps=req.overlay_max_fps,
                         overlay_theme=req.overlay_theme,
+                        overlay_variant=req.overlay_variant,
+                        overlay_options=req.hud_options(),
                         write_summary_card=req.write_summary_card,
                         summary_hold_seconds=req.summary_hold_seconds,
                     ),
@@ -4290,6 +4417,7 @@ def register_job_bodies(state: AppState) -> None:
                     scorecard=stg.scorecard,
                     shooter_label=proj.competitor_name or proj.name,
                     stage_time_is_manual=stg.time_seconds_manual,
+                    segment_cache=match_export_helpers.render_segment_cache(Config().output),
                 )
         except StageExportError as exc:
             # Surface as a job failure with the exporter's own message so
@@ -4484,22 +4612,28 @@ def register_job_bodies(state: AppState) -> None:
                 secondary_trims_present = all(
                     (exports_dir / f"{base}_cam_{vid}_trimmed.mp4").exists() for vid in wanted_secondary_ids
                 )
-                # Treat any non-default overlay format option as "force re-render"
-                # so the dialog's codec / max-height / max-fps choices actually
-                # apply when a stale overlay sits on disk. With all defaults we
-                # keep the legacy "skip if present" behaviour for fast re-stitching.
-                overlay_format_overridden = (
-                    req.overlay_codec != "auto"
-                    or req.overlay_max_height is not None
-                    or req.overlay_max_fps is not None
-                    or req.overlay_theme != "splitsmith"
-                )
-                # Pull a cached overlay only when we'd actually reuse it -- a
-                # format override forces a re-render, so don't waste the download.
-                if req.include_overlay and not overlay_format_overridden:
-                    export_storage.pull_export_file(proj, overlay_target)
+                # An overlay on disk is reused only when its record says it was
+                # drawn the way this export asks (Look, style, options, format).
+                # One without a record predates them and reads as the defaults,
+                # so an untouched form re-stitches without a re-render, as before.
+                overlay_record = export_helpers.overlay_settings_file(exports_dir, base)
+                overlay_reusable = False
+                if req.include_overlay:
+                    export_storage.pull_export_file(proj, overlay_record)
+                    wanted = overlay_settings(
+                        look=req.overlay_theme,
+                        variant=req.overlay_variant,
+                        options=req.hud_options(),
+                        codec=req.overlay_codec,
+                        max_height=req.overlay_max_height,
+                        max_fps=req.overlay_max_fps,
+                    )
+                    overlay_reusable = export_helpers.read_overlay_settings(overlay_record) == wanted
+                    # Pull the MOV only when it would be reused.
+                    if overlay_reusable:
+                        export_storage.pull_export_file(proj, overlay_target)
                 overlay_missing = req.include_overlay and (
-                    not overlay_target.exists() or overlay_format_overridden
+                    not overlay_target.exists() or not overlay_reusable
                 )
 
                 needs_per_stage = not trimmed_path.exists() or not secondary_trims_present or overlay_missing
@@ -4544,6 +4678,8 @@ def register_job_bodies(state: AppState) -> None:
                                 overlay_max_height=req.overlay_max_height,
                                 overlay_max_fps=req.overlay_max_fps,
                                 overlay_theme=req.overlay_theme,
+                                overlay_variant=req.overlay_variant,
+                                overlay_options=req.hud_options(),
                             ),
                             audit_path=audit_dir / f"stage{stage_number}.json",
                             exports_dir=exports_dir,
@@ -4554,6 +4690,7 @@ def register_job_bodies(state: AppState) -> None:
                             post_buffer_seconds=proj.trim_post_buffer_seconds,
                             config=Config(),
                             secondaries=secondaries_in,
+                            segment_cache=match_export_helpers.render_segment_cache(Config().output),
                         )
                     except StageExportError as exc:
                         raise RuntimeError(f"stage {stage_number}: {exc}") from exc
@@ -4597,7 +4734,9 @@ def register_job_bodies(state: AppState) -> None:
                 raise RuntimeError(f"{exc} (disappeared mid-flight)") from exc
 
             project_name = req.project_name or proj.name or "match"
+            book = shooter_book_module.load_snapshot(state.shooter_book)
             request_data = match_export_helpers.MatchExportRequestData(
+                event_logo=_current_event_logo(state),
                 stage_numbers=tuple(req.stage_numbers),
                 head_pad_seconds=req.head_pad_seconds,
                 tail_pad_seconds=req.tail_pad_seconds,
@@ -4628,12 +4767,31 @@ def register_job_bodies(state: AppState) -> None:
                     division=(
                         competitor_division(proj, state.shooter_root(slug)) if req.title_division else None
                     ),
+                    book=book,
                 ),
                 title_page_duration_seconds=req.title_page_duration_seconds,
                 closing_card=req.closing_card,
+                made_with=req.made_with,
+                account_brand=(
+                    account_profile_module.load_brand(state.account_profile) if req.account_brand else None
+                ),
+                card_variant=req.card_variant,
+                title_page_variant=req.title_page_variant,
+                stage_card_variant=req.stage_card_variant,
+                closing_card_variant=req.closing_card_variant,
                 overlay_theme=req.overlay_theme,
                 summary_hold_seconds=req.summary_hold_seconds,
+                match_summary=req.match_summary,
+                match_summary_seconds=req.match_summary_seconds,
                 shooter_label=proj.competitor_name,
+                shooter_identity=resolved_identity_for(
+                    proj,
+                    state.shooter_root(slug),
+                    look=load_look(req.overlay_theme),
+                    index=0,
+                    label=proj.competitor_name or project_name,
+                    book=book,
+                ),
             )
             try:
                 result = match_export_helpers.export_match(
@@ -5266,6 +5424,8 @@ class ShooterListEntry(BaseModel):
     # (primary + beep + stage_time + reachable source); stages missing those
     # prerequisites are excluded from the count.
     stages_missing_trim: int = 0
+    # The shooter's identity (#1243): accent, logo file name, club line.
+    identity: ShooterIdentity = Field(default_factory=ShooterIdentity)
     # Per-stage status for this shooter, one entry per stage in the
     # shooter's own project (same source as ``stages_audited``). The match
     # Overview pivots these across shooters into a per-stage grid.
@@ -5395,6 +5555,8 @@ class CompareShooterRecord(BaseModel):
     duration_seconds: float | None
     stage_time_seconds: float | None
     shots: list[CompareShotPoint]
+    # The shooter's identity (#1249): the roster draws their accent and logo.
+    identity: ShooterIdentity | None = None
 
 
 class CompareStageResponse(BaseModel):
@@ -6239,6 +6401,17 @@ class CameraModelRequest(BaseModel):
 
     make: str | None
     model: str | None
+
+
+class ShooterIdentityRequest(BaseModel):
+    """Body for PATCH /api/shooters/{slug}/identity (#1243). Only the keys
+    sent are applied; ``null`` clears one. The logo has its own routes.
+    ``scope`` (spec 2026-10-08): ``book`` also saves the result to the
+    shooter book under the shooter's SSI id; ``match`` keeps it here only."""
+
+    accent: str | None = None
+    club: str | None = None
+    scope: Literal["book", "match"] = "book"
 
 
 class CompareCameraRequest(BaseModel):
@@ -7209,12 +7382,16 @@ def _apply_hosted_mode_wiring(
 
     from ..db import (
         MagicLinkAuth,
+        PostgresAccountProfileStore,
         PostgresExportPresetStore,
         PostgresJobBackend,
+        PostgresLookStore,
         PostgresMatchStore,
         PostgresProfileStore,
         PostgresRecentProjectsStore,
         PostgresScoreboardIdentityStore,
+        PostgresShooterBookStore,
+        PostgresWhatsNewStore,
         PostgresYouTubeConnectionStore,
         ProjectStateStore,
         build_email_sender,
@@ -7512,6 +7689,9 @@ def _apply_hosted_mode_wiring(
                 row.access_tier, row.email, state.access, state.admin_emails
             )
 
+        tenant_storage = _tenant_s3_storage(s3_client, s3_bucket, user_id)
+        tenant_matches = PostgresMatchStore(tenant_factory, user_id=user_id)
+        tenant_state = ProjectStateStore(tenant_factory, user_id=user_id)
         return TenantContext(
             user_id=user_id,
             recent_projects=PostgresRecentProjectsStore(tenant_factory, user_id=user_id),
@@ -7524,16 +7704,31 @@ def _apply_hosted_mode_wiring(
                 bodies=state.job_bodies,
                 submit_allowed=_may_submit,
             ),
-            matches_store=PostgresMatchStore(tenant_factory, user_id=user_id),
-            project_state=ProjectStateStore(tenant_factory, user_id=user_id),
-            storage=_tenant_s3_storage(s3_client, s3_bucket, user_id),
+            matches_store=tenant_matches,
+            project_state=tenant_state,
+            storage=tenant_storage,
             share_tokens=ShareTokenStore(tenant_factory, user_id=user_id),
             desktop_tokens=DesktopTokenStore(tenant_factory, user_id=user_id),
             comments=CommentStore(tenant_factory, user_id=user_id),
             profile=PostgresProfileStore(tenant_factory, user_id=user_id),
             export_presets=PostgresExportPresetStore(tenant_factory, user_id=user_id),
+            looks=PostgresLookStore(tenant_factory, user_id=user_id),
+            whats_new=PostgresWhatsNewStore(tenant_factory, user_id=user_id),
             youtube=PostgresYouTubeConnectionStore(tenant_factory, user_id=user_id),
             desktop_commands=DesktopCommandStore(tenant_factory, user_id=user_id),
+            # The account's shooter book and brand (spec 2026-10-08): rows
+            # under RLS, files in the tenant's own storage prefix, mirrored
+            # into this container's cache by content name.
+            shooter_book=PostgresShooterBookStore(
+                tenant_factory,
+                user_id=user_id,
+                storage=tenant_storage,
+                cache_dir=process_runtime().cache_dir,
+                backfill_source=hosted_backfill_source(tenant_matches, tenant_state, tenant_storage),
+            ),
+            account_profile=PostgresAccountProfileStore(
+                tenant_factory, user_id=user_id, storage=tenant_storage, cache_dir=process_runtime().cache_dir
+            ),
         )
 
     state._build_tenant = _build_tenant
@@ -8000,6 +8195,62 @@ def _proxy_ready_for(storage: Storage | None, proxy_keys: set[str], path_str: st
     if not path_str.startswith("raw/"):
         return False
     return proxy_key_for(path_str) in proxy_keys
+
+
+def _reveal_in_file_manager(resolved: Path) -> None:
+    """Launch the OS file manager for ``resolved``, surfacing failures.
+
+    Without surfacing, a headless / minimal Linux install (no
+    ``xdg-open``) or a Wayland session without DBUS silently
+    swallows the click. Raising on nonzero exit lets the SPA toast.
+    ``explorer /select`` is opted out because it returns 1 even on
+    a successful selection -- treating that as failure would always
+    toast on Windows.
+    """
+    if sys.platform == "darwin":
+        cmd = ["open", "-R", str(resolved)]
+        check_exit = True
+    elif sys.platform.startswith("win"):
+        cmd = ["explorer", f"/select,{resolved}"]
+        check_exit = False
+    else:
+        # xdg-open doesn't support file selection; opening the parent
+        # is the closest cross-distro behaviour.
+        parent = resolved.parent if resolved.is_file() else resolved
+        cmd = ["xdg-open", str(parent)]
+        check_exit = True
+    try:
+        proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"failed to launch file manager: {exc}") from exc
+    if check_exit and proc.returncode != 0:
+        stderr = (proc.stderr or "").strip() or f"exit {proc.returncode}"
+        raise HTTPException(
+            status_code=500,
+            detail=f"file manager refused to open {resolved}: {stderr}",
+        )
+
+
+def _club_for(match_data: object, competitor_id: int | None) -> str | None:
+    """The scoreboard club of ``competitor_id`` in ``match_data``, if any."""
+    if competitor_id is None:
+        return None
+    for competitor in getattr(match_data, "competitors", None) or []:
+        if competitor.id == competitor_id:
+            return competitor.club
+    return None
+
+
+def _current_event_logo(state: AppState) -> Path | None:
+    """The bound match's event logo on this disk, for a render (the
+    branding work); ``None`` without a match, a logo, or the file, which
+    is a card without the corner mark, never a failed render."""
+    try:
+        match_root = state.match_root
+        match = state.match()
+    except HTTPException:
+        return None
+    return ensure_local_event_logo(match.branding, match_root, storage=state.storage, match_id=match.match_id)
 
 
 def create_app(
@@ -9219,7 +9470,9 @@ def create_app(
                 viewer = None
         viewer_token = current_share_viewer.set(viewer)
 
-        tenant_token = current_tenant.set(state.build_tenant(resolved.owner_user_id))
+        owner_tenant = state.build_tenant(resolved.owner_user_id)
+        tenant_token = current_tenant.set(owner_tenant)
+        looks_token = looks_module.set_user_looks_provider(tenant_looks_provider(owner_tenant))
         share_token = current_share_request.set(True)
         cameras_token = current_share_cameras.set(resolved.cameras)
         scope_token = current_share_scope.set(resolved.scope)
@@ -9248,6 +9501,7 @@ def create_app(
             current_share_scope.reset(scope_token)
             current_share_cameras.reset(cameras_token)
             current_share_request.reset(share_token)
+            looks_module.reset_user_looks_provider(looks_token)
             current_tenant.reset(tenant_token)
 
     # ----------------------------------------------------------------------
@@ -9326,10 +9580,13 @@ def create_app(
             return JSONResponse(status_code=403, content={"detail": "token scope"})
         if not hosted:
             return await call_next(request)
-        tenant_token = current_tenant.set(state.build_tenant(user.id))
+        tenant = state.build_tenant(user.id)
+        tenant_token = current_tenant.set(tenant)
+        looks_token = looks_module.set_user_looks_provider(tenant_looks_provider(tenant))
         try:
             return await call_next(request)
         finally:
+            looks_module.reset_user_looks_provider(looks_token)
             current_tenant.reset(tenant_token)
 
     # ----------------------------------------------------------------------
@@ -9339,6 +9596,21 @@ def create_app(
     def _local_match_path(root: Path) -> Path:
         """Resolve ``<root>/scoreboard/match.json`` (offline source path)."""
         return root / DEFAULT_SCOREBOARD_DIRNAME / DEFAULT_MATCH_FILENAME
+
+    def _adopt_club_from_scoreboard(
+        project: MatchProject, client_root: Path, content_type: int, match_id: int, competitor_id: int
+    ) -> None:
+        """Fill a shooter's empty club line from their scoreboard competitor,
+        best effort: a link never fails because the club could not be read."""
+        if (project.identity.club or "").strip():
+            return
+        try:
+            with _resolve_scoreboard_client(client_root) as client:
+                match_data = client.get_match(content_type, match_id)
+        except (ScoreboardError, OSError):
+            logger.info("scoreboard club for competitor %s could not be read", competitor_id, exc_info=True)
+            return
+        project.adopt_scoreboard_club(_club_for(match_data, competitor_id))
 
     def _resolve_scoreboard_client(root: Path) -> ScoreboardClient:
         """Pick the concrete ``ScoreboardClient`` for this shooter root.
@@ -11018,6 +11290,7 @@ def create_app(
                     project.selected_shooter_id = picked.shooterId
                     project.competitor_name = picked.name
                     project.competitor_division = picked.division
+                    project.adopt_scoreboard_club(picked.club)
         project.save(root)
         return JSONResponse({**project.model_dump(mode="json"), "stage_times_merged": merged})
 
@@ -11235,6 +11508,7 @@ def create_app(
         # render "pinned: Mathias Rinaldo" instead of an integer id.
         project.competitor_name = picked.name
         project.competitor_division = picked.division
+        project.adopt_scoreboard_club(picked.club)
         project.save(root)
 
         merged = _fetch_and_merge_stage_times(root, project, ct, mid, req.competitor_id)
@@ -11477,6 +11751,12 @@ def create_app(
             # and one on a dead network mount would stall the server (#1227).
             elsewhere = await run_in_threadpool(footage_sort_api.imported_elsewhere, state, slug)
         project = state.shooter_project(slug)
+        # ``register_video`` hands back the existing entry for a file this
+        # shooter already has (same source, or a byte copy by fingerprint);
+        # that is not an import, and counting it as one told the page a
+        # video was added when none was (#1233).
+        had_before = {str(v.path) for v in project.all_videos()}
+        added_from: dict[str, str] = {}
         for entry in candidates:
             if elsewhere:
                 try:
@@ -11495,7 +11775,15 @@ def create_app(
             except (FileNotFoundError, ValueError) as exc:
                 skipped.append(f"{entry.name}: {exc}")
                 continue
-            registered.append(str(video.path))
+            stored = str(video.path)
+            if stored in had_before:
+                skipped.append(f"{entry.name}: already imported for this shooter as {stored}")
+                continue
+            if stored in added_from:
+                skipped.append(f"{entry.name}: same recording as {added_from[stored]} in this import")
+                continue
+            added_from[stored] = entry.name
+            registered.append(stored)
 
         auto_assigned: dict[int, str] = {}
         auto_secondary: dict[int, list[str]] = {}
@@ -11907,6 +12195,7 @@ def create_app(
         video.beep_peak_amplitude = None
         video.beep_duration_ms = None
         video.beep_candidates = []
+        video.beep_ranker_version = None
         video.beep_reviewed = False
         video.beep_auto_detect_failed = False
         video.processed["beep"] = False
@@ -12439,6 +12728,7 @@ def create_app(
             video.beep_duration_ms = None
             video.beep_confidence = None
             video.beep_candidates = []
+            video.beep_ranker_version = None
             video.beep_auto_detect_failed = False
             video.beep_alignment_confidence = None
             video.beep_alignment_delta_ms = None
@@ -12456,6 +12746,7 @@ def create_app(
             # where the beep is, so the auto-trust gate (#219) opens.
             video.beep_confidence = 1.0
             video.beep_candidates = []
+            video.beep_ranker_version = None
             video.beep_auto_detect_failed = False
             video.beep_alignment_confidence = None
             video.beep_alignment_delta_ms = None
@@ -12931,6 +13222,299 @@ def create_app(
         project.compare_camera = req.camera
         project.save(state.shooter_root(slug))
         return JSONResponse(project.model_dump(mode="json"))
+
+    def _identity_logo_dir(slug: str) -> Path:
+        return state.shooter_root(slug) / LOGO_DIR
+
+    def _remove_local_logo(slug: str, name: str | None) -> None:
+        if name is None:
+            return
+        try:
+            (_identity_logo_dir(slug) / name).unlink()
+        except FileNotFoundError:
+            pass
+
+    async def _save_to_book(project: MatchProject, slug: str) -> None:
+        """Write the shooter's identity to the shooter book under their SSI
+        id (spec 2026-10-08): the whole record, the logo copied into the
+        book's own files (same content name); an identity that sets nothing
+        removes the entry. No SSI id, nothing: the book never keys by name."""
+        sid = project.selected_shooter_id
+        if sid is None:
+            return
+        try:
+            await _write_book(project, slug, sid)
+        except Exception as exc:  # noqa: BLE001 -- the match was saved; the book is the extra
+            logger.warning("shooter book: %s's look was saved to the match but not the book (%s)", slug, exc)
+
+    async def _write_book(project: MatchProject, slug: str, sid: int) -> None:
+        logo_bytes: bytes | None = None
+        if project.identity.logo is not None:
+            local = ensure_local_logo(project, state.shooter_root(slug))
+            try:
+                logo_bytes = local.read_bytes() if local is not None else None
+            except OSError as exc:
+                logger.warning("shooter book: could not read %s's logo (%s); saved without it", slug, exc)
+        await shooter_book_module.save_identity(
+            state.shooter_book,
+            shooter_id=sid,
+            identity=project.identity,
+            label=project.competitor_name or project.name,
+            logo_bytes=logo_bytes,
+        )
+
+    def _book_seeded_identity(project: MatchProject, slug: str) -> ShooterIdentity:
+        """What an edit starts from: the match's own record, or, when it sets
+        nothing, the book's look the sheet showed (its logo copied into this
+        match's ``identity/``), so an edit kept to this match never drops
+        what the user did not touch."""
+        own = project.identity
+        if shooter_book_module.is_set(own):
+            return own
+        book = shooter_book_module.load_snapshot(state.shooter_book)
+        entry = book.get(project.selected_shooter_id)
+        if not shooter_book_module.is_set(entry):
+            return own
+        assert entry is not None
+        logo = None
+        source = book.logo_path(entry)
+        if entry.logo is not None and source is not None:
+            target = _identity_logo_dir(slug) / entry.logo
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                data = source.read_bytes()
+                target.write_bytes(data)
+                storage = project._storage  # type: ignore[attr-defined]
+                storage_scope = project._storage_scope  # type: ignore[attr-defined]
+                if storage is not None and storage_scope is not None:
+                    storage.write_bytes(f"{storage_scope}/{LOGO_DIR}/{entry.logo}", data)
+                logo = entry.logo
+            except OSError as exc:
+                logger.warning("identity: could not copy the book's logo into %s (%s)", slug, exc)
+        return entry.model_copy(update={"logo": logo})
+
+    def _roster_book() -> shooter_book_module.BookSnapshot:
+        """The shooter book the roster reads (the shooters list, Compare's
+        payload, the logo route), so the ring shows the look the video draws.
+        A share request reads none: the book is the owner's account data and
+        no share route reads it."""
+        if current_share_request.get():
+            return shooter_book_module.EMPTY_BOOK
+        return shooter_book_module.load_snapshot(state.shooter_book)
+
+    def _identity_view(project: MatchProject) -> dict[str, Any]:
+        """The identity sheet's view: where the look comes from and what it is."""
+        book = shooter_book_module.load_snapshot(state.shooter_book)
+        source = identity_source(project, book)
+        effective = project.identity if source != "book" else book.get(project.selected_shooter_id)
+        return {
+            "source": source,
+            "identity": (effective or ShooterIdentity()).model_dump(mode="json"),
+            "shooter_id": project.selected_shooter_id,
+            # Whether the book holds a look for this shooter ("Use shooter
+            # book" has something to fall back to) and whether this server
+            # keeps a book at all (one with no store answers an empty one).
+            "book_entry": shooter_book_module.is_set(book.get(project.selected_shooter_id)),
+            "book_available": not isinstance(state.shooter_book, shooter_book_module.EmptyShooterBookStore),
+        }
+
+    @app.get("/api/shooters/{slug}/identity")
+    def get_shooter_identity(slug: str) -> JSONResponse:
+        """Where this shooter's look comes from (``match``, ``book`` or
+        ``none``) and the identity a render draws for them."""
+        return JSONResponse(_identity_view(state.shooter_project(slug)))
+
+    @app.post("/api/shooters/{slug}/identity/use-book")
+    def use_shooter_book(slug: str) -> JSONResponse:
+        """Drop this match's own record so the shooter book applies again.
+        The book is not touched. Refused (409) when the book holds no look for
+        this shooter: dropping the record would leave them with nothing."""
+        project = state.shooter_project(slug)
+        book = shooter_book_module.load_snapshot(state.shooter_book)
+        if not shooter_book_module.is_set(book.get(project.selected_shooter_id)):
+            raise HTTPException(status_code=409, detail="The shooter book has no look for this shooter.")
+        previous = project.identity.logo
+        project.identity = ShooterIdentity()
+        project.save(state.shooter_root(slug))
+        _remove_local_logo(slug, previous)
+        return JSONResponse(_identity_view(project))
+
+    @app.patch("/api/shooters/{slug}/identity")
+    def set_shooter_identity(slug: str, req: ShooterIdentityRequest) -> JSONResponse:
+        """Set the shooter's accent and club line (#1243). Validated by the
+        identity model itself, so a bad colour or an over-long club line
+        is a 422 that names the field and writes nothing."""
+        project = state.shooter_project(slug)
+        current = _book_seeded_identity(project, slug)
+        fields = req.model_dump(exclude_unset=True)
+        try:
+            project.identity = ShooterIdentity(
+                accent=fields.get("accent", current.accent),
+                club=fields.get("club", current.club),
+                logo=current.logo,
+            )
+        except ValidationError as exc:
+            raise HTTPException(status_code=422, detail=exc.errors()[0]["msg"]) from exc
+        project.save(state.shooter_root(slug))
+        if req.scope == "book":
+            run_sync(_save_to_book(project, slug))
+        return JSONResponse(project.model_dump(mode="json"))
+
+    @app.post("/api/shooters/{slug}/identity/logo")
+    async def upload_shooter_logo(
+        slug: str, file: UploadFile = File(...), scope: Literal["book", "match"] = Form("book")
+    ) -> JSONResponse:
+        """Store the shooter's logo (#1243): a PNG, JPEG or WebP of at most
+        ``LOGO_MAX_BYTES``, content-named under ``<shooter>/identity/``
+        (hosted: under the project's storage scope as well, which is the
+        key the sync push writes), the previous logo file removed. The
+        type is sniffed, never trusted from the name: SVG can script and
+        a template loads the logo in Chromium."""
+        from PIL import Image, UnidentifiedImageError
+
+        project = state.shooter_project(slug)
+        data = await file.read(LOGO_MAX_BYTES + 1)
+        if len(data) > LOGO_MAX_BYTES:
+            raise HTTPException(status_code=413, detail=f"logo is over {LOGO_MAX_BYTES // (1024 * 1024)} MB")
+        if not data:
+            raise HTTPException(status_code=422, detail="empty file")
+        try:
+            with Image.open(io.BytesIO(data)) as image:
+                fmt = (image.format or "").upper()
+                side = max(image.size)
+        except (UnidentifiedImageError, OSError, Image.DecompressionBombError) as exc:
+            # A decompression bomb is an Exception, not an OSError: without
+            # this it was a 500 (review of #1243).
+            raise HTTPException(status_code=422, detail="logo must be a PNG, JPEG or WebP image") from exc
+        # MPO is what a phone camera writes: a JPEG with a multi-picture
+        # marker. Chromium decodes it as a JPEG.
+        ext = {"PNG": "png", "JPEG": "jpeg", "MPO": "jpeg", "WEBP": "webp"}.get(fmt)
+        if ext is None:
+            raise HTTPException(status_code=422, detail="logo must be a PNG, JPEG or WebP image")
+        if side > LOGO_MAX_SIDE:
+            raise HTTPException(status_code=422, detail=f"logo is over {LOGO_MAX_SIDE} px on a side")
+        name = logo_name(data, ext)
+        previous = project.identity.logo
+        logo_dir = _identity_logo_dir(slug)
+        logo_dir.mkdir(parents=True, exist_ok=True)
+        (logo_dir / name).write_bytes(data)
+        storage = project._storage  # type: ignore[attr-defined]
+        storage_scope = project._storage_scope  # type: ignore[attr-defined]
+        if storage is not None and storage_scope is not None:
+            storage.write_bytes(f"{storage_scope}/{LOGO_DIR}/{name}", data)
+        project.identity = project.identity.model_copy(update={"logo": name})
+        project.save(state.shooter_root(slug))
+        if previous != name:
+            _remove_local_logo(slug, previous)
+        if scope == "book":
+            await _save_to_book(project, slug)
+        return JSONResponse(project.model_dump(mode="json"))
+
+    @app.get("/api/shooters/{slug}/identity/logo")
+    def get_shooter_logo(slug: str) -> FileResponse:
+        """The shooter's logo (#1249): for the Compare roster, the shooter
+        chips and the share views. On the share GET allowlist: the logo is
+        already drawn into every video the share shows, and the alias binds
+        the request to that match's shooters. Content-named and sniffed on
+        upload (PNG, JPEG, WebP, never SVG); served with ``nosniff``."""
+        project = state.shooter_project(slug)
+        book = _roster_book()
+        if identity_source(project, book) == "book":
+            entry = book.get(project.selected_shooter_id)
+            path = book.logo_path(entry) if entry is not None else None
+        else:
+            path = ensure_local_logo(project, state.shooter_root(slug))
+        if path is None or not path.is_file():
+            raise HTTPException(status_code=404, detail="no logo")
+        media = {".png": "image/png", ".jpeg": "image/jpeg", ".jpg": "image/jpeg", ".webp": "image/webp"}.get(
+            path.suffix.lower()
+        )
+        if media is None:
+            raise HTTPException(status_code=404, detail="no logo")
+        return FileResponse(
+            path,
+            media_type=media,
+            headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, max-age=3600"},
+        )
+
+    @app.delete("/api/shooters/{slug}/identity/logo")
+    def remove_shooter_logo(slug: str, scope: Literal["book", "match"] = "book") -> JSONResponse:
+        """Clear the shooter's logo (#1243) and remove the local file; a
+        hosted copy is swept by the next push's gc."""
+        project = state.shooter_project(slug)
+        previous = project.identity.logo
+        project.identity = project.identity.model_copy(update={"logo": None})
+        project.save(state.shooter_root(slug))
+        _remove_local_logo(slug, previous)
+        if scope == "book":
+            run_sync(_save_to_book(project, slug))
+        return JSONResponse(project.model_dump(mode="json"))
+
+    # --- the event's logo (the branding work) -------------------------------
+    #
+    # The match's own logo, the centrepiece of the title page and the closing card.
+    # Kept as ``<match>/identity/event-<hash>.<ext>``; hosted, also under
+    # ``matches/<id>/identity/`` (the push writes the same key from the
+    # desktop). An edit, so a desktop mirror refuses it like any other.
+
+    def _event_logo_response(match: match_model.Match) -> JSONResponse:
+        return JSONResponse({"event_logo": match.branding.event_logo})
+
+    @app.post("/api/match/branding/event-logo")
+    async def upload_event_logo(file: UploadFile = File(...)) -> JSONResponse:
+        """Store the event's logo: a PNG, JPEG or WebP, sniffed and capped
+        like a shooter's (``identity.sniff_logo``), never trusted by name;
+        the previous file is removed."""
+        match_root, match = _resolve_match_context()
+        data = await file.read(LOGO_MAX_BYTES + 1)
+        try:
+            ext = sniff_logo(data)
+        except ValueError as exc:
+            status = 413 if len(data) > LOGO_MAX_BYTES else 422
+            raise HTTPException(status_code=status, detail=str(exc)) from None
+        name = event_logo_name(data, ext)
+        previous = match.branding.event_logo
+        folder = match_root / EVENT_LOGO_DIR
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / name).write_bytes(data)
+        if state.storage is not None and match.match_id:
+            state.storage.write_bytes(event_logo_storage_key(match.match_id, name), data)
+        match.branding = match.branding.model_copy(update={"event_logo": name})
+        match.save(match_root)
+        if previous and previous != name:
+            (folder / previous).unlink(missing_ok=True)
+        return _event_logo_response(match)
+
+    @app.get("/api/match/branding/event-logo")
+    def get_event_logo() -> FileResponse:
+        """The event's logo, for the Branding row. Content-named and sniffed
+        on upload; served with ``nosniff``."""
+        match_root, match = _resolve_match_context()
+        path = ensure_local_event_logo(
+            match.branding, match_root, storage=state.storage, match_id=match.match_id
+        )
+        if path is None or not path.is_file():
+            raise HTTPException(status_code=404, detail="no event logo")
+        media = {".png": "image/png", ".jpeg": "image/jpeg", ".jpg": "image/jpeg", ".webp": "image/webp"}.get(
+            path.suffix.lower(), "application/octet-stream"
+        )
+        return FileResponse(
+            path,
+            media_type=media,
+            headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-cache"},
+        )
+
+    @app.delete("/api/match/branding/event-logo")
+    def remove_event_logo() -> JSONResponse:
+        """Clear the event's logo and remove the local file; a hosted copy is
+        swept by the next push's gc."""
+        match_root, match = _resolve_match_context()
+        previous = match.branding.event_logo
+        match.branding = match.branding.model_copy(update={"event_logo": None})
+        match.save(match_root)
+        if previous:
+            (match_root / EVENT_LOGO_DIR / previous).unlink(missing_ok=True)
+        return _event_logo_response(match)
 
     @app.post("/api/shooters/{slug}/stages/camera/bulk-set")
     def bulk_set_camera(slug: str, req: BulkCameraSetRequest) -> JSONResponse:
@@ -15061,39 +15645,6 @@ def create_app(
         ]
         return JSONResponse({"templates": payload})
 
-    def _reveal_in_file_manager(resolved: Path) -> None:
-        """Launch the OS file manager for ``resolved``, surfacing failures.
-
-        Without surfacing, a headless / minimal Linux install (no
-        ``xdg-open``) or a Wayland session without DBUS silently
-        swallows the click. Raising on nonzero exit lets the SPA toast.
-        ``explorer /select`` is opted out because it returns 1 even on
-        a successful selection -- treating that as failure would always
-        toast on Windows.
-        """
-        if sys.platform == "darwin":
-            cmd = ["open", "-R", str(resolved)]
-            check_exit = True
-        elif sys.platform.startswith("win"):
-            cmd = ["explorer", f"/select,{resolved}"]
-            check_exit = False
-        else:
-            # xdg-open doesn't support file selection; opening the parent
-            # is the closest cross-distro behaviour.
-            parent = resolved.parent if resolved.is_file() else resolved
-            cmd = ["xdg-open", str(parent)]
-            check_exit = True
-        try:
-            proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
-        except OSError as exc:
-            raise HTTPException(status_code=500, detail=f"failed to launch file manager: {exc}") from exc
-        if check_exit and proc.returncode != 0:
-            stderr = (proc.stderr or "").strip() or f"exit {proc.returncode}"
-            raise HTTPException(
-                status_code=500,
-                detail=f"file manager refused to open {resolved}: {stderr}",
-            )
-
     @app.post("/api/files/reveal")
     def reveal_file(req: RevealRequest) -> JSONResponse:
         """Reveal a file in the OS file manager.
@@ -15522,6 +16073,7 @@ def create_app(
             legacy.scoreboard_content_type = req.content_type
             legacy.selected_shooter_id = pick.selected_shooter_id
             legacy.selected_competitor_id = pick.selected_competitor_id
+            legacy.adopt_scoreboard_club(_club_for(match_data, pick.selected_competitor_id))
             try:
                 legacy.populate_from_match_data(match_data, overwrite=False)
             except ScoreboardImportConflictError as exc:
@@ -15574,7 +16126,10 @@ def create_app(
         return match_root, state.match()
 
     def _classify_shooter(
-        shooter_root: Path, match: match_model.Match, presence: StoragePresence | None
+        shooter_root: Path,
+        match: match_model.Match,
+        presence: StoragePresence | None,
+        book: shooter_book_module.BookSnapshot = shooter_book_module.EMPTY_BOOK,
     ) -> ShooterListEntry:
         """Build a list entry for a single shooter directory.
 
@@ -15671,6 +16226,7 @@ def create_app(
             video_count=total_videos,
             cameras=cameras,
             stages_missing_trim=stages_missing_trim,
+            identity=effective_identity(legacy, book),
             stage_statuses=[
                 StageStatusEntry(stage_number=n, status=st) for n, st in sorted(stage_status_map.items())
             ],
@@ -15795,11 +16351,12 @@ def create_app(
         # shooter. A share request gets none: its viewer never sees the
         # count the index exists to compute.
         presence = None if current_share_request.get() else StoragePresence(state.storage)
+        book = _roster_book()
         entries: list[ShooterListEntry] = []
         for slug in match.shooters:
             shooter_root = match_model.Match.shooter_root(match_root, slug)
             try:
-                entries.append(_classify_shooter(shooter_root, match, presence))
+                entries.append(_classify_shooter(shooter_root, match, presence, book))
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Skipping shooter %s: %s", slug, exc)
                 continue
@@ -15984,6 +16541,14 @@ def create_app(
             # legacy.competitor_name is already req.name from above.
             legacy.selected_shooter_id = req.selected_shooter_id
             legacy.selected_competitor_id = req.selected_competitor_id
+            if legacy.scoreboard_match_id and legacy.scoreboard_content_type is not None:
+                _adopt_club_from_scoreboard(
+                    legacy,
+                    match_root,
+                    legacy.scoreboard_content_type,
+                    int(legacy.scoreboard_match_id),
+                    req.selected_competitor_id,
+                )
         legacy.save(shooter_root)
         if (
             req.selected_competitor_id is not None
@@ -16094,6 +16659,14 @@ def create_app(
             shooter_root = state.shooter_root(link.slug)
             legacy.selected_shooter_id = link.shooter_id
             legacy.selected_competitor_id = link.competitor_id
+            if legacy.scoreboard_match_id and legacy.scoreboard_content_type is not None:
+                _adopt_club_from_scoreboard(
+                    legacy,
+                    shooter_root.parent.parent,
+                    legacy.scoreboard_content_type,
+                    int(legacy.scoreboard_match_id),
+                    link.competitor_id,
+                )
             legacy.save(shooter_root)
             if legacy.scoreboard_match_id and legacy.scoreboard_content_type is not None:
                 try:
@@ -16328,6 +16901,7 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
         records: list[CompareShooterRecord] = []
+        book = _roster_book()
         for slug in match.shooters:
             shooter_root = match_model.Match.shooter_root(match_root, slug)
             try:
@@ -16403,6 +16977,7 @@ def create_app(
                     duration_seconds=duration_seconds,
                     stage_time_seconds=(stage.time_seconds if stage is not None else None),
                     shots=shots,
+                    identity=effective_identity(legacy, book),
                 )
             )
 
@@ -18798,8 +19373,14 @@ def create_app(
     # Export presets (spec 2026-09-15 s1): one router for both modes; the
     # store behind ``state.export_presets`` is what differs.
     from .export_presets_api import router as export_presets_router
+    from .me_identity_api import router as me_identity_router
+    from .palette_api import router as palette_router
+    from .whats_new_api import router as whats_new_router
 
     app.include_router(export_presets_router)
+    app.include_router(me_identity_router)
+    app.include_router(whats_new_router)
+    app.include_router(palette_router)
 
     # Sort a shared footage folder across shooters (spec 2026-10-01).
     # Local only: every route 404s hosted.
@@ -18811,6 +19392,11 @@ def create_app(
     from .export_preview_api import router as export_preview_router
 
     app.include_router(export_preview_router)
+
+    # The Look catalog and its preview files (spec 2026-10-06 s4, #1246).
+    from .looks_api import router as looks_router
+
+    app.include_router(looks_router)
 
     # Share-link OG card PNGs (spec 2026-08-09). Same lazy-import,
     # always-registered idiom as sync_router and device_router: every

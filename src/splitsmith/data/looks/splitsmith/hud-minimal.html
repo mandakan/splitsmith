@@ -1,0 +1,96 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>hud minimal</title>
+<script>
+  // The shipped Minimal HUD (spec 2026-10-08): a small clock at the bottom
+  // and nothing else, each split flashing large in the middle and shrinking
+  // away; the landing pulls the clock up into the stage-time stamp. It
+  // places itself (no positions). seek(t) draws any instant from the stage
+  // data alone; nothing reads the wall clock. The engine stylesheet is
+  // loaded for its font faces only.
+  document.write('<style>' + window.splitsmith.engine.css + '</style>');
+</script>
+<style>
+  html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; }
+  .shade { text-shadow: 0 0 0.45vh rgba(0, 0, 0, 0.7), 0 0.35vh 1.4vh rgba(0, 0, 0, 0.55); }
+  .num {
+    font-family: "Splitsmith Mono", monospace; font-weight: 700;
+    font-variant-numeric: tabular-nums; line-height: 1; white-space: nowrap;
+  }
+  .label {
+    font-family: "Splitsmith Display", sans-serif; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.14em; white-space: nowrap;
+  }
+  #clock { position: absolute; left: 0; right: 0; bottom: 5.3vh; text-align: center; font-size: 6.4vh; }
+  #split { position: absolute; left: 0; right: 0; top: 40%; text-align: center; }
+  #split .num { font-size: 17.8vh; }
+  #split .label { font-size: 2.5vh; margin-top: 1vh; }
+  #stamp { position: absolute; left: 0; right: 0; top: 34%; text-align: center; opacity: 0; }
+  #stamp .label { font-size: 2.5vh; letter-spacing: 0.3em; }
+  #stamp .num { font-size: 16vh; }
+</style>
+</head>
+<body>
+<div class="num shade" id="clock">0.00</div>
+<div id="split"><div class="num shade" id="splitValue"></div><div class="label shade" id="splitLabel"></div></div>
+<div id="stamp"><div class="label shade">Stage time</div><div class="num shade" id="stampValue"></div></div>
+<script>
+(function () {
+  var s = window.splitsmith;
+  var theme = s.theme, stage = s.data.stage, opts = s.data.options;
+  var shots = stage.shots, beep = stage.beep;
+  var FLASH = 0.5, CLOCK_OUT = 0.25, STAMP_DELAY = 0.1, STAMP_IN = 0.35;
+
+  function el(id) { return document.getElementById(id); }
+  function clamp(x) { return Math.max(0, Math.min(1, x)); }
+  function easeOut(x) { x = clamp(x); return 1 - Math.pow(1 - x, 3); }
+  function backOut(x) { x = clamp(x); var c = 1.9; return 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2); }
+  function tierColour(tier) {
+    if (!opts.speed_colors || !tier) return theme.split;
+    return tier === 'good' ? theme.split_good : tier === 'slow' ? theme.accent : theme.split;
+  }
+
+  document.body.style.color = theme.ink;
+  el('splitLabel').style.color = theme.ink_2;
+  if (!opts.class_labels) el('splitLabel').style.display = 'none';
+  el('stampValue').textContent = stage.stage_time.toFixed(2);
+
+  window.settle = function () {
+    return opts.landing ? Math.max(CLOCK_OUT, STAMP_DELAY + STAMP_IN) : FLASH;
+  };
+
+  window.seek = function (t) {
+    var n = 0;
+    while (n < shots.length && shots[n].t <= t) n++;
+    var last = n ? shots[n - 1] : null;
+    var landed = n === shots.length && n > 0 ? t - last.t : -1;
+    var landing = opts.landing && landed >= 0;
+    var since = last ? t - last.t : Infinity;
+
+    var clock = el('clock');
+    clock.textContent = (landed >= 0 ? stage.stage_time : Math.max(0, t - beep)).toFixed(2);
+    clock.style.opacity = landing ? 1 - clamp(landed / CLOCK_OUT) : 1;
+
+    var split = el('split');
+    var k = since / FLASH;
+    if (!last || landing || k >= 1) {
+      split.style.opacity = 0;
+    } else {
+      split.style.opacity = clamp(1 - k * k);
+      split.style.transform = 'scale(' + (1 - 0.35 * easeOut(k)) + ')';
+      el('splitValue').textContent = last.split.toFixed(2);
+      el('splitValue').style.color = tierColour(last.tier);
+      el('splitLabel').textContent = last.label || '';
+    }
+
+    var stamp = el('stamp');
+    var sk = landing ? (landed - STAMP_DELAY) / STAMP_IN : 0;
+    stamp.style.opacity = clamp(sk);
+    stamp.style.transform = 'scale(' + (1.4 - 0.4 * backOut(sk)) + ')';
+  };
+})();
+</script>
+</body>
+</html>

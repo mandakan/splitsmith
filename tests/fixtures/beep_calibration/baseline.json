@@ -16,8 +16,55 @@
     "dur_match_min_ms": 150.0,
     "dur_match_full_ms": 300.0,
     "dur_match_weight": 1.0,
+    "silence_saturation_scale": 5.0,
     "search_window_s": 30.0,
-    "top_n_candidates": 5
+    "top_n_candidates": 5,
+    "ranker": {
+      "ranker": "learned",
+      "model_version": "beep-ranker-lr-4a15dc5d",
+      "features": [
+        "log_silence",
+        "tonal_ratio",
+        "duration_ms",
+        "log_peak_over_floor",
+        "peak_over_global",
+        "spectral_flatness",
+        "log_spectral_prominence"
+      ],
+      "mean": [
+        0.50836655,
+        0.77811538,
+        296.53426334,
+        3.73086349,
+        0.57989191,
+        0.35832228,
+        4.65109123
+      ],
+      "scale": [
+        1.27775948,
+        0.09752592,
+        157.57188662,
+        0.78956689,
+        0.25583307,
+        0.17364072,
+        3.50127623
+      ],
+      "coef": [
+        0.02181628,
+        0.64565341,
+        0.41730233,
+        -0.32296418,
+        0.40136711,
+        1.71163268,
+        4.43937241
+      ],
+      "intercept": -2.8992192,
+      "head_coef": [
+        0.37122929,
+        0.50651822
+      ],
+      "head_intercept": -2.62298459
+    }
   },
   "results": [
     {
@@ -27,8 +74,8 @@
       "ground_truth_s": 4.877,
       "tolerance_s": 0.02,
       "detected_time_s": 4.877083333333333,
-      "detected_score": 382.62327494454263,
-      "detected_confidence": 0.9987267766546176,
+      "detected_score": 0.9999963276138409,
+      "detected_confidence": 0.9996750769437895,
       "error_s": 8.333333333343518e-05,
       "correct_top1": true,
       "correct_in_topn": true,
@@ -45,8 +92,8 @@
       "ground_truth_s": 5.0,
       "tolerance_s": 0.015,
       "detected_time_s": 4.99975,
-      "detected_score": 12.278005579416165,
-      "detected_confidence": 0.9957414741359516,
+      "detected_score": 0.9999995088929181,
+      "detected_confidence": 0.9998476125011599,
       "error_s": -0.00025000000000030553,
       "correct_top1": true,
       "correct_in_topn": true,
@@ -64,28 +111,9 @@
       "ground_truth_s": 0.5,
       "tolerance_s": 0.015,
       "detected_time_s": 0.5,
-      "detected_score": 60.245887505877405,
-      "detected_confidence": 0.9833807525196606,
+      "detected_score": 0.9999989577118044,
+      "detected_confidence": 0.9996648223800785,
       "error_s": 0.0,
-      "correct_top1": true,
-      "correct_in_topn": true,
-      "candidate_count": 5,
-      "error_kind": null
-    },
-    {
-      "stem": "stage-shots-blacksmith-2026-stage1-s97dcec94",
-      "track": "full",
-      "tags": [
-        "headcam",
-        "late-beep",
-        "steel-prone"
-      ],
-      "ground_truth_s": 22.9417,
-      "tolerance_s": 0.015,
-      "detected_time_s": 22.941729166666665,
-      "detected_score": 6.524023930567193,
-      "detected_confidence": 0.8234733520143619,
-      "error_s": 2.9166666664082186e-05,
       "correct_top1": true,
       "correct_in_topn": true,
       "candidate_count": 5,
@@ -100,8 +128,8 @@
       "ground_truth_s": 5.0,
       "tolerance_s": 0.015,
       "detected_time_s": 5.000229166666666,
-      "detected_score": 9.496311481127757,
-      "detected_confidence": 0.9841137417420357,
+      "detected_score": 0.9999984703470287,
+      "detected_confidence": 0.99753008737784,
       "error_s": 0.0002291666666662806,
       "correct_top1": true,
       "correct_in_topn": true,
@@ -118,30 +146,12 @@
       "ground_truth_s": 0.5,
       "tolerance_s": 0.015,
       "detected_time_s": 0.5,
-      "detected_score": 65.11185068826258,
-      "detected_confidence": 0.9999999999975573,
+      "detected_score": 0.9999999901460092,
+      "detected_confidence": 0.9999865923633988,
       "error_s": 0.0,
       "correct_top1": true,
       "correct_in_topn": true,
       "candidate_count": 1,
-      "error_kind": null
-    },
-    {
-      "stem": "stage-shots-blacksmith-2026-stage2-s97dcec94",
-      "track": "full",
-      "tags": [
-        "headcam",
-        "late-beep"
-      ],
-      "ground_truth_s": 17.6261,
-      "tolerance_s": 0.015,
-      "detected_time_s": 17.6260625,
-      "detected_score": 6.530470119205748,
-      "detected_confidence": 0.901577746625233,
-      "error_s": -3.750000000124487e-05,
-      "correct_top1": true,
-      "correct_in_topn": true,
-      "candidate_count": 5,
       "error_kind": null
     },
     {
@@ -153,10 +163,10 @@
       ],
       "ground_truth_s": 5.0,
       "tolerance_s": 0.015,
-      "detected_time_s": 3.4687916666666667,
-      "detected_score": 1.0239290203249232,
-      "detected_confidence": 0.3725189256361387,
-      "error_s": -1.5312083333333333,
+      "detected_time_s": 5.0151875,
+      "detected_score": 0.9912779672671741,
+      "detected_confidence": 0.936288760851042,
+      "error_s": 0.015187499999999687,
       "correct_top1": false,
       "correct_in_topn": false,
       "candidate_count": 5,
@@ -173,31 +183,12 @@
       "ground_truth_s": 0.5,
       "tolerance_s": 0.015,
       "detected_time_s": 0.5002083333333334,
-      "detected_score": 19.922555891457176,
-      "detected_confidence": 0.9463487292327023,
+      "detected_score": 0.9999937268646861,
+      "detected_confidence": 0.9999865923633988,
       "error_s": 0.0002083333333333659,
       "correct_top1": true,
       "correct_in_topn": true,
       "candidate_count": 1,
-      "error_kind": null
-    },
-    {
-      "stem": "stage-shots-blacksmith-2026-stage3-s97dcec94",
-      "track": "full",
-      "tags": [
-        "headcam",
-        "late-beep",
-        "steel-prone"
-      ],
-      "ground_truth_s": 25.4267,
-      "tolerance_s": 0.015,
-      "detected_time_s": 25.426729166666668,
-      "detected_score": 5.1570817507469675,
-      "detected_confidence": 0.7791240635253627,
-      "error_s": 2.91666666676349e-05,
-      "correct_top1": true,
-      "correct_in_topn": true,
-      "candidate_count": 5,
       "error_kind": null
     },
     {
@@ -210,8 +201,8 @@
       "ground_truth_s": 5.0,
       "tolerance_s": 0.015,
       "detected_time_s": 5.0008333333333335,
-      "detected_score": 12.168392277781095,
-      "detected_confidence": 0.9402015939084657,
+      "detected_score": 0.9999361308596217,
+      "detected_confidence": 0.9991446533626436,
       "error_s": 0.0008333333333334636,
       "correct_top1": true,
       "correct_in_topn": true,
@@ -228,30 +219,12 @@
       "ground_truth_s": 0.5,
       "tolerance_s": 0.015,
       "detected_time_s": 0.4965833333333333,
-      "detected_score": 7.967566791176565,
-      "detected_confidence": 0.8178155143088319,
+      "detected_score": 0.9999862413995932,
+      "detected_confidence": 0.9927981694943926,
       "error_s": -0.003416666666666679,
       "correct_top1": true,
       "correct_in_topn": true,
       "candidate_count": 3,
-      "error_kind": null
-    },
-    {
-      "stem": "stage-shots-blacksmith-2026-stage5-s97dcec94",
-      "track": "full",
-      "tags": [
-        "headcam",
-        "steel-prone"
-      ],
-      "ground_truth_s": 6.522,
-      "tolerance_s": 0.015,
-      "detected_time_s": 6.518208333333333,
-      "detected_score": 1.8227350026575688,
-      "detected_confidence": 0.6595818227610635,
-      "error_s": -0.003791666666667304,
-      "correct_top1": true,
-      "correct_in_topn": true,
-      "candidate_count": 4,
       "error_kind": null
     },
     {
@@ -262,11 +235,11 @@
       ],
       "ground_truth_s": 3.292,
       "tolerance_s": 0.015,
-      "detected_time_s": 14.545458333333332,
-      "detected_score": 20.400797483626388,
-      "detected_confidence": 0.8366400814181361,
-      "error_s": 11.253458333333333,
-      "correct_top1": false,
+      "detected_time_s": 3.2940833333333335,
+      "detected_score": 0.9928732810178793,
+      "detected_confidence": 0.9354458771317199,
+      "error_s": 0.002083333333333659,
+      "correct_top1": true,
       "correct_in_topn": true,
       "candidate_count": 5,
       "error_kind": null
@@ -281,27 +254,9 @@
       "ground_truth_s": 0.5,
       "tolerance_s": 0.015,
       "detected_time_s": 0.5022291666666666,
-      "detected_score": 0.14554021444704712,
-      "detected_confidence": 0.5541001622317734,
+      "detected_score": 0.6155976558415068,
+      "detected_confidence": 0.9456039490424724,
       "error_s": 0.0022291666666666154,
-      "correct_top1": true,
-      "correct_in_topn": true,
-      "candidate_count": 1,
-      "error_kind": null
-    },
-    {
-      "stem": "stage-shots-blacksmith-2026-stage6-s97dcec94",
-      "track": "full",
-      "tags": [
-        "headcam",
-        "late-beep"
-      ],
-      "ground_truth_s": 14.1252,
-      "tolerance_s": 0.015,
-      "detected_time_s": 14.127145833333334,
-      "detected_score": 6.725757855525987,
-      "detected_confidence": 0.9578446795654588,
-      "error_s": 0.0019458333333339795,
       "correct_top1": true,
       "correct_in_topn": true,
       "candidate_count": 1,
@@ -315,11 +270,11 @@
       ],
       "ground_truth_s": 5.0,
       "tolerance_s": 0.015,
-      "detected_time_s": 1.3281458333333334,
-      "detected_score": 4.565180735021694,
-      "detected_confidence": 0.6593792257803714,
-      "error_s": -3.671854166666667,
-      "correct_top1": false,
+      "detected_time_s": 4.99975,
+      "detected_score": 0.9999359279121605,
+      "detected_confidence": 0.9957042484051556,
+      "error_s": -0.00025000000000030553,
+      "correct_top1": true,
       "correct_in_topn": true,
       "candidate_count": 5,
       "error_kind": null
@@ -334,30 +289,12 @@
       "ground_truth_s": 0.5,
       "tolerance_s": 0.015,
       "detected_time_s": 0.5000208333333334,
-      "detected_score": 20.70159359127117,
-      "detected_confidence": 0.999873344272643,
+      "detected_score": 0.9999987887719648,
+      "detected_confidence": 0.9999865923633988,
       "error_s": 2.0833333333358794e-05,
       "correct_top1": true,
       "correct_in_topn": true,
       "candidate_count": 1,
-      "error_kind": null
-    },
-    {
-      "stem": "stage-shots-blacksmith-2026-stage7-s97dcec94",
-      "track": "full",
-      "tags": [
-        "headcam",
-        "late-beep"
-      ],
-      "ground_truth_s": 17.3027,
-      "tolerance_s": 0.015,
-      "detected_time_s": 17.30270833333333,
-      "detected_score": 7.5258059413943394,
-      "detected_confidence": 0.8562957298777705,
-      "error_s": 8.333333330057258e-06,
-      "correct_top1": true,
-      "correct_in_topn": true,
-      "candidate_count": 5,
       "error_kind": null
     },
     {
@@ -370,8 +307,8 @@
       "ground_truth_s": 5.0,
       "tolerance_s": 0.015,
       "detected_time_s": 5.000166666666667,
-      "detected_score": 2.7090383544770433,
-      "detected_confidence": 0.5451275116011287,
+      "detected_score": 0.9362420346326635,
+      "detected_confidence": 0.5528549499923008,
       "error_s": 0.00016666666666687036,
       "correct_top1": true,
       "correct_in_topn": true,
@@ -389,8 +326,8 @@
       "ground_truth_s": 0.5,
       "tolerance_s": 0.015,
       "detected_time_s": 0.5,
-      "detected_score": 17.113316962767325,
-      "detected_confidence": 0.8662771096475963,
+      "detected_score": 0.9999098670627837,
+      "detected_confidence": 0.9727911906175646,
       "error_s": 0.0,
       "correct_top1": true,
       "correct_in_topn": true,
@@ -398,33 +335,1410 @@
       "error_kind": null
     },
     {
-      "stem": "stage-shots-blacksmith-2026-stage8-s97dcec94",
-      "track": "full",
+      "stem": "stage-shots-blacksmith-handgun-open-2026-stage1-s0fe3d797",
+      "track": "clip",
       "tags": [
-        "headcam",
-        "late-beep",
-        "steel-prone"
+        "headcam"
       ],
-      "ground_truth_s": 25.3944,
-      "tolerance_s": 0.015,
-      "detected_time_s": 25.394375,
-      "detected_score": 11.209105716543254,
-      "detected_confidence": 0.9830927372708619,
-      "error_s": -2.5000000000829914e-05,
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 5.000375,
+      "detected_score": 0.9999682419709403,
+      "detected_confidence": 0.9996484297835109,
+      "error_s": 0.0003750000000000142,
       "correct_top1": true,
       "correct_in_topn": true,
       "candidate_count": 5,
       "error_kind": null
     },
     {
+      "stem": "stage-shots-blacksmith-handgun-open-2026-stage1-s36ed6e4e",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 5.000479166666667,
+      "detected_score": 0.9999998637572641,
+      "detected_confidence": 0.999848750417798,
+      "error_s": 0.00047916666666658614,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 4,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-blacksmith-handgun-open-2026-stage2-s0fe3d797",
+      "track": "clip",
+      "tags": [
+        "headcam"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 4.999916666666667,
+      "detected_score": 0.9999993700469127,
+      "detected_confidence": 0.9983206157563068,
+      "error_s": -8.333333333343518e-05,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-blacksmith-handgun-open-2026-stage2-s36ed6e4e",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 5.000145833333334,
+      "detected_score": 0.9999968465084241,
+      "detected_confidence": 0.9965549461059237,
+      "error_s": 0.0001458333333337336,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-blacksmith-handgun-open-2026-stage3-s0fe3d797",
+      "track": "clip",
+      "tags": [
+        "headcam"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 5.000354166666667,
+      "detected_score": 0.9996102888205914,
+      "detected_confidence": 0.9952650985259389,
+      "error_s": 0.00035416666666687746,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-blacksmith-handgun-open-2026-stage3-s36ed6e4e",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 4.568770833333334,
+      "detected_score": 0.9955656068495059,
+      "detected_confidence": 0.3701256865947781,
+      "error_s": -0.43122916666666633,
+      "correct_top1": false,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-blacksmith-handgun-open-2026-stage4-s0fe3d797",
+      "track": "clip",
+      "tags": [
+        "headcam"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 4.999666666666666,
+      "detected_score": 0.9999964559596367,
+      "detected_confidence": 0.9968658554053121,
+      "error_s": -0.0003333333333337407,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-blacksmith-handgun-open-2026-stage4-s36ed6e4e",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 4.999604166666667,
+      "detected_score": 0.9994961640450837,
+      "detected_confidence": 0.9943274623887485,
+      "error_s": -0.00039583333333315096,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-blacksmith-handgun-open-2026-stage5-s0fe3d797",
+      "track": "clip",
+      "tags": [
+        "headcam"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 5.0015833333333335,
+      "detected_score": 0.9994973274033455,
+      "detected_confidence": 0.9898020533145794,
+      "error_s": 0.001583333333333492,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-blacksmith-handgun-open-2026-stage5-s36ed6e4e",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 5.0004583333333334,
+      "detected_score": 0.999825770237629,
+      "detected_confidence": 0.9984250103100288,
+      "error_s": 0.0004583333333334494,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-blacksmith-handgun-open-2026-stage6-s0fe3d797",
+      "track": "clip",
+      "tags": [
+        "headcam"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 5.0004583333333334,
+      "detected_score": 0.9999744222708281,
+      "detected_confidence": 0.9998019179156051,
+      "error_s": 0.0004583333333334494,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 2,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-blacksmith-handgun-open-2026-stage6-s36ed6e4e",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 5.000270833333333,
+      "detected_score": 0.9995394364612192,
+      "detected_confidence": 0.9998975035414559,
+      "error_s": 0.0002708333333334423,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 1,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-blacksmith-handgun-open-2026-stage7-s0fe3d797",
+      "track": "clip",
+      "tags": [
+        "headcam"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 5.0003125,
+      "detected_score": 0.8531329359208988,
+      "detected_confidence": 0.7789292458482678,
+      "error_s": 0.0003124999999997158,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-blacksmith-handgun-open-2026-stage7-s36ed6e4e",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 4.997020833333333,
+      "detected_score": 0.9998477949291471,
+      "detected_confidence": 0.9989108360517047,
+      "error_s": -0.002979166666666977,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-blacksmith-handgun-open-2026-stage8-s0fe3d797",
+      "track": "clip",
+      "tags": [
+        "headcam"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 5.000208333333333,
+      "detected_score": 0.9999983013669335,
+      "detected_confidence": 0.9930638022093894,
+      "error_s": 0.00020833333333314386,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-blacksmith-handgun-open-2026-stage8-s36ed6e4e",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 4.999645833333333,
+      "detected_score": 0.49117552215568744,
+      "detected_confidence": 0.0693933955124114,
+      "error_s": -0.00035416666666687746,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-bofors-bombardment-2026-stage1-s0fe3d797",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 0.9971458333333333,
+      "tolerance_s": 0.1,
+      "detected_time_s": 0.9971458333333333,
+      "detected_score": 0.538579207779633,
+      "detected_confidence": 0.45412624806961116,
+      "error_s": 0.0,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-bofors-bombardment-2026-stage1-s36ed6e4e",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 4.999854166666666,
+      "detected_score": 0.9573124158655081,
+      "detected_confidence": 0.8716485574421803,
+      "error_s": -0.0001458333333337336,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-bofors-bombardment-2026-stage2-s0fe3d797",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 2.8373958333333333,
+      "tolerance_s": 0.1,
+      "detected_time_s": 2.8373958333333333,
+      "detected_score": 0.9999995122481068,
+      "detected_confidence": 0.9995672427495876,
+      "error_s": 0.0,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 4,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-bofors-bombardment-2026-stage2-s36ed6e4e",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 4.976833333333333,
+      "detected_score": 0.9999565152493555,
+      "detected_confidence": 0.9976744192203756,
+      "error_s": -0.023166666666666558,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-bofors-bombardment-2026-stage3-s0fe3d797",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 1.7475416666666668,
+      "tolerance_s": 0.1,
+      "detected_time_s": 11.154333333333334,
+      "detected_score": 0.10466384338994565,
+      "detected_confidence": 0.03674629076974033,
+      "error_s": 9.406791666666667,
+      "correct_top1": false,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-bofors-bombardment-2026-stage3-s36ed6e4e",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 5.000479166666667,
+      "detected_score": 0.9996861550269879,
+      "detected_confidence": 0.9925163221043116,
+      "error_s": 0.00047916666666658614,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-bofors-bombardment-2026-stage4-s0fe3d797",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 1.425,
+      "tolerance_s": 0.1,
+      "detected_time_s": 0.9389375,
+      "detected_score": 0.9585484581429309,
+      "detected_confidence": 0.3224704538396458,
+      "error_s": -0.48606250000000006,
+      "correct_top1": false,
+      "correct_in_topn": false,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-bofors-bombardment-2026-stage4-s36ed6e4e",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 14.874458333333333,
+      "detected_score": 0.027621643887065426,
+      "detected_confidence": 0.0198115305254499,
+      "error_s": 9.874458333333333,
+      "correct_top1": false,
+      "correct_in_topn": false,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-bofors-bombardment-2026-stage5-s0fe3d797",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 2.755895833333333,
+      "tolerance_s": 0.1,
+      "detected_time_s": 2.755895833333333,
+      "detected_score": 0.999946883687426,
+      "detected_confidence": 0.9992077689561479,
+      "error_s": 0.0,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-bofors-bombardment-2026-stage5-s36ed6e4e",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 5.0013125,
+      "detected_score": 0.9865537911907359,
+      "detected_confidence": 0.894640648249659,
+      "error_s": 0.0013125000000000497,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-bofors-bombardment-2026-stage6-s0fe3d797",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 4.661458333333333,
+      "detected_score": 0.10608560758936664,
+      "detected_confidence": 0.03704491406535472,
+      "error_s": -0.33854166666666696,
+      "correct_top1": false,
+      "correct_in_topn": false,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-bofors-bombardment-2026-stage6-s36ed6e4e",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 5.0001875,
+      "detected_score": 0.9980573149134934,
+      "detected_confidence": 0.9860640778886237,
+      "error_s": 0.0001875000000000071,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-bofors-bombardment-2026-stage7-s0fe3d797",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 1.9551458333333334,
+      "tolerance_s": 0.1,
+      "detected_time_s": 1.9551458333333334,
+      "detected_score": 0.999998759744816,
+      "detected_confidence": 0.9995713200750911,
+      "error_s": 0.0,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-bofors-bombardment-2026-stage7-s36ed6e4e",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 4.999958333333334,
+      "detected_score": 0.9983034996507161,
+      "detected_confidence": 0.9887208449240616,
+      "error_s": -4.16666666662735e-05,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-bofors-bombardment-2026-stage8-s0fe3d797",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 3.7136875,
+      "tolerance_s": 0.1,
+      "detected_time_s": 3.7136875,
+      "detected_score": 0.9999591353151612,
+      "detected_confidence": 0.9972337144057769,
+      "error_s": 0.0,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-bofors-bombardment-2026-stage8-s36ed6e4e",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 5.000354166666667,
+      "detected_score": 0.9998198038466032,
+      "detected_confidence": 0.9800207448948419,
+      "error_s": 0.00035416666666687746,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-bofors-bombardment-2026-stage9-s0fe3d797",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 3.649395833333333,
+      "tolerance_s": 0.1,
+      "detected_time_s": 3.649395833333333,
+      "detected_score": 0.9930621922227516,
+      "detected_confidence": 0.9553129271481815,
+      "error_s": 0.0,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-bofors-bombardment-2026-stage9-s36ed6e4e",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 5.001166666666666,
+      "detected_score": 0.9999851330605671,
+      "detected_confidence": 0.999767456228123,
+      "error_s": 0.0011666666666663161,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage1-s0fe3d797",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 3.6395948705491477,
+      "tolerance_s": 0.1,
+      "detected_time_s": 1.2546666666666666,
+      "detected_score": 0.1306967738105096,
+      "detected_confidence": 0.04735123756909639,
+      "error_s": -2.384928203882481,
+      "correct_top1": false,
+      "correct_in_topn": false,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage1-s36ed6e4e",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 5.031979166666667,
+      "detected_score": 0.9972151408946422,
+      "detected_confidence": 0.9871074967146893,
+      "error_s": 0.03197916666666689,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 2,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage1-s97dcec94",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 4.999895833333333,
+      "detected_score": 0.9377628427995761,
+      "detected_confidence": 0.7849040801581347,
+      "error_s": -0.00010416666666657193,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage1-s9c1a2e74",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 4.993291666666667,
+      "detected_score": 0.976992731569941,
+      "detected_confidence": 0.905170715484522,
+      "error_s": -0.006708333333333094,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage10-s0fe3d797",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 2.3888333333333334,
+      "tolerance_s": 0.1,
+      "detected_time_s": 2.3888333333333334,
+      "detected_score": 0.9995508247468154,
+      "detected_confidence": 0.9964887043166518,
+      "error_s": 0.0,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage10-s36ed6e4e",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 5.020166666666666,
+      "detected_score": 0.999978514855881,
+      "detected_confidence": 0.9994455383651599,
+      "error_s": 0.020166666666666444,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage10-s97dcec94",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 5.001375,
+      "detected_score": 0.9580640088854635,
+      "detected_confidence": 0.8274851376729276,
+      "error_s": 0.0013750000000003482,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage10-s9c1a2e74",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 4.9998125,
+      "detected_score": 0.9991998067319153,
+      "detected_confidence": 0.9910844809825868,
+      "error_s": -0.0001875000000000071,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage11-s0fe3d797",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 1.3170833333333334,
+      "tolerance_s": 0.1,
+      "detected_time_s": 1.3170833333333334,
+      "detected_score": 0.985091497706793,
+      "detected_confidence": 0.9516505302510587,
+      "error_s": 0.0,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage11-s36ed6e4e",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 4.966395833333333,
+      "detected_score": 0.9994477450817274,
+      "detected_confidence": 0.9952854516882221,
+      "error_s": -0.03360416666666666,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage11-s97dcec94",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 3.88375,
+      "detected_score": 0.4847400083981477,
+      "detected_confidence": 0.0965031842875211,
+      "error_s": -1.11625,
+      "correct_top1": false,
+      "correct_in_topn": false,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage11-s9c1a2e74",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 4.9995,
+      "detected_score": 0.9992812438643904,
+      "detected_confidence": 0.9913591229581755,
+      "error_s": -0.0004999999999997229,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage12-s0fe3d797",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 4.990333333333333,
+      "detected_score": 0.9999969804661106,
+      "detected_confidence": 0.9994276573749734,
+      "error_s": -0.009666666666666934,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage12-s36ed6e4e",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 5.000479166666667,
+      "detected_score": 0.9999820686828695,
+      "detected_confidence": 0.9995997550031064,
+      "error_s": 0.00047916666666658614,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage12-s97dcec94",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 5.00025,
+      "detected_score": 0.9962777059527911,
+      "detected_confidence": 0.9993568765138815,
+      "error_s": 0.00025000000000030553,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 1,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage12-s9c1a2e74",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 4.99975,
+      "detected_score": 0.99999994632835,
+      "detected_confidence": 0.9999865923633988,
+      "error_s": -0.00025000000000030553,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 1,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage2-s0fe3d797",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 2.5307792561712916,
+      "tolerance_s": 0.1,
+      "detected_time_s": 12.102625,
+      "detected_score": 0.014634180028465478,
+      "detected_confidence": 0.016047334757584696,
+      "error_s": 9.571845743828709,
+      "correct_top1": false,
+      "correct_in_topn": false,
+      "candidate_count": 3,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage2-s36ed6e4e",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 4.751270833333334,
+      "detected_score": 0.16423439931640224,
+      "detected_confidence": 0.08731626098158572,
+      "error_s": -0.24872916666666622,
+      "correct_top1": false,
+      "correct_in_topn": false,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage2-s97dcec94",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 2.627666666666667,
+      "detected_score": 0.487272190796887,
+      "detected_confidence": 0.24719322939953914,
+      "error_s": -2.372333333333333,
+      "correct_top1": false,
+      "correct_in_topn": false,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage2-s9c1a2e74",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 5.257041666666667,
+      "detected_score": 0.8247715510835846,
+      "detected_confidence": 0.6966453229776773,
+      "error_s": 0.25704166666666683,
+      "correct_top1": false,
+      "correct_in_topn": false,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage3-s0fe3d797",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 4.271981146564694,
+      "tolerance_s": 0.1,
+      "detected_time_s": 4.2823125,
+      "detected_score": 0.9996767885019485,
+      "detected_confidence": 0.9946640860296752,
+      "error_s": 0.010331353435305779,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage3-s36ed6e4e",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 5.002166666666667,
+      "detected_score": 0.9996587648228343,
+      "detected_confidence": 0.9874475908704825,
+      "error_s": 0.00216666666666665,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage3-s97dcec94",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 4.8920625,
+      "detected_score": 0.9996980199910647,
+      "detected_confidence": 0.9758719010431912,
+      "error_s": -0.10793750000000024,
+      "correct_top1": false,
+      "correct_in_topn": false,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage3-s9c1a2e74",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 4.9748125,
+      "detected_score": 0.9999328259435559,
+      "detected_confidence": 0.9869045305794667,
+      "error_s": -0.025187500000000362,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage4-s0fe3d797",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 2.2609375,
+      "tolerance_s": 0.1,
+      "detected_time_s": 2.2609375,
+      "detected_score": 0.9999980142433784,
+      "detected_confidence": 0.9996535655977552,
+      "error_s": 0.0,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage4-s36ed6e4e",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 5.000104166666667,
+      "detected_score": 0.9999050655963155,
+      "detected_confidence": 0.9981990332112426,
+      "error_s": 0.00010416666666657193,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage4-s97dcec94",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 4.999604166666667,
+      "detected_score": 0.9999689503622726,
+      "detected_confidence": 0.9993948122984637,
+      "error_s": -0.00039583333333315096,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage4-s9c1a2e74",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 5.000333333333334,
+      "detected_score": 0.9997858682428458,
+      "detected_confidence": 0.9987504227339941,
+      "error_s": 0.0003333333333337407,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage5-s0fe3d797",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 1.8174583333333334,
+      "tolerance_s": 0.1,
+      "detected_time_s": 1.8174583333333334,
+      "detected_score": 0.9999881511722859,
+      "detected_confidence": 0.9880044420746654,
+      "error_s": 0.0,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage5-s36ed6e4e",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 4.738333333333333,
+      "detected_score": 0.6622166650107844,
+      "detected_confidence": 0.33608804192577035,
+      "error_s": -0.2616666666666667,
+      "correct_top1": false,
+      "correct_in_topn": false,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage5-s97dcec94",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 5.000291666666667,
+      "detected_score": 0.9999331639930479,
+      "detected_confidence": 0.999375147646338,
+      "error_s": 0.00029166666666657903,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage5-s9c1a2e74",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 4.9991875,
+      "detected_score": 0.9922051078077577,
+      "detected_confidence": 0.3456725367247727,
+      "error_s": -0.0008125000000003268,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage6-s0fe3d797",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 5.000020833333333,
+      "detected_score": 0.9977986444646709,
+      "detected_confidence": 0.9697922540838035,
+      "error_s": 2.083333333313675e-05,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage6-s36ed6e4e",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 5.037916666666667,
+      "detected_score": 0.8936669206665223,
+      "detected_confidence": 0.5924255080817884,
+      "error_s": 0.03791666666666682,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 4,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage6-s97dcec94",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 5.000479166666667,
+      "detected_score": 0.9995729307840234,
+      "detected_confidence": 0.9932487966101493,
+      "error_s": 0.00047916666666658614,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage6-s9c1a2e74",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 4.999770833333334,
+      "detected_score": 0.9999528588831118,
+      "detected_confidence": 0.9996792233753804,
+      "error_s": -0.0002291666666662806,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 4,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage7-s0fe3d797",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 2.1017019374094503,
+      "tolerance_s": 0.1,
+      "detected_time_s": 1.9645833333333333,
+      "detected_score": 0.9829819167869714,
+      "detected_confidence": 0.9230818965339077,
+      "error_s": -0.13711860407611698,
+      "correct_top1": false,
+      "correct_in_topn": false,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage7-s36ed6e4e",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 5.0238958333333334,
+      "detected_score": 0.9752665188765894,
+      "detected_confidence": 0.5981363361433065,
+      "error_s": 0.02389583333333345,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage7-s97dcec94",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 5.000145833333334,
+      "detected_score": 0.9999771785664827,
+      "detected_confidence": 0.9988871372638104,
+      "error_s": 0.0001458333333337336,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage7-s9c1a2e74",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 3.31754417941324,
+      "tolerance_s": 0.1,
+      "detected_time_s": 3.312291666666667,
+      "detected_score": 0.9961018572864772,
+      "detected_confidence": 0.855249356303168,
+      "error_s": -0.005252512746573235,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage8-s0fe3d797",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 1.9907459705505404,
+      "tolerance_s": 0.1,
+      "detected_time_s": 2.0401458333333333,
+      "detected_score": 0.9918575847730033,
+      "detected_confidence": 0.9341962358955622,
+      "error_s": 0.04939986278279296,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage8-s36ed6e4e",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 4.99225,
+      "detected_score": 0.9503175727836999,
+      "detected_confidence": 0.8130069803040213,
+      "error_s": -0.007749999999999702,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage8-s97dcec94",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 5.008583333333333,
+      "detected_score": 0.9961008173408015,
+      "detected_confidence": 0.9350808550907983,
+      "error_s": 0.008583333333333165,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage8-s9c1a2e74",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 3.8624375,
+      "tolerance_s": 0.1,
+      "detected_time_s": 3.8624375,
+      "detected_score": 0.9729897224282634,
+      "detected_confidence": 0.7646936441665847,
+      "error_s": 0.0,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage9-s0fe3d797",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 3.7735833333333333,
+      "tolerance_s": 0.1,
+      "detected_time_s": 3.7735833333333333,
+      "detected_score": 0.9976954497917558,
+      "detected_confidence": 0.9719456562223641,
+      "error_s": 0.0,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage9-s36ed6e4e",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 5.000270833333333,
+      "detected_score": 0.992629933008577,
+      "detected_confidence": 0.9422828791998007,
+      "error_s": 0.0002708333333334423,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage9-s97dcec94",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 5.000375,
+      "detected_score": 0.9746552138024164,
+      "detected_confidence": 0.9013671769100765,
+      "error_s": 0.0003750000000000142,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-hfo-masters-2026-stage9-s9c1a2e74",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 4.999875,
+      "detected_score": 0.9998233070214022,
+      "detected_confidence": 0.998301199214625,
+      "error_s": -0.00012499999999970868,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 4,
+      "error_kind": null
+    },
+    {
       "stem": "stage-shots-tallmilan-2026-stage1-s36ed6e4e",
       "track": "clip",
-      "tags": [],
+      "tags": [
+        "handheld"
+      ],
       "ground_truth_s": 5.0,
       "tolerance_s": 0.1,
       "detected_time_s": 4.983145833333333,
-      "detected_score": 1.7222005449838949,
-      "detected_confidence": 0.48393938427247635,
+      "detected_score": 0.9752371166709017,
+      "detected_confidence": 0.8357329348388537,
       "error_s": -0.016854166666666615,
       "correct_top1": true,
       "correct_in_topn": true,
@@ -434,13 +1748,15 @@
     {
       "stem": "stage-shots-tallmilan-2026-stage2-s36ed6e4e",
       "track": "clip",
-      "tags": [],
+      "tags": [
+        "handheld"
+      ],
       "ground_truth_s": 5.0,
       "tolerance_s": 0.1,
-      "detected_time_s": 22.463166666666666,
-      "detected_score": 34.41471957163007,
-      "detected_confidence": 0.8520415115114469,
-      "error_s": 17.463166666666666,
+      "detected_time_s": 4.837395833333333,
+      "detected_score": 0.13233804160207135,
+      "detected_confidence": 0.09430591912524414,
+      "error_s": -0.1626041666666671,
       "correct_top1": false,
       "correct_in_topn": false,
       "candidate_count": 4,
@@ -455,8 +1771,8 @@
       "ground_truth_s": 5.0,
       "tolerance_s": 0.015,
       "detected_time_s": 5.000416666666666,
-      "detected_score": 21.35869489485174,
-      "detected_confidence": 0.6877972471301963,
+      "detected_score": 0.9994587516140151,
+      "detected_confidence": 0.9976540581813194,
       "error_s": 0.0004166666666662877,
       "correct_top1": true,
       "correct_in_topn": true,
@@ -473,27 +1789,9 @@
       "ground_truth_s": 0.5,
       "tolerance_s": 0.015,
       "detected_time_s": 0.5,
-      "detected_score": 53.86015488180819,
-      "detected_confidence": 0.7563387164545757,
+      "detected_score": 0.9999232267699537,
+      "detected_confidence": 0.9992354779247309,
       "error_s": 0.0,
-      "correct_top1": true,
-      "correct_in_topn": true,
-      "candidate_count": 5,
-      "error_kind": null
-    },
-    {
-      "stem": "stage-shots-tallmilan-2026-stage2-s97dcec94",
-      "track": "full",
-      "tags": [
-        "headcam",
-        "late-beep"
-      ],
-      "ground_truth_s": 28.7817,
-      "tolerance_s": 0.015,
-      "detected_time_s": 28.78172916666667,
-      "detected_score": 4.432925233059318,
-      "detected_confidence": 0.6607197965135102,
-      "error_s": 2.91666666676349e-05,
       "correct_top1": true,
       "correct_in_topn": true,
       "candidate_count": 5,
@@ -502,12 +1800,14 @@
     {
       "stem": "stage-shots-tallmilan-2026-stage3-s36ed6e4e",
       "track": "clip",
-      "tags": [],
+      "tags": [
+        "handheld"
+      ],
       "ground_truth_s": 5.0,
       "tolerance_s": 0.1,
       "detected_time_s": 5.000375,
-      "detected_score": 65.45328128362016,
-      "detected_confidence": 0.7974626874817706,
+      "detected_score": 0.9999986006152294,
+      "detected_confidence": 0.9996493251275219,
       "error_s": 0.0003750000000000142,
       "correct_top1": true,
       "correct_in_topn": true,
@@ -525,28 +1825,9 @@
       "ground_truth_s": 0.5,
       "tolerance_s": 0.015,
       "detected_time_s": 0.5000208333333334,
-      "detected_score": 57.37638420461063,
-      "detected_confidence": 0.982969453650499,
+      "detected_score": 0.9999985715915609,
+      "detected_confidence": 0.9995526751458546,
       "error_s": 2.0833333333358794e-05,
-      "correct_top1": true,
-      "correct_in_topn": true,
-      "candidate_count": 5,
-      "error_kind": null
-    },
-    {
-      "stem": "stage-shots-tallmilan-2026-stage3-s97dcec94",
-      "track": "full",
-      "tags": [
-        "headcam",
-        "late-beep",
-        "steel-prone"
-      ],
-      "ground_truth_s": 19.8924,
-      "tolerance_s": 0.015,
-      "detected_time_s": 19.89239583333333,
-      "detected_score": 405.75861911503364,
-      "detected_confidence": 0.9968902108566835,
-      "error_s": -4.166666666804986e-06,
       "correct_top1": true,
       "correct_in_topn": true,
       "candidate_count": 5,
@@ -555,14 +1836,16 @@
     {
       "stem": "stage-shots-tallmilan-2026-stage4-s36ed6e4e",
       "track": "clip",
-      "tags": [],
+      "tags": [
+        "handheld"
+      ],
       "ground_truth_s": 5.0,
       "tolerance_s": 0.1,
-      "detected_time_s": 23.285125,
-      "detected_score": 78.73328086327722,
-      "detected_confidence": 0.5813449908746634,
-      "error_s": 18.285125,
-      "correct_top1": false,
+      "detected_time_s": 4.938395833333334,
+      "detected_score": 0.9980618220137063,
+      "detected_confidence": 0.97022267358252,
+      "error_s": -0.06160416666666624,
+      "correct_top1": true,
       "correct_in_topn": true,
       "candidate_count": 5,
       "error_kind": null
@@ -576,8 +1859,8 @@
       "ground_truth_s": 5.0,
       "tolerance_s": 0.015,
       "detected_time_s": 5.137145833333333,
-      "detected_score": 2.967343217277693,
-      "detected_confidence": 0.6441778405527517,
+      "detected_score": 0.9940955090220264,
+      "detected_confidence": 0.9599832706421917,
       "error_s": 0.1371458333333333,
       "correct_top1": false,
       "correct_in_topn": false,
@@ -592,11 +1875,11 @@
       ],
       "ground_truth_s": 5.0,
       "tolerance_s": 0.1,
-      "detected_time_s": 19.044125,
-      "detected_score": 12.529855775136062,
-      "detected_confidence": 0.5446643814139381,
-      "error_s": 14.044125000000001,
-      "correct_top1": false,
+      "detected_time_s": 5.0,
+      "detected_score": 0.9999837433715156,
+      "detected_confidence": 0.9955290609698805,
+      "error_s": 0.0,
+      "correct_top1": true,
       "correct_in_topn": true,
       "candidate_count": 5,
       "error_kind": null
@@ -604,14 +1887,16 @@
     {
       "stem": "stage-shots-tallmilan-2026-stage5-s36ed6e4e",
       "track": "clip",
-      "tags": [],
+      "tags": [
+        "handheld"
+      ],
       "ground_truth_s": 5.0,
       "tolerance_s": 0.1,
-      "detected_time_s": 25.793625,
-      "detected_score": 17.994373267235574,
-      "detected_confidence": 0.4537911810887535,
-      "error_s": 20.793625,
-      "correct_top1": false,
+      "detected_time_s": 5.0000625,
+      "detected_score": 0.9737889576886075,
+      "detected_confidence": 0.9098589249842844,
+      "error_s": 6.250000000029843e-05,
+      "correct_top1": true,
       "correct_in_topn": true,
       "candidate_count": 5,
       "error_kind": null
@@ -625,8 +1910,8 @@
       "ground_truth_s": 1.1507,
       "tolerance_s": 0.015,
       "detected_time_s": 1.1506875,
-      "detected_score": 68.76945196690086,
-      "detected_confidence": 0.7516225938898587,
+      "detected_score": 0.6273088231178326,
+      "detected_confidence": 0.4113792320544004,
       "error_s": -1.2499999999970868e-05,
       "correct_top1": true,
       "correct_in_topn": true,
@@ -642,29 +1927,11 @@
       ],
       "ground_truth_s": 0.5,
       "tolerance_s": 0.015,
-      "detected_time_s": 22.812,
-      "detected_score": 12.451869173595462,
-      "detected_confidence": 0.6812377831471047,
-      "error_s": 22.312,
-      "correct_top1": false,
-      "correct_in_topn": true,
-      "candidate_count": 5,
-      "error_kind": null
-    },
-    {
-      "stem": "stage-shots-tallmilan-2026-stage5-s97dcec94",
-      "track": "full",
-      "tags": [
-        "headcam",
-        "late-beep"
-      ],
-      "ground_truth_s": 15.0302,
-      "tolerance_s": 0.015,
-      "detected_time_s": 24.124041666666667,
-      "detected_score": 5.337878860486663,
-      "detected_confidence": 0.5218339391604034,
-      "error_s": 9.093841666666666,
-      "correct_top1": false,
+      "detected_time_s": 0.5,
+      "detected_score": 0.999961973869136,
+      "detected_confidence": 0.9996814860942752,
+      "error_s": 0.0,
+      "correct_top1": true,
       "correct_in_topn": true,
       "candidate_count": 5,
       "error_kind": null
@@ -672,14 +1939,16 @@
     {
       "stem": "stage-shots-tallmilan-2026-stage6-s36ed6e4e",
       "track": "clip",
-      "tags": [],
+      "tags": [
+        "handheld"
+      ],
       "ground_truth_s": 5.0,
       "tolerance_s": 0.1,
-      "detected_time_s": 8.706958333333333,
-      "detected_score": 26.385798766532577,
-      "detected_confidence": 0.4987217570813735,
-      "error_s": 3.7069583333333327,
-      "correct_top1": false,
+      "detected_time_s": 4.9990625,
+      "detected_score": 0.9995490305695774,
+      "detected_confidence": 0.9953212456742018,
+      "error_s": -0.0009375000000000355,
+      "correct_top1": true,
       "correct_in_topn": true,
       "candidate_count": 5,
       "error_kind": null
@@ -693,11 +1962,11 @@
       ],
       "ground_truth_s": 5.0,
       "tolerance_s": 0.015,
-      "detected_time_s": 7.250854166666667,
-      "detected_score": 5.694798332092174,
-      "detected_confidence": 0.522804122665559,
-      "error_s": 2.2508541666666666,
-      "correct_top1": false,
+      "detected_time_s": 4.999875,
+      "detected_score": 0.9952607332691036,
+      "detected_confidence": 0.953890504966385,
+      "error_s": -0.00012499999999970868,
+      "correct_top1": true,
       "correct_in_topn": true,
       "candidate_count": 5,
       "error_kind": null
@@ -713,8 +1982,8 @@
       "ground_truth_s": 0.5,
       "tolerance_s": 0.015,
       "detected_time_s": 0.5016875,
-      "detected_score": 16.413498295529156,
-      "detected_confidence": 0.83008354618926,
+      "detected_score": 0.9998796596162124,
+      "detected_confidence": 0.9917777889621486,
       "error_s": 0.001687499999999953,
       "correct_top1": true,
       "correct_in_topn": true,
@@ -722,35 +1991,18 @@
       "error_kind": null
     },
     {
-      "stem": "stage-shots-tallmilan-2026-stage6-s97dcec94",
-      "track": "full",
-      "tags": [
-        "headcam",
-        "late-beep",
-        "steel-prone"
-      ],
-      "ground_truth_s": 20.454,
-      "tolerance_s": 0.015,
-      "detected_time_s": 16.867020833333335,
-      "detected_score": 13.58621618943227,
-      "detected_confidence": 0.6447548917893097,
-      "error_s": -3.5869791666666657,
-      "correct_top1": false,
-      "correct_in_topn": true,
-      "candidate_count": 5,
-      "error_kind": null
-    },
-    {
       "stem": "stage-shots-tallmilan-2026-stage7-s36ed6e4e",
       "track": "clip",
-      "tags": [],
+      "tags": [
+        "handheld"
+      ],
       "ground_truth_s": 5.0,
       "tolerance_s": 0.1,
-      "detected_time_s": 17.87752083333333,
-      "detected_score": 74.78957122159696,
-      "detected_confidence": 0.5810693315871533,
-      "error_s": 12.877520833333332,
-      "correct_top1": false,
+      "detected_time_s": 5.0004375,
+      "detected_score": 0.9857099570210213,
+      "detected_confidence": 0.7985175930605206,
+      "error_s": 0.00043750000000031264,
+      "correct_top1": true,
       "correct_in_topn": true,
       "candidate_count": 5,
       "error_kind": null
@@ -764,11 +2016,11 @@
       ],
       "ground_truth_s": 5.0,
       "tolerance_s": 0.015,
-      "detected_time_s": 17.121604166666668,
-      "detected_score": 51.72065107201232,
-      "detected_confidence": 0.6437303982201208,
-      "error_s": 12.121604166666668,
-      "correct_top1": false,
+      "detected_time_s": 5.000354166666667,
+      "detected_score": 0.9553738111494487,
+      "detected_confidence": 0.4888756608352932,
+      "error_s": 0.00035416666666687746,
+      "correct_top1": true,
       "correct_in_topn": true,
       "candidate_count": 5,
       "error_kind": null
@@ -784,8 +2036,8 @@
       "ground_truth_s": 0.5,
       "tolerance_s": 0.015,
       "detected_time_s": 0.49735416666666665,
-      "detected_score": 4.1383305251917575,
-      "detected_confidence": 0.48915084985475066,
+      "detected_score": 0.9400557169412341,
+      "detected_confidence": 0.7244196173268174,
       "error_s": -0.0026458333333333472,
       "correct_top1": true,
       "correct_in_topn": true,
@@ -793,68 +2045,258 @@
       "error_kind": null
     },
     {
-      "stem": "stage-shots-tallmilan-2026-stage7-s97dcec94",
-      "track": "full",
+      "stem": "stage-shots-vads-easter-shoot-gotta-go-fast-stage1-s0fe3d797",
+      "track": "clip",
       "tags": [
-        "headcam",
-        "late-beep",
-        "steel-prone"
+        "handheld"
       ],
-      "ground_truth_s": 21.879,
-      "tolerance_s": 0.015,
-      "detected_time_s": 24.521020833333335,
-      "detected_score": 3.8421425722825076,
-      "detected_confidence": 0.489254965201683,
-      "error_s": 2.6420208333333335,
+      "ground_truth_s": 2.2571458333333334,
+      "tolerance_s": 0.1,
+      "detected_time_s": 2.2571458333333334,
+      "detected_score": 0.9998781479882025,
+      "detected_confidence": 0.9339656000332169,
+      "error_s": 0.0,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-vads-easter-shoot-gotta-go-fast-stage1-s36ed6e4e",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 5.000166666666667,
+      "detected_score": 0.999987918524844,
+      "detected_confidence": 0.9992726356123568,
+      "error_s": 0.00016666666666687036,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-vads-easter-shoot-gotta-go-fast-stage2-s0fe3d797",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 1.6885416666666666,
+      "tolerance_s": 0.1,
+      "detected_time_s": 1.6885416666666666,
+      "detected_score": 0.9999842494893592,
+      "detected_confidence": 0.9922738858831404,
+      "error_s": 0.0,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-vads-easter-shoot-gotta-go-fast-stage2-s36ed6e4e",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 4.999979166666667,
+      "detected_score": 0.9999995444201842,
+      "detected_confidence": 0.9986724390428228,
+      "error_s": -2.083333333313675e-05,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-vads-easter-shoot-gotta-go-fast-stage3-s0fe3d797",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 3.692,
+      "tolerance_s": 0.1,
+      "detected_time_s": 3.6921666666666666,
+      "detected_score": 0.9997448368584271,
+      "detected_confidence": 0.9788349671946464,
+      "error_s": 0.00016666666666642627,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-vads-easter-shoot-gotta-go-fast-stage3-s36ed6e4e",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 4.999583333333334,
+      "detected_score": 0.9994975971075009,
+      "detected_confidence": 0.9956156366104467,
+      "error_s": -0.0004166666666662877,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-vads-easter-shoot-gotta-go-fast-stage4-s0fe3d797",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 3.902,
+      "tolerance_s": 0.1,
+      "detected_time_s": 4.014020833333333,
+      "detected_score": 0.9789429542730895,
+      "detected_confidence": 0.8898568785435415,
+      "error_s": 0.11202083333333324,
       "correct_top1": false,
+      "correct_in_topn": false,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-vads-easter-shoot-gotta-go-fast-stage4-s36ed6e4e",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 5.001916666666666,
+      "detected_score": 0.999949498314722,
+      "detected_confidence": 0.9995913443836784,
+      "error_s": 0.0019166666666663446,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 2,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-vads-easter-shoot-gotta-go-fast-stage5-s0fe3d797",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 3.056,
+      "tolerance_s": 0.1,
+      "detected_time_s": 3.0538125,
+      "detected_score": 0.787277224119935,
+      "detected_confidence": 0.1288281890367336,
+      "error_s": -0.002187500000000231,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-vads-easter-shoot-gotta-go-fast-stage5-s36ed6e4e",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 4.958708333333333,
+      "detected_score": 0.7865787259443175,
+      "detected_confidence": 0.10913736192576078,
+      "error_s": -0.04129166666666695,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-vads-easter-shoot-gotta-go-fast-stage6-s0fe3d797",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 3.0576875,
+      "tolerance_s": 0.1,
+      "detected_time_s": 3.0576875,
+      "detected_score": 0.9975983990641015,
+      "detected_confidence": 0.9682450535074242,
+      "error_s": 0.0,
+      "correct_top1": true,
+      "correct_in_topn": true,
+      "candidate_count": 5,
+      "error_kind": null
+    },
+    {
+      "stem": "stage-shots-vads-easter-shoot-gotta-go-fast-stage6-s36ed6e4e",
+      "track": "clip",
+      "tags": [
+        "handheld"
+      ],
+      "ground_truth_s": 5.0,
+      "tolerance_s": 0.1,
+      "detected_time_s": 4.999625,
+      "detected_score": 0.9996310535820464,
+      "detected_confidence": 0.9959114539630384,
+      "error_s": -0.0003750000000000142,
+      "correct_top1": true,
       "correct_in_topn": true,
       "candidate_count": 5,
       "error_kind": null
     }
   ],
   "summary": {
-    "total": 45,
-    "top1_hits": 29,
-    "topn_hits": 42,
+    "total": 127,
+    "top1_hits": 109,
+    "topn_hits": 111,
     "not_found": 0,
     "exceptions": 0,
-    "recall_top1": 0.6444444444444445,
-    "recall_topn": 0.9333333333333333,
+    "unavailable": 0,
+    "recall_top1": 0.8582677165354331,
+    "recall_topn": 0.8740157480314961,
     "by_tag": {
       "handheld": {
-        "total": 12,
-        "top1_hits": 6,
-        "topn_hits": 10,
+        "total": 105,
+        "top1_hits": 87,
+        "topn_hits": 89,
         "not_found": 0,
         "exceptions": 0,
-        "recall_top1": 0.5,
-        "recall_topn": 0.8333333333333334
+        "unavailable": 0,
+        "recall_top1": 0.8285714285714286,
+        "recall_topn": 0.8476190476190476
       },
       "steel-prone": {
-        "total": 20,
-        "top1_hits": 15,
-        "topn_hits": 19,
+        "total": 13,
+        "top1_hits": 12,
+        "topn_hits": 12,
         "not_found": 0,
         "exceptions": 0,
-        "recall_top1": 0.75,
-        "recall_topn": 0.95
+        "unavailable": 0,
+        "recall_top1": 0.9230769230769231,
+        "recall_topn": 0.9230769230769231
       },
       "headcam": {
-        "total": 25,
-        "top1_hits": 20,
-        "topn_hits": 25,
+        "total": 21,
+        "top1_hits": 21,
+        "topn_hits": 21,
         "not_found": 0,
         "exceptions": 0,
-        "recall_top1": 0.8,
+        "unavailable": 0,
+        "recall_top1": 1.0,
         "recall_topn": 1.0
       },
       "late-beep": {
-        "total": 22,
-        "top1_hits": 18,
-        "topn_hits": 22,
+        "total": 11,
+        "top1_hits": 11,
+        "topn_hits": 11,
         "not_found": 0,
         "exceptions": 0,
-        "recall_top1": 0.8181818181818182,
+        "unavailable": 0,
+        "recall_top1": 1.0,
         "recall_topn": 1.0
       }
     }

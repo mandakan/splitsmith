@@ -41,6 +41,8 @@ import {
   splitsStats,
 } from "@/lib/splitsTable";
 import { useIsMobile } from "@/lib/useIsMobile";
+import { Avatar } from "@/components/ui/AvatarStack";
+import { identityMark } from "@/lib/identityMark";
 
 function formatDate(iso: string): string {
   const d = new Date(iso + "T00:00:00Z");
@@ -359,6 +361,9 @@ export function Results() {
                 aria-pressed={filterSlug === s.slug}
               >
                 <Chip tone={filterSlug === s.slug ? "ok" : "neutral"} tick={s.slug === defaultSlug ? "draw" : "muted"}>
+                  {s.identity?.accent || s.identity?.logo ? (
+                    <Avatar size="xs" initials={s.name.slice(0, 2)} seed={s.slug} name={s.name} {...identityMark(s.slug, s.identity)} />
+                  ) : null}
                   {s.name}
                 </Chip>
               </button>

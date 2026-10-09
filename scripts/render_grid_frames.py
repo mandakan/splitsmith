@@ -128,6 +128,8 @@ def _moments(
     title_seconds: float = 0.0,
     slate_seconds: float = 0.0,
     closing_seconds: float = 0.0,
+    transition_seconds: float = 0.0,
+    match_summary_seconds: float = 0.0,
 ) -> list[tuple[int, Moment]]:
     """Every ``(stage number, moment)`` the render should be sampled at.
 
@@ -215,29 +217,58 @@ def _moments(
             Moment("hold-end", segment_frames - 1, "the hold's last frame"),
         ]
 
+    # A transition (#1244) between stages k and k+1 takes half of itself
+    # off the end of stage k's segment and half off the start of what
+    # opens stage k+1 (its slate when it has one, else its segment), and
+    # puts a boundary segment of its own length between them.
+    half_frames = round(transition_seconds / 2 * fps)
+    boundary_frames = round(transition_seconds * fps)
+
     out: list[tuple[int, Moment]] = []
     if title_frames:
         out.append((0, Moment("title-page", title_frames // 2, "the match title card")))
+    pos = title_frames
     for stage in range(1, stages + 1):
-        base = title_frames + (stage - 1) * (slate_frames + segment_frames) + slate_frames
+        opens_after_boundary = stage > 1 and half_frames > 0
+        slate_len = slate_frames - (half_frames if opens_after_boundary and slate_frames else 0)
+        head_cut = half_frames if opens_after_boundary and not slate_frames else 0
+        tail_cut = half_frames if stage < stages else 0
+        segment_len = segment_frames - head_cut - tail_cut
+        base = pos + slate_len
         if slate_frames:
-            out.append((stage, Moment("slate", base - slate_frames // 2, "the stage's slate")))
+            # ``base - n // 2`` as before, so the default frames stay the frames they were
+            out.append((stage, Moment("slate", base - slate_len // 2, "the stage's slate")))
         for moment in per_stage:
-            out.append((stage, Moment(moment.name, base + moment.index, moment.why)))
+            index = segment_len - 1 if moment.name == "hold-end" else moment.index - head_cut
+            if 0 <= index < segment_len:
+                out.append((stage, Moment(moment.name, base + index, moment.why)))
+        pos = base + segment_len
+        if stage < stages and boundary_frames:
+            out.append((stage, Moment("boundary-in", pos + 2, "two frames into the crossfade")))
+            out.append(
+                (stage, Moment("boundary-mid", pos + boundary_frames // 2, "halfway through the crossfade"))
+            )
+            out.append(
+                (stage, Moment("boundary-out", pos + boundary_frames - 3, "the crossfade about to end"))
+            )
+            pos += boundary_frames
         if stage < stages:
             out.append(
                 (
                     stage,
                     Moment(
                         "next-stage",
-                        base + segment_frames,
+                        pos,
                         "the first frame of the following segment, across the concat join",
                     ),
                 )
             )
+    match_summary_frames = round(match_summary_seconds * fps)
+    if match_summary_frames:
+        out.append((stages, Moment("match-summary", pos + match_summary_frames // 2, "the match summary")))
+        pos += match_summary_frames
     if closing_frames:
-        end = title_frames + stages * (slate_frames + segment_frames)
-        out.append((stages, Moment("closing", end + closing_frames // 2, "the closing card")))
+        out.append((stages, Moment("closing", pos + closing_frames // 2, "the closing card")))
     return out
 
 
@@ -371,6 +402,15 @@ def _parse_canvas(value: str) -> tuple[int, int]:
     return width, height
 
 
+def _demo_logos(identities: dict, logo: Path | None) -> dict:  # type: ignore[type-arg]
+    """The demo gives every shooter a logo of their own (nothing falls back)."""
+    if logo is None:
+        return identities
+    from dataclasses import replace as _replace
+
+    return {label: _replace(identity, logo_path=logo) for label, identity in identities.items()}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -433,6 +473,28 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--title-page", action="store_true", help="open with a generated match title card")
     parser.add_argument("--closing-card", action="store_true", help="close with a generated card")
+    parser.add_argument(
+        "--match-summary",
+        type=float,
+        default=0.0,
+        metavar="SECONDS",
+        help="end on the match summary card for this long, before any closing card",
+    )
+    parser.add_argument("--card-variant", default="default", help="Look template variant for every card")
+    parser.add_argument(
+        "--transition",
+        default="none",
+        help="a transition between stages: an xfade kind (fade, dissolve, ...), zoom / static, or a Look "
+        "sting (sting:wipe)",
+    )
+    parser.add_argument(
+        "--transition-seconds", type=float, default=1.0, help="its length, centred on the cut"
+    )
+    parser.add_argument(
+        "--identity-demo",
+        action="store_true",
+        help="give every shooter an identity (the Look's accent series by slot, a generated club logo)",
+    )
     args = parser.parse_args(argv)
 
     if not 1 <= args.shooters <= MAX_SHOOTERS:
@@ -490,6 +552,13 @@ def main(argv: list[str] | None = None) -> int:
         f"rendering {args.shooters} shooter(s) x {args.stages} stage(s) at {width}x{height}@"
         f"{args.fps}, overlay={args.overlay}, hold={args.summary_hold:g}s ..."
     )
+    from splitsmith.composition import uniform_transitions
+    from splitsmith.looks import load_look
+    from splitsmith.ui.identity_media import grid_identities
+
+    sys.path.insert(0, str(REPO_ROOT / "scripts"))
+    from render_match_frames import demo_logo
+
     result = mp4_grid.render_grid_mp4(
         shooters,
         audio_label=audio_label,
@@ -497,6 +566,7 @@ def main(argv: list[str] | None = None) -> int:
         canvas=mp4_grid.GridCanvas(width=width, height=height, frame_rate_num=args.fps, frame_rate_den=1),
         head_pad_seconds=HEAD_PAD_SECONDS,
         tail_pad_seconds=TAIL_PAD_SECONDS,
+        transitions=uniform_transitions(args.transition, args.transition_seconds, args.stages),
         overlay=args.overlay,
         overlay_theme=args.overlay_theme,
         summary_hold_seconds=args.summary_hold,
@@ -505,18 +575,31 @@ def main(argv: list[str] | None = None) -> int:
         on_notice=lambda text: print(f"  notice: {text}"),
         title_page=(
             MatchTitle(
-                text="Bromma Classifier", info=("2026-05-01", "Level II"), duration_seconds=TITLE_SECONDS
+                text="Bromma Classifier",
+                info=("2026-05-01", "Level II"),
+                duration_seconds=TITLE_SECONDS,
+                variant=args.card_variant,
             )
             if args.title_page
             else None
         ),
         closing=(
-            MatchTitle(text="Bromma Classifier", duration_seconds=CLOSING_SECONDS)
+            MatchTitle(text="Bromma Classifier", duration_seconds=CLOSING_SECONDS, variant=args.card_variant)
             if args.closing_card
             else None
         ),
         stage_titles=args.titles,
         title_duration_seconds=SLATE_SECONDS,
+        card_variant=args.card_variant,
+        match_name="Bromma Classifier",
+        match_summary_seconds=args.match_summary,
+        # Through the production resolver either way, so the default frames
+        # are what an export draws for shooters who set nothing; the demo
+        # opts into the Look's slot series and a shared generated logo.
+        identities=_demo_logos(
+            grid_identities(shooters, look=load_look(args.overlay_theme), series_default=args.identity_demo),
+            demo_logo(work / "logo.png") if args.identity_demo else None,
+        ),
     )
     if result.failed:
         print(f"  {len(result.failed)} stage(s) failed: {result.failed}", file=sys.stderr)
@@ -529,6 +612,8 @@ def main(argv: list[str] | None = None) -> int:
         title_seconds=TITLE_SECONDS if args.title_page else 0.0,
         slate_seconds=SLATE_SECONDS if args.titles == "slate" else 0.0,
         closing_seconds=CLOSING_SECONDS if args.closing_card else 0.0,
+        transition_seconds=args.transition_seconds if args.transition != "none" else 0.0,
+        match_summary_seconds=args.match_summary,
     )
     written = 0
     for stage, moment in moments:

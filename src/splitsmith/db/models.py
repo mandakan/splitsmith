@@ -15,6 +15,9 @@ generate ids client-side without a round-trip.
 
 from __future__ import annotations
 
+import os
+import threading
+import time
 from datetime import datetime
 
 import ulid
@@ -42,11 +45,36 @@ class Base(DeclarativeBase):
     live schema."""
 
 
+_ULID_LOCK = threading.Lock()
+_ULID_LAST: tuple[int, int] = (0, 0)
+_ULID_MAX_RANDOM = (1 << 80) - 1
+
+
 def new_ulid() -> str:
     """Generate a fresh ULID string. Picked over UUID4 for the same
     reason doc 02 calls out: sortable by creation time, URL-safe,
-    same 128 bits of entropy."""
-    return str(ulid.ULID())
+    same 128 bits of entropy.
+
+    Monotonic within the process: ids made in the same millisecond (or after
+    the clock steps back) take the last one's random part plus one. The
+    clock is read once per id; ``python-ulid`` reads it twice, and a
+    millisecond boundary between the two reads gave an id the old timestamp
+    with fresh random bytes, which could sort before the id made just
+    before it (a CI flake)."""
+    global _ULID_LAST
+    with _ULID_LOCK:
+        now = time.time_ns() // 1_000_000
+        last_ms, last_random = _ULID_LAST
+        if now <= last_ms:
+            now = last_ms
+            random_part = last_random + 1
+            if random_part > _ULID_MAX_RANDOM:
+                now += 1
+                random_part = int.from_bytes(os.urandom(10), "big")
+        else:
+            random_part = int.from_bytes(os.urandom(10), "big")
+        _ULID_LAST = (now, random_part)
+    return str(ulid.ULID(now.to_bytes(6, "big") + random_part.to_bytes(10, "big")))
 
 
 class User(Base):
@@ -98,6 +126,10 @@ class User(Base):
     # which stays reserved for billing. The server default keeps a
     # non-ORM insert safe-for-today; the ORM always sets it explicitly.
     access_tier: Mapped[str] = mapped_column(String, nullable=False, server_default="full")
+    # The What's new entry ids (and ``chip:<key>`` dismissals) this account
+    # has seen; ``None`` until its first visit after the feature shipped
+    # (``splitsmith.whats_new``). Written only by ``db.whats_new``.
+    whats_new_seen: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
 
     # External auth vendor link. The provider (Clerk / WorkOS /
     # Auth.js / etc.) owns the authentication; this column carries
@@ -890,6 +922,92 @@ class ExportPresetRow(Base):
 
     def __repr__(self) -> str:
         return f"<ExportPresetRow user_id={self.user_id!r} preset_id={self.preset_id!r}>"
+
+
+class UserLookRow(Base):
+    """One saved Look per (user, name) (issue #1263, spec 2026-10-07 s3).
+
+    Hosted counterpart to a folder under ``~/.splitsmith/looks``. A Look
+    belongs to a user, not a match, so this is its own table and never a
+    ``state_docs`` kind (which would enter the sync manifest). ``body`` is
+    the JSON dump of ``look_store.StoredLookBody``: colours, accent series,
+    card styles and the base Look, never a template.
+
+    **Multi-tenant:** the primary key leads with ``user_id`` and the
+    ``tenant_isolation`` RLS policy applies (migration e7c2a9b41d63); the
+    store filters on ``user_id`` in every statement as well.
+    """
+
+    __tablename__ = "user_looks"
+
+    user_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, nullable=False
+    )
+    name: Mapped[str] = mapped_column(String, primary_key=True, nullable=False)
+    body: Mapped[dict] = mapped_column(JSON, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return f"<UserLookRow user_id={self.user_id!r} name={self.name!r}>"
+
+
+class ShooterBookRow(Base):
+    """One shooter's look in a user's shooter book, keyed by SSI shooter id
+    (spec 2026-10-08-account-identity-and-shooter-book-design).
+
+    Hosted counterpart to ``<user config>/account/shooter_book.json``. Its
+    own table, not a ``state_docs`` kind: the book belongs to a user, not a
+    match, and must stay out of the sync manifest. ``identity`` is the JSON
+    dump of ``identity.ShooterIdentity`` (its logo a content name under the
+    user's ``account/files/`` in storage), re-validated on read.
+
+    **Multi-tenant:** the primary key leads with ``user_id`` and the
+    ``tenant_isolation`` RLS policy applies; the store filters on
+    ``user_id`` in every statement as well.
+    """
+
+    __tablename__ = "shooter_book"
+
+    user_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, nullable=False
+    )
+    shooter_id: Mapped[int] = mapped_column(Integer, primary_key=True, nullable=False)
+    identity: Mapped[dict] = mapped_column(JSON, nullable=False)
+    label: Mapped[str | None] = mapped_column(String, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return f"<ShooterBookRow user_id={self.user_id!r} shooter_id={self.shooter_id!r}>"
+
+
+class AccountProfileRow(Base):
+    """A user's account profile (spec 2026-10-08): their brand (the JSON dump
+    of ``looks.LookBrand``, its logo a content name under ``account/brand/``
+    in storage) and when the shooter book was filled from their matches.
+
+    **Multi-tenant:** keyed by ``user_id``; the ``tenant_isolation`` RLS
+    policy applies and the store filters on ``user_id``.
+    """
+
+    __tablename__ = "account_profiles"
+
+    user_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, nullable=False
+    )
+    brand: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    #: Set once the shooter book was seeded from the user's matches; the
+    #: backfill never runs twice.
+    backfilled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return f"<AccountProfileRow user_id={self.user_id!r}>"
 
 
 class DesktopCommandRow(Base):

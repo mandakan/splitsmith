@@ -1,0 +1,91 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>starter: still card</title>
+<!--
+  A still card (title page, slate, closing card): one frame, held for the
+  card's seconds. Start here to change how a card looks.
+
+  The renderer installs window.splitsmith before this page's scripts run:
+    theme     the Look's colours as "#rrggbb": ink, ink_2, muted, accent,
+              surface, split, split_good, ... (look.json "colors")
+    data.card { slot, variant, text, info: [lines], duration_seconds }
+    data.shooters [{ label, accent, club, logo }]  logo is a file URL or null
+    size      { width, height } of the frame in CSS pixels
+    engine    { css, min_font_size }  css declares the two fonts below
+  The page is drawn over the blurred stage frame, so keep the background
+  transparent. Only two fonts load: "Splitsmith Display" and
+  "Splitsmith Mono". Guide: docs/looks/authoring.md
+-->
+<script>
+  // The engine stylesheet carries the @font-face rules for the bundled fonts.
+  document.write('<style>' + window.splitsmith.engine.css + '</style>');
+</script>
+<style>
+  html, body { margin: 0; background: transparent; overflow: hidden; }
+  .card {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 0.6em; text-align: center;
+  }
+  .title { font-family: "Splitsmith Display", sans-serif; font-weight: 700; line-height: 1; white-space: nowrap; }
+  .info { font-family: "Splitsmith Mono", monospace; letter-spacing: 0.04em; white-space: nowrap; }
+  .rule { height: 4px; border-radius: 2px; }
+  .logo { position: absolute; object-fit: contain; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="title" id="title"></div>
+  <div class="rule" id="rule"></div>
+  <div id="info"></div>
+</div>
+<script>
+  var S = window.splitsmith;
+  var H = S.size.height;
+  var title = document.getElementById('title');
+  title.textContent = S.data.card.text;
+  title.style.color = S.theme.ink;
+  title.style.fontSize = Math.round(H * 0.11) + 'px';
+
+  var rule = document.getElementById('rule');
+  rule.style.width = Math.round(H * 0.12) + 'px';
+  rule.style.background = S.theme.accent;
+
+  var info = document.getElementById('info');
+  (S.data.card.info || []).forEach(function (line) {
+    var div = document.createElement('div');
+    div.className = 'info';
+    div.textContent = line;
+    div.style.color = S.theme.ink_2;
+    div.style.fontSize = Math.round(H * 0.035) + 'px';
+    info.appendChild(div);
+  });
+
+  // One logo when the shooters have exactly one between them.
+  var logos = [];
+  (S.data.shooters || []).forEach(function (s) { if (s.logo && logos.indexOf(s.logo) < 0) logos.push(s.logo); });
+  if (logos.length === 1) {
+    var img = document.createElement('img');
+    img.className = 'logo';
+    img.src = logos[0];
+    img.style.height = Math.round(H * 0.12) + 'px';
+    img.style.top = img.style.right = Math.round(H * 0.04) + 'px';
+    document.body.appendChild(img);
+  }
+
+  // The renderer calls this once fonts are ready: shrink long text to fit.
+  window.__splitsmithFit = function () {
+    var max = S.size.width * 0.9;
+    document.querySelectorAll('.title, .info').forEach(function (el) {
+      var size = parseFloat(el.style.fontSize);
+      while (el.scrollWidth > max && size > S.engine.min_font_size) {
+        size -= 1;
+        el.style.fontSize = size + 'px';
+      }
+    });
+  };
+</script>
+</body>
+</html>

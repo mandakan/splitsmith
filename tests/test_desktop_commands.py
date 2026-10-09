@@ -396,15 +396,60 @@ def test_cancelling_a_lapsed_render_upload_ends_it_at_once(
     cancelled = asyncio.run(store.cancel(command_id, match_id=MATCH, now=later))
     assert cancelled is not None
     assert cancelled.status == "cancelled"
-    # The holder coming back later is told to stop, and its completion
-    # cannot reopen the row.
+    # The holder coming back later is told to stop, and a failure or cancel
+    # it reports leaves the row cancelled.
     assert asyncio.run(store.heartbeat(command_id, message=None, now=later)) is None
-    done = asyncio.run(store.complete(command_id, status="succeeded", now=later))
-    assert done is not None and done.status == "cancelled"
+    for status in ("failed", "cancelled"):
+        done = asyncio.run(store.complete(command_id, status=status, error="x", now=later))
+        assert done is not None and (done.status, done.error) == ("cancelled", None)
 
     fresh = _render_upload(client).json()
     assert fresh["id"] != command_id
     assert fresh["status"] == "pending"
+
+
+def test_a_late_success_on_a_lapsed_cancel_is_recorded(
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """The holder lost contact with hosted, not with YouTube (#1116): its
+    upload finished, the user cancelled the lapsed request, and the
+    completion that arrived afterwards was dropped. The phone showed
+    "Cancelled." for a live video, and asking again uploaded a second
+    copy. The video exists, so the row says so."""
+    client, sender = hosted_app
+    login(client, sender, EMAIL)
+    _mirror(client)
+    command_id = _render_upload(client).json()["id"]
+    store = _store(client)
+    now = datetime.now(UTC)
+    later = now + timedelta(minutes=11)
+    back = later + timedelta(minutes=5)
+    asyncio.run(store.claim([MATCH], token_id="tok-a", now=now))
+    asyncio.run(store.cancel(command_id, match_id=MATCH, now=later))
+
+    video = {"video_id": "abc", "url": "https://youtu.be/abc", "channel_title": "Anna"}
+    done = asyncio.run(store.complete(command_id, status="succeeded", result=video, now=back))
+
+    assert done is not None
+    assert (done.status, done.result, done.finished_at) == ("succeeded", video, back)
+    listed = client.get(PHONE).json()["commands"]
+    assert [(c["id"], c["status"], c["result"]) for c in listed] == [(command_id, "succeeded", video)]
+
+
+def test_a_success_never_reopens_a_request_cancelled_while_waiting(
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """No desktop held it, so no desktop can have run it."""
+    client, sender = hosted_app
+    login(client, sender, EMAIL)
+    _mirror(client)
+    command_id = _render_upload(client).json()["id"]
+    store = _store(client)
+    asyncio.run(store.cancel(command_id, match_id=MATCH))
+
+    done = asyncio.run(store.complete(command_id, status="succeeded", result={"video_id": "abc"}))
+
+    assert done is not None and (done.status, done.result) == ("cancelled", None)
 
 
 def test_cancelling_a_live_render_upload_only_asks(

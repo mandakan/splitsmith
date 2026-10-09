@@ -5,6 +5,7 @@
  * publish options inside YouTubeConnect are preset-owned; they live here
  * because this is where publishing is expected to be found.
  */
+import { BrandingField } from "@/components/export/BrandingField";
 import { YouTubeConnect } from "@/components/export/YouTubeConnect";
 import { Field, inputClass } from "@/components/ui/Field";
 import type { YouTubeSettings } from "@/lib/api";
@@ -77,6 +78,7 @@ export function DetailsGroup({
           />
         </Field>
       ) : null}
+      {titleCard ? <BrandingField busy={busy} /> : null}
       {titleCard ? (
         <Field label="Division" help="As the scoreboard has it, power factor included: Classic Major.">
           <label className="flex items-center gap-2 text-md text-ink-2">
@@ -91,6 +93,39 @@ export function DetailsGroup({
               className="accent-[var(--color-ink)]"
             />
             {single ? "Under the shooter's name" : "Next to each shooter's name"}
+          </label>
+        </Field>
+      ) : null}
+      {drawsCards && settings.renderOptions.closingCard ? (
+        <Field label="Credit" help="A small line and mark at the bottom of the closing card.">
+          <label className="flex items-center gap-2 text-md text-ink-2">
+            <input
+              type="checkbox"
+              aria-label="Made with splitsmith"
+              checked={settings.renderOptions.madeWith}
+              disabled={busy}
+              onChange={(e) => patch({ renderOptions: { ...settings.renderOptions, madeWith: e.target.checked } })}
+              className="accent-[var(--color-ink)]"
+            />
+            Made with splitsmith
+          </label>
+        </Field>
+      ) : null}
+      {drawsCards && (settings.renderOptions.titlePage || settings.renderOptions.closingCard) ? (
+        <Field
+          label="Brand"
+          help="Your brand from the You page, top-left on the title page and the closing card. A Look with its own brand shows that instead."
+        >
+          <label className="flex items-center gap-2 text-md text-ink-2">
+            <input
+              type="checkbox"
+              aria-label="Your brand"
+              checked={settings.renderOptions.accountBrand}
+              disabled={busy}
+              onChange={(e) => patch({ renderOptions: { ...settings.renderOptions, accountBrand: e.target.checked } })}
+              className="accent-[var(--color-ink)]"
+            />
+            Your brand
           </label>
         </Field>
       ) : null}

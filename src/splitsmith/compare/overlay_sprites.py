@@ -62,6 +62,10 @@ class TilePlacement:
     row: int
     col: int
     present: bool
+    #: The shooter's resolved accent (#1243), a ``#rrggbb`` the cell sets
+    #: as ``--accent``; ``None`` leaves the cell's markup exactly as it
+    #: was, so a grid without identities renders the same bytes.
+    accent: str | None = None
 
 
 @dataclass(frozen=True)
@@ -285,11 +289,13 @@ def _state_starts(
             key = round(shot.time_from_beep, _EVENT_PRECISION)
             buckets[key] = max(buckets.get(key, shot.time_from_beep), shot.time_from_beep)
     # 0.0 is the opening state, already covered; a shot at or past the
-    # segment end has nowhere to be drawn.
+    # segment end has nowhere to be drawn, and one before the segment
+    # starts (a boundary edge's window, whose head pad is negative, #1244)
+    # is folded into the opening state.
     starts = {0.0} | {
         head_pad_seconds + event
         for event in buckets.values()
-        if event > 0.0 and head_pad_seconds + event < duration_seconds
+        if event > 0.0 and 0.0 < head_pad_seconds + event < duration_seconds
     }
     return sorted(starts)
 
@@ -388,8 +394,9 @@ def theme_font_face(theme: OverlayTheme) -> OverlayFace:
     can express one now -- a bundled face and an ``@font-face`` rule
     naming it), and every caller already has a theme in hand.
     """
-    del theme  # see the docstring: one bundled face, both halves, every theme
-    return resolve_overlay_face("splitsmith-mono")
+    # A Look chooses its mono face now (#1272): a bundled file both halves
+    # load, the ``@font-face`` rule and this ``drawtext`` path alike.
+    return resolve_overlay_face(theme.mono_font)
 
 
 def quantize_durations(

@@ -13,6 +13,7 @@ from xml.etree import ElementTree as ET
 
 import pytest
 
+from splitsmith import composition
 from splitsmith.config import OutputConfig, VideoMetadata
 from splitsmith.fcpxml_gen import FFprobeError
 from splitsmith.ui import match_exports as match_exports_mod
@@ -812,6 +813,125 @@ def test_title_page_is_an_anomaly_on_fcpxml(tmp_path: Path) -> None:
     assert result.fcpxml_path.exists()
 
 
+def _two_stage_inputs(tmp_path: Path) -> list[match_exports_mod.MatchStageInput]:
+    payload = _audit_payload([{"shot_number": 1, "ms_after_beep": 500}])
+    return [
+        match_exports_mod.MatchStageInput(
+            stage_number=n,
+            stage_name=f"Stage {n}",
+            audit_path=_make_audit(tmp_path, f"stage{n}.json", payload),
+            trimmed_path=_make_trim(tmp_path, f"stage{n}_trimmed.mp4"),
+            beep_offset_seconds=5.0,
+        )
+        for n in (1, 2)
+    ]
+
+
+def test_an_xfade_kind_on_the_fcpxml_path_is_rendered_as_zoom_with_an_anomaly(tmp_path: Path) -> None:
+    """Issue #1244, review focus 5: the frozen emitter knows zoom and
+    static only; every other kind lowers to zoom and the response says so."""
+    result = match_exports_mod.export_match(
+        stages=_two_stage_inputs(tmp_path),
+        request=_card_request(
+            stage_numbers=(1, 2),
+            output_format="fcpxml",
+            transition_kind="dissolve",
+            transition_duration_seconds=1.0,
+        ),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    assert "transition dissolve is not an FCP effect; the FCPXML uses zoom" in result.anomalies
+    assert "Blurs" in result.fcpxml_path.read_text() or "Zoom" in result.fcpxml_path.read_text()
+
+
+def test_a_sting_on_the_fcpxml_path_is_rendered_as_zoom_with_an_anomaly(tmp_path: Path) -> None:
+    """Issue #1245: a sting is a Look template over the MP4 boundary; the
+    FCPXML emitter has no such thing and substitutes zoom, saying so."""
+    result = match_exports_mod.export_match(
+        stages=_two_stage_inputs(tmp_path),
+        request=_card_request(
+            stage_numbers=(1, 2),
+            output_format="fcpxml",
+            transition_kind="sting:wipe",
+            transition_duration_seconds=1.0,
+        ),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    assert "transition sting:wipe is not an FCP effect; the FCPXML uses zoom" in result.anomalies
+
+
+def test_a_malformed_transition_kind_is_refused_by_the_request_model() -> None:
+    """Issue #1245: ``TransitionKind`` is an open string now; the grammar
+    check keeps the old ``Literal``'s refusals."""
+    import pydantic
+
+    from splitsmith.ui import exports_api
+
+    for kind in ("sting:", "sting:Wipe", "wipe"):
+        with pytest.raises(pydantic.ValidationError):
+            exports_api.MatchExportRequest(stage_numbers=[1, 2], transition_kind=kind)
+        with pytest.raises(pydantic.ValidationError):
+            exports_api.CompareGridRequest(stage_numbers=[1, 2], audio_from="a", transition_kind=kind)
+    accepted = exports_api.MatchExportRequest(stage_numbers=[1, 2], transition_kind="sting:wipe")
+    assert accepted.transition_kind == "sting:wipe"
+
+
+def test_mp4_export_passes_transitions_to_the_renderer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #1244: the MP4 renderer draws transitions now, so the request
+    layer hands them over instead of recording the old "ignored" anomaly."""
+    captured = _capture_mp4(monkeypatch)
+    result = match_exports_mod.export_match(
+        stages=_two_stage_inputs(tmp_path),
+        request=_card_request(
+            stage_numbers=(1, 2), output_format="mp4", transition_kind="fade", transition_duration_seconds=1.0
+        ),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    comp = captured["comp"]
+    assert comp.transitions == (
+        composition.Transition(from_stage_index=0, to_stage_index=1, kind="fade", duration_seconds=1.0),
+    )
+    assert not any("transitions ignored" in a for a in result.anomalies)
+
+
+def test_mp4_export_keeps_slates_with_transitions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A boundary into a slate is the mechanism's point; only the FCPXML
+    emitter refuses the pair."""
+    captured = _capture_mp4(monkeypatch)
+    result = match_exports_mod.export_match(
+        stages=_two_stage_inputs(tmp_path),
+        request=_card_request(
+            stage_numbers=(1, 2), output_format="mp4", transition_kind="dissolve", title_kind="slate"
+        ),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    comp = captured["comp"]
+    assert comp.stages[0].title is not None and comp.stages[0].title.style == "slate"
+    assert len(comp.transitions) == 1
+    assert not any("slate titles dropped" in a for a in result.anomalies)
+
+
+def test_fcp7xml_still_ignores_transitions(tmp_path: Path) -> None:
+    result = match_exports_mod.export_match(
+        stages=_two_stage_inputs(tmp_path),
+        request=_card_request(stage_numbers=(1, 2), output_format="fcp7xml", transition_kind="zoom"),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    assert any("transitions ignored" in a for a in result.anomalies)
+
+
 def test_fcp7xml_still_ignores_titles_and_intro(tmp_path: Path) -> None:
     result = match_exports_mod.export_match(
         stages=[_one_stage_input(tmp_path)],
@@ -839,6 +959,31 @@ def test_title_info_lines_come_from_the_project(tmp_path: Path) -> None:
     )
     bare = MatchProject(name="Bromma")
     assert match_exports_mod.title_info_lines(bare, extra="  ") == ()
+
+
+def test_title_info_lines_print_the_shooters_club_after_their_name(tmp_path: Path) -> None:
+    """The one place the club line (#1243) is drawn today: under the
+    shooter's name on the title page, before the division."""
+    from datetime import date
+
+    from splitsmith.identity import ShooterIdentity
+    from splitsmith.match_project import MatchProject
+
+    project = MatchProject(
+        name="Bromma",
+        competitor_name="M. Axell",
+        match_date=date(2026, 5, 1),
+        identity=ShooterIdentity(club="Bromma PK"),
+    )
+    assert match_exports_mod.title_info_lines(project, division="Production Optics") == (
+        "2026-05-01",
+        "M. Axell",
+        "Bromma PK",
+        "Production Optics",
+    )
+    assert match_exports_mod.title_info_lines(
+        MatchProject(name="B", identity=ShooterIdentity(club="PK"))
+    ) == ("PK",)
 
 
 def test_stage_inputs_for_project_reads_existing_artefacts(tmp_path: Path) -> None:
@@ -1032,3 +1177,133 @@ def test_stage_inputs_name_an_unnamed_stage_by_its_number(tmp_path: Path) -> Non
     assert inputs[0].trimmed_path.name == "stage2_stage_trimmed.mp4"
     titles = match_exports_mod._build_uniform_titles(kind="slate", duration=1.5, stage_inputs=inputs)
     assert [t.text for t in titles.values()] == ["Stage 2", "Stage 5", "Standards"]
+
+
+def test_card_variant_reaches_every_generated_card(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """One knob (#1242): the title page, the closing card and every stage
+    title carry the requested Look variant; a request without it draws
+    the default."""
+    captured = _capture_mp4(monkeypatch)
+    match_exports_mod.export_match(
+        stages=[_one_stage_input(tmp_path)],
+        request=_card_request(title_page=True, closing_card=True, title_kind="slate", card_variant="rise"),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    comp = captured["comp"]
+    assert comp.title_page.variant == "rise" and comp.closing.variant == "rise"
+    assert all(stage.title is not None and stage.title.variant == "rise" for stage in comp.stages)
+
+    captured = _capture_mp4(monkeypatch)
+    match_exports_mod.export_match(
+        stages=[_one_stage_input(tmp_path)],
+        request=_card_request(title_page=True, title_kind="lower-third"),
+        exports_dir=tmp_path / "exports2",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    comp = captured["comp"]
+    assert comp.title_page.variant == "default"
+    assert all(stage.title is not None and stage.title.variant == "default" for stage in comp.stages)
+
+
+def test_the_shooters_identity_reaches_the_composition(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from splitsmith.composition import CompositionShooter
+    from splitsmith.identity import ResolvedIdentity
+
+    captured = _capture_mp4(monkeypatch)
+    resolved = ResolvedIdentity(label="Mathias", accent="#123456", logo_path=tmp_path / "l.png", club="PK")
+    match_exports_mod.export_match(
+        stages=[_one_stage_input(tmp_path)],
+        request=_card_request(title_page=True, shooter_identity=resolved),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    comp = captured["comp"]
+    assert comp.shooters == (
+        CompositionShooter(label="Mathias", accent="#123456", logo_path=tmp_path / "l.png", club="PK"),
+    )
+    captured = _capture_mp4(monkeypatch)
+    match_exports_mod.export_match(
+        stages=[_one_stage_input(tmp_path)],
+        request=_card_request(title_page=True),
+        exports_dir=tmp_path / "exports2",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    assert captured["comp"].shooters == ()
+
+
+def test_per_slot_variants_reach_their_cards_and_fall_back_to_the_knob(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Slice 6 (#1246): each card slot has its own variant field; ``None``
+    means the ``card_variant`` knob the CLI sets."""
+    captured = _capture_mp4(monkeypatch)
+    match_exports_mod.export_match(
+        stages=[_one_stage_input(tmp_path)],
+        request=_card_request(
+            title_page=True,
+            closing_card=True,
+            title_kind="slate",
+            card_variant="rise",
+            stage_card_variant="default",
+        ),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    comp = captured["comp"]
+    assert comp.title_page.variant == "rise" and comp.closing.variant == "rise"
+    assert all(stage.title is not None and stage.title.variant == "default" for stage in comp.stages)
+
+    captured = _capture_mp4(monkeypatch)
+    match_exports_mod.export_match(
+        stages=[_one_stage_input(tmp_path)],
+        request=_card_request(
+            title_page=True, closing_card=True, title_kind="slate", title_page_variant="rise"
+        ),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    comp = captured["comp"]
+    assert comp.title_page.variant == "rise" and comp.closing.variant == "default"
+    assert all(stage.title is not None and stage.title.variant == "default" for stage in comp.stages)
+
+    captured = _capture_mp4(monkeypatch)
+    match_exports_mod.export_match(
+        stages=[_one_stage_input(tmp_path)],
+        request=_card_request(title_kind="lower-third", stage_card_variant="rise"),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    comp = captured["comp"]
+    assert all(stage.title is not None and stage.title.variant == "rise" for stage in comp.stages)
+
+
+def test_the_export_request_accepts_any_installed_look_and_names_them_on_a_miss() -> None:
+    import pydantic
+
+    from splitsmith.ui import exports_api
+
+    assert exports_api.MatchExportRequest(stage_numbers=[1], overlay_theme="clean").overlay_theme == "clean"
+    with pytest.raises(pydantic.ValidationError, match="splitsmith, clean"):
+        exports_api.MatchExportRequest(stage_numbers=[1], overlay_theme="nope")
+    with pytest.raises(pydantic.ValidationError, match="splitsmith, clean"):
+        exports_api.CompareGridRequest(stage_numbers=[1], audio_from="a", overlay_theme="nope")
+    with pytest.raises(pydantic.ValidationError, match="splitsmith, clean"):
+        exports_api.ExportStageRequest(overlay_theme="nope")
+    request = exports_api.MatchExportRequest(
+        stage_numbers=[1], title_page_variant="rise", stage_card_variant="default"
+    )
+    assert (request.title_page_variant, request.stage_card_variant, request.closing_card_variant) == (
+        "rise",
+        "default",
+        None,
+    )

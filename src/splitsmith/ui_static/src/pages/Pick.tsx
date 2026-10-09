@@ -27,6 +27,7 @@ import { Menu, menuItemClass } from "@/components/ui/Menu";
 import { useConfirm } from "@/components/useConfirm";
 import { inputClass } from "@/components/ui/Field";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { NewChip } from "@/components/whatsNew/WhatsNew";
 import { PipelineDots } from "@/components/ui/PipelineDots";
 import { Table, Td, Th, Tr } from "@/components/ui/DataTable";
 import { useShellContextSlot } from "@/components/layout/shellChromeContext";
@@ -55,6 +56,7 @@ import {
 import { matchDeleteCopy } from "@/lib/matchDelete";
 import { useMode } from "@/lib/mode";
 import { cn } from "@/lib/utils";
+import { YOU_FEATURE } from "@/lib/you";
 
 /** Build the URL the picker should navigate to after a successful bind.
  *
@@ -319,6 +321,12 @@ export function Pick() {
           }
           actions={
             <>
+              {mode === "local" ? (
+                <Button type="button" onClick={() => navigate("/you")}>
+                  You
+                  <NewChip feature={YOU_FEATURE} />
+                </Button>
+              ) : null}
               {localFs && canCreate ? (
                 <Button
                   type="button"

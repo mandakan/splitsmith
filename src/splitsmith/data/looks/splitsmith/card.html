@@ -1,0 +1,34 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>card</title>
+<script>
+  // The shipped card: the engine's own stylesheet and cell markup, so
+  // this template renders what overlay_html renders for the same
+  // declaration. A custom Look may ignore both and draw
+  // window.splitsmith.data.card its own way.
+  document.write('<style>' + window.splitsmith.engine.css + '</style>');
+  document.write('<script src="' + window.splitsmith.assets.shared + '/fit.js"><\/script>');
+  document.write('<script src="' + window.splitsmith.assets.shared + '/cell.js"><\/script>');
+  document.write('<script src="' + window.splitsmith.assets.shared + '/identity.js"><\/script>');
+  document.write('<script src="' + window.splitsmith.assets.shared + '/brand.js"><\/script>');
+  document.write('<script src="' + window.splitsmith.assets.shared + '/event.js"><\/script>');
+  document.write('<script src="' + window.splitsmith.assets.shared + '/credit.js"><\/script>');
+</script>
+</head>
+<body>
+<script>
+  // Mount once the document is complete: a mount during parsing would
+  // leave the parser's trailing whitespace text nodes beside the cell.
+  document.addEventListener('DOMContentLoaded', function () {
+    window.__splitsmithMinFont = window.splitsmith.engine.min_font_size;
+    window.splitsmith.engine.mount(window.splitsmith.data.groups);
+    window.splitsmith.engine.mountIdentity(window.splitsmith.data.shooters, window.splitsmith.data.card.slot);
+    window.splitsmith.engine.mountBrand(window.splitsmith.data.brand);
+    window.splitsmith.engine.mountEvent(window.splitsmith.data.event);
+    window.splitsmith.engine.mountCredit(window.splitsmith.data.credit);
+  });
+</script>
+</body>
+</html>

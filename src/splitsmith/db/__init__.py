@@ -29,10 +29,12 @@ from .access_requests import (
     AlreadyDecidedError,
     NotFoundError,
 )
+from .account_identity import PostgresAccountProfileStore, PostgresShooterBookStore
 from .email import ConsoleEmailSender, EmailSender, LettermintEmailSender, build_email_sender
 from .engine import LoopEngines, create_engine, loop_sessionmaker, sessionmaker, tenant_session_factory
 from .export_presets import PostgresExportPresetStore
 from .job_backend import PostgresJobBackend
+from .looks import PostgresLookStore
 from .magic_link import (
     SESSION_COOKIE_NAME,
     InvalidMagicLinkError,
@@ -61,6 +63,7 @@ from .project_state import ProjectStateStore, StateConflictError
 from .recent_projects import PostgresRecentProjectsStore
 from .scoreboard_identity import PostgresScoreboardIdentityStore
 from .signup_policy import SignupPolicy, build_signup_policy
+from .whats_new import PostgresWhatsNewStore
 from .youtube_connections import PostgresYouTubeConnectionStore
 
 __all__ = [
@@ -85,7 +88,11 @@ __all__ = [
     "MagicLinkTokenRow",
     "MatchRow",
     "NotFoundError",
+    "PostgresAccountProfileStore",
     "PostgresExportPresetStore",
+    "PostgresShooterBookStore",
+    "PostgresLookStore",
+    "PostgresWhatsNewStore",
     "PostgresJobBackend",
     "PostgresMatchStore",
     "PostgresProfileStore",

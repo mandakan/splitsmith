@@ -161,3 +161,27 @@ def test_default_camera_is_a_review_write() -> None:
     from splitsmith.ui.capabilities import required_capability
 
     assert required_capability("PATCH", "shooters/anna/compare-camera") == REVIEW
+
+
+@pytest.mark.parametrize(
+    "rest",
+    ["shooters/s_71bb3f5f/export-preview", "shooters/me/palette-sources"],
+)
+def test_a_post_that_only_reads_needs_no_capability(rest: str) -> None:
+    """The Export rail's preview and the palette's footage sampler render or
+    measure and write nothing but a cache; a desktop mirror must reach them
+    (they were EDIT by default, so every Look preview on a mirror was a 403)."""
+    assert required_capability("POST", rest) is None
+
+
+@pytest.mark.parametrize(
+    "rest",
+    [
+        "shooters/s_1/export-preview/extra",
+        "shooters/s_1/export-previews",
+        "shooters/a/b/export-preview",
+        "shooters/s_1/export-preview\n",
+    ],
+)
+def test_the_read_only_posts_are_anchored(rest: str) -> None:
+    assert required_capability("POST", rest) == EDIT

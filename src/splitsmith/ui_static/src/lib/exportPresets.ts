@@ -11,10 +11,17 @@
 import type { ExportPresetBody, GridFreeCell, OverlayCodec } from "@/lib/api";
 import { DEFAULT_CAM_OPTIONS, fromPipLayout, type CamOptions } from "@/lib/camOptions";
 import type { ExportMode } from "@/lib/exportPlan";
+import { visibleTransitionKind } from "@/lib/lookGallery";
+import {
+  DEFAULT_OVERLAY_STYLE,
+  overlayStyleBody,
+  overlayStyleLabel,
+  styleFromBody,
+  type OverlayStyle,
+} from "@/lib/overlayStyle";
 import {
   DEFAULT_RENDER_OPTIONS,
   describeRenderOptions,
-  transitionsSupported,
   type OutputFormat,
   type RenderOptions,
 } from "@/lib/renderOptions";
@@ -30,12 +37,6 @@ export const PADDING_PRESETS: Record<Exclude<PaddingPreset, "custom">, { label: 
     action: { label: "Action", head: 0.5, tail: 1.0 },
     highlight: { label: "Highlight", head: 1.5, tail: 2.0 },
   };
-
-export const TRANSITIONS: { value: TransitionKind; label: string }[] = [
-  { value: "none", label: "Hard cut" },
-  { value: "static", label: "Static frame" },
-  { value: "zoom", label: "Zoom blur" },
-];
 
 export const FORMAT_LABELS: Record<OutputFormat, string> = { fcpxml: "FCPXML", fcp7xml: "FCP 7 XML", mp4: "MP4" };
 
@@ -105,9 +106,19 @@ export interface ExportSettings {
   tailPad: number;
   transitionKind: TransitionKind;
   transitionSeconds: number;
+  /** The Look (#1246) and each card slot's template variant; a preset
+   *  stores them, the page resolves them against the installed catalog
+   *  (``lib/looks``) before they reach a request. */
+  look: string;
+  titlePageVariant: string;
+  stageCardVariant: string;
+  closingCardVariant: string;
   /** ``titleInfo`` inside is match-specific and never stored. */
   renderOptions: RenderOptions;
   includeOverlay: boolean;
+  /** Which of the Look's HUD styles draws the overlay, and its toggles
+   *  (``lib/overlayStyle``); one shooter's overlay only. */
+  overlayStyle: OverlayStyle;
   gridOverlay: boolean;
   gridHoldSeconds: number;
   gridFreeCell: GridFreeCell;
@@ -127,8 +138,13 @@ export const DEFAULT_EXPORT_SETTINGS: ExportSettings = {
   tailPad: PADDING_PRESETS.full.tail,
   transitionKind: "none",
   transitionSeconds: 0.5,
+  look: "splitsmith",
+  titlePageVariant: "default",
+  stageCardVariant: "default",
+  closingCardVariant: "default",
   renderOptions: DEFAULT_RENDER_OPTIONS,
   includeOverlay: false,
+  overlayStyle: DEFAULT_OVERLAY_STYLE,
   gridOverlay: false,
   gridHoldSeconds: 0,
   gridFreeCell: "blank",
@@ -162,14 +178,23 @@ export function settingsToBody(s: ExportSettings): ExportPresetBody {
     tail_pad_seconds: finite(s.tailPad, PADDING_PRESETS.full.tail),
     transition_kind: s.transitionKind,
     transition_seconds: finite(s.transitionSeconds, 0.5),
+    look: s.look,
+    title_page_variant: s.titlePageVariant,
+    stage_card_variant: s.stageCardVariant,
+    closing_card_variant: s.closingCardVariant,
     title_page: s.renderOptions.titlePage,
     title_page_seconds: finite(s.renderOptions.titlePageDurationSeconds, D.titlePageDurationSeconds),
     title_division: s.renderOptions.titleDivision,
     closing_card: s.renderOptions.closingCard,
+    made_with: s.renderOptions.madeWith,
+    account_brand: s.renderOptions.accountBrand,
     stage_card_style: s.renderOptions.stageCardStyle,
     stage_card_seconds: finite(s.renderOptions.stageCardDurationSeconds, D.stageCardDurationSeconds),
     summary_hold_seconds: finite(s.renderOptions.summaryHoldSeconds, D.summaryHoldSeconds),
+    match_summary: s.renderOptions.matchSummary,
+    match_summary_seconds: finite(s.renderOptions.matchSummarySeconds, D.matchSummarySeconds),
     overlay: s.includeOverlay,
+    ...overlayStyleBody(s.overlayStyle),
     grid_overlay: s.gridOverlay,
     grid_hold_seconds: finite(s.gridHoldSeconds, 0),
     grid_free_cell: s.gridFreeCell,
@@ -205,17 +230,26 @@ export function applyBody(s: ExportSettings, body: ExportPresetBody): ExportSett
     tailPad: finite(body.tail_pad_seconds, PADDING_PRESETS.full.tail),
     transitionKind: body.transition_kind,
     transitionSeconds: finite(body.transition_seconds, 0.5),
+    look: body.look ?? "splitsmith",
+    titlePageVariant: body.title_page_variant ?? "default",
+    stageCardVariant: body.stage_card_variant ?? "default",
+    closingCardVariant: body.closing_card_variant ?? "default",
     renderOptions: {
       ...s.renderOptions,
       titlePage: body.title_page,
       titlePageDurationSeconds: finite(body.title_page_seconds, D.titlePageDurationSeconds),
       titleDivision: body.title_division ?? D.titleDivision,
       closingCard: body.closing_card,
+      madeWith: body.made_with ?? D.madeWith,
+      accountBrand: body.account_brand ?? D.accountBrand,
       stageCardStyle: body.stage_card_style,
       stageCardDurationSeconds: finite(body.stage_card_seconds, D.stageCardDurationSeconds),
       summaryHoldSeconds: finite(body.summary_hold_seconds, D.summaryHoldSeconds),
+      matchSummary: body.match_summary ?? D.matchSummary,
+      matchSummarySeconds: finite(body.match_summary_seconds ?? D.matchSummarySeconds, D.matchSummarySeconds),
     },
     includeOverlay: body.overlay,
+    overlayStyle: styleFromBody(body),
     gridOverlay: body.grid_overlay,
     gridHoldSeconds: finite(body.grid_hold_seconds, 0),
     gridFreeCell: body.grid_free_cell ?? "blank",
@@ -246,6 +280,10 @@ export type SettingsGroup = "output" | "cut" | "look";
 export interface SummaryContext {
   /** Synced secondary cameras on the selection (the cams line shows only with some). */
   secondaryCount: number;
+  /** The MP4 kinds the catalog offers (``requestLook``), so a chosen one reads as itself. */
+  kinds?: readonly string[];
+  /** What the page calls a kind ("Wind up"); unset, the kind itself. */
+  transitionLabel?: (kind: string) => string;
 }
 
 const CODEC_LABELS: Record<OverlayCodec, string> = {
@@ -279,9 +317,16 @@ export function groupSummary(s: ExportSettings, group: SettingsGroup, ctx: Summa
       const parts: string[] = [];
       const cards = describeRenderOptions(s.renderOptions, grid ? "grid" : "single", grid ? "mp4" : s.outputFormat);
       if (cards) parts.push(cards);
-      if (grid ? s.gridOverlay : s.includeOverlay) parts.push("overlay");
-      if (!grid && transitionsSupported(s.outputFormat) && s.transitionKind !== "none") {
-        parts.push(`${s.transitionKind} ${finite(s.transitionSeconds, 0.5).toFixed(1)} s`);
+      if (grid ? s.gridOverlay : s.includeOverlay) {
+        const style = grid ? DEFAULT_OVERLAY_STYLE.variant : s.overlayStyle.variant;
+        parts.push(style === DEFAULT_OVERLAY_STYLE.variant ? "overlay" : `${overlayStyleLabel(style)} overlay`);
+      }
+      if (
+        visibleTransitionKind(s.transitionKind, grid ? "mp4" : s.outputFormat, grid ? "compare" : "single", ctx.kinds ?? []) !==
+        "none"
+      ) {
+        const label = ctx.transitionLabel ? ctx.transitionLabel(s.transitionKind) : s.transitionKind;
+        parts.push(`${label} ${finite(s.transitionSeconds, 0.5).toFixed(1)} s`);
       }
       return parts.length > 0 ? parts.join(" · ") : "No cards";
     }

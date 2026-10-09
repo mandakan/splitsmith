@@ -227,6 +227,7 @@ def _apply_beep_manual(video: StageVideo, time_seconds: float) -> None:
     # (#219) opens immediately.
     video.beep_confidence = 1.0
     video.beep_candidates = []
+    video.beep_ranker_version = None
     video.beep_auto_detect_failed = False
     video.beep_alignment_confidence = None
     video.beep_alignment_delta_ms = None
@@ -246,6 +247,7 @@ def _apply_beep_clear(video: StageVideo) -> None:
     video.beep_duration_ms = None
     video.beep_confidence = None
     video.beep_candidates = []
+    video.beep_ranker_version = None
     video.beep_auto_detect_failed = False
     video.beep_alignment_confidence = None
     video.beep_alignment_delta_ms = None

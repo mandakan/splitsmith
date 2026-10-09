@@ -1,4 +1,12 @@
 {
+  "accent_series": [
+    "#ff2d2d",
+    "#fbbf24",
+    "#4ade80",
+    "#60a5fa",
+    "#c084fc",
+    "#f472b6"
+  ],
   "colors": {
     "accent": [
       255,
@@ -70,6 +78,37 @@
     "display": "Antonio",
     "mono": "JetBrains Mono",
     "sans": "Geist"
+  },
+  "label": "Splitsmith",
+  "name": "splitsmith",
+  "schema_version": 1,
+  "slots": {
+    "closing": {
+      "default": "card.html",
+      "rise": "card-rise.html"
+    },
+    "lower_third": {
+      "default": "card.html",
+      "rise": "card-rise.html"
+    },
+    "overlay": {
+      "minimal": "hud-minimal.html",
+      "pips": "hud-pips.html",
+      "plate": "hud-plate.html",
+      "ticker": "hud-ticker.html",
+      "timeline": "hud-timeline.html"
+    },
+    "slate": {
+      "default": "card.html",
+      "rise": "card-rise.html"
+    },
+    "title_page": {
+      "default": "card.html",
+      "rise": "card-rise.html"
+    },
+    "transition": {
+      "wipe": "sting-wipe.html"
+    }
   },
   "source": "src/splitsmith/ui_static/src/styles/index.css"
 }

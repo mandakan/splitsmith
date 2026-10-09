@@ -1,0 +1,128 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="splitsmith-positions" content="top-right,top-left">
+<title>hud ticker</title>
+<script>
+  // The shipped Ticker HUD (spec 2026-10-08): a rail with the clock, the
+  // shot count and the last four splits stacked with their classes. Each
+  // shot pushes the stack down and the new row lands on top. seek(t) draws
+  // any instant from the stage data alone; nothing reads the wall clock.
+  // The engine stylesheet is loaded for its font faces only.
+  document.write('<style>' + window.splitsmith.engine.css + '</style>');
+</script>
+<style>
+  html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; }
+  .shade { text-shadow: 0 0 0.45vh rgba(0, 0, 0, 0.7), 0 0.35vh 1.4vh rgba(0, 0, 0, 0.55); }
+  .num {
+    font-family: "Splitsmith Mono", monospace; font-weight: 700;
+    font-variant-numeric: tabular-nums; line-height: 1; white-space: nowrap;
+  }
+  .label {
+    font-family: "Splitsmith Display", sans-serif; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.14em; white-space: nowrap;
+  }
+  #rail { position: absolute; top: 5vh; width: 34vh; }
+  #rail.top-right { right: 5vh; text-align: right; }
+  #rail.top-left { left: 5vh; text-align: left; }
+  #clock { font-size: 9.6vh; }
+  #count { font-size: 2.5vh; margin: 0.6vh 0 1.8vh; }
+  #list { position: relative; height: 33vh; overflow: hidden; }
+  .row {
+    position: absolute; left: 0; right: 0; height: 7.4vh; box-sizing: border-box;
+    display: flex; align-items: center; gap: 1.8vh; padding: 0 1.8vh; border-radius: 0.7vh;
+  }
+  #rail.top-right .row { justify-content: flex-end; }
+  #rail.top-left .row { justify-content: flex-start; flex-direction: row-reverse; }
+  .row .label { font-size: 2vh; }
+  .row .num { font-size: 4.6vh; }
+  #stamp { position: absolute; left: 0; right: 0; top: 34%; text-align: center; opacity: 0; }
+  #stamp .label { font-size: 2.5vh; letter-spacing: 0.3em; }
+  #stamp .num { font-size: 16vh; }
+</style>
+</head>
+<body>
+<div id="rail">
+  <div class="num shade" id="clock">0.00</div>
+  <div class="label shade" id="count"></div>
+  <div id="list"></div>
+</div>
+<div id="stamp"><div class="label shade">Stage time</div><div class="num shade" id="stampValue"></div></div>
+<script>
+(function () {
+  var s = window.splitsmith;
+  var theme = s.theme, stage = s.data.stage, opts = s.data.options;
+  var shots = stage.shots, beep = stage.beep, rounds = stage.rounds;
+  var ROWS = 4, PITCH = 8.2, SLIDE = 0.2, FOLD = 0.4, STAMP_DELAY = 0.3, STAMP_IN = 0.35;
+
+  function el(id) { return document.getElementById(id); }
+  function clamp(x) { return Math.max(0, Math.min(1, x)); }
+  function easeOut(x) { x = clamp(x); return 1 - Math.pow(1 - x, 3); }
+  function backOut(x) { x = clamp(x); var c = 1.9; return 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2); }
+  function rgba(hex, a) {
+    var n = parseInt(hex.slice(1), 16);
+    return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
+  }
+  function tierColour(tier) {
+    if (!opts.speed_colors || !tier) return theme.split;
+    return tier === 'good' ? theme.split_good : tier === 'slow' ? theme.accent : theme.split;
+  }
+
+  var rail = el('rail');
+  rail.className = opts.position || 'top-right';
+  document.body.style.color = theme.ink;
+  el('count').style.color = theme.ink_2;
+  el('stampValue').textContent = stage.stage_time.toFixed(2);
+  var edge = rail.className === 'top-left' ? 'inset 0.6vh 0 0 ' : 'inset -0.6vh 0 0 ';
+  var rows = [];
+  for (var i = 0; i <= ROWS; i++) {
+    var row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML = '<span class="label"></span><span class="num"></span>';
+    row.firstChild.style.color = theme.ink_2;
+    if (!opts.class_labels) row.firstChild.style.display = 'none';
+    el('list').appendChild(row);
+    rows.push(row);
+  }
+
+  window.settle = function () {
+    return opts.landing ? Math.max(SLIDE, FOLD, STAMP_DELAY + STAMP_IN) : SLIDE;
+  };
+
+  window.seek = function (t) {
+    var n = 0;
+    while (n < shots.length && shots[n].t <= t) n++;
+    var last = n ? shots[n - 1] : null;
+    var landed = n === shots.length && n > 0 ? t - last.t : -1;
+    var landing = opts.landing && landed >= 0;
+    var since = last ? t - last.t : Infinity;
+
+    el('clock').textContent = (landed >= 0 ? stage.stage_time : Math.max(0, t - beep)).toFixed(2);
+    el('count').textContent = 'Shot ' + n + ' of ' + rounds;
+
+    var slide = easeOut(since / SLIDE);
+    var fold = landing ? easeOut(landed / FOLD) : 0;
+    for (var j = 0; j <= ROWS; j++) {
+      var index = n - 1 - j, row = rows[j];
+      if (index < 0) { row.style.opacity = 0; continue; }
+      var shot = shots[index];
+      var y = (j - 1 + slide) * PITCH;
+      row.style.transform = 'translateY(' + y + 'vh)' + (j === 0 ? ' scale(' + (1.08 - 0.08 * slide) + ')' : '');
+      row.style.opacity = (j === ROWS ? 1 - slide : j === 0 ? slide : 1) * (1 - fold);
+      row.style.background = rgba(theme.surface, j === 0 ? 0.9 : 0.72);
+      row.style.boxShadow = j === 0 ? edge + theme.accent : 'none';
+      row.firstChild.textContent = shot.label || '';
+      row.lastChild.textContent = shot.split.toFixed(2);
+      row.lastChild.style.color = j === 0 ? tierColour(shot.tier) : theme.ink;
+    }
+
+    var stamp = el('stamp');
+    var sk = landing ? (landed - STAMP_DELAY) / STAMP_IN : 0;
+    stamp.style.opacity = clamp(sk);
+    stamp.style.transform = 'scale(' + (1.4 - 0.4 * backOut(sk)) + ')';
+  };
+})();
+</script>
+</body>
+</html>

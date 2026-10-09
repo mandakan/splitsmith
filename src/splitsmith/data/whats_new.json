@@ -1,0 +1,174 @@
+{
+  "entries": [
+    {
+      "id": "overlay-styles",
+      "date": "2026-10-08",
+      "title": "Overlay styles with motion",
+      "body": "Pick Plate, Pips, Ticker, Timeline or Minimal under Overlay in Look on the Export page: the clock, shot count and splits animate on every shot and land on the stage time."
+    },
+    {
+      "id": "your-brand-and-shooter-book",
+      "date": "2026-10-08",
+      "title": "Your brand and your shooter book",
+      "body": "Set your brand once on the new You page and it marks every video you render. A shooter's colour, club and logo now follow them from match to match.",
+      "chip": "your-brand-and-shooter-book"
+    },
+    {
+      "id": "match-summary",
+      "date": "2026-10-07",
+      "title": "A match summary at the end of the video",
+      "body": "Turn on Match summary under Look on the Export page: after the last stage, your average split, best draw, hits and a row per stage. On the grid, each shooter gets a tile."
+    },
+    {
+      "id": "made-with-credit",
+      "date": "2026-10-07",
+      "title": "Made with splitsmith on the closing card",
+      "body": "The closing card now ends with a small Made with splitsmith line. Turn it off under Credit in Details on the Export page; your choice is kept with your presets."
+    },
+    {
+      "id": "event-logo",
+      "date": "2026-10-07",
+      "title": "The event's logo on the title page",
+      "body": "Add the match's own logo under Branding in Details on the Export page. The title page and closing card show it above the match name."
+    },
+    {
+      "id": "look-brand",
+      "date": "2026-10-07",
+      "title": "Your brand on the title page",
+      "body": "Add your club, personal or sponsor logo and a line to a Look under Card styles, Your brand. The title page and closing card show it in the top left corner."
+    },
+    {
+      "id": "club-from-scoreboard",
+      "date": "2026-10-07",
+      "title": "Club line from the scoreboard",
+      "body": "Linking a shooter to their scoreboard entry now fills their club line for the cards, unless you already typed one."
+    },
+    {
+      "id": "make-your-own-look",
+      "date": "2026-10-07",
+      "title": "Make your own Look",
+      "body": "Pick Make your own beside the Looks on the Export page, name it and choose what it starts from. Discard removes a new Look you changed your mind about."
+    },
+    {
+      "id": "look-editor-preview",
+      "date": "2026-10-07",
+      "title": "A clearer Look editor",
+      "body": "The preview now says when it is updating and shows a still before the animation, colours have plain names, and a demo scene lets you compare Looks without footage."
+    },
+    {
+      "id": "mirror-look-previews",
+      "date": "2026-10-07",
+      "title": "Look previews on synced matches",
+      "body": "On splitsmith.app, the Look editor and the Export preview now draw the cards of a match synced from the desktop app instead of staying blank."
+    },
+    {
+      "id": "own-fonts",
+      "date": "2026-10-07",
+      "title": "Your own font in a Look",
+      "body": "Add a TTF or OTF file under Card styles, Fonts in the Look editor and use it for titles or figures, the clock included. Desktop app only."
+    },
+    {
+      "id": "grid-render-cache",
+      "date": "2026-10-07",
+      "title": "Faster second renders of a compare grid",
+      "body": "Rendering a compare grid again reuses every stage, card and transition that did not change, as a single shooter's video already did."
+    },
+    {
+      "id": "identity-everywhere",
+      "date": "2026-10-07",
+      "title": "Club colours on Compare and shared pages",
+      "body": "A shooter's accent and logo now mark them on Compare, in the shooter chips and on the Splits pages, shared links included."
+    },
+    {
+      "id": "moving-previews",
+      "date": "2026-10-07",
+      "title": "Previews that move",
+      "body": "An animated card or sting now plays in the Export page's preview and in the Look editor, looping, on your own footage."
+    },
+    {
+      "id": "look-preflight",
+      "date": "2026-10-07",
+      "title": "Broken templates show before you export",
+      "body": "When your own Look has a template that fails, the Export page says which cards would be left out before you render, with the line that broke."
+    },
+    {
+      "id": "look-fonts",
+      "date": "2026-10-07",
+      "title": "Choose your Look's fonts",
+      "body": "Pick the title and figure faces under Card styles in the Look editor; the cards, the stage summary and the running clock all draw with them."
+    },
+    {
+      "id": "long-names-fit",
+      "date": "2026-10-07",
+      "title": "Long stage names fit the cards",
+      "body": "A long stage name on the title page, a slate or the lower third shrinks to fit the frame, and ends in an ellipsis when it still does not."
+    },
+    {
+      "id": "palette-suggestions",
+      "date": "2026-10-07",
+      "title": "Palettes that stand out on your footage",
+      "body": "The Look editor suggests full palettes from one colour, from your club logo, from ready-made range palettes, or from what stands out on this match's own footage."
+    },
+    {
+      "id": "template-editor",
+      "date": "2026-10-07",
+      "title": "Write your own card templates",
+      "body": "In the desktop app, the Look editor's Templates tab edits a card's HTML with a live preview, the data it receives and a check that names the broken line."
+    },
+    {
+      "id": "look-editor",
+      "date": "2026-10-07",
+      "title": "Make your own Look",
+      "body": "Duplicate a Look under Look, Advanced on the Export page, pick its colours and card styles, and see it on your own footage before you save.",
+      "chip": "look-editor"
+    },
+    {
+      "id": "stage-transitions",
+      "date": "2026-10-07",
+      "title": "Transitions between stages",
+      "body": "An MP4 can cross from one stage to the next with a fade, a wipe or a dozen other moves, each with a direction. The compare grid gets them too."
+    },
+    {
+      "id": "stings",
+      "date": "2026-10-07",
+      "title": "Stings in your colours",
+      "body": "A sting sweeps a band in your Look's colours across the cut between stages, carrying the club logo when there is one. Pick Wipe sting under transitions."
+    },
+    {
+      "id": "rise-cards",
+      "date": "2026-10-07",
+      "title": "Cards that rise into place",
+      "body": "Choose the Rise style for the title page, the stage slates, the lower third or the closing card, and their lines animate in."
+    },
+    {
+      "id": "shooter-identity",
+      "date": "2026-10-07",
+      "title": "Your club colour and logo",
+      "body": "Give each shooter an accent colour, a club line and a logo on the Footage page. The cards, the sting and the stage summary use them."
+    },
+    {
+      "id": "beep-ranker",
+      "date": "2026-10-07",
+      "title": "A better beep finder",
+      "body": "The first beep suggested for a stage is now the right one far more often, so there is less to confirm by hand."
+    },
+    {
+      "id": "smoother-scrubbing",
+      "date": "2026-10-06",
+      "title": "Smoother scrubbing in Audit",
+      "body": "Audit plays a lighter 720p copy of each trim, so seeking stays quick on long 4K clips."
+    },
+    {
+      "id": "known-clips",
+      "date": "2026-10-06",
+      "title": "Clips you already imported",
+      "body": "Adding a clip again, even from another folder, is recognised and skipped, and the import says why it skipped each file."
+    },
+    {
+      "id": "title-division",
+      "date": "2026-10-05",
+      "title": "Your division on the title page",
+      "body": "The title page prints the shooter's division as the scoreboard has it. Turn it off under Details on the Export page."
+    }
+  ]
+}

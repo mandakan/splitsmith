@@ -57,6 +57,10 @@ export interface AvatarProps
   seed?: string;
   /** Optional shooter name for the title tooltip. */
   name?: string;
+  /** The shooter's own colour (#1249): a ring around the avatar. */
+  accent?: string | null;
+  /** The shooter's logo URL (#1249): drawn in place of the initials. */
+  logo?: string | null;
 }
 
 export function Avatar({
@@ -66,17 +70,28 @@ export function Avatar({
   size,
   name,
   className,
+  accent,
+  logo,
+  style,
   ...props
 }: AvatarProps) {
   const resolved = tone ?? pickPalette(seed ?? initials);
+  // Only a shooter who set an accent gets a ring; everyone else renders
+  // exactly as before (no style attribute at all).
+  const ringed = accent ? { ...style, boxShadow: `0 0 0 1.5px ${accent}` } : style;
   return (
     <span
       title={name ?? initials}
       aria-label={name ?? initials}
-      className={cn(avatarVariants({ size }), TONE_CLASS[resolved], className)}
+      className={cn(avatarVariants({ size }), TONE_CLASS[resolved], logo && "overflow-hidden bg-surface-2", className)}
+      style={ringed}
       {...props}
     >
-      {initials.slice(0, 2).toUpperCase()}
+      {logo ? (
+        <img src={logo} alt="" className="h-full w-full object-contain" />
+      ) : (
+        initials.slice(0, 2).toUpperCase()
+      )}
     </span>
   );
 }

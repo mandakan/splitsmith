@@ -226,3 +226,13 @@ export function skippedSummary(skipped: string[], max = 3): string {
   const rest = skipped.length - max;
   return rest > 0 ? `${named}; and ${rest} more` : named;
 }
+
+
+/** The shooter whose Identity sheet a ``?identity=<slug>`` link asks the
+ *  Footage page to open (the Look editor's "Add a logo"), once that shooter
+ *  is in the list; ``null`` otherwise. */
+export function identityTarget<T extends { slug: string }>(search: string, shooters: readonly T[]): T | null {
+  const slug = new URLSearchParams(search).get("identity");
+  if (!slug) return null;
+  return shooters.find((s) => s.slug === slug) ?? null;
+}

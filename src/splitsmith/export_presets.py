@@ -29,9 +29,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from . import user_config
+from . import composition, looks, user_config
+from .overlay_hud import OverlayStyleFields
 
 logger = logging.getLogger(__name__)
 
@@ -48,12 +49,12 @@ PipLayout = Literal["stacked", "pip-corners"]
 InsetCorner = Literal["top-left", "top-right", "bottom-left", "bottom-right"]
 InsetSize = Literal["small", "medium", "large"]
 PaddingPreset = Literal["full", "action", "highlight", "custom"]
-TransitionKind = Literal["none", "zoom", "static"]
+TransitionKind = composition.TransitionKind  # "none" or a kind; validated below (#1245)
 StageCardStyle = Literal["none", "slate", "lower-third"]
 UploadPrivacy = Literal["private", "unlisted", "public"]
 
 
-class ExportPresetBody(BaseModel):
+class ExportPresetBody(OverlayStyleFields, BaseModel):
     """The recurring settings. Defaults equal the Export page's own."""
 
     model_config = ConfigDict(extra="ignore")
@@ -81,14 +82,41 @@ class ExportPresetBody(BaseModel):
     tail_pad_seconds: float = 5.0
     transition_kind: TransitionKind = "none"
     transition_seconds: float = 0.5
+    # Look (#1246): the Look name and each card slot's template variant.
+    # Validated by shape only: a preset must load on a machine without
+    # that Look (the page falls back to the default when it is missing).
+    look: str = "splitsmith"
+    title_page_variant: str = "default"
+    stage_card_variant: str = "default"
+    closing_card_variant: str = "default"
+
+    @field_validator("transition_kind")
+    @classmethod
+    def _transition_kind(cls, value: str) -> str:
+        return composition.validate_transition_kind(value)
+
+    @field_validator("look", "title_page_variant", "stage_card_variant", "closing_card_variant")
+    @classmethod
+    def _look_name_shape(cls, value: str) -> str:
+        if not looks.LOOK_NAME_RE.match(value):
+            raise ValueError(f"{value!r} is not a Look or variant name ({looks.LOOK_NAME_RE.pattern})")
+        return value
+
     # Look
     title_page: bool = False
     title_page_seconds: float = 3.0
     title_division: bool = True
     closing_card: bool = False
+    #: "Made with splitsmith" on the closing card (on unless turned off).
+    made_with: bool = True
+    #: Your account's brand on the cards (on unless turned off).
+    account_brand: bool = True
     stage_card_style: StageCardStyle = "none"
     stage_card_seconds: float = 1.5
     summary_hold_seconds: float = 0.0
+    #: The match summary card after the last stage, and its hold.
+    match_summary: bool = False
+    match_summary_seconds: float = 6.0
     overlay: bool = False
     grid_overlay: bool = False
     grid_hold_seconds: float = 0.0

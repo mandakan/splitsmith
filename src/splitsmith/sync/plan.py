@@ -27,6 +27,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from ..identity import EVENT_LOGO_DIR, EVENT_LOGO_RE, LOGO_DIR
 from ..match_model import load_match_or_legacy
 from ..match_project import MatchProject
 from .docs import absolute_path_videos, sanitize_project_doc
@@ -40,6 +41,10 @@ AUDIT_FILENAME_RE = re.compile(r"^stage(\d+)\.json$")
 
 #: ``trimmed/stage<N>_cam_<video_id>_trimmed.mp4`` filename shape.
 _TRIMMED_GLOB = "stage*_cam_*_trimmed.mp4"
+#: A shooter's logo under ``identity/`` (#1243): content-named, raster only,
+#: the same shape ``identity.ShooterIdentity`` admits and the hosted key
+#: gate accepts. Anything else in that directory is not synced.
+_LOGO_FILE_RE = re.compile(r"^logo-[0-9a-f]{12}\.(?:png|jpe?g|webp)$")
 #: The trim's streaming rendition (#1031), ``..._web.mp4`` beside it. A
 #: ``..._web.partial.mp4`` from a crashed transcode does not match.
 _WEB_GLOB = "stage*_cam_*_web.mp4"
@@ -253,6 +258,33 @@ def build_push_plan(match_root: Path, *, sync_state: SyncState, full_media: bool
                     media_skipped += 1
                 else:
                     media.append(item)
+
+        identity_dir = shooter_root / LOGO_DIR
+        if identity_dir.is_dir():
+            for artifact in sorted(identity_dir.iterdir()):
+                if not _LOGO_FILE_RE.match(artifact.name):
+                    continue
+                remote_key = _remote_key(match.match_id, slug, artifact.name, subdir=LOGO_DIR)
+                item = _plan_media_item(artifact, remote_key, sync_state)
+                if item is None:
+                    media_skipped += 1
+                else:
+                    media.append(item)
+
+    # The event's logo (the branding work), under the match root's own
+    # ``identity/``: content-named, raster only, like a shooter's.
+    event_dir = match_root / EVENT_LOGO_DIR
+    if match.match_id and event_dir.is_dir():
+        for artifact in sorted(event_dir.iterdir()):
+            if not EVENT_LOGO_RE.fullmatch(artifact.name):
+                continue
+            item = _plan_media_item(
+                artifact, f"matches/{match.match_id}/{EVENT_LOGO_DIR}/{artifact.name}", sync_state
+            )
+            if item is None:
+                media_skipped += 1
+            else:
+                media.append(item)
 
     return PushPlan(
         match_id=match.match_id,

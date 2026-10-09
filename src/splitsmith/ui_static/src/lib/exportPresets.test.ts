@@ -78,6 +78,53 @@ describe("title_division", () => {
   });
 });
 
+describe("made_with", () => {
+  it("is on by default, a body stored before it shipped applies it on, and off round-trips", () => {
+    expect(DEFAULT_EXPORT_SETTINGS.renderOptions.madeWith).toBe(true);
+    const legacy: Partial<ExportPresetBody> = { ...YOUTUBE };
+    delete legacy.made_with;
+    const off = { ...DEFAULT_EXPORT_SETTINGS.renderOptions, madeWith: false };
+    const applied = applyBody({ ...DEFAULT_EXPORT_SETTINGS, renderOptions: off }, legacy as ExportPresetBody);
+    expect(applied.renderOptions.madeWith).toBe(true);
+    const offSettings = { ...DEFAULT_EXPORT_SETTINGS, renderOptions: off };
+    expect(settingsToBody(offSettings).made_with).toBe(false);
+    expect(applyBody(DEFAULT_EXPORT_SETTINGS, settingsToBody(offSettings)).renderOptions.madeWith).toBe(false);
+  });
+});
+
+describe("match_summary", () => {
+  it("is off by default, a body stored before it shipped applies it off, and on round-trips", () => {
+    expect(DEFAULT_EXPORT_SETTINGS.renderOptions.matchSummary).toBe(false);
+    const legacy: Partial<ExportPresetBody> = { ...YOUTUBE };
+    delete legacy.match_summary;
+    delete legacy.match_summary_seconds;
+    const applied = applyBody(DEFAULT_EXPORT_SETTINGS, legacy as ExportPresetBody);
+    expect(applied.renderOptions.matchSummary).toBe(false);
+    expect(applied.renderOptions.matchSummarySeconds).toBe(6);
+    const on = {
+      ...DEFAULT_EXPORT_SETTINGS,
+      renderOptions: { ...DEFAULT_EXPORT_SETTINGS.renderOptions, matchSummary: true, matchSummarySeconds: 8 },
+    };
+    const back = applyBody(DEFAULT_EXPORT_SETTINGS, settingsToBody(on)).renderOptions;
+    expect([back.matchSummary, back.matchSummarySeconds]).toEqual([true, 8]);
+  });
+});
+
+describe("account_brand", () => {
+  it("is on by default, a body stored before it shipped applies it on, and off round-trips", () => {
+    expect(DEFAULT_EXPORT_SETTINGS.renderOptions.accountBrand).toBe(true);
+    const legacy: Partial<ExportPresetBody> = { ...YOUTUBE };
+    delete legacy.account_brand;
+    expect(applyBody(DEFAULT_EXPORT_SETTINGS, legacy as ExportPresetBody).renderOptions.accountBrand).toBe(true);
+    const off = {
+      ...DEFAULT_EXPORT_SETTINGS,
+      renderOptions: { ...DEFAULT_EXPORT_SETTINGS.renderOptions, accountBrand: false },
+    };
+    expect(settingsToBody(off).account_brand).toBe(false);
+    expect(applyBody(DEFAULT_EXPORT_SETTINGS, settingsToBody(off)).renderOptions.accountBrand).toBe(false);
+  });
+});
+
 describe("non-finite seconds", () => {
   it("a field being edited (NaN) is stored as its default, never as NaN", () => {
     const s: ExportSettings = { ...DEFAULT_EXPORT_SETTINGS, transitionSeconds: Number.NaN, headPad: Number.NaN };
@@ -99,6 +146,13 @@ describe("non-finite seconds", () => {
   it("the summaries never throw on a blank field", () => {
     const blank: ExportSettings = { ...DEFAULT_EXPORT_SETTINGS, transitionKind: "zoom", transitionSeconds: Number.NaN, headPad: Number.NaN };
     expect(groupSummary(blank, "look", { secondaryCount: 0 })).toBe("zoom 0.5 s");
+    const stung = { ...DEFAULT_EXPORT_SETTINGS, outputFormat: "mp4" as const, transitionKind: "sting:wipe" as const };
+    expect(groupSummary(stung, "look", { secondaryCount: 0, kinds: ["sting:wipe"] })).toBe("sting:wipe 0.5 s");
+    const wind = { ...stung, transitionKind: "vuwind" };
+    expect(
+      groupSummary(wind, "look", { secondaryCount: 0, kinds: ["vuwind"], transitionLabel: () => "Wind up" }),
+    ).toBe("Wind up 0.5 s");
+    expect(groupSummary(stung, "look", { secondaryCount: 0 })).toBe("No cards");
     expect(groupSummary(blank, "cut", { secondaryCount: 0 })).toBe("Full 5.0 / 5.0 s");
   });
 });
@@ -155,7 +209,49 @@ describe("groupSummary", () => {
     );
     const zoom = { ...DEFAULT_EXPORT_SETTINGS, transitionKind: "zoom" as const, transitionSeconds: 0.5 };
     expect(groupSummary(zoom, "look", ctx)).toBe("zoom 0.5 s");
+    // The single-shooter MP4 draws the xfade kinds since #1244, never the FCP effects;
+    // the FCP 7 XML draws none.
     expect(groupSummary({ ...zoom, outputFormat: "mp4" }, "look", ctx)).toBe("No cards");
+    expect(groupSummary({ ...zoom, transitionKind: "fade", outputFormat: "mp4" }, "look", { ...ctx, kinds: ["fade"] })).toBe(
+      "fade 0.5 s",
+    );
+    // Without the catalog's kinds an xfade is not drawn (#1259).
+    expect(groupSummary({ ...zoom, transitionKind: "fade", outputFormat: "mp4" }, "look", ctx)).toBe("No cards");
+    expect(groupSummary({ ...zoom, outputFormat: "fcp7xml" }, "look", ctx)).toBe("No cards");
+    // The grid draws the xfade kinds too (#1244); its summary names them.
+    expect(groupSummary({ ...zoom, mode: "compare", transitionKind: "fade", transitionSeconds: 1 }, "look", { ...ctx, kinds: ["fade", "dissolve", "slideleft", "wipeleft"] })).toContain(
+      "fade 1.0 s",
+    );
+  });
+});
+
+describe("the overlay style", () => {
+  const ctx = { secondaryCount: 0 };
+  const plate = {
+    ...DEFAULT_EXPORT_SETTINGS,
+    includeOverlay: true,
+    overlayStyle: { variant: "plate", speedColors: false, classLabels: true, landing: false, position: "top-right" },
+  };
+
+  it("round-trips through a preset and makes the form dirty when it changes", () => {
+    const body = settingsToBody(plate);
+    expect(body.overlay_variant).toBe("plate");
+    expect(body.overlay_position).toBe("top-right");
+    expect(applyBody(DEFAULT_EXPORT_SETTINGS, body).overlayStyle).toEqual(plate.overlayStyle);
+    expect(isDirty({ ...plate, overlayStyle: { ...plate.overlayStyle, landing: true } }, body)).toBe(true);
+  });
+
+  it("a body stored before styles shipped applies Classic", () => {
+    const old = { ...YOUTUBE } as Record<string, unknown>;
+    for (const k of ["overlay_variant", "overlay_speed_colors", "overlay_class_labels", "overlay_landing", "overlay_position"]) {
+      delete old[k];
+    }
+    expect(applyBody(plate, old as unknown as ExportPresetBody).overlayStyle).toEqual(DEFAULT_EXPORT_SETTINGS.overlayStyle);
+  });
+
+  it("names the style in the look summary", () => {
+    expect(groupSummary(plate, "look", ctx)).toBe("Plate overlay");
+    expect(groupSummary({ ...plate, mode: "compare", gridOverlay: true }, "look", ctx)).toBe("overlay");
   });
 });
 

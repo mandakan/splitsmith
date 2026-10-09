@@ -385,8 +385,9 @@ def register_compute_task(app: procrastinate.App, state: Any) -> None:
     body mapping the local registry uses. Must be registered before
     :meth:`procrastinate.App.run_worker_async`.
     """
+    from . import looks
     from .match_registry import MatchNotRegisteredError
-    from .ui.server import current_match_id, current_match_root, current_tenant
+    from .ui.server import current_match_id, current_match_root, current_tenant, tenant_looks_provider
 
     @app.task(name=RUN_COMPUTE_JOB_TASK, queue="default")
     async def _run_compute_job(
@@ -412,6 +413,7 @@ def register_compute_task(app: procrastinate.App, state: Any) -> None:
         # recoverable state).
         tenant = state.build_tenant(user_id)
         tenant_token = current_tenant.set(tenant)
+        looks_token = looks.set_user_looks_provider(tenant_looks_provider(tenant))
 
         def _bind_match() -> None:
             """Re-set the match ContextVars from the queued ``match_id``.
@@ -441,6 +443,7 @@ def register_compute_task(app: procrastinate.App, state: Any) -> None:
         try:
             await state.jobs.run_job(job_id=job_id, kind=kind, args=call_args, before_body=_bind_match)
         finally:
+            looks.reset_user_looks_provider(looks_token)
             current_tenant.reset(tenant_token)
 
 

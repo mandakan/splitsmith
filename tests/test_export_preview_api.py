@@ -25,11 +25,64 @@ ROUTE = "/api/shooters/me/export-preview"
 
 class _StubRasterizer:
     launches = 0
+    motion_seconds = 0.0
+    frames_rendered = 0
+
+    def __init__(self) -> None:
+        self.frame_requests: list[tuple] = []
 
     def png(self, html: str, *, width: int, height: int) -> bytes:
         buf = io.BytesIO()
         Image.new("RGBA", (width, height), (0, 0, 0, 0)).save(buf, format="PNG")
         return buf.getvalue()
+
+    def render_template(self, template, *, context, width: int, height: int) -> bytes:
+        import json
+
+        return self.png(json.dumps(context.data, ensure_ascii=False), width=width, height=height)
+
+    def engine_version(self) -> str:
+        return "fake"
+
+    def render_template_frames(
+        self, template, *, context, width: int, height: int, fps: float, max_seconds: float
+    ):
+        """A still unless ``motion_seconds`` is set; frames are blank and
+        counted in ``frames_rendered`` as they are pulled."""
+        import math
+
+        from splitsmith.overlay_raster import TemplateFrames
+
+        pass
+        self.frame_requests.append((template, context.model_dump(), width, height, fps, max_seconds))
+        duration = self.motion_seconds
+        count = 1 if duration <= 0 else max(1, math.ceil(min(duration, max_seconds) * fps - 1e-9))
+
+        def frames():
+            # Each frame differs (a moving template's do), so an encoder that
+            # merges identical frames still sees the motion.
+            for i in range(count):
+                self.frames_rendered += 1
+                yield bytes([255, 255, 255, min(255, 40 * i)]) * (width * height)
+
+        return TemplateFrames(
+            duration=duration, frame_count=count, width=width, height=height, frames=frames()
+        )
+
+    def render_template_timeline(self, template, *, context, width: int, height: int, plan):  # noqa: ANN001
+        """A HUD: one distinct frame per planned time (a fixed settle)."""
+        from splitsmith.overlay_raster import TemplateFrames
+
+        times = list(plan(0.5))
+        self.frame_requests.append((template, context.model_dump(), width, height))
+
+        def frames():
+            for i, _ in enumerate(times):
+                yield bytes([255, 255, 255, min(255, 10 * i)]) * (width * height)
+
+        return TemplateFrames(
+            duration=0.5, frame_count=len(times), width=width, height=height, frames=frames()
+        )
 
 
 @contextmanager
@@ -186,3 +239,99 @@ def test_the_title_preview_carries_the_division_unless_turned_off(
     assert len(pages) == 2, "the option must move the cache key"
     assert "Classic Major" in pages[0]
     assert "Classic Major" not in pages[1]
+
+
+def test_the_preview_takes_the_look_and_the_variant(client) -> None:
+    """Slice 6 (#1246): ``look`` and ``variant`` ride the body and the
+    cache key; an unknown Look is a 422 that names the installed ones."""
+    default = client.post(ROUTE, json={"card": "title", "stage_number": 1, "width": 480})
+    rise = client.post(ROUTE, json={"card": "title", "stage_number": 1, "width": 480, "variant": "rise"})
+    clean = client.post(ROUTE, json={"card": "title", "stage_number": 1, "width": 480, "look": "clean"})
+    assert default.status_code == rise.status_code == clean.status_code == 200
+    assert _StubRasterizer.launches == 3, "three keys, three renders"
+    refused = client.post(ROUTE, json={"card": "title", "stage_number": 1, "look": "nope"})
+    assert refused.status_code == 422 and "splitsmith" in refused.text
+
+
+# --- moving previews (#1249) ---------------------------------------------------------------
+
+
+def test_an_animated_card_previews_as_a_looping_webp(client) -> None:
+    _StubRasterizer.motion_seconds = 0.5
+    try:
+        r = client.post(ROUTE, json={"card": "title", "stage_number": 1, "width": 480, "motion": True})
+    finally:
+        _StubRasterizer.motion_seconds = 0.0
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == "image/webp"
+    with Image.open(io.BytesIO(r.content)) as im:
+        assert im.size == (480, 270)
+        assert getattr(im, "n_frames", 1) > 1
+        assert im.info.get("loop") == 0
+
+
+def test_a_still_card_stays_a_png_even_when_motion_is_asked(client) -> None:
+    r = client.post(ROUTE, json={"card": "slate", "stage_number": 1, "width": 480, "motion": True})
+    assert r.status_code == 200 and r.headers["content-type"] == "image/png"
+
+
+@pytest.mark.parametrize("card", ["frame", "summary", "overlay"])
+def test_cards_without_a_template_never_move(client, card: str) -> None:
+    _StubRasterizer.motion_seconds = 0.5
+    try:
+        r = client.post(ROUTE, json={"card": card, "stage_number": 1, "width": 480, "motion": True})
+    finally:
+        _StubRasterizer.motion_seconds = 0.0
+    assert r.status_code == 200 and r.headers["content-type"] == "image/png"
+
+
+def test_motion_and_still_are_cached_apart(client) -> None:
+    _StubRasterizer.motion_seconds = 0.5
+    try:
+        body = {"card": "closing", "stage_number": 1, "width": 480}
+        still = client.post(ROUTE, json=body)
+        moving = client.post(ROUTE, json={**body, "motion": True})
+        again = client.post(ROUTE, json={**body, "motion": True})
+    finally:
+        _StubRasterizer.motion_seconds = 0.0
+    assert still.headers["content-type"] == "image/png"
+    assert moving.headers["content-type"] == "image/webp" and again.content == moving.content
+    assert _StubRasterizer.launches == 2
+
+
+def test_the_demo_backdrop_paints_the_range_scene_instead_of_the_footage(client) -> None:
+    """The Look editor's backdrop switch: the same neutral range picture for
+    every stage, on hosted and where this disk holds no trim."""
+    import io
+
+    from PIL import Image
+
+    plain = client.post(ROUTE, json={"card": "frame", "stage_number": 1, "width": 480})
+    demo = client.post(ROUTE, json={"card": "frame", "stage_number": 1, "width": 480, "backdrop": "demo"})
+    assert plain.status_code == demo.status_code == 200
+    with Image.open(io.BytesIO(demo.content)) as im:
+        ground = im.convert("RGB").getpixel((240, 260))
+    with Image.open(io.BytesIO(plain.content)) as im:
+        surface = im.convert("RGB").getpixel((240, 260))
+    assert ground != surface
+    assert abs(ground[0] - 96) < 20 and abs(ground[1] - 84) < 20 and abs(ground[2] - 66) < 20
+    assert (
+        client.post(ROUTE, json={"card": "frame", "stage_number": 1, "backdrop": "moon"}).status_code == 422
+    )
+
+
+# --- overlay styles (template HUD, slice 3) ------------------------------------
+
+
+def test_an_overlay_style_previews_as_a_loop_and_keys_apart_from_classic(client) -> None:
+    body = {"card": "overlay", "stage_number": 1, "width": 480, "motion": True}
+    classic = client.post(ROUTE, json=body)
+    styled = client.post(ROUTE, json={**body, "overlay_variant": "plate", "overlay_position": "top-left"})
+    assert classic.status_code == styled.status_code == 200, styled.text
+    assert classic.headers["content-type"] == "image/png"
+    assert styled.headers["content-type"] == "image/webp"
+    with Image.open(io.BytesIO(styled.content)) as im:
+        assert getattr(im, "n_frames", 1) > 1
+    assert _StubRasterizer.launches == 2, "a style is its own cache entry"
+    refused = client.post(ROUTE, json={**body, "overlay_position": "middle"})
+    assert refused.status_code == 422

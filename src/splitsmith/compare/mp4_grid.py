@@ -31,15 +31,38 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
-from ..composition import MatchTitle, TitleCard, TitleStyle
+from ..composition import (
+    MatchTitle,
+    TitleCard,
+    TitleStyle,
+    Transition,
+    TransitionKind,
+    is_sting,
+    sting_name,
+    xfade_name,
+)
 from ..export_naming import stage_display_name
-from ..overlay_card import build_card_still, build_lower_third, lower_third_filters
+from ..identity import ResolvedIdentity
+from ..look_motion import MotionClipError, motion_overlay_filters, write_motion_clip
+from ..look_sting import sting_motion, sting_overlay_filters
+from ..looks import CardSlot, Look, load_look, sting_template_for
+from ..overlay_card import (
+    CardMotion,
+    card_backdrop,
+    card_motion,
+    compose_card,
+    first_frame_image,
+    lower_third_clip_filters,
+    lower_third_filters,
+    with_card_failures,
+)
 from ..overlay_clock import clock_common_options, clock_text, elapsed_text_option
 from ..overlay_layout import Anchor, CellScale, anchor_ffmpeg_expr
 from ..overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
 from ..overlay_text import FALLBACK_BUNDLED_FONT, overlay_font_file
-from ..overlay_theme import OverlayTheme, ThemeName, load_theme
+from ..overlay_theme import OverlayTheme, ThemeName, load_theme, theme_for
 from ..runtime import FFmpegCapabilities, ffmpeg_capabilities, quote_filter_value, runtime
+from ..segment_cache import SegmentCache
 from ..youtube_sidecar import Chapter
 from .free_cell import (
     FreeCellContext,
@@ -533,6 +556,342 @@ class GridStagePlan:
           after one 3s-short segment, ``-9000ms`` after three.
         """
         return self.duration_seconds + self.hold_seconds
+
+
+# --- the spine and its boundaries (issue #1244) ----------------------------------------
+
+
+@dataclass(frozen=True)
+class GridStageItem:
+    """One stage's segment on the spine: the action and its hold.
+    ``head_cut_seconds`` / ``tail_cut_seconds`` are what a transition on
+    either side took off; the item is encoded that much shorter and the
+    boundary segment shows them."""
+
+    index: int
+    plan: GridStagePlan
+    head_cut_seconds: float = 0.0
+    tail_cut_seconds: float = 0.0
+    kind: Literal["stage"] = "stage"
+
+    @property
+    def name(self) -> str:
+        return f"stage{self.plan.stage_number}"
+
+    @property
+    def duration_seconds(self) -> float:
+        return self.plan.total_seconds - self.head_cut_seconds - self.tail_cut_seconds
+
+
+@dataclass(frozen=True)
+class GridCardItem:
+    """A generated card segment on the spine. ``stage_index`` is the stage a
+    slate precedes (and whose head frame backs it); the title page and
+    the closing card carry the index of the stage their backdrop comes
+    from. ``card`` is the match title for the title page and the closing
+    card; a slate's card is built by the driver from the plan, the match
+    summary's still from every stage's data (``card`` stays ``None``)."""
+
+    kind: Literal["title_page", "slate", "match_summary", "closing"]
+    name: str
+    card_seconds: float
+    stage_index: int | None
+    card: MatchTitle | None = None
+    head_cut_seconds: float = 0.0
+    tail_cut_seconds: float = 0.0
+
+    @property
+    def duration_seconds(self) -> float:
+        return self.card_seconds - self.head_cut_seconds - self.tail_cut_seconds
+
+
+GridItem = GridStageItem | GridCardItem
+
+
+@dataclass(frozen=True)
+class GridBoundary:
+    """A transition between ``items[after_index]`` and the next item: a
+    crossfade of ``duration_seconds`` centred on the cut, each neighbour
+    having given up half of it, so the spine keeps its length."""
+
+    after_index: int
+    kind: TransitionKind
+    duration_seconds: float
+
+    @property
+    def name(self) -> str:
+        return f"boundary-{self.after_index:03d}"
+
+
+@dataclass(frozen=True)
+class GridSpine:
+    items: tuple[GridItem, ...]
+    boundaries: tuple[GridBoundary, ...] = ()
+    degradations: tuple[str, ...] = ()
+
+    @property
+    def duration_seconds(self) -> float:
+        return sum(i.duration_seconds for i in self.items) + sum(b.duration_seconds for b in self.boundaries)
+
+    def boundary_after(self, index: int) -> GridBoundary | None:
+        for boundary in self.boundaries:
+            if boundary.after_index == index:
+                return boundary
+        return None
+
+
+def head_pad_of(plan: GridStagePlan) -> float:
+    """The head pad the plan was built with, recovered from any real tile
+    through the tile invariant ``lead + (beep - seek) == head_pad``; 0 when
+    every tile is filler (nothing to place)."""
+    for tile in plan.tiles:
+        if tile.trim_path is not None:
+            return tile.lead_pad_seconds + tile.beep_offset_in_clip - tile.seek_seconds
+    return 0.0
+
+
+def grid_boundary_fit(
+    prev: GridItem, nxt: GridItem, *, half: float, seconds: float, tail_pad_seconds: float
+) -> str | None:
+    """Why a transition of ``seconds`` cannot sit between ``prev`` and
+    ``nxt``, or ``None``. A stage before the cut gives up ``half`` of its
+    hold and tail pad (the last shot stays out of the fade); one after
+    gives up ``half`` of its head pad (the beep stays out); a card gives up
+    ``half`` of itself and must be at least ``2 * half`` long. Reports,
+    never clamps; the handle past the pad is never a reason (the
+    boundary holds a frame for what the trims lack)."""
+    if isinstance(prev, GridStageItem):
+        room = prev.plan.hold_seconds + tail_pad_seconds
+        if half > room:
+            return (
+                f"transition after stage {prev.plan.stage_name!r} ({seconds:g}s) exceeds the stage's hold "
+                f"and tail pad ({room:g}s); lengthen the hold or the pad, or shorten the transition: "
+                "rendered as a cut"
+            )
+    elif half > prev.duration_seconds / 2.0:
+        return (
+            f"transition after {prev.name} ({seconds:g}s) exceeds half the card "
+            f"({prev.duration_seconds / 2.0:g}s): rendered as a cut"
+        )
+    if isinstance(nxt, GridStageItem):
+        pad = head_pad_of(nxt.plan)
+        if half > pad:
+            return (
+                f"transition before stage {nxt.plan.stage_name!r} ({seconds:g}s) exceeds the stage's "
+                f"head pad ({pad:g}s); increase the pad or shorten the transition: rendered as a cut"
+            )
+    elif half > nxt.duration_seconds / 2.0:
+        return (
+            f"transition into {nxt.name} ({seconds:g}s) exceeds half the card "
+            f"({nxt.duration_seconds / 2.0:g}s): rendered as a cut"
+        )
+    return None
+
+
+def plan_grid_spine(
+    plans: Sequence[GridStagePlan],
+    *,
+    title_page: MatchTitle | None,
+    closing: MatchTitle | None,
+    stage_titles: str,
+    title_duration_seconds: float,
+    transitions: Sequence[Transition],
+    tail_pad_seconds: float,
+    match_summary_seconds: float = 0.0,
+) -> GridSpine:
+    """The spine the driver walks (issue #1244): title page, per stage a
+    slate when ``stage_titles == "slate"`` and the stage, the match summary
+    when ``match_summary_seconds`` is positive, the closing card;
+    then the stage-indexed ``transitions`` placed as boundaries between
+    the last item of stage i (the stage, hold included) and the first of
+    stage i+1 (its slate when it has one). A transition that does not fit
+    is reported and left out."""
+    items: list[GridItem] = []
+    if title_page is not None:
+        items.append(
+            GridCardItem(
+                kind="title_page",
+                name="title_page",
+                card_seconds=title_page.duration_seconds,
+                stage_index=0,
+                card=title_page,
+            )
+        )
+    first_of_stage: dict[int, int] = {}
+    last_of_stage: dict[int, int] = {}
+    for index, plan in enumerate(plans):
+        if stage_titles == "slate":
+            first_of_stage[index] = len(items)
+            items.append(
+                GridCardItem(
+                    kind="slate",
+                    name=f"slate-stage{plan.stage_number}",
+                    card_seconds=title_duration_seconds,
+                    stage_index=index,
+                )
+            )
+        first_of_stage.setdefault(index, len(items))
+        last_of_stage[index] = len(items)
+        items.append(GridStageItem(index=index, plan=plan))
+    if match_summary_seconds > 0 and plans:
+        items.append(
+            GridCardItem(
+                kind="match_summary",
+                name="match_summary",
+                card_seconds=match_summary_seconds,
+                stage_index=len(plans) - 1,
+            )
+        )
+    if closing is not None:
+        items.append(
+            GridCardItem(
+                kind="closing",
+                name="closing",
+                card_seconds=closing.duration_seconds,
+                stage_index=len(plans) - 1,
+                card=closing,
+            )
+        )
+    boundaries: list[GridBoundary] = []
+    degradations: list[str] = []
+    for transition in sorted(transitions, key=lambda t: t.from_stage_index):
+        prev_index = last_of_stage.get(transition.from_stage_index)
+        next_index = first_of_stage.get(transition.to_stage_index)
+        if prev_index is None or next_index is None or next_index != prev_index + 1:
+            continue
+        half = transition.duration_seconds / 2.0
+        problem = grid_boundary_fit(
+            items[prev_index],
+            items[next_index],
+            half=half,
+            seconds=transition.duration_seconds,
+            tail_pad_seconds=tail_pad_seconds,
+        )
+        if problem is not None:
+            degradations.append(problem)
+            continue
+        items[prev_index] = replace(items[prev_index], tail_cut_seconds=half)
+        items[next_index] = replace(items[next_index], head_cut_seconds=half)
+        boundaries.append(
+            GridBoundary(
+                after_index=prev_index, kind=transition.kind, duration_seconds=transition.duration_seconds
+            )
+        )
+    return GridSpine(items=tuple(items), boundaries=tuple(boundaries), degradations=tuple(degradations))
+
+
+def narrow_grid_plan(plan: GridStagePlan, *, head_cut: float, tail_cut: float) -> GridStagePlan:
+    """The same stage ``head_cut`` seconds later in and ``tail_cut`` shorter
+    (issue #1244). The head pad shrinks by the cut and every real tile's
+    seek and lead pad (and its inset's) are rebuilt from it, so the beep
+    stays on the pad; the tail cut comes out of the hold first, then the
+    action. Negative cuts widen the window (an edge's handle). Zero cuts
+    return an equal plan."""
+    if head_cut == 0.0 and tail_cut == 0.0:
+        return plan
+    old_pad = head_pad_of(plan)
+    new_pad = old_pad - head_cut
+    tiles: list[GridTile] = []
+    for tile in plan.tiles:
+        if tile.trim_path is None:
+            tiles.append(tile)
+            continue
+        if tile.inset_path is not None:
+            # The inset's own beep, recovered through the same invariant.
+            inset_beep = old_pad - tile.inset_lead_pad_seconds + tile.inset_seek_seconds
+            inset_seek = max(0.0, inset_beep - new_pad)
+            inset_lead = max(0.0, new_pad - inset_beep)
+        else:
+            inset_seek, inset_lead = 0.0, 0.0
+        tiles.append(
+            replace(
+                tile,
+                seek_seconds=max(0.0, tile.beep_offset_in_clip - new_pad),
+                lead_pad_seconds=max(0.0, new_pad - tile.beep_offset_in_clip),
+                inset_seek_seconds=inset_seek,
+                inset_lead_pad_seconds=inset_lead,
+            )
+        )
+    hold_cut = max(0.0, min(tail_cut, plan.hold_seconds))
+    duration = plan.duration_seconds - head_cut - (tail_cut - hold_cut)
+    # A tile whose footage ended before the window would seek past its own
+    # end and hand ffmpeg no frames; in the stage it was black from its end
+    # on, so here it is filler: black, silent, the same inputs and track.
+    tiles = [
+        (
+            replace(
+                tile,
+                trim_path=None,
+                beep_offset_in_clip=0.0,
+                seek_seconds=0.0,
+                lead_pad_seconds=0.0,
+                source_duration_seconds=0.0,
+                inset_path=None,
+                inset_seek_seconds=0.0,
+                inset_lead_pad_seconds=0.0,
+            )
+            if tile.trim_path is not None and tile.seek_seconds >= tile.source_duration_seconds
+            else tile
+        )
+        for tile in tiles
+    ]
+    return replace(
+        plan, tiles=tuple(tiles), duration_seconds=duration, hold_seconds=plan.hold_seconds - hold_cut
+    )
+
+
+def overlay_plan_for(variant: GridStagePlan, *, source: GridStagePlan) -> GridStagePlan:
+    """``variant`` (a narrowed or edge plan) with the tiles' presence taken
+    from ``source``: a tile whose footage ended before the window is
+    filler for ffmpeg, but its counters, splits and held clock are still
+    on the overlay, as they were in the stage (review of #1244)."""
+    tiles = tuple(
+        replace(tile, trim_path=original.trim_path)
+        for tile, original in zip(variant.tiles, source.tiles, strict=True)
+    )
+    return replace(variant, tiles=tiles)
+
+
+def grid_edge_handle(plan: GridStagePlan, *, half: float, end: Literal["tail", "head"]) -> float:
+    """How much footage past the pad an edge can read, up to ``half``: at
+    the head the smallest seek among the real tiles (a lead-padded tile
+    has none); at the tail the smallest footage past the action end, and
+    none once a hold follows (the hold is a still, held by the boundary
+    just the same). The boundary holds a frame for what is missing."""
+    real = [tile for tile in plan.tiles if tile.trim_path is not None]
+    if not real:
+        return 0.0
+    if end == "head":
+        available = min(tile.seek_seconds for tile in real)
+    elif plan.hold_seconds > 0.0:
+        return 0.0
+    else:
+        available = min(
+            tile.source_duration_seconds - (tile.seek_seconds + plan.duration_seconds - tile.lead_pad_seconds)
+            for tile in real
+        )
+    return max(0.0, min(half, available))
+
+
+def grid_edge_is_hold_only(plan: GridStagePlan, *, half: float) -> bool:
+    """A tail edge that lies entirely in the hold: there is no action to
+    render, the driver makes it a still of the hold PNG."""
+    return plan.hold_seconds >= half
+
+
+def grid_edge_plan(plan: GridStagePlan, *, half: float, end: Literal["tail", "head"]) -> GridStagePlan:
+    """The stage window a boundary's edge render shows (issue #1244): at
+    the head, the handle before the pad plus the first ``half``; at the
+    tail, the last ``half`` (out of the hold first, then the action) plus
+    the handle after it. Not defined for a hold-only tail edge
+    (:func:`grid_edge_is_hold_only`)."""
+    handle = grid_edge_handle(plan, half=half, end=end)
+    if end == "head":
+        return narrow_grid_plan(plan, head_cut=-handle, tail_cut=plan.total_seconds - half)
+    if grid_edge_is_hold_only(plan, half=half):
+        raise ValueError("a tail edge inside the hold is a still of the hold, not a stage plan")
+    action_part = half - plan.hold_seconds
+    return narrow_grid_plan(plan, head_cut=plan.duration_seconds - action_part, tail_cut=-handle)
 
 
 def build_stage_plans(
@@ -1154,26 +1513,45 @@ def _early_summary_filters(
 
 @dataclass(frozen=True)
 class LowerThirdInput:
-    """A rasterized lower-third PNG (composed size) and how long it shows."""
+    """A rasterized lower-third (a composed-size PNG, or with ``clip`` an
+    alpha clip from ``look_motion``) and how long it shows."""
 
     path: Path
     seconds: float
+    clip: bool = False
+    #: Issue #1244: the window opens ``delay_seconds`` late (a boundary's
+    #: head edge) or drops ``skip_seconds`` already shown (the trimmed stage
+    #: after that boundary). See ``overlay_card.lower_third_filters``.
+    delay_seconds: float = 0.0
+    skip_seconds: float = 0.0
+
+    @property
+    def shown_seconds(self) -> float:
+        """How long the looped PNG input must last: until the window closes."""
+        return self.delay_seconds + self.seconds - self.skip_seconds
 
 
 StageTitleKind = Literal["none", "slate", "lower-third"]
 
 
 def stage_card(
-    plan: GridStagePlan, *, style: TitleStyle, seconds: float, expected_rounds: int | None
+    plan: GridStagePlan,
+    *,
+    style: TitleStyle,
+    seconds: float,
+    expected_rounds: int | None,
+    variant: str = "default",
 ) -> TitleCard:
     """The generated card for one grid stage (issue #973): the stage name,
     with its round count as an info line when known -- the same shape the
-    single-shooter export builds, so the two products read alike."""
+    single-shooter export builds, so the two products read alike.
+    ``variant`` names the Look template variant that draws it (#1242)."""
     return TitleCard(
         text=plan.stage_name,
         duration_seconds=seconds,
         style=style,
         info=(f"{expected_rounds} rounds",) if expected_rounds else (),
+        variant=variant,
     )
 
 
@@ -1185,9 +1563,14 @@ def build_card_segment_command(
     shooter_labels: Sequence[str],
     output_path: Path,
     ffmpeg_binary: str = "ffmpeg",
+    motion_clip: Path | None = None,
+    clip_offset_seconds: float = 0.0,
+    clip_delay_seconds: float = 0.0,
 ) -> tuple[str, ...]:
     """Hold one composed-size PNG for ``seconds`` as a segment with the
-    grid's own stream layout (issue #973).
+    grid's own stream layout (issue #973). With ``motion_clip`` (#1242)
+    the PNG is the card's backdrop and the clip, a template's alpha
+    frames, is laid over it with its last frame held to ``seconds``.
 
     A card is its own segment rather than a head extension of a stage's
     graph so the title page and the closing card do not have to hang off
@@ -1202,10 +1585,25 @@ def build_card_segment_command(
     rate = canvas.rate_string
     slots = len(shooter_labels)
     fan_out = "".join(f"[a{slot}]" for slot in range(slots))
-    graph = (
-        "[0:v]format=yuv420p,setsar=1[final];"
-        f"[1:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
-        f"asplit={slots + 1}[amix]{fan_out}"
+    audio_index = 1
+    video_parts = ["[0:v]format=yuv420p,setsar=1[final]"]
+    if motion_clip is not None:
+        audio_index = 2
+        motion_parts, label = motion_overlay_filters(
+            1,
+            rate=rate,
+            seconds=seconds,
+            source_label="0:v",
+            delay_seconds=clip_delay_seconds,
+            offset_seconds=clip_offset_seconds,
+        )
+        video_parts = [*motion_parts, f"[{label}]format=yuv420p,setsar=1[final]"]
+    graph = ";".join(
+        [
+            *video_parts,
+            f"[{audio_index}:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
+            f"asplit={slots + 1}[amix]{fan_out}",
+        ]
     )
     args: list[str] = [
         ffmpeg_binary,
@@ -1217,6 +1615,10 @@ def build_card_segment_command(
         rate,
         "-i",
         str(png_path),
+    ]
+    if motion_clip is not None:
+        args += ["-i", str(motion_clip)]
+    args += [
         "-f",
         "lavfi",
         "-i",
@@ -1232,6 +1634,98 @@ def build_card_segment_command(
     ]
     for slot in range(slots):
         args += ["-map", f"[a{slot}]"]
+    track_labels = audio_track_labels(shooter_labels)
+    args += list(_disposition_args(track_labels, 0))
+    args += list(_track_naming_args(track_labels))
+    args += [
+        "-r",
+        rate,
+        "-c:v",
+        "libx264",
+        "-preset",
+        "medium",
+        "-crf",
+        "20",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        SEGMENT_AUDIO_CODEC,
+        str(output_path),
+    ]
+    return tuple(args)
+
+
+def build_boundary_segment_command(
+    tail_edge: Path,
+    head_edge: Path,
+    *,
+    kind: TransitionKind,
+    seconds: float,
+    canvas: GridCanvas,
+    shooter_labels: Sequence[str],
+    output_path: Path,
+    ffmpeg_binary: str = "ffmpeg",
+    tail_pad_seconds: float = 0.0,
+    head_pad_seconds: float = 0.0,
+    sting_clip: Path | None = None,
+) -> tuple[str, ...]:
+    """The boundary segment (issue #1244): ``tail_edge`` crossfaded into
+    ``head_edge`` over ``seconds`` with ``xfade``, and every one of the
+    grid's N+1 audio tracks (the mix, then one per shooter, a filler's
+    being silence) crossfaded by stream index with ``acrossfade``, so the
+    stitch sees the layout, names and dispositions every other segment
+    carries. An edge whose trims had less handle than ``seconds / 2`` is
+    shorter; ``tail_pad_seconds`` holds its last frame (silence on every
+    track) and ``head_pad_seconds`` holds the head edge's first frame
+    (delaying every track) so both inputs span the fade.
+
+    ``sting_clip`` (issue #1245) is the sting's alpha clip, a third input
+    laid over the crossfaded video for the whole boundary before the
+    final pixel format; without it the argv is exactly what it was."""
+    rate = canvas.rate_string
+    tracks = len(shooter_labels) + 1
+    parts: list[str] = []
+    tail_v, head_v = "0:v", "1:v"
+    if tail_pad_seconds > 0.0:
+        parts.append(f"[0:v]tpad=stop_mode=clone:stop_duration={tail_pad_seconds:g}[tv]")
+        tail_v = "tv"
+    if head_pad_seconds > 0.0:
+        parts.append(f"[1:v]tpad=start_mode=clone:start_duration={head_pad_seconds:g}[hv]")
+        head_v = "hv"
+    xfade = f"[{tail_v}][{head_v}]xfade=transition={xfade_name(kind)}:duration={seconds:g}:offset=0"
+    inputs = ["-i", str(tail_edge), "-i", str(head_edge)]
+    if sting_clip is None:
+        parts.append(f"{xfade},format=yuv420p[final]")
+    else:
+        sting_parts, stung = sting_overlay_filters(2, rate=rate, seconds=seconds, source_label="xf")
+        parts += [f"{xfade}[xf]", *sting_parts, f"[{stung}]format=yuv420p[final]"]
+        inputs += ["-i", str(sting_clip)]
+    for k in range(tracks):
+        tail_a, head_a = f"0:a:{k}", f"1:a:{k}"
+        if tail_pad_seconds > 0.0:
+            parts.append(f"[0:a:{k}]apad=pad_dur={tail_pad_seconds:g}[t{k}]")
+            tail_a = f"t{k}"
+        if head_pad_seconds > 0.0:
+            parts.append(f"[1:a:{k}]adelay={round(head_pad_seconds * 1000)}:all=1[h{k}]")
+            head_a = f"h{k}"
+        parts.append(
+            f"[{tail_a}][{head_a}]acrossfade=d={seconds:g}:c1=tri:c2=tri,"
+            f"aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[x{k}]"
+        )
+    args: list[str] = [
+        ffmpeg_binary,
+        "-hide_banner",
+        "-y",
+        *inputs,
+        "-t",
+        f"{seconds:g}",
+        "-filter_complex",
+        ";".join(parts),
+        "-map",
+        "[final]",
+    ]
+    for k in range(tracks):
+        args += ["-map", f"[x{k}]"]
     track_labels = audio_track_labels(shooter_labels)
     args += list(_disposition_args(track_labels, 0))
     args += list(_track_naming_args(track_labels))
@@ -1495,19 +1989,30 @@ def build_stage_command(
     # after its predecessor: the only index safe to occupy is the next
     # free one. Composited on the action (see ``_build_filter_graph``),
     # so a card can never reach a frame of the hold.
-    lower_third_graph: tuple[int, float] | None = None
+    lower_third_graph: tuple[int, float, bool, float, float] | None = None
     if lower_third is not None:
-        args += [
-            "-loop",
-            "1",
-            "-framerate",
-            rate,
-            "-t",
-            f"{lower_third.seconds:g}",
-            "-i",
-            str(lower_third.path),
-        ]
-        lower_third_graph = (next_index, lower_third.seconds)
+        if lower_third.clip:
+            # A clip carries its own frames and length; the graph conforms
+            # and holds it (``lower_third_clip_filters``).
+            args += ["-i", str(lower_third.path)]
+        else:
+            args += [
+                "-loop",
+                "1",
+                "-framerate",
+                rate,
+                "-t",
+                f"{lower_third.shown_seconds:g}",
+                "-i",
+                str(lower_third.path),
+            ]
+        lower_third_graph = (
+            next_index,
+            lower_third.seconds,
+            lower_third.clip,
+            lower_third.delay_seconds,
+            lower_third.skip_seconds,
+        )
         next_index += 1
 
     # The tiles' insets, video only, dead last for the reason every input
@@ -1637,7 +2142,7 @@ def _build_filter_graph(
     sprite_index: int | None = None,
     hold_index: int | None = None,
     early_index: int | None = None,
-    lower_third: tuple[int, float] | None = None,
+    lower_third: tuple[int, float, bool, float, float] | None = None,
     inset_index: Sequence[int | None] = (),
     inset: GridInset | None = None,
 ) -> str:
@@ -1814,8 +2319,20 @@ def _build_filter_graph(
     # and sits upstream of the tail's ``concat``, like everything else
     # that draws on the action: there is no expression to get wrong.
     if lower_third is not None:
-        lt_index, lt_seconds = lower_third
-        lt_parts, video_label = lower_third_filters(lt_index, lt_seconds, source_label=video_label)
+        lt_index, lt_seconds, lt_clip, lt_delay, lt_skip = lower_third
+        if lt_clip:
+            lt_parts, video_label = lower_third_clip_filters(
+                lt_index,
+                lt_seconds,
+                rate=canvas.rate_string,
+                source_label=video_label,
+                delay_seconds=lt_delay,
+                skip_seconds=lt_skip,
+            )
+        else:
+            lt_parts, video_label = lower_third_filters(
+                lt_index, lt_seconds, source_label=video_label, delay_seconds=lt_delay, skip_seconds=lt_skip
+            )
         parts.extend(lt_parts)
 
     parts.extend(_video_tail(video_label, hold_label))
@@ -2012,6 +2529,7 @@ def _stage_overlay_plan(
     rasterizer: Rasterizer | None,
     tiles: bool = True,
     race_at: tuple[int, int] | None = None,
+    list_suffix: str = "",
 ) -> StageOverlayPlan:
     """Render one stage's sprites and describe its clocks.
 
@@ -2069,7 +2587,7 @@ def _stage_overlay_plan(
     # base to it, so the sprite steps on the same frame the clock does.
     list_path = write_concat_list(
         sequence,
-        work / f"sprites-stage{plan.stage_number}.txt",
+        work / f"sprites-stage{plan.stage_number}{list_suffix}.txt",
         frame_rate=canvas.frame_rate,
     )
 
@@ -2121,6 +2639,7 @@ def _stage_hold_still(
     ffmpeg_binary: str,
     runner: Runner,
     rasterizer: Rasterizer | None,
+    identities: Mapping[str, ResolvedIdentity] | None = None,
 ) -> Path:
     """Compose this stage's frozen summary still and return its path.
 
@@ -2166,6 +2685,7 @@ def _stage_hold_still(
         ffmpeg_binary=ffmpeg_binary,
         runner=runner,
         rasterizer=rasterizer,
+        accents={label: ident.accent for label, ident in (identities or {}).items()},
     )
 
 
@@ -2231,57 +2751,264 @@ def _grab_card_backdrop(
         return None
 
 
+@dataclass(frozen=True)
+class _CardAssets:
+    """What a card's encodes read: the composed still (or the backdrop,
+    with the motion clip laid over it)."""
+
+    png: Path
+    motion_clip: Path | None = None
+
+
+def _card_assets(
+    card: MatchTitle | TitleCard,
+    *,
+    name: str,
+    slot: CardSlot,
+    plan: GridStagePlan,
+    backdrop_at: Literal["head", "tail"],
+    canvas: GridCanvas,
+    look: Look | None,
+    rasterizer: Rasterizer | None,
+    work: Path,
+    ffmpeg_binary: str,
+    still_runner: Runner,
+    identities: Mapping[str, ResolvedIdentity] | None = None,
+) -> _CardAssets | None:
+    """Compose one full-frame card's files; ``None`` when it was skipped --
+    no rasterizer (already recorded as a degradation up front), a card
+    whose text could not be rasterized, or a motion clip ffmpeg refused.
+    Each is logged; none stops the render.
+
+    Sized to the *composed* grid of ``plan``, not the canvas (#691): the
+    stage segments are that size, and the stitch stream-copies video.
+    """
+    if rasterizer is None or look is None:
+        return None
+    composed_w, composed_h = _composed_size(canvas, plan)
+    motion = card_motion(
+        card,
+        slot=slot,
+        width=composed_w,
+        height=composed_h,
+        fps=canvas.fps,
+        look=look,
+        rasterizer=rasterizer,
+        max_seconds=card.duration_seconds,
+        shooters=_tile_identities(plan, identities),
+    )
+    if motion is None:
+        return None
+    backdrop = _grab_card_backdrop(
+        plan, at=backdrop_at, name=name, work=work, ffmpeg_binary=ffmpeg_binary, runner=still_runner
+    )
+    canvas_image = card_backdrop(backdrop, width=composed_w, height=composed_h, look=look)
+    if not motion.animated:
+        text = first_frame_image(motion)
+        if text is None:
+            return None
+        png = work / f"{name}.png"
+        compose_card(text, canvas_image).save(png)
+        return _CardAssets(png=png)
+    backdrop_png = work / f"{name}_backdrop.png"
+    canvas_image.save(backdrop_png)
+    clip_path = work / f"{name}_motion.mov"
+    try:
+        write_motion_clip(motion.frames, out=clip_path, fps=canvas.fps, ffmpeg_binary=ffmpeg_binary)
+    except MotionClipError as exc:
+        logger.warning("compare grid: card %s could not be drawn and is skipped: %s", name, exc)
+        return None
+    finally:
+        motion.close()
+    return _CardAssets(png=backdrop_png, motion_clip=clip_path)
+
+
+def _encode_card(
+    assets: _CardAssets,
+    *,
+    seconds: float,
+    name: str,
+    plan: GridStagePlan,
+    canvas: GridCanvas,
+    ffmpeg_binary: str,
+    runner: Runner,
+    clip_offset_seconds: float = 0.0,
+    clip_delay_seconds: float = 0.0,
+    encoder: _GridEncoder | None = None,
+) -> Path | None:
+    """Encode ``assets`` as a ``seconds``-long segment named ``name``
+    (through ``encoder``, so through the segment cache when it has one);
+    ``None`` (logged) when ffmpeg refused."""
+    work_path = assets.png.parent / f"{name}{SEGMENT_SUFFIX}"
+    cmd = build_card_segment_command(
+        assets.png,
+        seconds=seconds,
+        canvas=canvas,
+        shooter_labels=tuple(tile.label for tile in plan.tiles),
+        output_path=work_path,
+        ffmpeg_binary=ffmpeg_binary,
+        motion_clip=assets.motion_clip,
+        clip_offset_seconds=clip_offset_seconds,
+        clip_delay_seconds=clip_delay_seconds,
+    )
+    segment, error = (encoder or _GridEncoder(None, assets.png.parent)).encode(cmd, work_path, runner=runner)
+    if segment is None:
+        logger.warning("compare grid: card %s failed to encode and is skipped: %s", name, error)
+    return segment
+
+
 def _card_segment(
     card: MatchTitle | TitleCard,
     *,
     name: str,
+    slot: CardSlot,
     plan: GridStagePlan,
     backdrop_at: Literal["head", "tail"],
     canvas: GridCanvas,
-    theme: OverlayTheme | None,
+    look: Look | None,
     rasterizer: Rasterizer | None,
     work: Path,
     ffmpeg_binary: str,
     card_runner: Runner,
     still_runner: Runner,
+    identities: Mapping[str, ResolvedIdentity] | None = None,
 ) -> Path | None:
-    """Compose one full-frame card and encode it as a segment; ``None``
-    when it was skipped -- no rasterizer (already recorded as a
-    degradation up front), a card whose text could not be rasterized, or
-    an encode ffmpeg refused. Each is logged; none stops the render.
-
-    Sized to the *composed* grid of ``plan``, not the canvas (#691): the
-    stage segments are that size, and the stitch stream-copies video.
-    """
-    if rasterizer is None or theme is None:
-        return None
-    composed_w, composed_h = _composed_size(canvas, plan)
-    backdrop = _grab_card_backdrop(
-        plan, at=backdrop_at, name=name, work=work, ffmpeg_binary=ffmpeg_binary, runner=still_runner
-    )
-    image = build_card_still(
-        card, width=composed_w, height=composed_h, theme=theme, rasterizer=rasterizer, backdrop=backdrop
-    )
-    if image is None:
-        return None
-    png = work / f"{name}.png"
-    image.save(png)
-    segment = work / f"{name}{SEGMENT_SUFFIX}"
-    cmd = build_card_segment_command(
-        png,
-        seconds=card.duration_seconds,
+    """Compose one full-frame card and encode it as a segment
+    (:func:`_card_assets` then :func:`_encode_card`); ``None`` when either
+    step skipped it."""
+    assets = _card_assets(
+        card,
+        name=name,
+        slot=slot,
+        plan=plan,
+        backdrop_at=backdrop_at,
         canvas=canvas,
-        shooter_labels=tuple(tile.label for tile in plan.tiles),
-        output_path=segment,
+        look=look,
+        rasterizer=rasterizer,
+        work=work,
         ffmpeg_binary=ffmpeg_binary,
+        still_runner=still_runner,
+        identities=identities,
     )
-    completed = _run_ffmpeg(cmd, runner=card_runner)
-    if completed.returncode != 0:
-        logger.warning(
-            "compare grid: card %s failed to encode and is skipped: %s", name, _stderr_text(completed)
-        )
+    if assets is None:
         return None
-    return segment
+    return _encode_card(
+        assets,
+        seconds=card.duration_seconds,
+        name=name,
+        plan=plan,
+        canvas=canvas,
+        ffmpeg_binary=ffmpeg_binary,
+        runner=card_runner,
+    )
+
+
+def _tile_identities(
+    plan: GridStagePlan, identities: Mapping[str, ResolvedIdentity] | None
+) -> tuple[ResolvedIdentity, ...]:
+    """The resolved identities of this stage's tiles, in slot order, for
+    the ones the caller resolved (#1243)."""
+    if not identities:
+        return ()
+    return tuple(identities[tile.label] for tile in plan.tiles if tile.label in identities)
+
+
+@dataclass(frozen=True)
+class GridRenderStep:
+    """One step of a grid render, for a progress line: a stage's segment
+    (``plan``) being encoded or reused from the segment cache, or the
+    stitch (``plan`` is ``None``). ``index`` counts stages from 0 in plan
+    order and is ``total`` for the stitch. Cards, edges and boundaries
+    are not steps; the CLIs' "stage N of M" counts stages."""
+
+    index: int
+    total: int
+    plan: GridStagePlan | None
+    status: Literal["encoding", "reused", "stitching"]
+
+
+GridProgress = Callable[[GridRenderStep], None]
+
+
+class _GridEncoder:
+    """Runs a segment's ffmpeg command, or reuses the segment from the
+    segment cache (:mod:`splitsmith.segment_cache`); with no cache it runs
+    the command as written. ``keys_by_path`` is the key each segment came
+    from, so a boundary keys on its edges' identities rather than on
+    files the cache's own LRU touch re-dates."""
+
+    def __init__(self, cache: SegmentCache | None, work: Path) -> None:
+        self.cache = cache
+        self.work = work
+        self.used_keys: set[str] = set()
+        self.keys_by_path: dict[Path, str] = {}
+
+    def encode(
+        self,
+        cmd: tuple[str, ...],
+        out: Path,
+        *,
+        runner: Runner,
+        extra_inputs: Sequence[Path] = (),
+        virtual_inputs: Mapping[str, str] | None = None,
+        report: Callable[[Literal["encoding", "reused"]], None] | None = None,
+    ) -> tuple[Path | None, str]:
+        """The segment's path, or ``None`` and ffmpeg's complaint."""
+        if self.cache is None:
+            if report is not None:
+                report("encoding")
+            completed = _run_ffmpeg(cmd, runner=runner)
+            return (out, "") if completed.returncode == 0 else (None, _stderr_text(completed))
+        key = self.cache.key(
+            cmd,
+            output_path=out,
+            work_dir=self.work,
+            virtual_inputs=virtual_inputs,
+            extra_inputs=extra_inputs,
+        )
+        self.used_keys.add(key)
+        hit = self.cache.lookup(key, suffix=out.suffix)
+        if hit is not None:
+            if report is not None:
+                report("reused")
+            self.keys_by_path[hit] = key
+            return hit, ""
+        if report is not None:
+            report("encoding")
+        partial = self.cache.partial_path(key, suffix=out.suffix)
+        target = str(out)
+        try:
+            completed = _run_ffmpeg(
+                tuple(str(partial) if token == target else token for token in cmd), runner=runner
+            )
+            if completed.returncode != 0:
+                return None, _stderr_text(completed)
+            if not partial.is_file():
+                return None, f"ffmpeg reported success but wrote no {out.name}"
+            committed = self.cache.commit(partial, key, suffix=out.suffix)
+            self.keys_by_path[committed] = key
+            return committed, ""
+        finally:
+            partial.unlink(missing_ok=True)
+
+
+def _overlay_inputs(overlay: StageOverlayPlan | None) -> tuple[Path, ...]:
+    """The files a stage's overlay reads that are not argv tokens: every
+    sprite its concat list names, and the clock's font (named inside the
+    ``drawtext`` filter). The segment cache keys on their bytes."""
+    if overlay is None:
+        return ()
+    sprites: list[Path] = []
+    try:
+        lines = overlay.sprite_list_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        lines = []
+    for line in lines:
+        if line.startswith("file '") and line.endswith("'"):
+            sprite = Path(line[len("file '") : -1])
+            if sprite not in sprites:
+                sprites.append(sprite)
+    return (*sprites, overlay.font_path)
 
 
 def _run_ffmpeg(cmd: tuple[str, ...], *, runner: Runner) -> subprocess.CompletedProcess:
@@ -2350,6 +3077,54 @@ def _free_cell_still(
     return path
 
 
+def _grid_item_label(item: GridItem, stage_names: Sequence[str]) -> str:
+    """What a sting template is told is on either side of its cut (issue
+    #1245): a stage by its name, a match card by its text, a slate (whose
+    card the driver builds later) by the name of the stage it opens."""
+    if isinstance(item, GridStageItem):
+        return item.plan.stage_name
+    if item.card is not None:
+        return item.card.text
+    if item.stage_index is not None and 0 <= item.stage_index < len(stage_names):
+        return stage_names[item.stage_index]
+    return item.name
+
+
+class _EdgeFailedError(Exception):
+    """A boundary's edge or the boundary itself could not be rendered; the
+    transition becomes a cut."""
+
+
+@dataclass
+class _GridPrep:
+    """What an item's encodes read, made once (issue #1244): a card's
+    files, or a stage's lower third, hold still and free-cell still."""
+
+    assets: _CardAssets | None = None
+    lower_third: LowerThirdInput | None = None
+    hold_still: Path | None = None
+    free_still: Path | None = None
+    has_overlay: bool = False
+    failed: str | None = None
+
+
+def _grid_missing_handle(item: GridItem, *, half: float, end: Literal["tail", "head"]) -> float:
+    """How much of a boundary edge the item could not supply from footage:
+    zero for a card (its handle is its own frame) and for a hold-only tail
+    edge rendered as a still of the hold; ``half`` minus the trims' handle
+    for a stage."""
+    if isinstance(item, GridStageItem):
+        if end == "tail" and grid_edge_is_hold_only(item.plan, half=half):
+            return 0.0
+        return half - grid_edge_handle(item.plan, half=half, end=end)
+    return 0.0
+
+
+@with_card_failures(
+    lambda r, notes: replace(
+        r, degradations=(*r.degradations, *(OverlayDegradation(summary=n, detail=n) for n in notes))
+    )
+)
 def render_grid_mp4(
     shooters: Sequence[CompareShooterBundle],
     *,
@@ -2367,6 +3142,7 @@ def render_grid_mp4(
     probe_runner: Runner = subprocess.run,
     still_runner: Runner = subprocess.run,
     card_runner: Runner = subprocess.run,
+    boundary_runner: Runner = subprocess.run,
     rasterizer: Rasterizer | None = None,
     on_notice: NoticeHook | None = None,
     work_dir: Path | None = None,
@@ -2374,10 +3150,16 @@ def render_grid_mp4(
     closing: MatchTitle | None = None,
     stage_titles: StageTitleKind = "none",
     title_duration_seconds: float = 1.5,
+    card_variant: str = "default",
+    identities: Mapping[str, ResolvedIdentity] | None = None,
     inset: GridInset | None = None,
     free_cell: FreeCellKind = "blank",
     match_name: str = "",
     match_date: str | None = None,
+    transitions: Sequence[Transition] = (),
+    segment_cache: SegmentCache | None = None,
+    progress: GridProgress | None = None,
+    match_summary_seconds: float = 0.0,
 ) -> GridRenderResult:
     """Render every stage as a grid, then stitch them into one MP4.
 
@@ -2478,6 +3260,21 @@ def render_grid_mp4(
     debugged from, and skipping cleanup keeps a successful render from
     deleting a caller's own directory. Callers that want it gone should
     pass a path they own.
+
+    ``segment_cache`` keeps every encoded segment (stages, cards, edges,
+    boundaries) by the content of its command, as the single-shooter
+    render does: a second render of the same grid encodes nothing that
+    did not change and the stitch reads the rest from the cache. The
+    sprites and the clock's font reach the key as ``extra_inputs``
+    (:func:`_overlay_inputs`); the rasterizer still draws them each run.
+    ``progress`` hears each stage as it is encoded or reused, then the
+    stitch; a reused stage never reaches ``runner``.
+
+    ``match_summary_seconds`` above zero adds the match summary (spec
+    2026-10-08-grid-match-summary-design): one card after the last stage,
+    before the closing card, every shooter's match figures in their own
+    slot over their own last frame. It reads the shot data itself, so it
+    does not need ``overlay``; with no browser it is the frames alone.
     """
     # Before the canvas, the binary or anything else: this is a caller
     # error, not a render outcome, and it costs nothing to say so first.
@@ -2527,6 +3324,10 @@ def render_grid_mp4(
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     work = work_dir or output_path.parent / ".compare-grid-work"
+    if segment_cache is not None:
+        # The cache fingerprints a work file only through an absolute argv
+        # token; a relative one would be keyed by its name alone.
+        work = work.resolve()
     work.mkdir(parents=True, exist_ok=True)
 
     # Read once for the whole run, not per stage: every read opens the
@@ -2588,11 +3389,17 @@ def render_grid_mp4(
     # would simply find ``rasterizer is None`` per stage and degrade every
     # sprite to a blank canvas without anything having failed.
     cards_requested = title_page is not None or closing is not None or stage_titles != "none"
+    # A sting (#1245) is a Look template drawn by the same browser.
+    sting_requested = any(is_sting(t.kind) for t in transitions)
+    # The match summary's text is drawn by the same browser.
+    match_summary_requested = match_summary_seconds > 0
     # A free square with something to say is drawn by the same browser.
     free_requested = free_cell != "blank" and any(_unreached_cells(p) for p in plans)
     active_rasterizer: Rasterizer | None = rasterizer
     owned_rasterizer: ChromiumRasterizer | None = None
-    if (overlay or cards_requested or free_requested) and rasterizer is None:
+    if (
+        overlay or cards_requested or free_requested or sting_requested or match_summary_requested
+    ) and rasterizer is None:
         owned_rasterizer = ChromiumRasterizer()
         try:
             active_rasterizer = owned_rasterizer.__enter__()
@@ -2608,7 +3415,16 @@ def render_grid_mp4(
 
     outcomes: list[StageOutcome] = []
     segments: list[Path] = []
-    card_theme = load_theme(overlay_theme) if cards_requested else None
+    encoder = _GridEncoder(segment_cache, work)
+
+    def report(
+        index: int, plan: GridStagePlan | None, status: Literal["encoding", "reused", "stitching"]
+    ) -> None:
+        if progress is not None:
+            progress(GridRenderStep(index=index, total=len(plans), plan=plan, status=status))
+
+    card_look = load_look(overlay_theme) if cards_requested or sting_requested else None
+    card_theme = theme_for(card_look) if card_look is not None else None
     free_theme = card_theme or (load_theme(overlay_theme) if free_requested else None)
     free_tiles = load_overlay_data(shooters) if free_requested and free_cell == "splits" else {}
     free_rounds = load_expected_rounds(shooters) if free_requested and free_cell == "stage" else {}
@@ -2620,209 +3436,581 @@ def render_grid_mp4(
     elapsed = 0.0
     chapters: list[Chapter] = []
     match_title = title_page.text if title_page is not None else None
-    try:
-        if title_page is not None:
-            title_segment = _card_segment(
-                title_page,
-                name="title_page",
-                plan=plans[0],
-                backdrop_at="head",
+    labels_tuple = tuple(labels)
+    spine = plan_grid_spine(
+        plans,
+        title_page=title_page,
+        closing=closing,
+        stage_titles=stage_titles,
+        title_duration_seconds=title_duration_seconds,
+        transitions=transitions,
+        tail_pad_seconds=tail_pad_seconds,
+        match_summary_seconds=match_summary_seconds,
+    )
+    items: list[GridItem] = list(spine.items)
+    live: dict[int, GridBoundary] = {b.after_index: b for b in spine.boundaries}
+    transition_notes: list[OverlayDegradation] = [
+        OverlayDegradation(summary=note, detail=note) for note in spine.degradations
+    ]
+    prepared: dict[int, _GridPrep] = {}
+    pending_half = 0.0
+    last_boundary: GridBoundary | None = None
+    run_starts: dict[int, float] = {}
+
+    def sting_for_boundary(
+        kind: str, before: GridItem, after: GridItem, *, seconds: float
+    ) -> tuple[CardMotion | None, str]:
+        """The sting ``kind`` names, loaded for this boundary, or ``None``
+        and the reason (no browser, not in the Look, failed to load)."""
+        name = sting_name(kind)
+        if card_look is None or active_rasterizer is None:
+            return None, f"sting {name}: no browser to draw it"
+        if sting_template_for(card_look, name) is None:
+            return None, f"sting {name} is not in the {card_look.name} Look"
+        stage_names = [plan.stage_name for plan in plans]
+        shooters_seen = (
+            tuple(identities[label] for label in labels_tuple if label in identities) if identities else ()
+        )
+        motion = sting_motion(
+            card_look,
+            kind,
+            seconds=seconds,
+            from_label=_grid_item_label(before, stage_names),
+            to_label=_grid_item_label(after, stage_names),
+            width=canvas.width,
+            height=canvas.height,
+            fps=canvas.fps,
+            rasterizer=active_rasterizer,
+            shooters=shooters_seen,
+        )
+        if motion is None:
+            return None, f"sting {name} failed to load from the {card_look.name} Look"
+        return motion, ""
+
+    def note_cut(after: int, reason: str) -> None:
+        """A boundary that cannot be built becomes a cut: both neighbours
+        keep their full length and the result says why."""
+        del live[after]
+        items[after] = replace(items[after], tail_cut_seconds=0.0)
+        items[after + 1] = replace(items[after + 1], head_cut_seconds=0.0)
+        text = f"transition after {items[after].name} failed to render ({reason}); rendered as a cut"
+        logger.warning("compare grid: %s", text)
+        transition_notes.append(OverlayDegradation(summary=text, detail=text))
+
+    def overlay_for(
+        plan: GridStagePlan, *, source: GridStagePlan, head_pad: float | None, list_suffix: str
+    ) -> StageOverlayPlan | None:
+        """The stage's overlay plan for one plan variant: the original
+        (``head_pad`` None) takes the render's head pad, byte-identical to
+        the no-transition render; a narrowed or edge plan takes its own
+        head pad (negative for a tail edge) and the source's tile presence,
+        so the clocks and sprite states move with the cut and a tile the
+        window has no footage of still shows its figures."""
+        free_cells = _unreached_cells(plan)
+        race_at = free_cells[0] if race and free_cells and active_rasterizer is not None else None
+        if not ((overlay or race_at is not None) and font_path is not None):
+            return None
+        stage_overlay = _stage_overlay_plan(
+            plan if head_pad is None else overlay_plan_for(plan, source=source),
+            canvas,
+            overlay_data,
+            theme_name=overlay_theme,
+            font_path=font_path,
+            head_pad_seconds=head_pad_seconds if head_pad is None else head_pad,
+            work=work,
+            rasterizer=active_rasterizer,
+            tiles=overlay,
+            race_at=race_at,
+            list_suffix=list_suffix,
+        )
+        if not draw_clock:
+            # Dropping the clocks is what removes ``drawtext`` from the
+            # command: ``_clock_filters`` emits one filter per clock and,
+            # with none, emits nothing and hands its own input label
+            # straight back, so the rest of the video chain composes onto
+            # ``[ovlgrid]`` unchanged.
+            stage_overlay = replace(stage_overlay, clocks=())
+        return stage_overlay
+
+    def free_still_for(plan: GridStagePlan) -> Path | None:
+        free_cells = _unreached_cells(plan)
+        race_at = free_cells[0] if race and free_cells and active_rasterizer is not None else None
+        if race_at is not None and free_theme is not None:
+            cell_w, cell_h = _cell_size(canvas, plan)
+            still = work / f"free-stage{plan.stage_number}.png"
+            surface_still(width=cell_w, height=cell_h, theme=free_theme).save(still)
+            return still
+        if (
+            free_requested
+            and free_cell != "race"
+            and free_cells
+            and active_rasterizer is not None
+            and free_theme is not None
+        ):
+            return _free_cell_still(
+                plan,
+                kind=free_cell,
                 canvas=canvas,
-                theme=card_theme,
+                theme=free_theme,
+                rasterizer=active_rasterizer,
+                work=work,
+                match_name=match_name,
+                match_date=match_date,
+                tiles={
+                    label: data for (label, number), data in free_tiles.items() if number == plan.stage_number
+                },
+                expected_rounds=free_rounds.get(plan.stage_number),
+            )
+        return None
+
+    def match_summary_assets() -> _CardAssets | None:
+        """The match summary's still, at the composed size of the last
+        stage (every plan shares the grid: the stream layout check above).
+        ``None`` (logged) when it could not be saved: the card is skipped."""
+        from .overlay_summary import (
+            build_match_summary_grid_still,
+            extract_match_summary_freezes,
+            grid_match_summaries,
+        )
+
+        plan = plans[-1]
+        title = match_name or (title_page.text if title_page else closing.text if closing else "")
+        summaries = grid_match_summaries(
+            plans,
+            overlay_data or load_overlay_data(shooters),
+            title=title,
+            duration_seconds=match_summary_seconds,
+        )
+        freezes = extract_match_summary_freezes(
+            plans, work_dir=work / "match-summary", ffmpeg_binary=binary, runner=still_runner
+        )
+        composed_w, composed_h = _composed_size(canvas, plan)
+        still = build_match_summary_grid_still(
+            plan,
+            summaries,
+            freezes,
+            width=composed_w,
+            height=composed_h,
+            title=title,
+            theme=load_theme(overlay_theme),
+            rasterizer=active_rasterizer,
+            accents={
+                label: ident.accent for label, ident in (identities or {}).items() if ident.accent is not None
+            },
+        )
+        png = work / "match_summary.png"
+        try:
+            still.save(png)
+        except OSError as exc:
+            logger.warning("compare grid: the match summary could not be saved and is skipped: %s", exc)
+            return None
+        return _CardAssets(png=png)
+
+    def prepare(item: GridItem) -> _GridPrep:
+        """Everything an item's encodes read from disk, made once: a card's
+        files, or a stage's lower third, hold still and free-cell still. A
+        hold still that cannot be composed fails the stage (``failed``),
+        as it always did; a card that cannot be drawn is ``skipped``."""
+        if isinstance(item, GridCardItem) and item.kind == "match_summary":
+            return _GridPrep(assets=match_summary_assets())
+        if isinstance(item, GridCardItem):
+            plan = plans[item.stage_index if item.stage_index is not None else 0]
+            card: MatchTitle | TitleCard
+            if item.kind == "slate":
+                card = stage_card(
+                    plan,
+                    style="slate",
+                    seconds=title_duration_seconds,
+                    expected_rounds=expected_rounds.get(plan.stage_number),
+                    variant=card_variant,
+                )
+            else:
+                assert item.card is not None
+                card = item.card
+            assert item.kind != "match_summary"
+            assets = _card_assets(
+                card,
+                name=item.name,
+                slot=item.kind,
+                plan=plan,
+                backdrop_at="tail" if item.kind == "closing" else "head",
+                canvas=canvas,
+                look=card_look,
                 rasterizer=active_rasterizer,
                 work=work,
                 ffmpeg_binary=binary,
-                card_runner=card_runner,
                 still_runner=still_runner,
+                identities=identities,
             )
-            if title_segment is not None:
-                segments.append(title_segment)
-                elapsed += title_page.duration_seconds
-        for plan in plans:
-            stage_start = elapsed
-            segment = work / f"stage{plan.stage_number}{SEGMENT_SUFFIX}"
-            stage_overlay: StageOverlayPlan | None = None
-            hold_still: Path | None = None
-            lower_third: LowerThirdInput | None = None
-            if stage_titles != "none":
-                card = stage_card(
-                    plan,
-                    style=stage_titles,
-                    seconds=title_duration_seconds,
-                    expected_rounds=expected_rounds.get(plan.stage_number),
-                )
-                if stage_titles == "slate":
-                    slate_segment = _card_segment(
-                        card,
-                        name=f"slate-stage{plan.stage_number}",
-                        plan=plan,
-                        backdrop_at="head",
-                        canvas=canvas,
-                        theme=card_theme,
-                        rasterizer=active_rasterizer,
-                        work=work,
-                        ffmpeg_binary=binary,
-                        card_runner=card_runner,
-                        still_runner=still_runner,
+            return _GridPrep(assets=assets)
+        plan = item.plan
+        prep = _GridPrep()
+        if stage_titles == "lower-third" and active_rasterizer is not None and card_look is not None:
+            card = stage_card(
+                plan,
+                style=stage_titles,
+                seconds=title_duration_seconds,
+                expected_rounds=expected_rounds.get(plan.stage_number),
+                variant=card_variant,
+            )
+            composed_w, composed_h = _composed_size(canvas, plan)
+            lt_motion = card_motion(
+                card,
+                slot="lower_third",
+                width=composed_w,
+                height=composed_h,
+                fps=canvas.fps,
+                look=card_look,
+                rasterizer=active_rasterizer,
+                max_seconds=title_duration_seconds,
+                shooters=_tile_identities(plan, identities),
+            )
+            if lt_motion is not None and not lt_motion.animated:
+                image = first_frame_image(lt_motion)
+                if image is not None:
+                    png = work / f"lower-third-stage{plan.stage_number}.png"
+                    image.save(png)
+                    prep.lower_third = LowerThirdInput(path=png, seconds=title_duration_seconds)
+            elif lt_motion is not None:
+                clip_path = work / f"lower-third-stage{plan.stage_number}_motion.mov"
+                try:
+                    write_motion_clip(lt_motion.frames, out=clip_path, fps=canvas.fps, ffmpeg_binary=binary)
+                    prep.lower_third = LowerThirdInput(
+                        path=clip_path, seconds=title_duration_seconds, clip=True
                     )
-                    if slate_segment is not None:
-                        segments.append(slate_segment)
-                        elapsed += card.duration_seconds
-                elif active_rasterizer is not None and card_theme is not None:
-                    composed_w, composed_h = _composed_size(canvas, plan)
-                    image = build_lower_third(
-                        card,
-                        width=composed_w,
-                        height=composed_h,
-                        theme=card_theme,
-                        rasterizer=active_rasterizer,
+                except MotionClipError as exc:
+                    logger.warning(
+                        "compare grid: stage %d lower third could not be drawn and is dropped: %s",
+                        plan.stage_number,
+                        exc,
                     )
-                    if image is not None:
-                        png = work / f"lower-third-stage{plan.stage_number}.png"
-                        image.save(png)
-                        lower_third = LowerThirdInput(path=png, seconds=title_duration_seconds)
-            # ``font_path`` is set exactly when the sprites are; naming both
-            # keeps that obvious rather than asserting it.
-            free_cells = _unreached_cells(plan)
-            race_at = free_cells[0] if race and free_cells and active_rasterizer is not None else None
-            if (overlay or race_at is not None) and font_path is not None:
-                stage_overlay = _stage_overlay_plan(
+                finally:
+                    lt_motion.close()
+        # ``font_path`` is set exactly when the sprites are; naming both
+        # keeps that obvious rather than asserting it.
+        free_cells = _unreached_cells(plan)
+        race_at = free_cells[0] if race and free_cells and active_rasterizer is not None else None
+        prep.has_overlay = (overlay or race_at is not None) and font_path is not None
+        if prep.has_overlay and plan.hold_seconds > 0:
+            # A missing ``drawtext`` costs the summary nothing: the clock
+            # is a separate ffmpeg filter-graph chain (see
+            # ``_clock_filters``) that no longer draws once the action
+            # ends, and the summary's own text is composed through
+            # headless Chromium rasterizing CSS (``overlay_html`` /
+            # ``overlay_raster``, issue #683's amendment -- neither PIL nor
+            # drawtext), so a host that lost the clock still gets full
+            # summaries. A missing rasterizer (see the preflight above)
+            # costs the summary its text but not the still itself --
+            # ``build_hold_still`` composes the blurred freeze either way.
+            #
+            # Caught, not raised, and for the same reason a failed ffmpeg
+            # call below is: one bad stage is reported and skipped so the
+            # rest still stitch. ``overlay_summary`` already degrades an
+            # unreadable trim or a bad freeze to a black cell, so what
+            # reaches here is the whole-stage kind -- a font that will not
+            # load, a disk that will not take the PNG. Building the segment
+            # anyway is not an option: without the still the stage's audio
+            # would outlast its video, which is the one fault nothing
+            # downstream reports.
+            try:
+                prep.hold_still = _stage_hold_still(
                     plan,
                     canvas,
                     overlay_data,
                     theme_name=overlay_theme,
-                    font_path=font_path,
-                    head_pad_seconds=head_pad_seconds,
                     work=work,
+                    ffmpeg_binary=binary,
+                    runner=still_runner,
                     rasterizer=active_rasterizer,
-                    tiles=overlay,
-                    race_at=race_at,
+                    identities=identities,
                 )
-                if not draw_clock:
-                    # Dropping the clocks is what removes ``drawtext`` from
-                    # the command: ``_clock_filters`` emits one filter per
-                    # clock and, with none, emits nothing and hands its own
-                    # input label straight back, so the rest of the video
-                    # chain composes onto ``[ovlgrid]`` unchanged.
-                    stage_overlay = replace(stage_overlay, clocks=())
-                if plan.hold_seconds > 0:
-                    # A missing ``drawtext`` costs the summary nothing: the
-                    # clock is a separate ffmpeg filter-graph chain (see
-                    # ``_clock_filters``) that no longer draws once the
-                    # action ends, and the summary's own text is composed
-                    # through headless Chromium rasterizing CSS
-                    # (``overlay_html``/``overlay_raster``, issue #683's
-                    # amendment -- neither PIL nor drawtext), so a host that
-                    # lost the clock still gets full summaries. A missing
-                    # rasterizer (see the preflight above) costs the summary
-                    # its text but not the still itself -- ``build_hold_still``
-                    # composes the blurred freeze either way.
-                    #
-                    # Caught, not raised, and for the same reason a failed
-                    # ffmpeg call below is: one bad stage is reported and
-                    # skipped so the rest still stitch. ``overlay_summary``
-                    # already degrades an unreadable trim or a bad freeze to
-                    # a black cell, so what reaches here is the whole-stage
-                    # kind -- a font that will not load, a disk that will not
-                    # take the PNG. Building the segment anyway is not an
-                    # option: without the still the stage's audio would
-                    # outlast its video, which is the one fault nothing
-                    # downstream reports.
-                    try:
-                        hold_still = _stage_hold_still(
-                            plan,
-                            canvas,
-                            overlay_data,
-                            theme_name=overlay_theme,
-                            work=work,
-                            ffmpeg_binary=binary,
-                            runner=still_runner,
-                            rasterizer=active_rasterizer,
+            except Exception as exc:  # noqa: BLE001 -- one bad stage must not lose the match
+                prep.failed = f"could not compose the stage summary still: {exc}"
+                logger.warning("compare grid stage %d: %s", plan.stage_number, prep.failed)
+                return prep
+        prep.free_still = free_still_for(plan)
+        return prep
+
+    def stage_command(
+        item: GridStageItem,
+        prep: _GridPrep,
+        plan: GridStagePlan,
+        *,
+        lower_third: LowerThirdInput | None,
+        output: Path,
+        head_pad: float | None,
+        list_suffix: str,
+    ) -> tuple[tuple[str, ...], tuple[Path, ...]]:
+        """The stage's command and the files it reads that are not argv
+        tokens (:func:`_overlay_inputs`)."""
+        stage_overlay = (
+            overlay_for(plan, source=item.plan, head_pad=head_pad, list_suffix=list_suffix)
+            if prep.has_overlay
+            else None
+        )
+        cmd = build_stage_command(
+            plan,
+            canvas=canvas,
+            output_path=output,
+            ffmpeg_binary=binary,
+            overlay=stage_overlay,
+            hold_still_path=prep.hold_still if plan.hold_seconds > 0 else None,
+            lower_third=lower_third,
+            inset=inset,
+            free_cell_still=prep.free_still,
+        )
+        return cmd, _overlay_inputs(stage_overlay)
+
+    def encode_edge(item: GridItem, prep: _GridPrep, *, half: float, end: Literal["tail", "head"]) -> Path:
+        """A boundary's edge of ``item`` (issue #1244): ``2 * half`` seconds
+        around the cut (less where the trims hold no handle), rendered
+        with the item's own builder and the grid's N+1 tracks, on the
+        boundary runner. Raises when the item cannot provide one."""
+        name = f"edge-{item.name}-{end}"
+        out = work / f"{name}{SEGMENT_SUFFIX}"
+        if isinstance(item, GridCardItem):
+            if prep.assets is None:
+                raise _EdgeFailedError(f"{item.name} was skipped")
+            segment = _encode_card(
+                prep.assets,
+                seconds=2 * half,
+                name=name,
+                plan=plans[item.stage_index if item.stage_index is not None else 0],
+                canvas=canvas,
+                ffmpeg_binary=binary,
+                runner=boundary_runner,
+                clip_delay_seconds=half if end == "head" else 0.0,
+                clip_offset_seconds=item.card_seconds - half if end == "tail" else 0.0,
+                encoder=encoder,
+            )
+            if segment is None:
+                raise _EdgeFailedError(f"{name} failed to encode")
+            return segment
+        if prep.failed is not None:
+            raise _EdgeFailedError(prep.failed)
+        plan = item.plan
+        extra: tuple[Path, ...] = ()
+        if end == "tail" and grid_edge_is_hold_only(plan, half=half):
+            # The whole edge lies in the hold: a still of the hold PNG, the
+            # same N+1 silent tracks a card segment carries.
+            if prep.hold_still is None:
+                raise _EdgeFailedError("the stage holds its summary but has no still to hold")
+            cmd = build_card_segment_command(
+                prep.hold_still,
+                seconds=2 * half,
+                canvas=canvas,
+                shooter_labels=labels_tuple,
+                output_path=out,
+                ffmpeg_binary=binary,
+            )
+        else:
+            edge_plan = grid_edge_plan(plan, half=half, end=end)
+            handle = grid_edge_handle(plan, half=half, end=end)
+            lower_third = prep.lower_third
+            if lower_third is not None:
+                if end == "head":
+                    # The edge starts ``handle`` before the stage (the boundary
+                    # prepends the rest of the half), so the card opens then.
+                    lower_third = replace(lower_third, delay_seconds=handle)
+                else:
+                    skip = plan.duration_seconds - (half - plan.hold_seconds)
+                    lower_third = (
+                        replace(lower_third, skip_seconds=skip) if skip < lower_third.seconds else None
+                    )
+            edge_head_pad = (
+                head_pad_of(plan) + handle
+                if end == "head"
+                else head_pad_of(plan) - (plan.duration_seconds - (half - plan.hold_seconds))
+            )
+            cmd, extra = stage_command(
+                item,
+                prep,
+                edge_plan,
+                lower_third=lower_third,
+                output=out,
+                head_pad=edge_head_pad,
+                list_suffix=f"-{end}",
+            )
+        edge, error = encoder.encode(cmd, out, runner=boundary_runner, extra_inputs=extra)
+        if edge is None:
+            raise _EdgeFailedError(error)
+        return edge
+
+    try:
+        for i, item in enumerate(items):
+            prep = prepared.pop(i) if i in prepared else prepare(item)
+            boundary = live.get(i)
+            boundary_segment: Path | None = None
+            if boundary is not None:
+                nxt = items[i + 1]
+                if i + 1 not in prepared:
+                    prepared[i + 1] = prepare(nxt)
+                half = boundary.duration_seconds / 2.0
+                kind = boundary.kind
+                sting: CardMotion | None = None
+                sting_clip: Path | None = None
+                if is_sting(kind):
+                    # Issue #1245: the sting's template, or the fade it
+                    # rides with a note saying why.
+                    sting, reason = sting_for_boundary(kind, item, nxt, seconds=boundary.duration_seconds)
+                    if sting is None:
+                        text = f"{reason}; transition after {item.name} rendered as a fade"
+                        logger.warning("compare grid: %s", text)
+                        transition_notes.append(OverlayDegradation(summary=text, detail=text))
+                        kind = "fade"
+                    else:
+                        sting_clip = work / f"{boundary.name}_sting.mov"
+                try:
+                    tail_edge = encode_edge(item, prep, half=half, end="tail")
+                    head_edge = encode_edge(nxt, prepared[i + 1], half=half, end="head")
+                    if sting is not None and sting_clip is not None:
+                        write_motion_clip(sting.frames, out=sting_clip, fps=canvas.fps, ffmpeg_binary=binary)
+                    boundary_out = work / f"{boundary.name}{SEGMENT_SUFFIX}"
+                    cmd = build_boundary_segment_command(
+                        tail_edge,
+                        head_edge,
+                        kind=kind,
+                        seconds=boundary.duration_seconds,
+                        canvas=canvas,
+                        shooter_labels=labels_tuple,
+                        output_path=boundary_out,
+                        ffmpeg_binary=binary,
+                        tail_pad_seconds=_grid_missing_handle(item, half=half, end="tail"),
+                        head_pad_seconds=_grid_missing_handle(nxt, half=half, end="head"),
+                        sting_clip=sting_clip,
+                    )
+                    edge_keys = (
+                        {
+                            str(tail_edge): encoder.keys_by_path[tail_edge],
+                            str(head_edge): encoder.keys_by_path[head_edge],
+                        }
+                        if segment_cache is not None
+                        else None
+                    )
+                    boundary_segment, error = encoder.encode(
+                        cmd, boundary_out, runner=boundary_runner, virtual_inputs=edge_keys
+                    )
+                    if boundary_segment is None:
+                        raise _EdgeFailedError(error)
+                except (_EdgeFailedError, MotionClipError) as exc:
+                    note_cut(i, str(exc))
+                    item = items[i]
+                    boundary = None
+                finally:
+                    if sting is not None:
+                        sting.close()
+            # The chapter sits where the cut was: the boundary before this
+            # run is already in ``elapsed`` and half of it belongs to the
+            # previous item.
+            if isinstance(item, GridCardItem) and item.kind == "slate" and item.stage_index is not None:
+                run_starts[item.stage_index] = elapsed - pending_half
+            segment: Path | None
+            if isinstance(item, GridCardItem):
+                if prep.assets is None:
+                    segment = None
+                else:
+                    segment = _encode_card(
+                        prep.assets,
+                        seconds=item.duration_seconds,
+                        name=item.name,
+                        plan=plans[item.stage_index if item.stage_index is not None else 0],
+                        canvas=canvas,
+                        ffmpeg_binary=binary,
+                        runner=card_runner,
+                        clip_offset_seconds=item.head_cut_seconds,
+                        encoder=encoder,
+                    )
+            else:
+                stage_start = run_starts.pop(item.index, elapsed - pending_half)
+                if prep.failed is not None:
+                    outcomes.append(
+                        StageOutcome(
+                            stage_number=item.plan.stage_number,
+                            stage_name=item.plan.stage_name,
+                            ok=False,
+                            error=prep.failed,
                         )
-                    except Exception as exc:  # noqa: BLE001 -- one bad stage must not lose the match
-                        detail = f"could not compose the stage summary still: {exc}"
-                        logger.warning("compare grid stage %d: %s", plan.stage_number, detail)
+                    )
+                    segment = None
+                else:
+                    cut = bool(item.head_cut_seconds or item.tail_cut_seconds)
+                    plan = (
+                        narrow_grid_plan(
+                            item.plan, head_cut=item.head_cut_seconds, tail_cut=item.tail_cut_seconds
+                        )
+                        if cut
+                        else item.plan
+                    )
+                    lower_third = prep.lower_third
+                    if lower_third is not None and item.head_cut_seconds:
+                        lower_third = (
+                            None
+                            if item.head_cut_seconds >= lower_third.seconds
+                            else replace(lower_third, skip_seconds=item.head_cut_seconds)
+                        )
+                    cmd, extra = stage_command(
+                        item,
+                        prep,
+                        plan,
+                        lower_third=lower_third,
+                        output=work / f"{item.name}{SEGMENT_SUFFIX}",
+                        head_pad=head_pad_of(item.plan) - item.head_cut_seconds if cut else None,
+                        list_suffix="-cut" if cut else "",
+                    )
+                    segment, error = encoder.encode(
+                        cmd,
+                        work / f"{item.name}{SEGMENT_SUFFIX}",
+                        runner=runner,
+                        extra_inputs=extra,
+                        report=lambda status, n=item.index, p=item.plan: report(n, p, status),
+                    )
+                    if segment is None:
                         outcomes.append(
                             StageOutcome(
-                                stage_number=plan.stage_number,
-                                stage_name=plan.stage_name,
+                                stage_number=item.plan.stage_number,
+                                stage_name=item.plan.stage_name,
                                 ok=False,
-                                error=detail,
+                                error=error,
                             )
                         )
-                        continue
-            free_still: Path | None = None
-            if race_at is not None and free_theme is not None:
-                cell_w, cell_h = _cell_size(canvas, plan)
-                free_still = work / f"free-stage{plan.stage_number}.png"
-                surface_still(width=cell_w, height=cell_h, theme=free_theme).save(free_still)
-            elif (
-                free_requested
-                and free_cell != "race"
-                and free_cells
-                and active_rasterizer is not None
-                and free_theme is not None
-            ):
-                free_still = _free_cell_still(
-                    plan,
-                    kind=free_cell,
-                    canvas=canvas,
-                    theme=free_theme,
-                    rasterizer=active_rasterizer,
-                    work=work,
-                    match_name=match_name,
-                    match_date=match_date,
-                    tiles={
-                        label: data
-                        for (label, number), data in free_tiles.items()
-                        if number == plan.stage_number
-                    },
-                    expected_rounds=free_rounds.get(plan.stage_number),
-                )
-            cmd = build_stage_command(
-                plan,
-                canvas=canvas,
-                output_path=segment,
-                ffmpeg_binary=binary,
-                overlay=stage_overlay,
-                hold_still_path=hold_still,
-                lower_third=lower_third,
-                inset=inset,
-                free_cell_still=free_still,
-            )
-            completed = _run_ffmpeg(cmd, runner=runner)
-            if completed.returncode != 0:
-                outcomes.append(
-                    StageOutcome(
-                        stage_number=plan.stage_number,
-                        stage_name=plan.stage_name,
-                        ok=False,
-                        error=_stderr_text(completed),
+                    else:
+                        chapters.append(
+                            Chapter(
+                                start_seconds=stage_start,
+                                title=item.plan.stage_name or f"Stage {item.plan.stage_number}",
+                            )
+                        )
+                        outcomes.append(
+                            StageOutcome(
+                                stage_number=item.plan.stage_number, stage_name=item.plan.stage_name, ok=True
+                            )
+                        )
+            pending_half = 0.0
+            if segment is None:
+                # The item is gone; a boundary on either side of it must not
+                # stay: the one into it is already in the list and counted,
+                # the one out of it has its neighbour trimmed.
+                if boundary is not None:
+                    note_cut(i, f"{item.name} was not rendered")
+                if last_boundary is not None and segments:
+                    segments.pop()
+                    elapsed -= last_boundary.duration_seconds
+                    note = (
+                        f"transition into {item.name} dropped: the item was not rendered, and "
+                        f"{items[i - 1].name}'s last {last_boundary.duration_seconds / 2.0:g}s went with it"
                     )
-                )
+                    logger.warning("compare grid: %s", note)
+                    transition_notes.append(OverlayDegradation(summary=note, detail=note))
+                last_boundary = None
                 continue
             segments.append(segment)
-            elapsed += plan.total_seconds
-            chapters.append(
-                Chapter(start_seconds=stage_start, title=plan.stage_name or f"Stage {plan.stage_number}")
-            )
-            outcomes.append(StageOutcome(stage_number=plan.stage_number, stage_name=plan.stage_name, ok=True))
-        if closing is not None:
-            closing_segment = _card_segment(
-                closing,
-                name="closing",
-                plan=plans[-1],
-                backdrop_at="tail",
-                canvas=canvas,
-                theme=card_theme,
-                rasterizer=active_rasterizer,
-                work=work,
-                ffmpeg_binary=binary,
-                card_runner=card_runner,
-                still_runner=still_runner,
-            )
-            if closing_segment is not None:
-                segments.append(closing_segment)
+            elapsed += item.duration_seconds
+            last_boundary = None
+            if boundary_segment is not None and boundary is not None:
+                segments.append(boundary_segment)
+                elapsed += boundary.duration_seconds
+                pending_half = boundary.duration_seconds / 2.0
+                last_boundary = boundary
     finally:
         # Closed as soon as the stage loop is done, not held open through
         # the final concat/stitch below -- the stitch is ffmpeg-only and
@@ -2853,16 +4041,19 @@ def render_grid_mp4(
         ffmpeg_binary=binary,
         audio_labels=labels,
     )
+    report(len(plans), None, "stitching")
     completed = _run_ffmpeg(concat_cmd, runner=runner)
     if completed.returncode != 0:
         raise GridRenderError(f"concat stitch failed: {_stderr_text(completed)}")
+    if segment_cache is not None:
+        segment_cache.evict(keep=encoder.used_keys)
 
     if chapters and chapters[0].start_seconds > 0.0:
         chapters.insert(0, Chapter(start_seconds=0.0, title=match_title or "Intro"))
     return GridRenderResult(
         output_path=output_path,
         stages=tuple(outcomes),
-        degradations=degradations,
+        degradations=(*degradations, *transition_notes),
         chapters=tuple(chapters),
     )
 
@@ -2884,8 +4075,10 @@ __all__ = [
     "SEGMENT_SUFFIX",
     "SUMMARY_HOLD_WARN_SECONDS",
     "GridCanvas",
+    "GridProgress",
     "GridRenderError",
     "GridRenderResult",
+    "GridRenderStep",
     "GridStagePlan",
     "GridTile",
     "LowerThirdInput",

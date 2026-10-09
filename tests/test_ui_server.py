@@ -1185,6 +1185,65 @@ def test_scan_videos_400_on_missing_dir(tmp_path: Path) -> None:
     assert resp.status_code == 400
 
 
+def _scan_paths(client, paths: list[Path]) -> dict:
+    resp = client.post(
+        "/api/shooters/me/videos/scan",
+        json={"source_paths": [str(p) for p in paths], "auto_assign_primary": False},
+    )
+    assert resp.status_code == 200
+    return resp.json()
+
+
+def test_scan_reports_a_copy_of_an_imported_clip_as_skipped(tmp_path: Path) -> None:
+    """A byte copy of a clip this shooter has is not "added" (#1233).
+
+    ``register_video`` returns the existing video for a fingerprint match;
+    the scan listed it under ``registered`` and the page said "1 video
+    added" while the shooter's count stayed put.
+    """
+    client = _MatchClient(_match_create_app(project_root=tmp_path / "match", project_name="x"))
+    original = tmp_path / "card" / "VID.mp4"
+    original.parent.mkdir()
+    original.write_bytes(b"the recording")
+    assert _scan_paths(client, [original])["registered"] == ["raw/VID.mp4"]
+
+    copy = tmp_path / "elsewhere" / "VID-copy.mp4"
+    copy.parent.mkdir()
+    copy.write_bytes(b"the recording")
+    body = _scan_paths(client, [copy])
+
+    assert body["registered"] == []
+    assert body["skipped"] == ["VID-copy.mp4: already imported for this shooter as raw/VID.mp4"]
+    assert len(client.get("/api/shooters/me/project").json()["unassigned_videos"]) == 1
+
+
+def test_scan_reports_a_rescanned_file_as_skipped(tmp_path: Path) -> None:
+    client = _MatchClient(_match_create_app(project_root=tmp_path / "match", project_name="x"))
+    vid = tmp_path / "card" / "VID.mp4"
+    vid.parent.mkdir()
+    vid.write_bytes(b"the recording")
+    _scan_paths(client, [vid])
+
+    body = _scan_paths(client, [vid])
+
+    assert body["registered"] == []
+    assert body["skipped"] == ["VID.mp4: already imported for this shooter as raw/VID.mp4"]
+
+
+def test_scan_counts_two_copies_in_one_import_once(tmp_path: Path) -> None:
+    client = _MatchClient(_match_create_app(project_root=tmp_path / "match", project_name="x"))
+    first = tmp_path / "a" / "VID.mp4"
+    second = tmp_path / "b" / "VID-copy.mp4"
+    for f in (first, second):
+        f.parent.mkdir()
+        f.write_bytes(b"the recording")
+
+    body = _scan_paths(client, [first, second])
+
+    assert body["registered"] == ["raw/VID.mp4"]
+    assert body["skipped"] == ["VID-copy.mp4: same recording as VID.mp4 in this import"]
+
+
 def test_move_assignment_endpoint(tmp_path: Path) -> None:
     """Set role to ignored, verify, then move back to a stage."""
     project_root = tmp_path / "match"
@@ -2426,8 +2485,9 @@ def test_detect_beep_high_confidence_auto_trusts_into_beep_reviewed(tmp_path: Pa
         time = 6.5
         peak_amplitude = 0.42
         duration_ms = 350.0
-        confidence = 0.96  # above the 0.95 default threshold
+        confidence = 0.98  # above the 0.97 default threshold
         candidates: list = []
+        ranker_version = "beep-ranker-lr-test"
 
     monkeypatch.setattr(audio_helpers, "ensure_primary_audio", lambda *a, **kw: tmp_path / "z.wav")
     (tmp_path / "z.wav").write_bytes(b"\x00")
@@ -2444,8 +2504,10 @@ def test_detect_beep_high_confidence_auto_trusts_into_beep_reviewed(tmp_path: Pa
     assert resp.status_code == 200
     _wait_for_job(client, resp.json()["id"])
     primary_after = client.get("/api/shooters/me/project").json()["stages"][0]["videos"][0]
-    assert primary_after["beep_confidence"] == pytest.approx(0.96)
+    assert primary_after["beep_confidence"] == pytest.approx(0.98)
     assert primary_after["beep_reviewed"] is True
+    # Which ranker chose it rides with the stored candidates (#949).
+    assert primary_after["beep_ranker_version"] == "beep-ranker-lr-test"
 
 
 def test_detect_beep_low_confidence_leaves_beep_for_hitl(tmp_path: Path, monkeypatch) -> None:
@@ -8891,7 +8953,7 @@ def test_get_automation_returns_resolved_settings_and_provenance(tmp_path: Path)
     body = resp.json()
     assert body["settings"] == {
         "shot_detect_on_beep_verified": True,
-        "beep_low_confidence_threshold": 0.95,
+        "beep_low_confidence_threshold": 0.97,
     }
     prov = body["provenance"]["shot_detect_on_beep_verified"]
     assert prov["source"] == "global"
@@ -8900,7 +8962,7 @@ def test_get_automation_returns_resolved_settings_and_provenance(tmp_path: Path)
     assert prov["cli_value"] is None
     threshold_prov = body["provenance"]["beep_low_confidence_threshold"]
     assert threshold_prov["source"] == "global"
-    assert threshold_prov["global_value"] == 0.95
+    assert threshold_prov["global_value"] == 0.97
 
 
 def test_get_automation_reports_project_provenance_when_overridden(
@@ -9063,7 +9125,7 @@ def test_hitl_queue_lists_low_confidence_auto_beep(tmp_path: Path) -> None:
     resp = client.get("/api/shooters/me/hitl-queue")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["threshold"] == 0.95
+    assert body["threshold"] == 0.97
     assert len(body["items"]) == 1
     item = body["items"][0]
     assert item["kind"] == "beep_low_confidence"
@@ -10291,6 +10353,9 @@ def test_match_export_title_page_carries_the_division_unless_turned_off(
     project = MatchProject.load(project_root)
     project.competitor_name = "Martin Engström"
     project.competitor_division = "Classic Major"
+    from splitsmith.identity import ShooterIdentity
+
+    project.identity = ShooterIdentity(accent="#123456", club="PK")
     project.save(project_root)
     seen: list[match_exports_mod.MatchExportRequestData] = []
     real = match_exports_mod.export_match
@@ -10300,13 +10365,129 @@ def test_match_export_title_page_carries_the_division_unless_turned_off(
         return real(*args, **kwargs)
 
     monkeypatch.setattr(match_exports_mod, "export_match", capture)
-    for extra in ({}, {"title_division": False}):
+    for extra in ({}, {"title_division": False}, {"card_variant": "rise"}):
         resp = client.post(
             "/api/shooters/me/export/match",
             json={"stage_numbers": [1], "include_overlay": False, "title_page": True, **extra},
         )
         assert resp.status_code == 200, resp.text
         assert _wait_for_job(client, resp.json()["id"])["status"] == "succeeded"
-    on, off = (r.title_page_info for r in seen)
-    assert on[on.index("Martin Engström") + 1] == "Classic Major"
+    on, off, _ = (r.title_page_info for r in seen)
+    # The club line (#1243) sits between the shooter's name and the division.
+    assert on[on.index("Martin Engström") + 1 :][:2] == ("PK", "Classic Major")
     assert "Classic Major" not in off
+    # #1242: the Look variant is a request field, not a CLI-only knob.
+    assert [r.card_variant for r in seen] == ["default", "default", "rise"]
+    # #1243: the job resolves the shooter's identity for the cards.
+    assert seen[0].shooter_identity is not None
+    assert seen[0].shooter_identity.accent == "#123456" and seen[0].shooter_identity.club == "PK"
+    assert seen[0].shooter_identity.label == "Martin Engström"
+
+
+# --- overlay styles through the endpoints (template HUD, slice 3) --------------
+
+
+def test_export_stage_forwards_the_overlay_style(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from splitsmith import overlay_render
+
+    client, _root = _seed_match_export_project(tmp_path, stage_count=1)
+    seen: dict[str, object] = {}
+
+    def fake_render(**kwargs: object) -> Path:
+        seen.update(kwargs)
+        out = kwargs["output_path"]
+        assert isinstance(out, Path)
+        out.write_bytes(b"mov")
+        return out
+
+    monkeypatch.setattr(overlay_render, "render_overlay", fake_render)
+    resp = client.post(
+        "/api/shooters/me/stages/1/export",
+        json={
+            "write_trim": False,
+            "write_csv": False,
+            "write_fcpxml": False,
+            "write_report": False,
+            "write_overlay": True,
+            "overlay_variant": "ticker",
+            "overlay_class_labels": False,
+            "overlay_position": "top-left",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    assert _wait_for_job(client, resp.json()["id"])["status"] == "succeeded"
+    assert seen["variant"] == "ticker"
+    from splitsmith.overlay_hud import HudOptions
+
+    options = seen["hud_options"]
+    assert isinstance(options, HudOptions)
+    assert options.class_labels is False and options.position == "top-left"
+
+
+@pytest.mark.parametrize(
+    ("record", "request_style", "redraws"),
+    [
+        (None, {}, False),
+        (None, {"overlay_variant": "plate"}, True),
+        ("plate", {}, True),
+        ("plate", {"overlay_variant": "plate"}, False),
+        ("plate", {"overlay_variant": "plate", "overlay_landing": False}, True),
+        (None, {"overlay_speed_colors": False}, False),
+    ],
+)
+def test_match_export_redraws_an_overlay_only_when_its_record_differs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    record: str | None,
+    request_style: dict,
+    redraws: bool,
+) -> None:
+    """An overlay on disk is reused only when it was drawn the way this
+    export asks; one without a record is read as Classic defaults, so an
+    untouched form still reuses it, and Classic ignores the style toggles."""
+    import json as _json
+
+    from splitsmith import overlay_render
+    from splitsmith.overlay_hud import HudOptions, overlay_settings
+    from splitsmith.ui import exports as exports_mod
+
+    client, root = _seed_match_export_project(tmp_path, stage_count=1)
+    _stub_match_export_probe(monkeypatch)
+    exports_dir = root / "shooters" / "me" / "exports"
+    (exports_dir / "stage1_stage-1_overlay.mov").write_bytes(b"old")
+    if record is not None:
+        settings = overlay_settings(
+            look="splitsmith",
+            variant=record,
+            options=HudOptions(),
+            codec="auto",
+            max_height=None,
+            max_fps=None,
+        )
+        (exports_dir / "stage1_stage-1_overlay.json").write_text(_json.dumps(settings))
+    calls: list[exports_mod.StageExportRequest] = []
+    real = exports_mod.export_stage
+
+    def capture(**kwargs: object) -> object:
+        request = kwargs["request"]
+        assert isinstance(request, exports_mod.StageExportRequest)
+        calls.append(request)
+        return real(**kwargs)
+
+    def fake_render(**kwargs: object) -> Path:
+        out = kwargs["output_path"]
+        assert isinstance(out, Path)
+        out.write_bytes(b"new")
+        return out
+
+    monkeypatch.setattr(exports_mod, "export_stage", capture)
+    monkeypatch.setattr(overlay_render, "render_overlay", fake_render)
+    resp = client.post(
+        "/api/shooters/me/export/match",
+        json={"stage_numbers": [1], "include_overlay": True, **request_style},
+    )
+    assert resp.status_code == 200, resp.text
+    _wait_for_job(client, resp.json()["id"])
+    assert bool(calls) is redraws
+    if redraws:
+        assert calls[0].overlay_variant == request_style.get("overlay_variant", "default")

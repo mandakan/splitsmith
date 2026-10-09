@@ -8,7 +8,7 @@ import pytest
 
 from splitsmith.beep_calibration import DEFAULT_TOLERANCE_MS
 from splitsmith.beep_detect import BeepNotFoundError, detect_beep, load_audio
-from splitsmith.config import BeepDetectConfig
+from splitsmith.config import BeepDetectConfig, BeepRankerConfig
 
 
 def _load_fixture(fixtures_dir: Path, stem: str) -> tuple[np.ndarray, int, dict]:
@@ -324,11 +324,12 @@ _SATURATION_REGRESSION_STEMS = [
 ]
 
 
+@pytest.mark.parametrize("ranker", ["learned", "heuristic"])
 @pytest.mark.parametrize("stem", _SATURATION_REGRESSION_STEMS)
-def test_loud_transient_does_not_outrank_the_beep(fixtures_dir: Path, stem: str) -> None:
+def test_loud_transient_does_not_outrank_the_beep(fixtures_dir: Path, stem: str, ranker: str) -> None:
     """A gunshot is louder than a beep; loudness must not decide the ranking."""
     audio, sr, truth = _load_fixture(fixtures_dir, stem)
-    result = detect_beep(audio, sr, BeepDetectConfig())
+    result = detect_beep(audio, sr, BeepDetectConfig(ranker=BeepRankerConfig(ranker=ranker)))
     # Promoted stage fixtures carry no ``tolerance_ms`` of their own -- the
     # calibration suite's default is what the eval harness scores them by.
     tol_s = DEFAULT_TOLERANCE_MS / 1000.0
@@ -345,8 +346,10 @@ def test_silence_saturation_bounds_the_ranking_term(fixtures_dir: Path) -> None:
     was ``silence_score * ...`` and ran into the hundreds, so nothing the tonal
     or duration factors did could overcome a loud enough transient.
     """
+    # The saturated product is the heuristic ranker's score (#949 replaced it
+    # as the default with the learned ranker); pin it on that path.
     audio, sr, _ = _load_fixture(fixtures_dir, "stage-shots-hfo-masters-2026-stage10-s97dcec94")
-    result = detect_beep(audio, sr, BeepDetectConfig())
+    result = detect_beep(audio, sr, BeepDetectConfig(ranker=BeepRankerConfig(ranker="heuristic")))
     assert result.candidates, "expected ranked candidates"
     for c in result.candidates:
         assert 0.0 <= c.score < 1.0, f"score {c.score} outside [0, 1) -- saturation not applied"

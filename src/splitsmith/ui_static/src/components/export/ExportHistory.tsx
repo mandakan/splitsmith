@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/Label";
 import { Menu, menuItemClass } from "@/components/ui/Menu";
 import type { ExportRun } from "@/lib/api";
-import { stageLabel } from "@/lib/exportPlan";
+import { formatElapsed, stageLabel } from "@/lib/exportPlan";
 import { uploadLabel, uploadableArtifact, youtubeLink } from "@/lib/youtubeRows";
 
 /** The YouTube controls a row may carry (local mode, channel connected).
@@ -62,7 +62,7 @@ export function ExportHistory({
               <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-md">
                 <span className="font-medium text-ink">{stageLabel(r.stage_numbers)}</span>
                 <span className="text-sm text-muted">{r.formats.join(", ")}</span>
-                <span className="numeral text-sm text-muted">{r.duration_seconds.toFixed(1)}s</span>
+                <span className="numeral text-sm text-muted">took {formatElapsed(r.duration_seconds)}</span>
                 {r.anomaly_count > 0 && (
                   <span className="numeral text-sm text-live">
                     {r.anomaly_count} {r.anomaly_count === 1 ? "anomaly" : "anomalies"}

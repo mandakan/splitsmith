@@ -22,10 +22,11 @@
  * account page on a slow first load.
  */
 import { useState } from "react";
-import { Navigate } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 
 import { DesktopTokensSection } from "@/components/account/DesktopTokensSection";
 import { YouTubeSection } from "@/components/account/YouTubeSection";
+import { NewChip } from "@/components/whatsNew/WhatsNew";
 import { Button } from "@/components/ui/button";
 import { Field, inputClass } from "@/components/ui/Field";
 import { Label } from "@/components/ui/Label";
@@ -33,6 +34,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { api, apiErrorText } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useDeploymentMode } from "@/lib/features";
+import { YOU_FEATURE } from "@/lib/you";
 
 const SAVE_FAILED_FALLBACK = "Could not save the display name - check the connection and retry.";
 const DISPLAY_NAME_MAX = 60;
@@ -117,6 +119,14 @@ export function Account() {
             {saved ? <span className="text-sm text-done">Saved</span> : null}
           </div>
         </Field>
+      </section>
+
+      <section className="flex items-center justify-between gap-3 rounded-[10px] border border-rule bg-surface px-3.5 py-2.5">
+        <span className="text-md text-ink-2">Your shooter look, your brand and the shooter book.</span>
+        <Link to="/you" className="inline-flex items-center gap-2 text-md text-ink hover:underline">
+          You
+          <NewChip feature={YOU_FEATURE} />
+        </Link>
       </section>
 
       <YouTubeSection />

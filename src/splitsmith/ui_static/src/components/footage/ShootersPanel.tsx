@@ -12,8 +12,9 @@ import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/Label";
 import { Menu, menuItemClass } from "@/components/ui/Menu";
-import type { ShooterListEntry } from "@/lib/api";
+import type { ScoreboardIdentity, ShooterListEntry } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { isYou } from "@/lib/you";
 
 export interface ShootersPanelProps {
   shooters: ShooterListEntry[];
@@ -23,6 +24,12 @@ export interface ShootersPanelProps {
   onAdd: () => void;
   onRemove: (shooter: ShooterListEntry) => void;
   onRebuildTrims: (shooter: ShooterListEntry) => void;
+  /** Open the identity sheet for a shooter (#1243). */
+  onIdentity: (shooter: ShooterListEntry) => void;
+  /** Your scoreboard identity: the shooter with its SSI id is marked "You". */
+  me?: ScoreboardIdentity | null;
+  /** Make this shooter you (their SSI id becomes yours). */
+  onThisIsMe?: (shooter: ShooterListEntry) => void;
 }
 
 function initials(name: string): string {
@@ -35,7 +42,18 @@ function initials(name: string): string {
     .toUpperCase();
 }
 
-export function ShootersPanel({ shooters, activeSlug, editDenied, hrefs, onAdd, onRemove, onRebuildTrims }: ShootersPanelProps) {
+export function ShootersPanel({
+  shooters,
+  activeSlug,
+  editDenied,
+  hrefs,
+  onAdd,
+  onRemove,
+  onRebuildTrims,
+  onIdentity,
+  me = null,
+  onThisIsMe,
+}: ShootersPanelProps) {
   const [menuFor, setMenuFor] = useState<string | null>(null);
   return (
     <section aria-label="Shooters" className="overflow-hidden rounded-[10px] border border-rule bg-surface">
@@ -55,12 +73,17 @@ export function ShootersPanel({ shooters, activeSlug, editDenied, hrefs, onAdd, 
               current && "bg-surface-2 shadow-[inset_2px_0_0_var(--color-led)]",
             )}
           >
-            <span aria-hidden className="inline-grid size-5 shrink-0 place-items-center rounded-full bg-surface-3 font-mono text-xs text-ink-2">
+            <span
+              aria-hidden
+              className="inline-grid size-5 shrink-0 place-items-center rounded-full bg-surface-3 font-mono text-xs text-ink-2"
+              style={s.identity?.accent ? { boxShadow: `inset 0 0 0 2px ${s.identity.accent}` } : undefined}
+            >
               {initials(s.name)}
             </span>
             <Link to={hrefs.footage(s.slug)} className={cn("min-w-0 flex-1 truncate font-medium", current ? "text-ink" : "text-ink-2 hover:text-ink")}>
               {s.name}
             </Link>
+            {isYou(s.selected_shooter_id, me) ? <span className="shrink-0 text-sm text-muted">You</span> : null}
             <span className="numeral shrink-0 text-sm text-muted">
               {s.video_count} {s.video_count === 1 ? "video" : "videos"}
             </span>
@@ -78,6 +101,31 @@ export function ShootersPanel({ shooters, activeSlug, editDenied, hrefs, onAdd, 
               <Link role="menuitem" className={menuItemClass} to={hrefs.audit(s.slug)}>
                 Open Audit
               </Link>
+              <button
+                type="button"
+                role="menuitem"
+                className={menuItemClass}
+                disabled={editDenied}
+                onClick={() => {
+                  setMenuFor(null);
+                  onIdentity(s);
+                }}
+              >
+                Identity&hellip;
+              </button>
+              {onThisIsMe && s.selected_shooter_id != null && !isYou(s.selected_shooter_id, me) ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className={menuItemClass}
+                  onClick={() => {
+                    setMenuFor(null);
+                    onThisIsMe(s);
+                  }}
+                >
+                  This is me
+                </button>
+              ) : null}
               {s.stages_missing_trim > 0 ? (
                 <button
                   type="button"

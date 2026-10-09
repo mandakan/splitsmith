@@ -27,7 +27,9 @@ import { DesktopCommandLine } from "@/components/desktop/DesktopCommandLine";
 import { CutGroup } from "@/components/export/CutGroup";
 import { DetailsGroup } from "@/components/export/DetailsGroup";
 import { ExportHistory } from "@/components/export/ExportHistory";
+import { ExportWarnings } from "@/components/export/ExportWarnings";
 import { LookGroup } from "@/components/export/LookGroup";
+import { LookHealth } from "@/components/export/LookHealth";
 import { OutputGroup } from "@/components/export/OutputGroup";
 import { PresetRow } from "@/components/export/PresetRow";
 import { PreviewPane } from "@/components/export/PreviewPane";
@@ -86,9 +88,13 @@ import {
   type FixTarget,
 } from "@/lib/exportPlan";
 import { useDeploymentMode } from "@/lib/features";
+import { requestLook, transitionLabel } from "@/lib/looks";
+import { DEFAULT_OVERLAY_STYLE, overlayStyleLabel, visibleOverlayStyle } from "@/lib/overlayStyle";
+import { useLooks } from "@/lib/useLooks";
 import { useMatchHref } from "@/lib/matchHref";
 import { useDesktopCommands } from "@/lib/useDesktopCommands";
-import { describeRenderOptions, renderOptionsSeconds, transitionsSupported, type OutputFormat } from "@/lib/renderOptions";
+import { visibleTransitionKind } from "@/lib/lookGallery";
+import { describeRenderOptions, renderOptionsSeconds, type OutputFormat } from "@/lib/renderOptions";
 import { cn } from "@/lib/utils";
 import {
   buildCompareGridPayload,
@@ -122,6 +128,7 @@ export function Export() {
 
 function ExportInner({ slug }: { slug: string }) {
   const { mode: deploymentMode } = useDeploymentMode();
+  const looksState = useLooks();
   const hosted = deploymentMode === "hosted";
   const ctx = useOutletContext<MatchShellOutletContext>();
   const href = useMatchHref();
@@ -227,6 +234,15 @@ function ExportInner({ slug }: { slug: string }) {
     () => (onDesktop ? { ...settings, mode: "single", outputFormat: "mp4", youtube: true } : settings),
     [onDesktop, settings],
   );
+  // The Look the requests carry and the transition kinds the filter admits
+  // (#1246): resolved against the catalog once it answers; Export waits for it.
+  const lookRequest = requestLook(looksState, view);
+  // The overlay style the request carries: resolved like the Look once the
+  // catalog answers, the stored one (the server falls back) when it cannot.
+  const overlayStyle =
+    looksState.loaded && !looksState.failed
+      ? visibleOverlayStyle(looksState.looks, lookRequest.choice.look, view.overlayStyle)
+      : view.overlayStyle;
   const {
     mode,
     outputFormat,
@@ -526,12 +542,13 @@ function ExportInner({ slug }: { slug: string }) {
     mode,
     head: mode === "single" ? headPad : (project?.trim_pre_buffer_seconds ?? 0),
     tail: mode === "single" ? tailPad : (project?.trim_post_buffer_seconds ?? 0),
-    transitionKind: transitionsSupported(outputFormat) ? transitionKind : "none",
+    transitionKind: visibleTransitionKind(transitionKind, outputFormat, "single", lookRequest.kinds),
     transitionSeconds,
+    format: outputFormat,
     cardSeconds,
   });
 
-  const busy = job?.status === "pending" || job?.status === "running" || queueing;
+  const busy = job?.status === "pending" || job?.status === "running" || queueing || !looksState.loaded;
   const canExport = onDesktop
     ? mode === "single" && orderedSelection.length > 0 && !!project && !desktop.busy
     : !busy && orderedSelection.length > 0 && !!project && !editDenied && (!compare || audioFrom !== "");
@@ -654,8 +671,11 @@ function ExportInner({ slug }: { slug: string }) {
         uploadOptions: { ...uploadOptions, enabled: true },
         includeOverlay,
         overlayCodec,
+        overlayStyle,
         projectName: projectName || project.name,
         uploadTarget: "desktop",
+        look: lookRequest.choice,
+        kinds: lookRequest.kinds,
         youtubeConnected: false,
       }),
     );
@@ -683,8 +703,11 @@ function ExportInner({ slug }: { slug: string }) {
           uploadOptions,
           includeOverlay,
           overlayCodec,
+          overlayStyle,
           projectName: projectName || project.name,
           uploadTarget: "desk",
+          look: lookRequest.choice,
+          kinds: lookRequest.kinds,
           youtubeConnected: !!youtubeSettings?.connected,
         }),
       );
@@ -713,8 +736,12 @@ function ExportInner({ slug }: { slug: string }) {
         render: renderOptions,
         overlay: gridOverlay,
         summaryHoldSeconds: gridHoldSeconds,
+        transitionKind,
+        transitionSeconds,
         cams: camOptions,
         freeCell: gridFreeCells(shooters.length) > 0 ? gridFreeCell : "blank",
+        look: lookRequest.choice,
+        kinds: lookRequest.kinds,
         youtube,
         descriptionLead,
         uploadOptions,
@@ -777,10 +804,15 @@ function ExportInner({ slug }: { slug: string }) {
     eligible: eligibleNumbers.length,
     head: headPad,
     tail: tailPad,
-    transitionKind: transitionsSupported(outputFormat) ? transitionKind : "none",
+    transitionKind: visibleTransitionKind(transitionKind, outputFormat, "single", lookRequest.kinds),
+    transitionLabel: transitionLabel(transitionKind, looksState.transitions),
     transitionSeconds,
     cards: describeRenderOptions(renderOptions, compare ? "grid" : "single", compare ? "mp4" : outputFormat),
     overlay: compare ? gridOverlay : includeOverlay,
+    overlayStyle:
+      !compare && overlayStyle.variant !== DEFAULT_OVERLAY_STYLE.variant
+        ? overlayStyleLabel(overlayStyle.variant)
+        : undefined,
     cams:
       mode === "single" && secondaryCount > 0
         ? camsSummary(camOptions, camChoices, project?.compare_camera ? mountLabel(project.compare_camera) : "Primary")
@@ -791,7 +823,11 @@ function ExportInner({ slug }: { slug: string }) {
     canvas: canvas.label,
     bare: bareSelected,
   });
-  const summaryCtx = { secondaryCount };
+  const summaryCtx = {
+    secondaryCount,
+    kinds: lookRequest.kinds,
+    transitionLabel: (kind: string) => transitionLabel(kind, looksState.transitions),
+  };
   const primaryLabel = onDesktop
     ? "Render on desktop"
     : trimsOnly
@@ -944,6 +980,9 @@ function ExportInner({ slug }: { slug: string }) {
                 bareSelected={bareSelected}
                 onHover={setLookHover}
                 onSelect={setLookFocus}
+                slug={compare ? audioFrom || slug : slug}
+                stageNumber={orderedSelection[0] ?? 0}
+                hosted={hosted}
               />
             </Section>
           ) : null}
@@ -1021,12 +1060,14 @@ function ExportInner({ slug }: { slug: string }) {
             <PreviewPane
               slug={compare ? audioFrom || slug : slug}
               stageNumber={orderedSelection[0] ?? 0}
+              stageNumbers={orderedSelection}
               settings={view}
               projectName={projectName || project?.name || ""}
               focus={lookFocus}
               hover={lookHover}
               enabled={!trimsOnly && orderedSelection.length > 0}
             />
+            <LookHealth look={view.look} looks={looksState.looks} hosted={hosted} />
             <dl>
               {lines.map((l) => (
                 <div key={l.label} className="flex justify-between gap-3 border-b border-rule px-3.5 py-1.5 text-md">
@@ -1195,9 +1236,10 @@ function ResultPanel({
     <div className="mt-3 text-sm text-ink-2">
       <div className="font-medium text-done">Exported</div>
       <div className="numeral text-muted">
-        {result.stage_count} stages {"·"} {formatDuration(result.duration_seconds)}
+        {result.stage_count} stages {"·"} {formatDuration(result.duration_seconds)} timeline
         {result.anomalies.length > 0 ? <> {"·"} {result.anomalies.length} warnings</> : null}
       </div>
+      <ExportWarnings anomalies={result.anomalies} />
       {hosted ? (
         // Hosted: the bundle lives in object storage, not on a local disk to
         // reveal. Download each file (FCPXML + the media it references).

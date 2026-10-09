@@ -15,7 +15,10 @@ import {
   transitionsSupported,
   type RenderOptions,
 } from "./renderOptions";
-import { visibleSlots } from "./lookGallery";
+import { DEFAULT_EXPORT_SETTINGS } from "./exportPresets";
+import { slotsForLook, visibleSlots } from "./lookGallery";
+import { BUILTIN_LOOKS } from "./looks";
+import { FAMILIES } from "@/test/transitionFamilies";
 
 const ON: RenderOptions = {
   titlePage: true,
@@ -23,9 +26,13 @@ const ON: RenderOptions = {
   titleDivision: false,
   titlePageDurationSeconds: 4,
   closingCard: true,
+  madeWith: false,
+  accountBrand: false,
   stageCardStyle: "slate",
   stageCardDurationSeconds: 2,
   summaryHoldSeconds: 3,
+  matchSummary: true,
+  matchSummarySeconds: 0.2,
 };
 
 describe("cardsSupported", () => {
@@ -47,7 +54,11 @@ describe("matchExportFields", () => {
       title_division: false,
       title_page_duration_seconds: 4,
       closing_card: true,
+      made_with: false,
+      account_brand: false,
       summary_hold_seconds: 3,
+      match_summary: true,
+      match_summary_seconds: 0.5,
     });
   });
 
@@ -67,7 +78,11 @@ describe("matchExportFields", () => {
       title_division: true,
       title_page_duration_seconds: 3,
       closing_card: false,
+      made_with: true,
+      account_brand: true,
       summary_hold_seconds: 0,
+      match_summary: false,
+      match_summary_seconds: 6,
     });
   });
 
@@ -87,6 +102,10 @@ describe("gridExportFields", () => {
       title_division: false,
       title_page_duration_seconds: 4,
       closing_card: true,
+      made_with: false,
+      account_brand: false,
+      match_summary: true,
+      match_summary_seconds: 0.5,
     });
     expect("summary_hold_seconds" in fields).toBe(false);
     expect("title_kind" in fields).toBe(false);
@@ -123,8 +142,8 @@ describe("stageCardsSupported", () => {
 describe("describeRenderOptions", () => {
   it("names what is on in render order and nothing the format cannot draw", () => {
     expect(describeRenderOptions(DEFAULT_RENDER_OPTIONS, "single", "mp4")).toBeNull();
-    expect(describeRenderOptions(ON, "single", "mp4")).toBe("title page · slate · summary 3 s · closing");
-    expect(describeRenderOptions(ON, "grid", "mp4")).toBe("title page · slate · closing");
+    expect(describeRenderOptions(ON, "single", "mp4")).toBe("title page · slate · summary 3 s · match summary · closing");
+    expect(describeRenderOptions(ON, "grid", "mp4")).toBe("title page · slate · match summary · closing");
     expect(describeRenderOptions(ON, "single", "fcpxml")).toBe("slate");
     expect(describeRenderOptions(ON, "single", "fcp7xml")).toBeNull();
     expect(describeRenderOptions({ ...ON, stageCardStyle: "lower-third" }, "single", "fcpxml")).toBe("lower third");
@@ -132,9 +151,9 @@ describe("describeRenderOptions", () => {
 });
 
 describe("renderOptionsSeconds", () => {
-  it("adds a slate per stage, the match cards once each and a summary per stage", () => {
-    expect(renderOptionsSeconds(ON, 3, "single", "mp4")).toBe(3 * 2 + 4 + 4 + 3 * 3);
-    expect(renderOptionsSeconds(ON, 3, "grid", "mp4")).toBe(3 * 2 + 4 + 4);
+  it("adds a slate per stage, the match cards once each, a summary per stage and the match summary", () => {
+    expect(renderOptionsSeconds(ON, 3, "single", "mp4")).toBe(3 * 2 + 4 + 4 + 3 * 3 + 0.5);
+    expect(renderOptionsSeconds(ON, 3, "grid", "mp4")).toBe(3 * 2 + 4 + 4 + 0.5);
     expect(renderOptionsSeconds(ON, 3, "single", "fcpxml")).toBe(3 * 2);
     expect(renderOptionsSeconds(ON, 3, "single", "fcp7xml")).toBe(0);
     expect(renderOptionsSeconds(ON, 0, "single", "mp4")).toBe(0);
@@ -156,12 +175,56 @@ describe("the mappers against the gallery registry", () => {
   it("never emit a card field the gallery hides for the format", () => {
     for (const format of ["fcpxml", "fcp7xml", "mp4"] as const) {
       const fields = matchExportFields(ON, format);
-      const slots = new Set(visibleSlots("single", format).map((s) => s.id));
+      const slots = new Set(
+        visibleSlots("single", format, slotsForLook(BUILTIN_LOOKS, DEFAULT_EXPORT_SETTINGS, FAMILIES)).map((s) => s.id),
+      );
       expect("title_page" in fields, format).toBe(slots.has("titlePage"));
       expect("closing_card" in fields, format).toBe(slots.has("closingCard"));
       expect("summary_hold_seconds" in fields, format).toBe(slots.has("summaryHold"));
       expect(fields.title_kind !== "none", format).toBe(slots.has("stageCard"));
       expect(transitionsSupported(format), format).toBe(slots.has("transition"));
     }
+  });
+});
+
+describe("transitionsSupported by format and mode (#1244)", () => {
+  it("MP4 draws transitions for one shooter and the grid; the FCP 7 XML never", () => {
+    expect(transitionsSupported("mp4", "single")).toBe(true);
+    expect(transitionsSupported("mp4", "grid")).toBe(true);
+    expect(transitionsSupported("fcpxml", "single")).toBe(true);
+    expect(transitionsSupported("fcpxml", "grid")).toBe(true);
+    expect(transitionsSupported("fcp7xml", "single")).toBe(false);
+    expect(transitionsSupported("mp4")).toBe(true);
+  });
+});
+
+
+describe("the Look choice on the mappers (#1246)", () => {
+  const choice = { look: "clean", titlePageVariant: "rise", stageCardVariant: "default", closingCardVariant: "rise" };
+
+  it("matchExportFields sends the match-card variants where cards go and the stage card's where stage cards go", () => {
+    const mp4 = matchExportFields(ON, "mp4", choice);
+    expect(mp4.title_page_variant).toBe("rise");
+    expect("stage_card_variant" in mp4).toBe(false);
+    expect(mp4.closing_card_variant).toBe("rise");
+    const stage = matchExportFields(ON, "fcpxml", { ...choice, stageCardVariant: "rise" });
+    expect(stage.stage_card_variant).toBe("rise");
+    expect("title_page_variant" in stage).toBe(false);
+    expect("closing_card_variant" in stage).toBe(false);
+    const fcp7 = matchExportFields(ON, "fcp7xml", { ...choice, stageCardVariant: "rise" });
+    expect("stage_card_variant" in fcp7).toBe(false);
+    expect(matchExportFields(ON, "mp4")).not.toHaveProperty("title_page_variant");
+    const defaults = { look: "splitsmith", titlePageVariant: "default", stageCardVariant: "default", closingCardVariant: "default" };
+    expect(matchExportFields(ON, "mp4", defaults)).toEqual(matchExportFields(ON, "mp4"));
+  });
+
+  it("gridExportFields sends all three", () => {
+    const fields = gridExportFields(ON, choice);
+    expect([fields.title_page_variant, fields.stage_card_variant, fields.closing_card_variant]).toEqual([
+      "rise",
+      undefined,
+      "rise",
+    ]);
+    expect(gridExportFields(ON)).not.toHaveProperty("title_page_variant");
   });
 });

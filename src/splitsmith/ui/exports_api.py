@@ -30,19 +30,30 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
-from .. import export_runs, youtube_sidecar
+from .. import composition, export_runs, youtube_sidecar
 from ..compare.mp4_grid import DEFAULT_CANVAS_HEIGHT, DEFAULT_CANVAS_WIDTH
+from ..looks import look_names
 from ..match_project import trim_blocker
+from ..overlay_hud import OverlayStyleFields
 from ..overlay_theme import ThemeName
-from . import export_storage
+from . import export_storage, match_exports
 from .http_errors import source_unreachable
 
 router = APIRouter()
 
 
-class ExportStageRequest(BaseModel):
+def installed_look(value: str) -> str:
+    """``value`` when it names an installed Look (#1246), else ``ValueError``
+    naming the installed ones, so the 422 tells the user what exists."""
+    names = look_names()
+    if value in names:
+        return value
+    raise ValueError(f"unknown Look {value!r}; installed: {', '.join(names)}")
+
+
+class ExportStageRequest(OverlayStyleFields, BaseModel):
     """Body for POST /api/stages/{n}/export.
 
     Each toggle defaults True; turning one off skips that artefact while
@@ -75,9 +86,15 @@ class ExportStageRequest(BaseModel):
     summary_hold_seconds: float = 3.0
     # Palette preset for the overlay text + stroke. ``"splitsmith"``
     # (default) uses the same tokens the web UI ships, mirrored into
-    # ``data/overlay_theme.json``. ``"clean"`` is the neutral
-    # white-on-amber alternative.
-    overlay_theme: Literal["splitsmith", "clean"] = "splitsmith"
+    # ``data/looks/splitsmith/look.json``. ``"clean"`` is the neutral
+    # white-on-amber alternative; any installed Look since #1246.
+    overlay_theme: ThemeName = "splitsmith"
+
+    @field_validator("overlay_theme")
+    @classmethod
+    def _installed_look(cls, value: str) -> str:
+        return installed_look(value)
+
     # Multi-cam selection (issue #54). Allowlist of secondary
     # ``video_id``s to ride the FCPXML / get their own lossless trim. The
     # default ``None`` means "include every secondary with a beep" -- the
@@ -88,7 +105,7 @@ class ExportStageRequest(BaseModel):
     secondary_video_ids: list[str] | None = None
 
 
-class MatchExportRequest(BaseModel):
+class MatchExportRequest(OverlayStyleFields, BaseModel):
     """Body for POST /api/match/export (issue #171).
 
     Stitches the listed stages into one FCPXML, in the order given. Each
@@ -112,8 +129,14 @@ class MatchExportRequest(BaseModel):
     overlay_codec: Literal["auto", "hevc-alpha", "prores-4444"] = "auto"
     overlay_max_height: int | None = None
     overlay_max_fps: float | None = None
-    overlay_theme: Literal["splitsmith", "clean"] = "splitsmith"
+    overlay_theme: ThemeName = "splitsmith"
     project_name: str | None = None
+
+    @field_validator("overlay_theme")
+    @classmethod
+    def _installed_look(cls, value: str) -> str:
+        return installed_look(value)
+
     # Issue #193. ``"stacked"`` keeps secondaries full-frame (today's
     # behaviour). ``"pip-corners"`` adds an ``<adjust-transform>`` to each
     # secondary, rotating through TR -> TL -> BR -> BL at 25% scale.
@@ -134,8 +157,14 @@ class MatchExportRequest(BaseModel):
     # pair, or ``"none"`` for hard cuts. Currently only the FCPXML
     # renderer emits transitions; FCP7 / MP4 surface a "transitions
     # ignored" anomaly when set together with those formats.
-    transition_kind: Literal["none", "zoom", "static"] = "none"
-    transition_duration_seconds: float = 0.5
+    transition_kind: match_exports.TransitionKind = "none"
+    transition_duration_seconds: float = Field(0.5, gt=0)
+
+    @field_validator("transition_kind")
+    @classmethod
+    def _transition_kind(cls, value: str) -> str:
+        return composition.validate_transition_kind(value)
+
     # Issue #196. Per-stage title cards. ``"slate"`` adds a pre-stage
     # card on the spine; ``"lower-third"`` is a connected text clip
     # overlaid on the start of the primary. FCPXML only today;
@@ -171,10 +200,27 @@ class MatchExportRequest(BaseModel):
     title_division: bool = True
     title_page_duration_seconds: float = 3.0
     closing_card: bool = False
+    #: "Made with splitsmith" at the bottom of the closing card.
+    made_with: bool = True
+    #: Your account's brand on the title page and the closing card, for a
+    #: Look without one of its own (spec 2026-10-08).
+    account_brand: bool = True
+    # Issue #1242. The Look template variant every generated card draws
+    # with; ``default`` is the still card, the shipped Look adds ``rise``.
+    # The CLI's one knob and the fallback for the per-slot fields below.
+    card_variant: str = "default"
+    # Issue #1246. The gallery's per-slot choice; ``None`` is the knob.
+    title_page_variant: str | None = None
+    stage_card_variant: str | None = None
+    closing_card_variant: str | None = None
     # Issue #972. Hold each stage's summary (name, scoring, splits over
     # the blurred last frame) for this many seconds after its action in
     # the rendered MP4. 0 is off. Other renderers surface an anomaly.
     summary_hold_seconds: float = 0.0
+    # The match summary card after the last stage (spec
+    # 2026-10-07-match-summary-design); rendered MP4 only, an anomaly elsewhere.
+    match_summary: bool = False
+    match_summary_seconds: float = Field(default=6.0, ge=0.5, le=30.0)
     # Issue #1000. Chain a ``youtube_upload`` job onto this export. Needs
     # the sidecar (it is the upload's metadata) and a rendered MP4.
     youtube_upload: bool = False
@@ -222,8 +268,35 @@ class CompareGridRequest(BaseModel):
     title_division: bool = True
     title_page_duration_seconds: float = 3.0
     closing_card: bool = False
+    #: "Made with splitsmith" at the bottom of the closing card.
+    made_with: bool = True
+    #: Your account's brand on the title page and the closing card, for a
+    #: Look without one of its own (spec 2026-10-08).
+    account_brand: bool = True
+    # Issue #1242. The Look template variant every generated card draws
+    # with; ``default`` is the still card, the shipped Look adds ``rise``.
+    # The CLI's one knob and the fallback for the per-slot fields (#1246).
+    card_variant: str = "default"
+    title_page_variant: str | None = None
+    stage_card_variant: str | None = None
+    closing_card_variant: str | None = None
     stage_titles: Literal["none", "slate", "lower-third"] = "none"
     title_duration_seconds: float = 1.5
+    #: Every shooter's match figures in their own tile, after the last
+    #: stage and before the closing card (spec 2026-10-08).
+    match_summary: bool = False
+    match_summary_seconds: float = Field(6.0, ge=0.5, le=30)
+    # Issue #1244: one transition between every pair of stages, the same
+    # kinds the single-shooter MP4 draws; the grid renders them on its own
+    # boundary segments.
+    transition_kind: match_exports.TransitionKind = "none"
+    transition_duration_seconds: float = Field(0.5, gt=0)
+
+    @field_validator("transition_kind")
+    @classmethod
+    def _transition_kind(cls, value: str) -> str:
+        return composition.validate_transition_kind(value)
+
     # Issue #705. The splits overlay (per-tile counter and split, the
     # running clock) in the grid's own typography, and the end-of-stage
     # summary hold in seconds. The hold needs the overlay: it is drawn
@@ -233,6 +306,12 @@ class CompareGridRequest(BaseModel):
     overlay: bool = False
     overlay_theme: ThemeName = "splitsmith"
     summary_hold_seconds: float = Field(default=0.0, ge=0.0)
+
+    @field_validator("overlay_theme")
+    @classmethod
+    def _installed_look(cls, value: str) -> str:
+        return installed_look(value)
+
     # The YouTube sidecar and the chained upload, as for one shooter's
     # MP4 (``MatchExportRequest``): title, a description with a chapter per
     # stage, tags and a thumbnail beside the grid; ``youtube_upload`` then

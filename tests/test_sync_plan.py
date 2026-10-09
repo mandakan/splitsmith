@@ -458,3 +458,22 @@ def test_the_desktop_command_ledger_never_enters_the_push_plan(tmp_path: Path) -
     assert all(item.local_path != ledger for item in plan.media)
     assert all(DONE_LEDGER_NAME not in item.remote_key for item in plan.media)
     assert all("cmd-1" not in json.dumps(doc.body) for doc in plan.docs)
+
+
+# --- identity logos (slice 3, #1243) ----------------------------------------------
+
+
+def test_an_identity_logo_is_planned_as_media_and_a_stray_file_is_not(tmp_path: Path) -> None:
+    from splitsmith.identity import LOGO_DIR, logo_name
+
+    root, slug = _build_basic_match(tmp_path)
+    shooter_root = root / "shooters" / slug
+    name = logo_name(b"logo", "png")
+    (shooter_root / LOGO_DIR).mkdir()
+    (shooter_root / LOGO_DIR / name).write_bytes(b"logo")
+    (shooter_root / LOGO_DIR / "notes.txt").write_text("not a logo", encoding="utf-8")
+    plan = build_push_plan(root, sync_state=SyncState())
+    keys = {item.remote_key for item in plan.media}
+    match_id = match_model.Match.load(root).match_id
+    assert f"matches/{match_id}/shooters/{slug}/{LOGO_DIR}/{name}" in keys
+    assert not any("/identity/notes.txt" in key for key in keys)

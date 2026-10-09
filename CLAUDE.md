@@ -79,7 +79,9 @@ A green suite over a change is evidence the change didn't break anything known -
 
 ## Detection pipeline
 
-Beep detection runs inside per-stage derived search windows for multi-stage single-take videos (ffmpeg extracts the window's audio via -ss/-t; results are offset back to source-absolute). The shot-detection pipeline is a 3-voter ensemble, not raw signal processing:
+Beep detection runs inside per-stage derived search windows for multi-stage single-take videos (ffmpeg extracts the window's audio via -ss/-t; results are offset back to source-absolute). Its candidates are ranked by a logistic regression over seven per-run features (``beep_features.candidate_features``, the one implementation both runtime and trainer use), and confidence is a calibrated head over (logit, margin) (#949, spec 2026-10-06). The numbers are ``BeepRankerConfig`` defaults in ``config.py``, pasted from ``ranker_report.json``'s ``models.lr.final_fit``; ``tests/test_beep_ranker_config.py`` fails on any drift. To retrain after adding fixtures: rebuild the manifest, run ``scripts/train_beep_ranker.py``, paste the new ``final_fit``, regenerate ``baseline.json`` (``scripts/eval_beep_detector.py --track clip --json ...``) and list every newly wrong fixture in the PR. ``ranker: heuristic`` is the old hand-written product, kept as the escape hatch. Out of fold it picks the beep on 106 of the 111 fixtures where the beep is a candidate at all; most remaining misses are the 16 fixtures where it never is (run merging, late onsets), and every confident mistake so far is one of those.
+
+The shot-detection pipeline is a 3-voter ensemble, not raw signal processing:
 
 - **Voter A** -- ``splitsmith.shot_detect`` envelope onsets, gated at the
   auto-calibrated ``min_confidence`` floor (the lowest positive-shot
@@ -148,6 +150,29 @@ encodes go through their own runner hooks (``card_runner``,
 and ``scripts/render_grid_frames.py`` with their card flags; look at the
 frames, a green argv test proves nothing about pixels.
 
+The live overlay has **template styles** (spec
+``2026-10-08-template-hud-overlay-design``): a Look's ``overlay`` slot names
+HUD templates (``plate`` ships first); ``default`` is always Classic, the
+engine path (run-length PNGs and the ``drawtext`` clock), and a manifest
+cannot name a file for it. ``render_overlay(variant=...)`` sends a template
+variant through ``overlay_hud_render``: the template draws clock, counter
+and split per frame through ``seek(t)`` and declares ``settle()``, the
+seconds it moves after the last shot; ``overlay_hud.hud_frame_plan`` renders
+only the beep to ``last shot + settle`` and holds a frame either side. The
+data (splits, coach classes, speed tiers) is computed in ``overlay_hud``,
+never in a template. The MOV is cached in the render segment cache by the
+template digest and left untouched on a hit (the MP4 keys on its mtime). A
+template failure or an unknown variant draws Classic and lands in
+``degraded``; no browser is still ``OverlayRenderError``. Classic's argv
+and pixels never change for any of this; check with
+``scripts/render_overlay_frames.py`` against main.
+``looks check`` runs a HUD template on three sample stages
+(``look_tools.hud_samples``: twelve rounds with classes, thirty-two, none
+classified), probed at rest mid-stage and landed, and renders frames either
+side of the live span to catch motion the frame plan would freeze; the
+``hud`` starter is the minimal template and ``docs/looks/authoring.md``
+documents the contract.
+
 The single-shooter render keeps every encoded segment in
 ``segment_cache`` (``<cache_dir>/render-segments``, LRU past
 ``OutputConfig.render_cache_gb``), keyed on the segment's ffmpeg argv
@@ -160,7 +185,451 @@ Bump ``segment_cache.KEY_VERSION`` when the recipe changes. The job and
 the CLI get the cache through ``match_exports.render_segment_cache``;
 tests run with ``SPLITSMITH_RENDER_CACHE=0`` (conftest) and a cache test
 passes its own. ``RenderStep`` is the per-segment progress the job maps
-onto its bar; the grid renderer has no cache yet.
+onto its bar. The grid renderer shares the cache
+(``render_grid_mp4(segment_cache=)``, its ``.mov`` segments keep their
+suffix): it renders into a fresh temp dir, so the key writes the work dir
+as ``<work>`` in tokens and in small work files (the sprite concat list),
+and the files ffmpeg reads with no token of their own (every sprite the
+list names, the clock's font in ``drawtext``) reach it as
+``extra_inputs`` through ``_overlay_inputs``; a new indirect input goes
+there. Its progress is ``GridRenderStep`` through ``progress=``, one per
+stage, encoded or reused, then the stitch; never count ``runner`` calls,
+a reused stage makes none.
+
+Cards draw through a **Look** (``splitsmith.looks``, spec 2026-10-06):
+``data/looks/<name>/look.json`` holds the palette and names one HTML
+template per card slot; ``~/.splitsmith/looks/<name>/`` shadows a shipped
+one. ``overlay_theme.load_theme`` reads the manifest, so a palette change
+is a manifest change. The shipped ``card.html`` draws the engine's own
+markup through ``_shared/cell.js`` (a port of ``overlay_html._cell_div``,
+held to it by ``tests/test_look_template.py``) and ``_shared/fit.js``
+(the one fit policy, also inlined by ``overlay_html``); a template gets
+``window.splitsmith`` from ``look_template.TemplateContext`` before its
+scripts run. The summary and the live overlay are not templates yet.
+Check pixels with the frame scripts, not argv.
+
+A template that animates (``duration() > 0``) is rendered frame by frame
+(``Rasterizer.render_template_frames``, seeking ``seek(i / fps)``),
+written as a lossless alpha MOV by ``look_motion.write_motion_clip`` and
+overlaid on the card's backdrop with the last frame held
+(``motion_overlay_filters``, ``tpad=stop_mode=clone``); an animated lower
+third is the same clip through ``lower_third_clip_filters``. The segment
+cache keys that clip by ``look_template.template_digest`` (template
+bytes, context, fps, Chromium version) through
+``SegmentCache.key(virtual_inputs=...)`` and renders the frames in the
+encode's ``prepare`` step, so a cached card renders no frame. A still
+template takes the PNG path unchanged, which is what keeps the default
+variant pixel-identical. The manifest names variants per slot
+(``"slot": {"default": ..., "rise": ...}``; a bare string is ``default``),
+the IR carries ``variant`` on ``MatchTitle`` and ``TitleCard``.
+``card_variant`` is the CLI's one knob (``--card-variant`` on ``match
+export`` and ``compare export``) and the fallback; the request bodies
+carry a variant per slot since #1246 (``title_page_variant``,
+``stage_card_variant`` for the slate and the lower third together,
+``closing_card_variant``; ``None`` is the knob), threaded by
+``match_exports`` and ``compare/cards.CardOptions``. A variant the Look
+lacks falls back to ``default`` with a warning. The shipped ``splitsmith``
+Look has ``default`` and ``rise`` (``card-rise.html``, Web Animations
+driven by ``seek``, ``poster()`` at the end of the rise so previews never
+show its invisible first frame). ``overlay_theme`` on every request is any
+installed Look name (``overlay_theme.ThemeName`` is ``str``), validated
+against ``looks.look_names()`` by ``exports_api.installed_look`` with the
+installed set in the 422; ``ExportPresetBody.look`` and its three
+``*_variant`` fields are validated by shape only, so a preset loads on a
+machine without that Look and the page falls back to the default. The
+catalog is ``looks.look_catalog()`` (``GET /api/looks`` in
+``ui/looks_api.py``: every installed Look with every slot's variants and
+the preview each resolves to) and ``GET /api/looks/{name}/preview/{file}``
+serves a bare ``<slot>-<variant>.png|webp`` from the Look's ``preview/``
+directory, the shipped default's standing in for one a Look lacks
+(``looks.preview_file``); the shipped previews are rendered by
+``scripts/render_look_thumbnails.py --look-previews``.
+
+Authoring a Look (epic #1267, spec 2026-10-07): ``splitsmith looks list |
+new | check | preview`` (``looks_cli`` over ``look_tools``) and the guide
+``docs/looks/authoring.md`` with four starters in ``data/looks/_starters/``.
+``looks check`` loads every template a Look owns through
+``ChromiumRasterizer.probe_template`` against three sample cards (one
+shooter with a logo, two without, a 52-character stage name) and words what
+it saw: script errors, an animation without ``seek``, ``poster()`` outside
+``duration()``, fonts other than the two bundled faces, and text cut off by
+the canvas or a clipping ancestor (an ellipsis is fine); it reads a broken
+user Look strictly (``looks.read_look``), where ``load_look`` would fall back
+to the shipped one. ``_shared/fit.js`` fits width as well as height (#1268): a line whose
+text runs past the cell's real edge is shrunk on its own (to no less than 60%
+of its size), then capped with an ellipsis, a margin in from each edge it
+crossed; text inside the cell is never touched, so every frame that fit before
+is pixel-identical (checked against main with both frame scripts). Measure
+text with a Range, not an element's box: a row's elements are as wide as the
+row a long sibling stretches. ``tests/test_look_template.py`` forbids the
+digits of the legibility floor anywhere in that file, issue numbers included.
+
+A Look chooses its faces (#1272) from the bundled catalog ``splitsmith.fonts``
+(open-licensed files in ``data/fonts/`` beside their licences): one per role,
+``display`` and ``mono``. Templates never name a file; they draw ``"Splitsmith
+Display"`` / ``"Splitsmith Mono"``, and ``overlay_html._style_rules`` points
+those family names at the theme's ``display_font`` / ``mono_font`` ids
+(``theme_for`` resolves ``look.json``'s ``fonts`` by id or family label, an
+unknown one falling back to the role's default, so the shipped manifest's
+``"Antonio"`` and ``"sans": "Geist"`` still load). The ffmpeg clock reads the
+mono id too, both renderers (``theme_font_face``, ``overlay_render``), so the
+counter and the clock never disagree. The defaults are today's files and
+weights byte for byte, which is what keeps every default frame identical. A
+stored Look's ``fonts`` is validated strictly (``fonts.check``) and copies
+normalize to ids (``body_from_manifest``); ``theme_tokens`` skips the font ids,
+which are not colours. ``GET /api/looks/fonts/{id}`` serves a face by catalog
+id for the editor's samples (``FontPicker``). A desktop Look may also name its
+own file (step 2): ``own:font-<12hex>.ttf|otf`` in the Look's ``fonts/``,
+written by ``own_fonts.save_font`` (2 MB, bytes sniffed, WOFF and collections
+refused, opened with Pillow's FreeType, which is what ``drawtext`` reads with),
+uploaded through ``/api/looks/{name}/fonts`` (local only, in
+``LOCAL_ONLY_ROUTES``; ``db.looks._check_hosted`` refuses an ``own:`` value).
+``fonts.resolve(root=)`` turns it into the file's absolute path, so a theme's
+face is a catalog id or a path and every consumer takes both
+(``overlay_html._face_source``, ``overlay_text.resolve_overlay_face``). The
+content name is what keeps the caches honest: the card PNG and the
+``@font-face`` URL inside ``template_digest`` both move with the bytes. A copy
+of a Look (``looks.look_files``: ``looks new --from``, the editor's
+``draft_look``) carries every file but its manifest and previews. On hosted, Looks carry colours,
+fonts from the catalog and card styles, never a template: **custom templates
+are desktop only, by decision** (2026-10-07). A template is code; hosted would
+run it beside the database and R2 credentials, and Chromium's own OS sandbox
+cannot start on Railway (probed on staging: the platform's seccomp filter
+refuses user namespaces, ``unshare -Ur`` is denied and ``chromium_sandbox=True``
+fails to launch). Opening them on hosted would need a separate render service
+holding no secrets; do not build it, or relax any of the local-only guards
+below, without the user asking.
+
+Every template page loads in **the sandbox** (``look_sandbox``, #1266), local
+and hosted alike: navigated from ``https://look.invalid/look/<file>``, never
+``file://``, with every request answered by ``Sandbox.handle`` through
+``context.route``: ``/look/`` (the template's own folder, symlinks out
+refused), ``/shared/``, ``/fonts/``, and ``/file/<digest>/<name>`` for each
+``logo`` value naming a real PNG, JPEG or WebP that is not a symlink; the
+stylesheet and ``assets`` may name files inside the mounted folders only. Never
+widen that: ``data`` carries user text (a stage named
+``file:///proc/self/environ`` would be mounted, caught by
+``test_user_text_naming_a_file_is_never_mounted``), and an own font that is a
+symlink was a way to read any file (the security review's C1; ``fonts.resolve``
+and ``own_fonts`` refuse a symlinked font). Everything else aborts and
+lands in ``TemplateProbe.blocked``, which ``looks check`` words; websockets
+are routed to nothing, service workers blocked, files capped at
+``MAX_ASSET_BYTES``, and the browser launches with ``_SANDBOX_SWITCHES``
+(WebRTC's UDP and DNS prefetch off, which the route cannot see: a local STUN
+listener received packets before; a V8 heap cap). A crashed renderer is a
+``TemplateScriptError``, a skipped card. Answers come back through the binding
+by a random call id, only for a call in flight, so a template cannot answer
+for the probe. Calls into template code go through ``_TemplatePage.call``
+(``wait_for_function`` over ``_GUARD_JS``, answers back through the
+``__splitsmithDeliver`` binding), never a bare ``page.evaluate``, which waits
+forever on a stuck page. Playwright's own timeouts do not hold once a page
+sticks mid-call either (measured), so ``_TemplatePage.watched`` arms a
+watchdog that SIGKILLs the rasterizer's browser, found by the
+``--splitsmith-rasterizer=<uuid>`` switch it launched with (``_pids_with``:
+``/proc``, else ``ps``), and ``_live_browser`` relaunches it; the caller gets
+``TemplateTimeoutError``. Budgets live in ``look_sandbox``. The 27 shipped
+template renders were pixel-identical to the old ``file://`` path at the
+switch; ``overlay_raster.png`` (our own overlay HTML) still navigates by
+``file://`` and is not sandboxed.
+
+A Look carries **your brand** (the branding work): ``look.json``'s ``brand``
+(``looks.LookBrand``: a content-named ``brand-<12hex>.<ext>`` in the Look's
+``brand/`` folder, written by ``look_brand.save_brand_logo`` with the shooter
+logo's checks, and a line). ``look_brand.brand_json`` hands it to the title
+page and the closing card only, as ``data.brand``; a Look without one sends no
+key, so its contexts, digests and pixels are what they were (checked against
+main for every shipped card). ``_shared/brand.js`` draws it as a top-left corner
+mark, the line beside the logo, and never moves the card's text. The upload and serve routes are local only, and
+``db.looks._check_hosted`` refuses a brand *logo* (the line is fine) until Looks
+have a file store. It is the video maker's brand, never a shooter's: a shooter's
+logo stays theirs and nothing falls back between the two.
+
+The single-shooter MP4 can close with a **match summary** (spec
+``2026-10-07-match-summary-design``): ``match_summary.build_match_summary``
+reads the same ``TileStageData`` the stage summary hold does and the same
+rules (``statistic_splits``, the draw is the first split), never sums stage
+times and never shows a match %. It is ``Composition.match_summary``, a
+``_MatchSummaryItem`` on the spine after the last stage's summary and before
+the closing card, drawn by ``build_match_summary_still`` (engine HTML over
+the last stage's blurred tail frame, like the stage summary; not a Look
+template). It adds no chapter: YouTube drops every chapter when one is under
+ten seconds. The preview's ``match_summary`` card is built from every
+stage's audit by ``export_preview.match_summary_for`` and keyed by
+``summary_digest``, since the preview's own key reads one stage's audit.
+The grid's (spec ``2026-10-08-grid-match-summary-design``) is a
+``GridCardItem`` of kind ``match_summary`` (``render_grid_mp4(
+match_summary_seconds=)``, 0 is off): a title strip over the grid, each
+shooter's tile declared by ``match_summary.match_summary_groups`` in the
+stage hold's bands and drawn by ``grid_html``, over their own tail frame on
+the last stage that has footage of them
+(``overlay_summary.extract_match_summary_freezes``). It reads
+``load_overlay_data`` itself, so it never needs the overlay; there is no
+ranking between shooters, as on the stage hold. The rail preview cannot draw
+it (the route previews one shooter), so the pane shows its gallery thumbnail.
+
+The closing card ends with **"Made with splitsmith"** unless turned off
+(``MatchTitle.credit``, drawn by ``_shared/credit.js`` from ``data.credit``,
+which ``card_context`` sets on the ``closing`` slot only). The switch is
+``made_with``, on by default on every request body, ``ExportPresetBody``,
+``CardOptions``, ``MatchExportRequestData``, the preview request and both
+CLIs (``--no-made-with``); it joins the preview cache key only on a closing
+card that draws it. A closing card with it off is the card it always was.
+
+An account's Looks (#1263) go through ``look_store.LookStore`` (``state.looks``;
+``GET / PUT / DELETE /api/looks/{name}``): ``FolderLookStore`` over the Looks
+folder locally (``put`` on a hand-made Look rewrites only the stored fields of
+its ``look.json`` and keeps its templates; a local name may shadow a shipped
+one), ``db.looks.PostgresLookStore`` over the ``user_looks`` table hosted (a
+``StoredLookBody``: label, ``base``, colours, accent series and ``styles``,
+never a template; a shipped name or a non-shipped base is refused). ``styles``
+on a manifest picks the variant a slot's ``default`` draws, which is how a
+template-less Look has card styles. Renderers never see a store: they resolve
+Looks by name through ``looks.user_looks_dir()``, and hosted sets
+``looks.set_user_looks_provider(tenant_looks_provider(tenant))`` everywhere it
+pins ``current_tenant`` (the auth gate, the share alias, the queue task), which
+materializes the account's rows as manifest-only folders under
+``user_looks_cache_root()/<user_id>/<content hash>/``. A new place that pins a
+tenant must set the provider too, or a render there sees no user Looks.
+
+The Look editor (#1264) is the Export page Look group's Advanced row
+(``components/export/LookAdvanced`` -> ``LookEditor``, rules in
+``lib/lookEditor``): Duplicate copies server-side first
+(``POST /api/looks/{name}/duplicate``: ``looks new --from`` locally, so a
+hand-made Look keeps its templates; a manifest on the source's shipped base
+hosted), then the sheet edits the copy. Its draft previews through the
+export-preview route's ``draft`` (``look_store.draft_look``: the saved
+Look's manifest with the draft's fields, beside copies of its own
+templates) and ``at`` (``render_template(at=)``; the preview's
+``_AtTime`` wrapper), plus a ``sting`` card; both fields join the cache key
+only when set. The strip renders one card at a time
+(``lookEditor.serialQueue``): the server's render bound answers 429 to a
+second preview in flight. Contrast is a warning; only invalid fields block
+Save. ``refreshLooks()`` re-fetches the catalog for every mounted surface
+after a write.
+
+The template editor (#1265) is the editor's Templates tab on the desktop
+(``components/export/TemplateEditor``, CodeMirror 6 lazy-loaded through
+``CodeEditor``, rules in ``lib/templateEditor``). Its routes
+(``/api/looks/{name}/templates`` GET/PUT, ``/samples``, ``/check``,
+``/reveal``) are ``LOCAL_ONLY_ROUTES``: a template is code, hosted runs none
+of an account's (desktop only, see above). Unsaved text rides the preview and the check as
+``templates`` (``look_store.TemplateEdit``, applied by ``draft_look`` /
+``apply_template_edits``; the preview answers 403 hosted when it is set) and
+is keyed per own *file* (``editKey``): the shipped ``card.html`` draws four
+cards, and the tab says so (``sharedWith``). A borrowed slot is written to
+``<slot>-<variant>.html`` and named in ``look.json`` on first save. Page
+errors carry the template's line (``describe_page_error``).
+The Export rail's ``LookHealth`` (#1276) checks the chosen Look when it is
+your own and the app is local, through the same check route without a draft;
+that case is cached under ``cache_dir/look-check`` by every file of the Look's
+folder (``_folder_digest``), so choosing a Look again launches no browser and
+any edit checks again. A draft or template text is never cached. Failures are
+grouped by message (``lib/lookHealth``): one broken ``card.html`` is one line
+naming the four cards it draws. It never blocks Export.
+
+Palette suggestions (#1273) sit at the top of the Palette tab
+(``components/export/PaletteSuggestions``); every rule is in the pure
+``lib/palette`` (schemes from one colour, the footage ranking, the weak-accent
+warning, the grid accent series, the ready-made set). The server only
+measures: ``palette_sources`` (a deterministic k-means over two frames per
+stage from the trim on this disk, merging near-identical clusters, plus the
+logo's colours) behind ``POST /api/shooters/{slug}/palette-sources``; a
+hosted container has no trims, so its footage is empty and the source is
+disabled. "Stands out" is OKLCh hue separation from the footage's tinted
+swatches, not raw colour distance: a saturated green is far from dull grass
+in OKLab and still reads as the grass. Choosing a suggestion replaces the
+draft's colours and accent series; the neutrals stay.
+
+A shooter has an **identity** (``splitsmith.identity``, spec section 2,
+#1243): ``MatchProject.identity`` holds an optional ``#rrggbb`` accent, a
+club line and the name of a logo under ``<shooter>/identity/``
+(content-named ``logo-<12hex>.<ext>``, PNG / JPEG / WEBP, 2 MB). The
+renderers never read it raw: the request layer (the export jobs in
+``server.py``, ``match_cli``, ``compare/cli``, the preview API) resolves
+it through ``ui/identity_media.resolved_identity_for`` /
+``grid_identities`` into a ``ResolvedIdentity`` whose accent is the
+shooter's own or ``None`` and whose ``logo_path`` is a file on this disk
+or ``None`` (hosted mirrors the logo down like a trim; a missing file is
+a card without a logo, never a failed render). A shooter who set nothing
+renders exactly as before identities existed: the spec's slot default
+(the Look's ``accent_series`` by slot, alphabetical by label, filler
+tiles keep their slot) is opt-in through ``series_default`` and only the
+frame scripts' ``--identity-demo`` asks for it (a ruling from the slice
+3 review; the series is otherwise the sheet's swatches). The pixel gate
+against main runs the frame scripts' default path, which goes through
+the same resolver an export uses. ``Composition.shooters`` and
+``render_grid_mp4(identities=)`` carry it in; templates read
+``data.shooters`` and ``_shared/identity.js`` draws the logos top-right
+(a lower third only when exactly one shooter has one); the summary
+tile's accent bar and the name's colour are ``--accent`` on the cell
+wrapper, unset today's pixels; the club line prints under the shooter's
+name on the title page (``title_info_lines``). The upload sniffs the
+bytes (PNG / JPEG incl. MPO / WEBP), caps the side at ``LOGO_MAX_SIDE``
+and never reads the client's filename. The logo syncs over the media
+channel (``identity/`` in the push plan, the hosted key rule and the
+delete route). The roster shows it too (#1249): ``GET
+/api/shooters/{slug}/identity/logo`` serves the logo (``ensure_local_logo``,
+``nosniff``) and is on the share GET allowlist (the logo is in every video a
+share shows; the alias binds it to that match's shooters), the compare payload
+carries ``identity``, and ``Avatar`` takes ``accent`` (a ring) and ``logo`` (in
+place of the initials) through ``lib/identityMark``, whose URL carries the
+content-named file so a new logo is a new URL; with neither it renders as before.
+
+Three logos, and none stands in for another: the shooter's (top-right,
+above), **your brand** (``LookBrand`` on a Look, the top-left mark on the
+title page and the closing card) and the **event logo**, the match's own
+(``Match.branding.event_logo``, ``event-<12hex>.<ext>`` in
+``<match>/identity/``, routes ``/api/match/branding/event-logo``; the
+Export page's Branding row under Details). The event logo is the
+centrepiece of those two cards only, above the match name, which moves below it (``MatchTitle.logo`` ->
+``data.event`` -> ``_shared/event.js``); the old match-logo fallback for a
+shooter without one is gone. It syncs at match level
+(``matches/{id}/identity/event-*``: the push plan, the gc's
+``_EVENT_KEY_LOCAL_RE`` and the hosted key rule move together), and every
+renderer resolves it through ``identity_media.ensure_local_event_logo``,
+which mirrors it down on hosted and answers ``None`` when it is missing.
+
+**You, your brand and the shooter book** (spec
+``2026-10-08-account-identity-and-shooter-book-design``). "You" is the existing
+``ScoreboardIdentity.shooter_id``. The **shooter book** (``shooter_book``) keeps
+a shooter's look per account keyed by SSI shooter id, never by name:
+``identity_media.identity_source`` takes the match's own record when it sets
+anything (as a whole), else the book's entry for ``selected_shooter_id``, else
+nothing, so an empty book renders exactly as before. Renderers never read a
+store: the request layer loads ``load_snapshot(state.shooter_book)`` once per
+export and passes ``book=`` to ``resolved_identity_for`` / ``grid_identities``
+(every export job, the preview, the palette route, both CLIs). Identity edits
+write the book (``scope="book"``, the default; ``"match"`` keeps an edit here;
+an empty look removes the entry); an edit to a shooter whose match sets nothing
+starts from the book's look, logo copied in; ``use-book`` is refused when the
+book has nothing to fall back to. The account's **brand** (``AccountProfile``,
+the shape of ``LookBrand``) is ``MatchTitle.brand``, resolved by the request
+layer like the event logo; ``look_brand.brand_json`` draws the Look's brand when
+it has one, else the account's, as a whole. ``account_brand`` (default on) on
+every request body, the preset and both CLIs turns it off. The preview key gains
+``book_identity`` / ``account_brand`` only when the card draws them. Stores:
+``JsonShooterBookStore`` / ``JsonAccountProfileStore`` under ``<user
+config>/account/`` locally; hosted ``db.account_identity`` (tables
+``shooter_book`` and ``account_profiles`` under RLS, files in the tenant's own
+storage prefix at ``account/files/`` and ``account/brand/``, mirrored into the
+cache by content name). ``AppState.shooter_book`` / ``account_profile`` never
+fall back to the local files on a hosted server. The book fills once from the
+account's existing matches (``account_backfill``; most recent wins, entries the
+book already holds are kept; ``account_profiles.backfilled_at`` hosted, a
+``.backfilled`` marker locally). Never a ``state_docs`` kind, not synced
+between desktop and hosted, and no share route reads either: the roster (the
+shooters list, Compare's payload, the logo route) and the title page's club line
+show the look the video draws (``identity_media.effective_identity``) through
+``_roster_book``, which is the empty book on a share request.
+
+The single-shooter MP4 draws **transitions** (#1244, spec section 3) on a
+boundary segment. ``plan_timeline`` turns the stage-indexed
+``Composition.transitions`` into ``TimelinePlan.boundaries`` between
+consecutive spine items (the last item of a stage's run, its summary
+when it has one, and the first of the next, its slate when it has one);
+a transition of d seconds is a crossfade of length d centred on the cut,
+so the timeline, the chapters and the duration estimate keep their
+length. Each neighbour gives up d/2 (``head_cut_seconds`` /
+``tail_cut_seconds`` on the item; ``_narrow_plan`` shifts a stage's plan
+and recomputes its cams) and the boundary is ``xfade`` + ``acrossfade``
+over two *edge* renders made with the item's own builder
+(``_edge_plan``: the last d/2 of effective footage plus whatever handle
+the trim holds past the tail pad, up to d/2, and the mirror at the head;
+the boundary holds the edge's last or first frame for the rest
+(``tail_pad_seconds`` / ``head_pad_seconds`` on the boundary command), so
+the default 5 s pads over 5 s trim buffers, which leave no handle at all,
+still get a transition; a card's handle is its own frame, an animated
+card's head edge delays its clip and its tail edge offsets it, cloning
+the last frame before the skip so an offset past the animation still
+shows the card). The fit check reports and never clamps: d/2 must fit
+the pad (the beep and the last shot stay out of the fade), and a card
+must be at least d long; a miss or a failed edge is a cut with a
+degradation. A lower third the head edge showed in full is dropped from
+the trimmed stage (``_trimmed_lower_third``; a looped PNG with ``-t 0``
+runs forever). The driver prepares each item once, decides a boundary
+(edges, then the xfade) *before* encoding the item that opens it, and
+keys the boundary by its edges' cache keys, not their files (the
+cache's LRU touch re-dates them). ``KEY_VERSION`` is 3. Kinds are
+the curated ``xfade`` names plus the two FCP effects, which the MP4 maps
+through ``xfade_name`` and the FCPXML path substitutes with ``zoom`` and
+an anomaly. ``composition.XFADE_FAMILIES`` (#1259) is the one list: a
+family is a gallery tile with one or more directions (Wind: ``hlwind``,
+``hrwind``, ``vuwind``, ``vdwind``), ``XFADE_KINDS``, the request
+validation and both CLIs' help derive from it, ``GET /api/looks`` serves
+it as ``transitions`` with a looping preview per family
+(``data/looks/_transitions/preview/<family>.webp``, the ``_transitions``
+owner of the preview route), and ``tests/test_xfade_kinds_integration.py``
+pins every kind against the ffmpeg on PATH (CI's FFmpeg 6.1 is the
+oldest the project meets). A new transition is one family entry plus
+``render_look_thumbnails.py --look-previews``; the SPA has no list of its
+own. The grid draws them too (``compare/mp4_grid``):
+``plan_grid_spine`` places the same boundaries between its items (a
+stage's segment is action plus hold; a slate when present),
+``narrow_grid_plan`` rebuilds every tile's seek and lead pad from the cut
+head pad (the beep stays on it; the overlay plan is built from the
+narrowed plan so clocks and sprites move with it) and takes a tail cut
+from the hold first, ``grid_edge_plan`` reads the handle every real
+tile's trim holds (a tile with no footage in the window becomes filler,
+a tail edge inside the hold is a still of it), and
+``build_boundary_segment_command`` crossfades the video and each of the
+N+1 tracks by stream index. Edges and boundaries go through
+``boundary_runner``, never ``runner``, so the CLIs' "stage N of M" stays
+honest. ``scripts/render_grid_frames.py --transition fade`` shows it.
+``scripts/render_match_frames.py --transition fade --transition-seconds 1``
+shows the boundary (``boundary-1-in`` / ``-mid`` / ``-out``); a lower
+third on the stage after a boundary starts in the head edge
+(``lower_third_filters(delay_seconds=)``) and continues in the trimmed
+stage (``skip_seconds=``), never restarting.
+
+A **sting** (#1245) is a transition kind ``sting:<name>`` where ``<name>``
+is a variant of the Look's ``transition`` slot (``look.json``:
+``"transition": {"wipe": "sting-wipe.html"}``; ``looks.sting_template_for``
+resolves it against the Look and the shipped default, with no fallback to
+another variant). ``TransitionKind`` is therefore an open ``str``;
+``composition.validate_transition_kind`` is the one grammar check and the
+request bodies, ``ExportPresetBody`` and both CLIs run it, so ``sting:``
+alone or an unknown closed kind is still a 422 / usage error, and
+``Transition.__post_init__`` runs it again so a caller that skipped them
+(the MCP tool annotates the open string) never puts text into
+``xfade=transition=``. Both
+renderers decide a sting while deciding the boundary (``sting_for_boundary``
+in each driver): ``look_sting.sting_motion`` loads the template with
+``data.transition`` (kind, name, duration, the labels either side of the
+cut) and ``data.shooters`` (the identities the cards see), the clip is written with ``write_motion_clip`` and
+laid over the boundary's ``fade`` (``xfade_name`` of a sting) through
+``sting_overlay_filters`` for the whole segment from its first frame,
+whatever handle the edges had; the single-shooter cache keys it by
+``template_digest`` as a virtual input, so a cached boundary renders no
+frame. A sting the Look lacks, or one with no browser, is a fade plus a
+degradation naming it; frames that fail are a cut like any failed
+boundary. Without a sting every argv is unchanged. The shipped
+``sting-wipe.html`` sweeps an accent band across the seam carrying a logo
+when the shooters have exactly one distinct logo between them (each
+shooter's own; no other logo stands in for one) or the next item's
+name, clipped to the band in the bundled display face;
+``window.duration()`` returns the transition's length, so the renderer
+samples exactly the boundary. The FCPXML path substitutes zoom with an
+anomaly; the gallery tile is ``sting:wipe`` (MP4, both modes), its
+thumbnail the template at its poster over the mid-fade
+(``scripts/render_look_thumbnails.py``, Chromium at authoring time).
+``scripts/render_match_frames.py --transition sting:wipe --identity-demo``
+and the grid script show it.
+
+## What's new (in-app release notes)
+
+Every user-facing change adds its entry to ``src/splitsmith/data/whats_new.json``
+**in the same PR**: the app's What's new sheet is the only place most users
+learn a feature exists, and release-please's changelog is commit subjects,
+not user copy. Use the ``whats-new`` skill (``.claude/skills/whats-new``):
+it says when an entry is needed and the house style; ``tests/test_whats_new.py``
+fails an entry that breaks the mechanical rules (length, ASCII, no dash
+punctuation, no issue numbers, no hype). Seen-ness is a set of entry ids
+(``GlobalPrefs.whats_new_seen`` locally, ``users.whats_new_seen`` hosted), so
+an id is never renamed; a user with no matches starts with everything seen
+(``whats_new.first_seen``). The sheet (``components/whatsNew``) opens itself
+once per session when something is unseen and lives in ``RootLayout``, so
+share pages never show it; a feature's ``<NewChip feature=...>`` shows for 60
+days or until ``dismissNewChip`` is called where the feature is used.
 
 ## Hosted playback streams the web rendition (#1031)
 
@@ -239,13 +708,36 @@ registry of slots, variants, thumbnails, parameters and which mode and
 format can draw each; ``components/export/LookGallery.tsx`` renders it
 and owns nothing. A new effect is one registry entry plus one thumbnail
 from ``scripts/render_look_thumbnails.py`` (Chromium once, at authoring
-time; the gallery never rasterizes). ``lookGallery.test.ts`` pins the
-per-format visibility table and that every committed thumbnail is
-referenced; ``renderOptions.test.ts`` pins that the mappers never send a
-field the registry hides. Transitions live in Look (FCPXML only, sent
-as ``none`` elsewhere) and the title line in Details. A slot whose
-seconds field is being edited reads NaN and must still count as on, or
-the input vanishes under the cursor (``summaryHold.read``).
+time; the gallery never rasterizes; the cut and the FCP effects are
+bundled stills, the xfade families come from the server with looping
+WebP clips of the real transition through the project ffmpeg).
+``slotsForLook(looks, settings, transitions)`` turns the families into
+the transition tiles: a stored kind reads as its family, picking a family
+keeps the direction already chosen or takes its first, and a family with
+more than one direction shows a Direction ``Segmented`` under it. The
+kind filter (``visibleTransitionKind``) admits on MP4 only what
+``requestLook`` lists: the server's kinds and the chosen Look's stings,
+or the stored kind itself while the catalog is not there. The rail and
+the group summary name a kind with ``transitionLabel`` ("Wind up", a
+sting as "Wipe sting"). ``lookGallery.test.ts`` pins the per-format
+visibility table and that every committed thumbnail is referenced;
+``renderOptions.test.ts`` pins that the mappers never send a field the
+registry hides. The installed Looks reach it through ``lib/looks.ts``
+(the pure reader of ``GET /api/looks``: ``visibleLook``,
+``visibleVariant``, ``stingsFor``, ``resolveLookChoice``) and
+``useLooks`` (fetched once; ``BUILTIN_LOOKS`` until it answers):
+``slotsForLook(looks, settings)`` folds the catalog into the static
+table, the Look tiles first when more than one Look is installed, a
+Style (``Segmented``, ``VARIANT_FIELD``) under a card that is on when the
+chosen Look has more than one template variant, and the Look's stings
+among the transitions with their catalog previews. A Look field rides a
+request only when it is not the default (``nonDefault``), so an
+untouched form sends the body it always sent; a stored Look no longer
+installed, or a variant the Look lacks, is resolved before any request.
+Transitions live in Look (FCPXML only, sent as ``none`` elsewhere) and
+the title line in Details. A slot whose seconds field is being edited
+reads NaN and must still count as on, or the input vanishes under the
+cursor (``summaryHold.read``).
 
 The rail's preview (spec s3) is ``POST /api/shooters/{slug}/export-preview``
 -> PNG, engine ``export_preview.render_preview``: it declares the card
@@ -257,7 +749,15 @@ Cached under ``cache_dir/export-preview`` by a content key that includes
 the project's ``updated_at`` and the audit version. 503 is no browser,
 409 is the overlay without shots; the SPA maps each to one muted line in
 ``PreviewPane`` and never blocks the Export button. A new Look variant
-needs a ``previewCardFor`` case or it previews as the frame.
+needs a ``previewCardFor`` case or it previews as the frame. The request carries ``look`` and ``variant``
+(#1246, the focused slot's, only when not the defaults); both are in the
+cache key, and an animated template previews at its ``poster()`` through
+``render_template``, or, with ``motion`` (#1249, what the rail and the
+editor's big preview ask for), as a looping animated WebP of its own frames at
+``MOTION_FPS`` over the backdrop its still uses, the last frame held; a still
+template answers the PNG it always did, so ``motion`` is safe to ask for on any
+card a template draws. The response's type follows the bytes (``_image``), and
+the cache keeps ``<key>.png`` or ``<key>.webp`` accordingly.
 
 ## YouTube upload (#1000)
 

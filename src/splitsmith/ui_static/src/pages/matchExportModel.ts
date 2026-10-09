@@ -12,14 +12,16 @@ import type {
   MatchExportRequestPayload,
   OverlayCodec,
 } from "@/lib/api";
+import { DEFAULT_LOOK, nonDefault, type LookChoice } from "@/lib/looks";
+import { overlayStyleFields, type OverlayStyle } from "@/lib/overlayStyle";
 import { camExportFields, type CamOptions } from "@/lib/camOptions";
+import { visibleTransitionKind } from "@/lib/lookGallery";
 import type { TransitionKind } from "@/lib/exportPresets";
 import {
   anyRenderOptionOn,
   clampSeconds,
   gridExportFields,
   matchExportFields,
-  transitionsSupported,
   type OutputFormat,
   type RenderOptions,
 } from "@/lib/renderOptions";
@@ -78,6 +80,14 @@ export function buildCompareGridPayload(input: {
   descriptionLead?: string;
   uploadOptions?: UploadFormOptions;
   youtubeConnected?: boolean;
+  /** #1244: the transition between stages; sent only when the grid can
+   *  draw the kind, so an untouched body stays as it was. */
+  transitionKind?: TransitionKind;
+  transitionSeconds?: number;
+  /** The resolved Look choice (#1246); sent whenever given. */
+  look?: LookChoice;
+  /** The MP4 kinds the catalog offers (``requestLook``), for the kind filter. */
+  kinds?: readonly string[];
 }): CompareGridRequestPayload {
   const payload: CompareGridRequestPayload = {
     stage_numbers: [...input.stageNumbers].sort((a, b) => a - b),
@@ -86,7 +96,16 @@ export function buildCompareGridPayload(input: {
     canvas_height: input.canvas.height,
     output_name: input.outputName,
   };
-  if (input.render && anyRenderOptionOn(input.render)) Object.assign(payload, gridExportFields(input.render));
+  const transition = visibleTransitionKind(input.transitionKind ?? "none", "mp4", "compare", input.kinds ?? []);
+  if (transition !== "none") {
+    payload.transition_kind = transition;
+    payload.transition_duration_seconds = clampSeconds(input.transitionSeconds ?? 0.5, 0.1);
+  }
+  const theme = input.look && nonDefault(input.look.look, DEFAULT_LOOK);
+  if (theme) payload.overlay_theme = theme;
+  if (input.render && anyRenderOptionOn(input.render)) {
+    Object.assign(payload, gridExportFields(input.render, input.look));
+  }
   if (input.overlay) {
     payload.overlay = true;
     const hold = input.summaryHoldSeconds ?? 0;
@@ -176,11 +195,18 @@ export interface MatchExportPayloadInput {
   uploadOptions: UploadFormOptions;
   includeOverlay: boolean;
   overlayCodec: OverlayCodec;
+  /** The overlay style, resolved against the catalog (``lib/overlayStyle``);
+   *  carried only with the overlay on and a style chosen. */
+  overlayStyle?: OverlayStyle;
   projectName: string;
   /** "desk" posts an export here; "desktop" asks the linked desktop to
    *  render and upload, which only makes sense as an MP4 that uploads. */
   uploadTarget: "desk" | "desktop";
   youtubeConnected: boolean;
+  /** The resolved Look choice (#1246); omitted, the server's defaults. */
+  look?: LookChoice;
+  /** The MP4 kinds the catalog offers (``requestLook``), for the kind filter. */
+  kinds?: readonly string[];
 }
 
 /** The single-shooter match-export request body, for either the desk
@@ -201,9 +227,10 @@ export function buildMatchExportPayload(input: MatchExportPayloadInput): MatchEx
     tail_pad_seconds: input.tailPad,
     ...camExportFields(input.camOptions),
     output_format: outputFormat,
-    transition_kind: transitionsSupported(outputFormat) ? input.transitionKind : "none",
+    transition_kind: visibleTransitionKind(input.transitionKind, outputFormat, "single", input.kinds ?? []),
     transition_duration_seconds: clampSeconds(input.transitionSeconds, 0.1),
-    ...matchExportFields(input.renderOptions, outputFormat),
+    ...matchExportFields(input.renderOptions, outputFormat, input.look),
+    ...(input.look && nonDefault(input.look.look, DEFAULT_LOOK) ? { overlay_theme: input.look.look } : {}),
     intro_path: undefined,
     outro_path: undefined,
     youtube_sidecar: youtube,
@@ -218,6 +245,7 @@ export function buildMatchExportPayload(input: MatchExportPayloadInput): MatchEx
     youtube_publish_at: upload.publish_at,
     youtube_notify_subscribers: upload.notify_subscribers,
     include_overlay: input.includeOverlay,
+    ...(input.includeOverlay && input.overlayStyle ? overlayStyleFields(input.overlayStyle) : {}),
     overlay_codec: input.overlayCodec,
     overlay_max_height: null,
     overlay_max_fps: null,

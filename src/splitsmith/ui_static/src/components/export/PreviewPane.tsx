@@ -10,11 +10,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/Label";
-import { ApiError, api } from "@/lib/api";
+import { ApiError, api, type LookInfo, type TransitionFamilyInfo } from "@/lib/api";
 import { useDeploymentMode } from "@/lib/features";
 import { previewBody, previewCaption, previewCardFor, previewLine, type LookFocus } from "@/lib/exportPreview";
 import type { ExportSettings } from "@/lib/exportPresets";
-import { LOOK_SLOTS, thumbnailUrl } from "@/lib/lookGallery";
+import { slotsForLook, thumbnailUrl } from "@/lib/lookGallery";
+import { previewSrc } from "@/lib/looks";
+import { useLooks } from "@/lib/useLooks";
 
 export const PREVIEW_DEBOUNCE_MS = 400;
 /** How often the pane asks after the renderer install it started. */
@@ -33,15 +35,36 @@ export interface PreviewPaneProps {
   hover: LookFocus | null;
   /** False hides the pane (trims mode, no stage selected). */
   enabled: boolean;
+  /** The export's stage selection, in order (the match summary card). */
+  stageNumbers?: readonly number[];
 }
 
-function genericFor(focus: LookFocus | null): string | null {
+function genericFor(
+  focus: LookFocus | null,
+  looks: LookInfo[],
+  settings: ExportSettings,
+  transitions: TransitionFamilyInfo[],
+): string | null {
   if (!focus) return null;
-  const variant = LOOK_SLOTS.find((s) => s.id === focus.slotId)?.variants.find((v) => v.id === focus.variantId);
-  return variant ? thumbnailUrl(variant.thumbnail) : null;
+  const variant = slotsForLook(looks, settings, transitions)
+    .find((s) => s.id === focus.slotId)
+    // A slot can name one variant id per mode (the match summary's grid tile).
+    ?.variants.find((v) => v.id === focus.variantId && v.modes.includes(settings.mode));
+  if (!variant) return null;
+  return previewSrc(variant.previewUrl ?? null) ?? thumbnailUrl(variant.thumbnail);
 }
 
-export function PreviewPane({ slug, stageNumber, settings, projectName, focus, hover, enabled }: PreviewPaneProps) {
+export function PreviewPane({
+  slug,
+  stageNumber,
+  settings,
+  projectName,
+  focus,
+  hover,
+  enabled,
+  stageNumbers,
+}: PreviewPaneProps) {
+  const { looks, transitions } = useLooks();
   const [still, setStill] = useState<string | null>(null);
   const [status, setStatus] = useState<number | null>(null);
   const [failed, setFailed] = useState(false);
@@ -53,11 +76,12 @@ export function PreviewPane({ slug, stageNumber, settings, projectName, focus, h
   const { mode } = useDeploymentMode();
   const urlRef = useRef<string | null>(null);
 
-  const card = previewCardFor(focus);
+  const card = previewCardFor(focus, settings.mode);
   // One string so the effect re-runs only when the request would differ.
   const requestKey = useMemo(
-    () => (card ? JSON.stringify(previewBody(settings, card, stageNumber, projectName)) : null),
-    [card, settings, stageNumber, projectName],
+    () =>
+      card ? JSON.stringify(previewBody(settings, card, stageNumber, projectName, looks, stageNumbers)) : null,
+    [card, settings, stageNumber, projectName, looks, stageNumbers],
   );
 
   useEffect(() => {
@@ -129,10 +153,10 @@ export function PreviewPane({ slug, stageNumber, settings, projectName, focus, h
   );
 
   if (!enabled) return null;
-  const hovering = genericFor(hover);
-  const generic = card === null ? genericFor(focus) : null;
+  const hovering = genericFor(hover, looks, settings, transitions);
+  const generic = card === null ? genericFor(focus, looks, settings, transitions) : null;
   const src = hovering ?? generic ?? still;
-  const caption = previewCaption(hover ?? focus, stageNumber);
+  const caption = previewCaption(hover ?? focus, stageNumber, slotsForLook(looks, settings, transitions));
   return (
     <div className="border-b border-rule">
       <div className="flex items-center justify-between px-3.5 py-2">

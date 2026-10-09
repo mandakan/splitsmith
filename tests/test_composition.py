@@ -479,3 +479,139 @@ def test_summary_hold_attaches_to_its_stage(tmp_path: Path) -> None:
     assert comp.stages[0].summary is hold
     bare = composition.from_stage_compositions(_one_stage(tmp_path), project_name="m")
     assert bare.stages[0].summary is None
+
+
+def test_the_transition_catalog_is_the_curated_xfade_list_plus_the_fcp_effects() -> None:
+    """Issues #1244, #1259: the kinds are ffmpeg xfade names, derived from
+    the families; every kind a preset or a script may have stored before
+    the families existed is still one; the two FCP effects keep their
+    names and map to the nearest xfade for the MP4 renderers."""
+    kinds = composition.XFADE_KINDS
+    assert len(kinds) == len(set(kinds))
+    for kind in (
+        "fade",
+        "fadeblack",
+        "dissolve",
+        "slideleft",
+        "slideright",
+        "circleopen",
+        "zoomin",
+        "hblur",
+        "smoothleft",
+        "wipeleft",
+    ):
+        assert kind in kinds, kind
+    for kind in (
+        "fadewhite",
+        "radial",
+        "circleclose",
+        "pixelize",
+        "squeezeh",
+        "squeezev",
+        "coverleft",
+        "revealdown",
+        "hlwind",
+        "vdwind",
+        "slideup",
+        "wipedown",
+    ):
+        assert kind in kinds, kind
+    for skipped in (
+        "diagtl",
+        "hlslice",
+        "distance",
+        "rectcrop",
+        "circlecrop",
+        "fadegrays",
+        "fadefast",
+        "custom",
+    ):
+        assert skipped not in kinds, skipped
+    assert [f.id for f in composition.XFADE_FAMILIES] == [
+        "fade",
+        "fadeblack",
+        "fadewhite",
+        "dissolve",
+        "slide",
+        "smooth",
+        "wipe",
+        "cover",
+        "reveal",
+        "wind",
+        "circle",
+        "radial",
+        "zoomin",
+        "hblur",
+        "pixelize",
+        "squeeze",
+    ]
+    family, direction = composition.xfade_family("vuwind")
+    assert (family.id, direction.name) == ("wind", "up")
+    family, direction = composition.xfade_family("circleclose")
+    assert (family.id, direction.name, family.directions[0].kind) == ("circle", "close", "circleopen")
+    assert composition.xfade_family("sting:wipe") is None and composition.xfade_family("zoom") is None
+    for kind in ("hlwind", "squeezev", "radial"):
+        assert composition.validate_transition_kind(kind) == kind
+    assert composition.FCP_KINDS == ("zoom", "static")
+    assert composition.xfade_name("fade") == "fade"
+    assert composition.xfade_name("zoom") == "zoomin"
+    assert composition.xfade_name("static") == "fadeblack"
+    assert composition.fcp_kind("zoom") == ("zoom", False)
+    assert composition.fcp_kind("static") == ("static", False)
+    assert composition.fcp_kind("hblur") == ("zoom", True)
+
+
+def test_lowering_an_xfade_kind_to_fcpxml_substitutes_zoom() -> None:
+    lowered = composition._lower_transitions(
+        (composition.Transition(from_stage_index=0, to_stage_index=1, kind="dissolve", duration_seconds=1.0),)
+    )
+    assert lowered[0].kind == "zoom" and lowered[0].duration_seconds == 1.0
+
+
+def test_sting_kinds_parse_and_ride_a_fade() -> None:
+    """Issue #1245: ``sting:<name>`` names a variant of the Look's
+    ``transition`` slot; the MP4 renderers lay it over a fade and the
+    FCPXML emitter substitutes zoom like any xfade kind."""
+    assert composition.is_sting("sting:wipe")
+    assert not composition.is_sting("fade")
+    assert composition.sting_name("sting:wipe") == "wipe"
+    assert composition.xfade_name("sting:wipe") == "fade"
+    assert composition.fcp_kind("sting:wipe") == ("zoom", True)
+    with pytest.raises(ValueError):
+        composition.sting_name("fade")
+
+
+@pytest.mark.parametrize(
+    "kind", ["none", "fade", "zoom", "static", "wipeleft", "sting:wipe", "sting:logo-2", "sting:a_b"]
+)
+def test_validate_transition_kind_accepts_the_grammar(kind: str) -> None:
+    assert composition.validate_transition_kind(kind) == kind
+
+
+@pytest.mark.parametrize(
+    "kind",
+    ["", "sting:", "sting:Wipe", "sting:a b", "sting:-x", "wipe", "fade:", "Sting:wipe", "sting:" + "x" * 33],
+)
+def test_validate_transition_kind_refuses_everything_else(kind: str) -> None:
+    with pytest.raises(ValueError, match="transition kind"):
+        composition.validate_transition_kind(kind)
+
+
+def test_validate_transition_kind_can_refuse_none() -> None:
+    with pytest.raises(ValueError):
+        composition.validate_transition_kind("none", allow_none=False)
+
+
+def test_a_transition_refuses_a_kind_outside_the_grammar() -> None:
+    """Review of #1245: the IR is the last gate before ffmpeg's filter
+    graph, so a caller that skipped the request validators (the MCP tool
+    annotates the open string) still cannot put arbitrary text into
+    ``xfade=transition=``."""
+    for kind in ("bogus", "sting:", "none", "fade[x];movie=/etc/passwd"):
+        with pytest.raises(ValueError, match="transition kind"):
+            composition.Transition(from_stage_index=0, to_stage_index=1, kind=kind)
+    with pytest.raises(ValueError, match="transition kind"):
+        composition.uniform_transitions("bogus", 1.0, 2)
+    assert (
+        composition.Transition(from_stage_index=0, to_stage_index=1, kind="sting:wipe").kind == "sting:wipe"
+    )

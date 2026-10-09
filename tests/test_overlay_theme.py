@@ -48,11 +48,12 @@ def test_clean_preset_matches_legacy_hardcoded_values() -> None:
     assert sum(t.muted) < sum(t.ink_2) < sum(t.ink)
 
 
-def test_splitsmith_preset_loads_from_packaged_json() -> None:
-    """The ``splitsmith`` preset must round-trip through the JSON mirror so
+def test_splitsmith_preset_loads_from_its_look_manifest() -> None:
+    """The ``splitsmith`` preset round-trips through its Look's manifest so
     a regenerate step actually flows into runtime."""
-    with resources.files("splitsmith.data").joinpath("overlay_theme.json").open("r", encoding="utf-8") as fh:
-        data = json.load(fh)
+    from splitsmith import looks
+
+    data = json.loads((looks.shipped_looks_dir() / "splitsmith" / "look.json").read_text(encoding="utf-8"))
 
     t = overlay_theme.load_theme("splitsmith")
     assert t.name == "splitsmith"
@@ -182,3 +183,22 @@ def test_overlay_theme_json_is_in_sync_with_css() -> None:
         text=True,
     )
     assert proc.returncode == 0, f"overlay_theme.json drifted from index.css: {proc.stderr}"
+
+
+def test_theme_for_a_user_look_reads_its_own_colours(tmp_path, monkeypatch) -> None:
+    from splitsmith import looks
+
+    monkeypatch.setenv("SPLITSMITH_HOME", str(tmp_path))
+    manifest = json.loads((looks.shipped_looks_dir() / "clean" / "look.json").read_text(encoding="utf-8"))
+    manifest["name"] = "club"
+    manifest["colors"]["ink"] = [1, 2, 3]
+    (tmp_path / "looks" / "club").mkdir(parents=True)
+    (tmp_path / "looks" / "club" / "look.json").write_text(json.dumps(manifest), encoding="utf-8")
+    assert load_theme("club").ink == (1, 2, 3)
+    assert load_theme("club").name == "club"
+
+
+def test_the_old_theme_json_is_gone() -> None:
+    """One theme source: the Look manifest. A stray copy of the old file
+    would be read by nothing and drift silently."""
+    assert not resources.files("splitsmith.data").joinpath("overlay_theme.json").is_file()

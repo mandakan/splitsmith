@@ -25,6 +25,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
+from .. import composition
 from .. import templates as templates_module
 from ..config import Config
 from ..config import StageData as EngineStageData
@@ -99,7 +100,7 @@ def export_stage_tool(
     overlay_codec: Literal["auto", "hevc-alpha", "prores-4444"] = "auto",
     overlay_max_height: int | None = None,
     overlay_max_fps: float | None = None,
-    overlay_theme: Literal["splitsmith", "clean"] = "splitsmith",
+    overlay_theme: str = "splitsmith",
 ) -> dict[str, Any]:
     """Run the per-stage export -- writes the lossless trim + CSV +
     FCPXML + report (and optional overlay) into ``<project>/exports/``.
@@ -211,7 +212,7 @@ def export_match_tool(
     project_name: str | None = None,
     pip_layout: Literal["stacked", "pip-corners"] = "stacked",
     output_format: Literal["fcpxml", "fcp7xml", "mp4"] = "fcpxml",
-    transition_kind: Literal["none", "zoom", "static"] = "none",
+    transition_kind: match_export_helpers.TransitionKind = "none",
     transition_duration_seconds: float = 0.5,
     title_kind: Literal["none", "slate", "lower-third"] = "none",
     title_duration_seconds: float = 1.5,
@@ -244,6 +245,9 @@ def export_match_tool(
     Anomalies are non-fatal warnings the engine surfaced (e.g. a
     stage exported without shots, an intro file missing).
     """
+    # Before any artefact is looked for: the open kind is refused here as
+    # the request bodies refuse it, not after a trim turned out missing.
+    composition.validate_transition_kind(transition_kind)
     if not stage_numbers:
         raise ValueError("stage_numbers cannot be empty")
     root = resolve_project_root(project_root)

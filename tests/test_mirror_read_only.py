@@ -1399,3 +1399,23 @@ def test_native_match_events_put_is_allowed(
     resp = client.put(alias_url(match_id, "shooters/alice/stages/1/events"), json={"events": events})
     assert resp.status_code == 200, resp.text
     assert resp.json()["events"] == events
+
+
+def test_mirror_export_preview_passes_gate(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """The Look editor and the Export rail preview a desktop mirror's cards;
+    the request renders and writes nothing synced, so the gate lets it by.
+    With no shooter seeded the handler 404s, which proves it got past."""
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    match_id = "01JMIRRPREVIEWGATE0000001"
+    seed_mirror(client, match_id, "gate-preview")
+    resp = client.post(
+        f"/api/matches/{match_id}/shooters/ghost/export-preview",
+        json={"card": "title", "stage_number": 1, "width": 480},
+    )
+    assert resp.status_code != 403, resp.text
+    resp = client.post(f"/api/matches/{match_id}/shooters/ghost/palette-sources", json={})
+    assert resp.status_code != 403, resp.text

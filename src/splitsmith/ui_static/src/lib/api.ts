@@ -255,6 +255,15 @@ export interface StageFigures {
   split_count: number;
 }
 
+/** A shooter's identity (#1243): accent, logo file name (content-named,
+ *  under the shooter's ``identity/``), club line. ``null`` means "the
+ *  Look's default", never blank. */
+export interface ShooterIdentity {
+  accent: string | null;
+  logo: string | null;
+  club: string | null;
+}
+
 export interface MatchProject {
   schema_version: number;
   name: string;
@@ -294,6 +303,9 @@ export interface MatchProject {
    *  role ("primary" / "secondary"); ``null`` means the primary. Written
    *  via ``setCompareCamera``. */
   compare_camera: string | null;
+  /** The shooter's identity (#1243); every field defaults to null. Always
+   *  sent by the server; optional here so fixtures built by hand predate it. */
+  identity?: ShooterIdentity;
   /** Registered raw source recordings (doc 05). One entry per source
    *  file; a single take covering stages 1-4 is one entry with
    *  ``covers_stages = [1, 2, 3, 4]``. StageVideo entries reference
@@ -378,6 +390,36 @@ export type ScoreboardErrorDetail =
   | StageTimesBlockedOnUpstreamDetail
   | StageTimesOfflinePureMatchDataDetail
   | CompetitorNotInMatchDetail;
+
+/** Your brand (spec 2026-10-08): ``GET /api/me/profile``. */
+export interface AccountProfileView {
+  brand: { logo: string | null; line: string };
+}
+
+/** One shooter in your shooter book, keyed by SSI shooter id. */
+export interface ShooterBookEntryView {
+  shooter_id: number;
+  label: string | null;
+  identity: ShooterIdentity;
+  updated_at: string;
+}
+
+/** Where a shooter's look comes from: ``GET /api/shooters/{slug}/identity``. */
+export type IdentitySource = "match" | "book" | "none";
+
+export interface ShooterIdentityView {
+  source: IdentitySource;
+  identity: ShooterIdentity;
+  shooter_id: number | null;
+  /** The book holds a look for this shooter ("Use shooter book" has one). */
+  book_entry: boolean;
+  /** This server keeps a shooter book (hosted does not yet). */
+  book_available: boolean;
+}
+
+/** ``scope`` on an identity edit: ``book`` also saves it to the shooter
+ *  book, ``match`` keeps it to this match. */
+export type IdentityScope = "book" | "match";
 
 /** One row in the ``GET /api/scoreboard/shooter/search`` array. */
 export interface ScoreboardShooterRef {
@@ -1021,7 +1063,26 @@ export type OverlayCodec = "auto" | "hevc-alpha" | "prores-4444";
  *  ``export_presets.ExportPresetBody``; every field has a server default
  *  and unknown fields are dropped there, so the SPA never needs to
  *  migrate a stored body. */
-export interface ExportPresetBody {
+/** Stage-to-stage transition kinds: ``"none"``, the two FCP effects the
+ *  FCPXML emits natively, an ffmpeg xfade name from the server's list
+ *  (``GET /api/looks`` ``transitions``, #1259) or a Look sting,
+ *  ``sting:<name>`` (#1245). Open on purpose: the server owns the list and
+ *  validates it; the gallery admits only what the catalog offers. */
+export type TransitionKind = string;
+
+/** The overlay style (template HUD, spec 2026-10-08) as every body that
+ *  draws an overlay carries it: the match export, the preview, a preset.
+ *  Unset is Classic with every toggle on; ``lib/overlayStyle`` sends the
+ *  fields only when a style is chosen. */
+export interface OverlayStyleBody {
+  overlay_variant?: string;
+  overlay_speed_colors?: boolean;
+  overlay_class_labels?: boolean;
+  overlay_landing?: boolean;
+  overlay_position?: string | null;
+}
+
+export interface ExportPresetBody extends OverlayStyleBody {
   schema_version?: number;
   mode: "single" | "trims" | "compare";
   output_format: "fcpxml" | "fcp7xml" | "mp4";
@@ -1037,15 +1098,24 @@ export interface ExportPresetBody {
   padding_preset: "full" | "action" | "highlight" | "custom";
   head_pad_seconds: number;
   tail_pad_seconds: number;
-  transition_kind: "none" | "zoom" | "static";
+  transition_kind: TransitionKind;
   transition_seconds: number;
+  /** The Look and each card slot's template variant (#1246). */
+  look: string;
+  title_page_variant: string;
+  stage_card_variant: string;
+  closing_card_variant: string;
   title_page: boolean;
   title_page_seconds: number;
   title_division: boolean;
   closing_card: boolean;
+  made_with: boolean;
+  account_brand?: boolean;
   stage_card_style: "none" | "slate" | "lower-third";
   stage_card_seconds: number;
   summary_hold_seconds: number;
+  match_summary: boolean;
+  match_summary_seconds: number;
   overlay: boolean;
   grid_overlay: boolean;
   grid_hold_seconds: number;
@@ -1065,21 +1135,168 @@ export interface ExportPreset {
   body: ExportPresetBody;
 }
 
-export type PreviewCard = "frame" | "title" | "slate" | "lower-third" | "summary" | "closing" | "overlay";
+/** One template variant of a Look slot as ``GET /api/looks`` lists it (#1246). */
+export interface LookVariantInfo {
+  name: string;
+  /** ``/api/looks/<owner>/preview/<file>`` or null when no Look has a picture. */
+  preview: string | null;
+  /** An overlay style's positions, its default first; empty or absent for a
+   *  style that places itself and every other slot. */
+  positions?: string[];
+}
+
+/** One installed Look (#1246). ``slots`` has every slot name; a card slot
+ *  lists ``default`` first; ``transition`` lists the stings. */
+export interface LookInfo {
+  name: string;
+  label: string;
+  source: "shipped" | "user";
+  /** The caller may change or delete it (#1263): every user Look, never a shipped one. */
+  editable?: boolean;
+  accent_series: string[];
+  preview: string | null;
+  slots: Record<string, LookVariantInfo[]>;
+}
+
+/** An RGB triple, as ``look.json`` stores a colour. */
+export type Rgb = [number, number, number];
+
+/** What an account edits of a Look without code (``look_store.StoredLookBody``, #1263). */
+export interface StoredLookBody {
+  label: string;
+  base: string | null;
+  colors: Record<string, Rgb>;
+  accent_series: string[];
+  /** Card slot -> the variant its ``default`` draws; absent is ``default``. */
+  styles: Record<string, string>;
+  /** Font role -> a bundled face id (#1272); absent is the role's default. */
+  fonts?: Record<string, string>;
+  /** Your brand on the title page and the closing card; absent or null is none. */
+  brand?: { logo: string | null; line: string } | null;
+}
+
+/** One bundled face a Look may choose (#1272). */
+export interface FontInfo {
+  id: string;
+  label: string;
+  role: "display" | "mono";
+  help: string;
+  /** ``/api/looks/fonts/<id>``: the face's file, for a sample. */
+  url: string;
+}
+
+/** A font file of the Look's own (#1272), desktop only. */
+export interface OwnFontInfo {
+  /** What the Look's ``fonts`` names it by: ``own:font-<hash>.ttf``. */
+  value: string;
+  /** The family the file declares. */
+  family: string;
+  /** ``/api/looks/<name>/fonts/<file>``, for a sample. */
+  url: string;
+}
+
+export interface StoredLook {
+  name: string;
+  updated_at: string;
+  body: StoredLookBody;
+}
+
+/** One template of a Look as the template editor lists it (#1265). */
+export interface TemplateInfo {
+  slot: string;
+  variant: string;
+  /** The Look's own file, or the shipped default's it borrows. */
+  file: string;
+  own: boolean;
+  content: string;
+}
+
+/** Unsaved template text for a slot and variant. */
+export interface TemplateEdit {
+  slot: string;
+  variant: string;
+  content: string;
+}
+
+/** One ``looks check`` finding. */
+export interface CheckFinding {
+  subject: string;
+  level: "ok" | "warn" | "error";
+  message: string;
+}
+
+/** One What's new entry (``data/whats_new.json``). */
+export interface WhatsNewEntry {
+  id: string;
+  /** ``YYYY-MM-DD``. */
+  date: string;
+  title: string;
+  body: string;
+  /** The feature's "New" chip key, or null. */
+  chip: string | null;
+}
+
+/** ``GET /api/whats-new``: the entries and what this user has seen. */
+export interface WhatsNewPayload {
+  entries: WhatsNewEntry[];
+  /** Entry ids and ``chip:<key>`` dismissals. */
+  seen: string[];
+}
+
+/** One ffmpeg xfade family as the gallery shows it (#1259): a tile, its
+ *  directions (the first is what picking the tile selects) and a looping
+ *  preview. */
+export interface TransitionFamilyInfo {
+  id: string;
+  label: string;
+  help: string;
+  preview: string | null;
+  directions: { name: string; kind: string }[];
+}
+
+export type PreviewCard =
+  | "frame"
+  | "title"
+  | "slate"
+  | "lower-third"
+  | "summary"
+  | "match_summary"
+  | "closing"
+  | "overlay"
+  | "sting";
 
 /** Body of ``POST /api/shooters/{slug}/export-preview`` (spec 2026-09-15
  *  s3). The server ignores unknown fields, so the mapper output may ride
  *  along; only these move the picture. */
-export interface ExportPreviewBody {
+export interface ExportPreviewBody extends OverlayStyleBody {
   card: PreviewCard;
   stage_number: number;
   width?: number;
   title_info?: string | null;
   title_division?: boolean;
+  /** "Made with splitsmith" on the closing card. Server default on. */
+  made_with?: boolean;
+  /** Your brand from the You page on the cards. Server default on. */
+  account_brand?: boolean;
+  /** The export's stage selection (the match summary card only). */
+  stage_numbers?: number[];
   head_pad_seconds?: number;
   tail_pad_seconds?: number;
   /** The bundle name, as the match export's ``project_name``. */
   project_name?: string | null;
+  /** The Look and the card's template variant (#1246); a sting's name for ``sting``. */
+  look?: string;
+  variant?: string;
+  /** The Look editor (#1264): an unsaved draft drawn in place of ``look``. */
+  draft?: StoredLookBody;
+  /** Seconds into the template instead of its poster. */
+  at?: number;
+  /** The template editor's unsaved text (#1265); local only. */
+  templates?: TemplateEdit[];
+  /** The Look editor's backdrop switch: the demo range scene instead of this stage's footage. */
+  backdrop?: "footage" | "demo";
+  /** An animated template as a looping WebP (#1249); a still stays a PNG. */
+  motion?: boolean;
 }
 
 export interface ExportStageRequestPayload {
@@ -1127,7 +1344,7 @@ export interface ExportStageResult {
 /** Match-level stitched-FCPXML export (issue #171). The selected stages
  *  must already have a lossless trim + audit shots; the match export
  *  composes from those without re-encoding. */
-export interface MatchExportRequestPayload {
+export interface MatchExportRequestPayload extends OverlayStyleBody {
   stage_numbers: number[];
   /** Seconds of footage kept before the beep in each stage. Clamped
    *  server-side to the project's pre-buffer (default 5.0). */
@@ -1170,7 +1387,7 @@ export interface MatchExportRequestPayload {
    *  pair. ``"none"`` keeps today's hard cuts. Only FCPXML supports
    *  transitions today; selecting one with FCP7 XML or MP4 surfaces
    *  an anomaly note and falls back to hard cuts. */
-  transition_kind?: "none" | "zoom" | "static";
+  transition_kind?: TransitionKind;
   /** Total transition length in seconds; ignored when
    *  ``transition_kind`` is ``"none"``. Each adjacent stage's effective
    *  window must contain at least half this value of material. */
@@ -1223,10 +1440,24 @@ export interface MatchExportRequestPayload {
   title_page_duration_seconds?: number;
   /** Close the rendered MP4 with a generated card. */
   closing_card?: boolean;
+  /** "Made with splitsmith" on the closing card. Server default on. */
+  made_with?: boolean;
+  /** Your brand from the You page on the cards. Server default on. */
+  account_brand?: boolean;
+  /** The Look (#1246): any installed Look name; the server default. */
+  overlay_theme?: string;
+  /** Per-slot template variants (#1246); unset means the server's ``card_variant`` knob. */
+  title_page_variant?: string | null;
+  stage_card_variant?: string | null;
+  closing_card_variant?: string | null;
   /** Issue #972. Hold each stage's summary -- name, scoring, splits over
    *  the blurred last frame -- for this many seconds after its action in
    *  the rendered MP4. 0 (the server default) is off. */
   summary_hold_seconds?: number;
+  /** The match summary card after the last stage, and its hold (MP4
+   *  only). Server default off, 6 s. */
+  match_summary?: boolean;
+  match_summary_seconds?: number;
 }
 
 /** Body of a single export template (issue #198). Mirrors the dialog's
@@ -1242,7 +1473,7 @@ export interface MatchExportTemplate {
   include_overlay?: boolean;
   pip_layout?: "stacked" | "pip-corners";
   output_format?: "fcpxml" | "fcp7xml" | "mp4";
-  transition_kind?: "none" | "zoom" | "static";
+  transition_kind?: TransitionKind;
   transition_duration_seconds?: number;
   title_kind?: "none" | "slate" | "lower-third";
   title_duration_seconds?: number;
@@ -1283,6 +1514,9 @@ export type GridFreeCell = "blank" | "stage" | "splits" | "match" | "race";
 export interface CompareGridRequestPayload {
   stage_numbers: number[];
   audio_from: string;
+  /** #1244: one transition between every pair of stages, MP4 only. */
+  transition_kind?: TransitionKind;
+  transition_duration_seconds?: number;
   cameras?: Record<string, string>;
   canvas_width?: number;
   canvas_height?: number;
@@ -1297,6 +1531,13 @@ export interface CompareGridRequestPayload {
   title_division?: boolean;
   title_page_duration_seconds?: number;
   closing_card?: boolean;
+  /** "Made with splitsmith" on the closing card. Server default on. */
+  made_with?: boolean;
+  /** Your brand from the You page on the cards. Server default on. */
+  account_brand?: boolean;
+  /** Every shooter's match figures in their own tile before the closing card. */
+  match_summary?: boolean;
+  match_summary_seconds?: number;
   stage_titles?: "none" | "slate" | "lower-third";
   title_duration_seconds?: number;
   /** Issue #705. The splits overlay (per-tile counter and split, the
@@ -1304,7 +1545,12 @@ export interface CompareGridRequestPayload {
    *  hold needs the overlay on; the server refuses the pair otherwise
    *  with a 400. */
   overlay?: boolean;
-  overlay_theme?: "splitsmith" | "clean";
+  /** The Look (#1246): any installed Look name. */
+  overlay_theme?: string;
+  /** Per-slot template variants (#1246); unset means the ``card_variant`` knob. */
+  title_page_variant?: string | null;
+  stage_card_variant?: string | null;
+  closing_card_variant?: string | null;
   summary_hold_seconds?: number;
   /** Another of each shooter's cameras small in a corner of their tile:
    *  one selector (a mount or role) for the whole grid. */
@@ -1981,6 +2227,11 @@ export interface ScoreboardIdentity {
   base_url: string | null;
 }
 
+/** ``PUT /api/me/scoreboard-identity``: replaces the pin whole (build it
+ *  with ``lib/you.pinBody``). */
+export type ScoreboardPin = Omit<ScoreboardIdentity, "display_name" | "division" | "club" | "base_url"> &
+  Partial<Pick<ScoreboardIdentity, "display_name" | "division" | "club" | "base_url">>;
+
 /** One entry from ``GET /api/me/recent-projects``. ``last_opened_at``
  *  is an ISO-8601 UTC timestamp the picker uses to sort. ``path`` is
  *  resolved server-side; we don't normalise it client-side. ``kind``
@@ -2266,6 +2517,9 @@ export interface ShooterListEntry {
   /** Per-stage status for this shooter (one entry per stage in the
    *  shooter's own project). Drives the aggregate Overview grid. */
   stage_statuses: StageStatusEntry[];
+  /** The shooter's identity (#1243). Always sent by the server; optional
+   *  here so fixtures built by hand predate it. */
+  identity?: ShooterIdentity;
 }
 
 /** Response payload for POST /api/match/shooters/{slug}/build-trim-caches (#351). */
@@ -2374,6 +2628,8 @@ export interface CompareShooterRecord {
   duration_seconds: number | null;
   stage_time_seconds: number | null;
   shots: CompareShotPoint[];
+  /** The shooter's identity (#1249): the roster draws their accent and logo. */
+  identity?: ShooterIdentity | null;
 }
 
 export interface CompareStageResponse {
@@ -2600,7 +2856,13 @@ export function currentShareTokenFromLocation(): string | null {
  *  unnecessary. */
 const MATCH_SCOPED_PREFIXES = ["/api/shooters/", "/api/match/"];
 
-function scopeRequestPath(path: string): string {
+/** The event logo's URL for an ``<img>`` (the branding work); ``version``
+ *  busts the browser cache after a change. */
+export function eventLogoUrl(version: number): string {
+  return `${scopeRequestPath("/api/match/branding/event-logo")}?v=${version}`;
+}
+
+export function scopeRequestPath(path: string): string {
   if (!MATCH_SCOPED_PREFIXES.some((p) => path.startsWith(p))) return path;
   const shareToken = currentShareTokenFromLocation();
   if (shareToken) {
@@ -3298,6 +3560,55 @@ export const api = {
       },
     ),
 
+  /** Set the shooter's accent and club line (#1243). Only the keys sent
+   *  are applied; ``null`` clears one. The server validates the shape
+   *  (``#rrggbb``, at most 60 characters) and answers 422 otherwise. */
+  updateShooterIdentity: (
+    slug: string,
+    body: { accent?: string | null; club?: string | null; scope?: IdentityScope },
+  ) =>
+    request<MatchProject>(`/api/shooters/${encodeURIComponent(slug)}/identity`, {
+      method: "PATCH",
+      json: body,
+    }),
+
+  /** Upload the shooter's logo (#1243): PNG, JPEG or WebP, at most 2 MB.
+   *  The server sniffs the type and names the file by its content. */
+  uploadShooterLogo: (slug: string, file: File, scope: IdentityScope = "book") => {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    form.append("scope", scope);
+    return request<MatchProject>(`/api/shooters/${encodeURIComponent(slug)}/identity/logo`, {
+      method: "POST",
+      body: form,
+    });
+  },
+
+  /** The event's own logo (the branding work): PNG, JPEG or WebP, 2 MB. */
+  uploadEventLogo: (file: File) => {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    return request<{ event_logo: string | null }>("/api/match/branding/event-logo", { method: "POST", body: form });
+  },
+  removeEventLogo: () =>
+    request<{ event_logo: string | null }>("/api/match/branding/event-logo", { method: "DELETE" }),
+
+  /** Clear the shooter's logo (#1243). */
+  removeShooterLogo: (slug: string, scope: IdentityScope = "book") =>
+    request<MatchProject>(`/api/shooters/${encodeURIComponent(slug)}/identity/logo?scope=${scope}`, {
+      method: "DELETE",
+    }),
+
+  /** Where this shooter's look comes from, and what a render draws. */
+  getShooterIdentityView: (slug: string) =>
+    request<ShooterIdentityView>(`/api/shooters/${encodeURIComponent(slug)}/identity`),
+
+  /** Drop this match's own record so the shooter book applies again. */
+  useShooterBook: (slug: string) =>
+    request<ShooterIdentityView>(`/api/shooters/${encodeURIComponent(slug)}/identity/use-book`, {
+      method: "POST",
+    }),
+
   /** List the camera models calibrated in the shipped artifact. The SPA
    *  presents these as the camera-model dropdown options on Ingest. */
   getCalibratedCameraModels: () =>
@@ -3784,6 +4095,46 @@ export const api = {
    *  failed request in DevTools. */
   getScoreboardIdentity: () =>
     request<ScoreboardIdentity | null>("/api/me/scoreboard-identity"),
+
+  /** Pin yourself: your SSI shooter id (and the name it was found under). */
+  putScoreboardIdentity: (body: ScoreboardPin) =>
+    request<ScoreboardIdentity>("/api/me/scoreboard-identity", { method: "PUT", json: body }),
+
+  clearScoreboardIdentity: () => request<{ ok: boolean }>("/api/me/scoreboard-identity", { method: "DELETE" }),
+
+  /** Find yourself in the live shooter index, no match needed. */
+  searchShooterIndex: (q: string) =>
+    request<ScoreboardShooterRef[]>(`/api/me/shooter-search?q=${encodeURIComponent(q)}`),
+
+  getAccountProfile: () => request<AccountProfileView>("/api/me/profile"),
+
+  putAccountProfile: (body: { brand_line: string }) =>
+    request<AccountProfileView>("/api/me/profile", { method: "PUT", json: body }),
+
+  uploadAccountBrandLogo: (file: File) => {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    return request<AccountProfileView>("/api/me/profile/brand-logo", { method: "POST", body: form });
+  },
+
+  removeAccountBrandLogo: () => request<AccountProfileView>("/api/me/profile/brand-logo", { method: "DELETE" }),
+
+  getShooterBook: () => request<{ entries: ShooterBookEntryView[] }>("/api/me/shooter-book"),
+
+  putShooterBookEntry: (shooterId: number, body: { accent?: string | null; club?: string | null; label?: string | null }) =>
+    request<ShooterBookEntryView>(`/api/me/shooter-book/${shooterId}`, { method: "PUT", json: body }),
+
+  deleteShooterBookEntry: (shooterId: number) =>
+    request<{ ok: boolean }>(`/api/me/shooter-book/${shooterId}`, { method: "DELETE" }),
+
+  uploadShooterBookLogo: (shooterId: number, file: File) => {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    return request<ShooterBookEntryView>(`/api/me/shooter-book/${shooterId}/logo`, { method: "POST", body: form });
+  },
+
+  removeShooterBookLogo: (shooterId: number) =>
+    request<ShooterBookEntryView>(`/api/me/shooter-book/${shooterId}/logo`, { method: "DELETE" }),
 
   /** Recent-projects list, most-recent first. Drives the picker. */
   getRecentProjects: () =>
@@ -4841,6 +5192,67 @@ export const api = {
   // Export presets (spec 2026-09-15 s1): both modes, per user hosted.
 
   getExportPresets: () => request<{ presets: ExportPreset[] }>("/api/settings/export-presets"),
+  /** What's new: the entries and what this user has seen. */
+  getWhatsNew: () => request<WhatsNewPayload>("/api/whats-new"),
+  /** Mark entries (or ``chip:<key>``) seen; answers the new state. */
+  markWhatsNewSeen: (ids: string[]) =>
+    request<WhatsNewPayload>("/api/whats-new/seen", { method: "POST", json: { ids } }),
+
+  /** The installed Looks with their slots, variants and previews (#1246). */
+  listLooks: () =>
+    request<{ looks: LookInfo[]; transitions?: TransitionFamilyInfo[]; fonts?: FontInfo[] }>("/api/looks"),
+  /** The caller's own Looks (#1263, #1264); a shipped Look is a 404 here. */
+  getLook: (name: string) => request<StoredLook>(`/api/looks/${encodeURIComponent(name)}`),
+  putLook: (name: string, body: StoredLookBody) =>
+    request<StoredLook>(`/api/looks/${encodeURIComponent(name)}`, { method: "PUT", json: body }),
+  deleteLook: (name: string) => request<void>(`/api/looks/${encodeURIComponent(name)}`, { method: "DELETE" }),
+  /** Store a brand logo in the Look (local only): PNG, JPEG or WebP up to 2 MB. */
+  uploadBrandLogo: (name: string, file: File) => {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    return request<{ logo: string; url: string }>(`/api/looks/${encodeURIComponent(name)}/brand-logo`, {
+      method: "POST",
+      body: form,
+    });
+  },
+  /** A Look's own font files (#1272), local only. */
+  listOwnFonts: (name: string) => request<OwnFontInfo[]>(`/api/looks/${encodeURIComponent(name)}/fonts`),
+  /** Upload a TTF or OTF of at most 2 MB into the Look; the server sniffs
+   *  it and names the file by its content. */
+  uploadOwnFont: (name: string, file: File) => {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    return request<OwnFontInfo>(`/api/looks/${encodeURIComponent(name)}/fonts`, { method: "POST", body: form });
+  },
+  /** The template editor (#1265), local only. */
+  listTemplates: (name: string) =>
+    request<{ templates: TemplateInfo[]; starters: { name: string; content: string }[] }>(
+      `/api/looks/${encodeURIComponent(name)}/templates`,
+    ),
+  saveTemplate: (name: string, edit: TemplateEdit) =>
+    request<TemplateInfo>(`/api/looks/${encodeURIComponent(name)}/templates`, { method: "PUT", json: edit }),
+  templateSamples: (name: string, slot: string, variant: string) =>
+    request<{ cases: { case: string; context: Record<string, unknown> }[] }>(
+      `/api/looks/${encodeURIComponent(name)}/samples?slot=${encodeURIComponent(slot)}&variant=${encodeURIComponent(variant)}`,
+    ),
+  checkLook: (name: string, draft: StoredLookBody | null, templates: TemplateEdit[]) =>
+    request<{ items: CheckFinding[]; errors: number; warnings: number }>(
+      `/api/looks/${encodeURIComponent(name)}/check`,
+      { method: "POST", json: { draft, templates } },
+    ),
+  /** The colours the palette suggestions are chosen against (#1273). */
+  paletteSources: (slug: string, stageNumbers: number[]) =>
+    request<{ footage: { rgb: Rgb; share: number }[]; average: Rgb | null; logo: { rgb: Rgb; share: number }[] }>(
+      `/api/shooters/${encodeURIComponent(slug)}/palette-sources`,
+      { method: "POST", json: { stage_numbers: stageNumbers } },
+    ),
+  revealLook: (name: string) =>
+    request<{ revealed: string }>(`/api/looks/${encodeURIComponent(name)}/reveal`, { method: "POST" }),
+  duplicateLook: (name: string, source: string, label?: string) =>
+    request<StoredLook>(`/api/looks/${encodeURIComponent(name)}/duplicate`, {
+      method: "POST",
+      json: label ? { source, label } : { source },
+    }),
 
   /** The PNG for one card on one stage; rejects with an ApiError whose
    *  status the rail maps to a line (503 no browser, 409 no shots). */

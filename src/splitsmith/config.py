@@ -128,36 +128,49 @@ class StageAnalysis(BaseModel):
     anomalies: list[str] = Field(default_factory=list)
 
 
+class BeepFeatures(BaseModel):
+    """Ranker inputs for one beep candidate (#949, spec 2026-10-06).
+
+    Computed by :func:`splitsmith.beep_features.candidate_features`, the one
+    implementation both ``detect_beep`` and the ranker's trainer use.
+    Timer-agnostic (no tone frequency, no position in the window) and
+    unchanged by recording gain.
+    """
+
+    log_silence: float
+    tonal_ratio: float
+    duration_ms: float
+    log_peak_over_floor: float
+    peak_over_global: float
+    spectral_flatness: float
+    log_spectral_prominence: float
+
+
 class BeepCandidate(BaseModel):
     """One ranked beep candidate from ``beep_detect``.
 
     Surfaced to the production UI so the user can pick a different candidate
     when the auto-winner is wrong (issue #22). Fields:
 
-    * ``score`` -- composite ranking score: saturated silence-preference
-      (``tanh(run_peak / pre_window_max / silence_saturation_scale)``) tilted
-      by tonal concentration and duration match. Bounded to [0, 1). Higher =
-      stronger. Comparable only within one detection run -- nothing should
-      threshold on its absolute value.
+    * ``score`` -- what ranks the candidates. With the learned ranker (the
+      default, ``BeepRankerConfig``) it is the ranker's probability that this
+      run is the beep; with ``ranker: heuristic`` it is
+      ``tanh(silence / silence_saturation_scale) * tonal_factor * dur_factor``.
+      Comparable only within one detection run.
     * ``silence_score`` -- raw silence-preference component, kept for
-      diagnostics + threshold tuning.
+      diagnostics.
     * ``tonal_score`` -- raw tonal-concentration ratio in [0, 1]: fraction
       of the run's bandpassed energy that falls inside the IPSC timer
       fundamental band. ~1.0 for a pure tone, << 1.0 for gunshots / steel.
     * ``confidence`` -- calibrated probability in [0, 1] that this candidate
-      is the real beep. ``score`` ranks candidates; ``confidence`` is the
-      threshold-able trust value, and 0.5-0.7 lands in the HITL queue
-      (issue #219).
-
-      The ">=0.7 is right ~95 % of the time" figure from issue #220 was
-      measured on 33 fixtures. Over the 127-fixture corpus it is 88.1 %
-      (issue #949), and it was 71.0 % before the ranking term was
-      saturated -- ranking and confidence had disagreed about what a
-      strong candidate was. Note that saturation compresses
-      ``1 - runner_up_score / score``, so confidences are systematically
-      lower than pre-#949: more clips route to HITL, and the ones that
-      clear 0.7 are likelier to be right. Re-measure before quoting a
-      number here; do not assume this one still holds.
+      is the real beep: the ranker's confidence head over (its logit, its
+      margin to the best other candidate). Auto-trust and the review queue
+      threshold on it (``AutomationConfig.beep_low_confidence_threshold``).
+      Current per-bin precision is in
+      ``tests/fixtures/beep_calibration/ranker_report.json``; re-measure
+      there before quoting a number.
+    * ``features`` -- the ranker's inputs (:class:`BeepFeatures`); ``None``
+      on candidates stored before #949.
     """
 
     time: float
@@ -167,6 +180,7 @@ class BeepCandidate(BaseModel):
     silence_score: float = 0.0
     tonal_score: float = 0.0
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    features: BeepFeatures | None = None
 
 
 class BeepDetection(BaseModel):
@@ -185,6 +199,9 @@ class BeepDetection(BaseModel):
     duration_ms: float
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     candidates: list[BeepCandidate] = Field(default_factory=list)
+    # ``BeepRankerConfig.model_version`` of the ranker that chose ``time``, or
+    # ``"heuristic"``; ``None`` on detections stored before #949.
+    ranker_version: str | None = None
 
 
 class TrimResult(BaseModel):
@@ -255,6 +272,74 @@ class VideoMatchResult(BaseModel):
 # ---------------------------------------------------------------------------
 # Configuration models (tunable; YAML-overridable)
 # ---------------------------------------------------------------------------
+
+
+class BeepRankerConfig(BaseModel):
+    """The learned beep-candidate ranker (#949, spec 2026-10-06).
+
+    A logistic regression over :class:`BeepFeatures` ranks a stage's beep
+    candidates, and a confidence head over (the candidate's logit, its margin
+    to the best other candidate's logit) answers "is this the beep?". Both are
+    the trainer's final fit, pasted from
+    ``tests/fixtures/beep_calibration/ranker_report.json`` (``models.lr.final_fit``);
+    ``tests/test_beep_ranker_config.py`` fails if they drift. Retrain with
+    ``uv run python scripts/train_beep_ranker.py`` and paste the new values.
+
+    ``ranker: "heuristic"`` restores the hand-written score and confidence
+    (``tanh(silence) * tonal * duration``, ``candidate_confidence``).
+    """
+
+    ranker: Literal["learned", "heuristic"] = "learned"
+    model_version: str = "beep-ranker-lr-4a15dc5d"
+    features: tuple[str, ...] = (
+        "log_silence",
+        "tonal_ratio",
+        "duration_ms",
+        "log_peak_over_floor",
+        "peak_over_global",
+        "spectral_flatness",
+        "log_spectral_prominence",
+    )
+    mean: tuple[float, ...] = (
+        0.50836655,
+        0.77811538,
+        296.53426334,
+        3.73086349,
+        0.57989191,
+        0.35832228,
+        4.65109123,
+    )
+    scale: tuple[float, ...] = (
+        1.27775948,
+        0.09752592,
+        157.57188662,
+        0.78956689,
+        0.25583307,
+        0.17364072,
+        3.50127623,
+    )
+    coef: tuple[float, ...] = (
+        0.02181628,
+        0.64565341,
+        0.41730233,
+        -0.32296418,
+        0.40136711,
+        1.71163268,
+        4.43937241,
+    )
+    intercept: float = -2.8992192
+    head_coef: tuple[float, float] = (0.37122929, 0.50651822)
+    head_intercept: float = -2.62298459
+
+    @model_validator(mode="after")
+    def _shapes_match_the_features(self) -> BeepRankerConfig:
+        expected = tuple(BeepFeatures.model_fields)
+        if self.features != expected:
+            raise ValueError(f"features must be {expected} in that order, got {self.features}")
+        for name in ("mean", "scale", "coef"):
+            if len(getattr(self, name)) != len(expected):
+                raise ValueError(f"{name} has {len(getattr(self, name))} values for {len(expected)} features")
+        return self
 
 
 class BeepDetectConfig(BaseModel):
@@ -350,6 +435,8 @@ class BeepDetectConfig(BaseModel):
     # pick the right one without typing a timestamp by hand (issue #22).
     # ``0`` returns just the winner (legacy behaviour).
     top_n_candidates: int = 5
+    # How candidates are ranked and how confident the winner is (#949).
+    ranker: BeepRankerConfig = Field(default_factory=BeepRankerConfig)
 
 
 class ShotDetectConfig(BaseModel):

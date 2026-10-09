@@ -724,3 +724,110 @@ def test_overlay_html_stays_a_leaf_and_pulls_in_no_compare_module() -> None:
         [sys.executable, "-c", probe], capture_output=True, text=True, cwd=Path(__file__).parent.parent
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_single_html_is_single_css_plus_the_fit_script_plus_the_cell() -> None:
+    from splitsmith.overlay_html import _cell_div, _fit_script, single_css
+
+    theme = load_theme("splitsmith")
+    scale = CellScale.for_cell(360)
+    groups = (
+        Group(anchor=Anchor.MIDDLE_CENTER, flow=Flow.ROW, elements=(Element(role=Role.DETAIL, text="x"),)),
+    )
+    doc = single_html(groups, width=640, height=360, scale=scale, theme=theme)
+    assert f"<style>{single_css(width=640, height=360, scale=scale, theme=theme)}</style>" in doc
+    assert _fit_script() in doc
+    assert _cell_div(groups) in doc
+
+
+def test_the_fit_script_is_the_shipped_file_with_the_floor_set_beside_it() -> None:
+    from splitsmith.overlay_html import _fit_script, fit_js
+    from splitsmith.overlay_layout import MIN_FONT_SIZE
+
+    script = _fit_script()
+    assert fit_js() in script
+    assert f"window.__splitsmithMinFont = {MIN_FONT_SIZE};" in script
+    assert "window.__splitsmithMinFont" in fit_js()
+    assert str(MIN_FONT_SIZE) not in fit_js(), "the floor is set by the caller, never baked into the file"
+
+
+# --- per-shooter accent (slice 3, #1243) ----------------------------------------------
+
+
+def test_only_the_cell_with_an_accent_carries_the_variable() -> None:
+    """Two tiles, one accent: that wrapper sets ``--accent``; the other's
+    markup is byte for byte what it was before accents existed."""
+    from splitsmith.compare.overlay_sprites import SpriteGeometry, TilePlacement
+
+    geometry = SpriteGeometry(canvas_width=640, canvas_height=360, rows=1, cols=2)
+    tinted = TilePlacement(label="A", row=0, col=0, present=True, accent="#123456")
+    plain = TilePlacement(label="B", row=0, col=1, present=True)
+    doc = grid_html([(tinted, ()), (plain, ())], geometry=geometry, scale=SCALE, theme=THEME)
+    assert '<div style="grid-row:1;grid-column:1;--accent:#123456;">' in doc
+    assert '<div style="grid-row:1;grid-column:2;">' in doc
+
+
+def test_the_stylesheet_reads_the_accent_through_variables_that_fall_back() -> None:
+    from splitsmith.overlay_html import _style_rules
+
+    rules = _style_rules(scale=SCALE, theme=THEME)
+    cell = rules[rules.index(".cell {") : rules.index("}", rules.index(".cell {"))]
+    assert "var(--accent, transparent)" in cell, "the accent bar paints nothing when no accent is set"
+    identity = rules[rules.index(".role-identity") : rules.index("}", rules.index(".role-identity"))]
+    assert "color: var(--accent, currentColor);" in identity
+
+
+def test_the_shooters_name_really_takes_the_accent(tmp_path: Path) -> None:
+    """The stylesheet's ``.role-identity`` colour must survive the later
+    ``.emphasis-plain`` rule the same element carries (a review found it
+    did not: equal specificity, later source order). Rendered through
+    Chromium: with a green accent, green pixels appear below the accent
+    bar; with none, they do not."""
+    import io
+
+    from PIL import Image
+
+    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+
+    width, height = 320, 180
+    scale = CellScale.for_cell(height)
+    groups = (
+        Group(
+            anchor=Anchor.TOP_LEFT,
+            flow=Flow.ROW,
+            elements=(Element(role=Role.IDENTITY, text="Anders"),),
+            align="left",
+        ),
+    )
+
+    def green_pixels(png: bytes) -> int:
+        with Image.open(io.BytesIO(png)) as image:
+            rgb = image.convert("RGB").crop((0, height // 5, width, height))
+        return sum(1 for r, g, b in rgb.getdata() if g > 180 and r < 90 and b < 90)
+
+    try:
+        with ChromiumRasterizer() as rasterizer:
+            plain = rasterizer.png(
+                single_html(groups, width=width, height=height, scale=scale, theme=THEME),
+                width=width,
+                height=height,
+            )
+            tinted = rasterizer.png(
+                single_html(groups, width=width, height=height, scale=scale, theme=THEME, accent="#00ff00"),
+                width=width,
+                height=height,
+            )
+    except RasterizerUnavailableError as exc:
+        pytest.skip(str(exc))
+    assert green_pixels(plain) == 0
+    assert green_pixels(tinted) > 50, "the name is drawn in the accent"
+
+
+def test_single_html_puts_the_accent_on_its_one_cell() -> None:
+    groups = (
+        Group(anchor=Anchor.MIDDLE_CENTER, flow=Flow.ROW, elements=(Element(role=Role.DETAIL, text="x"),)),
+    )
+    plain = single_html(groups, width=64, height=32, scale=SCALE, theme=THEME)
+    tinted = single_html(groups, width=64, height=32, scale=SCALE, theme=THEME, accent="#abcdef")
+    assert '<div class="cell">' in plain and 'style="--accent' not in plain
+    assert '<div class="cell" style="--accent:#abcdef">' in tinted

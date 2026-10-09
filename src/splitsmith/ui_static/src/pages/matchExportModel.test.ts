@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { camExportFields, DEFAULT_CAM_OPTIONS } from "@/lib/camOptions";
 import { DEFAULT_EXPORT_SETTINGS as S } from "@/lib/exportPresets";
-import { DEFAULT_RENDER_OPTIONS, clampSeconds, matchExportFields, transitionsSupported } from "@/lib/renderOptions";
+import { visibleTransitionKind } from "@/lib/lookGallery";
+import { DEFAULT_RENDER_OPTIONS, clampSeconds, matchExportFields } from "@/lib/renderOptions";
 import { DEFAULT_UPLOAD_OPTIONS, rowUploadOptions } from "@/lib/youtubeRows";
 import {
   CANVAS_CHOICES,
@@ -164,7 +165,7 @@ describe("buildMatchExportPayload", () => {
       tail_pad_seconds: base.tailPad,
       ...camExportFields(base.camOptions),
       output_format: base.outputFormat,
-      transition_kind: transitionsSupported(base.outputFormat) ? base.transitionKind : "none",
+      transition_kind: visibleTransitionKind(base.transitionKind, base.outputFormat),
       transition_duration_seconds: clampSeconds(base.transitionSeconds, 0.1),
       ...matchExportFields(base.renderOptions, base.outputFormat),
       intro_path: undefined,
@@ -279,5 +280,105 @@ describe("summarizeGridResult", () => {
     expect(summary.partial).toBe(true);
     expect(summary.failedStages).toEqual(["Stage 2"]);
     expect(summary.headline).toContain("1 of 2");
+  });
+});
+
+describe("buildCompareGridPayload transitions (#1244)", () => {
+  const base = { stageNumbers: [1, 2], audioFrom: "me", canvas: { width: 1920, height: 1080 } as never, outputName: "g" };
+  it("sends the kind and its seconds when one is chosen, nothing otherwise", () => {
+    const faded = buildCompareGridPayload({ ...base, transitionKind: "fade", transitionSeconds: 1, kinds: ["fade"] });
+    // A kind the catalog does not offer is not sent (#1259).
+    expect("transition_kind" in buildCompareGridPayload({ ...base, transitionKind: "fade", transitionSeconds: 1 })).toBe(false);
+    expect(faded.transition_kind).toBe("fade");
+    expect(faded.transition_duration_seconds).toBe(1);
+    const cut = buildCompareGridPayload(base);
+    expect("transition_kind" in cut).toBe(false);
+    expect("transition_duration_seconds" in cut).toBe(false);
+    const hidden = buildCompareGridPayload({ ...base, transitionKind: "zoom", transitionSeconds: 1 });
+    expect("transition_kind" in hidden).toBe(false);
+  });
+});
+
+
+describe("the Look on the payloads (#1246)", () => {
+  const look = { look: "clean", titlePageVariant: "rise", stageCardVariant: "rise", closingCardVariant: "default" };
+
+  it("the match export carries overlay_theme and the variants its format draws", () => {
+    const base: MatchExportPayloadInput = {
+      stageNumbers: [1],
+      headPad: S.headPad,
+      tailPad: S.tailPad,
+      camOptions: S.camOptions,
+      outputFormat: "mp4",
+      transitionKind: S.transitionKind,
+      transitionSeconds: S.transitionSeconds,
+      renderOptions: S.renderOptions,
+      youtube: false,
+      descriptionLead: "",
+      uploadOptions: S.uploadOptions,
+      includeOverlay: false,
+      overlayCodec: S.overlayCodec,
+      projectName: "M",
+      uploadTarget: "desk",
+      youtubeConnected: false,
+    };
+    const payload = buildMatchExportPayload({ ...base, look });
+    expect(payload.overlay_theme).toBe("clean");
+    expect(payload.title_page_variant).toBe("rise");
+    expect(payload.stage_card_variant).toBe("rise");
+    expect(payload).not.toHaveProperty("closing_card_variant");
+    expect(buildMatchExportPayload(base)).not.toHaveProperty("overlay_theme");
+    const defaults = { look: "splitsmith", titlePageVariant: "default", stageCardVariant: "default", closingCardVariant: "default" };
+    expect(buildMatchExportPayload({ ...base, look: defaults })).toEqual(buildMatchExportPayload(base));
+    const xml = buildMatchExportPayload({ ...base, look, outputFormat: "fcp7xml" });
+    expect(xml.overlay_theme).toBe("clean");
+    expect(xml).not.toHaveProperty("stage_card_variant");
+  });
+
+  it("the grid carries overlay_theme with the choice and the variants only with a card on", () => {
+    const base = { stageNumbers: [1], audioFrom: "a", canvas: CANVAS_CHOICES[0], outputName: "g" };
+    const plain = buildCompareGridPayload({ ...base, look });
+    expect(plain.overlay_theme).toBe("clean");
+    expect(plain).not.toHaveProperty("title_page_variant");
+    const carded = buildCompareGridPayload({ ...base, look, render: { ...DEFAULT_RENDER_OPTIONS, titlePage: true } });
+    expect(carded.title_page_variant).toBe("rise");
+    expect(buildCompareGridPayload(base)).not.toHaveProperty("overlay_theme");
+    const defaults = { look: "splitsmith", titlePageVariant: "default", stageCardVariant: "default", closingCardVariant: "default" };
+    expect(buildCompareGridPayload({ ...base, look: defaults })).toEqual(buildCompareGridPayload(base));
+  });
+});
+
+describe("the overlay style on the match export (template HUD)", () => {
+  const base: MatchExportPayloadInput = {
+    stageNumbers: [1],
+    headPad: S.headPad,
+    tailPad: S.tailPad,
+    camOptions: S.camOptions,
+    outputFormat: "mp4",
+    transitionKind: S.transitionKind,
+    transitionSeconds: S.transitionSeconds,
+    renderOptions: S.renderOptions,
+    youtube: false,
+    descriptionLead: "",
+    uploadOptions: S.uploadOptions,
+    includeOverlay: true,
+    overlayCodec: S.overlayCodec,
+    projectName: "M",
+    uploadTarget: "desk",
+    youtubeConnected: false,
+  };
+  const plate = { ...S.overlayStyle, variant: "plate", landing: false };
+
+  it("carries a chosen style with the overlay on", () => {
+    const payload = buildMatchExportPayload({ ...base, overlayStyle: plate });
+    expect(payload.overlay_variant).toBe("plate");
+    expect(payload.overlay_landing).toBe(false);
+  });
+
+  it("sends the body it always sent for Classic or with the overlay off", () => {
+    expect(buildMatchExportPayload({ ...base, overlayStyle: S.overlayStyle })).toEqual(buildMatchExportPayload(base));
+    expect(buildMatchExportPayload({ ...base, includeOverlay: false, overlayStyle: plate })).not.toHaveProperty(
+      "overlay_variant",
+    );
   });
 });

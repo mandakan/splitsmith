@@ -161,6 +161,20 @@ _COMMENT_ROUTES: tuple[tuple[str, re.Pattern[str]], ...] = (
 )
 
 
+# POSTs that only read: they render or measure the match and write nothing
+# but a cache, so they need no capability, like a GET. The Export rail's
+# preview and the Look editor's cards (``export-preview``) and the palette's
+# footage sampler (``palette-sources``) post a body only because it is too
+# large for a query string. Falling through to EDIT made every preview on a
+# desktop mirror a 403, which the editor showed as empty boxes. The share
+# surface never reaches them: ``server._SHARE_WRITE_ROUTES`` does not list
+# them, so an anonymous caller still gets the uniform 404.
+_READ_ONLY_POSTS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\Ashooters/[^/]+/export-preview\Z"),
+    re.compile(r"\Ashooters/[^/]+/palette-sources\Z"),
+)
+
+
 def required_capability(method: str, rest: str) -> str | None:
     """Capability a request needs, or None for safe methods.
 
@@ -168,6 +182,8 @@ def required_capability(method: str, rest: str) -> str | None:
     ``/api/matches/{id}/``), the same string the old guard matched.
     """
     if method in ("GET", "HEAD", "OPTIONS"):
+        return None
+    if method == "POST" and any(pattern.match(rest) is not None for pattern in _READ_ONLY_POSTS):
         return None
     if rest == "match/shares" or rest.startswith("match/shares/"):
         return SHARE_MANAGE

@@ -108,6 +108,8 @@ from importlib.resources import files
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .fonts import font as bundled_font
+from .fonts import is_font_path
 from .overlay_clock import border_width
 from .overlay_layout import MIN_FONT_SIZE, Anchor, CellScale, ColorToken, Element, Flow, Group, Role
 from .overlay_theme import OverlayTheme
@@ -223,6 +225,22 @@ def _fit(px: int) -> str:
     return f"calc(var(--fit-scale, 1) * {px}px)"
 
 
+#: The weight range an own font file (#1272) is declared for: the user's
+#: file is usually one weight, and declaring the whole range makes
+#: Chromium draw it as is wherever a template asks for bold.
+OWN_FONT_WEIGHT = "100 900"
+
+
+def _face_source(value: str) -> tuple[str, str, str]:
+    """``(url, format, weight)`` for a theme's face: a catalog id's bundled
+    file, or a Look's own file by its absolute path."""
+    if is_font_path(value):
+        path = Path(value)
+        return path.as_uri(), "opentype" if path.suffix == ".otf" else "truetype", OWN_FONT_WEIGHT
+    face = bundled_font(value)
+    return font_face_url(face.file), "truetype", face.weight
+
+
 def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
     """The shared stylesheet for one cell's declared content.
 
@@ -232,8 +250,10 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
     is independently valid HTML a test can inspect without also holding
     a whole document.
     """
-    mono_url = font_face_url(FONT_FILES["mono"])
-    display_url = font_face_url(FONT_FILES["display"])
+    # The Look's faces (#1272) under the two family names every template
+    # draws with; the defaults are exactly the files and weights before.
+    mono_url, mono_format, mono_weight = _face_source(theme.mono_font)
+    display_url, display_format, display_weight = _face_source(theme.display_font)
     ink = _rgb(theme.ink)
     ink_2 = _rgb(theme.ink_2)
     rule_color = _rgb(theme.rule)
@@ -271,16 +291,19 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
     # equivalent ``row-gap`` on the same three rows the rest of this
     # stylesheet already lays out as ``grid-template-rows``.
     top_row_gap = scale.pad
+    # The accent bar's height: a hairline at small cells, a
+    # visible band at canvas size, scaled off the same pad as the gaps.
+    accent_bar = max(3, scale.pad // 4)
     return f"""
 @font-face {{
   font-family: "Splitsmith Mono";
-  src: url("{mono_url}") format("truetype");
-  font-weight: 700;
+  src: url("{mono_url}") format("{mono_format}");
+  font-weight: {mono_weight};
 }}
 @font-face {{
   font-family: "Splitsmith Display";
-  src: url("{display_url}") format("truetype");
-  font-weight: 400 700;
+  src: url("{display_url}") format("{display_format}");
+  font-weight: {display_weight};
 }}
 .cell {{
   position: relative;
@@ -288,6 +311,11 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
   height: 100%;
   overflow: hidden;
   box-sizing: border-box;
+  /* The shooter's accent bar: ``--accent`` is set on the cell
+     by ``grid_html`` / ``single_html`` for a shooter with an identity;
+     unset, a transparent inset shadow paints nothing, so a cell without
+     one is pixel for pixel what it was. */
+  box-shadow: inset 0 {accent_bar}px 0 0 var(--accent, transparent);
   font-family: "Splitsmith Mono", monospace;
   /* The bands stage summary (issue #683 Task 8) needs the whole cell
      height distributed between an auto-height identity row, a middle
@@ -486,6 +514,9 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
 }}
 .role-identity     {{
   font-size: {scale.identity}px;
+  /* The name takes the shooter's accent when one is set;
+     ``currentColor`` keeps the inherited ink otherwise. */
+  color: var(--accent, currentColor);
   text-overflow: ellipsis;
   /* The one place ``Antonio`` (condensed display) draws instead of the
      mono figure face: a competitor's name is the one string on the
@@ -540,6 +571,14 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
    ink_2, no shadow-via-emphasis" over ``.emphasis-plain``'s stroke,
    which is why it is declared here rather than beside ``.role-*``
    above. */
+/* The identity element carries ``.emphasis-plain`` too, whose ``color``
+   above would otherwise win on source order at equal specificity (the
+   identity slice's review found the name never took the accent). Same fallback
+   as ``.emphasis-plain``'s own ink, so an unset accent draws the same
+   pixels. */
+.role-identity.emphasis-plain {{
+  color: var(--accent, rgb({ink}));
+}}
 .role-label {{
   font-size: {_fit(scale.caption)};
   color: rgb({ink_2});
@@ -718,7 +757,7 @@ def _anchor_div(anchor: Anchor, members: Sequence[Group]) -> str:
     return f'<div class="{_anchor_classes(anchor, align)}">{groups_html}</div>'
 
 
-def _cell_div(groups: Sequence[Group]) -> str:
+def _cell_div(groups: Sequence[Group], *, style: str | None = None) -> str:
     """The ``<div class="cell">...</div>`` markup for one present tile,
     with no wrapping ``<style>`` -- shared by :func:`cell_html` (which
     wraps it with its own stylesheet so a single cell is independently
@@ -735,7 +774,8 @@ def _cell_div(groups: Sequence[Group]) -> str:
     for group in groups:
         buckets.setdefault(group.anchor, []).append(group)
     anchors_html = "".join(_anchor_div(anchor, members) for anchor, members in buckets.items())
-    return f'<div class="cell">{anchors_html}</div>'
+    style_attr = f' style="{style}"' if style else ""
+    return f'<div class="cell"{style_attr}>{anchors_html}</div>'
 
 
 def _fit_script() -> str:
@@ -789,108 +829,16 @@ def _fit_script() -> str:
     wrong factor the instant the bundled face actually loads and
     reflows everything under it.
     """
-    return f"""
-<script>
-window.__splitsmithFit = function () {{
-  function fits(stack, available) {{
-    return stack.scrollHeight <= available + 0.5;
-  }}
-  function availableHeight(cell) {{
-    var rows = getComputedStyle(cell).gridTemplateRows.split(' ').map(parseFloat);
-    return rows.length > 1 ? rows[1] : cell.clientHeight;
-  }}
-  function floorFactor(stack) {{
-    var min = Infinity;
-    stack.querySelectorAll('.value, .caption, .unit').forEach(function (el) {{
-      var size = parseFloat(getComputedStyle(el).fontSize);
-      if (size > 0 && size < min) {{ min = size; }}
-    }});
-    return min === Infinity ? 1 : Math.min(1, {MIN_FONT_SIZE} / min);
-  }}
-  function shrinkToFit(stack, available) {{
-    var lo = floorFactor(stack);
-    var hi = 1;
-    stack.style.setProperty('--fit-scale', String(hi));
-    if (fits(stack, available)) {{ return; }}
-    stack.style.setProperty('--fit-scale', String(lo));
-    if (!fits(stack, available)) {{ return; }}
-    for (var i = 0; i < 14; i++) {{
-      var mid = (lo + hi) / 2;
-      stack.style.setProperty('--fit-scale', String(mid));
-      if (fits(stack, available)) {{ lo = mid; }} else {{ hi = mid; }}
-    }}
-    stack.style.setProperty('--fit-scale', String(lo));
-  }}
-  function normalizeLeadingMargin(stack) {{
-    // ``Group.margin_top`` (see ``overlay_summary._cell_groups``' own
-    // "Splits" label group) is baked into the HTML at Python time,
-    // before this script ever runs, to separate the Splits band from a
-    // Scoring band that Python believed would be above it. Collapsing an
-    // emptied Scoring group (below) removes its own gap but leaves that
-    // margin behind on whatever group is now the flex column's first
-    // VISIBLE child -- space meant to separate two bands from each
-    // other, now separating one band from nothing. Re-zeroing it on
-    // whichever group ends up first-visible, every time the set of
-    // hidden groups changes, is what a real box model gives for free
-    // when there is nothing above to separate from; the browser cannot
-    // do that itself because the margin is this group's own property,
-    // not the (already ``display: none``, already zero-height) group
-    // before it.
-    var seenVisible = false;
-    Array.prototype.forEach.call(stack.children, function (child) {{
-      if (getComputedStyle(child).display === 'none') {{ return; }}
-      if (!seenVisible) {{
-        seenVisible = true;
-        if (child.style.marginTop) {{ child.style.marginTop = '0px'; }}
-      }}
-    }});
-  }}
-  function dropUntilFit(stack, available) {{
-    var candidates = Array.prototype.slice.call(stack.querySelectorAll('[data-drop-priority]'));
-    candidates.sort(function (a, b) {{
-      var ap = parseInt(a.getAttribute('data-drop-priority'), 10);
-      var bp = parseInt(b.getAttribute('data-drop-priority'), 10);
-      return ap - bp;
-    }});
-    for (var i = 0; i < candidates.length; i++) {{
-      if (fits(stack, available)) {{ return; }}
-      var el = candidates[i];
-      el.style.display = 'none';
-      // A ``.group`` with every child now hidden still sits in the
-      // ``.anchor-middle-center`` flex column and still consumes a
-      // ``row_gutter`` gap -- an emptied group is not a zero-height one.
-      // Left alone, those leftover gaps are exactly what pushed the
-      // Splits band's own values out of the cell even after this loop
-      // had correctly stopped dropping them: see the fix-round report
-      // for the measured 58px residual this closes. Hiding the group
-      // itself once nothing inside it is visible removes its gap from
-      // the flex column entirely, the same way ``display: none`` already
-      // removes each dropped ``.el``'s own space.
-      var group = el.closest('.group');
-      if (group) {{
-        var allHidden = Array.prototype.every.call(group.children, function (child) {{
-          return getComputedStyle(child).display === 'none';
-        }});
-        if (allHidden) {{
-          group.style.display = 'none';
-          normalizeLeadingMargin(stack);
-        }}
-      }}
-    }}
-  }}
-  document.querySelectorAll('.cell').forEach(function (cell) {{
-    var stack = cell.querySelector('.anchor-middle-center');
-    if (!stack) {{ return; }}
-    var available = availableHeight(cell);
-    if (!(available > 0)) {{ return; }}
-    if (fits(stack, available)) {{ return; }}
-    shrinkToFit(stack, available);
-    if (fits(stack, available)) {{ return; }}
-    dropUntilFit(stack, available);
-  }});
-}};
-</script>
-""".strip()
+    return f"<script>window.__splitsmithMinFont = {MIN_FONT_SIZE};</script>\n<script>\n{fit_js()}</script>"
+
+
+def fit_js() -> str:
+    """The shipped fit-policy script, ``data/looks/_shared/fit.js``. One
+    file for the Python path (inlined by :func:`_fit_script`) and the
+    Look templates (loaded by URL), so the two cannot drift. The file
+    reads its legibility floor from ``window.__splitsmithMinFont``,
+    which every caller sets first."""
+    return files("splitsmith.data").joinpath("looks/_shared/fit.js").read_text(encoding="utf-8")
 
 
 def cell_html(groups: Sequence[Group], *, scale: CellScale, theme: OverlayTheme) -> str:
@@ -925,6 +873,7 @@ def single_html(
     height: int,
     scale: CellScale,
     theme: OverlayTheme,
+    accent: str | None = None,
 ) -> str:
     """One canvas-sized cell as a whole HTML document (issue #684).
 
@@ -974,6 +923,23 @@ def single_html(
     only the single-shooter export builds is what keeps that true
     structurally rather than by anyone remembering.
     """
+    cell_style = f"--accent:{accent}" if accent else None
+    return (
+        "<!doctype html>\n"
+        '<html><head><meta charset="utf-8"><title>overlay</title>'
+        f"<style>{single_css(width=width, height=height, scale=scale, theme=theme)}</style>"
+        f"{_fit_script()}"
+        "</head>"
+        f"<body>{_cell_div(groups, style=cell_style)}</body></html>"
+    )
+
+
+def single_css(*, width: int, height: int, scale: CellScale, theme: OverlayTheme) -> str:
+    """The whole stylesheet :func:`single_html` puts in its ``<style>``:
+    the shared rules, the page sizing, and the one single-shooter
+    override. Public so a Look template can ask for exactly this text
+    through ``window.splitsmith.engine.css`` and render what Python
+    renders."""
     style = _style_rules(scale=scale, theme=theme)
     page_style = (
         "html, body {\n"
@@ -989,14 +955,7 @@ def single_html(
         f"-webkit-text-stroke: {2 * border_width(scale.live_primary)}px rgb({_rgb(theme.stroke)});\n"
         "}"
     )
-    return (
-        "<!doctype html>\n"
-        '<html><head><meta charset="utf-8"><title>overlay</title>'
-        f"<style>{style}\n{page_style}\n{single_style}</style>"
-        f"{_fit_script()}"
-        "</head>"
-        f"<body>{_cell_div(groups)}</body></html>"
-    )
+    return f"{style}\n{page_style}\n{single_style}"
 
 
 def grid_html(
@@ -1055,9 +1014,9 @@ def grid_html(
     body_cells: list[str] = []
     for placement, groups in cells:
         inner = _cell_div(groups) if placement.present else '<div class="cell"></div>'
-        body_cells.append(
-            f'<div style="grid-row:{placement.row + 1};grid-column:{placement.col + 1};">{inner}</div>'
-        )
+        accent = f"--accent:{placement.accent};" if placement.accent else ""
+        position = f"grid-row:{placement.row + 1};grid-column:{placement.col + 1};{accent}"
+        body_cells.append(f'<div style="{position}">{inner}</div>')
     return (
         "<!doctype html>\n"
         '<html><head><meta charset="utf-8"><title>stage summary</title>'

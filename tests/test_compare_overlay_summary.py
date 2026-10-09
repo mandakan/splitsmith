@@ -1535,3 +1535,23 @@ def test_write_hold_still_saves_a_png(tmp_path):
     assert out_path.exists()
     with Image.open(out_path) as image:
         assert image.size == (GEOMETRY.canvas_width, GEOMETRY.canvas_height)
+
+
+def test_placements_carry_the_accent_of_the_tiles_that_have_one(tmp_path):
+    """The hold's placements take each tile's resolved accent (#1243); a
+    tile without one stays as it was."""
+    plan = _plan([_tile("A", 0, 0, trim=tmp_path / "a.mp4"), _tile("B", 0, 1, trim=tmp_path / "b.mp4")])
+    placements = summ._placements_for_plan(plan, accents={"A": "#123456"})
+    assert placements[0].accent == "#123456" and placements[1].accent is None
+    assert summ._placements_for_plan(plan)[0].accent is None
+
+
+def test_a_placement_with_an_accent_sets_the_variable_on_its_cell_only():
+    tinted = TilePlacement(label="A", row=0, col=0, present=True, accent="#123456")
+    plain = _placement("B", 0, 1)
+    html = _rendered_html(
+        [tinted, plain],
+        {"A": TileStageData(label="A", stage_number=1), "B": TileStageData(label="B", stage_number=1)},
+    )
+    assert '<div style="grid-row:1;grid-column:1;--accent:#123456;">' in html
+    assert '<div style="grid-row:1;grid-column:2;">' in html

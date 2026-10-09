@@ -41,6 +41,19 @@ LOCAL_ONLY_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("POST", "/api/shooters/{slug}/project/settings"),
         # Opens the OS file manager.
         ("POST", "/api/files/reveal"),
+        # The template editor (#1265): a template is code; hosted runs none
+        # of an account's. Custom templates are desktop only, by decision.
+        ("GET", "/api/looks/{name}/templates"),
+        ("PUT", "/api/looks/{name}/templates"),
+        ("GET", "/api/looks/{name}/samples"),
+        ("POST", "/api/looks/{name}/check"),
+        ("POST", "/api/looks/{name}/reveal"),
+        # A Look's own font files (#1272) and brand logo: no hosted account assets yet.
+        ("POST", "/api/looks/{name}/brand-logo"),
+        ("GET", "/api/looks/{name}/brand/{file}"),
+        ("GET", "/api/looks/{name}/fonts"),
+        ("POST", "/api/looks/{name}/fonts"),
+        ("GET", "/api/looks/{name}/fonts/{file}"),
         ("POST", "/api/shooters/{slug}/videos/reveal"),
         # Merges legacy project folders named by path.
         ("POST", "/api/match/merge/plan"),
@@ -102,6 +115,22 @@ HOSTED_CONFINED_ROUTES: dict[tuple[str, str], str] = {
         "rows only, never a folder"
     ),
     ("POST", "/api/me/raw/upload"): "uploaded file name goes through _sanitize_raw_filename",
+    ("POST", "/api/match/branding/event-logo"): (
+        "the upload's bytes are sniffed (PNG / JPEG / WEBP) and stored under a content-derived name in the "
+        "bound match's identity/ folder; the client's filename is never read"
+    ),
+    ("POST", "/api/shooters/{slug}/identity/logo"): (
+        "the upload's bytes are sniffed (PNG / JPEG / WEBP) and stored under a content-derived name; "
+        "the client's filename is never read"
+    ),
+    ("POST", "/api/me/profile/brand-logo"): (
+        "the account's own store (hosted: the tenant's storage prefix under account/brand/); the bytes "
+        "are sniffed and stored under a content-derived name, the client's filename is never read"
+    ),
+    ("POST", "/api/me/shooter-book/{shooter_id}/logo"): (
+        "the account's own book (hosted: the tenant's storage prefix under account/files/); the bytes "
+        "are sniffed and stored under a content-derived name, the client's filename is never read"
+    ),
     ("POST", "/api/me/raw/upload/multipart/create"): _RAW_KEY,
     ("POST", "/api/me/raw/upload/multipart/part-url"): _RAW_KEY,
     ("POST", "/api/me/raw/upload/multipart/complete"): _RAW_KEY,
@@ -125,6 +154,10 @@ HOSTED_CONFINED_ROUTES: dict[tuple[str, str], str] = {
     ),
     ("POST", "/api/shooters/{slug}/exports/youtube-upload"): "confine_export_filename keeps it in exports/",
     ("POST", "/api/shooters/{slug}/export/match"): "hosted refuses intro_path / outro_path (400)",
+    ("GET", "/api/looks/{name}/preview/{file}"): (
+        "name must be an installed Look and file a bare <slot>-<variant>.png|webp inside that Look's "
+        "preview/ directory; anything else is 404 (looks_api)"
+    ),
 }
 
 
@@ -186,4 +219,14 @@ UNTYPED_BODY_ROUTES: dict[tuple[str, str], str] = {
     ),
     ("POST", "/api/sync/commands/{command_id}/complete"): "a finished command's result, stored for display",
     ("POST", "/api/workers/register"): "worker metadata, stored; the route also needs a worker token",
+    ("POST", "/api/shooters/{slug}/export-preview"): (
+        "the draft is a StoredLookBody (colour triples and card styles, validated per field) written as "
+        "look.json into a temporary folder beside copies of the saved Look's own templates; hosted Looks "
+        "own none, so no account-supplied file is read or run"
+    ),
+    ("PUT", "/api/looks/{name}"): (
+        "colour triples and card styles, validated per field (look_store.StoredLookBody); hosted, a "
+        "user_looks row materialized as look.json under the account's cache folder, the name checked "
+        "against LOOK_NAME_RE before any path is formed"
+    ),
 }

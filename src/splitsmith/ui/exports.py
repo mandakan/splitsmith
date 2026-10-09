@@ -14,16 +14,21 @@ the production UI is that the user-audited shots are the truth.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from .. import csv_gen, fcpxml_gen, overlay_render, report, summary_card, trim
 from ..audit_data import audit_shots_to_engine_shots, read_audit_data
 from ..config import Config, ReportFiles, StageAnalysis, StageData
 from ..export_naming import stage_file_base
+from ..looks import DEFAULT_VARIANT
 from ..match_project import StageScorecard
+from ..overlay_hud import LEGACY_OVERLAY_SETTINGS, HudOptions, overlay_settings
 from ..overlay_render import OverlayCodec
 from ..overlay_theme import ThemeName
+from ..segment_cache import SegmentCache
 from ..stage_summary_data import TileStageData, load_stage_shots
 
 
@@ -54,9 +59,13 @@ class StageExportRequest:
     overlay_max_height: int | None = None
     overlay_max_fps: float | None = None
     # Palette preset. ``"splitsmith"`` (default) pulls the same tokens
-    # the web UI uses out of overlay_theme.json so the overlay matches
+    # the web UI uses out of the splitsmith Look manifest so the overlay matches
     # the brand. ``"clean"`` is the neutral white-on-amber alternative.
     overlay_theme: ThemeName = "splitsmith"
+    # The overlay style (spec 2026-10-08): ``default`` is Classic; a
+    # template variant draws the whole HUD, with ``overlay_options``.
+    overlay_variant: str = DEFAULT_VARIANT
+    overlay_options: HudOptions = field(default_factory=HudOptions)
     # Issue #972 (option 1). Also write ``<base>_summary.png`` and
     # ``<base>_summary.mov`` -- the stage's result screen, held for
     # ``summary_hold_seconds`` -- next to the overlay MOV, for an editor
@@ -115,6 +124,28 @@ class StageExportResult:
     # Issue #972 (option 1): the held summary MOV; its PNG sits beside it
     # under the same stem. ``None`` when not requested or not written.
     summary_card_path: Path | None = None
+    # ``<base>_overlay.json``: what the overlay MOV was drawn with
+    # (:func:`overlay_settings`), written beside it on every render.
+    overlay_settings_path: Path | None = None
+
+
+def overlay_settings_file(exports_dir: Path, base: str) -> Path:
+    """Where the record of ``<base>_overlay.mov``'s settings lives."""
+    return exports_dir / f"{base}_overlay.json"
+
+
+def read_overlay_settings(path: Path) -> dict[str, Any] | None:
+    """The settings an overlay MOV was drawn with. A missing record is an
+    overlay rendered before records existed, read as the defaults
+    (:data:`LEGACY_OVERLAY_SETTINGS`); an unreadable one is ``None``, which
+    no request matches, so the overlay is drawn again."""
+    if not path.exists():
+        return dict(LEGACY_OVERLAY_SETTINGS)
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
 
 
 def export_stage(
@@ -132,6 +163,7 @@ def export_stage(
     scorecard: StageScorecard | None = None,
     shooter_label: str | None = None,
     stage_time_is_manual: bool = False,
+    segment_cache: SegmentCache | None = None,
 ) -> StageExportResult:
     """Run the export for one stage. Pure orchestration over the engine
     modules; never re-detects.
@@ -289,6 +321,9 @@ def export_stage(
     overlay_path: Path | None = None
     fcp_overlay_path: Path | None = None
     overlay_target = exports_dir / f"{base}_overlay.mov"
+    overlay_settings_path: Path | None = None
+    # A style that fell back to Classic: worth telling, not a failure.
+    overlay_notes: list[str] = []
     if request.write_overlay and not shots:
         # Overlay annotates shot times; with no shots there's nothing to
         # render. Surface as a skip reason so the user sees why the
@@ -323,8 +358,30 @@ def export_stage(
                     max_height=request.overlay_max_height,
                     max_fps=request.overlay_max_fps,
                     theme=request.overlay_theme,
+                    variant=request.overlay_variant,
+                    hud_options=request.overlay_options,
+                    segment_cache=segment_cache,
+                    degraded=overlay_notes,
                 )
                 overlay_path = overlay_target
+                # Record what was drawn: a fallback drew Classic, so a later
+                # match export asking for the style draws it again.
+                drawn = DEFAULT_VARIANT if overlay_notes else request.overlay_variant
+                overlay_settings_path = overlay_settings_file(exports_dir, base)
+                overlay_settings_path.write_text(
+                    json.dumps(
+                        overlay_settings(
+                            look=request.overlay_theme,
+                            variant=drawn,
+                            options=request.overlay_options,
+                            codec=request.overlay_codec,
+                            max_height=request.overlay_max_height,
+                            max_fps=request.overlay_max_fps,
+                        ),
+                        sort_keys=True,
+                    ),
+                    encoding="utf-8",
+                )
             except (overlay_render.OverlayRenderError, OSError) as exc:
                 skip_reasons.append(f"overlay not written: {exc}")
                 overlay_path = None
@@ -476,7 +533,7 @@ def export_stage(
                 fcpxml_path = None
 
     shot_anomalies = report.detect_anomalies(shots, beep_time_in_source, stage_data.time_seconds)
-    anomalies = [*shot_anomalies, *skip_reasons, *card_notes]
+    anomalies = [*shot_anomalies, *skip_reasons, *overlay_notes, *card_notes]
 
     report_path: Path | None = None
     if request.write_report:
@@ -514,4 +571,5 @@ def export_stage(
         shot_anomalies=shot_anomalies,
         export_failures=list(skip_reasons),
         summary_card_path=summary_card_path,
+        overlay_settings_path=overlay_settings_path,
     )

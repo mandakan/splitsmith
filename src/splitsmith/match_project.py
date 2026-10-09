@@ -42,6 +42,7 @@ from .automation import AutomationOverride
 from .config import BeepCandidate, StageData, StageRounds, VideoMatchConfig
 from .export_naming import is_match_export, stage_file_base
 from .fingerprint import clip_fingerprint
+from .identity import ShooterIdentity
 from .storage import Storage
 from .video_match import match_videos_to_stages
 
@@ -396,6 +397,11 @@ class StageVideo(BaseModel):
     # as one-click alternatives to the auto-winner so the user rarely has to
     # type a timestamp by hand. Cleared on manual override / clear (issue #22).
     beep_candidates: list[BeepCandidate] = Field(default_factory=list)
+    # Which ranker produced ``beep_candidates`` (``BeepDetection.ranker_version``:
+    # the learned ranker's model_version, or "heuristic"). Their ``score``
+    # means a probability or the hand-written product depending on it (#949).
+    # ``None`` before #949 and whenever the candidates are cleared.
+    beep_ranker_version: str | None = None
     notes: str = ""
     # Camera mount classification (issue #143). Drives per-camera-class
     # threshold selection in the 4-voter ensemble. Stored as the bare
@@ -972,6 +978,10 @@ class MatchProject(BaseModel):
     # a title page prints. Filled by :meth:`merge_competitor_division` on
     # every pick and stage-times refresh; ``None`` without a scoreboard.
     competitor_division: str | None = None
+    # Per-shooter identity (#1243): accent, logo file under
+    # ``<shooter>/identity/``, club line. On the project so it syncs with
+    # the ``project`` doc; the logo travels over the media channel.
+    identity: ShooterIdentity = Field(default_factory=ShooterIdentity)
     scoreboard_match_id: str | None = None
     # SSI ``content_type`` tier for the linked match (matches the integer the
     # ``ScoreboardClient`` Protocol expects). Populated when the project is
@@ -1879,6 +1889,15 @@ class MatchProject(BaseModel):
                 v.role = "secondary"
                 self.unassigned_videos.append(v)
 
+    def adopt_scoreboard_club(self, club: str | None) -> bool:
+        """Fill an empty club line with the scoreboard competitor's club.
+        Never overwrites one the user typed; ``True`` when it changed."""
+        value = (club or "").strip()
+        if not value or (self.identity.club or "").strip():
+            return False
+        self.identity = self.identity.model_copy(update={"club": value[:80]})
+        return True
+
     def populate_from_match_data(
         self,
         match_data: Any,
@@ -2511,6 +2530,7 @@ class MatchProject(BaseModel):
         new_primary.beep_peak_amplitude = None
         new_primary.beep_duration_ms = None
         new_primary.beep_candidates = []
+        new_primary.beep_ranker_version = None
         new_primary.beep_reviewed = False
         new_primary.beep_auto_detect_failed = False
         new_primary.beep_alignment_confidence = None
@@ -2655,6 +2675,7 @@ class MatchProject(BaseModel):
                     v.beep_peak_amplitude = None
                     v.beep_duration_ms = None
                     v.beep_candidates = []
+                    v.beep_ranker_version = None
                     v.beep_reviewed = False
                     v.beep_auto_detect_failed = False
                     v.beep_alignment_confidence = None

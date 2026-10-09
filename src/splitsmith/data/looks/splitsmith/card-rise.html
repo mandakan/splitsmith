@@ -1,0 +1,53 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>card rise</title>
+<script>
+  // The shipped motion card: the engine's markup and stylesheet, then each
+  // group rises into place, staggered. seek() drives the Web Animations;
+  // the renderer samples them frame by frame, so nothing here depends on
+  // wall-clock time.
+  document.write('<style>' + window.splitsmith.engine.css + '</style>');
+  document.write('<script src="' + window.splitsmith.assets.shared + '/fit.js"><\/script>');
+  document.write('<script src="' + window.splitsmith.assets.shared + '/cell.js"><\/script>');
+  document.write('<script src="' + window.splitsmith.assets.shared + '/identity.js"><\/script>');
+  document.write('<script src="' + window.splitsmith.assets.shared + '/brand.js"><\/script>');
+  document.write('<script src="' + window.splitsmith.assets.shared + '/event.js"><\/script>');
+  document.write('<script src="' + window.splitsmith.assets.shared + '/credit.js"><\/script>');
+</script>
+</head>
+<body>
+<script>
+  var RISE_MS = 600;
+  var STAGGER_MS = 90;
+  var animations = [];
+  var totalMs = RISE_MS;
+  document.addEventListener('DOMContentLoaded', function () {
+    window.__splitsmithMinFont = window.splitsmith.engine.min_font_size;
+    window.splitsmith.engine.mount(window.splitsmith.data.groups);
+    window.splitsmith.engine.mountIdentity(window.splitsmith.data.shooters, window.splitsmith.data.card.slot);
+    window.splitsmith.engine.mountBrand(window.splitsmith.data.brand);
+    window.splitsmith.engine.mountEvent(window.splitsmith.data.event);
+    window.splitsmith.engine.mountCredit(window.splitsmith.data.credit);
+    var slot = window.splitsmith.data.card.slot;
+    var from = slot === 'lower_third' ? 'translateX(-48px)' : 'translateY(28px)';
+    var groups = document.querySelectorAll('.group');
+    groups.forEach(function (group, index) {
+      var animation = group.animate(
+        [{ opacity: 0, transform: from }, { opacity: 1, transform: 'translate(0, 0)' }],
+        { duration: RISE_MS, delay: index * STAGGER_MS, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)', fill: 'both' }
+      );
+      animation.pause();
+      animations.push(animation);
+    });
+    totalMs = RISE_MS + STAGGER_MS * Math.max(0, groups.length - 1);
+  });
+  window.duration = function () { return totalMs / 1000; };
+  window.poster = function () { return totalMs / 1000; };
+  window.seek = function (seconds) {
+    animations.forEach(function (animation) { animation.currentTime = seconds * 1000; });
+  };
+</script>
+</body>
+</html>

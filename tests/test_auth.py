@@ -102,6 +102,19 @@ _ME_ROUTES_REQUIRING_AUTH: list[tuple[str, str, str]] = [
     ("POST", "/api/me/raw/upload/multipart/abort", "/api/me/raw/upload/multipart/abort"),
     ("GET", "/api/me/raw/list", "/api/me/raw/list"),
     ("DELETE", "/api/me/raw/{filename:path}", "/api/me/raw/clip.mp4"),
+    # You, your brand and the shooter book (spec 2026-10-08).
+    ("GET", "/api/me/profile", "/api/me/profile"),
+    ("PUT", "/api/me/profile", "/api/me/profile"),
+    ("GET", "/api/me/profile/brand-logo", "/api/me/profile/brand-logo"),
+    ("POST", "/api/me/profile/brand-logo", "/api/me/profile/brand-logo"),
+    ("DELETE", "/api/me/profile/brand-logo", "/api/me/profile/brand-logo"),
+    ("GET", "/api/me/shooter-book", "/api/me/shooter-book"),
+    ("PUT", "/api/me/shooter-book/{shooter_id}", "/api/me/shooter-book/42"),
+    ("DELETE", "/api/me/shooter-book/{shooter_id}", "/api/me/shooter-book/42"),
+    ("GET", "/api/me/shooter-book/{shooter_id}/logo", "/api/me/shooter-book/42/logo"),
+    ("POST", "/api/me/shooter-book/{shooter_id}/logo", "/api/me/shooter-book/42/logo"),
+    ("DELETE", "/api/me/shooter-book/{shooter_id}/logo", "/api/me/shooter-book/42/logo"),
+    ("GET", "/api/me/shooter-search", "/api/me/shooter-search"),
 ]
 
 

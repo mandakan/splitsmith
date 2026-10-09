@@ -1,6 +1,6 @@
 [project]
 name = "splitsmith"
-version = "0.60.0"
+version = "0.64.1"
 description = "Extract IPSC shot splits from head-mounted camera footage"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -269,6 +269,7 @@ select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "PTH"]
 "src/splitsmith/lab_cli.py" = ["B008"]
 "src/splitsmith/compare/cli.py" = ["B008"]
 "src/splitsmith/match_cli.py" = ["B008"]
+"src/splitsmith/looks_cli.py" = ["B008"]
 "src/splitsmith/youtube/cli.py" = ["B008"]
 # FastAPI mirrors the Typer pattern: ``File(...)``, ``Form(...)``,
 # ``Query(...)`` are required as parameter defaults so the framework can

@@ -103,6 +103,9 @@ export interface EstimateOptions {
   tail: number;
   transitionKind: string;
   transitionSeconds: number;
+  /** The output format: an MP4 transition is centred on the cut and adds
+   *  no time (#1244); the FCPXML estimate keeps adding one per boundary. */
+  format?: "fcpxml" | "fcp7xml" | "mp4";
   /** What the generated cards add (``renderOptionsSeconds``); the
    *  caller has already applied the mode and format rules. */
   cardSeconds?: number;
@@ -121,7 +124,7 @@ export function estimateDuration(
   for (const n of selected) duration += (times.get(n) ?? 0) + opts.head + opts.tail;
   if (opts.mode === "trims") return duration;
   const count = selected.length;
-  if (opts.mode === "single" && opts.transitionKind !== "none" && count > 1) {
+  if (opts.mode === "single" && opts.format !== "mp4" && opts.transitionKind !== "none" && count > 1) {
     duration += opts.transitionSeconds * (count - 1);
   }
   return duration + (opts.cardSeconds ?? 0);
@@ -131,6 +134,15 @@ export function formatDuration(seconds: number): string {
   const s = Math.max(0, Math.round(seconds));
   const m = Math.floor(s / 60);
   return `${m}:${String(s % 60).padStart(2, "0")}`;
+}
+
+/** How long a job took: "0.3s", "42s", then "m:ss" like a timeline's
+ *  length. A fast export rounds to nothing in ``formatDuration``. */
+export function formatElapsed(seconds: number): string {
+  const tenths = Math.round(Math.max(0, seconds) * 10) / 10;
+  if (tenths < 10) return `${tenths.toFixed(1)}s`;
+  const whole = Math.round(tenths);
+  return whole < 60 ? `${whole}s` : formatDuration(whole);
 }
 
 export interface SummaryLine {
@@ -147,10 +159,14 @@ export function summaryLines(args: {
   head: number;
   tail: number;
   transitionKind: string;
+  /** What the rail calls the transition ("Wind up"); unset, the kind itself (#1259). */
+  transitionLabel?: string;
   transitionSeconds: number;
   /** ``describeRenderOptions`` for the mode and format; null is off. */
   cards: string | null;
   overlay: boolean;
+  /** The overlay style's name ("Plate"); unset reads "on" (Classic). */
+  overlayStyle?: string;
   /** The camera choice in words (``camsSummary``); null hides the line
    *  (the shooter has no second camera, or the mode does not take them). */
   cams: string | null;
@@ -183,10 +199,15 @@ export function summaryLines(args: {
   lines.push(
     args.transitionKind === "none"
       ? { label: "Transitions", value: "cut", dim: true }
-      : { label: "Transitions", value: `${args.transitionKind} ${args.transitionSeconds.toFixed(1)} s` },
+      : {
+          label: "Transitions",
+          value: `${args.transitionLabel ?? args.transitionKind} ${args.transitionSeconds.toFixed(1)} s`,
+        },
   );
   lines.push(cards);
-  lines.push(args.overlay ? { label: "Overlay", value: "on" } : { label: "Overlay", value: "off", dim: true });
+  lines.push(
+    args.overlay ? { label: "Overlay", value: args.overlayStyle ?? "on" } : { label: "Overlay", value: "off", dim: true },
+  );
   if (args.cams !== null) lines.push({ label: "Cameras", value: args.cams });
   if (args.youtube !== null) {
     lines.push(args.youtube ? { label: "YouTube", value: "preset + sidecar" } : { label: "YouTube", value: "off", dim: true });

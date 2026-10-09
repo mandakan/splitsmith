@@ -56,6 +56,7 @@ import hashlib
 import json
 import re
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -1626,3 +1627,164 @@ def test_a_non_dividing_canvas_scales_the_stills_to_the_composed_size(tmp_path):
     # the flooring remainder.
     assert graph.count("scale=1278:720") == 2, graph
     assert "scale=1280:720" not in graph, graph
+
+
+# --- narrowing a plan for a transition (#1244) ---------------------------------
+
+
+def test_narrow_grid_plan_moves_the_tiles_and_takes_the_tail_from_the_hold_first() -> None:
+    """A head cut starts every tile later (the head pad shrinks by the cut,
+    the beep stays on it); a tail cut comes out of the hold before it
+    touches the action."""
+    plan = _plan(hold=HOLD)  # head pad 1.0: beep 1.25, seek 0.25, lead 0
+    narrowed = mp4_grid.narrow_grid_plan(plan, head_cut=0.5, tail_cut=1.0)
+    real = [t for t in narrowed.tiles if t.trim_path is not None]
+    assert all(t.seek_seconds == pytest.approx(0.75) and t.lead_pad_seconds == 0.0 for t in real)
+    assert [t for t in narrowed.tiles if t.trim_path is None] == [
+        t for t in plan.tiles if t.trim_path is None
+    ]
+    assert mp4_grid.head_pad_of(narrowed) == pytest.approx(0.5)
+    assert narrowed.duration_seconds == pytest.approx(ACTION - 0.5)
+    assert narrowed.hold_seconds == pytest.approx(HOLD - 1.0)
+    assert narrowed.total_seconds == pytest.approx(TOTAL - 1.5)
+    past_the_hold = mp4_grid.narrow_grid_plan(plan, head_cut=0.0, tail_cut=HOLD + 0.5)
+    assert past_the_hold.hold_seconds == 0.0
+    assert past_the_hold.duration_seconds == pytest.approx(ACTION - 0.5)
+    handle = mp4_grid.narrow_grid_plan(_plan(), head_cut=-0.25, tail_cut=-0.25)
+    assert all(
+        t.seek_seconds == pytest.approx(0.0) and t.lead_pad_seconds == 0.0
+        for t in handle.tiles
+        if t.trim_path
+    )
+    assert handle.duration_seconds == pytest.approx(ACTION + 0.5) and handle.hold_seconds == 0.0
+
+
+def test_narrow_grid_plan_keeps_a_lead_padded_tile_and_its_inset_on_the_beep() -> None:
+    padded = mp4_grid.GridTile(
+        label="Dee",
+        trim_path=Path("/trims/Dee.mov"),
+        beep_offset_in_clip=1.25,
+        seek_seconds=0.0,
+        lead_pad_seconds=0.5,  # head pad 1.75
+        source_duration_seconds=6.0,
+        row=0,
+        col=0,
+        inset_path=Path("/trims/Dee-inset.mov"),
+        inset_seek_seconds=0.25,  # inset beep 2.0
+        inset_lead_pad_seconds=0.0,
+    )
+    plan = mp4_grid.GridStagePlan(
+        stage_number=3,
+        stage_name="S",
+        tiles=(padded,),
+        duration_seconds=ACTION,
+        audio_label="Dee",
+        rows=1,
+        cols=1,
+    )
+    a_little = mp4_grid.narrow_grid_plan(plan, head_cut=0.25, tail_cut=0.0).tiles[0]
+    assert (a_little.seek_seconds, a_little.lead_pad_seconds) == (0.0, pytest.approx(0.25))
+    assert (a_little.inset_seek_seconds, a_little.inset_lead_pad_seconds) == (pytest.approx(0.5), 0.0)
+    past_the_pad = mp4_grid.narrow_grid_plan(plan, head_cut=0.75, tail_cut=0.0).tiles[0]
+    assert (past_the_pad.seek_seconds, past_the_pad.lead_pad_seconds) == (pytest.approx(0.25), 0.0)
+    assert (past_the_pad.inset_seek_seconds, past_the_pad.inset_lead_pad_seconds) == (pytest.approx(1.0), 0.0)
+
+
+def test_zero_cuts_leave_the_plan_and_its_command_unchanged() -> None:
+    plan = _plan(hold=HOLD)
+    same = mp4_grid.narrow_grid_plan(plan, head_cut=0.0, tail_cut=0.0)
+    assert same == plan
+    assert _command(same) == _command(plan)
+
+
+# --- the edges of a boundary (#1244) -------------------------------------------
+
+
+def _long_tile(label: str, *, source: float = 20.0, seek: float = 0.25) -> mp4_grid.GridTile:
+    return mp4_grid.GridTile(
+        label=label,
+        trim_path=Path(f"/trims/{label}.mov"),
+        beep_offset_in_clip=1.25,
+        seek_seconds=seek,
+        lead_pad_seconds=0.0,
+        source_duration_seconds=source,
+        row=0,
+        col=0,
+    )
+
+
+def _long_plan(*, hold: float = 0.0, tiles=None) -> mp4_grid.GridStagePlan:  # type: ignore[no-untyped-def]
+    return mp4_grid.GridStagePlan(
+        stage_number=3,
+        stage_name="S",
+        tiles=tiles or (_long_tile("Ann"), _long_tile("Bo")),
+        duration_seconds=ACTION,
+        audio_label="Ann",
+        rows=1,
+        cols=2,
+        hold_seconds=hold,
+    )
+
+
+def test_edge_handles_are_what_every_real_tiles_trim_holds() -> None:
+    """The head handle is footage before the pad (the smallest seek); the
+    tail handle is footage past the action end, none once a hold follows
+    (the hold is a still). A short tile pulls the handle to zero and the
+    boundary holds a frame instead."""
+    plan = _long_plan()  # seek 0.25; footage past the action: 20 - 12.75 = 7.25
+    assert mp4_grid.grid_edge_handle(plan, half=0.5, end="head") == pytest.approx(0.25)
+    assert mp4_grid.grid_edge_handle(plan, half=0.5, end="tail") == pytest.approx(0.5)
+    assert mp4_grid.grid_edge_handle(_long_plan(hold=HOLD), half=0.5, end="tail") == 0.0
+    short = _long_plan(tiles=(_long_tile("Ann"), _long_tile("Bo", source=6.0)))
+    assert mp4_grid.grid_edge_handle(short, half=0.5, end="tail") == 0.0
+    dee = replace(
+        _long_tile("Dee"), seek_seconds=0.0, lead_pad_seconds=0.5
+    )  # beep inside the pad: no footage before it
+    padded = _long_plan(tiles=(_long_tile("Ann"), dee))
+    assert mp4_grid.grid_edge_handle(padded, half=0.5, end="head") == 0.0
+
+
+def test_the_head_edge_is_the_handle_plus_the_first_half() -> None:
+    plan = _long_plan(hold=HOLD)
+    head = mp4_grid.grid_edge_plan(plan, half=0.5, end="head")
+    assert head.hold_seconds == 0.0
+    assert head.duration_seconds == pytest.approx(0.75)  # 0.25 of handle + 0.5
+    assert all(t.seek_seconds == pytest.approx(0.0) for t in head.tiles)
+    assert mp4_grid.head_pad_of(head) == pytest.approx(1.25)
+
+
+def test_the_tail_edge_ends_in_the_hold_or_is_the_hold_alone() -> None:
+    """Review Focus 3: a hold shorter than d/2 leaves ``half - hold`` of
+    action in the edge; a hold at least d/2 long makes the edge a still of
+    the hold, which the driver renders as a card segment."""
+    short_hold = _long_plan(hold=0.25)
+    assert not mp4_grid.grid_edge_is_hold_only(short_hold, half=0.5)
+    tail = mp4_grid.grid_edge_plan(short_hold, half=0.5, end="tail")
+    assert tail.hold_seconds == pytest.approx(0.25)
+    assert tail.duration_seconds == pytest.approx(0.25)
+    assert all(t.seek_seconds == pytest.approx(0.25 + ACTION - 0.25) for t in tail.tiles)
+    assert mp4_grid.grid_edge_is_hold_only(_long_plan(hold=HOLD), half=0.5)
+    no_hold = mp4_grid.grid_edge_plan(_long_plan(), half=0.5, end="tail")
+    assert no_hold.hold_seconds == 0.0 and no_hold.duration_seconds == pytest.approx(
+        1.0
+    )  # 0.5 + 0.5 of handle
+
+
+def test_a_tile_with_no_footage_in_the_window_becomes_filler() -> None:
+    """Review Focus 1: a tile whose footage ended before the window would
+    seek past its own end and feed ffmpeg no frames at all; in the stage it
+    was black from its end, so the edge shows it as filler: black and
+    silent, the same two inputs, the same track."""
+    short = _long_plan(tiles=(_long_tile("Ann"), _long_tile("Bo", source=6.0)))
+    tail = mp4_grid.grid_edge_plan(short, half=0.5, end="tail")
+    ann, bo = tail.tiles
+    assert ann.trim_path is not None and ann.seek_seconds == pytest.approx(ACTION - 0.25)
+    assert bo.trim_path is None and (bo.seek_seconds, bo.lead_pad_seconds, bo.source_duration_seconds) == (
+        0.0,
+        0.0,
+        0.0,
+    )
+    cmd = _command(tail, hold_still_path=None)
+    graph = _graph_of(cmd)
+    assert "color=c=black" in " ".join(cmd)
+    assert len(_chains(graph, r"\[a\d\]\[m\d\]$")) == 2, "both tracks still there"

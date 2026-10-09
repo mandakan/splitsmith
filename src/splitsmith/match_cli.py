@@ -32,6 +32,7 @@ from rich.markup import escape
 from rich.table import Table
 
 from . import camera_select, match_model, match_trims, user_config
+from .composition import XFADE_KINDS
 from .config import Config
 from .division import competitor_division
 from .events import events_from_doc
@@ -456,6 +457,29 @@ def export(
     closing_card: bool = typer.Option(
         False, "--closing-card", help="Close with a generated card (mp4 only)."
     ),
+    made_with: bool = typer.Option(
+        True,
+        "--made-with/--no-made-with",
+        help="'Made with splitsmith' at the bottom of the closing card.",
+    ),
+    account_brand: bool = typer.Option(
+        True,
+        "--account-brand/--no-account-brand",
+        help="Your account's brand on the title page and the closing card, when the Look has none.",
+    ),
+    card_variant: str = typer.Option(
+        "default",
+        "--card-variant",
+        help="Look template variant for the generated cards: 'default' or, with the splitsmith Look, 'rise'.",
+    ),
+    match_summary: bool = typer.Option(
+        False,
+        "--match-summary",
+        help="Close with a match summary card: match-wide figures and a row per stage (mp4 only).",
+    ),
+    match_summary_seconds: float = typer.Option(
+        6.0, "--match-summary-seconds", help="Seconds the match summary holds."
+    ),
     summary_hold: float = typer.Option(
         0.0,
         "--summary-hold",
@@ -463,6 +487,18 @@ def export(
             "Seconds to hold each stage's summary -- name, scoring, splits over the blurred last frame "
             "-- after its action (mp4 only). 0 is off."
         ),
+    ),
+    transition: str = typer.Option(
+        "none",
+        "--transition",
+        help=(
+            "Transition between stages: 'none', an ffmpeg xfade (mp4: "
+            + ", ".join(XFADE_KINDS)
+            + "), a Look sting ('sting:wipe'; mp4) or an FCP effect (zoom, static; fcpxml)."
+        ),
+    ),
+    transition_seconds: float = typer.Option(
+        0.5, "--transition-seconds", help="Length of each transition, centred on the cut."
     ),
     intro: Path | None = typer.Option(None, "--intro", help="Video clip to play before the first stage."),
     outro: Path | None = typer.Option(None, "--outro", help="Video clip to play after the last stage."),
@@ -511,7 +547,9 @@ def export(
         False, "--youtube-no-notify", help="Do not notify subscribers when the upload goes public."
     ),
     overlay_theme: str = typer.Option(
-        "splitsmith", "--theme", help="Overlay / card theme: 'splitsmith' or 'clean'."
+        "splitsmith",
+        "--theme",
+        help="Look (overlay and card palette, card templates): an installed Look name.",
     ),
     config_path: Path | None = typer.Option(None, "--config", help="Optional YAML config."),
 ) -> None:
@@ -528,9 +566,13 @@ def export(
     formats carry the stage titles FCP can draw and record the rest as
     notes.
     """
+    from .account_profile import JsonAccountProfileStore, load_brand
+    from .looks import load_look
     from .match_project import MatchProject
     from .mp4_render import RenderStep
+    from .shooter_book import JsonShooterBookStore, load_snapshot
     from .ui import match_exports
+    from .ui.identity_media import ensure_local_event_logo, resolved_identity_for
 
     if output_format not in _EXPORT_FORMATS:
         console.print(
@@ -543,8 +585,12 @@ def export(
     if pip_layout not in ("stacked", "pip-corners"):
         console.print(f"[red]Error:[/] --pip must be 'stacked' or 'pip-corners', got {pip_layout!r}.")
         raise typer.Exit(code=2)
-    if overlay_theme not in ("splitsmith", "clean"):
-        console.print(f"[red]Error:[/] --theme must be 'splitsmith' or 'clean', got {overlay_theme!r}.")
+    from .looks import look_names
+
+    if overlay_theme not in look_names():
+        console.print(
+            f"[red]Error:[/] --theme must be one of {', '.join(look_names())}, got {overlay_theme!r}."
+        )
         raise typer.Exit(code=2)
     yt_client: Any = None
     yt_conn = None
@@ -577,6 +623,22 @@ def export(
     if summary_hold < 0:
         console.print(f"[red]Error:[/] --summary-hold must not be negative, got {summary_hold:g}.")
         raise typer.Exit(code=2)
+    if match_summary and not 0.5 <= match_summary_seconds <= 30.0:
+        console.print(
+            "[red]Error:[/] --match-summary-seconds must be between 0.5 and 30, "
+            f"got {match_summary_seconds:g}."
+        )
+        raise typer.Exit(code=2)
+    from .composition import validate_transition_kind
+
+    try:
+        validate_transition_kind(transition)
+    except ValueError as exc:
+        console.print(f"[red]Error:[/] --transition: {exc}.")
+        raise typer.Exit(code=2) from None
+    if transition_seconds <= 0:
+        console.print(f"[red]Error:[/] --transition-seconds must be positive, got {transition_seconds:g}.")
+        raise typer.Exit(code=2)
     if output is not None and output.expanduser().is_dir():
         console.print(f"[red]Error:[/] --output {output} is a directory; pass the file to write.")
         raise typer.Exit(code=2)
@@ -606,7 +668,7 @@ def export(
     # read when a summary is asked for -- the roster file is not part of
     # an ordinary export and must not be able to fail one.
     shooter_label: str | None = project.competitor_name
-    if summary_hold > 0 and not shooter_label:
+    if (summary_hold > 0 or match_summary) and not shooter_label:
         try:
             shooter_label = match.load_shooter(match_path, slug).name
         except (OSError, KeyError, ValueError):
@@ -626,7 +688,9 @@ def export(
         raise typer.Exit(code=1) from exc
 
     project_name = project.name or match.name or "match"
+    book = load_snapshot(JsonShooterBookStore())
     request = match_exports.MatchExportRequestData(
+        event_logo=ensure_local_event_logo(match.branding, match_path, storage=None, match_id=None),
         stage_numbers=tuple(stage_numbers),
         head_pad_seconds=head_pad,
         tail_pad_seconds=tail_pad,
@@ -637,6 +701,8 @@ def export(
         output_format=output_format,  # type: ignore[arg-type]
         title_kind=titles,  # type: ignore[arg-type]
         title_duration_seconds=title_duration,
+        transition_kind=transition,  # type: ignore[arg-type]
+        transition_duration_seconds=transition_seconds,
         intro_path=intro.expanduser() if intro else None,
         outro_path=outro.expanduser() if outro else None,
         youtube_preset=youtube_preset,
@@ -647,12 +713,26 @@ def export(
             project,
             extra=title_info,
             division=competitor_division(project, shooter_root) if title_division else None,
+            book=book,
         ),
         title_page_duration_seconds=title_page_duration,
         closing_card=closing_card,
+        made_with=made_with,
+        account_brand=load_brand(JsonAccountProfileStore()) if account_brand else None,
+        card_variant=card_variant,
         overlay_theme=overlay_theme,  # type: ignore[arg-type]
         summary_hold_seconds=summary_hold,
+        match_summary=match_summary,
+        match_summary_seconds=match_summary_seconds,
         shooter_label=shooter_label,
+        shooter_identity=resolved_identity_for(
+            project,
+            shooter_root,
+            look=load_look(overlay_theme),
+            index=0,
+            label=shooter_label or project_name,
+            book=book,
+        ),
     )
     exports_dir = project.exports_path(shooter_root)
     if output is not None:

@@ -1,4 +1,4 @@
-"""Build ``overlay_theme.json`` from the web UI's design tokens.
+"""Write the ``splitsmith`` Look's colour tokens from the web UI's design tokens.
 
 The overlay renderer (``splitsmith.overlay_render``) needs the same colors
 the Shot Timer UI uses so the optional ``designsystem`` overlay variant
@@ -6,7 +6,9 @@ stays in sync with whatever is in
 ``src/splitsmith/ui_static/src/styles/index.css``. Re-parsing the CSS at
 import time would mean shipping a CSS parser as a runtime dep; instead we
 extract the handful of tokens overlays care about once at build time and
-mirror them into ``src/splitsmith/data/overlay_theme.json``.
+write them as ``colors``, ``fonts`` and ``source`` into
+``src/splitsmith/data/looks/splitsmith/look.json``, keeping every other
+key of that manifest (``slots``, ``label``, ``schema_version``) as found.
 
 Run::
 
@@ -27,7 +29,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CSS_PATH = REPO_ROOT / "src/splitsmith/ui_static/src/styles/index.css"
-DEFAULT_OUTPUT_PATH = REPO_ROOT / "src/splitsmith/data/overlay_theme.json"
+DEFAULT_OUTPUT_PATH = REPO_ROOT / "src/splitsmith/data/looks/splitsmith/look.json"
 
 # Map overlay role -> CSS variable. Roles are stable; CSS vars can move.
 # When a role's CSS var disappears, the build fails loudly rather than
@@ -173,14 +175,21 @@ def main() -> int:
     args = parser.parse_args()
 
     theme = build_theme(args.css)
-    rendered = json.dumps(theme, indent=2, sort_keys=True) + "\n"
+    existing: dict[str, object] = {}
+    if args.output.exists():
+        existing = json.loads(args.output.read_text(encoding="utf-8"))
+    merged = {**existing, **theme}
+    merged.setdefault("schema_version", 1)
+    merged.setdefault("name", "splitsmith")
+    merged.setdefault("label", "Splitsmith")
+    merged.setdefault("slots", {})
+    rendered = json.dumps(merged, indent=2, sort_keys=True) + "\n"
 
     if args.check:
         if not args.output.exists():
             print(f"missing {args.output}", file=sys.stderr)
             return 1
-        existing = args.output.read_text(encoding="utf-8")
-        if existing != rendered:
+        if args.output.read_text(encoding="utf-8") != rendered:
             print(f"{args.output} is out of sync; re-run without --check", file=sys.stderr)
             return 1
         print(f"{args.output} up to date")

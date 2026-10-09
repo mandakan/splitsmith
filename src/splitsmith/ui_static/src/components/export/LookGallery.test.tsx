@@ -1,119 +1,130 @@
 /**
- * The Look gallery (spec 2026-09-15 s2): tiles per slot, the selected
- * variant's parameters under its row, and only what the mode and format
- * can draw. Folds in the render panel's cases (the two-boolean title
- * page mapping, the seconds fields, the per-format rules).
+ * LookGallery with a catalog (#1246): the Look tiles, the Style control
+ * under a card slot and the Look's stings as transition tiles.
  */
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { LookGallery } from "@/components/export/LookGallery";
+import type { LookInfo } from "@/lib/api";
 import { DEFAULT_EXPORT_SETTINGS, type ExportSettings } from "@/lib/exportPresets";
+import { FAMILIES } from "@/test/transitionFamilies";
 
-function setup(over: Partial<ExportSettings> = {}, bareHints = {}) {
-  const settings = { ...DEFAULT_EXPORT_SETTINGS, ...over };
+const CATALOG: LookInfo[] = [
+  {
+    name: "splitsmith",
+    label: "Splitsmith",
+    source: "shipped",
+    accent_series: [],
+    preview: "/api/looks/splitsmith/preview/look.png",
+    slots: {
+      title_page: [{ name: "default", preview: null }, { name: "rise", preview: "/api/looks/splitsmith/preview/title_page-rise.png" }],
+      slate: [{ name: "default", preview: null }, { name: "rise", preview: null }],
+      lower_third: [{ name: "default", preview: null }, { name: "rise", preview: null }],
+      summary: [],
+      closing: [{ name: "default", preview: null }, { name: "rise", preview: null }],
+      transition: [{ name: "wipe", preview: "/api/looks/splitsmith/preview/transition-wipe.png" }],
+    },
+  },
+  {
+    name: "club",
+    label: "Club",
+    source: "user",
+    accent_series: [],
+    preview: null,
+    slots: {
+      title_page: [{ name: "default", preview: null }],
+      slate: [{ name: "default", preview: null }],
+      lower_third: [{ name: "default", preview: null }],
+      summary: [],
+      closing: [{ name: "default", preview: null }],
+      transition: [],
+    },
+  },
+];
+
+function mount(settings: ExportSettings, looks: LookInfo[] = CATALOG) {
   const patch = vi.fn();
-  const view = render(<LookGallery settings={settings} patch={patch} busy={false} bareHints={bareHints} />);
-  return { settings, patch, user: userEvent.setup(), container: view.container };
+  render(
+    <LookGallery settings={settings} patch={patch} busy={false} bareHints={{}} looks={looks} transitions={FAMILIES} />,
+  );
+  return patch;
 }
 
-const tile = (slot: string, name: string) =>
-  within(screen.getByRole("radiogroup", { name: slot })).getByRole("radio", { name });
+const MP4: ExportSettings = { ...DEFAULT_EXPORT_SETTINGS, outputFormat: "mp4" };
 
-const groups = () => screen.getAllByRole("radiogroup").map((g) => g.getAttribute("aria-label"));
+describe("LookGallery with a catalog", () => {
+  it("offers the installed Looks as tiles and writes the choice", async () => {
+    const user = userEvent.setup();
+    const patch = mount(MP4);
+    const looks = screen.getByRole("radiogroup", { name: "Look" });
+    expect(within(looks).getAllByRole("radio").map((r) => r.textContent)).toEqual(["Splitsmith", "Club"]);
+    await user.click(within(looks).getByRole("radio", { name: "Club" }));
+    expect(patch).toHaveBeenCalledWith({ look: "club" });
+  });
 
-describe("LookGallery", () => {
-  it("on MP4 offers every slot, each tile with its thumbnail, and the transition stays hidden", () => {
-    setup({ outputFormat: "mp4" });
-    expect(groups()).toEqual(["Title page", "Stage card", "Closing card", "Stage summary", "Overlay"]);
-    expect(tile("Title page", "None")).toBeChecked();
-    expect(tile("Stage card", "Slate").querySelector("img")).toHaveAttribute(
-      "src",
-      expect.stringMatching(/stage-card-slate/),
+  it("shows no Look tiles when only one Look is installed", () => {
+    mount(MP4, [CATALOG[0]]);
+    expect(screen.queryByRole("radiogroup", { name: "Look" })).toBeNull();
+  });
+
+  it("shows a Style under a card that is on when the Look has more than one variant, and writes it", async () => {
+    const user = userEvent.setup();
+    const on = { ...MP4, renderOptions: { ...MP4.renderOptions, titlePage: true } };
+    const patch = mount(on);
+    const style = screen.getByRole("group", { name: "Title page style" });
+    expect(within(style).getAllByRole("button").map((r) => r.textContent)).toEqual(["Default", "Rise"]);
+    await user.click(within(style).getByRole("button", { name: "Rise" }));
+    expect(patch).toHaveBeenCalledWith({ titlePageVariant: "rise" });
+  });
+
+  it("hides the Style while the card is off, and for a Look with one variant", () => {
+    mount(MP4);
+    expect(screen.queryByRole("group", { name: "Title page style" })).toBeNull();
+    const club = { ...MP4, look: "club", renderOptions: { ...MP4.renderOptions, titlePage: true } };
+    mount(club);
+    expect(screen.queryByRole("group", { name: "Title page style" })).toBeNull();
+  });
+
+  it("offers the Look's sting among the transitions with its API preview", () => {
+    mount(MP4);
+    const transitions = screen.getByRole("radiogroup", { name: "Transition" });
+    const sting = within(transitions).getByRole("radio", { name: "Wipe sting" });
+    expect(sting.querySelector("img")?.getAttribute("src")).toContain("/api/looks/splitsmith/preview/transition-wipe.png");
+  });
+});
+
+
+describe("transition families (#1259)", () => {
+  it("offers the families as tiles with their looping previews", () => {
+    mount(MP4);
+    const row = screen.getByRole("radiogroup", { name: "Transition" });
+    expect(within(row).getAllByRole("radio").map((r) => r.textContent)).toEqual([
+      "Hard cut",
+      "Fade",
+      "Slide",
+      "Wind",
+      "Circle",
+      "Wipe sting",
+    ]);
+    expect(within(row).getByRole("radio", { name: "Wind" }).querySelector("img")?.getAttribute("src")).toContain(
+      "/api/looks/_transitions/preview/wind.webp",
     );
   });
 
-  it("on FCPXML offers the stage card, the overlay and the transition only", () => {
-    setup({ outputFormat: "fcpxml" });
-    expect(groups()).toEqual(["Stage card", "Overlay", "Transition"]);
-    expect(tile("Transition", "Hard cut")).toBeChecked();
+  it("shows a Direction under a family with more than one, and writes the kind", async () => {
+    const user = userEvent.setup();
+    const patch = mount({ ...MP4, transitionKind: "hlwind" });
+    const direction = screen.getByRole("group", { name: "Transition direction" });
+    expect(within(direction).getAllByRole("button").map((b) => b.textContent)).toEqual(["Left", "Right", "Up", "Down"]);
+    expect(within(direction).getByRole("button", { name: "Left" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(within(direction).getByRole("button", { name: "Up" }));
+    expect(patch).toHaveBeenCalledWith({ transitionKind: "vuwind" });
   });
 
-  it("on FCP 7 XML offers the overlay only", () => {
-    setup({ outputFormat: "fcp7xml" });
-    expect(groups()).toEqual(["Overlay"]);
-  });
-
-  it("on the grid offers the cards and the grid overlay with its hold, never the summary", () => {
-    setup({ mode: "compare", gridOverlay: true, gridHoldSeconds: 2 });
-    expect(groups()).toEqual(["Title page", "Stage card", "Closing card", "Overlay"]);
-    expect(tile("Overlay", "Shot counter")).toBeChecked();
-    expect(screen.getByLabelText("Grid summary hold seconds")).toHaveValue(2);
-    expect(screen.getByText(/Per-tile shot counter/)).toBeInTheDocument();
-    expect(screen.queryByText(/codec is under Output/)).toBeNull();
-  });
-
-  it("in single mode the overlay has no hold field", () => {
-    setup({ outputFormat: "mp4", includeOverlay: true });
-    expect(tile("Overlay", "Shot counter")).toBeChecked();
-    expect(screen.queryByLabelText("Grid summary hold seconds")).toBeNull();
-  });
-
-  it("selecting a tile patches through the slot, keeping the rest of the options", async () => {
-    const { user, patch, settings } = setup({ outputFormat: "mp4" });
-    await user.click(tile("Stage card", "Lower third"));
-    expect(patch).toHaveBeenCalledWith({ renderOptions: { ...settings.renderOptions, stageCardStyle: "lower-third" } });
-    await user.click(tile("Title page", "Title page"));
-    expect(patch).toHaveBeenLastCalledWith({ renderOptions: { ...settings.renderOptions, titlePage: true } });
-    // Clicking the selected tile again is not a change.
-    patch.mockClear();
-    await user.click(tile("Closing card", "None"));
-    expect(patch).not.toHaveBeenCalled();
-  });
-
-  it("shows the selected variant's parameters and help, and none for the off tile", () => {
-    const { patch } = setup({
-      outputFormat: "mp4",
-      renderOptions: { ...DEFAULT_EXPORT_SETTINGS.renderOptions, stageCardStyle: "slate", stageCardDurationSeconds: 1.5 },
-    });
-    expect(screen.getByLabelText("Stage card seconds")).toHaveValue(1.5);
-    expect(screen.getByText(/on its own card before each stage/)).toBeInTheDocument();
-    expect(screen.queryByLabelText("Title page seconds")).toBeNull();
-    // The prop never updates under a mock, so one change event rather than typing.
-    fireEvent.change(screen.getByLabelText("Stage card seconds"), { target: { value: "2" } });
-    expect(patch).toHaveBeenLastCalledWith({
-      renderOptions: expect.objectContaining({ stageCardDurationSeconds: 2 }),
-    });
-  });
-
-  it("the summary hold tile turns the hold on at 3 s", async () => {
-    const { user, patch } = setup({ outputFormat: "mp4" });
-    await user.click(tile("Stage summary", "Summary hold"));
-    expect(patch).toHaveBeenCalledWith({ renderOptions: expect.objectContaining({ summaryHoldSeconds: 3 }) });
-  });
-
-  it("appends the bare hint to the slot's help only while its variant is on", () => {
-    setup({ outputFormat: "mp4", includeOverlay: true }, { overlay: "Skipped on 2 stages without splits." });
-    expect(screen.getByText(/Skipped on 2 stages without splits\./)).toBeInTheDocument();
-    expect(screen.queryByText(/Time and scoring only/)).toBeNull();
-  });
-
-  it("disables every tile and input while busy", () => {
-    render(
-      <LookGallery
-        settings={{ ...DEFAULT_EXPORT_SETTINGS, outputFormat: "mp4", includeOverlay: true }}
-        patch={vi.fn()}
-        busy
-        bareHints={{}}
-      />,
-    );
-    for (const r of screen.getAllByRole("radio")) expect(r).toBeDisabled();
-  });
-
-  it("never paints a coloured fill and has no primary action", () => {
-    const { container } = setup({ outputFormat: "mp4" });
-    expect(container.querySelector(".btn-primary")).toBeNull();
-    expect(container.querySelector("[class*='bg-led']")).toBeNull();
+  it("shows no Direction for a single-kind family or the cut", () => {
+    mount({ ...MP4, transitionKind: "fade" });
+    expect(screen.queryByRole("group", { name: "Transition direction" })).toBeNull();
   });
 });

@@ -884,3 +884,92 @@ def test_export_overview_ready_to_export_bare_needs_a_reviewed_beep_and_a_time(t
     assert {n: r.ready_to_export_bare for n, r in rows.items()} == {1: True, 2: False, 3: False, 4: False}
     assert rows[1].ready_to_trim is True and rows[1].ready_to_export is False
     assert rows[2].ready_to_trim is True  # the trim rule does not care about review
+
+
+# --- the overlay style and its record (template HUD, slice 3) ------------------
+
+
+def _overlay_export(
+    audit_path: Path,
+    exports_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    fall_back: bool = False,
+    **request: Any,
+) -> tuple[exports_mod.StageExportResult, dict[str, Any]]:
+    from splitsmith import overlay_render
+
+    captured: dict[str, Any] = {}
+
+    def fake_render(**kwargs: Any) -> Path:
+        captured.update(kwargs)
+        if fall_back:
+            kwargs["degraded"].append(f"overlay style {kwargs['variant']!r} fell back to Classic: boom")
+        kwargs["output_path"].write_bytes(b"mov")
+        return kwargs["output_path"]
+
+    monkeypatch.setattr(overlay_render, "render_overlay", fake_render)
+    result = exports_mod.export_stage(
+        request=exports_mod.StageExportRequest(
+            stage_number=1,
+            write_trim=False,
+            write_csv=False,
+            write_fcpxml=False,
+            write_report=False,
+            write_overlay=True,
+            **request,
+        ),
+        audit_path=audit_path,
+        exports_dir=exports_dir,
+        source_video_path=None,
+        pre_buffer_seconds=5.0,
+        post_buffer_seconds=5.0,
+        stage_data=StageData(
+            stage_number=1,
+            stage_name="Stage 1 -- H1",
+            time_seconds=8.0,
+            scorecard_updated_at=datetime(2026, 5, 2, 14, 30, tzinfo=UTC),
+        ),
+        beep_time_in_source=10.0,
+        config=Config(),
+    )
+    return result, captured
+
+
+def test_the_overlay_style_reaches_the_renderer_and_is_recorded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from splitsmith.overlay_hud import HudOptions
+
+    audit_path, exports_dir = _seed_stage_with_trim(tmp_path)
+    options = HudOptions(landing=False, position="top-right")
+    result, captured = _overlay_export(
+        audit_path, exports_dir, monkeypatch, overlay_variant="plate", overlay_options=options
+    )
+    assert captured["variant"] == "plate" and captured["hud_options"] == options
+    record = exports_dir / "stage1_stage-1-h1_overlay.json"
+    assert result.overlay_settings_path == record
+    assert json.loads(record.read_text())["variant"] == "plate"
+    assert json.loads(record.read_text())["options"]["position"] == "top-right"
+
+
+def test_a_fallback_is_recorded_as_classic_and_reported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The MOV on disk is Classic, so the record says so: the next match
+    export asking for the style re-renders rather than reusing it."""
+    audit_path, exports_dir = _seed_stage_with_trim(tmp_path)
+    result, _ = _overlay_export(audit_path, exports_dir, monkeypatch, fall_back=True, overlay_variant="plate")
+    record = json.loads((exports_dir / "stage1_stage-1-h1_overlay.json").read_text())
+    assert record["variant"] == "default" and record["options"] == {}
+    assert any("fell back to Classic" in a for a in result.anomalies)
+    assert not result.export_failures
+
+
+def test_read_overlay_settings_takes_a_missing_record_as_the_defaults(tmp_path: Path) -> None:
+    from splitsmith.overlay_hud import LEGACY_OVERLAY_SETTINGS
+
+    assert exports_mod.read_overlay_settings(tmp_path / "nope.json") == LEGACY_OVERLAY_SETTINGS
+    broken = tmp_path / "broken.json"
+    broken.write_text("{not json")
+    assert exports_mod.read_overlay_settings(broken) is None

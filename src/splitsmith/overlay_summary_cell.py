@@ -383,6 +383,7 @@ def build_summary_still(
     backdrop: Path | None,
     blur_radius: int | None = None,
     dim: float = DEFAULT_DIM,
+    accent: str | None = None,
 ) -> Image.Image | None:
     """One shooter's stage summary as a full-frame ``width x height`` RGB
     still (issue #972): the whole frame is one cell, composed the way the
@@ -403,7 +404,7 @@ def build_summary_still(
     if rasterizer is not None:
         scale = summary_scale(height)
         groups = summary_groups(tile, label, scale=scale, cell_width=width, cell_height=height)
-        html = single_html(groups, width=width, height=height, scale=scale, theme=theme)
+        html = single_html(groups, width=width, height=height, scale=scale, theme=theme, accent=accent)
         try:
             png_bytes = rasterizer.png(html, width=width, height=height)
             with Image.open(io.BytesIO(png_bytes)) as rendered:

@@ -152,18 +152,678 @@ fixtures:
   - headcam
   - late-beep
   - steel-prone
+- stem: stage-shots-blacksmith-handgun-open-2026-stage1-s0fe3d797
+  camera_kind: head
+  camera_id: unknown
+  clip_wav: stage-shots-blacksmith-handgun-open-2026-stage1-s0fe3d797.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - headcam
+- stem: stage-shots-blacksmith-handgun-open-2026-stage1-s36ed6e4e
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-blacksmith-handgun-open-2026-stage1-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-blacksmith-handgun-open-2026-stage2-s0fe3d797
+  camera_kind: head
+  camera_id: unknown
+  clip_wav: stage-shots-blacksmith-handgun-open-2026-stage2-s0fe3d797.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - headcam
+- stem: stage-shots-blacksmith-handgun-open-2026-stage2-s36ed6e4e
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-blacksmith-handgun-open-2026-stage2-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-blacksmith-handgun-open-2026-stage3-s0fe3d797
+  camera_kind: head
+  camera_id: unknown
+  clip_wav: stage-shots-blacksmith-handgun-open-2026-stage3-s0fe3d797.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - headcam
+- stem: stage-shots-blacksmith-handgun-open-2026-stage3-s36ed6e4e
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-blacksmith-handgun-open-2026-stage3-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-blacksmith-handgun-open-2026-stage4-s0fe3d797
+  camera_kind: head
+  camera_id: unknown
+  clip_wav: stage-shots-blacksmith-handgun-open-2026-stage4-s0fe3d797.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - headcam
+- stem: stage-shots-blacksmith-handgun-open-2026-stage4-s36ed6e4e
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-blacksmith-handgun-open-2026-stage4-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-blacksmith-handgun-open-2026-stage5-s0fe3d797
+  camera_kind: head
+  camera_id: unknown
+  clip_wav: stage-shots-blacksmith-handgun-open-2026-stage5-s0fe3d797.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - headcam
+- stem: stage-shots-blacksmith-handgun-open-2026-stage5-s36ed6e4e
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-blacksmith-handgun-open-2026-stage5-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-blacksmith-handgun-open-2026-stage6-s0fe3d797
+  camera_kind: head
+  camera_id: unknown
+  clip_wav: stage-shots-blacksmith-handgun-open-2026-stage6-s0fe3d797.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - headcam
+- stem: stage-shots-blacksmith-handgun-open-2026-stage6-s36ed6e4e
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-blacksmith-handgun-open-2026-stage6-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-blacksmith-handgun-open-2026-stage7-s0fe3d797
+  camera_kind: head
+  camera_id: unknown
+  clip_wav: stage-shots-blacksmith-handgun-open-2026-stage7-s0fe3d797.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - headcam
+- stem: stage-shots-blacksmith-handgun-open-2026-stage7-s36ed6e4e
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-blacksmith-handgun-open-2026-stage7-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-blacksmith-handgun-open-2026-stage8-s0fe3d797
+  camera_kind: head
+  camera_id: unknown
+  clip_wav: stage-shots-blacksmith-handgun-open-2026-stage8-s0fe3d797.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - headcam
+- stem: stage-shots-blacksmith-handgun-open-2026-stage8-s36ed6e4e
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-blacksmith-handgun-open-2026-stage8-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-bofors-bombardment-2026-stage1-s0fe3d797
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-bofors-bombardment-2026-stage1-s0fe3d797.wav
+  ground_truth_in_clip: 0.9971458333333333
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-bofors-bombardment-2026-stage1-s36ed6e4e
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-bofors-bombardment-2026-stage1-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-bofors-bombardment-2026-stage2-s0fe3d797
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-bofors-bombardment-2026-stage2-s0fe3d797.wav
+  ground_truth_in_clip: 2.8373958333333333
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-bofors-bombardment-2026-stage2-s36ed6e4e
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-bofors-bombardment-2026-stage2-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-bofors-bombardment-2026-stage3-s0fe3d797
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-bofors-bombardment-2026-stage3-s0fe3d797.wav
+  ground_truth_in_clip: 1.7475416666666668
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-bofors-bombardment-2026-stage3-s36ed6e4e
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-bofors-bombardment-2026-stage3-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-bofors-bombardment-2026-stage4-s0fe3d797
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-bofors-bombardment-2026-stage4-s0fe3d797.wav
+  ground_truth_in_clip: 1.425
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-bofors-bombardment-2026-stage4-s36ed6e4e
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-bofors-bombardment-2026-stage4-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-bofors-bombardment-2026-stage5-s0fe3d797
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-bofors-bombardment-2026-stage5-s0fe3d797.wav
+  ground_truth_in_clip: 2.755895833333333
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-bofors-bombardment-2026-stage5-s36ed6e4e
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-bofors-bombardment-2026-stage5-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-bofors-bombardment-2026-stage6-s0fe3d797
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-bofors-bombardment-2026-stage6-s0fe3d797.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-bofors-bombardment-2026-stage6-s36ed6e4e
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-bofors-bombardment-2026-stage6-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-bofors-bombardment-2026-stage7-s0fe3d797
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-bofors-bombardment-2026-stage7-s0fe3d797.wav
+  ground_truth_in_clip: 1.9551458333333334
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-bofors-bombardment-2026-stage7-s36ed6e4e
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-bofors-bombardment-2026-stage7-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-bofors-bombardment-2026-stage8-s0fe3d797
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-bofors-bombardment-2026-stage8-s0fe3d797.wav
+  ground_truth_in_clip: 3.7136875
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-bofors-bombardment-2026-stage8-s36ed6e4e
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-bofors-bombardment-2026-stage8-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-bofors-bombardment-2026-stage9-s0fe3d797
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-bofors-bombardment-2026-stage9-s0fe3d797.wav
+  ground_truth_in_clip: 3.649395833333333
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-bofors-bombardment-2026-stage9-s36ed6e4e
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-bofors-bombardment-2026-stage9-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage1-s0fe3d797
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage1-s0fe3d797.wav
+  ground_truth_in_clip: 3.6395948705491477
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage1-s36ed6e4e
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage1-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage1-s97dcec94
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage1-s97dcec94.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage1-s9c1a2e74
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage1-s9c1a2e74.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage10-s0fe3d797
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage10-s0fe3d797.wav
+  ground_truth_in_clip: 2.3888333333333334
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage10-s36ed6e4e
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage10-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage10-s97dcec94
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage10-s97dcec94.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage10-s9c1a2e74
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage10-s9c1a2e74.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage11-s0fe3d797
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage11-s0fe3d797.wav
+  ground_truth_in_clip: 1.3170833333333334
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage11-s36ed6e4e
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage11-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage11-s97dcec94
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage11-s97dcec94.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage11-s9c1a2e74
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage11-s9c1a2e74.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage12-s0fe3d797
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage12-s0fe3d797.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage12-s36ed6e4e
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage12-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage12-s97dcec94
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage12-s97dcec94.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage12-s9c1a2e74
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage12-s9c1a2e74.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage2-s0fe3d797
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage2-s0fe3d797.wav
+  ground_truth_in_clip: 2.5307792561712916
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage2-s36ed6e4e
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage2-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage2-s97dcec94
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage2-s97dcec94.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage2-s9c1a2e74
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage2-s9c1a2e74.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage3-s0fe3d797
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage3-s0fe3d797.wav
+  ground_truth_in_clip: 4.271981146564694
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage3-s36ed6e4e
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage3-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage3-s97dcec94
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage3-s97dcec94.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage3-s9c1a2e74
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage3-s9c1a2e74.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage4-s0fe3d797
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage4-s0fe3d797.wav
+  ground_truth_in_clip: 2.2609375
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage4-s36ed6e4e
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage4-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage4-s97dcec94
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage4-s97dcec94.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage4-s9c1a2e74
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage4-s9c1a2e74.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage5-s0fe3d797
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage5-s0fe3d797.wav
+  ground_truth_in_clip: 1.8174583333333334
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage5-s36ed6e4e
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage5-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage5-s97dcec94
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage5-s97dcec94.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage5-s9c1a2e74
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage5-s9c1a2e74.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage6-s0fe3d797
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage6-s0fe3d797.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage6-s36ed6e4e
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage6-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage6-s97dcec94
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage6-s97dcec94.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage6-s9c1a2e74
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage6-s9c1a2e74.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage7-s0fe3d797
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage7-s0fe3d797.wav
+  ground_truth_in_clip: 2.1017019374094503
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage7-s36ed6e4e
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage7-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage7-s97dcec94
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage7-s97dcec94.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage7-s9c1a2e74
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage7-s9c1a2e74.wav
+  ground_truth_in_clip: 3.31754417941324
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage8-s0fe3d797
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage8-s0fe3d797.wav
+  ground_truth_in_clip: 1.9907459705505404
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage8-s36ed6e4e
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage8-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage8-s97dcec94
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage8-s97dcec94.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage8-s9c1a2e74
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage8-s9c1a2e74.wav
+  ground_truth_in_clip: 3.8624375
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage9-s0fe3d797
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage9-s0fe3d797.wav
+  ground_truth_in_clip: 3.7735833333333333
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage9-s36ed6e4e
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage9-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage9-s97dcec94
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage9-s97dcec94.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-hfo-masters-2026-stage9-s9c1a2e74
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-hfo-masters-2026-stage9-s9c1a2e74.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
 - stem: stage-shots-tallmilan-2026-stage1-s36ed6e4e
-  camera_kind: unknown
+  camera_kind: hand
+  camera_id: unknown
   clip_wav: stage-shots-tallmilan-2026-stage1-s36ed6e4e.wav
   ground_truth_in_clip: 5.0
   tolerance_ms: 100.0
-  tags: []
+  tags:
+  - handheld
 - stem: stage-shots-tallmilan-2026-stage2-s36ed6e4e
-  camera_kind: unknown
+  camera_kind: hand
+  camera_id: unknown
   clip_wav: stage-shots-tallmilan-2026-stage2-s36ed6e4e.wav
   ground_truth_in_clip: 5.0
   tolerance_ms: 100.0
-  tags: []
+  tags:
+  - handheld
 - stem: stage-shots-tallmilan-2026-stage2-s97dcec94-apple-iphone17pro
   camera_kind: hand
   camera_id: apple-iphone17pro
@@ -185,11 +845,13 @@ fixtures:
   - headcam
   - late-beep
 - stem: stage-shots-tallmilan-2026-stage3-s36ed6e4e
-  camera_kind: unknown
+  camera_kind: hand
+  camera_id: unknown
   clip_wav: stage-shots-tallmilan-2026-stage3-s36ed6e4e.wav
   ground_truth_in_clip: 5.0
   tolerance_ms: 100.0
-  tags: []
+  tags:
+  - handheld
 - stem: stage-shots-tallmilan-2026-stage3-s97dcec94
   camera_kind: head
   camera_id: go3s
@@ -204,11 +866,13 @@ fixtures:
   - late-beep
   - steel-prone
 - stem: stage-shots-tallmilan-2026-stage4-s36ed6e4e
-  camera_kind: unknown
+  camera_kind: hand
+  camera_id: unknown
   clip_wav: stage-shots-tallmilan-2026-stage4-s36ed6e4e.wav
   ground_truth_in_clip: 5.0
   tolerance_ms: 100.0
-  tags: []
+  tags:
+  - handheld
 - stem: stage-shots-tallmilan-2026-stage4-s97dcec94-apple-iphone17pro
   camera_kind: hand
   camera_id: apple-iphone17pro
@@ -226,11 +890,13 @@ fixtures:
   tags:
   - headcam
 - stem: stage-shots-tallmilan-2026-stage5-s36ed6e4e
-  camera_kind: unknown
+  camera_kind: hand
+  camera_id: unknown
   clip_wav: stage-shots-tallmilan-2026-stage5-s36ed6e4e.wav
   ground_truth_in_clip: 5.0
   tolerance_ms: 100.0
-  tags: []
+  tags:
+  - handheld
 - stem: stage-shots-tallmilan-2026-stage5-s97dcec94-apple-iphone17pro
   camera_kind: hand
   camera_id: apple-iphone17pro
@@ -252,11 +918,13 @@ fixtures:
   - headcam
   - late-beep
 - stem: stage-shots-tallmilan-2026-stage6-s36ed6e4e
-  camera_kind: unknown
+  camera_kind: hand
+  camera_id: unknown
   clip_wav: stage-shots-tallmilan-2026-stage6-s36ed6e4e.wav
   ground_truth_in_clip: 5.0
   tolerance_ms: 100.0
-  tags: []
+  tags:
+  - handheld
 - stem: stage-shots-tallmilan-2026-stage6-s97dcec94-apple-iphone17pro
   camera_kind: hand
   camera_id: apple-iphone17pro
@@ -280,11 +948,13 @@ fixtures:
   - late-beep
   - steel-prone
 - stem: stage-shots-tallmilan-2026-stage7-s36ed6e4e
-  camera_kind: unknown
+  camera_kind: hand
+  camera_id: unknown
   clip_wav: stage-shots-tallmilan-2026-stage7-s36ed6e4e.wav
   ground_truth_in_clip: 5.0
   tolerance_ms: 100.0
-  tags: []
+  tags:
+  - handheld
 - stem: stage-shots-tallmilan-2026-stage7-s97dcec94-apple-iphone17pro
   camera_kind: hand
   camera_id: apple-iphone17pro
@@ -307,3 +977,99 @@ fixtures:
   - headcam
   - late-beep
   - steel-prone
+- stem: stage-shots-vads-easter-shoot-gotta-go-fast-stage1-s0fe3d797
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-vads-easter-shoot-gotta-go-fast-stage1-s0fe3d797.wav
+  ground_truth_in_clip: 2.2571458333333334
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-vads-easter-shoot-gotta-go-fast-stage1-s36ed6e4e
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-vads-easter-shoot-gotta-go-fast-stage1-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-vads-easter-shoot-gotta-go-fast-stage2-s0fe3d797
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-vads-easter-shoot-gotta-go-fast-stage2-s0fe3d797.wav
+  ground_truth_in_clip: 1.6885416666666666
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-vads-easter-shoot-gotta-go-fast-stage2-s36ed6e4e
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-vads-easter-shoot-gotta-go-fast-stage2-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-vads-easter-shoot-gotta-go-fast-stage3-s0fe3d797
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-vads-easter-shoot-gotta-go-fast-stage3-s0fe3d797.wav
+  ground_truth_in_clip: 3.692
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-vads-easter-shoot-gotta-go-fast-stage3-s36ed6e4e
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-vads-easter-shoot-gotta-go-fast-stage3-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-vads-easter-shoot-gotta-go-fast-stage4-s0fe3d797
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-vads-easter-shoot-gotta-go-fast-stage4-s0fe3d797.wav
+  ground_truth_in_clip: 3.902
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-vads-easter-shoot-gotta-go-fast-stage4-s36ed6e4e
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-vads-easter-shoot-gotta-go-fast-stage4-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-vads-easter-shoot-gotta-go-fast-stage5-s0fe3d797
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-vads-easter-shoot-gotta-go-fast-stage5-s0fe3d797.wav
+  ground_truth_in_clip: 3.056
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-vads-easter-shoot-gotta-go-fast-stage5-s36ed6e4e
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-vads-easter-shoot-gotta-go-fast-stage5-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-vads-easter-shoot-gotta-go-fast-stage6-s0fe3d797
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-vads-easter-shoot-gotta-go-fast-stage6-s0fe3d797.wav
+  ground_truth_in_clip: 3.0576875
+  tolerance_ms: 100.0
+  tags:
+  - handheld
+- stem: stage-shots-vads-easter-shoot-gotta-go-fast-stage6-s36ed6e4e
+  camera_kind: hand
+  camera_id: unknown
+  clip_wav: stage-shots-vads-easter-shoot-gotta-go-fast-stage6-s36ed6e4e.wav
+  ground_truth_in_clip: 5.0
+  tolerance_ms: 100.0
+  tags:
+  - handheld

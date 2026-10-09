@@ -36,14 +36,18 @@ Out of scope here, tracked in sibling issues:
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence as SequenceProto
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from . import fcpxml_gen
 from .config import OutputConfig, Shot, VideoMetadata
 from .stage_summary_data import TileStageData
+
+if TYPE_CHECKING:
+    from .match_summary import MatchSummary
 
 
 @dataclass(frozen=True)
@@ -178,7 +182,189 @@ class Stage:
     summary: SummaryHold | None = None
 
 
-TransitionKind = Literal["zoom", "static"]
+@dataclass(frozen=True)
+class XfadeDirection:
+    """One direction of a transition family: its label and the ffmpeg
+    ``xfade`` name it renders as."""
+
+    name: str
+    kind: str
+
+
+@dataclass(frozen=True)
+class XfadeFamily:
+    """A gallery tile (issue #1259): one look, in one or more directions.
+    ``directions[0]`` is what picking the tile selects and what its
+    preview shows."""
+
+    id: str
+    label: str
+    help: str
+    directions: tuple[XfadeDirection, ...]
+
+
+def _four(prefix: str, *, suffix: str = "") -> tuple[XfadeDirection, ...]:
+    return tuple(XfadeDirection(d, f"{prefix}{d}{suffix}") for d in ("left", "right", "up", "down"))
+
+
+#: The curated ffmpeg ``xfade`` transitions the MP4 renderers offer
+#: (issues #1244, #1259), in gallery order: the one list. ``XFADE_KINDS``,
+#: the request validation, both CLIs' help and ``GET /api/looks`` derive
+#: from it; every name exists in FFmpeg 6.1 and later (CI's, the hosted
+#: image's and the desktop's builds), pinned by a real-ffmpeg test.
+XFADE_FAMILIES: tuple[XfadeFamily, ...] = (
+    XfadeFamily("fade", "Fade", "Fades the stage into the next.", (XfadeDirection("default", "fade"),)),
+    XfadeFamily(
+        "fadeblack",
+        "Fade through black",
+        "Fades to black, then into the next stage.",
+        (XfadeDirection("default", "fadeblack"),),
+    ),
+    XfadeFamily(
+        "fadewhite",
+        "Flash",
+        "A white flash between the stages.",
+        (XfadeDirection("default", "fadewhite"),),
+    ),
+    XfadeFamily(
+        "dissolve",
+        "Dissolve",
+        "A grainy dissolve into the next stage.",
+        (XfadeDirection("default", "dissolve"),),
+    ),
+    XfadeFamily("slide", "Slide", "The next stage slides in, pushing this one out.", _four("slide")),
+    XfadeFamily("smooth", "Smooth", "A soft-edged wipe.", _four("smooth")),
+    XfadeFamily("wipe", "Wipe", "A hard-edged wipe.", _four("wipe")),
+    XfadeFamily("cover", "Cover", "The next stage slides in over this one.", _four("cover")),
+    XfadeFamily("reveal", "Reveal", "This stage slides away, revealing the next.", _four("reveal")),
+    XfadeFamily(
+        "wind",
+        "Wind",
+        "This stage blows away in streaks.",
+        (
+            XfadeDirection("left", "hlwind"),
+            XfadeDirection("right", "hrwind"),
+            XfadeDirection("up", "vuwind"),
+            XfadeDirection("down", "vdwind"),
+        ),
+    ),
+    XfadeFamily(
+        "circle",
+        "Circle",
+        "A circle opens onto the next stage, or closes on this one.",
+        (XfadeDirection("open", "circleopen"), XfadeDirection("close", "circleclose")),
+    ),
+    XfadeFamily(
+        "radial", "Radial", "A clock hand sweeps the next stage in.", (XfadeDirection("default", "radial"),)
+    ),
+    XfadeFamily(
+        "zoomin",
+        "Zoom in",
+        "Zooms into the stage and out into the next.",
+        (XfadeDirection("default", "zoomin"),),
+    ),
+    XfadeFamily(
+        "hblur",
+        "Horizontal blur",
+        "Blurs sideways out of the stage and into the next.",
+        (XfadeDirection("default", "hblur"),),
+    ),
+    XfadeFamily(
+        "pixelize",
+        "Pixelize",
+        "Breaks into blocks and re-forms as the next stage.",
+        (XfadeDirection("default", "pixelize"),),
+    ),
+    XfadeFamily(
+        "squeeze",
+        "Squeeze",
+        "This stage squeezes to a line, the next stretches out of it.",
+        (XfadeDirection("horizontal", "squeezeh"), XfadeDirection("vertical", "squeezev")),
+    ),
+)
+XFADE_KINDS: tuple[str, ...] = tuple(d.kind for f in XFADE_FAMILIES for d in f.directions)
+
+
+def xfade_family(kind: str) -> tuple[XfadeFamily, XfadeDirection] | None:
+    """The family and direction an xfade ``kind`` belongs to, or ``None``."""
+    for family in XFADE_FAMILIES:
+        for direction in family.directions:
+            if direction.kind == kind:
+                return family, direction
+    return None
+
+
+#: The two kinds the FCPXML emitter draws natively (FCP's .motr effects).
+FCP_KINDS: tuple[str, ...] = ("zoom", "static")
+#: A transition kind (issue #1245): an xfade name (``XFADE_KINDS``), an FCP
+#: effect (``FCP_KINDS``) or ``sting:<name>`` where ``<name>`` is a variant
+#: of the Look's ``transition`` slot. Open on purpose: the Look decides
+#: which stings exist, so the type is ``str`` and
+#: :func:`validate_transition_kind` is the grammar check every request
+#: surface (the Pydantic bodies, the presets, both CLIs) runs.
+TransitionKind = str
+STING_PREFIX = "sting:"
+STING_NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")  # the shape of a Look variant name
+_XFADE_FOR_FCP_KIND = {"zoom": "zoomin", "static": "fadeblack"}
+
+
+def is_sting(kind: str) -> bool:
+    """Whether ``kind`` names a Look sting (``sting:<name>``)."""
+    return kind.startswith(STING_PREFIX)
+
+
+def sting_name(kind: str) -> str:
+    """The sting's name (the ``transition`` slot variant) in ``kind``."""
+    if not is_sting(kind):
+        raise ValueError(f"{kind!r} is not a sting kind")
+    return kind[len(STING_PREFIX) :]
+
+
+def validate_transition_kind(kind: str, *, allow_none: bool = True) -> str:
+    """``kind`` when it is ``"none"`` (unless ``allow_none`` is off), an
+    xfade name, an FCP effect or a well-formed ``sting:<name>``; else
+    ``ValueError`` naming the grammar. Whether the sting exists is the
+    Look's business at render time (a missing one is a fade plus a
+    degradation), not the request's."""
+    if kind == "none" and allow_none:
+        return kind
+    if kind in XFADE_KINDS or kind in FCP_KINDS:
+        return kind
+    if is_sting(kind) and STING_NAME_RE.match(sting_name(kind)):
+        return kind
+    raise ValueError(
+        f"transition kind {kind!r} is not 'none', an xfade ({', '.join(XFADE_KINDS)}), an FCP effect "
+        f"({', '.join(FCP_KINDS)}) or 'sting:<name>' (a letter, then letters, digits, '-' and '_')"
+    )
+
+
+def xfade_name(kind: TransitionKind) -> str:
+    """The ``xfade`` transition an MP4 renderer draws for ``kind``: an
+    xfade kind is its own name; the two FCP effects take the nearest
+    xfade (``zoom`` -> ``zoomin``, ``static`` -> ``fadeblack``); a sting
+    rides a plain ``fade`` under its template (issue #1245)."""
+    if is_sting(kind):
+        return "fade"
+    return _XFADE_FOR_FCP_KIND.get(kind, kind)
+
+
+def uniform_transitions(kind: str, duration_seconds: float, stage_count: int) -> tuple[Transition, ...]:
+    """One ``kind`` transition of ``duration_seconds`` between every pair of
+    consecutive stages; none for ``"none"`` or fewer than two stages."""
+    if kind == "none" or stage_count < 2:
+        return ()
+    return tuple(
+        Transition(from_stage_index=i, to_stage_index=i + 1, kind=kind, duration_seconds=duration_seconds)
+        for i in range(stage_count - 1)
+    )
+
+
+def fcp_kind(kind: TransitionKind) -> tuple[Literal["zoom", "static"], bool]:
+    """The FCP effect ``kind`` lowers to and whether that is a substitution
+    (``True`` for every xfade kind: the caller reports an anomaly)."""
+    if kind == "static":
+        return "static", False
+    return "zoom", kind != "zoom"
 
 
 @dataclass(frozen=True)
@@ -207,6 +393,13 @@ class Transition:
     kind: TransitionKind = "zoom"
     duration_seconds: float = 0.5
     color: str | None = None  # reserved for future colour-bearing kinds
+
+    def __post_init__(self) -> None:
+        # The IR is the last gate before ``kind`` reaches ffmpeg's filter
+        # graph (``xfade=transition=<kind>``): a caller that skipped the
+        # request validators (the MCP tool annotates the open string) is
+        # refused here, with the same message (review of #1245).
+        validate_transition_kind(self.kind, allow_none=False)
 
 
 TitleStyle = Literal["slate", "lower-third"]
@@ -243,6 +436,20 @@ class TitleCard:
     font: str = "Helvetica"
     color: str = "1 1 1 1"
     info: tuple[str, ...] = ()
+    #: The Look template variant that draws it (``looks.DEFAULT_VARIANT``
+    #: is the still card); a variant the Look lacks falls back to default.
+    variant: str = "default"
+
+
+@dataclass(frozen=True)
+class BrandMark:
+    """The video maker's brand from their account (spec 2026-10-08): a logo
+    on this disk and a line, resolved by the request layer like the event
+    logo. Drawn on the title page and the closing card when the Look has no
+    brand of its own (``look_brand.brand_json``)."""
+
+    logo_path: Path | None = None
+    line: str | None = None
 
 
 @dataclass(frozen=True)
@@ -264,6 +471,16 @@ class MatchTitle:
     text: str
     info: tuple[str, ...] = ()
     duration_seconds: float = 3.0
+    #: The Look template variant that draws it (``looks.DEFAULT_VARIANT``
+    #: is the still card); a variant the Look lacks falls back to default.
+    variant: str = "default"
+    #: The event's own logo, a file on this disk (the branding work): the
+    #: centrepiece of the title page and the closing card.
+    logo: Path | None = None
+    #: "Made with splitsmith" at the bottom; drawn on the closing card only.
+    credit: bool = False
+    #: The account's brand, for a Look without one; ``None`` draws none.
+    brand: BrandMark | None = None
 
 
 @dataclass(frozen=True)
@@ -281,6 +498,19 @@ class Segment:
     asset: Asset
     name: str = ""
     title: TitleCard | None = None
+
+
+@dataclass(frozen=True)
+class CompositionShooter:
+    """One shooter as the templates see them (spec 2026-10-06 section 2):
+    the identity resolved against the Look by the caller, so renderers
+    read, never resolve. ``logo_path`` may name a file that is gone; the
+    template layer draws without it."""
+
+    label: str
+    accent: str | None
+    logo_path: Path | None
+    club: str | None
 
 
 @dataclass(frozen=True)
@@ -309,6 +539,12 @@ class Composition:
     chapter_markers: bool = False
     title_page: MatchTitle | None = None
     closing: MatchTitle | None = None
+    #: The shooters in the video (one for a single-shooter export), as
+    #: ``data.shooters`` reaches every card template (#1243).
+    shooters: tuple[CompositionShooter, ...] = ()
+    #: The match summary card after the last stage, before ``closing``
+    #: (spec 2026-10-07-match-summary-design); only the MP4 renderer draws it.
+    match_summary: MatchSummary | None = None
 
 
 # --- conversions -----------------------------------------------------------
@@ -340,6 +576,8 @@ def from_stage_compositions(
     title_page: MatchTitle | None = None,
     closing: MatchTitle | None = None,
     summaries: dict[int, SummaryHold] | None = None,
+    shooters: SequenceProto[CompositionShooter] = (),
+    match_summary: MatchSummary | None = None,
 ) -> Composition:
     """Build a :class:`Composition` from today's ``StageComposition`` inputs.
 
@@ -437,6 +675,8 @@ def from_stage_compositions(
         chapter_markers=chapter_markers,
         title_page=title_page,
         closing=closing,
+        shooters=tuple(shooters),
+        match_summary=match_summary,
     )
 
 
@@ -632,7 +872,7 @@ def _lower_transitions(
         out.append(
             fcpxml_gen.StageTransition(
                 after_stage_index=t.from_stage_index,
-                kind=t.kind,
+                kind=fcp_kind(t.kind)[0],
                 duration_seconds=t.duration_seconds,
                 color=t.color,
             )
@@ -676,8 +916,17 @@ __all__ = [
     "TitleStyle",
     "Transform",
     "Transition",
+    "STING_PREFIX",
+    "XFADE_FAMILIES",
+    "XFADE_KINDS",
+    "XfadeDirection",
+    "XfadeFamily",
     "TransitionKind",
     "from_stage_compositions",
+    "is_sting",
     "render_fcpxml",
+    "sting_name",
     "to_stage_compositions",
+    "validate_transition_kind",
+    "xfade_family",
 ]

@@ -8,9 +8,10 @@ server never imports a Typer module to build a title card.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from pathlib import Path
 
-from ..composition import MatchTitle
+from ..composition import BrandMark, MatchTitle
 from ..division import competitor_division, roster_lines
 from ..match_model import Match
 from ..match_project import MatchProject
@@ -31,6 +32,18 @@ class CardOptions:
     title_division: bool = True
     title_page_duration_seconds: float = 3.0
     closing_card: bool = False
+    #: "Made with splitsmith" at the bottom of the closing card.
+    made_with: bool = True
+    #: Your account's brand on the title page and the closing card, for a
+    #: Look without one of its own (spec 2026-10-08).
+    account_brand: bool = True
+    #: The Look template variant every card draws with (#1242); the
+    #: per-slot fields (#1246) win where set.
+    card_variant: str = "default"
+    title_page_variant: str | None = None
+    closing_card_variant: str | None = None
+    #: Seconds of the match summary card before the closing card; 0 is off.
+    match_summary_seconds: float = 0.0
 
 
 def match_title(match: Match, *, extra: str | None = None, roster: tuple[str, ...] = ()) -> MatchTitle:
@@ -48,7 +61,12 @@ def match_title(match: Match, *, extra: str | None = None, roster: tuple[str, ..
 
 
 def title_cards(
-    match: Match, cards: CardOptions, *, divisions: Sequence[tuple[str, str | None]] = ()
+    match: Match,
+    cards: CardOptions,
+    *,
+    divisions: Sequence[tuple[str, str | None]] = (),
+    event_logo: Path | None = None,
+    brand: BrandMark | None = None,
 ) -> tuple[MatchTitle | None, MatchTitle | None]:
     """``(title_page, closing)`` for ``render_grid_mp4``: the same text on
     both, each held for ``title_page_duration_seconds``; ``None`` where
@@ -59,8 +77,16 @@ def title_cards(
         return None, None
     roster = roster_lines(divisions) if cards.title_division else ()
     card = match_title(match, extra=cards.title_info, roster=roster)
-    card = MatchTitle(text=card.text, info=card.info, duration_seconds=cards.title_page_duration_seconds)
-    return (card if cards.title_page else None), (card if cards.closing_card else None)
+    card = MatchTitle(
+        text=card.text,
+        info=card.info,
+        duration_seconds=cards.title_page_duration_seconds,
+        logo=event_logo,
+        brand=brand if cards.account_brand else None,
+    )
+    title = replace(card, variant=cards.title_page_variant or cards.card_variant)
+    closing = replace(card, variant=cards.closing_card_variant or cards.card_variant, credit=cards.made_with)
+    return (title if cards.title_page else None), (closing if cards.closing_card else None)
 
 
 def bundle_divisions(bundles: Sequence[CompareShooterBundle]) -> list[tuple[str, str | None]]:

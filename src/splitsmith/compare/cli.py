@@ -10,9 +10,16 @@ import typer
 from rich.console import Console
 
 from .. import camera_select
+from ..account_profile import JsonAccountProfileStore, load_brand
+from ..composition import XFADE_KINDS, uniform_transitions
+from ..config import Config
 from ..export_naming import slugify
+from ..looks import load_look
 from ..match_model import Match, is_match_folder
 from ..overlay_theme import THEME_NAMES, ThemeName
+from ..shooter_book import JsonShooterBookStore, load_snapshot
+from ..ui.identity_media import ensure_local_event_logo, grid_identities
+from ..ui.match_exports import render_segment_cache
 from . import emitter as emitter_mod
 from . import manifest as manifest_mod
 from . import mp4_grid, project_loader
@@ -97,7 +104,7 @@ def export(
     overlay_theme: str = typer.Option(
         "splitsmith",
         "--overlay-theme",
-        help=f"Palette for --overlay. One of: {', '.join(THEME_NAMES)}.",
+        help=f"Look for the overlay and the cards: {', '.join(THEME_NAMES)} or an installed user Look.",
     ),
     summary_hold: float = typer.Option(
         0.0,
@@ -143,6 +150,44 @@ def export(
     closing_card: bool = typer.Option(
         False, "--closing-card", help="Close the rendered grid with a generated card. --format mp4 only."
     ),
+    made_with: bool = typer.Option(
+        True,
+        "--made-with/--no-made-with",
+        help="'Made with splitsmith' at the bottom of the closing card.",
+    ),
+    account_brand: bool = typer.Option(
+        True,
+        "--account-brand/--no-account-brand",
+        help="Your account's brand on the title page and the closing card, when the Look has none.",
+    ),
+    card_variant: str = typer.Option(
+        "default",
+        "--card-variant",
+        help="Look template variant for the generated cards: 'default' or, with the splitsmith Look, 'rise'.",
+    ),
+    transition: str = typer.Option(
+        "none",
+        "--transition",
+        help=(
+            "Transition between stages (--format mp4): 'none', an ffmpeg xfade ("
+            + ", ".join(XFADE_KINDS)
+            + ") or a Look sting ('sting:wipe')."
+        ),
+    ),
+    transition_seconds: float = typer.Option(
+        0.5, "--transition-seconds", help="Length of each transition, centred on the cut."
+    ),
+    match_summary: bool = typer.Option(
+        False,
+        "--match-summary",
+        help=(
+            "End on a match summary card: every shooter's match figures in their own tile, "
+            "before any closing card. --format mp4 only."
+        ),
+    ),
+    match_summary_seconds: float = typer.Option(
+        6.0, "--match-summary-seconds", help="Seconds the match summary holds."
+    ),
 ) -> None:
     """Render a multi-shooter comparison FCPXML.
 
@@ -163,6 +208,22 @@ def export(
     if output_format not in ("fcpxml", "mp4"):
         console.print(f"[red]Error:[/] --format must be 'fcpxml' or 'mp4', got {output_format!r}.")
         raise typer.Exit(code=2)
+    from ..composition import validate_transition_kind
+
+    try:
+        validate_transition_kind(transition)
+    except ValueError as exc:
+        console.print(f"[red]Error:[/] --transition: {exc}.")
+        raise typer.Exit(code=2) from None
+    if transition_seconds <= 0:
+        console.print(f"[red]Error:[/] --transition-seconds must be positive, got {transition_seconds:g}.")
+        raise typer.Exit(code=2)
+    if transition != "none" and output_format != "mp4":
+        console.print(
+            "[red]Error:[/] --transition requires --format mp4 -- the FCPXML grid has no transitions, so "
+            "it would silently do nothing."
+        )
+        raise typer.Exit(code=2)
     if output_format == "mp4" and not (source.is_dir() and is_match_folder(source)):
         console.print(
             "[red]Error:[/] --format mp4 requires SOURCE to be a merged match folder, not a manifest."
@@ -179,9 +240,12 @@ def export(
     # that adds --overlay and re-encodes the whole match -- is where the
     # user finds out. Rejecting a name that is never a valid theme costs
     # nothing and fails at the point the typo was made.
-    if overlay_theme not in THEME_NAMES:
+    from ..looks import look_names
+
+    if overlay_theme not in look_names():
         console.print(
-            f"[red]Error:[/] --overlay-theme must be one of {', '.join(THEME_NAMES)}, got {overlay_theme!r}."
+            f"[red]Error:[/] --overlay-theme must be an installed Look ({', '.join(look_names())}), "
+            f"got {overlay_theme!r}."
         )
         raise typer.Exit(code=2)
     if summary_hold < 0:
@@ -192,10 +256,17 @@ def export(
         raise typer.Exit(code=2)
     # Same rule as --overlay: the FCPXML grid ships clean tiles by decision,
     # and a card flag it would silently drop is refused by name instead.
-    if (titles != "none" or title_page or closing_card) and output_format != "mp4":
+    if (titles != "none" or title_page or closing_card or match_summary) and output_format != "mp4":
         console.print(
-            "[red]Error:[/] --titles, --title-page and --closing-card require --format mp4 -- "
-            "the FCPXML grid carries no generated cards, so they would silently do nothing."
+            "[red]Error:[/] --titles, --title-page, --closing-card and --match-summary require "
+            "--format mp4 -- the FCPXML grid carries no generated cards, so they would silently "
+            "do nothing."
+        )
+        raise typer.Exit(code=2)
+    if match_summary and not 0.5 <= match_summary_seconds <= 30.0:
+        console.print(
+            "[red]Error:[/] --match-summary-seconds must be between 0.5 and 30, "
+            f"got {match_summary_seconds:g}."
         )
         raise typer.Exit(code=2)
     # A hold with no overlay is a contradiction, not a no-op: the summary
@@ -242,6 +313,8 @@ def export(
             overlay=overlay,
             overlay_theme=overlay_theme,  # type: ignore[arg-type]  # validated above against THEME_NAMES
             summary_hold=summary_hold,
+            transition=transition,
+            transition_seconds=transition_seconds,
             cards=CardOptions(
                 stage_titles=titles,  # type: ignore[arg-type]  # validated above against _TITLE_KINDS
                 title_duration_seconds=title_duration,
@@ -250,6 +323,10 @@ def export(
                 title_division=title_division,
                 title_page_duration_seconds=title_page_duration,
                 closing_card=closing_card,
+                made_with=made_with,
+                account_brand=account_brand,
+                card_variant=card_variant,
+                match_summary_seconds=match_summary_seconds if match_summary else 0.0,
             ),
         )
         return
@@ -384,6 +461,8 @@ def _export_from_match(
     overlay_theme: ThemeName = "splitsmith",
     summary_hold: float = 0.0,
     cards: CardOptions | None = None,
+    transition: str = "none",
+    transition_seconds: float = 0.5,
 ) -> None:
     """Render the compare export directly from a merged Match."""
     match = Match.load(match_root)
@@ -452,8 +531,11 @@ def _export_from_match(
             overlay=overlay,
             overlay_theme=overlay_theme,
             summary_hold=summary_hold,
+            transition=transition,
+            transition_seconds=transition_seconds,
             cards=cards or CardOptions(),
             match=match,
+            event_logo=ensure_local_event_logo(match.branding, match_root, storage=None, match_id=None),
         )
         return
 
@@ -480,6 +562,9 @@ def _render_grid_mp4(
     summary_hold: float = 0.0,
     cards: CardOptions | None = None,
     match: Match | None = None,
+    event_logo: Path | None = None,
+    transition: str = "none",
+    transition_seconds: float = 0.5,
 ) -> None:
     """Render the grid straight to MP4, owning the scratch work dir.
 
@@ -493,13 +578,14 @@ def _render_grid_mp4(
     default lives beside the output: a match's worth of 4K segments should
     not have to fit on whatever filesystem backs /tmp.
 
-    ``render_grid_mp4`` has no progress callback, so progress is reported
-    by wrapping its ``runner`` hook (already part of its public signature,
-    and already how its own tests inject a fake ffmpeg) rather than
-    reaching into the engine to add one. ``build_stage_plans`` is called
-    once up front -- pure planning, no ffmpeg -- purely to learn the stage
-    count and names for the "N of M" messages; ``render_grid_mp4`` plans
-    again internally with the same inputs and so sees the same stages.
+    Progress comes through ``render_grid_mp4``'s ``progress`` hook, one
+    line per stage as it is encoded or reused from the render segment
+    cache (``match_exports.render_segment_cache``, shared with the
+    single-shooter export), then the stitch. Counting ``runner`` calls,
+    as this did before the cache, would skip a reused stage.
+    ``build_stage_plans`` is called once up front -- pure planning, no
+    ffmpeg -- for the transition count; ``render_grid_mp4`` plans again
+    internally with the same inputs and so sees the same stages.
 
     The engine decides what a feature-poor ffmpeg means for ``--overlay``
     (architecture rule 1: the CLI orchestrates, it does not own that);
@@ -522,20 +608,19 @@ def _render_grid_mp4(
         layout_2up="horizontal",
         hold_seconds=summary_hold,
     )
-    total = len(plans)
-    progress = {"calls": 0}
 
-    def _reporting_runner(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess:
-        index = progress["calls"]
-        progress["calls"] += 1
-        if index < total:
-            plan = plans[index]
-            console.print(
-                f"[cyan]Rendering[/] stage {plan.stage_number} ({plan.stage_name}) "
-                f"-- {index + 1} of {total}..."
-            )
-        else:
-            console.print(f"[cyan]Stitching[/] {total} stage(s) into {output}...")
+    def _report(step: mp4_grid.GridRenderStep) -> None:
+        if step.plan is None:
+            console.print(f"[cyan]Stitching[/] {step.total} stage(s) into {output}...")
+            return
+        verb = "Reusing" if step.status == "reused" else "Rendering"
+        console.print(
+            f"[cyan]{verb}[/] stage {step.plan.stage_number} ({step.plan.stage_name}) "
+            f"-- {step.index + 1} of {step.total}..."
+        )
+
+    def _runner(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        # Looked up per call, so a test's patched ``subprocess.run`` is the one run.
         return subprocess.run(cmd, **kwargs)  # type: ignore[arg-type]
 
     def _notice(message: str) -> None:
@@ -543,7 +628,15 @@ def _render_grid_mp4(
 
     cards = cards or CardOptions()
     title, closing = (
-        title_cards(match, cards, divisions=bundle_divisions(bundles)) if match is not None else (None, None)
+        title_cards(
+            match,
+            cards,
+            divisions=bundle_divisions(bundles),
+            event_logo=event_logo,
+            brand=load_brand(JsonAccountProfileStore()),
+        )
+        if match is not None
+        else (None, None)
     )
 
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -556,13 +649,22 @@ def _render_grid_mp4(
                 overlay=overlay,
                 overlay_theme=overlay_theme,
                 summary_hold_seconds=summary_hold,
-                runner=_reporting_runner,
+                runner=_runner,
+                progress=_report,
+                segment_cache=render_segment_cache(Config().output),
                 on_notice=_notice,
                 work_dir=Path(tmp),
                 title_page=title,
                 closing=closing,
                 stage_titles=cards.stage_titles,
                 title_duration_seconds=cards.title_duration_seconds,
+                card_variant=cards.card_variant,
+                identities=grid_identities(
+                    bundles, look=load_look(overlay_theme), book=load_snapshot(JsonShooterBookStore())
+                ),
+                transitions=uniform_transitions(transition, transition_seconds, len(plans)),
+                match_name=match.name if match is not None else "",
+                match_summary_seconds=cards.match_summary_seconds,
             )
         except mp4_grid.GridRenderError as exc:
             console.print(f"[red]Error:[/] {exc}")

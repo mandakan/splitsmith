@@ -17,7 +17,7 @@ from __future__ import annotations
 import os
 import subprocess
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal
 
@@ -25,11 +25,15 @@ from .. import composition, fcp7xml_render, fcpxml_gen, mp4_render, youtube_side
 from ..audit_data import StageExportError, audit_shots_to_engine_shots, read_audit_data
 from ..config import OutputConfig, StageRounds
 from ..export_naming import match_file_base, stage_display_name, stage_file_base
+from ..identity import ResolvedIdentity
 from ..match_project import MatchProject, StageScorecard
+from ..match_summary import DEFAULT_MATCH_SUMMARY_SECONDS, MatchSummary, build_match_summary
 from ..overlay_theme import ThemeName
 from ..runtime import runtime
 from ..segment_cache import SegmentCache
+from ..shooter_book import EMPTY_BOOK, BookSnapshot
 from ..stage_summary_data import TileStageData, load_stage_shots
+from .identity_media import effective_identity
 
 PipLayout = Literal["stacked", "pip-corners"]
 InsetSize = Literal["small", "medium", "large"]
@@ -48,7 +52,9 @@ OutputFormat = Literal["fcpxml", "fcp7xml", "mp4"]
 # variant in FCP after import. Only the FCPXML renderer emits
 # transitions today; FCP7 / MP4 ignore the request until they grow
 # transition support.
-TransitionKind = Literal["none", "zoom", "static"]
+#: ``"none"`` or a ``composition.TransitionKind`` (an open string since
+#: #1245; the Pydantic bodies validate it with ``validate_transition_kind``).
+TransitionKind = composition.TransitionKind
 # Issue #196. ``"none"`` keeps today's title-less stitching.
 # ``"slate"`` adds a pre-stage card on the spine; ``"lower-third"`` is
 # a connected text clip overlaid on the start of the primary. FCPXML
@@ -237,12 +243,18 @@ def stage_inputs_for_project(
 
 
 def title_info_lines(
-    project: MatchProject, *, extra: str | None = None, division: str | None = None
+    project: MatchProject,
+    *,
+    extra: str | None = None,
+    division: str | None = None,
+    book: BookSnapshot = EMPTY_BOOK,
 ) -> tuple[str, ...]:
     """The info lines under the match name on a generated title page
-    (issue #973): the match date, the shooter, the shooter's division,
-    then the caller's free text. Only what the project actually carries;
-    a blank line is never printed. ``division`` is the caller's to pass
+    (issue #973): the match date, the shooter, the shooter's club line
+    (their identity's, #1243: the match's own record, else the shooter
+    ``book``'s, as the cards draw it), the shooter's division, then the
+    caller's free text. Only what the project actually carries; a blank
+    line is never printed. ``division`` is the caller's to pass
     (:func:`splitsmith.division.competitor_division`, or ``None`` when the title page should
     not show it)."""
     lines: list[str] = []
@@ -250,6 +262,9 @@ def title_info_lines(
         lines.append(project.match_date.isoformat())
     if project.competitor_name:
         lines.append(project.competitor_name)
+    club = effective_identity(project, book).club
+    if club:
+        lines.append(club)
     if division and division.strip():
         lines.append(division.strip())
     if extra and extra.strip():
@@ -331,8 +346,26 @@ class MatchExportRequestData:
     # closing card repeats the title page: it is the data there is.
     title_page: bool = False
     title_page_info: tuple[str, ...] = ()
+    #: The event's logo on this disk (the branding work): a corner mark on
+    #: the title page and the closing card.
+    event_logo: Path | None = None
     title_page_duration_seconds: float = 3.0
     closing_card: bool = False
+    #: "Made with splitsmith" at the bottom of the closing card.
+    made_with: bool = True
+    #: Your account's brand, resolved by the caller (spec 2026-10-08); the
+    #: cards draw it when the Look has no brand of its own.
+    account_brand: composition.BrandMark | None = None
+    # Issue #1242. The Look template variant every generated card draws
+    # with (``default`` is the still card; the shipped ``splitsmith`` Look
+    # adds ``rise``). One knob for all slots until the gallery (#1246)
+    # exposes them separately; a variant the Look lacks falls back to
+    # ``default`` with a warning in the renderer.
+    card_variant: str = "default"
+    # Issue #1246. The gallery's per-slot choice; ``None`` is the knob.
+    title_page_variant: str | None = None
+    stage_card_variant: str | None = None
+    closing_card_variant: str | None = None
     # The overlay theme also styles the cards, so the two read as one.
     overlay_theme: ThemeName = "splitsmith"
     # Issue #972. Seconds to hold each stage's summary after its action
@@ -341,6 +374,14 @@ class MatchExportRequestData:
     # ``None`` falls back to the project name.
     summary_hold_seconds: float = 0.0
     shooter_label: str | None = None
+    # The match summary card after the last stage (spec
+    # 2026-10-07-match-summary-design); rendered MP4 only.
+    match_summary: bool = False
+    match_summary_seconds: float = DEFAULT_MATCH_SUMMARY_SECONDS
+    # Issue #1243. The shooter's identity resolved against the Look by the
+    # caller (accent, a logo on local disk or none, club line), the one
+    # entry of ``Composition.shooters`` every card template reads.
+    shooter_identity: ResolvedIdentity | None = None
 
     def __post_init__(self) -> None:
         # A preset or a CLI call from before the inset (``pip-corners``,
@@ -587,16 +628,23 @@ def export_match(
         duration=request.transition_duration_seconds,
         stage_count=len(compositions),
     )
-    if transitions and request.output_format != "fcpxml":
+    if transitions and request.output_format == "fcp7xml":
         anomalies.append(
             f"transitions ignored: not yet supported by the "
             f"{request.output_format} renderer (issue #195 follow-ups)"
         )
         transitions = ()
+    elif transitions and request.output_format == "fcpxml":
+        # Issue #1244: the FCPXML emitter is frozen on its two .motr
+        # effects; an xfade kind lowers to zoom and the response says so.
+        for kind in dict.fromkeys(t.kind for t in transitions):
+            if composition.fcp_kind(kind)[1]:
+                anomalies.append(f"transition {kind} is not an FCP effect; the FCPXML uses zoom")
     titles = _build_uniform_titles(
         kind=request.title_kind,
         duration=request.title_duration_seconds,
         stage_inputs=stages,
+        variant=request.stage_card_variant or request.card_variant,
     )
     if titles and request.output_format in _RENDERERS_WITHOUT_TITLES:
         anomalies.append(
@@ -604,10 +652,16 @@ def export_match(
             f"{request.output_format} renderer (issue #196 follow-ups)"
         )
         titles = {}
-    if titles and transitions and any(t.style == "slate" for t in titles.values()):
+    if (
+        titles
+        and transitions
+        and request.output_format == "fcpxml"
+        and any(t.style == "slate" for t in titles.values())
+    ):
         # Mirror the emitter's guard at the request layer so the
         # response carries an explicit anomaly instead of a 500-shaped
-        # error from generate_match_fcpxml.
+        # error from generate_match_fcpxml. The MP4 renderer crossfades
+        # into a slate like into any other item (issue #1244).
         anomalies.append("slate titles dropped: cannot combine with transitions (issue #196)")
         titles = {}
     intro_segment = _resolve_segment(
@@ -648,6 +702,37 @@ def export_match(
                     label=label,
                     duration_seconds=request.summary_hold_seconds,
                 )
+    # The match summary card (spec 2026-10-07-match-summary-design): every
+    # stage's figures, read the way the stage summary reads them.
+    match_summary: MatchSummary | None = None
+    if request.match_summary:
+        if request.output_format != "mp4":
+            anomalies.append(
+                f"match summary ignored: only the mp4 renderer draws it "
+                f"(current renderer: {request.output_format})"
+            )
+        else:
+            label = request.shooter_label or request.project_name
+            match_summary = build_match_summary(
+                [
+                    (
+                        stage_input.stage_name,
+                        TileStageData(
+                            label=label,
+                            stage_number=stage_input.stage_number,
+                            shots=load_stage_shots(stage_input.audit_path),
+                            stage_time_seconds=stage_input.stage_time_seconds,
+                            stage_time_is_manual=stage_input.stage_time_is_manual,
+                            scorecard=stage_input.scorecard,
+                            stage_rounds=stage_input.stage_rounds,
+                        ),
+                    )
+                    for stage_input in stages
+                ],
+                title=request.project_name,
+                label=label,
+                duration_seconds=request.match_summary_seconds,
+            )
     # Generated match cards (issue #973): only the MP4 renderer draws
     # them. Same text on both; the closing card repeats the title page.
     title_page: composition.MatchTitle | None = None
@@ -665,9 +750,23 @@ def export_match(
                 text=request.project_name,
                 info=request.title_page_info,
                 duration_seconds=request.title_page_duration_seconds,
+                logo=request.event_logo,
+                brand=request.account_brand,
             )
-            title_page = card if request.title_page else None
-            closing = card if request.closing_card else None
+            title_page = (
+                replace(card, variant=request.title_page_variant or request.card_variant)
+                if request.title_page
+                else None
+            )
+            closing = (
+                replace(
+                    card,
+                    variant=request.closing_card_variant or request.card_variant,
+                    credit=request.made_with,
+                )
+                if request.closing_card
+                else None
+            )
     # Chapter markers in the output: only when the YouTube sidecar is
     # requested AND the renderer carries chapters -- FCPXML as markers
     # on the timeline, MP4 as chapter atoms in the file (#204 and its
@@ -685,6 +784,19 @@ def export_match(
         title_page=title_page,
         closing=closing,
         summaries=summaries,
+        match_summary=match_summary,
+        shooters=(
+            (
+                composition.CompositionShooter(
+                    label=request.shooter_identity.label,
+                    accent=request.shooter_identity.accent,
+                    logo_path=request.shooter_identity.logo_path,
+                    club=request.shooter_identity.club,
+                ),
+            )
+            if request.shooter_identity is not None
+            else ()
+        ),
     )
     youtube_preset_active = request.youtube_preset and request.output_format == "mp4"
     if request.youtube_preset and request.output_format != "mp4":
@@ -804,17 +916,7 @@ def _build_uniform_transitions(
     """Expand a single ``(kind, duration)`` choice into N-1 transitions
     (one between each consecutive stage pair). Returns ``()`` for the
     no-op cases (kind == ``"none"`` or fewer than two stages)."""
-    if kind == "none" or stage_count < 2:
-        return ()
-    return tuple(
-        composition.Transition(
-            from_stage_index=i,
-            to_stage_index=i + 1,
-            kind=kind,
-            duration_seconds=duration,
-        )
-        for i in range(stage_count - 1)
-    )
+    return composition.uniform_transitions(kind, duration, stage_count)
 
 
 def _resolve_segment(
@@ -857,6 +959,7 @@ def _build_uniform_titles(
     kind: TitleKind,
     duration: float,
     stage_inputs: list[MatchStageInput],
+    variant: str = "default",
 ) -> dict[int, composition.TitleCard]:
     """Expand a single ``(kind, duration)`` into one ``TitleCard`` per
     stage. Each title's text defaults to the stage name -- templating
@@ -871,6 +974,7 @@ def _build_uniform_titles(
             duration_seconds=duration,
             style=kind,
             info=(f"{stage_input.expected_rounds} rounds",) if stage_input.expected_rounds else (),
+            variant=variant,
         )
         for idx, stage_input in enumerate(stage_inputs)
     }

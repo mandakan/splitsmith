@@ -15,6 +15,7 @@
  */
 
 import type { CompareGridRequestPayload, MatchExportRequestPayload } from "./api";
+import { DEFAULT_VARIANT, nonDefault, type LookChoice } from "./looks";
 
 export type StageCardStyle = "none" | "slate" | "lower-third";
 export type OutputFormat = NonNullable<MatchExportRequestPayload["output_format"]>;
@@ -31,6 +32,10 @@ export interface RenderOptions {
   titlePageDurationSeconds: number;
   /** Close with a card that repeats the title page. */
   closingCard: boolean;
+  /** "Made with splitsmith" at the bottom of the closing card. */
+  madeWith: boolean;
+  /** Your brand from the You page on the title page and the closing card. */
+  accountBrand: boolean;
   /** A card per stage: a slate before it, or a lower-third over its head. */
   stageCardStyle: StageCardStyle;
   /** Seconds a stage card shows for. */
@@ -38,6 +43,10 @@ export interface RenderOptions {
   /** Seconds to hold each stage's summary after its action; 0 is off.
    *  Single-shooter export only -- the grid's hold is #705's. */
   summaryHoldSeconds: number;
+  /** The match summary card after the last stage (single-shooter MP4). */
+  matchSummary: boolean;
+  /** Seconds the match summary holds. */
+  matchSummarySeconds: number;
 }
 
 export const DEFAULT_RENDER_OPTIONS: RenderOptions = {
@@ -46,9 +55,13 @@ export const DEFAULT_RENDER_OPTIONS: RenderOptions = {
   titleDivision: true,
   titlePageDurationSeconds: 3,
   closingCard: false,
+  madeWith: true,
+  accountBrand: true,
   stageCardStyle: "none",
   stageCardDurationSeconds: 1.5,
   summaryHoldSeconds: 0,
+  matchSummary: false,
+  matchSummarySeconds: 6,
 };
 
 /** The shortest hold a card can have; below this a card is a flash. */
@@ -68,11 +81,14 @@ export function stageCardsSupported(outputFormat: OutputFormat | undefined): boo
   return outputFormat !== "fcp7xml";
 }
 
-/** Transitions exist only in the FCPXML export today; the FCP 7 XML and
- *  the MP4 record an "ignored" anomaly for one, and a slate cannot be
- *  combined with one there either. */
-export function transitionsSupported(outputFormat: OutputFormat | undefined): boolean {
-  return outputFormat === "fcpxml";
+/** The FCPXML carries transitions as FCP effects; both MP4 renderers
+ *  draw the xfade kinds on a boundary segment (#1244). The FCP 7 XML
+ *  records an "ignored" anomaly for one. */
+export function transitionsSupported(
+  outputFormat: OutputFormat | undefined,
+  _mode: "single" | "grid" = "single",
+): boolean {
+  return outputFormat === "fcpxml" || outputFormat === "mp4";
 }
 
 /** Clamp a seconds field into its sane range; NaN and blanks become the
@@ -97,7 +113,14 @@ export type MatchExportCardFields = Pick<
       | "title_division"
       | "title_page_duration_seconds"
       | "closing_card"
+      | "made_with"
+      | "account_brand"
       | "summary_hold_seconds"
+      | "match_summary"
+      | "match_summary_seconds"
+      | "title_page_variant"
+      | "stage_card_variant"
+      | "closing_card_variant"
     >
   >;
 
@@ -108,11 +131,15 @@ export type MatchExportCardFields = Pick<
 export function matchExportFields(
   options: RenderOptions,
   outputFormat: OutputFormat | undefined,
+  /** The resolved Look choice (#1246); omitted, no variant field is sent. */
+  look?: LookChoice,
 ): MatchExportCardFields {
   const fields: MatchExportCardFields = {
     title_kind: stageCardsSupported(outputFormat) ? options.stageCardStyle : "none",
     title_duration_seconds: clampSeconds(options.stageCardDurationSeconds, MIN_CARD_SECONDS),
   };
+  const stageVariant = look && nonDefault(look.stageCardVariant, DEFAULT_VARIANT);
+  if (stageVariant && stageCardsSupported(outputFormat)) fields.stage_card_variant = stageVariant;
   if (!cardsSupported(outputFormat)) return fields;
   return {
     ...fields,
@@ -121,14 +148,22 @@ export function matchExportFields(
     title_division: options.titleDivision,
     title_page_duration_seconds: clampSeconds(options.titlePageDurationSeconds, MIN_CARD_SECONDS),
     closing_card: options.closingCard,
+    made_with: options.madeWith,
+    account_brand: options.accountBrand,
     summary_hold_seconds: clampSeconds(options.summaryHoldSeconds, 0),
+    match_summary: options.matchSummary,
+    match_summary_seconds: clampSeconds(options.matchSummarySeconds, MIN_CARD_SECONDS),
+    ...variantFields(look, ["title_page_variant", "closing_card_variant"]),
   };
 }
 
 /** The request-body fields for the compare grid, which is always a
- *  rendered MP4. The summary hold is not the grid's (#705). */
+ *  rendered MP4. The summary hold is not the grid's (#705); the match
+ *  summary is, as a tile per shooter. */
 export function gridExportFields(
   options: RenderOptions,
+  /** The resolved Look choice (#1246); omitted, no variant field is sent. */
+  look?: LookChoice,
 ): Pick<
   CompareGridRequestPayload,
   | "stage_titles"
@@ -138,6 +173,12 @@ export function gridExportFields(
   | "title_division"
   | "title_page_duration_seconds"
   | "closing_card"
+  | "made_with" | "account_brand"
+  | "match_summary"
+  | "match_summary_seconds"
+  | "title_page_variant"
+  | "stage_card_variant"
+  | "closing_card_variant"
 > {
   return {
     stage_titles: options.stageCardStyle,
@@ -147,7 +188,32 @@ export function gridExportFields(
     title_division: options.titleDivision,
     title_page_duration_seconds: clampSeconds(options.titlePageDurationSeconds, MIN_CARD_SECONDS),
     closing_card: options.closingCard,
+    made_with: options.madeWith,
+    account_brand: options.accountBrand,
+    match_summary: options.matchSummary,
+    match_summary_seconds: clampSeconds(options.matchSummarySeconds, MIN_CARD_SECONDS),
+    ...variantFields(look, ["title_page_variant", "stage_card_variant", "closing_card_variant"]),
   };
+}
+
+const VARIANT_SOURCE = {
+  title_page_variant: "titlePageVariant",
+  stage_card_variant: "stageCardVariant",
+  closing_card_variant: "closingCardVariant",
+} as const;
+
+/** The named variant fields of ``look`` that are not the default. */
+function variantFields(
+  look: LookChoice | undefined,
+  names: readonly (keyof typeof VARIANT_SOURCE)[],
+): Partial<Record<keyof typeof VARIANT_SOURCE, string>> {
+  const out: Partial<Record<keyof typeof VARIANT_SOURCE, string>> = {};
+  if (!look) return out;
+  for (const name of names) {
+    const value = nonDefault(look[VARIANT_SOURCE[name]], DEFAULT_VARIANT);
+    if (value) out[name] = value;
+  }
+  return out;
 }
 
 /** True when any card or hold is on -- what a summary line or a "reset"
@@ -157,7 +223,8 @@ export function anyRenderOptionOn(options: RenderOptions): boolean {
     options.titlePage ||
     options.closingCard ||
     options.stageCardStyle !== "none" ||
-    options.summaryHoldSeconds > 0
+    options.summaryHoldSeconds > 0 ||
+    options.matchSummary
   );
 }
 
@@ -180,13 +247,14 @@ export function describeRenderOptions(
   if (cards && surface === "single" && options.summaryHoldSeconds > 0) {
     parts.push(`summary ${clampSeconds(options.summaryHoldSeconds, 0)} s`);
   }
+  if (cards && options.matchSummary) parts.push("match summary");
   if (cards && options.closingCard) parts.push("closing");
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
 /** Seconds the cards add to a timeline of `stageCount` stages: a slate
- *  per stage, the title page, the closing card and, on the single-
- *  shooter export, one summary hold per stage. A lower-third rides the
+ *  per stage, the title page, the match summary, the closing card and, on
+ *  the single-shooter export, one summary hold per stage. A lower-third rides the
  *  stage's own head and adds nothing. Mirrors what the two renderers
  *  put on the spine; the estimate is a status line, not a promise. */
 export function renderOptionsSeconds(
@@ -205,5 +273,6 @@ export function renderOptionsSeconds(
   if (options.titlePage) seconds += titleSeconds;
   if (options.closingCard) seconds += titleSeconds;
   if (surface === "single") seconds += clampSeconds(options.summaryHoldSeconds, 0) * stageCount;
+  if (options.matchSummary) seconds += clampSeconds(options.matchSummarySeconds, MIN_CARD_SECONDS);
   return seconds;
 }

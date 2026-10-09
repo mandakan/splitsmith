@@ -29,6 +29,11 @@ from tests.hosted_helpers import _CapturingSender, login
 #: The local-only routes, spelled out here rather than read from the
 #: table, so dropping one from the table fails this file.
 EXPECTED_LOCAL_ONLY: set[tuple[str, str]] = {
+    ("POST", "/api/looks/{name}/brand-logo"),
+    ("GET", "/api/looks/{name}/brand/{file}"),
+    ("GET", "/api/looks/{name}/fonts"),
+    ("POST", "/api/looks/{name}/fonts"),
+    ("GET", "/api/looks/{name}/fonts/{file}"),
     ("GET", "/api/shooters/{slug}/fs/list"),
     ("GET", "/api/fs/list-dirs"),
     ("GET", "/api/shooters/{slug}/fs/probe"),
@@ -38,6 +43,12 @@ EXPECTED_LOCAL_ONLY: set[tuple[str, str]] = {
     ("POST", "/api/shooters/{slug}/videos/relink/apply"),
     ("POST", "/api/shooters/{slug}/project/settings"),
     ("POST", "/api/files/reveal"),
+    # The template editor (#1265): local only until the sandbox (#1266).
+    ("GET", "/api/looks/{name}/templates"),
+    ("PUT", "/api/looks/{name}/templates"),
+    ("GET", "/api/looks/{name}/samples"),
+    ("POST", "/api/looks/{name}/check"),
+    ("POST", "/api/looks/{name}/reveal"),
     ("POST", "/api/shooters/{slug}/videos/reveal"),
     ("POST", "/api/match/merge/plan"),
     ("POST", "/api/match/merge/execute"),

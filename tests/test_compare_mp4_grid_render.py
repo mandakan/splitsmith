@@ -20,6 +20,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from splitsmith import composition
 from splitsmith.compare import mp4_grid
 from splitsmith.compare.project_loader import CompareShooterBundle, CompareStageBundle
 
@@ -1511,3 +1512,413 @@ def test_a_30fps_source_is_not_silently_resampled_to_29_97(tmp_path: Path):
     )
 
     assert _video_fps(result.output_path) == pytest.approx(30.0, abs=0.001)
+
+
+# --- transitions on the boundary segment (#1244) ---------------------------------
+
+
+def _video_ss_t(cmd: tuple[str, ...], trim: str) -> tuple[str, str]:
+    """The ``-ss`` and ``-t`` before the first (video) read of ``trim``."""
+    at = cmd.index(trim)
+    return cmd[at - 4], cmd[at - 2]
+
+
+def test_a_transition_renders_edges_and_a_boundary_on_their_own_runner_and_trims_the_neighbours(
+    tmp_path: Path,
+):
+    """Review Focus 5 and the mechanism: the progress runner still sees two
+    stages and the stitch; the edges and the boundary go through
+    ``boundary_runner``; the neighbours are encoded half a second shorter
+    (stage 1 from its tail, stage 2 from its head, the beep staying on the
+    pad), the boundary pads the tail edge's missing handle with a held
+    frame, and the chapters sit where the cuts were."""
+    calls, runner = _recorder()
+    edges, boundary_runner = _recorder()
+    work = tmp_path / "work"
+    result = mp4_grid.render_grid_mp4(
+        _shooters(),
+        audio_label="Mathias",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=runner,
+        boundary_runner=boundary_runner,
+        work_dir=work,
+        ffmpeg_binary="/bin/ffmpeg",
+        transitions=(
+            composition.Transition(from_stage_index=0, to_stage_index=1, kind="fade", duration_seconds=1.0),
+        ),
+    )
+    assert result.degradations == ()
+    assert [c[-1].rsplit("/", 1)[-1] for c in calls] == ["stage1.mov", "stage2.mov", "grid.mp4"]
+    assert [c[-1].rsplit("/", 1)[-1] for c in edges] == [
+        "edge-stage1-tail.mov",
+        "edge-stage2-head.mov",
+        "boundary-000.mov",
+    ]
+    names = [line.rsplit("/", 1)[-1].rstrip("'") for line in (work / "concat.txt").read_text().splitlines()]
+    assert names == ["stage1.mov", "boundary-000.mov", "stage2.mov"]
+    stage_1, stage_2 = calls[0], calls[1]
+    trim = "/trims/s.mp4"
+    # The action is 1 + 10 + 0.5 = 11.5 s; each neighbour gives up 0.5.
+    assert _video_ss_t(stage_1, trim) == ("1", "11")
+    assert _video_ss_t(stage_2, trim) == ("1.5", "11")
+    head_edge = edges[1]
+    assert _video_ss_t(head_edge, trim) == (
+        "0.5",
+        "1",
+    ), "half a second of handle before the pad, then the first half"
+    boundary = edges[2]
+    graph = boundary[boundary.index("-filter_complex") + 1]
+    assert graph.startswith(
+        "[0:v]tpad=stop_mode=clone:stop_duration=0.5[tv];[tv][1:v]xfade=transition=fade:duration=1"
+    )
+    assert "[0:a:2]apad=pad_dur=0.5[t2];[t2][1:a:2]acrossfade" in graph
+    assert [(c.start_seconds, c.title) for c in result.chapters] == [(0.0, "Stage 1"), (11.5, "Stage 2")]
+
+
+def test_a_failed_edge_leaves_both_neighbours_untrimmed_and_reports_a_cut(tmp_path: Path):
+    def failing_tail_edge(cmd, **kwargs):
+        if str(cmd[-1]).endswith("edge-stage1-tail.mov"):
+            return subprocess.CompletedProcess(cmd, 1, b"", b"boom")
+        return _ok(cmd, **kwargs)
+
+    calls, runner = _recorder()
+    edges, boundary_runner = _recorder(failing_tail_edge)
+    work = tmp_path / "work"
+    result = mp4_grid.render_grid_mp4(
+        _shooters(),
+        audio_label="Mathias",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=runner,
+        boundary_runner=boundary_runner,
+        work_dir=work,
+        ffmpeg_binary="/bin/ffmpeg",
+        transitions=(
+            composition.Transition(from_stage_index=0, to_stage_index=1, kind="fade", duration_seconds=1.0),
+        ),
+    )
+    assert [c[-1].rsplit("/", 1)[-1] for c in edges] == ["edge-stage1-tail.mov"]
+    assert [c[-1].rsplit("/", 1)[-1] for c in calls] == ["stage1.mov", "stage2.mov", "grid.mp4"]
+    names = [line.rsplit("/", 1)[-1].rstrip("'") for line in (work / "concat.txt").read_text().splitlines()]
+    assert names == ["stage1.mov", "stage2.mov"]
+    assert _video_ss_t(calls[0], "/trims/s.mp4") == ("1", "11.5")
+    assert _video_ss_t(calls[1], "/trims/s.mp4") == ("1", "11.5")
+    (note,) = result.degradations
+    assert note.summary.startswith("transition after stage1 failed to render") and note.summary.endswith(
+        "rendered as a cut"
+    )
+    assert all(stage.ok for stage in result.stages)
+
+
+def test_a_transition_that_does_not_fit_reaches_the_grid_result(tmp_path: Path):
+    _, runner = _recorder()
+    result = mp4_grid.render_grid_mp4(
+        _shooters(),
+        audio_label="Mathias",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=runner,
+        work_dir=tmp_path / "work",
+        ffmpeg_binary="/bin/ffmpeg",
+        transitions=(
+            composition.Transition(from_stage_index=0, to_stage_index=1, kind="fade", duration_seconds=3.0),
+        ),
+    )
+    (note,) = result.degradations
+    assert note.summary == (
+        "transition after stage 'Stage 1' (3s) exceeds the stage's hold and tail pad (0.5s); "
+        "lengthen the hold or the pad, or shorten the transition: rendered as a cut"
+    )
+
+
+def test_a_stage_that_fails_after_a_boundary_keeps_elapsed_and_the_chapters_honest(tmp_path: Path):
+    """Review of #1244: the boundary into a stage that then fails is
+    dropped from the stitch, so the running total must give its length
+    back or every later chapter lands late; the note says what the
+    previous stage lost."""
+
+    def failing_stage_2(cmd, **kwargs):
+        if str(cmd[-1]).endswith("stage2.mov"):
+            return subprocess.CompletedProcess(cmd, 1, b"", b"boom")
+        return _ok(cmd, **kwargs)
+
+    calls, runner = _recorder(failing_stage_2)
+    _, boundary_runner = _recorder()
+    work = tmp_path / "work"
+    three = {label: {1: _bundle(1), 2: _bundle(2), 3: _bundle(3)} for label in ("Mathias", "Anders")}
+    result = mp4_grid.render_grid_mp4(
+        _shooters(three),
+        audio_label="Mathias",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=runner,
+        boundary_runner=boundary_runner,
+        work_dir=work,
+        ffmpeg_binary="/bin/ffmpeg",
+        transitions=(
+            composition.Transition(from_stage_index=0, to_stage_index=1, kind="fade", duration_seconds=1.0),
+        ),
+    )
+    names = [line.rsplit("/", 1)[-1].rstrip("'") for line in (work / "concat.txt").read_text().splitlines()]
+    assert names == ["stage1.mov", "stage3.mov"]
+    # Stage 1 was encoded 11.0 s long (its tail went to the dropped boundary).
+    assert [(c.start_seconds, c.title) for c in result.chapters] == [(0.0, "Stage 1"), (11.0, "Stage 3")]
+    (note,) = result.degradations
+    assert "stage2" in note.summary and "stage1" in note.summary and "0.5" in note.summary
+
+
+# --- stings (#1245) ----------------------------------------------------------------
+
+
+def _sting_grid(tmp_path: Path, *, kind: str = "sting:wipe", rasterizer=None, boundary_inner=_ok):
+    from tests.test_compare_mp4_grid_cards import _FakeRasterizer
+
+    calls, runner = _recorder()
+    edges, boundary_runner = _recorder(boundary_inner)
+    work = tmp_path / "work"
+    fake = _FakeRasterizer(motion_seconds=1.0) if rasterizer is None else rasterizer
+    result = mp4_grid.render_grid_mp4(
+        _shooters(),
+        audio_label="Mathias",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=runner,
+        boundary_runner=boundary_runner,
+        rasterizer=fake,
+        work_dir=work,
+        ffmpeg_binary="/bin/ffmpeg",
+        transitions=(
+            composition.Transition(from_stage_index=0, to_stage_index=1, kind=kind, duration_seconds=1.0),
+        ),
+    )
+    return result, calls, edges, fake, work
+
+
+def test_a_sting_boundary_takes_the_clip_on_the_boundary_runner_only(tmp_path: Path, monkeypatch) -> None:
+    """Issue #1245: the clip is written before the boundary encodes and is
+    an input of that segment alone; the stages, the edges and the
+    progress runner are untouched; the sting spans the boundary from its
+    first frame even though the tail edge is padded with a held frame."""
+    from tests.test_compare_mp4_grid_cards import _fake_clip_writer
+
+    monkeypatch.setattr(mp4_grid, "write_motion_clip", _fake_clip_writer)
+    result, calls, edges, fake, work = _sting_grid(tmp_path)
+    assert result.degradations == ()
+    assert [c[-1].rsplit("/", 1)[-1] for c in calls] == ["stage1.mov", "stage2.mov", "grid.mp4"]
+    assert [c[-1].rsplit("/", 1)[-1] for c in edges] == [
+        "edge-stage1-tail.mov",
+        "edge-stage2-head.mov",
+        "boundary-000.mov",
+    ]
+    boundary = edges[2]
+    clip = work / "boundary-000_sting.mov"
+    inputs = [boundary[i + 1] for i, token in enumerate(boundary) if token == "-i"]
+    assert inputs[2] == str(clip) and clip.exists()
+    graph = boundary[boundary.index("-filter_complex") + 1]
+    assert graph.startswith("[0:v]tpad=stop_mode=clone:stop_duration=0.5[tv];[tv][1:v]xfade=transition=fade")
+    assert (
+        ",trim=0:1[motion];[xf][motion]overlay=0:0:format=auto[stung];[stung]format=yuv420p[final]" in graph
+    )
+    assert "start_mode=add" not in graph
+    assert fake.frames_rendered == 30
+    assert not any(token.endswith("_sting.mov") for cmd in (*calls, edges[0], edges[1]) for token in cmd)
+    names = [line.rsplit("/", 1)[-1].rstrip("'") for line in (work / "concat.txt").read_text().splitlines()]
+    assert names == ["stage1.mov", "boundary-000.mov", "stage2.mov"]
+
+
+def test_a_sting_the_look_lacks_is_a_fade_on_the_grid(tmp_path: Path, monkeypatch) -> None:
+    from tests.test_compare_mp4_grid_cards import _fake_clip_writer
+
+    monkeypatch.setattr(mp4_grid, "write_motion_clip", _fake_clip_writer)
+    result, _calls, edges, fake, _work = _sting_grid(tmp_path, kind="sting:nope")
+    (note,) = result.degradations
+    assert (
+        note.summary == "sting nope is not in the splitsmith Look; transition after stage1 rendered as a fade"
+    )
+    boundary = edges[2]
+    assert len([t for t in boundary if t == "-i"]) == 2
+    assert (
+        "xfade=transition=fade:duration=1:offset=0,format=yuv420p[final]"
+        in boundary[boundary.index("-filter_complex") + 1]
+    )
+    assert fake.frames_rendered == 0
+
+
+def test_a_sting_whose_frames_fail_is_a_cut_on_the_grid(tmp_path: Path, monkeypatch) -> None:
+    from splitsmith.look_motion import MotionClipError
+
+    def writer_that_fails(frames, *, out: Path, fps: float, ffmpeg_binary: str):
+        frames.close()
+        out.unlink(missing_ok=True)
+        raise MotionClipError(f"{out.name}: boom on frame 2")
+
+    monkeypatch.setattr(mp4_grid, "write_motion_clip", writer_that_fails)
+    result, calls, edges, _fake, work = _sting_grid(tmp_path)
+    (note,) = result.degradations
+    assert note.summary == (
+        "transition after stage1 failed to render (boundary-000_sting.mov: boom on frame 2); "
+        "rendered as a cut"
+    )
+    assert [c[-1].rsplit("/", 1)[-1] for c in edges] == ["edge-stage1-tail.mov", "edge-stage2-head.mov"]
+    assert _video_ss_t(calls[0], "/trims/s.mp4") == ("1", "11.5")
+    assert _video_ss_t(calls[1], "/trims/s.mp4") == ("1", "11.5")
+    assert not (work / "boundary-000_sting.mov").exists()
+    assert all(stage.ok for stage in result.stages)
+
+
+def test_a_sting_is_told_the_stage_names_either_side_of_a_slate() -> None:
+    """The slate's card is built later by the driver, so the item carries
+    none; the sting's ``to`` label is the stage the slate opens, never the
+    segment's file name."""
+    names = ["Stage 1", "Stage 2"]
+    slate = mp4_grid.GridCardItem(kind="slate", name="slate-stage2", card_seconds=1.5, stage_index=1)
+    assert mp4_grid._grid_item_label(slate, names) == "Stage 2"
+    title = mp4_grid.GridCardItem(
+        kind="title_page",
+        name="title-page",
+        card_seconds=3.0,
+        stage_index=0,
+        card=composition.MatchTitle("Cup"),
+    )
+    assert mp4_grid._grid_item_label(title, names) == "Cup"
+
+
+# --- the segment cache (grid) --------------------------------------------
+
+
+def _writing_runner(fail_trim: str | None = None):
+    """A fake ffmpeg that writes its output file, so the cache can keep it;
+    an encode reading ``fail_trim`` answers 1."""
+    calls: list[tuple[str, ...]] = []
+
+    def runner(cmd, **kwargs):
+        argv = tuple(str(c) for c in cmd)
+        calls.append(argv)
+        if fail_trim is not None and fail_trim in argv:
+            return subprocess.CompletedProcess(cmd, 1, b"", b"boom")
+        Path(argv[-1]).write_bytes(b"segment " + argv[-1].encode())
+        return subprocess.CompletedProcess(cmd, 0, b"", b"")
+
+    return calls, runner
+
+
+def _cached_render(tmp_path: Path, work: str, runner, cache, steps=None):
+    # Distinct trims per stage: two stages with the same command are one
+    # cache entry, which is right but not what these tests count.
+    trims = {n: Path(f"/trims/stage{n}.mp4") for n in (1, 2)}
+    shooters = _shooters(
+        {label: {n: _bundle(n, trims[n]) for n in (1, 2)} for label in ("Mathias", "Anders")}
+    )
+    return mp4_grid.render_grid_mp4(
+        shooters,
+        audio_label="Mathias",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        ffmpeg_binary="/bin/ffmpeg",
+        runner=runner,
+        work_dir=tmp_path / work,
+        segment_cache=cache,
+        progress=steps.append if steps is not None else None,
+    )
+
+
+def test_a_second_grid_render_reuses_every_stage_from_the_cache(tmp_path: Path):
+    from splitsmith.segment_cache import SegmentCache
+
+    cache = SegmentCache(root=tmp_path / "cache", max_bytes=1 << 30)
+    first_calls, first = _writing_runner()
+    _cached_render(tmp_path, "work-a", first, cache)
+    assert len(first_calls) == 3
+
+    calls, runner = _writing_runner()
+    steps: list = []
+    result = _cached_render(tmp_path, "work-b", runner, cache, steps)
+    assert len(calls) == 1 and calls[0][calls[0].index("-f") + 1] == "concat"
+    listed = (tmp_path / "work-b" / "concat.txt").read_text(encoding="utf-8")
+    assert str((tmp_path / "cache").resolve()) in listed
+    assert [(s.plan.stage_number if s.plan else None, s.status) for s in steps] == [
+        (1, "reused"),
+        (2, "reused"),
+        (None, "stitching"),
+    ]
+    assert [(s.stage_number, s.ok) for s in result.stages] == [(1, True), (2, True)]
+
+
+def test_a_stage_that_failed_is_not_cached(tmp_path: Path):
+    from splitsmith.segment_cache import SegmentCache
+
+    cache = SegmentCache(root=tmp_path / "cache", max_bytes=1 << 30)
+    _, failing = _writing_runner(fail_trim="/trims/stage1.mp4")
+    result = _cached_render(tmp_path, "work-a", failing, cache)
+    assert [(s.stage_number, s.ok) for s in result.stages] == [(1, False), (2, True)]
+    assert not list((tmp_path / "cache").glob(".*.part*"))
+
+    calls, runner = _writing_runner()
+    _cached_render(tmp_path, "work-b", runner, cache)
+    # Stage 1 encodes again (into a partial named for its key), stage 2 is reused.
+    assert len(calls) == 2 and calls[1][calls[1].index("-f") + 1] == "concat"
+
+
+def test_progress_names_every_stage_as_it_encodes_then_the_stitch(tmp_path: Path):
+    steps: list = []
+    _, runner = _writing_runner()
+    _cached_render(tmp_path, "work", runner, None, steps)
+    assert [(s.index, s.total, s.plan.stage_number if s.plan else None, s.status) for s in steps] == [
+        (0, 2, 1, "encoding"),
+        (1, 2, 2, "encoding"),
+        (2, 2, None, "stitching"),
+    ]
+
+
+def test_the_overlays_sprites_and_font_reach_the_cache_key(tmp_path: Path):
+    """The sprites are named only inside a concat list and the font only
+    inside ``drawtext``; a redrawn sprite under the same name must miss."""
+    from splitsmith.compare.overlay_sprites import write_concat_list
+    from splitsmith.segment_cache import SegmentCache
+
+    sprites = [tmp_path / "sprites" / f"s{i}.png" for i in range(2)]
+    sprites[0].parent.mkdir()
+    for sprite in sprites:
+        sprite.write_bytes(b"sprite")
+    listing = write_concat_list(
+        [(sprites[0], 1.0), (sprites[1], 1.0)], tmp_path / "list.txt", frame_rate=(30, 1)
+    )
+    font = tmp_path / "clock.ttf"
+    font.write_bytes(b"font")
+    overlay = mp4_grid.StageOverlayPlan(sprite_list_path=listing, font_path=font, font_size=40)
+    inputs = mp4_grid._overlay_inputs(overlay)
+    assert inputs == (sprites[0].resolve(), sprites[1].resolve(), font)
+    assert mp4_grid._overlay_inputs(None) == ()
+
+    cache = SegmentCache(root=tmp_path / "cache", max_bytes=1 << 30)
+    argv = ("ffmpeg", "-f", "concat", "-i", str(listing), str(tmp_path / "out.mov"))
+    before = cache.key(argv, output_path=tmp_path / "out.mov", work_dir=tmp_path, extra_inputs=inputs)
+    sprites[1].write_bytes(b"redrawn in another theme")
+    after = cache.key(argv, output_path=tmp_path / "out.mov", work_dir=tmp_path, extra_inputs=inputs)
+    assert before != after
+
+
+def test_a_relative_work_dir_is_made_absolute_when_a_cache_keys_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The cache fingerprints a work file only when its argv token is an
+    absolute path; a relative one would be keyed by its name alone, so a
+    redrawn hold still under that name would be served stale."""
+    from splitsmith.segment_cache import SegmentCache
+
+    monkeypatch.chdir(tmp_path)
+    calls, runner = _writing_runner()
+    mp4_grid.render_grid_mp4(
+        _shooters(),
+        audio_label="Mathias",
+        output_path=Path("grid.mp4"),
+        canvas=CANVAS,
+        ffmpeg_binary="/bin/ffmpeg",
+        runner=runner,
+        work_dir=Path("work"),
+        segment_cache=SegmentCache(root=tmp_path / "cache", max_bytes=1 << 30),
+    )
+    stitch = calls[-1]
+    listed = Path(stitch[stitch.index("-i") + 1])
+    assert listed.is_absolute() and listed.parent == (tmp_path / "work").resolve()

@@ -23,6 +23,7 @@ import { CamerasPanel } from "@/components/footage/CamerasPanel";
 import { ClipSheet } from "@/components/footage/ClipSheet";
 import { CoverageMatrix, type FootageHrefs } from "@/components/footage/CoverageMatrix";
 import { FootageCards } from "@/components/footage/FootageCards";
+import { IdentitySheet } from "@/components/footage/IdentitySheet";
 import { ShootersPanel } from "@/components/footage/ShootersPanel";
 import { UnassignedPanel } from "@/components/footage/UnassignedPanel";
 import { HostedUploadModal } from "@/components/HostedUploadModal";
@@ -42,7 +43,7 @@ import {
   type MatchProject,
   type MoveShooterBlocked,
   type BeepQueueItem,
-  type ShooterListEntry,
+  type ScoreboardIdentity, type ShooterListEntry,
   type SortSummary,
   type StageVideo,
   type VideoRole,
@@ -53,12 +54,14 @@ import { isJobActive } from "@/lib/jobs";
 import { openSortText } from "@/lib/footageSort";
 import { useCan } from "@/lib/access";
 import { useDeploymentMode } from "@/lib/features";
-import { buildFootageRows, footageStats, skippedSummary, unassignedVideos, type UnassignedItem } from "@/lib/footage";
+import {
+  identityTarget, buildFootageRows, footageStats, skippedSummary, unassignedVideos, type UnassignedItem } from "@/lib/footage";
 import { pickDefaultShooterSlug } from "@/lib/defaultShooter";
 import { useMatchHref } from "@/lib/matchHref";
 import { useUploads } from "@/lib/uploads";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { damagedTakes, storedFilename, takeDamageText } from "@/lib/takeDamage";
+import { pinBody } from "@/lib/you";
 import { applyAssignmentLocally, buildClipModel, removeVideoLocally, type ClipItem } from "@/pages/ingest/model";
 
 type StorageMode = "symlink" | "copy";
@@ -557,6 +560,27 @@ function IngestInner({ slug }: { slug: string }) {
   // for an empty cell.
   const [sheet, setSheet] = useState<{ slug: string; videoId: string | null; assignStage: number | null } | null>(null);
   const [addShooterOpen, setAddShooterOpen] = useState(false);
+  const [identityFor, setIdentityFor] = useState<ShooterListEntry | null>(null);
+  // You (spec 2026-10-08): the roster marks the shooter with your SSI id.
+  const [me, setMe] = useState<ScoreboardIdentity | null>(null);
+  useEffect(() => {
+    let alive = true;
+    api.getScoreboardIdentity().then(
+      (id) => alive && setMe(id),
+      () => undefined,
+    );
+    return () => {
+      alive = false;
+    };
+  }, []);
+  // ``?identity=<slug>``: the Look editor's "Add a logo" opens that
+  // shooter's Identity sheet here, once, and drops the parameter.
+  useEffect(() => {
+    const target = identityTarget(location.search, shooters);
+    if (!target) return;
+    setIdentityFor(target);
+    navigate({ pathname: location.pathname, search: "" }, { replace: true });
+  }, [location.search, location.pathname, shooters, navigate]);
   const sheetProject = sheet ? projects[sheet.slug] : null;
   // Takes the old stage-1 bug left registered wrongly, per shooter shown.
   const takeRepairs = useMemo(
@@ -946,6 +970,15 @@ function IngestInner({ slug }: { slug: string }) {
               onAdd={() => setAddShooterOpen(true)}
               onRemove={(s) => void removeShooter(s)}
               onRebuildTrims={(s) => void rebuildTrims(s)}
+              onIdentity={(s) => setIdentityFor(s)}
+              me={me}
+              onThisIsMe={(s) => {
+                if (s.selected_shooter_id == null) return;
+                void api
+                  .putScoreboardIdentity(pinBody({ shooterId: s.selected_shooter_id, name: s.name }, me))
+                  .then(setMe)
+                  .catch(() => undefined);
+              }}
             />
             {clipModel ? <CamerasPanel slug={slug} cameras={clipModel.cameras} editDenied={editDenied} onSaved={handleSaved} /> : null}
           </div>
@@ -995,6 +1028,13 @@ function IngestInner({ slug }: { slug: string }) {
           void reload();
           setOthersTick((n) => n + 1);
         }}
+      />
+      <IdentitySheet
+        open={identityFor != null}
+        onClose={() => setIdentityFor(null)}
+        shooter={identityFor}
+        editDenied={editDenied}
+        onChanged={() => void reload()}
       />
 
       {showRelinkDialog && modeResolved && mode === "local" ? (

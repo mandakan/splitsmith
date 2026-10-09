@@ -13,8 +13,11 @@
  * table, and ``renderOptions.test.ts`` pins that the mappers never emit
  * a field the registry hides.
  */
+import type { LookInfo, TransitionFamilyInfo } from "@/lib/api";
 import type { ExportMode } from "@/lib/exportPlan";
 import type { ExportSettings } from "@/lib/exportPresets";
+import { stingLabel, stingsFor, transitionFamily, visibleLook, type LookChoice, type LookSlotName } from "@/lib/looks";
+import { DEFAULT_OVERLAY_STYLE, overlayStyleLabel, overlayStylesFor, type OverlayStyle } from "@/lib/overlayStyle";
 import {
   cardsSupported,
   MIN_CARD_SECONDS,
@@ -23,7 +26,15 @@ import {
   type OutputFormat,
 } from "@/lib/renderOptions";
 
-export type LookSlotId = "titlePage" | "stageCard" | "closingCard" | "summaryHold" | "overlay" | "transition";
+export type LookSlotId =
+  | "look"
+  | "titlePage"
+  | "stageCard"
+  | "closingCard"
+  | "summaryHold"
+  | "matchSummary"
+  | "overlay"
+  | "transition";
 
 export interface LookParam {
   /** Unique within the variant; becomes the input id. */
@@ -36,16 +47,41 @@ export interface LookParam {
   modes?: ExportMode[];
 }
 
+/** An on/off parameter under a variant's tile (an overlay style's toggles). */
+export interface LookToggle {
+  id: string;
+  label: string;
+  read(s: ExportSettings): boolean;
+  write(s: ExportSettings, on: boolean): Partial<ExportSettings>;
+}
+
+/** A closed choice under a variant's tile (an overlay style's position). */
+export interface LookChoiceParam {
+  id: string;
+  label: string;
+  options: { value: string; label: string }[];
+  read(s: ExportSettings): string;
+  write(s: ExportSettings, value: string): Partial<ExportSettings>;
+}
+
 export interface LookVariant {
   id: string;
   name: string;
-  /** File under ``assets/look/``. */
+  /** File under ``assets/look/``; the fallback when ``previewUrl`` is unset. */
   thumbnail: string;
+  /** A catalog preview (``/api/looks/...``, #1246) for a variant the Look draws. */
+  previewUrl?: string | null;
+  /** A transition family's directions (#1259); more than one shows a Direction control. */
+  directions?: { name: string; kind: string }[];
   /** One line under the row while this variant is selected; a function
    *  when the wording differs by mode (the grid's overlay has a hold and
    *  no codec). */
   help: string | ((mode: ExportMode) => string);
   params: LookParam[];
+  /** On/off parameters beside ``params`` (an overlay style's toggles). */
+  toggles?: LookToggle[];
+  /** A closed choice beside them (an overlay style's position). */
+  choice?: LookChoiceParam;
   modes: ExportMode[];
   formats: OutputFormat[];
 }
@@ -65,7 +101,9 @@ const ALL_FORMATS: OutputFormat[] = ["fcpxml", "fcp7xml", "mp4"];
 const MP4: OutputFormat[] = ["mp4"];
 const STAGE_CARD_FORMATS: OutputFormat[] = ALL_FORMATS.filter(stageCardsSupported);
 const MATCH_CARD_FORMATS: OutputFormat[] = ALL_FORMATS.filter(cardsSupported);
-const TRANSITION_FORMATS: OutputFormat[] = ALL_FORMATS.filter(transitionsSupported);
+const TRANSITION_FORMATS: OutputFormat[] = ALL_FORMATS.filter((f) => transitionsSupported(f, "single"));
+
+
 
 /** What the hold turns on at: the YouTube built-in's value. */
 export const DEFAULT_SUMMARY_HOLD_SECONDS = 3;
@@ -82,6 +120,14 @@ const titleSeconds: LookParam = {
   min: MIN_CARD_SECONDS,
   read: (s) => s.renderOptions.titlePageDurationSeconds,
   write: (s, n) => render(s, { titlePageDurationSeconds: n }),
+};
+
+const matchSummarySeconds: LookParam = {
+  id: "match-summary-seconds",
+  label: "Match summary seconds",
+  min: MIN_CARD_SECONDS,
+  read: (s) => s.renderOptions.matchSummarySeconds,
+  write: (s, n) => render(s, { matchSummarySeconds: n }),
 };
 
 const stageSeconds: LookParam = {
@@ -203,6 +249,34 @@ export const LOOK_SLOTS: readonly LookSlot[] = [
     write: (s, id) => render(s, { summaryHoldSeconds: id === "on" ? DEFAULT_SUMMARY_HOLD_SECONDS : 0 }),
   },
   {
+    id: "matchSummary",
+    label: "Match summary",
+    variants: [
+      none("The video ends after the last stage.", ALL_MODES, MP4),
+      {
+        id: "on",
+        name: "Match summary",
+        thumbnail: "match-summary.png",
+        help: "After the last stage: match-wide figures and a row per stage.",
+        params: [matchSummarySeconds],
+        modes: ["single"],
+        formats: MP4,
+      },
+      // The grid's own card: one tile per shooter, so its own thumbnail.
+      {
+        id: "on",
+        name: "Match summary",
+        thumbnail: "match-summary-grid.png",
+        help: "After the last stage: each shooter's match figures in their own tile.",
+        params: [matchSummarySeconds],
+        modes: ["compare"],
+        formats: MP4,
+      },
+    ],
+    read: (s) => (s.renderOptions.matchSummary ? "on" : "none"),
+    write: (s, id) => render(s, { matchSummary: id === "on" }),
+  },
+  {
     id: "overlay",
     label: "Overlay",
     variants: [
@@ -242,7 +316,7 @@ export const LOOK_SLOTS: readonly LookSlot[] = [
         thumbnail: "transition-cut.png",
         help: "Stages follow each other on the next frame.",
         params: [],
-        modes: ["single"],
+        modes: ["single", "compare"],
         formats: TRANSITION_FORMATS,
       },
       {
@@ -252,7 +326,7 @@ export const LOOK_SLOTS: readonly LookSlot[] = [
         help: "Holds the last frame of a stage before the next one starts.",
         params: [transitionSeconds],
         modes: ["single"],
-        formats: TRANSITION_FORMATS,
+        formats: ["fcpxml"],
       },
       {
         id: "zoom",
@@ -261,7 +335,7 @@ export const LOOK_SLOTS: readonly LookSlot[] = [
         help: "Zooms and blurs out of a stage and into the next.",
         params: [transitionSeconds],
         modes: ["single"],
-        formats: TRANSITION_FORMATS,
+        formats: ["fcpxml"],
       },
     ],
     read: (s) => (s.transitionKind === "none" ? "cut" : s.transitionKind),
@@ -278,9 +352,248 @@ export function visibleVariants(slot: LookSlot, mode: ExportMode, format: Output
   return slot.variants.filter((v) => v.modes.includes(mode) && v.formats.includes(format));
 }
 
+/** The kind a request sends for a stored ``transitionKind``: itself when
+ *  the transition slot can draw it for the format, else ``"none"``, so the
+ *  tile the gallery shows (Hard cut) and the render agree (#1244). A
+ *  preset saved with ``zoom`` for FCPXML is a hard cut on MP4, not a
+ *  zoomin nobody picked. */
+export function visibleTransitionKind(
+  kind: ExportSettings["transitionKind"],
+  format: OutputFormat,
+  mode: "single" | "compare" = "single",
+  /** The MP4 kinds the catalog offers: the server's xfade kinds and the
+   *  chosen Look's stings (``requestLook``, #1246, #1259). */
+  admitted: readonly string[] = [],
+): ExportSettings["transitionKind"] {
+  if (kind === "none") return "none";
+  const transition = LOOK_SLOTS.find((s) => s.id === "transition");
+  if (transition?.variants.some((v) => v.id === kind)) {
+    // The FCP effects: drawn only where the static table says.
+    return visibleVariants(transition, mode, format).some((v) => v.id === kind) ? kind : "none";
+  }
+  return format === "mp4" && admitted.includes(kind) ? kind : "none";
+}
+
 /** A slot shows when at least one variant beyond the default can be drawn. */
-export function visibleSlots(mode: ExportMode, format: OutputFormat): LookSlot[] {
-  return LOOK_SLOTS.filter((slot) => visibleVariants(slot, mode, format).length > 1);
+export function visibleSlots(
+  mode: ExportMode,
+  format: OutputFormat,
+  slots: readonly LookSlot[] = LOOK_SLOTS,
+): LookSlot[] {
+  return slots.filter((slot) => visibleVariants(slot, mode, format).length > 1);
+}
+
+/** Which settings field and which catalog slot a card slot's Style
+ *  control reads and writes (#1246); the other slots have no Style. */
+export const VARIANT_FIELD: Partial<Record<LookSlotId, { field: keyof LookChoice; slot: LookSlotName }>> = {
+  titlePage: { field: "titlePageVariant", slot: "title_page" },
+  stageCard: { field: "stageCardVariant", slot: "stage_card" },
+  closingCard: { field: "closingCardVariant", slot: "closing" },
+};
+
+/** The Look tiles: one per installed Look, first in the group (#1246). */
+function lookSlot(looks: LookInfo[]): LookSlot {
+  return {
+    id: "look",
+    label: "Look",
+    variants: looks.map((l) => ({
+      id: l.name,
+      name: l.label,
+      thumbnail: "none.png",
+      previewUrl: l.preview,
+      help:
+        l.source === "user"
+          ? "A Look installed under ~/.splitsmith/looks: its palette and templates draw every card."
+          : "The shipped palette and templates.",
+      params: [],
+      modes: ALL_MODES,
+      formats: ALL_FORMATS,
+    })),
+    read: (s) => visibleLook(looks, s.look),
+    write: (_s, id) => ({ look: id }),
+  };
+}
+
+/** The overlay style tile ids: ``style:<name>``, apart from ``none`` / ``on``. */
+const STYLE_PREFIX = "style:";
+
+/** One line per shipped style; a Look's own style gets the generic line. */
+const STYLE_HELP: Record<string, string> = {
+  plate: "Clock, shot count and split on plates in one corner; the count punches on each shot.",
+  pips: "A pip per round fills as the shots land; the split shows large and fades.",
+  ticker: "A rail with the clock and the last four splits with their classes.",
+  timeline: "A lower-third band whose track drops a tick at every shot.",
+  minimal: "A small clock; each split flashes in the middle of the frame.",
+};
+
+const POSITION_LABELS: Record<string, string> = {
+  "top-left": "Top left",
+  "top-right": "Top right",
+  "bottom-left": "Bottom left",
+  "bottom-right": "Bottom right",
+};
+
+const styled = (s: ExportSettings, patch: Partial<OverlayStyle>): Partial<ExportSettings> => ({
+  overlayStyle: { ...s.overlayStyle, ...patch },
+});
+
+const STYLE_TOGGLES: LookToggle[] = [
+  {
+    id: "speed-colors",
+    label: "Speed colours",
+    read: (s) => s.overlayStyle.speedColors,
+    write: (s, on) => styled(s, { speedColors: on }),
+  },
+  {
+    id: "class-labels",
+    label: "Class labels",
+    read: (s) => s.overlayStyle.classLabels,
+    write: (s, on) => styled(s, { classLabels: on }),
+  },
+  {
+    id: "landing",
+    label: "Landing",
+    read: (s) => s.overlayStyle.landing,
+    write: (s, on) => styled(s, { landing: on }),
+  },
+];
+
+/** The overlay slot with the chosen Look's HUD styles beside Classic, for
+ *  one shooter; the grid keeps its own counter. Without styles in the
+ *  catalog this is the static slot unchanged. */
+function overlaySlotFor(slot: LookSlot, looks: LookInfo[], look: string): LookSlot {
+  const styles = overlayStylesFor(looks, look);
+  if (styles.length === 0) return slot;
+  const [none, counter] = slot.variants;
+  const tiles: LookVariant[] = styles.map((style) => {
+    const positions = style.positions ?? [];
+    return {
+      id: `${STYLE_PREFIX}${style.name}`,
+      name: overlayStyleLabel(style.name),
+      thumbnail: "overlay.png",
+      previewUrl: style.preview,
+      help: `${STYLE_HELP[style.name] ?? "A HUD drawn by the Look with motion on every shot."} Renders slower than Classic.`,
+      params: [],
+      toggles: STYLE_TOGGLES,
+      choice:
+        positions.length > 0
+          ? {
+              id: "position",
+              label: "Overlay position",
+              options: positions.map((p) => ({ value: p, label: POSITION_LABELS[p] ?? p })),
+              read: (s) =>
+                s.overlayStyle.position !== null && positions.includes(s.overlayStyle.position)
+                  ? s.overlayStyle.position
+                  : positions[0],
+              write: (s, value) => styled(s, { position: value === positions[0] ? null : value }),
+            }
+          : undefined,
+      modes: ["single"],
+      formats: counter.formats,
+    };
+  });
+  const names = new Set(styles.map((v) => v.name));
+  return {
+    ...slot,
+    variants: [
+      none,
+      { ...counter, name: "Classic", modes: ["single"] },
+      { ...counter, modes: ["compare"] },
+      ...tiles,
+    ],
+    read: (s) => {
+      if (s.mode === "compare" || !s.includeOverlay) return slot.read(s);
+      return names.has(s.overlayStyle.variant) ? `${STYLE_PREFIX}${s.overlayStyle.variant}` : "on";
+    },
+    write: (s, id) => {
+      if (s.mode === "compare") return slot.write(s, id);
+      if (id.startsWith(STYLE_PREFIX)) {
+        return { includeOverlay: true, ...styled(s, { variant: id.slice(STYLE_PREFIX.length) }) };
+      }
+      const variant = DEFAULT_OVERLAY_STYLE.variant;
+      return { ...slot.write(s, id), ...(id === "on" ? styled(s, { variant }) : {}) };
+    },
+  };
+}
+
+/** The transition tile a stored kind selects: its family (#1259), else
+ *  the kind itself (a sting, an FCP effect), ``cut`` for none. */
+function transitionTileId(kind: string, transitions: readonly TransitionFamilyInfo[]): string {
+  if (kind === "none") return "cut";
+  return transitionFamily(kind, transitions)?.family.id ?? kind;
+}
+
+/** The gallery's slots for the installed catalog and the chosen Look
+ *  (#1246): the static table, the Look tiles first when more than one
+ *  Look is installed, and among the transitions the server's xfade
+ *  families (#1259) and the chosen Look's stings (MP4, both modes) with
+ *  their catalog previews. With the built-in catalog alone this is
+ *  ``LOOK_SLOTS`` unchanged. */
+export function slotsForLook(
+  looks: LookInfo[],
+  settings: Pick<ExportSettings, "look"> & Partial<Pick<ExportSettings, "transitionKind">>,
+  transitions: readonly TransitionFamilyInfo[] = [],
+): LookSlot[] {
+  const look = visibleLook(looks, settings.look);
+  const families: LookVariant[] = transitions.map((f) => ({
+    id: f.id,
+    name: f.label,
+    thumbnail: "none.png",
+    previewUrl: f.preview,
+    help: f.help,
+    params: [transitionSeconds],
+    modes: ["single", "compare"],
+    formats: ["mp4"],
+    directions: f.directions,
+  }));
+  const stings: LookVariant[] = stingsFor(looks, look).map((s) => ({
+    id: s.id,
+    name: stingLabel(s.name),
+    thumbnail: "none.png",
+    previewUrl: s.preview,
+    help: "A band from the Look sweeps across the cut over a fade.",
+    params: [transitionSeconds],
+    modes: ["single", "compare"],
+    formats: ["mp4"],
+  }));
+  const slots = LOOK_SLOTS.map((slot): LookSlot => {
+    if (slot.id === "overlay") return overlaySlotFor(slot, looks, settings.look);
+    if (slot.id !== "transition") return slot;
+    // A stored kind the catalog does not list (it has not answered, or it
+    // failed) keeps a tile of its own, so the request's transition stays
+    // visible and can be changed or cut (review of #1259).
+    const kind = settings.transitionKind ?? "none";
+    const known = kind === "none" || [...slot.variants, ...families, ...stings].some((v) => v.id === kind);
+    const owned = transitionFamily(kind, transitions) !== null;
+    const stray: LookVariant[] =
+      known || owned
+        ? []
+        : [
+            {
+              id: kind,
+              name: kind,
+              thumbnail: "none.png",
+              help: "The transition this export was set to; its tile appears with the others once the list loads.",
+              params: [transitionSeconds],
+              modes: ["single", "compare"],
+              formats: ["mp4"],
+            },
+          ];
+    if (families.length + stings.length + stray.length === 0) return slot;
+    return {
+      ...slot,
+      variants: [...slot.variants, ...families, ...stings, ...stray],
+      read: (s) => transitionTileId(s.transitionKind, transitions),
+      write: (s, id) => {
+        const family = transitions.find((f) => f.id === id);
+        if (!family) return slot.write(s, id);
+        // Keep the direction when the tile is already this family's.
+        const keep = family.directions.some((d) => d.kind === s.transitionKind);
+        return { transitionKind: keep ? s.transitionKind : family.directions[0].kind };
+      },
+    };
+  });
+  return looks.length > 1 ? [lookSlot(looks), ...slots] : slots;
 }
 
 /** Every thumbnail the registry references, for the coverage test and the script. */
@@ -288,13 +601,14 @@ export const THUMBNAIL_FILES: readonly string[] = [
   ...new Set(LOOK_SLOTS.flatMap((s) => s.variants.map((v) => v.thumbnail))),
 ];
 
-const THUMBNAILS = import.meta.glob("../assets/look/*.png", { eager: true, import: "default" }) as Record<
+const THUMBNAILS = import.meta.glob("../assets/look/*.{png,webp}", { eager: true, import: "default" }) as Record<
   string,
   string
 >;
 
 /** The bundled URL for a thumbnail file name; the glob keeps the images
- *  in the build without a runtime fetch of anything but the PNG. */
+ *  in the build without a runtime fetch of anything but the file (a PNG,
+ *  or a looping WebP for a transition, #1246). */
 export function thumbnailUrl(file: string): string {
   const hit = Object.entries(THUMBNAILS).find(([path]) => path.endsWith(`/${file}`));
   return hit ? hit[1] : "";

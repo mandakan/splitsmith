@@ -27,14 +27,56 @@ CANVAS = mp4_grid.GridCanvas(640, 360, 25, 1)
 
 
 class _FakeRasterizer:
-    def __init__(self) -> None:
+    def __init__(self, *, motion_seconds: float = 0.0) -> None:
         self.calls: list[str] = []
+        self.motion_seconds = motion_seconds
+        self.frame_requests: list[tuple] = []
+        self.frames_rendered = 0
 
     def png(self, html: str, *, width: int, height: int) -> bytes:
         self.calls.append(html)
         buf = io.BytesIO()
         Image.new("RGBA", (width, height), (0, 0, 0, 0)).save(buf, format="PNG")
         return buf.getvalue()
+
+    def render_template(self, template: Path, *, context, width: int, height: int) -> bytes:
+        """A card drawn through its Look template: recorded as the JSON of
+        what it was handed, so the text assertions below read the same
+        list whichever path drew it."""
+        import json
+
+        self.calls.append(json.dumps(context.data, ensure_ascii=False))
+        buf = io.BytesIO()
+        Image.new("RGBA", (width, height), (0, 0, 0, 0)).save(buf, format="PNG")
+        return buf.getvalue()
+
+    def engine_version(self) -> str:
+        return "fake"
+
+    def render_template_frames(
+        self, template, *, context, width: int, height: int, fps: float, max_seconds: float
+    ):
+        """A still unless ``motion_seconds`` is set; frames are blank and
+        counted in ``frames_rendered`` as they are pulled."""
+        import json
+        import math
+
+        from splitsmith.overlay_raster import TemplateFrames
+
+        self.calls.append(json.dumps(context.data, ensure_ascii=False))
+        self.frame_requests.append((template, context.model_dump(), width, height, fps, max_seconds))
+        duration = self.motion_seconds
+        count = 1 if duration <= 0 else max(1, math.ceil(min(duration, max_seconds) * fps - 1e-9))
+        blank = bytes(width * height * 4)
+
+        def frames():
+            for _ in range(count):
+                self.frames_rendered += 1
+                yield blank
+
+        return TemplateFrames(
+            duration=duration, frame_count=count, width=width, height=height, frames=frames()
+        )
 
 
 def _ok_runner(calls: list[tuple[str, ...]]):
@@ -379,3 +421,391 @@ def test_chapters_without_cards_start_at_the_first_stage(tmp_path: Path) -> None
         ffmpeg_binary="/bin/ffmpeg",
     )
     assert [(c.start_seconds, c.title) for c in result.chapters] == [(0.0, result.stages[0].stage_name)]
+
+
+# --- motion cards on the grid (slice 2, #1242) --------------------------------------
+
+
+def _fake_clip_writer(frames, *, out: Path, fps: float, ffmpeg_binary: str):
+    from splitsmith.look_motion import MotionClip
+
+    count = sum(1 for _ in frames.frames)
+    out.write_bytes(b"clip")
+    return MotionClip(path=out, seconds=count / fps, frame_count=count)
+
+
+def test_card_segment_with_a_motion_clip_overlays_it_and_keeps_the_stream_layout() -> None:
+    cmd = mp4_grid.build_card_segment_command(
+        Path("/w/bd.png"),
+        seconds=1.5,
+        canvas=CANVAS,
+        shooter_labels=("A", "B"),
+        output_path=Path("/w/card.mov"),
+        motion_clip=Path("/w/card_motion.mov"),
+    )
+    i_flags = [i for i, t in enumerate(cmd) if t == "-i"]
+    assert [cmd[i + 1] for i in i_flags][:2] == ["/w/bd.png", "/w/card_motion.mov"]
+    assert cmd[i_flags[2] + 1].startswith("anullsrc")
+    graph = cmd[cmd.index("-filter_complex") + 1]
+    assert "[0:v][motion]overlay=0:0:format=auto[withmotion]" in graph
+    assert "[withmotion]format=yuv420p,setsar=1[final]" in graph
+    assert "[2:a]aformat" in graph and "asplit=3[amix][a0][a1]" in graph
+    assert cmd.count("-map") == 4
+
+
+def test_card_segment_without_a_clip_is_unchanged() -> None:
+    plain = mp4_grid.build_card_segment_command(
+        Path("/w/c.png"), seconds=1.5, canvas=CANVAS, shooter_labels=("A",), output_path=Path("/w/c.mov")
+    )
+    assert "[1:a]aformat" in plain[plain.index("-filter_complex") + 1]
+    assert "[0:v]format=yuv420p,setsar=1[final]" in plain[plain.index("-filter_complex") + 1]
+
+
+def test_an_animated_card_reaches_the_grid_as_a_motion_segment(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(mp4_grid, "write_motion_clip", _fake_clip_writer)
+    cards: list[tuple[str, ...]] = []
+    work = tmp_path / "work"
+    fake = _FakeRasterizer(motion_seconds=0.6)
+    mp4_grid.render_grid_mp4(
+        _driver_shooters(tmp_path),
+        audio_label="Anders",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=_ok_runner([]),
+        card_runner=_ok_runner(cards),
+        still_runner=_still_runner([]),
+        rasterizer=fake,
+        work_dir=work,
+        ffmpeg_binary="/bin/ffmpeg",
+        title_page=MatchTitle(text="Bromma", duration_seconds=3.0),
+    )
+    assert len(cards) == 1
+    assert str(work / "title_page_motion.mov") in cards[0]
+    assert str(work / "title_page_backdrop.png") in cards[0]
+    assert (work / "title_page_backdrop.png").exists()
+    assert fake.frames_rendered == 15, "0.6 s at the canvas's 25 fps"
+
+
+def test_an_animated_lower_third_is_a_clip_input_on_the_grid_stage(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(mp4_grid, "write_motion_clip", _fake_clip_writer)
+    calls: list[tuple[str, ...]] = []
+    work = tmp_path / "work"
+    mp4_grid.render_grid_mp4(
+        _driver_shooters(tmp_path),
+        audio_label="Anders",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=_ok_runner(calls),
+        card_runner=_ok_runner([]),
+        rasterizer=_FakeRasterizer(motion_seconds=0.4),
+        work_dir=work,
+        ffmpeg_binary="/bin/ffmpeg",
+        stage_titles="lower-third",
+        title_duration_seconds=2.0,
+    )
+    clip = str(work / "lower-third-stage1_motion.mov")
+    assert clip in calls[0]
+    index = calls[0].index(clip)
+    assert calls[0][index - 1] == "-i" and calls[0][index - 2] != "-t", "a clip input is not looped or cut"
+    graph = _graph_of(calls[0])
+    assert "tpad=stop_mode=clone:stop_duration=2" in graph
+    assert "fade=t=out:st=1.5:d=0.5:alpha=1[lt]" in graph and "enable='lt(t,2)'" in graph
+
+
+def test_stage_card_carries_the_variant_the_grid_was_asked_for() -> None:
+    card = mp4_grid.stage_card(_plan(), style="slate", seconds=1.5, expected_rounds=24, variant="rise")
+    assert card.variant == "rise"
+    assert mp4_grid.stage_card(_plan(), style="slate", seconds=1.5, expected_rounds=None).variant == "default"
+
+
+def test_identities_reach_the_grids_cards_in_tile_order(tmp_path: Path) -> None:
+    import json
+
+    from splitsmith.identity import ResolvedIdentity
+
+    fake = _FakeRasterizer()
+    mp4_grid.render_grid_mp4(
+        _driver_shooters(tmp_path),
+        audio_label="Anders",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=_ok_runner([]),
+        card_runner=_ok_runner([]),
+        still_runner=_still_runner([]),
+        rasterizer=fake,
+        work_dir=tmp_path / "work",
+        ffmpeg_binary="/bin/ffmpeg",
+        title_page=MatchTitle(text="Bromma"),
+        identities={"Anders": ResolvedIdentity(label="Anders", accent="#123456", logo_path=None, club="PK")},
+    )
+    data = json.loads(fake.calls[0])
+    assert data["shooters"] == [{"label": "Anders", "accent": "#123456", "club": "PK", "logo": None}]
+
+
+def test_identities_reach_the_grids_hold_as_accents(tmp_path: Path, monkeypatch) -> None:
+    """The stage hold passes each identified tile's accent to the hold
+    builder, keyed by label; nothing else about the call changes."""
+    from splitsmith.compare import overlay_summary
+    from splitsmith.identity import ResolvedIdentity
+
+    seen: dict[str, object] = {}
+
+    def spy(plan, data, geometry, **kwargs):  # noqa: ANN001
+        seen.update(kwargs)
+        out = tmp_path / "hold.png"
+        out.write_bytes(b"png")
+        return out
+
+    monkeypatch.setattr(overlay_summary, "write_hold_still", spy)
+    mp4_grid._stage_hold_still(
+        _plan(),
+        CANVAS,
+        {},
+        theme_name="splitsmith",
+        work=tmp_path,
+        ffmpeg_binary="/bin/ffmpeg",
+        runner=_ok_runner([]),
+        rasterizer=None,
+        identities={
+            "Stage 3 shooter": ResolvedIdentity(label="x", accent="#123456", logo_path=None, club=None)
+        },
+    )
+    assert seen["accents"] == {"Stage 3 shooter": "#123456"}
+
+
+# --- the boundary segment (#1244) ----------------------------------------------
+
+
+def test_boundary_segment_crossfades_the_video_and_every_audio_track(tmp_path: Path) -> None:
+    """Review Focus 4: the grid's segments carry the mix plus one track per
+    shooter (a filler's is silence); the boundary crossfades each pair by
+    stream index, so the stitch sees the same layout, names and
+    dispositions as every other segment."""
+    labels = ("Anders", "Bea", "Mathias")
+    cmd = mp4_grid.build_boundary_segment_command(
+        tmp_path / "edge-tail.mov",
+        tmp_path / "edge-head.mov",
+        kind="zoom",
+        seconds=1.0,
+        canvas=CANVAS,
+        shooter_labels=labels,
+        output_path=tmp_path / "boundary-002.mov",
+    )
+    assert cmd[:3] == ("ffmpeg", "-hide_banner", "-y")
+    assert cmd[3:7] == ("-i", str(tmp_path / "edge-tail.mov"), "-i", str(tmp_path / "edge-head.mov"))
+    graph = cmd[cmd.index("-filter_complex") + 1]
+    assert graph == (
+        "[0:v][1:v]xfade=transition=zoomin:duration=1:offset=0,format=yuv420p[final];"
+        "[0:a:0][1:a:0]acrossfade=d=1:c1=tri:c2=tri,"
+        "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[x0];"
+        "[0:a:1][1:a:1]acrossfade=d=1:c1=tri:c2=tri,"
+        "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[x1];"
+        "[0:a:2][1:a:2]acrossfade=d=1:c1=tri:c2=tri,"
+        "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[x2];"
+        "[0:a:3][1:a:3]acrossfade=d=1:c1=tri:c2=tri,"
+        "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[x3]"
+    )
+    maps = [cmd[i + 1] for i, token in enumerate(cmd) if token == "-map"]
+    assert maps == ["[final]", "[x0]", "[x1]", "[x2]", "[x3]"]
+    card = mp4_grid.build_card_segment_command(
+        tmp_path / "c.png", seconds=1.0, canvas=CANVAS, shooter_labels=labels, output_path=tmp_path / "c.mov"
+    )
+    tail_of = lambda c: c[c.index("-disposition:a:0") :]  # noqa: E731
+    assert (
+        tail_of(cmd)[:-1] == tail_of(card)[:-1]
+    ), "same dispositions, names, rate and codecs as a card segment"
+    assert cmd[cmd.index("-t") + 1] == "1" and cmd[-1].endswith("boundary-002.mov")
+
+
+def test_boundary_segment_pads_a_short_edge_with_a_held_frame_on_every_track(tmp_path: Path) -> None:
+    labels = ("Anders", "Bea")
+    common = {
+        "kind": "fade",
+        "seconds": 1.0,
+        "canvas": CANVAS,
+        "shooter_labels": labels,
+        "output_path": tmp_path / "b.mov",
+    }
+    head_short = mp4_grid.build_boundary_segment_command(
+        tmp_path / "t.mov", tmp_path / "h.mov", head_pad_seconds=0.5, **common
+    )
+    graph = head_short[head_short.index("-filter_complex") + 1]
+    assert graph.startswith(
+        "[1:v]tpad=start_mode=clone:start_duration=0.5[hv];"
+        "[0:v][hv]xfade=transition=fade:duration=1:offset=0,format=yuv420p[final];"
+        "[1:a:0]adelay=500:all=1[h0];[0:a:0][h0]acrossfade=d=1:c1=tri:c2=tri,"
+    )
+    assert "[1:a:2]adelay=500:all=1[h2];[0:a:2][h2]acrossfade" in graph
+    tail_short = mp4_grid.build_boundary_segment_command(
+        tmp_path / "t.mov", tmp_path / "h.mov", tail_pad_seconds=0.25, **common
+    )
+    graph = tail_short[tail_short.index("-filter_complex") + 1]
+    assert graph.startswith(
+        "[0:v]tpad=stop_mode=clone:stop_duration=0.25[tv];"
+        "[tv][1:v]xfade=transition=fade:duration=1:offset=0,format=yuv420p[final];"
+        "[0:a:0]apad=pad_dur=0.25[t0];[t0][1:a:0]acrossfade=d=1:c1=tri:c2=tri,"
+    )
+
+
+# --- a transition into a slate (#1244) -----------------------------------------
+
+
+def test_a_transition_into_a_slate_trims_the_slate_and_the_stage_before_it(tmp_path: Path) -> None:
+    """The slate after a boundary is encoded half a second shorter on the
+    card runner; its head edge (a second of the same still) and the
+    boundary go through the boundary runner; the chapter stays at the cut."""
+    from splitsmith import composition
+    from tests.test_compare_mp4_grid_render import _shooters as _two_stage_shooters
+
+    calls: list[tuple[str, ...]] = []
+    cards: list[tuple[str, ...]] = []
+    edges: list[tuple[str, ...]] = []
+    work = tmp_path / "work"
+    result = mp4_grid.render_grid_mp4(
+        _two_stage_shooters(),
+        audio_label="Mathias",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=_ok_runner(calls),
+        card_runner=_ok_runner(cards),
+        boundary_runner=_ok_runner(edges),
+        still_runner=_still_runner([]),
+        rasterizer=_FakeRasterizer(),
+        work_dir=work,
+        ffmpeg_binary="/bin/ffmpeg",
+        stage_titles="slate",
+        title_duration_seconds=1.5,
+        transitions=(
+            composition.Transition(from_stage_index=0, to_stage_index=1, kind="fade", duration_seconds=1.0),
+        ),
+    )
+    assert result.degradations == ()
+    assert _concat_names(work) == [
+        "slate-stage1.mov",
+        "stage1.mov",
+        "boundary-001.mov",
+        "slate-stage2.mov",
+        "stage2.mov",
+    ]
+    assert [c[-1].rsplit("/", 1)[-1] for c in cards] == ["slate-stage1.mov", "slate-stage2.mov"]
+    assert cards[0][cards[0].index("-t") + 1] == "1.5"
+    assert (
+        cards[1][cards[1].index("-t") + 1] == "1"
+    ), "the slate after the boundary gave up its first half second"
+    assert [c[-1].rsplit("/", 1)[-1] for c in edges] == [
+        "edge-stage1-tail.mov",
+        "edge-slate-stage2-head.mov",
+        "boundary-001.mov",
+    ]
+    assert edges[1][edges[1].index("-t") + 1] == "1", "a card's edge is the still for the whole fade"
+    assert len(calls) == 3
+    assert [(c.start_seconds, c.title) for c in result.chapters] == [
+        (0.0, "Stage 1"),
+        (1.5 + 11.5, "Stage 2"),
+    ]
+
+
+def test_a_head_edges_lower_third_opens_at_the_stage_start_not_half_a_fade_late(tmp_path: Path) -> None:
+    """Review of #1244: the head edge's timeline starts ``handle`` before
+    the stage, and the boundary prepends the rest of the half; the lower
+    third therefore opens ``handle`` into the edge. With no footage before
+    the pad (beep on the pad) that is at once, not half a fade late."""
+    from splitsmith import composition
+    from tests.test_compare_mp4_grid_render import _shooters as _two_stage_shooters
+
+    edges: list[tuple[str, ...]] = []
+    mp4_grid.render_grid_mp4(
+        _two_stage_shooters(),
+        audio_label="Mathias",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        head_pad_seconds=2.0,  # the fixture's beep: seek 0, no handle
+        runner=_ok_runner([]),
+        card_runner=_ok_runner([]),
+        boundary_runner=_ok_runner(edges),
+        still_runner=_still_runner([]),
+        rasterizer=_FakeRasterizer(),
+        work_dir=tmp_path / "work",
+        ffmpeg_binary="/bin/ffmpeg",
+        stage_titles="lower-third",
+        title_duration_seconds=1.5,
+        transitions=(
+            composition.Transition(from_stage_index=0, to_stage_index=1, kind="fade", duration_seconds=1.0),
+        ),
+    )
+    assert [c[-1].rsplit("/", 1)[-1] for c in edges] == [
+        "edge-stage1-tail.mov",
+        "edge-stage2-head.mov",
+        "boundary-000.mov",
+    ]
+    head_graph = edges[1][edges[1].index("-filter_complex") + 1]
+    assert "enable='lt(t,1.5)'" in head_graph, "no handle: the card opens on the edge's first frame"
+    boundary_graph = edges[2][edges[2].index("-filter_complex") + 1]
+    assert "[1:v]tpad=start_mode=clone:start_duration=0.5[hv]" in boundary_graph
+
+
+# --- stings (#1245) ----------------------------------------------------------------
+
+
+def test_boundary_segment_lays_a_sting_clip_over_the_fade(tmp_path: Path) -> None:
+    """Issue #1245: the sting clip is a third input laid over the crossfaded
+    video for the whole boundary, before the final pixel format, with the
+    audio graph untouched; without a clip the argv is slice 4's."""
+    labels = ("Anders", "Bea")
+    common = {"seconds": 1.0, "canvas": CANVAS, "shooter_labels": labels, "output_path": tmp_path / "b.mov"}
+    plain = mp4_grid.build_boundary_segment_command(
+        tmp_path / "t.mov", tmp_path / "h.mov", kind="fade", **common
+    )
+    bare = mp4_grid.build_boundary_segment_command(
+        tmp_path / "t.mov", tmp_path / "h.mov", kind="sting:wipe", **common
+    )
+    assert bare == plain, "a sting without its clip is the fade it rides"
+    stung = mp4_grid.build_boundary_segment_command(
+        tmp_path / "t.mov", tmp_path / "h.mov", kind="sting:wipe", sting_clip=tmp_path / "s.mov", **common
+    )
+    inputs = [stung[i + 1] for i, token in enumerate(stung) if token == "-i"]
+    assert inputs == [str(tmp_path / "t.mov"), str(tmp_path / "h.mov"), str(tmp_path / "s.mov")]
+    graph = stung[stung.index("-filter_complex") + 1]
+    assert graph.startswith(
+        "[0:v][1:v]xfade=transition=fade:duration=1:offset=0[xf];"
+        f"[2:v]format=rgba,fps={CANVAS.rate_string},setpts=PTS-STARTPTS,"
+        "tpad=stop_mode=clone:stop_duration=1,trim=0:1[motion];"
+        "[xf][motion]overlay=0:0:format=auto[stung];"
+        "[stung]format=yuv420p[final];"
+        "[0:a:0][1:a:0]acrossfade=d=1:c1=tri:c2=tri,"
+    )
+    assert stung.index("-t") < stung.index("-filter_complex")
+    assert (
+        stung[stung.index("-filter_complex") :]
+        == plain[plain.index("-filter_complex") :][:1] + stung[stung.index("-filter_complex") + 1 :]
+    )
+    assert stung[stung.index("-map") :] == plain[plain.index("-map") :], "maps, names and codecs unchanged"
+
+
+def test_a_card_whose_template_fails_is_named_in_the_degradations(tmp_path: Path) -> None:
+    """A broken template used to drop its card with only a log line (#1265 review)."""
+    from splitsmith.overlay_raster import TemplateScriptError
+
+    class _Broken(_FakeRasterizer):
+        def render_template_frames(self, template, *, context, width, height, fps, max_seconds):
+            if context.data["card"]["slot"] == "title_page":
+                raise TemplateScriptError(f"{Path(template).name}: line 4: boom")
+            return super().render_template_frames(
+                template, context=context, width=width, height=height, fps=fps, max_seconds=max_seconds
+            )
+
+    result = mp4_grid.render_grid_mp4(
+        _driver_shooters(tmp_path),
+        audio_label="Anders",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=_ok_runner([]),
+        card_runner=_ok_runner([]),
+        still_runner=_still_runner([]),
+        rasterizer=_Broken(),
+        work_dir=tmp_path / "work",
+        ffmpeg_binary="/bin/ffmpeg",
+        title_page=MatchTitle(text="Bromma", info=("2026-05-01",), duration_seconds=3.0),
+    )
+    notes = [d for d in result.degradations if "line 4: boom" in d.detail]
+    assert len(notes) == 1 and "left out" in notes[0].summary, result.degradations

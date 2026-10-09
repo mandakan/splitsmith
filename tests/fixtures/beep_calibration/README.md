@@ -12,7 +12,10 @@ baseline scores that the layer-2 detector improvements measure against.
   (e.g. `cross-bay`, `steel-fp-observed`, `low-spl`); rebuild with
   `--preserve-tags` to keep them on a re-run.
 * `baseline.json` — committed. Snapshot of the current detector's
-  recall / per-tag stats. Compare against future runs.
+  recall / per-tag stats over the clip track. Compare against future
+  runs. `tests/test_beep_regression.py` pins every fixture it records as
+  correct at top-1, so a detector change that fixes one should
+  regenerate it (`--track clip --json` below) to pin the fix too.
 
 ## Tracks
 
@@ -37,6 +40,10 @@ uv run python scripts/build_beep_calibration.py
 uv run python scripts/build_beep_calibration.py --preserve-tags  # keep hand-edits
 ```
 
+A rebuild on a machine without the gitignored full-track WAVs keeps the
+full-track references the manifest already has. In the eval, a track
+whose WAV is missing counts as `unavailable`, never as a miss.
+
 Run the detector against the suite and print recall per bucket:
 
 ```bash
@@ -44,6 +51,7 @@ uv run python scripts/eval_beep_detector.py
 uv run python scripts/eval_beep_detector.py --tag handheld
 uv run python scripts/eval_beep_detector.py --track full
 uv run python scripts/eval_beep_detector.py --json out/run.json
+uv run python scripts/eval_beep_detector.py --track clip --json tests/fixtures/beep_calibration/baseline.json
 ```
 
 ## Auto-tag rules
@@ -56,3 +64,10 @@ uv run python scripts/eval_beep_detector.py --json out/run.json
 
 Add `cross-bay`, `steel-fp-observed`, `low-spl`, `ro-chatter`, etc. by
 hand once a fixture is reviewed.
+* `ranker_report.json` -- committed. Out-of-fold (leave-one-match-out)
+  evaluation of the learned ranker against today's detector, with the ship
+  gate's verdict (#949, spec 2026-10-06). Regenerate with
+  `uv run python scripts/train_beep_ranker.py`.
+* `baseline_heuristic.json` -- committed. The last run of the hand-written
+  ranker (`ranker: heuristic`) before the learned one became the default
+  (#949); `test_beep_regression.py` keeps that escape hatch honest on it.

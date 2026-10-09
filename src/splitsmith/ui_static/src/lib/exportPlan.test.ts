@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { StageExportStatus } from "@/lib/api";
-import { bareHint, estimateDuration, exportRows, stageBlock, summaryLines } from "@/lib/exportPlan";
+import { bareHint, estimateDuration, exportRows, formatElapsed, stageBlock, summaryLines } from "@/lib/exportPlan";
 
 function stage(over: Partial<StageExportStatus> = {}): StageExportStatus {
   return {
@@ -153,6 +153,12 @@ describe("summaryLines", () => {
     expect(lines[2]).toEqual({ label: "Transitions", value: "cut", dim: true });
     expect(lines[3]).toEqual({ label: "Cards", value: "off", dim: true });
   });
+  it("names the overlay style when one is chosen", () => {
+    const on = summaryLines({ ...base, mode: "single", overlay: true });
+    expect(on.find((l) => l.label === "Overlay")).toEqual({ label: "Overlay", value: "on" });
+    const plate = summaryLines({ ...base, mode: "single", overlay: true, overlayStyle: "Plate" });
+    expect(plate.find((l) => l.label === "Overlay")).toEqual({ label: "Overlay", value: "Plate" });
+  });
   it("names the cards, the cams and YouTube only when the mode and format offer them", () => {
     const lines = summaryLines({ ...base, mode: "single", cards: "title page · slate", cams: "Handheld + Head cam inset", youtube: true });
     expect(lines.map((l) => l.label)).toEqual(["Stages", "Padding", "Transitions", "Cards", "Overlay", "Cameras", "YouTube"]);
@@ -218,5 +224,36 @@ describe("bareHint", () => {
     expect(bareHint("summary", 2)).toBe("Time and scoring only on 2 stages without splits.");
     expect(bareHint("captions", 1)).toBe("Captions cover the audited stages only; 1 stage has none.");
     expect(bareHint("captions", 2)).toBe("Captions cover the audited stages only; 2 stages have none.");
+  });
+});
+
+describe("formatElapsed", () => {
+  it("keeps a decimal under ten seconds, so a fast export is not 0", () => {
+    expect(formatElapsed(0.3)).toBe("0.3s");
+    expect(formatElapsed(9.94)).toBe("9.9s");
+  });
+
+  it("drops it up to a minute", () => {
+    expect(formatElapsed(12.5)).toBe("13s");
+    expect(formatElapsed(59.4)).toBe("59s");
+  });
+
+  it("reads like a duration from a minute on", () => {
+    expect(formatElapsed(59.6)).toBe("1:00");
+    expect(formatElapsed(3600)).toBe("60:00");
+  });
+});
+
+describe("estimateDuration with an MP4 transition (#1244)", () => {
+  it("keeps the length: the fade is centred on the cut", () => {
+    const times = new Map([
+      [1, 10],
+      [2, 10],
+    ]);
+    const base = { mode: "single" as const, head: 3, tail: 2, transitionSeconds: 1, cardSeconds: 0 };
+    const faded = estimateDuration([1, 2], times, { ...base, format: "mp4", transitionKind: "fade" });
+    const cut = estimateDuration([1, 2], times, { ...base, format: "mp4", transitionKind: "none" });
+    expect(faded).toBe(cut);
+    expect(estimateDuration([1, 2], times, { ...base, format: "fcpxml", transitionKind: "zoom" })).toBe(cut + 1);
   });
 });

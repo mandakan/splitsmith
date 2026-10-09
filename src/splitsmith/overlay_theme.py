@@ -1,20 +1,11 @@
 """Color palette for the alpha overlay renderer.
 
-Two presets ship today:
-
-- ``splitsmith`` (default): tokens lifted from the web UI's
-  ``src/splitsmith/ui_static/src/styles/index.css`` ``@theme`` block --
-  the Shot Timer brand palette. Built into
-  ``src/splitsmith/data/overlay_theme.json`` by
-  ``scripts/build_overlay_theme.py`` so the overlay can't silently drift
-  from the rest of the design system.
-- ``clean``: a neutral white-on-amber palette with a pure-black stroke.
-  No brand colours; useful when the overlay needs to read against any
-  background without identifying the tool.
-
-The JSON mirror is intentional: parsing CSS at runtime would mean a CSS
-parser as a runtime dep, and the overlay only needs a handful of tokens.
-Re-run the build script after touching ``index.css``.
+Palettes come from Looks (``splitsmith.looks``): ``load_theme(name)``
+reads ``<look>/look.json``'s ``colors``. The two shipped Looks are
+``splitsmith`` (tokens lifted from the web UI's ``index.css`` by
+``scripts/build_overlay_theme.py``, so the overlay cannot drift from the
+design system) and ``clean`` (neutral white on black). A user Look under
+``~/.splitsmith/looks/`` is a theme too.
 
 Bundled fonts (Antonio + JetBrains Mono, SIL OFL 1.1) live under
 ``src/splitsmith/data/fonts/`` so overlay text renders deterministic
@@ -43,15 +34,19 @@ CSS alone will not reach it.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
-from importlib import resources
-from typing import Literal
 
-ThemeName = Literal["splitsmith", "clean"]
-"""Stable identifiers exposed in the export request + CLI."""
+from .fonts import resolve as resolve_fonts
+from .looks import Look, LookError, LookNotFoundError, load_look
 
-THEME_NAMES: tuple[ThemeName, ...] = ("splitsmith", "clean")
+ThemeName = str
+"""A Look name (#1246): any installed Look, shipped or the user's. The
+request layer validates it against ``looks.look_names()``; the CLI and
+the renderers load whatever name they are given."""
+
+THEME_NAMES: tuple[str, ...] = ("splitsmith", "clean")
+"""The two shipped Looks, for help text; the installed set is
+``looks.look_names()``."""
 
 RGB = tuple[int, int, int]
 
@@ -79,7 +74,7 @@ class OverlayTheme:
     and :func:`load_theme` ignores it.
     """
 
-    name: ThemeName
+    name: str
     ink: RGB
     split: RGB
     split_good: RGB
@@ -119,6 +114,12 @@ class OverlayTheme:
     #: Dimmer label grey than :attr:`muted` (``--color-subtle``), for
     #: captions that must sit below a value without competing with it.
     subtle: RGB
+    #: The Look's faces by role (``splitsmith.fonts`` ids, #1272): what
+    #: ``"Splitsmith Display"`` and ``"Splitsmith Mono"`` draw with, in the
+    #: cards and in the clock. The defaults are the faces every Look drew
+    #: before a Look could choose.
+    display_font: str = "antonio"
+    mono_font: str = "jetbrains-mono"
 
     @property
     def shadow(self) -> RGB:
@@ -129,102 +130,36 @@ class OverlayTheme:
         return self.stroke
 
 
-_CLEAN = OverlayTheme(
-    name="clean",
-    ink=(255, 255, 255),
-    split=(255, 220, 80),
-    # No brand palette to draw from here, so this is a plain, defensible
-    # "success green" -- (46, 204, 113), the Flat UI Colors "Emerald" --
-    # picked for being a common, accessible semantic-success hue that
-    # reads clearly against clean's black stroke and stays visually
-    # distinct from both split's gold and accent's red.
-    split_good=(46, 204, 113),
-    stroke=(0, 0, 0),
-    accent=(255, 45, 45),
-    # No brand palette here either, so these mirror the *relationship*
-    # the splitsmith theme's own three reds carry (a darker fill, a
-    # lighter body-text tint) applied to clean's own accent hue rather
-    # than inventing an unrelated one -- clean's accent already happens
-    # to equal the brand's led red, so the same fill/text pair the brand
-    # theme resolved from --color-led-fill/--color-led-text is reused
-    # verbatim rather than re-derived.
-    accent_fill=(220, 38, 38),
-    accent_text=(255, 180, 180),
-    # Brand-neutral dark and mid greys -- no hue borrowed from accent,
-    # split or split_good, so a hairline or a muted label doesn't quietly
-    # read as "for" one of those semantics.
-    rule=(60, 60, 60),
-    muted=(150, 150, 150),
-    # Sits between ink (255,255,255) and muted (150,150,150) -- no hue
-    # borrowed from accent/split/split_good, same discipline as rule/muted
-    # above.
-    ink_2=(205, 205, 205),
-    # No brand palette here either. The clean theme's existing neutral
-    # discipline: pure black for the plate fill, mid grey for the dimmer
-    # caption tone.
-    surface=(0, 0, 0),
-    subtle=(128, 128, 128),
-)
+def theme_for(look: Look) -> OverlayTheme:
+    """The palette a Look declares (``look.json``'s ``colors``)."""
+    c = look.manifest.colors
+    faces = resolve_fonts(look.manifest.fonts, root=look.root)
+    return OverlayTheme(
+        name=look.name,
+        ink=c["ink"],
+        split=c["split"],
+        split_good=c["split_good"],
+        stroke=c["stroke"],
+        accent=c["accent"],
+        accent_fill=c["accent_fill"],
+        accent_text=c["accent_text"],
+        rule=c["rule"],
+        muted=c["muted"],
+        ink_2=c["ink_2"],
+        surface=c["surface"],
+        subtle=c["subtle"],
+        display_font=faces["display"],
+        mono_font=faces["mono"],
+    )
 
 
-def _load_splitsmith() -> OverlayTheme:
+def load_theme(name: str) -> OverlayTheme:
+    """Resolve a Look name to its palette. Any installed Look, shipped or
+    the user's. ``OverlayThemeError`` for an unknown name, so the callers
+    that predate Looks keep the exception they handle."""
     try:
-        with (
-            resources.files("splitsmith.data")
-            .joinpath("overlay_theme.json")
-            .open("r", encoding="utf-8") as fh
-        ):
-            data = json.load(fh)
-    except (FileNotFoundError, OSError) as exc:
-        raise OverlayThemeError("overlay_theme.json missing; run scripts/build_overlay_theme.py") from exc
-    except json.JSONDecodeError as exc:
-        raise OverlayThemeError(f"overlay_theme.json is not valid JSON: {exc}") from exc
-
-    colors = data.get("colors") or {}
-    try:
-        return OverlayTheme(
-            name="splitsmith",
-            ink=_rgb(colors, "ink"),
-            split=_rgb(colors, "split"),
-            split_good=_rgb(colors, "split_good"),
-            stroke=_rgb(colors, "stroke"),
-            accent=_rgb(colors, "accent"),
-            accent_fill=_rgb(colors, "accent_fill"),
-            accent_text=_rgb(colors, "accent_text"),
-            rule=_rgb(colors, "rule"),
-            muted=_rgb(colors, "muted"),
-            ink_2=_rgb(colors, "ink_2"),
-            surface=_rgb(colors, "surface"),
-            subtle=_rgb(colors, "subtle"),
-        )
-    except (KeyError, TypeError, ValueError) as exc:
-        raise OverlayThemeError(f"overlay_theme.json malformed: {exc}") from exc
-
-
-def _rgb(colors: dict, role: str) -> RGB:
-    raw = colors[role]
-    if not isinstance(raw, (list, tuple)) or len(raw) != 3:
-        raise ValueError(f"{role!r} must be a 3-element list, got {raw!r}")
-    r, g, b = (int(v) for v in raw)
-    for v in (r, g, b):
-        if not 0 <= v <= 255:
-            raise ValueError(f"{role!r} channel out of 0..255 range: {raw!r}")
-    return r, g, b
-
-
-def load_theme(name: ThemeName) -> OverlayTheme:
-    """Resolve a theme name to its palette. Cached at the module level so
-    repeated stage exports don't re-read the JSON. Raises
-    ``OverlayThemeError`` for unknown names or a missing splitsmith JSON
-    artefact."""
-    if name == "clean":
-        return _CLEAN
-    if name == "splitsmith":
-        global _SPLITSMITH
-        if _SPLITSMITH is None:
-            _SPLITSMITH = _load_splitsmith()
-        return _SPLITSMITH
-    raise OverlayThemeError(f"unknown theme {name!r}; expected one of {THEME_NAMES}")
-
-
-_SPLITSMITH: OverlayTheme | None = None
+        return theme_for(load_look(name))
+    except LookNotFoundError as exc:
+        raise OverlayThemeError(str(exc)) from exc
+    except LookError as exc:
+        raise OverlayThemeError(f"Look {name!r} cannot be used: {exc}") from exc

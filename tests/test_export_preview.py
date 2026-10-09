@@ -9,6 +9,7 @@ once with synthetic media under the integration marker.
 from __future__ import annotations
 
 import io
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -16,19 +17,58 @@ from PIL import Image
 
 from splitsmith import export_preview as ep
 from splitsmith.config import StageRounds
+from splitsmith.looks import load_look
 from splitsmith.match_project import MatchProject, StageEntry, StageVideo
-from splitsmith.overlay_theme import load_theme
 
 
 class _StubRasterizer:
-    def __init__(self) -> None:
+    def __init__(self, *, motion_seconds: float = 0.0) -> None:
         self.htmls: list[str] = []
+        self.motion_seconds = motion_seconds
+        self.frame_requests: list[tuple] = []
+        self.frames_rendered = 0
 
     def png(self, html: str, *, width: int, height: int) -> bytes:
         self.htmls.append(html)
         buf = io.BytesIO()
         Image.new("RGBA", (width, height), (0, 0, 0, 0)).save(buf, format="PNG")
         return buf.getvalue()
+
+    def render_template(self, template: Path, *, context, width: int, height: int) -> bytes:
+        import json
+
+        self.htmls.append(json.dumps(context.data, ensure_ascii=False))
+        buf = io.BytesIO()
+        Image.new("RGBA", (width, height), (0, 0, 0, 0)).save(buf, format="PNG")
+        return buf.getvalue()
+
+    def engine_version(self) -> str:
+        return "fake"
+
+    def render_template_frames(
+        self, template, *, context, width: int, height: int, fps: float, max_seconds: float
+    ):
+        """A still unless ``motion_seconds`` is set; frames are blank and
+        counted in ``frames_rendered`` as they are pulled."""
+        import json
+        import math
+
+        from splitsmith.overlay_raster import TemplateFrames
+
+        self.htmls.append(json.dumps(context.data, ensure_ascii=False))
+        self.frame_requests.append((template, context.model_dump(), width, height, fps, max_seconds))
+        duration = self.motion_seconds
+        count = 1 if duration <= 0 else max(1, math.ceil(min(duration, max_seconds) * fps - 1e-9))
+        blank = bytes(width * height * 4)
+
+        def frames():
+            for _ in range(count):
+                self.frames_rendered += 1
+                yield blank
+
+        return TemplateFrames(
+            duration=duration, frame_count=count, width=width, height=height, frames=frames()
+        )
 
 
 def _project(tmp_path: Path) -> tuple[MatchProject, Path]:
@@ -74,7 +114,7 @@ def _render(
         project=project,
         root=root,
         audit_doc=audit,
-        theme=load_theme("splitsmith"),
+        look=load_look("splitsmith"),
         rasterizer=raster or _StubRasterizer(),
         ffmpeg_binary=None,
         work_dir=tmp_path / "work",
@@ -133,12 +173,34 @@ def test_summary_label_is_the_competitor_then_the_bundle_name(tmp_path: Path) ->
         project=project,
         root=root,
         audit_doc=AUDIT,
-        theme=load_theme("splitsmith"),
+        look=load_look("splitsmith"),
         rasterizer=raster,
         ffmpeg_binary=None,
         work_dir=tmp_path / "work",
     )
     assert "Club night" in raster.htmls[-1]
+
+
+def test_summary_preview_carries_the_shooters_accent_like_the_render(tmp_path: Path) -> None:
+    """The rail declares the hold exactly as the render does: an accent
+    the shooter set reaches the preview's cell, so the bar the export
+    draws is the bar the rail shows."""
+    from splitsmith.identity import ResolvedIdentity
+
+    project, root = _project(tmp_path)
+    raster = _StubRasterizer()
+    ep.render_preview(
+        ep.PreviewSpec(card="summary", stage_number=3, project_name="Club night"),
+        project=project,
+        root=root,
+        audit_doc=AUDIT,
+        look=load_look("splitsmith"),
+        rasterizer=raster,
+        ffmpeg_binary=None,
+        work_dir=tmp_path / "work",
+        shooter=ResolvedIdentity(label="M. Axell", accent="#123456", logo_path=None, club=None),
+    )
+    assert "--accent:#123456" in raster.htmls[-1]
 
 
 def test_slate_carries_the_stage_name_and_round_count(tmp_path: Path) -> None:
@@ -150,7 +212,7 @@ def test_slate_carries_the_stage_name_and_round_count(tmp_path: Path) -> None:
         project=project,
         root=root,
         audit_doc=None,
-        theme=load_theme("splitsmith"),
+        look=load_look("splitsmith"),
         rasterizer=raster,
         ffmpeg_binary=None,
         work_dir=tmp_path / "work",
@@ -259,9 +321,126 @@ def test_stage_card_names_an_unnamed_stage_by_number(tmp_path: Path, card: str) 
         project=project,
         root=root,
         audit_doc=None,
-        theme=load_theme("splitsmith"),
+        look=load_look("splitsmith"),
         rasterizer=raster,
         ffmpeg_binary=None,
         work_dir=tmp_path / "work",
     )
     assert "Stage 3" in raster.htmls[-1]
+
+
+def test_preview_key_moves_with_the_look_and_the_variant() -> None:
+    """Slice 6 (#1246): a rise title page and the default one on the same
+    stage are two cache entries, as are two Looks."""
+    base = ep.PreviewSpec(card="title", stage_number=1)
+    key = ep.preview_key(base, slug="me", project_updated_at="t", audit="a")
+    rise = ep.preview_key(replace(base, variant="rise"), slug="me", project_updated_at="t", audit="a")
+    clean = ep.preview_key(replace(base, look="clean"), slug="me", project_updated_at="t", audit="a")
+    assert len({key, rise, clean}) == 3
+
+
+def test_the_variant_reaches_the_cards_template(tmp_path: Path) -> None:
+    """The rasterizer is handed the Look's rise template for a rise
+    preview; ``render_template`` draws it at its poster, so the preview
+    is the finished card, never its invisible first frame."""
+    project, root = _project(tmp_path)
+    seen: list[str] = []
+
+    class _Recording(_StubRasterizer):
+        def render_template(self, template, *, context, width, height):
+            seen.append(template.name)
+            return super().render_template(template, context=context, width=width, height=height)
+
+    for card in ("title", "slate", "lower-third", "closing"):
+        ep.render_preview(
+            ep.PreviewSpec(card=card, stage_number=3, variant="rise"),
+            project=project,
+            root=root,
+            audit_doc=None,
+            look=load_look("splitsmith"),
+            rasterizer=_Recording(),
+            ffmpeg_binary=None,
+            work_dir=tmp_path / "work",
+        )
+    assert seen == ["card-rise.html"] * 4
+
+
+# --- overlay styles (template HUD, slice 3) ------------------------------------
+
+
+class _HudRasterizer(_StubRasterizer):
+    """The stub plus a HUD timeline: ``plan`` gets a fixed settle; one
+    blank frame per planned time."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.timelines: list[dict] = []
+
+    def render_template_timeline(self, template, *, context, width: int, height: int, plan):  # noqa: ANN001
+        from splitsmith.overlay_raster import TemplateFrames
+
+        times = list(plan(0.5))
+        self.timelines.append({"template": template, "data": context.data, "times": times})
+        blank = bytes(width * height * 4)
+        return TemplateFrames(
+            duration=0.5,
+            frame_count=len(times),
+            width=width,
+            height=height,
+            frames=iter([blank] * len(times)),
+        )
+
+
+def test_an_overlay_style_previews_as_a_loop_of_the_stage(tmp_path: Path) -> None:
+    from splitsmith.overlay_hud import HudOptions
+
+    raster = _HudRasterizer()
+    spec = ep.PreviewSpec(
+        card="overlay",
+        stage_number=3,
+        width=480,
+        motion=True,
+        overlay_variant="plate",
+        overlay_options=HudOptions(position="top-right"),
+    )
+    data = _render(tmp_path, spec, audit=AUDIT, raster=raster)
+    with Image.open(io.BytesIO(data)) as image:
+        assert image.format == "WEBP"
+    (timeline,) = raster.timelines
+    assert timeline["template"].name == "hud-plate.html"
+    assert timeline["data"]["options"]["position"] == "top-right"
+    times = timeline["times"]
+    stage = timeline["data"]["stage"]
+    assert times[0] < stage["beep"] and times[-1] > stage["shots"][-1]["t"] + 0.5, "beep through the landing"
+    assert raster.htmls == [], "Classic drew nothing"
+
+
+def test_an_overlay_style_still_is_one_frame_after_a_shot(tmp_path: Path) -> None:
+    raster = _HudRasterizer()
+    spec = ep.PreviewSpec(card="overlay", stage_number=3, width=480, overlay_variant="pips")
+    png = _render(tmp_path, spec, audit=AUDIT, raster=raster)
+    assert _png_size(png) == (480, 270)
+    (timeline,) = raster.timelines
+    assert len(timeline["times"]) == 1 and timeline["times"][0] > timeline["data"]["stage"]["shots"][-1]["t"]
+
+
+def test_an_unknown_overlay_style_previews_as_classic(tmp_path: Path) -> None:
+    raster = _HudRasterizer()
+    spec = ep.PreviewSpec(card="overlay", stage_number=3, width=480, overlay_variant="nope")
+    _render(tmp_path, spec, audit=AUDIT, raster=raster)
+    assert raster.timelines == [] and "3/3" in raster.htmls[-1]
+
+
+def test_the_overlay_style_moves_the_key_only_on_an_overlay_card() -> None:
+    from splitsmith.overlay_hud import HudOptions
+
+    def key(spec: ep.PreviewSpec) -> str:
+        return ep.preview_key(spec, slug="me", project_updated_at="t", audit="a")
+
+    classic = ep.PreviewSpec(card="overlay", stage_number=3)
+    styled = replace(classic, overlay_variant="plate")
+    assert key(classic) == key(replace(classic, overlay_options=HudOptions(landing=False)))
+    assert key(styled) != key(classic)
+    assert key(styled) != key(replace(styled, overlay_options=HudOptions(landing=False)))
+    slate = ep.PreviewSpec(card="slate", stage_number=3)
+    assert key(slate) == key(replace(slate, overlay_variant="plate"))

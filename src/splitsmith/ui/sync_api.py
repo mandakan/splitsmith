@@ -63,11 +63,32 @@ router = APIRouter(prefix="/api/sync")
 # .params.json sidecars; beep_review/ holds .m4a snippets plus their
 # .peaks.json. The cross-product (trimmed/*.m4a, beep_review/*.mp4) is
 # not a thing the desktop push ever writes, so the gate rejects it.
+# identity/ holds the shooter's logo (#1243): content-named, raster only,
+# exactly the shape ``identity.ShooterIdentity`` admits.
 _SYNC_MEDIA_KEY_RE = re.compile(
-    r"^matches/(?P<match_id>[A-Za-z0-9._-]+)/shooters/[A-Za-z0-9_-]+/"
+    r"^matches/(?P<match_id>[A-Za-z0-9._-]+)/(?:shooters/[A-Za-z0-9_-]+/"
     r"(?:trimmed/[A-Za-z0-9._-]+\.(?:mp4|json)"
-    r"|beep_review/[A-Za-z0-9._-]+\.(?:m4a|json))$"
+    r"|beep_review/[A-Za-z0-9._-]+\.(?:m4a|json)"
+    r"|identity/logo-[0-9a-f]{12}\.(?:png|jpe?g|webp))"
+    # The event's logo (the branding work): the one match-level media file.
+    r"|identity/event-[0-9a-f]{12}\.(?:png|jpe?g|webp))$"
 )
+
+
+def deletable_media_shape(key: str) -> bool:
+    """Whether ``delete_media`` may remove ``key``: a beep_review snippet,
+    a full trim, a rendition (its own extra check follows), or a logo
+    (#1243, content-named, so a replaced one is a stale key the push gc
+    removes). The ``.params.json`` sidecar is never deletable."""
+    name = key.rsplit("/", 1)[1]
+    in_trimmed = "/trimmed/" in key
+    is_web = in_trimmed and name.endswith(WEB_SUFFIX)
+    return (
+        "/beep_review/" in key
+        or "/identity/" in key
+        or (in_trimmed and name.endswith(TRIMMED_SUFFIX))
+        or is_web
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -784,14 +805,15 @@ async def delete_media(
 ) -> SyncMediaDeleteResponse:
     """Remove a pushed object the desktop no longer wants on hosted.
 
-    Three shapes only. A beep_review snippet (#821): the desktop deletes it
+    Four shapes only. A beep_review snippet (#821): the desktop deletes it
     when a video's beep is confirmed, since a stale remote copy makes
     snippet_ready lie forever. A full-resolution ``*_trimmed.mp4`` on a
     web-only mirror (spec 2026-09-27 v1.1), once its rendition is on R2.
     A stale ``*_web.mp4`` rendition (#1077), and only while its full trim
     is in storage to play instead: the rendition is what a web-only mirror
-    plays, so it is never the last copy of a clip to go. The
-    ``.params.json`` sidecar is never deletable here. Idempotent: deleting
+    plays, so it is never the last copy of a clip to go. A replaced
+    identity logo (#1243). The ``.params.json`` sidecar is never deletable
+    here. Idempotent: deleting
     a missing key is success, so a crashed push can retry safely."""
     _hosted_gate()
     await _resolve_mirror(request, match_id)
@@ -799,8 +821,10 @@ async def delete_media(
     name = body.key.rsplit("/", 1)[1]
     in_trimmed = "/trimmed/" in body.key
     is_web = in_trimmed and name.endswith(WEB_SUFFIX)
-    if "/beep_review/" not in body.key and not (in_trimmed and name.endswith(TRIMMED_SUFFIX)) and not is_web:
-        raise HTTPException(status_code=422, detail="delete is beep_review, full-trim or rendition only")
+    if not deletable_media_shape(body.key):
+        raise HTTPException(
+            status_code=422, detail="delete is beep_review, full-trim, rendition or logo only"
+        )
     storage = _require_storage(request)
     if is_web and not storage.exists(trim_key_for(body.key)):
         raise HTTPException(status_code=409, detail="rendition_is_the_only_copy")

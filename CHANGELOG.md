@@ -1,5 +1,108 @@
 # Changelog
 
+## [0.64.1](https://github.com/mandakan/splitsmith/compare/v0.64.0...v0.64.1) (2026-10-08)
+
+
+### Bug Fixes
+
+* **identity:** the roster and title page show the shooter book's look ([#1303](https://github.com/mandakan/splitsmith/issues/1303)) ([53f2c2c](https://github.com/mandakan/splitsmith/commit/53f2c2c486d89f5974f6c8ed8c59f5cbd2dcc913))
+
+## [0.64.0](https://github.com/mandakan/splitsmith/compare/v0.63.0...v0.64.0) (2026-10-08)
+
+
+### Features
+
+* **compare:** a match summary card on the grid MP4 ([#1300](https://github.com/mandakan/splitsmith/issues/1300)) ([406fe4e](https://github.com/mandakan/splitsmith/commit/406fe4ed5623c60db2245cf625a1f16dfb52c17d))
+* **export:** a match summary card at the end of the video ([#1298](https://github.com/mandakan/splitsmith/issues/1298)) ([3e46937](https://github.com/mandakan/splitsmith/commit/3e46937156216c5c0c7834791f90d1aab09cf3c1))
+* **hosted:** the shooter book and account brand on splitsmith.app ([#1302](https://github.com/mandakan/splitsmith/issues/1302)) ([d51b550](https://github.com/mandakan/splitsmith/commit/d51b5502c15c92fb30648b9c7e05880cc85fa328))
+* **identity:** You, your brand and the shooter book (local) ([#1301](https://github.com/mandakan/splitsmith/issues/1301)) ([31d2c2f](https://github.com/mandakan/splitsmith/commit/31d2c2f78b570e744bd8512cbe55b4ba2948feeb))
+
+## [0.63.0](https://github.com/mandakan/splitsmith/compare/v0.62.0...v0.63.0) (2026-10-07)
+
+
+### Features
+
+* **identity:** a shooter's club line from the scoreboard ([#1292](https://github.com/mandakan/splitsmith/issues/1292)) ([bc25281](https://github.com/mandakan/splitsmith/commit/bc25281c670b4c17ec3b6291513f665a6622f707))
+* **looks:** "Made with splitsmith" on the closing card ([#1296](https://github.com/mandakan/splitsmith/issues/1296)) ([4904ca3](https://github.com/mandakan/splitsmith/commit/4904ca37306137ba493378f56e986662abf696b8))
+* **looks:** event logo as the centrepiece, your brand in the corner ([#1295](https://github.com/mandakan/splitsmith/issues/1295)) ([e454875](https://github.com/mandakan/splitsmith/commit/e4548755c92464fb384980e5aaa490d3f52f35cc))
+* **looks:** your brand on the title page and the closing card ([#1293](https://github.com/mandakan/splitsmith/issues/1293)) ([02841be](https://github.com/mandakan/splitsmith/commit/02841bef190691eb1d5dbc3ab38249aff17c561c))
+
+
+### Documentation
+
+* custom Look templates are desktop only ([#1297](https://github.com/mandakan/splitsmith/issues/1297)) ([90d596d](https://github.com/mandakan/splitsmith/commit/90d596d7a5b30a12686796cbb398761b829b80a6))
+
+## [0.62.0](https://github.com/mandakan/splitsmith/compare/v0.61.0...v0.62.0) (2026-10-07)
+
+
+### Features
+
+* **looks:** a Look editor that says what it is doing ([#1290](https://github.com/mandakan/splitsmith/issues/1290)) ([c7f05e1](https://github.com/mandakan/splitsmith/commit/c7f05e1f20d7f9ac1a28937a873bc47faa42feba))
+* **looks:** Make your own Look, from the Look row ([#1291](https://github.com/mandakan/splitsmith/issues/1291)) ([36b16c1](https://github.com/mandakan/splitsmith/commit/36b16c167c1651aaeb893d5d11e7643b3f803eb6))
+
+
+### Bug Fixes
+
+* **hosted:** Look previews on a desktop mirror were refused as edits ([#1287](https://github.com/mandakan/splitsmith/issues/1287)) ([e3790a5](https://github.com/mandakan/splitsmith/commit/e3790a5b055939a20c7f68487c88c7a6136ea447))
+
+## [0.61.0](https://github.com/mandakan/splitsmith/compare/v0.60.0...v0.61.0) (2026-10-07)
+
+
+### Features
+
+* **app:** What's new, in-app release notes written for users ([#1274](https://github.com/mandakan/splitsmith/issues/1274)) ([51540a9](https://github.com/mandakan/splitsmith/commit/51540a97b6d1b4b0094575168bbcc006b0f3a224))
+* **beep:** per-candidate ranking features, ranking unchanged ([#949](https://github.com/mandakan/splitsmith/issues/949)) ([#1251](https://github.com/mandakan/splitsmith/issues/1251)) ([b9d6737](https://github.com/mandakan/splitsmith/commit/b9d67378dca8f0ccbb8682ed13487b66f617fbdf))
+* **beep:** rank beep candidates with the learned ranker; auto-trust at 0.97 ([#949](https://github.com/mandakan/splitsmith/issues/949)) ([#1261](https://github.com/mandakan/splitsmith/issues/1261)) ([2edf7cb](https://github.com/mandakan/splitsmith/commit/2edf7cb016440805e1fc45ebcbaa118abcdabd6f))
+* **beep:** ranker trainer and the out-of-fold report ([#949](https://github.com/mandakan/splitsmith/issues/949)) ([#1252](https://github.com/mandakan/splitsmith/issues/1252)) ([ffa00d8](https://github.com/mandakan/splitsmith/commit/ffa00d8c4ae7f3ae8d88b82074a57c3136edf9c3))
+* **compare:** the grid render reuses unchanged segments from the render cache ([#1284](https://github.com/mandakan/splitsmith/issues/1284)) ([91a4185](https://github.com/mandakan/splitsmith/commit/91a4185f1e1b67424e6e693e71614831be2c7a0e))
+* **export:** moving previews of animated cards and stings ([#1249](https://github.com/mandakan/splitsmith/issues/1249)) ([#1281](https://github.com/mandakan/splitsmith/issues/1281)) ([807d902](https://github.com/mandakan/splitsmith/commit/807d9022f3919bbf25aceaf3578693f9f74727fc))
+* **export:** warn before rendering when the chosen Look's templates fail ([#1276](https://github.com/mandakan/splitsmith/issues/1276)) ([#1280](https://github.com/mandakan/splitsmith/issues/1280)) ([2885d86](https://github.com/mandakan/splitsmith/commit/2885d861179e526982a7bbc6a50ed415cf4142cd))
+* **gallery:** the Look gallery fed from the Looks API, per-slot variants, looping previews ([#1246](https://github.com/mandakan/splitsmith/issues/1246)) ([#1258](https://github.com/mandakan/splitsmith/issues/1258)) ([4db873c](https://github.com/mandakan/splitsmith/commit/4db873cdafb2986df8c7cbe4c06931e1723b4016))
+* **grid-transitions:** MP4 transitions on the compare grid ([#1244](https://github.com/mandakan/splitsmith/issues/1244)) ([#1256](https://github.com/mandakan/splitsmith/issues/1256)) ([0d41488](https://github.com/mandakan/splitsmith/commit/0d414881bdf8afdc3c9620efe24d68a23ab7a262))
+* **identity:** a shooter's accent and logo on Compare and the share views ([#1249](https://github.com/mandakan/splitsmith/issues/1249)) ([#1282](https://github.com/mandakan/splitsmith/issues/1282)) ([344cdc1](https://github.com/mandakan/splitsmith/commit/344cdc149d38c0033c68dcf43d646ce0a4d476fb))
+* **identity:** per-shooter identity: accent, club logo, club line ([#1243](https://github.com/mandakan/splitsmith/issues/1243)) ([#1254](https://github.com/mandakan/splitsmith/issues/1254)) ([52b748a](https://github.com/mandakan/splitsmith/commit/52b748a3c33cc5623baf14c26e582283e34c81d5))
+* **looks:** a Look's own font file, on the desktop ([#1272](https://github.com/mandakan/splitsmith/issues/1272)) ([#1285](https://github.com/mandakan/splitsmith/issues/1285)) ([54dd3e5](https://github.com/mandakan/splitsmith/commit/54dd3e51e0fb20bcde7662da8bb0a5fcf951a03b))
+* **looks:** animated templates, the rise variant and motion segments ([#1242](https://github.com/mandakan/splitsmith/issues/1242)) ([#1253](https://github.com/mandakan/splitsmith/issues/1253)) ([213077e](https://github.com/mandakan/splitsmith/commit/213077e7ba52312a6cdef2007c0bc883e7b90017))
+* **looks:** choose a Look's fonts from a bundled set ([#1272](https://github.com/mandakan/splitsmith/issues/1272)) ([#1279](https://github.com/mandakan/splitsmith/issues/1279)) ([2836343](https://github.com/mandakan/splitsmith/commit/283634301118224ee1749593d1c41fbb7e2333df))
+* **looks:** palette suggestions from colour theory, the footage and the logo ([#1273](https://github.com/mandakan/splitsmith/issues/1273)) ([#1277](https://github.com/mandakan/splitsmith/issues/1277)) ([7132d6b](https://github.com/mandakan/splitsmith/commit/7132d6b4575b8008e4e65def08b7e4ea3f06182a))
+* **looks:** per-account Look storage, local folders and hosted rows ([#1263](https://github.com/mandakan/splitsmith/issues/1263)) ([#1270](https://github.com/mandakan/splitsmith/issues/1270)) ([f78ccac](https://github.com/mandakan/splitsmith/commit/f78ccac1b77668db60f3abe808b5edd9efcfc369))
+* **looks:** templates load in a sandbox ([#1266](https://github.com/mandakan/splitsmith/issues/1266)) ([#1286](https://github.com/mandakan/splitsmith/issues/1286)) ([084cd59](https://github.com/mandakan/splitsmith/commit/084cd599eb278985ddf902fabe3880ba11dee85d))
+* **looks:** the authoring guide, four starters and splitsmith looks list | new | check | preview ([#1262](https://github.com/mandakan/splitsmith/issues/1262)) ([#1269](https://github.com/mandakan/splitsmith/issues/1269)) ([061a2aa](https://github.com/mandakan/splitsmith/commit/061a2aaf4f5ae0cb617c0ff0532d8998157de78b))
+* **looks:** the Look directory, two migrated Looks, cards through templates ([#1241](https://github.com/mandakan/splitsmith/issues/1241)) ([#1250](https://github.com/mandakan/splitsmith/issues/1250)) ([ad226ab](https://github.com/mandakan/splitsmith/commit/ad226ab2fe43f12230f7863c02787889856705dc))
+* **looks:** the Look editor, palette, card styles and a draft preview ([#1264](https://github.com/mandakan/splitsmith/issues/1264)) ([#1271](https://github.com/mandakan/splitsmith/issues/1271)) ([f71d9bb](https://github.com/mandakan/splitsmith/commit/f71d9bbffa404f8791319c494e849513b463ec5b))
+* **looks:** the template editor, HTML in CodeMirror with a live preview ([#1265](https://github.com/mandakan/splitsmith/issues/1265)) ([#1275](https://github.com/mandakan/splitsmith/issues/1275)) ([2d69054](https://github.com/mandakan/splitsmith/commit/2d69054bb90c90b4aeaa633d3fe0c33fd4a39ef9))
+* **stings:** sting transitions, a Look template over the boundary segment ([#1245](https://github.com/mandakan/splitsmith/issues/1245)) ([#1257](https://github.com/mandakan/splitsmith/issues/1257)) ([0f0740b](https://github.com/mandakan/splitsmith/commit/0f0740bc21f6b79042573a49bcb63ced2188af1c))
+* **transitions:** more transitions as families with a direction, served from one list ([#1259](https://github.com/mandakan/splitsmith/issues/1259)) ([#1260](https://github.com/mandakan/splitsmith/issues/1260)) ([fcb65bb](https://github.com/mandakan/splitsmith/commit/fcb65bbe4b2687b9b0484803c727270a9ce73715))
+* **transitions:** MP4 transitions on a boundary segment, single-shooter renderer ([#1244](https://github.com/mandakan/splitsmith/issues/1244)) ([#1255](https://github.com/mandakan/splitsmith/issues/1255)) ([5798e6c](https://github.com/mandakan/splitsmith/commit/5798e6cf396d8b9d3b34edcc83ced99b7b26b560))
+
+
+### Bug Fixes
+
+* CI flakes and the looks command review notes ([#1283](https://github.com/mandakan/splitsmith/issues/1283)) ([8d8df8c](https://github.com/mandakan/splitsmith/commit/8d8df8c9f2989f12b994cf0acaaeae3a5f9242a3))
+* **commands:** a late upload success on a lapsed cancel is recorded ([#1116](https://github.com/mandakan/splitsmith/issues/1116)) ([#1235](https://github.com/mandakan/splitsmith/issues/1235)) ([d954e89](https://github.com/mandakan/splitsmith/commit/d954e89d7d022291c633d7a9957e0a7739105e49))
+* **export:** label the timeline length and the job time apart ([#934](https://github.com/mandakan/splitsmith/issues/934)) ([#1236](https://github.com/mandakan/splitsmith/issues/1236)) ([ceaee79](https://github.com/mandakan/splitsmith/commit/ceaee79f26f41445c3108202933873d9840c40ae))
+* **footage:** a re-imported clip is reported as skipped, not added ([#1233](https://github.com/mandakan/splitsmith/issues/1233)) ([#1234](https://github.com/mandakan/splitsmith/issues/1234)) ([f5ea456](https://github.com/mandakan/splitsmith/commit/f5ea456fc1d29d540087df62eacd074b06d9f218))
+* **footage:** an import says why each file was skipped ([#1227](https://github.com/mandakan/splitsmith/issues/1227)) ([#1232](https://github.com/mandakan/splitsmith/issues/1232)) ([61cb728](https://github.com/mandakan/splitsmith/commit/61cb728c79c224576a700e0deaef9588d3faf6c7))
+* **looks:** long names fit the cards' width, then ellipsize ([#1268](https://github.com/mandakan/splitsmith/issues/1268)) ([#1278](https://github.com/mandakan/splitsmith/issues/1278)) ([9fc4035](https://github.com/mandakan/splitsmith/commit/9fc4035d640bf6bcb35d57d3aafa3660d971661f))
+
+
+### Performance
+
+* **beep:** run the Hilbert FFT at a fast length ([#1237](https://github.com/mandakan/splitsmith/issues/1237)) ([966437f](https://github.com/mandakan/splitsmith/commit/966437fad16e614e1fa4aea82e03708784a37408))
+
+
+### Documentation
+
+* **spec:** rendered video first ([#1239](https://github.com/mandakan/splitsmith/issues/1239)) ([cb9ed50](https://github.com/mandakan/splitsmith/commit/cb9ed50cb3895d93d0fa386f57f5b0152b9cbaaf))
+
+
+### Build / CI
+
+* **deps:** bump fsspec from 2026.4.0 to 2026.6.0 ([#1219](https://github.com/mandakan/splitsmith/issues/1219)) ([e712ebb](https://github.com/mandakan/splitsmith/commit/e712ebbc922641288ed8846c8f7f21d51f655d24))
+* **deps:** bump mako from 1.3.12 to 1.4.2 ([#1220](https://github.com/mandakan/splitsmith/issues/1220)) ([5c47706](https://github.com/mandakan/splitsmith/commit/5c477061341a59c7adb67d4fa6617c2b6d55ccb4))
+* **deps:** bump urllib3 from 2.7.0 to 2.8.0 ([#1119](https://github.com/mandakan/splitsmith/issues/1119)) ([ad2ad91](https://github.com/mandakan/splitsmith/commit/ad2ad91eebc4dfc77e34aa3a5cee98cb5c9f5065))
+* **deps:** bump werkzeug from 3.1.8 to 3.1.9 ([#1221](https://github.com/mandakan/splitsmith/issues/1221)) ([dfb849d](https://github.com/mandakan/splitsmith/commit/dfb849df3eb3f5abb99d53c55bb8a0eb1c891f59))
+
 ## [0.60.0](https://github.com/mandakan/splitsmith/compare/v0.59.0...v0.60.0) (2026-10-06)
 
 

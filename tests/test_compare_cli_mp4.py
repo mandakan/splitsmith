@@ -241,6 +241,49 @@ def test_mp4_render_receives_the_loaded_bundles_and_resolved_audio_label(
     assert seen["output_path"] == output
 
 
+def test_mp4_render_receives_one_resolved_identity_per_shooter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The CLI resolves each project's identity against the Look and hands
+    the renderer the map keyed by tile label, so the cards and the summary
+    draw it (the renderer never reads a project itself)."""
+    from splitsmith.identity import ResolvedIdentity
+
+    match_root = _seed_match_with_stages(tmp_path / "match", stage_count=1)
+    _patch_probe(monkeypatch)
+    seen: dict[str, Any] = {}
+    real_render = cli_mod.mp4_grid.render_grid_mp4
+
+    def spy(shooters, *, audio_label, output_path, **kwargs):
+        seen["identities"] = kwargs.get("identities")
+        return real_render(shooters, audio_label=audio_label, output_path=output_path, **kwargs)
+
+    monkeypatch.setattr(cli_mod.mp4_grid, "render_grid_mp4", spy)
+    monkeypatch.setattr(cli_mod.subprocess, "run", _ffmpeg_stub_factory())
+
+    result = runner.invoke(
+        app,
+        [
+            "compare",
+            "export",
+            str(match_root),
+            "--audio-from",
+            "mathias",
+            "--format",
+            "mp4",
+            "-o",
+            str(tmp_path / "out.mp4"),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    identities = seen["identities"]
+    assert set(identities) == {"Mathias"}
+    resolved = identities["Mathias"]
+    assert isinstance(resolved, ResolvedIdentity)
+    assert resolved.accent is None, "nothing set, nothing drawn"
+    assert resolved.logo_path is None
+
+
 # --- work dir ownership --------------------------------------------------
 
 
@@ -866,6 +909,10 @@ def test_card_flags_reach_the_renderer(tmp_path: Path, monkeypatch: pytest.Monke
     assert title.text == "Compare Match"
     assert title.info == ("Level II",)
     assert captured["closing"].text == "Compare Match"
+    assert captured["closing"].credit is True and title.credit is False
+    result = _invoke_mp4(match_root, tmp_path / "out2.mp4", "--closing-card", "--no-made-with")
+    assert result.exit_code == 0, result.output
+    assert captured["closing"].credit is False
 
 
 def test_title_page_carries_the_match_date_when_known(
@@ -910,3 +957,153 @@ def test_unknown_titles_kind_is_refused(tmp_path: Path, monkeypatch: pytest.Monk
     result = _invoke_mp4(match_root, tmp_path / "out.mp4", "--titles", "banner")
     assert result.exit_code == 2
     assert "banner" in strip_ansi(result.output)
+
+
+def test_card_variant_reaches_the_grid_and_its_match_cards(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--card-variant`` (#1242) names the Look variant for every card the
+    grid draws: the stage cards it builds itself and the title page the
+    CLI builds for it."""
+    match_root = _seed_match_with_stages(tmp_path / "match", stage_count=1)
+    output = tmp_path / "out.mp4"
+    _patch_probe(monkeypatch)
+
+    seen: dict[str, Any] = {}
+    real_render = cli_mod.mp4_grid.render_grid_mp4
+
+    def spy(shooters, *, audio_label, output_path, **kwargs):
+        seen.update(kwargs)
+        return real_render(shooters, audio_label=audio_label, output_path=output_path, **kwargs)
+
+    monkeypatch.setattr(cli_mod.mp4_grid, "render_grid_mp4", spy)
+    monkeypatch.setattr(cli_mod.subprocess, "run", _ffmpeg_stub_factory())
+
+    result = runner.invoke(
+        app,
+        [
+            "compare",
+            "export",
+            str(match_root),
+            "--audio-from",
+            "mathias",
+            "--format",
+            "mp4",
+            "--title-page",
+            "--card-variant",
+            "rise",
+            "-o",
+            str(output),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert seen["card_variant"] == "rise"
+    assert seen["title_page"] is not None and seen["title_page"].variant == "rise"
+
+
+# --- transitions (#1244) -----------------------------------------------------
+
+
+def test_transition_flags_reach_the_grid_renderer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from splitsmith import composition
+
+    match_root = _seed_match_with_stages(tmp_path / "match", stage_count=2)
+    _patch_probe(monkeypatch)
+    captured: dict[str, Any] = {}
+
+    def fake_render(*args: Any, **kwargs: Any) -> mp4_grid.GridRenderResult:
+        captured.update(kwargs)
+        return mp4_grid.GridRenderResult(output_path=kwargs["output_path"], stages=())
+
+    monkeypatch.setattr(cli_mod.mp4_grid, "render_grid_mp4", fake_render)
+    result = runner.invoke(
+        app,
+        [
+            "compare",
+            "export",
+            str(match_root),
+            "--audio-from",
+            "mathias",
+            "--format",
+            "mp4",
+            "-o",
+            str(tmp_path / "out.mp4"),
+            "--transition",
+            "fade",
+            "--transition-seconds",
+            "1",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["transitions"] == (
+        composition.Transition(from_stage_index=0, to_stage_index=1, kind="fade", duration_seconds=1.0),
+    )
+    assert "--transition" in strip_ansi(runner.invoke(app, ["compare", "export", "--help"]).output)
+
+
+def test_a_bad_transition_kind_is_a_usage_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    match_root = _seed_match_with_stages(tmp_path / "match", stage_count=2)
+    _patch_probe(monkeypatch)
+    result = runner.invoke(
+        app,
+        [
+            "compare",
+            "export",
+            str(match_root),
+            "--audio-from",
+            "mathias",
+            "--format",
+            "mp4",
+            "--transition",
+            "nope",
+        ],
+    )
+    assert result.exit_code == 2, result.output
+    assert "transition" in strip_ansi(result.output)
+
+
+def test_a_sting_kind_passes_the_cli_check_and_a_malformed_one_does_not(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #1245: ``--transition sting:wipe`` is a valid kind; ``sting:``
+    alone is the usage error ``nope`` is."""
+    match_root = _seed_match_with_stages(tmp_path / "match", stage_count=2)
+    _patch_probe(monkeypatch)
+    captured: dict[str, Any] = {}
+
+    def fake_render(*args: Any, **kwargs: Any) -> mp4_grid.GridRenderResult:
+        captured.update(kwargs)
+        return mp4_grid.GridRenderResult(output_path=kwargs["output_path"], stages=())
+
+    monkeypatch.setattr(cli_mod.mp4_grid, "render_grid_mp4", fake_render)
+    base = ["compare", "export", str(match_root), "--audio-from", "mathias", "--format", "mp4", "-o"]
+    base.append(str(tmp_path / "out.mp4"))
+    base.append("--transition")
+    result = runner.invoke(app, [*base, "sting:"])
+    assert result.exit_code == 2, result.output
+    result = runner.invoke(app, [*base, "sting:wipe"])
+    assert result.exit_code == 0, result.output
+    assert [t.kind for t in captured["transitions"]] == ["sting:wipe"]
+
+
+def test_a_transition_with_the_fcpxml_grid_is_refused_like_every_mp4_only_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    match_root = _seed_match_with_stages(tmp_path / "match", stage_count=2)
+    _patch_probe(monkeypatch)
+    result = runner.invoke(
+        app,
+        [
+            "compare",
+            "export",
+            str(match_root),
+            "--audio-from",
+            "mathias",
+            "-o",
+            str(tmp_path / "o.fcpxml"),
+            "--transition",
+            "fade",
+        ],
+    )
+    assert result.exit_code == 2, result.output
+    assert "--transition requires --format mp4" in strip_ansi(result.output)
