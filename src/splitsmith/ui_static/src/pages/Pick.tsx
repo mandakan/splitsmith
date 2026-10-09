@@ -322,10 +322,15 @@ export function Pick() {
           actions={
             <>
               {mode === "local" ? (
-                <Button type="button" onClick={() => navigate("/you")}>
-                  You
-                  <NewChip feature={YOU_FEATURE} />
-                </Button>
+                <>
+                  <Button type="button" onClick={() => navigate("/you")}>
+                    You
+                    <NewChip feature={YOU_FEATURE} />
+                  </Button>
+                  <Button type="button" onClick={() => navigate("/shooters")}>
+                    Shooters
+                  </Button>
+                </>
               ) : null}
               {localFs && canCreate ? (
                 <Button
