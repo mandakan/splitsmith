@@ -145,7 +145,7 @@ export function MultiCamColumn({
         style={fill ? undefined : { height: primaryHeight }}
         className={cn(
           "relative overflow-hidden rounded-2xl border border-rule-strong bg-surface shadow-[inset_0_1px_0_rgba(255,255,255,0.02),0_18px_36px_-24px_rgba(0,0,0,0.7)]",
-          fill && "aspect-video max-h-[55vh] w-full [&_video]:object-contain",
+          fill && "aspect-video max-h-[max(240px,calc(100dvh-620px))] w-full [&_video]:object-contain",
         )}
       >
         <span

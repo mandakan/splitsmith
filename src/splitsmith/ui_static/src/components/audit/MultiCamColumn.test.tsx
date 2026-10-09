@@ -56,6 +56,6 @@ describe("MultiCamColumn fill", () => {
     expect(aside.style.width).toBe("");
     expect(aside).toHaveClass("w-full");
     expect(tile.style.height).toBe("");
-    expect(tile).toHaveClass("aspect-video", "w-full", "max-h-[55vh]");
+    expect(tile).toHaveClass("aspect-video", "w-full", "max-h-[max(240px,calc(100dvh-620px))]");
   });
 });
