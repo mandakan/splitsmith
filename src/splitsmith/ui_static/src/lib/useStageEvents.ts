@@ -11,7 +11,11 @@
  * (a shot PATCH, a reclassify) -- takes the payload, the revision and the
  * server's regions, but never replaces the local list while a local edit is
  * outstanding: in the debounce, in flight (or in a 409's reload), owed to a
- * re-send, or under the pointer. The list catches up with the server's when
+ * re-send, or under the pointer. While an edit is outstanding, a foreign
+ * response whose regions differ from the ones this tab last saw from the
+ * server (another writer's) takes only the payload, not the revision: the
+ * edit then 409s on its own revision and is discarded rather than overwrite
+ * those regions. The list catches up with the server's when
  * the last of those settles; a cancelled drag (Esc, pointercancel) adopts it
  * then, a release supersedes it with its own PUT.
  *
@@ -40,6 +44,8 @@ export interface StageEvents {
   /**
    * Adopt a coach response: ``applyCoach``, the revision and the server's
    * regions; the local list follows only when no local edit is outstanding.
+   * While one is, a response carrying other regions (another writer's)
+   * takes only ``applyCoach``, so the edit 409s instead of overwriting them.
    */
   apply: (next: CoachStageResponse | null) => void;
   /** The LaneEditor's ``onChange``: local always, a debounced PUT when ``commit``. */
@@ -102,18 +108,25 @@ export function useStageEvents(
     settledRef.current = Math.max(settledRef.current, seq);
   }, []);
 
+  // A local edit is under the pointer, in the debounce, or in flight (a PUT
+  // or its 409's reload). An owed re-send needs no clause: it exists only
+  // while the drag is live.
+  const outstanding = useCallback(
+    () => liveRef.current || pendingRef.current !== null || settledRef.current < seqRef.current,
+    [],
+  );
+
   // The local list catches up with the server's once no local edit is outstanding.
   const catchUp = useCallback(() => {
-    // (An owed re-send needs no clause: it exists only while the drag is live.)
-    if (liveRef.current || pendingRef.current !== null) return;
-    if (settledRef.current < seqRef.current) return;
+    if (outstanding()) return;
     const list = serverEventsRef.current;
     goodRef.current = list;
     setEvents(list);
     setSelectedId((id) => (id && list.some((e) => e.id === id) ? id : null));
-  }, []);
+  }, [outstanding]);
 
-  const apply = useCallback(
+  // Our own answers (a PUT's response, a 409's reload): authoritative, always advance.
+  const adopt = useCallback(
     (next: CoachStageResponse | null) => {
       applyCoach(next);
       revisionRef.current = next?._version;
@@ -121,6 +134,22 @@ export function useStageEvents(
       catchUp();
     },
     [applyCoach, catchUp],
+  );
+
+  // A foreign response (a shot PATCH, a reclassify). While a local edit is
+  // outstanding, one carrying regions other than the ones this tab last saw
+  // from the server (another writer's) takes only the payload: advancing the
+  // revision would let the edit overwrite those regions without a 409. The
+  // edit then 409s on the revision it started from and is discarded.
+  const apply = useCallback(
+    (next: CoachStageResponse | null) => {
+      if (outstanding() && !sameEvents(next?.events ?? [], serverEventsRef.current)) {
+        applyCoach(next);
+        return;
+      }
+      adopt(next);
+    },
+    [adopt, applyCoach, outstanding],
   );
 
   const stopQueued = useCallback(() => {
@@ -132,13 +161,12 @@ export function useStageEvents(
 
   // A 409 on PUT ``seq``. Runs inside the PUT chain, so no other PUT is in flight.
   const conflict = useCallback(
-    async (seq: number) => {
+    async (seq: number, base: StageEvent[]) => {
       // Everything built on the stale revision stops -- queued PUTs and the
       // edit still in the debounce, which would otherwise PUT on the
       // reloaded revision before we know whether it may.
       stopQueued();
       const dropped = seqRef.current;
-      const base = serverEventsRef.current;
       const mayResend = !resendRef.current;
       resendRef.current = false;
       let fresh: CoachStageResponse | null;
@@ -154,11 +182,13 @@ export function useStageEvents(
         // reclassify): the regions are as the edit found them, so it still
         // applies. Send the newest commit once on the fresh revision.
         resendRef.current = true;
-        if (liveRef.current) owedRef.current = true;
-        else if (pendingRef.current === null && seqRef.current === dropped) putRef.current(goodRef.current);
+        if (pendingRef.current === null && seqRef.current === dropped) {
+          if (liveRef.current) owedRef.current = true;
+          else putRef.current(goodRef.current);
+        }
         // else a commit made during the reload is on its way, on the fresh revision.
         settle(seq);
-        apply(fresh); // the payload and revision; the list stays, the re-send is outstanding
+        adopt(fresh); // the payload and revision; the list stays, the re-send is outstanding
         return;
       }
       // The regions changed under the edit, or the one re-send 409'd too:
@@ -167,10 +197,10 @@ export function useStageEvents(
       owedRef.current = false;
       settle(seqRef.current);
       if (liveRef.current) dropGestureRef.current = true;
-      apply(fresh);
+      adopt(fresh);
       onDiscardRef.current?.();
     },
-    [apply, onError, settle, slug, stage, stopQueued],
+    [adopt, onError, settle, slug, stage, stopQueued],
   );
 
   const put = useCallback(
@@ -181,14 +211,16 @@ export function useStageEvents(
           settle(seq);
           return;
         }
+        // The regions this PUT starts from: what its 409's reload is compared with.
+        const base = serverEventsRef.current;
         try {
           const res = await api.putStageEvents(slug, stage, next, revisionRef.current);
           resendRef.current = false;
           settle(seq);
-          apply(res);
+          adopt(res);
         } catch (e) {
           if (e instanceof ApiError && e.status === 409) {
-            await conflict(seq);
+            await conflict(seq, base);
             return;
           }
           resendRef.current = false;
@@ -197,7 +229,7 @@ export function useStageEvents(
         }
       });
     },
-    [apply, conflict, onError, settle, slug, stage],
+    [adopt, conflict, onError, settle, slug, stage],
   );
   putRef.current = put;
 

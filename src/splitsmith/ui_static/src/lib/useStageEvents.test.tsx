@@ -473,6 +473,89 @@ describe("useStageEvents: an in-flight save never reverts or drops an edit (#132
     expect(onDiscard).not.toHaveBeenCalled();
   });
 
+  // Fix round 2: a foreign response carrying another writer's regions.
+  const withEvt5 = () => ({ ...coach([ev("evt-1", 1, 2), ev("evt-5", 7, 8)], "v6"), version: 2 });
+
+  it("another writer's region arriving on a PATCH response before the 409 is kept: the edit is discarded, not re-sent", async () => {
+    const { result, applyCoach, onDiscard } = setupWithDiscard();
+    let failFirst: (e: unknown) => void = () => {};
+    vi.mocked(api.putStageEvents).mockImplementationOnce(() => new Promise((_r, j) => { failFirst = j; }));
+    vi.mocked(api.getStageCoach).mockResolvedValue(withEvt5());
+    act(() => result.current.change([ev("evt-1", 1.1, 2)], true));
+    await settle(); // the PUT goes out on v1
+    act(() => result.current.apply(withEvt5())); // the PATCH response, evt-5 from another tab
+    expect(applyCoach).toHaveBeenLastCalledWith(withEvt5()); // the payload is still taken
+    await act(async () => { failFirst(conflict()); });
+    expect(api.putStageEvents).toHaveBeenCalledTimes(1);
+    expect(result.current.events.map((e) => e.id)).toEqual(["evt-1", "evt-5"]);
+    expect(onDiscard).toHaveBeenCalledTimes(1);
+  });
+
+  it("another writer's region arriving mid-drag is not overwritten by the release", async () => {
+    const { result, onDiscard } = setupWithDiscard();
+    vi.mocked(api.putStageEvents).mockImplementation(async (_s, _n, events, version) => {
+      if (version !== "v6") throw conflict();
+      return coach(events, "v7");
+    });
+    vi.mocked(api.getStageCoach).mockResolvedValue(withEvt5());
+    act(() => result.current.change([ev("evt-1", 1.3, 2)], false)); // an edge drag
+    act(() => result.current.apply(withEvt5()));
+    expect(result.current.events).toEqual([ev("evt-1", 1.3, 2)]);
+    act(() => result.current.change([ev("evt-1", 1.3, 2)], true)); // release
+    await settle();
+    // The release went out on the revision it was drawn on, 409'd, and the server's list won.
+    expect(api.putStageEvents).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(api.putStageEvents).mock.calls[0][3]).toBe("v1");
+    expect(result.current.events.map((e) => e.id)).toEqual(["evt-1", "evt-5"]);
+    expect(onDiscard).toHaveBeenCalledTimes(1);
+  });
+
+  it("another writer's region arriving while a commit waits in the debounce is not overwritten by it", async () => {
+    const { result, onDiscard } = setupWithDiscard();
+    vi.mocked(api.putStageEvents).mockImplementation(async (_s, _n, events, version) => {
+      if (version !== "v6") throw conflict();
+      return coach(events, "v7");
+    });
+    vi.mocked(api.getStageCoach).mockResolvedValue(withEvt5());
+    act(() => result.current.change([ev("evt-1", 1.1, 2)], true)); // waits in the debounce
+    act(() => result.current.apply(withEvt5()));
+    await settle();
+    expect(api.putStageEvents).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(api.putStageEvents).mock.calls[0][3]).toBe("v1");
+    expect(result.current.events.map((e) => e.id)).toEqual(["evt-1", "evt-5"]);
+    expect(onDiscard).toHaveBeenCalledTimes(1);
+  });
+
+  it("a foreign response with the same regions while a commit waits still advances the revision", async () => {
+    const { result } = setupWithDiscard();
+    vi.mocked(api.putStageEvents).mockImplementation(async (_s, _n, events) => coach(events, "v7"));
+    act(() => result.current.change([ev("evt-1", 1.1, 2)], true));
+    act(() => result.current.apply({ ...coach([ev("evt-1", 1, 2)], "v6"), version: 2 }));
+    expect(result.current.events).toEqual([ev("evt-1", 1.1, 2)]);
+    await settle();
+    expect(api.putStageEvents).toHaveBeenCalledWith("anna", 1, [ev("evt-1", 1.1, 2)], "v6");
+  });
+
+  it("a commit made during a 409's reload, then a drag and Esc, is sent once", async () => {
+    const { result } = setupWithDiscard();
+    let finishReload: (c: CoachStageResponse) => void = () => {};
+    vi.mocked(api.putStageEvents)
+      .mockRejectedValueOnce(conflict())
+      .mockImplementation(async (_s, _n, events) => coach(events, "v10"));
+    vi.mocked(api.getStageCoach).mockImplementationOnce(() => new Promise((r) => { finishReload = r; }));
+    act(() => result.current.change([ev("evt-1", 1.1, 2)], true));
+    await settle(); // PUT 409s, the reload is in flight
+    act(() => result.current.change([ev("evt-1", 1.2, 2)], true)); // waits in the debounce
+    act(() => result.current.change([ev("evt-1", 1.2, 2.5)], false)); // a drag starts
+    await act(async () => { finishReload(coach([ev("evt-1", 1, 2)], "v9")); }); // regions unchanged
+    act(() => result.current.change([ev("evt-1", 1.2, 2)], false));
+    act(() => result.current.cancel());
+    await settle();
+    await settle();
+    expect(api.putStageEvents).toHaveBeenCalledTimes(2);
+    expect(api.putStageEvents).toHaveBeenLastCalledWith("anna", 1, [ev("evt-1", 1.2, 2)], "v9");
+  });
+
   it("a 409 whose reload changed the regions discards the edit without re-sending and reports it", async () => {
     const { result, onDiscard } = setupWithDiscard();
     vi.mocked(api.putStageEvents).mockRejectedValueOnce(conflict());
