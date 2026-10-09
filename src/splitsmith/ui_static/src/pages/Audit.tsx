@@ -1811,7 +1811,8 @@ export function Audit() {
         id: "flags",
         rows: [{ label: "Flags", height: 18 }],
         render: (geom) => (
-          <div className="pointer-events-none absolute inset-x-0 top-1/2 h-0">
+          // z-10: the pins' glow paints over the audio row below, not under it.
+          <div data-testid="audit-flags-track" className="pointer-events-none absolute inset-x-0 top-1/2 z-10 h-0">
             <AnomalyPins
               anomalies={anomalies}
               duration={dp.duration}
@@ -1998,6 +1999,7 @@ export function Audit() {
                     full width under it. */}
                 <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
                   <MultiCamColumn
+                    fill
                     videos={videos}
                     activeIndex={activeVideoIndex}
                     onActiveIndexChange={setActiveVideoIndex}

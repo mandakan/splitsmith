@@ -147,6 +147,8 @@ describe("Audit on the timeline band", () => {
     renderPage();
     const band = await screen.findByTestId("timeline");
     expect(within(band).getByText("Flags")).toBeInTheDocument();
+    // The pins' layer paints over the audio row below it.
+    expect(within(band).getByTestId("audit-flags-track")).toHaveClass("z-10");
     expect(within(band).getByText("Audio")).toBeInTheDocument();
     const track = audioTrack(band);
     await waitFor(() => expect(track.querySelectorAll("[data-audit-marker]").length).toBe(2));
@@ -189,6 +191,11 @@ describe("Audit on the timeline band", () => {
     expect(cols[0].querySelector("video")).not.toBeNull();
     expect(cols[1].querySelector("video")).toBeNull();
     expect(cols[1].textContent).toMatch(/Shot/i);
+    // The video fills its wide cell instead of the old fixed 380 px column.
+    // The camera column is the cell itself.
+    expect(cols[0].tagName).toBe("ASIDE");
+    expect((cols[0] as HTMLElement).style.width).toBe("");
+    expect(within(cols[0] as HTMLElement).getByTestId("cam-primary-tile")).toHaveClass("aspect-video");
   });
 
   it("adds a manual marker on a double-click in the audio row", async () => {
@@ -202,6 +209,48 @@ describe("Audit on the timeline band", () => {
     // A double-click on a marker adds nothing.
     fireEvent.doubleClick(track.querySelector("[data-audit-marker]")!, { clientX: 100 });
     expect(track.querySelectorAll("[data-audit-marker]").length).toBe(3);
+  });
+
+  describe("peak snapping on add", () => {
+    // The snap fetch asks for ~10 ms bins (2200 over 22 s). One spike at
+    // bin 1102 (11.025 s), inside the 25 ms window around 11.0 s.
+    const SPIKE_BIN = 1102;
+    const snapPeaksResult = (bins: number) => ({
+      ...peaksResult(),
+      bins,
+      peaks: Array.from({ length: bins }, (_, i) => (i === SPIKE_BIN ? 0.9 : 0.1)),
+    });
+
+    async function addAt(shiftKey: boolean): Promise<number> {
+      apiMock.getStagePeaks.mockImplementation(async (_s: string, _n: number, bins: number) =>
+        bins === 1500 ? peaksResult() : snapPeaksResult(bins),
+      );
+      renderPage();
+      const band = await screen.findByTestId("timeline");
+      const track = audioTrack(band);
+      await waitFor(() => expect(track.querySelectorAll("[data-audit-marker]").length).toBe(2));
+      await waitFor(() => expect(apiMock.getStagePeaks).toHaveBeenCalledWith("alice", 3, 2200));
+      await act(async () => {});
+      vi.spyOn(within(band).getByTestId("timeline-content"), "getBoundingClientRect").mockReturnValue(
+        new DOMRect(0, 0, VIEWPORT, 140),
+      );
+      // clientX 500 of 1000 px over 22 s: 11.0 s under the pointer.
+      fireEvent.doubleClick(track.parentElement!, { clientX: 500, shiftKey });
+      const added = await waitFor(() => {
+        const m = track.querySelector<HTMLElement>('[data-audit-marker-id^="manual-"]');
+        expect(m).not.toBeNull();
+        return m!;
+      });
+      return (parseFloat(added.style.left) / 100) * DURATION;
+    }
+
+    it("snaps to the nearby peak without Shift", async () => {
+      expect(await addAt(false)).toBeCloseTo((SPIKE_BIN + 0.5) * 0.01, 6);
+    });
+
+    it("keeps the raw time under the pointer with Shift", async () => {
+      expect(await addAt(true)).toBeCloseTo(11.0, 6);
+    });
   });
 
   it("hides the beep and timer-stop lines with the beep filter off; the ruler stays on the beep", async () => {

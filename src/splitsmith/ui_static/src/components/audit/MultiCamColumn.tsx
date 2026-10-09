@@ -1,6 +1,9 @@
 /* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
- * MultiCamColumn -- the 380px docked right column on the Audit page.
+ * MultiCamColumn -- the Audit page's camera column. By default a fixed
+ * 380px column; with ``fill`` (the Audit top row's left cell since the
+ * shared timeline, #1352) it takes the cell's width with a 16:9 primary.
+ * The notes below describe the fixed column.
  *
  * Replaces the floating a floating bay. Video lives in a fixed structural slot
  * so the waveform owns the left column and there's no overlap with the
@@ -58,6 +61,13 @@ export interface MultiCamColumnProps {
    *  own the <video> ref + secondary refs map). */
   children: ReactNode;
   className?: string;
+  /**
+   * Fill the host's cell instead of the fixed 380 px column: the column is
+   * `w-full` and the primary tile is a 16:9 box as wide as the column,
+   * capped at 55 % of the viewport height (the video letterboxes inside
+   * it). Secondary tiles keep their size. Off, nothing changes.
+   */
+  fill?: boolean;
 }
 
 export function MultiCamColumn({
@@ -79,6 +89,7 @@ export function MultiCamColumn({
   onStepFrame,
   children,
   className,
+  fill = false,
 }: MultiCamColumnProps) {
   const count = videos.length;
   if (count === 0) return null;
@@ -90,9 +101,10 @@ export function MultiCamColumn({
   return (
     <aside
       aria-label={`Cameras (${count})`}
-      style={{ width: COLUMN_WIDTH }}
+      style={fill ? undefined : { width: COLUMN_WIDTH }}
       className={cn(
         "flex shrink-0 flex-col gap-2",
+        fill && "w-full min-w-0",
         className,
       )}
     >
@@ -129,8 +141,12 @@ export function MultiCamColumn({
       {/* Primary tile. The actual <video> renders via {children} so the
           Audit page keeps owning the ref + secondary plumbing. */}
       <div
-        style={{ height: primaryHeight }}
-        className="relative overflow-hidden rounded-2xl border border-rule-strong bg-surface shadow-[inset_0_1px_0_rgba(255,255,255,0.02),0_18px_36px_-24px_rgba(0,0,0,0.7)]"
+        data-testid="cam-primary-tile"
+        style={fill ? undefined : { height: primaryHeight }}
+        className={cn(
+          "relative overflow-hidden rounded-2xl border border-rule-strong bg-surface shadow-[inset_0_1px_0_rgba(255,255,255,0.02),0_18px_36px_-24px_rgba(0,0,0,0.7)]",
+          fill && "aspect-video max-h-[55vh] w-full [&_video]:object-contain",
+        )}
       >
         <span
           className="absolute left-2.5 top-2 z-[2] inline-flex items-center gap-1.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.12em] text-led-text"
