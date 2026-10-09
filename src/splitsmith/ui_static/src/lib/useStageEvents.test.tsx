@@ -228,7 +228,7 @@ describe("useStageEvents: an in-flight save never reverts or drops an edit (#132
     expect(result.current.events).toEqual([ev("evt-1", 1.1, 2)]);
   });
 
-  it("a response held back by a drag is applied when the drag is cancelled", async () => {
+  it("a response landing mid-drag takes the payload but not the list, and the cancel adopts its list", async () => {
     const { result, applyCoach } = setupWithDiscard();
     let finishFirst: (c: CoachStageResponse) => void = () => {};
     vi.mocked(api.putStageEvents).mockImplementationOnce(() => new Promise((r) => { finishFirst = r; }));
@@ -237,13 +237,12 @@ describe("useStageEvents: an in-flight save never reverts or drops an edit (#132
     act(() => result.current.change([ev("evt-1", 1.5, 2)], false));
     const answer: CoachStageResponse = { ...coach([ev("evt-1", 1.1, 2)], "v2"), event_summary: summary };
     await act(async () => { finishFirst(answer); });
-    // Mid-drag it takes only the revision ...
-    expect(applyCoach).not.toHaveBeenLastCalledWith(answer);
-    expect(result.current.events[0].start).toBe(1.5);
-    act(() => result.current.change([ev("evt-1", 1.1, 2)], false));
-    act(() => result.current.cancel());
-    // ... and the cancel adopts it.
+    // Mid-drag it takes the payload (shot classes, summary) but keeps the dragged list ...
     expect(applyCoach).toHaveBeenLastCalledWith(answer);
+    expect(result.current.events[0].start).toBe(1.5);
+    act(() => result.current.change([ev("evt-1", 1.5, 2.5)], false));
+    act(() => result.current.cancel());
+    // ... and the cancel adopts the server's list, not the last frame.
     expect(result.current.events).toEqual([ev("evt-1", 1.1, 2)]);
     expect(api.putStageEvents).toHaveBeenCalledTimes(1);
   });
@@ -267,7 +266,25 @@ describe("useStageEvents: an in-flight save never reverts or drops an edit (#132
     await settle();
     expect(api.putStageEvents).toHaveBeenCalledTimes(1);
     expect(result.current.events.map((e) => e.id)).toEqual(["evt-1", "evt-5"]);
-    expect(onDiscard).toHaveBeenCalledTimes(2);
+    // One conflict, one discard report.
+    expect(onDiscard).toHaveBeenCalledTimes(1);
+  });
+
+  it("a cancel after a 409 that changed the regions adopts the reload and reports the discard once", async () => {
+    const { result, onDiscard } = setupWithDiscard();
+    let failFirst: (e: unknown) => void = () => {};
+    vi.mocked(api.putStageEvents).mockImplementationOnce(() => new Promise((_r, j) => { failFirst = j; }));
+    vi.mocked(api.getStageCoach).mockResolvedValue(coach([ev("evt-1", 1, 2), ev("evt-5", 7, 8)], "v9"));
+    act(() => result.current.change([ev("evt-1", 1.1, 2)], true));
+    await settle();
+    act(() => result.current.change([ev("evt-1", 1.1, 2), ev("evt-2", 3, 3.5)], false));
+    await act(async () => { failFirst(conflict()); });
+    act(() => result.current.change([ev("evt-1", 1.1, 2)], false));
+    act(() => result.current.cancel());
+    await settle();
+    expect(result.current.events.map((e) => e.id)).toEqual(["evt-1", "evt-5"]);
+    expect(api.putStageEvents).toHaveBeenCalledTimes(1);
+    expect(onDiscard).toHaveBeenCalledTimes(1);
   });
 
   it("a 409 during a live create whose reload leaves the regions alone lets the release go out on the fresh revision", async () => {
@@ -357,6 +374,103 @@ describe("useStageEvents: an in-flight save never reverts or drops an edit (#132
     expect(result.current.events).toEqual([ev("evt-1", 1, 2)]);
     expect(onDiscard).toHaveBeenCalledTimes(1);
     expect(onError).not.toHaveBeenCalled();
+  });
+
+  // Fix round 1: a foreign response (shot PATCH, reclassify) goes through ``apply``.
+  it("a shot PATCH response landing between the PUT and its 409 does not replace the edit the re-send carries", async () => {
+    const { result, applyCoach, onDiscard } = setupWithDiscard();
+    let failFirst: (e: unknown) => void = () => {};
+    vi.mocked(api.putStageEvents)
+      .mockImplementationOnce(() => new Promise((_r, j) => { failFirst = j; }))
+      .mockImplementationOnce(async (_s, _n, events) => coach(events, "v10"));
+    const patched = { ...coach([ev("evt-1", 1, 2)], "v9"), version: 2 };
+    vi.mocked(api.getStageCoach).mockResolvedValue(patched);
+    act(() => result.current.change([ev("evt-1", 1.1, 2)], true));
+    await settle(); // the PUT goes out on v1
+    act(() => result.current.apply(patched)); // the PATCH's response, handled first server-side
+    expect(applyCoach).toHaveBeenLastCalledWith(patched);
+    expect(result.current.events).toEqual([ev("evt-1", 1.1, 2)]);
+    await act(async () => { failFirst(conflict()); });
+    expect(api.putStageEvents).toHaveBeenCalledTimes(2);
+    expect(api.putStageEvents).toHaveBeenLastCalledWith("anna", 1, [ev("evt-1", 1.1, 2)], "v9");
+    expect(result.current.events).toEqual([ev("evt-1", 1.1, 2)]);
+    expect(onDiscard).not.toHaveBeenCalled();
+  });
+
+  it("a shot PATCH response landing during the 409's reload does not replace the edit either", async () => {
+    const { result, onDiscard } = setupWithDiscard();
+    let finishReload: (c: CoachStageResponse) => void = () => {};
+    vi.mocked(api.putStageEvents)
+      .mockRejectedValueOnce(conflict())
+      .mockImplementationOnce(async (_s, _n, events) => coach(events, "v10"));
+    const patched = { ...coach([ev("evt-1", 1, 2)], "v9"), version: 2 };
+    vi.mocked(api.getStageCoach).mockImplementationOnce(() => new Promise((r) => { finishReload = r; }));
+    act(() => result.current.change([ev("evt-1", 1.1, 2)], true));
+    await settle(); // PUT 409s, the reload is in flight
+    act(() => result.current.apply(patched));
+    expect(result.current.events).toEqual([ev("evt-1", 1.1, 2)]);
+    await act(async () => { finishReload(patched); });
+    expect(api.putStageEvents).toHaveBeenLastCalledWith("anna", 1, [ev("evt-1", 1.1, 2)], "v9");
+    expect(result.current.events).toEqual([ev("evt-1", 1.1, 2)]);
+    expect(onDiscard).not.toHaveBeenCalled();
+  });
+
+  it("a response applied with nothing pending still replaces the list", () => {
+    const { result } = setupWithDiscard();
+    act(() => result.current.apply(coach([ev("evt-3", 4, 5)], "v2")));
+    expect(result.current.events).toEqual([ev("evt-3", 4, 5)]);
+  });
+
+  it("a shot PATCH response mid-create keeps the region under the pointer and the release commits it", async () => {
+    const { result, applyCoach } = setupWithDiscard();
+    vi.mocked(api.putStageEvents).mockImplementationOnce(async (_s, _n, events) => coach(events, "v10"));
+    const drawing = [ev("evt-1", 1, 2), ev("evt-2", 3, 3.5)];
+    act(() => result.current.change(drawing, false));
+    const patched = { ...coach([ev("evt-1", 1, 2)], "v9"), version: 2 };
+    act(() => result.current.apply(patched));
+    expect(applyCoach).toHaveBeenLastCalledWith(patched);
+    expect(result.current.events).toEqual(drawing);
+    act(() => result.current.change(drawing, true));
+    await settle();
+    expect(api.putStageEvents).toHaveBeenLastCalledWith("anna", 1, drawing, "v9");
+  });
+
+  it("a shot PATCH response landing after a 409 left a re-send owed to the drag, then Esc, sends the edit", async () => {
+    const { result } = setupWithDiscard();
+    let failFirst: (e: unknown) => void = () => {};
+    vi.mocked(api.putStageEvents)
+      .mockImplementationOnce(() => new Promise((_r, j) => { failFirst = j; }))
+      .mockImplementationOnce(async (_s, _n, events) => coach(events, "v12"));
+    vi.mocked(api.getStageCoach).mockResolvedValue(coach([ev("evt-1", 1, 2)], "v9"));
+    act(() => result.current.change([ev("evt-1", 1.1, 2)], true));
+    await settle();
+    act(() => result.current.change([ev("evt-1", 1.1, 2), ev("evt-2", 3, 3.5)], false));
+    await act(async () => { failFirst(conflict()); }); // re-send owed to the drag
+    act(() => result.current.apply({ ...coach([ev("evt-1", 1, 2)], "v11"), version: 3 })); // another PATCH
+    act(() => result.current.change([ev("evt-1", 1.1, 2)], false));
+    act(() => result.current.cancel());
+    await settle();
+    expect(api.putStageEvents).toHaveBeenLastCalledWith("anna", 1, [ev("evt-1", 1.1, 2)], "v11");
+    expect(result.current.events).toEqual([ev("evt-1", 1.1, 2)]);
+  });
+
+  it("a re-send that fails with a non-409 error does not use up the next conflict's re-send", async () => {
+    const { result, onDiscard } = setupWithDiscard();
+    vi.mocked(api.putStageEvents)
+      .mockRejectedValueOnce(conflict())
+      .mockRejectedValueOnce(new ApiError(500, "boom"))
+      .mockRejectedValueOnce(conflict())
+      .mockImplementationOnce(async (_s, _n, events) => coach(events, "v20"));
+    vi.mocked(api.getStageCoach)
+      .mockResolvedValueOnce(coach([ev("evt-1", 1, 2)], "v9"))
+      .mockResolvedValueOnce(coach([ev("evt-1", 1, 2)], "v19"));
+    act(() => result.current.change([ev("evt-1", 1.1, 2)], true));
+    await settle(); // 409, re-send, 500
+    act(() => result.current.change([ev("evt-1", 1.2, 2)], true));
+    await settle(); // an unrelated 409: still gets its one re-send
+    expect(api.putStageEvents).toHaveBeenCalledTimes(4);
+    expect(api.putStageEvents).toHaveBeenLastCalledWith("anna", 1, [ev("evt-1", 1.2, 2)], "v19");
+    expect(onDiscard).not.toHaveBeenCalled();
   });
 
   it("a 409 whose reload changed the regions discards the edit without re-sending and reports it", async () => {
@@ -456,9 +570,12 @@ describe("useStageEvents driving the LaneEditor", () => {
     fireEvent.pointerDown(handle, { pointerId: 2, clientX: 200, clientY: 10, button: 0 });
     fireEvent.pointerMove(handle, { pointerId: 2, clientX: 300, clientY: 10, altKey: true });
     fireEvent.keyDown(window, { key: "Escape" });
-    const answer = coach([ev("evt-1", 1.02, 2)], "v2");
+    // The server's list must show once the gesture is over, not wait for the
+    // next commit (evt-7 stands in for anything the restored list lacks).
+    const answer = coach([ev("evt-1", 1.02, 2), ev("evt-7", 8, 9)], "v2");
     await act(async () => { finishNudge(answer); });
     expect(applyCoach).toHaveBeenLastCalledWith(answer);
+    expect(screen.getByTestId("event-evt-7")).toBeInTheDocument();
     expect(api.putStageEvents).toHaveBeenCalledTimes(1);
   });
 });
