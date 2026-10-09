@@ -21,6 +21,18 @@ Frames come out at **named** moments rather than frame indices the caller
 has to work out: ``pre-beep``, ``first-shot``, ``mid-action``,
 ``last-shot``, ``after-last-shot`` and ``tail-end``.
 
+With ``--stage-events`` (implied by ``--reload-chip`` / ``--stage-bar``)
+the stage is a different twelve shots with a confirmed movement spanning
+three of them and a confirmed reload overlapping the movement's end, so
+its overhang is positive; four more moments come out: ``mid-movement``,
+``mid-reload``, ``reload-fade`` (0.2 s after the reload ends) and
+``landed``. Render it with both toggles off as well: that is the frame
+to compare with the template before a change, the regions are in the
+data and must draw nothing.
+
+``--size WxH`` scales the trim first, so a frame at 1920x1080 or a
+phone-ish size shows the HUD at that page size.
+
 **Moments are converted to frame indices once, in Python, and extracted
 with ``select=eq(n,N)``** -- never by seeking to a timestamp. The
 synthetic clip runs at 30000/1001, so a seek that keeps the first frame
@@ -31,6 +43,7 @@ breaks in either direction. A frame index is exact at any rate.
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import subprocess
 import sys
@@ -63,6 +76,16 @@ BEEP_OFFSET_SECONDS = 1.0
 # the split label both change at a plausible rate.
 SHOTS_MS = (1100, 1320, 1560, 1740, 1980, 2310, 2530, 2790, 3040, 3280, 3600, 3850)
 
+# The stage with regions: three standing shots, three fired on the move,
+# a reload that starts on the move and ends 1.0 s after the movement
+# does (positive overhang), then six standing shots. Milliseconds from
+# the beep, like the shots; both regions confirmed (``manual``).
+EVENT_SHOTS_MS = (1100, 1320, 1540, 1900, 2150, 2400, 3850, 4070, 4290, 4520, 4740, 4960)
+MOVEMENT_MS = (1650, 2700)
+RELOAD_MS = (2550, 3700)
+#: The templates' fade after a reload ends; ``reload-fade`` sits part-way.
+RELOAD_FADE_SECONDS = 0.4
+
 
 @dataclass(frozen=True)
 class Moment:
@@ -71,14 +94,14 @@ class Moment:
     why: str
 
 
-def _moments() -> tuple[Moment, ...]:
+def _moments(shots_ms: tuple[int, ...], *, events: bool) -> tuple[Moment, ...]:
     def at(seconds: float) -> int:
         return round(seconds * FPS)
 
-    first = BEEP_OFFSET_SECONDS + SHOTS_MS[0] / 1000.0
-    last = BEEP_OFFSET_SECONDS + SHOTS_MS[-1] / 1000.0
-    mid = BEEP_OFFSET_SECONDS + SHOTS_MS[len(SHOTS_MS) // 2] / 1000.0
-    return (
+    first = BEEP_OFFSET_SECONDS + shots_ms[0] / 1000.0
+    last = BEEP_OFFSET_SECONDS + shots_ms[-1] / 1000.0
+    mid = BEEP_OFFSET_SECONDS + shots_ms[len(shots_ms) // 2] / 1000.0
+    base = (
         Moment("pre-beep", at(BEEP_OFFSET_SECONDS / 2), "counter reads 0/M, clock reads 0.00"),
         Moment("first-shot", at(first), "counter goes 1/M, no split yet -- nothing to measure against"),
         Moment("mid-action", at(mid), "counter and split both live, clock ticking"),
@@ -90,6 +113,24 @@ def _moments() -> tuple[Moment, ...]:
         Moment("last-shot", at(last), "counter reads (M-1)/M -- one frame short of the last shot"),
         Moment("after-last-shot", at(last + 0.75), "clock frozen, split still up"),
         Moment("tail-end", CLIP_FRAMES - 2, "the post-buffer -- what the viewer is left looking at"),
+    )
+    if not events:
+        return base
+
+    def clip(ms: int) -> float:
+        return BEEP_OFFSET_SECONDS + ms / 1000.0
+
+    reload_start, reload_end = clip(RELOAD_MS[0]), clip(RELOAD_MS[1])
+    return (
+        *base,
+        Moment("mid-movement", at(clip(EVENT_SHOTS_MS[4]) + 0.1), "movement band growing, no chip"),
+        Moment("mid-reload", at(reload_start + 1.0), "chip up, counting ~1.00; reload band growing"),
+        Moment(
+            "reload-fade",
+            at(reload_end + RELOAD_FADE_SECONDS / 2),
+            f"chip half faded, holding {(RELOAD_MS[1] - RELOAD_MS[0]) / 1000:.2f}",
+        ),
+        Moment("landed", at(last + 1.0), "stage done; bands frozen, chip gone"),
     )
 
 
@@ -134,6 +175,25 @@ def _extract(video: Path, index: int, destination: Path, *, ffmpeg: str) -> bool
     return destination.exists() and destination.stat().st_size > 0
 
 
+def _events() -> list[dict[str, object]]:
+    return [
+        {"id": "evt-1", "kind": "movement", "start": MOVEMENT_MS[0] / 1000, "end": MOVEMENT_MS[1] / 1000,
+         "source": "manual"},
+        {"id": "evt-2", "kind": "reload", "start": RELOAD_MS[0] / 1000, "end": RELOAD_MS[1] / 1000,
+         "source": "manual"},
+    ]  # fmt: skip
+
+
+def _size(text: str) -> tuple[int, int]:
+    try:
+        width, height = (int(part) for part in text.lower().split("x"))
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"expected WxH, got {text!r}") from exc
+    if width <= 0 or height <= 0 or width % 2 or height % 2:
+        raise argparse.ArgumentTypeError("both sides must be positive and even")
+    return width, height
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
@@ -146,7 +206,17 @@ def main() -> int:
     parser.add_argument("--no-speed-colors", action="store_true")
     parser.add_argument("--no-class-labels", action="store_true")
     parser.add_argument("--no-landing", action="store_true")
+    parser.add_argument("--reload-chip", action="store_true", help="draw the reload chip (HUD styles)")
+    parser.add_argument("--stage-bar", action="store_true", help="draw the stage bar (HUD styles)")
+    parser.add_argument(
+        "--stage-events",
+        action="store_true",
+        help="use the stage with a confirmed movement and reload (implied by the two toggles)",
+    )
+    parser.add_argument("--size", type=_size, default=None, help="scale the trim to WxH first")
     args = parser.parse_args()
+    with_events = args.stage_events or args.reload_chip or args.stage_bar
+    shots_ms = EVENT_SHOTS_MS if with_events else SHOTS_MS
 
     if not ffmpeg_available():
         parser.error("ffmpeg and ffprobe must be on PATH")
@@ -164,9 +234,24 @@ def main() -> int:
     build_synthetic_video(source)
     trim = work / "trim.mp4"
     cut_clip(source, trim, CLIP_FRAMES, ffmpeg=ffmpeg)
+    if args.size is not None:
+        scaled = work / "trim-scaled.mp4"
+        width, height = args.size
+        _run(
+            [
+                ffmpeg, "-hide_banner", "-y", "-v", "error", "-i", str(trim),
+                "-vf", f"scale={width}:{height}", "-c:v", "libx264", "-crf", "14",
+                "-pix_fmt", "yuv420p", "-c:a", "copy", str(scaled),
+            ]  # fmt: skip
+        )
+        trim = scaled
 
     audit = work / "stage1.json"
-    write_audit(audit, SHOTS_MS)
+    write_audit(audit, shots_ms)
+    if with_events:
+        doc = json.loads(audit.read_text(encoding="utf-8"))
+        doc["events"] = _events()
+        audit.write_text(json.dumps(doc), encoding="utf-8")
 
     overlay = work / "overlay.mov"
     degraded: list[str] = []
@@ -184,6 +269,8 @@ def main() -> int:
             class_labels=not args.no_class_labels,
             landing=not args.no_landing,
             position=args.overlay_position,
+            reload_chip=args.reload_chip,
+            stage_bar=args.stage_bar,
         ),
         degraded=degraded,
     )
@@ -193,7 +280,7 @@ def main() -> int:
     composed = work / "composed.mp4"
     _composite(trim, overlay, composed, ffmpeg=ffmpeg)
 
-    for moment in _moments():
+    for moment in _moments(shots_ms, events=with_events):
         target = out / f"{moment.name}.png"
         if _extract(composed, moment.index, target, ffmpeg=ffmpeg):
             print(f"{moment.name:18s} frame {moment.index:4d}  {moment.why}")

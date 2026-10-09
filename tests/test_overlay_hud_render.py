@@ -541,3 +541,168 @@ def test_the_hud_digest_moves_when_a_confirmed_region_is_added() -> None:
 
     region = StageEvent.model_validate(_MOVEMENT)
     assert digest([]) != digest([region])
+
+
+# --- Timeline: the reload chip and the stage bar, through real Chromium ---------
+
+#: Twelve shots (seconds from the beep): three standing, three on the move,
+#: a reload, six standing. The beep sits at clip second 1.0.
+_TL_SHOTS = (1.1, 1.32, 1.54, 1.9, 2.15, 2.4, 3.85, 4.07, 4.29, 4.52, 4.74, 4.96)
+_TL_MOVEMENT = {"id": "evt-1", "kind": "movement", "start": 1.65, "end": 2.7, "source": "manual"}
+_TL_RELOAD = {"id": "evt-2", "kind": "reload", "start": 2.55, "end": 3.7, "source": "manual"}
+_TL_ACTIVATION = {"id": "evt-3", "kind": "activation", "start": 4.3, "end": 4.6, "source": "manual"}
+
+_TIMELINE_DOM_JS = """() => {
+  const box = (el) => { const r = el.getBoundingClientRect();
+    return {left: r.left, right: r.right, top: r.top, bottom: r.bottom}; };
+  const chip = document.getElementById('chip');
+  const tag = document.getElementById('tag');
+  return {
+    chip: chip ? {opacity: Number(getComputedStyle(chip).opacity), label: chip.firstChild.textContent,
+                  num: chip.lastChild.textContent, border: getComputedStyle(chip).borderTopColor,
+                  box: box(chip)} : null,
+    clock: box(document.getElementById('clock')),
+    tag: tag && Number(getComputedStyle(tag).opacity) > 0 ? box(tag) : null,
+    track: box(document.getElementById('track')),
+    bands: [...document.querySelectorAll('#track .band')].map((b) => ({
+      shown: getComputedStyle(b).visibility === 'visible' && b.getBoundingClientRect().width > 0,
+      colour: getComputedStyle(b).backgroundColor, box: box(b)})),
+  };
+}"""
+
+
+def _timeline_view(rasterizer: Any, *, events: list[dict[str, Any]], **options: Any) -> Any:
+    from splitsmith.config import StageEvent
+    from splitsmith.looks import load_look, overlay_template_for
+    from splitsmith.overlay_hud import hud_options_data, hud_stage_data
+    from splitsmith.overlay_hud_render import hud_context
+    from splitsmith.overlay_theme import theme_for
+    from splitsmith.stage_summary_data import TileShot
+
+    look = load_look("splitsmith")
+    template = overlay_template_for(look, "timeline")
+    assert template is not None
+    shots, previous = [], 0.0
+    for index, t in enumerate(_TL_SHOTS):
+        shots.append(
+            TileShot(time_from_beep=t, split=t - previous, interval_class="split" if index else "first_shot")
+        )
+        previous = t
+    stage = hud_stage_data(shots, beep_in_clip=1.0, events=[StageEvent.model_validate(e) for e in events])
+    context = hud_context(
+        stage=stage,
+        options=hud_options_data(HudOptions(**options), None),
+        theme=theme_for(look),
+        width=640,
+        height=360,
+        fps=30.0,
+    )
+    return rasterizer._open_template(template, context=context, width=640, height=360)
+
+
+def _timeline_at(view: Any, t: float) -> dict[str, Any]:
+    view.call("seek", t)
+    state = view.page.evaluate(_TIMELINE_DOM_JS)
+    assert view.errors == []
+    return state
+
+
+def _overlaps(a: dict[str, float], b: dict[str, float]) -> bool:
+    return (
+        a["left"] < b["right"]
+        and b["left"] < a["right"]
+        and a["top"] < b["bottom"]
+        and b["top"] < a["bottom"]
+    )
+
+
+@pytest.mark.integration
+def test_timeline_reload_chip_counts_the_reload_and_holds_its_duration_through_the_fade() -> None:
+    with ChromiumRasterizer() as rasterizer:
+        view = _timeline_view(rasterizer, events=[_TL_MOVEMENT, _TL_RELOAD], reload_chip=True)
+        try:
+            before = _timeline_at(view, 1.0 + 2.5)
+            mid = _timeline_at(view, 1.0 + 2.55 + 1.0)
+            fading = _timeline_at(view, 1.0 + 3.7 + 0.2)
+            gone = _timeline_at(view, 1.0 + 3.7 + 0.45)
+        finally:
+            view.close()
+    assert before["chip"]["opacity"] == 0
+    chip = mid["chip"]
+    assert chip["opacity"] == 1 and chip["label"].lower() == "reload" and chip["num"] == "1.00"
+    assert chip["border"] == "rgb(251, 191, 36)", "the reload colour, never the brand red"
+    assert not _overlaps(chip["box"], mid["clock"])
+    assert mid["tag"] is not None and not _overlaps(chip["box"], mid["tag"])
+    assert 0.4 < fading["chip"]["opacity"] < 0.6 and fading["chip"]["num"] == "1.15"
+    assert gone["chip"]["opacity"] == 0
+
+
+@pytest.mark.integration
+def test_timeline_reload_chip_clears_the_tag_on_the_first_shot() -> None:
+    """The split tag sits furthest left on the first tick: a reload right
+    after the draw puts the chip and that tag up together."""
+    early = {"id": "evt-2", "kind": "reload", "start": 1.15, "end": 1.3, "source": "manual"}
+    with ChromiumRasterizer() as rasterizer:
+        view = _timeline_view(rasterizer, events=[early], reload_chip=True)
+        try:
+            state = _timeline_at(view, 1.0 + 1.25)
+        finally:
+            view.close()
+    assert state["chip"]["opacity"] == 1 and state["tag"] is not None
+    assert not _overlaps(state["chip"]["box"], state["tag"])
+    assert not _overlaps(state["chip"]["box"], state["clock"])
+
+
+@pytest.mark.integration
+def test_timeline_draws_no_chip_and_no_band_with_the_toggles_off() -> None:
+    with ChromiumRasterizer() as rasterizer:
+        view = _timeline_view(rasterizer, events=[_TL_MOVEMENT, _TL_RELOAD, _TL_ACTIVATION])
+        try:
+            state = _timeline_at(view, 1.0 + 3.55)
+        finally:
+            view.close()
+    assert state["chip"] is None and state["bands"] == []
+
+
+@pytest.mark.integration
+def test_timeline_stage_bar_draws_one_band_per_confirmed_region_as_it_happens() -> None:
+    proposal = {**_TL_ACTIVATION, "id": "evt-4", "source": "auto"}
+    with ChromiumRasterizer() as rasterizer:
+        view = _timeline_view(
+            rasterizer, events=[_TL_MOVEMENT, _TL_RELOAD, _TL_ACTIVATION, proposal], stage_bar=True
+        )
+        try:
+            mid_movement = _timeline_at(view, 1.0 + 2.25)
+            landed = _timeline_at(view, 1.0 + 6.0)
+        finally:
+            view.close()
+    assert len(landed["bands"]) == 3, "the proposal draws nothing"
+    assert [b["shown"] for b in mid_movement["bands"]] == [
+        True,
+        False,
+        False,
+    ], "a region shows once it starts"
+    assert all(b["shown"] for b in landed["bands"])
+    assert [b["colour"] for b in landed["bands"]][:2] == ["rgb(6, 182, 212)", "rgb(251, 191, 36)"]
+    assert landed["chip"] is None
+
+
+@pytest.mark.integration
+def test_timeline_clamps_a_reload_past_the_last_shot_and_settles_after_its_fade() -> None:
+    """Review Focus 2: a reload ending after the last shot (and past the
+    stage time) keeps its band on the track, and ``settle()`` covers the
+    chip's count and fade so the held frame is the faded one."""
+    late = {"id": "evt-2", "kind": "reload", "start": 4.8, "end": 6.5, "source": "manual"}
+    with ChromiumRasterizer() as rasterizer:
+        view = _timeline_view(rasterizer, events=[late], reload_chip=True, stage_bar=True)
+        try:
+            settle = view.call("hud")["settle"]
+            landed = _timeline_at(view, 1.0 + 6.2)
+            held = _timeline_at(view, 1.0 + 4.96 + settle)
+        finally:
+            view.close()
+    assert settle >= 6.5 + 0.4 - 4.96 - 1e-6
+    (band,) = landed["bands"]
+    assert band["shown"] and band["box"]["right"] <= landed["track"]["right"] + 0.5
+    assert landed["chip"]["opacity"] == 1 and landed["chip"]["num"] == "1.40"
+    assert held["chip"]["opacity"] == 0

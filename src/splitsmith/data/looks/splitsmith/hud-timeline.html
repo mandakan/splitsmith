@@ -34,6 +34,13 @@
   }
   #tag .label { font-size: 1.6vh; }
   #tag .num { font-size: 3.9vh; }
+  .band { position: absolute; top: 0; bottom: 0; border-radius: 0.45vh; }
+  #chip {
+    position: absolute; left: 5vh; bottom: 13.2vh; padding: 0.4vh 1.2vh; border-radius: 0.7vh;
+    border: 0.2vh solid; opacity: 0;
+  }
+  #chip .label { font-size: 1.6vh; }
+  #chip .num { font-size: 3.2vh; }
   #stamp { position: absolute; left: 0; right: 0; top: 34%; text-align: center; opacity: 0; }
   #stamp .label { font-size: 2.5vh; letter-spacing: 0.3em; }
   #stamp .num { font-size: 16vh; }
@@ -51,7 +58,11 @@
   var theme = s.theme, stage = s.data.stage, opts = s.data.options;
   var shots = stage.shots, beep = stage.beep, rounds = stage.rounds;
   var span = stage.stage_time > 0 ? stage.stage_time : 1;
-  var DROP = 0.2, TAG_IN = 0.2, STAMP_DELAY = 0.2, STAMP_IN = 0.35;
+  var DROP = 0.2, TAG_IN = 0.2, STAMP_DELAY = 0.2, STAMP_IN = 0.35, CHIP_FADE = 0.4;
+  // Confirmed regions only reach the data; with a toggle off, or nothing
+  // to draw, no element is created and the page is exactly the plain one.
+  var reloads = opts.reload_chip ? stage.reloads : [];
+  var regions = opts.stage_bar ? stage.events : [];
 
   function el(id) { return document.getElementById(id); }
   function clamp(x) { return Math.max(0, Math.min(1, x)); }
@@ -65,7 +76,11 @@
     if (!opts.speed_colors || !tier) return theme.split;
     return tier === 'good' ? theme.split_good : tier === 'slow' ? theme.accent : theme.split;
   }
-  function at(shot) { return 100 * clamp((shot.t - beep) / span) + '%'; }
+  function along(x) { return 100 * clamp((x - beep) / span); }
+  function at(shot) { return along(shot.t) + '%'; }
+  function regionColour(kind) {
+    return kind === 'movement' ? theme.movement : kind === 'reload' ? theme.reload : theme.ink_2;
+  }
 
   document.body.style.color = theme.ink;
   el('band').style.background =
@@ -73,6 +88,27 @@
   el('track').style.background = rgba(theme.ink, 0.22);
   el('fill').style.background = theme.ink;
   el('stampValue').textContent = stage.stage_time.toFixed(2);
+  // Bands sit over the fill (they grow with it, so the track never shows a
+  // region before it happens) and under the ticks.
+  var bands = regions.map(function (region) {
+    var band = document.createElement('div');
+    band.className = 'band';
+    band.style.left = along(region.start) + '%';
+    band.style.background = regionColour(region.kind);
+    band.style.opacity = region.kind === 'activation' ? 0.5 : 0.9;
+    el('track').appendChild(band);
+    return band;
+  });
+  var chip = null;
+  if (reloads.length) {
+    chip = document.createElement('div');
+    chip.id = 'chip';
+    chip.innerHTML = '<div class="label">Reload</div><div class="num"></div>';
+    chip.style.background = rgba(theme.surface, 0.9);
+    chip.style.borderColor = theme.reload;
+    chip.firstChild.style.color = theme.reload;
+    document.body.appendChild(chip);
+  }
   var ticks = shots.map(function (shot) {
     var tick = document.createElement('div');
     tick.className = 'tick';
@@ -90,7 +126,12 @@
   el('track').appendChild(tag);
 
   window.settle = function () {
-    return opts.landing ? Math.max(DROP, STAMP_DELAY + STAMP_IN) : Math.max(DROP, TAG_IN);
+    var base = opts.landing ? Math.max(DROP, STAMP_DELAY + STAMP_IN) : Math.max(DROP, TAG_IN);
+    // A reload that ends after the last shot keeps the chip counting and
+    // fading past it; the frame plan holds whatever the clip cannot reach.
+    var lastT = shots.length ? shots[shots.length - 1].t : beep;
+    for (var j = 0; j < reloads.length; j++) base = Math.max(base, reloads[j].end + CHIP_FADE - lastT);
+    return base;
   };
 
   window.seek = function (t) {
@@ -105,6 +146,24 @@
     el('clock').textContent = running.toFixed(2);
     el('count').textContent = n + '/' + rounds;
     el('fill').style.width = 100 * clamp(running / span) + '%';
+    for (var b = 0; b < bands.length; b++) {
+      var width = along(Math.min(regions[b].end, beep + running)) - along(regions[b].start);
+      bands[b].style.width = Math.max(0, width) + '%';
+      bands[b].style.visibility = width > 0 ? 'visible' : 'hidden';
+    }
+    if (chip) {
+      var live = null;
+      for (var j = 0; j < reloads.length; j++) {
+        if (reloads[j].start <= t && t < reloads[j].end + CHIP_FADE) live = reloads[j];
+      }
+      if (!live) {
+        chip.style.opacity = 0;
+      } else {
+        var held = t >= live.end;
+        chip.style.opacity = held ? clamp(1 - (t - live.end) / CHIP_FADE) : 1;
+        chip.lastChild.textContent = (held ? live.duration : t - live.start).toFixed(2);
+      }
+    }
     for (var i = 0; i < ticks.length; i++) {
       var age = t - shots[i].t;
       ticks[i].style.opacity = age < 0 ? 0 : 1;
