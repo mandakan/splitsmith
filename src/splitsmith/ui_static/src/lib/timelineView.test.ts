@@ -169,15 +169,22 @@ describe("followScroll", () => {
 
 describe("columnPeaks", () => {
   it("takes the loudest bin under each column of the visible window", () => {
-    // 10 bins over a 10 s clip; the track shows clip 2..6 s over 400 px content, scrolled to 0.
+    // 10 bins over a 10 s clip; the track shows clip 2..6 s over 4 px content (1 px/s), scrolled to 0.
     const peaks = [0, 0, 0.2, 0.9, 0.1, 0.4, 0, 0, 0, 0];
-    const cols = columnPeaks(peaks, 10, 2, 6, 400, 0, 4);
+    const cols = columnPeaks(peaks, 10, 2, 6, 4, 0, 4);
     expect(cols).toEqual([0.2, 0.9, 0.1, 0.4]);
   });
 
   it("only covers the visible window when scrolled", () => {
     const peaks = [0, 0, 0.2, 0.9, 0.1, 0.4, 0, 0, 0, 0];
-    expect(columnPeaks(peaks, 10, 2, 6, 400, 200, 2)).toEqual([0.1, 0.4]);
+    expect(columnPeaks(peaks, 10, 2, 6, 4, 2, 2)).toEqual([0.1, 0.4]);
+  });
+
+  it("samples a narrower slice when zoomed in", () => {
+    // 8 px over the 4 s window is 0.5 s/px; scrolled 2 px, 4 columns cover
+    // 3.0-3.5, 3.5-4.0, 4.0-4.5, 4.5-5.0 s.
+    const peaks = [0, 0, 0.2, 0.9, 0.1, 0.4, 0, 0, 0, 0];
+    expect(columnPeaks(peaks, 10, 2, 6, 8, 2, 4)).toEqual([0.9, 0.9, 0.1, 0.1]);
   });
 
   it("is zero outside the clip and empty without peaks", () => {

@@ -140,10 +140,11 @@ export function followScroll(playheadPx: number, scrollLeft: number, viewportPx:
 /**
  * Loudest peak under each of ``columns`` viewport columns. The track shows
  * clip seconds [from, to] across ``contentPx`` and is scrolled by
- * ``scrollLeft``; peaks are ``peaks.length`` bins over ``clipDuration``. The
- * visible window is [from + scrollLeft-as-seconds, to] -- its right edge is
- * fixed at ``to``, scrolling narrows it from the left -- resampled into
- * exactly ``columns`` equal buckets, not one bucket per content pixel.
+ * ``scrollLeft``; peaks are ``peaks.length`` bins over ``clipDuration``.
+ * ``columns`` is the viewport width in px: column c covers content pixels
+ * [scrollLeft + c, scrollLeft + c + 1), i.e. one content pixel each, so the
+ * visible window is [scrollLeft, scrollLeft + columns), never the content's
+ * far end.
  */
 export function columnPeaks(
   peaks: number[],
@@ -159,12 +160,9 @@ export function columnPeaks(
   if (n === 0 || clipDuration <= 0 || contentPx <= 0 || to <= from || columns <= 0) return out;
   const secPerPx = (to - from) / contentPx;
   const binsPerSec = n / clipDuration;
-  const visibleStart = from + scrollLeft * secPerPx;
-  const span = Math.max(to - visibleStart, 0);
-  const colWidth = span / columns;
   for (let c = 0; c < columns; c++) {
-    const a = visibleStart + c * colWidth;
-    const b = a + colWidth;
+    const a = from + (scrollLeft + c) * secPerPx;
+    const b = a + secPerPx;
     let lo = Math.floor(a * binsPerSec + 1e-9);
     let hi = Math.ceil(b * binsPerSec - 1e-9) - 1;
     if (hi < 0 || lo >= n) continue;
