@@ -291,7 +291,7 @@ def test_a_cache_hit_renders_no_frame_and_leaves_the_mov_alone(
 @pytest.mark.parametrize(
     "change",
     [
-        {"hud_options": HudOptions(speed_colors=False)},
+        {"hud_options": HudOptions(speed_colors=True)},
         {"hud_options": HudOptions(position="top-left")},
         {"beep_offset_seconds": 0.9},
         {"theme": "clean"},

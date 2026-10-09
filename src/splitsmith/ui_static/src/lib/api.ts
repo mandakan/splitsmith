@@ -1306,6 +1306,8 @@ export interface ExportPreviewBody extends OverlayStyleBody {
   backdrop?: "footage" | "demo";
   /** An animated template as a looping WebP (#1249); a still stays a PNG. */
   motion?: boolean;
+  /** A labelled placeholder in every logo spot no logo fills (previews only). */
+  logo_placeholders?: boolean;
 }
 
 export interface ExportStageRequestPayload {
@@ -1933,6 +1935,24 @@ export interface CoachShotPatch {
   /** Set by ``patchStageShotCoach`` on the positional fallback only --
    *  callers pass the version separately rather than composing it in. */
   expected_version?: number;
+}
+
+/** A row of the Shooters page (``GET /api/me/shooters``): the look the
+ *  videos draw for one shooter, from the book or their newest match. */
+export interface ShooterRosterRow {
+  shooter_id: number | null;
+  name: string;
+  club: string | null;
+  accent: string | null;
+  logo_url: string | null;
+  match_count: number;
+  last_match_at: string;
+  last_match_name: string;
+  you: boolean;
+  source: "book" | "match" | "none";
+  /** For a shooter without an SSI id: the one match the row stands for. */
+  match_id: string | null;
+  slug: string | null;
 }
 
 export interface StageAudit {
@@ -4130,6 +4150,9 @@ export const api = {
 
   getShooterBook: () => request<{ entries: ShooterBookEntryView[] }>("/api/me/shooter-book"),
 
+  /** Everyone you have filmed (the Shooters page): one row per SSI id. */
+  listShooters: () => request<{ rows: ShooterRosterRow[] }>("/api/me/shooters"),
+
   putShooterBookEntry: (shooterId: number, body: { accent?: string | null; club?: string | null; label?: string | null }) =>
     request<ShooterBookEntryView>(`/api/me/shooter-book/${shooterId}`, { method: "PUT", json: body }),
 
@@ -5249,6 +5272,12 @@ export const api = {
       `/api/looks/${encodeURIComponent(name)}/check`,
       { method: "POST", json: { draft, templates } },
     ),
+  /** Your Look's unedited copies of an older shipped template (local only). */
+  outdatedLookTemplates: (name: string) =>
+    request<{ files: string[] }>(`/api/looks/${encodeURIComponent(name)}/outdated`),
+  /** Drop those copies so the cards draw the current shipped templates. */
+  refreshLookTemplates: (name: string) =>
+    request<{ files: string[] }>(`/api/looks/${encodeURIComponent(name)}/refresh`, { method: "POST" }),
   /** The colours the palette suggestions are chosen against (#1273). */
   paletteSources: (slug: string, stageNumbers: number[]) =>
     request<{ footage: { rgb: Rgb; share: number }[]; average: Rgb | null; logo: { rgb: Rgb; share: number }[] }>(

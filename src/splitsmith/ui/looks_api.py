@@ -51,7 +51,15 @@ from ..look_store import (
     is_shipped_name,
     template_file,
 )
-from ..look_tools import EDITOR_STARTERS, STARTERS, check_folder, sample_contexts
+from ..look_tools import (
+    EDITOR_STARTERS,
+    STARTERS,
+    LookToolError,
+    check_folder,
+    outdated_copies,
+    refresh_templates,
+    sample_contexts,
+)
 from ..looks import (
     BRAND_DIR,
     BRAND_FILE_RE,
@@ -427,6 +435,31 @@ def _check(name: str, look: Look, req: CheckRequest) -> dict[str, Any]:
         "errors": report.errors,
         "warnings": report.warnings,
     }
+
+
+class OutdatedTemplates(BaseModel):
+    #: The Look's unedited copies of an older shipped template.
+    files: list[str]
+
+
+@router.get("/api/looks/{name}/outdated", response_model=OutdatedTemplates)
+def outdated_templates(name: str) -> OutdatedTemplates:
+    """Which of your Look's templates are unedited copies of an older
+    shipped version (a Look duplicated before a release): the Export
+    page offers to draw the current ones instead. No browser."""
+    return OutdatedTemplates(files=list(outdated_copies(_own_look(name))))
+
+
+@router.post("/api/looks/{name}/refresh", response_model=OutdatedTemplates)
+def refresh_look_templates(name: str) -> OutdatedTemplates:
+    """``looks refresh``: drop the Look's unedited copies of shipped
+    templates, old or current, so those cards draw the shipped ones. An
+    edited file is never touched. Answers the files removed."""
+    _own_look(name)
+    try:
+        return OutdatedTemplates(files=list(refresh_templates(name)))
+    except LookToolError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
 
 
 @router.post("/api/looks/{name}/reveal")

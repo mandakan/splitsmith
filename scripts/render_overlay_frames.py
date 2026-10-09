@@ -209,7 +209,7 @@ def main() -> int:
         "--overlay-variant", default="default", help="overlay style: default (Classic) or a template"
     )
     parser.add_argument("--overlay-position", default=None, choices=HUD_POSITIONS)
-    parser.add_argument("--no-speed-colors", action="store_true")
+    parser.add_argument("--speed-colors", action="store_true")
     parser.add_argument("--no-class-labels", action="store_true")
     parser.add_argument("--no-landing", action="store_true")
     parser.add_argument("--reload-chip", action="store_true", help="draw the reload chip (HUD styles)")
@@ -271,7 +271,7 @@ def main() -> int:
         ffmpeg_binary=ffmpeg,
         variant=args.overlay_variant,
         hud_options=HudOptions(
-            speed_colors=not args.no_speed_colors,
+            speed_colors=args.speed_colors,
             class_labels=not args.no_class_labels,
             landing=not args.no_landing,
             position=args.overlay_position,

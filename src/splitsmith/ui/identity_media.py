@@ -72,19 +72,22 @@ IdentitySource = Literal["match", "book", "none"]
 
 
 def identity_source(project: MatchProject, book: BookSnapshot = EMPTY_BOOK) -> IdentitySource:
-    """Where a shooter's look comes from (spec 2026-10-08): the match's own
-    record when it sets anything, as a whole; else the shooter book's entry
-    for their SSI shooter id; else nothing. Never matched by name."""
-    if is_set(project.identity):
-        return "match"
+    """Where a shooter's look comes from: the shooter book's entry for their
+    SSI shooter id when it sets anything; else the match's own record, as a
+    whole; else nothing. Never matched by name. The book wins (spec
+    2026-10-09): a look is edited on the Shooters page, and an old match
+    record must not keep drawing over it. The match record is the look of a
+    shooter the book has no entry for (no SSI id, or never edited)."""
     if is_set(book.get(project.selected_shooter_id)):
         return "book"
+    if is_set(project.identity):
+        return "match"
     return "none"
 
 
 def effective_identity(project: MatchProject, book: BookSnapshot = EMPTY_BOOK) -> ShooterIdentity:
     """The look :func:`identity_source` picks, as the roster shows it: the
-    match's own record, else the book's entry, else the (empty) record."""
+    book's entry, else the match's own record (possibly empty)."""
     if identity_source(project, book) == "book":
         entry = book.get(project.selected_shooter_id)
         if entry is not None:

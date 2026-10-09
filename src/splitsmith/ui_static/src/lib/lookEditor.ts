@@ -6,6 +6,7 @@
  * offers, the name a duplicate gets, and the preview requests. The sheet
  * maps these to primitives and owns no rule.
  */
+import { LOGO_SPOT_CARDS } from "@/lib/logoSpots";
 import { ApiError, type ExportPreviewBody, type LookInfo, type PreviewCard, type Rgb, type StoredLookBody, type TemplateEdit } from "@/lib/api";
 
 export type LookDraft = StoredLookBody;
@@ -259,6 +260,8 @@ export function previewRequest(args: {
   motion?: boolean;
   /** Draw over this stage's footage (the default) or the demo range scene. */
   backdrop?: "footage" | "demo";
+  /** "Show where logos go": placeholders in the card's empty logo spots. */
+  logoSpots?: boolean;
 }): ExportPreviewBody {
   const body: ExportPreviewBody = {
     card: args.card,
@@ -273,6 +276,7 @@ export function previewRequest(args: {
   if (args.templates && args.templates.length > 0) body.templates = args.templates;
   if (args.motion && args.at === null) body.motion = true;
   if (args.backdrop === "demo") body.backdrop = "demo";
+  if (args.logoSpots && LOGO_SPOT_CARDS.has(args.card)) body.logo_placeholders = true;
   return body;
 }
 

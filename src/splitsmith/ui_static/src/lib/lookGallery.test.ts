@@ -438,15 +438,25 @@ describe("overlay styles in the gallery (template HUD)", () => {
     expect(plate.choice!.read(s)).toBe("bottom-left");
     const moved = { ...s, ...plate.choice!.write(s, "top-right") };
     expect(moved.overlayStyle.position).toBe("top-right");
-    const quiet = { ...moved, ...plate.toggles![0].write(moved, false) };
-    expect(quiet.overlayStyle.speedColors).toBe(false);
-    expect(plate.toggles![0].read(quiet)).toBe(false);
+    expect(plate.toggles![0].read(moved)).toBe(false);
+    const coloured = { ...moved, ...plate.toggles![0].write(moved, true) };
+    expect(coloured.overlayStyle.speedColors).toBe(true);
+    expect(plate.toggles![0].read(coloured)).toBe(true);
     const reloaded = { ...moved, ...plate.toggles![3].write(moved, true) };
     expect(reloaded.overlayStyle.reloadChip).toBe(true);
     expect(plate.toggles![3].read(reloaded)).toBe(true);
     const barred = { ...moved, ...plate.toggles![4].write(moved, true) };
     expect(barred.overlayStyle.stageBar).toBe(true);
     expect(plate.toggles![4].read(barred)).toBe(true);
+  });
+
+  it("explains speed colours in full: off, on, the comparison and its limits", () => {
+    const slot = overlaySlot(DEFAULT_EXPORT_SETTINGS);
+    const plate = slot.variants.find((v) => v.id === "style:plate")!;
+    const hint = plate.toggles!.find((t) => t.id === "speed-colors")!.hint ?? "";
+    for (const part of ["one colour", "same kind", "same stage", "green", "red", "another stage", "draws and reloads"]) {
+      expect(hint).toContain(part);
+    }
   });
 
   it("without styles in the catalog the overlay slot is as it was", () => {

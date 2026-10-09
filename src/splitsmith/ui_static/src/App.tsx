@@ -55,6 +55,7 @@ const AdminWorkers = lazyPage(() => import("@/pages/AdminWorkers"), "AdminWorker
 const AdminAccess = lazyPage(() => import("@/pages/AdminAccess"), "AdminAccess");
 const Account = lazyPage(() => import("@/pages/Account"), "Account");
 const You = lazyPage(() => import("@/pages/You"), "You");
+const Shooters = lazyPage(() => import("@/pages/Shooters"), "Shooters");
 const Results = lazyPage(() => import("@/pages/Results"), "Results");
 const ResultsStage = lazyPage(() => import("@/pages/ResultsStage"), "ResultsStage");
 const Review = lazyPage(() => import("@/pages/Review"), "Review");
@@ -286,6 +287,8 @@ export function App() {
           <Route path="account" element={<Account />} />
           {/* You (spec 2026-10-08): both modes, not project-scoped. */}
           <Route path="you" element={<You />} />
+          {/* Everyone you have filmed (spec 2026-10-09): both modes, account level. */}
+          <Route path="shooters" element={<Shooters />} />
           {/* Device-flow approval screen (#719). Under RootLayout so it
               carries the account chip -- the operator needs to see which
               account they are approving for. */}

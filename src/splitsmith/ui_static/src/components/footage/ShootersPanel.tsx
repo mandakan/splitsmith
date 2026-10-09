@@ -24,7 +24,7 @@ export interface ShootersPanelProps {
   onAdd: () => void;
   onRemove: (shooter: ShooterListEntry) => void;
   onRebuildTrims: (shooter: ShooterListEntry) => void;
-  /** Open the identity sheet for a shooter (#1243). */
+  /** Open the shooter's look (spec 2026-10-09): the book-only shooter sheet. */
   onIdentity: (shooter: ShooterListEntry) => void;
   /** Your scoreboard identity: the shooter with its SSI id is marked "You". */
   me?: ScoreboardIdentity | null;
@@ -105,13 +105,18 @@ export function ShootersPanel({
                 type="button"
                 role="menuitem"
                 className={menuItemClass}
-                disabled={editDenied}
+                disabled={editDenied || s.selected_shooter_id == null}
+                title={
+                  s.selected_shooter_id == null
+                    ? `Link ${s.name} to the scoreboard to give them a look of their own.`
+                    : undefined
+                }
                 onClick={() => {
                   setMenuFor(null);
                   onIdentity(s);
                 }}
               >
-                Identity&hellip;
+                Edit look&hellip;
               </button>
               {onThisIsMe && s.selected_shooter_id != null && !isYou(s.selected_shooter_id, me) ? (
                 <button

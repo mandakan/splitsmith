@@ -10437,6 +10437,7 @@ def test_export_stage_forwards_the_overlay_style(tmp_path: Path, monkeypatch: py
         ("plate", {}, True),
         ("plate", {"overlay_variant": "plate"}, False),
         ("plate", {"overlay_variant": "plate", "overlay_landing": False}, True),
+        (None, {"overlay_speed_colors": True}, True),
     ],
 )
 def test_match_export_redraws_an_overlay_only_when_its_record_differs(

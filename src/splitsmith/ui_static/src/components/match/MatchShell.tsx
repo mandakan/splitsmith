@@ -26,6 +26,7 @@ import {
 } from "react-router-dom";
 
 import { AccountChip } from "@/components/AccountChip";
+import { AccountMenu } from "@/components/account/AccountMenu";
 import { HostedAccountChip } from "@/components/account/HostedAccountChip";
 import { JobsSurface } from "@/components/Jobs";
 import {
@@ -36,6 +37,8 @@ import {
 } from "@/components/layout/shellChromeContext";
 import { MobileNav } from "@/components/match/MobileNav";
 import { ShooterChipStrip } from "@/components/match/ShooterChipStrip";
+import { ShooterSheet, type SheetShooter } from "@/components/shooters/ShooterSheet";
+import { identityMark } from "@/lib/identityMark";
 import { FOOTAGE_HINT, matchNavItems } from "@/components/match/navItems";
 import { Brand } from "@/components/ui";
 import {
@@ -280,6 +283,24 @@ export function MatchShell() {
   const [health, setHealth] = useState<ServerHealth | null>(null);
   const [project, setProject] = useState<MatchProject | null>(null);
   const [shooters, setShooters] = useState<ShooterListEntry[]>([]);
+  // The shooter whose look the sheet edits (spec 2026-10-09), from a chip's menu.
+  const [editLook, setEditLook] = useState<SheetShooter | null>(null);
+  const openLook = useCallback((s: ShooterListEntry) => {
+    if (s.selected_shooter_id == null) return;
+    setEditLook({
+      shooterId: s.selected_shooter_id,
+      name: s.name,
+      accent: s.identity?.accent ?? null,
+      club: s.identity?.club ?? null,
+      logoUrl: identityMark(s.slug, s.identity).logo,
+    });
+  }, []);
+  const reloadShooters = useCallback(() => {
+    api
+      .listMatchShooters()
+      .then((r) => setShooters(r.shooters))
+      .catch(() => undefined);
+  }, []);
   // Null until the first listMatchShooters resolves - the banner only
   // renders once we actually know the match is a desktop mirror, not on
   // every load by default (#631 Task 10).
@@ -559,6 +580,13 @@ export function MatchShell() {
         urlBase={breadcrumbUrlBase(relativePath)}
         label={shooterStripLabel}
         variant="inline"
+        onEditLook={openLook}
+      />
+      <ShooterSheet
+        open={editLook !== null}
+        onClose={() => setEditLook(null)}
+        shooter={editLook}
+        onChanged={reloadShooters}
       />
     </div>
   ) : null;
@@ -639,6 +667,7 @@ export function MatchShell() {
           extras={
             <div className="flex flex-col gap-1">
               <div className="flex items-center gap-2 px-1 py-1">
+                <AccountMenu align="left" />
                 <HostedAccountChip />
                 <AccountChip />
                 <div className="flex-1" />

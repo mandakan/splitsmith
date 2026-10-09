@@ -1,6 +1,30 @@
 {
   "entries": [
     {
+      "id": "shooters-page",
+      "date": "2026-10-09",
+      "title": "A Shooters page and your account menu",
+      "body": "Set each shooter's logo, colour and club once on the new Shooters page, from the account menu at the top right. Every match follows, and a shooter chip in a match opens it too."
+    },
+    {
+      "id": "logo-spots-in-previews",
+      "date": "2026-10-09",
+      "title": "See where each logo goes",
+      "body": "The Export preview and the Look editor mark every logo spot with a dashed square until a logo is set: the shooter's, your brand and the event's. Turn it off with Show where logos go."
+    },
+    {
+      "id": "look-copies-stay-current",
+      "date": "2026-10-09",
+      "title": "Copied Looks keep up with new card features",
+      "body": "A Look you duplicate now draws the current cards, so it gets new features like your brand logo. An older copy shows a note beside the preview on the Export page with a button to catch up."
+    },
+    {
+      "id": "audit-save-flow",
+      "date": "2026-10-09",
+      "title": "Clearer saving in Audit",
+      "body": "Finishing the audit takes you to Splits, and if a stage was saved elsewhere while you edited, Audit asks whether to keep your edits or load the saved version instead of dropping them."
+    },
+    {
       "id": "audit-timer-stop",
       "date": "2026-10-09",
       "title": "See where the timer stopped in Audit",

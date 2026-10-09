@@ -4,6 +4,8 @@
  * templates live; the draft previewed on this match's stage before Save.
  * Rules live in ``lib/lookEditor``; this maps them to primitives.
  */
+import { LogoSpotsSwitch } from "@/components/export/LogoSpotsSwitch";
+import { useLogoSpots } from "@/lib/logoSpots";
 import { Loader2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -650,6 +652,7 @@ export function DraftPreview({
   hosted?: boolean;
 }) {
   const [backdrop, setBackdrop] = useState<"footage" | "demo">(hosted ? "demo" : "footage");
+  const [logoSpots, setLogoSpots] = useLogoSpots();
   const sting = focus?.card === "sting" ? focus.variant : (info?.slots.transition?.[0]?.name ?? null);
   const cards = PREVIEW_CARDS.filter((c) => c.card !== "sting" || sting !== null);
   const [card, setCard] = useState<PreviewCard>("title");
@@ -704,6 +707,7 @@ export function DraftPreview({
           templates,
           motion,
           backdrop,
+          logoSpots,
         }),
         signal,
       ),
@@ -755,7 +759,7 @@ export function DraftPreview({
       window.clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchCard reads these
-  }, [current.card, at, draft, name, slug, stageNumber, templatesKey, focus, backdrop]);
+  }, [current.card, at, draft, name, slug, stageNumber, templatesKey, focus, backdrop, logoSpots]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -780,7 +784,7 @@ export function DraftPreview({
       window.clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchCard reads these
-  }, [draft, name, slug, stageNumber, sting, templatesKey, backdrop]);
+  }, [draft, name, slug, stageNumber, sting, templatesKey, backdrop, logoSpots]);
 
   const status =
     phase === "still"
@@ -805,6 +809,7 @@ export function DraftPreview({
           ]}
         />
       </div>
+      <LogoSpotsSwitch on={logoSpots} onChange={setLogoSpots} />
       <p className="text-sm text-muted">
         {current.label},{" "}
         {backdrop === "demo" ? (

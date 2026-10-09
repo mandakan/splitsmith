@@ -290,7 +290,17 @@ face is a catalog id or a path and every consumer takes both
 content name is what keeps the caches honest: the card PNG and the
 ``@font-face`` URL inside ``template_digest`` both move with the bytes. A copy
 of a Look (``looks.look_files``: ``looks new --from``, the editor's
-``draft_look``) carries every file but its manifest and previews. On hosted, Looks carry colours,
+``draft_look``) carries every file but its manifest and previews, except a
+copy of a *shipped* Look, which names no template (``slots`` empty, ``base``
+set) so it draws the current shipped ones; ``--templates`` copies them. A
+copied ``card.html`` froze the cards before the brand, the event logo and
+the credit. ``data/looks/_history.json`` (every version of every shipped
+template by sha256, from git: ``scripts/record_template_history.py``, and
+``tests/test_look_tools.py`` fails until a changed template is recorded)
+lets ``look_tools.outdated_copies`` recognise an unedited copy of an older
+version; ``looks check`` warns, the Export rail's ``LookHealth`` offers "Use
+the current cards", and ``looks refresh`` / ``POST /api/looks/{name}/refresh``
+(local only) drop every unedited copy and its slot entries. On hosted, Looks carry colours,
 fonts from the catalog and card styles, never a template: **custom templates
 are desktop only, by decision** (2026-10-07). A template is code; hosted would
 run it beside the database and R2 credentials, and Chromium's own OS sandbox
@@ -489,19 +499,35 @@ shooter without one is gone. It syncs at match level
 renderer resolves it through ``identity_media.ensure_local_event_logo``,
 which mirrors it down on hosted and answers ``None`` when it is missing.
 
+**Shooters and the account menu** (spec
+``2026-10-09-shooters-page-and-account-menu-design``): ``/shooters`` lists
+everyone you have filmed (``GET /api/me/shooters``, ``ui/shooter_roster``: one
+row per SSI id over the recently opened matches locally and the account's
+matches hosted, the book's look else the newest match's, you first; listing
+writes nothing), and ``components/shooters/ShooterSheet`` edits the book only.
+The same sheet opens from a shooter chip's menu in a match
+(``ShooterChipStrip`` ``onEditLook``) and from Footage's "Edit look". The
+account pill (``AccountMenu``, top right, both modes) holds You, Shooters,
+Branding (``/you#brand``) and, hosted, Account; the splitsmith.app chips stay
+beside it. The SPA no longer sends ``scope="match"``; the server still takes it.
+
 **You, your brand and the shooter book** (spec
 ``2026-10-08-account-identity-and-shooter-book-design``). "You" is the existing
 ``ScoreboardIdentity.shooter_id``. The **shooter book** (``shooter_book``) keeps
 a shooter's look per account keyed by SSI shooter id, never by name:
-``identity_media.identity_source`` takes the match's own record when it sets
-anything (as a whole), else the book's entry for ``selected_shooter_id``, else
-nothing, so an empty book renders exactly as before. Renderers never read a
+``identity_media.identity_source`` takes the book's entry for
+``selected_shooter_id`` when it sets anything, else the match's own record (as
+a whole), else nothing (**the book wins**, spec
+``2026-10-09-shooters-page-and-account-menu-design``: no per-match overrides,
+and an old match record must not draw over the Shooters page), so an empty book
+renders exactly as before. Renderers never read a
 store: the request layer loads ``load_snapshot(state.shooter_book)`` once per
 export and passes ``book=`` to ``resolved_identity_for`` / ``grid_identities``
 (every export job, the preview, the palette route, both CLIs). Identity edits
-write the book (``scope="book"``, the default; ``"match"`` keeps an edit here;
-an empty look removes the entry); an edit to a shooter whose match sets nothing
-starts from the book's look, logo copied in; ``use-book`` is refused when the
+write the book (``scope="book"``, the default; ``"match"`` writes only this
+match's record, which the book now draws over; an empty look removes the
+entry); an edit starts from the look the videos draw (the book's, logo copied
+in, else the match's own); ``use-book`` is refused when the
 book has nothing to fall back to. The account's **brand** (``AccountProfile``,
 the shape of ``LookBrand``) is ``MatchTitle.brand``, resolved by the request
 layer like the event logo; ``look_brand.brand_json`` draws the Look's brand when
@@ -738,6 +764,8 @@ Transitions live in Look (FCPXML only, sent as ``none`` elsewhere) and
 the title line in Details. A slot whose seconds field is being edited
 reads NaN and must still count as on, or the input vanishes under the
 cursor (``summaryHold.read``).
+
+Both previews (the rail and the Look editor) can draw **logo placeholders**: ``logo_placeholders`` on the request fills every logo spot no logo fills (the shooter's corner, your brand, the event's centre; title, slate, lower third, closing) with a labelled dashed square from ``logo_placeholder`` (a content-named PNG under ``cache_dir/logo-placeholders``), keyed apart by ``PLACEHOLDER_REVISION``. The switch is the viewer's (``lib/logoSpots``, on by default); no export path ever asks for it.
 
 The rail's preview (spec s3) is ``POST /api/shooters/{slug}/export-preview``
 -> PNG, engine ``export_preview.render_preview``: it declares the card

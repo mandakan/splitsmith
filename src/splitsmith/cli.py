@@ -1222,7 +1222,9 @@ def overlay(
         None, "--overlay-position", help="Template styles: top-left, top-right, bottom-left or bottom-right."
     ),
     speed_colors: bool = typer.Option(
-        True, "--speed-colors/--no-speed-colors", help="Colour splits by speed."
+        False,
+        "--speed-colors/--no-speed-colors",
+        help="Colour each split by its speed against the stage's other splits of its kind.",
     ),
     class_labels: bool = typer.Option(
         True, "--class-labels/--no-class-labels", help="Show draw, split, transition and reload labels."

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ScoreboardIdentity } from "@/lib/api";
-import { identityIsSet, isYou, pinBody, sortBook, sourceLine } from "@/lib/you";
+import { identityIsSet, isYou, pinBody, sortBook } from "@/lib/you";
 
 const ME: ScoreboardIdentity = { shooter_id: 42, display_name: "Mathias", division: null, club: null, base_url: null };
 
@@ -12,21 +12,6 @@ describe("isYou", () => {
     expect(isYou(null, ME)).toBe(false);
     expect(isYou(undefined, ME)).toBe(false);
     expect(isYou(42, null)).toBe(false);
-  });
-});
-
-describe("sourceLine", () => {
-  it("says where the look comes from and what saving does", () => {
-    expect(sourceLine("book", true)).toMatch(/shooter book/);
-    expect(sourceLine("match", true)).toMatch(/updates your shooter book/);
-    expect(sourceLine("match", false)).toMatch(/Link this shooter's scoreboard entry/);
-    expect(sourceLine("none", false)).toMatch(/Link this shooter's scoreboard entry/);
-    expect(sourceLine("match", true, false)).toBe("Set for this match.");
-    expect(sourceLine("none", true, false)).not.toMatch(/book/);
-    for (const line of [sourceLine("book", true), sourceLine("none", true)]) {
-      expect(line).toMatch(/^[ -~]+$/);
-      expect(line).not.toMatch(/ - |--/);
-    }
   });
 });
 

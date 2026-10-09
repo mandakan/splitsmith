@@ -51,6 +51,9 @@ export interface LookParam {
 export interface LookToggle {
   id: string;
   label: string;
+  /** What the toggle does, in full, shown under the toggles whether it is
+   *  on or off, so the operator knows what the video will show. */
+  hint?: string;
   read(s: ExportSettings): boolean;
   write(s: ExportSettings, on: boolean): Partial<ExportSettings>;
 }
@@ -441,6 +444,11 @@ const STYLE_TOGGLES: LookToggle[] = [
   {
     id: "speed-colors",
     label: "Speed colours",
+    hint:
+      "Speed colours: off draws every split in one colour. On compares each split with your other splits " +
+      "of the same kind (split, transition or movement) on the same stage: more than 7% faster is green, " +
+      "more than 12% slower is red, anything else keeps the normal colour. The same time can get a " +
+      "different colour on another stage, and draws and reloads are never coloured.",
     read: (s) => s.overlayStyle.speedColors,
     write: (s, on) => styled(s, { speedColors: on }),
   },

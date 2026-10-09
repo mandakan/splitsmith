@@ -4,7 +4,7 @@
  * shooter id on your scoreboard identity; a shooter is you only by that id,
  * never by name.
  */
-import type { IdentitySource, ScoreboardIdentity, ScoreboardPin, ShooterIdentity } from "@/lib/api";
+import type { ScoreboardIdentity, ScoreboardPin, ShooterIdentity } from "@/lib/api";
 
 export const YOU_FEATURE = "your-brand-and-shooter-book";
 
@@ -29,21 +29,6 @@ export function pinBody(
     division: shooter.division ?? (same ? me.division : null),
     base_url: me?.base_url ?? null,
   };
-}
-
-/** The identity sheet's line on where a shooter's look comes from.
- *  ``bookAvailable`` false (a server with no book yet) promises nothing. */
-export function sourceLine(source: IdentitySource, hasShooterId: boolean, bookAvailable = true): string {
-  if (!bookAvailable) return source === "match" ? "Set for this match." : "Nothing set for this match.";
-  if (source === "book") return "From your shooter book: the same in every match.";
-  if (source === "match") {
-    return hasShooterId
-      ? "Set for this match. Saving also updates your shooter book."
-      : "Set for this match. Link this shooter's scoreboard entry to carry it to other matches.";
-  }
-  return hasShooterId
-    ? "Nothing set. What you save here goes to your shooter book too."
-    : "Nothing set. Link this shooter's scoreboard entry to carry a look to other matches.";
 }
 
 /** Whether an identity sets anything (an all-empty one is "nothing set"). */

@@ -49,7 +49,6 @@ import {
 } from "@/components/audit/CamSyncPill";
 import { CamGridModal } from "@/components/audit/CamGridModal";
 import { MultiCamColumn, type CamLayout } from "@/components/audit/MultiCamColumn";
-import { SessionSummary } from "@/components/audit/SessionSummary";
 import {
   DEFAULT_FILTERS,
   type MarkerFilters,
@@ -83,6 +82,7 @@ import {
   type StageVideo,
 } from "@/lib/api";
 import { detectAnomalies, keptShotsFromMarkers } from "@/lib/anomalies";
+import { onlyBookkeepingMoved } from "@/lib/auditConflict";
 import { isActiveCommand, latestForStage, REDETECT_CONFIRM } from "@/lib/desktopCommands";
 import { useDesktopCommands } from "@/lib/useDesktopCommands";
 import { isTypingTextTarget, useBlurOnPointerClick } from "@/lib/audit-input";
@@ -130,8 +130,6 @@ export function Audit() {
   const navigate = useNavigate();
   const href = useMatchHref();
   const [searchParams] = useSearchParams();
-  const doneParam = searchParams.get("done");
-  const nextShooterParam = searchParams.get("next");
 
   // Drop button / chip focus after a mouse click so the next Space press
   // toggles playback instead of re-clicking the last-touched control.
@@ -599,27 +597,40 @@ export function Audit() {
     };
   }, [peaks, slug, stageNumber]);
 
+  // Every load of the stage's audit takes a ticket; a response applies only
+  // while its ticket is the newest. Without it a slow load (the page's
+  // first one, on a spinning disk) could land after a newer one -- the
+  // reload after a reset -- and put the older copy back, whose revision
+  // the next save then sends: a refused save over nothing. A save bumps
+  // the counter too, so no load started before it can undo it.
+  const auditLoadSeqRef = useRef(0);
+  // A save the server refused because the stored stage really changed
+  // (shots, beep or candidates; see lib/auditConflict). The operator's
+  // edits stay on the page until they pick a side in the banner.
+  const [conflict, setConflict] = useState<{ stored: StageAudit | null; advance: boolean } | null>(null);
+
   // Load audit JSON. 404 means "no audit yet" -- start with empty markers.
   useEffect(() => {
+    setConflict(null);
     if (stageNumber == null) {
       setAudit(null);
       return;
     }
-    let alive = true;
+    const ticket = ++auditLoadSeqRef.current;
     api
       .getStageAudit(slug, stageNumber)
       .then((a) => {
-        if (!alive) return;
+        if (ticket !== auditLoadSeqRef.current) return;
         setAudit(a);
         setMarkers(deriveMarkers(a));
       })
       .catch(() => {
-        if (!alive) return;
+        if (ticket !== auditLoadSeqRef.current) return;
         setAudit(null);
         setMarkers([]);
       });
     return () => {
-      alive = false;
+      auditLoadSeqRef.current += 1;
     };
   }, [slug, stageNumber]);
 
@@ -1174,38 +1185,62 @@ export function Audit() {
   // ---- Save flow (Step 5) ------------------------------------------------
 
   const performSave = useCallback(
-    async (opts: { silent?: boolean; advance?: boolean } = {}): Promise<boolean> => {
+    async (opts: { silent?: boolean; advance?: boolean; base?: StageAudit | null } = {}): Promise<boolean> => {
       if (stageNumber == null || !stage) return false;
       if (!isDirtyRef.current && opts.silent) return true; // nothing to save
       const beepInClip = peaks?.beep_time ?? primary?.beep_time ?? null;
       const appendEvents = sessionEventsRef.current;
-      const payload = buildAuditJson({
-        base: audit,
-        stage: {
-          stage_number: stage.stage_number,
-          stage_name: stage.stage_name,
-          time_seconds: stage.time_seconds,
-        },
-        primaryBeepInClip: beepInClip,
-        markers,
-        appendEvents: [
-          ...appendEvents,
-          {
-            ts: new Date().toISOString(),
-            kind: "save",
-            payload: { shots_count: 0 /* filled after build */ },
+      const build = (base: StageAudit | null): StageAudit => {
+        const payload = buildAuditJson({
+          base,
+          stage: {
+            stage_number: stage.stage_number,
+            stage_name: stage.stage_name,
+            time_seconds: stage.time_seconds,
           },
-        ],
-      });
-      // Attach the actual shots count to the synthetic save event.
-      const lastEv = payload.audit_events?.[payload.audit_events.length - 1];
-      if (lastEv && lastEv.kind === "save") {
-        lastEv.payload = { shots_count: payload.shots.length };
-      }
+          primaryBeepInClip: beepInClip,
+          markers,
+          appendEvents: [
+            ...appendEvents,
+            {
+              ts: new Date().toISOString(),
+              kind: "save",
+              payload: { shots_count: 0 /* filled after build */ },
+            },
+          ],
+        });
+        // Attach the actual shots count to the synthetic save event.
+        const lastEv = payload.audit_events?.[payload.audit_events.length - 1];
+        if (lastEv && lastEv.kind === "save") {
+          lastEv.payload = { shots_count: payload.shots.length };
+        }
+        return payload;
+      };
+      const base = opts.base !== undefined ? opts.base : audit;
       setSaveStatus({ kind: "saving" });
       try {
-        const saved = await api.saveStageAudit(slug, stageNumber, payload);
+        let saved: StageAudit;
+        try {
+          saved = await api.saveStageAudit(slug, stageNumber, build(base));
+        } catch (err) {
+          // 409: the stored stage no longer matches the copy this page
+          // started from. When only bookkeeping moved (the audit log, the
+          // revision: a stale load landing late, a re-run with the same
+          // shots) the save is replayed on the stored copy and nothing is
+          // asked. Otherwise the operator chooses in the conflict banner;
+          // their edits stay on the page until they do.
+          if (!(err instanceof ApiError && err.status === 409)) throw err;
+          const fresh = await api.getStageAudit(slug, stageNumber);
+          if (!onlyBookkeepingMoved(base, fresh)) {
+            setConflict({ stored: fresh, advance: opts.advance ?? false });
+            setSaveStatus({ kind: "idle" });
+            return false;
+          }
+          saved = await api.saveStageAudit(slug, stageNumber, build(fresh));
+        }
+        auditLoadSeqRef.current += 1;
         setAudit(saved);
+        setConflict(null);
         sessionEventsRef.current = [];
         isDirtyRef.current = false;
         setSaveStatus({ kind: "saved", at: Date.now() });
@@ -1218,16 +1253,9 @@ export function Audit() {
         // Auto-advance on explicit Save (Cmd+S or the Save button): the
         // common audit loop is "run detect -> Save -> next stage", so we
         // jump immediately after the write returns. Silent saves (the
-        // dirty-flush during stage switch) never advance.
-        //
-        // The conveyor chains across shooters: at the last stage of the
-        // current shooter, land in a shooter-complete interstitial that
-        // names the next shooter and offers an explicit CTA (Variant D
-        // in the design bundle); at the last stage of the last shooter,
-        // land in the match-complete finish state. ?done=1 swaps the
-        // StageActionBar for SessionSummary either way; ?next=<slug>
-        // distinguishes shooter-complete from match-complete and names
-        // the next shooter's pickup target.
+        // dirty-flush during stage switch) never advance. The conveyor
+        // goes where its label says: the next stage, the next shooter's
+        // first stage, and after the last one the Splits page.
         if (opts.advance) {
           const step = computeAuditNextStep({
             shooters,
@@ -1237,41 +1265,14 @@ export function Audit() {
           });
           if (step.kind === "stage") {
             navigate(href("audit", step.nextSlug, String(step.nextStage)));
-          } else if (step.kind === "shooter" && slugParam != null && stageNumber != null) {
-            navigate(
-              `${href("audit", slugParam, String(stageNumber))}?done=1&next=${encodeURIComponent(step.nextSlug)}`,
-              { replace: true },
-            );
-          } else if (slugParam != null && stageNumber != null) {
-            navigate(`${href("audit", slugParam, String(stageNumber))}?done=1`, { replace: true });
+          } else if (step.kind === "shooter") {
+            navigate(href("audit", step.nextSlug));
+          } else {
+            navigate(href("results"));
           }
         }
         return true;
       } catch (err) {
-        // 409: the stage changed under this page (a sync pull from the
-        // phone, another tab). Reload rather than overwrite; same rule as
-        // MobileAudit (spec 2026-09-27 s5).
-        if (err instanceof ApiError && err.status === 409) {
-          try {
-            const fresh = await api.getStageAudit(slug, stageNumber);
-            setAudit(fresh);
-            setMarkers(deriveMarkers(fresh));
-            sessionEventsRef.current = [];
-            isDirtyRef.current = false;
-            setSaveStatus({
-              kind: "error",
-              message:
-                "This stage changed on another device. Reloaded it; your unsaved edits were discarded.",
-            });
-          } catch (reloadErr) {
-            const detail = reloadErr instanceof ApiError ? reloadErr.detail : String(reloadErr);
-            setSaveStatus({
-              kind: "error",
-              message: `Save conflicted and the reload failed. Check your connection and retry (${detail}).`,
-            });
-          }
-          return false;
-        }
         const message = err instanceof ApiError ? err.detail : String(err);
         setSaveStatus({ kind: "error", message });
         return false;
@@ -1304,9 +1305,7 @@ export function Audit() {
   const navigateToStage = useCallback(
     async (n: number) => {
       if (stageNumber === n) return;
-      if (isDirtyRef.current) {
-        await performSave({ silent: true });
-      }
+      if (isDirtyRef.current && !(await performSave({ silent: true }))) return;
       // Match-prefixed (see the stage-redirect effect above): a bare
       // ``/audit/...`` would escape the match scope and bounce to /pick.
       navigate(href("audit", slug, String(n)));
@@ -1651,10 +1650,31 @@ export function Audit() {
   }, [slug, stageNumber]);
   const reloadAudit = useCallback(async () => {
     if (stageNumber == null) return;
+    const ticket = ++auditLoadSeqRef.current;
     const a = await api.getStageAudit(slug, stageNumber);
+    if (ticket !== auditLoadSeqRef.current) return;
     setAudit(a);
     setMarkers(deriveMarkers(a));
+    setConflict(null);
   }, [slug, stageNumber]);
+
+  // The conflict banner's two ways out. Keeping the edits saves them over
+  // the stored copy (its audit log kept, this session's appended);
+  // loading the stored copy drops them, which is what a 409 used to do
+  // without asking.
+  const keepMyEdits = useCallback(() => {
+    if (!conflict) return;
+    void performSave({ advance: conflict.advance, base: conflict.stored });
+  }, [conflict, performSave]);
+  const loadStoredVersion = useCallback(() => {
+    if (!conflict) return;
+    auditLoadSeqRef.current += 1;
+    setAudit(conflict.stored);
+    setMarkers(deriveMarkers(conflict.stored));
+    sessionEventsRef.current = [];
+    isDirtyRef.current = false;
+    setConflict(null);
+  }, [conflict]);
   const reloadProject = useCallback(async () => {
     try {
       setProject(await api.getProject(slug));
@@ -1761,35 +1781,6 @@ export function Audit() {
   const rejectedCount = markers.filter((m) => m.kind === "rejected").length;
   const manualCount = markers.filter((m) => m.kind === "manual").length;
 
-  // ?done=1 is set by performSave when the conveyor lands on the
-  // finish state (no more stages, no more shooters). The StageActionBar
-  // swaps for the SessionSummary card so the operator gets a clear
-  // finish line instead of a stranded CTA.
-  //
-  // Plain const (not useMemo) on purpose -- this lives *after* the
-  // early returns (projectError / !project / no stages with primary),
-  // and a conditionally-called hook trips React error #310.
-  const sessionDone = doneParam === "1";
-  const activeShooter = shooters.find((s) => s.slug === slugParam) ?? null;
-  const summaryStats: { label: string; value: string; sub?: string }[] = [];
-  if (activeShooter) {
-    summaryStats.push({
-      label: "Stages audited",
-      value: String(activeShooter.stages_audited),
-      sub: `of ${activeShooter.stages_total}`,
-    });
-  }
-  summaryStats.push({
-    label: "Shots on this stage",
-    value: String(detectedCount + manualCount),
-    sub: `${rejectedCount} rejected · ${manualCount} manual`,
-  });
-  summaryStats.push({
-    label: "Anomalies",
-    value: String(anomalies.length),
-    sub: anomalies.length === 0 ? "clean" : "open",
-  });
-
   // Blocking pre-audit state. When a stage hasn't met the prerequisites
   // for audit -- the trim isn't built yet, or detection hasn't run --
   // the audit canvas is replaced by PrereqGate. The toolbar's
@@ -1811,6 +1802,7 @@ export function Audit() {
   // ---- Render --------------------------------------------------------------
 
   const flagCount = anomalies.filter((a) => a.time != null).length;
+  const activeShooter = shooters.find((s) => s.slug === slugParam) ?? null;
   const chips = primary ? headerState({ primary, keptCount: keptShots.length, flagCount }) : null;
   const header = stage
     ? {
@@ -1903,6 +1895,24 @@ export function Audit() {
                 </>
               }
             />
+
+            {conflict ? (
+              <div
+                role="alert"
+                className="mb-4 flex flex-wrap items-center gap-3 rounded-[10px] border border-destructive px-3.5 py-2.5 text-md text-ink"
+              >
+                <span className="min-w-0 flex-1">
+                  This stage was saved elsewhere since you opened it, with different shots or beep. Your edits are
+                  still here and not saved.
+                </span>
+                <Button type="button" onClick={loadStoredVersion}>
+                  Load the saved version
+                </Button>
+                <Button type="button" onClick={keepMyEdits} disabled={saving}>
+                  Keep my edits
+                </Button>
+              </div>
+            ) : null}
 
             {/* The gate carries its own running state; this line is for a
                 chain that runs while the editor is up (a re-run). */}
@@ -2198,20 +2208,6 @@ export function Audit() {
               </p>
             ) : null}
 
-            {sessionDone ? (
-              <div className="mt-4">
-                <SessionSummary
-                  shooterName={activeShooter?.name ?? null}
-                  stats={summaryStats}
-                  onJumpToOverview={() => navigate(href(""))}
-                  onExport={slugParam ? () => navigate(href("export", slugParam)) : undefined}
-                  nextShooterLabel={
-                    nextShooterParam ? (shooters.find((s) => s.slug === nextShooterParam)?.name ?? null) : null
-                  }
-                  onAuditNextShooter={nextShooterParam ? () => navigate(href("audit", nextShooterParam)) : undefined}
-                />
-              </div>
-            ) : null}
 
             {/* Fullscreen grid review. The column's "Grid" segment opens
                 this; clicking a tile promotes that cam to primary and

@@ -55,6 +55,27 @@ function mount(settings: ExportSettings, looks: LookInfo[] = CATALOG) {
 const MP4: ExportSettings = { ...DEFAULT_EXPORT_SETTINGS, outputFormat: "mp4" };
 
 describe("LookGallery with a catalog", () => {
+  it("says what speed colours do under a chosen overlay style's toggles", () => {
+    const looks: LookInfo[] = [
+      {
+        ...CATALOG[0],
+        slots: {
+          ...CATALOG[0].slots,
+          overlay: [
+            { name: "default", preview: null },
+            { name: "plate", preview: null, positions: ["bottom-left", "top-right"] },
+          ],
+        },
+      },
+    ];
+    mount(
+      { ...MP4, includeOverlay: true, overlayStyle: { ...MP4.overlayStyle, variant: "plate" } },
+      looks,
+    );
+    expect(screen.getByRole("checkbox", { name: "Speed colours" })).not.toBeChecked();
+    expect(screen.getByText(/off draws every split in one colour/)).toBeInTheDocument();
+  });
+
   it("offers the installed Looks as tiles and writes the choice", async () => {
     const user = userEvent.setup();
     const patch = mount(MP4);

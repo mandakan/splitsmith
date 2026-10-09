@@ -1,11 +1,13 @@
 /**
- * You (spec 2026-10-08): who you are as a shooter, your look on the cards,
- * your brand on every video you render, and the shooter book that carries
- * every shooter's look from match to match. Both modes: the Account page
+ * You (spec 2026-10-08): who you are as a shooter, your look on the cards
+ * and your brand on every video you render. Every other shooter's look is on
+ * the Shooters page (spec 2026-10-09). Both modes: the Account page
  * links here hosted, the Matches header locally. Rules live in `lib/you`.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
 
+import { LogoGuide } from "@/components/shooters/LogoGuide";
 import { Button } from "@/components/ui/button";
 import { Field, inputClass } from "@/components/ui/Field";
 import { Label } from "@/components/ui/Label";
@@ -21,16 +23,16 @@ import {
 import { useDeploymentMode } from "@/lib/features";
 import { dismissNewChip } from "@/lib/useWhatsNew";
 import { cn } from "@/lib/utils";
-import { YOU_FEATURE, pinBody, sortBook } from "@/lib/you";
+import { YOU_FEATURE, pinBody } from "@/lib/you";
 
 const ACCENT_SWATCHES = ["#ff2d2d", "#fbbf24", "#4ade80", "#60a5fa", "#c084fc", "#f472b6"] as const;
 const HEX = /^#[0-9a-fA-F]{6}$/;
 const BRAND_LINE_MAX = 60;
 const CLUB_MAX = 60;
 
-function Section({ label, children }: { label: string; children: React.ReactNode }) {
+function Section({ label, id, children }: { label: string; id?: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-[10px] border border-rule bg-surface">
+    <section id={id} className="scroll-mt-24 rounded-[10px] border border-rule bg-surface">
       <div className="border-b border-rule px-3.5 py-2">
         <Label>{label}</Label>
       </div>
@@ -235,7 +237,10 @@ function YourLook({ me, entry, onSaved }: { me: ScoreboardIdentity; entry: Shoot
           </Button>
         </div>
       </Field>
-      <Field label="Logo" help="PNG, JPEG or WebP, at most 2 MB. Drawn top-right on the cards.">
+      <Field
+        label="Shooter logo"
+        help="You as a shooter, often your club badge. Top right on your title page, stage slates and closing card. PNG, JPEG or WebP, at most 2 MB."
+      >
         <div className="flex items-center gap-3">
           {logo ? (
             <img
@@ -287,10 +292,10 @@ function YourBrand({ profile, onSaved }: { profile: AccountProfileView | null; o
   };
 
   return (
-    <Section label="Your brand">
+    <Section label="Your brand" id="brand">
       <Field
-        label="Logo"
-        help="Your mark, top-left on the title page and the closing card of every video you render. A Look with its own brand shows that instead; turn it off for one video under Details on the Export page."
+        label="Brand logo"
+        help="You as the video's maker: your channel, team or sponsor. Top left on the title page and closing card of every video you render, whoever is in it. Leave it empty if you have no mark of your own. A Look with its own brand shows that instead; turn it off for one video under Details on the Export page."
         error={error}
       >
         <div className="flex items-center gap-3">
@@ -334,50 +339,15 @@ function YourBrand({ profile, onSaved }: { profile: AccountProfileView | null; o
   );
 }
 
-function ShooterBook({
-  entries,
-  me,
-  onRemove,
-}: {
-  entries: ShooterBookEntryView[];
-  me: ScoreboardIdentity | null;
-  onRemove: (id: number) => void;
-}) {
-  return (
-    <Section label="Shooter book">
-      <p className="px-3.5 py-2 text-sm text-muted">
-        A shooter's look set in any match is kept here by their scoreboard id, and their next match picks it up.
-      </p>
-      {entries.length === 0 ? (
-        <p className="border-t border-rule px-3.5 py-2.5 text-sm text-muted">Nobody yet.</p>
-      ) : (
-        <ul className="divide-y divide-rule border-t border-rule">
-          {sortBook(entries, me).map((e) => (
-            <li key={e.shooter_id} className="flex items-center gap-2.5 px-3.5 py-2 text-md">
-              <span
-                aria-hidden
-                className="size-3 shrink-0 rounded-full border border-rule-strong"
-                style={e.identity.accent ? { backgroundColor: e.identity.accent } : undefined}
-              />
-              <span className="min-w-0 flex-1 truncate text-ink">
-                {e.label ?? `Shooter ${e.shooter_id}`}
-                {me?.shooter_id === e.shooter_id ? <span className="ml-2 text-sm text-muted">You</span> : null}
-              </span>
-              <span className="truncate text-sm text-muted">{e.identity.club ?? ""}</span>
-              <span className="numeral text-sm text-muted">#{e.shooter_id}</span>
-              <Button size="sm" variant="ghost" aria-label={`Remove ${e.label ?? e.shooter_id}`} onClick={() => onRemove(e.shooter_id)}>
-                Remove
-              </Button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </Section>
-  );
-}
-
 export function You() {
   const { mode } = useDeploymentMode();
+  // The account menu's Branding links to ``/you#brand``; a client-side
+  // navigation never does the browser's anchor scroll, so do it here.
+  const { hash } = useLocation();
+  useEffect(() => {
+    if (!hash) return;
+    document.getElementById(decodeURIComponent(hash.slice(1)))?.scrollIntoView({ block: "start" });
+  }, [hash]);
   const [me, setMe] = useState<ScoreboardIdentity | null>(null);
   const [profile, setProfile] = useState<AccountProfileView | null>(null);
   const [book, setBook] = useState<ShooterBookEntryView[]>([]);
@@ -406,19 +376,50 @@ export function You() {
         back={mode === "hosted" ? { label: "Account", to: "/account" } : { label: "Matches", to: "/pick" }}
       />
       {error ? <p className="text-sm text-led-text">{error}</p> : null}
+      <Section label="Where your logos go">
+        <div className="grid gap-4 px-3.5 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+          <LogoGuide
+            shooter={
+              myEntry?.identity.logo && me
+                ? `/api/me/shooter-book/${me.shooter_id}/logo?v=${encodeURIComponent(myEntry.identity.logo)}`
+                : null
+            }
+            brand={
+              profile?.brand.logo ? `/api/me/profile/brand-logo?v=${encodeURIComponent(profile.brand.logo)}` : null
+            }
+          />
+          <ul className="flex flex-col gap-2 text-sm text-ink-2">
+            <li>
+              <span className="text-ink">Shooter logo, top right.</span> Whoever is in the video, often their club
+              badge. Yours is under Your look; everyone else&apos;s on{" "}
+              <Link to="/shooters" className="text-ink underline-offset-4 hover:underline">
+                Shooters
+              </Link>
+              .
+            </li>
+            <li>
+              <span className="text-ink">Your brand, top left.</span> You as the maker, on every video you render,
+              whoever is in it. Under Your brand below.
+            </li>
+            <li>
+              <span className="text-ink">Event logo, centre.</span> The match&apos;s own, set per match under Details
+              on the Export page.
+            </li>
+          </ul>
+        </div>
+      </Section>
       <YouShooter me={me} onChange={setMe} />
       {me ? <YourLook me={me} entry={myEntry} onSaved={reloadBook} /> : null}
       <YourBrand profile={profile} onSaved={setProfile} />
-      <ShooterBook
-        entries={book}
-        me={me}
-        onRemove={(id) =>
-          void api
-            .deleteShooterBookEntry(id)
-            .then(reloadBook)
-            .catch((e: unknown) => setError(apiErrorText(e, "Could not remove the entry.")))
-        }
-      />
+      <Section label="Shooters">
+        <p className="px-3.5 py-3 text-md text-ink-2">
+          The looks of everyone you have filmed live on{" "}
+          <Link to="/shooters" className="text-ink underline-offset-4 hover:underline">
+            Shooters
+          </Link>
+          .
+        </p>
+      </Section>
     </div>
   );
 }

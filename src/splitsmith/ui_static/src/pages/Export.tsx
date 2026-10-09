@@ -90,7 +90,7 @@ import {
 import { useDeploymentMode } from "@/lib/features";
 import { requestLook, transitionLabel } from "@/lib/looks";
 import { DEFAULT_OVERLAY_STYLE, overlayStyleLabel, visibleOverlayStyle } from "@/lib/overlayStyle";
-import { useLooks } from "@/lib/useLooks";
+import { refreshLooks, useLooks } from "@/lib/useLooks";
 import { useMatchHref } from "@/lib/matchHref";
 import { useDesktopCommands } from "@/lib/useDesktopCommands";
 import { visibleTransitionKind } from "@/lib/lookGallery";
@@ -1067,7 +1067,12 @@ function ExportInner({ slug }: { slug: string }) {
               hover={lookHover}
               enabled={!trimsOnly && orderedSelection.length > 0}
             />
-            <LookHealth look={view.look} looks={looksState.looks} hosted={hosted} />
+            <LookHealth
+              look={view.look}
+              looks={looksState.looks}
+              hosted={hosted}
+              onRefreshed={() => void refreshLooks()}
+            />
             <dl>
               {lines.map((l) => (
                 <div key={l.label} className="flex justify-between gap-3 border-b border-rule px-3.5 py-1.5 text-md">

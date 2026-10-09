@@ -21,6 +21,14 @@ def test_the_defaults_are_classic_with_every_toggle_on() -> None:
     assert body.hud_options() == HudOptions()
 
 
+def test_speed_colours_are_off_unless_asked_for() -> None:
+    """Off by default: a colour against the stage's own median gave the
+    same split time different colours, which read as noise in a video."""
+    assert HudOptions().speed_colors is False
+    assert _Body().overlay_speed_colors is False
+    assert ExportPresetBody().overlay_speed_colors is False
+
+
 def test_the_fields_become_hud_options() -> None:
     body = _Body(
         overlay_variant="plate",

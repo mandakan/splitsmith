@@ -225,6 +225,13 @@ function SlotRow({
                 {t.label}
               </label>
             ))}
+            {selected.toggles
+              .filter((t) => t.hint)
+              .map((t) => (
+                <p key={`${t.id}-hint`} className="basis-full text-sm text-muted">
+                  {t.hint}
+                </p>
+              ))}
           </div>
         ) : null}
         {params.length > 0 ? (

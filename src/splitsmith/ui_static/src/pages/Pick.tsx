@@ -14,6 +14,7 @@
  * `/` focuses search. Deleting a match moved to the Export page.
  */
 
+import { useIsMobile } from "@/lib/useIsMobile";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
@@ -78,6 +79,7 @@ function errorText(e: unknown): string {
 }
 
 export function Pick() {
+  const isMobile = useIsMobile();
   const navigate = useNavigate();
   const { mode } = useDeploymentMode();
   const { mode: appMode } = useMode();
@@ -322,10 +324,18 @@ export function Pick() {
           actions={
             <>
               {mode === "local" ? (
-                <Button type="button" onClick={() => navigate("/you")}>
-                  You
-                  <NewChip feature={YOU_FEATURE} />
-                </Button>
+                <>
+                  <Button type="button" onClick={() => navigate("/you")}>
+                    You
+                    <NewChip feature={YOU_FEATURE} />
+                  </Button>
+                  {/* A phone has the account pill's Shooters; this row is already full there. */}
+                  {isMobile ? null : (
+                    <Button type="button" onClick={() => navigate("/shooters")}>
+                      Shooters
+                    </Button>
+                  )}
+                </>
               ) : null}
               {localFs && canCreate ? (
                 <Button

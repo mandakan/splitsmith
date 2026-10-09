@@ -36,6 +36,7 @@ from .config import StageEvent
 from .events import confirmed_from_doc, reload_figures
 from .export_naming import stage_display_name, stage_file_base
 from .identity import ResolvedIdentity
+from .logo_placeholder import PLACEHOLDER_REVISION
 from .look_sting import sting_context
 from .looks import Look, overlay_template_for, sting_template_for
 from .match_project import MatchProject
@@ -126,6 +127,10 @@ class PreviewSpec:
     #: ``default`` is Classic. In the cache key only when a style is chosen.
     overlay_variant: str = "default"
     overlay_options: HudOptions = field(default_factory=HudOptions)
+    #: Every logo spot the card has but no logo fills draws a labelled
+    #: placeholder (``logo_placeholder``): the Look editor's and the rail's
+    #: "where the logos go". Never part of an export.
+    logo_placeholders: bool = False
 
     @property
     def height(self) -> int:
@@ -199,6 +204,8 @@ def preview_key(
         fields["book_identity"] = spec.book_identity
     if spec.account_brand is not None:
         fields["account_brand"] = spec.account_brand
+    if spec.logo_placeholders:
+        fields["logo_placeholders"] = PLACEHOLDER_REVISION
     if spec.card == "overlay" and spec.overlay_variant != "default":
         fields["overlay_style"] = {
             "variant": spec.overlay_variant,

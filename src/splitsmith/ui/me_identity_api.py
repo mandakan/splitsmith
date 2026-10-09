@@ -226,7 +226,9 @@ async def remove_shooter_book_logo(shooter_id: int, request: Request) -> JSONRes
     _writable(store)
     current = await store.get(shooter_id)
     if current is None:
-        raise HTTPException(status_code=404, detail="no such entry")
+        # Nothing to remove is already the result: the Shooters sheet clears
+        # a look that came from a match record, which the book never held.
+        return JSONResponse(_entry_json(ShooterBookEntry(shooter_id=shooter_id, identity=ShooterIdentity())))
     entry = current.model_copy(update={"identity": current.identity.model_copy(update={"logo": None})})
     await _put_or_drop(store, entry)
     return JSONResponse(_entry_json(entry))
@@ -260,3 +262,25 @@ def shooter_search(q: str = Query("", max_length=80)) -> JSONResponse:
 
 
 __all__ = ["router"]
+
+
+# --- the Shooters page ---------------------------------------------------------------
+
+
+@router.get("/api/me/shooters")
+async def list_shooters(request: Request) -> JSONResponse:
+    """Everyone you have filmed (spec 2026-10-09): one row per SSI shooter id
+    with the look the videos draw (the book's, else the newest match's own),
+    one per match for a shooter without an id; you first. Writes nothing."""
+    from . import shooter_roster
+    from .server import _hosted_mode_active
+
+    state = request.app.state.splitsmith_state
+    if _hosted_mode_active():
+        seen = await shooter_roster.hosted_seen(state.matches_store, state.project_state)
+    else:
+        seen = shooter_roster.local_seen(shooter_roster.local_roots())
+    you = await state.scoreboard_identity.load()
+    book = await _book(request).snapshot()
+    rows = shooter_roster.build_roster(seen, book, you.shooter_id if you is not None else None)
+    return JSONResponse({"rows": [row.to_json() for row in rows]})

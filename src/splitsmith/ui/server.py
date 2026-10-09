@@ -13338,13 +13338,11 @@ def create_app(
         )
 
     def _book_seeded_identity(project: MatchProject, slug: str) -> ShooterIdentity:
-        """What an edit starts from: the match's own record, or, when it sets
-        nothing, the book's look the sheet showed (its logo copied into this
-        match's ``identity/``), so an edit kept to this match never drops
-        what the user did not touch."""
+        """What an edit starts from: the look the videos draw, so an edit
+        never drops what the user did not touch. That is the book's entry
+        when it sets anything (the book wins, spec 2026-10-09; its logo is
+        copied into this match's ``identity/``), else the match's own record."""
         own = project.identity
-        if shooter_book_module.is_set(own):
-            return own
         book = shooter_book_module.load_snapshot(state.shooter_book)
         entry = book.get(project.selected_shooter_id)
         if not shooter_book_module.is_set(entry):
