@@ -37,6 +37,15 @@
   #bar { position: absolute; left: 0; bottom: 0; height: 0.6vh; width: 0; }
   #chip { align-self: flex-end; border-left: 0.8vh solid transparent; }
   #split { font-size: 5.2vh; }
+  #hud.staged .plate { padding-bottom: 2.6vh; }
+  #stageBar { position: absolute; left: 2.6vh; right: 2.6vh; bottom: 1.3vh; height: 0.6vh; border-radius: 0.3vh; }
+  #stageFill, .band { position: absolute; top: 0; bottom: 0; border-radius: 0.3vh; }
+  #reloadChip { position: absolute; opacity: 0; border-left: 0.8vh solid; }
+  #reloadChip .num { font-size: 4.2vh; }
+  #hud.bottom-left #reloadChip, #hud.bottom-right #reloadChip { bottom: calc(100% + 0.9vh); }
+  #hud.top-left #reloadChip, #hud.top-right #reloadChip { top: calc(100% + 0.9vh); }
+  #hud.bottom-left #reloadChip, #hud.top-left #reloadChip { left: 0; }
+  #hud.bottom-right #reloadChip, #hud.top-right #reloadChip { right: 0; }
 </style>
 </head>
 <body>
@@ -61,7 +70,12 @@
   var theme = s.theme, stage = s.data.stage, opts = s.data.options;
   var shots = stage.shots, beep = stage.beep, rounds = stage.rounds;
   var PUNCH = 0.22, CHIP_IN = 0.18, BEEP_GLOW = 0.4, LANDING = 0.6;
-  var PLATE_ALPHA = 0.86;
+  var PLATE_ALPHA = 0.86, CHIP_FADE = 0.4;
+  var span = stage.stage_time > 0 ? stage.stage_time : 1;
+  // Confirmed regions only reach the data; with a toggle off, or nothing
+  // to draw, no element is created and the page is exactly the plain one.
+  var reloads = opts.reload_chip ? stage.reloads : [];
+  var regions = opts.stage_bar ? stage.events : [];
 
   function el(id) { return document.getElementById(id); }
   function clamp(x) { return Math.max(0, Math.min(1, x)); }
@@ -76,6 +90,111 @@
     var c = a.map(function (v, i) { return Math.round(v + (b[i] - v) * k); });
     return 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + PLATE_ALPHA + ')';
   }
+  function rgba(hex, a) {
+    var c = rgb(hex);
+    return 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + a + ')';
+  }
+  function along(x) { return 100 * clamp((x - beep) / span); }
+  function regionColour(kind) {
+    return kind === 'movement' ? theme.movement : kind === 'reload' ? theme.reload : theme.muted;
+  }
+  // The bar's pieces (Timeline's rule): movement and activation whole, then
+  // each reload cut where it meets a movement -- that slice takes the bar's
+  // top half, so the movement shows under it.
+  function pieces(regions) {
+    var out = [], moves = [];
+    regions.forEach(function (r) {
+      if (r.kind === 'reload') return;
+      out.push({kind: r.kind, start: r.start, end: r.end, half: false});
+      if (r.kind === 'movement') moves.push(r);
+    });
+    regions.forEach(function (r) {
+      if (r.kind !== 'reload') return;
+      var cuts = moves
+        .filter(function (m) { return m.start < r.end && r.start < m.end; })
+        .map(function (m) { return [Math.max(r.start, m.start), Math.min(r.end, m.end)]; })
+        .sort(function (a, b) { return a[0] - b[0]; });
+      var from = r.start;
+      cuts.forEach(function (c) {
+        if (c[0] > from) {
+          out.push({kind: 'reload', start: from, end: c[0], half: false, joinL: from > r.start, joinR: true});
+        }
+        if (c[1] > from) {
+          var s = Math.max(from, c[0]);
+          out.push({kind: 'reload', start: s, end: c[1], half: true, joinL: s > r.start, joinR: c[1] < r.end});
+          from = c[1];
+        }
+      });
+      if (from < r.end) {
+        out.push({kind: 'reload', start: from, end: r.end, half: false, joinL: from > r.start, joinR: false});
+      }
+    });
+    return out;
+  }
+  // The stage bar: a track that fills with time, the confirmed regions
+  // drawn over the fill as it reaches them. Null when there is nothing.
+  function stageBar() {
+    var spans = pieces(regions);
+    if (!spans.length) return null;
+    var bar = document.createElement('div');
+    bar.id = 'stageBar';
+    bar.style.background = rgba(theme.ink, 0.22);
+    var fill = document.createElement('div');
+    fill.id = 'stageFill';
+    fill.style.background = theme.ink;
+    bar.appendChild(fill);
+    var bands = spans.map(function (region) {
+      var band = document.createElement('div');
+      band.className = 'band';
+      band.dataset.kind = region.kind;
+      band.style.left = along(region.start) + '%';
+      band.style.background = regionColour(region.kind);
+      band.style.opacity = 0.9;
+      if (region.half) band.style.bottom = '50%';
+      if (region.joinL) { band.style.borderTopLeftRadius = 0; band.style.borderBottomLeftRadius = 0; }
+      if (region.joinR) { band.style.borderTopRightRadius = 0; band.style.borderBottomRightRadius = 0; }
+      bar.appendChild(band);
+      return band;
+    });
+    return {
+      el: bar,
+      seek: function (running) {
+        fill.style.width = 100 * clamp(running / span) + '%';
+        for (var b = 0; b < bands.length; b++) {
+          var width = along(Math.min(spans[b].end, beep + running)) - along(spans[b].start);
+          bands[b].style.width = Math.max(0, width) + '%';
+          bands[b].style.visibility = width > 0 ? 'visible' : 'hidden';
+        }
+      },
+    };
+  }
+  // The reload chip: counts up while the reload runs, then holds the
+  // reload's duration while it fades. Null when there is no reload.
+  function reloadChip(build) {
+    if (!reloads.length) return null;
+    var chip = build();
+    chip.id = 'reloadChip';
+    return {
+      el: chip,
+      seek: function (t) {
+        var live = null;
+        for (var j = 0; j < reloads.length; j++) {
+          if (reloads[j].start <= t && t < reloads[j].end + CHIP_FADE) live = reloads[j];
+        }
+        if (!live) { chip.style.opacity = 0; return; }
+        var held = t >= live.end;
+        chip.style.opacity = held ? clamp(1 - (t - live.end) / CHIP_FADE) : 1;
+        chip.lastChild.textContent = (held ? live.duration : t - live.start).toFixed(2);
+      },
+    };
+  }
+  // A reload that ends after the last shot keeps the chip counting and
+  // fading past it; the frame plan holds whatever the clip cannot reach.
+  function chipSettle(base) {
+    var lastT = shots.length ? shots[shots.length - 1].t : beep;
+    for (var j = 0; j < reloads.length; j++) base = Math.max(base, reloads[j].end + CHIP_FADE - lastT);
+    return base;
+  }
   function pad2(n) { return (n < 10 ? '0' : '') + n; }
   function tierColour(tier) {
     if (!opts.speed_colors || !tier) return theme.split;
@@ -89,9 +208,26 @@
   ['clockPlate', 'countPlate', 'chip'].forEach(function (id) { el(id).style.background = plate(0); });
   el('bar').style.background = theme.accent;
   if (!opts.class_labels) el('chipLabel').style.display = 'none';
+  // The stage bar runs along the foot of the clock plate, over the count
+  // line; the reload chip is a plate of its own off the clock's outer edge.
+  var bar = stageBar();
+  if (bar) {
+    hud.className += ' staged';
+    el('clockPlate').appendChild(bar.el);
+  }
+  var reload = reloadChip(function () {
+    var chip = document.createElement('div');
+    chip.className = 'plate';
+    chip.innerHTML = '<div class="label">Reload</div><div class="num"></div>';
+    chip.style.background = plate(0);
+    chip.style.borderLeftColor = theme.reload;
+    chip.firstChild.style.color = theme.reload;
+    hud.appendChild(chip);
+    return chip;
+  });
 
   window.settle = function () {
-    return opts.landing ? LANDING : Math.max(PUNCH, CHIP_IN);
+    return chipSettle(opts.landing ? LANDING : Math.max(PUNCH, CHIP_IN));
   };
 
   window.seek = function (t) {
@@ -103,6 +239,8 @@
     var since = last ? t - last.t : Infinity;
 
     el('clock').textContent = running.toFixed(2);
+    if (bar) bar.seek(running);
+    if (reload) reload.seek(t);
     el('bar').style.width = (rounds ? 100 * n / rounds : 0) + '%';
     var landing = opts.landing && landed >= 0;
     el('clockLabel').textContent = landing ? 'Stage time' : 'Time';

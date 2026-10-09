@@ -573,7 +573,9 @@ _TIMELINE_DOM_JS = """() => {
 }"""
 
 
-def _timeline_view(rasterizer: Any, *, events: list[dict[str, Any]], **options: Any) -> Any:
+def _timeline_view(
+    rasterizer: Any, *, events: list[dict[str, Any]], variant: str = "timeline", **options: Any
+) -> Any:
     from splitsmith.config import StageEvent
     from splitsmith.looks import load_look, overlay_template_for
     from splitsmith.overlay_hud import hud_options_data, hud_stage_data
@@ -582,7 +584,7 @@ def _timeline_view(rasterizer: Any, *, events: list[dict[str, Any]], **options: 
     from splitsmith.stage_summary_data import TileShot
 
     look = load_look("splitsmith")
-    template = overlay_template_for(look, "timeline")
+    template = overlay_template_for(look, variant)
     assert template is not None
     shots, previous = [], 0.0
     for index, t in enumerate(_TL_SHOTS):
@@ -593,7 +595,7 @@ def _timeline_view(rasterizer: Any, *, events: list[dict[str, Any]], **options: 
     stage = hud_stage_data(shots, beep_in_clip=1.0, events=[StageEvent.model_validate(e) for e in events])
     context = hud_context(
         stage=stage,
-        options=hud_options_data(HudOptions(**options), None),
+        options=hud_options_data(HudOptions(**options), options.get("position")),
         theme=theme_for(look),
         width=640,
         height=360,
@@ -756,5 +758,196 @@ def test_timeline_clamps_a_reload_past_the_last_shot_and_settles_after_its_fade(
     assert settle >= 6.5 + 0.4 - 4.96 - 1e-6
     (band,) = landed["bands"]
     assert band["shown"] and band["box"]["right"] <= landed["track"]["right"] + 0.5
+    assert landed["chip"]["opacity"] == 1 and landed["chip"]["num"] == "1.40"
+    assert held["chip"]["opacity"] == 0
+
+
+# --- Plate, Pips, Ticker, Minimal: the same chip and bar, each in its own layout --
+
+#: Each style's split display, which the chip must never cover, and the
+#: corners it declares (``None`` for a style that places itself). Pips and
+#: Minimal centre the split in a full-width block, so its text is measured.
+_STYLE_SPLIT = {"plate": "#chip", "pips": "#splitValue", "ticker": "#list", "minimal": "#splitValue"}
+_SPLIT_TEXT = ("pips", "minimal")
+_STYLE_POSITIONS: dict[str, tuple[str | None, ...]] = {
+    "plate": ("bottom-left", "top-left", "top-right", "bottom-right"),
+    "pips": ("top-left", "top-right", "bottom-left", "bottom-right"),
+    "ticker": ("top-right", "top-left"),
+    "minimal": (None,),
+}
+_STYLES = tuple(_STYLE_SPLIT)
+
+_STYLE_DOM_JS = """([split, splitText]) => {
+  const box = (el) => { const r = el.getBoundingClientRect();
+    return {left: r.left, right: r.right, top: r.top, bottom: r.bottom}; };
+  // The ink, not the block: a clock or a split may sit in a full-width box.
+  const text = (el) => { const range = document.createRange(); range.selectNodeContents(el);
+    return box(range); };
+  const shown = (el) => { const s = getComputedStyle(el);
+    return s.visibility === 'visible' && Number(s.opacity) > 0
+      && (!el.parentElement || el.parentElement === document.body || shown(el.parentElement)); };
+  const chip = document.getElementById('reloadChip');
+  const bar = document.getElementById('stageBar');
+  const fill = document.getElementById('stageFill');
+  const splitEl = document.querySelector(split);
+  return {
+    chip: chip ? {opacity: Number(getComputedStyle(chip).opacity), label: chip.firstChild.textContent,
+                  num: chip.lastChild.textContent, labelColour: getComputedStyle(chip.firstChild).color,
+                  box: box(chip)} : null,
+    clock: text(document.getElementById('clock')),
+    split: splitEl && shown(splitEl) ? (splitText ? text(splitEl) : box(splitEl)) : null,
+    bar: bar ? box(bar) : null,
+    fill: fill ? getComputedStyle(fill).backgroundColor : null,
+    bands: [...document.querySelectorAll('.band')].map((b) => ({
+      kind: b.dataset.kind,
+      shown: getComputedStyle(b).visibility === 'visible' && b.getBoundingClientRect().width > 0,
+      colour: getComputedStyle(b).backgroundColor, opacity: Number(getComputedStyle(b).opacity),
+      box: box(b)})),
+  };
+}"""
+
+
+def _style_at(view: Any, variant: str, t: float) -> dict[str, Any]:
+    view.call("seek", t)
+    state = view.page.evaluate(_STYLE_DOM_JS, [_STYLE_SPLIT[variant], variant in _SPLIT_TEXT])
+    assert view.errors == []
+    return state
+
+
+def _inside(a: dict[str, float], width: float = 640, height: float = 360) -> bool:
+    return a["left"] >= 0 and a["top"] >= 0 and a["right"] <= width and a["bottom"] <= height
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("variant", _STYLES)
+def test_style_reload_chip_counts_the_reload_and_holds_its_duration_through_the_fade(variant: str) -> None:
+    with ChromiumRasterizer() as rasterizer:
+        view = _timeline_view(
+            rasterizer, events=[_TL_MOVEMENT, _TL_RELOAD], variant=variant, reload_chip=True
+        )
+        try:
+            before = _style_at(view, variant, 1.0 + 2.5)
+            mid = _style_at(view, variant, 1.0 + 2.55 + 1.0)
+            fading = _style_at(view, variant, 1.0 + 3.7 + 0.2)
+            gone = _style_at(view, variant, 1.0 + 3.7 + 0.45)
+        finally:
+            view.close()
+    assert before["chip"]["opacity"] == 0
+    chip = mid["chip"]
+    assert chip["opacity"] == 1 and chip["label"].lower() == "reload" and chip["num"] == "1.00"
+    assert chip["labelColour"] == "rgb(251, 191, 36)", "the reload colour, never the brand red"
+    assert 0.4 < fading["chip"]["opacity"] < 0.6 and fading["chip"]["num"] == "1.15"
+    assert gone["chip"]["opacity"] == 0
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(("variant", "position"), [(v, p) for v in _STYLES for p in _STYLE_POSITIONS[v]])
+def test_style_chip_and_bar_clear_the_clock_and_the_split(variant: str, position: str | None) -> None:
+    """16:9, every corner the style declares: the chip stays on the frame and
+    off the clock and the split display, mid-stage and on the first shot
+    (a reload right after the draw); the bar sits under the clock."""
+    early = {"id": "evt-4", "kind": "reload", "start": 1.15, "end": 1.3, "source": "manual"}
+    states = []
+    with ChromiumRasterizer() as rasterizer:
+        # Instants where a split is up in every style (Minimal's flashes for 0.5 s).
+        for events, t in (([_TL_MOVEMENT, _TL_RELOAD], 2.6), ([_TL_MOVEMENT, early], 1.25)):
+            view = _timeline_view(
+                rasterizer,
+                events=events,
+                variant=variant,
+                position=position,
+                reload_chip=True,
+                stage_bar=True,
+            )
+            try:
+                states.append(_style_at(view, variant, 1.0 + t))
+            finally:
+                view.close()
+    for state in states:
+        chip, clock, bar = state["chip"], state["clock"], state["bar"]
+        assert chip["opacity"] == 1 and state["split"] is not None
+        assert _inside(chip["box"])
+        assert not _overlaps(chip["box"], clock)
+        assert not _overlaps(chip["box"], state["split"])
+        # The clock's box is its line box, descent included: under means
+        # below the digits, which fill the top three quarters of it.
+        under = clock["top"] + 0.75 * (clock["bottom"] - clock["top"])
+        assert _inside(bar) and bar["top"] >= under, "the bar runs under the clock"
+        assert bar["left"] < clock["right"] and clock["left"] < bar["right"]
+        assert not _overlaps(chip["box"], bar)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("variant", _STYLES)
+def test_style_draws_no_chip_and_no_bar_with_the_toggles_off(variant: str) -> None:
+    with ChromiumRasterizer() as rasterizer:
+        view = _timeline_view(rasterizer, events=[_TL_MOVEMENT, _TL_RELOAD, _TL_ACTIVATION], variant=variant)
+        try:
+            state = _style_at(view, variant, 1.0 + 3.55)
+        finally:
+            view.close()
+    assert state["chip"] is None and state["bar"] is None and state["bands"] == []
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("variant", _STYLES)
+def test_style_stage_bar_draws_one_band_per_confirmed_region_as_it_happens(variant: str) -> None:
+    proposal = {**_TL_ACTIVATION, "id": "evt-4", "source": "auto"}
+    with ChromiumRasterizer() as rasterizer:
+        view = _timeline_view(
+            rasterizer,
+            events=[_TL_MOVEMENT, _TL_RELOAD, _TL_ACTIVATION, proposal],
+            variant=variant,
+            stage_bar=True,
+            landing=False,
+        )
+        try:
+            mid_movement = _style_at(view, variant, 1.0 + 2.25)
+            landed = _style_at(view, variant, 1.0 + 6.0)
+        finally:
+            view.close()
+    # The reload is cut in two where it meets the movement; the proposal draws nothing.
+    assert sorted(b["kind"] for b in landed["bands"]) == ["activation", "movement", "reload", "reload"]
+    shown = {b["kind"]: b["shown"] for b in mid_movement["bands"] if b["kind"] != "reload"}
+    assert shown == {"movement": True, "activation": False}, "a region shows once it starts"
+    assert not any(b["shown"] for b in mid_movement["bands"] if b["kind"] == "reload")
+    assert all(b["shown"] for b in landed["bands"])
+    bar = landed["bar"]
+    for band in landed["bands"]:
+        assert bar["left"] - 0.5 <= band["box"]["left"] and band["box"]["right"] <= bar["right"] + 0.5
+    colours = {b["kind"]: b["colour"] for b in landed["bands"]}
+    assert colours["movement"] == "rgb(6, 182, 212)" and colours["reload"] == "rgb(251, 191, 36)"
+    (activation,) = [b for b in landed["bands"] if b["kind"] == "activation"]
+    fill, colour, alpha = _rgb(landed["fill"]), _rgb(activation["colour"]), activation["opacity"]
+    seen = [alpha * c + (1 - alpha) * f for c, f in zip(colour, fill, strict=True)]
+    assert max(abs(s - f) for s, f in zip(seen, fill, strict=True)) > 60, "the activation reads on the fill"
+    # The reload on the move: the slice over the movement takes the bar's top half.
+    height = bar["bottom"] - bar["top"]
+    on_move, after = sorted(
+        (b for b in landed["bands"] if b["kind"] == "reload"), key=lambda b: b["box"]["left"]
+    )
+    assert on_move["box"]["top"] == pytest.approx(bar["top"], abs=0.5)
+    assert on_move["box"]["bottom"] - on_move["box"]["top"] == pytest.approx(height / 2, abs=0.5)
+    assert after["box"]["bottom"] - after["box"]["top"] == pytest.approx(height, abs=0.5)
+    assert landed["chip"] is None
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("variant", _STYLES)
+def test_style_clamps_a_reload_past_the_last_shot_and_settles_after_its_fade(variant: str) -> None:
+    late = {"id": "evt-2", "kind": "reload", "start": 4.8, "end": 6.5, "source": "manual"}
+    with ChromiumRasterizer() as rasterizer:
+        view = _timeline_view(
+            rasterizer, events=[late], variant=variant, reload_chip=True, stage_bar=True, landing=False
+        )
+        try:
+            settle = view.call("hud")["settle"]
+            landed = _style_at(view, variant, 1.0 + 6.2)
+            held = _style_at(view, variant, 1.0 + 4.96 + settle)
+        finally:
+            view.close()
+    assert settle >= 6.5 + 0.4 - 4.96 - 1e-6
+    (band,) = landed["bands"]
+    assert band["shown"] and band["box"]["right"] <= landed["bar"]["right"] + 0.5
     assert landed["chip"]["opacity"] == 1 and landed["chip"]["num"] == "1.40"
     assert held["chip"]["opacity"] == 0
