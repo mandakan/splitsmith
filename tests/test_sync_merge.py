@@ -1232,3 +1232,29 @@ def test_compare_camera_changed_on_both_sides_goes_to_the_newer():
     )
     assert r.doc["compare_camera"] == "hand"
     assert [c.unit for c in r.conflicts] == ["compare_camera"]
+
+
+def test_stage_events_are_desktop_owned_local_wins_and_the_tripwire_names_them():
+    """Spec 2026-10-08: ``events`` is not a merge unit. The mirror refuses the
+    events PUT (403) on the strength of this: a diverging remote list never
+    reaches the desktop, and the tripwire note says the fields differed.
+    Adding ``events`` as a merge unit must revisit that ruling."""
+    shots = [{"id": "cand-1", "candidate_number": 1, "time": 6.5, "shot_number": 1, "ms_after_beep": 1500}]
+    base = {"shots": copy.deepcopy(shots), "audit_events": [], "events": [], "events_seeded": False}
+    local = {
+        "shots": copy.deepcopy(shots),
+        "audit_events": [],
+        "events": [{"id": "evt-1", "kind": "reload", "start": 1.0, "end": 2.0, "source": "manual"}],
+        "events_seeded": True,
+    }
+    remote = {
+        "shots": copy.deepcopy(shots),
+        "audit_events": [],
+        "events": [{"id": "evt-1", "kind": "movement", "start": 0.5, "end": 1.5, "source": "manual"}],
+        "events_seeded": True,
+    }
+    r = merge_audit_doc(base, local, remote, doc_key="audit/anna/3", local_ts=T_OLD, remote_ts=T_NEW)
+    assert r.doc["events"] == local["events"]
+    assert r.doc["events_seeded"] is True
+    assert r.changed_vs_local is False
+    assert any("events, events_seeded" in note for note in r.notes), r.notes

@@ -108,6 +108,9 @@ def test_share_scope_capability_sets() -> None:
         # A shot id outside [A-Za-z0-9._-] is not addressable by id.
         ("PATCH", "shooters/anna/stages/3/shots/by-id/bad id/coach", EDIT),
         ("PATCH", "shooters/anna/stages/3/shots/by-id//coach", EDIT),
+        # The stage events PUT (spec 2026-10-08) is desktop-owned, so it is
+        # not a review route: a mirror must refuse it.
+        ("PUT", "shooters/anna/stages/3/events", EDIT),
         # Unlisted writes require EDIT - new routes fail over-restricted,
         # never silently writable.
         ("POST", "match/shooters", EDIT),

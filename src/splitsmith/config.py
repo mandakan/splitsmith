@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .access import AccessConfig
 
@@ -57,6 +57,39 @@ IntervalClass = Literal[
 ]
 
 IntervalClassSource = Literal["auto", "manual"]
+
+# Stage events (spec 2026-10-08): regions on the stage timeline, one lane
+# per kind. Independent of shots -- a movement may span several shots,
+# which the per-gap ``interval_class`` cannot say.
+EventKind = Literal["movement", "reload", "activation"]
+
+
+class StageEvent(BaseModel):
+    """One region on the stage timeline, in seconds from the beep.
+
+    A reload's handles mean hand off the grip -> gun back on target (the
+    full manipulation cost), not the mechanical magazine change. Ids are
+    ``evt-<n>`` and never reused within a stage (the ``cand-<n>`` rule).
+
+    The stored shape ignores unknown keys: the desktop app and the CLI share
+    ``~/.splitsmith``, so a doc a newer version wrote must still load on an
+    older one. The events PUT's request model forbids them instead.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    kind: EventKind
+    start: float = Field(ge=0.0)
+    end: float
+    source: IntervalClassSource
+    note: str | None = None
+
+    @model_validator(mode="after")
+    def _end_after_start(self) -> StageEvent:
+        if self.end <= self.start:
+            raise ValueError(f"event {self.id}: end ({self.end}) must be after start ({self.start})")
+        return self
 
 
 class Shot(BaseModel):
@@ -604,6 +637,27 @@ class CoachAutoClassifyConfig(BaseModel):
     reload_hint_min_s: float = Field(default=2.50, gt=0.0)
 
 
+class DivisionCapacityConfig(BaseModel):
+    """Magazine capacity per division, keyed on the division string as SSI
+    spells it (the power factor is in the name where it matters:
+    "Classic Major"). ``capacity + 1`` is the most rounds a shooter can
+    fire before a reload (one chambered on a full magazine), and that is a
+    bound the seeder uses, never a count. Open and Standard have no entry.
+    A YAML override replaces the table.
+    """
+
+    capacities: dict[str, int] = Field(
+        default_factory=lambda: {
+            "Production": 15,
+            "Production Optics": 15,
+            "Classic Minor": 10,
+            "Classic Major": 8,
+            "Revolver Minor": 8,
+            "Revolver Major": 6,
+        }
+    )
+
+
 class BeepWindowConfig(BaseModel):
     """Search-window derivation for multi-stage single-take videos.
 
@@ -629,6 +683,7 @@ class Config(BaseModel):
     video_match: VideoMatchConfig = Field(default_factory=VideoMatchConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
     coach_auto_classify: CoachAutoClassifyConfig = Field(default_factory=CoachAutoClassifyConfig)
+    division_capacity: DivisionCapacityConfig = Field(default_factory=DivisionCapacityConfig)
     beep_windows: BeepWindowConfig = Field(default_factory=BeepWindowConfig)
     web_trim: WebTrimConfig = Field(default_factory=WebTrimConfig)
     footage_sort: FootageSortConfig = Field(default_factory=FootageSortConfig)

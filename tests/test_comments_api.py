@@ -222,6 +222,19 @@ def test_comment_token_cannot_reach_a_non_allowlisted_write_path(comment_token_c
     assert resp.status_code == 404
 
 
+def test_comment_token_cannot_put_stage_events(comment_token_client) -> None:
+    """The lane editor's PUT (spec 2026-10-08) is not on the share write
+    table: a comment-scoped token gets the uniform 404."""
+    client, token = comment_token_client
+    resp = client.put(
+        f"/api/share/{token}/shooters/alice/stages/3/events",
+        json={"events": []},
+        headers={AUTHOR_KEY_HEADER: KEY},
+    )
+    assert resp.status_code == 404
+    assert resp.json() == NOT_FOUND
+
+
 def test_comment_token_cannot_use_an_unlisted_method(comment_token_client) -> None:
     client, token = comment_token_client
     resp = client.put(

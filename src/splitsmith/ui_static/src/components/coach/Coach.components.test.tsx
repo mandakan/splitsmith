@@ -1,10 +1,12 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import type { CoachIntervalClass, CoachMatchDistributions, CoachShot } from "@/lib/api";
+import type { CoachIntervalClass, CoachMatchDistributions, CoachShot, StageEvent } from "@/lib/api";
 import { timeBudget } from "@/lib/timeBudget";
 
 import { CoachShotTable } from "./CoachShotTable";
+import { EventCard } from "./EventCard";
+import { EventList } from "./EventList";
 import { ShotEditor } from "./ShotEditor";
 import { TimeBudgetBar } from "./TimeBudgetBar";
 import { TimeBudgetCard } from "./TimeBudgetCard";
@@ -64,5 +66,75 @@ describe("CoachShotTable", () => {
     expect(within(rows[3]).getByText("long run")).toBeInTheDocument();
     fireEvent.click(rows[2]);
     expect(onSelect).toHaveBeenCalledWith(SHOTS[2]);
+  });
+});
+
+const E = (id: string, kind: StageEvent["kind"], start: number, end: number, source: StageEvent["source"] = "manual"): StageEvent =>
+  ({ id, kind, start, end, source });
+
+describe("EventCard", () => {
+  const events = [E("evt-1", "movement", 7.6, 9.16), E("evt-2", "reload", 8.05, 9.47)];
+
+  it("shows start, end, duration, the enclosing movement and the overhang for a reload", () => {
+    render(<EventCard event={events[1]} events={events} onKind={vi.fn()} onDelete={vi.fn()} onDone={vi.fn()} />);
+    const card = screen.getByRole("region", { name: "Region" });
+    expect(within(card).getByText("8.05")).toBeInTheDocument();
+    expect(within(card).getByText("9.47")).toBeInTheDocument();
+    expect(within(card).getByText("1.42")).toBeInTheDocument();
+    expect(within(card).getByText(/Movement 7\.60.9\.16/)).toBeInTheDocument();
+    expect(within(card).getByText("+0.31")).toBeInTheDocument();
+    expect(within(card).getByRole("button", { name: "Reload" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("a standing reload shows no overhang row; a movement shows neither", () => {
+    const standing = [E("evt-2", "reload", 8.05, 9.47)];
+    const { rerender } = render(<EventCard event={standing[0]} events={standing} onKind={vi.fn()} onDelete={vi.fn()} onDone={vi.fn()} />);
+    expect(screen.queryByText("Overhang")).toBeNull();
+    expect(screen.getByText("Standing")).toBeInTheDocument();
+    rerender(<EventCard event={events[0]} events={events} onKind={vi.fn()} onDelete={vi.fn()} onDone={vi.fn()} />);
+    expect(screen.queryByText("Overhang")).toBeNull();
+    expect(screen.queryByText("During")).toBeNull();
+  });
+
+  it("changes kind, deletes and closes", () => {
+    const onKind = vi.fn(); const onDelete = vi.fn(); const onDone = vi.fn();
+    render(<EventCard event={events[1]} events={events} onKind={onKind} onDelete={onDelete} onDone={onDone} />);
+    fireEvent.click(screen.getByRole("button", { name: "Activation" }));
+    expect(onKind).toHaveBeenCalledWith("activation");
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(onDelete).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(onDone).toHaveBeenCalled();
+  });
+
+  it("disables a kind whose lane the region would overlap", () => {
+    render(<EventCard event={events[1]} events={events} onKind={vi.fn()} onDelete={vi.fn()} onDone={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Movement" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Activation" })).toBeEnabled();
+  });
+
+  it("names an auto proposal as such", () => {
+    const auto = [E("evt-3", "reload", 13.3, 15.9, "auto")];
+    render(<EventCard event={auto[0]} events={auto} onKind={vi.fn()} onDelete={vi.fn()} onDone={vi.fn()} />);
+    expect(screen.getByText("Proposed")).toBeInTheDocument();
+  });
+});
+
+describe("EventList", () => {
+  it("lists one row per region with range or duration, moving-shot count and overhang", () => {
+    const events = [E("evt-1", "movement", 3.4, 6.1), E("evt-2", "movement", 7.6, 9.16), E("evt-3", "reload", 8.05, 9.47)];
+    const shots = [4.35, 4.71, 5.12, 5.48, 10.6].map((t) => ({ time_from_beep: t }));
+    render(<EventList events={events} shots={shots} />);
+    const rows = screen.getAllByRole("listitem");
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toHaveTextContent(/3\.40.6\.10/);
+    expect(rows[0]).toHaveTextContent("4 shots");
+    expect(rows[2]).toHaveTextContent("1.42");
+    expect(rows[2]).toHaveTextContent("+0.31");
+  });
+
+  it("renders nothing for an empty list", () => {
+    const { container } = render(<EventList events={[]} shots={[]} />);
+    expect(container).toBeEmptyDOMElement();
   });
 });

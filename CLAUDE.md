@@ -997,6 +997,93 @@ production for exactly that reason. An account with a blank name still
 falls back to a generated handle; that invariant is pinned in
 ``tests/test_comments_signed_in.py`` and does not move.
 
+## Stage events (spec 2026-10-08)
+
+Movement, reload and activation are **regions** (``events`` on the stage
+audit doc, ``config.StageEvent``, seconds from beep), independent of
+shots: a movement may span several shots, which the per-gap
+``interval_class`` cannot say. The two views coexist: the gap partition
+is still what the time budget sums and ``statistic_splits`` filters on;
+the regions only *hint* the auto-classifier (a gap over
+``transition_max_s`` overlapping a reload region auto-classes ``reload``,
+``coach.gap_overlaps_reload``) and never own a class. Every audit-doc
+writer that classifies (audit PUT, triage accept, coach PATCH, Reclassify,
+events PUT) goes through ``_classify_doc`` in ``ui/server.py``, which
+passes the doc's own events; a writer that called the classifier
+region-blind would flip a region-derived ``reload`` back to ``movement``
+on the next unrelated save, silently, since ``stale`` is not rendered.
+A new writer calls ``_classify_doc``; a corrupt events list there is the
+GET's 422, raised before the save.
+``is_classification_stale`` takes the same ``reload_overlap`` input as
+the classifier, or a region-derived ``reload`` would report stale. Every
+figure (per-shot ``moving``, ``reload_figures`` with the **overhang** =
+reload end minus the enclosing movement's end, ``stage_event_summary``)
+is derived, never stored, by ``splitsmith/events.py`` and its TS twin
+``lib/events.ts``, which run ``tests/fixtures/events/cases.json`` case
+for case -- a rule changes on both sides or not at all. A reload's
+handles mean hand off the grip -> gun back on target.
+
+Seeding (``events.seed_doc``) runs once per stage (``events_seeded``) on
+the coach GET, reload only, never movement: every hinted gap
+(``reload_hint_min_s``), or with a division capacity
+(``DivisionCapacityConfig``, keyed on the SSI string so the power factor
+rides in the name) the first hinted gap in a ``capacity + 1``-shot
+window, else the longest, and only when a shot beyond that window
+exists. ``capacity + 1`` is a bound, not a count: shooters start with
+one chambered. A reset re-detection (``_merge_detection_into``) drops
+the ``auto`` regions and ``events_seeded`` and keeps ``manual`` ones, so
+a stage with no surviving manual region seeds afresh over the new
+shots. The GET seeds but never re-classifies stored shots against the
+seed; the writers above are the explicit path. The seed and the heal are persisted
+under one condition in ``get_stage_coach``: an owner read that is not a
+mirror. The GET's ``_version`` is the revision of the doc *as stored*
+(taken before the in-memory seed and heal), so a mirror or share read
+still hands out a ``_version`` the PUT accepts. The share surface does
+reach the coach GET (``_SHARE_PATH_RE``): ``_build_coach_response``
+strips ``events[].note`` there, as it strips ``coaching_note``.
+
+``PUT /api/shooters/{slug}/stages/{n}/events`` replaces the list under
+``_audit_rmw()`` with the audit revision check (409 ``version_conflict``;
+422 ``lane_overlap`` names both ids) and returns the coach payload with
+the saved doc's revision. A ``NaN`` / ``Infinity`` in the body is a 422
+before the lock (``_reject_non_finite``, #843). The stored
+``StageEvent`` ignores unknown keys, so a doc a newer version wrote loads
+on an older one; the request's ``StageEventIn`` forbids them. It is **not** in ``_REVIEW_ROUTES``: ``events``
+is desktop-owned, ``sync.merge.merge_audit_doc`` keeps local's copy, so
+a hosted write on a mirror would be silently overwritten by the next
+sync. A desktop-origin mirror answers 403 ``read_only_mirror`` and the
+SPA renders the editor read-only on
+``capabilityDenied(project.capabilities, "edit")``; a hosted-native
+match keeps the PUT. The read-only rendering serves a hosted mirror (a
+desktop browser) and ``isMobile``, but the Coach route sits behind
+``DesktopGate`` in ``App.tsx``, so a phone never reaches it until a
+phone Coach surface exists. Every PUT appends an
+``audit_events`` entry, which is why the SPA saves on commit only
+(release or keyboard nudge) through a 350 ms debounce in
+``lib/useStageEvents.ts``: PUTs run one at a time with the revision the
+previous one returned, a 409 reloads the coach payload and drops
+anything pending, and a response that lands while a newer edit is
+pending or a drag is live (frames sent, no commit yet) takes only the
+revision. A commit whose lanes overlap never goes out: local state
+reverts to the last valid list. Never save per drag frame.
+
+The coach payload carries ``events``, ``event_summary``, ``_version``,
+per-shot ``moving`` and per-video ``trim_version`` / ``scrub_version``;
+the Coach player goes through ``useScrubSource`` like Audit, and the
+lane editor's "Full-resolution video" entry is the same
+``GlobalPrefs.full_res_scrub``. ``components/coach/LaneEditor`` owns the
+DOM only; geometry (clamp, snap, ``MIN_EVENT_S``) is ``lib/events.ts``.
+Pointer rules: a lane click seeks to the press point
+snapped to the nearest shot (a ruler click does not snap), unless the
+snap would land inside a same-lane region (then the raw press time), a
+click on empty lane space deselects, a region being created stops at its
+same-lane neighbours, ``pointercancel`` undoes like Esc. Auto proposals
+are dashed with an ``AUTO ?`` label; a time pill (seconds and frame
+number from the beep) follows the drag's seek target. Arrows nudge
+(bracket keys sit behind AltGr on Nordic layouts). Rendering, the
+summary card and CSV/FCPXML markers are part 2 of the plan, not yet
+built.
+
 ## Hosted access tiers (spec 2026-10-03)
 
 An account has **features** (``splitsmith.access.Feature``: ``sync``,

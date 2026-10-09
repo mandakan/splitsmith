@@ -87,3 +87,10 @@ def test_write_routes_are_anchored_against_a_trailing_newline() -> None:
         assert pattern.pattern.startswith(r"\A")
         assert pattern.pattern.endswith(r"\Z")
         assert pattern.flags & re.IGNORECASE == 0
+
+
+def test_write_does_not_admit_the_stage_events_put() -> None:
+    """The lane editor's PUT (spec 2026-10-08) is an owner write: no share
+    scope reaches it, so it is not on the write table under any method."""
+    for method in ("PUT", "POST", "DELETE"):
+        assert _share_write_admits(method, "shooters/alice/stages/3/events") is False, method
