@@ -2287,7 +2287,6 @@ def test_a_card_whose_template_fails_is_named_in_the_degradations(tmp_path: Path
     assert len(notes) == 1 and "left out" in notes[0], result.degradations
 
 
-
 # --- logo spots (spec 2026-10-09) -------------------------------------------------
 
 
