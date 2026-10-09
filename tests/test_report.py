@@ -69,10 +69,10 @@ def test_anomalies_no_shots_flag() -> None:
 
 
 def test_anomalies_official_time_mismatch() -> None:
-    # Last shot is 1s after stage_time -> > 500ms tolerance -> flag
+    # Last shot is 1s after stage_time -> past the tolerance -> flag
     shots = [_shot(1, 1.0, 1.0), _shot(2, 1.5, 0.5)]
     anomalies = detect_anomalies(shots, beep_time=10.0, stage_time=0.5)
-    assert any("Last detected shot" in a for a in anomalies)
+    assert any("after the timer stopped" in a for a in anomalies)
 
 
 def test_anomalies_double_detection() -> None:
@@ -284,3 +284,69 @@ def test_render_report_no_shots() -> None:
     text = render_report(analysis, None)
     assert "Detected 0 shots." in text
     assert "(none)" in text
+
+
+# --- stage time vs the timer (the scorecard's stage time) ---------------
+
+
+def test_mismatch_flags_a_gap_over_a_tenth_of_a_second() -> None:
+    """Höstfinalen stage 3: the last kept shot is 0.115 s after the timer
+    stopped, which the old 0.5 s tolerance let through."""
+    shots = [_shot(1, 1.5, 1.5), _shot(2, 11.429, 9.929), _shot(3, 12.265, 0.836)]
+    out = detect_anomalies_structured(shots, beep_time=10.0, stage_time=12.15)
+    assert [a.kind for a in out if a.kind == "stage_time_mismatch"] == ["stage_time_mismatch"]
+
+
+def test_mismatch_stays_quiet_within_timer_rounding() -> None:
+    shots = [_shot(1, 1.5, 1.5), _shot(2, 28.39, 26.89)]
+    out = detect_anomalies_structured(shots, beep_time=10.0, stage_time=28.37)
+    assert not [a for a in out if a.kind == "stage_time_mismatch"]
+
+
+def test_mismatch_exactly_at_the_tolerance_is_quiet() -> None:
+    shots = [_shot(1, 1.5, 1.5), _shot(2, 10.1, 8.6)]
+    out = detect_anomalies_structured(shots, beep_time=10.0, stage_time=10.0)
+    assert not [a for a in out if a.kind == "stage_time_mismatch"]
+
+
+def test_mismatch_names_the_shots_after_the_one_the_timer_caught() -> None:
+    """Höstfinalen stage 7: shot 2 sits on the timer's stop, shot 3 comes
+    0.2 s later. The flag names shot 3 and anchors on it."""
+    shots = [_shot(1, 1.5, 1.5), _shot(2, 41.588, 40.088), _shot(3, 41.773, 0.185)]
+    out = detect_anomalies_structured(shots, beep_time=10.0, stage_time=41.57)
+    (flag,) = [a for a in out if a.kind == "stage_time_mismatch"]
+    assert flag.shot_number == 3
+    assert flag.time == 41.773
+    assert "Shot 2 matches the timer" in flag.message
+    assert "shot 3" in flag.message
+
+
+def test_mismatch_names_a_run_of_extra_shots() -> None:
+    shots = [_shot(1, 1.5, 1.5), _shot(2, 20.0, 18.5), _shot(3, 20.3, 0.3), _shot(4, 20.6, 0.3)]
+    out = detect_anomalies_structured(shots, beep_time=10.0, stage_time=20.01)
+    (flag,) = [a for a in out if a.kind == "stage_time_mismatch"]
+    assert flag.shot_number == 3
+    assert "shots 3 to 4" in flag.message
+
+
+def test_mismatch_with_the_timer_after_the_last_shot_points_at_the_timer() -> None:
+    """Höstfinalen stage 8: the timer stopped 0.67 s after the last kept
+    shot. The flag sits where the timer stopped, on no shot."""
+    shots = [_shot(1, 1.5, 1.5), _shot(2, 14.844, 13.344)]
+    out = detect_anomalies_structured(shots, beep_time=10.0, stage_time=15.51)
+    (flag,) = [a for a in out if a.kind == "stage_time_mismatch"]
+    assert flag.shot_number is None
+    assert flag.time == 15.51
+    assert "missed final shot" in flag.message
+
+
+def test_mismatch_messages_are_ascii_without_dash_punctuation() -> None:
+    cases = [
+        ([_shot(1, 1.5, 1.5), _shot(2, 41.588, 40.088), _shot(3, 41.773, 0.185)], 41.57),
+        ([_shot(1, 1.5, 1.5), _shot(2, 14.844, 13.344)], 15.51),
+        ([_shot(1, 1.0, 1.0), _shot(2, 1.5, 0.5)], 0.5),
+    ]
+    for shots, stage_time in cases:
+        for a in detect_anomalies_structured(shots, beep_time=10.0, stage_time=stage_time):
+            assert a.message.isascii()
+            assert "--" not in a.message and " - " not in a.message

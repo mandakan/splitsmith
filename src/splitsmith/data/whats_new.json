@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "audit-timer-stop",
+      "date": "2026-10-09",
+      "title": "See where the timer stopped in Audit",
+      "body": "A dotted line on the Audit waveform marks the scorecard's stage time, and a flag names the shots after it or a missed last shot, so the video's clock matches the stage time."
+    },
+    {
       "id": "overlay-styles",
       "date": "2026-10-08",
       "title": "Overlay styles with motion",

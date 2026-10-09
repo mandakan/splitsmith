@@ -234,7 +234,7 @@ Files:
 ```
 
 Anomaly detection:
-- Beep-to-last-shot window differs from official `time_seconds` by >500ms → flag.
+- Beep-to-last-shot window differs from the timer's `time_seconds` by >100ms → flag, naming the shots after the one the timer caught, or a missed final shot.
 - Any split <80ms → flag (likely double-detection).
 - Any split >3s within the stage window → flag (likely missed shot, or just a long transition).
 - Shot count differs significantly from typical IPSC stage round counts → informational note (we don't know exact round count).

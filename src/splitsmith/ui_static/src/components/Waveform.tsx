@@ -50,6 +50,10 @@ interface WaveformProps {
    *  `shiftKey` lets the parent bypass peak-snapping (#28). */
   onDoubleClick?: (timeSeconds: number, shiftKey: boolean) => void;
   beepTime?: number | null;
+  /** Where the timer stopped (beep + the scorecard's stage time), drawn
+   *  as a dotted line in the beep's colour so the pair brackets the
+   *  stage. Null/undefined = no line. */
+  timerStopTime?: number | null;
   /** Shaded region indicating the section that repeats while loop mode is
    *  on (#29). Null/undefined = no shading. */
   loopRegion?: { start: number; end: number } | null;
@@ -74,6 +78,7 @@ export function Waveform({
   onScrubEnd,
   onDoubleClick,
   beepTime,
+  timerStopTime,
   loopRegion,
   pixelsPerSecond,
   height = 128,
@@ -204,6 +209,18 @@ export function Waveform({
       ctx.setLineDash([]);
     }
 
+    if (timerStopTime != null && duration > 0 && timerStopTime >= 0 && timerStopTime <= duration) {
+      const x = (timerStopTime / duration) * cssWidth;
+      ctx.strokeStyle = beepColor;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([2, 3]);
+      ctx.beginPath();
+      ctx.moveTo(x + 0.5, 0);
+      ctx.lineTo(x + 0.5, cssHeight);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
     if (duration > 0) {
       const x = (Math.min(Math.max(currentTime, 0), duration) / duration) * cssWidth;
       // Playhead picks up a subtle glow so it stays legible on top of
@@ -220,7 +237,7 @@ export function Waveform({
       ctx.stroke();
       ctx.restore();
     }
-  }, [peaks, duration, currentTime, beepTime, loopRegion, contentWidth, height, dpr, cssVar]);
+  }, [peaks, duration, currentTime, beepTime, timerStopTime, loopRegion, contentWidth, height, dpr, cssVar]);
 
   // Auto-scroll the playhead into view during playback. Edge-trigger:
   // only adjust scroll when the playhead leaves a center band, otherwise

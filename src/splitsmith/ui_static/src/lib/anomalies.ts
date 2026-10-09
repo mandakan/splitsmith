@@ -12,8 +12,10 @@
  */
 import type { AuditMarker } from "@/components/MarkerLayer";
 
-/** Beep -> last shot vs official stage time tolerance (seconds). */
-const OFFICIAL_TIME_TOLERANCE_S = 0.5;
+/** Beep -> last shot vs the timer's stage time tolerance (seconds). */
+const OFFICIAL_TIME_TOLERANCE_S = 0.1;
+/** A kept shot this close to the timer's stop is the one it caught. */
+const TIMER_MATCH_S = 0.05;
 /** Splits below this look like a single shot detected twice. */
 const DOUBLE_DETECTION_MAX_S = 0.08;
 /** Splits above this look like a missed shot or a long transition. */
@@ -89,6 +91,58 @@ export function keptShotsFromMarkers(
   return out;
 }
 
+function shotRange(first: number, last: number): string {
+  return first === last ? `shot ${first}` : `shots ${first} to ${last}`;
+}
+
+/** The timer (the scorecard's stage time) against beep -> last kept shot.
+ *  Mirrors ``report._stage_time_mismatch``: past the tolerance the flag
+ *  names the shots after the one the timer caught, or (the timer past the
+ *  last shot) sits where the timer stopped, on no shot. */
+function stageTimeMismatch(shots: KeptShot[], stageTime: number): Anomaly | null {
+  const last = shots[shots.length - 1];
+  const delta = last.time_from_beep - stageTime;
+  if (Math.abs(delta) <= OFFICIAL_TIME_TOLERANCE_S + 1e-9) return null;
+  const beep = last.time - last.time_from_beep;
+  if (delta < 0) {
+    return {
+      kind: "stage_time_mismatch",
+      severity: "warn",
+      message:
+        `Timer stopped ${(-delta).toFixed(2)} s after the last shot (${stageTime.toFixed(2)} s): ` +
+        `look for a missed final shot, or a beep placed too late.`,
+      shot_number: null,
+      time: beep + stageTime,
+    };
+  }
+  const head = `Last shot is ${delta.toFixed(2)} s after the timer stopped (${stageTime.toFixed(2)} s)`;
+  let caught: KeptShot | null = null;
+  for (const s of shots.slice(0, -1)) {
+    if (!caught || Math.abs(s.time_from_beep - stageTime) < Math.abs(caught.time_from_beep - stageTime)) caught = s;
+  }
+  if (!caught || Math.abs(caught.time_from_beep - stageTime) > TIMER_MATCH_S) {
+    return {
+      kind: "stage_time_mismatch",
+      severity: "warn",
+      message: `${head}: the last shot may be extra, or the beep placed too early.`,
+      shot_number: last.shot_number,
+      time: last.time,
+    };
+  }
+  const from = caught.time_from_beep;
+  const extra = shots.filter((s) => s.time_from_beep > from);
+  const verb = extra.length > 1 ? "are" : "is";
+  return {
+    kind: "stage_time_mismatch",
+    severity: "warn",
+    message:
+      `${head}. Shot ${caught.shot_number} matches the timer: ` +
+      `${verb} ${shotRange(extra[0].shot_number, extra[extra.length - 1].shot_number)} extra (an echo or steel)?`,
+    shot_number: extra[0].shot_number,
+    time: extra[0].time,
+  };
+}
+
 /** Compute the structured anomaly list for the current audit state.
  *
  * Mirrors :func:`splitsmith.report.detect_anomalies_structured` so the
@@ -111,21 +165,8 @@ export function detectAnomalies(
     return out;
   }
 
-  const last = shots[shots.length - 1];
-  const delta = last.time_from_beep - stageTime;
-  if (Math.abs(delta) > OFFICIAL_TIME_TOLERANCE_S) {
-    const direction = delta > 0 ? "after" : "before";
-    out.push({
-      kind: "stage_time_mismatch",
-      severity: "warn",
-      message:
-        `Last detected shot is ${Math.round(Math.abs(delta) * 1000)} ms ` +
-        `${direction} official stage time ` +
-        `(${last.time_from_beep.toFixed(3)} s vs ${stageTime.toFixed(3)} s).`,
-      shot_number: last.shot_number,
-      time: last.time,
-    });
-  }
+  const mismatch = stageTimeMismatch(shots, stageTime);
+  if (mismatch) out.push(mismatch);
 
   for (let i = 1; i < shots.length; i++) {
     const s = shots[i];
