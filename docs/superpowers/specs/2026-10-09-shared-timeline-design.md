@@ -210,8 +210,34 @@ Rulings:
    waveform shows the matching clip slice.
 4. **Follow playhead.** The band scrolls only when the playhead moves: a
    zoom keeps its anchor, and turning Follow on does not jump until the
-   playhead next moves.
+   playhead next moves. The rule itself depends on a new `playing?:
+   boolean` prop (default false; Coach passes `isPlaying`): while playing
+   it keeps the playhead inside the middle 80 % (the edge-triggered
+   rule, unchanged); while paused it only brings a playhead that is
+   wholly outside the visible window into view (`revealScroll` in
+   `lib/timelineView.ts`), and never re-centres one already on screen.
+   The paused case matters because a page's `currentTime` can arrive
+   after pointerup already cleared `pointerDown` (Coach's arrives
+   through the video's async `timeupdate`, which fires after a lane or
+   ruler click's or a drag's release) -- the playing edge rule would
+   otherwise treat that late update as a reason to re-centre even though
+   the clicked time is already on screen.
 5. **Peaks loading.** While peaks load the Audio track is empty; "No
    audio" shows only once the request has settled without peaks.
 6. **Per-stage reset.** The Coach band needs no explicit per-stage reset:
    the page's `CoachStage` is keyed per stage.
+7. **Resize keeps its anchor.** A viewport resize (Cmd/Ctrl+B, a window
+   resize) at a non-Fit zoom recomputes `scrollLeft` in the
+   `ResizeObserver` callback (`scrollLeft * newContentWidth /
+   oldContentWidth`) so the time under the left edge does not move; at
+   Fit there is nothing to anchor since content tracks the viewport
+   1:1.
+8. **Seekable tracks.** A `TimelineTrack` can set `seekable: true`; a
+   click on that track's row seeks through the content div's rect, no
+   snap, exactly like the ruler. Coach's Audio track is seekable; the
+   Shots/Movement/Reload/Activation lane tracks are not (their own
+   pointer rules, unchanged, live in `LaneEditor`).
+9. **Fit readout.** The zoom readout next to the Fit button shows
+   nothing at Fit (the button alone says "Fit"; the readout would
+   otherwise double it) and keeps its width so the header does not
+   shift when a number appears at a zoom.
