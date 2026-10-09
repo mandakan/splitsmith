@@ -564,7 +564,9 @@ _TIMELINE_DOM_JS = """() => {
     clock: box(document.getElementById('clock')),
     tag: tag && Number(getComputedStyle(tag).opacity) > 0 ? box(tag) : null,
     track: box(document.getElementById('track')),
+    fill: getComputedStyle(document.getElementById('fill')).backgroundColor,
     bands: [...document.querySelectorAll('#track .band')].map((b) => ({
+      kind: b.dataset.kind,
       shown: getComputedStyle(b).visibility === 'visible' && b.getBoundingClientRect().width > 0,
       colour: getComputedStyle(b).backgroundColor, box: box(b)})),
   };
@@ -676,15 +678,65 @@ def test_timeline_stage_bar_draws_one_band_per_confirmed_region_as_it_happens() 
             landed = _timeline_at(view, 1.0 + 6.0)
         finally:
             view.close()
-    assert len(landed["bands"]) == 3, "the proposal draws nothing"
-    assert [b["shown"] for b in mid_movement["bands"]] == [
-        True,
-        False,
-        False,
-    ], "a region shows once it starts"
+    kinds = [b["kind"] for b in landed["bands"]]
+    # The reload is cut in two where it meets the movement; the proposal draws nothing.
+    assert sorted(kinds) == ["activation", "movement", "reload", "reload"]
+    shown = {b["kind"]: b["shown"] for b in mid_movement["bands"] if b["kind"] != "reload"}
+    assert shown == {"movement": True, "activation": False}, "a region shows once it starts"
+    assert not any(b["shown"] for b in mid_movement["bands"] if b["kind"] == "reload")
     assert all(b["shown"] for b in landed["bands"])
-    assert [b["colour"] for b in landed["bands"]][:2] == ["rgb(6, 182, 212)", "rgb(251, 191, 36)"]
+    colours = {b["kind"]: b["colour"] for b in landed["bands"]}
+    assert colours["movement"] == "rgb(6, 182, 212)" and colours["reload"] == "rgb(251, 191, 36)"
+    assert colours["activation"] != landed["fill"], "an activation band reads against the fill"
     assert landed["chip"] is None
+
+
+def _rgb(text: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in text.removeprefix("rgb(").removesuffix(")").split(","))
+
+
+@pytest.mark.integration
+def test_timeline_activation_band_contrasts_with_the_fill() -> None:
+    """Review minor: ``ink_2`` at half opacity over the ``ink`` fill came out
+    near-white. Whatever the colour, the band as composited must stand off
+    the fill."""
+    with ChromiumRasterizer() as rasterizer:
+        view = _timeline_view(rasterizer, events=[_TL_ACTIVATION], stage_bar=True)
+        try:
+            state = _timeline_at(view, 1.0 + 6.0)
+            opacity = float(
+                view.page.evaluate("() => getComputedStyle(document.querySelector('.band')).opacity")
+            )
+        finally:
+            view.close()
+    (band,) = state["bands"]
+    fill, colour = _rgb(state["fill"]), _rgb(band["colour"])
+    seen = [opacity * c + (1 - opacity) * f for c, f in zip(colour, fill, strict=True)]
+    assert max(abs(s - f) for s, f in zip(seen, fill, strict=True)) > 60
+
+
+@pytest.mark.integration
+def test_timeline_reload_on_the_move_takes_the_top_half_of_the_track() -> None:
+    """Where a reload meets a movement the reload draws on the track's top
+    half over the full-height movement; outside it, the reload is full height."""
+    with ChromiumRasterizer() as rasterizer:
+        view = _timeline_view(rasterizer, events=[_TL_MOVEMENT, _TL_RELOAD], stage_bar=True)
+        try:
+            state = _timeline_at(view, 1.0 + 6.0)
+        finally:
+            view.close()
+    track = state["track"]
+    height = track["bottom"] - track["top"]
+    movement = [b for b in state["bands"] if b["kind"] == "movement"]
+    reloads = sorted((b for b in state["bands"] if b["kind"] == "reload"), key=lambda b: b["box"]["left"])
+    assert len(movement) == 1 and len(reloads) == 2
+    on_move, after = reloads
+    assert movement[0]["box"]["bottom"] - movement[0]["box"]["top"] == pytest.approx(height, abs=0.5)
+    assert on_move["box"]["top"] == pytest.approx(track["top"], abs=0.5)
+    assert on_move["box"]["bottom"] - on_move["box"]["top"] == pytest.approx(height / 2, abs=0.5)
+    assert on_move["box"]["right"] == pytest.approx(movement[0]["box"]["right"], abs=0.5)
+    assert after["box"]["bottom"] - after["box"]["top"] == pytest.approx(height, abs=0.5)
+    assert after["box"]["left"] == pytest.approx(on_move["box"]["right"], abs=0.5)
 
 
 @pytest.mark.integration
