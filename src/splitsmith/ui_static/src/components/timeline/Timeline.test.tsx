@@ -15,6 +15,8 @@ function Harness(props: {
   initialZoom?: Zoom;
   onZoom?: (z: Zoom) => void;
   playing?: boolean;
+  onScrubEnd?: () => void;
+  onDoubleClick?: (t: number, shiftKey: boolean) => void;
 }) {
   const [zoom, setZoom] = React.useState<Zoom>(props.initialZoom ?? null);
   return (
@@ -25,6 +27,7 @@ function Harness(props: {
       currentTime={props.currentTime ?? 0}
       playing={props.playing}
       onSeek={props.onSeek ?? vi.fn()}
+      onScrubEnd={props.onScrubEnd}
       zoom={zoom}
       onZoomChange={(z) => {
         setZoom(z);
@@ -33,9 +36,54 @@ function Harness(props: {
       tracks={[
         { id: "a", rows: [{ label: "Audio", height: 40 }], render: () => <div data-testid="track-a" />, seekable: true },
         { id: "b", rows: [{ label: "Shots", height: 40 }], render: () => <div data-testid="track-b" /> },
+        {
+          id: "s",
+          rows: [{ label: "Scrub", height: 40 }],
+          seekable: true,
+          onDoubleClick: props.onDoubleClick,
+          render: () => (
+            <div data-testid="track-s">
+              <button data-audit-marker data-testid="marker" />
+            </div>
+          ),
+        },
       ]}
     />
   );
+}
+
+/**
+ * jsdom has no rAF timing. Stub it on top of fake timers so a scheduled
+ * frame becomes a pending timer `vi.runOnlyPendingTimers()` can flush,
+ * matching the real one-callback-per-frame contract (latest queued wins).
+ */
+function stubRequestAnimationFrame() {
+  const realRaf = window.requestAnimationFrame;
+  const realCaf = window.cancelAnimationFrame;
+  let nextHandle = 1;
+  const timeouts = new Map<number, ReturnType<typeof setTimeout>>();
+  window.requestAnimationFrame = (cb: FrameRequestCallback) => {
+    const handle = nextHandle++;
+    timeouts.set(
+      handle,
+      setTimeout(() => {
+        timeouts.delete(handle);
+        cb(performance.now());
+      }, 0),
+    );
+    return handle;
+  };
+  window.cancelAnimationFrame = (handle: number) => {
+    const t = timeouts.get(handle);
+    if (t !== undefined) {
+      clearTimeout(t);
+      timeouts.delete(handle);
+    }
+  };
+  return () => {
+    window.requestAnimationFrame = realRaf;
+    window.cancelAnimationFrame = realCaf;
+  };
 }
 
 beforeEach(() => {
@@ -252,12 +300,16 @@ describe("Timeline", () => {
     vi.unstubAllGlobals();
   });
 
-  it("seeks from a click on a seekable track row, but not a non-seekable one (M5)", () => {
+  it("seeks from a press on a seekable track row, but not a non-seekable one (M5)", () => {
+    // Was a plain click; a press-and-release with no movement now seeks
+    // once (the click handler was replaced by press-to-scrub below).
     const onSeek = vi.fn();
     render(<Harness onSeek={onSeek} />);
-    fireEvent.click(screen.getByTestId("track-a"), { clientX: 437 });
+    fireEvent.pointerDown(screen.getByTestId("track-a"), { pointerId: 1, button: 0, clientX: 437 });
     expect(onSeek).toHaveBeenCalledWith(expect.closeTo(4.37, 3));
+    fireEvent.pointerUp(screen.getByTestId("track-a"), { pointerId: 1, clientX: 437 });
     onSeek.mockClear();
+    fireEvent.pointerDown(screen.getByTestId("track-b"), { pointerId: 2, button: 0, clientX: 437 });
     fireEvent.click(screen.getByTestId("track-b"), { clientX: 437 });
     expect(onSeek).not.toHaveBeenCalled();
   });
@@ -296,5 +348,71 @@ describe("Timeline", () => {
     expect(onZoom).toHaveBeenCalledTimes(2);
     expect(onZoom.mock.calls[0][0]).toBeCloseTo(1.6487, 3);
     expect(onZoom.mock.calls[1][0]).toBeCloseTo(2.718, 2);
+  });
+
+  describe("press-to-scrub and double-click on seekable tracks", () => {
+    let restoreRaf: () => void;
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      restoreRaf = stubRequestAnimationFrame();
+    });
+
+    afterEach(() => {
+      restoreRaf();
+      vi.useRealTimers();
+    });
+
+    it("scrubs while dragging a seekable track, one seek per frame, and ends once", () => {
+      const onSeek = vi.fn();
+      const onScrubEnd = vi.fn();
+      render(<Harness onSeek={onSeek} onScrubEnd={onScrubEnd} />);
+      const row = screen.getByTestId("track-s").parentElement!;
+      fireEvent.pointerDown(row, { pointerId: 1, button: 0, clientX: 100 });
+      fireEvent.pointerMove(row, { pointerId: 1, clientX: 200 });
+      fireEvent.pointerMove(row, { pointerId: 1, clientX: 300 });
+      act(() => vi.runOnlyPendingTimers());
+      fireEvent.pointerUp(row, { pointerId: 1, clientX: 300 });
+      expect(onSeek.mock.calls.map((c) => c[0])).toEqual([expect.closeTo(1, 2), expect.closeTo(3, 2)]);
+      expect(onScrubEnd).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not follow while scrubbing, and a paused release does not recentre", () => {
+      // Zoom 4 (4000 px content, 1000 px viewport): a drag from clientX 900
+      // to 980 seeks within [0, 10] s and must never move the host while
+      // the pointer is down (I1's paused-release rule covers the release
+      // itself, so this only has to show the drag doesn't fight it).
+      const onSeek = vi.fn();
+      const { rerender } = render(<Harness initialZoom={4} currentTime={0} onSeek={onSeek} />);
+      const host = screen.getByTestId("timeline-host");
+      const row = screen.getByTestId("track-a").parentElement!;
+      fireEvent.pointerDown(row, { pointerId: 1, button: 0, clientX: 900 });
+      rerender(<Harness initialZoom={4} currentTime={onSeek.mock.calls[0][0]} onSeek={onSeek} />);
+      expect(host.scrollLeft).toBe(0);
+      fireEvent.pointerMove(row, { pointerId: 1, clientX: 980 });
+      act(() => vi.runOnlyPendingTimers());
+      rerender(<Harness initialZoom={4} currentTime={onSeek.mock.calls.at(-1)![0]} onSeek={onSeek} />);
+      expect(host.scrollLeft).toBe(0);
+      fireEvent.pointerUp(row, { pointerId: 1, clientX: 980 });
+      rerender(<Harness initialZoom={4} currentTime={onSeek.mock.calls.at(-1)![0]} onSeek={onSeek} />);
+      expect(host.scrollLeft).toBe(0);
+    });
+
+    it("adds on double-click with the shift flag, but never on a marker", () => {
+      const onDouble = vi.fn();
+      render(<Harness onDoubleClick={onDouble} />);
+      fireEvent.doubleClick(screen.getByTestId("track-s").parentElement!, { clientX: 437, shiftKey: true });
+      expect(onDouble).toHaveBeenCalledWith(expect.closeTo(4.37, 3), true);
+      onDouble.mockClear();
+      fireEvent.doubleClick(screen.getByTestId("marker"), { clientX: 437 });
+      expect(onDouble).not.toHaveBeenCalled();
+    });
+
+    it("a press on a marker inside a seekable track does not scrub", () => {
+      const onSeek = vi.fn();
+      render(<Harness onSeek={onSeek} />);
+      fireEvent.pointerDown(screen.getByTestId("marker"), { pointerId: 2, button: 0, clientX: 437 });
+      expect(onSeek).not.toHaveBeenCalled();
+    });
   });
 });

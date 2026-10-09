@@ -43,8 +43,19 @@ export interface TimelineTrack {
   /** Gutter labels, one per row, and each row's height in px; the track spans their sum. */
   rows: { label: string; height: number }[];
   render: (geom: TimelineGeom) => ReactNode;
-  /** A click on the track's row seeks through the content div's rect, no snap, like the ruler. */
+  /**
+   * A press-and-drag on the track's row scrubs through the content div's
+   * rect, no snap, like the ruler: pointer capture, one `onSeek` per
+   * animation frame while dragging (the latest time wins), and a press
+   * without movement seeks once. A pointer whose target is inside
+   * `[data-audit-marker]` is ignored (MarkerLayer owns marker drags).
+   */
   seekable?: boolean;
+  /**
+   * Double-click on the track's row, ignored the same way inside
+   * `[data-audit-marker]`.
+   */
+  onDoubleClick?: (t: number, shiftKey: boolean) => void;
 }
 
 export interface TimelineProps {
@@ -57,6 +68,8 @@ export interface TimelineProps {
   /** Whether the page's video is playing; changes the follow rule (see the follow effect below). */
   playing?: boolean;
   onSeek: (t: number) => void;
+  /** Fires once when a seekable track's scrub drag ends (pointerup/cancel). */
+  onScrubEnd?: () => void;
   tracks: TimelineTrack[];
   zoom: Zoom;
   onZoomChange: (zoom: Zoom) => void;
@@ -73,6 +86,7 @@ export function Timeline(props: TimelineProps) {
     currentTime,
     playing = false,
     onSeek,
+    onScrubEnd,
     tracks,
     zoom,
     onZoomChange,
@@ -88,6 +102,11 @@ export function Timeline(props: TimelineProps) {
   const [follow, setFollow] = useFollowPlayhead();
   const pendingScroll = useRef<number | null>(null);
   const pointerDown = useRef(false);
+  // Press-to-scrub on a seekable track: the pointer currently dragging
+  // (null when none), the latest unflushed time, and its scheduled frame.
+  const scrubPointerId = useRef<number | null>(null);
+  const scrubPending = useRef<number | null>(null);
+  const scrubRaf = useRef<number | null>(null);
 
   useLayoutEffect(() => {
     const host = hostRef.current;
@@ -257,6 +276,62 @@ export function Timeline(props: TimelineProps) {
     return (Math.min(Math.max(clientX - rect.left, 0), rect.width) / rect.width) * span;
   };
 
+  // One onSeek per animation frame while scrubbing: queueScrub records the
+  // latest time and schedules a frame only if none is pending; flushScrub
+  // applies it. A pointerup/cancel that lands between frames cancels the
+  // scheduled one and flushes immediately instead of waiting for it.
+  const flushScrub = () => {
+    scrubRaf.current = null;
+    const t = scrubPending.current;
+    if (t !== null) {
+      scrubPending.current = null;
+      onSeek(t);
+    }
+  };
+  const queueScrub = (t: number) => {
+    scrubPending.current = t;
+    if (scrubRaf.current === null) {
+      scrubRaf.current = requestAnimationFrame(flushScrub);
+    }
+  };
+  useEffect(() => {
+    return () => {
+      if (scrubRaf.current !== null) cancelAnimationFrame(scrubRaf.current);
+    };
+  }, []);
+
+  const insideMarker = (target: EventTarget | null) =>
+    target instanceof HTMLElement && target.closest("[data-audit-marker]") !== null;
+
+  const handleTrackPointerDown = (track: TimelineTrack) => (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!track.seekable || e.button !== 0 || insideMarker(e.target)) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    scrubPointerId.current = e.pointerId;
+    scrubPending.current = null;
+    onSeek(tAt(e.clientX));
+  };
+  const handleTrackPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (scrubPointerId.current !== e.pointerId) return;
+    queueScrub(tAt(e.clientX));
+  };
+  const endTrackScrub = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (scrubPointerId.current !== e.pointerId) return;
+    scrubPointerId.current = null;
+    if (e.currentTarget.hasPointerCapture?.(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+    if (scrubRaf.current !== null) {
+      cancelAnimationFrame(scrubRaf.current);
+      flushScrub();
+    }
+    onScrubEnd?.();
+  };
+  const handleTrackDoubleClick = (track: TimelineTrack) => (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!track.onDoubleClick || insideMarker(e.target)) return;
+    track.onDoubleClick(tAt(e.clientX), e.shiftKey);
+  };
+
   const ticks = useMemo(() => {
     if (pxPerSec <= 0) return [];
     const t0 = Math.max(0, (scrollLeft - viewport) / pxPerSec);
@@ -386,9 +461,13 @@ export function Timeline(props: TimelineProps) {
             {tracks.map((track) => (
               <div
                 key={track.id}
-                className={track.seekable ? "relative cursor-pointer" : "relative"}
+                className={track.seekable ? "relative cursor-pointer touch-none" : "relative"}
                 style={{ height: track.rows.reduce((a, r) => a + r.height, 0) }}
-                onClick={track.seekable ? (e) => onSeek(tAt(e.clientX)) : undefined}
+                onPointerDown={track.seekable ? handleTrackPointerDown(track) : undefined}
+                onPointerMove={track.seekable ? handleTrackPointerMove : undefined}
+                onPointerUp={track.seekable ? endTrackScrub : undefined}
+                onPointerCancel={track.seekable ? endTrackScrub : undefined}
+                onDoubleClick={track.onDoubleClick ? handleTrackDoubleClick(track) : undefined}
               >
                 {track.render(geom)}
               </div>
