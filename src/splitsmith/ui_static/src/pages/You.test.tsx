@@ -100,19 +100,11 @@ describe("You", () => {
     await waitFor(() => expect(api.putAccountProfile).toHaveBeenCalledWith({ brand_line: "Team Axell" }));
   });
 
-  it("lists the book with you first and removes an entry", async () => {
+  it("sends every other shooter's look to the Shooters page and anchors the brand", async () => {
     vi.mocked(api.getScoreboardIdentity).mockResolvedValue(ME);
-    vi.mocked(api.getShooterBook).mockResolvedValue({
-      entries: [
-        { shooter_id: 7, label: "Anna", identity: { accent: null, logo: null, club: "Stockholm" }, updated_at: "" },
-        { shooter_id: 42, label: "Mathias Axell", identity: { accent: null, logo: null, club: null }, updated_at: "" },
-      ],
-    });
-    renderYou();
-    const removes = await screen.findAllByRole("button", { name: /^Remove (Anna|Mathias Axell)$/ });
-    expect(removes.map((b) => b.getAttribute("aria-label"))).toEqual(["Remove Mathias Axell", "Remove Anna"]);
-    fireEvent.click(screen.getByRole("button", { name: "Remove Anna" }));
-    await waitFor(() => expect(api.deleteShooterBookEntry).toHaveBeenCalledWith(7));
+    const { container } = renderYou();
+    expect(await screen.findByRole("link", { name: "Shooters" })).toHaveAttribute("href", "/shooters");
+    expect(container.querySelector("section#brand")).not.toBeNull();
   });
 
   it("goes back to Account hosted and to Matches locally", async () => {
@@ -123,5 +115,19 @@ describe("You", () => {
     mockMode = "local";
     renderYou();
     expect(await screen.findByRole("link", { name: /Matches/ })).toHaveAttribute("href", "/pick");
+  });
+});
+
+describe("You #brand", () => {
+  it("scrolls to the brand section when opened from the account menu's Branding", async () => {
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    render(
+      <MemoryRouter initialEntries={["/you#brand"]}>
+        <You />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(scroll).toHaveBeenCalled());
+    expect((scroll.mock.contexts[0] as Element).id).toBe("brand");
   });
 });

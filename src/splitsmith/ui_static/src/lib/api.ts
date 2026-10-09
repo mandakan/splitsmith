@@ -1928,6 +1928,24 @@ export interface CoachShotPatch {
   expected_version?: number;
 }
 
+/** A row of the Shooters page (``GET /api/me/shooters``): the look the
+ *  videos draw for one shooter, from the book or their newest match. */
+export interface ShooterRosterRow {
+  shooter_id: number | null;
+  name: string;
+  club: string | null;
+  accent: string | null;
+  logo_url: string | null;
+  match_count: number;
+  last_match_at: string;
+  last_match_name: string;
+  you: boolean;
+  source: "book" | "match" | "none";
+  /** For a shooter without an SSI id: the one match the row stands for. */
+  match_id: string | null;
+  slug: string | null;
+}
+
 export interface StageAudit {
   stage_number: number;
   stage_name: string;
@@ -4122,6 +4140,9 @@ export const api = {
   removeAccountBrandLogo: () => request<AccountProfileView>("/api/me/profile/brand-logo", { method: "DELETE" }),
 
   getShooterBook: () => request<{ entries: ShooterBookEntryView[] }>("/api/me/shooter-book"),
+
+  /** Everyone you have filmed (the Shooters page): one row per SSI id. */
+  listShooters: () => request<{ rows: ShooterRosterRow[] }>("/api/me/shooters"),
 
   putShooterBookEntry: (shooterId: number, body: { accent?: string | null; club?: string | null; label?: string | null }) =>
     request<ShooterBookEntryView>(`/api/me/shooter-book/${shooterId}`, { method: "PUT", json: body }),

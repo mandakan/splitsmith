@@ -23,7 +23,8 @@ import { CamerasPanel } from "@/components/footage/CamerasPanel";
 import { ClipSheet } from "@/components/footage/ClipSheet";
 import { CoverageMatrix, type FootageHrefs } from "@/components/footage/CoverageMatrix";
 import { FootageCards } from "@/components/footage/FootageCards";
-import { IdentitySheet } from "@/components/footage/IdentitySheet";
+import { identityMark } from "@/lib/identityMark";
+import { ShooterSheet } from "@/components/shooters/ShooterSheet";
 import { ShootersPanel } from "@/components/footage/ShootersPanel";
 import { UnassignedPanel } from "@/components/footage/UnassignedPanel";
 import { HostedUploadModal } from "@/components/HostedUploadModal";
@@ -1029,11 +1030,20 @@ function IngestInner({ slug }: { slug: string }) {
           setOthersTick((n) => n + 1);
         }}
       />
-      <IdentitySheet
-        open={identityFor != null}
+      <ShooterSheet
+        open={identityFor != null && identityFor.selected_shooter_id != null}
         onClose={() => setIdentityFor(null)}
-        shooter={identityFor}
-        editDenied={editDenied}
+        shooter={
+          identityFor && identityFor.selected_shooter_id != null
+            ? {
+                shooterId: identityFor.selected_shooter_id,
+                name: identityFor.name,
+                accent: identityFor.identity?.accent ?? null,
+                club: identityFor.identity?.club ?? null,
+                logoUrl: identityMark(identityFor.slug, identityFor.identity).logo,
+              }
+            : null
+        }
         onChanged={() => void reload()}
       />
 

@@ -499,19 +499,35 @@ shooter without one is gone. It syncs at match level
 renderer resolves it through ``identity_media.ensure_local_event_logo``,
 which mirrors it down on hosted and answers ``None`` when it is missing.
 
+**Shooters and the account menu** (spec
+``2026-10-09-shooters-page-and-account-menu-design``): ``/shooters`` lists
+everyone you have filmed (``GET /api/me/shooters``, ``ui/shooter_roster``: one
+row per SSI id over the recently opened matches locally and the account's
+matches hosted, the book's look else the newest match's, you first; listing
+writes nothing), and ``components/shooters/ShooterSheet`` edits the book only.
+The same sheet opens from a shooter chip's menu in a match
+(``ShooterChipStrip`` ``onEditLook``) and from Footage's "Edit look". The
+account pill (``AccountMenu``, top right, both modes) holds You, Shooters,
+Branding (``/you#brand``) and, hosted, Account; the splitsmith.app chips stay
+beside it. The SPA no longer sends ``scope="match"``; the server still takes it.
+
 **You, your brand and the shooter book** (spec
 ``2026-10-08-account-identity-and-shooter-book-design``). "You" is the existing
 ``ScoreboardIdentity.shooter_id``. The **shooter book** (``shooter_book``) keeps
 a shooter's look per account keyed by SSI shooter id, never by name:
-``identity_media.identity_source`` takes the match's own record when it sets
-anything (as a whole), else the book's entry for ``selected_shooter_id``, else
-nothing, so an empty book renders exactly as before. Renderers never read a
+``identity_media.identity_source`` takes the book's entry for
+``selected_shooter_id`` when it sets anything, else the match's own record (as
+a whole), else nothing (**the book wins**, spec
+``2026-10-09-shooters-page-and-account-menu-design``: no per-match overrides,
+and an old match record must not draw over the Shooters page), so an empty book
+renders exactly as before. Renderers never read a
 store: the request layer loads ``load_snapshot(state.shooter_book)`` once per
 export and passes ``book=`` to ``resolved_identity_for`` / ``grid_identities``
 (every export job, the preview, the palette route, both CLIs). Identity edits
-write the book (``scope="book"``, the default; ``"match"`` keeps an edit here;
-an empty look removes the entry); an edit to a shooter whose match sets nothing
-starts from the book's look, logo copied in; ``use-book`` is refused when the
+write the book (``scope="book"``, the default; ``"match"`` writes only this
+match's record, which the book now draws over; an empty look removes the
+entry); an edit starts from the look the videos draw (the book's, logo copied
+in, else the match's own); ``use-book`` is refused when the
 book has nothing to fall back to. The account's **brand** (``AccountProfile``,
 the shape of ``LookBrand``) is ``MatchTitle.brand``, resolved by the request
 layer like the event logo; ``look_brand.brand_json`` draws the Look's brand when

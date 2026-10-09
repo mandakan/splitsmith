@@ -75,10 +75,13 @@ def test_use_book_clears_the_match_record_only(tmp_path: Path) -> None:
     client, shooter_root = _seed(tmp_path)
     client.patch(IDENTITY, json={"accent": "#ff2d2d"})
     client.patch(IDENTITY, json={"accent": "#00ff00", "scope": "match"})
+    # The book wins over the match's own record (spec 2026-10-09): an older
+    # client's "only this match" edit is stored and drawn under the book.
+    assert MatchProject.load(shooter_root).identity.accent == "#00ff00"
     view = client.get(IDENTITY).json()
     assert view == {
-        "source": "match",
-        "identity": {"accent": "#00ff00", "logo": None, "club": None},
+        "source": "book",
+        "identity": {"accent": "#ff2d2d", "logo": None, "club": None},
         "shooter_id": SID,
         "book_entry": True,
         "book_available": True,
@@ -193,3 +196,23 @@ def test_removing_the_logo_with_scope_match_leaves_the_book(tmp_path: Path) -> N
     name = _book().identity.logo
     assert client.delete(LOGO, params={"scope": "match"}).status_code == 200
     assert _book().identity.logo == name
+
+
+def test_an_edit_through_the_old_route_starts_from_the_book_it_draws(tmp_path: Path) -> None:
+    """The book wins (spec 2026-10-09), so an older client's edit must start
+    from the book's look, not from a stale match record under it: the book's
+    accent survives a club-only edit."""
+    client, _ = _seed(tmp_path)
+    client.patch(IDENTITY, json={"accent": "#aa0000"})
+    client.patch(IDENTITY, json={"accent": "#00ff00", "scope": "match"})
+    client.patch(IDENTITY, json={"club": "Edited"})
+    entry = _book()
+    assert (entry.identity.accent, entry.identity.club) == ("#aa0000", "Edited")
+
+
+def test_removing_a_book_logo_that_is_not_there_is_not_an_error(tmp_path: Path) -> None:
+    """The Shooters sheet clears a look that came from a match record: the
+    book has no entry to remove a logo from, which is already the result."""
+    client, _ = _seed(tmp_path)
+    r = client.delete(f"/api/me/shooter-book/{SID + 1}/logo")
+    assert r.status_code == 200, r.text

@@ -148,9 +148,10 @@ describe("ShootersPanel", () => {
     expect(screen.queryByRole("menuitem", { name: /Rebuild trims/ })).toBeNull();
     fireEvent.click(screen.getByRole("menuitem", { name: /Remove/ }));
     expect(onRemove).toHaveBeenCalledWith(ME);
+    // No SSI id: no look of their own to edit (spec 2026-10-09).
     fireEvent.click(screen.getByRole("button", { name: "Mathias Axell actions" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: /Identity/ }));
-    expect(onIdentity).toHaveBeenCalledWith(ME);
+    expect(screen.getByRole("menuitem", { name: /Edit look/ })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Mathias Axell actions" }));
     fireEvent.click(screen.getByRole("button", { name: "Anna Berg actions" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Rebuild trims (2)" }));
     expect(onRebuild).toHaveBeenCalledWith(ANNA);
@@ -165,5 +166,20 @@ describe("CamerasPanel", () => {
     fireEvent.change(screen.getByLabelText("Mount for Camera A"), { target: { value: "head" } });
     await vi.waitFor(() => expect(api.bulkSetCamera).toHaveBeenCalledWith("me", { items: cam.members, set_mount: true, mount: "head" }));
     await vi.waitFor(() => expect(onSaved).toHaveBeenCalledWith({ name: "p" }));
+  });
+});
+
+describe("ShootersPanel Edit look", () => {
+  it("opens the look of a shooter with an SSI id", () => {
+    const onIdentity = vi.fn();
+    const linked = { ...ME, selected_shooter_id: 42 } as ShooterListEntry;
+    render(
+      <MemoryRouter>
+        <ShootersPanel shooters={[linked, ANNA]} activeSlug="me" editDenied={false} hrefs={{ footage: (s) => `/m/ingest/${s}`, audit: (s) => `/m/audit/${s}` }} onAdd={vi.fn()} onRemove={vi.fn()} onRebuildTrims={vi.fn()} onIdentity={onIdentity} />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Mathias Axell actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Edit look/ }));
+    expect(onIdentity).toHaveBeenCalledWith(linked);
   });
 });

@@ -13,9 +13,12 @@
  * matches and legacy projects have nothing to switch between.
  */
 
+import { useState } from "react";
+import { MoreHorizontal } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { Avatar } from "@/components/ui";
+import { Menu, menuItemClass } from "@/components/ui/Menu";
 import type { ShooterListEntry } from "@/lib/api";
 import { useMatchHref } from "@/lib/matchHref";
 import { cn } from "@/lib/utils";
@@ -50,6 +53,10 @@ interface Props {
    *  MatchShell breadcrumb row -- no label, no margin, the host
    *  controls spacing. */
   variant?: "block" | "inline";
+  /** Opens the shooter's look (spec 2026-10-09). When set, each chip gets
+   *  a small menu beside it with "Edit look"; the chip itself still
+   *  switches shooter. */
+  onEditLook?: (s: ShooterListEntry) => void;
 }
 
 const defaultCount = (s: ShooterListEntry): string =>
@@ -63,8 +70,10 @@ export function ShooterChipStrip({
   label,
   count = defaultCount,
   variant = "block",
+  onEditLook,
 }: Props) {
   const href = useMatchHref();
+  const [menuFor, setMenuFor] = useState<string | null>(null);
   if (shooters.length <= 1) return null;
   const isInline = variant === "inline";
   return (
@@ -93,47 +102,81 @@ export function ShooterChipStrip({
             : href(urlBase, s.slug);
         const secondary = count ? count(s) : null;
         return (
-          <Link
-            key={s.slug}
-            to={target}
-            replace
-            aria-current={isActive ? "page" : undefined}
-            title={
-              isActive
-                ? `${s.name} -- currently in focus`
-                : `Switch to ${s.name}`
-            }
-            className={cn(
-              "inline-flex items-center gap-2 rounded-full border px-2 py-1 text-[0.8125rem] transition-colors no-underline",
-              isActive
-                ? "border-led shadow-[0_0_0_1px_var(--color-led-deep),0_0_14px_var(--color-led-glow)]"
-                : "border-rule bg-surface-2 text-ink-2 hover:border-rule-strong hover:bg-surface-3",
-              isActive && "pointer-events-none",
-            )}
-          >
-            <Avatar
-              size="xs"
-              initials={chipInitials(s.name)}
-              seed={s.slug}
-              name={s.name}
-              {...identityMark(s.slug, s.identity)}
-            />
-            <span className="font-display text-[0.6875rem] font-semibold uppercase tracking-[0.06em]">
-              {s.name}
-            </span>
-            {secondary ? (
-              <span
-                className={cn(
-                  "font-mono text-[0.625rem] uppercase tracking-[0.06em]",
-                  s.stages_total > 0 && s.stages_audited >= s.stages_total
-                    ? "text-done"
-                    : "text-muted",
-                )}
-              >
-                {secondary}
+          <span key={s.slug} className="inline-flex items-center gap-0.5">
+            <Link
+              to={target}
+              replace
+              aria-current={isActive ? "page" : undefined}
+              title={
+                isActive
+                  ? `${s.name} -- currently in focus`
+                  : `Switch to ${s.name}`
+              }
+              className={cn(
+                "inline-flex items-center gap-2 rounded-full border px-2 py-1 text-[0.8125rem] transition-colors no-underline",
+                isActive
+                  ? "border-led shadow-[0_0_0_1px_var(--color-led-deep),0_0_14px_var(--color-led-glow)]"
+                  : "border-rule bg-surface-2 text-ink-2 hover:border-rule-strong hover:bg-surface-3",
+                isActive && "pointer-events-none",
+              )}
+            >
+              <Avatar
+                size="xs"
+                initials={chipInitials(s.name)}
+                seed={s.slug}
+                name={s.name}
+                {...identityMark(s.slug, s.identity)}
+              />
+              <span className="font-display text-[0.6875rem] font-semibold uppercase tracking-[0.06em]">
+                {s.name}
+              </span>
+              {secondary ? (
+                <span
+                  className={cn(
+                    "font-mono text-[0.625rem] uppercase tracking-[0.06em]",
+                    s.stages_total > 0 && s.stages_audited >= s.stages_total
+                      ? "text-done"
+                      : "text-muted",
+                  )}
+                >
+                  {secondary}
+                </span>
+              ) : null}
+            </Link>
+            {onEditLook ? (
+              <span className="relative">
+                <button
+                  type="button"
+                  aria-label={`More for ${s.name}`}
+                  aria-haspopup="menu"
+                  aria-expanded={menuFor === s.slug}
+                  onClick={() => setMenuFor(menuFor === s.slug ? null : s.slug)}
+                  className="inline-flex size-6 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-3 hover:text-ink"
+                >
+                  <MoreHorizontal className="size-3.5" aria-hidden />
+                </button>
+                <Menu open={menuFor === s.slug} onClose={() => setMenuFor(null)} align="left" className="min-w-48">
+                  {s.selected_shooter_id != null ? (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className={menuItemClass}
+                      onClick={() => {
+                        setMenuFor(null);
+                        onEditLook(s);
+                      }}
+                    >
+                      Edit look
+                    </button>
+                  ) : (
+                    <p className="max-w-56 px-2.5 py-1.5 text-sm text-muted">
+                      Link {s.name} to the scoreboard to give them a look of their own.
+                    </p>
+                  )}
+                </Menu>
               </span>
             ) : null}
-          </Link>
+          </span>
         );
       })}
     </div>
