@@ -335,12 +335,14 @@ function CoachMatchInner({ slug }: { slug: string }) {
               className="grid grid-cols-[36px_minmax(120px,160px)_minmax(0,1fr)_72px] items-center gap-3 border-b border-rule px-3.5 py-2 text-md last:border-b-0"
             >
               <span className="font-mono text-sm text-muted">{pad2(row.stage_number)}</span>
+              {/* A stage without a name reads "Stage N", as the sidebar has it:
+                  an empty name was a link with nothing in it to click. */}
               {row.audited ? (
                 <Link to={`${stagePrefix}/${row.stage_number}`} className="truncate font-medium text-ink hover:text-led-text">
-                  {row.stage_name}
+                  {row.stage_name || `Stage ${row.stage_number}`}
                 </Link>
               ) : (
-                <span className="truncate text-subtle">{row.stage_name}</span>
+                <span className="truncate text-subtle">{row.stage_name || `Stage ${row.stage_number}`}</span>
               )}
               <span>{st ? <TimeBudgetBar budget={st} compact scale={budget.maxTotal > 0 ? st.total / budget.maxTotal : 0} /> : null}</span>
               <span className="numeral text-right text-ink-2">{st ? st.total.toFixed(2) : row.total_seconds > 0 ? row.total_seconds.toFixed(2) : "\u2014"}</span>
