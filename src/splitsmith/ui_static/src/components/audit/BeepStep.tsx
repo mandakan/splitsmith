@@ -426,8 +426,8 @@ export function BeepStep({
               draftSourceTime={draft}
               candidates={candidates}
               mediaRef={videoRef}
+              mediaOnDesktop={mediaOnDesktop}
               onPick={handleTimelinePick}
-              onError={queue.setError}
             />
           </div>
         </>

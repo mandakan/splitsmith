@@ -18,7 +18,9 @@ vi.mock("@/components/audit/BeepTimeline", () => ({
     videoBeepTime: number | null;
     draftSourceTime: number | null;
     candidates: { time: number; detected: boolean }[];
+    mediaOnDesktop?: boolean;
     onPick: (t: number) => void;
+    onError?: (m: string) => void;
   }) => (
     <div data-testid="beep-timeline">
       <span data-testid="timeline-props">
@@ -26,6 +28,8 @@ vi.mock("@/components/audit/BeepTimeline", () => ({
           videoId: props.videoId,
           videoBeepTime: props.videoBeepTime,
           draftSourceTime: props.draftSourceTime,
+          mediaOnDesktop: props.mediaOnDesktop ?? null,
+          hasOnError: props.onError != null,
         })}
       </span>
       <button
@@ -172,6 +176,13 @@ describe("BeepStep", () => {
     expect(
       screen.getByRole("button", { name: /Confirm & next/ }),
     ).toBeEnabled();
+  });
+
+  it("forwards mediaOnDesktop to the band and never wires its own error into the queue's alert", () => {
+    renderStep(hookState([item()]), { mediaOnDesktop: true });
+    expect(
+      JSON.parse(screen.getByTestId("timeline-props").textContent!),
+    ).toMatchObject({ mediaOnDesktop: true, hasOnError: false });
   });
 
   it("a candidate click becomes the draft Confirm sends; the next beep in the queue is reported", async () => {

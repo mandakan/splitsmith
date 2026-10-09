@@ -32,6 +32,7 @@ function Harness(props: {
   videoBeepTime?: number | null;
   draftSourceTime?: number | null;
   candidates?: BeepCandidate[];
+  mediaOnDesktop?: boolean;
   onPick?: (t: number) => void;
   onError?: (m: string) => void;
 }) {
@@ -47,6 +48,7 @@ function Harness(props: {
         draftSourceTime={props.draftSourceTime ?? null}
         candidates={props.candidates ?? []}
         mediaRef={mediaRef}
+        mediaOnDesktop={props.mediaOnDesktop}
         onPick={props.onPick ?? vi.fn()}
         onError={props.onError}
       />
@@ -129,12 +131,21 @@ describe("BeepTimeline", () => {
     expect(screen.getByTestId("waveform-track")).toBeInTheDocument();
   });
 
-  it("calls onError and renders \"No audio\" when the fetch fails", async () => {
+  it('renders a muted "No audio yet. Run Re-detect" line, not an alert, when the fetch fails', async () => {
     vi.mocked(api.getVideoPeaks).mockRejectedValue(new Error("boom"));
     const onError = vi.fn();
     render(<Harness videoId="v1" onError={onError} />);
-    await screen.findByText("No audio");
+    await screen.findByText("No audio yet. Run Re-detect");
     expect(onError).toHaveBeenCalledWith("boom");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it('shows "Audio stays on the desktop install" instead when mediaOnDesktop, on the same failure', async () => {
+    vi.mocked(api.getVideoPeaks).mockRejectedValue(new Error("boom"));
+    render(<Harness videoId="v1" mediaOnDesktop />);
+    await screen.findByText("Audio stays on the desktop install");
+    expect(screen.queryByText("No audio yet. Run Re-detect")).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   describe("press-to-scrub on the Audio row", () => {

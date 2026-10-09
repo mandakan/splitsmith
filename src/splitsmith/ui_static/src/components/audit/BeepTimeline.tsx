@@ -50,6 +50,10 @@ export interface BeepTimelineProps {
   candidates: BeepCandidate[];
   /** The preview <video>; the band seeks it and reads its time and play state. */
   mediaRef: React.RefObject<HTMLVideoElement | null>;
+  /** Desktop-pushed mirror (#821): raw footage never leaves the desktop
+   *  install, so the peaks fetch is expected to fail. Only changes the
+   *  wording of the no-audio line. */
+  mediaOnDesktop?: boolean;
   /**
    * Called with a source-seconds pick: a scrub release, or a candidate
    * click (always the candidate's own `time`, including a `detected`
@@ -75,6 +79,7 @@ export function BeepTimeline({
   draftSourceTime,
   candidates,
   mediaRef,
+  mediaOnDesktop = false,
   onPick,
   onError,
 }: BeepTimelineProps) {
@@ -252,7 +257,11 @@ export function BeepTimeline({
     );
   }
   if (failed || !peaks) {
-    return <div className="rounded-[10px] border border-rule bg-surface-2 p-3 text-sm text-muted">No audio</div>;
+    return (
+      <div className="rounded-[10px] border border-rule bg-surface-2 p-3 text-sm text-muted">
+        {mediaOnDesktop ? "Audio stays on the desktop install" : "No audio yet. Run Re-detect"}
+      </div>
+    );
   }
 
   const origin = peaks.beep_time ?? 0;
