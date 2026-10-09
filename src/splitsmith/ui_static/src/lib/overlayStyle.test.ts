@@ -79,3 +79,9 @@ describe("overlay styles", () => {
     expect(overlayStyleLabel("plate")).toBe("Plate");
   });
 });
+
+describe("the default style", () => {
+  it("draws splits in one colour unless speed colours are asked for", () => {
+    expect(DEFAULT_OVERLAY_STYLE.speedColors).toBe(false);
+  });
+});

@@ -217,13 +217,14 @@ data.stage = {
   stage_time: 7.75,
   rounds: 12,
 }
-data.options = { speed_colors: true, class_labels: true, landing: true, position: "bottom-left" }
+data.options = { speed_colors: false, class_labels: true, landing: true, position: "bottom-left" }
 ```
 
 Read the numbers; never compute a split, a class or a speed in the template.
 `tier` is `good`, `normal` or `slow` against this stage's median for that
 class, and `null` for a draw, a reload and an unclassified shot. Honour the
-three toggles: draw a split in one colour when `speed_colors` is off, leave
+three toggles: draw a split in one colour when `speed_colors` is off (the
+default), leave
 the class out when `class_labels` is off, and skip the landing moment when
 `landing` is off.
 
