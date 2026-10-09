@@ -32,6 +32,8 @@ from typing import Literal
 from PIL import Image
 
 from . import composition
+from .config import StageEvent
+from .events import confirmed, events_from_doc
 from .export_naming import stage_display_name, stage_file_base
 from .identity import ResolvedIdentity
 from .look_sting import sting_context
@@ -137,6 +139,21 @@ def audit_digest(audit_doc: dict | None) -> str:
     if not isinstance(audit_doc, dict):
         return "none"
     return hashlib.sha256(json.dumps(audit_doc, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+
+
+def _confirmed_regions(audit_doc: dict | None) -> list[StageEvent]:
+    """The stage's confirmed regions, the way ``overlay_hud_render``'s
+    ``_confirmed_regions(audit_path)`` reads them -- here from the
+    already-loaded doc rather than a file. A corrupt events list must not
+    fail a preview: draw with no regions, as the Coach GET's in-memory
+    heal tolerates a legacy doc."""
+    if not isinstance(audit_doc, dict):
+        return []
+    try:
+        return confirmed(events_from_doc(audit_doc))
+    except (ValueError, TypeError) as exc:
+        logger.warning("unreadable stage events, previewing with none: %s", exc)
+        return []
 
 
 #: Bump when the same inputs draw a different picture, or a cached still
@@ -545,7 +562,14 @@ def render_preview(
         )
     else:  # overlay
         styled = _hud_preview(
-            spec, look=look, shots=shots, rasterizer=rasterizer, frame=frame, theme=theme, moving=moving
+            spec,
+            look=look,
+            shots=shots,
+            rasterizer=rasterizer,
+            frame=frame,
+            theme=theme,
+            moving=moving,
+            audit_doc=audit_doc,
         )
         if styled is not None:
             return styled
@@ -606,6 +630,7 @@ def _hud_preview(
     frame: Path | None,
     theme: OverlayTheme,
     moving: bool,
+    audit_doc: dict | None,
 ) -> bytes | None:
     """An overlay style over the stage's frame: moving, a loop of the
     opening shots then the last shot and the landing; still, the settled
@@ -619,7 +644,7 @@ def _hud_preview(
     # Deferred: overlay_hud_render builds on the renderer's encoder module.
     from .overlay_hud_render import hud_context
 
-    stage = hud_stage_data(shots, beep_in_clip=HUD_PREVIEW_BEEP)
+    stage = hud_stage_data(shots, beep_in_clip=HUD_PREVIEW_BEEP, events=_confirmed_regions(audit_doc))
     position = resolve_position(spec.overlay_options.position, declared_positions(template))
     context = hud_context(
         stage=stage,

@@ -444,3 +444,46 @@ def test_the_overlay_style_moves_the_key_only_on_an_overlay_card() -> None:
     assert key(styled) != key(replace(styled, overlay_options=HudOptions(landing=False)))
     slate = ep.PreviewSpec(card="slate", stage_number=3)
     assert key(slate) == key(replace(slate, overlay_variant="plate"))
+
+
+def test_a_confirmed_reload_reaches_the_hud_preview(tmp_path: Path) -> None:
+    """``export_preview`` holds the audit the way ``overlay_hud_render``
+    does (``_confirmed_regions``): the stage's confirmed regions must
+    reach ``data.stage`` so the Export rail preview draws the same chip
+    and bar the export would, not nothing (Task 1's review)."""
+    raster = _HudRasterizer()
+    audit = {
+        **AUDIT,
+        "events": [{"id": "evt-1", "kind": "reload", "start": 1.0, "end": 1.3, "source": "manual"}],
+    }
+    spec = ep.PreviewSpec(card="overlay", stage_number=3, width=480, overlay_variant="plate")
+    _render(tmp_path, spec, audit=audit, raster=raster)
+    (timeline,) = raster.timelines
+    assert timeline["data"]["stage"]["reloads"], "the confirmed reload never reached data.stage"
+
+
+def test_an_unconfirmed_reload_proposal_never_reaches_the_hud_preview(tmp_path: Path) -> None:
+    """A stage with only an auto proposal previews exactly as a stage with
+    no events (Review Focus #1 extends to the preview path)."""
+    raster = _HudRasterizer()
+    audit = {
+        **AUDIT,
+        "events": [{"id": "evt-1", "kind": "reload", "start": 1.0, "end": 1.3, "source": "auto"}],
+    }
+    spec = ep.PreviewSpec(card="overlay", stage_number=3, width=480, overlay_variant="plate")
+    _render(tmp_path, spec, audit=audit, raster=raster)
+    (timeline,) = raster.timelines
+    assert timeline["data"]["stage"]["reloads"] == []
+    assert timeline["data"]["stage"]["events"] == []
+
+
+def test_the_preview_cache_key_moves_when_a_region_is_confirmed() -> None:
+    """``audit_digest`` hashes the whole audit doc, which includes
+    ``events``; confirming a region edits that doc, so the cache key must
+    move without any dedicated handling in ``preview_key``."""
+    base_audit = {**AUDIT, "events": []}
+    confirmed_audit = {
+        **AUDIT,
+        "events": [{"id": "evt-1", "kind": "reload", "start": 1.0, "end": 1.3, "source": "manual"}],
+    }
+    assert ep.audit_digest(base_audit) != ep.audit_digest(confirmed_audit)

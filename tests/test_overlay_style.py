@@ -7,6 +7,7 @@ from pydantic import BaseModel, ValidationError
 
 from splitsmith.export_presets import ExportPresetBody
 from splitsmith.overlay_hud import HudOptions, OverlayStyleFields, overlay_settings
+from splitsmith.ui.export_preview_api import ExportPreviewRequest
 from splitsmith.ui.exports_api import ExportStageRequest, MatchExportRequest
 
 
@@ -45,6 +46,26 @@ def test_every_body_that_draws_an_overlay_carries_the_style(model: type[BaseMode
     body = model(overlay_variant="pips", overlay_position="bottom-left", **extra)
     assert body.overlay_variant == "pips"  # type: ignore[attr-defined]
     assert body.hud_options().position == "bottom-left"  # type: ignore[attr-defined]
+
+
+def test_an_export_request_and_a_preview_request_reach_reload_chip_and_stage_bar() -> None:
+    """The two new toggles must reach ``HudOptions`` through every body
+    that draws an overlay, exactly as ``overlay_landing`` does -- an
+    export request (the stage and the match export) and the preview
+    request. None of these models re-declares the fields, so there is
+    nothing to wire here but a regression pin against one that someday
+    does."""
+    stage = ExportStageRequest(overlay_reload_chip=True, overlay_stage_bar=True)
+    assert stage.hud_options().reload_chip is True
+    assert stage.hud_options().stage_bar is True
+
+    match = MatchExportRequest(stage_numbers=[1], overlay_reload_chip=True)
+    assert match.hud_options().reload_chip is True
+    assert match.hud_options().stage_bar is False
+
+    preview = ExportPreviewRequest(card="overlay", stage_number=1, overlay_stage_bar=True)
+    assert preview.hud_options().stage_bar is True
+    assert preview.hud_options().reload_chip is False
 
 
 def test_a_preset_saved_before_the_style_loads_as_classic() -> None:

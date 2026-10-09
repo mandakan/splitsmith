@@ -62,16 +62,37 @@ describe("overlay styles", () => {
       overlay_speed_colors: false,
       overlay_class_labels: true,
       overlay_landing: true,
+      overlay_reload_chip: false,
+      overlay_stage_bar: false,
     });
     expect(
       overlayStyleFields({ ...DEFAULT_OVERLAY_STYLE, variant: "plate", position: "top-right" }).overlay_position,
     ).toBe("top-right");
+    expect(
+      overlayStyleFields({ ...DEFAULT_OVERLAY_STYLE, variant: "plate", reloadChip: true, stageBar: true }),
+    ).toMatchObject({ overlay_reload_chip: true, overlay_stage_bar: true });
   });
 
   it("round-trips through a preset body and reads an old body as Classic", () => {
-    const style = { variant: "pips", speedColors: false, classLabels: true, landing: false, position: "top-left" };
+    const style = {
+      variant: "pips",
+      speedColors: false,
+      classLabels: true,
+      landing: false,
+      reloadChip: true,
+      stageBar: true,
+      position: "top-left",
+    };
     expect(styleFromBody(overlayStyleBody(style))).toEqual(style);
     expect(styleFromBody({})).toEqual(DEFAULT_OVERLAY_STYLE);
+  });
+
+  it("an old preset body without the two toggles loads them off", () => {
+    expect(styleFromBody({ overlay_variant: "pips", overlay_landing: false })).toEqual({
+      ...DEFAULT_OVERLAY_STYLE,
+      variant: "pips",
+      landing: false,
+    });
   });
 
   it("names a style for the rail", () => {

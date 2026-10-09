@@ -230,7 +230,15 @@ describe("the overlay style", () => {
   const plate = {
     ...DEFAULT_EXPORT_SETTINGS,
     includeOverlay: true,
-    overlayStyle: { variant: "plate", speedColors: false, classLabels: true, landing: false, position: "top-right" },
+    overlayStyle: {
+      variant: "plate",
+      speedColors: false,
+      classLabels: true,
+      landing: false,
+      reloadChip: true,
+      stageBar: false,
+      position: "top-right",
+    },
   };
 
   it("round-trips through a preset and makes the form dirty when it changes", () => {
@@ -239,6 +247,16 @@ describe("the overlay style", () => {
     expect(body.overlay_position).toBe("top-right");
     expect(applyBody(DEFAULT_EXPORT_SETTINGS, body).overlayStyle).toEqual(plate.overlayStyle);
     expect(isDirty({ ...plate, overlayStyle: { ...plate.overlayStyle, landing: true } }, body)).toBe(true);
+  });
+
+  it("a preset saved before the two toggles existed loads them off", () => {
+    const body = settingsToBody(plate) as unknown as Record<string, unknown>;
+    delete body.overlay_reload_chip;
+    delete body.overlay_stage_bar;
+    const applied = applyBody(DEFAULT_EXPORT_SETTINGS, body as unknown as ExportPresetBody).overlayStyle;
+    expect(applied.reloadChip).toBe(false);
+    expect(applied.stageBar).toBe(false);
+    expect(applied.variant).toBe("plate");
   });
 
   it("a body stored before styles shipped applies Classic", () => {

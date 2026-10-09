@@ -1079,6 +1079,8 @@ export interface OverlayStyleBody {
   overlay_speed_colors?: boolean;
   overlay_class_labels?: boolean;
   overlay_landing?: boolean;
+  overlay_reload_chip?: boolean;
+  overlay_stage_bar?: boolean;
   overlay_position?: string | null;
 }
 

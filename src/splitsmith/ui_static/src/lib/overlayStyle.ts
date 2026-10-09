@@ -16,6 +16,10 @@ export interface OverlayStyle {
   speedColors: boolean;
   classLabels: boolean;
   landing: boolean;
+  /** A chip counting a confirmed reload's time (spec 2026-10-08, part 2). */
+  reloadChip: boolean;
+  /** A thin stage bar with the movement and reload bands. */
+  stageBar: boolean;
   /** ``null`` is the style's own default position. */
   position: string | null;
 }
@@ -25,6 +29,8 @@ export const DEFAULT_OVERLAY_STYLE: OverlayStyle = {
   speedColors: true,
   classLabels: true,
   landing: true,
+  reloadChip: false,
+  stageBar: false,
   position: null,
 };
 
@@ -61,17 +67,21 @@ export function overlayStyleFields(style: OverlayStyle): OverlayStyleBody {
     overlay_speed_colors: style.speedColors,
     overlay_class_labels: style.classLabels,
     overlay_landing: style.landing,
+    overlay_reload_chip: style.reloadChip,
+    overlay_stage_bar: style.stageBar,
     ...(style.position !== null ? { overlay_position: style.position } : {}),
   };
 }
 
-/** The preset body's fields: always all five, so a preset round-trips. */
+/** The preset body's fields: always all seven, so a preset round-trips. */
 export function overlayStyleBody(style: OverlayStyle): Required<OverlayStyleBody> {
   return {
     overlay_variant: style.variant,
     overlay_speed_colors: style.speedColors,
     overlay_class_labels: style.classLabels,
     overlay_landing: style.landing,
+    overlay_reload_chip: style.reloadChip,
+    overlay_stage_bar: style.stageBar,
     overlay_position: style.position,
   };
 }
@@ -84,6 +94,8 @@ export function styleFromBody(body: OverlayStyleBody): OverlayStyle {
     speedColors: body.overlay_speed_colors ?? D.speedColors,
     classLabels: body.overlay_class_labels ?? D.classLabels,
     landing: body.overlay_landing ?? D.landing,
+    reloadChip: body.overlay_reload_chip ?? D.reloadChip,
+    stageBar: body.overlay_stage_bar ?? D.stageBar,
     position: body.overlay_position ?? D.position,
   };
 }
