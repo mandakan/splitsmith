@@ -118,9 +118,6 @@ CAMERA_CLASS_FEATURE_NAMES: tuple[str, ...] = ("headcam", "handheld")
 CAMERA_CLASS_FEATURE_DIM: int = len(CAMERA_CLASS_FEATURE_NAMES)
 _CAMERA_CLASS_TO_INDEX: dict[str, int] = {name: idx for idx, name in enumerate(CAMERA_CLASS_FEATURE_NAMES)}
 
-# +1 for clap_diff, +1 for gunshot_prob (folded in from voter D).
-VOTER_C_FEATURE_DIM: int = HAND_FEATURE_DIM + len(CLAP_PROMPTS) + 1 + 1 + CAMERA_CLASS_FEATURE_DIM
-
 
 def camera_class_one_hot(camera_classes: list[str] | np.ndarray, n_rows: int) -> np.ndarray:
     """Build the camera-class one-hot block for Voter C.
@@ -389,6 +386,12 @@ REL_FEATURE_NAMES: tuple[str, ...] = tuple(
     )
 )
 REL_FEATURE_DIM: int = len(REL_FEATURE_NAMES)
+
+# +1 for clap_diff, +1 for gunshot_prob (folded in from voter D), and the
+# stage-relative block (spec 2026-10-09) appended after the camera one-hot.
+VOTER_C_FEATURE_DIM: int = (
+    HAND_FEATURE_DIM + len(CLAP_PROMPTS) + 1 + 1 + CAMERA_CLASS_FEATURE_DIM + REL_FEATURE_DIM
+)
 _REF_FALLBACK_FRACTION: float = 0.3
 _REF_FALLBACK_MIN: int = 3
 _HAND_INDEX: dict[str, int] = {name: i for i, name in enumerate(_HAND_FEATURE_NAMES)}
@@ -754,11 +757,16 @@ def voter_c_feature_matrix(
     clap_diff: np.ndarray,
     gunshot_prob: np.ndarray,
     camera_classes: list[str] | np.ndarray | str | None = None,
+    *,
+    expected_rounds: int | None = None,
 ) -> np.ndarray:
-    """Stack the GBDT input vector.
+    """Stack the GBDT input vector for the candidates of ONE stage.
 
     Columns in order: ``hand | clap_sims | clap_diff | gunshot_prob |
-    camera_class_onehot``.
+    camera_class_onehot | stage_relative``. The stage-relative block
+    compares each candidate with the stage's likely shots, so every row
+    must come from the same detector universe; ``expected_rounds`` picks
+    how many likely shots (see ``reference_indices``).
 
     Column order matches the calibration script. Drift here -- adding
     features, reordering CLAP prompts, reordering camera classes -- silently
@@ -784,13 +792,18 @@ def voter_c_feature_matrix(
     else:
         classes_input = camera_classes
     cam_block = camera_class_one_hot(classes_input, n_rows)
-    return np.concatenate(
+    rel = stage_relative_features(hand_features, clap_sims, clap_diff, gunshot_prob, expected_rounds)
+    x = np.concatenate(
         [
             hand_features,
             clap_sims.astype(np.float64),
             clap_diff.astype(np.float64)[:, None],
             gunshot_prob.astype(np.float64)[:, None],
             cam_block,
+            rel,
         ],
         axis=1,
     )
+    # Absolute spectral columns are NaN where the window did not fit;
+    # the relative block already handled them.
+    return np.nan_to_num(x, nan=0.0)

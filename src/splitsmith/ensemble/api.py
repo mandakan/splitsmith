@@ -216,6 +216,15 @@ def load_ensemble_runtime(*, with_voter_e: bool = True) -> EnsembleRuntime:
     """
     calibration = load_calibration()
     voter_c_model = load_voter_c_model(calibration.voter_c_onnx_artifacts)
+    for model in voter_c_model.values():
+        width = getattr(model, "n_features", feat.VOTER_C_FEATURE_DIM)
+        if width != feat.VOTER_C_FEATURE_DIM:
+            raise RuntimeError(
+                f"{model.path} takes {width} features but this splitsmith builds "
+                f"{feat.VOTER_C_FEATURE_DIM}; the artifacts predate the current voter C "
+                "layout. Rebuild them with scripts/build_ensemble_artifacts.py, or check "
+                "out the commit they were built with."
+            )
     if tuple(calibration.clap_prompts) != feat.CLAP_PROMPTS:
         raise RuntimeError(
             "ensemble calibration prompt bank does not match the package's "
@@ -319,7 +328,7 @@ def detect_shots_ensemble(
     clap_diff = feat.clap_diff_from_similarities(clap_sims)
     gunshot_prob = feat.compute_pann_gunshot_probs(audio, sample_rate, times, runtime.pann)
     voter_c_x = feat.voter_c_feature_matrix(
-        hand, clap_sims, clap_diff, gunshot_prob, camera_classes=camera_class
+        hand, clap_sims, clap_diff, gunshot_prob, camera_classes=camera_class, expected_rounds=expected_rounds
     )
     cls_key = camera_class if camera_class in runtime.voter_c_model else cal.default_camera_class
     score_c = runtime.voter_c_model[cls_key].predict_proba(voter_c_x)[:, 1].astype(np.float64)

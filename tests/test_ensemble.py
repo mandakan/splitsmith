@@ -995,17 +995,20 @@ def test_voter_c_feature_matrix_appends_camera_class_one_hot() -> None:
     sims = np.zeros((n, len(CLAP_PROMPTS)), dtype=np.float32)
     diffs = np.zeros(n, dtype=np.float32)
     gunshot = np.zeros(n, dtype=np.float32)
+    # The one-hot sits after hand | clap_sims | clap_diff | gunshot_prob; the
+    # stage-relative block (spec 2026-10-09) follows it.
+    cam0 = HAND_FEATURE_DIM + len(CLAP_PROMPTS) + 2
 
     # Default (no camera_class) -> all rows tagged headcam (column 0).
     x_default = voter_c_feature_matrix(hand, sims, diffs, gunshot)
     assert x_default.shape == (n, VOTER_C_FEATURE_DIM)
-    cam_block = x_default[:, -CAMERA_CLASS_FEATURE_DIM:]
+    cam_block = x_default[:, cam0 : cam0 + CAMERA_CLASS_FEATURE_DIM]
     assert np.array_equal(cam_block[:, 0], np.ones(n))
     assert cam_block[:, 1].sum() == 0
 
     # Single string -> broadcast to every row.
     x_phone = voter_c_feature_matrix(hand, sims, diffs, gunshot, camera_classes="handheld")
-    cam_block = x_phone[:, -CAMERA_CLASS_FEATURE_DIM:]
+    cam_block = x_phone[:, cam0 : cam0 + CAMERA_CLASS_FEATURE_DIM]
     assert np.array_equal(cam_block[:, 1], np.ones(n))
     assert cam_block[:, 0].sum() == 0
 
@@ -1013,7 +1016,7 @@ def test_voter_c_feature_matrix_appends_camera_class_one_hot() -> None:
     x_mix = voter_c_feature_matrix(
         hand, sims, diffs, gunshot, camera_classes=["headcam", "handheld", "future-class"]
     )
-    cam_block = x_mix[:, -CAMERA_CLASS_FEATURE_DIM:]
+    cam_block = x_mix[:, cam0 : cam0 + CAMERA_CLASS_FEATURE_DIM]
     # Unknown class falls back to headcam (column 0).
     assert cam_block[0, 0] == 1.0 and cam_block[0, 1] == 0.0
     assert cam_block[1, 0] == 0.0 and cam_block[1, 1] == 1.0

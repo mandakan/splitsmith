@@ -266,7 +266,9 @@ def build_signals(
         hand = feat.compute_hand_features(
             audio, sr, times, truth["beep_time"], confidences, peak_amps, tta_agreement
         )
-        x = feat.voter_c_feature_matrix(hand, clap_sims, clap_diff, gunshot_prob, camera_classes=cam_class)
+        x = feat.voter_c_feature_matrix(
+            hand, clap_sims, clap_diff, gunshot_prob, camera_classes=cam_class, expected_rounds=expected_rounds
+        )
         cls_key = cam_class if cam_class in voter_c_model else cal.default_camera_class
         score_c = voter_c_model[cls_key].predict_proba(x)[:, 1].astype(np.float64)
 

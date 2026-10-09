@@ -132,3 +132,82 @@ def test_relative_centroid_absorbs_a_whole_stage_timbre_shift():
     # Most of the shift is absorbed, not all: the low-pass takes more from
     # treble-rich shots than from the non-shot candidates in the reference.
     assert rel_shift < 0.5 * abs_shift
+
+
+SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
+
+
+def _build_script():
+    import importlib.util
+    import sys
+
+    spec = importlib.util.spec_from_file_location(
+        "build_ensemble_artifacts", SCRIPTS / "build_ensemble_artifacts.py"
+    )
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["build_ensemble_artifacts"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _rows(fixture: str, n: int, seed: int, expected: int | None):
+    rng = np.random.default_rng(seed)
+    hand = np.abs(rng.normal(0.5, 0.2, (n, feat.HAND_FEATURE_DIM)))
+    sims = rng.normal(0, 0.1, (n, len(feat.CLAP_PROMPTS)))
+    return [
+        {
+            "fixture": fixture,
+            "camera_class": "headcam",
+            "expected_rounds": expected,
+            "hand_feats": hand[i].tolist(),
+            "clap_sims": sims[i].tolist(),
+            "clap_diff": float(sims[i, 0]),
+            "gunshot_prob": float(abs(sims[i, 1])),
+        }
+        for i in range(n)
+    ]
+
+
+def test_matrix_has_the_relative_block_and_no_nan():
+    rows = _rows("a", 6, 1, 3)
+    hand = np.array([r["hand_feats"] for r in rows])
+    hand[0, 17] = np.nan
+    sims = np.array([r["clap_sims"] for r in rows])
+    x = feat.voter_c_feature_matrix(hand, sims, sims[:, 0], np.abs(sims[:, 1]), "headcam", expected_rounds=3)
+    assert x.shape == (6, feat.VOTER_C_FEATURE_DIM) and feat.VOTER_C_FEATURE_DIM == 57
+    assert not np.isnan(x).any()
+
+
+def test_trainer_and_runtime_build_identical_matrices():
+    build = _build_script()
+    rows = _rows("stage-a", 7, 2, 4) + _rows("stage-b", 5, 3, None)
+    trainer = build._x_from(rows)
+    runtime_parts = []
+    for fx, exp in (("stage-a", 4), ("stage-b", None)):
+        rs = [r for r in rows if r["fixture"] == fx]
+        sims = np.array([r["clap_sims"] for r in rs])
+        runtime_parts.append(
+            feat.voter_c_feature_matrix(
+                np.array([r["hand_feats"] for r in rs]),
+                sims,
+                np.array([r["clap_diff"] for r in rs]),
+                np.array([r["gunshot_prob"] for r in rs]),
+                "headcam",
+                expected_rounds=exp,
+            )
+        )
+    np.testing.assert_array_equal(trainer, np.concatenate(runtime_parts))
+
+
+def test_old_width_artifact_fails_at_load(monkeypatch):
+    from splitsmith.ensemble import api
+
+    class Narrow:
+        n_features = 31
+        path = Path("voter_c_gbdt_headcam.onnx")
+
+    monkeypatch.setattr(api, "load_voter_c_model", lambda *_a, **_k: {"headcam": Narrow()})
+    monkeypatch.setattr(api.feat, "load_clap_runtime", lambda: None)
+    monkeypatch.setattr(api.feat, "load_pann_runtime", lambda: None)
+    with pytest.raises(RuntimeError, match=r"voter_c_gbdt_headcam\.onnx.*31.*57"):
+        api.load_ensemble_runtime(with_voter_e=False)
