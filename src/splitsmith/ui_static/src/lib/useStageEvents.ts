@@ -15,11 +15,14 @@
  * response whose regions differ from the ones this tab last saw from the
  * server (another writer's) takes only the payload and is withheld: its
  * revision and regions wait, so the edit 409s on its own revision and is
- * discarded rather than overwrite those regions. Only a 409's reload clears
- * a withheld response (it is the newest state); a successful PUT's answer
- * does not, since a withheld response that outlives a successful PUT is
- * newer than it (had that foreign write reached the server first, the PUT
- * would have 409'd).
+ * discarded rather than overwrite those regions. A withheld response is
+ * cleared by a 409's reload or by a later foreign response that is adopted
+ * (both arrived after it, so both are newer); a successful PUT's answer does
+ * not clear it, since a PUT whose revision was read before the withhold and
+ * still succeeded was written before the withheld write (had that write
+ * reached the server first, the PUT would have 409'd). A PUT can only go
+ * out on a revision newer than the withheld response through an adopted
+ * response or a reload, and both clear it.
  *
  * The list catches up with the server's when nothing is outstanding any
  * more: after a PUT's response, a 409's decision or a non-409 failure, on a
@@ -152,11 +155,14 @@ export function useStageEvents(
   }, [applyCoach, outstanding]);
 
   // Our own answers (a PUT's response, a 409's reload): authoritative, always
-  // advance. They do not clear a withheld foreign response: one that outlives
-  // a successful PUT is newer than its answer (had the foreign write reached
-  // the server first, the PUT would have 409'd), so the catch-up still adopts
-  // it. Only a 409's reload, which is newer than anything withheld, clears it
-  // (in ``conflict``).
+  // advance. ``adopt`` itself does not clear a withheld foreign response: a
+  // PUT sent on a revision read before the withhold that still succeeded was
+  // written before the withheld write (had that write reached the server
+  // first, the PUT would have 409'd), so the catch-up still adopts it. The
+  // two callers that are newer than anything withheld clear it themselves:
+  // a 409's reload (in ``conflict``) and a later foreign response (in
+  // ``apply``); a PUT sent on a revision adopted after the withhold passed
+  // through one of them.
   const adopt = useCallback(
     (next: CoachStageResponse | null) => {
       applyCoach(next);
@@ -181,6 +187,11 @@ export function useStageEvents(
         withheldRef.current = next;
         return;
       }
+      // Adopted after the withhold, so it arrived later and is the newer one.
+      // Left in place, the withheld response would be adopted over this one
+      // (and over a PUT sent on this one's revision) once nothing is
+      // outstanding, and the revision would go back.
+      withheldRef.current = null;
       adopt(next);
     },
     [adopt, applyCoach, outstanding],

@@ -621,6 +621,72 @@ describe("useStageEvents: an in-flight save never reverts or drops an edit (#132
     expect(api.putStageEvents).toHaveBeenLastCalledWith("anna", 1, [ev("evt-1", 1.2, 2)], "v3");
   });
 
+  // Fix round 5: a withheld response never outlives a later response that was adopted.
+  const serverFrom = (chain: Record<string, string>) =>
+    vi.mocked(api.putStageEvents).mockImplementation(async (_s, _n, events, version) => {
+      const next = version && chain[version];
+      if (!next) throw conflict();
+      return coach(events, next);
+    });
+
+  it("a foreign response adopted after a withhold supersedes the withheld one: nothing goes back to its revision (probe G)", async () => {
+    const { result, applyCoach, onDiscard } = setupWithDiscard();
+    let finishPut: (c: CoachStageResponse) => void = () => {};
+    vi.mocked(api.putStageEvents).mockImplementationOnce(() => new Promise((r) => { finishPut = r; }));
+    const edit1 = [ev("evt-1", 1.1, 2)];
+    const edit2 = [ev("evt-1", 1.2, 2)];
+    const edit3 = [ev("evt-1", 1.3, 2)];
+    act(() => result.current.change(edit1, true));
+    await settle(); // PUT1: the server stores it as v2; its answer is delayed
+    serverFrom({ v4: "v5", v5: "v6" });
+    vi.mocked(api.getStageCoach).mockImplementation(async () => coach(edit2, "v5")); // what a 409 would reload
+    const patch1 = { ...coach(edit1, "v3"), version: 2 }; // a shot PATCH on top of PUT1, answered first
+    act(() => result.current.apply(patch1)); // withheld: its regions are not the base
+    act(() => result.current.change(edit2, true)); // the user commits again; waits in the debounce
+    await act(async () => { finishPut(coach(edit1, "v2")); }); // PUT1's answer; the debounce keeps the list
+    const patch2 = { ...coach(edit1, "v4"), version: 3 }; // a second PATCH: its regions equal the base now
+    act(() => result.current.apply(patch2)); // adopted, so PUT2 goes out on v4
+    await settle(); // PUT2 @v4 -> v5
+    expect(api.putStageEvents).toHaveBeenCalledTimes(2);
+    expect(api.putStageEvents).toHaveBeenLastCalledWith("anna", 1, edit2, "v4");
+    // Settled: the page shows PUT2's answer, never the withheld v3 ...
+    expect(applyCoach).toHaveBeenLastCalledWith(coach(edit2, "v5"));
+    expect(result.current.events).toEqual(edit2);
+    // ... and the next edit saves on v5, with no 409 and nothing discarded.
+    act(() => result.current.change(edit3, true));
+    await settle();
+    expect(api.putStageEvents).toHaveBeenCalledTimes(3);
+    expect(api.putStageEvents).toHaveBeenLastCalledWith("anna", 1, edit3, "v5");
+    expect(api.getStageCoach).not.toHaveBeenCalled();
+    expect(onDiscard).not.toHaveBeenCalled();
+    expect(result.current.events).toEqual(edit3);
+  });
+
+  it("a withheld response that survived a failed 409 reload is superseded by the next idle response", async () => {
+    const { result, applyCoach, onError, onDiscard } = setupWithDiscard();
+    let failFirst: (e: unknown) => void = () => {};
+    vi.mocked(api.putStageEvents).mockImplementationOnce(() => new Promise((_r, j) => { failFirst = j; }));
+    vi.mocked(api.getStageCoach).mockRejectedValueOnce(new ApiError(500, "boom"));
+    act(() => result.current.change([ev("evt-1", 1.1, 2)], true));
+    await settle(); // in flight on v1
+    act(() => result.current.apply(withEvt5())); // withheld at v6
+    await act(async () => { failFirst(conflict()); }); // the reload fails: the withheld response stays
+    expect(onError).toHaveBeenCalledWith("boom");
+    // Nothing is outstanding; a later response (a reclassify, say) is the newest state there is.
+    const later = { ...coach([ev("evt-1", 1, 2), ev("evt-5", 7, 8), ev("evt-6", 9, 9.5)], "v8"), version: 3 };
+    act(() => result.current.apply(later));
+    expect(applyCoach).toHaveBeenLastCalledWith(later);
+    expect(result.current.events.map((e) => e.id)).toEqual(["evt-1", "evt-5", "evt-6"]);
+    serverFrom({ v8: "v9" });
+    const next = [ev("evt-1", 1.5, 2), ev("evt-5", 7, 8), ev("evt-6", 9, 9.5)];
+    act(() => result.current.change(next, true));
+    await settle();
+    expect(api.putStageEvents).toHaveBeenCalledTimes(2);
+    expect(api.putStageEvents).toHaveBeenLastCalledWith("anna", 1, next, "v8");
+    expect(api.getStageCoach).toHaveBeenCalledTimes(1);
+    expect(onDiscard).not.toHaveBeenCalled();
+  });
+
   it("a 409's reload supersedes a withheld response: the next edit saves on the reload's revision", async () => {
     const { result } = setupWithDiscard();
     let failFirst: (e: unknown) => void = () => {};
