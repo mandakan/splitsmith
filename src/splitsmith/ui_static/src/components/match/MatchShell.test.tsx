@@ -34,6 +34,7 @@ import {
 import {
   MatchShell,
   type MatchShellOutletContext,
+  stageClickPath,
   toMatchRelativePath,
   viewLabelForPath,
 } from "@/components/match/MatchShell";
@@ -555,4 +556,24 @@ describe("MatchShell chrome ownership (#550)", () => {
   // "local" earlier in this file, and that cache is never invalidated
   // (see GlobalBar.hosted.test.tsx, which hit the identical issue). A
   // fresh file gets a fresh, unpopulated cache.
+});
+
+describe("stageClickPath", () => {
+  it("keeps you in Coach, Splits and Export, on the shooter you are looking at", () => {
+    expect(stageClickPath("/coach/martin", 3, "martin", "mathias")).toBe("/coach/martin/3");
+    expect(stageClickPath("/coach/martin/1", 3, "martin", "mathias")).toBe("/coach/martin/3");
+    expect(stageClickPath("/results", 2, undefined, "mathias")).toBe("/results/mathias/2");
+    expect(stageClickPath("/export/anna", 4, "anna", "mathias")).toBe("/export/anna/4");
+  });
+
+  it("keeps Compare on Compare", () => {
+    expect(stageClickPath("/compare/1", 5, undefined, "mathias")).toBe("/compare/5");
+  });
+
+  it("opens Audit from anywhere else, and the shooters list without a shooter", () => {
+    expect(stageClickPath("/audit/anna/1", 2, "anna", "mathias")).toBe("/audit/anna/2");
+    expect(stageClickPath("", 2, undefined, "mathias")).toBe("/audit/mathias/2");
+    expect(stageClickPath("/ingest", 2, undefined, "mathias")).toBe("/audit/mathias/2");
+    expect(stageClickPath("/coach", 2, undefined, null)).toBe("/shooters");
+  });
 });

@@ -83,6 +83,29 @@ export function toMatchRelativePath(
   return pathname.startsWith(prefix) ? pathname.slice(prefix.length) : pathname;
 }
 
+/** The sections whose pages have a per-stage view for one shooter
+ *  (``/<section>/:slug/:stage``); a stage picked in the sidebar there stays
+ *  in that section. Everything else opens the stage in Audit. */
+const STAGE_SECTIONS = new Set(["audit", "coach", "results", "export"]);
+
+/** Where a stage picked in the sidebar goes, match-relative: the same
+ *  section and shooter the page is on when that section has a stage view
+ *  (Coach stays in Coach, Compare in Compare), else that stage's Audit for
+ *  the shooter in the URL or the default one; ``/shooters`` without one. */
+export function stageClickPath(
+  relativePath: string,
+  stage: number,
+  urlSlug: string | undefined,
+  defaultSlug: string | null | undefined,
+): string {
+  const section = relativePath.split("/").filter(Boolean)[0] ?? "";
+  if (section === "compare") return `/compare/${stage}`;
+  const slug = urlSlug ?? defaultSlug;
+  if (!slug) return "/shooters";
+  const target = STAGE_SECTIONS.has(section) ? section : "audit";
+  return `/${target}/${encodeURIComponent(slug)}/${stage}`;
+}
+
 /** Trailing breadcrumb segment ("Audit" / "Coach" / ...) for a
  *  match-relative path. Rendered as the last segment of the breadcrumb
  *  in the global bar (ink-2; nothing in the breadcrumb is red). ``null`` means no trailing segment (e.g. the match
@@ -712,11 +735,7 @@ export function MatchShell() {
           onStageClick={(n) => {
             const mid = urlMatchId ?? health?.match_id ?? null;
             const base = mid ? `/match/${mid}` : "";
-            navigate(
-              defaultShooterSlug
-                ? `${base}/audit/${defaultShooterSlug}/${n}`
-                : `${base}/shooters`,
-            );
+            navigate(`${base}${stageClickPath(relativePath, n, slug, defaultShooterSlug)}`);
           }}
           shooterSlug={defaultShooterSlug}
           matchId={urlMatchId ?? health?.match_id ?? undefined}
