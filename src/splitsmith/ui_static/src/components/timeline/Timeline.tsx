@@ -95,7 +95,10 @@ export function Timeline(props: TimelineProps) {
     const host = hostRef.current;
     const v = live.current.viewport;
     if (!host || v <= 0) return 0;
-    const px = (Math.min(Math.max(live.current.currentTime, 0), span) / span) * contentWidth(live.current.zoom, v) - host.scrollLeft;
+    // A scroll from an earlier zoom in the same event burst may not have
+    // committed to the DOM yet; pendingScroll is the more current value.
+    const scrollLeft = pendingScroll.current ?? host.scrollLeft;
+    const px = (Math.min(Math.max(live.current.currentTime, 0), span) / span) * contentWidth(live.current.zoom, v) - scrollLeft;
     return px >= 0 && px <= v ? px : v / 2;
   };
 
@@ -103,8 +106,25 @@ export function Timeline(props: TimelineProps) {
     const host = hostRef.current;
     const { zoom: cur, viewport: v } = live.current;
     if (!host || v <= 0 || next === cur) return;
-    const r = zoomAround({ zoom: cur, scrollLeft: host.scrollLeft }, next, anchorPx, v);
-    pendingScroll.current = r.scrollLeft;
+    // Two zoom events can land before React commits either (a fast wheel
+    // burst, both dispatched inside one act()): live.current.zoom and
+    // host.scrollLeft would otherwise still read the pre-first-zoom
+    // values, so the second step would repeat the first instead of
+    // compounding it. pendingScroll, once set below, is the freshest
+    // scroll position across such a burst; live.current.zoom is updated
+    // right here rather than waiting for the render that applies it.
+    const scrollLeft = pendingScroll.current ?? host.scrollLeft;
+    const r = zoomAround({ zoom: cur, scrollLeft }, next, anchorPx, v);
+    live.current.zoom = r.zoom;
+    if (contentWidth(next, v) !== contentWidth(cur, v)) {
+      pendingScroll.current = r.scrollLeft;
+    } else {
+      // The width-keyed layout effect below would never run for this
+      // change, so pendingScroll would sit until an unrelated later zoom
+      // applied it then. Apply it now instead.
+      host.scrollLeft = r.scrollLeft;
+      pendingScroll.current = null;
+    }
     onZoomChange(r.zoom);
   };
   const applyZoomRef = useRef(applyZoom);
@@ -142,6 +162,7 @@ export function Timeline(props: TimelineProps) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
       const a = zoomActionForKey(e);
       if (!a) return;
       e.preventDefault();
@@ -156,11 +177,18 @@ export function Timeline(props: TimelineProps) {
     const up = () => {
       pointerDown.current = false;
     };
+    // A context menu or a release outside the window can swallow the
+    // pointerup/pointercancel the band is waiting for, leaving follow
+    // permanently suppressed; blur and contextmenu are the backstop.
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", up);
+    window.addEventListener("blur", up);
+    window.addEventListener("contextmenu", up);
     return () => {
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", up);
+      window.removeEventListener("blur", up);
+      window.removeEventListener("contextmenu", up);
     };
   }, []);
 
@@ -169,9 +197,13 @@ export function Timeline(props: TimelineProps) {
     if (!host || !follow || pointerDown.current) return;
     const next = followScroll(x(currentTime), host.scrollLeft, viewport, content);
     if (next !== null) host.scrollLeft = next;
-    // x is derived from content and duration, both listed.
+    // Keyed on currentTime alone, deliberately: a zoom or a resize changes
+    // content/viewport without the playhead moving, and must not re-run
+    // this and fight the scroll that zoom just anchored. follow itself is
+    // read fresh whenever this does run, so switching it on causes no
+    // jump until the playhead next moves.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentTime, follow, viewport, content, duration]);
+  }, [currentTime]);
 
   const tAt = (clientX: number) => {
     const rect = contentRef.current?.getBoundingClientRect();

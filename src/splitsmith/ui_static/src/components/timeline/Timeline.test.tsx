@@ -74,15 +74,32 @@ describe("Timeline", () => {
     expect(e.defaultPrevented).toBe(true);
   });
 
-  it("zooms on a plain wheel once the switch is on, and the switch is shared", () => {
-    const onZoom = vi.fn();
-    render(<Harness onZoom={onZoom} />);
-    fireEvent.click(screen.getByRole("button", { name: "Timeline options" }));
-    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: /Wheel zooms the timeline/ }));
-    const e = wheel(screen.getByTestId("timeline-host"), { deltaY: -100, clientX: 500 });
+  it("zooms on a plain wheel once the switch is on, and the switch is shared across mounted bands", () => {
+    const onZoomA = vi.fn();
+    const onZoomB = vi.fn();
+    render(
+      <>
+        <Harness onZoom={onZoomA} />
+        <Harness onZoom={onZoomB} />
+      </>,
+    );
+    // Toggle the switch in the first band's menu...
+    fireEvent.click(screen.getAllByRole("button", { name: "Timeline options" })[0]);
+    fireEvent.click(screen.getAllByRole("menuitemcheckbox", { name: /Wheel zooms the timeline/ })[0]);
+    // ...and a plain wheel over the second, untouched band zooms too.
+    const e = wheel(screen.getAllByTestId("timeline-host")[1], { deltaY: -100, clientX: 500 });
     expect(e.defaultPrevented).toBe(true);
-    expect(onZoom).toHaveBeenCalled();
+    expect(onZoomB).toHaveBeenCalled();
+    expect(onZoomA).not.toHaveBeenCalled();
     expect(window.localStorage.getItem("splitsmith.timeline.wheelZooms")).toBe("on");
+  });
+
+  it("pans with Shift+wheel, at a zoom where there is room to scroll", () => {
+    render(<Harness initialZoom={4} />);
+    const host = screen.getByTestId("timeline-host");
+    const e = wheel(host, { deltaY: 60, shiftKey: true, clientX: 500 });
+    expect(e.defaultPrevented).toBe(true);
+    expect(host.scrollLeft).toBe(60);
   });
 
   it("steps with the buttons and returns to Fit", () => {
@@ -130,5 +147,41 @@ describe("Timeline", () => {
     });
     rerender(<Harness initialZoom={4} currentTime={9.6} />);
     expect(host.scrollLeft).toBeGreaterThan(0);
+  });
+
+  it("anchors a Ctrl+wheel zoom under the pointer even with follow on", () => {
+    // Follow defaults on and currentTime stays 0 (far outside the new
+    // view), which is exactly the case that used to let the follow
+    // effect re-run on the content-width change and overwrite the
+    // anchored scroll back to 0.
+    render(<Harness />);
+    const host = screen.getByTestId("timeline-host");
+    wheel(host, { deltaY: -400, ctrlKey: true, clientX: 900 });
+    const after = parseFloat(screen.getByTestId("timeline-content").style.width);
+    expect(host.scrollLeft).toBeCloseTo((900 / 1000) * after - 900, 1);
+  });
+
+  it("keeps the playhead's viewport position stable when zooming with the button", () => {
+    // currentTime 3 on a 10 s domain is at 300 px at Fit (viewport 1000).
+    render(<Harness currentTime={3} />);
+    const host = screen.getByTestId("timeline-host");
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    const content = parseFloat(screen.getByTestId("timeline-content").style.width);
+    const playheadViewportX = (3 / 10) * content - host.scrollLeft;
+    expect(playheadViewportX).toBeGreaterThan(299);
+    expect(playheadViewportX).toBeLessThan(301);
+  });
+
+  it("compounds two Ctrl+wheel zooms dispatched before a re-render", () => {
+    const onZoom = vi.fn();
+    render(<Harness onZoom={onZoom} />);
+    const host = screen.getByTestId("timeline-host");
+    act(() => {
+      host.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: -200, ctrlKey: true, clientX: 500 }));
+      host.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: -200, ctrlKey: true, clientX: 500 }));
+    });
+    expect(onZoom).toHaveBeenCalledTimes(2);
+    expect(onZoom.mock.calls[0][0]).toBeCloseTo(1.6487, 3);
+    expect(onZoom.mock.calls[1][0]).toBeCloseTo(2.718, 2);
   });
 });
