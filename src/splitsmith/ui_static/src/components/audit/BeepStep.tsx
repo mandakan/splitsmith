@@ -22,7 +22,6 @@ import {
   type ReactNode,
 } from "react";
 
-import { BeepWaveformPicker } from "@/components/BeepSection";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/Kbd";
 import { Label } from "@/components/ui/Label";
@@ -44,6 +43,7 @@ import {
 import { cn } from "@/lib/utils";
 
 import { BeepPreview } from "./BeepPreview";
+import { BeepTimeline } from "./BeepTimeline";
 
 export interface BeepStepProps {
   slug: string;
@@ -139,6 +139,21 @@ export function BeepStep({
     }
     return out;
   }, [item]);
+
+  // The band reports every pick in source seconds, including a release
+  // that lands on the detected candidate's own time -- treat that one
+  // the same as a click on the detected row: "no override", not a draft
+  // that happens to equal the detector's own pick.
+  const handleTimelinePick = useCallback(
+    (t: number) => {
+      setDraft(
+        item?.beep_time != null && Math.abs(t - item.beep_time) < 0.005
+          ? null
+          : t,
+      );
+    },
+    [item],
+  );
 
   const order = useMemo(() => queueOrder(queue.flatItems), [queue.flatItems]);
   const place = item
@@ -292,8 +307,8 @@ export function BeepStep({
           <span className="text-led">Step 1</span> of 2
         </Label>
         <span>
-          Is this the start beep? Pick the candidate or click the waveform, then
-          Confirm. Trim and shot detection run on the confirmed beep.
+          Is this the start beep? Pick the candidate or the timeline below,
+          then Confirm. Trim and shot detection run on the confirmed beep.
         </span>
       </div>
       {items.length > 1 ? (
@@ -323,32 +338,15 @@ export function BeepStep({
         </div>
       ) : null}
       {item ? (
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
-          <div className="overflow-hidden rounded-[10px] border border-rule bg-surface">
-            <div className="flex items-center gap-3 border-b border-rule px-3 py-2">
-              <Label tone="ink">{cameraLabel(item)}</Label>
-              <Label>full source</Label>
-            </div>
-            <div className="p-3">
-              <BeepWaveformPicker
-                key={keyOf(item)}
-                slug={item.slug}
-                stageNumber={item.stage_number}
-                videoId={item.video_id}
-                videoBeepTime={item.beep_time}
-                draftSourceTime={draft}
-                onPick={(t) => setDraft(t)}
-                setError={queue.setError}
-                snapEnabled={false}
-                showFallbackBeepMarker={item.beep_time != null}
-                instructions="Click the waveform to place the beep; the video parks on the pick."
-                ariaLabel={`Beep picker for ${item.shooter_name}, stage ${item.stage_number}`}
-                externalMediaRef={videoRef}
-                fillHeight
-              />
-            </div>
+        <>
+          <div className="mb-3 flex items-center gap-3">
+            <Label tone="ink">{cameraLabel(item)}</Label>
+            <Label>full source</Label>
           </div>
-          <div className="flex flex-col gap-3">
+          <div
+            data-testid="beep-top-row"
+            className="grid gap-4 lg:h-[max(300px,calc(100dvh-560px))] lg:grid-cols-[minmax(0,1fr)_340px] lg:grid-rows-[minmax(0,1fr)]"
+          >
             <BeepPreview
               key={keyOf(item)}
               slug={item.slug}
@@ -360,10 +358,11 @@ export function BeepStep({
               caption="Frame at the selected candidate"
             />
             <div
-              className="overflow-hidden rounded-[10px] border border-rule bg-surface"
+              className="overflow-hidden rounded-[10px] border border-rule bg-surface lg:flex lg:h-full lg:min-h-0 lg:flex-col"
               role="radiogroup"
               aria-label="Beep candidates"
             >
+              <div className="lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
               {candidates.map((c) => {
                 const selected =
                   selectedTime != null &&
@@ -408,16 +407,30 @@ export function BeepStep({
                   <span className="w-14 text-ink">{draft.toFixed(2)}</span>
                   <span className="w-12 text-muted">&mdash;</span>
                   <span className="font-sans text-sm text-muted">
-                    picked on the waveform
+                    picked on the timeline
                   </span>
                 </div>
               ) : null}
               <div className="px-3 py-2 text-sm text-muted">
-                Or click the waveform to place the beep by hand
+                Or pick the beep on the timeline below
+              </div>
               </div>
             </div>
           </div>
-        </div>
+          <div className="mt-4">
+            <BeepTimeline
+              slug={item.slug}
+              stageNumber={item.stage_number}
+              videoId={item.video_id}
+              videoBeepTime={item.beep_time}
+              draftSourceTime={draft}
+              candidates={candidates}
+              mediaRef={videoRef}
+              mediaOnDesktop={mediaOnDesktop}
+              onPick={handleTimelinePick}
+            />
+          </div>
+        </>
       ) : queue.data ? (
         <p className="text-md text-muted">
           Nothing on this stage needs a beep confirmed.

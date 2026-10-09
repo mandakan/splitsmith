@@ -309,3 +309,66 @@ six-label ruler and `TransportLine`'s `ZoomControls`.
    overflow menu (Full-resolution video, Trim now / Detect shots);
    `ZoomControls` is gone from it, moved into the band header like
    Coach's.
+
+## As built (PR 3)
+
+The beep step (`BeepStep`, Audit's step 1) moved onto the band;
+`BeepWaveformPicker` and its duplicated zoom maths stay for
+`MobileBeepReview` and `StageTimeSection`, which this PR does not touch.
+
+1. **`components/audit/BeepTimeline`.** Fetches the video's own peaks
+   (`api.getVideoPeaks`) once per video and owns the band's zoom
+   (`Zoom`, reset on every fetch, Fit by default). Two tracks: a 22 px
+   Candidates row of pin buttons (one per candidate; a candidate the
+   offset carries outside `[0, peaks.duration]` is hidden rather than
+   pinned to an edge it isn't at) and a 120 px seekable Audio row
+   (`WaveformTrack` with the chosen beep as its `beepTime` overlay). The
+   preview `<video>` and the band share one clip-local time through
+   `mediaRef`: every seek, scrub and the once-per-peaks-load park write
+   straight to the element, so there is no conversion for anything but
+   a *pick*.
+2. **Origin and the offset.** `origin` is `peaks.beep_time ?? 0`, so the
+   ruler reads seconds from the detector's own beep and candidate pins
+   show how far off they are; it never moves while picking, since it
+   depends only on the fetched peaks. `offset = videoBeepTime -
+   peaks.beep_time` (both null-safe, defaulting to 0) is the one
+   conversion, applied only where a clip-local time becomes a pick
+   (`local + offset` on scrub release, a candidate's own `time` needs
+   none) or a pick is parked back to local (`sourceTime - offset`,
+   floored at the earliest moment, never negative). This is
+   `BeepWaveformPicker`'s own rule (`BeepSection.tsx` ~821-824); the
+   peaks route serves the full source today, so the offset is 0 in
+   practice, but the maths carries over for the cached-trim case
+   `BeepWaveformPicker` already handles.
+3. **Picking.** A release after a press or drag on the Audio row calls
+   `onPick(local + offset)`; a candidate click calls `onPick(c.time)`
+   directly (always the candidate's own source time, including the
+   detected one) and also seeks the preview to it. `BeepStep` treats a
+   pick within 5 ms of the detected candidate's own time as "no
+   override" and clears its draft to `null`, whether the pick came from
+   a release or a candidate click on the detected row itself.
+4. **Layout.** `BeepStep`'s top row (`data-testid="beep-top-row"`) is
+   `lg:grid-cols-[minmax(0,1fr)_340px]` with `BeepPreview` left and the
+   candidate radiogroup right, then the band full width below. A pixel
+   check at 1440x900 found the Audio row entirely below the fold: the
+   row had no height bound, so `BeepPreview`'s `aspect-video` tile grew
+   to whatever its width implied and the page simply scrolled past the
+   viewport. Fixed the way Audit's own top row was (PR 2 ruling 1):
+   `lg:h-[max(300px,calc(100dvh-560px))]` with `lg:grid-rows-[minmax(0,1fr)]`
+   on the row, `BeepPreview` filling it (`lg:h-full`, a `lg:min-h-[200px]`
+   flex-1 tile, `object-contain`, the same `max-h-[max(240px,calc(100dvh-620px))]`
+   aspect-video cap below lg that `MultiCamColumn` uses), and the
+   candidate list scrolling in its own column (`lg:overflow-y-auto`)
+   rather than growing the row. At 1440x900 the preview and the full
+   Audio row are both on screen; at 1440x1080 the preview grows from
+   301 to 481 px tall. Pinned by a test asserting the row carries the
+   bounded class.
+5. **StrictMode and remounts.** The media-element listener effect has
+   no dependency array on purpose (`mediaRef.current` can change
+   without the `RefObject` identity changing, e.g. `BeepStep` swapping
+   cameras) but resets `attachedElRef` to `null` in its cleanup, or
+   StrictMode's replayed mount would see the same element and never
+   reattach. A `BeepPreview`-internal remount (its own error/Retry
+   swapping the `<video>`) is not observable from here without a
+   `BeepTimeline` re-render of its own; documented as a limitation, not
+   fixed.

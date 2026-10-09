@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ConfirmProvider } from "@/components/useConfirm";
 import type { BeepQueueItem } from "@/lib/api";
 import * as hook from "@/lib/useBeepQueue";
+import { zoomActionForKey } from "@/lib/zoomKeys";
 
 import { BeepStep } from "./BeepStep";
 
@@ -11,15 +12,59 @@ vi.mock("@/lib/useBeepQueue", async (orig) => ({
   ...(await orig<typeof import("@/lib/useBeepQueue")>()),
   useBeepQueue: vi.fn(),
 }));
-vi.mock("@/components/BeepSection", () => ({
-  BeepWaveformPicker: ({ onPick }: { onPick: (t: number) => void }) => (
-    <button
-      type="button"
-      data-testid="waveform-picker"
-      onClick={() => onPick(9.87)}
-    >
-      picker
-    </button>
+vi.mock("@/components/audit/BeepTimeline", () => ({
+  BeepTimeline: (props: {
+    videoId: string;
+    videoBeepTime: number | null;
+    draftSourceTime: number | null;
+    candidates: { time: number; detected: boolean }[];
+    mediaOnDesktop?: boolean;
+    onPick: (t: number) => void;
+    onError?: (m: string) => void;
+  }) => (
+    <div data-testid="beep-timeline">
+      <span data-testid="timeline-props">
+        {JSON.stringify({
+          videoId: props.videoId,
+          videoBeepTime: props.videoBeepTime,
+          draftSourceTime: props.draftSourceTime,
+          mediaOnDesktop: props.mediaOnDesktop ?? null,
+          hasOnError: props.onError != null,
+        })}
+      </span>
+      <button
+        type="button"
+        data-testid="timeline-pick"
+        onClick={() => props.onPick(9.87)}
+      >
+        pick
+      </button>
+      {props.candidates.map((c) => (
+        <button
+          key={c.time}
+          type="button"
+          data-testid={`timeline-pick-${c.time}`}
+          onClick={() => props.onPick(c.time)}
+        >
+          candidate {c.time}
+        </button>
+      ))}
+      {props.candidates
+        .filter((c) => c.detected)
+        .map((c) => (
+          // A pick 3 ms off the detected candidate's own time -- still
+          // "within 5 ms" of it, never exactly equal, so BeepStep's own
+          // epsilon match (not a `===`) is what has to clear the draft.
+          <button
+            key={`near-${c.time}`}
+            type="button"
+            data-testid="timeline-pick-near-detected"
+            onClick={() => props.onPick(c.time + 0.003)}
+          >
+            near detected
+          </button>
+        ))}
+    </div>
   ),
 }));
 vi.mock("@/lib/api", () => ({
@@ -133,6 +178,13 @@ describe("BeepStep", () => {
     ).toBeEnabled();
   });
 
+  it("forwards mediaOnDesktop to the band and never wires its own error into the queue's alert", () => {
+    renderStep(hookState([item()]), { mediaOnDesktop: true });
+    expect(
+      JSON.parse(screen.getByTestId("timeline-props").textContent!),
+    ).toMatchObject({ mediaOnDesktop: true, hasOnError: false });
+  });
+
   it("a candidate click becomes the draft Confirm sends; the next beep in the queue is reported", async () => {
     const state = hookState([item(), OTHER_STAGE]);
     const { onConfirmed } = renderStep(state);
@@ -167,11 +219,122 @@ describe("BeepStep", () => {
     await vi.waitFor(() => expect(onConfirmed).toHaveBeenCalledWith("done"));
   });
 
-  it("a waveform pick shows as its own selected row", () => {
-    renderStep(hookState([item()]));
-    fireEvent.click(screen.getByTestId("waveform-picker"));
+  it("a pick from the timeline shows as its own row, and Confirm sends it", async () => {
+    const state = hookState([item()]);
+    vi.mocked(api.getBeepQueue).mockResolvedValue({ stages: [] } as never);
+    const { onConfirmed } = renderStep(state);
+    fireEvent.click(screen.getByTestId("timeline-pick"));
     expect(screen.getByText("9.87")).toBeInTheDocument();
-    expect(screen.getByText("picked on the waveform")).toBeInTheDocument();
+    expect(screen.getByText("picked on the timeline")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Confirm & next/ }));
+    await vi.waitFor(() =>
+      expect(state.confirm).toHaveBeenCalledWith(
+        expect.objectContaining({ video_id: "v1" }),
+        9.87,
+      ),
+    );
+    await vi.waitFor(() => expect(onConfirmed).toHaveBeenCalledWith("done"));
+  });
+
+  it("picking the detected time from the timeline clears the draft (no override sent)", async () => {
+    const state = hookState([item()]);
+    vi.mocked(api.getBeepQueue).mockResolvedValue({ stages: [] } as never);
+    const { onConfirmed } = renderStep(state);
+    // Draft away from the detected time first, via the candidate list.
+    const radios = screen.getAllByRole("radio");
+    fireEvent.click(radios[1]);
+    expect(radios[1]).toHaveAttribute("aria-checked", "true");
+    // The timeline reports a pick at the detected time -- same as clicking
+    // its own row -- and that clears the draft back to "no override". The
+    // prop BeepStep hands back down to the band must itself be null: a
+    // naive `onPick={setDraft}` would echo 5.32 here (and item.beep_time
+    // is also 5.32) and still pass selectedTime/aria-checked/confirm
+    // assertions, since draft=5.32 and draft=null both read as "the
+    // detected time" everywhere else.
+    fireEvent.click(screen.getByTestId(`timeline-pick-${item().beep_time}`));
+    expect(
+      JSON.parse(screen.getByTestId("timeline-props").textContent!),
+    ).toMatchObject({ draftSourceTime: null });
+    expect(radios[0]).toHaveAttribute("aria-checked", "true");
+    expect(radios[1]).toHaveAttribute("aria-checked", "false");
+    // The operator's-own-pick row only renders for a draft that isn't one
+    // of the listed candidates; a cleared draft must not show it.
+    expect(screen.queryByText("picked on the timeline")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Confirm & next/ }));
+    await vi.waitFor(() =>
+      expect(state.confirm).toHaveBeenCalledWith(
+        expect.objectContaining({ video_id: "v1" }),
+        undefined,
+      ),
+    );
+    await vi.waitFor(() => expect(onConfirmed).toHaveBeenCalledWith("done"));
+  });
+
+  it("a pick 3 ms from the detected time also clears the draft", () => {
+    const state = hookState([item()]);
+    renderStep(state);
+    const radios = screen.getAllByRole("radio");
+    fireEvent.click(radios[1]);
+    expect(radios[1]).toHaveAttribute("aria-checked", "true");
+
+    fireEvent.click(screen.getByTestId("timeline-pick-near-detected"));
+
+    expect(
+      JSON.parse(screen.getByTestId("timeline-props").textContent!),
+    ).toMatchObject({ draftSourceTime: null });
+    expect(radios[0]).toHaveAttribute("aria-checked", "true");
+    expect(radios[1]).toHaveAttribute("aria-checked", "false");
+    expect(screen.queryByText("picked on the timeline")).not.toBeInTheDocument();
+  });
+
+  it("the timeline renders outside the two-column grid, after it, with the preview left and candidates right", () => {
+    renderStep(hookState([item()]));
+    const topRow = screen.getByTestId("beep-top-row");
+    const video = screen.getByTitle("Space toggles play/pause");
+    const radiogroup = screen.getByRole("radiogroup", {
+      name: "Beep candidates",
+    });
+    const timeline = screen.getByTestId("beep-timeline");
+
+    expect(topRow.contains(video)).toBe(true);
+    expect(topRow.contains(radiogroup)).toBe(true);
+    expect(topRow.children[0]?.contains(video)).toBe(true);
+    expect(topRow.children[1]).toBe(radiogroup);
+
+    expect(topRow.contains(timeline)).toBe(false);
+    expect(
+      topRow.compareDocumentPosition(timeline) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("the top row is height-bounded on lg, like Audit's, so the band stays on a laptop screen", () => {
+    renderStep(hookState([item()]));
+    const topRow = screen.getByTestId("beep-top-row");
+    expect(topRow.className).toContain(
+      "lg:h-[max(300px,calc(100dvh-560px))]",
+    );
+  });
+
+  it("'+' typed in a focused text field never reaches the band, and Cmd/Ctrl+Enter still confirms", async () => {
+    const input = document.createElement("input");
+    input.type = "text";
+    expect(
+      zoomActionForKey({
+        key: "+",
+        metaKey: false,
+        ctrlKey: false,
+        altKey: false,
+        target: input,
+      } as unknown as KeyboardEvent),
+    ).toBeNull();
+
+    const state = hookState([item()]);
+    vi.mocked(api.getBeepQueue).mockResolvedValue({ stages: [] } as never);
+    const { onConfirmed } = renderStep(state);
+    fireEvent.keyDown(window, { key: "Enter", metaKey: true });
+    await vi.waitFor(() => expect(state.confirm).toHaveBeenCalled());
+    await vi.waitFor(() => expect(onConfirmed).toHaveBeenCalledWith("done"));
   });
 
   it("with a pending secondary, confirming the primary stays on the stage and selects the secondary", async () => {

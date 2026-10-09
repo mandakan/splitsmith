@@ -1195,7 +1195,17 @@ fires once the drag ends, and a track can take ``onDoubleClick(t,
 shiftKey)``, ignored the same way inside a marker. ``WaveformTrack`` draws only the visible window
 into a viewport-sized canvas, never a full-content one. Audit moved onto
 the band in PR 2 (its own paragraph below, "UI: the visual budget"); the
-beep step is next.
+beep step moved onto it in PR 3: ``components/audit/BeepTimeline`` fetches
+the video's own peaks and owns the band's zoom, with ``origin`` at the
+detector's beep (``peaks.beep_time``, else 0) so the ruler reads seconds
+from it and never moves while picking. A Candidates row (one pin per
+candidate, outside-the-clip ones hidden) sits over a seekable Audio row;
+the same ``offset = videoBeepTime - peaks.beep_time`` rule
+``BeepWaveformPicker`` already used converts the band's clip-local time
+to a source-seconds pick on release, and BeepStep treats a pick within
+5 ms of the detected time as "no override". ``BeepWaveformPicker`` keeps
+its own zoom and stays mounted on ``MobileBeepReview`` and
+``StageTimeSection``; this is desktop-only.
 Pointer rules: a lane click seeks to the press point
 snapped to the nearest shot (a ruler click does not snap), unless the
 snap would land inside a same-lane region (then the raw press time), a
@@ -1538,7 +1548,15 @@ share-surface consumer come from ``stages[].figures`` on the project
 payload, never from triage (owner-only). Audit (``pages/Audit.tsx``,
 ``components/audit/*``, ``lib/auditStep.ts``): beep confirmation is its
 step 1 (``BeepStep`` on ``useBeepQueue``; ``/beep-review`` redirects
-there on desktop, the phone keeps ``MobileBeepReview``); the top row is
+there on desktop, the phone keeps ``MobileBeepReview``); its own top row
+is ``BeepPreview`` left and the candidate radiogroup right, bounded the
+same ``lg:h-[max(300px,calc(100dvh-560px))]`` way as step 2's below, and
+its waveform is the shared timeline band too
+(``components/audit/BeepTimeline``, spec 2026-10-09 PR 3): a candidates
+row of pins over a seekable Audio row, origin at the detector's beep,
+one pick per release. ``BeepWaveformPicker`` and its own zoom code
+remain for ``MobileBeepReview`` and ``StageTimeSection``, never for
+``BeepStep``. Step 2's top row is
 the video (``MultiCamColumn``, a 16:9 tile capped at
 ``max-h-[max(240px,calc(100dvh-620px))]``, letterboxed) and ``ShotList``,
 and the shared timeline band (spec 2026-10-09) underneath now hosts the
