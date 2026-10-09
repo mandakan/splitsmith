@@ -104,10 +104,14 @@ def test_polished_is_the_default_everywhere_a_user_starts() -> None:
     from splitsmith.ui.exports_api import CompareGridRequest, MatchExportRequest
     from splitsmith.ui.match_exports import MatchExportRequestData
 
-    assert MatchExportRequest(stage_numbers=[1]).logo_spots == ["summaries", "wipe"]
-    assert CompareGridRequest(stage_numbers=[1], audio_from="a").logo_spots == ["summaries", "wipe"]
-    assert ExportPresetBody().logo_spots == ["summaries", "wipe"]
-    assert ExportPreviewRequest(card="sting", stage_number=1).logo_spots == ["summaries", "wipe"]
+    assert MatchExportRequest(stage_numbers=[1]).logo_spots == ["summaries", "thumbnail", "wipe"]
+    assert CompareGridRequest(stage_numbers=[1], audio_from="a").logo_spots == [
+        "summaries",
+        "thumbnail",
+        "wipe",
+    ]
+    assert ExportPresetBody().logo_spots == ["summaries", "thumbnail", "wipe"]
+    assert ExportPreviewRequest(card="sting", stage_number=1).logo_spots == ["summaries", "thumbnail", "wipe"]
     # The renderers' own default is none: a caller that says nothing draws what it drew.
     assert MatchExportRequestData.__dataclass_fields__["logo_spots"].default == frozenset()
 
@@ -151,7 +155,7 @@ def test_the_match_export_threads_the_spots_and_the_brand(
         r = http.post("/api/shooters/me/export/match", json={**body, **extra})
         assert r.status_code == 200, r.text
         assert _wait_for_job(http, r.json()["id"])["status"] == "succeeded"
-    assert [req.logo_spots for req in seen] == [frozenset({"wipe", "summaries"}), frozenset()]
+    assert [req.logo_spots for req in seen] == [frozenset({"wipe", "summaries", "thumbnail"}), frozenset()]
 
 
 def test_the_composition_carries_the_spots_and_the_account_brand(
@@ -166,7 +170,7 @@ def test_the_composition_carries_the_spots_and_the_account_brand(
     out = tmp_path / "out" / "m.mp4"
     result = runner.invoke(app, ["match", "export", str(root), "--format", "mp4", "--output", str(out)])
     assert result.exit_code == 0, result.output
-    assert captured["comp"].logo_spots == {"wipe", "summaries"}
+    assert captured["comp"].logo_spots == {"wipe", "summaries", "thumbnail"}
     result = runner.invoke(
         app, ["match", "export", str(root), "--format", "mp4", "--output", str(out), "--logos", "cards"]
     )
@@ -207,7 +211,7 @@ def test_the_grid_job_threads_the_spots(tmp_path: Path, monkeypatch: pytest.Monk
         response = client.post("/api/match/compare-export", json={**body, **extra})
         assert response.status_code == 200
         assert _wait_for_job(client, response.json()["id"])["status"] == "succeeded"
-    assert [c["logo_spots"] for c in captured[-2:]] == [{"wipe", "summaries"}, {"summaries"}]
+    assert [c["logo_spots"] for c in captured[-2:]] == [{"wipe", "summaries", "thumbnail"}, {"summaries"}]
 
 
 def test_the_compare_cli_threads_the_spots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -218,7 +222,7 @@ def test_the_compare_cli_threads_the_spots(tmp_path: Path, monkeypatch: pytest.M
     captured = _capture_render(monkeypatch)
     result = _invoke_mp4(match_root, tmp_path / "out.mp4")
     assert result.exit_code == 0, result.output
-    assert captured["logo_spots"] == {"wipe", "summaries"}
+    assert captured["logo_spots"] == {"wipe", "summaries", "thumbnail"}
     result = _invoke_mp4(match_root, tmp_path / "out.mp4", "--logos", "wipe")
     assert result.exit_code == 0, result.output
     assert captured["logo_spots"] == {"wipe"}

@@ -82,7 +82,7 @@ describe("matchExportFields", () => {
       closing_card: false,
       made_with: true,
       account_brand: true,
-      logo_spots: ["summaries", "wipe"],
+      logo_spots: ["summaries", "thumbnail", "wipe"],
       summary_hold_seconds: 0,
       match_summary: false,
       match_summary_seconds: 6,

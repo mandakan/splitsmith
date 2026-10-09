@@ -11,13 +11,14 @@ import {
 
 describe("logoPlan", () => {
   it("defaults to Polished, as the server does", () => {
-    expect([...DEFAULT_LOGO_SPOTS]).toEqual(["summaries", "wipe"]);
+    expect([...DEFAULT_LOGO_SPOTS]).toEqual(["summaries", "thumbnail", "wipe"]);
     expect(presetFor(DEFAULT_LOGO_SPOTS)).toBe("polished");
   });
 
   it("names the preset a set of spots is, in any order", () => {
     expect(presetFor([])).toBe("cards");
-    expect(presetFor(["wipe", "summaries"])).toBe("polished");
+    expect(presetFor(["wipe", "thumbnail", "summaries"])).toBe("polished");
+    expect(presetFor(["wipe", "summaries"])).toBe("custom");
     expect(presetFor(["wipe"])).toBe("custom");
   });
 
@@ -28,7 +29,7 @@ describe("logoPlan", () => {
 
   it("switches presets and keeps the chosen spots on Choose", () => {
     expect(spotsForPreset("cards", ["wipe"])).toEqual([]);
-    expect(spotsForPreset("polished", [])).toEqual(["summaries", "wipe"]);
+    expect(spotsForPreset("polished", [])).toEqual(["summaries", "thumbnail", "wipe"]);
     expect(spotsForPreset("custom", ["wipe"])).toEqual(["wipe"]);
   });
 
@@ -41,5 +42,8 @@ describe("logoPlan", () => {
     expect(logoPlanHelp([])).toMatch(/Nowhere else\.$/);
     expect(logoPlanHelp(["wipe"])).toMatch(/Also your brand on the wipe between stages\.$/);
     expect(logoPlanHelp(["summaries", "wipe"])).toContain("the shooter's logo on the summaries and your brand on the wipe");
+    expect(logoPlanHelp(["summaries", "thumbnail", "wipe"])).toContain(
+      "the shooter's logo on the summaries, a designed thumbnail and your brand on the wipe",
+    );
   });
 });

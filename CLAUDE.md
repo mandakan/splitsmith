@@ -392,7 +392,15 @@ and the match summary, and on the grid in each shooter's own tile, with Pillow
 (``logo_spots.paste_logo``), so it needs no browser and reaches the segment
 cache through the still's bytes. Each logo keeps one corner everywhere (brand
 top left, shooter top right, event centre). A stored preset drops a spot it
-does not know; the request bodies refuse one.
+does not know; the request bodies refuse one. ``thumbnail`` makes the YouTube
+thumbnail a card (``thumbnail_card``): the Look's ``thumbnail`` slot
+(``looks.thumbnail_template_for``, the shipped ``thumbnail.html``) drawn over a
+sharp action frame, the first stage's first shot taken from the stage's own
+clip (``youtube_sidecar.action_frame_source``, so no HUD is burnt in; the grid
+takes its render's frame), with ``data.thumbnail`` (title, lines),
+``data.shooters``, ``data.brand`` and ``data.event``. No browser or a failed
+template is the plain frame it always was plus an anomaly; a thumbnail never
+fails an export.
 
 The closing card ends with **"Made with splitsmith"** unless turned off
 (``MatchTitle.credit``, drawn by ``_shared/credit.js`` from ``data.credit``,

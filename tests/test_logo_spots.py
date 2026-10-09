@@ -17,14 +17,14 @@ def _logo(path: Path, size: tuple[int, int] = (100, 100)) -> Path:
 
 
 def test_polished_is_the_default_and_cards_is_today() -> None:
-    assert DEFAULT_LOGO_SPOTS == PRESETS["polished"] == {"wipe", "summaries"}
+    assert DEFAULT_LOGO_SPOTS == PRESETS["polished"] == {"wipe", "summaries", "thumbnail"}
     assert PRESETS["cards"] == frozenset()
 
 
 @pytest.mark.parametrize(
     ("text", "spots"),
     [
-        ("polished", {"wipe", "summaries"}),
+        ("polished", {"wipe", "summaries", "thumbnail"}),
         ("cards", set()),
         ("none", set()),
         ("wipe", {"wipe"}),

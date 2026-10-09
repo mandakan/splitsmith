@@ -7,6 +7,9 @@ title page, the stage slates and the closing card always draw theirs; a
 - ``summaries``: the shooter's logo in the top right of the stage summary
   and the match summary, the corner the slates put it in; on the grid, in
   the top right of each shooter's own tile.
+- ``thumbnail``: the YouTube thumbnail is a card (``thumbnail_card``) over
+  an action frame, with the match name and every logo, instead of a frame
+  of the title page.
 
 Each logo keeps one corner everywhere (your brand top left, the shooter top
 right, the event in the centre), so no frame shows the same logo twice. The
@@ -29,13 +32,13 @@ from PIL import Image
 
 logger = logging.getLogger(__name__)
 
-LogoSpot = Literal["wipe", "summaries"]
+LogoSpot = Literal["wipe", "summaries", "thumbnail"]
 LOGO_SPOTS: tuple[LogoSpot, ...] = get_args(LogoSpot)
 
 LogoPreset = Literal["cards", "polished", "everything"]
 PRESETS: dict[str, frozenset[LogoSpot]] = {
     "cards": frozenset(),
-    "polished": frozenset({"wipe", "summaries"}),
+    "polished": frozenset({"wipe", "summaries", "thumbnail"}),
     "everything": frozenset(LOGO_SPOTS),
 }
 DEFAULT_LOGO_SPOTS: frozenset[LogoSpot] = PRESETS["polished"]

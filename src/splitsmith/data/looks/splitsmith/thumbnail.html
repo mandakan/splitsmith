@@ -1,0 +1,126 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>thumbnail</title>
+<script>
+  // The shipped YouTube thumbnail (the "thumbnail" logo spot): drawn over a
+  // sharp action frame the renderer composes underneath. The match name is
+  // large at the bottom left over a dark fade, the shooter line under it;
+  // your brand top left, the shooters' logos top right, the event logo above
+  // the name. Sized for a thumbnail seen small: few words, big type.
+  // The engine stylesheet is loaded for its font faces only.
+  document.write('<style>' + window.splitsmith.engine.css + '</style>');
+</script>
+<style>
+  html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; }
+  .fade { position: absolute; inset: 0; }
+  .corner { position: absolute; display: flex; align-items: center; }
+  .corner img { width: auto; object-fit: contain; flex: none; }
+  .block { position: absolute; display: flex; flex-direction: column; align-items: flex-start; }
+  .title {
+    font-family: "Splitsmith Display", sans-serif; font-weight: 700;
+    text-transform: uppercase; line-height: 0.95; letter-spacing: 0.01em;
+    overflow-wrap: break-word;
+  }
+  .bar { flex: none; }
+  .line {
+    font-family: "Splitsmith Mono", monospace; font-weight: 700;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+  }
+</style>
+</head>
+<body>
+<script>
+(function () {
+  var S = window.splitsmith;
+  var W = S.size.width, H = S.size.height;
+  var theme = S.theme || {};
+  var data = S.data || {};
+  var thumb = data.thumbnail || {};
+  var margin = Math.round(H * 0.05);
+  var logoH = Math.round(H * 0.15);
+
+  function corner(side, srcs) {
+    if (!srcs.length) { return; }
+    var wrap = document.createElement('div');
+    wrap.className = 'corner';
+    wrap.style.top = margin + 'px';
+    wrap.style[side] = margin + 'px';
+    wrap.style.gap = Math.round(logoH / 4) + 'px';
+    srcs.forEach(function (src) {
+      var img = document.createElement('img');
+      img.src = src;
+      img.alt = '';
+      img.style.height = logoH + 'px';
+      img.style.maxWidth = (logoH * 2.4) + 'px';
+      wrap.appendChild(img);
+    });
+    document.body.appendChild(wrap);
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    var fade = document.createElement('div');
+    fade.className = 'fade';
+    fade.style.background =
+      'linear-gradient(to top, rgba(0,0,0,0.82) 0%, rgba(0,0,0,0.55) 38%, rgba(0,0,0,0) 70%),' +
+      'linear-gradient(to right, rgba(0,0,0,0.45) 0%, rgba(0,0,0,0) 60%)';
+    document.body.appendChild(fade);
+
+    if (data.brand && data.brand.logo) { corner('left', [data.brand.logo]); }
+    var logos = [];
+    (data.shooters || []).forEach(function (s) {
+      if (s && s.logo && logos.indexOf(s.logo) < 0) { logos.push(s.logo); }
+    });
+    corner('right', logos.slice(0, 4));
+
+    var block = document.createElement('div');
+    block.className = 'block';
+    block.style.left = margin + 'px';
+    block.style.bottom = margin + 'px';
+    block.style.width = Math.round(W * 0.78) + 'px';
+    block.style.gap = Math.round(H * 0.022) + 'px';
+    if (data.event && data.event.logo) {
+      var ev = document.createElement('img');
+      ev.src = data.event.logo;
+      ev.alt = '';
+      ev.style.height = Math.round(H * 0.16) + 'px';
+      ev.style.width = 'auto';
+      ev.style.maxWidth = Math.round(H * 0.4) + 'px';
+      ev.style.objectFit = 'contain';
+      block.appendChild(ev);
+    }
+    var title = document.createElement('div');
+    title.className = 'title';
+    title.textContent = thumb.title || '';
+    title.style.color = theme.ink || '#f4f4f5';
+    title.style.width = '100%';
+    var size = Math.round(H * 0.17);
+    title.style.fontSize = size + 'px';
+    block.appendChild(title);
+    var bar = document.createElement('div');
+    bar.className = 'bar';
+    bar.style.width = Math.round(W * 0.09) + 'px';
+    bar.style.height = Math.max(4, Math.round(H * 0.012)) + 'px';
+    bar.style.background = ((data.shooters || [])[0] || {}).accent || theme.accent || '#ff2d2d';
+    block.appendChild(bar);
+    (thumb.lines || []).forEach(function (text) {
+      var line = document.createElement('div');
+      line.className = 'line';
+      line.textContent = text;
+      line.style.color = theme.ink || '#f4f4f5';
+      line.style.fontSize = Math.round(H * 0.055) + 'px';
+      block.appendChild(line);
+    });
+    document.body.appendChild(block);
+    // The name fits in two lines: shrink until it does, never below half.
+    var floor = Math.round(size / 2);
+    while (size > floor && title.scrollHeight > size * 0.95 * 2 + 2) {
+      size -= 2;
+      title.style.fontSize = size + 'px';
+    }
+  });
+})();
+</script>
+</body>
+</html>

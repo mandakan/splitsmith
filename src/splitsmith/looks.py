@@ -41,16 +41,19 @@ SLOT_NAMES: tuple[str, ...] = (
     "closing",
     "transition",
     "overlay",
+    "thumbnail",
 )
 """Every slot a manifest may name. ``summary`` is reserved: no renderer
 reads it in this slice, the stage summary still composes through
 ``overlay_summary_cell``. ``transition`` holds the Look's stings (issue
 #1245): each variant is a ``sting:<variant>`` transition kind.
 ``overlay`` holds the template HUDs (spec 2026-10-08): its ``default`` is
-the engine's Classic overlay and can never name a file."""
+the engine's Classic overlay and can never name a file. ``thumbnail``
+draws the YouTube thumbnail over an action frame (``thumbnail_card``)."""
 
 STING_SLOT = "transition"
 OVERLAY_SLOT = "overlay"
+THUMBNAIL_SLOT = "thumbnail"
 PREVIEW_DIR = "preview"
 """Where a Look keeps the gallery's pictures of it (issue #1246):
 ``<slot>-<variant>.png`` (or ``.webp``) per template variant and
@@ -472,6 +475,16 @@ def sting_template_for(look: Look, name: str) -> Path | None:
     return _shipped_default().own_template(STING_SLOT, name)
 
 
+def thumbnail_template_for(look: Look) -> Path | None:
+    """The template that draws the YouTube thumbnail for ``look``: its own
+    ``thumbnail`` default, else the shipped default Look's. ``None`` only
+    if neither has one; the caller grabs a plain frame then."""
+    own = look.own_template(THUMBNAIL_SLOT)
+    if own is not None:
+        return own
+    return _shipped_default().own_template(THUMBNAIL_SLOT)
+
+
 def overlay_template_for(look: Look, variant: str) -> Path | None:
     """The template that draws the live HUD in ``variant`` for ``look``:
     the Look's own, else the shipped default Look's. ``None`` for
@@ -617,6 +630,8 @@ __all__ = [
     "DEFAULT_VARIANT",
     "REQUIRED_COLORS",
     "SLOT_NAMES",
+    "THUMBNAIL_SLOT",
+    "thumbnail_template_for",
     "OVERLAY_SLOT",
     "STING_SLOT",
     "CardSlot",

@@ -187,7 +187,7 @@ from ..comment_identity import (
 )
 from ..compare import cards as compare_cards
 from ..compare import mp4_grid, project_loader
-from ..composition import uniform_transitions
+from ..composition import BrandMark, uniform_transitions
 from ..compute import ComputeBackend, LocalComputeBackend
 from ..config import (
     BeepDetectConfig,
@@ -217,6 +217,7 @@ from ..identity import (
     LOGO_DIR,
     LOGO_MAX_BYTES,
     LOGO_MAX_SIDE,
+    ResolvedIdentity,
     ShooterIdentity,
     event_logo_name,
     logo_name,
@@ -3075,6 +3076,19 @@ def _run_compare_grid(
         account_brand = account_profile_module.load_brand(
             state.account_profile if state is not None else account_profile_module.JsonAccountProfileStore()
         )
+        event_logo = ensure_local_event_logo(
+            match.branding,
+            root,
+            storage=state.storage if state is not None else None,
+            match_id=match.match_id,
+        )
+        identities = grid_identities(
+            filtered,
+            look=load_look(req.overlay_theme),
+            book=shooter_book_module.load_snapshot(
+                state.shooter_book if state is not None else shooter_book_module.JsonShooterBookStore()
+            ),
+        )
         title_page, closing = compare_cards.title_cards(
             match,
             compare_cards.CardOptions(
@@ -3093,12 +3107,7 @@ def _run_compare_grid(
             ),
             divisions=compare_cards.bundle_divisions(filtered),
             brand=account_brand,
-            event_logo=ensure_local_event_logo(
-                match.branding,
-                root,
-                storage=state.storage if state is not None else None,
-                match_id=match.match_id,
-            ),
+            event_logo=event_logo,
         )
         result = mp4_grid.render_grid_mp4(
             filtered,
@@ -3113,13 +3122,7 @@ def _run_compare_grid(
             stage_titles=req.stage_titles,
             title_duration_seconds=req.title_duration_seconds,
             card_variant=req.stage_card_variant or req.card_variant,
-            identities=grid_identities(
-                filtered,
-                look=load_look(req.overlay_theme),
-                book=shooter_book_module.load_snapshot(
-                    state.shooter_book if state is not None else shooter_book_module.JsonShooterBookStore()
-                ),
-            ),
+            identities=identities,
             transitions=uniform_transitions(req.transition_kind, req.transition_duration_seconds, len(plans)),
             overlay=req.overlay,
             overlay_theme=req.overlay_theme,
@@ -3136,7 +3139,19 @@ def _run_compare_grid(
 
     youtube_files: list[Path] = []
     if req.youtube_sidecar:
-        youtube_files = _write_grid_youtube_sidecar(match, req, result, plans)
+        youtube_files = _write_grid_youtube_sidecar(
+            match,
+            req,
+            result,
+            plans,
+            thumbnail_data=_grid_thumbnail_data(
+                match,
+                req,
+                identities=[identities[label] for label in sorted(identities)],
+                brand=account_brand if req.account_brand else None,
+                event_logo=event_logo,
+            ),
+        )
 
     if state is not None and hosted:
         handle.update(progress=0.98, message="Uploading the grid...")
@@ -3191,11 +3206,58 @@ def _run_compare_grid(
         )
 
 
+def _grid_thumbnail_card(video: Path, at: float, out: Path, data: Any, look_name: str) -> bool:
+    """The grid's thumbnail card over its own frame at ``at``; ``False``
+    (logged) when the spot is off or the card cannot be drawn, and the
+    caller grabs the plain frame."""
+    if data is None:
+        return False
+    from ..overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+    from ..thumbnail_card import ThumbnailError, grab_frame, render_thumbnail_card
+
+    frame = out.with_name(out.stem + "-frame.png")
+    try:
+        grab_frame(video, at, frame, ffmpeg_binary=process_runtime().ffmpeg_binary)
+        with ChromiumRasterizer() as rasterizer:
+            render_thumbnail_card(frame, out, data, look=load_look(look_name), rasterizer=rasterizer)
+    except (RasterizerUnavailableError, OSError, subprocess.CalledProcessError, ThumbnailError) as exc:
+        logger.warning("grid thumbnail card not drawn (%s); using a frame of the video", exc)
+        return False
+    finally:
+        frame.unlink(missing_ok=True)
+    return True
+
+
+def _grid_thumbnail_data(
+    match: match_model.Match,
+    req: CompareGridRequest,
+    *,
+    identities: list[ResolvedIdentity],
+    brand: BrandMark | None,
+    event_logo: Path | None,
+) -> Any:
+    """What the grid's thumbnail card says (the ``thumbnail`` logo spot):
+    the match name over the shooters' names; ``None`` with the spot off."""
+    if "thumbnail" not in req.logo_spots:
+        return None
+    from ..look_brand import brand_mark_json
+    from ..thumbnail_card import ThumbnailData
+
+    return ThumbnailData(
+        title=match.name or "Match",
+        lines=(" \u00b7 ".join(ident.label for ident in identities),) if identities else (),
+        shooters=identities,
+        brand=brand_mark_json(load_look(req.overlay_theme), brand),
+        event_logo=event_logo,
+    )
+
+
 def _write_grid_youtube_sidecar(
     match: match_model.Match,
     req: CompareGridRequest,
     result: mp4_grid.GridRenderResult,
     plans: list[mp4_grid.GridStagePlan],
+    thumbnail_data: Any = None,
 ) -> list[Path]:
     """Title, description with a chapter per stage, tags, a thumbnail and
     the paste text beside the grid, as one shooter's export writes them.
@@ -3213,9 +3275,10 @@ def _write_grid_youtube_sidecar(
     slate = req.title_duration_seconds if req.stage_titles == "slate" else 0.0
     at = first_start + slate + min(3.0, (plans[0].duration_seconds / 3) if plans else 3.0)
     try:
-        youtube_sidecar.write_thumbnail(
-            output_path, at, thumbnail, ffmpeg_binary=process_runtime().ffmpeg_binary
-        )
+        if not _grid_thumbnail_card(output_path, at, thumbnail, thumbnail_data, req.overlay_theme):
+            youtube_sidecar.write_thumbnail(
+                output_path, at, thumbnail, ffmpeg_binary=process_runtime().ffmpeg_binary
+            )
         written.append(thumbnail)
     except (OSError, subprocess.CalledProcessError) as exc:
         logger.warning("grid youtube thumbnail not written: %s", exc)
