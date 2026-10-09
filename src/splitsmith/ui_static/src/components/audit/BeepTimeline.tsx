@@ -75,6 +75,16 @@ export function BeepTimeline({
   const [zoom, setZoom] = useState<Zoom>(null);
   const lastScrubRef = useRef(0);
 
+  // The fetch effect parks the video once peaks land (below), using
+  // whatever draft/videoBeepTime are current *then*, not whichever were
+  // current when the fetch started -- refs instead of effect deps, since
+  // re-running the fetch on every draft change would refetch peaks for no
+  // reason.
+  const draftRef = useRef(draftSourceTime);
+  draftRef.current = draftSourceTime;
+  const videoBeepRef = useRef(videoBeepTime);
+  videoBeepRef.current = videoBeepTime;
+
   useEffect(() => {
     let alive = true;
     setLoading(true);
@@ -87,6 +97,14 @@ export function BeepTimeline({
         if (!alive) return;
         setPeaks(p);
         setLoading(false);
+        // Park the preview at the chosen beep, once, so pressing Play
+        // immediately auditions it instead of wherever the video last
+        // happened to be (BeepWaveformPicker's rule, carried over).
+        const off = videoBeepRef.current != null && p.beep_time != null ? videoBeepRef.current - p.beep_time : 0;
+        const local = draftRef.current != null ? draftRef.current - off : p.beep_time ?? 0;
+        setLocalTime(local);
+        const el = mediaRef.current;
+        if (el) el.currentTime = local;
       })
       .catch((e: unknown) => {
         if (!alive) return;
@@ -99,15 +117,35 @@ export function BeepTimeline({
     };
     // onError is a per-render callback, not part of what identifies "which
     // video's peaks to fetch"; including it would refetch on every render
-    // a parent that doesn't memoize it causes.
+    // a parent that doesn't memoize it causes. mediaRef is a stable
+    // RefObject identity, not part of the fetch's own identity either.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug, stageNumber, videoId]);
 
   // Read the media element's position and play state rather than own
   // them: the preview <video> is the parent's, shared with BeepPreview.
+  // No dependency array: BeepStep can remount the preview out from under
+  // mediaRef (a camera switch), which changes mediaRef.current without
+  // changing the mediaRef object itself or firing any prop change this
+  // component would otherwise depend on -- so this re-checks after every
+  // render instead, and is a no-op whenever the element hasn't changed.
+  const attachedElRef = useRef<HTMLVideoElement | null>(null);
+  const detachRef = useRef<() => void>(() => {});
+  // No deps array is deliberate here, not an omission: [mediaRef] (the
+  // lint rule's own suggestion) would run this exactly once, since
+  // mediaRef's identity never changes -- the one case this exists to
+  // handle. The early return below makes every other render's call a
+  // no-op, so this never loops.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     const el = mediaRef.current;
-    if (!el) return;
+    if (el === attachedElRef.current) return;
+    detachRef.current();
+    attachedElRef.current = el;
+    if (!el) {
+      detachRef.current = () => {};
+      return;
+    }
     const onTimeUpdate = () => setLocalTime(el.currentTime);
     const onPlay = () => setPlaying(true);
     const onPause = () => setPlaying(false);
@@ -116,12 +154,13 @@ export function BeepTimeline({
     el.addEventListener("pause", onPause);
     setLocalTime(el.currentTime);
     setPlaying(!el.paused);
-    return () => {
+    detachRef.current = () => {
       el.removeEventListener("timeupdate", onTimeUpdate);
       el.removeEventListener("play", onPlay);
       el.removeEventListener("pause", onPause);
     };
-  }, [mediaRef]);
+  });
+  useEffect(() => () => detachRef.current(), []);
 
   // timeupdate is browser-throttled to a few Hz; rAF gives the playhead
   // ~60 Hz while playing so it doesn't stutter against the static waveform.
@@ -139,6 +178,12 @@ export function BeepTimeline({
 
   const offset = videoBeepTime != null && peaks?.beep_time != null ? videoBeepTime - peaks.beep_time : 0;
 
+  // Source seconds never go negative (BeepWaveformPicker's rule): an
+  // offset bigger than the local pick is a confirmed-beep/peaks-beep
+  // mismatch worth surfacing as "the earliest moment", not a negative
+  // source time.
+  const pick = useCallback((sourceTime: number) => onPick(Math.max(0, sourceTime)), [onPick]);
+
   const handleSeek = useCallback(
     (t: number) => {
       lastScrubRef.current = t;
@@ -150,8 +195,8 @@ export function BeepTimeline({
   );
 
   const handleScrubEnd = useCallback(() => {
-    onPick(lastScrubRef.current + offset);
-  }, [onPick, offset]);
+    pick(lastScrubRef.current + offset);
+  }, [pick, offset]);
 
   if (loading) {
     return (
@@ -184,7 +229,14 @@ export function BeepTimeline({
                 type="button"
                 aria-label={`Candidate ${fromOrigin.toFixed(2)} s`}
                 aria-pressed={selected}
-                onClick={() => onPick(c.time)}
+                onClick={() => {
+                  // Seek the preview too, so the operator sees the frame
+                  // the candidate sits on, not just its row in the list.
+                  const el = mediaRef.current;
+                  if (el) el.currentTime = local;
+                  setLocalTime(local);
+                  pick(c.time);
+                }}
                 className={cn(
                   "absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-[1.5px]",
                   selected ? "border-led bg-led" : "border-rule-strong bg-surface-2",

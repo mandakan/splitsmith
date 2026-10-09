@@ -151,7 +151,7 @@ describe("BeepTimeline", () => {
     expect(onPick.mock.calls[0][0]).toBeCloseTo(9.5, 2);
   });
 
-  it("clicking a candidate pin calls onPick with its source time; the selected pin is marked", async () => {
+  it("clicking a candidate pin calls onPick with its source time, seeks the preview there, and marks the selected pin", async () => {
     vi.mocked(api.getVideoPeaks).mockResolvedValue(peaksFixture());
     const onPick = vi.fn();
     const candidates: BeepCandidate[] = [
@@ -168,6 +168,71 @@ describe("BeepTimeline", () => {
 
     fireEvent.click(unselected);
     expect(onPick).toHaveBeenCalledWith(3);
+    const video = screen.getByTestId("preview-video") as HTMLVideoElement;
+    expect(video.currentTime).toBeCloseTo(3, 2);
+  });
+
+  it("clamps a pick to >= 0 source seconds when the offset would carry it negative", async () => {
+    // offset = videoBeepTime(0) - peaks.beep_time(5) = -5; a press at
+    // local 1 s would otherwise pick -4.
+    vi.mocked(api.getVideoPeaks).mockResolvedValue(peaksFixture({ beep_time: 5.0 }));
+    const onPick = vi.fn();
+    render(<Harness videoId="v1" videoBeepTime={0} onPick={onPick} />);
+    await screen.findByTestId("waveform-track");
+    const row = audioRow();
+
+    fireEvent.pointerDown(row, { pointerId: 1, button: 0, clientX: 100 });
+    fireEvent.pointerUp(row, { pointerId: 1, clientX: 100 });
+
+    expect(onPick).toHaveBeenCalledTimes(1);
+    expect(onPick.mock.calls[0][0]).toBe(0);
+  });
+
+  describe("parking the preview video", () => {
+    it("parks at the detected beep once peaks resolve, and re-parks on a videoId switch", async () => {
+      vi.mocked(api.getVideoPeaks).mockImplementation((_s: string, _n: number, videoId: string) =>
+        Promise.resolve(
+          videoId === "v1"
+            ? peaksFixture({ duration: 10, beep_time: 4 })
+            : peaksFixture({ duration: 20, beep_time: 3 }),
+        ),
+      );
+      const { rerender } = render(<Harness videoId="v1" />);
+      await screen.findByTestId("waveform-track");
+      const video = screen.getByTestId("preview-video") as HTMLVideoElement;
+      expect(video.currentTime).toBeCloseTo(4, 2);
+
+      rerender(<Harness videoId="v2" />);
+      await screen.findByTestId("waveform-track");
+      expect(video.currentTime).toBeCloseTo(3, 2);
+    });
+
+    it("parks at the draft's local time, not the detected beep, when a draft exists", async () => {
+      vi.mocked(api.getVideoPeaks).mockResolvedValue(peaksFixture({ beep_time: 5.0 }));
+      render(<Harness videoId="v1" videoBeepTime={12.0} draftSourceTime={9.5} />);
+      await screen.findByTestId("waveform-track");
+      const video = screen.getByTestId("preview-video") as HTMLVideoElement;
+      // offset = 12 - 5 = 7; draft 9.5 -> local 2.5.
+      expect(video.currentTime).toBeCloseTo(2.5, 2);
+    });
+
+    it("does not re-park on an unrelated re-render (only once per peaks load)", async () => {
+      vi.mocked(api.getVideoPeaks).mockResolvedValue(peaksFixture({ beep_time: 4 }));
+      const { rerender } = render(<Harness videoId="v1" onPick={vi.fn()} />);
+      await screen.findByTestId("waveform-track");
+      const video = screen.getByTestId("preview-video") as HTMLVideoElement;
+      expect(video.currentTime).toBeCloseTo(4, 2);
+
+      // The operator scrubs away from the parked position...
+      const row = audioRow();
+      fireEvent.pointerDown(row, { pointerId: 1, button: 0, clientX: 700 });
+      fireEvent.pointerUp(row, { pointerId: 1, clientX: 700 });
+      expect(video.currentTime).toBeCloseTo(7, 2);
+
+      // ...and an unrelated re-render (same videoId) must not yank it back.
+      rerender(<Harness videoId="v1" onPick={vi.fn()} />);
+      expect(video.currentTime).toBeCloseTo(7, 2);
+    });
   });
 
   describe("switching videoId", () => {
@@ -211,6 +276,47 @@ describe("BeepTimeline", () => {
       rerender(<Harness videoId="v2" />);
       await screen.findByTestId("waveform-track");
       expect(screen.getByRole("button", { name: "Fit" })).toHaveAttribute("aria-pressed", "true");
+    });
+
+    it("re-attaches its media listeners when the preview element behind mediaRef is remounted (a camera switch)", async () => {
+      vi.mocked(api.getVideoPeaks).mockResolvedValue(peaksFixture({ duration: 10, beep_time: 0 }));
+
+      // BeepStep keys the preview <video> per item (keyOf(item)), so a
+      // camera switch unmounts the old element and mounts a new one --
+      // mediaRef.current changes without mediaRef itself changing and
+      // without any prop BeepTimeline reads changing either.
+      function RemountableHarness({ videoId }: { videoId: string }) {
+        const mediaRef = useRef<HTMLVideoElement>(null);
+        return (
+          <div>
+            <video key={videoId} ref={mediaRef} data-testid="preview-video" />
+            <BeepTimeline
+              slug="alice"
+              stageNumber={10}
+              videoId={videoId}
+              videoBeepTime={null}
+              draftSourceTime={null}
+              candidates={[]}
+              mediaRef={mediaRef}
+              onPick={vi.fn()}
+            />
+          </div>
+        );
+      }
+
+      const { rerender } = render(<RemountableHarness videoId="v1" />);
+      await screen.findByTestId("waveform-track");
+      const videoA = screen.getByTestId("preview-video");
+
+      rerender(<RemountableHarness videoId="v2" />);
+      await screen.findByTestId("waveform-track");
+      const videoB = screen.getByTestId("preview-video");
+      expect(videoB).not.toBe(videoA);
+
+      (videoB as HTMLVideoElement).currentTime = 4;
+      fireEvent(videoB, new Event("timeupdate"));
+
+      expect(screen.getByTestId("timeline-playhead")).toHaveStyle({ left: "400px" });
     });
   });
 });
