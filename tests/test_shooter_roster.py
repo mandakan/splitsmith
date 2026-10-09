@@ -124,7 +124,8 @@ def test_the_hosted_source_reads_the_accounts_matches_in_one_batch() -> None:
         async def load_docs_for_matches(self, ids):  # type: ignore[no-untyped-def]
             type(self).calls += 1
             assert ids == ["m1"]
-            return {"m1": SimpleNamespace(projects={"anna": project.model_dump(mode="json"), "bad": {"x": 1}})}
+            projects = {"anna": project.model_dump(mode="json"), "bad": {"x": 1}}
+            return {"m1": SimpleNamespace(projects=projects)}
 
     seen = asyncio.run(shooter_roster.hosted_seen(_Matches(), _State()))
     assert [(s.shooter_id, s.name, s.match_id, s.match_name, s.slug) for s in seen] == [

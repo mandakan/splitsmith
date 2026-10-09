@@ -52,7 +52,8 @@ describe("ShooterSheet", () => {
   });
 
   it("carries a logo the videos draw from a match record into the book", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(new Blob(["png"], { type: "image/png" })));
+    // A plain stand-in: CI's jsdom cannot build a Response around a Blob.
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, blob: async () => new Blob(["png"], { type: "image/png" }) });
     vi.stubGlobal("fetch", fetchMock);
     render(<ShooterSheet open onClose={vi.fn()} shooter={fromMatch()} onChanged={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
