@@ -48,6 +48,8 @@ LOCAL_ONLY_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("GET", "/api/looks/{name}/samples"),
         ("POST", "/api/looks/{name}/check"),
         ("POST", "/api/looks/{name}/reveal"),
+        ("GET", "/api/looks/{name}/outdated"),
+        ("POST", "/api/looks/{name}/refresh"),
         # A Look's own font files (#1272) and brand logo: no hosted account assets yet.
         ("POST", "/api/looks/{name}/brand-logo"),
         ("GET", "/api/looks/{name}/brand/{file}"),

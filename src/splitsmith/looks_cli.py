@@ -69,14 +69,22 @@ def list_command() -> None:
 @looks_app.command("new")
 def new_command(
     name: str = typer.Argument(..., help="The new Look's name: lower-case letters, digits, '-' and '_'."),
-    from_look: str | None = typer.Option(None, "--from", help="Copy this Look (its colours and templates)."),
+    from_look: str | None = typer.Option(
+        None,
+        "--from",
+        help="Copy this Look. A shipped Look's colours, fonts and styles; its cards keep drawing the "
+        "current shipped templates unless --templates copies them.",
+    ),
     starter: str | None = typer.Option(
         None, "--starter", help=f"Start from a template: {', '.join(sorted(look_tools.STARTERS))}."
+    ),
+    templates: bool = typer.Option(
+        False, "--templates", help="With --from a shipped Look: copy its templates too, to edit by hand."
     ),
 ) -> None:
     """Make a Look in your Looks folder to edit."""
     try:
-        root = look_tools.new_look(name, from_look=from_look, starter=starter)
+        root = look_tools.new_look(name, from_look=from_look, starter=starter, templates=templates)
     except (LookToolError, LookError) as exc:
         console.print(f"[red]Error:[/] {exc}")
         raise typer.Exit(code=2) from None
@@ -114,6 +122,20 @@ def check_command(name: str = typer.Argument(..., help="The Look to check.")) ->
     _print_report(report)
     if report.errors:
         raise typer.Exit(code=1)
+
+
+@looks_app.command("refresh")
+def refresh_command(name: str = typer.Argument(..., help="Your Look to refresh.")) -> None:
+    """Remove the Look's unedited copies of shipped templates, so its cards draw the current ones."""
+    try:
+        removed = look_tools.refresh_templates(name)
+    except (LookToolError, LookError) as exc:
+        console.print(f"[red]Error:[/] {exc}")
+        raise typer.Exit(code=2) from None
+    if not removed:
+        console.print(f"{name} holds no unedited copy of a shipped template; nothing to do.")
+        return
+    console.print(f"Removed {', '.join(removed)}: those cards now draw the current shipped templates.")
 
 
 @looks_app.command("preview")

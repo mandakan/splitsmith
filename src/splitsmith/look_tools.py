@@ -18,12 +18,14 @@ never finds out from a log line that a Look was skipped:
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import shutil
 import tempfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 from typing import Literal, Protocol
 
@@ -165,11 +167,19 @@ def strict_look(name: str) -> Look:
         raise LookToolError(f"{root / MANIFEST_FILE}: {exc}" if root.is_dir() else str(exc)) from None
 
 
-def new_look(name: str, *, from_look: str | None = None, starter: str | None = None) -> Path:
-    """Make ``~/.splitsmith/looks/<name>``: a copy of ``from_look`` (its
-    manifest and every template it owns), or a Look whose slots hold the
-    ``starter`` template over the default Look's palette. Neither given
-    copies the default Look. Returns the new folder."""
+def new_look(
+    name: str, *, from_look: str | None = None, starter: str | None = None, templates: bool = False
+) -> Path:
+    """Make ``~/.splitsmith/looks/<name>``: a copy of ``from_look``, or a
+    Look whose slots hold the ``starter`` template over the default Look's
+    palette. Neither given copies the default Look. Returns the new folder.
+
+    A copy of a shipped Look takes its manifest and no template: its slots
+    are empty, so every card draws the current shipped template and a
+    later release reaches it (a copied ``card.html`` froze the cards before
+    the brand, the event logo and the credit). ``templates`` copies them
+    anyway, to edit by hand. A copy of your own Look carries every file:
+    its templates may be yours."""
     if not LOOK_NAME_RE.match(name):
         raise LookToolError(
             f"{name!r} is not a Look name: lower-case letters, digits, '-' and '_', starting with a letter"
@@ -193,10 +203,15 @@ def new_look(name: str, *, from_look: str | None = None, starter: str | None = N
         source = strict_look(from_look or DEFAULT_LOOK)
         manifest = source.manifest.model_dump(exclude={"source"})
         manifest.update(name=name, label=_label(name))
-        # The whole folder, not only the templates the manifest names: a
-        # template may load an image or a stylesheet beside it. Its previews
-        # are pictures of the source, and the manifest is written fresh below.
-        files = look_files(source.root)
+        if source.source == "shipped" and not templates:
+            manifest.update(slots={}, base=source.name)
+            files = {}
+        else:
+            # The whole folder, not only the templates the manifest names: a
+            # template may load an image or a stylesheet beside it. Its
+            # previews are pictures of the source, and the manifest is
+            # written fresh below.
+            files = look_files(source.root)
     root.mkdir(parents=True)
     try:
         for file, src in files.items():
@@ -210,6 +225,74 @@ def new_look(name: str, *, from_look: str | None = None, starter: str | None = N
         shutil.rmtree(root, ignore_errors=True)
         raise
     return root
+
+
+# --- copies of shipped templates ---------------------------------------------------
+
+
+@cache
+def shipped_template_history() -> dict[str, str]:
+    """Every version a shipped template has had, by the sha256 of its bytes,
+    to its file name (``data/looks/_history.json``, written from git by
+    ``scripts/record_template_history.py``)."""
+    raw = (shipped_looks_dir() / "_history.json").read_text(encoding="utf-8")
+    return dict(json.loads(raw))
+
+
+def _named_files(look: Look) -> set[str]:
+    return {file for variants in look.manifest.slots.values() for file in variants.values()}
+
+
+def _shipped_copies(look: Look) -> dict[str, bool]:
+    """The template files ``look`` names that are byte-identical to some
+    version of the shipped file of the same name, each with whether that
+    version is still the current one. Anything else is the Look's own."""
+    history = shipped_template_history()
+    current_dir = shipped_looks_dir() / DEFAULT_LOOK
+    out: dict[str, bool] = {}
+    for file in sorted(_named_files(look)):
+        path = look.root / file
+        if path.is_symlink() or not path.is_file():
+            continue
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if history.get(digest) != Path(file).name:
+            continue
+        current = current_dir / Path(file).name
+        out[file] = current.is_file() and hashlib.sha256(current.read_bytes()).hexdigest() == digest
+    return out
+
+
+def outdated_copies(look: Look) -> tuple[str, ...]:
+    """The template files ``look`` holds that are unedited copies of an
+    older shipped version: the cards they draw miss what shipped since.
+    Only a user Look has any."""
+    if look.source != "user":
+        return ()
+    return tuple(file for file, current in _shipped_copies(look).items() if not current)
+
+
+def refresh_templates(name: str) -> tuple[str, ...]:
+    """Stop ``name`` from holding unedited copies of shipped templates, old
+    or current: drop every slot entry naming one and delete the file, so
+    those cards draw the shipped template from now on. A file the Look
+    edited is never touched. Returns the files removed."""
+    look = strict_look(name)
+    if look.source != "user":
+        raise LookToolError(f"{name!r} is a shipped Look; there is nothing to refresh")
+    copies = set(_shipped_copies(look))
+    if not copies:
+        return ()
+    manifest_path = look.root / MANIFEST_FILE
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    slots = {
+        slot: {variant: file for variant, file in variants.items() if file not in copies}
+        for slot, variants in manifest.get("slots", {}).items()
+    }
+    manifest["slots"] = {slot: variants for slot, variants in slots.items() if variants}
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    for file in sorted(copies):
+        (look.root / file).unlink(missing_ok=True)
+    return tuple(sorted(copies))
 
 
 # --- check ---------------------------------------------------------------------------
@@ -503,6 +586,15 @@ def check_folder(name: str, root: Path, source: Literal["shipped", "user"], *, p
             f"{len(look.manifest.colors)} colours, {len(look.accent_series)} in the accent series",
         )
     ]
+    items.extend(
+        CheckItem(
+            file,
+            "warn",
+            "an unedited copy of an older shipped template: its cards miss what shipped since. "
+            f"splitsmith looks refresh {name} draws the current one",
+        )
+        for file in outdated_copies(look)
+    )
     borrowed = 0
     with tempfile.TemporaryDirectory(prefix="looks-check-") as tmp:
         logo = _sample_logo(Path(tmp))

@@ -4,6 +4,7 @@ and any edit to its files checks again."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -66,9 +67,16 @@ def test_the_saved_looks_check_is_cached_by_its_content(client) -> None:
 
 def test_an_edited_template_is_checked_again(client) -> None:
     client.post("/api/looks/club/check", json={})
-    template = looks.load_look("club").own_template("title_page")
-    assert template is not None
-    template.write_text(template.read_text(encoding="utf-8") + "<script>BOOM</script>", encoding="utf-8")
+    # A duplicate draws the shipped templates; editing one writes it into
+    # the Look and names it in the manifest, as the Templates tab does.
+    root = looks.load_look("club").root
+    shipped = looks.shipped_looks_dir() / "splitsmith" / "card.html"
+    (root / "card.html").write_text(
+        shipped.read_text(encoding="utf-8") + "<script>BOOM</script>", encoding="utf-8"
+    )
+    manifest = json.loads((root / "look.json").read_text(encoding="utf-8"))
+    manifest["slots"] = {"title_page": {"default": "card.html"}}
+    (root / "look.json").write_text(json.dumps(manifest), encoding="utf-8")
     again = client.post("/api/looks/club/check", json={})
     assert _Prober.launches == 2
     assert again.json()["errors"] >= 1

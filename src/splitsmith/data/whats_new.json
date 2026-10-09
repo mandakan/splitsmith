@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "look-copies-stay-current",
+      "date": "2026-10-09",
+      "title": "Copied Looks keep up with new card features",
+      "body": "A Look you duplicate now draws the current cards, so it gets new features like your brand logo. An older copy shows a note beside the preview on the Export page with a button to catch up."
+    },
+    {
       "id": "audit-save-flow",
       "date": "2026-10-09",
       "title": "Clearer saving in Audit",

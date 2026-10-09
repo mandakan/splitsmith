@@ -144,12 +144,16 @@ def test_a_bad_draft_is_a_422_naming_the_field(client) -> None:
 # --- duplicate ----------------------------------------------------------------------------
 
 
-def test_duplicate_a_shipped_look_locally_keeps_its_templates(client) -> None:
+def test_duplicate_a_shipped_look_locally_draws_the_current_shipped_templates(client) -> None:
+    """A copy of the shipped templates froze the cards at the copy's date;
+    the duplicate names none and draws whatever ships."""
     r = client.post("/api/looks/club/duplicate", json={"source": "splitsmith"})
     assert r.status_code == 201, r.text
     assert r.json()["name"] == "club"
     look = looks.load_look("club")
-    assert look.source == "user" and look.own_template("title_page", "rise") is not None
+    assert look.source == "user" and look.manifest.slots == {} and look.manifest.base == "splitsmith"
+    shipped = looks.shipped_looks_dir() / "splitsmith"
+    assert looks.template_for(look, "title_page", "rise") == shipped / "card-rise.html"
     assert client.post("/api/looks/club/duplicate", json={"source": "splitsmith"}).status_code == 409
 
 
@@ -199,3 +203,41 @@ def test_draft_look_keeps_the_saved_looks_templates(tmp_path: Path, monkeypatch:
     assert (
         looks.template_for(draft, "title_page").read_bytes() == saved.own_template("title_page").read_bytes()
     )
+
+
+# --- outdated copies of shipped templates ---------------------------------------------
+
+
+def test_outdated_names_an_old_unedited_copy_and_refresh_removes_it(
+    client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import hashlib
+
+    from splitsmith import look_tools
+
+    look_tools.new_look("club", from_look="splitsmith", templates=True)
+    root = looks.load_look("club").root
+    old = b"<!doctype html><p>card.html as it shipped once</p>"
+    (root / "card.html").write_bytes(old)
+    history = {**look_tools.shipped_template_history(), hashlib.sha256(old).hexdigest(): "card.html"}
+    monkeypatch.setattr(look_tools, "shipped_template_history", lambda: history)
+
+    assert client.get("/api/looks/club/outdated").json() == {"files": ["card.html"]}
+    removed = client.post("/api/looks/club/refresh").json()["files"]
+    assert "card.html" in removed and "sting-wipe.html" in removed
+    assert client.get("/api/looks/club/outdated").json() == {"files": []}
+    assert looks.template_for(looks.load_look("club"), "title_page") == (
+        looks.shipped_looks_dir() / "splitsmith" / "card.html"
+    )
+
+
+def test_outdated_and_refresh_are_for_your_own_looks(client) -> None:
+    assert client.get("/api/looks/splitsmith/outdated").status_code == 404
+    assert client.post("/api/looks/splitsmith/refresh").status_code == 404
+
+
+def test_outdated_and_refresh_are_local_only(hosted_app) -> None:
+    client, sender = hosted_app
+    login(client, sender, "a@example.com")
+    assert client.get("/api/looks/club/outdated").status_code == 404
+    assert client.post("/api/looks/club/refresh").status_code == 404

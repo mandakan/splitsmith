@@ -166,3 +166,42 @@ def test_preview_refuses_a_stage_the_project_lacks(home: Path, monkeypatch: pyte
         ["looks", "preview", "clean", "--out", str(home / "o"), "--project", str(shooter), "--stage", "9"],
     )
     assert result.exit_code == 2 and "stage 9" in result.output
+
+
+def _plant_old_card(home: Path, name: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make ``name``'s card.html an unedited copy of a shipped version that
+    is no longer current, as a Look duplicated before a release holds."""
+    import hashlib
+
+    from splitsmith import look_tools
+
+    old = b"<!doctype html><p>card.html as it shipped once</p>"
+    (home / "looks" / name / "card.html").write_bytes(old)
+    history = {**look_tools.shipped_template_history(), hashlib.sha256(old).hexdigest(): "card.html"}
+    monkeypatch.setattr(look_tools, "shipped_template_history", lambda: history)
+
+
+def test_check_warns_about_an_outdated_copy_and_refresh_removes_it(
+    home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runner.invoke(app, ["looks", "new", "club", "--from", "splitsmith", "--templates"])
+    _plant_old_card(home, "club", monkeypatch)
+    _use(monkeypatch, _Prober())
+    checked = runner.invoke(app, ["looks", "check", "club"], terminal_width=240)
+    assert checked.exit_code == 0, checked.output
+    assert "card.html" in checked.output and "older shipped template" in checked.output
+    assert "splitsmith looks refresh club" in checked.output
+
+    refreshed = runner.invoke(app, ["looks", "refresh", "club"], terminal_width=240)
+    assert refreshed.exit_code == 0, refreshed.output
+    assert "card.html" in refreshed.output
+    assert not (home / "looks" / "club" / "card.html").exists()
+    again = runner.invoke(app, ["looks", "refresh", "club"])
+    assert "nothing to do" in again.output
+
+
+def test_new_from_a_shipped_look_copies_templates_only_when_asked(home: Path) -> None:
+    runner.invoke(app, ["looks", "new", "plain", "--from", "splitsmith"])
+    runner.invoke(app, ["looks", "new", "hand", "--from", "splitsmith", "--templates"])
+    assert not (home / "looks" / "plain" / "card.html").exists()
+    assert (home / "looks" / "hand" / "card.html").is_file()

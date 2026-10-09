@@ -3,7 +3,8 @@
  * chosen, and a template that fails is named before Export, never blocking it.
  */
 import { render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { LookHealth } from "@/components/export/LookHealth";
 import { api, type LookInfo } from "@/lib/api";
@@ -12,13 +13,19 @@ import { lookFailures } from "@/lib/lookHealth";
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
-  return { ...actual, api: { ...actual.api, checkLook: vi.fn() } };
+  return {
+    ...actual,
+    api: { ...actual.api, checkLook: vi.fn(), outdatedLookTemplates: vi.fn(), refreshLookTemplates: vi.fn() },
+  };
 });
 
 const club: LookInfo = { ...BUILTIN_LOOKS[0], name: "club", label: "Club", source: "user", editable: true };
 const shipped: LookInfo = { ...BUILTIN_LOOKS[0], editable: false };
 
 afterEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.mocked(api.outdatedLookTemplates).mockResolvedValue({ files: [] });
+});
 
 describe("lookFailures", () => {
   it("names each failing card in the UI's words", () => {
@@ -68,5 +75,22 @@ describe("LookHealth", () => {
     render(<LookHealth look="splitsmith" looks={[shipped, club]} hosted={false} />);
     render(<LookHealth look="club" looks={[club]} hosted />);
     expect(api.checkLook).not.toHaveBeenCalled();
+    expect(api.outdatedLookTemplates).not.toHaveBeenCalled();
+  });
+
+  it("says when the Look holds older copies of the shipped cards and switches them to the current ones", async () => {
+    vi.mocked(api.checkLook).mockResolvedValue({ items: [], errors: 0, warnings: 0 });
+    vi.mocked(api.outdatedLookTemplates).mockResolvedValue({ files: ["card.html", "sting-wipe.html"] });
+    vi.mocked(api.refreshLookTemplates).mockResolvedValue({ files: ["card.html", "sting-wipe.html"] });
+    const onRefreshed = vi.fn();
+    const user = userEvent.setup();
+    render(<LookHealth look="club" looks={[club]} hosted={false} onRefreshed={onRefreshed} />);
+    const note = await screen.findByRole("status");
+    expect(note.textContent).toContain("older copies of the shipped cards");
+    expect(note.textContent).toContain("your brand logo");
+    await user.click(screen.getByRole("button", { name: "Use the current cards" }));
+    expect(api.refreshLookTemplates).toHaveBeenCalledWith("club");
+    await waitFor(() => expect(onRefreshed).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
   });
 });
