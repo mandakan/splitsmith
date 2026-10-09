@@ -24,7 +24,7 @@ from .. import csv_gen, fcpxml_gen, overlay_render, report, summary_card, trim
 from ..audit_data import StageExportError, audit_shots_to_engine_shots, read_audit_data
 from ..audit_revision import audit_revision
 from ..config import Config, ReportFiles, StageAnalysis, StageData, StageEvent
-from ..events import confirmed, events_from_doc
+from ..events import confirmed_from_doc
 from ..export_naming import stage_file_base
 from ..looks import DEFAULT_VARIANT
 from ..match_project import StageScorecard
@@ -132,6 +132,11 @@ class StageExportResult:
     # ``<base>_overlay.json``: what the overlay MOV was drawn with
     # (:func:`overlay_settings`), written beside it on every render.
     overlay_settings_path: Path | None = None
+    # ``<base>_events.csv``: the stage's confirmed regions (spec
+    # 2026-10-08, part 2). ``None`` when the stage has none -- a re-export
+    # that drops its last confirmed region deletes a stale file rather
+    # than leaving ``None`` here with the old CSV still on disk.
+    events_csv_path: Path | None = None
 
 
 def overlay_settings_file(exports_dir: Path, base: str) -> Path:
@@ -171,12 +176,8 @@ def _confirmed_regions(audit_data: dict[str, Any], audit_path: Path) -> list[Sta
     """The stage's confirmed regions only (spec 2026-10-08, part 2). A
     corrupt events list must not fail the whole export -- it reads as
     none, the same tolerance the HUD render and the stage summary give a
-    legacy or malformed doc."""
-    try:
-        return confirmed(events_from_doc(audit_data))
-    except (ValueError, TypeError) as exc:
-        logger.warning("%s: unreadable stage events, exporting none: %s", audit_path.name, exc)
-        return []
+    legacy or malformed doc (``events.confirmed_from_doc``)."""
+    return confirmed_from_doc(audit_data, log_context=audit_path.name)
 
 
 def export_stage(
@@ -340,14 +341,22 @@ def export_stage(
                 secondary_trimmed[sec.video_id] = sec_target
 
     csv_path: Path | None = None
+    events_csv_path: Path | None = None
     if request.write_csv:
         if shots:
             csv_path = exports_dir / f"{base}_splits.csv"
             csv_gen.write_splits_csv(shots, csv_path, events=regions)
             # events.csv rides the same write_csv gate -- only written when
-            # the stage has confirmed regions (spec 2026-10-08, part 2).
+            # the stage has confirmed regions (spec 2026-10-08, part 2). A
+            # re-export that drops the stage's last confirmed region must
+            # not leave the previous run's events.csv behind as a stale
+            # artefact nobody asked for any more.
+            candidate_events_csv = exports_dir / f"{base}_events.csv"
             if regions:
-                csv_gen.write_events_csv(regions, exports_dir / f"{base}_events.csv")
+                csv_gen.write_events_csv(regions, candidate_events_csv)
+                events_csv_path = candidate_events_csv
+            else:
+                candidate_events_csv.unlink(missing_ok=True)
         else:
             skip_reasons.append("csv not written: no shots audited")
 
@@ -615,4 +624,5 @@ def export_stage(
         export_failures=list(skip_reasons),
         summary_card_path=summary_card_path,
         overlay_settings_path=overlay_settings_path,
+        events_csv_path=events_csv_path if events_csv_path is not None and events_csv_path.exists() else None,
     )

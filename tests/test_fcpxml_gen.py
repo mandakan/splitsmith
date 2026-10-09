@@ -333,27 +333,42 @@ def test_generate_fcpxml_drops_region_marker_outside_clip(tmp_path: Path) -> Non
     assert root.findall(".//marker") == []
 
 
-def test_generate_fcpxml_with_no_confirmed_regions_is_byte_identical_to_omitting_events(
-    tmp_path: Path,
-) -> None:
-    """``events=()`` (the default) must emit exactly as a call that doesn't
-    pass ``events`` at all -- the no-regions case is unchanged."""
+def test_generate_fcpxml_clamps_region_end_to_the_clip_duration(tmp_path: Path) -> None:
+    """A region that starts inside the clip but runs past its end (9.0s to
+    30.0s on a 20s clip, beep at 0s) is not dropped -- its end clamps to
+    the clip's own duration (20.0s = frame 600) instead of claiming a
+    duration FCP would reject for overrunning the asset."""
     video = tmp_path / "v.mp4"
     video.write_bytes(b"")
-    shots = [_shot(1, time_from_beep=1.0, split=1.0)]
-    out_default = tmp_path / "default.fcpxml"
-    out_explicit = tmp_path / "explicit.fcpxml"
-    kwargs = {
-        "video_path": video,
-        "video": _meta_30fps(),
-        "shots": shots,
-        "beep_offset_seconds": 5.0,
-        "project_name": "v",
-        "config": OutputConfig(),
-    }
-    generate_fcpxml(output_path=out_default, **kwargs)
-    generate_fcpxml(output_path=out_explicit, events=(), **kwargs)
-    assert out_default.read_bytes() == out_explicit.read_bytes()
+    out = tmp_path / "v.fcpxml"
+    events = [StageEvent(id="evt-1", kind="movement", start=9.0, end=30.0, source="manual")]
+    generate_fcpxml(
+        video_path=video,
+        video=_meta_30fps(),
+        shots=[],
+        beep_offset_seconds=0.0,
+        output_path=out,
+        project_name="v",
+        config=OutputConfig(),
+        events=events,
+    )
+    root = ET.fromstring(out.read_bytes())
+    markers = root.findall(".//marker")
+    assert len(markers) == 1
+    assert markers[0].attrib["start"] == "270/30s"  # 9.0s * 30fps
+    assert markers[0].attrib["duration"] == "330/30s"  # (20.0 - 9.0)s * 30fps, clamped
+    assert markers[0].attrib["value"] == "Movement"
+
+
+# No byte-identity self-pin here on purpose: a call with ``events=()`` vs
+# one that omits ``events`` entirely both reduce to the same empty list, so
+# comparing their output to each other cannot catch a mutant that
+# unconditionally injects a marker regardless of ``events`` -- both sides
+# would grow the same spurious marker and still match. The no-regions case
+# is instead pinned by the pre-existing, unmodified
+# ``test_generate_fcpxml_minimal_structure`` (``assert len(markers) == 2``
+# with no ``events`` argument at all): that exact-count assertion fails
+# under the "always append a marker" mutant described in review.
 
 
 def test_tag_source_application_writes_bplist_via_xattr(
@@ -1092,37 +1107,49 @@ def test_match_fcpxml_drops_region_marker_outside_trimmed_window(tmp_path: Path)
     assert all(m.attrib["value"] != "Movement" for m in markers)
 
 
-def test_match_fcpxml_with_no_confirmed_regions_is_byte_identical_to_omitting_events(
-    tmp_path: Path,
-) -> None:
-    """Byte-identity pin: a stage built without ``events`` and one built
-    with ``events=()`` must emit identical bytes -- the no-regions case is
-    unaffected by the region-marker feature."""
+def test_match_fcpxml_clamps_region_end_to_the_visible_window(tmp_path: Path) -> None:
+    """A region that starts inside the visible window but runs past its
+    end (9.0s to 30.0s, beep at 0s, a generous tail pad keeping the whole
+    20s clip visible) is not dropped -- its end clamps to the window's own
+    end (20.0s) instead of overrunning it."""
     video = _make_video(tmp_path, "v.mp4")
-    stage_kwargs = {
-        "stage_name": "v",
-        "video_path": video,
-        "video": _meta_30fps(),
-        "shots": [_shot(1, time_from_beep=0.4, split=0.4)],
-        "beep_offset_seconds": 5.0,
-        "head_pad_seconds": 0.5,
-        "tail_pad_seconds": 1.0,
-    }
-    out_default = tmp_path / "default.fcpxml"
-    out_explicit = tmp_path / "explicit.fcpxml"
+    out = tmp_path / "v.fcpxml"
+    events = [StageEvent(id="evt-1", kind="movement", start=9.0, end=30.0, source="manual")]
     generate_match_fcpxml(
-        stages=[StageComposition(**stage_kwargs)],
-        output_path=out_default,
+        stages=[
+            StageComposition(
+                stage_name="v",
+                video_path=video,
+                video=_meta_30fps(),
+                shots=[],
+                beep_offset_seconds=0.0,
+                head_pad_seconds=0.0,
+                tail_pad_seconds=20.0,
+                events=events,
+            )
+        ],
+        output_path=out,
         project_name="match",
         config=OutputConfig(),
     )
-    generate_match_fcpxml(
-        stages=[StageComposition(events=(), **stage_kwargs)],
-        output_path=out_explicit,
-        project_name="match",
-        config=OutputConfig(),
-    )
-    assert out_default.read_bytes() == out_explicit.read_bytes()
+    root = ET.fromstring(out.read_bytes())
+    markers = [m for m in root.findall(".//spine/asset-clip/marker") if m.attrib["value"] == "Movement"]
+    assert len(markers) == 1
+    assert markers[0].attrib["start"] == "270/30s"  # 9.0s * 30fps
+    assert markers[0].attrib["duration"] == "330/30s"  # (20.0 - 9.0)s * 30fps, clamped
+
+
+# No byte-identity self-pin here on purpose, for the same reason noted by
+# ``generate_fcpxml``'s equivalent comment above: comparing a stage built
+# with ``events=()`` against one that omits ``events`` cannot catch a
+# mutant that unconditionally injects a marker, since both sides reduce to
+# the same empty list and would grow the same spurious marker together.
+# The no-regions case is instead pinned by the pre-existing, unmodified
+# ``test_match_fcpxml_drops_markers_outside_trimmed_window`` (``assert
+# len(markers) == 2`` with no ``events`` argument at all, over
+# ``root.findall(".//spine/asset-clip/marker")`` -- every marker on the
+# primary, region or shot): an exact count that fails under the same
+# "always append a marker" mutant.
 
 
 def test_match_fcpxml_secondary_alignment_with_head_trim(tmp_path: Path) -> None:

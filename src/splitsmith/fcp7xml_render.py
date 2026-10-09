@@ -45,7 +45,8 @@ from .composition import (
     Stage,
     Transform,
 )
-from .config import StageEvent, VideoMetadata
+from .config import VideoMetadata
+from .fcpxml_gen import _region_marker_label
 
 
 def render_fcp7xml(
@@ -367,13 +368,14 @@ def _emit_primary_clipitem(
     # confirmed-only (``events.confirmed``, applied by whoever built the
     # IR); beep-relative like a ``Shot.time_from_beep``, so the same
     # ``beep_offset_seconds`` addition brings it to clip-local source time.
+    # A region whose end runs past the visible window has its end clamped
+    # to the window's own end (``head_trim_frames + effective_duration_frames``)
+    # rather than an out-frame past what this clipitem actually covers.
+    visible_end_frame = plan.head_trim_frames + plan.effective_duration_frames
     for event in stage.events:
         start_frame = round((stage.beep_offset_seconds + event.start) / fd_seconds)
-        end_frame = round((stage.beep_offset_seconds + event.end) / fd_seconds)
-        if (
-            start_frame < plan.head_trim_frames
-            or start_frame >= plan.head_trim_frames + plan.effective_duration_frames
-        ):
+        end_frame = min(round((stage.beep_offset_seconds + event.end) / fd_seconds), visible_end_frame)
+        if start_frame < plan.head_trim_frames or start_frame >= visible_end_frame:
             continue
         _emit_marker(
             clip,
@@ -551,17 +553,6 @@ def _marker_label(marker: object) -> str:
     if split is None:
         return f"Shot {n}"
     return f"Shot {n} / {split:.2f}s"
-
-
-def _region_marker_label(event: StageEvent) -> str:
-    """``Reload 1.42`` / ``Movement`` / ``Activation`` (spec 2026-10-08,
-    part 2), matching ``fcpxml_gen._region_marker_label``'s wording so the
-    two renderers agree on what a region marker says."""
-    if event.kind == "reload":
-        return f"Reload {event.end - event.start:.2f}"
-    if event.kind == "movement":
-        return "Movement"
-    return "Activation"
 
 
 def _safe_id(label: str) -> str:

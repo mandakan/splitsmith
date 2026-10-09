@@ -30,7 +30,7 @@ from typing import Any, Literal
 
 from .audit_data import read_audit_data
 from .config import StageEvent
-from .events import confirmed, events_from_doc
+from .events import confirmed_from_doc
 from .look_template import TemplateContext, engine_block, shared_url, template_digest, theme_tokens
 from .overlay_html import single_css
 from .overlay_hud import (
@@ -63,12 +63,9 @@ class HudFallbackError(Exception):
 def _confirmed_regions(audit_path: Path) -> list[StageEvent]:
     """The stage's confirmed regions. A corrupt events list must not fail a
     render (one bad doc, a 12-stage export): it draws with no regions, as
-    the Coach GET tolerates a legacy doc."""
-    try:
-        return confirmed(events_from_doc(read_audit_data(audit_path)))
-    except (ValueError, TypeError) as exc:
-        logger.warning("%s: unreadable stage events, drawing none: %s", audit_path.name, exc)
-        return []
+    the Coach GET tolerates a legacy doc. Thin path wrapper over
+    ``events.confirmed_from_doc``, the shared tolerant reader."""
+    return confirmed_from_doc(read_audit_data(audit_path), log_context=audit_path.name)
 
 
 def hud_context(

@@ -33,7 +33,7 @@ from PIL import Image
 
 from . import composition
 from .config import StageEvent
-from .events import confirmed, events_from_doc, reload_figures
+from .events import confirmed_from_doc, reload_figures
 from .export_naming import stage_display_name, stage_file_base
 from .identity import ResolvedIdentity
 from .look_sting import sting_context
@@ -146,14 +146,8 @@ def _confirmed_regions(audit_doc: dict | None) -> list[StageEvent]:
     ``_confirmed_regions(audit_path)`` reads them -- here from the
     already-loaded doc rather than a file. A corrupt events list must not
     fail a preview: draw with no regions, as the Coach GET's in-memory
-    heal tolerates a legacy doc."""
-    if not isinstance(audit_doc, dict):
-        return []
-    try:
-        return confirmed(events_from_doc(audit_doc))
-    except (ValueError, TypeError) as exc:
-        logger.warning("unreadable stage events, previewing with none: %s", exc)
-        return []
+    heal tolerates a legacy doc (``events.confirmed_from_doc``)."""
+    return confirmed_from_doc(audit_doc, log_context="preview")
 
 
 #: Bump when the same inputs draw a different picture, or a cached still

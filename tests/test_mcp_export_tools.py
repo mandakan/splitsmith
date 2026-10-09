@@ -122,6 +122,7 @@ def test_export_stage_calls_helper_and_returns_paths(tmp_path: Path) -> None:
             "stage_number": 1,
             "trimmed_video_path": root / "exports" / "stage1_k-vallen_trimmed.mp4",
             "csv_path": root / "exports" / "stage1_k-vallen_splits.csv",
+            "events_csv_path": root / "exports" / "stage1_k-vallen_events.csv",
             "fcpxml_path": root / "exports" / "stage1_k-vallen.fcpxml",
             "report_path": root / "exports" / "stage1_k-vallen_report.txt",
             "overlay_path": None,
@@ -143,6 +144,7 @@ def test_export_stage_calls_helper_and_returns_paths(tmp_path: Path) -> None:
     assert kwargs["exports_dir"].name == "exports"
     assert kwargs["beep_time_in_source"] == 5.0
     assert result["fcpxml_path"].endswith("stage1_k-vallen.fcpxml")
+    assert result["events_csv_path"].endswith("stage1_k-vallen_events.csv")
     assert result["shots_written"] == 2
     assert result["anomalies"] == []
 
@@ -249,6 +251,7 @@ def test_export_stage_includes_secondaries_with_beep(tmp_path: Path) -> None:
             "stage_number": 1,
             "trimmed_video_path": None,
             "csv_path": None,
+            "events_csv_path": None,
             "fcpxml_path": None,
             "report_path": None,
             "overlay_path": None,

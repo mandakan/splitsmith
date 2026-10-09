@@ -21,7 +21,7 @@ from typing import Any
 from .audit_data import audit_shots_to_engine_shots, read_audit_data
 from .coach import heal_unclassified
 from .config import IntervalClass, StageEvent, StageRounds
-from .events import ReloadFigure, confirmed, events_from_doc, reload_figures, shot_is_moving
+from .events import ReloadFigure, confirmed_from_doc, reload_figures, shot_is_moving
 from .match_project import StageScorecard, is_stub_audit
 
 logger = logging.getLogger(__name__)
@@ -98,12 +98,9 @@ class TileStageData:
 def _confirmed_events(audit_data: dict[str, Any], audit_path: Path) -> list[StageEvent]:
     """The doc's confirmed regions. A corrupt events list must not cost the
     stage its shots (one bad doc, a 12-stage render): it reads as none, the
-    way the HUD render and the export preview treat it."""
-    try:
-        return confirmed(events_from_doc(audit_data))
-    except (ValueError, TypeError) as exc:
-        logger.warning("stage summary: unreadable stage events in %s (%s); drawing none", audit_path, exc)
-        return []
+    way the HUD render and the export preview treat it
+    (``events.confirmed_from_doc``)."""
+    return confirmed_from_doc(audit_data, log_context=f"stage summary: {audit_path}")
 
 
 def load_stage_reloads(audit_path: Path) -> tuple[ReloadFigure, ...]:

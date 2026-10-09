@@ -24,6 +24,7 @@ from typing import Literal
 from .. import composition, fcp7xml_render, fcpxml_gen, mp4_render, youtube_sidecar
 from ..audit_data import StageExportError, audit_shots_to_engine_shots, read_audit_data
 from ..config import OutputConfig, StageRounds
+from ..events import confirmed_from_doc
 from ..export_naming import match_file_base, stage_display_name, stage_file_base
 from ..identity import ResolvedIdentity
 from ..match_project import MatchProject, StageScorecard
@@ -476,6 +477,10 @@ def export_match(
         # any beep_time_in_source value works here -- we pick 0.0 so the
         # ``time_absolute`` column stays trivially defined.
         shots = audit_shots_to_engine_shots(audit_data, beep_time_in_source=0.0)
+        # Confirmed regions only (spec 2026-10-08, part 2) -- an auto
+        # proposal carries into the match FCPXML / FCP7 XML no more than
+        # it does the per-stage export.
+        regions = confirmed_from_doc(audit_data, log_context=f"stage {stage_input.stage_number}")
         # Empty ``shots[]`` is permissive (#214): the stage still rides
         # the spine as a trim-only segment with its chapter (chapters are
         # per stage). What it loses is what depends on shots: the shot
@@ -611,6 +616,7 @@ def export_match(
                 overlay_path=overlay_path,
                 overlay_video=overlay_video,
                 secondaries=tuple(secondaries),
+                events=tuple(regions),
             )
         )
 

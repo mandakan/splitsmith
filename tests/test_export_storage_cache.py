@@ -210,3 +210,103 @@ def test_pull_is_false_in_local_mode(tmp_path: Path) -> None:
     project = _project(tmp_path, with_storage=False)
     target = _exports_dir(tmp_path) / "s1.fcpxml"
     assert export_storage.pull_export_file(project, target) is False
+
+
+# --- events.csv (spec 2026-10-08, part 2) ----------------------------------
+
+
+def test_push_stage_outputs_pushes_events_csv_when_present(tmp_path: Path) -> None:
+    project = _project(tmp_path)
+    storage = project._storage
+    ed = _exports_dir(tmp_path)
+    result = StageExportResult(
+        stage_number=1,
+        trimmed_video_path=None,
+        csv_path=_write(ed / "s1_splits.csv", b"CSV"),
+        fcpxml_path=None,
+        report_path=None,
+        overlay_path=None,
+        shots_written=1,
+        anomalies=[],
+        events_csv_path=_write(ed / "s1_events.csv", b"EVENTS"),
+    )
+
+    export_storage.push_stage_export_outputs(project, result)
+
+    assert storage.read_bytes(f"{SCOPE}/exports/s1_events.csv") == b"EVENTS"  # type: ignore[union-attr]
+
+
+def test_push_stage_outputs_deletes_a_stale_hosted_events_csv(tmp_path: Path) -> None:
+    """A prior run pushed ``s1_events.csv``; this run has no confirmed
+    regions (``events_csv_path=None``) but did write a splits CSV. The
+    stale hosted copy must be removed so a download route never serves a
+    region nobody confirmed any more (review: important finding 1)."""
+    project = _project(tmp_path)
+    storage = project._storage
+    storage.write_bytes(f"{SCOPE}/exports/s1_events.csv", b"STALE")  # type: ignore[union-attr]
+
+    ed = _exports_dir(tmp_path)
+    result = StageExportResult(
+        stage_number=1,
+        trimmed_video_path=None,
+        csv_path=_write(ed / "s1_splits.csv", b"CSV"),
+        fcpxml_path=None,
+        report_path=None,
+        overlay_path=None,
+        shots_written=1,
+        anomalies=[],
+        events_csv_path=None,
+    )
+
+    export_storage.push_stage_export_outputs(project, result)
+
+    assert storage.exists(f"{SCOPE}/exports/s1_events.csv") is False  # type: ignore[union-attr]
+
+
+def test_push_stage_outputs_does_not_attempt_delete_without_a_csv_path(tmp_path: Path) -> None:
+    """No splits CSV this run (write_csv off, or no shots) means no
+    ``<base>`` to derive the events.csv sibling from -- the delete is
+    skipped rather than guessing a name."""
+    project = _project(tmp_path)
+    storage = project._storage
+    storage.write_bytes(f"{SCOPE}/exports/s1_events.csv", b"UNRELATED")  # type: ignore[union-attr]
+
+    result = StageExportResult(
+        stage_number=1,
+        trimmed_video_path=None,
+        csv_path=None,
+        fcpxml_path=None,
+        report_path=None,
+        overlay_path=None,
+        shots_written=0,
+        anomalies=[],
+        events_csv_path=None,
+    )
+
+    export_storage.push_stage_export_outputs(project, result)
+
+    # Untouched: this run never produced a splits CSV, so nothing here
+    # claims to know whether s1_events.csv is stale.
+    assert storage.exists(f"{SCOPE}/exports/s1_events.csv") is True  # type: ignore[union-attr]
+
+
+def test_delete_export_file_is_noop_in_local_mode(tmp_path: Path) -> None:
+    project = _project(tmp_path, with_storage=False)
+    export_storage.delete_export_file(project, _exports_dir(tmp_path) / "s1_events.csv")  # no-op, no error
+
+
+def test_delete_export_file_tolerates_a_missing_key(tmp_path: Path) -> None:
+    """``Storage.delete`` is itself a no-op on an absent key; nothing here
+    needs an existence check first."""
+    project = _project(tmp_path)
+    export_storage.delete_export_file(project, _exports_dir(tmp_path) / "never_pushed_events.csv")
+
+
+def test_delete_export_file_failure_is_best_effort(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project = _project(tmp_path)
+    monkeypatch.setattr(
+        project._storage,
+        "delete",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("simulated R2 outage")),
+    )
+    export_storage.delete_export_file(project, _exports_dir(tmp_path) / "s1_events.csv")

@@ -4456,6 +4456,8 @@ def register_job_bodies(state: AppState) -> None:
             bits.append(f"{n} secondary trim{'s' if n != 1 else ''}")
         if result.csv_path is not None:
             bits.append("csv")
+        if result.events_csv_path is not None:
+            bits.append("events")
         if result.fcpxml_path is not None:
             bits.append("fcpxml")
         if result.report_path is not None:
@@ -4497,6 +4499,13 @@ def register_job_bodies(state: AppState) -> None:
         for produced, artifact_kind in (
             (result.trimmed_video_path, "trim"),
             (result.csv_path, "csv"),
+            # events.csv reuses kind "csv" rather than a new ArtifactKind
+            # literal: an unrecognised kind is a ``_record_export_run``
+            # ValidationError (swallowed, so the run loses its whole
+            # artifact record) and older desktops drop an unknown kind on
+            # read -- "csv" is already a safe, understood kind for a
+            # small text deliverable beside the splits CSV.
+            (result.events_csv_path, "csv"),
             (result.fcpxml_path, "fcpxml"),
             (result.report_path, "report"),
             (result.overlay_path, "overlay"),
@@ -4540,6 +4549,7 @@ def register_job_bodies(state: AppState) -> None:
                 "stage_number": stage_number,
                 "trimmed_video": _name(result.trimmed_video_path),
                 "csv": _name(result.csv_path),
+                "events_csv": _name(result.events_csv_path),
                 "fcpxml": _name(result.fcpxml_path),
                 "report": _name(result.report_path),
                 "overlay": _name(result.overlay_path),

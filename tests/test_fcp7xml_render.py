@@ -474,30 +474,42 @@ def test_region_marker_outside_visible_window_is_dropped(tmp_path: Path) -> None
     assert all(m.findtext("name") != "Movement" for m in markers)
 
 
-def test_no_confirmed_regions_is_byte_identical_to_omitting_events(tmp_path: Path) -> None:
-    """A stage built without ``events`` and one built with ``events=()``
-    must render identical bytes."""
-    primary_a = _make_video(tmp_path, "a.mp4")
-    stage_kwargs = {
-        "stage_name": "A",
-        "video_path": primary_a,
-        "video": _meta_30fps(),
-        "shots": [_shot(1, 1.0, 1.0)],
-        "beep_offset_seconds": 5.0,
-        "head_pad_seconds": 5.0,
-        "tail_pad_seconds": 5.0,
-    }
-    out_default = tmp_path / "default.xml"
-    out_explicit = tmp_path / "explicit.xml"
-    comp_default = composition.from_stage_compositions(
-        [StageComposition(**stage_kwargs)], project_name="match"
-    )
-    comp_explicit = composition.from_stage_compositions(
-        [StageComposition(events=(), **stage_kwargs)], project_name="match"
-    )
-    fcp7xml_render.render_fcp7xml(comp_default, output_path=out_default)
-    fcp7xml_render.render_fcp7xml(comp_explicit, output_path=out_explicit)
-    assert out_default.read_bytes() == out_explicit.read_bytes()
+def test_region_marker_end_clamps_to_the_visible_window(tmp_path: Path) -> None:
+    """A region that starts inside the visible window but runs past its
+    end (9.0s to 30.0s, beep at 0s, a generous tail pad keeping the whole
+    20s clip visible) is not dropped -- its out-frame clamps to the
+    window's own end (frame 600 = 20.0s at 30fps) instead of overrunning
+    it."""
+    primary = _make_video(tmp_path, "a.mp4")
+    stages = [
+        StageComposition(
+            stage_name="A",
+            video_path=primary,
+            video=_meta_30fps(),
+            shots=[],
+            beep_offset_seconds=0.0,
+            head_pad_seconds=0.0,
+            tail_pad_seconds=20.0,
+            events=(StageEvent(id="evt-1", kind="movement", start=9.0, end=30.0, source="manual"),),
+        )
+    ]
+    root = _render(stages, tmp_path)
+    markers = [m for m in root.findall(".//track[1]/clipitem/marker") if m.findtext("name") == "Movement"]
+    assert len(markers) == 1
+    assert markers[0].findtext("in") == "270"
+    assert markers[0].findtext("out") == "600"
+
+
+# No byte-identity self-pin here on purpose, for the same reason as the
+# fcpxml_gen tests' equivalent comments: a stage built with ``events=()``
+# vs one that omits ``events`` reduce to the same empty tuple, so comparing
+# their rendered bytes to each other cannot catch a mutant that
+# unconditionally emits a region marker -- both sides would grow the same
+# spurious marker and still match. The no-regions case is instead pinned
+# by the pre-existing, unmodified ``test_markers_land_at_clip_local_frames``
+# (``assert len(markers) == 2`` with no ``events`` argument at all, over
+# ``track[1]/clipitem/marker`` -- every marker on the primary): an exact
+# count that fails under the same "always emit a marker" mutant.
 
 
 # --- PiP via Basic Motion -------------------------------------------------

@@ -192,6 +192,7 @@ def export_stage_tool(
         "stage_number": result.stage_number,
         "trimmed_video_path": _path_or_none(result.trimmed_video_path),
         "csv_path": _path_or_none(result.csv_path),
+        "events_csv_path": _path_or_none(result.events_csv_path),
         "fcpxml_path": _path_or_none(result.fcpxml_path),
         "report_path": _path_or_none(result.report_path),
         "overlay_path": _path_or_none(result.overlay_path),

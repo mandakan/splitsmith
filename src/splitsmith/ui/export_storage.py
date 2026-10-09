@@ -117,6 +117,25 @@ def push_export_file(project: MatchProject | None, local_file: Path) -> None:
         logger.info("export cache: push to %s failed: %s", key, exc)
 
 
+def delete_export_file(project: MatchProject | None, local_file: Path) -> None:
+    """Delete one export deliverable's hosted copy, by the same key
+    ``_storage_export_key`` pushes it under. No-op in local mode (no
+    storage/scope); ``Storage.delete`` is itself a no-op on a missing key
+    (both backends), so this is safe to call whether or not the object
+    was ever pushed. Best-effort like the push helpers: a failure logs at
+    INFO and returns rather than raising, so a cleanup can't fail the job
+    that triggered it.
+    """
+    key = _storage_export_key(project, local_file)
+    if key is None:
+        return
+    storage = project._storage  # type: ignore[union-attr]
+    try:
+        storage.delete(key)
+    except Exception as exc:
+        logger.info("export cache: delete %s failed: %s", key, exc)
+
+
 def push_stage_export_outputs(project: MatchProject | None, result: StageExportResult) -> None:
     """Push every artifact a :func:`exports.export_stage` run produced.
 
@@ -127,6 +146,7 @@ def push_stage_export_outputs(project: MatchProject | None, result: StageExportR
     for p in (
         result.trimmed_video_path,
         result.csv_path,
+        result.events_csv_path,
         result.fcpxml_path,
         result.report_path,
         result.overlay_path,
@@ -141,6 +161,17 @@ def push_stage_export_outputs(project: MatchProject | None, result: StageExportR
     paths.extend(result.secondary_trimmed_paths.values())
     for p in paths:
         push_export_file(project, p)
+    # A stale events.csv from a prior run, now that the stage has no
+    # confirmed regions, must not survive as a downloadable hosted object
+    # once ``export_stage`` has unlinked it locally (review: important
+    # finding 1). Keyed off the splits CSV's name -- the two share
+    # ``<base>`` and ride the same ``write_csv`` gate -- so this fires
+    # only when a splits CSV was actually produced this run.
+    if result.events_csv_path is None and result.csv_path is not None:
+        stale_events_csv = result.csv_path.with_name(
+            result.csv_path.name.replace("_splits.csv", "_events.csv")
+        )
+        delete_export_file(project, stale_events_csv)
 
 
 # --- match-scoped deliverables (#755) --------------------------------------

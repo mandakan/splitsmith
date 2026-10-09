@@ -9,6 +9,7 @@ a rule that changes here changes there in the same change.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from collections.abc import Iterable, Sequence
@@ -20,6 +21,8 @@ from pydantic import BaseModel
 
 from .config import Config, DivisionCapacityConfig, StageEvent
 from .runtime import ENV_CONFIG_FILE
+
+logger = logging.getLogger(__name__)
 
 EVENTS_FIELD: Final = "events"
 EVENTS_SEEDED_FIELD: Final = "events_seeded"
@@ -87,6 +90,29 @@ def confirmed(events: Sequence[StageEvent]) -> list[StageEvent]:
     proposal is a guess nobody looked at; the Coach page shows it, a video
     or an export never does (spec 2026-10-08, part 2)."""
     return [e for e in events if e.source == "manual"]
+
+
+def confirmed_from_doc(doc: Any, *, log_context: str = "") -> list[StageEvent]:
+    """``confirmed(events_from_doc(doc))``, tolerant of a missing, corrupt
+    or wrongly-shaped events list.
+
+    Every rendered or exported surface that reads confirmed regions off an
+    audit doc goes through this (spec 2026-10-08, part 2) instead of
+    re-deriving the same try/except: a bad doc -- not a dict, an event
+    with ``end <= start``, a non-object entry -- degrades to no regions
+    (the conservative read: under-report rather than invent) instead of
+    failing the whole render or export. ``log_context`` names the file or
+    stage in the one warning this logs, e.g. an audit path's name; omit it
+    for a caller with nothing more specific to say.
+    """
+    if not isinstance(doc, dict):
+        return []
+    try:
+        return confirmed(events_from_doc(doc))
+    except (ValueError, TypeError) as exc:
+        where = f"{log_context}: " if log_context else ""
+        logger.warning("%sunreadable stage events, treating as none: %s", where, exc)
+        return []
 
 
 def shot_times_from_doc(doc: dict[str, Any]) -> list[float]:

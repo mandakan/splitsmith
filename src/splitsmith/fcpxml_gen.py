@@ -634,21 +634,25 @@ def generate_fcpxml(
 
     # Region markers (spec 2026-10-08, part 2). ``events`` is already the
     # caller's confirmed-only list; a region whose start falls outside the
-    # clip is dropped, the same rule as a shot marker above.
+    # clip is dropped, the same rule as a shot marker above. A region whose
+    # end runs past the clip has its end clamped to the clip's own duration
+    # rather than emitting a marker FCP would reject for overrunning the
+    # asset -- the user still sees the region start, just not a range that
+    # claims frames that don't exist on this clip.
     for event in events:
         start_clip_local = beep_offset_seconds + event.start
-        end_clip_local = beep_offset_seconds + event.end
+        end_clip_local = min(beep_offset_seconds + event.end, video.duration_seconds)
         if not 0.0 <= start_clip_local < video.duration_seconds:
             continue
         start_frames = round(start_clip_local / fd_seconds)
         end_frames = round(end_clip_local / fd_seconds)
-        duration_frames = max(1, end_frames - start_frames)
+        region_duration_frames = max(1, end_frames - start_frames)
         ET.SubElement(
             asset_clip,
             "marker",
             {
                 "start": _frame_aligned_str(start_frames, fd_num, fd_den),
-                "duration": _frame_aligned_str(duration_frames, fd_num, fd_den),
+                "duration": _frame_aligned_str(region_duration_frames, fd_num, fd_den),
                 "value": _region_marker_label(event),
             },
         )
@@ -1594,9 +1598,12 @@ def generate_match_fcpxml(
 
         # Region markers (spec 2026-10-08, part 2). ``stage.events`` is
         # already confirmed-only; same drop-outside-window rule as shots.
+        # A region whose end runs past the visible window has its end
+        # clamped to the window's own end rather than claiming spine time
+        # outside what this stage occupies.
         for event in stage.events:
             region_start_seconds = stage.beep_offset_seconds + event.start
-            region_end_seconds = stage.beep_offset_seconds + event.end
+            region_end_seconds = min(stage.beep_offset_seconds + event.end, eff_end_seconds)
             if not head_trim_seconds_for_window <= region_start_seconds < eff_end_seconds:
                 continue
             start_frames = round(region_start_seconds / fd_seconds)

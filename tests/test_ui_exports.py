@@ -1279,3 +1279,135 @@ def test_export_stage_fcpxml_with_no_confirmed_regions_matches_output_without_an
     bytes_no_events = _run(doc_no_events)
     bytes_auto_only = _run(doc_auto_only)
     assert bytes_no_events == bytes_auto_only
+
+
+@pytest.mark.parametrize(
+    "corrupt_events",
+    [
+        pytest.param(
+            [{"id": "evt-1", "kind": "movement", "start": 6.0, "end": 3.0, "source": "manual"}],
+            id="end_before_start",
+        ),
+        pytest.param({"not": "a list"}, id="a_dict_instead_of_a_list"),
+        pytest.param(42, id="an_int_instead_of_a_list"),
+    ],
+)
+def test_export_stage_corrupt_events_field_exports_moving_false_and_no_events_csv(
+    tmp_path: Path, corrupt_events: object
+) -> None:
+    """A malformed ``events`` field -- an event with ``end < start``, the
+    field holding a dict instead of a list, or an int -- must not fail
+    the export. It degrades to no confirmed regions: ``moving`` reads
+    false for every shot (including one that would have fallen inside the
+    bad region had it been valid) and no ``events.csv`` is written."""
+    audit_path = tmp_path / "stage1.json"
+    doc = _audit_payload(
+        shots=[{"shot_number": 1, "candidate_number": 1, "time": 9.0, "ms_after_beep": 4000}]
+    )
+    doc["events"] = corrupt_events
+    audit_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    exports_dir = tmp_path / "exports"
+    result = exports_mod.export_stage(
+        request=exports_mod.StageExportRequest(
+            stage_number=1, write_trim=False, write_csv=True, write_fcpxml=False, write_report=False
+        ),
+        audit_path=audit_path,
+        exports_dir=exports_dir,
+        source_video_path=None,
+        pre_buffer_seconds=5.0,
+        post_buffer_seconds=5.0,
+        stage_data=StageData(
+            stage_number=1,
+            stage_name="Stage 1 -- H1",
+            time_seconds=8.0,
+            scorecard_updated_at=datetime(2026, 5, 2, 14, 30, tzinfo=UTC),
+        ),
+        beep_time_in_source=10.0,
+        config=Config(),
+    )
+    assert result.csv_path is not None
+    rows = list(csv.reader(result.csv_path.open()))
+    assert rows[1][-1] == "false"
+    assert result.events_csv_path is None
+    assert not (exports_dir / "stage1_stage-1-h1_events.csv").exists()
+
+
+def test_export_stage_records_events_csv_path_on_the_result(tmp_path: Path) -> None:
+    """``events_csv_path`` on the result surfaces the file the same way
+    ``csv_path`` / ``fcpxml_path`` do, so a caller can offer it as a
+    download without re-deriving the filename."""
+    audit_path = tmp_path / "stage1.json"
+    doc = _audit_payload(
+        shots=[{"shot_number": 1, "candidate_number": 1, "time": 9.0, "ms_after_beep": 4000}]
+    )
+    doc["events"] = [_event("evt-1", "movement", 3.0, 6.0, source="manual")]
+    audit_path.write_text(json.dumps(doc), encoding="utf-8")
+
+    exports_dir = tmp_path / "exports"
+    result = exports_mod.export_stage(
+        request=exports_mod.StageExportRequest(
+            stage_number=1, write_trim=False, write_csv=True, write_fcpxml=False, write_report=False
+        ),
+        audit_path=audit_path,
+        exports_dir=exports_dir,
+        source_video_path=None,
+        pre_buffer_seconds=5.0,
+        post_buffer_seconds=5.0,
+        stage_data=StageData(
+            stage_number=1,
+            stage_name="Stage 1 -- H1",
+            time_seconds=8.0,
+            scorecard_updated_at=datetime(2026, 5, 2, 14, 30, tzinfo=UTC),
+        ),
+        beep_time_in_source=10.0,
+        config=Config(),
+    )
+    assert result.events_csv_path == exports_dir / "stage1_stage-1-h1_events.csv"
+    assert result.events_csv_path.exists()
+
+
+def test_export_stage_removes_a_stale_events_csv_when_regions_are_dropped(tmp_path: Path) -> None:
+    """A re-export after the user deletes the stage's last confirmed
+    region must not leave the previous run's events.csv behind -- a
+    download route serving it would hand out a region that no longer
+    exists (#review: important finding 1)."""
+    audit_path = tmp_path / "stage1.json"
+    exports_dir = tmp_path / "exports"
+
+    def _export() -> exports_mod.StageExportResult:
+        return exports_mod.export_stage(
+            request=exports_mod.StageExportRequest(
+                stage_number=1, write_trim=False, write_csv=True, write_fcpxml=False, write_report=False
+            ),
+            audit_path=audit_path,
+            exports_dir=exports_dir,
+            source_video_path=None,
+            pre_buffer_seconds=5.0,
+            post_buffer_seconds=5.0,
+            stage_data=StageData(
+                stage_number=1,
+                stage_name="Stage 1 -- H1",
+                time_seconds=8.0,
+                scorecard_updated_at=datetime(2026, 5, 2, 14, 30, tzinfo=UTC),
+            ),
+            beep_time_in_source=10.0,
+            config=Config(),
+        )
+
+    shots = [{"shot_number": 1, "candidate_number": 1, "time": 9.0, "ms_after_beep": 4000}]
+    doc_with_region = _audit_payload(shots=shots)
+    doc_with_region["events"] = [_event("evt-1", "movement", 3.0, 6.0, source="manual")]
+    audit_path.write_text(json.dumps(doc_with_region), encoding="utf-8")
+    first = _export()
+    events_csv = exports_dir / "stage1_stage-1-h1_events.csv"
+    assert first.events_csv_path == events_csv
+    assert events_csv.exists()
+
+    # The user deleted the region; re-export with none left.
+    doc_without_region = _audit_payload(shots=shots)
+    doc_without_region["events"] = []
+    audit_path.write_text(json.dumps(doc_without_region), encoding="utf-8")
+    second = _export()
+    assert second.events_csv_path is None
+    assert not events_csv.exists()
