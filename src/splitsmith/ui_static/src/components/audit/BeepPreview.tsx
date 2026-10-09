@@ -52,47 +52,54 @@ export function BeepPreview({ slug, videoPath, proxyReady, mediaOnDesktop, initi
     return () => v.removeEventListener("loadedmetadata", seek);
   }, [initialTime]);
 
-  const placeholder = "flex aspect-video w-full flex-col items-center justify-center gap-2 bg-black p-4 text-center text-md text-ink-2";
+  const placeholder = "flex h-full w-full flex-col items-center justify-center gap-2 bg-black p-4 text-center text-md text-ink-2";
   return (
-    <div className="overflow-hidden rounded-[10px] border border-rule bg-surface">
-      {!proxyReady ? (
-        <div role="status" className={placeholder}>
-          <Clock className="size-5 text-muted" aria-hidden />
-          {mediaOnDesktop ? (
-            <>
-              <span>Video stays on the desktop install</span>
-              <span className="text-sm text-muted">Raw footage is not synced to hosted</span>
-            </>
-          ) : (
-            <>
-              <span>Preview generating</span>
-              <span className="text-sm text-muted">Check back shortly</span>
-            </>
-          )}
-        </div>
-      ) : videoError ? (
-        <div role="alert" className={placeholder}>
-          <span>Preview unavailable</span>
-          <Button type="button" size="sm" onClick={() => setVideoError(false)}>
-            Retry
-          </Button>
-        </div>
-      ) : (
-        <video
-          ref={(el) => {
-            localRef.current = el;
-            videoRef.current = el;
-          }}
-          src={api.videoStreamUrl(slug, videoPath, "proxy")}
-          playsInline
-          controls
-          preload="metadata"
-          className="aspect-video w-full bg-black object-cover"
-          aria-label="Camera preview, the playback master for the beep picker"
-          title="Space toggles play/pause"
-          onError={() => setVideoError(true)}
-        />
-      )}
+    <div className="flex flex-col overflow-hidden rounded-[10px] border border-rule bg-surface lg:h-full">
+      {/* Below lg: an aspect-video tile capped the way Audit's own tile is
+       *  (max-h-[max(240px,calc(100dvh-620px))]). On lg this cell fills
+       *  whatever the bounded top row (BeepStep) leaves it, floored at
+       *  200px, same as MultiCamColumn's primary tile, so the timeline
+       *  band below always has room on a laptop screen. */}
+      <div className="relative aspect-video max-h-[max(240px,calc(100dvh-620px))] w-full flex-1 bg-black lg:aspect-auto lg:max-h-none lg:min-h-[200px]">
+        {!proxyReady ? (
+          <div role="status" className={placeholder}>
+            <Clock className="size-5 text-muted" aria-hidden />
+            {mediaOnDesktop ? (
+              <>
+                <span>Video stays on the desktop install</span>
+                <span className="text-sm text-muted">Raw footage is not synced to hosted</span>
+              </>
+            ) : (
+              <>
+                <span>Preview generating</span>
+                <span className="text-sm text-muted">Check back shortly</span>
+              </>
+            )}
+          </div>
+        ) : videoError ? (
+          <div role="alert" className={placeholder}>
+            <span>Preview unavailable</span>
+            <Button type="button" size="sm" onClick={() => setVideoError(false)}>
+              Retry
+            </Button>
+          </div>
+        ) : (
+          <video
+            ref={(el) => {
+              localRef.current = el;
+              videoRef.current = el;
+            }}
+            src={api.videoStreamUrl(slug, videoPath, "proxy")}
+            playsInline
+            controls
+            preload="metadata"
+            className="h-full w-full bg-black object-contain"
+            aria-label="Camera preview, the playback master for the beep picker"
+            title="Space toggles play/pause"
+            onError={() => setVideoError(true)}
+          />
+        )}
+      </div>
       <div className="border-t border-rule px-3 py-1.5">
         <Label>{caption}</Label>
       </div>

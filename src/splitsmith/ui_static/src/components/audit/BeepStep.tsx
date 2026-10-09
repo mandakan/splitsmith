@@ -345,7 +345,7 @@ export function BeepStep({
           </div>
           <div
             data-testid="beep-top-row"
-            className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start"
+            className="grid gap-4 lg:h-[max(300px,calc(100dvh-560px))] lg:grid-cols-[minmax(0,1fr)_340px] lg:grid-rows-[minmax(0,1fr)]"
           >
             <BeepPreview
               key={keyOf(item)}
@@ -358,10 +358,11 @@ export function BeepStep({
               caption="Frame at the selected candidate"
             />
             <div
-              className="overflow-hidden rounded-[10px] border border-rule bg-surface"
+              className="overflow-hidden rounded-[10px] border border-rule bg-surface lg:flex lg:h-full lg:min-h-0 lg:flex-col"
               role="radiogroup"
               aria-label="Beep candidates"
             >
+              <div className="lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
               {candidates.map((c) => {
                 const selected =
                   selectedTime != null &&
@@ -412,6 +413,7 @@ export function BeepStep({
               ) : null}
               <div className="px-3 py-2 text-sm text-muted">
                 Or pick the beep on the timeline below
+              </div>
               </div>
             </div>
           </div>

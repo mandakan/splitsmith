@@ -297,6 +297,14 @@ describe("BeepStep", () => {
     ).toBeTruthy();
   });
 
+  it("the top row is height-bounded on lg, like Audit's, so the band stays on a laptop screen", () => {
+    renderStep(hookState([item()]));
+    const topRow = screen.getByTestId("beep-top-row");
+    expect(topRow.className).toContain(
+      "lg:h-[max(300px,calc(100dvh-560px))]",
+    );
+  });
+
   it("'+' typed in a focused text field never reaches the band, and Cmd/Ctrl+Enter still confirms", async () => {
     const input = document.createElement("input");
     input.type = "text";
