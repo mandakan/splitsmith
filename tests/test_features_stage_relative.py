@@ -106,6 +106,20 @@ def test_nan_source_is_zero_and_excluded_from_median():
     assert rel[3, col] == pytest.approx(500.0 - 1100.0)
 
 
+def test_negative_attack_keeps_its_value():
+    """Attack is signed (a louder sample in the 10 ms before the onset makes it
+    negative), so it must not go through the log, which clamps every negative
+    value to one number."""
+    hand = np.ones((4, feat.HAND_FEATURE_DIM))
+    hand[:, 1] = [0.9, 0.8, 0.7, 0.1]
+    hand[:, feat._HAND_INDEX["attack"]] = [10.0, 20.0, 30.0, -50.0]
+    rel = _rel(hand)
+    c = feat.REL_FEATURE_NAMES.index("rel_attack")
+    assert rel[3, c] == pytest.approx(-50.0 - 20.0)
+    hand[3, feat._HAND_INDEX["attack"]] = -5.0
+    assert _rel(hand)[3, c] == pytest.approx(-5.0 - 20.0)
+
+
 def test_relative_level_ignores_gain_on_real_audio():
     hand, _, _ = _stage(GO3S_FIXTURE)
     quiet, _, _ = _stage(GO3S_FIXTURE, gain=0.25)
@@ -192,6 +206,17 @@ def test_trainer_and_runtime_build_identical_matrices():
             )
         )
     np.testing.assert_array_equal(trainer, np.concatenate(runtime_parts))
+
+
+def test_mined_rows_are_refused():
+    """Mined negatives come from a full-file detector pass outside the stage
+    window; mixed into a stage's reference they would give the trainer a
+    universe the runtime never sees."""
+    build = _build_script()
+    rows = _rows("stage-a", 6, 5, None)
+    rows[2]["mined"] = True
+    with pytest.raises(build.BuildError, match="mined"):
+        build._x_from(rows)
 
 
 def test_round_count_does_not_change_the_features():

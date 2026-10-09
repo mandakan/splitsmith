@@ -370,9 +370,10 @@ _REL_LOG_SOURCES: tuple[str, ...] = (
     "spectral_flatness",
     "spectral_peak_ratio",
     "rms_ratio",
-    "attack",
 )
-_REL_LIN_HAND_SOURCES: tuple[str, ...] = ("ratio_1_20", "ratio_5_20")
+# ``attack`` is signed (a louder sample in the 10 ms before the onset makes
+# it negative), so it is linear: a log would clamp every negative value to one.
+_REL_LIN_HAND_SOURCES: tuple[str, ...] = ("attack", "ratio_1_20", "ratio_5_20")
 _REL_LIN_TIMBRE_SOURCES: tuple[str, ...] = ("spectral_centroid_hz", "high_band_db")
 REL_FEATURE_NAMES: tuple[str, ...] = tuple(
     f"rel_{s}"

@@ -67,10 +67,13 @@ Absolute, per candidate, from the 40 ms starting 2 ms after the onset (Hann wind
 - `high_band_db`: energy above 4 kHz relative to the band, in dB
 
 Stage-relative, per candidate, for each of these source columns:
-`peak_amp, rms_post, tail_amp, peak_floor_ratio, spectral_flatness, spectral_peak_ratio, rms_ratio,
-attack` (log scale: `log(x) - median(log(ref))`) and
-`ratio_1_20, ratio_5_20, gunshot_prob, clap_diff, spectral_centroid_hz, high_band_db, clap_sim_00..09`
-(linear: `x - median(ref)`). That is 8 + 16 = 24 columns, named `rel_<source>`.
+`peak_amp, rms_post, tail_amp, peak_floor_ratio, spectral_flatness, spectral_peak_ratio, rms_ratio`
+(log scale: `log(x) - median(log(ref))`) and
+`attack, ratio_1_20, ratio_5_20, gunshot_prob, clap_diff, spectral_centroid_hz, high_band_db,
+clap_sim_00..09` (linear: `x - median(ref)`). That is 7 + 17 = 24 columns, named `rel_<source>`.
+`attack` is signed (negative when the 10 ms before the onset holds a louder sample, 42 % of
+candidates), so it is linear; the first draft logged it, which clamped every negative value to one
+number (found in the final review).
 
 ### The reference set
 

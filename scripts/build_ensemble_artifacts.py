@@ -357,6 +357,15 @@ def _x_from(universe: list[dict]) -> np.ndarray:
     """
     if not universe:
         return np.zeros((0, feat.VOTER_C_FEATURE_DIM), dtype=np.float64)
+    if any(row.get("mined") for row in universe):
+        # Mined negatives come from a full-file detector pass outside the
+        # stage window: in a stage's reference they would give the trainer a
+        # universe the runtime never sees. Mining needs a stage-aware rework
+        # before it can return.
+        raise BuildError(
+            "--with-mining is not supported with the stage-relative voter C features: "
+            "mined rows are not part of the stage's detector universe."
+        )
     out = np.zeros((len(universe), feat.VOTER_C_FEATURE_DIM), dtype=np.float64)
     by_fixture: dict[str, list[int]] = {}
     for i, row in enumerate(universe):
