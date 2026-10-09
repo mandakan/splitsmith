@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "headcam-detection-meta-glasses",
+      "date": "2026-10-10",
+      "title": "Better shot detection on Meta glasses footage",
+      "body": "Shot detection now finds far more shots in footage from recent Meta Vanguard glasses, including stages without a round count. It applies to stages detected from now on."
+    },
+    {
       "id": "coach-timeline",
       "date": "2026-10-09",
       "title": "A full-width, zoomable timeline",

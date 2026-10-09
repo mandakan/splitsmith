@@ -1,7 +1,7 @@
 {
-  "voter_a_floor": 0.013084496744631137,
+  "voter_a_floor": 0.013038689199254279,
   "voter_b_threshold": 0.03676433116197586,
-  "voter_c_threshold": 0.198137727362238,
+  "voter_c_threshold": 0.27914589972185405,
   "voter_e_threshold": null,
   "voter_c_target_recall": 0.95,
   "voter_e_target_recall": null,
@@ -120,6 +120,22 @@
     "stage-shots-hfo-masters-2026-stage9-s36ed6e4e",
     "stage-shots-hfo-masters-2026-stage9-s97dcec94",
     "stage-shots-hfo-masters-2026-stage9-s9c1a2e74",
+    "stage-shots-hostfinalen-xi-2026-stage1-s0fe3d797",
+    "stage-shots-hostfinalen-xi-2026-stage1-s97dcec94",
+    "stage-shots-hostfinalen-xi-2026-stage2-s0fe3d797",
+    "stage-shots-hostfinalen-xi-2026-stage2-s97dcec94",
+    "stage-shots-hostfinalen-xi-2026-stage3-s0fe3d797",
+    "stage-shots-hostfinalen-xi-2026-stage3-s97dcec94",
+    "stage-shots-hostfinalen-xi-2026-stage4-s0fe3d797",
+    "stage-shots-hostfinalen-xi-2026-stage4-s97dcec94",
+    "stage-shots-hostfinalen-xi-2026-stage5-s0fe3d797",
+    "stage-shots-hostfinalen-xi-2026-stage5-s97dcec94",
+    "stage-shots-hostfinalen-xi-2026-stage6-s0fe3d797",
+    "stage-shots-hostfinalen-xi-2026-stage6-s97dcec94",
+    "stage-shots-hostfinalen-xi-2026-stage7-s0fe3d797",
+    "stage-shots-hostfinalen-xi-2026-stage7-s97dcec94",
+    "stage-shots-hostfinalen-xi-2026-stage8-s0fe3d797",
+    "stage-shots-hostfinalen-xi-2026-stage8-s97dcec94",
     "stage-shots-tallmilan-2026-stage1-s36ed6e4e",
     "stage-shots-tallmilan-2026-stage2-s36ed6e4e",
     "stage-shots-tallmilan-2026-stage2-s97dcec94-apple-iphone17pro",
@@ -150,8 +166,8 @@
     "stage-shots-vads-easter-shoot-gotta-go-fast-stage6-s0fe3d797",
     "stage-shots-vads-easter-shoot-gotta-go-fast-stage6-s36ed6e4e"
   ],
-  "n_calibration_candidates": 6077,
-  "n_calibration_positives": 2603,
+  "n_calibration_candidates": 7270,
+  "n_calibration_positives": 2953,
   "voter_c_feature_dim": 31,
   "voter_c_onnx_artifacts": {
     "handheld": "voter_c_gbdt_handheld.onnx",
@@ -161,7 +177,7 @@
   "voter_e_frame_offsets": null,
   "voter_e_probe_artifact": null,
   "voter_e_audio_strong_min_votes_recommended": null,
-  "built_at": "2026-08-17T15:27:15.854625+00:00",
+  "built_at": "2026-10-09T17:59:43.432076+00:00",
   "default_camera_class": "headcam",
   "thresholds_by_camera_class": {
     "handheld": {
@@ -277,11 +293,11 @@
       ]
     },
     "headcam": {
-      "voter_a_floor": 0.013084496744631137,
+      "voter_a_floor": 0.013038689199254279,
       "voter_b_threshold": 0.03676433116197586,
-      "voter_c_threshold": 0.198137727362238,
-      "n_calibration_candidates": 1572,
-      "n_calibration_positives": 410,
+      "voter_c_threshold": 0.27914589972185405,
+      "n_calibration_candidates": 2765,
+      "n_calibration_positives": 760,
       "calibration_fixtures": [
         "stage-shots-blacksmith-2026-stage1-s97dcec94",
         "stage-shots-blacksmith-2026-stage2-s97dcec94",
@@ -298,6 +314,22 @@
         "stage-shots-blacksmith-handgun-open-2026-stage6-s0fe3d797",
         "stage-shots-blacksmith-handgun-open-2026-stage7-s0fe3d797",
         "stage-shots-blacksmith-handgun-open-2026-stage8-s0fe3d797",
+        "stage-shots-hostfinalen-xi-2026-stage1-s0fe3d797",
+        "stage-shots-hostfinalen-xi-2026-stage1-s97dcec94",
+        "stage-shots-hostfinalen-xi-2026-stage2-s0fe3d797",
+        "stage-shots-hostfinalen-xi-2026-stage2-s97dcec94",
+        "stage-shots-hostfinalen-xi-2026-stage3-s0fe3d797",
+        "stage-shots-hostfinalen-xi-2026-stage3-s97dcec94",
+        "stage-shots-hostfinalen-xi-2026-stage4-s0fe3d797",
+        "stage-shots-hostfinalen-xi-2026-stage4-s97dcec94",
+        "stage-shots-hostfinalen-xi-2026-stage5-s0fe3d797",
+        "stage-shots-hostfinalen-xi-2026-stage5-s97dcec94",
+        "stage-shots-hostfinalen-xi-2026-stage6-s0fe3d797",
+        "stage-shots-hostfinalen-xi-2026-stage6-s97dcec94",
+        "stage-shots-hostfinalen-xi-2026-stage7-s0fe3d797",
+        "stage-shots-hostfinalen-xi-2026-stage7-s97dcec94",
+        "stage-shots-hostfinalen-xi-2026-stage8-s0fe3d797",
+        "stage-shots-hostfinalen-xi-2026-stage8-s97dcec94",
         "stage-shots-tallmilan-2026-stage2-s97dcec94",
         "stage-shots-tallmilan-2026-stage3-s97dcec94",
         "stage-shots-tallmilan-2026-stage4-s97dcec94",
@@ -308,8 +340,8 @@
     }
   },
   "amp_floor_by_camera_model": {
-    "insta360 go 3s": 0.23,
-    "meta vanguard": 0.15
+    "insta360 go 3s": 0.25,
+    "meta vanguard": 0.13
   },
   "camera_model_metadata": {
     "insta360 go 3s": {
@@ -331,41 +363,15 @@
       "voter_c_fn": 109
     },
     "headcam": {
-      "voter_c_precision_cv": 0.8864,
-      "voter_c_recall_cv": 0.9512,
-      "voter_c_f1_cv": 0.9176,
-      "voter_c_tp": 390,
-      "voter_c_fp": 50,
-      "voter_c_fn": 20
+      "voter_c_precision_cv": 0.9014,
+      "voter_c_recall_cv": 0.95,
+      "voter_c_f1_cv": 0.925,
+      "voter_c_tp": 722,
+      "voter_c_fp": 79,
+      "voter_c_fn": 38
     }
   },
-  "voter_e_provenance": {
-    "n_visual_candidates": 0,
-    "n_visual_skipped_missing_video": 21,
-    "missing_video_fixtures": [
-      "stage-shots-blacksmith-2026-stage1-s97dcec94",
-      "stage-shots-blacksmith-2026-stage2-s97dcec94",
-      "stage-shots-blacksmith-2026-stage3-s97dcec94",
-      "stage-shots-blacksmith-2026-stage5-s97dcec94",
-      "stage-shots-blacksmith-2026-stage6-s97dcec94",
-      "stage-shots-blacksmith-2026-stage7-s97dcec94",
-      "stage-shots-blacksmith-2026-stage8-s97dcec94",
-      "stage-shots-blacksmith-handgun-open-2026-stage1-s0fe3d797",
-      "stage-shots-blacksmith-handgun-open-2026-stage2-s0fe3d797",
-      "stage-shots-blacksmith-handgun-open-2026-stage3-s0fe3d797",
-      "stage-shots-blacksmith-handgun-open-2026-stage4-s0fe3d797",
-      "stage-shots-blacksmith-handgun-open-2026-stage5-s0fe3d797",
-      "stage-shots-blacksmith-handgun-open-2026-stage6-s0fe3d797",
-      "stage-shots-blacksmith-handgun-open-2026-stage7-s0fe3d797",
-      "stage-shots-blacksmith-handgun-open-2026-stage8-s0fe3d797",
-      "stage-shots-tallmilan-2026-stage2-s97dcec94",
-      "stage-shots-tallmilan-2026-stage3-s97dcec94",
-      "stage-shots-tallmilan-2026-stage4-s97dcec94",
-      "stage-shots-tallmilan-2026-stage5-s97dcec94",
-      "stage-shots-tallmilan-2026-stage6-s97dcec94",
-      "stage-shots-tallmilan-2026-stage7-s97dcec94"
-    ]
-  },
+  "voter_e_provenance": {},
   "n_mined_negatives_used": 0,
   "mining_source_fixtures": [],
   "model_artifacts": {
