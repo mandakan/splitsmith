@@ -37,6 +37,8 @@ import {
 } from "@/components/layout/shellChromeContext";
 import { MobileNav } from "@/components/match/MobileNav";
 import { ShooterChipStrip } from "@/components/match/ShooterChipStrip";
+import { ShooterSheet, type SheetShooter } from "@/components/shooters/ShooterSheet";
+import { identityMark } from "@/lib/identityMark";
 import { FOOTAGE_HINT, matchNavItems } from "@/components/match/navItems";
 import { Brand } from "@/components/ui";
 import {
@@ -281,6 +283,24 @@ export function MatchShell() {
   const [health, setHealth] = useState<ServerHealth | null>(null);
   const [project, setProject] = useState<MatchProject | null>(null);
   const [shooters, setShooters] = useState<ShooterListEntry[]>([]);
+  // The shooter whose look the sheet edits (spec 2026-10-09), from a chip's menu.
+  const [editLook, setEditLook] = useState<SheetShooter | null>(null);
+  const openLook = useCallback((s: ShooterListEntry) => {
+    if (s.selected_shooter_id == null) return;
+    setEditLook({
+      shooterId: s.selected_shooter_id,
+      name: s.name,
+      accent: s.identity?.accent ?? null,
+      club: s.identity?.club ?? null,
+      logoUrl: identityMark(s.slug, s.identity).logo,
+    });
+  }, []);
+  const reloadShooters = useCallback(() => {
+    api
+      .listMatchShooters()
+      .then((r) => setShooters(r.shooters))
+      .catch(() => undefined);
+  }, []);
   // Null until the first listMatchShooters resolves - the banner only
   // renders once we actually know the match is a desktop mirror, not on
   // every load by default (#631 Task 10).
@@ -560,6 +580,13 @@ export function MatchShell() {
         urlBase={breadcrumbUrlBase(relativePath)}
         label={shooterStripLabel}
         variant="inline"
+        onEditLook={openLook}
+      />
+      <ShooterSheet
+        open={editLook !== null}
+        onClose={() => setEditLook(null)}
+        shooter={editLook}
+        onChanged={reloadShooters}
       />
     </div>
   ) : null;
