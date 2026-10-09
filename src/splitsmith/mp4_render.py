@@ -79,8 +79,8 @@ from .composition import (
     sting_name,
     xfade_name,
 )
-from .logo_spots import paste_logo
-from .look_brand import brand_mark_json
+from .logo_spots import LOGO_MARGIN, WATERMARK_HEIGHT, paste_logo, watermark_image
+from .look_brand import brand_logo_path, brand_mark_json
 from .look_motion import MotionClipError, motion_overlay_filters, write_motion_clip
 from .look_sting import sting_motion, sting_overlay_filters
 from .looks import load_look, sting_template_for
@@ -310,6 +310,7 @@ def _render_with_work_dir(
     summary_logo = (
         shooters[0].logo_path if "summaries" in composition.logo_spots and len(shooters) == 1 else None
     )
+    watermark = _prepare_watermark(composition, overlay_theme, work_dir)
     segments: list[tuple[Path, float]] = []
     generated = False
     # Every item, plus two edges and the boundary per transition, plus the stitch.
@@ -575,6 +576,7 @@ def _render_with_work_dir(
                     youtube_preset=youtube_preset,
                     lower_third=lt,
                     primary_audio=prep.primary_audio,
+                    watermark=watermark,
                 )
 
             index = next_step()
@@ -696,6 +698,7 @@ def _render_with_work_dir(
                 youtube_preset=youtube_preset,
                 lower_third=lower_third,
                 primary_audio=prep.primary_audio,
+                watermark=watermark,
             )
             if lower_third is not None and prep.motion is not None:
                 return encode(
@@ -1491,6 +1494,42 @@ class _LowerThirdInput:
         return self.delay_seconds + self.card.duration_seconds - self.skip_seconds
 
 
+@dataclass(frozen=True)
+class _WatermarkInput:
+    """Your brand over the stage footage (the ``watermark`` logo spot): a
+    prepared PNG in the work dir and its top-left corner on the frame."""
+
+    path: Path
+    x: int
+    y: int
+
+
+def _prepare_watermark(
+    composition: Composition, overlay_theme: ThemeName, work_dir: Path
+) -> _WatermarkInput | None:
+    """The watermark PNG for this render, written once into ``work_dir``
+    (the segment cache keys it by content), or ``None`` when the spot is off
+    or there is no brand logo to draw."""
+    if "watermark" not in composition.logo_spots:
+        return None
+    logo = brand_logo_path(load_look(overlay_theme), composition.brand)
+    if logo is None:
+        return None
+    height = composition.sequence.height
+    mark = watermark_image(logo, height=max(1, round(height * WATERMARK_HEIGHT)))
+    if mark is None:
+        return None
+    path = work_dir / "watermark.png"
+    mark.save(path)
+    margin = round(height * LOGO_MARGIN)
+    x = (
+        margin
+        if composition.watermark_corner == "top-left"
+        else composition.sequence.width - margin - mark.width
+    )
+    return _WatermarkInput(path=path, x=x, y=margin)
+
+
 def _build_stage_command(
     plan: _StagePlan,
     *,
@@ -1500,6 +1539,7 @@ def _build_stage_command(
     youtube_preset: bool = False,
     lower_third: _LowerThirdInput | None = None,
     primary_audio: bool = True,
+    watermark: _WatermarkInput | None = None,
 ) -> tuple[str, ...]:
     """Build the ffmpeg invocation that renders one stage to ``output_path``.
 
@@ -1595,10 +1635,31 @@ def _build_stage_command(
                 str(lower_third.path),
             ]
 
+    watermark_graph: tuple[int, int, int] | None = None
+    if watermark is not None:
+        watermark_index = (
+            1 + len(plan.cam_alignments) + (1 if overlay_index is not None else 0) + (1 if lower_third else 0)
+        )
+        watermark_graph = (watermark_index, watermark.x, watermark.y)
+        args += [
+            "-loop",
+            "1",
+            "-framerate",
+            _rate_string(sequence),
+            "-t",
+            f"{plan.effective_seconds:g}",
+            "-i",
+            str(watermark.path),
+        ]
+
     audio_index: int | None = None
     if primary_audio:
         audio_index = (
-            1 + len(plan.cam_alignments) + (1 if overlay_index is not None else 0) + (1 if lower_third else 0)
+            1
+            + len(plan.cam_alignments)
+            + (1 if overlay_index is not None else 0)
+            + (1 if lower_third else 0)
+            + (1 if watermark is not None else 0)
         )
         args += ["-i", str(stage.primary.path)]
 
@@ -1608,6 +1669,7 @@ def _build_stage_command(
         overlay_input_index=overlay_index,
         lower_third=lower_third_graph,
         audio_input_index=audio_index,
+        watermark=watermark_graph,
     )
 
     args += ["-filter_complex", filter_graph, "-map", "[final]"]
@@ -1704,6 +1766,7 @@ def _build_stage_filter_graph(
     overlay_input_index: int | None,
     lower_third: _LowerThirdGraph | None = None,
     audio_input_index: int | None = None,
+    watermark: tuple[int, int, int] | None = None,
 ) -> str:
     """Compose primary + cams + overlay into a single ``-filter_complex``.
 
@@ -1747,6 +1810,13 @@ def _build_stage_filter_graph(
         parts.append(f"[{overlay_input_index}:v]setpts=PTS-STARTPTS[overlay_v]")
         parts.append(f"[{base_label}][overlay_v]overlay=0:0[withov]")
         base_label = "withov"
+
+    if watermark is not None:
+        # Your brand (the ``watermark`` logo spot), above the HUD and under
+        # a lower third, for the whole stage.
+        wm_index, wm_x, wm_y = watermark
+        parts.append(f"[{base_label}][{wm_index}:v]overlay={wm_x}:{wm_y}:format=auto[withwm]")
+        base_label = "withwm"
 
     if lower_third is not None:
         input_index, seconds, is_clip, lt_delay, lt_skip = lower_third

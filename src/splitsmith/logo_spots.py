@@ -10,6 +10,10 @@ title page, the stage slates and the closing card always draw theirs; a
 - ``thumbnail``: the YouTube thumbnail is a card (``thumbnail_card``) over
   an action frame, with the match name and every logo, instead of a frame
   of the title page.
+- ``watermark``: your brand, small and half see-through, over the stage
+  footage in the top-left corner (top right when the HUD sits top left).
+  For videos reposted off YouTube, where the channel watermark does not
+  follow; only ``everything`` turns it on.
 
 Each logo keeps one corner everywhere (your brand top left, the shooter top
 right, the event in the centre), so no frame shows the same logo twice. The
@@ -32,7 +36,7 @@ from PIL import Image
 
 logger = logging.getLogger(__name__)
 
-LogoSpot = Literal["wipe", "summaries", "thumbnail"]
+LogoSpot = Literal["wipe", "summaries", "thumbnail", "watermark"]
 LOGO_SPOTS: tuple[LogoSpot, ...] = get_args(LogoSpot)
 
 LogoPreset = Literal["cards", "polished", "everything"]
@@ -48,6 +52,9 @@ DEFAULT_LOGO_SPOTS: frozenset[LogoSpot] = PRESETS["polished"]
 SUMMARY_LOGO_HEIGHT = 0.09
 #: The gap to the frame's edge, as the cards keep it (``identity.js``).
 LOGO_MARGIN = 0.04
+#: The watermark: a share of the frame height, and how opaque it is.
+WATERMARK_HEIGHT = 0.07
+WATERMARK_OPACITY = 0.8
 
 
 def logo_spots(values: Iterable[str]) -> frozenset[LogoSpot]:
@@ -105,6 +112,27 @@ def paste_logo(
     return out.convert(canvas.mode)
 
 
+def watermark_image(logo: Path, *, height: int, opacity: float = WATERMARK_OPACITY) -> Image.Image | None:
+    """``logo`` scaled to ``height`` (at most three times as wide) with its
+    alpha multiplied by ``opacity``, as RGBA; ``None`` (logged) when the
+    file cannot be read or is a symlink."""
+    if logo.is_symlink() or not logo.is_file():
+        logger.warning("watermark logo %s is not a file; no watermark", logo)
+        return None
+    try:
+        with Image.open(logo) as source:
+            mark = source.convert("RGBA")
+    except (OSError, Image.DecompressionBombError, ValueError) as exc:
+        logger.warning("could not read watermark logo %s (%s); no watermark", logo, exc)
+        return None
+    scale = min(height / mark.height, (3 * height) / mark.width)
+    size = (max(1, round(mark.width * scale)), max(1, round(mark.height * scale)))
+    mark = mark.resize(size, Image.Resampling.LANCZOS)
+    alpha = mark.getchannel("A").point(lambda a: round(a * opacity))
+    mark.putalpha(alpha)
+    return mark
+
+
 __all__ = [
     "DEFAULT_LOGO_SPOTS",
     "LOGO_SPOTS",
@@ -114,4 +142,5 @@ __all__ = [
     "logo_spots",
     "parse_logo_spots",
     "paste_logo",
+    "watermark_image",
 ]

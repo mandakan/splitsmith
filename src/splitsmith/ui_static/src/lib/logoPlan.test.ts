@@ -19,6 +19,7 @@ describe("logoPlan", () => {
     expect(presetFor([])).toBe("cards");
     expect(presetFor(["wipe", "thumbnail", "summaries"])).toBe("polished");
     expect(presetFor(["wipe", "summaries"])).toBe("custom");
+    expect(presetFor(["watermark", "wipe", "thumbnail", "summaries"])).toBe("everything");
     expect(presetFor(["wipe"])).toBe("custom");
   });
 
@@ -31,6 +32,7 @@ describe("logoPlan", () => {
     expect(spotsForPreset("cards", ["wipe"])).toEqual([]);
     expect(spotsForPreset("polished", [])).toEqual(["summaries", "thumbnail", "wipe"]);
     expect(spotsForPreset("custom", ["wipe"])).toEqual(["wipe"]);
+    expect(spotsForPreset("everything", [])).toEqual(["summaries", "thumbnail", "watermark", "wipe"]);
   });
 
   it("toggles one spot", () => {

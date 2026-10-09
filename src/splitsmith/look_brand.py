@@ -93,6 +93,19 @@ def brand_json(
     return brand_mark_json(look, fallback)
 
 
+def brand_logo_path(look: Look | None, fallback: BrandMark | None = None) -> Path | None:
+    """The brand's logo file under :func:`brand_mark_json`'s rule: the
+    Look's brand when it has one (its logo, or none when it is a line
+    only), else ``fallback``'s; ``None`` when there is no such file."""
+    brand = look.manifest.brand if look is not None else None
+    if brand is not None and (brand.logo or brand.line):
+        return brand_path(look) if look is not None else None
+    logo = fallback.logo_path if fallback is not None else None
+    if logo is None or logo.is_symlink() or not logo.is_file():
+        return None
+    return logo
+
+
 def brand_mark_json(look: Look | None, fallback: BrandMark | None = None) -> dict[str, str | None] | None:
     """The brand as a template draws it, whatever the slot: the Look's when
     it has one, else ``fallback`` (the account's), as a whole; ``None`` when
@@ -116,6 +129,7 @@ __all__ = [
     "BRAND_SLOTS",
     "BrandError",
     "brand_json",
+    "brand_logo_path",
     "brand_mark_json",
     "brand_path",
     "check_brand_logo",

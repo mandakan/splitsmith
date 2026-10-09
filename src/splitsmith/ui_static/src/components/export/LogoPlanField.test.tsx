@@ -44,6 +44,13 @@ describe("LogoPlanField", () => {
     expect(screen.getByTestId("spots")).toHaveTextContent("summaries,thumbnail,wipe");
   });
 
+  it("Everything adds your brand over the footage", () => {
+    render(<Harness start={["summaries", "thumbnail", "wipe"]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Everything" }));
+    expect(screen.getByTestId("spots")).toHaveTextContent("summaries,thumbnail,watermark,wipe");
+    expect(pressed("Everything")).toBe("true");
+  });
+
   it("opens on Choose for a set no preset names", () => {
     render(<Harness start={["wipe"]} />);
     expect(pressed("Choose")).toBe("true");

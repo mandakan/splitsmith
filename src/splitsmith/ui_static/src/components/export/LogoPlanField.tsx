@@ -22,6 +22,7 @@ import {
 const OPTIONS = [
   { value: "cards", label: "Cards only" },
   { value: "polished", label: "Polished" },
+  { value: "everything", label: "Everything" },
   { value: "custom", label: "Choose" },
 ] as const;
 

@@ -85,6 +85,7 @@
   "slots": {
     "closing": {
       "default": "card.html",
+      "end-screen": "card-end-screen.html",
       "rise": "card-rise.html"
     },
     "lower_third": {

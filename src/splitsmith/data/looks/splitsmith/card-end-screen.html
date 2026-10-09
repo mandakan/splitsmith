@@ -1,0 +1,110 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>end screen</title>
+<script>
+  // The closing card as a YouTube end screen: everything sits in the left
+  // two fifths, the right of the frame is left clear for YouTube's
+  // subscribe and next-video elements, which need the last 5 to 20 s of a
+  // video (the renderer holds this card at least END_SCREEN_SECONDS). Your
+  // brand is the large mark; without one, the event's logo, else the
+  // shooter's. The match name and its lines sit under it, the credit at the
+  // bottom left. The engine stylesheet is loaded for its font faces.
+  document.write('<style>' + window.splitsmith.engine.css + '</style>');
+  document.write('<script src="' + window.splitsmith.assets.shared + '/credit.js"><\/script>');
+</script>
+<style>
+  html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; }
+  .fade { position: absolute; inset: 0; }
+  .column { position: absolute; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; }
+  .column img { width: auto; object-fit: contain; flex: none; }
+  .name {
+    font-family: "Splitsmith Display", sans-serif; font-weight: 700;
+    text-transform: uppercase; line-height: 1; overflow-wrap: break-word; max-width: 100%;
+  }
+  .info {
+    font-family: "Splitsmith Mono", monospace;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+  }
+</style>
+</head>
+<body>
+<script>
+(function () {
+  var S = window.splitsmith;
+  var W = S.size.width, H = S.size.height;
+  var theme = S.theme || {};
+  var data = S.data || {};
+  var card = data.card || {};
+
+  function logoUrl() {
+    if (data.brand && data.brand.logo) { return data.brand.logo; }
+    if (data.event && data.event.logo) { return data.event.logo; }
+    var shooters = data.shooters || [];
+    for (var i = 0; i < shooters.length; i++) {
+      if (shooters[i] && shooters[i].logo) { return shooters[i].logo; }
+    }
+    return null;
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    var fade = document.createElement('div');
+    fade.className = 'fade';
+    fade.style.background = 'linear-gradient(to right, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0.35) 42%, rgba(0,0,0,0.15) 100%)';
+    document.body.appendChild(fade);
+
+    var margin = Math.round(H * 0.07);
+    var column = document.createElement('div');
+    column.className = 'column';
+    column.style.left = margin + 'px';
+    column.style.top = margin + 'px';
+    column.style.bottom = Math.round(H * 0.14) + 'px';
+    column.style.width = Math.round(W * 0.36) + 'px';
+    column.style.gap = Math.round(H * 0.03) + 'px';
+
+    var src = logoUrl();
+    if (src) {
+      var img = document.createElement('img');
+      img.src = src;
+      img.alt = '';
+      img.style.height = Math.round(H * 0.3) + 'px';
+      img.style.maxWidth = '100%';
+      column.appendChild(img);
+    }
+    if (data.brand && data.brand.line) {
+      var brandLine = document.createElement('div');
+      brandLine.className = 'info';
+      brandLine.textContent = data.brand.line;
+      brandLine.style.color = theme.ink_2 || '#c9ccd2';
+      brandLine.style.fontSize = Math.round(H * 0.035) + 'px';
+      column.appendChild(brandLine);
+    }
+    var name = document.createElement('div');
+    name.className = 'name';
+    name.textContent = card.text || '';
+    name.style.color = theme.ink || '#f4f4f5';
+    name.style.fontSize = Math.round(H * 0.075) + 'px';
+    column.appendChild(name);
+    (card.info || []).slice(0, 2).forEach(function (text) {
+      var line = document.createElement('div');
+      line.className = 'info';
+      line.textContent = text;
+      line.style.color = theme.ink_2 || '#c9ccd2';
+      line.style.fontSize = Math.round(H * 0.032) + 'px';
+      column.appendChild(line);
+    });
+    document.body.appendChild(column);
+
+    S.engine.mountCredit(data.credit);
+    var credit = document.querySelector('.credit');
+    if (credit) {
+      credit.style.justifyContent = 'flex-start';
+      credit.style.left = margin + 'px';
+      credit.style.right = 'auto';
+    }
+  });
+})();
+</script>
+</body>
+</html>

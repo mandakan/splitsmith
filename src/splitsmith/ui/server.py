@@ -4877,6 +4877,7 @@ def register_job_bodies(state: AppState) -> None:
                     account_profile_module.load_brand(state.account_profile) if req.account_brand else None
                 ),
                 logo_spots=frozenset(req.logo_spots),
+                watermark_corner="top-right" if req.overlay_position == "top-left" else "top-left",
                 card_variant=req.card_variant,
                 title_page_variant=req.title_page_variant,
                 stage_card_variant=req.stage_card_variant,
