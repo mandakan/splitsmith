@@ -22,7 +22,7 @@ export interface OverlayStyle {
 
 export const DEFAULT_OVERLAY_STYLE: OverlayStyle = {
   variant: DEFAULT_VARIANT,
-  speedColors: true,
+  speedColors: false,
   classLabels: true,
   landing: true,
   position: null,

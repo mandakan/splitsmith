@@ -71,7 +71,7 @@ class HudOptions(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    speed_colors: bool = True
+    speed_colors: bool = False
     class_labels: bool = True
     landing: bool = True
     #: ``None`` is the variant's own default (the first position it declares).
@@ -86,7 +86,7 @@ class OverlayStyleFields(BaseModel):
 
     #: The Look's ``overlay`` variant; ``default`` is Classic.
     overlay_variant: str = DEFAULT_VARIANT
-    overlay_speed_colors: bool = True
+    overlay_speed_colors: bool = False
     overlay_class_labels: bool = True
     overlay_landing: bool = True
     overlay_position: HudPosition | None = None
