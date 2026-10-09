@@ -353,8 +353,7 @@ def _x_from(universe: list[dict]) -> np.ndarray:
 
     Rows are grouped by ``fixture`` (one stage each) so the stage-relative
     block sees exactly the candidates the runtime would; the output keeps
-    the input row order. Mined rows (``--with-mining``, off in production)
-    carry no ``expected_rounds`` and use the reference fallback.
+    the input row order.
     """
     if not universe:
         return np.zeros((0, feat.VOTER_C_FEATURE_DIM), dtype=np.float64)
@@ -370,7 +369,6 @@ def _x_from(universe: list[dict]) -> np.ndarray:
             np.array([r["clap_diff"] for r in rows], dtype=np.float64),
             np.array([r["gunshot_prob"] for r in rows], dtype=np.float64),
             [r.get("camera_class", DEFAULT_CAMERA_CLASS) for r in rows],
-            expected_rounds=rows[0].get("expected_rounds"),
         )
     return out
 

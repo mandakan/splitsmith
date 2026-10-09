@@ -397,21 +397,19 @@ _REF_FALLBACK_MIN: int = 3
 _HAND_INDEX: dict[str, int] = {name: i for i, name in enumerate(_HAND_FEATURE_NAMES)}
 
 
-def reference_indices(confidences: np.ndarray, expected_rounds: int | None) -> np.ndarray:
+def reference_indices(confidences: np.ndarray) -> np.ndarray:
     """Indices of the stage's likely shots: the top-K candidates by detector confidence.
 
-    ``K`` is ``expected_rounds`` when known, else ``max(3, round(0.3 * N))``,
-    always clamped to ``[1, N]``. A stable sort keeps tied confidences in
+    ``K = max(3, round(0.3 * N))`` clamped to ``N``. Never the round count:
+    most training stages have one and many app stages do not, and a
+    reference picked two ways made the features mean two things (spec
+    2026-10-09, amended). A stable sort keeps tied confidences in
     candidate order so two runs of the same stage agree.
     """
     n = int(confidences.size)
     if n == 0:
         return np.zeros(0, dtype=np.int64)
-    if expected_rounds is not None:
-        k = int(expected_rounds)
-    else:
-        k = max(_REF_FALLBACK_MIN, int(round(_REF_FALLBACK_FRACTION * n)))
-    k = min(max(k, 1), n)
+    k = min(max(_REF_FALLBACK_MIN, int(round(_REF_FALLBACK_FRACTION * n))), n)
     return np.argsort(-confidences, kind="stable")[:k]
 
 
@@ -420,7 +418,6 @@ def stage_relative_features(
     clap_sims: np.ndarray,
     clap_diff: np.ndarray,
     gunshot_prob: np.ndarray,
-    expected_rounds: int | None,
 ) -> np.ndarray:
     """Per-candidate ``(N, REL_FEATURE_DIM)`` block relative to the stage's likely shots.
 
@@ -432,7 +429,7 @@ def stage_relative_features(
     out = np.zeros((n, REL_FEATURE_DIM), dtype=np.float64)
     if n == 0:
         return out
-    ref = reference_indices(hand[:, _HAND_INDEX["confidence"]], expected_rounds)
+    ref = reference_indices(hand[:, _HAND_INDEX["confidence"]])
     sources: list[np.ndarray] = [
         np.log(np.maximum(hand[:, _HAND_INDEX[s]], 1e-9)) for s in _REL_LOG_SOURCES
     ]
@@ -757,16 +754,14 @@ def voter_c_feature_matrix(
     clap_diff: np.ndarray,
     gunshot_prob: np.ndarray,
     camera_classes: list[str] | np.ndarray | str | None = None,
-    *,
-    expected_rounds: int | None = None,
 ) -> np.ndarray:
     """Stack the GBDT input vector for the candidates of ONE stage.
 
     Columns in order: ``hand | clap_sims | clap_diff | gunshot_prob |
     camera_class_onehot | stage_relative``. The stage-relative block
-    compares each candidate with the stage's likely shots, so every row
-    must come from the same detector universe; ``expected_rounds`` picks
-    how many likely shots (see ``reference_indices``).
+    compares each candidate with the stage's likely shots (see
+    ``reference_indices``), so every row must come from the same
+    detector universe.
 
     Column order matches the calibration script. Drift here -- adding
     features, reordering CLAP prompts, reordering camera classes -- silently
@@ -792,7 +787,7 @@ def voter_c_feature_matrix(
     else:
         classes_input = camera_classes
     cam_block = camera_class_one_hot(classes_input, n_rows)
-    rel = stage_relative_features(hand_features, clap_sims, clap_diff, gunshot_prob, expected_rounds)
+    rel = stage_relative_features(hand_features, clap_sims, clap_diff, gunshot_prob)
     x = np.concatenate(
         [
             hand_features,

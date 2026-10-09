@@ -328,7 +328,7 @@ def detect_shots_ensemble(
     clap_diff = feat.clap_diff_from_similarities(clap_sims)
     gunshot_prob = feat.compute_pann_gunshot_probs(audio, sample_rate, times, runtime.pann)
     voter_c_x = feat.voter_c_feature_matrix(
-        hand, clap_sims, clap_diff, gunshot_prob, camera_classes=camera_class, expected_rounds=expected_rounds
+        hand, clap_sims, clap_diff, gunshot_prob, camera_classes=camera_class
     )
     cls_key = camera_class if camera_class in runtime.voter_c_model else cal.default_camera_class
     score_c = runtime.voter_c_model[cls_key].predict_proba(voter_c_x)[:, 1].astype(np.float64)

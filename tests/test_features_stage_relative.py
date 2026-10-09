@@ -67,25 +67,25 @@ def test_window_past_clip_end_is_nan():
     assert np.isnan(hand[0, 17]) and np.isnan(hand[0, 18])
 
 
-def test_reference_uses_round_count_then_thirty_percent():
+def test_reference_is_the_top_thirty_percent_by_confidence():
+    # Never the round count: training and runtime must pick the reference
+    # the same way whether or not the scorecard knows the rounds.
     conf = np.array([0.1, 0.9, 0.5, 0.7, 0.3, 0.8, 0.2, 0.6, 0.4, 0.05])
-    assert sorted(feat.reference_indices(conf, 3).tolist()) == [1, 3, 5]
-    assert sorted(feat.reference_indices(conf, None).tolist()) == [1, 3, 5]  # max(3, round(3.0))
-    assert len(feat.reference_indices(conf, 50)) == 10
-    assert len(feat.reference_indices(conf, 0)) == 1
-    assert len(feat.reference_indices(conf, -4)) == 1
-    assert len(feat.reference_indices(np.array([]), None)) == 0
+    assert sorted(feat.reference_indices(conf).tolist()) == [1, 3, 5]  # max(3, round(3.0))
+    assert len(feat.reference_indices(np.linspace(0, 1, 40))) == 12
+    assert len(feat.reference_indices(np.array([0.2, 0.4]))) == 2
+    assert len(feat.reference_indices(np.array([]))) == 0
 
 
 def test_reference_is_stable_under_ties():
-    conf = np.full(9, 0.5)
-    assert feat.reference_indices(conf, 4).tolist() == feat.reference_indices(conf, 4).tolist() == [0, 1, 2, 3]
+    conf = np.full(12, 0.5)
+    assert feat.reference_indices(conf).tolist() == feat.reference_indices(conf).tolist() == [0, 1, 2, 3]
 
 
-def _rel(hand, n_clap=10, expected=None):
+def _rel(hand, n_clap=10):
     n = hand.shape[0]
     sims = np.zeros((n, n_clap))
-    return feat.stage_relative_features(hand, sims, np.zeros(n), np.zeros(n), expected)
+    return feat.stage_relative_features(hand, sims, np.zeros(n), np.zeros(n))
 
 
 def test_tiny_stages_do_not_raise():
@@ -98,19 +98,18 @@ def test_tiny_stages_do_not_raise():
 
 def test_nan_source_is_zero_and_excluded_from_median():
     hand = np.ones((4, feat.HAND_FEATURE_DIM))
-    hand[:, 1] = [0.9, 0.8, 0.7, 0.1]  # confidence: the first three are the reference
+    hand[:, 1] = [0.9, 0.8, 0.7, 0.1]  # confidence: the first three are the reference (min 3)
     hand[:, 17] = [1000.0, 1200.0, np.nan, 500.0]
-    rel = _rel(hand, expected=3)
+    rel = _rel(hand)
     col = feat.REL_FEATURE_NAMES.index("rel_spectral_centroid_hz")
     assert rel[2, col] == 0.0
     assert rel[3, col] == pytest.approx(500.0 - 1100.0)
 
 
 def test_relative_level_ignores_gain_on_real_audio():
-    hand, truth, _ = _stage(GO3S_FIXTURE)
+    hand, _, _ = _stage(GO3S_FIXTURE)
     quiet, _, _ = _stage(GO3S_FIXTURE, gain=0.25)
-    exp = (truth.get("stage_rounds") or {}).get("expected")
-    a, b = _rel(hand, expected=exp), _rel(quiet, expected=exp)
+    a, b = _rel(hand), _rel(quiet)
     for name in ("rel_peak_amp", "rel_rms_post", "rel_tail_amp"):
         c = feat.REL_FEATURE_NAMES.index(name)
         assert np.abs(a[:, c]).max() > 0.1  # the column carries signal
@@ -120,14 +119,11 @@ def test_relative_level_ignores_gain_on_real_audio():
 def test_relative_centroid_absorbs_a_whole_stage_timbre_shift():
     hand, truth, times = _stage(GO3S_FIXTURE)
     dull, _, _ = _stage(GO3S_FIXTURE, lowpass_hz=1500.0)
-    exp = (truth.get("stage_rounds") or {}).get("expected")
     shot_times = np.array([float(s["time"]) for s in truth["shots"]])
     shot_mask = np.array([np.min(np.abs(float(t) - shot_times)) < 0.075 for t in times])
     c = feat.REL_FEATURE_NAMES.index("rel_spectral_centroid_hz")
     abs_shift = abs(np.nanmedian(dull[shot_mask, 17]) - np.nanmedian(hand[shot_mask, 17]))
-    rel_shift = abs(
-        np.median(_rel(dull, expected=exp)[shot_mask, c]) - np.median(_rel(hand, expected=exp)[shot_mask, c])
-    )
+    rel_shift = abs(np.median(_rel(dull)[shot_mask, c]) - np.median(_rel(hand)[shot_mask, c]))
     assert abs_shift > 100.0
     # Most of the shift is absorbed, not all: the low-pass takes more from
     # treble-rich shots than from the non-shot candidates in the reference.
@@ -173,7 +169,7 @@ def test_matrix_has_the_relative_block_and_no_nan():
     hand = np.array([r["hand_feats"] for r in rows])
     hand[0, 17] = np.nan
     sims = np.array([r["clap_sims"] for r in rows])
-    x = feat.voter_c_feature_matrix(hand, sims, sims[:, 0], np.abs(sims[:, 1]), "headcam", expected_rounds=3)
+    x = feat.voter_c_feature_matrix(hand, sims, sims[:, 0], np.abs(sims[:, 1]), "headcam")
     assert x.shape == (6, feat.VOTER_C_FEATURE_DIM) and feat.VOTER_C_FEATURE_DIM == 57
     assert not np.isnan(x).any()
 
@@ -183,7 +179,7 @@ def test_trainer_and_runtime_build_identical_matrices():
     rows = _rows("stage-a", 7, 2, 4) + _rows("stage-b", 5, 3, None)
     trainer = build._x_from(rows)
     runtime_parts = []
-    for fx, exp in (("stage-a", 4), ("stage-b", None)):
+    for fx in ("stage-a", "stage-b"):
         rs = [r for r in rows if r["fixture"] == fx]
         sims = np.array([r["clap_sims"] for r in rs])
         runtime_parts.append(
@@ -193,10 +189,20 @@ def test_trainer_and_runtime_build_identical_matrices():
                 np.array([r["clap_diff"] for r in rs]),
                 np.array([r["gunshot_prob"] for r in rs]),
                 "headcam",
-                expected_rounds=exp,
             )
         )
     np.testing.assert_array_equal(trainer, np.concatenate(runtime_parts))
+
+
+def test_round_count_does_not_change_the_features():
+    """The app scores some stages with a round count and some without; the
+    features must not depend on which, or training and runtime disagree."""
+    build = _build_script()
+    # 12 candidates: the fallback reference is 4, so a round count of 9
+    # would pick a different reference if it were used.
+    with_rounds = build._x_from(_rows("stage-a", 12, 4, 9))
+    without = build._x_from(_rows("stage-a", 12, 4, None))
+    np.testing.assert_array_equal(with_rounds, without)
 
 
 def test_old_width_artifact_fails_at_load(monkeypatch):

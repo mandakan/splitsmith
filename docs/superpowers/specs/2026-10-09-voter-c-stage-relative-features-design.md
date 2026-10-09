@@ -75,10 +75,15 @@ attack` (log scale: `log(x) - median(log(ref))`) and
 ### The reference set
 
 Candidates of the same stage (one detector universe, the one voter C already scores), ranked by
-detector confidence. The reference is the top `K`:
+detector confidence (stable sort). The reference is the top `K = max(3, round(0.3 * N))`, clamped
+to `N`, **whether or not the round count is known**.
 
-- `K = expected_rounds` when the caller passes it (the scorecard knows it), clamped to `[1, N]`.
-- Otherwise `K = max(3, round(0.3 * N))`, clamped to `N`.
+Amended 2026-10-09 (user-approved): the first version used `K = expected_rounds` when known. Nearly
+every training fixture has a round count, so the model learned the features with that reference,
+and a stage scored without one got a differently defined reference: in-sample, without round
+counts, headcam false positives rose from 26 to 44. One rule everywhere removes the mismatch; the
+spike measured no cost for it (headcam held-out F1 0.883 against 0.885). The round count keeps its
+existing job in voter C's top-K mode.
 
 `N = 0` returns an empty block. A NaN source value (a candidate too close to the clip end for the
 spectral window) is excluded from the median and its own relative value is 0.
