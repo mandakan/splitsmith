@@ -15,6 +15,7 @@ the production UI is that the user-audited shots are the truth.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -22,7 +23,8 @@ from typing import Any
 from .. import csv_gen, fcpxml_gen, overlay_render, report, summary_card, trim
 from ..audit_data import StageExportError, audit_shots_to_engine_shots, read_audit_data
 from ..audit_revision import audit_revision
-from ..config import Config, ReportFiles, StageAnalysis, StageData
+from ..config import Config, ReportFiles, StageAnalysis, StageData, StageEvent
+from ..events import confirmed, events_from_doc
 from ..export_naming import stage_file_base
 from ..looks import DEFAULT_VARIANT
 from ..match_project import StageScorecard
@@ -31,6 +33,8 @@ from ..overlay_render import OverlayCodec
 from ..overlay_theme import ThemeName
 from ..segment_cache import SegmentCache
 from ..stage_summary_data import TileStageData, load_stage_reloads, load_stage_shots
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -163,6 +167,18 @@ def read_overlay_settings(path: Path) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
+def _confirmed_regions(audit_data: dict[str, Any], audit_path: Path) -> list[StageEvent]:
+    """The stage's confirmed regions only (spec 2026-10-08, part 2). A
+    corrupt events list must not fail the whole export -- it reads as
+    none, the same tolerance the HUD render and the stage summary give a
+    legacy or malformed doc."""
+    try:
+        return confirmed(events_from_doc(audit_data))
+    except (ValueError, TypeError) as exc:
+        logger.warning("%s: unreadable stage events, exporting none: %s", audit_path.name, exc)
+        return []
+
+
 def export_stage(
     *,
     request: StageExportRequest,
@@ -213,6 +229,8 @@ def export_stage(
     # clip + FCPXML spine do not. ``report.detect_anomalies`` already
     # surfaces "No shots detected in the stage window" for this case so
     # the audit trail stays clean.
+
+    regions = _confirmed_regions(audit_data, audit_path)
 
     exports_dir.mkdir(parents=True, exist_ok=True)
     base = stage_file_base(stage_data.stage_number, stage_data.stage_name)
@@ -325,7 +343,11 @@ def export_stage(
     if request.write_csv:
         if shots:
             csv_path = exports_dir / f"{base}_splits.csv"
-            csv_gen.write_splits_csv(shots, csv_path)
+            csv_gen.write_splits_csv(shots, csv_path, events=regions)
+            # events.csv rides the same write_csv gate -- only written when
+            # the stage has confirmed regions (spec 2026-10-08, part 2).
+            if regions:
+                csv_gen.write_events_csv(regions, exports_dir / f"{base}_events.csv")
         else:
             skip_reasons.append("csv not written: no shots audited")
 
@@ -547,6 +569,7 @@ def export_stage(
                     overlay_path=fcp_overlay_path,
                     overlay_video=overlay_meta,
                     secondaries=fcp_secondaries or None,
+                    events=regions,
                 )
             except (fcpxml_gen.FFprobeError, OSError) as exc:
                 skip_reasons.append(f"fcpxml not written: {exc}")

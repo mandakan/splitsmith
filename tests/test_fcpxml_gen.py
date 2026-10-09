@@ -22,6 +22,7 @@ from splitsmith.config import (
     OutputConfig,
     Shot,
     SplitColorThresholds,
+    StageEvent,
     VideoMetadata,
 )
 from splitsmith.fcpxml_gen import (
@@ -65,6 +66,16 @@ def _meta_2997() -> VideoMetadata:
         duration_seconds=20.0,
         frame_rate_num=30000,
         frame_rate_den=1001,
+    )
+
+
+def _meta_24fps() -> VideoMetadata:
+    return VideoMetadata(
+        width=1920,
+        height=1080,
+        duration_seconds=20.0,
+        frame_rate_num=24,
+        frame_rate_den=1,
     )
 
 
@@ -217,6 +228,132 @@ def test_2997_frame_alignment_uses_rational_duration(tmp_path: Path) -> None:
     assert marker.attrib["start"] == "180180/30000s"
     # Sanity: the unreduced fraction equals the mathematical 6.006s exactly.
     assert Fraction(180180, 30000) == Fraction(180, 1) * Fraction(1001, 30000)
+
+
+# --- generate_fcpxml: region markers (spec 2026-10-08, part 2) ------------
+
+
+def test_generate_fcpxml_region_marker_reload_frame_aligned_24fps(tmp_path: Path) -> None:
+    """A 1.42s reload starting 8.05s after the beep, beep at 5.0s clip-local
+    -> region starts at clip-local 13.05s = 313.2 frames -> 313 at 24fps;
+    the end (14.47s = 347.28 -> 347) minus the start frame gives a 34-frame
+    duration."""
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"")
+    out = tmp_path / "v.fcpxml"
+    events = [StageEvent(id="evt-1", kind="reload", start=8.05, end=9.47, source="manual")]
+    generate_fcpxml(
+        video_path=video,
+        video=_meta_24fps(),
+        shots=[],
+        beep_offset_seconds=5.0,
+        output_path=out,
+        project_name="v",
+        config=OutputConfig(),
+        events=events,
+    )
+    root = ET.fromstring(out.read_bytes())
+    marker = root.find(".//marker")
+    assert marker is not None
+    assert marker.attrib["start"] == "313/24s"
+    assert marker.attrib["duration"] == "34/24s"
+    assert marker.attrib["value"] == "Reload 1.42"
+
+
+def test_generate_fcpxml_region_marker_reload_frame_aligned_2997fps(tmp_path: Path) -> None:
+    """Same reload at 29.97fps (frame_rate_num=30000, frame_rate_den=1001):
+    the start/duration stay rational with the 1001 denominator intact
+    (FCP convention -- not reduced to a smaller fraction)."""
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"")
+    out = tmp_path / "v.fcpxml"
+    events = [StageEvent(id="evt-1", kind="reload", start=8.05, end=9.47, source="manual")]
+    generate_fcpxml(
+        video_path=video,
+        video=_meta_2997(),
+        shots=[],
+        beep_offset_seconds=5.0,
+        output_path=out,
+        project_name="v",
+        config=OutputConfig(),
+        events=events,
+    )
+    root = ET.fromstring(out.read_bytes())
+    marker = root.find(".//marker")
+    assert marker is not None
+    assert marker.attrib["start"] == "391391/30000s"
+    assert marker.attrib["duration"] == "43043/30000s"
+    assert marker.attrib["value"] == "Reload 1.42"
+    # Sanity: start is the mathematically exact 391 * (1001/30000)s.
+    assert Fraction(391391, 30000) == Fraction(391, 1) * Fraction(1001, 30000)
+
+
+def test_generate_fcpxml_region_marker_movement_and_activation_values(tmp_path: Path) -> None:
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"")
+    out = tmp_path / "v.fcpxml"
+    events = [
+        StageEvent(id="evt-1", kind="movement", start=1.0, end=3.0, source="manual"),
+        StageEvent(id="evt-2", kind="activation", start=4.0, end=4.5, source="manual"),
+    ]
+    generate_fcpxml(
+        video_path=video,
+        video=_meta_30fps(),
+        shots=[],
+        beep_offset_seconds=5.0,
+        output_path=out,
+        project_name="v",
+        config=OutputConfig(),
+        events=events,
+    )
+    root = ET.fromstring(out.read_bytes())
+    markers = root.findall(".//marker")
+    assert len(markers) == 2
+    assert markers[0].attrib["value"] == "Movement"
+    assert markers[1].attrib["value"] == "Activation"
+
+
+def test_generate_fcpxml_drops_region_marker_outside_clip(tmp_path: Path) -> None:
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"")
+    out = tmp_path / "v.fcpxml"
+    # Clip is 20s; a region starting at clip-local 25s must be dropped.
+    events = [StageEvent(id="evt-1", kind="movement", start=20.0, end=21.0, source="manual")]
+    generate_fcpxml(
+        video_path=video,
+        video=_meta_30fps(),
+        shots=[],
+        beep_offset_seconds=5.0,
+        output_path=out,
+        project_name="v",
+        config=OutputConfig(),
+        events=events,
+    )
+    root = ET.fromstring(out.read_bytes())
+    assert root.findall(".//marker") == []
+
+
+def test_generate_fcpxml_with_no_confirmed_regions_is_byte_identical_to_omitting_events(
+    tmp_path: Path,
+) -> None:
+    """``events=()`` (the default) must emit exactly as a call that doesn't
+    pass ``events`` at all -- the no-regions case is unchanged."""
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"")
+    shots = [_shot(1, time_from_beep=1.0, split=1.0)]
+    out_default = tmp_path / "default.fcpxml"
+    out_explicit = tmp_path / "explicit.fcpxml"
+    kwargs = {
+        "video_path": video,
+        "video": _meta_30fps(),
+        "shots": shots,
+        "beep_offset_seconds": 5.0,
+        "project_name": "v",
+        "config": OutputConfig(),
+    }
+    generate_fcpxml(output_path=out_default, **kwargs)
+    generate_fcpxml(output_path=out_explicit, events=(), **kwargs)
+    assert out_default.read_bytes() == out_explicit.read_bytes()
 
 
 def test_tag_source_application_writes_bplist_via_xattr(
@@ -891,6 +1028,101 @@ def test_match_fcpxml_drops_markers_outside_trimmed_window(tmp_path: Path) -> No
     assert len(markers) == 2
     assert "Shot 2" in markers[0].attrib["value"]
     assert "Shot 3" in markers[1].attrib["value"]
+
+
+def test_match_fcpxml_region_marker_on_primary_clip(tmp_path: Path) -> None:
+    """A confirmed region on a match stage becomes a marker on the primary
+    clip with duration spanning the region, same as the single-stage path."""
+    video = _make_video(tmp_path, "v.mp4")
+    out = tmp_path / "match.fcpxml"
+    events = [StageEvent(id="evt-1", kind="reload", start=1.0, end=2.42, source="manual")]
+    generate_match_fcpxml(
+        stages=[
+            StageComposition(
+                stage_name="v",
+                video_path=video,
+                video=_meta_30fps(),
+                shots=[_shot(1, time_from_beep=0.4, split=0.4)],
+                beep_offset_seconds=5.0,
+                head_pad_seconds=0.5,
+                tail_pad_seconds=1.0,
+                events=events,
+            )
+        ],
+        output_path=out,
+        project_name="match",
+        config=OutputConfig(),
+    )
+    root = ET.fromstring(out.read_bytes())
+    markers = root.findall(".//spine/asset-clip/marker")
+    region_markers = [m for m in markers if m.attrib["value"] == "Reload 1.42"]
+    assert len(region_markers) == 1
+    assert region_markers[0].attrib["start"] == "180/30s"  # (5.0+1.0)s * 30fps
+    assert region_markers[0].attrib["duration"] != "1/30s"  # spans the region, not one frame
+
+
+def test_match_fcpxml_drops_region_marker_outside_trimmed_window(tmp_path: Path) -> None:
+    """Mirrors ``test_match_fcpxml_drops_markers_outside_trimmed_window`` for
+    a region: a confirmed region whose start falls outside the visible
+    window is dropped."""
+    video = _make_video(tmp_path, "v.mp4")
+    out = tmp_path / "v.fcpxml"
+    # Clip is 20s; a region starting at clip-local 25s (beep 5.0 + 20.0) is
+    # well past the trimmed/visible window and must be dropped.
+    events = [StageEvent(id="evt-1", kind="movement", start=20.0, end=20.5, source="manual")]
+    generate_match_fcpxml(
+        stages=[
+            StageComposition(
+                stage_name="v",
+                video_path=video,
+                video=_meta_30fps(),
+                shots=[_shot(2, time_from_beep=0.4, split=1.0)],
+                beep_offset_seconds=5.0,
+                head_pad_seconds=0.5,
+                tail_pad_seconds=1.0,
+                events=events,
+            )
+        ],
+        output_path=out,
+        project_name="match",
+        config=OutputConfig(),
+    )
+    root = ET.fromstring(out.read_bytes())
+    markers = root.findall(".//spine/asset-clip/marker")
+    assert all(m.attrib["value"] != "Movement" for m in markers)
+
+
+def test_match_fcpxml_with_no_confirmed_regions_is_byte_identical_to_omitting_events(
+    tmp_path: Path,
+) -> None:
+    """Byte-identity pin: a stage built without ``events`` and one built
+    with ``events=()`` must emit identical bytes -- the no-regions case is
+    unaffected by the region-marker feature."""
+    video = _make_video(tmp_path, "v.mp4")
+    stage_kwargs = {
+        "stage_name": "v",
+        "video_path": video,
+        "video": _meta_30fps(),
+        "shots": [_shot(1, time_from_beep=0.4, split=0.4)],
+        "beep_offset_seconds": 5.0,
+        "head_pad_seconds": 0.5,
+        "tail_pad_seconds": 1.0,
+    }
+    out_default = tmp_path / "default.fcpxml"
+    out_explicit = tmp_path / "explicit.fcpxml"
+    generate_match_fcpxml(
+        stages=[StageComposition(**stage_kwargs)],
+        output_path=out_default,
+        project_name="match",
+        config=OutputConfig(),
+    )
+    generate_match_fcpxml(
+        stages=[StageComposition(events=(), **stage_kwargs)],
+        output_path=out_explicit,
+        project_name="match",
+        config=OutputConfig(),
+    )
+    assert out_default.read_bytes() == out_explicit.read_bytes()
 
 
 def test_match_fcpxml_secondary_alignment_with_head_trim(tmp_path: Path) -> None:

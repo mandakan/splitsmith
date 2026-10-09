@@ -43,7 +43,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from . import fcpxml_gen
-from .config import OutputConfig, Shot, VideoMetadata
+from .config import OutputConfig, Shot, StageEvent, VideoMetadata
 from .stage_summary_data import TileStageData
 
 if TYPE_CHECKING:
@@ -178,6 +178,11 @@ class Stage:
     secondaries: tuple[ConnectedClip, ...] = ()
     overlay: ConnectedClip | None = None
     markers: tuple[Marker, ...] = ()
+    #: This stage's confirmed regions only (spec 2026-10-08, part 2), in
+    #: beep-relative seconds like ``StageEvent.start``/``.end`` -- a
+    #: renderer adds ``beep_offset_seconds`` for clip-local time, the same
+    #: way it already does for ``markers``. Empty for a stage with none.
+    events: tuple[StageEvent, ...] = ()
     title: TitleCard | None = None
     summary: SummaryHold | None = None
 
@@ -660,6 +665,7 @@ def from_stage_compositions(
                 secondaries=tuple(secondaries),
                 overlay=overlay,
                 markers=markers,
+                events=tuple(stage_comp.events),
                 title=titles_map.get(stage_idx),
                 summary=summaries_map.get(stage_idx),
             )
@@ -727,6 +733,7 @@ def to_stage_compositions(
                 tail_pad_seconds=stage.tail_pad_seconds,
                 overlay_path=overlay_path,
                 overlay_video=overlay_video,
+                events=stage.events,
                 secondaries=tuple(secondaries),
             )
         )
@@ -821,6 +828,7 @@ def render_fcpxml(
             secondaries=list(stage.secondaries),
             overlay_path=stage.overlay_path,
             overlay_video=stage.overlay_video,
+            events=stage.events,
         )
         return
     fcpxml_gen.generate_match_fcpxml(

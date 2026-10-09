@@ -45,7 +45,7 @@ from .composition import (
     Stage,
     Transform,
 )
-from .config import VideoMetadata
+from .config import StageEvent, VideoMetadata
 
 
 def render_fcp7xml(
@@ -363,6 +363,25 @@ def _emit_primary_clipitem(
             continue
         _emit_marker(clip, frame=frame, label=_marker_label(marker))
 
+    # Region markers (spec 2026-10-08, part 2). ``stage.events`` is already
+    # confirmed-only (``events.confirmed``, applied by whoever built the
+    # IR); beep-relative like a ``Shot.time_from_beep``, so the same
+    # ``beep_offset_seconds`` addition brings it to clip-local source time.
+    for event in stage.events:
+        start_frame = round((stage.beep_offset_seconds + event.start) / fd_seconds)
+        end_frame = round((stage.beep_offset_seconds + event.end) / fd_seconds)
+        if (
+            start_frame < plan.head_trim_frames
+            or start_frame >= plan.head_trim_frames + plan.effective_duration_frames
+        ):
+            continue
+        _emit_marker(
+            clip,
+            frame=start_frame,
+            label=_region_marker_label(event),
+            out_frame=max(end_frame, start_frame + 1),
+        )
+
 
 def _emit_secondary_clipitem(
     track: ET.Element,
@@ -463,14 +482,16 @@ def _emit_overlay_clipitem(
     )
 
 
-def _emit_marker(parent: ET.Element, *, frame: int, label: str) -> None:
+def _emit_marker(parent: ET.Element, *, frame: int, label: str, out_frame: int | None = None) -> None:
     marker = ET.SubElement(parent, "marker")
     _text(marker, "name", label)
     _text(marker, "in", str(frame))
     # FCP itself emits 1-frame ranges for point markers; Premiere reads
     # both ``out=in+1`` and ``out=-1``, but the +1 form survives a
-    # round-trip through DaVinci more reliably.
-    _text(marker, "out", str(frame + 1))
+    # round-trip through DaVinci more reliably. A region marker (spec
+    # 2026-10-08, part 2) passes its own ``out_frame`` so its range spans
+    # the region instead of one frame.
+    _text(marker, "out", str(out_frame if out_frame is not None else frame + 1))
 
 
 def _emit_basic_motion_filter(
@@ -530,6 +551,17 @@ def _marker_label(marker: object) -> str:
     if split is None:
         return f"Shot {n}"
     return f"Shot {n} / {split:.2f}s"
+
+
+def _region_marker_label(event: StageEvent) -> str:
+    """``Reload 1.42`` / ``Movement`` / ``Activation`` (spec 2026-10-08,
+    part 2), matching ``fcpxml_gen._region_marker_label``'s wording so the
+    two renderers agree on what a region marker says."""
+    if event.kind == "reload":
+        return f"Reload {event.end - event.start:.2f}"
+    if event.kind == "movement":
+        return "Movement"
+    return "Activation"
 
 
 def _safe_id(label: str) -> str:

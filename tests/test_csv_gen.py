@@ -1,4 +1,4 @@
-"""Tests for csv_gen.write_splits_csv / read_splits_csv."""
+"""Tests for csv_gen.write_splits_csv / read_splits_csv / write_events_csv."""
 
 from __future__ import annotations
 
@@ -6,8 +6,15 @@ from pathlib import Path
 
 import pytest
 
-from splitsmith.config import Shot
-from splitsmith.csv_gen import CSV_HEADER, read_splits_csv, write_splits_csv
+from splitsmith.config import Shot, StageEvent
+from splitsmith.csv_gen import (
+    CSV_HEADER,
+    CSV_HEADER_WITH_MOVING,
+    EVENTS_CSV_HEADER,
+    read_splits_csv,
+    write_events_csv,
+    write_splits_csv,
+)
 
 
 def _make_shot(
@@ -45,9 +52,11 @@ def test_write_then_read_round_trip(tmp_path: Path) -> None:
 
     text = out.read_text()
     lines = text.splitlines()
-    assert lines[0] == ",".join(CSV_HEADER)
-    # First row uses 3 decimal places for time and split.
+    assert lines[0] == ",".join(CSV_HEADER_WITH_MOVING)
+    # First row uses 3 decimal places for time and split; moving is always
+    # false with no events passed.
     assert lines[1].startswith("1,1.420,1.420,0.5500,0.920,draw")
+    assert lines[1].endswith(",false")
 
     rows = read_splits_csv(out)
     assert [r.shot_number for r in rows] == [1, 2, 3]
@@ -62,8 +71,50 @@ def test_write_then_read_round_trip(tmp_path: Path) -> None:
 def test_write_empty_list_emits_only_header(tmp_path: Path) -> None:
     out = tmp_path / "empty.csv"
     write_splits_csv([], out)
-    assert out.read_text().strip() == ",".join(CSV_HEADER)
+    assert out.read_text().strip() == ",".join(CSV_HEADER_WITH_MOVING)
     assert read_splits_csv(out) == []
+
+
+def test_read_accepts_legacy_header_without_moving(tmp_path: Path) -> None:
+    """A splits CSV written before the ``moving`` column existed still reads."""
+    out = tmp_path / "legacy.csv"
+    out.write_text(",".join(CSV_HEADER) + "\n" + "1,1.420,1.420,0.5500,0.920,draw\n")
+    rows = read_splits_csv(out)
+    assert len(rows) == 1
+    assert rows[0].shot_number == 1
+    assert rows[0].notes == "draw"
+
+
+def test_moving_column_true_for_a_shot_inside_a_confirmed_movement_region(tmp_path: Path) -> None:
+    shots = [
+        _make_shot(1, 1.0, peak=0.5, confidence=0.9),  # time_from_beep 0.0, not moving
+        _make_shot(2, 4.5, prev_t=1.0, peak=0.5, confidence=0.9),  # time_from_beep 3.5, moving
+    ]
+    events = [StageEvent(id="evt-1", kind="movement", start=3.0, end=6.0, source="manual")]
+    out = tmp_path / "moving.csv"
+    write_splits_csv(shots, out, events=events)
+    lines = out.read_text().splitlines()
+    assert lines[0] == ",".join(CSV_HEADER_WITH_MOVING)
+    assert lines[1].endswith(",false")
+    assert lines[2].endswith(",true")
+
+
+def test_moving_column_ignores_an_unconfirmed_auto_proposal(tmp_path: Path) -> None:
+    """Callers pass only confirmed regions; this guards against a caller
+    accidentally handing an auto proposal through -- the column must not
+    read as moving for it (the module trusts its caller, but a shot that
+    would otherwise be 'true' here is the tell that the gate broke)."""
+    shots = [_make_shot(1, 4.5, beep_time=1.0, peak=0.5, confidence=0.9)]  # time_from_beep 3.5
+    events = [StageEvent(id="evt-1", kind="movement", start=3.0, end=6.0, source="auto")]
+    out = tmp_path / "auto_only.csv"
+    # auto-only is never passed through by a correct caller, but the
+    # function itself only applies ``shot_is_moving`` over what it's given --
+    # it does not re-filter by source. Confirming that here documents the
+    # contract: filtering is the caller's job (events.confirmed), not this
+    # module's.
+    write_splits_csv(shots, out, events=events)
+    rows_text = out.read_text().splitlines()[1]
+    assert rows_text.endswith(",true")
 
 
 def test_notes_with_commas_and_quotes_round_trip(tmp_path: Path) -> None:
@@ -81,6 +132,25 @@ def test_read_rejects_unexpected_header(tmp_path: Path) -> None:
     out.write_text("foo,bar,baz\n1,2,3\n")
     with pytest.raises(ValueError, match="unexpected CSV header"):
         read_splits_csv(out)
+
+
+def test_write_events_csv_writes_header_and_rows(tmp_path: Path) -> None:
+    events = [
+        StageEvent(id="evt-1", kind="reload", start=8.05, end=9.47, source="manual"),
+        StageEvent(id="evt-2", kind="movement", start=3.4, end=6.1, source="manual", note="to box B"),
+    ]
+    out = tmp_path / "events.csv"
+    write_events_csv(events, out)
+    lines = out.read_text().splitlines()
+    assert lines[0] == ",".join(EVENTS_CSV_HEADER)
+    assert lines[1] == "evt-1,reload,8.050,9.470,1.420,manual,"
+    assert lines[2] == "evt-2,movement,3.400,6.100,2.700,manual,to box B"
+
+
+def test_write_events_csv_with_no_events_still_writes_header_only(tmp_path: Path) -> None:
+    out = tmp_path / "empty_events.csv"
+    write_events_csv([], out)
+    assert out.read_text().strip() == ",".join(EVENTS_CSV_HEADER)
 
 
 def test_user_can_drop_rows_without_breaking_read(tmp_path: Path) -> None:

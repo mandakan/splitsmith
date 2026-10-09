@@ -22,14 +22,14 @@ from __future__ import annotations
 import json
 import plistlib
 import subprocess
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
 from fractions import Fraction
 from pathlib import Path
 from typing import Literal
 from xml.etree import ElementTree as ET
 
-from .config import OutputConfig, Shot, SplitColorThresholds, VideoMetadata
+from .config import OutputConfig, Shot, SplitColorThresholds, StageEvent, VideoMetadata
 
 PipCorner = Literal["top-right", "top-left", "bottom-right", "bottom-left"]
 
@@ -326,6 +326,7 @@ def generate_fcpxml(
     overlay_path: Path | None = None,
     overlay_video: VideoMetadata | None = None,
     secondaries: list[SecondaryClip] | None = None,
+    events: Sequence[StageEvent] = (),
 ) -> None:
     """Write a minimal FCPXML 1.10 timeline for the trimmed video.
 
@@ -336,6 +337,13 @@ def generate_fcpxml(
     Each entry in ``shots`` must have ``time_from_beep`` set; shot times are
     converted to clip-local time via ``beep_offset + time_from_beep`` and
     rationalized against the source frame duration.
+
+    ``events``: the stage's **confirmed** regions only (spec 2026-10-08,
+    part 2) -- callers filter with ``events.confirmed`` before passing them
+    here; this function does not re-filter by ``source``. Each becomes one
+    marker on the primary clip with ``duration`` spanning the region, value
+    ``Reload 1.42`` / ``Movement`` / ``Activation``. Empty by default, so a
+    stage with no confirmed regions emits exactly as before.
 
     ``overlay_path``: optional pre-rendered alpha MOV (issue #45) to place
     on V2 as a connected clip. When the file exists the timeline gets a
@@ -624,6 +632,27 @@ def generate_fcpxml(
             },
         )
 
+    # Region markers (spec 2026-10-08, part 2). ``events`` is already the
+    # caller's confirmed-only list; a region whose start falls outside the
+    # clip is dropped, the same rule as a shot marker above.
+    for event in events:
+        start_clip_local = beep_offset_seconds + event.start
+        end_clip_local = beep_offset_seconds + event.end
+        if not 0.0 <= start_clip_local < video.duration_seconds:
+            continue
+        start_frames = round(start_clip_local / fd_seconds)
+        end_frames = round(end_clip_local / fd_seconds)
+        duration_frames = max(1, end_frames - start_frames)
+        ET.SubElement(
+            asset_clip,
+            "marker",
+            {
+                "start": _frame_aligned_str(start_frames, fd_num, fd_den),
+                "duration": _frame_aligned_str(duration_frames, fd_num, fd_den),
+                "value": _region_marker_label(event),
+            },
+        )
+
     ET.indent(fcpxml, space="    ")
     tree_bytes = ET.tostring(fcpxml, encoding="utf-8", xml_declaration=True)
     # Inject the FCPXML DOCTYPE (ElementTree does not emit it).
@@ -779,6 +808,11 @@ class StageComposition:
     overlay_path: Path | None = None
     overlay_video: VideoMetadata | None = None
     secondaries: tuple[SecondaryClip, ...] = ()
+    #: This stage's confirmed regions only (spec 2026-10-08, part 2) --
+    #: the composer filters with ``events.confirmed`` before building this.
+    #: Empty by default, so a stage built before this field existed still
+    #: emits exactly as before.
+    events: tuple[StageEvent, ...] = ()
 
 
 def generate_match_fcpxml(
@@ -1558,6 +1592,26 @@ def generate_match_fcpxml(
                 },
             )
 
+        # Region markers (spec 2026-10-08, part 2). ``stage.events`` is
+        # already confirmed-only; same drop-outside-window rule as shots.
+        for event in stage.events:
+            region_start_seconds = stage.beep_offset_seconds + event.start
+            region_end_seconds = stage.beep_offset_seconds + event.end
+            if not head_trim_seconds_for_window <= region_start_seconds < eff_end_seconds:
+                continue
+            start_frames = round(region_start_seconds / fd_seconds)
+            end_frames = round(region_end_seconds / fd_seconds)
+            region_duration_frames = max(1, end_frames - start_frames)
+            ET.SubElement(
+                primary_clip,
+                "marker",
+                {
+                    "start": _frame_aligned_str(start_frames, fd_num, fd_den),
+                    "duration": _frame_aligned_str(region_duration_frames, fd_num, fd_den),
+                    "value": _region_marker_label(event),
+                },
+            )
+
         # Stage-boundary transition (issue #195). Centred on the cut
         # point: transition offset = end_of_prev - duration/2,
         # duration = transition.duration. Both adjacent stages keep
@@ -1663,6 +1717,17 @@ def _marker_label(shot: Shot, thresholds: SplitColorThresholds) -> str:
     else:
         kind = "split"
     return f"Shot {shot.shot_number}: {shot.split:.3f}s [{band}] ({kind})"
+
+
+def _region_marker_label(event: StageEvent) -> str:
+    """``Reload 1.42`` / ``Movement`` / ``Activation`` (spec 2026-10-08,
+    part 2). A reload's label carries its duration; the other two kinds
+    don't -- the marker's own ``duration`` already shows the span in FCP."""
+    if event.kind == "reload":
+        return f"Reload {event.end - event.start:.2f}"
+    if event.kind == "movement":
+        return "Movement"
+    return "Activation"
 
 
 def _frame_aligned_str(frames: int, fd_num: int, fd_den: int) -> str:

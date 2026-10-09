@@ -14,7 +14,7 @@ from xml.etree import ElementTree as ET
 import pytest
 
 from splitsmith import composition, fcp7xml_render
-from splitsmith.config import Shot, VideoMetadata
+from splitsmith.config import Shot, StageEvent, VideoMetadata
 from splitsmith.fcpxml_gen import (
     PipPlacement,
     SecondaryClip,
@@ -398,6 +398,106 @@ def test_markers_outside_visible_window_are_dropped(tmp_path: Path) -> None:
     root = _render(stages, tmp_path)
     markers = root.findall(".//clipitem/marker")
     assert len(markers) == 1
+
+
+# --- region markers (spec 2026-10-08, part 2) -----------------------------
+
+
+def test_region_marker_in_out_frames_for_a_reload(tmp_path: Path) -> None:
+    """A 1.42s reload starting 8.05s after the beep (beep at 5.0s) ->
+    clip-local 13.05s-14.47s = frames 392-434 at 30fps. ``tail_pad_seconds``
+    is generous so the whole 20s clip stays visible and the region isn't
+    itself the thing deciding the window (that's the next test)."""
+    primary = _make_video(tmp_path, "a.mp4")
+    stages = [
+        StageComposition(
+            stage_name="A",
+            video_path=primary,
+            video=_meta_30fps(),
+            shots=[],
+            beep_offset_seconds=5.0,
+            head_pad_seconds=5.0,
+            tail_pad_seconds=20.0,
+            events=(StageEvent(id="evt-1", kind="reload", start=8.05, end=9.47, source="manual"),),
+        )
+    ]
+    root = _render(stages, tmp_path)
+    markers = root.findall(".//track[1]/clipitem/marker")
+    assert len(markers) == 1
+    assert markers[0].findtext("in") == "392"
+    assert markers[0].findtext("out") == "434"
+    assert markers[0].findtext("name") == "Reload 1.42"
+
+
+def test_region_marker_values_for_movement_and_activation(tmp_path: Path) -> None:
+    primary = _make_video(tmp_path, "a.mp4")
+    stages = [
+        StageComposition(
+            stage_name="A",
+            video_path=primary,
+            video=_meta_30fps(),
+            shots=[],
+            beep_offset_seconds=5.0,
+            head_pad_seconds=5.0,
+            tail_pad_seconds=20.0,
+            events=(
+                StageEvent(id="evt-1", kind="movement", start=1.0, end=3.0, source="manual"),
+                StageEvent(id="evt-2", kind="activation", start=4.0, end=4.5, source="manual"),
+            ),
+        )
+    ]
+    root = _render(stages, tmp_path)
+    markers = root.findall(".//track[1]/clipitem/marker")
+    names = [m.findtext("name") for m in markers]
+    assert names == ["Movement", "Activation"]
+
+
+def test_region_marker_outside_visible_window_is_dropped(tmp_path: Path) -> None:
+    """Mirrors ``test_markers_outside_visible_window_are_dropped`` for a
+    region: tight tail pad collapses the window, so a region starting
+    well past it is skipped."""
+    primary = _make_video(tmp_path, "a.mp4")
+    stages = [
+        StageComposition(
+            stage_name="A",
+            video_path=primary,
+            video=_meta_30fps(),
+            shots=[_shot(1, 1.0, 1.0)],
+            beep_offset_seconds=5.0,
+            head_pad_seconds=5.0,
+            tail_pad_seconds=0.0,
+            events=(StageEvent(id="evt-1", kind="movement", start=14.5, end=14.8, source="manual"),),
+        )
+    ]
+    root = _render(stages, tmp_path)
+    markers = root.findall(".//clipitem/marker")
+    assert all(m.findtext("name") != "Movement" for m in markers)
+
+
+def test_no_confirmed_regions_is_byte_identical_to_omitting_events(tmp_path: Path) -> None:
+    """A stage built without ``events`` and one built with ``events=()``
+    must render identical bytes."""
+    primary_a = _make_video(tmp_path, "a.mp4")
+    stage_kwargs = {
+        "stage_name": "A",
+        "video_path": primary_a,
+        "video": _meta_30fps(),
+        "shots": [_shot(1, 1.0, 1.0)],
+        "beep_offset_seconds": 5.0,
+        "head_pad_seconds": 5.0,
+        "tail_pad_seconds": 5.0,
+    }
+    out_default = tmp_path / "default.xml"
+    out_explicit = tmp_path / "explicit.xml"
+    comp_default = composition.from_stage_compositions(
+        [StageComposition(**stage_kwargs)], project_name="match"
+    )
+    comp_explicit = composition.from_stage_compositions(
+        [StageComposition(events=(), **stage_kwargs)], project_name="match"
+    )
+    fcp7xml_render.render_fcp7xml(comp_default, output_path=out_default)
+    fcp7xml_render.render_fcp7xml(comp_explicit, output_path=out_explicit)
+    assert out_default.read_bytes() == out_explicit.read_bytes()
 
 
 # --- PiP via Basic Motion -------------------------------------------------
