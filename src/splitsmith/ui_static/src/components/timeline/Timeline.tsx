@@ -307,7 +307,10 @@ export function Timeline(props: TimelineProps) {
   }, []);
 
   const insideMarker = (target: EventTarget | null) =>
-    target instanceof HTMLElement && target.closest("[data-audit-marker]") !== null;
+    // The marker's visible head (MarkerGlyph) is an <svg>, which is an
+    // Element but not an HTMLElement -- HTMLElement would miss a press or
+    // double-click that lands on the glyph itself rather than the button.
+    target instanceof Element && target.closest("[data-audit-marker]") !== null;
 
   const handleTrackPointerDown = (track: TimelineTrack) => (e: React.PointerEvent<HTMLDivElement>) => {
     if (!track.seekable || e.button !== 0 || insideMarker(e.target)) return;

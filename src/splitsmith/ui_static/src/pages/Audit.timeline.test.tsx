@@ -209,6 +209,10 @@ describe("Audit on the timeline band", () => {
     // A double-click on a marker adds nothing.
     fireEvent.doubleClick(track.querySelector("[data-audit-marker]")!, { clientX: 100 });
     expect(track.querySelectorAll("[data-audit-marker]").length).toBe(3);
+    // Nor does one on the marker's own glyph (an <svg>, not an HTMLElement) (I1).
+    const marker = track.querySelector("[data-audit-marker]")!;
+    fireEvent.doubleClick(marker.querySelector("svg")!, { clientX: 100 });
+    expect(track.querySelectorAll("[data-audit-marker]").length).toBe(3);
   });
 
   describe("peak snapping on add", () => {

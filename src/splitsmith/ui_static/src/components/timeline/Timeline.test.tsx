@@ -43,7 +43,9 @@ function Harness(props: {
           onDoubleClick: props.onDoubleClick,
           render: () => (
             <div data-testid="track-s">
-              <button data-audit-marker data-testid="marker" />
+              <button data-audit-marker data-testid="marker">
+                <svg data-testid="marker-glyph" width={18} height={18} />
+              </button>
             </div>
           ),
         },
@@ -412,6 +414,20 @@ describe("Timeline", () => {
       const onSeek = vi.fn();
       render(<Harness onSeek={onSeek} />);
       fireEvent.pointerDown(screen.getByTestId("marker"), { pointerId: 2, button: 0, clientX: 437 });
+      expect(onSeek).not.toHaveBeenCalled();
+    });
+
+    it("ignores a dblclick and a pointerdown on the marker's own svg glyph, not just the button (I1)", () => {
+      // The marker's visible head (MarkerGlyph) is an <svg>, which is not an
+      // HTMLElement -- a check that only accepted HTMLElement let a press or
+      // double-click on the glyph itself bubble past the marker guard.
+      const onDouble = vi.fn();
+      const onSeek = vi.fn();
+      render(<Harness onDoubleClick={onDouble} onSeek={onSeek} />);
+      const glyph = screen.getByTestId("marker-glyph");
+      fireEvent.doubleClick(glyph, { clientX: 437 });
+      expect(onDouble).not.toHaveBeenCalled();
+      fireEvent.pointerDown(glyph, { pointerId: 3, button: 0, clientX: 437 });
       expect(onSeek).not.toHaveBeenCalled();
     });
 
