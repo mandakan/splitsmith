@@ -244,12 +244,12 @@ def test_seed_doc_runs_once_and_only_with_shots() -> None:
     assert seed_doc(empty, hint_min_s=2.5, capacity=15) is False
     assert "events_seeded" not in empty
 
-    times = _quick(1.0, 12) + _quick(1.0 + 11 * 0.3 + 3.2, 4)
+    times = _quick(1.0, 12) + _quick(1.0 + 11 * 0.3 + 3.2, 8)
     doc = {
         "shots": [{"shot_number": i + 1, "ms_after_beep": int(round(t * 1000))} for i, t in enumerate(times)]
     }
     assert seed_doc(doc, hint_min_s=2.5, capacity=15) is True
-    assert doc["events_seeded"] is True
+    assert doc["events_seeded"] == 2
     assert [e["kind"] for e in doc["events"]] == ["reload"]
     assert "note" not in doc["events"][0]
 
@@ -307,3 +307,110 @@ def test_confirmed_from_doc_logs_with_the_given_context(caplog: pytest.LogCaptur
     with caplog.at_level("WARNING"):
         confirmed_from_doc(doc, log_context="stage1.json")
     assert any("stage1.json" in rec.message for rec in caplog.records)
+
+
+# --- the round count places the proposals (seeder version 2) -------------------
+
+# Höstfinalen XI stage 2 as audited: 28 shots, gaps in seconds. One reload
+# is forced (28 > 16), and only after shots 12 to 16; the 2.49 s gap after
+# shot 14 is the one, though the hint (2.5 s) misses it. The first seeder
+# proposed the 2.91 s gap after shot 4 and the 3.08 s one after shot 17.
+STAGE2_GAPS = [
+    0.47,
+    0.77,
+    0.68,
+    2.91,
+    0.84,
+    1.21,
+    0.56,
+    1.02,
+    1.24,
+    1.43,
+    0.48,
+    1.01,
+    0.3,
+    2.49,
+    0.31,
+    0.58,
+    3.08,
+    0.84,
+    1.0,
+    0.53,
+    0.82,
+    0.94,
+    1.02,
+    0.18,
+    1.05,
+    0.32,
+    0.29,
+]
+
+
+def _from_gaps(gaps: list[float], start: float = 1.9) -> list[float]:
+    times = [start]
+    for gap in gaps:
+        times.append(times[-1] + gap)
+    return times
+
+
+def test_seed_places_the_one_reload_the_round_count_forces() -> None:
+    times = _from_gaps(STAGE2_GAPS)
+    seeds = seed_events(times, hint_min_s=2.5, capacity=15)
+    assert len(seeds) == 1
+    assert seeds[0].start == pytest.approx(times[13]) and seeds[0].end == pytest.approx(times[14])
+
+
+def test_seed_a_stage_one_magazine_holds_gets_no_proposal_whatever_its_gaps() -> None:
+    times = _quick(1.0, 6) + _quick(1.0 + 5 * 0.3 + 3.5, 10)  # 16 shots, a 3.5 s gap
+    assert seed_events(times, hint_min_s=2.5, capacity=15) == []
+
+
+def test_seed_never_reloads_in_a_gap_too_short_to_reload_in() -> None:
+    # 32 shots: one reload after shot 16 would do, but that gap is 0.3 s.
+    # Two reloads in the real gaps (3.0 s, 2.9 s) beat one impossible one.
+    a = _quick(1.0, 14)
+    b = _quick(a[-1] + 3.0, 16)
+    c = _quick(b[-1] + 2.9, 2)
+    seeds = seed_events(a + b + c, hint_min_s=2.5, capacity=15)
+    assert [round(s.start, 3) for s in seeds] == [round(a[-1], 3), round(b[-1], 3)]
+
+
+def test_seed_falls_back_to_any_gap_when_no_long_one_can_hold_the_reload() -> None:
+    times = _quick(1.0, 20)  # every gap 0.3 s, a reload forced
+    seeds = seed_events(times, hint_min_s=2.5, capacity=15)
+    assert len(seeds) == 1
+
+
+def _doc(times: list[float], events: list[dict] | None, seeded: object) -> dict:
+    doc: dict = {
+        "shots": [{"shot_number": i + 1, "ms_after_beep": int(round(t * 1000))} for i, t in enumerate(times)]
+    }
+    if events is not None:
+        doc["events"] = events
+    if seeded is not None:
+        doc["events_seeded"] = seeded
+    return doc
+
+
+def test_an_earlier_seeders_untouched_proposals_are_replaced() -> None:
+    times = _from_gaps(STAGE2_GAPS)
+    old = [
+        {"id": "evt-1", "kind": "reload", "start": times[3], "end": times[4], "source": "auto"},
+        {"id": "evt-2", "kind": "reload", "start": times[16], "end": times[17], "source": "auto"},
+    ]
+    doc = _doc(times, old, True)
+    assert seed_doc(doc, hint_min_s=2.5, capacity=15) is True
+    assert doc["events_seeded"] == 2
+    assert [(round(e["start"], 3), e["source"]) for e in doc["events"]] == [(round(times[13], 3), "auto")]
+    assert seed_doc(doc, hint_min_s=2.5, capacity=15) is False, "once"
+
+
+def test_a_stage_the_user_touched_is_never_reseeded() -> None:
+    times = _from_gaps(STAGE2_GAPS)
+    kept = [{"id": "evt-1", "kind": "reload", "start": times[3], "end": times[4], "source": "manual"}]
+    doc = _doc(times, kept, True)
+    assert seed_doc(doc, hint_min_s=2.5, capacity=15) is False
+    assert doc["events"] == kept
+    deleted = _doc(times, [], True)  # the user deleted every proposal
+    assert seed_doc(deleted, hint_min_s=2.5, capacity=15) is False
+    assert deleted["events"] == []
