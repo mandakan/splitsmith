@@ -107,6 +107,12 @@ export function Timeline(props: TimelineProps) {
   const scrubPointerId = useRef<number | null>(null);
   const scrubPending = useRef<number | null>(null);
   const scrubRaf = useRef<number | null>(null);
+  // A frame scheduled by queueScrub in one render must call that frame's
+  // own latest onSeek, not the one closed over by the render that scheduled
+  // it -- a prop change between the move and the flush must not reach a
+  // stale handler.
+  const onSeekRef = useRef(onSeek);
+  onSeekRef.current = onSeek;
 
   useLayoutEffect(() => {
     const host = hostRef.current;
@@ -285,7 +291,7 @@ export function Timeline(props: TimelineProps) {
     const t = scrubPending.current;
     if (t !== null) {
       scrubPending.current = null;
-      onSeek(t);
+      onSeekRef.current(t);
     }
   };
   const queueScrub = (t: number) => {
@@ -305,6 +311,10 @@ export function Timeline(props: TimelineProps) {
 
   const handleTrackPointerDown = (track: TimelineTrack) => (e: React.PointerEvent<HTMLDivElement>) => {
     if (!track.seekable || e.button !== 0 || insideMarker(e.target)) return;
+    // Reentrancy: a second pointer pressing while one is already scrubbing
+    // must not steal scrubPointerId, which would orphan the first pointer's
+    // eventual up (its onScrubEnd would never fire).
+    if (scrubPointerId.current !== null) return;
     e.preventDefault();
     e.currentTarget.setPointerCapture?.(e.pointerId);
     scrubPointerId.current = e.pointerId;

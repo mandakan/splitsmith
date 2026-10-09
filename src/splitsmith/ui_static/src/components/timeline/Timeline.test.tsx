@@ -414,5 +414,43 @@ describe("Timeline", () => {
       fireEvent.pointerDown(screen.getByTestId("marker"), { pointerId: 2, button: 0, clientX: 437 });
       expect(onSeek).not.toHaveBeenCalled();
     });
+
+    it("ignores a second pointer's press while a scrub is in progress, and the first pointer's up still ends it once", () => {
+      // Reentrancy: a second pointerdown during a drag used to overwrite
+      // scrubPointerId, orphaning the first pointer's eventual up (it no
+      // longer matched scrubPointerId.current, so onScrubEnd never fired
+      // for it).
+      const onSeek = vi.fn();
+      const onScrubEnd = vi.fn();
+      render(<Harness onSeek={onSeek} onScrubEnd={onScrubEnd} />);
+      const row = screen.getByTestId("track-s").parentElement!;
+      fireEvent.pointerDown(row, { pointerId: 1, button: 0, clientX: 100 });
+      onSeek.mockClear();
+      fireEvent.pointerDown(row, { pointerId: 2, button: 0, clientX: 500 });
+      expect(onSeek).not.toHaveBeenCalled();
+      fireEvent.pointerUp(row, { pointerId: 1, clientX: 100 });
+      expect(onScrubEnd).toHaveBeenCalledTimes(1);
+      // The second pointer was never the scrub pointer, so its own up is a no-op.
+      fireEvent.pointerUp(row, { pointerId: 2, clientX: 500 });
+      expect(onScrubEnd).toHaveBeenCalledTimes(1);
+    });
+
+    it("a pending scrub frame calls the latest onSeek, not the one from the render that scheduled it", () => {
+      // Stale handler: the rAF callback used to close over the onSeek from
+      // the render that scheduled it, so a prop change between a move and
+      // the frame flush would call a stale handler instead of the current
+      // one.
+      const onSeekOld = vi.fn();
+      const onSeekNew = vi.fn();
+      const { rerender } = render(<Harness onSeek={onSeekOld} />);
+      const row = screen.getByTestId("track-s").parentElement!;
+      fireEvent.pointerDown(row, { pointerId: 1, button: 0, clientX: 100 });
+      onSeekOld.mockClear();
+      fireEvent.pointerMove(row, { pointerId: 1, clientX: 300 });
+      rerender(<Harness onSeek={onSeekNew} />);
+      act(() => vi.runOnlyPendingTimers());
+      expect(onSeekNew).toHaveBeenCalledWith(expect.closeTo(3, 2));
+      expect(onSeekOld).not.toHaveBeenCalled();
+    });
   });
 });
