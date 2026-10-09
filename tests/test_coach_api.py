@@ -627,7 +627,7 @@ def _write_shots(audit_file: Path, ms: list[int]) -> None:
 
 def _po_shots_with_a_reload_gap() -> list[int]:
     quick = [1200 + i * 300 for i in range(12)]
-    after = [quick[-1] + 3200 + i * 300 for i in range(4)]
+    after = [quick[-1] + 3200 + i * 300 for i in range(8)]
     return quick + after
 
 
@@ -645,7 +645,7 @@ def test_get_coach_seeds_a_reload_proposal_once(tmp_path: Path) -> None:
     assert isinstance(body["_version"], str) and len(body["_version"]) == 16
 
     stored = json.loads(audit_file.read_text(encoding="utf-8"))
-    assert stored["events_seeded"] is True
+    assert stored["events_seeded"] == 2
     assert len(stored["events"]) == 1
 
     # The user deletes the proposal; the next read does not resurrect it.
@@ -726,7 +726,7 @@ def test_get_coach_version_is_the_stored_docs_revision(
     monkeypatch.setattr(server_module, "_is_mirror", lambda: False)
     body = client.get(f"{base}/shooters/me/stages/1/coach").json()
     stored = _read(audit_file)
-    assert stored["events_seeded"] is True
+    assert stored["events_seeded"] == 2
     assert body["_version"] == audit_revision(stored)
 
 
@@ -825,7 +825,7 @@ def test_put_events_replaces_the_list_and_returns_the_coach_payload(tmp_path: Pa
 
     stored = json.loads(audit_file.read_text(encoding="utf-8"))
     assert stored["events"] == events
-    assert stored["events_seeded"] is True
+    assert stored["events_seeded"] == 2
     assert stored["audit_events"][-1]["kind"] == "events_save"
     assert stored["audit_events"][-1]["payload"] == {"count": 2}
 
@@ -1065,3 +1065,42 @@ def test_reclassify_with_corrupt_events_is_a_422_and_leaves_the_doc(tmp_path: Pa
     assert resp.status_code == 422, resp.text
     assert "invalid events" in resp.json()["detail"]
     assert audit_file.read_text(encoding="utf-8") == before
+
+
+def test_get_coach_reseeds_an_older_seeders_untouched_proposals(tmp_path: Path) -> None:
+    """A stage the first seeder proposed (``events_seeded: true``) gets the
+    round count's proposal on the next read, and the shot the old proposal
+    made a ``reload`` is classified again."""
+    client, audit_file, base = _bootstrap(tmp_path, division="Production Optics")
+    # 4 quick shots, a 2.9 s gap, 10 quick, a 2.4 s gap, 10 quick: 26 shots,
+    # so one reload, forced after shots 10 to 16: the 2.4 s gap after shot 15.
+    first = [1200 + i * 300 for i in range(4)]
+    middle = [first[-1] + 2900 + i * 300 for i in range(11)]
+    last = [middle[-1] + 2400 + i * 300 for i in range(11)]
+    _write_shots(audit_file, first + middle + last)
+    doc = json.loads(audit_file.read_text(encoding="utf-8"))
+    old = {
+        "id": "evt-1",
+        "kind": "reload",
+        "start": first[-1] / 1000,
+        "end": middle[0] / 1000,
+        "source": "auto",
+    }
+    doc["events"] = [old]
+    doc["events_seeded"] = True
+    # Every shot classified, as the old seeder's stage was: the gap it
+    # covered as ``reload``, the real reload gap as ``movement``.
+    for shot in doc["shots"]:
+        shot["interval_class"] = "split"
+        shot["interval_class_source"] = "auto"
+    doc["shots"][0]["interval_class"] = "first_shot"
+    doc["shots"][4]["interval_class"] = "reload"
+    doc["shots"][15]["interval_class"] = "movement"
+    audit_file.write_text(json.dumps(doc) + "\n", encoding="utf-8")
+
+    body = client.get(f"{base}/shooters/me/stages/1/coach").json()
+    assert [(round(e["start"], 3), e["source"]) for e in body["events"]] == [(middle[-1] / 1000, "auto")]
+    stored = json.loads(audit_file.read_text(encoding="utf-8"))
+    assert stored["events_seeded"] == 2
+    assert stored["shots"][4]["interval_class"] != "reload"
+    assert stored["shots"][15]["interval_class"] == "reload"
