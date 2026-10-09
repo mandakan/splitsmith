@@ -500,6 +500,30 @@ def test_region_marker_end_clamps_to_the_visible_window(tmp_path: Path) -> None:
     assert markers[0].findtext("out") == "600"
 
 
+def test_region_marker_end_clamps_to_a_window_shorter_than_the_clip(tmp_path: Path) -> None:
+    """The window, not the clip: a 10 s tail pad over the 20 s clip ends the
+    visible window at frame 300, so a region from 9.0 s to 30.0 s goes out
+    there. Clamping to the clip's end would give 600."""
+    primary = _make_video(tmp_path, "a.mp4")
+    stages = [
+        StageComposition(
+            stage_name="A",
+            video_path=primary,
+            video=_meta_30fps(),
+            shots=[],
+            beep_offset_seconds=0.0,
+            head_pad_seconds=0.0,
+            tail_pad_seconds=10.0,
+            events=(StageEvent(id="evt-1", kind="movement", start=9.0, end=30.0, source="manual"),),
+        )
+    ]
+    root = _render(stages, tmp_path)
+    markers = [m for m in root.findall(".//track[1]/clipitem/marker") if m.findtext("name") == "Movement"]
+    assert len(markers) == 1
+    assert markers[0].findtext("in") == "270"
+    assert markers[0].findtext("out") == "300"
+
+
 # No byte-identity self-pin here on purpose, for the same reason as the
 # fcpxml_gen tests' equivalent comments: a stage built with ``events=()``
 # vs one that omits ``events`` reduce to the same empty tuple, so comparing

@@ -1139,6 +1139,37 @@ def test_match_fcpxml_clamps_region_end_to_the_visible_window(tmp_path: Path) ->
     assert markers[0].attrib["duration"] == "330/30s"  # (20.0 - 9.0)s * 30fps, clamped
 
 
+def test_match_fcpxml_clamps_region_end_to_a_window_shorter_than_the_clip(tmp_path: Path) -> None:
+    """The window, not the clip: a 10 s tail pad over the 20 s clip ends the
+    visible window at 10.0 s, so a region from 9.0 s to 30.0 s runs one
+    second (30/30s). Clamping to the clip's end would give 330/30s."""
+    video = _make_video(tmp_path, "v.mp4")
+    out = tmp_path / "v.fcpxml"
+    events = [StageEvent(id="evt-1", kind="movement", start=9.0, end=30.0, source="manual")]
+    generate_match_fcpxml(
+        stages=[
+            StageComposition(
+                stage_name="v",
+                video_path=video,
+                video=_meta_30fps(),
+                shots=[],
+                beep_offset_seconds=0.0,
+                head_pad_seconds=0.0,
+                tail_pad_seconds=10.0,
+                events=events,
+            )
+        ],
+        output_path=out,
+        project_name="match",
+        config=OutputConfig(),
+    )
+    root = ET.fromstring(out.read_bytes())
+    markers = [m for m in root.findall(".//spine/asset-clip/marker") if m.attrib["value"] == "Movement"]
+    assert len(markers) == 1
+    assert markers[0].attrib["start"] == "270/30s"
+    assert markers[0].attrib["duration"] == "30/30s"  # (10.0 - 9.0)s * 30fps
+
+
 # No byte-identity self-pin here on purpose, for the same reason noted by
 # ``generate_fcpxml``'s equivalent comment above: comparing a stage built
 # with ``events=()`` against one that omits ``events`` cannot catch a

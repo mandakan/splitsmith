@@ -112,3 +112,19 @@ def test_standing_reload_has_no_overhang_figure(tmp_path: Path) -> None:
     assert figures["reloads"] == 1
     assert figures["reload_avg_s"] == pytest.approx(1.8)
     assert figures["overhang_s"] is None
+
+
+def test_confirmed_movement_alone_reports_moving_shots_and_no_reload_figures(tmp_path: Path) -> None:
+    """Movement 1.6-3.5 covers shots 2 and 3 and there is no reload: the
+    stage has figures (``moving_shots``), the reload ones say none were
+    marked (``0``) and nothing was measured (``null``), never ``0.0``."""
+    figures = _figures(
+        tmp_path,
+        [{"id": "evt-1", "kind": "movement", "start": 1.6, "end": 3.5, "source": "manual"}],
+    )
+    assert {k: figures[k] for k in REGION_KEYS} == {
+        "moving_shots": 2,
+        "reloads": 0,
+        "reload_avg_s": None,
+        "overhang_s": None,
+    }
