@@ -41,6 +41,7 @@ import { CoachShotTable } from "@/components/coach/CoachShotTable";
 import { EventCard } from "@/components/coach/EventCard";
 import { EventList } from "@/components/coach/EventList";
 import { LaneEditor } from "@/components/coach/LaneEditor";
+import { SaveNotice } from "@/components/coach/SaveNotice";
 import { ShotEditor } from "@/components/coach/ShotEditor";
 import { TimeBudgetBar } from "@/components/coach/TimeBudgetBar";
 import { TimeBudgetCard } from "@/components/coach/TimeBudgetCard";
@@ -769,7 +770,9 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
     setCoach(next);
   }, []);
   // Regions (spec 2026-10-08): ``apply`` wraps applyCoach and is what every
-  // coach response goes through, so the events' revision moves with it.
+  // coach response goes through, so the events' revision moves with it. A
+  // failed region save is ``saveIssue``, shown under the lane editor: it
+  // never replaces the page the way a load or shot PATCH failure does.
   const {
     events,
     selectedId: selectedEventId,
@@ -777,7 +780,11 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
     apply,
     change: changeEvents,
     cancel: cancelEvents,
-  } = useStageEvents(slug, stage, applyCoach, setError);
+    issue: saveIssue,
+    retry: retrySave,
+    dismiss: dismissSaveIssue,
+    busy: regionSaveBusy,
+  } = useStageEvents(slug, stage, applyCoach);
   const isMobile = useIsMobile();
 
   useEffect(() => {
@@ -1126,6 +1133,7 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
               ) : undefined
             }
           />
+          {saveIssue ? <SaveNotice issue={saveIssue} busy={regionSaveBusy} onRetry={retrySave} onDismiss={dismissSaveIssue} /> : null}
           {eventsReadOnly ? <EventList events={events} shots={coach.shots} /> : null}
 
           {selectedEvent ? (

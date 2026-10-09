@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 
@@ -235,6 +235,117 @@ describe("stage events on the Coach page", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
     expect(await screen.findByTestId("event-evt-2")).toBeInTheDocument();
     expect(api.getStageCoach).toHaveBeenCalledTimes(2);
+  });
+
+  describe("a failed region save says so under the lane editor", () => {
+    const PROJECT = { name: "M", competitor_name: "Anna",
+      stages: [{ stage_number: 1, stage_name: "Stage One", time_seconds: 16.2 }] } as never;
+    const region = (id: string, start: number): StageEvent => ({ id, kind: "movement", start, end: start + 1, source: "manual" });
+    const stageWith = (events: StageEvent[], version: string) => makeCoachWithEvents([makeShot(1, "c1")], events, version);
+    const conflict = () => new ApiError(409, "version_conflict", { code: "version_conflict" });
+    const deleteRegion = async (id: string) => {
+      fireEvent.click(await screen.findByTestId(`event-${id}`));
+      fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    };
+    const notices = () => screen.queryAllByTestId("region-save-notice");
+
+    beforeEach(() => {
+      vi.mocked(api.getProject).mockResolvedValue(PROJECT);
+    });
+
+    it("a 409 that discarded the edit shows the notice and keeps the page", async () => {
+      vi.mocked(api.getStageCoach)
+        .mockResolvedValueOnce(stageWith([region("evt-1", 1)], "old"))
+        .mockResolvedValueOnce(stageWith([region("evt-2", 4)], "new"));
+      vi.mocked(api.putStageEvents).mockRejectedValue(conflict());
+      renderCoachRoute();
+      await deleteRegion("evt-1");
+      const notice = await screen.findByTestId("region-save-notice");
+      expect(notice).toHaveTextContent("Your last region change was not saved. The stage changed elsewhere and was reloaded.");
+      expect(notice).toHaveAttribute("role", "status");
+      expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+      expect(screen.getByTestId("lane-editor")).toBeInTheDocument();
+      expect(screen.getByTestId("event-evt-2")).toBeInTheDocument();
+    });
+
+    it("Retry is disabled, and says why, while another region edit is on its way", async () => {
+      vi.mocked(api.getStageCoach).mockResolvedValue(stageWith([region("evt-1", 1), region("evt-2", 4)], "v1"));
+      let failSecond: (e: unknown) => void = () => {};
+      vi.mocked(api.putStageEvents)
+        .mockRejectedValueOnce(new ApiError(500, "Internal Server Error", {}))
+        .mockImplementationOnce(() => new Promise((_r, j) => { failSecond = j; }));
+      renderCoachRoute();
+      await deleteRegion("evt-1");
+      const retry = await screen.findByRole("button", { name: "Retry" });
+      expect(retry).toBeEnabled();
+      // The list reverted, so evt-2 is there to edit; the edit waits in the debounce, then flies.
+      await deleteRegion("evt-2");
+      expect(retry).toBeDisabled();
+      expect(retry).toHaveAttribute("title", "Wait for the current region change to save");
+      await waitFor(() => expect(api.putStageEvents).toHaveBeenCalledTimes(2));
+      expect(retry).toBeDisabled();
+      await act(async () => { failSecond(new ApiError(500, "Internal Server Error", {})); });
+      await waitFor(() => expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled());
+      expect(screen.getByRole("button", { name: "Retry" })).not.toHaveAttribute("title");
+    });
+
+    it("a 500 shows the notice with Retry; Retry re-sends the edit and its success clears the notice", async () => {
+      vi.mocked(api.getStageCoach).mockResolvedValue(stageWith([region("evt-1", 1)], "v1"));
+      vi.mocked(api.putStageEvents)
+        .mockRejectedValueOnce(new ApiError(500, "Internal Server Error", {}))
+        .mockResolvedValueOnce(stageWith([], "v2"));
+      renderCoachRoute();
+      await deleteRegion("evt-1");
+      const notice = await screen.findByTestId("region-save-notice");
+      expect(within(notice).getByText("Your last region change was not saved.")).toBeInTheDocument();
+      expect(notice).not.toHaveTextContent(/Internal Server Error|Service Unavailable/);
+      // The server's message is for diagnosis: the line's tooltip, not its copy.
+      expect(within(notice).getByText("Your last region change was not saved.")).toHaveAttribute("title", "Internal Server Error");
+      expect(notice).toHaveAttribute("role", "alert");
+      expect(screen.getByTestId("lane-editor")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+      await waitFor(() => expect(api.putStageEvents).toHaveBeenCalledTimes(2));
+      expect(api.putStageEvents).toHaveBeenLastCalledWith("anna", 1, [], "v1");
+      await waitFor(() => expect(notices()).toHaveLength(0));
+      expect(screen.queryByTestId("event-evt-1")).toBeNull();
+    });
+
+    it("a 409 whose reload fails shows the notice, not the error page", async () => {
+      vi.mocked(api.getStageCoach)
+        .mockResolvedValueOnce(stageWith([region("evt-1", 1)], "v1"))
+        .mockRejectedValueOnce(new ApiError(503, "Service Unavailable", {}));
+      vi.mocked(api.putStageEvents).mockRejectedValue(conflict());
+      renderCoachRoute();
+      await deleteRegion("evt-1");
+      const notice = await screen.findByTestId("region-save-notice");
+      expect(within(notice).getByText("Your last region change was not saved.")).toBeInTheDocument();
+      expect(notice).not.toHaveTextContent(/Internal Server Error|Service Unavailable/);
+      expect(within(notice).getByText("Your last region change was not saved.")).toHaveAttribute("title", "Service Unavailable");
+      expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+      expect(screen.getByTestId("lane-editor")).toBeInTheDocument();
+      // Not saved, so not shown as saved: the deleted region is back.
+      expect(screen.getByTestId("event-evt-1")).toBeInTheDocument();
+    });
+
+    it("the next successful save clears a shown notice, and Dismiss hides one", async () => {
+      vi.mocked(api.getStageCoach)
+        .mockResolvedValueOnce(stageWith([region("evt-1", 1)], "a"))
+        .mockResolvedValueOnce(stageWith([region("evt-2", 4), region("evt-3", 7)], "b"));
+      vi.mocked(api.putStageEvents)
+        .mockRejectedValueOnce(conflict())
+        .mockResolvedValueOnce(stageWith([region("evt-3", 7)], "c"))
+        .mockRejectedValueOnce(new ApiError(500, "Internal Server Error", {}));
+      renderCoachRoute();
+      await deleteRegion("evt-1");
+      await screen.findByTestId("region-save-notice");
+      await deleteRegion("evt-2");
+      await waitFor(() => expect(api.putStageEvents).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(notices()).toHaveLength(0));
+      await deleteRegion("evt-3");
+      await screen.findByRole("button", { name: "Retry" });
+      fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+      expect(notices()).toHaveLength(0);
+    });
   });
 
   it("the region card replaces the shot editor until a shot is picked again", async () => {

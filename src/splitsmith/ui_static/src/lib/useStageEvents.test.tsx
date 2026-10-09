@@ -836,3 +836,168 @@ describe("useStageEvents driving the LaneEditor", () => {
     expect(api.putStageEvents).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("useStageEvents: a save problem is an issue the page shows, with a retry", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.mocked(api.putStageEvents).mockReset();
+    vi.mocked(api.getStageCoach).mockReset();
+  });
+  afterEach(() => vi.useRealTimers());
+
+  const conflict = () => new ApiError(409, "version_conflict", { code: "version_conflict" });
+  const boom = () => new ApiError(500, "Internal Server Error", {});
+
+  function setupIssue() {
+    const applyCoach = vi.fn();
+    const onError = vi.fn();
+    const onDiscard = vi.fn();
+    const hook = renderHook(() => useStageEvents("anna", 1, applyCoach, onError, onDiscard));
+    act(() => hook.result.current.apply(coach([ev("evt-1", 1, 2)], "v1")));
+    return { ...hook, applyCoach, onError, onDiscard };
+  }
+
+  it("a 500 is a failed issue; retry re-sends the failed list and its success clears the issue", async () => {
+    const { result, onError } = setupIssue();
+    vi.mocked(api.putStageEvents)
+      .mockRejectedValueOnce(boom())
+      .mockImplementationOnce(async (_s, _n, events) => coach(events, "v2"));
+    act(() => result.current.change([ev("evt-1", 1.1, 2)], true));
+    await settle();
+    expect(result.current.issue).toEqual({ kind: "failed", message: "Internal Server Error" });
+    expect(onError).toHaveBeenCalledTimes(1);
+    // The list caught up with the server's, as before: the retry brings the edit back.
+    expect(result.current.events).toEqual([ev("evt-1", 1, 2)]);
+    await act(async () => { result.current.retry(); });
+    expect(api.putStageEvents).toHaveBeenCalledTimes(2);
+    expect(api.putStageEvents).toHaveBeenLastCalledWith("anna", 1, [ev("evt-1", 1.1, 2)], "v1");
+    expect(result.current.issue).toBeNull();
+    expect(result.current.events).toEqual([ev("evt-1", 1.1, 2)]);
+  });
+
+  it("a failed retry keeps the issue and the list to retry again", async () => {
+    const { result } = setupIssue();
+    vi.mocked(api.putStageEvents).mockRejectedValueOnce(boom()).mockRejectedValueOnce(boom())
+      .mockImplementationOnce(async (_s, _n, events) => coach(events, "v2"));
+    act(() => result.current.change([ev("evt-1", 1.1, 2)], true));
+    await settle();
+    await act(async () => { result.current.retry(); });
+    expect(result.current.issue?.kind).toBe("failed");
+    await act(async () => { result.current.retry(); });
+    expect(api.putStageEvents).toHaveBeenCalledTimes(3);
+    expect(api.putStageEvents).toHaveBeenLastCalledWith("anna", 1, [ev("evt-1", 1.1, 2)], "v1");
+    expect(result.current.issue).toBeNull();
+  });
+
+  it("a 409 whose reload fails is a failed issue, and retry goes back through the 409 rules", async () => {
+    const { result, onDiscard } = setupIssue();
+    vi.mocked(api.putStageEvents)
+      .mockRejectedValueOnce(conflict())
+      .mockRejectedValueOnce(conflict())
+      .mockImplementationOnce(async (_s, _n, events) => coach(events, "v10"));
+    vi.mocked(api.getStageCoach)
+      .mockRejectedValueOnce(new ApiError(503, "Service Unavailable", {}))
+      // The revision moved for a shot PATCH: the regions are as the edit found them.
+      .mockResolvedValueOnce(coach([ev("evt-1", 1, 2)], "v9"));
+    act(() => result.current.change([ev("evt-1", 1.1, 2)], true));
+    await settle();
+    expect(result.current.issue).toEqual({ kind: "failed", message: "Service Unavailable" });
+    await act(async () => { result.current.retry(); });
+    await settle();
+    // The retry 409'd on the stale revision, reloaded, and re-sent once on v9.
+    expect(api.putStageEvents).toHaveBeenCalledTimes(3);
+    expect(api.putStageEvents).toHaveBeenLastCalledWith("anna", 1, [ev("evt-1", 1.1, 2)], "v9");
+    expect(result.current.issue).toBeNull();
+    expect(onDiscard).not.toHaveBeenCalled();
+  });
+
+  it("a 409 whose reload fails reverts the list to the server's, and retry puts the edit back", async () => {
+    const { result } = setupIssue();
+    vi.mocked(api.putStageEvents).mockRejectedValueOnce(conflict()).mockImplementationOnce(() => new Promise(() => {}));
+    vi.mocked(api.getStageCoach).mockRejectedValueOnce(new ApiError(503, "Service Unavailable", {}));
+    act(() => result.current.change([ev("evt-1", 1.1, 2)], true));
+    await settle();
+    // Not saved, so not shown as saved.
+    expect(result.current.events).toEqual([ev("evt-1", 1, 2)]);
+    act(() => result.current.retry());
+    expect(result.current.events).toEqual([ev("evt-1", 1.1, 2)]);
+  });
+
+  it("busy follows an outstanding edit: a drag, the debounce, the PUT in flight", async () => {
+    const { result } = setupIssue();
+    let finish: (c: CoachStageResponse) => void = () => {};
+    vi.mocked(api.putStageEvents).mockImplementationOnce(() => new Promise((r) => { finish = r; }));
+    expect(result.current.busy).toBe(false);
+    act(() => result.current.change([ev("evt-1", 1.05, 2)], false));
+    expect(result.current.busy).toBe(true);
+    act(() => result.current.change([ev("evt-1", 1, 2)], false));
+    act(() => result.current.cancel());
+    expect(result.current.busy).toBe(false);
+    act(() => result.current.change([ev("evt-1", 1.1, 2)], true));
+    expect(result.current.busy).toBe(true);
+    await settle();
+    expect(api.putStageEvents).toHaveBeenCalledTimes(1);
+    expect(result.current.busy).toBe(true);
+    await act(async () => { finish(coach([ev("evt-1", 1.1, 2)], "v2")); });
+    expect(result.current.busy).toBe(false);
+  });
+
+  it("retry after another writer's regions arrived discards instead of overwriting them", async () => {
+    const { result, onDiscard } = setupIssue();
+    vi.mocked(api.putStageEvents).mockRejectedValueOnce(boom());
+    act(() => result.current.change([ev("evt-1", 1.1, 2)], true));
+    await settle();
+    // A foreign response (a shot PATCH answered after another tab moved a region).
+    act(() => result.current.apply(coach([ev("evt-1", 1, 2), ev("evt-5", 7, 8)], "v5")));
+    act(() => result.current.retry());
+    await settle();
+    expect(api.putStageEvents).toHaveBeenCalledTimes(1);
+    expect(result.current.issue).toEqual({ kind: "discarded" });
+    expect(onDiscard).toHaveBeenCalledTimes(1);
+    expect(result.current.events.map((e) => e.id)).toEqual(["evt-1", "evt-5"]);
+  });
+
+  it("retry does nothing while an edit is outstanding", async () => {
+    const { result } = setupIssue();
+    vi.mocked(api.putStageEvents).mockRejectedValueOnce(boom())
+      .mockImplementation(async (_s, _n, events) => coach(events, "v2"));
+    act(() => result.current.change([ev("evt-1", 1.1, 2)], true));
+    await settle();
+    act(() => result.current.change([ev("evt-1", 1.3, 2)], true)); // in the debounce
+    act(() => result.current.retry());
+    await settle();
+    expect(api.putStageEvents).toHaveBeenCalledTimes(2);
+    expect(api.putStageEvents).toHaveBeenLastCalledWith("anna", 1, [ev("evt-1", 1.3, 2)], "v1");
+    // The newer edit saved, so the issue is gone and a late retry has nothing to send.
+    expect(result.current.issue).toBeNull();
+    act(() => result.current.retry());
+    await settle();
+    expect(api.putStageEvents).toHaveBeenCalledTimes(2);
+  });
+
+  it("a discard is one issue however often it is reported; dismiss clears it and gives up a failed list", async () => {
+    const { result, onDiscard } = setupIssue();
+    vi.mocked(api.putStageEvents).mockRejectedValueOnce(conflict()).mockRejectedValueOnce(conflict());
+    vi.mocked(api.getStageCoach)
+      .mockResolvedValueOnce(coach([ev("evt-1", 1, 2), ev("evt-5", 7, 8)], "v6"))
+      .mockResolvedValueOnce(coach([ev("evt-1", 1, 2), ev("evt-6", 9, 10)], "v7"));
+    act(() => result.current.change([ev("evt-1", 1.1, 2)], true));
+    await settle();
+    act(() => result.current.change([ev("evt-1", 1.2, 2)], true));
+    await settle();
+    expect(onDiscard).toHaveBeenCalledTimes(2);
+    expect(result.current.issue).toEqual({ kind: "discarded" });
+    act(() => result.current.dismiss());
+    expect(result.current.issue).toBeNull();
+    vi.mocked(api.putStageEvents).mockRejectedValueOnce(boom());
+    act(() => result.current.change([ev("evt-1", 1.3, 2)], true));
+    await settle();
+    expect(result.current.issue?.kind).toBe("failed");
+    act(() => result.current.dismiss());
+    expect(result.current.issue).toBeNull();
+    // Dismissed is given up: retry has nothing to send.
+    act(() => result.current.retry());
+    await settle();
+    expect(api.putStageEvents).toHaveBeenCalledTimes(3);
+  });
+});

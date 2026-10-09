@@ -1148,7 +1148,15 @@ shot PATCH), the newest local list is re-sent once on the fresh
 revision (a live drag's release carries it, a cancel sends it),
 otherwise, or on a second 409, the server's list wins, a live drag's
 release is dropped, and ``onDiscard`` fires once (the seam for the
-inline notice). A commit whose lanes overlap never goes out: local
+inline notice). The hook's ``issue`` is that notice (``SaveIssue``,
+rendered by ``components/coach/SaveNotice`` under the lane editor): a
+discard is muted; any other failed save, a failed 409 reload included,
+reverts the list like a non-409 failure and never replaces the page, but
+shows ``retry``, which re-sends the list the failed PUT carried unless
+the regions it started from have since changed (then it is a discard)
+and is disabled while ``busy`` (an edit outstanding); the server's
+message is the line's ``title``, never its copy; the next successful
+PUT or ``dismiss`` clears it. A commit whose lanes overlap never goes out: local
 state reverts to the last valid list. Never save per drag frame.
 
 The coach payload carries ``events``, ``event_summary``, ``_version``,
