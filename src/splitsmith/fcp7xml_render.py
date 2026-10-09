@@ -46,7 +46,7 @@ from .composition import (
     Transform,
 )
 from .config import VideoMetadata
-from .fcpxml_gen import _region_marker_label
+from .events import region_marker_label
 
 
 def render_fcp7xml(
@@ -380,7 +380,7 @@ def _emit_primary_clipitem(
         _emit_marker(
             clip,
             frame=start_frame,
-            label=_region_marker_label(event),
+            label=region_marker_label(event),
             out_frame=max(end_frame, start_frame + 1),
         )
 

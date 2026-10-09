@@ -30,6 +30,7 @@ from typing import Literal
 from xml.etree import ElementTree as ET
 
 from .config import OutputConfig, Shot, SplitColorThresholds, StageEvent, VideoMetadata
+from .events import region_marker_label
 
 PipCorner = Literal["top-right", "top-left", "bottom-right", "bottom-left"]
 
@@ -653,7 +654,7 @@ def generate_fcpxml(
             {
                 "start": _frame_aligned_str(start_frames, fd_num, fd_den),
                 "duration": _frame_aligned_str(region_duration_frames, fd_num, fd_den),
-                "value": _region_marker_label(event),
+                "value": region_marker_label(event),
             },
         )
 
@@ -1615,7 +1616,7 @@ def generate_match_fcpxml(
                 {
                     "start": _frame_aligned_str(start_frames, fd_num, fd_den),
                     "duration": _frame_aligned_str(region_duration_frames, fd_num, fd_den),
-                    "value": _region_marker_label(event),
+                    "value": region_marker_label(event),
                 },
             )
 
@@ -1724,17 +1725,6 @@ def _marker_label(shot: Shot, thresholds: SplitColorThresholds) -> str:
     else:
         kind = "split"
     return f"Shot {shot.shot_number}: {shot.split:.3f}s [{band}] ({kind})"
-
-
-def _region_marker_label(event: StageEvent) -> str:
-    """``Reload 1.42`` / ``Movement`` / ``Activation`` (spec 2026-10-08,
-    part 2). A reload's label carries its duration; the other two kinds
-    don't -- the marker's own ``duration`` already shows the span in FCP."""
-    if event.kind == "reload":
-        return f"Reload {event.end - event.start:.2f}"
-    if event.kind == "movement":
-        return "Movement"
-    return "Activation"
 
 
 def _frame_aligned_str(frames: int, fd_num: int, fd_den: int) -> str:

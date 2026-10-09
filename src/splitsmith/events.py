@@ -92,6 +92,19 @@ def confirmed(events: Sequence[StageEvent]) -> list[StageEvent]:
     return [e for e in events if e.source == "manual"]
 
 
+def region_marker_label(event: StageEvent) -> str:
+    """An editor marker's name for a confirmed region: ``Reload 1.42`` /
+    ``Movement`` / ``Activation`` (spec 2026-10-08, part 2). A reload's
+    label carries its duration; the other two kinds don't -- the marker's
+    own duration already shows the span. The FCPXML and FCP7 XML exports
+    both name their region markers through this."""
+    if event.kind == "reload":
+        return f"Reload {event.end - event.start:.2f}"
+    if event.kind == "movement":
+        return "Movement"
+    return "Activation"
+
+
 def confirmed_from_doc(doc: Any, *, log_context: str = "") -> list[StageEvent]:
     """``confirmed(events_from_doc(doc))``, tolerant of a missing, corrupt
     or wrongly-shaped events list.
