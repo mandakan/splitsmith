@@ -190,6 +190,16 @@ describe("LaneEditor", () => {
     expect(lastCommit(onChange)).toEqual([]);
   });
 
+  it("keys fired on a region bubble to the root but the own-keys guard still blocks them", () => {
+    const onChange = vi.fn();
+    render(<Harness initial={[ev("evt-1", "reload", 4, 5)]} selectedId="evt-1" onChange={onChange} />);
+    const region = screen.getByTestId("event-evt-1");
+    fireEvent.keyDown(region, { key: "ArrowRight" });
+    fireEvent.keyDown(region, { key: "Delete" });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByTestId("event-evt-1")).toHaveAttribute("data-end", "5");
+  });
+
   it("renders auto proposals dashed and marks a touched one manual", () => {
     const onChange = vi.fn();
     render(<Harness initial={[ev("evt-1", "reload", 4, 5, "auto")]} selectedId="evt-1" onChange={onChange} />);

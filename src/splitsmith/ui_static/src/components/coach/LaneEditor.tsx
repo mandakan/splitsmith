@@ -207,8 +207,10 @@ export function LaneEditor(props: LaneEditorProps) {
   }, []);
 
   const handleKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
-    // Only keys aimed at the editor itself: the menu slot's keys bubble here too (React
-    // bubbles through portals), and an arrow there must not nudge -- each nudge is a save.
+    // Only keys aimed at the root itself: a focusable descendant (a region, a
+    // handle, a future control inside the strip) bubbles its keydown here too,
+    // and an arrow or Delete there must not nudge or delete the selection --
+    // each nudge is a save, so only the root's own keys drive it.
     if (e.target !== e.currentTarget) return;
     if (readOnly || !selectedId || dragRef.current) return;
     const current = eventsRef.current;

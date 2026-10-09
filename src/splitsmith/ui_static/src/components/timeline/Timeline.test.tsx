@@ -135,6 +135,16 @@ describe("Timeline", () => {
     expect(screen.getByTestId("track-a")).toBeInTheDocument();
   });
 
+  it("draws the playhead at its mapped position, at Fit and at a zoom", () => {
+    // currentTime 4 on a 10 s domain: at Fit (1000 px viewport) that's 400 px;
+    // at zoom 2 (2000 px content) it's 800 px.
+    const first = render(<Harness currentTime={4} />);
+    expect(screen.getByTestId("timeline-playhead")).toHaveStyle({ left: "400px" });
+    first.unmount();
+    render(<Harness currentTime={4} initialZoom={2} />);
+    expect(screen.getByTestId("timeline-playhead")).toHaveStyle({ left: "800px" });
+  });
+
   it("follows the playhead while playing, but not while a pointer is down in the band", () => {
     const { rerender } = render(<Harness initialZoom={4} currentTime={0} />);
     const host = screen.getByTestId("timeline-host");
