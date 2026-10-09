@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 
+import { LogoGuide } from "@/components/shooters/LogoGuide";
 import { Button } from "@/components/ui/button";
 import { Field, inputClass } from "@/components/ui/Field";
 import { Label } from "@/components/ui/Label";
@@ -236,7 +237,10 @@ function YourLook({ me, entry, onSaved }: { me: ScoreboardIdentity; entry: Shoot
           </Button>
         </div>
       </Field>
-      <Field label="Logo" help="PNG, JPEG or WebP, at most 2 MB. Drawn top-right on the cards.">
+      <Field
+        label="Shooter logo"
+        help="You as a shooter, often your club badge. Top right on your title page, stage slates and closing card. PNG, JPEG or WebP, at most 2 MB."
+      >
         <div className="flex items-center gap-3">
           {logo ? (
             <img
@@ -290,8 +294,8 @@ function YourBrand({ profile, onSaved }: { profile: AccountProfileView | null; o
   return (
     <Section label="Your brand" id="brand">
       <Field
-        label="Logo"
-        help="Your mark, top-left on the title page and the closing card of every video you render. A Look with its own brand shows that instead; turn it off for one video under Details on the Export page."
+        label="Brand logo"
+        help="You as the video's maker: your channel, team or sponsor. Top left on the title page and closing card of every video you render, whoever is in it. Leave it empty if you have no mark of your own. A Look with its own brand shows that instead; turn it off for one video under Details on the Export page."
         error={error}
       >
         <div className="flex items-center gap-3">
@@ -372,6 +376,38 @@ export function You() {
         back={mode === "hosted" ? { label: "Account", to: "/account" } : { label: "Matches", to: "/pick" }}
       />
       {error ? <p className="text-sm text-led-text">{error}</p> : null}
+      <Section label="Where your logos go">
+        <div className="grid gap-4 px-3.5 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+          <LogoGuide
+            shooter={
+              myEntry?.identity.logo && me
+                ? `/api/me/shooter-book/${me.shooter_id}/logo?v=${encodeURIComponent(myEntry.identity.logo)}`
+                : null
+            }
+            brand={
+              profile?.brand.logo ? `/api/me/profile/brand-logo?v=${encodeURIComponent(profile.brand.logo)}` : null
+            }
+          />
+          <ul className="flex flex-col gap-2 text-sm text-ink-2">
+            <li>
+              <span className="text-ink">Shooter logo, top right.</span> Whoever is in the video, often their club
+              badge. Yours is under Your look; everyone else&apos;s on{" "}
+              <Link to="/shooters" className="text-ink underline-offset-4 hover:underline">
+                Shooters
+              </Link>
+              .
+            </li>
+            <li>
+              <span className="text-ink">Your brand, top left.</span> You as the maker, on every video you render,
+              whoever is in it. Under Your brand below.
+            </li>
+            <li>
+              <span className="text-ink">Event logo, centre.</span> The match&apos;s own, set per match under Details
+              on the Export page.
+            </li>
+          </ul>
+        </div>
+      </Section>
       <YouShooter me={me} onChange={setMe} />
       {me ? <YourLook me={me} entry={myEntry} onSaved={reloadBook} /> : null}
       <YourBrand profile={profile} onSaved={setProfile} />
