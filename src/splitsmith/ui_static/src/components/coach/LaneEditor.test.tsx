@@ -333,6 +333,73 @@ describe("LaneEditor", () => {
     expect(screen.queryByTestId("drag-pill")).toBeNull();
   });
 
+  it("a body drag back to its start commits nothing and ends the live state (#1325)", () => {
+    const onChange = vi.fn();
+    const onCancel = vi.fn();
+    render(
+      <Harness initial={[ev("evt-1", "reload", 4, 5)]} selectedId="evt-1" onChange={onChange} onCancel={onCancel} />,
+    );
+    const body = screen.getByTestId("event-evt-1");
+    fireEvent.pointerDown(body, { pointerId: 20, clientX: 450, clientY: 10, button: 0 });
+    fireEvent.pointerMove(body, { pointerId: 20, clientX: 480, clientY: 10, altKey: true });
+    fireEvent.pointerMove(body, { pointerId: 20, clientX: 450, clientY: 10, altKey: true });
+    fireEvent.pointerUp(body, { pointerId: 20, clientX: 450, clientY: 10, altKey: true });
+    expect(onChange.mock.calls.filter((c) => c[1] === true)).toHaveLength(0);
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("event-evt-1")).toHaveAttribute("data-start", "4");
+    expect(screen.getByTestId("event-evt-1")).toHaveAttribute("data-end", "5");
+  });
+
+  it("an edge drag back to its start commits nothing and ends the live state (#1325)", () => {
+    const onChange = vi.fn();
+    const onCancel = vi.fn();
+    render(
+      <Harness initial={[ev("evt-1", "reload", 4, 5)]} selectedId="evt-1" onChange={onChange} onCancel={onCancel} />,
+    );
+    const handle = screen.getByTestId("handle-evt-1-end");
+    fireEvent.pointerDown(handle, { pointerId: 21, clientX: 500, clientY: 10, button: 0 });
+    fireEvent.pointerMove(handle, { pointerId: 21, clientX: 700, clientY: 10, altKey: true });
+    fireEvent.pointerMove(handle, { pointerId: 21, clientX: 500, clientY: 10, altKey: true });
+    fireEvent.pointerUp(handle, { pointerId: 21, clientX: 500, clientY: 10, altKey: true });
+    expect(onChange.mock.calls.filter((c) => c[1] === true)).toHaveLength(0);
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("event-evt-1")).toHaveAttribute("data-end", "5");
+  });
+
+  it("a nudge into a neighbour commits nothing (#1325)", () => {
+    const onChange = vi.fn();
+    render(
+      <Harness
+        initial={[ev("evt-1", "movement", 0, 3), ev("evt-2", "movement", 3, 5)]}
+        selectedId="evt-2"
+        onChange={onChange}
+      />,
+    );
+    const root = screen.getByTestId("lane-editor");
+    root.focus();
+    fireEvent.keyDown(root, { key: "ArrowLeft" });
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("a nudge at the floor commits nothing (#1325)", () => {
+    const onChange = vi.fn();
+    render(<Harness initial={[ev("evt-1", "movement", 0, 2)]} selectedId="evt-1" onChange={onChange} />);
+    const root = screen.getByTestId("lane-editor");
+    root.focus();
+    fireEvent.keyDown(root, { key: "ArrowLeft" });
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("a real nudge still commits once (#1325)", () => {
+    const onChange = vi.fn();
+    render(<Harness initial={[ev("evt-1", "reload", 4, 5)]} selectedId="evt-1" onChange={onChange} />);
+    const root = screen.getByTestId("lane-editor");
+    root.focus();
+    fireEvent.keyDown(root, { key: "ArrowRight" });
+    expect(onChange.mock.calls.filter((c) => c[1] === true)).toHaveLength(1);
+    expect(lastCommit(onChange)![0].start).toBeCloseTo(4.02, 3);
+  });
+
   it("clicking the ruler seeks and draws the playhead at currentTime", () => {
     const onSeek = vi.fn();
     render(<Harness onSeek={onSeek} />);

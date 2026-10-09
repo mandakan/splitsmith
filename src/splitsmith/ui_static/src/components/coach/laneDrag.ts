@@ -19,6 +19,8 @@ export interface DragBase {
   startY: number;
   thresholdPx: number;
   moved: boolean;
+  /** The list as it stood when the gesture began, to tell a no-op release from a real one (#1325). */
+  startEvents: StageEvent[];
 }
 export type Drag =
   | (DragBase & { mode: "create"; kind: StageEventKind; anchorT: number; id: string | null })
@@ -38,6 +40,20 @@ export interface Frame {
 /** A user touch turns an auto proposal into the user's own region. */
 export const touched = (e: StageEvent): StageEvent => (e.source === "auto" ? { ...e, source: "manual" } : e);
 const replace = (events: StageEvent[], next: StageEvent) => events.map((e) => (e.id === next.id ? next : e));
+
+/**
+ * Same list by value: a drag or nudge that ends up exactly where its gesture
+ * started is a no-op and must not commit (#1325). ``replace`` keeps order
+ * and length, so index-for-index is enough; a genuine create (a longer
+ * list) or delete never compares equal here.
+ */
+export function sameEvents(a: StageEvent[], b: StageEvent[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((x, i) => {
+    const y = b[i];
+    return x.id === y.id && x.kind === y.kind && x.start === y.start && x.end === y.end && x.source === y.source;
+  });
+}
 
 /**
  * One frame of a drag past its threshold. ``t`` is the time under the
