@@ -1190,8 +1190,9 @@ editor's pointer maths reads its own rect and needs no zoom code; a new
 track does the same. A track can also be ``seekable`` (Coach's Audio
 track is), which seeks on a row click through the content div's rect
 like the ruler, no snap. ``WaveformTrack`` draws only the visible window
-into a viewport-sized canvas, never a full-content one. Audit and the
-beep step move onto the band next.
+into a viewport-sized canvas, never a full-content one. Audit moved onto
+the band in PR 2 (its own paragraph below, "UI: the visual budget"); the
+beep step is next.
 Pointer rules: a lane click seeks to the press point
 snapped to the nearest shot (a ruler click does not snap), unless the
 snap would land inside a same-lane region (then the raw press time), a
@@ -1534,11 +1535,18 @@ share-surface consumer come from ``stages[].figures`` on the project
 payload, never from triage (owner-only). Audit (``pages/Audit.tsx``,
 ``components/audit/*``, ``lib/auditStep.ts``): beep confirmation is its
 step 1 (``BeepStep`` on ``useBeepQueue``; ``/beep-review`` redirects
-there on desktop, the phone keeps ``MobileBeepReview``); a new control
-belongs on ``TransportLine``'s overflow menu or ``CurrentShotLine``, a
-new per-shot signal on ``ShotList`` through ``lib/auditStep.shotRows``;
-``_after_beep_reviewed`` in ``ui/server.py`` is the one place a confirm
-chains trim and detection. Footage (``pages/Ingest.tsx``,
+there on desktop, the phone keeps ``MobileBeepReview``); the top row is
+the video (``MultiCamColumn fill``, a 16:9 tile capped at
+``max-h-[55vh]``, letterboxed) and ``ShotList``, and the shared timeline
+band (spec 2026-10-09) underneath now hosts the waveform: the audio
+track carries ``WaveformTrack`` and ``MarkerLayer`` together, pins are
+their own seekable-free Flags row above it, and the band's own ruler and
+zoom replaced Audit's static ruler and ``TransportLine``'s
+``ZoomControls``; a new control belongs on ``TransportLine``'s overflow
+menu or ``CurrentShotLine``, a new per-shot signal still on ``ShotList``
+through ``lib/auditStep.shotRows``; ``_after_beep_reviewed`` in
+``ui/server.py`` is the one place a confirm chains trim and detection.
+Footage (``pages/Ingest.tsx``,
 ``components/footage/*``, ``lib/footage.ts``): in local mode Add footage
 is the footage sort (``pages/FootageSort.tsx``, ``ui/footage_sort_api.py``,
 spec 2026-10-01) whenever the match has scorecards; the per-shooter import

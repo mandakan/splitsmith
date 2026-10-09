@@ -241,3 +241,52 @@ Rulings:
    nothing at Fit (the button alone says "Fit"; the readout would
    otherwise double it) and keeps its width so the header does not
    shift when a number appears at a zoom.
+
+## As built (PR 2)
+
+Audit moved onto the band. The top row (video left, `ShotList` right)
+is unchanged; the band, its own ruler and zoom replace Audit's static
+six-label ruler and `TransportLine`'s `ZoomControls`.
+
+1. **Layout.** `MultiCamColumn fill` fills the top row's left cell (a
+   16:9 tile capped at `max-h-[55vh]`, letterboxed) instead of the
+   fixed 380 px column it used outside Audit; `ShotList` is unchanged.
+2. **Domain and origin.** The band's domain is the clip, `[0,
+   peaks.duration]` in clip seconds (not beep-relative times); the
+   ruler's zero is the beep through `Timeline`'s `origin` prop
+   (`auditBeep ?? 0`). Markers, pins and the loop region already carry
+   clip seconds, so nothing converts.
+3. **Tracks.** Two tracks: a Flags row (18 px, only rendered when an
+   anomaly has a time) carrying `AnomalyPins` pinned to the row's
+   mid-line with `z-10` so its glow paints over the audio row below;
+   and a 140 px seekable Audio row holding `WaveformTrack` and
+   `MarkerLayer` in one wrapper div, which is the parent `MarkerLayer`
+   measures for drags. The audio track's `onDoubleClick` is
+   `handleAddManual(t, shiftKey)`, which is how a double-click on
+   empty waveform still adds a manual marker, snapped to the nearest
+   peak unless Shift is held; both the scrub press and the
+   double-click ignore `[data-audit-marker]`, so a marker's own drag
+   and delete keep working inside a seekable track.
+4. **Scrub and overlays.** Press-and-drag on the Audio row scrubs
+   through `Timeline`'s shared scrub handling (one in flight,
+   rAF-throttled, `onSeek` read through a ref so a drag started before
+   a re-render still calls the latest handler); `WaveformTrack` draws
+   the beep (dashed), timer-stop (dotted, only once a stage time
+   exists) and the loop region (clamped to the visible window) as DOM
+   overlays rather than baking them into the canvas.
+5. **Pins.** `AnomalyPins` renders at the Flags row's own geometry
+   (`contentWidth` from `geom`, `scrollLeft` 0 -- the row scrolls with
+   the band, so the pins need no independent view) and are labelled
+   buttons, not `aria-hidden`, now that they sit in a keyboard-reachable
+   track instead of floating over the old ruler.
+6. **Review Focus 5 was wrong.** The review brief assumed Audit's top
+   row rendered before peaks loaded and asked whether the band would
+   change that. It does not: Audit has always gated the whole
+   video+list+band region on `displayPeaks` and shown only "Computing
+   waveform..." before peaks arrive (`!prereqShouldShow && displayPeaks
+   ? ... : null`), on the band exactly as before it existed. No
+   behaviour changed.
+7. **`TransportLine`.** Keeps transport, filters, legend and its own
+   overflow menu (Full-resolution video, Trim now / Detect shots);
+   `ZoomControls` is gone from it, moved into the band header like
+   Coach's.

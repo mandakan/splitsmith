@@ -3,8 +3,8 @@
     {
       "id": "coach-timeline",
       "date": "2026-10-09",
-      "title": "A full-width, zoomable timeline on Coach",
-      "body": "The lane editor now sits on a full-width timeline with its own audio waveform. Zoom up to 16x, and switch on wheel zoom from the timeline's menu (the three dots), next to Follow playhead."
+      "title": "A full-width, zoomable timeline",
+      "body": "Coach's lane editor and Audit's waveform now share one full-width timeline. Zoom up to 16x, and switch on wheel zoom from the timeline's menu (the three dots), next to Follow playhead."
     },
     {
       "id": "stage-list-keeps-your-page",
