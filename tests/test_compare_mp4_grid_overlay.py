@@ -1494,3 +1494,14 @@ def test_the_clock_draws_at_the_corner_fits_size(tmp_path):
     expected = corner_fit(540, 1920, advance_em=0.6)
     assert expected.size < CellScale.for_cell(1920).live_primary
     assert overlay.font_size == expected.size
+    # The split is not the corner's: the sprite list's PNGs are blank here
+    # (no rasterizer), so the size is checked where it is decided.
+    assert (
+        mp4_grid._split_size(
+            540,
+            1920,
+            mp4_grid._overlay_data_for_stage(mp4_grid.load_overlay_data(shooters), 1),
+            font_path=tmp_path / "font.ttf",
+        )
+        == 137
+    )

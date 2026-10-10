@@ -85,6 +85,7 @@ from .overlay_sprites import (
     TilePlacement,
     build_overlay_states,
     corner_fit,
+    split_fit_size,
     theme_font_face,
     write_concat_list,
 )
@@ -2523,9 +2524,9 @@ def _overlay_data_for_stage(
     return {label: tile for (label, number), tile in data.items() if number == stage_number}
 
 
-#: The glyphs the counter and the clock draw: digits, the counter's slash
-#: and the clock's point.
-_CORNER_GLYPHS = "0123456789/."
+#: The glyphs the counter, the clock and the split draw: digits, the
+#: counter's slash, the point and the split's unit.
+_CORNER_GLYPHS = "0123456789/.s"
 
 
 def _figure_advance_em(font_path: Path) -> float:
@@ -2574,6 +2575,28 @@ def _corner_fit(
         counter_chars=counter_chars,
         clock_chars=clock_chars,
     )
+
+
+def _split_size(
+    cell_w: int,
+    cell_h: int,
+    stage_data: Mapping[str, TileStageData],
+    *,
+    font_path: Path,
+) -> int:
+    """The stage's live split size (#1421): the cell's ``live_primary``,
+    capped by the cell's width for the longest split this stage draws.
+    Independent of the corner fit."""
+    chars = max(
+        (
+            len(f"{shot.split:.2f}s")
+            for tile in stage_data.values()
+            for shot in tile.shots
+            if shot.split is not None
+        ),
+        default=0,
+    )
+    return split_fit_size(cell_w, cell_h, advance_em=_figure_advance_em(font_path), split_chars=chars)
 
 
 def _stage_overlay_plan(
@@ -2629,6 +2652,7 @@ def _stage_overlay_plan(
     )
     cell_w, cell_h = _cell_size(canvas, plan)
     fit = _corner_fit(cell_w, cell_h, stage_data, font_path=font_path)
+    split_size = _split_size(cell_w, cell_h, stage_data, font_path=font_path)
     # One cache directory for the whole run, not one per stage: the cache
     # is content-addressed, so stages that share a state share a PNG. That
     # dedup matters roughly five times more since #693 -- a repeat now
@@ -2643,6 +2667,7 @@ def _stage_overlay_plan(
             cache_dir=work / "sprites",
             rasterizer=rasterizer,
             fit=fit,
+            split_size=split_size,
         )
     # The canvas rate, not a guess: the list writer quantises every state
     # boundary onto a whole output frame and pins the demuxer's own time

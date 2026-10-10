@@ -278,3 +278,26 @@ def test_a_longer_clock_than_the_floor_widens_the_fit():
     six = overlay_sprites.corner_fit(360, 640, advance_em=0.6, clock_chars=6)
     assert five.size == 48 and not five.stacked
     assert six.size < 48
+
+
+@pytest.mark.parametrize("canvas", _CANVASES)
+@pytest.mark.parametrize("grid", _GRIDS)
+def test_the_split_keeps_the_cells_size_unless_its_own_width_caps_it(canvas, grid):
+    from splitsmith.overlay_layout import CellScale
+
+    rows, cols = grid
+    cell_w, cell_h = canvas[0] // cols, canvas[1] // rows
+    scale = CellScale.for_cell(cell_h)
+    size = overlay_sprites.split_fit_size(cell_w, cell_h, advance_em=0.6)
+    assert size <= scale.live_primary
+    assert 2 * scale.pad + 5 * 0.6 * size <= cell_w
+    if 2 * scale.pad + 5 * 0.6 * scale.live_primary <= cell_w:
+        assert size == scale.live_primary
+
+
+def test_the_split_is_not_shrunk_by_the_corner():
+    """A 1x2 upright 1080x1920 cell: the corner shrinks to fit two figures on
+    a row, the split alone at the bottom keeps the cell's 137 px."""
+    corner = overlay_sprites.corner_fit(540, 1920, advance_em=0.6)
+    assert corner.size < 137
+    assert overlay_sprites.split_fit_size(540, 1920, advance_em=0.6) == 137

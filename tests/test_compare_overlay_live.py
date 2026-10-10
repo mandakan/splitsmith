@@ -387,7 +387,7 @@ def test_a_stacked_fit_puts_the_counter_under_the_clock():
 
 def test_an_unstacked_fit_declares_what_no_fit_declares():
     panel = _panel(shots_fired=2, expected_shots=8, last_split=0.31)
-    assert live.panel_groups(panel, sp.CornerFit(size=48)) == live.panel_groups(panel)
+    assert live.panel_groups(panel, sp.CornerFit(size=48), corner_size=48) == live.panel_groups(panel)
 
 
 def test_a_fit_without_the_counter_keeps_the_split():
@@ -407,9 +407,37 @@ def test_a_fit_at_the_cells_own_size_writes_the_document_it_always_did():
     )
 
 
-def test_a_shrunk_fit_draws_every_live_figure_at_its_size():
+def test_a_shrunk_corner_draws_the_counter_small_and_leaves_the_split_alone():
+    """The counter takes the corner fit; the split keeps the cell's size."""
     state = sp.OverlayState(
-        start_seconds=0.0, duration_seconds=1.0, panels=(_panel(shots_fired=3, expected_shots=12),)
+        start_seconds=0.0,
+        duration_seconds=1.0,
+        panels=(_panel(shots_fired=3, expected_shots=12, last_split=0.31),),
     )
+    size = CellScale.for_cell(GEOMETRY.cell_height).live_primary
     html = live.state_html(state, GEOMETRY, theme=THEME, fit=sp.CornerFit(size=37))
-    assert ".role-live-primary      { font-size: 37px; }" in html
+    assert f".role-live-primary      {{ font-size: {size}px; }}" in html
+    assert 'style="font-size: 37px">3/12<' in html
+    assert ">0.31s<" in html and 'style="font-size: 37px">0.31s' not in html
+
+
+def test_the_split_size_is_independent_of_the_corner_fit():
+    """Splits are the product: whatever the corner does (row, shrink, stack,
+    drop), the split draws at its own size."""
+    state = sp.OverlayState(
+        start_seconds=0.0,
+        duration_seconds=1.0,
+        panels=(_panel(shots_fired=3, expected_shots=12, last_split=0.31),),
+    )
+    fits = [
+        sp.CornerFit(size=48),
+        sp.CornerFit(size=33),
+        sp.CornerFit(size=48, stacked=True),
+        sp.CornerFit(size=32, counter=False),
+    ]
+    for fit in fits:
+        html = live.state_html(state, GEOMETRY, theme=THEME, fit=fit, split_size=61)
+        assert ".role-live-primary      { font-size: 61px; }" in html, fit
+        groups = live.panel_groups(state.panels[0], fit, corner_size=61)
+        (split,) = [e for e in _elements(groups) if e.text == "0.31s"]
+        assert split.size is None, fit

@@ -28,7 +28,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from ..overlay_layout import CellScale
+from ..overlay_layout import MIN_FONT_SIZE, CellScale
 from ..overlay_text import OverlayFace, resolve_overlay_face
 from ..overlay_theme import OverlayTheme
 from .overlay_data import TileShot, TileStageData
@@ -403,9 +403,9 @@ class CornerFit:
        one element that says where in the run the frame is; a counter
        without it is a fraction of an unknown total.
 
-    ``size`` is the live type size for the whole tile -- counter, clock
-    and the split under them, which have shared one size since before
-    ``CellScale`` existed. ``stack_offset`` is the counter group's
+    ``size`` is the counter's and the clock's size. The split under them
+    is not the corner's: it keeps the cell's own size, capped only by its
+    own width (:func:`split_fit_size`). ``stack_offset`` is the counter group's
     ``margin-top`` when stacked: one em, which clears the clock's digits
     (cap height ~0.73 em, drawn from the pad) by about half an em in every
     bundled mono face.
@@ -469,6 +469,30 @@ def corner_fit(
         if alone_fits(clock_chars, size):
             return CornerFit(size=size, counter=False)
     return CornerFit(size=floor, counter=False)
+
+
+def split_fit_size(
+    cell_width: int,
+    cell_height: int,
+    *,
+    advance_em: float,
+    split_chars: int = CORNER_MIN_CHARS,
+) -> int:
+    """The live split's size (#1421): the cell's own ``live_primary``,
+    capped only by its own width.
+
+    The split sits alone at the bottom of the tile, so nothing but the
+    cell's edges limits it, inset by the same ``pad``; the corner fit
+    never reaches it. Splits are what the overlay is for, and a narrow
+    corner is no reason to shrink one. Sized for at least ``"0.28s"``
+    (five glyphs), more when the stage's data is longer.
+    """
+    scale = CellScale.for_cell(cell_height)
+    chars = max(CORNER_MIN_CHARS, split_chars)
+    for size in range(scale.live_primary, MIN_FONT_SIZE - 1, -1):
+        if 2 * scale.pad + chars * advance_em * size <= cell_width:
+            return size
+    return MIN_FONT_SIZE
 
 
 def theme_font_face(theme: OverlayTheme) -> OverlayFace:
