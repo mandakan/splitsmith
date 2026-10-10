@@ -14466,15 +14466,19 @@ def create_app(
         The one classification path for every audit-doc writer: a writer
         that classified region-blind would flip a reload region's gap back
         to ``movement`` on the next unrelated save. A corrupt events list is
-        the coach GET's 422, raised before the caller saves anything.
+        the coach GET's 422, raised before the caller saves anything --
+        also on a doc with no shots to classify (#1330): the coach routes
+        build their response from the saved doc, and a corrupt list that
+        slipped past here was a 422 *after* the save went through.
         """
+        stage_events = _coach_events(payload, stage_number)
         shots = payload.get("shots")
         if not isinstance(shots, list):
             return
         coach_module.classify_intervals_in_dicts(
             [s for s in shots if isinstance(s, dict)],
             cfg,
-            events=_coach_events(payload, stage_number),
+            events=stage_events,
         )
 
     def _coach_capacity(slug: str, project: MatchProject) -> int | None:
@@ -14742,7 +14746,7 @@ def create_app(
         PUT's 409 ``version_conflict``. Returns the coach payload."""
         project = state.shooter_project(slug)
         try:
-            project.stage(stage_number)
+            stg = project.stage(stage_number)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         # #843: a NaN ``end`` passes every field bound (``NaN <= start`` is
@@ -14772,12 +14776,17 @@ def create_app(
                     "payload": {"count": len(req.events)},
                 }
             )
-            state.save_audit(slug, stage_number, stored, version=version)
-            payload, version, beep_in_clip, stg, project = _load_audit_for_coach(slug, stage_number)
+            # #1330: the saved doc is ``stored`` and its lock version is what
+            # the save returns; reloading both (and the project and stage
+            # again, through ``_load_audit_for_coach``) only cost a hosted
+            # ``state_docs`` round trip per save.
+            version = _coach_save(slug, stage_number, stored, version)
+        prim = stg.primary()
+        beep_in_clip = _video_beep_in_clip(slug, project, stage_number, prim) if prim is not None else None
         return JSONResponse(
             _build_coach_response(
                 slug,
-                payload,
+                stored,
                 beep_in_clip,
                 stg,
                 project,
