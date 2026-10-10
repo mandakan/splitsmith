@@ -1302,8 +1302,10 @@ and ``theme`` are all read *before* the render; a null ``template`` or
 ``theme`` never matches. One rule decides reuse,
 ``ui/exports.overlay_record_matches``, for the match export job, the MCP
 tool and ``splitsmith match export`` alike (the CLI wants the recorded style
-in ``--theme``'s Look and cannot redraw, so a stale overlay is left out with
-a note, like the MCP tool); a legacy record never matches, and a failed
+and Look, like the MCP tool, unless an explicit ``--theme`` asks for another
+Look; it cannot redraw, so a stale overlay is left out with a note, which
+names the recorded Look when only the Look differs); a legacy record never
+matches, and a failed
 redraw drops that stage's overlay with an anomaly rather than reusing the
 stale one.
 

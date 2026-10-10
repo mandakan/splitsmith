@@ -555,10 +555,13 @@ def export(
     youtube_no_notify: bool = typer.Option(
         False, "--youtube-no-notify", help="Do not notify subscribers when the upload goes public."
     ),
-    overlay_theme: str = typer.Option(
-        "splitsmith",
+    theme_option: str | None = typer.Option(
+        None,
         "--theme",
-        help="Look (overlay and card palette, card templates): an installed Look name.",
+        help=(
+            "Look (overlay and card palette, card templates): an installed Look name. "
+            "Default: splitsmith for the cards; an overlay is stitched in the Look it was drawn in."
+        ),
     ),
     config_path: Path | None = typer.Option(None, "--config", help="Optional YAML config."),
 ) -> None:
@@ -596,6 +599,10 @@ def export(
         raise typer.Exit(code=2)
     from .looks import look_names
 
+    # An explicit --theme also asks the overlay for that Look; left out, the
+    # cards draw in the default Look and an overlay is wanted in whichever
+    # Look it was drawn in, as the MCP tool wants it.
+    overlay_theme = theme_option if theme_option is not None else "splitsmith"
     if overlay_theme not in look_names():
         console.print(
             f"[red]Error:[/] --theme must be one of {', '.join(look_names())}, got {overlay_theme!r}."
@@ -703,7 +710,7 @@ def export(
         console.print(f"[red]Error:[/] {exc}")
         raise typer.Exit(code=1) from exc
     if not no_overlay:
-        stages_input = _vouched_overlays(stages_input, overlay_theme)
+        stages_input = _vouched_overlays(stages_input, theme_option)
 
     project_name = project.name or match.name or "match"
     book = load_snapshot(JsonShooterBookStore())
@@ -827,15 +834,17 @@ def export(
         report_upload(record)
 
 
-def _vouched_overlays(stages_input: list[Any], look: str) -> list[Any]:
+def _vouched_overlays(stages_input: list[Any], look: str | None) -> list[Any]:
     """Each stage's overlay MOV only when its record says it was drawn the way
-    this export would draw it: from the audit as it stands, in ``look``'s
-    palette and faces, with its template as it stands
+    this export would draw it: from the audit as it stands, with its template
+    and its Look's palette and faces as they stand
     (``exports.overlay_record_matches``, the rule the app's match export and
     the MCP tool use). The CLI has no style, options or format of its own to
-    ask for, so the recorded ones are wanted. It cannot redraw either (it
-    re-cuts nothing; the style a redraw needs is the app's request), so a
-    stale overlay is left out and said so; the MOV stays on disk."""
+    ask for, so the recorded ones are wanted, and the recorded Look too unless
+    ``look`` (an explicit ``--theme``) asks for another. It cannot redraw
+    either (it re-cuts nothing; the style a redraw needs is the app's
+    request), so a stale overlay is left out and said so; the MOV stays on
+    disk."""
     from dataclasses import replace
 
     from .ui import exports as export_helpers
@@ -849,11 +858,25 @@ def _vouched_overlays(stages_input: list[Any], look: str) -> list[Any]:
             )
             current = export_helpers.overlay_audit_revision(stage_in.audit_path)
             if not export_helpers.overlay_record_matches(record, audit_revision=current, look=look):
+                drawn_in = record.get("look") if record is not None else None
+                if (
+                    look is not None
+                    and isinstance(drawn_in, str)
+                    and drawn_in != look
+                    and export_helpers.overlay_record_matches(record, audit_revision=current)
+                ):
+                    why = (
+                        f"was drawn in Look {drawn_in!r}, not {look!r} -- left out; pass "
+                        f"--theme {drawn_in} to stitch it, or run the stage's export with the overlay "
+                        "on to draw it in this Look"
+                    )
+                else:
+                    why = (
+                        "was drawn from an older audit, Look or template (or has no record of which) "
+                        "-- left out; run the stage's export with the overlay on to draw it again"
+                    )
                 console.print(
-                    f"[yellow]note[/] stage {stage_in.stage_number}: overlay at {mov} was drawn from an "
-                    "older audit, another Look or template (or has no record of which) -- left out; "
-                    "run the stage's export with the overlay on to draw it again",
-                    soft_wrap=True,
+                    f"[yellow]note[/] stage {stage_in.stage_number}: overlay at {mov} {why}", soft_wrap=True
                 )
                 stage_in = replace(stage_in, overlay_path=None)
         out.append(stage_in)

@@ -157,12 +157,21 @@ def test_missing_trim_names_the_stage_and_exits_1(tmp_path: Path, monkeypatch: p
     assert "trim" in text
 
 
-def _overlay_on_disk(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, record: str, change: str) -> Any:
+def _overlay_on_disk(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    record: str,
+    change: str,
+    drawn_in: str = "splitsmith",
+    args: tuple[str, ...] = (),
+) -> Any:
     """Seed a stage with an overlay MOV and its record (``record``:
-    ``current`` / ``none``), change something after it was drawn (``change``:
-    ``nothing`` / ``audit`` / ``palette`` / ``font``), and run the CLI's MP4
-    match export. Returns the composed stage. Edits a copy of the shipped
-    Looks, never the files."""
+    ``current`` / ``none``, drawn in Look ``drawn_in``), change something
+    after it was drawn (``change``: ``nothing`` / ``audit`` / ``palette`` /
+    ``font``), and run the CLI's MP4 match export with ``args``. Returns the
+    composed stage and the output. Edits a copy of the shipped Looks, never
+    the files."""
     import shutil
 
     from splitsmith import looks
@@ -181,7 +190,7 @@ def _overlay_on_disk(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, record:
     (exports / f"{base}_overlay.mov").write_bytes(b"")
     if record == "current":
         settings = overlay_settings(
-            look="splitsmith",
+            look=drawn_in,
             variant="default",
             options=HudOptions(),
             codec="auto",
@@ -202,7 +211,7 @@ def _overlay_on_disk(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, record:
         else:
             manifest["fonts"]["mono"] = "roboto-mono"
         manifest_path.write_text(json.dumps(manifest))
-    result = runner.invoke(app, ["match", "export", str(root), "--shooter", "me", "--format", "mp4"])
+    result = runner.invoke(app, ["match", "export", str(root), "--shooter", "me", "--format", "mp4", *args])
     assert result.exit_code == 0, result.output
     return captured["comp"].stages[0], strip_ansi(result.output)
 
@@ -231,22 +240,43 @@ def test_overlay_nothing_vouches_for_is_left_out_and_said_so(
     assert "stage 1: overlay at" in output and "left out" in output
 
 
-def test_overlay_drawn_in_another_look_is_left_out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """``--theme`` names the Look this export draws in; an overlay recorded
-    in another Look's colours is not it."""
-    from splitsmith import looks
-
-    stage, _output = _overlay_on_disk(tmp_path, monkeypatch, record="current", change="nothing")
-    assert stage.overlay is not None
-    other = next(name for name in looks.look_names() if name != "splitsmith")
-    captured = _capture_mp4(monkeypatch)
-    result = runner.invoke(
-        app,
-        ["match", "export", str(tmp_path / "match"), "--shooter", "me", "--format", "mp4", "--theme", other],
+def test_overlay_drawn_in_another_look_is_left_out_under_an_explicit_theme(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An explicit ``--theme`` asks the overlay for that Look too; one drawn
+    in another Look is left out, and the note names the Look it was drawn in
+    and the flag that stitches it."""
+    stage, output = _overlay_on_disk(
+        tmp_path,
+        monkeypatch,
+        record="current",
+        change="nothing",
+        drawn_in="clean",
+        args=("--theme", "splitsmith"),
     )
-    assert result.exit_code == 0, result.output
-    assert captured["comp"].stages[0].overlay is None
-    assert "left out" in strip_ansi(result.output)
+    assert stage.overlay is None
+    assert "drawn in Look 'clean'" in output
+    assert "--theme clean" in output
+
+
+def test_overlay_drawn_in_another_look_is_kept_without_a_theme(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without ``--theme`` the CLI wants the overlay in whichever Look it was
+    drawn in, as the MCP tool does; only the cards fall back to the default
+    Look."""
+    stage, output = _overlay_on_disk(
+        tmp_path, monkeypatch, record="current", change="nothing", drawn_in="clean"
+    )
+    assert stage.overlay is not None
+    assert "left out" not in output
+
+
+def test_overlay_in_the_explicit_theme_is_stitched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    stage, _output = _overlay_on_disk(
+        tmp_path, monkeypatch, record="current", change="nothing", drawn_in="clean", args=("--theme", "clean")
+    )
+    assert stage.overlay is not None
 
 
 def test_bad_format_is_a_usage_error(tmp_path: Path) -> None:
