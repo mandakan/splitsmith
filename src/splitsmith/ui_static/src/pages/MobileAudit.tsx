@@ -348,9 +348,18 @@ export function MobileAudit() {
     return api.videoStreamUrl(slug, primaryVideo.path, choice.kind, choice.version, stageNumber);
   }, [primaryVideo, peaksResult, slug, chooseScrub, stageNumber]);
 
+  // Where the dialog's video starts, captured when Video is pressed. The tap
+  // that selected the shot also started its audio, so the playhead-derived
+  // target moves on before the video's metadata arrives; reading it then
+  // opened the video at 0 or at a later shot (#1419).
+  const videoSeekRef = useRef(0);
+
   const handleShowVideo = useCallback(() => {
-    if (videoUrl) setVideoOpen(true);
-  }, [videoUrl]);
+    if (!videoUrl) return;
+    videoSeekRef.current = target.kind === "shot" ? Math.max(0, target.marker.time - 1.5) : 0;
+    playback.stop();
+    setVideoOpen(true);
+  }, [videoUrl, target, playback]);
 
   const closeVideo = useCallback(() => setVideoOpen(false), []);
 
@@ -362,9 +371,8 @@ export function MobileAudit() {
   const handleVideoLoadedMetadata = useCallback(() => {
     const el = videoElRef.current;
     if (!el) return;
-    const seekTo = target.kind === "shot" ? Math.max(0, target.marker.time - 1.5) : 0;
-    el.currentTime = seekTo;
-  }, [target]);
+    el.currentTime = videoSeekRef.current;
+  }, []);
 
   // ---- Save -----------------------------------------------------------------
 

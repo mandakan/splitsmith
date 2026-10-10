@@ -7,10 +7,16 @@
       "body": "In a compare video with many shooters on an upright canvas, the stage summary ran each tile's Best, Avg, Worst and Draw into each other. They now stack two to a line."
     },
     {
-      "id": "splits-camera-inset",
+      "id": "phone-video-opens-at-the-shot",
       "date": "2026-10-10",
-      "title": "The other camera in a corner on Splits",
-      "body": "On a stage page under Splits, the other camera plays in a small window over the video. Click it or press C to swap them; playback keeps going from the same moment."
+      "title": "Shot video opens at the shot on a phone",
+      "body": "On a phone, Video in Audit now opens 1.5 s before the shot you tapped and stops the shot's sound. It used to start at the beginning or at a later shot."
+    },
+    {
+      "id": "camera-inset",
+      "date": "2026-10-10",
+      "title": "Other cameras in a corner of the video",
+      "body": "On a stage in Splits, Audit, Coach and Breakdown, the other cameras play in a small window over the video. Click it or press C to swap; the sound and times stay with Cam 1."
     },
     {
       "id": "audit-controls-on-the-timeline",

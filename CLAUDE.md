@@ -1664,6 +1664,22 @@ to the primary, or to a page's ``start`` camera, on a new ``stageKey``), the cor
 handler (``pipKeyAction``: C / Shift+C); the usage note is at the top of
 ``PipView.tsx``. The inset spends no red; the primary's speaker glyph and
 PRIMARY chip travel with it.
+Coach and Breakdown (#1409) host it in ``components/coach/StageViewer``'s
+``StageVideo`` (cameras from ``lib/stageCameras``: primary first, "Cam N",
+the coach payload's ``beep_in_clip`` and kind; C / Shift+C through
+``lib/keyboard.usePipCycleKeys``, which skips a press another handler
+claimed). A swap hands the big camera's beep to the workspace
+(``useStageWorkspace.setBigBeep``): ``currentTime`` stays in the primary
+clip's seconds (where ``coach.beep_time`` and ``shots[].time_absolute``
+live), the video's clock comes in through ``fromVideoTime`` and every seek
+(shot, strip, band's ``seekFromBeep``, a deep link, a remount) goes out
+through the same mapping (``stageCameras.primaryToBig`` / ``bigToPrimary``),
+so a new seek path calls the workspace, never
+``videoRef.current.currentTime``. A moment before the big clip's start
+lands on its first frame and the playhead goes where the picture is. Audio
+stays the primary's through ``lib/usePrimaryAudio`` (the primary camera's
+own stream and ``beep_in_clip``; an audio error falls back to its next
+stream kind).
 
 **Rules the lint cannot check:** red marks the brand, the one primary
 action, the current position and focus, nothing else (stage state is
@@ -1718,7 +1734,25 @@ the video (``MultiCamColumn``, a 16:9 tile capped at
 ``ShotList``; on lg the row is ``max(300px,calc(100dvh-502px))``, and
 ``max(398px,...)`` with two or more cameras (#1359: two cameras at
 1440x900 end the band's Audio row at the sticky footer, 863; a taller
-screen gives the extra height to the video),
+screen gives the extra height to the video). The other cameras are a
+PiP inset over the big player (#1407), never a strip: the tile is the
+whole column under its header (two cameras at 1440x900, a 648x365
+frame; 746x420 at 1000 high). ``lib/auditPip`` maps each camera to its
+inset clip and beep through ``planServedClip``, so a camera reads the
+same instant in the inset as big; each camera's ``CamPill`` travels with
+its picture (the big one's at the tile's top right, the inset's as its
+note), and a camera with no beep, which cannot enter the inset, keeps
+its pill in the column header. The big camera is ``usePip``'s
+(``activeVideoIndex`` is derived from it; C / Shift+C in the page's key
+handler, the grid's pick is ``pip.focus``, a new stage resets to the
+primary). A swap changes the picture only: ``beepOffset`` maps the big
+clip onto the primary's timeline, so the waveform, markers, shot list
+and every seek stay the primary's, and while a secondary is big the
+sound is ``lib/usePrimaryAudio`` (as on Splits) playing the stage audit
+WAV, the waveform's own file, anchored on ``peaks.beep_time`` (the
+primary's stream, same anchor, if the WAV fails). Nothing else syncs a
+second element: the page's old secondary loop is gone, and a new
+follower goes through ``attachInsetSync``, never a loop of its own,
 and the shared timeline band (spec 2026-10-09) underneath now hosts the
 waveform: the audio track carries ``WaveformTrack`` and ``MarkerLayer``
 together, pins are on a Flags row that does not seek, above it, and the

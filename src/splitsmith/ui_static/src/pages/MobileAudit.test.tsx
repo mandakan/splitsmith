@@ -230,6 +230,42 @@ describe("MobileAudit", () => {
     ctx.value = { ...ctx.value, project: null };
   });
 
+  it.each([
+    ["off every shot", 5.0],
+    ["on a later shot", 2.4],
+  ])(
+    "the video opens 1.5 s before the shot Video was pressed on, with the playhead moved %s by load",
+    async (_label, movedTo) => {
+      ctx.value = { ...ctx.value, project: projectWithVideo() };
+      playback.state.playhead = 2.0; // on cand-1
+      const page = renderPage();
+      await waitFor(() => expect(screen.getByTestId("wrapped-waveform")).toBeInTheDocument());
+      fireEvent.click(screen.getByRole("button", { name: "Video" }));
+      expect(playback.state.stop).toHaveBeenCalled();
+      // The tap's audio moved the playhead on before the video's metadata arrived.
+      playback.state.playhead = movedTo;
+      page.rerender(
+        <MemoryRouter initialEntries={["/match/m1/audit/alice/3"]}>
+          <Routes>
+            <Route path="/match/:matchId/audit/:slug/:stage" element={<MobileAudit />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+      const video = screen.getByRole("dialog", { name: "Shot video" }).querySelector("video")!;
+      let set: number | null = null;
+      Object.defineProperty(video, "currentTime", {
+        configurable: true,
+        get: () => set ?? 0,
+        set: (v: number) => {
+          set = v;
+        },
+      });
+      fireEvent.loadedMetadata(video);
+      expect(set).toBeCloseTo(0.5);
+      ctx.value = { ...ctx.value, project: null };
+    },
+  );
+
   it("action buttons disable while a save is in flight", async () => {
     let resolveSave: (v: StageAudit) => void = () => {};
     apiMock.saveStageAudit.mockImplementation(

@@ -38,9 +38,6 @@ export function StageBand({ ws, view, compact = false, toolbar, audioHeight = AU
   const { coach, peaks, peaksLoading, scrub, regions } = ws;
   const { stageTime, tFromBeep, audioBeep, eventsReadOnly } = view;
   if (!coach) return null;
-  const seekFromBeep = (t: number) => {
-    if (ws.videoRef.current) ws.videoRef.current.currentTime = coach.beep_time + t;
-  };
   const showHints = !compact || keysOn;
   return (
     <div>
@@ -50,7 +47,7 @@ export function StageBand({ ws, view, compact = false, toolbar, audioHeight = AU
         fps={30}
         currentTime={tFromBeep}
         playing={ws.isPlaying}
-        onSeek={seekFromBeep}
+        onSeek={ws.seekFromBeep}
         zoom={zoom}
         onZoomChange={setZoom}
         dense={compact}
@@ -120,7 +117,7 @@ export function StageBand({ ws, view, compact = false, toolbar, audioHeight = AU
                 selectedId={regions.selectedId}
                 readOnly={eventsReadOnly}
                 onSelect={regions.select}
-                onSeek={seekFromBeep}
+                onSeek={ws.seekFromBeep}
                 onChange={regions.change}
                 onCancel={regions.cancel}
               />

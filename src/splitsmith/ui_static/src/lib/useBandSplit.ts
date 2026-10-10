@@ -87,7 +87,8 @@ export function useBandSplit(): BandSplit {
   const previousRef = useRef<number | null>(null);
 
   const roomRef = useObserved((el) => setRoom(Math.max(0, el.getBoundingClientRect().height - SPLITTER_PX)));
-  // The viewer column: the video first, the transport under it on a tall window.
+  // The viewer column: the video first (StageVideo's box, which hosts the
+  // PiP inset), the transport under it on a tall window.
   const viewerRef = useObserved((el) => {
     const video = el.firstElementChild;
     setChrome(video ? Math.max(0, el.getBoundingClientRect().height - video.getBoundingClientRect().height) : 0);

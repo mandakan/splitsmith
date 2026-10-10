@@ -217,19 +217,80 @@ describe("Audit on the timeline band", () => {
     expect(within(shots).getByTestId("shot-list-scroll")).toHaveClass("min-h-0", "flex-1", "overflow-y-auto");
   });
 
-  it("raises the top row's floor when the stage has a second camera", async () => {
-    const p = project();
-    const primary = p.stages[0].videos[0];
-    p.stages[0].videos.push({ ...primary, video_id: "v2", role: "secondary", path: "raw/stage3-b.mp4" });
-    apiMock.getProject.mockResolvedValue(p);
-    renderPage();
-    await screen.findByTestId("timeline");
-    await screen.findByText(/Synced to primary beep/i);
-    const grid = document.querySelector('[class*="lg:grid-cols-[minmax(0,1fr)_380px]"]') as HTMLElement;
-    // The secondary strip and the sync row cost about 150 px, so the floor
-    // grows by that much and the primary tile keeps a usable height.
-    expect(grid).toHaveClass("lg:h-[max(398px,calc(100dvh-502px))]");
-    expect(grid).not.toHaveClass("lg:h-[max(300px,calc(100dvh-502px))]");
+  describe("with a second camera (PiP, #1407)", () => {
+    const twoCams = () => {
+      const p = project();
+      const primary = p.stages[0].videos[0];
+      p.stages[0].videos.push({
+        ...primary,
+        video_id: "v2",
+        role: "secondary",
+        path: "raw/stage3-b.mp4",
+        beep_time: 7.5,
+        added_at: "2026-10-02T00:00:00Z",
+      });
+      return p;
+    };
+    const bigVideo = () => document.querySelector("video[data-active-path]") as HTMLVideoElement;
+
+    it("keeps #1404's floor and draws no secondary strip or sync row", async () => {
+      apiMock.getProject.mockResolvedValue(twoCams());
+      renderPage();
+      await screen.findByTestId("timeline");
+      const grid = document.querySelector('[class*="lg:grid-cols-[minmax(0,1fr)_380px]"]') as HTMLElement;
+      expect(grid).toHaveClass("lg:h-[max(398px,calc(100dvh-502px))]");
+      expect(grid).not.toHaveClass("lg:h-[max(300px,calc(100dvh-502px))]");
+      expect(screen.queryByText(/Synced to primary beep/i)).toBeNull();
+      expect(screen.queryByTestId("cam-strip")).toBeNull();
+      expect(within(grid).getByTestId("pip-view")).toBeInTheDocument();
+    });
+
+    it("C swaps the big camera; the timeline, its beep and the sound stay the primary's", async () => {
+      apiMock.getProject.mockResolvedValue(twoCams());
+      const made: HTMLAudioElement[] = [];
+      const RealAudio = window.Audio;
+      window.Audio = function FakeAudio() {
+        const a = document.createElement("audio");
+        made.push(a);
+        return a;
+      } as unknown as typeof Audio;
+      try {
+        renderPage();
+        const band = await screen.findByTestId("timeline");
+        await waitFor(() => expect(bigVideo()).toHaveAttribute("data-active-path", "raw/stage3.mp4"));
+        const beepLeft = within(band).getByTestId("wave-beep").style.left;
+        expect(made).toHaveLength(0);
+        expect(bigVideo().muted).toBe(false);
+
+        fireEvent.keyDown(window, { key: "c" });
+        await waitFor(() => expect(bigVideo()).toHaveAttribute("data-active-path", "raw/stage3-b.mp4"));
+        expect(bigVideo().getAttribute("src")).toContain(encodeURIComponent("raw/stage3-b.mp4"));
+        // Its picture, the primary's sound: the big player is muted and the
+        // stage audit WAV (the waveform's own audio) plays on its clock.
+        await waitFor(() => expect(made).toHaveLength(1));
+        expect(made[0].getAttribute("src")).toMatch(/\/shooters\/alice\/stages\/3\/audio$/);
+        expect(made[0].muted).toBe(false);
+        expect(bigVideo().muted).toBe(true);
+        // The band does not move: same beep line, same peaks.
+        expect(within(band).getByTestId("wave-beep").style.left).toBe(beepLeft);
+        expect(apiMock.getStagePeaks.mock.calls.every((c) => c[0] === "alice" && c[1] === 3)).toBe(true);
+
+        // Shift+C (or C again) goes back: no follower, nothing muted.
+        fireEvent.keyDown(window, { key: "C", shiftKey: true });
+        await waitFor(() => expect(bigVideo()).toHaveAttribute("data-active-path", "raw/stage3.mp4"));
+        expect(made[0].getAttribute("src")).toBeNull();
+        expect(bigVideo().muted).toBe(false);
+      } finally {
+        window.Audio = RealAudio;
+      }
+    });
+
+    it("C does nothing with one camera", async () => {
+      renderPage();
+      await screen.findByTestId("timeline");
+      fireEvent.keyDown(window, { key: "c" });
+      expect(bigVideo()).toHaveAttribute("data-active-path", "raw/stage3.mp4");
+    });
   });
 
   it("adds a manual marker on a double-click in the audio row", async () => {
