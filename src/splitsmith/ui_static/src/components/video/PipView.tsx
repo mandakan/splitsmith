@@ -325,7 +325,7 @@ const PIP_LABEL_Y = 8;
 
 /** The camera's name chip (speaker glyph on the primary) and, on the
  *  primary, a PRIMARY chip: the marking travels with the primary. */
-function CamChips({ camera, primary }: { camera: PipCamera; primary: boolean }) {
+export function CamChips({ camera, primary }: { camera: PipCamera; primary: boolean }) {
   return (
     <>
       <Chip size="overlay" className="min-w-0 shrink" title={camera.label}>

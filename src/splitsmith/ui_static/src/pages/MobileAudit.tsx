@@ -18,6 +18,7 @@ import { ArrowLeft, MoreHorizontal, X } from "lucide-react";
 
 import { ActionArea } from "@/components/audit/mobile/ActionArea";
 import { AuditTransport } from "@/components/audit/mobile/AuditTransport";
+import { CameraStack } from "@/components/audit/mobile/CameraStack";
 import { DEFAULT_ROWS, WrappedWaveform } from "@/components/audit/mobile/WrappedWaveform";
 import { ZoomLane, type ZoomFactor } from "@/components/audit/mobile/ZoomLane";
 import type { AuditMarker } from "@/components/MarkerLayer";
@@ -36,7 +37,9 @@ import {
   type AuditEvent,
   type PeaksResult,
   type StageAudit,
+  type StageVideo,
 } from "@/lib/api";
+import { addFailedKind, auditPipCameras, type AuditPipCamera, type FailedKinds } from "@/lib/auditPip";
 import { buildAuditJson, deriveMarkers } from "@/lib/audit-doc";
 import { resolveTarget } from "@/lib/audit-target";
 import { useDialogFocus } from "@/lib/dialogFocus";
@@ -44,6 +47,7 @@ import { isActiveCommand, latestForStage, REDETECT_CONFIRM } from "@/lib/desktop
 import { useDesktopCommands } from "@/lib/useDesktopCommands";
 import { useMatchHref } from "@/lib/matchHref";
 import { snapToLeadingEdge, type SnapPeaks } from "@/lib/peak-snap";
+import { stackCameras } from "@/lib/phoneCameraStack";
 import { createScrubber, type Scrubber } from "@/lib/scrub-audio";
 import { useAuditPlayback } from "@/lib/useAuditPlayback";
 import { useScrubSource } from "@/lib/useScrubSource";
@@ -321,11 +325,20 @@ export function MobileAudit() {
 
   // ---- Video overlay --------------------------------------------------------
 
-  const primaryVideo = useMemo(() => {
+  // The stage's cameras, primary first and the others by when they were
+  // added (desktop Audit's order, so "Cam 2" names the same camera).
+  const stageVideos = useMemo<StageVideo[]>(() => {
     const stageEntry = outletCtx?.project?.stages.find((s) => s.stage_number === stageNumber);
-    if (!stageEntry) return null;
-    return stageEntry.videos.find((v) => v.role === "primary") ?? null;
+    if (!stageEntry) return [];
+    const primary = stageEntry.videos.find((v) => v.role === "primary");
+    if (!primary) return [];
+    const secondaries = stageEntry.videos
+      .filter((v) => v.role === "secondary")
+      .slice()
+      .sort((a, b) => (a.added_at ?? "").localeCompare(b.added_at ?? ""));
+    return [primary, ...secondaries];
   }, [outletCtx?.project, stageNumber]);
+  const primaryVideo = stageVideos[0] ?? null;
 
   // The trim pin may play the 720p rendition (lib/scrubSource.ts); a
   // playback error falls back to the trim for that video.
@@ -362,6 +375,35 @@ export function MobileAudit() {
   }, [videoUrl, target, playback]);
 
   const closeVideo = useCallback(() => setVideoOpen(false), []);
+
+  // Two or more cameras with a beep: the dialog stacks them (#1410), each
+  // streaming what desktop Audit's PiP streams for it (lib/auditPip: the
+  // 720p rendition first), synced on the beep offsets. Fewer: the one
+  // primary player below, unchanged.
+  const [stackFailed, setStackFailed] = useState<FailedKinds>({});
+  const preBufferSeconds = outletCtx?.project?.trim_pre_buffer_seconds ?? 5;
+  const stacked = useMemo(() => {
+    if (!peaksResult || stageVideos.length < 2) return null;
+    return stackCameras(
+      auditPipCameras({
+        slug,
+        stageNumber,
+        videos: stageVideos,
+        peaks: { beep_time: peaksResult.beep_time, trimmed: peaksResult.trimmed },
+        preBufferSeconds,
+        failed: stackFailed,
+      }),
+    );
+  }, [peaksResult, stageVideos, slug, stageNumber, preBufferSeconds, stackFailed]);
+  const onStackCameraError = useCallback(
+    (cam: AuditPipCamera) => {
+      setStackFailed((prev) => addFailedKind(prev, cam.id, cam.kind));
+      // A broken rendition is broken for the one-camera player too.
+      const video = stageVideos.find((v) => v.video_id === cam.id);
+      if (cam.kind === "scrub" && video) markScrubFailed(video);
+    },
+    [stageVideos, markScrubFailed],
+  );
 
   // Same overlay-architecture contract as MobileConfirmSheet: Escape
   // closes, Tab is trapped inside, focus moves in on open and restores
@@ -673,17 +715,25 @@ export function MobileAudit() {
                 <X className="size-5" aria-hidden />
               </button>
             </div>
-            <video
-              ref={videoElRef}
-              src={videoUrl}
-              controls
-              playsInline
-              className="min-h-0 flex-1"
-              onLoadedMetadata={handleVideoLoadedMetadata}
-              onError={() => {
-                if (primaryVideo && videoUrl.includes("kind=scrub")) markScrubFailed(primaryVideo);
-              }}
-            />
+            {stacked ? (
+              <CameraStack
+                cameras={stacked}
+                openAt={videoSeekRef.current - (stacked[0].beepInClip ?? 0)}
+                onCameraError={onStackCameraError}
+              />
+            ) : (
+              <video
+                ref={videoElRef}
+                src={videoUrl}
+                controls
+                playsInline
+                className="min-h-0 flex-1"
+                onLoadedMetadata={handleVideoLoadedMetadata}
+                onError={() => {
+                  if (primaryVideo && videoUrl.includes("kind=scrub")) markScrubFailed(primaryVideo);
+                }}
+              />
+            )}
           </div>
         )}
 

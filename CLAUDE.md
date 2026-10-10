@@ -1750,7 +1750,24 @@ clip onto the primary's timeline, so the waveform, markers, shot list
 and every seek stay the primary's, and while a secondary is big the
 sound is ``lib/usePrimaryAudio`` (as on Splits) playing the stage audit
 WAV, the waveform's own file, anchored on ``peaks.beep_time`` (the
-primary's stream, same anchor, if the WAV fails). Nothing else syncs a
+primary's stream, same anchor, if the WAV fails). The phone Audit's
+Video dialog (``pages/MobileAudit.tsx``, #1410) stacks instead of an
+inset: with two or more cameras that line up
+(``lib/phoneCameraStack.stackCameras`` over ``auditPipCameras``, so the
+same streams, 720p rendition first) ``components/audit/mobile/CameraStack``
+shows Cam 1 full width with one other camera the same size under it (a
+"2 / 3" chooser cycles the others: two decodes at most). The active camera
+has the native controls and is the clock, the other follows muted through
+``attachInsetSync``; a tap makes it active without remounting either.
+Sound is never two cameras at once and never ``usePrimaryAudio``: Cam 1
+is on screen and synced anyway, so with another camera active Cam 1's own
+element sounds and the active one is muted, until the active camera's
+control unmutes it (``volumechange``), which mutes Cam 1 for as long. No
+lead correction there: the clocks read ~30 ms apart whichever camera
+drives (not a start lag), and seeking the playing follower overshot. The
+stack sits top-aligned under the close row. The opening seek (1.5 s before the shot, ``videoSeekRef``)
+lands on the active camera, the follower synced to it. One camera keeps the
+old single player untouched; beep review stays one camera. Nothing else syncs a
 second element: the page's old secondary loop is gone, and a new
 follower goes through ``attachInsetSync``, never a loop of its own,
 and the shared timeline band (spec 2026-10-09) underneath now hosts the
