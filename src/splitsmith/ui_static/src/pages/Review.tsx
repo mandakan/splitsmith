@@ -63,7 +63,7 @@ import {
 } from "@/lib/api";
 import { isTypingTextTarget, useBlurOnPointerClick } from "@/lib/audit-input";
 import { zoomActionForKey } from "@/lib/zoomKeys";
-import { snapToPeak, type SnapPeaks } from "@/lib/peak-snap";
+import { displayBins, reviewMaxZoom } from "@/lib/reviewZoom";
 import { useReleaseMediaOnUnmount } from "@/lib/utils";
 
 const PEAK_BINS = 1500;
@@ -96,7 +96,12 @@ export function Review() {
   const [peaks, setPeaks] = useState<PeaksResult | null>(null);
   const [peaksLoading, setPeaksLoading] = useState(false);
   const [peaksError, setPeaksError] = useState<string | null>(null);
-  const [snapPeaks, setSnapPeaks] = useState<SnapPeaks | null>(null);
+  // Peaks drawn at the current zoom (about one bin per pixel, down to 1 ms);
+  // ``null`` until fetched, then the last fetched set stays up while a
+  // deeper one loads.
+  const [displayPeaks, setDisplayPeaks] = useState<{ bins: number; peaks: number[] } | null>(
+    null,
+  );
 
   const [markers, setMarkers] = useState<AuditMarker[]>([]);
   const [focusedMarkerId, setFocusedMarkerId] = useState<string | null>(null);
@@ -242,33 +247,36 @@ export function Review() {
     };
   }, [fixturePath]);
 
-  // High-resolution peaks for drop/add peak-snapping (#28); see Audit.tsx.
+  // Waveform detail follows the zoom: a fixture shot is placed on its onset
+  // by eye, which the 1500 fit bins (~35 ms each on a long stage) cannot
+  // show. Debounced so stepping through zoom levels fetches once.
+  const pixelsPerSecond = peaks
+    ? zoomToPixelsPerSecond(zoom, waveformViewport, peaks.duration)
+    : null;
+  const wantedBins = peaks ? displayBins(peaks.duration, pixelsPerSecond, PEAK_BINS) : PEAK_BINS;
   useEffect(() => {
-    if (!peaks || !fixturePath) {
-      setSnapPeaks(null);
-      return;
-    }
-    const bins = Math.min(8192, Math.max(PEAK_BINS, Math.ceil(peaks.duration / 0.01)));
-    if (bins <= PEAK_BINS) {
-      setSnapPeaks({ peaks: peaks.peaks, duration: peaks.duration });
-      return;
-    }
-    // Clear before fetching: drops during the refetch window fall back to
-    // grid snapping instead of snapping against the previous clip's array.
-    setSnapPeaks(null);
+    setDisplayPeaks(null);
+  }, [fixturePath]);
+  useEffect(() => {
+    if (!peaks || !fixturePath || wantedBins <= PEAK_BINS) return;
     let alive = true;
-    api
-      .getFixturePeaks(fixturePath, bins)
-      .then((p) => {
-        if (alive) setSnapPeaks({ peaks: p.peaks, duration: p.duration });
-      })
-      .catch(() => {
-        if (alive) setSnapPeaks(null);
-      });
+    const timer = window.setTimeout(() => {
+      api
+        .getFixturePeaks(fixturePath, wantedBins)
+        .then((p) => {
+          if (alive) setDisplayPeaks({ bins: wantedBins, peaks: p.peaks });
+        })
+        .catch(() => {
+          // Keep drawing what we have; the fit peaks are always there.
+        });
+    }, 150);
     return () => {
       alive = false;
+      window.clearTimeout(timer);
     };
-  }, [peaks, fixturePath]);
+  }, [peaks, fixturePath, wantedBins]);
+  const drawnPeaks =
+    peaks && wantedBins > PEAK_BINS && displayPeaks ? displayPeaks.peaks : peaks?.peaks;
 
   // ---- Marker mutators (push prev state to undo stack) -------------------
 
@@ -343,9 +351,10 @@ export function Review() {
   }, []);
 
   const handleAddManual = useCallback(
-    (time: number, shiftKey = false) => {
-      const snapped = !shiftKey && snapPeaks ? snapToPeak(time, snapPeaks) : null;
-      const t = snapped ?? time;
+    (time: number) => {
+      // Exactly where the person clicked, on the 1 ms grid: ground truth is
+      // the onset, and a peak snap would move it later (precise placement).
+      const t = Math.round(time * 1000) / 1000;
       const id = `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       recordEvent("marker_added_manual", { id, time: t });
       mutate([
@@ -362,7 +371,7 @@ export function Review() {
       ]);
       setFocusedMarkerId(id);
     },
-    [markers, mutate, recordEvent, snapPeaks],
+    [markers, mutate, recordEvent],
   );
 
   const handleNoteChange = useCallback((id: string, note: string) => {
@@ -611,7 +620,9 @@ export function Review() {
         e.preventDefault();
         if (zoomAction === "fit") setZoom(null);
         else if (zoomAction === "in")
-          setZoom((z) => Math.min(16, (z ?? 1) * 1.5));
+          setZoom((z) =>
+            Math.min(reviewMaxZoom(peaks?.duration ?? 0, waveformViewport), (z ?? 1) * 1.5),
+          );
         else setZoom((z) => {
           const next = (z ?? 1) / 1.5;
           return next <= 0.25 ? null : next;
@@ -706,6 +717,7 @@ export function Review() {
     keptShots,
     currentShotIndex,
     elapsedFromMedia,
+    waveformViewport,
   ]);
 
   // Peek key handler -- separate from the main onKey effect so it can be
@@ -861,20 +873,20 @@ export function Review() {
                   onPeekStart={() => setPeeking(true)}
                   onPeekEnd={() => setPeeking(false)}
                 />
-                <ZoomControls zoom={zoom} onZoomChange={setZoom} />
+                <ZoomControls
+                  zoom={zoom}
+                  onZoomChange={setZoom}
+                  maxZoom={reviewMaxZoom(peaks.duration, waveformViewport)}
+                />
               </div>
               <div ref={waveformWrapperRef}>
                 <Waveform
-                  peaks={peaks.peaks}
+                  peaks={drawnPeaks ?? peaks.peaks}
                   duration={peaks.duration}
                   currentTime={currentTime}
                   beepTime={filters.beep ? peaks.beep_time : null}
                   loopRegion={loopRegion}
-                  pixelsPerSecond={zoomToPixelsPerSecond(
-                    zoom,
-                    waveformViewport,
-                    peaks.duration,
-                  )}
+                  pixelsPerSecond={pixelsPerSecond}
                   onScrub={handleScrub}
                   onDoubleClick={handleAddManual}
                   height={160}
@@ -888,7 +900,7 @@ export function Review() {
                     onDelete={handleMarkerDelete}
                     onTimeChange={handleMarkerTimeChange}
                     visibleKinds={visibleKinds}
-                    snapPeaks={snapPeaks ?? undefined}
+                    precise
                   />
                 </Waveform>
               </div>

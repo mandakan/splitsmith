@@ -40,6 +40,8 @@ import { cn } from "@/lib/utils";
  *  and land on the 1 ms grid. */
 export const DETECTOR_RESOLUTION_S = 0.0107;
 const FINE_NUDGE_S = 0.001;
+/** Precise mode's Shift nudge: a coarser step for crossing a few ms fast. */
+const PRECISE_COARSE_NUDGE_S = 0.01;
 
 /** Pointer travel (in CSS pixels) before a press is treated as a drag rather
  *  than a click. Trackpad clicks routinely register a few stray pixels of
@@ -106,6 +108,11 @@ export interface MarkerLayerProps {
    *  transient (#28). Absent = no peak snapping (grid snap only). Shift
    *  held at drop always bypasses. */
   snapPeaks?: SnapPeaks;
+  /** Ground-truth placement (the lab's fixture review): a marker lands
+   *  exactly where it is dropped on the 1 ms grid, never peak-snapped, and
+   *  arrows nudge 1 ms (Shift 10 ms). A shot's time is its onset, which a
+   *  person places; snapping to the loudest bin moves it later. */
+  precise?: boolean;
 }
 
 export function MarkerLayer(props: MarkerLayerProps) {
@@ -126,6 +133,7 @@ function MarkerLayerInner({
   visibleKinds,
   forcedVisibleId,
   snapPeaks,
+  precise = false,
 }: MarkerLayerProps) {
   // Drag state lives in a ref so re-renders driven by external time
   // updates don't reset the active drag. ``moved`` only flips once the
@@ -192,10 +200,13 @@ function MarkerLayerInner({
     [duration],
   );
 
-  const snap = useCallback((t: number, fine: boolean): number => {
-    const step = fine ? FINE_NUDGE_S : DETECTOR_RESOLUTION_S;
-    return Math.round(t / step) * step;
-  }, []);
+  const snap = useCallback(
+    (t: number, fine: boolean): number => {
+      const step = fine || precise ? FINE_NUDGE_S : DETECTOR_RESOLUTION_S;
+      return Math.round(t / step) * step;
+    },
+    [precise],
+  );
 
   const handlePointerDown = useCallback(
     (e: React.PointerEvent<HTMLButtonElement>, marker: AuditMarker) => {
@@ -261,7 +272,7 @@ function MarkerLayerInner({
       let final = live?.time ?? marker.time;
       // Peak-snap the drop unless Shift is held (Shift = exactly where I put
       // it). Live drag keeps detector-grid snapping; only the commit snaps.
-      if (!e.shiftKey && snapPeaks) {
+      if (!precise && !e.shiftKey && snapPeaks) {
         const snapped = snapToPeak(final, snapPeaks);
         if (snapped != null && snapped !== final) {
           final = snapped;
@@ -270,7 +281,7 @@ function MarkerLayerInner({
       }
       onTimeChangeCommit?.(marker.id, final);
     },
-    [onClick, onTimeChangeCommit, markers, snapPeaks, onTimeChange],
+    [onClick, onTimeChangeCommit, markers, snapPeaks, onTimeChange, precise],
   );
 
   // Esc cancels an in-flight drag: restore the pointerdown-time position
@@ -311,7 +322,13 @@ function MarkerLayerInner({
         case "ArrowRight": {
           e.preventDefault();
           const dir = e.key === "ArrowRight" ? 1 : -1;
-          const step = e.shiftKey ? FINE_NUDGE_S : DETECTOR_RESOLUTION_S;
+          const step = precise
+            ? e.shiftKey
+              ? PRECISE_COARSE_NUDGE_S
+              : FINE_NUDGE_S
+            : e.shiftKey
+              ? FINE_NUDGE_S
+              : DETECTOR_RESOLUTION_S;
           const next = snap(
             Math.max(0, Math.min(duration, marker.time + dir * step)),
             e.shiftKey,
@@ -353,7 +370,7 @@ function MarkerLayerInner({
           return;
       }
     },
-    [duration, onClick, onDelete, onTimeChange, onTimeChangeBegin, snap, flushNudge],
+    [duration, onClick, onDelete, onTimeChange, onTimeChangeBegin, snap, flushNudge, precise],
   );
 
   // Whenever focus moves to a marker, keep ARIA in sync.
@@ -394,26 +411,35 @@ function MarkerLayerInner({
             onPointerUp={(e) => handlePointerUp(e, m)}
             onPointerCancel={(e) => handlePointerUp(e, m)}
             onKeyDown={(e) => handleKeyDown(e, m)}
+            data-focused={focused ? "true" : undefined}
             className={cn(
               "group pointer-events-auto absolute top-0 -translate-x-1/2 cursor-grab",
               "flex h-full flex-col items-center justify-start outline-none",
               "active:cursor-grabbing",
-              focused && "ring-2 ring-led ring-offset-1 ring-offset-bg",
             )}
             style={{ left: `${x}%`, width: "10px" }}
             title={label}
           >
-            {/* Vertical guide line full-height behind the glyph for visibility. */}
+            {/* Vertical guide line full-height behind the glyph for visibility.
+                The focused marker shows on the line and the glyph only: an
+                outline beside the line would cover the audio a person is
+                lining it up with. */}
             <span
               aria-hidden
               className={cn(
-                "absolute top-0 bottom-0 left-1/2 w-px -translate-x-1/2",
-                m.kind === "detected" && "bg-marker-detected/60",
-                m.kind === "rejected" && "bg-marker-rejected/60",
-                m.kind === "manual" && "bg-marker-manual/60",
+                "absolute top-0 bottom-0 left-1/2 -translate-x-1/2",
+                focused ? "w-0.5 bg-ink" : "w-px",
+                !focused && m.kind === "detected" && "bg-marker-detected/60",
+                !focused && m.kind === "rejected" && "bg-marker-rejected/60",
+                !focused && m.kind === "manual" && "bg-marker-manual/60",
               )}
             />
-            <span className="relative mt-1">
+            <span
+              className={cn(
+                "relative mt-1 transition-transform",
+                focused && "scale-125 drop-shadow-[0_0_3px_var(--color-ink)]",
+              )}
+            >
               <MarkerGlyph kind={m.kind} size={18} />
             </span>
           </button>

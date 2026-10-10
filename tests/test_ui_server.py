@@ -5240,6 +5240,24 @@ def test_fixture_peaks_serves_sibling_wav(tmp_path: Path) -> None:
     assert len(body["peaks"]) == 64
 
 
+def test_fixture_peaks_reach_one_millisecond_on_a_long_stage(tmp_path: Path) -> None:
+    """The lab review zooms until one bin is 1 ms, so a 60 s fixture
+    needs 60 000 bins (the old 8192 cap stopped at ~7 ms)."""
+    import json as _json
+
+    import numpy as np
+    import soundfile as sf
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    fixture = tmp_path / "review.json"
+    fixture.write_text(_json.dumps({"beep_time": 5.0, "shots": []}), encoding="utf-8")
+    sf.write(fixture.with_suffix(".wav"), np.zeros(60 * 48_000, dtype="float32"), 48_000)
+
+    resp = client.get(f"/api/fixture/peaks?path={fixture}&bins=60000")
+    assert resp.status_code == 200
+    assert len(resp.json()["peaks"]) == 60000
+
+
 def test_fixture_audio_serves_sibling_wav(tmp_path: Path) -> None:
     import numpy as np
     import soundfile as sf

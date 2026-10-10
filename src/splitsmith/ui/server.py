@@ -15014,7 +15014,9 @@ def create_app(
     @app.get("/api/fixture/peaks")
     def get_fixture_peaks(
         path: str = Query(...),
-        bins: int = Query(default=1200, ge=16, le=8192),
+        # Up to 1 ms bins on a two-minute fixture: the lab review zooms
+        # until the shot's rising edge is a few pixels wide.
+        bins: int = Query(default=1200, ge=16, le=131_072),
     ) -> JSONResponse:
         """Compute peaks for the fixture's sibling WAV (``<path>.with_suffix('.wav')``).
 
