@@ -419,11 +419,11 @@ _CARD_PROBE_JS = """() => {
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize(("width", "height"), [(1080, 1920), (720, 1280)])
+@pytest.mark.parametrize(("width", "height"), [(1080, 1920), (720, 1280), (1080, 1350), (1080, 1080)])
 def test_an_upright_card_keeps_every_headline_figure_on_the_page(tmp_path, width: int, height: int) -> None:
-    """Sized by its height, an upright card's headline row runs past the
-    right edge (the hit counts were cut off at 1080x1920) and its title is
-    ellipsized; it is sized as a 16:9 card of its width instead."""
+    """Sized by its height, an upright or square card's headline row runs
+    past the right edge (the hit counts were cut off at 1080x1920) and its
+    title is ellipsized; it is sized as a 6:5 card of its width instead."""
     from splitsmith.match_summary import match_summary_html
     from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
     from splitsmith.overlay_theme import load_theme
@@ -467,3 +467,42 @@ def test_an_upright_card_keeps_every_headline_figure_on_the_page(tmp_path, width
     off = [i["text"] for i in state["items"] if i["box"]["left"] < 0 or i["box"]["right"] > width]
     assert off == []
     assert not state["titleCut"]
+
+
+@pytest.mark.parametrize(
+    ("width", "height"),
+    [
+        (1920, 1080),
+        (1280, 720),
+        (3840, 2160),
+        (2560, 1080),
+        (1920, 1088),
+        (1440, 1080),
+        (2704, 2028),
+        (4000, 3000),
+        (1350, 1080),
+        (1280, 1024),
+        (1200, 1000),
+    ],
+)
+def test_a_landscape_card_sizes_its_type_by_its_height_as_it_always_has(width: int, height: int) -> None:
+    """6:5, 5:4, 4:3, 16:9 and wider: the card fits the page sized by its height,
+    so its type is exactly what it was before upright cards were sized by
+    their width."""
+    from splitsmith.match_summary import match_summary_html
+    from splitsmith.overlay_theme import load_theme
+
+    summary = build_match_summary(
+        [(f"Stage {n}", _tile(n, shots=_shots(1.23, 0.21), time=14.2, card=CARD)) for n in range(1, 4)],
+        title="Stockholm Open",
+        label="Mathias",
+    )
+    html = match_summary_html(summary, width=width, height=height, theme=load_theme("splitsmith"))
+    assert f"font-size: {round(height * 0.06)}px;" in html, "the title"
+    assert f".fig .v {{ font-size: {round(height * 0.058)}px;" in html
+    assert f"font-size: {round(height * 0.022)}px;" in html, "the captions"
+    assert f".label {{ font-size: {round(height * 0.032)}px;" in html
+    # The spacing that follows the type: the strip's and the notes' gaps, the shadow.
+    assert f"margin-top: {round(height * 0.03)}px;\n  align-items: flex-end;" in html
+    assert f"margin-top: {round(height * 0.012)}px; }}" in html
+    assert f"text-shadow: 0 {max(1, height // 360)}px {max(2, height // 180)}px" in html

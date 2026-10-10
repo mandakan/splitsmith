@@ -1311,8 +1311,11 @@ holds were pixel-identical under it (the grid-hold check covered holds
 without regions: ``render_grid_frames.py`` writes no events). The live race
 does not opt in (its rows change text per frame). The single-shooter match
 summary is its own table document (``match_summary_html``, no ``fit.js``):
-an upright canvas sizes its type as a 16:9 card of its width, every
-landscape one exactly as before. A ``fit.js`` change
+its type follows the canvas height on any canvas at least
+``SIZE_ASPECT`` (6:5) wide, byte-identical to before there (6:5, 5:4, 4:3,
+16:9, 1920x1088 and wider, where it always fitted); a squarer or upright
+canvas sizes it as a 6:5 card of its width, since by height its headline
+row ran off the page (measured break-even about 1.17:1). A ``fit.js`` change
 reaches the summary PNG by content, the preview only through
 ``PREVIEW_REVISION``. Exports: the splits CSV gains
 ``moving`` as its last column (``read_splits_csv`` takes both headers);

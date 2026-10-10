@@ -1,10 +1,10 @@
 {
   "entries": [
     {
-      "id": "upright-video-overlays-and-match-summary",
+      "id": "match-summary-on-upright-video",
       "date": "2026-10-10",
-      "title": "Overlays and match summary fit upright video",
-      "body": "On a vertical video the Timeline overlay's clock no longer sits under its track, the Ticker's reload count stays on screen, and the match summary keeps every figure on the card."
+      "title": "Match summary fits vertical video",
+      "body": "On a vertical or square video, the match summary (Look on the Export page) now keeps every figure and the match name on the card."
     },
     {
       "id": "coach-review-page",

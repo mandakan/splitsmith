@@ -286,6 +286,12 @@ def row_cells(row: MatchSummaryRow) -> list[str]:
     return [f"{row.number:02d}", row.name, time, hf, pct, _num(row.draw), _num(row.avg_split)]
 
 
+#: The squarest canvas (width:height) whose type still follows its height.
+#: Sized by height, a typical twelve-stage card's headline row fits the page
+#: from about 1.17:1 up and overflows a square one; 6:5 keeps every canvas
+#: that fitted (6:5, 5:4, 4:3, 16:9 and wider) exactly as it was.
+SIZE_ASPECT = (6, 5)
+
 TABLE_HEADER = ["", "Stage", "Time", "HF", "%", "Draw", "Split"]
 #: The table's fixed columns in ems (number, time, HF, %, draw, split, the
 #: name's right padding) and the least a name keeps before its ellipsis.
@@ -312,15 +318,17 @@ def _css_rgb(color: RGB) -> str:
 
 
 def match_summary_html(summary: MatchSummary, *, width: int, height: int, theme: OverlayTheme) -> str:
-    """The card as one document, transparent where the backdrop shows. Sizes
-    follow the canvas height, a tall canvas's as a 16:9 one of its width
-    (an upright card sized by its height runs the headline figures off the
-    page); the table splits into two columns past :data:`ROWS_PER_COLUMN`
-    so a long match never shrinks its rows below a readable size."""
+    """The card as one document, transparent where the backdrop shows. Type
+    follows the canvas height on any canvas at least :data:`SIZE_ASPECT`
+    wide (6:5, 5:4, 4:3, 16:9 and wider); a squarer or upright one sizes it
+    as a 6:5 card of its width, since by its height the headline figures
+    run off the page. The table splits into two columns past
+    :data:`ROWS_PER_COLUMN` so a long match never shrinks its rows below a
+    readable size."""
     mono_url, mono_format, mono_weight = _face_source(theme.mono_font)
     display_url, display_format, display_weight = _face_source(theme.display_font)
-    # Every landscape canvas (16:9 and wider) sizes exactly as before.
-    size = min(height, math.ceil(width * 9 / 16))
+    num, den = SIZE_ASPECT
+    size = height if width * den >= height * num else width * den // num
     pad_x = round(width * 0.06)
     pad_y = round(height * 0.06)
     title_px = round(size * 0.06)
