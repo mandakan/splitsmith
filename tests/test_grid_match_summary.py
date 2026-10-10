@@ -449,3 +449,33 @@ def test_a_tall_cell_sizes_its_tile_as_a_16_by_9_one() -> None:
     assert match_summary_cell_scale(two_up) == summary_scale(540)
     two_by_two = SpriteGeometry(canvas_width=1920, canvas_height=972, rows=2, cols=2)
     assert match_summary_cell_scale(two_by_two) == summary_scale(486)
+
+
+def test_the_grid_match_summary_asks_for_the_column_fit() -> None:
+    """Its tiles carry the stage hold's Splits rows, so they fit their own
+    columns the way the hold's do (fit.js ``fitColumns``); the title strip
+    has no columns and keeps the old policy."""
+    from splitsmith.compare.overlay_summary import build_match_summary_grid_still
+    from splitsmith.overlay_theme import load_theme
+    from tests.test_compare_mp4_grid_cards import _FakeRasterizer
+    from tests.test_compare_mp4_grid_hold import _plan
+
+    names = ("Anna", "Bo")
+    plan = replace(_plan(names, fillers=0, rows=2, cols=1), stage_number=1)
+    data = {(name, 1): _tile(1, shots=_shots(1.0, 0.2, 0.3), card=CARD, label=name) for name in names}
+    summaries = grid_match_summaries([plan], data, title="M", duration_seconds=6.0)
+    fake = _FakeRasterizer()
+    build_match_summary_grid_still(
+        plan,
+        summaries,
+        {},
+        width=1080,
+        height=1920,
+        title="M",
+        theme=load_theme("splitsmith"),
+        rasterizer=fake,
+    )
+    flag = "window.__splitsmithFitColumns = true;"
+    (cells,) = [html for html in fake.calls if ">Rounds<" in html]
+    (strip,) = [html for html in fake.calls if html is not cells]
+    assert flag in cells and flag not in strip

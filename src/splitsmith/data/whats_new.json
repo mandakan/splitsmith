@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "upright-video-overlays-and-match-summary",
+      "date": "2026-10-10",
+      "title": "Overlays and match summary fit upright video",
+      "body": "On a vertical video the Timeline overlay's clock no longer sits under its track, the Ticker's reload count stays on screen, and the match summary keeps every figure on the card."
+    },
+    {
       "id": "coach-review-page",
       "date": "2026-10-10",
       "title": "Review a stage on Coach",
