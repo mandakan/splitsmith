@@ -1467,3 +1467,41 @@ def test_a_tail_edge_keeps_the_tiles_overlay_and_clocks(tmp_path):
     ]
     assert durations and all(d >= 0 for d in durations)
     assert overlay.sprite_list_path.name == "sprites-stage1-tail.txt"
+
+
+def test_the_clock_draws_at_the_corner_fits_size(tmp_path):
+    """#1421: a 1x2 upright grid's 540 px cells cannot hold the counter and
+    the clock at the 137 px the cell height asks for, so both shrink to one
+    size: the plan's clock reads the same fit the sprites are drawn with."""
+    from splitsmith.compare.overlay_sprites import corner_fit
+    from splitsmith.overlay_layout import CellScale
+
+    shooters = _shooters(tmp_path)
+    (plan,) = mp4_grid.build_stage_plans(
+        shooters, audio_label="Anders", head_pad_seconds=1.0, tail_pad_seconds=0.5
+    )
+    upright = mp4_grid.GridCanvas(width=1080, height=1920, frame_rate_num=30, frame_rate_den=1)
+    overlay = mp4_grid._stage_overlay_plan(
+        plan,
+        upright,
+        mp4_grid.load_overlay_data(shooters),
+        theme_name="splitsmith",
+        font_path=tmp_path / "font.ttf",
+        head_pad_seconds=1.0,
+        work=tmp_path / "upright",
+        rasterizer=None,
+    )
+    expected = corner_fit(540, 1920, advance_em=0.6)
+    assert expected.size < CellScale.for_cell(1920).live_primary
+    assert overlay.font_size == expected.size
+    # The split is not the corner's: the sprite list's PNGs are blank here
+    # (no rasterizer), so the size is checked where it is decided.
+    assert (
+        mp4_grid._split_size(
+            540,
+            1920,
+            mp4_grid._overlay_data_for_stage(mp4_grid.load_overlay_data(shooters), 1),
+            font_path=tmp_path / "font.ttf",
+        )
+        == 137
+    )

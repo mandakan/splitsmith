@@ -700,7 +700,8 @@ def _element_div(element: Element) -> str:
     if element.unit is not None:
         unit_html = f'<span class="unit">{escape(element.unit)}</span>'
     value_classes = " ".join(c for c in ("value", role_class, emphasis_class, color_class) if c)
-    value_html = f'<span class="{value_classes}">{escape(element.text)}{unit_html}</span>'
+    size_attr = f' style="font-size: {element.size}px"' if element.size is not None else ""
+    value_html = f'<span class="{value_classes}"{size_attr}>{escape(element.text)}{unit_html}</span>'
     priority_attr = ""
     if element.drop_priority is not None:
         priority_attr = f' data-drop-priority="{element.drop_priority}"'

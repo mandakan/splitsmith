@@ -72,6 +72,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 
 from PIL import Image
@@ -81,10 +82,22 @@ from ..overlay_layout import Anchor, CellScale, ColorToken, Element, Flow, Group
 from ..overlay_raster import Rasterizer
 from ..overlay_theme import OverlayTheme
 from .free_cell import race_groups, row_gutter
-from .overlay_sprites import OverlayState, RaceCell, SpriteGeometry, TilePanel, TilePlacement
+from .overlay_sprites import (
+    CornerFit,
+    OverlayState,
+    RaceCell,
+    SpriteGeometry,
+    TilePanel,
+    TilePlacement,
+)
 
 
-def panel_groups(panel: TilePanel) -> tuple[Group, ...]:
+def panel_groups(
+    panel: TilePanel,
+    fit: CornerFit | None = None,
+    *,
+    corner_size: int | None = None,
+) -> tuple[Group, ...]:
     """What one tile says while its run is in progress.
 
     Two things, each absent when it has nothing honest to say:
@@ -115,20 +128,32 @@ def panel_groups(panel: TilePanel) -> tuple[Group, ...]:
     too. #683's issue text claimed the counter and clock were at
     *different* weights; rendering them proved that false, and the shared
     role is what keeps it false.
+
+    ``fit`` is the grid's :class:`~splitsmith.compare.overlay_sprites.CornerFit`
+    (#1421): ``None`` or an unstacked fit keeps the counter top left; a
+    stacked one moves it under the clock, right-aligned, one
+    ``stack_offset`` down; ``counter`` false drops it. The counter draws at
+    ``fit.size`` through its element's own size whenever that differs from
+    ``corner_size``, the document's ``live_primary`` (:func:`state_html`);
+    the split always draws at the document's size, never the corner's.
     """
     if not panel.present:
         return ()
     groups: list[Group] = []
-    if panel.shots_fired > 0:
+    show_counter = fit is None or fit.counter
+    if panel.shots_fired > 0 and show_counter:
         if panel.expected_shots is not None:
             counter = f"{panel.shots_fired}/{panel.expected_shots}"
         else:
             counter = f"{panel.shots_fired}"
+        stacked = fit is not None and fit.stacked
+        size = fit.size if fit is not None and fit.size != corner_size else None
         groups.append(
             Group(
-                anchor=Anchor.TOP_LEFT,
+                anchor=Anchor.TOP_RIGHT if stacked else Anchor.TOP_LEFT,
                 flow=Flow.ROW,
-                elements=(Element(text=counter, role=Role.LIVE_PRIMARY),),
+                elements=(Element(text=counter, role=Role.LIVE_PRIMARY, size=size),),
+                margin_top=fit.stack_offset if stacked and fit is not None else None,
             )
         )
     if panel.last_split is not None:
@@ -148,7 +173,14 @@ def panel_groups(panel: TilePanel) -> tuple[Group, ...]:
     return tuple(groups)
 
 
-def state_html(state: OverlayState, geometry: SpriteGeometry, *, theme: OverlayTheme) -> str:
+def state_html(
+    state: OverlayState,
+    geometry: SpriteGeometry,
+    *,
+    theme: OverlayTheme,
+    fit: CornerFit | None = None,
+    split_size: int | None = None,
+) -> str:
     """One :class:`~splitsmith.compare.overlay_sprites.OverlayState` as a
     canvas-sized HTML document.
 
@@ -167,12 +199,20 @@ def state_html(state: OverlayState, geometry: SpriteGeometry, *, theme: OverlayT
     document: every cell in a grid is the same size, and a size read off
     canvas height would be identical at 2x2 and 4x4, which is the bug
     that made narrow cells overflow before ``CellScale`` existed.
+
+    ``fit`` (#1421) is the corner's: the counter draws at the size the
+    clock does. ``split_size`` is the split's own (the document's
+    ``live_primary``), the cell's size capped by its width alone. A fit at
+    the cell's own size, no stack and an uncapped split write the document
+    they always did.
     """
     scale = CellScale.for_cell(geometry.cell_height)
+    if split_size is not None and split_size != scale.live_primary:
+        scale = replace(scale, live_primary=split_size)
     cells = [
         (
             TilePlacement(label=panel.label, row=panel.row, col=panel.col, present=panel.present),
-            panel_groups(panel),
+            panel_groups(panel, fit, corner_size=scale.live_primary),
         )
         for panel in state.panels
     ]
@@ -210,6 +250,8 @@ def _cache_key(
     theme: OverlayTheme,
     panels: tuple[TilePanel, ...],
     race: RaceCell | None = None,
+    fit: CornerFit | None = None,
+    split_size: int | None = None,
 ) -> str:
     """SHA-256 over a stable JSON dump of the render *inputs* -- never the
     rendered bytes. Two states with identical geometry/theme/panels hash
@@ -244,6 +286,10 @@ def _cache_key(
     }
     if race is not None:
         payload["race"] = _race_key(race)
+    if fit is not None:
+        payload["fit"] = [fit.size, fit.stacked, fit.counter]
+    if split_size is not None:
+        payload["split_size"] = split_size
     blob = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(blob).hexdigest()
 
@@ -255,6 +301,8 @@ def write_sprite_sequence(
     theme: OverlayTheme,
     cache_dir: Path,
     rasterizer: Rasterizer,
+    fit: CornerFit | None = None,
+    split_size: int | None = None,
 ) -> tuple[tuple[Path, float], ...]:
     """Rasterize every state, content-addressed, and return ``(png_path,
     duration_seconds)`` per state in order.
@@ -280,13 +328,13 @@ def write_sprite_sequence(
     written: dict[str, Path] = {}
     sequence: list[tuple[Path, float]] = []
     for state in states:
-        key = _cache_key(geometry, theme, state.panels, state.race)
+        key = _cache_key(geometry, theme, state.panels, state.race, fit, split_size)
         path = written.get(key)
         if path is None:
             path = cache_dir / f"sprite-{key[:16]}.png"
             if not path.exists():
                 png = rasterizer.png(
-                    state_html(state, geometry, theme=theme),
+                    state_html(state, geometry, theme=theme, fit=fit, split_size=split_size),
                     width=geometry.canvas_width,
                     height=geometry.canvas_height,
                 )

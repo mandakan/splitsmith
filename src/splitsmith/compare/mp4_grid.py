@@ -31,6 +31,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
+from PIL import ImageFont
+
 from ..composition import (
     BrandMark,
     MatchTitle,
@@ -78,9 +80,12 @@ from .layout import Layout2Up, choose_grid, grid_shape
 from .overlay_data import TileStageData, load_expected_rounds, load_overlay_data
 from .overlay_live import write_absent_sprite_sequence, write_sprite_sequence
 from .overlay_sprites import (
+    CornerFit,
     SpriteGeometry,
     TilePlacement,
     build_overlay_states,
+    corner_fit,
+    split_fit_size,
     theme_font_face,
     write_concat_list,
 )
@@ -2519,6 +2524,81 @@ def _overlay_data_for_stage(
     return {label: tile for (label, number), tile in data.items() if number == stage_number}
 
 
+#: The glyphs the counter, the clock and the split draw: digits, the
+#: counter's slash, the point and the split's unit.
+_CORNER_GLYPHS = "0123456789/.s"
+
+
+def _figure_advance_em(font_path: Path) -> float:
+    """The widest advance among the corner's glyphs, in ems, read off the
+    face the clock draws with (and the sprite's ``@font-face`` loads).
+
+    0.6 for every bundled mono face; measured rather than assumed because a
+    Look may name its own font file. A face Pillow cannot open falls back to
+    0.6, the figure every bundled face measures.
+    """
+    try:
+        face = ImageFont.truetype(str(font_path), 1000)
+    except OSError:
+        return 0.6
+    return max(face.getlength(glyph) for glyph in _CORNER_GLYPHS) / 1000.0
+
+
+def _corner_fit(
+    cell_w: int,
+    cell_h: int,
+    stage_data: Mapping[str, TileStageData],
+    *,
+    font_path: Path,
+) -> CornerFit:
+    """The stage's :class:`CornerFit` (#1421): the cell's width, the face's
+    advance, and the longest counter and clock this stage's data can draw
+    (the floor :data:`~splitsmith.compare.overlay_sprites.CORNER_MIN_CHARS`
+    covers every ordinary stage, so the fit is the same on every stage of
+    a render unless one runs past 99.99 s or 99 rounds)."""
+    counter_chars = 0
+    clock_chars = 0
+    for tile in stage_data.values():
+        expected = tile.stage_rounds.expected if tile.stage_rounds else None
+        shots = tile.shot_count
+        if expected is not None:
+            counter_chars = max(counter_chars, len(f"{max(shots, expected)}/{expected}"))
+        else:
+            counter_chars = max(counter_chars, len(str(shots)))
+        last = tile.last_shot_time
+        if last is not None:
+            clock_chars = max(clock_chars, len(clock_text(last)))
+    return corner_fit(
+        cell_w,
+        cell_h,
+        advance_em=_figure_advance_em(font_path),
+        counter_chars=counter_chars,
+        clock_chars=clock_chars,
+    )
+
+
+def _split_size(
+    cell_w: int,
+    cell_h: int,
+    stage_data: Mapping[str, TileStageData],
+    *,
+    font_path: Path,
+) -> int:
+    """The stage's live split size (#1421): the cell's ``live_primary``,
+    capped by the cell's width for the longest split this stage draws.
+    Independent of the corner fit."""
+    chars = max(
+        (
+            len(f"{shot.split:.2f}s")
+            for tile in stage_data.values()
+            for shot in tile.shots
+            if shot.split is not None
+        ),
+        default=0,
+    )
+    return split_fit_size(cell_w, cell_h, advance_em=_figure_advance_em(font_path), split_chars=chars)
+
+
 def _stage_overlay_plan(
     plan: GridStagePlan,
     canvas: GridCanvas,
@@ -2570,6 +2650,9 @@ def _stage_overlay_plan(
         race_at=race_at,
         stage_number=plan.stage_number,
     )
+    cell_w, cell_h = _cell_size(canvas, plan)
+    fit = _corner_fit(cell_w, cell_h, stage_data, font_path=font_path)
+    split_size = _split_size(cell_w, cell_h, stage_data, font_path=font_path)
     # One cache directory for the whole run, not one per stage: the cache
     # is content-addressed, so stages that share a state share a PNG. That
     # dedup matters roughly five times more since #693 -- a repeat now
@@ -2583,6 +2666,8 @@ def _stage_overlay_plan(
             theme=theme,
             cache_dir=work / "sprites",
             rasterizer=rasterizer,
+            fit=fit,
+            split_size=split_size,
         )
     # The canvas rate, not a guess: the list writer quantises every state
     # boundary onto a whole output frame and pins the demuxer's own time
@@ -2618,13 +2703,12 @@ def _stage_overlay_plan(
             )
         )
 
-    _cell_w, cell_h = _cell_size(canvas, plan)
     return StageOverlayPlan(
         sprite_list_path=list_path,
         font_path=font_path,
-        # Same resolver the sprite uses, so the clock and the shot counter
-        # beside it cannot pick up different sizes.
-        font_size=CellScale.for_cell(cell_h).live_primary,
+        # The same fit the sprite was drawn with, so the clock and the shot
+        # counter beside it cannot pick up different sizes.
+        font_size=fit.size,
         clocks=tuple(clocks),
         ink=theme.ink,
         stroke=theme.stroke,
