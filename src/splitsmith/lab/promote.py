@@ -26,7 +26,10 @@ Design decisions from issue #97 / #123:
 
 from __future__ import annotations
 
+import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -34,6 +37,7 @@ import numpy as np
 from ..cross_align import CrossAlignResult, align_secondary_to_primary
 from ..ensemble.api import EnsembleResult, detect_shots_ensemble, load_ensemble_runtime
 from ..fixture_schema import (
+    REVIEW_NEEDED,
     AnchorLink,
     Camera,
     HistoryEntry,
@@ -292,6 +296,70 @@ def promote_from_anchor(
     )
 
 
+TrimWav = Callable[[Path, Path, float, float], None]
+_CLIP_HEAD_S = 5.0
+_CLIP_TAIL_S = 5.0
+
+
+def write_promoted_fixture(
+    *,
+    fixture_data: dict[str, Any],
+    promotion_report: dict[str, Any],
+    secondary_wav: Path,
+    fixtures_root: Path,
+    slug: str,
+    trim_wav: TrimWav,
+    source_video: str | None = None,
+    overwrite: bool = False,
+) -> Path:
+    """Cut the secondary's audio to the stage and write the fixture beside it.
+
+    The fixture is clip-local like every primary fixture: the WAV runs from
+    5 s before the beep to 5 s after the last shot, and every time field is
+    rebased onto it. Writes ``<slug>.json``, ``<slug>.wav`` and
+    ``<slug>-promotion-report.json``; returns the JSON path. ``trim_wav``
+    cuts ``[start, end)`` of ``secondary_wav`` (ffmpeg in practice).
+    """
+    target_json = fixtures_root / f"{slug}.json"
+    if target_json.exists() and not overwrite:
+        raise FileExistsError(f"fixture already exists: {target_json.name}")
+
+    data = dict(fixture_data)
+    beep = float(data.get("beep_time") or 0.0)
+    shot_times = [float(s["time"]) for s in data.get("shots", []) if s.get("time") is not None]
+    clip_start = max(0.0, beep - _CLIP_HEAD_S)
+    clip_end = max(max(shot_times) + _CLIP_TAIL_S if shot_times else 0.0, beep + _CLIP_HEAD_S)
+
+    fixtures_root.mkdir(parents=True, exist_ok=True)
+    trim_wav(secondary_wav, fixtures_root / f"{slug}.wav", clip_start, clip_end)
+
+    def rebase(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        out = []
+        for item in items:
+            item = dict(item)
+            if item.get("time") is not None:
+                item["time"] = round(float(item["time"]) - clip_start, 4)
+            out.append(item)
+        return out
+
+    data["beep_time"] = round(beep - clip_start, 4)
+    data["fixture_window_in_source"] = [round(clip_start, 4), round(clip_end, 4)]
+    data["shots"] = rebase(data.get("shots", []))
+    pending = data.get("_candidates_pending_audit") or {}
+    if pending.get("candidates"):
+        data["_candidates_pending_audit"] = {**pending, "candidates": rebase(pending["candidates"])}
+    if source_video is not None:
+        data["source_video"] = source_video
+
+    tmp = target_json.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+    tmp.replace(target_json)
+    (fixtures_root / f"{slug}-promotion-report.json").write_text(
+        json.dumps(promotion_report, indent=2, ensure_ascii=True) + "\n", encoding="utf-8"
+    )
+    return target_json
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -364,13 +432,15 @@ def _build_fixture(
                 }
             )
         else:
-            # Include missed shots so the review UI can surface them.
+            # Include missed shots so the review UI can surface them, at the
+            # time the anchor predicts: the shot happened, and every truth
+            # consumer reads ``float(shot["time"])``. Review settles it.
             shots_out.append(
                 {
                     "shot_number": snap.shot_number,
                     "candidate_number": None,
-                    "time": None,
-                    "ms_after_beep": None,
+                    "time": round(snap.predicted_time, 4),
+                    "ms_after_beep": round((snap.predicted_time - secondary_beep_time) * 1000),
                     "source": "promoted-missed",
                     "subclass": anchor_shot.get("subclass", "unknown"),
                     "snap_displacement_ms": None,
@@ -402,6 +472,11 @@ def _build_fixture(
         "camera": camera.model_dump(mode="json"),
         "anchor": anchor_link.model_dump(mode="json"),
         "history": [history_entry.model_dump(mode="json")],
+        "review": {
+            "status": REVIEW_NEEDED,
+            "derived_from": anchor_link.fixture_slug,
+            "reviewed_at": None,
+        },
     }
 
 

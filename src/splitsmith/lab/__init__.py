@@ -48,6 +48,7 @@ from .promote import (
     PromoteFromAnchorRequest,
     PromoteFromAnchorResult,
     promote_from_anchor,
+    write_promoted_fixture,
 )
 
 __all__ = [
@@ -78,4 +79,5 @@ __all__ = [
     "save_run",
     "scrub_local_path",
     "shooter_token",
+    "write_promoted_fixture",
 ]

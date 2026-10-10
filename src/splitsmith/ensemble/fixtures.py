@@ -30,6 +30,8 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..fixture_schema import REVIEWED, review_status
+
 FIXTURES_DIR: Path = Path(__file__).resolve().parents[3] / "tests" / "fixtures"
 
 # Fixtures excluded from Voter E (CLIP visual probe) training because the
@@ -71,6 +73,7 @@ class Fixture:
     expected_rounds: int | None
     n_audited_shots: int
     has_wav: bool
+    review_status: str = REVIEWED
 
     @property
     def audited(self) -> bool:
@@ -136,6 +139,7 @@ def _scan(fixtures_dir: Path) -> Iterator[Fixture]:
             expected_rounds=rounds.get("expected"),
             n_audited_shots=len(data.get("shots") or []),
             has_wav=json_path.with_suffix(".wav").exists(),
+            review_status=review_status(data),
         )
 
 
@@ -181,11 +185,13 @@ def audited(
     shooter_id: str | None = None,
     match: str | None = None,
     exclude_wrong_clip: bool = False,
+    reviewed_only: bool = False,
 ) -> list[Fixture]:
     """Return audited fixtures (``n_audited_shots > 0``), optionally filtered.
 
     All filter args are AND-combined. Unfiltered ``audited()`` returns
-    every fixture with at least one verified shot.
+    every fixture with at least one verified shot. ``reviewed_only`` drops
+    fixtures snapped from another angle that nobody has reviewed yet (#1363).
     """
     items = [f for f in all_fixtures() if f.audited]
     if mount is not None:
@@ -196,6 +202,8 @@ def audited(
         items = [f for f in items if f.match == match]
     if exclude_wrong_clip:
         items = [f for f in items if f.stem not in WRONG_CLIP_FIXTURES]
+    if reviewed_only:
+        items = [f for f in items if f.review_status == REVIEWED]
     return items
 
 
@@ -205,6 +213,7 @@ def fixture_stems(
     shooter_id: str | None = None,
     match: str | None = None,
     exclude_wrong_clip: bool = False,
+    reviewed_only: bool = False,
 ) -> list[str]:
     """Drop-in replacement for the old ``DEFAULT_FIXTURES`` literals.
 
@@ -218,5 +227,6 @@ def fixture_stems(
             shooter_id=shooter_id,
             match=match,
             exclude_wrong_clip=exclude_wrong_clip,
+            reviewed_only=reviewed_only,
         )
     ]
