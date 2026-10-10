@@ -66,8 +66,11 @@ class SyncState(BaseModel):
     """The full local sync digest cache for one match."""
 
     #: 3 (#1376): audit docs whose base predates ``stage_note`` were pulled
-    #: once (``run._forget_unaware_audit_versions``); a file still at 2 has
-    #: not completed a sync since. A fresh state starts at the current one.
+    #: once (``run._repull_audit_docs_for_stage_note``); a file still at 2
+    #: has not merged a pull since. A fresh state starts at the current one,
+    #: and so does a file that fails validation (``load_sync_state`` loads a
+    #: fresh state, versions and bases' trust included): harmless, since
+    #: with no versions every doc is pulled again anyway.
     schema_version: int = STAGE_NOTE_SCHEMA
     last_synced_at: datetime | None = None
     items: dict[str, SyncedItem] = Field(default_factory=dict)  # remote key -> digest

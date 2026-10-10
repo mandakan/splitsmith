@@ -258,11 +258,14 @@ def run_sync(
         client.ensure_match(match_id, match_name)
 
     # After the mirror check, which reads doc_versions. In memory only until
-    # a sync completes: a failed run leaves the file below the schema, so
-    # the next one forgets (and pulls) those docs again.
+    # the first pull has merged: from then on every pulled base is a
+    # note-aware snapshot, and running this again would strip a note the
+    # merge has seen (a later hosted clear would lose to it). A failure
+    # before that pull leaves the file below the schema and the next run
+    # repeats this, harmlessly.
     stage_note_migration = sync_state.schema_version < STAGE_NOTE_SCHEMA
     if stage_note_migration:
-        _forget_unaware_audit_versions(match_root, sync_state)
+        _repull_audit_docs_for_stage_note(match_root, sync_state)
 
     pulled_total = 0
     all_conflicts: list[dict] = []
@@ -284,6 +287,8 @@ def run_sync(
             all_conflicts.extend(result_counts["conflicts"])
             all_notes.extend(result_counts["notes"])
             reprocess.update(result_counts["reprocess"])
+            if stage_note_migration:
+                sync_state.schema_version = STAGE_NOTE_SCHEMA
             save_sync_state(match_root, sync_state)
 
         try:
@@ -313,10 +318,6 @@ def run_sync(
                 ) from exc
             on_progress(0.0, "hosted changed during sync - retrying")
 
-    if stage_note_migration:
-        sync_state.schema_version = STAGE_NOTE_SCHEMA
-        save_sync_state(match_root, sync_state)
-
     report = SyncReport(
         **push_report.model_dump(),
         pulled=pulled_total,
@@ -332,7 +333,7 @@ def run_sync(
     return report
 
 
-def _forget_unaware_audit_versions(match_root: Path, sync_state: SyncState) -> int:
+def _repull_audit_docs_for_stage_note(match_root: Path, sync_state: SyncState) -> None:
     """The one-time stage-note migration (#1376), for a sync state written
     by an install older than the field: every audit doc is pulled once more
     and its base stops claiming a note.
@@ -347,17 +348,14 @@ def _forget_unaware_audit_versions(match_root: Path, sync_state: SyncState) -> i
     version (the next pull fetches the doc once) and drop ``stage_note``
     from each base (the merge then adopts the hosted note, and a local note
     written before that pull meets it as a conflict, not as an edit of it).
-    Idempotent, so a failed sync simply runs it again. Returns how many
-    versions were forgotten."""
-    forgotten = 0
+    Idempotent until the first pull after it has merged, which is when
+    ``run_sync`` marks it done; a failure before that runs it again."""
     for key in [k for k in sync_state.doc_versions if k.startswith("audit/")]:
         base = load_base_doc(match_root, key)
         if base is not None and FIELD_STAGE_NOTE in base:
             del base[FIELD_STAGE_NOTE]
             save_base_doc(match_root, key, base)
         del sync_state.doc_versions[key]
-        forgotten += 1
-    return forgotten
 
 
 def _apply_pull(

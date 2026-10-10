@@ -50,7 +50,7 @@ def hosted(hosted_env: str, monkeypatch: pytest.MonkeyPatch):
 
 
 _REAL_MERGE = merge_mod.merge_audit_doc
-_REAL_FORGET = run_mod._forget_unaware_audit_versions
+_REAL_FORGET = run_mod._repull_audit_docs_for_stage_note
 
 
 def _merge(base, local, remote, **kw):
@@ -103,7 +103,7 @@ class _Desktop:
         and a sync_state written at schema 2, as the released desktop did."""
         self.old = True
         self.mp.setattr(run_mod, "merge_audit_doc", _old_merge)
-        self.mp.setattr(run_mod, "_forget_unaware_audit_versions", lambda root, state: 0)
+        self.mp.setattr(run_mod, "_repull_audit_docs_for_stage_note", lambda root, state: 0)
         real = self._real_put
 
         def put(match_id, item, *, expected_version):
@@ -114,7 +114,7 @@ class _Desktop:
     def upgraded(self) -> None:
         self.old = False
         self.mp.setattr(run_mod, "merge_audit_doc", _merge)
-        self.mp.setattr(run_mod, "_forget_unaware_audit_versions", _REAL_FORGET)
+        self.mp.setattr(run_mod, "_repull_audit_docs_for_stage_note", _REAL_FORGET)
         self.mp.setattr(self.sc, "put_doc_detail", self._real_put)
 
     def sync(self):
@@ -283,7 +283,7 @@ def test_the_migration_reruns_after_a_failed_sync_and_stops_after_a_completed_on
         calls.append(1)
         return _REAL_FORGET(root, state)
 
-    monkeypatch.setattr(run_mod, "_forget_unaware_audit_versions", counting)
+    monkeypatch.setattr(run_mod, "_repull_audit_docs_for_stage_note", counting)
     real_manifest = d.sc.get_doc_manifest
 
     def boom(match_id):
@@ -303,6 +303,45 @@ def test_the_migration_reruns_after_a_failed_sync_and_stops_after_a_completed_on
     assert load_sync_state(d.root).schema_version == 3
     d.sync()
     assert calls == [1, 1]  # never again
+
+
+def test_a_failure_after_the_pull_marks_the_migration_done_and_a_later_hosted_clear_survives(
+    hosted, tmp_path, monkeypatch
+):
+    """The pull merged, then the push failed (a media upload, say). The
+    bases are note-aware now, so the migration is done: running it again
+    would strip "X" from the base and the merge (base none, local X, remote
+    cleared) would keep X and push it over the phone's clear."""
+    d = _Desktop(hosted, tmp_path, monkeypatch)
+    _old_desktop_pushes_over_a_hosted_note(d)
+    d.upgraded()
+
+    calls: list[int] = []
+
+    def counting(root, state):
+        calls.append(1)
+        return _REAL_FORGET(root, state)
+
+    monkeypatch.setattr(run_mod, "_repull_audit_docs_for_stage_note", counting)
+
+    def push_fails(*a, **kw):
+        raise run_mod.SyncClientError("upload failed")
+
+    with monkeypatch.context() as m:
+        m.setattr(run_mod, "run_push", push_fails)
+        with pytest.raises(run_mod.SyncClientError):
+            d.sync()
+    assert calls == [1]
+    assert d.local()["stage_note"] == "X"  # the pull merged
+    assert load_sync_state(d.root).schema_version == 3  # done once it had
+
+    d.hosted_note("")  # the phone clears the note
+    rep = d.sync()
+    d.report("clear-after-post-pull-failure", rep)
+    assert calls == [1]  # not re-run
+    assert d.local()["stage_note"] is None
+    assert d.hosted_doc()["stage_note"] is None
+    assert rep.conflicts == []
 
 
 def test_an_old_desktop_is_unaffected(hosted, tmp_path, monkeypatch):
