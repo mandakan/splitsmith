@@ -522,17 +522,29 @@ def test_a_short_row_keeps_the_bands_four_columns(tmp_path: Path) -> None:
 
 #: Every visible grid-row figure or caption whose text is wider than its
 #: own column, or a caption that wrapped: what ``overflow: hidden`` would
-#: cut to a plausible wrong figure ("1.4" for 1.42).
+#: cut to a plausible wrong figure ("1.4" for 1.42). Also any whose text
+#: ends closer than half its caption's size to the next column in its row
+#: (measured independently of fit.js's own 0.6 em): "Reload avg" against
+#: "Exposed" reads as one phrase.
 _COLUMN_OVERFLOWS_JS = """() => {
   const out = [];
+  const visible = (e) => getComputedStyle(e).display !== 'none';
   document.querySelectorAll('.group.flow-grid > .el').forEach((el) => {
-    if (getComputedStyle(el).display === 'none') { return; }
-    const width = el.getBoundingClientRect().width;
+    if (!visible(el)) { return; }
+    const box = el.getBoundingClientRect();
+    let next = el.nextElementSibling;
+    while (next && !visible(next)) { next = next.nextElementSibling; }
+    const nextBox = next ? next.getBoundingClientRect() : null;
+    const sameRow = nextBox && Math.abs(nextBox.top - box.top) < 0.5 && nextBox.left > box.left;
+    const caption = el.querySelector('.caption');
     Array.from(el.children).forEach((child) => {
       const range = document.createRange();
       range.selectNodeContents(child);
+      const rect = range.getBoundingClientRect();
       const wrapped = child.classList.contains('caption') && range.getClientRects().length > 1;
-      if (range.getBoundingClientRect().width > width + 0.5 || wrapped) { out.push(child.textContent); }
+      const em = parseFloat(getComputedStyle(caption || child).fontSize);
+      const crowded = sameRow && nextBox.left - rect.right < 0.5 * em;
+      if (rect.width > box.width + 0.5 || wrapped || crowded) { out.push(child.textContent); }
     });
   });
   return out;
@@ -563,14 +575,16 @@ def _column_overflows(html: str, *, width: int, height: int, tmp_path: Path) -> 
 
 @pytest.mark.integration
 @pytest.mark.parametrize(("width", "height"), [(1080, 1920), (720, 1280)])
-@pytest.mark.parametrize("events", [None, [_MOVE_1, _MOVE_2, _RELOAD]])
+@pytest.mark.parametrize("events", [None, [_MOVE_1, _MOVE_2, _RELOAD], [_RELOAD]])
 def test_a_portrait_card_draws_every_figure_whole(
     tmp_path: Path, width: int, height: int, events: list[dict] | None
 ) -> None:
     """A portrait card's quarter columns are narrower than a headline
     figure at full size: the card shrinks until each figure fits its own
-    column, rather than cutting 1.42 to "1.4" and +0.31 to "+0.". The HTML
-    is the one ``build_summary_still`` hands the rasterizer."""
+    column, rather than cutting 1.42 to "1.4" and +0.31 to "+0.", and
+    keeps a gap before the next column, so a standing reload's "Reload avg"
+    and "Exposed" never read as one caption. The HTML is the one
+    ``build_summary_still`` hands the rasterizer."""
     fake = _FakeRasterizer()
     tile = _events_tile(_audit(tmp_path, events))
     cell.build_summary_still(

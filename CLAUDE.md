@@ -1257,7 +1257,9 @@ so cells stay comparable, and keep the reload row. No confirmed regions
 renders byte-identically to before. Both summary stills (and only they)
 set ``fit_columns`` on ``single_html`` / ``grid_html``: ``fit.js``'s
 ``fitColumns`` shrinks the band until no grid column's text overflows its
-column, which is what keeps a portrait card from cutting 1.42 to "1.4";
+column or comes within 0.6 em (of its caption) of the next column in its
+row, which is what keeps a portrait card from cutting 1.42 to "1.4" and
+"Reload avg" from running into "Exposed";
 landscape and grid holds were pixel-identical under it. The live race
 does not opt in (its rows change text per frame). A ``fit.js`` change
 reaches the summary PNG by content, the preview only through

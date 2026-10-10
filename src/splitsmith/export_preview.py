@@ -174,7 +174,9 @@ def _confirmed_regions(audit_doc: dict | None) -> list[StageEvent]:
 #: confirmed reloads and static / moving split rows. 4: the summary's
 #: table rows fit their own columns (``fit.js`` ``fitColumns``), which no
 #: other key input sees: ``_shared/`` scripts are not in any digest.
-PREVIEW_REVISION = 4
+#: 5: those columns also keep a gap before the next one (``fitColumns``),
+#: and a confirmed reload's row reads Exposed in place of Overhang.
+PREVIEW_REVISION = 5
 
 
 def preview_key(
