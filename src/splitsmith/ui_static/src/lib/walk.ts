@@ -369,6 +369,7 @@ export type WalkAction =
   | { kind: "rise_foot" }
   | { kind: "listen" }
   | { kind: "guide" }
+  | { kind: "loop" }
   | { kind: "back" }
   | { kind: "nudge"; ms: number };
 
@@ -399,6 +400,9 @@ export function walkActionForKey(e: {
       return { kind: "back" };
     case "?":
       return { kind: "guide" };
+    case "l":
+    case "L":
+      return { kind: "loop" };
     case "ArrowLeft":
       return { kind: "nudge", ms: e.shiftKey ? -5 : -1 };
     case "ArrowRight":
@@ -450,6 +454,26 @@ export function writeGuideOpen(open: boolean): void {
     window.localStorage.setItem(GUIDE_KEY, open ? "1" : "0");
   } catch {
     // Without storage the guide opens with every fixture; nothing else depends on it.
+  }
+}
+
+const LOOP_KEY = "splitsmith.reviewWalk.loop";
+
+/** Whether each stop's sound repeats as the walk reaches it (off until
+ *  turned on, then remembered like the guide). */
+export function readLoopOn(): boolean {
+  try {
+    return window.localStorage.getItem(LOOP_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function writeLoopOn(on: boolean): void {
+  try {
+    window.localStorage.setItem(LOOP_KEY, on ? "1" : "0");
+  } catch {
+    // Without storage the loop starts off with every fixture.
   }
 }
 

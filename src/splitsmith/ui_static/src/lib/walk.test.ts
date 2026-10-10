@@ -17,6 +17,8 @@ import {
   typicalShotLevel,
   unmarkedBursts,
   walkActionForKey,
+  readLoopOn,
+  writeLoopOn,
   walkHref,
   walkStops,
 } from "./walk";
@@ -255,6 +257,8 @@ describe("keys", () => {
     expect(key("f")).toEqual({ kind: "rise_foot" });
     expect(key(" ")).toEqual({ kind: "listen" });
     expect(key("Backspace")).toEqual({ kind: "back" });
+    expect(key("l")).toEqual({ kind: "loop" });
+    expect(key("L")).toEqual({ kind: "loop" });
     expect(key("ArrowLeft")).toEqual({ kind: "nudge", ms: -1 });
     expect(key("ArrowRight", { shiftKey: true })).toEqual({ kind: "nudge", ms: 5 });
   });
@@ -277,5 +281,16 @@ describe("countCheck and walkHref", () => {
   it("opens the walk, with the video when there is one", () => {
     expect(walkHref("/f/a b.json", null)).toBe("/review?fixture=%2Ff%2Fa%20b.json&walk=1");
     expect(walkHref("/f/a.json", "/v/x.MOV")).toBe("/review?fixture=%2Ff%2Fa.json&video=%2Fv%2Fx.MOV&walk=1");
+  });
+});
+
+describe("loop preference", () => {
+  it("is off until turned on, and remembered", () => {
+    window.localStorage.removeItem("splitsmith.reviewWalk.loop");
+    expect(readLoopOn()).toBe(false);
+    writeLoopOn(true);
+    expect(readLoopOn()).toBe(true);
+    writeLoopOn(false);
+    expect(readLoopOn()).toBe(false);
   });
 });

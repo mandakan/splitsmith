@@ -76,6 +76,8 @@ import {
   WALK_METHOD,
   nextFixtureToReview,
   readGuideOpen,
+  readLoopOn,
+  writeLoopOn,
   walkHref,
   writeGuideOpen,
   type WalkScope,
@@ -196,6 +198,8 @@ export function Review() {
   // started (or where the user last scrubbed). On pause / end-of-clip
   // while loopMode is on, the playhead snaps back here.
   const loopAnchorRef = useRef<number | null>(null);
+  // The walk's loop window (``playAround``): playback wraps to its start.
+  const walkRegionRef = useRef<{ start: number; end: number } | null>(null);
 
   // Loop region around the focused marker (#29). Loop on + a focused
   // marker = repeat a tight window around it; loop on + no focus keeps
@@ -588,7 +592,11 @@ export function Review() {
         const dur = peaks?.duration ?? null;
         // Loop wrap: region end when a marker is focused, clip end otherwise.
         const regionEnd = loopRegion?.end ?? (dur != null ? dur - 0.05 : null);
-        if (loopMode && regionEnd != null && t >= regionEnd) {
+        const walkRegion = walkMode ? walkRegionRef.current : null;
+        if (walkRegion && t >= walkRegion.end) {
+          el.currentTime = mediaFromElapsed(walkRegion.start, el);
+          setCurrentTime(walkRegion.start);
+        } else if (loopMode && regionEnd != null && t >= regionEnd) {
           const target = loopRegion?.start ?? loopAnchorRef.current ?? 0;
           el.currentTime = mediaFromElapsed(target, el);
           setCurrentTime(target);
@@ -602,7 +610,7 @@ export function Review() {
     return () => {
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
     };
-  }, [isPlaying, loopMode, peaks, loopRegion, elapsedFromMedia, mediaFromElapsed]);
+  }, [isPlaying, loopMode, walkMode, peaks, loopRegion, elapsedFromMedia, mediaFromElapsed]);
 
   const stepShot = useCallback(
     (delta: number) => {
@@ -824,35 +832,66 @@ export function Review() {
     [markers, mutate, recordEvent],
   );
 
-  // Space in the walk: hear the stop once, from half a second before it to
-  // 0.7 s after; Space again stops it.
+  // Space in the walk: hear the stop from half a second before it to 0.7 s
+  // after, once, or on repeat with the walk's loop on (which also starts each
+  // stop as the walk reaches it); Space again pauses.
   const listenTimerRef = useRef<number | null>(null);
-  const listenAround = useCallback(
-    (t: number) => {
+  const [walkLoop, setWalkLoop] = useState(readLoopOn);
+  const pauseListening = useCallback(() => {
+    if (listenTimerRef.current != null) window.clearTimeout(listenTimerRef.current);
+    listenTimerRef.current = null;
+    const el = playbackEl();
+    el?.pause();
+    setIsPlaying(false);
+  }, []);
+  const playAround = useCallback(
+    (t: number, repeat: boolean) => {
       const el = playbackEl();
       if (!el) return;
       if (listenTimerRef.current != null) window.clearTimeout(listenTimerRef.current);
       listenTimerRef.current = null;
-      if (!el.paused) {
-        el.pause();
-        setIsPlaying(false);
-        return;
-      }
       const start = Math.max(0, t - LOOP_PRE_S);
+      const end = t + LOOP_POST_S;
+      walkRegionRef.current = repeat ? { start, end } : null;
       handleScrub(start);
-      void el.play();
+      // A play the browser refuses (no gesture yet on a fresh load) leaves
+      // the page paused rather than showing it playing.
+      el.play().catch(() => setIsPlaying(false));
       setIsPlaying(true);
-      listenTimerRef.current = window.setTimeout(
-        () => {
-          el.pause();
-          setIsPlaying(false);
-          listenTimerRef.current = null;
-        },
-        (t + LOOP_POST_S - start) * 1000,
-      );
+      if (!repeat) {
+        listenTimerRef.current = window.setTimeout(pauseListening, (end - start) * 1000);
+      }
     },
-    [handleScrub],
+    [handleScrub, pauseListening],
   );
+  const listenAround = useCallback(
+    (t: number) => {
+      const el = playbackEl();
+      if (!el) return;
+      if (!el.paused) pauseListening();
+      else playAround(t, walkLoop);
+    },
+    [playAround, pauseListening, walkLoop],
+  );
+  const loopStop = useCallback(
+    (t: number | null) => {
+      if (t == null) {
+        walkRegionRef.current = null;
+        pauseListening();
+      } else playAround(t, true);
+    },
+    [playAround, pauseListening],
+  );
+  const toggleWalkLoop = useCallback(() => {
+    const on = !walkLoop;
+    writeLoopOn(on);
+    setWalkLoop(on);
+    // Turning it on plays the current stop (the walk reports it); off stops.
+    if (!on) {
+      walkRegionRef.current = null;
+      pauseListening();
+    }
+  }, [walkLoop, pauseListening]);
 
   const snapDisplacementMs = useCallback(
     (markerId: string): number | null => {
@@ -1174,6 +1213,9 @@ export function Review() {
               onRecord={recordEvent}
               onFocus={focusFromWalk}
               onListen={listenAround}
+              loop={walkLoop}
+              onToggleLoop={toggleWalkLoop}
+              onLoopStop={loopStop}
               onDone={() => void finishWalk()}
               onExit={() => setWalkMode(false)}
               busy={marking}
