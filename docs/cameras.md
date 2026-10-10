@@ -51,6 +51,11 @@ reliable key for older fixtures.
   and the rise-foot walk back stops at the first dip inside it (`shot_detect`'s 20 ms rising
   guard). These are audited fixtures: the shots were kept at fit zoom, where 35 ms bars hid it.
   Splits between a late and an on-time shot are off by the difference.
+- **A burst's first wavefront is often split from its body by a 1 to 2 ms dip (2026-10-10).**
+  A first spike at 30 to 95 % of the peak, a dip below a quarter of it, then the main burst 5 to
+  8 ms later. The rise-foot rule stopped at that dip until it learned to pass one dip under 3 ms;
+  on headcam fixtures needing review that was 450 shots. Recognise it on a 1 ms zoom: two humps,
+  the first narrow, less than 10 ms apart.
 
 Implication: absolute spectral features drift within a stage on this camera. Features relative to
 the stage's own earlier shots should hold up better; evaluate recall by shot index in string, not

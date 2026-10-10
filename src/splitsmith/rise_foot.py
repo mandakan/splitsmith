@@ -5,7 +5,8 @@ peak: walking back from that peak, the last moment the level is still above
 both 5 % of the peak and 1.5 x the noise floor before it. An earlier sound
 separated from the burst by a dip (an echo, the previous shot, a lead-in
 that falls back before the blast) is not part of the rise; a lead-in that
-ramps continuously into the burst is.
+ramps continuously into the burst is, and so is the burst's own first
+wavefront, split from its body by a dip under 3 ms (one such dip is passed).
 
 One rule, three places, held identical by ``tests/fixtures/rise_foot/cases.json``:
 the shot detector's reported time (``shot_detect``; candidates are still scored
@@ -32,8 +33,12 @@ RISE_FOOT_FRAC = 0.05
 #: ... or this multiple of the noise floor, whichever is higher.
 NOISE_FLOOR_FACTOR = 1.5
 #: A dip below this fraction of the peak, with the level rising again behind
-#: it, separates an earlier sound from this shot's rise.
+#: it, separates an earlier sound from this shot's rise ...
 VALLEY_FRAC = 0.25
+#: ... unless the level was above it again within this long behind the dip:
+#: that is the burst's own first wavefront, split from its body by a brief
+#: dip (GO 3S, 5 to 8 ms; #1363). The walk passes one such dip.
+WAVEFRONT_GAP_S = 0.003
 MAX_WALK_S = 0.1
 NOISE_WINDOW_S = 0.1
 BIN_S = 0.001
@@ -70,12 +75,20 @@ def rise_foot(peaks: list[float] | np.ndarray, duration: float, time: float) -> 
     floor = float(np.sort(noise)[noise.size // 2]) if noise.size else 0.0
     threshold = max(RISE_FOOT_FRAC * peak, NOISE_FLOOR_FACTOR * floor)
     max_walk = round(MAX_WALK_S / bin_w)
+    gap = max(1, round(WAVEFRONT_GAP_S / bin_w))
+    valley = VALLEY_FRAC * peak
+    passed = crossing = False
     i = max_idx
     while i > 0 and max_idx - i < max_walk:
         cur, prev = p[i], p[i - 1]
         if prev < threshold:
             break
-        if cur < VALLEY_FRAC * peak and prev > cur:
-            break
+        if crossing:
+            # Inside the one brief dip being passed, until the wavefront.
+            crossing = cur < valley
+        elif cur < valley and prev > cur:
+            if passed or p[max(0, i - gap) : i].max() < valley:
+                break
+            passed = crossing = True
         i -= 1
     return i * bin_w

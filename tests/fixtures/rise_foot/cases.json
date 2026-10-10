@@ -116,6 +116,82 @@
       ],
       "time": 2.985,
       "expect": 3.0
+    },
+    {
+      "name": "the burst's first wavefront, split from it by a brief dip, is part of the rise",
+      "floor": 0.01,
+      "lines": [
+        [
+          2994,
+          2998,
+          0.05,
+          0.55
+        ],
+        [
+          2998,
+          2999,
+          0.335,
+          0.335
+        ],
+        [
+          2999,
+          3000,
+          0.12,
+          0.12
+        ]
+      ],
+      "bursts": [
+        [
+          3000,
+          1.0
+        ]
+      ],
+      "time": 3.01,
+      "expect": 2.994
+    },
+    {
+      "name": "only one brief dip is passed: a second still separates an earlier sound",
+      "floor": 0.01,
+      "lines": [
+        [
+          2988,
+          2990,
+          0.4,
+          0.4
+        ],
+        [
+          2990,
+          2991,
+          0.15,
+          0.15
+        ],
+        [
+          2991,
+          2998,
+          0.4,
+          0.4
+        ],
+        [
+          2998,
+          2999,
+          0.335,
+          0.335
+        ],
+        [
+          2999,
+          3000,
+          0.12,
+          0.12
+        ]
+      ],
+      "bursts": [
+        [
+          3000,
+          1.0
+        ]
+      ],
+      "time": 3.01,
+      "expect": 2.99
     }
   ]
 }

@@ -233,15 +233,15 @@
       },
       {
         "candidate_number": 9,
-        "time": 2.616,
-        "ms_after_beep": 2116.0,
+        "time": 2.611,
+        "ms_after_beep": 2111.0,
         "peak_amplitude": 0.3438,
         "confidence": 0.33
       },
       {
         "candidate_number": 10,
-        "time": 3.156,
-        "ms_after_beep": 2656.0,
+        "time": 3.15,
+        "ms_after_beep": 2650.0,
         "peak_amplitude": 0.2873,
         "confidence": 0.48
       },
@@ -394,8 +394,8 @@
       },
       {
         "candidate_number": 32,
-        "time": 9.673,
-        "ms_after_beep": 9173.0,
+        "time": 9.671,
+        "ms_after_beep": 9171.0,
         "peak_amplitude": 0.5196,
         "confidence": 0.41
       },
@@ -506,8 +506,8 @@
       },
       {
         "candidate_number": 48,
-        "time": 12.633,
-        "ms_after_beep": 12133.0,
+        "time": 12.624,
+        "ms_after_beep": 12124.0,
         "peak_amplitude": 0.676,
         "confidence": 0.76
       },
@@ -651,7 +651,7 @@
       "1.708": "movement",
       "2.363": "movement",
       "2.438": "movement",
-      "2.616": "movement",
+      "2.611": "movement",
       "3.491": "steel_ring",
       "3.606": "steel_ring",
       "3.732": "steel_ring",

@@ -233,8 +233,8 @@
       },
       {
         "candidate_number": 18,
-        "time": 7.319,
-        "ms_after_beep": 6819.0,
+        "time": 7.315,
+        "ms_after_beep": 6815.0,
         "peak_amplitude": 0.7042,
         "confidence": 0.29
       },
@@ -450,8 +450,8 @@
       },
       {
         "candidate_number": 49,
-        "time": 17.072,
-        "ms_after_beep": 16572.0,
+        "time": 17.064,
+        "ms_after_beep": 16564.0,
         "peak_amplitude": 0.5092,
         "confidence": 0.34
       },
@@ -625,8 +625,8 @@
       },
       {
         "candidate_number": 74,
-        "time": 23.276,
-        "ms_after_beep": 22776.0,
+        "time": 23.263,
+        "ms_after_beep": 22763.0,
         "peak_amplitude": 0.4271,
         "confidence": 0.36
       },
