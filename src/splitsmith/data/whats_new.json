@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "audit-camera-inset",
+      "date": "2026-10-10",
+      "title": "Other cameras as an inset on Audit",
+      "body": "On Audit, the other cameras play in a small inset over the video, so the main picture is bigger. Click the inset or press C to swap; sound and times stay with Cam 1."
+    },
+    {
       "id": "audit-controls-on-the-timeline",
       "date": "2026-10-10",
       "title": "Audit controls on the timeline",

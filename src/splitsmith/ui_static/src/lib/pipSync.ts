@@ -4,7 +4,8 @@
  * can drive it against real media.
  *
  * Rules (decisions in lib/pip.ts ``insetPlan`` / ``shouldCorrectDrift``):
- * - The inset is muted and follows play / pause and rate.
+ * - The inset is muted (unless ``audible``) and follows play / pause and
+ *   rate.
  * - Outside the inset clip (the big video before the inset's start or
  *   past its end) the inset holds paused at the clamp and is never
  *   played: playing ended media restarts it at 0, which looped a short
@@ -25,12 +26,16 @@ const HAVE_METADATA = 1;
 const HAVE_FUTURE_DATA = 3;
 
 export function attachInsetSync(
-  big: HTMLVideoElement,
-  inset: HTMLVideoElement,
+  big: HTMLMediaElement,
+  inset: HTMLMediaElement,
   beeps: { bigBeep: number; insetBeep: number },
+  /** ``audible``: the follower is the page's sound, not a picture (Audit
+   *  plays the primary's audio through a hidden ``<audio>`` while a
+   *  secondary is big); every other rule is the inset's. */
+  opts: { audible?: boolean } = {},
 ): () => void {
   let stalled = false;
-  inset.muted = true;
+  inset.muted = !opts.audible;
 
   const sync = (force: boolean) => {
     const plan = insetPlan({

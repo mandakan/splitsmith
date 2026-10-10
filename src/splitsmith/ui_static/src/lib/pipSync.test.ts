@@ -69,6 +69,16 @@ describe("attachInsetSync", () => {
     expect(inset.muted).toBe(true);
   });
 
+  it("leaves an audible follower (Audit's primary audio) unmuted, on the same clock", () => {
+    const big = new FakeMedia();
+    big.t = 9;
+    const audio = new FakeMedia();
+    audio.muted = true;
+    attachInsetSync(big as unknown as HTMLMediaElement, audio as unknown as HTMLMediaElement, { bigBeep: 5, insetBeep: 3 }, { audible: true });
+    expect(audio.muted).toBe(false);
+    expect(audio.t).toBe(7);
+  });
+
   it("lines the inset up at once when it already has metadata", () => {
     const big = new FakeMedia();
     big.t = 9;

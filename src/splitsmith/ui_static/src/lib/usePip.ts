@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   cyclePip,
+  focusPip,
   initialPip,
   normalizePip,
   pipCounter,
@@ -32,6 +33,8 @@ export interface PipController {
   swap: () => void;
   /** C (+1) / Shift+C (-1). */
   cycle: (dir: 1 | -1) => void;
+  /** Make this camera big (a page's own picker); see ``focusPip``. */
+  focus: (id: string) => void;
 }
 
 export function usePip(args: {
@@ -66,6 +69,13 @@ export function usePip(args: {
     [cameras],
   );
 
+  const focus = useCallback(
+    (id: string) => {
+      setHeld((prev) => ({ key: prev.key, state: focusPip(normalizePip(prev.state, cameras), cameras, id) }));
+    },
+    [cameras],
+  );
+
   const big = cameras.find((c) => c.id === state.big) ?? null;
   const inset = state.inset === null ? null : (cameras.find((c) => c.id === state.inset) ?? null);
   const primary = cameras.find((c) => c.primary) ?? cameras[0] ?? null;
@@ -85,5 +95,5 @@ export function usePip(args: {
     report.current?.(cameras.find((c) => c.id === state.big) ?? null);
   }, [state.big, cameras]);
 
-  return { cameras, state, big, inset, counter: pipCounter(state, cameras), primary, swap, cycle };
+  return { cameras, state, big, inset, counter: pipCounter(state, cameras), primary, swap, cycle, focus };
 }

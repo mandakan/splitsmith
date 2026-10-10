@@ -245,5 +245,15 @@ describe("AuditFooter", () => {
     expect(screen.getByText("next flag")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /all shortcuts/ }));
     expect(onOpenHelp).toHaveBeenCalled();
+    // One camera: no C.
+    expect(screen.queryByText(/camera/)).toBeNull();
+  });
+
+  it("lists C for the PiP inset: a swap with two cameras, next / prev with more", () => {
+    const { rerender } = render(<AuditFooter onOpenHelp={vi.fn()} camera="swap" />);
+    expect(screen.getByText("swap camera")).toBeInTheDocument();
+    rerender(<AuditFooter onOpenHelp={vi.fn()} camera="next" />);
+    expect(screen.getByText("next / prev camera")).toBeInTheDocument();
+    expect(screen.getByText("⇧C")).toBeInTheDocument();
   });
 });

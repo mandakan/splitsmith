@@ -107,6 +107,17 @@ export function swapPip(state: PipState): PipState {
   return { big: state.inset, inset: state.big };
 }
 
+/** A page picks a camera to watch big (Audit's grid): it becomes big and
+ *  the camera that was big takes the inset, as a swap would. A camera that
+ *  cannot be lined up (no beep), or a big camera that cannot, changes
+ *  nothing. */
+export function focusPip(state: PipState, cameras: readonly PipCamera[], id: string): PipState {
+  if (id === state.big) return state;
+  const cam = cameras.find((c) => c.id === id);
+  if (!cam || !syncable(cam) || !bigIsSyncable(cameras, state.big)) return state;
+  return { big: id, inset: state.big };
+}
+
 /** C / Shift+C: the next (or previous) camera that is not big goes into
  *  the inset, in camera order, wrapping. With one candidate (two cameras)
  *  that would change nothing, so it swaps instead. */
