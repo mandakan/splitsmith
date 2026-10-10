@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "breakdown-page",
+      "date": "2026-10-10",
+      "title": "Mark movement and reloads on a stage",
+      "body": "Open Breakdown in the Analyse group of a match to mark movement, reloads and activations on the timeline and set each shot's interval, with the video beside it. Works on a computer."
+    },
+    {
       "id": "audit-shot-placement-to-the-millisecond",
       "date": "2026-10-10",
       "title": "Place shots to the millisecond",

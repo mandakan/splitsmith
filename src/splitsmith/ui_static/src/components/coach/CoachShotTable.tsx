@@ -9,6 +9,7 @@ import { useEffect, useRef } from "react";
 import { Chip } from "@/components/ui/Chip";
 import { Label } from "@/components/ui/Label";
 import type { CoachShot } from "@/lib/api";
+import { nearestScrollTop } from "@/lib/breakdown";
 import { gapTier, type TierBaselines } from "@/lib/splits";
 import { BUDGET_LABEL, BUDGET_TICK } from "@/lib/timeBudget";
 import { cn } from "@/lib/utils";
@@ -19,20 +20,35 @@ export interface CoachShotTableProps {
   baselines: TierBaselines | null;
   onSelect: (shot: CoachShot) => void;
   className?: string;
+  /** Fill the parent's height and scroll inside it (Breakdown's inspector)
+   *  instead of capping the list at 70 % of the viewport. */
+  fill?: boolean;
 }
 
 const GRID = "grid grid-cols-[30px_54px_62px_minmax(0,1fr)_minmax(0,1fr)] items-center gap-2";
 const TIER_TEXT = { quick: "text-done", typical: "text-ink", long: "text-live" } as const;
 
-export function CoachShotTable({ shots, activeShotNumber, baselines, onSelect, className }: CoachShotTableProps) {
+export function CoachShotTable({ shots, activeShotNumber, baselines, onSelect, className, fill = false }: CoachShotTableProps) {
   const ref = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (activeShotNumber == null) return;
-    const el = ref.current?.querySelector<HTMLElement>(`[data-shot-number="${activeShotNumber}"]`);
-    if (el && typeof el.scrollIntoView === "function") el.scrollIntoView({ block: "nearest" });
-  }, [activeShotNumber]);
+    const list = ref.current;
+    const el = list?.querySelector<HTMLElement>(`[data-shot-number="${activeShotNumber}"]`);
+    if (!list || !el) return;
+    if (fill) {
+      // Inside Breakdown's inspector: scroll the list alone. scrollIntoView
+      // scrolls every scrollable ancestor too, which opened the inspector
+      // scrolled and clipped the card above the list.
+      list.scrollTop = nearestScrollTop(list.scrollTop, list.clientHeight, el.offsetTop, el.offsetHeight);
+      return;
+    }
+    if (typeof el.scrollIntoView === "function") el.scrollIntoView({ block: "nearest" });
+  }, [activeShotNumber, fill]);
   return (
-    <section aria-label="Shots" className={cn("overflow-hidden rounded-[10px] border border-rule bg-surface", className)}>
+    <section
+      aria-label="Shots"
+      className={cn("overflow-hidden rounded-[10px] border border-rule bg-surface", fill && "flex min-h-0 flex-col", className)}
+    >
       <div className={cn(GRID, "border-b border-rule-strong px-3 py-2")}>
         <Label>#</Label>
         <Label className="text-right">T</Label>
@@ -40,7 +56,7 @@ export function CoachShotTable({ shots, activeShotNumber, baselines, onSelect, c
         <Label>Interval</Label>
         <Label>Note</Label>
       </div>
-      <div ref={ref} className="max-h-[70vh] overflow-y-auto">
+      <div ref={ref} className={fill ? "relative min-h-0 flex-1 overflow-y-auto" : "max-h-[70vh] overflow-y-auto"}>
         {shots.map((shot) => {
           const tier = gapTier(shot.split, shot.interval_class, baselines);
           const active = shot.shot_number === activeShotNumber;

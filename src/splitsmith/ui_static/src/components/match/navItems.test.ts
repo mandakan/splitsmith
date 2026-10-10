@@ -21,6 +21,7 @@ describe("matchNavItems shape", () => {
       ["audit", "review", "Audit"],
       ["results", "analyse", "Splits"],
       ["coach", "analyse", "Coach"],
+      ["breakdown", "analyse", "Breakdown"],
       ["export", "deliver", "Export"],
     ]);
   });
@@ -30,7 +31,7 @@ describe("matchNavItems compare entry", () => {
   it("shows Compare only on a multi-shooter match, landing on the first audited stage", () => {
     expect(matchNavItems(base).find((i) => i.key === "compare")).toBeUndefined();
     const items = matchNavItems({ ...base, multiShooter: true, compareStage: 3 });
-    expect(items.map((i) => i.key)).toEqual(["overview", "videos", "audit", "results", "coach", "compare", "export"]);
+    expect(items.map((i) => i.key)).toEqual(["overview", "videos", "audit", "results", "coach", "breakdown", "compare", "export"]);
     expect(items.find((i) => i.key === "compare")).toMatchObject({ group: "analyse", to: "/match/m1/compare/3", label: "Compare" });
   });
 });
@@ -43,3 +44,19 @@ describe("matchNavItems audit entry", () => {
   });
 });
 
+
+describe("matchNavItems breakdown entry", () => {
+  it("is optional by design: no badge at zero regions, never a pending badge", () => {
+    for (const regionCount of [undefined, 0]) {
+      const row = matchNavItems({ ...base, regionCount }).find((i) => i.key === "breakdown");
+      expect(row).toMatchObject({ group: "analyse", to: "/match/m1/breakdown/s", label: "Breakdown" });
+      expect(row?.count).toBeUndefined();
+      expect(row?.badgeKind).not.toBe("pending");
+    }
+  });
+
+  it("shows a quiet count of the confirmed regions", () => {
+    const row = matchNavItems({ ...base, regionCount: 3 }).find((i) => i.key === "breakdown");
+    expect(row).toMatchObject({ count: 3, badgeKind: "count", badgeAriaLabel: "3 regions in this match" });
+  });
+});

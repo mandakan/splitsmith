@@ -383,3 +383,55 @@ describe("Overview", () => {
       expect(l).toHaveAttribute("href", "/match/m1/ingest/s1");
   });
 });
+
+describe("Breakdown is optional by design (#1371)", () => {
+  beforeEach(() => {
+    vi.mocked(api.listMatchShooters).mockResolvedValue({
+      match_root: "/r",
+      match_name: "m",
+      shooters: [SHOOTER],
+      origin: "hosted",
+      capabilities: ["edit", "review", "share_manage"],
+    });
+    vi.mocked(api.getTriage).mockResolvedValue(TRIAGE);
+    vi.mocked(api.getBeepQueue).mockRejectedValue(new Error("no queue in this test"));
+  });
+
+  function withRegions(regions: number | null): MatchProject {
+    const p = project();
+    p.stages = TRIAGE.cells.map((c) => ({
+      stage_number: c.stage_number,
+      stage_name: c.stage_name,
+      time_seconds: c.time_seconds,
+      scorecard_updated_at: null,
+      videos: [],
+      skipped: false,
+      placeholder: false,
+      time_seconds_manual: false,
+      stage_rounds: null,
+      scorecard: null,
+      figures: {
+        draw: c.draw,
+        avg_split: c.avg_split,
+        fastest_split: null,
+        shot_count: c.shot_count,
+        split_count: 0,
+        regions,
+      },
+    }));
+    return p;
+  }
+
+  it("a stage with zero regions shows no Breakdown prompt, and the next step ignores regions", async () => {
+    const { unmount } = renderHome([SHOOTER], { project: withRegions(null) });
+    const primary = await screen.findByRole("link", { name: "Audit 06 B5 All" });
+    expect(primary).toHaveAttribute("href", "/match/m1/audit/s1/6");
+    expect(document.body.textContent).not.toMatch(/breakdown|region/i);
+    unmount();
+
+    renderHome([SHOOTER], { project: withRegions(4) });
+    const again = await screen.findByRole("link", { name: "Audit 06 B5 All" });
+    expect(again).toHaveAttribute("href", "/match/m1/audit/s1/6");
+    expect(document.body.textContent).not.toMatch(/breakdown|region/i);
+  });
+});

@@ -6,6 +6,7 @@
 import type { ReactNode } from "react";
 import {
   ArrowDownToLine,
+  ChartGantt,
   ClipboardCheck,
   Columns2,
   Crosshair,
@@ -58,6 +59,10 @@ export function matchNavItems(args: {
   multiShooter?: boolean;
   /** Where the Compare row lands: the first audited stage, else stage 1. */
   compareStage?: number;
+  /** Confirmed regions across the shooter's stages: the Breakdown row's
+   *  quiet count. Undefined or 0 shows nothing; Breakdown is optional by
+   *  design (epic #1370), never a missing step. */
+  regionCount?: number;
 }): MatchNavItem[] {
   const {
     base,
@@ -67,7 +72,9 @@ export function matchNavItems(args: {
     footageHint,
     multiShooter = false,
     compareStage = 1,
+    regionCount,
   } = args;
+  const regions = regionCount && regionCount > 0 ? regionCount : undefined;
   return [
     { key: "overview", to: `${base}/`, icon: <LayoutGrid className="size-[15px]" />, label: "Overview", end: true },
     {
@@ -100,6 +107,21 @@ export function matchNavItems(args: {
       label: "Coach",
       disabled: !hasFootage,
       disabledHint: footageHint,
+    },
+    {
+      // Optional region and interval editor (#1371): a neutral count badge
+      // when regions exist, nothing otherwise; never a pending badge.
+      key: "breakdown",
+      group: "analyse",
+      to: shooterSlug ? `${base}/breakdown/${shooterSlug}` : `${base}/breakdown`,
+      icon: <ChartGantt className="size-[15px]" />,
+      label: "Breakdown",
+      disabled: !hasFootage,
+      disabledHint: footageHint,
+      count: regions,
+      badgeKind: "count",
+      // A total over the shooter's stages, so the label says so.
+      badgeAriaLabel: regions ? `${regions} ${regions === 1 ? "region" : "regions"} in this match` : undefined,
     },
     ...(multiShooter
       ? [

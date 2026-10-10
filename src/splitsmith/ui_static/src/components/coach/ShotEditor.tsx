@@ -5,23 +5,11 @@
  * note, Flag and Save. Save is the page's one primary while the note is
  * dirty; the class and the flag write on click, as before.
  */
+import { IntervalClassControl } from "@/components/coach/IntervalClassControl";
+import { ShotHeading } from "@/components/coach/ShotHeading";
 import { Button } from "@/components/ui/button";
-import { Chip } from "@/components/ui/Chip";
 import type { CoachIntervalClass, CoachShot } from "@/lib/api";
 import type { GapTier } from "@/lib/splits";
-import { BUDGET_LABEL, BUDGET_ORDER, BUDGET_TICK } from "@/lib/timeBudget";
-import { cn } from "@/lib/utils";
-
-const TICK_BG: Record<string, string> = {
-  draw: "bg-led",
-  movement: "bg-beep",
-  transition: "bg-manual",
-  fire: "bg-done",
-  reload: "bg-live",
-  activation: "bg-ink-2",
-};
-
-const CLASSES = BUDGET_ORDER.filter((c): c is CoachIntervalClass => c !== "unclassified");
 
 export interface ShotEditorProps {
   shot: CoachShot;
@@ -38,38 +26,8 @@ export function ShotEditor({ shot, tier, noteDraft, onNoteChange, onSave, onClas
   const dirty = noteDraft !== (shot.coaching_note ?? "");
   return (
     <section aria-label={`Shot ${shot.shot_number}`} className="rounded-[10px] border border-rule bg-surface px-3.5 py-3">
-      <div className="flex flex-wrap items-baseline gap-3">
-        <span className="numeral text-2xl leading-none text-ink">{String(shot.shot_number).padStart(2, "0")}</span>
-        <span className="numeral text-md text-ink-2">
-          {shot.split.toFixed(3)} split &middot; {shot.time_from_beep.toFixed(2)} from beep
-        </span>
-        {tier ? (
-          <Chip tick={tier.label === "quick" ? "fire" : tier.label === "long" ? "reload" : "activation"} className="ml-auto">
-            {tier.label}
-          </Chip>
-        ) : null}
-      </div>
-      <div role="group" aria-label="Interval class" className="mt-3 inline-flex flex-wrap gap-0.5 rounded-md border border-rule-strong bg-surface-2 p-0.5">
-        {CLASSES.map((cls) => {
-          const on = shot.interval_class === cls;
-          return (
-            <button
-              key={cls}
-              type="button"
-              aria-pressed={on}
-              disabled={disabled}
-              onClick={() => onClassify(cls)}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led disabled:opacity-50",
-                on ? "bg-surface-3 text-ink" : "text-muted hover:text-ink",
-              )}
-            >
-              <i aria-hidden className={cn("size-1.5 rounded-full", TICK_BG[BUDGET_TICK[cls]])} />
-              {BUDGET_LABEL[cls]}
-            </button>
-          );
-        })}
-      </div>
+      <ShotHeading shot={shot} tier={tier} />
+      <IntervalClassControl value={shot.interval_class} onClassify={onClassify} disabled={disabled} className="mt-3" />
       <textarea
         value={noteDraft}
         onChange={(e) => onNoteChange(e.target.value)}

@@ -102,7 +102,8 @@ function sameEvents(a: StageEvent[], b: StageEvent[]): boolean {
 /**
  * ``onDiscard`` fires once per conflict that dropped a local region edit
  * (#1322). Nothing else tells the user, so it is the seam an inline notice
- * hangs on.
+ * hangs on. ``onSaved`` fires after every PUT the server accepted: the
+ * seam for state outside the page that counts regions (the nav badge).
  */
 export function useStageEvents(
   slug: string,
@@ -110,6 +111,7 @@ export function useStageEvents(
   applyCoach: (next: CoachStageResponse | null) => void,
   onError?: (message: string) => void,
   onDiscard?: () => void,
+  onSaved?: () => void,
 ): StageEvents {
   const [events, setEvents] = useState<StageEvent[]>([]);
   const [issue, setIssue] = useState<SaveIssue | null>(null);
@@ -148,6 +150,8 @@ export function useStageEvents(
   const withheldRef = useRef<CoachStageResponse | null>(null);
   const onDiscardRef = useRef(onDiscard);
   onDiscardRef.current = onDiscard;
+  const onSavedRef = useRef(onSaved);
+  onSavedRef.current = onSaved;
   const putRef = useRef<(next: StageEvent[]) => void>(() => {});
 
   // A local edit is under the pointer, in the debounce, or in flight (a PUT
@@ -327,6 +331,7 @@ export function useStageEvents(
           failedRef.current = null;
           setIssue(null);
           adopt(res);
+          onSavedRef.current?.();
         } catch (e) {
           if (e instanceof ApiError && e.status === 409) {
             await conflict(seq, base);

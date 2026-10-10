@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 from splitsmith.ui.server import create_app
 
-REGION_KEYS = ("moving_shots", "reloads", "reload_avg_s", "exposed_reload_s")
+REGION_KEYS = ("moving_shots", "reloads", "reload_avg_s", "exposed_reload_s", "regions")
 
 
 @pytest.fixture(autouse=True)
@@ -99,6 +99,8 @@ def test_confirmed_reload_on_the_move_reports_figures(tmp_path: Path) -> None:
     assert figures["reloads"] == 1
     assert figures["reload_avg_s"] == pytest.approx(1.8)
     assert figures["exposed_reload_s"] == pytest.approx(1.7)
+    # Breakdown's nav count (#1371): the two confirmed regions, not the proposal.
+    assert figures["regions"] == 2
 
 
 def test_standing_reload_is_exposed_for_its_whole_duration(tmp_path: Path) -> None:
@@ -129,4 +131,5 @@ def test_confirmed_movement_alone_reports_moving_shots_and_no_reload_figures(tmp
         "reloads": 0,
         "reload_avg_s": None,
         "exposed_reload_s": None,
+        "regions": 1,
     }
