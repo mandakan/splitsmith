@@ -189,6 +189,20 @@ describe("Timeline", () => {
     expect(onSeek).toHaveBeenCalledWith(expect.closeTo(4.37, 3));
   });
 
+  it("turns off the browser's swipe-back while a band is mounted, and restores it after the last one", () => {
+    const html = document.documentElement;
+    expect(html.style.overscrollBehaviorX).toBe("");
+    const first = render(<Harness />);
+    const second = render(<Harness />);
+    expect(html.style.overscrollBehaviorX).toBe("none");
+    expect(document.body.style.overscrollBehaviorX).toBe("none");
+    first.unmount();
+    expect(html.style.overscrollBehaviorX).toBe("none");
+    second.unmount();
+    expect(html.style.overscrollBehaviorX).toBe("");
+    expect(document.body.style.overscrollBehaviorX).toBe("");
+  });
+
   it("labels the gutter and renders each track", () => {
     render(<Harness />);
     expect(screen.getByText("Audio")).toBeInTheDocument();
