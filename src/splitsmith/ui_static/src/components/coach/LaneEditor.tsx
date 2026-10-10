@@ -23,8 +23,9 @@
  * listbox of its regions in time order with one tab stop (the selected
  * region when it is in that lane, else the first). Focusing a region selects
  * it. Keys act only on the region element itself, so a key pressed in a
- * handle, a menu or any other control never nudges: Left / Right nudge
- * (commit, with the #1325 no-op rule, announced in a polite status line),
+ * handle, a menu or any other control never nudges: Left / Right nudge the
+ * selected region (commit, with the #1325 no-op rule, announced in a polite
+ * status line),
  * Up / Down / Home / End move through the lane, Enter / Space select.
  * Delete / Backspace remove the focused region only when it is the selected
  * one and never on auto-repeat; focus then moves to the lane's neighbour
@@ -307,6 +308,9 @@ export function LaneEditor(props: LaneEditorProps) {
     const current = eventsRef.current;
     if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
       e.preventDefault();
+      // A nudge is a save and confirms a proposal: like Delete it needs the
+      // region selected, not just focused (focus lands unselected after a Delete).
+      if (selectedId !== x.id) return;
       const dir = e.key === "ArrowLeft" ? -1 : 1;
       const next = nudge(current, x.id, dir, { alt: e.altKey, shift: e.shiftKey }, fps);
       // A clamp (a neighbour, or the 0 floor / stage-time ceiling) can leave the

@@ -636,6 +636,24 @@ describe("LaneEditor", () => {
       expect(screen.getAllByRole("option").map((o) => o.dataset.testid)).toEqual(["event-evt-3", "event-evt-2", "event-evt-4"]);
     });
 
+    it("an arrow on a focused but unselected region nudges nothing until Enter selects it", () => {
+      const onChange = vi.fn();
+      render(<Harness initial={[ev("evt-1", "reload", 1, 2), ev("evt-2", "reload", 3, 4, "auto")]} onChange={onChange} />);
+      const at = (id: string) => screen.getByTestId(`event-${id}`);
+      act(() => at("evt-1").focus());
+      fireEvent.keyDown(at("evt-1"), { key: "Delete" });
+      expect(at("evt-2")).toHaveFocus();
+      onChange.mockClear();
+      fireEvent.keyDown(at("evt-2"), { key: "ArrowRight" });
+      fireEvent.keyDown(at("evt-2"), { key: "ArrowLeft", shiftKey: true });
+      expect(onChange).not.toHaveBeenCalled();
+      expect(at("evt-2")).toHaveAttribute("data-source", "auto");
+      fireEvent.keyDown(at("evt-2"), { key: "Enter" });
+      fireEvent.keyDown(at("evt-2"), { key: "ArrowRight" });
+      expect(onChange.mock.calls.filter((c) => c[1] === true)).toHaveLength(1);
+      expect(lastCommit(onChange)![0].start).toBeCloseTo(3.02, 3);
+    });
+
     it("a repeat keydown never deletes, even on the selected region", () => {
       const onChange = vi.fn();
       render(<Harness initial={[ev("evt-1", "reload", 1, 2)]} selectedId="evt-1" onChange={onChange} />);
