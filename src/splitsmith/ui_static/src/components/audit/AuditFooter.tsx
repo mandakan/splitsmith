@@ -7,6 +7,9 @@ import { Kbd } from "@/components/ui/Kbd";
 
 export interface AuditFooterProps {
   onOpenHelp: () => void;
+  /** C, the PiP inset: "swap" with two cameras, "next" with more (Shift+C
+   *  back); none with one. */
+  camera?: "swap" | "next" | null;
 }
 
 const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "⌃";
@@ -24,7 +27,7 @@ function Item({ keys, label }: { keys: string[]; label: string }) {
   );
 }
 
-export function AuditFooter({ onOpenHelp }: AuditFooterProps) {
+export function AuditFooter({ onOpenHelp, camera = null }: AuditFooterProps) {
   return (
     <div className="sticky bottom-0 z-10 -mx-4 mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-rule bg-surface px-4 py-2 text-sm text-muted md:-mx-7 md:px-7">
       <Item keys={["Space"]} label="play" />
@@ -33,6 +36,7 @@ export function AuditFooter({ onOpenHelp }: AuditFooterProps) {
       <Item keys={["K"]} label="toggle shot at playhead" />
       <Item keys={["R"]} label="reject" />
       <Item keys={["+", "0", "−"]} label="zoom" />
+      {camera ? <Item keys={camera === "next" ? ["C", "⇧C"] : ["C"]} label={camera === "next" ? "next / prev camera" : "swap camera"} /> : null}
       <Item keys={[`${MOD}⏎`]} label="save & next" />
       <button type="button" onClick={onOpenHelp} className="ml-auto inline-flex items-center gap-1 rounded text-muted hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led">
         <Kbd size="sm">?</Kbd>

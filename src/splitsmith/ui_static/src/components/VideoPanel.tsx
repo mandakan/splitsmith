@@ -66,8 +66,8 @@ interface VideoPanelProps {
   mediaOnDesktop?: boolean;
   gridMode: boolean;
   onGridModeToggle: () => void;
-  onSecondaryRef: (path: string, el: HTMLVideoElement | null) => void;
-  onSecondaryBuffering: (path: string, buffering: boolean) => void;
+  onSecondaryRef?: (path: string, el: HTMLVideoElement | null) => void;
+  onSecondaryBuffering?: (path: string, buffering: boolean) => void;
   onPrimaryTimeUpdate?: () => void;
   className?: string;
   /** The panel fills a parent of definite height (Audit's primary tile):
@@ -545,8 +545,8 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
                   key={v.path}
                   label={`Cam ${i + 2}`}
                   src={api.videoStreamUrl(slug, v.path, "proxy")}
-                  onRef={(el) => onSecondaryRef(v.path, el)}
-                  onBuffering={(b) => onSecondaryBuffering(v.path, b)}
+                  onRef={(el) => onSecondaryRef?.(v.path, el)}
+                  onBuffering={(b) => onSecondaryBuffering?.(v.path, b)}
                   overlay={renderCamOverlay ? renderCamOverlay(v, i + 1) : null}
                 />
               ))

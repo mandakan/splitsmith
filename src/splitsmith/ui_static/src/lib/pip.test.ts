@@ -4,6 +4,7 @@ import {
   containedFrame,
   cornerByArrow,
   cyclePip,
+  focusPip,
   insetPlan,
   PIP_END_GUARD_S,
   servedClipBeep,
@@ -119,6 +120,25 @@ describe("cyclePip", () => {
   it("does nothing without an inset", () => {
     const s = { big: "c1", inset: null };
     expect(cyclePip(s, cams(1), 1)).toBe(s);
+  });
+});
+
+describe("focusPip", () => {
+  it("makes the picked camera big and drops the big one to the inset", () => {
+    expect(focusPip({ big: "c1", inset: "c2" }, cams(3), "c3")).toEqual({ big: "c3", inset: "c1" });
+    expect(focusPip({ big: "c1", inset: "c2" }, cams(3), "c2")).toEqual({ big: "c2", inset: "c1" });
+  });
+
+  it("does nothing for the big camera, an unknown one or one without a beep", () => {
+    const s = { big: "c1", inset: "c2" };
+    expect(focusPip(s, cams(2), "c1")).toBe(s);
+    expect(focusPip(s, cams(2), "c9")).toBe(s);
+    expect(focusPip(s, [cam(1), cam(2), cam(3, { beepInClip: null })], "c3")).toBe(s);
+  });
+
+  it("does nothing when the big camera itself cannot be lined up", () => {
+    const s = { big: "c1", inset: null };
+    expect(focusPip(s, [cam(1, { beepInClip: null }), cam(2)], "c2")).toBe(s);
   });
 });
 

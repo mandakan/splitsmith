@@ -1711,7 +1711,25 @@ the video (``MultiCamColumn``, a 16:9 tile capped at
 ``ShotList``; on lg the row is ``max(300px,calc(100dvh-502px))``, and
 ``max(398px,...)`` with two or more cameras (#1359: two cameras at
 1440x900 end the band's Audio row at the sticky footer, 863; a taller
-screen gives the extra height to the video),
+screen gives the extra height to the video). The other cameras are a
+PiP inset over the big player (#1407), never a strip: the tile is the
+whole column under its header (two cameras at 1440x900, a 648x365
+frame; 746x420 at 1000 high). ``lib/auditPip`` maps each camera to its
+inset clip and beep through ``planServedClip``, so a camera reads the
+same instant in the inset as big; each camera's ``CamPill`` travels with
+its picture (the big one's at the tile's top right, the inset's as its
+note), and a camera with no beep, which cannot enter the inset, keeps
+its pill in the column header. The big camera is ``usePip``'s
+(``activeVideoIndex`` is derived from it; C / Shift+C in the page's key
+handler, the grid's pick is ``pip.focus``, a new stage resets to the
+primary). A swap changes the picture only: ``beepOffset`` maps the big
+clip onto the primary's timeline, so the waveform, markers, shot list
+and every seek stay the primary's, and while a secondary is big the
+sound is ``lib/usePrimaryAudio`` (as on Splits) playing the stage audit
+WAV, the waveform's own file, anchored on ``peaks.beep_time`` (the
+primary's stream, same anchor, if the WAV fails). Nothing else syncs a
+second element: the page's old secondary loop is gone, and a new
+follower goes through ``attachInsetSync``, never a loop of its own,
 and the shared timeline band (spec 2026-10-09) underneath now hosts the
 waveform: the audio track carries ``WaveformTrack`` and ``MarkerLayer``
 together, pins are on a Flags row that does not seek, above it, and the

@@ -69,6 +69,13 @@ function sections(mode: HelpMode): Section[] {
     { keys: ["0"], desc: "Fit waveform to view" },
     { keys: ["-"], desc: "Zoom out" },
   ];
+  if (mode === "audit") {
+    // The PiP inset (#1407): the sound and every time stay the primary's.
+    view.push(
+      { keys: ["C"], desc: "Next camera into the inset (two cameras: swap)" },
+      { keys: ["Shift", "C"], desc: "Previous camera into the inset" },
+    );
+  }
   const edit: ShortcutRow[] = [
     { keys: [mod, "Z"], desc: "Undo last marker change" },
     {
