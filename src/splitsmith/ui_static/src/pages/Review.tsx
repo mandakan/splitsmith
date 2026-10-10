@@ -16,7 +16,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   CheckCircle2,
   Crosshair,
@@ -42,6 +42,7 @@ import { HelpOverlay } from "@/components/HelpOverlay";
 import { ListDrawer } from "@/components/ListDrawer";
 import { MarkerLayer, type AuditMarker } from "@/components/MarkerLayer";
 import { ShotStepper } from "@/components/ShotStepper";
+import { StepThrough } from "@/components/review/StepThrough";
 import { Waveform } from "@/components/Waveform";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -65,6 +66,7 @@ import { isTypingTextTarget, useBlurOnPointerClick } from "@/lib/audit-input";
 import { zoomActionForKey } from "@/lib/zoomKeys";
 import { placeTime, type SnapPeaks } from "@/lib/peak-snap";
 import { displayBins, reviewMaxZoom } from "@/lib/reviewZoom";
+import { nextFixtureToReview } from "@/lib/stepThrough";
 import { useReleaseMediaOnUnmount } from "@/lib/utils";
 
 const PEAK_BINS = 1500;
@@ -87,6 +89,15 @@ export function Review() {
   const [params] = useSearchParams();
   const fixturePath = params.get("fixture");
   const videoPath = params.get("video");
+  const navigate = useNavigate();
+  // Step-through (lib/stepThrough): one close-up per shot whose rise foot
+  // disagrees with its stored time. ``?step=1`` opens it, which is how the
+  // review queue and the sign-off's "next fixture" link here.
+  const stepParam = params.get("step") === "1";
+  const [stepMode, setStepMode] = useState(stepParam);
+  useEffect(() => {
+    setStepMode(stepParam);
+  }, [fixturePath, stepParam]);
 
   // Drop button / chip focus after a mouse click so the next Space press
   // toggles playback instead of re-clicking the last-touched control.
@@ -621,20 +632,44 @@ export function Review() {
   const [marking, setMarking] = useState(false);
   const reviewStatus =
     (audit as unknown as { review?: { status?: string } } | null)?.review?.status ?? null;
-  const markReviewed = useCallback(async () => {
-    if (!fixturePath) return;
+  const markReviewed = useCallback(async (): Promise<boolean> => {
+    if (!fixturePath) return false;
     setMarking(true);
     try {
-      if (isDirtyRef.current && !(await performSave())) return;
+      if (isDirtyRef.current && !(await performSave())) return false;
       const slug = fixturePath.split("/").pop()!.replace(/\.json$/, "");
       await api.confirmReviewFixture(slug);
       setAudit(await api.getFixtureAudit(fixturePath));
+      return true;
     } catch (err) {
       setSaveStatus({ kind: "error", message: err instanceof ApiError ? err.detail : String(err) });
+      return false;
     } finally {
       setMarking(false);
     }
   }, [fixturePath, performSave]);
+
+  // The step-through's sign-off: mark reviewed, then open the queue's next
+  // fixture whose times need checking, straight into its step-through.
+  const finishStepThrough = useCallback(async () => {
+    if (!fixturePath || !(await markReviewed())) return;
+    const slug = fixturePath.split("/").pop()!.replace(/\.json$/, "");
+    try {
+      const next = nextFixtureToReview((await api.getDevReviewQueue()).pending, slug);
+      if (next) navigate(`/review?fixture=${encodeURIComponent(next.audit_path)}&step=1`);
+      else setStepMode(false);
+    } catch {
+      setStepMode(false);
+    }
+  }, [fixturePath, markReviewed, navigate]);
+
+  const focusFromStep = useCallback(
+    (id: string, time: number) => {
+      setFocusedMarkerId(id);
+      handleScrub(time);
+    },
+    [handleScrub],
+  );
 
   // ---- Global hotkeys ----------------------------------------------------
 
@@ -907,6 +942,20 @@ export function Review() {
             </div>
           ) : peaks ? (
             <>
+              {stepMode && edgePeaks ? (
+                <StepThrough
+                  key={fixturePath}
+                  markers={markers}
+                  peaks={edgePeaks}
+                  onSetTime={handleMarkerTimeChange}
+                  onReject={handleMarkerDelete}
+                  onRecord={recordEvent}
+                  onFocus={focusFromStep}
+                  onDone={() => void finishStepThrough()}
+                  onExit={() => setStepMode(false)}
+                  busy={marking}
+                />
+              ) : null}
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <FilterBar
                   filters={filters}
@@ -1012,6 +1061,17 @@ export function Review() {
                   {marking ? <Loader2 className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}
                   {reviewStatus === "reviewed" ? "Reviewed" : "Mark reviewed"}
                 </Button>
+                {!stepMode ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setStepMode(true)}
+                    disabled={!edgePeaks}
+                    title="Check each shot whose rise foot disagrees with its stored time, one key per shot"
+                  >
+                    Step through
+                  </Button>
+                ) : null}
                 <span className="ml-auto flex items-center gap-3 text-xs text-muted">
                   <span>{detectedCount} detected</span>
                   <span>{rejectedCount} rejected</span>
