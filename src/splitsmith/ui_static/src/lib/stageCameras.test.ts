@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { CoachVideoEntry } from "@/lib/api";
 import type { InsetStreamKind } from "@/lib/pip";
-import { stageCameras } from "@/lib/stageCameras";
+import { bigToPrimary, primaryToBig, stageCameras } from "@/lib/stageCameras";
 
 const url = (v: CoachVideoEntry, kind: InsetStreamKind, version: string | null) => `${kind}:${v.path}:${version ?? ""}`;
 
@@ -42,5 +42,21 @@ describe("stageCameras", () => {
 
   it("keeps a camera without a beep (it never enters the inset: beepInClip null)", () => {
     expect(stageCameras([PRIMARY, NO_BEEP], url)[1].beepInClip).toBeNull();
+  });
+});
+
+describe("primaryToBig / bigToPrimary", () => {
+  it("line the clips up on their own beep and are each other's inverse", () => {
+    expect(primaryToBig(7, 5, 3)).toBe(5);
+    expect(bigToPrimary(5, 5, 3)).toBe(7);
+    expect(primaryToBig(7, 5, null)).toBe(7);
+    expect(bigToPrimary(7, null, 3)).toBe(7);
+  });
+
+  it("a moment before the big clip's start lands on its first frame, and the playhead goes there too", () => {
+    // 4 s before the primary's beep is before Cam 2's clip (beep at 3 s).
+    const landed = primaryToBig(1, 5, 3);
+    expect(landed).toBe(0);
+    expect(bigToPrimary(landed, 5, 3)).toBe(2); // 3 s before the beep, where the picture is
   });
 });

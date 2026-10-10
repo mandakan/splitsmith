@@ -35,3 +35,19 @@ export function stageCameras(
     };
   });
 }
+
+/** A primary-clip time in the big camera's clip: both clips line up on
+ *  their own beep. ``bigBeep`` null is the primary itself (or no payload
+ *  yet): unchanged. A moment before the big clip's start lands on its
+ *  first frame, 0. */
+export function primaryToBig(clip: number, primaryBeep: number | null, bigBeep: number | null): number {
+  if (primaryBeep == null || bigBeep == null) return clip;
+  return Math.max(0, clip - primaryBeep + bigBeep);
+}
+
+/** The big camera's clock in primary-clip seconds (``primaryToBig``'s
+ *  inverse, without the clamp). */
+export function bigToPrimary(videoTime: number, primaryBeep: number | null, bigBeep: number | null): number {
+  if (primaryBeep == null || bigBeep == null) return videoTime;
+  return videoTime - bigBeep + primaryBeep;
+}

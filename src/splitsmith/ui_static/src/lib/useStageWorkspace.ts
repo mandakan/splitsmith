@@ -27,6 +27,7 @@ import {
 } from "@/lib/api";
 import { shotAtOrBefore } from "@/lib/coachReview";
 import { useSpacePlayPause } from "@/lib/keyboard";
+import { bigToPrimary, primaryToBig } from "@/lib/stageCameras";
 import { type TierBaselines, baselinesFromMatchDistributions } from "@/lib/splits";
 import { parseStageLink, resolveStageLink } from "@/lib/stageLink";
 import { useIsMobile } from "@/lib/useIsMobile";
@@ -138,23 +139,25 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
 
   // Primary-clip seconds <-> the big video's own. Equal while the primary
   // is big; with a secondary big, both clips line up on their own beep.
-  const toVideoTime = useCallback((clip: number) => {
-    const c = coachRef.current;
-    const bb = bigBeepRef.current;
-    if (!c || bb == null) return clip;
-    return Math.max(0, clip - c.beep_time + bb);
-  }, []);
-  const fromVideoTime = useCallback((videoTime: number) => {
-    const c = coachRef.current;
-    const bb = bigBeepRef.current;
-    if (!c || bb == null) return videoTime;
-    return videoTime - bb + c.beep_time;
-  }, []);
+  // A moment before the big clip's start lands on its first frame
+  // (``primaryToBig`` clamps), and the playhead is put where the picture is.
+  const toVideoTime = useCallback(
+    (clip: number) => primaryToBig(clip, coachRef.current?.beep_time ?? null, bigBeepRef.current),
+    [],
+  );
+  const fromVideoTime = useCallback(
+    (videoTime: number) => bigToPrimary(videoTime, coachRef.current?.beep_time ?? null, bigBeepRef.current),
+    [],
+  );
+  /** Seek the big video to a primary-clip time; answers where it landed,
+   *  in primary-clip seconds (clamped to the big clip's start). */
   const seekClip = useCallback(
     (clip: number) => {
-      if (videoRef.current) videoRef.current.currentTime = toVideoTime(clip);
+      const t = toVideoTime(clip);
+      if (videoRef.current) videoRef.current.currentTime = t;
+      return fromVideoTime(t);
     },
-    [toVideoTime],
+    [fromVideoTime, toVideoTime],
   );
   const setBigBeep = useCallback((beep: number | null) => {
     bigBeepRef.current = beep;
@@ -344,9 +347,7 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
       selectEvent(null);
       // A raw time makes the shot the playhead has passed the current one.
       setActiveShotNumber(shotNumber ?? shotAtOrBefore(c.shots, tFromBeep));
-      const clip = c.beep_time + tFromBeep;
-      setCurrentTime(clip);
-      seekClip(clip);
+      setCurrentTime(seekClip(c.beep_time + tFromBeep));
     },
     [seekClip, selectEvent],
   );
@@ -354,7 +355,7 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
   const seekFromBeep = useCallback(
     (tFromBeep: number) => {
       const c = coachRef.current;
-      if (c) seekClip(c.beep_time + tFromBeep);
+      if (c) setCurrentTime(seekClip(c.beep_time + tFromBeep));
     },
     [seekClip],
   );

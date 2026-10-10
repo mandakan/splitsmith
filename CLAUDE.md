@@ -1666,8 +1666,10 @@ claimed). A swap hands the big camera's beep to the workspace
 clip's seconds (where ``coach.beep_time`` and ``shots[].time_absolute``
 live), the video's clock comes in through ``fromVideoTime`` and every seek
 (shot, strip, band's ``seekFromBeep``, a deep link, a remount) goes out
-through the same mapping, so a new seek path calls the workspace, never
-``videoRef.current.currentTime``. Audio stays the primary's: with a
+through the same mapping (``stageCameras.primaryToBig`` / ``bigToPrimary``),
+so a new seek path calls the workspace, never
+``videoRef.current.currentTime``. A moment before the big clip's start
+lands on its first frame and the playhead goes where the picture is. Audio stays the primary's: with a
 secondary big the big player is muted and a hidden ``<audio>`` of the
 stage audio follows it (``attachInsetSync(..., { audible: true })``).
 
