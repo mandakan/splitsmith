@@ -1,0 +1,121 @@
+{
+  "bins": 10000,
+  "duration": 10.0,
+  "burst": {
+    "rise_bins": 10,
+    "decay_bins": 50,
+    "decay_tau_bins": 15
+  },
+  "cases": [
+    {
+      "name": "clean shot, dropped on its loud part",
+      "floor": 0.01,
+      "bursts": [
+        [
+          3000,
+          1.0
+        ]
+      ],
+      "time": 3.012,
+      "expect": 3.0
+    },
+    {
+      "name": "noise floor above 5 % of the peak",
+      "floor": 0.12,
+      "bursts": [
+        [
+          3000,
+          1.0
+        ]
+      ],
+      "time": 3.01,
+      "expect": 3.0
+    },
+    {
+      "name": "echo of the previous shot still decaying",
+      "floor": 0.01,
+      "bursts": [
+        [
+          2950,
+          0.6
+        ],
+        [
+          3000,
+          1.0
+        ]
+      ],
+      "time": 3.008,
+      "expect": 2.999
+    },
+    {
+      "name": "silence",
+      "floor": 0.01,
+      "time": 5.0,
+      "expect": null
+    },
+    {
+      "name": "lead-in ramping into the burst is part of the rise",
+      "floor": 0.01,
+      "lines": [
+        [
+          2985,
+          3000,
+          0.01,
+          0.1
+        ]
+      ],
+      "bursts": [
+        [
+          3000,
+          1.0
+        ]
+      ],
+      "time": 3.01,
+      "expect": 2.992
+    },
+    {
+      "name": "lead-in separated by a dip is not",
+      "floor": 0.01,
+      "lines": [
+        [
+          2980,
+          2986,
+          0.01,
+          0.3
+        ],
+        [
+          2986,
+          2995,
+          0.3,
+          0.08
+        ],
+        [
+          2995,
+          3000,
+          0.08,
+          0.08
+        ]
+      ],
+      "bursts": [
+        [
+          3000,
+          1.0
+        ]
+      ],
+      "time": 3.01,
+      "expect": 2.995
+    },
+    {
+      "name": "dropped before the shot, still within reach",
+      "floor": 0.01,
+      "bursts": [
+        [
+          3000,
+          1.0
+        ]
+      ],
+      "time": 2.985,
+      "expect": 3.0
+    }
+  ]
+}

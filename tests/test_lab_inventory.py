@@ -63,28 +63,6 @@ def test_onset_spread_raises_priority_and_reviewed_is_zero():
     assert any("15 ms" in r for r in why)
 
 
-def _trace(floor: float, shots: list[tuple[int, float]]) -> list[float]:
-    """10 s of 1 ms bins, shots as (start bin, peak): the app's test trace."""
-    p = [floor] * 10000
-    for start, peak in shots:
-        for i in range(10):
-            p[start + i] = max(p[start + i], floor + (peak - floor) * (i + 1) / 10)
-        for i in range(10, 60):
-            p[start + i] = max(p[start + i], floor + (peak - floor) * float(np.exp(-(i - 10) / 15)))
-    return p
-
-
-def test_leading_edge_matches_the_apps_rule():
-    from splitsmith.lab.inventory import leading_edge
-
-    assert leading_edge(_trace(0.01, [(3000, 1.0)]), 10.0, 3.012) == pytest.approx(3.0, abs=1e-9)
-    noisy = leading_edge(_trace(0.12, [(3000, 1.0)]), 10.0, 3.01)
-    assert 2.999 <= noisy <= 3.002
-    echo = leading_edge(_trace(0.01, [(2950, 0.6), (3000, 1.0)]), 10.0, 3.008)
-    assert echo == pytest.approx(3.0, abs=0.005)
-    assert leading_edge(_trace(0.01, []), 10.0, 5.0) is None
-
-
 def test_suggested_moves_name_the_shots_that_look_off():
     from splitsmith.lab.inventory import suggested_moves
 

@@ -1,6 +1,55 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, it } from "vitest";
 
 import { EXACT_PX_PER_SECOND, placeTime, snapToLeadingEdge } from "@/lib/peak-snap";
+
+interface RiseFootCase {
+  name: string;
+  floor: number;
+  lines?: [number, number, number, number][];
+  bursts?: [number, number][];
+  time: number;
+  expect: number | null;
+}
+interface RiseFootFixture {
+  bins: number;
+  duration: number;
+  burst: { rise_bins: number; decay_bins: number; decay_tau_bins: number };
+  cases: RiseFootCase[];
+}
+
+// The same file tests/test_rise_foot.py reads: the shot-time definition
+// (splitsmith.rise_foot) holds on both sides or not at all.
+const here = dirname(fileURLToPath(import.meta.url));
+const RISE_FOOT = JSON.parse(
+  readFileSync(join(here, "../../../../../tests/fixtures/rise_foot/cases.json"), "utf8"),
+) as RiseFootFixture;
+
+function buildCase(c: RiseFootCase): number[] {
+  const { rise_bins: rise, decay_bins: decay, decay_tau_bins: tau } = RISE_FOOT.burst;
+  const p = new Array<number>(RISE_FOOT.bins).fill(c.floor);
+  for (const [start, end, a, b] of c.lines ?? []) {
+    for (let k = start; k < end; k++) p[k] = Math.max(p[k], a + ((b - a) * (k - start)) / Math.max(1, end - start));
+  }
+  for (const [start, peak] of c.bursts ?? []) {
+    for (let i = 0; i < rise; i++) p[start + i] = Math.max(p[start + i], c.floor + ((peak - c.floor) * (i + 1)) / rise);
+    for (let i = rise; i < decay + rise; i++) {
+      p[start + i] = Math.max(p[start + i], c.floor + (peak - c.floor) * Math.exp(-(i - rise) / tau));
+    }
+  }
+  return p;
+}
+
+describe("rise foot parity with splitsmith.rise_foot", () => {
+  it.each(RISE_FOOT.cases.map((c) => [c.name, c] as const))("%s", (_name, c) => {
+    const got = snapToLeadingEdge(c.time, { peaks: buildCase(c), duration: RISE_FOOT.duration });
+    if (c.expect === null) expect(got).toBeNull();
+    else expect(got).toBeCloseTo(c.expect, 6);
+  });
+});
 
 /** 10 s of 1 ms bins at ``floor``, with shots given as [start bin, peak]. */
 function trace(floor: number, shots: [number, number][]): number[] {
