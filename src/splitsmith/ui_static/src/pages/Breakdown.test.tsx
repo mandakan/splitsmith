@@ -476,8 +476,8 @@ describe("Breakdown splitter (#1373)", () => {
     rect = vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
       const el = this as HTMLElement;
       if (el.dataset.testid === "breakdown-room") return box(0, 706);
-      if (el.tagName === "VIDEO") return box(0, 347);
-      if (el.firstElementChild?.tagName === "VIDEO") return box(0, 400);
+      if (el.dataset.testid === "stage-video") return box(0, 347);
+      if ((el.firstElementChild as HTMLElement | null)?.dataset?.testid === "stage-video") return box(0, 400);
       if (el.parentElement?.dataset.testid === "breakdown-band") return box(0, 303);
       return box(0, 0);
     });
@@ -572,5 +572,92 @@ describe("Breakdown splitter (#1373)", () => {
     expect(window.localStorage.getItem(BAND_HEIGHT_KEY)).toBe("300");
     fireEvent.pointerUp(sep, { pointerId: 1, clientY: 350 });
     expect(window.localStorage.getItem(BAND_HEIGHT_KEY)).toBe("350");
+  });
+});
+
+describe("Breakdown: a second camera in the PiP inset (#1409)", () => {
+  // Cam 2's beep sits at 3 s in its own clip, the primary's at 5 s: a shot
+  // 2 s after the beep is 7 s into the primary and 5 s into Cam 2.
+  const twoCams = (): CoachStageResponse => ({
+    ...coach(EVENTS),
+    videos: [
+      { path: "trimmed/stage2.mp4", role: "primary", beep_in_clip: 5, kind: "trim" },
+      { path: "trimmed/stage2_cam2.mp4", role: "secondary", beep_in_clip: 3, kind: "trim", scrub_version: "s1" },
+    ],
+  });
+  const frame = { top: 0, bottom: 562, height: 562, left: 0, right: 1000, width: 1000, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
+  let rect: ReturnType<typeof vi.spyOn>;
+  const big = (c: HTMLElement) => c.querySelector<HTMLVideoElement>('[data-testid="stage-video"] > video')!;
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    resetBreakdownPrefsForTests();
+    vi.mocked(api.getProject).mockResolvedValue(PROJECT);
+    vi.mocked(api.getStageCoach).mockReset();
+    rect = vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue(frame);
+  });
+  afterEach(() => rect.mockRestore());
+
+  it("a one-camera stage has no inset", async () => {
+    vi.mocked(api.getStageCoach).mockResolvedValue(coach(EVENTS));
+    const { container } = renderAt("/match/m1/breakdown/anna/2");
+    await screen.findByRole("complementary", { name: "Inspector" });
+    expect(big(container)).not.toBeNull();
+    expect(screen.queryByTestId("pip-view")).toBeNull();
+  });
+
+  it("shows Cam 2 in the inset from its 720p rendition; the primary stays big with its own sound", async () => {
+    vi.mocked(api.getStageCoach).mockResolvedValue(twoCams());
+    const { container } = renderAt("/match/m1/breakdown/anna/2");
+    const inset = await screen.findByTestId("pip-inset");
+    expect(inset).toHaveAttribute("aria-label", "Inset camera: Cam 2");
+    expect(within(inset).getByTestId("pip-inset-video")).toHaveAttribute("src", "http://localhost/scrub/trimmed/stage2_cam2.mp4");
+    expect(big(container)).toHaveAttribute("src", "http://localhost/trim/trimmed/stage2.mp4");
+    expect(big(container).muted).toBe(false);
+    expect(screen.queryByTestId("stage-primary-audio")).toBeNull();
+  });
+
+  it("C swaps: the shot seek and the clock follow Cam 2's beep, and the primary's audio plays", async () => {
+    vi.mocked(api.getStageCoach).mockResolvedValue(twoCams());
+    const { container } = renderAt("/match/m1/breakdown/anna/2");
+    await screen.findByTestId("pip-inset");
+    fireEvent.keyDown(window, { key: "c" });
+    await waitFor(() => expect(big(container)).toHaveAttribute("src", "http://localhost/scrub/trimmed/stage2_cam2.mp4"));
+    expect(screen.getByTestId("pip-inset")).toHaveAttribute("aria-label", "Inset camera: Cam 1");
+    expect(screen.getByText("Audio + beep: Cam 1")).toBeInTheDocument();
+    // Audio stays the primary's: the big player is muted, the stage audio plays.
+    expect(big(container).muted).toBe(true);
+    expect(screen.getByTestId("stage-primary-audio")).toBeInTheDocument();
+
+    // A shot 2 s after the beep is 5 s into Cam 2's clip.
+    fireEvent.click(container.querySelector<HTMLElement>('[aria-label="Inspector"] [data-shot-number="2"]')!);
+    expect(big(container).currentTime).toBeCloseTo(5, 6);
+
+    // Cam 2 at 6 s is 3 s after the beep: the transport says so.
+    const v = big(container);
+    Object.defineProperty(v, "readyState", { configurable: true, value: 4 });
+    v.currentTime = 6;
+    fireEvent.timeUpdate(v);
+    expect(await screen.findByText("3.00 s")).toBeInTheDocument();
+
+    // Shift+C swaps back: the primary's clock again.
+    fireEvent.keyDown(window, { key: "C", shiftKey: true });
+    await waitFor(() => expect(big(container)).toHaveAttribute("src", "http://localhost/trim/trimmed/stage2.mp4"));
+    expect(big(container).muted).toBe(false);
+    expect(screen.queryByTestId("stage-primary-audio")).toBeNull();
+    fireEvent.click(container.querySelector<HTMLElement>('[aria-label="Inspector"] [data-shot-number="3"]')!);
+    expect(big(container).currentTime).toBeCloseTo(8, 6);
+  });
+
+  it("C never fires with a modifier, on auto-repeat, or once another handler claimed the press", async () => {
+    vi.mocked(api.getStageCoach).mockResolvedValue(twoCams());
+    const { container } = renderAt("/match/m1/breakdown/anna/2");
+    await screen.findByTestId("pip-inset");
+    fireEvent.keyDown(window, { key: "c", metaKey: true });
+    fireEvent.keyDown(window, { key: "c", repeat: true });
+    const claimed = new KeyboardEvent("keydown", { key: "c", bubbles: true, cancelable: true });
+    claimed.preventDefault();
+    window.dispatchEvent(claimed);
+    expect(big(container)).toHaveAttribute("src", "http://localhost/trim/trimmed/stage2.mp4");
   });
 });

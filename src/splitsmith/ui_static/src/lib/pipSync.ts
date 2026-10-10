@@ -4,7 +4,7 @@
  * can drive it against real media.
  *
  * Rules (decisions in lib/pip.ts ``insetPlan`` / ``shouldCorrectDrift``):
- * - The inset is muted and follows play / pause and rate.
+ * - The inset is muted (unless ``audible``) and follows play / pause and rate.
  * - Outside the inset clip (the big video before the inset's start or
  *   past its end) the inset holds paused at the clamp and is never
  *   played: playing ended media restarts it at 0, which looped a short
@@ -25,12 +25,18 @@ const HAVE_METADATA = 1;
 const HAVE_FUTURE_DATA = 3;
 
 export function attachInsetSync(
-  big: HTMLVideoElement,
-  inset: HTMLVideoElement,
+  big: HTMLMediaElement,
+  inset: HTMLMediaElement,
   beeps: { bigBeep: number; insetBeep: number },
+  opts: {
+    /** Leave the follower's sound on: Coach and Breakdown play the
+     *  primary's audio from a hidden ``<audio>`` this keeps on the big
+     *  video's clock while a secondary is big (#1409). */
+    audible?: boolean;
+  } = {},
 ): () => void {
   let stalled = false;
-  inset.muted = true;
+  if (!opts.audible) inset.muted = true;
 
   const sync = (force: boolean) => {
     const plan = insetPlan({

@@ -1657,6 +1657,19 @@ to the primary on a new ``stageKey``), the corner per browser in
 handler (``pipKeyAction``: C / Shift+C); the usage note is at the top of
 ``PipView.tsx``. The inset spends no red; the primary's speaker glyph and
 PRIMARY chip travel with it.
+Coach and Breakdown (#1409) host it in ``components/coach/StageViewer``'s
+``StageVideo`` (cameras from ``lib/stageCameras``: primary first, "Cam N",
+the coach payload's ``beep_in_clip`` and kind; C / Shift+C through
+``lib/keyboard.usePipCycleKeys``, which skips a press another handler
+claimed). A swap hands the big camera's beep to the workspace
+(``useStageWorkspace.setBigBeep``): ``currentTime`` stays in the primary
+clip's seconds (where ``coach.beep_time`` and ``shots[].time_absolute``
+live), the video's clock comes in through ``fromVideoTime`` and every seek
+(shot, strip, band's ``seekFromBeep``, a deep link, a remount) goes out
+through the same mapping, so a new seek path calls the workspace, never
+``videoRef.current.currentTime``. Audio stays the primary's: with a
+secondary big the big player is muted and a hidden ``<audio>`` of the
+stage audio follows it (``attachInsetSync(..., { audible: true })``).
 
 **Rules the lint cannot check:** red marks the brand, the one primary
 action, the current position and focus, nothing else (stage state is
