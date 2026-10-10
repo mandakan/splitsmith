@@ -879,9 +879,9 @@ def upright_grid_type(
     widest rows fit the narrowest, so every tile in the grid draws at the
     same size and no tile is sized on its own. On the hold, hit factor goes
     over time (``stack_figures``) when any tile's time was entered by hand,
-    and the reload row takes two columns
-    rather than three when the narrowest tile has no room for them on one
-    row at that size. A caption a little under the legibility floor draws
+    and the reload row takes two columns rather than three when the
+    narrowest tile that draws one has no room for them on one row at that
+    size. A caption a little under the legibility floor draws
     at the floor; one further under it is dropped (``captions`` is
     ``False``), never drawn smaller. When a tile cannot fit even with
     everything at the floor (sixteen shooters on a 720 px wide frame), the
@@ -889,6 +889,11 @@ def upright_grid_type(
     tiles that are short of room."""
     rooms = list(tiles) or [TileRoom(cell_width, cell_height)]
     narrowest = min(min(cell_width, room.usable_width) for room in rooms)
+    # The reload row only draws in a tile that has one: the narrowest of
+    # those decides whether its three figures share one row.
+    narrowest_reload = min(
+        (min(cell_width, room.usable_width) for room in rooms if room.reloads), default=narrowest
+    )
     manual = not match and any(room.manual_time for room in rooms)
 
     def candidates() -> Iterator[UprightGridType]:
@@ -897,10 +902,13 @@ def upright_grid_type(
             kind = _grid_scale(unit, cell_width, cell_height)
             if not match:
                 inner = narrowest - 2 * kind.scale.pad
+                reload_inner = narrowest_reload - 2 * kind.scale.pad
                 kind = replace(
                     kind,
                     stack_figures=manual or not _figures_fit(kind, inner=inner, cell_width=cell_width),
-                    reload_columns=3 if _reload_row_fits(kind, inner=inner, cell_width=cell_width) else 2,
+                    reload_columns=(
+                        3 if _reload_row_fits(kind, inner=reload_inner, cell_width=cell_width) else 2
+                    ),
                 )
             yield kind
             if kind.scale.headline <= MIN_FONT_SIZE:

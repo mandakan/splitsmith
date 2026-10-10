@@ -350,6 +350,46 @@ def test_a_tile_far_past_a_real_stage_still_keeps_out_of_the_safe_area(
     assert _misplaced(items, frame_width=width, frame_height=height) == []
 
 
+_FILL_JS = r"""() => [...document.querySelectorAll('.cell')].map((cell) => {
+  // The band under the name over the track it has: the cell less its name,
+  // its gaps and the safe area's padding.
+  const stack = cell.querySelector('.anchor-middle-center');
+  const track = parseFloat(getComputedStyle(cell).gridTemplateRows.split(' ')[1]);
+  return stack && track > 0 ? stack.scrollHeight / track : 0;
+})"""
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(("width", "height", "count"), _HOLD_CASES)
+def test_an_upright_hold_uses_the_frame(tmp_path: Path, width: int, height: int, count: int) -> None:
+    """The type is as large as the tightest tile allows: in that tile the
+    band under the name fills at least 85 % of the height it has (the tile
+    less its name and the safe area). Sized more cautiously, every tile of
+    the grid would sit in empty space."""
+    html, geometry = _hold_html(width, height, count)
+    fills = _probe(
+        html, width=geometry.canvas_width, height=geometry.canvas_height, tmp_path=tmp_path, js=_FILL_JS
+    )
+    assert max(fills) >= 0.85, fills
+
+
+def test_a_reload_costs_its_own_row_and_no_more() -> None:
+    """A confirmed reload in one tile of a 2x2 adds that tile's reload row
+    to the grid's budget, three figures to a row where that tile has the
+    room, so the whole grid shrinks by about one row's height, not two."""
+    from splitsmith.overlay_summary_cell import TileRoom, upright_grid_type
+
+    def rooms(reload: bool) -> list[TileRoom]:
+        # 1080x1920, 2x2: the right column loses the button column, the
+        # bottom row the bottom band; the reload is bottom left.
+        return [TileRoom(540, 960), TileRoom(410, 960), TileRoom(540, 710, reload), TileRoom(410, 710)]
+
+    plain = upright_grid_type(540, 960, rooms(False))
+    reload = upright_grid_type(540, 960, rooms(True))
+    assert reload.reload_columns == 3
+    assert reload.scale.headline >= 0.82 * plain.scale.headline, (reload.scale.headline, plain.scale.headline)
+
+
 _SCALES_JS = r"""() => [...document.querySelectorAll('.anchor-middle-center')].map(
   (stack) => parseFloat(stack.style.getPropertyValue('--fit-scale')) || 1)"""
 

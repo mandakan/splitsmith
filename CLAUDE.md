@@ -461,7 +461,8 @@ A tile is never sized on its own: ``grid_html(upright=area)`` turns on
 ends at the smallest ``--fit-scale`` any band needed) and makes the width
 step end a line at the button column, not the tile's edge. A hold tile is
 ``summary_groups(upright=True, grid=kind)``: Splits first as a 2x2, the
-reload row three or two across, the counts three to a row, hit factor and
+reload row three across unless the narrowest tile that draws one is too
+narrow (so a reload costs its own row and no more), the counts three to a row, hit factor and
 time at the counts' size (``Role.DETAIL``), over each other when the
 narrowest tile has no room or any time was entered by hand. A match
 summary tile (``match_summary_groups(upright=True)``) lists Avg / Best
