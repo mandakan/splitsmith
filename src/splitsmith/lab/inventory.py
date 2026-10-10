@@ -19,6 +19,7 @@ import numpy as np
 from scipy.signal import butter, sosfiltfilt
 
 from ..fixture_schema import REVIEW_NEEDED
+from ..rise_foot import peak_envelope, rise_foot
 
 _HOP_S = 0.00025  # envelope resolution
 _WINDOW_S = 0.040  # around the stored time
@@ -72,66 +73,22 @@ def onset_spread_ms(audio: np.ndarray, sr: int, shot_times: list[float]) -> floa
     return float(np.median(np.abs(d - np.median(d))))
 
 
-#: The app's leading-edge rule (``ui_static/src/lib/peak-snap.ts``), ported
-#: line for line so a suggestion lands where a zoomed-out drop would.
-_SNAP_TOLERANCE_S = 0.025
-_MIN_PEAK_AMPLITUDE = 0.05
-_RISE_FOOT_FRAC = 0.05
-_NOISE_FLOOR_FACTOR = 1.5
-_VALLEY_FRAC = 0.25
-_MAX_WALK_S = 0.1
-_NOISE_WINDOW_S = 0.1
 #: A suggestion only when the edge is further than this from the stored time.
 MIN_MOVE_MS = 5.0
 
 
-def leading_edge(peaks: list[float] | np.ndarray, duration: float, time: float) -> float | None:
-    """The start of the first bin of the rise of the shot nearest ``time``
-    (``peak-snap.ts`` ``snapToLeadingEdge``); ``None`` when there is none."""
-    p = np.asarray(peaks, dtype=np.float64)
-    n = p.size
-    if n == 0 or duration <= 0 or not np.isfinite(time):
-        return None
-    bin_w = duration / n
-    center = min(n - 1, max(0, int(np.floor(time / bin_w))))
-    radius = max(1, round(_SNAP_TOLERANCE_S / bin_w))
-    lo, hi = max(0, center - radius), min(n - 1, center + radius)
-    max_idx = lo + int(np.argmax(p[lo : hi + 1]))
-    peak = p[max_idx]
-    if peak < _MIN_PEAK_AMPLITUDE:
-        return None
-    if max_idx == hi and hi < n - 1 and p[hi + 1] > p[hi]:
-        return None
-    noise = p[max(0, lo - round(_NOISE_WINDOW_S / bin_w)) : lo]
-    floor = float(np.sort(noise)[noise.size // 2]) if noise.size else 0.0
-    threshold = max(_RISE_FOOT_FRAC * peak, _NOISE_FLOOR_FACTOR * floor)
-    max_walk = round(_MAX_WALK_S / bin_w)
-    i = max_idx
-    while i > 0 and max_idx - i < max_walk:
-        cur, prev = p[i], p[i - 1]
-        if prev < threshold:
-            break
-        if cur < _VALLEY_FRAC * peak and prev > cur:
-            break
-        i -= 1
-    return i * bin_w
-
-
 def suggested_moves(audio: np.ndarray, sr: int, shot_times: list[float]) -> list[dict[str, Any]]:
-    """Shots whose leading edge sits more than ``MIN_MOVE_MS`` from the stored time.
+    """Shots whose rise foot (``splitsmith.rise_foot``, the shot-time
+    definition) sits more than ``MIN_MOVE_MS`` from the stored time.
 
     Each entry: ``shot_index`` (into ``shot_times``), ``time``, ``suggested``
     and ``move_ms`` (suggested minus stored). For the review queue to point
     at, never written into a fixture.
     """
-    from ..waveform import compute_peaks
-
-    duration = len(audio) / sr
-    bins = max(1, int(np.ceil(duration / 0.001)))
-    peaks = compute_peaks(np.asarray(audio, dtype=np.float32), sr, bins).peaks
+    peaks, duration = peak_envelope(audio, sr)
     out = []
     for idx, t in enumerate(shot_times):
-        edge = leading_edge(peaks, duration, float(t))
+        edge = rise_foot(peaks, duration, float(t))
         if edge is None:
             continue
         move_ms = (edge - float(t)) * 1000.0

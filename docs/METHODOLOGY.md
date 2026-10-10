@@ -36,32 +36,28 @@ Per-project overrides + the resolved provenance badge (CLI > project > global > 
 2. **`librosa.onset.onset_detect`** with spectral flux (default `delta=0.07`, `pre_max=post_max=30 ms`) finds onset frames at ~10.7 ms resolution.
 3. **80 ms minimum-gap filter** (greedy): drop onsets within 80 ms of a previously-kept one. Catches close echoes from steel/walls.
 4. **150 ms echo refractory**: drop subsequent onsets within 150 ms of a kept onset whose peak amplitude is below 40% of the previous peak. Catches lower-amplitude intra-bay echoes.
-5. **Half-rise leading edge**: this is the per-shot time you see in outputs. For each kept onset, find the absolute peak `|audio|` in a 30 ms window around the librosa frame, then report the first sample whose `|audio|` reaches **half** that peak. This is the "leading edge" definition used everywhere downstream.
+5. **Rise-foot leading edge**: this is the per-shot time you see in outputs, defined below and computed by `splitsmith.rise_foot`.
 
-### Why half-rise?
+### A shot's time: the rise foot
 
-| target | property | why we don't use it |
-|---|---|---|
-| absolute amplitude threshold (CED7000-style) | simple, fast | sensitive to AGC, distance, gain. A quiet AGC-ducked shot crosses the threshold later in its rise than a loud unducked shot, biasing splits. |
-| noise-floor-relative threshold | adapts to recording conditions | depends on a tunable "K times noise" knob; biases earlier on slow-rise transients. |
-| **half of the local peak (half-rise)** | uses the burst's own peak as reference, so AGC ducking doesn't bias timing; matches what the eye picks when scrubbing a waveform | (the choice) |
+**Definition.** A shot's time is the foot of the rise that leads to the shot's own peak: walking back from that peak, the last moment the level is still above both 5 % of the peak and 1.5 x the noise floor just before the shot. An earlier sound separated from the burst by a dip (the level falls below a quarter of the peak and rises again behind it: an echo, the previous shot, a lead-in that falls back before the blast) is not part of the rise. A lead-in that ramps continuously into the burst is. Times are stored to the millisecond.
 
-Half-rise is the standard "onset" definition in audio-engineering literature for sharp transients. It is **insensitive** to:
-- ambient noise levels (uses peak ratio, not absolute energy)
-- camera AGC ducking (a quieter shot still has a peak; half-rise lands at the same fractional point)
-- recording gain or distance (peak scales linearly; half scales the same way)
+This is the leading edge the eye picks when scrubbing a zoomed waveform, and the same rule the beep detector uses for the beep (see above, step 4). It is measured against the shot's own peak, so it is **insensitive** to camera AGC ducking, recording gain and distance (the foot sits at the same point of a quieter shot's rise), and the noise floor keeps it from sliding into the noise before the shot on loud backgrounds.
 
-It is **sensitive** to:
-- the burst's own profile (sharp transients have a sharp leading edge; gradual transients land later)
-- the 30 ms peak-search window (transients longer than 30 ms would have their peak underestimated; not a concern for gunshots)
+**One rule, three places,** held identical by `tests/fixtures/rise_foot/cases.json` (run by `tests/test_rise_foot.py` and the app's `lib/peak-snap.test.ts`):
+- the shot detector's leading edge (`shot_detect`; still the older walk until the switch in the follow-up to #1363 lands, see History),
+- the app's drop snap in Audit and the fixture review while zoomed out (`lib/peak-snap.ts`; zoomed in to 2 ms per pixel or finer, a marker lands exactly where it is dropped),
+- the review inventory's suggested corrections (`lab.inventory`).
+
+A change to the definition changes all three and the cases file in the same PR.
+
+**History.** Shot times were first the half-rise (the first sample at half the local peak); that lands mid-rise, visibly later than the audible start, and people dragging markers consistently pulled them earlier, so the detector moved to the rise foot (5 % of the peak, walking back from the peak found near librosa's frame). That walk had no noise floor and stopped at the first dip, so it ran into the noise before some shots (Vanguard: 8 to 15 ms early) and stopped inside compressed bursts (GO 3S: 20 to 30 ms late, 27 % of reviewed shots); see `docs/cameras.md`, 2026-10-10. The definition above, from the beep detector plus the dip rule, fixes both: read by eye on 118 sampled shots (blind, from plots without any marks), the detector's current times sit a median 4.4 / 8.2 / 7.2 ms from the main burst's start (GO 3S / Vanguard / handheld) and the definition 0.6 / 3.5 / 2.6 ms (issue #1363).
 
 ### Comparing splitsmith times to a CED7000 / Pact / similar
 
-**Don't expect absolute timestamps to match.** A CED7000 typically uses an absolute amplitude threshold; splitsmith uses half-rise. On the same recording the two definitions can differ by 5-15 ms per shot.
+**Don't expect absolute timestamps to match.** A CED7000 typically uses an absolute amplitude threshold; splitsmith uses the rise foot, which sits at the very start of the rise. On the same recording the two can differ by 5-15 ms per shot, splitsmith earlier.
 
-**Splits *do* match across recordings.** Because the half-rise definition is internally consistent, the *difference* between two consecutive shot times is comparable across stages, matches, and recording conditions. Any constant per-shot offset cancels in the subtraction. This is the metric that matters for training.
-
-If you ever need to compare absolute times to another timer, expect a small constant offset (typically splitsmith reports 5-15 ms earlier than amplitude-threshold timers because half-rise lands earlier in the rise than a fixed threshold).
+**Splits *do* match across recordings.** Because the definition is the same for every shot, the *difference* between two consecutive shot times is comparable across stages, matches and recording conditions; a constant per-shot offset cancels in the subtraction. This is the metric that matters, and why a rule that lands at different points of different shots (as the old walk did on GO 3S) is worse than one that is consistently early or late.
 
 ## Confidence ranking
 

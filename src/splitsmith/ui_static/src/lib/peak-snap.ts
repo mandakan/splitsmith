@@ -1,8 +1,9 @@
 /**
  * Where a dropped or added marker lands (#28, revised 2026-10-10).
  *
- * A shot's time is its onset, the foot of the rise, which is also what the
- * detector reports (``shot_detect``'s rise-foot refinement). Zoomed out, a
+ * A shot's time is the rise foot (docs/METHODOLOGY.md): ``snapToLeadingEdge``
+ * is ``splitsmith.rise_foot.rise_foot`` line for line, held to it by
+ * ``tests/fixtures/rise_foot/cases.json``; change both or neither. Zoomed out, a
  * drop snaps to that leading edge, since a pixel is too coarse to place it
  * by hand; zoomed in to 2 ms per pixel or finer (or with Shift held), it
  * lands exactly where it was dropped, on the 1 ms grid shot times are stored
