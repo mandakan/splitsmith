@@ -267,13 +267,16 @@ def _output_time(envelope: tuple[list[float], float], t_feature: float, prev_out
     """A detected shot's reported time: the rise foot read from its scoring
     time (the shot-time definition, docs/METHODOLOGY.md); the scoring time
     where no shot stands out of the window or the foot would crowd the
-    previous shot."""
+    previous shot. Never at or before the previous reported time: a foot can
+    sit later than its scoring time, so two candidates under 25 ms apart could
+    otherwise report out of order."""
     foot = rise_foot(envelope[0], envelope[1], t_feature)
-    if foot is None:
-        return t_feature
-    if prev_output is not None and foot <= prev_output + _MIN_OUTPUT_SPACING_S:
-        return t_feature
-    return foot
+    out = t_feature
+    if foot is not None and (prev_output is None or foot > prev_output + _MIN_OUTPUT_SPACING_S):
+        out = foot
+    if prev_output is not None and out <= prev_output:
+        out = prev_output + 0.001
+    return out
 
 
 def _leading_edge(audio: np.ndarray, onset_t: float, sr: int) -> float:

@@ -55,14 +55,14 @@ def test_reasons_use_exact_key_lookup() -> None:
     assert reasons[round(5.123, 3)] == "echo"
 
 
-def test_a_reason_follows_its_candidate_when_the_detector_retimes_it() -> None:
-    """Reasons are keyed by the candidate time they were given at; a detector
-    change to the shot-time definition (docs/METHODOLOGY.md) shifts candidates
-    by up to ~30 ms. Candidates are at least 80 ms apart, so the nearest key
-    within 40 ms is the same candidate."""
+def test_a_reason_binds_through_a_rounding_miss_but_never_to_a_neighbour() -> None:
+    """A key written from a 4-decimal time can miss its candidate's 3-decimal
+    key by 1 ms; that still binds. An unlabelled candidate beside a labelled
+    one never inherits its reason: on the cwt path two candidates can sit
+    23 ms apart, and a retiming detector change migrates the keys (#1386)."""
     from splitsmith.lab.core import _reason_for_time
 
-    reasons, _ = _load_labels_from_audit({"_candidates_pending_audit": {"labels_by_time": {"1.100": "echo"}}})
-    assert _reason_for_time(1.100, reasons) == "echo"
-    assert _reason_for_time(1.075, reasons) == "echo"  # retimed 25 ms earlier
-    assert _reason_for_time(1.200, reasons) is None  # the next candidate along
+    reasons, _ = _load_labels_from_audit({"_candidates_pending_audit": {"labels_by_time": {"20.794": "echo"}}})
+    assert _reason_for_time(20.794, reasons) == "echo"
+    assert _reason_for_time(20.7951, reasons) == "echo"  # rounds to 20.795
+    assert _reason_for_time(20.771, reasons) is None  # a shot 23 ms before the echo

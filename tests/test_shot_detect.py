@@ -331,3 +331,15 @@ def test_a_compressed_go3s_shot_is_timed_at_the_start_of_its_burst(fixtures_dir:
     # main's time for this shot. Internal only, never serialized.
     assert shot.scoring_time == pytest.approx(8.299, abs=0.001)
     assert "feature_time" not in shot.model_dump()
+
+
+def test_a_reported_time_never_lands_at_or_before_the_previous_one() -> None:
+    """Where no rise foot stands out, the scoring time is reported; a foot
+    can sit later than its own scoring time, so the previous shot's report can
+    already be past this one's scoring time (two cwt candidates under 25 ms
+    apart). The report then follows the previous one rather than reorder."""
+    from splitsmith.shot_detect import _output_time
+
+    silence = ([0.0] * 2000, 2.0)
+    assert _output_time(silence, 1.027, prev_output=1.045) == pytest.approx(1.046)
+    assert _output_time(silence, 1.027, prev_output=None) == pytest.approx(1.027)

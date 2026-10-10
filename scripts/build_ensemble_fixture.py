@@ -176,7 +176,7 @@ def _voter_a_floor(fixtures: list[str], tolerance_ms: float) -> float:
         audio, sr = load_audio(FIXTURES_DIR / f"{fix}.wav")
         cfg = ShotDetectConfig(recall_fallback="cwt", min_confidence=0.0)
         shots = detect_shots(audio, sr, truth["beep_time"], truth["stage_time_seconds"], cfg)
-        cand_t = [s.time_absolute for s in shots]
+        cand_t = [s.scoring_time for s in shots]
         labels = _label(cand_t, truth["shots"], tolerance_ms)
         for sh, lbl in zip(shots, labels, strict=True):
             if lbl == 1 and sh.confidence < min_conf:
@@ -195,9 +195,9 @@ def _compute_universe(fixtures: list[str], tolerance_ms: float, voter_a_floor: f
         cfg_safe = ShotDetectConfig(recall_fallback="cwt", min_confidence=voter_a_floor)
         all_shots = detect_shots(audio, sr, truth["beep_time"], truth["stage_time_seconds"], cfg_recall)
         safe_shots = detect_shots(audio, sr, truth["beep_time"], truth["stage_time_seconds"], cfg_safe)
-        safe_times = {round(s.time_absolute, 6) for s in safe_shots}
+        safe_times = {round(s.scoring_time, 6) for s in safe_shots}
 
-        cand_t = [s.time_absolute for s in all_shots]
+        cand_t = [s.scoring_time for s in all_shots]
         labels = _label(cand_t, truth.get("shots", []), tolerance_ms)
 
         clap = np.load(CACHE_DIR / f"{fix}_clap.npz", allow_pickle=True)
@@ -229,7 +229,7 @@ def _compute_universe(fixtures: list[str], tolerance_ms: float, voter_a_floor: f
             feats = _hand_features(
                 audio,
                 sr,
-                shot.time_absolute,
+                shot.scoring_time,
                 cand_t,
                 truth["beep_time"],
                 shot.confidence,
@@ -239,9 +239,9 @@ def _compute_universe(fixtures: list[str], tolerance_ms: float, voter_a_floor: f
             universe.append(
                 {
                     "fixture": fix,
-                    "t": shot.time_absolute,
+                    "t": shot.scoring_time,
                     "label": labels[i],
-                    "vote_a": int(round(shot.time_absolute, 6) in safe_times),
+                    "vote_a": int(round(shot.scoring_time, 6) in safe_times),
                     "clap_diff": float(diff[i]),
                     "gunshot_prob": float(gunshot_prob[i]),
                     "hand_feats": feats,
