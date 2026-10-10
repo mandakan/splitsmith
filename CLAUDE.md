@@ -1328,7 +1328,14 @@ its last baseline, so a caption-less "Static" label sits lower than its
 figures), which is what keeps a portrait card from cutting 1.42 to "1.4"
 and "Reload avg" from running into "Exposed"; landscape cards and grid
 holds were pixel-identical under it (the grid-hold check covered holds
-without regions: ``render_grid_frames.py`` writes no events). The live race
+without regions: ``render_grid_frames.py`` writes no events). That shrink
+floors at the smallest font, the captions, so on a dense upright grid hold
+(9-up at 720x1280) the figures still ran together at the floor; there
+(``fitColumnsPastFloor``, #1417, only when a *figure* still collides) the
+rows wrap to half their columns, then go one line without captions, then
+both, the band's text shrinking by one factor but none below the floor. A
+caption that merely wrapped (the dense match summary's "Best draw") does
+not trigger it, so those frames are unchanged. The live race
 does not opt in (its rows change text per frame). The single-shooter match
 summary is its own table document (``match_summary_html``, no ``fit.js``):
 its type follows the canvas height on any canvas at least

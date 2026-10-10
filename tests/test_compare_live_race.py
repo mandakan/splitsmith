@@ -133,8 +133,9 @@ def test_a_race_only_render_draws_the_race_without_tile_overlays_or_clocks(tmp_p
     assert not any("anchor anchor-top-left" in html for html in pages)
 
 
-#: Each middle band's ``--fit-scale`` as fit.js left it, and whether any of
-#: its grid columns' text is wider than the column.
+#: Each middle band's ``--fit-scale`` as fit.js left it, whether the column
+#: step went past the floor (``data-fit-columns``), and
+#: whether any of its grid columns' text is wider than the column.
 _RACE_FIT_JS = """() => Array.from(document.querySelectorAll('.anchor-middle-center')).map((stack) => {
   let overflow = false;
   stack.querySelectorAll('.group.flow-grid > .el').forEach((el) => {
@@ -145,7 +146,10 @@ _RACE_FIT_JS = """() => Array.from(document.querySelectorAll('.anchor-middle-cen
       if (range.getBoundingClientRect().width > width + 0.5) { overflow = true; }
     });
   });
-  return {scale: parseFloat(stack.style.getPropertyValue('--fit-scale')) || 1, overflow: overflow};
+  const touched = stack.getAttribute('data-fit-columns') === 'past-floor';
+  return {
+    scale: parseFloat(stack.style.getPropertyValue('--fit-scale')) || 1, touched: touched, overflow: overflow,
+  };
 })"""
 
 
@@ -197,9 +201,11 @@ def test_the_live_race_never_takes_the_column_fit(tmp_path: Path) -> None:
         tmp_path=tmp_path,
         **size,
     )
-    # The opt-in shrinks this race, so its columns really overflow...
-    assert opted["scale"] < 1
+    # The opt-in reshapes this race (a shrink, or the step past the floor),
+    # so its columns really overflow...
+    assert opted["scale"] < 1 or opted["touched"]
     # ...and without the opt-in the column step leaves it alone: the height
     # fit's scale (nothing to shrink here) and the overflow still there.
     assert live["scale"] == 1, "the live race took the column fit"
+    assert not live["touched"], "the live race took the column fit"
     assert live["overflow"]

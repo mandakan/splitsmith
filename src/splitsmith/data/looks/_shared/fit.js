@@ -194,7 +194,10 @@ window.__splitsmithFit = function () {
     var b = next.getBoundingClientRect();
     return a.top < b.bottom && b.top < a.bottom && b.left > a.left ? b : null;
   }
-  function columnOverflows(stack) {
+  // ``figuresOnly`` asks the narrower question the fallback below needs:
+  // does any text run past its column or into the next one? A caption
+  // that wrapped onto a second line is legible and does not count.
+  function columnOverflows(stack, figuresOnly) {
     var els = stack.querySelectorAll('.group.flow-grid > .el');
     var anyCaption = stack.querySelector('.caption');
     for (var i = 0; i < els.length; i++) {
@@ -214,7 +217,9 @@ window.__splitsmithFit = function () {
         }
         // A value is nowrap; a caption is plain text, so a caption that
         // wrapped ("Reload / avg") has more than one line box.
-        if (child.classList.contains('caption') && range.getClientRects().length > 1) { return true; }
+        if (!figuresOnly && child.classList.contains('caption') && range.getClientRects().length > 1) {
+          return true;
+        }
       }
     }
     return false;
@@ -226,13 +231,85 @@ window.__splitsmithFit = function () {
     var hi = parseFloat(stack.style.getPropertyValue('--fit-scale')) || 1;
     var lo = hi * floorFactor(stack);
     stack.style.setProperty('--fit-scale', String(lo));
-    if (columnOverflows(stack)) { return; }
+    if (columnOverflows(stack)) {
+      fitColumnsPastFloor(cell, stack, hi);
+      return;
+    }
     for (var i = 0; i < 14; i++) {
       var mid = (lo + hi) / 2;
       stack.style.setProperty('--fit-scale', String(mid));
       if (columnOverflows(stack)) { hi = mid; } else { lo = mid; }
     }
     stack.style.setProperty('--fit-scale', String(lo));
+  }
+  // At the floor and a figure still runs into the next column: a dense
+  // upright grid hold, whose quarter columns are narrower than "0.30" at
+  // the size its captions reach the floor. The captions and the band's
+  // labels set the floor, so the uniform shrink above cannot make the
+  // figures any smaller. In order, the first layout that fits wins:
+  //   1. the band wraps: each table row takes half its columns per line
+  //      (Best / Avg over Worst / Draw) and keeps every caption;
+  //   2. one line again, without the row's captions;
+  //   3. wrapped and without captions.
+  // In each the band's text may shrink, every size by one factor but none
+  // below the floor, so the figures keep their rank against hit factor
+  // and time while the labels already at the floor stay. The band keeps
+  // the height it fitted in. A band whose figures fit at the floor (a
+  // caption that wrapped, as on a dense match summary) is left exactly as
+  // it was.
+  function fitColumnsPastFloor(cell, stack, hi) {
+    if (!columnOverflows(stack, true)) { return; }
+    // Marks the band for tests: no style reads it.
+    stack.setAttribute('data-fit-columns', 'past-floor');
+    var available = availableHeight(cell);
+    var heightFit = !(available > 0) || fits(stack, available);
+    var groups = Array.prototype.slice.call(stack.querySelectorAll('.group.flow-grid'));
+    var captions = Array.prototype.slice.call(stack.querySelectorAll('.group.flow-grid > .el > .caption'));
+    var texts = Array.prototype.slice.call(stack.querySelectorAll('.value, .caption'));
+    var columns = groups.map(function (group) {
+      return getComputedStyle(group).gridTemplateColumns.split(' ').length;
+    });
+    var floorPx = window.__splitsmithMinFont;
+    function ok() {
+      return !columnOverflows(stack, true) && (!heightFit || fits(stack, available));
+    }
+    // The largest factor in [floor, 1] at which ok() holds, applied;
+    // false, left at the floor, when none does.
+    function shrinkText() {
+      var bases = texts.map(function (text) { return parseFloat(getComputedStyle(text).fontSize) || 0; });
+      var largest = Math.max.apply(null, bases.concat([0]));
+      function apply(factor) {
+        texts.forEach(function (text, i) {
+          var base = bases[i];
+          text.style.fontSize = (base <= floorPx ? base : Math.max(floorPx, base * factor)) + 'px';
+        });
+      }
+      apply(1);
+      if (ok()) { return true; }
+      var lo = largest > floorPx ? floorPx / largest : 1;
+      var top = 1;
+      apply(lo);
+      if (!ok()) { return false; }
+      for (var i = 0; i < 14; i++) {
+        var mid = (lo + top) / 2;
+        apply(mid);
+        if (ok()) { lo = mid; } else { top = mid; }
+      }
+      apply(lo);
+      return true;
+    }
+    function layout(wrap, captionless) {
+      stack.style.setProperty('--fit-scale', String(hi));
+      texts.forEach(function (text) { text.style.fontSize = ''; });
+      captions.forEach(function (caption) { caption.style.display = captionless ? 'none' : ''; });
+      groups.forEach(function (group, i) {
+        group.style.gridTemplateColumns = wrap && columns[i] > 2 ? 'repeat(' + Math.ceil(columns[i] / 2) + ', 1fr)' : '';
+      });
+      return shrinkText();
+    }
+    if (layout(true, false)) { return; }
+    if (layout(false, true)) { return; }
+    layout(true, true);
   }
   document.querySelectorAll('.cell').forEach(function (cell) {
     fitHeight(cell);

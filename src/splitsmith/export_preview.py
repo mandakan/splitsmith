@@ -182,7 +182,10 @@ def _confirmed_regions(audit_doc: dict | None) -> list[StageEvent]:
 #: key never reads a shipped Look's template bytes).
 #: Since #1337 the key also carries ``look_template.shared_digest``, so a
 #: ``_shared/`` script change moves it without a bump here.
-PREVIEW_REVISION = 6
+#: 7: a table row whose figures run into each other at the legibility
+#: floor wraps, then drops its captions (``fitColumns``); bumped as well,
+#: so the change reads in the history and not only in the digest.
+PREVIEW_REVISION = 7
 
 
 def preview_key(
