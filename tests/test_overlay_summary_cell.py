@@ -523,9 +523,10 @@ def test_a_short_row_keeps_the_bands_four_columns(tmp_path: Path) -> None:
 #: Every visible grid-row figure or caption whose text is wider than its
 #: own column, or a caption that wrapped: what ``overflow: hidden`` would
 #: cut to a plausible wrong figure ("1.4" for 1.42). Also any whose text
-#: ends closer than half its caption's size to the next column in its row
-#: (measured independently of fit.js's own 0.6 em): "Reload avg" against
-#: "Exposed" reads as one phrase.
+#: ends closer than half the band's caption size to the next column it
+#: overlaps vertically (measured independently of fit.js's own 0.6 em):
+#: "Reload avg" against "Exposed" reads as one phrase, and a caption-less
+#: "Static" label sits lower on its row's last baseline than the figures.
 _COLUMN_OVERFLOWS_JS = """() => {
   const out = [];
   const visible = (e) => getComputedStyle(e).display !== 'none';
@@ -535,8 +536,9 @@ _COLUMN_OVERFLOWS_JS = """() => {
     let next = el.nextElementSibling;
     while (next && !visible(next)) { next = next.nextElementSibling; }
     const nextBox = next ? next.getBoundingClientRect() : null;
-    const sameRow = nextBox && Math.abs(nextBox.top - box.top) < 0.5 && nextBox.left > box.left;
-    const caption = el.querySelector('.caption');
+    const sameRow =
+      nextBox && box.top < nextBox.bottom && nextBox.top < box.bottom && nextBox.left > box.left;
+    const caption = document.querySelector('.anchor-middle-center .caption');
     Array.from(el.children).forEach((child) => {
       const range = document.createRange();
       range.selectNodeContents(child);
@@ -591,6 +593,24 @@ def test_a_portrait_card_draws_every_figure_whole(
         tile, "Me", width=width, height=height, theme=THEME, rasterizer=fake, backdrop=None
     )
     (html,) = fake.calls
+    assert _column_overflows(html, width=width, height=height, tmp_path=tmp_path) == []
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(("width", "height"), [(1920, 1080), (1080, 1080), (853, 480)])
+def test_a_static_moving_card_keeps_its_row_labels_clear_of_the_figures(
+    tmp_path: Path, width: int, height: int
+) -> None:
+    """The Static and Moving rows sit on their last baseline, so the
+    caption-less label sits lower than the captioned figures beside it:
+    it still counts as the same row and keeps the gap before them."""
+    fake = _FakeRasterizer()
+    tile = _events_tile(_audit(tmp_path, [_MOVE_1, _MOVE_2, _RELOAD]))
+    cell.build_summary_still(
+        tile, "Me", width=width, height=height, theme=THEME, rasterizer=fake, backdrop=None
+    )
+    (html,) = fake.calls
+    assert ">Static<" in html
     assert _column_overflows(html, width=width, height=height, tmp_path=tmp_path) == []
 
 

@@ -177,9 +177,14 @@ window.__splitsmithFit = function () {
   // exactly as it was.
   // Text that exactly fills its column runs into the next one: "Reload
   // avg" and "Exposed" read as one phrase. So a column's text also
-  // overflows when it ends closer than COLUMN_GAP_EM of its caption's
-  // size to the start of the next column in the same row; the last
-  // column of a row has nothing to run into.
+  // overflows when it ends closer than COLUMN_GAP_EM to the start of the
+  // next column in the same row; the last column of a row has nothing to
+  // run into. The em is the band's caption size for every column, a
+  // caption-less row label ("Static") included: the caption is the
+  // smaller text, the one that collides, so one base reads the same gap
+  // everywhere. "Same row" is vertical overlap, not equal tops: a table
+  // row sits on its last baseline, so a caption-less label sits lower
+  // than the captioned figures beside it.
   var COLUMN_GAP_EM = 0.6;
   function nextInRow(el) {
     var next = el.nextElementSibling;
@@ -187,16 +192,16 @@ window.__splitsmithFit = function () {
     if (!next) { return null; }
     var a = el.getBoundingClientRect();
     var b = next.getBoundingClientRect();
-    return Math.abs(a.top - b.top) < 0.5 && b.left > a.left ? b : null;
+    return a.top < b.bottom && b.top < a.bottom && b.left > a.left ? b : null;
   }
   function columnOverflows(stack) {
     var els = stack.querySelectorAll('.group.flow-grid > .el');
+    var anyCaption = stack.querySelector('.caption');
     for (var i = 0; i < els.length; i++) {
       var el = els[i];
       if (getComputedStyle(el).display === 'none') { continue; }
       var width = el.getBoundingClientRect().width;
       var next = nextInRow(el);
-      var caption = el.querySelector('.caption');
       for (var j = 0; j < el.children.length; j++) {
         var child = el.children[j];
         var range = document.createRange();
@@ -204,7 +209,7 @@ window.__splitsmithFit = function () {
         var rect = range.getBoundingClientRect();
         if (rect.width > width + 0.5) { return true; }
         if (next) {
-          var em = parseFloat(getComputedStyle(caption || child).fontSize);
+          var em = parseFloat(getComputedStyle(anyCaption || child).fontSize);
           if (rect.right > next.left - COLUMN_GAP_EM * em + 0.5) { return true; }
         }
         // A value is nowrap; a caption is plain text, so a caption that

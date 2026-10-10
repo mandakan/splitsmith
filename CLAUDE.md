@@ -1227,7 +1227,9 @@ output -- overlay, summary card, ``events.csv``, FCPXML markers, share
 figures -- reads **confirmed** regions only (``source == "manual"``)
 through ``events.confirmed_from_doc``, which degrades a corrupt list to
 none; a new consumer calls it, never re-derives the rule. The Coach page
-alone shows proposals. **Keep** on the region card (``default`` button,
+alone shows proposals: on the lanes, the region card and the region list,
+while its stat strip (on the move, exposed reload) counts confirmed regions
+only (``lib/events.confirmedEvents``), like every output. **Keep** on the region card (``default`` button,
 auto proposals only) commits ``lib/events.keepEvent``: ``source`` to
 ``manual``, nothing else; dragging, nudging or changing kind confirm too.
 
@@ -1253,14 +1255,19 @@ Reload avg / Exposed, drawn whenever there is a confirmed reload,
 unsigned and standing reloads included. Static / Moving split rows need a
 single-shooter cell that is landscape or square and >= 480 px tall
 (``_SPLIT_ROWS_MIN_CELL_HEIGHT``); grid holds pass ``split_rows=False``
-so cells stay comparable, and keep the reload row. No confirmed regions
-renders byte-identically to before. Both summary stills (and only they)
+so cells stay comparable, and keep the reload row. A stage with no
+confirmed regions declares exactly the groups it did before regions existed
+(pixels follow fit.js; portrait cards changed with the 0.6 em gap rule).
+Both summary stills (and only they)
 set ``fit_columns`` on ``single_html`` / ``grid_html``: ``fit.js``'s
 ``fitColumns`` shrinks the band until no grid column's text overflows its
-column or comes within 0.6 em (of its caption) of the next column in its
-row, which is what keeps a portrait card from cutting 1.42 to "1.4" and
-"Reload avg" from running into "Exposed";
-landscape and grid holds were pixel-identical under it. The live race
+column or comes within 0.6 em (the band's caption size, for every
+column) of the next column that overlaps it vertically (a table row sits on
+its last baseline, so a caption-less "Static" label sits lower than its
+figures), which is what keeps a portrait card from cutting 1.42 to "1.4"
+and "Reload avg" from running into "Exposed"; landscape cards and grid
+holds were pixel-identical under it (the grid-hold check covered holds
+without regions: ``render_grid_frames.py`` writes no events). The live race
 does not opt in (its rows change text per frame). A ``fit.js`` change
 reaches the summary PNG by content, the preview only through
 ``PREVIEW_REVISION``. Exports: the splits CSV gains
