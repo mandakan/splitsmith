@@ -28,6 +28,7 @@ import {
 import { useSpacePlayPause } from "@/lib/keyboard";
 import { type TierBaselines, baselinesFromMatchDistributions } from "@/lib/splits";
 import { useIsMobile } from "@/lib/useIsMobile";
+import { shotAtOrBefore } from "@/lib/coachReview";
 import { parseStageLink, resolveStageLink } from "@/lib/stageLink";
 import { useScrubSource } from "@/lib/useScrubSource";
 import { useStageEvents, type StageEvents } from "@/lib/useStageEvents";
@@ -75,6 +76,8 @@ export interface StageWorkspace {
   togglePlay: () => void;
   /** The video's metadata loaded: a deep link's pending seek lands. */
   onVideoReady: () => void;
+  /** True while a shot's note has focus: playback stops advancing the current shot. */
+  holdActiveShot: (held: boolean) => void;
   isMobile: boolean;
 }
 
@@ -98,6 +101,7 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
   const [activeShotNumber, setActiveShotNumber] = useState<number | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [activeShotHeld, holdActiveShot] = useState(false);
   const [peaks, setPeaks] = useState<PeaksResult | null>(null);
   const wantPeaks = options.peaks ?? true;
   const [peaksLoading, setPeaksLoading] = useState(wantPeaks);
@@ -173,11 +177,16 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
   }, [apply, selectEvent, slug, stage]);
 
   // The video mounts after the payload: a linked seek lands once it can.
+  // With none pending, a new source (the scrub rendition failed over to the
+  // trim) takes the position the old one had, rather than starting at 0.
+  const positionRef = useRef(0);
+  positionRef.current = currentTime;
   const onVideoReady = useCallback(() => {
-    const clip = pendingSeekRef.current;
-    if (clip == null || !videoRef.current) return;
+    const v = videoRef.current;
+    if (!v) return;
+    const clip = pendingSeekRef.current ?? (positionRef.current > 0 ? positionRef.current : null);
     pendingSeekRef.current = null;
-    videoRef.current.currentTime = clip;
+    if (clip != null && Math.abs(v.currentTime - clip) > 1e-3) v.currentTime = clip;
   }, []);
 
   // Load peaks for the band's audio track (same shape as Audit.tsx's "Load
@@ -209,8 +218,10 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
   // While the video is playing, advance the active shot to whichever
   // one's time_absolute has just passed under the playhead. Gated on
   // isPlaying so a click + seek doesn't fight with the tick that follows.
+  // Held while a shot's note has focus (``holdActiveShot``): playback must
+  // not unmount the textarea under the cursor.
   useEffect(() => {
-    if (!isPlaying || !coach) return;
+    if (!isPlaying || !coach || activeShotHeld) return;
     const ordered = [...coach.shots].sort((a, b) => a.time_absolute - b.time_absolute);
     let current: CoachShot | null = null;
     for (const s of ordered) {
@@ -220,7 +231,7 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
     if (current && current.shot_number !== activeShotNumber) {
       setActiveShotNumber(current.shot_number);
     }
-  }, [currentTime, isPlaying, coach, activeShotNumber]);
+  }, [currentTime, isPlaying, coach, activeShotNumber, activeShotHeld]);
 
   const reclassify = useCallback(async () => {
     setReclassifying(true);
@@ -283,14 +294,7 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
       if (!c) return;
       selectEvent(null);
       // A raw time makes the shot the playhead has passed the current one.
-      let active = shotNumber;
-      if (active == null) {
-        for (const s of [...c.shots].sort((a, b) => a.time_from_beep - b.time_from_beep)) {
-          if (s.time_from_beep <= tFromBeep + 1e-6) active = s.shot_number;
-          else break;
-        }
-      }
-      setActiveShotNumber(active);
+      setActiveShotNumber(shotNumber ?? shotAtOrBefore(c.shots, tFromBeep));
       const clip = c.beep_time + tFromBeep;
       setCurrentTime(clip);
       if (videoRef.current) videoRef.current.currentTime = clip;
@@ -336,6 +340,7 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
     seekToTime,
     togglePlay,
     onVideoReady,
+    holdActiveShot,
     isMobile,
   };
 }

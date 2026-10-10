@@ -15,21 +15,10 @@
  */
 import { useMemo, useRef } from "react";
 
-import type { ChipTick } from "@/components/ui/Chip";
+import { CHIP_TICK_BG as TICK_BG } from "@/components/ui/chipTicks";
 import type { CoachShot, StageEvent, StageEventKind } from "@/lib/api";
 import { playheadX, stepShot, stripGeometry, stripTarget } from "@/lib/stageStrip";
 import { cn } from "@/lib/utils";
-
-const TICK_BG: Record<ChipTick, string> = {
-  draw: "bg-led",
-  movement: "bg-beep",
-  transition: "bg-manual",
-  fire: "bg-done",
-  reload: "bg-live",
-  activation: "bg-ink-2",
-  muted: "bg-muted",
-  neutral: "bg-ink",
-};
 
 const BAR_BG: Record<StageEventKind, string> = {
   movement: "bg-beep/30",

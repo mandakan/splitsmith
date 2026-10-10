@@ -27,7 +27,12 @@ export function StageVideo({ ws, view, className }: { ws: StageWorkspace; view: 
       preload="metadata"
       playsInline
       onLoadedMetadata={ws.onVideoReady}
-      onTimeUpdate={(e) => ws.setCurrentTime((e.target as HTMLVideoElement).currentTime)}
+      onTimeUpdate={(e) => {
+        // A source swap resets the element to 0 before its metadata loads;
+        // that is not a position, and onVideoReady restores the real one.
+        const v = e.target as HTMLVideoElement;
+        if (v.readyState >= 1) ws.setCurrentTime(v.currentTime);
+      }}
       onPlay={() => ws.setIsPlaying(true)}
       onPause={() => ws.setIsPlaying(false)}
       onError={() => {

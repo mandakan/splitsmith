@@ -41,6 +41,20 @@ export function reviewFigures(shots: readonly CoachShot[], events: readonly Stag
   };
 }
 
+/** The shot at or before ``t`` seconds from the beep (the one the playhead
+ *  has passed), else null. Any order in. */
+export function shotAtOrBefore(
+  shots: readonly Pick<CoachShot, "shot_number" | "time_from_beep">[],
+  t: number,
+): number | null {
+  let found: number | null = null;
+  for (const s of [...shots].sort((a, b) => a.time_from_beep - b.time_from_beep)) {
+    if (s.time_from_beep <= t + 1e-6) found = s.shot_number;
+    else break;
+  }
+  return found;
+}
+
 /** Two-digit shot ordinal, as every shot list prints it. */
 export function shotOrdinal(n: number): string {
   return String(n).padStart(2, "0");

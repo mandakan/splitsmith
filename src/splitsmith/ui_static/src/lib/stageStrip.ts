@@ -128,13 +128,3 @@ export function stepShot(
 export function playheadX(tFromBeep: number, duration: number): number {
   return duration > 0 ? clamp01(tFromBeep / duration) : 0;
 }
-
-/** The shot at or before ``t`` (the one the playhead has passed), else null. */
-export function shotAtOrBefore(ticks: readonly StripTick[], t: number): number | null {
-  let found: number | null = null;
-  for (const tick of ticks) {
-    if (tick.t <= t + 1e-6) found = tick.shotNumber;
-    else break;
-  }
-  return found;
-}

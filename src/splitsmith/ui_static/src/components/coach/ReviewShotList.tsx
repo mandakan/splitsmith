@@ -37,6 +37,8 @@ export interface ReviewShotListProps {
   onReloadNote: (shot: CoachShot) => Promise<string | null>;
   /** No review capability: notes and flags show, nothing edits. */
   readOnly?: boolean;
+  /** The open note took or lost focus (the page holds the current shot meanwhile). */
+  onNoteFocus?: (focused: boolean) => void;
   className?: string;
 }
 
@@ -49,6 +51,7 @@ export function ReviewShotList({
   onToggleFlag,
   onReloadNote,
   readOnly = false,
+  onNoteFocus,
   className,
 }: ReviewShotListProps) {
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -105,6 +108,7 @@ export function ReviewShotList({
                   onSave={onSaveNote}
                   onReload={onReloadNote}
                   onToggleFlag={onToggleFlag}
+                  onFocusChange={onNoteFocus}
                   readOnly={readOnly}
                 />
               ) : null}
@@ -121,14 +125,20 @@ function ShotNote({
   onSave,
   onReload,
   onToggleFlag,
+  onFocusChange,
   readOnly,
 }: {
   shot: CoachShot;
   onSave: (shot: CoachShot, text: string) => Promise<void>;
   onReload: (shot: CoachShot) => Promise<string | null>;
   onToggleFlag: (shot: CoachShot) => void;
+  onFocusChange?: (focused: boolean) => void;
   readOnly: boolean;
 }) {
+  // Leaving while focused (a click on another shot) releases the hold.
+  const focusRef = useRef(onFocusChange);
+  focusRef.current = onFocusChange;
+  useEffect(() => () => focusRef.current?.(false), []);
   const note = useNoteAutosave({
     serverValue: shot.coaching_note ?? "",
     save: (text) => onSave(shot, text),
@@ -143,7 +153,11 @@ function ShotNote({
       <textarea
         value={note.draft}
         onChange={(e) => note.onChange(e.target.value)}
-        onBlur={note.flush}
+        onFocus={() => onFocusChange?.(true)}
+        onBlur={() => {
+          note.flush();
+          onFocusChange?.(false);
+        }}
         placeholder="What to keep or change on this shot"
         aria-label={label}
         rows={2}

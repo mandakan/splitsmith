@@ -14,6 +14,10 @@
  * - Any other failure keeps the draft (typing is never thrown away) and sets
  *   ``issue`` to ``failed``; ``retry`` sends the draft again.
  *
+ * - Leaving (another shot, another stage) sends pending typing on unmount.
+ *   A save that fails after that is silent: nothing is mounted to show the
+ *   notice, and the server's note stays what it was.
+ *
  * ``issue`` is what ``SaveNotice`` renders. Pure state plus timers: the page
  * supplies ``save`` (which applies the response) and ``reload``.
  */

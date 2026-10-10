@@ -382,6 +382,23 @@ describe("Breakdown timeline band", () => {
     expect(screen.queryByText("No audio")).toBeNull();
   });
 
+  it("shows No audio once the peaks request has settled without any", async () => {
+    let rejectPeaks: (e: unknown) => void = () => {};
+    vi.mocked(api.getStagePeaks).mockReset();
+    vi.mocked(api.getStagePeaks).mockImplementation(
+      () => new Promise((_resolve, reject) => {
+        rejectPeaks = reject;
+      }),
+    );
+    renderTimeline();
+    await screen.findByTestId("timeline");
+    expect(screen.queryByText("No audio")).toBeNull();
+    await act(async () => {
+      rejectPeaks(new ApiError(404, "no trim"));
+    });
+    expect(await screen.findByText("No audio")).toBeInTheDocument();
+  });
+
   it("the timeline band's options menu toggles full-resolution video through the scrub settings", async () => {
     vi.mocked(api.getStageCoach).mockResolvedValue({
       ...stageWith([]),

@@ -10,6 +10,8 @@ import { cva, type VariantProps } from "class-variance-authority";
 
 import { cn } from "@/lib/utils";
 
+import { CHIP_TICK_BG as TICK, type ChipTick } from "./chipTicks";
+
 const chip = cva(
   "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[12px] leading-[1.4]",
   {
@@ -24,28 +26,7 @@ const chip = cva(
   },
 );
 
-export type ChipTick =
-  | "draw"
-  | "movement"
-  | "transition"
-  | "fire"
-  | "reload"
-  | "activation"
-  | "muted"
-  | "neutral";
-
-const TICK: Record<ChipTick, string> = {
-  draw: "bg-led",
-  movement: "bg-beep",
-  transition: "bg-manual",
-  fire: "bg-done",
-  reload: "bg-live",
-  activation: "bg-ink-2",
-  muted: "bg-muted",
-  // No hue and no meaning: a fact about a row (a region's source) that is
-  // not a budget class, a state or a kind.
-  neutral: "bg-ink",
-};
+export type { ChipTick };
 
 export interface ChipProps
   extends React.HTMLAttributes<HTMLSpanElement>,

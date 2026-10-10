@@ -61,6 +61,17 @@ describe("useNoteAutosave", () => {
     expect(result.current.draft).toBe("mine");
   });
 
+  it("keeps the draft after a failed save when the server value then changes", async () => {
+    const save = vi.fn().mockRejectedValue(new ApiError(500, "boom", {}));
+    const { result, rerender } = setup("old", save, vi.fn());
+    act(() => result.current.onChange("mine"));
+    await settle();
+    expect(result.current.issue).toMatchObject({ kind: "failed" });
+    // A coach response for another reason (a flag) arrives with a new note.
+    rerender({ serverValue: "theirs" });
+    expect(result.current.draft).toBe("mine");
+  });
+
   it("follows the server when nothing local is unsaved", () => {
     const { result, rerender } = setup("old", vi.fn(), vi.fn());
     rerender({ serverValue: "new" });

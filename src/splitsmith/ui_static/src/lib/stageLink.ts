@@ -6,6 +6,7 @@
  * ignored, never an error. Pure, no React.
  */
 import type { CoachShot, StageEvent } from "@/lib/api";
+import { shotAtOrBefore } from "@/lib/coachReview";
 
 export interface StageLink {
   /** Seconds from the beep. */
@@ -55,12 +56,6 @@ export function resolveStageLink(
   const shot = link.shot != null ? (shots.find((s) => s.shot_number === link.shot) ?? null) : null;
   const region = link.region != null ? (events.find((e) => e.id === link.region) ?? null) : null;
   const t = link.t ?? shot?.time_from_beep ?? region?.start ?? null;
-  let active = shot?.shot_number ?? null;
-  if (active == null && t != null) {
-    for (const s of [...shots].sort((a, b) => a.time_from_beep - b.time_from_beep)) {
-      if (s.time_from_beep <= t + 1e-6) active = s.shot_number;
-      else break;
-    }
-  }
+  const active = shot?.shot_number ?? (t != null ? shotAtOrBefore(shots, t) : null);
   return { t, shot: active, region: region?.id ?? null };
 }

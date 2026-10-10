@@ -291,6 +291,24 @@ describe("Coach notes and flags", () => {
     await waitFor(() => expect(screen.queryByTestId("note-save-notice")).toBeNull());
   });
 
+  it("playback does not move the current shot while its note has focus", async () => {
+    const { container } = renderCoachStage([makeShot(1, "c1"), makeShot(2, "c2"), makeShot(3, "c3")]);
+    const box = await screen.findByRole("textbox", { name: "Note on shot 01" });
+    const video = container.querySelector("video")!;
+    Object.defineProperty(video, "readyState", { configurable: true, get: () => 4 });
+    const playTo = (clip: number) => {
+      Object.defineProperty(video, "currentTime", { configurable: true, get: () => clip, set: () => {} });
+      fireEvent.timeUpdate(video);
+    };
+    fireEvent.focus(box);
+    fireEvent.play(video);
+    playTo(5 + 3.1); // past shot 3
+    expect(screen.getByRole("textbox", { name: "Note on shot 01" })).toBe(box);
+    fireEvent.blur(box);
+    playTo(5 + 3.2);
+    await waitFor(() => expect(container.querySelector('[data-shot-number="3"]')).toHaveAttribute("aria-current", "true"));
+  });
+
   it("picking another shot opens its note; the first one's typing is saved on the way out", async () => {
     const one = makeShot(1, "c1");
     const two = makeShot(2, "c2", { coaching_note: "second" });
@@ -425,6 +443,30 @@ describe("Coach player source", () => {
     const { container } = renderCoachRoute();
     await screen.findByRole("region", { name: "Shots" });
     expect(container.querySelector("video")?.getAttribute("src")).toContain("/scrub/");
+  });
+
+  it("a source swap keeps the position: the new source seeks to where the old one was", async () => {
+    vi.mocked(api.getStageCoach).mockResolvedValue(trimCoach({}));
+    const { container } = renderCoachRoute();
+    await screen.findByRole("region", { name: "Shots" });
+    const video = container.querySelector("video")!;
+    let position = 12.5;
+    const seeks: number[] = [];
+    Object.defineProperty(video, "readyState", { configurable: true, get: () => 4 });
+    Object.defineProperty(video, "currentTime", {
+      configurable: true,
+      get: () => position,
+      set: (v: number) => {
+        seeks.push(v);
+        position = v;
+      },
+    });
+    fireEvent.timeUpdate(video);
+    fireEvent.error(video);
+    await waitFor(() => expect(video.getAttribute("src")).toContain("/trim/"));
+    position = 0; // the new source starts at 0
+    fireEvent.loadedMetadata(video);
+    expect(seeks).toEqual([12.5]);
   });
 
   it("falls back to the trim after the rendition errors", async () => {

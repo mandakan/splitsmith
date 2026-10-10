@@ -795,12 +795,11 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
         }
         actions={
           <>
-            {/* Regions and intervals are edited in Breakdown (desktop only). */}
-            {ws.isMobile ? null : (
-              <Button asChild size="lg">
-                <Link to={`${breakdownPrefix}/${stage}${here}`}>Adjust in Breakdown</Link>
-              </Button>
-            )}
+            {/* Regions and intervals are edited in Breakdown. Coach sits
+                behind DesktopGate too, so no phone reaches this header. */}
+            <Button asChild size="lg">
+              <Link to={`${breakdownPrefix}/${stage}${here}`}>Adjust in Breakdown</Link>
+            </Button>
             <Button asChild size="lg">
               <Link to={`${auditPrefix}/${stage}`}>Audit</Link>
             </Button>
@@ -863,6 +862,7 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
               const same = fresh.shots.find((s) => (shot.id ? s.id === shot.id : s.shot_number === shot.shot_number));
               return same?.coaching_note ?? "";
             }}
+            onNoteFocus={ws.holdActiveShot}
             readOnly={notesReadOnly}
           />
         </div>

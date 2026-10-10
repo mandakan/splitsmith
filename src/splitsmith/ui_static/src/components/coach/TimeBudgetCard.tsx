@@ -4,21 +4,14 @@
  * average, the delta against the shooter's match, and the outliers
  * named as buttons that select the shot.
  */
+import { CHIP_TICK_BG } from "@/components/ui/chipTicks";
 import { Label } from "@/components/ui/Label";
 import { BUDGET_LABEL, BUDGET_TICK, type TimeBudget } from "@/lib/timeBudget";
 import { cn } from "@/lib/utils";
 
 import { TimeBudgetBar } from "./TimeBudgetBar";
 
-const TICK_BG: Record<string, string> = {
-  draw: "bg-led",
-  movement: "bg-beep",
-  transition: "bg-manual",
-  fire: "bg-done",
-  reload: "bg-live",
-  activation: "bg-ink-2",
-  muted: "bg-muted",
-};
+const TICK_BG = CHIP_TICK_BG;
 
 export interface TimeBudgetCardProps {
   budget: TimeBudget;

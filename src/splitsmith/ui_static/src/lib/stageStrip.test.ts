@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { CoachShot, StageEvent } from "@/lib/api";
-import { playheadX, shotAtOrBefore, shotLabel, stepShot, stripGeometry, stripTarget } from "@/lib/stageStrip";
+import { playheadX, shotLabel, stepShot, stripGeometry, stripTarget } from "@/lib/stageStrip";
 
 function shot(n: number, t: number, cls: CoachShot["interval_class"]): CoachShot {
   return {
@@ -88,9 +88,7 @@ describe("keys and labels", () => {
     expect(shotLabel({ shot_number: 12, time_from_beep: 3, interval_class: null })).toBe("Shot 12, 3.00 s, unclassified");
   });
 
-  it("finds the shot the playhead has passed and places the playhead", () => {
-    expect(shotAtOrBefore(ticks, 6.5)).toBe(3);
-    expect(shotAtOrBefore(ticks, 1)).toBeNull();
+  it("places the playhead", () => {
     expect(playheadX(5, 10)).toBe(0.5);
     expect(playheadX(-1, 10)).toBe(0);
   });

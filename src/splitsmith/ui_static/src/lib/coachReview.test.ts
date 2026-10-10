@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { CoachShot, StageEvent } from "@/lib/api";
-import { reviewFigures, shotOrdinal } from "@/lib/coachReview";
+import { reviewFigures, shotAtOrBefore, shotOrdinal } from "@/lib/coachReview";
 
 function shot(n: number, t: number, split: number, cls: CoachShot["interval_class"]): CoachShot {
   return {
@@ -48,6 +48,14 @@ describe("reviewFigures", () => {
 
   it("has no figures without shots", () => {
     expect(reviewFigures([], [])).toEqual({ avgSplit: null, draw: null, movingShots: 0, reloads: 0, exposedReload: 0 });
+  });
+});
+
+describe("shotAtOrBefore", () => {
+  it("finds the shot the playhead has passed, in any input order", () => {
+    expect(shotAtOrBefore([...SHOTS].reverse(), 2.4)).toBe(3);
+    expect(shotAtOrBefore(SHOTS, 2.3)).toBe(3);
+    expect(shotAtOrBefore(SHOTS, 1)).toBeNull();
   });
 });
 
