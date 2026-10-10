@@ -13,7 +13,7 @@ import { Chip } from "@/components/ui/Chip";
 import { Label } from "@/components/ui/Label";
 import { Segmented, type SegmentedOption } from "@/components/ui/Segmented";
 import type { StageEvent, StageEventKind } from "@/lib/api";
-import { enclosingMovement, withKind } from "@/lib/events";
+import { enclosingMovement, reloadFigures, withKind } from "@/lib/events";
 import { cn } from "@/lib/utils";
 
 const KINDS: readonly { value: StageEventKind; label: string }[] = [
@@ -32,11 +32,11 @@ export interface EventCardProps {
 }
 
 const f2 = (x: number) => x.toFixed(2);
-const signed = (x: number) => `${x >= 0 ? "+" : ""}${f2(x)}`;
 
 export function EventCard({ event, events, onKind, onKeep, onDelete, onDone }: EventCardProps) {
   const during = event.kind === "reload" ? enclosingMovement(event, events) : null;
-  const overhang = during ? event.end - during.end : null;
+  // The reload's time no movement covers: its whole duration standing.
+  const exposed = event.kind === "reload" ? (reloadFigures(events).find((f) => f.eventId === event.id)?.exposed ?? null) : null;
   const options: SegmentedOption<StageEventKind>[] = KINDS.map((k) => {
     const blocked = k.value !== event.kind && withKind(events, event.id, k.value) === null;
     return { ...k, tick: k.value, disabled: blocked, title: blocked ? "Overlaps a region in that lane" : undefined };
@@ -70,13 +70,13 @@ export function EventCard({ event, events, onKind, onKeep, onDelete, onDone }: E
             )}
           </Row>
         ) : null}
-        {overhang !== null ? (
-          <Row k="Overhang">
-            <Num className="text-live">{signed(overhang)}</Num>
+        {exposed !== null ? (
+          <Row k="Exposed">
+            <Num>{f2(exposed)}</Num>
           </Row>
         ) : null}
         <Row k="Source">
-          <Chip tick={event.source === "auto" ? "muted" : "transition"}>{event.source === "auto" ? "Proposed" : "Manual"}</Chip>
+          <Chip tick={event.source === "auto" ? "muted" : "neutral"}>{event.source === "auto" ? "Proposed" : "Manual"}</Chip>
         </Row>
       </dl>
       <div className="mt-3 flex items-center justify-end gap-2">

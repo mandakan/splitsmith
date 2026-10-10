@@ -49,10 +49,7 @@ def test_fixture_case(name: str) -> None:
     for fig, want in zip(figs, expect["reloads"], strict=True):
         assert round(fig.duration, 2) == pytest.approx(want["duration"])
         assert fig.moving is want["moving"]
-        if want["overhang"] is None:
-            assert fig.overhang is None
-        else:
-            assert round(fig.overhang, 2) == pytest.approx(want["overhang"])
+        assert round(fig.exposed, 2) == pytest.approx(want["exposed"])
 
     summary = stage_event_summary(case["shots"], events, case["capacity"])
     want_s = expect["summary"]
@@ -63,7 +60,7 @@ def test_fixture_case(name: str) -> None:
         assert summary.reload_avg_s is None
     else:
         assert round(summary.reload_avg_s, 2) == pytest.approx(want_s["reload_avg_s"])
-    assert round(summary.overhang_s, 2) == pytest.approx(want_s["overhang_s"])
+    assert round(summary.exposed_reload_s, 2) == pytest.approx(want_s["exposed_reload_s"])
     assert summary.capacity_warning == want_s["capacity_warning"]
 
 

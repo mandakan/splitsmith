@@ -208,14 +208,15 @@ def test_confirmed_regions_reach_the_stage_in_clip_seconds() -> None:
     (reload,) = data["reloads"]
     assert reload["start"] == 10.05 and reload["end"] == 11.47
     assert reload["duration"] == 1.42
-    assert reload["overhang"] is None, "a standing reload has no overhang"
+    assert reload["exposed"] == 1.42, "a standing reload is exposed for its whole duration"
     assert [s["moving"] for s in data["shots"]] == [False, True, False, False]
 
 
-def test_a_reload_inside_a_movement_carries_its_overhang() -> None:
+def test_a_reload_on_the_move_carries_its_exposed_time() -> None:
     events = [_event("evt-1", "movement", 3.4, 9.0), _event("evt-2", "reload", 8.05, 9.47)]
     (reload,) = hud_stage_data(EVENT_SHOTS, beep_in_clip=2.0, events=events)["reloads"]
-    assert reload["overhang"] == 0.47
+    assert reload["exposed"] == 0.47
+    assert "overhang" not in reload
 
 
 def test_proposals_never_reach_the_stage() -> None:

@@ -469,8 +469,8 @@ def hud_samples() -> list[HudSample]:
     bare: list[tuple[str | None, float]] = [(None, 1.05)]
     bare += [(None, 0.3)] * 7
     # Shot 6 lands at 2.80 s, 7 at 4.44, 8 at 4.71, 9 at 6.61, 10 at 6.84, 11 at 7.50.
-    # The reload is on the move and ends after the movement (overhang
-    # +0.15), so the check runs a template's split-band path: the stage bar
+    # The reload is on the move and ends after the movement (0.15 of it
+    # exposed), so the check runs a template's split-band path: the stage bar
     # cuts a reload on the move into its half of the bar.
     regions = (
         _region(1, "reload", 2.95, 4.25),

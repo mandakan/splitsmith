@@ -26,7 +26,7 @@ interface Case {
   events: StageEvent[];
   expect: {
     moving: boolean[];
-    reloads: { event_id: string; duration: number; moving: boolean; overhang: number | null }[];
+    reloads: { event_id: string; duration: number; moving: boolean; exposed: number }[];
     summary: StageEventSummary;
   };
 }
@@ -55,8 +55,7 @@ describe("events fixture parity", () => {
       const want = c.expect.reloads[i];
       expect(r2(f.duration)).toBeCloseTo(want.duration, 9);
       expect(f.moving).toBe(want.moving);
-      if (want.overhang === null) expect(f.overhang).toBeNull();
-      else expect(r2(f.overhang as number)).toBeCloseTo(want.overhang, 9);
+      expect(r2(f.exposed)).toBeCloseTo(want.exposed, 9);
     });
 
     const s = summarize(c.shots, c.events, c.capacity);
@@ -65,7 +64,7 @@ describe("events fixture parity", () => {
     expect(s.reloads).toBe(c.expect.summary.reloads);
     if (c.expect.summary.reload_avg_s === null) expect(s.reload_avg_s).toBeNull();
     else expect(r2(s.reload_avg_s as number)).toBeCloseTo(c.expect.summary.reload_avg_s, 9);
-    expect(r2(s.overhang_s)).toBeCloseTo(c.expect.summary.overhang_s, 9);
+    expect(r2(s.exposed_reload_s)).toBeCloseTo(c.expect.summary.exposed_reload_s, 9);
     expect(s.capacity_warning).toBe(c.expect.summary.capacity_warning);
   });
 

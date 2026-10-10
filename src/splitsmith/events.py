@@ -43,10 +43,12 @@ class ReloadFigure:
     duration: float
     #: True when any movement region overlaps the reload.
     moving: bool
-    #: ``reload.end - movement.end`` against the overlapping movement with
-    #: the latest end; positive means the reload cost time, zero or
-    #: negative means it was hidden. ``None`` for a standing reload.
-    overhang: float | None
+    #: Exposed reload time: the reload's duration minus its total overlap
+    #: with movement regions (their union, so nothing counts twice),
+    #: floored at 0. The time the reload cost: a standing reload is exposed
+    #: for its whole duration, one fully inside a movement for none, and a
+    #: part before the movement starts or after it stops counts.
+    exposed: float
 
 
 class StageEventSummary(BaseModel):
@@ -54,8 +56,8 @@ class StageEventSummary(BaseModel):
     moving_shots: int
     reloads: int
     reload_avg_s: float | None
-    #: Sum of the positive overhangs only.
-    overhang_s: float
+    #: Exposed reload time summed over the stage's reloads.
+    exposed_reload_s: float
     #: "N shots without a reload" when a capacity division fired more
     #: than ``capacity + 1`` rounds between two reload regions.
     capacity_warning: str | None
@@ -150,23 +152,39 @@ def shot_is_moving(time_from_beep: float, events: Sequence[StageEvent]) -> bool:
     return any(e.kind == "movement" and e.start <= time_from_beep <= e.end for e in events)
 
 
-def reload_figures(events: Sequence[StageEvent]) -> list[ReloadFigure]:
-    movements = [e for e in events if e.kind == "movement"]
-    out: list[ReloadFigure] = []
-    for r in sorted((e for e in events if e.kind == "reload"), key=lambda e: e.start):
-        overlapping = [m for m in movements if _overlaps(m, r)]
-        if overlapping:
-            latest_end = max(m.end for m in overlapping)
-            out.append(ReloadFigure(r.id, r.end - r.start, True, r.end - latest_end))
-        else:
-            out.append(ReloadFigure(r.id, r.end - r.start, False, None))
+def exposed_spans(reload: StageEvent, events: Sequence[StageEvent]) -> list[tuple[float, float]]:
+    """The stretches of ``reload`` no movement covers, in time order: the
+    reload minus the union of the movements overlapping it, so two movements
+    that touch or overlap never count the same instant twice. What the
+    exposed figure sums (``exposedSpans`` in ``lib/events.ts``)."""
+    covered = sorted(
+        (max(m.start, reload.start), min(m.end, reload.end))
+        for m in events
+        if m.kind == "movement" and _overlaps(m, reload)
+    )
+    out: list[tuple[float, float]] = []
+    at = reload.start
+    for start, end in covered:
+        if start > at:
+            out.append((at, start))
+        at = max(at, end)
+    if reload.end > at:
+        out.append((at, reload.end))
     return out
 
 
-def positive_overhang_s(figures: Sequence[ReloadFigure]) -> float:
-    """The stage's overhang: the positive overhangs summed. A hidden reload
-    (zero or negative) costs nothing and a standing one has none."""
-    return sum(f.overhang for f in figures if f.overhang is not None and f.overhang > 0)
+def reload_figures(events: Sequence[StageEvent]) -> list[ReloadFigure]:
+    out: list[ReloadFigure] = []
+    for r in sorted((e for e in events if e.kind == "reload"), key=lambda e: e.start):
+        moving = any(m.kind == "movement" and _overlaps(m, r) for m in events)
+        exposed = sum(end - start for start, end in exposed_spans(r, events))
+        out.append(ReloadFigure(r.id, r.end - r.start, moving, max(0.0, exposed)))
+    return out
+
+
+def exposed_reload_s(figures: Sequence[ReloadFigure]) -> float:
+    """The stage's exposed reload time: every reload's exposed time summed."""
+    return sum(f.exposed for f in figures)
 
 
 def _capacity_warning(
@@ -205,7 +223,7 @@ def stage_event_summary(
         moving_shots=sum(1 for t in shot_times if shot_is_moving(t, events)),
         reloads=len(figs),
         reload_avg_s=(sum(f.duration for f in figs) / len(figs)) if figs else None,
-        overhang_s=positive_overhang_s(figs),
+        exposed_reload_s=exposed_reload_s(figs),
         capacity_warning=_capacity_warning(shot_times, reloads, capacity),
     )
 

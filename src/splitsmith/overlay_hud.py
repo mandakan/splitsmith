@@ -197,7 +197,7 @@ def hud_stage_data(
 
     ``events`` and ``reloads`` come from confirmed regions only
     (``events.confirmed``; a proposal is dropped here as well, so no caller
-    can leak one), in clip seconds. A reload's duration and overhang are
+    can leak one), in clip seconds. A reload's duration and exposed time are
     ``events.reload_figures``', so a template never re-derives one. Both
     keys are always present, empty without confirmed regions."""
     regions = confirmed(events)
@@ -227,7 +227,7 @@ def hud_stage_data(
                 "start": _clip(beep_in_clip, by_id[fig.event_id].start),
                 "end": _clip(beep_in_clip, by_id[fig.event_id].end),
                 "duration": round(fig.duration, 6),
-                "overhang": None if fig.overhang is None else round(fig.overhang, 6),
+                "exposed": round(fig.exposed, 6),
             }
             for fig in reload_figures(regions)
         ],

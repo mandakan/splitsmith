@@ -201,7 +201,7 @@ describe("useStageEvents: an in-flight save never reverts or drops an edit (#132
   afterEach(() => vi.useRealTimers());
 
   const conflict = () => new ApiError(409, "version_conflict", { code: "version_conflict" });
-  const summary = { movement_s: 0, moving_shots: 3, reloads: 0, reload_avg_s: null, overhang_s: 0, capacity_warning: null };
+  const summary = { movement_s: 0, moving_shots: 3, reloads: 0, reload_avg_s: null, exposed_reload_s: 0, capacity_warning: null };
 
   function setupWithDiscard() {
     const applyCoach = vi.fn();

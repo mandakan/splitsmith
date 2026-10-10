@@ -39,7 +39,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Kbd } from "@/components/ui/Kbd";
 import { Label } from "@/components/ui/Label";
 import type { StageEvent, StageEventKind } from "@/lib/api";
-import { enclosingMovement, shotIsMoving, snapTime, timeFromX } from "@/lib/events";
+import { enclosingMovement, exposedSpans, shotIsMoving, snapTime, timeFromX } from "@/lib/events";
 import { cn } from "@/lib/utils";
 
 import {
@@ -338,7 +338,11 @@ export function LaneEditor(props: LaneEditorProps) {
   };
 
   const selected = events.find((x) => x.id === selectedId);
-  const overhangOf = selected?.kind === "reload" ? enclosingMovement(selected, events) : null;
+  // A reload on the move brackets the stretches no movement covers (its
+  // exposed time); a standing reload is exposed end to end, which the
+  // region itself already shows.
+  const exposed =
+    selected?.kind === "reload" && enclosingMovement(selected, events) ? exposedSpans(selected, events) : [];
 
   return (
     <div
@@ -445,7 +449,8 @@ export function LaneEditor(props: LaneEditorProps) {
                   ))}
               </div>
             ))}
-            {kind === "reload" && selected && overhangOf && <OverhangBracket from={overhangOf.end} to={selected.end} pct={pct} />}
+            {kind === "reload" &&
+              exposed.map(([from, to]) => <ExposedBracket key={`${from}-${to}`} from={from} to={to} pct={pct} />)}
           </div>
         );
       })}
@@ -485,20 +490,16 @@ export function LaneHints({ readOnly }: { readOnly?: boolean }) {
   );
 }
 
-/** Reload end minus the enclosing movement's end, drawn between the two. */
-function OverhangBracket({ from, to, pct }: { from: number; to: number; pct: (t: number) => string }) {
-  const lo = Math.min(from, to);
-  const d = to - from;
+/** One stretch of a reload no movement covers, labelled with its length. */
+function ExposedBracket({ from, to, pct }: { from: number; to: number; pct: (t: number) => string }) {
   return (
     <div
       aria-hidden="true"
+      data-testid="exposed-bracket"
       className="pointer-events-none absolute bottom-0 border-t border-dashed border-ink-2"
-      style={{ left: pct(lo), width: pct(Math.abs(d)) }}
+      style={{ left: pct(from), width: pct(to - from) }}
     >
-      <span className="numeral absolute -top-4 left-1/2 -translate-x-1/2 text-xs text-ink-2">
-        {d >= 0 ? "+" : "-"}
-        {Math.abs(d).toFixed(2)}
-      </span>
+      <span className="numeral absolute -top-4 left-1/2 -translate-x-1/2 text-xs text-ink-2">{(to - from).toFixed(2)}</span>
     </div>
   );
 }

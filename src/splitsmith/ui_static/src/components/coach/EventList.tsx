@@ -1,7 +1,7 @@
 /**
  * EventList -- the read-only companion to the lanes (phone, or a match
  * mirrored from a desktop): one hairline row per region in time order. A
- * reload reads as its duration and overhang, a movement or activation as
+ * reload reads as its duration and exposed time, a movement or activation as
  * its range, a movement with the shots fired inside it.
  */
 import { Chip } from "@/components/ui/Chip";
@@ -33,15 +33,8 @@ export function EventList({ events, shots }: EventListProps) {
               {fig ? (
                 <>
                   {f2(fig.duration)}
-                  {fig.overhang !== null ? (
-                    <>
-                      {" · "}
-                      <span className="text-live">
-                        {fig.overhang >= 0 ? "+" : ""}
-                        {f2(fig.overhang)}
-                      </span>
-                    </>
-                  ) : null}
+                  {" · "}
+                  <span className="text-ink">{f2(fig.exposed)} exposed</span>
                 </>
               ) : (
                 <>

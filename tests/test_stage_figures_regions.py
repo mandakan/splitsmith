@@ -1,6 +1,6 @@
 """Region figures on ``stages[].figures`` (spec 2026-10-08, part 2, "Share
 figures"): ``moving_shots``, ``reloads``, ``reload_avg_s`` and
-``overhang_s`` come from *confirmed* regions only (``source == "manual"``,
+``exposed_reload_s`` come from *confirmed* regions only (``source == "manual"``,
 ``events.confirmed_from_doc``), and are all ``null`` when the stage has
 none. An auto proposal nobody looked at never reaches a shared figure.
 """
@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 from splitsmith.ui.server import create_app
 
-REGION_KEYS = ("moving_shots", "reloads", "reload_avg_s", "overhang_s")
+REGION_KEYS = ("moving_shots", "reloads", "reload_avg_s", "exposed_reload_s")
 
 
 @pytest.fixture(autouse=True)
@@ -85,7 +85,7 @@ def test_auto_proposals_alone_report_null_region_figures(tmp_path: Path) -> None
 
 def test_confirmed_reload_on_the_move_reports_figures(tmp_path: Path) -> None:
     """Movement 1.6-3.5 covers shots 2 and 3; the reload 3.4-5.2 overlaps
-    it, so it overhangs by 5.2 - 3.5. An auto reload beside them is not
+    it by 0.1, so 1.7 of it is exposed. An auto reload beside them is not
     counted."""
     figures = _figures(
         tmp_path,
@@ -98,12 +98,13 @@ def test_confirmed_reload_on_the_move_reports_figures(tmp_path: Path) -> None:
     assert figures["moving_shots"] == 2
     assert figures["reloads"] == 1
     assert figures["reload_avg_s"] == pytest.approx(1.8)
-    assert figures["overhang_s"] == pytest.approx(1.7)
+    assert figures["exposed_reload_s"] == pytest.approx(1.7)
 
 
-def test_standing_reload_has_no_overhang_figure(tmp_path: Path) -> None:
-    """A standing reload measures no overhang: ``null``, never ``0.0``
-    (the summary card omits it on the same condition)."""
+def test_standing_reload_is_exposed_for_its_whole_duration(tmp_path: Path) -> None:
+    """A standing reload cost all of its time: its exposed figure is its
+    full duration, never ``null`` or ``0.0`` (the summary card draws the
+    same figure)."""
     figures = _figures(
         tmp_path,
         [{"id": "evt-1", "kind": "reload", "start": 3.4, "end": 5.2, "source": "manual"}],
@@ -111,7 +112,8 @@ def test_standing_reload_has_no_overhang_figure(tmp_path: Path) -> None:
     assert figures["moving_shots"] == 0
     assert figures["reloads"] == 1
     assert figures["reload_avg_s"] == pytest.approx(1.8)
-    assert figures["overhang_s"] is None
+    assert figures["exposed_reload_s"] == pytest.approx(1.8)
+    assert "overhang_s" not in figures
 
 
 def test_confirmed_movement_alone_reports_moving_shots_and_no_reload_figures(tmp_path: Path) -> None:
@@ -126,5 +128,5 @@ def test_confirmed_movement_alone_reports_moving_shots_and_no_reload_figures(tmp
         "moving_shots": 2,
         "reloads": 0,
         "reload_avg_s": None,
-        "overhang_s": None,
+        "exposed_reload_s": None,
     }

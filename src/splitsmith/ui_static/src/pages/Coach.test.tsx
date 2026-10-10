@@ -170,7 +170,7 @@ describe("Coach stage stream URL", () => {
 function makeCoachWithEvents(shots: CoachShot[], events: StageEvent[], version = "aaaaaaaaaaaaaaaa"): CoachStageResponse {
   return { ...makeCoach(shots), events, _version: version,
     event_summary: { movement_s: 0, moving_shots: 0, reloads: events.filter((e) => e.kind === "reload").length,
-      reload_avg_s: null, overhang_s: 0.31, capacity_warning: null } };
+      reload_avg_s: null, exposed_reload_s: 0.31, capacity_warning: null } };
 }
 
 function renderCoachRoute() {
@@ -192,7 +192,7 @@ describe("stage events on the Coach page", () => {
       stages: [{ stage_number: 1, stage_name: "Stage One", time_seconds: 16.2 }] } as never);
     // The strip now computes from these events (summarize, #1324), not the
     // mocked event_summary below: a movement region overlapping the reload
-    // gives an overhang of 9.47 - 9.16 = 0.31, same as the hardcoded figure
+    // leaves 9.47 - 9.16 = 0.31 of it exposed, same as the hardcoded figure
     // makeCoachWithEvents used to send, so the two cannot be told apart by
     // this assertion alone -- the parity test below is what pins it.
     vi.mocked(api.getStageCoach).mockResolvedValue(
@@ -200,28 +200,43 @@ describe("stage events on the Coach page", () => {
         [makeShot(1, "c1"), makeShot(2, "c2")],
         [
           { id: "evt-0", kind: "movement", start: 7.6, end: 9.16, source: "manual" },
-          { id: "evt-1", kind: "reload", start: 8.05, end: 9.47, source: "auto" },
+          { id: "evt-1", kind: "reload", start: 8.05, end: 9.47, source: "manual" },
         ],
       ),
     );
     render(<MemoryRouter initialEntries={["/match/m1/coach/anna/1"]}><Routes>
       <Route path="/match/:matchId/coach/:slug/:stage" element={<Coach />} /></Routes></MemoryRouter>);
-    expect(await screen.findByTestId("event-evt-1")).toHaveAttribute("data-source", "auto");
-    expect(screen.getByText("Overhang")).toBeInTheDocument();
-    expect(screen.getByText("+0.31")).toBeInTheDocument();
+    expect(await screen.findByTestId("event-evt-1")).toHaveAttribute("data-source", "manual");
+    const strip = screen.getByText("Exposed reload").parentElement!;
+    expect(within(strip).getByText("0.31")).toBeInTheDocument();
+    expect(screen.queryByText("+0.31")).toBeNull();
   });
 
-  it("ignores a stale server moving/overhang figure and computes it from the local events; capacity_warning still comes from the server", async () => {
+  it("shows a standing reload's whole duration as exposed in the stat strip", async () => {
+    vi.mocked(api.getProject).mockResolvedValue({ name: "M", competitor_name: "Anna",
+      stages: [{ stage_number: 1, stage_name: "Stage One", time_seconds: 16.2 }] } as never);
+    vi.mocked(api.getStageCoach).mockResolvedValue(
+      makeCoachWithEvents([makeShot(1, "c1"), makeShot(2, "c2")], [
+        { id: "evt-1", kind: "reload", start: 8.05, end: 9.47, source: "manual" },
+      ]),
+    );
+    renderCoachRoute();
+    await screen.findByTestId("event-evt-1");
+    const strip = screen.getByText("Exposed reload").parentElement!;
+    expect(within(strip).getByText("1.42")).toBeInTheDocument();
+  });
+
+  it("ignores a stale server moving/exposed figure and computes it from the local events; capacity_warning still comes from the server", async () => {
     vi.mocked(api.getProject).mockResolvedValue({ name: "M", competitor_name: "Anna",
       stages: [{ stage_number: 1, stage_name: "Stage One", time_seconds: 16.2 }] } as never);
     const movement: StageEvent = { id: "evt-0", kind: "movement", start: 7.6, end: 9.16, source: "manual" };
-    const reload: StageEvent = { id: "evt-1", kind: "reload", start: 8.05, end: 9.47, source: "auto" };
+    const reload: StageEvent = { id: "evt-1", kind: "reload", start: 8.05, end: 9.47, source: "manual" };
     const shots = [makeShot(1, "c1"), makeShot(2, "c2")];
     // The TS twin of the server's own ``events.stage_event_summary`` (all
     // regions, no capacity) for this exact list -- what the real server
     // response would carry.
     const real = summarize(shots.map((s) => s.time_from_beep), [movement, reload], null);
-    expect(real.overhang_s).toBeCloseTo(0.31);
+    expect(real.exposed_reload_s).toBeCloseTo(0.31);
     const coach = makeCoachWithEvents(shots, [movement, reload], "v1v1v1v1v1v1v1v1");
     coach.event_summary = {
       // A stale server figure (e.g. computed before an edit landed): if the
@@ -229,13 +244,13 @@ describe("stage events on the Coach page", () => {
       // the real 0.31.
       ...real,
       moving_shots: 7,
-      overhang_s: 9.99,
+      exposed_reload_s: 9.99,
       capacity_warning: "9 shots without a reload",
     };
     vi.mocked(api.getStageCoach).mockResolvedValue(coach);
     renderCoachRoute();
-    expect(await screen.findByText("+0.31")).toBeInTheDocument();
-    expect(screen.queryByText("+9.99")).toBeNull();
+    expect(await screen.findByText("0.31")).toBeInTheDocument();
+    expect(screen.queryByText("9.99")).toBeNull();
     // Neither shot (t=1, t=2) falls inside the movement region (7.6-9.16),
     // so the real, locally-computed count is 0 -- not the server's stale 7.
     const onMove = screen.getByText("On the move").parentElement!;
@@ -254,7 +269,7 @@ describe("stage events on the Coach page", () => {
         [makeShot(1, "c1"), makeShot(2, "c2")],
         [
           { id: "evt-0", kind: "movement", start: 7.6, end: 9.16, source: "manual" },
-          { id: "evt-1", kind: "reload", start: 8.05, end: 9.47, source: "auto" },
+          { id: "evt-1", kind: "reload", start: 8.05, end: 9.47, source: "manual" },
         ],
         "v1v1v1v1v1v1v1v1",
       ),
@@ -263,9 +278,9 @@ describe("stage events on the Coach page", () => {
     // on the PUT, let alone its answer.
     vi.mocked(api.putStageEvents).mockImplementation(() => new Promise(() => {}));
     renderCoachRoute();
-    expect(await screen.findByText("+0.31")).toBeInTheDocument();
+    expect(await screen.findByText("0.31")).toBeInTheDocument();
     // Selecting the region opens the region card, which shows its own
-    // "Overhang" readout alongside the strip's -- scope to the strip (the
+    // "Exposed" readout alongside the strip's -- scope to the strip (the
     // container that also holds "On the move") so the two are not conflated.
     const strip = screen.getByText("On the move").closest("div")!.parentElement!;
     const region = await screen.findByTestId("event-evt-1");
@@ -275,17 +290,17 @@ describe("stage events on the Coach page", () => {
       vi.useRealTimers();
     });
     // Shift+ArrowRight moves the reload's end one frame later (1/30 s),
-    // widening the overhang from 0.31 to ~0.34.
+    // widening the exposed time from 0.31 to ~0.34.
     fireEvent.keyDown(region, { key: "ArrowRight", shiftKey: true });
-    expect(within(strip).getByText("+0.34")).toBeInTheDocument();
-    expect(within(strip).queryByText("+0.31")).toBeNull();
+    expect(within(strip).getByText("0.34")).toBeInTheDocument();
+    expect(within(strip).queryByText("0.31")).toBeNull();
     // Still true once the debounce fires the (unresolved) PUT.
     expect(api.putStageEvents).not.toHaveBeenCalled();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(COMMIT_DEBOUNCE_MS);
     });
     expect(api.putStageEvents).toHaveBeenCalledTimes(1);
-    expect(within(strip).getByText("+0.34")).toBeInTheDocument();
+    expect(within(strip).getByText("0.34")).toBeInTheDocument();
   });
 
   it("deleting the selected region PUTs the list with _version and applies the response", async () => {
@@ -300,6 +315,26 @@ describe("stage events on the Coach page", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
     await waitFor(() => expect(api.putStageEvents).toHaveBeenCalledWith("anna", 1, [], "v1v1v1v1v1v1v1v1"));
     await waitFor(() => expect(screen.queryByTestId("event-evt-1")).toBeNull());
+  });
+
+  it("counts only confirmed regions in the stat strip: a proposed reload adds no exposed figure until Keep", async () => {
+    vi.mocked(api.getProject).mockResolvedValue({ name: "M", competitor_name: "Anna",
+      stages: [{ stage_number: 1, stage_name: "Stage One", time_seconds: 16.2 }] } as never);
+    const auto: StageEvent = { id: "evt-1", kind: "reload", start: 8.05, end: 9.47, source: "auto" };
+    vi.mocked(api.getStageCoach).mockResolvedValue(makeCoachWithEvents([makeShot(1, "c1")], [auto], "v1v1v1v1v1v1v1v1"));
+    vi.mocked(api.putStageEvents).mockResolvedValue(
+      makeCoachWithEvents([makeShot(1, "c1")], [{ ...auto, source: "manual" }], "v2v2v2v2v2v2v2v2"));
+    renderCoachRoute();
+    fireEvent.click(await screen.findByTestId("event-evt-1"));
+    // The card still describes the proposal itself...
+    const card = screen.getByRole("region", { name: "Region" });
+    expect(within(card).getByText("Exposed")).toBeInTheDocument();
+    // ...but the stage total in the strip does not count it.
+    expect(screen.getByText("On the move")).toBeInTheDocument();
+    expect(screen.queryByText("Exposed reload")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Keep" }));
+    const strip = (await screen.findByText("Exposed reload")).parentElement!;
+    expect(within(strip).getByText("1.42")).toBeInTheDocument();
   });
 
   it("Keep on a proposal PUTs the list with that region manual and every other field unchanged", async () => {

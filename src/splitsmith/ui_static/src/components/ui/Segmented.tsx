@@ -16,6 +16,7 @@ const TICK: Record<ChipTick, string> = {
   reload: "bg-live",
   activation: "bg-ink-2",
   muted: "bg-muted",
+  neutral: "bg-ink",
 };
 
 export interface SegmentedOption<T extends string> {

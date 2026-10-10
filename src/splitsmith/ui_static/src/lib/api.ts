@@ -255,12 +255,13 @@ export interface StageFigures {
   shot_count: number;
   split_count: number;
   /** Region figures from confirmed regions only (spec 2026-10-08, part 2);
-   *  all null when the stage has none. `overhang_s` is null unless a
-   *  reload overlaps a movement. Optional: an older server omits them. */
+   *  all null when the stage has none. `exposed_reload_s` is the reloads'
+   *  time not covered by a movement, set whenever there is a confirmed
+   *  reload. Optional: an older server omits them. */
   moving_shots?: number | null;
   reloads?: number | null;
   reload_avg_s?: number | null;
-  overhang_s?: number | null;
+  exposed_reload_s?: number | null;
 }
 
 /** A shooter's identity (#1243): accent, logo file name (content-named,
@@ -1790,7 +1791,7 @@ export interface StageEventSummary {
   moving_shots: number;
   reloads: number;
   reload_avg_s: number | null;
-  overhang_s: number;
+  exposed_reload_s: number;
   capacity_warning: string | null;
 }
 

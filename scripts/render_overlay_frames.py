@@ -24,7 +24,7 @@ has to work out: ``pre-beep``, ``first-shot``, ``mid-action``,
 With ``--stage-events`` (implied by ``--reload-chip`` / ``--stage-bar``)
 the stage is a different twelve shots with a confirmed movement spanning
 three of them, a confirmed reload overlapping the movement's end (so
-its overhang is positive) and a confirmed activation later on; five more
+part of it is exposed) and a confirmed activation later on; five more
 moments come out: ``mid-movement``, ``mid-reload``, ``reload-fade``
 (0.2 s after the reload ends), ``activation`` and ``landed``. Render
 it with both toggles off as well: that is the frame to compare with the
@@ -79,7 +79,7 @@ SHOTS_MS = (1100, 1320, 1560, 1740, 1980, 2310, 2530, 2790, 3040, 3280, 3600, 38
 
 # The stage with regions: three standing shots, three fired on the move,
 # a reload that starts on the move and ends 1.0 s after the movement
-# does (positive overhang), then six standing shots with an activation
+# does (1.0 s of it exposed), then six standing shots with an activation
 # among them. Milliseconds from the beep, like the shots; every region
 # confirmed (``manual``).
 EVENT_SHOTS_MS = (1100, 1320, 1540, 1900, 2150, 2400, 3850, 4070, 4290, 4520, 4740, 4960)

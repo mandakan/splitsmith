@@ -287,7 +287,7 @@ def test_a_confirmed_reload_adds_exactly_the_reload_row(tmp_path: Path) -> None:
     tile = _events_tile(_audit(tmp_path, [_MOVE_2, _RELOAD]))
     without = _events_tile(_audit(tmp_path, [_MOVE_2]))
     groups, base = _groups(tile), _groups(without)
-    assert _splits_rows(groups)[-1] == [("Reloads", "1"), ("Reload avg", "1.42"), ("Overhang", "+0.31")]
+    assert _splits_rows(groups)[-1] == [("Reloads", "1"), ("Reload avg", "1.42"), ("Exposed", "0.31")]
     assert groups[-1].columns == 4 and groups[-1].flow is Flow.GRID
     # The Best/Avg/Worst/Draw row above it is the same row, now on the
     # band's shared four columns.
@@ -297,14 +297,14 @@ def test_a_confirmed_reload_adds_exactly_the_reload_row(tmp_path: Path) -> None:
 
 def test_the_reload_row_drops_after_the_unlit_faults_and_before_the_rest(tmp_path: Path) -> None:
     """A cell too small for everything gives up the unlit faults, then the
-    reload row (overhang first, count last), then the scoring it did before;
+    reload row (exposed first, count last), then the scoring it did before;
     the split figures never carry a priority."""
     groups = _groups(_events_tile(_audit(tmp_path, [_MOVE_2, _RELOAD])))
     order = sorted(
         (e.drop_priority, e.text) for g in groups for e in g.elements if e.drop_priority is not None
     )
     assert [text for _, text in order] == [
-        "M0", "NS0", "+0.31", "1.42", "1", "A20", "C3", "D1", "P1", "6.42", "10.40s", "Scoring",
+        "M0", "NS0", "0.31", "1.42", "1", "A20", "C3", "D1", "P1", "6.42", "10.40s", "Scoring",
     ]  # fmt: skip
     assert [p for p, _ in order] == list(range(len(order)))
 
@@ -315,20 +315,19 @@ def test_an_auto_reload_adds_no_row(tmp_path: Path) -> None:
     assert _groups(auto) == _groups(none)
 
 
-def test_standing_reloads_draw_no_overhang(tmp_path: Path) -> None:
-    """A standing reload has no overhang (``None``, not zero): the row
-    never draws a figure that was not measured."""
+def test_a_standing_reload_is_exposed_for_its_whole_duration(tmp_path: Path) -> None:
+    """A standing reload cost all of its time: the row draws Exposed, the
+    reload's full duration, unsigned (never omitted, never ``+0.00``)."""
     reload_ = {**_RELOAD, "start": 9.0, "end": 9.5}
     rows = _splits_rows(_groups(_events_tile(_audit(tmp_path, [reload_]))))
-    assert rows[-1] == [("Reloads", "1"), ("Reload avg", "0.50")]
+    assert rows[-1] == [("Reloads", "1"), ("Reload avg", "0.50"), ("Exposed", "0.50")]
 
 
-def test_a_hidden_reload_sums_no_overhang(tmp_path: Path) -> None:
-    """Only positive overhangs are summed, as on the Coach page: a reload
-    finished inside its movement (-0.16) reads +0.00, not -0.16."""
+def test_a_reload_hidden_inside_its_movement_is_exposed_for_none(tmp_path: Path) -> None:
+    """A reload finished inside its movement cost nothing: 0.00."""
     hidden = {**_RELOAD, "start": 7.7, "end": 9.0}
     rows = _splits_rows(_groups(_events_tile(_audit(tmp_path, [_MOVE_2, hidden]))))
-    assert rows[-1] == [("Reloads", "1"), ("Reload avg", "1.30"), ("Overhang", "+0.00")]
+    assert rows[-1] == [("Reloads", "1"), ("Reload avg", "1.30"), ("Exposed", "0.00")]
 
 
 def test_static_and_moving_splits_become_two_rows(tmp_path: Path) -> None:
@@ -345,7 +344,7 @@ def test_static_moving_and_a_reload_share_the_last_row_with_the_draw(tmp_path: P
     assert rows == [
         [(None, "Static"), ("Best", "0.22"), ("Avg", "0.24"), ("Worst", "0.27")],
         [(None, "Moving"), (None, "0.31"), (None, "0.32"), (None, "0.32")],
-        [("Draw", "1.10"), ("Reloads", "1"), ("Reload avg", "1.42"), ("Overhang", "+0.31")],
+        [("Draw", "1.10"), ("Reloads", "1"), ("Reload avg", "1.42"), ("Exposed", "0.31")],
     ]
 
 
@@ -359,7 +358,7 @@ def test_a_short_cell_keeps_one_split_row_and_the_reload_row(tmp_path: Path) -> 
     short = cell.summary_groups(tile, "Me", scale=scale, cell_width=640, cell_height=360)
     assert _splits_rows(short) == [
         [("Best", "0.22"), ("Avg", "0.26"), ("Worst", "0.32"), ("Draw", "1.10")],
-        [("Reloads", "1"), ("Reload avg", "1.42"), ("Overhang", "+0.31")],
+        [("Reloads", "1"), ("Reload avg", "1.42"), ("Exposed", "0.31")],
     ]
     tall = cell.summary_groups(tile, "Me", scale=cell.summary_scale(480), cell_width=853, cell_height=480)
     assert [row[0] for row in _splits_rows(tall)[:2]] == [(None, "Static"), (None, "Moving")]
@@ -405,7 +404,7 @@ def test_the_grid_hold_keeps_one_comparable_split_row(tmp_path: Path) -> None:
     )
     assert _splits_rows(grid) == [
         [("Best", "0.22"), ("Avg", "0.26"), ("Worst", "0.32"), ("Draw", "1.10")],
-        [("Reloads", "1"), ("Reload avg", "1.42"), ("Overhang", "+0.31")],
+        [("Reloads", "1"), ("Reload avg", "1.42"), ("Exposed", "0.31")],
     ]
     single = cell.summary_groups(tile, "Me", scale=cell.summary_scale(540), cell_width=960, cell_height=540)
     assert _splits_rows(single)[0][0] == (None, "Static")
@@ -427,7 +426,7 @@ def test_the_grid_hold_still_declares_no_static_or_moving_row(tmp_path: Path) ->
     )
     (html,) = fake.calls
     assert ">Static<" not in html and ">Moving<" not in html
-    assert ">Reloads<" in html and ">+0.31<" in html
+    assert ">Reloads<" in html and ">Exposed<" in html and ">0.31<" in html
 
 
 @pytest.mark.parametrize(("width", "height"), [(1080, 1920), (720, 1280), (1080, 1081)])
@@ -444,7 +443,7 @@ def test_a_narrow_card_keeps_one_split_row_and_the_reload_row_on_its_own(
     )
     assert _splits_rows(groups) == [
         [("Best", "0.22"), ("Avg", "0.26"), ("Worst", "0.32"), ("Draw", "1.10")],
-        [("Reloads", "1"), ("Reload avg", "1.42"), ("Overhang", "+0.31")],
+        [("Reloads", "1"), ("Reload avg", "1.42"), ("Exposed", "0.31")],
     ]
 
 
@@ -486,7 +485,7 @@ def test_reloads_load_from_confirmed_regions_only(tmp_path: Path) -> None:
     (fig,) = load_stage_reloads(_audit(tmp_path, [_MOVE_2, _RELOAD, _AUTO_RELOAD]))
     assert fig.event_id == "evt-3"
     assert fig.duration == pytest.approx(1.42)
-    assert fig.overhang == pytest.approx(0.31)
+    assert fig.exposed == pytest.approx(0.31)
     assert load_stage_reloads(_audit(tmp_path, None)) == ()
 
 
@@ -503,7 +502,7 @@ def test_a_corrupt_events_list_keeps_the_shots_and_draws_no_regions(tmp_path: Pa
 def test_the_rows_reach_the_rendered_html(tmp_path: Path) -> None:
     tile = _events_tile(_audit(tmp_path, [_MOVE_1, _MOVE_2, _RELOAD]))
     html = single_html(_groups(tile), width=1920, height=1080, scale=cell.summary_scale(1080), theme=THEME)
-    for text in (">Static<", ">Moving<", ">Reloads<", ">Reload avg<", ">+0.31<"):
+    for text in (">Static<", ">Moving<", ">Reloads<", ">Reload avg<", ">Exposed<"):
         assert text in html
 
 
@@ -515,7 +514,7 @@ def test_a_short_row_keeps_the_bands_four_columns(tmp_path: Path) -> None:
 
     groups = _groups(_events_tile(_audit(tmp_path, [_MOVE_2, _RELOAD])))
     reload_row = groups[-1]
-    assert [e.caption for e in reload_row.elements] == ["Reloads", "Reload avg", "Overhang"]
+    assert [e.caption for e in reload_row.elements] == ["Reloads", "Reload avg", "Exposed"]
     assert "grid-template-columns: repeat(4, 1fr)" in _group_div(reload_row)
 
 
@@ -523,17 +522,31 @@ def test_a_short_row_keeps_the_bands_four_columns(tmp_path: Path) -> None:
 
 #: Every visible grid-row figure or caption whose text is wider than its
 #: own column, or a caption that wrapped: what ``overflow: hidden`` would
-#: cut to a plausible wrong figure ("1.4" for 1.42).
+#: cut to a plausible wrong figure ("1.4" for 1.42). Also any whose text
+#: ends closer than half the band's caption size to the next column it
+#: overlaps vertically (measured independently of fit.js's own 0.6 em):
+#: "Reload avg" against "Exposed" reads as one phrase, and a caption-less
+#: "Static" label sits lower on its row's last baseline than the figures.
 _COLUMN_OVERFLOWS_JS = """() => {
   const out = [];
+  const visible = (e) => getComputedStyle(e).display !== 'none';
   document.querySelectorAll('.group.flow-grid > .el').forEach((el) => {
-    if (getComputedStyle(el).display === 'none') { return; }
-    const width = el.getBoundingClientRect().width;
+    if (!visible(el)) { return; }
+    const box = el.getBoundingClientRect();
+    let next = el.nextElementSibling;
+    while (next && !visible(next)) { next = next.nextElementSibling; }
+    const nextBox = next ? next.getBoundingClientRect() : null;
+    const sameRow =
+      nextBox && box.top < nextBox.bottom && nextBox.top < box.bottom && nextBox.left > box.left;
+    const caption = document.querySelector('.anchor-middle-center .caption');
     Array.from(el.children).forEach((child) => {
       const range = document.createRange();
       range.selectNodeContents(child);
+      const rect = range.getBoundingClientRect();
       const wrapped = child.classList.contains('caption') && range.getClientRects().length > 1;
-      if (range.getBoundingClientRect().width > width + 0.5 || wrapped) { out.push(child.textContent); }
+      const em = parseFloat(getComputedStyle(caption || child).fontSize);
+      const crowded = sameRow && nextBox.left - rect.right < 0.5 * em;
+      if (rect.width > box.width + 0.5 || wrapped || crowded) { out.push(child.textContent); }
     });
   });
   return out;
@@ -564,20 +577,40 @@ def _column_overflows(html: str, *, width: int, height: int, tmp_path: Path) -> 
 
 @pytest.mark.integration
 @pytest.mark.parametrize(("width", "height"), [(1080, 1920), (720, 1280)])
-@pytest.mark.parametrize("events", [None, [_MOVE_1, _MOVE_2, _RELOAD]])
+@pytest.mark.parametrize("events", [None, [_MOVE_1, _MOVE_2, _RELOAD], [_RELOAD]])
 def test_a_portrait_card_draws_every_figure_whole(
     tmp_path: Path, width: int, height: int, events: list[dict] | None
 ) -> None:
     """A portrait card's quarter columns are narrower than a headline
     figure at full size: the card shrinks until each figure fits its own
-    column, rather than cutting 1.42 to "1.4" and +0.31 to "+0.". The HTML
-    is the one ``build_summary_still`` hands the rasterizer."""
+    column, rather than cutting 1.42 to "1.4" and +0.31 to "+0.", and
+    keeps a gap before the next column, so a standing reload's "Reload avg"
+    and "Exposed" never read as one caption. The HTML is the one
+    ``build_summary_still`` hands the rasterizer."""
     fake = _FakeRasterizer()
     tile = _events_tile(_audit(tmp_path, events))
     cell.build_summary_still(
         tile, "Me", width=width, height=height, theme=THEME, rasterizer=fake, backdrop=None
     )
     (html,) = fake.calls
+    assert _column_overflows(html, width=width, height=height, tmp_path=tmp_path) == []
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(("width", "height"), [(1920, 1080), (1080, 1080), (853, 480)])
+def test_a_static_moving_card_keeps_its_row_labels_clear_of_the_figures(
+    tmp_path: Path, width: int, height: int
+) -> None:
+    """The Static and Moving rows sit on their last baseline, so the
+    caption-less label sits lower than the captioned figures beside it:
+    it still counts as the same row and keeps the gap before them."""
+    fake = _FakeRasterizer()
+    tile = _events_tile(_audit(tmp_path, [_MOVE_1, _MOVE_2, _RELOAD]))
+    cell.build_summary_still(
+        tile, "Me", width=width, height=height, theme=THEME, rasterizer=fake, backdrop=None
+    )
+    (html,) = fake.calls
+    assert ">Static<" in html
     assert _column_overflows(html, width=width, height=height, tmp_path=tmp_path) == []
 
 

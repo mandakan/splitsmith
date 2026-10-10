@@ -75,25 +75,36 @@ const E = (id: string, kind: StageEvent["kind"], start: number, end: number, sou
 describe("EventCard", () => {
   const events = [E("evt-1", "movement", 7.6, 9.16), E("evt-2", "reload", 8.05, 9.47)];
 
-  it("shows start, end, duration, the enclosing movement and the overhang for a reload", () => {
+  it("shows start, end, duration, the enclosing movement and the exposed time for a reload", () => {
     render(<EventCard event={events[1]} events={events} onKind={vi.fn()} onKeep={vi.fn()} onDelete={vi.fn()} onDone={vi.fn()} />);
     const card = screen.getByRole("region", { name: "Region" });
     expect(within(card).getByText("8.05")).toBeInTheDocument();
     expect(within(card).getByText("9.47")).toBeInTheDocument();
     expect(within(card).getByText("1.42")).toBeInTheDocument();
     expect(within(card).getByText(/Movement 7\.60.9\.16/)).toBeInTheDocument();
-    expect(within(card).getByText("+0.31")).toBeInTheDocument();
+    // Exposed: 9.47 - 9.16, unsigned and in ink (no amber).
+    expect(within(card).getByText("Exposed")).toBeInTheDocument();
+    expect(within(card).getByText("0.31")).toHaveClass("text-ink");
+    expect(within(card).queryByText("+0.31")).toBeNull();
     expect(within(card).getByRole("button", { name: "Reload" })).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("a standing reload shows no overhang row; a movement shows neither", () => {
+  it("a standing reload is exposed for its whole duration; a movement shows no exposed row", () => {
     const standing = [E("evt-2", "reload", 8.05, 9.47)];
     const { rerender } = render(<EventCard event={standing[0]} events={standing} onKind={vi.fn()} onKeep={vi.fn()} onDelete={vi.fn()} onDone={vi.fn()} />);
-    expect(screen.queryByText("Overhang")).toBeNull();
+    const exposed = screen.getByText("Exposed").parentElement!;
+    expect(within(exposed).getByText("1.42")).toHaveClass("text-ink");
     expect(screen.getByText("Standing")).toBeInTheDocument();
     rerender(<EventCard event={events[0]} events={events} onKind={vi.fn()} onKeep={vi.fn()} onDelete={vi.fn()} onDone={vi.fn()} />);
-    expect(screen.queryByText("Overhang")).toBeNull();
+    expect(screen.queryByText("Exposed")).toBeNull();
     expect(screen.queryByText("During")).toBeNull();
+  });
+
+  it("gives the Manual source chip a neutral tick, not a budget hue", () => {
+    render(<EventCard event={events[1]} events={events} onKind={vi.fn()} onKeep={vi.fn()} onDelete={vi.fn()} onDone={vi.fn()} />);
+    const tick = screen.getByText("Manual").querySelector("[data-tick]")!;
+    expect(tick).toHaveClass("bg-ink");
+    expect(tick).not.toHaveClass("bg-manual");
   });
 
   it("changes kind, deletes and closes", () => {
@@ -134,7 +145,7 @@ describe("EventCard", () => {
 });
 
 describe("EventList", () => {
-  it("lists one row per region with range or duration, moving-shot count and overhang", () => {
+  it("lists one row per region with range or duration, moving-shot count and exposed time", () => {
     const events = [E("evt-1", "movement", 3.4, 6.1), E("evt-2", "movement", 7.6, 9.16), E("evt-3", "reload", 8.05, 9.47)];
     const shots = [4.35, 4.71, 5.12, 5.48, 10.6].map((t) => ({ time_from_beep: t }));
     render(<EventList events={events} shots={shots} />);
@@ -143,7 +154,13 @@ describe("EventList", () => {
     expect(rows[0]).toHaveTextContent(/3\.40.6\.10/);
     expect(rows[0]).toHaveTextContent("4 shots");
     expect(rows[2]).toHaveTextContent("1.42");
-    expect(rows[2]).toHaveTextContent("+0.31");
+    expect(rows[2]).toHaveTextContent("0.31 exposed");
+    expect(rows[2]).not.toHaveTextContent("+0.31");
+  });
+
+  it("shows a standing reload's whole duration as exposed", () => {
+    render(<EventList events={[E("evt-1", "reload", 8.05, 9.47)]} shots={[]} />);
+    expect(screen.getByRole("listitem")).toHaveTextContent("1.42 exposed");
   });
 
   it("renders nothing for an empty list", () => {

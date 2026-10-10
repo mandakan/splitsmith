@@ -31,7 +31,8 @@ export type ChipTick =
   | "fire"
   | "reload"
   | "activation"
-  | "muted";
+  | "muted"
+  | "neutral";
 
 const TICK: Record<ChipTick, string> = {
   draw: "bg-led",
@@ -41,6 +42,9 @@ const TICK: Record<ChipTick, string> = {
   reload: "bg-live",
   activation: "bg-ink-2",
   muted: "bg-muted",
+  // No hue and no meaning: a fact about a row (a region's source) that is
+  // not a budget class, a state or a kind.
+  neutral: "bg-ink",
 };
 
 export interface ChipProps

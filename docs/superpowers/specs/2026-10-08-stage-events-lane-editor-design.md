@@ -85,14 +85,17 @@ places and a merge rule; this needs none of it.
 
 - Per shot: `moving: bool` -- the shot's `time_from_beep` falls inside a
   movement region (inclusive at both ends).
-- Per reload region: `ReloadFigure {duration, moving, overhang}` --
-  `moving` when any movement region overlaps it; `overhang = reload.end -
-  movement.end` against the overlapping movement with the latest end,
-  `None` when standing. Positive overhang is time the reload cost;
-  zero or negative means it was hidden in the movement.
+- Per reload region: `ReloadFigure {duration, moving, exposed}` --
+  `moving` when any movement region overlaps it; `exposed = duration -
+  overlap with the union of the movement regions`, floored at 0: the time
+  the reload cost. A standing reload is exposed for its whole duration, one
+  fully inside a movement for 0; the part before a movement starts and the
+  part after it stops both count. (Amended 2026-10-09: this replaced
+  `overhang = reload.end - latest overlapping movement end`, which had no
+  value standing and ignored a reload that started before the movement.)
 - Per stage: `StageEventSummary {movement_s, moving_shots, reloads,
-  reload_avg_s, overhang_s}` where `overhang_s` is the sum of positive
-  overhangs.
+  reload_avg_s, exposed_reload_s}` where `exposed_reload_s` is the sum of
+  the reloads' exposed time.
 - Capacity check: in a division with a capacity, more than `capacity + 1`
   shots between two reload regions (or before the first) is impossible;
   the summary carries `capacity_warning: str | None` ("17 shots without a
@@ -245,8 +248,9 @@ offers an edit it would refuse.
 - Under the video: `components/coach/LaneEditor.tsx`. Beside the video:
   the selected-region card, which replaces `ShotEditor` while a region is
   selected and gives it back on deselect (one card level per view).
-- The stat strip gains **On the move** (shots) and **Overhang** (s,
-  amber: it is reload-hued, not a warning).
+- The stat strip gains **On the move** (shots) and **Exposed reload**
+  (s, unsigned, 2 dp) when the stage has a reload. The figure is ink
+  (amended 2026-10-09: amber means in progress in the visual budget).
 - The lane editor's overflow menu gets **Full-resolution video**, bound to
   the same hook as Audit's `TransportLine` entry, shown only when
   `scrub.available` (local mode).
@@ -285,9 +289,9 @@ restores the pre-drag state):
   Shift+Arrow nudges the end, Alt+Arrow moves by 100 ms; Delete or
   Backspace removes. Arrows rather than brackets: bracket keys sit behind
   AltGr on Nordic layouts.
-- While a reload region is selected, an overhang bracket is drawn from
-  the enclosing movement's end to the reload's end, labelled with the
-  signed difference.
+- While a reload region on the move is selected, each stretch of it no
+  movement covers (its exposed time) gets a dashed bracket labelled with
+  its length.
 - Auto proposals render with a dashed outline and an `AUTO ?` label.
 - No zoom, no multi-select, no copy in this cut. At 16 s over ~900 px one
   pixel is ~18 ms; coarse placement by drag, fine by nudge.
@@ -297,7 +301,7 @@ payload. Nudges commit after 350 ms idle so a held key is one PUT.
 
 There is no separate mobile Coach page; under the phone breakpoint the
 Coach page renders the same component read-only, with a region list under it (one row
-per region: kind chip, range or duration, moving-shot count or overhang).
+per region: kind chip, range or duration, moving-shot count or exposed time).
 Editing stays on the desktop, where there is a frame to judge from.
 As shipped, the Coach route itself is behind `DesktopGate` (`App.tsx`),
 so a phone gets the desktop-only notice and never reaches this read-only
@@ -333,7 +337,7 @@ that does not pick either slot has a byte-identical argv (pinned).
 
 ### Summary card
 
-The Splits band gains `Reloads N`, `Reload avg`, `Overhang` when a reload
+The Splits band gains `Reloads N`, `Reload avg`, `Exposed` when a reload
 region exists, and the split figures appear as two rows, `Static` and
 `Moving`, when both populations exist. A stage with no events renders
 exactly as today (pinned). `share_card.stage_figures` stays on
@@ -354,8 +358,9 @@ restore it. A test that passes against the pre-change code is not a test.
 
 - `tests/test_events.py`: `validate_lanes` (same-kind overlap rejected,
   cross-kind allowed, touching edges allowed); `shot_is_moving` inclusive
-  ends; `reload_figures` standing / hidden (negative overhang) / positive
-  overhang / two movements overlapping one reload (latest end wins);
+  ends; `reload_figures` standing (fully exposed) / fully inside a
+  movement (0) / ends after the movement stops / starts before it starts /
+  two movements overlapping one reload (their union);
   `stage_event_summary` sums; `capacity_for` on the SSI strings including
   an unknown one; the seeder over fixtures: a PO stage with a reload at
   shot 12 on a movement (hint wins inside the window), a Classic Minor
@@ -431,8 +436,9 @@ The template HUD receives its stage through `overlay_hud.hud_stage_data`.
 It gains, from confirmed regions only:
 
 - `events`: `[{kind, start, end}]` in clip seconds (beep-offset like `shots[].t`).
-- `reloads`: `[{start, end, duration, overhang}]` in clip seconds, from
-  `events.reload_figures` (`overhang` is `null` for a standing reload).
+- `reloads`: `[{start, end, duration, exposed}]` in clip seconds, from
+  `events.reload_figures` (`exposed` is the whole duration for a standing
+  reload).
   Templates never re-derive a figure.
 - each shot gains `moving: bool`.
 
@@ -476,10 +482,9 @@ before the other four styles are done.
 ### Summary card
 
 When the stage has confirmed reloads, the Splits band gains a row: Reloads,
-Reload avg, Overhang (positive overhangs summed, as on the Coach page).
-Overhang is omitted when every reload is standing: nothing was measured,
-and the card never draws a figure that was not (the Coach page shows
-`+0.00` there). When both static and moving splits exist, the split
+Reload avg, Exposed (the reloads' exposed time summed, unsigned, as on the
+Coach page), drawn whenever there is a confirmed reload: a standing reload
+is exposed for its whole duration. When both static and moving splits exist, the split
 figures appear as two rows, Static and Moving, on a single-shooter card
 that is landscape or square and at least 480 px tall; a narrower or
 shorter card keeps the one combined row, because the fit would otherwise
@@ -508,5 +513,6 @@ carry per-shot markers today and does not carry regions either.
 ### Share figures
 
 `stages[].figures` on the project payload gains `moving_shots`,
-`reloads`, `reload_avg_s`, `overhang_s` from confirmed regions (`null`
-when the stage has none). The share card does not change.
+`reloads`, `reload_avg_s`, `exposed_reload_s` from confirmed regions
+(`null` when the stage has none; `exposed_reload_s` is a number whenever
+there is a confirmed reload). The share card does not change.

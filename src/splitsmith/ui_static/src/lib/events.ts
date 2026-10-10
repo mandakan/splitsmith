@@ -14,8 +14,12 @@ export interface ReloadFigure {
   duration: number;
   /** Any movement region overlaps the reload. */
   moving: boolean;
-  /** reload.end - end of the latest-ending overlapping movement; null when standing. */
-  overhang: number | null;
+  /**
+   * Exposed reload time: duration minus the union of its overlap with
+   * movement regions, floored at 0. Standing is the whole duration, fully
+   * inside a movement is 0, a part before or after the movement counts.
+   */
+  exposed: number;
 }
 
 const overlaps = (a: StageEvent, b: StageEvent) => a.start < b.end && b.start < a.end;
@@ -48,6 +52,15 @@ export function withKind(events: StageEvent[], id: string, kind: StageEventKind)
   return validateLanes(next) ? null : next;
 }
 
+/**
+ * The regions a stage total may count: the ones the user confirmed
+ * (``source === "manual"``), in their stored order. The twin of
+ * ``events.confirmed``; an auto proposal is a guess nobody looked at.
+ */
+export function confirmedEvents(events: StageEvent[]): StageEvent[] {
+  return events.filter((e) => e.source === "manual");
+}
+
 /** Keep: ``id`` confirmed as a manual region, every other field and region untouched. */
 export function keepEvent(events: StageEvent[], id: string): StageEvent[] {
   return events.map((e) => (e.id === id ? { ...e, source: "manual" as const } : e));
@@ -66,13 +79,35 @@ export function enclosingMovement(event: StageEvent, events: StageEvent[]): Stag
   return best;
 }
 
+/**
+ * The stretches of ``reload`` no movement covers, in time order: the reload
+ * minus the union of the movements overlapping it. What the exposed figure
+ * sums and what the lane editor brackets.
+ */
+export function exposedSpans(reload: StageEvent, events: StageEvent[]): [number, number][] {
+  const covered = events
+    .filter((m) => m.kind === "movement" && overlaps(m, reload))
+    .map((m) => [Math.max(m.start, reload.start), Math.min(m.end, reload.end)] as const)
+    .sort((a, b) => a[0] - b[0]);
+  const out: [number, number][] = [];
+  let at = reload.start;
+  for (const [start, end] of covered) {
+    if (start > at) out.push([at, start]);
+    at = Math.max(at, end);
+  }
+  if (reload.end > at) out.push([at, reload.end]);
+  return out;
+}
+
 export function reloadFigures(events: StageEvent[]): ReloadFigure[] {
   return events
     .filter((e) => e.kind === "reload")
     .sort((a, b) => a.start - b.start)
     .map((r) => {
-      const m = enclosingMovement(r, events);
-      return { eventId: r.id, duration: r.end - r.start, moving: m !== null, overhang: m ? r.end - m.end : null };
+      const duration = r.end - r.start;
+      const moving = events.some((m) => m.kind === "movement" && overlaps(m, r));
+      const exposed = exposedSpans(r, events).reduce((s, [a, b]) => s + (b - a), 0);
+      return { eventId: r.id, duration, moving, exposed: Math.max(0, exposed) };
     });
 }
 
@@ -102,7 +137,7 @@ export function summarize(shotTimes: number[], events: StageEvent[], capacity: n
     moving_shots: shotTimes.filter((t) => shotIsMoving(t, events)).length,
     reloads: figs.length,
     reload_avg_s: figs.length ? figs.reduce((s, f) => s + f.duration, 0) / figs.length : null,
-    overhang_s: figs.reduce((s, f) => s + (f.overhang !== null && f.overhang > 0 ? f.overhang : 0), 0),
+    exposed_reload_s: figs.reduce((s, f) => s + f.exposed, 0),
     capacity_warning: capacityWarning(shotTimes, events.filter((e) => e.kind === "reload"), capacity),
   };
 }
