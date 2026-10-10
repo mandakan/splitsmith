@@ -671,6 +671,40 @@ def test_timeline_reload_chip_clears_the_tag_on_the_first_shot(size: tuple[int, 
     assert track["bottom"] + 0.016 * height <= clock["top"] or track["left"] >= clock["right"]
 
 
+#: A 40 s stage whose first and last ticks sit near either end of the track.
+_EDGE_SHOTS = (0.55, 1.0, 10.0, 20.0, 30.0, 39.3, 39.6)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("size", [(1080, 1920), (720, 1280), (1080, 1080), (1920, 1080)])
+@pytest.mark.parametrize("landing", [True, False])
+def test_timeline_tag_stays_on_the_page_at_either_end_of_the_track(
+    size: tuple[int, int], landing: bool
+) -> None:
+    """Upright, the track runs the page's width, so a tick at either end
+    would put the centred split tag past the edge: the tag is held inside
+    the page, on the first tick and at the far end. The landing hides the
+    tag once the stage is done, so with it on the far end is the tick
+    before the last (99 % along); with it off, the last tick's tag stays."""
+    width, height = size
+    end = _EDGE_SHOTS[-2] if landing else _EDGE_SHOTS[-1]
+    with ChromiumRasterizer() as rasterizer:
+        view = _timeline_view(rasterizer, events=[], size=size, shot_times=_EDGE_SHOTS, landing=landing)
+        try:
+            # 0.25 s after the tick: the tag has eased in (0.2 s).
+            first = _timeline_at(view, 1.0 + _EDGE_SHOTS[0] + 0.25)
+            last = _timeline_at(view, 1.0 + end + 0.25)
+        finally:
+            view.close()
+    assert first["tag"] is not None and last["tag"] is not None
+    off = [
+        (name, s["tag"])
+        for name, s in (("first", first), ("end", last))
+        if not _inside(s["tag"], width, height)
+    ]
+    assert off == []
+
+
 @pytest.mark.integration
 def test_timeline_draws_no_chip_and_no_band_with_the_toggles_off() -> None:
     with ChromiumRasterizer() as rasterizer:

@@ -228,6 +228,15 @@
       tag.firstChild.textContent = last.label || '';
       tag.lastChild.textContent = last.split.toFixed(2);
       tag.lastChild.style.color = tierColour(last.tier);
+      // A tick near either end of a page-wide track (upright) would put
+      // the centred tag past the edge: hold its centre half its width and
+      // a margin in. A tag that fits keeps its percentage, so a landscape
+      // track, which never reaches the edges, draws as it always did.
+      var track = el('track').getBoundingClientRect();
+      var half = tag.offsetWidth / 2, margin = window.innerHeight * 0.02;
+      var centre = track.left + track.width * along(last.t) / 100;
+      var tagX = Math.max(half + margin, Math.min(window.innerWidth - half - margin, centre));
+      if (tagX !== centre) tag.style.left = (tagX - track.left) + 'px';
     }
 
     var stamp = el('stamp');
