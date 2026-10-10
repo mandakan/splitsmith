@@ -226,28 +226,91 @@ export interface StopFlag {
   text: string;
 }
 
+/** The one question a stop asks, what the page sees there, and which keys
+ *  answer it. Worded from the stop's situation so the person never has to
+ *  work out what is being asked. */
+export interface StopPrompt {
+  question: string;
+  /** What the audio shows here, in a sentence. */
+  seen: string;
+  /** The keys that answer the question, most likely first. */
+  keys: string;
+  tone: "neutral" | "warn";
+}
+
+export function stopPrompt(opts: {
+  marker: AuditMarker | null;
+  markers: ReadonlyArray<AuditMarker>;
+  time: number;
+  peaks: SnapPeaks;
+  level: number;
+}): StopPrompt {
+  const { marker, markers, time, peaks, level } = opts;
+  const loud = level > 0 ? BURST_LEVEL_FRAC * level : Infinity;
+  if (stopState(marker) === "not_shot") {
+    // A burst starting here: the loudest point just after the stop.
+    const burst = maxIn(peaks, time - 0.005, time + 0.04) >= loud;
+    return burst
+      ? {
+          question: "Is this a shot?",
+          seen: "A burst as loud as a shot starts here, and no shot is kept on it.",
+          keys: "S if it is a shot (then F seats it on its onset) · Enter if it is not",
+          tone: "warn",
+        }
+      : {
+          question: "Is this a shot?",
+          seen: "Nothing here is as loud as the stage's shots.",
+          keys: "Enter if it is not a shot · S if it is",
+          tone: "neutral",
+        };
+  }
+  const local = maxIn(peaks, time - SHOT_LEVEL_HALF_S, time + SHOT_LEVEL_HALF_S);
+  if (local < loud) {
+    return {
+      question: "Is this shot on a sound?",
+      seen: "Nothing within 25 ms is as loud as a shot: it sits in silence or in another sound's tail. The real shot is often just before.",
+      keys: "X if it is not a shot · click the start of the right sound to move it there",
+      tone: "warn",
+    };
+  }
+  const near = markers.find((m) => m.id !== marker!.id && isKept(m) && Math.abs(m.time - time) <= NEIGHBOUR_FLAG_S);
+  if (near) {
+    const ms = Math.round(Math.abs(near.time - time) * 1000);
+    return {
+      question: "Two shots on one sound?",
+      seen: `Another kept shot is ${ms} ms ${near.time < time ? "before" : "after"} this one.`,
+      keys: "X if this one is an echo or a duplicate · Enter if both are shots",
+      tone: "warn",
+    };
+  }
+  return {
+    question: "Is this shot on its onset?",
+    seen: "The red line should sit where the burst first rises out of the background.",
+    keys: "Enter if it does · F seats it on the rise foot · click or arrows to place it yourself",
+    tone: "neutral",
+  };
+}
+
 /** What is worth knowing at a stop, in words; empty when nothing is. */
 export function stopFlags(opts: {
   stop: WalkStop;
   marker: AuditMarker | null;
   markers: ReadonlyArray<AuditMarker>;
-  peaks: SnapPeaks;
-  level: number;
   /** How far the snap from another angle moved this shot, ms. */
   snapDisplacementMs: number | null;
 }): StopFlag[] {
-  const { stop, marker, markers, peaks, level, snapDisplacementMs } = opts;
+  const { stop, marker, markers, snapDisplacementMs } = opts;
   const flags: StopFlag[] = [];
   const t = stopTime(stop, marker);
   if (stop.origin === "burst") {
-    flags.push({ tone: "warn", text: "Nothing marked here: the detector proposed no candidate for this sound." });
+    flags.push({ tone: "info", text: "The detector proposed no candidate for this sound." });
     const late = markers.find(
       (m) => isKept(m) && m.id !== marker?.id && m.time > t && m.time - t <= TAIL_FLAG_S,
     );
     if (late) {
       flags.push({
         tone: "warn",
-        text: `A kept shot sits ${Math.round((late.time - t) * 1000)} ms later, in this sound's tail: if this is the shot, mark it (S) and reject that one (X) at its stop.`,
+        text: `A kept shot sits ${Math.round((late.time - t) * 1000)} ms later, in this sound's tail: if this is the shot, mark it (S) here and reject that one (X) at its stop.`,
       });
     }
   }
@@ -256,21 +319,6 @@ export function stopFlags(opts: {
       tone: "warn",
       text: `Snapped ${Math.round(Math.abs(snapDisplacementMs))} ms from the other camera's time: check it is on the right sound.`,
     });
-  }
-  if (stopState(marker) === "shot") {
-    const local = maxIn(peaks, t - SHOT_LEVEL_HALF_S, t + SHOT_LEVEL_HALF_S);
-    if (level > 0 && local < BURST_LEVEL_FRAC * level) {
-      flags.push({ tone: "warn", text: "No burst within 25 ms of this shot: it may sit in silence or a tail." });
-    }
-    const near = markers.filter(
-      (m) => m.id !== marker!.id && isKept(m) && Math.abs(m.time - t) <= NEIGHBOUR_FLAG_S,
-    );
-    for (const m of near) {
-      flags.push({
-        tone: "warn",
-        text: `Another shot ${Math.round(Math.abs(m.time - t) * 1000)} ms ${m.time < t ? "before" : "after"}: one of them may be an echo.`,
-      });
-    }
   }
   return flags;
 }

@@ -10,6 +10,7 @@ import {
   isDecided,
   placementOf,
   stopFlags,
+  stopPrompt,
   typicalShotLevel,
   unmarkedBursts,
   walkActionForKey,
@@ -134,63 +135,62 @@ describe("decisions", () => {
   });
 });
 
-describe("stopFlags", () => {
+describe("stopPrompt", () => {
   const peaks = envelope(3, [0.5, 1.0]);
-  const level = 1;
+  const ask = (marker: AuditMarker | null, time: number, markers: AuditMarker[] = marker ? [marker] : []) =>
+    stopPrompt({ marker, markers, time, peaks, level: 1 });
 
-  it("warns about a shot sitting in silence", () => {
-    const m = marker("cand-1", "detected", 2.0);
-    const flags = stopFlags({
-      stop: { key: m.id, markerId: m.id, time: 2.0, origin: "kept" },
-      marker: m,
-      markers: [m],
-      peaks,
-      level,
-      snapDisplacementMs: null,
-    });
-    expect(flags.map((f) => f.text).join(" ")).toMatch(/No burst within 25 ms/);
+  it("asks whether a rejected candidate on a shot-loud burst is a shot, and says S", () => {
+    const p = ask(marker("cand-2", "rejected", 1.0), 1.0);
+    expect(p.question).toBe("Is this a shot?");
+    expect(p.seen).toMatch(/A burst as loud as a shot starts here/);
+    expect(p.keys).toMatch(/^S if it is a shot/);
+    expect(p.tone).toBe("warn");
   });
 
-  it("warns about a second shot close by and a long snap", () => {
-    const a = marker("cand-1", "detected", 0.51);
-    const b = marker("cand-2", "detected", 0.55);
-    const text = stopFlags({
-      stop: { key: a.id, markerId: a.id, time: 0.51, origin: "kept" },
-      marker: a,
-      markers: [a, b],
-      peaks,
-      level,
-      snapDisplacementMs: 57.4,
-    })
-      .map((f) => f.text)
-      .join(" | ");
-    expect(text).toMatch(/Snapped 57 ms/);
-    expect(text).toMatch(/Another shot 40 ms after/);
+  it("leads with Enter on a quiet sound nobody kept", () => {
+    const p = ask(marker("cand-3", "rejected", 2.0), 2.0);
+    expect(p.seen).toMatch(/Nothing here is as loud/);
+    expect(p.keys).toMatch(/^Enter if it is not a shot/);
   });
 
-  it("says nothing about a shot sitting on its onset", () => {
-    const m = marker("cand-1", "detected", 0.5);
-    const flags = stopFlags({
-      stop: { key: m.id, markerId: m.id, time: 0.5, origin: "kept" },
-      marker: m,
-      markers: [m],
-      peaks,
-      level,
-      snapDisplacementMs: 3,
-    });
-    expect(flags).toEqual([]);
+  it("asks whether a kept shot in silence is on a sound at all", () => {
+    const p = ask(marker("cand-1", "detected", 2.0), 2.0);
+    expect(p.question).toBe("Is this shot on a sound?");
+    expect(p.keys).toMatch(/^X if it is not a shot/);
   });
 
-  it("names an unmarked burst for what it is", () => {
+  it("asks about two kept shots on one sound", () => {
+    const a = marker("cand-1", "detected", 0.5);
+    const p = ask(a, 0.5, [a, marker("cand-2", "detected", 0.54)]);
+    expect(p.question).toBe("Two shots on one sound?");
+    expect(p.seen).toMatch(/40 ms after/);
+  });
+
+  it("asks only about the onset of a shot that sits on its burst", () => {
+    const p = ask(marker("cand-1", "detected", 0.5), 0.5);
+    expect(p.question).toBe("Is this shot on its onset?");
+    expect(p.tone).toBe("neutral");
+  });
+});
+
+describe("stopFlags", () => {
+  it("points a burst at the kept shot sitting in its tail", () => {
+    const late = marker("cand-1", "detected", 1.163);
     const flags = stopFlags({
       stop: { key: "burst-1000", markerId: null, time: 1.0, origin: "burst" },
       marker: null,
-      markers: [],
-      peaks,
-      level,
+      markers: [late],
       snapDisplacementMs: null,
-    });
-    expect(flags[0].text).toMatch(/proposed no candidate/);
+    }).map((f) => f.text);
+    expect(flags.join(" ")).toMatch(/A kept shot sits 163 ms later, in this sound's tail/);
+  });
+
+  it("warns about a long snap and says nothing about a short one", () => {
+    const m = marker("cand-1", "detected", 0.5);
+    const stop = { key: m.id, markerId: m.id, time: 0.5, origin: "kept" as const };
+    expect(stopFlags({ stop, marker: m, markers: [m], snapDisplacementMs: 57.4 })[0].text).toMatch(/Snapped 57 ms/);
+    expect(stopFlags({ stop, marker: m, markers: [m], snapDisplacementMs: 3 })).toEqual([]);
   });
 });
 

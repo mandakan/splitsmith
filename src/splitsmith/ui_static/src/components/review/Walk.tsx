@@ -7,12 +7,14 @@
  * never also reach the page's own play and scrub handlers.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import type { AuditMarker } from "@/components/MarkerLayer";
+import { WalkGuide } from "@/components/review/WalkGuide";
 import { Button } from "@/components/ui/button";
 import { isTypingTextTarget } from "@/lib/audit-input";
 import { snapToLeadingEdge, type SnapPeaks } from "@/lib/peak-snap";
+import type { DecodedAudio } from "@/lib/useDecodedAudio";
 import {
   BURST_LEVEL_FRAC,
   CLOSEUP_HALF_S,
@@ -25,6 +27,7 @@ import {
   isDecided,
   placementOf,
   stopFlags,
+  stopPrompt,
   stopState,
   stopTime,
   typicalShotLevel,
@@ -56,9 +59,13 @@ export interface WalkProps {
   onDone: () => void;
   onExit: () => void;
   busy: boolean;
-  /** The guide lives under the page's waveform; the walk only toggles it. */
+  /** Open or hidden by the page, which remembers it across fixtures. */
   guideOpen: boolean;
   onToggleGuide: () => void;
+  /** The fixture's samples, for drawing the wave itself; ``null`` draws the level. */
+  audio: DecodedAudio | null;
+  /** Beside the stop, above the guide: the page's video. */
+  aside?: ReactNode;
 }
 
 export function Walk(props: WalkProps) {
@@ -211,20 +218,39 @@ export function Walk(props: WalkProps) {
     return () => window.removeEventListener("keydown", onKey, { capture: true });
   }, [stop, stops, index, state, time, marker, decisions, decidedCount, busy, armed, check.ok, peaks, markerFor, makeShot, place, toggleGuide, props]);
 
+
   const guideButton = (
     <Button size="sm" variant="ghost" onClick={toggleGuide} aria-pressed={guideOpen}>
       {guideOpen ? "Hide guide" : "Guide"}
     </Button>
   );
 
+  // Two columns: the stop on the left, the video and the guide beside it, so
+  // nothing the decision needs is ever below the fold.
+  const shell = (main: ReactNode) => (
+    <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,380px)]">
+      <div className="min-w-0 space-y-3 rounded-md border border-border p-4 text-sm">{main}</div>
+      <aside className="min-w-0 space-y-3 lg:sticky lg:top-4">
+        {props.aside}
+        {guideOpen ? (
+          <div className="max-h-[70vh] overflow-y-auto">
+            <WalkGuide onClose={toggleGuide} />
+          </div>
+        ) : (
+          <Button size="sm" variant="ghost" onClick={toggleGuide}>
+            Show the guide (?)
+          </Button>
+        )}
+      </aside>
+    </div>
+  );
+
   if (!stop) {
     const undecided = stops.length - decidedCount;
-    return (
-      <div className="space-y-3 rounded-md border border-border p-4 text-sm">
-        <p className="text-ink">
-          {undecided > 0
-            ? `${undecided} of ${stops.length} stops are still undecided.`
-            : `All ${stops.length} stops decided.`}
+    return shell(
+      <>
+        <p className="text-xl font-semibold text-ink">
+          {undecided > 0 ? `${undecided} of ${stops.length} stops are still undecided` : "Every stop decided"}
         </p>
         <p className={check.ok ? "text-ink" : "text-status-warning"}>{check.text}</p>
         {undecided > 0 ? (
@@ -238,7 +264,7 @@ export function Walk(props: WalkProps) {
           </div>
         ) : (
           <>
-            <p className="text-muted">
+            <p className="text-ink">
               {armed ? (
                 <>
                   Press <kbd>Enter</kbd> again to sign off with {keptCount} shots.
@@ -261,44 +287,64 @@ export function Walk(props: WalkProps) {
               <Button size="sm" variant="ghost" onClick={props.onExit}>
                 Leave the walk
               </Button>
-              {guideButton}
             </div>
           </>
         )}
-      </div>
+        <Strip
+          label="The stage, numbered shots"
+          audio={props.audio}
+          peaks={peaks}
+          center={peaks.duration / 2}
+          half={peaks.duration / 2}
+          scale={Math.max(1e-6, level)}
+          markers={markers}
+          currentId={null}
+          currentTime={null}
+          candidateTime={null}
+          foot={null}
+          numbered
+          height={90}
+        />
+      </>,
     );
   }
 
+  const prompt = stopPrompt({ marker, markers, time, peaks, level });
   const flags = stopFlags({
     stop,
     marker,
     markers,
-    peaks,
-    level,
     snapDisplacementMs: marker ? props.snapDisplacementMs(marker.id) : null,
   });
   const foot = state === "shot" ? snapToLeadingEdge(time, peaks) : null;
   const placement = state === "shot" ? placementOf(time, peaks) : null;
   const origin =
     stop.origin === "burst"
-      ? "Unmarked sound"
+      ? "unmarked sound"
       : stop.origin === "rejected"
-        ? "Rejected candidate"
+        ? "rejected candidate"
         : marker?.kind === "manual"
-          ? "Manual shot"
-          : "Kept shot";
+          ? "manual shot"
+          : "kept shot";
+  const mark = {
+    markers,
+    currentId: marker?.id ?? null,
+    currentTime: state === "shot" ? time : null,
+    candidateTime: state === "shot" ? null : time,
+    foot,
+  };
 
-  return (
-    <div className="space-y-3 rounded-md border border-border p-4 text-sm">
-      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+  return shell(
+    <>
+      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-muted">
         <span className="text-ink">
           Stop {index + 1} of {stops.length}
         </span>
-        <span className="text-muted">
-          {decidedCount} decided · {keptCount} shots
+        <span>{origin}</span>
+        <span>
+          {decidedCount} decided · {keptCount} shots kept
           {expectedRounds != null ? ` of ${expectedRounds} rounds` : ""}
         </span>
-        <span className="text-muted">{origin}</span>
         <span className="ml-auto flex gap-1">
           {guideButton}
           <Button size="sm" variant="ghost" onClick={props.onExit}>
@@ -306,82 +352,92 @@ export function Walk(props: WalkProps) {
           </Button>
         </span>
       </div>
-      <div className="flex flex-wrap items-baseline gap-x-4">
-        <span
-          className={
-            state === "shot"
-              ? "text-xl font-semibold text-status-complete"
-              : "text-xl font-semibold text-muted"
-          }
-        >
-          {state === "shot" ? "Shot" : "Not a shot"}
-        </span>
-        <span className="font-mono text-ink">{time.toFixed(3)} s</span>
+
+      <div
+        className={
+          prompt.tone === "warn"
+            ? "space-y-1 rounded-md border border-status-warning/60 p-3"
+            : "space-y-1 rounded-md border border-border p-3"
+        }
+      >
+        <div className="flex flex-wrap items-baseline gap-x-3">
+          <span className="text-xl font-semibold text-ink">{prompt.question}</span>
+          <span className={state === "shot" ? "text-status-complete" : "text-muted"}>
+            now: {state === "shot" ? "a shot" : "not a shot"} at {time.toFixed(3)} s
+          </span>
+          {decided(stop) ? <span className="text-muted">confirmed</span> : null}
+        </div>
+        <p className="text-ink">{prompt.seen}</p>
+        <p className="font-semibold text-ink">{prompt.keys}</p>
         {placement ? (
           placement.placement === "rule" ? (
-            <span className="text-status-complete">on the rise foot</span>
+            <p className="text-status-complete">On the rise foot (the rule).</p>
           ) : placement.offsetMs != null ? (
-            <span className="text-status-warning">
-              {Math.abs(placement.offsetMs)} ms {placement.offsetMs < 0 ? "before" : "after"} the rise foot:
-              your placement, kept as is if the definition changes. F puts it on the rule.
-            </span>
+            <p className="text-status-warning">
+              {Math.abs(placement.offsetMs)} ms {placement.offsetMs < 0 ? "before" : "after"} the rise foot: your
+              placement, kept as is if the definition changes. F puts it on the rule.
+            </p>
           ) : (
-            <span className="text-status-warning">no rise foot found here: your placement, kept as is</span>
+            <p className="text-status-warning">No rise foot found here: your placement, kept as is.</p>
           )
         ) : null}
-        {decided(stop) ? <span className="text-muted">confirmed</span> : null}
+        {flags.map((f) => (
+          <p key={f.text} className={f.tone === "warn" ? "text-status-warning" : "text-muted"}>
+            {f.text}
+          </p>
+        ))}
       </div>
-      {flags.length > 0 ? (
-        <ul className="space-y-0.5">
-          {flags.map((f) => (
-            <li key={f.text} className={f.tone === "warn" ? "text-status-warning" : "text-muted"}>
-              {f.text}
-            </li>
-          ))}
-        </ul>
-      ) : null}
+
       <Strip
-        label="Close-up, 300 ms: level per millisecond"
+        label="300 ms around the stop"
+        audio={props.audio}
         peaks={peaks}
         center={stop.time}
         half={CLOSEUP_HALF_S}
         scale={closeupScale(peaks, stop.time, level)}
-        markers={markers}
-        currentId={marker?.id ?? null}
-        currentTime={state === "shot" ? time : null}
-        candidateTime={state === "shot" ? null : time}
-        foot={foot}
+        {...mark}
         onPlace={place}
-        height={120}
+        height={112}
       />
       <Strip
-        label="Onset, 40 ms: level per millisecond"
+        label="40 ms around the onset"
+        audio={props.audio}
         peaks={peaks}
         center={time}
         half={DETAIL_HALF_S}
         scale={Math.max(1e-6, BURST_LEVEL_FRAC * level, ...windowBins(peaks, time, 0.06).map((b) => b.v))}
-        markers={markers}
-        currentId={marker?.id ?? null}
-        currentTime={state === "shot" ? time : null}
-        candidateTime={state === "shot" ? null : time}
-        foot={foot}
+        {...mark}
         onPlace={place}
-        height={80}
+        height={84}
+      />
+      <Strip
+        label="3 s of the stage, shots numbered"
+        audio={props.audio}
+        peaks={peaks}
+        center={time}
+        half={1.5}
+        scale={Math.max(1e-6, level)}
+        {...mark}
+        foot={null}
+        numbered
+        height={70}
       />
       <p className="text-xs text-muted">
-        <kbd>Enter</kbd> correct as shown, next · <kbd>S</kbd> shot · <kbd>X</kbd> not a shot · <kbd>F</kbd>{" "}
-        to the rise foot · <kbd>&larr;</kbd>/<kbd>&rarr;</kbd> 1 ms (Shift 5 ms) · click places the shot ·{" "}
-        <kbd>Space</kbd> listen · <kbd>Backspace</kbd> previous stop · <kbd>?</kbd> guide
+        Red: this stop (dashed when it is not a shot) · white: kept shots · grey dashed: rejected candidates ·
+        green: the rise foot. Click either of the top two to place the shot there. <kbd>Space</kbd> listens,{" "}
+        <kbd>Backspace</kbd> goes back a stop.
       </p>
-    </div>
+    </>,
   );
 }
 
-/** One waveform window: bars of the 1 ms peaks, every marker in it, the rise
- *  foot as a thin reference and the current shot on top. A click places the
- *  shot there. */
+/** One window of the stage: the wave itself when the audio is decoded (the
+ *  shape the guide's figures show), else its per-millisecond level; every
+ *  marker in it, the rise foot as a thin reference and the current shot on
+ *  top. A click places the shot there when ``onPlace`` is given. */
 function Strip({
   label,
+  audio,
   peaks,
   center,
   half,
@@ -392,12 +448,15 @@ function Strip({
   candidateTime,
   foot,
   onPlace,
+  numbered = false,
   height,
 }: {
   label: string;
+  audio: DecodedAudio | null;
   peaks: SnapPeaks;
   center: number;
   half: number;
+  /** Full scale, as a share of the clip's loudest sample. */
   scale: number;
   markers: ReadonlyArray<AuditMarker>;
   currentId: string | null;
@@ -405,95 +464,158 @@ function Strip({
   /** Where the stop is when it is not a shot (drawn dashed). */
   candidateTime: number | null;
   foot: number | null;
-  onPlace: (t: number) => void;
+  onPlace?: (t: number) => void;
+  /** Number the kept shots, in time order over the whole stage. */
+  numbered?: boolean;
   height: number;
 }) {
-  const bins = useMemo(() => windowBins(peaks, center, half), [peaks, center, half]);
   const t0 = center - half;
   const span = 2 * half;
-  const binW = peaks.duration / Math.max(1, peaks.peaks.length);
   const x = (t: number) => ((t - t0) / span) * 1000;
   const mid = height / 2;
   const inView = (t: number) => t >= t0 && t <= t0 + span;
   const others = markers.filter((m) => m.id !== currentId && inView(m.time));
+  const kept = useMemo(
+    () => markers.filter((m) => m.kind !== "rejected").sort((a, b) => a.time - b.time),
+    [markers],
+  );
+
+  const wave = useMemo(() => {
+    if (!audio) return null;
+    const { samples, sampleRate, maxAbs } = audio;
+    const s0 = Math.max(0, Math.floor(t0 * sampleRate));
+    const s1 = Math.min(samples.length, Math.ceil((t0 + span) * sampleRate));
+    const cols = Math.max(1, Math.min(1000, s1 - s0));
+    let d = "";
+    for (let c = 0; c < cols; c++) {
+      const a = s0 + Math.floor(((s1 - s0) * c) / cols);
+      const b = Math.max(a + 1, s0 + Math.floor(((s1 - s0) * (c + 1)) / cols));
+      let lo = Infinity;
+      let hi = -Infinity;
+      for (let i = a; i < b && i < samples.length; i++) {
+        const v = samples[i] / maxAbs / scale;
+        if (v < lo) lo = v;
+        if (v > hi) hi = v;
+      }
+      if (lo === Infinity) continue;
+      const px = x((a + b) / 2 / sampleRate);
+      const yHi = mid - Math.max(-1, Math.min(1, hi)) * (mid - 2);
+      const yLo = mid - Math.max(-1, Math.min(1, lo)) * (mid - 2);
+      d += `M${px.toFixed(1)},${yHi.toFixed(1)}L${px.toFixed(1)},${Math.max(yLo, yHi + 0.6).toFixed(1)}`;
+    }
+    return d;
+    // x depends only on t0 and span.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [audio, t0, span, scale, mid]);
+
+  const bins = useMemo(() => (audio ? [] : windowBins(peaks, center, half)), [audio, peaks, center, half]);
+  const binW = peaks.duration / Math.max(1, peaks.peaks.length);
 
   return (
     <div>
       <div className="mb-0.5 text-xs text-muted">{label}</div>
-      <svg
-        viewBox={`0 0 1000 ${height}`}
-        preserveAspectRatio="none"
-        className="block w-full cursor-crosshair select-none rounded-sm bg-surface"
-        style={{ height }}
-        role="img"
-        aria-label={label}
-        onClick={(e) => {
-          const r = e.currentTarget.getBoundingClientRect();
-          onPlace(t0 + ((e.clientX - r.left) / r.width) * span);
-        }}
-      >
-        {bins.map((b) => {
-          const h = Math.min(1, b.v / scale) * (mid - 2);
-          return (
-            <rect
-              key={b.t}
-              x={x(b.t)}
-              y={mid - h}
-              width={Math.max(0.5, (binW / span) * 1000 - (span > 0.1 ? 0 : 1))}
-              height={Math.max(0.5, 2 * h)}
-              className="fill-current text-ink-2"
-              opacity={0.6}
+      <div className="relative">
+        {numbered
+          ? kept.map((m, i) =>
+              inView(m.time) ? (
+                <span
+                  key={m.id}
+                  className="pointer-events-none absolute top-0 -translate-x-1/2 font-mono text-xs text-ink"
+                  style={{ left: `${(x(m.time) / 1000) * 100}%` }}
+                >
+                  {i + 1}
+                </span>
+              ) : null,
+            )
+          : null}
+        <svg
+          viewBox={`0 0 1000 ${height}`}
+          preserveAspectRatio="none"
+          className={
+            onPlace
+              ? "block w-full cursor-crosshair select-none rounded-sm bg-surface"
+              : "block w-full select-none rounded-sm bg-surface"
+          }
+          style={{ height }}
+          role="img"
+          aria-label={label}
+          onClick={
+            onPlace
+              ? (e) => {
+                  const r = e.currentTarget.getBoundingClientRect();
+                  onPlace(t0 + ((e.clientX - r.left) / r.width) * span);
+                }
+              : undefined
+          }
+        >
+          <line x1={0} x2={1000} y1={mid} y2={mid} className="stroke-current text-rule" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+          {wave != null ? (
+            <path d={wave} className="stroke-current text-ink-2" strokeWidth={1} fill="none" vectorEffect="non-scaling-stroke" />
+          ) : (
+            bins.map((b) => {
+              const h = Math.min(1, b.v / scale) * (mid - 2);
+              return (
+                <rect
+                  key={b.t}
+                  x={x(b.t)}
+                  y={mid - h}
+                  width={Math.max(0.5, (binW / span) * 1000 - (span > 0.1 ? 0 : 1))}
+                  height={Math.max(0.5, 2 * h)}
+                  className="fill-current text-ink-2"
+                  opacity={0.6}
+                />
+              );
+            })
+          )}
+          {others.map((m) => (
+            <line
+              key={m.id}
+              x1={x(m.time)}
+              x2={x(m.time)}
+              y1={numbered ? 14 : 0}
+              y2={height}
+              className={m.kind === "rejected" ? "stroke-current text-muted" : "stroke-current text-ink"}
+              strokeWidth={m.kind === "rejected" ? 1 : 2}
+              strokeDasharray={m.kind === "rejected" ? "4 4" : undefined}
+              vectorEffect="non-scaling-stroke"
             />
-          );
-        })}
-        {others.map((m) => (
-          <line
-            key={m.id}
-            x1={x(m.time)}
-            x2={x(m.time)}
-            y1={0}
-            y2={height}
-            className={m.kind === "rejected" ? "stroke-current text-muted" : "stroke-current text-ink"}
-            strokeWidth={m.kind === "rejected" ? 1 : 2}
-            strokeDasharray={m.kind === "rejected" ? "4 4" : undefined}
-            vectorEffect="non-scaling-stroke"
-          />
-        ))}
-        {foot != null && inView(foot) ? (
-          <line
-            x1={x(foot)}
-            x2={x(foot)}
-            y1={0}
-            y2={height}
-            className="stroke-current text-status-complete"
-            strokeWidth={1}
-            vectorEffect="non-scaling-stroke"
-          />
-        ) : null}
-        {candidateTime != null && inView(candidateTime) ? (
-          <line
-            x1={x(candidateTime)}
-            x2={x(candidateTime)}
-            y1={0}
-            y2={height}
-            className="stroke-current text-led"
-            strokeWidth={2}
-            strokeDasharray="6 4"
-            vectorEffect="non-scaling-stroke"
-          />
-        ) : null}
-        {currentTime != null && inView(currentTime) ? (
-          <line
-            x1={x(currentTime)}
-            x2={x(currentTime)}
-            y1={0}
-            y2={height}
-            className="stroke-current text-led"
-            strokeWidth={3}
-            vectorEffect="non-scaling-stroke"
-          />
-        ) : null}
-      </svg>
+          ))}
+          {foot != null && inView(foot) ? (
+            <line
+              x1={x(foot)}
+              x2={x(foot)}
+              y1={0}
+              y2={height}
+              className="stroke-current text-status-complete"
+              strokeWidth={2}
+              vectorEffect="non-scaling-stroke"
+            />
+          ) : null}
+          {candidateTime != null && inView(candidateTime) ? (
+            <line
+              x1={x(candidateTime)}
+              x2={x(candidateTime)}
+              y1={0}
+              y2={height}
+              className="stroke-current text-led"
+              strokeWidth={2}
+              strokeDasharray="6 4"
+              vectorEffect="non-scaling-stroke"
+            />
+          ) : null}
+          {currentTime != null && inView(currentTime) ? (
+            <line
+              x1={x(currentTime)}
+              x2={x(currentTime)}
+              y1={0}
+              y2={height}
+              className="stroke-current text-led"
+              strokeWidth={2}
+              vectorEffect="non-scaling-stroke"
+            />
+          ) : null}
+        </svg>
+      </div>
     </div>
   );
 }

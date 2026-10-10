@@ -6,7 +6,6 @@ import type { AuditMarker } from "@/components/MarkerLayer";
 import { WALK_DECIDED_EVENT, WALK_METHOD, readGuideOpen, writeGuideOpen } from "@/lib/walk";
 
 import { Walk } from "./Walk";
-import { WalkGuide } from "./WalkGuide";
 
 function envelope(duration: number, onsets: number[]): { peaks: number[]; duration: number } {
   const n = Math.round(duration * 1000);
@@ -76,8 +75,8 @@ function Harness({
         busy={false}
         guideOpen={guideOpen}
         onToggleGuide={toggle}
+        audio={null}
       />
-      {guideOpen ? <WalkGuide onClose={toggle} /> : null}
     </>
   );
 }
@@ -90,7 +89,7 @@ describe("Walk", () => {
     const record = vi.fn();
     render(<Harness initial={markersAll} record={record} />);
     expect(screen.getByText("Stop 1 of 3")).toBeTruthy();
-    expect(screen.getByText("Shot")).toBeTruthy();
+    expect(screen.getByText(/^now: a shot at/)).toBeTruthy();
     press("Enter");
     expect(record).toHaveBeenLastCalledWith(WALK_DECIDED_EVENT, {
       stop: "cand-1",
@@ -101,13 +100,13 @@ describe("Walk", () => {
       rule_time: 0.5,
     });
     expect(screen.getByText("Stop 2 of 3")).toBeTruthy();
-    expect(screen.getByText("Not a shot")).toBeTruthy();
+    expect(screen.getByText(/^now: not a shot at/)).toBeTruthy();
   });
 
   it("records a nudged shot as an override, says so, and F puts it back on the rule", () => {
     const record = vi.fn();
     render(<Harness initial={markersAll} record={record} />);
-    expect(screen.getByText("on the rise foot")).toBeTruthy();
+    expect(screen.getByText("On the rise foot (the rule).")).toBeTruthy();
     press("ArrowRight");
     press("ArrowRight");
     expect(screen.getByText(/2 ms after the rise foot: your placement/)).toBeTruthy();
@@ -118,7 +117,7 @@ describe("Walk", () => {
     );
     press("Backspace");
     press("f");
-    expect(screen.getByText("on the rise foot")).toBeTruthy();
+    expect(screen.getByText("On the rise foot (the rule).")).toBeTruthy();
   });
 
   it("makes a rejected candidate a shot on S, and an unmarked burst a shot at its onset", () => {
@@ -126,7 +125,7 @@ describe("Walk", () => {
     render(<Harness initial={markersAll} record={record} />);
     press("Enter");
     press("s");
-    expect(screen.getByText("Shot")).toBeTruthy();
+    expect(screen.getByText(/^now: a shot at/)).toBeTruthy();
     press("Enter");
     expect(record).toHaveBeenLastCalledWith(WALK_DECIDED_EVENT, expect.objectContaining({ stop: "cand-2", state: "shot" }));
     expect(screen.getByText(/proposed no candidate/)).toBeTruthy();
@@ -143,7 +142,7 @@ describe("Walk", () => {
     render(<Harness initial={[m("cand-1", "detected", 0.5), m("manual-shot-2", "manual", 1.0)]} record={record} />);
     press("Enter");
     press("x");
-    expect(screen.getByText("Not a shot")).toBeTruthy();
+    expect(screen.getByText(/^now: not a shot at/)).toBeTruthy();
   });
 
   it("resumes at the first stop no saved decision covers", () => {

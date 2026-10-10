@@ -43,7 +43,6 @@ import { ListDrawer } from "@/components/ListDrawer";
 import { MarkerLayer, type AuditMarker } from "@/components/MarkerLayer";
 import { ShotStepper } from "@/components/ShotStepper";
 import { Walk } from "@/components/review/Walk";
-import { WalkGuide } from "@/components/review/WalkGuide";
 import { Waveform } from "@/components/Waveform";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -64,6 +63,7 @@ import {
 } from "@/lib/api";
 import { deriveMarkers } from "@/lib/audit-doc";
 import { buildFixtureJson } from "@/lib/fixtureDoc";
+import { useDecodedAudio } from "@/lib/useDecodedAudio";
 import { isTypingTextTarget, useBlurOnPointerClick } from "@/lib/audit-input";
 import { zoomActionForKey } from "@/lib/zoomKeys";
 import { placeTime, type SnapPeaks } from "@/lib/peak-snap";
@@ -113,11 +113,22 @@ export function Review() {
       return !open;
     });
   }, []);
+  const [videoLarge, setVideoLarge] = useState(false);
+  useEffect(() => {
+    if (!videoLarge) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setVideoLarge(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [videoLarge]);
   const walkParam = params.get("walk") === "1" || params.get("step") === "1";
   const [walkMode, setWalkMode] = useState(walkParam);
   useEffect(() => {
     setWalkMode(walkParam);
   }, [fixturePath, walkParam]);
+  // The walk draws the wave itself: the fixture's samples, decoded once.
+  const decodedAudio = useDecodedAudio(walkMode && fixturePath ? api.fixtureAudioUrl(fixturePath) : null);
 
   // Drop button / chip focus after a mouse click so the next Space press
   // toggles playback instead of re-clicking the last-touched control.
@@ -1058,18 +1069,57 @@ export function Review() {
   const rejectedCount = markers.filter((m) => m.kind === "rejected").length;
   const manualCount = markers.filter((m) => m.kind === "manual").length;
 
+  // In the walk the video sits small beside the stop (it shows whether the
+  // shooter fired); a click or the corner button enlarges it, Esc shrinks it.
+  const videoBox = videoPath ? (
+    <div
+      className={
+        videoLarge
+          ? "fixed inset-6 z-50 flex items-center justify-center rounded-md bg-black/95"
+          : "relative overflow-hidden rounded-md bg-black"
+      }
+    >
+      <video
+        ref={videoRef}
+        src={api.fixtureVideoUrl(videoPath)}
+        preload="metadata"
+        playsInline
+        controls={false}
+        onClick={walkMode ? () => setVideoLarge((v) => !v) : undefined}
+        className={
+          videoLarge
+            ? "max-h-full max-w-full cursor-zoom-out"
+            : walkMode
+              ? "block h-auto max-h-[30vh] w-full cursor-zoom-in object-contain"
+              : "block h-auto w-full max-h-[60vh]"
+        }
+      />
+      {walkMode ? (
+        <button
+          type="button"
+          className="absolute right-2 top-2 rounded bg-black/70 px-2 py-0.5 text-xs text-ink"
+          onClick={() => setVideoLarge((v) => !v)}
+        >
+          {videoLarge ? "Smaller (Esc)" : "Enlarge"}
+        </button>
+      ) : null}
+    </div>
+  ) : null;
+
   return (
     <div className="space-y-6">
-      <div className="flex items-baseline justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Review</h1>
-          <p className="text-sm text-muted">
-            Standalone fixture review. Drag the waveform to scrub. Double-click
-            to add a manual marker. Press <kbd>?</kbd> for the full keyboard
-            shortcuts.
-          </p>
+      {walkMode ? null : (
+        <div className="flex items-baseline justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Review</h1>
+            <p className="text-sm text-muted">
+              Standalone fixture review. Drag the waveform to scrub. Double-click
+              to add a manual marker. Press <kbd>?</kbd> for the full keyboard
+              shortcuts.
+            </p>
+          </div>
         </div>
-      </div>
+      )}
 
       <Card>
         <CardHeader>
@@ -1083,9 +1133,11 @@ export function Review() {
               <Badge variant="outline">beep at {audit.beep_time.toFixed(3)}s</Badge>
             ) : null}
           </CardTitle>
-          <CardDescription>
-            <code className="text-xs">{fixturePath}</code>
-          </CardDescription>
+          {walkMode ? null : (
+            <CardDescription>
+              <code className="text-xs">{fixturePath}</code>
+            </CardDescription>
+          )}
         </CardHeader>
         <CardContent className="space-y-4">
           {walkMode && peaks && edgePeaks ? (
@@ -1111,6 +1163,8 @@ export function Review() {
               busy={marking}
               guideOpen={guideOpen}
               onToggleGuide={toggleGuide}
+              audio={decodedAudio}
+              aside={videoBox}
             />
           ) : walkMode && peaks ? (
             <div className="flex items-center gap-2 text-sm text-muted">
@@ -1118,20 +1172,7 @@ export function Review() {
             </div>
           ) : null}
           {videoPath ? (
-            <div className="overflow-hidden rounded-md bg-black">
-              <video
-                ref={videoRef}
-                src={api.fixtureVideoUrl(videoPath)}
-                preload="metadata"
-                playsInline
-                controls={false}
-                className={
-                  walkMode
-                    ? "mx-auto block h-auto max-h-[30vh] w-auto"
-                    : "block h-auto w-full max-h-[60vh]"
-                }
-              />
-            </div>
+            walkMode ? null : videoBox
           ) : (
             <audio
               ref={audioRef}
@@ -1149,7 +1190,7 @@ export function Review() {
             <div className="rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
               Couldn't load peaks: {peaksError}
             </div>
-          ) : peaks ? (
+          ) : peaks && !walkMode ? (
             <>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <FilterBar
@@ -1297,7 +1338,6 @@ export function Review() {
                 onStep={stepShot}
                 onNoteChange={handleNoteChange}
               />
-              {walkMode && guideOpen ? <WalkGuide onClose={toggleGuide} /> : null}
             </>
           ) : null}
         </CardContent>

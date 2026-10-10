@@ -57,7 +57,7 @@ export function WalkGuide({ onClose }: { onClose: () => void }) {
         </button>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="space-y-4">
         <div className="space-y-3">
           <p className="text-ink">
             The goal: every real shot is kept, each sits on its onset, and nothing else is kept. The onset
@@ -153,7 +153,9 @@ export function WalkGuide({ onClose }: { onClose: () => void }) {
           </p>
           {EXAMPLES.map((e) => (
             <figure key={e.src} className="space-y-1">
-              <img src={e.src} alt={e.caption} className="w-full rounded-sm bg-white" loading="lazy" />
+              <a href={e.src} target="_blank" rel="noreferrer" title="Open full size">
+                <img src={e.src} alt={e.caption} className="w-full cursor-zoom-in rounded-sm bg-white" loading="lazy" />
+              </a>
               <figcaption className="text-muted">{e.caption}</figcaption>
             </figure>
           ))}
