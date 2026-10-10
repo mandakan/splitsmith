@@ -129,6 +129,15 @@ refused), so the corpus holds unreviewed footage on purpose: the build trains
 on it by default and ``--reviewed-only`` (``fixture_stems(reviewed_only=True)``)
 leaves it out. Compare both before trusting a number.
 
+New fixture audio is **not in git** (#1363): ``tests/fixtures/audio.lock.json``
+maps each such WAV to its sha256, the bytes live content-addressed in a
+public-read R2 bucket (``wav/<sha256>.wav``) and ``tests/fixtures/.gitignore``
+keeps the local copies out. ``uv run python scripts/fixture_audio.py fetch``
+before a build or a sweep (a missing WAV is a skipped fixture, silently);
+``push <stem>`` uploads a new or changed WAV (write credentials in
+``SPLITSMITH_FIXTURE_R2_*``) and records it. Never commit a fixture WAV
+again; no test needs the external ones (the suite was run without them).
+
 The review-time variant generator ``scripts/build_ensemble_fixture.py``
 still exists for offline comparison under ``build/ensemble-review/``.
 

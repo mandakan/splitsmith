@@ -1,0 +1,299 @@
+{
+  "slug": "stage-shots-stockholm-ipsc-open-2026-stage12-s36ed6e4e-samsung",
+  "secondary_source": "raw/martin_12_2.mp4",
+  "anchor_slug": "stage12-stage-b2-left",
+  "cross_align": {
+    "method": "known_beeps",
+    "secondary_beep_time": 33.4583,
+    "offset_seconds": 28.4583,
+    "confidence": null,
+    "peak_correlation": 1.0
+  },
+  "snap_window_ms": 60.0,
+  "drift_ms_per_minute": -11.647,
+  "counts": {
+    "anchor_shots": 25,
+    "snapped": 25,
+    "missed": 0,
+    "monotonicity_flagged": 0,
+    "min_spacing_flagged": 0,
+    "voter_a_candidates": 47,
+    "total_candidates": 65,
+    "at_window_edge": 0
+  },
+  "displacement_stats": {
+    "mean_ms": 12.28,
+    "stdev_ms": 12.0,
+    "p95_ms": 31.9,
+    "min_ms": -7.65,
+    "max_ms": 35.41
+  },
+  "amplitude_stats": {
+    "median": 0.7893,
+    "p10": 0.676,
+    "low_amplitude_shots": 0
+  },
+  "quality": {
+    "wrong_clip_suspected": false,
+    "snap_rate": 1.0,
+    "warnings": []
+  },
+  "per_shot": [
+    {
+      "shot_number": 1,
+      "anchor_time": 7.22,
+      "predicted_time": 35.65090494786855,
+      "snapped_time": 35.684,
+      "displacement_ms": 33.095052131450586,
+      "snap_confidence": 0.903717041015625,
+      "time_since_beep_s": 2.2199999999999998,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 2,
+      "anchor_time": 9.138,
+      "predicted_time": 37.568587391001884,
+      "snapped_time": 37.604,
+      "displacement_ms": 35.41260899811505,
+      "snap_confidence": 0.828460693359375,
+      "time_since_beep_s": 4.138,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 3,
+      "anchor_time": 10.993,
+      "predicted_time": 39.42328026483521,
+      "snapped_time": 39.419,
+      "displacement_ms": -4.280264835216485,
+      "snap_confidence": 0.8253173828125,
+      "time_since_beep_s": 5.993,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 4,
+      "anchor_time": 11.483,
+      "predicted_time": 39.91319913716855,
+      "snapped_time": 39.908,
+      "displacement_ms": -5.199137168546031,
+      "snap_confidence": 0.781646728515625,
+      "time_since_beep_s": 6.4830000000000005,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 5,
+      "anchor_time": 11.985,
+      "predicted_time": 40.41511602270188,
+      "snapped_time": 40.441,
+      "displacement_ms": 25.883977298121863,
+      "snap_confidence": 0.718963623046875,
+      "time_since_beep_s": 6.984999999999999,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 6,
+      "anchor_time": 12.475,
+      "predicted_time": 40.905034895035215,
+      "snapped_time": 40.928,
+      "displacement_ms": 22.965104964782768,
+      "snap_confidence": 0.8155517578125,
+      "time_since_beep_s": 7.475,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 7,
+      "anchor_time": 13.42,
+      "predicted_time": 41.84987843453521,
+      "snapped_time": 41.877,
+      "displacement_ms": 27.121565464788944,
+      "snap_confidence": 0.9659423828125,
+      "time_since_beep_s": 8.42,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 8,
+      "anchor_time": 13.92,
+      "predicted_time": 42.34979565120188,
+      "snapped_time": 42.374,
+      "displacement_ms": 24.204348798122055,
+      "snap_confidence": 0.8204345703125,
+      "time_since_beep_s": 8.92,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 9,
+      "anchor_time": 16.802,
+      "predicted_time": 45.23131848806855,
+      "snapped_time": 45.229,
+      "displacement_ms": -2.3184880685533926,
+      "snap_confidence": 0.77581787109375,
+      "time_since_beep_s": 11.802,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 10,
+      "anchor_time": 19.134,
+      "predicted_time": 47.56293238660189,
+      "snapped_time": 47.561,
+      "displacement_ms": -1.9323866018865488,
+      "snap_confidence": 0.81719970703125,
+      "time_since_beep_s": 14.134,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 11,
+      "anchor_time": 20.646,
+      "predicted_time": 49.07468204980188,
+      "snapped_time": 49.074,
+      "displacement_ms": -0.682049801881135,
+      "snap_confidence": 0.806243896484375,
+      "time_since_beep_s": 15.646,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 12,
+      "anchor_time": 21.626,
+      "predicted_time": 50.05451979446855,
+      "snapped_time": 50.054,
+      "displacement_ms": -0.5197944685448874,
+      "snap_confidence": 0.71002197265625,
+      "time_since_beep_s": 16.626,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 13,
+      "anchor_time": 24.822,
+      "predicted_time": 53.24999064340188,
+      "snapped_time": 53.268,
+      "displacement_ms": 18.009356598120974,
+      "snap_confidence": 0.730224609375,
+      "time_since_beep_s": 19.822,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 14,
+      "anchor_time": 26.357,
+      "predicted_time": 54.78473649856855,
+      "snapped_time": 54.794,
+      "displacement_ms": 9.263501431448162,
+      "snap_confidence": 0.623748779296875,
+      "time_since_beep_s": 21.357,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 15,
+      "anchor_time": 26.896,
+      "predicted_time": 55.32364725813522,
+      "snapped_time": 55.316,
+      "displacement_ms": -7.6472581352149405,
+      "snap_confidence": 0.685516357421875,
+      "time_since_beep_s": 21.896,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 16,
+      "anchor_time": 29.561,
+      "predicted_time": 57.98820602296855,
+      "snapped_time": 57.997,
+      "displacement_ms": 8.793977031452016,
+      "snap_confidence": 0.798980712890625,
+      "time_since_beep_s": 24.561,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 17,
+      "anchor_time": 30.035,
+      "predicted_time": 58.46212754436855,
+      "snapped_time": 58.478,
+      "displacement_ms": 15.872455631452453,
+      "snap_confidence": 0.72088623046875,
+      "time_since_beep_s": 25.035,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 18,
+      "anchor_time": 31.023,
+      "predicted_time": 59.44996396450188,
+      "snapped_time": 59.464,
+      "displacement_ms": 14.036035498115496,
+      "snap_confidence": 0.789337158203125,
+      "time_since_beep_s": 26.023,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 19,
+      "anchor_time": 31.738,
+      "predicted_time": 60.16484558433521,
+      "snapped_time": 60.176,
+      "displacement_ms": 11.154415664790918,
+      "snap_confidence": 0.7308349609375,
+      "time_since_beep_s": 26.738,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 20,
+      "anchor_time": 32.729,
+      "predicted_time": 61.15568150776855,
+      "snapped_time": 61.165,
+      "displacement_ms": 9.318492231450648,
+      "snap_confidence": 0.882659912109375,
+      "time_since_beep_s": 27.729,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 21,
+      "anchor_time": 33.731,
+      "predicted_time": 62.15751560996855,
+      "snapped_time": 62.172,
+      "displacement_ms": 14.484390031448413,
+      "snap_confidence": 0.6190185546875,
+      "time_since_beep_s": 28.731,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 22,
+      "anchor_time": 34.276,
+      "predicted_time": 62.70242537613522,
+      "snapped_time": 62.719,
+      "displacement_ms": 16.574623864784144,
+      "snap_confidence": 0.78240966796875,
+      "time_since_beep_s": 29.276000000000003,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 23,
+      "anchor_time": 36.219,
+      "predicted_time": 64.64510368010188,
+      "snapped_time": 64.653,
+      "displacement_ms": 7.896319898122783,
+      "snap_confidence": 0.66973876953125,
+      "time_since_beep_s": 31.219,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 24,
+      "anchor_time": 37.985,
+      "predicted_time": 66.41081128936855,
+      "snapped_time": 66.423,
+      "displacement_ms": 12.188710631448885,
+      "snap_confidence": 0.7972412109375,
+      "time_since_beep_s": 32.985,
+      "sanity_flag": ""
+    },
+    {
+      "shot_number": 25,
+      "anchor_time": 39.229,
+      "predicted_time": 67.65460532443521,
+      "snapped_time": 67.678,
+      "displacement_ms": 23.394675564787804,
+      "snap_confidence": 0.81463623046875,
+      "time_since_beep_s": 34.229,
+      "sanity_flag": ""
+    }
+  ],
+  "warnings": [],
+  "onset_lag": {
+    "onset_lag_ms": -27.0,
+    "onset_lag_contrast": 1.25,
+    "onset_lag_applied": true
+  }
+}
