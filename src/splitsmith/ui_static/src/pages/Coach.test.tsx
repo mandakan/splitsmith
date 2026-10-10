@@ -492,6 +492,47 @@ describe("Coach player source", () => {
   });
 });
 
+describe("Coach second camera (#1409)", () => {
+  const twoCams = () =>
+    makeCoach([makeShot(1, "c1")], 4, {
+      videos: [
+        { path: "trimmed/stage1.mp4", role: "primary", beep_in_clip: 5, kind: "trim" },
+        { path: "trimmed/stage1_cam2.mp4", role: "secondary", beep_in_clip: 3, kind: "trim" },
+      ],
+    });
+  const big = (c: HTMLElement) => c.querySelector<HTMLVideoElement>('[data-testid="stage-video"] > video')!;
+
+  beforeEach(() => {
+    vi.mocked(api.getProject).mockResolvedValue(PROJECT as never);
+  });
+
+  it("C swaps the cameras, but never while typing a note", async () => {
+    vi.mocked(api.getStageCoach).mockResolvedValue(twoCams());
+    const { container } = renderCoachRoute();
+    const note = await screen.findByRole("textbox", { name: "Stage note" });
+    expect(screen.getByTestId("pip-view")).toBeInTheDocument();
+    expect(big(container).getAttribute("src")).toContain("/trim/trimmed/stage1.mp4");
+    fireEvent.keyDown(note, { key: "c" });
+    expect(big(container).getAttribute("src")).toContain("/trim/trimmed/stage1.mp4");
+    fireEvent.keyDown(window, { key: "c" });
+    await waitFor(() => expect(big(container).getAttribute("src")).toContain("/trim/trimmed/stage1_cam2.mp4"));
+  });
+
+  it("with Cam 2 big, the strip, the transport and Adjust in Breakdown read seconds from the beep", async () => {
+    vi.mocked(api.getStageCoach).mockResolvedValue(twoCams());
+    const { container } = renderCoachRoute();
+    await screen.findByRole("region", { name: "Shots" });
+    fireEvent.keyDown(window, { key: "c" });
+    await waitFor(() => expect(big(container).getAttribute("src")).toContain("stage1_cam2"));
+    const v = big(container);
+    Object.defineProperty(v, "readyState", { configurable: true, value: 4 });
+    v.currentTime = 4.5; // 1.5 s after Cam 2's beep at 3 s
+    fireEvent.timeUpdate(v);
+    expect(await screen.findByText("1.50 s")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Adjust in Breakdown" }).getAttribute("href")).toContain("t=1.5");
+  });
+});
+
 describe("match coach time budget rows", () => {
   it("names a stage without a name and links it to that stage's coach", async () => {
     vi.mocked(api.getProject).mockResolvedValue({

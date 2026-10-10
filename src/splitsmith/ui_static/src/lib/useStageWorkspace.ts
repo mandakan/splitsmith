@@ -27,6 +27,7 @@ import {
 } from "@/lib/api";
 import { shotAtOrBefore } from "@/lib/coachReview";
 import { useSpacePlayPause } from "@/lib/keyboard";
+import { bigToPrimary, primaryToBig } from "@/lib/stageCameras";
 import { type TierBaselines, baselinesFromMatchDistributions } from "@/lib/splits";
 import { parseStageLink, resolveStageLink } from "@/lib/stageLink";
 import { useIsMobile } from "@/lib/useIsMobile";
@@ -51,8 +52,19 @@ export interface StageWorkspace {
   regions: StageEvents;
   scrub: ReturnType<typeof useScrubSource>;
   videoRef: React.MutableRefObject<HTMLVideoElement | null>;
+  /** The playhead in the primary clip's seconds (``coach.beep_time`` and
+   *  ``shots[].time_absolute`` are in that clip), whichever camera is big. */
   currentTime: number;
   setCurrentTime: (t: number) => void;
+  /** The big player shows a camera whose beep sits at ``beep`` in its own
+   *  clip (#1409, PiP swap); ``null`` is the primary. Every seek and the
+   *  clock go through it, so times stay seconds from the beep. */
+  setBigBeep: (beep: number | null) => void;
+  /** The big video's own time -> the primary clip's (the clock). */
+  fromVideoTime: (videoTime: number) => number;
+  /** Move the video to seconds from the beep (the band's seek); the
+   *  current shot follows playback, not this. */
+  seekFromBeep: (tFromBeep: number) => void;
   isPlaying: boolean;
   setIsPlaying: (playing: boolean) => void;
   activeShotNumber: number | null;
@@ -107,6 +119,10 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
   const [peaksLoading, setPeaksLoading] = useState(wantPeaks);
   const scrub = useScrubSource();
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  // The beep in the clip the big player streams; null while it is the
+  // primary's (#1409). A ref: the clock and every seek read it at once,
+  // before a swapped source has loaded.
+  const bigBeepRef = useRef<number | null>(null);
   // Guard value for the positional shot PATCH (#844). A ref rather than
   // reading ``coach``: patchShot is memoised on [slug, stage], so the
   // ``coach`` it closes over is the one from the render that created it -
@@ -118,6 +134,34 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
   // A deep link's seek (#1377), in clip seconds, held until the video can take it.
   const pendingSeekRef = useRef<number | null>(null);
   const linkRef = useRef(options.link ?? "");
+  const isPlayingRef = useRef(false);
+  isPlayingRef.current = isPlaying;
+
+  // Primary-clip seconds <-> the big video's own. Equal while the primary
+  // is big; with a secondary big, both clips line up on their own beep.
+  // A moment before the big clip's start lands on its first frame
+  // (``primaryToBig`` clamps), and the playhead is put where the picture is.
+  const toVideoTime = useCallback(
+    (clip: number) => primaryToBig(clip, coachRef.current?.beep_time ?? null, bigBeepRef.current),
+    [],
+  );
+  const fromVideoTime = useCallback(
+    (videoTime: number) => bigToPrimary(videoTime, coachRef.current?.beep_time ?? null, bigBeepRef.current),
+    [],
+  );
+  /** Seek the big video to a primary-clip time; answers where it landed,
+   *  in primary-clip seconds (clamped to the big clip's start). */
+  const seekClip = useCallback(
+    (clip: number) => {
+      const t = toVideoTime(clip);
+      if (videoRef.current) videoRef.current.currentTime = t;
+      return fromVideoTime(t);
+    },
+    [fromVideoTime, toVideoTime],
+  );
+  const setBigBeep = useCallback((beep: number | null) => {
+    bigBeepRef.current = beep;
+  }, []);
 
   // The only writer of coach state, so the guard value cannot fall out of
   // step with the document it guards. Written here rather than in an effect
@@ -138,6 +182,8 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
 
   useEffect(() => {
     let alive = true;
+    // A new stage starts on its primary (usePip resets the swap too).
+    bigBeepRef.current = null;
     (async () => {
       try {
         const [p, c, dist] = await Promise.all([
@@ -165,7 +211,7 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
           const clip = c.beep_time + link.t;
           pendingSeekRef.current = clip;
           setCurrentTime(clip);
-          if (videoRef.current) videoRef.current.currentTime = clip;
+          seekClip(clip);
         }
       } catch (e) {
         if (alive) setError(e instanceof ApiError ? e.detail : String(e));
@@ -174,11 +220,13 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
     return () => {
       alive = false;
     };
-  }, [apply, selectEvent, slug, stage]);
+  }, [apply, selectEvent, seekClip, slug, stage]);
 
   // The video mounts after the payload: a linked seek lands once it can.
   // With none pending, a new source (the scrub rendition failed over to the
-  // trim) takes the position the old one had, rather than starting at 0.
+  // trim, or a PiP swap put another camera in the big player) takes the
+  // position the old one had, rather than starting at 0, and keeps playing
+  // if it was: loading a new source pauses the element without a ``pause``.
   const positionRef = useRef(0);
   positionRef.current = currentTime;
   const onVideoReady = useCallback(() => {
@@ -186,8 +234,12 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
     if (!v) return;
     const clip = pendingSeekRef.current ?? (positionRef.current > 0 ? positionRef.current : null);
     pendingSeekRef.current = null;
-    if (clip != null && Math.abs(v.currentTime - clip) > 1e-3) v.currentTime = clip;
-  }, []);
+    if (clip != null) {
+      const t = toVideoTime(clip);
+      if (Math.abs(v.currentTime - t) > 1e-3) v.currentTime = t;
+    }
+    if (isPlayingRef.current && v.paused) void v.play().catch(() => {});
+  }, [toVideoTime]);
 
   // Load peaks for the band's audio track (same shape as Audit.tsx's "Load
   // peaks" effect). A failure just means no waveform -- the track renders
@@ -283,9 +335,9 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
       // Picking a shot brings its editor back in place of the region card.
       selectEvent(null);
       setActiveShotNumber(shot.shot_number);
-      if (videoRef.current) videoRef.current.currentTime = shot.time_absolute;
+      seekClip(shot.time_absolute);
     },
-    [selectEvent],
+    [seekClip, selectEvent],
   );
 
   const seekToTime = useCallback(
@@ -295,11 +347,17 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
       selectEvent(null);
       // A raw time makes the shot the playhead has passed the current one.
       setActiveShotNumber(shotNumber ?? shotAtOrBefore(c.shots, tFromBeep));
-      const clip = c.beep_time + tFromBeep;
-      setCurrentTime(clip);
-      if (videoRef.current) videoRef.current.currentTime = clip;
+      setCurrentTime(seekClip(c.beep_time + tFromBeep));
     },
-    [selectEvent],
+    [seekClip, selectEvent],
+  );
+
+  const seekFromBeep = useCallback(
+    (tFromBeep: number) => {
+      const c = coachRef.current;
+      if (c) setCurrentTime(seekClip(c.beep_time + tFromBeep));
+    },
+    [seekClip],
   );
 
   const togglePlay = useCallback(() => {
@@ -326,6 +384,9 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
     videoRef,
     currentTime,
     setCurrentTime,
+    setBigBeep,
+    fromVideoTime,
+    seekFromBeep,
     isPlaying,
     setIsPlaying,
     activeShotNumber,
@@ -362,6 +423,28 @@ export interface StageView {
   selectedEvent: StageEvent | null;
   prevStage: number | null;
   nextStage: number | null;
+  /** The shooter and stage the payloads are for (stream URLs). */
+  slug: string;
+  stage: number;
+}
+
+/** What the big player streams for a camera: a trim through the scrub
+ *  rendition when there is one (``useScrubSource``), any other kind as the
+ *  payload pinned it, so the clip matches its ``beep_in_clip``. */
+export function bigStream(
+  video: CoachVideoEntry,
+  scrub: Pick<StageWorkspace["scrub"], "choose">,
+  slug: string,
+  stage: number,
+): { url: string; playingScrub: boolean } {
+  if (video.kind !== "trim") {
+    return { url: api.videoStreamUrl(slug, video.path, video.kind, null, stage), playingScrub: false };
+  }
+  const choice = scrub.choose(video);
+  return {
+    url: api.videoStreamUrl(slug, video.path, choice.kind, choice.version, stage),
+    playingScrub: choice.kind === "scrub",
+  };
 }
 
 /** Everything a stage page draws that follows from the two payloads. */
@@ -374,13 +457,9 @@ export function deriveStageView(ws: StageWorkspace, slug: string, stage: number)
   const nextStage = idx >= 0 && idx < allStages.length - 1 ? allStages[idx + 1] : null;
   const activeShot = coach.shots.find((s) => s.shot_number === ws.activeShotNumber) ?? null;
   const primary = coach.videos.find((v) => v.role === "primary") ?? null;
-  const scrubChoice = primary?.kind === "trim" ? ws.scrub.choose(primary) : null;
-  const playingScrub = scrubChoice?.kind === "scrub";
-  const streamUrl = primary
-    ? primary.kind !== "trim"
-      ? api.videoStreamUrl(slug, primary.path, primary.kind, null, stage)
-      : api.videoStreamUrl(slug, primary.path, scrubChoice!.kind, scrubChoice!.version, stage)
-    : null;
+  const stream = primary ? bigStream(primary, ws.scrub, slug, stage) : null;
+  const playingScrub = stream?.playingScrub ?? false;
+  const streamUrl = stream?.url ?? null;
   const eventsReadOnly = ws.isMobile || capabilityDenied(project.capabilities, "edit");
   const { events, selectedId } = ws.regions;
   const selectedEvent = eventsReadOnly ? null : (events.find((e) => e.id === selectedId) ?? null);
@@ -405,5 +484,7 @@ export function deriveStageView(ws: StageWorkspace, slug: string, stage: number)
     selectedEvent,
     prevStage,
     nextStage,
+    slug,
+    stage,
   };
 }
