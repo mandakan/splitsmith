@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "phone-video-opens-at-the-shot",
+      "date": "2026-10-10",
+      "title": "Shot video opens at the shot on a phone",
+      "body": "On a phone, Video in Audit now opens 1.5 s before the shot you tapped and stops the shot's sound. It used to start at the beginning or at a later shot."
+    },
+    {
       "id": "camera-inset",
       "date": "2026-10-10",
       "title": "Other cameras in a corner of the video",
