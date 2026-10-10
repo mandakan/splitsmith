@@ -29,7 +29,7 @@ from pathlib import Path
 from PIL import Image
 
 from .coach import statistic_split_shots
-from .events import ReloadFigure, positive_overhang_s
+from .events import ReloadFigure, exposed_reload_s
 from .match_project import StageScorecard
 from .overlay_html import single_html
 from .overlay_layout import Anchor, CellScale, ColorToken, Element, Emphasis, Flow, Group, Role
@@ -262,16 +262,16 @@ def _unlit_fault_count(counts: list[Element]) -> int:
 
 
 def _reload_elements(reloads: tuple[ReloadFigure, ...], *, first_priority: int) -> list[Element]:
-    """Reloads / Reload avg / Overhang for the stage's confirmed reloads.
+    """Reloads / Reload avg / Exposed for the stage's confirmed reloads.
 
-    Overhang is the positive overhangs summed and signed (``+0.31``), the
-    Coach page's figure (``events.positive_overhang_s``). It is drawn only
-    when some reload overlapped a movement: a standing reload has no
-    overhang at all, and the summary never draws a figure that was not
-    measured. Nothing at all without a confirmed reload.
+    Exposed is the reloads' time no confirmed movement covered, summed and
+    unsigned (``1.42``), the Coach page's figure (``events.exposed_reload_s``):
+    a standing reload is exposed for its whole duration, one hidden inside a
+    movement for none. Drawn whenever there is a confirmed reload; nothing at
+    all without one.
 
     Drop priorities run from ``first_priority`` right to left, so a cell
-    that must give up part of the row loses the overhang first and the
+    that must give up part of the row loses the exposed time first and the
     count last."""
     if not reloads:
         return []
@@ -279,9 +279,8 @@ def _reload_elements(reloads: tuple[ReloadFigure, ...], *, first_priority: int) 
     declared = [
         (str(len(reloads)), "Reloads"),
         (f"{avg:.2f}", "Reload avg"),
+        (f"{exposed_reload_s(reloads):.2f}", "Exposed"),
     ]
-    if any(r.overhang is not None for r in reloads):
-        declared.append((f"+{positive_overhang_s(reloads):.2f}", "Overhang"))
     last = first_priority + len(declared) - 1
     return [
         Element(role=Role.HEADLINE, text=text, caption=caption, drop_priority=last - index)
@@ -328,7 +327,7 @@ def summary_groups(
     band only: Static and Moving rows in place of the one Best/Avg/Worst
     row when both kinds of split exist, ``split_rows`` is on and the cell
     is tall and wide enough (:func:`_fits_split_rows`), and a
-    Reloads / Reload avg / Overhang row when the stage has a confirmed
+    Reloads / Reload avg / Exposed row when the stage has a confirmed
     reload. A stage without confirmed regions declares exactly the groups
     it did before (pinned in ``tests/test_overlay_summary_cell.py``).
 
@@ -450,7 +449,7 @@ def summary_groups(
     # regions only) and the cell is tall enough
     # (:func:`_fits_split_rows`) the Best/Avg/Worst row becomes a
     # Static and a Moving row, and the Draw moves down to the last row;
-    # confirmed reloads add Reloads / Reload avg / Overhang to that last row
+    # confirmed reloads add Reloads / Reload avg / Exposed to that last row
     # (their own row under Best/Avg/Worst/Draw otherwise). Every row then
     # shares four columns so the figures line up. A stage with neither
     # declares exactly what it did before: one grid, one column per element.

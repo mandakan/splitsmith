@@ -53,6 +53,20 @@ const lastCommit = (onChange: ReturnType<typeof vi.fn>) =>
   [...onChange.mock.calls].reverse().find((c) => c[1] === true)?.[0] as StageEvent[] | undefined;
 
 describe("LaneEditor", () => {
+  it("brackets each exposed stretch of a selected reload on the move, unsigned", () => {
+    // Reload 2.0-5.5 around movement 3.0-4.0: 1.00 exposed before it, 1.50 after.
+    render(<Harness initial={[ev("evt-1", "movement", 3, 4), ev("evt-2", "reload", 2, 5.5)]} selectedId="evt-2" />);
+    const brackets = screen.getAllByTestId("exposed-bracket");
+    expect(brackets.map((b) => b.textContent)).toEqual(["1.00", "1.50"]);
+    expect(brackets[0].style.left).toBe("20%");
+    expect(brackets[1].style.left).toBe("40%");
+  });
+
+  it("draws no exposed bracket for a standing reload", () => {
+    render(<Harness initial={[ev("evt-1", "reload", 2, 3.5)]} selectedId="evt-1" />);
+    expect(screen.queryByTestId("exposed-bracket")).toBeNull();
+  });
+
   it("creates a region by dragging empty lane space and seeks the moving edge", () => {
     const onChange = vi.fn();
     const onSeek = vi.fn();

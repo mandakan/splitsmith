@@ -289,7 +289,7 @@ def test_the_sample_reload_is_on_the_move_so_the_split_band_path_runs() -> None:
     """Every shipped style cuts a reload on the move into its half of the
     stage bar; a sample whose reload never overlaps a movement would never
     run that path in a custom template. The mid-reload probe lands inside
-    the movement too, and the reload outlasts it (a positive overhang)."""
+    the movement too, and the reload outlasts it (part of it is exposed)."""
     (sample,) = [s for s in look_tools.hud_samples() if s.events]
     reload = next(e for e in sample.events if e.kind == "reload")
     mid = (reload.start + reload.end) / 2

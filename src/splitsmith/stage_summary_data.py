@@ -105,7 +105,7 @@ def _confirmed_events(audit_data: dict[str, Any], audit_path: Path) -> list[Stag
 
 def load_stage_reloads(audit_path: Path) -> tuple[ReloadFigure, ...]:
     """This stage's confirmed reloads as :class:`~splitsmith.events.ReloadFigure`
-    records (duration, overhang against an overlapping confirmed movement).
+    records (duration, exposed time against the confirmed movements).
     An auto proposal is never here. Missing, unreadable or corrupt reads as
     none."""
     try:

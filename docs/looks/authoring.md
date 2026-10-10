@@ -237,7 +237,7 @@ data.stage = {
   stage_time: 7.75,
   rounds: 12,
   events: [{ kind: "movement", start: 7.2, end: 8.9 }, ...],   // clip seconds
-  reloads: [{ start: 9.05, end: 10.47, duration: 1.42, overhang: null }, ...],
+  reloads: [{ start: 9.05, end: 10.47, duration: 1.42, exposed: 1.42 }, ...],
 }
 data.options = {
   speed_colors: false, class_labels: true, landing: true, position: "bottom-left",
@@ -261,9 +261,12 @@ template. Both lists are always there and empty when there is nothing:
 - `events[]` is every confirmed region, in clip seconds: `kind` is
   `movement`, `reload` or `activation`.
 - `reloads[]` is the reloads again, with `duration` (seconds, already
-  measured) and `overhang`: seconds from the end of the last movement it
-  overlaps to the reload's end (negative when it finished on the move), or
-  `null` when it overlaps no movement.
+  measured) and `exposed`: the seconds of the reload no confirmed movement
+  covers, never negative. A standing reload is exposed for its whole
+  duration, one finished inside a movement for `0`, and the part before a
+  movement starts or after it stops counts. This replaced `overhang`
+  (seconds past the last movement's end, `null` standing); a template that
+  still reads `overhang` gets `undefined`.
 - `shots[].moving` is true for a shot fired inside a confirmed movement.
 
 Two more toggles, both off unless the exporter turns them on:

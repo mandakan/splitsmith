@@ -288,7 +288,7 @@ def test_confirmed_reloads_and_movement_reach_the_grid_tile(tmp_path, with_proje
     assert [s.moving for s in tile.shots] == [False, True, True, False]
     (reload_,) = tile.reloads
     assert reload_.event_id == "evt-2"
-    assert reload_.overhang == pytest.approx(1.0)
+    assert reload_.exposed == pytest.approx(1.0)
 
 
 def test_scoring_comes_off_the_project_on_disk(tmp_path):

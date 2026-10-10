@@ -678,7 +678,7 @@ def test_get_coach_marks_moving_shots_and_sums_the_summary(tmp_path: Path) -> No
     summary = body["event_summary"]
     assert summary["moving_shots"] == 2
     assert summary["movement_s"] == pytest.approx(2.6)
-    assert summary["overhang_s"] == pytest.approx(0.4)
+    assert summary["exposed_reload_s"] == pytest.approx(0.4)
     # The 3.2 s gap before shot 5 overlaps the reload region -> auto reload.
     assert body["shots"][4]["interval_class"] == "reload"
     assert body["shots"][4]["interval_class_source"] == "auto"

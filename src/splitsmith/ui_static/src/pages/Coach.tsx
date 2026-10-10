@@ -953,7 +953,7 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
   useSpacePlayPause(togglePlay);
 
   const budget = useMemo(() => timeBudget(coach?.shots ?? [], distributions), [coach, distributions]);
-  // Moving-shot and reload/overhang figures come from the hook's local
+  // Moving-shot and exposed-reload figures come from the hook's local
   // ``events`` list (spec #1324), not the server's ``event_summary``: a
   // nudge or a drag release updates the strip before its PUT resolves.
   // ``summarize`` is the TS twin of the server's ``events.stage_event_summary``,
@@ -1088,7 +1088,7 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
         <StatStrip className="mb-4">
           <Stat label="On the move" value={String(summary.moving_shots)} unit={summary.moving_shots === 1 ? "shot" : "shots"} />
           {summary.reloads > 0 ? (
-            <Stat label="Overhang" value={`${summary.overhang_s >= 0 ? "+" : ""}${summary.overhang_s.toFixed(2)}`} unit="s" />
+            <Stat label="Exposed reload" value={summary.exposed_reload_s.toFixed(2)} unit="s" />
           ) : null}
         </StatStrip>
       ) : null}

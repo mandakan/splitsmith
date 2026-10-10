@@ -8226,20 +8226,20 @@ def _stage_figures_payload(doc: dict | None, project: MatchProject, stage_number
 def _stage_region_figures(doc: dict, stage_number: int) -> dict:
     """Region figures for ``stages[].figures`` (spec 2026-10-08, part 2):
     confirmed regions only (``events.confirmed_from_doc``), all four
-    ``None`` when the stage has none. ``overhang_s`` is ``None`` unless a
-    reload overlaps a movement (a standing reload measures no overhang;
-    the summary card omits it on the same condition). No capacity: the
-    capacity warning is a Coach-page hint, not a shared figure."""
+    ``None`` when the stage has none. ``exposed_reload_s`` is the reloads'
+    time no confirmed movement covered (a standing reload's whole
+    duration), a number whenever there is a confirmed reload and ``None``
+    without one, as ``reload_avg_s``. No capacity: the capacity warning is
+    a Coach-page hint, not a shared figure."""
     confirmed = events_module.confirmed_from_doc(doc, log_context=f"stage {stage_number}")
     if not confirmed:
-        return {"moving_shots": None, "reloads": None, "reload_avg_s": None, "overhang_s": None}
+        return {"moving_shots": None, "reloads": None, "reload_avg_s": None, "exposed_reload_s": None}
     summary = events_module.stage_event_summary(events_module.shot_times_from_doc(doc), confirmed, None)
-    moving_reload = any(f.overhang is not None for f in events_module.reload_figures(confirmed))
     return {
         "moving_shots": summary.moving_shots,
         "reloads": summary.reloads,
         "reload_avg_s": summary.reload_avg_s,
-        "overhang_s": summary.overhang_s if moving_reload else None,
+        "exposed_reload_s": summary.exposed_reload_s if summary.reloads else None,
     }
 
 

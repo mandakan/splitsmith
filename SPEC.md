@@ -257,7 +257,7 @@ Anomaly detection:
 - `run_trims(plan, ...)`: drives `exports.export_stage` with trim-only flags, one stage at a time. One stage's failure never ends the run.
 - The permanent skip rules live in `ui.project.trim_blocker`, shared with the SPA's `ready_to_trim` and the per-stage export endpoint, so eligibility cannot drift between surfaces. `SkipReason` adds what only a planner sees: `source_unreachable`, `already_exported`, `camera_ambiguous`.
 
-**`events.py`** -- pure. Stage events (movement / reload / activation regions on the audit doc, spec 2026-10-08) beside `coach.py`'s per-gap classes: lane validation, the once-per-stage reload seed (`seed_doc`, division capacity), and every derived figure (per-shot `moving`, reload overhang, `stage_event_summary`); `lib/events.ts` is its TS twin over the shared `tests/fixtures/events/cases.json`.
+**`events.py`** -- pure. Stage events (movement / reload / activation regions on the audit doc, spec 2026-10-08) beside `coach.py`'s per-gap classes: lane validation, the once-per-stage reload seed (`seed_doc`, division capacity), and every derived figure (per-shot `moving`, exposed reload time, `stage_event_summary`); `lib/events.ts` is its TS twin over the shared `tests/fixtures/events/cases.json`.
 
 **`share_card.py`** -- pure. Builds the `MatchCard` / `StageCard` models plus
 their content hash. **Does not own the split rule** -- `coach.statistic_splits`

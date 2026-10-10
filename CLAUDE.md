@@ -1083,8 +1083,10 @@ A new writer calls ``_classify_doc``; a corrupt events list there is the
 GET's 422, raised before the save.
 ``is_classification_stale`` takes the same ``reload_overlap`` input as
 the classifier, or a region-derived ``reload`` would report stale. Every
-figure (per-shot ``moving``, ``reload_figures`` with the **overhang** =
-reload end minus the enclosing movement's end, ``stage_event_summary``)
+figure (per-shot ``moving``, ``reload_figures`` with the **exposed** time =
+reload duration minus its overlap with the union of the movements, floored
+at 0, so a standing reload is exposed for all of it; ``stage_event_summary``
+and its ``exposed_reload_s``)
 is derived, never stored, by ``splitsmith/events.py`` and its TS twin
 ``lib/events.ts``, which run ``tests/fixtures/events/cases.json`` case
 for case -- a rule changes on both sides or not at all. A reload's
@@ -1231,8 +1233,8 @@ auto proposals only) commits ``lib/events.keepEvent``: ``source`` to
 
 HUD contract (``overlay_hud.hud_stage_data``): ``data.stage.events``
 (``{kind, start, end}``, clip seconds like ``shots[].t``),
-``data.stage.reloads`` (``{start, end, duration, overhang}``, overhang
-``null`` standing; templates never re-derive a figure), ``shots[].moving``,
+``data.stage.reloads`` (``{start, end, duration, exposed}``, exposed
+the whole duration standing; templates never re-derive a figure), ``shots[].moving``,
 ``options.reload_chip`` / ``options.stage_bar`` (both off by default, on
 the existing style-toggle seam), palette ``reload`` (``#FBBF24``) and
 ``movement`` (``#06B6D4``) in ``OverlayTheme`` / ``look.json``, optional.
@@ -1247,8 +1249,8 @@ edit redraws; a legacy record never matches, and a failed redraw drops
 that stage's overlay with an anomaly rather than reusing the stale one.
 
 Summary card: with confirmed reloads the Splits band gains Reloads /
-Reload avg / Overhang; Overhang is omitted when every reload is standing
-(never a drawn ``+0.00``). Static / Moving split rows need a
+Reload avg / Exposed, drawn whenever there is a confirmed reload,
+unsigned and standing reloads included. Static / Moving split rows need a
 single-shooter cell that is landscape or square and >= 480 px tall
 (``_SPLIT_ROWS_MIN_CELL_HEIGHT``); grid holds pass ``split_rows=False``
 so cells stay comparable, and keep the reload row. No confirmed regions
@@ -1270,9 +1272,9 @@ a prior file stays, as the splits CSV does. Region markers
 the stage clip in single-stage and match FCPXML and FCP7 XML, clamped to
 the visible window; compare carries none. ``stages[].figures`` on the
 project payload carries ``moving_shots``, ``reloads``, ``reload_avg_s``,
-``overhang_s`` (``_stage_region_figures``): all ``null`` with no
-confirmed region, ``overhang_s`` ``null`` unless a reload overlaps a
-movement, and no capacity warning (a Coach hint, not a shared figure).
+``exposed_reload_s`` (``_stage_region_figures``): all ``null`` with no
+confirmed region, ``exposed_reload_s`` a number whenever there is a
+confirmed reload, and no capacity warning (a Coach hint, not a shared figure).
 
 ## Hosted access tiers (spec 2026-10-03)
 
