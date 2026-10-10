@@ -52,6 +52,15 @@ export function withKind(events: StageEvent[], id: string, kind: StageEventKind)
   return validateLanes(next) ? null : next;
 }
 
+/**
+ * The regions a stage total may count: the ones the user confirmed
+ * (``source === "manual"``), in their stored order. The twin of
+ * ``events.confirmed``; an auto proposal is a guess nobody looked at.
+ */
+export function confirmedEvents(events: StageEvent[]): StageEvent[] {
+  return events.filter((e) => e.source === "manual");
+}
+
 /** Keep: ``id`` confirmed as a manual region, every other field and region untouched. */
 export function keepEvent(events: StageEvent[], id: string): StageEvent[] {
   return events.map((e) => (e.id === id ? { ...e, source: "manual" as const } : e));

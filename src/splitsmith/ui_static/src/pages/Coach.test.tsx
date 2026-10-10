@@ -200,13 +200,13 @@ describe("stage events on the Coach page", () => {
         [makeShot(1, "c1"), makeShot(2, "c2")],
         [
           { id: "evt-0", kind: "movement", start: 7.6, end: 9.16, source: "manual" },
-          { id: "evt-1", kind: "reload", start: 8.05, end: 9.47, source: "auto" },
+          { id: "evt-1", kind: "reload", start: 8.05, end: 9.47, source: "manual" },
         ],
       ),
     );
     render(<MemoryRouter initialEntries={["/match/m1/coach/anna/1"]}><Routes>
       <Route path="/match/:matchId/coach/:slug/:stage" element={<Coach />} /></Routes></MemoryRouter>);
-    expect(await screen.findByTestId("event-evt-1")).toHaveAttribute("data-source", "auto");
+    expect(await screen.findByTestId("event-evt-1")).toHaveAttribute("data-source", "manual");
     const strip = screen.getByText("Exposed reload").parentElement!;
     expect(within(strip).getByText("0.31")).toBeInTheDocument();
     expect(screen.queryByText("+0.31")).toBeNull();
@@ -230,7 +230,7 @@ describe("stage events on the Coach page", () => {
     vi.mocked(api.getProject).mockResolvedValue({ name: "M", competitor_name: "Anna",
       stages: [{ stage_number: 1, stage_name: "Stage One", time_seconds: 16.2 }] } as never);
     const movement: StageEvent = { id: "evt-0", kind: "movement", start: 7.6, end: 9.16, source: "manual" };
-    const reload: StageEvent = { id: "evt-1", kind: "reload", start: 8.05, end: 9.47, source: "auto" };
+    const reload: StageEvent = { id: "evt-1", kind: "reload", start: 8.05, end: 9.47, source: "manual" };
     const shots = [makeShot(1, "c1"), makeShot(2, "c2")];
     // The TS twin of the server's own ``events.stage_event_summary`` (all
     // regions, no capacity) for this exact list -- what the real server
@@ -269,7 +269,7 @@ describe("stage events on the Coach page", () => {
         [makeShot(1, "c1"), makeShot(2, "c2")],
         [
           { id: "evt-0", kind: "movement", start: 7.6, end: 9.16, source: "manual" },
-          { id: "evt-1", kind: "reload", start: 8.05, end: 9.47, source: "auto" },
+          { id: "evt-1", kind: "reload", start: 8.05, end: 9.47, source: "manual" },
         ],
         "v1v1v1v1v1v1v1v1",
       ),
@@ -315,6 +315,26 @@ describe("stage events on the Coach page", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
     await waitFor(() => expect(api.putStageEvents).toHaveBeenCalledWith("anna", 1, [], "v1v1v1v1v1v1v1v1"));
     await waitFor(() => expect(screen.queryByTestId("event-evt-1")).toBeNull());
+  });
+
+  it("counts only confirmed regions in the stat strip: a proposed reload adds no exposed figure until Keep", async () => {
+    vi.mocked(api.getProject).mockResolvedValue({ name: "M", competitor_name: "Anna",
+      stages: [{ stage_number: 1, stage_name: "Stage One", time_seconds: 16.2 }] } as never);
+    const auto: StageEvent = { id: "evt-1", kind: "reload", start: 8.05, end: 9.47, source: "auto" };
+    vi.mocked(api.getStageCoach).mockResolvedValue(makeCoachWithEvents([makeShot(1, "c1")], [auto], "v1v1v1v1v1v1v1v1"));
+    vi.mocked(api.putStageEvents).mockResolvedValue(
+      makeCoachWithEvents([makeShot(1, "c1")], [{ ...auto, source: "manual" }], "v2v2v2v2v2v2v2v2"));
+    renderCoachRoute();
+    fireEvent.click(await screen.findByTestId("event-evt-1"));
+    // The card still describes the proposal itself...
+    const card = screen.getByRole("region", { name: "Region" });
+    expect(within(card).getByText("Exposed")).toBeInTheDocument();
+    // ...but the stage total in the strip does not count it.
+    expect(screen.getByText("On the move")).toBeInTheDocument();
+    expect(screen.queryByText("Exposed reload")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Keep" }));
+    const strip = (await screen.findByText("Exposed reload")).parentElement!;
+    expect(within(strip).getByText("1.42")).toBeInTheDocument();
   });
 
   it("Keep on a proposal PUTs the list with that region manual and every other field unchanged", async () => {

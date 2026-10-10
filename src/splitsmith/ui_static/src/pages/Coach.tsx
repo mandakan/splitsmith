@@ -63,7 +63,7 @@ import {
   type MatchProject,
   type PeaksResult,
 } from "@/lib/api";
-import { keepEvent, summarize, withKind } from "@/lib/events";
+import { confirmedEvents, keepEvent, summarize, withKind } from "@/lib/events";
 import { useSpacePlayPause } from "@/lib/keyboard";
 import { useMatchHref } from "@/lib/matchHref";
 import { type Zoom } from "@/lib/timelineView";
@@ -957,14 +957,14 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
   // ``events`` list (spec #1324), not the server's ``event_summary``: a
   // nudge or a drag release updates the strip before its PUT resolves.
   // ``summarize`` is the TS twin of the server's ``events.stage_event_summary``,
-  // called the same way the server builds it in ``_build_coach_response``
-  // (every region, not confirmed-only) so the figures do not jump when the
-  // response lands. ``capacity_warning`` stays server-side: it needs the
-  // division capacity, which the SPA never receives. Computed above the
-  // early returns below: a hook cannot be conditional on ``coach`` being
-  // loaded yet.
+  // over the confirmed regions only, as the exports and the share figures
+  // count them: a proposal shows its own figures on its card and in the
+  // list, never in the stage totals until it is kept. ``capacity_warning``
+  // stays server-side: it needs the division capacity, which the SPA never
+  // receives. Computed above the early returns below: a hook cannot be
+  // conditional on ``coach`` being loaded yet.
   const localSummary = useMemo(
-    () => summarize(coach?.shots.map((s) => s.time_from_beep) ?? [], events, null),
+    () => summarize(coach?.shots.map((s) => s.time_from_beep) ?? [], confirmedEvents(events), null),
     [coach, events],
   );
 
