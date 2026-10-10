@@ -1,5 +1,80 @@
 # Changelog
 
+## [0.65.0](https://github.com/mandakan/splitsmith/compare/v0.64.1...v0.65.0) (2026-10-10)
+
+
+### Features
+
+* **audit:** flag a stage time the audit disagrees with, and show where the timer stopped ([#1313](https://github.com/mandakan/splitsmith/issues/1313)) ([d7ffc3c](https://github.com/mandakan/splitsmith/commit/d7ffc3cdd38e03da2c75a99c367cfcc25fd7db6a))
+* **audit:** the beep step on the full-width timeline ([#1352](https://github.com/mandakan/splitsmith/issues/1352)) ([1eff01a](https://github.com/mandakan/splitsmith/commit/1eff01aca7282800245644223df24d2b8bbf344c))
+* **audit:** the other cameras show as a PiP inset ([#1407](https://github.com/mandakan/splitsmith/issues/1407)) ([#1416](https://github.com/mandakan/splitsmith/issues/1416)) ([be3d891](https://github.com/mandakan/splitsmith/commit/be3d891618c96b61173a28a4b2c30ec5d041f2de))
+* **audit:** the phone's Video dialog stacks the other camera ([#1410](https://github.com/mandakan/splitsmith/issues/1410)) ([#1423](https://github.com/mandakan/splitsmith/issues/1423)) ([0b29f26](https://github.com/mandakan/splitsmith/commit/0b29f26a11f82514fedcabdf34ab05747847ea2a))
+* **audit:** the transport, camera label and legend live in the timeline band header ([#1359](https://github.com/mandakan/splitsmith/issues/1359)) ([#1404](https://github.com/mandakan/splitsmith/issues/1404)) ([df4fe88](https://github.com/mandakan/splitsmith/commit/df4fe88c7080f04cd38f35a9c2417147a5d4cefa))
+* **audit:** the waveform, markers and pins on the full-width timeline ([#1352](https://github.com/mandakan/splitsmith/issues/1352)) ([beb5a11](https://github.com/mandakan/splitsmith/commit/beb5a11153f93c45cf72ff3f02f11ae8e133a732))
+* **breakdown:** a fixed-workspace editor for regions and intervals ([#1371](https://github.com/mandakan/splitsmith/issues/1371)) ([9f75e83](https://github.com/mandakan/splitsmith/commit/9f75e83e561e3a978800c1076df6501f8bf0870a))
+* **breakdown:** an inspector that folds and a splitter above the band ([#1372](https://github.com/mandakan/splitsmith/issues/1372), [#1373](https://github.com/mandakan/splitsmith/issues/1373)) ([75f1d67](https://github.com/mandakan/splitsmith/commit/75f1d676989728af847e3169e3879d66e3743d65))
+* **coach:** a full-width zoomable timeline with the stage audio ([#1352](https://github.com/mandakan/splitsmith/issues/1352)) ([7bf03ef](https://github.com/mandakan/splitsmith/commit/7bf03ef49cbbe8eaf0b7a977624f4ee832ab45c9))
+* **coach:** Coach and Breakdown show a second camera as a PiP inset ([#1409](https://github.com/mandakan/splitsmith/issues/1409)) ([#1418](https://github.com/mandakan/splitsmith/issues/1418)) ([f6ee17d](https://github.com/mandakan/splitsmith/commit/f6ee17d8539fd0079d013ddf4dec503bf7e2945e))
+* **coach:** Coach becomes the review page ([#1374](https://github.com/mandakan/splitsmith/issues/1374), [#1375](https://github.com/mandakan/splitsmith/issues/1375), [#1376](https://github.com/mandakan/splitsmith/issues/1376), [#1377](https://github.com/mandakan/splitsmith/issues/1377)) ([#1392](https://github.com/mandakan/splitsmith/issues/1392)) ([fc25d7c](https://github.com/mandakan/splitsmith/commit/fc25d7ccce043e2540210b1d8f29e19d8e259b24))
+* **coach:** exposed reload time replaces overhang ([#1328](https://github.com/mandakan/splitsmith/issues/1328)) ([e0692ef](https://github.com/mandakan/splitsmith/commit/e0692efde59eb7cd3e32474b37df81f430712516))
+* **coach:** stage events and the lane editor ([#1312](https://github.com/mandakan/splitsmith/issues/1312)) ([cbe0e9e](https://github.com/mandakan/splitsmith/commit/cbe0e9ef76627a48fd524fcd8da255583c0d450f))
+* **detect:** report shots at the rise foot, score at the detector's own walk ([#1386](https://github.com/mandakan/splitsmith/issues/1386)) ([82c3795](https://github.com/mandakan/splitsmith/commit/82c3795ec06cb7275f9b3a6358c26aa8e6ab6b17))
+* **ensemble:** retrain voter C with the Höstfinalen headcam fixtures ([#1355](https://github.com/mandakan/splitsmith/issues/1355)) ([b6e74c8](https://github.com/mandakan/splitsmith/commit/b6e74c82f661a271e59b8f1796791189fd97b3f8))
+* **ensemble:** stage-relative features for voter C ([#1357](https://github.com/mandakan/splitsmith/issues/1357)) ([2a91e72](https://github.com/mandakan/splitsmith/commit/2a91e72061bec216589387d2bfcf05349b140bdf))
+* **export:** a designed YouTube thumbnail card ([#1343](https://github.com/mandakan/splitsmith/issues/1343)) ([1cf861b](https://github.com/mandakan/splitsmith/commit/1cf861b200a11a5b0927a70557fed92a435b2244))
+* **export:** an end screen closing card and your brand over the footage ([#1344](https://github.com/mandakan/splitsmith/issues/1344)) ([a39aa0b](https://github.com/mandakan/splitsmith/commit/a39aa0b36a673bf9ac799faf803755637cd18c6a))
+* **export:** logo spots, your brand on the wipe and the shooter's logo on the summaries ([#1342](https://github.com/mandakan/splitsmith/issues/1342)) ([db87351](https://github.com/mandakan/splitsmith/commit/db87351740c13a84098b1dbacd4230f6badca8d6))
+* **export:** pick an overlay style on the Export page (slice 3b) ([#1309](https://github.com/mandakan/splitsmith/issues/1309)) ([2d0b6da](https://github.com/mandakan/splitsmith/commit/2d0b6dae341c6f713848f563c4c75e60a4eeee8e))
+* **lab:** every secondary angle as a needs-review fixture, audio in R2 ([#1367](https://github.com/mandakan/splitsmith/issues/1367)) ([fef6ac3](https://github.com/mandakan/splitsmith/commit/fef6ac3f94e5bfd57e08873763c309b52d3f1082))
+* **lab:** review inventory points at shots whose leading edge disagrees; camera timing findings ([#1384](https://github.com/mandakan/splitsmith/issues/1384)) ([05d2f0b](https://github.com/mandakan/splitsmith/commit/05d2f0b3a52668a49540d8d480f25184a99f1023))
+* **lab:** review queue puts doubtful shot times first; Mark reviewed in the editor ([#1382](https://github.com/mandakan/splitsmith/issues/1382)) ([d971c38](https://github.com/mandakan/splitsmith/commit/d971c386c34eae2749ffdf5cf969fde1c546ef06))
+* **lab:** step through a fixture's shot times one key per disagreement ([#1389](https://github.com/mandakan/splitsmith/issues/1389)) ([b8de8ef](https://github.com/mandakan/splitsmith/commit/b8de8ef3ef65cb79c8add1d157c31fa403c1c9ca))
+* **looks:** looks check and a starter for overlay styles (slice 4) ([#1311](https://github.com/mandakan/splitsmith/issues/1311)) ([69bf728](https://github.com/mandakan/splitsmith/commit/69bf7286b24eb8c4c0acd5008531816bd7da8526))
+* **looks:** Pips, Ticker, Timeline and Minimal HUD styles (slice 2) ([#1307](https://github.com/mandakan/splitsmith/issues/1307)) ([00e230e](https://github.com/mandakan/splitsmith/commit/00e230ea0bb706dc228b7dc7ce9ee342686223e6))
+* **overlay:** overlay styles on the export requests, presets and catalog (slice 3a) ([#1308](https://github.com/mandakan/splitsmith/issues/1308)) ([dc12f53](https://github.com/mandakan/splitsmith/commit/dc12f5375acbe98fbb96a852cb2929aad31d8a41))
+* **overlay:** speed colours off by default, with an explanation on the Export page ([#1315](https://github.com/mandakan/splitsmith/issues/1315)) ([309a968](https://github.com/mandakan/splitsmith/commit/309a968ea89a31a21b6ae031148efb63ce9835dc))
+* **overlay:** stage events in videos and exports ([#1320](https://github.com/mandakan/splitsmith/issues/1320)) ([049ff97](https://github.com/mandakan/splitsmith/commit/049ff97f91623cc5ed969159a0d2eaa39bb722f8))
+* **overlay:** template HUD styles, slice 1 (engine + Plate) ([#1306](https://github.com/mandakan/splitsmith/issues/1306)) ([b8ea064](https://github.com/mandakan/splitsmith/commit/b8ea064fc24b67eca47637f2cad02eb6851a8351))
+* place shots to the millisecond in Audit and fixture review ([#1368](https://github.com/mandakan/splitsmith/issues/1368)) ([7785da4](https://github.com/mandakan/splitsmith/commit/7785da4e7f7d6d07aa4bd5733dc1995d1bac2485))
+* **preview:** show where each logo goes with labelled placeholders ([#1317](https://github.com/mandakan/splitsmith/issues/1317)) ([a996a41](https://github.com/mandakan/splitsmith/commit/a996a41d9d72e607fac29f38b436acbe79a5721e))
+* **shooters:** a Shooters page, an account menu, and the shooter book wins ([#1318](https://github.com/mandakan/splitsmith/issues/1318)) ([f650e0f](https://github.com/mandakan/splitsmith/commit/f650e0f61e6bf4489ba25c44cbb2b5048afc6b5c))
+* **splits:** the stage page shows the other camera as a PiP inset ([#1408](https://github.com/mandakan/splitsmith/issues/1408)) ([#1414](https://github.com/mandakan/splitsmith/issues/1414)) ([1a02fc2](https://github.com/mandakan/splitsmith/commit/1a02fc2f0def26c685b6691500931467ad92684a))
+* **summary:** upright single-shooter summary cards and the upright safe area ([#1394](https://github.com/mandakan/splitsmith/issues/1394)) ([#1424](https://github.com/mandakan/splitsmith/issues/1424)) ([92c42c5](https://github.com/mandakan/splitsmith/commit/92c42c5746734fa1245ccf58855476d8aefc91ae))
+* **ui:** the PipView primitive for picture-in-picture cameras ([#1406](https://github.com/mandakan/splitsmith/issues/1406)) ([#1413](https://github.com/mandakan/splitsmith/issues/1413)) ([ddeac6b](https://github.com/mandakan/splitsmith/commit/ddeac6b465049068b6b580d4bf73e0ab6b0ba320))
+* **you:** a guide to where each logo goes ([#1319](https://github.com/mandakan/splitsmith/issues/1319)) ([ebc9176](https://github.com/mandakan/splitsmith/commit/ebc91766add78e3c800da3e786126a3dc63190f5))
+
+
+### Bug Fixes
+
+* **audit:** beep picker cleanup after the beep step moved onto the band ([#1360](https://github.com/mandakan/splitsmith/issues/1360)) ([#1398](https://github.com/mandakan/splitsmith/issues/1398)) ([6c84bca](https://github.com/mandakan/splitsmith/commit/6c84bcaf984e73645db717939601771c70c6fbb4))
+* **audit:** finish goes to Splits, and a refused save no longer drops edits ([#1314](https://github.com/mandakan/splitsmith/issues/1314)) ([ae5cbe3](https://github.com/mandakan/splitsmith/commit/ae5cbe33e5d0f666a90e5789972c637559781ccc))
+* **audit:** the phone's shot video opens at the shot it was pressed on ([#1419](https://github.com/mandakan/splitsmith/issues/1419)) ([#1420](https://github.com/mandakan/splitsmith/issues/1420)) ([1778480](https://github.com/mandakan/splitsmith/commit/1778480a3ca50214835248628216fd3454607a49))
+* **coach:** a failed region save says so inline ([#1346](https://github.com/mandakan/splitsmith/issues/1346)) ([76277e7](https://github.com/mandakan/splitsmith/commit/76277e7ddf33a493749e5881450bb52438afb8eb))
+* **coach:** a no-op drag or a blocked nudge does not save ([#1325](https://github.com/mandakan/splitsmith/issues/1325)) ([8f1825d](https://github.com/mandakan/splitsmith/commit/8f1825d0f42d4db68d5a80a718679af6bb1a3dd9))
+* **coach:** a stage without a name is clickable, and the proposal label fits ([#1349](https://github.com/mandakan/splitsmith/issues/1349)) ([4910bb6](https://github.com/mandakan/splitsmith/commit/4910bb63ff1a1bf129c203d90403259d7148cbf7))
+* **coach:** a touch drag on a lane is an edit, never a pan ([#1326](https://github.com/mandakan/splitsmith/issues/1326)) ([9f3f105](https://github.com/mandakan/splitsmith/commit/9f3f105cfb3a56213fe61bcbdd0baf3ff0516e2b))
+* **coach:** an in-flight region save never reverts or drops an edit ([#1345](https://github.com/mandakan/splitsmith/issues/1345)) ([8c9bf1f](https://github.com/mandakan/splitsmith/commit/8c9bf1f7865bd8f043032e31a5a05e0070371a1b))
+* **coach:** reload proposals follow the round count ([#1350](https://github.com/mandakan/splitsmith/issues/1350)) ([eb5be1a](https://github.com/mandakan/splitsmith/commit/eb5be1a077445fec31af04c780f4036269f0234c))
+* **coach:** the lane editor works from the keyboard and reads out its regions ([#1327](https://github.com/mandakan/splitsmith/issues/1327)) ([740b68e](https://github.com/mandakan/splitsmith/commit/740b68e1f3a9c12ab98763ad967bc212c4009766))
+* **coach:** the stat strip's region figures update instantly ([#1347](https://github.com/mandakan/splitsmith/issues/1347)) ([f64c3c4](https://github.com/mandakan/splitsmith/commit/f64c3c40d9ede79ec32b0372142f4c06ae1cbe42))
+* **export:** overlay reuse follows the Look's palette and faces; the CLI match export uses the rule ([#1403](https://github.com/mandakan/splitsmith/issues/1403)) ([#1412](https://github.com/mandakan/splitsmith/issues/1412)) ([b7dc8a9](https://github.com/mandakan/splitsmith/commit/b7dc8a976ce8cf3fa7ff57e9721ffd74c49e2890))
+* **looks:** a copied Look draws the current shipped cards, and old copies can catch up ([#1316](https://github.com/mandakan/splitsmith/issues/1316)) ([cbcb7f1](https://github.com/mandakan/splitsmith/commit/cbcb7f190389b81193c3ff3b85e03db1f803351d))
+* **looks:** template caches follow the shared scripts; one HUD helper script ([#1337](https://github.com/mandakan/splitsmith/issues/1337), [#1338](https://github.com/mandakan/splitsmith/issues/1338), [#1339](https://github.com/mandakan/splitsmith/issues/1339)) ([#1401](https://github.com/mandakan/splitsmith/issues/1401)) ([b905f92](https://github.com/mandakan/splitsmith/commit/b905f92ed655ce5f1c5d5d171af006792040f848))
+* **looks:** the editor no longer offers the unused slow-split colour ([#1340](https://github.com/mandakan/splitsmith/issues/1340)) ([#1396](https://github.com/mandakan/splitsmith/issues/1396)) ([3461d2d](https://github.com/mandakan/splitsmith/commit/3461d2de2a4b28dbff5dfbd512cdb200eb760588))
+* **mcp:** the detect_shots reset shares the server's reset rule ([#1380](https://github.com/mandakan/splitsmith/issues/1380)) ([#1399](https://github.com/mandakan/splitsmith/issues/1399)) ([f654bd7](https://github.com/mandakan/splitsmith/commit/f654bd7ddefafd57353b24e104ad040e64dcba31))
+* **share:** share links never carry shot notes from the distributions route ([#1390](https://github.com/mandakan/splitsmith/issues/1390)) ([424529e](https://github.com/mandakan/splitsmith/commit/424529e9c985aa2b93b9d643b926f5ba9a53b19d))
+* **shell:** a stage picked in the sidebar stays on the page you are on ([#1348](https://github.com/mandakan/splitsmith/issues/1348)) ([115834a](https://github.com/mandakan/splitsmith/commit/115834a201324a3fddebc6cee0e95a53660cba1a))
+* stage events server hygiene ([#1329](https://github.com/mandakan/splitsmith/issues/1329) [#1330](https://github.com/mandakan/splitsmith/issues/1330) [#1331](https://github.com/mandakan/splitsmith/issues/1331) [#1332](https://github.com/mandakan/splitsmith/issues/1332) [#1333](https://github.com/mandakan/splitsmith/issues/1333)) ([8513853](https://github.com/mandakan/splitsmith/commit/851385381ea7e36e51552bb8bb097064e56e67ea))
+* **summary:** a dense upright grid hold never runs one split figure into the next ([#1417](https://github.com/mandakan/splitsmith/issues/1417)) ([#1422](https://github.com/mandakan/splitsmith/issues/1422)) ([ec534de](https://github.com/mandakan/splitsmith/commit/ec534de411d5b3dd06196e2a0cf109859b0e3234))
+* Timeline, Ticker and the match summary on upright video ([#1334](https://github.com/mandakan/splitsmith/issues/1334), [#1335](https://github.com/mandakan/splitsmith/issues/1335), [#1336](https://github.com/mandakan/splitsmith/issues/1336)) ([#1395](https://github.com/mandakan/splitsmith/issues/1395)) ([178d47d](https://github.com/mandakan/splitsmith/commit/178d47daa84bffbba436b14e09b5a46e329ec0ba))
+* **timeline:** a sideways swipe on a timeline page never navigates back ([e233d26](https://github.com/mandakan/splitsmith/commit/e233d2637495875808c4a5793738ddbe1c228f80))
+* **you:** a first edit on Your look is never undone by the form's load ([#1364](https://github.com/mandakan/splitsmith/issues/1364)) ([#1397](https://github.com/mandakan/splitsmith/issues/1397)) ([c8ba221](https://github.com/mandakan/splitsmith/commit/c8ba22149990bab3ad3c61f5579be2982ec050a7))
+
+
+### Documentation
+
+* the Breakdown and Coach review design ([#1378](https://github.com/mandakan/splitsmith/issues/1378)) ([#1393](https://github.com/mandakan/splitsmith/issues/1393)) ([43b9578](https://github.com/mandakan/splitsmith/commit/43b95782decb317e79812e56110d1bb4ff506883))
+
 ## [0.64.1](https://github.com/mandakan/splitsmith/compare/v0.64.0...v0.64.1) (2026-10-08)
 
 
