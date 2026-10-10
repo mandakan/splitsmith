@@ -62,7 +62,9 @@ def test_a_reason_binds_through_a_rounding_miss_but_never_to_a_neighbour() -> No
     23 ms apart, and a retiming detector change migrates the keys (#1386)."""
     from splitsmith.lab.core import _reason_for_time
 
-    reasons, _ = _load_labels_from_audit({"_candidates_pending_audit": {"labels_by_time": {"20.794": "echo"}}})
+    reasons, _ = _load_labels_from_audit(
+        {"_candidates_pending_audit": {"labels_by_time": {"20.794": "echo"}}}
+    )
     assert _reason_for_time(20.794, reasons) == "echo"
     assert _reason_for_time(20.7951, reasons) == "echo"  # rounds to 20.795
     assert _reason_for_time(20.771, reasons) is None  # a shot 23 ms before the echo
