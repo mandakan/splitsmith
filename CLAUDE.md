@@ -1143,7 +1143,7 @@ is a bound, not a count: shooters start with one chambered. A stage an
 older seeder proposed (``events_seeded`` below the version) whose events
 are all untouched proposals is seeded again on the next owner read, and
 its shots classified again against the new regions; a manual region or
-deleted proposals keep the stage as it is. A reset re-detection (``_merge_detection_into``) drops
+deleted proposals keep the stage as it is. A reset re-detection (``detection_merge.merge_detection_into``, the one rule the server job and the MCP ``detect_shots`` tool share) drops
 the ``auto`` regions and ``events_seeded`` and keeps ``manual`` ones, so
 a stage with no surviving manual region seeds afresh over the new
 shots. The GET seeds but never re-classifies stored shots against the
