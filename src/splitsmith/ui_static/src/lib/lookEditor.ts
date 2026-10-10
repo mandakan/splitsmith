@@ -52,7 +52,8 @@ export const TOKEN_GROUPS: { group: string; tokens: TokenRow[] }[] = [
     tokens: [
       { token: "split", label: "Split", help: "The current split" },
       { token: "split_good", label: "Fast split", help: "A fast split, Alphas" },
-      { token: "split_slow", label: "Slow split", help: "A slow split, misses", optional: true },
+      // No split_slow row: a Look may carry it, but nothing draws it (slow
+      // splits use accent), so the editor does not offer it.
     ],
   },
 ];

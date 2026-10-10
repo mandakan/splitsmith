@@ -78,6 +78,12 @@ describe("tokens", () => {
     ]);
   });
 
+  it("offers no split_slow row, and a Look that carries one still saves", () => {
+    // Nothing draws split_slow (slow splits use accent); shipped look.json files carry it.
+    expect(TOKEN_GROUPS.flatMap((g) => g.tokens).map((t) => t.token)).not.toContain("split_slow");
+    expect(draftErrors(draft({ colors: { ...COLORS, split_slow: [255, 45, 45] } }))).toEqual({});
+  });
+
   it("converts between hex and triples", () => {
     expect(rgbToHex([255, 45, 0])).toBe("#ff2d00");
     expect(hexToRgb("#FF2D00")).toEqual([255, 45, 0]);
