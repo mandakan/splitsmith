@@ -53,3 +53,16 @@ def test_reasons_use_exact_key_lookup() -> None:
     # Stored keys round to the same 1 ms grid as candidate times.
     assert reasons[round(1.149, 3)] == "handling"
     assert reasons[round(5.123, 3)] == "echo"
+
+
+def test_a_reason_follows_its_candidate_when_the_detector_retimes_it() -> None:
+    """Reasons are keyed by the candidate time they were given at; a detector
+    change to the shot-time definition (docs/METHODOLOGY.md) shifts candidates
+    by up to ~30 ms. Candidates are at least 80 ms apart, so the nearest key
+    within 40 ms is the same candidate."""
+    from splitsmith.lab.core import _reason_for_time
+
+    reasons, _ = _load_labels_from_audit({"_candidates_pending_audit": {"labels_by_time": {"1.100": "echo"}}})
+    assert _reason_for_time(1.100, reasons) == "echo"
+    assert _reason_for_time(1.075, reasons) == "echo"  # retimed 25 ms earlier
+    assert _reason_for_time(1.200, reasons) is None  # the next candidate along

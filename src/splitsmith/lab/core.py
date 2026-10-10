@@ -643,6 +643,26 @@ def _load_labels_from_audit(
     return reason_by_time, subclass_entries
 
 
+#: A reason stays with its candidate within this distance: a change to the
+#: shot-time definition moves candidates by up to ~30 ms, and candidates are
+#: at least 80 ms apart (min gap), so the nearest key is always the same one.
+_REASON_TOLERANCE_S = 0.040
+
+
+def _reason_for_time(candidate_time: float, reason_by_time: dict[float, str]) -> str | None:
+    """The reason given to this candidate: its exact key, else the nearest
+    key within ``_REASON_TOLERANCE_S`` (one written before a retiming)."""
+    exact = reason_by_time.get(_time_key(candidate_time))
+    if exact is not None:
+        return exact
+    best: tuple[float, str] | None = None
+    for t, reason in reason_by_time.items():
+        d = abs(t - candidate_time)
+        if d <= _REASON_TOLERANCE_S and (best is None or d < best[0]):
+            best = (d, reason)
+    return best[1] if best is not None else None
+
+
 def _subclass_for_time(
     candidate_time: float,
     subclass_entries: list[tuple[float, str]],
@@ -866,7 +886,7 @@ def run_eval(
                 kept=c.kept,
                 truth=int(labels[i]),
                 matched_shot_number=matched[i],
-                reason=reason_by_time.get(_time_key(c.time)),
+                reason=_reason_for_time(c.time, reason_by_time),
                 subclass=_subclass_for_time(c.time, subclass_entries),
             )
             for i, c in enumerate(result.candidates)
@@ -928,7 +948,7 @@ def relabel_run(run: EvalRun) -> EvalRun:
         new_candidates = [
             c.model_copy(
                 update={
-                    "reason": reason_by_time.get(_time_key(c.time)),
+                    "reason": _reason_for_time(c.time, reason_by_time),
                     "subclass": _subclass_for_time(c.time, subclass_entries),
                 }
             )

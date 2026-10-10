@@ -573,15 +573,15 @@
     ],
     "labels_by_time": {
       "2.377": "cross_bay",
-      "3.306": "cross_bay",
-      "4.136": "cross_bay",
-      "1.843": "steel_ring",
-      "4.723": "cross_bay",
-      "19.117": "cross_bay",
+      "3.307": "cross_bay",
+      "4.137": "cross_bay",
+      "1.854": "steel_ring",
+      "4.685": "cross_bay",
+      "19.119": "cross_bay",
       "8.496": "movement",
-      "16.077": "cross_bay",
+      "16.079": "cross_bay",
       "18.591": "movement",
-      "18.815": "cross_bay"
+      "18.820": "cross_bay"
     }
   },
   "audit_notes": "",
