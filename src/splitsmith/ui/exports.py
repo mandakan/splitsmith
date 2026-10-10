@@ -28,7 +28,7 @@ from ..events import confirmed_from_doc
 from ..export_naming import stage_file_base
 from ..looks import DEFAULT_VARIANT
 from ..match_project import StageScorecard
-from ..overlay_hud import LEGACY_OVERLAY_SETTINGS, HudOptions, overlay_settings
+from ..overlay_hud import LEGACY_OVERLAY_SETTINGS, HudOptions, overlay_settings, overlay_template_identity
 from ..overlay_render import OverlayCodec
 from ..overlay_theme import ThemeName
 from ..segment_cache import SegmentCache
@@ -187,6 +187,11 @@ def overlay_record_matches(
     as it would be drawn now, so a template or shared script that moved
     since still misses. An unreadable audit or record never matches."""
     if record is None or audit_revision is None:
+        return False
+    # A template style that recorded no template identity (its Look or
+    # template could not be found) has nothing vouching for its pixels;
+    # null == null must not read as a match.
+    if record.get("variant") != DEFAULT_VARIANT and record.get("template") is None:
         return False
     if wanted is None:
         try:
@@ -439,6 +444,7 @@ def export_stage(
             # Read before the render: an edit that lands while it runs was
             # never drawn and must read as a change to the next reuse check.
             drawn_revision = overlay_audit_revision(audit_path)
+            drawn_template = overlay_template_identity(request.overlay_theme, request.overlay_variant)
             try:
                 overlay_render.render_overlay(
                     audit_path=audit_path,
@@ -469,6 +475,7 @@ def export_stage(
                             max_height=request.overlay_max_height,
                             max_fps=request.overlay_max_fps,
                             audit_revision=drawn_revision,
+                            template=drawn_template,
                         ),
                         sort_keys=True,
                     ),

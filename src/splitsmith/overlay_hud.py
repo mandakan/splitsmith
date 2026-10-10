@@ -120,6 +120,10 @@ class OverlayStyleFields(BaseModel):
         )
 
 
+#: ``overlay_settings(template=...)`` left out: read the template now.
+_READ_NOW = object()
+
+
 def overlay_template_identity(look: str, variant: str) -> str | None:
     """What a template style's MOV depends on beyond the request and the
     audit: the bytes of the template that draws ``variant`` for ``look``
@@ -155,6 +159,7 @@ def overlay_settings(
     max_height: int | None,
     max_fps: float | None,
     audit_revision: str | None,
+    template: str | None | object = _READ_NOW,
 ) -> dict[str, Any]:
     """What an overlay MOV was drawn with, as recorded beside it and
     compared before a match export reuses it. Classic draws none of the
@@ -169,7 +174,10 @@ def overlay_settings(
     A template style also records ``template`` (:func:`overlay_template_identity`):
     an edit to its template or to a shared script it loads must draw it
     again, and a record from before the key existed matches no request.
-    Classic records carry no such key: the engine draws them."""
+    Classic records carry no such key: the engine draws them. The writer
+    passes ``template`` as it read it before the render, as it does the
+    audit revision: a template saved mid-render was never drawn. Left out,
+    it is read now (what a reuse check wants)."""
     settings: dict[str, Any] = {
         "look": look,
         "variant": variant,
@@ -180,7 +188,7 @@ def overlay_settings(
         "audit_revision": audit_revision,
     }
     if variant != DEFAULT_VARIANT:
-        settings["template"] = overlay_template_identity(look, variant)
+        settings["template"] = overlay_template_identity(look, variant) if template is _READ_NOW else template
     return settings
 
 
