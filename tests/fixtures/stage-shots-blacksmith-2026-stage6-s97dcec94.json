@@ -326,21 +326,21 @@
     ],
     "labels_by_time": {
       "8.591": "movement",
-      "10.001": "cross_bay",
+      "10.002": "cross_bay",
       "2.714": "cross_bay",
-      "2.801": "cross_bay",
+      "2.848": "cross_bay",
       "5.147": "barrel_echo",
-      "5.444": "barrel_echo",
+      "5.496": "barrel_echo",
       "6.528": "barrel_echo",
       "7.698": "barrel_echo",
       "8.038": "barrel_echo",
       "8.221": "barrel_echo",
       "8.410": "barrel_echo",
-      "9.648": "barrel_echo",
-      "10.135": "cross_bay",
+      "9.625": "barrel_echo",
+      "10.183": "cross_bay",
       "3.971": "cross_bay",
       "1.107": "cross_bay",
-      "3.288": "movement"
+      "3.253": "movement"
     }
   },
   "stage_rounds": {

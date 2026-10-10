@@ -314,7 +314,10 @@ def detect_shots_ensemble(
     if n == 0:
         return EnsembleResult(candidates=[], consensus=cfg.consensus, expected_rounds=expected_rounds)
 
-    times = np.array([s.time_absolute for s in shots], dtype=np.float64)
+    # Features are measured at each candidate's scoring time, where the models
+    # were trained; candidates are reported at their shot time (the rise foot).
+    times = np.array([s.scoring_time for s in shots], dtype=np.float64)
+    shot_times = np.array([s.time_absolute for s in shots], dtype=np.float64)
     confidences = np.array([s.confidence for s in shots], dtype=np.float64)
     peak_amps = np.array([s.peak_amplitude for s in shots], dtype=np.float64)
     ms_after_beep = np.array([round(s.time_from_beep * 1000) for s in shots], dtype=np.int64)
@@ -405,7 +408,7 @@ def detect_shots_ensemble(
         candidates.append(
             EnsembleCandidate(
                 candidate_number=i + 1,
-                time=round(float(times[i]), 4),
+                time=round(float(shot_times[i]), 4),
                 ms_after_beep=int(ms_after_beep[i]),
                 peak_amplitude=round(float(peak_amps[i]), 4),
                 confidence=round(float(confidences[i]), 3),

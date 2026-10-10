@@ -325,5 +325,9 @@ def test_a_compressed_go3s_shot_is_timed_at_the_start_of_its_burst(fixtures_dir:
         config=ShotDetectConfig(),
     )
     times = np.array([s.time_absolute for s in shots])
-    nearest = times[np.argmin(np.abs(times - 8.274))]
-    assert nearest == pytest.approx(8.274, abs=0.003)
+    shot = shots[int(np.argmin(np.abs(times - 8.274)))]
+    assert shot.time_absolute == pytest.approx(8.274, abs=0.003)
+    # Scoring stays where the models were trained: the candidate's own walk,
+    # main's time for this shot. Internal only, never serialized.
+    assert shot.scoring_time == pytest.approx(8.299, abs=0.001)
+    assert "feature_time" not in shot.model_dump()

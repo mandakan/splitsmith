@@ -187,12 +187,15 @@ def detect_shots(
         kept_strengths.append(float(strength))
         kept_peaks.append(float(peak))
 
-    # Refine each kept onset's time to its rise foot (the shot-time
-    # definition, ``splitsmith.rise_foot``, docs/METHODOLOGY.md). Min-gap
-    # and refractory operate on the librosa-frame times above (preserving
-    # ordering and candidate count); only the OUTPUT time changes.
-    envelope = peak_envelope(audio, sample_rate)
-    kept_times = [_leading_edge(audio, t, sample_rate, envelope) for t in kept_times]
+    # Two times per candidate. The SCORING time (``Shot.feature_time``) is
+    # the detector's original leading-edge walk: the candidate pool, the
+    # peaks, the CWT merge and every ensemble feature are measured from it,
+    # so the trained models see exactly what they were trained on. The
+    # OUTPUT time (``Shot.time_absolute``) is the shot-time definition, the
+    # rise foot (``splitsmith.rise_foot``, docs/METHODOLOGY.md), read from
+    # the scoring time below. Moving the scoring time instead broke the
+    # September Vanguard firmware held out (#1386).
+    kept_times = [_leading_edge(audio, t, sample_rate) for t in kept_times]
     # Re-measure peak amplitude at the backtracked times (the actual transient
     # peak is typically a few ms past the leading edge, still inside the peak
     # window since _PEAK_WIN_MS is symmetric).
@@ -213,7 +216,6 @@ def detect_shots(
             beep_time=beep_time,
             stage_time=stage_time,
             peak_win_samples=peak_win_samples,
-            envelope=envelope,
             min_gap_s=min_gap_s,
         )
 
@@ -229,15 +231,17 @@ def detect_shots(
     max_kept_peak = max(kept_peaks) if kept_peaks else 0.0
     max_kept_hf_lf = max(kept_hf_lf) if kept_hf_lf else 0.0
 
+    envelope = peak_envelope(audio, sample_rate)
     shots: list[Shot] = []
     prev_t = beep_time
-    for t_abs, strength, peak, hf_lf in zip(kept_times, kept_strengths, kept_peaks, kept_hf_lf, strict=True):
+    for t_feat, strength, peak, hf_lf in zip(kept_times, kept_strengths, kept_peaks, kept_hf_lf, strict=True):
         s_norm = strength / max_kept_strength if max_kept_strength > 0 else 0.0
         p_norm = peak / max_kept_peak if max_kept_peak > 0 else 0.0
         hf_norm = hf_lf / max_kept_hf_lf if max_kept_hf_lf > 0 else 0.0
         confidence = float(np.clip((s_norm * p_norm * hf_norm) ** (1.0 / 3.0), 0.0, 1.0))
         if confidence < config.min_confidence:
             continue
+        t_abs = _output_time(envelope, t_feat, prev_t if shots else None)
         shots.append(
             Shot(
                 shot_number=len(shots) + 1,
@@ -246,6 +250,7 @@ def detect_shots(
                 split=t_abs - prev_t,
                 peak_amplitude=peak,
                 confidence=confidence,
+                feature_time=t_feat,
             )
         )
         prev_t = t_abs
@@ -253,20 +258,28 @@ def detect_shots(
     return shots
 
 
-def _leading_edge(
-    audio: np.ndarray,
-    onset_t: float,
-    sr: int,
-    envelope: tuple[list[float], float] | None = None,
-) -> float:
-    """Return the rise-foot leading edge of the transient surrounding ``onset_t``.
+#: An output time this close to (or before) the previous shot's keeps the
+#: scoring time instead, so the rise foot can never reorder or merge shots.
+_MIN_OUTPUT_SPACING_S = 0.010
 
-    With ``envelope`` (``rise_foot.peak_envelope`` of ``audio``) the time is
-    the shot-time definition, ``rise_foot.rise_foot``; the walk below is only
-    the fallback where that finds no shot (a window quieter than 5 % of the
-    clip's loudest sound).
 
-    The fallback walk:
+def _output_time(envelope: tuple[list[float], float], t_feature: float, prev_output: float | None) -> float:
+    """A detected shot's reported time: the rise foot read from its scoring
+    time (the shot-time definition, docs/METHODOLOGY.md); the scoring time
+    where no shot stands out of the window or the foot would crowd the
+    previous shot."""
+    foot = rise_foot(envelope[0], envelope[1], t_feature)
+    if foot is None:
+        return t_feature
+    if prev_output is not None and foot <= prev_output + _MIN_OUTPUT_SPACING_S:
+        return t_feature
+    return foot
+
+
+def _leading_edge(audio: np.ndarray, onset_t: float, sr: int) -> float:
+    """Return the detector's own leading edge of the transient surrounding
+    ``onset_t``: the SCORING time (``Shot.feature_time``). The reported shot
+    time is the rise foot (``_output_time``).
 
     The window extends up to 100 ms BEFORE the librosa frame (so we can find
     the foot even if librosa fired well into the rise) and 30 ms after. Peak
@@ -276,10 +289,6 @@ def _leading_edge(
     * drops below ``_RISE_FOOT_FRAC * peak`` (silence at the foot), or
     * rises again (we'd be entering an earlier transient).
     """
-    if envelope is not None:
-        foot = rise_foot(envelope[0], envelope[1], onset_t)
-        if foot is not None:
-            return foot
     onset_idx = int(round(onset_t * sr))
     win_lo = max(0, onset_idx - int(_LEAD_EDGE_BACKWARD_MAX_S * sr))
     win_hi = min(audio.size, onset_idx + int(_LEAD_EDGE_PEAK_WINDOW_S * sr))
@@ -415,7 +424,6 @@ def _apply_cwt_recall_fallback(
     stage_time: float,
     peak_win_samples: int,
     min_gap_s: float,
-    envelope: tuple[list[float], float] | None = None,
 ) -> tuple[list[float], list[float], list[float]]:
     """Insert CWT-detected candidates inside suspicious gaps in ``kept_times``.
 
@@ -494,7 +502,7 @@ def _apply_cwt_recall_fallback(
     # the existing pass-1 candidates.
     refined: list[tuple[float, float]] = []  # (time, cwt_strength)
     for t, s in zip(extras_t, extras_strength, strict=True):
-        t_refined = _leading_edge(audio, t, sr, envelope)
+        t_refined = _leading_edge(audio, t, sr)
         if all(abs(t_refined - q) >= min_gap_s for q in kept_times):
             refined.append((t_refined, s))
     if not refined:

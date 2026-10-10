@@ -8,7 +8,8 @@ that falls back before the blast) is not part of the rise; a lead-in that
 ramps continuously into the burst is.
 
 One rule, three places, held identical by ``tests/fixtures/rise_foot/cases.json``:
-the shot detector's leading edge (``shot_detect``), the review inventory's
+the shot detector's reported time (``shot_detect``; candidates are still scored
+at its own walk, ``Shot.feature_time``), the review inventory's
 suggestions (``lab.inventory``), and the app's drop snap
 (``ui_static/src/lib/peak-snap.ts``, ``snapToLeadingEdge``).
 
