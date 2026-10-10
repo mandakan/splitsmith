@@ -37,9 +37,13 @@ export interface BeepPreviewProps {
 export function BeepPreview({ slug, videoPath, proxyReady, mediaOnDesktop, initialTime, onVideoElement, caption }: BeepPreviewProps) {
   const localRef = useRef<HTMLVideoElement | null>(null);
   useReleaseMediaOnUnmount(localRef);
+  // The element in state as well as the ref, so the park below runs again
+  // for a new <video> (the error / Retry swap), not only on a new time.
+  const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null);
   const videoRef = useCallback(
     (el: HTMLVideoElement | null) => {
       localRef.current = el;
+      setVideoEl(el);
       onVideoElement(el);
     },
     [onVideoElement],
@@ -50,7 +54,7 @@ export function BeepPreview({ slug, videoPath, proxyReady, mediaOnDesktop, initi
   }, [videoPath]);
 
   useEffect(() => {
-    const v = localRef.current;
+    const v = videoEl;
     if (!v || initialTime == null) return;
     const seek = () => {
       try {
@@ -62,7 +66,7 @@ export function BeepPreview({ slug, videoPath, proxyReady, mediaOnDesktop, initi
     if (v.readyState >= 1) seek();
     else v.addEventListener("loadedmetadata", seek, { once: true });
     return () => v.removeEventListener("loadedmetadata", seek);
-  }, [initialTime]);
+  }, [initialTime, videoEl]);
 
   const placeholder = "flex h-full w-full flex-col items-center justify-center gap-2 bg-black p-4 text-center text-md text-ink-2";
   return (

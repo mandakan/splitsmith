@@ -57,7 +57,8 @@ const PEAKS: PeaksResult = {
   trimmed: false,
 };
 
-function queueState() {
+function queueState(item: BeepQueueItem = ITEM) {
+  const ITEM = item;
   return {
     data: { total_items: 1, pending_count: 1, confirmed_count: 0, origin: "local", stages: [] },
     flatItems: [ITEM],
@@ -98,7 +99,42 @@ afterEach(() => {
   resetTimelinePrefsForTests();
 });
 
+function renderStep() {
+  render(
+    <ConfirmProvider>
+      <BeepStep
+        slug="alice"
+        stageNumber={10}
+        onConfirmed={vi.fn()}
+        header={{ ordinal: "10", title: "B3", sub: "Alice" }}
+        mediaOnDesktop={false}
+      />
+    </ConfirmProvider>,
+  );
+}
+
 describe("BeepStep preview remount", () => {
+  it("the remounted <video> is parked at the selected candidate's time once its metadata lands", async () => {
+    vi.mocked(hook.useBeepQueue).mockReturnValue(
+      queueState({ ...ITEM, alt_candidates: [{ time: 3, confidence: 0.2 }] }),
+    );
+    renderStep();
+    await screen.findByTestId("waveform-track");
+    fireEvent.click(screen.getAllByRole("radio")[1]);
+
+    const first = screen.getByTitle("Space toggles play/pause") as HTMLVideoElement;
+    fireEvent.error(first);
+    fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+    const second = screen.getByTitle("Space toggles play/pause") as HTMLVideoElement;
+    expect(second).not.toBe(first);
+    expect(second.currentTime).toBe(0);
+
+    act(() => {
+      fireEvent(second, new Event("loadedmetadata"));
+    });
+    expect(second.currentTime).toBe(3);
+  });
+
   it("the band follows the new <video> after the preview's error / Retry remount", async () => {
     render(
       <ConfirmProvider>
