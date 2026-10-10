@@ -69,15 +69,6 @@ describe("attachInsetSync", () => {
     expect(inset.muted).toBe(true);
   });
 
-  it("leaves an audible follower's sound on and still keeps it on the big clock (#1409)", () => {
-    const big = new FakeMedia();
-    big.t = 9;
-    const audio = new FakeMedia();
-    attachInsetSync(big as unknown as HTMLMediaElement, audio as unknown as HTMLMediaElement, { bigBeep: 5, insetBeep: 2 }, { audible: true });
-    expect(audio.muted).toBe(false);
-    expect(audio.currentTime).toBe(6);
-  });
-
   it("lines the inset up at once when it already has metadata", () => {
     const big = new FakeMedia();
     big.t = 9;

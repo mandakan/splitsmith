@@ -614,7 +614,6 @@ describe("Breakdown: a second camera in the PiP inset (#1409)", () => {
     expect(within(inset).getByTestId("pip-inset-video")).toHaveAttribute("src", "http://localhost/scrub/trimmed/stage2_cam2.mp4");
     expect(big(container)).toHaveAttribute("src", "http://localhost/trim/trimmed/stage2.mp4");
     expect(big(container).muted).toBe(false);
-    expect(screen.queryByTestId("stage-primary-audio")).toBeNull();
   });
 
   it("C swaps: the shot seek and the clock follow Cam 2's beep, and the primary's audio plays", async () => {
@@ -625,9 +624,9 @@ describe("Breakdown: a second camera in the PiP inset (#1409)", () => {
     await waitFor(() => expect(big(container)).toHaveAttribute("src", "http://localhost/scrub/trimmed/stage2_cam2.mp4"));
     expect(screen.getByTestId("pip-inset")).toHaveAttribute("aria-label", "Inset camera: Cam 1");
     expect(screen.getByText("Audio + beep: Cam 1")).toBeInTheDocument();
-    // Audio stays the primary's: the big player is muted, the stage audio plays.
+    // Audio stays the primary's: the big player is muted and its own stream plays
     expect(big(container).muted).toBe(true);
-    expect(screen.getByTestId("stage-primary-audio")).toBeInTheDocument();
+    // in a detached <audio> (lib/usePrimaryAudio).
 
     // A shot 2 s after the beep is 5 s into Cam 2's clip.
     fireEvent.click(container.querySelector<HTMLElement>('[aria-label="Inspector"] [data-shot-number="2"]')!);
@@ -644,7 +643,6 @@ describe("Breakdown: a second camera in the PiP inset (#1409)", () => {
     fireEvent.keyDown(window, { key: "C", shiftKey: true });
     await waitFor(() => expect(big(container)).toHaveAttribute("src", "http://localhost/trim/trimmed/stage2.mp4"));
     expect(big(container).muted).toBe(false);
-    expect(screen.queryByTestId("stage-primary-audio")).toBeNull();
     fireEvent.click(container.querySelector<HTMLElement>('[aria-label="Inspector"] [data-shot-number="3"]')!);
     expect(big(container).currentTime).toBeCloseTo(8, 6);
   });

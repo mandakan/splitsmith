@@ -1,10 +1,10 @@
 {
   "entries": [
     {
-      "id": "coach-breakdown-second-camera",
+      "id": "splits-camera-inset",
       "date": "2026-10-10",
-      "title": "Second camera on Coach and Breakdown",
-      "body": "A stage filmed from more than one angle shows the other camera in a corner of the video on Coach and Breakdown. Click it, or press C, to make it big; drag it to another corner."
+      "title": "The other camera in a corner on Splits",
+      "body": "On a stage page under Splits, the other camera plays in a small window over the video. Click it or press C to swap them; playback keeps going from the same moment."
     },
     {
       "id": "audit-controls-on-the-timeline",
