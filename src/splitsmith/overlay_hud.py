@@ -122,6 +122,12 @@ class OverlayStyleFields(BaseModel):
         )
 
 
+#: The ``layout`` an upright overlay's record carries: the layout that
+#: keeps out of the platform safe area (issue #1394). Bump the suffix when
+#: the upright layout changes in a way the template identity cannot show
+#: (Classic's sprite).
+UPRIGHT_LAYOUT = "upright-safe-1"
+
 #: ``overlay_settings(template=...)`` left out: read the template now.
 _READ_NOW = object()
 
@@ -186,6 +192,7 @@ def overlay_settings(
     audit_revision: str | None,
     template: str | None | object = _READ_NOW,
     theme: str | None | object = _READ_NOW,
+    upright: bool = False,
 ) -> dict[str, Any]:
     """What an overlay MOV was drawn with, as recorded beside it and
     compared before a match export reuses it. Classic draws none of the
@@ -209,7 +216,13 @@ def overlay_settings(
     (:func:`overlay_theme_identity`): a palette or font edit to the Look must
     draw the overlay again. It is passed and read like ``template``; a
     record from before the key existed matches no request, so each such
-    overlay is drawn once more."""
+    overlay is drawn once more.
+
+    An overlay on an ``upright`` canvas (taller than wide) also records
+    ``layout`` (:data:`UPRIGHT_LAYOUT`): every style keeps out of the
+    platform safe area there since issue #1394, so an upright overlay drawn
+    before (no key) misses once and is drawn again. A square or wider
+    canvas records no such key, so its records match as they always did."""
     settings: dict[str, Any] = {
         "look": look,
         "variant": variant,
@@ -222,6 +235,8 @@ def overlay_settings(
     }
     if variant != DEFAULT_VARIANT:
         settings["template"] = overlay_template_identity(look, variant) if template is _READ_NOW else template
+    if upright:
+        settings["layout"] = UPRIGHT_LAYOUT
     return settings
 
 
@@ -414,6 +429,7 @@ __all__ = [
     "SLOW_ABOVE",
     "SpeedTier",
     "TIERED_CLASSES",
+    "UPRIGHT_LAYOUT",
     "declared_positions",
     "hud_frame_plan",
     "hud_options_data",

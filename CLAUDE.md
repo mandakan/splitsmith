@@ -472,8 +472,16 @@ grows into place rather than shrinking from 1.4x. Classic changes only its
 sprite: ``overlay_render.classic_cell_style`` pads the cell's bottom by the
 band so the split rises (``None`` on a landscape canvas, so its HTML, argv
 and pixels are unchanged; the drawtext clock and the counter are top
-corners and never reach the area). A Classic overlay drawn upright before
-this is still reused (its record knows no canvas). ``TemplateProbe.unsafe``
+corners and never reach the area). An upright overlay's record carries
+``layout: upright-safe-1`` (``overlay_settings(upright=True)``, the
+``UPRIGHT_LAYOUT`` constant), a square or wider one no such key, so an
+upright overlay drawn before this misses once and is drawn again while
+landscape records match as they did. The canvas is read off a file
+(``ui/exports.overlay_canvas_upright``: ffprobe, unreadable is not
+upright): the trim the writer mirrors, the pulled trim in the server's
+match export (no trim there means the stage is cut and drawn again
+anyway), and the overlay MOV itself in the MCP tool and the CLI, which
+pass ``upright=`` to ``overlay_record_matches``. ``TemplateProbe.unsafe``
 (the probe walks visible text and painted boxes against ``data.safe_area``)
 is what ``looks check`` reads: each HUD sample is probed again on a 608x1080
 page, also just after a shot, and anything in the area is a warning.

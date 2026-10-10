@@ -178,3 +178,105 @@ def test_looks_check_warns_about_a_style_that_draws_into_the_safe_area(
     report = look_tools.check_look("mine", prober=raster)
     warnings = [i.message for i in report.items if i.level == "warn"]
     assert any('"0.00"' in m and "safe area" in m and "upright" in m for m in warnings), warnings
+
+
+# --- reuse: an upright overlay drawn before the safe area is drawn again ------------------
+
+
+def _record(*, variant: str = "default", upright: bool = False, revision: str = "rev-1") -> dict:
+    from splitsmith.overlay_hud import overlay_settings
+
+    return overlay_settings(
+        look="splitsmith",
+        variant=variant,
+        options=HudOptions(),
+        codec="prores-4444",
+        max_height=None,
+        max_fps=None,
+        audit_revision=revision,
+        upright=upright,
+    )
+
+
+def _legacy_record(variant: str = "default") -> dict:
+    """A record as written before the upright layout existed: the same call,
+    which carried no layout key."""
+    record = _record(variant=variant)
+    assert "layout" not in record
+    return record
+
+
+@pytest.mark.parametrize("variant", ["default", "plate"])
+def test_an_upright_record_from_before_the_safe_area_misses(variant: str) -> None:
+    from splitsmith.ui.exports import overlay_record_matches
+
+    legacy = _legacy_record(variant)
+    # The server's rule: the request says what it wants.
+    wanted = _record(variant=variant, upright=True)
+    assert not overlay_record_matches(legacy, audit_revision="rev-1", wanted=wanted)
+    # The MCP tool's and the CLI's rule: the recorded style, as drawn now on this canvas.
+    assert not overlay_record_matches(legacy, audit_revision="rev-1", upright=True)
+
+
+@pytest.mark.parametrize("variant", ["default", "plate"])
+def test_an_upright_record_drawn_with_the_safe_area_matches(variant: str) -> None:
+    from splitsmith.ui.exports import overlay_record_matches
+
+    record = _record(variant=variant, upright=True)
+    assert record["layout"] == "upright-safe-1"
+    wanted = _record(variant=variant, upright=True)
+    assert overlay_record_matches(record, audit_revision="rev-1", wanted=wanted)
+    assert overlay_record_matches(record, audit_revision="rev-1", upright=True)
+    # Still one audit edit from a redraw, like any record.
+    assert not overlay_record_matches(record, audit_revision="rev-2", upright=True)
+
+
+@pytest.mark.parametrize("variant", ["default", "plate"])
+def test_a_landscape_record_is_unchanged_and_still_matches(variant: str) -> None:
+    from splitsmith.ui.exports import overlay_record_matches
+
+    record = _record(variant=variant)
+    keys = {"look", "variant", "options", "codec", "max_height", "max_fps", "audit_revision", "theme"}
+    assert set(record) == keys | ({"template"} if variant != "default" else set())
+    assert overlay_record_matches(record, audit_revision="rev-1", wanted=_record(variant=variant))
+    assert overlay_record_matches(record, audit_revision="rev-1")
+    # An upright record is not a landscape one.
+    assert not overlay_record_matches(_record(variant=variant, upright=True), audit_revision="rev-1")
+
+
+def test_the_canvas_is_upright_when_the_video_is_taller_than_wide(monkeypatch: pytest.MonkeyPatch) -> None:
+    from splitsmith import fcpxml_gen
+    from splitsmith.config import VideoMetadata
+    from splitsmith.ui import exports
+
+    sizes = {"up.mp4": (1080, 1920), "wide.mp4": (1920, 1080), "square.mp4": (1080, 1080)}
+
+    def probe(path: Path, **_: object) -> VideoMetadata:
+        if path.name not in sizes:
+            raise fcpxml_gen.FFprobeError("not a video")
+        w, h = sizes[path.name]
+        return VideoMetadata(width=w, height=h, duration_seconds=1.0, frame_rate_num=30, frame_rate_den=1)
+
+    monkeypatch.setattr(fcpxml_gen, "probe_video", probe)
+    assert exports.overlay_canvas_upright(Path("up.mp4"))
+    assert not exports.overlay_canvas_upright(Path("wide.mp4"))
+    assert not exports.overlay_canvas_upright(Path("square.mp4"))
+    # Unreadable: no upright layout, as before.
+    assert not exports.overlay_canvas_upright(Path("broken.mov"))
+
+
+@pytest.mark.integration
+def test_the_canvas_is_read_from_a_real_file(tmp_path: Path) -> None:
+    import shutil
+    import subprocess
+
+    from splitsmith.ui.exports import overlay_canvas_upright
+
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        pytest.skip("no ffmpeg")
+    for name, size in (("up.mp4", "180x320"), ("wide.mp4", "320x180")):
+        source = f"color=c=black:s={size}:d=0.2"
+        subprocess.run([ffmpeg, "-v", "error", "-f", "lavfi", "-i", source, str(tmp_path / name)], check=True)
+    assert overlay_canvas_upright(tmp_path / "up.mp4")
+    assert not overlay_canvas_upright(tmp_path / "wide.mp4")
