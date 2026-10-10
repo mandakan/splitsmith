@@ -71,23 +71,32 @@ _SAMSUNG = re.compile(r"^\d{8}_\d{6}.*\.mp4$", re.IGNORECASE)
 _IPHONE = re.compile(r"^IMG_\d{4}.*\.mov$", re.IGNORECASE)
 
 
-def camera_for(file_name: str, mount_hint: str | None, probe: CameraProbeResult) -> Camera | None:
-    """The camera block for a secondary video, or ``None`` when it cannot be placed.
+def camera_for(
+    file_name: str,
+    mount_hint: str | None,
+    probe: CameraProbeResult,
+    *,
+    make: str | None = None,
+    model: str | None = None,
+) -> Camera | None:
+    """The camera block for a video, or ``None`` when it cannot be placed.
 
-    The file name decides the device (``docs/cameras.md``); ffprobe's make and
-    model fill in what it can. A handheld camera is filmed by someone else
-    (``squadmate``), a head camera by the shooter.
+    The make and model the project recorded for the video win (a renamed file
+    keeps them); otherwise the file name decides the device
+    (``docs/cameras.md``). ffprobe fills in what it can. A handheld camera is
+    filmed by someone else (``squadmate``), a head camera by the shooter.
     """
     name = file_name
-    if _GO3S.match(name):
+    known = f"{make or probe.make or ''} {model or probe.model or ''}".strip().lower()
+    if known == "insta360 go 3s" or _GO3S.match(name):
         cid, make, model, mount = "go3s", "Insta360", "GO 3S", CameraMount.head
-    elif _VANGUARD.match(name):
+    elif known.endswith("vanguard") or _VANGUARD.match(name):
         cid, make, model, mount = "meta-vanguard", "Meta", "Vanguard", CameraMount.head
-    elif _DJI.match(name):
+    elif known.startswith("dji") or _DJI.match(name):
         cid, make, model, mount = "dji-osmoaction4", "DJI", "Osmo Action 4", CameraMount.head
-    elif _SAMSUNG.match(name):
+    elif known.startswith("samsung") or _SAMSUNG.match(name):
         cid, make, model, mount = "samsung", "Samsung", None, CameraMount.hand
-    elif _IPHONE.match(name) or (probe.make or "").lower() == "apple":
+    elif _IPHONE.match(name) or "apple" in ((probe.make or "").lower(), known.split(" ")[0]):
         cid = probe.suggested_id or "apple-iphone"
         make, model, mount = probe.make or "Apple", probe.model, CameraMount.hand
     else:

@@ -109,3 +109,20 @@ def test_a_taken_slug_is_not_overwritten():
     other = AnchorFixture(f"{anchor.stem}-apple-iphone17pro", "IMG_9.MOV", REVIEWED, 20)
     (plan,) = plan_secondary_promotions([stage], [anchor, other], _cams(("b2aaaa", "IMG_2.MOV")))
     assert plan.slug == f"{anchor.stem}-apple-iphone17pro-b2aaaa"
+
+
+def test_the_projects_make_and_model_place_a_renamed_file():
+    go3s = camera_for("mathias_stage_2.mp4", "head", NO_PROBE, make="Insta360", model="GO 3S")
+    assert (go3s.id, go3s.mount) == ("go3s", CameraMount.head)
+    vanguard = camera_for("stage3.mov", None, NO_PROBE, make="Meta", model="Vanguard")
+    assert vanguard.id == "meta-vanguard"
+    assert (
+        camera_for("martin_8_1.MOV", "hand", IPHONE, make="Apple", model="iPhone 17 Pro").id
+        == "apple-iphone17pro"
+    )
+    assert camera_for("mystery.mp4", "head", NO_PROBE, make="Acme", model="Cam") is None
+
+
+def test_a_samsung_probe_places_a_renamed_phone_file():
+    samsung = camera_for("anton_8_2.mp4", "hand", CameraProbeResult(make="Samsung"))
+    assert (samsung.id, samsung.mount) == ("samsung", CameraMount.hand)

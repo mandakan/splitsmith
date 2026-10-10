@@ -383,6 +383,8 @@ def probe_camera_metadata(
     model: str | None = (
         fmt_tags.get("com.apple.quicktime.model") or fmt_tags.get("model") or fmt_tags.get("Model")
     )
+    if not make and any(k.startswith("com.samsung.android") for k in fmt_tags):
+        make = "Samsung"  # Samsung writes no make or model tag, only its own keys
 
     sample_rate: int | None = None
     bit_depth: int | None = None

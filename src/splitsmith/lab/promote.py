@@ -50,12 +50,20 @@ from .core import (
     event_id_from_payload,
     match_stage_from_slug,
 )
-from .snap_window import SnapResult, guided_snap_anchor_shots, snap_anchor_shots
+from .snap_window import (
+    SnapResult,
+    estimate_onset_lag,
+    guided_snap_anchor_shots,
+    snap_anchor_shots,
+)
 
 _TOOL_VERSION = "0.1.0"
 _ALIGN_CONFIDENCE_WARN = 1.5
 _DEFAULT_SNAP_WINDOW_MS = 60.0
 _DEFAULT_MIN_SPACING_MS = 80.0
+# Peak over the best correlation more than 20 ms away; below this the onset
+# lag is a guess and the snap stays around the marked beeps.
+_LAG_MIN_CONTRAST = 1.15
 
 
 # ---------------------------------------------------------------------------
@@ -192,11 +200,32 @@ def promote_from_anchor(
     #    - Untrusted-prior (cross-correlation fallback): threshold-based
     #      snap against voter A. Without a known beep we can't trust
     #      the offset enough to drop the detector threshold.
+    onset_lag_s, onset_lag_contrast, lag_applied = 0.0, None, False
     if req.secondary_beep_time is not None:
+        # The two angles' marked beeps can disagree by more than the snap
+        # window (#1363); shift the prior by the stage's onset lag first.
+        if anchor_shot_times:
+            onset_lag_s, onset_lag_contrast = estimate_onset_lag(
+                anchor_audio=req.primary_audio,
+                anchor_sr=req.primary_sr,
+                anchor_beep_time=anchor_beep,
+                secondary_audio=req.secondary_audio,
+                secondary_sr=req.secondary_sr,
+                secondary_beep_time=secondary_beep_time,
+                span_s=max(anchor_shot_times) - anchor_beep + 0.5,
+            )
+            lag_applied = onset_lag_contrast >= _LAG_MIN_CONTRAST
+            if not lag_applied:
+                warnings.append(
+                    f"no clear onset lag (contrast {onset_lag_contrast:.2f}); "
+                    "snapping around the marked beeps"
+                )
+                onset_lag_s = 0.0
+        prior_beep = secondary_beep_time + onset_lag_s
         first_pass = guided_snap_anchor_shots(
             anchor_beep_time=anchor_beep,
             anchor_shots=anchor_shot_times,
-            secondary_beep_time=secondary_beep_time,
+            secondary_beep_time=prior_beep,
             secondary_audio=req.secondary_audio,
             secondary_sr=req.secondary_sr,
             window_ms=max(150.0, req.snap_window_ms * 2.5),
@@ -211,7 +240,7 @@ def promote_from_anchor(
         snaps = guided_snap_anchor_shots(
             anchor_beep_time=anchor_beep,
             anchor_shots=anchor_shot_times,
-            secondary_beep_time=secondary_beep_time,
+            secondary_beep_time=prior_beep,
             secondary_audio=req.secondary_audio,
             secondary_sr=req.secondary_sr,
             window_ms=req.snap_window_ms,
@@ -255,6 +284,12 @@ def promote_from_anchor(
             "snapped": sum(1 for s in snaps if s.snapped_time is not None),
             "missed": sum(1 for s in snaps if s.sanity_flag == "no-candidate"),
             "sanity_flagged": sum(1 for s in snaps if s.sanity_flag not in ("", "no-candidate")),
+            "onset_lag_ms": round(onset_lag_s * 1000.0, 1),
+            "onset_lag_contrast": (
+                round(onset_lag_contrast, 3) if onset_lag_contrast not in (None, float("inf")) else None
+            ),
+            "onset_lag_applied": lag_applied,
+            "at_window_edge": _at_window_edge(snaps, req.snap_window_ms),
         },
     )
     fixture_data = _build_fixture(
@@ -283,6 +318,10 @@ def promote_from_anchor(
         total_candidates=len(ensemble_result.candidates),
         warnings=warnings,
     )
+    report["onset_lag"] = {
+        k: history_entry.details[k] for k in ("onset_lag_ms", "onset_lag_contrast", "onset_lag_applied")
+    }
+    report["counts"]["at_window_edge"] = history_entry.details["at_window_edge"]
 
     return PromoteFromAnchorResult(
         fixture_data=fixture_data,
@@ -363,6 +402,13 @@ def write_promoted_fixture(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _at_window_edge(snaps: list[SnapResult], window_ms: float) -> int:
+    """Snaps within 5 ms of the window's edge: the onset was likely outside it."""
+    return sum(
+        1 for s in snaps if s.displacement_ms is not None and abs(s.displacement_ms) >= window_ms - 5.0
+    )
 
 
 def _estimate_drift(snaps: list[SnapResult]) -> float | None:

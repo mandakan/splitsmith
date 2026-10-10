@@ -32,18 +32,22 @@ def test_an_unknown_status_falls_back_to_the_history():
     assert review_status({"anchor": {"fixture_slug": "a"}, "review": {"status": "maybe"}}) == "needs_review"
 
 
-def test_the_corpus_marks_exactly_the_snapped_fixtures():
+def test_the_corpus_marks_the_snapped_and_the_flagged_fixtures():
     fx_module.all_fixtures.cache_clear()
-    snapped = set()
+    expected = set()
     for p in FIXTURES.glob("stage-shots-*.json"):
         if p.stem.endswith("-report"):
             continue
         d = json.loads(p.read_text())
-        if d.get("anchor") or any(h.get("action") == "promote-from-anchor" for h in d.get("history") or []):
-            snapped.add(p.stem)
-    assert len(snapped) >= 12
+        snapped = d.get("anchor") or any(
+            h.get("action") == "promote-from-anchor" for h in d.get("history") or []
+        )
+        flagged = (d.get("review") or {}).get("status") == "needs_review"
+        if snapped or flagged:
+            expected.add(p.stem)
+    assert len(expected) >= 12
     needs = {f.stem for f in fx_module.all_fixtures() if f.review_status == "needs_review"}
-    assert needs == snapped
+    assert needs == expected
 
 
 def test_reviewed_only_leaves_out_the_unreviewed(tmp_path, monkeypatch):

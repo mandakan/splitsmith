@@ -115,7 +115,11 @@ def main() -> int:
                     continue
                 source = project.resolve_video_path(root, v.path)
                 probe = probe_camera_metadata(source) if source.exists() else None
-                cameras[v.video_id] = camera_for(name, v.camera_mount, probe) if probe else None
+                cameras[v.video_id] = (
+                    camera_for(name, v.camera_mount, probe, make=v.camera_make, model=v.camera_model)
+                    if probe
+                    else None
+                )
                 context[v.video_id] = (project, root, stage.stage_number, v, source)
             stages.append(StageAngles(match, root.name, stage.stage_number, tuple(angles)))
 

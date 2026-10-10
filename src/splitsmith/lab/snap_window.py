@@ -163,6 +163,68 @@ def _peak_envelope(audio: np.ndarray, source_sr: int, target_sr: int) -> np.ndar
     return abs_a[:trimmed].reshape(-1, block).max(axis=1)
 
 
+def _onset_strength(audio: np.ndarray, sr: int, start_s: float, end_s: float) -> np.ndarray:
+    """Rises of the log block-max envelope at 1 kHz over ``[start_s, end_s)``."""
+    i0, i1 = max(0, int(start_s * sr)), max(0, int(end_s * sr))
+    env = _peak_envelope(np.asarray(audio[i0:i1], dtype=np.float32), sr, _GUIDED_ENVELOPE_SR)
+    if env.size < 2:
+        return np.zeros(0)
+    env = np.log1p(env / (float(np.median(env)) + 1e-9))
+    onset = np.maximum(np.diff(env, prepend=env[0]), 0.0)
+    onset = np.convolve(onset, np.ones(3) / 3, mode="same")
+    return onset - onset.mean()
+
+
+def estimate_onset_lag(
+    *,
+    anchor_audio: np.ndarray,
+    anchor_sr: int,
+    anchor_beep_time: float,
+    secondary_audio: np.ndarray,
+    secondary_sr: int,
+    secondary_beep_time: float,
+    span_s: float,
+    max_lag_ms: int = 500,
+) -> tuple[float, float]:
+    """The constant lag of the secondary's shots behind what its beep predicts.
+
+    Two angles' marked beeps can disagree by more than the snap window
+    (#1363: up to about 200 ms between reviewed beeps on one stage), so the
+    guided snap shifts its prior by this first. Cross-correlates onset
+    strength over the stage (beep + 0.3 s to beep + ``span_s``; the beep
+    itself is left out, since its own marking error is what is measured).
+
+    Returns ``(lag_s, contrast)``: positive lag means the secondary's shots
+    are later than predicted; contrast is the peak correlation over the best
+    correlation more than 20 ms away (about 1 means no clear answer).
+    """
+    head = 0.3
+    anchor = _onset_strength(anchor_audio, anchor_sr, anchor_beep_time + head, anchor_beep_time + span_s)
+    pad = max_lag_ms / 1000.0
+    sec = _onset_strength(
+        secondary_audio,
+        secondary_sr,
+        secondary_beep_time + head - pad,
+        secondary_beep_time + span_s + pad,
+    )
+    if anchor.size == 0 or sec.size < anchor.size:
+        return 0.0, 0.0
+    a_norm = float(np.linalg.norm(anchor)) + 1e-12
+    scores = []
+    for lag in range(-max_lag_ms, max_lag_ms + 1):
+        seg = sec[max_lag_ms + lag : max_lag_ms + lag + anchor.size]
+        if seg.size < anchor.size:
+            scores.append(-np.inf)
+            continue
+        scores.append(float(np.dot(seg, anchor)) / (float(np.linalg.norm(seg)) + 1e-12) / a_norm)
+    s = np.asarray(scores)
+    best = int(np.argmax(s))
+    far = np.abs(np.arange(s.size) - best) > 20
+    runner_up = float(np.max(s[far])) if far.any() else 0.0
+    contrast = float(s[best] / runner_up) if runner_up > 0 else float("inf")
+    return (best - max_lag_ms) / 1000.0, contrast
+
+
 def guided_snap_anchor_shots(
     anchor_beep_time: float,
     anchor_shots: list[float],

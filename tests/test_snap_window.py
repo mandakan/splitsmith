@@ -8,6 +8,7 @@ times, so the tests are deterministic.
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 from splitsmith.lab.snap_window import SnapResult, snap_anchor_shots
@@ -160,3 +161,54 @@ def test_returns_pydantic_models() -> None:
         voter_a_candidates=[(1.0, 0.9)],
     )
     assert all(isinstance(r, SnapResult) for r in results)
+
+
+def _clicks(times: list[float], duration: float, sr: int = 48000, seed: int = 0) -> np.ndarray:
+    rng = np.random.default_rng(seed)
+    audio = rng.normal(0.0, 0.002, int(duration * sr)).astype(np.float32)
+    decay = np.exp(-np.arange(int(0.05 * sr)) / (0.008 * sr)).astype(np.float32)
+    for t in times:
+        i = int(t * sr)
+        burst = rng.normal(0.0, 0.5, decay.size).astype(np.float32) * decay
+        audio[i : i + decay.size] += burst[: audio.size - i]
+    return audio
+
+
+def test_onset_lag_finds_a_constant_offset_between_angles():
+    """Two angles' marked beeps can disagree by 100 ms or more (#1363);
+    the snap window is 60 ms, so the lag must be found first."""
+    from splitsmith.lab.snap_window import estimate_onset_lag
+
+    shots = [1.0, 1.31, 1.9, 2.4, 2.62, 3.5, 4.1, 4.33]
+    anchor = _clicks([0.5 + s for s in shots], 6.0, seed=1)
+    # Secondary: beep marked at 0.5 too, but every shot really lands 120 ms later.
+    secondary = _clicks([0.5 + s + 0.120 for s in shots], 6.5, seed=2)
+    lag_s, contrast = estimate_onset_lag(
+        anchor_audio=anchor,
+        anchor_sr=48000,
+        anchor_beep_time=0.5,
+        secondary_audio=secondary,
+        secondary_sr=48000,
+        secondary_beep_time=0.5,
+        span_s=max(shots) + 0.5,
+    )
+    assert abs(lag_s - 0.120) <= 0.003
+    assert contrast > 1.5
+
+
+def test_onset_lag_is_zero_when_the_beeps_agree():
+    from splitsmith.lab.snap_window import estimate_onset_lag
+
+    shots = [1.0, 1.4, 2.2, 2.9]
+    anchor = _clicks([0.5 + s for s in shots], 5.0, seed=3)
+    secondary = _clicks([0.8 + s for s in shots], 5.5, seed=4)
+    lag_s, _ = estimate_onset_lag(
+        anchor_audio=anchor,
+        anchor_sr=48000,
+        anchor_beep_time=0.5,
+        secondary_audio=secondary,
+        secondary_sr=48000,
+        secondary_beep_time=0.8,
+        span_s=3.5,
+    )
+    assert abs(lag_s) <= 0.003
