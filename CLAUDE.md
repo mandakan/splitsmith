@@ -1156,12 +1156,11 @@ on an older one; the request's ``StageEventIn`` forbids them. It is **not** in `
 is desktop-owned, ``sync.merge.merge_audit_doc`` keeps local's copy, so
 a hosted write on a mirror would be silently overwritten by the next
 sync. A desktop-origin mirror answers 403 ``read_only_mirror`` and the
-SPA renders the editor read-only on
+SPA renders Breakdown's editor read-only on
 ``capabilityDenied(project.capabilities, "edit")``; a hosted-native
 match keeps the PUT. The read-only rendering serves a hosted mirror (a
-desktop browser) and ``isMobile``, but the Coach route sits behind
-``DesktopGate`` in ``App.tsx``, so a phone never reaches it until a
-phone Coach surface exists. Every PUT appends an
+desktop browser) and ``isMobile``, but the Breakdown route sits behind
+``DesktopGate`` in ``App.tsx``, so a phone never reaches it. Every PUT appends an
 ``audit_events`` entry, which is why the SPA saves on commit only
 (release or keyboard nudge) through a 350 ms debounce in
 ``lib/useStageEvents.ts``: PUTs run one at a time with the revision the
@@ -1190,7 +1189,7 @@ revision (a live drag's release carries it, a cancel sends it),
 otherwise, or on a second 409, the server's list wins, a live drag's
 release is dropped, and ``onDiscard`` fires once (the seam for the
 inline notice). The hook's ``issue`` is that notice (``SaveIssue``,
-rendered by ``components/coach/SaveNotice`` under the lane editor): a
+rendered by ``components/coach/SaveNotice`` in Breakdown's inspector): a
 discard is muted; any other failed save, a failed 409 reload included,
 reverts the list like a non-409 failure and never replaces the page, but
 shows ``retry``, which re-sends the list the failed PUT carried unless
@@ -1202,11 +1201,11 @@ state reverts to the last valid list. Never save per drag frame.
 
 The coach payload carries ``events``, ``event_summary``, ``_version``,
 per-shot ``moving`` and per-video ``trim_version`` / ``scrub_version``;
-the Coach player goes through ``useScrubSource`` like Audit, and the
-timeline band's options menu's "Full-resolution video" entry is the same
-``GlobalPrefs.full_res_scrub``. ``components/coach/LaneEditor`` owns the
+the Coach and Breakdown players go through ``useScrubSource`` like Audit,
+and Breakdown's timeline band options menu "Full-resolution video" entry
+is the same ``GlobalPrefs.full_res_scrub``. ``components/coach/LaneEditor`` owns the
 DOM only; geometry (clamp, snap, ``MIN_EVENT_S``) is ``lib/events.ts``.
-On Coach the lanes are a track of the shared timeline band
+On Breakdown the lanes are a track of the shared timeline band
 (``components/timeline/Timeline``, spec 2026-10-09): the band owns the
 ruler, the playhead, zoom (``lib/timelineView``: ``null`` is Fit, a
 multiplier up to 16x, never narrower than the viewport), the wheel rules
@@ -1217,13 +1216,13 @@ The follow rule depends on ``playing``: while playing it keeps the
 playhead in the middle 80 % (the edge-triggered rule); while paused it
 only brings an off-screen playhead into view and never re-centres one
 already on screen, since a paused seek's ``currentTime`` can land after
-pointerup already cleared (Coach's arrives through the video's async
+pointerup already cleared (Breakdown's arrives through the video's async
 ``timeupdate``). Either way a zoom or a resize keeps its anchor: a
 resize recomputes ``scrollLeft`` to hold the left edge's time, which is
 why Cmd/Ctrl+B and a window resize never move the visible window at a
 zoom. A track positions by percentage of the band's content div, so the
 editor's pointer maths reads its own rect and needs no zoom code; a new
-track does the same. A track can also be ``seekable`` (Coach's Audio
+track does the same. A track can also be ``seekable`` (Breakdown's Audio
 track is), which scrubs on a press-and-drag through the content div's
 rect like the ruler, no snap, with pointer capture and one seek per
 frame; a press inside ``[data-audit-marker]`` is ignored. ``onScrubEnd``
@@ -1256,10 +1255,11 @@ over its older "Rendering and export" text). Every rendered or exported
 output -- overlay, summary card, ``events.csv``, FCPXML markers, share
 figures -- reads **confirmed** regions only (``source == "manual"``)
 through ``events.confirmed_from_doc``, which degrades a corrupt list to
-none; a new consumer calls it, never re-derives the rule. The Coach page
-alone shows proposals: on the lanes, the region card and the region list,
-while its stat strip (on the move, exposed reload) counts confirmed regions
-only (``lib/events.confirmedEvents``), like every output. **Keep** on the region card (``default`` button,
+none; a new consumer calls it, never re-derives the rule. Breakdown
+alone shows proposals: on the lanes, the region card and the region list.
+Coach's ``StageStrip`` and its stat strip (on the move, exposed reload,
+``lib/coachReview.reviewFigures``) draw and count confirmed regions only
+(``lib/events.confirmedEvents``), like every output. **Keep** on the region card (``default`` button,
 auto proposals only) commits ``lib/events.keepEvent``: ``source`` to
 ``manual``, nothing else; dragging, nudging or changing kind confirm too.
 
@@ -1329,8 +1329,15 @@ Breakdown's; Coach shows them read-only through ``StageStrip``
 revision check (409 ``version_conflict``) and an ``audit_events`` entry; it
 is a ``_REVIEW_ROUTES`` entry, because ``merge_audit_doc`` merges
 ``stage_note`` three-way like a shot's note (newer doc wins a conflict,
-surfaced), unlike desktop-owned ``events``. The coach payload carries
-``stage_note``, ``null`` on a share read. "Adjust in Breakdown" and
+surfaced), unlike desktop-owned ``events``. A clear is an explicit
+``null`` (the tombstone); an **absent key means the writer never knew the
+field** (an older install): the sync audit PUT (``sync_api.put_audit_doc``)
+keeps the stored note when the body lacks the key, and the merge reads a
+side without it as unchanged, so an older desktop's push or recorded base
+never erases a note. Never drop the key to clear it. The audit event records
+the note's length and a short hash, not its text (so does ``coach_patch``
+for ``coaching_note``). The coach payload carries ``stage_note``, ``null``
+for none, a clear and a share read alike. "Adjust in Breakdown" and
 "Review in Coach" carry ``?t=`` (seconds from the beep) and ``&shot=``,
 and Breakdown also reads ``&region=`` (``lib/stageLink``, applied once on
 load by ``useStageWorkspace``'s ``link``); a stale or malformed one is
@@ -1649,8 +1656,11 @@ popover primitives. Coach (``pages/Coach.tsx``, ``components/coach/*``,
 stored interval class (``timeBudget`` / ``matchBudget``; the segments
 equal the stage time to 1 ms, pinned by fixture); the budget hues are
 the chip ticks (``BUDGET_TICK``), and an outlier is an interval over
-twice its type's match median. A new per-shot control belongs on
-``ShotEditor``, a new per-type figure on ``TimeBudgetCard``. Compare
+twice its type's match median. Coach is the review page: a new per-shot
+review control (metadata, never an interval) belongs on ``ReviewShotList``'s
+open row, a new per-type figure on ``TimeBudgetCard``, a new mark on the
+stage on ``StageStrip`` (``lib/stageStrip``); an interval or region control
+belongs on Breakdown (``BreakdownInspector``, ``ShotIntervalCard``). Compare
 (``pages/Compare.tsx``, ``pages/compare/*``): header on ``PageHeader``,
 the nav row appears only on multi-shooter matches
 (``matchNavItems({ multiShooter })``). Matches (``pages/Pick.tsx``,
