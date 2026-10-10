@@ -32,10 +32,11 @@ from .coach import statistic_split_shots
 from .events import ReloadFigure, exposed_reload_s
 from .match_project import StageScorecard
 from .overlay_html import single_html
-from .overlay_layout import Anchor, CellScale, ColorToken, Element, Emphasis, Flow, Group, Role
+from .overlay_layout import MIN_FONT_SIZE, Anchor, CellScale, ColorToken, Element, Emphasis, Flow, Group, Role
 from .overlay_raster import Rasterizer
 from .overlay_still import DEFAULT_DIM, backdrop_from_frame
 from .overlay_theme import OverlayTheme
+from .safe_area import SafeArea, safe_area
 from .stage_summary_data import TileStageData
 
 logger = logging.getLogger(__name__)
@@ -296,6 +297,7 @@ def summary_groups(
     cell_width: int,
     cell_height: int,
     split_rows: bool = True,
+    upright: bool = False,
 ) -> tuple[Group, ...]:
     """What one cell says, as anchored groups rather than an ordered list.
 
@@ -336,6 +338,12 @@ def summary_groups(
     row (a static-only figure beside a neighbour's combined one is not a
     comparison) and is not shrunk by two extra rows its neighbours lack.
     The reload row still appears; it is that shooter's own fact.
+
+    ``upright=True`` is the single-shooter card on a canvas taller than
+    wide (issue #1394): the Splits band comes first and is stacked
+    (:func:`_upright_split_groups`; Static / Moving rows whenever both
+    kinds of split exist and ``split_rows`` is on, whatever the aspect),
+    and hit factor and time share its two columns under the counts.
     """
     scorecard = tile.scorecard if tile is not None else None
     # Narrowed to a real ``StageScorecard`` (not just a bool) so the reads
@@ -360,8 +368,8 @@ def summary_groups(
         return tuple(groups)
 
     # The vertically centred stack of two bands. Declared top to bottom;
-    # groups sharing MIDDLE_CENTER stack in declaration order.
-    stack: list[Group] = []
+    # groups sharing MIDDLE_CENTER stack in declaration order: Scoring then
+    # Splits, Splits first on an upright card.
 
     counts = count_elements(active_scorecard) if active_scorecard is not None else []
     # The reload row (confirmed reloads only) is the first thing a cell too
@@ -391,6 +399,7 @@ def summary_groups(
     # no counts, no hit factor.
     scoring_present = bool(counts) or hf_text is not None or time_text is not None
 
+    scoring: list[Group] = []
     if scoring_present:
         # Drop-priority continues past the counts row's own tiers (issue
         # #683 F1): the whole counts row is exhausted before the fit
@@ -408,7 +417,7 @@ def summary_groups(
         if time_text is not None:
             working.append(Element(role=Role.HEADLINE, text=time_text, drop_priority=next_priority))
             next_priority += 1
-        stack.append(
+        scoring.append(
             Group(
                 anchor=Anchor.MIDDLE_CENTER,
                 flow=Flow.ROW,
@@ -417,7 +426,7 @@ def summary_groups(
             )
         )
         if counts:
-            stack.append(
+            scoring.append(
                 Group(
                     anchor=Anchor.MIDDLE_CENTER,
                     flow=Flow.ROW,
@@ -426,8 +435,21 @@ def summary_groups(
                     gap=_counts_gap(scale),
                 )
             )
-        if working:
-            stack.append(
+        if working and upright:
+            # Upright: hit factor and time sit in the Splits band's two
+            # columns, under the 2x2 of figures, so the eye reads one table.
+            scoring.append(
+                Group(
+                    anchor=Anchor.MIDDLE_CENTER,
+                    flow=Flow.GRID,
+                    elements=tuple(working),
+                    align="left",
+                    gap=_sgrid_gap(cell_width),
+                    columns=_UPRIGHT_COLUMNS,
+                )
+            )
+        elif working:
+            scoring.append(
                 Group(
                     anchor=Anchor.MIDDLE_CENTER,
                     flow=Flow.ROW,
@@ -453,52 +475,221 @@ def summary_groups(
     # (their own row under Best/Avg/Worst/Draw otherwise). Every row then
     # shares four columns so the figures line up. A stage with neither
     # declares exactly what it did before: one grid, one column per element.
-    rows: list[list[Element]] = []
-    if tile.has_shots:
-        selected = statistic_split_shots(tile.shots)
-        static = [shot.split for shot in selected if not shot.moving]
-        moving = [shot.split for shot in selected if shot.moving]
-        draw = Element(role=Role.HEADLINE, text=f"{tile.shots[0].split:.2f}", caption="Draw")
-        if static and moving and split_rows and _fits_split_rows(cell_width, cell_height):
-            rows.append([Element(role=Role.LABEL, text="Static"), *_split_stat_elements(static)])
-            # No captions: the Moving figures sit under the Static row's.
-            rows.append(
-                [
-                    Element(role=Role.LABEL, text="Moving"),
-                    *(replace(e, caption=None) for e in _split_stat_elements(moving)),
-                ]
-            )
-            rows.append([draw, *reload_row])
-        else:
-            rows.append([*_split_stat_elements([shot.split for shot in selected]), draw])
-            if reload_row:
-                rows.append(reload_row)
-    columns = _SPLIT_COLUMNS if len(rows) > 1 else None
-
-    if rows:
-        stack.append(
-            Group(
-                anchor=Anchor.MIDDLE_CENTER,
-                flow=Flow.ROW,
-                elements=(Element(role=Role.LABEL, text="Splits"),),
-                align="left",
-                margin_top=_band_gap_extra(cell_height) if scoring_present else None,
-            )
+    splits: list[Group] = []
+    if upright:
+        splits = _upright_split_groups(
+            tile,
+            reload_row,
+            scale=scale,
+            cell_width=cell_width,
+            cell_height=cell_height,
+            split_rows=split_rows,
         )
-        for row in rows:
-            stack.append(
+    else:
+        rows: list[list[Element]] = []
+        if tile.has_shots:
+            selected = statistic_split_shots(tile.shots)
+            static = [shot.split for shot in selected if not shot.moving]
+            moving = [shot.split for shot in selected if shot.moving]
+            draw = Element(role=Role.HEADLINE, text=f"{tile.shots[0].split:.2f}", caption="Draw")
+            if static and moving and split_rows and _fits_split_rows(cell_width, cell_height):
+                rows.append([Element(role=Role.LABEL, text="Static"), *_split_stat_elements(static)])
+                # No captions: the Moving figures sit under the Static row's.
+                rows.append(
+                    [
+                        Element(role=Role.LABEL, text="Moving"),
+                        *(replace(e, caption=None) for e in _split_stat_elements(moving)),
+                    ]
+                )
+                rows.append([draw, *reload_row])
+            else:
+                rows.append([*_split_stat_elements([shot.split for shot in selected]), draw])
+                if reload_row:
+                    rows.append(reload_row)
+        columns = _SPLIT_COLUMNS if len(rows) > 1 else None
+        if rows:
+            splits.append(
                 Group(
                     anchor=Anchor.MIDDLE_CENTER,
-                    flow=Flow.GRID,
-                    elements=tuple(row),
+                    flow=Flow.ROW,
+                    elements=(Element(role=Role.LABEL, text="Splits"),),
                     align="left",
-                    gap=_sgrid_gap(cell_width),
-                    columns=columns,
+                    margin_top=_band_gap_extra(cell_height) if scoring_present else None,
                 )
             )
+            for row in rows:
+                splits.append(
+                    Group(
+                        anchor=Anchor.MIDDLE_CENTER,
+                        flow=Flow.GRID,
+                        elements=tuple(row),
+                        align="left",
+                        gap=_sgrid_gap(cell_width),
+                        columns=columns,
+                    )
+                )
 
-    groups.extend(stack)
+    if upright:
+        # Splits lead on an upright card; the Scoring band follows a band
+        # gap below them.
+        if splits and scoring:
+            scoring[0] = replace(scoring[0], margin_top=_band_gap_extra(cell_height))
+        groups.extend(splits + scoring)
+    else:
+        groups.extend(scoring + splits)
     return tuple(groups)
+
+
+#: The upright stage summary's column count for its 2x2 rows (Best / Avg
+#: over Worst / Draw; Draw / Reloads over Reload avg / Exposed) and its hit
+#: factor and time; the Static and Moving rows take three.
+_UPRIGHT_COLUMNS = 2
+_UPRIGHT_STAT_COLUMNS = 3
+
+
+def _upright_split_groups(
+    tile: TileStageData,
+    reload_row: list[Element],
+    *,
+    scale: CellScale,
+    cell_width: int,
+    cell_height: int,
+    split_rows: bool,
+) -> list[Group]:
+    """The upright card's Splits band (issue #1394): stacked, never four
+    across. Without confirmed regions Best / Avg over Worst / Draw as a 2x2;
+    with both static and moving splits a Static and a Moving row of three
+    (Moving without captions, as landscape), then Draw / Reloads / Reload
+    avg / Exposed as a 2x2; with a confirmed reload and no such split
+    Best / Avg / Worst as a row of three over the same 2x2. Nothing when
+    the stage has no shots."""
+    if not tile.has_shots:
+        return []
+    selected = statistic_split_shots(tile.shots)
+    static = [shot.split for shot in selected if not shot.moving]
+    moving = [shot.split for shot in selected if shot.moving]
+    draw = Element(role=Role.HEADLINE, text=f"{tile.shots[0].split:.2f}", caption="Draw")
+    gap = _sgrid_gap(cell_width)
+
+    def label(text: str) -> Group:
+        return Group(
+            anchor=Anchor.MIDDLE_CENTER,
+            flow=Flow.ROW,
+            elements=(Element(role=Role.LABEL, text=text),),
+            align="left",
+        )
+
+    def grid(elements: list[Element], columns: int) -> Group:
+        return Group(
+            anchor=Anchor.MIDDLE_CENTER,
+            flow=Flow.GRID,
+            elements=tuple(elements),
+            align="left",
+            gap=gap,
+            columns=columns,
+        )
+
+    groups = [label("Splits")]
+    if static and moving and split_rows and cell_height >= _SPLIT_ROWS_MIN_CELL_HEIGHT:
+        groups.append(label("Static"))
+        groups.append(grid(_split_stat_elements(static), _UPRIGHT_STAT_COLUMNS))
+        groups.append(label("Moving"))
+        groups.append(
+            grid([replace(e, caption=None) for e in _split_stat_elements(moving)], _UPRIGHT_STAT_COLUMNS)
+        )
+        groups.append(grid([draw, *reload_row], _UPRIGHT_COLUMNS))
+    elif reload_row:
+        stats = _split_stat_elements([shot.split for shot in selected])
+        if stats:
+            groups.append(grid(stats, _UPRIGHT_STAT_COLUMNS))
+        groups.append(grid([draw, *reload_row], _UPRIGHT_COLUMNS))
+    else:
+        groups.append(
+            grid([*_split_stat_elements([shot.split for shot in selected]), draw], _UPRIGHT_COLUMNS)
+        )
+    return groups
+
+
+def upright_summary_scale(width: int, height: int, *, dense: bool) -> CellScale:
+    """The :class:`CellScale` of an upright stage summary (issue #1394),
+    keyed to the canvas width, which is what limits a row of figures on a
+    tall card: the name at 12 % of the width (130 px at 1080x1920, never
+    more than the landscape rule's ``height / 7``), every figure at 13.5 %
+    (about 1.2x the 1920x1080 card's) or, ``dense`` (Static / Moving rows
+    or a reload row to fit), 10.5 %, the counts at 6.6 % and the captions
+    at 3.2 %. The live-overlay fields stay :meth:`CellScale.for_cell`'s."""
+    base = CellScale.for_cell(height)
+    identity = max(MIN_FONT_SIZE, min(round(width * 0.12), height // 7))
+    return replace(
+        base,
+        identity=identity,
+        headline=max(MIN_FONT_SIZE, round(width * (0.105 if dense else 0.135))),
+        verdict=max(MIN_FONT_SIZE, identity // 2),
+        detail=max(MIN_FONT_SIZE, round(width * 0.066)),
+        caption=max(13, round(width * 0.032)),
+        pad=max(16, round(width * 0.06)),
+        stroke_width=max(1, width // 540),
+    )
+
+
+def _upright_dense(tile: TileStageData) -> bool:
+    """Whether an upright card has more than one row of split figures to
+    fit: a confirmed reload, or both static and moving splits."""
+    if tile.reloads:
+        return True
+    if not tile.has_shots:
+        return False
+    selected = statistic_split_shots(tile.shots)
+    return any(shot.moving for shot in selected) and any(not shot.moving for shot in selected)
+
+
+def upright_cell_style(area: SafeArea, *, pad: int) -> str:
+    """The upright stage summary's cell padding: the name starts 7 % down
+    the frame, the figures end at the safe area's bottom line and short of
+    its button column, given the anchors' own ``pad`` inset; plus the area
+    as CSS custom properties."""
+    top = max(0, round(area.height * 0.07) - pad)
+    right = max(0, area.right - pad)
+    bottom = max(0, area.bottom - pad)
+    return f"padding:{top}px {right}px {bottom}px 0;{area.css_vars()}"
+
+
+def summary_still_html(
+    tile: TileStageData,
+    label: str,
+    *,
+    width: int,
+    height: int,
+    theme: OverlayTheme,
+    accent: str | None = None,
+) -> str:
+    """The document :func:`build_summary_still` rasterizes. An upright
+    canvas (taller than wide) takes the upright layout (issue #1394):
+    :func:`upright_summary_scale`, the Splits band first and stacked
+    (``summary_groups(upright=True)``), the cell padded out of the platform
+    safe area (:func:`upright_cell_style`). Square and wider canvases are
+    the landscape card, unchanged."""
+    area = safe_area(width, height)
+    if area is not None:
+        scale = upright_summary_scale(width, height, dense=_upright_dense(tile))
+        groups = summary_groups(tile, label, scale=scale, cell_width=width, cell_height=height, upright=True)
+        return single_html(
+            groups,
+            width=width,
+            height=height,
+            scale=scale,
+            theme=theme,
+            accent=accent,
+            fit_columns=True,
+            cell_style=upright_cell_style(area, pad=scale.pad),
+        )
+    scale = summary_scale(height)
+    groups = summary_groups(tile, label, scale=scale, cell_width=width, cell_height=height)
+    # The summary's table rows fit their own columns (fit.js
+    # ``fitColumns``): a portrait card otherwise clips 1.42 to "1.4".
+    return single_html(
+        groups, width=width, height=height, scale=scale, theme=theme, accent=accent, fit_columns=True
+    )
 
 
 def build_summary_still(
@@ -531,13 +722,7 @@ def build_summary_still(
         canvas = backdrop_from_frame(backdrop, width=width, height=height, radius=blur_radius, dim_amount=dim)
     text: Image.Image | None = None
     if rasterizer is not None:
-        scale = summary_scale(height)
-        groups = summary_groups(tile, label, scale=scale, cell_width=width, cell_height=height)
-        # The summary's table rows fit their own columns (fit.js
-        # ``fitColumns``): a portrait card otherwise clips 1.42 to "1.4".
-        html = single_html(
-            groups, width=width, height=height, scale=scale, theme=theme, accent=accent, fit_columns=True
-        )
+        html = summary_still_html(tile, label, width=width, height=height, theme=theme, accent=accent)
         try:
             png_bytes = rasterizer.png(html, width=width, height=height)
             with Image.open(io.BytesIO(png_bytes)) as rendered:
@@ -559,5 +744,8 @@ __all__ = [
     "count_elements",
     "summary_groups",
     "summary_scale",
+    "summary_still_html",
     "time_text_for",
+    "upright_cell_style",
+    "upright_summary_scale",
 ]

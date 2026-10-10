@@ -185,7 +185,10 @@ def _confirmed_regions(audit_doc: dict | None) -> list[StageEvent]:
 #: 7: a table row whose figures run into each other at the legibility
 #: floor wraps, then drops its captions (``fitColumns``); bumped as well,
 #: so the change reads in the history and not only in the digest.
-PREVIEW_REVISION = 7
+#: 8: an upright (taller than wide) match summary and stage summary take
+#: their own layouts, splits first and out of the platform safe area
+#: (``safe_area``, #1394).
+PREVIEW_REVISION = 8
 
 
 def preview_key(
