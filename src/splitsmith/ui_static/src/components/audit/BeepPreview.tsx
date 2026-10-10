@@ -3,10 +3,12 @@
  * (moved from BeepReview's BeepVideoMini). Plays the low-res proxy, never
  * the trim: the proxy is untrimmed and shares the source timeline origin,
  * so the playhead stays in sync with the picker's full-source waveform.
- * The <video> element here is the playback master; the picker reads
- * scrub and time off it through ``videoRef``.
+ * The <video> element here is the playback master; it is handed up
+ * through ``onVideoElement`` on every mount and unmount (a camera switch,
+ * the error / Retry swap below), so the band always reads and seeks the
+ * live element.
  */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Clock } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -25,20 +27,34 @@ export interface BeepPreviewProps {
   mediaOnDesktop: boolean;
   /** Where to park the playhead once metadata lands. */
   initialTime: number | null;
-  videoRef: { current: HTMLVideoElement | null };
+  /** Called with the <video> when it mounts and with null when it
+   *  unmounts; must be stable (a state setter), or the element is
+   *  re-reported on every render. */
+  onVideoElement: (el: HTMLVideoElement | null) => void;
   caption: string;
 }
 
-export function BeepPreview({ slug, videoPath, proxyReady, mediaOnDesktop, initialTime, videoRef, caption }: BeepPreviewProps) {
+export function BeepPreview({ slug, videoPath, proxyReady, mediaOnDesktop, initialTime, onVideoElement, caption }: BeepPreviewProps) {
   const localRef = useRef<HTMLVideoElement | null>(null);
   useReleaseMediaOnUnmount(localRef);
+  // The element in state as well as the ref, so the park below runs again
+  // for a new <video> (the error / Retry swap), not only on a new time.
+  const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null);
+  const videoRef = useCallback(
+    (el: HTMLVideoElement | null) => {
+      localRef.current = el;
+      setVideoEl(el);
+      onVideoElement(el);
+    },
+    [onVideoElement],
+  );
   const [videoError, setVideoError] = useState(false);
   useEffect(() => {
     setVideoError(false);
   }, [videoPath]);
 
   useEffect(() => {
-    const v = localRef.current;
+    const v = videoEl;
     if (!v || initialTime == null) return;
     const seek = () => {
       try {
@@ -50,7 +66,7 @@ export function BeepPreview({ slug, videoPath, proxyReady, mediaOnDesktop, initi
     if (v.readyState >= 1) seek();
     else v.addEventListener("loadedmetadata", seek, { once: true });
     return () => v.removeEventListener("loadedmetadata", seek);
-  }, [initialTime]);
+  }, [initialTime, videoEl]);
 
   const placeholder = "flex h-full w-full flex-col items-center justify-center gap-2 bg-black p-4 text-center text-md text-ink-2";
   return (
@@ -85,10 +101,7 @@ export function BeepPreview({ slug, videoPath, proxyReady, mediaOnDesktop, initi
           </div>
         ) : (
           <video
-            ref={(el) => {
-              localRef.current = el;
-              videoRef.current = el;
-            }}
+            ref={videoRef}
             src={api.videoStreamUrl(slug, videoPath, "proxy")}
             playsInline
             controls

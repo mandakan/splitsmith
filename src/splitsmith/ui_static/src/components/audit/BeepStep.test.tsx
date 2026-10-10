@@ -178,6 +178,16 @@ describe("BeepStep", () => {
     ).toBeEnabled();
   });
 
+  it("marks the selected candidate in the beep colour, never the led red", () => {
+    renderStep(hookState([item()]));
+    const selected = screen.getAllByRole("radio")[0];
+    expect(selected.className).toContain("var(--color-beep)");
+    expect(selected.className).not.toContain("var(--color-led)");
+    const dot = selected.querySelector("i")!;
+    expect(dot.className).toContain("bg-beep");
+    expect(dot.className).not.toContain("bg-led");
+  });
+
   it("forwards mediaOnDesktop to the band and never wires its own error into the queue's alert", () => {
     renderStep(hookState([item()]), { mediaOnDesktop: true });
     expect(

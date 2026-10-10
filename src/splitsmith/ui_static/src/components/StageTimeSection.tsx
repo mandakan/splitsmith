@@ -9,7 +9,7 @@
  * detection won't run without a trimmed clip.
  *
  * This component lets the user pick the end-of-stage moment on the
- * primary's waveform (same canvas + audio player as ``BeepSection``,
+ * primary's waveform (BeepWaveformPicker's canvas and audio player,
  * but without "Snap to beep" -- the snap detector looks for the
  * beep tone's rise-foot, which is the wrong target here). The
  * displayed duration is computed as ``end_source_time - beep_time``;
