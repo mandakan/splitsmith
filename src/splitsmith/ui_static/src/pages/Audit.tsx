@@ -90,7 +90,7 @@ import { auditProxyReady, auditVideoSrc } from "@/lib/auditVideoSrc";
 import { addFailedKind, auditPipCameras, type FailedKinds } from "@/lib/auditPip";
 import { planServedClip } from "@/lib/camPlayback";
 import { pipKeyAction, type InsetStreamKind, type PipCamera } from "@/lib/pip";
-import { attachInsetSync } from "@/lib/pipSync";
+import { usePrimaryAudio } from "@/lib/usePrimaryAudio";
 import { usePip } from "@/lib/usePip";
 import { useScrubSource } from "@/lib/useScrubSource";
 import { computeAuditNextStep } from "@/lib/audit-next-step";
@@ -199,6 +199,8 @@ export function Audit() {
   }, []);
   // Stream kinds that failed in the PiP inset, per video_id (#1407).
   const [insetFailed, setInsetFailed] = useState<FailedKinds>({});
+  // The stage audit WAV failed as the swapped-in primary audio (see below).
+  const [stageWavFailed, setStageWavFailed] = useState(false);
   // Auto-advance to the next visible marker after K toggles a candidate.
   // Default on (FCP-style "mark and move"); persisted across sessions
   // because the user audits in long flow blocks and shouldn't have to
@@ -486,6 +488,7 @@ export function Audit() {
     // The big camera goes back to the primary by itself (usePip's
     // stageKey); the inset's failed streams are this stage's only.
     setInsetFailed({});
+    setStageWavFailed(false);
     setFocusedMarkerId(null);
     setCurrentShotIndex(0);
     setRepick(false);
@@ -608,9 +611,6 @@ export function Audit() {
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
-    // A big secondary is muted before it can play (the primary's audio
-    // follower below is the sound); the effect on ``bigVideoEl`` repeats it.
-    v.muted = activeVideoIndex !== 0;
     const targetVideoTime = currentTime + beepOffset;
     const seekWhenReady = () => {
       if (Number.isFinite(targetVideoTime) && targetVideoTime >= 0) {
@@ -703,29 +703,32 @@ export function Audit() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusedMarkerId]);
 
-  // A secondary is big (a swap): its picture, the primary's sound. The big
-  // player is muted and a hidden <audio> plays the primary's clip on the
-  // big player's clock (the inset's rule, lib/pipSync, audible), so what
-  // you hear is the audio the waveform draws and the beep the times count
-  // from. With the primary big there is no follower and nothing is muted.
-  const [primaryAudioEl, setPrimaryAudioEl] = useState<HTMLAudioElement | null>(null);
-  const bigIsPrimary = activeVideoIndex === 0;
+  // A secondary is big (a swap): its picture, the primary's sound. The
+  // shared follower (lib/usePrimaryAudio) mutes the big player and plays
+  // the primary's audio on its clock. Audit's primary audio is the stage
+  // audit WAV, the file the waveform is drawn from, so its anchor is
+  // ``peaks.beep_time``; if the WAV fails the primary's own stream takes
+  // over (its served clip shares that anchor, lib/auditPip). With the
+  // primary big nothing follows and nothing is muted.
   const primaryCam = pipCameras[0] ?? null;
-  const primaryAudioSrc = !bigIsPrimary && primaryCam?.src ? primaryCam.src : null;
-  const bigBeepInClip = pip.big?.beepInClip ?? null;
-  const primaryBeepInClip = primaryCam?.beepInClip ?? null;
-  useEffect(() => {
-    if (bigVideoEl) bigVideoEl.muted = !bigIsPrimary;
-  }, [bigVideoEl, bigIsPrimary]);
-  useEffect(() => {
-    if (!bigVideoEl || !primaryAudioEl || bigBeepInClip == null || primaryBeepInClip == null) return;
-    return attachInsetSync(
-      bigVideoEl,
-      primaryAudioEl,
-      { bigBeep: bigBeepInClip, insetBeep: primaryBeepInClip },
-      { audible: true },
-    );
-  }, [bigVideoEl, primaryAudioEl, bigBeepInClip, primaryBeepInClip]);
+  const primaryAudioSrc =
+    stageNumber == null ? null : stageWavFailed ? (primaryCam?.src ?? null) : api.stageAudioUrl(slug, stageNumber);
+  const primaryAudioBeep = stageWavFailed ? (primaryCam?.beepInClip ?? null) : (peaks?.beep_time ?? null);
+  // A swap remounts the big <video> (its src changes); until the new
+  // element arrives the old one still names the previous camera, so the
+  // follower waits for it instead of attaching to an element on its way out.
+  const bigVideoForAudio = bigVideoEl?.dataset.activePath === activeVideo?.path ? bigVideoEl : null;
+  usePrimaryAudio({
+    bigVideo: bigVideoForAudio,
+    bigIsPrimary: activeVideoIndex === 0,
+    src: primaryAudioSrc,
+    primaryBeep: primaryAudioBeep,
+    bigBeep: pip.big?.beepInClip ?? null,
+    onError: useCallback(() => {
+      if (!stageWavFailed) setStageWavFailed(true);
+      else if (primaryCam) setInsetFailed((prev) => addFailedKind(prev, primaryCam.id, primaryCam.kind));
+    }, [stageWavFailed, primaryCam]),
+  });
 
   const onInsetError = useCallback(
     (camera: PipCamera, kind: InsetStreamKind | null) => {
@@ -2013,21 +2016,6 @@ export function Audit() {
                       fill
                       className="size-full"
                     />
-                    {primaryAudioSrc ? (
-                      // The primary's sound while a secondary is big (see the
-                      // follower above). No controls, so it draws nothing.
-                      <audio
-                        key={primaryAudioSrc}
-                        ref={setPrimaryAudioEl}
-                        data-testid="audit-primary-audio"
-                        src={primaryAudioSrc}
-                        preload="auto"
-                        onError={() => {
-                          if (primaryCam) onInsetError(primaryCam, primaryCam.kind);
-                        }}
-                        className="hidden"
-                      />
-                    ) : null}
                   </MultiCamColumn>
                   <ShotList
                     rows={rows}

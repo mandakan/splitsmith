@@ -42,31 +42,36 @@ export function usePip(args: {
   /** Any value naming the stage (and shooter); a change resets to the
    *  primary, the audio and beep source. */
   stageKey: string | number;
+  /** A camera id to open big instead of the primary (a link naming a
+   *  camera, a choice carried across stages). Read whenever the state
+   *  starts afresh: on mount, on a new ``stageKey``, and while the
+   *  cameras have not arrived yet. Keep it stable for a stage. */
+  start?: string | null;
   /** Called when the big camera changes (a swap, a two-camera cycle, a
    *  reset on a new stage); not on mount. */
   onBigChange?: (camera: PipCamera | null) => void;
 }): PipController {
-  const { cameras, stageKey, onBigChange } = args;
-  const [held, setHeld] = useState(() => ({ key: stageKey, state: initialPip(cameras) }));
+  const { cameras, stageKey, start = null, onBigChange } = args;
+  const [held, setHeld] = useState(() => ({ key: stageKey, state: initialPip(cameras, start) }));
 
   // A new stage: reset during render, so the first frame of the new stage
   // never shows the old stage's swap.
   let current = held;
   if (held.key !== stageKey) {
-    current = { key: stageKey, state: initialPip(cameras) };
+    current = { key: stageKey, state: initialPip(cameras, start) };
     setHeld(current);
   }
-  const state = normalizePip(current.state, cameras);
+  const state = normalizePip(current.state, cameras, start);
 
   const swap = useCallback(() => {
-    setHeld((prev) => ({ key: prev.key, state: swapPip(normalizePip(prev.state, cameras)) }));
-  }, [cameras]);
+    setHeld((prev) => ({ key: prev.key, state: swapPip(normalizePip(prev.state, cameras, start)) }));
+  }, [cameras, start]);
 
   const cycle = useCallback(
     (dir: 1 | -1) => {
-      setHeld((prev) => ({ key: prev.key, state: cyclePip(normalizePip(prev.state, cameras), cameras, dir) }));
+      setHeld((prev) => ({ key: prev.key, state: cyclePip(normalizePip(prev.state, cameras, start), cameras, dir) }));
     },
-    [cameras],
+    [cameras, start],
   );
 
   const focus = useCallback(

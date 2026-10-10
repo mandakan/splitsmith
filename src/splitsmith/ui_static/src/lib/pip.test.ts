@@ -60,6 +60,15 @@ describe("initialPip", () => {
   it("is empty with no cameras", () => {
     expect(initialPip([])).toEqual({ big: "", inset: null });
   });
+
+  it("opens a named start camera big, the primary first in the inset", () => {
+    expect(initialPip(cams(3), "c3")).toEqual({ big: "c3", inset: "c1" });
+  });
+
+  it("ignores a start camera that is missing or cannot be lined up", () => {
+    expect(initialPip(cams(2), "c9")).toEqual({ big: "c1", inset: "c2" });
+    expect(initialPip([cam(1), cam(2, { beepInClip: null })], "c2")).toEqual({ big: "c1", inset: null });
+  });
 });
 
 describe("swapPip", () => {
@@ -141,6 +150,10 @@ describe("normalizePip", () => {
 
   it("starts over when the big camera went away", () => {
     expect(normalizePip({ big: "c9", inset: "c2" }, cams(2))).toEqual({ big: "c1", inset: "c2" });
+  });
+
+  it("starts over on the start camera when there is one", () => {
+    expect(normalizePip({ big: "", inset: null }, cams(2), "c2")).toEqual({ big: "c2", inset: "c1" });
   });
 
   it("drops the inset when the big camera lost its beep", () => {

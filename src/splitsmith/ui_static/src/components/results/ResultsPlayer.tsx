@@ -14,6 +14,11 @@
  * `video.currentTime = t` - no offset math here.
  *
  * Read-only by contract: part of the future share-link surface.
+ *
+ * A new ``src`` (the page swapped which camera is big, PiP, #1408) is
+ * changed in place, never by a remount: the position carries over as
+ * seconds from the beep (the same moment on every camera; ``beepTime``
+ * moves with ``src``) and the play state with it.
  */
 import { Link2, Maximize, Minimize, Pause, Play } from "lucide-react";
 import {
@@ -21,7 +26,9 @@ import {
   useEffect,
   useRef,
   useState,
+  useLayoutEffect,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
   type RefObject,
 } from "react";
 
@@ -42,6 +49,12 @@ interface ResultsPlayerProps {
   beepTime: number;
   shots: CoachShot[];
   videoRef: RefObject<HTMLVideoElement | null>;
+  /** The big ``<video>`` element as it mounts and unmounts (a callback
+   *  ref), for consumers that must re-bind to it (PipView's sync). */
+  onVideoElement?: (el: HTMLVideoElement | null) => void;
+  /** Drawn over the video box (``position: relative``, holding the
+   *  ``<video>``): the page's PipView. */
+  overlay?: ReactNode;
   onTimeChange: (t: number) => void;
   onPlayingChange?: (playing: boolean) => void;
   /** Fired on fullscreen mode changes. The page needs to know about
@@ -97,6 +110,8 @@ export function ResultsPlayer({
   beepTime,
   shots,
   videoRef,
+  onVideoElement,
+  overlay,
   onTimeChange,
   onPlayingChange,
   onFullscreenChange,
@@ -129,8 +144,13 @@ export function ResultsPlayer({
 
   const pct = (t: number): number => clamp(((t - winStart) / winSpan) * 100, 0, 100);
 
+  // The last position and play state reported, read when ``src`` changes:
+  // by then the element has already reset to its new source.
+  const lastTimeRef = useRef(0);
+  const playingRef = useRef(false);
   const emitTime = useCallback(
     (t: number) => {
+      lastTimeRef.current = t;
       setTime(t);
       onTimeChange(t);
     },
@@ -139,10 +159,51 @@ export function ResultsPlayer({
 
   const setPlaying = useCallback(
     (p: boolean) => {
+      playingRef.current = p;
       setIsPlaying(p);
       onPlayingChange?.(p);
     },
     [onPlayingChange],
+  );
+
+  // A camera swap (new ``src``) in place: the moment carries over by the
+  // beep, applied once the new source has metadata. Until then the
+  // element reports its new source's zero, which is not the viewer's
+  // position, so the readout holds the carried time.
+  const carryRef = useRef<{ t: number; play: boolean } | null>(null);
+  const shownRef = useRef({ src, beepTime });
+  useLayoutEffect(() => {
+    const prev = shownRef.current;
+    shownRef.current = { src, beepTime };
+    if (prev.src === src) return;
+    const pending = carryRef.current;
+    const t = (pending ? pending.t : lastTimeRef.current) - prev.beepTime + beepTime;
+    carryRef.current = { t, play: pending ? pending.play : playingRef.current };
+    emitTime(Math.max(0, t));
+  }, [src, beepTime, emitTime]);
+
+  const applyCarry = useCallback(
+    (v: HTMLVideoElement): boolean => {
+      const c = carryRef.current;
+      if (!c) return false;
+      carryRef.current = null;
+      const end = Number.isFinite(v.duration) ? v.duration : c.t;
+      const target = clamp(c.t, 0, end);
+      v.currentTime = target;
+      emitTime(target);
+      if (c.play) {
+        try {
+          void Promise.resolve(v.play()).catch(() => {});
+        } catch {
+          /* ignore */
+        }
+      } else if (playingRef.current) {
+        // The load reset paused it without a pause event.
+        setPlaying(false);
+      }
+      return true;
+    },
+    [emitTime, setPlaying],
   );
 
   // Window-end stop for play-all. Latched per (mount, play) so the
@@ -153,7 +214,7 @@ export function ResultsPlayer({
   const windowEndFiredRef = useRef(false);
   const checkWindowEnd = useCallback(
     (v: HTMLVideoElement) => {
-      if (!onWindowEnd || windowEndFiredRef.current || v.paused) return;
+      if (!onWindowEnd || windowEndFiredRef.current || v.paused || carryRef.current) return;
       if (v.currentTime < winEnd) return;
       windowEndFiredRef.current = true;
       v.pause();
@@ -171,7 +232,7 @@ export function ResultsPlayer({
     let raf = 0;
     const tick = () => {
       const v = videoRef.current;
-      if (v) {
+      if (v && !carryRef.current) {
         emitTime(v.currentTime);
         checkWindowEnd(v);
       }
@@ -210,8 +271,9 @@ export function ResultsPlayer({
   useEffect(() => {
     // Covers a cached element whose metadata is already in at mount;
     // the normal path goes through onLoadedMetadata.
+    // A swap's new source is the carry's business, never the window start.
     const v = videoRef.current;
-    if (v && v.readyState >= 1) {
+    if (v && v.readyState >= 1 && !carryRef.current) {
       setDuration(Number.isFinite(v.duration) ? v.duration : null);
       seekToWindowStart();
       maybeAutoplay();
@@ -224,13 +286,20 @@ export function ResultsPlayer({
   // scrubbing), but a genuinely new momentTime (query-only navigation
   // to a different moment on an already-mounted player) must re-arm and
   // seek again.
+  //
+  // Compared as seconds from the beep: a camera swap moves momentTime and
+  // beepTime together, and that is the same moment, not a new one to
+  // seek to (the swap carries the viewer's own position).
   const lastAppliedMomentRef = useRef<number | null>(null);
+  const momentFromBeep = momentTime == null ? null : momentTime - beepTime;
   useEffect(() => {
     const v = videoRef.current;
-    if (!v || momentTime == null || lastAppliedMomentRef.current === momentTime) return;
+    if (!v || momentTime == null || momentFromBeep == null) return;
+    const same = (a: number | null) => a != null && Math.abs(a - momentFromBeep) < 1e-6;
+    if (same(lastAppliedMomentRef.current)) return;
     const apply = () => {
-      if (lastAppliedMomentRef.current === momentTime) return;
-      lastAppliedMomentRef.current = momentTime;
+      if (same(lastAppliedMomentRef.current)) return;
+      lastAppliedMomentRef.current = momentFromBeep;
       const end = Number.isFinite(v.duration) ? v.duration : momentTime;
       v.currentTime = Math.min(Math.max(momentTime, 0), end);
     };
@@ -240,7 +309,17 @@ export function ResultsPlayer({
     }
     v.addEventListener("loadedmetadata", apply, { once: true });
     return () => v.removeEventListener("loadedmetadata", apply);
-  }, [momentTime, videoRef]);
+  }, [momentTime, momentFromBeep, videoRef]);
+
+  // The element goes to the page's ref object and to whoever re-binds to
+  // it (PipView): a callback ref, so a new element is reported.
+  const setVideoEl = useCallback(
+    (el: HTMLVideoElement | null) => {
+      videoRef.current = el;
+      onVideoElement?.(el);
+    },
+    [videoRef, onVideoElement],
+  );
 
   const togglePlay = useCallback(() => {
     const v = videoRef.current;
@@ -391,13 +470,14 @@ export function ResultsPlayer({
           survives and retry can call load() on it. */}
       <div className={cn("relative", isFs && "min-h-0 flex-1")}>
         <video
-          ref={videoRef}
+          ref={setVideoEl}
           src={src}
           controls={false}
           preload="metadata"
           playsInline
           onTimeUpdate={(e) => {
             const v = e.target as HTMLVideoElement;
+            if (carryRef.current) return;
             if (!isPlaying) emitTime(v.currentTime);
             checkWindowEnd(v);
           }}
@@ -415,6 +495,7 @@ export function ResultsPlayer({
             const v = e.target as HTMLVideoElement;
             setDuration(Number.isFinite(v.duration) ? v.duration : null);
             setVideoError(false);
+            if (applyCarry(v)) return;
             seekToWindowStart();
             maybeAutoplay();
           }}
@@ -422,6 +503,7 @@ export function ResultsPlayer({
           className={cn("w-full bg-black", isFs ? "h-full object-contain" : "aspect-video")}
         />
         <ShotTicker shots={shots} beepTime={beepTime} time={time} baselines={baselines} />
+        {overlay}
         {videoError ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-surface-3">
             <p className="px-4 text-center text-sm text-ink-2">Video failed to load</p>

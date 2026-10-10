@@ -247,32 +247,42 @@ describe("Audit on the timeline band", () => {
 
     it("C swaps the big camera; the timeline, its beep and the sound stay the primary's", async () => {
       apiMock.getProject.mockResolvedValue(twoCams());
-      renderPage();
-      const band = await screen.findByTestId("timeline");
-      await waitFor(() => expect(bigVideo()).toHaveAttribute("data-active-path", "raw/stage3.mp4"));
-      const beepLeft = within(band).getByTestId("wave-beep").style.left;
-      expect(screen.queryByTestId("audit-primary-audio")).toBeNull();
-      expect(bigVideo().muted).toBe(false);
+      const made: HTMLAudioElement[] = [];
+      const RealAudio = window.Audio;
+      window.Audio = function FakeAudio() {
+        const a = document.createElement("audio");
+        made.push(a);
+        return a;
+      } as unknown as typeof Audio;
+      try {
+        renderPage();
+        const band = await screen.findByTestId("timeline");
+        await waitFor(() => expect(bigVideo()).toHaveAttribute("data-active-path", "raw/stage3.mp4"));
+        const beepLeft = within(band).getByTestId("wave-beep").style.left;
+        expect(made).toHaveLength(0);
+        expect(bigVideo().muted).toBe(false);
 
-      fireEvent.keyDown(window, { key: "c" });
-      await waitFor(() => expect(bigVideo()).toHaveAttribute("data-active-path", "raw/stage3-b.mp4"));
-      expect(bigVideo().getAttribute("src")).toContain(encodeURIComponent("raw/stage3-b.mp4"));
-      // Its picture, the primary's sound: the big player is muted and a
-      // hidden <audio> streams the primary's clip.
-      expect(bigVideo().muted).toBe(true);
-      const audio = screen.getByTestId("audit-primary-audio");
-      expect(audio.getAttribute("src")).toContain(encodeURIComponent("raw/stage3.mp4"));
-      // It follows the big clock and is the one thing you hear.
-      await waitFor(() => expect((audio as HTMLAudioElement).muted).toBe(false));
-      // The band does not move: same beep line, same peaks.
-      expect(within(band).getByTestId("wave-beep").style.left).toBe(beepLeft);
-      expect(apiMock.getStagePeaks.mock.calls.every((c) => c[0] === "alice" && c[1] === 3)).toBe(true);
+        fireEvent.keyDown(window, { key: "c" });
+        await waitFor(() => expect(bigVideo()).toHaveAttribute("data-active-path", "raw/stage3-b.mp4"));
+        expect(bigVideo().getAttribute("src")).toContain(encodeURIComponent("raw/stage3-b.mp4"));
+        // Its picture, the primary's sound: the big player is muted and the
+        // stage audit WAV (the waveform's own audio) plays on its clock.
+        await waitFor(() => expect(made).toHaveLength(1));
+        expect(made[0].getAttribute("src")).toMatch(/\/shooters\/alice\/stages\/3\/audio$/);
+        expect(made[0].muted).toBe(false);
+        expect(bigVideo().muted).toBe(true);
+        // The band does not move: same beep line, same peaks.
+        expect(within(band).getByTestId("wave-beep").style.left).toBe(beepLeft);
+        expect(apiMock.getStagePeaks.mock.calls.every((c) => c[0] === "alice" && c[1] === 3)).toBe(true);
 
-      // Shift+C (or C again) goes back: no follower, nothing muted.
-      fireEvent.keyDown(window, { key: "C", shiftKey: true });
-      await waitFor(() => expect(bigVideo()).toHaveAttribute("data-active-path", "raw/stage3.mp4"));
-      expect(screen.queryByTestId("audit-primary-audio")).toBeNull();
-      expect(bigVideo().muted).toBe(false);
+        // Shift+C (or C again) goes back: no follower, nothing muted.
+        fireEvent.keyDown(window, { key: "C", shiftKey: true });
+        await waitFor(() => expect(bigVideo()).toHaveAttribute("data-active-path", "raw/stage3.mp4"));
+        expect(made[0].getAttribute("src")).toBeNull();
+        expect(bigVideo().muted).toBe(false);
+      } finally {
+        window.Audio = RealAudio;
+      }
     });
 
     it("C does nothing with one camera", async () => {

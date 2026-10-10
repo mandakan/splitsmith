@@ -7,6 +7,11 @@
  * arrive already in the served clip's coordinate system, so seeking is
  * plain currentTime assignment.
  *
+ * A stage's other cameras are a PiP inset over the player (PipView,
+ * #1408): click it or C / Shift+C to make another camera big. The player
+ * changes its source in place (position and play state carry over by the
+ * beep); the primary's audio plays whichever camera is big.
+ *
  * Read-only on share mounts only: operator mounts (desktop and mobile)
  * carry the slice-5 interval-reclassify write path (mobile operator
  * surfaces program), deliberately breaking the old blanket read-only
@@ -27,7 +32,6 @@ import {
 import { CommentPanel } from "@/components/comments/CommentPanel";
 import { Snackbar, type SnackState } from "@/components/Snackbar";
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
-import { CamPicker } from "@/components/results/CamPicker";
 import { ReclassifySheet } from "@/components/results/ReclassifySheet";
 import { ResultsPlayer, type FullscreenMode } from "@/components/results/ResultsPlayer";
 import { Scorecard } from "@/components/results/Scorecard";
@@ -37,6 +41,7 @@ import { StageStats } from "@/components/results/StageStats";
 import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/Chip";
 import { PageHeader } from "@/components/ui/PageHeader";
+import { PipView } from "@/components/video/PipView";
 import {
   ApiError,
   api,
@@ -51,7 +56,10 @@ import { buildUndoPatch } from "@/lib/coachPatch";
 import { useDeploymentMode } from "@/lib/features";
 import { useMatchHref } from "@/lib/matchHref";
 import { camsParam, parseCams, selectorFor, startingCamera, withCams } from "@/lib/cameraPrefs";
-import { momentHref, momentToSearch, parseMoment } from "@/lib/moment";
+import { momentHref, momentToSearch, parseMoment, type Moment } from "@/lib/moment";
+import { insetStream, pipKeyAction, type InsetStreamKind, type PipCamera } from "@/lib/pip";
+import { usePrimaryAudio } from "@/lib/usePrimaryAudio";
+import { usePip } from "@/lib/usePip";
 import { isShareView } from "@/lib/shareView";
 import {
   INTERVAL_LABEL,
@@ -83,16 +91,26 @@ export function ResultsStage() {
   );
 }
 
-// Camera identity is the payload index (primary first); a stale index
-// (coach reloaded with fewer cameras) resolves to 0 rather than erroring.
-function resolveCamIndex(coach: CoachStageResponse, raw: number): number {
-  return coach.videos[raw] ? raw : 0;
-}
-
 // The beep anchor of the clip the SPA plays for this camera; falls back
 // to the primary anchor when the entry is missing or beepless.
 function camBeep(coach: CoachStageResponse, index: number): number {
   return coach.videos[index]?.beep_in_clip ?? coach.beep_time;
+}
+
+// The camera the page opens big, once per mount: a moment link's ?v= names
+// one exactly (a payload index, primary first); otherwise the camera chosen
+// on an earlier stage (?cams=, a mount or role, lib/cameraPrefs), else the
+// shooter's saved default. ``null`` is the primary.
+function startCameraId(
+  coach: CoachStageResponse,
+  moment: Moment | null,
+  camsQuery: string | null,
+  slug: string,
+): string | null {
+  const v = moment?.v;
+  if (typeof v === "number" && coach.videos[v]?.beep_in_clip != null) return coach.videos[v].path;
+  const start = startingCamera(coach.videos, parseCams(camsQuery)[slug], coach.compare_camera);
+  return start > 0 ? (coach.videos[start]?.path ?? null) : null;
 }
 
 function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
@@ -137,6 +155,9 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  // The same element as state, for what must re-bind when it changes
+  // (PipView's inset sync, the primary's audio).
+  const [bigEl, setBigEl] = useState<HTMLVideoElement | null>(null);
   const [fsMode, setFsMode] = useState<FullscreenMode>("off");
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [playerBox, setPlayerBox] = useState<HTMLDivElement | null>(null);
@@ -158,10 +179,9 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   // this page's own advance, so a play-all link opened cold still
   // waits for a press of Play (which the browser would demand anyway).
   const playAll = searchParams.get("play") === "all";
-  // Armed for the first player mount only: a camera switch remounts the
-  // player (key={camIndex}) and restores the viewer's own play state via
-  // pendingSeekRef, so autoplay must not fire again there.
-  const [autoplayArmed, setAutoplayArmed] = useState(
+  // Read once per mount: a camera swap changes the player's source in
+  // place, so the player's own once-per-mount autoplay never fires again.
+  const [autoplayArmed] = useState(
     () => playAll && Boolean((location.state as { autoplay?: boolean } | null)?.autoplay),
   );
   const togglePlayAll = useCallback(() => {
@@ -175,23 +195,116 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
       { replace: true },
     );
   }, [setSearchParams]);
-  const [activeCamIndex, setActiveCamIndex] = useState(0);
-  // Position to restore after a camera switch remounts the player.
-  const pendingSeekRef = useRef<{ t: number; play: boolean } | null>(null);
-  // One-shot: apply a moment link's ?v= once per mount (the page remounts
-  // per slug-stage via the key in ResultsStage).
-  const appliedMomentCamRef = useRef(false);
-  // Mirrors camIndex for handleCopyMoment, which is memoized on other
-  // deps - a ref avoids re-memoizing the callback on every camera switch.
+  const camsQuery = searchParams.get("cams");
+
+  // The starting camera, latched the first time the coach payload is in
+  // (the page remounts per stage), not on every coach reload - a later
+  // PATCH response must not yank the viewer back after a swap. Set during
+  // render so the player's first frame is already the right camera.
+  const [start, setStart] = useState<{ id: string | null } | null>(null);
+  if (coach && start === null) setStart({ id: startCameraId(coach, moment, camsQuery, slug) });
+
+  // Stream kinds that failed per camera path, for the inset's fallback
+  // (rendition, then the trim) and the primary's audio.
+  const [failedStreams, setFailedStreams] = useState<Record<string, ReadonlySet<InsetStreamKind>>>({});
+  const addFailed = useCallback((path: string, kind: InsetStreamKind | null) => {
+    if (!kind) return;
+    setFailedStreams((prev) => {
+      if (prev[path]?.has(kind)) return prev;
+      return { ...prev, [path]: new Set([...(prev[path] ?? []), kind]) };
+    });
+  }, []);
+
+  // Every camera as PipView sees it. The id is the video path; the inset
+  // streams the 720p rendition when there is one (insetStream), through
+  // the same scoped stream URL the big player uses (the share alias on a
+  // share mount). A camera without a beep never enters the inset.
+  const pipCams = useMemo(() => {
+    if (!coach) return { cameras: [] as PipCamera[], kinds: new Map<string, InsetStreamKind>() };
+    const kinds = new Map<string, InsetStreamKind>();
+    const cameras = coach.videos.map((e, i): PipCamera => {
+      const s = insetStream(e, failedStreams[e.path]);
+      if (s) kinds.set(e.path, s.kind);
+      return {
+        id: e.path,
+        label: `Cam ${i + 1}`,
+        primary: e.role === "primary",
+        beepInClip: e.beep_in_clip ?? (i === 0 ? coach.beep_time : null),
+        src: s ? api.videoStreamUrl(slug, e.path, s.kind, s.version, stage) : null,
+        unavailable: s === null,
+      };
+    });
+    return { cameras, kinds };
+  }, [coach, failedStreams, slug, stage]);
+
+  // A swap holds on the next stages: kept as a selector in ?cams=.
+  const onBigChange = useCallback(
+    (cam: PipCamera | null) => {
+      if (!coach || !cam) return;
+      const index = coach.videos.findIndex((v) => v.path === cam.id);
+      if (index < 0 || coach.videos[index].beep_in_clip == null) return;
+      const sel = selectorFor(coach.videos, index) ?? "primary";
+      setSearchParams(
+        (prev) => {
+          const out = new URLSearchParams(prev);
+          const cams = camsParam({ ...parseCams(prev.get("cams")), [slug]: sel });
+          if (cams) out.set("cams", cams);
+          return out;
+        },
+        { replace: true },
+      );
+    },
+    [coach, slug, setSearchParams],
+  );
+  const pip = usePip({
+    cameras: pipCams.cameras,
+    stageKey: `${slug}/${stage}`,
+    start: start?.id ?? null,
+    onBigChange,
+  });
+
+  // The big camera's payload index (primary first); 0 while there is none.
+  const bigIndex = coach && pip.big ? Math.max(0, coach.videos.findIndex((v) => v.path === pip.big?.id)) : 0;
+  // Mirror bigIndex / its beep for handleCopyMoment, which is memoized on
+  // other deps: t is encoded against the *big* camera's beep (mirroring
+  // how momentTime decodes it), not always the primary's coach.beep_time.
   const camIndexRef = useRef(0);
-  // Mirrors activeBeep alongside camIndexRef, same reason: handleCopyMoment
-  // must encode t against the *active* camera's beep (mirroring how
-  // momentTime decodes it), not always the primary's coach.beep_time.
   const activeBeepRef = useRef(0);
-  const momentTime =
-    moment != null && coach != null
-      ? camBeep(coach, resolveCamIndex(coach, activeCamIndex)) + moment.t
-      : null;
+  const momentTime = moment != null && coach != null ? camBeep(coach, bigIndex) + moment.t : null;
+
+  // C / Shift+C cycles the inset (with two cameras: a swap). Never while
+  // typing (the comment box) - pipKeyAction owns that rule.
+  const hasInset = pip.inset != null;
+  const cyclePip = pip.cycle;
+  useEffect(() => {
+    if (!hasInset) return;
+    const onKey = (e: KeyboardEvent) => {
+      const dir = pipKeyAction(e);
+      if (!dir) return;
+      e.preventDefault();
+      cyclePip(dir);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [hasInset, cyclePip]);
+
+  // The primary is the audio source whichever camera is big (epic #1405):
+  // with a secondary big, the big player is muted and the primary's own
+  // stream follows it on the beep clock (lib/usePrimaryAudio). The anchor
+  // is the primary's beep_in_clip, measured in the file it streams.
+  const primaryCam = pip.primary;
+  const primaryId = primaryCam?.id ?? null;
+  const primaryKind = primaryId ? (pipCams.kinds.get(primaryId) ?? null) : null;
+  usePrimaryAudio({
+    bigVideo: bigEl,
+    bigIsPrimary: pip.big == null || primaryCam == null || pip.big.id === primaryCam.id,
+    src: primaryCam?.src ?? null,
+    primaryBeep: primaryCam?.beepInClip ?? null,
+    bigBeep: pip.big?.beepInClip ?? null,
+    onError: useCallback(() => {
+      if (primaryId) addFailed(primaryId, primaryKind);
+    }, [addFailed, primaryId, primaryKind]),
+  });
 
   // When the match has a live share, copy the share-scoped moment URL
   // instead of the operator one - it works for whoever the owner
@@ -349,49 +462,6 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
     };
   }, [applyCoach, slug, stage, attempt]);
 
-  // The starting camera, once per mount (the page remounts per stage), not
-  // on every coach reload - a later PATCH response must not yank the
-  // viewer back after they have switched. A moment link's ?v= names one
-  // exactly; otherwise the camera chosen on an earlier stage (?cams=, a
-  // mount or role, lib/cameraPrefs), else the shooter's saved default.
-  const camsQuery = searchParams.get("cams");
-  useEffect(() => {
-    if (!coach || appliedMomentCamRef.current) return;
-    appliedMomentCamRef.current = true;
-    const v = moment?.v;
-    if (
-      typeof v === "number" &&
-      v < coach.videos.length &&
-      coach.videos[v]?.beep_in_clip != null
-    ) {
-      setActiveCamIndex(v);
-      return;
-    }
-    const start = startingCamera(coach.videos, parseCams(camsQuery)[slug], coach.compare_camera);
-    if (start > 0) setActiveCamIndex(start);
-    // camsQuery is read once per mount on purpose.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [coach, moment, slug]);
-
-  // Restores the preserved playback position after a camera switch
-  // remounts ResultsPlayer. Runs after the child's own effects (parent
-  // effects fire after child effects on mount), so it lands after
-  // ResultsPlayer's seekToWindowStart / moment seek in both the
-  // loadedmetadata-listener path and the already-buffered readyState>=1
-  // path.
-  useEffect(() => {
-    const pending = pendingSeekRef.current;
-    const el = videoRef.current;
-    if (!pending || !el) return;
-    pendingSeekRef.current = null;
-    const apply = () => {
-      el.currentTime = Math.max(0, pending.t);
-      if (pending.play) void el.play().catch(() => {});
-    };
-    if (el.readyState >= 1) apply();
-    else el.addEventListener("loadedmetadata", apply, { once: true });
-  }, [activeCamIndex]);
-
   const shooter = shooters.find((s) => s.slug === slug) ?? null;
 
   // This shooter's audited stages, ordered - prev/next skip stages that
@@ -421,9 +491,7 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   const shots = useMemo(() => coach?.shots ?? [], [coach]);
   // Shot times arrive in the primary clip's coordinates; replaying them
   // on another camera shifts them onto that clip's clock via the beep.
-  const camDeltaForShots = coach
-    ? camBeep(coach, resolveCamIndex(coach, activeCamIndex)) - coach.beep_time
-    : 0;
+  const camDeltaForShots = coach ? camBeep(coach, bigIndex) - coach.beep_time : 0;
   const displayShots = useMemo(
     () =>
       camDeltaForShots === 0
@@ -462,37 +530,6 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
     [seekToTime],
   );
 
-  const handleSelectCam = useCallback(
-    (index: number) => {
-      setAutoplayArmed(false);
-      setActiveCamIndex((prev) => {
-        if (index === prev || !coach) return prev;
-        const prevBeep = camBeep(coach, resolveCamIndex(coach, prev));
-        const nextBeep = coach.videos[index]?.beep_in_clip;
-        if (nextBeep == null) return prev;
-        const el = videoRef.current;
-        if (el) {
-          // Same run moment on the new camera's clock.
-          pendingSeekRef.current = { t: el.currentTime - prevBeep + nextBeep, play: !el.paused };
-        }
-        return index;
-      });
-      // The choice holds on the next stages: kept as a selector in ?cams=.
-      if (!coach || coach.videos[index]?.beep_in_clip == null) return;
-      const sel = selectorFor(coach.videos, index) ?? "primary";
-      setSearchParams(
-        (prev) => {
-          const out = new URLSearchParams(prev);
-          const cams = camsParam({ ...parseCams(prev.get("cams")), [slug]: sel });
-          if (cams) out.set("cams", cams);
-          return out;
-        },
-        { replace: true },
-      );
-    },
-    [coach, slug, setSearchParams],
-  );
-
   if (error) {
     return (
       <div className="px-4 py-8 md:px-7">
@@ -524,12 +561,12 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
     );
   }
 
-  const camIndex = resolveCamIndex(coach, activeCamIndex);
-  const activeVideo = coach.videos[camIndex];
-  const activeBeep = camBeep(coach, camIndex);
+  const activeVideo = coach.videos[bigIndex];
+  const activeBeep = camBeep(coach, bigIndex);
   const camDelta = activeBeep - coach.beep_time;
-  camIndexRef.current = camIndex;
+  camIndexRef.current = bigIndex;
   activeBeepRef.current = activeBeep;
+  const insetCam = pip.inset;
   const shooterLine = shooter ? (
     shooters.length > 1 ? (
       // Minimal shooter switcher: the name line itself is a native
@@ -694,11 +731,21 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
         )}
       >
         <ResultsPlayer
-          key={camIndex}
           src={api.videoStreamUrl(slug, activeVideo.path, activeVideo.kind, null, stage)}
           beepTime={coach.beep_time + camDelta}
           shots={displayShots}
           videoRef={videoRef}
+          onVideoElement={setBigEl}
+          overlay={
+            pipCams.cameras.length > 1 ? (
+              <PipView
+                pip={pip}
+                bigVideo={bigEl}
+                insetKind={insetCam ? (pipCams.kinds.get(insetCam.id) ?? null) : null}
+                onInsetError={(cam, kind) => addFailed(cam.id, kind)}
+              />
+            ) : null
+          }
           onTimeChange={setCurrentTime}
           onPlayingChange={setIsPlaying}
           onFullscreenChange={setFsMode}
@@ -708,12 +755,6 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
           commentTimes={commentAnchors.map((t) => coach.beep_time + camDelta + t)}
           onWindowEnd={playAll ? handleWindowEnd : undefined}
           autoplay={autoplayArmed}
-        />
-        <CamPicker
-          entries={coach.videos}
-          activeIndex={camIndex}
-          onSelect={handleSelectCam}
-          srcFor={(e) => api.videoStreamUrl(slug, e.path, e.kind, null, stage)}
         />
         {legend}
       </div>

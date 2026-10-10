@@ -81,19 +81,22 @@ function bigIsSyncable(cameras: readonly PipCamera[], big: string): boolean {
 }
 
 /** A new stage: the primary is big, the next syncable camera in order is
- *  the inset. */
-export function initialPip(cameras: readonly PipCamera[]): PipState {
-  const primary = primaryOf(cameras);
-  if (!primary) return { big: "", inset: null };
-  const inset = bigIsSyncable(cameras, primary.id) ? (others(cameras, primary.id)[0]?.id ?? null) : null;
-  return { big: primary.id, inset };
+ *  the inset. ``start`` names a syncable camera to open big instead (a
+ *  link that names a camera, a choice carried across stages); one that is
+ *  missing or cannot be lined up is ignored. */
+export function initialPip(cameras: readonly PipCamera[], start?: string | null): PipState {
+  const chosen = start ? cameras.find((c) => c.id === start && syncable(c)) : undefined;
+  const big = chosen ?? primaryOf(cameras);
+  if (!big) return { big: "", inset: null };
+  const inset = bigIsSyncable(cameras, big.id) ? (others(cameras, big.id)[0]?.id ?? null) : null;
+  return { big: big.id, inset };
 }
 
 /** Keep a state valid against a camera list that changed under it (a
  *  camera gained its beep, or went away). A big camera that is gone falls
- *  back to the start state. */
-export function normalizePip(state: PipState, cameras: readonly PipCamera[]): PipState {
-  if (!cameras.some((c) => c.id === state.big)) return initialPip(cameras);
+ *  back to the start state (``start`` as in ``initialPip``). */
+export function normalizePip(state: PipState, cameras: readonly PipCamera[], start?: string | null): PipState {
+  if (!cameras.some((c) => c.id === state.big)) return initialPip(cameras, start);
   if (!bigIsSyncable(cameras, state.big)) return state.inset === null ? state : { big: state.big, inset: null };
   const cands = others(cameras, state.big);
   if (state.inset !== null && cands.some((c) => c.id === state.inset)) return state;
