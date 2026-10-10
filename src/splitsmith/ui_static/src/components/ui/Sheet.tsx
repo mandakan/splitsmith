@@ -21,7 +21,11 @@ export function Sheet({ open, onClose, label, children, className }: SheetProps)
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape") return;
+      // Consumed: a page-level Escape (Breakdown drops its region) checks
+      // defaultPrevented and leaves this press to the sheet, as dialogFocus does.
+      e.preventDefault();
+      onClose();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);

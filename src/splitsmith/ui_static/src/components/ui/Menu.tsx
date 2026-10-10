@@ -72,7 +72,11 @@ export function Menu({ open, onClose, children, align = "left", className }: Men
       onClose();
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape") return;
+      // Consumed: a page-level Escape (Breakdown drops its region) checks
+      // defaultPrevented and leaves this press to the menu, as dialogFocus does.
+      e.preventDefault();
+      onClose();
     };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);

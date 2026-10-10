@@ -1,8 +1,15 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { flushSync } from "react-dom";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { CoachShot, CoachStageResponse, StageEvent } from "@/lib/api";
+import {
+  BAND_HEIGHT_KEY,
+  INSPECTOR_FOLDED_KEY,
+  SHOTS_FOLDED_KEY,
+  resetBreakdownPrefsForTests,
+} from "@/lib/breakdownPrefs";
 
 import { Breakdown } from "@/pages/Breakdown";
 
@@ -259,5 +266,280 @@ describe("Breakdown inspector scrolling", () => {
     fireEvent.click(container.querySelector<HTMLElement>('[aria-label="Inspector"] [data-shot-number="2"]')!);
     await waitFor(() => expect(within(inspector).getByRole("region", { name: "Shot 2" })).toBeInTheDocument());
     expect(inspector.scrollTop).toBe(0);
+  });
+});
+
+describe("Breakdown inspector (#1372)", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    resetBreakdownPrefsForTests();
+    vi.mocked(api.getProject).mockResolvedValue(PROJECT);
+    vi.mocked(api.getStageCoach).mockReset();
+    vi.mocked(api.getStageCoach).mockResolvedValue(coach(EVENTS));
+    vi.mocked(api.putStageEvents).mockReset();
+    HTMLElement.prototype.setPointerCapture = vi.fn();
+    HTMLElement.prototype.hasPointerCapture = vi.fn(() => true);
+    HTMLElement.prototype.releasePointerCapture = vi.fn();
+  });
+
+  const shotsToggle = (inspector: HTMLElement) =>
+    within(within(inspector).getByRole("region", { name: "Shots" })).getByRole("button", { name: /Shots/ });
+
+  it("a region swaps the shot card for the region card and folds the shot into a line that opens it again", async () => {
+    renderAt("/match/m1/breakdown/anna/2");
+    const inspector = await screen.findByRole("complementary", { name: "Inspector" });
+    expect(within(inspector).getByRole("region", { name: "Shot 1" })).toBeInTheDocument();
+    expect(within(inspector).queryByRole("button", { name: "Open shot 01" })).toBeNull();
+    fireEvent.click(screen.getByTestId("event-evt-1"));
+    expect(within(inspector).getByRole("region", { name: "Region" })).toBeInTheDocument();
+    expect(within(inspector).queryByRole("region", { name: "Shot 1" })).toBeNull();
+    // The list stays under the card.
+    expect(within(inspector).getByRole("region", { name: "Shots" })).toBeInTheDocument();
+    fireEvent.click(within(inspector).getByRole("button", { name: "Open shot 01" }));
+    expect(within(inspector).getByRole("region", { name: "Shot 1" })).toBeInTheDocument();
+    expect(within(inspector).queryByRole("region", { name: "Region" })).toBeNull();
+  });
+
+  it("Escape drops a selected region back to the shot view", async () => {
+    renderAt("/match/m1/breakdown/anna/2");
+    const inspector = await screen.findByRole("complementary", { name: "Inspector" });
+    fireEvent.click(screen.getByTestId("event-evt-2"));
+    expect(within(inspector).getByRole("region", { name: "Region" })).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(within(inspector).getByRole("region", { name: "Shot 1" })).toBeInTheDocument());
+    expect(within(inspector).queryByRole("region", { name: "Region" })).toBeNull();
+  });
+
+  it("Escape on an open band menu closes the menu and keeps the region selected", async () => {
+    renderAt("/match/m1/breakdown/anna/2");
+    const inspector = await screen.findByRole("complementary", { name: "Inspector" });
+    fireEvent.click(screen.getByTestId("event-evt-2"));
+    fireEvent.click(screen.getByRole("button", { name: "Timeline options" }));
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    // A real key press runs React's commit of the menu's close in the
+    // microtask checkpoint after the menu's document listener, before any
+    // window listener sees the press; jsdom runs no checkpoint mid-dispatch,
+    // so a later document listener flushes it the same way.
+    const flush = () => flushSync(() => {});
+    document.addEventListener("keydown", flush);
+    try {
+      act(() => {
+        document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+      });
+    } finally {
+      document.removeEventListener("keydown", flush);
+    }
+    expect(screen.queryByRole("menu")).toBeNull();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(within(inspector).getByRole("region", { name: "Region" })).toBeInTheDocument();
+  });
+
+  it("Escape in a text field is the field's own", async () => {
+    renderAt("/match/m1/breakdown/anna/2");
+    const inspector = await screen.findByRole("complementary", { name: "Inspector" });
+    fireEvent.click(screen.getByTestId("event-evt-2"));
+    const field = document.createElement("input");
+    document.body.appendChild(field);
+    try {
+      fireEvent.keyDown(field, { key: "Escape" });
+      await new Promise((r) => setTimeout(r, 20));
+      expect(within(inspector).getByRole("region", { name: "Region" })).toBeInTheDocument();
+    } finally {
+      field.remove();
+    }
+  });
+
+  it("Escape during a live lane drag cancels the drag and keeps the region selected", async () => {
+    const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      width: 1000,
+      height: 32,
+      left: 0,
+      top: 0,
+      right: 1000,
+      bottom: 32,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+    try {
+      renderAt("/match/m1/breakdown/anna/2");
+      const inspector = await screen.findByRole("complementary", { name: "Inspector" });
+      fireEvent.click(screen.getByTestId("event-evt-2"));
+      const handle = screen.getByTestId("handle-evt-2-end");
+      fireEvent.pointerDown(handle, { pointerId: 6, clientX: 200, clientY: 10, button: 0 });
+      fireEvent.pointerMove(handle, { pointerId: 6, clientX: 260, clientY: 10, altKey: true });
+      fireEvent.keyDown(window, { key: "Escape" });
+      await new Promise((r) => setTimeout(r, 20));
+      expect(within(inspector).getByRole("region", { name: "Region" })).toBeInTheDocument();
+      expect(screen.getByTestId("event-evt-2")).toHaveAttribute("data-end", "4.1");
+      expect(api.putStageEvents).not.toHaveBeenCalled();
+    } finally {
+      rect.mockRestore();
+    }
+  });
+
+  it("the shot list folds to its header, remembered per browser and shared by every stage", async () => {
+    renderAt("/match/m1/breakdown/anna/2");
+    const inspector = await screen.findByRole("complementary", { name: "Inspector" });
+    const shots = within(inspector).getByRole("region", { name: "Shots" });
+    expect(shotsToggle(inspector)).toHaveAttribute("aria-expanded", "true");
+    expect(shots.querySelector("[data-shot-number]")).not.toBeNull();
+    fireEvent.click(shotsToggle(inspector));
+    expect(shotsToggle(inspector)).toHaveAttribute("aria-expanded", "false");
+    expect(shots.querySelector("[data-shot-number]")).toBeNull();
+    expect(window.localStorage.getItem(SHOTS_FOLDED_KEY)).toBe("on");
+    // Another stage: still folded.
+    fireEvent.click(screen.getByRole("link", { name: "Next stage" }));
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/match/m1/breakdown/anna/3"));
+    const next = await screen.findByRole("complementary", { name: "Inspector" });
+    expect(shotsToggle(next)).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("stored folds are read on a fresh load", async () => {
+    window.localStorage.setItem(SHOTS_FOLDED_KEY, "on");
+    window.localStorage.setItem(INSPECTOR_FOLDED_KEY, "on");
+    renderAt("/match/m1/breakdown/anna/2");
+    const rail = await screen.findByRole("complementary", { name: "Inspector" });
+    expect(rail).toHaveAttribute("data-folded", "true");
+    fireEvent.click(within(rail).getByRole("button", { name: "Unfold inspector" }));
+    expect(shotsToggle(screen.getByRole("complementary", { name: "Inspector" }))).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("the inspector folds to a rail naming the selection; the band and the video stay", async () => {
+    const { container } = renderAt("/match/m1/breakdown/anna/2");
+    const inspector = await screen.findByRole("complementary", { name: "Inspector" });
+    fireEvent.click(screen.getByTestId("event-evt-2"));
+    fireEvent.click(within(inspector).getByRole("button", { name: "Fold inspector" }));
+    const rail = screen.getByRole("complementary", { name: "Inspector" });
+    expect(rail).toHaveAttribute("data-folded", "true");
+    expect(within(rail).getByTestId("inspector-rail-selection")).toHaveTextContent("Reload");
+    expect(within(rail).queryByRole("region", { name: "Region" })).toBeNull();
+    expect(window.localStorage.getItem(INSPECTOR_FOLDED_KEY)).toBe("on");
+    // The band and the viewer are still there, and the selection still moves.
+    expect(screen.getByTestId("timeline")).toBeInTheDocument();
+    expect(container.querySelector("video")).not.toBeNull();
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(within(rail).getByTestId("inspector-rail-selection")).toHaveTextContent("Shot 01"));
+    fireEvent.click(within(rail).getByRole("button", { name: "Unfold inspector" }));
+    expect(screen.getByRole("complementary", { name: "Inspector" })).not.toHaveAttribute("data-folded");
+    expect(window.localStorage.getItem(INSPECTOR_FOLDED_KEY)).toBe("off");
+  });
+});
+
+describe("Breakdown splitter (#1373)", () => {
+  // A measured page: 700 px shared by the viewer row and the band (plus the
+  // 6 px splitter), a 53 px transport under a 347 px video, a band 303 px
+  // tall with every row at its own height. Floor: 303 less the Reload and
+  // Activation lanes (72) = 231; the video's 200 px floor caps the band at
+  // 700 - 53 - 200 = 447.
+  const box = (top: number, height: number) =>
+    ({ top, bottom: top + height, height, left: 0, right: 1000, width: 1000, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+  let rect: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    resetBreakdownPrefsForTests();
+    vi.mocked(api.getProject).mockResolvedValue(PROJECT);
+    vi.mocked(api.getStageCoach).mockReset();
+    vi.mocked(api.getStageCoach).mockResolvedValue(coach(EVENTS));
+    rect = vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+      const el = this as HTMLElement;
+      if (el.dataset.testid === "breakdown-room") return box(0, 706);
+      if (el.tagName === "VIDEO") return box(0, 347);
+      if (el.firstElementChild?.tagName === "VIDEO") return box(0, 400);
+      if (el.parentElement?.dataset.testid === "breakdown-band") return box(0, 303);
+      return box(0, 0);
+    });
+  });
+  afterEach(() => rect.mockRestore());
+
+  const band = () => screen.getByTestId("breakdown-band");
+  const audioRow = () => screen.getByText("Audio").parentElement!;
+
+  it("with nothing remembered the band keeps its own height and the Audio row its own", async () => {
+    renderAt("/match/m1/breakdown/anna/2");
+    const sep = await screen.findByRole("separator", { name: "Resize the timeline" });
+    expect(band().style.height).toBe("");
+    expect(audioRow().style.height).toBe("56px");
+    expect(sep).toHaveAttribute("aria-valuemin", String(700 - 447));
+    expect(sep).toHaveAttribute("aria-valuemax", String(700 - 231));
+  });
+
+  it("a remembered split is drawn, clamped to this window, and its extra height goes to the Audio row", async () => {
+    window.localStorage.setItem(BAND_HEIGHT_KEY, "350");
+    const { unmount } = renderAt("/match/m1/breakdown/anna/2");
+    await screen.findByRole("separator");
+    expect(band().style.height).toBe("350px");
+    expect(audioRow().style.height).toBe(`${56 + 350 - 303}px`);
+    unmount();
+    window.localStorage.setItem(BAND_HEIGHT_KEY, "9999");
+    resetBreakdownPrefsForTests();
+    renderAt("/match/m1/breakdown/anna/2");
+    await screen.findByRole("separator");
+    expect(band().style.height).toBe("447px");
+  });
+
+  it("keys move the split within its limits and remember it; double-click toggles the band-large preset", async () => {
+    renderAt("/match/m1/breakdown/anna/2");
+    const sep = await screen.findByRole("separator");
+    fireEvent.keyDown(sep, { key: "End" });
+    expect(band().style.height).toBe("231px");
+    expect(window.localStorage.getItem(BAND_HEIGHT_KEY)).toBe("231");
+    fireEvent.keyDown(sep, { key: "ArrowUp" });
+    expect(window.localStorage.getItem(BAND_HEIGHT_KEY)).toBe("247");
+    fireEvent.doubleClick(sep);
+    expect(band().style.height).toBe("447px");
+    expect(window.localStorage.getItem(BAND_HEIGHT_KEY)).toBe("447");
+    fireEvent.doubleClick(sep);
+    expect(band().style.height).toBe("247px");
+    expect(window.localStorage.getItem(BAND_HEIGHT_KEY)).toBe("247");
+  });
+
+  it("a band under its natural height scrolls only its rows: the header and the ruler stay", async () => {
+    window.localStorage.setItem(BAND_HEIGHT_KEY, "231");
+    renderAt("/match/m1/breakdown/anna/2");
+    await screen.findByRole("separator");
+    const rows = screen.getByTestId("timeline-rows");
+    const gutter = screen.getByTestId("timeline-gutter-rows");
+    // Audio, Shots and one lane: 303 - 231 = 72 px of rows below.
+    expect(rows.style.height).toBe("124px");
+    expect(gutter.style.height).toBe(rows.style.height);
+    expect(rows).toHaveClass("overflow-y-auto");
+    expect(band()).toHaveClass("overflow-hidden");
+    // The ruler and the band's header are outside the scroller.
+    expect(rows.contains(screen.getByTestId("timeline-ruler"))).toBe(false);
+    expect(rows.contains(screen.getByRole("button", { name: "Timeline options" }))).toBe(false);
+    expect(within(rows).getByTestId("event-evt-2")).toBeInTheDocument();
+    expect(within(gutter).getByText("Activation")).toBeInTheDocument();
+    // The two scrollers move together.
+    rows.scrollTop = 40;
+    fireEvent.scroll(rows);
+    expect(gutter.scrollTop).toBe(40);
+    gutter.scrollTop = 10;
+    fireEvent.scroll(gutter);
+    expect(rows.scrollTop).toBe(10);
+  });
+
+  it("at or above its natural height the band's rows are not boxed", async () => {
+    window.localStorage.setItem(BAND_HEIGHT_KEY, "350");
+    renderAt("/match/m1/breakdown/anna/2");
+    await screen.findByRole("separator");
+    expect(screen.queryByTestId("timeline-rows")).toBeNull();
+    expect(screen.queryByTestId("timeline-gutter-rows")).toBeNull();
+  });
+
+  it("a drag on the handle remembers the split it lands on", async () => {
+    HTMLElement.prototype.setPointerCapture = vi.fn();
+    HTMLElement.prototype.hasPointerCapture = vi.fn(() => true);
+    HTMLElement.prototype.releasePointerCapture = vi.fn();
+    window.localStorage.setItem(BAND_HEIGHT_KEY, "300");
+    renderAt("/match/m1/breakdown/anna/2");
+    const sep = await screen.findByRole("separator");
+    fireEvent.pointerDown(sep, { pointerId: 1, clientY: 400, button: 0 });
+    fireEvent.pointerMove(sep, { pointerId: 1, clientY: 350 });
+    expect(band().style.height).toBe("350px");
+    expect(window.localStorage.getItem(BAND_HEIGHT_KEY)).toBe("300");
+    fireEvent.pointerUp(sep, { pointerId: 1, clientY: 350 });
+    expect(window.localStorage.getItem(BAND_HEIGHT_KEY)).toBe("350");
   });
 });
