@@ -176,7 +176,6 @@ def review_priority(entry: dict[str, Any]) -> tuple[float, list[str]]:
     n_shots = int(entry.get("n_shots") or 0)
     if moves and n_shots:
         score += 50.0 * moves / n_shots
-        reasons.append(
-            f"{moves} of {n_shots} shots: the leading-edge snap disagrees by more than {round(MIN_MOVE_MS)} ms"
-        )
+        limit = round(MIN_MOVE_MS)
+        reasons.append(f"{moves} of {n_shots} shots: the leading-edge snap disagrees by more than {limit} ms")
     return score, reasons
