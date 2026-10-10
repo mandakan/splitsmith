@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "grid-hold-dense-upright",
+      "date": "2026-10-10",
+      "title": "Readable splits on tall grids",
+      "body": "In a compare video with many shooters on an upright canvas, the stage summary ran each tile's Best, Avg, Worst and Draw into each other. They now stack two to a line."
+    },
+    {
       "id": "phone-video-opens-at-the-shot",
       "date": "2026-10-10",
       "title": "Shot video opens at the shot on a phone",

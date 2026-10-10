@@ -62,6 +62,7 @@ from splitsmith.compare import overlay_summary as summ
 from splitsmith.compare.mp4_grid import GridStagePlan, GridTile
 from splitsmith.compare.overlay_data import TileShot, TileStageData
 from splitsmith.compare.overlay_sprites import SpriteGeometry, TilePlacement
+from splitsmith.events import ReloadFigure
 from splitsmith.match_project import StageScorecard
 from splitsmith.overlay_html import grid_html
 from splitsmith.overlay_layout import Anchor, ColorToken, Emphasis, Flow, Role
@@ -1555,3 +1556,107 @@ def test_a_placement_with_an_accent_sets_the_variable_on_its_cell_only():
     )
     assert '<div style="grid-row:1;grid-column:1;--accent:#123456;">' in html
     assert '<div style="grid-row:1;grid-column:2;">' in html
+
+
+# --- dense upright holds: no split figure runs into its neighbour ----------
+
+#: Every visible split figure (a value in a grid row) whose text runs past
+#: its own column, or ends closer than half the band's caption size to the
+#: next column it overlaps vertically: measured independently of fit.js's
+#: own 0.6 em, as ``test_overlay_summary_cell``'s card check is. Also every
+#: grid-row caption (Best / Avg / Worst / Draw, the reload row's) that is
+#: hidden: at these sizes the wrap keeps them all.
+_FIGURE_COLLISIONS_JS = """() => {
+  const out = {collisions: [], hidden: [], splits: 0};
+  const splitCaptions = ['Best', 'Avg', 'Worst', 'Draw'];
+  const visible = (e) => e.getClientRects().length > 0;
+  document.querySelectorAll('.cell').forEach((cell, index) => {
+    const caption = cell.querySelector('.anchor-middle-center .caption');
+    const em = caption ? parseFloat(getComputedStyle(caption).fontSize) : 0;
+    cell.querySelectorAll('.group.flow-grid > .el').forEach((el) => {
+      if (!visible(el)) { return; }
+      const box = el.getBoundingClientRect();
+      let next = el.nextElementSibling;
+      while (next && !visible(next)) { next = next.nextElementSibling; }
+      const nextBox = next ? next.getBoundingClientRect() : null;
+      const sameRow =
+        nextBox && box.top < nextBox.bottom && nextBox.top < box.bottom && nextBox.left > box.left;
+      const label = el.querySelector('.caption');
+      if (label && !visible(label)) { out.hidden.push(index + ':' + label.textContent); }
+      const value = el.querySelector('.value');
+      if (!value || !visible(value)) { return; }
+      if (label && splitCaptions.includes(label.textContent)) { out.splits += 1; }
+      const range = document.createRange();
+      range.selectNodeContents(value);
+      const rect = range.getBoundingClientRect();
+      const crowded = sameRow && nextBox.left - rect.right < 0.5 * em;
+      const outside = rect.left < box.left - 0.5 || rect.right > box.right + 0.5;
+      if (outside || crowded) { out.collisions.push(index + ':' + value.textContent); }
+    });
+  });
+  return out;
+}"""
+
+
+def _hold_figure_collisions(html: str, *, width: int, height: int, tmp_path: Path) -> dict:
+    """Lay ``html`` out in the real browser as ``ChromiumRasterizer.png``
+    does (file URL, fonts ready, the fit policy run), then measure."""
+    page_path = tmp_path / "hold.html"
+    page_path.write_text(html, encoding="utf-8")
+    try:
+        with ChromiumRasterizer() as rasterizer:
+            context = rasterizer._live_browser().new_context(viewport={"width": width, "height": height})
+            try:
+                page = context.new_page()
+                page.goto(page_path.resolve().as_uri(), wait_until="load")
+                page.evaluate("document.fonts.ready")
+                page.evaluate("window.__splitsmithFit && window.__splitsmithFit()")
+                return page.evaluate(_FIGURE_COLLISIONS_JS)
+            finally:
+                context.close()
+    except RasterizerUnavailableError as exc:
+        pytest.skip(str(exc))
+
+
+def _dense_tile(label: str, *, reload: bool) -> TileStageData:
+    shots, t = [], 0.0
+    for split in (0.5, 0.3, 0.37, 0.5, 0.42, 0.38):
+        t += split
+        shots.append(TileShot(time_from_beep=t, split=split))
+    reloads = (ReloadFigure(event_id="r1", duration=1.42, moving=False, exposed=1.42),) if reload else ()
+    return TileStageData(
+        label=label,
+        stage_number=2,
+        shots=tuple(shots),
+        stage_time_seconds=4.5,
+        scorecard=StageScorecard(hit_factor=12.0, alphas=10, charlies=1, deltas=1, misses=0),
+        reloads=reloads,
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(("width", "height"), [(720, 1280), (1080, 1920)])
+@pytest.mark.parametrize("reload", [False, True])
+def test_a_dense_upright_hold_never_runs_one_split_figure_into_the_next(
+    tmp_path: Path, width: int, height: int, reload: bool
+) -> None:
+    """Nine shooters on an upright canvas give each tile a quarter column
+    narrower than "0.30" at the size the band's captions reach the
+    legibility floor, and the figures drew into each other
+    ("0.300.370.500.50"). The band wraps instead, two figures a line, and
+    keeps every caption. The HTML is the one ``build_hold_still`` hands
+    the rasterizer."""
+    names = ("Anders", "Bea", "Mathias", "Nils", "Olof", "Petra", "Rikard", "Sanna", "Tove")
+    geometry = SpriteGeometry(canvas_width=width, canvas_height=height, rows=3, cols=3)
+    placements = [_placement(name, i // 3, i % 3) for i, name in enumerate(names)]
+    data = {name: _dense_tile(name, reload=reload) for name in names}
+    fake = _FakeRasterizer()
+    summ.build_hold_still(placements, data, {}, geometry, theme=load_theme("splitsmith"), rasterizer=fake)
+    ((html, _, _),) = fake.calls
+    result = _hold_figure_collisions(html, width=width, height=height, tmp_path=tmp_path)
+    # Best / Avg / Worst / Draw on every tile. The reload row may lose
+    # figures to the height policy (``data-drop-priority``) before any
+    # column is measured, on main as here.
+    assert result["splits"] == len(names) * 4
+    assert result["collisions"] == []
+    assert result["hidden"] == []
