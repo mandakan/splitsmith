@@ -1,4 +1,6 @@
-"""Compare two eval_ensemble_artifacts.py outputs: totals per camera class and mode, and every fixture that changed.
+"""Compare two eval_ensemble_artifacts.py outputs.
+
+Totals per camera class and mode, and every fixture that changed.
 
 Usage: uv run python scripts/compare_ensemble_evals.py <old.json> <new.json>
 """
@@ -35,7 +37,8 @@ def main(old_path: Path, new_path: Path) -> None:
             )
         worse = [fx for fx in common if sum(new[fx][mode][1:]) > sum(old[fx][mode][1:])]
         better = [fx for fx in common if sum(new[fx][mode][1:]) < sum(old[fx][mode][1:])]
-        print(f"  worse {len(worse)}, better {len(better)}, unchanged {len(common) - len(worse) - len(better)}")
+        same = len(common) - len(worse) - len(better)
+        print(f"  worse {len(worse)}, better {len(better)}, unchanged {same}")
         for fx in worse:
             o, n = old[fx][mode], new[fx][mode]
             print(f"    WORSE {fx}: FP {o[1]}->{n[1]} FN {o[2]}->{n[2]}")

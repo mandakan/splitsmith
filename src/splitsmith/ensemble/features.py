@@ -431,9 +431,7 @@ def stage_relative_features(
     if n == 0:
         return out
     ref = reference_indices(hand[:, _HAND_INDEX["confidence"]])
-    sources: list[np.ndarray] = [
-        np.log(np.maximum(hand[:, _HAND_INDEX[s]], 1e-9)) for s in _REL_LOG_SOURCES
-    ]
+    sources: list[np.ndarray] = [np.log(np.maximum(hand[:, _HAND_INDEX[s]], 1e-9)) for s in _REL_LOG_SOURCES]
     sources += [hand[:, _HAND_INDEX[s]] for s in _REL_LIN_HAND_SOURCES]
     sources += [np.asarray(gunshot_prob, dtype=np.float64), np.asarray(clap_diff, dtype=np.float64)]
     sources += [hand[:, _HAND_INDEX[s]] for s in _REL_LIN_TIMBRE_SOURCES]
