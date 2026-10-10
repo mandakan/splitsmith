@@ -435,7 +435,10 @@ function DetailPane({
     );
   }
 
-  const reviewUrl = `/review?fixture=${encodeURIComponent(item.audit_path)}`;
+  // A fixture whose shot times need checking opens in the step-through.
+  const reviewUrl = `/review?fixture=${encodeURIComponent(item.audit_path)}${
+    item.review_status === "needs_review" ? "&step=1" : ""
+  }`;
   // Labeling happens on the fixture detail page (candidates only exist
   // there); marker edits stay in /review. The redesign spec's routes
   // table promises both links from a queue item (#902).

@@ -309,3 +309,37 @@ def test_detect_shots_validates_inputs() -> None:
         detect_shots(audio, sr, -0.1, 1.0, ShotDetectConfig())
     with pytest.raises(ValueError, match="stage_time"):
         detect_shots(audio, sr, 0.0, 0.0, ShotDetectConfig())
+
+
+def test_a_compressed_go3s_shot_is_timed_at_the_start_of_its_burst(fixtures_dir: Path) -> None:
+    """GO 3S compresses a shot into a burst with internal dips; the old walk
+    back from the peak stopped at the first dip, 25 ms inside this one
+    (shot 3, stored at 8.299 s; the burst starts at 8.274 s, read off the
+    waveform). The rise foot (docs/METHODOLOGY.md) lands on the start."""
+    audio, sr, truth = _load_fixture(fixtures_dir, "stage-shots-hostfinalen-xi-2026-stage3-s97dcec94")
+    shots = detect_shots(
+        audio,
+        sample_rate=sr,
+        beep_time=truth["beep_time"],
+        stage_time=truth["stage_time_seconds"],
+        config=ShotDetectConfig(),
+    )
+    times = np.array([s.time_absolute for s in shots])
+    shot = shots[int(np.argmin(np.abs(times - 8.274)))]
+    assert shot.time_absolute == pytest.approx(8.274, abs=0.003)
+    # Scoring stays where the models were trained: the candidate's own walk,
+    # main's time for this shot. Internal only, never serialized.
+    assert shot.scoring_time == pytest.approx(8.299, abs=0.001)
+    assert "feature_time" not in shot.model_dump()
+
+
+def test_a_reported_time_never_lands_at_or_before_the_previous_one() -> None:
+    """Where no rise foot stands out, the scoring time is reported; a foot
+    can sit later than its own scoring time, so the previous shot's report can
+    already be past this one's scoring time (two cwt candidates under 25 ms
+    apart). The report then follows the previous one rather than reorder."""
+    from splitsmith.shot_detect import _output_time
+
+    silence = ([0.0] * 2000, 2.0)
+    assert _output_time(silence, 1.027, prev_output=1.045) == pytest.approx(1.046)
+    assert _output_time(silence, 1.027, prev_output=None) == pytest.approx(1.027)

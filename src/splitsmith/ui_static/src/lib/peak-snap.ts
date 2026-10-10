@@ -31,8 +31,11 @@ const RISE_FOOT_FRAC = 0.05;
 /** The foot also sits above the noise: this many times its median level. */
 const NOISE_FLOOR_FACTOR = 1.5;
 /** A valley below this fraction of the peak, with the level rising again
- *  behind it, is an earlier sound (an echo, the previous shot): stop there. */
+ *  behind it, is an earlier sound (an echo, the previous shot): stop there ... */
 const VALLEY_FRAC = 0.25;
+/** ... unless the level was above it again within this long behind the dip:
+ *  the burst's own first wavefront. The walk passes one such dip. */
+const WAVEFRONT_GAP_S = 0.003;
 const MAX_WALK_S = 0.1;
 const NOISE_WINDOW_S = 0.1;
 
@@ -70,12 +73,22 @@ export function snapToLeadingEdge(
   const floor = median(peaks.slice(noiseFrom, lo));
   const threshold = Math.max(RISE_FOOT_FRAC * peak, NOISE_FLOOR_FACTOR * floor);
   const maxWalk = Math.round(MAX_WALK_S / binW);
+  const gap = Math.max(1, Math.round(WAVEFRONT_GAP_S / binW));
+  const valley = VALLEY_FRAC * peak;
+  let passed = false;
+  let crossing = false;
   let i = maxIdx;
   while (i > 0 && maxIdx - i < maxWalk) {
     const cur = peaks[i];
     const prev = peaks[i - 1];
     if (prev < threshold) break;
-    if (cur < VALLEY_FRAC * peak && prev > cur) break;
+    if (crossing) {
+      // Inside the one brief dip being passed, until the wavefront.
+      crossing = cur < valley;
+    } else if (cur < valley && prev > cur) {
+      if (passed || Math.max(...peaks.slice(Math.max(0, i - gap), i)) < valley) break;
+      passed = crossing = true;
+    }
     i--;
   }
   return i * binW;

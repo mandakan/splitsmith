@@ -91,7 +91,7 @@ def two_pass_detect(
     min_extra_gap_s: float = 0.080,
 ) -> tuple[list[float], list[float]]:
     shots = detect_shots(audio, sr, beep, stage_t, ShotDetectConfig())
-    pass1_t = sorted(s.time_absolute for s in shots)
+    pass1_t = sorted(s.scoring_time for s in shots)
     if len(pass1_t) < 2:
         return pass1_t, []
     env = cwt_envelope(audio, sr)

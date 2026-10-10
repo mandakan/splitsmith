@@ -231,7 +231,7 @@ def build_signals(
             fixtures_skipped.append((fix, "no_candidates"))
             continue
 
-        times = np.array([s.time_absolute for s in shots], dtype=np.float64)
+        times = np.array([s.scoring_time for s in shots], dtype=np.float64)
         confidences = np.array([s.confidence for s in shots], dtype=np.float64)
         peak_amps = np.array([s.peak_amplitude for s in shots], dtype=np.float64)
         ms_after_beep = np.array([round(s.time_from_beep * 1000) for s in shots], dtype=np.int64)

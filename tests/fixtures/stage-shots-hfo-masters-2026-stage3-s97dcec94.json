@@ -567,5 +567,13 @@
   "shooter": {
     "id": "s97dcec94"
   },
-  "event_id": "hfo-masters-2026:3:s97dcec94"
+  "event_id": "hfo-masters-2026:3:s97dcec94",
+  "review": {
+    "status": "needs_review",
+    "derived_from": null,
+    "reviewed_at": null,
+    "note": "shot times predate the rise-foot definition (docs/METHODOLOGY.md, 2026-10-10): check each shot's leading edge",
+    "previous_status": "reviewed",
+    "previous_reviewed_at": null
+  }
 }

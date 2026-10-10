@@ -104,7 +104,7 @@ def _build_universe(fixtures, tol_ms):
         audio, sr = load_audio(FIXTURES_DIR / f"{fix}.wav")
         cfg = ShotDetectConfig(recall_fallback="cwt", min_confidence=0.0)
         shots = detect_shots(audio, sr, truth["beep_time"], truth["stage_time_seconds"], cfg)
-        cand_t = [s.time_absolute for s in shots]
+        cand_t = [s.scoring_time for s in shots]
         labels, _ = _label(cand_t, truth.get("shots", []), tol_ms)
 
         clap = np.load(CACHE_DIR / f"{fix}_clap.npz", allow_pickle=True)
@@ -125,7 +125,7 @@ def _build_universe(fixtures, tol_ms):
             universe.append(
                 {
                     "fixture": fix,
-                    "t": sh.time_absolute,
+                    "t": sh.scoring_time,
                     "label": labels[i],
                     "clap_diff": float(diff[i]),
                     "hand_feats": feats_matrix[i].tolist(),

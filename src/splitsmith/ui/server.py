@@ -15099,6 +15099,16 @@ def create_app(
                 continue
             triples.append((stg.stage_number, stg.stage_name, shots))
         result = coach_distributions_module.match_distributions(stages=triples, config=cfg)
+        # ``coaching_note`` is private text, same as on the coach GET
+        # (``_build_coach_response``) -- this route is on ``_SHARE_PATH_RE``,
+        # so a share read gets every top-shot and flagged entry with its
+        # note stripped. ``match_distributions`` stays pure; the route is
+        # what knows whether this is a share request.
+        if current_share_request.get():
+            for entry in (*result.top_splits, *result.top_transitions):
+                entry.coaching_note = None
+            for entry in result.flagged_shots:
+                entry.coaching_note = None
         return JSONResponse(result.model_dump())
 
     # ----------------------------------------------------------------------

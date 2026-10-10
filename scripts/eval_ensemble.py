@@ -168,7 +168,7 @@ def main() -> None:
         audio, sr = load_audio(FIXTURES_DIR / f"{fix}.wav")
         cfg_recall = ShotDetectConfig(recall_fallback="cwt", min_confidence=0.0)
         all_shots = detect_shots(audio, sr, truth["beep_time"], truth["stage_time_seconds"], cfg_recall)
-        cand_t = [s.time_absolute for s in all_shots]
+        cand_t = [s.scoring_time for s in all_shots]
         labels, _ = _label(cand_t, truth.get("shots", []), args.tolerance_ms)
         for sh, lbl in zip(all_shots, labels, strict=True):
             if lbl == 1 and sh.confidence < min_pos_conf:
@@ -186,9 +186,9 @@ def main() -> None:
         cfg_safe = ShotDetectConfig(recall_fallback="cwt", min_confidence=voter_a_floor)
         all_shots = detect_shots(audio, sr, truth["beep_time"], truth["stage_time_seconds"], cfg_recall)
         safe_shots = detect_shots(audio, sr, truth["beep_time"], truth["stage_time_seconds"], cfg_safe)
-        safe_times = {round(s.time_absolute, 6) for s in safe_shots}
+        safe_times = {round(s.scoring_time, 6) for s in safe_shots}
 
-        cand_t = [s.time_absolute for s in all_shots]
+        cand_t = [s.scoring_time for s in all_shots]
         labels, fix_misses = _label(cand_t, truth.get("shots", []), args.tolerance_ms)
         all_misses.extend([{**m, "fixture": fix} for m in fix_misses])
 
@@ -220,7 +220,7 @@ def main() -> None:
             )
         gunshot_prob = pann["gunshot_prob"]
 
-        cand_times_arr = np.array([s.time_absolute for s in all_shots], dtype=np.float64)
+        cand_times_arr = np.array([s.scoring_time for s in all_shots], dtype=np.float64)
         confs_arr = np.array([s.confidence for s in all_shots], dtype=np.float64)
         peaks_arr = np.array([s.peak_amplitude for s in all_shots], dtype=np.float64)
         tta_arr = compute_tta_agreement(
@@ -233,9 +233,9 @@ def main() -> None:
             universe.append(
                 {
                     "fixture": fix,
-                    "t": shot.time_absolute,
+                    "t": shot.scoring_time,
                     "label": labels[i],
-                    "vote_a": int(round(shot.time_absolute, 6) in safe_times),
+                    "vote_a": int(round(shot.scoring_time, 6) in safe_times),
                     "clap_diff": float(diff[i]),
                     "gunshot_prob": float(gunshot_prob[i]),
                     "hand_feats": feats_matrix[i].tolist(),

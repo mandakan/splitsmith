@@ -612,6 +612,50 @@ def test_share_coach_read_strips_the_stage_note(
     client.cookies.clear()
 
 
+def test_share_match_distributions_strips_notes(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """#1390: ``GET shooters/{slug}/coach/distributions`` is on
+    ``_SHARE_PATH_RE``, and ``match_distributions`` puts ``coaching_note``
+    on both its top-shot and its flagged entries. A share read must strip
+    it, the same as the coach GET strips a shot's own ``coaching_note`` -
+    while an owner read of the same route keeps the real note."""
+    token = _setup_shared_match(hosted_env, hosted_app)
+    doc = {
+        "stage_number": 1,
+        "shots": [
+            {"shot_number": 1, "ms_after_beep": 1500},
+            {
+                "shot_number": 2,
+                "ms_after_beep": 1800,
+                "coaching_note": "private split note",
+                "improvement_flag": True,
+            },
+        ],
+    }
+    _seed_stage_audit(hosted_env, "owner@example.com", MID, SLUG, doc)
+
+    client, sender = hosted_app
+    resp = client.get(_share_url(token, f"shooters/{SLUG}/coach/distributions"))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["top_splits"], "expected at least one top-split entry"
+    assert all(e["coaching_note"] is None for e in body["top_splits"])
+    assert body["flagged_shots"], "expected at least one flagged entry"
+    assert all(e["coaching_note"] is None for e in body["flagged_shots"])
+
+    # The strip is share-scoped, not global: an owner read of the same
+    # route still returns the real note.
+    login(client, sender, "owner@example.com")
+    owner_resp = client.get(f"/api/matches/{MID}/shooters/{SLUG}/coach/distributions")
+    assert owner_resp.status_code == 200, owner_resp.text
+    owner_body = owner_resp.json()
+    assert owner_body["top_splits"][0]["coaching_note"] == "private split note"
+    assert owner_body["flagged_shots"][0]["coaching_note"] == "private split note"
+    client.cookies.clear()
+
+
 # -- stage compare (#700 task 3) -----------------------------------------
 
 

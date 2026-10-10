@@ -112,4 +112,4 @@ def _detect_times(
     shots = detect_shots(audio, sample_rate, beep_time, stage_time, cfg)
     if not shots:
         return np.zeros(0, dtype=np.float64)
-    return np.array([s.time_absolute for s in shots], dtype=np.float64)
+    return np.array([s.scoring_time for s in shots], dtype=np.float64)

@@ -79,7 +79,7 @@ def build_in_stage_rows(fix: str) -> list[dict]:
     shots = detect_shots(audio, sr, truth["beep_time"], truth["stage_time_seconds"], cfg)
     if not shots:
         return []
-    cand_t = [s.time_absolute for s in shots]
+    cand_t = [s.scoring_time for s in shots]
     labels = _label(cand_t, truth.get("shots", []), TOLERANCE_MS)
 
     clap = np.load(clap_path, allow_pickle=True)

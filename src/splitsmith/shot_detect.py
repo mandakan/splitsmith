@@ -61,6 +61,7 @@ from scipy.ndimage import maximum_filter1d
 from scipy.signal import fftconvolve
 
 from .config import Shot, ShotDetectConfig
+from .rise_foot import peak_envelope, rise_foot
 
 _HOP_LENGTH = 512  # librosa default; ~10.7 ms per frame at 48 kHz
 _PEAK_WIN_MS = 5.0  # half-width of the window used to read peak amplitude per shot
@@ -186,9 +187,14 @@ def detect_shots(
         kept_strengths.append(float(strength))
         kept_peaks.append(float(peak))
 
-    # Refine each kept onset's time to its half-rise leading edge. Min-gap
-    # and refractory operate on the librosa-frame times above (preserving
-    # ordering and candidate count); only the OUTPUT time changes.
+    # Two times per candidate. The SCORING time (``Shot.feature_time``) is
+    # the detector's original leading-edge walk: the candidate pool, the
+    # peaks, the CWT merge and every ensemble feature are measured from it,
+    # so the trained models see exactly what they were trained on. The
+    # OUTPUT time (``Shot.time_absolute``) is the shot-time definition, the
+    # rise foot (``splitsmith.rise_foot``, docs/METHODOLOGY.md), read from
+    # the scoring time below. Moving the scoring time instead broke the
+    # September Vanguard firmware held out (#1386).
     kept_times = [_leading_edge(audio, t, sample_rate) for t in kept_times]
     # Re-measure peak amplitude at the backtracked times (the actual transient
     # peak is typically a few ms past the leading edge, still inside the peak
@@ -225,15 +231,17 @@ def detect_shots(
     max_kept_peak = max(kept_peaks) if kept_peaks else 0.0
     max_kept_hf_lf = max(kept_hf_lf) if kept_hf_lf else 0.0
 
+    envelope = peak_envelope(audio, sample_rate)
     shots: list[Shot] = []
     prev_t = beep_time
-    for t_abs, strength, peak, hf_lf in zip(kept_times, kept_strengths, kept_peaks, kept_hf_lf, strict=True):
+    for t_feat, strength, peak, hf_lf in zip(kept_times, kept_strengths, kept_peaks, kept_hf_lf, strict=True):
         s_norm = strength / max_kept_strength if max_kept_strength > 0 else 0.0
         p_norm = peak / max_kept_peak if max_kept_peak > 0 else 0.0
         hf_norm = hf_lf / max_kept_hf_lf if max_kept_hf_lf > 0 else 0.0
         confidence = float(np.clip((s_norm * p_norm * hf_norm) ** (1.0 / 3.0), 0.0, 1.0))
         if confidence < config.min_confidence:
             continue
+        t_abs = _output_time(envelope, t_feat, prev_t if shots else None)
         shots.append(
             Shot(
                 shot_number=len(shots) + 1,
@@ -242,6 +250,7 @@ def detect_shots(
                 split=t_abs - prev_t,
                 peak_amplitude=peak,
                 confidence=confidence,
+                feature_time=t_feat,
             )
         )
         prev_t = t_abs
@@ -249,8 +258,31 @@ def detect_shots(
     return shots
 
 
+#: An output time this close to (or before) the previous shot's keeps the
+#: scoring time instead, so the rise foot can never reorder or merge shots.
+_MIN_OUTPUT_SPACING_S = 0.010
+
+
+def _output_time(envelope: tuple[list[float], float], t_feature: float, prev_output: float | None) -> float:
+    """A detected shot's reported time: the rise foot read from its scoring
+    time (the shot-time definition, docs/METHODOLOGY.md); the scoring time
+    where no shot stands out of the window or the foot would crowd the
+    previous shot. Never at or before the previous reported time: a foot can
+    sit later than its scoring time, so two candidates under 25 ms apart could
+    otherwise report out of order."""
+    foot = rise_foot(envelope[0], envelope[1], t_feature)
+    out = t_feature
+    if foot is not None and (prev_output is None or foot > prev_output + _MIN_OUTPUT_SPACING_S):
+        out = foot
+    if prev_output is not None and out <= prev_output:
+        out = prev_output + 0.001
+    return out
+
+
 def _leading_edge(audio: np.ndarray, onset_t: float, sr: int) -> float:
-    """Return the rise-foot leading edge of the transient surrounding ``onset_t``.
+    """Return the detector's own leading edge of the transient surrounding
+    ``onset_t``: the SCORING time (``Shot.feature_time``). The reported shot
+    time is the rise foot (``_output_time``).
 
     The window extends up to 100 ms BEFORE the librosa frame (so we can find
     the foot even if librosa fired well into the rise) and 30 ms after. Peak

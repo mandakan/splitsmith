@@ -85,6 +85,15 @@ What each camera's audio does to detection (mono or stereo, compression, firmwar
 recognise its files) is in ``docs/cameras.md``. Read it before tuning a threshold or a voter C
 feature, and add to it, dated, whenever a measurement shows something new about a camera.
 
+A detected shot carries **two times**: ``Shot.time_absolute`` is the shot time
+(the rise foot, ``splitsmith.rise_foot``, docs/METHODOLOGY.md) that every
+output reports, and ``Shot.feature_time`` is the detector's own leading-edge
+walk, where candidates are found and scored. Every model input reads
+``Shot.scoring_time`` (the ensemble, TTA, the build, the CLAP/PANN caches,
+the sweeps): computing features from ``time_absolute`` shifted them between
+the two Vanguard firmwares and made the September footage undetectable held
+out (#1386). ``feature_time`` is never serialized.
+
 The shot-detection pipeline is a 3-voter ensemble, not raw signal processing:
 
 - **Voter A** -- ``splitsmith.shot_detect`` envelope onsets, gated at the
