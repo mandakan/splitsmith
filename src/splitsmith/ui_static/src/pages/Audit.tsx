@@ -43,12 +43,9 @@ import { CurrentShotLine } from "@/components/audit/CurrentShotLine";
 import { PrereqGate } from "@/components/audit/PrereqGate";
 import { ShotList } from "@/components/audit/ShotList";
 import { HelpButton, LegendKey, TransportLine, TransportMenuItems } from "@/components/audit/TransportLine";
-import {
-  CamSyncPill,
-  type CamSyncState,
-} from "@/components/audit/CamSyncPill";
+import type { CamSyncState } from "@/components/audit/CamSyncPill";
 import { CamGridModal } from "@/components/audit/CamGridModal";
-import { MultiCamColumn, type CamLayout } from "@/components/audit/MultiCamColumn";
+import { CamPill, MultiCamColumn, type CamLayout } from "@/components/audit/MultiCamColumn";
 import {
   DEFAULT_FILTERS,
   type MarkerFilters,
@@ -90,7 +87,11 @@ import { buildAuditJson, deriveMarkers } from "@/lib/audit-doc";
 import { beepStepVideos, headerState, nextFlaggedIndex, shotRows } from "@/lib/auditStep";
 import { isJobActive } from "@/lib/jobs";
 import { auditProxyReady, auditVideoSrc } from "@/lib/auditVideoSrc";
+import { addFailedKind, auditPipCameras, type FailedKinds } from "@/lib/auditPip";
 import { planServedClip } from "@/lib/camPlayback";
+import { pipKeyAction, type InsetStreamKind, type PipCamera } from "@/lib/pip";
+import { usePrimaryAudio } from "@/lib/usePrimaryAudio";
+import { usePip } from "@/lib/usePip";
 import { useScrubSource } from "@/lib/useScrubSource";
 import { computeAuditNextStep } from "@/lib/audit-next-step";
 import { useMatchHref } from "@/lib/matchHref";
@@ -188,21 +189,18 @@ export function Audit() {
   const editorRootRef = useRef<HTMLDivElement | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [activeVideoIndex, setActiveVideoIndex] = useState(0);
   const [loopMode, setLoopMode] = useState(false);
-  // VideoPanel still ships a Grid/Single toggle internally (we suppress
-  // it via showHeader={false}) but the prop is required, so keep a
-  // no-op callback. The v2 column always operates in single-cam mode --
-  // secondaries are picker tiles, not concurrent <video>s.
-  // Stable refs used by grid-mode callbacks to avoid stale closures without
-  // adding them to useCallback / useEffect dep arrays.
-  const isPlayingRef = useRef(false);
-  const currentTimeRef = useRef(0);
-  // Map of secondary video path -> element, populated by SecondarySlot mounts.
-  const secondaryRefsMap = useRef<Map<string, HTMLVideoElement>>(new Map());
-  // Map of secondary video path -> beep offset (secondary.beep_time - auditBeep).
-  // Rebuilt whenever videos or auditBeep change so the rAF loop reads stable values.
-  const secondaryOffsetsRef = useRef<Map<string, number>>(new Map());
+  // The big <video> as an element too (PipView and the primary-audio
+  // follower bind to it; a remounted player must re-bind them).
+  const [bigVideoEl, setBigVideoEl] = useState<HTMLVideoElement | null>(null);
+  const setBigVideo = useCallback((el: HTMLVideoElement | null) => {
+    videoRef.current = el;
+    setBigVideoEl(el);
+  }, []);
+  // Stream kinds that failed in the PiP inset, per video_id (#1407).
+  const [insetFailed, setInsetFailed] = useState<FailedKinds>({});
+  // The stage audit WAV failed as the swapped-in primary audio (see below).
+  const [stageWavFailed, setStageWavFailed] = useState(false);
   // Auto-advance to the next visible marker after K toggles a candidate.
   // Default on (FCP-style "mark and move"); persisted across sessions
   // because the user audits in long flow blocks and shouldn't have to
@@ -246,9 +244,6 @@ export function Audit() {
     };
   }, [loopMode, focusedMarkerId, markers, peaks]);
 
-  // Keep stable refs in sync so callbacks that can't take deps use them.
-  useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
-  useEffect(() => { currentTimeRef.current = currentTime; }, [currentTime]);
 
   const [filters, setFilters] = useState<MarkerFilters>(DEFAULT_FILTERS);
   // Momentary "peek": true while the user holds the peek button or the p key.
@@ -383,7 +378,6 @@ export function Audit() {
   }, [stage]);
 
   const primary = videos[0] ?? null;
-  const activeVideo = videos[activeVideoIndex] ?? primary;
   const primaryBeep = primary?.beep_time ?? null;
 
   // Per-cam buzzer sync state, surfaced as the CamSyncPill on each tile
@@ -414,7 +408,6 @@ export function Audit() {
       return "synced";
     });
   }, [videos, beepLowConfThreshold]);
-  const activeBeep = activeVideo?.beep_time ?? null;
   // Beep position **on the audit timeline** -- this is the X where the
   // waveform draws the dashed beep line and where audit-time = beep-time.
   // When the server is serving trimmed audio, peaks.beep_time is the
@@ -423,42 +416,46 @@ export function Audit() {
   // primary.beep_time. Either way, this value is the correct anchor.
   const auditBeep = peaks?.beep_time ?? primaryBeep;
 
-  // Rebuild the secondary offset table whenever videos or auditBeep change.
-  // The rAF tick loop reads this map without needing it in its dep array.
-  //
-  // Also catch up any already-mounted secondaries: the SecondarySlot ref
-  // callback fires during the commit phase (before this effect), so on the
-  // initial render after data loads -- and on stage change -- the new
-  // <video> elements land in secondaryRefsMap *before* this map is
-  // populated. Without a re-seek here they stay parked at source time 0
-  // and play out of sync once the user hits play.
-  useEffect(() => {
-    const map = new Map<string, number>();
-    if (auditBeep != null) {
-      for (const v of videos.slice(1)) {
-        if (v.beep_time != null) {
-          map.set(v.path, v.beep_time - auditBeep);
-        }
-      }
-    }
-    secondaryOffsetsRef.current = map;
-    for (const [path, sv] of secondaryRefsMap.current) {
-      const off = map.get(path);
-      if (off == null) continue;
-      const target = currentTimeRef.current + off;
-      if (sv.readyState >= 1) {
-        sv.currentTime = target;
-      } else {
-        sv.addEventListener(
-          "loadedmetadata",
-          () => {
-            sv.currentTime = target;
-          },
-          { once: true },
-        );
-      }
-    }
-  }, [videos, auditBeep]);
+  // A camera pill's "sync" opens step 1 on that camera, in place.
+  const openBeepReview = useCallback((cam: StageVideo) => {
+    setBeepFocusVideoId(cam.video_id);
+    setRepick(true);
+  }, []);
+
+  // The other cameras are a PiP inset over the big player (#1407). Each
+  // camera's inset clip and beep come from the clip the big player would
+  // stream for it (lib/auditPip.ts); its sync pill rides as the note.
+  // Swap / C change only which camera is big: the audit timeline, the
+  // waveform, the markers and every time stay the primary's, and so does
+  // the sound (see the primary-audio follower below).
+  const pipCameras = useMemo(() => {
+    const base = auditPipCameras({
+      slug,
+      stageNumber,
+      videos,
+      peaks: peaks ? { beep_time: peaks.beep_time, trimmed: peaks.trimmed } : null,
+      preBufferSeconds: project?.trim_pre_buffer_seconds ?? 5,
+      failed: insetFailed,
+    });
+    return base.map((c, i) => ({
+      ...c,
+      note: (
+        <CamPill
+          video={videos[i]}
+          index={i}
+          state={camSyncStates[i] ?? "no_beep"}
+          primaryBeepTime={primaryBeep}
+          onStartSync={openBeepReview}
+        />
+      ),
+    }));
+  }, [slug, stageNumber, videos, peaks, project?.trim_pre_buffer_seconds, insetFailed, camSyncStates, primaryBeep, openBeepReview]);
+  const pip = usePip({ cameras: pipCameras, stageKey: `${slug}/${stageNumber ?? ""}` });
+  const activeVideoIndex = Math.max(0, videos.findIndex((v) => v.video_id === pip.state.big));
+  const activeVideo = videos[activeVideoIndex] ?? primary;
+  const activeBeep = activeVideo?.beep_time ?? null;
+  const pipCycle = pip.cycle;
+  const insetKind = pip.inset ? (pipCameras.find((c) => c.id === pip.inset?.id)?.kind ?? null) : null;
 
   // Which file to stream for the active cam + how audit time maps onto
   // it. Secondaries have their own beep-anchored trim once built, so the
@@ -488,7 +485,10 @@ export function Audit() {
   useEffect(() => {
     setCurrentTime(0);
     setIsPlaying(false);
-    setActiveVideoIndex(0);
+    // The big camera goes back to the primary by itself (usePip's
+    // stageKey); the inset's failed streams are this stage's only.
+    setInsetFailed({});
+    setStageWavFailed(false);
     setFocusedMarkerId(null);
     setCurrentShotIndex(0);
     setRepick(false);
@@ -500,11 +500,6 @@ export function Audit() {
     isDirtyRef.current = false;
     setSaveStatus({ kind: "idle" });
     setCamLayout("focus");
-    // Don't clear secondaryRefsMap here. Refs attach during commit before
-    // this effect runs, so a clear() would wipe the freshly-mounted new
-    // stage's <video> elements. SecondarySlot's unmount path calls
-    // setRef(null) -> handleSecondaryRef deletes stale entries, which is
-    // sufficient to keep the map clean across stage transitions.
     const v = videoRef.current;
     if (v) {
       v.pause();
@@ -645,26 +640,11 @@ export function Audit() {
         const regionEnd = loopRegion?.end ?? (dur != null ? dur - 0.05 : null);
         if (loopMode && regionEnd != null && auditT >= regionEnd) {
           const target = loopRegion?.start ?? loopAnchorRef.current ?? 0;
+          // The inset and the primary-audio follower follow the seek.
           v.currentTime = target + beepOffset;
           setCurrentTime(target);
-          // Snap secondaries to the loop target too.
-          for (const [path, sv] of secondaryRefsMap.current) {
-            const off = secondaryOffsetsRef.current.get(path);
-            if (off != null) sv.currentTime = target + off;
-          }
         } else {
           setCurrentTime(auditT);
-          // Drift-correct secondaries: nudge if >50 ms off. Auto-resume is
-          // handled event-driven via the primary's "timeupdate" listener -- not
-          // here -- to avoid seek-thrashing at 60 fps.
-          for (const [path, sv] of secondaryRefsMap.current) {
-            const off = secondaryOffsetsRef.current.get(path);
-            if (off == null) continue;
-            const expected = auditT + off;
-            if (!sv.paused && Math.abs(sv.currentTime - expected) > 0.05) {
-              sv.currentTime = expected;
-            }
-          }
         }
       }
       rafRef.current = requestAnimationFrame(tick);
@@ -675,30 +655,10 @@ export function Audit() {
     };
   }, [isPlaying, beepOffset, loopMode, peaks, loopRegion]);
 
-  // Master/slave sync: invoked from the primary's <video onTimeUpdate>.
-  // Browser-throttled to ~4 Hz, which is the right rate for reconciliation.
-  // For each secondary: if the primary is inside the secondary's content
-  // range and it's paused, seek+play it; if out of range and playing, pause.
-  // Standard multi-video sync recipe -- rAF would seek-thrash.
-  const handlePrimaryTimeUpdate = useCallback(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    const auditT = v.currentTime - beepOffset;
-    for (const [path, sv] of secondaryRefsMap.current) {
-      const off = secondaryOffsetsRef.current.get(path);
-      if (off == null) continue;
-      const expected = auditT + off;
-      const dur = Number.isFinite(sv.duration) ? sv.duration : null;
-      const inRange = expected >= 0 && (dur == null || expected <= dur);
-      if (inRange && sv.paused && isPlayingRef.current) {
-        sv.currentTime = expected;
-        void sv.play().catch(() => {});
-      } else if (!inRange && !sv.paused) {
-        sv.pause();
-      }
-    }
-  }, [beepOffset]);
-
+  // The other cameras are not the page's to sync: PipView keeps its inset
+  // on the big player's clock (lib/pipSync), and the primary-audio
+  // follower below uses the same rule. Every seek here moves only the big
+  // player; both follow its ``seeking``.
   const handleScrub = useCallback(
     (primaryTime: number) => {
       const v = videoRef.current;
@@ -708,19 +668,6 @@ export function Audit() {
       // dragging to a candidate, then play-pausing would yank the
       // playhead back to the OLD anchor instead of the new one.
       loopAnchorRef.current = primaryTime;
-      // Seek all secondaries to the equivalent position. The primary's
-      // timeupdate listener will resume any that are in their content range.
-      for (const [path, sv] of secondaryRefsMap.current) {
-        const off = secondaryOffsetsRef.current.get(path);
-        if (off == null) continue;
-        const expected = primaryTime + off;
-        const dur = Number.isFinite(sv.duration) ? sv.duration : null;
-        const inRange = expected >= 0 && (dur == null || expected <= dur);
-        if (inRange) {
-          sv.currentTime = expected;
-          if (isPlayingRef.current && sv.paused) void sv.play().catch(() => {});
-        }
-      }
     },
     [beepOffset],
   );
@@ -732,15 +679,9 @@ export function Audit() {
       // Starting playback -- record the anchor in audit-timeline coords.
       loopAnchorRef.current = v.currentTime - beepOffset;
       void v.play();
-      for (const sv of secondaryRefsMap.current.values()) {
-        void sv.play();
-      }
       setIsPlaying(true);
     } else {
       v.pause();
-      for (const sv of secondaryRefsMap.current.values()) {
-        sv.pause();
-      }
       setIsPlaying(false);
       // Loop semantics: pause snaps back to region start (or play anchor if
       // no region is active).
@@ -748,10 +689,6 @@ export function Audit() {
         const target = loopRegion?.start ?? loopAnchorRef.current ?? 0;
         v.currentTime = target + beepOffset;
         setCurrentTime(target);
-        for (const [path, sv] of secondaryRefsMap.current) {
-          const off = secondaryOffsetsRef.current.get(path);
-          if (off != null) sv.currentTime = target + off;
-        }
       }
     }
   }, [beepOffset, loopMode, loopRegion]);
@@ -766,6 +703,43 @@ export function Audit() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusedMarkerId]);
 
+  // A secondary is big (a swap): its picture, the primary's sound. The
+  // shared follower (lib/usePrimaryAudio) mutes the big player and plays
+  // the primary's audio on its clock. Audit's primary audio is the stage
+  // audit WAV, the file the waveform is drawn from, so its anchor is
+  // ``peaks.beep_time``; if the WAV fails the primary's own stream takes
+  // over (its served clip shares that anchor, lib/auditPip). With the
+  // primary big nothing follows and nothing is muted.
+  const primaryCam = pipCameras[0] ?? null;
+  const primaryAudioSrc =
+    stageNumber == null ? null : stageWavFailed ? (primaryCam?.src ?? null) : api.stageAudioUrl(slug, stageNumber);
+  const primaryAudioBeep = stageWavFailed ? (primaryCam?.beepInClip ?? null) : (peaks?.beep_time ?? null);
+  // A swap remounts the big <video> (its src changes); until the new
+  // element arrives the old one still names the previous camera, so the
+  // follower waits for it instead of attaching to an element on its way out.
+  const bigVideoForAudio = bigVideoEl?.dataset.activePath === activeVideo?.path ? bigVideoEl : null;
+  usePrimaryAudio({
+    bigVideo: bigVideoForAudio,
+    bigIsPrimary: activeVideoIndex === 0,
+    src: primaryAudioSrc,
+    primaryBeep: primaryAudioBeep,
+    bigBeep: pip.big?.beepInClip ?? null,
+    onError: useCallback(() => {
+      if (!stageWavFailed) setStageWavFailed(true);
+      else if (primaryCam) setInsetFailed((prev) => addFailedKind(prev, primaryCam.id, primaryCam.kind));
+    }, [stageWavFailed, primaryCam]),
+  });
+
+  const onInsetError = useCallback(
+    (camera: PipCamera, kind: InsetStreamKind | null) => {
+      setInsetFailed((prev) => addFailedKind(prev, camera.id, kind));
+      // A broken rendition is broken for the big player too.
+      const video = videos.find((v) => v.video_id === camera.id);
+      if (kind === "scrub" && video) scrub.markFailed(video);
+    },
+    [videos, scrub],
+  );
+
   // ---- Marker mutators (push prev state to undo stack) -------------------
 
   const recordEvent = useCallback((kind: string, payload: Record<string, unknown>) => {
@@ -777,40 +751,9 @@ export function Audit() {
     isDirtyRef.current = true;
   }, []);
 
-  // ---- Grid mode callbacks (#128) -----------------------------------------
-
-  // Called by VideoPanel's SecondarySlot when a secondary video mounts/unmounts.
-  const handleSecondaryRef = useCallback((path: string, el: HTMLVideoElement | null) => {
-    if (el) {
-      secondaryRefsMap.current.set(path, el);
-      const off = secondaryOffsetsRef.current.get(path);
-      if (off != null) {
-        const target = currentTimeRef.current + off;
-        if (el.readyState >= 1) {
-          el.currentTime = target;
-        } else {
-          el.addEventListener("loadedmetadata", () => { el.currentTime = target; }, { once: true });
-        }
-        if (isPlayingRef.current) void el.play();
-      }
-    } else {
-      secondaryRefsMap.current.delete(path);
-    }
-  }, []);
-
-  // Buffering events are no-ops at the page level: each secondary plays
-  // independently. The primary's timeupdate listener reconciles state on the
-  // fly, so a secondary that stalls or runs off the end of its source just
-  // pauses naturally and the primary keeps going. SecondarySlot still shows
-  // its own buffering overlay locally.
-  const handleSecondaryBuffering = useCallback(
-    (_path: string, _isBuffering: boolean) => {},
-    [],
-  );
-
   const handleGridModeToggle = useCallback(() => {
-    // No-op in v2: VideoPanel always renders the single primary cell
-    // and the column owns the multicam picker. Kept so VideoPanel's
+    // No-op: VideoPanel always renders the single big cell; the column
+    // owns the other cameras (the PiP inset). Kept so VideoPanel's
     // required prop type is satisfied.
   }, []);
 
@@ -1285,15 +1228,6 @@ export function Audit() {
     [navigate, performSave, stageNumber, href, slug],
   );
 
-  // Open the /beep-review queue with this exact item active. Replaces
-  // the old per-cam "start sync" entry; beep editing lives in the
-  // queue now (#396).
-  // A camera pill's "sync" opens step 1 on that camera, in place.
-  const openBeepReview = useCallback((cam: StageVideo) => {
-    setBeepFocusVideoId(cam.video_id);
-    setRepick(true);
-  }, []);
-
   // ---- Global keyboard shortcuts -----------------------------------------
 
   useEffect(() => {
@@ -1383,6 +1317,15 @@ export function Audit() {
         }
         handleMarkerTimeChange(target.id, next);
         handleScrub(next);
+        return;
+      }
+      // C / Shift+C: the next (previous) camera into the PiP inset; with
+      // two cameras a swap (lib/pip.ts pipKeyAction: never while typing,
+      // never auto-repeat, never with a modifier).
+      const camDir = inField ? null : pipKeyAction(e);
+      if (camDir) {
+        e.preventDefault();
+        pipCycle(camDir);
         return;
       }
       if (!inField && !e.metaKey && !e.ctrlKey && !e.altKey) {
@@ -1504,6 +1447,7 @@ export function Audit() {
     prevStageNumber,
     nextStageNumber,
     anomalies,
+    pipCycle,
   ]);
 
   // Stage switch / unmount: flush any pending nudge bracket so the
@@ -2010,22 +1954,21 @@ export function Audit() {
                     video left, the shot list right. Everything else runs
                     full width under it. On lg the row's height is bounded
                     by the viewport so the band below it stays on a laptop
-                    screen: the primary tile flexes into what is left and
-                    the shot list scrolls inside its column. VideoPanel's
+                    screen: the big player's tile flexes into what is left
+                    and the shot list scrolls inside its column. VideoPanel's
                     `fill` (h-full, object-contain) applies at every width,
                     so the video letterboxes inside the tile below lg too.
-                    The row's floor follows the camera count: a second
-                    camera adds about 100 px of fixed chrome (the secondary
-                    strip or thumb row, the sync row, a taller header and
-                    two gaps, measured at 1440 wide), so several cameras
-                    take a 398 px floor and the primary tile keeps about
-                    228 px, what it had before the column's transport row
-                    folded into the band header (#1359). Above the floor
-                    the row is the viewport less 502 px, the page header,
-                    the band and the footer at 1440 wide: two cameras at
-                    1440x900 end the band's Audio row at the sticky footer,
-                    and a taller screen gives its extra height to the video
-                    rather than to empty space under the band. */}
+                    The row's floor follows the camera count (#1404): 398 px
+                    with several cameras, 300 px with one. The other cameras
+                    are a PiP inset over the big player (#1407), so the
+                    tile takes the whole row under the column header (at
+                    1440x900 with two cameras a 16:9 frame of about
+                    648x365). Above the floor the row is the viewport less
+                    502 px, the page header, the band and the footer at 1440
+                    wide: two cameras at 1440x900 end the band's Audio row
+                    at the sticky footer, and a taller screen gives its
+                    extra height to the video rather than to empty space
+                    under the band. */}
                 <div
                   className={cn(
                     "grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:grid-rows-[minmax(0,1fr)]",
@@ -2036,25 +1979,26 @@ export function Audit() {
                 >
                   <MultiCamColumn
                     videos={videos}
-                    activeIndex={activeVideoIndex}
-                    onActiveIndexChange={setActiveVideoIndex}
                     camSyncStates={camSyncStates}
                     primaryBeepTime={primaryBeep}
                     onStartSync={openBeepReview}
-                    onPromote={(cam) => {
-                      const idx = videos.findIndex((v) => v.video_id === cam.video_id);
-                      if (idx > 0) setActiveVideoIndex(idx);
-                    }}
                     layout={camLayout}
                     onLayoutChange={setCamLayout}
+                    pip={pip}
+                    bigVideo={bigVideoEl}
+                    insetKind={insetKind}
+                    onInsetError={onInsetError}
                   >
                     <VideoPanel
-                      ref={videoRef}
+                      ref={setBigVideo}
                       slug={slug}
                       videos={videos}
                       primaryBeepTime={primaryBeep}
                       activeIndex={activeVideoIndex}
-                      onActiveIndexChange={setActiveVideoIndex}
+                      onActiveIndexChange={(i) => {
+                        const v = videos[i];
+                        if (v) pip.focus(v.video_id);
+                      }}
                       videoSrc={videoSrc}
                       onPlaybackError={() => {
                         if (activeVideo && videoSrc.includes("kind=scrub")) scrub.markFailed(activeVideo);
@@ -2068,27 +2012,7 @@ export function Audit() {
                       mediaOnDesktop={project?.origin === "desktop"}
                       gridMode={false}
                       onGridModeToggle={handleGridModeToggle}
-                      onSecondaryRef={handleSecondaryRef}
-                      onSecondaryBuffering={handleSecondaryBuffering}
-                      onPrimaryTimeUpdate={handlePrimaryTimeUpdate}
                       showHeader={false}
-                      renderCamOverlay={(video, index) => {
-                        const state = camSyncStates[index] ?? "no_beep";
-                        const offsetSeconds =
-                          index === 0 || video.beep_time == null || primaryBeep == null
-                            ? null
-                            : video.beep_time - primaryBeep;
-                        return (
-                          <CamSyncPill
-                            state={state}
-                            beepTime={video.beep_time}
-                            beepConfidence={video.beep_confidence}
-                            offsetSeconds={offsetSeconds}
-                            size="xs"
-                            onClick={() => openBeepReview(video)}
-                          />
-                        );
-                      }}
                       fill
                       className="size-full"
                     />
@@ -2240,8 +2164,10 @@ export function Audit() {
                 onTogglePlay={togglePlay}
                 onClose={() => setCamLayout("focus")}
                 onPickFocus={(cam) => {
-                  const idx = videos.findIndex((v) => v.video_id === cam.video_id);
-                  if (idx >= 0) setActiveVideoIndex(idx);
+                  // The picked camera goes big; the one that was big takes
+                  // the inset (a camera with no beep cannot be lined up
+                  // and changes nothing).
+                  pip.focus(cam.video_id);
                   setCamLayout("focus");
                 }}
                 renderTile={(cam, _i) => {
@@ -2263,7 +2189,7 @@ export function Audit() {
         )
       ) : null}
       <HelpOverlay open={showHelp} onClose={() => setShowHelp(false)} mode="audit" />
-      {!beepStep ? <AuditFooter onOpenHelp={() => setShowHelp(true)} /> : null}
+      {!beepStep ? <AuditFooter onOpenHelp={() => setShowHelp(true)} camera={pip.inset == null ? null : pip.counter ? "next" : "swap"} /> : null}
       {saveStatus.kind === "error" ? <SaveToast status={saveStatus} /> : null}
     </div>
   );

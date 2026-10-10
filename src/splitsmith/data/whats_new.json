@@ -1,10 +1,10 @@
 {
   "entries": [
     {
-      "id": "splits-camera-inset",
+      "id": "camera-inset",
       "date": "2026-10-10",
-      "title": "The other camera in a corner on Splits",
-      "body": "On a stage page under Splits, the other camera plays in a small window over the video. Click it or press C to swap them; playback keeps going from the same moment."
+      "title": "Other cameras in a corner of the video",
+      "body": "On a stage page under Splits and on Audit, the other cameras play in a small window over the video. Click it or press C to swap; the sound and times stay with Cam 1."
     },
     {
       "id": "audit-controls-on-the-timeline",
