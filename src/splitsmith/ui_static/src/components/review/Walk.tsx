@@ -16,12 +16,10 @@ import { isTypingTextTarget } from "@/lib/audit-input";
 import { snapToLeadingEdge, type SnapPeaks } from "@/lib/peak-snap";
 import type { DecodedAudio } from "@/lib/useDecodedAudio";
 import {
-  BURST_LEVEL_FRAC,
   CLOSEUP_HALF_S,
   DETAIL_HALF_S,
   WALK_DECIDED_EVENT,
   WALK_METHOD,
-  closeupScale,
   countCheck,
   decisionsFrom,
   isDecided,
@@ -32,7 +30,9 @@ import {
   stopTime,
   typicalShotLevel,
   walkActionForKey,
+  nearestStop,
   walkStops,
+  type WalkScope,
   windowBins,
   type WalkDecision,
   type WalkStop,
@@ -66,13 +66,17 @@ export interface WalkProps {
   audio: DecodedAudio | null;
   /** Beside the stop, above the guide: the page's video. */
   aside?: ReactNode;
+  /** What this walk visits (lib/walk ``defaultScope``); the page remounts the
+   *  walk when it changes. */
+  scope: WalkScope;
+  onScopeChange: (scope: WalkScope) => void;
 }
 
 export function Walk(props: WalkProps) {
   const { markers, peaks, savedEvents, from, expectedRounds, busy } = props;
   // The stops are fixed when the walk opens, so a decision never moves the
   // cursor's ground; a burst marked as a shot binds to its new marker.
-  const [stops] = useState<WalkStop[]>(() => walkStops(markers, peaks, from));
+  const [stops] = useState<WalkStop[]>(() => walkStops(markers, peaks, from, props.scope));
   const [bound, setBound] = useState<Record<string, string>>({});
   const [decisions, setDecisions] = useState<WalkDecision[]>(() => decisionsFrom(savedEvents));
   const level = useMemo(() => typicalShotLevel(markers, peaks, from), [markers, peaks, from]);
@@ -219,6 +223,25 @@ export function Walk(props: WalkProps) {
   }, [stop, stops, index, state, time, marker, decisions, decidedCount, busy, armed, check.ok, peaks, markerFor, makeShot, place, toggleGuide, props]);
 
 
+  const scopeButton = (
+    <Button
+      size="sm"
+      variant="ghost"
+      onClick={() => props.onScopeChange(props.scope === "all" ? "shots" : "all")}
+      title={
+        props.scope === "all"
+          ? "Visit the kept shots only"
+          : "Also visit every rejected candidate and every loud sound nobody marked"
+      }
+    >
+      {props.scope === "all" ? "Kept shots only" : "Walk every sound"}
+    </Button>
+  );
+  const scopeLine =
+    props.scope === "all"
+      ? "Walking every candidate and every loud sound: the shots were snapped from another camera, or their count is off."
+      : "Walking the kept shots: a person labelled this audio and the count matches. The whole stage below shows everything else.";
+
   const guideButton = (
     <Button size="sm" variant="ghost" onClick={toggleGuide} aria-pressed={guideOpen}>
       {guideOpen ? "Hide guide" : "Guide"}
@@ -296,14 +319,15 @@ export function Walk(props: WalkProps) {
           peaks={peaks}
           center={peaks.duration / 2}
           half={peaks.duration / 2}
-          scale={Math.max(1e-6, level)}
+          level={level}
+          fit="stage"
           markers={markers}
           currentId={null}
           currentTime={null}
           candidateTime={null}
           foot={null}
           numbered
-          height={90}
+          cssHeight={CONTEXT_HEIGHT}
         />
       </>,
     );
@@ -346,6 +370,7 @@ export function Walk(props: WalkProps) {
           {expectedRounds != null ? ` of ${expectedRounds} rounds` : ""}
         </span>
         <span className="ml-auto flex gap-1">
+          {scopeButton}
           {guideButton}
           <Button size="sm" variant="ghost" onClick={props.onExit}>
             Leave the walk
@@ -353,6 +378,7 @@ export function Walk(props: WalkProps) {
         </span>
       </div>
 
+      <p className="text-xs text-muted">{scopeLine}</p>
       <div
         className={
           prompt.tone === "warn"
@@ -389,38 +415,60 @@ export function Walk(props: WalkProps) {
       </div>
 
       <Strip
+        label="80 ms around the shot, ms from the red line: compare with the guide's examples"
+        audio={props.audio}
+        peaks={peaks}
+        center={time}
+        half={DETAIL_HALF_S}
+        level={level}
+        fit="window"
+        {...mark}
+        onPlace={place}
+        tickMs={10}
+        cssHeight={CLOSE_HEIGHT}
+      />
+      <Strip
         label="300 ms around the stop"
         audio={props.audio}
         peaks={peaks}
         center={stop.time}
         half={CLOSEUP_HALF_S}
-        scale={closeupScale(peaks, stop.time, level)}
+        level={level}
+        fit="window"
         {...mark}
         onPlace={place}
-        height={112}
+        tickMs={50}
+        cssHeight={CLOSE_HEIGHT}
       />
       <Strip
-        label="40 ms around the onset"
-        audio={props.audio}
-        peaks={peaks}
-        center={time}
-        half={DETAIL_HALF_S}
-        scale={Math.max(1e-6, BURST_LEVEL_FRAC * level, ...windowBins(peaks, time, 0.06).map((b) => b.v))}
-        {...mark}
-        onPlace={place}
-        height={84}
-      />
-      <Strip
-        label="3 s of the stage, shots numbered"
+        label="3 s of the stage, shots numbered, at the stage's shot level"
         audio={props.audio}
         peaks={peaks}
         center={time}
         half={1.5}
-        scale={Math.max(1e-6, level)}
+        level={level}
+        fit="stage"
         {...mark}
         foot={null}
         numbered
-        height={70}
+        cssHeight={CONTEXT_HEIGHT}
+      />
+      <Strip
+        label="The whole stage: click to go to the nearest stop"
+        audio={props.audio}
+        peaks={peaks}
+        center={peaks.duration / 2}
+        half={peaks.duration / 2}
+        level={level}
+        fit="stage"
+        {...mark}
+        foot={null}
+        numbered
+        onPick={(t) => {
+          const i = nearestStop(stops, t);
+          if (i >= 0) setIndex(i);
+        }}
+        cssHeight={CONTEXT_HEIGHT}
       />
       <p className="text-xs text-muted">
         Red: this stop (dashed when it is not a shot) · white: kept shots · grey dashed: rejected candidates ·
@@ -431,33 +479,47 @@ export function Walk(props: WalkProps) {
   );
 }
 
-/** One window of the stage: the wave itself when the audio is decoded (the
- *  shape the guide's figures show), else its per-millisecond level; every
- *  marker in it, the rise foot as a thin reference and the current shot on
- *  top. A click places the shot there when ``onPlace`` is given. */
+/** The strips' heights follow the window: the two close-ups are where the
+ *  decision is made, so they take what the screen can give. */
+const CLOSE_HEIGHT = "clamp(140px, 21vh, 300px)";
+const CONTEXT_HEIGHT = "clamp(64px, 9vh, 130px)";
+/** viewBox height: every y below is in these units, stretched to the CSS height. */
+const H = 100;
+
+/** One window of the stage: the wave itself when the audio is decoded,
+ *  drawn like the guide's example figures (a line through every sample,
+ *  ``fit="window"`` scaled to the window's own loudest point, ms ticks from
+ *  the stop), else its per-millisecond level; every marker in it, the rise
+ *  foot as a reference and the current shot on top. ``fit="stage"`` scales
+ *  to the stage's typical shot instead, so shots compare with each other.
+ *  A click places the shot there when ``onPlace`` is given. */
 function Strip({
   label,
   audio,
   peaks,
   center,
   half,
-  scale,
+  level,
+  fit,
   markers,
   currentId,
   currentTime,
   candidateTime,
   foot,
   onPlace,
+  onPick,
   numbered = false,
-  height,
+  tickMs,
+  cssHeight,
 }: {
   label: string;
   audio: DecodedAudio | null;
   peaks: SnapPeaks;
   center: number;
   half: number;
-  /** Full scale, as a share of the clip's loudest sample. */
-  scale: number;
+  /** The stage's typical shot level, as a share of the clip's loudest sample. */
+  level: number;
+  fit: "window" | "stage";
   markers: ReadonlyArray<AuditMarker>;
   currentId: string | null;
   currentTime: number | null;
@@ -465,55 +527,95 @@ function Strip({
   candidateTime: number | null;
   foot: number | null;
   onPlace?: (t: number) => void;
+  /** A click picks this time (the overview's jump to a stop). */
+  onPick?: (t: number) => void;
   /** Number the kept shots, in time order over the whole stage. */
   numbered?: boolean;
-  height: number;
+  /** Ticks every this many ms, counted from the stop (0 at the red line). */
+  tickMs?: number;
+  cssHeight: string;
 }) {
   const t0 = center - half;
   const span = 2 * half;
   const x = (t: number) => ((t - t0) / span) * 1000;
-  const mid = height / 2;
+  const mid = H / 2;
   const inView = (t: number) => t >= t0 && t <= t0 + span;
   const others = markers.filter((m) => m.id !== currentId && inView(m.time));
   const kept = useMemo(
     () => markers.filter((m) => m.kind !== "rejected").sort((a, b) => a.time - b.time),
     [markers],
   );
+  const zero = currentTime ?? candidateTime;
+
+  // The window's loudest point, in the clip's units (the level's and the
+  // normalized samples' alike).
+  const windowMax = useMemo(() => {
+    if (audio) {
+      const { samples, sampleRate, maxAbs } = audio;
+      const s0 = Math.max(0, Math.floor(t0 * sampleRate));
+      const s1 = Math.min(samples.length, Math.ceil((t0 + span) * sampleRate));
+      let m = 0;
+      for (let i = s0; i < s1; i++) m = Math.max(m, Math.abs(samples[i]));
+      return m / maxAbs;
+    }
+    return Math.max(0, ...windowBins(peaks, center, half).map((b) => b.v));
+  }, [audio, peaks, t0, span, center, half]);
+  const scale = Math.max(1e-6, fit === "window" ? windowMax * 1.05 : level);
 
   const wave = useMemo(() => {
     if (!audio) return null;
     const { samples, sampleRate, maxAbs } = audio;
     const s0 = Math.max(0, Math.floor(t0 * sampleRate));
     const s1 = Math.min(samples.length, Math.ceil((t0 + span) * sampleRate));
-    const cols = Math.max(1, Math.min(1000, s1 - s0));
-    let d = "";
+    const y = (v: number) => (mid - Math.max(-1, Math.min(1, v / maxAbs / scale)) * (mid - 1)).toFixed(2);
+    const px = (i: number) => (((i / sampleRate - t0) / span) * 1000).toFixed(2);
+    if (s1 - s0 <= 24000) {
+      // A line through every sample: the guide's figures, sample for sample.
+      const pts: string[] = [];
+      for (let i = s0; i < s1; i++) pts.push(`${px(i)},${y(samples[i])}`);
+      return { kind: "line" as const, d: pts.length ? `M${pts.join("L")}` : "" };
+    }
+    // Too many samples for a line: the outline of the wave, filled.
+    const cols = 1200;
+    const top: string[] = [];
+    const bottom: string[] = [];
     for (let c = 0; c < cols; c++) {
       const a = s0 + Math.floor(((s1 - s0) * c) / cols);
       const b = Math.max(a + 1, s0 + Math.floor(((s1 - s0) * (c + 1)) / cols));
       let lo = Infinity;
       let hi = -Infinity;
       for (let i = a; i < b && i < samples.length; i++) {
-        const v = samples[i] / maxAbs / scale;
-        if (v < lo) lo = v;
-        if (v > hi) hi = v;
+        if (samples[i] < lo) lo = samples[i];
+        if (samples[i] > hi) hi = samples[i];
       }
       if (lo === Infinity) continue;
-      const px = x((a + b) / 2 / sampleRate);
-      const yHi = mid - Math.max(-1, Math.min(1, hi)) * (mid - 2);
-      const yLo = mid - Math.max(-1, Math.min(1, lo)) * (mid - 2);
-      d += `M${px.toFixed(1)},${yHi.toFixed(1)}L${px.toFixed(1)},${Math.max(yLo, yHi + 0.6).toFixed(1)}`;
+      top.push(`${px(a)},${y(hi)}`);
+      bottom.push(`${px(a)},${y(lo)}`);
     }
-    return d;
-    // x depends only on t0 and span.
+    return { kind: "fill" as const, d: top.length ? `M${top.join("L")}L${bottom.reverse().join("L")}Z` : "" };
+    // x positions depend only on t0 and span.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [audio, t0, span, scale, mid]);
+  }, [audio, t0, span, scale]);
 
   const bins = useMemo(() => (audio ? [] : windowBins(peaks, center, half)), [audio, peaks, center, half]);
   const binW = peaks.duration / Math.max(1, peaks.peaks.length);
 
+  const ticks: Array<{ t: number; ms: number }> = [];
+  if (tickMs && zero != null) {
+    const step = tickMs / 1000;
+    for (let k = Math.ceil((t0 - zero) / step); zero + k * step <= t0 + span; k++) {
+      ticks.push({ t: zero + k * step, ms: Math.round(k * tickMs) });
+    }
+  }
+  const loudness =
+    fit === "window" && level > 0 ? ` · loudest point ${Math.round((windowMax / level) * 100)} % of a typical shot` : "";
+
   return (
     <div>
-      <div className="mb-0.5 text-xs text-muted">{label}</div>
+      <div className="mb-0.5 text-xs text-muted">
+        {label}
+        {loudness}
+      </div>
       <div className="relative">
         {numbered
           ? kept.map((m, i) =>
@@ -529,31 +631,51 @@ function Strip({
             )
           : null}
         <svg
-          viewBox={`0 0 1000 ${height}`}
+          viewBox={`0 0 1000 ${H}`}
           preserveAspectRatio="none"
           className={
             onPlace
               ? "block w-full cursor-crosshair select-none rounded-sm bg-surface"
-              : "block w-full select-none rounded-sm bg-surface"
+              : onPick
+                ? "block w-full cursor-pointer select-none rounded-sm bg-surface"
+                : "block w-full select-none rounded-sm bg-surface"
           }
-          style={{ height }}
+          style={{ height: cssHeight }}
           role="img"
           aria-label={label}
           onClick={
-            onPlace
+            onPlace || onPick
               ? (e) => {
                   const r = e.currentTarget.getBoundingClientRect();
-                  onPlace(t0 + ((e.clientX - r.left) / r.width) * span);
+                  const t = t0 + ((e.clientX - r.left) / r.width) * span;
+                  if (onPlace) onPlace(t);
+                  else onPick!(t);
                 }
               : undefined
           }
         >
+          {ticks.map((k) => (
+            <line
+              key={k.ms}
+              x1={x(k.t)}
+              x2={x(k.t)}
+              y1={0}
+              y2={H}
+              className="stroke-current text-rule"
+              strokeWidth={1}
+              vectorEffect="non-scaling-stroke"
+            />
+          ))}
           <line x1={0} x2={1000} y1={mid} y2={mid} className="stroke-current text-rule" strokeWidth={1} vectorEffect="non-scaling-stroke" />
           {wave != null ? (
-            <path d={wave} className="stroke-current text-ink-2" strokeWidth={1} fill="none" vectorEffect="non-scaling-stroke" />
+            wave.kind === "line" ? (
+              <path d={wave.d} className="stroke-current text-ink" strokeWidth={1} fill="none" vectorEffect="non-scaling-stroke" />
+            ) : (
+              <path d={wave.d} className="fill-current text-ink-2" stroke="none" />
+            )
           ) : (
             bins.map((b) => {
-              const h = Math.min(1, b.v / scale) * (mid - 2);
+              const h = Math.min(1, b.v / scale) * (mid - 1);
               return (
                 <rect
                   key={b.t}
@@ -572,8 +694,8 @@ function Strip({
               key={m.id}
               x1={x(m.time)}
               x2={x(m.time)}
-              y1={numbered ? 14 : 0}
-              y2={height}
+              y1={numbered ? 16 : 0}
+              y2={H}
               className={m.kind === "rejected" ? "stroke-current text-muted" : "stroke-current text-ink"}
               strokeWidth={m.kind === "rejected" ? 1 : 2}
               strokeDasharray={m.kind === "rejected" ? "4 4" : undefined}
@@ -585,7 +707,7 @@ function Strip({
               x1={x(foot)}
               x2={x(foot)}
               y1={0}
-              y2={height}
+              y2={H}
               className="stroke-current text-status-complete"
               strokeWidth={2}
               vectorEffect="non-scaling-stroke"
@@ -596,7 +718,7 @@ function Strip({
               x1={x(candidateTime)}
               x2={x(candidateTime)}
               y1={0}
-              y2={height}
+              y2={H}
               className="stroke-current text-led"
               strokeWidth={2}
               strokeDasharray="6 4"
@@ -608,13 +730,26 @@ function Strip({
               x1={x(currentTime)}
               x2={x(currentTime)}
               y1={0}
-              y2={height}
+              y2={H}
               className="stroke-current text-led"
               strokeWidth={2}
               vectorEffect="non-scaling-stroke"
             />
           ) : null}
         </svg>
+        {ticks.length > 0 ? (
+          <div className="relative h-4 font-mono text-xs text-muted">
+            {ticks.map((k) => (
+              <span
+                key={k.ms}
+                className="absolute top-0 -translate-x-1/2"
+                style={{ left: `${(x(k.t) / 1000) * 100}%` }}
+              >
+                {k.ms}
+              </span>
+            ))}
+          </div>
+        ) : null}
       </div>
     </div>
   );

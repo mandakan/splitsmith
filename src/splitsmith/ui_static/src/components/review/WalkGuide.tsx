@@ -72,7 +72,10 @@ export function WalkGuide({ onClose }: { onClose: () => void }) {
             override only what the rule gets wrong.
           </p>
           <p className="text-ink">
-            The walk visits every candidate, every kept shot and every loud sound nobody marked, in time
+            On a fixture a person labelled, whose shot count matches the stage&apos;s rounds, the walk
+            visits the kept shots; the whole stage at the bottom shows everything else. On one snapped from
+            another camera, or with a count that is off, it visits every candidate, every kept shot and
+            every loud sound nobody marked; the switch at the top changes it. Stops come in time
             order. Decide each one, then <kbd>Enter</kbd>. Decisions save as you go; reopening the fixture
             resumes at the first stop you have not confirmed. At the end, check the shot count and sign off.
           </p>
@@ -137,20 +140,21 @@ export function WalkGuide({ onClose }: { onClose: () => void }) {
               dashed grey ones rejected candidates; green is the rise foot.
             </p>
             <p className="mt-1 text-muted">
-              The strips and the waveform below draw the <strong>level</strong>, not the wave: each bar is the
-              loudest sample in its millisecond, mirrored around the centre line. &quot;Rising&quot; means the
-              level climbing out of the background. The rise foot is computed on this level.
+              The two close-ups draw the wave itself, each scaled to fill its box (the label says how loud
+              the window really is against the stage&apos;s shots); the stage strip is drawn at the
+              stage&apos;s shot level, so shots compare with each other. The 80 ms one is the window of the
+              examples below, with the same ms ticks.
+            </p>
+            <p className="mt-1 text-muted">
+              Times are kept to the millisecond, and the rise foot is the start of the first millisecond
+              that rises: the green and red lines can sit up to 1 ms before the first sample that visibly
+              swings. That is the grid, not a misplacement; splits are shown to 0.01 s.
             </p>
           </div>
         </div>
 
         <div className="space-y-3">
           <h3 className="font-semibold text-ink">Examples (real fixture audio, the green line is the shot time)</h3>
-          <p className="text-muted">
-            These draw the wave itself, sample by sample, so the swings above and below the line are the
-            sound&apos;s pressure. The strips show the same moments as a level: where the wave starts swinging
-            wider than the background, the level starts rising.
-          </p>
           {EXAMPLES.map((e) => (
             <figure key={e.src} className="space-y-1">
               <a href={e.src} target="_blank" rel="noreferrer" title="Open full size">

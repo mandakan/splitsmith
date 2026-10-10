@@ -7,6 +7,9 @@ import {
   WALK_METHOD,
   countCheck,
   decisionsFrom,
+  defaultScope,
+  isSnapped,
+  nearestStop,
   isDecided,
   placementOf,
   stopFlags,
@@ -132,6 +135,37 @@ describe("decisions", () => {
     const d = [{ key: "manual-abc", state: "shot" as const, time: 2.5 }];
     expect(isDecided("shot", 2.5, d)).toBe(true);
     expect(isDecided("shot", 2.502, d)).toBe(false);
+  });
+});
+
+describe("scope", () => {
+  const peaks = envelope(3, [0.5, 1.0, 1.5]);
+  const markers = [marker("cand-1", "detected", 0.5), marker("cand-2", "rejected", 1.0)];
+
+  it("visits only the kept shots in the shots scope, and everything in the all scope", () => {
+    expect(walkStops(markers, peaks, 0, "shots").map((s) => s.key)).toEqual(["cand-1"]);
+    expect(walkStops(markers, peaks, 0, "all").map((s) => s.key)).toEqual(["cand-1", "cand-2", "burst-1500"]);
+  });
+
+  it("walks everything on a snapped fixture or a count that is off, else the kept shots", () => {
+    expect(defaultScope({ snapped: true, kept: 24, expectedRounds: 24 })).toBe("all");
+    expect(defaultScope({ snapped: false, kept: 26, expectedRounds: 24 })).toBe("all");
+    expect(defaultScope({ snapped: false, kept: 24, expectedRounds: 24 })).toBe("shots");
+    expect(defaultScope({ snapped: false, kept: 24, expectedRounds: null })).toBe("shots");
+  });
+
+  it("knows a snapped fixture by its anchor or its promotion history, like review_status", () => {
+    expect(isSnapped({ anchor: { fixture_slug: "x" } })).toBe(true);
+    expect(isSnapped({ history: [{ action: "promote-from-anchor" }] })).toBe(true);
+    expect(isSnapped({ history: [{ action: "manual-edit" }] })).toBe(false);
+    expect(isSnapped({})).toBe(false);
+  });
+
+  it("jumps from the overview to the nearest stop", () => {
+    const stops = [{ time: 0.5 }, { time: 1.0 }, { time: 1.5 }];
+    expect(nearestStop(stops, 1.2)).toBe(1);
+    expect(nearestStop(stops, 9)).toBe(2);
+    expect(nearestStop([], 1)).toBe(-1);
   });
 });
 

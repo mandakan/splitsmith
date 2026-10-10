@@ -34,12 +34,14 @@ function Harness({
   initial,
   savedEvents = [],
   expectedRounds = null,
+  scope = "all",
   onDone = () => {},
   record,
 }: {
   initial: AuditMarker[];
   savedEvents?: Array<{ kind: string; payload: Record<string, unknown> }>;
   expectedRounds?: number | null;
+  scope?: "all" | "shots";
   onDone?: () => void;
   record: (kind: string, payload: Record<string, unknown>) => void;
 }) {
@@ -76,6 +78,8 @@ function Harness({
         guideOpen={guideOpen}
         onToggleGuide={toggle}
         audio={null}
+        scope={scope}
+        onScopeChange={() => {}}
       />
     </>
   );

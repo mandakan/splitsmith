@@ -70,12 +70,15 @@ import { placeTime, type SnapPeaks } from "@/lib/peak-snap";
 import { displayBins, reviewMaxZoom } from "@/lib/reviewZoom";
 import {
   BEEP_GUARD_S,
+  defaultScope,
+  isSnapped,
   WALK_DECIDED_EVENT,
   WALK_METHOD,
   nextFixtureToReview,
   readGuideOpen,
   walkHref,
   writeGuideOpen,
+  type WalkScope,
 } from "@/lib/walk";
 import { useReleaseMediaOnUnmount } from "@/lib/utils";
 
@@ -114,6 +117,11 @@ export function Review() {
     });
   }, []);
   const [videoLarge, setVideoLarge] = useState(false);
+  // What the walk visits: set once per loaded fixture (editing shots must not
+  // flip it mid-walk), overridden by the walk's switch.
+  const [initialScope, setInitialScope] = useState<WalkScope>("all");
+  const [scopeOverride, setScopeOverride] = useState<WalkScope | null>(null);
+  const walkScope = scopeOverride ?? initialScope;
   useEffect(() => {
     if (!videoLarge) return;
     const onKey = (e: KeyboardEvent) => {
@@ -273,6 +281,14 @@ export function Review() {
         loadedPathRef.current = fixturePath;
         setAudit(a);
         setMarkers(deriveMarkers(a));
+        setScopeOverride(null);
+        setInitialScope(
+          defaultScope({
+            snapped: isSnapped(a as never),
+            kept: (a.shots ?? []).filter((s) => s.time != null).length,
+            expectedRounds: (a as unknown as { stage_rounds?: { expected?: number } }).stage_rounds?.expected ?? null,
+          }),
+        );
         setAuditLoaded(true);
       })
       .catch((err) => {
@@ -1142,7 +1158,7 @@ export function Review() {
         <CardContent className="space-y-4">
           {walkMode && peaks && edgePeaks ? (
             <Walk
-              key={fixturePath}
+              key={`${fixturePath}:${walkScope}`}
               markers={markers}
               peaks={edgePeaks}
               savedEvents={audit.audit_events ?? []}
@@ -1165,6 +1181,8 @@ export function Review() {
               onToggleGuide={toggleGuide}
               audio={decodedAudio}
               aside={videoBox}
+              scope={walkScope}
+              onScopeChange={setScopeOverride}
             />
           ) : walkMode && peaks ? (
             <div className="flex items-center gap-2 text-sm text-muted">
