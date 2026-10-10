@@ -89,7 +89,7 @@ function Card({
         )}
       </span>
       {help ? <span className="text-sm text-muted">{help}</span> : null}
-      <Strip colors={[c.accent, c.accent_fill, c.split, c.split_good, c.split_slow]} series={s.series} />
+      <Strip colors={[c.accent, c.accent_fill, c.split, c.split_good]} series={s.series} />
     </button>
   );
 }
