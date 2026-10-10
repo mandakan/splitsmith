@@ -9,10 +9,16 @@
  * was clipped by any `overflow-hidden` ancestor, which is every `Table`,
  * so a row menu near the bottom of a table was cut off. It sits on the
  * drawer layer, above a takeover (the phone Audit) and a sheet.
+ *
+ * It opens below the anchor, and flips above it when the room below
+ * cannot hold it and the room above is larger (lib/menuPlacement): a
+ * menu from a control near the bottom of the screen, like Audit's band
+ * header, would otherwise run off the screen.
  */
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
+import { menuTop } from "@/lib/menuPlacement";
 import { cn } from "@/lib/utils";
 
 export const menuItemClass =
@@ -24,6 +30,10 @@ export interface MenuProps {
   children: ReactNode;
   align?: "left" | "right";
   className?: string;
+  /** ``dialog`` for a popover that holds no menu items (Audit's marker
+   *  key), named by ``label``. Default ``menu``. */
+  role?: "menu" | "dialog";
+  label?: string;
 }
 
 interface Position {
@@ -32,7 +42,7 @@ interface Position {
   right?: number;
 }
 
-export function Menu({ open, onClose, children, align = "left", className }: MenuProps) {
+export function Menu({ open, onClose, children, align = "left", className, role = "menu", label }: MenuProps) {
   const ref = useRef<HTMLDivElement | null>(null);
   const markerRef = useRef<HTMLSpanElement | null>(null);
   const [pos, setPos] = useState<Position | null>(null);
@@ -46,11 +56,9 @@ export function Menu({ open, onClose, children, align = "left", className }: Men
       const anchor = markerRef.current?.parentElement;
       if (!anchor) return;
       const r = anchor.getBoundingClientRect();
-      setPos(
-        align === "right"
-          ? { top: r.bottom + 4, right: window.innerWidth - r.right }
-          : { top: r.bottom + 4, left: r.left },
-      );
+      const height = ref.current?.getBoundingClientRect().height ?? 0;
+      const top = menuTop(r, height, window.innerHeight);
+      setPos(align === "right" ? { top, right: window.innerWidth - r.right } : { top, left: r.left });
     };
     place();
     window.addEventListener("resize", place);
@@ -93,7 +101,8 @@ export function Menu({ open, onClose, children, align = "left", className }: Men
         ? createPortal(
             <div
               ref={ref}
-              role="menu"
+              role={role}
+              aria-label={label}
               style={pos ?? { visibility: "hidden" }}
               className={cn(
                 "fixed z-drawer flex min-w-52 flex-col gap-0.5 rounded-[10px] border border-rule-strong bg-surface p-1.5 text-md text-ink-2 shadow-lg",

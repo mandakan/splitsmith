@@ -1654,8 +1654,8 @@ payload, never from triage (owner-only). Audit (``pages/Audit.tsx``,
 ``components/audit/*``, ``lib/auditStep.ts``): beep confirmation is its
 step 1 (``BeepStep`` on ``useBeepQueue``; ``/beep-review`` redirects
 there on desktop, the phone keeps ``MobileBeepReview``); its own top row
-is ``BeepPreview`` left and the candidate radiogroup right, bounded the
-same ``lg:h-[max(300px,calc(100dvh-560px))]`` way as step 2's below, and
+is ``BeepPreview`` left and the candidate radiogroup right, bounded by
+``lg:h-[max(300px,calc(100dvh-560px))]`` (step 2's own bound is below), and
 its waveform is the shared timeline band too
 (``components/audit/BeepTimeline``, spec 2026-10-09 PR 3): a candidates
 row of pins over a seekable Audio row, origin at the detector's beep,
@@ -1663,14 +1663,27 @@ one pick per release. ``BeepWaveformPicker`` and its own zoom code
 remain for ``MobileBeepReview`` and ``StageTimeSection``, never for
 ``BeepStep``. Step 2's top row is
 the video (``MultiCamColumn``, a 16:9 tile capped at
-``max-h-[max(240px,calc(100dvh-620px))]``, letterboxed) and ``ShotList``,
+``max-h-[max(240px,calc(100dvh-620px))]`` below lg, letterboxed) and
+``ShotList``; on lg the row is ``max(300px,calc(100dvh-502px))``, and
+``max(398px,...)`` with two or more cameras (#1359: two cameras at
+1440x900 end the band's Audio row at the sticky footer, 863; a taller
+screen gives the extra height to the video),
 and the shared timeline band (spec 2026-10-09) underneath now hosts the
 waveform: the audio track carries ``WaveformTrack`` and ``MarkerLayer``
 together, pins are on a Flags row that does not seek, above it, and the
 band's own ruler and
 zoom replaced Audit's static ruler and ``TransportLine``'s
-``ZoomControls``; a new control belongs on ``TransportLine``'s overflow
-menu or ``CurrentShotLine``, a new per-shot signal still on ``ShotList``
+``ZoomControls``. Since #1359 the band's header row is Audit's only
+control row (no strip above the band, no transport row in
+``MultiCamColumn``): ``TransportLine`` is its ``toolbar`` (play, clock,
+loop, camera label, the "show" filter), ``LegendKey`` its ``actionsStart``
+(swatches + Key, labels in a popover), the help ``?`` its ``actionsEnd``,
+and ``TransportMenuItems`` its ``menuExtra`` in the band's one ``...``
+menu (frame steps, auto-step, full-resolution video, the trim / detect
+action, then ``lib/auditBand`` readouts: peaks and linked cameras). A new
+control belongs in that header if it fits one row at 1440 wide, else in
+that menu, or on ``CurrentShotLine``; ``components/ui/Menu`` flips upward
+when the room below cannot hold it. A new per-shot signal still goes on ``ShotList``
 through ``lib/auditStep.shotRows``; ``_after_beep_reviewed`` in
 ``ui/server.py`` is the one place a confirm chains trim and detection.
 Footage (``pages/Ingest.tsx``,

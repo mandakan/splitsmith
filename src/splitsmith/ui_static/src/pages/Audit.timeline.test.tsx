@@ -204,7 +204,7 @@ describe("Audit on the timeline band", () => {
     const grid = document.querySelector('[class*="lg:grid-cols-[minmax(0,1fr)_380px]"]') as HTMLElement;
     // The row's height, not the shot list's length, sets where the band
     // starts: one row track that may shrink below its content.
-    expect(grid).toHaveClass("lg:h-[max(300px,calc(100dvh-560px))]", "lg:grid-rows-[minmax(0,1fr)]");
+    expect(grid).toHaveClass("lg:h-[max(300px,calc(100dvh-502px))]", "lg:grid-rows-[minmax(0,1fr)]");
     expect(grid).not.toHaveClass("lg:items-start");
     const [video, shots] = Array.from(grid.children) as HTMLElement[];
     expect(video).toHaveClass("lg:h-full");
@@ -228,8 +228,8 @@ describe("Audit on the timeline band", () => {
     const grid = document.querySelector('[class*="lg:grid-cols-[minmax(0,1fr)_380px]"]') as HTMLElement;
     // The secondary strip and the sync row cost about 150 px, so the floor
     // grows by that much and the primary tile keeps a usable height.
-    expect(grid).toHaveClass("lg:h-[max(450px,calc(100dvh-560px))]");
-    expect(grid).not.toHaveClass("lg:h-[max(300px,calc(100dvh-560px))]");
+    expect(grid).toHaveClass("lg:h-[max(398px,calc(100dvh-502px))]");
+    expect(grid).not.toHaveClass("lg:h-[max(300px,calc(100dvh-502px))]");
   });
 
   it("adds a manual marker on a double-click in the audio row", async () => {
@@ -331,6 +331,42 @@ describe("Audit on the timeline band", () => {
     expect(screen.queryByText("2.3x")).toBeNull();
     expect(screen.getAllByRole("button", { name: "Fit" })).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: "Zoom in" })).toHaveLength(1);
+  });
+
+  // #1359: the transport, the camera label and the legend are the band's
+  // header; its one menu carries the band's switches, then Audit's.
+  it("puts the transport in the band header and one menu on the band", async () => {
+    renderPage();
+    const band = await screen.findByTestId("timeline");
+    const header = band.firstElementChild as HTMLElement;
+    expect(within(header).getByRole("button", { name: "Play" })).toBeInTheDocument();
+    expect(within(header).getByRole("button", { name: /Loop off/ })).toBeInTheDocument();
+    expect(within(header).getByRole("button", { name: /show 2 detected/ })).toBeInTheDocument();
+    expect(within(header).getByRole("button", { name: "Marker key" })).toBeInTheDocument();
+    expect(within(header).getByRole("button", { name: "Keyboard shortcuts (?)" })).toBeInTheDocument();
+    expect(within(header).queryByText("Waveform")).toBeNull();
+    // One play button and one "..." menu on the page: the old transport row
+    // and the camera column's footer are gone.
+    expect(screen.getAllByRole("button", { name: /^(Play|Pause)/ })).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "More" })).toBeNull();
+    expect(screen.queryByTestId("cam-transport")).toBeNull();
+    fireEvent.click(within(header).getByRole("button", { name: "Timeline options" }));
+    const items = within(screen.getByRole("menu")).getAllByRole("menuitemcheckbox").map((e) => e.textContent ?? "");
+    expect(items[0]).toMatch(/Wheel zooms/);
+    expect(items[1]).toMatch(/Follow playhead/);
+    expect(items[2]).toMatch(/Auto-step/);
+    expect(within(screen.getByRole("menu")).getByRole("button", { name: "Step frame back" })).toBeInTheDocument();
+    expect(within(screen.getByRole("menu")).getByText(/peaks · \d+\.\d\d s/)).toBeInTheDocument();
+  });
+
+  it("toggles loop with L and from the band header alike", async () => {
+    renderPage();
+    const band = await screen.findByTestId("timeline");
+    const header = band.firstElementChild as HTMLElement;
+    fireEvent.click(within(header).getByRole("button", { name: "Loop off (L)" }));
+    expect(within(header).getByRole("button", { name: "Loop on (L)" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.keyDown(window, { key: "l" });
+    expect(within(header).getByRole("button", { name: "Loop off (L)" })).toBeInTheDocument();
   });
 
   it("never zooms out below Fit from the keyboard", async () => {

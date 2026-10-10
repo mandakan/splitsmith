@@ -42,7 +42,7 @@ import { BeepStep } from "@/components/audit/BeepStep";
 import { CurrentShotLine } from "@/components/audit/CurrentShotLine";
 import { PrereqGate } from "@/components/audit/PrereqGate";
 import { ShotList } from "@/components/audit/ShotList";
-import { TransportLine } from "@/components/audit/TransportLine";
+import { HelpButton, LegendKey, TransportLine, TransportMenuItems } from "@/components/audit/TransportLine";
 import {
   CamSyncPill,
   type CamSyncState,
@@ -65,7 +65,6 @@ import { WaveformTrack } from "@/components/timeline/WaveformTrack";
 import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/Chip";
 import { Kbd } from "@/components/ui/Kbd";
-import { Label } from "@/components/ui/Label";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Portal } from "@/components/ui/Portal";
 import {
@@ -82,6 +81,7 @@ import {
   type StageVideo,
 } from "@/lib/api";
 import { detectAnomalies, keptShotsFromMarkers } from "@/lib/anomalies";
+import { bandPipelineAction, bandReadouts } from "@/lib/auditBand";
 import { onlyBookkeepingMoved } from "@/lib/auditConflict";
 import { isActiveCommand, latestForStage, REDETECT_CONFIRM } from "@/lib/desktopCommands";
 import { useDesktopCommands } from "@/lib/useDesktopCommands";
@@ -1757,6 +1757,15 @@ export function Audit() {
         : null
     : null;
   const prereqActive = prereqKind != null && stage != null && primary != null;
+  // The band menu's pipeline entry (lib/auditBand).
+  const pipelineAction = bandPipelineAction(peaks);
+  // One frame (25 ms) back or forward from the playhead, from the band header.
+  const stepFrame = (dir: -1 | 1) => {
+    const v = videoRef.current;
+    if (!v || !peaks) return;
+    const t = v.currentTime - beepOffset;
+    handleScrub(Math.min(peaks.duration, Math.max(0, t + dir * 0.025)));
+  };
   const prereqShouldShow = prereqActive;
 
   // ---- Render --------------------------------------------------------------
@@ -2006,17 +2015,23 @@ export function Audit() {
                     `fill` (h-full, object-contain) applies at every width,
                     so the video letterboxes inside the tile below lg too.
                     The row's floor follows the camera count: a second
-                    camera adds about 150 px of fixed chrome (the secondary
+                    camera adds about 100 px of fixed chrome (the secondary
                     strip or thumb row, the sync row, a taller header and
                     two gaps, measured at 1440 wide), so several cameras
-                    take a 450 px floor and the primary tile keeps about
-                    250 px. */}
+                    take a 398 px floor and the primary tile keeps about
+                    228 px, what it had before the column's transport row
+                    folded into the band header (#1359). Above the floor
+                    the row is the viewport less 502 px, the page header,
+                    the band and the footer at 1440 wide: two cameras at
+                    1440x900 end the band's Audio row at the sticky footer,
+                    and a taller screen gives its extra height to the video
+                    rather than to empty space under the band. */}
                 <div
                   className={cn(
                     "grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:grid-rows-[minmax(0,1fr)]",
                     videos.length > 1
-                      ? "lg:h-[max(450px,calc(100dvh-560px))]"
-                      : "lg:h-[max(300px,calc(100dvh-560px))]",
+                      ? "lg:h-[max(398px,calc(100dvh-502px))]"
+                      : "lg:h-[max(300px,calc(100dvh-502px))]",
                   )}
                 >
                   <MultiCamColumn
@@ -2032,18 +2047,6 @@ export function Audit() {
                     }}
                     layout={camLayout}
                     onLayoutChange={setCamLayout}
-                    isPlaying={isPlaying}
-                    loopMode={loopMode}
-                    currentTime={currentTime}
-                    duration={peaks?.duration ?? 0}
-                    onTogglePlay={togglePlay}
-                    onToggleLoop={() => setLoopMode((v) => !v)}
-                    onStepFrame={(dir) => {
-                      const v = videoRef.current;
-                      if (!v || !peaks) return;
-                      const t = v.currentTime - beepOffset;
-                      handleScrub(Math.min(peaks.duration, Math.max(0, t + dir * 0.025)));
-                    }}
                   >
                     <VideoPanel
                       ref={videoRef}
@@ -2099,52 +2102,42 @@ export function Audit() {
                   />
                 </div>
 
-                <div className="min-w-0 overflow-hidden rounded-[10px] border border-rule bg-surface">
-                  {/* No bottom rule: TransportLine draws its own top one. */}
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2">
-                    <Label tone="ink">{chips?.camera ?? "Head cam"}</Label>
-                    <Label>
-                      {displayPeaks.peaks.length} peaks &middot; {displayPeaks.duration.toFixed(2)} s
-                    </Label>
-                    {peaksLoading ? (
-                      <Label tone="live" aria-live="polite">
-                        Loading
-                      </Label>
-                    ) : null}
-                    <span className="ml-auto flex flex-wrap gap-3 text-sm text-muted">
-                      <Legend className="bg-beep" label="Beep" />
-                      <Legend className="border border-beep bg-transparent" label="Timer stop" />
-                      <Legend className="bg-ink-2" label="Shot" />
-                      <Legend className="bg-manual" label="Manual" />
-                      <Legend className="border border-rule-strong bg-transparent" label="Rejected" />
-                      <Legend className="bg-live" label="Flag" />
-                      <Legend className="bg-led" label="Current" />
-                    </span>
-                  </div>
-                  <TransportLine
-                    isPlaying={isPlaying}
-                    onTogglePlay={togglePlay}
-                    currentTime={currentTime}
-                    duration={displayPeaks.duration}
-                    filters={filters}
-                    counts={{
-                      detected: detectedCount,
-                      rejected: rejectedCount,
-                      manual: manualCount,
-                      beep: auditBeep != null ? 1 : 0,
-                    }}
-                    onFiltersChange={setFilters}
-                    peeking={peeking}
-                    onPeekStart={() => setPeeking(true)}
-                    onPeekEnd={() => setPeeking(false)}
-                    kAutoProgress={kAutoProgress}
-                    onToggleKAuto={() => setKAutoProgress((v) => !v)}
-                    fullResVideo={scrub.fullRes}
-                    onToggleFullResVideo={scrub.available ? () => scrub.setFullRes(!scrub.fullRes) : undefined}
-                    onOpenHelp={() => setShowHelp(true)}
-                    menuExtra={
-                      <>
-                        {peaks && !peaks.trimmed ? (
+                <Timeline
+                  title={null}
+                  toolbar={
+                    <TransportLine
+                      isPlaying={isPlaying}
+                      onTogglePlay={togglePlay}
+                      currentTime={currentTime}
+                      duration={displayPeaks.duration}
+                      loopMode={loopMode}
+                      onToggleLoop={() => setLoopMode((v) => !v)}
+                      camera={chips?.camera ?? "Head cam"}
+                      loading={peaksLoading}
+                      filters={filters}
+                      counts={{
+                        detected: detectedCount,
+                        rejected: rejectedCount,
+                        manual: manualCount,
+                        beep: auditBeep != null ? 1 : 0,
+                      }}
+                      onFiltersChange={setFilters}
+                      peeking={peeking}
+                      onPeekStart={() => setPeeking(true)}
+                      onPeekEnd={() => setPeeking(false)}
+                    />
+                  }
+                  actionsStart={<LegendKey />}
+                  actionsEnd={<HelpButton onOpenHelp={() => setShowHelp(true)} />}
+                  menuExtra={
+                    <TransportMenuItems
+                      onStepFrame={stepFrame}
+                      kAutoProgress={kAutoProgress}
+                      onToggleKAuto={() => setKAutoProgress((v) => !v)}
+                      fullResVideo={scrub.fullRes}
+                      onToggleFullResVideo={scrub.available ? () => scrub.setFullRes(!scrub.fullRes) : undefined}
+                      action={
+                        pipelineAction === "trim" ? (
                           <TrimNowBadge
                             slug={slug}
                             stageNumber={stage.stage_number}
@@ -2155,8 +2148,7 @@ export function Audit() {
                               reloadPeaks();
                             }}
                           />
-                        ) : null}
-                        {peaks && peaks.trimmed ? (
+                        ) : pipelineAction === "detect" ? (
                           <DetectShotsBadge
                             slug={slug}
                             stageNumber={stage.stage_number}
@@ -2173,14 +2165,15 @@ export function Audit() {
                                 : undefined
                             }
                           />
-                        ) : null}
-                      </>
-                    }
-                  />
-                </div>
-
-                <Timeline
-                  title="Waveform"
+                        ) : null
+                      }
+                      readouts={bandReadouts({
+                        peakCount: displayPeaks.peaks.length,
+                        duration: displayPeaks.duration,
+                        cameras: videos.length,
+                      })}
+                    />
+                  }
                   duration={displayPeaks.duration}
                   origin={auditBeep ?? 0}
                   fps={30}
@@ -2273,15 +2266,6 @@ export function Audit() {
       {!beepStep ? <AuditFooter onOpenHelp={() => setShowHelp(true)} /> : null}
       {saveStatus.kind === "error" ? <SaveToast status={saveStatus} /> : null}
     </div>
-  );
-}
-
-function Legend({ className, label }: { className: string; label: string }) {
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      <i aria-hidden className={cn("inline-block size-2 rounded-full", className)} />
-      {label}
-    </span>
   );
 }
 
