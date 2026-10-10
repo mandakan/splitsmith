@@ -761,13 +761,16 @@ def apply_labels(audit_path: Path, labels: list[CandidateLabel]) -> dict[str, in
     return counts
 
 
-def confirm_review(audit_path: Path) -> str:
+def confirm_review(audit_path: Path, method: str | None = None) -> str:
     """Stamp ``review.confirmed_at`` on a fixture JSON and return it.
 
     The review queue's "Approve to corpus" action: an explicit human
     sign-off that clears ``FixtureRecord.needs_review`` without
     requiring a label pass. Same atomic ``.tmp`` + ``.bak`` rotation
     as ``apply_labels``; the rest of the payload is preserved.
+    ``method`` records how it was checked (the review walk's version, so a
+    flawed walk can re-flag exactly what it signed off); a sign-off without
+    one drops an earlier method.
     """
     audit = json.loads(audit_path.read_text(encoding="utf-8"))
     stamp = datetime.now(UTC).isoformat()
@@ -780,6 +783,10 @@ def confirm_review(audit_path: Path) -> str:
     # ``reviewed_only`` reads ``status``.
     review["status"] = REVIEWED
     review["reviewed_at"] = stamp
+    if method:
+        review["method"] = method
+    else:
+        review.pop("method", None)
 
     tmp = audit_path.with_suffix(audit_path.suffix + ".tmp")
     backup = audit_path.with_suffix(audit_path.suffix + ".bak")

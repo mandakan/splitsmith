@@ -5656,6 +5656,15 @@ class DevReviewQueueItem(BaseModel):
     review_status: Literal["needs_review", "reviewed"] = "reviewed"
     priority: float | None = None
     reasons: list[str] = []
+    # The fixture's source video when it is on this disk (the external
+    # volume mounted); the review walk shows it beside the waveform.
+    video_path: str | None = None
+
+
+class DevReviewConfirmBody(BaseModel):
+    """Optional body for the queue's sign-off: how the fixture was checked."""
+
+    method: str | None = Field(default=None, max_length=40)
 
 
 class DevReviewQueueResponse(BaseModel):
@@ -19275,6 +19284,7 @@ def create_app(
                 review_status="needs_review" if fx.review_status == "needs_review" else "reviewed",
                 priority=fx.review_priority,
                 reasons=fx.review_reasons,
+                video_path=(fx.source_video if fx.source_video and Path(fx.source_video).is_file() else None),
             )
             if item.status == "pending":
                 pending.append(item)
@@ -19294,16 +19304,17 @@ def create_app(
         return DevReviewQueueResponse(pending=pending, flagged=flagged, done=done)
 
     @app.post("/api/dev/review-queue/{slug}/confirm")
-    def dev_review_confirm(slug: str) -> JSONResponse:
+    def dev_review_confirm(slug: str, body: DevReviewConfirmBody | None = None) -> JSONResponse:
         """The queue's "Approve to corpus": stamp ``review.confirmed_at``
         on the fixture JSON so ``needs_review`` clears without a label
         pass. Registered alongside the other always-available /api/dev
-        endpoints -- the queue itself renders without ``--lab``.
+        endpoints -- the queue itself renders without ``--lab``. ``method``
+        (the review walk's version) is recorded with the sign-off.
         """
         fx = next((f for f in _lab_for_dev.list_fixtures() if f.slug == slug), None)
         if fx is None:
             raise HTTPException(status_code=404, detail=f"unknown fixture: {slug}")
-        stamp = _lab_for_dev.confirm_review(Path(fx.audit_path))
+        stamp = _lab_for_dev.confirm_review(Path(fx.audit_path), method=body.method if body else None)
         return JSONResponse({"slug": slug, "confirmed_at": stamp, "status": "done"})
 
     # Desktop-to-hosted sync router (#631). Included after every middleware
