@@ -9,8 +9,8 @@
  * user to the relevant stage's beep section so they can listen to
  * the ranked candidates and pick.
  *
- * The panel is intentionally light. The candidate cards + audio
- * playback already live in :file:`BeepSection.tsx` -- this component
+ * The panel is intentionally light. The candidate list and audio
+ * playback live in Audit's beep step (BeepStep) -- this component
  * is just the index that tells the user what's left to do.
  *
  * Empty state: when the queue is empty (every primary either auto-

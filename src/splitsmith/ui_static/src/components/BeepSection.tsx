@@ -1,25 +1,11 @@
 /* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
- * Per-video beep detection + correction (issue #22, multi-cam ingest).
- *
- * The beep timestamp anchors the trim window for *every* angle and -- for
- * the primary -- the shot-detection input window for the audit screen.
- * Without per-video beep alignment, secondaries can't be slipped into the
- * audit timeline (a phone shooting at 30 fps and a head-cam at 60 fps need
- * to land on the same physical instant). This component is rendered once
- * per video on the stage card so each angle gets the same controls:
- *
- *   - Status: none / auto / manual
- *   - Detect-beep action (or re-detect, with confirmation when overriding manual)
- *   - Manual override: numeric input (seconds, ms precision)
- *   - Per-video 1 s preview clip around the chosen beep
- *   - Ranked candidate list (when the detector returned alternatives)
- *
- * Waveform picker + audio verifier are primary-only because the project
- * caches a stage-level audit WAV / peaks bundle from the primary's audio.
- * Secondaries fall back to the numeric input + preview clip; that's
- * enough for the multi-cam alignment use case (the beep is loud and
- * visible in the preview).
+ * BeepWaveformPicker, this file's one export: a waveform, its own
+ * <audio> player and snap-to-beep, for picking a time on one video's
+ * audio. The phone's beep review
+ * (MobileBeepReview) and the stage-time entry (StageTimeSection) use it;
+ * the desktop Audit's beep step picks on the shared timeline band instead
+ * (BeepTimeline).
  */
 
 import {
@@ -30,41 +16,28 @@ import {
   useState,
   type VideoHTMLAttributes,
 } from "react";
-import { Link } from "react-router-dom";
 import {
   Check,
-  ChevronDown,
-  ChevronRight,
   Crosshair,
   Loader2,
   Pause,
-  Pencil,
   Play,
-  RefreshCw,
   Sparkles,
-  Trash2,
   Volume2,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { useConfirm } from "@/components/useConfirm";
 import { Waveform } from "@/components/Waveform";
 import { useSpacePlayPause } from "@/lib/keyboard";
 import { zoomActionForKey } from "@/lib/zoomKeys";
-import { cn, useReleaseMediaOnUnmount } from "@/lib/utils";
+import { useReleaseMediaOnUnmount } from "@/lib/utils";
 import {
   ApiError,
   api,
-  asSourceUnreachable,
-  type BeepCandidate,
   type BeepSnapResult,
-  type Job,
-  type MatchProject,
   type PeaksResult,
-  type StageVideo,
 } from "@/lib/api";
 
 // Wraps a <video> with the buffer-release hook so conditional preview
@@ -77,592 +50,7 @@ function ReleasingPreviewVideo(
   return <video ref={ref} {...props} />;
 }
 
-interface Props {
-  slug: string;
-  stageNumber: number;
-  /** The video this section operates on. Beep fields, candidate lists and
-   *  the preview clip are all read from / written to this video; the
-   *  per-video API endpoints carry ``video.video_id`` so jobs and caches
-   *  stay scoped to one camera at a time. */
-  video: StageVideo;
-  onProjectUpdate: (next: MatchProject) => void;
-  setError: (msg: string | null) => void;
-  /** Drop the section's own border/background when nested inside a video
-   *  panel that already provides the single visual frame. */
-  bare?: boolean;
-}
-
-export function BeepSection({
-  slug,
-  stageNumber,
-  video,
-  onProjectUpdate,
-  setError,
-  bare = false,
-}: Props) {
-  const confirm = useConfirm();
-  // Section-local busy. Each video's beep section runs its own
-  // independent jobs (auto-queued on assignment, or user-initiated via
-  // Detect / Save / Clear), so disabling controls page-wide while one
-  // section's job is in flight blocks unrelated work like assigning the
-  // next video from the unassigned tray. Keeping busy local means each
-  // section disables only its own buttons; the jobs rail still surfaces
-  // the running job globally.
-  const [busy, setBusy] = useState(false);
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(video.beep_time?.toFixed(3) ?? "");
-  // Brief background highlight on the draft input whenever its value is
-  // changed by a non-typing action (waveform scrub, Snap-to-beep accept,
-  // etc.). The number itself updating is easy to miss when the user's
-  // attention is on a video preview or the Accept button; the flash
-  // makes "we just wrote a new value into the field" obvious. Drives a
-  // tailwind transition-colors fade; see the input className below.
-  const [draftFlashing, setDraftFlashing] = useState(false);
-  const [jobStatus, setJobStatus] = useState<Job | null>(null);
-  // After a beep change on a primary that already had shots detected,
-  // surface an inline banner offering to re-run shot detection. Captured
-  // from props pre-change because the override endpoint flips
-  // ``processed.shot_detect`` to false as part of clearing stale state,
-  // so the post-call shape can't tell us shots existed before.
-  const [pendingShotRedetect, setPendingShotRedetect] = useState<{
-    deltaMs: number;
-  } | null>(null);
-  const [redetecting, setRedetecting] = useState(false);
-  const flashDraftInput = useCallback(() => {
-    // Drop-then-set across an rAF tick so a second pick in quick
-    // succession re-triggers the fade instead of being a no-op (state
-    // is already true from the previous flash).
-    setDraftFlashing(false);
-    requestAnimationFrame(() => setDraftFlashing(true));
-  }, []);
-  useEffect(() => {
-    if (!draftFlashing) return;
-    const t = setTimeout(() => setDraftFlashing(false), 700);
-    return () => clearTimeout(t);
-  }, [draftFlashing]);
-  // Auto-collapse the section once the beep is reviewed so finished cards
-  // don't dominate the stage view; the user can click the chevron to
-  // re-open. Re-collapses when "Mark reviewed" is clicked mid-session.
-  const [collapsed, setCollapsed] = useState(video.beep_reviewed);
-  const isPrimary = video.role === "primary";
-  const videoId = video.video_id;
-
-  useEffect(() => {
-    setDraft(video.beep_time?.toFixed(3) ?? "");
-  }, [video.beep_time]);
-
-  useEffect(() => {
-    if (video.beep_reviewed) setCollapsed(true);
-  }, [video.beep_reviewed]);
-
-  // After a page reload, an in-flight detect-beep job is still running on
-  // the server. Surface it instead of letting the user click "Detect beep"
-  // again -- the server now dedupes anyway, but the SPA showing the
-  // progress is the difference between confidence and confusion. We match
-  // on video_id too so each camera's section picks up its own job.
-  useEffect(() => {
-    let cancelled = false;
-    api
-      .listJobs()
-      .then(async (jobs) => {
-        if (cancelled) return;
-        const active = jobs.find(
-          (j) =>
-            j.kind === "detect_beep" &&
-            j.shooter_slug === slug &&
-            j.stage_number === stageNumber &&
-            j.video_id === videoId &&
-            (j.status === "pending" || j.status === "running"),
-        );
-        if (!active) return;
-        setJobStatus(active);
-        setBusy(true);
-        try {
-          const final = await api.pollJob(active.id, setJobStatus);
-          if (cancelled) return;
-          if (final.status === "succeeded") onProjectUpdate(await api.getProject(slug));
-          else if (final.status === "failed") setError(final.error ?? "Beep detection failed");
-        } finally {
-          if (!cancelled) {
-            setJobStatus(null);
-            setBusy(false);
-          }
-        }
-      })
-      .catch(() => {
-        /* the action buttons still work; nothing to surface */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [slug, stageNumber, videoId, onProjectUpdate, setError]);
-
-  const detect = async (force: boolean) => {
-    setBusy(true);
-    setError(null);
-    try {
-      const job = await api.detectBeepForVideo(slug, stageNumber, videoId, force);
-      setJobStatus(job);
-      const final = await api.pollJob(job.id, setJobStatus);
-      if (final.status === "failed") {
-        setError(final.error ?? "Beep detection failed");
-      } else {
-        onProjectUpdate(await api.getProject(slug));
-      }
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 409) {
-        const ok = await confirm({
-          title: "Replace manual beep override?",
-          body: "This video has a manual beep override. Replace it with the auto-detected value?",
-          confirmLabel: "Replace",
-        });
-        if (ok.confirmed) await detect(true);
-      } else {
-        const unreachable = asSourceUnreachable(e);
-        if (unreachable) {
-          setError(unreachable.message);
-        } else {
-          setError(e instanceof Error ? e.message : String(e));
-        }
-      }
-    } finally {
-      setJobStatus(null);
-      setBusy(false);
-    }
-  };
-
-  // Capture pre-change "had shots" so we can offer a re-detect after the
-  // override clears the flag. Primary-only: shot detection is anchored
-  // on the primary's trim, so secondaries never invalidate shots.
-  const queueShotRedetectIfNeeded = useCallback(
-    (prevBeepTime: number | null, prevHadShots: boolean, nextBeepTime: number | null) => {
-      if (!isPrimary || !prevHadShots || nextBeepTime == null) return;
-      const deltaMs = Math.round(((nextBeepTime - (prevBeepTime ?? nextBeepTime)) * 1000));
-      setPendingShotRedetect({ deltaMs });
-    },
-    [isPrimary],
-  );
-
-  const runShotRedetect = useCallback(async () => {
-    setRedetecting(true);
-    setError(null);
-    try {
-      const job = await api.detectShots(slug, stageNumber, { reset: true });
-      const final = await api.pollJob(job.id, () => {});
-      if (final.status === "failed") {
-        setError(final.error ?? "Shot detection failed");
-      } else {
-        onProjectUpdate(await api.getProject(slug));
-      }
-      setPendingShotRedetect(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setRedetecting(false);
-    }
-  }, [stageNumber, onProjectUpdate, setError]);
-
-  const save = async () => {
-    const trimmed = draft.trim();
-    if (!trimmed) {
-      setError("Enter a beep time in seconds, e.g. 12.453");
-      return;
-    }
-    const value = Number(trimmed);
-    if (Number.isNaN(value) || value < 0) {
-      setError("Beep time must be a non-negative number of seconds");
-      return;
-    }
-    const prevBeepTime = video.beep_time;
-    const prevHadShots = isPrimary && video.processed.shot_detect;
-    setBusy(true);
-    try {
-      const updated = await api.overrideBeepForVideo(slug, stageNumber, videoId, value);
-      onProjectUpdate(updated);
-      setError(null);
-      setEditing(false);
-      queueShotRedetectIfNeeded(prevBeepTime, prevHadShots, value);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const clear = async () => {
-    setBusy(true);
-    try {
-      const updated = await api.overrideBeepForVideo(slug, stageNumber, videoId, null);
-      onProjectUpdate(updated);
-      setError(null);
-      setEditing(false);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const selectCandidate = async (time: number) => {
-    const prevBeepTime = video.beep_time;
-    const prevHadShots = isPrimary && video.processed.shot_detect;
-    setBusy(true);
-    try {
-      const updated = await api.selectBeepCandidateForVideo(slug, stageNumber, videoId, time);
-      onProjectUpdate(updated);
-      setError(null);
-      queueShotRedetectIfNeeded(prevBeepTime, prevHadShots, time);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (editing) {
-    const draftSourceTime = Number(draft);
-    const draftValid = Number.isFinite(draftSourceTime) && draftSourceTime >= 0;
-    return (
-      <div className="space-y-2 rounded-md border border-rule bg-muted/30 p-3 text-sm">
-        <div className="flex flex-wrap items-end gap-2">
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-muted">Beep time (seconds)</span>
-            <input
-              type="number"
-              step="0.001"
-              min="0"
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              className={cn(
-                "h-8 w-32 rounded-md border border-rule px-2 py-1 font-mono text-sm shadow-sm transition-colors duration-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led",
-                draftFlashing ? "bg-led/20" : "bg-bg",
-              )}
-              disabled={busy}
-              aria-label={`Beep time for stage ${stageNumber}`}
-              autoFocus
-            />
-          </label>
-          <Button size="sm" onClick={save} disabled={busy}>
-            <Check />
-            Apply
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => setEditing(false)} disabled={busy}>
-            Cancel
-          </Button>
-        </div>
-        <BeepWaveformPicker
-          slug={slug}
-          stageNumber={stageNumber}
-          videoId={videoId}
-          videoBeepTime={video.beep_time}
-          draftSourceTime={draftValid ? draftSourceTime : null}
-          onPick={(sourceTime) => {
-            setDraft(sourceTime.toFixed(3));
-            flashDraftInput();
-          }}
-          setError={setError}
-        />
-      </div>
-    );
-  }
-
-  if (!video.beep_time) {
-    // Distinguish "never tried" from "tried both detectors and got nothing".
-    // The latter is the secondary soft-fail (#112): in-stream beep_detect
-    // raised + cross-correlation either errored or fell below the
-    // auto-accept floor. Surfacing it tells the user "automatic alignment
-    // gave up; place the marker yourself" instead of letting them re-click
-    // Detect beep and watch it fail again.
-    const failed = video.beep_auto_detect_failed;
-    const conf = video.beep_alignment_confidence;
-    const failedHint = failed
-      ? conf != null
-        ? `Auto-detect + cross-align failed (conf ${conf.toFixed(2)}). Pick the beep on the waveform.`
-        : "Auto-detect failed and the camera doesn't overlap enough with the primary to align. Pick the beep on the waveform."
-      : null;
-    return (
-      <div
-        className={cn(
-          "flex flex-wrap items-center gap-2 px-2 py-1.5 text-xs",
-          !bare && "rounded-md border border-rule/60 bg-muted/20",
-        )}
-      >
-        <Badge variant={failed ? "statusWarning" : "statusNotStarted"} className="gap-1">
-          {failed ? "! Auto-detect failed" : "○ No beep yet"}
-        </Badge>
-        {jobStatus ? (
-          <JobProgress job={jobStatus} />
-        ) : (
-          <span className="text-muted">
-            {failedHint ??
-              (isPrimary
-                ? "Audit screen needs this. Run detection or set manually."
-                : "Needed to sync this camera to the primary timeline.")}
-          </span>
-        )}
-        <div className="ml-auto flex gap-1">
-          {failed ? (
-            <Button size="sm" onClick={() => setEditing(true)} disabled={busy}>
-              <Pencil />
-              Pick on waveform
-            </Button>
-          ) : (
-            <Button size="sm" onClick={() => detect(false)} disabled={busy}>
-              <RefreshCw />
-              Detect beep
-            </Button>
-          )}
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={failed ? () => detect(false) : () => setEditing(true)}
-            disabled={busy}
-          >
-            {failed ? (
-              <>
-                <RefreshCw />
-                Retry detect
-              </>
-            ) : (
-              <>
-                <Pencil />
-                Set manually
-              </>
-            )}
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  const isManual = video.beep_source === "manual";
-  const isAligned = video.beep_source === "aligned";
-  const reviewed = video.beep_reviewed;
-  // Three-state pill (#71): manual entry counts as reviewed
-  // automatically; auto-detect and cross-aligned suggestions leave the
-  // user a yellow "review" pill until they confirm. Pure visual nudge --
-  // pipeline doesn't gate on it.
-  const pillVariant = reviewed
-    ? "statusComplete"
-    : isManual
-      ? "statusComplete"
-      : "statusWarning";
-  const sourceLabel = isManual ? "user" : isAligned ? "aligned" : "auto";
-  const pillLabel = reviewed
-    ? `beep · ${sourceLabel} · reviewed`
-    : isManual
-      ? "beep · user"
-      : isAligned
-        ? "beep · aligned · verify"
-        : "beep · review";
-  const conf = video.beep_alignment_confidence;
-  const pillTitle =
-    isAligned && conf != null
-      ? `Cross-correlation alignment to primary (conf ${conf.toFixed(2)}). Verify on the waveform before marking reviewed.`
-      : undefined;
-  // Sanity-check disagreement: in-stream succeeded on a secondary AND
-  // cross-correlation also produced a high-confidence answer that
-  // disagrees with it by more than 250 ms. The most common cause is the
-  // in-stream detector mistaking a steel hit / RO command for the
-  // buzzer. Flagged as a yellow strip with the cross-align suggestion
-  // so the user can compare both candidates on the waveform.
-  const deltaMs = video.beep_alignment_delta_ms;
-  const disagreement =
-    !isManual && deltaMs != null && Math.abs(deltaMs) > 250;
-  const crossAlignSuggestion =
-    disagreement && video.beep_time != null ? video.beep_time - deltaMs / 1000 : null;
-
-  const markReviewed = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const updated = await api.setBeepReviewed(slug, stageNumber, videoId, true);
-      onProjectUpdate(updated);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const unmarkReviewed = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      const updated = await api.setBeepReviewed(slug, stageNumber, videoId, false);
-      onProjectUpdate(updated);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const shotRedetectBanner = pendingShotRedetect ? (
-    <ShotRedetectBanner
-      deltaMs={pendingShotRedetect.deltaMs}
-      busy={redetecting}
-      onRedetect={() => void runShotRedetect()}
-      onDismiss={() => setPendingShotRedetect(null)}
-    />
-  ) : null;
-
-  if (collapsed) {
-    return (
-      <div
-        className={cn(
-          "px-2 py-1.5 text-xs",
-          !bare && "rounded-md border border-rule/60 bg-muted/20",
-        )}
-      >
-        {shotRedetectBanner}
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge variant={pillVariant} className="gap-1">
-            <Check className="size-3" />
-            {pillLabel}
-          </Badge>
-          <span className="font-mono tabular-nums">{video.beep_time.toFixed(3)}s</span>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="ml-auto"
-            onClick={() => setCollapsed(false)}
-            title="Show beep candidates and preview"
-          >
-            <ChevronDown />
-            Expand
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div
-      className={cn(
-        "space-y-2 px-2 py-1.5 text-xs",
-        !bare && "rounded-md border border-rule/60 bg-muted/20",
-      )}
-    >
-      {shotRedetectBanner}
-      <div className="flex flex-wrap items-center gap-2">
-        <Badge variant={pillVariant} className="gap-1" title={pillTitle}>
-          <Check className="size-3" />
-          {pillLabel}
-        </Badge>
-        <span className="font-mono tabular-nums">{video.beep_time.toFixed(3)}s</span>
-        {video.beep_peak_amplitude != null ? (
-          <span className="text-muted" title="Peak amplitude on the bandpassed envelope">
-            peak {video.beep_peak_amplitude.toFixed(2)}
-          </span>
-        ) : null}
-        {jobStatus ? <JobProgress job={jobStatus} /> : null}
-        <div className="ml-auto flex gap-1">
-          {!reviewed ? (
-            <Button
-              size="sm"
-             
-              onClick={() => void markReviewed()}
-              disabled={busy}
-              title="Confirm the detected beep is correct after listening to the preview below"
-            >
-              <Check />
-              Mark reviewed
-            </Button>
-          ) : (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => void unmarkReviewed()}
-              disabled={busy}
-              title="Mark this beep as needing another review"
-            >
-              Unmark
-            </Button>
-          )}
-          <Button size="sm" variant="ghost" onClick={() => setEditing(true)} disabled={busy}>
-            <Pencil />
-            Edit
-          </Button>
-          <Button size="sm" variant="ghost" onClick={() => detect(false)} disabled={busy}>
-            <RefreshCw />
-            Re-detect
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={clear}
-            disabled={busy}
-            title="Clear the beep timestamp (back to no-beep state)"
-          >
-            <Trash2 />
-          </Button>
-          {reviewed ? (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => setCollapsed(true)}
-              title="Collapse this card; the beep is reviewed and stays applied"
-              aria-label="Collapse beep card"
-            >
-              <ChevronRight />
-            </Button>
-          ) : null}
-        </div>
-      </div>
-      {disagreement && crossAlignSuggestion != null ? (
-        <AlignmentDisagreement
-          slug={slug}
-          stageNumber={stageNumber}
-          videoId={videoId}
-          inStreamTime={video.beep_time!}
-          crossAlignTime={crossAlignSuggestion}
-          deltaMs={deltaMs!}
-          confidence={conf}
-          onUseCrossAlign={async () => {
-            const prevBeepTime = video.beep_time;
-            const prevHadShots = isPrimary && video.processed.shot_detect;
-            setBusy(true);
-            try {
-              const updated = await api.overrideBeepForVideo(
-                slug,
-                stageNumber,
-                videoId,
-                crossAlignSuggestion,
-              );
-              onProjectUpdate(updated);
-              setError(null);
-              queueShotRedetectIfNeeded(prevBeepTime, prevHadShots, crossAlignSuggestion);
-            } catch (e) {
-              setError(e instanceof Error ? e.message : String(e));
-            } finally {
-              setBusy(false);
-            }
-          }}
-          busy={busy}
-        />
-      ) : null}
-      <BeepCandidates
-        slug={slug}
-        stageNumber={stageNumber}
-        videoId={videoId}
-        candidates={video.beep_candidates}
-        currentTime={video.beep_time}
-        busy={busy}
-        onSelect={selectCandidate}
-      />
-      <BeepPreview
-        slug={slug}
-        stageNumber={stageNumber}
-        videoId={videoId}
-        beepTime={video.beep_time}
-        isPrimary={isPrimary}
-      />
-    </div>
-  );
-}
-
-/** Combined waveform + audio player + snap-to-beep, primary-only.
+/** Combined waveform + audio player + snap-to-beep.
  *
  *  Workflow:
  *    1. User plays the audio (controls below the waveform). The playhead
@@ -703,8 +91,6 @@ export function BeepWaveformPicker({
   showFallbackBeepMarker = true,
   instructions,
   ariaLabel,
-  externalMediaRef,
-  fillHeight = false,
 }: {
   slug: string;
   stageNumber: number;
@@ -725,19 +111,6 @@ export function BeepWaveformPicker({
   instructions?: string;
   /** Override the canvas aria-label for screen readers. */
   ariaLabel?: string;
-  /** Optional external media element (audio OR video) for the picker
-   *  to drive. When provided, the picker skips rendering its own
-   *  <audio> element -- the parent owns playback (same pattern as
-   *  the audit page's MultiCamColumn <video>). Space, click-to-scrub,
-   *  zoom, and the initial seek all act on this element. When not
-   *  provided, the picker creates its own internal <audio src=
-   *  videoAudioUrl(...)> as before -- StageTimeSection relies on
-   *  that path. */
-  externalMediaRef?: { current: HTMLAudioElement | HTMLVideoElement | null };
-  /** Grow the waveform vertically (200 px instead of 80 px) so the
-   *  picker box fills the row when paired with a taller sibling like
-   *  BeepReview's <video aspect-video>. */
-  fillHeight?: boolean;
 }) {
   const [peaks, setPeaks] = useState<PeaksResult | null>(null);
   const [loading, setLoading] = useState(true);
@@ -767,14 +140,10 @@ export function BeepWaveformPicker({
   }, []);
   const [snapping, setSnapping] = useState(false);
   const [proposal, setProposal] = useState<BeepSnapResult | null>(null);
-  // The picker's playback handle. When the parent owns the media
-  // element (BeepReview passes its <video> ref), we just alias the
-  // external ref; otherwise we create our own <audio> below. Either
-  // way, the rest of the picker (togglePlay, scrub, init seek,
-  // Space hook) reads / writes through ``mediaRef``.
-  const internalAudioRef = useRef<HTMLAudioElement | null>(null);
-  const mediaRef = externalMediaRef ?? internalAudioRef;
-  useReleaseMediaOnUnmount(internalAudioRef);
+  // The picker's own <audio> (rendered below); togglePlay, scrub, the
+  // initial seek and the Space hook all read / write through it.
+  const mediaRef = useRef<HTMLAudioElement | null>(null);
+  useReleaseMediaOnUnmount(mediaRef);
   const rafRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -870,28 +239,6 @@ export function BeepWaveformPicker({
   // actually having peaks loaded so Space falls through to the
   // browser default while the picker is in its empty / loading state.
   useSpacePlayPause(togglePlay, peaks != null);
-
-  // When the parent owns the media element (BeepReview), the
-  // ``playing`` / ``localTime`` state need a separate event bridge --
-  // the inline ``onPlay``/``onPause`` handlers below only fire on the
-  // internal <audio>. Listen on the external element so the picker's
-  // playhead + Play button label still reflect the truth.
-  useEffect(() => {
-    if (!externalMediaRef) return;
-    const el = externalMediaRef.current;
-    if (!el) return;
-    const onPlay = () => setPlaying(true);
-    const onPause = () => setPlaying(false);
-    const onEnded = () => setPlaying(false);
-    el.addEventListener("play", onPlay);
-    el.addEventListener("pause", onPause);
-    el.addEventListener("ended", onEnded);
-    return () => {
-      el.removeEventListener("play", onPlay);
-      el.removeEventListener("pause", onPause);
-      el.removeEventListener("ended", onEnded);
-    };
-  }, [externalMediaRef, peaks]);
 
   // Click / drag = seek audio AND set the marker. Marker and the
   // numeric input both read from the draft state in the parent, so they
@@ -1041,7 +388,7 @@ export function BeepWaveformPicker({
           onScrubEnd={handleScrubEnd}
           beepTime={markerLocal}
           pixelsPerSecond={pxPerSec}
-          height={fillHeight ? 200 : 80}
+          height={80}
           ariaLabel={ariaLabel ?? `Beep editor waveform for stage ${stageNumber}`}
         />
       </div>
@@ -1071,62 +418,52 @@ export function BeepWaveformPicker({
           <span>out</span>
         </span>
       </div>
-      {externalMediaRef ? null : (
-        <audio
-          ref={internalAudioRef}
-          src={api.videoAudioUrl(slug, stageNumber, videoId)}
-          preload="metadata"
-          onPlay={() => setPlaying(true)}
-          onPause={() => setPlaying(false)}
-          onEnded={() => setPlaying(false)}
-          onLoadedMetadata={() => {
-            // Retry the initial seek when audio metadata lands
-            // after peaks did. Without this, the picker shows the
-            // beep marker but Play starts at 0.
-            const el = internalAudioRef.current;
-            if (!el) return;
-            if (Math.abs(el.currentTime - localTime) > 0.05) {
-              try {
-                el.currentTime = localTime;
-              } catch {
-                /* unreachable -- metadata loaded by definition */
-              }
+      <audio
+        ref={mediaRef}
+        src={api.videoAudioUrl(slug, stageNumber, videoId)}
+        preload="metadata"
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => setPlaying(false)}
+        onLoadedMetadata={() => {
+          // Retry the initial seek when audio metadata lands
+          // after peaks did. Without this, the picker shows the
+          // beep marker but Play starts at 0.
+          const el = mediaRef.current;
+          if (!el) return;
+          if (Math.abs(el.currentTime - localTime) > 0.05) {
+            try {
+              el.currentTime = localTime;
+            } catch {
+              /* unreachable -- metadata loaded by definition */
             }
-          }}
-          controls
-          className="w-full"
-        />
-      )}
-      {/* Play / Snap buttons live in this row only when the picker
-          owns its own <audio>. When the parent passes an external
-          media element (e.g. BeepReview's <video controls>), the
-          play affordance + Space toggle already exist on that
-          element -- a redundant button row just eats vertical space. */}
-      {externalMediaRef ? null : (
-        <div className="flex flex-wrap items-center gap-2 pt-1">
+          }
+        }}
+        controls
+        className="w-full"
+      />
+      <div className="flex flex-wrap items-center gap-2 pt-1">
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={togglePlay}
+          title="Play / pause the audio"
+        >
+          {playing ? <Pause /> : <Play />}
+          {playing ? "Pause" : "Play"}
+        </Button>
+        {snapEnabled ? (
           <Button
             size="sm"
-            variant="outline"
-            onClick={togglePlay}
-            title="Play / pause the audio"
+            onClick={() => void requestSnap()}
+            disabled={draftSourceTime == null || snapping}
+            title="Snap the marker to the rise-foot of the nearest beep tone (±1.5s)"
           >
-            {playing ? <Pause /> : <Play />}
-            {playing ? "Pause" : "Play"}
+            {snapping ? <Loader2 className="animate-spin" /> : <Crosshair />}
+            Snap to beep
           </Button>
-          {snapEnabled ? (
-            <Button
-              size="sm"
-             
-              onClick={() => void requestSnap()}
-              disabled={draftSourceTime == null || snapping}
-              title="Snap the marker to the rise-foot of the nearest beep tone (±1.5s)"
-            >
-              {snapping ? <Loader2 className="animate-spin" /> : <Crosshair />}
-              Snap to beep
-            </Button>
-          ) : null}
-        </div>
-      )}
+        ) : null}
+      </div>
       {proposal != null ? (
         <SnapProposal
           slug={slug}
@@ -1242,400 +579,3 @@ function ProposalPreview({
     />
   );
 }
-
-function BeepCandidates({
-  slug,
-  stageNumber,
-  videoId,
-  candidates,
-  currentTime,
-  busy,
-  onSelect,
-}: {
-  slug: string;
-  stageNumber: number;
-  videoId: string;
-  candidates: BeepCandidate[];
-  currentTime: number | null;
-  busy: boolean;
-  onSelect: (time: number) => void | Promise<void>;
-}) {
-  const hasAlternatives = candidates.length > 1;
-  const [open, setOpen] = useState(false);
-
-  const activeIndex = (() => {
-    if (currentTime == null) return -1;
-    let best = -1;
-    let bestDelta = Infinity;
-    candidates.forEach((c, i) => {
-      const d = Math.abs(c.time - currentTime);
-      if (d < bestDelta) {
-        bestDelta = d;
-        best = i;
-      }
-    });
-    return bestDelta <= 1e-3 ? best : -1;
-  })();
-
-  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
-  const [previewError, setPreviewError] = useState(false);
-  useEffect(() => {
-    setPreviewError(false);
-  }, [previewIndex, stageNumber, videoId]);
-  useEffect(() => {
-    if (previewIndex != null && previewIndex >= candidates.length) {
-      setPreviewIndex(null);
-    }
-  }, [candidates.length, previewIndex]);
-
-  // Guarded here (not above) so every hook runs unconditionally: with a
-  // single candidate there are no alternatives to browse.
-  if (!hasAlternatives) return null;
-
-  return (
-    <div className="rounded-md border border-rule/40 bg-bg/40">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-1 px-2 py-1 text-xs text-muted hover:text-ink"
-        aria-expanded={open}
-        aria-controls={`beep-candidates-${stageNumber}-${videoId}`}
-        title="Silence-preference ranked; pick a different one if the auto-winner is wrong"
-      >
-        {open ? (
-          <ChevronDown className="size-3" aria-hidden />
-        ) : (
-          <ChevronRight className="size-3" aria-hidden />
-        )}
-        <span>
-          {candidates.length - 1} alternate
-          {candidates.length - 1 === 1 ? "" : "s"}
-        </span>
-      </button>
-      {open ? (
-        <>
-          <ul
-            id={`beep-candidates-${stageNumber}-${videoId}`}
-            className="divide-y divide-rule/40 border-t border-rule/40"
-          >
-            {candidates.map((c, i) => (
-              <CandidateRow
-                key={`${c.time.toFixed(6)}-${i}`}
-                candidate={c}
-                index={i}
-                isActive={i === activeIndex}
-                isPreviewing={i === previewIndex}
-                busy={busy}
-                onTogglePreview={() =>
-                  setPreviewIndex((cur) => (cur === i ? null : i))
-                }
-                onSelect={() => onSelect(c.time)}
-              />
-            ))}
-          </ul>
-          {previewIndex != null && candidates[previewIndex] ? (
-            <div className="border-t border-rule/40 p-2">
-              <div className="mb-1 text-xs text-muted">
-                Preview #{previewIndex + 1} -- {candidates[previewIndex].time.toFixed(3)}s
-              </div>
-              {previewError ? (
-                <div className="flex items-center gap-1 rounded-md border border-dashed border-rule/60 bg-bg/40 px-2 py-1 text-xs text-muted">
-                  <Sparkles className="size-3" />
-                  Preview unavailable (no cached clip yet)
-                </div>
-              ) : (
-                <ReleasingPreviewVideo
-                  key={`${stageNumber}:${videoId}:${candidates[previewIndex].time.toFixed(3)}`}
-                  src={api.videoBeepPreviewUrl(
-                    slug,
-                    stageNumber,
-                    videoId,
-                    candidates[previewIndex].time,
-                  )}
-                  className="aspect-video w-full max-w-sm rounded-md border border-rule/60 bg-black object-contain"
-                  playsInline
-                  controls
-                  autoPlay
-                  preload="metadata"
-                  aria-label={`Preview for candidate ${previewIndex + 1}`}
-                  onError={() => setPreviewError(true)}
-                />
-              )}
-            </div>
-          ) : null}
-        </>
-      ) : null}
-    </div>
-  );
-}
-
-function CandidateRow({
-  candidate,
-  index,
-  isActive,
-  isPreviewing,
-  busy,
-  onTogglePreview,
-  onSelect,
-}: {
-  candidate: BeepCandidate;
-  index: number;
-  isActive: boolean;
-  isPreviewing: boolean;
-  busy: boolean;
-  onTogglePreview: () => void;
-  onSelect: () => void | Promise<void>;
-}) {
-  return (
-    <li
-      className={`px-2 py-1.5 text-xs ${isActive ? "bg-muted/40" : ""}`}
-    >
-      <div className="flex items-center gap-2">
-        <span className="w-5 shrink-0 text-muted tabular-nums">
-          #{index + 1}
-        </span>
-        <span className="font-mono tabular-nums">{candidate.time.toFixed(3)}s</span>
-        <div className="ml-auto flex shrink-0 items-center gap-1">
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={onTogglePreview}
-            aria-pressed={isPreviewing}
-            aria-label={isPreviewing ? "Hide preview" : "Preview"}
-            title={isPreviewing ? "Hide preview" : "Preview a 1 s clip"}
-            className="size-7"
-          >
-            <Play className="size-3.5" />
-          </Button>
-          {isActive ? (
-            <Badge variant="statusComplete" className="gap-1" title="Currently promoted">
-              <Check className="size-3" />
-              Selected
-            </Badge>
-          ) : (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={onSelect}
-              disabled={busy}
-              title={`Promote ${candidate.time.toFixed(3)}s as the beep`}
-            >
-              Use this
-            </Button>
-          )}
-        </div>
-      </div>
-      <div
-        className="mt-0.5 pl-7 text-[11px] text-muted"
-        title={`Calibrated detector confidence in [0, 1] (#220 layer 3a). Components: silence-preference ${candidate.silence_score.toFixed(2)} (run peak / pre-window max), tonal concentration ${candidate.tonal_score.toFixed(2)} (energy in IPSC fundamental band). Duration: ${candidate.duration_ms.toFixed(0)} ms; peak ${candidate.peak_amplitude.toFixed(3)}.`}
-      >
-        conf {candidate.confidence.toFixed(2)} &middot; tonal{" "}
-        {candidate.tonal_score.toFixed(2)} &middot;{" "}
-        {Math.round(candidate.duration_ms)} ms
-      </div>
-    </li>
-  );
-}
-
-function BeepPreview({
-  slug,
-  stageNumber,
-  videoId,
-  beepTime,
-  isPrimary,
-}: {
-  slug: string;
-  stageNumber: number;
-  videoId: string;
-  beepTime: number;
-  isPrimary: boolean;
-}) {
-  const [errored, setErrored] = useState(false);
-  useEffect(() => {
-    setErrored(false);
-  }, [stageNumber, videoId, beepTime]);
-
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      {errored ? (
-        <div className="flex items-center gap-1 rounded-md border border-dashed border-rule/60 bg-bg/40 px-2 py-1 text-muted">
-          <Sparkles className="size-3" />
-          Preview unavailable
-        </div>
-      ) : (
-        <ReleasingPreviewVideo
-          key={`${stageNumber}:${videoId}:${beepTime.toFixed(3)}`}
-          src={api.videoBeepPreviewUrl(slug, stageNumber, videoId, beepTime)}
-          className="h-40 w-64 rounded-md border border-rule/60 bg-black object-cover"
-          playsInline
-          controls
-          preload="metadata"
-          aria-label={`Beep preview for stage ${stageNumber}`}
-          title="1s preview around the detected beep -- press play to verify"
-          onError={() => setErrored(true)}
-        />
-      )}
-      {isPrimary ? (
-        <Link
-          to={`/audit/${slug}/${stageNumber}`}
-          className="inline-flex items-center gap-1 text-xs text-muted underline-offset-2 hover:text-ink hover:underline"
-          title="Open the audit screen to verify or correct this beep on the waveform"
-        >
-          <Sparkles className="size-3" />
-          Looks wrong? Refine in audit
-        </Link>
-      ) : null}
-    </div>
-  );
-}
-
-/** Sanity-check banner: in-stream beep_detect succeeded but cross-correlation
- *  alignment to the primary lands somewhere different by > 250 ms. The most
- *  common cause is the in-stream detector locking onto a steel hit or other
- *  loud transient that tone-matches the buzzer's bandpassed envelope. The
- *  cross-correlation sees the broader loudness shape (silence -> loud ->
- *  pause -> shots) and is harder to fool by a single tone. We don't auto-
- *  override -- in-stream has frequency-domain information cross-align
- *  doesn't -- but we offer the user a one-click swap. */
-function AlignmentDisagreement({
-  slug,
-  stageNumber,
-  videoId,
-  inStreamTime,
-  crossAlignTime,
-  deltaMs,
-  confidence,
-  onUseCrossAlign,
-  busy,
-}: {
-  slug: string;
-  stageNumber: number;
-  videoId: string;
-  inStreamTime: number;
-  crossAlignTime: number;
-  deltaMs: number;
-  confidence: number | null;
-  onUseCrossAlign: () => void | Promise<void>;
-  busy: boolean;
-}) {
-  const sign = deltaMs >= 0 ? "+" : "";
-  return (
-    <div className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/5 px-2 py-1.5 text-xs">
-      <div className="flex flex-wrap items-center gap-2">
-        <Sparkles className="size-3 text-amber-600 dark:text-amber-400" />
-        <span>
-          In-stream and cross-align disagree by{" "}
-          <span className="font-mono tabular-nums">
-            {sign}
-            {Math.round(deltaMs)} ms
-          </span>
-          . Could be a steel-strike mistaken for the buzzer.
-        </span>
-        <span
-          className="text-muted"
-          title={`In-stream: ${inStreamTime.toFixed(3)}s. Cross-align: ${crossAlignTime.toFixed(3)}s${
-            confidence != null ? ` (conf ${confidence.toFixed(2)})` : ""
-          }.`}
-        >
-          in-stream <span className="font-mono tabular-nums">{inStreamTime.toFixed(3)}s</span> ·
-          cross-align <span className="font-mono tabular-nums">{crossAlignTime.toFixed(3)}s</span>
-        </span>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => void onUseCrossAlign()}
-          disabled={busy}
-          className="ml-auto"
-        >
-          Use cross-align
-        </Button>
-      </div>
-      {/* Side-by-side previews so the user can A/B before swapping. The
-       *  current beep_time preview already lives below this banner via
-       *  BeepPreview; rendering the cross-align candidate here gives the
-       *  user the missing half of the comparison. */}
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="flex flex-col gap-0.5">
-          <span className="text-[11px] text-muted">
-            Cross-align preview ({crossAlignTime.toFixed(3)}s)
-          </span>
-          <ProposalPreview
-            slug={slug}
-            stageNumber={stageNumber}
-            videoId={videoId}
-            time={crossAlignTime}
-            ariaLabel={`Cross-align preview at ${crossAlignTime.toFixed(3)}s`}
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** Shown after a primary's beep moves while shot detection had already
- *  run for the stage. Shot times are anchored to the previous trim, so
- *  the user has to decide: re-run detection now, or keep the current
- *  list (e.g. when the change is sub-frame and won't affect anything).
- *  Stays inline -- the user just changed a value above and the prompt
- *  needs to be obviously connected to that action, not floated as a
- *  toast. */
-function ShotRedetectBanner({
-  deltaMs,
-  busy,
-  onRedetect,
-  onDismiss,
-}: {
-  deltaMs: number;
-  busy: boolean;
-  onRedetect: () => void;
-  onDismiss: () => void;
-}) {
-  const absMs = Math.abs(deltaMs);
-  const direction = deltaMs > 0 ? "later" : deltaMs < 0 ? "earlier" : "unchanged";
-  return (
-    <div
-      role="alert"
-      className="flex flex-wrap items-center gap-2 rounded-md border border-amber-300/60 bg-amber-50 px-2 py-1.5 text-xs text-amber-950 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-100"
-    >
-      <span className="font-medium">Shot times are now stale.</span>
-      <span>
-        Beep moved {absMs} ms {direction}; existing shot timestamps were
-        detected against the old trim.
-      </span>
-      <div className="ml-auto flex gap-1">
-        <Button size="sm" onClick={onRedetect} disabled={busy}>
-          {busy ? <Loader2 className="animate-spin" /> : <Sparkles />}
-          Re-detect shots
-        </Button>
-        <Button size="sm" variant="ghost" onClick={onDismiss} disabled={busy}>
-          Keep existing
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-function JobProgress({ job }: { job: Job }) {
-  const pct = job.progress != null ? Math.round(job.progress * 100) : null;
-  const tone =
-    job.status === "failed"
-      ? "text-destructive"
-      : job.status === "succeeded"
-        ? "text-muted"
-        : "text-ink";
-  const active = job.status === "pending" || job.status === "running";
-  return (
-    <span
-      className={`flex items-center gap-1 ${tone}`}
-      role="status"
-      aria-live="polite"
-    >
-      {active ? <Loader2 className="size-3 animate-spin" aria-hidden /> : null}
-      <span className="text-xs">
-        {job.message ?? job.status}
-        {pct != null && active ? ` (${pct}%)` : null}
-      </span>
-    </span>
-  );
-}
-
