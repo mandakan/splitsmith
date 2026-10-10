@@ -9,10 +9,16 @@
  * was clipped by any `overflow-hidden` ancestor, which is every `Table`,
  * so a row menu near the bottom of a table was cut off. It sits on the
  * drawer layer, above a takeover (the phone Audit) and a sheet.
+ *
+ * It opens below the anchor, and flips above it when the room below
+ * cannot hold it and the room above is larger (lib/menuPlacement): a
+ * menu from a control near the bottom of the screen, like Audit's band
+ * header, would otherwise run off the screen.
  */
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
+import { menuTop } from "@/lib/menuPlacement";
 import { cn } from "@/lib/utils";
 
 export const menuItemClass =
@@ -46,11 +52,9 @@ export function Menu({ open, onClose, children, align = "left", className }: Men
       const anchor = markerRef.current?.parentElement;
       if (!anchor) return;
       const r = anchor.getBoundingClientRect();
-      setPos(
-        align === "right"
-          ? { top: r.bottom + 4, right: window.innerWidth - r.right }
-          : { top: r.bottom + 4, left: r.left },
-      );
+      const height = ref.current?.getBoundingClientRect().height ?? 0;
+      const top = menuTop(r, height, window.innerHeight);
+      setPos(align === "right" ? { top, right: window.innerWidth - r.right } : { top, left: r.left });
     };
     place();
     window.addEventListener("resize", place);
