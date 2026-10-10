@@ -88,7 +88,6 @@ import sys
 import tempfile
 import threading
 import time
-import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from contextlib import AbstractContextManager, asynccontextmanager, nullcontext
 from contextvars import ContextVar
@@ -200,6 +199,12 @@ from ..config import (
     StageEvent,
     StageRounds,
 )
+from ..detection_merge import candidate_dict as _candidate_dict
+from ..detection_merge import candidate_high_water as _candidate_high_water  # noqa: F401  (tests import it)
+from ..detection_merge import merge_detection_into
+from ..detection_merge import new_event_id as _new_event_id
+from ..detection_merge import now_iso as _now_iso
+from ..detection_merge import reset_deletion_events as _reset_deletion_events  # noqa: F401  (tests import it)
 from ..display_name import normalize_display_name
 from ..division import competitor_division
 from ..export_naming import slugify, stage_file_base
@@ -882,144 +887,6 @@ def _ensure_ui_built() -> None:
         )
     except subprocess.CalledProcessError as exc:
         logger.error("npm run build failed (exit %d); serving stale bundle", exc.returncode)
-
-
-def _now_iso() -> str:
-    """ISO-8601 UTC timestamp for audit_events entries."""
-    return datetime.now(UTC).isoformat()
-
-
-def _new_event_id() -> str:
-    """Unique id for audit_events entries - the sync merge unions event
-    lists by this id, so every event needs one at creation time. uuid4
-    hex, not ULID: ordering comes from ``ts``, and the ulid package is a
-    hosted-only extra while events are stamped on slim local installs too."""
-    return uuid.uuid4().hex
-
-
-def _reset_deletion_events(shots: Any) -> list[dict[str, Any]]:
-    """One ``marker_deleted`` per identified shot a reset re-detect wipes.
-
-    A ``reset`` re-detect rewrites ``doc["shots"]`` wholesale but used to
-    write no ``marker_*`` event at all, so the append-only ``audit_events``
-    log went on carrying whatever verdict those shots last had. The sync
-    merge reads that log for shot membership, and its
-    ``verdicts.get(k) is True`` escape hatch then re-adopted a superseded
-    shot from the other side's document whenever the shot's id still
-    carried a ``marker_kept`` -- which every rejected marker the user
-    clicked back on has written. Measured on #842: a 5-shot local document
-    merged to 6 with no note, and 18 of this repo's 57 audited fixtures
-    carrying events hold at least one live present-verdict id.
-
-    Emitting the delete makes the local log carry the *newest* verdict for
-    the shots this run removes, instead of falling silent and letting an
-    older one stay live.
-
-    Only shots that already carry a usable id are named. An event keys on
-    the shot id and there is nothing to key on otherwise -- and an
-    unstamped shot makes the merge refuse the whole shot section out loud
-    anyway (``sync/merge.py``'s unstamped-shot gate), so it cannot produce
-    the silent re-adoption this closes.
-    """
-    if not isinstance(shots, list):
-        return []
-    now = _now_iso()
-    return [
-        {
-            "id": _new_event_id(),
-            "ts": now,
-            "kind": "marker_deleted",
-            "payload": {"id": shot["id"], "reason": "shot_detect_reset"},
-        }
-        for shot in shots
-        if isinstance(shot, dict) and has_usable_id(shot)
-    ]
-
-
-def _events_reset_event(dropped: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """One ``events_reset`` entry naming the ``auto`` stage events a reset
-    re-detect drops, or nothing when it drops none (#1329).
-
-    The shot wipe is logged per shot (``_reset_deletion_events``); the
-    proposals the same wipe drops went without a trace, so the audit log
-    could not show that regions had been there.
-    """
-    if not dropped:
-        return []
-    return [
-        {
-            "id": _new_event_id(),
-            "ts": _now_iso(),
-            "kind": "events_reset",
-            "payload": {
-                "count": len(dropped),
-                "ids": [e["id"] for e in dropped if e.get("id")],
-                "reason": "shot_detect_reset",
-            },
-        }
-    ]
-
-
-#: ``cand-<n>`` shot id, as ``shot_id.derive_shot_id`` builds it. Read back
-#: here so a candidate number that survives only in the event log still
-#: counts against the high-water mark (#842).
-_CAND_ID_RE = re.compile(r"^cand-(\d+)$")
-
-
-def _candidate_high_water(doc: Any) -> int:
-    """Highest candidate number this stage's document has ever used.
-
-    A detection run numbers its candidates 1..K, so a re-detect used to
-    hand the same ``cand-<n>`` to a different physical shot. That is the
-    aliasing half of #842: the merge keys shot membership on the id, and
-    an id that names one shot on Monday and another on Tuesday cannot
-    carry a verdict. Numbering the next run from here + 1 means a
-    candidate number is never reused within a stage, so the alias cannot
-    form in the first place.
-
-    Three places a number can survive, and all three count:
-
-    * ``_candidates_pending_audit.candidates`` -- the current run's block.
-      This is the inductive case: each run records its own already-offset
-      numbers, so the next run clears them by construction even though
-      the block is overwritten and earlier runs' candidates are gone.
-    * ``shots[]`` -- an audited shot outlives the block it came from.
-    * ``audit_events`` payload ids -- the log is append-only and never
-      pruned, so it outlives *both*. This is the clause that matters: the
-      second surviving case on #842 is a re-detect recreating a
-      ``cand-<n>`` that only an old ``marker_rejected`` still remembers,
-      and only the log has that number by then.
-
-    Returns 0 for a document that has never been detected, so a first run
-    numbers from 1 exactly as before.
-    """
-    if not isinstance(doc, dict):
-        return 0
-    numbers: list[int] = []
-
-    def _take(value: Any) -> None:
-        # bool is an int in Python and True would count as candidate 1.
-        if isinstance(value, int) and not isinstance(value, bool):
-            numbers.append(value)
-
-    block = doc.get("_candidates_pending_audit")
-    if isinstance(block, dict):
-        for cand in block.get("candidates") or []:
-            if isinstance(cand, dict):
-                _take(cand.get("candidate_number"))
-    for shot in doc.get("shots") or []:
-        if isinstance(shot, dict):
-            _take(shot.get("candidate_number"))
-    for event in doc.get("audit_events") or []:
-        if not isinstance(event, dict):
-            continue
-        payload = event.get("payload")
-        shot_id = payload.get("id") if isinstance(payload, dict) else None
-        match = _CAND_ID_RE.match(shot_id) if isinstance(shot_id, str) else None
-        if match is not None:
-            numbers.append(int(match.group(1)))
-
-    return max(numbers, default=0)
 
 
 def _kept_audit_shots(shots: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -4227,26 +4094,7 @@ def register_job_bodies(state: AppState) -> None:
         candidates: list[dict[str, Any]] = []
         with handle.timer.phase("build_candidates"):
             for cand in result.candidates:
-                candidates.append(
-                    {
-                        "candidate_number": cand.candidate_number,
-                        "time": cand.time,
-                        "ms_after_beep": cand.ms_after_beep,
-                        "peak_amplitude": cand.peak_amplitude,
-                        "confidence": cand.confidence,
-                        "vote_a": cand.vote_a,
-                        "vote_b": cand.vote_b,
-                        "vote_c": cand.vote_c,
-                        "vote_e": cand.vote_e,
-                        "vote_total": cand.vote_total,
-                        "apriori_boost": cand.apriori_boost,
-                        "ensemble_score": cand.ensemble_score,
-                        "score_c": cand.score_c,
-                        "clap_diff": cand.clap_diff,
-                        "gunshot_prob": cand.gunshot_prob,
-                        "voter_e_signal": cand.voter_e_signal,
-                    }
-                )
+                candidates.append(_candidate_dict(cand))
 
         handle.update(progress=0.85, message="Saving audit JSON...")
 
@@ -4262,117 +4110,22 @@ def register_job_bodies(state: AppState) -> None:
         def _merge_detection_into(doc: dict[str, Any]) -> dict[str, Any]:
             """Fold this run's detection results into ``doc``.
 
-            Re-appliable against a freshly-loaded doc so a lost
-            optimistic-lock race re-merges into the winner's document
-            instead of clobbering it: project ``stage_rounds`` wins, the
-            candidate block is rewritten, ``shots[]`` is seeded only when
-            empty (or on ``reset``) so a concurrent manual edit survives,
-            and the run is appended to the ``audit_events`` log.
-
-            ``doc`` may be the beep-confirm stub (``{"shots": [],
-            "detection": "none"}``) seeded by ``set_beep_reviewed`` --
-            which has none of the base fields (``stage_number``,
-            ``beep_time``, ...) that ``_default_audit_doc`` sets, because
-            those are unknown at beep-confirm time. Backfill them here so
-            a stage that only ever had a stub still ends up with a
-            complete document (readers like the compare-timeline exporter
-            key on ``beep_time``). ``setdefault`` keeps this idempotent
-            under re-merge and never overwrites a value the doc already
-            carries (e.g. a genuinely-audited doc's own fields).
-
-            The sentinel is also dropped when present so the saved
-            document stays clean, but ``is_stub_audit`` no longer depends
-            on that for correctness -- it also requires the absence of
-            ``shots``/``audit_events``, so a doc this function has
-            written to can never read back as a stub even if some other
-            writer forgot to strip the marker.
+            The rule is :func:`splitsmith.detection_merge.merge_detection_into`,
+            shared with the MCP ``detect_shots`` tool (#1380); it is
+            re-appliable against a freshly-loaded doc, which is what
+            ``_save_audit_with_remerge`` relies on.
             """
-            for key, value in _default_audit_doc().items():
-                doc.setdefault(key, value)
-            if doc.get("detection") == STUB_AUDIT_DETECTION:
-                del doc["detection"]
-            if stg.stage_rounds is not None:
-                doc["stage_rounds"] = stg.stage_rounds.model_dump(mode="json", exclude_none=True)
-            # #842: the ensemble numbers its candidates 1..K every run, so a
-            # re-detect used to hand ``cand-<n>`` to a different physical shot
-            # than the one that id already named. Offset past everything this
-            # document has ever used, so a number is never reused within a
-            # stage. Computed from ``doc`` and applied to a copy rather than to
-            # ``candidates`` in place: this function is re-applied against a
-            # freshly-loaded document when a hosted save loses the version
-            # race, and mutating the closed-over list would offset it twice.
-            offset = _candidate_high_water(doc)
-            numbered = [{**c, "candidate_number": c["candidate_number"] + offset} for c in candidates]
-            doc["_candidates_pending_audit"] = {
-                "_note": (
-                    "3-voter ensemble (PANN gunshot folded into voter C). "
-                    "vote_a/b/c=1 means the voter kept the candidate; "
-                    "ensemble_score = vote_total + apriori_boost. shots[] is "
-                    "seeded from candidates with ensemble_score >= consensus. "
-                    "candidate_number is unique across this stage's detection "
-                    "runs, not 1..K per run -- see _candidate_high_water."
+            return merge_detection_into(
+                doc,
+                result,
+                base=_default_audit_doc(),
+                stage_rounds=(
+                    stg.stage_rounds.model_dump(mode="json", exclude_none=True)
+                    if stg.stage_rounds is not None
+                    else None
                 ),
-                "consensus": result.consensus,
-                "expected_rounds": result.expected_rounds,
-                "candidates": numbered,
-            }
-            reset_deletions: list[dict[str, Any]] = []
-            if reset:
-                # #842: record the wipe before performing it. Without this the
-                # log falls silent and an older ``marker_kept`` on a superseded
-                # shot stays the newest verdict for that id, which the sync
-                # merge then reads as "keep" and re-adopts from the other side.
-                reset_deletions = _reset_deletion_events(doc.get("shots"))
-                doc["shots"] = []
-                # Stage events (spec 2026-10-08): the seeder's untouched
-                # proposals sat over gaps this wipe supersedes, so they go
-                # and the stage may seed again; a region the user drew or
-                # edited (``manual``) describes the run and stays.
-                stage_events = doc.get(events_module.EVENTS_FIELD)
-                if isinstance(stage_events, list):
-                    dropped = [e for e in stage_events if isinstance(e, dict) and e.get("source") == "auto"]
-                    doc[events_module.EVENTS_FIELD] = [
-                        e for e in stage_events if not (isinstance(e, dict) and e.get("source") == "auto")
-                    ]
-                    reset_deletions.extend(_events_reset_event(dropped))
-                doc.pop(events_module.EVENTS_SEEDED_FIELD, None)
-            seeded_shots = False
-            if not doc.get("shots"):
-                kept = [c for c in result.candidates if c.kept]
-                doc["shots"] = [
-                    {
-                        "shot_number": i,
-                        "candidate_number": c.candidate_number + offset,
-                        "time": c.time,
-                        "ms_after_beep": c.ms_after_beep,
-                        "source": "detected",
-                        "ensemble_votes": c.vote_total,
-                        "apriori_boost": c.apriori_boost,
-                        "ensemble_score": c.ensemble_score,
-                    }
-                    for i, c in enumerate(kept, start=1)
-                ]
-                seeded_shots = True
-            events = list(doc.get("audit_events") or [])
-            # Deletions first: they describe the state this run superseded,
-            # and the merge orders a shot's verdicts by ``ts``.
-            events.extend(reset_deletions)
-            events.append(
-                {
-                    "id": _new_event_id(),
-                    "ts": _now_iso(),
-                    "kind": "shot_detect_run",
-                    "payload": {
-                        "candidate_count": len(candidates),
-                        "kept_count": sum(1 for c in result.candidates if c.kept),
-                        "consensus": result.consensus,
-                        "expected_rounds": result.expected_rounds,
-                        "seeded_shots": seeded_shots,
-                    },
-                }
+                reset=reset,
             )
-            doc["audit_events"] = events
-            return doc
 
         # Persist the merged audit with a bounded re-load + re-merge retry.
         # Hosted state_docs saves are optimistic-locked: a concurrent manual

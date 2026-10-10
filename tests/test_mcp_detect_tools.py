@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -564,6 +565,248 @@ def test_detect_shots_does_not_overwrite_an_existing_beep_time(tmp_path: Path) -
     payload = json.loads(audit_file.read_text())
     assert payload["beep_time"] == pytest.approx(4.25)
     assert payload["stage_name"] == "One"
+
+
+# ---------------------------------------------------------------------------
+# The server's reset rule, through the MCP tool (#1380)
+# ---------------------------------------------------------------------------
+
+
+def _detect_via_mcp(root: Path, wav: Path, result_or_effect: Any, *, reset: bool = False) -> dict:
+    """Run the MCP tool with the heavy edges stubbed. ``result_or_effect`` is
+    an ``EnsembleResult`` or a callable standing in for the ensemble."""
+    detect_kw = (
+        {"side_effect": result_or_effect}
+        if callable(result_or_effect)
+        else {"return_value": result_or_effect}
+    )
+    with (
+        patch(
+            "splitsmith.mcp.detect_tools.audio_helpers.ensure_audit_audio",
+            return_value=_FakeAudit(wav, beep_in_clip=5.0),
+        ),
+        patch("splitsmith.mcp.detect_tools._get_ensemble_runtime", return_value=None),
+        patch("splitsmith.mcp.detect_tools.ensemble_module.detect_shots_ensemble", **detect_kw),
+    ):
+        return detect_tools.detect_shots_for_stage(str(root), stage_number=1, reset=reset)
+
+
+def test_detect_shots_reset_applies_the_servers_reset_rule(tmp_path: Path) -> None:
+    """An MCP reset used to wipe ``shots[]`` and nothing else: the seeder's
+    ``auto`` proposals and ``events_seeded`` survived (no reseed over the new
+    shots), the wiped shots and dropped proposals went unlogged, and the new
+    run numbered its candidates from 1 again, reusing ids the log still
+    holds verdicts for."""
+    root, _src, wav = _seed_shot_detect_project(tmp_path)
+    audit_dir = root / "audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    audit_file = audit_dir / "stage1.json"
+    manual = {"id": "evt-2", "kind": "movement", "start": 0.2, "end": 0.9, "source": "manual"}
+    audit_file.write_text(
+        json.dumps(
+            {
+                "stage_number": 1,
+                "stage_name": "One",
+                "stage_time_seconds": 12.0,
+                "beep_time": 5.0,
+                "shots": [
+                    {"shot_number": 1, "id": "cand-4", "candidate_number": 4, "time": 5.5},
+                    {"shot_number": 2, "id": "cand-9", "candidate_number": 9, "time": 6.5},
+                ],
+                "events": [
+                    {"id": "evt-1", "kind": "reload", "start": 0.5, "end": 1.5, "source": "auto"},
+                    manual,
+                ],
+                "events_seeded": 2,
+                # Only the log still remembers candidate 12.
+                "audit_events": [
+                    {
+                        "id": "e0",
+                        "ts": "2026-08-12T12:00:00Z",
+                        "kind": "marker_rejected",
+                        "payload": {"id": "cand-12"},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = _detect_via_mcp(root, wav, _fake_ensemble_result([5.6, 6.2]), reset=True)
+
+    doc = json.loads(audit_file.read_text())
+    assert doc["events"] == [manual]
+    assert "events_seeded" not in doc
+    deleted = [e["payload"] for e in doc["audit_events"] if e["kind"] == "marker_deleted"]
+    assert deleted == [
+        {"id": "cand-4", "reason": "shot_detect_reset"},
+        {"id": "cand-9", "reason": "shot_detect_reset"},
+    ]
+    reset_logs = [e for e in doc["audit_events"] if e["kind"] == "events_reset"]
+    assert [e["payload"] for e in reset_logs] == [
+        {"count": 1, "ids": ["evt-1"], "reason": "shot_detect_reset"}
+    ]
+    kinds = [e["kind"] for e in doc["audit_events"]]
+    assert kinds.index("marker_deleted") < kinds.index("shot_detect_run")
+    assert kinds.index("events_reset") < kinds.index("shot_detect_run")
+    assert doc["audit_events"][-1]["payload"]["source"] == "mcp"
+    # Numbering continues past the high-water mark (12, from the log).
+    assert [s["candidate_number"] for s in doc["shots"]] == [13, 14]
+    assert [c["candidate_number"] for c in doc["_candidates_pending_audit"]["candidates"]] == [13, 14]
+    assert result["shots_seeded"] is True
+    assert result["shot_count"] == 2
+
+
+def test_detect_shots_without_reset_numbers_past_the_high_water_mark(tmp_path: Path) -> None:
+    """The non-reset path shares the rule too: a re-detect over curated shots
+    must not hand ``cand-<n>`` to a different candidate than the one it
+    named, and it supersedes nothing, so it logs no deletes."""
+    root, _src, wav = _seed_shot_detect_project(tmp_path)
+    audit_dir = root / "audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    audit_file = audit_dir / "stage1.json"
+    audit_file.write_text(
+        json.dumps(
+            {
+                "stage_number": 1,
+                "beep_time": 5.0,
+                "shots": [{"shot_number": 1, "id": "cand-3", "candidate_number": 3, "time": 5.5}],
+                "events": [{"id": "evt-1", "kind": "reload", "start": 0.5, "end": 1.5, "source": "auto"}],
+                "events_seeded": 2,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    _detect_via_mcp(root, wav, _fake_ensemble_result([5.6, 6.2]))
+
+    doc = json.loads(audit_file.read_text())
+    assert [c["candidate_number"] for c in doc["_candidates_pending_audit"]["candidates"]] == [4, 5]
+    assert [s["candidate_number"] for s in doc["shots"]] == [3]
+    assert doc["events_seeded"] == 2
+    assert len(doc["events"]) == 1
+    assert {e["kind"] for e in doc["audit_events"]} == {"shot_detect_run"}
+
+
+def test_detect_shots_keeps_an_edit_saved_while_detection_ran(tmp_path: Path) -> None:
+    """The tool merges onto the document as it stands after detection, not
+    the one it read before: shots curated in the SPA during the run (tens of
+    seconds on CPU) used to be overwritten by a fresh seed."""
+    root, _src, wav = _seed_shot_detect_project(tmp_path)
+    audit_file = root / "audit" / "stage1.json"
+    curated = [{"shot_number": 1, "time": 5.42, "source": "manual"}]
+    fake_result = _fake_ensemble_result([5.5, 6.1, 6.9])
+
+    def _detect_while_the_user_edits(*_a: Any, **_kw: Any) -> Any:
+        audit_file.parent.mkdir(parents=True, exist_ok=True)
+        audit_file.write_text(json.dumps({"stage_number": 1, "shots": curated}), encoding="utf-8")
+        return fake_result
+
+    result = _detect_via_mcp(root, wav, _detect_while_the_user_edits)
+
+    doc = json.loads(audit_file.read_text())
+    assert doc["shots"] == curated
+    assert result["shots_seeded"] is False
+
+
+def test_detect_shots_keeps_a_project_edit_saved_while_detection_ran(tmp_path: Path) -> None:
+    """Flagging ``shot_detect`` re-loads the project, as the server's job
+    does: saving the snapshot read before detection used to undo whatever
+    the SPA wrote to ``project.json`` during the run."""
+    root, _src, wav = _seed_shot_detect_project(tmp_path)
+    fake_result = _fake_ensemble_result([5.5, 6.1])
+
+    def _detect_while_the_user_edits(*_a: Any, **_kw: Any) -> Any:
+        project = MatchProject.load(root)
+        project.competitor_division = "Production Optics"
+        project.stages[0].videos[0].processed["trim"] = True
+        project.save(root)
+        return fake_result
+
+    _detect_via_mcp(root, wav, _detect_while_the_user_edits)
+
+    project = MatchProject.load(root)
+    assert project.competitor_division == "Production Optics"
+    primary = project.stages[0].videos[0]
+    assert primary.processed["trim"] is True
+    assert primary.processed["shot_detect"] is True
+
+
+def test_detect_shots_logs_an_audit_doc_that_is_not_an_object(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A doc that parses but is not a JSON object is discarded out loud, like
+    an unparseable one, and the previous file survives as the ``.bak``."""
+    root, _src, wav = _seed_shot_detect_project(tmp_path)
+    audit_file = root / "audit" / "stage1.json"
+    audit_file.parent.mkdir(parents=True, exist_ok=True)
+    audit_file.write_text("[1, 2]", encoding="utf-8")
+
+    with caplog.at_level("WARNING", logger="splitsmith.mcp.detect_tools"):
+        _detect_via_mcp(root, wav, _fake_ensemble_result([5.5]))
+
+    assert any(
+        "expected an object, found list" in r.getMessage() and str(audit_file) in r.getMessage()
+        for r in caplog.records
+    )
+    assert len(json.loads(audit_file.read_text())["shots"]) == 1
+    assert (audit_file.parent / "stage1.json.bak").read_text(encoding="utf-8") == "[1, 2]"
+
+
+def test_coach_get_reseeds_after_an_mcp_reset(tmp_path: Path) -> None:
+    """End to end: after an MCP reset the next coach GET seeds a reload
+    proposal over the *new* shots' gap. Before the fix ``events_seeded``
+    survived the reset, so the stale proposal stayed and nothing reseeded."""
+    import numpy as np
+    import soundfile as sf
+    from fastapi.testclient import TestClient
+
+    from splitsmith.ui.server import create_app
+    from tests.conftest import scaffold_match
+
+    match_root, shooter_root = scaffold_match(tmp_path, name="MCP Reseed")
+    (shooter_root / "raw").mkdir(parents=True, exist_ok=True)
+    (shooter_root / "raw" / "v.mp4").write_bytes(b"FAKE_MP4")
+    wav = shooter_root / "audio" / "stage1_audit.wav"
+    wav.parent.mkdir(parents=True, exist_ok=True)
+    sf.write(str(wav), np.zeros(48_000, dtype="float32"), 48_000)
+    project = MatchProject.load(shooter_root)
+    project.competitor_division = "Production Optics"
+    project.stages = [
+        StageEntry(
+            stage_number=1,
+            stage_name="K-vallen",
+            time_seconds=30.0,
+            videos=[StageVideo(path=Path("raw/v.mp4"), role="primary", beep_time=5.0)],
+        )
+    ]
+    project.save(shooter_root)
+    audit_file = shooter_root / "audit" / "stage1.json"
+    audit_file.parent.mkdir(parents=True, exist_ok=True)
+    # The previous run's shots, with the seeder's proposal over their gap.
+    audit_file.write_text(
+        json.dumps(
+            {
+                "stage_number": 1,
+                "beep_time": 5.0,
+                "shots": [{"shot_number": 1, "time": 6.0, "ms_after_beep": 1000, "source": "detected"}],
+                "events": [{"id": "evt-1", "kind": "reload", "start": 9.0, "end": 10.0, "source": "auto"}],
+                "events_seeded": 2,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    # Twelve quick shots, a 3.2 s reload gap, eight more (a PO magazine).
+    quick = [1.2 + i * 0.3 for i in range(12)]
+    after = [quick[-1] + 3.2 + i * 0.3 for i in range(8)]
+    _detect_via_mcp(shooter_root, wav, _fake_ensemble_result([5.0 + t for t in quick + after]), reset=True)
+
+    app = create_app(project_root=match_root, project_name="MCP Reseed")
+    match_id = app.state.splitsmith_state.matches.known_ids()[0]
+    body = TestClient(app).get(f"/api/matches/{match_id}/shooters/me/stages/1/coach").json()
+    assert [(e["kind"], e["source"]) for e in body["events"]] == [("reload", "auto")]
+    assert body["events"][0]["start"] == pytest.approx(quick[-1], abs=0.01)
 
 
 def test_detect_shots_rejects_stage_without_beep_time(tmp_path: Path) -> None:
