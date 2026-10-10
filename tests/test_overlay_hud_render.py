@@ -574,7 +574,13 @@ _TIMELINE_DOM_JS = """() => {
 
 
 def _timeline_view(
-    rasterizer: Any, *, events: list[dict[str, Any]], variant: str = "timeline", **options: Any
+    rasterizer: Any,
+    *,
+    events: list[dict[str, Any]],
+    variant: str = "timeline",
+    size: tuple[int, int] = (640, 360),
+    shot_times: tuple[float, ...] = _TL_SHOTS,
+    **options: Any,
 ) -> Any:
     from splitsmith.config import StageEvent
     from splitsmith.looks import load_look, overlay_template_for
@@ -587,7 +593,7 @@ def _timeline_view(
     template = overlay_template_for(look, variant)
     assert template is not None
     shots, previous = [], 0.0
-    for index, t in enumerate(_TL_SHOTS):
+    for index, t in enumerate(shot_times):
         shots.append(
             TileShot(time_from_beep=t, split=t - previous, interval_class="split" if index else "first_shot")
         )
@@ -597,11 +603,11 @@ def _timeline_view(
         stage=stage,
         options=hud_options_data(HudOptions(**options), options.get("position")),
         theme=theme_for(look),
-        width=640,
-        height=360,
+        width=size[0],
+        height=size[1],
         fps=30.0,
     )
-    return rasterizer._open_template(template, context=context, width=640, height=360)
+    return rasterizer._open_template(template, context=context, width=size[0], height=size[1])
 
 
 def _timeline_at(view: Any, t: float) -> dict[str, Any]:
@@ -642,19 +648,61 @@ def test_timeline_reload_chip_counts_the_reload_and_holds_its_duration_through_t
 
 
 @pytest.mark.integration
-def test_timeline_reload_chip_clears_the_tag_on_the_first_shot() -> None:
+@pytest.mark.parametrize("size", [(640, 360), (360, 640), (1080, 1920)])
+def test_timeline_reload_chip_clears_the_tag_on_the_first_shot(size: tuple[int, int]) -> None:
     """The split tag sits furthest left on the first tick: a reload right
-    after the draw puts the chip and that tag up together."""
+    after the draw puts the chip and that tag up together. Upright too,
+    where the clock is wide enough to reach the track."""
     early = {"id": "evt-2", "kind": "reload", "start": 1.15, "end": 1.3, "source": "manual"}
     with ChromiumRasterizer() as rasterizer:
-        view = _timeline_view(rasterizer, events=[early], reload_chip=True)
+        view = _timeline_view(rasterizer, events=[early], size=size, reload_chip=True, stage_bar=True)
         try:
             state = _timeline_at(view, 1.0 + 1.25)
         finally:
             view.close()
-    assert state["chip"]["opacity"] == 1 and state["tag"] is not None
-    assert not _overlaps(state["chip"]["box"], state["tag"])
-    assert not _overlaps(state["chip"]["box"], state["clock"])
+    width, height = size
+    chip, tag, clock, track = state["chip"]["box"], state["tag"], state["clock"], state["track"]
+    assert state["chip"]["opacity"] == 1 and tag is not None
+    assert _inside(chip, width, height) and _inside(tag, width, height)
+    assert not _overlaps(chip, tag)
+    assert not _overlaps(chip, clock)
+    assert not _overlaps(tag, clock)
+    # The track's ticks reach 1.6 vh under it: the clock sits clear of them.
+    assert track["bottom"] + 0.016 * height <= clock["top"] or track["left"] >= clock["right"]
+
+
+#: A 40 s stage whose first and last ticks sit near either end of the track.
+_EDGE_SHOTS = (0.55, 1.0, 10.0, 20.0, 30.0, 39.3, 39.6)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("size", [(1080, 1920), (720, 1280), (1080, 1080), (1920, 1080)])
+@pytest.mark.parametrize("landing", [True, False])
+def test_timeline_tag_stays_on_the_page_at_either_end_of_the_track(
+    size: tuple[int, int], landing: bool
+) -> None:
+    """Upright, the track runs the page's width, so a tick at either end
+    would put the centred split tag past the edge: the tag is held inside
+    the page, on the first tick and at the far end. The landing hides the
+    tag once the stage is done, so with it on the far end is the tick
+    before the last (99 % along); with it off, the last tick's tag stays."""
+    width, height = size
+    end = _EDGE_SHOTS[-2] if landing else _EDGE_SHOTS[-1]
+    with ChromiumRasterizer() as rasterizer:
+        view = _timeline_view(rasterizer, events=[], size=size, shot_times=_EDGE_SHOTS, landing=landing)
+        try:
+            # 0.25 s after the tick: the tag has eased in (0.2 s).
+            first = _timeline_at(view, 1.0 + _EDGE_SHOTS[0] + 0.25)
+            last = _timeline_at(view, 1.0 + end + 0.25)
+        finally:
+            view.close()
+    assert first["tag"] is not None and last["tag"] is not None
+    off = [
+        (name, s["tag"])
+        for name, s in (("first", first), ("end", last))
+        if not _inside(s["tag"], width, height)
+    ]
+    assert off == []
 
 
 @pytest.mark.integration
@@ -901,6 +949,41 @@ def test_style_chip_and_bar_clear_the_clock_and_the_split(variant: str, position
         assert _inside(bar) and bar["top"] >= under, "the bar runs under the clock"
         assert bar["left"] < clock["right"] and clock["left"] < bar["right"]
         assert not _overlaps(chip["box"], bar)
+
+
+#: A twelve-second stage, so the clock reads five digits ("10.60").
+_LONG_SHOTS = (1.1, 1.4, 1.7, 2.0, 4.0, 4.3, 6.5, 6.8, 9.9, 10.15, 11.4, 12.0)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("position", _STYLE_POSITIONS["ticker"])
+def test_ticker_chip_stays_on_an_upright_page_at_a_stage_time_of_ten_seconds_or_more(position: str) -> None:
+    """9:16, a 12 s stage: a chip beside a five-digit clock is wider than
+    the page, so upright the chip is the row under the stack -- inside the
+    page and off the clock and the splits."""
+    reload = {"id": "evt-2", "kind": "reload", "start": 10.2, "end": 11.0, "source": "manual"}
+    width, height = 1080, 1920
+    with ChromiumRasterizer() as rasterizer:
+        view = _timeline_view(
+            rasterizer,
+            events=[reload],
+            variant="ticker",
+            size=(width, height),
+            shot_times=_LONG_SHOTS,
+            position=position,
+            reload_chip=True,
+            stage_bar=True,
+        )
+        try:
+            state = _style_at(view, "ticker", 1.0 + 10.6)
+        finally:
+            view.close()
+    chip = state["chip"]
+    assert chip["opacity"] == 1 and chip["num"] == "0.40" and state["split"] is not None
+    assert _inside(chip["box"], width, height)
+    assert not _overlaps(chip["box"], state["clock"])
+    assert not _overlaps(chip["box"], state["split"])
+    assert not _overlaps(chip["box"], state["bar"])
 
 
 @pytest.mark.integration

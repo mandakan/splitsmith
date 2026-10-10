@@ -404,3 +404,105 @@ def test_the_cli_refuses_a_hold_the_encode_cannot_make(
     result = runner.invoke(app, [*args, "--match-summary-seconds", seconds])
     assert result.exit_code != 0
     assert "comp" not in captured
+
+
+#: Every headline figure, caption and the shooter's name, as laid out: its
+#: text's box; and whether an ellipsis cut the title.
+_CARD_PROBE_JS = """() => {
+  const text = (el) => { const r = document.createRange(); r.selectNodeContents(el);
+    const b = r.getBoundingClientRect(); return {left: b.left, right: b.right}; };
+  const items = [...document.querySelectorAll('.fig .v, .fig .c, .label')].map((el) => ({
+    text: el.textContent, box: text(el)}));
+  const title = document.querySelector('.title');
+  return {items, titleCut: title.scrollWidth > title.clientWidth + 1};
+}"""
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(("width", "height"), [(1080, 1920), (720, 1280), (1080, 1350), (1080, 1080)])
+def test_an_upright_card_keeps_every_headline_figure_on_the_page(tmp_path, width: int, height: int) -> None:
+    """Sized by its height, an upright or square card's headline row runs
+    past the right edge (the hit counts were cut off at 1080x1920) and its
+    title is ellipsized; it is sized as a 6:5 card of its width instead."""
+    from splitsmith.match_summary import match_summary_html
+    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+    from splitsmith.overlay_theme import load_theme
+
+    big = StageScorecard(
+        hit_factor=6.12,
+        stage_pct=88.4,
+        alphas=123,
+        charlies=12,
+        deltas=3,
+        misses=1,
+        no_shoots=0,
+        procedurals=2,
+    )
+    summary = build_match_summary(
+        [
+            (f"Stage {n}", _tile(n, shots=_shots(1.23, 0.21, 0.31), time=14.2 + n, card=big))
+            for n in range(1, 13)
+        ],
+        title="Stockholm Open 2026",
+        label="Mathias Axell",
+    )
+    page_path = tmp_path / "card.html"
+    page_path.write_text(
+        match_summary_html(summary, width=width, height=height, theme=load_theme("splitsmith")),
+        encoding="utf-8",
+    )
+    try:
+        with ChromiumRasterizer() as rasterizer:
+            context = rasterizer._live_browser().new_context(viewport={"width": width, "height": height})
+            try:
+                page = context.new_page()
+                page.goto(page_path.resolve().as_uri(), wait_until="load")
+                page.evaluate("document.fonts.ready")
+                state = page.evaluate(_CARD_PROBE_JS)
+            finally:
+                context.close()
+    except RasterizerUnavailableError as exc:
+        pytest.skip(str(exc))
+    assert {i["text"] for i in state["items"]} >= {"1476", "P", "24", "Mathias Axell"}
+    off = [i["text"] for i in state["items"] if i["box"]["left"] < 0 or i["box"]["right"] > width]
+    assert off == []
+    assert not state["titleCut"]
+
+
+@pytest.mark.parametrize(
+    ("width", "height"),
+    [
+        (1920, 1080),
+        (1280, 720),
+        (3840, 2160),
+        (2560, 1080),
+        (1920, 1088),
+        (1440, 1080),
+        (2704, 2028),
+        (4000, 3000),
+        (1350, 1080),
+        (1280, 1024),
+        (1200, 1000),
+    ],
+)
+def test_a_landscape_card_sizes_its_type_by_its_height_as_it_always_has(width: int, height: int) -> None:
+    """6:5, 5:4, 4:3, 16:9 and wider: the card fits the page sized by its height,
+    so its type is exactly what it was before upright cards were sized by
+    their width."""
+    from splitsmith.match_summary import match_summary_html
+    from splitsmith.overlay_theme import load_theme
+
+    summary = build_match_summary(
+        [(f"Stage {n}", _tile(n, shots=_shots(1.23, 0.21), time=14.2, card=CARD)) for n in range(1, 4)],
+        title="Stockholm Open",
+        label="Mathias",
+    )
+    html = match_summary_html(summary, width=width, height=height, theme=load_theme("splitsmith"))
+    assert f"font-size: {round(height * 0.06)}px;" in html, "the title"
+    assert f".fig .v {{ font-size: {round(height * 0.058)}px;" in html
+    assert f"font-size: {round(height * 0.022)}px;" in html, "the captions"
+    assert f".label {{ font-size: {round(height * 0.032)}px;" in html
+    # The spacing that follows the type: the strip's and the notes' gaps, the shadow.
+    assert f"margin-top: {round(height * 0.03)}px;\n  align-items: flex-end;" in html
+    assert f"margin-top: {round(height * 0.012)}px; }}" in html
+    assert f"text-shadow: 0 {max(1, height // 360)}px {max(2, height // 180)}px" in html

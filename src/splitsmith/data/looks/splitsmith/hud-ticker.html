@@ -54,6 +54,14 @@
   #rail.top-left #reloadChip { left: 1.8vh; flex-direction: row-reverse; }
   #reloadChip .label { font-size: 2vh; }
   #reloadChip .num { font-size: 4.6vh; }
+  /* Upright video: no room beside the clock at a stage time of ten
+     seconds or more, so the chip is the ticker's next row, under the stack. */
+  @media (max-aspect-ratio: 1/1) {
+    #reloadSlot { position: static; width: auto; height: auto; }
+    #reloadChip { position: relative; top: auto; margin-top: 0.8vh; }
+    #rail.top-right #reloadChip { right: auto; justify-content: flex-end; }
+    #rail.top-left #reloadChip { left: auto; justify-content: flex-start; }
+  }
   #stamp { position: absolute; left: 0; right: 0; top: 34%; text-align: center; opacity: 0; }
   #stamp .label { font-size: 2.5vh; letter-spacing: 0.3em; }
   #stamp .num { font-size: 16vh; }
@@ -200,7 +208,8 @@
   el('stampValue').textContent = stage.stage_time.toFixed(2);
   var edge = rail.className === 'top-left' ? 'inset 0.6vh 0 0 ' : 'inset -0.6vh 0 0 ';
   // The stage bar runs the rail's width under the clock; the reload chip
-  // is a row of the ticker's own kind, beside the clock outside the rail.
+  // is a row of the ticker's own kind, beside the clock outside the rail
+  // (upright, the CSS makes it the row under the stack).
   var bar = stageBar();
   if (bar) rail.insertBefore(bar.el, el('count'));
   var reload = reloadChip(function () {
