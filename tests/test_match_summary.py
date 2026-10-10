@@ -411,7 +411,7 @@ def test_the_cli_refuses_a_hold_the_encode_cannot_make(
 _CARD_PROBE_JS = """() => {
   const text = (el) => { const r = document.createRange(); r.selectNodeContents(el);
     const b = r.getBoundingClientRect(); return {left: b.left, right: b.right}; };
-  const items = [...document.querySelectorAll('.fig .v, .fig .c, .label')].map((el) => ({
+  const items = [...document.querySelectorAll('.fig .v, .fig .c, .f .v, .f .c, .label')].map((el) => ({
     text: el.textContent, box: text(el)}));
   const title = document.querySelector('.title');
   return {items, titleCut: title.scrollWidth > title.clientWidth + 1};
@@ -423,7 +423,8 @@ _CARD_PROBE_JS = """() => {
 def test_an_upright_card_keeps_every_headline_figure_on_the_page(tmp_path, width: int, height: int) -> None:
     """Sized by its height, an upright or square card's headline row runs
     past the right edge (the hit counts were cut off at 1080x1920) and its
-    title is ellipsized; it is sized as a 6:5 card of its width instead."""
+    title is ellipsized; a square one is sized as a 6:5 card of its width
+    instead, an upright one takes its own layout (``test_upright_cards``)."""
     from splitsmith.match_summary import match_summary_html
     from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
     from splitsmith.overlay_theme import load_theme

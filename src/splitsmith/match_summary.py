@@ -27,11 +27,12 @@ from PIL import Image
 from .coach import statistic_splits
 from .match_project import StageScorecard
 from .overlay_html import _face_source
-from .overlay_layout import Anchor, CellScale, Element, Emphasis, Flow, Group, Role
+from .overlay_layout import MIN_FONT_SIZE, Anchor, CellScale, Element, Emphasis, Flow, Group, Role
 from .overlay_raster import Rasterizer
 from .overlay_still import DEFAULT_DIM, backdrop_from_frame
 from .overlay_summary_cell import _band_gap_extra, _counts_gap, _sgrid_gap, count_elements
 from .overlay_theme import RGB, OverlayTheme
+from .safe_area import is_upright, safe_area
 from .stage_summary_data import TileStageData
 
 logger = logging.getLogger(__name__)
@@ -318,13 +319,16 @@ def _css_rgb(color: RGB) -> str:
 
 
 def match_summary_html(summary: MatchSummary, *, width: int, height: int, theme: OverlayTheme) -> str:
-    """The card as one document, transparent where the backdrop shows. Type
-    follows the canvas height on any canvas at least :data:`SIZE_ASPECT`
-    wide (6:5, 5:4, 4:3, 16:9 and wider); a squarer or upright one sizes it
-    as a 6:5 card of its width, since by its height the headline figures
-    run off the page. The table splits into two columns past
-    :data:`ROWS_PER_COLUMN` so a long match never shrinks its rows below a
-    readable size."""
+    """The card as one document, transparent where the backdrop shows. An
+    upright canvas (taller than wide) takes its own layout,
+    :func:`upright_match_summary_html`. Otherwise type follows the canvas
+    height on any canvas at least :data:`SIZE_ASPECT` wide (6:5, 5:4, 4:3,
+    16:9 and wider); a squarer one sizes it as a 6:5 card of its width,
+    since by its height the headline figures run off the page. The table
+    splits into two columns past :data:`ROWS_PER_COLUMN` so a long match
+    never shrinks its rows below a readable size."""
+    if is_upright(width, height):
+        return upright_match_summary_html(summary, width=width, height=height, theme=theme)
     mono_url, mono_format, mono_weight = _face_source(theme.mono_font)
     display_url, display_format, display_weight = _face_source(theme.display_font)
     num, den = SIZE_ASPECT
@@ -475,6 +479,268 @@ th:nth-child(5), td:nth-child(5) {{ width: 3.9em; }}
 </body></html>"""
 
 
+#: The upright table's columns: splits lead, as in the strip above it.
+UPRIGHT_TABLE_HEADER = ["", "Stage", "Draw", "Split", "Time", "HF", "%"]
+#: Characters of a stage name the upright table keeps before its ellipsis.
+UPRIGHT_NAME_CHARS = 12
+#: The upright table's fixed columns in ems (number, draw, split, time, HF,
+#: %) and the room a name keeps from the Draw column. A mono figure is
+#: 0.6 em a character, so a column holds its widest figure ("1.23",
+#: "14.21*", "100.0") with about 0.8 em to spare.
+_UPRIGHT_FIXED_EMS = (1.9, 3.2, 3.2, 4.4, 3.4, 3.6)
+_UPRIGHT_NAME_PAD_EMS = 0.6
+#: A mono face's advance per character, the bundled faces' own (0.6 em).
+_MONO_ADVANCE_EMS = 0.6
+
+
+def upright_row_cells(row: MatchSummaryRow) -> list[str]:
+    """A row's cells in the upright table's order: number, name, draw,
+    split, time, HF, %."""
+    number, name, time, hf, pct, draw, split = row_cells(row)
+    return [number, name, draw, split, time, hf, pct]
+
+
+def _upright_fit_script(*, floor: int, bottom_line: int) -> str:
+    """The upright card's fit: each figure row shrinks (one factor per row)
+    until every value ends inside its own column, and the table shrinks
+    until no figure overflows its cell and its last row sits above the
+    safe area's bottom line, then spreads the height left over between its
+    rows. Nothing goes under the legibility floor. Defined here and called
+    by the rasterizer once the faces have loaded, like ``fit.js``."""
+    return (
+        "<script>window.__splitsmithFit = function () {" f"var FLOOR = {floor}; var LINE = {bottom_line};" """
+function textRect(el) {
+  var r = document.createRange();
+  r.selectNodeContents(el);
+  return r.getBoundingClientRect();
+}
+function overflows(cells, inner) {
+  for (var i = 0; i < cells.length; i++) {
+    var box = cells[i].getBoundingClientRect();
+    var text = textRect(inner(cells[i]));
+    if (text.width > 0 && (text.right > box.right + 0.5 || text.left < box.left - 0.5)) { return true; }
+  }
+  return false;
+}
+document.querySelectorAll('.figs').forEach(function (row) {
+  var cells = row.querySelectorAll('.f');
+  var inner = function (cell) { return cell.querySelector('.v'); };
+  var base = parseFloat(getComputedStyle(row.querySelector('.v')).fontSize);
+  var k = 1;
+  while (overflows(cells, inner) && base * k * 0.97 >= FLOOR) {
+    k *= 0.97;
+    row.style.setProperty('--k', String(k));
+  }
+});
+var table = document.querySelector('table');
+if (table) {
+  var tds = table.querySelectorAll('tbody td:not(.nm)');
+  var self = function (cell) { return cell; };
+  var rows = table.querySelectorAll('tbody tr').length;
+  var size = parseFloat(getComputedStyle(table).fontSize);
+  // A row's glyphs reach below its 1.0 line box: the text counts, not the box.
+  var bottom = function () {
+    return Math.max(table.getBoundingClientRect().bottom, textRect(table.tBodies[0]).bottom);
+  };
+  var past = function () { return bottom() > LINE + 0.5 || overflows(tds, self); };
+  while (past() && size * 0.97 >= FLOOR) {
+    size *= 0.97;
+    table.style.fontSize = size + 'px';
+  }
+  var spare = LINE - bottom();
+  if (rows > 0 && spare > 0) {
+    var pad = Math.min(0.45 * size, spare / (2 * rows));
+    table.style.setProperty('--pad', pad + 'px');
+  }
+}
+};</script>"""
+    )
+
+
+def upright_match_summary_html(summary: MatchSummary, *, width: int, height: int, theme: OverlayTheme) -> str:
+    """The card on an upright canvas (issue #1394, owner decisions
+    2026-10-10): a small "Match summary" label over the title (two lines at
+    most) and the shooter; Avg split / Best draw / Rounds alone on a row at
+    10.4 % of the width, the hit counts on their own row; then one stage
+    table that uses the height down to the safe area's bottom line, its
+    splits leading (``# Stage Draw Split Time HF %``) and each stage's name
+    inline, cut at :data:`UPRIGHT_NAME_CHARS` characters. Everything stays
+    out of the platform safe area (:mod:`splitsmith.safe_area`): the right
+    padding is the button column's width, the table stops at the bottom
+    band."""
+    area = safe_area(width, height)
+    assert area is not None, "upright_match_summary_html takes an upright canvas"
+    mono_url, mono_format, mono_weight = _face_source(theme.mono_font)
+    display_url, display_format, display_weight = _face_source(theme.display_font)
+    u = width / 100
+    pad_x = round(6 * u)
+    pad_right = max(pad_x, area.right)
+    top = round(height * 0.07)
+    kicker_px = max(MIN_FONT_SIZE, round(2.6 * u))
+    title_px = round(8.2 * u)
+    label_px = round(4.2 * u)
+    figure_px = round(10.4 * u)
+    count_px = round(6.4 * u)
+    caption_px = max(MIN_FONT_SIZE, round(2.6 * u))
+    note_px = max(MIN_FONT_SIZE, round(2.6 * u))
+    content_width = width - pad_x - pad_right
+    name_ems = UPRIGHT_NAME_CHARS * _MONO_ADVANCE_EMS + _MONO_ADVANCE_EMS + _UPRIGHT_NAME_PAD_EMS
+    row_px = max(
+        MIN_FONT_SIZE, min(round(4.4 * u), math.floor(content_width / (sum(_UPRIGHT_FIXED_EMS) + name_ems)))
+    )
+    ink = _css_rgb(theme.ink)
+    ink_2 = _css_rgb(theme.ink_2)
+    stroke = _css_rgb(theme.stroke)
+    rule = _css_rgb(theme.rule)
+    hit_colour = {
+        "A": _css_rgb(theme.split_good),
+        "C": ink,
+        "D": _css_rgb(theme.split),
+        "M": _css_rgb(theme.accent_text),
+        "NS": _css_rgb(theme.accent_text),
+        "P": _css_rgb(theme.accent_text),
+    }
+
+    def figure(caption: str, value: str) -> str:
+        colour = f' style="color: {hit_colour[caption]}"' if caption in hit_colour else ""
+        return (
+            f'<div class="f"><div class="v"{colour}>{html.escape(value)}</div>'
+            f'<div class="c">{html.escape(caption)}</div></div>'
+        )
+
+    figures = headline_figures(summary)
+    splits_row = "".join(figure(caption, value) for caption, value in figures[:3])
+    counts_row = "".join(figure(caption, value) for caption, value in figures[3:])
+    counts = f'<div class="figs counts">{counts_row}</div>' if counts_row else ""
+    notes = "".join(f'<div class="note">{html.escape(line)}</div>' for line in coverage_lines(summary))
+    head = "".join(f"<th>{html.escape(h)}</th>" for h in UPRIGHT_TABLE_HEADER)
+    body = "".join(
+        "<tr>"
+        + "".join(
+            (
+                f'<td class="nm"><span>{html.escape(cell)}</span></td>'
+                if i == 1
+                else f"<td>{html.escape(cell)}</td>"
+            )
+            for i, cell in enumerate(upright_row_cells(row))
+        )
+        + "</tr>"
+        for row in summary.rows
+    )
+    # Column widths on ``<col>``: an em there is the table's own size, where
+    # on a header cell it would be the smaller header type's.
+    number_em, *figure_ems = _UPRIGHT_FIXED_EMS
+    cols = f'<col style="width: {number_em}em"><col>' + "".join(
+        f'<col style="width: {ems}em">' for ems in figure_ems
+    )
+    return f"""<!doctype html>
+<html><head><meta charset="utf-8"><style>
+@font-face {{
+  font-family: "Splitsmith Mono";
+  src: url("{mono_url}") format("{mono_format}");
+  font-weight: {mono_weight};
+}}
+@font-face {{
+  font-family: "Splitsmith Display";
+  src: url("{display_url}") format("{display_format}");
+  font-weight: {display_weight};
+}}
+:root {{ {area.css_vars()} }}
+html, body {{ margin: 0; width: {width}px; height: {height}px; background: transparent; overflow: hidden; }}
+body {{
+  box-sizing: border-box;
+  padding: {top}px {pad_right}px {area.bottom}px {pad_x}px;
+  color: {ink};
+  font-family: "Splitsmith Mono", monospace;
+  text-shadow: 0 {max(1, width // 360)}px {max(2, width // 180)}px {stroke};
+}}
+.kicker {{
+  font-size: {kicker_px}px;
+  color: {ink_2};
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}}
+.title {{
+  font-family: "Splitsmith Display", sans-serif;
+  font-size: {title_px}px;
+  line-height: 1.05;
+  margin-top: {round(0.6 * u)}px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}}
+.label {{
+  font-size: {label_px}px;
+  color: {ink_2};
+  margin-top: {round(0.8 * u)}px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}}
+.figs {{ display: grid; margin-top: {round(4 * u)}px; }}
+.splits {{ grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: {round(3 * u)}px; }}
+.splits .v {{ font-size: calc(var(--k, 1) * {figure_px}px); }}
+.counts {{
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  column-gap: {round(1.5 * u)}px;
+  margin-top: {round(2.5 * u)}px;
+}}
+.counts .v {{ font-size: calc(var(--k, 1) * {count_px}px); }}
+.f {{ min-width: 0; }}
+.v {{ line-height: 1.05; white-space: nowrap; }}
+.c {{
+  font-size: {caption_px}px;
+  color: {ink_2};
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-top: {round(0.4 * u)}px;
+  white-space: nowrap;
+}}
+.notes {{ margin-top: {round(1.5 * u)}px; }}
+.note {{ font-size: {note_px}px; color: {ink_2}; margin-top: {round(0.6 * u)}px; }}
+table {{
+  border-collapse: collapse;
+  width: 100%;
+  table-layout: fixed;
+  font-size: {row_px}px;
+  margin-top: {round(2.5 * u)}px;
+}}
+th {{
+  color: {ink_2};
+  font-weight: normal;
+  text-align: right;
+  font-size: max({MIN_FONT_SIZE}px, 0.62em);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0 0 0.3em;
+  border-bottom: 1px solid {rule};
+  white-space: nowrap;
+}}
+td {{ text-align: right; padding: var(--pad, 0px) 0; line-height: 1.0; white-space: nowrap; }}
+th:nth-child(1), td:nth-child(1) {{ text-align: left; color: {ink_2}; }}
+th:nth-child(2), td:nth-child(2) {{ text-align: left; }}
+td.nm {{ color: {ink_2}; }}
+td.nm span {{
+  display: block;
+  max-width: {UPRIGHT_NAME_CHARS + 1}ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}}
+</style>
+{_upright_fit_script(floor=MIN_FONT_SIZE, bottom_line=area.bottom_line)}
+</head><body>
+<div class="kicker">Match summary</div>
+<div class="title">{html.escape(summary.title)}</div>
+<div class="label">{html.escape(summary.label)}</div>
+<div class="figs splits">{splits_row}</div>
+{counts}
+<div class="notes">{notes}</div>
+<table><colgroup>{cols}</colgroup><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>
+</body></html>"""
+
+
 def match_summary_strip_html(title: str, *, width: int, height: int, theme: OverlayTheme) -> str:
     """The grid card's title strip: "Match summary" and the match name on one
     line, ``height`` tall, so the card does not read as one more stage hold."""
@@ -576,4 +842,6 @@ __all__ = [
     "headline_figures",
     "match_summary_html",
     "row_cells",
+    "upright_match_summary_html",
+    "upright_row_cells",
 ]

@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "upright-summary-cards",
+      "date": "2026-10-10",
+      "title": "Summaries made for upright video",
+      "body": "On a tall export, the stage and match summaries now fill the frame with larger splits shown first, and keep clear of the captions and buttons that Shorts and Reels draw on top."
+    },
+    {
       "id": "grid-hold-dense-upright",
       "date": "2026-10-10",
       "title": "Readable splits on tall grids",
