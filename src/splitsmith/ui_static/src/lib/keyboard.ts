@@ -1,5 +1,7 @@
 import { useEffect } from "react";
 
+import { pipKeyAction } from "@/lib/pip";
+
 /**
  * Window-level Space -> toggle play/pause hook.
  *
@@ -92,4 +94,27 @@ export function useSpacePlayPause(
       window.removeEventListener("keydown", onBubble);
     };
   }, [toggle, enabled]);
+}
+
+/**
+ * Window-level C / Shift+C -> cycle the PiP inset (epic #1405): the next
+ * (or previous) camera goes into the inset; with two cameras it swaps.
+ * ``pipKeyAction`` decides, so it never fires while typing (a note's
+ * textarea), with a modifier held or on auto-repeat, and a press another
+ * handler already claimed (``defaultPrevented``) is left alone. Pass
+ * ``enabled = false`` when there is no inset.
+ */
+export function usePipCycleKeys(cycle: (dir: 1 | -1) => void, enabled = true): void {
+  useEffect(() => {
+    if (!enabled) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      const dir = pipKeyAction(e);
+      if (!dir) return;
+      e.preventDefault();
+      cycle(dir);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [cycle, enabled]);
 }
