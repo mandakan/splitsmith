@@ -63,10 +63,11 @@ export function StageTransport({
       >
         {ws.isPlaying ? <Pause className="size-4" aria-hidden /> : <Play className="size-4 fill-current" aria-hidden />}
       </Button>
-      <span className="numeral text-md text-ink-2">{ws.currentTime.toFixed(2)} s</span>
+      {/* Seconds from the beep, like every figure, the strip and the band. */}
+      <span className="numeral text-md text-ink-2">{view.tFromBeep.toFixed(2)} s</span>
       {activeShot ? (
         <span className="numeral text-sm text-muted">
-          shot {String(activeShot.shot_number).padStart(2, "0")} at {activeShot.time_absolute.toFixed(2)} s
+          shot {String(activeShot.shot_number).padStart(2, "0")} at {activeShot.time_from_beep.toFixed(2)} s
         </span>
       ) : null}
     </div>

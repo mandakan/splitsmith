@@ -218,8 +218,10 @@ describe("Breakdown deep links (#1377)", () => {
     renderAt("/match/m1/breakdown/anna/2?t=2.75&shot=2&region=evt-2");
     const inspector = await screen.findByRole("complementary", { name: "Inspector" });
     expect(within(inspector).getByRole("region", { name: "Region" })).toBeInTheDocument();
-    // The playhead: clip time = beep (5) + 2.75.
-    expect(screen.getByText("7.75 s")).toBeInTheDocument();
+    // The transport reads seconds from the beep (the clip seeks to 5 + 2.75),
+    // and names the current shot by its time from the beep too.
+    expect(screen.getByText("2.75 s")).toBeInTheDocument();
+    expect(screen.getByText("shot 02 at 2.00 s")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Review in Coach" })).toHaveAttribute(
       "href",
       "/match/m1/coach/anna/2?t=2.75&shot=2",
