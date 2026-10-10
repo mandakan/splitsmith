@@ -6,7 +6,8 @@ both 5 % of the peak and 1.5 x the noise floor before it. An earlier sound
 separated from the burst by a dip (an echo, the previous shot, a lead-in
 that falls back before the blast) is not part of the rise; a lead-in that
 ramps continuously into the burst is, and so is the burst's own first
-wavefront, split from its body by a dip under 3 ms (one such dip is passed).
+wavefront: loud again within 3 ms behind the dip's lowest point (one such
+dip is passed).
 
 One rule, three places, held identical by ``tests/fixtures/rise_foot/cases.json``:
 the shot detector's reported time (``shot_detect``; candidates are still scored

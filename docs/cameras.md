@@ -53,7 +53,7 @@ reliable key for older fixtures.
   Splits between a late and an on-time shot are off by the difference.
 - **A burst's first wavefront is often split from its body by a 1 to 2 ms dip (2026-10-10).**
   A first spike at 30 to 95 % of the peak, a dip below a quarter of it, then the main burst 5 to
-  8 ms later. The rise-foot rule stopped at that dip until it learned to pass one dip under 3 ms;
+  8 ms later. The rise-foot rule stopped at that dip until it learned to pass one dip with the spike within 3 ms behind its lowest point;
   on headcam fixtures needing review that was 450 shots. Recognise it on a 1 ms zoom: two humps,
   the first narrow, less than 10 ms apart.
 
