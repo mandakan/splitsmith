@@ -30,7 +30,9 @@ import {
   stopTime,
   typicalShotLevel,
   walkActionForKey,
+  nearestStop,
   walkStops,
+  type WalkScope,
   windowBins,
   type WalkDecision,
   type WalkStop,
@@ -64,13 +66,17 @@ export interface WalkProps {
   audio: DecodedAudio | null;
   /** Beside the stop, above the guide: the page's video. */
   aside?: ReactNode;
+  /** What this walk visits (lib/walk ``defaultScope``); the page remounts the
+   *  walk when it changes. */
+  scope: WalkScope;
+  onScopeChange: (scope: WalkScope) => void;
 }
 
 export function Walk(props: WalkProps) {
   const { markers, peaks, savedEvents, from, expectedRounds, busy } = props;
   // The stops are fixed when the walk opens, so a decision never moves the
   // cursor's ground; a burst marked as a shot binds to its new marker.
-  const [stops] = useState<WalkStop[]>(() => walkStops(markers, peaks, from));
+  const [stops] = useState<WalkStop[]>(() => walkStops(markers, peaks, from, props.scope));
   const [bound, setBound] = useState<Record<string, string>>({});
   const [decisions, setDecisions] = useState<WalkDecision[]>(() => decisionsFrom(savedEvents));
   const level = useMemo(() => typicalShotLevel(markers, peaks, from), [markers, peaks, from]);
@@ -217,6 +223,25 @@ export function Walk(props: WalkProps) {
   }, [stop, stops, index, state, time, marker, decisions, decidedCount, busy, armed, check.ok, peaks, markerFor, makeShot, place, toggleGuide, props]);
 
 
+  const scopeButton = (
+    <Button
+      size="sm"
+      variant="ghost"
+      onClick={() => props.onScopeChange(props.scope === "all" ? "shots" : "all")}
+      title={
+        props.scope === "all"
+          ? "Visit the kept shots only"
+          : "Also visit every rejected candidate and every loud sound nobody marked"
+      }
+    >
+      {props.scope === "all" ? "Kept shots only" : "Walk every sound"}
+    </Button>
+  );
+  const scopeLine =
+    props.scope === "all"
+      ? "Walking every candidate and every loud sound: the shots were snapped from another camera, or their count is off."
+      : "Walking the kept shots: a person labelled this audio and the count matches. The whole stage below shows everything else.";
+
   const guideButton = (
     <Button size="sm" variant="ghost" onClick={toggleGuide} aria-pressed={guideOpen}>
       {guideOpen ? "Hide guide" : "Guide"}
@@ -345,6 +370,7 @@ export function Walk(props: WalkProps) {
           {expectedRounds != null ? ` of ${expectedRounds} rounds` : ""}
         </span>
         <span className="ml-auto flex gap-1">
+          {scopeButton}
           {guideButton}
           <Button size="sm" variant="ghost" onClick={props.onExit}>
             Leave the walk
@@ -352,6 +378,7 @@ export function Walk(props: WalkProps) {
         </span>
       </div>
 
+      <p className="text-xs text-muted">{scopeLine}</p>
       <div
         className={
           prompt.tone === "warn"
@@ -426,6 +453,23 @@ export function Walk(props: WalkProps) {
         numbered
         cssHeight={CONTEXT_HEIGHT}
       />
+      <Strip
+        label="The whole stage: click to go to the nearest stop"
+        audio={props.audio}
+        peaks={peaks}
+        center={peaks.duration / 2}
+        half={peaks.duration / 2}
+        level={level}
+        fit="stage"
+        {...mark}
+        foot={null}
+        numbered
+        onPick={(t) => {
+          const i = nearestStop(stops, t);
+          if (i >= 0) setIndex(i);
+        }}
+        cssHeight={CONTEXT_HEIGHT}
+      />
       <p className="text-xs text-muted">
         Red: this stop (dashed when it is not a shot) · white: kept shots · grey dashed: rejected candidates ·
         green: the rise foot. Click either of the top two to place the shot there. <kbd>Space</kbd> listens,{" "}
@@ -463,6 +507,7 @@ function Strip({
   candidateTime,
   foot,
   onPlace,
+  onPick,
   numbered = false,
   tickMs,
   cssHeight,
@@ -482,6 +527,8 @@ function Strip({
   candidateTime: number | null;
   foot: number | null;
   onPlace?: (t: number) => void;
+  /** A click picks this time (the overview's jump to a stop). */
+  onPick?: (t: number) => void;
   /** Number the kept shots, in time order over the whole stage. */
   numbered?: boolean;
   /** Ticks every this many ms, counted from the stop (0 at the red line). */
@@ -589,16 +636,20 @@ function Strip({
           className={
             onPlace
               ? "block w-full cursor-crosshair select-none rounded-sm bg-surface"
-              : "block w-full select-none rounded-sm bg-surface"
+              : onPick
+                ? "block w-full cursor-pointer select-none rounded-sm bg-surface"
+                : "block w-full select-none rounded-sm bg-surface"
           }
           style={{ height: cssHeight }}
           role="img"
           aria-label={label}
           onClick={
-            onPlace
+            onPlace || onPick
               ? (e) => {
                   const r = e.currentTarget.getBoundingClientRect();
-                  onPlace(t0 + ((e.clientX - r.left) / r.width) * span);
+                  const t = t0 + ((e.clientX - r.left) / r.width) * span;
+                  if (onPlace) onPlace(t);
+                  else onPick!(t);
                 }
               : undefined
           }

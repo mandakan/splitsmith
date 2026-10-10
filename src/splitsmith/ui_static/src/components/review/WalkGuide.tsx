@@ -72,7 +72,10 @@ export function WalkGuide({ onClose }: { onClose: () => void }) {
             override only what the rule gets wrong.
           </p>
           <p className="text-ink">
-            The walk visits every candidate, every kept shot and every loud sound nobody marked, in time
+            On a fixture a person labelled, whose shot count matches the stage&apos;s rounds, the walk
+            visits the kept shots; the whole stage at the bottom shows everything else. On one snapped from
+            another camera, or with a count that is off, it visits every candidate, every kept shot and
+            every loud sound nobody marked; the switch at the top changes it. Stops come in time
             order. Decide each one, then <kbd>Enter</kbd>. Decisions save as you go; reopening the fixture
             resumes at the first stop you have not confirmed. At the end, check the shot count and sign off.
           </p>

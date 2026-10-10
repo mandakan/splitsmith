@@ -153,17 +153,55 @@ export function walkStops(
   markers: ReadonlyArray<AuditMarker>,
   peaks: SnapPeaks,
   from = 0,
+  scope: WalkScope = "all",
 ): WalkStop[] {
-  const stops: WalkStop[] = markers.map((m) => ({
-    key: m.id,
-    markerId: m.id,
-    time: m.time,
-    origin: isKept(m) ? "kept" : "rejected",
-  }));
-  for (const t of unmarkedBursts(markers, peaks, from)) {
-    stops.push({ key: `burst-${Math.round(t * 1000)}`, markerId: null, time: t, origin: "burst" });
+  const stops: WalkStop[] = markers
+    .filter((m) => scope === "all" || isKept(m))
+    .map((m) => ({
+      key: m.id,
+      markerId: m.id,
+      time: m.time,
+      origin: isKept(m) ? "kept" : "rejected",
+    }));
+  if (scope === "all") {
+    for (const t of unmarkedBursts(markers, peaks, from)) {
+      stops.push({ key: `burst-${Math.round(t * 1000)}`, markerId: null, time: t, origin: "burst" });
+    }
   }
   return stops.sort((a, b) => a.time - b.time || a.key.localeCompare(b.key));
+}
+
+/** What a walk visits. ``all``: every candidate, kept or rejected, and every
+ *  unmarked sound, for labels that may miss or misplace shots. ``shots``: the
+ *  kept shots only, for labels a person made on this audio, where a missed
+ *  shot is rare and the shot count against the stage's rounds is the net. */
+export type WalkScope = "all" | "shots";
+
+/** The scope a fixture opens with: everything when its shots were snapped
+ *  from another camera (``snapped``) or their count disagrees with the
+ *  stage's rounds; else the kept shots. */
+export function defaultScope(opts: { snapped: boolean; kept: number; expectedRounds: number | null }): WalkScope {
+  if (opts.snapped) return "all";
+  if (opts.expectedRounds != null && opts.kept !== opts.expectedRounds) return "all";
+  return "shots";
+}
+
+/** Whether a fixture's shots were snapped from another camera: the same
+ *  rule as ``fixture_schema.review_status`` (an ``anchor`` block or a
+ *  ``promote-from-anchor`` history entry). */
+export function isSnapped(doc: { anchor?: unknown; history?: unknown }): boolean {
+  if (doc.anchor) return true;
+  const history = Array.isArray(doc.history) ? doc.history : [];
+  return history.some((h) => typeof h === "object" && h != null && (h as { action?: unknown }).action === "promote-from-anchor");
+}
+
+/** The stop nearest a time, for a click on the stage overview. */
+export function nearestStop(stops: ReadonlyArray<{ time: number }>, t: number): number {
+  let best = -1;
+  for (let i = 0; i < stops.length; i++) {
+    if (best < 0 || Math.abs(stops[i].time - t) < Math.abs(stops[best].time - t)) best = i;
+  }
+  return best;
 }
 
 /** A stop's state now: a shot when its marker is kept. */
