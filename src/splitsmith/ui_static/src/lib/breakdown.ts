@@ -95,6 +95,19 @@ export function audioRowHeight(band: number | null, natural: number, base: numbe
   return base + Math.max(0, Math.round(band - natural));
 }
 
+/** The band's least height: its natural height less the rows past the
+ *  least it shows (``minRows``: Audio, Shots and one lane). */
+export function bandFloor(natural: number, rowsTotal: number, minRows: number): number {
+  return Math.ceil(natural - (rowsTotal - minRows));
+}
+
+/** The track rows' height for a band under its natural height (they scroll
+ *  under the fixed header and ruler), else ``null``: every row shown. */
+export function bandRowsHeight(band: number | null, natural: number, rowsTotal: number): number | null {
+  if (band == null || natural <= 0 || band >= natural) return null;
+  return Math.max(0, Math.round(rowsTotal - (natural - band)));
+}
+
 /** The Breakdown nav row's count: confirmed regions over every stage's
  *  ``figures.regions``, or ``undefined`` when there are none, so the row
  *  shows nothing rather than a zero. */

@@ -68,6 +68,14 @@ export function BandSplitter({ band, limits, room, onDrag, onCommit, onCancel, o
       onPointerCancel={(e) => {
         if (end(e)) onCancel();
       }}
+      // Capture lost without an up or a cancel (the element re-rendered
+      // away, the system took the pointer): end the drag, nothing remembered.
+      onLostPointerCapture={(e) => {
+        const d = drag.current;
+        if (!d || d.pointerId !== e.pointerId) return;
+        drag.current = null;
+        onCancel();
+      }}
       onDoubleClick={onToggleLarge}
       onKeyDown={(e) => {
         const next = bandForKey(e.key, e.shiftKey, band, limits);
@@ -75,8 +83,10 @@ export function BandSplitter({ band, limits, room, onDrag, onCommit, onCancel, o
         e.preventDefault();
         onCommit(next);
       }}
-      className="group flex h-1.5 shrink-0 cursor-row-resize touch-none items-center justify-center border-y border-rule bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-led"
+      className="group relative z-10 flex h-1.5 shrink-0 cursor-row-resize touch-none items-center justify-center border-y border-rule bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-led"
     >
+      {/* The grab area: 18 px tall around the 6 px drawn handle. */}
+      <span aria-hidden data-testid="band-splitter-hit" className="absolute inset-x-0 -bottom-1.5 -top-1.5" />
       <span aria-hidden className="h-0.5 w-10 rounded-full bg-rule-strong group-hover:bg-ink-2" />
     </div>
   );

@@ -81,6 +81,31 @@ describe("BandSplitter", () => {
     expect(onCommit).not.toHaveBeenCalled();
   });
 
+  it("a lost pointer capture ends the drag without remembering it", () => {
+    const onCommit = vi.fn();
+    render(<Harness onCommit={onCommit} />);
+    const sep = screen.getByRole("separator");
+    fireEvent.pointerDown(sep, { pointerId: 4, clientY: 500, button: 0 });
+    fireEvent.pointerMove(sep, { pointerId: 4, clientY: 450 });
+    expect(screen.getByTestId("band")).toHaveTextContent("350");
+    fireEvent.lostPointerCapture(sep, { pointerId: 4 });
+    expect(screen.getByTestId("band")).toHaveTextContent("300");
+    // The drag is over: a later move or up does nothing.
+    fireEvent.pointerMove(sep, { pointerId: 4, clientY: 400 });
+    fireEvent.pointerUp(sep, { pointerId: 4, clientY: 400 });
+    expect(screen.getByTestId("band")).toHaveTextContent("300");
+    expect(onCommit).not.toHaveBeenCalled();
+  });
+
+  it("the grab area is taller than the drawn handle and starts a drag", () => {
+    render(<Harness />);
+    const hit = screen.getByTestId("band-splitter-hit");
+    expect(hit).toHaveClass("-top-1.5", "-bottom-1.5");
+    fireEvent.pointerDown(hit, { pointerId: 5, clientY: 500, button: 0 });
+    fireEvent.pointerMove(hit, { pointerId: 5, clientY: 480 });
+    expect(screen.getByTestId("band")).toHaveTextContent("320");
+  });
+
   it("arrow keys step, Shift steps further, Home and End go to the limits", () => {
     render(<Harness />);
     const sep = screen.getByRole("separator");

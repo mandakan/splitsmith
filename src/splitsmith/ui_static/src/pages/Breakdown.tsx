@@ -113,15 +113,16 @@ function BreakdownStage({ slug, stage }: { slug: string; stage: number }) {
     if (inspectorRef.current) inspectorRef.current.scrollTop = 0;
   }, [regions.selectedId, ws.activeShotNumber]);
   // Escape drops a region selection back to the shot view. Decided after the
-  // event has reached every listener: a live lane drag claims Esc (the lane
-  // editor's preventDefault) and its cancel wins; an open menu or sheet
-  // closes on that press instead; a text field keeps its own Esc.
+  // event has reached every listener, by defaultPrevented: a live lane drag
+  // (the lane editor), an open menu or sheet (Menu, Sheet) and a dialog
+  // (dialogFocus) each claim the press they consume, and win it. Not a DOM
+  // query for an open menu: by the time a window listener runs, React has
+  // already committed the menu's close. A text field keeps its own Esc.
   const { selectedId, select } = regions;
   useEffect(() => {
     if (selectedId == null) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || isTypingTextTarget(e.target)) return;
-      if (document.querySelector('[role="menu"], [role="dialog"]')) return;
       window.setTimeout(() => {
         if (!e.defaultPrevented) select(null);
       }, 0);
@@ -236,11 +237,12 @@ function BreakdownStage({ slug, stage }: { slug: string; stage: number }) {
           <div className="h-1.5 shrink-0 border-y border-rule bg-surface-2" />
         )}
         {/* Sized by the split when one is set; a band under its natural
-            height scrolls its lanes, a taller one grows the Audio row. */}
+            height gives its rows less (they scroll under the fixed header
+            and ruler), a taller one grows the Audio row. */}
         <div
           ref={split.bandRef}
           data-testid="breakdown-band"
-          className={cn("shrink-0", split.band != null && "overflow-y-auto overflow-x-hidden")}
+          className={cn("shrink-0", split.band != null && "overflow-hidden")}
           style={split.band != null ? { height: split.band } : undefined}
         >
           <div ref={split.contentRef}>
@@ -250,6 +252,7 @@ function BreakdownStage({ slug, stage }: { slug: string; stage: number }) {
               compact={compact}
               toolbar={compact ? transport : undefined}
               audioHeight={split.audioHeight}
+              rowsHeight={split.rowsHeight ?? undefined}
             />
           </div>
         </div>

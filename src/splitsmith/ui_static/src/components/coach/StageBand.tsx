@@ -28,9 +28,11 @@ export interface StageBandProps {
   toolbar?: ReactNode;
   /** The Audio row's height: taller where Breakdown's splitter gives the band room (#1373). */
   audioHeight?: number;
+  /** The rows' height when the splitter makes the band shorter than its rows: they scroll under the fixed ruler (Timeline `rowsHeight`). */
+  rowsHeight?: number;
 }
 
-export function StageBand({ ws, view, compact = false, toolbar, audioHeight = AUDIO_ROW_HEIGHT }: StageBandProps) {
+export function StageBand({ ws, view, compact = false, toolbar, audioHeight = AUDIO_ROW_HEIGHT, rowsHeight }: StageBandProps) {
   const [zoom, setZoom] = useState<Zoom>(null);
   const [keysOn, setKeysOn] = useState(false);
   const { coach, peaks, peaksLoading, scrub, regions } = ws;
@@ -52,6 +54,7 @@ export function StageBand({ ws, view, compact = false, toolbar, audioHeight = AU
         zoom={zoom}
         onZoomChange={setZoom}
         dense={compact}
+        rowsHeight={rowsHeight}
         toolbar={toolbar}
         menuExtra={
           scrub.available || (compact && !eventsReadOnly) ? (

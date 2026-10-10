@@ -115,9 +115,6 @@ export function BreakdownInspector({ ws, view, compact, scrollRef }: BreakdownIn
           <PanelRightClose className="size-4" aria-hidden />
         </Button>
       </div>
-      {regions.issue ? (
-        <SaveNotice issue={regions.issue} busy={regions.busy} onRetry={regions.retry} onDismiss={regions.dismiss} />
-      ) : null}
       <div className="shrink-0">
         {selectedEvent ? (
           <SelectedRegionCard event={selectedEvent} regions={regions} compact />
@@ -129,6 +126,12 @@ export function BreakdownInspector({ ws, view, compact, scrollRef }: BreakdownIn
           />
         ) : null}
       </div>
+      {/* Under the card, so a failed save never pushes Delete and Done down. */}
+      {regions.issue ? (
+        <div className="shrink-0">
+          <SaveNotice issue={regions.issue} busy={regions.busy} onRetry={regions.retry} onDismiss={regions.dismiss} />
+        </div>
+      ) : null}
       {eventsReadOnly ? (
         <div className="max-h-[40%] shrink-0 overflow-y-auto">
           <EventList events={regions.events} shots={coach.shots} />

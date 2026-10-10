@@ -5,8 +5,10 @@ import {
   SPLIT_STEP_PX,
   VIEWER_MIN_PX,
   audioRowHeight,
+  bandFloor,
   bandForKey,
   bandLimits,
+  bandRowsHeight,
   clampBand,
   navRegionCount,
   nearestScrollTop,
@@ -92,5 +94,16 @@ describe("the band splitter (#1373)", () => {
     expect(audioRowHeight(200, 267, 56)).toBe(56);
     // Not measured yet: the base height.
     expect(audioRowHeight(400, 0, 56)).toBe(56);
+  });
+
+  it("a band under its natural height gives its rows less height, down to Audio, Shots and one lane", () => {
+    // Rows: Audio 56 + Shots 32 + three 36 px lanes = 196; least shown 124.
+    expect(bandFloor(303, 196, 124)).toBe(231);
+    expect(bandRowsHeight(null, 303, 196)).toBeNull();
+    expect(bandRowsHeight(303, 303, 196)).toBeNull();
+    expect(bandRowsHeight(400, 303, 196)).toBeNull();
+    expect(bandRowsHeight(231, 303, 196)).toBe(124);
+    expect(bandRowsHeight(270, 303, 196)).toBe(163);
+    expect(bandRowsHeight(270, 0, 196)).toBeNull();
   });
 });
