@@ -365,10 +365,21 @@ function QueueItem({
             {item.slug}
           </div>
           <div className="flex items-center gap-2 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
-            <span>{item.source_label}</span>
+            {item.review_status === "needs_review" ? (
+              <span className="text-live">Check shot times</span>
+            ) : (
+              <span>{item.source_label}</span>
+            )}
             <span className="text-whisper">/</span>
             <span>{item.n_shots} shots</span>
           </div>
+          {item.reasons.length > 0 && item.status !== "done" ? (
+            <div className="truncate text-[0.6875rem] text-subtle" title={item.reasons.join("; ")}>
+              {/* The first reason (why it is in the queue at all) repeats on
+                  every snapped row; the rest is what tells them apart. */}
+              {item.reasons.length > 1 ? item.reasons.slice(1).join("; ") : item.reasons[0]}
+            </div>
+          ) : null}
         </div>
         {item.status === "done" ? (
           <CheckCircle2 className="size-4 text-done" />
@@ -468,7 +479,11 @@ function DetailPane({
                 item.status === "done" && "bg-[color:var(--color-done-tint)] text-done",
               )}
             >
-              {item.status === "pending" ? "Pending confirm" : item.status}
+              {item.status === "pending"
+                ? item.review_status === "needs_review"
+                  ? "Check shot times"
+                  : "Pending confirm"
+                : item.status}
             </span>
           </div>
           <h1 className="font-mono text-[1.25rem] font-bold tracking-tight text-ink">
@@ -488,6 +503,13 @@ function DetailPane({
               Shots <b className="text-ink-2">{item.n_shots}</b>
             </span>
           </div>
+          {item.reasons.length > 0 ? (
+            <ul className="mt-3 list-disc pl-5 text-[0.8125rem] text-ink-2">
+              {item.reasons.map((r) => (
+                <li key={r}>{r}</li>
+              ))}
+            </ul>
+          ) : null}
         </div>
       </header>
 
@@ -574,8 +596,10 @@ function DetailPane({
                 /review
               </code>{" "}
               already provides; labeling happens on the fixture detail page. Once
-              you're satisfied, "Approve to corpus" signs the fixture off and clears
-              it from this queue -- labeling it does the same implicitly.
+              you have checked every shot's leading edge on this fixture's own audio,
+              "Approve to corpus" (or "Mark reviewed" in the editor) signs it off and
+              clears it from this queue. A label pass clears a label-only item, never
+              one whose shot times still need checking.
             </p>
             <div className="mt-4 rounded border border-rule bg-bg-glow px-4 py-3">
               <div className="font-mono text-[0.625rem] uppercase tracking-[0.18em] text-subtle">

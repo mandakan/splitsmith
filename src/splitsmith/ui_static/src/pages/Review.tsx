@@ -614,6 +614,28 @@ export function Review() {
     return () => window.clearTimeout(timer);
   }, [saveStatus]);
 
+  // "Mark reviewed" (#1363): the person has checked every shot on this
+  // fixture's own audio. Saves first, signs off through the review queue's
+  // approve route, then reloads the fixture so a later save cannot write
+  // the stale review block back.
+  const [marking, setMarking] = useState(false);
+  const reviewStatus =
+    (audit as unknown as { review?: { status?: string } } | null)?.review?.status ?? null;
+  const markReviewed = useCallback(async () => {
+    if (!fixturePath) return;
+    setMarking(true);
+    try {
+      if (isDirtyRef.current && !(await performSave())) return;
+      const slug = fixturePath.split("/").pop()!.replace(/\.json$/, "");
+      await api.confirmReviewFixture(slug);
+      setAudit(await api.getFixtureAudit(fixturePath));
+    } catch (err) {
+      setSaveStatus({ kind: "error", message: err instanceof ApiError ? err.detail : String(err) });
+    } finally {
+      setMarking(false);
+    }
+  }, [fixturePath, performSave]);
+
   // ---- Global hotkeys ----------------------------------------------------
 
   useEffect(() => {
@@ -979,6 +1001,16 @@ export function Review() {
                   ) : (
                     <Save className="size-4" />
                   )}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void markReviewed()}
+                  disabled={marking || reviewStatus === "reviewed"}
+                  title="Every shot checked on this fixture's own audio: sign it off"
+                >
+                  {marking ? <Loader2 className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}
+                  {reviewStatus === "reviewed" ? "Reviewed" : "Mark reviewed"}
                 </Button>
                 <span className="ml-auto flex items-center gap-3 text-xs text-muted">
                   <span>{detectedCount} detected</span>

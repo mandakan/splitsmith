@@ -5898,6 +5898,11 @@ class DevReviewQueueItem(BaseModel):
     stage_number: int | None = None
     shooter: str | None = None
     age_seconds: int | None = None
+    # Shot times checked on this fixture's own audio (#1363), and the
+    # inventory's priority and reasons (``scripts/fixture_review_inventory.py``).
+    review_status: Literal["needs_review", "reviewed"] = "reviewed"
+    priority: float | None = None
+    reasons: list[str] = []
 
 
 class DevReviewQueueResponse(BaseModel):
@@ -19404,14 +19409,24 @@ def create_app(
                 stage_number=_stage_from_slug(fx.slug),
                 shooter=_shooter_from_slug(fx.slug),
                 age_seconds=age,
+                review_status="needs_review" if fx.review_status == "needs_review" else "reviewed",
+                priority=fx.review_priority,
+                reasons=fx.review_reasons,
             )
             if item.status == "pending":
                 pending.append(item)
             else:
                 done.append(item)
-        # Sort pending by age (newest first); done alphabetically so the
-        # corpus is browsable.
-        pending.sort(key=lambda x: x.age_seconds or 0)
+        # Pending: shot times that need checking first, most doubtful first
+        # (the inventory's priority), then label passes by age (newest
+        # first). Done alphabetically so the corpus is browsable.
+        pending.sort(
+            key=lambda x: (
+                x.review_status != "needs_review",
+                -(x.priority or 0.0),
+                x.age_seconds or 0,
+            )
+        )
         done.sort(key=lambda x: x.slug)
         return DevReviewQueueResponse(pending=pending, flagged=flagged, done=done)
 

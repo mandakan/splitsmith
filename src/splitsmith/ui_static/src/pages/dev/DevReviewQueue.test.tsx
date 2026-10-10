@@ -45,6 +45,9 @@ function item(slug: string): DevReviewQueueItem {
     n_disagreements: 0,
     promoted_at: null,
     age_seconds: 60,
+    review_status: "reviewed",
+    priority: null,
+    reasons: [],
   };
 }
 
@@ -57,6 +60,30 @@ function renderQueue(search = "") {
     </MemoryRouter>,
   );
 }
+
+describe("DevReviewQueue shot-time review", () => {
+  it("says which fixtures need their shot times checked, and why", async () => {
+    vi.mocked(api.getDevReviewQueue).mockResolvedValue({
+      pending: [
+        {
+          ...item("stage-shots-hfo-2026-stage1-s97dcec94-go3s"),
+          review_status: "needs_review",
+          priority: 150,
+          reasons: ["snapped from another angle, never checked on this audio", "42 % at the window edge"],
+        },
+      ],
+      flagged: [],
+      done: [],
+    });
+
+    renderQueue();
+
+    expect((await screen.findAllByText("Check shot times")).length).toBeGreaterThan(0);
+    // The detail pane lists every reason; the row shows what sets it apart.
+    expect(screen.getByText("snapped from another angle, never checked on this audio")).toBeInTheDocument();
+    expect(screen.getAllByText("42 % at the window edge")).toHaveLength(2);
+  });
+});
 
 describe("DevReviewQueue detail pane", () => {
   it("links the active item to marker edits and to labeling, keeping ?match=", async () => {

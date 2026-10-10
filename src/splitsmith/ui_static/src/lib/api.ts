@@ -2811,6 +2811,12 @@ export interface DevReviewQueueItem {
   stage_number: number | null;
   shooter: string | null;
   age_seconds: number | null;
+  /** Whether the shot times were checked on this fixture's own audio. */
+  review_status: "needs_review" | "reviewed";
+  /** Review order from scripts/fixture_review_inventory.py; null until it has run. */
+  priority: number | null;
+  /** Why this fixture is worth checking, in plain words. */
+  reasons: string[];
 }
 
 export interface DevReviewQueueResponse {
