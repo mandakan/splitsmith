@@ -2015,18 +2015,23 @@ export function Audit() {
                     `fill` (h-full, object-contain) applies at every width,
                     so the video letterboxes inside the tile below lg too.
                     The row's floor follows the camera count: a second
-                    camera adds about 150 px of fixed chrome (the secondary
+                    camera adds about 100 px of fixed chrome (the secondary
                     strip or thumb row, the sync row, a taller header and
                     two gaps, measured at 1440 wide), so several cameras
-                    take a 450 px floor and the primary tile keeps about
-                    250 px (280 px since the column's transport row folded
-                    into the band header, #1359). */}
+                    take a 398 px floor and the primary tile keeps about
+                    228 px, what it had before the column's transport row
+                    folded into the band header (#1359). Above the floor
+                    the row is the viewport less 502 px, the page header,
+                    the band and the footer at 1440 wide: two cameras at
+                    1440x900 end the band's Audio row at the sticky footer,
+                    and a taller screen gives its extra height to the video
+                    rather than to empty space under the band. */}
                 <div
                   className={cn(
                     "grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:grid-rows-[minmax(0,1fr)]",
                     videos.length > 1
-                      ? "lg:h-[max(450px,calc(100dvh-560px))]"
-                      : "lg:h-[max(300px,calc(100dvh-560px))]",
+                      ? "lg:h-[max(398px,calc(100dvh-502px))]"
+                      : "lg:h-[max(300px,calc(100dvh-502px))]",
                   )}
                 >
                   <MultiCamColumn

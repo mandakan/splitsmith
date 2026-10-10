@@ -164,7 +164,7 @@ export function LegendKey() {
         size="sm"
         variant="ghost"
         aria-label="Marker key"
-        aria-haspopup="menu"
+        aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
         className={cn("gap-1 px-2 text-muted", open ? "bg-surface-3" : null)}
@@ -174,13 +174,21 @@ export function LegendKey() {
         ))}
         <span className="ml-1">Key</span>
       </Button>
-      <Menu open={open} onClose={() => setOpen(false)} className="min-w-0 gap-1.5 p-3 text-sm text-muted">
-        {LEGEND.map((e) => (
-          <span key={e.label} className="inline-flex items-center gap-2">
-            <Swatch entry={e} />
-            {e.label}
-          </span>
-        ))}
+      <Menu
+        open={open}
+        onClose={() => setOpen(false)}
+        role="dialog"
+        label="Marker key"
+        className="min-w-0 p-3 text-sm text-muted"
+      >
+        <ul className="flex flex-col gap-1.5">
+          {LEGEND.map((e) => (
+            <li key={e.label} className="inline-flex items-center gap-2">
+              <Swatch entry={e} />
+              {e.label}
+            </li>
+          ))}
+        </ul>
       </Menu>
     </span>
   );

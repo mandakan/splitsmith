@@ -30,6 +30,10 @@ export interface MenuProps {
   children: ReactNode;
   align?: "left" | "right";
   className?: string;
+  /** ``dialog`` for a popover that holds no menu items (Audit's marker
+   *  key), named by ``label``. Default ``menu``. */
+  role?: "menu" | "dialog";
+  label?: string;
 }
 
 interface Position {
@@ -38,7 +42,7 @@ interface Position {
   right?: number;
 }
 
-export function Menu({ open, onClose, children, align = "left", className }: MenuProps) {
+export function Menu({ open, onClose, children, align = "left", className, role = "menu", label }: MenuProps) {
   const ref = useRef<HTMLDivElement | null>(null);
   const markerRef = useRef<HTMLSpanElement | null>(null);
   const [pos, setPos] = useState<Position | null>(null);
@@ -97,7 +101,8 @@ export function Menu({ open, onClose, children, align = "left", className }: Men
         ? createPortal(
             <div
               ref={ref}
-              role="menu"
+              role={role}
+              aria-label={label}
               style={pos ?? { visibility: "hidden" }}
               className={cn(
                 "fixed z-drawer flex min-w-52 flex-col gap-0.5 rounded-[10px] border border-rule-strong bg-surface p-1.5 text-md text-ink-2 shadow-lg",

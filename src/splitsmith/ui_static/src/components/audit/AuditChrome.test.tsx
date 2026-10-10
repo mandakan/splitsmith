@@ -186,9 +186,11 @@ describe("LegendKey", () => {
     expect(screen.queryByText("Timer stop")).toBeNull();
     fireEvent.click(key);
     expect(key).toHaveAttribute("aria-expanded", "true");
-    for (const label of ["Beep", "Timer stop", "Shot", "Manual", "Rejected", "Flag", "Current"]) {
-      expect(within(screen.getByRole("menu")).getByText(label)).toBeInTheDocument();
-    }
+    // A popover of labels, not a menu: no menu role, the key as a list.
+    expect(screen.queryByRole("menu")).toBeNull();
+    const dialog = screen.getByRole("dialog", { name: "Marker key" });
+    const items = within(dialog).getAllByRole("listitem").map((li) => li.textContent);
+    expect(items).toEqual(["Beep", "Timer stop", "Shot", "Manual", "Rejected", "Flag", "Current"]);
   });
 });
 

@@ -204,7 +204,7 @@ describe("Audit on the timeline band", () => {
     const grid = document.querySelector('[class*="lg:grid-cols-[minmax(0,1fr)_380px]"]') as HTMLElement;
     // The row's height, not the shot list's length, sets where the band
     // starts: one row track that may shrink below its content.
-    expect(grid).toHaveClass("lg:h-[max(300px,calc(100dvh-560px))]", "lg:grid-rows-[minmax(0,1fr)]");
+    expect(grid).toHaveClass("lg:h-[max(300px,calc(100dvh-502px))]", "lg:grid-rows-[minmax(0,1fr)]");
     expect(grid).not.toHaveClass("lg:items-start");
     const [video, shots] = Array.from(grid.children) as HTMLElement[];
     expect(video).toHaveClass("lg:h-full");
@@ -228,8 +228,8 @@ describe("Audit on the timeline band", () => {
     const grid = document.querySelector('[class*="lg:grid-cols-[minmax(0,1fr)_380px]"]') as HTMLElement;
     // The secondary strip and the sync row cost about 150 px, so the floor
     // grows by that much and the primary tile keeps a usable height.
-    expect(grid).toHaveClass("lg:h-[max(450px,calc(100dvh-560px))]");
-    expect(grid).not.toHaveClass("lg:h-[max(300px,calc(100dvh-560px))]");
+    expect(grid).toHaveClass("lg:h-[max(398px,calc(100dvh-502px))]");
+    expect(grid).not.toHaveClass("lg:h-[max(300px,calc(100dvh-502px))]");
   });
 
   it("adds a manual marker on a double-click in the audio row", async () => {
