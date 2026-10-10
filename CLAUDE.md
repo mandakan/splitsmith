@@ -1290,7 +1290,12 @@ the reload chip, ``chipSettle``, easing and colours) live in
 all of ``_shared/``, so an edit there invalidates every cached MOV.
 The overlay's ``<base>_overlay.json`` record carries the audit revision
 for every style (``ui/exports.overlay_audit_revision``), so any audit
-edit redraws; a legacy record never matches, and a failed redraw drops
+edit redraws; a template style's record also carries ``template``
+(``overlay_hud.overlay_template_identity``: the template's bytes and
+``shared_digest``), so an edit to the template or a shared script redraws
+the exports' MOV too; Classic records carry none. One rule decides reuse,
+``ui/exports.overlay_record_matches``, for the match export job and the
+MCP tool alike; a legacy record never matches, and a failed redraw drops
 that stage's overlay with an anomaly rather than reusing the stale one.
 
 Summary card: with confirmed reloads the Splits band gains Reloads /
@@ -1320,7 +1325,8 @@ its type follows the canvas height on any canvas at least
 16:9, 1920x1088 and wider, where it always fitted); a squarer or upright
 canvas sizes it as a 6:5 card of its width, since by height its headline
 row ran off the page (measured break-even about 1.17:1). A ``fit.js`` change
-reaches the summary PNG by content, the preview only through
+reaches the summary PNG by content and the preview through the key's
+``shared_digest``; any other change to what a preview draws still needs
 ``PREVIEW_REVISION``. Exports: the splits CSV gains
 ``moving`` as its last column (``read_splits_csv`` takes both headers);
 ``<base>_events.csv`` is written only with shots and confirmed regions.

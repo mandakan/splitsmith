@@ -15,6 +15,7 @@ frame of live stage, and nothing for the pads.
 
 from __future__ import annotations
 
+import hashlib
 import math
 import re
 from collections.abc import Sequence
@@ -119,6 +120,32 @@ class OverlayStyleFields(BaseModel):
         )
 
 
+def overlay_template_identity(look: str, variant: str) -> str | None:
+    """What a template style's MOV depends on beyond the request and the
+    audit: the bytes of the template that draws ``variant`` for ``look``
+    and every shipped ``_shared/`` script (``look_template.shared_digest``).
+    The same template inputs ``template_digest`` reads that do not change
+    per render. ``None`` for Classic, whose pixels the engine draws, and
+    for a style no Look draws (that render falls back to Classic)."""
+    if variant == DEFAULT_VARIANT:
+        return None
+    # Deferred: look_template imports the theme and layout modules, which
+    # nothing else here needs.
+    from .look_template import shared_digest
+    from .looks import LookError, load_look, overlay_template_for
+
+    try:
+        template = overlay_template_for(load_look(look), variant)
+        if template is None:
+            return None
+        body = template.read_bytes()
+    except (LookError, OSError):
+        return None
+    digest = hashlib.sha256(body + b"\0")
+    digest.update(shared_digest().encode("ascii"))
+    return digest.hexdigest()
+
+
 def overlay_settings(
     *,
     look: str,
@@ -137,8 +164,13 @@ def overlay_settings(
     ``audit_revision`` is the revision of the audit doc the overlay was drawn
     from (``ui.exports.overlay_audit_revision``), for every style: a shot
     edit or a confirmed region moves what any style draws, so an overlay is
-    never reused across an audit change."""
-    return {
+    never reused across an audit change.
+
+    A template style also records ``template`` (:func:`overlay_template_identity`):
+    an edit to its template or to a shared script it loads must draw it
+    again, and a record from before the key existed matches no request.
+    Classic records carry no such key: the engine draws them."""
+    settings: dict[str, Any] = {
         "look": look,
         "variant": variant,
         "options": options.model_dump() if variant != DEFAULT_VARIANT else {},
@@ -147,6 +179,9 @@ def overlay_settings(
         "max_fps": max_fps,
         "audit_revision": audit_revision,
     }
+    if variant != DEFAULT_VARIANT:
+        settings["template"] = overlay_template_identity(look, variant)
+    return settings
 
 
 #: What an overlay rendered before the record existed is taken to be: the

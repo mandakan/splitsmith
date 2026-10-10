@@ -297,14 +297,18 @@ and yours may load it the same way:
 `window.splitsmithHud(window.splitsmith)` then answers the helpers, bound to
 the stage and the options: `stageBar()` (a `#stageBar` element with its
 `#stageFill` and bands, or `null`; place `.el`, call `.seek(running)`),
-`regionBands(parent)` (the bands alone, on a track of your own),
+`regionBands(parent)` (the bands alone, on a track of your own; it answers
+an object whose `.seek(running)` grows them with the clock),
 `reloadChip(build, id)` (`build()` makes and places the chip, its last child
 takes the figure; `null` without a reload; call `.seek(t)`), `chipSettle(base)`
 (your own settle, stretched to finish the chip's fade), and `clamp`,
 `easeOut`, `backOut`, `rgba(hex, alpha)`, `along(t)` (percent of the stage
-at clip time `t`) and `tierColour(tier)`. Each one honours the toggles, so a
+at clip time `t`), `span` (the stage time `along` divides by, 1 for a stage
+without one), `tierColour(tier)`, `regionColour(kind)` (the theme colour of a
+region) and `pieces(regions)` (the bar's pieces of a region list: a reload
+cut where it meets a movement, that slice marked `half`). Each one honours the toggles, so a
 style that calls them draws nothing extra with a toggle off. A change to the
-script reaches every cached render, yours included.
+script reaches every cached render and every exported overlay, yours included.
 
 A style that can sit in more than one corner says which in its own markup,
 its default first; `options.position` is then one of them:

@@ -176,6 +176,36 @@ def read_overlay_settings(path: Path) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
+def overlay_record_matches(
+    record: dict[str, Any] | None, *, audit_revision: str | None, wanted: dict[str, Any] | None = None
+) -> bool:
+    """Whether an overlay MOV whose settings record is ``record`` may be
+    reused: the one rule for every reuse check (the match export job and the
+    MCP tool). ``audit_revision`` is the audit as it stands
+    (:func:`overlay_audit_revision`). ``wanted`` is the request's settings
+    (:func:`overlay_settings`); ``None`` wants whatever style was recorded,
+    as it would be drawn now, so a template or shared script that moved
+    since still misses. An unreadable audit or record never matches."""
+    if record is None or audit_revision is None:
+        return False
+    if wanted is None:
+        try:
+            variant = str(record["variant"])
+            options = HudOptions(**record["options"]) if variant != DEFAULT_VARIANT else HudOptions()
+            wanted = overlay_settings(
+                look=str(record["look"]),
+                variant=variant,
+                options=options,
+                codec=record["codec"],
+                max_height=record["max_height"],
+                max_fps=record["max_fps"],
+                audit_revision=audit_revision,
+            )
+        except (KeyError, TypeError, ValueError):
+            return False
+    return wanted.get("audit_revision") == audit_revision and record == wanted
+
+
 def _confirmed_regions(audit_data: dict[str, Any], audit_path: Path) -> list[StageEvent]:
     """The stage's confirmed regions only (spec 2026-10-08, part 2). A
     corrupt events list must not fail the whole export -- it reads as

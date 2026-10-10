@@ -323,21 +323,22 @@ def export_match_tool(
             candidate = exports_dir / f"{base}_overlay.mov"
             if candidate.exists():
                 # Stitched only when its record says it was drawn from the
-                # audit as it stands: this tool cannot redraw it (it has no
-                # style to draw with), so a stale one is left out and said so.
-                # Look, style and options are deliberately not compared: this
-                # tool asks for none, so whatever style was drawn is wanted.
+                # audit as it stands, with the template and shared scripts as
+                # they stand: this tool cannot redraw it (it has no style to
+                # draw with), so a stale one is left out and said so. It asks
+                # for no style, so whatever style was drawn is wanted
+                # (``overlay_record_matches`` without ``wanted``).
                 record = export_helpers.read_overlay_settings(
                     export_helpers.overlay_settings_file(exports_dir, base)
                 )
                 current = export_helpers.overlay_audit_revision(audit_path)
-                if current is not None and record is not None and record.get("audit_revision") == current:
+                if export_helpers.overlay_record_matches(record, audit_revision=current):
                     overlay_path = candidate
                 else:
                     stale_stages.append(stage_number)
                     stale_overlays.append(
-                        f"stage {stage_number}: overlay at {candidate} was drawn from an older audit "
-                        "(or has no record of which) -- left out; call export_stage with "
+                        f"stage {stage_number}: overlay at {candidate} was drawn from an older audit or "
+                        "template (or has no record of which) -- left out; call export_stage with "
                         "write_overlay=True to draw it again"
                     )
         stages_input.append(
