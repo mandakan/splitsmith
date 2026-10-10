@@ -2,8 +2,8 @@
 
 Desktop is authoritative for everything except the narrow whitelist
 mobile is allowed to write (spec 2026-08-10-bidirectional-sync-design):
-per-video beep field-groups in project docs, per-shot coach fields and
-the append-only ``audit_events`` log in audit docs. Each merge starts
+per-video beep field-groups in project docs, per-shot coach fields, the
+stage note and the append-only ``audit_events`` log in audit docs. Each merge starts
 from a deep copy of the local doc and resolves whitelisted units
 three-way against the base snapshot: changed on one side wins outright;
 changed on both is a true conflict resolved last-writer-wins by doc
@@ -59,7 +59,7 @@ import copy
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from ..coach import COACH_FIELDS
+from ..coach import COACH_FIELDS, FIELD_STAGE_NOTE
 from ..shot_id import ensure_shot_ids
 
 #: Every key on a video dict starting with this prefix moves as one
@@ -480,6 +480,24 @@ def merge_audit_doc(
         else:
             merged.pop("needs_attention", None)
 
+    # stage_note (#1376): a doc-level unit merged exactly like a shot's
+    # coaching_note -- three-way against base, changed on one side wins,
+    # changed on both is a conflict the newer doc wins, surfaced. A missing
+    # key and a missing note are the same value.
+    base_sn = (base or {}).get(FIELD_STAGE_NOTE)
+    local_sn = local.get(FIELD_STAGE_NOTE)
+    remote_sn = remote.get(FIELD_STAGE_NOTE)
+    sn_winner, sn_conflict = _resolve_unit(
+        base_sn, local_sn, remote_sn, local_ts=local_ts, remote_ts=remote_ts
+    )
+    if sn_conflict:
+        result.conflicts.append(MergeConflict(doc_key=doc_key, unit=FIELD_STAGE_NOTE, winner=sn_winner))
+    if sn_winner == "remote" and remote_sn != local_sn:
+        if remote_sn is None:
+            merged.pop(FIELD_STAGE_NOTE, None)
+        else:
+            merged[FIELD_STAGE_NOTE] = remote_sn
+
     # Same shape as the project merge's tripwire: remote's copy differs from
     # base on a field this merge does not carry, so local's value stands.
     #
@@ -506,6 +524,7 @@ def merge_audit_doc(
         clone = copy.deepcopy(doc or {})
         clone.pop("audit_events", None)
         clone.pop("needs_attention", None)
+        clone.pop(FIELD_STAGE_NOTE, None)
         clone.pop("shots", None)
         return clone
 

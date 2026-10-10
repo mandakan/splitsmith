@@ -111,6 +111,9 @@ _REVIEW_ROUTES: tuple[tuple[str, re.Pattern[str]], ...] = (
     # use - ``shot_number`` renumbers under it on any insert or delete.
     ("PATCH", re.compile(r"\Ashooters/[^/]+/stages/\d+/shots/(?:\d+|by-id/[A-Za-z0-9._-]+)/coach\Z")),
     ("POST", re.compile(r"\Ashooters/[^/]+/stages/\d+/coach/reclassify\Z")),
+    # The stage note (#1376), review metadata like a shot's note: sync
+    # merges ``stage_note`` three-way, so a mirror's edit reaches the desktop.
+    ("PATCH", re.compile(r"\Ashooters/[^/]+/stages/\d+/stage-note\Z")),
     # The full stage audit PUT (#631 Task 6). Safe now that shots carry a
     # stable id and sync/merge.py merges their membership by it - before
     # the merge unit shipped, opening this would have let a desktop pull

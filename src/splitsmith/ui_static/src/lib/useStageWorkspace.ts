@@ -61,6 +61,9 @@ export interface StageWorkspace {
   /** ``patchShot`` that rethrows instead of replacing the page: an autosaved
    *  note reports its own failure (``useNoteAutosave``). */
   savePatch: (shot: CoachShot, patch: ShotPatch) => Promise<void>;
+  /** Write the stage note with the latest payload's revision (#1376);
+   *  rethrows, a 409 included. */
+  saveStageNote: (text: string) => Promise<void>;
   /** Fetch the coach payload again and apply it (after a conflict). */
   reload: () => Promise<CoachStageResponse | null>;
   /** Select a shot and seek the video to it; drops a selected region. */
@@ -221,6 +224,14 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
     [savePatch],
   );
 
+  const saveStageNote = useCallback(
+    async (text: string) => {
+      const c = await api.patchStageNote(slug, stage, text, coachRef.current?._version);
+      apply(c);
+    },
+    [apply, slug, stage],
+  );
+
   const reload = useCallback(async () => {
     const c = await api.getStageCoach(slug, stage);
     apply(c);
@@ -290,6 +301,7 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
     reclassify,
     patchShot,
     savePatch,
+    saveStageNote,
     reload,
     seekToShot,
     seekToTime,

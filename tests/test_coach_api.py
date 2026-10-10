@@ -1135,3 +1135,92 @@ def test_get_coach_reseeds_an_older_seeders_untouched_proposals(tmp_path: Path) 
     assert stored["events_seeded"] == 2
     assert stored["shots"][4]["interval_class"] != "reload"
     assert stored["shots"][15]["interval_class"] == "reload"
+
+
+# ---------------------------------------------------------------------------
+# PATCH stage note (#1376)
+# ---------------------------------------------------------------------------
+
+
+def _note(client, base: str, body: dict) -> Any:
+    return client.patch(f"{base}/shooters/me/stages/1/stage-note", json=body)
+
+
+def test_stage_note_round_trips_and_returns_the_coach_payload(tmp_path: Path) -> None:
+    client, audit_file, base = _bootstrap(tmp_path)
+    before = _coach(client, base)
+    assert before["stage_note"] is None
+    resp = _note(client, base, {"stage_note": "Draw earlier on the move", "_version": before["_version"]})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["stage_note"] == "Draw earlier on the move"
+    assert "shots" in body and "videos" in body
+    stored = _read(audit_file)
+    assert stored["stage_note"] == "Draw earlier on the move"
+    assert stored["audit_events"][-1]["kind"] == "stage_note"
+    assert stored["audit_events"][-1]["payload"] == {"stage_note": "Draw earlier on the move"}
+    # The served revision is the saved doc's, so the next save goes through.
+    assert body["_version"] == audit_revision(stored)
+    assert _coach(client, base)["stage_note"] == "Draw earlier on the move"
+    again = _note(client, base, {"stage_note": "", "_version": body["_version"]})
+    assert again.status_code == 200, again.text
+    assert again.json()["stage_note"] is None
+    assert "stage_note" not in _read(audit_file)
+
+
+def test_stage_note_null_clears_it(tmp_path: Path) -> None:
+    client, audit_file, base = _bootstrap(tmp_path)
+    assert _note(client, base, {"stage_note": "x"}).status_code == 200
+    assert _note(client, base, {"stage_note": None}).status_code == 200
+    assert "stage_note" not in _read(audit_file)
+
+
+def test_stage_note_stale_version_is_a_409_and_leaves_the_doc(tmp_path: Path) -> None:
+    client, audit_file, base = _bootstrap(tmp_path)
+    _coach(client, base)
+    before = audit_file.read_text(encoding="utf-8")
+    resp = _note(client, base, {"stage_note": "late", "_version": "0000000000000000"})
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"]["code"] == "version_conflict"
+    assert audit_file.read_text(encoding="utf-8") == before
+
+
+def test_stage_note_a_shot_patch_moves_the_revision_it_checks(tmp_path: Path) -> None:
+    client, _audit, base = _bootstrap(tmp_path)
+    v1 = _coach(client, base)["_version"]
+    patched = client.patch(f"{base}/shooters/me/stages/1/shots/1/coach", json={"improvement_flag": True})
+    assert patched.status_code == 200, patched.text
+    assert _note(client, base, {"stage_note": "x", "_version": v1}).status_code == 409
+    assert _note(client, base, {"stage_note": "x", "_version": patched.json()["_version"]}).status_code == 200
+
+
+def test_stage_note_without_an_audit_is_404(tmp_path: Path) -> None:
+    client, audit_file, base = _bootstrap(tmp_path)
+    audit_file.unlink()
+    resp = _note(client, base, {"stage_note": "x"})
+    assert resp.status_code == 404
+    assert "no audit JSON" in resp.json()["detail"]
+
+
+def test_stage_note_rejects_an_unknown_field(tmp_path: Path) -> None:
+    client, _audit, base = _bootstrap(tmp_path)
+    assert _note(client, base, {"stage_note": "x", "note": "y"}).status_code == 422
+
+
+def test_stage_note_with_corrupt_events_is_a_422_and_leaves_the_doc(tmp_path: Path) -> None:
+    client, audit_file, base = _bootstrap(tmp_path)
+    doc = _read(audit_file)
+    doc["events"] = [{"id": "evt-1", "kind": "nap", "start": 1.0, "end": 2.0, "source": "manual"}]
+    audit_file.write_text(json.dumps(doc) + "\n", encoding="utf-8")
+    before = audit_file.read_text(encoding="utf-8")
+    resp = _note(client, base, {"stage_note": "x"})
+    assert resp.status_code == 422, resp.text
+    assert audit_file.read_text(encoding="utf-8") == before
+
+
+def test_get_coach_ignores_a_non_string_stage_note(tmp_path: Path) -> None:
+    client, audit_file, base = _bootstrap(tmp_path)
+    doc = _read(audit_file)
+    doc["stage_note"] = {"hand": "edited"}
+    audit_file.write_text(json.dumps(doc) + "\n", encoding="utf-8")
+    assert _coach(client, base)["stage_note"] is None

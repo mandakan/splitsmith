@@ -23,6 +23,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 
 import { ReviewShotList } from "@/components/coach/ReviewShotList";
+import { StageNoteCard } from "@/components/coach/StageNoteCard";
 import { StageStrip } from "@/components/coach/StageStrip";
 import { StageTransport, StageVideo } from "@/components/coach/StageViewer";
 import { TimeBudgetBar } from "@/components/coach/TimeBudgetBar";
@@ -834,6 +835,15 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
         </div>
 
         <div className="flex min-w-0 flex-col gap-4">
+          <StageNoteCard
+            note={coach.stage_note ?? null}
+            save={ws.saveStageNote}
+            reload={async () => {
+              const fresh = await ws.reload().catch(() => null);
+              return fresh ? (fresh.stage_note ?? "") : null;
+            }}
+            readOnly={notesReadOnly}
+          />
           <ReviewShotList
             shots={coach.shots}
             activeShotNumber={ws.activeShotNumber}

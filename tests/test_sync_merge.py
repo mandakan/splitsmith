@@ -220,6 +220,80 @@ def test_audit_remote_shot_nudge_is_not_a_tripwire():
     assert not r.notes
 
 
+# stage_note (#1376): merged like a shot's coaching_note
+
+
+def _noted(note):
+    doc = _audit([_shot(1)], [])
+    if note is not None:
+        doc["stage_note"] = note
+    return doc
+
+
+def test_stage_note_remote_only_change_wins_without_a_note():
+    # A note written on hosted (a mirror) reaches the desktop's doc.
+    r = merge_audit_doc(
+        _noted(None),
+        _noted(None),
+        _noted("from the phone"),
+        doc_key="audit/anna/3",
+        local_ts=T_OLD,
+        remote_ts=T_NEW,
+    )
+    assert r.doc["stage_note"] == "from the phone"
+    assert r.conflicts == [] and r.notes == [] and r.changed_vs_local is True
+
+
+def test_stage_note_local_only_change_is_kept():
+    # A desktop edit survives a pull whose copy still holds the base note.
+    r = merge_audit_doc(
+        _noted("base"),
+        _noted("desktop"),
+        _noted("base"),
+        doc_key="audit/anna/3",
+        local_ts=T_NEW,
+        remote_ts=T_OLD,
+    )
+    assert r.doc["stage_note"] == "desktop"
+    assert r.conflicts == [] and r.changed_vs_local is False
+
+
+def test_stage_note_remote_clear_removes_it():
+    r = merge_audit_doc(
+        _noted("base"), _noted("base"), _noted(None), doc_key="audit/anna/3", local_ts=T_OLD, remote_ts=T_NEW
+    )
+    assert "stage_note" not in r.doc
+
+
+@pytest.mark.parametrize(
+    ("local_ts", "remote_ts", "winner", "expected"),
+    [(T_OLD, T_NEW, "remote", "theirs"), (T_NEW, T_OLD, "local", "mine")],
+)
+def test_stage_note_both_changed_newer_wins_and_is_surfaced(local_ts, remote_ts, winner, expected):
+    r = merge_audit_doc(
+        _noted("base"),
+        _noted("mine"),
+        _noted("theirs"),
+        doc_key="audit/anna/3",
+        local_ts=local_ts,
+        remote_ts=remote_ts,
+    )
+    assert r.doc["stage_note"] == expected
+    assert [(c.unit, c.winner) for c in r.conflicts] == [("stage_note", winner)]
+
+
+def test_stage_note_both_sides_converged_is_no_conflict():
+    r = merge_audit_doc(
+        _noted("base"),
+        _noted("same"),
+        _noted("same"),
+        doc_key="audit/anna/3",
+        local_ts=T_OLD,
+        remote_ts=T_NEW,
+    )
+    assert r.doc["stage_note"] == "same" and r.conflicts == []
+
+
 # needs_attention (triage slice 4)
 
 

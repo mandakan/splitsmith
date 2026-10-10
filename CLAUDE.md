@@ -1318,6 +1318,20 @@ project payload carries ``moving_shots``, ``reloads``, ``reload_avg_s``,
 confirmed region, ``exposed_reload_s`` a number whenever there is a
 confirmed reload, and no capacity warning (a Coach hint, not a shared figure).
 
+**Coach is the review page, Breakdown the editor** (epic #1370). Coach
+edits metadata only: per-shot ``coaching_note`` / ``improvement_flag``
+and the **stage note** (``stage_note`` on the stage audit doc,
+``coach.FIELD_STAGE_NOTE``), each saved by ``lib/useNoteAutosave`` after a
+pause and on blur. Regions and interval classes (and Reclassify) are
+Breakdown's; Coach shows them read-only through ``StageStrip``
+(``lib/stageStrip``, confirmed regions only). ``PATCH
+.../stages/{n}/stage-note`` writes under ``_audit_rmw()`` with the audit
+revision check (409 ``version_conflict``) and an ``audit_events`` entry; it
+is a ``_REVIEW_ROUTES`` entry, because ``merge_audit_doc`` merges
+``stage_note`` three-way like a shot's note (newer doc wins a conflict,
+surfaced), unlike desktop-owned ``events``. The coach payload carries
+``stage_note``, ``null`` on a share read.
+
 ## Hosted access tiers (spec 2026-10-03)
 
 An account has **features** (``splitsmith.access.Feature``: ``sync``,

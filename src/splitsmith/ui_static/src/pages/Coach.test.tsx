@@ -22,6 +22,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
       getMatchCoachDistributions: vi.fn().mockResolvedValue(null),
       getStagePeaks: vi.fn(),
       patchStageShotCoach: vi.fn(),
+      patchStageNote: vi.fn(),
       putStageEvents: vi.fn(),
       getScrubSettings: vi.fn().mockResolvedValue({ full_res_scrub: false }),
       setScrubSettings: vi.fn().mockResolvedValue({ full_res_scrub: true }),
@@ -301,6 +302,70 @@ describe("Coach notes and flags", () => {
     expect(await screen.findByRole("textbox", { name: "Note on shot 02" })).toHaveValue("second");
     await waitFor(() => expect(api.patchStageShotCoach).toHaveBeenCalledTimes(1));
     expect(vi.mocked(api.patchStageShotCoach).mock.calls[0][2]).toEqual(expect.objectContaining({ id: "c1" }));
+  });
+});
+
+describe("Coach stage note", () => {
+  beforeEach(() => {
+    vi.mocked(api.patchStageNote).mockReset();
+  });
+
+  it("shows the stored note and saves an edit after a pause with the payload's revision", async () => {
+    renderCoachStage([makeShot(1, "c1")], { stage_note: "Second array" });
+    const box = await screen.findByRole("textbox", { name: "Stage note" });
+    expect(box).toHaveValue("Second array");
+    vi.useFakeTimers();
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    vi.mocked(api.patchStageNote).mockResolvedValue(makeCoach([makeShot(1, "c1")], 4, { stage_note: "Second array: draw earlier", _version: "bbbbbbbbbbbbbbbb" }));
+    fireEvent.change(box, { target: { value: "Second array: draw earlier" } });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(NOTE_SAVE_DELAY_MS);
+    });
+    expect(api.patchStageNote).toHaveBeenCalledWith("anna", 1, "Second array: draw earlier", "aaaaaaaaaaaaaaaa");
+    // The next save sends the revision the first one returned.
+    vi.mocked(api.patchStageNote).mockResolvedValue(makeCoach([makeShot(1, "c1")], 4, { stage_note: "x", _version: "cccccccccccccccc" }));
+    fireEvent.change(box, { target: { value: "x" } });
+    fireEvent.blur(box);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(api.patchStageNote).toHaveBeenLastCalledWith("anna", 1, "x", "bbbbbbbbbbbbbbbb");
+  });
+
+  it("a conflict over another writer's note keeps theirs and says so", async () => {
+    vi.mocked(api.getProject).mockResolvedValue(PROJECT as never);
+    vi.mocked(api.getStageCoach)
+      .mockResolvedValueOnce(makeCoach([makeShot(1, "c1")], 4, { stage_note: "base" }))
+      .mockResolvedValueOnce(makeCoach([makeShot(1, "c1")], 4, { stage_note: "theirs", _version: "dddddddddddddddd" }));
+    vi.mocked(api.patchStageNote).mockRejectedValue(new ApiError(409, "version_conflict", { code: "version_conflict" }));
+    renderCoachRoute();
+    const box = await screen.findByRole("textbox", { name: "Stage note" });
+    fireEvent.change(box, { target: { value: "mine" } });
+    fireEvent.blur(box);
+    const notice = await screen.findByTestId("stage-note-save-notice");
+    expect(notice).toHaveTextContent("Your last stage note change was not saved. The stage changed elsewhere and was reloaded.");
+    expect(screen.getByRole("textbox", { name: "Stage note" })).toHaveValue("theirs");
+    expect(api.patchStageNote).toHaveBeenCalledTimes(1);
+  });
+
+  it("a conflict for another reason re-sends the note on the fresh revision", async () => {
+    vi.mocked(api.getProject).mockResolvedValue(PROJECT as never);
+    vi.mocked(api.getStageCoach)
+      .mockResolvedValueOnce(makeCoach([makeShot(1, "c1")], 4, { stage_note: "base" }))
+      .mockResolvedValueOnce(makeCoach([makeShot(1, "c1", { improvement_flag: true })], 5, { stage_note: "base", _version: "eeeeeeeeeeeeeeee" }));
+    vi.mocked(api.patchStageNote)
+      .mockRejectedValueOnce(new ApiError(409, "version_conflict", { code: "version_conflict" }))
+      .mockResolvedValueOnce(makeCoach([makeShot(1, "c1")], 5, { stage_note: "mine", _version: "ffffffffffffffff" }));
+    renderCoachRoute();
+    const box = await screen.findByRole("textbox", { name: "Stage note" });
+    fireEvent.change(box, { target: { value: "mine" } });
+    fireEvent.blur(box);
+    await waitFor(() => expect(api.patchStageNote).toHaveBeenCalledTimes(2));
+    expect(api.patchStageNote).toHaveBeenLastCalledWith("anna", 1, "mine", "eeeeeeeeeeeeeeee");
+    expect(screen.queryByTestId("stage-note-save-notice")).toBeNull();
+    expect(screen.getByRole("textbox", { name: "Stage note" })).toHaveValue("mine");
   });
 });
 

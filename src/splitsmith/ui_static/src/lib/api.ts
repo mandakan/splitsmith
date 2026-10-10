@@ -1874,6 +1874,9 @@ export interface CoachStageResponse {
   shots: CoachShot[];
   events?: StageEvent[];
   event_summary?: StageEventSummary;
+  /** The stage note (#1376); null when there is none or on a share read.
+   *  Absent from older servers. */
+  stage_note?: string | null;
   /** audit_revision of the stored doc; what putStageEvents sends back */
   _version?: string;
 }
@@ -4651,6 +4654,14 @@ export const api = {
     request<CoachStageResponse>(
       `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/events`,
       { method: "PUT", json: { events, _version: version ?? null } },
+    ),
+
+  /** Write the stage note (#1376); "" clears it. ``version`` is the coach
+   *  payload's ``_version``: a stale one is a 409 ``version_conflict``. */
+  patchStageNote: (slug: string, stageNumber: number, stageNote: string, version: string | null | undefined) =>
+    request<CoachStageResponse>(
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/stage-note`,
+      { method: "PATCH", json: { stage_note: stageNote, _version: version ?? null } },
     ),
 
   /** Patch one shot's coach annotation (#844).

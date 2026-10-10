@@ -51,6 +51,12 @@ COACH_FIELDS: Final[tuple[str, ...]] = (
     FIELD_COACHING_NOTE,
 )
 
+#: A stage-level note on the stage audit doc (#1376): free text, written
+#: on the Coach review page, absent when there is none. An older install
+#: never reads it and keeps it through every save (audit docs are dicts).
+#: Merged by sync like a shot's ``coaching_note``; private on a share.
+FIELD_STAGE_NOTE: Final = "stage_note"
+
 
 def read_coach_fields(shot: dict[str, Any]) -> dict[str, Any]:
     """Extract coach annotations from an audit-JSON shot dict.
