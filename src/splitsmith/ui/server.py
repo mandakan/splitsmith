@@ -953,7 +953,7 @@ def _events_reset_event(dropped: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "kind": "events_reset",
             "payload": {
                 "count": len(dropped),
-                "ids": [e.get("id") for e in dropped],
+                "ids": [e["id"] for e in dropped if e.get("id")],
                 "reason": "shot_detect_reset",
             },
         }

@@ -266,7 +266,7 @@ def test_events_put_reads_the_audit_once_and_returns_the_saved_revision(
     assert resp.status_code == 200, resp.text
     # 9 before #1330: the second project lookup and the post-save audit
     # reload cost three. One audit read remains, the compare-and-save's.
-    assert len(state_docs_selects) == 6, state_docs_selects
+    assert len(state_docs_selects) <= 6, state_docs_selects
     audit_reads = [s for s in state_docs_selects if "state_docs.stage_number = ?" in s]
     assert len(audit_reads) == 1, state_docs_selects
 

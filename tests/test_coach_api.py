@@ -1084,6 +1084,9 @@ def test_reclassify_without_shots_and_corrupt_events_is_a_422_before_saving(tmp_
 
 
 def test_coach_patch_with_corrupt_events_is_a_422_and_leaves_the_doc(tmp_path: Path) -> None:
+    """Pins existing behaviour: the PATCH always has shots, so it already
+    422'd before saving on main. Only reclassify without shots was broken
+    (#1330); this keeps the PATCH from regressing into that."""
     client, audit_file, base = _bootstrap(tmp_path)
     doc = _read(audit_file)
     doc["events"] = [{"id": "evt-1", "kind": "nap", "start": 1.0, "end": 2.0, "source": "manual"}]
