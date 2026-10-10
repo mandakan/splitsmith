@@ -41,6 +41,7 @@ from .overlay_hud import (
     hud_frame_plan,
     hud_options_data,
     hud_page_size,
+    hud_safe_area_data,
     hud_stage_data,
     resolve_position,
 )
@@ -48,6 +49,7 @@ from .overlay_layout import CellScale
 from .overlay_raster import Rasterizer, TemplateScriptError
 from .overlay_text import OverlayRenderError
 from .overlay_theme import OverlayTheme
+from .safe_area import safe_area
 from .segment_cache import SegmentCache
 from .stage_summary_data import load_stage_shots
 
@@ -78,15 +80,27 @@ def hud_context(
     fps: float,
 ) -> TemplateContext:
     """``window.splitsmith`` for a HUD: the stage and the options as data,
-    the theme's tokens, and the engine stylesheet for its font faces."""
+    the theme's tokens, and the engine stylesheet for its font faces.
+
+    An upright page (taller than wide, issue #1394) also carries the
+    platform safe area in page pixels, twice: ``data.safe_area``
+    (:func:`overlay_hud.hud_safe_area_data`) and the custom properties
+    ``--safe-bottom`` / ``--safe-right`` / ``--safe-right-top`` on
+    ``:root`` at the end of the engine stylesheet. A square or wider page
+    gets neither, so its context, and with it the template digest, is what
+    it always was."""
+    data: dict[str, Any] = {"stage": stage, "options": options}
+    css = single_css(width=width, height=height, scale=CellScale.for_cell(height), theme=theme)
+    area = safe_area(width, height)
+    if area is not None:
+        data["safe_area"] = hud_safe_area_data(area)
+        css = f"{css}\n:root {{ {area.css_vars()} }}"
     return TemplateContext(
         theme=theme_tokens(theme),
-        data={"stage": stage, "options": options},
+        data=data,
         size={"width": width, "height": height},
         fps=fps,
-        engine=engine_block(
-            css=single_css(width=width, height=height, scale=CellScale.for_cell(height), theme=theme)
-        ),
+        engine=engine_block(css=css),
         assets={"shared": shared_url()},
     )
 

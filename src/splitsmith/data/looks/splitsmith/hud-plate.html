@@ -42,11 +42,26 @@
   #stageBar { position: absolute; left: 2.6vh; right: 2.6vh; bottom: 1.3vh; height: 0.6vh; border-radius: 0.3vh; }
   #stageFill, .band { position: absolute; top: 0; bottom: 0; border-radius: 0.3vh; }
   #reloadChip { position: absolute; opacity: 0; border-left: 0.8vh solid; }
+  #break { display: none; }
   #reloadChip .num { font-size: 4.2vh; }
   #hud.bottom-left #reloadChip, #hud.bottom-right #reloadChip { bottom: calc(100% + 0.9vh); }
   #hud.top-left #reloadChip, #hud.top-right #reloadChip { top: calc(100% + 0.9vh); }
   #hud.bottom-left #reloadChip, #hud.top-left #reloadChip { left: 0; }
   #hud.bottom-right #reloadChip, #hud.top-right #reloadChip { right: 0; }
+  /* Upright video: the platform safe area (--safe-bottom, --safe-right
+     from --safe-right-top down) stays clear; body.safe is set from
+     data.safe_area, so a landscape page never matches these rules. */
+  /* The plates take two rows, the clock on its own: one row of three runs
+     past the page's width. The bottom corners stack upwards. */
+  body.safe #hud { flex-wrap: wrap; row-gap: 0.45vh; }
+  body.safe #hud.bottom-left, body.safe #hud.bottom-right {
+    bottom: calc(var(--safe-bottom) + 4vh); flex-wrap: wrap-reverse;
+  }
+  body.safe #hud.bottom-right { right: calc(var(--safe-right) + 2vh); }
+  body.safe #break { display: block; flex-basis: 100%; height: 0; }
+  /* Under a top-right HUD the reload chip would reach down past where the
+     button column starts: it hangs from the HUD's inner edge instead. */
+  body.safe #hud.top-right #reloadChip { right: auto; left: 0; }
 </style>
 </head>
 <body>
@@ -56,6 +71,7 @@
     <div class="num" id="clock">0.00</div>
     <div id="bar"></div>
   </div>
+  <div id="break"></div>
   <div class="plate" id="countPlate">
     <div class="label">Shots</div>
     <div class="num" id="count"></div>
@@ -68,6 +84,9 @@
 <script>
 (function () {
   var s = window.splitsmith;
+  // Upright video (data.safe_area): the body.safe rules keep every element
+  // out of what Shorts, Reels and TikTok draw over.
+  if (s.data.safe_area) document.body.classList.add('safe');
   var theme = s.theme, stage = s.data.stage, opts = s.data.options;
   var shots = stage.shots, beep = stage.beep, rounds = stage.rounds;
   // The helpers every shipped HUD shares (_shared/hud.js).

@@ -30,6 +30,7 @@ from pydantic import BaseModel, ConfigDict, field_validator
 from .config import StageEvent
 from .events import confirmed, reload_figures, shot_is_moving
 from .looks import DEFAULT_VARIANT, LOOK_NAME_RE
+from .safe_area import SafeArea
 from .stage_summary_data import TileShot
 
 HudPosition = Literal["top-left", "top-right", "bottom-left", "bottom-right"]
@@ -344,6 +345,16 @@ def hud_options_data(options: HudOptions, position: HudPosition | None) -> dict[
     }
 
 
+def hud_safe_area_data(area: SafeArea) -> dict[str, int]:
+    """``data.safe_area`` on an upright page (issue #1394): what Shorts,
+    Reels and TikTok draw over, in page pixels. ``bottom`` is the band along
+    the bottom edge, ``right`` the button column's width and ``right_top``
+    where that column starts (from the top); a HUD keeps every element above
+    ``height - bottom`` and, below ``right_top``, left of ``width - right``.
+    Absent on a square or wider page."""
+    return {"bottom": area.bottom, "right": area.right, "right_top": area.right_top}
+
+
 @dataclass(frozen=True)
 class HudFrame:
     """One rendered frame: the clip time it seeks to and how many output
@@ -407,6 +418,7 @@ __all__ = [
     "hud_frame_plan",
     "hud_options_data",
     "hud_page_size",
+    "hud_safe_area_data",
     "hud_stage_data",
     "overlay_settings",
     "resolve_position",

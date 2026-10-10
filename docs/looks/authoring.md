@@ -322,6 +322,36 @@ renders at most 1080 lines tall and a larger video scales it up, so size
 text in `vh`. A HUD has no 60 s limit: it gets its load time plus a second
 for every frame of the stage, however long the course.
 
+### Upright video and the safe area
+
+On an upright video (taller than wide: a phone held up, a Short or a Reel)
+the platforms draw their own captions along the bottom and a column of
+buttons down the right edge. Your HUD then gets that area, in page pixels:
+
+```js
+data.safe_area = { bottom: 140, right: 73, right_top: 432 }   // a 608x1080 page
+```
+
+and the same three numbers as CSS variables on the root, at the end of the
+engine stylesheet: `--safe-bottom`, `--safe-right` and `--safe-right-top`.
+Keep every element above `height - bottom`, and anything below `right_top`
+left of `width - right`. On a square or wider video neither is there, so a
+rule written only for upright pages changes nothing else. The shipped
+styles add a class when the area is there and write their upright rules
+under it:
+
+```js
+if (window.splitsmith.data.safe_area) document.body.classList.add('safe');
+```
+
+```css
+body.safe #clock { bottom: calc(var(--safe-bottom) + 4vh); }
+```
+
+`looks check` probes every overlay style on an upright page too, mid-stage,
+just after a shot and landed, and warns about any text or painted box that
+reaches into the area.
+
 ## Logos and identity
 
 `data.shooters` lists the shooters a card is about, each with their label,
