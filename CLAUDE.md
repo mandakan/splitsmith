@@ -1282,10 +1282,13 @@ does not opt in (its rows change text per frame). A ``fit.js`` change
 reaches the summary PNG by content, the preview only through
 ``PREVIEW_REVISION``. Exports: the splits CSV gains
 ``moving`` as its last column (``read_splits_csv`` takes both headers);
-``<base>_events.csv`` is written only with confirmed regions and deleted,
-locally and in hosted storage, when a re-export that writes the splits
-CSV (``write_csv`` and shots, the CSV gate) has none; outside that gate
-a prior file stays, as the splits CSV does. Region markers
+``<base>_events.csv`` is written only with shots and confirmed regions.
+A ``write_csv`` export deletes, locally and in hosted storage, an earlier
+events CSV when the stage has no confirmed region, and both CSVs when it
+has no shots (#1331); ``StageExportResult.removed_paths`` names what it
+deleted and the hosted push deletes exactly those keys. With
+``write_csv`` off both earlier files stay, like every output a run was
+not asked for. Region markers
 (``Reload 1.42`` / ``Movement`` / ``Activation``, with duration, named by
 ``events.region_marker_label``) go on
 the stage clip in single-stage and match FCPXML and FCP7 XML, clamped to

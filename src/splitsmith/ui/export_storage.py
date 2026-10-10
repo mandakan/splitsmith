@@ -161,17 +161,12 @@ def push_stage_export_outputs(project: MatchProject | None, result: StageExportR
     paths.extend(result.secondary_trimmed_paths.values())
     for p in paths:
         push_export_file(project, p)
-    # A stale events.csv from a prior run, now that the stage has no
-    # confirmed regions, must not survive as a downloadable hosted object
-    # once ``export_stage`` has unlinked it locally (review: important
-    # finding 1). Keyed off the splits CSV's name -- the two share
-    # ``<base>`` and ride the same ``write_csv`` gate -- so this fires
-    # only when a splits CSV was actually produced this run.
-    if result.events_csv_path is None and result.csv_path is not None:
-        stale_events_csv = result.csv_path.with_name(
-            result.csv_path.name.replace("_splits.csv", "_events.csv")
-        )
-        delete_export_file(project, stale_events_csv)
+    # An earlier run's CSVs this run removed as stale (a stage with no
+    # confirmed region any more, or no shots: #1331) must not survive as
+    # downloadable hosted objects once ``export_stage`` has unlinked them
+    # locally. The result names them, so no name is derived here.
+    for p in result.removed_paths:
+        delete_export_file(project, p)
 
 
 # --- match-scoped deliverables (#755) --------------------------------------
