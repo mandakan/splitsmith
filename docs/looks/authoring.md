@@ -122,7 +122,7 @@ window.splitsmith = {
   size:   { width: 1920, height: 1080 },        // the frame, in CSS pixels
   fps:    30,
   engine: { css: "...", min_font_size: 12 },     // the font faces; the legibility floor
-  assets: { shared: "https://look.invalid/shared" },     // fit.js, cell.js, identity.js
+  assets: { shared: "https://look.invalid/shared" },     // fit.js, cell.js, identity.js, hud.js
   data: {
     card: {
       slot: "title_page",                        // or slate, lower_third, closing
@@ -284,6 +284,27 @@ there is something to draw. A reload can end after the last shot; return a
 `settle()` long enough to finish the chip's count and fade
 (`reload.end + fade - last shot`), and clamp a band to the bar. The shipped
 styles all do this; `hud-timeline.html` is the shortest to read.
+
+The shipped styles share those pieces through the engine script `hud.js`,
+and yours may load it the same way:
+
+```html
+<script>
+  document.write('<script src="' + window.splitsmith.assets.shared + '/hud.js"><\/script>');
+</script>
+```
+
+`window.splitsmithHud(window.splitsmith)` then answers the helpers, bound to
+the stage and the options: `stageBar()` (a `#stageBar` element with its
+`#stageFill` and bands, or `null`; place `.el`, call `.seek(running)`),
+`regionBands(parent)` (the bands alone, on a track of your own),
+`reloadChip(build, id)` (`build()` makes and places the chip, its last child
+takes the figure; `null` without a reload; call `.seek(t)`), `chipSettle(base)`
+(your own settle, stretched to finish the chip's fade), and `clamp`,
+`easeOut`, `backOut`, `rgba(hex, alpha)`, `along(t)` (percent of the stage
+at clip time `t`) and `tierColour(tier)`. Each one honours the toggles, so a
+style that calls them draws nothing extra with a toggle off. A change to the
+script reaches every cached render, yours included.
 
 A style that can sit in more than one corner says which in its own markup,
 its default first; `options.position` is then one of them:

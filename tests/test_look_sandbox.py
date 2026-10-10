@@ -63,6 +63,8 @@ def test_the_context_names_files_on_the_virtual_origin_only(tmp_path: Path) -> N
     assert sandbox.resolve(logo_url) == logo.resolve()
     assert sandbox.resolve(f"{look_sandbox.ORIGIN}/look/card.html") == template.resolve()
     assert sandbox.resolve(f"{look_sandbox.ORIGIN}/shared/fit.js") is not None
+    # The HUD styles' shared helpers (#1338) are served the same way.
+    assert sandbox.resolve(f"{look_sandbox.ORIGIN}/shared/hud.js") is not None
 
 
 def test_user_text_naming_a_file_is_never_mounted(tmp_path: Path) -> None:
