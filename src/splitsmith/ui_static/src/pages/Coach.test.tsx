@@ -305,6 +305,36 @@ describe("Coach notes and flags", () => {
   });
 });
 
+describe("Coach deep links (#1377)", () => {
+  it("opens at the link's time and shot, and Adjust in Breakdown carries them on", async () => {
+    vi.mocked(api.getProject).mockResolvedValue(PROJECT as never);
+    vi.mocked(api.getStageCoach).mockResolvedValue(makeCoach([makeShot(1, "c1"), makeShot(2, "c2"), makeShot(3, "c3")]));
+    const { container } = renderCoachRoute("/match/m1/coach/anna/1?t=2.5&shot=2");
+    await screen.findByRole("region", { name: "Shots" });
+    expect(container.querySelector('[data-shot-number="2"]')).toHaveAttribute("aria-current", "true");
+    // The strip's playhead sits at 2.5 of the stage's 16.2 s.
+    expect(screen.getByTestId("strip-playhead").style.left).toMatch(/^15\.43/);
+    expect(screen.getByRole("link", { name: "Adjust in Breakdown" })).toHaveAttribute(
+      "href",
+      "/match/m1/breakdown/anna/1?t=2.5&shot=2",
+    );
+  });
+
+  it("ignores stale parameters: the first shot, no error", async () => {
+    vi.mocked(api.getProject).mockResolvedValue(PROJECT as never);
+    vi.mocked(api.getStageCoach).mockResolvedValue(makeCoach([makeShot(1, "c1"), makeShot(2, "c2")]));
+    const { container } = renderCoachRoute("/match/m1/coach/anna/1?t=x&shot=42&region=evt-1");
+    await screen.findByRole("region", { name: "Shots" });
+    expect(container.querySelector('[data-shot-number="1"]')).toHaveAttribute("aria-current", "true");
+    expect(screen.getByRole("link", { name: "Adjust in Breakdown" })).toHaveAttribute("href", "/match/m1/breakdown/anna/1?shot=1");
+  });
+
+  it("stage prev / next stay on Coach", async () => {
+    renderCoachStage([makeShot(1, "c1")]);
+    expect(await screen.findByRole("link", { name: "Next stage" })).toHaveAttribute("href", "/match/m1/coach/anna/2");
+  });
+});
+
 describe("Coach stage note", () => {
   beforeEach(() => {
     vi.mocked(api.patchStageNote).mockReset();

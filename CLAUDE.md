@@ -1330,7 +1330,11 @@ revision check (409 ``version_conflict``) and an ``audit_events`` entry; it
 is a ``_REVIEW_ROUTES`` entry, because ``merge_audit_doc`` merges
 ``stage_note`` three-way like a shot's note (newer doc wins a conflict,
 surfaced), unlike desktop-owned ``events``. The coach payload carries
-``stage_note``, ``null`` on a share read.
+``stage_note``, ``null`` on a share read. "Adjust in Breakdown" and
+"Review in Coach" carry ``?t=`` (seconds from the beep) and ``&shot=``,
+and Breakdown also reads ``&region=`` (``lib/stageLink``, applied once on
+load by ``useStageWorkspace``'s ``link``); a stale or malformed one is
+ignored.
 
 ## Hosted access tiers (spec 2026-10-03)
 

@@ -26,6 +26,7 @@ export function StageVideo({ ws, view, className }: { ws: StageWorkspace; view: 
       controls={false}
       preload="metadata"
       playsInline
+      onLoadedMetadata={ws.onVideoReady}
       onTimeUpdate={(e) => ws.setCurrentTime((e.target as HTMLVideoElement).currentTime)}
       onPlay={() => ws.setIsPlaying(true)}
       onPause={() => ws.setIsPlaying(false)}

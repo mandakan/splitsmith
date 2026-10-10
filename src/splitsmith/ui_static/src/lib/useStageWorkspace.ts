@@ -28,6 +28,7 @@ import {
 import { useSpacePlayPause } from "@/lib/keyboard";
 import { type TierBaselines, baselinesFromMatchDistributions } from "@/lib/splits";
 import { useIsMobile } from "@/lib/useIsMobile";
+import { parseStageLink, resolveStageLink } from "@/lib/stageLink";
 import { useScrubSource } from "@/lib/useScrubSource";
 import { useStageEvents, type StageEvents } from "@/lib/useStageEvents";
 
@@ -72,6 +73,8 @@ export interface StageWorkspace {
    *  playhead has passed) becomes the current shot. */
   seekToTime: (tFromBeep: number, shotNumber?: number | null) => void;
   togglePlay: () => void;
+  /** The video's metadata loaded: a deep link's pending seek lands. */
+  onVideoReady: () => void;
   isMobile: boolean;
 }
 
@@ -81,6 +84,8 @@ export interface StageWorkspaceOptions {
   onRegionsSaved?: () => void;
   /** Fetch the band's audio peaks (default true). Coach draws no band. */
   peaks?: boolean;
+  /** The page URL's query (``?t=&shot=&region=``, #1377), read once on load. */
+  link?: string;
 }
 
 export function useStageWorkspace(slug: string, stage: number, options: StageWorkspaceOptions = {}): StageWorkspace {
@@ -103,13 +108,17 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
   // ``coach`` it closes over is the one from the render that created it -
   // null on mount, and stale after every patch that follows.
   const coachVersionRef = useRef<number | undefined>(undefined);
+  // The latest payload, for callbacks memoised on [slug, stage] (seekToTime,
+  // the stage note's revision).
+  const coachRef = useRef<CoachStageResponse | null>(null);
+  // A deep link's seek (#1377), in clip seconds, held until the video can take it.
+  const pendingSeekRef = useRef<number | null>(null);
+  const linkRef = useRef(options.link ?? "");
 
   // The only writer of coach state, so the guard value cannot fall out of
   // step with the document it guards. Written here rather than in an effect
   // on ``coach``: an effect lands a commit later, and a second patch fired
   // before that commit would send the version the first one just replaced.
-  // The latest payload, for callbacks memoised on [slug, stage] (seekToTime).
-  const coachRef = useRef<CoachStageResponse | null>(null);
   const applyCoach = useCallback((next: CoachStageResponse | null) => {
     coachVersionRef.current = next?.version;
     coachRef.current = next;
@@ -139,8 +148,20 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
         apply(c);
         setBaselines(baselinesFromMatchDistributions(dist));
         setDistributions(dist);
-        if (c && c.shots.length > 0) {
+        // A deep link (#1377) opens at its time with its shot and region;
+        // a stale or malformed parameter is ignored.
+        const link = c ? resolveStageLink(parseStageLink(linkRef.current), c.shots, c.events ?? []) : null;
+        if (link?.shot != null) {
+          setActiveShotNumber(link.shot);
+        } else if (c && c.shots.length > 0 && link?.t == null) {
           setActiveShotNumber(c.shots[0].shot_number);
+        }
+        if (link?.region != null) selectEvent(link.region);
+        if (c && link?.t != null) {
+          const clip = c.beep_time + link.t;
+          pendingSeekRef.current = clip;
+          setCurrentTime(clip);
+          if (videoRef.current) videoRef.current.currentTime = clip;
         }
       } catch (e) {
         if (alive) setError(e instanceof ApiError ? e.detail : String(e));
@@ -149,7 +170,15 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
     return () => {
       alive = false;
     };
-  }, [apply, slug, stage]);
+  }, [apply, selectEvent, slug, stage]);
+
+  // The video mounts after the payload: a linked seek lands once it can.
+  const onVideoReady = useCallback(() => {
+    const clip = pendingSeekRef.current;
+    if (clip == null || !videoRef.current) return;
+    pendingSeekRef.current = null;
+    videoRef.current.currentTime = clip;
+  }, []);
 
   // Load peaks for the band's audio track (same shape as Audit.tsx's "Load
   // peaks" effect). A failure just means no waveform -- the track renders
@@ -306,6 +335,7 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
     seekToShot,
     seekToTime,
     togglePlay,
+    onVideoReady,
     isMobile,
   };
 }

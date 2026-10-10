@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/Chip";
 import { Label } from "@/components/ui/Label";
 import type { CoachShot } from "@/lib/api";
+import { nearestScrollTop } from "@/lib/breakdown";
 import { shotOrdinal } from "@/lib/coachReview";
 import { gapTier, type TierBaselines } from "@/lib/splits";
 import { BUDGET_LABEL, BUDGET_TICK } from "@/lib/timeBudget";
@@ -53,8 +54,12 @@ export function ReviewShotList({
   const listRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (activeShotNumber == null) return;
-    const el = listRef.current?.querySelector<HTMLElement>(`[data-shot-number="${activeShotNumber}"]`);
-    if (el && typeof el.scrollIntoView === "function") el.scrollIntoView({ block: "nearest" });
+    const list = listRef.current;
+    const row = list?.querySelector<HTMLElement>(`[data-shot-number="${activeShotNumber}"]`)?.parentElement;
+    if (!list || !row) return;
+    // Scroll the list alone: scrollIntoView moves every scrollable ancestor
+    // too, which opened a deep-linked page scrolled past its header.
+    list.scrollTop = nearestScrollTop(list.scrollTop, list.clientHeight, row.offsetTop, row.offsetHeight);
   }, [activeShotNumber]);
   const flagged = shots.filter((s) => s.improvement_flag).length;
   return (
@@ -63,7 +68,7 @@ export function ReviewShotList({
         <Label>Shots &middot; {shots.length}</Label>
         {flagged > 0 ? <Label tone="subtle">{flagged} flagged</Label> : null}
       </div>
-      <div ref={listRef} className="max-h-[70vh] overflow-y-auto">
+      <div ref={listRef} className="relative max-h-[70vh] overflow-y-auto">
         {shots.map((shot) => {
           const tier = gapTier(shot.split, shot.interval_class, baselines);
           const active = shot.shot_number === activeShotNumber;

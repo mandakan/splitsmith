@@ -20,7 +20,7 @@
 
 import { ArrowLeft, ArrowRight, Loader2 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
+import { Link, Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { ReviewShotList } from "@/components/coach/ReviewShotList";
 import { StageNoteCard } from "@/components/coach/StageNoteCard";
@@ -45,6 +45,7 @@ import {
 } from "@/lib/api";
 import { reviewFigures } from "@/lib/coachReview";
 import { useMatchHref } from "@/lib/matchHref";
+import { stageLinkSearch } from "@/lib/stageLink";
 import { INTERVAL_LABEL, baselinesFromMatchDistributions, gapTier, statisticSplits } from "@/lib/splits";
 import { BUDGET_LABEL, BUDGET_TICK, matchBudget, timeBudget } from "@/lib/timeBudget";
 import { useStageWorkspace, deriveStageView } from "@/lib/useStageWorkspace";
@@ -717,7 +718,8 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
   const auditPrefix = href("audit", slug);
   const breakdownPrefix = href("breakdown", slug);
   // Coach is the review page (#1374, epic #1370): no band, so no peaks.
-  const ws = useStageWorkspace(slug, stage, { peaks: false });
+  const { search } = useLocation();
+  const ws = useStageWorkspace(slug, stage, { peaks: false, link: search });
   const { project, coach, baselines, distributions, error, regions } = ws;
 
   const budget = useMemo(() => timeBudget(coach?.shots ?? [], distributions), [coach, distributions]);
@@ -747,6 +749,9 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
   }
 
   const { prevStage, nextStage } = view;
+  // Breakdown opens at this moment and shot (#1377); before the video has a
+  // position, the shot's own time.
+  const here = stageLinkSearch({ t: ws.currentTime > 0 ? view.tFromBeep : null, shot: ws.activeShotNumber });
   const capacityWarning = coach.event_summary?.capacity_warning ?? null;
   // Notes and flags are review actions: a mirror without the review
   // capability (never the case today) shows them read-only.
@@ -793,7 +798,7 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
             {/* Regions and intervals are edited in Breakdown (desktop only). */}
             {ws.isMobile ? null : (
               <Button asChild size="lg">
-                <Link to={`${breakdownPrefix}/${stage}`}>Adjust in Breakdown</Link>
+                <Link to={`${breakdownPrefix}/${stage}${here}`}>Adjust in Breakdown</Link>
               </Button>
             )}
             <Button asChild size="lg">
@@ -830,11 +835,12 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
             {figures.reloads > 0 ? <Stat label="Exposed reload" value={figures.exposedReload.toFixed(2)} unit="s" /> : null}
             <Stat label="On the move" value={String(figures.movingShots)} unit={figures.movingShots === 1 ? "shot" : "shots"} />
           </StatStrip>
-
-          {coach.shots.length > 0 ? <TimeBudgetCard budget={budget} onSelectShot={selectShotNumber} /> : null}
         </div>
 
-        <div className="flex min-w-0 flex-col gap-4">
+        {/* The notes column spans both rows at xl, so the budget sits under
+            the video; on a 1024 px tablet the budget takes the full width
+            under both, where its columns fit. */}
+        <div className="flex min-w-0 flex-col gap-4 lg:col-start-2 lg:row-start-1 xl:row-span-2">
           <StageNoteCard
             note={coach.stage_note ?? null}
             save={ws.saveStageNote}
@@ -860,6 +866,14 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
             readOnly={notesReadOnly}
           />
         </div>
+
+        {coach.shots.length > 0 ? (
+          <TimeBudgetCard
+            budget={budget}
+            onSelectShot={selectShotNumber}
+            className="min-w-0 lg:col-span-2 xl:col-span-1 xl:col-start-1 xl:row-start-2"
+          />
+        ) : null}
       </div>
     </div>
   );

@@ -23,7 +23,7 @@
  */
 import { ArrowLeft, ArrowRight, Loader2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { Link, Navigate, useOutletContext, useParams } from "react-router-dom";
+import { Link, Navigate, useLocation, useOutletContext, useParams } from "react-router-dom";
 
 import { BandSplitter } from "@/components/coach/BandSplitter";
 import { BreakdownInspector } from "@/components/coach/BreakdownInspector";
@@ -38,6 +38,7 @@ import { isTypingTextTarget } from "@/lib/audit-input";
 import { regionCounts } from "@/lib/breakdown";
 import { useInspectorFolded } from "@/lib/breakdownPrefs";
 import { useMatchHref } from "@/lib/matchHref";
+import { stageLinkSearch } from "@/lib/stageLink";
 import { useBandSplit } from "@/lib/useBandSplit";
 import { useShortViewport } from "@/lib/useShortViewport";
 import { deriveStageView, useStageWorkspace } from "@/lib/useStageWorkspace";
@@ -101,7 +102,9 @@ function BreakdownStage({ slug, stage }: { slug: string; stage: number }) {
   // A saved region moves the nav's count: the shell refetches the project.
   // Optional: outside the match shell (a test) there is no outlet context.
   const shell = useOutletContext<MatchShellOutletContext | undefined>();
-  const ws = useStageWorkspace(slug, stage, { onRegionsSaved: shell?.refreshProject });
+  // A deep link from Coach (#1377) opens at its time, shot and region.
+  const { search } = useLocation();
+  const ws = useStageWorkspace(slug, stage, { onRegionsSaved: shell?.refreshProject, link: search });
   const { project, coach, error, regions } = ws;
   const compact = useShortViewport();
   const [inspectorFolded] = useInspectorFolded();
@@ -209,7 +212,14 @@ function BreakdownStage({ slug, stage }: { slug: string; stage: number }) {
                 {ws.reclassifying ? "Reclassifying…" : "Reclassify"}
               </Button>
               <Button asChild>
-                <Link to={`${coachPrefix}/${stage}`}>Review in Coach</Link>
+                <Link
+                  to={`${coachPrefix}/${stage}${stageLinkSearch({
+                    t: ws.currentTime > 0 ? view.tFromBeep : null,
+                    shot: ws.activeShotNumber,
+                  })}`}
+                >
+                  Review in Coach
+                </Link>
               </Button>
               {stepButton("Previous stage", prevStage, <ArrowLeft className="size-4" />)}
               {stepButton("Next stage", nextStage, <ArrowRight className="size-4" />)}
