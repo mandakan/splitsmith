@@ -134,8 +134,10 @@ maps each such WAV to its sha256, the bytes live content-addressed in a
 public-read R2 bucket (``wav/<sha256>.wav``) and ``tests/fixtures/.gitignore``
 keeps the local copies out. ``uv run python scripts/fixture_audio.py fetch``
 before a build or a sweep (a missing WAV is a skipped fixture, silently);
-``push <stem>`` uploads a new or changed WAV (write credentials in
-``SPLITSMITH_FIXTURE_R2_*``) and records it. Never commit a fixture WAV
+``push <stem>`` uploads a new or changed WAV to ``splitsmith-fixtures``
+(served at ``fixtures.splitsmith.app``) through ``wrangler r2 object put``,
+so it needs a ``wrangler login`` on the account that owns splitsmith.app, and
+records it. Never commit a fixture WAV
 again; no test needs the external ones (the suite was run without them).
 
 The review-time variant generator ``scripts/build_ensemble_fixture.py``

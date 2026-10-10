@@ -4,9 +4,7 @@ import importlib.util
 import sys
 from pathlib import Path
 
-import boto3
 import pytest
-from moto import mock_aws
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "fixture_audio.py"
 
@@ -24,15 +22,11 @@ def fa(tmp_path, monkeypatch):
 
 
 @pytest.fixture()
-def bucket(monkeypatch):
-    with mock_aws():
-        monkeypatch.setenv("SPLITSMITH_FIXTURE_R2_ENDPOINT", "https://s3.amazonaws.com")
-        monkeypatch.setenv("SPLITSMITH_FIXTURE_R2_BUCKET", "fixtures")
-        monkeypatch.setenv("SPLITSMITH_FIXTURE_R2_ACCESS_KEY_ID", "k")
-        monkeypatch.setenv("SPLITSMITH_FIXTURE_R2_SECRET_ACCESS_KEY", "s")
-        client = boto3.client("s3", region_name="us-east-1")
-        client.create_bucket(Bucket="fixtures")
-        yield client
+def bucket(fa, monkeypatch):
+    stored: dict[str, bytes] = {}
+    monkeypatch.setattr(fa, "_object_exists", lambda _url, digest: digest in stored)
+    monkeypatch.setattr(fa, "_upload", lambda path, digest: stored.__setitem__(digest, path.read_bytes()))
+    return stored
 
 
 def test_push_uploads_by_hash_records_and_ignores(fa, bucket, tmp_path):
@@ -42,9 +36,17 @@ def test_push_uploads_by_hash_records_and_ignores(fa, bucket, tmp_path):
     files = fa.load_manifest()
     digest = fa.sha256(tmp_path / "stage-shots-a.wav")
     assert files == {"stage-shots-a.wav": {"sha256": digest, "bytes": 6}}
-    assert bucket.get_object(Bucket="fixtures", Key=f"wav/{digest}.wav")["Body"].read() == b"RIFF-a"
+    assert bucket == {digest: b"RIFF-a"}
     ignore = (tmp_path / ".gitignore").read_text()
     assert "*.peaks" in ignore and "/stage-shots-a.wav" in ignore
+
+
+def test_push_skips_an_object_already_stored(fa, bucket, tmp_path, monkeypatch):
+    (tmp_path / "a.wav").write_bytes(b"same")
+    bucket[fa.sha256(tmp_path / "a.wav")] = b"same"
+    monkeypatch.setattr(fa, "_upload", lambda *_a: pytest.fail("uploaded twice"))
+    fa.push(["a.wav"])
+    assert "a.wav" in fa.load_manifest()
 
 
 def test_push_twice_keeps_one_managed_block(fa, bucket, tmp_path):
