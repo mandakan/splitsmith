@@ -139,6 +139,12 @@ window.__splitsmithFit = function () {
   function fitWidth(cell) {
     var edges = cell.getBoundingClientRect();
     if (!(edges.width > 0)) { return; }
+    if (window.__splitsmithFitUniform) {
+      // An upright grid pads a tile out of the platform's button column:
+      // its text must end inside that padding, not at the tile's edge.
+      var inset = parseFloat(getComputedStyle(cell).paddingRight) || 0;
+      edges = {left: edges.left, right: edges.right - inset, top: edges.top, bottom: edges.bottom};
+    }
     cell.querySelectorAll('.el').forEach(function (el) {
       if (getComputedStyle(el).display === 'none' || !pastEdge(el, edges)) { return; }
       var box = target(textRect(el), edges);
@@ -311,11 +317,28 @@ window.__splitsmithFit = function () {
     if (layout(false, true)) { return; }
     layout(true, true);
   }
-  document.querySelectorAll('.cell').forEach(function (cell) {
+  // Uniform (opt-in, window.__splitsmithFitUniform, an upright compare
+  // grid only): every tile ends at the smallest scale any tile's band
+  // needed, so a tile with less to say (no splits) never draws its figures
+  // larger than its neighbours'. A band that took the past-floor layouts
+  // sets its own sizes and is left as it is. Cells are fixed grid tracks,
+  // so fitting one never moves another and the width step can run after.
+  var cells = Array.prototype.slice.call(document.querySelectorAll('.cell'));
+  cells.forEach(function (cell) {
     fitHeight(cell);
     fitColumns(cell);
-    fitWidth(cell);
   });
+  if (window.__splitsmithFitUniform) { fitUniform(cells); }
+  cells.forEach(fitWidth);
+  function fitUniform(all) {
+    var stacks = all.map(function (cell) { return cell.querySelector('.anchor-middle-center'); })
+      .filter(function (stack) { return stack && !stack.hasAttribute('data-fit-columns'); });
+    var scales = stacks.map(function (stack) { return parseFloat(stack.style.getPropertyValue('--fit-scale')) || 1; });
+    var least = Math.min.apply(null, scales.concat([1]));
+    stacks.forEach(function (stack, i) {
+      if (scales[i] > least) { stack.style.setProperty('--fit-scale', String(least)); }
+    });
+  }
   function fitHeight(cell) {
     var stack = cell.querySelector('.anchor-middle-center');
     if (!stack) { return; }

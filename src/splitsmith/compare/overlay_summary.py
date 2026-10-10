@@ -47,14 +47,20 @@ from __future__ import annotations
 
 import io
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
 from PIL import Image
 
 from ..logo_spots import paste_logo
-from ..match_summary import MatchSummary, build_match_summary, match_summary_groups, match_summary_strip_html
+from ..match_summary import (
+    MatchSummary,
+    build_match_summary,
+    match_summary_groups,
+    match_summary_strip_html,
+    upright_match_summary_strip_html,
+)
 from ..overlay_html import grid_html
 from ..overlay_layout import CellScale, Group
 from ..overlay_raster import Rasterizer
@@ -67,8 +73,18 @@ from ..overlay_still import DEFAULT_DIM
 from ..overlay_still import apply_blur as _apply_blur
 from ..overlay_still import dim as _dim
 from ..overlay_still import letterbox as _letterbox
-from ..overlay_summary_cell import count_elements, summary_groups, summary_scale, time_text_for
+from ..overlay_summary_cell import (
+    TileRoom,
+    UprightGridType,
+    count_elements,
+    summary_groups,
+    summary_scale,
+    time_text_for,
+    upright_grid_type,
+    without_captions,
+)
 from ..overlay_theme import OverlayTheme
+from ..safe_area import SafeArea, safe_area
 from .mp4_grid import GridStagePlan, Runner
 from .overlay_data import TileStageData
 from .overlay_sprites import SpriteGeometry, TilePlacement
@@ -353,6 +369,7 @@ def _summary_cells(
     scale: CellScale,
     cell_width: int,
     cell_height: int,
+    upright: UprightGridType | None = None,
 ) -> list[tuple[TilePlacement, tuple[Group, ...]]]:
     """One ``(placement, declared groups)`` pair per placement, in
     placement order -- :func:`splitsmith.overlay_html.grid_html`'s own
@@ -379,9 +396,47 @@ def _summary_cells(
             cell_width=cell_width,
             cell_height=cell_height,
             split_rows=False,
+            upright=upright is not None,
+            grid=upright,
         )
+        if upright is not None and not upright.captions:
+            groups = without_captions(groups)
         cells.append((placement, groups))
     return cells
+
+
+def upright_grid(
+    placements: Sequence[TilePlacement],
+    geometry: SpriteGeometry,
+    area: SafeArea,
+    *,
+    top: int = 0,
+    match: bool = False,
+    reloads: Collection[str] = (),
+    manual_times: Collection[str] = (),
+) -> UprightGridType:
+    """The one type every tile of an upright grid draws at (issue #1394 part
+    2): keyed to the cell's width and shrunk until every shooter's tile,
+    once the platform safe area is taken out of it, holds its text.
+    ``top`` is where the grid starts on the frame; ``reloads`` the labels
+    whose tile draws a reload row, ``manual_times`` those whose stage time
+    was entered by hand."""
+    rooms: list[TileRoom] = []
+    for placement in placements:
+        if not placement.present:
+            continue
+        x0 = placement.col * geometry.cell_width
+        y0 = top + placement.row * geometry.cell_height
+        right, bottom = area.box_insets(x0, y0, x0 + geometry.cell_width, y0 + geometry.cell_height)
+        rooms.append(
+            TileRoom(
+                usable_width=geometry.cell_width - right,
+                available_height=geometry.cell_height - bottom,
+                reloads=placement.label in reloads,
+                manual_time=placement.label in manual_times,
+            )
+        )
+    return upright_grid_type(geometry.cell_width, geometry.cell_height, rooms, match=match)
 
 
 def build_hold_still(
@@ -453,16 +508,35 @@ def build_hold_still(
         canvas.paste(cell_image.convert("RGBA"), (x0, y0))
 
     if rasterizer is not None:
-        scale = _summary_scale(geometry.cell_height)
+        # An upright grid (taller than wide, issue #1394 part 2) types every
+        # tile from its width and keeps out of the platform safe area.
+        area = safe_area(geometry.canvas_width, geometry.canvas_height)
+        upright = (
+            upright_grid(
+                placements,
+                geometry,
+                area,
+                reloads={label for label, tile in data.items() if tile is not None and tile.reloads},
+                manual_times={
+                    label
+                    for label, tile in data.items()
+                    if tile is not None and tile.stage_time_seconds is not None and tile.stage_time_is_manual
+                },
+            )
+            if area is not None
+            else None
+        )
+        scale = upright.scale if upright is not None else _summary_scale(geometry.cell_height)
         cells = _summary_cells(
             placements,
             data,
             scale=scale,
             cell_width=geometry.cell_width,
             cell_height=geometry.cell_height,
+            upright=upright,
         )
         # Each cell's table rows fit their own columns, as the single card's do.
-        html = grid_html(cells, geometry=geometry, scale=scale, theme=theme, fit_columns=True)
+        html = grid_html(cells, geometry=geometry, scale=scale, theme=theme, fit_columns=True, upright=area)
         try:
             png_bytes = rasterizer.png(html, width=geometry.canvas_width, height=geometry.canvas_height)
             with Image.open(io.BytesIO(png_bytes)) as overlay_image:
@@ -663,33 +737,50 @@ def build_match_summary_grid_still(
             )
     canvas = Image.new("RGBA", (width, height), (0, 0, 0, 255))
     if rasterizer is not None:
-        scale = match_summary_cell_scale(geometry)
-        cells: list[tuple[TilePlacement, tuple[Group, ...]]] = [
-            (
-                placement,
-                (
-                    match_summary_groups(
-                        summaries[placement.label],
-                        placement.label,
-                        scale=scale,
-                        cell_width=geometry.cell_width,
-                        cell_height=geometry.cell_height,
-                    )
-                    if placement.label in summaries
-                    else ()
-                ),
-            )
-            for placement in placements
-        ]
+        # Upright (issue #1394 part 2): one width-keyed type for every tile,
+        # out of the safe area, and the title strip over two lines.
+        area = safe_area(width, height)
+        upright = (
+            upright_grid(placements, geometry, area, top=strip, match=True) if area is not None else None
+        )
+        scale = upright.scale if upright is not None else match_summary_cell_scale(geometry)
+        cells: list[tuple[TilePlacement, tuple[Group, ...]]] = []
+        for placement in placements:
+            groups: tuple[Group, ...] = ()
+            if placement.label in summaries:
+                groups = match_summary_groups(
+                    summaries[placement.label],
+                    placement.label,
+                    scale=scale,
+                    cell_width=geometry.cell_width,
+                    cell_height=geometry.cell_height,
+                    upright=upright is not None,
+                )
+                if upright is not None and not upright.captions:
+                    groups = without_captions(groups)
+            cells.append((placement, groups))
+        strip_html = (
+            upright_match_summary_strip_html(title, width=width, height=strip, theme=theme)
+            if area is not None
+            else match_summary_strip_html(title, width=width, height=strip, theme=theme)
+        )
         # The tiles' Splits rows fit their own columns, as the stage hold's do.
         try:
             cells_png = rasterizer.png(
-                grid_html(cells, geometry=geometry, scale=scale, theme=theme, fit_columns=True),
+                grid_html(
+                    cells,
+                    geometry=geometry,
+                    scale=scale,
+                    theme=theme,
+                    fit_columns=True,
+                    upright=area,
+                    top=strip,
+                ),
                 width=geometry.canvas_width,
                 height=geometry.canvas_height,
             )
             strip_png = rasterizer.png(
-                match_summary_strip_html(title, width=width, height=strip, theme=theme),
+                strip_html,
                 width=width,
                 height=strip,
             )

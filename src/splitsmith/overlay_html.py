@@ -113,6 +113,7 @@ from .fonts import is_font_path
 from .overlay_clock import border_width
 from .overlay_layout import MIN_FONT_SIZE, Anchor, CellScale, ColorToken, Element, Flow, Group, Role
 from .overlay_theme import OverlayTheme
+from .safe_area import SafeArea
 
 if TYPE_CHECKING:
     # ``grid_html`` names these two in its signature and reads attributes
@@ -723,7 +724,8 @@ def _group_style(group: Group) -> str:
     parts: list[str] = []
     if group.flow is Flow.GRID:
         columns = group.columns if group.columns is not None else len(group.elements)
-        parts.append(f"grid-template-columns: repeat({max(1, columns)}, 1fr)")
+        track = "max-content" if group.content_columns else "1fr"
+        parts.append(f"grid-template-columns: repeat({max(1, columns)}, {track})")
         if group.columns is not None:
             # A grid with a set column count is one row of a table (the
             # stage summary's Static / Moving rows): its cells sit on their
@@ -785,7 +787,7 @@ def _cell_div(groups: Sequence[Group], *, style: str | None = None) -> str:
     return f'<div class="cell"{style_attr}>{anchors_html}</div>'
 
 
-def _fit_script(*, fit_columns: bool = False) -> str:
+def _fit_script(*, fit_columns: bool = False, uniform: bool = False) -> str:
     """The one piece of *measurement* this pipeline hands to the browser
     instead of doing in Python (issue #683 F1's fit policy).
 
@@ -851,6 +853,8 @@ def _fit_script(*, fit_columns: bool = False) -> str:
     flags = f"window.__splitsmithMinFont = {MIN_FONT_SIZE};"
     if fit_columns:
         flags += " window.__splitsmithFitColumns = true;"
+    if uniform:
+        flags += " window.__splitsmithFitUniform = true;"
     return f"<script>{flags}</script>\n<script>\n{fit_js()}</script>"
 
 
@@ -997,6 +1001,8 @@ def grid_html(
     scale: CellScale,
     theme: OverlayTheme,
     fit_columns: bool = False,
+    upright: SafeArea | None = None,
+    top: int = 0,
 ) -> str:
     """A whole canvas-sized grid of declared cells as one HTML document.
 
@@ -1032,8 +1038,24 @@ def grid_html(
     screenshot.
     ``fit_columns`` turns on its column step (the stage summary's hold;
     never the live sprites, whose rows change text frame to frame).
+
+    ``upright`` is the platform safe area of an upright frame (issue #1394
+    part 2), ``top`` how far down that frame the grid starts (the match
+    summary's title strip): each tile the area reaches keeps its text out
+    of it by padding (:meth:`SafeArea.box_insets`; at the bottom less the
+    gap the cell already keeps under its band), the fit takes every tile
+    to the smallest scale any tile needed (``fit.js``'s uniform step) and
+    ends a line short of the button column rather than the tile's edge, a
+    lit plate keeps to its text, and a unit suffix keeps to the legibility
+    floor. ``None`` is the document as it always was.
     """
     style = _style_rules(scale=scale, theme=theme)
+    if upright is not None:
+        style += (
+            f"\n:root {{ {upright.css_vars()} }}"
+            f"\n.unit {{ font-size: max(0.45em, {MIN_FONT_SIZE}px); }}"
+            "\n.group.flow-grid > .el > .emphasis-plate { align-self: flex-start; }"
+        )
     grid_style = (
         ".grid {\n"
         "position: absolute; top: 0; left: 0; display: grid;\n"
@@ -1049,6 +1071,12 @@ def grid_html(
     body_cells: list[str] = []
     for placement, groups in cells:
         inner = _cell_div(groups) if placement.present else '<div class="cell"></div>'
+        if placement.present and upright is not None:
+            x0 = placement.col * geometry.cell_width
+            y0 = top + placement.row * geometry.cell_height
+            right, bottom = upright.box_insets(x0, y0, x0 + geometry.cell_width, y0 + geometry.cell_height)
+            padding = f"padding:0 {right}px {max(0, bottom - scale.pad)}px 0"
+            inner = _cell_div(groups, style=padding)
         accent = f"--accent:{placement.accent};" if placement.accent else ""
         position = f"grid-row:{placement.row + 1};grid-column:{placement.col + 1};{accent}"
         body_cells.append(f'<div style="{position}">{inner}</div>')
@@ -1056,7 +1084,7 @@ def grid_html(
         "<!doctype html>\n"
         '<html><head><meta charset="utf-8"><title>stage summary</title>'
         f"<style>{style}\n{grid_style}</style>"
-        f"{_fit_script(fit_columns=fit_columns)}"
+        f"{_fit_script(fit_columns=fit_columns, uniform=upright is not None)}"
         "</head>"
         f'<body><div class="grid">{"".join(body_cells)}</div></body></html>'
     )

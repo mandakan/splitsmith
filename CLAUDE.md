@@ -447,6 +447,36 @@ written out by hand. The shooter's logo (``logo_spots.paste_logo``, 9 %
 of the height, top right) is pasted after the fact and can still sit over
 a long title or name on an upright card, as on main.
 
+Upright compare grids (#1394 part 2) keep their 2x2 / 3x3 / 4x4 and give
+the stage hold and the grid match summary their own tile layout:
+``compare/overlay_summary.upright_grid`` measures every shooter's tile with
+the safe area taken out (``SafeArea.box_insets``: the bottom band, and the
+button column across a whole tile any of whose rows reach it) and
+``overlay_summary_cell.upright_grid_type`` picks **one** ``CellScale`` for
+the grid, keyed to the cell width and shrunk until the fullest tile's text
+(a pixel model of the stack, ``_grid_tile_height``, a reload row counted
+where a tile has one) fits every tile and its widest rows the narrowest.
+A tile is never sized on its own: ``grid_html(upright=area)`` turns on
+``fit.js``'s uniform step (``window.__splitsmithFitUniform``: every band
+ends at the smallest ``--fit-scale`` any band needed) and makes the width
+step end a line at the button column, not the tile's edge. A hold tile is
+``summary_groups(upright=True, grid=kind)``: Splits first as a 2x2, the
+reload row three or two across, the counts three to a row, hit factor and
+time at the counts' size (``Role.DETAIL``), over each other when the
+narrowest tile has no room or any time was entered by hand. A match
+summary tile (``match_summary_groups(upright=True)``) lists Avg / Best
+draw / Rounds as caption-value rows (``Group.content_columns``, so "Best
+draw" never wraps) above its Scoring band, and the title strip is
+``upright_match_summary_strip_html``: a small label over the whole name,
+two lines at most, shrunk rather than cut. A caption a little under the
+floor (from 85 % of it) draws at the floor; further under, every caption
+in the grid is dropped (``without_captions``), never drawn smaller.
+Sixteen shooters at 720 px wide do not fit at the floor: the type is what
+the widths allow and the bottom row's tiles drop by priority. Square and
+wider grids are pixel-identical to before (the fit script's text changed,
+nothing it does without the flag). ``tests/test_upright_grids.py``
+measures all of it in Chromium against the area written out by hand.
+
 **Logo spots** (``logo_spots``, spec 2026-10-09): beyond the cards, an export
 may put a logo in more places, chosen per export by the Export page's Logos row
 (``lib/logoPlan``: Cards only, Polished, Choose), ``--logos`` on both CLIs and

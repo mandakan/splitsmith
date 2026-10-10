@@ -19,7 +19,7 @@ import io
 import logging
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from PIL import Image
@@ -185,6 +185,7 @@ def match_summary_groups(
     scale: CellScale,
     cell_width: int,
     cell_height: int,
+    upright: bool = False,
 ) -> tuple[Group, ...]:
     """One shooter's tile on the grid's match summary (spec
     2026-10-08-grid-match-summary-design), in the stage summary hold's bands
@@ -194,6 +195,11 @@ def match_summary_groups(
     **Splits** (Avg, Best draw, Rounds), each with "N of M stages" when it
     stands on part of the match. No ranking, no summed time, never a zero
     for a count nobody reported. A shooter with nothing recorded is a name.
+
+    ``upright=True`` is a tile of an upright grid (issue #1394 part 2):
+    Splits first, Avg / Best draw / Rounds as caption-value rows (the
+    caption beside its figure, so "Best draw" never wraps), then Scoring
+    with the counts wrapping to three columns.
     """
     identity: list[Element] = [Element(role=Role.IDENTITY, text=label)]
     if summary.dq:
@@ -204,6 +210,7 @@ def match_summary_groups(
     total = summary.stage_count
 
     scoring = False
+    scoring_groups: list[Group] = []
     if summary.hits is not None:
         hits = summary.hits
         totals = StageScorecard(
@@ -215,7 +222,9 @@ def match_summary_groups(
             procedurals=hits["P"],
         )
         counts = count_elements(totals)
-        if counts:
+        if counts and upright:
+            scoring_groups = _upright_scoring_groups(counts, _coverage(summary.scored_stages, total), scale)
+        elif counts:
             scoring = True
             head = [Element(role=Role.LABEL, text="Scoring", drop_priority=len(counts))]
             note = _coverage(summary.scored_stages, total)
@@ -247,6 +256,15 @@ def match_summary_groups(
                 caption="Rounds",
             ),
         ]
+    if upright:
+        return _upright_tile(
+            groups,
+            splits,
+            _coverage(summary.split_stages, total),
+            scoring_groups,
+            scale=scale,
+            cell_height=cell_height,
+        )
     if splits:
         head = [Element(role=Role.LABEL, text="Splits")]
         note = _coverage(summary.split_stages, total)
@@ -270,6 +288,74 @@ def match_summary_groups(
                 gap=_sgrid_gap(cell_width),
             )
         )
+    return tuple(groups)
+
+
+def _upright_scoring_groups(counts: list[Element], note: Element | None, scale: CellScale) -> list[Group]:
+    """An upright grid tile's Scoring band: its label (and coverage note),
+    then the counts three to a row. The counts drop first, then the note,
+    then the label, as on the hold."""
+    head = [Element(role=Role.LABEL, text="Scoring", drop_priority=len(counts) + 1)]
+    if note is not None:
+        head.append(replace(note, drop_priority=len(counts)))
+    return [
+        Group(anchor=Anchor.MIDDLE_CENTER, flow=Flow.ROW, elements=tuple(head), align="left"),
+        Group(
+            anchor=Anchor.MIDDLE_CENTER,
+            flow=Flow.GRID,
+            elements=tuple(counts),
+            align="left",
+            gap=_counts_gap(scale),
+            columns=3,
+        ),
+    ]
+
+
+def _upright_tile(
+    groups: list[Group],
+    splits: list[Element],
+    note: Element | None,
+    scoring: list[Group],
+    *,
+    scale: CellScale,
+    cell_height: int,
+) -> tuple[Group, ...]:
+    """An upright grid tile below its name: Splits as caption-value rows (the
+    caption, then its figure, every figure lined up after the longest
+    caption), then Scoring a band gap below. A tile too short for all of it
+    gives up the Scoring band first, then the Rounds row, then the Splits
+    band's coverage note; never Avg or Best draw."""
+    priority = 1 + max(
+        (e.drop_priority for g in scoring for e in g.elements if e.drop_priority is not None), default=-1
+    )
+    if splits:
+        head = [Element(role=Role.LABEL, text="Splits")]
+        rows: list[Element] = []
+        for index, element in enumerate(splits):
+            rounds = index == len(splits) - 1
+            rows.append(
+                Element(
+                    role=Role.LABEL, text=element.caption or "", drop_priority=priority if rounds else None
+                )
+            )
+            rows.append(replace(element, caption=None, drop_priority=priority if rounds else None))
+        if note is not None:
+            head.append(replace(note, drop_priority=priority + 1))
+        groups.append(Group(anchor=Anchor.MIDDLE_CENTER, flow=Flow.ROW, elements=tuple(head), align="left"))
+        groups.append(
+            Group(
+                anchor=Anchor.MIDDLE_CENTER,
+                flow=Flow.GRID,
+                elements=tuple(rows),
+                align="left",
+                gap=max(4, round(scale.caption * 0.8)),
+                columns=2,
+                content_columns=True,
+            )
+        )
+    if scoring and splits:
+        scoring[0] = replace(scoring[0], margin_top=_band_gap_extra(cell_height))
+    groups.extend(scoring)
     return tuple(groups)
 
 
@@ -788,6 +874,91 @@ body {{
   min-width: 0;
 }}
 </style></head><body>
+<div class="label">Match summary</div>
+<div class="title">{html.escape(title)}</div>
+</body></html>"""
+
+
+def upright_match_summary_strip_html(title: str, *, width: int, height: int, theme: OverlayTheme) -> str:
+    """The grid card's title strip on an upright frame (issue #1394 part 2):
+    a small "Match summary" label over the whole match name, which may take
+    two lines and is never cut short. The name starts at half the strip's
+    height on one line and shrinks (``window.__splitsmithFit``, called by the
+    rasterizer once the faces have loaded) until it fits the strip in at
+    most two lines, never under the legibility floor; only a name too long
+    for two lines at the floor loses its end."""
+    mono_url, mono_format, mono_weight = _face_source(theme.mono_font)
+    display_url, display_format, display_weight = _face_source(theme.display_font)
+    pad_x = round(width * 0.04)
+    pad_y = round(height * 0.08)
+    label_px = max(MIN_FONT_SIZE, round(height * 0.13))
+    title_px = round(height * 0.5)
+    return f"""<!doctype html>
+<html><head><meta charset="utf-8"><style>
+@font-face {{
+  font-family: "Splitsmith Mono";
+  src: url("{mono_url}") format("{mono_format}");
+  font-weight: {mono_weight};
+}}
+@font-face {{
+  font-family: "Splitsmith Display";
+  src: url("{display_url}") format("{display_format}");
+  font-weight: {display_weight};
+}}
+html, body {{ margin: 0; width: {width}px; height: {height}px; background: transparent; overflow: hidden; }}
+body {{
+  box-sizing: border-box;
+  padding: {pad_y}px {pad_x}px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  color: {_css_rgb(theme.ink)};
+  text-shadow: 0 1px 3px {_css_rgb(theme.stroke)};
+}}
+.label {{
+  font-family: "Splitsmith Mono", monospace;
+  font-size: {label_px}px;
+  color: {_css_rgb(theme.ink_2)};
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}}
+.title {{
+  font-family: "Splitsmith Display", sans-serif;
+  font-size: {title_px}px;
+  line-height: 1.05;
+  overflow-wrap: anywhere;
+  padding-bottom: 0.12em;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}}
+</style>
+<script>window.__splitsmithFit = function () {{
+  var FLOOR = {MIN_FONT_SIZE};
+  var title = document.querySelector('.title');
+  var label = document.querySelector('.label');
+  var style = getComputedStyle(document.body);
+  var room = document.body.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+  var size = parseFloat(getComputedStyle(title).fontSize);
+  // The title's own lines, clamped or not: a range measures the text.
+  function textHeight() {{
+    var range = document.createRange();
+    range.selectNodeContents(title);
+    return range.getBoundingClientRect().height;
+  }}
+  function fits() {{
+    var height = textHeight();
+    var lines = Math.round(height / parseFloat(getComputedStyle(title).lineHeight));
+    return lines <= 2 && label.getBoundingClientRect().height + height <= room + 0.5;
+  }}
+  while (!fits() && size * 0.97 >= FLOOR) {{
+    size *= 0.97;
+    title.style.fontSize = size + 'px';
+  }}
+}};</script>
+</head><body>
 <div class="label">Match summary</div>
 <div class="title">{html.escape(title)}</div>
 </body></html>"""

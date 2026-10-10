@@ -23,8 +23,10 @@ from __future__ import annotations
 
 import io
 import logging
-from dataclasses import replace
+from collections.abc import Iterator, Sequence
+from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import NamedTuple
 
 from PIL import Image
 
@@ -298,6 +300,7 @@ def summary_groups(
     cell_height: int,
     split_rows: bool = True,
     upright: bool = False,
+    grid: UprightGridType | None = None,
 ) -> tuple[Group, ...]:
     """What one cell says, as anchored groups rather than an ordered list.
 
@@ -344,6 +347,16 @@ def summary_groups(
     (:func:`_upright_split_groups`; Static / Moving rows whenever both
     kinds of split exist and ``split_rows`` is on, whatever the aspect),
     and hit factor and time share its two columns under the counts.
+
+    ``grid`` (with ``upright=True``) is one tile of an upright compare
+    grid's hold (issue #1394 part 2), typed for the whole grid by
+    :func:`upright_grid_type`: the same order, but Best / Avg over Worst /
+    Draw as a 2x2, the reload row as a row of its own
+    (:attr:`UprightGridType.reload_columns` wide), the counts wrapping to
+    three columns, and hit factor and time one size down
+    (:attr:`~splitsmith.overlay_layout.Role.DETAIL`, the counts' size), over
+    each other when the grid's narrowest tile has no room for both on a row
+    (:attr:`UprightGridType.stack_figures`).
     """
     scorecard = tile.scorecard if tile is not None else None
     # Narrowed to a real ``StageScorecard`` (not just a bool) so the reads
@@ -425,7 +438,18 @@ def summary_groups(
                 align="left",
             )
         )
-        if counts:
+        if counts and upright and grid is not None:
+            scoring.append(
+                Group(
+                    anchor=Anchor.MIDDLE_CENTER,
+                    flow=Flow.GRID,
+                    elements=tuple(counts),
+                    align="left",
+                    gap=_counts_gap(scale),
+                    columns=_UPRIGHT_COUNT_COLUMNS,
+                )
+            )
+        elif counts:
             scoring.append(
                 Group(
                     anchor=Anchor.MIDDLE_CENTER,
@@ -435,6 +459,8 @@ def summary_groups(
                     gap=_counts_gap(scale),
                 )
             )
+        if working and upright and grid is not None:
+            working = [replace(e, role=Role.DETAIL) for e in working]
         if working and upright:
             # Upright: hit factor and time sit in the Splits band's two
             # columns, under the 2x2 of figures, so the eye reads one table.
@@ -445,7 +471,7 @@ def summary_groups(
                     elements=tuple(working),
                     align="left",
                     gap=_sgrid_gap(cell_width),
-                    columns=_UPRIGHT_COLUMNS,
+                    columns=1 if grid is not None and grid.stack_figures else _UPRIGHT_COLUMNS,
                 )
             )
         elif working:
@@ -484,6 +510,7 @@ def summary_groups(
             cell_width=cell_width,
             cell_height=cell_height,
             split_rows=split_rows,
+            grid=grid,
         )
     else:
         rows: list[list[Element]] = []
@@ -545,6 +572,8 @@ def summary_groups(
 #: factor and time; the Static and Moving rows take three.
 _UPRIGHT_COLUMNS = 2
 _UPRIGHT_STAT_COLUMNS = 3
+#: An upright grid tile's hit/fault counts: A C D over M NS P.
+_UPRIGHT_COUNT_COLUMNS = 3
 
 
 def _upright_split_groups(
@@ -555,6 +584,7 @@ def _upright_split_groups(
     cell_width: int,
     cell_height: int,
     split_rows: bool,
+    grid: UprightGridType | None = None,
 ) -> list[Group]:
     """The upright card's Splits band (issue #1394): stacked, never four
     across. Without confirmed regions Best / Avg over Worst / Draw as a 2x2;
@@ -579,7 +609,7 @@ def _upright_split_groups(
             align="left",
         )
 
-    def grid(elements: list[Element], columns: int) -> Group:
+    def grid_of(elements: list[Element], columns: int) -> Group:
         return Group(
             anchor=Anchor.MIDDLE_CENTER,
             flow=Flow.GRID,
@@ -590,22 +620,31 @@ def _upright_split_groups(
         )
 
     groups = [label("Splits")]
+    if grid is not None:
+        # An upright grid tile: the combined 2x2 whatever the stage marked
+        # up (the hold keeps the combined row, ``split_rows=False``).
+        groups.append(
+            grid_of([*_split_stat_elements([shot.split for shot in selected]), draw], _UPRIGHT_COLUMNS)
+        )
+        if reload_row:
+            groups.append(grid_of(reload_row, grid.reload_columns))
+        return groups
     if static and moving and split_rows and cell_height >= _SPLIT_ROWS_MIN_CELL_HEIGHT:
         groups.append(label("Static"))
-        groups.append(grid(_split_stat_elements(static), _UPRIGHT_STAT_COLUMNS))
+        groups.append(grid_of(_split_stat_elements(static), _UPRIGHT_STAT_COLUMNS))
         groups.append(label("Moving"))
         groups.append(
-            grid([replace(e, caption=None) for e in _split_stat_elements(moving)], _UPRIGHT_STAT_COLUMNS)
+            grid_of([replace(e, caption=None) for e in _split_stat_elements(moving)], _UPRIGHT_STAT_COLUMNS)
         )
-        groups.append(grid([draw, *reload_row], _UPRIGHT_COLUMNS))
+        groups.append(grid_of([draw, *reload_row], _UPRIGHT_COLUMNS))
     elif reload_row:
         stats = _split_stat_elements([shot.split for shot in selected])
         if stats:
-            groups.append(grid(stats, _UPRIGHT_STAT_COLUMNS))
-        groups.append(grid([draw, *reload_row], _UPRIGHT_COLUMNS))
+            groups.append(grid_of(stats, _UPRIGHT_STAT_COLUMNS))
+        groups.append(grid_of([draw, *reload_row], _UPRIGHT_COLUMNS))
     else:
         groups.append(
-            grid([*_split_stat_elements([shot.split for shot in selected]), draw], _UPRIGHT_COLUMNS)
+            grid_of([*_split_stat_elements([shot.split for shot in selected]), draw], _UPRIGHT_COLUMNS)
         )
     return groups
 
@@ -641,6 +680,261 @@ def _upright_dense(tile: TileStageData) -> bool:
         return False
     selected = statistic_split_shots(tile.shots)
     return any(shot.moving for shot in selected) and any(not shot.moving for shot in selected)
+
+
+#: An upright grid tile's sizes, in hundredths of the cell's width (issue
+#: #1394 part 2, the owner's mockup): the name, the split figures, the counts
+#: with hit factor and time one size down, the captions and band labels, and
+#: the cell's padding.
+_GRID_IDENTITY_U = 14.0
+_GRID_HEADLINE_U = 13.0
+_GRID_DETAIL_U = 9.0
+_GRID_CAPTION_U = 4.6
+_GRID_PAD_U = 5.0
+
+#: The bundled faces' line box over their size (measured in Chromium: the
+#: mono face 1.31-1.33, the display face 1.30), the mono face's advance per
+#: character, and a label's with its 0.08 em of letter spacing.
+_LINE_EMS = 1.33
+_ADVANCE_EMS = 0.6
+_LABEL_ADVANCE_EMS = 0.68
+#: What ``fit.js``'s column step keeps between a column's text and the next
+#: column (``COLUMN_GAP_EM``).
+_COLUMN_GAP_EMS = 0.6
+#: A stage time entered by hand as a hold tile draws it: ``12.34s (manual)``.
+_MANUAL_TIME_CHARS = 15
+#: What a lit penalty plate adds to its row (0.15 em of padding each side).
+_PLATE_EMS = 0.3
+#: How far under the legibility floor a tile's captions may come by the
+#: width before they are dropped rather than drawn at the floor: a 9-up
+#: 1080 px wide hold's 11 px captions draw at the floor, a 9-up 720 px
+#: one's 8 px captions are dropped.
+_CAPTION_CLAMP = 0.85
+
+
+@dataclass(frozen=True)
+class UprightGridType:
+    """One upright grid's type (issue #1394 part 2): the scale every tile
+    draws at, and what its tightest tile makes every tile give up."""
+
+    scale: CellScale
+    #: ``False`` when a caption would come out under the legibility floor
+    #: (:data:`~splitsmith.overlay_layout.MIN_FONT_SIZE`): the captions are
+    #: dropped instead, and the band labels sit at the floor.
+    captions: bool
+    #: Hit factor over time rather than beside it: the narrowest tile has
+    #: no room for both on one row.
+    stack_figures: bool = False
+    #: How many of Reloads / Reload avg / Exposed sit on a row: all three
+    #: when the narrowest tile has the room, else two.
+    reload_columns: int = 2
+
+
+class TileRoom(NamedTuple):
+    """What one upright grid tile has for its text once the platform safe
+    area is taken out of it, whether it draws a reload row, and whether its
+    stage time was entered by hand (``4.50s (manual)``, too long to sit
+    beside hit factor)."""
+
+    usable_width: int
+    available_height: int
+    reloads: bool = False
+    manual_time: bool = False
+
+
+def _grid_scale(unit: float, cell_width: int, cell_height: int) -> UprightGridType:
+    caption = round(unit * _GRID_CAPTION_U)
+    identity = max(MIN_FONT_SIZE, round(unit * _GRID_IDENTITY_U))
+    scale = replace(
+        CellScale.for_cell(cell_height),
+        identity=identity,
+        headline=max(MIN_FONT_SIZE, round(unit * _GRID_HEADLINE_U)),
+        verdict=max(MIN_FONT_SIZE, identity // 2),
+        detail=max(MIN_FONT_SIZE, round(unit * _GRID_DETAIL_U)),
+        caption=max(MIN_FONT_SIZE, caption),
+        pad=max(8, round(unit * _GRID_PAD_U)),
+        stroke_width=max(1, cell_width // 360),
+    )
+    return UprightGridType(scale=scale, captions=unit * _GRID_CAPTION_U >= _CAPTION_CLAMP * MIN_FONT_SIZE)
+
+
+def _fits_row(widths: list[float], *, inner: float, columns: int, gap: float, em: float) -> bool:
+    """Whether text ``widths`` laid ``columns`` to a row of equal columns in
+    ``inner`` pixels each end ``fit.js``'s column gap short of the next."""
+    column = (inner - (columns - 1) * gap) / columns
+    return all(
+        width + (_COLUMN_GAP_EMS * em if index % columns < columns - 1 else 0) <= column
+        for index, width in enumerate(widths)
+    )
+
+
+def _grid_rows_fit(kind: UprightGridType, *, inner: float, cell_width: int, match: bool) -> bool:
+    """Whether a tile's widest rows fit ``inner`` pixels of text width: the
+    counts three to a row, then two split figures (``0.00``) side by side on
+    the hold, a "Best draw" caption and its figure on the match summary."""
+    scale = kind.scale
+    count = 3 * _ADVANCE_EMS * scale.detail
+    if not _fits_row(
+        [count] * 3,
+        inner=inner,
+        columns=3,
+        gap=_counts_gap(scale),
+        em=scale.caption if kind.captions else scale.detail,
+    ):
+        return False
+    figure = 4 * _ADVANCE_EMS * scale.headline
+    if match:
+        label = 9 * _LABEL_ADVANCE_EMS * scale.caption
+        return label + _caption_value_gap(scale) + figure <= inner
+    return _fits_row(
+        [figure, figure],
+        inner=inner,
+        columns=2,
+        gap=_sgrid_gap(cell_width),
+        em=scale.caption if kind.captions else scale.headline,
+    )
+
+
+def _figures_fit(kind: UprightGridType, *, inner: float, cell_width: int) -> bool:
+    """Whether hit factor (``12.34`` and its unit) fits beside a time
+    (``12.34s``) on one row of a hold tile."""
+    scale = kind.scale
+    unit = max(0.45 * scale.detail, MIN_FONT_SIZE)
+    hit_factor = 5 * _ADVANCE_EMS * scale.detail + (0.25 + 2 * _ADVANCE_EMS) * unit
+    time = 6 * _ADVANCE_EMS * scale.detail
+    return _fits_row(
+        [hit_factor, time],
+        inner=inner,
+        columns=2,
+        gap=_sgrid_gap(cell_width),
+        em=scale.caption if kind.captions else scale.detail,
+    )
+
+
+def _caption_value_gap(scale: CellScale) -> int:
+    """The gap between a match summary tile's caption and its figure, and
+    between its caption-value rows."""
+    return max(4, round(scale.caption * 0.8))
+
+
+def _reload_row_fits(kind: UprightGridType, *, inner: float, cell_width: int) -> bool:
+    """Whether Reloads / Reload avg / Exposed fit three to a row, each
+    column as wide as its caption ("Reload avg") or its figure (``1.42``)."""
+    scale = kind.scale
+    figure = 4 * _ADVANCE_EMS * scale.headline
+    caption = 10 * _LABEL_ADVANCE_EMS * scale.caption if kind.captions else 0
+    return _fits_row(
+        [max(figure, caption)] * 3,
+        inner=inner,
+        columns=3,
+        gap=_sgrid_gap(cell_width),
+        em=scale.caption if kind.captions else scale.headline,
+    )
+
+
+def _grid_tile_height(
+    kind: UprightGridType, *, cell_width: int, cell_height: int, match: bool, reloads: bool = False
+) -> float:
+    """How tall the fullest tile's text is, top padding to the band's last
+    line, in pixels: the name, then on the hold the Splits 2x2 (with its
+    captions when they show) and its reload row when it has one, the counts
+    as two rows of three with a lit plate, and hit factor with time (over
+    each other when stacked); on the match summary three caption-value rows
+    and the counts."""
+    scale = kind.scale
+
+    def line(size: int) -> float:
+        return size * _LINE_EMS
+
+    gutter = max(8, scale.pad // 2)
+    counts = 2 * line(scale.detail) + _PLATE_EMS * scale.detail + _counts_gap(scale)
+    if match:
+        rows = 3 * line(scale.headline) + 2 * _caption_value_gap(scale)
+        stack = 2 * line(scale.caption) + rows + counts + 3 * gutter
+    else:
+        figure = line(scale.headline) + (line(scale.caption) if kind.captions else 0)
+        splits = 2 * figure + _sgrid_gap(cell_width)
+        if reloads:
+            reload_rows = -(-3 // kind.reload_columns)
+            splits += gutter + reload_rows * figure + (reload_rows - 1) * _sgrid_gap(cell_width)
+        working = (
+            2 * line(scale.detail) + _sgrid_gap(cell_width) if kind.stack_figures else line(scale.detail)
+        )
+        stack = 2 * line(scale.caption) + splits + counts + working + 4 * gutter
+    # The name's row and its padding, the gaps either side of the band, and
+    # the gap before the Scoring band.
+    return 2 * scale.pad + line(scale.identity) + stack + _band_gap_extra(cell_height)
+
+
+def upright_grid_type(
+    cell_width: int, cell_height: int, tiles: Sequence[TileRoom], *, match: bool = False
+) -> UprightGridType:
+    """The one type scale of an upright grid's tiles (issue #1394 part 2),
+    keyed to the cell's width: the name at 14 % of it, the split figures at
+    13 %, the counts, hit factor and time at 9 %, captions and band labels
+    at 4.6 % and the padding at 5 %. ``tiles`` is what each shooter's tile
+    has once the platform safe area is taken out of it (:class:`TileRoom`);
+    the unit shrinks until every tile's text (:func:`_grid_tile_height`, a
+    reload row included where the tile draws one) fits its height and the
+    widest rows fit the narrowest, so every tile in the grid draws at the
+    same size and no tile is sized on its own. On the hold, hit factor goes
+    over time (``stack_figures``) when any tile's time was entered by hand,
+    and the reload row takes two columns
+    rather than three when the narrowest tile has no room for them on one
+    row at that size. A caption a little under the legibility floor draws
+    at the floor; one further under it is dropped (``captions`` is
+    ``False``), never drawn smaller. When a tile cannot fit even with
+    everything at the floor (sixteen shooters on a 720 px wide frame), the
+    type is what the widths allow and the fit drops by priority in the
+    tiles that are short of room."""
+    rooms = list(tiles) or [TileRoom(cell_width, cell_height)]
+    narrowest = min(min(cell_width, room.usable_width) for room in rooms)
+    manual = not match and any(room.manual_time for room in rooms)
+
+    def candidates() -> Iterator[UprightGridType]:
+        unit = cell_width / 100
+        while True:
+            kind = _grid_scale(unit, cell_width, cell_height)
+            if not match:
+                inner = narrowest - 2 * kind.scale.pad
+                kind = replace(
+                    kind,
+                    stack_figures=manual or not _figures_fit(kind, inner=inner, cell_width=cell_width),
+                    reload_columns=3 if _reload_row_fits(kind, inner=inner, cell_width=cell_width) else 2,
+                )
+            yield kind
+            if kind.scale.headline <= MIN_FONT_SIZE:
+                return
+            unit *= 0.98
+
+    def wide_enough(kind: UprightGridType) -> bool:
+        inner = narrowest - 2 * kind.scale.pad
+        if manual and _MANUAL_TIME_CHARS * _ADVANCE_EMS * kind.scale.detail > inner:
+            return False
+        return _grid_rows_fit(kind, inner=inner, cell_width=cell_width, match=match)
+
+    def short_enough(kind: UprightGridType) -> bool:
+        return all(
+            _grid_tile_height(
+                kind, cell_width=cell_width, cell_height=cell_height, match=match, reloads=room.reloads
+            )
+            <= room.available_height
+            for room in rooms
+        )
+
+    kinds = list(candidates())
+    return next(
+        (k for k in kinds if wide_enough(k) and short_enough(k)),
+        next((k for k in kinds if wide_enough(k)), kinds[-1]),
+    )
+
+
+def without_captions(groups: tuple[Group, ...]) -> tuple[Group, ...]:
+    """``groups`` with every figure's caption taken off: what an upright grid
+    tile draws when its captions would sit under the legibility floor."""
+    return tuple(
+        replace(group, elements=tuple(replace(e, caption=None) for e in group.elements)) for group in groups
+    )
 
 
 def upright_cell_style(area: SafeArea, *, pad: int) -> str:
@@ -746,6 +1040,10 @@ __all__ = [
     "summary_scale",
     "summary_still_html",
     "time_text_for",
+    "TileRoom",
+    "UprightGridType",
     "upright_cell_style",
+    "upright_grid_type",
     "upright_summary_scale",
+    "without_captions",
 ]

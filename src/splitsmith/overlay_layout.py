@@ -305,6 +305,12 @@ class Group:
     #: such a row also aligns its cells on their last baseline
     #: (``overlay_html._group_style``).
     columns: int | None = None
+    #: A ``GRID``'s columns sized to their content (``max-content``) rather
+    #: than shared equally: the upright grid match summary's caption-value
+    #: rows (issue #1394 part 2), so a caption never wraps and every figure
+    #: lines up after the longest caption. ``False`` (the default) is what
+    #: every grid did before this field existed.
+    content_columns: bool = False
 
 
 @dataclass(frozen=True)
