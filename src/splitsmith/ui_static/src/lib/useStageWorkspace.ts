@@ -58,6 +58,11 @@ export interface StageWorkspace {
   reclassifying: boolean;
   reclassify: () => Promise<void>;
   patchShot: (shot: CoachShot, patch: ShotPatch) => Promise<void>;
+  /** ``patchShot`` that rethrows instead of replacing the page: an autosaved
+   *  note reports its own failure (``useNoteAutosave``). */
+  savePatch: (shot: CoachShot, patch: ShotPatch) => Promise<void>;
+  /** Fetch the coach payload again and apply it (after a conflict). */
+  reload: () => Promise<CoachStageResponse | null>;
   /** Select a shot and seek the video to it; drops a selected region. */
   seekToShot: (shot: CoachShot) => void;
   togglePlay: () => void;
@@ -68,6 +73,8 @@ export interface StageWorkspaceOptions {
   /** After every region save the server accepted (Breakdown refreshes the
    *  shell's project so the nav's region count follows). */
   onRegionsSaved?: () => void;
+  /** Fetch the band's audio peaks (default true). Coach draws no band. */
+  peaks?: boolean;
 }
 
 export function useStageWorkspace(slug: string, stage: number, options: StageWorkspaceOptions = {}): StageWorkspace {
@@ -81,7 +88,8 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [peaks, setPeaks] = useState<PeaksResult | null>(null);
-  const [peaksLoading, setPeaksLoading] = useState(true);
+  const wantPeaks = options.peaks ?? true;
+  const [peaksLoading, setPeaksLoading] = useState(wantPeaks);
   const scrub = useScrubSource();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   // Guard value for the positional shot PATCH (#844). A ref rather than
@@ -141,6 +149,7 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
   // request is in flight, so "No audio" never flashes before a slow
   // response has had a chance to resolve.
   useEffect(() => {
+    if (!wantPeaks) return;
     let alive = true;
     setPeaksLoading(true);
     api
@@ -157,7 +166,7 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
     return () => {
       alive = false;
     };
-  }, [slug, stage]);
+  }, [slug, stage, wantPeaks]);
 
   // While the video is playing, advance the active shot to whichever
   // one's time_absolute has just passed under the playhead. Gated on
@@ -187,17 +196,30 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
     }
   }, [apply, slug, stage]);
 
+  const savePatch = useCallback(
+    async (shot: CoachShot, patch: ShotPatch) => {
+      const c = await api.patchStageShotCoach(slug, stage, shot, patch, coachVersionRef.current);
+      apply(c);
+    },
+    [apply, slug, stage],
+  );
+
   const patchShot = useCallback(
     async (shot: CoachShot, patch: ShotPatch) => {
       try {
-        const c = await api.patchStageShotCoach(slug, stage, shot, patch, coachVersionRef.current);
-        apply(c);
+        await savePatch(shot, patch);
       } catch (e) {
         setError(e instanceof ApiError ? e.detail : String(e));
       }
     },
-    [apply, slug, stage],
+    [savePatch],
   );
+
+  const reload = useCallback(async () => {
+    const c = await api.getStageCoach(slug, stage);
+    apply(c);
+    return c;
+  }, [apply, slug, stage]);
 
   const seekToShot = useCallback(
     (shot: CoachShot) => {
@@ -240,6 +262,8 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
     reclassifying,
     reclassify,
     patchShot,
+    savePatch,
+    reload,
     seekToShot,
     togglePlay,
     isMobile,

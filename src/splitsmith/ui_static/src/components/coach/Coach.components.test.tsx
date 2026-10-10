@@ -7,7 +7,7 @@ import { timeBudget } from "@/lib/timeBudget";
 import { CoachShotTable } from "./CoachShotTable";
 import { EventCard } from "./EventCard";
 import { EventList } from "./EventList";
-import { ShotEditor } from "./ShotEditor";
+import { ReviewShotList } from "./ReviewShotList";
 import { TimeBudgetBar } from "./TimeBudgetBar";
 import { TimeBudgetCard } from "./TimeBudgetCard";
 
@@ -38,21 +38,30 @@ describe("TimeBudgetBar / TimeBudgetCard", () => {
   });
 });
 
-describe("ShotEditor", () => {
-  it("presses the current class, writes a class on click, and makes Save primary only when the note is dirty", () => {
-    const onClassify = vi.fn();
-    const onSave = vi.fn();
-    const { rerender } = render(
-      <ShotEditor shot={SHOTS[1]} tier={null} noteDraft="" onNoteChange={vi.fn()} onSave={onSave} onClassify={onClassify} onToggleFlag={vi.fn()} />,
-    );
-    expect(screen.getByRole("button", { name: "Movement" })).toHaveAttribute("aria-pressed", "true");
-    fireEvent.click(screen.getByRole("button", { name: "Transition" }));
-    expect(onClassify).toHaveBeenCalledWith("transition");
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
-    rerender(<ShotEditor shot={SHOTS[1]} tier={null} noteDraft="late" onNoteChange={vi.fn()} onSave={onSave} onClassify={onClassify} onToggleFlag={vi.fn()} />);
-    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    expect(onSave).toHaveBeenCalled();
+describe("ReviewShotList", () => {
+  const props = {
+    shots: SHOTS,
+    baselines: null,
+    onSelect: vi.fn(),
+    onSaveNote: vi.fn().mockResolvedValue(undefined),
+    onToggleFlag: vi.fn(),
+    onReloadNote: vi.fn().mockResolvedValue(null),
+  };
+  it("shows intervals as chips only, opens the current shot's note under its row, and toggles its flag", () => {
+    const onToggleFlag = vi.fn();
+    render(<ReviewShotList {...props} activeShotNumber={4} onToggleFlag={onToggleFlag} />);
+    expect(screen.queryByRole("group", { name: "Interval class" })).toBeNull();
+    expect(screen.getByText("1 flagged")).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Note on shot 04" })).toHaveValue("long run");
+    expect(screen.getAllByRole("textbox")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Flagged" }));
+    expect(onToggleFlag).toHaveBeenCalledWith(SHOTS[3]);
+  });
+  it("read-only shows the note without a textbox or a flag button", () => {
+    render(<ReviewShotList {...props} activeShotNumber={4} readOnly />);
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Flagged" })).toBeNull();
+    expect(screen.getByText("long run")).toBeInTheDocument();
   });
 });
 

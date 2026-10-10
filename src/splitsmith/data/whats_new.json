@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "coach-review-page",
+      "date": "2026-10-10",
+      "title": "Review a stage on Coach",
+      "body": "Coach now shows the stage video, its figures and time budget, and a note on each shot that saves as you type. To change movement, reloads or intervals, use Adjust in Breakdown."
+    },
+    {
       "id": "breakdown-page",
       "date": "2026-10-10",
       "title": "Mark movement and reloads on a stage",

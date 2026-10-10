@@ -199,6 +199,15 @@ function BreakdownStage({ slug, stage }: { slug: string; stage: number }) {
             <>
               {/* Short window: one header line. The shooter strip above names the shooter. */}
               {compact ? <span className="mr-2 inline-flex items-center gap-2">{regionChips}</span> : null}
+              {/* Moved from Coach (#1374): re-running the classifier is interval work. */}
+              <Button
+                type="button"
+                onClick={() => void ws.reclassify()}
+                disabled={ws.reclassifying}
+                title="Re-run the auto-classifier; manual overrides survive"
+              >
+                {ws.reclassifying ? "Reclassifying…" : "Reclassify"}
+              </Button>
               <Button asChild>
                 <Link to={`${coachPrefix}/${stage}`}>Review in Coach</Link>
               </Button>

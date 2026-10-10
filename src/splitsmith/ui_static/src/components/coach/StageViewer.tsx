@@ -37,7 +37,18 @@ export function StageVideo({ ws, view, className }: { ws: StageWorkspace; view: 
   );
 }
 
-export function StageTransport({ ws, view, className }: { ws: StageWorkspace; view: StageView; className?: string }) {
+export function StageTransport({
+  ws,
+  view,
+  className,
+  touch = false,
+}: {
+  ws: StageWorkspace;
+  view: StageView;
+  className?: string;
+  /** A 40 px play button (Coach on a tablet). */
+  touch?: boolean;
+}) {
   const { activeShot } = view;
   return (
     <div className={cn("flex items-center gap-3 px-3 py-2", className)}>
@@ -47,7 +58,7 @@ export function StageTransport({ ws, view, className }: { ws: StageWorkspace; vi
         onClick={ws.togglePlay}
         aria-label={ws.isPlaying ? "Pause" : "Play"}
         aria-pressed={ws.isPlaying}
-        className="rounded-full"
+        className={cn("rounded-full", touch && "size-10")}
       >
         {ws.isPlaying ? <Pause className="size-4" aria-hidden /> : <Play className="size-4 fill-current" aria-hidden />}
       </Button>
