@@ -43,6 +43,14 @@ reliable key for older fixtures.
   held out by match, Blacksmith 2026 GO 3S precision fell from 0.944 to 0.825 (recall 0.905 to
   0.926) in exchange for surviving camera audio changes. Revisit by reverting that PR, or by
   retraining with the relative block for the Vanguard only.
+- **Detector shot times often land inside the shot, 20 to 30 ms late (2026-10-10).** On 27 % of
+  the 667 shots in reviewed GO 3S fixtures, the shot's leading edge (the app's snap rule,
+  `lib/peak-snap.snapToLeadingEdge`) sits more than 10 ms before the stored detector time; 3 %
+  the other way. Plotted cases show a sharp burst starting 20 to 30 ms before the stored time,
+  which sits mid-burst. Likely cause: librosa fires on a later loud part of the compressed burst,
+  and the rise-foot walk back stops at the first dip inside it (`shot_detect`'s 20 ms rising
+  guard). These are audited fixtures: the shots were kept at fit zoom, where 35 ms bars hid it.
+  Splits between a late and an on-time shot are off by the difference.
 
 Implication: absolute spectral features drift within a stage on this camera. Features relative to
 the stage's own earlier shots should hold up better; evaluate recall by shot index in string, not
@@ -66,6 +74,11 @@ only overall.
 - **Real stereo** (L/R correlation about 0.3 to 0.6 around shots). Own shots arrive more balanced
   and more coherent than other sounds, but as a voter C addition it caught nothing extra on 38 hard
   negatives (2026-10-09).
+- **Detector shot times often sit in the silence before the shot (2026-10-10).** On 10 % of the
+  347 shots in reviewed Vanguard fixtures the stored time is more than 10 ms before the leading
+  edge (1 % the other way): plotted cases show silence at the stored time and the shot starting
+  8 to 15 ms later. Where the rise has a quiet lead-in before the main burst, the app's snap rule
+  can land on the main burst, a few ms after the lead-in; place those by eye at 1 ms zoom.
 - Portrait 1200x1600 at about 60 fps. The promote route's comment says ffprobe exposes no make or
   model for these files; current ffprobe reads `model=Vanguard`.
 
@@ -81,6 +94,11 @@ only overall.
 - Handheld means a squadmate films the shooter, so "own muzzle" cues (stereo direction, frame
   motion) do not apply. Inter-channel time differences are about one sample at 48 kHz.
 - The bulk of the handheld corpus. Held-out handheld voter C is the strong cell (F1 about 0.96).
+- **Leading edges are ambiguous on far angles (2026-10-10).** On reviewed handheld fixtures the
+  stored detector time and the app's snap rule disagree by more than 10 ms on about 40 % of
+  shots, in both directions (29 % with the snap earlier, 11 % later). Not plotted yet: reverb and
+  the gun's mechanical sound arriving before the blast both blur the rise at a distance. The
+  review queue lists the disagreeing shots (`scripts/fixture_review_inventory.py`).
 
 ## Samsung phone (hand)
 

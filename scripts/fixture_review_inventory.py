@@ -23,7 +23,7 @@ from pathlib import Path
 from splitsmith.beep_detect import load_audio
 from splitsmith.ensemble import fixtures as fx_module
 from splitsmith.fixture_schema import review_status
-from splitsmith.lab.inventory import onset_spread_ms, review_priority
+from splitsmith.lab.inventory import onset_spread_ms, review_priority, suggested_moves
 
 OUT = Path("build/fixture_review_inventory.json")
 
@@ -60,10 +60,12 @@ def main() -> int:
         data = json.loads((args.fixtures / f"{f.stem}.json").read_text())
         wav = args.fixtures / f"{f.stem}.wav"
         spread = None
+        moves: list[dict] = []
         if wav.exists():
             audio, sr = load_audio(wav)
             times = [float(s["time"]) for s in data.get("shots") or [] if s.get("time") is not None]
             spread = onset_spread_ms(audio, sr, times)
+            moves = suggested_moves(audio, sr, times)
         else:
             missing_audio += 1
         entry = {
@@ -77,6 +79,10 @@ def main() -> int:
             "derived": bool(data.get("anchor")),
             "edge_fraction": _edge_fraction(args.fixtures, f.stem, data),
             "onset_spread_ms": None if spread is None else round(spread, 2),
+            # Where the app's leading-edge rule would put shots that look off;
+            # a pointer for the reviewer, never written into the fixture.
+            "suggested_moves": len(moves),
+            "moves": moves,
         }
         score, reasons = review_priority(entry)
         entry["priority"] = round(score, 1)
