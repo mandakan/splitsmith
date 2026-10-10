@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { StrictMode, useRef } from "react";
+import { StrictMode, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PeaksResult } from "@/lib/api";
@@ -36,10 +36,10 @@ function Harness(props: {
   onPick?: (t: number) => void;
   onError?: (m: string) => void;
 }) {
-  const mediaRef = useRef<HTMLVideoElement>(null);
+  const [media, setMedia] = useState<HTMLVideoElement | null>(null);
   return (
     <div>
-      <video ref={mediaRef} data-testid="preview-video" />
+      <video ref={setMedia} data-testid="preview-video" />
       <BeepTimeline
         slug="alice"
         stageNumber={10}
@@ -47,7 +47,7 @@ function Harness(props: {
         videoBeepTime={props.videoBeepTime ?? null}
         draftSourceTime={props.draftSourceTime ?? null}
         candidates={props.candidates ?? []}
-        mediaRef={mediaRef}
+        media={media}
         mediaOnDesktop={props.mediaOnDesktop}
         onPick={props.onPick ?? vi.fn()}
         onError={props.onError}
@@ -389,18 +389,17 @@ describe("BeepTimeline", () => {
       expect(screen.getByRole("button", { name: "Fit" })).toHaveAttribute("aria-pressed", "true");
     });
 
-    it("re-attaches its media listeners when the preview element behind mediaRef is remounted (a camera switch)", async () => {
+    it("re-attaches its media listeners when the preview element is remounted (a camera switch)", async () => {
       vi.mocked(api.getVideoPeaks).mockResolvedValue(peaksFixture({ duration: 10, beep_time: 0 }));
 
       // BeepStep keys the preview <video> per item (keyOf(item)), so a
-      // camera switch unmounts the old element and mounts a new one --
-      // mediaRef.current changes without mediaRef itself changing and
-      // without any prop BeepTimeline reads changing either.
+      // camera switch unmounts the old element and mounts a new one;
+      // the parent's callback ref hands the band the new element.
       function RemountableHarness({ videoId }: { videoId: string }) {
-        const mediaRef = useRef<HTMLVideoElement>(null);
+        const [media, setMedia] = useState<HTMLVideoElement | null>(null);
         return (
           <div>
-            <video key={videoId} ref={mediaRef} data-testid="preview-video" />
+            <video key={videoId} ref={setMedia} data-testid="preview-video" />
             <BeepTimeline
               slug="alice"
               stageNumber={10}
@@ -408,7 +407,7 @@ describe("BeepTimeline", () => {
               videoBeepTime={null}
               draftSourceTime={null}
               candidates={[]}
-              mediaRef={mediaRef}
+              media={media}
               onPick={vi.fn()}
             />
           </div>

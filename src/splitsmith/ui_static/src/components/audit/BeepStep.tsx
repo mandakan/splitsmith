@@ -17,7 +17,6 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -116,7 +115,10 @@ export function BeepStep({
   useEffect(() => {
     setDraft(null);
   }, [item?.video_id]);
-  const videoRef = useRef<HTMLVideoElement | null>(null);
+  // The preview's <video>, held in state rather than a ref: BeepPreview
+  // can swap it on its own (error / Retry, a camera switch), and the band
+  // has to re-attach to the new element, which only a re-render tells it.
+  const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null);
   const selectedTime = draft ?? item?.beep_time ?? null;
 
   const candidates = useMemo(() => {
@@ -354,7 +356,7 @@ export function BeepStep({
               proxyReady={item.proxy_ready}
               mediaOnDesktop={mediaOnDesktop}
               initialTime={selectedTime}
-              videoRef={videoRef}
+              onVideoElement={setVideoEl}
               caption="Frame at the selected candidate"
             />
             <div
@@ -425,7 +427,7 @@ export function BeepStep({
               videoBeepTime={item.beep_time}
               draftSourceTime={draft}
               candidates={candidates}
-              mediaRef={videoRef}
+              media={videoEl}
               mediaOnDesktop={mediaOnDesktop}
               onPick={handleTimelinePick}
             />

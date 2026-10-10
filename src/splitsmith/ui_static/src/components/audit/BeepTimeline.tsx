@@ -12,8 +12,8 @@
  * that one shared clip-local time -- there is no conversion between
  * them. Only a *pick*, the value handed to `onPick`, is source seconds:
  * ``offset = videoBeepTime - peaks.beep_time`` converts clip-local to
- * source there, mirroring BeepWaveformPicker's rule (BeepSection.tsx
- * ~821-824). The peaks route serves the full source today, so this
+ * source there, mirroring BeepWaveformPicker's rule (its ``offset``
+ * memo). The peaks route serves the full source today, so this
  * offset is 0 in practice; it exists for BeepWaveformPicker's other
  * case (a cached trim, where the peaks' clip starts partway into the
  * source) in case this component ever serves that case too -- it does
@@ -47,8 +47,11 @@ export interface BeepTimelineProps {
   draftSourceTime: number | null;
   /** Candidates in source seconds. */
   candidates: BeepCandidate[];
-  /** The preview <video>; the band seeks it and reads its time and play state. */
-  mediaRef: React.RefObject<HTMLVideoElement | null>;
+  /** The preview <video>, or null while none is mounted; the band seeks
+   *  it and reads its time and play state. Passed as the element itself
+   *  (BeepStep holds it in state through BeepPreview's callback ref), so a
+   *  remount of the <video> re-renders the band and re-attaches it. */
+  media: HTMLVideoElement | null;
   /** Desktop-pushed mirror (#821): raw footage never leaves the desktop
    *  install, so the peaks fetch is expected to fail. Only changes the
    *  wording of the no-audio line. */
@@ -77,7 +80,7 @@ export function BeepTimeline({
   videoBeepTime,
   draftSourceTime,
   candidates,
-  mediaRef,
+  media,
   mediaOnDesktop = false,
   onPick,
   onError,
@@ -91,7 +94,7 @@ export function BeepTimeline({
   const lastScrubRef = useRef(0);
 
   // The fetch effect parks the video once peaks land (below), using
-  // whatever draft/videoBeepTime are current *then*, not whichever were
+  // whatever draft/videoBeepTime/media are current *then*, not whichever were
   // current when the fetch started -- refs instead of effect deps, since
   // re-running the fetch on every draft change would refetch peaks for no
   // reason.
@@ -99,6 +102,8 @@ export function BeepTimeline({
   draftRef.current = draftSourceTime;
   const videoBeepRef = useRef(videoBeepTime);
   videoBeepRef.current = videoBeepTime;
+  const mediaRef = useRef(media);
+  mediaRef.current = media;
 
   useEffect(() => {
     let alive = true;
@@ -133,74 +138,36 @@ export function BeepTimeline({
     // onError is a per-render callback, not part of what identifies "which
     // video's peaks to fetch"; including it would refetch on every render
     // a parent that doesn't memoize it causes. mediaRef is a stable
-    // RefObject identity, not part of the fetch's own identity either.
+    // ref mirroring `media`, not part of the fetch's own identity either.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug, stageNumber, videoId]);
 
   // Read the media element's position and play state rather than own
   // them: the preview <video> is the parent's, shared with BeepPreview.
-  // No dependency array: BeepStep can remount the preview out from under
-  // mediaRef (a camera switch), which changes mediaRef.current without
-  // changing the mediaRef object itself or firing any prop change this
-  // component would otherwise depend on -- so this re-checks after every
-  // render instead, and is a no-op whenever the element hasn't changed.
-  //
-  // This still can't see a remount that happens entirely inside
-  // BeepPreview (a sibling) without BeepTimeline itself re-rendering --
-  // e.g. its own error/Retry swapping the <video> it owns. Nothing here
-  // runs until *this* component's next render, so the listeners stay on
-  // the dead element until then. Seeks (handleSeek, the candidate click,
-  // park) are unaffected: they read `mediaRef.current` fresh every time,
-  // not whichever element these listeners are attached to.
-  const attachedElRef = useRef<HTMLVideoElement | null>(null);
-  const detachRef = useRef<() => void>(() => {});
-  // No deps array is deliberate here, not an omission: [mediaRef] (the
-  // lint rule's own suggestion) would run this exactly once, since
-  // mediaRef's identity never changes -- the one case this exists to
-  // handle. The early return below makes every other render's call a
-  // no-op, so this never loops.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // Keyed on the element itself, so a remount (a camera switch, the
+  // preview's error / Retry) detaches from the old one and attaches here;
+  // with no element mounted nothing is playing.
   useEffect(() => {
-    const el = mediaRef.current;
-    if (el === attachedElRef.current) return;
-    detachRef.current();
-    attachedElRef.current = el;
-    if (!el) {
-      detachRef.current = () => {};
+    if (!media) {
+      setPlaying(false);
       return;
     }
-    const onTimeUpdate = () => setLocalTime(el.currentTime);
+    const onTimeUpdate = () => setLocalTime(media.currentTime);
     const onPlay = () => setPlaying(true);
     const onPause = () => setPlaying(false);
-    const onEnded = () => setPlaying(false);
-    el.addEventListener("timeupdate", onTimeUpdate);
-    el.addEventListener("play", onPlay);
-    el.addEventListener("pause", onPause);
-    el.addEventListener("ended", onEnded);
-    setLocalTime(el.currentTime);
-    setPlaying(!el.paused);
-    detachRef.current = () => {
-      el.removeEventListener("timeupdate", onTimeUpdate);
-      el.removeEventListener("play", onPlay);
-      el.removeEventListener("pause", onPause);
-      el.removeEventListener("ended", onEnded);
+    media.addEventListener("timeupdate", onTimeUpdate);
+    media.addEventListener("play", onPlay);
+    media.addEventListener("pause", onPause);
+    media.addEventListener("ended", onPause);
+    setLocalTime(media.currentTime);
+    setPlaying(!media.paused);
+    return () => {
+      media.removeEventListener("timeupdate", onTimeUpdate);
+      media.removeEventListener("play", onPlay);
+      media.removeEventListener("pause", onPause);
+      media.removeEventListener("ended", onPause);
     };
-  });
-  // StrictMode (main.tsx wraps <App> in it) double-invokes effects on
-  // mount: run every effect, run every cleanup, run every effect again.
-  // The cleanup below must drop attachedElRef back to null, not just
-  // detach -- otherwise the replayed effect above sees `el ===
-  // attachedElRef.current` (still the same element, never reset) and
-  // bails out, leaving the listeners detached for good. A real unmount
-  // doesn't care either way, since nothing reads these refs again.
-  useEffect(
-    () => () => {
-      detachRef.current();
-      detachRef.current = () => {};
-      attachedElRef.current = null;
-    },
-    [],
-  );
+  }, [media]);
 
   // timeupdate is browser-throttled to a few Hz; rAF gives the playhead
   // ~60 Hz while playing so it doesn't stutter against the static waveform.
@@ -208,26 +175,24 @@ export function BeepTimeline({
     if (!playing) return;
     let raf: number;
     const tick = () => {
-      const el = mediaRef.current;
-      if (el) setLocalTime(el.currentTime);
+      if (media) setLocalTime(media.currentTime);
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [playing, mediaRef]);
+  }, [playing, media]);
 
   const offset = videoBeepTime != null && peaks?.beep_time != null ? videoBeepTime - peaks.beep_time : 0;
 
   // Space -> play/pause the preview, the same window-level hook every
-  // other Splitsmith media surface wires (BeepSection's old picker
-  // included). Gated on peaks being loaded, same as the old picker, so
+  // other Splitsmith media surface wires (BeepWaveformPicker
+  // included). Gated on peaks being loaded, same as that picker, so
   // Space falls through to the browser default while this is still
   // loading or failed.
   useSpacePlayPause(() => {
-    const el = mediaRef.current;
-    if (!el) return;
-    if (el.paused) void el.play().catch(() => {});
-    else el.pause();
+    if (!media) return;
+    if (media.paused) void media.play().catch(() => {});
+    else media.pause();
   }, peaks != null);
 
   // Source seconds never go negative (BeepWaveformPicker's rule): an
@@ -240,10 +205,9 @@ export function BeepTimeline({
     (t: number) => {
       lastScrubRef.current = t;
       setLocalTime(t);
-      const el = mediaRef.current;
-      if (el) el.currentTime = t;
+      if (media) media.currentTime = t;
     },
-    [mediaRef],
+    [media],
   );
 
   const handleScrubEnd = useCallback(() => {
@@ -291,8 +255,7 @@ export function BeepTimeline({
                 onClick={() => {
                   // Seek the preview too, so the operator sees the frame
                   // the candidate sits on, not just its row in the list.
-                  const el = mediaRef.current;
-                  if (el) el.currentTime = local;
+                  if (media) media.currentTime = local;
                   setLocalTime(local);
                   pick(c.time);
                 }}
