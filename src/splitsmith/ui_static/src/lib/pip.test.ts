@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   containedFrame,
+  cornerByArrow,
   cyclePip,
+  insetPlan,
+  PIP_END_GUARD_S,
+  servedClipBeep,
   DEFAULT_PIP_CORNER,
   initialPip,
   insetBox,
@@ -119,6 +123,11 @@ describe("normalizePip", () => {
     expect(normalizePip({ big: "c9", inset: "c2" }, cams(2))).toEqual({ big: "c1", inset: "c2" });
   });
 
+  it("drops the inset when the big camera lost its beep", () => {
+    const list = [cam(1, { beepInClip: null }), cam(2)];
+    expect(normalizePip({ big: "c1", inset: "c2" }, list)).toEqual({ big: "c1", inset: null });
+  });
+
   it("refills the inset when its camera went away or a camera gained its beep", () => {
     expect(normalizePip({ big: "c1", inset: "c4" }, cams(3))).toEqual({ big: "c1", inset: "c2" });
     expect(normalizePip({ big: "c1", inset: null }, cams(2))).toEqual({ big: "c1", inset: "c2" });
@@ -150,6 +159,19 @@ describe("pipKeyAction", () => {
     expect(pipKeyAction({ key: "c", ctrlKey: true })).toBeNull();
     expect(pipKeyAction({ key: "c", altKey: true })).toBeNull();
     expect(pipKeyAction({ key: "x" })).toBeNull();
+  });
+
+  it("ignores auto-repeat and typing in a field", () => {
+    expect(pipKeyAction({ key: "c", repeat: true })).toBeNull();
+    for (const tag of ["input", "textarea", "select"]) {
+      expect(pipKeyAction({ key: "c", target: document.createElement(tag) })).toBeNull();
+    }
+    const editable = document.createElement("div");
+    editable.contentEditable = "true";
+    // jsdom does not derive isContentEditable from the attribute.
+    Object.defineProperty(editable, "isContentEditable", { value: true });
+    expect(pipKeyAction({ key: "c", target: editable })).toBeNull();
+    expect(pipKeyAction({ key: "c", target: document.createElement("button") })).toBe(1);
   });
 });
 
@@ -233,25 +255,69 @@ describe("clocks", () => {
     expect(insetTime({ bigTime: 7, bigBeep: 3, insetBeep: 5 })).toBe(9);
   });
 
-  it("clamps to the inset clip's start and end", () => {
+  it("clamps to the inset clip's start, and to just before its end", () => {
     expect(insetTime({ bigTime: 1, bigBeep: 5, insetBeep: 2 })).toBe(0);
-    expect(insetTime({ bigTime: 40, bigBeep: 5, insetBeep: 5, insetDuration: 30 })).toBe(30);
+    expect(insetTime({ bigTime: 40, bigBeep: 5, insetBeep: 5, insetDuration: 30 })).toBeCloseTo(30 - PIP_END_GUARD_S);
     expect(insetTime({ bigTime: 40, bigBeep: 5, insetBeep: 5, insetDuration: NaN })).toBe(40);
   });
 
-  it("corrects drift past 0.2 s while playing, under a frame while paused", () => {
-    expect(shouldCorrectDrift({ target: 10, current: 10.15, paused: false })).toBe(false);
-    expect(shouldCorrectDrift({ target: 10, current: 10.25, paused: false })).toBe(true);
-    expect(shouldCorrectDrift({ target: 10, current: 9.75, paused: false })).toBe(true);
-    expect(shouldCorrectDrift({ target: 10, current: 10.01, paused: true })).toBe(false);
-    expect(shouldCorrectDrift({ target: 10, current: 10.05, paused: true })).toBe(true);
+  it("corrects drift past 0.2 s while playing, past 15 ms while held", () => {
+    expect(shouldCorrectDrift({ target: 10, current: 10.15, playing: true })).toBe(false);
+    expect(shouldCorrectDrift({ target: 10, current: 10.25, playing: true })).toBe(true);
+    expect(shouldCorrectDrift({ target: 10, current: 9.75, playing: true })).toBe(true);
+    expect(shouldCorrectDrift({ target: 10, current: 10.01, playing: false })).toBe(false);
+    expect(shouldCorrectDrift({ target: 10, current: 10.02, playing: false })).toBe(true);
+    expect(shouldCorrectDrift({ target: 10, current: 10.05, playing: false })).toBe(true);
+  });
+});
+
+describe("insetPlan", () => {
+  const base = { bigBeep: 0, insetBeep: 0, insetDuration: 4, bigPaused: false };
+
+  it("plays in range while the big plays", () => {
+    expect(insetPlan({ ...base, bigTime: 2 })).toEqual({ target: 2, inRange: true, play: true });
+  });
+
+  it("holds paused at the start while the big is before the inset clip", () => {
+    expect(insetPlan({ ...base, bigBeep: 3, bigTime: 1 })).toEqual({ target: 0, inRange: false, play: false });
+  });
+
+  it("holds paused just before the end once the big passes the inset clip", () => {
+    const p = insetPlan({ ...base, bigTime: 5 });
+    expect(p.inRange).toBe(false);
+    expect(p.play).toBe(false);
+    expect(p.target).toBeCloseTo(4 - PIP_END_GUARD_S);
+    expect(insetPlan({ ...base, bigTime: 3.95 }).play).toBe(false);
+  });
+
+  it("holds while the big is paused or stalled", () => {
+    expect(insetPlan({ ...base, bigTime: 2, bigPaused: true }).play).toBe(false);
+    expect(insetPlan({ ...base, bigTime: 2, bigStalled: true }).play).toBe(false);
+  });
+
+  it("an unknown duration is open-ended", () => {
+    expect(insetPlan({ ...base, insetDuration: NaN, bigTime: 99 }).play).toBe(true);
+  });
+});
+
+describe("servedClipBeep", () => {
+  it("maps Audit's served-clip offset onto the audit beep", () => {
+    expect(servedClipBeep({ index: 0, offset: 0, auditBeep: 5, beepTime: 12 })).toBe(5);
+    expect(servedClipBeep({ index: 1, offset: -2, auditBeep: 5, beepTime: 3 })).toBe(3);
+  });
+
+  it("is unsyncable without the audit beep or a secondary's own beep", () => {
+    expect(servedClipBeep({ index: 0, offset: 0, auditBeep: null, beepTime: 12 })).toBeNull();
+    expect(servedClipBeep({ index: 1, offset: 0, auditBeep: 5, beepTime: null })).toBeNull();
   });
 });
 
 describe("insetStream", () => {
+  const none = new Set<never>();
+
   it("plays the rendition when there is one, whatever the full-resolution preference", () => {
     expect(insetStream({ trim_version: "t1", scrub_version: "w1" })).toEqual({ kind: "scrub", version: "w1" });
-    expect(insetStream({ kind: "trim", trim_version: "t1", scrub_version: "w1" })).toEqual({
+    expect(insetStream({ kind: "trim", trim_version: "t1", scrub_version: "w1" }, none)).toEqual({
       kind: "scrub",
       version: "w1",
     });
@@ -260,11 +326,40 @@ describe("insetStream", () => {
 
   it("falls back to the trim without a rendition or after it failed", () => {
     expect(insetStream({ trim_version: "t1", scrub_version: null })).toEqual({ kind: "trim", version: "t1" });
-    expect(insetStream({ trim_version: "t1", scrub_version: "w1" }, true)).toEqual({ kind: "trim", version: "t1" });
-    expect(insetStream({ kind: "web", trim_version: "t1" }, true)).toEqual({ kind: "trim", version: "t1" });
+    expect(insetStream({ trim_version: "t1", scrub_version: "w1" }, new Set(["scrub"]))).toEqual({
+      kind: "trim",
+      version: "t1",
+    });
+    expect(insetStream({ kind: "web", trim_version: "t1" }, new Set(["web"]))).toEqual({ kind: "trim", version: "t1" });
   });
 
-  it("keeps a source camera on the source: its beep anchor is in the source", () => {
+  it("keeps a source or proxy camera on that clip: its beep anchor is in it", () => {
     expect(insetStream({ kind: "source", scrub_version: "w1" })).toEqual({ kind: "source", version: null });
+    expect(insetStream({ kind: "proxy", trim_version: "t1", scrub_version: "w1" })).toEqual({
+      kind: "proxy",
+      version: null,
+    });
+  });
+
+  it("answers null once every kind failed, so the page can mark the camera unavailable", () => {
+    expect(insetStream({ kind: "proxy" }, new Set(["proxy"]))).toBeNull();
+    expect(insetStream({ kind: "source" }, new Set(["source"]))).toBeNull();
+    expect(insetStream({ scrub_version: "w1" }, new Set(["scrub", "trim"]))).toBeNull();
+    expect(insetStream({ kind: "web" }, new Set(["web", "trim"]))).toBeNull();
+  });
+});
+
+describe("cornerByArrow", () => {
+  it("moves to the arrow's side, keeping the other axis", () => {
+    expect(cornerByArrow("tr", "ArrowDown")).toBe("br");
+    expect(cornerByArrow("tr", "ArrowLeft")).toBe("tl");
+    expect(cornerByArrow("bl", "ArrowUp")).toBe("tl");
+    expect(cornerByArrow("bl", "ArrowRight")).toBe("br");
+  });
+
+  it("is null on the side it is already on, or for another key", () => {
+    expect(cornerByArrow("tr", "ArrowUp")).toBeNull();
+    expect(cornerByArrow("tr", "ArrowRight")).toBeNull();
+    expect(cornerByArrow("tr", "Enter")).toBeNull();
   });
 });

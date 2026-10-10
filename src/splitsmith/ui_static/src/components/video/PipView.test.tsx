@@ -263,6 +263,75 @@ describe("PipView", () => {
     expect(inset).toHaveAttribute("data-corner", "tr");
   });
 
+  it("arrow keys inside the inset move it to a corner and remember it", async () => {
+    const user = userEvent.setup();
+    render(<Harness cameras={TWO} />);
+    screen.getByRole("button", { name: "Swap with the big camera" }).focus();
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByTestId("pip-inset")).toHaveAttribute("data-corner", "br");
+    await user.keyboard("{ArrowLeft}");
+    expect(screen.getByTestId("pip-inset")).toHaveAttribute("data-corner", "bl");
+    expect(window.localStorage.getItem(PIP_CORNER_KEY)).toBe("bl");
+    expect(bigVideo().dataset.cam).toBe("c1");
+  });
+
+  it("a click on a control in the note is the control's, never a swap", () => {
+    const onPill = vi.fn();
+    const cams = [
+      cam(1, 5),
+      {
+        ...cam(2, 3),
+        note: (
+          <button type="button" onClick={onPill}>
+            Sync +0.12 s
+          </button>
+        ),
+      },
+    ];
+    render(<Harness cameras={cams} />);
+    fireEvent.click(screen.getByRole("button", { name: "Sync +0.12 s" }));
+    expect(onPill).toHaveBeenCalledTimes(1);
+    expect(bigVideo().dataset.cam).toBe("c1");
+  });
+
+  it("shows Unavailable, not a black box, when nothing is left to play", () => {
+    render(<Harness cameras={[cam(1, 5), { ...cam(2, 3), src: null, unavailable: true }]} />);
+    expect(screen.queryByTestId("pip-inset-video")).toBeNull();
+    expect(screen.getByTestId("pip-unavailable")).toHaveTextContent("Unavailable");
+    expect(screen.getByTestId("pip-inset")).toHaveTextContent("Cam 2");
+  });
+
+  it("reports a failed inset stream with the camera and the kind it was built from", () => {
+    const onInsetError = vi.fn();
+    function Errs() {
+      const pip = usePip({ cameras: TWO, stageKey: 1 });
+      const [big, setBig] = useState<HTMLVideoElement | null>(null);
+      return (
+        <div>
+          <video ref={setBig} />
+          <PipView pip={pip} bigVideo={big} insetKind="scrub" onInsetError={onInsetError} />
+        </div>
+      );
+    }
+    render(<Errs />);
+    fireEvent.error(insetVideo());
+    expect(onInsetError).toHaveBeenCalledWith(expect.objectContaining({ id: "c2" }), "scrub");
+  });
+
+  it("with no camera marked primary, the first is the primary and gets no audio note while big", () => {
+    const cams = [
+      { ...cam(1, 5), primary: false },
+      { ...cam(2, 3), primary: false },
+    ];
+    render(<Harness cameras={cams} />);
+    const label = screen.getByTestId("pip-big-label");
+    expect(label).toHaveTextContent(/Cam 1.*Primary/);
+    expect(label).not.toHaveTextContent("Audio + beep");
+    fireEvent.click(screen.getByRole("button", { name: "Swap with the big camera" }));
+    expect(screen.getByTestId("pip-big-label")).toHaveTextContent("Audio + beep: Cam 1");
+    expect(screen.getByTestId("pip-inset")).toHaveTextContent("Primary");
+  });
+
   it("has no inset with one camera", () => {
     render(<Harness cameras={[cam(1, 5)]} />);
     expect(screen.queryByTestId("pip-inset")).toBeNull();
@@ -280,6 +349,19 @@ describe("usePip", () => {
     rerender({ stage: 2 });
     expect(result.current.state).toEqual({ big: "c1", inset: "c2" });
     expect(onBigChange.mock.calls.map((c) => c[0]?.id)).toEqual(["c2", "c1"]);
+  });
+
+  it("does not report a big camera when the cameras first arrive", () => {
+    const onBigChange = vi.fn();
+    const { result, rerender } = renderHook(
+      ({ cameras }: { cameras: PipCamera[] }) => usePip({ cameras, stageKey: 1, onBigChange }),
+      { initialProps: { cameras: [] as PipCamera[] } },
+    );
+    rerender({ cameras: TWO });
+    expect(result.current.big?.id).toBe("c1");
+    expect(onBigChange).not.toHaveBeenCalled();
+    act(() => result.current.swap());
+    expect(onBigChange).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the swap while the stage stays", () => {

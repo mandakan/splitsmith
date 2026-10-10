@@ -25,7 +25,9 @@ export interface PipController {
   inset: PipCamera | null;
   /** "2 / 3" with three or more syncable cameras, else ``null``. */
   counter: { n: number; total: number } | null;
-  /** The primary camera (audio and beep source), wherever it sits. */
+  /** The primary camera (audio and beep source), wherever it sits: the
+   *  one marked ``primary``, else the first. Compare by id, never by the
+   *  camera's own ``primary`` flag. */
   primary: PipCamera | null;
   swap: () => void;
   /** C (+1) / Shift+C (-1). */
@@ -75,7 +77,11 @@ export function usePip(args: {
   }, [onBigChange]);
   useEffect(() => {
     if (lastBig.current === state.big) return;
+    const before = lastBig.current;
     lastBig.current = state.big;
+    // Cameras arriving (from none) is the page's first big camera, not a
+    // change; the page already shows the primary.
+    if (!before) return;
     report.current?.(cameras.find((c) => c.id === state.big) ?? null);
   }, [state.big, cameras]);
 

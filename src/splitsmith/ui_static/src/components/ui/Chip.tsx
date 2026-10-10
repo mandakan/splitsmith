@@ -21,8 +21,13 @@ const chip = cva(
         warn: "border-live/45 text-live",
         ok: "border-done/45 text-done",
       },
+      size: {
+        default: "",
+        // Laid over video (the PiP inset): 10 px on a dark scrim.
+        overlay: "gap-1 bg-black/75 px-1.5 py-0 text-[10px] leading-[1.5]",
+      },
     },
-    defaultVariants: { tone: "neutral" },
+    defaultVariants: { tone: "neutral", size: "default" },
   },
 );
 
@@ -34,9 +39,9 @@ export interface ChipProps
   tick?: ChipTick;
 }
 
-export function Chip({ tick, tone, className, children, ...props }: ChipProps) {
+export function Chip({ tick, tone, size, className, children, ...props }: ChipProps) {
   return (
-    <span className={cn(chip({ tone }), className)} {...props}>
+    <span className={cn(chip({ tone, size }), className)} {...props}>
       {tick ? (
         <i data-tick aria-hidden className={cn("size-1.5 shrink-0 rounded-full", TICK[tick])} />
       ) : null}

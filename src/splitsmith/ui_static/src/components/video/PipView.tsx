@@ -1,54 +1,80 @@
 /**
  * PipView -- a stage's other camera as a picture-in-picture inset over the
- * big player (epic #1405, issue #1406). Rules: lib/pip.ts. State:
- * lib/usePip.ts. Corner: lib/pipPrefs.ts.
+ * big player (epic #1405, issue #1406). Rules: lib/pip.ts. Clock:
+ * lib/pipSync.ts. State: lib/usePip.ts. Corner: lib/pipPrefs.ts.
  *
- * Usage. The page keeps its own big player and its own key handler:
+ * Usage. The page keeps its own big player, its own key handler, and the
+ * map from a camera to its video dict and its failed stream kinds:
  *
- *   const cameras: PipCamera[] = videos.map((v, i) => ({
- *     id: v.path, label: `Cam ${i + 1}`, primary: i === 0,
- *     beepInClip: v.beep_in_clip,
- *     src: (() => { const s = insetStream(v, failed(v)); return api.videoStreamUrl(slug, v.path, s.kind, s.version, stage); })(),
- *   }));
+ *   // Audit: each video's served clip comes from camPlayback.planServedClip
+ *   const cameras: PipCamera[] = videos.map((v, i) => {
+ *     const plan = planServedClip({ index: i, ... });
+ *     const s = insetStream({ kind: plan.kind, trim_version: v.trim_version,
+ *                             scrub_version: v.scrub_version }, failed[v.video_id]);
+ *     return {
+ *       id: v.video_id, label: `Cam ${i + 1}`, primary: i === 0,
+ *       beepInClip: servedClipBeep({ index: i, offset: plan.offset,
+ *                                    auditBeep: peaks.beep_time, beepTime: v.beep_time }),
+ *       src: s && api.videoStreamUrl(slug, v.path, s.kind, s.version, stage),
+ *       unavailable: s === null,
+ *     };
+ *   });
+ *   // Splits / Coach: CoachVideoEntry carries beep_in_clip and its kind:
+ *   //   beepInClip: e.beep_in_clip, insetStream(e, failed[e.path]) ...
  *   const pip = usePip({ cameras, stageKey: `${slug}/${stage}` });
  *   const [bigEl, setBigEl] = useState<HTMLVideoElement | null>(null);
- *   // big player: src from pip.big, ref={setBigEl} (a callback ref, so a
- *   // remounted <video> re-binds the sync)
  *   <div className="relative">            // the big player's host
  *     <video ref={setBigEl} className="object-contain ..." src={srcFor(pip.big)} />
- *     <PipView pip={pip} bigVideo={bigEl} topInset={26} />
+ *     <PipView pip={pip} bigVideo={bigEl} topInset={26}
+ *              onInsetError={(cam, kind) => addFailed(cam.id, kind)} />
  *   </div>
- *   // key handler: const dir = pipKeyAction(e); if (dir) pip.cycle(dir);
+ *   // key handler: const dir = pipKeyAction(e); if (dir) { e.preventDefault(); pip.cycle(dir); }
+ *
+ * ``onInsetError(camera, kind)`` names the camera and the stream kind
+ * that failed; the page adds the kind to that camera's failed set (and,
+ * for ``scrub``, may call ``useScrubSource().markFailed(video)`` so the big
+ * player skips the rendition too) and hands the next ``insetStream``. When
+ * nothing is left the camera is ``unavailable`` and the inset says so.
  *
  * The host must be ``position: relative`` and hold the big ``<video>``;
  * PipView fills it (``absolute inset-0``, transparent to the pointer
  * outside the inset) and lays the inset and the big camera's label over
- * the video's rendered frame, letterboxing included. The inset is muted,
- * follows the big video's seeks, play / pause and rate through the beep
- * offsets, and corrects drift on ``timeupdate`` past a threshold, never
- * per frame. Audio stays the big player's business: the page plays the
- * primary's audio whichever camera is big.
+ * the video's rendered frame, letterboxing included. The corner moves by
+ * drag (snapped, remembered per browser) or by the arrow keys while focus
+ * is in the inset. Audio stays the big player's business: the page plays
+ * the primary's audio whichever camera is big.
  */
 import { ArrowRightLeft, ChevronRight, Volume1 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
+import { Chip } from "@/components/ui/Chip";
+import { IconButton } from "@/components/ui/IconButton";
 import { Label } from "@/components/ui/Label";
 import {
   containedFrame,
+  cornerByArrow,
   insetBox,
   insetSize,
-  insetTime,
-  shouldCorrectDrift,
   snapCorner,
   type Box,
+  type InsetStreamKind,
   type PipCamera,
 } from "@/lib/pip";
 import { usePipCorner } from "@/lib/pipPrefs";
+import { attachInsetSync } from "@/lib/pipSync";
 import type { PipController } from "@/lib/usePip";
 import { cn } from "@/lib/utils";
 
 /** A press that moves less than this is a click (swap), not a drag. */
 const DRAG_SLOP_PX = 4;
+/** A click on one of these inside the inset is its own, never a swap. */
+const INTERACTIVE = "button, a, input, select, textarea, [role=button]";
+
+/** Did the event start on a control inside ``host`` (not one around it)? */
+function onControl(e: { target: EventTarget; currentTarget: Element }): boolean {
+  const hit = e.target instanceof Element ? e.target.closest(INTERACTIVE) : null;
+  return hit != null && e.currentTarget.contains(hit);
+}
 
 export interface PipViewProps {
   pip: PipController;
@@ -62,9 +88,13 @@ export interface PipViewProps {
   /** Draw the big camera's label chips (top left of the frame). Off when
    *  the page labels its player itself. */
   bigLabel?: boolean;
-  /** The inset's stream failed: the page marks the rendition failed and
-   *  hands a new ``src`` (``insetStream(video, true)``). */
-  onInsetError?: (camera: PipCamera) => void;
+  /** The inset's stream failed. ``kind`` is the stream kind the page
+   *  passed for it (``insetKind``), so the page can add it to the camera's
+   *  failed set and hand the next ``insetStream``. */
+  onInsetError?: (camera: PipCamera, kind: InsetStreamKind | null) => void;
+  /** The stream kind the inset camera's ``src`` was built from, echoed
+   *  back through ``onInsetError``. */
+  insetKind?: InsetStreamKind | null;
   className?: string;
 }
 
@@ -75,6 +105,7 @@ export function PipView({
   bottomInset = 0,
   bigLabel = true,
   onInsetError,
+  insetKind = null,
   className,
 }: PipViewProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -82,8 +113,14 @@ export function PipView({
   const [corner, setCorner] = usePipCorner();
   const [insetEl, setInsetEl] = useState<HTMLVideoElement | null>(null);
   const { big, inset, primary, counter } = pip;
+  const isPrimary = (c: PipCamera) => primary != null && c.id === primary.id;
 
-  useInsetSync(bigVideo, insetEl, big?.beepInClip ?? null, inset?.beepInClip ?? null);
+  const bigBeep = big?.beepInClip ?? null;
+  const insetBeep = inset?.beepInClip ?? null;
+  useEffect(() => {
+    if (!bigVideo || !insetEl || bigBeep == null || insetBeep == null) return;
+    return attachInsetSync(bigVideo, insetEl, { bigBeep, insetBeep });
+  }, [bigVideo, insetEl, bigBeep, insetBeep]);
 
   // Drag to a corner. ``drag`` is the live offset; ``press`` the pointer
   // that started it; ``dragged`` swallows the click that ends a drag.
@@ -95,7 +132,7 @@ export function PipView({
   const chips = frame ? insetSize(frame.width).chips : false;
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0 || (e.target as HTMLElement).closest("button")) return;
+    if (e.button !== 0 || onControl(e)) return;
     press.current = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: false };
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
@@ -125,15 +162,26 @@ export function PipView({
       setCorner(snapCorner(frame, cx, cy));
     }
   };
-  const onClick = () => {
+  const onClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (dragged.current) {
       dragged.current = false;
       return;
     }
+    // The swap and next buttons handle themselves; a page's control in
+    // the note (Audit's sync pill) is its own.
+    if (onControl(e)) return;
     pip.swap();
   };
+  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const next = cornerByArrow(corner, e.key);
+    if (!next) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setCorner(next);
+  };
 
-  const primaryLabel = primary?.label ?? "Cam 1";
+  const unavailable = inset != null && (inset.unavailable === true || (!inset.src && !inset.poster));
+  const note = inset?.note;
 
   return (
     <div ref={rootRef} data-testid="pip-view" className={cn("pointer-events-none absolute inset-0", className)}>
@@ -143,12 +191,12 @@ export function PipView({
           className="absolute z-[4] flex items-center gap-1.5"
           style={{ left: frame.left + PIP_LABEL_X, top: frame.top + PIP_LABEL_Y }}
         >
-          <CamChips camera={big} />
-          {!big.primary ? (
-            <VideoChip>
+          <CamChips camera={big} primary={isPrimary(big)} />
+          {primary && !isPrimary(big) ? (
+            <Chip size="overlay">
               <Volume1 aria-hidden className="size-2.5 shrink-0" strokeWidth={2.4} />
-              <span className="text-xs text-ink-2">Audio + beep: {primaryLabel}</span>
-            </VideoChip>
+              Audio + beep: {primary.label}
+            </Chip>
           ) : null}
         </div>
       ) : null}
@@ -159,12 +207,13 @@ export function PipView({
           aria-label={`Inset camera: ${inset.label}`}
           data-testid="pip-inset"
           data-corner={corner}
-          title="Click to swap, drag to another corner"
+          title="Click to swap; drag, or arrow keys, to move"
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={(e) => endPress(e, true)}
           onPointerCancel={(e) => endPress(e, false)}
           onClick={onClick}
+          onKeyDown={onKeyDown}
           className={cn(
             "pointer-events-auto absolute z-[5] cursor-pointer touch-none select-none overflow-hidden rounded-lg border border-rule-strong bg-black",
             drag ? "cursor-grabbing" : null,
@@ -178,7 +227,14 @@ export function PipView({
             boxShadow: "0 0 0 1px rgba(0,0,0,0.55), 0 10px 24px -10px rgba(0,0,0,0.85)",
           }}
         >
-          {inset.src || inset.poster ? (
+          {unavailable ? (
+            <div
+              data-testid="pip-unavailable"
+              className="pointer-events-none absolute inset-0 flex items-center justify-center bg-surface-2"
+            >
+              <Label tone="muted">Unavailable</Label>
+            </div>
+          ) : (
             <video
               key={`${inset.id}\n${inset.src ?? ""}`}
               ref={setInsetEl}
@@ -191,10 +247,10 @@ export function PipView({
               tabIndex={-1}
               aria-hidden
               draggable={false}
-              onError={() => onInsetError?.(inset)}
+              onError={() => onInsetError?.(inset, insetKind)}
               className="pointer-events-none block h-full w-full object-cover"
             />
-          ) : null}
+          )}
           <div
             aria-hidden
             className="pointer-events-none absolute inset-0"
@@ -203,52 +259,58 @@ export function PipView({
                 "linear-gradient(180deg, rgba(0,0,0,0.55), transparent 38%, transparent 62%, rgba(0,0,0,0.55))",
             }}
           />
-          {chips ? (
+          {chips || unavailable ? (
             // Clear of the buttons on the right (one 22 px button, or two
             // with the counter), so a long name truncates instead.
             <div
               className="pointer-events-none absolute left-1.5 top-1.5 flex min-w-0 items-center gap-1"
               style={{ right: counter ? 60 : 34 }}
             >
-              <CamChips camera={inset} />
+              <CamChips camera={inset} primary={isPrimary(inset)} />
             </div>
           ) : null}
           <div className="absolute right-1.5 top-1 flex gap-1">
             {counter ? (
-              <InsetButton
+              <IconButton
+                variant="overlay"
+                size="xs"
                 label="Next camera (C)"
                 onClick={(e) => {
                   e.stopPropagation();
                   pip.cycle(1);
                 }}
               >
-                <ChevronRight aria-hidden className="size-3" strokeWidth={2.4} />
-              </InsetButton>
+                <ChevronRight aria-hidden strokeWidth={2.4} />
+              </IconButton>
             ) : null}
-            <InsetButton
+            <IconButton
+              variant="overlay"
+              size="xs"
               label="Swap with the big camera"
               onClick={(e) => {
                 e.stopPropagation();
                 pip.swap();
               }}
             >
-              <ArrowRightLeft aria-hidden className="size-3" strokeWidth={2.2} />
-            </InsetButton>
+              <ArrowRightLeft aria-hidden strokeWidth={2.2} />
+            </IconButton>
           </div>
-          {chips && (inset.note || counter) ? (
+          {chips && (note || counter) ? (
             <div className="pointer-events-none absolute bottom-1.5 left-1.5 right-1.5 flex items-center gap-1">
-              {inset.note ? (
-                <VideoChip className="min-w-0 shrink" title={inset.note}>
-                  <span className="truncate text-xs text-ink-2">{inset.note}</span>
-                </VideoChip>
+              {typeof note === "string" ? (
+                <Chip size="overlay" className="min-w-0 shrink" title={note}>
+                  <span className="truncate">{note}</span>
+                </Chip>
+              ) : note ? (
+                <div data-testid="pip-note" className="pointer-events-auto min-w-0 shrink">
+                  {note}
+                </div>
               ) : null}
               <span className="flex-1" />
               {counter ? (
-                <VideoChip data-testid="pip-counter" className="shrink-0">
-                  <span className="numeral text-xs text-ink-2">
-                    {counter.n} / {counter.total}
-                  </span>
-                </VideoChip>
+                <Chip size="overlay" data-testid="pip-counter" className="numeral shrink-0">
+                  {counter.n} / {counter.total}
+                </Chip>
               ) : null}
             </div>
           ) : null}
@@ -263,70 +325,27 @@ const PIP_LABEL_Y = 8;
 
 /** The camera's name chip (speaker glyph on the primary) and, on the
  *  primary, a PRIMARY chip: the marking travels with the primary. */
-function CamChips({ camera }: { camera: PipCamera }) {
+function CamChips({ camera, primary }: { camera: PipCamera; primary: boolean }) {
   return (
     <>
-      <VideoChip className="min-w-0 shrink" title={camera.label}>
-        {camera.primary ? (
-          <Volume1 aria-label="Audio and beep source" className="size-2.5 shrink-0" strokeWidth={2.4} />
-        ) : null}
-        <Label tone="ink" className="truncate text-xs">
-          {camera.label}
-        </Label>
-      </VideoChip>
-      {camera.primary ? (
-        <VideoChip className="shrink-0">
-          <Label tone="ink" className="text-xs">
-            Primary
-          </Label>
-        </VideoChip>
+      <Chip size="overlay" className="min-w-0 shrink" title={camera.label}>
+        {primary ? <Volume1 aria-label="Audio and beep source" className="size-2.5 shrink-0" strokeWidth={2.4} /> : null}
+        <CamName>{camera.label}</CamName>
+      </Chip>
+      {primary ? (
+        <Chip size="overlay" className="shrink-0">
+          <CamName>Primary</CamName>
+        </Chip>
       ) : null}
     </>
   );
 }
 
-function VideoChip({
-  children,
-  className,
-  ...rest
-}: {
-  children: ReactNode;
-  className?: string;
-  title?: string;
-  "data-testid"?: string;
-}) {
+function CamName({ children }: { children: ReactNode }) {
   return (
-    <span
-      {...rest}
-      className={cn(
-        "inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-rule-strong bg-black/75 px-1.5 leading-[1.5] text-ink-2",
-        className,
-      )}
-    >
+    <Label tone="ink" className="truncate text-xs">
       {children}
-    </span>
-  );
-}
-
-function InsetButton({
-  label,
-  onClick,
-  children,
-}: {
-  label: string;
-  onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      onClick={onClick}
-      className="inline-flex size-[22px] items-center justify-center rounded-full border border-rule-strong bg-black/80 p-0 text-ink hover:border-ink-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-2"
-    >
-      {children}
-    </button>
+    </Label>
   );
 }
 
@@ -390,90 +409,4 @@ function useFrame(
   }, [measure, rootRef, video]);
 
   return frame;
-}
-
-/* -------------------------------------------------------------------------
- * Keeping the inset on the big video's clock
- * ----------------------------------------------------------------------- */
-
-function useInsetSync(
-  big: HTMLVideoElement | null,
-  inset: HTMLVideoElement | null,
-  bigBeep: number | null,
-  insetBeep: number | null,
-) {
-  useEffect(() => {
-    if (!big || !inset || bigBeep == null || insetBeep == null) return;
-    inset.muted = true;
-
-    const target = () =>
-      insetTime({
-        bigTime: big.currentTime,
-        bigBeep,
-        insetBeep,
-        insetDuration: Number.isFinite(inset.duration) ? inset.duration : null,
-      });
-    const seek = (force: boolean) => {
-      const t = target();
-      if (force || shouldCorrectDrift({ target: t, current: inset.currentTime, paused: big.paused })) {
-        try {
-          inset.currentTime = t;
-        } catch {
-          /* no metadata yet: loadedmetadata seeks again */
-        }
-      }
-    };
-    const play = () => {
-      if (!inset.paused) return;
-      const p = inset.play();
-      if (p && typeof p.catch === "function") p.catch(() => {});
-    };
-    const follow = () => {
-      if (inset.playbackRate !== big.playbackRate) inset.playbackRate = big.playbackRate;
-      if (big.paused) {
-        if (!inset.paused) inset.pause();
-      } else {
-        play();
-      }
-    };
-
-    const onPlay = () => {
-      seek(false);
-      follow();
-    };
-    const onPause = () => {
-      follow();
-      seek(true);
-    };
-    const onSeek = () => seek(true);
-    const onTime = () => {
-      seek(false);
-      follow();
-    };
-    const onRate = () => {
-      inset.playbackRate = big.playbackRate;
-    };
-    const onInsetReady = () => {
-      seek(true);
-      follow();
-    };
-
-    big.addEventListener("play", onPlay);
-    big.addEventListener("pause", onPause);
-    big.addEventListener("seeking", onSeek);
-    big.addEventListener("seeked", onSeek);
-    big.addEventListener("timeupdate", onTime);
-    big.addEventListener("ratechange", onRate);
-    inset.addEventListener("loadedmetadata", onInsetReady);
-    if (inset.readyState >= 1) onInsetReady();
-    return () => {
-      big.removeEventListener("play", onPlay);
-      big.removeEventListener("pause", onPause);
-      big.removeEventListener("seeking", onSeek);
-      big.removeEventListener("seeked", onSeek);
-      big.removeEventListener("timeupdate", onTime);
-      big.removeEventListener("ratechange", onRate);
-      inset.removeEventListener("loadedmetadata", onInsetReady);
-    };
-  }, [big, inset, bigBeep, insetBeep]);
 }

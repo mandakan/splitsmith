@@ -22,8 +22,15 @@ const iconButtonVariants = cva(
         subtle:
           "border-transparent bg-transparent text-muted hover:text-ink hover:bg-surface-3",
         led: "border-led/60 bg-surface-2 text-led hover:bg-[color:var(--color-led-tint)] hover:border-led",
+        // Over video (the PiP inset): round, a dark scrim for contrast on
+        // any frame, neutral focus ring (the inset spends no red).
+        overlay:
+          "rounded-full border-rule-strong bg-black/80 text-ink hover:border-ink-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ink-2",
       },
       size: {
+        // Compact, for controls laid over video only; never a page's
+        // standalone button (the 36 px minimum target still holds there).
+        xs: "size-[22px] p-0 [&_svg]:size-3",
         sm: "size-8 [&_svg]:size-3.5",
         md: "size-9 [&_svg]:size-4",
         lg: "size-11 [&_svg]:size-5",
