@@ -66,7 +66,7 @@ describe("MarkerLayer visibility filtering", () => {
   });
 });
 
-describe("MarkerLayer focus and precise placement", () => {
+describe("MarkerLayer focus and placement", () => {
   it("marks the focused marker without a red ring around the waveform", () => {
     const { container } = renderLayer({ focusedId: "d1" });
     const btn = container.querySelector('[data-audit-marker-id="d1"]')!;
@@ -74,9 +74,9 @@ describe("MarkerLayer focus and precise placement", () => {
     expect(btn.getAttribute("data-focused")).toBe("true");
   });
 
-  it("nudges by 1 ms in precise mode, 10 ms with Shift", () => {
+  it("nudges by 1 ms, 10 ms with Shift", () => {
     const onTimeChange = vi.fn();
-    const { container } = renderLayer({ precise: true, onTimeChange });
+    const { container } = renderLayer({ onTimeChange });
     const btn = container.querySelector('[data-audit-marker-id="d1"]')!;
     fireEvent.keyDown(btn, { key: "ArrowRight" });
     expect(onTimeChange.mock.lastCall?.[1]).toBeCloseTo(1.001, 6);
@@ -84,10 +84,13 @@ describe("MarkerLayer focus and precise placement", () => {
     expect(onTimeChange.mock.lastCall?.[1]).toBeCloseTo(0.99, 6);
   });
 
-  function dropAt(precise: boolean) {
+  /** Drag d1 to 3.012 s on a band ``widthPx`` wide over 10 s and drop it.
+   *  The audio has one shot whose rise starts at 3.000 s. */
+  function dropAt(widthPx: number, shiftKey = false) {
     const onTimeChangeCommit = vi.fn();
-    // A loud bin 10 ms after the drop point pulls a peak-snapped drop onto it.
-    const peaks = Array.from({ length: 10000 }, (_, i) => (i === 3014 ? 1 : 0.1));
+    const peaks = Array.from({ length: 10000 }, (_, i) =>
+      i < 3000 ? 0.01 : i < 3010 ? 0.01 + (i - 2999) * 0.099 : Math.max(0.01, Math.exp(-(i - 3010) / 15)),
+    );
     function Harness() {
       const [markers, setMarkers] = useState(MARKERS);
       return (
@@ -103,7 +106,6 @@ describe("MarkerLayer focus and precise placement", () => {
           }
           onTimeChangeCommit={onTimeChangeCommit}
           snapPeaks={{ peaks, duration: 10 }}
-          precise={precise}
         />
       );
     }
@@ -111,22 +113,27 @@ describe("MarkerLayer focus and precise placement", () => {
     const btn = container.querySelector('[data-audit-marker-id="d1"]') as HTMLElement;
     const parent = btn.parentElement as HTMLElement;
     parent.getBoundingClientRect = () =>
-      ({ left: 0, width: 1000, top: 0, height: 100 }) as DOMRect;
+      ({ left: 0, width: widthPx, top: 0, height: 100 }) as DOMRect;
     btn.setPointerCapture = vi.fn();
     btn.hasPointerCapture = () => true;
     btn.releasePointerCapture = vi.fn();
-    fireEvent.pointerDown(btn, { button: 0, pointerId: 1, clientX: 100, clientY: 5 });
-    // 300.4 px of 1000 over 10 s is 3.004 s.
-    fireEvent.pointerMove(btn, { pointerId: 1, clientX: 300.4, clientY: 5 });
-    fireEvent.pointerUp(btn, { pointerId: 1, clientX: 300.4, clientY: 5 });
+    const x = (3.012 / 10) * widthPx;
+    fireEvent.pointerDown(btn, { button: 0, pointerId: 1, clientX: widthPx / 10, clientY: 5 });
+    fireEvent.pointerMove(btn, { pointerId: 1, clientX: x, clientY: 5 });
+    fireEvent.pointerUp(btn, { pointerId: 1, clientX: x, clientY: 5, shiftKey });
     return onTimeChangeCommit.mock.lastCall?.[1] as number;
   }
 
-  it("drops exactly where released in precise mode, ignoring peak snap", () => {
-    expect(dropAt(true)).toBeCloseTo(3.004, 6);
+  it("snaps a drop to the shot's leading edge when zoomed out", () => {
+    // 1000 px over 10 s: 10 ms per pixel.
+    expect(dropAt(1000)).toBeCloseTo(3.0, 6);
   });
 
-  it("still peak-snaps a drop outside precise mode", () => {
-    expect(dropAt(false)).toBeCloseTo(3.0145, 6);
+  it("places a drop exactly when zoomed in to 2 ms per pixel or finer", () => {
+    expect(dropAt(10000)).toBeCloseTo(3.012, 6);
+  });
+
+  it("places a drop exactly with Shift at any zoom", () => {
+    expect(dropAt(1000, true)).toBeCloseTo(3.012, 6);
   });
 });

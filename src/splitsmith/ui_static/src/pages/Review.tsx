@@ -63,10 +63,13 @@ import {
 } from "@/lib/api";
 import { isTypingTextTarget, useBlurOnPointerClick } from "@/lib/audit-input";
 import { zoomActionForKey } from "@/lib/zoomKeys";
+import { placeTime, type SnapPeaks } from "@/lib/peak-snap";
 import { displayBins, reviewMaxZoom } from "@/lib/reviewZoom";
 import { useReleaseMediaOnUnmount } from "@/lib/utils";
 
 const PEAK_BINS = 1500;
+/** The fixture peaks route's cap: 1 ms bins on a clip up to ~131 s. */
+const FIXTURE_PEAKS_MAX_BINS = 131_072;
 const MAX_UNDO = 50;
 
 /** Region-loop window around the focused marker (#29): 0.5 s of pre-roll
@@ -278,6 +281,27 @@ export function Review() {
   const drawnPeaks =
     peaks && wantedBins > PEAK_BINS && displayPeaks ? displayPeaks.peaks : peaks?.peaks;
 
+  // 1 ms peaks once per fixture: a drop or a double-click while zoomed out
+  // snaps to the shot's leading edge from these (lib/peak-snap.placeTime).
+  const [edgePeaks, setEdgePeaks] = useState<SnapPeaks | null>(null);
+  useEffect(() => {
+    setEdgePeaks(null);
+    if (!peaks || !fixturePath) return;
+    let alive = true;
+    const bins = Math.min(FIXTURE_PEAKS_MAX_BINS, Math.max(PEAK_BINS, Math.ceil(peaks.duration / 0.001)));
+    api
+      .getFixturePeaks(fixturePath, bins)
+      .then((p) => {
+        if (alive) setEdgePeaks({ peaks: p.peaks, duration: p.duration });
+      })
+      .catch(() => {
+        // Without them every drop lands exactly; nothing else depends on them.
+      });
+    return () => {
+      alive = false;
+    };
+  }, [peaks, fixturePath]);
+
   // ---- Marker mutators (push prev state to undo stack) -------------------
 
   const recordEvent = useCallback((kind: string, payload: Record<string, unknown>) => {
@@ -351,10 +375,12 @@ export function Review() {
   }, []);
 
   const handleAddManual = useCallback(
-    (time: number) => {
-      // Exactly where the person clicked, on the 1 ms grid: ground truth is
-      // the onset, and a peak snap would move it later (precise placement).
-      const t = Math.round(time * 1000) / 1000;
+    (time: number, shiftKey = false) => {
+      // Zoomed out a new marker snaps to the shot's leading edge; zoomed in
+      // (2 ms per pixel or finer) or with Shift it lands exactly.
+      const pxPerSecond =
+        pixelsPerSecond ?? (peaks && peaks.duration > 0 ? waveformViewport / peaks.duration : 0);
+      const t = placeTime(time, { pxPerSecond, shiftKey, peaks: edgePeaks });
       const id = `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       recordEvent("marker_added_manual", { id, time: t });
       mutate([
@@ -371,7 +397,7 @@ export function Review() {
       ]);
       setFocusedMarkerId(id);
     },
-    [markers, mutate, recordEvent],
+    [markers, mutate, recordEvent, pixelsPerSecond, peaks, waveformViewport, edgePeaks],
   );
 
   const handleNoteChange = useCallback((id: string, note: string) => {
@@ -647,7 +673,7 @@ export function Review() {
         }
         if (!target) return;
         const dir = e.key === "ArrowRight" ? 1 : -1;
-        const step = e.shiftKey ? 0.001 : 0.0107;
+        const step = e.shiftKey ? 0.01 : 0.001;
         const dur = peaks?.duration ?? target.time + step;
         const next = Math.min(dur, Math.max(0, target.time + dir * step));
         handleMarkerTimeChange(target.id, next);
@@ -900,7 +926,7 @@ export function Review() {
                     onDelete={handleMarkerDelete}
                     onTimeChange={handleMarkerTimeChange}
                     visibleKinds={visibleKinds}
-                    precise
+                    snapPeaks={edgePeaks ?? undefined}
                   />
                 </Waveform>
               </div>

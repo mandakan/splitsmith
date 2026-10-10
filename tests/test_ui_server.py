@@ -5360,6 +5360,13 @@ def test_peaks_endpoint_rejects_extreme_bins(tmp_path: Path) -> None:
     assert client.get("/api/shooters/me/stages/1/peaks?bins=999999").status_code == 422
 
 
+def test_stage_peaks_reach_one_millisecond(tmp_path: Path) -> None:
+    """Audit snaps to the leading edge from 1 ms peaks: a 60 s stage asks
+    for 60 000 bins, past the old 8192 cap."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    assert client.get("/api/shooters/me/stages/1/peaks?bins=60000").status_code != 422
+
+
 def test_scan_videos_with_explicit_source_paths(tmp_path: Path) -> None:
     """source_paths picks specific files (USB-cam workflow). Only the listed
     files are registered, even if other videos sit in the same directory."""

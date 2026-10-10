@@ -34,6 +34,13 @@ describe("zoom", () => {
     expect(clampZoom(2)).toBe(2);
   });
 
+  it("takes a deeper cap where a page asks for one (Audit's 1 ms zoom)", () => {
+    expect(clampZoom(40, 140)).toBe(40);
+    expect(clampZoom(400, 140)).toBe(140);
+    expect(zoomStep(100, 1, 140)).toBe(140);
+    expect(applyWheelZoom(30, 2, 140)).toBe(60);
+  });
+
   it("steps 1.5x from Fit and back to Fit", () => {
     expect(zoomStep(null, 1)).toBe(1.5);
     expect(zoomStep(1.5, -1)).toBeNull();

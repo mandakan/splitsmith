@@ -13950,7 +13950,9 @@ def create_app(
     def stage_peaks(
         slug: str,
         stage_number: int,
-        bins: int = Query(default=1200, ge=16, le=8192),
+        # 1 ms bins on a clip up to ~131 s: Audit draws and snaps to a
+        # shot's leading edge from these.
+        bins: int = Query(default=1200, ge=16, le=131_072),
     ) -> JSONResponse:
         """Return ``bins`` peak magnitudes (0..1) for the stage's audit clip.
 

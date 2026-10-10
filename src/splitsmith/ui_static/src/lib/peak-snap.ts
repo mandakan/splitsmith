@@ -1,9 +1,12 @@
 /**
- * Nearest-local-peak snapping for marker drop / add gestures (#28).
+ * Where a dropped or added marker lands (#28, revised 2026-10-10).
  *
- * Pure function over a server-computed peaks array (see
- * splitsmith.waveform.compute_peaks). Kept side-effect-free so it is
- * unit-testable the day the SPA gains a test runner.
+ * A shot's time is its onset, the foot of the rise, which is also what the
+ * detector reports (``shot_detect``'s rise-foot refinement). Zoomed out, a
+ * drop snaps to that leading edge, since a pixel is too coarse to place it
+ * by hand; zoomed in to 2 ms per pixel or finer (or with Shift held), it
+ * lands exactly where it was dropped, on the 1 ms grid shot times are stored
+ * at. Pure functions over server-computed peaks (splitsmith.waveform).
  */
 
 export interface SnapPeaks {
@@ -11,21 +14,37 @@ export interface SnapPeaks {
   duration: number;
 }
 
-/** Default snap window, seconds. Transients the user aims at are a few
- *  ms wide; 25 ms of forgiveness covers cursor slop without jumping to
- *  the neighboring shot on a fast string (typical splits 150-400 ms). */
+/** Search window around the drop, seconds: cursor slop without reaching
+ *  the neighbouring shot on a fast string (splits are 150-400 ms). */
 export const PEAK_SNAP_TOLERANCE_S = 0.025;
 
-/** Minimum normalized amplitude for a bin to count as a peak. Below this
+/** At this many pixels per second (2 ms per pixel) or more, a drop is placed
+ *  exactly: the person can see the edge better than the snap can find it. */
+export const EXACT_PX_PER_SECOND = 500;
+
+/** Minimum normalized amplitude for a bin to count as a shot. Below this
  *  the window is treated as silence and the gesture keeps its raw time. */
 const MIN_PEAK_AMPLITUDE = 0.05;
+/** The detector's rise-foot fraction of the local peak. */
+const RISE_FOOT_FRAC = 0.05;
+/** The foot also sits above the noise: this many times its median level. */
+const NOISE_FLOOR_FACTOR = 1.5;
+/** A valley below this fraction of the peak, with the level rising again
+ *  behind it, is an earlier sound (an echo, the previous shot): stop there. */
+const VALLEY_FRAC = 0.25;
+const MAX_WALK_S = 0.1;
+const NOISE_WINDOW_S = 0.1;
 
-/** Returns the bin-center time of the strongest local peak within
- *  +/- toleranceS of `time`, or null when the window has no meaningful
- *  local maximum (silence, or the max sits on the window edge with the
- *  envelope still rising outside - that is the slope of a farther peak,
- *  not one the user aimed at). */
-export function snapToPeak(
+function median(values: number[]): number {
+  if (values.length === 0) return 0;
+  const s = [...values].sort((a, b) => a - b);
+  return s[Math.floor(s.length / 2)];
+}
+
+/** The leading edge of the shot nearest ``time``: the start of the first bin
+ *  of its rise. ``null`` when the window holds no shot (silence, or only the
+ *  slope of a farther one). */
+export function snapToLeadingEdge(
   time: number,
   snapPeaks: SnapPeaks,
   toleranceS: number = PEAK_SNAP_TOLERANCE_S,
@@ -42,8 +61,32 @@ export function snapToPeak(
   for (let i = lo + 1; i <= hi; i++) {
     if (peaks[i] > peaks[maxIdx]) maxIdx = i;
   }
-  if (peaks[maxIdx] < MIN_PEAK_AMPLITUDE) return null;
-  if (maxIdx === lo && lo > 0 && peaks[lo - 1] > peaks[lo]) return null;
+  const peak = peaks[maxIdx];
+  if (peak < MIN_PEAK_AMPLITUDE) return null;
   if (maxIdx === hi && hi < n - 1 && peaks[hi + 1] > peaks[hi]) return null;
-  return (maxIdx + 0.5) * binW;
+
+  const noiseFrom = Math.max(0, lo - Math.round(NOISE_WINDOW_S / binW));
+  const floor = median(peaks.slice(noiseFrom, lo));
+  const threshold = Math.max(RISE_FOOT_FRAC * peak, NOISE_FLOOR_FACTOR * floor);
+  const maxWalk = Math.round(MAX_WALK_S / binW);
+  let i = maxIdx;
+  while (i > 0 && maxIdx - i < maxWalk) {
+    const cur = peaks[i];
+    const prev = peaks[i - 1];
+    if (prev < threshold) break;
+    if (cur < VALLEY_FRAC * peak && prev > cur) break;
+    i--;
+  }
+  return i * binW;
+}
+
+/** Where a marker dropped or added at ``time`` lands. */
+export function placeTime(
+  time: number,
+  opts: { pxPerSecond: number; shiftKey: boolean; peaks: SnapPeaks | null | undefined },
+): number {
+  const exact = Math.round(time * 1000) / 1000;
+  if (opts.shiftKey || opts.pxPerSecond >= EXACT_PX_PER_SECOND || !opts.peaks) return exact;
+  const edge = snapToLeadingEdge(time, opts.peaks);
+  return edge == null ? exact : Math.round(edge * 1000) / 1000;
 }
