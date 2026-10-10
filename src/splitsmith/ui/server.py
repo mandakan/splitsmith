@@ -19011,66 +19011,17 @@ def create_app(
                 handle.check_cancel()
                 handle.update(progress=0.85, message="writing fixture...")
 
-                # Trim secondary WAV to a clip-local window around the beep,
-                # mirroring the convention used by primary fixtures (the
-                # /api/fixture/peaks endpoint marks fixture audio as
-                # ``trimmed=true``). Without this the audit screen renders
-                # the entire raw recording with shots clustered far down
-                # the timeline.
-                fixture_data = dict(result.fixture_data)
-                secondary_beep = float(fixture_data.get("beep_time") or 0.0)
-                shot_times = [
-                    float(s["time"]) for s in fixture_data.get("shots", []) if s.get("time") is not None
-                ]
-                trim_buffer = 5.0
-                trim_tail = 5.0
-                clip_start = max(0.0, secondary_beep - trim_buffer)
-                clip_end_floor = secondary_beep + trim_buffer
-                clip_end = max(shot_times) + trim_tail if shot_times else clip_end_floor
-                clip_end = max(clip_end, clip_end_floor)
-
-                fixtures_root.mkdir(parents=True, exist_ok=True)
-                target_wav = fixtures_root / f"{fixture_slug}.wav"
+                # Clip-local, like every primary fixture: without the trim
+                # the audit screen renders the entire raw recording.
                 handle.update(progress=0.88, message="trimming clip audio...")
-                _trim_wav_to_clip(secondary_wav_path, target_wav, clip_start, clip_end)
-
-                # Rebase time-axis fields to clip-local coordinates.
-                fixture_data["beep_time"] = round(secondary_beep - clip_start, 4)
-                fixture_data["fixture_window_in_source"] = [
-                    round(clip_start, 4),
-                    round(clip_end, 4),
-                ]
-                rebased_shots = []
-                for s in fixture_data.get("shots", []):
-                    s = dict(s)
-                    if s.get("time") is not None:
-                        s["time"] = round(float(s["time"]) - clip_start, 4)
-                    rebased_shots.append(s)
-                fixture_data["shots"] = rebased_shots
-                cands = (fixture_data.get("_candidates_pending_audit") or {}).get("candidates")
-                if cands:
-                    rebased_cands = []
-                    for c in cands:
-                        c = dict(c)
-                        if c.get("time") is not None:
-                            c["time"] = round(float(c["time"]) - clip_start, 4)
-                        rebased_cands.append(c)
-                    fixture_data["_candidates_pending_audit"] = {
-                        **fixture_data["_candidates_pending_audit"],
-                        "candidates": rebased_cands,
-                    }
-
-                tmp = target_json.with_suffix(".json.tmp")
-                tmp.write_text(
-                    __import__("json").dumps(fixture_data, indent=2, ensure_ascii=True) + "\n",
-                    encoding="utf-8",
-                )
-                tmp.replace(target_json)
-
-                report_path = fixtures_root / f"{fixture_slug}-promotion-report.json"
-                report_path.write_text(
-                    __import__("json").dumps(result.promotion_report, indent=2, ensure_ascii=True) + "\n",
-                    encoding="utf-8",
+                lab_module.write_promoted_fixture(
+                    fixture_data=result.fixture_data,
+                    promotion_report=result.promotion_report,
+                    secondary_wav=secondary_wav_path,
+                    fixtures_root=fixtures_root,
+                    slug=fixture_slug,
+                    trim_wav=_trim_wav_to_clip,
+                    overwrite=True,
                 )
 
                 handle.update(
@@ -19225,59 +19176,15 @@ def create_app(
                 handle.check_cancel()
                 handle.update(progress=0.85, message="writing fixture...")
 
-                fixture_data = dict(result.fixture_data)
-                secondary_beep = float(fixture_data.get("beep_time") or 0.0)
-                shot_times = [
-                    float(s["time"]) for s in fixture_data.get("shots", []) if s.get("time") is not None
-                ]
-                trim_buffer = 5.0
-                trim_tail = 5.0
-                clip_start = max(0.0, secondary_beep - trim_buffer)
-                clip_end_floor = secondary_beep + trim_buffer
-                clip_end = max(shot_times) + trim_tail if shot_times else clip_end_floor
-                clip_end = max(clip_end, clip_end_floor)
-
-                fixtures_root.mkdir(parents=True, exist_ok=True)
-                target_wav = fixtures_root / f"{slug}.wav"
                 handle.update(progress=0.88, message="trimming clip audio...")
-                _trim_wav_to_clip(secondary_wav_path, target_wav, clip_start, clip_end)
-
-                fixture_data["beep_time"] = round(secondary_beep - clip_start, 4)
-                fixture_data["fixture_window_in_source"] = [
-                    round(clip_start, 4),
-                    round(clip_end, 4),
-                ]
-                rebased_shots = []
-                for s in fixture_data.get("shots", []):
-                    s = dict(s)
-                    if s.get("time") is not None:
-                        s["time"] = round(float(s["time"]) - clip_start, 4)
-                    rebased_shots.append(s)
-                fixture_data["shots"] = rebased_shots
-                cands = (fixture_data.get("_candidates_pending_audit") or {}).get("candidates")
-                if cands:
-                    rebased_cands = []
-                    for c in cands:
-                        c = dict(c)
-                        if c.get("time") is not None:
-                            c["time"] = round(float(c["time"]) - clip_start, 4)
-                        rebased_cands.append(c)
-                    fixture_data["_candidates_pending_audit"] = {
-                        **fixture_data["_candidates_pending_audit"],
-                        "candidates": rebased_cands,
-                    }
-
-                tmp = target_json.with_suffix(".json.tmp")
-                tmp.write_text(
-                    json.dumps(fixture_data, indent=2, ensure_ascii=True) + "\n",
-                    encoding="utf-8",
-                )
-                tmp.replace(target_json)
-
-                report_path = fixtures_root / f"{slug}-promotion-report.json"
-                report_path.write_text(
-                    json.dumps(result.promotion_report, indent=2, ensure_ascii=True) + "\n",
-                    encoding="utf-8",
+                lab_module.write_promoted_fixture(
+                    fixture_data=result.fixture_data,
+                    promotion_report=result.promotion_report,
+                    secondary_wav=secondary_wav_path,
+                    fixtures_root=fixtures_root,
+                    slug=slug,
+                    trim_wav=_trim_wav_to_clip,
+                    overwrite=True,
                 )
 
                 handle.update(

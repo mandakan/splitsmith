@@ -86,14 +86,28 @@ only overall.
 
 - Real stereo AAC, variable frame rate. Secondary angle at Höstfinalen XI; no fixtures yet.
 
-## Fixture coverage (2026-10-09)
+## Fixture coverage (2026-10-10)
 
-| Camera | Fixtures | Matches |
-|---|---|---|
-| Insta360 GO 3S | 21 | Blacksmith 2026, Tallmilan 2026, Höstfinalen XI |
-| Meta Vanguard | 16 | Blacksmith Handgun Open 2026 (April firmware), Höstfinalen XI (September firmware) |
-| iPhone | about 105 | most matches |
-| DJI Osmo Action 4, Samsung | 0 | |
+Every secondary angle is now a fixture too, snapped from its stage's reviewed angle and marked
+`needs_review` until audited on its own audio (#1363, `scripts/promote_secondary_angles.py`).
+
+| Camera | Reviewed | Needs review | Matches |
+|---|---|---|---|
+| Insta360 GO 3S | 32 | 12 | Blacksmith 2026, Tallmilan 2026, Höstfinalen XI, Stockholm IPSC Open 2026, HFO Masters 2026 (snapped) |
+| Meta Vanguard | 16 | 0 | Blacksmith Handgun Open 2026 (April firmware), Höstfinalen XI (September firmware) |
+| DJI Osmo Action 4 | 0 | 8 | Höstfinalen XI (Martin; audited by ear on the handheld, placed on the DJI) |
+| iPhone | about 98 | about 40 | most matches |
+| Samsung | 0 | 11 | Höstfinalen XI, Stockholm IPSC Open 2026 |
+
+Samsung phones write no make or model tag; the probe recognises them by their
+`com.samsung.android.*` format tags (2026-10-10).
+
+**Two angles' marked beeps disagree.** Snapping one angle's shots onto another by the reviewed beeps
+alone missed by 50 to 200 ms on about a third of stage pairs (HFO Masters GO 3S against the handheld,
+Höstfinalen and Stockholm phones against the headcam), which is beyond the 60 ms snap window. The
+snap now first estimates the stage's constant lag from onset cross-correlation; the lag and the number
+of shots that still landed at the window edge are in each fixture's promotion report and history
+(2026-10-10).
 
 ## How these were measured
 

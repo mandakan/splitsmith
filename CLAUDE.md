@@ -119,6 +119,27 @@ the build script after adding new audited fixtures. Set
 at a different artifact set for A/B comparisons without rebuilding the
 shipped one (see ``splitsmith.runtime`` for the full env-var list).
 
+Fixtures carry a **review status** (#1363, ``fixture_schema.review_status``):
+one snapped from another angle (``anchor`` block, ``promote-from-anchor``
+history) is ``needs_review`` until its ``review`` block says ``reviewed``;
+everything else counts as hand-audited. ``scripts/promote_secondary_angles.py``
+snaps every secondary angle that has no fixture onto its stage's reviewed
+fixture (dry run by default, ``--write`` to promote; a snap of a snap is
+refused), so the corpus holds unreviewed footage on purpose: the build trains
+on it by default and ``--reviewed-only`` (``fixture_stems(reviewed_only=True)``)
+leaves it out. Compare both before trusting a number.
+
+New fixture audio is **not in git** (#1363): ``tests/fixtures/audio.lock.json``
+maps each such WAV to its sha256, the bytes live content-addressed in a
+public-read R2 bucket (``wav/<sha256>.wav``) and ``tests/fixtures/.gitignore``
+keeps the local copies out. ``uv run python scripts/fixture_audio.py fetch``
+before a build or a sweep (a missing WAV is a skipped fixture, silently);
+``push <stem>`` uploads a new or changed WAV to ``splitsmith-fixtures``
+(served at ``fixtures.splitsmith.app``) through ``wrangler r2 object put``,
+so it needs a ``wrangler login`` on the account that owns splitsmith.app, and
+records it. Never commit a fixture WAV
+again; no test needs the external ones (the suite was run without them).
+
 The review-time variant generator ``scripts/build_ensemble_fixture.py``
 still exists for offline comparison under ``build/ensemble-review/``.
 

@@ -251,6 +251,33 @@ class HistoryEntry(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Review status (#1363)
+# ---------------------------------------------------------------------------
+
+REVIEW_NEEDED = "needs_review"
+REVIEWED = "reviewed"
+
+
+def review_status(data: dict[str, Any]) -> str:
+    """Whether a person has checked this fixture's shots on its own audio.
+
+    The ``review`` block (``{"status", "derived_from", "reviewed_at"}``) says
+    so when present. A fixture without one was hand-audited unless it was
+    snapped from another angle (an ``anchor`` block or a
+    ``promote-from-anchor`` history entry): those need review until marked.
+    """
+    block = data.get("review")
+    if isinstance(block, dict) and block.get("status") in (REVIEW_NEEDED, REVIEWED):
+        return str(block["status"])
+    history = data.get("history") or []
+    if data.get("anchor") or any(
+        isinstance(h, dict) and h.get("action") == "promote-from-anchor" for h in history
+    ):
+        return REVIEW_NEEDED
+    return REVIEWED
+
+
+# ---------------------------------------------------------------------------
 # SHA utilities
 # ---------------------------------------------------------------------------
 
@@ -356,6 +383,8 @@ def probe_camera_metadata(
     model: str | None = (
         fmt_tags.get("com.apple.quicktime.model") or fmt_tags.get("model") or fmt_tags.get("Model")
     )
+    if not make and any(k.startswith("com.samsung.android") for k in fmt_tags):
+        make = "Samsung"  # Samsung writes no make or model tag, only its own keys
 
     sample_rate: int | None = None
     bit_depth: int | None = None

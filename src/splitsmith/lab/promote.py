@@ -26,7 +26,10 @@ Design decisions from issue #97 / #123:
 
 from __future__ import annotations
 
+import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -34,6 +37,7 @@ import numpy as np
 from ..cross_align import CrossAlignResult, align_secondary_to_primary
 from ..ensemble.api import EnsembleResult, detect_shots_ensemble, load_ensemble_runtime
 from ..fixture_schema import (
+    REVIEW_NEEDED,
     AnchorLink,
     Camera,
     HistoryEntry,
@@ -46,12 +50,20 @@ from .core import (
     event_id_from_payload,
     match_stage_from_slug,
 )
-from .snap_window import SnapResult, guided_snap_anchor_shots, snap_anchor_shots
+from .snap_window import (
+    SnapResult,
+    estimate_onset_lag,
+    guided_snap_anchor_shots,
+    snap_anchor_shots,
+)
 
 _TOOL_VERSION = "0.1.0"
 _ALIGN_CONFIDENCE_WARN = 1.5
 _DEFAULT_SNAP_WINDOW_MS = 60.0
 _DEFAULT_MIN_SPACING_MS = 80.0
+# Peak over the best correlation more than 20 ms away; below this the onset
+# lag is a guess and the snap stays around the marked beeps.
+_LAG_MIN_CONTRAST = 1.15
 
 
 # ---------------------------------------------------------------------------
@@ -188,11 +200,32 @@ def promote_from_anchor(
     #    - Untrusted-prior (cross-correlation fallback): threshold-based
     #      snap against voter A. Without a known beep we can't trust
     #      the offset enough to drop the detector threshold.
+    onset_lag_s, onset_lag_contrast, lag_applied = 0.0, None, False
     if req.secondary_beep_time is not None:
+        # The two angles' marked beeps can disagree by more than the snap
+        # window (#1363); shift the prior by the stage's onset lag first.
+        if anchor_shot_times:
+            onset_lag_s, onset_lag_contrast = estimate_onset_lag(
+                anchor_audio=req.primary_audio,
+                anchor_sr=req.primary_sr,
+                anchor_beep_time=anchor_beep,
+                secondary_audio=req.secondary_audio,
+                secondary_sr=req.secondary_sr,
+                secondary_beep_time=secondary_beep_time,
+                span_s=max(anchor_shot_times) - anchor_beep + 0.5,
+            )
+            lag_applied = onset_lag_contrast >= _LAG_MIN_CONTRAST
+            if not lag_applied:
+                warnings.append(
+                    f"no clear onset lag (contrast {onset_lag_contrast:.2f}); "
+                    "snapping around the marked beeps"
+                )
+                onset_lag_s = 0.0
+        prior_beep = secondary_beep_time + onset_lag_s
         first_pass = guided_snap_anchor_shots(
             anchor_beep_time=anchor_beep,
             anchor_shots=anchor_shot_times,
-            secondary_beep_time=secondary_beep_time,
+            secondary_beep_time=prior_beep,
             secondary_audio=req.secondary_audio,
             secondary_sr=req.secondary_sr,
             window_ms=max(150.0, req.snap_window_ms * 2.5),
@@ -207,7 +240,7 @@ def promote_from_anchor(
         snaps = guided_snap_anchor_shots(
             anchor_beep_time=anchor_beep,
             anchor_shots=anchor_shot_times,
-            secondary_beep_time=secondary_beep_time,
+            secondary_beep_time=prior_beep,
             secondary_audio=req.secondary_audio,
             secondary_sr=req.secondary_sr,
             window_ms=req.snap_window_ms,
@@ -251,6 +284,12 @@ def promote_from_anchor(
             "snapped": sum(1 for s in snaps if s.snapped_time is not None),
             "missed": sum(1 for s in snaps if s.sanity_flag == "no-candidate"),
             "sanity_flagged": sum(1 for s in snaps if s.sanity_flag not in ("", "no-candidate")),
+            "onset_lag_ms": round(onset_lag_s * 1000.0, 1),
+            "onset_lag_contrast": (
+                round(onset_lag_contrast, 3) if onset_lag_contrast not in (None, float("inf")) else None
+            ),
+            "onset_lag_applied": lag_applied,
+            "at_window_edge": _at_window_edge(snaps, req.snap_window_ms),
         },
     )
     fixture_data = _build_fixture(
@@ -279,6 +318,10 @@ def promote_from_anchor(
         total_candidates=len(ensemble_result.candidates),
         warnings=warnings,
     )
+    report["onset_lag"] = {
+        k: history_entry.details[k] for k in ("onset_lag_ms", "onset_lag_contrast", "onset_lag_applied")
+    }
+    report["counts"]["at_window_edge"] = history_entry.details["at_window_edge"]
 
     return PromoteFromAnchorResult(
         fixture_data=fixture_data,
@@ -292,9 +335,80 @@ def promote_from_anchor(
     )
 
 
+TrimWav = Callable[[Path, Path, float, float], None]
+_CLIP_HEAD_S = 5.0
+_CLIP_TAIL_S = 5.0
+
+
+def write_promoted_fixture(
+    *,
+    fixture_data: dict[str, Any],
+    promotion_report: dict[str, Any],
+    secondary_wav: Path,
+    fixtures_root: Path,
+    slug: str,
+    trim_wav: TrimWav,
+    source_video: str | None = None,
+    overwrite: bool = False,
+) -> Path:
+    """Cut the secondary's audio to the stage and write the fixture beside it.
+
+    The fixture is clip-local like every primary fixture: the WAV runs from
+    5 s before the beep to 5 s after the last shot, and every time field is
+    rebased onto it. Writes ``<slug>.json``, ``<slug>.wav`` and
+    ``<slug>-promotion-report.json``; returns the JSON path. ``trim_wav``
+    cuts ``[start, end)`` of ``secondary_wav`` (ffmpeg in practice).
+    """
+    target_json = fixtures_root / f"{slug}.json"
+    if target_json.exists() and not overwrite:
+        raise FileExistsError(f"fixture already exists: {target_json.name}")
+
+    data = dict(fixture_data)
+    beep = float(data.get("beep_time") or 0.0)
+    shot_times = [float(s["time"]) for s in data.get("shots", []) if s.get("time") is not None]
+    clip_start = max(0.0, beep - _CLIP_HEAD_S)
+    clip_end = max(max(shot_times) + _CLIP_TAIL_S if shot_times else 0.0, beep + _CLIP_HEAD_S)
+
+    fixtures_root.mkdir(parents=True, exist_ok=True)
+    trim_wav(secondary_wav, fixtures_root / f"{slug}.wav", clip_start, clip_end)
+
+    def rebase(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        out = []
+        for item in items:
+            item = dict(item)
+            if item.get("time") is not None:
+                item["time"] = round(float(item["time"]) - clip_start, 4)
+            out.append(item)
+        return out
+
+    data["beep_time"] = round(beep - clip_start, 4)
+    data["fixture_window_in_source"] = [round(clip_start, 4), round(clip_end, 4)]
+    data["shots"] = rebase(data.get("shots", []))
+    pending = data.get("_candidates_pending_audit") or {}
+    if pending.get("candidates"):
+        data["_candidates_pending_audit"] = {**pending, "candidates": rebase(pending["candidates"])}
+    if source_video is not None:
+        data["source_video"] = source_video
+
+    tmp = target_json.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+    tmp.replace(target_json)
+    (fixtures_root / f"{slug}-promotion-report.json").write_text(
+        json.dumps(promotion_report, indent=2, ensure_ascii=True) + "\n", encoding="utf-8"
+    )
+    return target_json
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _at_window_edge(snaps: list[SnapResult], window_ms: float) -> int:
+    """Snaps within 5 ms of the window's edge: the onset was likely outside it."""
+    return sum(
+        1 for s in snaps if s.displacement_ms is not None and abs(s.displacement_ms) >= window_ms - 5.0
+    )
 
 
 def _estimate_drift(snaps: list[SnapResult]) -> float | None:
@@ -364,13 +478,15 @@ def _build_fixture(
                 }
             )
         else:
-            # Include missed shots so the review UI can surface them.
+            # Include missed shots so the review UI can surface them, at the
+            # time the anchor predicts: the shot happened, and every truth
+            # consumer reads ``float(shot["time"])``. Review settles it.
             shots_out.append(
                 {
                     "shot_number": snap.shot_number,
                     "candidate_number": None,
-                    "time": None,
-                    "ms_after_beep": None,
+                    "time": round(snap.predicted_time, 4),
+                    "ms_after_beep": round((snap.predicted_time - secondary_beep_time) * 1000),
                     "source": "promoted-missed",
                     "subclass": anchor_shot.get("subclass", "unknown"),
                     "snap_displacement_ms": None,
@@ -402,6 +518,11 @@ def _build_fixture(
         "camera": camera.model_dump(mode="json"),
         "anchor": anchor_link.model_dump(mode="json"),
         "history": [history_entry.model_dump(mode="json")],
+        "review": {
+            "status": REVIEW_NEEDED,
+            "derived_from": anchor_link.fixture_slug,
+            "reviewed_at": None,
+        },
     }
 
 

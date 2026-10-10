@@ -250,7 +250,31 @@ def test_build_fixture_missed_shots_have_promoted_missed_source() -> None:
         ensemble_result=_make_minimal_ensemble_result(),
     )
     assert fixture["shots"][0]["source"] == "promoted-missed"
-    assert fixture["shots"][0]["time"] is None
+    # The predicted time stands in until review: every truth consumer reads
+    # ``float(shot["time"])``, and the shot did happen.
+    assert fixture["shots"][0]["time"] == 2.1
+    assert fixture["shots"][0]["ms_after_beep"] == 965
+
+
+def test_build_fixture_needs_review_and_names_its_anchor() -> None:
+    snaps = [_make_snap(1, 2.0, 2.09, displacement_ms=90.0)]
+    fixture = _build_fixture(
+        anchor=_ANCHOR_DATA,
+        snaps=snaps,
+        anchor_shots=_ANCHOR_SHOTS[:1],
+        secondary_beep_time=1.135,
+        secondary_source_desc="x",
+        slug="slug",
+        camera=_CAMERA,
+        anchor_link=_make_anchor_link(),
+        history_entry=_make_history(),
+        ensemble_result=_make_minimal_ensemble_result(),
+    )
+    assert fixture["review"] == {
+        "status": "needs_review",
+        "derived_from": _make_anchor_link().fixture_slug,
+        "reviewed_at": None,
+    }
 
 
 def test_build_fixture_carries_subclass_from_anchor() -> None:
