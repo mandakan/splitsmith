@@ -3121,6 +3121,8 @@ def test_shot_detect_reset_records_a_delete_for_every_shot_it_wipes(tmp_path: Pa
     assert all(e["id"] for e in deleted), "every event needs an id -- the merge unions on it"
     kinds = [e["kind"] for e in events]
     assert kinds.index("marker_deleted") < kinds.index("shot_detect_run")
+    # #1329: no auto proposal was dropped, so nothing claims one was.
+    assert "events_reset" not in kinds
 
 
 def test_shot_detect_reset_drops_auto_regions_and_keeps_manual_ones(tmp_path: Path, monkeypatch) -> None:
@@ -3196,6 +3198,13 @@ def test_shot_detect_reset_drops_auto_regions_and_keeps_manual_ones(tmp_path: Pa
     doc = _json.loads((_shooter_root / "audit" / "stage1.json").read_text(encoding="utf-8"))
     assert doc["events"] == [manual]
     assert "events_seeded" not in doc
+    # #1329: the dropped proposals are logged, like the shots the reset wipes.
+    reset_logs = [e for e in doc["audit_events"] if e["kind"] == "events_reset"]
+    assert len(reset_logs) == 1
+    assert reset_logs[0]["id"]
+    assert reset_logs[0]["payload"] == {"count": 1, "ids": ["evt-1"], "reason": "shot_detect_reset"}
+    kinds = [e["kind"] for e in doc["audit_events"]]
+    assert kinds.index("events_reset") < kinds.index("shot_detect_run")
 
 
 def test_shot_detect_without_reset_records_no_deletes(tmp_path: Path, monkeypatch) -> None:

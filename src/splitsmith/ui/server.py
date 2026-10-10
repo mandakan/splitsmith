@@ -936,6 +936,30 @@ def _reset_deletion_events(shots: Any) -> list[dict[str, Any]]:
     ]
 
 
+def _events_reset_event(dropped: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One ``events_reset`` entry naming the ``auto`` stage events a reset
+    re-detect drops, or nothing when it drops none (#1329).
+
+    The shot wipe is logged per shot (``_reset_deletion_events``); the
+    proposals the same wipe drops went without a trace, so the audit log
+    could not show that regions had been there.
+    """
+    if not dropped:
+        return []
+    return [
+        {
+            "id": _new_event_id(),
+            "ts": _now_iso(),
+            "kind": "events_reset",
+            "payload": {
+                "count": len(dropped),
+                "ids": [e.get("id") for e in dropped],
+                "reason": "shot_detect_reset",
+            },
+        }
+    ]
+
+
 #: ``cand-<n>`` shot id, as ``shot_id.derive_shot_id`` builds it. Read back
 #: here so a candidate number that survives only in the event log still
 #: counts against the high-water mark (#842).
@@ -4299,9 +4323,11 @@ def register_job_bodies(state: AppState) -> None:
                 # edited (``manual``) describes the run and stays.
                 stage_events = doc.get(events_module.EVENTS_FIELD)
                 if isinstance(stage_events, list):
+                    dropped = [e for e in stage_events if isinstance(e, dict) and e.get("source") == "auto"]
                     doc[events_module.EVENTS_FIELD] = [
                         e for e in stage_events if not (isinstance(e, dict) and e.get("source") == "auto")
                     ]
+                    reset_deletions.extend(_events_reset_event(dropped))
                 doc.pop(events_module.EVENTS_SEEDED_FIELD, None)
             seeded_shots = False
             if not doc.get("shots"):
