@@ -555,6 +555,16 @@ describe("Coach player source", () => {
     expect(container.querySelector("video")?.getAttribute("src")).toContain("/source/");
   });
 
+  it("a web-kind primary streams the rendition and never asks for scrub", async () => {
+    // Hosted: the clip anchor is the web rendition itself, so the scrub pin
+    // (meant for a full-resolution trim) does not apply even with a version.
+    vi.mocked(api.getProject).mockResolvedValue(PROJECT as never);
+    vi.mocked(api.getStageCoach).mockResolvedValue(trimCoach({ kind: "web" }));
+    const { container } = renderRoute();
+    await screen.findByTestId("lane-editor");
+    expect(container.querySelector("video")?.getAttribute("src")).toContain("/web/");
+  });
+
   it("the timeline band's options menu toggles full-resolution video through the scrub settings", async () => {
     // The "More" menu that used to live on the lane editor itself moved onto
     // the shared Timeline band (spec 2026-10-09); the switch is unchanged.
