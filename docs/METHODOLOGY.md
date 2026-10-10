@@ -57,6 +57,13 @@ A change to the definition changes all three and the cases file in the same PR.
 
 **Don't expect absolute timestamps to match.** A CED7000 typically uses an absolute amplitude threshold; splitsmith uses the rise foot, which sits at the very start of the rise. On the same recording the two can differ by 5-15 ms per shot, splitsmith earlier.
 
+**How a timer decides (2026-10-10, from the CED7000 manuals).** It scans forward from the beep and fires on the first moment the microphone level crosses a fixed threshold (sensitivity 1 to 8, higher catches quieter, more distant shots), then ignores everything for a dead time (0.08 s by default, adjustable from 0.02 to 0.09 s: the echo filter, and why two shots closer than 0.09 s cannot both register). It never looks back. Two consequences for the rise foot:
+
+- **A lead-in that crosses the threshold fires the timer**, dip or not. The rise foot walks back from the peak and stops at a dip below a quarter of the peak, so on a weak first arrival a few ms before the burst (seen on a handheld phone, Höstfinalen XI stage 6) the two land apart: the timer at the lead-in, the rise foot at the burst.
+- **A timer's threshold is fixed for the stage**; the rise foot's is relative to each shot's peak. On camera audio a fixed level is meaningless (gain, compression and the GO 3S's shot-to-shot level control), so the relative threshold stays; the camera's processing can also smear an onset the timer's microphone hears sharply, which no rule recovers.
+
+Whether to move to the timer's forward-scan structure is open until per-shot timer data exists (photos of a timer's review screen for filmed stages); the stage times on scorecards give only the last shot, after a 0.01 s display, and cannot separate the rule from camera-to-timer geometry. The fixture review records, per confirmed shot, whether its time is the rule's (`walk_decided` events, `placement: "rule"` with `rule_time`) or the reviewer's override, so a definition change re-times the rule's shots from their sounds and leaves only the overrides to look at again.
+
 **Splits *do* match across recordings.** Because the definition is the same for every shot, the *difference* between two consecutive shot times is comparable across stages, matches and recording conditions; a constant per-shot offset cancels in the subtraction. This is the metric that matters, and why a rule that lands at different points of different shots (as the old walk did on GO 3S) is worse than one that is consistently early or late.
 
 ## Confidence ranking
