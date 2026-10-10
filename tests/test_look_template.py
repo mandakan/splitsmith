@@ -261,6 +261,40 @@ def test_template_digest_moves_with_every_input(tmp_path) -> None:
     assert base != look_template.template_digest(template, ctx, fps=30, engine_version="v1")
 
 
+def _shared_copy(tmp_path, monkeypatch):
+    """A copy of the shipped Looks tree that the shipped-dir lookup points at,
+    so a test edits a shared script without touching the shipped files."""
+    import shutil
+
+    root = tmp_path / "looks"
+    shutil.copytree(looks.shipped_looks_dir(), root)
+    monkeypatch.setattr(looks, "shipped_looks_dir", lambda: root)
+    return root / "_shared"
+
+
+def test_template_digest_moves_with_the_shared_scripts(tmp_path, monkeypatch) -> None:
+    """A template loads ``_shared/`` scripts by URL, so a cached render keyed
+    by the digest must miss once any of them changes (#1337)."""
+    shared = _shared_copy(tmp_path, monkeypatch)
+    template = tmp_path / "t.html"
+    template.write_text("<!doctype html>", encoding="utf-8")
+    ctx = look_template.TemplateContext(
+        theme={"ink": "#ffffff"},
+        data={"groups": []},
+        size={"width": 64, "height": 32},
+        fps=30,
+        engine=look_template.engine_block(css="body{}"),
+        assets={"shared": look_template.shared_url()},
+    )
+    base = look_template.template_digest(template, ctx, fps=30, engine_version="v1")
+    fit = shared / "fit.js"
+    fit.write_bytes(fit.read_bytes() + b"\n// edited\n")
+    edited = look_template.template_digest(template, ctx, fps=30, engine_version="v1")
+    assert edited != base
+    (shared / "helper.js").write_text("window.helper = 1;", encoding="utf-8")
+    assert look_template.template_digest(template, ctx, fps=30, engine_version="v1") != edited
+
+
 @pytest.mark.integration
 def test_the_rise_variant_animates_deterministically() -> None:
     """``card-rise.html``: nothing painted at t=0, the whole card by the

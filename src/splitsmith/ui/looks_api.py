@@ -51,6 +51,7 @@ from ..look_store import (
     is_shipped_name,
     template_file,
 )
+from ..look_template import shared_digest
 from ..look_tools import (
     EDITOR_STARTERS,
     STARTERS,
@@ -384,8 +385,10 @@ CHECK_CACHE_VERSION = 1
 
 
 def _folder_digest(root: Path) -> str:
-    """Every file of a Look folder, by relative path and bytes."""
-    digest = hashlib.sha256(f"v{CHECK_CACHE_VERSION}".encode())
+    """Every file of a Look folder, by relative path and bytes, and the
+    shipped ``_shared/`` scripts its templates load (``shared_digest``,
+    #1337): an edit there can change what the probe sees."""
+    digest = hashlib.sha256(f"v{CHECK_CACHE_VERSION}|shared={shared_digest()}".encode())
     for path in sorted(p for p in root.rglob("*") if p.is_file()):
         digest.update(str(path.relative_to(root)).encode("utf-8") + b"\0")
         digest.update(path.read_bytes() + b"\0")

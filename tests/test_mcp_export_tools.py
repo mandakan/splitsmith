@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import patch
 
@@ -410,7 +411,9 @@ def test_export_match_rejects_a_transition_kind_outside_the_grammar(tmp_path: Pa
             )
 
 
-def _export_match_with_overlay_on_disk(tmp_path: Path, *, record: str) -> tuple[Path, object, dict]:
+def _export_match_with_overlay_on_disk(
+    tmp_path: Path, *, record: str, variant: str = "default", after_record: Callable[[], None] | None = None
+) -> tuple[Path, object, dict]:
     """Seed a stage with a trim and an overlay MOV, write the overlay's
     settings record as ``record`` says (``current`` / ``stale`` / ``none``),
     and run the MCP match export with the composer mocked."""
@@ -427,7 +430,7 @@ def _export_match_with_overlay_on_disk(tmp_path: Path, *, record: str) -> tuple[
     if record != "none":
         settings = overlay_settings(
             look="splitsmith",
-            variant="default",
+            variant=variant,
             options=HudOptions(),
             codec="auto",
             max_height=None,
@@ -435,6 +438,8 @@ def _export_match_with_overlay_on_disk(tmp_path: Path, *, record: str) -> tuple[
             audit_revision=exports_mod.overlay_audit_revision(audit_path),
         )
         (exports_dir / "stage1_k-vallen_overlay.json").write_text(json.dumps(settings))
+    if after_record is not None:
+        after_record()
     if record == "stale":
         doc = json.loads(audit_path.read_text())
         doc["shots"][0]["ms_after_beep"] = 640
@@ -469,6 +474,48 @@ def test_export_match_reuses_an_overlay_drawn_from_the_current_audit(tmp_path: P
     overlay, stage_input, result = _export_match_with_overlay_on_disk(tmp_path, record="current")
     assert stage_input.overlay_path == overlay
     assert result["anomalies"] == []
+
+
+def _shipped_looks_copy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A copy of the shipped Looks tree the shipped-dir lookup points at, so
+    a test edits a template or a shared script without touching the
+    shipped files."""
+    import shutil
+
+    from splitsmith import looks
+
+    copy = tmp_path / "shipped-looks"
+    shutil.copytree(looks.shipped_looks_dir(), copy)
+    monkeypatch.setattr(looks, "shipped_looks_dir", lambda: copy)
+    return copy
+
+
+def test_export_match_reuses_a_template_overlay_drawn_from_the_current_template(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _shipped_looks_copy(tmp_path, monkeypatch)
+    overlay, stage_input, _result = _export_match_with_overlay_on_disk(
+        tmp_path, record="current", variant="plate"
+    )
+    assert stage_input.overlay_path == overlay
+
+
+@pytest.mark.parametrize("edited", ["_shared/hud.js", "splitsmith/hud-plate.html"])
+def test_export_match_drops_a_template_overlay_its_template_has_moved_past(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, edited: str
+) -> None:
+    """A HUD style's MOV shows what its template and the shared scripts drew:
+    once either changes, the record no longer vouches for it (#1337 review)."""
+    copy = _shipped_looks_copy(tmp_path, monkeypatch)
+
+    def edit() -> None:
+        path = copy / edited
+        path.write_bytes(path.read_bytes() + b"\n<!-- edited -->\n")
+
+    _overlay, stage_input, _result = _export_match_with_overlay_on_disk(
+        tmp_path, record="current", variant="plate", after_record=edit
+    )
+    assert stage_input.overlay_path is None
 
 
 @pytest.mark.parametrize("record", ["stale", "none"])

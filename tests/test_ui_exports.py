@@ -1002,6 +1002,59 @@ def test_read_overlay_settings_takes_a_missing_record_as_the_defaults(tmp_path: 
     assert exports_mod.read_overlay_settings(broken) is None
 
 
+def test_a_template_record_without_the_template_identity_matches_nothing() -> None:
+    """A HUD style's record written before it carried the template identity
+    cannot say which template drew it: the reuse check misses, whether the
+    request names the style or (the MCP tool) wants whatever was drawn.
+    A Classic record carries no identity and still matches."""
+    from splitsmith.overlay_hud import HudOptions, overlay_settings
+
+    def settings(variant: str) -> dict:
+        return overlay_settings(
+            look="splitsmith",
+            variant=variant,
+            options=HudOptions(),
+            codec="auto",
+            max_height=None,
+            max_fps=None,
+            audit_revision="rev",
+        )
+
+    current = settings("plate")
+    assert current["template"]
+    legacy = {k: v for k, v in current.items() if k != "template"}
+    assert exports_mod.overlay_record_matches(current, audit_revision="rev", wanted=current)
+    assert exports_mod.overlay_record_matches(current, audit_revision="rev")
+    assert not exports_mod.overlay_record_matches(legacy, audit_revision="rev", wanted=current)
+    assert not exports_mod.overlay_record_matches(legacy, audit_revision="rev")
+    assert not exports_mod.overlay_record_matches(current, audit_revision="other")
+    assert not exports_mod.overlay_record_matches(current, audit_revision=None)
+    classic = settings("default")
+    assert "template" not in classic
+    assert exports_mod.overlay_record_matches(classic, audit_revision="rev")
+
+
+def test_a_template_record_with_no_template_identity_never_matches() -> None:
+    """A template style whose template could not be found records
+    ``"template": null``; re-deriving that record (the MCP tool's
+    ``wanted=None``) finds no template either, and null == null must not
+    read as a match: nothing vouches for what that MOV shows."""
+    from splitsmith.overlay_hud import HudOptions, overlay_settings
+
+    record = overlay_settings(
+        look="nosuch",
+        variant="plate",
+        options=HudOptions(),
+        codec="auto",
+        max_height=None,
+        max_fps=None,
+        audit_revision="rev",
+    )
+    assert "template" in record and record["template"] is None
+    assert not exports_mod.overlay_record_matches(record, audit_revision="rev")
+    assert not exports_mod.overlay_record_matches(record, audit_revision="rev", wanted=dict(record))
+
+
 @pytest.mark.parametrize("variant", ["default", "plate"])
 def test_the_record_holds_the_audit_revision_read_before_the_render(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, variant: str
@@ -1050,6 +1103,69 @@ def test_the_record_holds_the_audit_revision_read_before_the_render(
     record = json.loads((exports_dir / "stage1_stage-1-h1_overlay.json").read_text())
     assert record["audit_revision"] == before
     assert exports_mod.overlay_audit_revision(audit_path) != before
+
+
+def test_the_record_holds_the_template_read_before_the_render(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A template saved while the overlay renders (the desktop template
+    editor can) was never drawn: the record names the template as it stood
+    when the render began, so the next export sees the edit and draws again.
+    Edits a copy of the shipped Looks, never the shipped files."""
+    import shutil
+
+    from splitsmith import looks, overlay_render
+    from splitsmith.overlay_hud import HudOptions, overlay_settings
+
+    copy = tmp_path / "shipped-looks"
+    shutil.copytree(looks.shipped_looks_dir(), copy)
+    monkeypatch.setattr(looks, "shipped_looks_dir", lambda: copy)
+    audit_path, exports_dir = _seed_stage_with_trim(tmp_path)
+    template = copy / "splitsmith" / "hud-plate.html"
+
+    def render_while_editing(**kwargs: Any) -> Path:
+        template.write_bytes(template.read_bytes() + b"\n<!-- saved mid-render -->\n")
+        kwargs["output_path"].write_bytes(b"mov")
+        return kwargs["output_path"]
+
+    monkeypatch.setattr(overlay_render, "render_overlay", render_while_editing)
+    exports_mod.export_stage(
+        request=exports_mod.StageExportRequest(
+            stage_number=1,
+            write_trim=False,
+            write_csv=False,
+            write_fcpxml=False,
+            write_report=False,
+            write_overlay=True,
+            overlay_variant="plate",
+        ),
+        audit_path=audit_path,
+        exports_dir=exports_dir,
+        source_video_path=None,
+        pre_buffer_seconds=5.0,
+        post_buffer_seconds=5.0,
+        stage_data=StageData(
+            stage_number=1,
+            stage_name="Stage 1 -- H1",
+            time_seconds=8.0,
+            scorecard_updated_at=datetime(2026, 5, 2, 14, 30, tzinfo=UTC),
+        ),
+        beep_time_in_source=10.0,
+        config=Config(),
+    )
+    record = exports_mod.read_overlay_settings(exports_dir / "stage1_stage-1-h1_overlay.json")
+    revision = exports_mod.overlay_audit_revision(audit_path)
+    wanted = overlay_settings(
+        look="splitsmith",
+        variant="plate",
+        options=HudOptions(),
+        codec="auto",
+        max_height=None,
+        max_fps=None,
+        audit_revision=revision,
+    )
+    assert not exports_mod.overlay_record_matches(record, audit_revision=revision, wanted=wanted)
+    assert not exports_mod.overlay_record_matches(record, audit_revision=revision)
 
 
 def test_the_audit_revision_is_none_for_an_unreadable_audit(tmp_path: Path) -> None:

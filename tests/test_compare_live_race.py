@@ -3,16 +3,23 @@ they say, and how a render with only the race reaches ffmpeg."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
+
 from splitsmith.compare import mp4_grid
 from splitsmith.compare.free_cell import race_groups
 from splitsmith.compare.overlay_sprites import (
     RaceRow,
+    SpriteGeometry,
     TilePlacement,
     build_overlay_states,
     race_rows_at,
 )
 from splitsmith.config import StageRounds
-from splitsmith.overlay_layout import ColorToken
+from splitsmith.overlay_html import grid_html
+from splitsmith.overlay_layout import CellScale, ColorToken
+from splitsmith.overlay_theme import load_theme
 from splitsmith.stage_summary_data import TileShot, TileStageData
 from tests.conftest import fake_ffmpeg_probe
 from tests.test_compare_mp4_grid_overlay import CANVAS, _recorder, _shooters, _StubRasterizer
@@ -124,3 +131,75 @@ def test_a_race_only_render_draws_the_race_without_tile_overlays_or_clocks(tmp_p
     # With the overlay off no page carries a tile's shot counter: the
     # race's own "2" sits in a grid row, never alone at a corner anchor.
     assert not any("anchor anchor-top-left" in html for html in pages)
+
+
+#: Each middle band's ``--fit-scale`` as fit.js left it, and whether any of
+#: its grid columns' text is wider than the column.
+_RACE_FIT_JS = """() => Array.from(document.querySelectorAll('.anchor-middle-center')).map((stack) => {
+  let overflow = false;
+  stack.querySelectorAll('.group.flow-grid > .el').forEach((el) => {
+    const width = el.getBoundingClientRect().width;
+    Array.from(el.children).forEach((child) => {
+      const range = document.createRange();
+      range.selectNodeContents(child);
+      if (range.getBoundingClientRect().width > width + 0.5) { overflow = true; }
+    });
+  });
+  return {scale: parseFloat(stack.style.getPropertyValue('--fit-scale')) || 1, overflow: overflow};
+})"""
+
+
+def _race_fit(html: str, *, width: int, height: int, tmp_path: Path) -> list[dict]:
+    """Lay ``html`` out as ``ChromiumRasterizer.png`` does (file URL, fonts
+    ready, the fit policy run) and read what fit.js did to each band."""
+    from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+
+    page_path = tmp_path / "race.html"
+    page_path.write_text(html, encoding="utf-8")
+    try:
+        with ChromiumRasterizer() as rasterizer:
+            context = rasterizer._live_browser().new_context(viewport={"width": width, "height": height})
+            try:
+                page = context.new_page()
+                page.goto(page_path.resolve().as_uri(), wait_until="load")
+                page.evaluate("document.fonts.ready")
+                page.evaluate("window.__splitsmithFit && window.__splitsmithFit()")
+                return page.evaluate(_RACE_FIT_JS)
+            finally:
+                context.close()
+    except RasterizerUnavailableError as exc:
+        pytest.skip(str(exc))
+
+
+@pytest.mark.integration
+def test_the_live_race_never_takes_the_column_fit(tmp_path: Path) -> None:
+    """fit.js's column step is opt-in per document
+    (``window.__splitsmithFitColumns``): the live race's rows change text
+    frame to frame, and a per-frame rescale would make the table jump. A
+    race whose column overflows keeps the scale the height fit gave it; the
+    same page with the opt-in shrinks, which proves the race really
+    overflows and the gate is what holds it (#1339)."""
+    # An upright 2x2 grid: the race sits in a 540 px wide free square.
+    geometry = SpriteGeometry(canvas_width=1080, canvas_height=1920, rows=2, cols=2)
+    rows = [
+        RaceRow(label="Wolfgang", present=True, shots_fired=0, expected_shots=None, finish_seconds=103.27),
+        RaceRow(label="Bartholomew", present=True, shots_fired=31, expected_shots=32, finish_seconds=None),
+    ]
+    cells = [(TilePlacement(label="", row=1, col=1, present=True), race_groups(rows, stage_number=3))]
+    theme = load_theme("splitsmith")
+    scale = CellScale.for_cell(geometry.cell_height)
+    size = {"width": geometry.canvas_width, "height": geometry.canvas_height}
+    (live,) = _race_fit(
+        grid_html(cells, geometry=geometry, scale=scale, theme=theme), tmp_path=tmp_path, **size
+    )
+    (opted,) = _race_fit(
+        grid_html(cells, geometry=geometry, scale=scale, theme=theme, fit_columns=True),
+        tmp_path=tmp_path,
+        **size,
+    )
+    # The opt-in shrinks this race, so its columns really overflow...
+    assert opted["scale"] < 1
+    # ...and without the opt-in the column step leaves it alone: the height
+    # fit's scale (nothing to shrink here) and the overflow still there.
+    assert live["scale"] == 1, "the live race took the column fit"
+    assert live["overflow"]

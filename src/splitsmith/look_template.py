@@ -127,13 +127,29 @@ def shared_url() -> str:
     return shared_dir().resolve().as_uri()
 
 
+def shared_digest() -> str:
+    """Every file under the shipped ``_shared/`` folder, by relative path and
+    bytes. A template loads these by URL (``assets.shared``), so they are as
+    much a render input as the template itself. All of them, not the ones a
+    template names: a script may load another, and the folder is a few small
+    files, so hashing it whole can never miss a load."""
+    root = shared_dir()
+    digest = hashlib.sha256()
+    for path in sorted(p for p in root.rglob("*") if p.is_file()):
+        digest.update(path.relative_to(root).as_posix().encode("utf-8") + b"\0")
+        digest.update(path.read_bytes() + b"\0")
+    return digest.hexdigest()
+
+
 def template_digest(template: Path, context: TemplateContext, *, fps: float, engine_version: str) -> str:
     """What a template render depends on, hashed: the template's bytes,
-    the whole context, the frame rate and the engine. The segment cache
-    keys a motion clip by this instead of by the clip's own content, so a
-    cached segment is found before any frame is rendered."""
+    the shared scripts it can load (:func:`shared_digest`), the whole
+    context, the frame rate and the engine. The segment cache keys a
+    motion clip by this instead of by the clip's own content, so a cached
+    segment is found before any frame is rendered."""
     digest = hashlib.sha256()
     digest.update(template.read_bytes())
+    digest.update(f"|shared={shared_digest()}|".encode())
     digest.update(context.init_script().encode("utf-8"))
     digest.update(f"|fps={fps!r}|engine={engine_version}".encode())
     return digest.hexdigest()
@@ -143,6 +159,7 @@ __all__ = [
     "TemplateContext",
     "engine_block",
     "group_json",
+    "shared_digest",
     "shared_url",
     "shooter_json",
     "template_digest",

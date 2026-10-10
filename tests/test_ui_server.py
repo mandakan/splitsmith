@@ -10699,6 +10699,32 @@ def test_match_export_redraws_an_overlay_when_its_audit_changed(
     assert _run_overlay_match_export(client, monkeypatch, request_style) == [], "and then reuses again"
 
 
+@pytest.mark.parametrize("edited", ["_shared/hud.js", "splitsmith/hud-plate.html"])
+def test_match_export_redraws_a_template_overlay_when_its_template_changed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, edited: str
+) -> None:
+    """A HUD style's MOV is what its template and the shared scripts drew:
+    the record carries their identity, so an edit to either draws it again
+    (#1337 review). Edits a copy of the shipped Looks, never the files."""
+    import shutil
+
+    from splitsmith import looks
+
+    copy = tmp_path / "shipped-looks"
+    shutil.copytree(looks.shipped_looks_dir(), copy)
+    monkeypatch.setattr(looks, "shipped_looks_dir", lambda: copy)
+    client, _root = _seed_match_export_project(tmp_path, stage_count=1)
+    _stub_match_export_probe(monkeypatch)
+    style = {"overlay_variant": "plate"}
+
+    assert _run_overlay_match_export(client, monkeypatch, style), "first export draws"
+    assert _run_overlay_match_export(client, monkeypatch, style) == [], "unchanged template reuses"
+    path = copy / edited
+    path.write_bytes(path.read_bytes() + b"\n<!-- edited -->\n")
+    assert _run_overlay_match_export(client, monkeypatch, style), "edited template redraws"
+    assert _run_overlay_match_export(client, monkeypatch, style) == [], "and then reuses again"
+
+
 def test_match_export_never_reuses_a_legacy_overlay_over_an_unreadable_audit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

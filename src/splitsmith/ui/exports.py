@@ -28,7 +28,7 @@ from ..events import confirmed_from_doc
 from ..export_naming import stage_file_base
 from ..looks import DEFAULT_VARIANT
 from ..match_project import StageScorecard
-from ..overlay_hud import LEGACY_OVERLAY_SETTINGS, HudOptions, overlay_settings
+from ..overlay_hud import LEGACY_OVERLAY_SETTINGS, HudOptions, overlay_settings, overlay_template_identity
 from ..overlay_render import OverlayCodec
 from ..overlay_theme import ThemeName
 from ..segment_cache import SegmentCache
@@ -174,6 +174,41 @@ def read_overlay_settings(path: Path) -> dict[str, Any] | None:
     except (OSError, ValueError):
         return None
     return value if isinstance(value, dict) else None
+
+
+def overlay_record_matches(
+    record: dict[str, Any] | None, *, audit_revision: str | None, wanted: dict[str, Any] | None = None
+) -> bool:
+    """Whether an overlay MOV whose settings record is ``record`` may be
+    reused: the one rule for every reuse check (the match export job and the
+    MCP tool). ``audit_revision`` is the audit as it stands
+    (:func:`overlay_audit_revision`). ``wanted`` is the request's settings
+    (:func:`overlay_settings`); ``None`` wants whatever style was recorded,
+    as it would be drawn now, so a template or shared script that moved
+    since still misses. An unreadable audit or record never matches."""
+    if record is None or audit_revision is None:
+        return False
+    # A template style that recorded no template identity (its Look or
+    # template could not be found) has nothing vouching for its pixels;
+    # null == null must not read as a match.
+    if record.get("variant") != DEFAULT_VARIANT and record.get("template") is None:
+        return False
+    if wanted is None:
+        try:
+            variant = str(record["variant"])
+            options = HudOptions(**record["options"]) if variant != DEFAULT_VARIANT else HudOptions()
+            wanted = overlay_settings(
+                look=str(record["look"]),
+                variant=variant,
+                options=options,
+                codec=record["codec"],
+                max_height=record["max_height"],
+                max_fps=record["max_fps"],
+                audit_revision=audit_revision,
+            )
+        except (KeyError, TypeError, ValueError):
+            return False
+    return wanted.get("audit_revision") == audit_revision and record == wanted
 
 
 def _confirmed_regions(audit_data: dict[str, Any], audit_path: Path) -> list[StageEvent]:
@@ -409,6 +444,7 @@ def export_stage(
             # Read before the render: an edit that lands while it runs was
             # never drawn and must read as a change to the next reuse check.
             drawn_revision = overlay_audit_revision(audit_path)
+            drawn_template = overlay_template_identity(request.overlay_theme, request.overlay_variant)
             try:
                 overlay_render.render_overlay(
                     audit_path=audit_path,
@@ -439,6 +475,7 @@ def export_stage(
                             max_height=request.overlay_max_height,
                             max_fps=request.overlay_max_fps,
                             audit_revision=drawn_revision,
+                            template=drawn_template,
                         ),
                         sort_keys=True,
                     ),

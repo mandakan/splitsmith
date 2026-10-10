@@ -4498,9 +4498,10 @@ def register_job_bodies(state: AppState) -> None:
                         max_fps=req.overlay_max_fps,
                         audit_revision=current_revision,
                     )
-                    overlay_reusable = (
-                        current_revision is not None
-                        and export_helpers.read_overlay_settings(overlay_record) == wanted
+                    overlay_reusable = export_helpers.overlay_record_matches(
+                        export_helpers.read_overlay_settings(overlay_record),
+                        audit_revision=current_revision,
+                        wanted=wanted,
                     )
                     # Pull the MOV only when it would be reused.
                     if overlay_reusable:

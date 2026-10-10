@@ -258,7 +258,9 @@ overlaid on the card's backdrop with the last frame held
 (``motion_overlay_filters``, ``tpad=stop_mode=clone``); an animated lower
 third is the same clip through ``lower_third_clip_filters``. The segment
 cache keys that clip by ``look_template.template_digest`` (template
-bytes, context, fps, Chromium version) through
+bytes, every file under the shipped ``_shared/`` (``shared_digest``,
+which the export preview's key and the ``look-check`` cache carry too),
+context, fps, Chromium version) through
 ``SegmentCache.key(virtual_inputs=...)`` and renders the frames in the
 encode's ``prepare`` step, so a cached card renders no frame. A still
 template takes the PNG path unchanged, which is what keeps the default
@@ -1281,12 +1283,19 @@ the existing style-toggle seam), palette ``reload`` (``#FBBF24``) and
 ``movement`` (``#06B6D4``) in ``OverlayTheme`` / ``look.json``, optional.
 All five template styles draw both; Classic (drawtext) and the compare
 grid's sprite overlay draw neither. A reload on the move draws split on
-the stage bar (reload in the top half, the movement under it). HUD
-helpers stay inline in each template: ``_shared/`` scripts are not in
-``template_digest``, so an edit there would not invalidate a cached MOV.
+the stage bar (reload in the top half, the movement under it). The
+stage-event helpers the five styles share (the stage bar and its bands,
+the reload chip, ``chipSettle``, easing and colours) live in
+``_shared/hud.js`` (``window.splitsmithHud``); ``template_digest`` hashes
+all of ``_shared/``, so an edit there invalidates every cached MOV.
 The overlay's ``<base>_overlay.json`` record carries the audit revision
 for every style (``ui/exports.overlay_audit_revision``), so any audit
-edit redraws; a legacy record never matches, and a failed redraw drops
+edit redraws; a template style's record also carries ``template``
+(``overlay_hud.overlay_template_identity``: the template's bytes and
+``shared_digest``), so an edit to the template or a shared script redraws
+the exports' MOV too; Classic records carry none. One rule decides reuse,
+``ui/exports.overlay_record_matches``, for the match export job and the
+MCP tool alike; a legacy record never matches, and a failed redraw drops
 that stage's overlay with an anomaly rather than reusing the stale one.
 
 Summary card: with confirmed reloads the Splits band gains Reloads /
@@ -1316,7 +1325,8 @@ its type follows the canvas height on any canvas at least
 16:9, 1920x1088 and wider, where it always fitted); a squarer or upright
 canvas sizes it as a 6:5 card of its width, since by height its headline
 row ran off the page (measured break-even about 1.17:1). A ``fit.js`` change
-reaches the summary PNG by content, the preview only through
+reaches the summary PNG by content and the preview through the key's
+``shared_digest``; any other change to what a preview draws still needs
 ``PREVIEW_REVISION``. Exports: the splits CSV gains
 ``moving`` as its last column (``read_splits_csv`` takes both headers);
 ``<base>_events.csv`` is written only with shots and confirmed regions.
