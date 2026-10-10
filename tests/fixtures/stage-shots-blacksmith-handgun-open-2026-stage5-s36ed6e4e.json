@@ -1128,11 +1128,11 @@
       }
     ],
     "labels_by_time": {
-      "9.907": "cross_bay",
-      "6.005": "handling",
-      "6.062": "handling",
+      "9.908": "cross_bay",
+      "6.006": "handling",
+      "6.068": "handling",
       "10.235": "cross_bay",
-      "9.485": "unknown"
+      "9.489": "unknown"
     }
   },
   "audit_events": [
@@ -1254,5 +1254,13 @@
   "shooter": {
     "id": "s36ed6e4e"
   },
-  "event_id": "blacksmith-handgun-open-2026:5:s36ed6e4e"
+  "event_id": "blacksmith-handgun-open-2026:5:s36ed6e4e",
+  "review": {
+    "status": "needs_review",
+    "derived_from": null,
+    "reviewed_at": null,
+    "note": "shot times predate the rise-foot definition (docs/METHODOLOGY.md, 2026-10-10): check each shot's leading edge",
+    "previous_status": "reviewed",
+    "previous_reviewed_at": null
+  }
 }

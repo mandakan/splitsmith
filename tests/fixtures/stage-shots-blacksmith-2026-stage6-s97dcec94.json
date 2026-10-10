@@ -325,22 +325,22 @@
       }
     ],
     "labels_by_time": {
-      "8.617": "movement",
-      "10.001": "cross_bay",
-      "2.728": "cross_bay",
-      "2.847": "cross_bay",
-      "5.124": "barrel_echo",
-      "5.474": "barrel_echo",
-      "6.539": "barrel_echo",
-      "7.679": "barrel_echo",
-      "8.055": "barrel_echo",
-      "8.247": "barrel_echo",
-      "8.425": "barrel_echo",
-      "9.639": "barrel_echo",
-      "10.165": "cross_bay",
-      "3.966": "cross_bay",
-      "1.088": "cross_bay",
-      "3.262": "movement"
+      "8.591": "movement",
+      "10.002": "cross_bay",
+      "2.714": "cross_bay",
+      "2.848": "cross_bay",
+      "5.147": "barrel_echo",
+      "5.496": "barrel_echo",
+      "6.528": "barrel_echo",
+      "7.698": "barrel_echo",
+      "8.038": "barrel_echo",
+      "8.221": "barrel_echo",
+      "8.410": "barrel_echo",
+      "9.625": "barrel_echo",
+      "10.183": "cross_bay",
+      "3.971": "cross_bay",
+      "1.107": "cross_bay",
+      "3.253": "movement"
     }
   },
   "stage_rounds": {
@@ -491,5 +491,13 @@
   "shooter": {
     "id": "s97dcec94"
   },
-  "event_id": "blacksmith-2026:6:s97dcec94"
+  "event_id": "blacksmith-2026:6:s97dcec94",
+  "review": {
+    "status": "needs_review",
+    "derived_from": null,
+    "reviewed_at": null,
+    "note": "shot times predate the rise-foot definition (docs/METHODOLOGY.md, 2026-10-10): check each shot's leading edge",
+    "previous_status": "reviewed",
+    "previous_reviewed_at": null
+  }
 }

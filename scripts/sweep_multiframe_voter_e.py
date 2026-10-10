@@ -132,7 +132,7 @@ def _embed_fixture(
     shots = detect_shots(audio, sr, truth["beep_time"], truth["stage_time_seconds"], cfg)
     if not shots:
         return None, np.zeros(0), np.zeros(0), [], 0.0
-    cand_t = np.array([s.time_absolute for s in shots], dtype=np.float64)
+    cand_t = np.array([s.scoring_time for s in shots], dtype=np.float64)
     labels = np.array(
         _label_candidates(cand_t.tolist(), truth.get("shots", []) or [], TOL_MS),
         dtype=np.int64,

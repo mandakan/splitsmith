@@ -114,7 +114,7 @@ def mine_one(
 
     rows: list[dict] = []
     for s in shots:
-        t = s.time_absolute
+        t = s.scoring_time
         if excl_lo <= t <= excl_hi:
             continue  # inside the audited stage window -- not a free negative
         if t < beep_in_full:

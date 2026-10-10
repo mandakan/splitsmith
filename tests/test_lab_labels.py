@@ -53,3 +53,18 @@ def test_reasons_use_exact_key_lookup() -> None:
     # Stored keys round to the same 1 ms grid as candidate times.
     assert reasons[round(1.149, 3)] == "handling"
     assert reasons[round(5.123, 3)] == "echo"
+
+
+def test_a_reason_binds_through_a_rounding_miss_but_never_to_a_neighbour() -> None:
+    """A key written from a 4-decimal time can miss its candidate's 3-decimal
+    key by 1 ms; that still binds. An unlabelled candidate beside a labelled
+    one never inherits its reason: on the cwt path two candidates can sit
+    23 ms apart, and a retiming detector change migrates the keys (#1386)."""
+    from splitsmith.lab.core import _reason_for_time
+
+    reasons, _ = _load_labels_from_audit(
+        {"_candidates_pending_audit": {"labels_by_time": {"20.794": "echo"}}}
+    )
+    assert _reason_for_time(20.794, reasons) == "echo"
+    assert _reason_for_time(20.7951, reasons) == "echo"  # rounds to 20.795
+    assert _reason_for_time(20.771, reasons) is None  # a shot 23 ms before the echo

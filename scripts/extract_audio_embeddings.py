@@ -103,7 +103,7 @@ def extract_for_fixture(name: str, *, force: bool, audio_tagger, full: bool = Fa
         print(f"  {name}: no candidates, skipping")
         return
 
-    times = np.array([s.time_absolute for s in shots], dtype=np.float64)
+    times = np.array([s.scoring_time for s in shots], dtype=np.float64)
 
     # Build batch of 1 s windows at 32 kHz.
     if sr != PANN_SR:
