@@ -24,9 +24,13 @@
  * region when it is in that lane, else the first). Focusing a region selects
  * it. Keys act only on the region element itself, so a key pressed in a
  * handle, a menu or any other control never nudges: Left / Right nudge
- * (commit, with the #1325 no-op rule), Delete / Backspace remove, Up / Down
- * / Home / End move through the lane. Read-only regions focus and announce,
- * and only the moves work.
+ * (commit, with the #1325 no-op rule, announced in a polite status line),
+ * Up / Down / Home / End move through the lane, Enter / Space select.
+ * Delete / Backspace remove the focused region only when it is the selected
+ * one and never on auto-repeat; focus then moves to the lane's neighbour
+ * *without* selecting it (the root when the lane is empty), so holding
+ * Delete removes one region, never the stage. Read-only regions focus and
+ * announce, and only the moves work.
  */
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -115,6 +119,10 @@ export function LaneEditor(props: LaneEditorProps) {
   const regionEls = useRef(new Map<string, HTMLDivElement>());
   // A region a create just committed: focused once it has rendered.
   const focusAfterRender = useRef<string | null>(null);
+  // A region focus is moving to after a Delete: its onFocus must not select it.
+  const focusWithoutSelect = useRef<string | null>(null);
+  // The polite status line: the region's new label after a committed nudge.
+  const [announcement, setAnnouncement] = useState("");
   useLayoutEffect(() => {
     const id = focusAfterRender.current;
     const el = id ? regionEls.current.get(id) : undefined;
@@ -260,10 +268,16 @@ export function LaneEditor(props: LaneEditorProps) {
     list.filter((x) => x.kind === kind).sort(byStart);
   // The lane's one tab stop: the selected region when it is in the lane, else the first in time.
   const tabStop = (lane: StageEvent[]) => lane.find((x) => x.id === selectedId) ?? lane[0];
-  const focusRegion = (id: string | undefined) => {
+  // Keyboard focus moves only: the region may sit outside the zoomed band's
+  // visible window, so bring it into view (a pointer focus is already there).
+  const focusRegion = (id: string | undefined, select = true) => {
     const el = id ? regionEls.current.get(id) : undefined;
-    el?.focus({ preventScroll: true });
-    return Boolean(el);
+    if (!el) return false;
+    focusWithoutSelect.current = select ? null : (id ?? null);
+    el.focus({ preventScroll: true });
+    focusWithoutSelect.current = null;
+    el.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+    return true;
   };
 
   const handleRegionKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>, x: StageEvent) => {
@@ -284,6 +298,11 @@ export function LaneEditor(props: LaneEditorProps) {
       focusRegion(moves[e.key]?.id);
       return;
     }
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      if (selectedId !== x.id) onSelect(x.id);
+      return;
+    }
     if (readOnly) return;
     const current = eventsRef.current;
     if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
@@ -292,18 +311,25 @@ export function LaneEditor(props: LaneEditorProps) {
       const next = nudge(current, x.id, dir, { alt: e.altKey, shift: e.shiftKey }, fps);
       // A clamp (a neighbour, or the 0 floor / stage-time ceiling) can leave the
       // region exactly where it was: that nudge commits nothing (#1325).
-      if (next && !sameEvents(next, current)) emit(next, true);
-    } else if ((e.key === "Delete" || e.key === "Backspace") && i >= 0) {
+      if (next && !sameEvents(next, current)) {
+        emit(next, true);
+        const moved = next.find((y) => y.id === x.id);
+        if (moved) setAnnouncement(regionLabel(moved));
+      }
+    } else if (e.key === "Delete" || e.key === "Backspace") {
       e.preventDefault();
-      const remaining = current.filter((y) => y.id !== x.id);
-      emit(remaining, true);
+      // One deliberate press removes one region: never on auto-repeat, and only
+      // the selected one, so the neighbour focus lands on (unselected) survives
+      // a held or doubled key until Enter selects it.
+      if (e.repeat || selectedId !== x.id || i < 0) return;
+      emit(
+        current.filter((y) => y.id !== x.id),
+        true,
+      );
       onSelect(null);
       // Focus stays in the lane (the next region in time, else the previous),
-      // else goes to the next lane with a stop, else the previous, else the root.
-      const k = LANES.indexOf(x.kind);
-      const others = [...LANES.slice(k + 1), ...LANES.slice(0, k).reverse()];
-      const target = lane[i + 1] ?? lane[i - 1] ?? others.map((kind) => laneOf(kind, remaining)[0]).find(Boolean);
-      if (!focusRegion(target?.id)) rootRef.current?.focus({ preventScroll: true });
+      // unselected; an emptied lane parks it on the root.
+      if (!focusRegion((lane[i + 1] ?? lane[i - 1])?.id, false)) rootRef.current?.focus({ preventScroll: true });
     }
   };
 
@@ -369,7 +395,8 @@ export function LaneEditor(props: LaneEditorProps) {
                 data-start={x.start}
                 data-end={x.end}
                 onFocus={(e) => {
-                  if (e.target === e.currentTarget && selectedId !== x.id) onSelect(x.id);
+                  if (e.target !== e.currentTarget || focusWithoutSelect.current === x.id) return;
+                  if (selectedId !== x.id) onSelect(x.id);
                 }}
                 onClick={(e) => {
                   onSelect(x.id);
@@ -416,6 +443,9 @@ export function LaneEditor(props: LaneEditorProps) {
           </div>
         );
       })}
+      <span role="status" aria-live="polite" className="sr-only">
+        {announcement}
+      </span>
       {pill !== null && (
         <span
           data-testid="drag-pill"
@@ -437,10 +467,10 @@ export function LaneHints({ readOnly }: { readOnly?: boolean }) {
       <span>Drag empty lane to add</span>
       <span>Drag edge to resize, body to move</span>
       <span>
-        <Kbd>Arrows</Kbd> nudge a frame, <Kbd>Shift</Kbd> end, <Kbd>Alt</Kbd> 100 ms
+        <Kbd>Left</Kbd>/<Kbd>Right</Kbd> nudge a frame, <Kbd>Shift</Kbd> end, <Kbd>Alt</Kbd> 100 ms
       </span>
       <span>
-        <Kbd>Up</Kbd>/<Kbd>Down</Kbd> moves between regions
+        <Kbd>Up</Kbd>/<Kbd>Down</Kbd> moves between regions, <Kbd>Enter</Kbd> selects
       </span>
       <span>
         <Kbd>Alt</Kbd>-drag skips snap, <Kbd>Esc</Kbd> cancels, <Kbd>Del</Kbd> removes

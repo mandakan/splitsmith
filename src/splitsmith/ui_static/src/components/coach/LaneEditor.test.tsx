@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { StageEvent } from "@/lib/api";
 import { validateLanes } from "@/lib/events";
 
-import { LaneEditor } from "./LaneEditor";
+import { LaneEditor, LaneHints } from "./LaneEditor";
 
 const WIDTH = 1000;
 const STAGE = 10; // 100 px per second
@@ -44,6 +44,8 @@ beforeEach(() => {
   HTMLElement.prototype.setPointerCapture = vi.fn();
   HTMLElement.prototype.hasPointerCapture = vi.fn(() => true);
   HTMLElement.prototype.releasePointerCapture = vi.fn();
+  // jsdom has no scrollIntoView.
+  HTMLElement.prototype.scrollIntoView = vi.fn();
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -180,7 +182,7 @@ describe("LaneEditor", () => {
     const onChange = vi.fn();
     render(<Harness initial={[ev("evt-1", "reload", 4, 5)]} selectedId="evt-1" onChange={onChange} />);
     const region = screen.getByTestId("event-evt-1");
-    region.focus();
+    act(() => region.focus());
     fireEvent.keyDown(region, { key: "ArrowRight" });
     expect(lastCommit(onChange)![0].start).toBeCloseTo(4.02, 3); // 1/50 s
     fireEvent.keyDown(region, { key: "ArrowLeft", shiftKey: true });
@@ -378,7 +380,7 @@ describe("LaneEditor", () => {
       />,
     );
     const region = screen.getByTestId("event-evt-2");
-    region.focus();
+    act(() => region.focus());
     fireEvent.keyDown(region, { key: "ArrowLeft" });
     expect(onChange).not.toHaveBeenCalled();
   });
@@ -387,7 +389,7 @@ describe("LaneEditor", () => {
     const onChange = vi.fn();
     render(<Harness initial={[ev("evt-1", "movement", 0, 2)]} selectedId="evt-1" onChange={onChange} />);
     const region = screen.getByTestId("event-evt-1");
-    region.focus();
+    act(() => region.focus());
     fireEvent.keyDown(region, { key: "ArrowLeft" });
     expect(onChange).not.toHaveBeenCalled();
   });
@@ -396,7 +398,7 @@ describe("LaneEditor", () => {
     const onChange = vi.fn();
     render(<Harness initial={[ev("evt-1", "reload", 4, 5)]} selectedId="evt-1" onChange={onChange} />);
     const region = screen.getByTestId("event-evt-1");
-    region.focus();
+    act(() => region.focus());
     fireEvent.keyDown(region, { key: "ArrowRight" });
     expect(onChange.mock.calls.filter((c) => c[1] === true)).toHaveLength(1);
     expect(lastCommit(onChange)![0].start).toBeCloseTo(4.02, 3);
@@ -435,7 +437,7 @@ describe("LaneEditor", () => {
       />,
     );
     const region = screen.getByTestId("event-evt-2");
-    region.focus();
+    act(() => region.focus());
     fireEvent.keyDown(region, { key: "ArrowLeft" });
     expect(onChange).not.toHaveBeenCalled();
     expect(screen.getByTestId("event-evt-2")).toHaveAttribute("data-source", "auto");
@@ -540,7 +542,7 @@ describe("LaneEditor", () => {
       const onChange = vi.fn();
       render(<Harness initial={MIXED} onChange={onChange} />);
       const region = screen.getByTestId("event-evt-4");
-      region.focus();
+      act(() => region.focus());
       fireEvent.keyDown(region, { key: "ArrowRight" });
       const commits = onChange.mock.calls.filter((c) => c[1] === true);
       expect(commits).toHaveLength(1);
@@ -551,7 +553,7 @@ describe("LaneEditor", () => {
       const onChange = vi.fn();
       render(<Harness initial={[ev("evt-1", "reload", 2, 3), ev("evt-2", "reload", 3, 4)]} onChange={onChange} />);
       const region = screen.getByTestId("event-evt-2");
-      region.focus();
+      act(() => region.focus());
       fireEvent.keyDown(region, { key: "ArrowLeft" });
       expect(onChange).not.toHaveBeenCalled();
     });
@@ -565,7 +567,7 @@ describe("LaneEditor", () => {
         />,
       );
       const at = (id: string) => screen.getByTestId(`event-${id}`);
-      at("evt-2").focus();
+      act(() => at("evt-2").focus());
       fireEvent.keyDown(at("evt-2"), { key: "ArrowDown" });
       expect(at("evt-3")).toHaveFocus();
       expect(at("evt-3")).toHaveAttribute("aria-selected", "true");
@@ -588,22 +590,117 @@ describe("LaneEditor", () => {
       const onChange = vi.fn();
       render(<Harness initial={[ev("evt-1", "reload", 1, 2), ev("evt-2", "reload", 3, 4), ev("evt-3", "reload", 6, 7)]} onChange={onChange} />);
       const at = (id: string) => screen.getByTestId(`event-${id}`);
-      at("evt-2").focus();
+      act(() => at("evt-2").focus());
       fireEvent.keyDown(at("evt-2"), { key: "Delete" });
       expect(lastCommit(onChange)!.map((x) => x.id)).toEqual(["evt-1", "evt-3"]);
       expect(screen.queryByTestId("event-evt-2")).toBeNull();
       expect(at("evt-3")).toHaveFocus(); // the next one in time
+      fireEvent.keyDown(at("evt-3"), { key: "Enter" });
       fireEvent.keyDown(at("evt-3"), { key: "Backspace" });
       expect(at("evt-1")).toHaveFocus(); // none after: the previous one
     });
 
-    it("deleting a lane's last region moves focus to another lane's stop, else parks it on the editor", () => {
+    it("a Delete leaves nothing selected, though focus moved to the neighbour", () => {
+      render(<Harness initial={[ev("evt-1", "reload", 1, 2), ev("evt-2", "reload", 3, 4)]} />);
+      const at = (id: string) => screen.getByTestId(`event-${id}`);
+      act(() => at("evt-1").focus());
+      fireEvent.keyDown(at("evt-1"), { key: "Delete" });
+      expect(at("evt-2")).toHaveFocus();
+      expect(screen.getAllByRole("option").filter((o) => o.getAttribute("aria-selected") === "true")).toEqual([]);
+    });
+
+    it("a second Delete right after the first removes nothing", () => {
+      const onChange = vi.fn();
+      render(<Harness initial={[ev("evt-1", "reload", 1, 2), ev("evt-2", "reload", 3, 4)]} onChange={onChange} />);
+      const region = screen.getByTestId("event-evt-1");
+      act(() => region.focus());
+      fireEvent.keyDown(region, { key: "Delete" });
+      fireEvent.keyDown(document.activeElement!, { key: "Delete" });
+      expect(onChange.mock.calls.filter((c) => c[1] === true)).toHaveLength(1);
+      expect(screen.getByTestId("event-evt-2")).toBeInTheDocument();
+    });
+
+    it("a held Delete (auto-repeat) removes exactly one region in the whole stage", () => {
+      const onChange = vi.fn();
+      render(
+        <Harness
+          initial={[ev("evt-1", "reload", 1, 2), ev("evt-2", "reload", 3, 4), ev("evt-3", "movement", 1, 5), ev("evt-4", "activation", 0, 1)]}
+          onChange={onChange}
+        />,
+      );
+      const region = screen.getByTestId("event-evt-1");
+      act(() => region.focus());
+      fireEvent.keyDown(region, { key: "Delete" });
+      for (let n = 0; n < 6; n += 1) fireEvent.keyDown(document.activeElement!, { key: "Delete", repeat: true });
+      expect(onChange.mock.calls.filter((c) => c[1] === true)).toHaveLength(1);
+      expect(screen.getAllByRole("option").map((o) => o.dataset.testid)).toEqual(["event-evt-3", "event-evt-2", "event-evt-4"]);
+    });
+
+    it("a repeat keydown never deletes, even on the selected region", () => {
+      const onChange = vi.fn();
+      render(<Harness initial={[ev("evt-1", "reload", 1, 2)]} selectedId="evt-1" onChange={onChange} />);
+      const region = screen.getByTestId("event-evt-1");
+      act(() => region.focus());
+      fireEvent.keyDown(region, { key: "Delete", repeat: true });
+      expect(onChange).not.toHaveBeenCalled();
+    });
+
+    it("Enter or Space selects the focused region, and then Delete removes it", () => {
+      const onChange = vi.fn();
+      render(<Harness initial={[ev("evt-1", "reload", 1, 2), ev("evt-2", "reload", 3, 4), ev("evt-3", "reload", 5, 6)]} onChange={onChange} />);
+      const at = (id: string) => screen.getByTestId(`event-${id}`);
+      act(() => at("evt-1").focus());
+      fireEvent.keyDown(at("evt-1"), { key: "Delete" });
+      expect(at("evt-2")).toHaveFocus();
+      fireEvent.keyDown(at("evt-2"), { key: "Enter" });
+      expect(at("evt-2")).toHaveAttribute("aria-selected", "true");
+      fireEvent.keyDown(at("evt-2"), { key: "Delete" });
+      expect(lastCommit(onChange)!.map((x) => x.id)).toEqual(["evt-3"]);
+      expect(at("evt-3")).toHaveFocus();
+      fireEvent.keyDown(at("evt-3"), { key: " " });
+      expect(at("evt-3")).toHaveAttribute("aria-selected", "true");
+    });
+
+    it("deleting a lane's last region parks focus on the editor, never hopping to another lane", () => {
       render(<Harness initial={[ev("evt-1", "reload", 1, 2), ev("evt-2", "activation", 3, 4)]} />);
-      screen.getByTestId("event-evt-1").focus();
+      act(() => screen.getByTestId("event-evt-1").focus());
       fireEvent.keyDown(screen.getByTestId("event-evt-1"), { key: "Delete" });
-      expect(screen.getByTestId("event-evt-2")).toHaveFocus();
-      fireEvent.keyDown(screen.getByTestId("event-evt-2"), { key: "Delete" });
       expect(screen.getByTestId("lane-editor")).toHaveFocus();
+      expect(screen.getByTestId("event-evt-2")).toHaveAttribute("aria-selected", "false");
+    });
+
+    it("a keyboard move scrolls the focused region into view in the zoomed band", () => {
+      render(<Harness initial={[ev("evt-1", "reload", 1, 2), ev("evt-2", "reload", 8, 9)]} />);
+      const first = screen.getByTestId("event-evt-1");
+      act(() => first.focus());
+      const scroll = vi.mocked(HTMLElement.prototype.scrollIntoView);
+      scroll.mockClear();
+      fireEvent.keyDown(first, { key: "ArrowDown" });
+      expect(screen.getByTestId("event-evt-2")).toHaveFocus();
+      expect(scroll).toHaveBeenCalledWith({ block: "nearest", inline: "nearest" });
+      expect(scroll.mock.contexts.at(-1)).toBe(screen.getByTestId("event-evt-2"));
+    });
+
+    it("a committed nudge is announced in a polite status region; a blocked one is not", () => {
+      render(<Harness initial={[ev("evt-1", "reload", 4, 5), ev("evt-2", "reload", 5, 6)]} />);
+      const status = screen.getByRole("status");
+      expect(status).toHaveAttribute("aria-live", "polite");
+      expect(status).toHaveTextContent(/^$/);
+      const region = screen.getByTestId("event-evt-1");
+      act(() => region.focus());
+      fireEvent.keyDown(region, { key: "ArrowRight", shiftKey: true }); // end into evt-2: blocked
+      expect(status).toHaveTextContent(/^$/);
+      fireEvent.keyDown(region, { key: "ArrowRight", altKey: true });
+      expect(status).toHaveTextContent("Reload 4.10 to 5.00, 0.90 seconds, confirmed");
+    });
+
+    it("the hints name Left/Right for nudges, Up/Down for moves and Enter for select", () => {
+      render(<LaneHints />);
+      const text = document.body.textContent ?? "";
+      expect(text).toContain("Left/Right nudge a frame");
+      expect(text).toContain("Up/Down moves between regions");
+      expect(text).toContain("Enter selects");
+      expect(text).not.toContain("Arrows");
     });
 
     it("read-only options are focusable and labelled, but arrows and Delete change nothing", () => {
@@ -611,7 +708,7 @@ describe("LaneEditor", () => {
       render(<Harness initial={MIXED} readOnly onChange={onChange} />);
       const region = screen.getByRole("option", { name: "Reload 3.00 to 4.00, 1.00 seconds, confirmed" });
       expect(region).toHaveAttribute("tabindex", "0");
-      region.focus();
+      act(() => region.focus());
       expect(region).toHaveFocus();
       fireEvent.keyDown(region, { key: "ArrowRight" });
       fireEvent.keyDown(region, { key: "ArrowLeft", shiftKey: true });
@@ -650,11 +747,15 @@ describe("LaneEditor", () => {
       expect(screen.getByTestId("event-evt-1")).toHaveFocus();
     });
 
+    // Not distinguishable from the pre-#1327 code (an empty-lane click cleared
+    // the selection there too); it guards the new focus rule: without the
+    // create press parking focus on the root, the region keeps focus and the
+    // arrow nudges it (checked by mutation).
     it("a click on empty lane space takes focus off a region, so an arrow then nudges nothing", () => {
       const onChange = vi.fn();
       render(<Harness initial={[ev("evt-1", "reload", 4, 5)]} onChange={onChange} />);
       const region = screen.getByTestId("event-evt-1");
-      region.focus();
+      act(() => region.focus());
       const lane = screen.getByTestId("lane-movement");
       fireEvent.pointerDown(lane, { pointerId: 33, clientX: 800, clientY: 10, button: 0 });
       fireEvent.pointerUp(lane, { pointerId: 33, clientX: 800, clientY: 10 });
