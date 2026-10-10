@@ -377,7 +377,9 @@ export function LaneEditor(props: LaneEditorProps) {
             role="listbox"
             aria-label={`${LANE_LABEL[kind]} regions`}
             aria-readonly={readOnly || undefined}
-            className={cn("relative h-9 border-t border-rule/60", !readOnly && "cursor-crosshair")}
+            // touch-none: a touch drag on an editable lane is an edit, never a pan. Without it the
+            // browser takes the gesture over mid-drag and fires pointercancel, which undoes the drag.
+            className={cn("relative h-9 border-t border-rule/60", !readOnly && "cursor-crosshair touch-none")}
             onPointerDown={readOnly ? undefined : (e) => startCreate(e, kind)}
             onPointerMove={readOnly ? undefined : handleMove}
             onPointerUp={readOnly ? undefined : handleUp}
