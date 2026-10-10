@@ -10,6 +10,7 @@
  */
 
 import { Bell, Check, Crosshair, Plus, Save, Settings, Trash2 } from "lucide-react";
+import { useMemo, useState } from "react";
 
 import { Avatar, AvatarStack } from "@/components/ui/AvatarStack";
 import { Brand, BrandMark } from "@/components/ui/Brand";
@@ -30,6 +31,9 @@ import { Label } from "@/components/ui/Label";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { PipelineDots } from "@/components/ui/PipelineDots";
 import { Stat, StatStrip } from "@/components/ui/Stat";
+import { PipView } from "@/components/video/PipView";
+import type { PipCamera } from "@/lib/pip";
+import { usePip } from "@/lib/usePip";
 import { useMode } from "@/lib/mode";
 import { modKeyGlyph } from "@/lib/platform";
 
@@ -247,6 +251,20 @@ export function Design() {
               <span className="numeral text-[13px] text-ink">4 / 12</span>
             </div>
           </div>
+        </div>
+      </Section>
+
+      {/* ----- Picture in picture (#1406) -------------------------------- */}
+      <Section title="Picture in picture" kicker="00 / Primitive">
+        <p className="max-w-3xl text-md text-ink-2">
+          PipView over a page's own player. Click the inset or its swap button to make it big; with three
+          cameras the next button (C on a page) cycles the inset. Drag it to another corner. Placeholder
+          stills stand in for footage.
+        </p>
+        {/* Audit's frame width at 1440 x 900 (648 px), where the chips show. */}
+        <div className="grid max-w-[648px] gap-6">
+          <PipExample count={2} />
+          <PipExample count={3} />
         </div>
       </Section>
 
@@ -686,3 +704,87 @@ const STAGE_DEMO: TickState[] = [
   "todo",
   "todo",
 ];
+
+/* ---------------------------------------------------------------------------
+ * PipView example: a player with stills for posters
+ * ------------------------------------------------------------------------- */
+
+const PIP_HUES = [18, 205, 140];
+
+function placeholderStill(label: string, hue: number): string | null {
+  if (typeof document === "undefined") return null;
+  const c = document.createElement("canvas");
+  c.width = 640;
+  c.height = 360;
+  let g: CanvasRenderingContext2D | null;
+  try {
+    g = c.getContext("2d");
+  } catch {
+    return null;
+  }
+  if (!g) return null;
+  const grd = g.createLinearGradient(0, 0, 640, 360);
+  grd.addColorStop(0, `hsl(${hue} 30% 24%)`);
+  grd.addColorStop(1, `hsl(${hue} 25% 9%)`);
+  g.fillStyle = grd;
+  g.fillRect(0, 0, 640, 360);
+  g.strokeStyle = "rgba(255,255,255,0.07)";
+  for (let x = 0; x <= 640; x += 40) {
+    g.beginPath();
+    g.moveTo(x, 0);
+    g.lineTo(x, 360);
+    g.stroke();
+  }
+  for (let y = 0; y <= 360; y += 40) {
+    g.beginPath();
+    g.moveTo(0, y);
+    g.lineTo(640, y);
+    g.stroke();
+  }
+  g.fillStyle = "rgba(230,200,150,0.7)";
+  g.fillRect(470, 120, 46, 110);
+  g.fillStyle = "rgba(255,255,255,0.16)";
+  g.fillRect(120, 140, 70, 90);
+  g.fillRect(250, 150, 60, 80);
+  g.fillStyle = "rgba(255,255,255,0.85)";
+  g.font = "bold 56px system-ui";
+  g.textAlign = "center";
+  g.fillText(label, 320, 205);
+  return c.toDataURL("image/png");
+}
+
+function PipExample({ count }: { count: number }) {
+  const cameras = useMemo<PipCamera[]>(
+    () =>
+      Array.from({ length: count }, (_, i) => ({
+        id: `cam${i + 1}`,
+        label: i === 0 ? "Cam 1 - Head cam" : `Cam ${i + 1}`,
+        primary: i === 0,
+        beepInClip: 5,
+        src: null,
+        note: i === 0 ? null : "Synced +0.000 s",
+        poster: placeholderStill(`Cam ${i + 1}`, PIP_HUES[i % PIP_HUES.length]),
+      })),
+    [count],
+  );
+  const pip = usePip({ cameras, stageKey: count });
+  const [big, setBig] = useState<HTMLVideoElement | null>(null);
+  return (
+    <div className="space-y-2" data-testid={`pip-example-${count}`}>
+      <Label>{count} cameras</Label>
+      <div className="relative aspect-video w-full overflow-hidden rounded-lg border border-rule bg-black">
+        <video
+          ref={setBig}
+          muted
+          playsInline
+          poster={pip.big?.poster ?? undefined}
+          className="h-full w-full object-contain"
+        />
+        <PipView pip={pip} bigVideo={big} topInset={26} />
+        <span className="absolute right-2.5 top-2 rounded-full border border-rule-strong bg-black/75 px-2 text-sm text-ink-2">
+          Beep pill
+        </span>
+      </div>
+    </div>
+  );
+}

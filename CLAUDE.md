@@ -1642,6 +1642,22 @@ every count, time and split. Sizes come from the theme scale
 ``components/ui``. ``Kicker``, ``DisplayHeading``, ``Readout`` and
 ``TickStrip`` are deprecated exports: do not add consumers.
 
+A stage's other cameras show as **picture-in-picture** through
+``components/video/PipView`` (epic #1405), never stacked tiles or a
+camera picker; Compare keeps its grid. Every rule is in ``lib/pip.ts``
+(swap, cycle over the cameras that are not big, the inset at 28 % of the
+frame but never under 180 px nor over 45 %, its corners, the beep-offset clock and the drift threshold, ``insetStream``:
+the rendition whenever there is one, then only kinds sharing the beep
+anchor, ``null`` = unavailable), the clock in ``lib/pipSync`` (outside the
+inset clip it holds paused at the clamp and is never played: play on
+ended media restarts at 0), the state in ``lib/usePip`` (reset
+to the primary on a new ``stageKey``), the corner per browser in
+``lib/pipPrefs``. The page keeps its own big player (src from
+``pip.big``, passed as an element through a callback ref) and its own key
+handler (``pipKeyAction``: C / Shift+C); the usage note is at the top of
+``PipView.tsx``. The inset spends no red; the primary's speaker glyph and
+PRIMARY chip travel with it.
+
 **Rules the lint cannot check:** red marks the brand, the one primary
 action, the current position and focus, nothing else (stage state is
 amber / green / hollow, errors are ``--color-destructive`` as outline +
