@@ -83,8 +83,13 @@ def test_compute_hand_features_emits_expected_dim_and_finite_values() -> None:
         tta_agreement=tta,
     )
     assert out.shape == (2, HAND_FEATURE_DIM)
-    assert np.all(np.isfinite(out))
-    # The TTA column is the last one; the two spectral columns sit just before it.
-    assert out[0, -1] == 3.0
-    assert out[1, -1] == 1.0
-    assert out[:, -3:-1].shape == (2, 2)
+    # Columns 17-18 (centroid, high band) are NaN over digital silence by
+    # design; voter_c_feature_matrix zeroes them after the relative block.
+    assert np.all(np.isfinite(out[:, :17]))
+    # The TTA column follows the two cross-bay spectral columns (flatness, peak ratio).
+    from splitsmith.ensemble.features import _HAND_FEATURE_NAMES
+
+    tta_col = _HAND_FEATURE_NAMES.index("tta_agreement")
+    assert out[0, tta_col] == 3.0
+    assert out[1, tta_col] == 1.0
+    assert _HAND_FEATURE_NAMES[tta_col - 2 : tta_col] == ("spectral_flatness", "spectral_peak_ratio")

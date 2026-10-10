@@ -216,6 +216,15 @@ def load_ensemble_runtime(*, with_voter_e: bool = True) -> EnsembleRuntime:
     """
     calibration = load_calibration()
     voter_c_model = load_voter_c_model(calibration.voter_c_onnx_artifacts)
+    for model in voter_c_model.values():
+        width = getattr(model, "n_features", feat.VOTER_C_FEATURE_DIM)
+        if width != feat.VOTER_C_FEATURE_DIM:
+            raise RuntimeError(
+                f"{model.path} takes {width} features but this splitsmith builds "
+                f"{feat.VOTER_C_FEATURE_DIM}; the artifacts predate the current voter C "
+                "layout. Rebuild them with scripts/build_ensemble_artifacts.py, or check "
+                "out the commit they were built with."
+            )
     if tuple(calibration.clap_prompts) != feat.CLAP_PROMPTS:
         raise RuntimeError(
             "ensemble calibration prompt bank does not match the package's "

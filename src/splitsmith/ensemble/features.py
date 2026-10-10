@@ -90,6 +90,11 @@ _HAND_FEATURE_NAMES: tuple[str, ...] = (
     # Real shots are robust to small perturbations; FPs barely clearing the
     # smoothed-envelope threshold drop out under one or more.
     "tta_agreement",
+    # Timbre that drifts with camera and firmware (spec 2026-10-09): the
+    # 40 ms starting 2 ms after the candidate. NaN when the window does
+    # not fit; voter_c_feature_matrix zeroes them after the relative block.
+    "spectral_centroid_hz",
+    "high_band_db",
 )
 
 # Onset window for spectral features (issue #108): 50 ms gives ~20 Hz
@@ -112,9 +117,6 @@ HAND_FEATURE_DIM: int = len(_HAND_FEATURE_NAMES)
 CAMERA_CLASS_FEATURE_NAMES: tuple[str, ...] = ("headcam", "handheld")
 CAMERA_CLASS_FEATURE_DIM: int = len(CAMERA_CLASS_FEATURE_NAMES)
 _CAMERA_CLASS_TO_INDEX: dict[str, int] = {name: idx for idx, name in enumerate(CAMERA_CLASS_FEATURE_NAMES)}
-
-# +1 for clap_diff, +1 for gunshot_prob (folded in from voter D).
-VOTER_C_FEATURE_DIM: int = HAND_FEATURE_DIM + len(CLAP_PROMPTS) + 1 + 1 + CAMERA_CLASS_FEATURE_DIM
 
 
 def camera_class_one_hot(camera_classes: list[str] | np.ndarray, n_rows: int) -> np.ndarray:
@@ -230,6 +232,28 @@ def _spectral_flatness_and_peak_ratio(seg: np.ndarray, sr: int) -> tuple[float, 
     return flatness, peak_ratio
 
 
+_TIMBRE_OFFSET_S: float = 0.002
+_TIMBRE_WINDOW_S: float = 0.040
+_TIMBRE_NFFT: int = 4096
+_TIMBRE_BAND_HZ: tuple[float, float] = (200.0, 16000.0)
+_HIGH_BAND_LO_HZ: float = 4000.0
+
+
+def _centroid_and_high_band(segment: np.ndarray, sample_rate: int) -> tuple[float, float]:
+    """Spectral centroid (Hz) and energy above 4 kHz relative to 200 Hz-16 kHz (dB)."""
+    if segment.size < 64:
+        return float("nan"), float("nan")
+    spec = np.abs(np.fft.rfft(segment * np.hanning(segment.size), _TIMBRE_NFFT)) ** 2
+    freqs = np.fft.rfftfreq(_TIMBRE_NFFT, 1.0 / sample_rate)
+    band = (freqs >= _TIMBRE_BAND_HZ[0]) & (freqs <= _TIMBRE_BAND_HZ[1])
+    total = float(spec[band].sum())
+    if total <= 0.0:
+        return float("nan"), float("nan")
+    centroid = float((freqs[band] * spec[band]).sum() / total)
+    high = float(spec[freqs >= _HIGH_BAND_LO_HZ].sum())
+    return centroid, float(10.0 * np.log10(high / total + 1e-12))
+
+
 def compute_hand_features(
     audio: np.ndarray,
     sample_rate: int,
@@ -327,6 +351,98 @@ def compute_hand_features(
         out[k, 14] = flatness
         out[k, 15] = peak_ratio
         out[k, 16] = float(tta_agreement[k])
+
+        t_lo = idx + int(round(_TIMBRE_OFFSET_S * sample_rate))
+        t_hi = t_lo + int(round(_TIMBRE_WINDOW_S * sample_rate))
+        segment = audio[t_lo:t_hi].astype(np.float64) if t_hi <= n else np.zeros(0)
+        out[k, 17], out[k, 18] = _centroid_and_high_band(segment, sample_rate)
+    return out
+
+
+# Stage-relative block (spec 2026-10-09): each source column minus the
+# median over the stage's likely shots, so a camera or firmware that
+# shifts every shot's level or timbre moves the reference with it.
+_REL_LOG_SOURCES: tuple[str, ...] = (
+    "peak_amp",
+    "rms_post",
+    "tail_amp",
+    "peak_floor_ratio",
+    "spectral_flatness",
+    "spectral_peak_ratio",
+    "rms_ratio",
+)
+# ``attack`` is signed (a louder sample in the 10 ms before the onset makes
+# it negative), so it is linear: a log would clamp every negative value to one.
+_REL_LIN_HAND_SOURCES: tuple[str, ...] = ("attack", "ratio_1_20", "ratio_5_20")
+_REL_LIN_TIMBRE_SOURCES: tuple[str, ...] = ("spectral_centroid_hz", "high_band_db")
+REL_FEATURE_NAMES: tuple[str, ...] = tuple(
+    f"rel_{s}"
+    for s in (
+        *_REL_LOG_SOURCES,
+        *_REL_LIN_HAND_SOURCES,
+        "gunshot_prob",
+        "clap_diff",
+        *_REL_LIN_TIMBRE_SOURCES,
+        *(f"clap_sim_{i:02d}" for i in range(len(CLAP_PROMPTS))),
+    )
+)
+REL_FEATURE_DIM: int = len(REL_FEATURE_NAMES)
+
+# +1 for clap_diff, +1 for gunshot_prob (folded in from voter D), and the
+# stage-relative block (spec 2026-10-09) appended after the camera one-hot.
+VOTER_C_FEATURE_DIM: int = (
+    HAND_FEATURE_DIM + len(CLAP_PROMPTS) + 1 + 1 + CAMERA_CLASS_FEATURE_DIM + REL_FEATURE_DIM
+)
+_REF_FALLBACK_FRACTION: float = 0.3
+_REF_FALLBACK_MIN: int = 3
+_HAND_INDEX: dict[str, int] = {name: i for i, name in enumerate(_HAND_FEATURE_NAMES)}
+
+
+def reference_indices(confidences: np.ndarray) -> np.ndarray:
+    """Indices of the stage's likely shots: the top-K candidates by detector confidence.
+
+    ``K = max(3, round(0.3 * N))`` clamped to ``N``. Never the round count:
+    most training stages have one and many app stages do not, and a
+    reference picked two ways made the features mean two things (spec
+    2026-10-09, amended). A stable sort keeps tied confidences in
+    candidate order so two runs of the same stage agree.
+    """
+    n = int(confidences.size)
+    if n == 0:
+        return np.zeros(0, dtype=np.int64)
+    k = min(max(_REF_FALLBACK_MIN, int(round(_REF_FALLBACK_FRACTION * n))), n)
+    return np.argsort(-confidences, kind="stable")[:k]
+
+
+def stage_relative_features(
+    hand: np.ndarray,
+    clap_sims: np.ndarray,
+    clap_diff: np.ndarray,
+    gunshot_prob: np.ndarray,
+) -> np.ndarray:
+    """Per-candidate ``(N, REL_FEATURE_DIM)`` block relative to the stage's likely shots.
+
+    All rows must come from one stage (one detector universe). Log-scale
+    sources take ``log(x) - median(log(ref))``; linear ones ``x - median(ref)``.
+    A NaN source is excluded from the median and its own value is 0.
+    """
+    n = hand.shape[0]
+    out = np.zeros((n, REL_FEATURE_DIM), dtype=np.float64)
+    if n == 0:
+        return out
+    ref = reference_indices(hand[:, _HAND_INDEX["confidence"]])
+    sources: list[np.ndarray] = [np.log(np.maximum(hand[:, _HAND_INDEX[s]], 1e-9)) for s in _REL_LOG_SOURCES]
+    sources += [hand[:, _HAND_INDEX[s]] for s in _REL_LIN_HAND_SOURCES]
+    sources += [np.asarray(gunshot_prob, dtype=np.float64), np.asarray(clap_diff, dtype=np.float64)]
+    sources += [hand[:, _HAND_INDEX[s]] for s in _REL_LIN_TIMBRE_SOURCES]
+    sources += [np.asarray(clap_sims[:, i], dtype=np.float64) for i in range(clap_sims.shape[1])]
+    for j, col in enumerate(sources):
+        ref_vals = col[ref]
+        ref_vals = ref_vals[~np.isnan(ref_vals)]
+        if ref_vals.size == 0:
+            continue
+        rel = col - float(np.median(ref_vals))
+        out[:, j] = np.where(np.isnan(rel), 0.0, rel)
     return out
 
 
@@ -638,10 +754,13 @@ def voter_c_feature_matrix(
     gunshot_prob: np.ndarray,
     camera_classes: list[str] | np.ndarray | str | None = None,
 ) -> np.ndarray:
-    """Stack the GBDT input vector.
+    """Stack the GBDT input vector for the candidates of ONE stage.
 
     Columns in order: ``hand | clap_sims | clap_diff | gunshot_prob |
-    camera_class_onehot``.
+    camera_class_onehot | stage_relative``. The stage-relative block
+    compares each candidate with the stage's likely shots (see
+    ``reference_indices``), so every row must come from the same
+    detector universe.
 
     Column order matches the calibration script. Drift here -- adding
     features, reordering CLAP prompts, reordering camera classes -- silently
@@ -667,13 +786,18 @@ def voter_c_feature_matrix(
     else:
         classes_input = camera_classes
     cam_block = camera_class_one_hot(classes_input, n_rows)
-    return np.concatenate(
+    rel = stage_relative_features(hand_features, clap_sims, clap_diff, gunshot_prob)
+    x = np.concatenate(
         [
             hand_features,
             clap_sims.astype(np.float64),
             clap_diff.astype(np.float64)[:, None],
             gunshot_prob.astype(np.float64)[:, None],
             cam_block,
+            rel,
         ],
         axis=1,
     )
+    # Absolute spectral columns are NaN where the window did not fit;
+    # the relative block already handled them.
+    return np.nan_to_num(x, nan=0.0)

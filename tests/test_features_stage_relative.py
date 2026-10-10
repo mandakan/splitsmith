@@ -1,0 +1,244 @@
+"""Stage-relative voter C features (spec 2026-10-09)."""
+
+import json
+from pathlib import Path
+
+import numpy as np
+import pytest
+from scipy.signal import butter, sosfiltfilt
+
+from splitsmith.beep_detect import load_audio
+from splitsmith.config import ShotDetectConfig
+from splitsmith.ensemble import features as feat
+from splitsmith.ensemble.tta import compute_tta_agreement
+from splitsmith.shot_detect import detect_shots
+
+FIXTURES = Path(__file__).parent / "fixtures"
+GO3S_FIXTURE = "stage-shots-hostfinalen-xi-2026-stage7-s97dcec94"
+
+
+def _stage(name: str, gain: float = 1.0, lowpass_hz: float | None = None):
+    audio, sr = load_audio(FIXTURES / f"{name}.wav")
+    truth = json.loads((FIXTURES / f"{name}.json").read_text())
+    shots = detect_shots(
+        audio,
+        sr,
+        truth["beep_time"],
+        truth["stage_time_seconds"],
+        ShotDetectConfig(recall_fallback="cwt", min_confidence=0.0),
+    )
+    times = np.array([s.time_absolute for s in shots])
+    conf = np.array([s.confidence for s in shots])
+    peaks = np.array([s.peak_amplitude for s in shots])
+    tta = compute_tta_agreement(audio, sr, truth["beep_time"], truth["stage_time_seconds"], times)
+    x = audio.astype(np.float64)
+    if lowpass_hz is not None:
+        x = sosfiltfilt(butter(4, lowpass_hz, btype="low", fs=sr, output="sos"), x)
+    x = x * gain
+    hand = feat.compute_hand_features(x, sr, times, truth["beep_time"], conf, peaks * gain, tta)
+    return hand, truth, times
+
+
+def test_hand_features_carry_centroid_and_high_band():
+    assert feat.HAND_FEATURE_DIM == 19
+    assert feat._HAND_FEATURE_NAMES[17:] == ("spectral_centroid_hz", "high_band_db")
+
+
+def test_lowpass_lowers_centroid_and_high_band():
+    hand, _, _ = _stage(GO3S_FIXTURE)
+    dull, _, _ = _stage(GO3S_FIXTURE, lowpass_hz=1500.0)
+    assert np.nanmedian(dull[:, 17]) < np.nanmedian(hand[:, 17]) - 100.0
+    assert np.nanmedian(dull[:, 18]) < np.nanmedian(hand[:, 18]) - 3.0
+
+
+def test_centroid_and_high_band_ignore_gain():
+    hand, _, _ = _stage(GO3S_FIXTURE)
+    quiet, _, _ = _stage(GO3S_FIXTURE, gain=0.25)
+    assert quiet.shape[1] == hand.shape[1] == 19  # an empty slice would pass vacuously
+    assert np.isfinite(hand[:, 17]).sum() > 10
+    np.testing.assert_allclose(quiet[:, 17:19], hand[:, 17:19], rtol=1e-6, atol=1e-6)
+
+
+def test_window_past_clip_end_is_nan():
+    sr = 48000
+    audio = np.random.default_rng(0).normal(0, 0.01, sr)
+    t = np.array([len(audio) / sr - 0.01])
+    hand = feat.compute_hand_features(audio, sr, t, 0.0, np.array([0.5]), np.array([0.1]), np.array([5.0]))
+    assert np.isnan(hand[0, 17]) and np.isnan(hand[0, 18])
+
+
+def test_reference_is_the_top_thirty_percent_by_confidence():
+    # Never the round count: training and runtime must pick the reference
+    # the same way whether or not the scorecard knows the rounds.
+    conf = np.array([0.1, 0.9, 0.5, 0.7, 0.3, 0.8, 0.2, 0.6, 0.4, 0.05])
+    assert sorted(feat.reference_indices(conf).tolist()) == [1, 3, 5]  # max(3, round(3.0))
+    assert len(feat.reference_indices(np.linspace(0, 1, 40))) == 12
+    assert len(feat.reference_indices(np.array([0.2, 0.4]))) == 2
+    assert len(feat.reference_indices(np.array([]))) == 0
+
+
+def test_reference_is_stable_under_ties():
+    conf = np.full(12, 0.5)
+    assert feat.reference_indices(conf).tolist() == feat.reference_indices(conf).tolist() == [0, 1, 2, 3]
+
+
+def _rel(hand, n_clap=10):
+    n = hand.shape[0]
+    sims = np.zeros((n, n_clap))
+    return feat.stage_relative_features(hand, sims, np.zeros(n), np.zeros(n))
+
+
+def test_tiny_stages_do_not_raise():
+    for n in (0, 1, 2):
+        hand = np.abs(np.random.default_rng(n).normal(0.5, 0.1, (n, feat.HAND_FEATURE_DIM)))
+        rel = _rel(hand)
+        assert rel.shape == (n, feat.REL_FEATURE_DIM)
+        assert not np.isnan(rel).any()
+
+
+def test_nan_source_is_zero_and_excluded_from_median():
+    hand = np.ones((4, feat.HAND_FEATURE_DIM))
+    hand[:, 1] = [0.9, 0.8, 0.7, 0.1]  # confidence: the first three are the reference (min 3)
+    hand[:, 17] = [1000.0, 1200.0, np.nan, 500.0]
+    rel = _rel(hand)
+    col = feat.REL_FEATURE_NAMES.index("rel_spectral_centroid_hz")
+    assert rel[2, col] == 0.0
+    assert rel[3, col] == pytest.approx(500.0 - 1100.0)
+
+
+def test_negative_attack_keeps_its_value():
+    """Attack is signed (a louder sample in the 10 ms before the onset makes it
+    negative), so it must not go through the log, which clamps every negative
+    value to one number."""
+    hand = np.ones((4, feat.HAND_FEATURE_DIM))
+    hand[:, 1] = [0.9, 0.8, 0.7, 0.1]
+    hand[:, feat._HAND_INDEX["attack"]] = [10.0, 20.0, 30.0, -50.0]
+    rel = _rel(hand)
+    c = feat.REL_FEATURE_NAMES.index("rel_attack")
+    assert rel[3, c] == pytest.approx(-50.0 - 20.0)
+    hand[3, feat._HAND_INDEX["attack"]] = -5.0
+    assert _rel(hand)[3, c] == pytest.approx(-5.0 - 20.0)
+
+
+def test_relative_level_ignores_gain_on_real_audio():
+    hand, _, _ = _stage(GO3S_FIXTURE)
+    quiet, _, _ = _stage(GO3S_FIXTURE, gain=0.25)
+    a, b = _rel(hand), _rel(quiet)
+    for name in ("rel_peak_amp", "rel_rms_post", "rel_tail_amp"):
+        c = feat.REL_FEATURE_NAMES.index(name)
+        assert np.abs(a[:, c]).max() > 0.1  # the column carries signal
+        np.testing.assert_allclose(b[:, c], a[:, c], atol=1e-6)
+
+
+def test_relative_centroid_absorbs_a_whole_stage_timbre_shift():
+    hand, truth, times = _stage(GO3S_FIXTURE)
+    dull, _, _ = _stage(GO3S_FIXTURE, lowpass_hz=1500.0)
+    shot_times = np.array([float(s["time"]) for s in truth["shots"]])
+    shot_mask = np.array([np.min(np.abs(float(t) - shot_times)) < 0.075 for t in times])
+    c = feat.REL_FEATURE_NAMES.index("rel_spectral_centroid_hz")
+    abs_shift = abs(np.nanmedian(dull[shot_mask, 17]) - np.nanmedian(hand[shot_mask, 17]))
+    rel_shift = abs(np.median(_rel(dull)[shot_mask, c]) - np.median(_rel(hand)[shot_mask, c]))
+    assert abs_shift > 100.0
+    # Most of the shift is absorbed, not all: the low-pass takes more from
+    # treble-rich shots than from the non-shot candidates in the reference.
+    assert rel_shift < 0.5 * abs_shift
+
+
+SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
+
+
+def _build_script():
+    import importlib.util
+    import sys
+
+    spec = importlib.util.spec_from_file_location(
+        "build_ensemble_artifacts", SCRIPTS / "build_ensemble_artifacts.py"
+    )
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["build_ensemble_artifacts"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _rows(fixture: str, n: int, seed: int, expected: int | None):
+    rng = np.random.default_rng(seed)
+    hand = np.abs(rng.normal(0.5, 0.2, (n, feat.HAND_FEATURE_DIM)))
+    sims = rng.normal(0, 0.1, (n, len(feat.CLAP_PROMPTS)))
+    return [
+        {
+            "fixture": fixture,
+            "camera_class": "headcam",
+            "expected_rounds": expected,
+            "hand_feats": hand[i].tolist(),
+            "clap_sims": sims[i].tolist(),
+            "clap_diff": float(sims[i, 0]),
+            "gunshot_prob": float(abs(sims[i, 1])),
+        }
+        for i in range(n)
+    ]
+
+
+def test_matrix_has_the_relative_block_and_no_nan():
+    rows = _rows("a", 6, 1, 3)
+    hand = np.array([r["hand_feats"] for r in rows])
+    hand[0, 17] = np.nan
+    sims = np.array([r["clap_sims"] for r in rows])
+    x = feat.voter_c_feature_matrix(hand, sims, sims[:, 0], np.abs(sims[:, 1]), "headcam")
+    assert x.shape == (6, feat.VOTER_C_FEATURE_DIM) and feat.VOTER_C_FEATURE_DIM == 57
+    assert not np.isnan(x).any()
+
+
+def test_trainer_and_runtime_build_identical_matrices():
+    build = _build_script()
+    rows = _rows("stage-a", 7, 2, 4) + _rows("stage-b", 5, 3, None)
+    trainer = build._x_from(rows)
+    runtime_parts = []
+    for fx in ("stage-a", "stage-b"):
+        rs = [r for r in rows if r["fixture"] == fx]
+        sims = np.array([r["clap_sims"] for r in rs])
+        runtime_parts.append(
+            feat.voter_c_feature_matrix(
+                np.array([r["hand_feats"] for r in rs]),
+                sims,
+                np.array([r["clap_diff"] for r in rs]),
+                np.array([r["gunshot_prob"] for r in rs]),
+                "headcam",
+            )
+        )
+    np.testing.assert_array_equal(trainer, np.concatenate(runtime_parts))
+
+
+def test_mined_rows_are_refused():
+    """Mined negatives come from a full-file detector pass outside the stage
+    window; mixed into a stage's reference they would give the trainer a
+    universe the runtime never sees."""
+    build = _build_script()
+    rows = _rows("stage-a", 6, 5, None)
+    rows[2]["mined"] = True
+    with pytest.raises(build.BuildError, match="mined"):
+        build._x_from(rows)
+
+
+def test_round_count_does_not_change_the_features():
+    """The app scores some stages with a round count and some without; the
+    features must not depend on which, or training and runtime disagree."""
+    build = _build_script()
+    # 12 candidates: the fallback reference is 4, so a round count of 9
+    # would pick a different reference if it were used.
+    with_rounds = build._x_from(_rows("stage-a", 12, 4, 9))
+    without = build._x_from(_rows("stage-a", 12, 4, None))
+    np.testing.assert_array_equal(with_rounds, without)
+
+
+def test_old_width_artifact_fails_at_load(monkeypatch):
+    from splitsmith.ensemble import api
+
+    class Narrow:
+        n_features = 31
+        path = Path("voter_c_gbdt_headcam.onnx")
+
+    monkeypatch.setattr(api, "load_voter_c_model", lambda *_a, **_k: {"headcam": Narrow()})
+    monkeypatch.setattr(api.feat, "load_clap_runtime", lambda: None)
+    monkeypatch.setattr(api.feat, "load_pann_runtime", lambda: None)
+    with pytest.raises(RuntimeError, match=r"voter_c_gbdt_headcam\.onnx.*31.*57"):
+        api.load_ensemble_runtime(with_voter_e=False)

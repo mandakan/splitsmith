@@ -38,6 +38,12 @@ reliable key for older fixtures.
   from April and September 2026, so not a recent firmware change.
 - Frame rate 29.97 or 50 fps depending on the setting, 16:9.
 
+- **Stage-relative voter C (2026-10-09).** Voter C now also judges each candidate against the
+  stage's likely shots (spec `2026-10-09-voter-c-stage-relative-features-design`). Accepted trade:
+  held out by match, Blacksmith 2026 GO 3S precision fell from 0.944 to 0.825 (recall 0.905 to
+  0.926) in exchange for surviving camera audio changes. Revisit by reverting that PR, or by
+  retraining with the relative block for the Vanguard only.
+
 Implication: absolute spectral features drift within a stage on this camera. Features relative to
 the stage's own earlier shots should hold up better; evaluate recall by shot index in string, not
 only overall.
@@ -54,6 +60,9 @@ only overall.
   from the expected round count is what kept detection working in the app. A stage without a round
   count, or the next firmware change, fails silently. Check older and newer Vanguard footage
   separately; the `description` tag tells them apart.
+- **Fixed by stage-relative voter C (2026-10-09).** Held out by match, Höstfinalen Vanguard recall
+  is 0.911 (precision 0.901) at the trained threshold, up from 0.000, with or without a round
+  count. Blacksmith Handgun Open (April) stays at recall 0.988, precision 0.747.
 - **Real stereo** (L/R correlation about 0.3 to 0.6 around shots). Own shots arrive more balanced
   and more coherent than other sounds, but as a voter C addition it caught nothing extra on 38 hard
   negatives (2026-10-09).

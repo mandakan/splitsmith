@@ -349,23 +349,37 @@ def _split_by_camera_class(universe: list[dict]) -> dict[str, list[dict]]:
 
 
 def _x_from(universe: list[dict]) -> np.ndarray:
-    """Stack per-row Voter C features.
+    """Stack per-row Voter C features through ``feat.voter_c_feature_matrix``.
 
-    Column order: ``[hand | clap_sims | clap_diff | gunshot_prob | camera_class_onehot]``.
-
-    Camera-class one-hot is appended last so the column order matches
-    ``voter_c_feature_matrix`` at runtime. ``gunshot_prob`` is folded in
-    as a feature column (voter D collapsed into voter C).
+    Rows are grouped by ``fixture`` (one stage each) so the stage-relative
+    block sees exactly the candidates the runtime would; the output keeps
+    the input row order.
     """
     if not universe:
         return np.zeros((0, feat.VOTER_C_FEATURE_DIM), dtype=np.float64)
-    base = np.array(
-        [c["hand_feats"] + c["clap_sims"] + [c["clap_diff"], c["gunshot_prob"]] for c in universe],
-        dtype=np.float64,
-    )
-    classes = [c.get("camera_class", DEFAULT_CAMERA_CLASS) for c in universe]
-    cam_block = feat.camera_class_one_hot(classes, base.shape[0])
-    return np.concatenate([base, cam_block], axis=1)
+    if any(row.get("mined") for row in universe):
+        # Mined negatives come from a full-file detector pass outside the
+        # stage window: in a stage's reference they would give the trainer a
+        # universe the runtime never sees. Mining needs a stage-aware rework
+        # before it can return.
+        raise BuildError(
+            "--with-mining is not supported with the stage-relative voter C features: "
+            "mined rows are not part of the stage's detector universe."
+        )
+    out = np.zeros((len(universe), feat.VOTER_C_FEATURE_DIM), dtype=np.float64)
+    by_fixture: dict[str, list[int]] = {}
+    for i, row in enumerate(universe):
+        by_fixture.setdefault(row["fixture"], []).append(i)
+    for idx in by_fixture.values():
+        rows = [universe[i] for i in idx]
+        out[idx] = feat.voter_c_feature_matrix(
+            np.array([r["hand_feats"] for r in rows], dtype=np.float64),
+            np.array([r["clap_sims"] for r in rows], dtype=np.float64),
+            np.array([r["clap_diff"] for r in rows], dtype=np.float64),
+            np.array([r["gunshot_prob"] for r in rows], dtype=np.float64),
+            [r.get("camera_class", DEFAULT_CAMERA_CLASS) for r in rows],
+        )
+    return out
 
 
 def _load_mined_negatives(
