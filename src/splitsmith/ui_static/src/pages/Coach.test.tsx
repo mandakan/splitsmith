@@ -276,7 +276,7 @@ describe("stage events on the Coach page", () => {
     });
     // Shift+ArrowRight moves the reload's end one frame later (1/30 s),
     // widening the overhang from 0.31 to ~0.34.
-    fireEvent.keyDown(screen.getByTestId("lane-editor"), { key: "ArrowRight", shiftKey: true });
+    fireEvent.keyDown(region, { key: "ArrowRight", shiftKey: true });
     expect(within(strip).getByText("+0.34")).toBeInTheDocument();
     expect(within(strip).queryByText("+0.31")).toBeNull();
     // Still true once the debounce fires the (unresolved) PUT.
@@ -497,7 +497,7 @@ describe("stage events on the Coach page", () => {
     expect(screen.queryByRole("region", { name: "Region" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
     // The keyboard path is closed too.
-    fireEvent.keyDown(screen.getByTestId("lane-editor"), { key: "Delete" });
+    fireEvent.keyDown(region, { key: "Delete" });
     // The read-only list stands in for the card.
     expect(screen.getAllByRole("listitem")).toHaveLength(1);
     await act(async () => {

@@ -791,7 +791,7 @@ describe("useStageEvents driving the LaneEditor", () => {
     render(<Page />);
     // A nudge commits; its PUT is still in flight when the next gesture starts.
     fireEvent.click(screen.getByTestId("event-evt-1"));
-    fireEvent.keyDown(screen.getByTestId("lane-editor"), { key: "ArrowRight" });
+    fireEvent.keyDown(screen.getByTestId("event-evt-1"), { key: "ArrowRight" });
     await settle();
     expect(api.putStageEvents).toHaveBeenCalledTimes(1);
 
@@ -819,7 +819,7 @@ describe("useStageEvents driving the LaneEditor", () => {
     vi.mocked(api.putStageEvents).mockImplementationOnce(() => new Promise((r) => { finishNudge = r; }));
     render(<Page />);
     fireEvent.click(screen.getByTestId("event-evt-1"));
-    fireEvent.keyDown(screen.getByTestId("lane-editor"), { key: "ArrowRight" });
+    fireEvent.keyDown(screen.getByTestId("event-evt-1"), { key: "ArrowRight" });
     await settle();
     expect(api.putStageEvents).toHaveBeenCalledTimes(1);
 
