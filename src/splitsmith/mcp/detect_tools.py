@@ -32,14 +32,13 @@ import json
 import logging
 import os
 import threading
-import uuid
-from datetime import UTC, datetime
 from typing import Any
 
 from .. import automation as automation_module
 from .. import beep_detect
 from .. import ensemble as ensemble_module
-from ..match_project import STUB_AUDIT_DETECTION, MatchProject
+from ..detection_merge import merge_detection_into
+from ..match_project import MatchProject
 from ..ui import audio as audio_helpers
 from .sandbox import resolve_project_root
 from .write_tools import _resolve_stage_video
@@ -53,6 +52,14 @@ logger = logging.getLogger(__name__)
 # lifetime.
 _ENSEMBLE_RUNTIME: ensemble_module.EnsembleRuntime | None = None
 _ENSEMBLE_RUNTIME_LOCK = threading.Lock()
+
+# Guards this process's audit read-merge-write in ``detect_shots_for_stage``
+# (#1380). The server's ``AppState.audit_lock`` is a process-local RLock and
+# the MCP server is its own process (stdio), so that lock cannot be held from
+# here; this one serialises the MCP tools' own concurrent calls, and the
+# re-load under it is what keeps a write made during detection (the SPA's,
+# or another tool's) from being clobbered by the doc read before the run.
+_AUDIT_LOCK = threading.RLock()
 
 
 def _get_ensemble_runtime() -> ensemble_module.EnsembleRuntime:
@@ -69,18 +76,6 @@ def _get_ensemble_runtime() -> ensemble_module.EnsembleRuntime:
                 with_voter_e = os.environ.get("SPLITSMITH_ENABLE_VOTER_E") == "1"
                 _ENSEMBLE_RUNTIME = ensemble_module.load_ensemble_runtime(with_voter_e=with_voter_e)
     return _ENSEMBLE_RUNTIME
-
-
-def _now_iso() -> str:
-    return datetime.now(UTC).isoformat(timespec="seconds")
-
-
-def _new_event_id() -> str:
-    """Unique id for audit_events entries - mirrors
-    ``splitsmith.ui.server._new_event_id`` (the sync merge unions event
-    lists by this id). Duplicated rather than imported: this module
-    doesn't otherwise depend on the web-UI layer."""
-    return uuid.uuid4().hex
 
 
 def detect_beep_for_video(
@@ -270,10 +265,16 @@ def detect_shots_for_stage(
     audit_dir = project.audit_path(root)
     audit_dir.mkdir(parents=True, exist_ok=True)
     audit_file = audit_dir / f"stage{stage_number}.json"
-    existing_json = _load_or_seed_audit_json(audit_file, stage, beep_in_clip)
-    if stage.stage_rounds is not None:
-        existing_json["stage_rounds"] = stage.stage_rounds.model_dump(mode="json", exclude_none=True)
-    expected_rounds = _expected_rounds_from(existing_json)
+    stage_rounds = (
+        stage.stage_rounds.model_dump(mode="json", exclude_none=True)
+        if stage.stage_rounds is not None
+        else None
+    )
+    # Project ``stage_rounds`` wins over a stale copy in the audit doc, as in
+    # the merge below; read here only to steer the ensemble.
+    expected_rounds = _expected_rounds_from(
+        {"stage_rounds": stage_rounds} if stage_rounds is not None else _load_audit_doc(audit_file)
+    )
 
     runtime = _get_ensemble_runtime()
     audio_array, sr = beep_detect.load_audio(audit.audio_path)
@@ -293,126 +294,60 @@ def detect_shots_for_stage(
         source_beep_time=primary.beep_time if enable_e else None,
     )
 
-    candidates = [_candidate_dict(c) for c in result.candidates]
-    existing_json["_candidates_pending_audit"] = {
-        "_note": (
-            "4-voter ensemble (issue #31). vote_a/b/c/d=1 means the voter "
-            "kept the candidate; ensemble_score = vote_total + apriori_boost. "
-            "shots[] is seeded from candidates with ensemble_score >= consensus."
-        ),
-        "consensus": result.consensus,
-        "expected_rounds": result.expected_rounds,
-        "candidates": candidates,
-    }
-    if reset:
-        existing_json["shots"] = []
-    seeded = False
-    if not existing_json.get("shots"):
-        kept = [c for c in result.candidates if c.kept]
-        existing_json["shots"] = [
-            {
-                "shot_number": i,
-                "candidate_number": c.candidate_number,
-                "time": c.time,
-                "ms_after_beep": c.ms_after_beep,
-                "source": "detected",
-                "ensemble_votes": c.vote_total,
-                "apriori_boost": c.apriori_boost,
-                "ensemble_score": c.ensemble_score,
-            }
-            for i, c in enumerate(kept, start=1)
-        ]
-        seeded = True
-    events = list(existing_json.get("audit_events") or [])
-    events.append(
-        {
-            "id": _new_event_id(),
-            "ts": _now_iso(),
-            "kind": "shot_detect_run",
-            "payload": {
-                "candidate_count": len(candidates),
-                "kept_count": sum(1 for c in result.candidates if c.kept),
-                "consensus": result.consensus,
-                "expected_rounds": result.expected_rounds,
-                "seeded_shots": seeded,
-                "source": "mcp",
-            },
-        }
-    )
-    existing_json["audit_events"] = events
-    _atomic_write_audit_json(audit_file, existing_json)
-
-    primary.processed["shot_detect"] = True
-    project.save(root)
-    return {
-        "stage_number": stage_number,
-        "candidate_count": len(candidates),
-        "kept_count": sum(1 for c in result.candidates if c.kept),
-        "consensus": result.consensus,
-        "expected_rounds": result.expected_rounds,
-        "shots_seeded": seeded,
-        "shot_count": len(existing_json.get("shots") or []),
-    }
-
-
-def _candidate_dict(cand: Any) -> dict[str, Any]:
-    return {
-        "candidate_number": cand.candidate_number,
-        "time": cand.time,
-        "ms_after_beep": cand.ms_after_beep,
-        "peak_amplitude": cand.peak_amplitude,
-        "confidence": cand.confidence,
-        "vote_a": cand.vote_a,
-        "vote_b": cand.vote_b,
-        "vote_c": cand.vote_c,
-        "vote_e": cand.vote_e,
-        "vote_total": cand.vote_total,
-        "apriori_boost": cand.apriori_boost,
-        "ensemble_score": cand.ensemble_score,
-        "score_c": cand.score_c,
-        "clap_diff": cand.clap_diff,
-        "gunshot_prob": cand.gunshot_prob,
-        "voter_e_signal": cand.voter_e_signal,
-    }
-
-
-def _load_or_seed_audit_json(audit_file: Any, stage: Any, beep_in_clip: float) -> dict[str, Any]:
-    """Load this stage's audit document, backfilling the base fields.
-
-    The loaded doc may be the beep-confirm stub (``{"shots": [],
-    "detection": "none"}``) seeded by the SPA's beep-review endpoint --
-    which has none of the base fields (``stage_number``, ``beep_time``,
-    ...) that a detection run's document carries, because those are
-    unknown at beep-confirm time. Backfill them here so a stage that only
-    ever had a stub still ends up with a complete document (readers like
-    the compare-timeline exporter key on ``beep_time`` and drop every shot
-    when it is missing). ``setdefault`` never overwrites a value the doc
-    already carries, so a genuinely-audited doc keeps its own fields.
-
-    The sentinel is dropped once real detection has run so the saved
-    document stays clean; ``is_stub_audit`` no longer depends on that for
-    correctness. Mirrors ``ui.server``'s ``_merge_detection_into``.
-    """
-    doc: dict[str, Any] | None = None
-    if audit_file.exists():
-        try:
-            doc = json.loads(audit_file.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            logger.warning("Discarding unreadable audit JSON at %s: %s", audit_file, exc)
-    if doc is None:
-        doc = {}
-    seed = {
+    base = {
         "stage_number": stage.stage_number,
         "stage_name": stage.stage_name,
         "stage_time_seconds": stage.time_seconds,
         "beep_time": round(beep_in_clip, 4),
         "shots": [],
     }
-    for key, value in seed.items():
-        doc.setdefault(key, value)
-    if doc.get("detection") == STUB_AUDIT_DETECTION:
-        del doc["detection"]
-    return doc
+    # The server's rule, not a copy of it (#1380): a reset drops the seeder's
+    # ``auto`` stage events and ``events_seeded``, logs ``marker_deleted`` /
+    # ``events_reset``, and candidate numbers continue past the stage's
+    # high-water mark. The doc is re-loaded under the lock rather than reused
+    # from before detection, as the server's ``_save_audit_with_remerge``
+    # does on desktop.
+    with _AUDIT_LOCK:
+        doc = merge_detection_into(
+            _load_audit_doc(audit_file),
+            result,
+            base=base,
+            stage_rounds=stage_rounds,
+            reset=reset,
+            run_payload={"source": "mcp"},
+        )
+        _atomic_write_audit_json(audit_file, doc)
+
+    # Read-modify-write the project, as the server's job does: the snapshot
+    # loaded before detection may predate an edit made while it ran.
+    fresh = MatchProject.load(root)
+    fresh_primary = next((v for v in fresh.stage(stage_number).videos if v.role == "primary"), None)
+    if fresh_primary is not None:
+        fresh_primary.processed["shot_detect"] = True
+        fresh.save(root)
+    return {
+        "stage_number": stage_number,
+        "candidate_count": len(result.candidates),
+        "kept_count": sum(1 for c in result.candidates if c.kept),
+        "consensus": result.consensus,
+        "expected_rounds": result.expected_rounds,
+        "shots_seeded": doc["audit_events"][-1]["payload"]["seeded_shots"],
+        "shot_count": len(doc.get("shots") or []),
+    }
+
+
+def _load_audit_doc(audit_file: Any) -> dict[str, Any]:
+    """This stage's audit document as stored, or ``{}`` when there is none
+    or it will not parse (the merge then backfills the base fields)."""
+    if audit_file.exists():
+        try:
+            doc = json.loads(audit_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("Discarding unreadable audit JSON at %s: %s", audit_file, exc)
+        else:
+            if isinstance(doc, dict):
+                return doc
+    return {}
 
 
 def _expected_rounds_from(audit_json: dict[str, Any]) -> int | None:
