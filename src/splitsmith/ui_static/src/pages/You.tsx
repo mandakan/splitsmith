@@ -161,10 +161,6 @@ function YourLook({ me, entry, onSaved }: { me: ScoreboardIdentity; entry: Shoot
   const [club, setClub] = useState(entry?.identity.club ?? "");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    setAccent(entry?.identity.accent ?? "");
-    setClub(entry?.identity.club ?? "");
-  }, [entry]);
   const valid = accent === "" || HEX.test(accent);
   const logo = entry?.identity.logo ?? null;
 
@@ -276,7 +272,6 @@ function YourBrand({ profile, onSaved }: { profile: AccountProfileView | null; o
   const [line, setLine] = useState(profile?.brand.line ?? "");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  useEffect(() => setLine(profile?.brand.line ?? ""), [profile]);
   const logo = profile?.brand.logo ?? null;
 
   const run = async (op: () => Promise<AccountProfileView>, fallback: string) => {
@@ -409,8 +404,18 @@ export function You() {
         </div>
       </Section>
       <YouShooter me={me} onChange={setMe} />
-      {me ? <YourLook me={me} entry={myEntry} onSaved={reloadBook} /> : null}
-      <YourBrand profile={profile} onSaved={setProfile} />
+      {/* Keyed by what is stored, so a load or a save starts the form over
+          from it. An effect that copied it into state could land after a
+          first click and undo it (#1364). */}
+      {me ? (
+        <YourLook
+          key={JSON.stringify([me.shooter_id, myEntry?.identity ?? null])}
+          me={me}
+          entry={myEntry}
+          onSaved={reloadBook}
+        />
+      ) : null}
+      <YourBrand key={JSON.stringify(profile?.brand ?? null)} profile={profile} onSaved={setProfile} />
       <Section label="Shooters">
         <p className="px-3.5 py-3 text-md text-ink-2">
           The looks of everyone you have filmed live on{" "}
