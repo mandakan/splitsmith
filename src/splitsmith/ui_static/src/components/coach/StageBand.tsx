@@ -26,9 +26,11 @@ export interface StageBandProps {
   compact?: boolean;
   /** Controls drawn in the header row (Breakdown's transport when compact). */
   toolbar?: ReactNode;
+  /** The Audio row's height: taller where Breakdown's splitter gives the band room (#1373). */
+  audioHeight?: number;
 }
 
-export function StageBand({ ws, view, compact = false, toolbar }: StageBandProps) {
+export function StageBand({ ws, view, compact = false, toolbar, audioHeight = AUDIO_ROW_HEIGHT }: StageBandProps) {
   const [zoom, setZoom] = useState<Zoom>(null);
   const [keysOn, setKeysOn] = useState(false);
   const { coach, peaks, peaksLoading, scrub, regions } = ws;
@@ -84,14 +86,14 @@ export function StageBand({ ws, view, compact = false, toolbar }: StageBandProps
         tracks={[
           {
             id: "audio",
-            rows: [{ label: "Audio", height: AUDIO_ROW_HEIGHT }],
+            rows: [{ label: "Audio", height: audioHeight }],
             seekable: true,
             render: (geom) =>
               peaksLoading ? (
                 // Nothing drawn yet: "No audio" would otherwise flash on
                 // every stage load before a normal-latency request has had
                 // a chance to resolve.
-                <div style={{ height: AUDIO_ROW_HEIGHT }} />
+                <div style={{ height: audioHeight }} />
               ) : (
                 <WaveformTrack
                   peaks={peaks?.peaks ?? null}
@@ -99,7 +101,7 @@ export function StageBand({ ws, view, compact = false, toolbar }: StageBandProps
                   from={audioBeep}
                   to={audioBeep + stageTime}
                   geom={geom}
-                  height={AUDIO_ROW_HEIGHT}
+                  height={audioHeight}
                 />
               ),
           },

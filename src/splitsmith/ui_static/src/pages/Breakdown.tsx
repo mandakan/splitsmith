@@ -12,7 +12,9 @@
  * The inspector (``BreakdownInspector``, #1372) shows the selected region's
  * card, else the active shot's interval class, with the shot list scrolling
  * under it; it folds to a rail that gives the viewer the width. Escape drops
- * a region selection back to the shot view.
+ * a region selection back to the shot view. A splitter (``BandSplitter``,
+ * ``useBandSplit``, #1373) trades video height for band height, remembered
+ * per browser; with nothing remembered the band keeps its own height.
  *
  * Every rule is the shared one: ``useStageWorkspace`` owns the payloads and
  * the shot PATCH, ``useStageEvents`` the region saves, the lane editor its
@@ -23,6 +25,7 @@ import { ArrowLeft, ArrowRight, Loader2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useOutletContext, useParams } from "react-router-dom";
 
+import { BandSplitter } from "@/components/coach/BandSplitter";
 import { BreakdownInspector } from "@/components/coach/BreakdownInspector";
 import { StageBand } from "@/components/coach/StageBand";
 import { StageTransport, StageVideo } from "@/components/coach/StageViewer";
@@ -35,6 +38,7 @@ import { isTypingTextTarget } from "@/lib/audit-input";
 import { regionCounts } from "@/lib/breakdown";
 import { useInspectorFolded } from "@/lib/breakdownPrefs";
 import { useMatchHref } from "@/lib/matchHref";
+import { useBandSplit } from "@/lib/useBandSplit";
 import { useShortViewport } from "@/lib/useShortViewport";
 import { deriveStageView, useStageWorkspace } from "@/lib/useStageWorkspace";
 import { cn } from "@/lib/utils";
@@ -101,6 +105,7 @@ function BreakdownStage({ slug, stage }: { slug: string; stage: number }) {
   const { project, coach, error, regions } = ws;
   const compact = useShortViewport();
   const [inspectorFolded] = useInspectorFolded();
+  const split = useBandSplit();
   const inspectorRef = useRef<HTMLElement | null>(null);
   // A new selection (a region, or a shot in place of one) opens the
   // inspector at its top, so the card is never left scrolled out of view.
@@ -203,21 +208,51 @@ function BreakdownStage({ slug, stage }: { slug: string; stage: number }) {
         />
       </div>
 
-      <div
-        className={cn(
-          "grid min-h-0 flex-1",
-          inspectorFolded ? "grid-cols-[minmax(0,1fr)_40px]" : "grid-cols-[minmax(0,1fr)_360px]",
-        )}
-      >
-        <div className="flex min-h-0 flex-col border-r border-rule">
-          <StageVideo ws={ws} view={view} className="min-h-0 w-full flex-1 object-contain" />
-          {compact ? null : transport}
+      <div ref={split.roomRef} data-testid="breakdown-room" className="flex min-h-0 flex-1 flex-col">
+        <div
+          className={cn(
+            "grid min-h-0 flex-1",
+            inspectorFolded ? "grid-cols-[minmax(0,1fr)_40px]" : "grid-cols-[minmax(0,1fr)_360px]",
+          )}
+        >
+          <div ref={split.viewerRef} className="flex min-h-0 flex-col border-r border-rule">
+            <StageVideo ws={ws} view={view} className="min-h-0 w-full flex-1 object-contain" />
+            {compact ? null : transport}
+          </div>
+          <BreakdownInspector ws={ws} view={view} compact={compact} scrollRef={inspectorRef} />
         </div>
-        <BreakdownInspector ws={ws} view={view} compact={compact} scrollRef={inspectorRef} />
-      </div>
 
-      <div className="shrink-0 border-t border-rule">
-        <StageBand ws={ws} view={view} compact={compact} toolbar={compact ? transport : undefined} />
+        {split.limits ? (
+          <BandSplitter
+            band={split.current}
+            limits={split.limits}
+            room={split.room}
+            onDrag={split.drag}
+            onCommit={split.commit}
+            onCancel={split.cancel}
+            onToggleLarge={split.toggleLarge}
+          />
+        ) : (
+          <div className="h-1.5 shrink-0 border-y border-rule bg-surface-2" />
+        )}
+        {/* Sized by the split when one is set; a band under its natural
+            height scrolls its lanes, a taller one grows the Audio row. */}
+        <div
+          ref={split.bandRef}
+          data-testid="breakdown-band"
+          className={cn("shrink-0", split.band != null && "overflow-y-auto overflow-x-hidden")}
+          style={split.band != null ? { height: split.band } : undefined}
+        >
+          <div ref={split.contentRef}>
+            <StageBand
+              ws={ws}
+              view={view}
+              compact={compact}
+              toolbar={compact ? transport : undefined}
+              audioHeight={split.audioHeight}
+            />
+          </div>
+        </div>
       </div>
     </div>
   );

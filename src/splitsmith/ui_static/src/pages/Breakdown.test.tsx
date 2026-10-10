@@ -1,9 +1,14 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { CoachShot, CoachStageResponse, StageEvent } from "@/lib/api";
-import { INSPECTOR_FOLDED_KEY, SHOTS_FOLDED_KEY, resetBreakdownPrefsForTests } from "@/lib/breakdownPrefs";
+import {
+  BAND_HEIGHT_KEY,
+  INSPECTOR_FOLDED_KEY,
+  SHOTS_FOLDED_KEY,
+  resetBreakdownPrefsForTests,
+} from "@/lib/breakdownPrefs";
 
 import { Breakdown } from "@/pages/Breakdown";
 
@@ -378,5 +383,91 @@ describe("Breakdown inspector (#1372)", () => {
     fireEvent.click(within(rail).getByRole("button", { name: "Unfold inspector" }));
     expect(screen.getByRole("complementary", { name: "Inspector" })).not.toHaveAttribute("data-folded");
     expect(window.localStorage.getItem(INSPECTOR_FOLDED_KEY)).toBe("off");
+  });
+});
+
+describe("Breakdown splitter (#1373)", () => {
+  // A measured page: 700 px shared by the viewer row and the band (plus the
+  // 6 px splitter), a 53 px transport under a 347 px video, a band whose
+  // rows add up to 303 px with its ruler ending 65 px down. Floor: 65 +
+  // Audio 56 + Shots 32 + one lane 36 + the hairline = 190; the video's
+  // 200 px floor caps the band at 700 - 53 - 200 = 447.
+  const box = (top: number, height: number) =>
+    ({ top, bottom: top + height, height, left: 0, right: 1000, width: 1000, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+  let rect: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    resetBreakdownPrefsForTests();
+    vi.mocked(api.getProject).mockResolvedValue(PROJECT);
+    vi.mocked(api.getStageCoach).mockReset();
+    vi.mocked(api.getStageCoach).mockResolvedValue(coach(EVENTS));
+    rect = vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+      const el = this as HTMLElement;
+      if (el.dataset.testid === "breakdown-room") return box(0, 706);
+      if (el.dataset.testid === "timeline-ruler") return box(41, 24);
+      if (el.tagName === "VIDEO") return box(0, 347);
+      if (el.firstElementChild?.tagName === "VIDEO") return box(0, 400);
+      if (el.parentElement?.dataset.testid === "breakdown-band") return box(0, 303);
+      return box(0, 0);
+    });
+  });
+  afterEach(() => rect.mockRestore());
+
+  const band = () => screen.getByTestId("breakdown-band");
+  const audioRow = () => screen.getByText("Audio").parentElement!;
+
+  it("with nothing remembered the band keeps its own height and the Audio row its own", async () => {
+    renderAt("/match/m1/breakdown/anna/2");
+    const sep = await screen.findByRole("separator", { name: "Resize the timeline" });
+    expect(band().style.height).toBe("");
+    expect(audioRow().style.height).toBe("56px");
+    expect(sep).toHaveAttribute("aria-valuemin", String(700 - 447));
+    expect(sep).toHaveAttribute("aria-valuemax", String(700 - 190));
+  });
+
+  it("a remembered split is drawn, clamped to this window, and its extra height goes to the Audio row", async () => {
+    window.localStorage.setItem(BAND_HEIGHT_KEY, "350");
+    const { unmount } = renderAt("/match/m1/breakdown/anna/2");
+    await screen.findByRole("separator");
+    expect(band().style.height).toBe("350px");
+    expect(audioRow().style.height).toBe(`${56 + 350 - 303}px`);
+    unmount();
+    window.localStorage.setItem(BAND_HEIGHT_KEY, "9999");
+    resetBreakdownPrefsForTests();
+    renderAt("/match/m1/breakdown/anna/2");
+    await screen.findByRole("separator");
+    expect(band().style.height).toBe("447px");
+  });
+
+  it("keys move the split within its limits and remember it; double-click toggles the band-large preset", async () => {
+    renderAt("/match/m1/breakdown/anna/2");
+    const sep = await screen.findByRole("separator");
+    fireEvent.keyDown(sep, { key: "End" });
+    expect(band().style.height).toBe("190px");
+    expect(window.localStorage.getItem(BAND_HEIGHT_KEY)).toBe("190");
+    fireEvent.keyDown(sep, { key: "ArrowUp" });
+    expect(window.localStorage.getItem(BAND_HEIGHT_KEY)).toBe("206");
+    fireEvent.doubleClick(sep);
+    expect(band().style.height).toBe("447px");
+    expect(window.localStorage.getItem(BAND_HEIGHT_KEY)).toBe("447");
+    fireEvent.doubleClick(sep);
+    expect(band().style.height).toBe("206px");
+    expect(window.localStorage.getItem(BAND_HEIGHT_KEY)).toBe("206");
+  });
+
+  it("a drag on the handle remembers the split it lands on", async () => {
+    HTMLElement.prototype.setPointerCapture = vi.fn();
+    HTMLElement.prototype.hasPointerCapture = vi.fn(() => true);
+    HTMLElement.prototype.releasePointerCapture = vi.fn();
+    window.localStorage.setItem(BAND_HEIGHT_KEY, "300");
+    renderAt("/match/m1/breakdown/anna/2");
+    const sep = await screen.findByRole("separator");
+    fireEvent.pointerDown(sep, { pointerId: 1, clientY: 400, button: 0 });
+    fireEvent.pointerMove(sep, { pointerId: 1, clientY: 350 });
+    expect(band().style.height).toBe("350px");
+    expect(window.localStorage.getItem(BAND_HEIGHT_KEY)).toBe("300");
+    fireEvent.pointerUp(sep, { pointerId: 1, clientY: 350 });
+    expect(window.localStorage.getItem(BAND_HEIGHT_KEY)).toBe("350");
   });
 });
