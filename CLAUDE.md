@@ -1297,8 +1297,10 @@ single-shooter cell that is landscape or square and >= 480 px tall
 so cells stay comparable, and keep the reload row. A stage with no
 confirmed regions declares exactly the groups it did before regions existed
 (pixels follow fit.js; portrait cards changed with the 0.6 em gap rule).
-Both summary stills (and only they)
-set ``fit_columns`` on ``single_html`` / ``grid_html``: ``fit.js``'s
+The stage summary stills (``build_summary_still``, the grid hold's
+``build_hold_still``) and the grid's match summary
+(``build_match_summary_grid_still``), and only they, set ``fit_columns`` on
+``single_html`` / ``grid_html``: ``fit.js``'s
 ``fitColumns`` shrinks the band until no grid column's text overflows its
 column or comes within 0.6 em (the band's caption size, for every
 column) of the next column that overlaps it vertically (a table row sits on
@@ -1307,7 +1309,13 @@ figures), which is what keeps a portrait card from cutting 1.42 to "1.4"
 and "Reload avg" from running into "Exposed"; landscape cards and grid
 holds were pixel-identical under it (the grid-hold check covered holds
 without regions: ``render_grid_frames.py`` writes no events). The live race
-does not opt in (its rows change text per frame). A ``fit.js`` change
+does not opt in (its rows change text per frame). The single-shooter match
+summary is its own table document (``match_summary_html``, no ``fit.js``):
+its type follows the canvas height on any canvas at least
+``SIZE_ASPECT`` (6:5) wide, byte-identical to before there (6:5, 5:4, 4:3,
+16:9, 1920x1088 and wider, where it always fitted); a squarer or upright
+canvas sizes it as a 6:5 card of its width, since by height its headline
+row ran off the page (measured break-even about 1.17:1). A ``fit.js`` change
 reaches the summary PNG by content, the preview only through
 ``PREVIEW_REVISION``. Exports: the splits CSV gains
 ``moving`` as its last column (``read_splits_csv`` takes both headers);

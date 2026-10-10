@@ -681,9 +681,10 @@ def build_match_summary_grid_still(
             )
             for placement in placements
         ]
+        # The tiles' Splits rows fit their own columns, as the stage hold's do.
         try:
             cells_png = rasterizer.png(
-                grid_html(cells, geometry=geometry, scale=scale, theme=theme),
+                grid_html(cells, geometry=geometry, scale=scale, theme=theme, fit_columns=True),
                 width=geometry.canvas_width,
                 height=geometry.canvas_height,
             )

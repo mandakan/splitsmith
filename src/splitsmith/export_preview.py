@@ -176,7 +176,10 @@ def _confirmed_regions(audit_doc: dict | None) -> list[StageEvent]:
 #: other key input sees: ``_shared/`` scripts are not in any digest.
 #: 5: those columns also keep a gap before the next one (``fitColumns``),
 #: and a confirmed reload's row reads Exposed in place of Overhang.
-PREVIEW_REVISION = 5
+#: 6: a square or upright match summary sizes its type as a 6:5 card of
+#: its width; and the Timeline and Ticker overlays' upright layouts (the
+#: key never reads a shipped Look's template bytes).
+PREVIEW_REVISION = 6
 
 
 def preview_key(

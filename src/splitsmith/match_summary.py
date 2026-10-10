@@ -286,6 +286,12 @@ def row_cells(row: MatchSummaryRow) -> list[str]:
     return [f"{row.number:02d}", row.name, time, hf, pct, _num(row.draw), _num(row.avg_split)]
 
 
+#: The squarest canvas (width:height) whose type still follows its height.
+#: Sized by height, a typical twelve-stage card's headline row fits the page
+#: from about 1.17:1 up and overflows a square one; 6:5 keeps every canvas
+#: that fitted (6:5, 5:4, 4:3, 16:9 and wider) exactly as it was.
+SIZE_ASPECT = (6, 5)
+
 TABLE_HEADER = ["", "Stage", "Time", "HF", "%", "Draw", "Split"]
 #: The table's fixed columns in ems (number, time, HF, %, draw, split, the
 #: name's right padding) and the least a name keeps before its ellipsis.
@@ -312,19 +318,24 @@ def _css_rgb(color: RGB) -> str:
 
 
 def match_summary_html(summary: MatchSummary, *, width: int, height: int, theme: OverlayTheme) -> str:
-    """The card as one document, transparent where the backdrop shows. Sizes
-    follow the canvas height; the table splits into two columns past
+    """The card as one document, transparent where the backdrop shows. Type
+    follows the canvas height on any canvas at least :data:`SIZE_ASPECT`
+    wide (6:5, 5:4, 4:3, 16:9 and wider); a squarer or upright one sizes it
+    as a 6:5 card of its width, since by its height the headline figures
+    run off the page. The table splits into two columns past
     :data:`ROWS_PER_COLUMN` so a long match never shrinks its rows below a
     readable size."""
     mono_url, mono_format, mono_weight = _face_source(theme.mono_font)
     display_url, display_format, display_weight = _face_source(theme.display_font)
+    num, den = SIZE_ASPECT
+    size = height if width * den >= height * num else width * den // num
     pad_x = round(width * 0.06)
     pad_y = round(height * 0.06)
-    title_px = round(height * 0.06)
-    label_px = round(height * 0.032)
-    figure_px = round(height * 0.058)
-    caption_px = round(height * 0.022)
-    note_px = round(height * 0.022)
+    title_px = round(size * 0.06)
+    label_px = round(size * 0.032)
+    figure_px = round(size * 0.058)
+    caption_px = round(size * 0.022)
+    note_px = round(size * 0.022)
     columns = 1 if summary.stage_count <= ROWS_PER_COLUMN else 2
     per_column = max(1, math.ceil(summary.stage_count / columns))
     # The table takes what is left under the header and the strip.
@@ -338,7 +349,7 @@ def match_summary_html(summary: MatchSummary, *, width: int, height: int, theme:
     row_px = max(
         10,
         min(
-            round(height * 0.032),
+            round(size * 0.032),
             math.floor(table_height / (per_column + 1) / 1.35),
             math.floor(column_width / row_ems),
         ),
@@ -394,7 +405,7 @@ body {{
   padding: {pad_y}px {pad_x}px;
   color: {ink};
   font-family: "Splitsmith Mono", monospace;
-  text-shadow: 0 {max(1, height // 360)}px {max(2, height // 180)}px {stroke};
+  text-shadow: 0 {max(1, size // 360)}px {max(2, size // 180)}px {stroke};
 }}
 .head {{ display: flex; align-items: baseline; justify-content: space-between; gap: {pad_x // 2}px; }}
 .title {{
@@ -411,7 +422,7 @@ body {{
   display: flex;
   flex-wrap: nowrap;
   gap: {round(width * 0.025)}px;
-  margin-top: {round(height * 0.03)}px;
+  margin-top: {round(size * 0.03)}px;
   align-items: flex-end;
 }}
 .fig .v {{ font-size: {figure_px}px; line-height: 1.1; }}
@@ -423,12 +434,12 @@ body {{
   margin-top: {round(caption_px * 0.3)}px;
 }}
 .note {{ font-size: {note_px}px; color: {ink_2}; margin-top: {round(note_px * 0.4)}px; }}
-.notes {{ min-height: {round(note_px * 2.4)}px; margin-top: {round(height * 0.012)}px; }}
+.notes {{ min-height: {round(note_px * 2.4)}px; margin-top: {round(size * 0.012)}px; }}
 .tables {{
   display: grid;
   grid-template-columns: repeat({columns}, minmax(0, 1fr));
   column-gap: {column_gap}px;
-  margin-top: {round(height * 0.01)}px;
+  margin-top: {round(size * 0.01)}px;
   align-items: start;
 }}
 table {{ border-collapse: collapse; width: 100%; table-layout: fixed; font-size: {row_px}px; }}

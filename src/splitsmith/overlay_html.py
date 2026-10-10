@@ -833,9 +833,9 @@ def _fit_script(*, fit_columns: bool = False) -> str:
     ``fit_columns`` turns on a third step, between the two above and the
     width step: shrink the band until no grid column's text overflows
     its own column (``fitColumns`` in ``fit.js``). Only the stage
-    summary asks for it (:func:`single_html` / :func:`grid_html`'s
-    ``fit_columns``): a portrait card's quarter columns otherwise clip
-    ``1.42`` to ``1.4``. The live race and the free cell keep the old
+    summary and the grid's match summary ask for it (:func:`single_html`
+    / :func:`grid_html`'s ``fit_columns``): a portrait card's quarter
+    columns otherwise clip ``1.42`` to ``1.4``. The live race and the free cell keep the old
     policy, their rows change text frame to frame.
 
     Called by :mod:`splitsmith.overlay_raster` after
