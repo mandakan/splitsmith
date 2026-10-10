@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "audit-nudge-kept",
+      "date": "2026-10-10",
+      "title": "Moved shots stay where you put them",
+      "body": "A shot you moved on Audit came back at the detector's time the next time you opened the stage, and saving again undid your move. It now stays where you placed it."
+    },
+    {
       "id": "match-summary-on-upright-video",
       "date": "2026-10-10",
       "title": "Match summary fits vertical video",

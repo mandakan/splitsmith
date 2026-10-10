@@ -92,6 +92,56 @@ describe("shot id round-trip", () => {
     expect(doc.shots[0].id).toBeUndefined();
     expect(doc.shots[0].candidate_number).toBe(37);
   });
+
+  it("draws a detected shot at its stored time, not its candidate's, so a nudge survives a reload", () => {
+    const marker = {
+      id: "cand-37",
+      shotId: null,
+      kind: "detected" as const,
+      time: 7.2,
+      candidateNumber: 37,
+      confidence: 0.8,
+      peakAmplitude: 0.5,
+      note: "",
+    };
+    const saved = buildAuditJson({
+      base: { _candidates_pending_audit: { candidates: [{ candidate_number: 37, time: 7.25 }] } },
+      stage,
+      primaryBeepInClip: 5,
+      markers: [marker],
+      appendEvents: [],
+    } as never);
+    const reloaded = deriveMarkers(saved);
+    expect(reloaded).toHaveLength(1);
+    expect(reloaded[0].kind).toBe("detected");
+    expect(reloaded[0].time).toBe(7.2);
+  });
+
+  it("keeps both shots when two claim the same candidate, so a save drops neither", () => {
+    // A fixture snapped from another camera can bind two shots to one
+    // candidate; one marker per candidate lost the second on every save.
+    const doc = {
+      shots: [
+        { shot_number: 12, candidate_number: 30, time: 12.31, source: "promoted" },
+        { shot_number: 13, candidate_number: 30, time: 12.487, source: "promoted" },
+      ],
+      _candidates_pending_audit: { candidates: [{ candidate_number: 30, time: 12.4 }] },
+    };
+    const markers = deriveMarkers(doc as never);
+    const kept = markers.filter((m) => m.kind !== "rejected").map((m) => m.time).sort();
+    expect(kept).toEqual([12.31, 12.487]);
+    const saved = buildAuditJson({ base: doc, stage, primaryBeepInClip: 0, markers, appendEvents: [] } as never);
+    expect(saved.shots.map((s) => s.time)).toEqual([12.31, 12.487]);
+  });
+
+  it("draws a rejected candidate at the candidate's own time", () => {
+    const markers = deriveMarkers({
+      shots: [],
+      _candidates_pending_audit: { candidates: [{ candidate_number: 4, time: 6.123 }] },
+    } as never);
+    expect(markers[0].kind).toBe("rejected");
+    expect(markers[0].time).toBe(6.123);
+  });
 });
 
 describe("audit revision round-trip (spec 2026-09-27)", () => {

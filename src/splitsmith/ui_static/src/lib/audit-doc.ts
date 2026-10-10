@@ -61,18 +61,30 @@ function round3(n: number): number {
   return Math.round(n * 1000) / 1000;
 }
 
+/** A kept candidate's drawn time: its shot's, unless that is missing. */
+function keptTime(shotTime: number | undefined, candidateTime: number): number {
+  return shotTime != null && Number.isFinite(shotTime) ? shotTime : candidateTime;
+}
+
 export function deriveMarkers(audit: StageAudit | null): AuditMarker[] {
   if (!audit) return [];
   const candidates = audit._candidates_pending_audit?.candidates ?? [];
   const candidateNumbers = new Set(candidates.map((c) => c.candidate_number));
-  const shotsByCandidateNumber = new Map<number, true>();
+  // A kept candidate is drawn at its shot's stored time: a nudge or a
+  // promotion moves the shot, never the candidate, and drawing the
+  // candidate's time lost the move on the next save. The first shot naming
+  // a candidate claims it; a later one naming the same candidate (a fixture
+  // snapped from another camera can bind two shots to one) is drawn as a
+  // manual shot below, or the save would drop it.
+  const claimedBy = new Map<number, AuditShot>();
   for (const s of audit.shots ?? []) {
-    if (s.candidate_number != null) shotsByCandidateNumber.set(s.candidate_number, true);
+    const n = s.candidate_number;
+    if (n != null && candidateNumbers.has(n) && !claimedBy.has(n)) claimedBy.set(n, s);
   }
   const markers: AuditMarker[] = candidates.map((c) => ({
     id: `cand-${c.candidate_number}`,
-    kind: shotsByCandidateNumber.has(c.candidate_number) ? "detected" : "rejected",
-    time: c.time,
+    kind: claimedBy.has(c.candidate_number) ? "detected" : "rejected",
+    time: keptTime(claimedBy.get(c.candidate_number)?.time ?? undefined, c.time),
     candidateNumber: c.candidate_number,
     confidence: c.confidence ?? null,
     peakAmplitude: c.peak_amplitude ?? null,
@@ -99,7 +111,7 @@ export function deriveMarkers(audit: StageAudit | null): AuditMarker[] {
   // marker drawer doesn't crash on ``time.toFixed(...)``.
   for (const s of audit.shots ?? []) {
     if (s.time == null) continue;
-    if (s.candidate_number == null || !candidateNumbers.has(s.candidate_number)) {
+    if (s.candidate_number == null || claimedBy.get(s.candidate_number) !== s) {
       markers.push({
         id: s.id ?? `manual-shot-${s.shot_number}`,
         shotId: s.id ?? null,
