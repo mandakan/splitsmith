@@ -49,6 +49,10 @@ from ..match_project import atomic_write_json
 
 SYNC_STATE_FILE = "sync_state.json"
 
+#: The ``SyncState.schema_version`` from which audit bases know the stage
+#: note (#1376). Below it, ``run_sync`` re-pulls those docs once.
+STAGE_NOTE_SCHEMA = 3
+
 
 class SyncedItem(BaseModel):
     """Digest of one remote media object as of its last successful push."""
@@ -61,7 +65,10 @@ class SyncedItem(BaseModel):
 class SyncState(BaseModel):
     """The full local sync digest cache for one match."""
 
-    schema_version: int = 2
+    #: 3 (#1376): audit docs whose base predates ``stage_note`` were pulled
+    #: once (``run._forget_unaware_audit_versions``); a file still at 2 has
+    #: not completed a sync since. A fresh state starts at the current one.
+    schema_version: int = STAGE_NOTE_SCHEMA
     last_synced_at: datetime | None = None
     items: dict[str, SyncedItem] = Field(default_factory=dict)  # remote key -> digest
     #: doc identity ("match" / "project/<slug>" / "audit/<slug>/<stage>") ->

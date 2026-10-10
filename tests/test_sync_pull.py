@@ -17,7 +17,7 @@ import pytest
 from splitsmith import match_model
 from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 from splitsmith.sync.base import load_base_doc
-from splitsmith.sync.client import SyncClientError, SyncVersionConflict
+from splitsmith.sync.client import DocPutResult, SyncClientError, SyncVersionConflict
 from splitsmith.sync.plan import doc_identity_key
 from splitsmith.sync.pull import plan_pull, remote_doc_key
 from splitsmith.sync.run import SyncReport, format_sync_message, run_sync
@@ -197,6 +197,9 @@ class FakeSyncClient:
         self.docs[key] = (item.body, current + 1)
         self.put_calls.append((key, expected_version))
         return current + 1
+
+    def put_doc_detail(self, match_id, item, *, expected_version: int) -> DocPutResult:
+        return DocPutResult(version=self.put_doc(match_id, item, expected_version=expected_version))
 
     def upload_media(self, match_id, item, *, progress) -> str:
         progress(item.size)

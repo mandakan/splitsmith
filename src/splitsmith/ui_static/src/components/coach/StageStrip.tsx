@@ -15,7 +15,7 @@
  */
 import { useMemo, useRef } from "react";
 
-import { CHIP_TICK_BG as TICK_BG } from "@/components/ui/chipTicks";
+import { CHIP_TICK_BG } from "@/components/ui/chipTicks";
 import type { CoachShot, StageEvent, StageEventKind } from "@/lib/api";
 import { playheadX, stepShot, stripGeometry, stripTarget } from "@/lib/stageStrip";
 import { cn } from "@/lib/utils";
@@ -103,7 +103,7 @@ export function StageStrip({ shots, events, stageTime, tFromBeep, activeShotNumb
               }}
               className={cn(
                 "pointer-events-none absolute -translate-x-1/2 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led focus-visible:ring-offset-1 focus-visible:ring-offset-surface-2",
-                TICK_BG[t.tick],
+                CHIP_TICK_BG[t.tick],
                 active ? "inset-y-0 w-1 ring-1 ring-led ring-offset-1 ring-offset-surface-2" : "inset-y-1 w-0.5",
               )}
               style={{ left: pct(t.x) }}

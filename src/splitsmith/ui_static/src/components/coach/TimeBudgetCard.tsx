@@ -11,8 +11,6 @@ import { cn } from "@/lib/utils";
 
 import { TimeBudgetBar } from "./TimeBudgetBar";
 
-const TICK_BG = CHIP_TICK_BG;
-
 export interface TimeBudgetCardProps {
   budget: TimeBudget;
   onSelectShot?: (shotNumber: number) => void;
@@ -48,7 +46,7 @@ export function TimeBudgetCard({ budget, onSelectShot, className }: TimeBudgetCa
       {budget.segments.map((s) => (
         <div key={s.cls} className={cn(GRID, "numeral border-t border-rule py-1.5 text-md text-ink-2")}>
           <span className="inline-flex items-center gap-2 font-sans text-ink">
-            <i aria-hidden className={cn("size-2 rounded-full", TICK_BG[BUDGET_TICK[s.cls]])} />
+            <i aria-hidden className={cn("size-2 rounded-full", CHIP_TICK_BG[BUDGET_TICK[s.cls]])} />
             {BUDGET_LABEL[s.cls]}
           </span>
           <span className="text-right">{s.seconds.toFixed(2)}</span>

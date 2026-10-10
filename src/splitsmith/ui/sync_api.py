@@ -135,6 +135,17 @@ class SyncDocVersionResponse(BaseModel):
     version: int
 
 
+class SyncAuditDocVersionResponse(SyncDocVersionResponse):
+    """The audit doc upsert's response: the version, plus what it kept."""
+
+    #: Stored fields the pushed body lacked and the save kept (#1376: an
+    #: absent ``stage_note`` key). The stored doc then differs from what the
+    #: client sent, so a client that knows this field must not record
+    #: ``version`` as seen: it pulls and merges the doc on its next sync.
+    #: Older clients ignore it.
+    kept_fields: list[str] = Field(default_factory=list)
+
+
 class SyncDocMeta(BaseModel):
     """One manifest row: doc identity + version."""
 
@@ -679,7 +690,9 @@ async def put_project_doc(
     return SyncDocVersionResponse(version=version)
 
 
-@router.put("/matches/{match_id}/docs/audit/{slug}/{stage_number}", response_model=SyncDocVersionResponse)
+@router.put(
+    "/matches/{match_id}/docs/audit/{slug}/{stage_number}", response_model=SyncAuditDocVersionResponse
+)
 async def put_audit_doc(
     match_id: str,
     slug: str,
@@ -688,7 +701,7 @@ async def put_audit_doc(
     request: Request,
     body: dict[str, Any] = Body(...),
     user: Any = Depends(_current_user),
-) -> SyncDocVersionResponse:
+) -> SyncAuditDocVersionResponse:
     """Upsert one stage's audit doc at ``expected_version``. Schemaless -
     stored as-is, no model. Same optimistic-lock contract as
     ``put_match_doc``.
@@ -696,16 +709,20 @@ async def put_audit_doc(
     _hosted_gate()
     await _resolve_mirror(request, match_id)
     store = _project_state(request)
+    kept: list[str] = []
     if FIELD_STAGE_NOTE not in body:
         # A desktop older than the stage note (#1376) pushes docs without
         # the key: it never knew the field, so it cannot have cleared it (a
         # clear is an explicit null). Keep the hosted note rather than let
-        # that push erase one written on this mirror.
+        # that push erase one written on this mirror, and say so: the pusher
+        # now holds a doc that differs from the stored one by this note.
         stored, _ = await store.load_audit(match_id, slug, stage_number)
         if stored and FIELD_STAGE_NOTE in stored:
             body = {**body, FIELD_STAGE_NOTE: stored[FIELD_STAGE_NOTE]}
+            if stored[FIELD_STAGE_NOTE] is not None:
+                kept.append(FIELD_STAGE_NOTE)
     version = await store.save_audit(match_id, slug, stage_number, body, expected_version=expected_version)
-    return SyncDocVersionResponse(version=version)
+    return SyncAuditDocVersionResponse(version=version, kept_fields=kept)
 
 
 # ---------------------------------------------------------------------------

@@ -270,11 +270,11 @@ def test_put_audit_doc_is_schemaless_and_versions_increment(
 
     first = _put_doc(client, "m1", "audit/shooter-a/1", body={"shots": [0.5, 1.1]}, expected_version=0)
     assert first.status_code == 200, first.text
-    assert first.json() == {"version": 1}
+    assert first.json() == {"version": 1, "kept_fields": []}
 
     second = _put_doc(client, "m1", "audit/shooter-a/1", body={"shots": [0.5, 1.1, 1.9]}, expected_version=1)
     assert second.status_code == 200, second.text
-    assert second.json() == {"version": 2}
+    assert second.json() == {"version": 2, "kept_fields": []}
 
 
 # doc manifest + per-doc GET routes
@@ -589,10 +589,19 @@ def test_audit_push_without_the_stage_note_key_keeps_the_hosted_note(
     old_push = {"stage_number": 1, "shots": [], "audit_events": []}
     resp = _put_doc(client, "m1", "audit/anna/1", body=old_push, expected_version=1)
     assert resp.status_code == 200, resp.text
+    # It says so, for a client that knows the field; an older one reads
+    # only ``version`` and is unchanged.
+    assert resp.json() == {"version": 2, "kept_fields": ["stage_note"]}
     got = client.get(url).json()
     assert got["doc"]["stage_note"] == "from the phone"
     assert got["doc"]["audit_events"] == []
 
     clear = {"stage_number": 1, "shots": [], "stage_note": None}
-    assert _put_doc(client, "m1", "audit/anna/1", body=clear, expected_version=2).status_code == 200
+    resp = _put_doc(client, "m1", "audit/anna/1", body=clear, expected_version=2)
+    assert resp.json() == {"version": 3, "kept_fields": []}
+    assert client.get(url).json()["doc"]["stage_note"] is None
+    # A body without the key over a cleared note keeps the tombstone but
+    # reports nothing: both sides agree there is no note.
+    resp = _put_doc(client, "m1", "audit/anna/1", body=old_push, expected_version=3)
+    assert resp.json()["kept_fields"] == []
     assert client.get(url).json()["doc"]["stage_note"] is None

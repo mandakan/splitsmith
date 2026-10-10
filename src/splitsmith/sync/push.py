@@ -303,14 +303,21 @@ def run_push(
             label = doc.kind if doc.slug is None else f"{doc.kind} ({doc.slug})"
             on_progress(1.0, f"syncing {label}")
             key = doc_identity_key(doc.kind, doc.slug, doc.stage_number)
-            new_version = client.put_doc(
+            result = client.put_doc_detail(
                 plan.match_id, doc, expected_version=sync_state.doc_versions.get(key, 0)
             )
             # Record hash + version + base only after the PUT succeeds -
             # same crash-safety invariant as media: a failed push must
             # retry this doc next time, not skip it forever.
             sync_state.doc_hashes[key] = hash_doc_body(doc.body)
-            sync_state.doc_versions[key] = new_version
+            if result.kept_fields:
+                # Hosted kept a field this body lacked (a stage note written
+                # there while this doc never carried the key, #1376): the
+                # stored doc is not what was sent, so leave its version
+                # unseen and the next sync pulls and merges it.
+                sync_state.doc_versions.pop(key, None)
+            else:
+                sync_state.doc_versions[key] = result.version
             save_base_doc(match_root, key, doc.body)
             save_sync_state(match_root, sync_state)
 

@@ -25,11 +25,11 @@ import {
   type PeaksResult,
   type StageEvent,
 } from "@/lib/api";
+import { shotAtOrBefore } from "@/lib/coachReview";
 import { useSpacePlayPause } from "@/lib/keyboard";
 import { type TierBaselines, baselinesFromMatchDistributions } from "@/lib/splits";
-import { useIsMobile } from "@/lib/useIsMobile";
-import { shotAtOrBefore } from "@/lib/coachReview";
 import { parseStageLink, resolveStageLink } from "@/lib/stageLink";
+import { useIsMobile } from "@/lib/useIsMobile";
 import { useScrubSource } from "@/lib/useScrubSource";
 import { useStageEvents, type StageEvents } from "@/lib/useStageEvents";
 

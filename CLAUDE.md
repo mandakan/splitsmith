@@ -1334,7 +1334,12 @@ surfaced), unlike desktop-owned ``events``. A clear is an explicit
 field** (an older install): the sync audit PUT (``sync_api.put_audit_doc``)
 keeps the stored note when the body lacks the key, and the merge reads a
 side without it as unchanged, so an older desktop's push or recorded base
-never erases a note. Never drop the key to clear it. The audit event records
+never erases a note. When that PUT keeps a note the body lacked it answers
+``kept_fields`` (``SyncAuditDocVersionResponse``) and ``run_push`` leaves the
+doc's version unseen, so the next sync pulls and merges it; and a sync state
+below ``state.STAGE_NOTE_SCHEMA`` (3) runs ``run._forget_unaware_audit_versions``
+once (forget every audit version, drop ``stage_note`` from every audit base),
+marked done only when a sync completes. Never drop the key to clear it. The audit event records
 the note's length and a short hash, not its text (so does ``coach_patch``
 for ``coaching_note``). The coach payload carries ``stage_note``, ``null``
 for none, a clear and a share read alike. "Adjust in Breakdown" and
