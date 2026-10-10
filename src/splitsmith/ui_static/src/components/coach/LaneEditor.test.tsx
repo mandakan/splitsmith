@@ -224,6 +224,17 @@ describe("LaneEditor", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
+  it("editable lanes refuse touch panning; read-only lanes leave it to the page", () => {
+    // A touch pan mid-drag fires pointercancel, which undoes the drag (#1326).
+    const { unmount } = render(<Harness />);
+    for (const kind of ["movement", "reload", "activation"]) {
+      expect(screen.getByTestId(`lane-${kind}`)).toHaveClass("touch-none");
+    }
+    unmount();
+    render(<Harness readOnly />);
+    expect(screen.getByTestId("lane-reload")).not.toHaveClass("touch-none");
+  });
+
   it("a press whose snap lands inside a same-lane neighbour anchors on the raw press, never overlapping it", () => {
     const onChange = vi.fn();
     render(<Harness initial={[ev("evt-1", "reload", 4, 6.02)]} onChange={onChange} />);
