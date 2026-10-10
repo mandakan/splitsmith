@@ -10725,6 +10725,45 @@ def test_match_export_redraws_a_template_overlay_when_its_template_changed(
     assert _run_overlay_match_export(client, monkeypatch, style) == [], "and then reuses again"
 
 
+def _edit_look_palette(manifest: dict) -> None:
+    manifest["colors"]["accent"] = [10, 200, 90]
+
+
+def _edit_look_mono_font(manifest: dict) -> None:
+    manifest["fonts"]["mono"] = "roboto-mono"
+
+
+@pytest.mark.parametrize("request_style", [{}, {"overlay_variant": "plate"}], ids=["classic", "plate"])
+@pytest.mark.parametrize("edit", [_edit_look_palette, _edit_look_mono_font], ids=["palette", "font"])
+def test_match_export_redraws_an_overlay_when_its_look_changed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request_style: dict, edit: Callable[[dict], None]
+) -> None:
+    """Every style draws in the Look's palette and faces (Classic's clock
+    too), so the record carries their identity: an unchanged Look reuses the
+    MOV, a palette or font edit draws it again (#1403). Before, the record
+    held only the Look's name and the old colours shipped. Edits a copy of
+    the shipped Looks, never the files."""
+    import json as _json
+    import shutil
+
+    from splitsmith import looks
+
+    copy = tmp_path / "shipped-looks"
+    shutil.copytree(looks.shipped_looks_dir(), copy)
+    monkeypatch.setattr(looks, "shipped_looks_dir", lambda: copy)
+    client, _root = _seed_match_export_project(tmp_path, stage_count=1)
+    _stub_match_export_probe(monkeypatch)
+
+    assert _run_overlay_match_export(client, monkeypatch, request_style), "first export draws"
+    assert _run_overlay_match_export(client, monkeypatch, request_style) == [], "unchanged Look reuses"
+    manifest_path = copy / "splitsmith" / "look.json"
+    manifest = _json.loads(manifest_path.read_text(encoding="utf-8"))
+    edit(manifest)
+    manifest_path.write_text(_json.dumps(manifest), encoding="utf-8")
+    assert _run_overlay_match_export(client, monkeypatch, request_style), "edited Look redraws"
+    assert _run_overlay_match_export(client, monkeypatch, request_style) == [], "and then reuses again"
+
+
 def test_match_export_never_reuses_a_legacy_overlay_over_an_unreadable_audit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

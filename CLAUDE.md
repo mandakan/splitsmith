@@ -1293,10 +1293,21 @@ for every style (``ui/exports.overlay_audit_revision``), so any audit
 edit redraws; a template style's record also carries ``template``
 (``overlay_hud.overlay_template_identity``: the template's bytes and
 ``shared_digest``), so an edit to the template or a shared script redraws
-the exports' MOV too; Classic records carry none. One rule decides reuse,
-``ui/exports.overlay_record_matches``, for the match export job and the
-MCP tool alike; a legacy record never matches, and a failed redraw drops
-that stage's overlay with an anomaly rather than reusing the stale one.
+the exports' MOV too; Classic records carry none. Every style's record,
+Classic included, carries ``theme`` (``overlay_hud.overlay_theme_identity``:
+``theme_tokens(load_theme(look))`` plus both face ids, an own face by its
+content-named file name only, so a hosted materialisation agrees), so a
+palette or font edit to the Look redraws. ``audit_revision``, ``template``
+and ``theme`` are all read *before* the render; a null ``template`` or
+``theme`` never matches. One rule decides reuse,
+``ui/exports.overlay_record_matches``, for the match export job, the MCP
+tool and ``splitsmith match export`` alike (the CLI wants the recorded style
+and Look, like the MCP tool, unless an explicit ``--theme`` asks for another
+Look; it cannot redraw, so a stale overlay is left out with a note, which
+names the recorded Look when only the Look differs); a legacy record never
+matches, and a failed
+redraw drops that stage's overlay with an anomaly rather than reusing the
+stale one.
 
 Summary card: with confirmed reloads the Splits band gains Reloads /
 Reload avg / Exposed, drawn whenever there is a confirmed reload,

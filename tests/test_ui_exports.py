@@ -7,6 +7,7 @@ and the orchestrator's failure modes (missing audit, no shots).
 from __future__ import annotations
 
 import csv
+import dataclasses
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -1166,6 +1167,127 @@ def test_the_record_holds_the_template_read_before_the_render(
     )
     assert not exports_mod.overlay_record_matches(record, audit_revision=revision, wanted=wanted)
     assert not exports_mod.overlay_record_matches(record, audit_revision=revision)
+
+
+@pytest.mark.parametrize("variant", ["default", "plate"])
+def test_the_record_holds_the_look_theme_read_before_the_render(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, variant: str
+) -> None:
+    """A Look saved while the overlay renders (a palette edit in the Look
+    editor) was never drawn: the record names the theme as it stood when the
+    render began, so the next export draws again (#1403). Edits a copy of
+    the shipped Looks."""
+    import shutil
+
+    from splitsmith import looks, overlay_render
+    from splitsmith.overlay_hud import HudOptions, overlay_settings
+
+    copy = tmp_path / "shipped-looks"
+    shutil.copytree(looks.shipped_looks_dir(), copy)
+    monkeypatch.setattr(looks, "shipped_looks_dir", lambda: copy)
+    audit_path, exports_dir = _seed_stage_with_trim(tmp_path)
+    manifest_path = copy / "splitsmith" / "look.json"
+
+    def render_while_editing(**kwargs: Any) -> Path:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["colors"]["accent"] = [10, 200, 90]
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        kwargs["output_path"].write_bytes(b"mov")
+        return kwargs["output_path"]
+
+    monkeypatch.setattr(overlay_render, "render_overlay", render_while_editing)
+    exports_mod.export_stage(
+        request=exports_mod.StageExportRequest(
+            stage_number=1,
+            write_trim=False,
+            write_csv=False,
+            write_fcpxml=False,
+            write_report=False,
+            write_overlay=True,
+            overlay_variant=variant,
+        ),
+        audit_path=audit_path,
+        exports_dir=exports_dir,
+        source_video_path=None,
+        pre_buffer_seconds=5.0,
+        post_buffer_seconds=5.0,
+        stage_data=StageData(
+            stage_number=1,
+            stage_name="Stage 1 -- H1",
+            time_seconds=8.0,
+            scorecard_updated_at=datetime(2026, 5, 2, 14, 30, tzinfo=UTC),
+        ),
+        beep_time_in_source=10.0,
+        config=Config(),
+    )
+    record = exports_mod.read_overlay_settings(exports_dir / "stage1_stage-1-h1_overlay.json")
+    revision = exports_mod.overlay_audit_revision(audit_path)
+    wanted = overlay_settings(
+        look="splitsmith",
+        variant=variant,
+        options=HudOptions(),
+        codec="auto",
+        max_height=None,
+        max_fps=None,
+        audit_revision=revision,
+    )
+    assert not exports_mod.overlay_record_matches(record, audit_revision=revision, wanted=wanted)
+    assert not exports_mod.overlay_record_matches(record, audit_revision=revision)
+
+
+def test_a_record_without_a_theme_identity_never_matches() -> None:
+    """A Classic record from before the theme key existed cannot say which
+    palette it drew, and one whose Look could not be read records
+    ``"theme": null``: neither matches, and null == null never reads as a
+    match (#1403)."""
+    from splitsmith.overlay_hud import HudOptions, overlay_settings
+
+    def settings(look: str) -> dict:
+        return overlay_settings(
+            look=look,
+            variant="default",
+            options=HudOptions(),
+            codec="auto",
+            max_height=None,
+            max_fps=None,
+            audit_revision="rev",
+        )
+
+    current = settings("splitsmith")
+    assert current["theme"]
+    assert exports_mod.overlay_record_matches(current, audit_revision="rev", wanted=current)
+    legacy = {k: v for k, v in current.items() if k != "theme"}
+    assert not exports_mod.overlay_record_matches(legacy, audit_revision="rev", wanted=current)
+    assert not exports_mod.overlay_record_matches(legacy, audit_revision="rev")
+    unreadable = settings("nosuch")
+    assert unreadable["theme"] is None
+    assert not exports_mod.overlay_record_matches(unreadable, audit_revision="rev")
+    assert not exports_mod.overlay_record_matches(unreadable, audit_revision="rev", wanted=dict(unreadable))
+
+
+def test_the_theme_identity_keeps_only_an_own_fonts_content_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A Look's own face resolves to an absolute path; the same Look read
+    from another folder (hosted materialises one per tenant and content
+    hash) must give the same identity, so only the content-named file name
+    is kept."""
+    from splitsmith import overlay_theme
+    from splitsmith.overlay_hud import overlay_theme_identity
+
+    real = overlay_theme.load_theme("splitsmith")
+    seen: list[str] = []
+    for folder in ("a", "b"):
+        face = str(tmp_path / folder / "fonts" / "font-0123456789ab.ttf")
+        monkeypatch.setattr(
+            overlay_theme, "load_theme", lambda _name, face=face: dataclasses.replace(real, mono_font=face)
+        )
+        identity = overlay_theme_identity("splitsmith")
+        assert identity is not None
+        seen.append(identity)
+    assert seen[0] == seen[1]
+    monkeypatch.setattr(overlay_theme, "load_theme", lambda _name: real)
+    assert overlay_theme_identity("splitsmith") != seen[0]
 
 
 def test_the_audit_revision_is_none_for_an_unreadable_audit(tmp_path: Path) -> None:
