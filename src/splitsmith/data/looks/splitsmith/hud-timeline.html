@@ -41,6 +41,14 @@
   }
   #chip .label { font-size: 1.6vh; }
   #chip .num { font-size: 3.2vh; }
+  /* Upright video: the clock is as wide as a fifth of the page, so the
+     track lifts off the clock row and runs the page's width, its split
+     tag above it, and the chip above the tag. */
+  @media (max-aspect-ratio: 1/1) {
+    #band { height: 30vh; }
+    #track { left: 5vh; right: 5vh; bottom: 14.5vh; }
+    #chip { bottom: 26.5vh; }
+  }
   #stamp { position: absolute; left: 0; right: 0; top: 34%; text-align: center; opacity: 0; }
   #stamp .label { font-size: 2.5vh; letter-spacing: 0.3em; }
   #stamp .num { font-size: 16vh; }
