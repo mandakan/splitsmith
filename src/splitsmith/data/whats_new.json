@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "coach-review-page",
+      "date": "2026-10-10",
+      "title": "Review a stage on Coach",
+      "body": "Coach now shows the stage video, a strip of its shots and reloads, the figures, and notes on the stage and each shot that save as you type. To change regions or intervals, use Adjust in Breakdown."
+    },
+    {
       "id": "breakdown-page",
       "date": "2026-10-10",
       "title": "Mark movement and reloads on a stage",

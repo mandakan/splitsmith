@@ -157,7 +157,9 @@ def test_coach_writes_hold_the_lock(tmp_path: Path, monkeypatch) -> None:
     assert client.post("/api/shooters/me/stages/1/coach/reclassify").status_code == 200
     resp = client.patch("/api/shooters/me/stages/1/shots/1/coach", json={"coaching_note": "smoother"})
     assert resp.status_code == 200, resp.text
-    assert saves == [True, True]
+    resp = client.patch("/api/shooters/me/stages/1/stage-note", json={"stage_note": "draw earlier"})
+    assert resp.status_code == 200, resp.text
+    assert saves == [True, True, True]
     # Each save's own load ran under the lock too (not only the save).
     assert loads[-1] is True
 

@@ -6753,6 +6753,17 @@ class StageEventsPutRequest(BaseModel):
     revision: str | None = Field(default=None, alias=REVISION_FIELD)
 
 
+class StageNotePatchRequest(BaseModel):
+    """Body for PATCH .../stages/{n}/stage-note (#1376): the stage note's new
+    text (empty or null clears it) and the audit revision the client loaded;
+    a stale one is a 409 like the events PUT."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    stage_note: str | None = Field(default=None, max_length=10_000)
+    revision: str | None = Field(default=None, alias=REVISION_FIELD)
+
+
 class CleanupRequest(BaseModel):
     """Body for POST /api/project/cleanup.
 
@@ -14568,6 +14579,20 @@ def create_app(
         """
         return state.save_audit(slug, stage_number, payload, version=version)
 
+    def _note_digest(text: str | None) -> dict[str, Any] | None:
+        """A note as an audit event records it: its length and a short hash,
+        never the text. Notes autosave after every pause and the journal
+        syncs, so the text itself would be copied once per pause."""
+        if text is None:
+            return None
+        return {"length": len(text), "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]}
+
+    def _stage_note(payload: dict[str, Any]) -> str | None:
+        """The doc's stage note, or None for a missing or non-string one
+        (audit docs are hand-editable JSON)."""
+        note = payload.get(coach_module.FIELD_STAGE_NOTE)
+        return note if isinstance(note, str) and note else None
+
     def _build_coach_response(
         slug: str,
         payload: dict[str, Any],
@@ -14675,6 +14700,9 @@ def create_app(
                 for e in stage_events
             ],
             "event_summary": summary.model_dump(),
+            # The stage note (#1376): private text, like ``coaching_note``,
+            # so a share read gets none.
+            "stage_note": None if current_share_request.get() else _stage_note(payload),
             # The stored audit doc's content revision, what the events PUT
             # compares against (the audit route's ``_version``).
             REVISION_FIELD: stored_revision if stored_revision is not None else audit_revision(payload),
@@ -14819,6 +14847,58 @@ def create_app(
             )
         )
 
+    @app.patch("/api/shooters/{slug}/stages/{stage_number}/stage-note")
+    def patch_stage_note(slug: str, stage_number: int, req: StageNotePatchRequest) -> JSONResponse:
+        """Write the stage's note (#1376), edited on the Coach review page.
+        Empty or null removes it. A ``_version`` that no longer matches the
+        stored doc is the audit PUT's 409 ``version_conflict``. A REVIEW
+        route, like the shot coach PATCH: ``sync.merge.merge_audit_doc``
+        merges the field three-way, so a mirror's note reaches the desktop.
+        Returns the coach payload."""
+        project = state.shooter_project(slug)
+        try:
+            stg = project.stage(stage_number)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        cfg = coach_module.auto_classify_config()
+        with _audit_rmw():
+            stored, version = state.load_audit(slug, stage_number)
+            if stored is None:
+                raise HTTPException(status_code=404, detail=f"no audit JSON yet for stage {stage_number}")
+            if req.revision is not None and req.revision != audit_revision(stored):
+                raise AuditRevisionConflictError(f"stage {stage_number} audit changed since it was loaded")
+            # The response reads the events; a corrupt list is the GET's 422,
+            # raised here before the save rather than after it.
+            _coach_events(stored, stage_number)
+            # A clear writes ``null``, never drops the key: sync reads an
+            # absent key as "this writer never knew the field" (an older
+            # install), and only the tombstone deletes on the other side.
+            text = req.stage_note or None
+            stored[coach_module.FIELD_STAGE_NOTE] = text
+            stored.setdefault("audit_events", []).append(
+                {
+                    "id": _new_event_id(),
+                    "ts": _now_iso(),
+                    "kind": "stage_note",
+                    "payload": {"stage_note": _note_digest(text)},
+                }
+            )
+            version = _coach_save(slug, stage_number, stored, version)
+        prim = stg.primary()
+        beep_in_clip = _video_beep_in_clip(slug, project, stage_number, prim) if prim is not None else None
+        return JSONResponse(
+            _build_coach_response(
+                slug,
+                stored,
+                beep_in_clip,
+                stg,
+                project,
+                cfg,
+                version,
+                capacity=_coach_capacity(slug, project),
+            )
+        )
+
     @app.post("/api/shooters/{slug}/stages/{stage_number}/coach/reclassify")
     def reclassify_stage_coach(slug: str, stage_number: int) -> JSONResponse:
         """Force the auto-classifier to (re)write ``interval_class`` for
@@ -14908,7 +14988,18 @@ def create_app(
                     "payload": {
                         "shot_id": target.get("id"),
                         "shot_number": target.get("shot_number"),
-                        "fields": coach_module.read_coach_fields(target),
+                        "fields": {
+                            **coach_module.read_coach_fields(target),
+                            **(
+                                {
+                                    coach_module.FIELD_COACHING_NOTE: _note_digest(
+                                        target[coach_module.FIELD_COACHING_NOTE]
+                                    )
+                                }
+                                if isinstance(target.get(coach_module.FIELD_COACHING_NOTE), str)
+                                else {}
+                            ),
+                        },
                     },
                 }
             )

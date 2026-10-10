@@ -160,7 +160,8 @@ describe("Breakdown", () => {
     expect(within(inspector).getByRole("region", { name: "Shots" })).toBeInTheDocument();
     expect(screen.getByText("Audio")).toBeInTheDocument();
     expect(screen.getAllByText("Movement").length).toBeGreaterThan(0);
-    expect(screen.getByRole("link", { name: "Review in Coach" })).toHaveAttribute("href", "/match/m1/coach/anna/2");
+    // Before the video has a position the link carries the current shot (#1377).
+    expect(screen.getByRole("link", { name: "Review in Coach" })).toHaveAttribute("href", "/match/m1/coach/anna/2?shot=1");
     expect(screen.getByRole("link", { name: "Previous stage" })).toHaveAttribute("href", "/match/m1/breakdown/anna/1");
     expect(screen.getByRole("link", { name: "Next stage" })).toHaveAttribute("href", "/match/m1/breakdown/anna/3");
   });
@@ -203,6 +204,36 @@ describe("Breakdown", () => {
       ),
     );
     await waitFor(() => expect(screen.getByText("2 regions")).toBeInTheDocument());
+  });
+});
+
+describe("Breakdown deep links (#1377)", () => {
+  beforeEach(() => {
+    vi.mocked(api.getProject).mockResolvedValue(PROJECT);
+    vi.mocked(api.getStageCoach).mockReset();
+    vi.mocked(api.getStageCoach).mockResolvedValue(coach(EVENTS));
+  });
+
+  it("opens at the link's time with its shot and region, and Review in Coach carries them back", async () => {
+    renderAt("/match/m1/breakdown/anna/2?t=2.75&shot=2&region=evt-2");
+    const inspector = await screen.findByRole("complementary", { name: "Inspector" });
+    expect(within(inspector).getByRole("region", { name: "Region" })).toBeInTheDocument();
+    // The transport reads seconds from the beep (the clip seeks to 5 + 2.75),
+    // and names the current shot by its time from the beep too.
+    expect(screen.getByText("2.75 s")).toBeInTheDocument();
+    expect(screen.getByText("shot 02 at 2.00 s")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Review in Coach" })).toHaveAttribute(
+      "href",
+      "/match/m1/coach/anna/2?t=2.75&shot=2",
+    );
+  });
+
+  it("ignores a stale shot and region and a time that does not parse", async () => {
+    renderAt("/match/m1/breakdown/anna/2?t=soon&shot=99&region=evt-404");
+    const inspector = await screen.findByRole("complementary", { name: "Inspector" });
+    expect(within(inspector).getByRole("region", { name: "Shot 1" })).toBeInTheDocument();
+    expect(within(inspector).queryByRole("region", { name: "Region" })).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });
 

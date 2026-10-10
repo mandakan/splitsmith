@@ -220,6 +220,121 @@ def test_audit_remote_shot_nudge_is_not_a_tripwire():
     assert not r.notes
 
 
+# stage_note (#1376): merged like a shot's coaching_note
+
+
+def _noted(note):
+    """A doc that knows the field: a note, or ``None`` for the clear tombstone."""
+    doc = _audit([_shot(1)], [])
+    doc["stage_note"] = note
+    return doc
+
+
+def _unaware():
+    """A doc written by an install older than the stage note: no key at all."""
+    return _audit([_shot(1)], [])
+
+
+def test_stage_note_remote_only_change_wins_without_a_note():
+    # A note written on hosted (a mirror) reaches the desktop's doc.
+    r = merge_audit_doc(
+        _unaware(),
+        _unaware(),
+        _noted("from the phone"),
+        doc_key="audit/anna/3",
+        local_ts=T_OLD,
+        remote_ts=T_NEW,
+    )
+    assert r.doc["stage_note"] == "from the phone"
+    assert r.conflicts == [] and r.notes == [] and r.changed_vs_local is True
+
+
+def test_stage_note_local_only_change_is_kept():
+    # A desktop edit survives a pull whose copy still holds the base note.
+    r = merge_audit_doc(
+        _noted("base"),
+        _noted("desktop"),
+        _noted("base"),
+        doc_key="audit/anna/3",
+        local_ts=T_NEW,
+        remote_ts=T_OLD,
+    )
+    assert r.doc["stage_note"] == "desktop"
+    assert r.conflicts == [] and r.changed_vs_local is False
+
+
+def test_stage_note_remote_clear_tombstone_clears_it():
+    r = merge_audit_doc(
+        _noted("base"), _noted("base"), _noted(None), doc_key="audit/anna/3", local_ts=T_OLD, remote_ts=T_NEW
+    )
+    assert r.doc["stage_note"] is None
+
+
+def test_stage_note_a_poisoned_base_heals_on_the_upgraded_pull():
+    # An older desktop recorded base = hosted's doc (with the note) while its
+    # own doc never carried the key. Upgraded, its missing key is "never
+    # knew the field", not a delete: the note comes back.
+    r = merge_audit_doc(
+        _noted("from the phone"),
+        _unaware(),
+        _noted("from the phone"),
+        doc_key="audit/anna/3",
+        local_ts=T_NEW,
+        remote_ts=T_OLD,
+    )
+    assert r.doc["stage_note"] == "from the phone"
+    assert r.conflicts == []
+
+
+def test_stage_note_a_doc_without_the_key_never_clears_the_other_side():
+    # Remote unaware (pushed by an older install): local's note stands.
+    r = merge_audit_doc(
+        _noted("base"), _noted("desktop"), _unaware(), doc_key="audit/anna/3", local_ts=T_OLD, remote_ts=T_NEW
+    )
+    assert r.doc["stage_note"] == "desktop" and r.conflicts == []
+    # Local unaware, remote changed: remote wins, no conflict.
+    r = merge_audit_doc(
+        _noted("base"), _unaware(), _noted("phone"), doc_key="audit/anna/3", local_ts=T_NEW, remote_ts=T_OLD
+    )
+    assert r.doc["stage_note"] == "phone" and r.conflicts == []
+
+
+def test_stage_note_neither_side_knows_the_field_leaves_the_doc_alone():
+    r = merge_audit_doc(
+        _unaware(), _unaware(), _unaware(), doc_key="audit/anna/3", local_ts=T_OLD, remote_ts=T_NEW
+    )
+    assert "stage_note" not in r.doc and r.changed_vs_local is False
+
+
+@pytest.mark.parametrize(
+    ("local_ts", "remote_ts", "winner", "expected"),
+    [(T_OLD, T_NEW, "remote", "theirs"), (T_NEW, T_OLD, "local", "mine")],
+)
+def test_stage_note_both_changed_newer_wins_and_is_surfaced(local_ts, remote_ts, winner, expected):
+    r = merge_audit_doc(
+        _noted("base"),
+        _noted("mine"),
+        _noted("theirs"),
+        doc_key="audit/anna/3",
+        local_ts=local_ts,
+        remote_ts=remote_ts,
+    )
+    assert r.doc["stage_note"] == expected
+    assert [(c.unit, c.winner) for c in r.conflicts] == [("stage_note", winner)]
+
+
+def test_stage_note_both_sides_converged_is_no_conflict():
+    r = merge_audit_doc(
+        _noted("base"),
+        _noted("same"),
+        _noted("same"),
+        doc_key="audit/anna/3",
+        local_ts=T_OLD,
+        remote_ts=T_NEW,
+    )
+    assert r.doc["stage_note"] == "same" and r.conflicts == []
+
+
 # needs_attention (triage slice 4)
 
 

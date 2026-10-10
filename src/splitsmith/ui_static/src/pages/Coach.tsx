@@ -12,27 +12,22 @@
  * the rest (per-stage times, ranking, annotations feed) loops over the
  * project's audited stages.
  *
- * Per-stage preserves the existing wiring:
- *   - GET /api/stages/{n}/coach loads shots + videos + beep
- *   - POST .../reclassify reruns auto-classification
- *   - PATCH .../shots/{s}/coach writes class / flag / note edits
- * but the chrome / layout is the polished design.
+ * Per-stage is the review page (#1374, epic #1370): the video, the figures,
+ * the time budget, and the metadata edited here -- per-shot notes and flags
+ * (PATCH .../shots/{s}/coach). Regions and interval classes are display
+ * only; "Adjust in Breakdown" opens the editor.
  */
 
 import { ArrowLeft, ArrowRight, Loader2 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
+import { Link, Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 
-import { CoachShotTable } from "@/components/coach/CoachShotTable";
-import { EventList } from "@/components/coach/EventList";
-import { SaveNotice } from "@/components/coach/SaveNotice";
-import { SelectedRegionCard } from "@/components/coach/SelectedRegionCard";
-import { ShotEditor } from "@/components/coach/ShotEditor";
-import { StageBand } from "@/components/coach/StageBand";
+import { ReviewShotList } from "@/components/coach/ReviewShotList";
+import { StageNoteCard } from "@/components/coach/StageNoteCard";
+import { StageStrip } from "@/components/coach/StageStrip";
 import { StageTransport, StageVideo } from "@/components/coach/StageViewer";
 import { TimeBudgetBar } from "@/components/coach/TimeBudgetBar";
 import { TimeBudgetCard } from "@/components/coach/TimeBudgetCard";
-import { ShotRuler } from "@/components/results/ShotRuler";
 import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/Chip";
 import { Label } from "@/components/ui/Label";
@@ -41,14 +36,16 @@ import { Stat, StatStrip } from "@/components/ui/Stat";
 import {
   ApiError,
   api,
+  capabilityDenied,
   type CoachIntervalClass,
   type CoachMatchDistributions,
   type CoachShot,
   type CoachStageResponse,
   type MatchProject,
 } from "@/lib/api";
-import { confirmedEvents, summarize } from "@/lib/events";
+import { reviewFigures } from "@/lib/coachReview";
 import { useMatchHref } from "@/lib/matchHref";
+import { stageLinkSearch } from "@/lib/stageLink";
 import { INTERVAL_LABEL, baselinesFromMatchDistributions, gapTier, statisticSplits } from "@/lib/splits";
 import { BUDGET_LABEL, BUDGET_TICK, matchBudget, timeBudget } from "@/lib/timeBudget";
 import { useStageWorkspace, deriveStageView } from "@/lib/useStageWorkspace";
@@ -720,31 +717,17 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
   const coachPrefix = href("coach", slug);
   const auditPrefix = href("audit", slug);
   const breakdownPrefix = href("breakdown", slug);
-  const ws = useStageWorkspace(slug, stage);
+  // Coach is the review page (#1374, epic #1370): no band, so no peaks.
+  const { search } = useLocation();
+  const ws = useStageWorkspace(slug, stage, { peaks: false, link: search });
   const { project, coach, baselines, distributions, error, regions } = ws;
-  const [noteDraft, setNoteDraft] = useState("");
-
-  useEffect(() => {
-    if (!coach || ws.activeShotNumber == null) return;
-    const shot = coach.shots.find((s) => s.shot_number === ws.activeShotNumber);
-    setNoteDraft(shot?.coaching_note ?? "");
-  }, [ws.activeShotNumber, coach]);
 
   const budget = useMemo(() => timeBudget(coach?.shots ?? [], distributions), [coach, distributions]);
-  // Moving-shot and exposed-reload figures come from the hook's local
-  // ``events`` list (spec #1324), not the server's ``event_summary``: a
-  // nudge or a drag release updates the strip before its PUT resolves.
-  // ``summarize`` is the TS twin of the server's ``events.stage_event_summary``,
-  // over the confirmed regions only, as the exports and the share figures
-  // count them: a proposal shows its own figures on its card and in the
-  // list, never in the stage totals until it is kept. ``capacity_warning``
-  // stays server-side: it needs the division capacity, which the SPA never
-  // receives. Computed above the early returns below: a hook cannot be
-  // conditional on ``coach`` being loaded yet.
-  const localSummary = useMemo(
-    () => summarize(coach?.shots.map((s) => s.time_from_beep) ?? [], confirmedEvents(regions.events), null),
-    [coach, regions.events],
-  );
+  // Display only: the region figures count the confirmed regions, as the
+  // exports and the share figures do (``reviewFigures``). Regions are
+  // Breakdown's to change. Computed above the early returns below: a hook
+  // cannot be conditional on ``coach`` being loaded yet.
+  const figures = useMemo(() => reviewFigures(coach?.shots ?? [], regions.events), [coach, regions.events]);
 
   if (error) {
     return (
@@ -765,27 +748,29 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
     );
   }
 
-  const { activeShot, prevStage, nextStage, eventsReadOnly, selectedEvent } = view;
-  const maxAbs = coach.shots.length > 0 ? Math.max(...coach.shots.map((s) => s.time_absolute)) : 0;
-  const minAbs = coach.shots.length > 0 ? Math.min(...coach.shots.map((s) => s.time_absolute)) : 0;
-  const span = Math.max(0.0001, maxAbs - minAbs);
-  const summary = coach.event_summary
-    ? { ...localSummary, capacity_warning: coach.event_summary.capacity_warning }
-    : undefined;
+  const { prevStage, nextStage } = view;
+  // Breakdown opens at this moment and shot (#1377); before the video has a
+  // position, the shot's own time.
+  const here = stageLinkSearch({ t: ws.currentTime > 0 ? view.tFromBeep : null, shot: ws.activeShotNumber });
+  const capacityWarning = coach.event_summary?.capacity_warning ?? null;
+  // Notes and flags are review actions: a mirror without the review
+  // capability (never the case today) shows them read-only.
+  const notesReadOnly = capabilityDenied(project.capabilities, "review");
   const selectShotNumber = (n: number) => {
     const shot = coach.shots.find((s) => s.shot_number === n);
     if (shot) ws.seekToShot(shot);
   };
   const stepButton = (label: string, to: number | null, icon: React.ReactNode) =>
     to != null ? (
-      <Button asChild size="icon" aria-label={label}>
+      <Button asChild size="icon" aria-label={label} className="size-10">
         <Link to={`${coachPrefix}/${to}`}>{icon}</Link>
       </Button>
     ) : (
-      <Button type="button" size="icon" disabled aria-label={label}>
+      <Button type="button" size="icon" disabled aria-label={label} className="size-10">
         {icon}
       </Button>
     );
+  const dash = "—";
 
   return (
     <div className="px-4 py-4 md:px-7 md:py-5">
@@ -805,21 +790,17 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
               </Chip>
             ) : null}
             {!budget.classified && coach.shots.length > 0 ? <Chip tick="muted">unclassified</Chip> : null}
-            {summary?.capacity_warning ? <Chip tone="warn">{summary.capacity_warning}</Chip> : null}
+            {capacityWarning ? <Chip tone="warn">{capacityWarning}</Chip> : null}
           </span>
         }
         actions={
           <>
-            <Button type="button" onClick={() => void ws.reclassify()} disabled={ws.reclassifying} title="Re-run the auto-classifier; manual overrides survive">
-              {ws.reclassifying ? "Reclassifying\u2026" : "Reclassify"}
+            {/* Regions and intervals are edited in Breakdown. Coach sits
+                behind DesktopGate too, so no phone reaches this header. */}
+            <Button asChild size="lg">
+              <Link to={`${breakdownPrefix}/${stage}${here}`}>Adjust in Breakdown</Link>
             </Button>
-            {/* Breakdown is desktop only (DesktopGate): the phone keeps Coach. */}
-            {ws.isMobile ? null : (
-              <Button asChild>
-                <Link to={`${breakdownPrefix}/${stage}`}>Breakdown</Link>
-              </Button>
-            )}
-            <Button asChild>
+            <Button asChild size="lg">
               <Link to={`${auditPrefix}/${stage}`}>Audit</Link>
             </Button>
             {stepButton("Previous stage", prevStage, <ArrowLeft className="size-4" />)}
@@ -828,67 +809,69 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
         }
       />
 
-      {summary ? (
-        <StatStrip className="mb-4">
-          <Stat label="On the move" value={String(summary.moving_shots)} unit={summary.moving_shots === 1 ? "shot" : "shots"} />
-          {summary.reloads > 0 ? (
-            <Stat label="Exposed reload" value={summary.exposed_reload_s.toFixed(2)} unit="s" />
-          ) : null}
-        </StatStrip>
-      ) : null}
-
-      {coach.shots.length > 0 ? <TimeBudgetCard budget={budget} onSelectShot={selectShotNumber} className="mb-4" /> : null}
-
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
-        <div className="overflow-hidden rounded-[10px] border border-rule bg-surface">
-          <StageVideo ws={ws} view={view} className="aspect-video w-full" />
-          <StageTransport ws={ws} view={view} className="border-t border-rule" />
-          <div className="border-t border-rule px-3 py-2">
-            <ShotRuler
-              shots={coach.shots}
-              minAbs={minAbs}
-              span={span}
-              activeShotNumber={ws.activeShotNumber}
-              onSeek={ws.seekToShot}
-              baselines={baselines}
-            />
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start xl:grid-cols-[minmax(0,1fr)_380px]">
+        <div className="flex min-w-0 flex-col gap-4">
+          <div className="overflow-hidden rounded-[10px] border border-rule bg-surface">
+            <StageVideo ws={ws} view={view} className="aspect-video w-full" />
+            <StageTransport ws={ws} view={view} touch className="border-t border-rule" />
+            <div className="border-t border-rule px-3.5 pb-2 pt-2.5">
+              <Label>Stage</Label>
+              <StageStrip
+                className="mt-2"
+                shots={coach.shots}
+                events={regions.events}
+                stageTime={view.stageTime}
+                tFromBeep={view.tFromBeep}
+                activeShotNumber={ws.activeShotNumber}
+                onSeek={ws.seekToTime}
+              />
+            </div>
           </div>
+
+          <StatStrip aria-label="Figures">
+            <Stat label="Avg split" value={figures.avgSplit != null ? figures.avgSplit.toFixed(2) : dash} unit={figures.avgSplit != null ? "s" : undefined} tone={figures.avgSplit == null ? "dim" : "ink"} />
+            <Stat label="Draw" value={figures.draw != null ? figures.draw.toFixed(2) : dash} unit={figures.draw != null ? "s" : undefined} tone={figures.draw == null ? "dim" : "ink"} />
+            {figures.reloads > 0 ? <Stat label="Exposed reload" value={figures.exposedReload.toFixed(2)} unit="s" /> : null}
+            <Stat label="On the move" value={String(figures.movingShots)} unit={figures.movingShots === 1 ? "shot" : "shots"} />
+          </StatStrip>
         </div>
 
-        <CoachShotTable shots={coach.shots} activeShotNumber={ws.activeShotNumber} baselines={baselines} onSelect={ws.seekToShot} />
-      </div>
+        {/* The notes column spans both rows at xl, so the budget sits under
+            the video; on a 1024 px tablet the budget takes the full width
+            under both, where its columns fit. */}
+        <div className="flex min-w-0 flex-col gap-4 lg:col-start-2 lg:row-start-1 xl:row-span-2">
+          <StageNoteCard
+            note={coach.stage_note ?? null}
+            save={ws.saveStageNote}
+            reload={async () => {
+              const fresh = await ws.reload().catch(() => null);
+              return fresh ? (fresh.stage_note ?? "") : null;
+            }}
+            readOnly={notesReadOnly}
+          />
+          <ReviewShotList
+            shots={coach.shots}
+            activeShotNumber={ws.activeShotNumber}
+            baselines={baselines}
+            onSelect={ws.seekToShot}
+            onSaveNote={(shot, text) => ws.savePatch(shot, { coaching_note: text })}
+            onToggleFlag={(shot) => void ws.patchShot(shot, { improvement_flag: !shot.improvement_flag })}
+            onReloadNote={async (shot) => {
+              const fresh = await ws.reload().catch(() => null);
+              if (!fresh) return null;
+              const same = fresh.shots.find((s) => (shot.id ? s.id === shot.id : s.shot_number === shot.shot_number));
+              return same?.coaching_note ?? "";
+            }}
+            onNoteFocus={ws.holdActiveShot}
+            readOnly={notesReadOnly}
+          />
+        </div>
 
-      <div className="mt-4 flex flex-col gap-4">
-        <StageBand ws={ws} view={view} />
-        {regions.issue ? (
-          <SaveNotice issue={regions.issue} busy={regions.busy} onRetry={regions.retry} onDismiss={regions.dismiss} />
-        ) : null}
-        {eventsReadOnly ? <EventList events={regions.events} shots={coach.shots} /> : null}
-
-        {selectedEvent ? (
-          <SelectedRegionCard event={selectedEvent} regions={regions} />
-        ) : activeShot ? (
-          <ShotEditor
-            shot={activeShot}
-            tier={gapTier(activeShot.split, activeShot.interval_class, baselines)}
-            noteDraft={noteDraft}
-            onNoteChange={setNoteDraft}
-            onSave={() =>
-              void ws.patchShot(activeShot, {
-                coaching_note: noteDraft || null,
-              })
-            }
-            onClassify={(cls) =>
-              void ws.patchShot(activeShot, {
-                interval_class: cls,
-                interval_class_source: "manual",
-              })
-            }
-            onToggleFlag={() =>
-              void ws.patchShot(activeShot, {
-                improvement_flag: !activeShot.improvement_flag,
-              })
-            }
+        {coach.shots.length > 0 ? (
+          <TimeBudgetCard
+            budget={budget}
+            onSelectShot={selectShotNumber}
+            className="min-w-0 lg:col-span-2 xl:col-span-1 xl:col-start-1 xl:row-start-2"
           />
         ) : null}
       </div>

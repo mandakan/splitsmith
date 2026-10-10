@@ -28,6 +28,7 @@ import concurrent.futures
 import hashlib
 import threading
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import IO
 
 import httpx
@@ -62,6 +63,15 @@ class SyncVersionConflict(SyncClientError):
         super().__init__(message)
         #: The doc identity key the PUT was for.
         self.key = key
+
+
+@dataclass(frozen=True)
+class DocPutResult:
+    """A doc PUT's answer: the assigned version, and the stored fields
+    hosted kept that the pushed body lacked (#1376)."""
+
+    version: int
+    kept_fields: tuple[str, ...] = ()
 
 
 class SyncMirrorGone(SyncClientError):
@@ -141,6 +151,11 @@ class HostedSyncClient:
         the version the hosted side assigned. Raises
         :class:`SyncVersionConflict` when the row moved on since the
         manifest/pull this ``expected_version`` came from."""
+        return self.put_doc_detail(match_id, item, expected_version=expected_version).version
+
+    def put_doc_detail(self, match_id: str, item: DocItem, *, expected_version: int) -> DocPutResult:
+        """``put_doc`` plus the stored fields hosted kept that the body
+        lacked (``kept_fields``, #1376; empty from an older hosted)."""
         resp = self._http.put(
             self._doc_url(match_id, item),
             params={"expected_version": expected_version},
@@ -150,7 +165,9 @@ class HostedSyncClient:
             key = doc_identity_key(item.kind, item.slug, item.stage_number)
             raise SyncVersionConflict(f"doc {key} changed on the hosted side during this sync", key=key)
         self._raise_for_status(resp)
-        return resp.json()["version"]
+        data = resp.json()
+        kept = data.get("kept_fields") or []
+        return DocPutResult(version=data["version"], kept_fields=tuple(str(f) for f in kept))
 
     def get_doc_manifest(self, match_id: str) -> list[dict]:
         """Identity + version of every hosted doc for this match."""

@@ -4,21 +4,12 @@
  * average, the delta against the shooter's match, and the outliers
  * named as buttons that select the shot.
  */
+import { CHIP_TICK_BG } from "@/components/ui/chipTicks";
 import { Label } from "@/components/ui/Label";
 import { BUDGET_LABEL, BUDGET_TICK, type TimeBudget } from "@/lib/timeBudget";
 import { cn } from "@/lib/utils";
 
 import { TimeBudgetBar } from "./TimeBudgetBar";
-
-const TICK_BG: Record<string, string> = {
-  draw: "bg-led",
-  movement: "bg-beep",
-  transition: "bg-manual",
-  fire: "bg-done",
-  reload: "bg-live",
-  activation: "bg-ink-2",
-  muted: "bg-muted",
-};
 
 export interface TimeBudgetCardProps {
   budget: TimeBudget;
@@ -55,7 +46,7 @@ export function TimeBudgetCard({ budget, onSelectShot, className }: TimeBudgetCa
       {budget.segments.map((s) => (
         <div key={s.cls} className={cn(GRID, "numeral border-t border-rule py-1.5 text-md text-ink-2")}>
           <span className="inline-flex items-center gap-2 font-sans text-ink">
-            <i aria-hidden className={cn("size-2 rounded-full", TICK_BG[BUDGET_TICK[s.cls]])} />
+            <i aria-hidden className={cn("size-2 rounded-full", CHIP_TICK_BG[BUDGET_TICK[s.cls]])} />
             {BUDGET_LABEL[s.cls]}
           </span>
           <span className="text-right">{s.seconds.toFixed(2)}</span>

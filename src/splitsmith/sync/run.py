@@ -22,6 +22,7 @@ from pathlib import Path
 
 from pydantic import Field
 
+from ..coach import FIELD_STAGE_NOTE
 from ..match_model import load_match_or_legacy
 from ..match_project import PROJECT_FILE, MatchProject, atomic_write_json
 from ..observability import PhaseTimer
@@ -33,7 +34,7 @@ from .merge import MergeResult, merge_audit_doc, merge_project_doc
 from .plan import AUDIT_FILENAME_RE, build_push_plan, doc_identity_key
 from .pull import RemoteDoc, plan_pull, remote_doc_key
 from .push import PushReport, run_push, timed_phase
-from .state import SyncState, load_sync_state, save_sync_state
+from .state import STAGE_NOTE_SCHEMA, SyncState, load_sync_state, save_sync_state
 
 _MAX_ATTEMPTS = 3
 
@@ -256,6 +257,16 @@ def run_sync(
     with timed_phase(timings, timer, "ensure_match"):
         client.ensure_match(match_id, match_name)
 
+    # After the mirror check, which reads doc_versions. In memory only until
+    # the first pull has merged: from then on every pulled base is a
+    # note-aware snapshot, and running this again would strip a note the
+    # merge has seen (a later hosted clear would lose to it). A failure
+    # before that pull leaves the file below the schema and the next run
+    # repeats this, harmlessly.
+    stage_note_migration = sync_state.schema_version < STAGE_NOTE_SCHEMA
+    if stage_note_migration:
+        _repull_audit_docs_for_stage_note(match_root, sync_state)
+
     pulled_total = 0
     all_conflicts: list[dict] = []
     all_notes: list[str] = list(web_trim_notes)
@@ -276,6 +287,8 @@ def run_sync(
             all_conflicts.extend(result_counts["conflicts"])
             all_notes.extend(result_counts["notes"])
             reprocess.update(result_counts["reprocess"])
+            if stage_note_migration:
+                sync_state.schema_version = STAGE_NOTE_SCHEMA
             save_sync_state(match_root, sync_state)
 
         try:
@@ -318,6 +331,31 @@ def run_sync(
     )
     report.timings.update(timings)
     return report
+
+
+def _repull_audit_docs_for_stage_note(match_root: Path, sync_state: SyncState) -> None:
+    """The one-time stage-note migration (#1376), for a sync state written
+    by an install older than the field: every audit doc is pulled once more
+    and its base stops claiming a note.
+
+    That install could not have seen a stage note. Hosted may hold one it
+    never merged: its push kept the note (``put_audit_doc``) and it
+    recorded that version as seen, or it pulled the doc, recorded the
+    remote (with the note) as base and kept its own doc without it. Either
+    way ``plan_pull`` compares versions only, so the note would not reach
+    this desktop until some other hosted write moved the doc, and a local
+    note written meanwhile would overwrite it unseen. So: forget each audit
+    version (the next pull fetches the doc once) and drop ``stage_note``
+    from each base (the merge then adopts the hosted note, and a local note
+    written before that pull meets it as a conflict, not as an edit of it).
+    Idempotent until the first pull after it has merged, which is when
+    ``run_sync`` marks it done; a failure before that runs it again."""
+    for key in [k for k in sync_state.doc_versions if k.startswith("audit/")]:
+        base = load_base_doc(match_root, key)
+        if base is not None and FIELD_STAGE_NOTE in base:
+            del base[FIELD_STAGE_NOTE]
+            save_base_doc(match_root, key, base)
+        del sync_state.doc_versions[key]
 
 
 def _apply_pull(

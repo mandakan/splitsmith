@@ -816,6 +816,22 @@ def test_mirror_allows_coach_shot_patch(
     assert resp.status_code != 403, resp.text
 
 
+def test_mirror_allows_the_stage_note_patch(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """#1376: the stage note is review metadata like a shot's note, so a
+    mirror may write it (sync merges it). Only the gate is under test."""
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    match_id = "01JMIRRCOACHGATE0000000003"
+    seed_mirror(client, match_id, "gate-stage-note")
+    resp = client.patch(
+        f"/api/matches/{match_id}/shooters/alice/stages/1/stage-note", json={"stage_note": "from the phone"}
+    )
+    assert resp.status_code != 403, resp.text
+
+
 def test_mirror_allows_coach_reclassify(
     hosted_env: str,
     hosted_app: tuple[TestClient, _CapturingSender],

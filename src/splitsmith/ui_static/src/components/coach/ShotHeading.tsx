@@ -1,6 +1,6 @@
 /**
- * A shot card's heading line, shared by Coach's ShotEditor and Breakdown's
- * ShotIntervalCard (#1371): the ordinal, its split and time from the beep,
+ * A shot card's heading line, on Breakdown's ShotIntervalCard (#1371): the
+ * ordinal, its split and time from the beep,
  * and the tier chip (quick / typical / long, in the budget ticks).
  */
 import { Chip, type ChipTick } from "@/components/ui/Chip";

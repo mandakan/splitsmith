@@ -23,7 +23,7 @@
  */
 import { ArrowLeft, ArrowRight, Loader2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { Link, Navigate, useOutletContext, useParams } from "react-router-dom";
+import { Link, Navigate, useLocation, useOutletContext, useParams } from "react-router-dom";
 
 import { BandSplitter } from "@/components/coach/BandSplitter";
 import { BreakdownInspector } from "@/components/coach/BreakdownInspector";
@@ -38,6 +38,7 @@ import { isTypingTextTarget } from "@/lib/audit-input";
 import { regionCounts } from "@/lib/breakdown";
 import { useInspectorFolded } from "@/lib/breakdownPrefs";
 import { useMatchHref } from "@/lib/matchHref";
+import { stageLinkSearch } from "@/lib/stageLink";
 import { useBandSplit } from "@/lib/useBandSplit";
 import { useShortViewport } from "@/lib/useShortViewport";
 import { deriveStageView, useStageWorkspace } from "@/lib/useStageWorkspace";
@@ -101,7 +102,9 @@ function BreakdownStage({ slug, stage }: { slug: string; stage: number }) {
   // A saved region moves the nav's count: the shell refetches the project.
   // Optional: outside the match shell (a test) there is no outlet context.
   const shell = useOutletContext<MatchShellOutletContext | undefined>();
-  const ws = useStageWorkspace(slug, stage, { onRegionsSaved: shell?.refreshProject });
+  // A deep link from Coach (#1377) opens at its time, shot and region.
+  const { search } = useLocation();
+  const ws = useStageWorkspace(slug, stage, { onRegionsSaved: shell?.refreshProject, link: search });
   const { project, coach, error, regions } = ws;
   const compact = useShortViewport();
   const [inspectorFolded] = useInspectorFolded();
@@ -199,8 +202,24 @@ function BreakdownStage({ slug, stage }: { slug: string; stage: number }) {
             <>
               {/* Short window: one header line. The shooter strip above names the shooter. */}
               {compact ? <span className="mr-2 inline-flex items-center gap-2">{regionChips}</span> : null}
+              {/* Moved from Coach (#1374): re-running the classifier is interval work. */}
+              <Button
+                type="button"
+                onClick={() => void ws.reclassify()}
+                disabled={ws.reclassifying}
+                title="Re-run the auto-classifier; manual overrides survive"
+              >
+                {ws.reclassifying ? "Reclassifying…" : "Reclassify"}
+              </Button>
               <Button asChild>
-                <Link to={`${coachPrefix}/${stage}`}>Review in Coach</Link>
+                <Link
+                  to={`${coachPrefix}/${stage}${stageLinkSearch({
+                    t: ws.currentTime > 0 ? view.tFromBeep : null,
+                    shot: ws.activeShotNumber,
+                  })}`}
+                >
+                  Review in Coach
+                </Link>
               </Button>
               {stepButton("Previous stage", prevStage, <ArrowLeft className="size-4" />)}
               {stepButton("Next stage", nextStage, <ArrowRight className="size-4" />)}

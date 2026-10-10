@@ -581,6 +581,37 @@ def test_share_coach_read_strips_event_notes(
     client.cookies.clear()
 
 
+def test_share_coach_read_strips_the_stage_note(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """#1376: the stage note is private text like ``coaching_note``, so the
+    share surface's coach GET carries none, while an owner read keeps it.
+    The PATCH that writes it is not on the share write allowlist."""
+    token = _setup_shared_match(hosted_env, hosted_app)
+    doc = {
+        "stage_number": 1,
+        "shots": [{"shot_number": 1, "ms_after_beep": 1500}, {"shot_number": 2, "ms_after_beep": 1800}],
+        "stage_note": "private!",
+    }
+    _seed_stage_audit(hosted_env, "owner@example.com", MID, SLUG, doc)
+
+    client, sender = hosted_app
+    resp = client.get(_share_url(token, f"shooters/{SLUG}/stages/1/coach"))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["stage_note"] is None
+    assert "private!" not in resp.text
+
+    write = client.patch(_share_url(token, f"shooters/{SLUG}/stages/1/stage-note"), json={"stage_note": "x"})
+    assert write.status_code == 404
+
+    login(client, sender, "owner@example.com")
+    owner_resp = client.get(f"/api/matches/{MID}/shooters/{SLUG}/stages/1/coach")
+    assert owner_resp.status_code == 200, owner_resp.text
+    assert owner_resp.json()["stage_note"] == "private!"
+    client.cookies.clear()
+
+
 def test_share_match_distributions_strips_notes(
     hosted_env: str,
     hosted_app: tuple[TestClient, _CapturingSender],

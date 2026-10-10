@@ -8,7 +8,8 @@ from splitsmith.sync.state import SyncState, load_sync_state, save_sync_state
 
 def test_sync_state_v2_roundtrip(tmp_path: Path):
     state = SyncState()
-    assert state.schema_version == 2
+    # A fresh state starts at the current schema (3 since #1376).
+    assert state.schema_version == 3
     state.doc_versions["project/anna"] = 4
     save_sync_state(tmp_path, state)
     loaded = load_sync_state(tmp_path)

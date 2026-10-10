@@ -25,8 +25,10 @@ import {
   type PeaksResult,
   type StageEvent,
 } from "@/lib/api";
+import { shotAtOrBefore } from "@/lib/coachReview";
 import { useSpacePlayPause } from "@/lib/keyboard";
 import { type TierBaselines, baselinesFromMatchDistributions } from "@/lib/splits";
+import { parseStageLink, resolveStageLink } from "@/lib/stageLink";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { useScrubSource } from "@/lib/useScrubSource";
 import { useStageEvents, type StageEvents } from "@/lib/useStageEvents";
@@ -58,9 +60,24 @@ export interface StageWorkspace {
   reclassifying: boolean;
   reclassify: () => Promise<void>;
   patchShot: (shot: CoachShot, patch: ShotPatch) => Promise<void>;
+  /** ``patchShot`` that rethrows instead of replacing the page: an autosaved
+   *  note reports its own failure (``useNoteAutosave``). */
+  savePatch: (shot: CoachShot, patch: ShotPatch) => Promise<void>;
+  /** Write the stage note with the latest payload's revision (#1376);
+   *  rethrows, a 409 included. */
+  saveStageNote: (text: string) => Promise<void>;
+  /** Fetch the coach payload again and apply it (after a conflict). */
+  reload: () => Promise<CoachStageResponse | null>;
   /** Select a shot and seek the video to it; drops a selected region. */
   seekToShot: (shot: CoachShot) => void;
+  /** Seek to seconds from the beep; ``shotNumber`` (else the shot the
+   *  playhead has passed) becomes the current shot. */
+  seekToTime: (tFromBeep: number, shotNumber?: number | null) => void;
   togglePlay: () => void;
+  /** The video's metadata loaded: a deep link's pending seek lands. */
+  onVideoReady: () => void;
+  /** True while a shot's note has focus: playback stops advancing the current shot. */
+  holdActiveShot: (held: boolean) => void;
   isMobile: boolean;
 }
 
@@ -68,6 +85,10 @@ export interface StageWorkspaceOptions {
   /** After every region save the server accepted (Breakdown refreshes the
    *  shell's project so the nav's region count follows). */
   onRegionsSaved?: () => void;
+  /** Fetch the band's audio peaks (default true). Coach draws no band. */
+  peaks?: boolean;
+  /** The page URL's query (``?t=&shot=&region=``, #1377), read once on load. */
+  link?: string;
 }
 
 export function useStageWorkspace(slug: string, stage: number, options: StageWorkspaceOptions = {}): StageWorkspace {
@@ -80,8 +101,10 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
   const [activeShotNumber, setActiveShotNumber] = useState<number | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [activeShotHeld, holdActiveShot] = useState(false);
   const [peaks, setPeaks] = useState<PeaksResult | null>(null);
-  const [peaksLoading, setPeaksLoading] = useState(true);
+  const wantPeaks = options.peaks ?? true;
+  const [peaksLoading, setPeaksLoading] = useState(wantPeaks);
   const scrub = useScrubSource();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   // Guard value for the positional shot PATCH (#844). A ref rather than
@@ -89,6 +112,12 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
   // ``coach`` it closes over is the one from the render that created it -
   // null on mount, and stale after every patch that follows.
   const coachVersionRef = useRef<number | undefined>(undefined);
+  // The latest payload, for callbacks memoised on [slug, stage] (seekToTime,
+  // the stage note's revision).
+  const coachRef = useRef<CoachStageResponse | null>(null);
+  // A deep link's seek (#1377), in clip seconds, held until the video can take it.
+  const pendingSeekRef = useRef<number | null>(null);
+  const linkRef = useRef(options.link ?? "");
 
   // The only writer of coach state, so the guard value cannot fall out of
   // step with the document it guards. Written here rather than in an effect
@@ -96,6 +125,7 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
   // before that commit would send the version the first one just replaced.
   const applyCoach = useCallback((next: CoachStageResponse | null) => {
     coachVersionRef.current = next?.version;
+    coachRef.current = next;
     setCoach(next);
   }, []);
   // Regions (spec 2026-10-08): ``apply`` wraps applyCoach and is what every
@@ -122,8 +152,20 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
         apply(c);
         setBaselines(baselinesFromMatchDistributions(dist));
         setDistributions(dist);
-        if (c && c.shots.length > 0) {
+        // A deep link (#1377) opens at its time with its shot and region;
+        // a stale or malformed parameter is ignored.
+        const link = c ? resolveStageLink(parseStageLink(linkRef.current), c.shots, c.events ?? []) : null;
+        if (link?.shot != null) {
+          setActiveShotNumber(link.shot);
+        } else if (c && c.shots.length > 0 && link?.t == null) {
           setActiveShotNumber(c.shots[0].shot_number);
+        }
+        if (link?.region != null) selectEvent(link.region);
+        if (c && link?.t != null) {
+          const clip = c.beep_time + link.t;
+          pendingSeekRef.current = clip;
+          setCurrentTime(clip);
+          if (videoRef.current) videoRef.current.currentTime = clip;
         }
       } catch (e) {
         if (alive) setError(e instanceof ApiError ? e.detail : String(e));
@@ -132,7 +174,20 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
     return () => {
       alive = false;
     };
-  }, [apply, slug, stage]);
+  }, [apply, selectEvent, slug, stage]);
+
+  // The video mounts after the payload: a linked seek lands once it can.
+  // With none pending, a new source (the scrub rendition failed over to the
+  // trim) takes the position the old one had, rather than starting at 0.
+  const positionRef = useRef(0);
+  positionRef.current = currentTime;
+  const onVideoReady = useCallback(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const clip = pendingSeekRef.current ?? (positionRef.current > 0 ? positionRef.current : null);
+    pendingSeekRef.current = null;
+    if (clip != null && Math.abs(v.currentTime - clip) > 1e-3) v.currentTime = clip;
+  }, []);
 
   // Load peaks for the band's audio track (same shape as Audit.tsx's "Load
   // peaks" effect). A failure just means no waveform -- the track renders
@@ -141,6 +196,7 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
   // request is in flight, so "No audio" never flashes before a slow
   // response has had a chance to resolve.
   useEffect(() => {
+    if (!wantPeaks) return;
     let alive = true;
     setPeaksLoading(true);
     api
@@ -157,13 +213,15 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
     return () => {
       alive = false;
     };
-  }, [slug, stage]);
+  }, [slug, stage, wantPeaks]);
 
   // While the video is playing, advance the active shot to whichever
   // one's time_absolute has just passed under the playhead. Gated on
   // isPlaying so a click + seek doesn't fight with the tick that follows.
+  // Held while a shot's note has focus (``holdActiveShot``): playback must
+  // not unmount the textarea under the cursor.
   useEffect(() => {
-    if (!isPlaying || !coach) return;
+    if (!isPlaying || !coach || activeShotHeld) return;
     const ordered = [...coach.shots].sort((a, b) => a.time_absolute - b.time_absolute);
     let current: CoachShot | null = null;
     for (const s of ordered) {
@@ -173,7 +231,7 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
     if (current && current.shot_number !== activeShotNumber) {
       setActiveShotNumber(current.shot_number);
     }
-  }, [currentTime, isPlaying, coach, activeShotNumber]);
+  }, [currentTime, isPlaying, coach, activeShotNumber, activeShotHeld]);
 
   const reclassify = useCallback(async () => {
     setReclassifying(true);
@@ -187,17 +245,38 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
     }
   }, [apply, slug, stage]);
 
+  const savePatch = useCallback(
+    async (shot: CoachShot, patch: ShotPatch) => {
+      const c = await api.patchStageShotCoach(slug, stage, shot, patch, coachVersionRef.current);
+      apply(c);
+    },
+    [apply, slug, stage],
+  );
+
   const patchShot = useCallback(
     async (shot: CoachShot, patch: ShotPatch) => {
       try {
-        const c = await api.patchStageShotCoach(slug, stage, shot, patch, coachVersionRef.current);
-        apply(c);
+        await savePatch(shot, patch);
       } catch (e) {
         setError(e instanceof ApiError ? e.detail : String(e));
       }
     },
+    [savePatch],
+  );
+
+  const saveStageNote = useCallback(
+    async (text: string) => {
+      const c = await api.patchStageNote(slug, stage, text, coachRef.current?._version);
+      apply(c);
+    },
     [apply, slug, stage],
   );
+
+  const reload = useCallback(async () => {
+    const c = await api.getStageCoach(slug, stage);
+    apply(c);
+    return c;
+  }, [apply, slug, stage]);
 
   const seekToShot = useCallback(
     (shot: CoachShot) => {
@@ -205,6 +284,20 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
       selectEvent(null);
       setActiveShotNumber(shot.shot_number);
       if (videoRef.current) videoRef.current.currentTime = shot.time_absolute;
+    },
+    [selectEvent],
+  );
+
+  const seekToTime = useCallback(
+    (tFromBeep: number, shotNumber: number | null = null) => {
+      const c = coachRef.current;
+      if (!c) return;
+      selectEvent(null);
+      // A raw time makes the shot the playhead has passed the current one.
+      setActiveShotNumber(shotNumber ?? shotAtOrBefore(c.shots, tFromBeep));
+      const clip = c.beep_time + tFromBeep;
+      setCurrentTime(clip);
+      if (videoRef.current) videoRef.current.currentTime = clip;
     },
     [selectEvent],
   );
@@ -240,8 +333,14 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
     reclassifying,
     reclassify,
     patchShot,
+    savePatch,
+    saveStageNote,
+    reload,
     seekToShot,
+    seekToTime,
     togglePlay,
+    onVideoReady,
+    holdActiveShot,
     isMobile,
   };
 }

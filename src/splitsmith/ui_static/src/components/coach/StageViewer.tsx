@@ -26,7 +26,13 @@ export function StageVideo({ ws, view, className }: { ws: StageWorkspace; view: 
       controls={false}
       preload="metadata"
       playsInline
-      onTimeUpdate={(e) => ws.setCurrentTime((e.target as HTMLVideoElement).currentTime)}
+      onLoadedMetadata={ws.onVideoReady}
+      onTimeUpdate={(e) => {
+        // A source swap resets the element to 0 before its metadata loads;
+        // that is not a position, and onVideoReady restores the real one.
+        const v = e.target as HTMLVideoElement;
+        if (v.readyState >= 1) ws.setCurrentTime(v.currentTime);
+      }}
       onPlay={() => ws.setIsPlaying(true)}
       onPause={() => ws.setIsPlaying(false)}
       onError={() => {
@@ -37,7 +43,18 @@ export function StageVideo({ ws, view, className }: { ws: StageWorkspace; view: 
   );
 }
 
-export function StageTransport({ ws, view, className }: { ws: StageWorkspace; view: StageView; className?: string }) {
+export function StageTransport({
+  ws,
+  view,
+  className,
+  touch = false,
+}: {
+  ws: StageWorkspace;
+  view: StageView;
+  className?: string;
+  /** A 40 px play button (Coach on a tablet). */
+  touch?: boolean;
+}) {
   const { activeShot } = view;
   return (
     <div className={cn("flex items-center gap-3 px-3 py-2", className)}>
@@ -47,14 +64,15 @@ export function StageTransport({ ws, view, className }: { ws: StageWorkspace; vi
         onClick={ws.togglePlay}
         aria-label={ws.isPlaying ? "Pause" : "Play"}
         aria-pressed={ws.isPlaying}
-        className="rounded-full"
+        className={cn("rounded-full", touch && "size-10")}
       >
         {ws.isPlaying ? <Pause className="size-4" aria-hidden /> : <Play className="size-4 fill-current" aria-hidden />}
       </Button>
-      <span className="numeral text-md text-ink-2">{ws.currentTime.toFixed(2)} s</span>
+      {/* Seconds from the beep, like every figure, the strip and the band. */}
+      <span className="numeral text-md text-ink-2">{view.tFromBeep.toFixed(2)} s</span>
       {activeShot ? (
         <span className="numeral text-sm text-muted">
-          shot {String(activeShot.shot_number).padStart(2, "0")} at {activeShot.time_absolute.toFixed(2)} s
+          shot {String(activeShot.shot_number).padStart(2, "0")} at {activeShot.time_from_beep.toFixed(2)} s
         </span>
       ) : null}
     </div>
