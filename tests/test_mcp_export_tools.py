@@ -518,6 +518,40 @@ def test_export_match_drops_a_template_overlay_its_template_has_moved_past(
     assert stage_input.overlay_path is None
 
 
+@pytest.mark.parametrize("variant", ["default", "plate"])
+def test_export_match_reuses_an_overlay_drawn_in_the_current_look(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, variant: str
+) -> None:
+    _shipped_looks_copy(tmp_path, monkeypatch)
+    overlay, stage_input, _result = _export_match_with_overlay_on_disk(
+        tmp_path, record="current", variant=variant
+    )
+    assert stage_input.overlay_path == overlay
+
+
+@pytest.mark.parametrize("variant", ["default", "plate"])
+@pytest.mark.parametrize(
+    ("key", "value"), [("colors", ("accent", [10, 200, 90])), ("fonts", ("mono", "roboto-mono"))]
+)
+def test_export_match_drops_an_overlay_its_look_has_moved_past(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, variant: str, key: str, value: tuple[str, object]
+) -> None:
+    """Every style, Classic included, draws in the Look's palette and faces:
+    once either changes, the record no longer vouches for the MOV (#1403)."""
+    copy = _shipped_looks_copy(tmp_path, monkeypatch)
+
+    def edit() -> None:
+        path = copy / "splitsmith" / "look.json"
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        manifest[key][value[0]] = value[1]
+        path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    _overlay, stage_input, _result = _export_match_with_overlay_on_disk(
+        tmp_path, record="current", variant=variant, after_record=edit
+    )
+    assert stage_input.overlay_path is None
+
+
 @pytest.mark.parametrize("record", ["stale", "none"])
 def test_export_match_drops_an_overlay_the_audit_has_moved_past(tmp_path: Path, record: str) -> None:
     """An overlay drawn from an older audit (or with no record to say which)

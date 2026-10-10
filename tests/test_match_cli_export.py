@@ -157,6 +157,98 @@ def test_missing_trim_names_the_stage_and_exits_1(tmp_path: Path, monkeypatch: p
     assert "trim" in text
 
 
+def _overlay_on_disk(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, record: str, change: str) -> Any:
+    """Seed a stage with an overlay MOV and its record (``record``:
+    ``current`` / ``none``), change something after it was drawn (``change``:
+    ``nothing`` / ``audit`` / ``palette`` / ``font``), and run the CLI's MP4
+    match export. Returns the composed stage. Edits a copy of the shipped
+    Looks, never the files."""
+    import shutil
+
+    from splitsmith import looks
+    from splitsmith.overlay_hud import HudOptions, overlay_settings
+    from splitsmith.ui import exports as exports_mod
+
+    copy = tmp_path / "shipped-looks"
+    shutil.copytree(looks.shipped_looks_dir(), copy)
+    monkeypatch.setattr(looks, "shipped_looks_dir", lambda: copy)
+    root = _seed(tmp_path)
+    captured = _capture_mp4(monkeypatch)
+    shooter_root = root / "shooters" / "me"
+    exports = shooter_root / "exports"
+    audit_path = shooter_root / "audit" / "stage1.json"
+    base = stage_file_base(1, "Speed")
+    (exports / f"{base}_overlay.mov").write_bytes(b"")
+    if record == "current":
+        settings = overlay_settings(
+            look="splitsmith",
+            variant="default",
+            options=HudOptions(),
+            codec="auto",
+            max_height=None,
+            max_fps=None,
+            audit_revision=exports_mod.overlay_audit_revision(audit_path),
+        )
+        exports_mod.overlay_settings_file(exports, base).write_text(json.dumps(settings))
+    if change == "audit":
+        doc = json.loads(audit_path.read_text())
+        doc["shots"][0]["ms_after_beep"] = 640
+        audit_path.write_text(json.dumps(doc))
+    elif change in ("palette", "font"):
+        manifest_path = copy / "splitsmith" / "look.json"
+        manifest = json.loads(manifest_path.read_text())
+        if change == "palette":
+            manifest["colors"]["accent"] = [10, 200, 90]
+        else:
+            manifest["fonts"]["mono"] = "roboto-mono"
+        manifest_path.write_text(json.dumps(manifest))
+    result = runner.invoke(app, ["match", "export", str(root), "--shooter", "me", "--format", "mp4"])
+    assert result.exit_code == 0, result.output
+    return captured["comp"].stages[0], strip_ansi(result.output)
+
+
+def test_overlay_drawn_from_the_current_audit_and_look_is_stitched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stage, output = _overlay_on_disk(tmp_path, monkeypatch, record="current", change="nothing")
+    assert stage.overlay is not None
+    assert "left out" not in output
+
+
+@pytest.mark.parametrize(
+    ("record", "change"),
+    [("current", "audit"), ("current", "palette"), ("current", "font"), ("none", "nothing")],
+)
+def test_overlay_nothing_vouches_for_is_left_out_and_said_so(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, record: str, change: str
+) -> None:
+    """The CLI goes through the reuse rule the app and the MCP tool use
+    (#1403): an overlay drawn from an older audit or Look, or with no record
+    of what it was drawn from, is not stitched, and the run says why. Before,
+    any ``_overlay.mov`` on disk was stitched unchecked."""
+    stage, output = _overlay_on_disk(tmp_path, monkeypatch, record=record, change=change)
+    assert stage.overlay is None
+    assert "stage 1: overlay at" in output and "left out" in output
+
+
+def test_overlay_drawn_in_another_look_is_left_out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``--theme`` names the Look this export draws in; an overlay recorded
+    in another Look's colours is not it."""
+    from splitsmith import looks
+
+    stage, _output = _overlay_on_disk(tmp_path, monkeypatch, record="current", change="nothing")
+    assert stage.overlay is not None
+    other = next(name for name in looks.look_names() if name != "splitsmith")
+    captured = _capture_mp4(monkeypatch)
+    result = runner.invoke(
+        app,
+        ["match", "export", str(tmp_path / "match"), "--shooter", "me", "--format", "mp4", "--theme", other],
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["comp"].stages[0].overlay is None
+    assert "left out" in strip_ansi(result.output)
+
+
 def test_bad_format_is_a_usage_error(tmp_path: Path) -> None:
     root = _seed(tmp_path)
     result = runner.invoke(app, ["match", "export", str(root), "--shooter", "me", "--format", "avi"])

@@ -16,6 +16,7 @@ frame of live stage, and nothing for the pads.
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import re
 from collections.abc import Sequence
@@ -150,6 +151,29 @@ def overlay_template_identity(look: str, variant: str) -> str | None:
     return digest.hexdigest()
 
 
+def overlay_theme_identity(look: str) -> str | None:
+    """What every overlay style reads from ``look`` besides its template: the
+    palette (``look_template.theme_tokens`` of ``load_theme``) and the two
+    faces, Classic's ``drawtext`` clock included (the mono face, in the
+    Look's ink and stroke). A catalog face is its id; a Look's own face
+    resolves to an absolute path whose file name is content-named
+    (``font-<12hex>.ttf``), so only the name is kept: the same Look read
+    from another folder (hosted materialises it per tenant and content
+    hash) gives the same identity. ``None`` when the Look cannot be loaded,
+    which no reuse check matches."""
+    # Deferred, like the template's: the theme module loads the Look machinery.
+    from .look_template import theme_tokens
+    from .overlay_theme import OverlayThemeError, load_theme
+
+    try:
+        theme = load_theme(look)
+    except OverlayThemeError:
+        return None
+    faces = {"display": Path(theme.display_font).name, "mono": Path(theme.mono_font).name}
+    payload = json.dumps({"colors": theme_tokens(theme), "fonts": faces}, sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def overlay_settings(
     *,
     look: str,
@@ -160,6 +184,7 @@ def overlay_settings(
     max_fps: float | None,
     audit_revision: str | None,
     template: str | None | object = _READ_NOW,
+    theme: str | None | object = _READ_NOW,
 ) -> dict[str, Any]:
     """What an overlay MOV was drawn with, as recorded beside it and
     compared before a match export reuses it. Classic draws none of the
@@ -177,7 +202,13 @@ def overlay_settings(
     Classic records carry no such key: the engine draws them. The writer
     passes ``template`` as it read it before the render, as it does the
     audit revision: a template saved mid-render was never drawn. Left out,
-    it is read now (what a reuse check wants)."""
+    it is read now (what a reuse check wants).
+
+    Every style, Classic included, records ``theme``
+    (:func:`overlay_theme_identity`): a palette or font edit to the Look must
+    draw the overlay again. It is passed and read like ``template``; a
+    record from before the key existed matches no request, so each such
+    overlay is drawn once more."""
     settings: dict[str, Any] = {
         "look": look,
         "variant": variant,
@@ -186,6 +217,7 @@ def overlay_settings(
         "max_height": max_height,
         "max_fps": max_fps,
         "audit_revision": audit_revision,
+        "theme": overlay_theme_identity(look) if theme is _READ_NOW else theme,
     }
     if variant != DEFAULT_VARIANT:
         settings["template"] = overlay_template_identity(look, variant) if template is _READ_NOW else template
@@ -203,6 +235,7 @@ LEGACY_OVERLAY_SETTINGS: dict[str, Any] = overlay_settings(
     max_height=None,
     max_fps=None,
     audit_revision=None,
+    theme=None,
 )
 
 

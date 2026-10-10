@@ -28,7 +28,13 @@ from ..events import confirmed_from_doc
 from ..export_naming import stage_file_base
 from ..looks import DEFAULT_VARIANT
 from ..match_project import StageScorecard
-from ..overlay_hud import LEGACY_OVERLAY_SETTINGS, HudOptions, overlay_settings, overlay_template_identity
+from ..overlay_hud import (
+    LEGACY_OVERLAY_SETTINGS,
+    HudOptions,
+    overlay_settings,
+    overlay_template_identity,
+    overlay_theme_identity,
+)
 from ..overlay_render import OverlayCodec
 from ..overlay_theme import ThemeName
 from ..segment_cache import SegmentCache
@@ -177,16 +183,26 @@ def read_overlay_settings(path: Path) -> dict[str, Any] | None:
 
 
 def overlay_record_matches(
-    record: dict[str, Any] | None, *, audit_revision: str | None, wanted: dict[str, Any] | None = None
+    record: dict[str, Any] | None,
+    *,
+    audit_revision: str | None,
+    wanted: dict[str, Any] | None = None,
+    look: str | None = None,
 ) -> bool:
     """Whether an overlay MOV whose settings record is ``record`` may be
-    reused: the one rule for every reuse check (the match export job and the
-    MCP tool). ``audit_revision`` is the audit as it stands
-    (:func:`overlay_audit_revision`). ``wanted`` is the request's settings
-    (:func:`overlay_settings`); ``None`` wants whatever style was recorded,
-    as it would be drawn now, so a template or shared script that moved
-    since still misses. An unreadable audit or record never matches."""
+    reused: the one rule for every reuse check (the match export job, the
+    MCP tool and the CLI's match export). ``audit_revision`` is the audit as
+    it stands (:func:`overlay_audit_revision`). ``wanted`` is the request's
+    settings (:func:`overlay_settings`); ``None`` wants whatever style was
+    recorded, as it would be drawn now, so a template, shared script or
+    Look palette or font that moved since still misses. ``look`` (only
+    with ``wanted`` left out) asks for that Look instead of the recorded
+    one. An unreadable audit or record never matches."""
     if record is None or audit_revision is None:
+        return False
+    # Nothing vouches for the palette and faces an overlay drew with when its
+    # record names none (a legacy record, or a Look that could not be read).
+    if record.get("theme") is None:
         return False
     # A template style that recorded no template identity (its Look or
     # template could not be found) has nothing vouching for its pixels;
@@ -198,7 +214,7 @@ def overlay_record_matches(
             variant = str(record["variant"])
             options = HudOptions(**record["options"]) if variant != DEFAULT_VARIANT else HudOptions()
             wanted = overlay_settings(
-                look=str(record["look"]),
+                look=str(record["look"]) if look is None else look,
                 variant=variant,
                 options=options,
                 codec=record["codec"],
@@ -445,6 +461,7 @@ def export_stage(
             # never drawn and must read as a change to the next reuse check.
             drawn_revision = overlay_audit_revision(audit_path)
             drawn_template = overlay_template_identity(request.overlay_theme, request.overlay_variant)
+            drawn_theme = overlay_theme_identity(request.overlay_theme)
             try:
                 overlay_render.render_overlay(
                     audit_path=audit_path,
@@ -476,6 +493,7 @@ def export_stage(
                             max_fps=request.overlay_max_fps,
                             audit_revision=drawn_revision,
                             template=drawn_template,
+                            theme=drawn_theme,
                         ),
                         sort_keys=True,
                     ),
