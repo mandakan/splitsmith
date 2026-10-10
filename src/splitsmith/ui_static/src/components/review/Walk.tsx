@@ -79,7 +79,7 @@ export function Walk(props: WalkProps) {
   const decided = useCallback(
     (stop: WalkStop) => {
       const m = markerFor(stop);
-      return isDecided(stop, stopState(m), stopTime(stop, m), decisions);
+      return isDecided(stopState(m), stopTime(stop, m), decisions);
     },
     [markerFor, decisions],
   );
@@ -161,7 +161,7 @@ export function Walk(props: WalkProps) {
           const after = stops.findIndex(
             (s, i) =>
               i > index &&
-              !isDecided(s, stopState(markerFor(s)), stopTime(s, markerFor(s)), next),
+              !isDecided(stopState(markerFor(s)), stopTime(s, markerFor(s)), next),
           );
           setIndex(after === -1 ? stops.length : after);
           break;

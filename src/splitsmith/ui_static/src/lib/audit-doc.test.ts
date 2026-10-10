@@ -134,6 +134,19 @@ describe("shot id round-trip", () => {
     expect(saved.shots.map((s) => s.time)).toEqual([12.31, 12.487]);
   });
 
+  it("never gives two markers one id when a later claimant carries the candidate's", () => {
+    const markers = deriveMarkers({
+      shots: [
+        { shot_number: 1, candidate_number: 30, time: 12.31, source: "detected" },
+        { shot_number: 2, candidate_number: 30, time: 12.487, source: "detected", id: "cand-30" },
+      ],
+      _candidates_pending_audit: { candidates: [{ candidate_number: 30, time: 12.4 }] },
+    } as never);
+    const ids = markers.map((m) => m.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(markers.map((m) => m.time).sort()).toEqual([12.31, 12.487]);
+  });
+
   it("draws a rejected candidate at the candidate's own time", () => {
     const markers = deriveMarkers({
       shots: [],

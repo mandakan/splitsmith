@@ -145,6 +145,15 @@ export function Review() {
   const undoStackRef = useRef<AuditMarker[][]>([]);
 
   const sessionEventsRef = useRef<AuditEvent[]>([]);
+  // The save path's view of the page (see performSave): the document as last
+  // loaded or saved, the newest markers, the save queue, and which fixture
+  // the document belongs to.
+  const auditRef = useRef(audit);
+  auditRef.current = audit;
+  const markersRef = useRef(markers);
+  markersRef.current = markers;
+  const saveChainRef = useRef<Promise<boolean>>(Promise.resolve(true));
+  const loadedPathRef = useRef<string | null>(null);
   const isDirtyRef = useRef(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>({ kind: "idle" });
 
@@ -238,10 +247,19 @@ export function Review() {
     let alive = true;
     setAuditLoaded(false);
     setAuditError(null);
+    // A new fixture starts a new session: nothing of the last one's events,
+    // undo or dirtiness may reach this one's file, and no save runs until
+    // this fixture's own document is in hand.
+    loadedPathRef.current = null;
+    sessionEventsRef.current = [];
+    undoStackRef.current = [];
+    isDirtyRef.current = false;
     api
       .getFixtureAudit(fixturePath)
       .then((a) => {
         if (!alive) return;
+        auditRef.current = a;
+        loadedPathRef.current = fixturePath;
         setAudit(a);
         setMarkers(deriveMarkers(a));
         setAuditLoaded(true);
@@ -618,13 +636,11 @@ export function Review() {
   // as last saved (refs, not a render's state), and each sends only the
   // events no save has written yet: the walk saves after every decision, and
   // two saves in flight must never drop one or write an older document back.
-  const auditRef = useRef(audit);
-  auditRef.current = audit;
-  const markersRef = useRef(markers);
-  markersRef.current = markers;
-  const saveChainRef = useRef<Promise<boolean>>(Promise.resolve(true));
+  // A save for a fixture that is not the one loaded (the page moved on to
+  // the next fixture) writes nothing.
   const performSave = useCallback((): Promise<boolean> => {
     const run = async (): Promise<boolean> => {
+      if (loadedPathRef.current !== fixturePath) return false;
       const base = auditRef.current;
       if (!fixturePath || !base) return false;
       const sent = sessionEventsRef.current.length;
@@ -689,8 +705,31 @@ export function Review() {
       await saveChainRef.current;
       if (isDirtyRef.current && !(await performSave())) return false;
       const slug = fixturePath.split("/").pop()!.replace(/\.json$/, "");
-      await api.confirmReviewFixture(slug, method);
-      setAudit(await api.getFixtureAudit(fixturePath));
+      const { confirmed_at } = await api.confirmReviewFixture(slug, method);
+      // A save replaces the whole file from this document, so the sign-off
+      // goes into it at once, before the reload that confirms it: a failed
+      // reload must not leave a document that a later save would write back
+      // without its review block.
+      const base = auditRef.current as (StageAudit & { review?: Record<string, unknown> }) | null;
+      if (base) {
+        const review: Record<string, unknown> = {
+          ...(base.review ?? {}),
+          status: "reviewed",
+          reviewed_at: confirmed_at,
+          confirmed_at,
+        };
+        if (method) review.method = method;
+        else delete review.method;
+        auditRef.current = { ...base, review } as StageAudit;
+        setAudit(auditRef.current);
+      }
+      try {
+        const fresh = await api.getFixtureAudit(fixturePath);
+        auditRef.current = fresh;
+        setAudit(fresh);
+      } catch {
+        // The folded-in sign-off above stands until the next load.
+      }
       return true;
     } catch (err) {
       setSaveStatus({ kind: "error", message: err instanceof ApiError ? err.detail : String(err) });

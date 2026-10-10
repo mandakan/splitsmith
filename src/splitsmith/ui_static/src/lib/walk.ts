@@ -186,21 +186,14 @@ export function decisionsFrom(
   return out;
 }
 
-/** A stop counts as decided when a decision confirmed it in the state it is
- *  in now: for a candidate (``cand-<n>``, stable across a reload) by its key,
- *  for anything else at the same time to the half millisecond. Manual shots
- *  are renumbered by a save and reload, so their keys cannot be trusted. */
-export function isDecided(
-  stop: { key: string },
-  state: StopState,
-  time: number,
-  decisions: ReadonlyArray<WalkDecision>,
-): boolean {
-  return decisions.some(
-    (d) =>
-      d.state === state &&
-      ((stop.key.startsWith("cand-") && d.key === stop.key) || Math.abs(d.time - time) <= 0.0005),
-  );
+/** A stop counts as decided when a decision confirmed exactly what it shows
+ *  now: the same state at the same time, to the half millisecond. Never by
+ *  key: a shot moved after its Enter must be stopped at again, a save and
+ *  reload renumbers manual shots, and a re-detection renumbers candidates.
+ *  The cost is one extra stop: a kept candidate rejected and then reloaded
+ *  is drawn at the candidate's own time, which nobody confirmed. */
+export function isDecided(state: StopState, time: number, decisions: ReadonlyArray<WalkDecision>): boolean {
+  return decisions.some((d) => d.state === state && Math.abs(d.time - time) <= 0.0005);
 }
 
 export interface StopFlag {

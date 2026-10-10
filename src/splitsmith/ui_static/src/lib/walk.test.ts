@@ -117,16 +117,19 @@ describe("decisions", () => {
     expect(decisionsFrom(events)).toEqual([{ key: "cand-1", state: "shot", time: 0.5 }]);
   });
 
-  it("holds a candidate's decision by its key, across a reload that draws it elsewhere", () => {
-    const d = [{ key: "cand-7", state: "not_shot" as const, time: 1.234 }];
-    expect(isDecided({ key: "cand-7" }, "not_shot", 1.2, d)).toBe(true);
-    expect(isDecided({ key: "cand-7" }, "shot", 1.234, d)).toBe(false);
+  it("lapses a candidate's decision when the shot moves after it, whatever its key", () => {
+    // Confirmed at 2.2, then nudged to 2.25 without Enter: a resume must stop
+    // there again. Keys are no evidence either: a re-detection renumbers.
+    const d = [{ key: "cand-5", state: "shot" as const, time: 2.2 }];
+    expect(isDecided("shot", 2.2, d)).toBe(true);
+    expect(isDecided("shot", 2.25, d)).toBe(false);
+    expect(isDecided("not_shot", 2.2, d)).toBe(false);
   });
 
   it("holds a manual shot's decision by its time, since a reload renumbers it", () => {
     const d = [{ key: "manual-abc", state: "shot" as const, time: 2.5 }];
-    expect(isDecided({ key: "manual-shot-4" }, "shot", 2.5, d)).toBe(true);
-    expect(isDecided({ key: "manual-shot-4" }, "shot", 2.502, d)).toBe(false);
+    expect(isDecided("shot", 2.5, d)).toBe(true);
+    expect(isDecided("shot", 2.502, d)).toBe(false);
   });
 });
 
