@@ -64,7 +64,13 @@ export interface StageWorkspace {
   isMobile: boolean;
 }
 
-export function useStageWorkspace(slug: string, stage: number): StageWorkspace {
+export interface StageWorkspaceOptions {
+  /** After every region save the server accepted (Breakdown refreshes the
+   *  shell's project so the nav's region count follows). */
+  onRegionsSaved?: () => void;
+}
+
+export function useStageWorkspace(slug: string, stage: number, options: StageWorkspaceOptions = {}): StageWorkspace {
   const [project, setProject] = useState<MatchProject | null>(null);
   const [coach, setCoach] = useState<CoachStageResponse | null>(null);
   const [baselines, setBaselines] = useState<TierBaselines | null>(null);
@@ -96,7 +102,7 @@ export function useStageWorkspace(slug: string, stage: number): StageWorkspace {
   // coach response goes through, so the events' revision moves with it. A
   // failed region save is ``regions.issue``, shown under the lane editor: it
   // never replaces the page the way a load or shot PATCH failure does.
-  const regions = useStageEvents(slug, stage, applyCoach);
+  const regions = useStageEvents(slug, stage, applyCoach, undefined, undefined, options.onRegionsSaved);
   const { apply, select: selectEvent } = regions;
   const isMobile = useIsMobile();
 

@@ -29,11 +29,17 @@ export interface EventCardProps {
   onKeep: () => void;
   onDelete: () => void;
   onDone: () => void;
+  /** A short window (Breakdown, #1371): ~30 px rows, the kind control on
+   *  the label's line, smaller figures, so the whole card fits beside the
+   *  video. */
+  compact?: boolean;
 }
 
 const f2 = (x: number) => x.toFixed(2);
 
-export function EventCard({ event, events, onKind, onKeep, onDelete, onDone }: EventCardProps) {
+export function EventCard({ event, events, onKind, onKeep, onDelete, onDone, compact = false }: EventCardProps) {
+  const Row = compact ? CompactRow : FullRow;
+  const Num = compact ? CompactNum : FullNum;
   const during = event.kind === "reload" ? enclosingMovement(event, events) : null;
   // The reload's time no movement covers: its whole duration standing.
   const exposed = event.kind === "reload" ? (reloadFigures(events).find((f) => f.eventId === event.id)?.exposed ?? null) : null;
@@ -42,12 +48,21 @@ export function EventCard({ event, events, onKind, onKeep, onDelete, onDone }: E
     return { ...k, tick: k.value, disabled: blocked, title: blocked ? "Overlaps a region in that lane" : undefined };
   });
   return (
-    <section aria-label="Region" className="rounded-[10px] border border-rule bg-surface px-3.5 py-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <section
+      aria-label="Region"
+      className={cn("rounded-[10px] border border-rule bg-surface", compact ? "px-3 py-2" : "px-3.5 py-3")}
+    >
+      <div className={cn("flex items-center justify-between", compact ? "flex-nowrap gap-2" : "flex-wrap gap-3")}>
         <Label>Region</Label>
-        <Segmented value={event.kind} options={options} onChange={onKind} label="Region kind" />
+        <Segmented
+          value={event.kind}
+          options={options}
+          onChange={onKind}
+          label="Region kind"
+          className={compact ? "flex-nowrap [&>button]:px-2" : undefined}
+        />
       </div>
-      <dl className="mt-3 divide-y divide-rule">
+      <dl className={cn("divide-y divide-rule", compact ? "mt-1" : "mt-3")}>
         <Row k="Start">
           <Num>{f2(event.start)}</Num>
         </Row>
@@ -79,7 +94,7 @@ export function EventCard({ event, events, onKind, onKeep, onDelete, onDone }: E
           <Chip tick={event.source === "auto" ? "muted" : "neutral"}>{event.source === "auto" ? "Proposed" : "Manual"}</Chip>
         </Row>
       </dl>
-      <div className="mt-3 flex items-center justify-end gap-2">
+      <div className={cn("flex items-center justify-end gap-2", compact ? "mt-1.5" : "mt-3")}>
         {event.source === "auto" ? (
           <Button size="sm" onClick={onKeep}>
             Keep
@@ -96,7 +111,7 @@ export function EventCard({ event, events, onKind, onKeep, onDelete, onDone }: E
   );
 }
 
-function Row({ k, children }: { k: string; children: ReactNode }) {
+function FullRow({ k, children }: { k: string; children: ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-3 py-2">
       <dt className="text-md text-muted">{k}</dt>
@@ -105,6 +120,19 @@ function Row({ k, children }: { k: string; children: ReactNode }) {
   );
 }
 
-function Num({ className, children }: { className?: string; children: ReactNode }) {
+function CompactRow({ k, children }: { k: string; children: ReactNode }) {
+  return (
+    <div className="flex h-[30px] items-center justify-between gap-3">
+      <dt className="text-md text-muted">{k}</dt>
+      <dd className="m-0">{children}</dd>
+    </div>
+  );
+}
+
+function FullNum({ className, children }: { className?: string; children: ReactNode }) {
   return <span className={cn("numeral text-lg text-ink", className)}>{children}</span>;
+}
+
+function CompactNum({ className, children }: { className?: string; children: ReactNode }) {
+  return <span className={cn("numeral text-md text-ink", className)}>{children}</span>;
 }

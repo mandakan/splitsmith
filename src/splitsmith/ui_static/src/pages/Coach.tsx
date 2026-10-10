@@ -811,7 +811,7 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
         actions={
           <>
             <Button type="button" onClick={() => void ws.reclassify()} disabled={ws.reclassifying} title="Re-run the auto-classifier; manual overrides survive">
-              {ws.reclassifying ? "Reclassifying…" : "Reclassify"}
+              {ws.reclassifying ? "Reclassifying\u2026" : "Reclassify"}
             </Button>
             {/* Breakdown is desktop only (DesktopGate): the phone keeps Coach. */}
             {ws.isMobile ? null : (

@@ -9,12 +9,21 @@ import type { StageEvent } from "@/lib/api";
 import { keepEvent, withKind } from "@/lib/events";
 import type { StageEvents } from "@/lib/useStageEvents";
 
-export function SelectedRegionCard({ event, regions }: { event: StageEvent; regions: StageEvents }) {
+export function SelectedRegionCard({
+  event,
+  regions,
+  compact = false,
+}: {
+  event: StageEvent;
+  regions: StageEvents;
+  compact?: boolean;
+}) {
   const { events, change, select } = regions;
   return (
     <EventCard
       event={event}
       events={events}
+      compact={compact}
       onKind={(kind) => {
         const next = withKind(events, event.id, kind);
         if (next) change(next, true);

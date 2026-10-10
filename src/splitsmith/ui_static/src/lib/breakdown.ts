@@ -17,6 +17,16 @@ export function regionCounts(events: readonly StageEvent[]): { confirmed: number
   return { confirmed, proposed };
 }
 
+/** The list's scrollTop that brings a row fully into view with the least
+ *  movement (``block: "nearest"``), for a list that must scroll alone:
+ *  unchanged when the row is already visible. Offsets are the row's own
+ *  within the list's content. */
+export function nearestScrollTop(scrollTop: number, viewHeight: number, rowTop: number, rowHeight: number): number {
+  if (rowTop < scrollTop) return rowTop;
+  if (rowTop + rowHeight > scrollTop + viewHeight) return Math.max(0, rowTop + rowHeight - viewHeight);
+  return scrollTop;
+}
+
 /** The Breakdown nav row's count: confirmed regions over every stage's
  *  ``figures.regions``, or ``undefined`` when there are none, so the row
  *  shows nothing rather than a zero. */

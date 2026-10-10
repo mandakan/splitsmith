@@ -30,6 +30,7 @@ import {
   zoomStep,
   type Zoom,
 } from "@/lib/timelineView";
+import { cn } from "@/lib/utils";
 import { zoomActionForKey } from "@/lib/zoomKeys";
 
 import type { TimelineGeom } from "./types";
@@ -76,6 +77,11 @@ export interface TimelineProps {
   /** Page entries appended to the band's "More" menu. */
   menuExtra?: ReactNode;
   title?: string;
+  /** Page controls drawn in the header row after the title (Breakdown's
+   *  transport on a short window, so the band and the player share a row). */
+  toolbar?: ReactNode;
+  /** A tighter header row for short windows. */
+  dense?: boolean;
 }
 
 let swipeBackHolds = 0;
@@ -122,6 +128,8 @@ export function Timeline(props: TimelineProps) {
     onZoomChange,
     menuExtra,
     title = "Timeline",
+    toolbar,
+    dense = false,
   } = props;
   const hostRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
@@ -399,8 +407,9 @@ export function Timeline(props: TimelineProps) {
         pointerDown.current = true;
       }}
     >
-      <div className="flex items-center gap-3 border-b border-rule px-3 py-2">
+      <div className={cn("flex items-center gap-3 border-b border-rule px-3", dense ? "py-1" : "py-2")}>
         <Label>{title}</Label>
+        {toolbar}
         <div className="ml-auto flex items-center gap-1" role="group" aria-label="Zoom controls">
           <Button
             type="button"

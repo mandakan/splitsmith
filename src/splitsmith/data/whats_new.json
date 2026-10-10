@@ -3,8 +3,8 @@
     {
       "id": "breakdown-page",
       "date": "2026-10-10",
-      "title": "Break a stage down on one screen",
-      "body": "Breakdown, under Analyse in the menu, puts the video, the region card and the timeline on one screen so you can mark movement and reloads and fix interval types without scrolling."
+      "title": "Mark movement and reloads on a stage",
+      "body": "Open Breakdown in the Analyse group of a match to mark movement, reloads and activations on the timeline and set each shot's interval, with the video beside it. Works on a computer."
     },
     {
       "id": "headcam-detection-meta-glasses",

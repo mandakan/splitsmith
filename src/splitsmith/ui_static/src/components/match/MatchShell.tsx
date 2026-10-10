@@ -172,6 +172,11 @@ export interface MatchShellOutletContext {
    *  refetch triggers are the shell load and a settled job. Optional for
    *  the same reason as ``beepQueue``. */
   refreshBeepQueue?: () => void;
+  /** Refetch ``project`` in place now. For writes that change what the
+   *  shell derives from it without starting a job (a region saved on
+   *  Breakdown moves the nav's region count, #1371). Optional: ShareShell's
+   *  read-only context has none. */
+  refreshProject?: () => void;
   /** The shell's one jobs-poller snapshot (#631 Task 11's SyncCard reads
    *  this for its "a sync_match job is pending/running" check rather than
    *  running a second poller - lib/jobs.ts's "one poller per shell"
@@ -373,12 +378,27 @@ export function MatchShell() {
         /* keep the last known queue */
       });
   }, []);
+  // Refetch the project in place (no setProject(null), so the sidebar never
+  // flashes empty) for the shooter the shell shows. Kept current through a
+  // ref so the callback is stable for the pages that hold it.
+  const projectTargetRef = useRef<string | null>(null);
+  const refreshProject = useCallback(() => {
+    const target = projectTargetRef.current;
+    if (!target) return;
+    api
+      .getProject(target)
+      .then((p) => setProject(p))
+      .catch(() => {
+        /* keep the last known project */
+      });
+  }, []);
   // Per-shooter pages (Audit / Coach / Videos / Export) need a shooter in
   // the URL. Rather than forcing the user to the shooter list, default to
   // one -- the URL slug if present, else the shared default-shooter rule
   // (same one DefaultShooterRedirect uses, so chrome and redirect agree).
   // ``undefined`` only when the match has no shooters yet.
   const defaultShooterSlug = slug ?? pickDefaultShooterSlug(shooters);
+  projectTargetRef.current = defaultShooterSlug ?? null;
 
 
   // Server-state drift recovery: when ANY request returns 409 ``no_project``
@@ -782,6 +802,7 @@ export function MatchShell() {
               capabilities,
               beepQueue,
               refreshBeepQueue,
+              refreshProject,
               jobs,
               jobsState,
             }}

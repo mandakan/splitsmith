@@ -57,6 +57,6 @@ describe("matchNavItems breakdown entry", () => {
 
   it("shows a quiet count of the confirmed regions", () => {
     const row = matchNavItems({ ...base, regionCount: 3 }).find((i) => i.key === "breakdown");
-    expect(row).toMatchObject({ count: 3, badgeKind: "count", badgeAriaLabel: "3 regions" });
+    expect(row).toMatchObject({ count: 3, badgeKind: "count", badgeAriaLabel: "3 regions in this match" });
   });
 });

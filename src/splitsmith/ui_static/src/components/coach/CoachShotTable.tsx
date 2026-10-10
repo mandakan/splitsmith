@@ -9,6 +9,7 @@ import { useEffect, useRef } from "react";
 import { Chip } from "@/components/ui/Chip";
 import { Label } from "@/components/ui/Label";
 import type { CoachShot } from "@/lib/api";
+import { nearestScrollTop } from "@/lib/breakdown";
 import { gapTier, type TierBaselines } from "@/lib/splits";
 import { BUDGET_LABEL, BUDGET_TICK } from "@/lib/timeBudget";
 import { cn } from "@/lib/utils";
@@ -31,9 +32,18 @@ export function CoachShotTable({ shots, activeShotNumber, baselines, onSelect, c
   const ref = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (activeShotNumber == null) return;
-    const el = ref.current?.querySelector<HTMLElement>(`[data-shot-number="${activeShotNumber}"]`);
-    if (el && typeof el.scrollIntoView === "function") el.scrollIntoView({ block: "nearest" });
-  }, [activeShotNumber]);
+    const list = ref.current;
+    const el = list?.querySelector<HTMLElement>(`[data-shot-number="${activeShotNumber}"]`);
+    if (!list || !el) return;
+    if (fill) {
+      // Inside Breakdown's inspector: scroll the list alone. scrollIntoView
+      // scrolls every scrollable ancestor too, which opened the inspector
+      // scrolled and clipped the card above the list.
+      list.scrollTop = nearestScrollTop(list.scrollTop, list.clientHeight, el.offsetTop, el.offsetHeight);
+      return;
+    }
+    if (typeof el.scrollIntoView === "function") el.scrollIntoView({ block: "nearest" });
+  }, [activeShotNumber, fill]);
   return (
     <section
       aria-label="Shots"
@@ -46,7 +56,7 @@ export function CoachShotTable({ shots, activeShotNumber, baselines, onSelect, c
         <Label>Interval</Label>
         <Label>Note</Label>
       </div>
-      <div ref={ref} className={fill ? "min-h-0 flex-1 overflow-y-auto" : "max-h-[70vh] overflow-y-auto"}>
+      <div ref={ref} className={fill ? "relative min-h-0 flex-1 overflow-y-auto" : "max-h-[70vh] overflow-y-auto"}>
         {shots.map((shot) => {
           const tier = gapTier(shot.split, shot.interval_class, baselines);
           const active = shot.shot_number === activeShotNumber;

@@ -18,8 +18,8 @@
  * next step, readiness and the export gate never count regions.
  */
 import { ArrowLeft, ArrowRight, Loader2 } from "lucide-react";
-import { useEffect, useState } from "react";
-import { Link, Navigate, useParams } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, Navigate, useOutletContext, useParams } from "react-router-dom";
 
 import { CoachShotTable } from "@/components/coach/CoachShotTable";
 import { EventList } from "@/components/coach/EventList";
@@ -28,6 +28,7 @@ import { SelectedRegionCard } from "@/components/coach/SelectedRegionCard";
 import { ShotIntervalCard } from "@/components/coach/ShotIntervalCard";
 import { StageBand } from "@/components/coach/StageBand";
 import { StageTransport, StageVideo } from "@/components/coach/StageViewer";
+import type { MatchShellOutletContext } from "@/components/match/MatchShell";
 import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/Chip";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -35,6 +36,7 @@ import { ApiError, api } from "@/lib/api";
 import { regionCounts } from "@/lib/breakdown";
 import { useMatchHref } from "@/lib/matchHref";
 import { gapTier } from "@/lib/splits";
+import { useShortViewport } from "@/lib/useShortViewport";
 import { deriveStageView, useStageWorkspace } from "@/lib/useStageWorkspace";
 
 export function Breakdown() {
@@ -92,8 +94,18 @@ function BreakdownStage({ slug, stage }: { slug: string; stage: number }) {
   const href = useMatchHref();
   const prefix = href("breakdown", slug);
   const coachPrefix = href("coach", slug);
-  const ws = useStageWorkspace(slug, stage);
+  // A saved region moves the nav's count: the shell refetches the project.
+  // Optional: outside the match shell (a test) there is no outlet context.
+  const shell = useOutletContext<MatchShellOutletContext | undefined>();
+  const ws = useStageWorkspace(slug, stage, { onRegionsSaved: shell?.refreshProject });
   const { project, coach, baselines, error, regions } = ws;
+  const compact = useShortViewport();
+  const inspectorRef = useRef<HTMLElement | null>(null);
+  // A new selection (a region, or a shot in place of one) opens the
+  // inspector at its top, so the card is never left scrolled out of view.
+  useEffect(() => {
+    if (inspectorRef.current) inspectorRef.current.scrollTop = 0;
+  }, [regions.selectedId, ws.activeShotNumber]);
 
   if (error) {
     return (
@@ -116,6 +128,14 @@ function BreakdownStage({ slug, stage }: { slug: string; stage: number }) {
 
   const { activeShot, selectedEvent, eventsReadOnly, prevStage, nextStage } = view;
   const counts = regionCounts(regions.events);
+  const regionChips = (
+    <>
+      <Chip tick="muted">
+        {counts.confirmed} {counts.confirmed === 1 ? "region" : "regions"}
+      </Chip>
+      {counts.proposed > 0 ? <Chip tick="muted">{counts.proposed} proposed</Chip> : null}
+    </>
+  );
   const stepButton = (label: string, to: number | null, icon: React.ReactNode) =>
     to != null ? (
       <Button asChild size="icon" aria-label={label}>
@@ -127,10 +147,16 @@ function BreakdownStage({ slug, stage }: { slug: string; stage: number }) {
       </Button>
     );
 
+  // Short windows (under 900 px tall) go dense rather than shrink the video:
+  // the transport moves into the band's header row, the region card is
+  // compact, and the lane hints wait behind the band's menu. Under the
+  // min-height floor (a window under ~640 px) the shell scrolls instead.
+  const transport = <StageTransport ws={ws} view={view} className={compact ? "p-0" : "shrink-0 border-t border-rule"} />;
   return (
     <div
       data-testid="breakdown-workspace"
-      className="flex h-[calc(100dvh-var(--shell-header-h,86px))] min-h-0 flex-col overflow-hidden"
+      data-compact={compact || undefined}
+      className="flex h-[calc(100dvh-var(--shell-header-h,86px))] min-h-[520px] flex-col overflow-hidden"
     >
       <div className="shrink-0 border-b border-rule px-4 py-2 md:px-7">
         <PageHeader
@@ -138,16 +164,17 @@ function BreakdownStage({ slug, stage }: { slug: string; stage: number }) {
           ordinal={pad2(stage)}
           title={coach.stage_name || "Stage"}
           sub={
-            <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
-              {project.competitor_name ? <span>{project.competitor_name}</span> : null}
-              <Chip tick="muted">
-                {counts.confirmed} {counts.confirmed === 1 ? "region" : "regions"}
-              </Chip>
-              {counts.proposed > 0 ? <Chip tick="muted">{counts.proposed} proposed</Chip> : null}
-            </span>
+            compact ? undefined : (
+              <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
+                {project.competitor_name ? <span>{project.competitor_name}</span> : null}
+                {regionChips}
+              </span>
+            )
           }
           actions={
             <>
+              {/* Short window: one header line. The shooter strip above names the shooter. */}
+              {compact ? <span className="mr-2 inline-flex items-center gap-2">{regionChips}</span> : null}
               <Button asChild>
                 <Link to={`${coachPrefix}/${stage}`}>Review in Coach</Link>
               </Button>
@@ -161,17 +188,17 @@ function BreakdownStage({ slug, stage }: { slug: string; stage: number }) {
       <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_360px]">
         <div className="flex min-h-0 flex-col border-r border-rule">
           <StageVideo ws={ws} view={view} className="min-h-0 w-full flex-1 object-contain" />
-          <StageTransport ws={ws} view={view} className="shrink-0 border-t border-rule" />
+          {compact ? null : transport}
         </div>
         {/* The column scrolls only when the card and a usable shot list do not
             both fit (a short window with a region selected); the page never does. */}
-        <aside aria-label="Inspector" className="flex min-h-0 flex-col gap-2 overflow-y-auto px-3 py-2">
+        <aside ref={inspectorRef} aria-label="Inspector" className="flex min-h-0 flex-col gap-2 overflow-y-auto px-3 py-2">
           {regions.issue ? (
             <SaveNotice issue={regions.issue} busy={regions.busy} onRetry={regions.retry} onDismiss={regions.dismiss} />
           ) : null}
           <div className="shrink-0">
             {selectedEvent ? (
-              <SelectedRegionCard event={selectedEvent} regions={regions} />
+              <SelectedRegionCard event={selectedEvent} regions={regions} compact={compact} />
             ) : activeShot ? (
               <ShotIntervalCard
                 shot={activeShot}
@@ -189,7 +216,7 @@ function BreakdownStage({ slug, stage }: { slug: string; stage: number }) {
           ) : null}
           <CoachShotTable
             fill
-            className="min-h-40 flex-1"
+            className={compact ? "min-h-24 flex-1" : "min-h-40 flex-1"}
             shots={coach.shots}
             activeShotNumber={ws.activeShotNumber}
             baselines={baselines}
@@ -199,7 +226,7 @@ function BreakdownStage({ slug, stage }: { slug: string; stage: number }) {
       </div>
 
       <div className="shrink-0 border-t border-rule">
-        <StageBand ws={ws} view={view} />
+        <StageBand ws={ws} view={view} compact={compact} toolbar={compact ? transport : undefined} />
       </div>
     </div>
   );

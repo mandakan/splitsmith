@@ -120,7 +120,8 @@ export function matchNavItems(args: {
       disabledHint: footageHint,
       count: regions,
       badgeKind: "count",
-      badgeAriaLabel: regions ? `${regions} ${regions === 1 ? "region" : "regions"}` : undefined,
+      // A total over the shooter's stages, so the label says so.
+      badgeAriaLabel: regions ? `${regions} ${regions === 1 ? "region" : "regions"} in this match` : undefined,
     },
     ...(multiShooter
       ? [

@@ -198,3 +198,66 @@ describe("Breakdown", () => {
     await waitFor(() => expect(screen.getByText("2 regions")).toBeInTheDocument());
   });
 });
+
+describe("Breakdown on a short window", () => {
+  it("goes dense: the transport joins the band's header, the hints wait behind Lane keys", async () => {
+    vi.mocked(api.getProject).mockResolvedValue(PROJECT);
+    vi.mocked(api.getStageCoach).mockReset();
+    vi.mocked(api.getStageCoach).mockResolvedValue(coach(EVENTS));
+    const saved = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: query.includes("max-height"),
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    })) as unknown as typeof window.matchMedia;
+    try {
+      renderAt("/match/m1/breakdown/anna/2");
+      const band = await screen.findByTestId("timeline");
+      expect(screen.getByTestId("breakdown-workspace")).toHaveAttribute("data-compact", "true");
+      expect(within(band).getByRole("button", { name: "Play" })).toBeInTheDocument();
+      expect(screen.queryByText("Drag empty lane to add")).toBeNull();
+      fireEvent.click(within(band).getByRole("button", { name: "Timeline options" }));
+      fireEvent.click(screen.getByRole("menuitemcheckbox", { name: /Lane keys/ }));
+      expect(screen.getByText("Drag empty lane to add")).toBeInTheDocument();
+    } finally {
+      window.matchMedia = saved;
+    }
+  });
+});
+
+describe("Breakdown inspector scrolling", () => {
+  beforeEach(() => {
+    vi.mocked(api.getProject).mockResolvedValue(PROJECT);
+    vi.mocked(api.getStageCoach).mockReset();
+    vi.mocked(api.getStageCoach).mockResolvedValue(coach(EVENTS));
+  });
+
+  it("picking a shot scrolls the shot list alone, never the inspector or the page", async () => {
+    const spy = vi.fn();
+    const saved = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = spy;
+    try {
+      const { container } = renderAt("/match/m1/breakdown/anna/2");
+      await screen.findByRole("complementary", { name: "Inspector" });
+      fireEvent.click(container.querySelector<HTMLElement>('[aria-label="Inspector"] [data-shot-number="3"]')!);
+      await waitFor(() => expect(screen.getByRole("region", { name: "Shot 3" })).toBeInTheDocument());
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      Element.prototype.scrollIntoView = saved;
+    }
+  });
+
+  it("a new selection opens the inspector at its top: region after shot, and shot after region", async () => {
+    const { container } = renderAt("/match/m1/breakdown/anna/2");
+    const inspector = await screen.findByRole("complementary", { name: "Inspector" });
+    inspector.scrollTop = 80;
+    fireEvent.click(screen.getByTestId("event-evt-2"));
+    await waitFor(() => expect(within(inspector).getByRole("region", { name: "Region" })).toBeInTheDocument());
+    expect(inspector.scrollTop).toBe(0);
+    inspector.scrollTop = 80;
+    fireEvent.click(container.querySelector<HTMLElement>('[aria-label="Inspector"] [data-shot-number="2"]')!);
+    await waitFor(() => expect(within(inspector).getByRole("region", { name: "Shot 2" })).toBeInTheDocument());
+    expect(inspector.scrollTop).toBe(0);
+  });
+});

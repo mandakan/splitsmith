@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { navRegionCount, regionCounts } from "@/lib/breakdown";
+import { navRegionCount, nearestScrollTop, regionCounts } from "@/lib/breakdown";
+
+describe("nearestScrollTop", () => {
+  it("leaves a visible row alone and moves the least to show a hidden one", () => {
+    expect(nearestScrollTop(0, 100, 40, 30)).toBe(0);
+    expect(nearestScrollTop(0, 100, 150, 30)).toBe(80);
+    expect(nearestScrollTop(200, 100, 60, 30)).toBe(60);
+  });
+});
 
 describe("regionCounts", () => {
   it("splits confirmed (manual) from proposed (auto)", () => {
