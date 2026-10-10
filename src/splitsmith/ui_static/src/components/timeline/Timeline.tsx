@@ -79,10 +79,16 @@ export interface TimelineProps {
   maxZoom?: number;
   /** Page entries appended to the band's "More" menu. */
   menuExtra?: ReactNode;
-  title?: string;
+  /** The header's label; ``null`` draws none (Audit's toolbar leads with its transport). */
+  title?: string | null;
   /** Page controls drawn in the header row after the title (Breakdown's
-   *  transport on a short window, so the band and the player share a row). */
+   *  transport on a short window, so the band and the player share a row;
+   *  Audit's play, clock, camera and marker filter, #1359). */
   toolbar?: ReactNode;
+  /** Page controls pushed right, before the zoom group (Audit's legend key). */
+  actionsStart?: ReactNode;
+  /** Page controls after the band's menu, at the row's end (Audit's help). */
+  actionsEnd?: ReactNode;
   /** A tighter header row for short windows. */
   dense?: boolean;
   /**
@@ -141,6 +147,8 @@ export function Timeline(props: TimelineProps) {
     menuExtra,
     title = "Timeline",
     toolbar,
+    actionsStart,
+    actionsEnd,
     dense = false,
     rowsHeight,
   } = props;
@@ -451,9 +459,14 @@ export function Timeline(props: TimelineProps) {
       }}
     >
       <div className={cn("flex items-center gap-3 border-b border-rule px-3", dense ? "py-1" : "py-2")}>
-        <Label>{title}</Label>
+        {title === null ? null : <Label>{title}</Label>}
         {toolbar}
-        <div className="ml-auto flex items-center gap-1" role="group" aria-label="Zoom controls">
+        {actionsStart ? <div className="ml-auto flex shrink-0 items-center">{actionsStart}</div> : null}
+        <div
+          className={cn("flex shrink-0 items-center gap-1", actionsStart ? null : "ml-auto")}
+          role="group"
+          aria-label="Zoom controls"
+        >
           <Button
             type="button"
             size="sm"
@@ -525,6 +538,7 @@ export function Timeline(props: TimelineProps) {
             </Menu>
           </span>
         </div>
+        {actionsEnd}
       </div>
       <div className="grid grid-cols-[96px_minmax(0,1fr)]">
         <div className="flex flex-col border-r border-rule">

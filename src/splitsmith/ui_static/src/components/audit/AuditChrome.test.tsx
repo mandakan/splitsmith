@@ -8,7 +8,7 @@ import { shotRows } from "@/lib/auditStep";
 import { AuditFooter } from "./AuditFooter";
 import { CurrentShotLine } from "./CurrentShotLine";
 import { ShotList } from "./ShotList";
-import { TransportLine } from "./TransportLine";
+import { LegendKey, TransportLine, TransportMenuItems } from "./TransportLine";
 
 function marker(id: string, time: number, kind: AuditMarker["kind"] = "detected"): AuditMarker {
   return { id, kind, time, candidateNumber: null, confidence: 0.8, peakAmplitude: null, note: "" };
@@ -68,15 +68,15 @@ describe("TransportLine", () => {
       onTogglePlay: vi.fn(),
       currentTime: 7.29,
       duration: 42.13,
+      loopMode: false,
+      onToggleLoop: vi.fn(),
+      camera: "Head cam",
       filters: DEFAULT_FILTERS,
       counts: { detected: 30, rejected: 89, manual: 0, beep: 1 },
       onFiltersChange: vi.fn(),
       peeking: false,
       onPeekStart: vi.fn(),
       onPeekEnd: vi.fn(),
-      kAutoProgress: true,
-      onToggleKAuto: vi.fn(),
-      onOpenHelp: vi.fn(),
       ...over,
     };
     render(<TransportLine {...props} />);
@@ -91,31 +91,104 @@ describe("TransportLine", () => {
     expect(props.onFiltersChange).toHaveBeenCalledWith({ ...DEFAULT_FILTERS, rejected: true });
   });
 
-  // Zoom moved to the timeline band's header (#1352); "steps with the
-  // buttons and returns to Fit" in components/timeline/Timeline.test.tsx
-  // covers Zoom in from Fit to 1.5x, and Audit.timeline.test.tsx the page.
-  it("has no zoom controls; the overflow menu toggles auto-step", () => {
-    const props = renderLine();
+  // Zoom is the timeline band's own (#1352); "steps with the buttons and
+  // returns to Fit" in components/timeline/Timeline.test.tsx covers it.
+  it("has no zoom controls; names the camera in place of the band's title", () => {
+    renderLine({ camera: "Chest cam" });
     expect(screen.queryByRole("button", { name: /zoom|fit/i })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "More" }));
-    fireEvent.click(screen.getByRole("menuitemcheckbox"));
+    expect(screen.getByText("Chest cam")).toBeInTheDocument();
+  });
+
+  // The camera column's transport row (#1359) folded in here: its play and
+  // clock were copies, its loop was not (its frame steps went to the menu).
+  it("plays and loops", () => {
+    const props = renderLine({ loopMode: true });
+    fireEvent.click(screen.getByRole("button", { name: "Play" }));
+    expect(props.onTogglePlay).toHaveBeenCalledTimes(1);
+    const loop = screen.getByRole("button", { name: "Loop on (L)" });
+    expect(loop).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(loop);
+    expect(props.onToggleLoop).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: /Step frame/ })).toBeNull();
+  });
+
+  it("says when the peaks are loading", () => {
+    renderLine({ loading: true });
+    expect(screen.getByText("Loading")).toBeInTheDocument();
+  });
+});
+
+describe("TransportMenuItems", () => {
+  function renderItems(over: Partial<React.ComponentProps<typeof TransportMenuItems>> = {}) {
+    const props: React.ComponentProps<typeof TransportMenuItems> = {
+      onStepFrame: vi.fn(),
+      kAutoProgress: true,
+      onToggleKAuto: vi.fn(),
+      ...over,
+    };
+    render(
+      <div role="menu">
+        <TransportMenuItems {...props} />
+      </div>,
+    );
+    return props;
+  }
+
+  it("steps one frame back and forward", () => {
+    const props = renderItems();
+    fireEvent.click(screen.getByRole("button", { name: "Step frame back" }));
+    fireEvent.click(screen.getByRole("button", { name: "Step frame forward" }));
+    expect(props.onStepFrame).toHaveBeenNthCalledWith(1, -1);
+    expect(props.onStepFrame).toHaveBeenNthCalledWith(2, 1);
+  });
+
+  it("toggles auto-step", () => {
+    const props = renderItems();
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: /auto-step/i }));
     expect(props.onToggleKAuto).toHaveBeenCalled();
   });
 
   it("offers the full-resolution switch only when the page passes one", () => {
-    renderLine();
-    fireEvent.click(screen.getByRole("button", { name: "More" }));
+    renderItems();
     expect(screen.queryByRole("menuitemcheckbox", { name: /full-resolution video/i })).toBeNull();
   });
 
-  it("toggles full-resolution video from the overflow menu", () => {
+  it("toggles full-resolution video", () => {
     const onToggleFullResVideo = vi.fn();
-    renderLine({ fullResVideo: false, onToggleFullResVideo });
-    fireEvent.click(screen.getByRole("button", { name: "More" }));
+    renderItems({ fullResVideo: false, onToggleFullResVideo });
     const item = screen.getByRole("menuitemcheckbox", { name: /full-resolution video/i });
     expect(item).toHaveAttribute("aria-checked", "false");
     fireEvent.click(item);
     expect(onToggleFullResVideo).toHaveBeenCalledTimes(1);
+  });
+
+  it("ends with the page's action and then the readouts", () => {
+    renderItems({
+      action: (
+        <button type="button" role="menuitem">
+          Detect shots
+        </button>
+      ),
+      readouts: ["1500 peaks · 44.69 s", "All 2 cameras linked"],
+    });
+    const menu = screen.getByRole("menu");
+    const text = menu.textContent ?? "";
+    expect(text.indexOf("Auto-step")).toBeLessThan(text.indexOf("Detect shots"));
+    expect(text.indexOf("Detect shots")).toBeLessThan(text.indexOf("1500 peaks"));
+    expect(text.indexOf("1500 peaks")).toBeLessThan(text.indexOf("All 2 cameras linked"));
+  });
+});
+
+describe("LegendKey", () => {
+  it("folds the legend to its swatches and opens the labels on click", () => {
+    render(<LegendKey />);
+    const key = screen.getByRole("button", { name: "Marker key" });
+    expect(screen.queryByText("Timer stop")).toBeNull();
+    fireEvent.click(key);
+    expect(key).toHaveAttribute("aria-expanded", "true");
+    for (const label of ["Beep", "Timer stop", "Shot", "Manual", "Rejected", "Flag", "Current"]) {
+      expect(within(screen.getByRole("menu")).getByText(label)).toBeInTheDocument();
+    }
   });
 });
 

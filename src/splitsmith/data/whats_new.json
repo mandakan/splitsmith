@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "audit-controls-on-the-timeline",
+      "date": "2026-10-10",
+      "title": "Audit controls on the timeline",
+      "body": "On Audit, play, loop, the shot filter and the marker key now sit on the timeline's top row, and its ... menu holds the rest, so more of the waveform fits on a laptop screen."
+    },
+    {
       "id": "match-summary-on-upright-video",
       "date": "2026-10-10",
       "title": "Match summary fits vertical video",

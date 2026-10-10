@@ -1659,8 +1659,17 @@ waveform: the audio track carries ``WaveformTrack`` and ``MarkerLayer``
 together, pins are on a Flags row that does not seek, above it, and the
 band's own ruler and
 zoom replaced Audit's static ruler and ``TransportLine``'s
-``ZoomControls``; a new control belongs on ``TransportLine``'s overflow
-menu or ``CurrentShotLine``, a new per-shot signal still on ``ShotList``
+``ZoomControls``. Since #1359 the band's header row is Audit's only
+control row (no strip above the band, no transport row in
+``MultiCamColumn``): ``TransportLine`` is its ``toolbar`` (play, clock,
+loop, camera label, the "show" filter), ``LegendKey`` its ``actionsStart``
+(swatches + Key, labels in a popover), the help ``?`` its ``actionsEnd``,
+and ``TransportMenuItems`` its ``menuExtra`` in the band's one ``...``
+menu (frame steps, auto-step, full-resolution video, the trim / detect
+action, then ``lib/auditBand`` readouts: peaks and linked cameras). A new
+control belongs in that header if it fits one row at 1440 wide, else in
+that menu, or on ``CurrentShotLine``; ``components/ui/Menu`` flips upward
+when the room below cannot hold it. A new per-shot signal still goes on ``ShotList``
 through ``lib/auditStep.shotRows``; ``_after_beep_reviewed`` in
 ``ui/server.py`` is the one place a confirm chains trim and detection.
 Footage (``pages/Ingest.tsx``,

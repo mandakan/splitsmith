@@ -18,7 +18,7 @@
  *   3+ cams -> 16:9 primary + thumbnail row (~72h each) below.
  *
  * On lg the column fills Audit's bounded top row: every sibling of the
- * primary tile (header, strip or thumb row, sync row, transport) is
+ * primary tile (header, strip or thumb row, sync row) is
  * `shrink-0`, so the tile is what flexes, and it never drops below
  * 200 px (Audit raises the row's floor when there is more than one
  * camera so the backstop is not what holds it).
@@ -26,11 +26,11 @@
  * The "Focus / Grid" segmented control at the top hints that an equal
  * 2x2 grid mode is available -- the host owns the Grid modal (see
  * CamGridModal). The shared transport (play / pause / loop / step
- * frame) lives in the column footer; this is the single source of
- * playback truth for the operator.
+ * frame) is the timeline band's header (#1359: the column's own footer
+ * row repeated its play and clock), so the tile keeps that height.
  */
 
-import { Maximize2, Pause, Play, Plus, Repeat, X } from "lucide-react";
+import { Maximize2 } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { CamSyncPill, type CamSyncState } from "@/components/audit/CamSyncPill";
@@ -52,14 +52,6 @@ export interface MultiCamColumnProps {
    *  ``videos.length >= 2``. */
   layout: CamLayout;
   onLayoutChange: (layout: CamLayout) => void;
-  /** Shared transport state -- rendered in the column footer. */
-  isPlaying: boolean;
-  loopMode: boolean;
-  currentTime: number;
-  duration: number;
-  onTogglePlay: () => void;
-  onToggleLoop: () => void;
-  onStepFrame: (dir: -1 | 1) => void;
   /** The primary video element renders here (passed in so the page can
    *  own the <video> ref + secondary refs map). */
   children: ReactNode;
@@ -76,13 +68,6 @@ export function MultiCamColumn({
   onPromote,
   layout,
   onLayoutChange,
-  isPlaying,
-  loopMode,
-  currentTime,
-  duration,
-  onTogglePlay,
-  onToggleLoop,
-  onStepFrame,
   children,
   className,
 }: MultiCamColumnProps) {
@@ -194,65 +179,6 @@ export function MultiCamColumn({
         />
       ) : null}
 
-      {/* Transport footer. Single source of playback truth for the
-          audit page -- it used to live in a floating bay; now it docks here so
-          the operator can scrub without ever leaving the column. */}
-      <div data-testid="cam-transport" className="flex shrink-0 items-center gap-2 rounded-md border border-rule bg-surface-2 px-2.5 py-1.5">
-        <button
-          type="button"
-          onClick={onTogglePlay}
-          title={isPlaying ? "Pause (Space)" : "Play (Space)"}
-          aria-label={isPlaying ? "Pause (Space)" : "Play (Space)"}
-          className="inline-flex size-6 items-center justify-center rounded-full border-0 bg-led-fill text-ink shadow-[0_0_10px_var(--color-led-glow)] transition-colors hover:bg-led-soft"
-        >
-          {isPlaying ? <Pause className="size-3" /> : <Play className="size-3" />}
-        </button>
-        <span className="font-mono text-[0.6875rem] tabular-nums text-ink-2">
-          {currentTime.toFixed(3)}
-          <span className="text-subtle">/{duration.toFixed(2)}s</span>
-        </span>
-        <span
-          aria-hidden
-          className="ml-auto font-mono text-[0.5625rem] font-bold uppercase tracking-[0.1em] text-subtle"
-        >
-          all cams · linked
-        </span>
-        <div className="inline-flex items-center gap-1">
-          <button
-            type="button"
-            onClick={onToggleLoop}
-            aria-pressed={loopMode}
-            title="Loop (R)"
-            aria-label={loopMode ? "Loop on (R)" : "Loop off (R)"}
-            className={cn(
-              "inline-flex size-[22px] items-center justify-center rounded-sm border transition-colors",
-              loopMode
-                ? "border-led bg-led/10 text-led shadow-[0_0_8px_var(--color-led-glow)]"
-                : "border-rule bg-transparent text-muted hover:border-rule-strong hover:text-ink-2",
-            )}
-          >
-            <Repeat className="size-3" aria-hidden />
-          </button>
-          <button
-            type="button"
-            onClick={() => onStepFrame(-1)}
-            title="Step frame back (Shift+Left)"
-            aria-label="Step frame back"
-            className="inline-flex size-[22px] items-center justify-center rounded-sm border border-rule font-mono text-[0.625rem] font-bold text-muted transition-colors hover:border-rule-strong hover:text-ink-2"
-          >
-            ‹
-          </button>
-          <button
-            type="button"
-            onClick={() => onStepFrame(1)}
-            title="Step frame forward (Shift+Right)"
-            aria-label="Step frame forward"
-            className="inline-flex size-[22px] items-center justify-center rounded-sm border border-rule font-mono text-[0.625rem] font-bold text-muted transition-colors hover:border-rule-strong hover:text-ink-2"
-          >
-            ›
-          </button>
-        </div>
-      </div>
     </aside>
   );
 }
@@ -446,6 +372,3 @@ function pad2(n: number): string {
   return n.toString().padStart(2, "0");
 }
 
-/* Keep imports used by the JSX (lucide tree-shake hint). */
-void Plus;
-void X;

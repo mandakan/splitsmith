@@ -485,3 +485,33 @@ describe("Timeline", () => {
     });
   });
 });
+
+describe("Timeline header slots (#1359)", () => {
+  it("drops the title on null and draws the page's actions around the zoom group", () => {
+    render(
+      <Timeline
+        title={null}
+        duration={10}
+        currentTime={0}
+        onSeek={vi.fn()}
+        zoom={null}
+        onZoomChange={vi.fn()}
+        tracks={[]}
+        toolbar={<span>Toolbar</span>}
+        actionsStart={<button type="button">Key</button>}
+        actionsEnd={<button type="button">Help</button>}
+      />,
+    );
+    expect(screen.queryByText("Timeline")).toBeNull();
+    const header = screen.getByText("Toolbar").parentElement as HTMLElement;
+    const order = Array.from(header.querySelectorAll("button")).map(
+      (b) => b.getAttribute("aria-label") ?? b.textContent,
+    );
+    expect(order).toEqual(["Key", "Zoom out", "Zoom in", "Fit", "Timeline options", "Help"]);
+  });
+
+  it("keeps its title by default", () => {
+    render(<Timeline duration={10} currentTime={0} onSeek={vi.fn()} zoom={null} onZoomChange={vi.fn()} tracks={[]} />);
+    expect(screen.getByText("Timeline")).toBeInTheDocument();
+  });
+});

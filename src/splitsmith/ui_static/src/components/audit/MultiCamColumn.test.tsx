@@ -31,13 +31,6 @@ function renderColumn(videos: StageVideo[] = [video]) {
       onPromote={vi.fn()}
       layout="focus"
       onLayoutChange={vi.fn()}
-      isPlaying={false}
-      loopMode={false}
-      currentTime={0}
-      duration={20}
-      onTogglePlay={vi.fn()}
-      onToggleLoop={vi.fn()}
-      onStepFrame={vi.fn()}
     >
       <video />
     </MultiCamColumn>,
@@ -73,10 +66,13 @@ describe("MultiCamColumn", () => {
     expect(tile).not.toHaveClass("lg:min-h-0");
     // Every fixed-height sibling holds its size, so the tile is what gives.
     const siblings = Array.from(aside.children).filter((c) => c !== tile);
-    expect(siblings).toHaveLength(4);
+    // Header, secondary strip or thumbs, sync row. No transport row: it
+    // folded into the timeline band's header (#1359).
+    expect(siblings).toHaveLength(3);
     for (const s of siblings) expect(s).toHaveClass("shrink-0");
     expect(screen.getByTestId(secondaryId)).toHaveClass("shrink-0");
     expect(screen.getByTestId("cam-sync-row")).toHaveClass("shrink-0");
-    expect(screen.getByTestId("cam-transport")).toHaveClass("shrink-0");
+    expect(screen.queryByTestId("cam-transport")).toBeNull();
+    expect(screen.queryByRole("button", { name: /play|loop/i })).toBeNull();
   });
 });
