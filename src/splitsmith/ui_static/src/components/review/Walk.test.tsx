@@ -37,6 +37,10 @@ function Harness({
   scope = "all",
   onDone = () => {},
   record,
+  loop = false,
+  onToggleLoop = () => {},
+  onLoopStop = () => {},
+  onListen = () => {},
 }: {
   initial: AuditMarker[];
   savedEvents?: Array<{ kind: string; payload: Record<string, unknown> }>;
@@ -44,6 +48,10 @@ function Harness({
   scope?: "all" | "shots";
   onDone?: () => void;
   record: (kind: string, payload: Record<string, unknown>) => void;
+  loop?: boolean;
+  onToggleLoop?: () => void;
+  onLoopStop?: (time: number | null) => void;
+  onListen?: (time: number) => void;
 }) {
   const [markers, setMarkers] = useState(initial);
   // The page's guide wiring (pages/Review.tsx): the walk toggles, the page draws.
@@ -71,7 +79,10 @@ function Harness({
         onRemove={(id) => setMarkers((ms) => ms.filter((x) => x.id !== id))}
         onRecord={record}
         onFocus={() => {}}
-        onListen={() => {}}
+        onListen={onListen}
+        loop={loop}
+        onToggleLoop={onToggleLoop}
+        onLoopStop={onLoopStop}
         onDone={onDone}
         onExit={() => {}}
         busy={false}
@@ -201,5 +212,38 @@ describe("Walk", () => {
     } finally {
       window.removeEventListener("keydown", pageKey);
     }
+  });
+
+  it("loops each stop as the walk arrives at it, and not when a shot moves", () => {
+    const onLoopStop = vi.fn();
+    render(<Harness initial={markersAll} record={vi.fn()} loop onLoopStop={onLoopStop} />);
+    expect(onLoopStop).toHaveBeenCalledTimes(1);
+    expect(onLoopStop).toHaveBeenLastCalledWith(0.5);
+    press("ArrowRight");
+    press("f");
+    expect(onLoopStop).toHaveBeenCalledTimes(1);
+    press("Enter");
+    expect(onLoopStop).toHaveBeenCalledTimes(2);
+    expect(onLoopStop).toHaveBeenLastCalledWith(1.0);
+    press("Backspace");
+    expect(onLoopStop).toHaveBeenLastCalledWith(0.5);
+  });
+
+  it("plays nothing by itself with the loop off, and L toggles it", () => {
+    const onLoopStop = vi.fn();
+    const onToggleLoop = vi.fn();
+    render(<Harness initial={markersAll} record={vi.fn()} onLoopStop={onLoopStop} onToggleLoop={onToggleLoop} />);
+    press("Enter");
+    expect(onLoopStop).not.toHaveBeenCalled();
+    press("l");
+    expect(onToggleLoop).toHaveBeenCalledTimes(1);
+  });
+
+  it("listens around where the stop was found, not where a nudge moved the shot", () => {
+    const onListen = vi.fn();
+    render(<Harness initial={markersAll} record={vi.fn()} onListen={onListen} />);
+    press("ArrowRight");
+    press(" ");
+    expect(onListen).toHaveBeenLastCalledWith(0.5);
   });
 });

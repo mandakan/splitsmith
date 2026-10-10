@@ -7,7 +7,7 @@
  * never also reach the page's own play and scrub handlers.
  */
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import type { AuditMarker } from "@/components/MarkerLayer";
 import { WalkGuide } from "@/components/review/WalkGuide";
@@ -54,7 +54,13 @@ export interface WalkProps {
   onRemove: (id: string) => void;
   onRecord: (kind: string, payload: Record<string, unknown>) => void;
   onFocus: (id: string | null, time: number) => void;
+  /** Space: play around this time (once, or on repeat with the loop on). */
   onListen: (time: number) => void;
+  /** The loop (``L``): with it on, every stop the walk arrives at is passed
+   *  to ``onLoopStop`` to repeat its sound (``null`` past the last stop). */
+  loop: boolean;
+  onToggleLoop: () => void;
+  onLoopStop: (time: number | null) => void;
   /** Sign the fixture off and move on. */
   onDone: () => void;
   onExit: () => void;
@@ -110,6 +116,16 @@ export function Walk(props: WalkProps) {
   const marker = stop ? markerFor(stop) : null;
   const state = stopState(marker);
   const time = stop ? stopTime(stop, marker) : 0;
+  // Where this stop was found: what Space and the loop play around, so a
+  // nudge or F moves the shot under a sound that keeps repeating.
+  const anchorRef = useRef(time);
+  const { loop, onLoopStop } = props;
+  useEffect(() => {
+    anchorRef.current = time;
+    if (loop) onLoopStop(stop ? time : null);
+    // Keyed on the stop and the switch only: a placement must not restart it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stop?.key, loop]);
   const decidedCount = stops.filter(decided).length;
   const keptCount = markers.filter((m) => m.kind === "detected" || m.kind === "manual").length;
   const check = countCheck(keptCount, expectedRounds);
@@ -155,6 +171,10 @@ export function Walk(props: WalkProps) {
       e.stopPropagation();
       if (action.kind === "guide") {
         toggleGuide();
+        return;
+      }
+      if (action.kind === "loop") {
+        props.onToggleLoop();
         return;
       }
       if (!stop) {
@@ -211,7 +231,7 @@ export function Walk(props: WalkProps) {
           if (state === "shot" && marker) place(time + action.ms / 1000);
           break;
         case "listen":
-          props.onListen(time);
+          props.onListen(anchorRef.current);
           break;
         case "back":
           setIndex((i) => Math.max(0, i - 1));
@@ -241,6 +261,18 @@ export function Walk(props: WalkProps) {
     props.scope === "all"
       ? "Walking every candidate and every loud sound: the shots were snapped from another camera, or their count is off."
       : "Walking the kept shots: a person labelled this audio and the count matches. The whole stage below shows everything else.";
+
+  const loopButton = (
+    <Button
+      size="sm"
+      variant="ghost"
+      onClick={props.onToggleLoop}
+      aria-pressed={props.loop}
+      title="Repeat each stop's sound, from half a second before to 0.7 s after (L)"
+    >
+      {props.loop ? "Loop on" : "Loop"}
+    </Button>
+  );
 
   const guideButton = (
     <Button size="sm" variant="ghost" onClick={toggleGuide} aria-pressed={guideOpen}>
@@ -371,6 +403,7 @@ export function Walk(props: WalkProps) {
         </span>
         <span className="ml-auto flex gap-1">
           {scopeButton}
+          {loopButton}
           {guideButton}
           <Button size="sm" variant="ghost" onClick={props.onExit}>
             Leave the walk
