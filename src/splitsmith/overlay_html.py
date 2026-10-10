@@ -898,8 +898,13 @@ def single_html(
     theme: OverlayTheme,
     accent: str | None = None,
     fit_columns: bool = False,
+    cell_style: str | None = None,
 ) -> str:
     """One canvas-sized cell as a whole HTML document (issue #684).
+
+    ``cell_style`` is extra inline style for the cell (the upright stage
+    summary's padding out of the platform safe area, issue #1394); ``None``
+    leaves the document exactly as it was.
 
     The single-shooter overlay's counterpart to :func:`grid_html`. There
     is exactly one cell and it is the whole frame, so this takes plain
@@ -948,7 +953,10 @@ def single_html(
     only the single-shooter export builds is what keeps that true
     structurally rather than by anyone remembering.
     """
-    cell_style = f"--accent:{accent}" if accent else None
+    styles = [f"--accent:{accent}"] if accent else []
+    if cell_style:
+        styles.append(cell_style)
+    cell_style = ";".join(styles) or None
     return (
         "<!doctype html>\n"
         '<html><head><meta charset="utf-8"><title>overlay</title>'

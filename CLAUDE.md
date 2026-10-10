@@ -422,6 +422,31 @@ the last stage that has footage of them
 ranking between shooters, as on the stage hold. The rail preview cannot draw
 it (the route previews one shooter), so the pane shows its gallery thumbnail.
 
+**Upright cards** (#1394 part 1): a canvas taller than wide
+(``safe_area.is_upright``; square is not upright) gives both single-shooter
+summary cards their own layout, and every square or wider card is byte for
+byte what it was (HTML and pixels, checked at 1920x1080, 1280x720,
+1080x1080 and 1440x1080). ``safe_area.safe_area(w, h)`` is the one
+definition of what Shorts / Reels / TikTok draw over: the bottom 13 % and a
+right-edge button column 12 % wide from 40 % down (``None`` when not
+upright); a document reads it as ``--safe-bottom`` / ``--safe-right`` /
+``--safe-right-top`` (``SafeArea.css_vars``), which is how the upright HUD
+is to receive it. The match summary is ``upright_match_summary_html``
+(kicker, a two-line title, Avg split / Best draw / Rounds at 10.4 % of the
+width, the counts on their own row, one table of ``# Stage Draw Split Time
+HF %`` with names cut at 12 characters) with its own small fit script: each
+figure row shrinks to its columns, the table shrinks until its text clears
+the safe line and then spreads the spare height over its rows. The stage
+summary goes through the engine as before (``summary_still_html``):
+``upright_summary_scale`` keys type to the width, ``summary_groups(upright=
+True)`` puts Splits first and stacked (a 2x2 without regions; Static /
+Moving rows of three and a Draw / reload 2x2 with them, whatever the aspect),
+and ``upright_cell_style`` pads the cell out of the safe area.
+``tests/test_upright_cards.py`` measures both in Chromium against the area
+written out by hand. The shooter's logo (``logo_spots.paste_logo``, 9 %
+of the height, top right) is pasted after the fact and can still sit over
+a long title or name on an upright card, as on main.
+
 **Logo spots** (``logo_spots``, spec 2026-10-09): beyond the cards, an export
 may put a logo in more places, chosen per export by the Export page's Logos row
 (``lib/logoPlan``: Cards only, Polished, Choose), ``--logos`` on both CLIs and
@@ -1313,7 +1338,8 @@ Summary card: with confirmed reloads the Splits band gains Reloads /
 Reload avg / Exposed, drawn whenever there is a confirmed reload,
 unsigned and standing reloads included. Static / Moving split rows need a
 single-shooter cell that is landscape or square and >= 480 px tall
-(``_SPLIT_ROWS_MIN_CELL_HEIGHT``); grid holds pass ``split_rows=False``
+(``_SPLIT_ROWS_MIN_CELL_HEIGHT``), or an upright card (its own stacked
+layout, above); grid holds pass ``split_rows=False``
 so cells stay comparable, and keep the reload row. A stage with no
 confirmed regions declares exactly the groups it did before regions existed
 (pixels follow fit.js; portrait cards changed with the 0.6 em gap rule).
