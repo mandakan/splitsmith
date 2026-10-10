@@ -1411,3 +1411,66 @@ def test_export_stage_removes_a_stale_events_csv_when_regions_are_dropped(tmp_pa
     second = _export()
     assert second.events_csv_path is None
     assert not events_csv.exists()
+    assert second.removed_paths == [events_csv]
+
+
+def _csv_export(tmp_path: Path, *, write_csv: bool) -> exports_mod.StageExportResult:
+    return exports_mod.export_stage(
+        request=exports_mod.StageExportRequest(
+            stage_number=1, write_trim=False, write_csv=write_csv, write_fcpxml=False, write_report=False
+        ),
+        audit_path=tmp_path / "stage1.json",
+        exports_dir=tmp_path / "exports",
+        source_video_path=None,
+        pre_buffer_seconds=5.0,
+        post_buffer_seconds=5.0,
+        stage_data=StageData(
+            stage_number=1,
+            stage_name="Stage 1 -- H1",
+            time_seconds=8.0,
+            scorecard_updated_at=datetime(2026, 5, 2, 14, 30, tzinfo=UTC),
+        ),
+        beep_time_in_source=10.0,
+        config=Config(),
+    )
+
+
+def _write_audit_with_region(audit_path: Path, *, shots: list[dict]) -> None:
+    doc = _audit_payload(shots=shots)
+    doc["events"] = [_event("evt-1", "movement", 3.0, 6.0, source="manual")]
+    audit_path.write_text(json.dumps(doc), encoding="utf-8")
+
+
+def test_a_csv_export_with_no_shots_removes_both_earlier_csvs(tmp_path: Path) -> None:
+    """#1331: a ``write_csv`` re-export after every shot was removed left the
+    previous run's splits and events CSVs on disk, so a download served
+    figures for shots that no longer exist."""
+    shots = [{"shot_number": 1, "candidate_number": 1, "time": 9.0, "ms_after_beep": 4000}]
+    _write_audit_with_region(tmp_path / "stage1.json", shots=shots)
+    first = _csv_export(tmp_path, write_csv=True)
+    assert first.csv_path is not None and first.csv_path.exists()
+    assert first.events_csv_path is not None and first.events_csv_path.exists()
+
+    _write_audit_with_region(tmp_path / "stage1.json", shots=[])
+    second = _csv_export(tmp_path, write_csv=True)
+
+    assert second.csv_path is None
+    assert second.events_csv_path is None
+    assert not first.csv_path.exists()
+    assert not first.events_csv_path.exists()
+    assert second.removed_paths == [first.csv_path, first.events_csv_path]
+
+
+def test_an_export_without_csv_leaves_earlier_csvs_alone(tmp_path: Path) -> None:
+    """``write_csv`` off is not a statement about the CSVs: like every other
+    output a run was not asked for, the earlier files stay."""
+    shots = [{"shot_number": 1, "candidate_number": 1, "time": 9.0, "ms_after_beep": 4000}]
+    _write_audit_with_region(tmp_path / "stage1.json", shots=shots)
+    first = _csv_export(tmp_path, write_csv=True)
+
+    _write_audit_with_region(tmp_path / "stage1.json", shots=[])
+    second = _csv_export(tmp_path, write_csv=False)
+
+    assert first.csv_path is not None and first.csv_path.exists()
+    assert first.events_csv_path is not None and first.events_csv_path.exists()
+    assert second.removed_paths == []

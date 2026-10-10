@@ -834,3 +834,26 @@ def test_hosted_scrub_version_on_a_mirror_names_the_pushed_rendition(
     [video] = _project_videos(client)
 
     assert video["scrub_version"] is not None
+
+
+def test_hosted_coach_payload_names_the_fresh_rendition(
+    s3_stream_client: tuple[TestClient, S3Storage],
+) -> None:
+    """The Coach player pins its scrub source through the coach route's own
+    ``videos[]``, built by ``_coach_video_entries``, not the project payload:
+    hosted, its ``scrub_version`` must come from the storage listing too, or
+    the player never asks for the rendition."""
+    client, storage = s3_stream_client
+    storage.write_bytes(_TRIM_KEY, b"TRIMDATA")
+    storage.write_bytes(_WEB_KEY, b"WEBDATA")
+    web = storage.stat(_WEB_KEY)
+    assert web is not None and web.last_modified is not None
+    base = f"/api/matches/{MATCH_ID}/shooters/{SLUG}/stages/1"
+    saved = client.put(f"{base}/audit", json={"stage_number": 1, "beep_time": 5.0, "shots": []})
+    assert saved.status_code == 200, saved.text
+
+    resp = client.get(f"{base}/coach")
+
+    assert resp.status_code == 200, resp.text
+    [video] = resp.json()["videos"]
+    assert video["scrub_version"] == f"{int(web.last_modified.timestamp() * 1e9):x}-{web.size:x}"

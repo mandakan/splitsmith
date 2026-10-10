@@ -256,6 +256,7 @@ def test_push_stage_outputs_deletes_a_stale_hosted_events_csv(tmp_path: Path) ->
         shots_written=1,
         anomalies=[],
         events_csv_path=None,
+        removed_paths=[ed / "s1_events.csv"],
     )
 
     export_storage.push_stage_export_outputs(project, result)
@@ -263,10 +264,38 @@ def test_push_stage_outputs_deletes_a_stale_hosted_events_csv(tmp_path: Path) ->
     assert storage.exists(f"{SCOPE}/exports/s1_events.csv") is False  # type: ignore[union-attr]
 
 
-def test_push_stage_outputs_does_not_attempt_delete_without_a_csv_path(tmp_path: Path) -> None:
-    """No splits CSV this run (write_csv off, or no shots) means no
-    ``<base>`` to derive the events.csv sibling from -- the delete is
-    skipped rather than guessing a name."""
+def test_push_stage_outputs_deletes_both_hosted_csvs_a_shotless_run_removed(tmp_path: Path) -> None:
+    """#1331: a ``write_csv`` run with no shots removes both CSVs locally and
+    lists them; their hosted copies go too, though no splits CSV was written
+    this run to derive a name from."""
+    project = _project(tmp_path)
+    storage = project._storage
+    storage.write_bytes(f"{SCOPE}/exports/s1_splits.csv", b"STALE")  # type: ignore[union-attr]
+    storage.write_bytes(f"{SCOPE}/exports/s1_events.csv", b"STALE")  # type: ignore[union-attr]
+
+    ed = _exports_dir(tmp_path)
+    result = StageExportResult(
+        stage_number=1,
+        trimmed_video_path=None,
+        csv_path=None,
+        fcpxml_path=None,
+        report_path=None,
+        overlay_path=None,
+        shots_written=0,
+        anomalies=[],
+        events_csv_path=None,
+        removed_paths=[ed / "s1_splits.csv", ed / "s1_events.csv"],
+    )
+
+    export_storage.push_stage_export_outputs(project, result)
+
+    assert storage.exists(f"{SCOPE}/exports/s1_splits.csv") is False  # type: ignore[union-attr]
+    assert storage.exists(f"{SCOPE}/exports/s1_events.csv") is False  # type: ignore[union-attr]
+
+
+def test_push_stage_outputs_deletes_nothing_the_run_did_not_remove(tmp_path: Path) -> None:
+    """A run that removed nothing (``write_csv`` off) leaves every hosted
+    copy alone, as it leaves the local files."""
     project = _project(tmp_path)
     storage = project._storage
     storage.write_bytes(f"{SCOPE}/exports/s1_events.csv", b"UNRELATED")  # type: ignore[union-attr]
@@ -285,8 +314,8 @@ def test_push_stage_outputs_does_not_attempt_delete_without_a_csv_path(tmp_path:
 
     export_storage.push_stage_export_outputs(project, result)
 
-    # Untouched: this run never produced a splits CSV, so nothing here
-    # claims to know whether s1_events.csv is stale.
+    # Untouched: this run removed nothing, so nothing here claims to know
+    # whether s1_events.csv is stale.
     assert storage.exists(f"{SCOPE}/exports/s1_events.csv") is True  # type: ignore[union-attr]
 
 
