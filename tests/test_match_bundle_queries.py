@@ -241,3 +241,41 @@ def test_coach_get_adds_no_state_docs_query_for_events(
     # versions' roster lookup is paid for by ``_video_trim_anchor`` now
     # resolving the shooter root once instead of twice, hence 9.
     assert second <= 9, (first, second, state_docs_selects)
+
+
+def test_events_put_reads_the_audit_once_and_returns_the_saved_revision(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+    state_docs_selects: list[str],
+) -> None:
+    """#1330: the events PUT looked the project and stage up twice and loaded
+    the audit doc a second time after saving, only to learn the version the
+    save had just returned. Its response must still carry the post-save
+    revision and lock version: a second PUT on the returned ``_version`` and
+    a positional PATCH on the returned ``version`` both go through."""
+    client, sender = hosted_app
+    login(client, sender, OWNER)
+    uid = _user_id(hosted_env, OWNER)
+    match_id = _create_match(client)
+    _add_shooter(hosted_env, uid, match_id, "bea")
+    base = f"/api/matches/{match_id}/shooters/bea/stages/1"
+    region = {"id": "evt-1", "kind": "movement", "start": 0.1, "end": 0.4, "source": "manual"}
+
+    state_docs_selects.clear()
+    resp = client.put(f"{base}/events", json={"events": [region]})
+    assert resp.status_code == 200, resp.text
+    # 9 before #1330: the second project lookup and the post-save audit
+    # reload cost three. One audit read remains, the compare-and-save's.
+    assert len(state_docs_selects) <= 6, state_docs_selects
+    audit_reads = [s for s in state_docs_selects if "state_docs.stage_number = ?" in s]
+    assert len(audit_reads) == 1, state_docs_selects
+
+    body = resp.json()
+    stored = client.get(f"{base}/audit").json()
+    assert body["_version"] == stored["_version"]
+    again = client.put(f"{base}/events", json={"events": [region], "_version": body["_version"]})
+    assert again.status_code == 200, again.text
+    patched = client.patch(
+        f"{base}/shots/1/coach", json={"coaching_note": "x", "expected_version": again.json()["version"]}
+    )
+    assert patched.status_code == 200, patched.text

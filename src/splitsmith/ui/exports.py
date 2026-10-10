@@ -137,6 +137,10 @@ class StageExportResult:
     # that drops its last confirmed region deletes a stale file rather
     # than leaving ``None`` here with the old CSV still on disk.
     events_csv_path: Path | None = None
+    # Earlier runs' deliverables this run deleted as stale (#1331), so the
+    # hosted push deletes their storage copies too. Listed whether or not
+    # the local file existed: a worker's disk may never have held it.
+    removed_paths: list[Path] = field(default_factory=list)
 
 
 def overlay_settings_file(exports_dir: Path, base: str) -> Path:
@@ -342,23 +346,31 @@ def export_stage(
 
     csv_path: Path | None = None
     events_csv_path: Path | None = None
+    removed_paths: list[Path] = []
     if request.write_csv:
+        # events.csv rides the same write_csv gate -- only written when the
+        # stage has shots and confirmed regions (spec 2026-10-08, part 2).
+        # A ``write_csv`` re-export that has no shots any more, or no
+        # confirmed region, removes the earlier run's file rather than leave
+        # figures for shots or regions that no longer exist (#1331).
+        # ``write_csv`` off leaves both, like every output a run was not
+        # asked for.
+        splits_csv = exports_dir / f"{base}_splits.csv"
+        candidate_events_csv = exports_dir / f"{base}_events.csv"
         if shots:
-            csv_path = exports_dir / f"{base}_splits.csv"
+            csv_path = splits_csv
             csv_gen.write_splits_csv(shots, csv_path, events=regions)
-            # events.csv rides the same write_csv gate -- only written when
-            # the stage has confirmed regions (spec 2026-10-08, part 2). A
-            # re-export that drops the stage's last confirmed region must
-            # not leave the previous run's events.csv behind as a stale
-            # artefact nobody asked for any more.
-            candidate_events_csv = exports_dir / f"{base}_events.csv"
             if regions:
                 csv_gen.write_events_csv(regions, candidate_events_csv)
                 events_csv_path = candidate_events_csv
             else:
                 candidate_events_csv.unlink(missing_ok=True)
+                removed_paths.append(candidate_events_csv)
         else:
             skip_reasons.append("csv not written: no shots audited")
+            for stale in (splits_csv, candidate_events_csv):
+                stale.unlink(missing_ok=True)
+                removed_paths.append(stale)
 
     # Overlay render (issue #45). Gated on having a trimmed clip to mirror;
     # the overlay must match the trim frame-for-frame or it will drift on
@@ -625,4 +637,5 @@ def export_stage(
         summary_card_path=summary_card_path,
         overlay_settings_path=overlay_settings_path,
         events_csv_path=events_csv_path if events_csv_path is not None and events_csv_path.exists() else None,
+        removed_paths=removed_paths,
     )

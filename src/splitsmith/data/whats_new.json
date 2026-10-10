@@ -7,6 +7,12 @@
       "body": "Open Breakdown in the Analyse group of a match to mark movement, reloads and activations on the timeline and set each shot's interval, with the video beside it. Works on a computer."
     },
     {
+      "id": "audit-shot-placement-to-the-millisecond",
+      "date": "2026-10-10",
+      "title": "Place shots to the millisecond",
+      "body": "Zoom the Audit waveform until each shot's rising edge shows and drop a marker right on it. Zoomed out, a dropped marker snaps to the start of the shot; hold Shift to place it exactly."
+    },
+    {
       "id": "headcam-detection-meta-glasses",
       "date": "2026-10-10",
       "title": "Better shot detection on Meta glasses footage",

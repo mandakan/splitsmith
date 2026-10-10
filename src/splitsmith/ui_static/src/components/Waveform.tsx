@@ -151,17 +151,24 @@ export function Waveform({
     const canvas = canvasRef.current;
     if (!canvas || contentWidth === 0) return;
 
+    // The canvas covers only the visible slice of the content and sits at
+    // the scroll offset: a deep zoom makes the content far wider than any
+    // browser allows a canvas to be. Everything below draws in content
+    // coordinates through the translate.
     const cssWidth = contentWidth;
     const cssHeight = height;
-    canvas.width = Math.floor(cssWidth * dpr);
+    const visibleWidth = Math.max(1, Math.min(contentWidth, viewportWidth || contentWidth));
+    const offset = Math.min(Math.max(scrollLeft, 0), Math.max(0, contentWidth - visibleWidth));
+    canvas.width = Math.floor(visibleWidth * dpr);
     canvas.height = Math.floor(cssHeight * dpr);
-    canvas.style.width = `${cssWidth}px`;
+    canvas.style.width = `${visibleWidth}px`;
     canvas.style.height = `${cssHeight}px`;
+    canvas.style.left = `${offset}px`;
 
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, cssWidth, cssHeight);
+    ctx.setTransform(dpr, 0, 0, dpr, -offset * dpr, 0);
+    ctx.clearRect(offset, 0, visibleWidth, cssHeight);
 
     // Read canonical --color-waveform-* tokens. These used to read the
     // un-prefixed --waveform-* names which silently fell back to the
@@ -189,7 +196,9 @@ export function Waveform({
       const barWidth = Math.max(1, barStride * 0.9);
       const halfH = cssHeight / 2;
       ctx.fillStyle = barColor;
-      for (let i = 0; i < n; i++) {
+      const first = Math.max(0, Math.floor(offset / barStride) - 1);
+      const last = Math.min(n, Math.ceil((offset + visibleWidth) / barStride) + 1);
+      for (let i = first; i < last; i++) {
         const p = peaks[i];
         const h = Math.max(1, p * (cssHeight - 2));
         const x = i * barStride + (barStride - barWidth) / 2;
@@ -237,7 +246,20 @@ export function Waveform({
       ctx.stroke();
       ctx.restore();
     }
-  }, [peaks, duration, currentTime, beepTime, timerStopTime, loopRegion, contentWidth, height, dpr, cssVar]);
+  }, [
+    peaks,
+    duration,
+    currentTime,
+    beepTime,
+    timerStopTime,
+    loopRegion,
+    contentWidth,
+    viewportWidth,
+    scrollLeft,
+    height,
+    dpr,
+    cssVar,
+  ]);
 
   // Auto-scroll the playhead into view during playback. Edge-trigger:
   // only adjust scroll when the playhead leaves a center band, otherwise
@@ -378,7 +400,7 @@ export function Waveform({
             onDoubleClick(timeFromEvent(e.clientX), e.shiftKey);
           }}
         >
-          <canvas ref={canvasRef} className="block" />
+          <canvas ref={canvasRef} className="pointer-events-none absolute top-0" />
           {children}
         </div>
       </div>

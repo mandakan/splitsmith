@@ -94,12 +94,15 @@ import { planServedClip } from "@/lib/camPlayback";
 import { useScrubSource } from "@/lib/useScrubSource";
 import { computeAuditNextStep } from "@/lib/audit-next-step";
 import { useMatchHref } from "@/lib/matchHref";
-import { snapToPeak, type SnapPeaks } from "@/lib/peak-snap";
+import { placeTime, type SnapPeaks } from "@/lib/peak-snap";
+import { reviewMaxZoom } from "@/lib/reviewZoom";
 import { deriveStageStatus } from "@/lib/stageStatus";
 import type { Zoom } from "@/lib/timelineView";
 import { cn } from "@/lib/utils";
 
 const PEAK_BINS = 1500;
+/** The stage peaks route's cap: 1 ms bins on a clip up to ~131 s. */
+const STAGE_PEAKS_MAX_BINS = 131_072;
 const MAX_UNDO = 50;
 const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 const MOD_LABEL = IS_MAC ? "Cmd" : "Ctrl";
@@ -540,16 +543,17 @@ export function Audit() {
     };
   }, [slug, stageNumber, primary]);
 
-  // High-resolution peaks for drop/add peak-snapping (#28). The render
-  // fetch stays at PEAK_BINS so visuals do not change; snapping wants
-  // ~10 ms bins, which PEAK_BINS only delivers on clips under ~15 s.
-  // Until this resolves, drops fall back to grid snapping - never blocks.
+  // Peaks at 1 ms per bin: the leading-edge snap of a drop while zoomed out
+  // (lib/peak-snap.placeTime), and the waveform the band draws once they
+  // arrive, so a deep zoom shows the shot's rise instead of 35 ms blocks
+  // (each column draws the loudest bin under it, at any zoom). Until this
+  // resolves, drops land exactly and the band draws the fit peaks.
   useEffect(() => {
     if (!peaks || stageNumber == null) {
       setSnapPeaks(null);
       return;
     }
-    const bins = Math.min(8192, Math.max(PEAK_BINS, Math.ceil(peaks.duration / 0.01)));
+    const bins = Math.min(STAGE_PEAKS_MAX_BINS, Math.max(PEAK_BINS, Math.ceil(peaks.duration / 0.001)));
     if (bins <= PEAK_BINS) {
       setSnapPeaks({ peaks: peaks.peaks, duration: peaks.duration });
       return;
@@ -923,9 +927,8 @@ export function Audit() {
   }, [handleMarkerTimeChangeCommit]);
 
   const handleAddManual = useCallback(
-    (time: number, shiftKey = false) => {
-      const snapped = !shiftKey && snapPeaks ? snapToPeak(time, snapPeaks) : null;
-      const t = snapped ?? time;
+    (time: number, shiftKey = false, pxPerSecond = 0) => {
+      const t = placeTime(time, { pxPerSecond, shiftKey, peaks: snapPeaks });
       const id = `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       recordEvent("marker_added_manual", { id, time: t });
       mutate([
@@ -1339,8 +1342,8 @@ export function Audit() {
       }
       // Zoom (+ / 0 / -, Cmd+1/2/3 as aliases) is the timeline band's own
       // window listener; the page does not answer those keys.
-      // Alt+Arrow nudges the focused marker (or the current shot) by
-      // detector resolution; Alt+Shift+Arrow is sample-precise (~1 ms).
+      // Alt+Arrow nudges the focused marker (or the current shot) by 1 ms,
+      // the grid shot times are stored on; Alt+Shift+Arrow by 10 ms.
       // We also scrub the playhead to the new position so the user
       // immediately hears what the marker is aligned to.
       if (
@@ -1361,7 +1364,7 @@ export function Audit() {
         }
         if (!target) return;
         const dir = e.key === "ArrowRight" ? 1 : -1;
-        const step = e.shiftKey ? 0.001 : 0.0107;
+        const step = e.shiftKey ? 0.01 : 0.001;
         const dur = peaks?.duration ?? target.time + step;
         const next = Math.min(dur, Math.max(0, target.time + dir * step));
         // Burst-coalesce so Cmd+Z reverses the entire burst, not each tap.
@@ -1833,7 +1836,7 @@ export function Audit() {
       render: (geom) => (
         <div data-testid="audit-audio-track" className="relative h-full">
           <WaveformTrack
-            peaks={dp.peaks}
+            peaks={snapPeaks && snapPeaks.duration === dp.duration ? snapPeaks.peaks : dp.peaks}
             clipDuration={dp.duration}
             from={0}
             to={dp.duration}
@@ -2186,6 +2189,7 @@ export function Audit() {
                   onSeek={handleScrub}
                   zoom={zoom}
                   onZoomChange={setZoom}
+                  maxZoom={reviewMaxZoom(displayPeaks.duration, window.innerWidth)}
                   tracks={auditTracks(displayPeaks)}
                 />
 

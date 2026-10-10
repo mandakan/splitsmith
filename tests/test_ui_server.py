@@ -3121,6 +3121,8 @@ def test_shot_detect_reset_records_a_delete_for_every_shot_it_wipes(tmp_path: Pa
     assert all(e["id"] for e in deleted), "every event needs an id -- the merge unions on it"
     kinds = [e["kind"] for e in events]
     assert kinds.index("marker_deleted") < kinds.index("shot_detect_run")
+    # #1329: no auto proposal was dropped, so nothing claims one was.
+    assert "events_reset" not in kinds
 
 
 def test_shot_detect_reset_drops_auto_regions_and_keeps_manual_ones(tmp_path: Path, monkeypatch) -> None:
@@ -3196,6 +3198,13 @@ def test_shot_detect_reset_drops_auto_regions_and_keeps_manual_ones(tmp_path: Pa
     doc = _json.loads((_shooter_root / "audit" / "stage1.json").read_text(encoding="utf-8"))
     assert doc["events"] == [manual]
     assert "events_seeded" not in doc
+    # #1329: the dropped proposals are logged, like the shots the reset wipes.
+    reset_logs = [e for e in doc["audit_events"] if e["kind"] == "events_reset"]
+    assert len(reset_logs) == 1
+    assert reset_logs[0]["id"]
+    assert reset_logs[0]["payload"] == {"count": 1, "ids": ["evt-1"], "reason": "shot_detect_reset"}
+    kinds = [e["kind"] for e in doc["audit_events"]]
+    assert kinds.index("events_reset") < kinds.index("shot_detect_run")
 
 
 def test_shot_detect_without_reset_records_no_deletes(tmp_path: Path, monkeypatch) -> None:
@@ -5240,6 +5249,24 @@ def test_fixture_peaks_serves_sibling_wav(tmp_path: Path) -> None:
     assert len(body["peaks"]) == 64
 
 
+def test_fixture_peaks_reach_one_millisecond_on_a_long_stage(tmp_path: Path) -> None:
+    """The lab review zooms until one bin is 1 ms, so a 60 s fixture
+    needs 60 000 bins (the old 8192 cap stopped at ~7 ms)."""
+    import json as _json
+
+    import numpy as np
+    import soundfile as sf
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    fixture = tmp_path / "review.json"
+    fixture.write_text(_json.dumps({"beep_time": 5.0, "shots": []}), encoding="utf-8")
+    sf.write(fixture.with_suffix(".wav"), np.zeros(60 * 48_000, dtype="float32"), 48_000)
+
+    resp = client.get(f"/api/fixture/peaks?path={fixture}&bins=60000")
+    assert resp.status_code == 200
+    assert len(resp.json()["peaks"]) == 60000
+
+
 def test_fixture_audio_serves_sibling_wav(tmp_path: Path) -> None:
     import numpy as np
     import soundfile as sf
@@ -5340,6 +5367,13 @@ def test_peaks_endpoint_rejects_extreme_bins(tmp_path: Path) -> None:
     client, _ = _seed_project_with_primary(tmp_path)
     assert client.get("/api/shooters/me/stages/1/peaks?bins=8").status_code == 422
     assert client.get("/api/shooters/me/stages/1/peaks?bins=999999").status_code == 422
+
+
+def test_stage_peaks_reach_one_millisecond(tmp_path: Path) -> None:
+    """Audit snaps to the leading edge from 1 ms peaks: a 60 s stage asks
+    for 60 000 bins, past the old 8192 cap."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    assert client.get("/api/shooters/me/stages/1/peaks?bins=60000").status_code != 422
 
 
 def test_scan_videos_with_explicit_source_paths(tmp_path: Path) -> None:
@@ -9359,6 +9393,58 @@ def test_dev_review_queue_includes_batch_promoted_unlabeled(
     # The model chip's review counter follows the same rule.
     model = client.get("/api/dev/model").json()
     assert model["step_counts"]["review"] == 1
+
+
+def test_dev_review_queue_puts_doubtful_shot_times_first(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fixtures whose shot times need checking (#1363) lead the pending
+    list in the inventory's priority order, with its reasons; label-pass
+    items follow."""
+    import splitsmith.lab.core as lab_core
+
+    fixtures = tmp_path / "tests" / "fixtures"
+    _seed_review_state_fixtures(fixtures)
+    for slug in (
+        "stage-shots-hfo-masters-2026-stage1-s97dcec94-go3s",
+        "stage-shots-hfo-masters-2026-stage2-s97dcec94-go3s",
+    ):
+        (fixtures / f"{slug}.json").write_text(
+            json.dumps({"anchor": {"fixture_slug": "a"}, "shots": [{"time": 5.5}]})
+        )
+        (fixtures / f"{slug}.wav").write_bytes(b"")
+    (tmp_path / "build").mkdir()
+    (tmp_path / "build" / "fixture_review_inventory.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "fixtures": [
+                    {
+                        "slug": "stage-shots-hfo-masters-2026-stage1-s97dcec94-go3s",
+                        "priority": 120.0,
+                        "reasons": ["a"],
+                    },
+                    {
+                        "slug": "stage-shots-hfo-masters-2026-stage2-s97dcec94-go3s",
+                        "priority": 170.0,
+                        "reasons": ["b"],
+                    },
+                ],
+            }
+        )
+    )
+    monkeypatch.setattr(lab_core, "DEFAULT_FIXTURES_ROOT", fixtures)
+    client = _MatchClient(_match_create_app(project_root=tmp_path / "match", project_name="x"))
+
+    pending = client.get("/api/dev/review-queue").json()["pending"]
+    assert [p["slug"] for p in pending] == [
+        "stage-shots-hfo-masters-2026-stage2-s97dcec94-go3s",
+        "stage-shots-hfo-masters-2026-stage1-s97dcec94-go3s",
+        "stage-shots-hfo-masters-2026-stage1-s0fe3d797",
+    ]
+    assert pending[0]["review_status"] == "needs_review"
+    assert pending[0]["priority"] == 170.0 and pending[0]["reasons"] == ["b"]
+    assert pending[2]["review_status"] == "reviewed"
 
 
 def test_dev_review_confirm_clears_pending(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

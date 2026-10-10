@@ -414,11 +414,12 @@ describe("Timeline", () => {
       expect(host.scrollLeft).toBe(0);
     });
 
-    it("adds on double-click with the shift flag, but never on a marker", () => {
+    it("adds on double-click with the shift flag and the zoom, but never on a marker", () => {
       const onDouble = vi.fn();
       render(<Harness onDoubleClick={onDouble} />);
       fireEvent.doubleClick(screen.getByTestId("track-s").parentElement!, { clientX: 437, shiftKey: true });
-      expect(onDouble).toHaveBeenCalledWith(expect.closeTo(4.37, 3), true);
+      // Fit: 1000 px over 10 s.
+      expect(onDouble).toHaveBeenCalledWith(expect.closeTo(4.37, 3), true, 100);
       onDouble.mockClear();
       fireEvent.doubleClick(screen.getByTestId("marker"), { clientX: 437 });
       expect(onDouble).not.toHaveBeenCalled();

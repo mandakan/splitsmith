@@ -1067,6 +1067,37 @@ def test_reclassify_with_corrupt_events_is_a_422_and_leaves_the_doc(tmp_path: Pa
     assert audit_file.read_text(encoding="utf-8") == before
 
 
+def test_reclassify_without_shots_and_corrupt_events_is_a_422_before_saving(tmp_path: Path) -> None:
+    """#1330: a doc with no ``shots`` skipped the events check in
+    ``_classify_doc``, saved, and only then hit the response builder's 422:
+    the save went through and the caller was told it failed."""
+    client, audit_file, base = _bootstrap(tmp_path)
+    doc = _read(audit_file)
+    del doc["shots"]
+    doc["events"] = [{"id": "evt-1", "kind": "nap", "start": 1.0, "end": 2.0, "source": "manual"}]
+    audit_file.write_text(json.dumps(doc) + "\n", encoding="utf-8")
+    before = audit_file.read_text(encoding="utf-8")
+    resp = client.post(f"{base}/shooters/me/stages/1/coach/reclassify")
+    assert resp.status_code == 422, resp.text
+    assert "invalid events" in resp.json()["detail"]
+    assert audit_file.read_text(encoding="utf-8") == before
+
+
+def test_coach_patch_with_corrupt_events_is_a_422_and_leaves_the_doc(tmp_path: Path) -> None:
+    """Pins existing behaviour: the PATCH always has shots, so it already
+    422'd before saving on main. Only reclassify without shots was broken
+    (#1330); this keeps the PATCH from regressing into that."""
+    client, audit_file, base = _bootstrap(tmp_path)
+    doc = _read(audit_file)
+    doc["events"] = [{"id": "evt-1", "kind": "nap", "start": 1.0, "end": 2.0, "source": "manual"}]
+    audit_file.write_text(json.dumps(doc) + "\n", encoding="utf-8")
+    before = audit_file.read_text(encoding="utf-8")
+    resp = client.patch(f"{base}/shooters/me/stages/1/shots/1/coach", json={"coaching_note": "x"})
+    assert resp.status_code == 422, resp.text
+    assert "invalid events" in resp.json()["detail"]
+    assert audit_file.read_text(encoding="utf-8") == before
+
+
 def test_get_coach_reseeds_an_older_seeders_untouched_proposals(tmp_path: Path) -> None:
     """A stage the first seeder proposed (``events_seeded: true``) gets the
     round count's proposal on the next read, and the shot the old proposal

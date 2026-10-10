@@ -128,6 +128,15 @@ fixture (dry run by default, ``--write`` to promote; a snap of a snap is
 refused), so the corpus holds unreviewed footage on purpose: the build trains
 on it by default and ``--reviewed-only`` (``fixture_stems(reviewed_only=True)``)
 leaves it out. Compare both before trusting a number.
+``scripts/fixture_review_inventory.py`` scores every fixture for review
+(``lab.inventory``: needing review, snapped, the promotion report's share of
+shots at the snap window's edge, and how much the stored leading edges
+disagree with a stricter onset shot to shot) into
+``build/fixture_review_inventory.json``; the lab's review queue
+(``/dev/review``) puts shot times to check first in that order, and "Approve
+to corpus" or the fixture editor's "Mark reviewed" (``lab.confirm_review``)
+writes ``review.status = reviewed``. A label pass never clears a fixture whose
+times need checking.
 
 New fixture audio is **not in git** (#1363): ``tests/fixtures/audio.lock.json``
 maps each such WAV to its sha256, the bytes live content-addressed in a
@@ -1293,10 +1302,13 @@ does not opt in (its rows change text per frame). A ``fit.js`` change
 reaches the summary PNG by content, the preview only through
 ``PREVIEW_REVISION``. Exports: the splits CSV gains
 ``moving`` as its last column (``read_splits_csv`` takes both headers);
-``<base>_events.csv`` is written only with confirmed regions and deleted,
-locally and in hosted storage, when a re-export that writes the splits
-CSV (``write_csv`` and shots, the CSV gate) has none; outside that gate
-a prior file stays, as the splits CSV does. Region markers
+``<base>_events.csv`` is written only with shots and confirmed regions.
+A ``write_csv`` export deletes, locally and in hosted storage, an earlier
+events CSV when the stage has no confirmed region, and both CSVs when it
+has no shots (#1331); ``StageExportResult.removed_paths`` names what it
+deleted and the hosted push deletes exactly those keys. With
+``write_csv`` off both earlier files stay, like every output a run was
+not asked for. Region markers
 (``Reload 1.42`` / ``Movement`` / ``Activation``, with duration, named by
 ``events.region_marker_label``) go on
 the stage clip in single-stage and match FCPXML and FCP7 XML, clamped to

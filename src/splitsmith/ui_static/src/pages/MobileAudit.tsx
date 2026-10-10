@@ -43,7 +43,7 @@ import { useDialogFocus } from "@/lib/dialogFocus";
 import { isActiveCommand, latestForStage, REDETECT_CONFIRM } from "@/lib/desktopCommands";
 import { useDesktopCommands } from "@/lib/useDesktopCommands";
 import { useMatchHref } from "@/lib/matchHref";
-import { snapToPeak, type SnapPeaks } from "@/lib/peak-snap";
+import { snapToLeadingEdge, type SnapPeaks } from "@/lib/peak-snap";
 import { createScrubber, type Scrubber } from "@/lib/scrub-audio";
 import { useAuditPlayback } from "@/lib/useAuditPlayback";
 import { useScrubSource } from "@/lib/useScrubSource";
@@ -295,7 +295,7 @@ export function MobileAudit() {
 
   const handleAddShot = useCallback(() => {
     if (target.kind !== "none" || readOnly || saving) return;
-    const snapped = snapPeaks ? snapToPeak(playback.playhead, snapPeaks) : null;
+    const snapped = snapPeaks ? snapToLeadingEdge(playback.playhead, snapPeaks) : null;
     const t = snapped ?? playback.playhead;
     const id = `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     recordEvent("marker_added_manual", { id, time: t });

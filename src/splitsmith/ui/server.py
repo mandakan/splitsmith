@@ -936,6 +936,30 @@ def _reset_deletion_events(shots: Any) -> list[dict[str, Any]]:
     ]
 
 
+def _events_reset_event(dropped: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One ``events_reset`` entry naming the ``auto`` stage events a reset
+    re-detect drops, or nothing when it drops none (#1329).
+
+    The shot wipe is logged per shot (``_reset_deletion_events``); the
+    proposals the same wipe drops went without a trace, so the audit log
+    could not show that regions had been there.
+    """
+    if not dropped:
+        return []
+    return [
+        {
+            "id": _new_event_id(),
+            "ts": _now_iso(),
+            "kind": "events_reset",
+            "payload": {
+                "count": len(dropped),
+                "ids": [e["id"] for e in dropped if e.get("id")],
+                "reason": "shot_detect_reset",
+            },
+        }
+    ]
+
+
 #: ``cand-<n>`` shot id, as ``shot_id.derive_shot_id`` builds it. Read back
 #: here so a candidate number that survives only in the event log still
 #: counts against the high-water mark (#842).
@@ -2584,13 +2608,20 @@ class AppState:
         lives in ``state_docs``, so write it to the local file first.
         Local: the file is already on disk, return its path. When no audit
         doc exists the returned path simply won't exist -- the caller's
-        existing "missing audit" handling fires, same as before."""
+        existing "missing audit" handling fires, same as before.
+
+        Hosted with no doc, a local file an earlier job on this worker
+        materialized is removed (#1332): it is a copy of a doc that is
+        gone, and the export (and the overlay's audit revision) would read
+        it as current."""
         audit_file = self._audit_file(slug, stage_number)
-        if self.project_state is not None:
+        if self.audit_doc_target() is not None:
             doc, _ = self.load_audit(slug, stage_number)
             if doc is not None:
                 audit_file.parent.mkdir(parents=True, exist_ok=True)
                 audit_file.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+            else:
+                audit_file.unlink(missing_ok=True)
         return audit_file
 
     def shooter_project(self, slug: str) -> MatchProject:
@@ -4299,9 +4330,11 @@ def register_job_bodies(state: AppState) -> None:
                 # edited (``manual``) describes the run and stays.
                 stage_events = doc.get(events_module.EVENTS_FIELD)
                 if isinstance(stage_events, list):
+                    dropped = [e for e in stage_events if isinstance(e, dict) and e.get("source") == "auto"]
                     doc[events_module.EVENTS_FIELD] = [
                         e for e in stage_events if not (isinstance(e, dict) and e.get("source") == "auto")
                     ]
+                    reset_deletions.extend(_events_reset_event(dropped))
                 doc.pop(events_module.EVENTS_SEEDED_FIELD, None)
             seeded_shots = False
             if not doc.get("shots"):
@@ -5865,6 +5898,11 @@ class DevReviewQueueItem(BaseModel):
     stage_number: int | None = None
     shooter: str | None = None
     age_seconds: int | None = None
+    # Shot times checked on this fixture's own audio (#1363), and the
+    # inventory's priority and reasons (``scripts/fixture_review_inventory.py``).
+    review_status: Literal["needs_review", "reviewed"] = "reviewed"
+    priority: float | None = None
+    reasons: list[str] = []
 
 
 class DevReviewQueueResponse(BaseModel):
@@ -13959,7 +13997,9 @@ def create_app(
     def stage_peaks(
         slug: str,
         stage_number: int,
-        bins: int = Query(default=1200, ge=16, le=8192),
+        # 1 ms bins on a clip up to ~131 s: Audit draws and snaps to a
+        # shot's leading edge from these.
+        bins: int = Query(default=1200, ge=16, le=131_072),
     ) -> JSONResponse:
         """Return ``bins`` peak magnitudes (0..1) for the stage's audit clip.
 
@@ -14449,15 +14489,19 @@ def create_app(
         The one classification path for every audit-doc writer: a writer
         that classified region-blind would flip a reload region's gap back
         to ``movement`` on the next unrelated save. A corrupt events list is
-        the coach GET's 422, raised before the caller saves anything.
+        the coach GET's 422, raised before the caller saves anything --
+        also on a doc with no shots to classify (#1330): the coach routes
+        build their response from the saved doc, and a corrupt list that
+        slipped past here was a 422 *after* the save went through.
         """
+        stage_events = _coach_events(payload, stage_number)
         shots = payload.get("shots")
         if not isinstance(shots, list):
             return
         coach_module.classify_intervals_in_dicts(
             [s for s in shots if isinstance(s, dict)],
             cfg,
-            events=_coach_events(payload, stage_number),
+            events=stage_events,
         )
 
     def _coach_capacity(slug: str, project: MatchProject) -> int | None:
@@ -14725,7 +14769,7 @@ def create_app(
         PUT's 409 ``version_conflict``. Returns the coach payload."""
         project = state.shooter_project(slug)
         try:
-            project.stage(stage_number)
+            stg = project.stage(stage_number)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         # #843: a NaN ``end`` passes every field bound (``NaN <= start`` is
@@ -14755,12 +14799,17 @@ def create_app(
                     "payload": {"count": len(req.events)},
                 }
             )
-            state.save_audit(slug, stage_number, stored, version=version)
-            payload, version, beep_in_clip, stg, project = _load_audit_for_coach(slug, stage_number)
+            # #1330: the saved doc is ``stored`` and its lock version is what
+            # the save returns; reloading both (and the project and stage
+            # again, through ``_load_audit_for_coach``) only cost a hosted
+            # ``state_docs`` round trip per save.
+            version = _coach_save(slug, stage_number, stored, version)
+        prim = stg.primary()
+        beep_in_clip = _video_beep_in_clip(slug, project, stage_number, prim) if prim is not None else None
         return JSONResponse(
             _build_coach_response(
                 slug,
-                payload,
+                stored,
                 beep_in_clip,
                 stg,
                 project,
@@ -15023,7 +15072,9 @@ def create_app(
     @app.get("/api/fixture/peaks")
     def get_fixture_peaks(
         path: str = Query(...),
-        bins: int = Query(default=1200, ge=16, le=8192),
+        # Up to 1 ms bins on a two-minute fixture: the lab review zooms
+        # until the shot's rising edge is a few pixels wide.
+        bins: int = Query(default=1200, ge=16, le=131_072),
     ) -> JSONResponse:
         """Compute peaks for the fixture's sibling WAV (``<path>.with_suffix('.wav')``).
 
@@ -19367,14 +19418,24 @@ def create_app(
                 stage_number=_stage_from_slug(fx.slug),
                 shooter=_shooter_from_slug(fx.slug),
                 age_seconds=age,
+                review_status="needs_review" if fx.review_status == "needs_review" else "reviewed",
+                priority=fx.review_priority,
+                reasons=fx.review_reasons,
             )
             if item.status == "pending":
                 pending.append(item)
             else:
                 done.append(item)
-        # Sort pending by age (newest first); done alphabetically so the
-        # corpus is browsable.
-        pending.sort(key=lambda x: x.age_seconds or 0)
+        # Pending: shot times that need checking first, most doubtful first
+        # (the inventory's priority), then label passes by age (newest
+        # first). Done alphabetically so the corpus is browsable.
+        pending.sort(
+            key=lambda x: (
+                x.review_status != "needs_review",
+                -(x.priority or 0.0),
+                x.age_seconds or 0,
+            )
+        )
         done.sort(key=lambda x: x.slug)
         return DevReviewQueueResponse(pending=pending, flagged=flagged, done=done)
 

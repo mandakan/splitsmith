@@ -7,14 +7,15 @@
  *
  * Pointer interactions:
  *   - click          -> onClick(marker)         (parent toggles keep/reject)
- *   - drag           -> onTimeChange(id, t)     (snapped, see SNAP_S below)
- *                       On drop, peak-snaps to nearest audio transient when
- *                       snapPeaks is provided; Shift at drop bypasses.
+ *   - drag           -> onTimeChange(id, t)     (on the 1 ms grid)
+ *                       On drop, zoomed out (coarser than 2 ms per pixel),
+ *                       snaps to the shot's leading edge when snapPeaks is
+ *                       provided; zoomed in, or with Shift, lands exactly
+ *                       (lib/peak-snap.placeTime).
  *   - dblclick on bg -> handled by <Waveform>
  *
  * Keyboard interactions (focused marker):
- *   - Arrow Left/Right -> nudge by detector resolution. Shift narrows the
- *     step to ~1 ms so users can land on a single sample edge.
+ *   - Arrow Left/Right -> nudge 1 ms. Shift widens the step to 10 ms.
  *   - Escape           -> cancel in-flight drag, restore pre-drag position
  *   - Enter            -> toggle keep/reject (detected/rejected only)
  *   - Delete/Backspace -> destructive action (parent decides; manual = remove,
@@ -31,15 +32,14 @@
 import { useCallback, useEffect, useRef } from "react";
 
 import { MarkerGlyph, type MarkerKind } from "@/components/MarkerGlyph";
-import { snapToPeak, type SnapPeaks } from "@/lib/peak-snap";
+import { placeTime, type SnapPeaks } from "@/lib/peak-snap";
 import { cn } from "@/lib/utils";
 
-/** Detector resolution -- coarse hop length in seconds for the shot detector
- *  pipeline. Drag-snap rounds to multiples of this so users can't land on
- *  positions finer than the detector itself can resolve. Hold Shift to bypass
- *  and land on the 1 ms grid. */
-export const DETECTOR_RESOLUTION_S = 0.0107;
-const FINE_NUDGE_S = 0.001;
+/** Shot times are stored to the millisecond: a drag moves on that grid and
+ *  an arrow nudges by it. */
+const NUDGE_S = 0.001;
+/** Shift nudge: a coarser step for crossing a few ms fast. */
+const COARSE_NUDGE_S = 0.01;
 
 /** Pointer travel (in CSS pixels) before a press is treated as a drag rather
  *  than a click. Trackpad clicks routinely register a few stray pixels of
@@ -102,9 +102,10 @@ export interface MarkerLayerProps {
    *  its kind's filter is off so focus never lands on an invisible
    *  marker (#666). */
   forcedVisibleId?: string | null;
-  /** High-resolution peaks used to snap a drag-drop onto the nearest audio
-   *  transient (#28). Absent = no peak snapping (grid snap only). Shift
-   *  held at drop always bypasses. */
+  /** Peaks at about 1 ms per bin, used to snap a drop to the shot's leading
+   *  edge while zoomed out (``lib/peak-snap.placeTime``). Zoomed in to 2 ms
+   *  per pixel or finer, or with Shift held, a drop lands exactly. Absent =
+   *  every drop lands exactly. */
   snapPeaks?: SnapPeaks;
 }
 
@@ -192,10 +193,7 @@ function MarkerLayerInner({
     [duration],
   );
 
-  const snap = useCallback((t: number, fine: boolean): number => {
-    const step = fine ? FINE_NUDGE_S : DETECTOR_RESOLUTION_S;
-    return Math.round(t / step) * step;
-  }, []);
+  const snap = useCallback((t: number): number => Math.round(t / NUDGE_S) * NUDGE_S, []);
 
   const handlePointerDown = useCallback(
     (e: React.PointerEvent<HTMLButtonElement>, marker: AuditMarker) => {
@@ -239,7 +237,7 @@ function MarkerLayerInner({
       const parent = e.currentTarget.parentElement;
       if (!parent) return;
       const rect = parent.getBoundingClientRect();
-      const t = snap(timeFromClientX(e.clientX, rect), e.shiftKey);
+      const t = snap(timeFromClientX(e.clientX, rect));
       onTimeChange(marker.id, t);
     },
     [snap, timeFromClientX, onTimeChange, onTimeChangeBegin],
@@ -259,18 +257,21 @@ function MarkerLayerInner({
       }
       const live = markers.find((m) => m.id === marker.id);
       let final = live?.time ?? marker.time;
-      // Peak-snap the drop unless Shift is held (Shift = exactly where I put
-      // it). Live drag keeps detector-grid snapping; only the commit snaps.
-      if (!e.shiftKey && snapPeaks) {
-        const snapped = snapToPeak(final, snapPeaks);
-        if (snapped != null && snapped !== final) {
-          final = snapped;
-          onTimeChange(marker.id, snapped);
-        }
+      // Zoomed out the drop snaps to the shot's leading edge; zoomed in, or
+      // with Shift, it stays exactly where it was let go.
+      const width = e.currentTarget.parentElement?.getBoundingClientRect().width ?? 0;
+      const placed = placeTime(final, {
+        pxPerSecond: duration > 0 ? width / duration : 0,
+        shiftKey: e.shiftKey,
+        peaks: snapPeaks,
+      });
+      if (placed !== final) {
+        final = placed;
+        onTimeChange(marker.id, placed);
       }
       onTimeChangeCommit?.(marker.id, final);
     },
-    [onClick, onTimeChangeCommit, markers, snapPeaks, onTimeChange],
+    [onClick, onTimeChangeCommit, markers, snapPeaks, onTimeChange, duration],
   );
 
   // Esc cancels an in-flight drag: restore the pointerdown-time position
@@ -311,11 +312,8 @@ function MarkerLayerInner({
         case "ArrowRight": {
           e.preventDefault();
           const dir = e.key === "ArrowRight" ? 1 : -1;
-          const step = e.shiftKey ? FINE_NUDGE_S : DETECTOR_RESOLUTION_S;
-          const next = snap(
-            Math.max(0, Math.min(duration, marker.time + dir * step)),
-            e.shiftKey,
-          );
+          const step = e.shiftKey ? COARSE_NUDGE_S : NUDGE_S;
+          const next = snap(Math.max(0, Math.min(duration, marker.time + dir * step)));
           // First key in a burst -> open the bracket. Subsequent keys
           // just refresh the trailing-edge timer.
           if (nudgeRef.current?.id !== marker.id) {
@@ -394,26 +392,35 @@ function MarkerLayerInner({
             onPointerUp={(e) => handlePointerUp(e, m)}
             onPointerCancel={(e) => handlePointerUp(e, m)}
             onKeyDown={(e) => handleKeyDown(e, m)}
+            data-focused={focused ? "true" : undefined}
             className={cn(
               "group pointer-events-auto absolute top-0 -translate-x-1/2 cursor-grab",
               "flex h-full flex-col items-center justify-start outline-none",
               "active:cursor-grabbing",
-              focused && "ring-2 ring-led ring-offset-1 ring-offset-bg",
             )}
             style={{ left: `${x}%`, width: "10px" }}
             title={label}
           >
-            {/* Vertical guide line full-height behind the glyph for visibility. */}
+            {/* Vertical guide line full-height behind the glyph for visibility.
+                The focused marker shows on the line and the glyph only: an
+                outline beside the line would cover the audio a person is
+                lining it up with. */}
             <span
               aria-hidden
               className={cn(
-                "absolute top-0 bottom-0 left-1/2 w-px -translate-x-1/2",
-                m.kind === "detected" && "bg-marker-detected/60",
-                m.kind === "rejected" && "bg-marker-rejected/60",
-                m.kind === "manual" && "bg-marker-manual/60",
+                "absolute top-0 bottom-0 left-1/2 -translate-x-1/2",
+                focused ? "w-0.5 bg-ink" : "w-px",
+                !focused && m.kind === "detected" && "bg-marker-detected/60",
+                !focused && m.kind === "rejected" && "bg-marker-rejected/60",
+                !focused && m.kind === "manual" && "bg-marker-manual/60",
               )}
             />
-            <span className="relative mt-1">
+            <span
+              className={cn(
+                "relative mt-1 transition-transform",
+                focused && "scale-125 drop-shadow-[0_0_3px_var(--color-ink)]",
+              )}
+            >
               <MarkerGlyph kind={m.kind} size={18} />
             </span>
           </button>
