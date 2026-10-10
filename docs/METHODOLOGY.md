@@ -45,7 +45,7 @@ Per-project overrides + the resolved provenance badge (CLI > project > global > 
 This is the leading edge the eye picks when scrubbing a zoomed waveform, and the same rule the beep detector uses for the beep (see above, step 4). It is measured against the shot's own peak, so it is **insensitive** to camera AGC ducking, recording gain and distance (the foot sits at the same point of a quieter shot's rise), and the noise floor keeps it from sliding into the noise before the shot on loud backgrounds.
 
 **One rule, three places,** held identical by `tests/fixtures/rise_foot/cases.json` (run by `tests/test_rise_foot.py` and the app's `lib/peak-snap.test.ts`):
-- the shot detector's leading edge (`shot_detect`; still the older walk until the switch in the follow-up to #1363 lands, see History),
+- the shot detector's leading edge (`shot_detect`; the older walk is only the fallback where no shot stands out of the window),
 - the app's drop snap in Audit and the fixture review while zoomed out (`lib/peak-snap.ts`; zoomed in to 2 ms per pixel or finer, a marker lands exactly where it is dropped),
 - the review inventory's suggested corrections (`lab.inventory`).
 

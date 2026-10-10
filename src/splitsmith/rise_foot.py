@@ -7,10 +7,10 @@ separated from the burst by a dip (an echo, the previous shot, a lead-in
 that falls back before the blast) is not part of the rise; a lead-in that
 ramps continuously into the burst is.
 
-One rule, held identical by ``tests/fixtures/rise_foot/cases.json``: the
-review inventory's suggestions (``lab.inventory``) and the app's drop snap
-(``ui_static/src/lib/peak-snap.ts``, ``snapToLeadingEdge``); the shot
-detector (``shot_detect``) moves to it in a follow-up.
+One rule, three places, held identical by ``tests/fixtures/rise_foot/cases.json``:
+the shot detector's leading edge (``shot_detect``), the review inventory's
+suggestions (``lab.inventory``), and the app's drop snap
+(``ui_static/src/lib/peak-snap.ts``, ``snapToLeadingEdge``).
 
 Operates on a peak envelope: the maximum ``|audio|`` per bin, normalized to
 the clip's loudest sample (``waveform.compute_peaks``), at 1 ms bins, the

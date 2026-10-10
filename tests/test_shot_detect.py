@@ -309,3 +309,21 @@ def test_detect_shots_validates_inputs() -> None:
         detect_shots(audio, sr, -0.1, 1.0, ShotDetectConfig())
     with pytest.raises(ValueError, match="stage_time"):
         detect_shots(audio, sr, 0.0, 0.0, ShotDetectConfig())
+
+
+def test_a_compressed_go3s_shot_is_timed_at_the_start_of_its_burst(fixtures_dir: Path) -> None:
+    """GO 3S compresses a shot into a burst with internal dips; the old walk
+    back from the peak stopped at the first dip, 25 ms inside this one
+    (shot 3, stored at 8.299 s; the burst starts at 8.274 s, read off the
+    waveform). The rise foot (docs/METHODOLOGY.md) lands on the start."""
+    audio, sr, truth = _load_fixture(fixtures_dir, "stage-shots-hostfinalen-xi-2026-stage3-s97dcec94")
+    shots = detect_shots(
+        audio,
+        sample_rate=sr,
+        beep_time=truth["beep_time"],
+        stage_time=truth["stage_time_seconds"],
+        config=ShotDetectConfig(),
+    )
+    times = np.array([s.time_absolute for s in shots])
+    nearest = times[np.argmin(np.abs(times - 8.274))]
+    assert nearest == pytest.approx(8.274, abs=0.003)
