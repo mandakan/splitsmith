@@ -40,6 +40,7 @@ from .logo_placeholder import PLACEHOLDER_REVISION
 from .logo_spots import paste_logo
 from .look_brand import brand_mark_json
 from .look_sting import sting_context
+from .look_template import shared_digest
 from .looks import Look, overlay_template_for, sting_template_for
 from .match_project import MatchProject
 from .match_summary import MatchSummary, build_match_summary, build_match_summary_still
@@ -176,6 +177,8 @@ def _confirmed_regions(audit_doc: dict | None) -> list[StageEvent]:
 #: other key input sees: ``_shared/`` scripts are not in any digest.
 #: 5: those columns also keep a gap before the next one (``fitColumns``),
 #: and a confirmed reload's row reads Exposed in place of Overhang.
+#: Since #1337 the key also carries ``look_template.shared_digest``, so a
+#: ``_shared/`` script change moves it without a bump here.
 PREVIEW_REVISION = 5
 
 
@@ -245,6 +248,7 @@ def preview_key(
             "variant": spec.variant,
             "project": project_updated_at,
             "audit": audit,
+            "shared": shared_digest(),
             "revision": PREVIEW_REVISION,
         },
         sort_keys=True,

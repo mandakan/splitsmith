@@ -307,6 +307,23 @@ def test_preview_key_changes_with_every_input_that_changes_the_picture() -> None
     assert len({key(), *variants}) == len(variants) + 1
 
 
+def test_preview_key_moves_with_the_shared_scripts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every card a template or ``overlay_html`` draws runs ``_shared/``
+    scripts, so editing one must move the key (#1337)."""
+    import shutil
+
+    from splitsmith import looks
+
+    root = tmp_path / "looks"
+    shutil.copytree(looks.shipped_looks_dir(), root)
+    monkeypatch.setattr(looks, "shipped_looks_dir", lambda: root)
+    spec = ep.PreviewSpec(card="title", stage_number=3, title_info="a")
+    before = ep.preview_key(spec, slug="me", project_updated_at="t1", audit="a1")
+    fit = root / "_shared" / "fit.js"
+    fit.write_bytes(fit.read_bytes() + b"\n// edited\n")
+    assert ep.preview_key(spec, slug="me", project_updated_at="t1", audit="a1") != before
+
+
 def test_audit_digest_moves_with_the_shots_and_not_with_key_order() -> None:
     reordered = dict(reversed(list(AUDIT.items())))
     more = {**AUDIT, "shots": [*AUDIT["shots"], {"shot_number": 4, "ms_after_beep": 2200}]}

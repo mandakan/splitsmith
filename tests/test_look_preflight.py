@@ -89,3 +89,21 @@ def test_a_draft_is_never_served_from_the_cache(client) -> None:
     client.post("/api/looks/club/check", json={"templates": [edit]})
     client.post("/api/looks/club/check", json={"templates": [edit]})
     assert _Prober.launches == 3
+
+
+def test_an_edited_shared_script_is_checked_again(client, tmp_path: Path, monkeypatch) -> None:
+    """The Look's templates run the shipped ``_shared/`` scripts, so a change
+    there must miss the cache even though the Look's folder is unchanged
+    (#1337). Edits a copy of the shipped tree, never the shipped files."""
+    import shutil
+
+    client.post("/api/looks/club/check", json={})
+    root = tmp_path / "shipped"
+    shutil.copytree(looks.shipped_looks_dir(), root)
+    monkeypatch.setattr(looks, "shipped_looks_dir", lambda: root)
+    client.post("/api/looks/club/check", json={})
+    assert _Prober.launches == 1
+    fit = root / "_shared" / "fit.js"
+    fit.write_bytes(fit.read_bytes() + b"\n// edited\n")
+    client.post("/api/looks/club/check", json={})
+    assert _Prober.launches == 2

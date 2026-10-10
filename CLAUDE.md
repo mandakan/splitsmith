@@ -258,7 +258,9 @@ overlaid on the card's backdrop with the last frame held
 (``motion_overlay_filters``, ``tpad=stop_mode=clone``); an animated lower
 third is the same clip through ``lower_third_clip_filters``. The segment
 cache keys that clip by ``look_template.template_digest`` (template
-bytes, context, fps, Chromium version) through
+bytes, every file under the shipped ``_shared/`` (``shared_digest``,
+which the export preview's key and the ``look-check`` cache carry too),
+context, fps, Chromium version) through
 ``SegmentCache.key(virtual_inputs=...)`` and renders the frames in the
 encode's ``prepare`` step, so a cached card renders no frame. A still
 template takes the PNG path unchanged, which is what keeps the default
@@ -1281,9 +1283,9 @@ the existing style-toggle seam), palette ``reload`` (``#FBBF24``) and
 ``movement`` (``#06B6D4``) in ``OverlayTheme`` / ``look.json``, optional.
 All five template styles draw both; Classic (drawtext) and the compare
 grid's sprite overlay draw neither. A reload on the move draws split on
-the stage bar (reload in the top half, the movement under it). HUD
-helpers stay inline in each template: ``_shared/`` scripts are not in
-``template_digest``, so an edit there would not invalidate a cached MOV.
+the stage bar (reload in the top half, the movement under it). A HUD
+helper may live in ``_shared/``: ``template_digest`` hashes all of it,
+so an edit there invalidates every cached MOV.
 The overlay's ``<base>_overlay.json`` record carries the audit revision
 for every style (``ui/exports.overlay_audit_revision``), so any audit
 edit redraws; a legacy record never matches, and a failed redraw drops
