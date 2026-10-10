@@ -78,6 +78,36 @@ export interface TimelineProps {
   title?: string;
 }
 
+let swipeBackHolds = 0;
+let swipeBackSaved: { html: string; body: string } | null = null;
+
+/**
+ * Turn off the browser's horizontal swipe-back (overscroll-behavior-x on the
+ * root scroller) until every holder has released it. Counted, so StrictMode's
+ * double-invoked effects and a remount never restore it early.
+ */
+function holdNoSwipeBack(): () => void {
+  const html = document.documentElement;
+  const body = document.body;
+  if (swipeBackHolds === 0) {
+    swipeBackSaved = { html: html.style.overscrollBehaviorX, body: body.style.overscrollBehaviorX };
+    html.style.overscrollBehaviorX = "none";
+    body.style.overscrollBehaviorX = "none";
+  }
+  swipeBackHolds += 1;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    swipeBackHolds -= 1;
+    if (swipeBackHolds === 0 && swipeBackSaved) {
+      html.style.overscrollBehaviorX = swipeBackSaved.html;
+      body.style.overscrollBehaviorX = swipeBackSaved.body;
+      swipeBackSaved = null;
+    }
+  };
+}
+
 export function Timeline(props: TimelineProps) {
   const {
     duration,
@@ -200,6 +230,12 @@ export function Timeline(props: TimelineProps) {
     }
     setScrollLeft(host.scrollLeft);
   }, [content]);
+
+  // While a band is on the page, a sideways swipe is never the browser's back
+  // gesture: on a timeline it is far more often a stray pan or drag than a
+  // deliberate "go back", and leaving the page drops the edit in hand. The
+  // back button and keyboard shortcuts still work; other pages keep the gesture.
+  useEffect(() => holdNoSwipeBack(), []);
 
   useEffect(() => {
     const host = hostRef.current;
