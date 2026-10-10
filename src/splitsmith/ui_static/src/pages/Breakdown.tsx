@@ -9,8 +9,10 @@
  *
  * Rows: the header, the workspace (viewer, then the 360 px inspector), the
  * band (``StageBand``: ruler, Audio, Shots and the region lanes, the hints).
- * The inspector shows the selected region's card, else the active shot's
- * interval class, with the shot list scrolling under it.
+ * The inspector (``BreakdownInspector``, #1372) shows the selected region's
+ * card, else the active shot's interval class, with the shot list scrolling
+ * under it; it folds to a rail that gives the viewer the width. Escape drops
+ * a region selection back to the shot view.
  *
  * Every rule is the shared one: ``useStageWorkspace`` owns the payloads and
  * the shot PATCH, ``useStageEvents`` the region saves, the lane editor its
@@ -21,11 +23,7 @@ import { ArrowLeft, ArrowRight, Loader2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useOutletContext, useParams } from "react-router-dom";
 
-import { CoachShotTable } from "@/components/coach/CoachShotTable";
-import { EventList } from "@/components/coach/EventList";
-import { SaveNotice } from "@/components/coach/SaveNotice";
-import { SelectedRegionCard } from "@/components/coach/SelectedRegionCard";
-import { ShotIntervalCard } from "@/components/coach/ShotIntervalCard";
+import { BreakdownInspector } from "@/components/coach/BreakdownInspector";
 import { StageBand } from "@/components/coach/StageBand";
 import { StageTransport, StageVideo } from "@/components/coach/StageViewer";
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
@@ -33,11 +31,13 @@ import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/Chip";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { ApiError, api } from "@/lib/api";
+import { isTypingTextTarget } from "@/lib/audit-input";
 import { regionCounts } from "@/lib/breakdown";
+import { useInspectorFolded } from "@/lib/breakdownPrefs";
 import { useMatchHref } from "@/lib/matchHref";
-import { gapTier } from "@/lib/splits";
 import { useShortViewport } from "@/lib/useShortViewport";
 import { deriveStageView, useStageWorkspace } from "@/lib/useStageWorkspace";
+import { cn } from "@/lib/utils";
 
 export function Breakdown() {
   const { slug, stage } = useParams<{ slug?: string; stage?: string }>();
@@ -98,14 +98,32 @@ function BreakdownStage({ slug, stage }: { slug: string; stage: number }) {
   // Optional: outside the match shell (a test) there is no outlet context.
   const shell = useOutletContext<MatchShellOutletContext | undefined>();
   const ws = useStageWorkspace(slug, stage, { onRegionsSaved: shell?.refreshProject });
-  const { project, coach, baselines, error, regions } = ws;
+  const { project, coach, error, regions } = ws;
   const compact = useShortViewport();
+  const [inspectorFolded] = useInspectorFolded();
   const inspectorRef = useRef<HTMLElement | null>(null);
   // A new selection (a region, or a shot in place of one) opens the
   // inspector at its top, so the card is never left scrolled out of view.
   useEffect(() => {
     if (inspectorRef.current) inspectorRef.current.scrollTop = 0;
   }, [regions.selectedId, ws.activeShotNumber]);
+  // Escape drops a region selection back to the shot view. Decided after the
+  // event has reached every listener: a live lane drag claims Esc (the lane
+  // editor's preventDefault) and its cancel wins; an open menu or sheet
+  // closes on that press instead; a text field keeps its own Esc.
+  const { selectedId, select } = regions;
+  useEffect(() => {
+    if (selectedId == null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || isTypingTextTarget(e.target)) return;
+      if (document.querySelector('[role="menu"], [role="dialog"]')) return;
+      window.setTimeout(() => {
+        if (!e.defaultPrevented) select(null);
+      }, 0);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedId, select]);
 
   if (error) {
     return (
@@ -126,7 +144,7 @@ function BreakdownStage({ slug, stage }: { slug: string; stage: number }) {
     );
   }
 
-  const { activeShot, selectedEvent, eventsReadOnly, prevStage, nextStage } = view;
+  const { prevStage, nextStage } = view;
   const counts = regionCounts(regions.events);
   const regionChips = (
     <>
@@ -185,44 +203,17 @@ function BreakdownStage({ slug, stage }: { slug: string; stage: number }) {
         />
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_360px]">
+      <div
+        className={cn(
+          "grid min-h-0 flex-1",
+          inspectorFolded ? "grid-cols-[minmax(0,1fr)_40px]" : "grid-cols-[minmax(0,1fr)_360px]",
+        )}
+      >
         <div className="flex min-h-0 flex-col border-r border-rule">
           <StageVideo ws={ws} view={view} className="min-h-0 w-full flex-1 object-contain" />
           {compact ? null : transport}
         </div>
-        {/* The column scrolls only when the card and a usable shot list do not
-            both fit (a short window with a region selected); the page never does. */}
-        <aside ref={inspectorRef} aria-label="Inspector" className="flex min-h-0 flex-col gap-2 overflow-y-auto px-3 py-2">
-          {regions.issue ? (
-            <SaveNotice issue={regions.issue} busy={regions.busy} onRetry={regions.retry} onDismiss={regions.dismiss} />
-          ) : null}
-          <div className="shrink-0">
-            {selectedEvent ? (
-              <SelectedRegionCard event={selectedEvent} regions={regions} compact={compact} />
-            ) : activeShot ? (
-              <ShotIntervalCard
-                shot={activeShot}
-                tier={gapTier(activeShot.split, activeShot.interval_class, baselines)}
-                onClassify={(cls) =>
-                  void ws.patchShot(activeShot, { interval_class: cls, interval_class_source: "manual" })
-                }
-              />
-            ) : null}
-          </div>
-          {eventsReadOnly ? (
-            <div className="max-h-[40%] shrink-0 overflow-y-auto">
-              <EventList events={regions.events} shots={coach.shots} />
-            </div>
-          ) : null}
-          <CoachShotTable
-            fill
-            className={compact ? "min-h-24 flex-1" : "min-h-40 flex-1"}
-            shots={coach.shots}
-            activeShotNumber={ws.activeShotNumber}
-            baselines={baselines}
-            onSelect={ws.seekToShot}
-          />
-        </aside>
+        <BreakdownInspector ws={ws} view={view} compact={compact} scrollRef={inspectorRef} />
       </div>
 
       <div className="shrink-0 border-t border-rule">

@@ -3,6 +3,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { CoachShot, CoachStageResponse, StageEvent } from "@/lib/api";
+import { INSPECTOR_FOLDED_KEY, SHOTS_FOLDED_KEY, resetBreakdownPrefsForTests } from "@/lib/breakdownPrefs";
 
 import { Breakdown } from "@/pages/Breakdown";
 
@@ -259,5 +260,123 @@ describe("Breakdown inspector scrolling", () => {
     fireEvent.click(container.querySelector<HTMLElement>('[aria-label="Inspector"] [data-shot-number="2"]')!);
     await waitFor(() => expect(within(inspector).getByRole("region", { name: "Shot 2" })).toBeInTheDocument());
     expect(inspector.scrollTop).toBe(0);
+  });
+});
+
+describe("Breakdown inspector (#1372)", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    resetBreakdownPrefsForTests();
+    vi.mocked(api.getProject).mockResolvedValue(PROJECT);
+    vi.mocked(api.getStageCoach).mockReset();
+    vi.mocked(api.getStageCoach).mockResolvedValue(coach(EVENTS));
+    vi.mocked(api.putStageEvents).mockReset();
+    HTMLElement.prototype.setPointerCapture = vi.fn();
+    HTMLElement.prototype.hasPointerCapture = vi.fn(() => true);
+    HTMLElement.prototype.releasePointerCapture = vi.fn();
+  });
+
+  const shotsToggle = (inspector: HTMLElement) =>
+    within(within(inspector).getByRole("region", { name: "Shots" })).getByRole("button", { name: /Shots/ });
+
+  it("a region swaps the shot card for the region card and folds the shot into a line that opens it again", async () => {
+    renderAt("/match/m1/breakdown/anna/2");
+    const inspector = await screen.findByRole("complementary", { name: "Inspector" });
+    expect(within(inspector).getByRole("region", { name: "Shot 1" })).toBeInTheDocument();
+    expect(within(inspector).queryByRole("button", { name: "Open shot 01" })).toBeNull();
+    fireEvent.click(screen.getByTestId("event-evt-1"));
+    expect(within(inspector).getByRole("region", { name: "Region" })).toBeInTheDocument();
+    expect(within(inspector).queryByRole("region", { name: "Shot 1" })).toBeNull();
+    // The list stays under the card.
+    expect(within(inspector).getByRole("region", { name: "Shots" })).toBeInTheDocument();
+    fireEvent.click(within(inspector).getByRole("button", { name: "Open shot 01" }));
+    expect(within(inspector).getByRole("region", { name: "Shot 1" })).toBeInTheDocument();
+    expect(within(inspector).queryByRole("region", { name: "Region" })).toBeNull();
+  });
+
+  it("Escape drops a selected region back to the shot view", async () => {
+    renderAt("/match/m1/breakdown/anna/2");
+    const inspector = await screen.findByRole("complementary", { name: "Inspector" });
+    fireEvent.click(screen.getByTestId("event-evt-2"));
+    expect(within(inspector).getByRole("region", { name: "Region" })).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(within(inspector).getByRole("region", { name: "Shot 1" })).toBeInTheDocument());
+    expect(within(inspector).queryByRole("region", { name: "Region" })).toBeNull();
+  });
+
+  it("Escape during a live lane drag cancels the drag and keeps the region selected", async () => {
+    const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      width: 1000,
+      height: 32,
+      left: 0,
+      top: 0,
+      right: 1000,
+      bottom: 32,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+    try {
+      renderAt("/match/m1/breakdown/anna/2");
+      const inspector = await screen.findByRole("complementary", { name: "Inspector" });
+      fireEvent.click(screen.getByTestId("event-evt-2"));
+      const handle = screen.getByTestId("handle-evt-2-end");
+      fireEvent.pointerDown(handle, { pointerId: 6, clientX: 200, clientY: 10, button: 0 });
+      fireEvent.pointerMove(handle, { pointerId: 6, clientX: 260, clientY: 10, altKey: true });
+      fireEvent.keyDown(window, { key: "Escape" });
+      await new Promise((r) => setTimeout(r, 20));
+      expect(within(inspector).getByRole("region", { name: "Region" })).toBeInTheDocument();
+      expect(screen.getByTestId("event-evt-2")).toHaveAttribute("data-end", "4.1");
+      expect(api.putStageEvents).not.toHaveBeenCalled();
+    } finally {
+      rect.mockRestore();
+    }
+  });
+
+  it("the shot list folds to its header, remembered per browser and shared by every stage", async () => {
+    renderAt("/match/m1/breakdown/anna/2");
+    const inspector = await screen.findByRole("complementary", { name: "Inspector" });
+    const shots = within(inspector).getByRole("region", { name: "Shots" });
+    expect(shotsToggle(inspector)).toHaveAttribute("aria-expanded", "true");
+    expect(shots.querySelector("[data-shot-number]")).not.toBeNull();
+    fireEvent.click(shotsToggle(inspector));
+    expect(shotsToggle(inspector)).toHaveAttribute("aria-expanded", "false");
+    expect(shots.querySelector("[data-shot-number]")).toBeNull();
+    expect(window.localStorage.getItem(SHOTS_FOLDED_KEY)).toBe("on");
+    // Another stage: still folded.
+    fireEvent.click(screen.getByRole("link", { name: "Next stage" }));
+    await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("/match/m1/breakdown/anna/3"));
+    const next = await screen.findByRole("complementary", { name: "Inspector" });
+    expect(shotsToggle(next)).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("stored folds are read on a fresh load", async () => {
+    window.localStorage.setItem(SHOTS_FOLDED_KEY, "on");
+    window.localStorage.setItem(INSPECTOR_FOLDED_KEY, "on");
+    renderAt("/match/m1/breakdown/anna/2");
+    const rail = await screen.findByRole("complementary", { name: "Inspector" });
+    expect(rail).toHaveAttribute("data-folded", "true");
+    fireEvent.click(within(rail).getByRole("button", { name: "Unfold inspector" }));
+    expect(shotsToggle(screen.getByRole("complementary", { name: "Inspector" }))).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("the inspector folds to a rail naming the selection; the band and the video stay", async () => {
+    const { container } = renderAt("/match/m1/breakdown/anna/2");
+    const inspector = await screen.findByRole("complementary", { name: "Inspector" });
+    fireEvent.click(screen.getByTestId("event-evt-2"));
+    fireEvent.click(within(inspector).getByRole("button", { name: "Fold inspector" }));
+    const rail = screen.getByRole("complementary", { name: "Inspector" });
+    expect(rail).toHaveAttribute("data-folded", "true");
+    expect(within(rail).getByTestId("inspector-rail-selection")).toHaveTextContent("Reload");
+    expect(within(rail).queryByRole("region", { name: "Region" })).toBeNull();
+    expect(window.localStorage.getItem(INSPECTOR_FOLDED_KEY)).toBe("on");
+    // The band and the viewer are still there, and the selection still moves.
+    expect(screen.getByTestId("timeline")).toBeInTheDocument();
+    expect(container.querySelector("video")).not.toBeNull();
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(within(rail).getByTestId("inspector-rail-selection")).toHaveTextContent("Shot 01"));
+    fireEvent.click(within(rail).getByRole("button", { name: "Unfold inspector" }));
+    expect(screen.getByRole("complementary", { name: "Inspector" })).not.toHaveAttribute("data-folded");
+    expect(window.localStorage.getItem(INSPECTOR_FOLDED_KEY)).toBe("off");
   });
 });
