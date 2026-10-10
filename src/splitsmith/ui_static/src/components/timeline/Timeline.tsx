@@ -53,9 +53,10 @@ export interface TimelineTrack {
   seekable?: boolean;
   /**
    * Double-click on the track's row, ignored the same way inside
-   * `[data-audit-marker]`.
+   * `[data-audit-marker]`. ``pxPerSec`` is the band's zoom at the click, so
+   * the page can decide how a new marker is placed (lib/peak-snap.placeTime).
    */
-  onDoubleClick?: (t: number, shiftKey: boolean) => void;
+  onDoubleClick?: (t: number, shiftKey: boolean, pxPerSec: number) => void;
 }
 
 export interface TimelineProps {
@@ -73,6 +74,8 @@ export interface TimelineProps {
   tracks: TimelineTrack[];
   zoom: Zoom;
   onZoomChange: (zoom: Zoom) => void;
+  /** Deepest zoom offered (default ``MAX_ZOOM``); Audit asks for 1 ms detail. */
+  maxZoom?: number;
   /** Page entries appended to the band's "More" menu. */
   menuExtra?: ReactNode;
   title?: string;
@@ -120,6 +123,7 @@ export function Timeline(props: TimelineProps) {
     tracks,
     zoom,
     onZoomChange,
+    maxZoom = MAX_ZOOM,
     menuExtra,
     title = "Timeline",
   } = props;
@@ -177,8 +181,8 @@ export function Timeline(props: TimelineProps) {
   const x = (t: number) => (Math.min(Math.max(t, 0), span) / span) * content;
 
   // Latest values for the native listeners.
-  const live = useRef({ zoom, viewport, wheelZooms, currentTime });
-  live.current = { zoom, viewport, wheelZooms, currentTime };
+  const live = useRef({ zoom, viewport, wheelZooms, currentTime, maxZoom });
+  live.current = { zoom, viewport, wheelZooms, currentTime, maxZoom };
 
   const playheadAnchor = (): number => {
     const host = hostRef.current;
@@ -249,7 +253,7 @@ export function Timeline(props: TimelineProps) {
         return;
       }
       const anchor = e.clientX - host.getBoundingClientRect().left;
-      applyZoomRef.current(applyWheelZoom(live.current.zoom, action.factor), anchor);
+      applyZoomRef.current(applyWheelZoom(live.current.zoom, action.factor, live.current.maxZoom), anchor);
     };
     host.addEventListener("wheel", onWheel, { passive: false });
     return () => host.removeEventListener("wheel", onWheel);
@@ -262,7 +266,7 @@ export function Timeline(props: TimelineProps) {
       if (!a) return;
       e.preventDefault();
       if (a === "fit") applyZoomRef.current(null, 0);
-      else applyZoomRef.current(zoomStep(live.current.zoom, a === "in" ? 1 : -1), anchorRef.current());
+      else applyZoomRef.current(zoomStep(live.current.zoom, a === "in" ? 1 : -1, live.current.maxZoom), anchorRef.current());
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -378,7 +382,7 @@ export function Timeline(props: TimelineProps) {
   };
   const handleTrackDoubleClick = (track: TimelineTrack) => (e: React.MouseEvent<HTMLDivElement>) => {
     if (!track.onDoubleClick || insideMarker(e.target)) return;
-    track.onDoubleClick(tAt(e.clientX), e.shiftKey);
+    track.onDoubleClick(tAt(e.clientX), e.shiftKey, pxPerSec);
   };
 
   const ticks = useMemo(() => {
@@ -389,7 +393,7 @@ export function Timeline(props: TimelineProps) {
   }, [pxPerSec, scrollLeft, viewport, span, origin, fps]);
 
   const geom: TimelineGeom = { contentWidth: content, viewportWidth: viewport, scrollLeft, pxPerSec };
-  const sliderMax = Math.log(MAX_ZOOM);
+  const sliderMax = Math.log(maxZoom);
 
   return (
     <div
@@ -407,7 +411,7 @@ export function Timeline(props: TimelineProps) {
             size="sm"
             variant="ghost"
             aria-label="Zoom out"
-            onClick={() => applyZoom(zoomStep(zoom, -1), playheadAnchor())}
+            onClick={() => applyZoom(zoomStep(zoom, -1, maxZoom), playheadAnchor())}
           >
             <Minus className="size-3" aria-hidden />
           </Button>
@@ -418,7 +422,7 @@ export function Timeline(props: TimelineProps) {
             max={sliderMax}
             step={0.01}
             value={Math.log(zoom ?? 1)}
-            onChange={(e) => applyZoom(clampZoom(Math.exp(Number(e.target.value))), playheadAnchor())}
+            onChange={(e) => applyZoom(clampZoom(Math.exp(Number(e.target.value)), maxZoom), playheadAnchor())}
             className="w-28 accent-ink-2"
           />
           <Button
@@ -426,7 +430,7 @@ export function Timeline(props: TimelineProps) {
             size="sm"
             variant="ghost"
             aria-label="Zoom in"
-            onClick={() => applyZoom(zoomStep(zoom, 1), playheadAnchor())}
+            onClick={() => applyZoom(zoomStep(zoom, 1, maxZoom), playheadAnchor())}
           >
             <Plus className="size-3" aria-hidden />
           </Button>

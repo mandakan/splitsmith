@@ -184,6 +184,8 @@ export interface ZoomControlsProps {
    *  relative to fit-mode's pixels-per-second. */
   zoom: number | null;
   onZoomChange: (next: number | null) => void;
+  /** Deepest zoom offered; the lab's fixture review goes past the default. */
+  maxZoom?: number;
   className?: string;
 }
 
@@ -191,7 +193,7 @@ export const MIN_ZOOM = 0.25;
 export const MAX_ZOOM = 16;
 export const ZOOM_STEP = 1.5;
 
-export function ZoomControls({ zoom, onZoomChange, className }: ZoomControlsProps) {
+export function ZoomControls({ zoom, onZoomChange, maxZoom = MAX_ZOOM, className }: ZoomControlsProps) {
   const display = useMemo(() => {
     if (zoom == null) return "fit";
     return `${zoom.toFixed(zoom < 1 ? 2 : 1)}x`;
@@ -199,7 +201,7 @@ export function ZoomControls({ zoom, onZoomChange, className }: ZoomControlsProp
 
   const zoomIn = () => {
     const base = zoom ?? 1;
-    onZoomChange(Math.min(MAX_ZOOM, base * ZOOM_STEP));
+    onZoomChange(Math.min(maxZoom, base * ZOOM_STEP));
   };
   const zoomOut = () => {
     const base = zoom ?? 1;

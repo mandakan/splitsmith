@@ -249,14 +249,17 @@ describe("Audit on the timeline band", () => {
     expect(track.querySelectorAll("[data-audit-marker]").length).toBe(3);
   });
 
-  describe("peak snapping on add", () => {
-    // The snap fetch asks for ~10 ms bins (2200 over 22 s). One spike at
-    // bin 1102 (11.025 s), inside the 25 ms window around 11.0 s.
-    const SPIKE_BIN = 1102;
+  describe("leading-edge snapping on add", () => {
+    // The snap fetch asks for 1 ms bins (22 000 over 22 s). One shot whose
+    // rise starts at bin 11010 (11.010 s), inside the 25 ms window around
+    // 11.0 s, peaking 10 ms later.
+    const RISE_BIN = 11010;
     const snapPeaksResult = (bins: number) => ({
       ...peaksResult(),
       bins,
-      peaks: Array.from({ length: bins }, (_, i) => (i === SPIKE_BIN ? 0.9 : 0.1)),
+      peaks: Array.from({ length: bins }, (_, i) =>
+        i < RISE_BIN ? 0.01 : i < RISE_BIN + 10 ? 0.01 + (i - RISE_BIN + 1) * 0.089 : 0.01,
+      ),
     });
 
     async function addAt(shiftKey: boolean): Promise<number> {
@@ -267,7 +270,7 @@ describe("Audit on the timeline band", () => {
       const band = await screen.findByTestId("timeline");
       const track = audioTrack(band);
       await waitFor(() => expect(track.querySelectorAll("[data-audit-marker]").length).toBe(2));
-      await waitFor(() => expect(apiMock.getStagePeaks).toHaveBeenCalledWith("alice", 3, 2200));
+      await waitFor(() => expect(apiMock.getStagePeaks).toHaveBeenCalledWith("alice", 3, 22000));
       await act(async () => {});
       vi.spyOn(within(band).getByTestId("timeline-content"), "getBoundingClientRect").mockReturnValue(
         new DOMRect(0, 0, VIEWPORT, 140),
@@ -282,8 +285,9 @@ describe("Audit on the timeline band", () => {
       return (parseFloat(added.style.left) / 100) * DURATION;
     }
 
-    it("snaps to the nearby peak without Shift", async () => {
-      expect(await addAt(false)).toBeCloseTo((SPIKE_BIN + 0.5) * 0.01, 6);
+    it("snaps to the shot's leading edge without Shift at fit zoom", async () => {
+      // 1000 px over 22 s is 45 px/s, coarser than 2 ms per pixel.
+      expect(await addAt(false)).toBeCloseTo(RISE_BIN * 0.001, 6);
     });
 
     it("keeps the raw time under the pointer with Shift", async () => {

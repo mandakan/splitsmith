@@ -16,17 +16,18 @@ const ZOOM_WHEEL_RATE = 0.0025;
 const LINE_PX = 16;
 const PAGE_PX = 800;
 
-export function clampZoom(z: number): Zoom {
+/** ``max`` is the page's deepest zoom: Audit goes until 1 ms is a few pixels. */
+export function clampZoom(z: number, max: number = MAX_ZOOM): Zoom {
   if (!Number.isFinite(z) || z <= 1 + 1e-9) return null;
-  return Math.min(MAX_ZOOM, z);
+  return Math.min(max, z);
 }
 
-export function zoomStep(zoom: Zoom, dir: 1 | -1): Zoom {
-  return clampZoom((zoom ?? 1) * (dir === 1 ? ZOOM_STEP : 1 / ZOOM_STEP));
+export function zoomStep(zoom: Zoom, dir: 1 | -1, max: number = MAX_ZOOM): Zoom {
+  return clampZoom((zoom ?? 1) * (dir === 1 ? ZOOM_STEP : 1 / ZOOM_STEP), max);
 }
 
-export function applyWheelZoom(zoom: Zoom, factor: number): Zoom {
-  return clampZoom((zoom ?? 1) * factor);
+export function applyWheelZoom(zoom: Zoom, factor: number, max: number = MAX_ZOOM): Zoom {
+  return clampZoom((zoom ?? 1) * factor, max);
 }
 
 export function contentWidth(zoom: Zoom, viewportPx: number): number {

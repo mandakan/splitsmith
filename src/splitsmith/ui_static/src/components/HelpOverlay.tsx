@@ -54,9 +54,13 @@ function sections(mode: HelpMode): Section[] {
     { keys: ["Shift", "N"], desc: "Previous marker (any kind)" },
     { keys: ["K"], desc: "Toggle keep / reject (manual: delete); auto-advances if enabled" },
     { keys: ["Delete"], desc: "Delete focused manual marker" },
-    { keys: ["Alt", "←", "→"], desc: "Nudge selected marker (10.7 ms)" },
-    { keys: ["Alt", "Shift", "←", "→"], desc: "Nudge selected marker (1 ms)" },
+    { keys: ["Alt", "←", "→"], desc: "Nudge selected marker (1 ms)" },
+    { keys: ["Alt", "Shift", "←", "→"], desc: "Nudge selected marker (10 ms)" },
     { keys: ["Double-click"], desc: "Add a manual marker at click time" },
+    {
+      keys: ["Shift", "drop"],
+      desc: "Place exactly; zoomed out, a drop snaps to the shot's leading edge",
+    },
   ];
   const view: ShortcutRow[] = [
     { keys: ["L"], desc: "Toggle loop (snaps back to anchor)" },

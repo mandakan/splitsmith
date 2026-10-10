@@ -13950,7 +13950,9 @@ def create_app(
     def stage_peaks(
         slug: str,
         stage_number: int,
-        bins: int = Query(default=1200, ge=16, le=8192),
+        # 1 ms bins on a clip up to ~131 s: Audit draws and snaps to a
+        # shot's leading edge from these.
+        bins: int = Query(default=1200, ge=16, le=131_072),
     ) -> JSONResponse:
         """Return ``bins`` peak magnitudes (0..1) for the stage's audit clip.
 
@@ -15014,7 +15016,9 @@ def create_app(
     @app.get("/api/fixture/peaks")
     def get_fixture_peaks(
         path: str = Query(...),
-        bins: int = Query(default=1200, ge=16, le=8192),
+        # Up to 1 ms bins on a two-minute fixture: the lab review zooms
+        # until the shot's rising edge is a few pixels wide.
+        bins: int = Query(default=1200, ge=16, le=131_072),
     ) -> JSONResponse:
         """Compute peaks for the fixture's sibling WAV (``<path>.with_suffix('.wav')``).
 
