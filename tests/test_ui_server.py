@@ -9477,6 +9477,53 @@ def test_dev_review_confirm_clears_pending(tmp_path: Path, monkeypatch: pytest.M
     assert client.post("/api/dev/review-queue/nope/confirm").status_code == 404
 
 
+def test_dev_review_confirm_records_the_walk_version(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The review walk signs off with its version, so a flawed walk can
+    re-flag exactly the fixtures it signed off; a plain sign-off (the editor's
+    Mark reviewed) leaves no method behind."""
+    import splitsmith.lab.core as lab_core
+
+    _seed_review_state_fixtures(tmp_path / "fixtures")
+    monkeypatch.setattr(lab_core, "DEFAULT_FIXTURES_ROOT", tmp_path / "fixtures")
+    client = _MatchClient(_match_create_app(project_root=tmp_path / "match", project_name="x"))
+    slug = "stage-shots-hfo-masters-2026-stage1-s0fe3d797"
+    path = tmp_path / "fixtures" / f"{slug}.json"
+
+    assert client.post(f"/api/dev/review-queue/{slug}/confirm", json={"method": "walk-1"}).status_code == 200
+    assert json.loads(path.read_text())["review"]["method"] == "walk-1"
+
+    assert client.post(f"/api/dev/review-queue/{slug}/confirm").status_code == 200
+    assert "method" not in json.loads(path.read_text())["review"]
+
+
+def test_dev_review_queue_names_the_source_video_only_when_it_is_on_disk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The walk shows the source video beside the waveform; a fixture whose
+    video sits on an unmounted volume gets none rather than a broken player."""
+    import splitsmith.lab.core as lab_core
+
+    fixtures = tmp_path / "fixtures"
+    fixtures.mkdir()
+    video = tmp_path / "IMG_0001.MOV"
+    video.write_bytes(b"x")
+    for slug, source in (
+        ("stage-shots-hfo-masters-2026-stage1-s0fe3d797", str(video)),
+        ("stage-shots-hfo-masters-2026-stage2-s0fe3d797", "/Volumes/Gone/IMG_0002.MOV"),
+    ):
+        (fixtures / f"{slug}.json").write_text(
+            json.dumps({"promoted_at": "2026-08-14T12:38:39+00:00", "source_video": source, "shots": []})
+        )
+        (fixtures / f"{slug}.wav").write_bytes(b"")
+    monkeypatch.setattr(lab_core, "DEFAULT_FIXTURES_ROOT", fixtures)
+    client = _MatchClient(_match_create_app(project_root=tmp_path / "match", project_name="x"))
+
+    body = client.get("/api/dev/review-queue").json()
+    items = {i["slug"]: i for i in body["pending"] + body["done"]}
+    assert items["stage-shots-hfo-masters-2026-stage1-s0fe3d797"]["video_path"] == str(video)
+    assert items["stage-shots-hfo-masters-2026-stage2-s0fe3d797"]["video_path"] is None
+
+
 def test_lab_fixtures_reports_calibration_membership(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """/api/lab/fixtures augments each record with ``in_calibration`` by
     comparing slugs against the active artifact's calibration_fixtures."""

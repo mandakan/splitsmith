@@ -2823,6 +2823,8 @@ export interface DevReviewQueueItem {
   priority: number | null;
   /** Why this fixture is worth checking, in plain words. */
   reasons: string[];
+  /** The fixture's source video when it is on this disk; the walk shows it. */
+  video_path?: string | null;
 }
 
 export interface DevReviewQueueResponse {
@@ -4956,10 +4958,12 @@ export const api = {
 
   /** "Approve to corpus": stamp review.confirmed_at on the fixture so
    *  it stops pending without a label pass. */
-  confirmReviewFixture: (slug: string) =>
+  confirmReviewFixture: (slug: string, method?: string) =>
     request<{ slug: string; confirmed_at: string; status: string }>(
       `/api/dev/review-queue/${encodeURIComponent(slug)}/confirm`,
-      { method: "POST" },
+      method
+        ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ method }) }
+        : { method: "POST" },
     ),
 
   promoteFromAnchor: (payload: {

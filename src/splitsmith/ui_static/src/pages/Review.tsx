@@ -42,7 +42,8 @@ import { HelpOverlay } from "@/components/HelpOverlay";
 import { ListDrawer } from "@/components/ListDrawer";
 import { MarkerLayer, type AuditMarker } from "@/components/MarkerLayer";
 import { ShotStepper } from "@/components/ShotStepper";
-import { StepThrough } from "@/components/review/StepThrough";
+import { Walk } from "@/components/review/Walk";
+import { WalkGuide } from "@/components/review/WalkGuide";
 import { Waveform } from "@/components/Waveform";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -58,15 +59,24 @@ import {
   ApiError,
   api,
   type AuditEvent,
-  type AuditShot,
   type PeaksResult,
   type StageAudit,
 } from "@/lib/api";
+import { deriveMarkers } from "@/lib/audit-doc";
+import { buildFixtureJson } from "@/lib/fixtureDoc";
 import { isTypingTextTarget, useBlurOnPointerClick } from "@/lib/audit-input";
 import { zoomActionForKey } from "@/lib/zoomKeys";
 import { placeTime, type SnapPeaks } from "@/lib/peak-snap";
 import { displayBins, reviewMaxZoom } from "@/lib/reviewZoom";
-import { nextFixtureToReview } from "@/lib/stepThrough";
+import {
+  BEEP_GUARD_S,
+  WALK_DECIDED_EVENT,
+  WALK_METHOD,
+  nextFixtureToReview,
+  readGuideOpen,
+  walkHref,
+  writeGuideOpen,
+} from "@/lib/walk";
 import { useReleaseMediaOnUnmount } from "@/lib/utils";
 
 const PEAK_BINS = 1500;
@@ -90,14 +100,24 @@ export function Review() {
   const fixturePath = params.get("fixture");
   const videoPath = params.get("video");
   const navigate = useNavigate();
-  // Step-through (lib/stepThrough): one close-up per shot whose rise foot
-  // disagrees with its stored time. ``?step=1`` opens it, which is how the
-  // review queue and the sign-off's "next fixture" link here.
-  const stepParam = params.get("step") === "1";
-  const [stepMode, setStepMode] = useState(stepParam);
+  // The walk (lib/walk): every candidate, manual shot and unmarked burst,
+  // one stop at a time. ``?walk=1`` opens it, which is how the review queue
+  // and the sign-off's "next fixture" link here (``?step=1``, the old link,
+  // still does).
+  // The walk's guide sits under the waveform, so the stop and its context
+  // stay together on screen; open until hidden once (lib/walk).
+  const [guideOpen, setGuideOpen] = useState(readGuideOpen);
+  const toggleGuide = useCallback(() => {
+    setGuideOpen((open) => {
+      writeGuideOpen(!open);
+      return !open;
+    });
+  }, []);
+  const walkParam = params.get("walk") === "1" || params.get("step") === "1";
+  const [walkMode, setWalkMode] = useState(walkParam);
   useEffect(() => {
-    setStepMode(stepParam);
-  }, [fixturePath, stepParam]);
+    setWalkMode(walkParam);
+  }, [fixturePath, walkParam]);
 
   // Drop button / chip focus after a mouse click so the next Space press
   // toggles playback instead of re-clicking the last-touched control.
@@ -195,7 +215,9 @@ export function Review() {
 
   const visibleKinds = useMemo(() => {
     const kinds = visibleKindsFromFilters(filters);
-    if (peeking) kinds.add("rejected");
+    // The walk visits rejected candidates too; hiding them below would make
+    // the two views disagree about what exists.
+    if (peeking || walkMode) kinds.add("rejected");
     // Keep a keyboard-focused rejected marker visible even when the
     // rejected filter is off, so `n`-stepping onto it never focuses
     // an invisible marker (the user can then K it back to kept).
@@ -204,7 +226,7 @@ export function Review() {
       if (f?.kind === "rejected") kinds.add("rejected");
     }
     return kinds;
-  }, [filters, peeking, focusedMarkerId, markers]);
+  }, [filters, peeking, walkMode, focusedMarkerId, markers]);
 
   // Load fixture JSON.
   useEffect(() => {
@@ -315,9 +337,14 @@ export function Review() {
 
   // ---- Marker mutators (push prev state to undo stack) -------------------
 
+  // Bumped by every walk decision; an effect saves after the render that
+  // carries the decision's markers, so closing the tab loses at most the
+  // stop in hand.
+  const [autosaveTick, setAutosaveTick] = useState(0);
   const recordEvent = useCallback((kind: string, payload: Record<string, unknown>) => {
     sessionEventsRef.current.push({ ts: new Date().toISOString(), kind, payload });
     isDirtyRef.current = true;
+    if (kind === WALK_DECIDED_EVENT) setAutosaveTick((n) => n + 1);
   }, []);
 
   const mutate = useCallback((next: AuditMarker[]) => {
@@ -587,37 +614,58 @@ export function Review() {
 
   // ---- Save flow ---------------------------------------------------------
 
-  const performSave = useCallback(async (): Promise<boolean> => {
-    if (!fixturePath || !audit) return false;
-    const appendEvents = sessionEventsRef.current;
-    const payload = buildAuditJson({
-      base: audit,
-      markers,
-      appendEvents: [
-        ...appendEvents,
-        { ts: new Date().toISOString(), kind: "save", payload: { shots_count: 0 } },
-      ],
-    });
-    const lastEv = payload.audit_events?.[payload.audit_events.length - 1];
-    if (lastEv && lastEv.kind === "save") {
-      lastEv.payload = { shots_count: payload.shots.length };
-    }
-    setSaveStatus({ kind: "saving" });
-    try {
-      const saved = await api.saveFixtureAudit(fixturePath, payload);
-      setAudit(saved);
-      sessionEventsRef.current = [];
-      isDirtyRef.current = false;
-      setSaveStatus({ kind: "saved", at: Date.now() });
-      return true;
-    } catch (err) {
-      setSaveStatus({
-        kind: "error",
-        message: err instanceof ApiError ? err.detail : String(err),
+  // Saves run one at a time, each from the newest markers and the document
+  // as last saved (refs, not a render's state), and each sends only the
+  // events no save has written yet: the walk saves after every decision, and
+  // two saves in flight must never drop one or write an older document back.
+  const auditRef = useRef(audit);
+  auditRef.current = audit;
+  const markersRef = useRef(markers);
+  markersRef.current = markers;
+  const saveChainRef = useRef<Promise<boolean>>(Promise.resolve(true));
+  const performSave = useCallback((): Promise<boolean> => {
+    const run = async (): Promise<boolean> => {
+      const base = auditRef.current;
+      if (!fixturePath || !base) return false;
+      const sent = sessionEventsRef.current.length;
+      const sentMarkers = markersRef.current;
+      const payload = buildFixtureJson({
+        base,
+        markers: sentMarkers,
+        appendEvents: [
+          ...sessionEventsRef.current.slice(0, sent),
+          { ts: new Date().toISOString(), kind: "save", payload: { shots_count: 0 } },
+        ],
       });
-      return false;
-    }
-  }, [fixturePath, audit, markers]);
+      const lastEv = payload.audit_events?.[payload.audit_events.length - 1];
+      if (lastEv && lastEv.kind === "save") {
+        lastEv.payload = { shots_count: payload.shots.length };
+      }
+      setSaveStatus({ kind: "saving" });
+      try {
+        const saved = await api.saveFixtureAudit(fixturePath, payload);
+        auditRef.current = saved;
+        setAudit(saved);
+        sessionEventsRef.current = sessionEventsRef.current.slice(sent);
+        isDirtyRef.current = sessionEventsRef.current.length > 0 || markersRef.current !== sentMarkers;
+        setSaveStatus({ kind: "saved", at: Date.now() });
+        return true;
+      } catch (err) {
+        setSaveStatus({
+          kind: "error",
+          message: err instanceof ApiError ? err.detail : String(err),
+        });
+        return false;
+      }
+    };
+    const next = saveChainRef.current.then(run, run);
+    saveChainRef.current = next;
+    return next;
+  }, [fixturePath]);
+
+  useEffect(() => {
+    if (autosaveTick > 0) void performSave();
+  }, [autosaveTick, performSave]);
 
   useEffect(() => {
     if (saveStatus.kind !== "saved") return;
@@ -632,13 +680,16 @@ export function Review() {
   const [marking, setMarking] = useState(false);
   const reviewStatus =
     (audit as unknown as { review?: { status?: string } } | null)?.review?.status ?? null;
-  const markReviewed = useCallback(async (): Promise<boolean> => {
+  const markReviewed = useCallback(async (method?: string): Promise<boolean> => {
     if (!fixturePath) return false;
     setMarking(true);
     try {
+      // A save still in flight would write the document back without the
+      // sign-off: wait for it, then save what it did not carry.
+      await saveChainRef.current;
       if (isDirtyRef.current && !(await performSave())) return false;
       const slug = fixturePath.split("/").pop()!.replace(/\.json$/, "");
-      await api.confirmReviewFixture(slug);
+      await api.confirmReviewFixture(slug, method);
       setAudit(await api.getFixtureAudit(fixturePath));
       return true;
     } catch (err) {
@@ -649,27 +700,113 @@ export function Review() {
     }
   }, [fixturePath, performSave]);
 
-  // The step-through's sign-off: mark reviewed, then open the queue's next
-  // fixture whose times need checking, straight into its step-through.
-  const finishStepThrough = useCallback(async () => {
-    if (!fixturePath || !(await markReviewed())) return;
+  // The walk's sign-off: mark reviewed (stamped with the walk's version),
+  // then open the queue's next fixture that needs checking, in its walk.
+  const finishWalk = useCallback(async () => {
+    if (!fixturePath || !(await markReviewed(WALK_METHOD))) return;
     const slug = fixturePath.split("/").pop()!.replace(/\.json$/, "");
     try {
       const next = nextFixtureToReview((await api.getDevReviewQueue()).pending, slug);
-      if (next) navigate(`/review?fixture=${encodeURIComponent(next.audit_path)}&step=1`);
-      else setStepMode(false);
+      if (next) navigate(walkHref(next.audit_path, next.video_path ?? null));
+      else setWalkMode(false);
     } catch {
-      setStepMode(false);
+      setWalkMode(false);
     }
   }, [fixturePath, markReviewed, navigate]);
 
-  const focusFromStep = useCallback(
-    (id: string, time: number) => {
+  const focusFromWalk = useCallback(
+    (id: string | null, time: number) => {
       setFocusedMarkerId(id);
       handleScrub(time);
     },
     [handleScrub],
   );
+
+  const setMarkerKind = useCallback(
+    (id: string, kind: "detected" | "rejected") => {
+      const m = markers.find((x) => x.id === id);
+      if (!m || m.kind === kind || m.kind === "manual") return;
+      recordEvent(kind === "detected" ? "marker_kept" : "marker_rejected", { id, time: m.time });
+      mutate(markers.map((x) => (x.id === id ? { ...x, kind } : x)));
+    },
+    [markers, mutate, recordEvent],
+  );
+
+  // The walk places a new shot exactly where it was decided; the editor's
+  // own double-click snaps (``handleAddManual``).
+  const addShotExact = useCallback(
+    (time: number): string => {
+      const id = `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const t = Math.round(time * 1000) / 1000;
+      recordEvent("marker_added_manual", { id, time: t });
+      mutate([
+        ...markers,
+        { id, kind: "manual", time: t, candidateNumber: null, confidence: null, peakAmplitude: null, note: "" },
+      ]);
+      return id;
+    },
+    [markers, mutate, recordEvent],
+  );
+
+  const removeManual = useCallback(
+    (id: string) => {
+      const m = markers.find((x) => x.id === id);
+      if (!m || m.kind !== "manual") return;
+      recordEvent("marker_deleted", { id, time: m.time });
+      mutate(markers.filter((x) => x.id !== id));
+    },
+    [markers, mutate, recordEvent],
+  );
+
+  // Space in the walk: hear the stop once, from half a second before it to
+  // 0.7 s after; Space again stops it.
+  const listenTimerRef = useRef<number | null>(null);
+  const listenAround = useCallback(
+    (t: number) => {
+      const el = playbackEl();
+      if (!el) return;
+      if (listenTimerRef.current != null) window.clearTimeout(listenTimerRef.current);
+      listenTimerRef.current = null;
+      if (!el.paused) {
+        el.pause();
+        setIsPlaying(false);
+        return;
+      }
+      const start = Math.max(0, t - LOOP_PRE_S);
+      handleScrub(start);
+      void el.play();
+      setIsPlaying(true);
+      listenTimerRef.current = window.setTimeout(
+        () => {
+          el.pause();
+          setIsPlaying(false);
+          listenTimerRef.current = null;
+        },
+        (t + LOOP_POST_S - start) * 1000,
+      );
+    },
+    [handleScrub],
+  );
+
+  const snapDisplacementMs = useCallback(
+    (markerId: string): number | null => {
+      const m = markers.find((x) => x.id === markerId);
+      if (!m || m.candidateNumber == null) return null;
+      const shot = (audit?.shots ?? []).find((s) => s.candidate_number === m.candidateNumber) as
+        | { snap_displacement_ms?: number }
+        | undefined;
+      return typeof shot?.snap_displacement_ms === "number" ? shot.snap_displacement_ms : null;
+    },
+    [markers, audit],
+  );
+
+  // The bottom waveform shows the walk's context: about six seconds around
+  // the stop (it scrolls along with each stop's scrub).
+  useEffect(() => {
+    if (!walkMode || !peaks || peaks.duration <= 8 || waveformViewport <= 0) return;
+    setZoom(Math.min(reviewMaxZoom(peaks.duration, waveformViewport), peaks.duration / 6));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [walkMode, peaks, waveformViewport > 0]);
 
   // ---- Global hotkeys ----------------------------------------------------
 
@@ -912,6 +1049,35 @@ export function Review() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {walkMode && peaks && edgePeaks ? (
+            <Walk
+              key={fixturePath}
+              markers={markers}
+              peaks={edgePeaks}
+              savedEvents={audit.audit_events ?? []}
+              from={(audit.beep_time ?? 0) + BEEP_GUARD_S}
+              expectedRounds={
+                (audit as unknown as { stage_rounds?: { expected?: number } }).stage_rounds?.expected ?? null
+              }
+              snapDisplacementMs={snapDisplacementMs}
+              onSetTime={handleMarkerTimeChange}
+              onSetKind={setMarkerKind}
+              onAddShot={addShotExact}
+              onRemove={removeManual}
+              onRecord={recordEvent}
+              onFocus={focusFromWalk}
+              onListen={listenAround}
+              onDone={() => void finishWalk()}
+              onExit={() => setWalkMode(false)}
+              busy={marking}
+              guideOpen={guideOpen}
+              onToggleGuide={toggleGuide}
+            />
+          ) : walkMode && peaks ? (
+            <div className="flex items-center gap-2 text-sm text-muted">
+              <Loader2 className="size-4 animate-spin" /> Loading the 1 ms waveform for the walk...
+            </div>
+          ) : null}
           {videoPath ? (
             <div className="overflow-hidden rounded-md bg-black">
               <video
@@ -920,7 +1086,11 @@ export function Review() {
                 preload="metadata"
                 playsInline
                 controls={false}
-                className="block h-auto w-full max-h-[60vh]"
+                className={
+                  walkMode
+                    ? "mx-auto block h-auto max-h-[30vh] w-auto"
+                    : "block h-auto w-full max-h-[60vh]"
+                }
               />
             </div>
           ) : (
@@ -942,23 +1112,9 @@ export function Review() {
             </div>
           ) : peaks ? (
             <>
-              {stepMode && edgePeaks ? (
-                <StepThrough
-                  key={fixturePath}
-                  markers={markers}
-                  peaks={edgePeaks}
-                  onSetTime={handleMarkerTimeChange}
-                  onReject={handleMarkerDelete}
-                  onRecord={recordEvent}
-                  onFocus={focusFromStep}
-                  onDone={() => void finishStepThrough()}
-                  onExit={() => setStepMode(false)}
-                  busy={marking}
-                />
-              ) : null}
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <FilterBar
-                  filters={filters}
+                  filters={walkMode ? { ...filters, rejected: true } : filters}
                   counts={{
                     detected: detectedCount,
                     rejected: rejectedCount,
@@ -1061,15 +1217,15 @@ export function Review() {
                   {marking ? <Loader2 className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}
                   {reviewStatus === "reviewed" ? "Reviewed" : "Mark reviewed"}
                 </Button>
-                {!stepMode ? (
+                {!walkMode ? (
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setStepMode(true)}
+                    onClick={() => setWalkMode(true)}
                     disabled={!edgePeaks}
-                    title="Check each shot whose rise foot disagrees with its stored time, one key per shot"
+                    title="Visit every candidate, shot and unmarked sound in time order, one key each"
                   >
-                    Step through
+                    Walk
                   </Button>
                 ) : null}
                 <span className="ml-auto flex items-center gap-3 text-xs text-muted">
@@ -1102,6 +1258,7 @@ export function Review() {
                 onStep={stepShot}
                 onNoteChange={handleNoteChange}
               />
+              {walkMode && guideOpen ? <WalkGuide onClose={toggleGuide} /> : null}
             </>
           ) : null}
         </CardContent>
@@ -1154,78 +1311,6 @@ function SaveToast({ status }: { status: SaveStatus }) {
       </div>
     </Portal>
   );
-}
-
-function buildAuditJson(opts: {
-  base: StageAudit;
-  markers: AuditMarker[];
-  appendEvents: AuditEvent[];
-}): StageAudit {
-  const { base, markers, appendEvents } = opts;
-  const kept = markers
-    .filter((m) => m.kind === "detected" || m.kind === "manual")
-    .slice()
-    .sort((a, b) => a.time - b.time || a.id.localeCompare(b.id));
-
-  const beep = base.beep_time ?? null;
-  const shots: AuditShot[] = kept.map((m, i) => ({
-    shot_number: i + 1,
-    candidate_number: m.candidateNumber,
-    time: round3(m.time),
-    ms_after_beep: beep != null ? Math.round((m.time - beep) * 1000) : 0,
-    source: m.kind === "manual" ? "manual" : "detected",
-    ...(m.note ? { note: m.note } : {}),
-  })) as (AuditShot & { note?: string })[];
-
-  const previousEvents = base.audit_events ?? [];
-  return {
-    ...base,
-    shots,
-    audit_events: [...previousEvents, ...appendEvents],
-  };
-}
-
-function round3(n: number): number {
-  return Math.round(n * 1000) / 1000;
-}
-
-function deriveMarkers(audit: StageAudit | null): AuditMarker[] {
-  if (!audit) return [];
-  const candidates = audit._candidates_pending_audit?.candidates ?? [];
-  const candidateNumbers = new Set(candidates.map((c) => c.candidate_number));
-  const shotsByCandidateNumber = new Map<number, true>();
-  for (const s of audit.shots ?? []) {
-    if (s.candidate_number != null) shotsByCandidateNumber.set(s.candidate_number, true);
-  }
-  const markers: AuditMarker[] = candidates.map((c) => ({
-    id: `cand-${c.candidate_number}`,
-    kind: shotsByCandidateNumber.has(c.candidate_number) ? "detected" : "rejected",
-    time: c.time,
-    candidateNumber: c.candidate_number,
-    confidence: c.confidence ?? null,
-    peakAmplitude: c.peak_amplitude ?? null,
-    note: "",
-  }));
-  // #847: same rule as ``lib/audit-doc.ts`` -- emit a manual marker only for
-  // a shot the candidate pass above did not already cover. This page keeps
-  // its own copy because it saves fixtures through ``saveFixtureAudit``
-  // rather than the production audit endpoint, and its documents carry no
-  // shot ids; the double-emit defect was identical in both.
-  for (const s of audit.shots ?? []) {
-    if (s.time == null) continue;
-    if (s.candidate_number == null || !candidateNumbers.has(s.candidate_number)) {
-      markers.push({
-        id: `manual-shot-${s.shot_number}`,
-        kind: "manual",
-        time: s.time,
-        candidateNumber: s.candidate_number ?? null,
-        confidence: null,
-        peakAmplitude: null,
-        note: "",
-      });
-    }
-  }
-  return markers;
 }
 
 function formatTime(seconds: number): string {
