@@ -37,6 +37,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, ValidationError
 
 from .. import match_model
+from ..coach import FIELD_STAGE_NOTE
 from ..match_project import MatchProject
 from ..storage import Storage
 from ..sync.plan import TRIMMED_SUFFIX, WEB_SUFFIX, doc_identity_key, trim_key_for
@@ -695,6 +696,14 @@ async def put_audit_doc(
     _hosted_gate()
     await _resolve_mirror(request, match_id)
     store = _project_state(request)
+    if FIELD_STAGE_NOTE not in body:
+        # A desktop older than the stage note (#1376) pushes docs without
+        # the key: it never knew the field, so it cannot have cleared it (a
+        # clear is an explicit null). Keep the hosted note rather than let
+        # that push erase one written on this mirror.
+        stored, _ = await store.load_audit(match_id, slug, stage_number)
+        if stored and FIELD_STAGE_NOTE in stored:
+            body = {**body, FIELD_STAGE_NOTE: stored[FIELD_STAGE_NOTE]}
     version = await store.save_audit(match_id, slug, stage_number, body, expected_version=expected_version)
     return SyncDocVersionResponse(version=version)
 

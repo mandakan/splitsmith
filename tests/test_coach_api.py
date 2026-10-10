@@ -564,6 +564,11 @@ def test_patch_emits_audit_event(tmp_path: Path) -> None:
     coach_events = [e for e in events if e.get("kind") == "coach_patch"]
     assert len(coach_events) == 1
     assert coach_events[0]["payload"]["shot_number"] == 2
+    # The note itself stays out of the synced journal: a length and a hash.
+    fields = coach_events[0]["payload"]["fields"]
+    assert fields["improvement_flag"] is True
+    assert fields["coaching_note"]["length"] == len("fix me")
+    assert "fix me" not in json.dumps(events)
 
 
 # ---------------------------------------------------------------------------
@@ -1158,21 +1163,29 @@ def test_stage_note_round_trips_and_returns_the_coach_payload(tmp_path: Path) ->
     stored = _read(audit_file)
     assert stored["stage_note"] == "Draw earlier on the move"
     assert stored["audit_events"][-1]["kind"] == "stage_note"
-    assert stored["audit_events"][-1]["payload"] == {"stage_note": "Draw earlier on the move"}
+    # The journal records a length and a short hash, never the text.
+    digest = stored["audit_events"][-1]["payload"]["stage_note"]
+    assert digest["length"] == len("Draw earlier on the move") and len(digest["sha256"]) == 12
+    assert "Draw earlier" not in json.dumps(stored["audit_events"])
     # The served revision is the saved doc's, so the next save goes through.
     assert body["_version"] == audit_revision(stored)
     assert _coach(client, base)["stage_note"] == "Draw earlier on the move"
     again = _note(client, base, {"stage_note": "", "_version": body["_version"]})
     assert again.status_code == 200, again.text
     assert again.json()["stage_note"] is None
-    assert "stage_note" not in _read(audit_file)
+    # A clear is the tombstone, never a dropped key: sync reads an absent
+    # key as "this writer never knew the field".
+    assert _read(audit_file)["stage_note"] is None
 
 
 def test_stage_note_null_clears_it(tmp_path: Path) -> None:
     client, audit_file, base = _bootstrap(tmp_path)
     assert _note(client, base, {"stage_note": "x"}).status_code == 200
-    assert _note(client, base, {"stage_note": None}).status_code == 200
-    assert "stage_note" not in _read(audit_file)
+    resp = _note(client, base, {"stage_note": None})
+    assert resp.status_code == 200
+    assert resp.json()["stage_note"] is None
+    stored = _read(audit_file)
+    assert "stage_note" in stored and stored["stage_note"] is None
 
 
 def test_stage_note_stale_version_is_a_409_and_leaves_the_doc(tmp_path: Path) -> None:

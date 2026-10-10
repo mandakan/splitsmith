@@ -482,21 +482,23 @@ def merge_audit_doc(
 
     # stage_note (#1376): a doc-level unit merged exactly like a shot's
     # coaching_note -- three-way against base, changed on one side wins,
-    # changed on both is a conflict the newer doc wins, surfaced. A missing
-    # key and a missing note are the same value.
+    # changed on both is a conflict the newer doc wins, surfaced. A clear is
+    # an explicit ``null`` (the tombstone); an absent key means the writer
+    # never knew the field (an install older than it), so that side counts
+    # as unchanged. That also heals a base an older install recorded with a
+    # note its own doc never carried: base-has / local-lacks is not a delete.
     base_sn = (base or {}).get(FIELD_STAGE_NOTE)
-    local_sn = local.get(FIELD_STAGE_NOTE)
-    remote_sn = remote.get(FIELD_STAGE_NOTE)
+    local_sn = local[FIELD_STAGE_NOTE] if FIELD_STAGE_NOTE in local else base_sn
+    remote_sn = remote[FIELD_STAGE_NOTE] if FIELD_STAGE_NOTE in remote else base_sn
     sn_winner, sn_conflict = _resolve_unit(
         base_sn, local_sn, remote_sn, local_ts=local_ts, remote_ts=remote_ts
     )
     if sn_conflict:
         result.conflicts.append(MergeConflict(doc_key=doc_key, unit=FIELD_STAGE_NOTE, winner=sn_winner))
-    if sn_winner == "remote" and remote_sn != local_sn:
-        if remote_sn is None:
-            merged.pop(FIELD_STAGE_NOTE, None)
-        else:
-            merged[FIELD_STAGE_NOTE] = remote_sn
+    sn_value = remote_sn if sn_winner == "remote" else local_sn
+    if FIELD_STAGE_NOTE in local or FIELD_STAGE_NOTE in remote or sn_value is not None:
+        if merged.get(FIELD_STAGE_NOTE, ...) != sn_value:
+            merged[FIELD_STAGE_NOTE] = sn_value
 
     # Same shape as the project merge's tripwire: remote's copy differs from
     # base on a field this merge does not carry, so local's value stands.

@@ -14579,6 +14579,14 @@ def create_app(
         """
         return state.save_audit(slug, stage_number, payload, version=version)
 
+    def _note_digest(text: str | None) -> dict[str, Any] | None:
+        """A note as an audit event records it: its length and a short hash,
+        never the text. Notes autosave after every pause and the journal
+        syncs, so the text itself would be copied once per pause."""
+        if text is None:
+            return None
+        return {"length": len(text), "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]}
+
     def _stage_note(payload: dict[str, Any]) -> str | None:
         """The doc's stage note, or None for a missing or non-string one
         (audit docs are hand-editable JSON)."""
@@ -14862,17 +14870,17 @@ def create_app(
             # The response reads the events; a corrupt list is the GET's 422,
             # raised here before the save rather than after it.
             _coach_events(stored, stage_number)
+            # A clear writes ``null``, never drops the key: sync reads an
+            # absent key as "this writer never knew the field" (an older
+            # install), and only the tombstone deletes on the other side.
             text = req.stage_note or None
-            if text is None:
-                stored.pop(coach_module.FIELD_STAGE_NOTE, None)
-            else:
-                stored[coach_module.FIELD_STAGE_NOTE] = text
+            stored[coach_module.FIELD_STAGE_NOTE] = text
             stored.setdefault("audit_events", []).append(
                 {
                     "id": _new_event_id(),
                     "ts": _now_iso(),
                     "kind": "stage_note",
-                    "payload": {"stage_note": text},
+                    "payload": {"stage_note": _note_digest(text)},
                 }
             )
             version = _coach_save(slug, stage_number, stored, version)
@@ -14980,7 +14988,18 @@ def create_app(
                     "payload": {
                         "shot_id": target.get("id"),
                         "shot_number": target.get("shot_number"),
-                        "fields": coach_module.read_coach_fields(target),
+                        "fields": {
+                            **coach_module.read_coach_fields(target),
+                            **(
+                                {
+                                    coach_module.FIELD_COACHING_NOTE: _note_digest(
+                                        target[coach_module.FIELD_COACHING_NOTE]
+                                    )
+                                }
+                                if isinstance(target.get(coach_module.FIELD_COACHING_NOTE), str)
+                                else {}
+                            ),
+                        },
                     },
                 }
             )
