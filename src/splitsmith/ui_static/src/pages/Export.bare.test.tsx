@@ -286,3 +286,29 @@ describe("Export bare-stage hints", () => {
     expect(screen.queryByText(/Captions cover/)).toBeNull();
   });
 });
+
+describe("Breakdown is optional by design (#1371)", () => {
+  it("a stage with zero regions exports with no Breakdown prompt, and regions change nothing", async () => {
+    const figures = (regions: number | null) => ({
+      draw: 1.2,
+      avg_split: 0.3,
+      fastest_split: 0.2,
+      shot_count: 6,
+      split_count: 4,
+      moving_shots: null,
+      reloads: null,
+      reload_avg_s: null,
+      exposed_reload_s: null,
+      regions,
+    });
+    vi.mocked(api.getExportOverview).mockResolvedValue({ match_exports: [], stages: [ready(1), ready(2)] });
+    vi.mocked(api.getProject).mockResolvedValue({
+      ...PROJECT,
+      stages: PROJECT.stages.map((s) => ({ ...s, figures: figures(null) })),
+    });
+    await renderPage();
+    expect(screen.getByRole("checkbox", { name: /Stage 1/i })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /Stage 2/i })).toBeChecked();
+    expect(document.body.textContent).not.toMatch(/breakdown|region/i);
+  });
+});

@@ -34,6 +34,7 @@ const Audit = lazyPage(() => import("@/pages/Audit"), "Audit");
 const MobileAudit = lazyPage(() => import("@/pages/MobileAudit"), "MobileAudit");
 const MobileBeepReview = lazyPage(() => import("@/pages/MobileBeepReview"), "MobileBeepReview");
 const Coach = lazyPage(() => import("@/pages/Coach"), "Coach");
+const Breakdown = lazyPage(() => import("@/pages/Breakdown"), "Breakdown");
 const Compare = lazyPage(() => import("@/pages/Compare"), "Compare");
 const CreateMatch = lazyPage(() => import("@/pages/CreateMatch"), "CreateMatch");
 const Design = lazyPage(() => import("@/pages/Design"), "Design");
@@ -326,6 +327,17 @@ export function App() {
                 element={<ShooterScopedRoute element={<DesktopGate screen="Coach"><Coach /></DesktopGate>} />}
               />
               <Route path="coach" element={<DefaultShooterRedirect base="coach" />} />
+              {/* Breakdown (#1371): the optional region and interval editor,
+                  desktop only like Coach. */}
+              <Route
+                path="breakdown/:slug"
+                element={<ShooterScopedRoute element={<DesktopGate screen="Breakdown"><Breakdown /></DesktopGate>} />}
+              />
+              <Route
+                path="breakdown/:slug/:stage"
+                element={<ShooterScopedRoute element={<DesktopGate screen="Breakdown"><Breakdown /></DesktopGate>} />}
+              />
+              <Route path="breakdown" element={<DefaultShooterRedirect base="breakdown" />} />
               <Route path="beep-review" element={<BeepReviewRoute />} />
               {/* Take overview: carve-up review for one multi-stage raw
                   recording. :filename is the raw video's basename. */}

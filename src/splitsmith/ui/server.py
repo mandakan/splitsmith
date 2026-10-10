@@ -8229,17 +8229,26 @@ def _stage_region_figures(doc: dict, stage_number: int) -> dict:
     ``None`` when the stage has none. ``exposed_reload_s`` is the reloads'
     time no confirmed movement covered (a standing reload's whole
     duration), a number whenever there is a confirmed reload and ``None``
-    without one, as ``reload_avg_s``. No capacity: the capacity warning is
-    a Coach-page hint, not a shared figure."""
+    without one, as ``reload_avg_s``. ``regions`` counts the confirmed
+    regions of every kind, the Breakdown nav row's quiet count (#1371). No
+    capacity: the capacity warning is a Coach-page hint, not a shared
+    figure."""
     confirmed = events_module.confirmed_from_doc(doc, log_context=f"stage {stage_number}")
     if not confirmed:
-        return {"moving_shots": None, "reloads": None, "reload_avg_s": None, "exposed_reload_s": None}
+        return {
+            "moving_shots": None,
+            "reloads": None,
+            "reload_avg_s": None,
+            "exposed_reload_s": None,
+            "regions": None,
+        }
     summary = events_module.stage_event_summary(events_module.shot_times_from_doc(doc), confirmed, None)
     return {
         "moving_shots": summary.moving_shots,
         "reloads": summary.reloads,
         "reload_avg_s": summary.reload_avg_s,
         "exposed_reload_s": summary.exposed_reload_s if summary.reloads else None,
+        "regions": len(confirmed),
     }
 
 

@@ -19,12 +19,15 @@ export interface CoachShotTableProps {
   baselines: TierBaselines | null;
   onSelect: (shot: CoachShot) => void;
   className?: string;
+  /** Fill the parent's height and scroll inside it (Breakdown's inspector)
+   *  instead of capping the list at 70 % of the viewport. */
+  fill?: boolean;
 }
 
 const GRID = "grid grid-cols-[30px_54px_62px_minmax(0,1fr)_minmax(0,1fr)] items-center gap-2";
 const TIER_TEXT = { quick: "text-done", typical: "text-ink", long: "text-live" } as const;
 
-export function CoachShotTable({ shots, activeShotNumber, baselines, onSelect, className }: CoachShotTableProps) {
+export function CoachShotTable({ shots, activeShotNumber, baselines, onSelect, className, fill = false }: CoachShotTableProps) {
   const ref = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (activeShotNumber == null) return;
@@ -32,7 +35,10 @@ export function CoachShotTable({ shots, activeShotNumber, baselines, onSelect, c
     if (el && typeof el.scrollIntoView === "function") el.scrollIntoView({ block: "nearest" });
   }, [activeShotNumber]);
   return (
-    <section aria-label="Shots" className={cn("overflow-hidden rounded-[10px] border border-rule bg-surface", className)}>
+    <section
+      aria-label="Shots"
+      className={cn("overflow-hidden rounded-[10px] border border-rule bg-surface", fill && "flex min-h-0 flex-col", className)}
+    >
       <div className={cn(GRID, "border-b border-rule-strong px-3 py-2")}>
         <Label>#</Label>
         <Label className="text-right">T</Label>
@@ -40,7 +46,7 @@ export function CoachShotTable({ shots, activeShotNumber, baselines, onSelect, c
         <Label>Interval</Label>
         <Label>Note</Label>
       </div>
-      <div ref={ref} className="max-h-[70vh] overflow-y-auto">
+      <div ref={ref} className={fill ? "min-h-0 flex-1 overflow-y-auto" : "max-h-[70vh] overflow-y-auto"}>
         {shots.map((shot) => {
           const tier = gapTier(shot.split, shot.interval_class, baselines);
           const active = shot.shot_number === activeShotNumber;

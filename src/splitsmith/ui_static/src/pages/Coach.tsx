@@ -19,71 +19,40 @@
  * but the chrome / layout is the polished design.
  */
 
-import {
-  ArrowLeft,
-  ArrowRight,
-  Loader2,
-  Pause,
-  Play,
-} from "lucide-react";
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { ArrowLeft, ArrowRight, Loader2 } from "lucide-react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 
 import { CoachShotTable } from "@/components/coach/CoachShotTable";
-import { EventCard } from "@/components/coach/EventCard";
 import { EventList } from "@/components/coach/EventList";
-import { LANE_ROWS, LaneEditor, LaneHints } from "@/components/coach/LaneEditor";
 import { SaveNotice } from "@/components/coach/SaveNotice";
+import { SelectedRegionCard } from "@/components/coach/SelectedRegionCard";
 import { ShotEditor } from "@/components/coach/ShotEditor";
+import { StageBand } from "@/components/coach/StageBand";
+import { StageTransport, StageVideo } from "@/components/coach/StageViewer";
 import { TimeBudgetBar } from "@/components/coach/TimeBudgetBar";
 import { TimeBudgetCard } from "@/components/coach/TimeBudgetCard";
-import { Timeline } from "@/components/timeline/Timeline";
-import { WaveformTrack } from "@/components/timeline/WaveformTrack";
+import { ShotRuler } from "@/components/results/ShotRuler";
 import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/Chip";
 import { Label } from "@/components/ui/Label";
-import { menuItemClass } from "@/components/ui/Menu";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Stat, StatStrip } from "@/components/ui/Stat";
 import {
   ApiError,
   api,
-  capabilityDenied,
   type CoachIntervalClass,
   type CoachMatchDistributions,
   type CoachShot,
   type CoachStageResponse,
   type MatchProject,
-  type PeaksResult,
 } from "@/lib/api";
-import { confirmedEvents, keepEvent, summarize, withKind } from "@/lib/events";
-import { useSpacePlayPause } from "@/lib/keyboard";
+import { confirmedEvents, summarize } from "@/lib/events";
 import { useMatchHref } from "@/lib/matchHref";
-import { type Zoom } from "@/lib/timelineView";
-import { useIsMobile } from "@/lib/useIsMobile";
-import { useScrubSource } from "@/lib/useScrubSource";
-import { useStageEvents } from "@/lib/useStageEvents";
-import { cn } from "@/lib/utils";
-import {
-  INTERVAL_LABEL,
-  type TierBaselines,
-  baselinesFromMatchDistributions,
-  gapTier,
-  statisticSplits,
-} from "@/lib/splits";
-import { ShotRuler } from "@/components/results/ShotRuler";
+import { INTERVAL_LABEL, baselinesFromMatchDistributions, gapTier, statisticSplits } from "@/lib/splits";
 import { BUDGET_LABEL, BUDGET_TICK, matchBudget, timeBudget } from "@/lib/timeBudget";
-
-/** Peaks bins for the Coach audio track; same request shape as Audit's
- *  "Load peaks" effect, a wider bin count since Coach stages run longer. */
-const PEAK_BINS = 4000;
+import { useStageWorkspace, deriveStageView } from "@/lib/useStageWorkspace";
+import { cn } from "@/lib/utils";
 
 export function Coach() {
   // Slug carried by ShooterScopedRoute (#353 phase 1) -- present whenever
@@ -750,207 +719,16 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
   const href = useMatchHref();
   const coachPrefix = href("coach", slug);
   const auditPrefix = href("audit", slug);
-  const [project, setProject] = useState<MatchProject | null>(null);
-  const [coach, setCoach] = useState<CoachStageResponse | null>(null);
-  const [baselines, setBaselines] = useState<TierBaselines | null>(null);
-  const [distributions, setDistributions] = useState<CoachMatchDistributions | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [reclassifying, setReclassifying] = useState(false);
-  const [activeShotNumber, setActiveShotNumber] = useState<number | null>(null);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(false);
+  const breakdownPrefix = href("breakdown", slug);
+  const ws = useStageWorkspace(slug, stage);
+  const { project, coach, baselines, distributions, error, regions } = ws;
   const [noteDraft, setNoteDraft] = useState("");
-  const [timelineZoom, setTimelineZoom] = useState<Zoom>(null);
-  const [peaks, setPeaks] = useState<PeaksResult | null>(null);
-  const [peaksLoading, setPeaksLoading] = useState(true);
-  const scrub = useScrubSource();
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const shotListRef = useRef<HTMLDivElement | null>(null);
-  // Guard value for the positional shot PATCH (#844). A ref rather than
-  // reading ``coach``: patchShot is memoised on [slug, stage], so the
-  // ``coach`` it closes over is the one from the render that created it -
-  // null on mount, and stale after every patch that follows.
-  const coachVersionRef = useRef<number | undefined>(undefined);
-
-  // The only writer of coach state, so the guard value cannot fall out of
-  // step with the document it guards. Written here rather than in an effect
-  // on ``coach``: an effect lands a commit later, and a second patch fired
-  // before that commit would send the version the first one just replaced.
-  const applyCoach = useCallback((next: CoachStageResponse | null) => {
-    coachVersionRef.current = next?.version;
-    setCoach(next);
-  }, []);
-  // Regions (spec 2026-10-08): ``apply`` wraps applyCoach and is what every
-  // coach response goes through, so the events' revision moves with it. A
-  // failed region save is ``saveIssue``, shown under the lane editor: it
-  // never replaces the page the way a load or shot PATCH failure does.
-  const {
-    events,
-    selectedId: selectedEventId,
-    select: selectEvent,
-    apply,
-    change: changeEvents,
-    cancel: cancelEvents,
-    issue: saveIssue,
-    retry: retrySave,
-    dismiss: dismissSaveIssue,
-    busy: regionSaveBusy,
-  } = useStageEvents(slug, stage, applyCoach);
-  const isMobile = useIsMobile();
 
   useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const [p, c, dist] = await Promise.all([
-          api.getProject(slug),
-          api.getStageCoach(slug, stage),
-          // Match-scope baseline for the tier chips; a failed fetch just
-          // means unjudged rows, never an error.
-          api.getMatchCoachDistributions(slug).catch(() => null),
-        ]);
-        if (!alive) return;
-        setProject(p);
-        apply(c);
-        setBaselines(baselinesFromMatchDistributions(dist));
-        setDistributions(dist);
-        if (c && c.shots.length > 0) {
-          setActiveShotNumber(c.shots[0].shot_number);
-        }
-      } catch (e) {
-        if (alive) setError(e instanceof ApiError ? e.detail : String(e));
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [apply, slug, stage]);
-
-  // Load peaks for the band's audio track (same shape as Audit.tsx's "Load
-  // peaks" effect). A failure just means no waveform -- the track renders
-  // "No audio" for null peaks once the request has settled -- never a page
-  // error. peaksLoading keeps the track an empty placeholder while the
-  // request is in flight, so "No audio" never flashes before a slow
-  // response has had a chance to resolve.
-  useEffect(() => {
-    let alive = true;
-    setPeaksLoading(true);
-    api
-      .getStagePeaks(slug, stage, PEAK_BINS)
-      .then((p) => {
-        if (alive) setPeaks(p);
-      })
-      .catch(() => {
-        if (alive) setPeaks(null);
-      })
-      .finally(() => {
-        if (alive) setPeaksLoading(false);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [slug, stage]);
-
-  useEffect(() => {
-    if (!coach || activeShotNumber == null) return;
-    const shot = coach.shots.find((s) => s.shot_number === activeShotNumber);
+    if (!coach || ws.activeShotNumber == null) return;
+    const shot = coach.shots.find((s) => s.shot_number === ws.activeShotNumber);
     setNoteDraft(shot?.coaching_note ?? "");
-  }, [activeShotNumber, coach]);
-
-  // While the video is playing, advance the active shot to whichever
-  // one's time_absolute has just passed under the playhead. Without
-  // this the shot list + stepper stay frozen on whatever shot was last
-  // clicked, even as audio of subsequent shots plays.
-  //
-  // Gate on isPlaying so a user click + seek doesn't fight with the
-  // currentTime tick that follows (the seek would land at the clicked
-  // shot's time and the auto-sync would re-confirm the same shot; that
-  // path works, but isPlaying keeps the logic simple to reason about).
-  useEffect(() => {
-    if (!isPlaying || !coach) return;
-    // Last shot whose time_absolute <= currentTime is the one currently
-    // audible. Shots are sorted by shot_number; we sort by time here to
-    // be defensive against any out-of-order input.
-    const ordered = [...coach.shots].sort(
-      (a, b) => a.time_absolute - b.time_absolute,
-    );
-    let current: CoachShot | null = null;
-    for (const s of ordered) {
-      if (s.time_absolute <= currentTime) current = s;
-      else break;
-    }
-    if (current && current.shot_number !== activeShotNumber) {
-      setActiveShotNumber(current.shot_number);
-    }
-  }, [currentTime, isPlaying, coach, activeShotNumber]);
-
-  // Scroll the active shot row into view as it changes during playback.
-  // Without this the highlight moves correctly but a long list scrolls
-  // off-screen, so the user has to chase it manually. block:'nearest'
-  // avoids yanking the viewport when the row is already visible.
-  useEffect(() => {
-    if (activeShotNumber == null) return;
-    const container = shotListRef.current;
-    if (!container) return;
-    const row = container.querySelector<HTMLElement>(
-      `[data-shot-number="${activeShotNumber}"]`,
-    );
-    row?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }, [activeShotNumber]);
-
-  const reclassify = useCallback(async () => {
-    setReclassifying(true);
-    try {
-      const c = await api.reclassifyStageCoach(slug, stage);
-      apply(c);
-    } catch (e) {
-      setError(e instanceof ApiError ? e.detail : String(e));
-    } finally {
-      setReclassifying(false);
-    }
-  }, [apply, slug, stage]);
-
-  const patchShot = useCallback(
-    async (
-      shot: CoachShot,
-      patch: Parameters<typeof api.patchStageShotCoach>[3],
-    ) => {
-      try {
-        const c = await api.patchStageShotCoach(
-          slug,
-          stage,
-          shot,
-          patch,
-          coachVersionRef.current,
-        );
-        apply(c);
-      } catch (e) {
-        setError(e instanceof ApiError ? e.detail : String(e));
-      }
-    },
-    [apply, slug, stage],
-  );
-
-  const seekToShot = useCallback(
-    (shot: CoachShot) => {
-      // Picking a shot brings its editor back in place of the region card.
-      selectEvent(null);
-      setActiveShotNumber(shot.shot_number);
-      if (videoRef.current) videoRef.current.currentTime = shot.time_absolute;
-    },
-    [selectEvent],
-  );
-
-  const togglePlay = useCallback(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    if (v.paused) void v.play().catch(() => {});
-    else v.pause();
-  }, []);
-  // Space toggles play/pause from anywhere on the page (focus on a
-  // shot row, nav link, etc) so the user doesn't have to click the
-  // video first.
-  useSpacePlayPause(togglePlay);
+  }, [ws.activeShotNumber, coach]);
 
   const budget = useMemo(() => timeBudget(coach?.shots ?? [], distributions), [coach, distributions]);
   // Moving-shot and exposed-reload figures come from the hook's local
@@ -964,8 +742,8 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
   // receives. Computed above the early returns below: a hook cannot be
   // conditional on ``coach`` being loaded yet.
   const localSummary = useMemo(
-    () => summarize(coach?.shots.map((s) => s.time_from_beep) ?? [], confirmedEvents(events), null),
-    [coach, events],
+    () => summarize(coach?.shots.map((s) => s.time_from_beep) ?? [], confirmedEvents(regions.events), null),
+    [coach, regions.events],
   );
 
   if (error) {
@@ -978,7 +756,8 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
       </div>
     );
   }
-  if (!coach || !project) {
+  const view = deriveStageView(ws, slug, stage);
+  if (!coach || !project || !view) {
     return (
       <div className="flex h-64 items-center justify-center gap-2 text-md text-muted">
         <Loader2 className="size-4 animate-spin" /> Loading stage coach...
@@ -986,57 +765,16 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
     );
   }
 
-  const allStages = project.stages
-    .map((s) => s.stage_number)
-    .sort((a, b) => a - b);
-  const idx = allStages.indexOf(stage);
-  const prevStage = idx > 0 ? allStages[idx - 1] : null;
-  const nextStage =
-    idx >= 0 && idx < allStages.length - 1 ? allStages[idx + 1] : null;
-
-  const activeShot =
-    coach.shots.find((s) => s.shot_number === activeShotNumber) ?? null;
-  const primary = coach.videos.find((v) => v.role === "primary") ?? null;
-  const scrubChoice = primary?.kind === "trim" ? scrub.choose(primary) : null;
-  const playingScrub = scrubChoice?.kind === "scrub";
-  const streamUrl = primary
-    ? primary.kind !== "trim"
-      ? api.videoStreamUrl(slug, primary.path, primary.kind, null, stage)
-      : api.videoStreamUrl(slug, primary.path, scrubChoice!.kind, scrubChoice!.version, stage)
-    : null;
-  const maxAbs =
-    coach.shots.length > 0
-      ? Math.max(...coach.shots.map((s) => s.time_absolute))
-      : 0;
-  const minAbs =
-    coach.shots.length > 0
-      ? Math.min(...coach.shots.map((s) => s.time_absolute))
-      : 0;
+  const { activeShot, prevStage, nextStage, eventsReadOnly, selectedEvent } = view;
+  const maxAbs = coach.shots.length > 0 ? Math.max(...coach.shots.map((s) => s.time_absolute)) : 0;
+  const minAbs = coach.shots.length > 0 ? Math.min(...coach.shots.map((s) => s.time_absolute)) : 0;
   const span = Math.max(0.0001, maxAbs - minAbs);
-  // events is desktop-owned: a mirror has no edit capability and the PUT
-  // 403s, and the phone has no room for handles. Both read the lanes and
-  // the list.
-  const eventsReadOnly = isMobile || capabilityDenied(project.capabilities, "edit");
-  const selectedEvent = eventsReadOnly ? null : (events.find((e) => e.id === selectedEventId) ?? null);
-  const stageSeconds = project.stages.find((s) => s.stage_number === stage)?.time_seconds ?? 0;
-  const lastShot = coach.shots.length > 0 ? Math.max(...coach.shots.map((s) => s.time_from_beep)) : 0;
-  const stageTime = stageSeconds > 0 ? stageSeconds : lastShot + 1;
-  const tFromBeep = currentTime - coach.beep_time;
-  const seekFromBeep = (t: number) => {
-    if (videoRef.current) videoRef.current.currentTime = coach.beep_time + t;
-  };
-  // coach.beep_time is the coach response's own clip anchor (the same
-  // trim-vs-source anchor the video stream uses); peaks.beep_time is the
-  // audit audio's beep in its own clip. The two agree in the normal case
-  // and can only differ when they resolve to different clips, so the
-  // measured one wins when it is there.
-  const audioBeep = peaks?.beep_time ?? coach.beep_time;
   const summary = coach.event_summary
     ? { ...localSummary, capacity_warning: coach.event_summary.capacity_warning }
     : undefined;
   const selectShotNumber = (n: number) => {
     const shot = coach.shots.find((s) => s.shot_number === n);
-    if (shot) seekToShot(shot);
+    if (shot) ws.seekToShot(shot);
   };
   const stepButton = (label: string, to: number | null, icon: React.ReactNode) =>
     to != null ? (
@@ -1072,9 +810,15 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
         }
         actions={
           <>
-            <Button type="button" onClick={() => void reclassify()} disabled={reclassifying} title="Re-run the auto-classifier; manual overrides survive">
-              {reclassifying ? "Reclassifying\u2026" : "Reclassify"}
+            <Button type="button" onClick={() => void ws.reclassify()} disabled={ws.reclassifying} title="Re-run the auto-classifier; manual overrides survive">
+              {ws.reclassifying ? "Reclassifying…" : "Reclassify"}
             </Button>
+            {/* Breakdown is desktop only (DesktopGate): the phone keeps Coach. */}
+            {ws.isMobile ? null : (
+              <Button asChild>
+                <Link to={`${breakdownPrefix}/${stage}`}>Breakdown</Link>
+              </Button>
+            )}
             <Button asChild>
               <Link to={`${auditPrefix}/${stage}`}>Audit</Link>
             </Button>
@@ -1097,151 +841,32 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
         <div className="overflow-hidden rounded-[10px] border border-rule bg-surface">
-          {streamUrl ? (
-            <video
-              ref={videoRef}
-              src={streamUrl}
-              controls={false}
-              preload="metadata"
-              playsInline
-              onTimeUpdate={(e) =>
-                setCurrentTime((e.target as HTMLVideoElement).currentTime)
-              }
-              onPlay={() => setIsPlaying(true)}
-              onPause={() => setIsPlaying(false)}
-              onError={() => {
-                if (primary && playingScrub) scrub.markFailed(primary);
-              }}
-              className="aspect-video w-full bg-black"
-            />
-          ) : (
-            <div className="flex aspect-video items-center justify-center bg-surface-2 text-md text-muted">
-              No primary video
-            </div>
-          )}
-          <div className="flex items-center gap-3 border-t border-rule px-3 py-2">
-            <Button
-              type="button"
-              size="icon"
-              onClick={togglePlay}
-              aria-label={isPlaying ? "Pause" : "Play"}
-              aria-pressed={isPlaying}
-              className="rounded-full"
-            >
-              {isPlaying ? <Pause className="size-4" aria-hidden /> : <Play className="size-4 fill-current" aria-hidden />}
-            </Button>
-            <span className="numeral text-md text-ink-2">{currentTime.toFixed(2)} s</span>
-            {activeShot ? (
-              <span className="numeral text-sm text-muted">
-                shot {pad2(activeShot.shot_number)} at {activeShot.time_absolute.toFixed(2)} s
-              </span>
-            ) : null}
-          </div>
+          <StageVideo ws={ws} view={view} className="aspect-video w-full" />
+          <StageTransport ws={ws} view={view} className="border-t border-rule" />
           <div className="border-t border-rule px-3 py-2">
             <ShotRuler
               shots={coach.shots}
               minAbs={minAbs}
               span={span}
-              activeShotNumber={activeShotNumber}
-              onSeek={seekToShot}
+              activeShotNumber={ws.activeShotNumber}
+              onSeek={ws.seekToShot}
               baselines={baselines}
             />
           </div>
         </div>
 
-        <CoachShotTable shots={coach.shots} activeShotNumber={activeShotNumber} baselines={baselines} onSelect={seekToShot} />
+        <CoachShotTable shots={coach.shots} activeShotNumber={ws.activeShotNumber} baselines={baselines} onSelect={ws.seekToShot} />
       </div>
 
       <div className="mt-4 flex flex-col gap-4">
-        <div>
-          <Timeline
-            duration={stageTime}
-            origin={0}
-            fps={30}
-            currentTime={tFromBeep}
-            playing={isPlaying}
-            onSeek={seekFromBeep}
-            zoom={timelineZoom}
-            onZoomChange={setTimelineZoom}
-            menuExtra={
-              scrub.available ? (
-                <button
-                  type="button"
-                  role="menuitemcheckbox"
-                  aria-checked={scrub.fullRes}
-                  className={menuItemClass}
-                  onClick={() => scrub.setFullRes(!scrub.fullRes)}
-                >
-                  Full-resolution video
-                  <span className="ml-auto text-sm text-muted">{scrub.fullRes ? "on" : "off"}</span>
-                </button>
-              ) : undefined
-            }
-            tracks={[
-              {
-                id: "audio",
-                rows: [{ label: "Audio", height: 56 }],
-                seekable: true,
-                render: (geom) =>
-                  peaksLoading ? (
-                    // Nothing drawn yet: "No audio" would otherwise flash on
-                    // every stage load before a normal-latency request has
-                    // had a chance to resolve.
-                    <div style={{ height: 56 }} />
-                  ) : (
-                    <WaveformTrack
-                      peaks={peaks?.peaks ?? null}
-                      clipDuration={peaks?.duration ?? 0}
-                      from={audioBeep}
-                      to={audioBeep + stageTime}
-                      geom={geom}
-                      height={56}
-                    />
-                  ),
-              },
-              {
-                id: "lanes",
-                rows: LANE_ROWS,
-                render: () => (
-                  <LaneEditor
-                    shots={coach.shots}
-                    events={events}
-                    stageTime={stageTime}
-                    currentTime={tFromBeep}
-                    selectedId={selectedEventId}
-                    readOnly={eventsReadOnly}
-                    onSelect={selectEvent}
-                    onSeek={seekFromBeep}
-                    onChange={changeEvents}
-                    onCancel={cancelEvents}
-                  />
-                ),
-              },
-            ]}
-          />
-          <LaneHints readOnly={eventsReadOnly} />
-        </div>
-        {saveIssue ? <SaveNotice issue={saveIssue} busy={regionSaveBusy} onRetry={retrySave} onDismiss={dismissSaveIssue} /> : null}
-        {eventsReadOnly ? <EventList events={events} shots={coach.shots} /> : null}
+        <StageBand ws={ws} view={view} />
+        {regions.issue ? (
+          <SaveNotice issue={regions.issue} busy={regions.busy} onRetry={regions.retry} onDismiss={regions.dismiss} />
+        ) : null}
+        {eventsReadOnly ? <EventList events={regions.events} shots={coach.shots} /> : null}
 
         {selectedEvent ? (
-          <EventCard
-            event={selectedEvent}
-            events={events}
-            onKind={(kind) => {
-              const next = withKind(events, selectedEvent.id, kind);
-              if (next) changeEvents(next, true);
-            }}
-            onKeep={() => changeEvents(keepEvent(events, selectedEvent.id), true)}
-            onDelete={() => {
-              changeEvents(
-                events.filter((e) => e.id !== selectedEvent.id),
-                true,
-              );
-              selectEvent(null);
-            }}
-            onDone={() => selectEvent(null)}
-          />
+          <SelectedRegionCard event={selectedEvent} regions={regions} />
         ) : activeShot ? (
           <ShotEditor
             shot={activeShot}
@@ -1249,18 +874,18 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
             noteDraft={noteDraft}
             onNoteChange={setNoteDraft}
             onSave={() =>
-              void patchShot(activeShot, {
+              void ws.patchShot(activeShot, {
                 coaching_note: noteDraft || null,
               })
             }
             onClassify={(cls) =>
-              void patchShot(activeShot, {
+              void ws.patchShot(activeShot, {
                 interval_class: cls,
                 interval_class_source: "manual",
               })
             }
             onToggleFlag={() =>
-              void patchShot(activeShot, {
+              void ws.patchShot(activeShot, {
                 improvement_flag: !activeShot.improvement_flag,
               })
             }
