@@ -51,6 +51,41 @@ This is the leading edge the eye picks when scrubbing a zoomed waveform, and the
 
 A change to the definition changes all three and the cases file in the same PR.
 
+### Placing a shot by eye
+
+For reviewing fixtures and for correcting markers in Audit. The definition above is the authority; this is how it looks on a waveform.
+
+**Checklist, per shot:**
+1. **Zoom in** until a pixel is 2 ms or finer (the zoom this takes depends on the clip's length; around 15 to 20x on a stage-length clip). There a dropped marker lands exactly where you let go; zoomed out it snaps to the rise foot, which is right most of the time but not always (figure 7).
+2. **Find the burst**, the large transient of the shot itself, and follow its rise **backwards** to where it leaves the background. That point is the shot time: the first moment the level stands clearly above the noise just before it, about a twentieth of the burst's height.
+3. **Keep a lead-in that grows straight into the burst** (figure 5); **drop anything that dies back first**: a tone, a click, an echo, another bay's shot (figures 4 and 6). The test is the gap: if the level falls back towards the background between the earlier sound and the burst, the earlier sound is not this shot.
+4. **Ignore what happens inside the burst.** Compressed cameras (GO 3S) dip and swing several times within one shot; the time is the start, never a dip or a swing (figures 2 and 7).
+5. **Same rule on every shot**, however loud or quiet: splits are only right if every shot is timed at the same point of its rise.
+6. **When you cannot tell** (wind, a shot buried in a neighbouring bay's), place your best guess and add a note to the shot rather than leave the detector's time.
+
+**What it looks like** (real fixture audio; the green line is the shot time):
+
+![Clean shot](images/shot-time/01-clean.png)
+1. A clean shot: the burst leaves a quiet background at one sharp point.
+
+![GO 3S compressed burst](images/shot-time/02-go3s-compressed.png)
+2. A GO 3S shot. The camera compresses the blast into a burst with dips inside it; the old detector stopped at one of them, 26 ms in. The time is where the burst starts.
+
+![Noisy background](images/shot-time/03-noisy.png)
+3. A noisy background. Not the first wiggle that is a little larger than the rest: the point where the burst clearly rises out of the noise.
+
+![Separated lead-in](images/shot-time/04-separated-lead-in.png)
+4. A tone just before the shot, falling back before the blast. It is not the shot.
+
+![Continuous lead-in](images/shot-time/05-continuous-lead-in.png)
+5. A lead-in that grows straight into the burst is part of the rise: time where it starts.
+
+![Earlier sound](images/shot-time/06-earlier-sound.png)
+6. An earlier, separate sound (an echo, a shot in another bay) with background between it and the burst. Not this shot.
+
+![Snap late](images/shot-time/07-snap-late.png)
+7. Where the zoomed-out snap goes wrong: it stopped at a large swing 9 ms into the burst (dashed red). Zoom in and place it by eye at the start.
+
 **History.** Shot times were first the half-rise (the first sample at half the local peak); that lands mid-rise, visibly later than the audible start, and people dragging markers consistently pulled them earlier, so the detector moved to the rise foot (5 % of the peak, walking back from the peak found near librosa's frame). That walk had no noise floor and stopped at the first dip, so it ran into the noise before some shots (Vanguard: 8 to 15 ms early) and stopped inside compressed bursts (GO 3S: 20 to 30 ms late, 27 % of reviewed shots); see `docs/cameras.md`, 2026-10-10. The definition above, from the beep detector plus the dip rule, fixes both: read by eye on 118 sampled shots (blind, from plots without any marks), the detector's current times sit a median 4.4 / 8.2 / 7.2 ms from the main burst's start (GO 3S / Vanguard / handheld) and the definition 0.6 / 3.5 / 2.6 ms (issue #1363).
 
 ### Comparing splitsmith times to a CED7000 / Pact / similar
