@@ -100,6 +100,10 @@ _GENERIC_FAMILIES = frozenset(
     }
 )
 CHECK_WIDTH, CHECK_HEIGHT, CHECK_FPS = 1280, 720, 30.0
+#: The upright page a HUD style is also probed on (issue #1394): what a
+#: 1080x1920 or 720x1280 video renders its HUD at (``hud_page_size``), so
+#: its context carries the platform safe area.
+CHECK_UPRIGHT_WIDTH, CHECK_UPRIGHT_HEIGHT = 608, 1080
 PREVIEW_WIDTH, PREVIEW_HEIGHT = 960, 540
 LONG_STAGE_NAME = "Stage 7 - The Very Long Corridor Of Doom And Despair"
 
@@ -430,6 +434,8 @@ HUD_SAMPLE_BEEP = 1.0
 HUD_LANDED_AFTER = 2.0
 #: How far past ``settle()`` the stillness check looks for motion.
 HUD_STILL_AFTER = 0.7
+#: How long after a shot the upright probe looks: a split's flash is up.
+HUD_AFTER_SHOT = 0.1
 
 
 def _hud_stage(gaps: Sequence[tuple[str | None, float]]) -> list[TileShot]:
@@ -485,7 +491,9 @@ def hud_samples() -> list[HudSample]:
     ]
 
 
-def _hud_context(look: Look, template: Path, sample: HudSample) -> TemplateContext:
+def _hud_context(
+    look: Look, template: Path, sample: HudSample, *, width: int = CHECK_WIDTH, height: int = CHECK_HEIGHT
+) -> TemplateContext:
     # Deferred: overlay_hud_render builds on the renderer's encoder module.
     from .overlay_hud_render import hud_context
 
@@ -497,8 +505,8 @@ def _hud_context(look: Look, template: Path, sample: HudSample) -> TemplateConte
         stage=stage,
         options=hud_options_data(HudOptions(reload_chip=True, stage_bar=True), position),
         theme=theme_for(look),
-        width=CHECK_WIDTH,
-        height=CHECK_HEIGHT,
+        width=width,
+        height=height,
         fps=CHECK_FPS,
     )
 
@@ -506,12 +514,21 @@ def _hud_context(look: Look, template: Path, sample: HudSample) -> TemplateConte
 def _check_hud(subject: str, look: Look, template: Path, prober: Prober) -> list[CheckItem]:
     """A HUD template's findings: what the card checks look for, probed
     mid-stage and landed on every sample stage, then whether it is still
-    where the renderer holds one frame (before the beep, after settle())."""
+    where the renderer holds one frame (before the beep, after settle()).
+
+    Every sample is probed again on an upright page (issue #1394), whose
+    context carries the platform safe area, at the same moments and just
+    after a shot (where a split flashes up): anything drawn into the area is
+    a warning naming it."""
     results: list[tuple[str, TemplateProbe]] = []
+    upright: list[tuple[str, TemplateProbe]] = []
     contexts: list[tuple[str, TemplateContext, list[TileShot]]] = []
     for sample in hud_samples():
         case, shots = sample.name, sample.shots
         context = _hud_context(look, template, sample)
+        upright_context = _hud_context(
+            look, template, sample, width=CHECK_UPRIGHT_WIDTH, height=CHECK_UPRIGHT_HEIGHT
+        )
         contexts.append((case, context, shots))
         # Mid-stage at rest: just before the shot that ends the longest gap,
         # so a shot effect caught mid-way is never mistaken for a layout fault.
@@ -530,9 +547,38 @@ def _check_hud(subject: str, look: Look, template: Path, prober: Prober) -> list
                 template, context=context, width=CHECK_WIDTH, height=CHECK_HEIGHT, at=at
             )
             results.append((f"{case}, {moment}", probe))
+        # Just after a shot a split is flashing up or a row is sliding in:
+        # read for the safe area only, never as a layout fault (a row half
+        # way through its slide is clipped on purpose).
+        shot = HUD_SAMPLE_BEEP + shots[index + 1].time_from_beep + HUD_AFTER_SHOT
+        for moment, at in [*moments, ("just after a shot", shot)]:
+            probe = prober.probe_template(
+                template,
+                context=upright_context,
+                width=CHECK_UPRIGHT_WIDTH,
+                height=CHECK_UPRIGHT_HEIGHT,
+                at=at,
+            )
+            upright.append((f"{case}, {moment}, upright", probe))
+            if moment != "just after a shot":
+                results.append((f"{case}, {moment}, upright", probe))
     items = _judge(subject, results)
     if any(item.level == "error" for item in items):
         return items
+    for case, probe in upright:
+        if probe.unsafe:
+            what, by = probe.unsafe[0]
+            items = [item for item in items if item.level != "ok"]
+            items.append(
+                CheckItem(
+                    subject,
+                    "warn",
+                    f"{what} reaches {by} px into an upright video's safe area, where Shorts, Reels and "
+                    "TikTok draw their captions and buttons; keep clear of data.safe_area "
+                    f"(sample: {case})",
+                )
+            )
+            break
 
     _, context, shots = contexts[0]
     last = HUD_SAMPLE_BEEP + shots[-1].time_from_beep

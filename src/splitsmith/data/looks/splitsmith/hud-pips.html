@@ -58,6 +58,26 @@
   #stamp { position: absolute; left: 0; right: 0; top: 34%; text-align: center; opacity: 0; }
   #stamp .label { font-size: 2.5vh; letter-spacing: 0.3em; }
   #stamp .num { font-size: 16vh; }
+  /* Upright video: the platform safe area (--safe-bottom, --safe-right
+     from --safe-right-top down) stays clear; body.safe is set from
+     data.safe_area, so a landscape page never matches these rules. */
+  body.safe #hud.bottom-left, body.safe #hud.bottom-right { bottom: calc(var(--safe-bottom) + 5vh); }
+  /* A ring bursts about 3vh past its pip: the right corner sits that much
+     further in, and the pips wrap short of the column. */
+  body.safe #hud.bottom-right { right: calc(var(--safe-right) + 4vh); }
+  body.safe #hud.bottom-left #pips, body.safe #hud.bottom-right #pips {
+    max-width: calc(100vw - 9vh - var(--safe-right));
+  }
+  /* Smaller pips on the narrow page, so a twelve-round stage stays one row. */
+  body.safe #pips { gap: 0.8vh; }
+  body.safe .pip { width: 2.2vh; height: 2.2vh; border-width: 0.35vh; }
+  body.safe #split { bottom: calc(var(--safe-bottom) + 7vh); }
+  /* A HUD in a bottom corner holds the foot of the frame, so the split
+     flashes above where the button column starts. */
+  body.safe #hud.bottom-left ~ #split, body.safe #hud.bottom-right ~ #split {
+    bottom: calc(100% - var(--safe-right-top) + 2vh);
+  }
+  body.safe #stamp { right: var(--safe-right); }
 </style>
 </head>
 <body>
@@ -71,6 +91,9 @@
 <script>
 (function () {
   var s = window.splitsmith;
+  // Upright video (data.safe_area): the body.safe rules keep every element
+  // out of what Shorts, Reels and TikTok draw over.
+  if (s.data.safe_area) document.body.classList.add('safe');
   var theme = s.theme, stage = s.data.stage, opts = s.data.options;
   var shots = stage.shots, beep = stage.beep, rounds = stage.rounds;
   // The helpers every shipped HUD shares (_shared/hud.js).
@@ -174,7 +197,9 @@
     var stamp = el('stamp');
     var sk = landing ? (landed - STAMP_DELAY) / STAMP_IN : 0;
     stamp.style.opacity = clamp(sk);
-    stamp.style.transform = 'scale(' + (1.4 - 0.4 * backOut(sk)) + ')';
+    // Upright, the stamp grows into place: shrinking from 1.4x it would
+    // sweep over the button column on its way in.
+    stamp.style.transform = 'scale(' + (s.data.safe_area ? 0.8 + 0.2 * backOut(sk) : 1.4 - 0.4 * backOut(sk)) + ')';
   };
 })();
 </script>

@@ -4497,6 +4497,9 @@ def register_job_bodies(state: AppState) -> None:
                         max_height=req.overlay_max_height,
                         max_fps=req.overlay_max_fps,
                         audit_revision=current_revision,
+                        # The trim was pulled above; without it the stage is
+                        # cut and drawn again whatever this says.
+                        upright=trimmed_path.exists() and export_helpers.overlay_canvas_upright(trimmed_path),
                     )
                     overlay_reusable = export_helpers.overlay_record_matches(
                         export_helpers.read_overlay_settings(overlay_record),
