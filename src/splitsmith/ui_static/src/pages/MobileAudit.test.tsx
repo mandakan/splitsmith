@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DEFAULT_ROWS } from "@/components/audit/mobile/WrappedWaveform";
 import type { StageAudit } from "@/lib/api";
@@ -382,5 +382,134 @@ describe("MobileAudit scrub source", () => {
     );
     apiMock.videoStreamUrl.mockImplementation(() => "/video.mp4");
     ctx.value = { ...ctx.value, project: null };
+  });
+});
+
+describe("MobileAudit stacked cameras (#1410)", () => {
+  // Primary beep 1.0 in its trim (peaks.beep_time); each secondary's trim
+  // keeps the 5 s pre-buffer, so its beep sits at 5.0 in its clip.
+  const video = (id: string, role: "primary" | "secondary", added: string, beep: number | null) => ({
+    video_id: id,
+    role,
+    path: `raw/${id}.mp4`,
+    added_at: added,
+    beep_time: beep,
+    processed: { beep: beep != null, shot_detect: false, trim: true },
+    trim_version: `t-${id}`,
+    scrub_version: `w-${id}`,
+  });
+  const project = (n: number, secondaryBeep: number | null = 12) => ({
+    stages: [
+      {
+        stage_number: 3,
+        videos: [
+          video("cam1", "primary", "2026-01-01", 30),
+          ...Array.from({ length: n - 1 }, (_, i) =>
+            video(`cam${i + 2}`, "secondary", `2026-01-0${i + 2}`, secondaryBeep),
+          ),
+        ],
+      },
+    ],
+  });
+
+  // jsdom media has no clock: give an element a settable currentTime and
+  // a readyState, the way a loaded <video> reports them.
+  function fakeClock(el: HTMLVideoElement, readyState = 1) {
+    let t = 0;
+    const set: number[] = [];
+    Object.defineProperty(el, "currentTime", {
+      configurable: true,
+      get: () => t,
+      set: (v: number) => {
+        t = v;
+        set.push(v);
+      },
+    });
+    Object.defineProperty(el, "readyState", { configurable: true, get: () => readyState });
+    return set;
+  }
+
+  async function openOn(projectValue: unknown) {
+    ctx.value = { ...ctx.value, project: projectValue };
+    apiMock.videoStreamUrl.mockImplementation(((_s: string, path: string, kind: string) => `/${path}?kind=${kind}`) as never);
+    playback.state.playhead = 2.0; // on cand-1
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId("wrapped-waveform")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Video" }));
+    return screen.getByRole("dialog", { name: "Shot video" });
+  }
+
+  const cams = (dialog: HTMLElement) =>
+    Array.from(dialog.querySelectorAll<HTMLElement>("[data-testid=stack-camera]"));
+  const videoOf = (slot: HTMLElement) => slot.querySelector("video")!;
+
+  afterEach(() => {
+    apiMock.videoStreamUrl.mockImplementation(() => "/video.mp4");
+    ctx.value = { ...ctx.value, project: null };
+  });
+
+  it("two cameras render stacked, Cam 1 on top with the controls, each on its 720p rendition", async () => {
+    const dialog = await openOn(project(2));
+    const [top, bottom] = cams(dialog);
+    expect([top.dataset.camera, bottom.dataset.camera]).toEqual(["cam1", "cam2"]);
+    expect(videoOf(top).hasAttribute("controls")).toBe(true);
+    expect(videoOf(bottom).hasAttribute("controls")).toBe(false);
+    expect(videoOf(top).getAttribute("src")).toBe("/raw/cam1.mp4?kind=scrub");
+    expect(videoOf(bottom).getAttribute("src")).toBe("/raw/cam2.mp4?kind=scrub");
+    expect(screen.getByRole("button", { name: "Switch to Cam 2" })).toBeInTheDocument();
+    expect(dialog.querySelector("[data-testid=stack-counter]")).toBeNull();
+  });
+
+  it("the opening seek lands 1.5 s before the shot on both cameras", async () => {
+    const dialog = await openOn(project(2));
+    const [top, bottom] = cams(dialog);
+    const topSet = fakeClock(videoOf(top));
+    const bottomSet = fakeClock(videoOf(bottom));
+    fireEvent.loadedMetadata(videoOf(top));
+    expect(topSet).toEqual([0.5]); // shot 2.0 - 1.5 on the primary's clip
+    // The follower lines up on the beeps: 0.5 - 1.0 + 5.0.
+    fireEvent.loadedMetadata(videoOf(bottom));
+    expect(bottomSet.at(-1)).toBeCloseTo(4.5);
+  });
+
+  it("tapping Cam 2 makes it active: the controls move, its picture is muted under Cam 1's sound", async () => {
+    const dialog = await openOn(project(2));
+    fireEvent.click(screen.getByRole("button", { name: "Switch to Cam 2" }));
+    const [top, bottom] = cams(dialog);
+    expect(bottom.dataset.active).toBe("true");
+    expect(videoOf(bottom).hasAttribute("controls")).toBe(true);
+    expect(videoOf(top).hasAttribute("controls")).toBe(false);
+    expect(videoOf(bottom).muted).toBe(true);
+    expect(videoOf(top).muted).toBe(true);
+    expect(screen.getByText(/Audio \+ beep: Cam 1/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Switch to Cam 1" })).toBeInTheDocument();
+    // Cam 1 now follows Cam 2's clock: 1.0 s after the beep in each clip.
+    fakeClock(videoOf(bottom));
+    const topSet = fakeClock(videoOf(top));
+    videoOf(bottom).currentTime = 6.0;
+    fireEvent.loadedMetadata(videoOf(top));
+    expect(topSet.at(-1)).toBeCloseTo(2.0);
+  });
+
+  it("three cameras: Cam 2 under Cam 1 with a 2 / 3 chooser that steps to Cam 3", async () => {
+    const dialog = await openOn(project(3));
+    expect(cams(dialog).map((c) => c.dataset.camera)).toEqual(["cam1", "cam2"]);
+    expect(screen.getByTestId("stack-counter").textContent).toBe("2 / 3");
+    fireEvent.click(screen.getByRole("button", { name: "Next camera" }));
+    expect(cams(dialog).map((c) => c.dataset.camera)).toEqual(["cam1", "cam3"]);
+    expect(screen.getByTestId("stack-counter").textContent).toBe("3 / 3");
+  });
+
+  it("one camera is the one player it always was", async () => {
+    const dialog = await openOn(projectWithVideo());
+    expect(dialog.querySelector("[data-testid=camera-stack]")).toBeNull();
+    expect(dialog.querySelectorAll("video")).toHaveLength(1);
+    expect(dialog.querySelector("video")?.hasAttribute("controls")).toBe(true);
+  });
+
+  it("a second camera with no beep does not stack", async () => {
+    const dialog = await openOn(project(2, null));
+    expect(dialog.querySelector("[data-testid=camera-stack]")).toBeNull();
+    expect(dialog.querySelectorAll("video")).toHaveLength(1);
   });
 });
