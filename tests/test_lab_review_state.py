@@ -103,6 +103,62 @@ def test_confirm_review_stamps_and_clears_pending(tmp_path: Path) -> None:
     assert json.loads(path.read_text())["shots"] == [{"time": 5.5}]
 
 
+def test_confirm_review_marks_the_timing_reviewed(tmp_path: Path) -> None:
+    """Approving is the human sign-off after checking the shots on this
+    fixture's own audio (#1363): it writes ``review.status`` too, so
+    training's ``reviewed_only`` and the queue agree."""
+    from splitsmith.fixture_schema import review_status
+    from splitsmith.lab.core import confirm_review
+
+    fixtures = tmp_path / "fixtures"
+    fixtures.mkdir()
+    slug = "stage-shots-hfo-masters-2026-stage1-s97dcec94-go3s"
+    _write_fixture(
+        fixtures,
+        slug,
+        {
+            "anchor": {"fixture_slug": "stage-shots-hfo-masters-2026-stage1-s97dcec94"},
+            "review": {"status": "needs_review", "derived_from": "x", "reviewed_at": None},
+            "shots": [{"time": 5.5}],
+        },
+    )
+    path = fixtures / f"{slug}.json"
+    (rec,) = list_fixtures(fixtures)
+    assert rec.review_status == "needs_review" and rec.needs_review is True
+
+    stamp = confirm_review(path)
+
+    data = json.loads(path.read_text())
+    assert data["review"]["status"] == "reviewed"
+    assert data["review"]["reviewed_at"] == stamp
+    assert data["review"]["derived_from"] == "x"
+    assert review_status(data) == "reviewed"
+    (rec,) = list_fixtures(fixtures)
+    assert rec.review_status == "reviewed" and rec.needs_review is False
+
+
+def test_needs_review_status_trumps_a_label_pass() -> None:
+    """Labels say a person classified shots, not that their times were
+    checked: a fixture marked needs_review stays pending."""
+    rec = _record(promoted_at="2026-10-10T07:00:00+00:00", n_labeled_shots=4, review_status="needs_review")
+    assert rec.needs_review is True
+
+
+def test_list_fixtures_carries_the_inventory_priority(tmp_path: Path) -> None:
+    fixtures = tmp_path / "tests" / "fixtures"
+    fixtures.mkdir(parents=True)
+    slug = "stage-shots-hfo-masters-2026-stage1-s97dcec94-go3s"
+    _write_fixture(fixtures, slug, {"anchor": {"fixture_slug": "a"}, "shots": [{"time": 5.5}]})
+    build = tmp_path / "build"
+    build.mkdir()
+    (build / "fixture_review_inventory.json").write_text(
+        json.dumps({"version": 1, "fixtures": [{"slug": slug, "priority": 140.5, "reasons": ["why"]}]})
+    )
+    (rec,) = list_fixtures(fixtures)
+    assert rec.review_priority == 140.5
+    assert rec.review_reasons == ["why"]
+
+
 def test_needs_review_confirmation_trumps_anchor() -> None:
     rec = _record(
         anchor_slug="stage-shots-foo-2026-stage1",

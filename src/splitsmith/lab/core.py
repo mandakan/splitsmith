@@ -26,6 +26,7 @@ from ..ensemble.api import (
     detect_shots_ensemble,
 )
 from ..ensemble.calibration import camera_class_from_mount
+from ..fixture_schema import REVIEW_NEEDED, REVIEWED, review_status
 
 DEFAULT_FIXTURES_ROOT = Path(__file__).resolve().parents[3] / "tests" / "fixtures"
 DEFAULT_RUNS_ROOT = Path("build/lab/runs")
@@ -171,6 +172,12 @@ class FixtureRecord(BaseModel):
     # (``confirm_review``). An explicit human sign-off; trumps every
     # pending heuristic in ``needs_review``.
     review_confirmed_at: str | None = None
+    # Whether the shot times were checked on this fixture's own audio
+    # (``fixture_schema.review_status``, #1363), and the queue's order from
+    # ``scripts/fixture_review_inventory.py`` (``None`` until it has run).
+    review_status: str = REVIEWED
+    review_priority: float | None = None
+    review_reasons: list[str] = []
     # Event grouping key (issue #149 follow-up). Identifies the same
     # shooter-stage-match across multi-camera coverage so the Lab table
     # can render siblings together. Stored on the fixture JSON when
@@ -190,6 +197,8 @@ class FixtureRecord(BaseModel):
         Hand-dropped fixtures predate promotion entirely and are treated
         as reviewed.
         """
+        if self.review_status == REVIEW_NEEDED:
+            return True  # labels classify shots; they do not check their times
         if self.review_confirmed_at is not None:
             return False
         if self.anchor_slug is not None:
@@ -205,6 +214,7 @@ def list_fixtures(fixtures_root: Path | None = None) -> list[FixtureRecord]:
     """
     root = (fixtures_root or DEFAULT_FIXTURES_ROOT).resolve()
     out: list[FixtureRecord] = []
+    priorities = _review_inventory(root)
     if not root.is_dir():
         return out
     for json_path in sorted(root.glob("*.json")):
@@ -260,8 +270,27 @@ def list_fixtures(fixtures_root: Path | None = None) -> list[FixtureRecord]:
                 audio_mtime=wav.stat().st_mtime if wav.exists() else None,
                 anchor_slug=anchor_slug,
                 event_id=event_id,
+                review_status=review_status(payload),
+                review_priority=priorities.get(json_path.stem, (None, []))[0],
+                review_reasons=priorities.get(json_path.stem, (None, []))[1],
             )
         )
+    return out
+
+
+def _review_inventory(fixtures_root: Path) -> dict[str, tuple[float | None, list[str]]]:
+    """Priority and reasons per fixture from ``build/fixture_review_inventory.json``
+    (``scripts/fixture_review_inventory.py``); empty until it has run."""
+    path = fixtures_root.parent.parent / "build" / "fixture_review_inventory.json"
+    try:
+        body = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    out: dict[str, tuple[float | None, list[str]]] = {}
+    for entry in body.get("fixtures") or []:
+        if isinstance(entry, dict) and isinstance(entry.get("slug"), str):
+            reasons = entry.get("reasons") if isinstance(entry.get("reasons"), list) else []
+            out[entry["slug"]] = (entry.get("priority"), [str(r) for r in reasons])
     return out
 
 
@@ -725,6 +754,10 @@ def confirm_review(audit_path: Path) -> str:
         review = {}
         audit["review"] = review
     review["confirmed_at"] = stamp
+    # The sign-off is also the timing review (#1363): training's
+    # ``reviewed_only`` reads ``status``.
+    review["status"] = REVIEWED
+    review["reviewed_at"] = stamp
 
     tmp = audit_path.with_suffix(audit_path.suffix + ".tmp")
     backup = audit_path.with_suffix(audit_path.suffix + ".bak")

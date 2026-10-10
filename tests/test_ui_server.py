@@ -9386,6 +9386,58 @@ def test_dev_review_queue_includes_batch_promoted_unlabeled(
     assert model["step_counts"]["review"] == 1
 
 
+def test_dev_review_queue_puts_doubtful_shot_times_first(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fixtures whose shot times need checking (#1363) lead the pending
+    list in the inventory's priority order, with its reasons; label-pass
+    items follow."""
+    import splitsmith.lab.core as lab_core
+
+    fixtures = tmp_path / "tests" / "fixtures"
+    _seed_review_state_fixtures(fixtures)
+    for slug in (
+        "stage-shots-hfo-masters-2026-stage1-s97dcec94-go3s",
+        "stage-shots-hfo-masters-2026-stage2-s97dcec94-go3s",
+    ):
+        (fixtures / f"{slug}.json").write_text(
+            json.dumps({"anchor": {"fixture_slug": "a"}, "shots": [{"time": 5.5}]})
+        )
+        (fixtures / f"{slug}.wav").write_bytes(b"")
+    (tmp_path / "build").mkdir()
+    (tmp_path / "build" / "fixture_review_inventory.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "fixtures": [
+                    {
+                        "slug": "stage-shots-hfo-masters-2026-stage1-s97dcec94-go3s",
+                        "priority": 120.0,
+                        "reasons": ["a"],
+                    },
+                    {
+                        "slug": "stage-shots-hfo-masters-2026-stage2-s97dcec94-go3s",
+                        "priority": 170.0,
+                        "reasons": ["b"],
+                    },
+                ],
+            }
+        )
+    )
+    monkeypatch.setattr(lab_core, "DEFAULT_FIXTURES_ROOT", fixtures)
+    client = _MatchClient(_match_create_app(project_root=tmp_path / "match", project_name="x"))
+
+    pending = client.get("/api/dev/review-queue").json()["pending"]
+    assert [p["slug"] for p in pending] == [
+        "stage-shots-hfo-masters-2026-stage2-s97dcec94-go3s",
+        "stage-shots-hfo-masters-2026-stage1-s97dcec94-go3s",
+        "stage-shots-hfo-masters-2026-stage1-s0fe3d797",
+    ]
+    assert pending[0]["review_status"] == "needs_review"
+    assert pending[0]["priority"] == 170.0 and pending[0]["reasons"] == ["b"]
+    assert pending[2]["review_status"] == "reviewed"
+
+
 def test_dev_review_confirm_clears_pending(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """POST /api/dev/review-queue/{slug}/confirm stamps review.confirmed_at
     on the fixture JSON, moving it from the pending bucket to done and

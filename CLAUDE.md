@@ -128,6 +128,15 @@ fixture (dry run by default, ``--write`` to promote; a snap of a snap is
 refused), so the corpus holds unreviewed footage on purpose: the build trains
 on it by default and ``--reviewed-only`` (``fixture_stems(reviewed_only=True)``)
 leaves it out. Compare both before trusting a number.
+``scripts/fixture_review_inventory.py`` scores every fixture for review
+(``lab.inventory``: needing review, snapped, the promotion report's share of
+shots at the snap window's edge, and how much the stored leading edges
+disagree with a stricter onset shot to shot) into
+``build/fixture_review_inventory.json``; the lab's review queue
+(``/dev/review``) puts shot times to check first in that order, and "Approve
+to corpus" or the fixture editor's "Mark reviewed" (``lab.confirm_review``)
+writes ``review.status = reviewed``. A label pass never clears a fixture whose
+times need checking.
 
 New fixture audio is **not in git** (#1363): ``tests/fixtures/audio.lock.json``
 maps each such WAV to its sha256, the bytes live content-addressed in a
