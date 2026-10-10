@@ -181,10 +181,18 @@ describe("geometry", () => {
     expect(insetSize(746)).toEqual({ width: 209, height: 118, chips: true });
   });
 
-  it("hides the chips under 180 px wide", () => {
+  it("is never narrower than 180 px: a larger share of a small frame", () => {
     expect(insetSize(643)).toMatchObject({ width: 180, chips: true });
-    expect(insetSize(641)).toMatchObject({ width: 179, chips: false });
-    expect(insetSize(474)).toEqual({ width: 133, height: 75, chips: false });
+    expect(insetSize(641)).toMatchObject({ width: 180, chips: true });
+    // Audit at 1440 x 800: 28% would be 133 px.
+    expect(insetSize(474)).toEqual({ width: 180, height: 101, chips: true });
+    expect(insetSize(400)).toEqual({ width: 180, height: 101, chips: true });
+  });
+
+  it("never covers more than 45% of the frame; the chips drop once that cap bites under 180 px", () => {
+    expect(insetSize(360)).toEqual({ width: 162, height: 91, chips: false });
+    expect(insetSize(200)).toEqual({ width: 90, height: 51, chips: false });
+    expect(insetSize(0)).toEqual({ width: 0, height: 0, chips: false });
   });
 
   it("places the inset 10 px in from each corner, the top ones below the pill", () => {

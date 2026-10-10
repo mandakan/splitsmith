@@ -1624,8 +1624,8 @@ every count, time and split. Sizes come from the theme scale
 A stage's other cameras show as **picture-in-picture** through
 ``components/video/PipView`` (epic #1405), never stacked tiles or a
 camera picker; Compare keeps its grid. Every rule is in ``lib/pip.ts``
-(swap, cycle over the cameras that are not big, the 28 % inset and its
-corners, the beep-offset clock and the drift threshold, ``insetStream``:
+(swap, cycle over the cameras that are not big, the inset at 28 % of the
+frame but never under 180 px nor over 45 %, its corners, the beep-offset clock and the drift threshold, ``insetStream``:
 the rendition whenever there is one), the state in ``lib/usePip`` (reset
 to the primary on a new ``stageKey``), the corner per browser in
 ``lib/pipPrefs``. The page keeps its own big player (src from

@@ -43,7 +43,14 @@ export const DEFAULT_PIP_CORNER: PipCorner = "tr";
 export const PIP_WIDTH_SHARE = 0.28;
 /** Gap between the inset and the frame's edges, px. */
 export const PIP_MARGIN = 10;
-/** Below this inset width the chips are hidden (they crowd the frame). */
+/** The inset is never narrower than this (owner, epic #1405)... */
+export const PIP_MIN_WIDTH = 180;
+/** ...nor wider than this share of the frame, so it never buries it. */
+export const PIP_MAX_SHARE = 0.45;
+/** Below this inset width the chips are hidden: at 180 px a swapped
+ *  primary still reads ("CAM 1..." + PRIMARY + two buttons, checked at
+ *  1440 x 900), narrower crowds them. Only a frame under 400 px, where
+ *  the 45 % cap wins over the floor, gets there. */
 export const PIP_CHIPS_MIN_WIDTH = 180;
 /** While playing, a gap under this is left alone: a seek costs a decoder
  *  flush and a visible hitch, and ``timeupdate`` fires ~4x a second. */
@@ -171,9 +178,13 @@ export interface InsetSize {
   chips: boolean;
 }
 
-/** 28 % of the frame's width, 16:9. */
+/** 28 % of the frame's width, 16:9, never narrower than
+ *  ``PIP_MIN_WIDTH`` (so on a small frame it is a larger share), and never
+ *  wider than ``PIP_MAX_SHARE`` of the frame, which wins on a frame too
+ *  small for the floor (under 400 px). */
 export function insetSize(frameWidth: number): InsetSize {
-  const width = Math.max(0, Math.round(frameWidth * PIP_WIDTH_SHARE));
+  const fw = Math.max(0, frameWidth);
+  const width = Math.round(Math.min(Math.max(fw * PIP_WIDTH_SHARE, PIP_MIN_WIDTH), fw * PIP_MAX_SHARE));
   return { width, height: Math.round((width * 9) / 16), chips: width >= PIP_CHIPS_MIN_WIDTH };
 }
 
