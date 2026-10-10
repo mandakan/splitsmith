@@ -377,14 +377,14 @@ export function BeepStep({
                     className={cn(
                       "numeral flex w-full items-center gap-3 border-b border-rule px-3 py-2 text-left text-md text-ink-2 last:border-b-0 hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-led",
                       selected &&
-                        "bg-surface-2 shadow-[inset_2px_0_0_var(--color-led)]",
+                        "bg-surface-2 shadow-[inset_2px_0_0_var(--color-beep)]",
                     )}
                   >
                     <i
                       aria-hidden
                       className={cn(
                         "size-3 rounded-full border-[1.5px]",
-                        selected ? "border-led bg-led" : "border-rule-strong",
+                        selected ? "border-beep bg-beep" : "border-rule-strong",
                       )}
                     />
                     <span className="w-14 text-ink">{c.time.toFixed(2)}</span>
@@ -399,10 +399,10 @@ export function BeepStep({
               })}
               {draft != null &&
               !candidates.some((c) => Math.abs(c.time - draft) < 0.005) ? (
-                <div className="numeral flex items-center gap-3 border-b border-rule bg-surface-2 px-3 py-2 text-md text-ink-2 shadow-[inset_2px_0_0_var(--color-led)] last:border-b-0">
+                <div className="numeral flex items-center gap-3 border-b border-rule bg-surface-2 px-3 py-2 text-md text-ink-2 shadow-[inset_2px_0_0_var(--color-beep)] last:border-b-0">
                   <i
                     aria-hidden
-                    className="size-3 rounded-full border-[1.5px] border-led bg-led"
+                    className="size-3 rounded-full border-[1.5px] border-beep bg-beep"
                   />
                   <span className="w-14 text-ink">{draft.toFixed(2)}</span>
                   <span className="w-12 text-muted">&mdash;</span>
