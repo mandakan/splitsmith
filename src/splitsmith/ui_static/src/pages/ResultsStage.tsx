@@ -58,7 +58,7 @@ import { useMatchHref } from "@/lib/matchHref";
 import { camsParam, parseCams, selectorFor, startingCamera, withCams } from "@/lib/cameraPrefs";
 import { momentHref, momentToSearch, parseMoment, type Moment } from "@/lib/moment";
 import { insetStream, pipKeyAction, type InsetStreamKind, type PipCamera } from "@/lib/pip";
-import { attachInsetSync } from "@/lib/pipSync";
+import { usePrimaryAudio } from "@/lib/usePrimaryAudio";
 import { usePip } from "@/lib/usePip";
 import { isShareView } from "@/lib/shareView";
 import {
@@ -289,31 +289,22 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   }, [hasInset, cyclePip]);
 
   // The primary is the audio source whichever camera is big (epic #1405):
-  // with a secondary big, the big player is muted and a hidden <audio> of
-  // the primary follows it on the beep clock (the inset's sync rules).
+  // with a secondary big, the big player is muted and the primary's own
+  // stream follows it on the beep clock (lib/usePrimaryAudio). The anchor
+  // is the primary's beep_in_clip, measured in the file it streams.
   const primaryCam = pip.primary;
-  const audioSwap =
-    pip.big != null && primaryCam != null && pip.big.id !== primaryCam.id && primaryCam.src != null
-      ? primaryCam
-      : null;
-  const [audioEl, setAudioEl] = useState<HTMLAudioElement | null>(null);
-  const bigBeepInClip = pip.big?.beepInClip ?? null;
-  const primaryBeepInClip = audioSwap?.beepInClip ?? null;
-  useEffect(() => {
-    if (!bigEl) return;
-    if (!audioEl || bigBeepInClip == null || primaryBeepInClip == null) {
-      bigEl.muted = false;
-      return;
-    }
-    const detach = attachInsetSync(bigEl, audioEl, { bigBeep: bigBeepInClip, insetBeep: primaryBeepInClip });
-    audioEl.muted = false;
-    bigEl.muted = true;
-    return () => {
-      detach();
-      audioEl.pause();
-      bigEl.muted = false;
-    };
-  }, [bigEl, audioEl, bigBeepInClip, primaryBeepInClip]);
+  const primaryId = primaryCam?.id ?? null;
+  const primaryKind = primaryId ? (pipCams.kinds.get(primaryId) ?? null) : null;
+  usePrimaryAudio({
+    bigVideo: bigEl,
+    bigIsPrimary: pip.big == null || primaryCam == null || pip.big.id === primaryCam.id,
+    src: primaryCam?.src ?? null,
+    primaryBeep: primaryCam?.beepInClip ?? null,
+    bigBeep: pip.big?.beepInClip ?? null,
+    onError: useCallback(() => {
+      if (primaryId) addFailed(primaryId, primaryKind);
+    }, [addFailed, primaryId, primaryKind]),
+  });
 
   // When the match has a live share, copy the share-scoped moment URL
   // instead of the operator one - it works for whoever the owner
@@ -765,18 +756,6 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
           onWindowEnd={playAll ? handleWindowEnd : undefined}
           autoplay={autoplayArmed}
         />
-        {audioSwap ? (
-          // The primary's audio while a secondary is big (see above).
-          <audio
-            key={audioSwap.src ?? ""}
-            ref={setAudioEl}
-            src={audioSwap.src ?? undefined}
-            preload="auto"
-            aria-hidden
-            className="hidden"
-            onError={() => addFailed(audioSwap.id, pipCams.kinds.get(audioSwap.id) ?? null)}
-          />
-        ) : null}
         {legend}
       </div>
       <div className="flex flex-col gap-4 lg:max-h-[calc(100dvh-var(--shell-header-h,86px)-2rem)] lg:overflow-y-auto">

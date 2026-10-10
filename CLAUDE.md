@@ -1686,8 +1686,14 @@ the beep and the play state, without re-running the window-start, moment
 or autoplay seeks. The starting camera (``?v=`` on a moment link, else
 ``?cams=``, else ``compare_camera``) is ``usePip``'s ``start``, latched
 once per mount; a swap writes ``?cams=`` like the picker did. With a
-secondary big the player is muted and a hidden ``<audio>`` of the primary
-follows it through ``attachInsetSync`` (audio stays the primary's). C /
+secondary big the primary's sound comes from ``lib/usePrimaryAudio``
+(shared with Coach and Breakdown; audio stays the primary's): the player
+muted, a detached ``<audio>`` of the primary's own stream on
+``attachInsetSync``, anchored on that file's own ``beep_in_clip``, plus a
+lead correction per play start (the <audio> starts 40-85 ms late; it
+seeks ahead by the seek cost it learns from the residual, never per frame,
+and a tighter drift line measured worse). An audio error unmutes the
+player and the page falls back to the next stream kind. C /
 Shift+C is a window keydown through ``pipKeyAction``. Audit (``pages/Audit.tsx``,
 ``components/audit/*``, ``lib/auditStep.ts``): beep confirmation is its
 step 1 (``BeepStep`` on ``useBeepQueue``; ``/beep-review`` redirects

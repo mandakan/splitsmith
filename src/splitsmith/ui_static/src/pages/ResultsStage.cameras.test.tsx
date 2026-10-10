@@ -186,17 +186,29 @@ describe("ResultsStage cameras (PiP)", () => {
       videos: TWO_CAMS,
     });
     await screen.findByText(/steel rush/i);
-    const player = document.querySelector("video:not([aria-hidden])") as HTMLVideoElement;
-    expect(document.querySelector("audio")).toBeNull();
-    expect(player.muted).toBe(false);
-    swap();
-    const audio = document.querySelector("audio") as HTMLAudioElement;
-    expect(audio.src).toBe("http://localhost/trim/cam-primary.mp4#s2");
-    expect(player.muted).toBe(true);
-    expect(audio.muted).toBe(false);
-    swap();
-    expect(document.querySelector("audio")).toBeNull();
-    expect(player.muted).toBe(false);
+    const made: HTMLAudioElement[] = [];
+    const RealAudio = window.Audio;
+    window.Audio = function FakeAudio() {
+      const a = document.createElement("audio");
+      made.push(a);
+      return a;
+    } as unknown as typeof Audio;
+    try {
+      const player = document.querySelector("video:not([aria-hidden])") as HTMLVideoElement;
+      expect(made).toHaveLength(0);
+      expect(player.muted).toBe(false);
+      swap();
+      expect(made).toHaveLength(1);
+      // The primary's own stream; its beep anchor is its own beep_in_clip.
+      expect(made[0].src).toBe("http://localhost/trim/cam-primary.mp4#s2");
+      expect(player.muted).toBe(true);
+      expect(made[0].muted).toBe(false);
+      swap();
+      expect(player.muted).toBe(false);
+      expect(made[0].getAttribute("src")).toBeNull();
+    } finally {
+      window.Audio = RealAudio;
+    }
   });
 
   it("opens on the camera a moment link names via ?v=", async () => {
