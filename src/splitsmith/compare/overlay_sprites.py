@@ -28,6 +28,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from ..overlay_layout import CellScale
 from ..overlay_text import OverlayFace, resolve_overlay_face
 from ..overlay_theme import OverlayTheme
 from .overlay_data import TileShot, TileStageData
@@ -363,6 +364,111 @@ class SpriteGeometry:
     @property
     def cell_height(self) -> int:
         return self.canvas_height // self.rows
+
+
+#: The shot counter and the clock are sized for at least this many glyphs
+#: each -- ``"32/32"`` and ``"12.34"`` -- whatever the stage's own data
+#: says. A floor rather than the data's own lengths so the fit is a
+#: property of the cell, the same on every stage of one render: a stage
+#: whose counter reads ``"8/8"`` must not lay its corner out differently
+#: from the next one's ``"24/24"``. Longer data (a 100 s stage, a 3-digit
+#: round count) widens it; see :func:`corner_fit`.
+CORNER_MIN_CHARS = 5
+
+#: The smallest size the corner shrinks to before it stacks instead. Two
+#: thirds of the 48 px the live overlay draws at on every cell up to
+#: 672 px tall: below this a figure read off a phone at arm's length
+#: is a squint, and stacking at full size is the better trade.
+CORNER_FLOOR_PX = 32
+
+
+@dataclass(frozen=True)
+class CornerFit:
+    """How one grid's top corners hold the shot counter and the clock (#1421).
+
+    The counter sits top left (a sprite) and the clock top right (a
+    ``drawtext`` filter), each inset by ``pad`` and both at
+    ``CellScale.live_primary``. On a narrow cell -- a 3x3 upright grid's
+    240 px column -- the two run into each other ("2/83.00"). The ladder,
+    in order, each step taken only when the one before it cannot keep a
+    clear gap:
+
+    1. both at ``live_primary`` on one row (every grid that fit before,
+       which is what keeps those renders pixel-identical);
+    2. both shrunk together, down to :data:`CORNER_FLOOR_PX`;
+    3. the counter stacked under the clock, right-aligned, at the largest
+       size either fits alone;
+    4. the counter dropped and the clock kept, when even one figure alone
+       does not fit at the floor. The clock goes last because it is the
+       one element that says where in the run the frame is; a counter
+       without it is a fraction of an unknown total.
+
+    ``size`` is the live type size for the whole tile -- counter, clock
+    and the split under them, which have shared one size since before
+    ``CellScale`` existed. ``stack_offset`` is the counter group's
+    ``margin-top`` when stacked: one em, which clears the clock's digits
+    (cap height ~0.73 em, drawn from the pad) by about half an em in every
+    bundled mono face.
+    """
+
+    size: int
+    stacked: bool = False
+    counter: bool = True
+
+    @property
+    def stack_offset(self) -> int:
+        return self.size
+
+
+def corner_gap(size: int) -> int:
+    """The clear space kept between the counter and the clock: half an em."""
+    return size // 2
+
+
+def corner_fit(
+    cell_width: int,
+    cell_height: int,
+    *,
+    advance_em: float,
+    counter_chars: int = CORNER_MIN_CHARS,
+    clock_chars: int = CORNER_MIN_CHARS,
+) -> CornerFit:
+    """Fit the counter and the clock into one cell's top corners.
+
+    ``advance_em`` is the mono face's widest figure advance in ems (0.6 for
+    every bundled face); the caller measures it off the font file the
+    clock draws with, the same face the sprite's ``@font-face`` loads.
+    Widths are ``chars * advance_em * size``: the faces are monospaced, so
+    this is the text's real advance, not an estimate.
+    """
+    scale = CellScale.for_cell(cell_height)
+    pad = scale.pad
+    counter_chars = max(CORNER_MIN_CHARS, counter_chars)
+    clock_chars = max(CORNER_MIN_CHARS, clock_chars)
+
+    def width(chars: int, size: int) -> float:
+        return chars * advance_em * size
+
+    def row_fits(size: int) -> bool:
+        need = 2 * pad + width(counter_chars, size) + corner_gap(size) + width(clock_chars, size)
+        return need <= cell_width
+
+    def alone_fits(chars: int, size: int) -> bool:
+        return 2 * pad + width(chars, size) <= cell_width
+
+    start = scale.live_primary
+    floor = min(start, CORNER_FLOOR_PX)
+    for size in range(start, floor - 1, -1):
+        if row_fits(size):
+            return CornerFit(size=size)
+    widest = max(counter_chars, clock_chars)
+    for size in range(start, floor - 1, -1):
+        if alone_fits(widest, size):
+            return CornerFit(size=size, stacked=True)
+    for size in range(start, floor - 1, -1):
+        if alone_fits(clock_chars, size):
+            return CornerFit(size=size, counter=False)
+    return CornerFit(size=floor, counter=False)
 
 
 def theme_font_face(theme: OverlayTheme) -> OverlayFace:

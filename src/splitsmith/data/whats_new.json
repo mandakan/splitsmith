@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "grid-counter-clear-of-clock",
+      "date": "2026-10-10",
+      "title": "Shot count and clock apart on tall grids",
+      "body": "In an upright compare video, each tile's shot count could run into its clock. On narrow tiles they now shrink, or the count moves under the clock."
+    },
+    {
       "id": "grid-hold-dense-upright",
       "date": "2026-10-10",
       "title": "Readable splits on tall grids",

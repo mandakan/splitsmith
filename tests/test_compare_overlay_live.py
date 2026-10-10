@@ -372,3 +372,44 @@ def test_a_rasterizer_failure_is_not_swallowed(tmp_path):
             cache_dir=tmp_path,
             rasterizer=_Boom(),
         )
+
+
+# --- the corner fit (#1421) -------------------------------------------
+
+
+def test_a_stacked_fit_puts_the_counter_under_the_clock():
+    fit = sp.CornerFit(size=48, stacked=True)
+    groups = live.panel_groups(_panel(shots_fired=2, expected_shots=8), fit)
+    (counter,) = [g for g in groups if _texts([g]) == ["2/8"]]
+    assert counter.anchor is Anchor.TOP_RIGHT
+    assert counter.margin_top == fit.stack_offset
+
+
+def test_an_unstacked_fit_declares_what_no_fit_declares():
+    panel = _panel(shots_fired=2, expected_shots=8, last_split=0.31)
+    assert live.panel_groups(panel, sp.CornerFit(size=48)) == live.panel_groups(panel)
+
+
+def test_a_fit_without_the_counter_keeps_the_split():
+    groups = live.panel_groups(
+        _panel(shots_fired=2, expected_shots=8, last_split=0.31), sp.CornerFit(size=32, counter=False)
+    )
+    assert _texts(groups) == ["0.31s"]
+
+
+def test_a_fit_at_the_cells_own_size_writes_the_document_it_always_did():
+    state = sp.OverlayState(
+        start_seconds=0.0, duration_seconds=1.0, panels=(_panel(shots_fired=3, expected_shots=12),)
+    )
+    size = CellScale.for_cell(GEOMETRY.cell_height).live_primary
+    assert live.state_html(state, GEOMETRY, theme=THEME, fit=sp.CornerFit(size=size)) == live.state_html(
+        state, GEOMETRY, theme=THEME
+    )
+
+
+def test_a_shrunk_fit_draws_every_live_figure_at_its_size():
+    state = sp.OverlayState(
+        start_seconds=0.0, duration_seconds=1.0, panels=(_panel(shots_fired=3, expected_shots=12),)
+    )
+    html = live.state_html(state, GEOMETRY, theme=THEME, fit=sp.CornerFit(size=37))
+    assert ".role-live-primary      { font-size: 37px; }" in html
