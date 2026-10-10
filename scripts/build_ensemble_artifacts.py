@@ -1109,16 +1109,21 @@ def build_artifacts(
     voter_e: bool = True,
     voter_e_target_recall: float = DEFAULT_VOTER_E_TARGET_RECALL,
     rebuild_visual: bool = False,
+    reviewed_only: bool = False,
     log: Callable[[str], None] = print,
 ) -> dict:
     """Run the calibration build and write artifacts under ``DATA_DIR``.
 
     Importable so the production UI's "Rebuild calibration" button can
     drive the same code path as the CLI. Logs progress through ``log``;
-    returns the calibration dict that was written.
+    returns the calibration dict that was written. ``reviewed_only`` leaves
+    out fixtures snapped from another angle that nobody has reviewed (#1363).
     """
-    fixtures = list(fixtures) if fixtures else list(DEFAULT_FIXTURES)
-    log(f"Calibrating ensemble over {len(fixtures)} fixture(s)...")
+    if not fixtures:
+        fixtures = fixture_stems(reviewed_only=True) if reviewed_only else list(DEFAULT_FIXTURES)
+    fixtures = list(fixtures)
+    unreviewed = set(fixtures) - set(fixture_stems(reviewed_only=True))
+    log(f"Calibrating ensemble over {len(fixtures)} fixture(s), {len(unreviewed)} not yet reviewed...")
     universe = _build_universe(fixtures, tolerance_ms, log=log)
     if not universe:
         raise BuildError(
@@ -1394,6 +1399,11 @@ def main() -> None:
             "ignoring tests/fixtures/.cache/{fix}_visual.npz."
         ),
     )
+    p.add_argument(
+        "--reviewed-only",
+        action="store_true",
+        help="Leave out fixtures snapped from another angle that nobody has reviewed yet.",
+    )
     args = p.parse_args()
     try:
         build_artifacts(
@@ -1405,6 +1415,7 @@ def main() -> None:
             voter_e=args.voter_e,
             voter_e_target_recall=args.voter_e_target_recall,
             rebuild_visual=args.rebuild_visual,
+            reviewed_only=args.reviewed_only,
         )
     except BuildError as exc:
         # Clean CLI failure without a traceback; in-process callers (the
