@@ -381,7 +381,6 @@ export function MobileAudit() {
   // 720p rendition first), synced on the beep offsets. Fewer: the one
   // primary player below, unchanged.
   const [stackFailed, setStackFailed] = useState<FailedKinds>({});
-  const [stackWavFailed, setStackWavFailed] = useState(false);
   const preBufferSeconds = outletCtx?.project?.trim_pre_buffer_seconds ?? 5;
   const stacked = useMemo(() => {
     if (!peaksResult || stageVideos.length < 2) return null;
@@ -396,21 +395,6 @@ export function MobileAudit() {
       }),
     );
   }, [peaksResult, stageVideos, slug, stageNumber, preBufferSeconds, stackFailed]);
-  const stackPrimary = stacked?.[0] ?? null;
-  // The primary's sound while another camera is active: the stage audit
-  // WAV the waveform is drawn from (anchored on peaks.beep_time), else the
-  // primary's own stream, as on desktop Audit.
-  const stackAudio = useMemo(
-    () => ({
-      src: stackWavFailed ? (stackPrimary?.src ?? null) : audioSrc,
-      beep: stackWavFailed ? (stackPrimary?.beepInClip ?? null) : (peaksResult?.beep_time ?? null),
-      onError: () => {
-        if (!stackWavFailed) setStackWavFailed(true);
-        else if (stackPrimary) setStackFailed((prev) => addFailedKind(prev, stackPrimary.id, stackPrimary.kind));
-      },
-    }),
-    [stackWavFailed, stackPrimary, audioSrc, peaksResult?.beep_time],
-  );
   const onStackCameraError = useCallback(
     (cam: AuditPipCamera) => {
       setStackFailed((prev) => addFailedKind(prev, cam.id, cam.kind));
@@ -735,7 +719,6 @@ export function MobileAudit() {
               <CameraStack
                 cameras={stacked}
                 openAt={videoSeekRef.current - (stacked[0].beepInClip ?? 0)}
-                primaryAudio={stackAudio}
                 onCameraError={onStackCameraError}
               />
             ) : (

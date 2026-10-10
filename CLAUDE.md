@@ -1751,9 +1751,14 @@ same streams, 720p rendition first) ``components/audit/mobile/CameraStack``
 shows Cam 1 full width with one other camera the same size under it (a
 "2 / 3" chooser cycles the others: two decodes at most). The active camera
 has the native controls and is the clock, the other follows muted through
-``attachInsetSync``; a tap makes it active without remounting either, the
-sound stays the primary's (``usePrimaryAudio``, the WAV then the primary's
-stream), and the opening seek (1.5 s before the shot, ``videoSeekRef``)
+``attachInsetSync``; a tap makes it active without remounting either.
+Sound is never two cameras at once and never ``usePrimaryAudio``: Cam 1
+is on screen and synced anyway, so with another camera active Cam 1's own
+element sounds and the active one is muted, until the active camera's
+control unmutes it (``volumechange``), which mutes Cam 1 for as long. No
+lead correction there: the clocks read ~30 ms apart whichever camera
+drives (not a start lag), and seeking the playing follower overshot. The
+stack sits top-aligned under the close row. The opening seek (1.5 s before the shot, ``videoSeekRef``)
 lands on the active camera, the follower synced to it. One camera keeps the
 old single player untouched; beep review stays one camera. Nothing else syncs a
 second element: the page's old secondary loop is gone, and a new

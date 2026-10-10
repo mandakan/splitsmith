@@ -472,7 +472,15 @@ describe("MobileAudit stacked cameras (#1410)", () => {
     expect(bottomSet.at(-1)).toBeCloseTo(4.5);
   });
 
-  it("tapping Cam 2 makes it active: the controls move, its picture is muted under Cam 1's sound", async () => {
+  it("Cam 1 active plays its own sound; Cam 2 follows muted", async () => {
+    const dialog = await openOn(project(2));
+    const [top, bottom] = cams(dialog);
+    expect(videoOf(top).muted).toBe(false);
+    expect(videoOf(bottom).muted).toBe(true);
+  });
+
+  it("tapping Cam 2 makes it active: the controls move, and Cam 1's own element sounds with no extra audio", async () => {
+    const AudioSpy = vi.spyOn(window, "Audio");
     const dialog = await openOn(project(2));
     fireEvent.click(screen.getByRole("button", { name: "Switch to Cam 2" }));
     const [top, bottom] = cams(dialog);
@@ -480,7 +488,9 @@ describe("MobileAudit stacked cameras (#1410)", () => {
     expect(videoOf(bottom).hasAttribute("controls")).toBe(true);
     expect(videoOf(top).hasAttribute("controls")).toBe(false);
     expect(videoOf(bottom).muted).toBe(true);
-    expect(videoOf(top).muted).toBe(true);
+    expect(videoOf(top).muted).toBe(false);
+    expect(AudioSpy).not.toHaveBeenCalled();
+    AudioSpy.mockRestore();
     expect(screen.getByText(/Audio \+ beep: Cam 1/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Switch to Cam 1" })).toBeInTheDocument();
     // Cam 1 now follows Cam 2's clock: 1.0 s after the beep in each clip.
@@ -489,6 +499,27 @@ describe("MobileAudit stacked cameras (#1410)", () => {
     videoOf(bottom).currentTime = 6.0;
     fireEvent.loadedMetadata(videoOf(top));
     expect(topSet.at(-1)).toBeCloseTo(2.0);
+  });
+
+  it("unmuting Cam 2 with its own control chooses its sound: Cam 1 is muted until Cam 2 is muted again", async () => {
+    const dialog = await openOn(project(2));
+    fireEvent.click(screen.getByRole("button", { name: "Switch to Cam 2" }));
+    const [top, bottom] = cams(dialog);
+    act(() => {
+      videoOf(bottom).muted = false;
+      fireEvent(videoOf(bottom), new Event("volumechange"));
+    });
+    expect(videoOf(top).muted).toBe(true);
+    expect(screen.getByText(/Beep: Cam 1/).textContent).not.toMatch(/Audio/);
+    act(() => {
+      videoOf(bottom).muted = true;
+      fireEvent(videoOf(bottom), new Event("volumechange"));
+    });
+    expect(videoOf(top).muted).toBe(false);
+    // Back to Cam 1: its own sound, Cam 2 muted again.
+    fireEvent.click(screen.getByRole("button", { name: "Switch to Cam 1" }));
+    expect(videoOf(top).muted).toBe(false);
+    expect(videoOf(bottom).muted).toBe(true);
   });
 
   it("three cameras: Cam 2 under Cam 1 with a 2 / 3 chooser that steps to Cam 3", async () => {
