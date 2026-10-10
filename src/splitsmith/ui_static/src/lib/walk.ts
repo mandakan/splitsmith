@@ -27,8 +27,9 @@ export const WALK_DECIDED_EVENT = "walk_decided";
 
 /** The close-up's half width: the shot, its lead-in and its neighbours. */
 export const CLOSEUP_HALF_S = 0.15;
-/** The detail strip's half width, for seating the onset. */
-export const DETAIL_HALF_S = 0.02;
+/** The onset strip's half width: 80 ms, the window the shot-time guide's
+ *  example figures show, so the two can be compared side by side. */
+export const DETAIL_HALF_S = 0.04;
 /** A burst at least this share of the fixture's typical shot level ... */
 export const BURST_LEVEL_FRAC = 0.35;
 /** ... that is the loudest point this far either side of it ... */
@@ -383,13 +384,6 @@ export function windowBins(
   const out: Array<{ t: number; v: number }> = [];
   for (let i = lo; i < hi; i++) out.push({ t: i * w, v: peaks.peaks[i] });
   return out;
-}
-
-/** The close-up's full scale: the loudest point well around the stop, so a
- *  tail or noise draws small next to the shot it belongs to instead of
- *  filling the box. Never below the fixture's typical shot level's half. */
-export function closeupScale(peaks: SnapPeaks, center: number, level: number): number {
-  return Math.max(1e-6, maxIn(peaks, center - 0.4, center + 0.4), level / 2);
 }
 
 /** The sign-off line: kept shots against the stage's rounds. */
