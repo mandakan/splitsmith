@@ -1,6 +1,7 @@
 """Review priority for fixtures (#1363)."""
 
 import numpy as np
+import pytest
 
 from splitsmith.lab.inventory import onset_spread_ms, review_priority
 
@@ -60,3 +61,48 @@ def test_onset_spread_raises_priority_and_reviewed_is_zero():
     clean, _ = review_priority({"review_status": "reviewed", "derived": False, "onset_spread_ms": 0.5})
     assert noisy > clean == 0.0
     assert any("15 ms" in r for r in why)
+
+
+def _trace(floor: float, shots: list[tuple[int, float]]) -> list[float]:
+    """10 s of 1 ms bins, shots as (start bin, peak): the app's test trace."""
+    p = [floor] * 10000
+    for start, peak in shots:
+        for i in range(10):
+            p[start + i] = max(p[start + i], floor + (peak - floor) * (i + 1) / 10)
+        for i in range(10, 60):
+            p[start + i] = max(p[start + i], floor + (peak - floor) * float(np.exp(-(i - 10) / 15)))
+    return p
+
+
+def test_leading_edge_matches_the_apps_rule():
+    from splitsmith.lab.inventory import leading_edge
+
+    assert leading_edge(_trace(0.01, [(3000, 1.0)]), 10.0, 3.012) == pytest.approx(3.0, abs=1e-9)
+    noisy = leading_edge(_trace(0.12, [(3000, 1.0)]), 10.0, 3.01)
+    assert 2.999 <= noisy <= 3.002
+    echo = leading_edge(_trace(0.01, [(2950, 0.6), (3000, 1.0)]), 10.0, 3.008)
+    assert echo == pytest.approx(3.0, abs=0.005)
+    assert leading_edge(_trace(0.01, []), 10.0, 5.0) is None
+
+
+def test_suggested_moves_name_the_shots_that_look_off():
+    from splitsmith.lab.inventory import suggested_moves
+
+    audio = _clicks(ONSETS)
+    stored = list(ONSETS)
+    stored[2] += 0.012  # placed 12 ms late
+    stored[5] -= 0.015  # 15 ms early
+    moves = suggested_moves(audio, SR, stored)
+    assert [m["shot_index"] for m in moves] == [2, 5]
+    assert moves[0]["move_ms"] == pytest.approx(-12, abs=2)
+    assert moves[1]["move_ms"] == pytest.approx(15, abs=2)
+    assert moves[0]["suggested"] == pytest.approx(ONSETS[2], abs=0.002)
+
+
+def test_suggested_moves_raise_priority_and_say_how_many():
+    score, why = review_priority(
+        {"review_status": "needs_review", "derived": True, "suggested_moves": 4, "n_shots": 20}
+    )
+    base, _ = review_priority({"review_status": "needs_review", "derived": True, "n_shots": 20})
+    assert score > base
+    assert any("4 of 20 shots" in r for r in why)
