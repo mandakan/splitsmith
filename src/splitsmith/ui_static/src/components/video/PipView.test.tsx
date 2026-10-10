@@ -364,6 +364,20 @@ describe("usePip", () => {
     expect(onBigChange).toHaveBeenCalledTimes(1);
   });
 
+  it("opens on the start camera once the cameras arrive, without reporting it", () => {
+    const onBigChange = vi.fn();
+    const { result, rerender } = renderHook(
+      ({ cameras }: { cameras: PipCamera[] }) => usePip({ cameras, stageKey: 1, start: "c2", onBigChange }),
+      { initialProps: { cameras: [] as PipCamera[] } },
+    );
+    rerender({ cameras: TWO });
+    expect(result.current.state).toEqual({ big: "c2", inset: "c1" });
+    expect(onBigChange).not.toHaveBeenCalled();
+    act(() => result.current.swap());
+    expect(result.current.big?.id).toBe("c1");
+    expect(onBigChange).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps the swap while the stage stays", () => {
     const { result, rerender } = renderHook(({ stage }) => usePip({ cameras: TWO, stageKey: stage }), {
       initialProps: { stage: 1 },

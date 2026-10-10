@@ -226,21 +226,21 @@ describe("ResultsStage play all", () => {
     expect(loc()).toBe("/match/m1/results/anna/1");
   });
 
-  it("autoplays only the first player mount - a camera switch keeps the viewer's own play state", async () => {
+  it("autoplays once - a camera swap keeps the player and the viewer's own play state", async () => {
     const { container } = renderStage("/match/m1/results/anna/1?play=all", {
       cameras: 2,
       state: { autoplay: true },
     });
     const first = await armVideo(container);
     expect(first.play).toHaveBeenCalledTimes(1);
-    // Viewer pauses, then switches camera: the remounted player must not
-    // start playing on its own.
+    // Viewer pauses, then swaps camera (C): the player is not remounted
+    // and must not start playing on its own.
     first.pause();
     fireEvent(first.video, new Event("pause"));
-    fireEvent.click(screen.getByRole("button", { name: /camera 2 of 2/i }));
-    const second = await armVideo(container);
-    expect(second.video).not.toBe(first.video);
-    expect(second.play).not.toHaveBeenCalled();
+    fireEvent.keyDown(document.body, { key: "c" });
+    expect(container.querySelector("video")).toBe(first.video);
+    fireEvent(first.video, new Event("loadedmetadata"));
+    expect(first.play).toHaveBeenCalledTimes(1);
   });
 
   it("does not autoplay a play-all link opened cold", async () => {
