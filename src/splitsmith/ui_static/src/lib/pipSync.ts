@@ -25,8 +25,8 @@ const HAVE_METADATA = 1;
 const HAVE_FUTURE_DATA = 3;
 
 export function attachInsetSync(
-  big: HTMLVideoElement,
-  inset: HTMLVideoElement,
+  big: HTMLMediaElement,
+  inset: HTMLMediaElement,
   beeps: { bigBeep: number; insetBeep: number },
 ): () => void {
   let stalled = false;

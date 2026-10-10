@@ -42,6 +42,12 @@ beforeAll(() => {
       disconnect() {}
     },
   );
+  // PipView lays the inset over the video's measured frame; jsdom
+  // measures nothing, so every box is 800 x 450.
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+    () =>
+      ({ left: 0, top: 0, right: 800, bottom: 450, width: 800, height: 450, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect,
+  );
   window.matchMedia = ((query: string) => ({
     matches: true,
     media: query,
@@ -112,29 +118,85 @@ const TWO_CAMS: CoachVideoEntry[] = [
 ];
 
 function mainVideoSrcs(): string[] {
-  // CamPicker thumbs are aria-hidden; the main player's video is not.
+  // The PiP inset's video is aria-hidden; the main player's video is not.
   return Array.from(document.querySelectorAll("video:not([aria-hidden])")).map(
     (v) => (v as HTMLVideoElement).src,
   );
 }
 
-describe("ResultsStage camera selection", () => {
-  it("renders no picker for a single-camera run", async () => {
+function insetSrc(): string | null {
+  return (screen.queryByTestId("pip-inset-video") as HTMLVideoElement | null)?.src ?? null;
+}
+
+const swap = () => fireEvent.click(screen.getByRole("button", { name: /swap with the big camera/i }));
+
+describe("ResultsStage cameras (PiP)", () => {
+  it("renders no inset for a single-camera run", async () => {
     renderStage("/match/m1/results/anna/2", [makeShooter("anna", "Anna", [[2, "audited"]])], {
       videos: [TWO_CAMS[0]],
     });
     await screen.findByText(/steel rush/i);
-    expect(screen.queryByRole("group", { name: /cameras/i })).toBeNull();
+    expect(screen.queryByTestId("pip-view")).toBeNull();
+    expect(screen.queryByTestId("pip-inset")).toBeNull();
   });
 
-  it("renders the picker and swaps the player to the chosen camera", async () => {
+  it("shows the other camera as the inset and swaps without remounting the player", async () => {
     renderStage("/match/m1/results/anna/2", [makeShooter("anna", "Anna", [[2, "audited"]])], {
       videos: TWO_CAMS,
     });
     await screen.findByText(/steel rush/i);
     expect(mainVideoSrcs()).toEqual(["http://localhost/trim/cam-primary.mp4#s2"]);
-    fireEvent.click(screen.getByRole("button", { name: /camera 2 of 2/i }));
+    expect(insetSrc()).toBe("http://localhost/trim/cam-b.mp4#s2");
+    const player = document.querySelector("video:not([aria-hidden])");
+    swap();
     expect(mainVideoSrcs()).toEqual(["http://localhost/trim/cam-b.mp4#s2"]);
+    expect(insetSrc()).toBe("http://localhost/trim/cam-primary.mp4#s2");
+    expect(document.querySelector("video:not([aria-hidden])")).toBe(player);
+  });
+
+  it("the inset streams the rendition when the camera has one", async () => {
+    renderStage("/match/m1/results/anna/2", [makeShooter("anna", "Anna", [[2, "audited"]])], {
+      videos: [TWO_CAMS[0], { ...TWO_CAMS[1], scrub_version: "r1" }],
+    });
+    await screen.findByText(/steel rush/i);
+    expect(insetSrc()).toBe("http://localhost/scrub/cam-b.mp4#s2");
+    // The rendition failed: the trim it was cut from, same beep anchor.
+    fireEvent.error(screen.getByTestId("pip-inset-video"));
+    await waitFor(() => expect(insetSrc()).toBe("http://localhost/trim/cam-b.mp4#s2"));
+  });
+
+  it("C swaps the cameras, never while typing", async () => {
+    renderStage("/match/m1/results/anna/2", [makeShooter("anna", "Anna", [[2, "audited"]])], {
+      videos: TWO_CAMS,
+    });
+    await screen.findByText(/steel rush/i);
+    const typing = document.createElement("textarea");
+    document.body.appendChild(typing);
+    fireEvent.keyDown(typing, { key: "c" });
+    expect(mainVideoSrcs()).toEqual(["http://localhost/trim/cam-primary.mp4#s2"]);
+    typing.remove();
+    fireEvent.keyDown(document.body, { key: "c" });
+    expect(mainVideoSrcs()).toEqual(["http://localhost/trim/cam-b.mp4#s2"]);
+    fireEvent.keyDown(document.body, { key: "C", shiftKey: true });
+    expect(mainVideoSrcs()).toEqual(["http://localhost/trim/cam-primary.mp4#s2"]);
+  });
+
+  it("plays the primary's audio while a secondary is big", async () => {
+    renderStage("/match/m1/results/anna/2", [makeShooter("anna", "Anna", [[2, "audited"]])], {
+      videos: TWO_CAMS,
+    });
+    await screen.findByText(/steel rush/i);
+    const player = document.querySelector("video:not([aria-hidden])") as HTMLVideoElement;
+    expect(document.querySelector("audio")).toBeNull();
+    expect(player.muted).toBe(false);
+    swap();
+    const audio = document.querySelector("audio") as HTMLAudioElement;
+    expect(audio.src).toBe("http://localhost/trim/cam-primary.mp4#s2");
+    expect(player.muted).toBe(true);
+    expect(audio.muted).toBe(false);
+    swap();
+    expect(document.querySelector("audio")).toBeNull();
+    expect(player.muted).toBe(false);
   });
 
   it("opens on the camera a moment link names via ?v=", async () => {
@@ -168,7 +230,7 @@ describe("ResultsStage camera selection", () => {
     });
     await screen.findByText(/steel rush/i);
 
-    fireEvent.click(screen.getByRole("button", { name: /camera 2 of 2/i }));
+    swap();
     expect(mainVideoSrcs()).toEqual(["http://localhost/trim/cam-b.mp4#s2"]);
 
     // Cam B's beep_in_clip is 12 - park the video 3s past it on cam B's
@@ -193,7 +255,8 @@ describe("ResultsStage camera selection", () => {
     );
     await screen.findByText(/steel rush/i);
     expect(mainVideoSrcs()).toEqual(["http://localhost/trim/cam-b.mp4#s2"]);
-    expect(screen.getByRole("group", { name: /cameras/i })).toBeInTheDocument();
+    // The primary is the inset, through the same scoped stream URL.
+    expect(insetSrc()).toBe("http://localhost/trim/cam-primary.mp4#s2");
   });
 
   describe("the camera holds across stages", () => {
@@ -219,7 +282,7 @@ describe("ResultsStage camera selection", () => {
       renderStage("/match/m1/results/anna/2", anna, { videos: HEAD_THEN_PHONE });
       await screen.findByText(/steel rush/i);
       expect(screen.getByRole("link", { name: "Next stage" }).getAttribute("href")).not.toContain("cams=");
-      fireEvent.click(screen.getByRole("button", { name: /camera 2 of 2/i }));
+      swap();
       await waitFor(() =>
         expect(screen.getByRole("link", { name: "Next stage" })).toHaveAttribute(
           "href",

@@ -1651,7 +1651,7 @@ the rendition whenever there is one, then only kinds sharing the beep
 anchor, ``null`` = unavailable), the clock in ``lib/pipSync`` (outside the
 inset clip it holds paused at the clamp and is never played: play on
 ended media restarts at 0), the state in ``lib/usePip`` (reset
-to the primary on a new ``stageKey``), the corner per browser in
+to the primary, or to a page's ``start`` camera, on a new ``stageKey``), the corner per browser in
 ``lib/pipPrefs``. The page keeps its own big player (src from
 ``pip.big``, passed as an element through a callback ref) and its own key
 handler (``pipKeyAction``: C / Shift+C); the usage note is at the top of
@@ -1677,7 +1677,18 @@ case); Splits and the stage page (``pages/Results.tsx``,
 ``SplitsList.tsx`` / ``Scorecard.tsx`` / ``StageStats.tsx``,
 ``components/share/ShareShell.tsx``); per-stage split figures for any
 share-surface consumer come from ``stages[].figures`` on the project
-payload, never from triage (owner-only). Audit (``pages/Audit.tsx``,
+payload, never from triage (owner-only). The stage page's other cameras
+are the PipView inset (#1408, no camera picker): ``ResultsPlayer`` takes
+the PipView as its ``overlay`` and hands the big ``<video>`` out through
+``onVideoElement``; a swap changes its ``src`` in place, never by a
+remount (no ``key`` on the player), carrying the position as seconds from
+the beep and the play state, without re-running the window-start, moment
+or autoplay seeks. The starting camera (``?v=`` on a moment link, else
+``?cams=``, else ``compare_camera``) is ``usePip``'s ``start``, latched
+once per mount; a swap writes ``?cams=`` like the picker did. With a
+secondary big the player is muted and a hidden ``<audio>`` of the primary
+follows it through ``attachInsetSync`` (audio stays the primary's). C /
+Shift+C is a window keydown through ``pipKeyAction``. Audit (``pages/Audit.tsx``,
 ``components/audit/*``, ``lib/auditStep.ts``): beep confirmation is its
 step 1 (``BeepStep`` on ``useBeepQueue``; ``/beep-review`` redirects
 there on desktop, the phone keeps ``MobileBeepReview``); its own top row
@@ -1765,7 +1776,7 @@ Overview rows carry accept / audit and the flag count, the progress
 strip and its drawer are Jobs, and ``/triage`` + ``/jobs`` redirect to
 Overview (drop the redirects after one release). Still grandfathered --
 restyle onto the primitives whenever you touch them:
-``components/results/ResultsPlayer.tsx``, ``CamPicker.tsx``,
+``components/results/ResultsPlayer.tsx``,
 ``ReclassifySheet.tsx``, ``ShareDialog.tsx``,
 ``components/comments/CommentPanel.tsx``, ``components/BeepSection.tsx``,
 ``components/Waveform.tsx``, ``components/MarkerLayer.tsx``,
