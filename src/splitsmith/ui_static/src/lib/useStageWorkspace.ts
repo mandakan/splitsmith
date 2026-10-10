@@ -65,6 +65,9 @@ export interface StageWorkspace {
   reload: () => Promise<CoachStageResponse | null>;
   /** Select a shot and seek the video to it; drops a selected region. */
   seekToShot: (shot: CoachShot) => void;
+  /** Seek to seconds from the beep; ``shotNumber`` (else the shot the
+   *  playhead has passed) becomes the current shot. */
+  seekToTime: (tFromBeep: number, shotNumber?: number | null) => void;
   togglePlay: () => void;
   isMobile: boolean;
 }
@@ -102,8 +105,11 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
   // step with the document it guards. Written here rather than in an effect
   // on ``coach``: an effect lands a commit later, and a second patch fired
   // before that commit would send the version the first one just replaced.
+  // The latest payload, for callbacks memoised on [slug, stage] (seekToTime).
+  const coachRef = useRef<CoachStageResponse | null>(null);
   const applyCoach = useCallback((next: CoachStageResponse | null) => {
     coachVersionRef.current = next?.version;
+    coachRef.current = next;
     setCoach(next);
   }, []);
   // Regions (spec 2026-10-08): ``apply`` wraps applyCoach and is what every
@@ -231,6 +237,27 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
     [selectEvent],
   );
 
+  const seekToTime = useCallback(
+    (tFromBeep: number, shotNumber: number | null = null) => {
+      const c = coachRef.current;
+      if (!c) return;
+      selectEvent(null);
+      // A raw time makes the shot the playhead has passed the current one.
+      let active = shotNumber;
+      if (active == null) {
+        for (const s of [...c.shots].sort((a, b) => a.time_from_beep - b.time_from_beep)) {
+          if (s.time_from_beep <= tFromBeep + 1e-6) active = s.shot_number;
+          else break;
+        }
+      }
+      setActiveShotNumber(active);
+      const clip = c.beep_time + tFromBeep;
+      setCurrentTime(clip);
+      if (videoRef.current) videoRef.current.currentTime = clip;
+    },
+    [selectEvent],
+  );
+
   const togglePlay = useCallback(() => {
     const v = videoRef.current;
     if (!v) return;
@@ -265,6 +292,7 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
     savePatch,
     reload,
     seekToShot,
+    seekToTime,
     togglePlay,
     isMobile,
   };

@@ -179,6 +179,15 @@ describe("Coach is the review page", () => {
     expect(screen.queryByText("9.99")).toBeNull();
   });
 
+  it("draws the stage strip under the video; a shot on it becomes the current shot", async () => {
+    const { container } = renderCoachStage([makeShot(1, "c1"), makeShot(2, "c2"), makeShot(3, "c3")]);
+    const strip = await screen.findByRole("group", { name: "Stage strip" });
+    expect(container.querySelector('[data-shot-number="1"]')).toHaveAttribute("aria-current", "true");
+    fireEvent.click(within(strip).getByRole("button", { name: "Shot 03, 3.00 s, fire" }));
+    expect(container.querySelector('[data-shot-number="3"]')).toHaveAttribute("aria-current", "true");
+    expect(await screen.findByRole("textbox", { name: "Note on shot 03" })).toBeInTheDocument();
+  });
+
   it("shot rows are 40 px touch targets", async () => {
     const { container } = renderCoachStage([makeShot(1, "c1")]);
     await screen.findByRole("region", { name: "Shots" });

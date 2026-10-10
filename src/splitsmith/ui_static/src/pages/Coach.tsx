@@ -23,10 +23,10 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 
 import { ReviewShotList } from "@/components/coach/ReviewShotList";
+import { StageStrip } from "@/components/coach/StageStrip";
 import { StageTransport, StageVideo } from "@/components/coach/StageViewer";
 import { TimeBudgetBar } from "@/components/coach/TimeBudgetBar";
 import { TimeBudgetCard } from "@/components/coach/TimeBudgetCard";
-import { ShotRuler } from "@/components/results/ShotRuler";
 import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/Chip";
 import { Label } from "@/components/ui/Label";
@@ -746,9 +746,6 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
   }
 
   const { prevStage, nextStage } = view;
-  const maxAbs = coach.shots.length > 0 ? Math.max(...coach.shots.map((s) => s.time_absolute)) : 0;
-  const minAbs = coach.shots.length > 0 ? Math.min(...coach.shots.map((s) => s.time_absolute)) : 0;
-  const span = Math.max(0.0001, maxAbs - minAbs);
   const capacityWarning = coach.event_summary?.capacity_warning ?? null;
   // Notes and flags are review actions: a mirror without the review
   // capability (never the case today) shows them read-only.
@@ -812,14 +809,16 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
           <div className="overflow-hidden rounded-[10px] border border-rule bg-surface">
             <StageVideo ws={ws} view={view} className="aspect-video w-full" />
             <StageTransport ws={ws} view={view} touch className="border-t border-rule" />
-            <div className="border-t border-rule px-3 py-2">
-              <ShotRuler
+            <div className="border-t border-rule px-3.5 pb-2 pt-2.5">
+              <Label>Stage</Label>
+              <StageStrip
+                className="mt-2"
                 shots={coach.shots}
-                minAbs={minAbs}
-                span={span}
+                events={regions.events}
+                stageTime={view.stageTime}
+                tFromBeep={view.tFromBeep}
                 activeShotNumber={ws.activeShotNumber}
-                onSeek={ws.seekToShot}
-                baselines={baselines}
+                onSeek={ws.seekToTime}
               />
             </div>
           </div>
