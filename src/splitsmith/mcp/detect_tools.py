@@ -210,7 +210,7 @@ def detect_shots_for_stage(
     stage_number: int,
     reset: bool = False,
 ) -> dict[str, Any]:
-    """Run the 4-voter shot-detection ensemble on a stage's audit clip.
+    """Run the 3-voter shot-detection ensemble on a stage's audit clip.
 
     Mirror of ``POST /api/stages/{n}/shot-detect``: loads the audit
     audio (preferring the trim cache, falling back to the full
@@ -224,8 +224,12 @@ def detect_shots_for_stage(
 
     ``reset=True`` wipes the existing ``shots[]`` before seeding from
     the new run -- useful when re-running detection after fixing a
-    wrong beep. By default ``shots[]`` is preserved if non-empty
-    (the user retains authority over the curated list).
+    wrong beep -- and, by the server's own rule
+    (``detection_merge.merge_detection_into``), drops the seeder's
+    ``auto`` stage events and ``events_seeded`` so the next coach read
+    seeds afresh, keeping ``manual`` regions. By default ``shots[]`` is
+    preserved if non-empty (the user retains authority over the curated
+    list).
 
     First call in a process loads the ensemble runtime (~5 s for
     CLAP + GBDT + PANN weights, plus first-call download if not yet
@@ -337,17 +341,23 @@ def detect_shots_for_stage(
 
 
 def _load_audit_doc(audit_file: Any) -> dict[str, Any]:
-    """This stage's audit document as stored, or ``{}`` when there is none
-    or it will not parse (the merge then backfills the base fields)."""
-    if audit_file.exists():
-        try:
-            doc = json.loads(audit_file.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            logger.warning("Discarding unreadable audit JSON at %s: %s", audit_file, exc)
-        else:
-            if isinstance(doc, dict):
-                return doc
-    return {}
+    """This stage's audit document as stored, or ``{}`` when there is none,
+    it will not parse or it is not a JSON object (the merge then backfills
+    the base fields). A discarded file is logged; the write that follows
+    keeps it as ``stage<N>.json.bak``."""
+    if not audit_file.exists():
+        return {}
+    try:
+        doc = json.loads(audit_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("Discarding unreadable audit JSON at %s: %s", audit_file, exc)
+        return {}
+    if not isinstance(doc, dict):
+        logger.warning(
+            "Discarding audit JSON at %s: expected an object, found %s", audit_file, type(doc).__name__
+        )
+        return {}
+    return doc
 
 
 def _expected_rounds_from(audit_json: dict[str, Any]) -> int | None:

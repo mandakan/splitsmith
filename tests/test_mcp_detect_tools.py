@@ -709,6 +709,50 @@ def test_detect_shots_keeps_an_edit_saved_while_detection_ran(tmp_path: Path) ->
     assert result["shots_seeded"] is False
 
 
+def test_detect_shots_keeps_a_project_edit_saved_while_detection_ran(tmp_path: Path) -> None:
+    """Flagging ``shot_detect`` re-loads the project, as the server's job
+    does: saving the snapshot read before detection used to undo whatever
+    the SPA wrote to ``project.json`` during the run."""
+    root, _src, wav = _seed_shot_detect_project(tmp_path)
+    fake_result = _fake_ensemble_result([5.5, 6.1])
+
+    def _detect_while_the_user_edits(*_a: Any, **_kw: Any) -> Any:
+        project = MatchProject.load(root)
+        project.competitor_division = "Production Optics"
+        project.stages[0].videos[0].processed["trim"] = True
+        project.save(root)
+        return fake_result
+
+    _detect_via_mcp(root, wav, _detect_while_the_user_edits)
+
+    project = MatchProject.load(root)
+    assert project.competitor_division == "Production Optics"
+    primary = project.stages[0].videos[0]
+    assert primary.processed["trim"] is True
+    assert primary.processed["shot_detect"] is True
+
+
+def test_detect_shots_logs_an_audit_doc_that_is_not_an_object(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A doc that parses but is not a JSON object is discarded out loud, like
+    an unparseable one, and the previous file survives as the ``.bak``."""
+    root, _src, wav = _seed_shot_detect_project(tmp_path)
+    audit_file = root / "audit" / "stage1.json"
+    audit_file.parent.mkdir(parents=True, exist_ok=True)
+    audit_file.write_text("[1, 2]", encoding="utf-8")
+
+    with caplog.at_level("WARNING", logger="splitsmith.mcp.detect_tools"):
+        _detect_via_mcp(root, wav, _fake_ensemble_result([5.5]))
+
+    assert any(
+        "expected an object, found list" in r.getMessage() and str(audit_file) in r.getMessage()
+        for r in caplog.records
+    )
+    assert len(json.loads(audit_file.read_text())["shots"]) == 1
+    assert (audit_file.parent / "stage1.json.bak").read_text(encoding="utf-8") == "[1, 2]"
+
+
 def test_coach_get_reseeds_after_an_mcp_reset(tmp_path: Path) -> None:
     """End to end: after an MCP reset the next coach GET seeds a reload
     proposal over the *new* shots' gap. Before the fix ``events_seeded``

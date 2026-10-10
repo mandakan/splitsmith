@@ -232,7 +232,7 @@ def create_server(name: str = "splitsmith") -> FastMCP:
         stage_number: int,
         reset: bool = False,
     ) -> dict:
-        """Run the 4-voter shot-detection ensemble on a stage.
+        """Run the 3-voter shot-detection ensemble on a stage.
 
         Mirror of ``POST /api/stages/{n}/shot-detect``. Loads the
         audit clip's audio, runs CLAP + GBDT + PANN consensus, and
@@ -250,7 +250,11 @@ def create_server(name: str = "splitsmith") -> FastMCP:
         ``SPLITSMITH_ENABLE_VOTER_E=1``.
 
         ``reset=True`` wipes the existing ``shots[]`` before
-        seeding; default preserves curated lists.
+        seeding, drops the automatic stage-event proposals
+        (``source: "auto"`` regions) and ``events_seeded`` so the next
+        coach read proposes reloads over the new shots, and keeps the
+        user's ``manual`` regions. The default preserves curated shots
+        and every region.
         """
         return detect_tools.detect_shots_for_stage(
             project_root,
