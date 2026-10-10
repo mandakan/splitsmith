@@ -216,7 +216,7 @@ def collect_candidates(
     truth = json.loads((FIXTURES_DIR / f"{fixture}.json").read_text())
     audio, sr = load_audio(FIXTURES_DIR / f"{fixture}.wav")
     shots = detect_shots(audio, sr, truth["beep_time"], truth["stage_time_seconds"], config)
-    cand_t = [s.time_absolute for s in shots]
+    cand_t = [s.scoring_time for s in shots]
     gt_t = [s["time"] for s in truth.get("shots", [])]
     labels = _label_candidates(cand_t, gt_t, tolerance_ms)
 
@@ -253,7 +253,7 @@ def collect_candidates(
         feats = _featurize(
             audio=audio,
             sr=sr,
-            t=shot.time_absolute,
+            t=shot.scoring_time,
             all_times=cand_t,
             beep_time=truth["beep_time"],
             cwt_env_full=cwt_env,
@@ -268,7 +268,7 @@ def collect_candidates(
         out.append(
             Candidate(
                 fixture=fixture,
-                t=shot.time_absolute,
+                t=shot.scoring_time,
                 label=label,
                 features=feats,
                 pann_embedding=emb,

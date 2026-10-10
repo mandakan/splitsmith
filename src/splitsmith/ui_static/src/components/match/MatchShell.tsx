@@ -59,6 +59,7 @@ import {
   type ServerHealth,
   type ShooterListEntry,
 } from "@/lib/api";
+import { navRegionCount } from "@/lib/breakdown";
 import { isJobActive, useJobs, type JobsState } from "@/lib/jobs";
 import { useMode } from "@/lib/mode";
 import { isTypingTextTarget } from "@/lib/audit-input";
@@ -87,7 +88,7 @@ export function toMatchRelativePath(
 /** The sections whose pages have a per-stage view for one shooter
  *  (``/<section>/:slug/:stage``); a stage picked in the sidebar there stays
  *  in that section. Everything else opens the stage in Audit. */
-const STAGE_SECTIONS = new Set(["audit", "coach", "results", "export"]);
+const STAGE_SECTIONS = new Set(["audit", "coach", "breakdown", "results", "export"]);
 
 /** Where a stage picked in the sidebar goes, match-relative: the same
  *  section and shooter the page is on when that section has a stage view
@@ -114,6 +115,7 @@ export function stageClickPath(
 export function viewLabelForPath(relativePath: string): string | null {
   if (relativePath.startsWith("/audit")) return "Audit";
   if (relativePath.startsWith("/coach")) return "Coach";
+  if (relativePath.startsWith("/breakdown")) return "Breakdown";
   if (relativePath.startsWith("/compare")) return "Compare";
   if (relativePath.startsWith("/export")) return "Export";
   if (relativePath.startsWith("/ingest") || relativePath.startsWith("/videos"))
@@ -135,6 +137,7 @@ export function viewLabelForPath(relativePath: string): string | null {
  *  entire IA decision in 7 chars". */
 export function shooterStripLabelForPath(relativePath: string): string | null {
   if (relativePath.startsWith("/coach")) return "Coaching";
+  if (relativePath.startsWith("/breakdown")) return "Editing";
   if (relativePath.startsWith("/audit")) return "Editing";
   if (relativePath.startsWith("/export")) return "Editing";
   if (relativePath.startsWith("/ingest") || relativePath.startsWith("/videos"))
@@ -169,6 +172,11 @@ export interface MatchShellOutletContext {
    *  refetch triggers are the shell load and a settled job. Optional for
    *  the same reason as ``beepQueue``. */
   refreshBeepQueue?: () => void;
+  /** Refetch ``project`` in place now. For writes that change what the
+   *  shell derives from it without starting a job (a region saved on
+   *  Breakdown moves the nav's region count, #1371). Optional: ShareShell's
+   *  read-only context has none. */
+  refreshProject?: () => void;
   /** The shell's one jobs-poller snapshot (#631 Task 11's SyncCard reads
    *  this for its "a sync_match job is pending/running" check rather than
    *  running a second poller - lib/jobs.ts's "one poller per shell"
@@ -370,12 +378,27 @@ export function MatchShell() {
         /* keep the last known queue */
       });
   }, []);
+  // Refetch the project in place (no setProject(null), so the sidebar never
+  // flashes empty) for the shooter the shell shows. Kept current through a
+  // ref so the callback is stable for the pages that hold it.
+  const projectTargetRef = useRef<string | null>(null);
+  const refreshProject = useCallback(() => {
+    const target = projectTargetRef.current;
+    if (!target) return;
+    api
+      .getProject(target)
+      .then((p) => setProject(p))
+      .catch(() => {
+        /* keep the last known project */
+      });
+  }, []);
   // Per-shooter pages (Audit / Coach / Videos / Export) need a shooter in
   // the URL. Rather than forcing the user to the shooter list, default to
   // one -- the URL slug if present, else the shared default-shooter rule
   // (same one DefaultShooterRedirect uses, so chrome and redirect agree).
   // ``undefined`` only when the match has no shooters yet.
   const defaultShooterSlug = slug ?? pickDefaultShooterSlug(shooters);
+  projectTargetRef.current = defaultShooterSlug ?? null;
 
 
   // Server-state drift recovery: when ANY request returns 409 ``no_project``
@@ -706,6 +729,7 @@ export function MatchShell() {
             beepReviewPendingCount: beepReviewPending,
             multiShooter: shooters.length > 1,
             compareStage: stages.find((s) => s.status === "audited")?.stage_number ?? 1,
+            regionCount: navRegionCount(project?.stages),
             footageHint: FOOTAGE_HINT,
           })}
           header={{ matchName: project?.name ?? health?.project_name ?? "..." }}
@@ -747,6 +771,7 @@ export function MatchShell() {
           beepReviewPendingCount={beepReviewPending}
           multiShooter={shooters.length > 1}
           compareStage={stages.find((s) => s.status === "audited")?.stage_number ?? 1}
+          regionCount={navRegionCount(project?.stages)}
           awaiting={
             stages.length > 0 && stages.every((s) => s.status === "todo")
           }
@@ -777,6 +802,7 @@ export function MatchShell() {
               capabilities,
               beepQueue,
               refreshBeepQueue,
+              refreshProject,
               jobs,
               jobsState,
             }}
@@ -801,8 +827,9 @@ function renderMatchSubtitle(project: MatchProject | null) {
  *  flipping shooters keeps the operator on the same view. */
 function breadcrumbUrlBase(
   pathname: string,
-): "audit" | "ingest" | "coach" | "export" {
+): "audit" | "ingest" | "coach" | "breakdown" | "export" {
   if (pathname.startsWith("/coach")) return "coach";
+  if (pathname.startsWith("/breakdown")) return "breakdown";
   if (pathname.startsWith("/export")) return "export";
   if (pathname.startsWith("/ingest") || pathname.startsWith("/videos"))
     return "ingest";

@@ -29,11 +29,15 @@ export interface EventCardProps {
   onKeep: () => void;
   onDelete: () => void;
   onDone: () => void;
+  /** Breakdown's inspector (#1371, #1372): the figures in one row of
+   *  columns and the source beside the actions, so Delete and Done sit
+   *  beside a laptop's video without scrolling. */
+  compact?: boolean;
 }
 
 const f2 = (x: number) => x.toFixed(2);
 
-export function EventCard({ event, events, onKind, onKeep, onDelete, onDone }: EventCardProps) {
+export function EventCard({ event, events, onKind, onKeep, onDelete, onDone, compact = false }: EventCardProps) {
   const during = event.kind === "reload" ? enclosingMovement(event, events) : null;
   // The reload's time no movement covers: its whole duration standing.
   const exposed = event.kind === "reload" ? (reloadFigures(events).find((f) => f.eventId === event.id)?.exposed ?? null) : null;
@@ -41,11 +45,76 @@ export function EventCard({ event, events, onKind, onKeep, onDelete, onDone }: E
     const blocked = k.value !== event.kind && withKind(events, event.id, k.value) === null;
     return { ...k, tick: k.value, disabled: blocked, title: blocked ? "Overlaps a region in that lane" : undefined };
   });
+  const kindControl = (
+    <Segmented
+      value={event.kind}
+      options={options}
+      onChange={onKind}
+      label="Region kind"
+      className={compact ? "flex-nowrap [&>button]:px-2" : undefined}
+    />
+  );
+  const sourceChip = (
+    <Chip tick={event.source === "auto" ? "muted" : "neutral"}>{event.source === "auto" ? "Proposed" : "Manual"}</Chip>
+  );
+  const duringValue = during ? (
+    <Chip tick="movement">
+      <span className="numeral">
+        Movement {f2(during.start)}&ndash;{f2(during.end)}
+      </span>
+    </Chip>
+  ) : (
+    <span className="text-md text-muted">Standing</span>
+  );
+  const actions = (
+    <>
+      {event.source === "auto" ? (
+        <Button size="sm" onClick={onKeep}>
+          Keep
+        </Button>
+      ) : null}
+      <Button size="sm" variant="destructive" onClick={onDelete}>
+        Delete
+      </Button>
+      <Button size="sm" onClick={onDone}>
+        Done
+      </Button>
+    </>
+  );
+
+  if (compact) {
+    return (
+      <section aria-label="Region" className="rounded-[10px] border border-rule bg-surface px-3 py-2">
+        <div className="flex flex-nowrap items-center justify-between gap-2">
+          <Label>Region</Label>
+          {kindControl}
+        </div>
+        <dl className="mt-2 grid grid-cols-4 gap-2">
+          <Figure k="Start">{f2(event.start)}</Figure>
+          <Figure k="End">{f2(event.end)}</Figure>
+          <Figure k="Duration">{f2(event.end - event.start)}</Figure>
+          {exposed !== null ? <Figure k="Exposed">{f2(exposed)}</Figure> : null}
+        </dl>
+        {event.kind === "reload" ? (
+          <div className="mt-1.5 flex h-6 items-center justify-between gap-3">
+            <Label>During</Label>
+            {duringValue}
+          </div>
+        ) : null}
+        <div className="mt-2 flex items-center gap-2">
+          {sourceChip}
+          <span className="ml-auto" />
+          {actions}
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section aria-label="Region" className="rounded-[10px] border border-rule bg-surface px-3.5 py-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Label>Region</Label>
-        <Segmented value={event.kind} options={options} onChange={onKind} label="Region kind" />
+        {kindControl}
       </div>
       <dl className="mt-3 divide-y divide-rule">
         <Row k="Start">
@@ -57,41 +126,15 @@ export function EventCard({ event, events, onKind, onKeep, onDelete, onDone }: E
         <Row k="Duration">
           <Num>{f2(event.end - event.start)}</Num>
         </Row>
-        {event.kind === "reload" ? (
-          <Row k="During">
-            {during ? (
-              <Chip tick="movement">
-                <span className="numeral">
-                  Movement {f2(during.start)}&ndash;{f2(during.end)}
-                </span>
-              </Chip>
-            ) : (
-              <span className="text-md text-muted">Standing</span>
-            )}
-          </Row>
-        ) : null}
+        {event.kind === "reload" ? <Row k="During">{duringValue}</Row> : null}
         {exposed !== null ? (
           <Row k="Exposed">
             <Num>{f2(exposed)}</Num>
           </Row>
         ) : null}
-        <Row k="Source">
-          <Chip tick={event.source === "auto" ? "muted" : "neutral"}>{event.source === "auto" ? "Proposed" : "Manual"}</Chip>
-        </Row>
+        <Row k="Source">{sourceChip}</Row>
       </dl>
-      <div className="mt-3 flex items-center justify-end gap-2">
-        {event.source === "auto" ? (
-          <Button size="sm" onClick={onKeep}>
-            Keep
-          </Button>
-        ) : null}
-        <Button size="sm" variant="destructive" onClick={onDelete}>
-          Delete
-        </Button>
-        <Button size="sm" onClick={onDone}>
-          Done
-        </Button>
-      </div>
+      <div className="mt-3 flex items-center justify-end gap-2">{actions}</div>
     </section>
   );
 }
@@ -107,4 +150,16 @@ function Row({ k, children }: { k: string; children: ReactNode }) {
 
 function Num({ className, children }: { className?: string; children: ReactNode }) {
   return <span className={cn("numeral text-lg text-ink", className)}>{children}</span>;
+}
+
+/** One figure in the compact card's row: its label over the number. */
+function Figure({ k, children }: { k: string; children: ReactNode }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-0.5">
+      <dt>
+        <Label>{k}</Label>
+      </dt>
+      <dd className="numeral m-0 text-md text-ink">{children}</dd>
+    </div>
+  );
 }

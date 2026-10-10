@@ -262,6 +262,9 @@ export interface StageFigures {
   reloads?: number | null;
   reload_avg_s?: number | null;
   exposed_reload_s?: number | null;
+  /** Confirmed regions of any kind (#1371): Breakdown's quiet nav count.
+   *  Null when the stage has none. */
+  regions?: number | null;
 }
 
 /** A shooter's identity (#1243): accent, logo file name (content-named,

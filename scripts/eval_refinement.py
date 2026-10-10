@@ -59,7 +59,7 @@ def main() -> None:
         audio, sr = load_audio(FIXTURES_DIR / f"{fix}.wav")
         det_cfg = ShotDetectConfig(recall_fallback="cwt", min_confidence=0.0)
         shots = detect_shots(audio, sr, truth["beep_time"], truth["stage_time_seconds"], det_cfg)
-        cand_t = [s.time_absolute for s in shots]
+        cand_t = [s.scoring_time for s in shots]
 
         orig_drifts: list[float] = []
         refined_drifts: list[float] = []

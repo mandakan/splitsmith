@@ -177,7 +177,7 @@ def _build_universe(
         shots = detect_shots(audio, sr, truth["beep_time"], truth["stage_time_seconds"], cfg)
         if not shots:
             continue
-        cand_t = [s.time_absolute for s in shots]
+        cand_t = [s.scoring_time for s in shots]
         labels = _label(cand_t, truth.get("shots", []), tolerance_ms)
 
         clap = np.load(clap_path, allow_pickle=True)
@@ -879,7 +879,7 @@ def _build_visual_universe(
             shots = detect_shots(audio, sr, truth["beep_time"], truth["stage_time_seconds"], cfg)
             if not shots:
                 continue
-            cand_t = np.array([s.time_absolute for s in shots], dtype=np.float64)
+            cand_t = np.array([s.scoring_time for s in shots], dtype=np.float64)
             label_list = _label(cand_t.tolist(), truth.get("shots", []), tolerance_ms)
             sub_list = [_resolve_subclass(truth, float(t)) for t in cand_t]
             source_times = vis.candidate_times_in_source(

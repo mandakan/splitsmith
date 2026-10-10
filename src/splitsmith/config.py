@@ -100,6 +100,11 @@ class Shot(BaseModel):
     peak_amplitude: float
     confidence: float = Field(ge=0.0, le=1.0)
     notes: str = ""
+    # The detector's scoring time: where the ensemble's features are measured
+    # (the candidate's original leading-edge walk). ``time_absolute`` is the
+    # shot time (the rise foot, docs/METHODOLOGY.md). Internal to detection:
+    # never serialized, ``None`` on shots that did not come from the detector.
+    feature_time: float | None = Field(default=None, exclude=True)
 
     # Coaching annotations (issue #159). All optional so old audit JSONs
     # load unchanged; the Coach page populates them on first open via the
@@ -110,6 +115,11 @@ class Shot(BaseModel):
     interval_class_source: IntervalClassSource | None = None
     improvement_flag: bool = False
     coaching_note: str | None = None
+
+    @property
+    def scoring_time(self) -> float:
+        """Where the ensemble measures this candidate's features."""
+        return self.feature_time if self.feature_time is not None else self.time_absolute
 
     @model_validator(mode="after")
     def _coach_annotations_consistent(self) -> Shot:

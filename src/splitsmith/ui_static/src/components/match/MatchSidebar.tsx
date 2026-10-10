@@ -67,6 +67,8 @@ interface MatchSidebarProps {
   multiShooter?: boolean;
   /** Where the Compare row lands: the first audited stage, else 1. */
   compareStage?: number;
+  /** Confirmed regions over the shooter's stages: Breakdown's quiet count. */
+  regionCount?: number;
   /** When true the sidebar renders the "no footage yet" sub for the stage
    *  list (matches polished/17). Defaults to false. */
   awaiting?: boolean;
@@ -114,6 +116,7 @@ export function MatchSidebar({
   beepReviewPendingCount,
   multiShooter,
   compareStage,
+  regionCount,
   awaiting = false,
   hasFootage = true,
   onStageClick,
@@ -202,6 +205,7 @@ export function MatchSidebar({
           beepReviewPendingCount: beepReviewPendingCount ?? 0,
           multiShooter,
           compareStage,
+          regionCount,
           footageHint,
         }).flatMap((item, i, items) => {
           // A phase label whenever the group changes (spec 2026-09-13

@@ -31,7 +31,7 @@ interface Props {
   activeSlug: string | undefined;
   /** Route base for the chip targets, without leading slash. Examples:
    *  ``"audit"``, ``"ingest"``, ``"coach"``, ``"export"``. */
-  urlBase: "audit" | "ingest" | "coach" | "export";
+  urlBase: "audit" | "ingest" | "coach" | "breakdown" | "export";
   /** Optional stage number to suffix on the chip target. When set, the
    *  target becomes ``/<urlBase>/<slug>/<stage>``; when null, just
    *  ``/<urlBase>/<slug>``. Audit + Coach + Export all support both

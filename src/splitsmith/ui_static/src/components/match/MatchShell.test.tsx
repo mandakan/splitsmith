@@ -386,6 +386,10 @@ describe("viewLabelForPath (#691)", () => {
   it('maps a shooter-scoped path like "/audit/anna/3" to "Audit"', () => {
     expect(viewLabelForPath("/audit/anna/3")).toBe("Audit");
   });
+
+  it("names Breakdown (#1371)", () => {
+    expect(viewLabelForPath("/breakdown/anna/3")).toBe("Breakdown");
+  });
 });
 
 describe("toMatchRelativePath (#691)", () => {
@@ -564,6 +568,10 @@ describe("stageClickPath", () => {
     expect(stageClickPath("/coach/martin/1", 3, "martin", "mathias")).toBe("/coach/martin/3");
     expect(stageClickPath("/results", 2, undefined, "mathias")).toBe("/results/mathias/2");
     expect(stageClickPath("/export/anna", 4, "anna", "mathias")).toBe("/export/anna/4");
+  });
+
+  it("keeps Breakdown on Breakdown (#1371)", () => {
+    expect(stageClickPath("/breakdown/anna/1", 3, "anna", "mathias")).toBe("/breakdown/anna/3");
   });
 
   it("keeps Compare on Compare", () => {

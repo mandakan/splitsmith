@@ -30,6 +30,7 @@ import {
   zoomStep,
   type Zoom,
 } from "@/lib/timelineView";
+import { cn } from "@/lib/utils";
 import { zoomActionForKey } from "@/lib/zoomKeys";
 
 import type { TimelineGeom } from "./types";
@@ -79,6 +80,19 @@ export interface TimelineProps {
   /** Page entries appended to the band's "More" menu. */
   menuExtra?: ReactNode;
   title?: string;
+  /** Page controls drawn in the header row after the title (Breakdown's
+   *  transport on a short window, so the band and the player share a row). */
+  toolbar?: ReactNode;
+  /** A tighter header row for short windows. */
+  dense?: boolean;
+  /**
+   * Opt-in (Breakdown's splitter, #1373): the height the track rows get.
+   * Rows past it scroll vertically under the fixed header and ruler, the
+   * gutter labels scrolling with them; a plain wheel scrolls them while
+   * "Wheel zooms the timeline" is off (on, the wheel zooms as everywhere).
+   * Unset: every row at its own height, the band as tall as its rows.
+   */
+  rowsHeight?: number;
 }
 
 let swipeBackHolds = 0;
@@ -126,9 +140,14 @@ export function Timeline(props: TimelineProps) {
     maxZoom = MAX_ZOOM,
     menuExtra,
     title = "Timeline",
+    toolbar,
+    dense = false,
+    rowsHeight,
   } = props;
   const hostRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
+  const rowsRef = useRef<HTMLDivElement | null>(null);
+  const gutterRowsRef = useRef<HTMLDivElement | null>(null);
   const [viewport, setViewport] = useState(0);
   const [scrollLeft, setScrollLeft] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -395,6 +414,34 @@ export function Timeline(props: TimelineProps) {
   const geom: TimelineGeom = { contentWidth: content, viewportWidth: viewport, scrollLeft, pxPerSec };
   const sliderMax = Math.log(maxZoom);
 
+  const gutterLabels = tracks.flatMap((track) =>
+    track.rows.map((row) => (
+      <div key={`${track.id}-${row.label}`} className="flex items-center justify-end pr-2" style={{ height: row.height }}>
+        <Label>{row.label}</Label>
+      </div>
+    )),
+  );
+  const trackRows = tracks.map((track) => (
+    <div
+      key={track.id}
+      className={track.seekable ? "relative cursor-pointer touch-none" : "relative"}
+      style={{ height: track.rows.reduce((a, r) => a + r.height, 0) }}
+      onPointerDown={track.seekable ? handleTrackPointerDown(track) : undefined}
+      onPointerMove={track.seekable ? handleTrackPointerMove : undefined}
+      onPointerUp={track.seekable ? endTrackScrub : undefined}
+      onPointerCancel={track.seekable ? endTrackScrub : undefined}
+      onDoubleClick={track.onDoubleClick ? handleTrackDoubleClick(track) : undefined}
+    >
+      {track.render(geom)}
+    </div>
+  ));
+  // rowsHeight: the gutter's rows and the track rows are two vertical
+  // scrollers kept at one scrollTop (the track rows sit inside the
+  // horizontally scrolled content, the gutter outside it).
+  const syncRows = (from: HTMLDivElement, to: HTMLDivElement | null) => {
+    if (to && to.scrollTop !== from.scrollTop) to.scrollTop = from.scrollTop;
+  };
+
   return (
     <div
       data-testid="timeline"
@@ -403,8 +450,9 @@ export function Timeline(props: TimelineProps) {
         pointerDown.current = true;
       }}
     >
-      <div className="flex items-center gap-3 border-b border-rule px-3 py-2">
+      <div className={cn("flex items-center gap-3 border-b border-rule px-3", dense ? "py-1" : "py-2")}>
         <Label>{title}</Label>
+        {toolbar}
         <div className="ml-auto flex items-center gap-1" role="group" aria-label="Zoom controls">
           <Button
             type="button"
@@ -481,12 +529,18 @@ export function Timeline(props: TimelineProps) {
       <div className="grid grid-cols-[96px_minmax(0,1fr)]">
         <div className="flex flex-col border-r border-rule">
           <div style={{ height: RULER_H }} />
-          {tracks.flatMap((track) =>
-            track.rows.map((row) => (
-              <div key={`${track.id}-${row.label}`} className="flex items-center justify-end pr-2" style={{ height: row.height }}>
-                <Label>{row.label}</Label>
-              </div>
-            )),
+          {rowsHeight === undefined ? (
+            gutterLabels
+          ) : (
+            <div
+              ref={gutterRowsRef}
+              data-testid="timeline-gutter-rows"
+              className="overflow-y-auto overflow-x-hidden [scrollbar-width:thin]"
+              style={{ height: rowsHeight }}
+              onScroll={(e) => syncRows(e.currentTarget, rowsRef.current)}
+            >
+              {gutterLabels}
+            </div>
           )}
         </div>
         <div
@@ -511,20 +565,19 @@ export function Timeline(props: TimelineProps) {
                 </span>
               ))}
             </div>
-            {tracks.map((track) => (
+            {rowsHeight === undefined ? (
+              trackRows
+            ) : (
               <div
-                key={track.id}
-                className={track.seekable ? "relative cursor-pointer touch-none" : "relative"}
-                style={{ height: track.rows.reduce((a, r) => a + r.height, 0) }}
-                onPointerDown={track.seekable ? handleTrackPointerDown(track) : undefined}
-                onPointerMove={track.seekable ? handleTrackPointerMove : undefined}
-                onPointerUp={track.seekable ? endTrackScrub : undefined}
-                onPointerCancel={track.seekable ? endTrackScrub : undefined}
-                onDoubleClick={track.onDoubleClick ? handleTrackDoubleClick(track) : undefined}
+                ref={rowsRef}
+                data-testid="timeline-rows"
+                className="overflow-y-auto overflow-x-hidden [scrollbar-width:none]"
+                style={{ height: rowsHeight }}
+                onScroll={(e) => syncRows(e.currentTarget, gutterRowsRef.current)}
               >
-                {track.render(geom)}
+                {trackRows}
               </div>
-            ))}
+            )}
             <div
               data-testid="timeline-playhead"
               className="pointer-events-none absolute inset-y-0 w-px bg-led"

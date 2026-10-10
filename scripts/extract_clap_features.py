@@ -122,7 +122,7 @@ def extract_for_fixture(name: str, *, force: bool, model, processor, full: bool 
         print(f"  {name}: no candidates, skipping")
         return
 
-    times = np.array([s.time_absolute for s in shots], dtype=np.float64)
+    times = np.array([s.scoring_time for s in shots], dtype=np.float64)
 
     if sr != CLAP_SR:
         audio_clap = librosa.resample(audio.astype(np.float32), orig_sr=sr, target_sr=CLAP_SR)
