@@ -2608,13 +2608,20 @@ class AppState:
         lives in ``state_docs``, so write it to the local file first.
         Local: the file is already on disk, return its path. When no audit
         doc exists the returned path simply won't exist -- the caller's
-        existing "missing audit" handling fires, same as before."""
+        existing "missing audit" handling fires, same as before.
+
+        Hosted with no doc, a local file an earlier job on this worker
+        materialized is removed (#1332): it is a copy of a doc that is
+        gone, and the export (and the overlay's audit revision) would read
+        it as current."""
         audit_file = self._audit_file(slug, stage_number)
-        if self.project_state is not None:
+        if self.audit_doc_target() is not None:
             doc, _ = self.load_audit(slug, stage_number)
             if doc is not None:
                 audit_file.parent.mkdir(parents=True, exist_ok=True)
                 audit_file.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+            else:
+                audit_file.unlink(missing_ok=True)
         return audit_file
 
     def shooter_project(self, slug: str) -> MatchProject:
