@@ -38,9 +38,9 @@ const KEYS: Array<[string, string]> = [
   ["Enter", "Correct as shown: confirm and go to the next stop"],
   ["S", "It is a shot (a rejected candidate or an unmarked sound becomes one)"],
   ["X", "It is not a shot"],
-  ["F", "Put the shot on the rise foot (the green line)"],
-  ["Left / Right", "Move the shot 1 ms (Shift: 5 ms)"],
-  ["Click", "Place the shot exactly there, in either strip"],
+  ["F", "Put the shot on the rise foot (the green line): the rule, re-timed if the rule changes"],
+  ["Left / Right", "Move the shot 1 ms (Shift: 5 ms); off the rule it is your placement"],
+  ["Click", "Place the shot exactly there, in either strip (your placement)"],
   ["Space", "Listen: half a second before the stop to 0.7 s after"],
   ["Backspace", "Back to the previous stop"],
   ["?", "Show or hide this guide"],
@@ -65,6 +65,13 @@ export function WalkGuide({ onClose }: { onClose: () => void }) {
             still clearly above the background just before it (about a twentieth of the peak).
           </p>
           <p className="text-ink">
+            What only you can tell is <strong>which sounds are shots</strong>. The exact millisecond is a
+            rule applied to the audio, and the rule may still change (a shot timer fires differently on a
+            weak lead-in). A shot left on the rule is re-timed from its sound if it does; one you placed
+            yourself is kept as you placed it, and listed for a second look. So use <kbd>F</kbd> and
+            override only what the rule gets wrong.
+          </p>
+          <p className="text-ink">
             The walk visits every candidate, every kept shot and every loud sound nobody marked, in time
             order. Decide each one, then <kbd>Enter</kbd>. Decisions save as you go; reopening the fixture
             resumes at the first stop you have not confirmed. At the end, check the shot count and sign off.
@@ -78,9 +85,11 @@ export function WalkGuide({ onClose }: { onClose: () => void }) {
                 a louder sound&apos;s tail.
               </li>
               <li>
-                <strong>Is it on the onset?</strong> Follow the burst&apos;s rise backwards to where it leaves
-                the background. Keep a lead-in that grows straight into the burst; drop one that dies back
-                first. Ignore dips and swings inside the burst. <kbd>F</kbd> places the rise foot; check it.
+                <strong>Put it on the rule: press <kbd>F</kbd>.</strong> F seats the shot on the rise foot,
+                and the line next to the time says <em>on the rise foot</em>. Check it against the waveform:
+                the burst&apos;s rise, followed backwards to where it leaves the background. Only when F is
+                clearly wrong (it stops on a swing inside the burst, or on a different sound) place it
+                yourself with a click or the arrows.
               </li>
               <li>
                 <strong>Same rule on every shot</strong>, loud or quiet: splits are only right if every shot is

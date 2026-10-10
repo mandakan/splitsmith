@@ -10,6 +10,10 @@
  * The rise foot is drawn as a reference and placed on F; it is never the
  * default. A stop is decided when the person confirms it; decisions are
  * audit events, so a reopened fixture resumes at its first undecided stop.
+ * A confirmed shot records whether its time is the rule's (``placementOf``):
+ * the review settles which sounds are shots, and a definition change can
+ * re-time the rule's shots from their sounds (docs/METHODOLOGY.md, comparing
+ * to a timer).
  */
 
 import type { AuditMarker } from "@/components/MarkerLayer";
@@ -171,6 +175,27 @@ export function stopTime(stop: WalkStop, marker: AuditMarker | null): number {
   return marker ? marker.time : stop.time;
 }
 
+/** How a confirmed shot's time relates to the definition. The review fixes
+ *  which sound is a shot; the millisecond is the rule's. A shot left on the
+ *  rule (``rule``) is re-timed from its sound whenever the definition
+ *  changes; one placed anywhere else (``override``) is the person's call and
+ *  kept, and listed for a second look. ``ruleTime`` is ``null`` where the
+ *  rule finds no shot around the time. */
+export interface Placement {
+  placement: "rule" | "override";
+  ruleTime: number | null;
+  /** ``time - ruleTime`` in whole ms; ``null`` without a rule time. */
+  offsetMs: number | null;
+}
+
+export function placementOf(time: number, peaks: SnapPeaks): Placement {
+  const foot = snapToLeadingEdge(time, peaks);
+  const ruleTime = foot == null ? null : Math.round(foot * 1000) / 1000;
+  if (ruleTime == null) return { placement: "override", ruleTime: null, offsetMs: null };
+  const offsetMs = Math.round((time - ruleTime) * 1000);
+  return { placement: offsetMs === 0 ? "rule" : "override", ruleTime, offsetMs };
+}
+
 /** Decisions from audit events of this walk version, oldest first. */
 export function decisionsFrom(
   events: ReadonlyArray<{ kind: string; payload: Record<string, unknown> }>,
@@ -245,13 +270,6 @@ export function stopFlags(opts: {
         tone: "warn",
         text: `Another shot ${Math.round(Math.abs(m.time - t) * 1000)} ms ${m.time < t ? "before" : "after"}: one of them may be an echo.`,
       });
-    }
-    const foot = snapToLeadingEdge(t, peaks);
-    if (foot != null) {
-      const ms = Math.round((foot - t) * 1000);
-      if (Math.abs(ms) > 2) {
-        flags.push({ tone: "info", text: `Rise foot ${Math.abs(ms)} ms ${ms < 0 ? "earlier" : "later"} (F places it there).` });
-      }
     }
   }
   return flags;

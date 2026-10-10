@@ -23,6 +23,7 @@ import {
   countCheck,
   decisionsFrom,
   isDecided,
+  placementOf,
   stopFlags,
   stopState,
   stopTime,
@@ -155,7 +156,16 @@ export function Walk(props: WalkProps) {
       }
       switch (action.kind) {
         case "confirm": {
-          props.onRecord(WALK_DECIDED_EVENT, { stop: stop.key, state, time, method: WALK_METHOD });
+          // A shot records whether its time is the rule's, so a later
+          // definition change can re-time it from its sound (lib/walk).
+          const placed = state === "shot" ? placementOf(time, peaks) : null;
+          props.onRecord(WALK_DECIDED_EVENT, {
+            stop: stop.key,
+            state,
+            time,
+            method: WALK_METHOD,
+            ...(placed ? { placement: placed.placement, rule_time: placed.ruleTime } : {}),
+          });
           const next = [...decisions, { key: stop.key, state, time }];
           setDecisions(next);
           const after = stops.findIndex(
@@ -268,6 +278,7 @@ export function Walk(props: WalkProps) {
     snapDisplacementMs: marker ? props.snapDisplacementMs(marker.id) : null,
   });
   const foot = state === "shot" ? snapToLeadingEdge(time, peaks) : null;
+  const placement = state === "shot" ? placementOf(time, peaks) : null;
   const origin =
     stop.origin === "burst"
       ? "Unmarked sound"
@@ -306,6 +317,18 @@ export function Walk(props: WalkProps) {
           {state === "shot" ? "Shot" : "Not a shot"}
         </span>
         <span className="font-mono text-ink">{time.toFixed(3)} s</span>
+        {placement ? (
+          placement.placement === "rule" ? (
+            <span className="text-status-complete">on the rise foot</span>
+          ) : placement.offsetMs != null ? (
+            <span className="text-status-warning">
+              {Math.abs(placement.offsetMs)} ms {placement.offsetMs < 0 ? "before" : "after"} the rise foot:
+              your placement, kept as is if the definition changes. F puts it on the rule.
+            </span>
+          ) : (
+            <span className="text-status-warning">no rise foot found here: your placement, kept as is</span>
+          )
+        ) : null}
         {decided(stop) ? <span className="text-muted">confirmed</span> : null}
       </div>
       {flags.length > 0 ? (

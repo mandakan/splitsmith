@@ -8,6 +8,7 @@ import {
   countCheck,
   decisionsFrom,
   isDecided,
+  placementOf,
   stopFlags,
   typicalShotLevel,
   unmarkedBursts,
@@ -150,7 +151,7 @@ describe("stopFlags", () => {
     expect(flags.map((f) => f.text).join(" ")).toMatch(/No burst within 25 ms/);
   });
 
-  it("warns about a second shot close by and a long snap, and points at the rise foot", () => {
+  it("warns about a second shot close by and a long snap", () => {
     const a = marker("cand-1", "detected", 0.51);
     const b = marker("cand-2", "detected", 0.55);
     const text = stopFlags({
@@ -165,7 +166,6 @@ describe("stopFlags", () => {
       .join(" | ");
     expect(text).toMatch(/Snapped 57 ms/);
     expect(text).toMatch(/Another shot 40 ms after/);
-    expect(text).toMatch(/Rise foot 1\d ms earlier/);
   });
 
   it("says nothing about a shot sitting on its onset", () => {
@@ -191,6 +191,22 @@ describe("stopFlags", () => {
       snapDisplacementMs: null,
     });
     expect(flags[0].text).toMatch(/proposed no candidate/);
+  });
+});
+
+describe("placementOf", () => {
+  const peaks = envelope(3, [0.5, 1.0]);
+
+  it("calls a shot on its rise foot the rule's, so a new definition can re-time it", () => {
+    expect(placementOf(0.5, peaks)).toEqual({ placement: "rule", ruleTime: 0.5, offsetMs: 0 });
+  });
+
+  it("calls anything else an override and says by how much", () => {
+    expect(placementOf(0.507, peaks)).toEqual({ placement: "override", ruleTime: 0.5, offsetMs: 7 });
+  });
+
+  it("calls a shot where the rule finds nothing an override with no rule time", () => {
+    expect(placementOf(2.0, peaks)).toEqual({ placement: "override", ruleTime: null, offsetMs: null });
   });
 });
 

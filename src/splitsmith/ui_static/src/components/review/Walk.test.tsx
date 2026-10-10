@@ -97,9 +97,28 @@ describe("Walk", () => {
       state: "shot",
       time: 0.5,
       method: WALK_METHOD,
+      placement: "rule",
+      rule_time: 0.5,
     });
     expect(screen.getByText("Stop 2 of 3")).toBeTruthy();
     expect(screen.getByText("Not a shot")).toBeTruthy();
+  });
+
+  it("records a nudged shot as an override, says so, and F puts it back on the rule", () => {
+    const record = vi.fn();
+    render(<Harness initial={markersAll} record={record} />);
+    expect(screen.getByText("on the rise foot")).toBeTruthy();
+    press("ArrowRight");
+    press("ArrowRight");
+    expect(screen.getByText(/2 ms after the rise foot: your placement/)).toBeTruthy();
+    press("Enter");
+    expect(record).toHaveBeenLastCalledWith(
+      WALK_DECIDED_EVENT,
+      expect.objectContaining({ stop: "cand-1", time: 0.502, placement: "override", rule_time: 0.5 }),
+    );
+    press("Backspace");
+    press("f");
+    expect(screen.getByText("on the rise foot")).toBeTruthy();
   });
 
   it("makes a rejected candidate a shot on S, and an unmarked burst a shot at its onset", () => {
