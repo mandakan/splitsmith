@@ -14387,16 +14387,23 @@ def create_app(
         # set a beep yet (older / partial audits).
         clip_anchor = primary_beep_in_clip if primary_beep_in_clip is not None else 0.0
         raw_shots = payload.get("shots") or []
+        # A shot whose time is missing or unreadable (a string, NaN: a
+        # hand-edited doc) is left out of the view rather than 500ing every
+        # read of the stage (``events.shot_ms``).
         ordered = sorted(
-            (s for s in raw_shots if isinstance(s, dict) and "ms_after_beep" in s),
-            key=lambda s: float(s.get("ms_after_beep", 0)),
+            ((ms, s) for s in raw_shots if (ms := events_module.shot_ms(s)) is not None),
+            key=lambda pair: pair[0],
         )
         stage_events = _coach_events(payload, stg.stage_number)
+        # Every figure here reads confirmed regions only, as every output does
+        # (``events.confirmed``): ``stale``, per-shot ``moving`` and the
+        # summary Coach draws (its capacity warning included), so a figure
+        # never moves because Breakdown was opened and proposed something.
+        # The response's ``events`` keep the proposals for Breakdown's lanes.
         confirmed_events = events_module.confirmed(stage_events)
         coach_shots: list[dict[str, Any]] = []
         prev_ms: float | None = None
-        for s in ordered:
-            ms = float(s["ms_after_beep"])
+        for ms, s in ordered:
             time_from_beep = ms / 1000.0
             gap_s: float | None
             if prev_ms is None:
@@ -14440,10 +14447,10 @@ def create_app(
                 }
             )
         for shot_out in coach_shots:
-            shot_out["moving"] = events_module.shot_is_moving(shot_out["time_from_beep"], stage_events)
+            shot_out["moving"] = events_module.shot_is_moving(shot_out["time_from_beep"], confirmed_events)
         summary = events_module.stage_event_summary(
             [shot_out["time_from_beep"] for shot_out in coach_shots],
-            stage_events,
+            confirmed_events,
             capacity,
         )
         return {

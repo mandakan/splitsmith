@@ -226,8 +226,9 @@ def detect_shots_for_stage(
     the new run -- useful when re-running detection after fixing a
     wrong beep -- and, by the server's own rule
     (``detection_merge.merge_detection_into``), drops the seeder's
-    ``auto`` stage events and ``events_seeded`` so the next coach read
-    seeds afresh, keeping ``manual`` regions. By default ``shots[]`` is
+    ``auto`` stage events and ``events_seeded`` so the next seeding
+    coach read (Breakdown's ``?seed=1``) seeds afresh, keeping
+    ``manual`` regions. By default ``shots[]`` is
     preserved if non-empty (the user retains authority over the curated
     list).
 

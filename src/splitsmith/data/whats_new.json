@@ -4,7 +4,7 @@
       "id": "older-match-overlay-redraw",
       "date": "2026-10-11",
       "title": "Older matches redraw their overlay once",
-      "body": "Export a match made with an earlier version again and its overlay is drawn fresh the first time, so it may now carry the shooter's current look and logos."
+      "body": "Export an older match again and its overlay is drawn fresh once, in your Look's current colours and fonts. Its cards and summaries may now carry the shooter's current look and logos."
     },
     {
       "id": "grid-counter-clear-of-clock",

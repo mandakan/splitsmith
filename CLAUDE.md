@@ -1264,7 +1264,11 @@ that raises is logged and the stage served without proposals, and
 ``seed_events`` never proposes a region that would not validate (a gap
 starting before the beep, no length, a non-finite time). The heal is
 persisted on any owner read, mirrors included, as in v0.64.1; the seed
-never rides it. The GET's ``_version`` is the revision of the doc *as stored*
+never rides it. The payload's ``event_summary`` (Coach's capacity warning
+included), per-shot ``moving`` and ``stale`` read confirmed regions only;
+its ``events`` keep the proposals for Breakdown's lanes. A shot whose time
+is unreadable (``events.shot_ms``) is left out of the payload and skipped by
+the classifier, never a 500. The GET's ``_version`` is the revision of the doc *as stored*
 (taken before the in-memory seed and heal), so a mirror or share read
 still hands out a ``_version`` the PUT accepts. The share surface does
 reach the coach GET (``_SHARE_PATH_RE``): ``_build_coach_response``

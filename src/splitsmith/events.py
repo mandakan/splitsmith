@@ -135,20 +135,27 @@ def confirmed_from_doc(doc: Any, *, log_context: str = "") -> list[StageEvent]:
         return []
 
 
+def shot_ms(shot: Any) -> float | None:
+    """A shot dict's ``ms_after_beep`` as a finite number, or None when it
+    is missing or unreadable (a hand-edited or legacy doc: a string, a bool,
+    NaN). The coach GET and the seeder skip such a shot rather than 500."""
+    if not isinstance(shot, dict):
+        return None
+    raw = shot.get("ms_after_beep")
+    if raw is None or isinstance(raw, bool):
+        return None
+    try:
+        ms = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return ms if math.isfinite(ms) else None
+
+
 def shot_times_from_doc(doc: dict[str, Any]) -> list[float]:
     """Kept shots' times from the beep, ascending. A time that is not a
-    finite number (a hand-edited or legacy doc) is skipped, never raised:
-    the seeder reads this on a GET."""
-    times: list[float] = []
-    for s in doc.get("shots") or []:
-        if not isinstance(s, dict) or s.get("ms_after_beep") is None or isinstance(s["ms_after_beep"], bool):
-            continue
-        try:
-            t = float(s["ms_after_beep"]) / 1000.0
-        except (TypeError, ValueError):
-            continue
-        if math.isfinite(t):
-            times.append(t)
+    finite number is skipped (:func:`shot_ms`), never raised: the seeder
+    reads this on a GET."""
+    times = [ms / 1000.0 for s in doc.get("shots") or [] if (ms := shot_ms(s)) is not None]
     return sorted(times)
 
 
