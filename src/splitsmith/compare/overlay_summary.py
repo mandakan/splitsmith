@@ -436,7 +436,11 @@ def upright_grid(
                 manual_time=placement.label in manual_times,
             )
         )
-    return upright_grid_type(geometry.cell_width, geometry.cell_height, rooms, match=match)
+    # Two tiles as tall as the frame: caption-value rows, grown to fill it.
+    two_up = geometry.rows * geometry.cols == 2
+    return upright_grid_type(
+        geometry.cell_width, geometry.cell_height, rooms, match=match, caption_rows=two_up
+    )
 
 
 def build_hold_still(
@@ -755,6 +759,7 @@ def build_match_summary_grid_still(
                     cell_width=geometry.cell_width,
                     cell_height=geometry.cell_height,
                     upright=upright is not None,
+                    count_columns=upright.counts_columns if upright is not None else 3,
                 )
                 if upright is not None and not upright.captions:
                     groups = without_captions(groups)

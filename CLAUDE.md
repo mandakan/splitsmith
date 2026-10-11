@@ -463,7 +463,12 @@ step end a line at the button column, not the tile's edge. A hold tile is
 reload row three across unless the narrowest tile that draws one is too
 narrow (so a reload costs its own row and no more), the counts three to a row, hit factor and
 time at the counts' size (``Role.DETAIL``), over each other when the
-narrowest tile has no room or any time was entered by hand. A match
+narrowest tile has no room or any time was entered by hand. A two-up
+grid's tiles are as tall as the frame, so there (``caption_rows``, any
+grid of two tiles) the splits are caption-value rows like the match
+summary's, the counts go two to a row, and the type grows past the width
+key (to 3x) until the tiles are full, the name, captions and padding
+staying at the width key: 104 px splits at 1080x1920. A match
 summary tile (``match_summary_groups(upright=True)``) lists Avg / Best
 draw / Rounds as caption-value rows (``Group.content_columns``, so "Best
 draw" never wraps) above its Scoring band, and the title strip is

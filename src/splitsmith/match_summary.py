@@ -186,6 +186,7 @@ def match_summary_groups(
     cell_width: int,
     cell_height: int,
     upright: bool = False,
+    count_columns: int = 3,
 ) -> tuple[Group, ...]:
     """One shooter's tile on the grid's match summary (spec
     2026-10-08-grid-match-summary-design), in the stage summary hold's bands
@@ -199,7 +200,7 @@ def match_summary_groups(
     ``upright=True`` is a tile of an upright grid (issue #1394 part 2):
     Splits first, Avg / Best draw / Rounds as caption-value rows (the
     caption beside its figure, so "Best draw" never wraps), then Scoring
-    with the counts wrapping to three columns.
+    with the counts wrapping to ``count_columns`` (three; two on a two-up).
     """
     identity: list[Element] = [Element(role=Role.IDENTITY, text=label)]
     if summary.dq:
@@ -223,7 +224,9 @@ def match_summary_groups(
         )
         counts = count_elements(totals)
         if counts and upright:
-            scoring_groups = _upright_scoring_groups(counts, _coverage(summary.scored_stages, total), scale)
+            scoring_groups = _upright_scoring_groups(
+                counts, _coverage(summary.scored_stages, total), scale, columns=count_columns
+            )
         elif counts:
             scoring = True
             head = [Element(role=Role.LABEL, text="Scoring", drop_priority=len(counts))]
@@ -291,7 +294,9 @@ def match_summary_groups(
     return tuple(groups)
 
 
-def _upright_scoring_groups(counts: list[Element], note: Element | None, scale: CellScale) -> list[Group]:
+def _upright_scoring_groups(
+    counts: list[Element], note: Element | None, scale: CellScale, *, columns: int = 3
+) -> list[Group]:
     """An upright grid tile's Scoring band: its label (and coverage note),
     then the counts three to a row. The counts drop first, then the note,
     then the label, as on the hold."""
@@ -306,7 +311,7 @@ def _upright_scoring_groups(counts: list[Element], note: Element | None, scale: 
             elements=tuple(counts),
             align="left",
             gap=_counts_gap(scale),
-            columns=3,
+            columns=columns,
         ),
     ]
 

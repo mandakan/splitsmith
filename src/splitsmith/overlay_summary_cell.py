@@ -446,7 +446,7 @@ def summary_groups(
                     elements=tuple(counts),
                     align="left",
                     gap=_counts_gap(scale),
-                    columns=_UPRIGHT_COUNT_COLUMNS,
+                    columns=grid.counts_columns,
                 )
             )
         elif counts:
@@ -620,6 +620,14 @@ def _upright_split_groups(
         )
 
     groups = [label("Splits")]
+    if grid is not None and grid.caption_rows:
+        # A two-up tile: caption-value rows, a caption then its figure, every
+        # figure lined up after the longest caption; a reload's rows follow.
+        figures = [*_split_stat_elements([shot.split for shot in selected]), draw]
+        groups.append(_caption_value_rows(figures, scale))
+        if reload_row:
+            groups.append(_caption_value_rows(reload_row, scale))
+        return groups
     if grid is not None:
         # An upright grid tile: the combined 2x2 whatever the stage marked
         # up (the hold keeps the combined row, ``split_rows=False``).
@@ -647,6 +655,27 @@ def _upright_split_groups(
             grid_of([*_split_stat_elements([shot.split for shot in selected]), draw], _UPRIGHT_COLUMNS)
         )
     return groups
+
+
+def _caption_value_rows(figures: list[Element], scale: CellScale) -> Group:
+    """``figures`` as caption-value rows: each caption as a label, then its
+    figure without one, in two content-sized columns. A label drops with its
+    figure."""
+    elements: list[Element] = []
+    for figure in figures:
+        elements.append(
+            Element(role=Role.LABEL, text=figure.caption or "", drop_priority=figure.drop_priority)
+        )
+        elements.append(replace(figure, caption=None))
+    return Group(
+        anchor=Anchor.MIDDLE_CENTER,
+        flow=Flow.GRID,
+        elements=tuple(elements),
+        align="left",
+        gap=max(4, round(scale.caption * 0.8)),
+        columns=2,
+        content_columns=True,
+    )
 
 
 def upright_summary_scale(width: int, height: int, *, dense: bool) -> CellScale:
@@ -703,6 +732,9 @@ _LABEL_ADVANCE_EMS = 0.68
 _COLUMN_GAP_EMS = 0.6
 #: A stage time entered by hand as a hold tile draws it: ``12.34s (manual)``.
 _MANUAL_TIME_CHARS = 15
+#: How far past its width key a two-up grid's type may grow to fill the
+#: tile's height (:attr:`UprightGridType.caption_rows`).
+_GRID_GROWTH = 3.0
 #: What a lit penalty plate adds to its row (0.15 em of padding each side).
 _PLATE_EMS = 0.3
 #: How far under the legibility floor a tile's captions may come by the
@@ -728,6 +760,16 @@ class UprightGridType:
     #: How many of Reloads / Reload avg / Exposed sit on a row: all three
     #: when the narrowest tile has the room, else two.
     reload_columns: int = 2
+    #: A two-up grid (``caption_rows``): its tiles are as tall as the frame,
+    #: so the splits are caption-value rows (Best 0.30 / Avg / Worst / Draw,
+    #: as on the match summary) rather than a 2x2, the counts go two to a
+    #: row, and the type grows past the width key until the tiles are full.
+    caption_rows: bool = False
+
+    @property
+    def counts_columns(self) -> int:
+        """How many hit/fault counts sit on a row: three, two on a two-up."""
+        return 2 if self.caption_rows else _UPRIGHT_COUNT_COLUMNS
 
 
 class TileRoom(NamedTuple):
@@ -742,9 +784,15 @@ class TileRoom(NamedTuple):
     manual_time: bool = False
 
 
-def _grid_scale(unit: float, cell_width: int, cell_height: int) -> UprightGridType:
-    caption = round(unit * _GRID_CAPTION_U)
-    identity = max(MIN_FONT_SIZE, round(unit * _GRID_IDENTITY_U))
+def _grid_scale(
+    unit: float, cell_width: int, cell_height: int, *, caption_rows: bool = False
+) -> UprightGridType:
+    # The name and the captions keep to the width key when the figures grow
+    # past it (a two-up grid): the figures are what fills the tile.
+    caption = min(round(unit * _GRID_CAPTION_U), round(cell_width * _GRID_CAPTION_U / 100))
+    identity = max(
+        MIN_FONT_SIZE, min(round(unit * _GRID_IDENTITY_U), round(cell_width * _GRID_IDENTITY_U / 100))
+    )
     scale = replace(
         CellScale.for_cell(cell_height),
         identity=identity,
@@ -752,10 +800,14 @@ def _grid_scale(unit: float, cell_width: int, cell_height: int) -> UprightGridTy
         verdict=max(MIN_FONT_SIZE, identity // 2),
         detail=max(MIN_FONT_SIZE, round(unit * _GRID_DETAIL_U)),
         caption=max(MIN_FONT_SIZE, caption),
-        pad=max(8, round(unit * _GRID_PAD_U)),
+        pad=max(8, round(min(unit, cell_width / 100) * _GRID_PAD_U)),
         stroke_width=max(1, cell_width // 360),
     )
-    return UprightGridType(scale=scale, captions=unit * _GRID_CAPTION_U >= _CAPTION_CLAMP * MIN_FONT_SIZE)
+    return UprightGridType(
+        scale=scale,
+        captions=unit * _GRID_CAPTION_U >= _CAPTION_CLAMP * MIN_FONT_SIZE,
+        caption_rows=caption_rows,
+    )
 
 
 def _fits_row(widths: list[float], *, inner: float, columns: int, gap: float, em: float) -> bool:
@@ -768,23 +820,29 @@ def _fits_row(widths: list[float], *, inner: float, columns: int, gap: float, em
     )
 
 
-def _grid_rows_fit(kind: UprightGridType, *, inner: float, cell_width: int, match: bool) -> bool:
+def _grid_rows_fit(
+    kind: UprightGridType, *, inner: float, cell_width: int, match: bool, reloads: bool = False
+) -> bool:
     """Whether a tile's widest rows fit ``inner`` pixels of text width: the
-    counts three to a row, then two split figures (``0.00``) side by side on
-    the hold, a "Best draw" caption and its figure on the match summary."""
+    counts three (two) to a row, then two split figures (``0.00``) side by
+    side on the hold, a caption and its figure on a caption-value row ("Best
+    draw" on the match summary, "Worst", or "Reload avg" where a tile has a
+    reload, on a two-up hold)."""
     scale = kind.scale
     count = 3 * _ADVANCE_EMS * scale.detail
+    columns = kind.counts_columns
     if not _fits_row(
-        [count] * 3,
+        [count] * columns,
         inner=inner,
-        columns=3,
+        columns=columns,
         gap=_counts_gap(scale),
         em=scale.caption if kind.captions else scale.detail,
     ):
         return False
     figure = 4 * _ADVANCE_EMS * scale.headline
-    if match:
-        label = 9 * _LABEL_ADVANCE_EMS * scale.caption
+    if match or kind.caption_rows:
+        chars = 9 if match else (10 if reloads else 5)
+        label = chars * _LABEL_ADVANCE_EMS * scale.caption
         return label + _caption_value_gap(scale) + figure <= inner
     return _fits_row(
         [figure, figure],
@@ -847,10 +905,21 @@ def _grid_tile_height(
         return size * _LINE_EMS
 
     gutter = max(8, scale.pad // 2)
-    counts = 2 * line(scale.detail) + _PLATE_EMS * scale.detail + _counts_gap(scale)
+    count_rows = -(-6 // kind.counts_columns)
+    counts = (
+        count_rows * line(scale.detail) + _PLATE_EMS * scale.detail + (count_rows - 1) * _counts_gap(scale)
+    )
     if match:
         rows = 3 * line(scale.headline) + 2 * _caption_value_gap(scale)
         stack = 2 * line(scale.caption) + rows + counts + 3 * gutter
+    elif kind.caption_rows:
+        splits = 4 * line(scale.headline) + 3 * _caption_value_gap(scale)
+        if reloads:
+            splits += gutter + 3 * line(scale.headline) + 2 * _caption_value_gap(scale)
+        working = (
+            2 * line(scale.detail) + _sgrid_gap(cell_width) if kind.stack_figures else line(scale.detail)
+        )
+        stack = 2 * line(scale.caption) + splits + counts + working + 4 * gutter
     else:
         figure = line(scale.headline) + (line(scale.caption) if kind.captions else 0)
         splits = 2 * figure + _sgrid_gap(cell_width)
@@ -867,7 +936,12 @@ def _grid_tile_height(
 
 
 def upright_grid_type(
-    cell_width: int, cell_height: int, tiles: Sequence[TileRoom], *, match: bool = False
+    cell_width: int,
+    cell_height: int,
+    tiles: Sequence[TileRoom],
+    *,
+    match: bool = False,
+    caption_rows: bool = False,
 ) -> UprightGridType:
     """The one type scale of an upright grid's tiles (issue #1394 part 2),
     keyed to the cell's width: the name at 14 % of it, the split figures at
@@ -886,7 +960,10 @@ def upright_grid_type(
     ``False``), never drawn smaller. When a tile cannot fit even with
     everything at the floor (sixteen shooters on a 720 px wide frame), the
     type is what the widths allow and the fit drops by priority in the
-    tiles that are short of room."""
+    tiles that are short of room. ``caption_rows`` is a two-up grid
+    (:attr:`UprightGridType.caption_rows`): the figures may grow past the
+    width key (up to :data:`_GRID_GROWTH` times it) until the tiles are
+    full, the name staying at its width key."""
     rooms = list(tiles) or [TileRoom(cell_width, cell_height)]
     narrowest = min(min(cell_width, room.usable_width) for room in rooms)
     # The reload row only draws in a tile that has one: the narrowest of
@@ -895,11 +972,12 @@ def upright_grid_type(
         (min(cell_width, room.usable_width) for room in rooms if room.reloads), default=narrowest
     )
     manual = not match and any(room.manual_time for room in rooms)
+    reloads = any(room.reloads for room in rooms)
 
     def candidates() -> Iterator[UprightGridType]:
-        unit = cell_width / 100
+        unit = cell_width / 100 * (_GRID_GROWTH if caption_rows else 1)
         while True:
-            kind = _grid_scale(unit, cell_width, cell_height)
+            kind = _grid_scale(unit, cell_width, cell_height, caption_rows=caption_rows)
             if not match:
                 inner = narrowest - 2 * kind.scale.pad
                 reload_inner = narrowest_reload - 2 * kind.scale.pad
@@ -919,7 +997,7 @@ def upright_grid_type(
         inner = narrowest - 2 * kind.scale.pad
         if manual and _MANUAL_TIME_CHARS * _ADVANCE_EMS * kind.scale.detail > inner:
             return False
-        return _grid_rows_fit(kind, inner=inner, cell_width=cell_width, match=match)
+        return _grid_rows_fit(kind, inner=inner, cell_width=cell_width, match=match, reloads=reloads)
 
     def short_enough(kind: UprightGridType) -> bool:
         return all(

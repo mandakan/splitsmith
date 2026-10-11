@@ -29,7 +29,7 @@ from splitsmith.stage_summary_data import TileShot, TileStageData
 THEME = load_theme("splitsmith")
 NAMES = ("Anders", "Bea", "Mathias", "Nils", "Olof", "Petra", "Rikard", "Sanna", "Tove")
 NAMES += ("Ulla", "Viktor", "Wilma", "Xander", "Ylva", "Zlatan", "Kristoffersson")
-SHAPES = {4: (2, 2), 9: (3, 3), 16: (4, 4)}
+SHAPES = {2: (1, 2), 4: (2, 2), 9: (3, 3), 16: (4, 4)}
 UPRIGHT = [(1080, 1920), (720, 1280)]
 
 
@@ -360,7 +360,7 @@ _FILL_JS = r"""() => [...document.querySelectorAll('.cell')].map((cell) => {
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize(("width", "height", "count"), _HOLD_CASES)
+@pytest.mark.parametrize(("width", "height", "count"), [(w, h, n) for w, h in UPRIGHT for n in (2, 4, 9)])
 def test_an_upright_hold_uses_the_frame(tmp_path: Path, width: int, height: int, count: int) -> None:
     """The type is as large as the tightest tile allows: in that tile the
     band under the name fills at least 85 % of the height it has (the tile
@@ -371,6 +371,37 @@ def test_an_upright_hold_uses_the_frame(tmp_path: Path, width: int, height: int,
         html, width=geometry.canvas_width, height=geometry.canvas_height, tmp_path=tmp_path, js=_FILL_JS
     )
     assert max(fills) >= 0.85, fills
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(("width", "height"), UPRIGHT)
+def test_a_two_up_hold_lists_its_splits_as_caption_value_rows(
+    tmp_path: Path, width: int, height: int
+) -> None:
+    """Two tiles as tall as the frame: Best / Avg / Worst / Draw one to a
+    row, each caption left of its figure on the figure's row, not a 2x2.
+    The other grids keep the 2x2."""
+    html, geometry = _hold_html(width, height, 2)
+    items = _probe(html, width=geometry.canvas_width, height=geometry.canvas_height, tmp_path=tmp_path)
+    own = [item for item in items if item["tile"] == 0]
+    rows = []
+    for caption, figure in (("Best", "0.30"), ("Avg", "0.38"), ("Worst", "0.50"), ("Draw", "0.50")):
+        label = next(i for i in own if i["text"] == caption)
+        value = next(
+            i
+            for i in own
+            if i["text"] == figure
+            and i["box"]["top"] < label["box"]["bottom"]
+            and label["box"]["top"] < i["box"]["bottom"]
+        )
+        assert label["box"]["right"] < value["box"]["left"], caption
+        rows.append(value["box"]["top"])
+    assert rows == sorted(rows) and len({round(r) for r in rows}) == 4, rows
+    html, geometry = _hold_html(width, height, 4)
+    items = _probe(html, width=geometry.canvas_width, height=geometry.canvas_height, tmp_path=tmp_path)
+    own = [item for item in items if item["tile"] == 0]
+    best, avg = (next(i for i in own if i["text"] == t) for t in ("Best", "Avg"))
+    assert abs(best["box"]["top"] - avg["box"]["top"]) < 1  # side by side: the 2x2
 
 
 def test_a_reload_costs_its_own_row_and_no_more() -> None:
