@@ -39,6 +39,8 @@ function Harness({
   onToggleSlow,
   onRestart,
   peaks = envelope(3, [0.5, 1.0, 1.5]),
+  saved = [],
+  walkProps = {},
 }: {
   initial: AuditMarker[];
   record: (kind: string, payload: Record<string, unknown>) => void;
@@ -48,13 +50,15 @@ function Harness({
   onToggleSlow?: () => void;
   onRestart?: (scope: "all" | "shots" | "source") => void;
   peaks?: { peaks: number[]; duration: number };
+  saved?: Array<{ kind: string; payload: Record<string, unknown> }>;
+  walkProps?: Partial<React.ComponentProps<typeof MobileWalk>>;
 }) {
   const [markers, setMarkers] = useState(initial);
   return (
     <MobileWalk
       markers={markers}
       peaks={peaks}
-      savedEvents={[]}
+      savedEvents={saved}
       from={0}
       expectedRounds={null}
       snapDisplacementMs={() => null}
@@ -82,6 +86,7 @@ function Harness({
       scope="all"
       onScopeChange={() => {}}
       onRestart={onRestart}
+      {...walkProps}
     />
   );
 }
@@ -208,5 +213,43 @@ describe("MobileWalk rise foot", () => {
     fireEvent.click(strip, { clientX: ((0.514 - (0.49 - 0.04)) / 0.08) * 800 });
     fireEvent.click(screen.getByRole("button", { name: "Rise foot" }));
     expect(screen.getByText(/now: a shot at 0\.516 s/)).toBeTruthy();
+  });
+});
+
+describe("MobileWalk beep step", () => {
+  // This camera hears the source's three shots 0.1 s later, and a beep.
+  const here = envelope(3, [0.3, 0.6, 1.1, 1.6]);
+  const sourceProps = (onSetBeep: (t: number) => void, beepTime = 0.25) => ({
+    scope: "source" as const,
+    source: [0.5, 1.0, 1.5],
+    sourceAudio: { peaks: envelope(3, [0.2, 0.5, 1.0, 1.5]), beepTime: 0.2, camera: "GO 3S" },
+    beepTime,
+    onSetBeep,
+  });
+  const shots = [m("cand-1", "detected", 0.6), m("cand-2", "detected", 1.1), m("cand-3", "detected", 1.6)];
+
+  it("asks for the beep first, where the source's lands, and saves it on Confirm", () => {
+    const onSetBeep = vi.fn();
+    render(<Harness initial={shots} record={vi.fn()} peaks={here} walkProps={sourceProps(onSetBeep)} />);
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    expect(screen.getByText("Is this the beep?")).toBeTruthy();
+    expect(screen.getByText(/the stored beep is 0\.250 s, 50 ms apart/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm beep" }));
+    expect(onSetBeep).toHaveBeenCalledWith(0.3);
+    expect(screen.getByText(/Shot 1 of 3 on the source camera/)).toBeTruthy();
+  });
+
+  it("does not ask again for a beep this walk already confirmed", () => {
+    render(
+      <Harness
+        initial={shots}
+        record={vi.fn()}
+        peaks={here}
+        saved={[{ kind: "walk_beep", payload: { time: 0.3 } }]}
+        walkProps={sourceProps(vi.fn(), 0.3)}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    expect(screen.queryByText("Is this the beep?")).toBeNull();
   });
 });

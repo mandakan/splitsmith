@@ -5,6 +5,11 @@ import type { AuditMarker } from "@/components/MarkerLayer";
 import {
   alignToSource,
   alignmentOk,
+  beepProposal,
+  levelAt,
+  levelFlags,
+  typicalLevelAt,
+  unmapSourceTime,
   mapSourceTime,
   soundOnsets,
   sourceStops,
@@ -106,5 +111,45 @@ describe("sourceStops repairs a snap that landed on the wrong sounds", () => {
     ]);
     expect(moved[0].moveFrom).toBeCloseTo(2.196, 6);
     expect(stops.filter((s) => s.origin === "extra").map((s) => s.markerId)).toEqual(["far"]);
+  });
+});
+
+describe("levels on both cameras", () => {
+  it("maps a time back to the source", () => {
+    const a: SourceAlignment = { offset: -0.19, drift: -0.002, s0: 2, matched: 1, total: 1 };
+    expect(unmapSourceTime(a, mapSourceTime(a, 7.5))).toBeCloseTo(7.5, 9);
+  });
+
+  it("reads a sound's level and a camera's typical shot", () => {
+    const peaks = envelope(3, [0.5, 1.0, 2.0]);
+    expect(levelAt(peaks, 0.5)).toBeCloseTo(1, 6);
+    expect(levelAt(peaks, 1.5)).toBeCloseTo(0.01, 6);
+    expect(typicalLevelAt(peaks, [0.5, 1.0, 2.0])).toBeCloseTo(1, 6);
+  });
+
+  it("says what each camera heard, and what that suggests", () => {
+    expect(levelFlags({ here: 0.04, there: 0.7, camera: "GO 3S", origin: "source" })).toEqual([
+      { tone: "info", text: "Loudness: here 4 %, GO 3S 70 % of a typical shot." },
+      {
+        tone: "warn",
+        kind: "verdict",
+        text: "This camera hears nothing here; the GO 3S does. Most likely a sound only its mic picked up, not a shot: Not a shot here, and the source may need a look.",
+      },
+    ]);
+    expect(levelFlags({ here: 0.9, there: 1.06, camera: "GO 3S", origin: "extra" })[1].text).toMatch(
+      /^Loud on both cameras/,
+    );
+    expect(levelFlags({ here: 0.2, there: 0.1, camera: null, origin: "extra" })[1].text).toBe(
+      "Quiet on both cameras: most likely a shot in another bay.",
+    );
+    expect(levelFlags({ here: 1, there: 1, camera: "GO 3S", origin: "source" })).toHaveLength(1);
+  });
+
+  it("proposes the beep where the source's lands, on its onset", () => {
+    const a: SourceAlignment = { offset: -0.6, drift: 0, s0: 2, matched: 1, total: 1 };
+    expect(beepProposal(a, 1.1, envelope(3, [0.5]))).toBe(0.5);
+    // The fit puts it 90 ms early: the beep is still found.
+    expect(beepProposal(a, 1.01, envelope(3, [0.5]))).toBe(0.5);
+    expect(beepProposal(a, 2.6, envelope(3, [0.5]))).toBe(2);
   });
 });

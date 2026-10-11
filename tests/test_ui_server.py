@@ -10916,7 +10916,15 @@ def test_fixture_source_names_the_snapped_fixtures_source(tmp_path: Path) -> Non
     )
 
     body = client.get(f"/api/fixture/source?path={snapped}").json()
-    assert body == {"stem": "stage-shots-m-stage6-s1", "shots": [7.2, 8.4], "rounds": 24}
+    assert body == {
+        "stem": "stage-shots-m-stage6-s1",
+        "path": str((fx / "stage-shots-m-stage6-s1.json").resolve()),
+        "shots": [7.2, 8.4],
+        "rounds": 24,
+        "beep_time": None,
+        "camera": None,
+        "duration": None,
+    }
 
     # Its source is the longest unsnapped prefix, never another snap.
     deeper = fx / "stage-shots-m-stage6-s1-apple-iphone17pro-x.json"

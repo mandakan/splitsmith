@@ -51,7 +51,11 @@ export function MobileWalk(props: WalkProps) {
   // hidden, which on a phone would cover the stop.
   const [guideShown, setGuideShown] = useState(false);
   const toggleGuide = () => setGuideShown((v) => !v);
-  const w = useWalk(props, { holdLoop: !started });
+  // The beep step (a walk that follows the source): the beep first, once.
+  const [beepDone, setBeepDone] = useState(false);
+  const [beepAt, setBeepAt] = useState<number | null>(null);
+  const [onBeepStep, setOnBeepStep] = useState(false);
+  const w = useWalk(props, { holdLoop: !started || onBeepStep });
   // The whole-stage strip keeps the current stop in the middle of its view.
   const stageScroller = useRef<HTMLDivElement | null>(null);
   const followKey = w.stop?.key ?? null;
@@ -65,11 +69,29 @@ export function MobileWalk(props: WalkProps) {
   const { markers, peaks, busy } = props;
   const { stops, index, stop, marker, state, time, level, decidedCount, keptCount, check, armed, actions } = w;
 
+  const beepStepDue = !!w.beep && !w.beep.confirmed && !beepDone && !!props.onSetBeep;
   const start = () => {
     setStarted(true);
     // Inside the tap: the only moment a phone lets the page start sound.
+    if (beepStepDue && w.beep) {
+      setOnBeepStep(true);
+      setBeepAt(w.beep.proposed);
+      // Nothing to hear when the beep is before the clip.
+      if (w.beep.proposed >= 0) props.onLoopStop(w.beep.proposed);
+      return;
+    }
     if (props.loop) props.onLoopStop(stop ? w.anchor : null);
     else if (stop) props.onListen(w.anchor);
+  };
+  const moveBeep = (t: number) => {
+    const at = Math.round(t * 1000) / 1000;
+    setBeepAt(at);
+    props.onLoopStop(at);
+  };
+  const leaveBeep = (t: number | null) => {
+    if (t != null) props.onSetBeep?.(t);
+    setBeepDone(true);
+    setOnBeepStep(false);
   };
 
   const header = (
@@ -136,6 +158,101 @@ export function MobileWalk(props: WalkProps) {
               Ask every stop again
             </Button>
           ) : null}
+        </div>
+      </FullScreen>
+    );
+  }
+
+  if (onBeepStep && w.beep && beepAt != null) {
+    const { stored, proposed } = w.beep;
+    const camera = props.sourceAudio?.camera ?? "source camera";
+    const apart = stored != null ? Math.round(Math.abs(stored - proposed) * 1000) : null;
+    const beepMark = { markers: [], currentId: null, currentTime: beepAt, candidateTime: null, foot: null };
+    // A camera that started recording after the beep: there is nothing to
+    // place, only the source's word for where it was.
+    const before = proposed < 0;
+    return (
+      <FullScreen>
+        <div className="flex flex-col gap-2 p-3 pb-40">
+          {header}
+          {props.title ? <p className="text-muted">{props.title}</p> : null}
+          <div className="space-y-1 rounded-md border border-status-warning/60 p-2 text-sm">
+            <p className="text-base font-semibold text-ink">Is this the beep?</p>
+            <p className="text-muted">now: the beep at {beepAt.toFixed(3)} s</p>
+            {before ? (
+              <p className="text-ink">
+                This camera started recording after the beep: the {camera}&apos;s beep lands{" "}
+                {Math.abs(proposed).toFixed(3)} s before this clip begins
+                {stored != null ? `, and the stored beep (${stored.toFixed(3)} s) is not a beep at all` : ""}. Every
+                split from the beep on this camera starts from it.
+              </p>
+            ) : (
+              <p className="text-ink">
+                The {camera}&apos;s beep lands at {proposed.toFixed(3)} s on this camera
+                {stored != null ? `; the stored beep is ${stored.toFixed(3)} s, ${apart} ms apart` : "; none is stored"}.
+                Every split from the beep on this camera starts here.
+              </p>
+            )}
+          </div>
+          {before ? null : (
+          <>
+          <Strip
+            label="80 ms around the beep: tap to place it"
+            audio={props.audio}
+            peaks={peaks}
+            center={beepAt}
+            half={DETAIL_HALF_S}
+            level={w.level}
+            fit="window"
+            {...beepMark}
+            onPlace={moveBeep}
+            tickMs={10}
+            cssHeight={DETAIL_HEIGHT}
+          />
+          <Strip
+            label="300 ms around the beep"
+            audio={props.audio}
+            peaks={peaks}
+            center={beepAt}
+            half={CLOSEUP_HALF_S}
+            level={w.level}
+            fit="window"
+            {...beepMark}
+            onPlace={moveBeep}
+            tickMs={50}
+            cssHeight={CLOSE_HEIGHT}
+          />
+          </>
+          )}
+          <div className="fixed inset-x-0 bottom-0 z-40 space-y-1.5 border-t border-border bg-surface p-1.5 pb-[calc(0.375rem+env(safe-area-inset-bottom))]">
+            <div className={before ? "hidden" : "flex gap-1.5"}>
+              {[-5, -1, 1, 5].map((ms) => (
+                <Button
+                  key={ms}
+                  className={BIG}
+                  onClick={() => moveBeep(beepAt + ms / 1000)}
+                  aria-label={`${ms > 0 ? "+" : ""}${ms} ms`}
+                >
+                  {ms > 0 ? `+${ms}` : ms}
+                </Button>
+              ))}
+            </div>
+            <div className="flex gap-1.5">
+              {stored != null ? (
+                <Button className={BIG} onClick={() => leaveBeep(stored)}>
+                  Keep {stored.toFixed(3)}
+                </Button>
+              ) : null}
+              <Button
+                className="min-h-11 min-w-0 flex-[1.5] px-1 text-base"
+                variant="primary"
+                onClick={() => leaveBeep(beepAt)}
+              >
+                {before ? `Use ${proposed.toFixed(3)}` : "Confirm beep"}
+              </Button>
+            </div>
+          </div>
+          {guide}
         </div>
       </FullScreen>
     );
@@ -211,8 +328,17 @@ export function MobileWalk(props: WalkProps) {
     shape,
   );
   if (neighbour) flags.push(neighbour);
-  const quiet = quietFlag(peaks, time, level);
-  if (quiet) flags.unshift(quiet);
+  // Both cameras' loudness says more than this camera's alone, and a verdict
+  // from it replaces the extra's guess from the count.
+  if (w.levelFlags.some((f) => f.kind === "verdict")) {
+    const at = flags.findIndex((f) => f.kind === "extra");
+    if (at >= 0) flags.splice(at, 1);
+  }
+  if (w.levelFlags.length > 0) flags.unshift(...w.levelFlags);
+  else {
+    const quiet = quietFlag(peaks, time, level);
+    if (quiet) flags.unshift(quiet);
+  }
   const { foot, placement } = w;
   const mark = {
     markers,

@@ -75,6 +75,12 @@ export interface WalkProps {
   source?: number[] | null;
   /** Which fixture this is, in words (lib/walk ``fixtureTitle``). */
   title?: string;
+  /** The source camera's audio levels, beep and name: the walk that follows
+   *  the source reads both cameras' loudness at each stop and proposes the beep. */
+  sourceAudio?: { peaks: SnapPeaks; beepTime: number | null; camera: string | null } | null;
+  /** This fixture's beep, and how the walk changes it (the phone's beep step). */
+  beepTime?: number | null;
+  onSetBeep?: (time: number) => void;
 }
 
 export function Walk(props: WalkProps) {

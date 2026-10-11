@@ -388,6 +388,9 @@ export function isDecided(state: StopState, time: number, decisions: ReadonlyArr
 export interface StopFlag {
   tone: "warn" | "info";
   text: string;
+  /** ``extra``: the source has no shot here (a guess from the count);
+   *  ``verdict``: what both cameras' loudness says, which replaces it. */
+  kind?: "extra" | "verdict";
 }
 
 /** The one question a stop asks, what the page sees there, and which keys
@@ -491,6 +494,7 @@ export function stopFlags(opts: {
   if (stop.origin === "extra" && stopState(marker) === "shot") {
     flags.push({
       tone: "warn",
+      kind: "extra",
       text: "The source camera has no shot here: most likely an echo, a shot in another bay or a duplicate. Not a shot, unless you hear one the source missed.",
     });
   }

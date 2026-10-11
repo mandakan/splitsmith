@@ -13,7 +13,7 @@
 
 import type { AuditMarker } from "@/components/MarkerLayer";
 import { snapToLeadingEdge, type SnapPeaks } from "@/lib/peak-snap";
-import { soundPeaks, type WalkStop } from "@/lib/walk";
+import { soundPeaks, type StopFlag, type WalkStop } from "@/lib/walk";
 
 /** Offsets are voted in bins this wide. */
 const VOTE_BIN_S = 0.005;
@@ -45,6 +45,11 @@ export interface SourceAlignment {
 
 export function mapSourceTime(a: SourceAlignment, s: number): number {
   return s + a.offset + a.drift * (s - a.s0);
+}
+
+/** The source's time for this camera's ``t``: ``mapSourceTime`` undone. */
+export function unmapSourceTime(a: SourceAlignment, t: number): number {
+  return a.s0 + (t - a.offset - a.s0) / (1 + a.drift);
 }
 
 /** Whether the fit is good enough to lead the walk. */
@@ -179,4 +184,80 @@ export function sourceStops(
     if (!used.has(m.id)) stops.push({ key: m.id, markerId: m.id, time: m.time, origin: "extra" });
   }
   return stops.sort((a, b) => a.time - b.time || a.key.localeCompare(b.key));
+}
+
+/** A sound's loudest point, 10 ms before ``t`` to 40 ms after. */
+export function levelAt(peaks: SnapPeaks, t: number): number {
+  const p = peaks.peaks;
+  if (p.length === 0 || peaks.duration <= 0) return 0;
+  const w = peaks.duration / p.length;
+  const a = Math.max(0, Math.floor((t - 0.01) / w));
+  const b = Math.min(p.length, Math.ceil((t + 0.04) / w));
+  let m = 0;
+  for (let i = a; i < b; i++) if (p[i] > m) m = p[i];
+  return m;
+}
+
+/** The source camera's typical shot: the median level at its shots. */
+export function typicalLevelAt(peaks: SnapPeaks, shots: ReadonlyArray<number>): number {
+  const v = shots.map((s) => levelAt(peaks, s)).sort((x, y) => x - y);
+  return v.length ? v[Math.floor(v.length / 2)] : 0;
+}
+
+/** Under this share of a typical shot a camera heard nothing there. */
+const UNHEARD_SHARE = 0.1;
+/** At or above this share a camera heard a shot-like sound. */
+const HEARD_SHARE = 0.4;
+/** Both cameras at or above this: loud for both. */
+const LOUD_SHARE = 0.5;
+/** Both cameras under this: quiet for both, as a shot in another bay is. */
+const QUIET_SHARE = 0.35;
+
+/** What the two cameras heard at a stop, in words. ``here`` and ``there``
+ *  are shares of each camera's typical shot. The shooter's head camera sits
+ *  next to the gun: the shooter's own shot is loud on it, a shot in another
+ *  bay is quiet on both, and a sound only one camera's mic picked up (a
+ *  bump, handling) is loud on that one alone. */
+export function levelFlags(opts: {
+  here: number;
+  there: number;
+  camera: string | null;
+  origin: WalkStop["origin"];
+}): StopFlag[] {
+  const { here, there, origin } = opts;
+  const camera = opts.camera ?? "the source camera";
+  const pct = (v: number) => `${Math.round(v * 100)} %`;
+  const flags: StopFlag[] = [
+    { tone: "info", text: `Loudness: here ${pct(here)}, ${camera} ${pct(there)} of a typical shot.` },
+  ];
+  if (origin === "source" && here < UNHEARD_SHARE && there >= HEARD_SHARE) {
+    flags.push({
+      tone: "warn",
+      kind: "verdict",
+      text: `This camera hears nothing here; the ${camera} does. Most likely a sound only its mic picked up, not a shot: Not a shot here, and the source may need a look.`,
+    });
+  } else if (origin === "extra" && here >= LOUD_SHARE && there >= LOUD_SHARE) {
+    flags.push({
+      tone: "warn",
+      kind: "verdict",
+      text: "Loud on both cameras: more likely the shooter's own shot than one from another bay. The source may have missed it.",
+    });
+  } else if (origin === "extra" && here < QUIET_SHARE && there < QUIET_SHARE) {
+    flags.push({ tone: "info", kind: "verdict", text: "Quiet on both cameras: most likely a shot in another bay." });
+  }
+  return flags;
+}
+
+/** The beep is looked for this far either side of where the fit puts it.
+ *  The fit is made of shots, which travel from wherever the shooter stands;
+ *  the beep travels from the timer, so it maps up to about 0.1 s off (90 ms
+ *  on hostfinalen stage 7). No shot comes this soon after a beep. */
+const BEEP_SEARCH_S = 0.2;
+
+/** Where this camera's beep should be: the source's beep through the fit,
+ *  on the onset of the loudest sound within ``BEEP_SEARCH_S`` of it. */
+export function beepProposal(align: SourceAlignment, sourceBeep: number, peaks: SnapPeaks): number {
+  const t = mapSourceTime(align, sourceBeep);
+  const onset = snapToLeadingEdge(t, peaks, BEEP_SEARCH_S);
+  return Math.round((onset ?? t) * 1000) / 1000;
 }

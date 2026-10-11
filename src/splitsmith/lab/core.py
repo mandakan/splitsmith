@@ -775,9 +775,17 @@ class AnchorSource(BaseModel):
     """The fixture a snapped one was snapped from, as the review walk reads it."""
 
     stem: str
+    #: The source fixture's JSON, for its audio (``/api/fixture/peaks``).
+    path: str
     #: The source's shot times in its own clip's seconds, in time order.
     shots: list[float]
     rounds: int | None = None
+    #: The source's reviewed beep, in its own clip's seconds.
+    beep_time: float | None = None
+    #: The source camera, in words ("GO 3S"), for the walk's level line.
+    camera: str | None = None
+    #: The source clip's length, so its 1 ms levels take one request.
+    duration: float | None = None
 
 
 def _is_snapped(doc: dict[str, Any]) -> bool:
@@ -827,7 +835,29 @@ def anchor_source(fixture_path: Path) -> AnchorSource | None:
     )
     rounds_block = data.get("stage_rounds")
     rounds = rounds_block.get("expected") if isinstance(rounds_block, dict) else None
-    return AnchorSource(stem=other, shots=shots, rounds=rounds if isinstance(rounds, int) else None)
+    beep = data.get("beep_time")
+    cam = data.get("camera")
+    camera = None
+    if isinstance(cam, dict):
+        camera = cam.get("model") or cam.get("id")
+    duration = None
+    wav = fixture_path.parent / f"{other}.wav"
+    if wav.exists():
+        import soundfile as sf
+
+        try:
+            duration = float(sf.info(str(wav)).duration)
+        except RuntimeError:
+            duration = None
+    return AnchorSource(
+        stem=other,
+        path=str(fixture_path.parent / f"{other}.json"),
+        shots=shots,
+        rounds=rounds if isinstance(rounds, int) else None,
+        beep_time=float(beep) if isinstance(beep, (int, float)) and not isinstance(beep, bool) else None,
+        camera=camera if isinstance(camera, str) and camera else None,
+        duration=duration,
+    )
 
 
 def confirm_review(audit_path: Path, method: str | None = None) -> str:

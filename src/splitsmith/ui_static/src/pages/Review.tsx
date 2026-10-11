@@ -60,6 +60,7 @@ import {
   api,
   type AuditEvent,
   type PeaksResult,
+  type FixtureSource,
   type StageAudit,
 } from "@/lib/api";
 import { deriveMarkers } from "@/lib/audit-doc";
@@ -137,6 +138,26 @@ export function Review() {
   const [walkRound, setWalkRound] = useState(0);
   // A snapped fixture's source shots: its walk follows them (lib/sourceWalk).
   const [sourceShots, setSourceShots] = useState<number[] | null>(null);
+  const [source, setSource] = useState<FixtureSource | null>(null);
+  // The source's 1 ms levels: the walk reads both cameras' loudness from them.
+  const [sourcePeaks, setSourcePeaks] = useState<SnapPeaks | null>(null);
+  useEffect(() => {
+    setSourcePeaks(null);
+    if (!source?.duration) return;
+    let alive = true;
+    const bins = Math.min(FIXTURE_PEAKS_MAX_BINS, Math.ceil(source.duration / 0.001));
+    api
+      .getFixturePeaks(source.path, bins)
+      .then((p) => {
+        if (alive) setSourcePeaks({ peaks: p.peaks, duration: p.duration });
+      })
+      .catch(() => {
+        // Without them the walk has no level line; nothing else needs them.
+      });
+    return () => {
+      alive = false;
+    };
+  }, [source]);
   const restartWalk = useCallback((scope: WalkScope) => {
     setScopeOverride(scope);
     setWalkRound((n) => n + 1);
@@ -310,6 +331,7 @@ export function Review() {
       .then(([a, source]) => {
         if (!alive) return;
         setSourceShots(source && source.shots.length > 0 ? source.shots : null);
+        setSource(source);
         auditRef.current = a;
         loadedPathRef.current = fixturePath;
         setAudit(a);
@@ -969,6 +991,22 @@ export function Review() {
     }
   }, [walkLoop, pauseListening, phone]);
 
+  // The walk's beep step: the beep moves, the change is an audit event, and
+  // it saves at once like a decision.
+  const setBeepFromWalk = useCallback(
+    (t: number) => {
+      const base = auditRef.current;
+      if (!base) return;
+      const time = Math.round(t * 1000) / 1000;
+      recordEvent("walk_beep", { from: base.beep_time ?? null, time, method: WALK_METHOD });
+      auditRef.current = { ...base, beep_time: time };
+      setAudit(auditRef.current);
+      isDirtyRef.current = true;
+      setAutosaveTick((n) => n + 1);
+    },
+    [recordEvent],
+  );
+
   const toggleWalkSlow = useCallback(() => {
     const on = !walkSlow;
     writeSlowOn(on);
@@ -1319,6 +1357,11 @@ export function Review() {
               onRestart={restartWalk}
               source={sourceShots}
               title={fixtureTitle(audit as never)}
+              sourceAudio={
+                source && sourcePeaks ? { peaks: sourcePeaks, beepTime: source.beep_time, camera: source.camera } : null
+              }
+              beepTime={audit.beep_time ?? null}
+              onSetBeep={setBeepFromWalk}
             />
           ) : walkMode && peaks ? (
             <div className="flex items-center gap-2 text-sm text-muted">
