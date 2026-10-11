@@ -465,7 +465,11 @@ puts ``SafeArea.css_vars()`` into the engine stylesheet (upright only, so
 square and wider contexts are unchanged), ``cell.js`` pads the cell by
 ``--safe-bottom`` and ``--safe-right`` (both sides, lifting a lower third
 with it) and turns on ``fit.js``'s right inset, and ``credit.js`` sets the
-credit just above the bottom band. The end screen's name wraps at spaces
+credit just above the bottom band. On an upright card the info lines under
+the name (all ``Role.DETAIL``, the date included) fit as one block
+(``fit.js`` ``fitInfoBlock``): one size, the largest at which every line
+fits, down to the legibility floor, and only a line that does not fit
+there wraps. The end screen's name wraps at spaces
 only: a word wider than the column shrinks the name, and only a word too
 long at the floor is cut with "...".
 ``tests/test_card_logos.py`` measures it all in Chromium.

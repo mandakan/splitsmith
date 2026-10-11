@@ -191,7 +191,8 @@ def _confirmed_regions(audit_doc: dict | None) -> list[StageEvent]:
 #: mark gives way to the event logo and an upright card's name takes two
 #: lines rather than end in "..." (#1431), and a summary's text keeps
 #: clear of the pasted shooter logo (#1432); every upright card keeps its
-#: text out of the platform safe area and the end screen never breaks a word.
+#: text out of the platform safe area, its info lines at one size, and the
+#: end screen never breaks a word.
 PREVIEW_REVISION = 9
 
 

@@ -489,3 +489,30 @@ def test_the_end_screen_never_breaks_a_word(width: int, height: int, text: str) 
         assert word["lines"] == 1, f"{word['word']!r} is broken over {word['lines']} lines"
         assert word["right"] <= page["right"] + 0.5, f"{word['word']!r} runs past the column"
     assert not page["cut"]
+
+
+_INFO_JS = r"""() => Array.from(document.querySelectorAll('.anchor-middle-center .role-detail')).map(v => {
+  const range = document.createRange();
+  range.selectNodeContents(v);
+  return {text: v.textContent, size: parseFloat(getComputedStyle(v).fontSize),
+          clipped: v.scrollWidth > v.clientWidth + 0.5, right: range.getBoundingClientRect().right};
+})"""
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(("width", "height"), UPRIGHT)
+@pytest.mark.parametrize("variant", ["default", "rise"])
+@pytest.mark.parametrize("with_logos", [True, False])
+def test_an_upright_title_page_draws_its_info_lines_at_one_size(
+    variant: str, width: int, height: int, with_logos: bool, logos: dict[str, Path]
+) -> None:
+    """The lines under the name (all the same detail role, the date
+    included) fit as one block: one size, the largest at which all fit."""
+    info = ("2026-09-13", "Bo", "Bromma Pistolklubb", "Production Optics Standard")
+    lines = _card_page(
+        "title_page", variant, width, height, logos if with_logos else None, info=info, js=_INFO_JS
+    )
+    assert [line["text"] for line in lines] == list(info)
+    assert len({round(line["size"], 2) for line in lines}) == 1, lines
+    assert not any(line["clipped"] for line in lines), lines
+    assert all(line["right"] <= width - round(width * 0.12) + 0.5 for line in lines), lines

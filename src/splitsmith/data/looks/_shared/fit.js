@@ -220,6 +220,36 @@ window.__splitsmithFit = function () {
     scaleValues(values, bases, lo);
     return false;
   }
+  // The info block (an upright card's detail lines under the name: date,
+  // shooter, club, division) fits as one: when any line runs past its
+  // edge, every line takes the same size, the largest at which all of
+  // them fit, down to the legibility floor. A line that does not fit even
+  // there is left at the floor for the step below, which wraps it at its
+  // spaces. A block whose lines all fit is left exactly as it was.
+  function fitInfoBlock(cell, edgesFor) {
+    var els = Array.prototype.filter.call(cell.querySelectorAll('.anchor-middle-center .el'), function (el) {
+      return getComputedStyle(el).display !== 'none' && el.querySelector('.role-detail') && !el.closest('.flow-grid');
+    });
+    if (els.length < 2) { return; }
+    if (!els.some(function (el) { return pastEdge(el, edgesFor(el)); })) { return; }
+    var boxes = els.map(function (el) { return target(textRect(el), edgesFor(el)); });
+    var values = [];
+    els.forEach(function (el) { values = values.concat(Array.prototype.slice.call(el.querySelectorAll('.value'))); });
+    var bases = values.map(function (v) { return parseFloat(getComputedStyle(v).fontSize) || 0; });
+    var sizes = bases.filter(function (b) { return b > 0; });
+    if (!sizes.length) { return; }
+    var lo = Math.min(1, window.__splitsmithMinFont / Math.min.apply(null, sizes));
+    var hi = 1;
+    function fitAll() { return els.every(function (el, i) { return inside(el, boxes[i]); }); }
+    scaleValues(values, bases, lo);
+    if (!fitAll()) { return; }
+    for (var i = 0; i < 14; i++) {
+      var mid = (lo + hi) / 2;
+      scaleValues(values, bases, mid);
+      if (fitAll()) { lo = mid; } else { hi = mid; }
+    }
+    scaleValues(values, bases, lo);
+  }
   function fitWidth(cell) {
     var edges = cell.getBoundingClientRect();
     if (!(edges.width > 0)) { return; }
@@ -241,6 +271,7 @@ window.__splitsmithFit = function () {
       var right = r.right - (parseFloat(getComputedStyle(row).paddingRight) || 0);
       return {left: edges.left, right: Math.min(edges.right, right), top: edges.top, bottom: edges.bottom};
     }
+    if (window.__splitsmithFitLines > 1) { fitInfoBlock(cell, edgesFor); }
     cell.querySelectorAll('.el').forEach(function (el) {
       var bounds = edgesFor(el);
       if (getComputedStyle(el).display === 'none' || !pastEdge(el, bounds)) { return; }
