@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.65.1](https://github.com/mandakan/splitsmith/compare/v0.65.0...v0.65.1) (2026-10-11)
+
+
+### Bug Fixes
+
+* **cards:** logos never collide, cover text or upscale; upright cards keep out of the safe area ([#1436](https://github.com/mandakan/splitsmith/issues/1436)) ([582bb2c](https://github.com/mandakan/splitsmith/commit/582bb2c82fe0dd7de443d9464ab6725f766e359a))
+* **overlay:** the HUD never runs late on a clip that starts less than the pre-buffer before the beep ([#1430](https://github.com/mandakan/splitsmith/issues/1430)) ([#1434](https://github.com/mandakan/splitsmith/issues/1434)) ([42420ac](https://github.com/mandakan/splitsmith/commit/42420ac8dc3b8d1bbcd1123384084835eb7aacb0))
+
 ## [0.65.0](https://github.com/mandakan/splitsmith/compare/v0.64.1...v0.65.0) (2026-10-11)
 
 
