@@ -80,6 +80,26 @@
     // (fit.js fitLines, #1431); a name that fits one line is untouched.
     var size = window.splitsmith.size;
     if (size && size.height > size.width) { window.__splitsmithFitLines = 2; }
+    // The platform safe area of an upright card (the engine stylesheet's
+    // --safe-bottom / --safe-right, safe_area.py): the cell keeps its text
+    // above the bottom band and in from the button column, on both sides
+    // so a centred line stays centred; fit.js measures to that padding.
+    var root = getComputedStyle(document.documentElement);
+    var bottom = parseFloat(root.getPropertyValue('--safe-bottom')) || 0;
+    var right = parseFloat(root.getPropertyValue('--safe-right')) || 0;
+    var cell = document.body.firstElementChild;
+    if ((bottom > 0 || right > 0) && cell) {
+      cell.style.padding = '0 ' + right + 'px ' + bottom + 'px';
+      window.__splitsmithFitInset = true;
+      // A corner anchor (a lower third) is placed against the cell's
+      // padding box, which the padding does not move: lift it too.
+      cell.querySelectorAll('.anchor-bottom-left, .anchor-bottom-right').forEach(function (a) {
+        a.style.bottom = parseFloat(getComputedStyle(a).bottom) + bottom + 'px';
+      });
+      cell.querySelectorAll('.anchor-bottom-right').forEach(function (a) {
+        a.style.right = parseFloat(getComputedStyle(a).right) + right + 'px';
+      });
+    }
   };
   if (typeof window.duration !== 'function') { window.duration = function () { return 0; }; }
   if (typeof window.seek !== 'function') { window.seek = function () {}; }

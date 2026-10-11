@@ -202,8 +202,16 @@ def _overlaps(a: dict[str, float], b: dict[str, float]) -> bool:
 
 
 def _card_page(
-    slot: str, variant: str, width: int, height: int, logos: dict[str, Path], *, info: tuple[str, ...]
-) -> dict[str, Any]:
+    slot: str,
+    variant: str,
+    width: int,
+    height: int,
+    logos: dict[str, Path] | None,
+    *,
+    info: tuple[str, ...],
+    text: str = "HFO Masters 2026",
+    js: str = _PROBE_JS,
+) -> Any:
     from splitsmith.look_brand import brand_json
     from splitsmith.looks import load_look, template_for
     from splitsmith.overlay_card import card_context
@@ -211,14 +219,19 @@ def _card_page(
     from splitsmith.overlay_theme import theme_for
 
     look = load_look("splitsmith")
-    card = composition.MatchTitle(
-        text="HFO Masters 2026",
-        info=info,
-        variant=variant,
-        logo=logos["event"],
-        credit=slot == "closing",
-        brand=composition.BrandMark(logo_path=logos["brand"]),
-    )
+    card: composition.MatchTitle | composition.TitleCard
+    if slot in ("slate", "lower_third"):
+        style = "slate" if slot == "slate" else "lower-third"
+        card = composition.TitleCard(text=text, info=info, variant=variant, style=style, duration_seconds=2.0)
+    else:
+        card = composition.MatchTitle(
+            text=text,
+            info=info,
+            variant=variant,
+            logo=logos["event"] if logos else None,
+            credit=slot == "closing",
+            brand=composition.BrandMark(logo_path=logos["brand"]) if logos else None,
+        )
     context = card_context(
         card,
         slot=slot,  # type: ignore[arg-type]
@@ -226,8 +239,12 @@ def _card_page(
         height=height,
         fps=30.0,
         theme=theme_for(look),
-        shooters=(ResolvedIdentity(label="Mathias Axell", accent=None, logo_path=logos["club"], club=None),),
-        brand=brand_json(look, slot, card.brand),  # type: ignore[arg-type]
+        shooters=(
+            ResolvedIdentity(
+                label="Mathias Axell", accent=None, logo_path=logos["club"] if logos else None, club=None
+            ),
+        ),
+        brand=brand_json(look, slot, getattr(card, "brand", None)),  # type: ignore[arg-type]
     )
     template = template_for(look, slot, variant)  # type: ignore[arg-type]
     try:
@@ -238,7 +255,7 @@ def _card_page(
                 view.call("fonts")
                 view.call("fit")
                 assert view.errors == []
-                return view.page.evaluate(_PROBE_JS)
+                return view.page.evaluate(js)
             finally:
                 view.close()
     except RasterizerUnavailableError as exc:
@@ -375,3 +392,100 @@ def test_a_grid_hold_keeps_each_name_off_its_tile_logo(
     # A name that only just reaches the logo shrinks to end before it
     # (fit.js, --logo-room) rather than losing its end to "...".
     assert [t for t in page["texts"] if t["text"] == "Mathias Axell" and not t["cut"]]
+
+
+# --- the upright safe area on every card (owner decision for every upright card) ----
+
+
+def _in_safe_area(texts: list[dict[str, Any]], width: int, height: int) -> list[str]:
+    """Text drawn into what Shorts / Reels / TikTok cover, the area written
+    out by hand here (not read from safe_area.py): the bottom 13 % and the
+    right 12 % from 40 % down."""
+    bottom_line = height - round(height * 0.13)
+    right_line = width - round(width * 0.12)
+    right_top = round(height * 0.40)
+    out = []
+    for t in texts:
+        b = t["box"]
+        if b["right"] <= b["left"]:
+            continue
+        if b["bottom"] > bottom_line + 0.5:
+            out.append(f"in the bottom band: {t['text']}")
+        elif b["right"] > right_line + 0.5 and b["bottom"] > right_top:
+            out.append(f"in the button column: {t['text']}")
+    return out
+
+
+_CARDS = [
+    ("title_page", "default"),
+    ("title_page", "rise"),
+    ("closing", "default"),
+    ("closing", "rise"),
+    ("closing", "end-screen"),
+    ("slate", "default"),
+    ("lower_third", "default"),
+]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(("width", "height"), UPRIGHT)
+@pytest.mark.parametrize(("slot", "variant"), _CARDS)
+@pytest.mark.parametrize("with_logos", [True, False])
+def test_an_upright_card_keeps_its_text_out_of_the_safe_area(
+    slot: str, variant: str, width: int, height: int, with_logos: bool, logos: dict[str, Path]
+) -> None:
+    info = ("2026-09-13", "Mathias Axell", "Bromma PK", "Production Optics")
+    page = _card_page(slot, variant, width, height, logos if with_logos else None, info=info)
+    assert page["texts"]
+    assert _in_safe_area(page["texts"], width, height) == []
+
+
+@pytest.mark.parametrize(("width", "height"), [(1920, 1080), (1080, 1080), (1440, 1080)])
+def test_a_square_or_wider_card_carries_no_safe_area(width: int, height: int) -> None:
+    from splitsmith.looks import load_look
+    from splitsmith.overlay_card import card_context
+    from splitsmith.overlay_theme import theme_for
+
+    card = composition.MatchTitle(text="HFO Masters 2026", info=("2026-09-13",), credit=True)
+    context = card_context(
+        card, slot="closing", width=width, height=height, fps=30.0, theme=theme_for(load_look("splitsmith"))
+    )
+    assert "--safe-bottom" not in context.engine["css"]
+
+
+#: Every word of the end screen's name, and the lines it sits on.
+_WORDS_JS = r"""() => {
+  const name = document.querySelector('.name');
+  const node = name.firstChild;
+  const text = node.textContent;
+  const words = [];
+  const re = /\S+/g;
+  let m;
+  while ((m = re.exec(text))) {
+    const range = document.createRange();
+    range.setStart(node, m.index);
+    range.setEnd(node, m.index + m[0].length);
+    const rects = Array.from(range.getClientRects()).filter(r => r.width > 0);
+    const tops = new Set(rects.map(r => Math.round(r.top)));
+    const r = range.getBoundingClientRect();
+    words.push({word: m[0], lines: tops.size, right: r.right});
+  }
+  const box = name.getBoundingClientRect();
+  const s = getComputedStyle(name);
+  const cut = s.textOverflow === 'ellipsis' && name.scrollWidth > name.clientWidth + 0.5;
+  return {words, right: box.right, cut};
+}"""
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(("width", "height"), [*UPRIGHT, (1920, 1080)])
+@pytest.mark.parametrize("text", ["HFO Masters 2026", "Stockholm Open IPSC Handgun Championship 2026"])
+def test_the_end_screen_never_breaks_a_word(width: int, height: int, text: str) -> None:
+    page = _card_page(
+        "closing", "end-screen", width, height, None, info=("2026-09-13",), text=text, js=_WORDS_JS
+    )
+    assert page["words"]
+    for word in page["words"]:
+        assert word["lines"] == 1, f"{word['word']!r} is broken over {word['lines']} lines"
+        assert word["right"] <= page["right"] + 0.5, f"{word['word']!r} runs past the column"
+    assert not page["cut"]

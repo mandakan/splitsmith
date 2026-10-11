@@ -137,9 +137,10 @@ window.__splitsmithFit = function () {
     values.forEach(function (value, i) { value.style.fontSize = bases[i] * factor + 'px'; });
   }
   // Lines (opt-in, window.__splitsmithFitLines, set by cell.js on an
-  // upright card): a name that would end in "..." on one line wraps
-  // at its spaces onto at most that many lines instead, centred as the
-  // anchor aligns it, at the largest size down to the width floor at which
+  // upright card): a line (the name, an info line; never a figure in a
+  // table column) that would end in "..." on one line wraps at its spaces
+  // onto at most that many lines instead, centred as the anchor aligns
+  // it, at the largest size down to the legibility floor at which
   // every line stays inside the safe edges and the band still fits the
   // cell's height. Returns false, the name as it was, when no size does,
   // so the caller cuts it as before.
@@ -156,13 +157,22 @@ window.__splitsmithFit = function () {
   }
   function fitLines(cell, el, values, bases, box, lo) {
     var most = window.__splitsmithFitLines;
-    if (!(most > 1) || !el.querySelector('.role-identity')) { return false; }
+    if (!(most > 1) || el.closest('.flow-grid')) { return false; }
+    // On two lines the name may go under the one-line width floor, down
+    // to the legibility floor, before any of it is cut.
+    var sizes = bases.filter(function (b) { return b > 0; });
+    if (sizes.length) { lo = Math.min(lo, Math.min(1, window.__splitsmithMinFont / Math.min.apply(null, sizes))); }
     var stack = el.closest('.anchor-middle-center');
     var available = stack ? availableHeight(cell) : 0;
     var anchor = el.closest('.anchor');
     var align = anchor && anchor.classList.contains('align-center') ? 'center'
       : anchor && anchor.classList.contains('align-right') ? 'right' : 'left';
-    el.style.maxWidth = Math.max(0, box.right - box.left) + 'px';
+    // No wider than the anchor it is laid out in (a padded cell's anchor
+    // is narrower than the safe edges), or the lines start at the anchor's
+    // edge and run past the box.
+    var width = box.right - box.left;
+    if (anchor && anchor.clientWidth > 0) { width = Math.min(width, anchor.clientWidth); }
+    el.style.maxWidth = Math.max(0, width) + 'px';
     el.style.minWidth = '0';
     values.forEach(function (value) {
       value.style.whiteSpace = 'normal';
@@ -171,7 +181,9 @@ window.__splitsmithFit = function () {
     var scale = stack ? stack.style.getPropertyValue('--fit-scale') : '';
     function wide(factor) {
       scaleValues(values, bases, factor);
-      return lineCount(values) <= most && inside(el, box);
+      // A word wider than the line clips inside its own value box.
+      var clipped = values.some(function (v) { return v.scrollWidth > v.clientWidth + 0.5; });
+      return !clipped && lineCount(values) <= most && inside(el, box);
     }
     function tall() {
       return !(available > 0) || fits(stack, available);
@@ -211,9 +223,10 @@ window.__splitsmithFit = function () {
   function fitWidth(cell) {
     var edges = cell.getBoundingClientRect();
     if (!(edges.width > 0)) { return; }
-    if (window.__splitsmithFitUniform) {
-      // An upright grid pads a tile out of the platform's button column:
-      // its text must end inside that padding, not at the tile's edge.
+    if (window.__splitsmithFitUniform || window.__splitsmithFitInset) {
+      // An upright grid pads a tile out of the platform's button column,
+      // and an upright card its cell (cell.js): text must end inside that
+      // padding, not at the tile's edge.
       var inset = parseFloat(getComputedStyle(cell).paddingRight) || 0;
       edges = {left: edges.left, right: edges.right - inset, top: edges.top, bottom: edges.bottom};
     }

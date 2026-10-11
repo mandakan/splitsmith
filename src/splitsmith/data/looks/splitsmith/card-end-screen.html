@@ -96,6 +96,36 @@
     });
     document.body.appendChild(column);
 
+    // The name wraps at its spaces only: a word wider than the column
+    // shrinks the name until it fits (never under the legibility floor),
+    // and only a word too long even then is cut with "...". A name whose
+    // words all fit is left as it is.
+    window.__splitsmithFit = function () {
+      var base = parseFloat(name.style.fontSize);
+      var floor = Math.min(base, S.engine.min_font_size || 12);
+      function wordFits() {
+        var range = document.createRange();
+        range.selectNodeContents(name);
+        return range.getBoundingClientRect().width <= name.clientWidth + 0.5;
+      }
+      name.style.overflowWrap = 'normal';
+      if (wordFits()) { name.style.overflowWrap = ''; return; }
+      var lo = floor / base, hi = 1;
+      name.style.fontSize = base * lo + 'px';
+      if (!wordFits()) {
+        name.style.whiteSpace = 'nowrap';
+        name.style.overflow = 'hidden';
+        name.style.textOverflow = 'ellipsis';
+        return;
+      }
+      for (var i = 0; i < 14; i++) {
+        var mid = (lo + hi) / 2;
+        name.style.fontSize = base * mid + 'px';
+        if (wordFits()) { lo = mid; } else { hi = mid; }
+      }
+      name.style.fontSize = base * lo + 'px';
+    };
+
     S.engine.mountCredit(data.credit);
     var credit = document.querySelector('.credit');
     if (credit) {

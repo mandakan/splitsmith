@@ -190,7 +190,8 @@ def _confirmed_regions(audit_doc: dict | None) -> list[StageEvent]:
 #: 9: no logo is drawn larger than its own pixels (#1433), a wide brand
 #: mark gives way to the event logo and an upright card's name takes two
 #: lines rather than end in "..." (#1431), and a summary's text keeps
-#: clear of the pasted shooter logo (#1432).
+#: clear of the pasted shooter logo (#1432); every upright card keeps its
+#: text out of the platform safe area and the end screen never breaks a word.
 PREVIEW_REVISION = 9
 
 

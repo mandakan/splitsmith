@@ -55,6 +55,7 @@ from .overlay_layout import Anchor, CellScale, Element, Emphasis, Flow, Group, R
 from .overlay_raster import Rasterizer, TemplateFrames
 from .overlay_still import DEFAULT_DIM, backdrop_from_frame
 from .overlay_theme import OverlayTheme, theme_for
+from .safe_area import safe_area
 
 logger = logging.getLogger(__name__)
 
@@ -231,12 +232,20 @@ def card_context(
         # "Made with splitsmith" (``_shared/credit.js``); a card without it
         # sends no key, so its context and pixels are what they were.
         data["credit"] = {"text": CREDIT_TEXT}
+    css = single_css(width=width, height=height, scale=scale, theme=theme)
+    area = safe_area(width, height)
+    if area is not None:
+        # An upright card keeps its text out of what Shorts / Reels / TikTok
+        # draw over (``cell.js``, ``credit.js``), read from the same custom
+        # properties the summary cards carry; square and wider cards get
+        # none, so their context and pixels are what they were.
+        css += f"\n:root {{ {area.css_vars()} }}"
     return TemplateContext(
         theme=theme_tokens(theme),
         data=data,
         size={"width": width, "height": height},
         fps=fps,
-        engine=engine_block(css=single_css(width=width, height=height, scale=scale, theme=theme)),
+        engine=engine_block(css=css),
         assets={"shared": shared_url()},
     )
 

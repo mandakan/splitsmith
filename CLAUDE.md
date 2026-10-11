@@ -459,7 +459,15 @@ logo shrinks by its own aspect into the room beside it, or, when that room
 is under half its width, the event logo and the text move down below the
 corners; and on an upright card ``cell.js`` lets ``fit.js`` wrap a name
 that would end in "..." onto two lines (``fitLines``). Cards whose marks
-never touched, and names that fitted, are pixel-identical.
+never touched, and names that fitted, are pixel-identical. Every upright
+card keeps its text out of the platform safe area too: ``card_context``
+puts ``SafeArea.css_vars()`` into the engine stylesheet (upright only, so
+square and wider contexts are unchanged), ``cell.js`` pads the cell by
+``--safe-bottom`` and ``--safe-right`` (both sides, lifting a lower third
+with it) and turns on ``fit.js``'s right inset, and ``credit.js`` sets the
+credit just above the bottom band. The end screen's name wraps at spaces
+only: a word wider than the column shrinks the name, and only a word too
+long at the floor is cut with "...".
 ``tests/test_card_logos.py`` measures it all in Chromium.
 
 Upright compare grids (#1394 part 2) keep their 2x2 / 3x3 / 4x4 and give
