@@ -550,6 +550,24 @@ export function writeSlowOn(on: boolean): void {
   }
 }
 
+/** Under this share of a typical shot, a sound at a stop is quiet enough
+ *  to be another bay's shot or an echo. */
+const QUIET_SHARE = 0.35;
+
+/** A warning when the sound at ``t`` (10 ms before it to 40 ms after) is far
+ *  quieter than the stage's typical shot: zoomed to its own loudest point a
+ *  close-up makes any sound look like a shot. */
+export function quietFlag(peaks: SnapPeaks, t: number, level: number): StopFlag | null {
+  if (level <= 0) return null;
+  const loudest = Math.max(0, ...windowBins(peaks, t + 0.015, 0.025).map((b) => b.v));
+  const share = loudest / level;
+  if (share >= QUIET_SHARE) return null;
+  return {
+    tone: "warn",
+    text: `Quiet: ${Math.round(share * 100)} % of a typical shot on this stage. A shot in another bay, or an echo, sounds like this.`,
+  };
+}
+
 /** The Review page fits a phone only in its walk (``?walk=1``, or the old
  *  ``?step=1``); the full editor still needs a desk. */
 export function walkFitsPhone(search: URLSearchParams): boolean {

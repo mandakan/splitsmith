@@ -24,6 +24,7 @@ import {
   loopNeighbourFlag,
   loopWindow,
   placementOf,
+  quietFlag,
   stopFlags,
   stopPrompt,
   stopTime,
@@ -199,6 +200,8 @@ export function MobileWalk(props: WalkProps) {
     shape,
   );
   if (neighbour) flags.push(neighbour);
+  const quiet = quietFlag(peaks, time, level);
+  if (quiet) flags.unshift(quiet);
   const foot = state === "shot" ? snapToLeadingEdge(time, peaks) : null;
   const placement = state === "shot" ? placementOf(time, peaks) : null;
   const mark = {
@@ -260,13 +263,13 @@ export function MobileWalk(props: WalkProps) {
         cssHeight={DETAIL_HEIGHT}
       />
       <Strip
-        label="300 ms around the stop"
+        label="300 ms around the stop, on the stage's scale"
         audio={props.audio}
         peaks={peaks}
         center={stop.time}
         half={CLOSEUP_HALF_S}
         level={level}
-        fit="window"
+        fit="stage"
         {...mark}
         onPlace={actions.place}
         tickMs={50}

@@ -30,6 +30,7 @@ import {
   loopNeighbourFlag,
   readSlowOn,
   writeSlowOn,
+  quietFlag,
 } from "./walk";
 
 /** 1 ms bins over ``duration`` s of quiet noise with a shot-like burst
@@ -384,5 +385,23 @@ describe("half speed preference", () => {
     expect(readSlowOn()).toBe(false);
     writeSlowOn(true);
     expect(readSlowOn()).toBe(true);
+  });
+});
+
+describe("quietFlag", () => {
+  it("warns at a sound far quieter than the stage's shots", () => {
+    const peaks = envelope(3, [1.0]);
+    const quiet = envelope(3, [2.0], 0.07);
+    const both = { duration: 3, peaks: peaks.peaks.map((v, i) => Math.max(v, quiet.peaks[i])) };
+    expect(quietFlag(both, 2.0, 1)).toEqual({
+      tone: "warn",
+      text: "Quiet: 7 % of a typical shot on this stage. A shot in another bay, or an echo, sounds like this.",
+    });
+  });
+
+  it("says nothing at a sound as loud as a shot, or with no level to compare", () => {
+    const peaks = envelope(3, [1.0]);
+    expect(quietFlag(peaks, 1.0, 1)).toBeNull();
+    expect(quietFlag(peaks, 1.0, 0)).toBeNull();
   });
 });
