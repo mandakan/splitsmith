@@ -36,6 +36,7 @@ function Harness({
   expectedRounds = null,
   scope = "all",
   onDone = () => {},
+  busy = false,
   record,
   loop = false,
   onToggleLoop = () => {},
@@ -47,6 +48,7 @@ function Harness({
   expectedRounds?: number | null;
   scope?: "all" | "shots";
   onDone?: () => void;
+  busy?: boolean;
   record: (kind: string, payload: Record<string, unknown>) => void;
   loop?: boolean;
   onToggleLoop?: () => void;
@@ -85,7 +87,7 @@ function Harness({
         onLoopStop={onLoopStop}
         onDone={onDone}
         onExit={() => {}}
-        busy={false}
+        busy={busy}
         guideOpen={guideOpen}
         onToggleGuide={toggle}
         audio={null}
@@ -186,6 +188,39 @@ describe("Walk", () => {
     expect(onDone).not.toHaveBeenCalled();
     press("Enter");
     expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it("forgets the first Enter of a sign-off once the walk leaves the end", () => {
+    const onDone = vi.fn();
+    render(<Harness initial={[m("cand-1", "detected", 0.5)]} record={vi.fn()} expectedRounds={3} onDone={onDone} />);
+    press("Enter");
+    press("x");
+    press("Enter");
+    press("x");
+    press("Enter");
+    press("Enter"); // armed: one more signs off a count that does not match
+    press("Backspace"); // back to the last stop, from the end screen
+    expect(screen.getByText("Stop 3 of 3")).toBeTruthy();
+    press("Enter"); // the end again
+    press("Enter");
+    expect(onDone).not.toHaveBeenCalled(); // asked again, not signed off
+    press("Enter");
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not sign off while a save is running", () => {
+    const onDone = vi.fn();
+    const { rerender } = render(
+      <Harness initial={[m("cand-1", "detected", 0.5)]} record={vi.fn()} onDone={onDone} />,
+    );
+    press("Enter");
+    press("x");
+    press("Enter");
+    press("x");
+    press("Enter");
+    rerender(<Harness initial={[m("cand-1", "detected", 0.5)]} record={vi.fn()} onDone={onDone} busy />);
+    press("Enter");
+    expect(onDone).not.toHaveBeenCalled();
   });
 
   it("shows the guide until it is hidden, and remembers that", () => {

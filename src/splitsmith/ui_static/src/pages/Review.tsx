@@ -64,7 +64,6 @@ import {
 } from "@/lib/api";
 import { deriveMarkers } from "@/lib/audit-doc";
 import { buildFixtureJson } from "@/lib/fixtureDoc";
-import { useIsMobile } from "@/lib/useIsMobile";
 import { useDecodedAudio } from "@/lib/useDecodedAudio";
 import { isTypingTextTarget, useBlurOnPointerClick } from "@/lib/audit-input";
 import { zoomActionForKey } from "@/lib/zoomKeys";
@@ -78,6 +77,8 @@ import {
   WALK_METHOD,
   nextFixtureToReview,
   readGuideOpen,
+  mediaMatches,
+  phoneLayout,
   readLoopOn,
   writeLoopOn,
   walkHref,
@@ -135,10 +136,9 @@ export function Review() {
     return () => window.removeEventListener("keydown", onKey);
   }, [videoLarge]);
   const walkParam = params.get("walk") === "1" || params.get("step") === "1";
-  // The phone's walk (thumb buttons, one column): a narrow screen, or
-  // ?phone=1 to try it on the desktop.
-  const narrow = useIsMobile();
-  const phone = narrow || params.get("phone") === "1";
+  // The phone's walk (thumb buttons, one column), decided once: a phone
+  // turned sideways keeps it (lib/walk phoneLayout).
+  const [phone] = useState(() => phoneLayout(params, mediaMatches));
   const WalkView = phone ? MobileWalk : Walk;
   const [walkMode, setWalkMode] = useState(walkParam);
   useEffect(() => {

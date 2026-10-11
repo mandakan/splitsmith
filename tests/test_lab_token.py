@@ -72,3 +72,24 @@ def test_ui_refuses_a_lan_bind_without_a_token(monkeypatch: pytest.MonkeyPatch) 
     )
     assert r.exit_code == 0, r.output
     assert called[0]["lab_token"] == TOKEN
+
+
+def test_review_refuses_a_lan_bind(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """``splitsmith review`` serves the same fixture routes and has no token:
+    it stays on loopback."""
+    from splitsmith import cli
+
+    called: list[dict] = []
+    monkeypatch.setattr("splitsmith.ui.server.serve", lambda **kw: called.append(kw))
+    fixture = tmp_path / "f.json"
+    fixture.write_text("{}")
+    fixture.with_suffix(".wav").write_bytes(b"")
+    r = CliRunner().invoke(
+        cli.app, ["review", "--fixture", str(fixture), "--no-browser", "--host", "0.0.0.0"]
+    )
+    assert r.exit_code != 0
+    assert "loopback" in r.output
+    assert called == []
+    r = CliRunner().invoke(cli.app, ["review", "--fixture", str(fixture), "--no-browser"])
+    assert r.exit_code == 0, r.output
+    assert called[0]["host"] == "127.0.0.1"

@@ -28,8 +28,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useLabRun } from "@/components/lab/useLabRun";
 import { api, type DevReviewQueueItem, type DevReviewQueueResponse } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { useIsMobile } from "@/lib/useIsMobile";
-import { continueTarget, walkHref } from "@/lib/walk";
+import { continueTarget, mediaMatches, phoneLayout, walkHref } from "@/lib/walk";
 
 /** State bundle for the queue rail's eval affordance. Labels attach to
  *  detection candidates, and candidates only exist inside an eval run --
@@ -51,7 +50,7 @@ export function DevReviewQueue() {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeSlug = searchParams.get("slug");
   // A phone gets Continue and a list; the two panes need a desk.
-  const phone = useIsMobile();
+  const [phone] = useState(() => phoneLayout(searchParams, mediaMatches));
 
   useEffect(() => {
     let alive = true;

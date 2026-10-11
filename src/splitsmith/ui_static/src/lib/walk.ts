@@ -485,6 +485,19 @@ export function walkFitsPhone(search: URLSearchParams): boolean {
   return search.get("walk") === "1" || search.get("step") === "1";
 }
 
+/** The review's phone layout: a narrow window, a finger for a pointer (a
+ *  phone held sideways is 844 px or more wide), or ``?phone=1``. Callers
+ *  decide it once per page, so turning the phone never swaps the layout
+ *  mid-walk. */
+export function phoneLayout(search: URLSearchParams, matches: (query: string) => boolean): boolean {
+  return search.get("phone") === "1" || matches("(max-width: 767px)") || matches("(pointer: coarse)");
+}
+
+/** ``window.matchMedia`` as ``phoneLayout`` takes it. */
+export function mediaMatches(query: string): boolean {
+  return typeof window.matchMedia === "function" && window.matchMedia(query).matches;
+}
+
 /** A fixture's Review page, opened in its walk, with its source video when
  *  that is on this disk. */
 export function walkHref(auditPath: string, videoPath: string | null): string {

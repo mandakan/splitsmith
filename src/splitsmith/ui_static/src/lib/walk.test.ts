@@ -20,6 +20,7 @@ import {
   walkActionForKey,
   continueTarget,
   walkFitsPhone,
+  phoneLayout,
   readLoopOn,
   writeLoopOn,
   walkHref,
@@ -326,5 +327,20 @@ describe("walkFitsPhone", () => {
     expect(walkFitsPhone(new URLSearchParams("fixture=a.json&walk=1"))).toBe(true);
     expect(walkFitsPhone(new URLSearchParams("fixture=a.json&step=1"))).toBe(true);
     expect(walkFitsPhone(new URLSearchParams("fixture=a.json"))).toBe(false);
+  });
+});
+
+describe("phoneLayout", () => {
+  const media = (...on: string[]) => (q: string) => on.some((x) => q.includes(x));
+  it("keeps a phone held sideways on the phone layout", () => {
+    // 844 px wide in landscape: not narrow, but the pointer is a finger.
+    expect(phoneLayout(new URLSearchParams(""), media("pointer: coarse"))).toBe(true);
+  });
+  it("is the phone layout on a narrow window, or when asked", () => {
+    expect(phoneLayout(new URLSearchParams(""), media("max-width: 767px"))).toBe(true);
+    expect(phoneLayout(new URLSearchParams("phone=1"), media())).toBe(true);
+  });
+  it("is the desktop layout with a mouse on a wide window", () => {
+    expect(phoneLayout(new URLSearchParams(""), media())).toBe(false);
   });
 });

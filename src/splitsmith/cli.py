@@ -352,8 +352,14 @@ def review(
     import tempfile
     from urllib.parse import urlencode
 
+    from .ui.lab_token import is_loopback
     from .ui.server import serve
 
+    # The fixture routes read any path and write fixture files, and this
+    # verb has no token: it stays on this machine (``ui --lab-token`` is the
+    # way to reach a phone).
+    if not is_loopback(host):
+        raise typer.BadParameter(f"--host {host}: review only serves on loopback (e.g. 127.0.0.1)")
     if not fixture.exists():
         raise typer.BadParameter(f"fixture not found: {fixture}")
     audio_path = fixture.with_suffix(".wav")
