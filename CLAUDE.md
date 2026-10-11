@@ -527,7 +527,7 @@ page, also just after a shot, and anything in the area is a warning.
 may put a logo in more places, chosen per export by the Export page's Logos row
 (``lib/logoPlan``: Cards only, Polished, Choose), ``--logos`` on both CLIs and
 ``logo_spots`` on every request body, the preset and the preview request.
-``polished`` (``wipe`` + ``summaries``) is the default of all of those; the
+``polished`` (``wipe`` + ``summaries`` + ``thumbnail``) is the default of all of those; the
 renderers' own default (``Composition.logo_spots``, ``render_grid_mp4(logo_spots=)``)
 is empty, so a caller that says nothing draws what it always drew. ``wipe``
 hands the sting ``data.brand`` (``look_brand.brand_mark_json``: the Look's
@@ -1213,12 +1213,15 @@ audit doc, ``config.StageEvent``, seconds from beep), independent of
 shots: a movement may span several shots, which the per-gap
 ``interval_class`` cannot say. The two views coexist: the gap partition
 is still what the time budget sums and ``statistic_splits`` filters on;
-the regions only *hint* the auto-classifier (a gap over
-``transition_max_s`` overlapping a reload region auto-classes ``reload``,
-``coach.gap_overlaps_reload``) and never own a class. Every audit-doc
+**confirmed** regions only *hint* the auto-classifier (a gap over
+``transition_max_s`` overlapping a confirmed reload region auto-classes
+``reload``, ``coach.gap_overlaps_reload``, which ignores anything not
+``source == "manual"``) and never own a class. An auto proposal never
+touches a stored class: not through a save, a note typed on Coach,
+Reclassify, ``match reclassify``, the GET's heal or ``stale``. Every audit-doc
 writer that classifies (audit PUT, triage accept, coach PATCH, Reclassify,
 events PUT) goes through ``_classify_doc`` in ``ui/server.py``, which
-passes the doc's own events; a writer that called the classifier
+passes the doc's own confirmed events; a writer that called the classifier
 region-blind would flip a region-derived ``reload`` back to ``movement``
 on the next unrelated save, silently, since ``stale`` is not rendered.
 A new writer calls ``_classify_doc``; a corrupt events list there is the
@@ -1235,8 +1238,10 @@ for case -- a rule changes on both sides or not at all. A reload's
 handles mean hand off the grip -> gun back on target.
 
 Seeding (``events.seed_doc``) runs once per stage (``events_seeded``,
-which holds ``events.SEED_VERSION``) on the coach GET, reload only, never
-movement: every hinted gap (``reload_hint_min_s``), or with a division
+which holds ``events.SEED_VERSION``) on the coach GET **with ``?seed=1``**,
+which only Breakdown sends (``useStageWorkspace``'s ``seed``); Coach, the
+Splits stage page and Compare read every stage and must never write one.
+Reload only, never movement: every hinted gap (``reload_hint_min_s``), or with a division
 capacity (``DivisionCapacityConfig``, keyed on the SSI string so the power
 factor rides in the name) the round count decides: the fewest reloads that
 keep every run within ``capacity + 1`` shots, in the longest gaps those
@@ -1244,15 +1249,22 @@ runs allow, each gap at least ``reload_min_s`` (any gap when no such
 placement exists); a stage one magazine holds gets none. ``capacity + 1``
 is a bound, not a count: shooters start with one chambered. A stage an
 older seeder proposed (``events_seeded`` below the version) whose events
-are all untouched proposals is seeded again on the next owner read, and
-its shots classified again against the new regions; a manual region or
+are all untouched proposals is seeded again on the next seeding owner
+read, and its shots classified again (confirmed regions only); a manual region or
 deleted proposals keep the stage as it is. A reset re-detection (``detection_merge.merge_detection_into``, the one rule the server job and the MCP ``detect_shots`` tool share) drops
 the ``auto`` regions and ``events_seeded`` and keeps ``manual`` ones, so
 a stage with no surviving manual region seeds afresh over the new
 shots. The GET seeds but never re-classifies stored shots against the
-seed; the writers above are the explicit path. The seed and the heal are persisted
-under one condition in ``get_stage_coach``: an owner read that is not a
-mirror. The GET's ``_version`` is the revision of the doc *as stored*
+seed; the writers above are the explicit path. A first seed that proposes
+nothing writes nothing (``seed_doc`` returns False and leaves the doc), so
+it is recomputed next time; once proposals exist ``events_seeded`` is
+stored, which keeps deleted ones from coming back. The seed runs on a copy
+and is persisted only on a seeding owner read that is not a mirror; a seed
+that raises is logged and the stage served without proposals, and
+``seed_events`` never proposes a region that would not validate (a gap
+starting before the beep, no length, a non-finite time). The heal is
+persisted on any owner read, mirrors included, as in v0.64.1; the seed
+never rides it. The GET's ``_version`` is the revision of the doc *as stored*
 (taken before the in-memory seed and heal), so a mirror or share read
 still hands out a ``_version`` the PUT accepts. The share surface does
 reach the coach GET (``_SHARE_PATH_RE``): ``_build_coach_response``

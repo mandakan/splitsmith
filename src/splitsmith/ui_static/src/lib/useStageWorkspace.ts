@@ -101,6 +101,9 @@ export interface StageWorkspaceOptions {
   peaks?: boolean;
   /** The page URL's query (``?t=&shot=&region=``, #1377), read once on load. */
   link?: string;
+  /** Ask the server to seed reload proposals (``?seed=1``). Breakdown, the
+   *  region editor, alone; Coach reads without writing. */
+  seed?: boolean;
 }
 
 export function useStageWorkspace(slug: string, stage: number, options: StageWorkspaceOptions = {}): StageWorkspace {
@@ -116,6 +119,7 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
   const [activeShotHeld, holdActiveShot] = useState(false);
   const [peaks, setPeaks] = useState<PeaksResult | null>(null);
   const wantPeaks = options.peaks ?? true;
+  const seed = options.seed ?? false;
   const [peaksLoading, setPeaksLoading] = useState(wantPeaks);
   const scrub = useScrubSource();
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -188,7 +192,7 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
       try {
         const [p, c, dist] = await Promise.all([
           api.getProject(slug),
-          api.getStageCoach(slug, stage),
+          api.getStageCoach(slug, stage, { seed }),
           // Match-scope baseline for the tier chips; a failed fetch just
           // means unjudged rows, never an error.
           api.getMatchCoachDistributions(slug).catch(() => null),
@@ -220,7 +224,7 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
     return () => {
       alive = false;
     };
-  }, [apply, selectEvent, seekClip, slug, stage]);
+  }, [apply, seed, selectEvent, seekClip, slug, stage]);
 
   // The video mounts after the payload: a linked seek lands once it can.
   // With none pending, a new source (the scrub rendition failed over to the
@@ -325,10 +329,10 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
   );
 
   const reload = useCallback(async () => {
-    const c = await api.getStageCoach(slug, stage);
+    const c = await api.getStageCoach(slug, stage, { seed });
     apply(c);
     return c;
-  }, [apply, slug, stage]);
+  }, [apply, seed, slug, stage]);
 
   const seekToShot = useCallback(
     (shot: CoachShot) => {

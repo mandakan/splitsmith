@@ -122,6 +122,12 @@ beforeEach(() => {
 });
 
 describe("region saves on Breakdown", () => {
+  it("asks for reload proposals: Breakdown is the one reader that seeds", async () => {
+    vi.mocked(api.getStageCoach).mockResolvedValue(stageWith([]));
+    renderBreakdown();
+    await waitFor(() => expect(api.getStageCoach).toHaveBeenCalledWith("anna", 1, { seed: true }));
+  });
+
   it("deleting the selected region PUTs the list with _version and applies the response", async () => {
     vi.mocked(api.getStageCoach).mockResolvedValue(
       stageWith([{ id: "evt-1", kind: "reload", start: 8.05, end: 9.47, source: "auto" }], "v1v1v1v1v1v1v1v1"),

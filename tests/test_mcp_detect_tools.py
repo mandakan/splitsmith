@@ -754,7 +754,7 @@ def test_detect_shots_logs_an_audit_doc_that_is_not_an_object(
 
 
 def test_coach_get_reseeds_after_an_mcp_reset(tmp_path: Path) -> None:
-    """End to end: after an MCP reset the next coach GET seeds a reload
+    """End to end: after an MCP reset the next seeding coach GET (Breakdown) seeds a reload
     proposal over the *new* shots' gap. Before the fix ``events_seeded``
     survived the reset, so the stale proposal stayed and nothing reseeded."""
     import numpy as np
@@ -804,7 +804,7 @@ def test_coach_get_reseeds_after_an_mcp_reset(tmp_path: Path) -> None:
 
     app = create_app(project_root=match_root, project_name="MCP Reseed")
     match_id = app.state.splitsmith_state.matches.known_ids()[0]
-    body = TestClient(app).get(f"/api/matches/{match_id}/shooters/me/stages/1/coach").json()
+    body = TestClient(app).get(f"/api/matches/{match_id}/shooters/me/stages/1/coach?seed=1").json()
     assert [(e["kind"], e["source"]) for e in body["events"]] == [("reload", "auto")]
     assert body["events"][0]["start"] == pytest.approx(quick[-1], abs=0.01)
 

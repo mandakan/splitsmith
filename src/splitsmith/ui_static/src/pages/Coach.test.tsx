@@ -138,6 +138,15 @@ describe("Coach is the review page", () => {
     expect(api.getStagePeaks).not.toHaveBeenCalled();
   });
 
+  it("reads the stage without asking for proposals: a review never writes the doc", async () => {
+    renderCoachStage([makeShot(1, "c1"), makeShot(2, "c2")]);
+    await screen.findByRole("region", { name: "Shots" });
+    expect(api.getStageCoach).toHaveBeenCalled();
+    for (const call of vi.mocked(api.getStageCoach).mock.calls) {
+      expect((call[2] as { seed?: boolean } | undefined)?.seed ?? false).toBe(false);
+    }
+  });
+
   it("links to Breakdown at this stage from the header", async () => {
     renderCoachStage([makeShot(1, "c1")]);
     const link = await screen.findByRole("link", { name: "Adjust in Breakdown" });

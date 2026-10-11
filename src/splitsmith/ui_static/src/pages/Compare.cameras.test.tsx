@@ -137,6 +137,15 @@ describe("Compare per-shooter camera choice", () => {
         !v.closest("[role=menu]"),
     ) as HTMLVideoElement;
 
+  it("reads every shooter's stage without asking for proposals", async () => {
+    renderCompare("/match/m1/compare/2");
+    await trigger();
+    expect(api.getStageCoach).toHaveBeenCalled();
+    for (const call of vi.mocked(api.getStageCoach).mock.calls) {
+      expect((call[2] as { seed?: boolean } | undefined)?.seed ?? false).toBe(false);
+    }
+  });
+
   it("names the camera on screen and the angle count in the tile's name bar, only for multi-camera shooters", async () => {
     renderCompare("/match/m1/compare/2");
     await screen.findByTestId("compare-page");

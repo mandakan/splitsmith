@@ -773,3 +773,32 @@ def test_youtube_publish_at_garbage_fails_before_rendering(
     assert result.exit_code == 2
     assert "--youtube-publish-at" in strip_ansi(result.output)
     assert "comp" not in captured
+
+
+@pytest.mark.parametrize(("source", "expected"), [("auto", "movement"), ("manual", "reload")])
+def test_reclassify_reads_confirmed_regions_only(tmp_path: Path, source: str, expected: str) -> None:
+    """An auto proposal over a movement gap moves nothing; the same region
+    confirmed makes it a reload."""
+    root = _seed(tmp_path)
+    audit = root / "shooters" / "me" / "audit" / "stage1.json"
+    doc = json.loads(audit.read_text())
+    doc["shots"] = [
+        {
+            "shot_number": 1,
+            "ms_after_beep": 1500,
+            "interval_class": "first_shot",
+            "interval_class_source": "auto",
+        },
+        {
+            "shot_number": 2,
+            "ms_after_beep": 3800,
+            "interval_class": "movement",
+            "interval_class_source": "auto",
+        },
+    ]
+    doc["events"] = [{"id": "evt-1", "kind": "reload", "start": 1.5, "end": 3.8, "source": source}]
+    audit.write_text(json.dumps(doc))
+
+    result = runner.invoke(app, ["match", "reclassify", str(root), "--shooter", "me"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(audit.read_text())["shots"][1]["interval_class"] == expected

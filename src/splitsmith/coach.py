@@ -169,8 +169,14 @@ def _classify_gap(
 
 
 def gap_overlaps_reload(prev_t: float, t: float, events: Sequence[StageEvent]) -> bool:
-    """True when the open interval (prev_t, t) overlaps a reload region."""
-    return any(e.kind == "reload" and e.start < t and prev_t < e.end for e in events)
+    """True when the open interval (prev_t, t) overlaps a *confirmed* reload
+    region (``source == "manual"``, the rule of ``events.confirmed``).
+
+    An auto proposal is a guess nobody looked at: it shows on Breakdown and
+    never touches a stored class, so every classifier caller (the audit
+    writers, the coach GET's heal and ``stale``, Reclassify, ``match
+    reclassify``) gets the same answer whatever list it passes."""
+    return any(e.kind == "reload" and e.source == "manual" and e.start < t and prev_t < e.end for e in events)
 
 
 def reload_hinted(gap_s: float | None, config: CoachAutoClassifyConfig) -> bool:
@@ -295,7 +301,7 @@ def classify_intervals_in_dicts(
     from the beep). Shots without it are skipped (no class is written).
 
     ``events`` (spec 2026-10-08) lets a would-be-movement gap that
-    overlaps a reload region auto-class as ``reload`` instead; see
+    overlaps a confirmed reload region auto-class as ``reload`` instead; see
     :func:`_classify_gap`.
     """
     indexed = list(enumerate(shots))
@@ -424,7 +430,7 @@ def is_classification_stale(
     the caller decides whether to act on it. For shots with no class
     set, returns False.
 
-    ``reload_overlap`` is whether the gap overlaps a reload region
+    ``reload_overlap`` is whether the gap overlaps a confirmed reload region
     (:func:`gap_overlaps_reload`); without it a region-derived auto
     ``reload`` would read as stale against the region-blind rule.
     """

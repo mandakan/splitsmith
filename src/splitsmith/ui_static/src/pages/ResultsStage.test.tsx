@@ -177,6 +177,15 @@ describe("ResultsStage back link", () => {
     const back = await screen.findByRole("link", { name: /all stages/i });
     expect(back).toHaveAttribute("href", "/match/m1/results");
   });
+
+  it("reads the stage without asking for proposals", async () => {
+    renderStage("/match/m1/results/anna/2", MULTI);
+    await screen.findByRole("link", { name: /all stages/i });
+    expect(api.getStageCoach).toHaveBeenCalled();
+    for (const call of vi.mocked(api.getStageCoach).mock.calls) {
+      expect((call[2] as { seed?: boolean } | undefined)?.seed ?? false).toBe(false);
+    }
+  });
 });
 
 describe("ResultsStage stats strip", () => {

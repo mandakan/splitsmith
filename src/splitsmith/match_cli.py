@@ -35,7 +35,7 @@ from . import camera_select, match_model, match_trims, user_config
 from .composition import XFADE_KINDS
 from .config import Config
 from .division import competitor_division
-from .events import events_from_doc
+from .events import confirmed, events_from_doc
 from .match_model import (
     MATCH_FILE,
     Match,
@@ -959,7 +959,8 @@ def reclassify(
         if not isinstance(shots, list) or not shots:
             continue
         try:
-            stage_events = events_from_doc(doc)
+            # Confirmed regions only: an auto proposal never moves a class.
+            stage_events = confirmed(events_from_doc(doc))
         except ValueError as exc:
             console.print(
                 f"[yellow]note[/] stage {entry.stage_number}: skipping events hint, {escape(str(exc))}",
