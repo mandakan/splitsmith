@@ -33,6 +33,7 @@ import {
   quietFlag,
   jumpTarget,
   endCheck,
+  fixtureTitle,
 } from "./walk";
 
 /** 1 ms bins over ``duration`` s of quiet noise with a shot-like burst
@@ -452,5 +453,27 @@ describe("endCheck", () => {
       "3 shots, matching the source camera's 3. One sound is marked twice (7.357 s): tap one to go to it.",
     );
     expect(endCheck(markers.filter((m) => m.id !== "b"), 2, "source").ok).toBe(true);
+  });
+});
+
+describe("fixtureTitle", () => {
+  it("names the match, the stage and the camera", () => {
+    expect(
+      fixtureTitle({
+        event_id: "hostfinalen-xi-2026:7:s97dcec94",
+        stage_number: 7,
+        stage_name: "",
+        camera: { id: "apple-iphone17pro", model: "iPhone 17 Pro", position: "squadmate" },
+      }),
+    ).toBe("Hostfinalen XI 2026 · Stage 7 · iPhone 17 Pro, squadmate");
+    expect(
+      fixtureTitle({
+        event_id: "tallmilan-2026:2:s1",
+        stage_number: 2,
+        stage_name: "Unload, and then show clear",
+        camera: { id: "apple-iphone17pro", model: null, position: "shooter" },
+      }),
+    ).toBe('Tallmilan 2026 · Stage 2 "Unload, and then show clear" · iphone17pro, shooter');
+    expect(fixtureTitle({})).toBe("");
   });
 });

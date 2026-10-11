@@ -80,6 +80,7 @@ import {
   readGuideOpen,
   mediaMatches,
   phoneLayout,
+  fixtureTitle,
   loopWindow,
   readLoopOn,
   readSlowOn,
@@ -1317,6 +1318,7 @@ export function Review() {
               onScopeChange={setScopeOverride}
               onRestart={restartWalk}
               source={sourceShots}
+              title={fixtureTitle(audit as never)}
             />
           ) : walkMode && peaks ? (
             <div className="flex items-center gap-2 text-sm text-muted">

@@ -73,6 +73,8 @@ export interface WalkProps {
   /** A snapped fixture's source shots (source clip seconds): the ``source``
    *  scope walks exactly these (lib/sourceWalk). */
   source?: number[] | null;
+  /** Which fixture this is, in words (lib/walk ``fixtureTitle``). */
+  title?: string;
 }
 
 export function Walk(props: WalkProps) {

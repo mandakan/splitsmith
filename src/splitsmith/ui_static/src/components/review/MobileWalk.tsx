@@ -117,6 +117,7 @@ export function MobileWalk(props: WalkProps) {
       <FullScreen>
         <div className="space-y-4 p-4">
           {header}
+          {props.title ? <p className="text-base font-semibold text-ink">{props.title}</p> : null}
           <p className="text-ink">
             {stops.length} stops. Each one plays on repeat while you decide; Confirm moves on to the next.
           </p>
@@ -146,6 +147,7 @@ export function MobileWalk(props: WalkProps) {
       <FullScreen>
       <div className="space-y-4 p-4">
         {header}
+        {props.title ? <p className="text-muted">{props.title}</p> : null}
         <p className="text-base font-semibold text-ink">
           {undecided > 0 ? `${undecided} of ${stops.length} stops are still undecided` : "Every stop decided"}
         </p>

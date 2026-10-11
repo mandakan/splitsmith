@@ -227,6 +227,42 @@ export function nearestStop(stops: ReadonlyArray<{ time: number }>, t: number): 
   return best;
 }
 
+/** Which fixture this is, in words: the match, the stage and the camera,
+ *  e.g. "Hostfinalen XI 2026 · Stage 7 · iPhone 17 Pro, squadmate". */
+export function fixtureTitle(doc: {
+  event_id?: unknown;
+  stage_number?: unknown;
+  stage_name?: unknown;
+  camera?: unknown;
+}): string {
+  const parts: string[] = [];
+  const event = typeof doc.event_id === "string" ? doc.event_id.split(":")[0] : "";
+  if (event) {
+    parts.push(
+      event
+        .split("-")
+        .map((w) => (/^[ivxlc]+$/.test(w) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)))
+        .join(" "),
+    );
+  }
+  if (typeof doc.stage_number === "number") {
+    const name = typeof doc.stage_name === "string" && doc.stage_name.trim() ? ` "${doc.stage_name.trim()}"` : "";
+    parts.push(`Stage ${doc.stage_number}${name}`);
+  }
+  const cam = doc.camera && typeof doc.camera === "object" ? (doc.camera as Record<string, unknown>) : null;
+  if (cam) {
+    const name =
+      typeof cam.model === "string" && cam.model
+        ? cam.model
+        : typeof cam.id === "string"
+          ? cam.id.replace(/^apple-/, "").replace(/-/g, " ")
+          : "";
+    const where = typeof cam.position === "string" && cam.position ? `, ${cam.position}` : "";
+    if (name) parts.push(`${name}${where}`);
+  }
+  return parts.join(" · ");
+}
+
 /** Two kept shots this close are one sound marked twice (Rise foot seats
  *  both on the same foot). */
 export const SAME_SOUND_S = 0.005;
