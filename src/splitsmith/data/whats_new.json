@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "breakdown-drag-follows-video",
+      "date": "2026-10-11",
+      "title": "The video follows a dragged region edge",
+      "body": "In Breakdown, dragging a region's edge now scrubs the video under the pointer while the edge still snaps to a shot. Snap to shots can be turned off in the timeline's options menu."
+    },
+    {
       "id": "breakdown-nudge-shows-the-frame",
       "date": "2026-10-11",
       "title": "Nudging a region shows the frame",

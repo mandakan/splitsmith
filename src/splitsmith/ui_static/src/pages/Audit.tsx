@@ -80,6 +80,7 @@ import {
 import { detectAnomalies, keptShotsFromMarkers } from "@/lib/anomalies";
 import { bandPipelineAction, bandReadouts } from "@/lib/auditBand";
 import { onlyBookkeepingMoved } from "@/lib/auditConflict";
+import { coalescedSeek } from "@/lib/coalescedSeek";
 import { isActiveCommand, latestForStage, REDETECT_CONFIRM } from "@/lib/desktopCommands";
 import { useDesktopCommands } from "@/lib/useDesktopCommands";
 import { isTypingTextTarget, useBlurOnPointerClick } from "@/lib/audit-input";
@@ -658,11 +659,13 @@ export function Audit() {
   // The other cameras are not the page's to sync: PipView keeps its inset
   // on the big player's clock (lib/pipSync), and the primary-audio
   // follower below uses the same rule. Every seek here moves only the big
-  // player; both follow its ``seeking``.
+  // player; both follow its ``seeking``. One seek in flight (#1440): a band
+  // scrub asks every frame, and a seek that replaces the one decoding
+  // paints nothing.
   const handleScrub = useCallback(
     (primaryTime: number) => {
       const v = videoRef.current;
-      if (v) v.currentTime = primaryTime + beepOffset;
+      if (v) coalescedSeek(v, primaryTime + beepOffset);
       setCurrentTime(primaryTime);
       // Manual scrub re-anchors the loop. Without this, hitting R, then
       // dragging to a candidate, then play-pausing would yank the

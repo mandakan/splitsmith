@@ -10,6 +10,7 @@ import {
   SHOTS_FOLDED_KEY,
   resetBreakdownPrefsForTests,
 } from "@/lib/breakdownPrefs";
+import { SNAP_TO_SHOTS_KEY, resetTimelinePrefsForTests } from "@/lib/timelinePrefs";
 
 import { Breakdown } from "@/pages/Breakdown";
 
@@ -407,6 +408,62 @@ describe("Breakdown inspector (#1372)", () => {
     } finally {
       rect.mockRestore();
     }
+  });
+
+  it("a lane drag keeps one seek in flight on the video and lands on the last pointer time (#1440)", async () => {
+    const rect = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      width: 1000, height: 32, left: 0, top: 0, right: 1000, bottom: 32, x: 0, y: 0, toJSON: () => ({}),
+    });
+    try {
+      const { container } = renderAt("/match/m1/breakdown/anna/2");
+      await screen.findByRole("complementary", { name: "Inspector" });
+      // A decoder that takes its time: every write starts a seek that lands on "seeked".
+      const v = container.querySelector<HTMLVideoElement>('[data-testid="stage-video"] > video')!;
+      const writes: number[] = [];
+      let seeking = false;
+      let t = 0;
+      Object.defineProperty(v, "seeking", { configurable: true, get: () => seeking });
+      Object.defineProperty(v, "currentTime", {
+        configurable: true,
+        get: () => t,
+        set: (x: number) => {
+          t = x;
+          seeking = true;
+          writes.push(x);
+        },
+      });
+      fireEvent.click(screen.getByTestId("event-evt-2"));
+      const handle = screen.getByTestId("handle-evt-2-end");
+      const px = (s: number) => (s / 16.2) * 1000;
+      fireEvent.pointerDown(handle, { pointerId: 8, clientX: px(4.1), clientY: 10, button: 0 });
+      for (const s of [4.5, 4.7, 4.9, 5.1, 5.3]) {
+        fireEvent.pointerMove(handle, { pointerId: 8, clientX: px(s), clientY: 10, altKey: true });
+      }
+      // Clip seconds are beep (5 s) + seconds from the beep.
+      expect(writes.map((x) => Number(x.toFixed(2)))).toEqual([9.5]);
+      fireEvent.pointerUp(handle, { pointerId: 8, clientX: px(5.3), clientY: 10, altKey: true });
+      seeking = false;
+      fireEvent(v, new Event("seeked"));
+      expect(writes.map((x) => Number(x.toFixed(2)))).toEqual([9.5, 10.3]);
+      seeking = false;
+      fireEvent(v, new Event("seeked"));
+      expect(writes).toHaveLength(2);
+    } finally {
+      rect.mockRestore();
+    }
+  });
+
+  it("Snap to shots sits in the band's options menu and is remembered per browser (#1440)", async () => {
+    renderAt("/match/m1/breakdown/anna/2");
+    await screen.findByRole("complementary", { name: "Inspector" });
+    fireEvent.click(screen.getByRole("button", { name: "Timeline options" }));
+    const item = screen.getByRole("menuitemcheckbox", { name: /Snap to shots/ });
+    expect(item).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(item);
+    expect(window.localStorage.getItem(SNAP_TO_SHOTS_KEY)).toBe("off");
+    expect(screen.getByRole("menuitemcheckbox", { name: /Snap to shots/ })).toHaveAttribute("aria-checked", "false");
+    window.localStorage.removeItem(SNAP_TO_SHOTS_KEY);
+    resetTimelinePrefsForTests();
   });
 
   it("the shot list folds to its header, remembered per browser and shared by every stage", async () => {

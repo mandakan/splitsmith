@@ -1,9 +1,10 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { StageEvent } from "@/lib/api";
 import { validateLanes } from "@/lib/events";
+import { SNAP_TO_SHOTS_KEY, resetTimelinePrefsForTests, useSnapToShots } from "@/lib/timelinePrefs";
 
 import { LaneEditor, LaneHints } from "./LaneEditor";
 
@@ -97,16 +98,117 @@ describe("LaneEditor", () => {
     expect(onSeek).toHaveBeenCalledWith(expect.closeTo(3.0, 2));
   });
 
-  it("dragging the end handle resizes, seeks to the handle and snaps to a shot", () => {
+  it("dragging the end handle resizes and snaps to a shot; the video follows the pointer, the pill names the shot", () => {
     const onChange = vi.fn();
     const onSeek = vi.fn();
     render(<Harness initial={[ev("evt-1", "reload", 4, 5)]} selectedId="evt-1" onChange={onChange} onSeek={onSeek} />);
     const handle = screen.getByTestId("handle-evt-1-end");
     fireEvent.pointerDown(handle, { pointerId: 2, clientX: 500, clientY: 10, button: 0 });
     fireEvent.pointerMove(handle, { pointerId: 2, clientX: 596, clientY: 10 }); // 5.96 s, 4 px from shot at 6.0
-    expect(onSeek).toHaveBeenLastCalledWith(expect.closeTo(6.0, 2));
+    expect(onSeek).toHaveBeenLastCalledWith(expect.closeTo(5.96, 3));
+    expect(screen.getByTestId("drag-pill")).toHaveTextContent("6.00 s");
+    expect(screen.getByTestId("drag-pill")).toHaveTextContent("snapped to shot 4");
     fireEvent.pointerUp(handle, { pointerId: 2, clientX: 596, clientY: 10 });
     expect(lastCommit(onChange)![0].end).toBeCloseTo(6.0, 3);
+    // The release seeks nowhere: the video stays on the frame last shown.
+    expect(onSeek).toHaveBeenLastCalledWith(expect.closeTo(5.96, 3));
+  });
+
+  describe("the picture follows the pointer (#1440)", () => {
+    // Fit zoom on a long stage: 10 px per second, so the 8 px snap reaches 0.8 s
+    // and a reload between two shots is all snap range.
+    beforeEach(() => {
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+        width: 100, height: 32, left: 0, top: 0, right: 100, bottom: 32, x: 0, y: 0, toJSON: () => ({}),
+      });
+    });
+
+    it("an edge dragged across a shot-free window seeks to the pointer on every frame; the saved edge snaps", () => {
+      const onChange = vi.fn();
+      const onSeek = vi.fn();
+      // Shots at 6 and 7 (shots 4 and 5); the reload sits between them.
+      render(<Harness initial={[ev("evt-1", "reload", 6.1, 6.9)]} selectedId="evt-1" onChange={onChange} onSeek={onSeek} />);
+      const handle = screen.getByTestId("handle-evt-1-end");
+      fireEvent.pointerDown(handle, { pointerId: 2, clientX: 69, clientY: 10, button: 0 });
+      for (const x of [62, 64, 66, 68]) fireEvent.pointerMove(handle, { pointerId: 2, clientX: x, clientY: 10 });
+      expect(onSeek.mock.calls.map((c) => Number(c[0].toFixed(3)))).toEqual([6.2, 6.4, 6.6, 6.8]);
+      // 6.8 s is 0.2 s from shot 5 at 7.0: the edge snaps there and the pill says so.
+      expect(screen.getByTestId("drag-pill")).toHaveTextContent("7.00 s");
+      expect(screen.getByTestId("drag-pill")).toHaveTextContent("snapped to shot 5");
+      fireEvent.pointerUp(handle, { pointerId: 2, clientX: 68, clientY: 10 });
+      expect(lastCommit(onChange)![0].end).toBeCloseTo(7.0, 3);
+      expect(onSeek).toHaveBeenCalledTimes(4);
+    });
+
+    it("a create drag seeks to the pointer, not the snapped edge", () => {
+      const onSeek = vi.fn();
+      render(<Harness onSeek={onSeek} />);
+      const lane = screen.getByTestId("lane-movement");
+      fireEvent.pointerDown(lane, { pointerId: 3, clientX: 40, clientY: 10, button: 0, altKey: true });
+      for (const x of [48, 52, 55]) fireEvent.pointerMove(lane, { pointerId: 3, clientX: x, clientY: 10 });
+      expect(onSeek.mock.calls.map((c) => Number(c[0].toFixed(3)))).toEqual([4.8, 5.2, 5.5]);
+      // 5.5 s snaps to shot 4 at 6.0.
+      expect(screen.getByTestId("drag-pill")).toHaveTextContent("6.00 s");
+      expect(screen.getByTestId("drag-pill")).toHaveTextContent("snapped to shot 4");
+    });
+  });
+
+  describe("Snap to shots switch (#1440)", () => {
+    afterEach(() => {
+      window.localStorage.clear();
+      resetTimelinePrefsForTests();
+    });
+    const snapOff = () => {
+      window.localStorage.setItem(SNAP_TO_SHOTS_KEY, "off");
+      resetTimelinePrefsForTests();
+    };
+
+    it("off: an edge drag and a lane click do not snap", () => {
+      snapOff();
+      const onChange = vi.fn();
+      const onSeek = vi.fn();
+      render(<Harness initial={[ev("evt-1", "reload", 4, 5)]} selectedId="evt-1" onChange={onChange} onSeek={onSeek} />);
+      const handle = screen.getByTestId("handle-evt-1-end");
+      fireEvent.pointerDown(handle, { pointerId: 2, clientX: 500, clientY: 10, button: 0 });
+      fireEvent.pointerMove(handle, { pointerId: 2, clientX: 596, clientY: 10 });
+      expect(screen.getByTestId("drag-pill")).not.toHaveTextContent("snapped");
+      fireEvent.pointerUp(handle, { pointerId: 2, clientX: 596, clientY: 10 });
+      expect(lastCommit(onChange)![0].end).toBeCloseTo(5.96, 3);
+
+      const lane = screen.getByTestId("lane-movement");
+      fireEvent.pointerDown(lane, { pointerId: 3, clientX: 303, clientY: 10, button: 0 });
+      fireEvent.pointerUp(lane, { pointerId: 3, clientX: 303, clientY: 10 });
+      expect(onSeek).toHaveBeenLastCalledWith(expect.closeTo(3.03, 3));
+    });
+
+    it("off: Alt snaps for that gesture, and the hint says so", () => {
+      snapOff();
+      const onChange = vi.fn();
+      const onSeek = vi.fn();
+      render(<Harness initial={[ev("evt-1", "reload", 4, 5)]} selectedId="evt-1" onChange={onChange} onSeek={onSeek} />);
+      const handle = screen.getByTestId("handle-evt-1-end");
+      fireEvent.pointerDown(handle, { pointerId: 2, clientX: 500, clientY: 10, button: 0 });
+      fireEvent.pointerMove(handle, { pointerId: 2, clientX: 596, clientY: 10, altKey: true });
+      fireEvent.pointerUp(handle, { pointerId: 2, clientX: 596, clientY: 10, altKey: true });
+      expect(lastCommit(onChange)![0].end).toBeCloseTo(6.0, 3);
+
+      const lane = screen.getByTestId("lane-movement");
+      fireEvent.pointerDown(lane, { pointerId: 3, clientX: 303, clientY: 10, button: 0, altKey: true });
+      fireEvent.pointerUp(lane, { pointerId: 3, clientX: 303, clientY: 10, altKey: true });
+      expect(onSeek).toHaveBeenLastCalledWith(expect.closeTo(3.0, 3));
+
+      render(<LaneHints />);
+      expect(screen.getByText(/-drag snaps to shots/)).toBeInTheDocument();
+    });
+
+    it("the switch persists per browser and every editor follows it", () => {
+      const { result } = renderHook(() => useSnapToShots());
+      expect(result.current[0]).toBe(true);
+      act(() => result.current[1](false));
+      expect(window.localStorage.getItem(SNAP_TO_SHOTS_KEY)).toBe("off");
+      resetTimelinePrefsForTests();
+      expect(renderHook(() => useSnapToShots()).result.current[0]).toBe(false);
+    });
   });
 
   it("Alt skips the snap", () => {

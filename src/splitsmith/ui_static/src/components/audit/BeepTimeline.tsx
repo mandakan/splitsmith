@@ -28,6 +28,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Timeline, type TimelineTrack } from "@/components/timeline/Timeline";
 import { WaveformTrack } from "@/components/timeline/WaveformTrack";
 import { api, type PeaksResult } from "@/lib/api";
+import { coalescedSeek } from "@/lib/coalescedSeek";
 import { useSpacePlayPause } from "@/lib/keyboard";
 import type { Zoom } from "@/lib/timelineView";
 import { cn } from "@/lib/utils";
@@ -205,7 +206,8 @@ export function BeepTimeline({
     (t: number) => {
       lastScrubRef.current = t;
       setLocalTime(t);
-      if (media) media.currentTime = t;
+      // One seek in flight (#1440): the scrub asks every frame.
+      if (media) coalescedSeek(media, t);
     },
     [media],
   );
