@@ -202,3 +202,102 @@ def test_no_shots_at_all_yields_a_single_state():
     assert len(states) == 1
     assert states[0].start_seconds == 0.0
     assert states[0].duration_seconds == pytest.approx(DURATION)
+
+
+# --- the corner fit (#1421) -------------------------------------------
+
+#: Every grid kind on every canvas the compare export offers, landscape and
+#: upright, at 720p, 1080p and 4K.
+_CANVASES = [(1280, 720), (1920, 1080), (3840, 2160), (720, 1280), (1080, 1920), (2160, 3840)]
+_GRIDS = [(1, 2), (2, 1), (2, 2), (3, 3), (4, 4)]
+
+
+def _corner_boxes(fit, cell_w, cell_h, *, counter_chars=5, clock_chars=5, advance=0.6):
+    """``(counter, clock)`` as ``(left, top, right, bottom)`` in cell pixels:
+    the advance width of the text, a line of one em tall."""
+    from splitsmith.overlay_layout import CellScale
+
+    pad = CellScale.for_cell(cell_h).pad
+    counter_w = counter_chars * advance * fit.size
+    clock_w = clock_chars * advance * fit.size
+    clock = (cell_w - pad - clock_w, pad, cell_w - pad, pad + fit.size)
+    if fit.stacked:
+        top = pad + fit.stack_offset
+        counter = (cell_w - pad - counter_w, top, cell_w - pad, top + fit.size)
+    else:
+        counter = (pad, pad, pad + counter_w, pad + fit.size)
+    return counter, clock
+
+
+@pytest.mark.parametrize("canvas", _CANVASES)
+@pytest.mark.parametrize("grid", _GRIDS)
+def test_the_counter_and_the_clock_keep_a_gap_in_every_cell(canvas, grid):
+    """At every grid size the two corners stay inside the cell and apart:
+    half an em between them on one row, or the counter a whole em under
+    the clock when stacked."""
+    rows, cols = grid
+    cell_w, cell_h = canvas[0] // cols, canvas[1] // rows
+    fit = overlay_sprites.corner_fit(cell_w, cell_h, advance_em=0.6)
+    counter, clock = _corner_boxes(fit, cell_w, cell_h)
+    assert clock[0] >= 0, f"the clock runs out of a {cell_w} px cell"
+    if not fit.counter:
+        return
+    assert counter[0] >= 0 and counter[2] <= cell_w
+    if fit.stacked:
+        assert counter[1] - clock[1] >= fit.size
+    else:
+        assert clock[0] - counter[2] >= overlay_sprites.corner_gap(fit.size)
+
+
+def test_a_cell_that_fit_before_keeps_its_size_and_its_row():
+    """Pixel identity for every grid that already fit: the live size it
+    always drew at, counter top left."""
+    from splitsmith.overlay_layout import CellScale
+
+    for cell_w, cell_h in [(640, 360), (960, 540), (540, 960), (360, 640), (426, 240)]:
+        fit = overlay_sprites.corner_fit(cell_w, cell_h, advance_em=0.6)
+        assert fit == overlay_sprites.CornerFit(size=CellScale.for_cell(cell_h).live_primary)
+
+
+def test_the_ladder_shrinks_then_stacks_then_drops_the_counter():
+    # A 1x2 upright 1080x1920 cell: 137 px type in 540 px; shrinks, stays on a row.
+    shrunk = overlay_sprites.corner_fit(540, 1920, advance_em=0.6)
+    assert shrunk.size < 137 and not shrunk.stacked and shrunk.counter
+    # A 3x3 upright 720x1280 cell: below the floor on a row, so it stacks at full size.
+    stacked = overlay_sprites.corner_fit(240, 426, advance_em=0.6)
+    assert stacked == overlay_sprites.CornerFit(size=48, stacked=True)
+    # Narrower than any figure fits at the floor: the clock stays, the counter goes.
+    dropped = overlay_sprites.corner_fit(130, 426, advance_em=0.6)
+    assert not dropped.counter
+
+
+def test_a_longer_clock_than_the_floor_widens_the_fit():
+    """A stage past 99.99 s draws a six-glyph clock; a cell that fits five
+    at full size must shrink for six rather than run them together."""
+    five = overlay_sprites.corner_fit(360, 640, advance_em=0.6)
+    six = overlay_sprites.corner_fit(360, 640, advance_em=0.6, clock_chars=6)
+    assert five.size == 48 and not five.stacked
+    assert six.size < 48
+
+
+@pytest.mark.parametrize("canvas", _CANVASES)
+@pytest.mark.parametrize("grid", _GRIDS)
+def test_the_split_keeps_the_cells_size_unless_its_own_width_caps_it(canvas, grid):
+    from splitsmith.overlay_layout import CellScale
+
+    rows, cols = grid
+    cell_w, cell_h = canvas[0] // cols, canvas[1] // rows
+    scale = CellScale.for_cell(cell_h)
+    size = overlay_sprites.split_fit_size(cell_w, cell_h, advance_em=0.6)
+    assert size <= scale.live_primary
+    assert 2 * scale.pad + 5 * 0.6 * size <= cell_w
+    if 2 * scale.pad + 5 * 0.6 * scale.live_primary <= cell_w:
+        assert size == scale.live_primary
+
+
+def test_the_split_is_not_shrunk_by_the_corner():
+    """A 1x2 upright 1080x1920 cell: the corner shrinks to fit two figures on
+    a row, the split alone at the bottom keeps the cell's 137 px."""
+    corner = overlay_sprites.corner_fit(540, 1920, advance_em=0.6)
+    assert corner.size < 137
+    assert overlay_sprites.split_fit_size(540, 1920, advance_em=0.6) == 137
