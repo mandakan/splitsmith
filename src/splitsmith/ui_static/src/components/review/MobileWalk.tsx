@@ -276,7 +276,7 @@ export function MobileWalk(props: WalkProps) {
         cssHeight={CLOSE_HEIGHT}
       />
       <Strip
-        label="3 s of the stage · shaded: what the loop plays"
+        label="3 s of the stage · shaded: what the loop plays · tap a sound to go to it"
         audio={props.audio}
         peaks={peaks}
         center={time}
@@ -287,9 +287,10 @@ export function MobileWalk(props: WalkProps) {
         foot={null}
         numbered
         band={loop}
+        onPick={actions.jump}
         cssHeight={CONTEXT_HEIGHT}
       />
-      <div className="text-xs text-muted">Whole stage: scroll sideways, tap to go to the nearest stop</div>
+      <div className="text-xs text-muted">Whole stage: scroll sideways, tap a sound to go to it</div>
       <div ref={stageScroller} className="-mx-3 overflow-x-auto px-3">
         <div style={{ width: `${Math.max(1, Math.round(peaks.duration * STAGE_PX_PER_S))}px` }}>
           <Strip

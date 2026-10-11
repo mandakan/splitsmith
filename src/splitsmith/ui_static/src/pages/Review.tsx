@@ -65,6 +65,7 @@ import {
 import { deriveMarkers } from "@/lib/audit-doc";
 import { buildFixtureJson } from "@/lib/fixtureDoc";
 import { useDecodedAudio } from "@/lib/useDecodedAudio";
+import { WalkPlayer } from "@/lib/walkPlayer";
 import { isTypingTextTarget, useBlurOnPointerClick } from "@/lib/audit-input";
 import { zoomActionForKey } from "@/lib/zoomKeys";
 import { placeTime, type SnapPeaks } from "@/lib/peak-snap";
@@ -875,6 +876,17 @@ export function Review() {
   // after, once, or on repeat with the walk's loop on (which also starts each
   // stop as the walk reaches it); Space again pauses.
   const listenTimerRef = useRef<number | null>(null);
+  // The phone listens through Web Audio from the decoded samples
+  // (lib/walkPlayer): seeking the streamed video was slower than a pass.
+  const walkPlayerRef = useRef<WalkPlayer | null>(null);
+  const phonePlayer = (): WalkPlayer | null => {
+    if (!phone || !decodedAudio) return null;
+    walkPlayerRef.current ??= new WalkPlayer();
+    return walkPlayerRef.current;
+  };
+  useEffect(() => () => walkPlayerRef.current?.close(), []);
+  // What was last played, so Half speed can play it again at the new rate.
+  const lastPassRef = useRef<{ t: number; repeat: boolean } | null>(null);
   const [walkLoop, setWalkLoop] = useState(() => readLoopOn(phone ? "phone" : "desktop"));
   // Half speed (the phone's): a 50 ms double becomes 100 ms, two sounds.
   const [walkSlow, setWalkSlow] = useState(() => phone && readSlowOn());
@@ -882,41 +894,59 @@ export function Review() {
   const pauseListening = useCallback(() => {
     if (listenTimerRef.current != null) window.clearTimeout(listenTimerRef.current);
     listenTimerRef.current = null;
+    walkPlayerRef.current?.stop();
     if (walkRegionRef.current) walkRegionRef.current.resumeAt = null;
     const el = playbackEl();
     el?.pause();
     setIsPlaying(false);
   }, []);
   const playAround = useCallback(
-    (t: number, repeat: boolean) => {
+    (t: number, repeat: boolean, rate: number = walkRate) => {
+      lastPassRef.current = { t, repeat };
+      const { start, end, gap } = loopWindow(t, WALK_LOOP[phone ? "phone" : "desktop"], peaks?.duration ?? null);
+      const player = phonePlayer();
+      if (player && decodedAudio) {
+        playbackEl()?.pause();
+        player.play(decodedAudio, start, end, { loop: repeat, gapS: gap, rate });
+        return;
+      }
       const el = playbackEl();
       if (!el) return;
       if (listenTimerRef.current != null) window.clearTimeout(listenTimerRef.current);
       listenTimerRef.current = null;
-      const { start, end, gap } = loopWindow(t, WALK_LOOP[phone ? "phone" : "desktop"], peaks?.duration ?? null);
       walkRegionRef.current = repeat ? { start, end, gap, resumeAt: null } : null;
       handleScrub(start);
-      el.playbackRate = walkRate;
+      el.playbackRate = rate;
       el.preservesPitch = false;
       // A play the browser refuses (no gesture yet on a fresh load) leaves
       // the page paused rather than showing it playing.
       el.play().catch(() => setIsPlaying(false));
       setIsPlaying(true);
       if (!repeat) {
-        listenTimerRef.current = window.setTimeout(pauseListening, ((end - start) * 1000) / walkRate);
+        listenTimerRef.current = window.setTimeout(pauseListening, ((end - start) * 1000) / rate);
       }
     },
-    [handleScrub, pauseListening, phone, peaks, walkRate],
+    // phonePlayer reads phone and decodedAudio, both listed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [handleScrub, pauseListening, phone, peaks, walkRate, decodedAudio],
   );
   const listenAround = useCallback(
     (t: number) => {
+      const player = phonePlayer();
+      if (player) {
+        if (player.playing) pauseListening();
+        else playAround(t, walkLoop);
+        return;
+      }
       const el = playbackEl();
       if (!el) return;
       // In the silence between passes the element is paused but the loop plays.
       if (!el.paused || walkRegionRef.current?.resumeAt != null) pauseListening();
       else playAround(t, walkLoop);
     },
-    [playAround, pauseListening, walkLoop],
+    // phonePlayer reads phone and decodedAudio.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [playAround, pauseListening, walkLoop, phone, decodedAudio],
   );
   const loopStop = useCallback(
     (t: number | null) => {
@@ -944,7 +974,10 @@ export function Review() {
     setWalkSlow(on);
     const el = playbackEl();
     if (el) el.playbackRate = on ? 0.5 : 1;
-  }, [walkSlow]);
+    // The phone's pass is rebuilt at the new rate, its silence with it.
+    const last = lastPassRef.current;
+    if (walkPlayerRef.current?.playing && last) playAround(last.t, last.repeat, on ? 0.5 : 1);
+  }, [walkSlow, playAround]);
 
   const snapDisplacementMs = useCallback(
     (markerId: string): number | null => {

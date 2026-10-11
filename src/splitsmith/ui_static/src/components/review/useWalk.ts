@@ -17,7 +17,7 @@ import {
   countCheck,
   decisionsFrom,
   isDecided,
-  nearestStop,
+  jumpTarget,
   placementOf,
   stopState,
   stopTime,
@@ -100,7 +100,15 @@ export function useWalk(props: WalkProps, opts?: { holdLoop?: boolean }): WalkMo
       led: false,
     };
   });
-  const stops = plan.stops;
+  // Stops a tap on a stage strip added (``jumpTarget``), kept in time order.
+  const [added, setAdded] = useState<WalkStop[]>([]);
+  const stops = useMemo(
+    () =>
+      added.length === 0
+        ? plan.stops
+        : [...plan.stops, ...added].sort((a, b) => a.time - b.time || a.key.localeCompare(b.key)),
+    [plan.stops, added],
+  );
   // The source walk moves the snap's misplaced shots onto their sounds once,
   // when it opens; each is still confirmed at its stop.
   useEffect(() => {
@@ -289,8 +297,16 @@ export function useWalk(props: WalkProps, opts?: { holdLoop?: boolean }): WalkMo
         if (stop) props.onListen(anchorRef.current);
       },
       jump: (t: number) => {
-        const i = nearestStop(stops, t);
-        if (i >= 0) setIndex(i);
+        const target = jumpTarget(stops, markers, peaks, t);
+        if (target == null) return;
+        if ("index" in target) {
+          setIndex(target.index);
+          return;
+        }
+        const s = target.stop;
+        const next = [...stops, s].sort((a, b) => a.time - b.time || a.key.localeCompare(b.key));
+        setAdded((prev) => [...prev, s]);
+        setIndex(next.findIndex((x) => x.key === s.key));
       },
       firstUndecided: () => setIndex(firstUndecidedFrom(0)),
     },

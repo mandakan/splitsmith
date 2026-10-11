@@ -31,6 +31,7 @@ import {
   readSlowOn,
   writeSlowOn,
   quietFlag,
+  jumpTarget,
 } from "./walk";
 
 /** 1 ms bins over ``duration`` s of quiet noise with a shot-like burst
@@ -405,5 +406,32 @@ describe("quietFlag", () => {
     const peaks = envelope(3, [1.0]);
     expect(quietFlag(peaks, 1.0, 1)).toBeNull();
     expect(quietFlag(peaks, 1.0, 0)).toBeNull();
+  });
+});
+
+describe("jumpTarget", () => {
+  const peaks = envelope(3, [0.5, 1.0, 1.5]);
+  const kept = marker("cand-1", "detected", 0.5);
+  const rejected = marker("cand-2", "rejected", 1.004);
+  const stops = [{ key: "cand-1", markerId: "cand-1", time: 0.5, origin: "kept" as const }];
+
+  it("goes to a stop under the tap", () => {
+    expect(jumpTarget(stops, [kept, rejected], peaks, 0.55)).toEqual({ index: 0 });
+  });
+
+  it("makes a stop for a rejected candidate the walk does not visit", () => {
+    expect(jumpTarget(stops, [kept, rejected], peaks, 1.05)).toEqual({
+      stop: { key: "cand-2", markerId: "cand-2", time: 1.004, origin: "rejected" },
+    });
+  });
+
+  it("makes a stop for a sound nobody marked, at its onset", () => {
+    expect(jumpTarget(stops, [kept], peaks, 1.52)).toEqual({
+      stop: { key: "burst-1500", markerId: null, time: 1.5, origin: "burst" },
+    });
+  });
+
+  it("falls back to the nearest stop in silence", () => {
+    expect(jumpTarget(stops, [kept], peaks, 2.5)).toEqual({ index: 0 });
   });
 });

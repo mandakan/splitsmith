@@ -227,6 +227,40 @@ export function nearestStop(stops: ReadonlyArray<{ time: number }>, t: number): 
   return best;
 }
 
+/** A tap on a stage strip lands on what is under it within this. */
+export const JUMP_REACH_S = 0.12;
+
+/** Where a tap at ``t`` on a stage strip goes: a stop there, else a stop
+ *  made for the marker there (a rejected candidate included), else for the
+ *  sound there, at its onset; else the nearest stop. A walk of the kept
+ *  shots alone can still reach the shot it lost. ``stop`` is set when the
+ *  walk has to add it. */
+export function jumpTarget(
+  stops: ReadonlyArray<WalkStop>,
+  markers: ReadonlyArray<AuditMarker>,
+  peaks: SnapPeaks,
+  t: number,
+): { index: number } | { stop: WalkStop } | null {
+  const i = nearestStop(stops, t);
+  if (i >= 0 && Math.abs(stops[i].time - t) <= JUMP_REACH_S) return { index: i };
+  let near: AuditMarker | null = null;
+  for (const m of markers) {
+    if (Math.abs(m.time - t) > JUMP_REACH_S) continue;
+    if (near == null || Math.abs(m.time - t) < Math.abs(near.time - t)) near = m;
+  }
+  if (near) {
+    const at = stops.findIndex((s) => s.markerId === near!.id);
+    if (at >= 0) return { index: at };
+    return { stop: { key: near.id, markerId: near.id, time: near.time, origin: isKept(near) ? "kept" : "rejected" } };
+  }
+  const onset = snapToLeadingEdge(t, peaks);
+  if (onset != null) {
+    const time = Math.round(onset * 1000) / 1000;
+    return { stop: { key: `burst-${Math.round(time * 1000)}`, markerId: null, time, origin: "burst" } };
+  }
+  return i >= 0 ? { index: i } : null;
+}
+
 /** A stop's state now: a shot when its marker is kept. */
 export function stopState(marker: AuditMarker | null): StopState {
   return marker && isKept(marker) ? "shot" : "not_shot";
