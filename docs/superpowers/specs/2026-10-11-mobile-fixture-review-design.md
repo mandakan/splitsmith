@@ -125,3 +125,21 @@ Fixed at the bottom, within thumb reach, respecting the safe-area inset:
 - B: the hosted store, the pull script, the admin gate, signed video.
 - Any change to the walk's rules, scope or the rise foot.
 - A What's new entry (lab only).
+
+## Changed while planning and building
+
+- The cookie is `SameSite=Lax`: Strict drops it when the page is opened from
+  a bookmark or another app, which is a cross-site navigation.
+- The token persists in `build/review_phone_token` (gitignored, mode 600) so
+  the phone stays signed in between runs; `--new-token` rotates it.
+- Continue resumes a fixture with `walk_decided` events first: the stops are
+  computed in the browser from the audio, so the queue cannot know which
+  fixture is nearly done.
+- On a phone the queue is Continue plus a list (the two-pane grid needs a
+  desk), each row naming the camera so two angles of one stage read apart.
+- `/dev/review` and `/review?walk=1` pass the desktop gate on a phone; the
+  full editor and the other developer steps still need a desk, and the
+  developer sidebar hides below 768 px.
+- The phone's guide opens from its button only (the desktop's stays open
+  until hidden); the page drops the fixture card's header and the editor's
+  marker list in the phone walk.
