@@ -37,6 +37,7 @@ function Harness({
   onLoopStop = () => {},
   guideOpen = false,
   onToggleSlow,
+  onRestart,
 }: {
   initial: AuditMarker[];
   record: (kind: string, payload: Record<string, unknown>) => void;
@@ -44,6 +45,7 @@ function Harness({
   onLoopStop?: (time: number | null) => void;
   guideOpen?: boolean;
   onToggleSlow?: () => void;
+  onRestart?: (scope: "all" | "shots") => void;
 }) {
   const [markers, setMarkers] = useState(initial);
   return (
@@ -77,6 +79,7 @@ function Harness({
       audio={null}
       scope="all"
       onScopeChange={() => {}}
+      onRestart={onRestart}
     />
   );
 }
@@ -157,5 +160,18 @@ describe("MobileWalk listening", () => {
     ).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Half speed" }));
     expect(onToggleSlow).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("MobileWalk at the end", () => {
+  it("offers to check the kept shots, or walk every stop, again", () => {
+    const onRestart = vi.fn();
+    render(<Harness initial={markersAll} record={vi.fn()} onRestart={onRestart} />);
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    for (let i = 0; i < 3; i++) fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+    fireEvent.click(screen.getByRole("button", { name: "Check the 1 kept shot again" }));
+    expect(onRestart).toHaveBeenLastCalledWith("shots");
+    fireEvent.click(screen.getByRole("button", { name: "Walk every stop again" }));
+    expect(onRestart).toHaveBeenLastCalledWith("all");
   });
 });

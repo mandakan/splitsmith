@@ -68,6 +68,9 @@ export interface WalkProps {
    *  walk when it changes. */
   scope: WalkScope;
   onScopeChange: (scope: WalkScope) => void;
+  /** Walk again from the first stop, every stop undecided (a signed-off
+   *  fixture included); the phone's end screen offers it. */
+  onRestart?: (scope: WalkScope) => void;
 }
 
 export function Walk(props: WalkProps) {

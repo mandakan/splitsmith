@@ -130,6 +130,13 @@ export function Review() {
   // flip it mid-walk), overridden by the walk's switch.
   const [initialScope, setInitialScope] = useState<WalkScope>("all");
   const [scopeOverride, setScopeOverride] = useState<WalkScope | null>(null);
+  // A walk started again (``restartWalk``) ignores the decisions already
+  // saved, so every stop is asked again; 0 resumes from them.
+  const [walkRound, setWalkRound] = useState(0);
+  const restartWalk = useCallback((scope: WalkScope) => {
+    setScopeOverride(scope);
+    setWalkRound((n) => n + 1);
+  }, []);
   const walkScope = scopeOverride ?? initialScope;
   useEffect(() => {
     if (!videoLarge) return;
@@ -300,6 +307,7 @@ export function Review() {
         setAudit(a);
         setMarkers(deriveMarkers(a));
         setScopeOverride(null);
+        setWalkRound(0);
         setInitialScope(
           defaultScope({
             snapped: isSnapped(a as never),
@@ -1237,10 +1245,10 @@ export function Review() {
         <CardContent className={walkMode && phone ? "p-0" : "space-y-4"}>
           {walkMode && peaks && edgePeaks ? (
             <WalkView
-              key={`${fixturePath}:${walkScope}`}
+              key={`${fixturePath}:${walkScope}:${walkRound}`}
               markers={markers}
               peaks={edgePeaks}
-              savedEvents={audit.audit_events ?? []}
+              savedEvents={walkRound > 0 ? [] : (audit.audit_events ?? [])}
               from={(audit.beep_time ?? 0) + BEEP_GUARD_S}
               expectedRounds={
                 (audit as unknown as { stage_rounds?: { expected?: number } }).stage_rounds?.expected ?? null
@@ -1267,6 +1275,7 @@ export function Review() {
               aside={videoBox}
               scope={walkScope}
               onScopeChange={setScopeOverride}
+              onRestart={restartWalk}
             />
           ) : walkMode && peaks ? (
             <div className="flex items-center gap-2 text-sm text-muted">

@@ -7,7 +7,7 @@
  * height is for the strips and the buttons.
  */
 
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import { CLOSE_HEIGHT, CONTEXT_HEIGHT, Strip } from "@/components/review/Strip";
 import { useWalk } from "@/components/review/useWalk";
@@ -30,6 +30,9 @@ import {
 } from "@/lib/walk";
 
 const DETAIL_HEIGHT = "clamp(160px, 28vh, 260px)";
+/** The whole stage scrolls sideways at this scale: shots a fifth of a
+ *  second apart sit 20 px apart, numbers legible. */
+const STAGE_PX_PER_S = 100;
 // min-w-0 and narrow padding: four labels must fit a 360 px phone.
 const BIG = "min-h-11 min-w-0 flex-1 px-1 text-sm";
 
@@ -50,6 +53,16 @@ export function MobileWalk(props: WalkProps) {
   const [guideShown, setGuideShown] = useState(false);
   const toggleGuide = () => setGuideShown((v) => !v);
   const w = useWalk(props, { holdLoop: !started });
+  // The whole-stage strip keeps the current stop in the middle of its view.
+  const stageScroller = useRef<HTMLDivElement | null>(null);
+  const followKey = w.stop?.key ?? null;
+  useEffect(() => {
+    const el = stageScroller.current;
+    if (!el || !w.stop) return;
+    el.scrollLeft = w.time * STAGE_PX_PER_S - el.clientWidth / 2;
+    // Follow the stop, not every nudge.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [followKey, started]);
   const { markers, peaks, expectedRounds, busy } = props;
   const { stops, index, stop, marker, state, time, level, decidedCount, keptCount, check, armed, actions } = w;
 
@@ -61,7 +74,7 @@ export function MobileWalk(props: WalkProps) {
   };
 
   const header = (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">
+    <div className="sticky top-0 z-10 -mx-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border bg-bg px-3 py-1 text-sm text-muted">
       <span className="text-ink">{stop ? `Stop ${index + 1} of ${stops.length}` : "End of the walk"}</span>
       <span className="numeral">
         {keptCount}
@@ -113,8 +126,13 @@ export function MobileWalk(props: WalkProps) {
             span on the 3 s strip is what plays.
           </p>
           <Button variant="primary" className="min-h-11 w-full text-base" onClick={start}>
-            Start
+            {decidedCount > 0 ? `Continue (${decidedCount} of ${stops.length} decided)` : "Start"}
           </Button>
+          {decidedCount > 0 && props.onRestart ? (
+            <Button className="min-h-11 w-full text-base" onClick={() => props.onRestart!(props.scope)}>
+              Ask every stop again
+            </Button>
+          ) : null}
         </div>
       </FullScreen>
     );
@@ -144,6 +162,16 @@ export function MobileWalk(props: WalkProps) {
             {armed ? `Sign off with ${keptCount} shots anyway` : `Sign off with ${keptCount} shots`}
           </Button>
         )}
+        {props.onRestart ? (
+          <>
+            <Button className="min-h-11 w-full text-base" onClick={() => props.onRestart!("shots")}>
+              Check the {keptCount} kept {keptCount === 1 ? "shot" : "shots"} again
+            </Button>
+            <Button className="min-h-11 w-full text-base" onClick={() => props.onRestart!("all")}>
+              Walk every stop again
+            </Button>
+          </>
+        ) : null}
         <Button variant="ghost" className="min-h-11 w-full" onClick={actions.back}>
           Back to the last stop
         </Button>
@@ -258,22 +286,26 @@ export function MobileWalk(props: WalkProps) {
         band={loop}
         cssHeight={CONTEXT_HEIGHT}
       />
-      <details className="text-sm">
-        <summary className="min-h-11 cursor-pointer py-2 text-muted">Whole stage</summary>
-        <Strip
-          label="Tap to go to the nearest stop"
-          audio={props.audio}
-          peaks={peaks}
-          center={peaks.duration / 2}
-          half={peaks.duration / 2}
-          level={level}
-          fit="stage"
-          {...mark}
-          foot={null}
-          onPick={actions.jump}
-          cssHeight={CONTEXT_HEIGHT}
-        />
-      </details>
+      <div className="text-xs text-muted">Whole stage: scroll sideways, tap to go to the nearest stop</div>
+      <div ref={stageScroller} className="-mx-3 overflow-x-auto px-3">
+        <div style={{ width: `${Math.max(1, Math.round(peaks.duration * STAGE_PX_PER_S))}px` }}>
+          <Strip
+            label=""
+            audio={props.audio}
+            peaks={peaks}
+            center={peaks.duration / 2}
+            half={peaks.duration / 2}
+            level={level}
+            fit="stage"
+            {...mark}
+            foot={null}
+            numbered
+            band={loop}
+            onPick={actions.jump}
+            cssHeight={CONTEXT_HEIGHT}
+          />
+        </div>
+      </div>
       {props.aside ? (
         <details className="text-sm">
           <summary className="min-h-11 cursor-pointer py-2 text-muted">Video</summary>
