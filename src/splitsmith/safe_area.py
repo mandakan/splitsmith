@@ -64,6 +64,16 @@ class SafeArea:
             return True
         return right > self.right_line + 0.5 and bottom > self.right_top - 0.5
 
+    def box_insets(self, left: int, top: int, right: int, bottom: int) -> tuple[int, int]:
+        """How far a box (a grid tile, in canvas pixels) must keep its text in
+        from its own right and bottom edges to stay out of the area:
+        ``(right, bottom)``, ``0`` on a side the area does not reach. The
+        right inset covers the whole box when any of it reaches down into
+        the button column's rows."""
+        inset_bottom = max(0, bottom - self.bottom_line)
+        inset_right = max(0, right - self.right_line) if bottom > self.right_top else 0
+        return inset_right, inset_bottom
+
     def css_vars(self) -> str:
         """The area as CSS custom properties, for a document's ``:root``."""
         return (

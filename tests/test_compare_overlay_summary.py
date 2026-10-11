@@ -1568,7 +1568,6 @@ def test_a_placement_with_an_accent_sets_the_variable_on_its_cell_only():
 #: hidden: at these sizes the wrap keeps them all.
 _FIGURE_COLLISIONS_JS = """() => {
   const out = {collisions: [], hidden: [], splits: 0};
-  const splitCaptions = ['Best', 'Avg', 'Worst', 'Draw'];
   const visible = (e) => e.getClientRects().length > 0;
   document.querySelectorAll('.cell').forEach((cell, index) => {
     const caption = cell.querySelector('.anchor-middle-center .caption');
@@ -1585,7 +1584,10 @@ _FIGURE_COLLISIONS_JS = """() => {
       if (label && !visible(label)) { out.hidden.push(index + ':' + label.textContent); }
       const value = el.querySelector('.value');
       if (!value || !visible(value)) { return; }
-      if (label && splitCaptions.includes(label.textContent)) { out.splits += 1; }
+      // The Splits band's first grid holds Best / Avg / Worst / Draw (its
+      // captions are dropped on a grid too narrow for them, #1394).
+      const splitsGrid = cell.querySelector('.anchor-middle-center .group.flow-grid');
+      if (el.parentElement === splitsGrid) { out.splits += 1; }
       const range = document.createRange();
       range.selectNodeContents(value);
       const rect = range.getBoundingClientRect();
