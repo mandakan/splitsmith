@@ -411,3 +411,34 @@ def test_a_stage_the_user_touched_is_never_reseeded() -> None:
     deleted = _doc(times, [], True)  # the user deleted every proposal
     assert seed_doc(deleted, hint_min_s=2.5, capacity=15) is False
     assert deleted["events"] == []
+
+
+def test_seed_events_skips_a_gap_that_starts_before_the_beep() -> None:
+    seeds = seed_events([-0.2, 3.5, 3.8, 7.0], hint_min_s=2.5, capacity=None)
+    assert [(e.start, e.end) for e in seeds] == [(3.8, 7.0)]
+
+
+def test_seed_events_skips_non_finite_times() -> None:
+    seeds = seed_events([1.0, float("nan"), 4.0, float("inf")], hint_min_s=2.5, capacity=None)
+    assert [(e.start, e.end) for e in seeds] == [(1.0, 4.0)]
+
+
+def test_seed_doc_skips_unreadable_shot_times() -> None:
+    doc = {
+        "shots": [
+            {"ms_after_beep": 1000},
+            {"ms_after_beep": "late"},
+            {"ms_after_beep": None},
+            {"ms_after_beep": 4000},
+        ]
+    }
+    assert seed_doc(doc, hint_min_s=2.5, capacity=None) is True
+    assert [(e["start"], e["end"]) for e in doc["events"]] == [(1.0, 4.0)]
+
+
+def test_seed_doc_with_nothing_to_propose_leaves_the_doc_untouched() -> None:
+    """An empty first seed is recomputed next time, never stored: marking
+    the stage seeded would stop proposals over shots added later."""
+    doc = {"shots": [{"ms_after_beep": 1000}, {"ms_after_beep": 1300}]}
+    assert seed_doc(doc, hint_min_s=2.5, capacity=None) is False
+    assert doc == {"shots": [{"ms_after_beep": 1000}, {"ms_after_beep": 1300}]}

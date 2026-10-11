@@ -487,3 +487,16 @@ def test_heal_passes_events_through(cfg: CoachAutoClassifyConfig) -> None:
     shots = [_shot(1, 1000), _shot(2, 3800)]
     assert heal_unclassified(shots, cfg, events=[_reload(1.9, 3.2)]) is True
     assert shots[1]["interval_class"] == "reload"
+
+
+def test_gap_overlaps_reload_counts_confirmed_regions_only() -> None:
+    from splitsmith.coach import gap_overlaps_reload
+
+    auto = StageEvent(id="evt-1", kind="reload", start=1.5, end=3.5, source="auto")
+    manual = StageEvent(id="evt-2", kind="reload", start=1.5, end=3.5, source="manual")
+    movement = StageEvent(id="evt-3", kind="movement", start=1.5, end=3.5, source="manual")
+    assert gap_overlaps_reload(1.0, 4.0, [auto]) is False
+    assert gap_overlaps_reload(1.0, 4.0, [movement]) is False
+    assert gap_overlaps_reload(1.0, 4.0, [manual]) is True
+    assert gap_overlaps_reload(1.0, 4.0, [auto, manual]) is True
+    assert gap_overlaps_reload(3.5, 4.0, [manual]) is False  # touching is not overlapping

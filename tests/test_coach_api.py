@@ -72,8 +72,8 @@ def _bootstrap(
             {"shot_number": 1, "ms_after_beep": 1500, "source": "detected"},
             {"shot_number": 2, "ms_after_beep": 1800, "source": "detected"},  # 0.30 -> split
             {"shot_number": 3, "ms_after_beep": 3300, "source": "detected"},  # 1.50 -> transition
-            # 2.60 -> hinted: the first GET seeds a reload region over the
-            # gap, so the heal says reload rather than movement.
+            # 2.60 -> hinted, but a hint is a proposal at most: with no
+            # confirmed reload region over the gap the heal says movement.
             {"shot_number": 4, "ms_after_beep": 5900, "source": "detected"},
         ],
     }
@@ -108,7 +108,7 @@ def test_get_coach_backfills_classes_on_first_read(tmp_path: Path) -> None:
         "first_shot",
         "split",
         "transition",
-        "reload",
+        "movement",
     ]
     for s in body["shots"]:
         assert s["interval_class_source"] == "auto"
@@ -121,7 +121,7 @@ def test_get_coach_backfills_classes_on_first_read(tmp_path: Path) -> None:
         "first_shot",
         "split",
         "transition",
-        "reload",
+        "movement",
     ]
     assert not any(e.get("kind") == "coach_reclassify" for e in stored.get("audit_events") or [])
 
@@ -155,7 +155,7 @@ def test_get_coach_heal_survives_slim_install(tmp_path: Path, monkeypatch: pytes
         "first_shot",
         "split",
         "transition",
-        "reload",
+        "movement",
     ]
 
 
@@ -640,12 +640,12 @@ def test_get_coach_seeds_a_reload_proposal_once(tmp_path: Path) -> None:
     client, audit_file, base = _bootstrap(tmp_path, division="Production Optics")
     _write_shots(audit_file, _po_shots_with_a_reload_gap())
 
-    body = client.get(f"{base}/shooters/me/stages/1/coach").json()
+    body = client.get(f"{base}/shooters/me/stages/1/coach?seed=1").json()
     assert [(e["kind"], e["source"]) for e in body["events"]] == [("reload", "auto")]
     assert body["events"][0]["start"] == pytest.approx(12 * 0.3 + 0.9)  # the 12th shot, 1.2 + 11*0.3
     assert body["events"][0]["id"] == "evt-1"
-    assert body["event_summary"]["reloads"] == 1
-    assert body["event_summary"]["capacity_warning"] is None
+    # The summary counts confirmed regions only: the proposal is not one.
+    assert body["event_summary"]["reloads"] == 0
     assert all(s["moving"] is False for s in body["shots"])
     assert isinstance(body["_version"], str) and len(body["_version"]) == 16
 
@@ -656,14 +656,14 @@ def test_get_coach_seeds_a_reload_proposal_once(tmp_path: Path) -> None:
     # The user deletes the proposal; the next read does not resurrect it.
     stored["events"] = []
     audit_file.write_text(json.dumps(stored) + "\n", encoding="utf-8")
-    body2 = client.get(f"{base}/shooters/me/stages/1/coach").json()
+    body2 = client.get(f"{base}/shooters/me/stages/1/coach?seed=1").json()
     assert body2["events"] == []
 
 
 def test_get_coach_without_a_division_seeds_from_the_hint_alone(tmp_path: Path) -> None:
     client, audit_file, base = _bootstrap(tmp_path)
     _write_shots(audit_file, [1000, 1300, 4000, 4300, 7200])  # two gaps over 2.5 s
-    body = client.get(f"{base}/shooters/me/stages/1/coach").json()
+    body = client.get(f"{base}/shooters/me/stages/1/coach?seed=1").json()
     assert [e["kind"] for e in body["events"]] == ["reload", "reload"]
 
 
@@ -713,8 +713,9 @@ def test_get_coach_version_is_the_stored_docs_revision(
 ) -> None:
     """``_version`` names the stored doc. An owner read saves its seed, so
     it is the saved doc's; a mirror read seeds in memory only, never
-    persists, and still hands back the stored doc's revision -- else the
-    events PUT would 409 against it forever."""
+    persists it, and hands back the stored doc's revision -- else the
+    events PUT would 409 against it forever. The heal is persisted on a
+    mirror as v0.64.1 did; the seed never rides it."""
     from splitsmith.audit_revision import audit_revision
     from splitsmith.ui import server as server_module
 
@@ -723,13 +724,15 @@ def test_get_coach_version_is_the_stored_docs_revision(
     before = _read(audit_file)
 
     monkeypatch.setattr(server_module, "_is_mirror", lambda: True)
-    body = client.get(f"{base}/shooters/me/stages/1/coach").json()
+    body = client.get(f"{base}/shooters/me/stages/1/coach?seed=1").json()
     assert [e["kind"] for e in body["events"]] == ["reload"]  # served in memory
-    assert _read(audit_file) == before  # neither the seed nor the heal persisted
-    assert body["_version"] == audit_revision(before)
+    healed = _read(audit_file)
+    assert "events" not in healed and "events_seeded" not in healed  # the seed is not persisted
+    assert healed["shots"] != before["shots"]  # the heal is (v0.64.1)
+    assert body["_version"] == audit_revision(healed)
 
     monkeypatch.setattr(server_module, "_is_mirror", lambda: False)
-    body = client.get(f"{base}/shooters/me/stages/1/coach").json()
+    body = client.get(f"{base}/shooters/me/stages/1/coach?seed=1").json()
     stored = _read(audit_file)
     assert stored["events_seeded"] == 2
     assert body["_version"] == audit_revision(stored)
@@ -750,7 +753,7 @@ def test_get_coach_resolves_the_capacity_once(tmp_path: Path, monkeypatch: pytes
     monkeypatch.setattr(events_module, "capacity_for", counting)
     client, audit_file, base = _bootstrap(tmp_path, division="Production Optics")
     _write_shots(audit_file, _po_shots_with_a_reload_gap())
-    assert client.get(f"{base}/shooters/me/stages/1/coach").status_code == 200
+    assert client.get(f"{base}/shooters/me/stages/1/coach?seed=1").status_code == 200
     assert calls == ["Production Optics"]
 
 
@@ -773,22 +776,33 @@ def _po_shots_past_capacity_without_a_hinted_gap() -> list[int]:
     return first + rest
 
 
+def test_get_coach_without_seed_proposes_nothing_and_warns_by_capacity(tmp_path: Path) -> None:
+    """Coach's read: no proposal is seeded, and 20 shots on one Production
+    Optics magazine is the capacity warning."""
+    client, audit_file, base = _bootstrap(tmp_path, division="Production Optics")
+    _write_shots(audit_file, _po_shots_past_capacity_without_a_hinted_gap())
+    body = client.get(f"{base}/shooters/me/stages/1/coach").json()
+    assert body["events"] == []
+    assert body["event_summary"]["capacity_warning"] == "20 shots without a reload"
+
+
 def test_get_coach_seeds_by_division_capacity_when_no_gap_is_hinted(tmp_path: Path) -> None:
     client, audit_file, base = _bootstrap(tmp_path, division="Production Optics")
     shots = _po_shots_past_capacity_without_a_hinted_gap()
     _write_shots(audit_file, shots)
 
-    body = client.get(f"{base}/shooters/me/stages/1/coach").json()
+    body = client.get(f"{base}/shooters/me/stages/1/coach?seed=1").json()
     assert [(e["kind"], e["source"]) for e in body["events"]] == [("reload", "auto")]
     assert body["events"][0]["start"] == pytest.approx(shots[13] / 1000)
     assert body["events"][0]["end"] == pytest.approx(shots[14] / 1000)
-    assert body["event_summary"]["capacity_warning"] is None
+    # A proposal is not a confirmed reload: the warning stands until one is.
+    assert body["event_summary"]["capacity_warning"] == "20 shots without a reload"
 
     # The user deletes the proposal: 20 shots on one magazine is over capacity.
     stored = _read(audit_file)
     stored["events"] = []
     audit_file.write_text(json.dumps(stored) + "\n", encoding="utf-8")
-    body2 = client.get(f"{base}/shooters/me/stages/1/coach").json()
+    body2 = client.get(f"{base}/shooters/me/stages/1/coach?seed=1").json()
     assert body2["events"] == []
     assert body2["event_summary"]["capacity_warning"] == "20 shots without a reload"
 
@@ -798,7 +812,7 @@ def test_get_coach_capacity_from_the_scoreboard_files_of_an_older_project(tmp_pa
     dropped match file, so the route must hand it the shooter directory."""
     client, audit_file, base = _bootstrap(tmp_path, pinned_competitor=727539)  # Production Optics
     _write_shots(audit_file, _po_shots_past_capacity_without_a_hinted_gap())
-    body = client.get(f"{base}/shooters/me/stages/1/coach").json()
+    body = client.get(f"{base}/shooters/me/stages/1/coach?seed=1").json()
     assert [e["kind"] for e in body["events"]] == ["reload"]
 
 
@@ -1134,12 +1148,14 @@ def test_get_coach_reseeds_an_older_seeders_untouched_proposals(tmp_path: Path) 
     doc["shots"][15]["interval_class"] = "movement"
     audit_file.write_text(json.dumps(doc) + "\n", encoding="utf-8")
 
-    body = client.get(f"{base}/shooters/me/stages/1/coach").json()
+    body = client.get(f"{base}/shooters/me/stages/1/coach?seed=1").json()
     assert [(round(e["start"], 3), e["source"]) for e in body["events"]] == [(middle[-1] / 1000, "auto")]
     stored = json.loads(audit_file.read_text(encoding="utf-8"))
     assert stored["events_seeded"] == 2
-    assert stored["shots"][4]["interval_class"] != "reload"
-    assert stored["shots"][15]["interval_class"] == "reload"
+    # Classified again: the old proposal's auto ``reload`` goes, and the new
+    # proposal sets none (a proposal never touches a stored class).
+    assert stored["shots"][4]["interval_class"] == "movement"
+    assert stored["shots"][15]["interval_class"] == "movement"
 
 
 # ---------------------------------------------------------------------------
@@ -1237,3 +1253,240 @@ def test_get_coach_ignores_a_non_string_stage_note(tmp_path: Path) -> None:
     doc["stage_note"] = {"hand": "edited"}
     audit_file.write_text(json.dumps(doc) + "\n", encoding="utf-8")
     assert _coach(client, base)["stage_note"] is None
+
+
+# ---------------------------------------------------------------------------
+# Release blockers for 0.65.0: proposals never classify, reads never write,
+# seeding never 500s
+# ---------------------------------------------------------------------------
+
+
+def _classified(ms: list[int]) -> list[dict[str, Any]]:
+    from splitsmith import coach as coach_module
+
+    shots = [{"shot_number": i + 1, "ms_after_beep": m, "source": "detected"} for i, m in enumerate(ms)]
+    coach_module.classify_intervals_in_dicts(shots, coach_module.auto_classify_config())
+    return shots
+
+
+def _stage_with_a_proposal_only(tmp_path: Path) -> tuple[TestClient, Path, str]:
+    """Three classified shots whose last gap (2.3 s) is ``movement``, and an
+    auto reload proposal over that gap that nobody confirmed."""
+    client, audit_file, base = _bootstrap(tmp_path)
+    doc = _read(audit_file)
+    doc["shots"] = _classified([1000, 1300, 3600])
+    doc["events"] = [{"id": "evt-1", "kind": "reload", "start": 1.3, "end": 3.6, "source": "auto"}]
+    doc["events_seeded"] = 2
+    audit_file.write_text(json.dumps(doc) + "\n", encoding="utf-8")
+    assert _stored_class(audit_file, 2) == "movement"
+    return client, audit_file, base
+
+
+def _confirm(audit_file: Path) -> None:
+    doc = _read(audit_file)
+    doc["events"][0]["source"] = "manual"
+    audit_file.write_text(json.dumps(doc) + "\n", encoding="utf-8")
+
+
+def _write_through(client: TestClient, base: str, writer: str) -> None:
+    if writer == "audit_put":
+        doc = client.get(f"{base}/shooters/me/stages/1/audit").json()
+        resp = client.put(f"{base}/shooters/me/stages/1/audit", json=doc)
+    elif writer == "accept":
+        resp = client.post(f"{base}/shooters/me/stages/1/audit/accept")
+    elif writer == "note_patch":
+        resp = client.patch(f"{base}/shooters/me/stages/1/shots/1/coach", json={"coaching_note": "x"})
+    else:
+        resp = client.post(f"{base}/shooters/me/stages/1/coach/reclassify")
+    assert resp.status_code == 200, resp.text
+
+
+WRITERS = ["audit_put", "accept", "note_patch", "reclassify"]
+
+
+@pytest.mark.parametrize("writer", WRITERS)
+def test_a_proposal_never_moves_a_stored_class(tmp_path: Path, writer: str) -> None:
+    """An auto proposal over a movement gap leaves it ``movement`` through
+    every audit-doc writer; a typed note on Coach must not rewrite classes."""
+    client, audit_file, base = _stage_with_a_proposal_only(tmp_path)
+    _write_through(client, base, writer)
+    assert _stored_class(audit_file, 2) == "movement"
+    shot = _coach(client, base)["shots"][2]
+    assert shot["interval_class"] == "movement"
+    assert shot["stale"] is False
+
+
+@pytest.mark.parametrize("writer", WRITERS)
+def test_a_confirmed_reload_does_move_the_class(tmp_path: Path, writer: str) -> None:
+    """The other direction: the same region confirmed makes every writer
+    say ``reload``."""
+    client, audit_file, base = _stage_with_a_proposal_only(tmp_path)
+    _confirm(audit_file)
+    _write_through(client, base, writer)
+    assert _stored_class(audit_file, 2) == "reload"
+    assert _coach(client, base)["shots"][2]["stale"] is False
+
+
+def test_the_heal_ignores_a_proposal(tmp_path: Path) -> None:
+    """The GET's heal of an unclassified doc reads confirmed regions only."""
+    client, audit_file, base = _bootstrap(tmp_path)
+    doc = _read(audit_file)
+    doc["shots"] = [{"shot_number": i + 1, "ms_after_beep": m} for i, m in enumerate([1000, 1300, 3600])]
+    doc["events"] = [{"id": "evt-1", "kind": "reload", "start": 1.3, "end": 3.6, "source": "auto"}]
+    doc["events_seeded"] = 2
+    audit_file.write_text(json.dumps(doc) + "\n", encoding="utf-8")
+    body = _coach(client, base)
+    assert body["shots"][2]["interval_class"] == "movement"
+    assert _stored_class(audit_file, 2) == "movement"
+
+
+def test_get_without_seed_writes_nothing(tmp_path: Path) -> None:
+    """Coach, the Splits stage page and Compare fetch every stage: a read
+    without ``seed`` must not seed, mark the stage seeded or move its
+    revision, even over a gap the seeder would propose."""
+    from splitsmith.audit_revision import audit_revision
+
+    client, audit_file, base = _bootstrap(tmp_path, division="Production Optics")
+    doc = _read(audit_file)
+    doc["shots"] = _classified(_po_shots_with_a_reload_gap())
+    audit_file.write_text(json.dumps(doc) + "\n", encoding="utf-8")
+    before = audit_file.read_bytes()
+
+    for _ in range(2):
+        body = _coach(client, base)
+        assert body["events"] == []
+    assert audit_file.read_bytes() == before
+    assert "events_seeded" not in _read(audit_file)
+    assert body["_version"] == audit_revision(json.loads(before))
+
+
+def test_get_with_seed_persists_proposals_once(tmp_path: Path) -> None:
+    client, audit_file, base = _bootstrap(tmp_path, division="Production Optics")
+    doc = _read(audit_file)
+    doc["shots"] = _classified(_po_shots_with_a_reload_gap())
+    audit_file.write_text(json.dumps(doc) + "\n", encoding="utf-8")
+    shots_before = _read(audit_file)["shots"]
+
+    body = client.get(f"{base}/shooters/me/stages/1/coach?seed=1").json()
+    assert [(e["kind"], e["source"]) for e in body["events"]] == [("reload", "auto")]
+    stored = _read(audit_file)
+    assert stored["events_seeded"] == 2 and len(stored["events"]) == 1
+    assert stored["shots"] == shots_before  # the proposal moved no class
+    after_first = audit_file.read_bytes()
+
+    again = client.get(f"{base}/shooters/me/stages/1/coach?seed=1").json()
+    assert audit_file.read_bytes() == after_first
+    assert again["_version"] == body["_version"]
+
+
+def test_get_with_seed_and_nothing_to_propose_writes_nothing(tmp_path: Path) -> None:
+    client, audit_file, base = _bootstrap(tmp_path)
+    doc = _read(audit_file)
+    doc["shots"] = _classified([1000, 1300, 1600, 1900])
+    audit_file.write_text(json.dumps(doc) + "\n", encoding="utf-8")
+    before = audit_file.read_bytes()
+    body = client.get(f"{base}/shooters/me/stages/1/coach?seed=1").json()
+    assert body["events"] == []
+    assert audit_file.read_bytes() == before
+
+
+@pytest.mark.parametrize("query", ["", "?seed=1"])
+def test_a_pre_beep_first_shot_before_a_long_gap_is_served(tmp_path: Path, query: str) -> None:
+    """A first kept shot before the beep followed by a gap over the hint:
+    the seeder used to build a region starting before 0 and every coach
+    GET of the stage 500ed."""
+    from splitsmith.config import StageEvent
+
+    client, audit_file, base = _bootstrap(tmp_path)
+    _write_shots(audit_file, [-200, 3500, 3800, 7000])
+    resp = client.get(f"{base}/shooters/me/stages/1/coach{query}")
+    assert resp.status_code == 200, resp.text
+    for e in resp.json()["events"]:
+        StageEvent.model_validate(e)
+        assert e["start"] >= 0
+    # The gap after the beep (3.8 -> 7.0) is still proposed when seeding.
+    if query:
+        assert [(e["start"], e["end"]) for e in resp.json()["events"]] == [(3.8, 7.0)]
+
+
+def test_a_failing_seed_serves_the_stage_without_proposals(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from splitsmith import events as events_module
+
+    def boom(*_a: Any, **_k: Any) -> bool:
+        raise RuntimeError("seeder bug")
+
+    monkeypatch.setattr(events_module, "seed_doc", boom)
+    client, audit_file, base = _bootstrap(tmp_path)
+    _write_shots(audit_file, [1000, 1300, 4000])
+    resp = client.get(f"{base}/shooters/me/stages/1/coach?seed=1")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["events"] == []
+    assert "events_seeded" not in _read(audit_file)
+
+
+def test_the_capacity_warning_does_not_move_when_breakdown_proposes(tmp_path: Path) -> None:
+    """Coach's capacity warning reads confirmed regions only: it is the same
+    before and after a seeding (Breakdown) read, and goes only when a
+    reload is confirmed."""
+    client, audit_file, base = _bootstrap(tmp_path, division="Production Optics")
+    _write_shots(audit_file, _po_shots_past_capacity_without_a_hinted_gap())
+    warning = "20 shots without a reload"
+
+    assert _coach(client, base)["event_summary"]["capacity_warning"] == warning
+    seeded = client.get(f"{base}/shooters/me/stages/1/coach?seed=1").json()
+    assert [e["source"] for e in seeded["events"]] == ["auto"]
+    after = _coach(client, base)
+    assert after["event_summary"]["capacity_warning"] == warning
+    assert after["event_summary"]["reloads"] == 0
+    assert all(s["moving"] is False for s in after["shots"])
+
+    confirmed = [{**seeded["events"][0], "source": "manual"}]
+    resp = client.put(
+        f"{base}/shooters/me/stages/1/events", json={"events": confirmed, "_version": after["_version"]}
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["event_summary"]["capacity_warning"] is None
+    assert _coach(client, base)["event_summary"]["capacity_warning"] is None
+    assert _coach(client, base)["event_summary"]["reloads"] == 1
+
+
+def test_a_proposed_movement_does_not_mark_shots_moving(tmp_path: Path) -> None:
+    client, audit_file, base = _bootstrap(tmp_path)
+    doc = _read(audit_file)
+    doc["shots"] = _classified([1000, 1300, 3600])
+    doc["events"] = [{"id": "evt-1", "kind": "movement", "start": 1.2, "end": 3.7, "source": "auto"}]
+    doc["events_seeded"] = 2
+    audit_file.write_text(json.dumps(doc) + "\n", encoding="utf-8")
+    body = _coach(client, base)
+    assert [s["moving"] for s in body["shots"]] == [False, False, False]
+    assert body["event_summary"]["movement_s"] == 0
+    doc["events"][0]["source"] = "manual"
+    audit_file.write_text(json.dumps(doc) + "\n", encoding="utf-8")
+    assert [s["moving"] for s in _coach(client, base)["shots"]] == [False, True, True]
+
+
+@pytest.mark.parametrize("query", ["", "?seed=1"])
+def test_an_unreadable_shot_time_is_left_out_not_a_500(tmp_path: Path, query: str) -> None:
+    """A hand-edited doc with a shot time that is not a number: the GET
+    serves the stage without that shot, with and without seeding."""
+    client, audit_file, base = _bootstrap(tmp_path)
+    doc = _read(audit_file)
+    doc["shots"] = [
+        {"shot_number": 1, "ms_after_beep": 1000},
+        {"shot_number": 2, "ms_after_beep": "late"},
+        {"shot_number": 3, "ms_after_beep": None},
+        {"shot_number": 4, "ms_after_beep": 1300},
+        {"shot_number": 5, "ms_after_beep": 4000},
+    ]
+    audit_file.write_text(json.dumps(doc) + "\n", encoding="utf-8")
+    resp = client.get(f"{base}/shooters/me/stages/1/coach{query}")
+    assert resp.status_code == 200, resp.text
+    assert [s["shot_number"] for s in resp.json()["shots"]] == [1, 4, 5]
+    # The heal classified the readable shots once; an unreadable one never
+    # counts as needing a heal, so the next read writes nothing.
+    settled = audit_file.read_bytes()
+    again = client.get(f"{base}/shooters/me/stages/1/coach{query}")
+    assert again.status_code == 200, again.text
+    assert audit_file.read_bytes() == settled

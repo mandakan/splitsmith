@@ -10,6 +10,7 @@ a rule that changes here changes there in the same change.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import re
 from collections.abc import Iterable, Sequence
@@ -134,13 +135,27 @@ def confirmed_from_doc(doc: Any, *, log_context: str = "") -> list[StageEvent]:
         return []
 
 
+def shot_ms(shot: Any) -> float | None:
+    """A shot dict's ``ms_after_beep`` as a finite number, or None when it
+    is missing or unreadable (a hand-edited or legacy doc: a string, a bool,
+    NaN). The coach GET and the seeder skip such a shot rather than 500."""
+    if not isinstance(shot, dict):
+        return None
+    raw = shot.get("ms_after_beep")
+    if raw is None or isinstance(raw, bool):
+        return None
+    try:
+        ms = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return ms if math.isfinite(ms) else None
+
+
 def shot_times_from_doc(doc: dict[str, Any]) -> list[float]:
-    """Kept shots' times from the beep, ascending."""
-    times = [
-        float(s["ms_after_beep"]) / 1000.0
-        for s in doc.get("shots") or []
-        if isinstance(s, dict) and s.get("ms_after_beep") is not None
-    ]
+    """Kept shots' times from the beep, ascending. A time that is not a
+    finite number is skipped (:func:`shot_ms`), never raised: the seeder
+    reads this on a GET."""
+    times = [ms / 1000.0 for s in doc.get("shots") or [] if (ms := shot_ms(s)) is not None]
     return sorted(times)
 
 
@@ -265,17 +280,21 @@ def seed_events(
     ``min_reload_s`` can hold a reload; when no placement exists over those
     gaps, any gap may. A stage that fits in one magazine gets none, however
     long its gaps. Movement is never seeded.
+
+    A gap that cannot be a region is never proposed: one that starts before
+    the beep (a pre-beep first shot), has no length, or has a time that is
+    not a finite number. The seeder runs on a coach GET, and an invalid
+    region there was a 500 on every read of the stage.
     """
-    times = sorted(shot_times)
+    times = sorted(t for t in shot_times if math.isfinite(t))
     gaps = [times[i + 1] - times[i] for i in range(len(times) - 1)]
     seeds: list[StageEvent] = []
 
     def _seed(g: int) -> None:
-        seeds.append(
-            StageEvent(
-                id=next_event_id(seeds), kind="reload", start=times[g], end=times[g + 1], source="auto"
-            )
-        )
+        start, end = times[g], times[g + 1]
+        if start < 0.0 or end <= start:
+            return
+        seeds.append(StageEvent(id=next_event_id(seeds), kind="reload", start=start, end=end, source="auto"))
 
     if capacity is None:
         for g, gap in enumerate(gaps):
@@ -335,7 +354,13 @@ def seed_doc(
     doc: dict[str, Any], *, hint_min_s: float, capacity: int | None, min_reload_s: float = 0.6
 ) -> bool:
     """Seed once per stage, or again over an earlier seeder's untouched
-    proposals (:func:`reseedable`). Returns True when the doc changed."""
+    proposals (:func:`reseedable`). Returns True when the doc changed.
+
+    A first seed that proposes nothing leaves the doc untouched: marking
+    the stage seeded would stop a later read from proposing over shots
+    added since, and recomputing an empty seed is cheap. Once proposals
+    exist, ``events_seeded`` is what keeps deleted ones from coming back.
+    """
     again = reseedable(doc)
     if not again and (doc.get(EVENTS_SEEDED_FIELD) or doc.get(EVENTS_FIELD)):
         return False
@@ -343,6 +368,8 @@ def seed_doc(
     if not times:
         return False
     seeds = seed_events(times, hint_min_s=hint_min_s, capacity=capacity, min_reload_s=min_reload_s)
+    if not seeds and not again:
+        return False
     events = [e.model_dump(exclude_none=True) for e in seeds]
     if again and events == doc.get(EVENTS_FIELD):
         doc[EVENTS_SEEDED_FIELD] = SEED_VERSION

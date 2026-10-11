@@ -19,6 +19,7 @@ Pure functions only -- no I/O. Callers own the audit JSON read/write.
 
 from __future__ import annotations
 
+import math
 import os
 from collections.abc import Sequence
 from pathlib import Path
@@ -169,8 +170,14 @@ def _classify_gap(
 
 
 def gap_overlaps_reload(prev_t: float, t: float, events: Sequence[StageEvent]) -> bool:
-    """True when the open interval (prev_t, t) overlaps a reload region."""
-    return any(e.kind == "reload" and e.start < t and prev_t < e.end for e in events)
+    """True when the open interval (prev_t, t) overlaps a *confirmed* reload
+    region (``source == "manual"``, the rule of ``events.confirmed``).
+
+    An auto proposal is a guess nobody looked at: it shows on Breakdown and
+    never touches a stored class, so every classifier caller (the audit
+    writers, the coach GET's heal and ``stale``, Reclassify, ``match
+    reclassify``) gets the same answer whatever list it passes."""
+    return any(e.kind == "reload" and e.source == "manual" and e.start < t and prev_t < e.end for e in events)
 
 
 def reload_hinted(gap_s: float | None, config: CoachAutoClassifyConfig) -> bool:
@@ -295,14 +302,16 @@ def classify_intervals_in_dicts(
     from the beep). Shots without it are skipped (no class is written).
 
     ``events`` (spec 2026-10-08) lets a would-be-movement gap that
-    overlaps a reload region auto-class as ``reload`` instead; see
+    overlaps a confirmed reload region auto-class as ``reload`` instead; see
     :func:`_classify_gap`.
     """
     indexed = list(enumerate(shots))
     indexed.sort(key=_sort_key)
     prev_ms: float | None = None
     for _orig_idx, shot in indexed:
-        ms = shot.get("ms_after_beep")
+        # An unreadable time (a string, NaN: a hand-edited doc) is skipped
+        # like a missing one; it sorts last, so it breaks no gap.
+        ms = _readable_ms(shot)
         if ms is None:
             prev_ms = None
             continue
@@ -367,7 +376,7 @@ def heal_unclassified(
         return False
     dicts = [s for s in shots if isinstance(s, dict)]
     needs_heal = any(
-        s.get("ms_after_beep") is not None
+        _readable_ms(s) is not None
         and s.get(FIELD_INTERVAL_CLASS) is None
         and s.get(FIELD_INTERVAL_CLASS_SOURCE) != "manual"
         for s in dicts
@@ -424,7 +433,7 @@ def is_classification_stale(
     the caller decides whether to act on it. For shots with no class
     set, returns False.
 
-    ``reload_overlap`` is whether the gap overlaps a reload region
+    ``reload_overlap`` is whether the gap overlaps a confirmed reload region
     (:func:`gap_overlaps_reload`); without it a region-derived auto
     ``reload`` would read as stale against the region-blind rule.
     """
@@ -437,10 +446,24 @@ def is_classification_stale(
     return _classify_gap(gap_s, config, reload_overlap=reload_overlap) != cls
 
 
+def _readable_ms(shot: dict[str, Any]) -> float | None:
+    """``ms_after_beep`` as a finite number, else None (the rule of
+    ``events.shot_ms``): a classifier pass never raises on a doc a coach GET
+    has to serve."""
+    raw = shot.get("ms_after_beep")
+    if raw is None or isinstance(raw, bool):
+        return None
+    try:
+        ms = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return ms if math.isfinite(ms) else None
+
+
 def _sort_key(pair: tuple[int, dict[str, Any]]) -> tuple[float, int, int]:
     orig_idx, shot = pair
-    ms = shot.get("ms_after_beep")
-    ms_key = float(ms) if isinstance(ms, (int, float)) else float("inf")
+    ms = _readable_ms(shot)
+    ms_key = ms if ms is not None else float("inf")
     sn = shot.get("shot_number")
     sn_key = int(sn) if isinstance(sn, (int, float)) else orig_idx
     return (ms_key, sn_key, orig_idx)

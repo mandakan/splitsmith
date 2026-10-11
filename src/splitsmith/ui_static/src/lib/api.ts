@@ -4635,13 +4635,15 @@ export const api = {
       },
     ),
 
-  /** Coach view: per-shot interval class + flags + notes (#161). The
-   *  GET is read-only; ``stale=true`` means the rule disagrees with the
-   *  stored class and the user can accept the recompute via reclassify.
-   *  Returns null when the stage has no audit JSON yet. */
-  getStageCoach: (slug: string, stageNumber: number) =>
+  /** Coach view: per-shot interval class + flags + notes (#161).
+   *  ``stale=true`` means the rule disagrees with the stored class and the
+   *  user can accept the recompute via reclassify. Returns null when the
+   *  stage has no audit JSON yet. ``seed`` is Breakdown's alone: it asks
+   *  the server to propose reload regions (and keep them). Every other
+   *  reader leaves it off, so reading a stage never writes it. */
+  getStageCoach: (slug: string, stageNumber: number, options: { seed?: boolean } = {}) =>
     request<CoachStageResponse | null>(
-      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/coach`,
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/coach${options.seed ? "?seed=1" : ""}`,
     ),
 
   reclassifyStageCoach: (slug: string, stageNumber: number) =>

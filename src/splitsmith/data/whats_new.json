@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "older-match-overlay-redraw",
+      "date": "2026-10-11",
+      "title": "Older matches redraw their overlay once",
+      "body": "Export an older match again and its overlay is drawn fresh once, in your Look's current colours and fonts. Its cards and summaries may now carry the shooter's current look and logos."
+    },
+    {
       "id": "grid-counter-clear-of-clock",
       "date": "2026-10-10",
       "title": "Shot count and clock apart on tall grids",

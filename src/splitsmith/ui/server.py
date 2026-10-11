@@ -74,6 +74,7 @@ from __future__ import annotations
 import asyncio
 import atexit
 import contextlib
+import copy
 import functools
 import hashlib
 import io
@@ -14261,17 +14262,19 @@ def create_app(
 
     def _classify_doc(payload: dict[str, Any], stage_number: int, cfg: CoachAutoClassifyConfig) -> None:
         """Run the auto-classifier over the doc's shots against the doc's own
-        stage events (spec 2026-10-08), in place.
+        *confirmed* stage events (spec 2026-10-08), in place.
 
         The one classification path for every audit-doc writer: a writer
         that classified region-blind would flip a reload region's gap back
-        to ``movement`` on the next unrelated save. A corrupt events list is
+        to ``movement`` on the next unrelated save. Only confirmed regions
+        (``source == "manual"``) hint the classifier: an auto proposal never
+        touches a stored class, whatever save happens next. A corrupt events list is
         the coach GET's 422, raised before the caller saves anything --
         also on a doc with no shots to classify (#1330): the coach routes
         build their response from the saved doc, and a corrupt list that
         slipped past here was a 422 *after* the save went through.
         """
-        stage_events = _coach_events(payload, stage_number)
+        stage_events = events_module.confirmed(_coach_events(payload, stage_number))
         shots = payload.get("shots")
         if not isinstance(shots, list):
             return
@@ -14384,15 +14387,23 @@ def create_app(
         # set a beep yet (older / partial audits).
         clip_anchor = primary_beep_in_clip if primary_beep_in_clip is not None else 0.0
         raw_shots = payload.get("shots") or []
+        # A shot whose time is missing or unreadable (a string, NaN: a
+        # hand-edited doc) is left out of the view rather than 500ing every
+        # read of the stage (``events.shot_ms``).
         ordered = sorted(
-            (s for s in raw_shots if isinstance(s, dict) and "ms_after_beep" in s),
-            key=lambda s: float(s.get("ms_after_beep", 0)),
+            ((ms, s) for s in raw_shots if (ms := events_module.shot_ms(s)) is not None),
+            key=lambda pair: pair[0],
         )
         stage_events = _coach_events(payload, stg.stage_number)
+        # Every figure here reads confirmed regions only, as every output does
+        # (``events.confirmed``): ``stale``, per-shot ``moving`` and the
+        # summary Coach draws (its capacity warning included), so a figure
+        # never moves because Breakdown was opened and proposed something.
+        # The response's ``events`` keep the proposals for Breakdown's lanes.
+        confirmed_events = events_module.confirmed(stage_events)
         coach_shots: list[dict[str, Any]] = []
         prev_ms: float | None = None
-        for s in ordered:
-            ms = float(s["ms_after_beep"])
+        for ms, s in ordered:
             time_from_beep = ms / 1000.0
             gap_s: float | None
             if prev_ms is None:
@@ -14402,7 +14413,9 @@ def create_app(
             else:
                 gap_s = (ms - prev_ms) / 1000.0
                 split = gap_s
-                overlap = coach_module.gap_overlaps_reload(prev_ms / 1000.0, time_from_beep, stage_events)
+                # Confirmed regions only, as ``_classify_doc``: a proposal
+                # never makes a stored class stale.
+                overlap = coach_module.gap_overlaps_reload(prev_ms / 1000.0, time_from_beep, confirmed_events)
             prev_ms = ms
             stale = coach_module.is_classification_stale(s, gap_s=gap_s, config=cfg, reload_overlap=overlap)
             reload_hint = coach_module.reload_hinted(gap_s, cfg)
@@ -14434,10 +14447,10 @@ def create_app(
                 }
             )
         for shot_out in coach_shots:
-            shot_out["moving"] = events_module.shot_is_moving(shot_out["time_from_beep"], stage_events)
+            shot_out["moving"] = events_module.shot_is_moving(shot_out["time_from_beep"], confirmed_events)
         summary = events_module.stage_event_summary(
             [shot_out["time_from_beep"] for shot_out in coach_shots],
-            stage_events,
+            confirmed_events,
             capacity,
         )
         return {
@@ -14475,19 +14488,25 @@ def create_app(
         }
 
     @app.get("/api/shooters/{slug}/stages/{stage_number}/coach")
-    def get_stage_coach(slug: str, stage_number: int) -> JSONResponse:
+    def get_stage_coach(slug: str, stage_number: int, seed: bool = False) -> JSONResponse:
         """Return the per-shot coach view for a stage.
 
         A legacy audit doc with unclassified shots is healed on first read
         so every consumer sees fully-classified data - see ``stale`` for
         whether the current rule disagrees with a stored (possibly manual)
-        class. Owner reads persist the heal and the one-time reload seed;
-        share-token reads and desktop-origin mirrors compute both in-memory
-        only and never write back. The client can also call
-        ``POST /coach/reclassify`` to force-persist the rule's verdict onto
-        unset/auto entries. Returns ``200 null`` when the stage has no
+        class. Owner reads persist the heal (#775); share-token reads
+        classify in-memory only and never write back. The client can also
+        call ``POST /coach/reclassify`` to force-persist the rule's verdict
+        onto unset/auto entries. Returns ``200 null`` when the stage has no
         audit JSON yet (a normal pre-audit state); 404 is reserved for
         genuinely-unknown stage numbers.
+
+        ``seed=1`` is Breakdown's: only then are reload proposals seeded
+        (spec 2026-10-08), and only an owner read that is not a mirror
+        persists them, and only when the seed proposed something. Every
+        other reader (Coach, the Splits stage page, Compare) reads without
+        writing anything but the heal: a page that fetches every stage must
+        not move every stage's revision and queue a sync push per stage.
         """
         project = state.shooter_project(slug)
         try:
@@ -14505,20 +14524,7 @@ def create_app(
             # ``_version``, or the events PUT would 409 on every attempt.
             stored_revision = audit_revision(payload)
             capacity = _coach_capacity(slug, project)
-            # Stage events (spec 2026-10-08): reload proposals are seeded
-            # once per stage, before the heal so it classifies against them.
-            # An earlier seeder's untouched proposals are replaced, and the
-            # shots classified again against the new ones: an auto ``reload``
-            # class on a gap the old proposal covered would otherwise stay.
-            reseeding = events_module.reseedable(payload)
-            seeded = events_module.seed_doc(
-                payload, hint_min_s=cfg.reload_hint_min_s, capacity=capacity, min_reload_s=cfg.reload_min_s
-            )
-            if seeded and reseeding:
-                _classify_doc(payload, stage_number, cfg)
-            healed = coach_module.heal_unclassified(
-                payload.get("shots"), cfg, events=_coach_events(payload, stage_number)
-            )
+            share_read = current_share_request.get()
             # #775: heal legacy docs on read so consumers (Results, share view,
             # statistic_splits) always see a fully classified stage. Owners get
             # the heal persisted; share-token readers are read-only, so the
@@ -14526,10 +14532,44 @@ def create_app(
             # itself lives in ``coach.heal_unclassified`` (#780) - this is the
             # only one of its four callers that persists, and it keys the write
             # off the return value so an untouched doc costs no version bump.
-            # Neither is persisted on a desktop-origin mirror (spec
-            # 2026-10-08): ``events`` is desktop-owned, and a heal saved
-            # there would carry the in-memory seed with it.
-            if (healed or seeded) and not current_share_request.get() and not _is_mirror():
+            # It classifies against confirmed regions only, which no seed adds,
+            # so the heal is the same with or without ``seed``.
+            healed = coach_module.heal_unclassified(
+                payload.get("shots"),
+                cfg,
+                events=events_module.confirmed(_coach_events(payload, stage_number)),
+            )
+            persist = healed and not share_read
+            # The doc the response is built from. The seed runs on a copy: a
+            # failed seed leaves nothing behind, and one nobody persists (a
+            # mirror, a share read) never rides a heal saved below.
+            view = payload
+            if seed:
+                keep_seed = not share_read and not _is_mirror()
+                target = copy.deepcopy(payload)
+                # Stage events (spec 2026-10-08): reload proposals, seeded once
+                # per stage. An earlier seeder's untouched proposals are
+                # replaced, and the shots classified again (confirmed regions
+                # only) so nothing an old proposal may have set stays.
+                try:
+                    reseeding = events_module.reseedable(target)
+                    seeded = events_module.seed_doc(
+                        target,
+                        hint_min_s=cfg.reload_hint_min_s,
+                        capacity=capacity,
+                        min_reload_s=cfg.reload_min_s,
+                    )
+                    if seeded and reseeding:
+                        _classify_doc(target, stage_number, cfg)
+                except Exception:  # noqa: BLE001 -- a seed must never fail the read
+                    logger.exception("stage %s/%s: seeding reload proposals failed", slug, stage_number)
+                    seeded = False
+                if seeded:
+                    view = target
+                    if keep_seed:
+                        payload = target
+                        persist = True
+            if persist:
                 try:
                     version = _coach_save(slug, stage_number, payload, version)
                     stored_revision = audit_revision(payload)
@@ -14541,6 +14581,7 @@ def create_app(
                     # has no db extras, and an unguarded import here 500ed
                     # every heal-triggering coach GET.
                     pass
+            payload = view
         return JSONResponse(
             _build_coach_response(
                 slug,
@@ -14740,9 +14781,11 @@ def create_app(
             # #775: a ``clear_class: true`` patch drops the shot's class, which
             # would re-open the partial-classification state the invariant
             # rules out. Re-running the classifier heals it back to the rule's
-            # auto verdict; this is a no-op for every other patch because the
-            # classifier only rewrites unset/auto entries and manual patches
-            # set interval_class_source="manual" on the target shot itself.
+            # auto verdict. It also applies the rule to every other unset/auto
+            # entry (manual ones are kept), against confirmed regions only, so
+            # a note typed on Coach can move an auto class only where the
+            # stored one disagrees with the current rule (``stale``); an auto
+            # proposal never moves one.
             _classify_doc(payload, stage_number, cfg)
 
             events = list(payload.get("audit_events") or [])

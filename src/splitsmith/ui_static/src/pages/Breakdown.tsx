@@ -104,7 +104,8 @@ function BreakdownStage({ slug, stage }: { slug: string; stage: number }) {
   const shell = useOutletContext<MatchShellOutletContext | undefined>();
   // A deep link from Coach (#1377) opens at its time, shot and region.
   const { search } = useLocation();
-  const ws = useStageWorkspace(slug, stage, { onRegionsSaved: shell?.refreshProject, link: search });
+  // ``seed``: the region editor is the one reader that asks for proposals.
+  const ws = useStageWorkspace(slug, stage, { onRegionsSaved: shell?.refreshProject, link: search, seed: true });
   const { project, coach, error, regions } = ws;
   const compact = useShortViewport();
   const [inspectorFolded] = useInspectorFolded();

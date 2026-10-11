@@ -252,7 +252,8 @@ def create_server(name: str = "splitsmith") -> FastMCP:
         ``reset=True`` wipes the existing ``shots[]`` before
         seeding, drops the automatic stage-event proposals
         (``source: "auto"`` regions) and ``events_seeded`` so the next
-        coach read proposes reloads over the new shots, and keeps the
+        time the stage opens in Breakdown it proposes reloads over the
+        new shots, and keeps the
         user's ``manual`` regions. The default preserves curated shots
         and every region.
         """
