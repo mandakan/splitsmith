@@ -37,6 +37,7 @@ from ..overlay_hud import (
 )
 from ..overlay_render import OverlayCodec
 from ..overlay_theme import ThemeName
+from ..safe_area import is_upright
 from ..segment_cache import SegmentCache
 from ..stage_summary_data import TileStageData, load_stage_reloads, load_stage_shots
 
@@ -182,12 +183,26 @@ def read_overlay_settings(path: Path) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
+def overlay_canvas_upright(video: Path) -> bool:
+    """Whether an overlay drawn over ``video`` (its trim, or the overlay MOV
+    itself) is on an upright canvas (``safe_area.is_upright``): the overlay
+    is the trim's size, scaled to a height cap with the aspect kept, so
+    either file answers. A file ffprobe cannot read answers ``False``: the
+    record then carries no upright layout, as before issue #1394."""
+    try:
+        meta = fcpxml_gen.probe_video(video)
+    except (fcpxml_gen.FFprobeError, OSError):
+        return False
+    return is_upright(meta.width, meta.height)
+
+
 def overlay_record_matches(
     record: dict[str, Any] | None,
     *,
     audit_revision: str | None,
     wanted: dict[str, Any] | None = None,
     look: str | None = None,
+    upright: bool = False,
 ) -> bool:
     """Whether an overlay MOV whose settings record is ``record`` may be
     reused: the one rule for every reuse check (the match export job, the
@@ -197,7 +212,11 @@ def overlay_record_matches(
     recorded, as it would be drawn now, so a template, shared script or
     Look palette or font that moved since still misses. ``look`` (only
     with ``wanted`` left out) asks for that Look instead of the recorded
-    one. An unreadable audit or record never matches."""
+    one. ``upright`` (only with ``wanted`` left out; a ``wanted`` says it
+    itself through ``overlay_settings(upright=...)``) is whether the canvas
+    is upright (:func:`overlay_canvas_upright`): an upright record must then
+    carry the upright layout, so one drawn before the HUD kept out of the
+    safe area misses. An unreadable audit or record never matches."""
     if record is None or audit_revision is None:
         return False
     # Nothing vouches for the palette and faces an overlay drew with when its
@@ -221,6 +240,7 @@ def overlay_record_matches(
                 max_height=record["max_height"],
                 max_fps=record["max_fps"],
                 audit_revision=audit_revision,
+                upright=upright,
             )
         except (KeyError, TypeError, ValueError):
             return False
@@ -462,6 +482,7 @@ def export_stage(
             drawn_revision = overlay_audit_revision(audit_path)
             drawn_template = overlay_template_identity(request.overlay_theme, request.overlay_variant)
             drawn_theme = overlay_theme_identity(request.overlay_theme)
+            drawn_upright = overlay_canvas_upright(mirror_target)
             try:
                 overlay_render.render_overlay(
                     audit_path=audit_path,
@@ -494,6 +515,7 @@ def export_stage(
                             audit_revision=drawn_revision,
                             template=drawn_template,
                             theme=drawn_theme,
+                            upright=drawn_upright,
                         ),
                         sort_keys=True,
                     ),

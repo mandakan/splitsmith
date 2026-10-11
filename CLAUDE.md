@@ -430,8 +430,7 @@ byte what it was (HTML and pixels, checked at 1920x1080, 1280x720,
 definition of what Shorts / Reels / TikTok draw over: the bottom 13 % and a
 right-edge button column 12 % wide from 40 % down (``None`` when not
 upright); a document reads it as ``--safe-bottom`` / ``--safe-right`` /
-``--safe-right-top`` (``SafeArea.css_vars``), which is how the upright HUD
-is to receive it. The match summary is ``upright_match_summary_html``
+``--safe-right-top`` (``SafeArea.css_vars``). The match summary is ``upright_match_summary_html``
 (kicker, a two-line title, Avg split / Best draw / Rounds at 10.4 % of the
 width, the counts on their own row, one table of ``# Stage Draw Split Time
 HF %`` with names cut at 12 characters) with its own small fit script: each
@@ -446,6 +445,47 @@ and ``upright_cell_style`` pads the cell out of the safe area.
 written out by hand. The shooter's logo (``logo_spots.paste_logo``, 9 %
 of the height, top right) is pasted after the fact and can still sit over
 a long title or name on an upright card, as on main.
+
+**The upright HUD** (#1394 part 3): on an upright page every live overlay
+style keeps out of the safe area. ``overlay_hud_render.hud_context`` hands a
+template the area in *page* pixels (the HUD page is capped at 1080 lines,
+so a 1080x1920 video's page is 608x1080) twice: ``data.safe_area``
+(``overlay_hud.hud_safe_area_data``: ``bottom``, ``right``, ``right_top``)
+and the three CSS variables on ``:root`` at the end of ``engine.css``. A
+square or wider page gets neither, so its context and frames are what they
+were; the five templates' bytes moved, so their ``template_digest`` and the
+record's ``template`` identity moved too (each cached landscape template
+overlay is drawn once more, to identical pixels: checked against main frame
+for frame at 1920x1080, and every template render at 1280x720, 1920x1080,
+1080x1080 and 1440x1080). The shipped templates set ``body.safe`` from
+``data.safe_area`` and write every upright rule under it: Plate takes two
+rows (the clock on its own; one row of three ran off a 608 px page) above
+the band, Pips' pips shrink a little (twelve stay one row) and its bottom
+corners and split rise above the band (a split over a HUD in a bottom corner
+flashes above the column top instead; a bottom-right HUD sits 4vh in from the
+column for the ring bursts), Ticker's
+right rail clears the column, Timeline's band, clock, count and track sit on
+the safe line and stops at the column (the band fades out into it, the tag's
+clamp stops there), Minimal's clock, bar
+and chip rise, and every landing stamp is centred left of the column and
+grows into place rather than shrinking from 1.4x. Classic changes only its
+sprite: ``overlay_render.classic_cell_style`` pads the cell's bottom by the
+band so the split rises (``None`` on a landscape canvas, so its HTML, argv
+and pixels are unchanged; the drawtext clock and the counter are top
+corners and never reach the area). An upright overlay's record carries
+``layout: upright-safe-1`` (``overlay_settings(upright=True)``, the
+``UPRIGHT_LAYOUT`` constant), a square or wider one no such key, so an
+upright overlay drawn before this misses once and is drawn again while
+landscape records match as they did. The canvas is read off a file
+(``ui/exports.overlay_canvas_upright``: ffprobe, unreadable is not
+upright): the trim the writer mirrors, the pulled trim in the server's
+match export (no trim there means the stage is cut and drawn again
+anyway), and the overlay MOV itself in the MCP tool and the CLI, which
+pass ``upright=`` to ``overlay_record_matches``. ``TemplateProbe.unsafe``
+(the probe walks visible text and painted boxes against ``data.safe_area``)
+is what ``looks check`` reads: each HUD sample is probed again on a 608x1080
+page, also just after a shot, and anything in the area is a warning.
+``tests/test_upright_hud.py`` holds every style and position to it.
 
 **Logo spots** (``logo_spots``, spec 2026-10-09): beyond the cards, an export
 may put a logo in more places, chosen per export by the Export page's Logos row
@@ -1308,7 +1348,9 @@ the existing style-toggle seam), palette ``reload`` (``#FBBF24``) and
 ``movement`` (``#06B6D4``) in ``OverlayTheme`` / ``look.json``, optional.
 All five template styles draw both; Classic (drawtext) and the compare
 grid's sprite overlay draw neither. A reload on the move draws split on
-the stage bar (reload in the top half, the movement under it). The
+the stage bar (reload in the top half, the movement under it). On an
+upright page the context also carries ``data.safe_area`` (see "The upright
+HUD"). The
 stage-event helpers the five styles share (the stage bar and its bands,
 the reload chip, ``chipSettle``, easing and colours) live in
 ``_shared/hud.js`` (``window.splitsmithHud``); ``template_digest`` hashes

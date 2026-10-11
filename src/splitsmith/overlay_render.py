@@ -58,6 +58,7 @@ from .overlay_single import build_overlay_runs, run_groups
 from .overlay_text import OverlayRenderError, overlay_font_file, resolve_overlay_face
 from .overlay_theme import ThemeName, load_theme
 from .runtime import Runner, _probe, _probe_text, ffmpeg_capabilities, quote_filter_value
+from .safe_area import safe_area
 from .segment_cache import SegmentCache
 
 logger = logging.getLogger(__name__)
@@ -342,6 +343,18 @@ def _clock_filter_graph(
             f"drawtext={common}:text={held}:enable='gte(t\\,{freeze})'",
         )
     )
+
+
+def classic_cell_style(width: int, height: int) -> str | None:
+    """The Classic sprite's cell style on an upright canvas (issue #1394):
+    the cell gives up the platform safe area's bottom band
+    (``safe_area.safe_area``), so the split, the one Classic element at
+    the bottom, sits above it; the counter (top left) and the ``drawtext``
+    clock (top right, above where the button column starts) never reach
+    the area and keep their places. ``None`` on a square or wider canvas,
+    which leaves the sprite's document exactly as it was."""
+    area = safe_area(width, height)
+    return None if area is None else f"padding-bottom:{area.bottom}px"
 
 
 def _discard_partial_output(output_path: Path, *, piped_frames: bool) -> None:
@@ -692,6 +705,7 @@ def render_overlay(
                             height=height,
                             scale=scale,
                             theme=palette,
+                            cell_style=classic_cell_style(width, height),
                         ),
                         width=width,
                         height=height,

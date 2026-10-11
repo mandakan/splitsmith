@@ -120,6 +120,11 @@ class TemplateProbe:
     #: Every request the sandbox refused (a path outside the Look, a
     #: network host, a file over the size cap), for ``looks check``.
     blocked: tuple[str, ...] = ()
+    #: What reaches into an upright canvas's platform safe area (the
+    #: context's ``data.safe_area``, issue #1394): visible text, quoted, and
+    #: painted boxes by ``#id`` or ``tag.class``, each with how far in (CSS
+    #: pixels). Empty on a landscape context, which carries no area.
+    unsafe: tuple[tuple[str, int], ...] = ()
 
 
 @dataclass
@@ -355,7 +360,62 @@ _HUD_JS = (
 _PROBE_JS = """(() => {
       const families = new Set();
       const overflow = [];
+      const unsafe = [];
       const W = window.innerWidth, H = window.innerHeight;
+      // An upright HUD's context carries the platform safe area
+      // (``data.safe_area``, issue #1394): how far a visible box reaches
+      // into the bottom band, or into the right button column below its
+      // top, in CSS pixels (0 when it stays out).
+      const ctx = window.splitsmith && window.splitsmith.data;
+      const area = ctx && ctx.safe_area;
+      function into(r) {
+        if (!area) return 0;
+        const below = r.bottom - (H - area.bottom);
+        const column = Math.min(r.right - (W - area.right), r.bottom - area.right_top);
+        return Math.max(0, below, column);
+      }
+      function shown(el) {
+        for (let a = el; a; a = a.parentElement) {
+          const acs = getComputedStyle(a);
+          if (Number(acs.opacity) === 0 || acs.display === 'none') return false;
+        }
+        return getComputedStyle(el).visibility !== 'hidden';
+      }
+      function clipped(el, box) {
+        let r = {left: box.left, right: box.right, top: box.top, bottom: box.bottom};
+        for (let a = el.parentElement; a && a !== document.body && a !== document.documentElement;
+             a = a.parentElement) {
+          if (getComputedStyle(a).overflow === 'visible') continue;
+          const c = a.getBoundingClientRect();
+          r = {left: Math.max(r.left, c.left), right: Math.min(r.right, c.right),
+               top: Math.max(r.top, c.top), bottom: Math.min(r.bottom, c.bottom)};
+        }
+        return {left: Math.max(r.left, 0), right: Math.min(r.right, W),
+                top: Math.max(r.top, 0), bottom: Math.min(r.bottom, H)};
+      }
+      function painted(cs) {
+        const clear = (c) => c === 'transparent'
+          || (c.startsWith('rgba') && c.replace(/ /g, '').endsWith(',0)'));
+        if (!clear(cs.backgroundColor) || cs.backgroundImage !== 'none') return true;
+        return ['Top', 'Right', 'Bottom', 'Left'].some(
+          (side) => parseFloat(cs['border' + side + 'Width']) > 0 && cs['border' + side + 'Style'] !== 'none'
+            && !clear(cs['border' + side + 'Color']));
+      }
+      if (area) {
+        for (const el of document.body.querySelectorAll('*')) {
+          if (el.closest('script, style')) continue;
+          const cs = getComputedStyle(el);
+          if (!painted(cs) || !shown(el)) continue;
+          const r = clipped(el, el.getBoundingClientRect());
+          if (r.right <= r.left || r.bottom <= r.top) continue;
+          const by = Math.round(into(r));
+          if (by >= 1) {
+            const name = el.id ? '#' + el.id : el.tagName.toLowerCase()
+              + (el.className && typeof el.className === 'string' ? '.' + el.className.split(' ')[0] : '');
+            unsafe.push([name, by]);
+          }
+        }
+      }
       const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
       let node;
       while ((node = walker.nextNode())) {
@@ -399,8 +459,11 @@ _PROBE_JS = """(() => {
                                                r.top - full.top, full.bottom - r.bottom);
         const by = Math.round(Math.max(past, cut));
         if (by > 1) overflow.push([text.slice(0, 60), by]);
+        const deep = Math.round(into({left: Math.max(r.left, 0), right: Math.min(r.right, W),
+                                      top: Math.max(r.top, 0), bottom: Math.min(r.bottom, H)}));
+        if (deep >= 1) unsafe.push(['"' + text.slice(0, 60) + '"', deep]);
       }
-      return {families: [...families], overflow, hasSeek: typeof window.seek === 'function'};
+      return {families: [...families], overflow, unsafe, hasSeek: typeof window.seek === 'function'};
     })()"""
 
 #: Every call into a template's code runs inside this predicate, under
@@ -835,6 +898,7 @@ class ChromiumRasterizer:
                 has_seek=bool(seen["hasSeek"]),
                 families=tuple(seen["families"]),
                 overflow=tuple((str(t), int(b)) for t, b in seen["overflow"]),
+                unsafe=tuple((str(t), int(b)) for t, b in seen["unsafe"]),
                 blocked=tuple(view.sandbox.blocked),
             )
         finally:

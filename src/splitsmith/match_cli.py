@@ -857,13 +857,16 @@ def _vouched_overlays(stages_input: list[Any], look: str | None) -> list[Any]:
                 export_helpers.overlay_settings_file(mov.parent, mov.name.removesuffix("_overlay.mov"))
             )
             current = export_helpers.overlay_audit_revision(stage_in.audit_path)
-            if not export_helpers.overlay_record_matches(record, audit_revision=current, look=look):
+            upright = export_helpers.overlay_canvas_upright(mov)
+            if not export_helpers.overlay_record_matches(
+                record, audit_revision=current, look=look, upright=upright
+            ):
                 drawn_in = record.get("look") if record is not None else None
                 if (
                     look is not None
                     and isinstance(drawn_in, str)
                     and drawn_in != look
-                    and export_helpers.overlay_record_matches(record, audit_revision=current)
+                    and export_helpers.overlay_record_matches(record, audit_revision=current, upright=upright)
                 ):
                     why = (
                         f"was drawn in Look {drawn_in!r}, not {look!r} -- left out; pass "

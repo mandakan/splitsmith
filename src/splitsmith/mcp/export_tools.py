@@ -332,7 +332,8 @@ def export_match_tool(
                     export_helpers.overlay_settings_file(exports_dir, base)
                 )
                 current = export_helpers.overlay_audit_revision(audit_path)
-                if export_helpers.overlay_record_matches(record, audit_revision=current):
+                upright = export_helpers.overlay_canvas_upright(candidate)
+                if export_helpers.overlay_record_matches(record, audit_revision=current, upright=upright):
                     overlay_path = candidate
                 else:
                     stale_stages.append(stage_number)
