@@ -457,24 +457,45 @@ export function writeGuideOpen(open: boolean): void {
   }
 }
 
-const LOOP_KEY = "splitsmith.reviewWalk.loop";
+const LOOP_KEYS = { desktop: "splitsmith.reviewWalk.loop", phone: "splitsmith.reviewWalk.loop.phone" } as const;
 
-/** Whether each stop's sound repeats as the walk reaches it (off until
- *  turned on, then remembered like the guide). */
-export function readLoopOn(): boolean {
+/** Whether each stop's sound repeats as the walk reaches it: off on the
+ *  desktop until turned on, on for the phone (no keyboard to ask for it),
+ *  each remembered on its own. */
+export function readLoopOn(device: "desktop" | "phone"): boolean {
   try {
-    return window.localStorage.getItem(LOOP_KEY) === "1";
+    const v = window.localStorage.getItem(LOOP_KEYS[device]);
+    return v == null ? device === "phone" : v === "1";
   } catch {
-    return false;
+    return device === "phone";
   }
 }
 
-export function writeLoopOn(on: boolean): void {
+export function writeLoopOn(on: boolean, device: "desktop" | "phone"): void {
   try {
-    window.localStorage.setItem(LOOP_KEY, on ? "1" : "0");
+    window.localStorage.setItem(LOOP_KEYS[device], on ? "1" : "0");
   } catch {
-    // Without storage the loop starts off with every fixture.
+    // Without storage the loop starts at the device's default.
   }
+}
+
+/** The Review page fits a phone only in its walk (``?walk=1``, or the old
+ *  ``?step=1``); the full editor still needs a desk. */
+export function walkFitsPhone(search: URLSearchParams): boolean {
+  return search.get("walk") === "1" || search.get("step") === "1";
+}
+
+/** The review's phone layout: a narrow window, a finger for a pointer (a
+ *  phone held sideways is 844 px or more wide), or ``?phone=1``. Callers
+ *  decide it once per page, so turning the phone never swaps the layout
+ *  mid-walk. */
+export function phoneLayout(search: URLSearchParams, matches: (query: string) => boolean): boolean {
+  return search.get("phone") === "1" || matches("(max-width: 767px)") || matches("(pointer: coarse)");
+}
+
+/** ``window.matchMedia`` as ``phoneLayout`` takes it. */
+export function mediaMatches(query: string): boolean {
+  return typeof window.matchMedia === "function" && window.matchMedia(query).matches;
 }
 
 /** A fixture's Review page, opened in its walk, with its source video when
@@ -486,6 +507,13 @@ export function walkHref(auditPath: string, videoPath: string | null): string {
 
 /** The fixture to open after this one is signed off: the queue's next one
  *  whose shots need checking. */
+/** Where a short session picks up: a walk already started (still pending,
+ *  so not signed off), else the queue's first fixture needing review. */
+export function continueTarget(pending: ReadonlyArray<DevReviewQueueItem>): DevReviewQueueItem | null {
+  const open = pending.filter((i) => i.review_status === "needs_review");
+  return open.find((i) => (i.walk_decisions ?? 0) > 0) ?? open[0] ?? null;
+}
+
 export function nextFixtureToReview(
   pending: ReadonlyArray<DevReviewQueueItem>,
   currentSlug: string,

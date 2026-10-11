@@ -172,6 +172,9 @@ class FixtureRecord(BaseModel):
     # (``confirm_review``). An explicit human sign-off; trumps every
     # pending heuristic in ``needs_review``.
     review_confirmed_at: str | None = None
+    # walk_decided audit events: how far the review walk has got (the
+    # queue's Continue resumes a started walk first).
+    walk_decisions: int = 0
     # Whether the shot times were checked on this fixture's own audio
     # (``fixture_schema.review_status``, #1363), and the queue's order from
     # ``scripts/fixture_review_inventory.py`` (``None`` until it has run).
@@ -250,6 +253,12 @@ def list_fixtures(fixtures_root: Path | None = None) -> list[FixtureRecord]:
         raw_promoted_at = payload.get("promoted_at")
         review_block = payload.get("review")
         raw_confirmed = review_block.get("confirmed_at") if isinstance(review_block, dict) else None
+        events = payload.get("audit_events")
+        walk_decisions = (
+            sum(1 for e in events if isinstance(e, dict) and e.get("kind") == "walk_decided")
+            if isinstance(events, list)
+            else 0
+        )
         out.append(
             FixtureRecord(
                 slug=json_path.stem,
@@ -261,6 +270,7 @@ def list_fixtures(fixtures_root: Path | None = None) -> list[FixtureRecord]:
                 n_labeled_shots=sum(1 for s in shots if isinstance(s, dict) and s.get("subclass")),
                 n_labeled_rejects=len(labels_by_time) if isinstance(labels_by_time, dict) else 0,
                 review_confirmed_at=raw_confirmed if isinstance(raw_confirmed, str) else None,
+                walk_decisions=walk_decisions,
                 expected_rounds=rounds,
                 stage_time_seconds=payload.get("stage_time_seconds"),
                 beep_time=payload.get("beep_time"),

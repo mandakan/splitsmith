@@ -9395,6 +9395,25 @@ def test_dev_review_queue_includes_batch_promoted_unlabeled(
     assert model["step_counts"]["review"] == 1
 
 
+def test_dev_review_queue_counts_walk_decisions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Continue resumes a walk already started: the queue says how far each got."""
+    import splitsmith.lab.core as lab_core
+
+    _seed_review_state_fixtures(tmp_path / "fixtures")
+    path = tmp_path / "fixtures" / "stage-shots-hfo-masters-2026-stage1-s0fe3d797.json"
+    doc = json.loads(path.read_text())
+    doc["audit_events"] = [
+        {"kind": "walk_decided", "payload": {"stop": "a"}},
+        {"kind": "walk_decided", "payload": {"stop": "b"}},
+        {"kind": "marker_moved", "payload": {}},
+    ]
+    path.write_text(json.dumps(doc))
+    monkeypatch.setattr(lab_core, "DEFAULT_FIXTURES_ROOT", tmp_path / "fixtures")
+    client = _MatchClient(_match_create_app(project_root=tmp_path / "match", project_name="x"))
+    pending = {i["slug"]: i for i in client.get("/api/dev/review-queue").json()["pending"]}
+    assert pending["stage-shots-hfo-masters-2026-stage1-s0fe3d797"]["walk_decisions"] == 2
+
+
 def test_dev_review_queue_puts_doubtful_shot_times_first(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { AuditMarker } from "@/components/MarkerLayer";
+import type { DevReviewQueueItem } from "@/lib/api";
 
 import {
   WALK_DECIDED_EVENT,
@@ -17,6 +18,9 @@ import {
   typicalShotLevel,
   unmarkedBursts,
   walkActionForKey,
+  continueTarget,
+  walkFitsPhone,
+  phoneLayout,
   readLoopOn,
   writeLoopOn,
   walkHref,
@@ -287,10 +291,56 @@ describe("countCheck and walkHref", () => {
 describe("loop preference", () => {
   it("is off until turned on, and remembered", () => {
     window.localStorage.removeItem("splitsmith.reviewWalk.loop");
-    expect(readLoopOn()).toBe(false);
-    writeLoopOn(true);
-    expect(readLoopOn()).toBe(true);
-    writeLoopOn(false);
-    expect(readLoopOn()).toBe(false);
+    expect(readLoopOn("desktop")).toBe(false);
+    writeLoopOn(true, "desktop");
+    expect(readLoopOn("desktop")).toBe(true);
+    writeLoopOn(false, "desktop");
+    expect(readLoopOn("desktop")).toBe(false);
+  });
+
+  it("starts on for the phone, kept apart from the desktop's", () => {
+    window.localStorage.removeItem("splitsmith.reviewWalk.loop.phone");
+    expect(readLoopOn("phone")).toBe(true);
+    writeLoopOn(false, "phone");
+    expect(readLoopOn("phone")).toBe(false);
+    expect(readLoopOn("desktop")).toBe(false);
+  });
+});
+
+describe("continueTarget", () => {
+  const item = (slug: string, extra: Partial<DevReviewQueueItem> = {}) =>
+    ({ slug, audit_path: `/f/${slug}.json`, review_status: "needs_review", walk_decisions: 0, ...extra }) as DevReviewQueueItem;
+
+  it("resumes a started walk before the queue's order", () => {
+    expect(continueTarget([item("a"), item("b", { walk_decisions: 3 })])?.slug).toBe("b");
+  });
+  it("falls back to the first fixture needing review", () => {
+    expect(continueTarget([item("a", { review_status: "reviewed" }), item("b")])?.slug).toBe("b");
+  });
+  it("has nothing to continue on an empty queue", () => {
+    expect(continueTarget([])).toBeNull();
+  });
+});
+
+describe("walkFitsPhone", () => {
+  it("lets the walk through to a phone, never the full editor", () => {
+    expect(walkFitsPhone(new URLSearchParams("fixture=a.json&walk=1"))).toBe(true);
+    expect(walkFitsPhone(new URLSearchParams("fixture=a.json&step=1"))).toBe(true);
+    expect(walkFitsPhone(new URLSearchParams("fixture=a.json"))).toBe(false);
+  });
+});
+
+describe("phoneLayout", () => {
+  const media = (...on: string[]) => (q: string) => on.some((x) => q.includes(x));
+  it("keeps a phone held sideways on the phone layout", () => {
+    // 844 px wide in landscape: not narrow, but the pointer is a finger.
+    expect(phoneLayout(new URLSearchParams(""), media("pointer: coarse"))).toBe(true);
+  });
+  it("is the phone layout on a narrow window, or when asked", () => {
+    expect(phoneLayout(new URLSearchParams(""), media("max-width: 767px"))).toBe(true);
+    expect(phoneLayout(new URLSearchParams("phone=1"), media())).toBe(true);
+  });
+  it("is the desktop layout with a mouse on a wide window", () => {
+    expect(phoneLayout(new URLSearchParams(""), media())).toBe(false);
   });
 });

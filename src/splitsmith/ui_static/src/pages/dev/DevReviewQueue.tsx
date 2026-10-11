@@ -28,7 +28,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useLabRun } from "@/components/lab/useLabRun";
 import { api, type DevReviewQueueItem, type DevReviewQueueResponse } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { walkHref } from "@/lib/walk";
+import { continueTarget, mediaMatches, phoneLayout, walkHref } from "@/lib/walk";
 
 /** State bundle for the queue rail's eval affordance. Labels attach to
  *  detection candidates, and candidates only exist inside an eval run --
@@ -49,6 +49,8 @@ export function DevReviewQueue() {
   const [loading, setLoading] = useState(true);
   const [searchParams, setSearchParams] = useSearchParams();
   const activeSlug = searchParams.get("slug");
+  // A phone gets Continue and a list; the two panes need a desk.
+  const [phone] = useState(() => phoneLayout(searchParams, mediaMatches));
 
   useEffect(() => {
     let alive = true;
@@ -141,6 +143,8 @@ export function DevReviewQueue() {
     hasRun: evalRun !== null,
     onRun: () => void runEval(workSlugs),
   };
+
+  if (phone) return <PhoneQueue loading={loading} queue={queue} />;
 
   return (
     <div className="grid h-[calc(100vh-86px)] grid-cols-[320px_1fr]">
@@ -645,5 +649,57 @@ function DetailPane({
         </div>
       </div>
     </main>
+  );
+}
+
+/** The queue on a phone: one button that picks up where the last session
+ *  stopped, then the fixtures still needing review. */
+function PhoneQueue({ loading, queue }: { loading: boolean; queue: DevReviewQueueResponse | null }) {
+  if (loading || !queue) return <p className="p-4 text-sm text-muted">Loading the queue...</p>;
+  const next = continueTarget(queue.pending);
+  const open = queue.pending.filter((i) => i.review_status === "needs_review");
+  // The camera is what tells two angles of one stage apart: the slug's tail
+  // after the shooter.
+  const camera = (i: DevReviewQueueItem) => {
+    const mark = i.shooter ? `-${i.shooter}-` : null;
+    return mark && i.slug.includes(mark) ? i.slug.slice(i.slug.indexOf(mark) + mark.length) : null;
+  };
+  const name = (i: DevReviewQueueItem) =>
+    [i.venue, i.stage_number != null ? `stage ${i.stage_number}` : null, camera(i)].filter(Boolean).join(", ") ||
+    i.slug;
+  return (
+    <div className="space-y-4 p-4">
+      {next ? (
+        <Link
+          to={walkHref(next.audit_path, next.video_path ?? null)}
+          className="btn-primary block min-h-11 rounded-lg px-4 py-3 text-center"
+        >
+          <span className="block text-base font-semibold">Continue</span>
+          <span className="block text-sm">
+            {name(next)}
+            {(next.walk_decisions ?? 0) > 0 ? ` · ${next.walk_decisions} decided` : ""}
+          </span>
+        </Link>
+      ) : (
+        <p className="text-sm text-muted">Nothing needs review.</p>
+      )}
+      {open.length > 1 ? (
+        <ul className="divide-y divide-border text-sm">
+          {open.map((i) => (
+            <li key={i.slug}>
+              <Link
+                to={walkHref(i.audit_path, i.video_path ?? null)}
+                className="flex min-h-11 items-center justify-between gap-2 py-2"
+              >
+                <span className="text-ink">{name(i)}</span>
+                <span className="numeral text-muted">
+                  {(i.walk_decisions ?? 0) > 0 ? `${i.walk_decisions} decided` : `${i.n_shots} shots`}
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
   );
 }

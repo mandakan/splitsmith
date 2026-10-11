@@ -186,3 +186,55 @@ describe("DevReviewQueue eval-pending rail", () => {
     expect(await screen.findByText(/run covers 2 \/ 3 pending/i)).toBeInTheDocument();
   });
 });
+
+describe("DevReviewQueue on a phone", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("leads with Continue, resuming the walk already started", async () => {
+    vi.stubGlobal("matchMedia", (q: string) => ({
+      matches: true,
+      media: q,
+      addEventListener() {},
+      removeEventListener() {},
+    }));
+    vi.mocked(api.getDevReviewQueue).mockResolvedValue({
+      pending: [
+        { ...item("stage-shots-a-2026-stage1"), review_status: "needs_review" },
+        { ...item("stage-shots-b-2026-stage2"), review_status: "needs_review", walk_decisions: 2, stage_number: 2 },
+      ],
+      flagged: [],
+      done: [],
+    });
+
+    renderQueue();
+
+    const link = await screen.findByRole("link", { name: /Continue/ });
+    expect(link.getAttribute("href")).toBe(
+      `/review?fixture=${encodeURIComponent("/fixtures/stage-shots-b-2026-stage2.json")}&walk=1`,
+    );
+  });
+
+  it("tells apart two angles of one stage by their camera", async () => {
+    vi.stubGlobal("matchMedia", (q: string) => ({
+      matches: true,
+      media: q,
+      addEventListener() {},
+      removeEventListener() {},
+    }));
+    vi.mocked(api.getDevReviewQueue).mockResolvedValue({
+      pending: [
+        { ...item("stage-shots-hfo-2026-stage1-s0fe3d797-apple-iphone17pro"), review_status: "needs_review" },
+        { ...item("stage-shots-hfo-2026-stage1-s0fe3d797-go3s"), review_status: "needs_review" },
+      ],
+      flagged: [],
+      done: [],
+    });
+
+    renderQueue();
+
+    expect((await screen.findAllByText("hfo, stage 1, apple-iphone17pro")).length).toBeGreaterThan(0);
+    expect(screen.getByText("hfo, stage 1, go3s")).toBeTruthy();
+  });
+});
