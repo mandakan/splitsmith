@@ -207,6 +207,38 @@ describe("LaneEditor", () => {
     expect(lastCommit(onChange)).toEqual([]);
   });
 
+  it("a nudge seeks the video to the edge it moved and shows the time pill for a moment", () => {
+    vi.useFakeTimers();
+    try {
+      const onSeek = vi.fn();
+      render(<Harness initial={[ev("evt-1", "reload", 4, 5)]} selectedId="evt-1" onSeek={onSeek} />);
+      const region = screen.getByTestId("event-evt-1");
+      act(() => region.focus());
+      fireEvent.keyDown(region, { key: "ArrowRight" });
+      expect(onSeek).toHaveBeenLastCalledWith(expect.closeTo(4.02, 3)); // the start moved
+      expect(screen.getByTestId("drag-pill")).toHaveTextContent("4.02 s");
+      fireEvent.keyDown(region, { key: "ArrowLeft", shiftKey: true });
+      expect(onSeek).toHaveBeenLastCalledWith(expect.closeTo(4.98, 3)); // Shift: the end moved
+      expect(screen.getByTestId("drag-pill")).toHaveTextContent("4.98 s");
+      act(() => {
+        vi.advanceTimersByTime(1300);
+      });
+      expect(screen.queryByTestId("drag-pill")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a nudge a clamp blocks does not seek", () => {
+    const onSeek = vi.fn();
+    render(<Harness initial={[ev("evt-1", "movement", 0, 2)]} selectedId="evt-1" onSeek={onSeek} />);
+    const region = screen.getByTestId("event-evt-1");
+    act(() => region.focus());
+    fireEvent.keyDown(region, { key: "ArrowLeft" });
+    expect(onSeek).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("drag-pill")).toBeNull();
+  });
+
   it("keys on anything but a region (the root, a handle) never nudge or delete", () => {
     const onChange = vi.fn();
     render(<Harness initial={[ev("evt-1", "reload", 4, 5)]} selectedId="evt-1" onChange={onChange} />);
