@@ -80,6 +80,7 @@ import {
 import { detectAnomalies, keptShotsFromMarkers } from "@/lib/anomalies";
 import { bandPipelineAction, bandReadouts } from "@/lib/auditBand";
 import { onlyBookkeepingMoved } from "@/lib/auditConflict";
+import { coalescedSeek, seekNow } from "@/lib/coalescedSeek";
 import { isActiveCommand, latestForStage, REDETECT_CONFIRM } from "@/lib/desktopCommands";
 import { useDesktopCommands } from "@/lib/useDesktopCommands";
 import { isTypingTextTarget, useBlurOnPointerClick } from "@/lib/audit-input";
@@ -503,7 +504,7 @@ export function Audit() {
     const v = videoRef.current;
     if (v) {
       v.pause();
-      v.currentTime = 0;
+      seekNow(v, 0);
     }
     // slugParam is a dependency too: shooter B's stage 3 is a different
     // recording than shooter A's stage 3, so switching shooters on the
@@ -614,7 +615,7 @@ export function Audit() {
     const targetVideoTime = currentTime + beepOffset;
     const seekWhenReady = () => {
       if (Number.isFinite(targetVideoTime) && targetVideoTime >= 0) {
-        v.currentTime = targetVideoTime;
+        seekNow(v, targetVideoTime);
       }
       if (isPlaying) void v.play();
     };
@@ -641,7 +642,7 @@ export function Audit() {
         if (loopMode && regionEnd != null && auditT >= regionEnd) {
           const target = loopRegion?.start ?? loopAnchorRef.current ?? 0;
           // The inset and the primary-audio follower follow the seek.
-          v.currentTime = target + beepOffset;
+          seekNow(v, target + beepOffset);
           setCurrentTime(target);
         } else {
           setCurrentTime(auditT);
@@ -658,11 +659,13 @@ export function Audit() {
   // The other cameras are not the page's to sync: PipView keeps its inset
   // on the big player's clock (lib/pipSync), and the primary-audio
   // follower below uses the same rule. Every seek here moves only the big
-  // player; both follow its ``seeking``.
+  // player; both follow its ``seeking``. One seek in flight (#1440): a band
+  // scrub asks every frame, and a seek that replaces the one decoding
+  // paints nothing.
   const handleScrub = useCallback(
     (primaryTime: number) => {
       const v = videoRef.current;
-      if (v) v.currentTime = primaryTime + beepOffset;
+      if (v) coalescedSeek(v, primaryTime + beepOffset);
       setCurrentTime(primaryTime);
       // Manual scrub re-anchors the loop. Without this, hitting R, then
       // dragging to a candidate, then play-pausing would yank the
@@ -687,7 +690,7 @@ export function Audit() {
       // no region is active).
       if (loopMode && (loopRegion != null || loopAnchorRef.current != null)) {
         const target = loopRegion?.start ?? loopAnchorRef.current ?? 0;
-        v.currentTime = target + beepOffset;
+        seekNow(v, target + beepOffset);
         setCurrentTime(target);
       }
     }

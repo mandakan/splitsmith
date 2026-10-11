@@ -31,8 +31,14 @@ export type DragInit = Drag extends infer D ? (D extends Drag ? Omit<D, keyof Dr
 
 export interface Frame {
   events: StageEvent[];
-  /** Where the video seeks: the moving edge, or the leading edge for a body move. */
+  /**
+   * Where the video seeks: the time under the pointer, unsnapped (#1440), so
+   * the picture follows the drag even where the edge snaps to a shot or stops
+   * at a neighbour; for a body move (never snapped) its leading edge.
+   */
   seek: number;
+  /** The moving edge as it will be saved (snapped, clamped): what the time pill shows. */
+  edge: number;
   /** The id a create minted on its first frame. */
   id?: string;
 }
@@ -61,7 +67,8 @@ export function sameEvents(a: StageEvent[], b: StageEvent[]): boolean {
 
 /**
  * One frame of a drag past its threshold. ``t`` is the time under the
- * pointer; ``snap`` applies the shot snap (identity under Alt). Null when
+ * pointer; ``snap`` applies the shot snap (identity when snapping is off
+ * for this gesture: the "Snap to shots" switch, which Alt inverts). Null when
  * the frame changes nothing (a create still shorter than MIN_EVENT_S).
  */
 export function dragFrame(
@@ -80,12 +87,13 @@ export function dragFrame(
     const start = Math.min(drag.anchorT, edge);
     const end = Math.max(drag.anchorT, edge);
     if (end - start < MIN_EVENT_S) return null;
+    const seek = Math.min(Math.max(t, 0), duration);
     if (drag.id === null) {
       const id = nextEventId(current);
-      return { events: [...current, { id, kind: drag.kind, start, end, source: "manual" }], seek: edge, id };
+      return { events: [...current, { id, kind: drag.kind, start, end, source: "manual" }], seek, edge, id };
     }
     const me = current.find((x) => x.id === drag.id);
-    return me ? { events: replace(current, { ...me, start, end }), seek: edge } : null;
+    return me ? { events: replace(current, { ...me, start, end }), seek, edge } : null;
   }
   // Neighbour sides are judged from where the region stood when the drag began.
   const { before } = drag;
@@ -98,7 +106,11 @@ export function dragFrame(
       drag.edge === "start" ? edge : before.start,
       drag.edge === "end" ? edge : before.end,
     );
-    return { events: replace(current, touched({ ...before, ...c })), seek: drag.edge === "start" ? c.start : c.end };
+    return {
+      events: replace(current, touched({ ...before, ...c })),
+      seek: Math.min(Math.max(t, 0), duration),
+      edge: drag.edge === "start" ? c.start : c.end,
+    };
   }
   // Body: no snap, the length is kept.
   const len = before.end - before.start;
@@ -107,7 +119,7 @@ export function dragFrame(
   const lo = Math.max(0, ...lane.filter((x) => x.end <= before.start).map((x) => x.end));
   const hi = Math.min(duration, ...lane.filter((x) => x.start >= before.end).map((x) => x.start)) - len;
   const start = Math.min(Math.max(t - drag.grabOffsetT, lo), Math.max(hi, lo));
-  return { events: replace(current, touched({ ...before, start, end: start + len })), seek: start };
+  return { events: replace(current, touched({ ...before, start, end: start + len })), seek: start, edge: start };
 }
 
 /** The list Esc restores: the region as it stood, or without the one being created. */

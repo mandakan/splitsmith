@@ -1401,9 +1401,26 @@ Pointer rules: a lane click seeks to the press point
 snapped to the nearest shot (a ruler click does not snap), unless the
 snap would land inside a same-lane region (then the raw press time), a
 click on empty lane space deselects, a region being created stops at its
-same-lane neighbours, ``pointercancel`` undoes like Esc. Auto proposals
-are dashed with an ``AUTO ?`` label; a time pill (seconds and frame
-number from the beep) follows the drag's seek target. Arrows nudge
+same-lane neighbours, ``pointercancel`` undoes like Esc. Edges and lane
+clicks snap only while "Snap to shots" is on (the band's options menu,
+``timelinePrefs.useSnapToShots``, per browser, default on); Alt inverts
+it for one gesture, and keyboard nudges never snap. During an edge or
+create drag the video seeks to the time under the pointer, **unsnapped**
+(#1440: a snapped seek pinned the picture on one shot's frame across a
+shot-free reload); a body move seeks to its leading edge. The time pill
+(seconds and frame number from the beep) shows the edge as it will be
+saved, with "snapped to shot N" when the snap pulled it off the pointer;
+a release seeks nowhere, so the video stays on the last frame shown.
+Every drag or scrub seek on a player goes through ``lib/coalescedSeek``
+(one seek in flight; the latest request lands on ``seeked``): the
+workspace's ``seekClip``, Audit's ``handleScrub`` and ``BeepTimeline``'s
+scrub. A seek on the 720p rendition takes 0.1-0.2 s, and a write that
+replaces the one decoding paints nothing. A pending request is dropped on
+``emptied`` / ``loadstart`` or when ``currentSrc`` moved (a PiP swap, a
+re-cut), and every other write to an element that takes coalesced seeks
+goes through ``seekNow`` (cancel, then write: the source-swap carry, the
+loop wrap, a parked position); an element that never takes one (the PiP
+inset, the primary audio, the Results player) needs nothing. Arrows nudge
 (bracket keys sit behind AltGr on Nordic layouts).
 
 Part 2 (rendering and export; the spec's "Part 2 as built" section wins

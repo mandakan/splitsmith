@@ -28,6 +28,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Timeline, type TimelineTrack } from "@/components/timeline/Timeline";
 import { WaveformTrack } from "@/components/timeline/WaveformTrack";
 import { api, type PeaksResult } from "@/lib/api";
+import { coalescedSeek, seekNow } from "@/lib/coalescedSeek";
 import { useSpacePlayPause } from "@/lib/keyboard";
 import type { Zoom } from "@/lib/timelineView";
 import { cn } from "@/lib/utils";
@@ -124,7 +125,7 @@ export function BeepTimeline({
         const local = Math.max(0, draftRef.current != null ? draftRef.current - off : p.beep_time ?? 0);
         setLocalTime(local);
         const el = mediaRef.current;
-        if (el) el.currentTime = local;
+        if (el) seekNow(el, local);
       })
       .catch((e: unknown) => {
         if (!alive) return;
@@ -205,7 +206,8 @@ export function BeepTimeline({
     (t: number) => {
       lastScrubRef.current = t;
       setLocalTime(t);
-      if (media) media.currentTime = t;
+      // One seek in flight (#1440): the scrub asks every frame.
+      if (media) coalescedSeek(media, t);
     },
     [media],
   );
@@ -255,7 +257,7 @@ export function BeepTimeline({
                 onClick={() => {
                   // Seek the preview too, so the operator sees the frame
                   // the candidate sits on, not just its row in the list.
-                  if (media) media.currentTime = local;
+                  if (media) seekNow(media, local);
                   setLocalTime(local);
                   pick(c.time);
                 }}

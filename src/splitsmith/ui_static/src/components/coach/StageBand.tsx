@@ -2,7 +2,8 @@
  * The stage's timeline band, shared by Coach and Breakdown (#1371): the
  * shared ``Timeline`` with the Audio track (``WaveformTrack`` over the
  * stage's peaks) and the region lanes (``LaneEditor``), the Full-resolution
- * video entry in its More menu, and the lane hints under it. Every lane rule
+ * video and Snap to shots entries in its More menu, and the lane hints
+ * under it. Every lane rule
  * lives in the lane editor and ``useStageEvents``; this file only wires them
  * to the workspace.
  */
@@ -12,6 +13,7 @@ import { LANE_ROWS, LaneEditor, LaneHints } from "@/components/coach/LaneEditor"
 import { Timeline } from "@/components/timeline/Timeline";
 import { WaveformTrack } from "@/components/timeline/WaveformTrack";
 import { menuItemClass } from "@/components/ui/Menu";
+import { useSnapToShots } from "@/lib/timelinePrefs";
 import { type Zoom } from "@/lib/timelineView";
 import type { StageView, StageWorkspace } from "@/lib/useStageWorkspace";
 
@@ -35,6 +37,7 @@ export interface StageBandProps {
 export function StageBand({ ws, view, compact = false, toolbar, audioHeight = AUDIO_ROW_HEIGHT, rowsHeight }: StageBandProps) {
   const [zoom, setZoom] = useState<Zoom>(null);
   const [keysOn, setKeysOn] = useState(false);
+  const [snapOn, setSnapOn] = useSnapToShots();
   const { coach, peaks, peaksLoading, scrub, regions } = ws;
   const { stageTime, tFromBeep, audioBeep, eventsReadOnly } = view;
   if (!coach) return null;
@@ -54,8 +57,20 @@ export function StageBand({ ws, view, compact = false, toolbar, audioHeight = AU
         rowsHeight={rowsHeight}
         toolbar={toolbar}
         menuExtra={
-          scrub.available || (compact && !eventsReadOnly) ? (
+          scrub.available || !eventsReadOnly ? (
             <>
+              {!eventsReadOnly ? (
+                <button
+                  type="button"
+                  role="menuitemcheckbox"
+                  aria-checked={snapOn}
+                  className={menuItemClass}
+                  onClick={() => setSnapOn(!snapOn)}
+                >
+                  Snap to shots
+                  <span className="ml-auto text-sm text-muted">{snapOn ? "on" : "off"}</span>
+                </button>
+              ) : null}
               {scrub.available ? (
                 <button
                   type="button"

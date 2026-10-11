@@ -26,6 +26,7 @@ import {
   type StageEvent,
 } from "@/lib/api";
 import { shotAtOrBefore } from "@/lib/coachReview";
+import { cancelCoalescedSeek, coalescedSeek, seekNow } from "@/lib/coalescedSeek";
 import { useSpacePlayPause } from "@/lib/keyboard";
 import { bigToPrimary, primaryToBig } from "@/lib/stageCameras";
 import { type TierBaselines, baselinesFromMatchDistributions } from "@/lib/splits";
@@ -154,11 +155,14 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
     [],
   );
   /** Seek the big video to a primary-clip time; answers where it landed,
-   *  in primary-clip seconds (clamped to the big clip's start). */
+   *  in primary-clip seconds (clamped to the big clip's start). One seek in
+   *  flight (lib/coalescedSeek, #1440): a lane drag or a band scrub asks
+   *  every pointer frame, and a seek that replaces the one decoding paints
+   *  nothing. */
   const seekClip = useCallback(
     (clip: number) => {
       const t = toVideoTime(clip);
-      if (videoRef.current) videoRef.current.currentTime = t;
+      if (videoRef.current) coalescedSeek(videoRef.current, t);
       return fromVideoTime(t);
     },
     [fromVideoTime, toVideoTime],
@@ -240,7 +244,9 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
     pendingSeekRef.current = null;
     if (clip != null) {
       const t = toVideoTime(clip);
-      if (Math.abs(v.currentTime - t) > 1e-3) v.currentTime = t;
+      // seekNow: a drag's pending seek was asked against the old source.
+      if (Math.abs(v.currentTime - t) > 1e-3) seekNow(v, t);
+      else cancelCoalescedSeek(v);
     }
     if (isPlayingRef.current && v.paused) void v.play().catch(() => {});
   }, [toVideoTime]);

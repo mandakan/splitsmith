@@ -3,10 +3,15 @@
  * activation regions, edited by pointer (spec 2026-10-08). Pointer rules
  * follow MarkerLayer: pointer capture, a travel threshold before a press
  * becomes a drag (wider for touch), Esc restores the pre-drag state. While
- * an edge drags the video seeks to it -- the frame under the cursor is what
- * is being marked -- and an arrow nudge seeks to the edge it moved the same
- * way, so frame-by-frame adjustment shows the frame. Geometry lives in lib/events.ts and the per-gesture frame
- * math in ./laneDrag.ts; this file owns the DOM.
+ * an edge drags the video seeks to the time under the pointer, unsnapped
+ * (#1440): the edge may snap to a shot, but the picture never sits on the
+ * shot's frame while the pointer travels; the pill shows the edge as it
+ * will be saved and names the shot it snapped to. An arrow nudge seeks to
+ * the edge it moved, so frame-by-frame adjustment shows the frame. Edges
+ * and lane clicks snap when the band's "Snap to shots" switch is on
+ * (``useSnapToShots``, default on); Alt inverts it for one gesture.
+ * Geometry lives in lib/events.ts and the per-gesture frame math in
+ * ./laneDrag.ts; this file owns the DOM.
  *
  * Every ``onChange(events, true)`` is a server write upstream, so drag
  * frames go out with ``commit=false`` and only a release or a keyboard
@@ -41,6 +46,7 @@ import { Kbd } from "@/components/ui/Kbd";
 import { Label } from "@/components/ui/Label";
 import type { StageEvent, StageEventKind } from "@/lib/api";
 import { enclosingMovement, exposedSpans, shotIsMoving, snapTime, timeFromX } from "@/lib/events";
+import { useSnapToShots } from "@/lib/timelinePrefs";
 import { cn } from "@/lib/utils";
 
 import {
@@ -118,9 +124,11 @@ export function LaneEditor(props: LaneEditorProps) {
   // The list as last emitted: a drag frame reads it before the parent re-renders.
   const eventsRef = useRef(events);
   eventsRef.current = events;
-  // The time pill: where the drag's moving edge (the seek target) stands, null between drags.
-  // A keyboard nudge shows it briefly too, at the edge it moved.
-  const [pill, setPill] = useState<number | null>(null);
+  // The time pill: where the drag's moving edge stands (what a release saves), null between
+  // drags, with what it snapped to when the snap pulled it off the pointer (#1440). A
+  // keyboard nudge shows it briefly too, at the edge it moved.
+  const [pill, setPill] = useState<{ t: number; snappedTo: string | null } | null>(null);
+  const [snapOn] = useSnapToShots();
   const nudgePillTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearNudgePill = () => {
     if (nudgePillTimer.current !== null) clearTimeout(nudgePillTimer.current);
@@ -149,10 +157,18 @@ export function LaneEditor(props: LaneEditorProps) {
     const rect = rootRef.current?.getBoundingClientRect();
     return rect ? timeFromX(clientX - rect.left, rect.width, duration) : 0;
   };
+  // "Snap to shots" (the band's options menu) decides; Alt inverts it for one gesture.
   const maybeSnap = (t: number, alt: boolean) => {
-    if (alt) return t;
+    if (snapOn === alt) return t;
     const width = Math.max(rootRef.current?.getBoundingClientRect().width ?? 0, 1);
     return snapTime(t, [0, ...shots.map((s) => s.time_from_beep)], (SNAP_PX / width) * duration);
+  };
+  // What a drag frame's edge snapped to, when the snap (not a neighbour) pulled it off the pointer.
+  const snappedTo = (edge: number, pointer: number, alt: boolean): string | null => {
+    if (Math.abs(edge - pointer) < 1e-9 || maybeSnap(pointer, alt) !== edge) return null;
+    if (edge === 0) return "beep";
+    const shot = shots.find((s) => s.time_from_beep === edge);
+    return shot ? `shot ${shot.shot_number}` : null;
   };
   const emit = (next: StageEvent[], commit: boolean) => {
     eventsRef.current = next;
@@ -212,13 +228,15 @@ export function LaneEditor(props: LaneEditorProps) {
       if (dx * dx + dy * dy < drag.thresholdPx * drag.thresholdPx) return;
       drag.moved = true;
     }
-    const frame = dragFrame(drag, eventsRef.current, tAt(e.clientX), (t) => maybeSnap(t, e.altKey), duration);
+    const t = tAt(e.clientX);
+    const frame = dragFrame(drag, eventsRef.current, t, (x) => maybeSnap(x, e.altKey), duration);
     if (!frame) return;
     if (drag.mode === "create" && frame.id) drag.id = frame.id;
     emit(frame.events, false);
+    // The picture follows the pointer; the pill says where the edge will be saved.
     onSeek(frame.seek);
     clearNudgePill();
-    setPill(frame.seek);
+    setPill({ t: frame.edge, snappedTo: drag.mode === "body" ? null : snappedTo(frame.edge, t, e.altKey) });
   };
 
   const handleUp = (e: ReactPointerEvent<HTMLElement>) => {
@@ -337,7 +355,7 @@ export function LaneEditor(props: LaneEditorProps) {
           const edge = e.shiftKey ? moved.end : moved.start;
           onSeek(edge);
           clearNudgePill();
-          setPill(edge);
+          setPill({ t: edge, snappedTo: null });
           nudgePillTimer.current = setTimeout(() => {
             nudgePillTimer.current = null;
             setPill(null);
@@ -485,9 +503,10 @@ export function LaneEditor(props: LaneEditorProps) {
         <span
           data-testid="drag-pill"
           className="numeral pointer-events-none absolute top-0 z-10 -translate-x-1/2 whitespace-nowrap rounded border border-rule-strong bg-surface px-1 text-xs text-ink"
-          style={{ left: pct(pill) }}
+          style={{ left: pct(pill.t) }}
         >
-          {pill.toFixed(2)} s <span className="text-muted">f {Math.round(pill * fps)}</span>
+          {pill.t.toFixed(2)} s <span className="text-muted">f {Math.round(pill.t * fps)}</span>
+          {pill.snappedTo ? <span className="text-muted"> snapped to {pill.snappedTo}</span> : null}
         </span>
       )}
     </div>
@@ -496,6 +515,7 @@ export function LaneEditor(props: LaneEditorProps) {
 
 /** The lane editor's control hints, drawn by the page under the Timeline band. */
 export function LaneHints({ readOnly }: { readOnly?: boolean }) {
+  const [snapOn] = useSnapToShots();
   if (readOnly) return null;
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 pb-2 text-xs text-muted">
@@ -508,7 +528,7 @@ export function LaneHints({ readOnly }: { readOnly?: boolean }) {
         <Kbd>Up</Kbd>/<Kbd>Down</Kbd> moves between regions, <Kbd>Enter</Kbd> selects
       </span>
       <span>
-        <Kbd>Alt</Kbd>-drag skips snap, <Kbd>Esc</Kbd> cancels, <Kbd>Del</Kbd> removes
+        <Kbd>Alt</Kbd>-drag {snapOn ? "skips snap" : "snaps to shots"}, <Kbd>Esc</Kbd> cancels, <Kbd>Del</Kbd> removes
       </span>
     </div>
   );

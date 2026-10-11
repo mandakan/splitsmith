@@ -1,13 +1,16 @@
 /**
  * The timeline band's two per-browser switches, shared by Coach, Audit and
  * the beep step (spec 2026-10-09): "Wheel zooms the timeline" (off: a plain
- * wheel scrolls the page) and "Follow playhead" (on). Same shape as
+ * wheel scrolls the page) and "Follow playhead" (on), plus "Snap to shots"
+ * (on), which only Breakdown's region lanes read (#1440). Same shape as
  * lib/logoSpots.ts.
  */
 import { useSyncExternalStore } from "react";
 
 export const WHEEL_ZOOMS_KEY = "splitsmith.timeline.wheelZooms";
 export const FOLLOW_PLAYHEAD_KEY = "splitsmith.timeline.followPlayhead";
+/** Region edges and lane clicks snap to the nearest shot; Alt inverts it for one gesture. */
+export const SNAP_TO_SHOTS_KEY = "splitsmith.timeline.snapToShots";
 
 function makePref(key: string, fallback: boolean) {
   const listeners = new Set<() => void>();
@@ -47,12 +50,15 @@ function makePref(key: string, fallback: boolean) {
 
 const wheelZooms = makePref(WHEEL_ZOOMS_KEY, false);
 const followPlayhead = makePref(FOLLOW_PLAYHEAD_KEY, true);
+const snapToShots = makePref(SNAP_TO_SHOTS_KEY, true);
 
 export const useWheelZooms = wheelZooms.use;
 export const useFollowPlayhead = followPlayhead.use;
+export const useSnapToShots = snapToShots.use;
 
 /** Drop the cached values so a test reads localStorage afresh. */
 export function resetTimelinePrefsForTests(): void {
   wheelZooms.reset();
   followPlayhead.reset();
+  snapToShots.reset();
 }
