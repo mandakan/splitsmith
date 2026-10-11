@@ -15,12 +15,11 @@ import { useWalk } from "@/components/review/useWalk";
 import { WalkGuide } from "@/components/review/WalkGuide";
 import { Button } from "@/components/ui/button";
 import { isTypingTextTarget } from "@/lib/audit-input";
-import { snapToLeadingEdge, type SnapPeaks } from "@/lib/peak-snap";
+import type { SnapPeaks } from "@/lib/peak-snap";
 import type { DecodedAudio } from "@/lib/useDecodedAudio";
 import {
   CLOSEUP_HALF_S,
   DETAIL_HALF_S,
-  placementOf,
   stopFlags,
   stopPrompt,
   walkActionForKey,
@@ -253,8 +252,7 @@ export function Walk(props: WalkProps) {
     markers,
     snapDisplacementMs: marker ? props.snapDisplacementMs(marker.id) : null,
   });
-  const foot = state === "shot" ? snapToLeadingEdge(time, peaks) : null;
-  const placement = state === "shot" ? placementOf(time, peaks) : null;
+  const { foot, placement } = w;
   const origin =
     stop.origin === "burst"
       ? "unmarked sound"

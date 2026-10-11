@@ -16,14 +16,12 @@ import { WalkGuide } from "@/components/review/WalkGuide";
 import { Button } from "@/components/ui/button";
 import { Portal } from "@/components/ui/Portal";
 import { Sheet } from "@/components/ui/Sheet";
-import { snapToLeadingEdge } from "@/lib/peak-snap";
 import {
   CLOSEUP_HALF_S,
   DETAIL_HALF_S,
   WALK_LOOP,
   loopNeighbourFlag,
   loopWindow,
-  placementOf,
   quietFlag,
   stopFlags,
   stopPrompt,
@@ -202,8 +200,7 @@ export function MobileWalk(props: WalkProps) {
   if (neighbour) flags.push(neighbour);
   const quiet = quietFlag(peaks, time, level);
   if (quiet) flags.unshift(quiet);
-  const foot = state === "shot" ? snapToLeadingEdge(time, peaks) : null;
-  const placement = state === "shot" ? placementOf(time, peaks) : null;
+  const { foot, placement } = w;
   const mark = {
     markers,
     currentId: marker?.id ?? null,

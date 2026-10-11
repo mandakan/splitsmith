@@ -38,6 +38,7 @@ function Harness({
   guideOpen = false,
   onToggleSlow,
   onRestart,
+  peaks = envelope(3, [0.5, 1.0, 1.5]),
 }: {
   initial: AuditMarker[];
   record: (kind: string, payload: Record<string, unknown>) => void;
@@ -46,12 +47,13 @@ function Harness({
   guideOpen?: boolean;
   onToggleSlow?: () => void;
   onRestart?: (scope: "all" | "shots") => void;
+  peaks?: { peaks: number[]; duration: number };
 }) {
   const [markers, setMarkers] = useState(initial);
   return (
     <MobileWalk
       markers={markers}
-      peaks={envelope(3, [0.5, 1.0, 1.5])}
+      peaks={peaks}
       savedEvents={[]}
       from={0}
       expectedRounds={null}
@@ -173,5 +175,38 @@ describe("MobileWalk at the end", () => {
     expect(onRestart).toHaveBeenLastCalledWith("shots");
     fireEvent.click(screen.getByRole("button", { name: "Walk every stop again" }));
     expect(onRestart).toHaveBeenLastCalledWith("all");
+  });
+});
+
+describe("MobileWalk rise foot", () => {
+  /** A short burst at 0.500 s, then a louder one 16 ms later after a dip:
+   *  looked for from 0.500 the rule finds the louder one, from 0.490 the first. */
+  function doubleBurst(): { peaks: number[]; duration: number } {
+    const peaks = new Array<number>(1000).fill(0.01);
+    for (let i = 500; i < 510; i++) peaks[i] = 0.5;
+    for (let i = 510; i < 516; i++) peaks[i] = 0.02;
+    for (let k = 0; k < 60; k++) peaks[516 + k] = Math.max(0.01, Math.exp(-k / 15));
+    return { peaks, duration: 1 };
+  }
+
+  it("stays put when pressed on a shot already on it", () => {
+    render(<Harness initial={[m("cand-1", "detected", 0.49)]} record={vi.fn()} peaks={doubleBurst()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    fireEvent.click(screen.getByRole("button", { name: "Rise foot" }));
+    expect(screen.getByText(/now: a shot at 0\.500 s/)).toBeTruthy();
+    expect(screen.getByText("On the rise foot (the rule).")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Rise foot" }));
+    expect(screen.getByText(/now: a shot at 0\.500 s/)).toBeTruthy();
+  });
+
+  it("looks for the foot from where a tap placed the shot", () => {
+    render(<Harness initial={[m("cand-1", "detected", 0.49)]} record={vi.fn()} peaks={doubleBurst()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    // A tap 2 ms before the louder burst: its foot is that burst's.
+    const strip = screen.getByRole("img", { name: "80 ms around the shot: tap to place it" });
+    strip.getBoundingClientRect = () => ({ left: 0, width: 800, top: 0, height: 100, right: 800, bottom: 100, x: 0, y: 0, toJSON: () => ({}) });
+    fireEvent.click(strip, { clientX: ((0.514 - (0.49 - 0.04)) / 0.08) * 800 });
+    fireEvent.click(screen.getByRole("button", { name: "Rise foot" }));
+    expect(screen.getByText(/now: a shot at 0\.516 s/)).toBeTruthy();
   });
 });

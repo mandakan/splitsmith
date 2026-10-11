@@ -52,6 +52,13 @@ export interface WalkModel {
   time: number;
   /** Where this stop was found: what listening and the loop play around. */
   anchor: number;
+  /** The rule's time for this shot, and where the shot sits against it.
+   *  Found from where the sound is (the stop, or the last tap), never from
+   *  the shot's own time: on a burst with a louder reflection inside the
+   *  search window the rule is not its own fixed point, and Rise foot would
+   *  walk the shot forward a few ms per press. */
+  foot: number | null;
+  placement: ReturnType<typeof placementOf> | null;
   level: number;
   decidedCount: number;
   keptCount: number;
@@ -104,6 +111,12 @@ export function useWalk(props: WalkProps, opts?: { holdLoop?: boolean }): WalkMo
   // Where this stop was found: what Space and the loop play around, so a
   // nudge or F moves the shot under a sound that keeps repeating.
   const anchorRef = useRef(time);
+  // Where the rise foot is looked for: the stop's own time until a tap
+  // places the shot; a nudge or Rise foot never moves it.
+  const [footFromAt, setFootFromAt] = useState<{ key: string; t: number } | null>(null);
+  const footFrom = stop && footFromAt?.key === stop.key ? footFromAt.t : stop ? stop.time : time;
+  const foot = state === "shot" ? snapToLeadingEdge(footFrom, peaks) : null;
+  const placement = state === "shot" ? placementOf(time, peaks, footFrom) : null;
   const { loop, onLoopStop } = props;
   const holdLoop = opts?.holdLoop ?? false;
   useEffect(() => {
@@ -158,7 +171,7 @@ export function useWalk(props: WalkProps, opts?: { holdLoop?: boolean }): WalkMo
     }
     // A shot records whether its time is the rule's, so a later
     // definition change can re-time it from its sound (lib/walk).
-    const placed = state === "shot" ? placementOf(time, peaks) : null;
+    const placed = placement;
     props.onRecord(WALK_DECIDED_EVENT, {
       stop: stop.key,
       state,
@@ -189,7 +202,6 @@ export function useWalk(props: WalkProps, opts?: { holdLoop?: boolean }): WalkMo
 
   const riseFoot = () => {
     if (!stop || state !== "shot" || !marker) return;
-    const foot = snapToLeadingEdge(time, peaks);
     if (foot != null) place(foot);
   };
 
@@ -202,6 +214,8 @@ export function useWalk(props: WalkProps, opts?: { holdLoop?: boolean }): WalkMo
     state,
     time,
     anchor: anchorRef.current,
+    foot,
+    placement,
     level,
     decidedCount,
     keptCount,
@@ -224,7 +238,10 @@ export function useWalk(props: WalkProps, opts?: { holdLoop?: boolean }): WalkMo
       nudge: (ms: number) => {
         if (onShot) place(time + ms / 1000);
       },
-      place,
+      place: (t: number) => {
+        if (stop) setFootFromAt({ key: stop.key, t });
+        place(t);
+      },
       back: () => {
         if (!stop) {
           if (stops.length > 0) setIndex(stops.length - 1);

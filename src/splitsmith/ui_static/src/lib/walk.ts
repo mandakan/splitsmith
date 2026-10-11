@@ -227,8 +227,8 @@ export interface Placement {
   offsetMs: number | null;
 }
 
-export function placementOf(time: number, peaks: SnapPeaks): Placement {
-  const foot = snapToLeadingEdge(time, peaks);
+export function placementOf(time: number, peaks: SnapPeaks, footFrom: number = time): Placement {
+  const foot = snapToLeadingEdge(footFrom, peaks);
   const ruleTime = foot == null ? null : Math.round(foot * 1000) / 1000;
   if (ruleTime == null) return { placement: "override", ruleTime: null, offsetMs: null };
   const offsetMs = Math.round((time - ruleTime) * 1000);
