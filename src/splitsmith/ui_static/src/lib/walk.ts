@@ -479,6 +479,77 @@ export function writeLoopOn(on: boolean, device: "desktop" | "phone"): void {
   }
 }
 
+/** What the walk plays around a stop, seconds: ``pre`` before it, ``post``
+ *  after, then ``gap`` of silence before the next pass. The phone's loop is
+ *  short and starts after a silence, so the stop is always the first sound
+ *  heard and neighbouring stops sound different; the desktop keeps its wide
+ *  window, which carries the shot's lead-in and its echo. */
+export interface LoopShape {
+  pre: number;
+  post: number;
+  gap: number;
+}
+
+export const WALK_LOOP: Readonly<Record<"desktop" | "phone", LoopShape>> = {
+  desktop: { pre: 0.5, post: 0.7, gap: 0 },
+  phone: { pre: 0.15, post: 0.25, gap: 0.6 },
+};
+
+/** The span one pass plays around ``t``, inside the clip when its length is known. */
+export function loopWindow(
+  t: number,
+  shape: LoopShape,
+  duration: number | null,
+): { start: number; end: number; gap: number } {
+  const start = Math.max(0, t - shape.pre);
+  const end = duration != null ? Math.min(duration - 0.01, t + shape.post) : t + shape.post;
+  return { start: Math.round(start * 1e6) / 1e6, end: Math.round(end * 1e6) / 1e6, gap: shape.gap };
+}
+
+/** Under this a neighbour and the stop blur into one sound at full speed. */
+const BLUR_S = 0.06;
+
+/** The other stops a pass around ``t`` plays, in words, nearest first;
+ *  ``null`` when the loop holds this stop alone. */
+export function loopNeighbourFlag(t: number, others: ReadonlyArray<number>, shape: LoopShape): StopFlag | null {
+  const near = others
+    .map((o) => o - t)
+    .filter((d) => Math.abs(d) >= 0.001 && d >= -shape.pre && d <= shape.post)
+    .sort((a, b) => Math.abs(a) - Math.abs(b));
+  if (near.length === 0) return null;
+  const words = (d: number) => `${Math.round(Math.abs(d) * 1000)} ms ${d < 0 ? "before" : "after"}`;
+  if (near.length === 1) {
+    const blur = Math.abs(near[0]) < BLUR_S;
+    return {
+      tone: blur ? "warn" : "info",
+      text: `Another stop ${words(near[0])} this one plays in the loop.${blur ? " Half speed hears them as two sounds." : ""}`,
+    };
+  }
+  return {
+    tone: near.some((d) => Math.abs(d) < BLUR_S) ? "warn" : "info",
+    text: `Other stops in the loop: ${near.map(words).join(", ")}.`,
+  };
+}
+
+const SLOW_KEY = "splitsmith.reviewWalk.slow";
+
+/** Half-speed listening in the walk: off until turned on, then remembered. */
+export function readSlowOn(): boolean {
+  try {
+    return window.localStorage.getItem(SLOW_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function writeSlowOn(on: boolean): void {
+  try {
+    window.localStorage.setItem(SLOW_KEY, on ? "1" : "0");
+  } catch {
+    // Without storage the walk starts at full speed.
+  }
+}
+
 /** The Review page fits a phone only in its walk (``?walk=1``, or the old
  *  ``?step=1``); the full editor still needs a desk. */
 export function walkFitsPhone(search: URLSearchParams): boolean {

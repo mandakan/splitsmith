@@ -40,6 +40,7 @@ export function Strip({
   onPick,
   numbered = false,
   tickMs,
+  band,
   cssHeight,
 }: {
   label: string;
@@ -63,6 +64,8 @@ export function Strip({
   numbered?: boolean;
   /** Ticks every this many ms, counted from the stop (0 at the red line). */
   tickMs?: number;
+  /** A span to shade behind the wave (what the loop plays). */
+  band?: { start: number; end: number } | null;
   cssHeight: string;
 }) {
   const t0 = center - half;
@@ -184,6 +187,16 @@ export function Strip({
               : undefined
           }
         >
+          {band ? (
+            <rect
+              x={x(Math.max(t0, band.start))}
+              width={Math.max(0, x(Math.min(t0 + span, band.end)) - x(Math.max(t0, band.start)))}
+              y={0}
+              height={H}
+              className="fill-current text-ink"
+              fillOpacity={0.12}
+            />
+          ) : null}
           {ticks.map((k) => (
             <line
               key={k.ms}

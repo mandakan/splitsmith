@@ -3,21 +3,45 @@
  * desktop walk (useWalk), with thumb buttons in place of keys. One column,
  * the close-ups first; the whole stage and the video fold away. A phone plays
  * no sound before a tap, so the walk opens on Start, which starts the loop.
+ * It takes the whole screen (the app's headers stay under it): the phone's
+ * height is for the strips and the buttons.
  */
 
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 
 import { CLOSE_HEIGHT, CONTEXT_HEIGHT, Strip } from "@/components/review/Strip";
 import { useWalk } from "@/components/review/useWalk";
 import type { WalkProps } from "@/components/review/Walk";
 import { WalkGuide } from "@/components/review/WalkGuide";
 import { Button } from "@/components/ui/button";
+import { Portal } from "@/components/ui/Portal";
 import { Sheet } from "@/components/ui/Sheet";
 import { snapToLeadingEdge } from "@/lib/peak-snap";
-import { CLOSEUP_HALF_S, DETAIL_HALF_S, placementOf, stopFlags, stopPrompt } from "@/lib/walk";
+import {
+  CLOSEUP_HALF_S,
+  DETAIL_HALF_S,
+  WALK_LOOP,
+  loopNeighbourFlag,
+  loopWindow,
+  placementOf,
+  stopFlags,
+  stopPrompt,
+  stopTime,
+} from "@/lib/walk";
 
 const DETAIL_HEIGHT = "clamp(160px, 28vh, 260px)";
-const BIG = "min-h-11 flex-1 text-base";
+// min-w-0 and narrow padding: four labels must fit a 360 px phone.
+const BIG = "min-h-11 min-w-0 flex-1 px-1 text-sm";
+
+/** The whole screen, over the app's headers. The guide sheet portals in
+ *  after it and so sits above it. */
+function FullScreen({ children }: { children: ReactNode }) {
+  return (
+    <Portal>
+      <div className="fixed inset-0 z-chrome overflow-y-auto bg-bg pt-[env(safe-area-inset-top)]">{children}</div>
+    </Portal>
+  );
+}
 
 export function MobileWalk(props: WalkProps) {
   const [started, setStarted] = useState(false);
@@ -51,11 +75,20 @@ export function MobileWalk(props: WalkProps) {
           <Button size="sm" variant="ghost" aria-pressed={props.loop} onClick={props.onToggleLoop}>
             {props.loop ? "Loop on" : "Loop"}
           </Button>
+          {props.onToggleSlow ? (
+            <Button size="sm" variant="ghost" aria-pressed={props.slow} onClick={props.onToggleSlow}>
+              {props.slow ? "Half speed on" : "Half speed"}
+            </Button>
+          ) : null}
           <Button size="sm" variant="ghost" onClick={toggleGuide}>
             Guide
           </Button>
         </span>
-      ) : null}
+      ) : (
+        <a className="ml-auto py-2 text-muted underline" href="/dev/review">
+          Queue
+        </a>
+      )}
     </div>
   );
 
@@ -69,21 +102,28 @@ export function MobileWalk(props: WalkProps) {
 
   if (!started) {
     return (
-      <div className="space-y-4 p-4">
-        {header}
-        <p className="text-ink">
-          {stops.length} stops. Each one plays on repeat while you decide; Confirm moves on to the next.
-        </p>
-        <Button variant="primary" className="min-h-11 w-full text-base" onClick={start}>
-          Start
-        </Button>
-      </div>
+      <FullScreen>
+        <div className="space-y-4 p-4">
+          {header}
+          <p className="text-ink">
+            {stops.length} stops. Each one plays on repeat while you decide; Confirm moves on to the next.
+          </p>
+          <p className="text-muted">
+            Each pass is short and starts after a moment of silence: the stop is the first sound you hear. The shaded
+            span on the 3 s strip is what plays.
+          </p>
+          <Button variant="primary" className="min-h-11 w-full text-base" onClick={start}>
+            Start
+          </Button>
+        </div>
+      </FullScreen>
     );
   }
 
   if (!stop) {
     const undecided = stops.length - decidedCount;
     return (
+      <FullScreen>
       <div className="space-y-4 p-4">
         {header}
         <p className="text-base font-semibold text-ink">
@@ -109,6 +149,7 @@ export function MobileWalk(props: WalkProps) {
         </Button>
         {guide}
       </div>
+      </FullScreen>
     );
   }
 
@@ -119,6 +160,17 @@ export function MobileWalk(props: WalkProps) {
     markers,
     snapDisplacementMs: marker ? props.snapDisplacementMs(marker.id) : null,
   });
+  // The loop plays around where it was started (the anchor), not the nudged time.
+  const shape = WALK_LOOP.phone;
+  const loop = loopWindow(w.anchor, shape, peaks.duration);
+  const neighbour = loopNeighbourFlag(
+    w.anchor,
+    stops
+      .filter((s) => s.key !== stop.key)
+      .map((s) => stopTime(s, s.markerId ? (markers.find((m) => m.id === s.markerId) ?? null) : null)),
+    shape,
+  );
+  if (neighbour) flags.push(neighbour);
   const foot = state === "shot" ? snapToLeadingEdge(time, peaks) : null;
   const placement = state === "shot" ? placementOf(time, peaks) : null;
   const mark = {
@@ -131,7 +183,8 @@ export function MobileWalk(props: WalkProps) {
 
   return (
     // Bottom padding: the fixed bar must never cover the last strip.
-    <div className="flex flex-col gap-2 p-3 pb-44">
+    <FullScreen>
+    <div className="flex flex-col gap-2 p-3 pb-40">
       {header}
       <div
         className={
@@ -192,7 +245,7 @@ export function MobileWalk(props: WalkProps) {
         cssHeight={CLOSE_HEIGHT}
       />
       <Strip
-        label="3 s of the stage"
+        label="3 s of the stage · shaded: what the loop plays"
         audio={props.audio}
         peaks={peaks}
         center={time}
@@ -202,6 +255,7 @@ export function MobileWalk(props: WalkProps) {
         {...mark}
         foot={null}
         numbered
+        band={loop}
         cssHeight={CONTEXT_HEIGHT}
       />
       <details className="text-sm">
@@ -216,7 +270,6 @@ export function MobileWalk(props: WalkProps) {
           fit="stage"
           {...mark}
           foot={null}
-          numbered
           onPick={actions.jump}
           cssHeight={CONTEXT_HEIGHT}
         />
@@ -228,8 +281,8 @@ export function MobileWalk(props: WalkProps) {
         </details>
       ) : null}
 
-      <div className="fixed inset-x-0 bottom-0 z-40 space-y-2 border-t border-border bg-surface p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))]">
-        <div className="flex gap-2">
+      <div className="fixed inset-x-0 bottom-0 z-40 space-y-1.5 border-t border-border bg-surface p-1.5 pb-[calc(0.375rem+env(safe-area-inset-bottom))]">
+        <div className="flex gap-1.5">
           {[-5, -1, 1, 5].map((ms) => (
             <Button
               key={ms}
@@ -245,7 +298,7 @@ export function MobileWalk(props: WalkProps) {
             Back
           </Button>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-1.5">
           <Button className={BIG} disabled={!w.can.notShot} onClick={actions.notShot}>
             Not a shot
           </Button>
@@ -255,12 +308,13 @@ export function MobileWalk(props: WalkProps) {
           <Button className={BIG} disabled={!w.can.riseFoot} onClick={actions.riseFoot}>
             Rise foot
           </Button>
-          <Button className="min-h-11 flex-[2] text-base" variant="primary" onClick={actions.confirm}>
+          <Button className="min-h-11 min-w-0 flex-[1.5] px-1 text-base" variant="primary" onClick={actions.confirm}>
             Confirm
           </Button>
         </div>
       </div>
       {guide}
     </div>
+    </FullScreen>
   );
 }

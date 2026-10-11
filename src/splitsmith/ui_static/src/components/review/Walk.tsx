@@ -50,6 +50,9 @@ export interface WalkProps {
   loop: boolean;
   onToggleLoop: () => void;
   onLoopStop: (time: number | null) => void;
+  /** Half-speed listening (the phone's walk offers it). */
+  slow?: boolean;
+  onToggleSlow?: () => void;
   /** Sign the fixture off and move on. */
   onDone: () => void;
   onExit: () => void;

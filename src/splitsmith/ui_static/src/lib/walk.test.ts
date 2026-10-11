@@ -25,6 +25,11 @@ import {
   writeLoopOn,
   walkHref,
   walkStops,
+  WALK_LOOP,
+  loopWindow,
+  loopNeighbourFlag,
+  readSlowOn,
+  writeSlowOn,
 } from "./walk";
 
 /** 1 ms bins over ``duration`` s of quiet noise with a shot-like burst
@@ -342,5 +347,42 @@ describe("phoneLayout", () => {
   });
   it("is the desktop layout with a mouse on a wide window", () => {
     expect(phoneLayout(new URLSearchParams(""), media())).toBe(false);
+  });
+});
+
+describe("the walk's loop", () => {
+  it("puts the phone's stop just after a silence, and keeps the desktop's window", () => {
+    expect(loopWindow(10, WALK_LOOP.phone, 60)).toEqual({ start: 9.85, end: 10.25, gap: 0.6 });
+    expect(loopWindow(10, WALK_LOOP.desktop, 60)).toEqual({ start: 9.5, end: 10.7, gap: 0 });
+  });
+
+  it("stays inside the clip", () => {
+    expect(loopWindow(0.1, WALK_LOOP.phone, 60).start).toBe(0);
+    expect(loopWindow(59.9, WALK_LOOP.phone, 60).end).toBeLessThan(60);
+    expect(loopWindow(59.9, WALK_LOOP.phone, null).end).toBeCloseTo(60.15);
+  });
+
+  it("names every other stop the loop plays, nearest first", () => {
+    expect(loopNeighbourFlag(10, [10.048], WALK_LOOP.phone)).toEqual({
+      tone: "warn",
+      text: "Another stop 48 ms after this one plays in the loop. Half speed hears them as two sounds.",
+    });
+    expect(loopNeighbourFlag(10, [9.88, 10.2, 11], WALK_LOOP.phone)).toEqual({
+      tone: "info",
+      text: "Other stops in the loop: 120 ms before, 200 ms after.",
+    });
+  });
+
+  it("says nothing when the loop holds this stop alone", () => {
+    expect(loopNeighbourFlag(10, [9.5, 10.4, 10.0004], WALK_LOOP.phone)).toBeNull();
+  });
+});
+
+describe("half speed preference", () => {
+  it("is off until turned on, and remembered", () => {
+    window.localStorage.clear();
+    expect(readSlowOn()).toBe(false);
+    writeSlowOn(true);
+    expect(readSlowOn()).toBe(true);
   });
 });

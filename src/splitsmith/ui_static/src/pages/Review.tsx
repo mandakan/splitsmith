@@ -79,7 +79,11 @@ import {
   readGuideOpen,
   mediaMatches,
   phoneLayout,
+  loopWindow,
   readLoopOn,
+  readSlowOn,
+  WALK_LOOP,
+  writeSlowOn,
   writeLoopOn,
   walkHref,
   writeGuideOpen,
@@ -205,8 +209,11 @@ export function Review() {
   // started (or where the user last scrubbed). On pause / end-of-clip
   // while loopMode is on, the playhead snaps back here.
   const loopAnchorRef = useRef<number | null>(null);
-  // The walk's loop window (``playAround``): playback wraps to its start.
-  const walkRegionRef = useRef<{ start: number; end: number } | null>(null);
+  // The walk's loop window (``playAround``): playback wraps to its start,
+  // after ``gap`` seconds of silence (``resumeAt``, a performance.now()).
+  const walkRegionRef = useRef<{ start: number; end: number; gap: number; resumeAt: number | null } | null>(
+    null,
+  );
 
   // Loop region around the focused marker (#29). Loop on + a focused
   // marker = repeat a tight window around it; loop on + no focus keeps
@@ -600,9 +607,19 @@ export function Review() {
         // Loop wrap: region end when a marker is focused, clip end otherwise.
         const regionEnd = loopRegion?.end ?? (dur != null ? dur - 0.05 : null);
         const walkRegion = walkMode ? walkRegionRef.current : null;
-        if (walkRegion && t >= walkRegion.end) {
+        if (walkRegion?.resumeAt != null) {
+          // The silence between passes: paused on the start, then play.
+          if (performance.now() >= walkRegion.resumeAt) {
+            walkRegion.resumeAt = null;
+            el.play().catch(() => setIsPlaying(false));
+          }
+        } else if (walkRegion && t >= walkRegion.end) {
           el.currentTime = mediaFromElapsed(walkRegion.start, el);
           setCurrentTime(walkRegion.start);
+          if (walkRegion.gap > 0) {
+            el.pause();
+            walkRegion.resumeAt = performance.now() + walkRegion.gap * 1000;
+          }
         } else if (loopMode && regionEnd != null && t >= regionEnd) {
           const target = loopRegion?.start ?? loopAnchorRef.current ?? 0;
           el.currentTime = mediaFromElapsed(target, el);
@@ -844,9 +861,13 @@ export function Review() {
   // stop as the walk reaches it); Space again pauses.
   const listenTimerRef = useRef<number | null>(null);
   const [walkLoop, setWalkLoop] = useState(() => readLoopOn(phone ? "phone" : "desktop"));
+  // Half speed (the phone's): a 50 ms double becomes 100 ms, two sounds.
+  const [walkSlow, setWalkSlow] = useState(() => phone && readSlowOn());
+  const walkRate = walkSlow ? 0.5 : 1;
   const pauseListening = useCallback(() => {
     if (listenTimerRef.current != null) window.clearTimeout(listenTimerRef.current);
     listenTimerRef.current = null;
+    if (walkRegionRef.current) walkRegionRef.current.resumeAt = null;
     const el = playbackEl();
     el?.pause();
     setIsPlaying(false);
@@ -857,25 +878,27 @@ export function Review() {
       if (!el) return;
       if (listenTimerRef.current != null) window.clearTimeout(listenTimerRef.current);
       listenTimerRef.current = null;
-      const start = Math.max(0, t - LOOP_PRE_S);
-      const end = t + LOOP_POST_S;
-      walkRegionRef.current = repeat ? { start, end } : null;
+      const { start, end, gap } = loopWindow(t, WALK_LOOP[phone ? "phone" : "desktop"], peaks?.duration ?? null);
+      walkRegionRef.current = repeat ? { start, end, gap, resumeAt: null } : null;
       handleScrub(start);
+      el.playbackRate = walkRate;
+      el.preservesPitch = false;
       // A play the browser refuses (no gesture yet on a fresh load) leaves
       // the page paused rather than showing it playing.
       el.play().catch(() => setIsPlaying(false));
       setIsPlaying(true);
       if (!repeat) {
-        listenTimerRef.current = window.setTimeout(pauseListening, (end - start) * 1000);
+        listenTimerRef.current = window.setTimeout(pauseListening, ((end - start) * 1000) / walkRate);
       }
     },
-    [handleScrub, pauseListening],
+    [handleScrub, pauseListening, phone, peaks, walkRate],
   );
   const listenAround = useCallback(
     (t: number) => {
       const el = playbackEl();
       if (!el) return;
-      if (!el.paused) pauseListening();
+      // In the silence between passes the element is paused but the loop plays.
+      if (!el.paused || walkRegionRef.current?.resumeAt != null) pauseListening();
       else playAround(t, walkLoop);
     },
     [playAround, pauseListening, walkLoop],
@@ -899,6 +922,14 @@ export function Review() {
       pauseListening();
     }
   }, [walkLoop, pauseListening, phone]);
+
+  const toggleWalkSlow = useCallback(() => {
+    const on = !walkSlow;
+    writeSlowOn(on);
+    setWalkSlow(on);
+    const el = playbackEl();
+    if (el) el.playbackRate = on ? 0.5 : 1;
+  }, [walkSlow]);
 
   const snapDisplacementMs = useCallback(
     (markerId: string): number | null => {
@@ -1225,6 +1256,8 @@ export function Review() {
               loop={walkLoop}
               onToggleLoop={toggleWalkLoop}
               onLoopStop={loopStop}
+              slow={walkSlow}
+              onToggleSlow={toggleWalkSlow}
               onDone={() => void finishWalk()}
               onExit={() => setWalkMode(false)}
               busy={marking}
@@ -1426,15 +1459,19 @@ export function Review() {
         onClose={() => setShowHelp(false)}
         mode="review"
       />
-      <SaveToast status={saveStatus} />
+      <SaveToast status={saveStatus} phone={walkMode && phone} />
     </div>
   );
 }
 
-function SaveToast({ status }: { status: SaveStatus }) {
+/** The phone's walk saves on every Confirm: only a failure is worth a word
+ *  there, and it shows at the top, clear of the thumb buttons. */
+function SaveToast({ status, phone = false }: { status: SaveStatus; phone?: boolean }) {
   let label = "";
   let tone = "";
-  if (status.kind === "saving") {
+  if (phone && status.kind !== "error") {
+    // Nothing to say.
+  } else if (status.kind === "saving") {
     label = "Saving fixture...";
     tone = "bg-surface text-ink";
   } else if (status.kind === "saved") {
@@ -1449,7 +1486,11 @@ function SaveToast({ status }: { status: SaveStatus }) {
       <div
         role="status"
         aria-live={status.kind === "error" ? "assertive" : "polite"}
-        className="pointer-events-none fixed bottom-4 right-4 z-toast"
+        className={
+          phone
+            ? "pointer-events-none fixed inset-x-2 top-[calc(0.5rem+env(safe-area-inset-top))] z-toast"
+            : "pointer-events-none fixed bottom-4 right-4 z-toast"
+        }
       >
         {label ? (
           <div

@@ -36,12 +36,14 @@ function Harness({
   loop = false,
   onLoopStop = () => {},
   guideOpen = false,
+  onToggleSlow,
 }: {
   initial: AuditMarker[];
   record: (kind: string, payload: Record<string, unknown>) => void;
   loop?: boolean;
   onLoopStop?: (time: number | null) => void;
   guideOpen?: boolean;
+  onToggleSlow?: () => void;
 }) {
   const [markers, setMarkers] = useState(initial);
   return (
@@ -65,6 +67,8 @@ function Harness({
       loop={loop}
       onToggleLoop={() => {}}
       onLoopStop={onLoopStop}
+      slow={false}
+      onToggleSlow={onToggleSlow}
       onDone={() => {}}
       onExit={() => {}}
       busy={false}
@@ -134,5 +138,24 @@ describe("MobileWalk", () => {
     expect(screen.queryByRole("dialog", { name: "Review guide" })).toBeNull();
     fireEvent.click(button("Guide"));
     expect(screen.getByRole("dialog", { name: "Review guide" })).toBeTruthy();
+  });
+});
+
+describe("MobileWalk listening", () => {
+  it("names a stop close enough to blur into this one, and offers half speed", () => {
+    const onToggleSlow = vi.fn();
+    render(
+      <Harness
+        initial={[m("cand-1", "detected", 0.5), m("cand-2", "rejected", 0.548)]}
+        record={vi.fn()}
+        onToggleSlow={onToggleSlow}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    expect(
+      screen.getByText("Another stop 48 ms after this one plays in the loop. Half speed hears them as two sounds."),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Half speed" }));
+    expect(onToggleSlow).toHaveBeenCalledTimes(1);
   });
 });
