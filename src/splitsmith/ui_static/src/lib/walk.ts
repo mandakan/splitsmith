@@ -479,6 +479,12 @@ export function writeLoopOn(on: boolean, device: "desktop" | "phone"): void {
   }
 }
 
+/** The Review page fits a phone only in its walk (``?walk=1``, or the old
+ *  ``?step=1``); the full editor still needs a desk. */
+export function walkFitsPhone(search: URLSearchParams): boolean {
+  return search.get("walk") === "1" || search.get("step") === "1";
+}
+
 /** A fixture's Review page, opened in its walk, with its source video when
  *  that is on this disk. */
 export function walkHref(auditPath: string, videoPath: string | null): string {

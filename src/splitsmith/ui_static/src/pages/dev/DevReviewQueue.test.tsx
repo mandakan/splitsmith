@@ -215,4 +215,26 @@ describe("DevReviewQueue on a phone", () => {
       `/review?fixture=${encodeURIComponent("/fixtures/stage-shots-b-2026-stage2.json")}&walk=1`,
     );
   });
+
+  it("tells apart two angles of one stage by their camera", async () => {
+    vi.stubGlobal("matchMedia", (q: string) => ({
+      matches: true,
+      media: q,
+      addEventListener() {},
+      removeEventListener() {},
+    }));
+    vi.mocked(api.getDevReviewQueue).mockResolvedValue({
+      pending: [
+        { ...item("stage-shots-hfo-2026-stage1-s0fe3d797-apple-iphone17pro"), review_status: "needs_review" },
+        { ...item("stage-shots-hfo-2026-stage1-s0fe3d797-go3s"), review_status: "needs_review" },
+      ],
+      flagged: [],
+      done: [],
+    });
+
+    renderQueue();
+
+    expect((await screen.findAllByText("hfo, stage 1, apple-iphone17pro")).length).toBeGreaterThan(0);
+    expect(screen.getByText("hfo, stage 1, go3s")).toBeTruthy();
+  });
 });

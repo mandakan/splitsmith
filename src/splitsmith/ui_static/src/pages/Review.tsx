@@ -1412,6 +1412,7 @@ export function Review() {
         </CardContent>
       </Card>
 
+      {walkMode && phone ? null : (
       <ListDrawer
         open={showDrawer}
         onClose={() => setShowDrawer(false)}
@@ -1419,6 +1420,7 @@ export function Review() {
         currentMarkerId={focusedMarkerId}
         onJumpTo={jumpToMarker}
       />
+      )}
       <HelpOverlay
         open={showHelp}
         onClose={() => setShowHelp(false)}

@@ -168,7 +168,10 @@ export function DeveloperShell() {
       {slot ? createPortal(contextRow, slot) : null}
 
       <div className="flex min-h-[calc(100dvh-var(--shell-header-h,86px))]">
-        <DeveloperSidebar model={model} activeIdx={activeIdx} />
+        {/* No room beside a phone's review queue; the other steps are desk-only. */}
+        <div className="hidden md:flex">
+          <DeveloperSidebar model={model} activeIdx={activeIdx} />
+        </div>
         <div className="min-w-0 flex-1">
           <Outlet
             context={{

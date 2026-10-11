@@ -21,6 +21,10 @@ const BIG = "min-h-11 flex-1 text-base";
 
 export function MobileWalk(props: WalkProps) {
   const [started, setStarted] = useState(false);
+  // The guide opens from its button only: the desktop keeps it open until
+  // hidden, which on a phone would cover the stop.
+  const [guideShown, setGuideShown] = useState(false);
+  const toggleGuide = () => setGuideShown((v) => !v);
   const w = useWalk(props, { holdLoop: !started });
   const { markers, peaks, expectedRounds, busy } = props;
   const { stops, index, stop, marker, state, time, level, decidedCount, keptCount, check, armed, actions } = w;
@@ -47,7 +51,7 @@ export function MobileWalk(props: WalkProps) {
           <Button size="sm" variant="ghost" aria-pressed={props.loop} onClick={props.onToggleLoop}>
             {props.loop ? "Loop on" : "Loop"}
           </Button>
-          <Button size="sm" variant="ghost" onClick={props.onToggleGuide}>
+          <Button size="sm" variant="ghost" onClick={toggleGuide}>
             Guide
           </Button>
         </span>
@@ -56,9 +60,9 @@ export function MobileWalk(props: WalkProps) {
   );
 
   const guide = (
-    <Sheet open={props.guideOpen && started} onClose={props.onToggleGuide} label="Review guide">
+    <Sheet open={guideShown} onClose={toggleGuide} label="Review guide">
       <div className="max-h-[85vh] overflow-y-auto">
-        <WalkGuide onClose={props.onToggleGuide} />
+        <WalkGuide onClose={toggleGuide} />
       </div>
     </Sheet>
   );

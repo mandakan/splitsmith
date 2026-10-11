@@ -35,11 +35,13 @@ function Harness({
   record,
   loop = false,
   onLoopStop = () => {},
+  guideOpen = false,
 }: {
   initial: AuditMarker[];
   record: (kind: string, payload: Record<string, unknown>) => void;
   loop?: boolean;
   onLoopStop?: (time: number | null) => void;
+  guideOpen?: boolean;
 }) {
   const [markers, setMarkers] = useState(initial);
   return (
@@ -66,7 +68,7 @@ function Harness({
       onDone={() => {}}
       onExit={() => {}}
       busy={false}
-      guideOpen={false}
+      guideOpen={guideOpen}
       onToggleGuide={() => {}}
       audio={null}
       scope="all"
@@ -124,5 +126,13 @@ describe("MobileWalk", () => {
     fireEvent.click(button("Confirm"));
     fireEvent.click(button("Back"));
     expect(screen.getByText("Stop 1 of 3")).toBeTruthy();
+  });
+
+  it("keeps the guide closed until asked, whatever the desktop remembers", () => {
+    render(<Harness initial={markersAll} record={vi.fn()} guideOpen />);
+    fireEvent.click(button("Start"));
+    expect(screen.queryByRole("dialog", { name: "Review guide" })).toBeNull();
+    fireEvent.click(button("Guide"));
+    expect(screen.getByRole("dialog", { name: "Review guide" })).toBeTruthy();
   });
 });

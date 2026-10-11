@@ -6,6 +6,7 @@ import {
   Routes,
   useLocation,
   useParams,
+  useSearchParams,
 } from "react-router-dom";
 
 import { AppShell } from "@/components/AppShell";
@@ -26,6 +27,7 @@ import { useDeploymentMode } from "@/lib/features";
 import { peekApproveCode, stashApproveCode, takeApproveCode } from "@/lib/deviceApproveStash";
 import { ShooterScopedRoute } from "@/components/ShooterScopedRoute";
 import { lazyPage } from "@/lib/lazyPage";
+import { walkFitsPhone } from "@/lib/walk";
 import { BeepReviewRedirect } from "@/components/match/BeepReviewRedirect";
 
 // Pages load on first navigation (#894); the shells above stay eager.
@@ -123,6 +125,16 @@ export function AuditRoute() {
   ) : (
     <DesktopGate screen="Audit">
       <Audit />
+    </DesktopGate>
+  );
+}
+
+/** The fixture editor needs a desk; its review walk fits a phone. */
+function ReviewRoute() {
+  const [params] = useSearchParams();
+  return (
+    <DesktopGate screen="Fixture editor" links={false} allowOnMobile={walkFitsPhone(params)}>
+      <Review />
     </DesktopGate>
   );
 }
@@ -375,7 +387,8 @@ export function App() {
             <Route path="dev" element={<Navigate to="/dev/corpus" replace />} />
             <Route path="dev/corpus" element={<DesktopGate screen="Developer tools" links={false}><DevCorpus /></DesktopGate>} />
             <Route path="dev/corpus/:slug" element={<RedirectCorpusSlug />} />
-            <Route path="dev/review" element={<DesktopGate screen="Developer tools" links={false}><DevReviewQueue /></DesktopGate>} />
+            {/* The review queue fits a phone: Continue and a list (DevReviewQueue). */}
+            <Route path="dev/review" element={<DesktopGate screen="Developer tools" links={false} allowOnMobile><DevReviewQueue /></DesktopGate>} />
             <Route path="dev/review/:slug" element={<DesktopGate screen="Developer tools" links={false}><DevFixtureDetail /></DesktopGate>} />
             <Route path="dev/validate" element={<DesktopGate screen="Developer tools" links={false}><DevValidate /></DesktopGate>} />
             <Route path="dev/retrain" element={<DesktopGate screen="Developer tools" links={false}><DevRetrain /></DesktopGate>} />
@@ -389,7 +402,7 @@ export function App() {
               links into via /review?fixture=..., and /_design is the
               token palette browser. */}
           <Route element={<AppShell />}>
-            <Route path="review" element={<DesktopGate screen="Fixture editor" links={false}><Review /></DesktopGate>} />
+            <Route path="review" element={<ReviewRoute />} />
             <Route path="promote-review" element={<DesktopGate screen="Promote review" links={false}><PromoteReview /></DesktopGate>} />
             <Route path="_design" element={<DesktopGate screen="Design system" links={false}><Design /></DesktopGate>} />
             {/* Legacy redirects so old bookmarks don't 404. */}

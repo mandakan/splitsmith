@@ -19,6 +19,7 @@ import {
   unmarkedBursts,
   walkActionForKey,
   continueTarget,
+  walkFitsPhone,
   readLoopOn,
   writeLoopOn,
   walkHref,
@@ -317,5 +318,13 @@ describe("continueTarget", () => {
   });
   it("has nothing to continue on an empty queue", () => {
     expect(continueTarget([])).toBeNull();
+  });
+});
+
+describe("walkFitsPhone", () => {
+  it("lets the walk through to a phone, never the full editor", () => {
+    expect(walkFitsPhone(new URLSearchParams("fixture=a.json&walk=1"))).toBe(true);
+    expect(walkFitsPhone(new URLSearchParams("fixture=a.json&step=1"))).toBe(true);
+    expect(walkFitsPhone(new URLSearchParams("fixture=a.json"))).toBe(false);
   });
 });

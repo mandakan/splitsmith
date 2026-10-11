@@ -659,8 +659,15 @@ function PhoneQueue({ loading, queue }: { loading: boolean; queue: DevReviewQueu
   if (loading || !queue) return <p className="p-4 text-sm text-muted">Loading the queue...</p>;
   const next = continueTarget(queue.pending);
   const open = queue.pending.filter((i) => i.review_status === "needs_review");
+  // The camera is what tells two angles of one stage apart: the slug's tail
+  // after the shooter.
+  const camera = (i: DevReviewQueueItem) => {
+    const mark = i.shooter ? `-${i.shooter}-` : null;
+    return mark && i.slug.includes(mark) ? i.slug.slice(i.slug.indexOf(mark) + mark.length) : null;
+  };
   const name = (i: DevReviewQueueItem) =>
-    [i.venue, i.stage_number != null ? `stage ${i.stage_number}` : null].filter(Boolean).join(", ") || i.slug;
+    [i.venue, i.stage_number != null ? `stage ${i.stage_number}` : null, camera(i)].filter(Boolean).join(", ") ||
+    i.slug;
   return (
     <div className="space-y-4 p-4">
       {next ? (
