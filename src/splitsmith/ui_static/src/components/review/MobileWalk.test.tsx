@@ -46,7 +46,7 @@ function Harness({
   onLoopStop?: (time: number | null) => void;
   guideOpen?: boolean;
   onToggleSlow?: () => void;
-  onRestart?: (scope: "all" | "shots") => void;
+  onRestart?: (scope: "all" | "shots" | "source") => void;
   peaks?: { peaks: number[]; duration: number };
 }) {
   const [markers, setMarkers] = useState(initial);

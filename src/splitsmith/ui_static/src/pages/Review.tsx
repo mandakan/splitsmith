@@ -133,6 +133,8 @@ export function Review() {
   // A walk started again (``restartWalk``) ignores the decisions already
   // saved, so every stop is asked again; 0 resumes from them.
   const [walkRound, setWalkRound] = useState(0);
+  // A snapped fixture's source shots: its walk follows them (lib/sourceWalk).
+  const [sourceShots, setSourceShots] = useState<number[] | null>(null);
   const restartWalk = useCallback((scope: WalkScope) => {
     setScopeOverride(scope);
     setWalkRound((n) => n + 1);
@@ -298,10 +300,14 @@ export function Review() {
     sessionEventsRef.current = [];
     undoStackRef.current = [];
     isDirtyRef.current = false;
-    api
-      .getFixtureAudit(fixturePath)
-      .then((a) => {
+    Promise.all([
+      api.getFixtureAudit(fixturePath),
+      // No source is a walk of every sound, never a failed page.
+      api.getFixtureSource(fixturePath).catch(() => null),
+    ])
+      .then(([a, source]) => {
         if (!alive) return;
+        setSourceShots(source && source.shots.length > 0 ? source.shots : null);
         auditRef.current = a;
         loadedPathRef.current = fixturePath;
         setAudit(a);
@@ -311,6 +317,7 @@ export function Review() {
         setInitialScope(
           defaultScope({
             snapped: isSnapped(a as never),
+            hasSource: source != null && source.shots.length > 0,
             kept: (a.shots ?? []).filter((s) => s.time != null).length,
             expectedRounds: (a as unknown as { stage_rounds?: { expected?: number } }).stage_rounds?.expected ?? null,
           }),
@@ -1276,6 +1283,7 @@ export function Review() {
               scope={walkScope}
               onScopeChange={setScopeOverride}
               onRestart={restartWalk}
+              source={sourceShots}
             />
           ) : walkMode && peaks ? (
             <div className="flex items-center gap-2 text-sm text-muted">

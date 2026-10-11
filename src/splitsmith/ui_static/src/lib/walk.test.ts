@@ -161,7 +161,9 @@ describe("scope", () => {
 
   it("walks everything on a snapped fixture or a count that is off, else the kept shots", () => {
     expect(defaultScope({ snapped: true, kept: 24, expectedRounds: 24 })).toBe("all");
-    expect(defaultScope({ snapped: false, kept: 26, expectedRounds: 24 })).toBe("all");
+    expect(defaultScope({ snapped: true, hasSource: true, kept: 24, expectedRounds: 24 })).toBe("source");
+    // More shots than rounds is normal: an audited fixture walks its shots.
+    expect(defaultScope({ snapped: false, kept: 26, expectedRounds: 24 })).toBe("shots");
     expect(defaultScope({ snapped: false, kept: 24, expectedRounds: 24 })).toBe("shots");
     expect(defaultScope({ snapped: false, kept: 24, expectedRounds: null })).toBe("shots");
   });

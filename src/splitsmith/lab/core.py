@@ -771,6 +771,65 @@ def apply_labels(audit_path: Path, labels: list[CandidateLabel]) -> dict[str, in
     return counts
 
 
+class AnchorSource(BaseModel):
+    """The fixture a snapped one was snapped from, as the review walk reads it."""
+
+    stem: str
+    #: The source's shot times in its own clip's seconds, in time order.
+    shots: list[float]
+    rounds: int | None = None
+
+
+def _is_snapped(doc: dict[str, Any]) -> bool:
+    if isinstance(doc.get("anchor"), dict):
+        return True
+    history = doc.get("history")
+    return isinstance(history, list) and any(
+        isinstance(h, dict) and h.get("action") == "promote-from-anchor" for h in history
+    )
+
+
+def anchor_source(fixture_path: Path) -> AnchorSource | None:
+    """The source of a fixture snapped from another camera.
+
+    A snapped fixture is named ``<source>-<camera>`` (``promote_secondary_angles``),
+    so its source is the longest sibling fixture whose stem prefixes this one's
+    and which is not itself snapped. ``None`` for a fixture that is not snapped
+    or whose source is not on this disk.
+    """
+    try:
+        doc = json.loads(fixture_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(doc, dict) or not _is_snapped(doc):
+        return None
+    stem = fixture_path.stem
+    best: tuple[str, dict[str, Any]] | None = None
+    for sibling in fixture_path.parent.glob("*.json"):
+        other = sibling.stem
+        if not stem.startswith(other + "-") or (best is not None and len(other) <= len(best[0])):
+            continue
+        try:
+            data = json.loads(sibling.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(data, dict) and isinstance(data.get("shots"), list) and not _is_snapped(data):
+            best = (other, data)
+    if best is None:
+        return None
+    other, data = best
+    shots = sorted(
+        float(s["time"])
+        for s in data["shots"]
+        if isinstance(s, dict)
+        and isinstance(s.get("time"), (int, float))
+        and not isinstance(s.get("time"), bool)
+    )
+    rounds_block = data.get("stage_rounds")
+    rounds = rounds_block.get("expected") if isinstance(rounds_block, dict) else None
+    return AnchorSource(stem=other, shots=shots, rounds=rounds if isinstance(rounds, int) else None)
+
+
 def confirm_review(audit_path: Path, method: str | None = None) -> str:
     """Stamp ``review.confirmed_at`` on a fixture JSON and return it.
 

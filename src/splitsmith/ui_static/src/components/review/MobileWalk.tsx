@@ -62,7 +62,7 @@ export function MobileWalk(props: WalkProps) {
     // Follow the stop, not every nudge.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [followKey, started]);
-  const { markers, peaks, expectedRounds, busy } = props;
+  const { markers, peaks, busy } = props;
   const { stops, index, stop, marker, state, time, level, decidedCount, keptCount, check, armed, actions } = w;
 
   const start = () => {
@@ -77,7 +77,7 @@ export function MobileWalk(props: WalkProps) {
       <span className="text-ink">{stop ? `Stop ${index + 1} of ${stops.length}` : "End of the walk"}</span>
       <span className="numeral">
         {keptCount}
-        {expectedRounds != null ? ` / ${expectedRounds}` : ""} shots
+        {w.expected != null ? ` / ${w.expected}` : ""} shots
       </span>
       {started ? (
         <span className="ml-auto flex gap-1">
@@ -120,6 +120,9 @@ export function MobileWalk(props: WalkProps) {
           <p className="text-ink">
             {stops.length} stops. Each one plays on repeat while you decide; Confirm moves on to the next.
           </p>
+          {w.sourceLine ? (
+            <p className={w.sourceLed ? "text-ink" : "text-status-warning"}>{w.sourceLine}</p>
+          ) : null}
           <p className="text-muted">
             Each pass is short and starts after a moment of silence: the stop is the first sound you hear. The shaded
             span on the 3 s strip is what plays.

@@ -62,7 +62,21 @@ export interface WalkStop {
   /** Where the stop sits when the walk opens: the marker's time, or the
    *  burst's onset. */
   time: number;
-  origin: "kept" | "rejected" | "burst";
+  /** ``source`` / ``extra``: a walk led by the fixture's source camera
+   *  (lib/sourceWalk): one of the source's shots, or a kept shot the source
+   *  has none for. */
+  origin: "kept" | "rejected" | "burst" | "source" | "extra";
+  source?: {
+    /** Which of the source's shots, from 0. */
+    index: number;
+    count: number;
+    /** Where the fit expects it on this camera. */
+    expected: number;
+    /** A sound was found within the window around ``expected``. */
+    heard: boolean;
+  };
+  /** A kept shot the walk moves to ``time`` when it opens: where it was. */
+  moveFrom?: number;
 }
 
 export interface WalkDecision {
@@ -90,7 +104,7 @@ const isKept = (m: AuditMarker) => m.kind === "detected" || m.kind === "manual";
 
 /** Every sound's loudest point after ``from``: the first bin of the loudest
  *  level within ``BURST_PEAK_HALF_S`` either side, in time order. */
-function soundPeaks(peaks: SnapPeaks, from: number): Array<{ t: number; v: number }> {
+export function soundPeaks(peaks: SnapPeaks, from: number): Array<{ t: number; v: number }> {
   const w = binWidth(peaks);
   const half = Math.max(1, Math.round(BURST_PEAK_HALF_S / w));
   const p = peaks.peaks;
@@ -175,14 +189,23 @@ export function walkStops(
  *  unmarked sound, for labels that may miss or misplace shots. ``shots``: the
  *  kept shots only, for labels a person made on this audio, where a missed
  *  shot is rare and the shot count against the stage's rounds is the net. */
-export type WalkScope = "all" | "shots";
+export type WalkScope = "all" | "shots" | "source";
 
-/** The scope a fixture opens with: everything when its shots were snapped
- *  from another camera (``snapped``) or their count disagrees with the
- *  stage's rounds; else the kept shots. */
-export function defaultScope(opts: { snapped: boolean; kept: number; expectedRounds: number | null }): WalkScope {
-  if (opts.snapped) return "all";
-  if (opts.expectedRounds != null && opts.kept !== opts.expectedRounds) return "all";
+/** The scope a fixture opens with: a snapped fixture follows its source
+ *  camera's shots when the source is on this disk, else every sound; a
+ *  fixture a person audited walks its kept shots. */
+export function defaultScope(opts: {
+  snapped: boolean;
+  /** The snapped fixture's source is on this disk (``source`` scope). */
+  hasSource?: boolean;
+  kept: number;
+  expectedRounds: number | null;
+}): WalkScope {
+  if (opts.snapped) return opts.hasSource ? "source" : "all";
+  // A person audited this audio: which sounds are shots is settled, only
+  // their times are checked. A count above the stage's rounds is normal
+  // (extra shots, makeups: 141 of 154 audited fixtures), never a reason to
+  // audit every sound again; the end screen still compares the two.
   return "shots";
 }
 
@@ -341,6 +364,34 @@ export function stopFlags(opts: {
   const { stop, marker, markers, snapDisplacementMs } = opts;
   const flags: StopFlag[] = [];
   const t = stopTime(stop, marker);
+  if (stop.origin === "source" && stop.source) {
+    const { index, count, heard } = stop.source;
+    const which = `Shot ${index + 1} of ${count} on the source camera`;
+    if (stopState(marker) === "shot") {
+      flags.push(
+        stop.moveFrom != null
+          ? {
+              tone: "warn",
+              text: `${which}. The snap had put it ${Math.round(Math.abs(stop.moveFrom - stop.time) * 1000)} ms ${stop.moveFrom > stop.time ? "later" : "earlier"}, on another sound; moved here.`,
+            }
+          : { tone: "info", text: `${which}.` },
+      );
+    }
+    else if (heard) {
+      flags.push({ tone: "warn", text: `${which}: no shot is kept here yet. If this sound is it, mark it Shot.` });
+    } else {
+      flags.push({
+        tone: "warn",
+        text: `${which}: no sound within 40 ms of where it should be. This camera may not have heard it.`,
+      });
+    }
+  }
+  if (stop.origin === "extra" && stopState(marker) === "shot") {
+    flags.push({
+      tone: "warn",
+      text: "The source camera has no shot here: most likely an echo, a shot in another bay or a duplicate. Not a shot, unless you hear one the source missed.",
+    });
+  }
   if (stop.origin === "burst") {
     flags.push({ tone: "info", text: "The detector proposed no candidate for this sound." });
     const late = markers.find(
@@ -353,7 +404,8 @@ export function stopFlags(opts: {
       });
     }
   }
-  if (snapDisplacementMs != null && Math.abs(snapDisplacementMs) >= 20) {
+  // A walk led by the source re-placed the snap: its old distance means nothing.
+  if (stop.origin !== "source" && snapDisplacementMs != null && Math.abs(snapDisplacementMs) >= 20) {
     flags.push({
       tone: "warn",
       text: `Snapped ${Math.round(Math.abs(snapDisplacementMs))} ms from the other camera's time: check it is on the right sound.`,
@@ -429,8 +481,19 @@ export function windowBins(
 }
 
 /** The sign-off line: kept shots against the stage's rounds. */
-export function countCheck(kept: number, expected: number | null): { ok: boolean; text: string } {
+export function countCheck(
+  kept: number,
+  expected: number | null,
+  against: "rounds" | "source" = "rounds",
+): { ok: boolean; text: string } {
   if (expected == null) return { ok: true, text: `${kept} shots. The stage's round count is not known.` };
+  if (against === "source") {
+    if (kept === expected) return { ok: true, text: `${kept} shots, matching the source camera's ${expected}.` };
+    return {
+      ok: false,
+      text: `${kept} shots, but the source camera has ${expected}. Check the extras and any shot this camera did not hear.`,
+    };
+  }
   if (kept === expected) return { ok: true, text: `${kept} shots, matching the stage's ${expected} rounds.` };
   return {
     ok: false,

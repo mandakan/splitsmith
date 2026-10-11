@@ -70,10 +70,13 @@ export interface WalkProps {
   /** Walk again from the first stop, every stop undecided (a signed-off
    *  fixture included); the phone's end screen offers it. */
   onRestart?: (scope: WalkScope) => void;
+  /** A snapped fixture's source shots (source clip seconds): the ``source``
+   *  scope walks exactly these (lib/sourceWalk). */
+  source?: number[] | null;
 }
 
 export function Walk(props: WalkProps) {
-  const { markers, peaks, expectedRounds, busy } = props;
+  const { markers, peaks, busy } = props;
   const w = useWalk(props);
   const { stops, index, stop, marker, state, time, level, decidedCount, keptCount, check, armed } = w;
   const decided = w.isDecided;
@@ -127,19 +130,20 @@ export function Walk(props: WalkProps) {
     <Button
       size="sm"
       variant="ghost"
-      onClick={() => props.onScopeChange(props.scope === "all" ? "shots" : "all")}
+      onClick={() => props.onScopeChange(props.scope === "all" ? (props.source ? "source" : "shots") : "all")}
       title={
         props.scope === "all"
           ? "Visit the kept shots only"
           : "Also visit every rejected candidate and every loud sound nobody marked"
       }
     >
-      {props.scope === "all" ? "Kept shots only" : "Walk every sound"}
+      {props.scope === "all" ? (props.source ? "Follow the source camera" : "Kept shots only") : "Walk every sound"}
     </Button>
   );
-  const scopeLine =
-    props.scope === "all"
-      ? "Walking every candidate and every loud sound: the shots were snapped from another camera, or their count is off."
+  const scopeLine = w.sourceLine
+    ? w.sourceLine
+    : props.scope === "all"
+      ? "Walking every candidate and every loud sound."
       : "Walking the kept shots: a person labelled this audio and the count matches. The whole stage below shows everything else.";
 
   const loopButton = (
@@ -278,7 +282,7 @@ export function Walk(props: WalkProps) {
         <span>{origin}</span>
         <span>
           {decidedCount} decided · {keptCount} shots kept
-          {expectedRounds != null ? ` of ${expectedRounds} rounds` : ""}
+          {w.expected != null ? (w.sourceLed ? ` of the source's ${w.expected}` : ` of ${w.expected} rounds`) : ""}
         </span>
         <span className="ml-auto flex gap-1">
           {scopeButton}

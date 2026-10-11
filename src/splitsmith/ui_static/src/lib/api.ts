@@ -4868,6 +4868,11 @@ export const api = {
   // build so the audit primitives are shared.
   // -----------------------------------------------------------------------
 
+  /** A snapped fixture's source and its shot times; ``null`` for any other. */
+  getFixtureSource: (fixturePath: string) =>
+    request<{ stem: string; shots: number[]; rounds: number | null } | null>(
+      `/api/fixture/source?path=${encodeURIComponent(fixturePath)}`,
+    ),
   getFixtureAudit: (fixturePath: string) =>
     request<StageAudit>(`/api/fixture/audit?path=${encodeURIComponent(fixturePath)}`),
 

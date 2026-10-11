@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AuditMarker } from "@/components/MarkerLayer";
 import type { WalkProps } from "@/components/review/Walk";
 import { snapToLeadingEdge } from "@/lib/peak-snap";
+import { alignToSource, alignmentOk, soundOnsets, sourceStops } from "@/lib/sourceWalk";
 import {
   WALK_DECIDED_EVENT,
   WALK_METHOD,
@@ -65,6 +66,13 @@ export interface WalkModel {
   check: ReturnType<typeof countCheck>;
   armed: boolean;
   isDecided: (stop: WalkStop) => boolean;
+  /** What the count is checked against: the source camera's shots when the
+   *  walk follows it, else the stage's rounds. */
+  expected: number | null;
+  sourceLed: boolean;
+  /** One line on how the walk was chosen for a snapped fixture; ``null``
+   *  for any other fixture. */
+  sourceLine: string | null;
   /** Which actions do anything at this stop (the phone disables the rest). */
   can: { riseFoot: boolean; nudge: boolean; notShot: boolean; shot: boolean };
   actions: WalkActions;
@@ -75,7 +83,31 @@ export function useWalk(props: WalkProps, opts?: { holdLoop?: boolean }): WalkMo
   const { markers, peaks, savedEvents, from, expectedRounds, busy } = props;
   // The stops are fixed when the walk opens, so a decision never moves the
   // cursor's ground; a burst marked as a shot binds to its new marker.
-  const [stops] = useState<WalkStop[]>(() => walkStops(markers, peaks, from, props.scope));
+  const [plan] = useState(() => {
+    if (props.scope !== "source") return { stops: walkStops(markers, peaks, from, props.scope), line: null, led: false };
+    const shots = props.source ?? [];
+    const align = alignToSource(shots, soundOnsets(peaks, from));
+    if (align && alignmentOk(align)) {
+      return {
+        stops: sourceStops(shots, align, soundOnsets(peaks, from), markers),
+        line: `Following the source camera: its ${shots.length} shots in order (${align.matched} of them line up with a sound here), then any kept shot it has none for.`,
+        led: true,
+      };
+    }
+    return {
+      stops: walkStops(markers, peaks, from, "all"),
+      line: `This camera does not line up with the source (${align?.matched ?? 0} of ${shots.length} shots land on a sound): the wrong clip, or too far away to hear them. Walking every sound instead.`,
+      led: false,
+    };
+  });
+  const stops = plan.stops;
+  // The source walk moves the snap's misplaced shots onto their sounds once,
+  // when it opens; each is still confirmed at its stop.
+  useEffect(() => {
+    for (const s of stops) if (s.moveFrom != null && s.markerId) props.onSetTime(s.markerId, s.time);
+    // Once per walk: the stops never change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [bound, setBound] = useState<Record<string, string>>({});
   const [decisions, setDecisions] = useState<WalkDecision[]>(() => decisionsFrom(savedEvents));
   const level = useMemo(() => typicalShotLevel(markers, peaks, from), [markers, peaks, from]);
@@ -127,7 +159,8 @@ export function useWalk(props: WalkProps, opts?: { holdLoop?: boolean }): WalkMo
   }, [stop?.key, loop, holdLoop]);
   const decidedCount = stops.filter(decided).length;
   const keptCount = markers.filter((m) => m.kind === "detected" || m.kind === "manual").length;
-  const check = countCheck(keptCount, expectedRounds);
+  const expected = plan.led ? (props.source?.length ?? null) : expectedRounds;
+  const check = countCheck(keptCount, expected, plan.led ? "source" : "rounds");
 
   useEffect(() => {
     setArmed(false);
@@ -216,6 +249,9 @@ export function useWalk(props: WalkProps, opts?: { holdLoop?: boolean }): WalkMo
     anchor: anchorRef.current,
     foot,
     placement,
+    expected,
+    sourceLed: plan.led,
+    sourceLine: plan.line,
     level,
     decidedCount,
     keptCount,
