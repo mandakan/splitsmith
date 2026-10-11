@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
@@ -10,6 +12,12 @@ from splitsmith.ui import lab_token
 from splitsmith.ui.server import create_app
 
 TOKEN = "s3cret-token"
+# CI forces colour and a narrow box: read the error as plain, unwrapped text.
+_PLAIN_ENV = {"NO_COLOR": "1", "FORCE_COLOR": "", "TERM": "dumb", "COLUMNS": "300"}
+
+
+def _plain(text: str) -> str:
+    return " ".join(re.sub(r"\x1b\[[0-9;]*m", "", text).replace("│", " ").split())
 
 
 def _client(token: str | None) -> TestClient:
@@ -63,9 +71,9 @@ def test_ui_refuses_a_lan_bind_without_a_token(monkeypatch: pytest.MonkeyPatch) 
     called: list[dict] = []
     monkeypatch.setattr("splitsmith.ui.server.serve", lambda **kw: called.append(kw))
     monkeypatch.delenv("SPLITSMITH_LAB_TOKEN", raising=False)
-    r = CliRunner().invoke(cli.app, ["ui", "--lab", "--no-browser", "--host", "192.168.1.20"])
+    r = CliRunner().invoke(cli.app, ["ui", "--lab", "--no-browser", "--host", "192.168.1.20"], env=_PLAIN_ENV)
     assert r.exit_code != 0
-    assert "--lab-token" in r.output
+    assert "--lab-token" in _plain(r.output)
     assert called == []
     r = CliRunner().invoke(
         cli.app, ["ui", "--lab", "--no-browser", "--host", "192.168.1.20", "--lab-token", TOKEN]
@@ -85,10 +93,10 @@ def test_review_refuses_a_lan_bind(monkeypatch: pytest.MonkeyPatch, tmp_path) ->
     fixture.write_text("{}")
     fixture.with_suffix(".wav").write_bytes(b"")
     r = CliRunner().invoke(
-        cli.app, ["review", "--fixture", str(fixture), "--no-browser", "--host", "0.0.0.0"]
+        cli.app, ["review", "--fixture", str(fixture), "--no-browser", "--host", "0.0.0.0"], env=_PLAIN_ENV
     )
     assert r.exit_code != 0
-    assert "loopback" in r.output
+    assert "loopback" in _plain(r.output)
     assert called == []
     r = CliRunner().invoke(cli.app, ["review", "--fixture", str(fixture), "--no-browser"])
     assert r.exit_code == 0, r.output
