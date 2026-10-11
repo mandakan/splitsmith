@@ -1415,7 +1415,12 @@ Every drag or scrub seek on a player goes through ``lib/coalescedSeek``
 (one seek in flight; the latest request lands on ``seeked``): the
 workspace's ``seekClip``, Audit's ``handleScrub`` and ``BeepTimeline``'s
 scrub. A seek on the 720p rendition takes 0.1-0.2 s, and a write that
-replaces the one decoding paints nothing. Arrows nudge
+replaces the one decoding paints nothing. A pending request is dropped on
+``emptied`` / ``loadstart`` or when ``currentSrc`` moved (a PiP swap, a
+re-cut), and every other write to an element that takes coalesced seeks
+goes through ``seekNow`` (cancel, then write: the source-swap carry, the
+loop wrap, a parked position); an element that never takes one (the PiP
+inset, the primary audio, the Results player) needs nothing. Arrows nudge
 (bracket keys sit behind AltGr on Nordic layouts).
 
 Part 2 (rendering and export; the spec's "Part 2 as built" section wins

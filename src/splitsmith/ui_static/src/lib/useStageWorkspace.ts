@@ -26,7 +26,7 @@ import {
   type StageEvent,
 } from "@/lib/api";
 import { shotAtOrBefore } from "@/lib/coachReview";
-import { coalescedSeek } from "@/lib/coalescedSeek";
+import { cancelCoalescedSeek, coalescedSeek, seekNow } from "@/lib/coalescedSeek";
 import { useSpacePlayPause } from "@/lib/keyboard";
 import { bigToPrimary, primaryToBig } from "@/lib/stageCameras";
 import { type TierBaselines, baselinesFromMatchDistributions } from "@/lib/splits";
@@ -244,7 +244,9 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
     pendingSeekRef.current = null;
     if (clip != null) {
       const t = toVideoTime(clip);
-      if (Math.abs(v.currentTime - t) > 1e-3) v.currentTime = t;
+      // seekNow: a drag's pending seek was asked against the old source.
+      if (Math.abs(v.currentTime - t) > 1e-3) seekNow(v, t);
+      else cancelCoalescedSeek(v);
     }
     if (isPlayingRef.current && v.paused) void v.play().catch(() => {});
   }, [toVideoTime]);

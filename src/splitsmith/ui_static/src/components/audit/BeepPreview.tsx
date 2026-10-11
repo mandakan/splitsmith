@@ -14,6 +14,7 @@ import { Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/Label";
 import { api } from "@/lib/api";
+import { seekNow } from "@/lib/coalescedSeek";
 import { useReleaseMediaOnUnmount } from "@/lib/utils";
 
 export interface BeepPreviewProps {
@@ -58,7 +59,8 @@ export function BeepPreview({ slug, videoPath, proxyReady, mediaOnDesktop, initi
     if (!v || initialTime == null) return;
     const seek = () => {
       try {
-        v.currentTime = initialTime;
+        // seekNow: the beep step's scrub coalesces seeks on this element.
+        seekNow(v, initialTime);
       } catch {
         /* metadata not loaded yet -- the listener below handles it */
       }
