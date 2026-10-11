@@ -14,7 +14,7 @@ import { alignToSource, alignmentOk, soundOnsets, sourceStops } from "@/lib/sour
 import {
   WALK_DECIDED_EVENT,
   WALK_METHOD,
-  countCheck,
+  endCheck,
   decisionsFrom,
   isDecided,
   jumpTarget,
@@ -63,7 +63,7 @@ export interface WalkModel {
   level: number;
   decidedCount: number;
   keptCount: number;
-  check: ReturnType<typeof countCheck>;
+  check: ReturnType<typeof endCheck>;
   armed: boolean;
   isDecided: (stop: WalkStop) => boolean;
   /** What the count is checked against: the source camera's shots when the
@@ -167,8 +167,10 @@ export function useWalk(props: WalkProps, opts?: { holdLoop?: boolean }): WalkMo
   }, [stop?.key, loop, holdLoop]);
   const decidedCount = stops.filter(decided).length;
   const keptCount = markers.filter((m) => m.kind === "detected" || m.kind === "manual").length;
-  const expected = plan.led ? (props.source?.length ?? null) : expectedRounds;
-  const check = countCheck(keptCount, expected, plan.led ? "source" : "rounds");
+  // A snapped fixture's count is its source's, in any of its walks.
+  const bySource = (props.source?.length ?? 0) > 0;
+  const expected = bySource ? props.source!.length : expectedRounds;
+  const check = endCheck(markers, expected, bySource ? "source" : "rounds");
 
   useEffect(() => {
     setArmed(false);

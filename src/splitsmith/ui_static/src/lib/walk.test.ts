@@ -32,6 +32,7 @@ import {
   writeSlowOn,
   quietFlag,
   jumpTarget,
+  endCheck,
 } from "./walk";
 
 /** 1 ms bins over ``duration`` s of quiet noise with a shot-like burst
@@ -433,5 +434,23 @@ describe("jumpTarget", () => {
 
   it("falls back to the nearest stop in silence", () => {
     expect(jumpTarget(stops, [kept], peaks, 2.5)).toEqual({ index: 0 });
+  });
+});
+
+describe("endCheck", () => {
+  it("does not pass a sound marked twice, whatever the count", () => {
+    const markers = [
+      marker("a", "detected", 7.357),
+      marker("b", "manual", 7.357),
+      marker("c", "detected", 8.0),
+      marker("r", "rejected", 8.002),
+    ];
+    const check = endCheck(markers, 3, "source");
+    expect(check.ok).toBe(false);
+    expect(check.duplicates.map((m) => m.id)).toEqual(["b"]);
+    expect(check.text).toBe(
+      "3 shots, matching the source camera's 3. One sound is marked twice (7.357 s): tap one to go to it.",
+    );
+    expect(endCheck(markers.filter((m) => m.id !== "b"), 2, "source").ok).toBe(true);
   });
 });

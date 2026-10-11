@@ -227,6 +227,38 @@ export function nearestStop(stops: ReadonlyArray<{ time: number }>, t: number): 
   return best;
 }
 
+/** Two kept shots this close are one sound marked twice (Rise foot seats
+ *  both on the same foot). */
+export const SAME_SOUND_S = 0.005;
+
+/** The later shot of every pair of kept shots on the same sound, in time order. */
+export function sameSoundDuplicates(markers: ReadonlyArray<AuditMarker>): AuditMarker[] {
+  const kept = markers.filter(isKept).sort((a, b) => a.time - b.time);
+  const out: AuditMarker[] = [];
+  for (let i = 1; i < kept.length; i++) {
+    if (kept[i].time - kept[i - 1].time <= SAME_SOUND_S) out.push(kept[i]);
+  }
+  return out;
+}
+
+/** The end of the walk's check: the count, and any sound marked twice. */
+export function endCheck(
+  markers: ReadonlyArray<AuditMarker>,
+  expected: number | null,
+  against: "rounds" | "source",
+): { ok: boolean; text: string; duplicates: AuditMarker[] } {
+  const kept = markers.filter(isKept).length;
+  const count = countCheck(kept, expected, against);
+  const duplicates = sameSoundDuplicates(markers);
+  if (duplicates.length === 0) return { ...count, duplicates };
+  const at = duplicates.map((m) => `${m.time.toFixed(3)} s`).join(", ");
+  return {
+    ok: false,
+    text: `${count.text} ${duplicates.length === 1 ? "One sound is" : `${duplicates.length} sounds are`} marked twice (${at}): tap one to go to it.`,
+    duplicates,
+  };
+}
+
 /** A tap on a stage strip lands on what is under it within this. */
 export const JUMP_REACH_S = 0.12;
 

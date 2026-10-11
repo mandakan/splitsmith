@@ -150,6 +150,11 @@ export function MobileWalk(props: WalkProps) {
           {undecided > 0 ? `${undecided} of ${stops.length} stops are still undecided` : "Every stop decided"}
         </p>
         <p className={check.ok ? "text-ink" : "text-status-warning"}>{check.text}</p>
+        {check.duplicates.map((d) => (
+          <Button key={d.id} className="min-h-11 w-full text-base" onClick={() => actions.jump(d.time)}>
+            Go to the shot at {d.time.toFixed(3)} s
+          </Button>
+        ))}
         {undecided > 0 ? (
           <Button variant="primary" className="min-h-11 w-full text-base" onClick={actions.firstUndecided}>
             Go to the first undecided stop
@@ -169,7 +174,10 @@ export function MobileWalk(props: WalkProps) {
             <Button className="min-h-11 w-full text-base" onClick={() => props.onRestart!("shots")}>
               Check the {keptCount} kept {keptCount === 1 ? "shot" : "shots"} again
             </Button>
-            <Button className="min-h-11 w-full text-base" onClick={() => props.onRestart!("all")}>
+            <Button
+              className="min-h-11 w-full text-base"
+              onClick={() => props.onRestart!(props.source ? "source" : "all")}
+            >
               Walk every stop again
             </Button>
           </>
