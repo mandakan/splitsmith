@@ -42,6 +42,7 @@ import { HelpOverlay } from "@/components/HelpOverlay";
 import { ListDrawer } from "@/components/ListDrawer";
 import { MarkerLayer, type AuditMarker } from "@/components/MarkerLayer";
 import { ShotStepper } from "@/components/ShotStepper";
+import { MobileWalk } from "@/components/review/MobileWalk";
 import { Walk } from "@/components/review/Walk";
 import { Waveform } from "@/components/Waveform";
 import { Badge } from "@/components/ui/badge";
@@ -63,6 +64,7 @@ import {
 } from "@/lib/api";
 import { deriveMarkers } from "@/lib/audit-doc";
 import { buildFixtureJson } from "@/lib/fixtureDoc";
+import { useIsMobile } from "@/lib/useIsMobile";
 import { useDecodedAudio } from "@/lib/useDecodedAudio";
 import { isTypingTextTarget, useBlurOnPointerClick } from "@/lib/audit-input";
 import { zoomActionForKey } from "@/lib/zoomKeys";
@@ -133,6 +135,11 @@ export function Review() {
     return () => window.removeEventListener("keydown", onKey);
   }, [videoLarge]);
   const walkParam = params.get("walk") === "1" || params.get("step") === "1";
+  // The phone's walk (thumb buttons, one column): a narrow screen, or
+  // ?phone=1 to try it on the desktop.
+  const narrow = useIsMobile();
+  const phone = narrow || params.get("phone") === "1";
+  const WalkView = phone ? MobileWalk : Walk;
   const [walkMode, setWalkMode] = useState(walkParam);
   useEffect(() => {
     setWalkMode(walkParam);
@@ -836,7 +843,7 @@ export function Review() {
   // after, once, or on repeat with the walk's loop on (which also starts each
   // stop as the walk reaches it); Space again pauses.
   const listenTimerRef = useRef<number | null>(null);
-  const [walkLoop, setWalkLoop] = useState(readLoopOn);
+  const [walkLoop, setWalkLoop] = useState(() => readLoopOn(phone ? "phone" : "desktop"));
   const pauseListening = useCallback(() => {
     if (listenTimerRef.current != null) window.clearTimeout(listenTimerRef.current);
     listenTimerRef.current = null;
@@ -884,14 +891,14 @@ export function Review() {
   );
   const toggleWalkLoop = useCallback(() => {
     const on = !walkLoop;
-    writeLoopOn(on);
+    writeLoopOn(on, phone ? "phone" : "desktop");
     setWalkLoop(on);
     // Turning it on plays the current stop (the walk reports it); off stops.
     if (!on) {
       walkRegionRef.current = null;
       pauseListening();
     }
-  }, [walkLoop, pauseListening]);
+  }, [walkLoop, pauseListening, phone]);
 
   const snapDisplacementMs = useCallback(
     (markerId: string): number | null => {
@@ -1177,6 +1184,7 @@ export function Review() {
       )}
 
       <Card>
+        {walkMode && phone ? null : (
         <CardHeader>
           <CardTitle className="flex flex-wrap items-center gap-3">
             <Crosshair className="size-5" />
@@ -1194,9 +1202,10 @@ export function Review() {
             </CardDescription>
           )}
         </CardHeader>
-        <CardContent className="space-y-4">
+        )}
+        <CardContent className={walkMode && phone ? "p-0" : "space-y-4"}>
           {walkMode && peaks && edgePeaks ? (
-            <Walk
+            <WalkView
               key={`${fixturePath}:${walkScope}`}
               markers={markers}
               peaks={edgePeaks}

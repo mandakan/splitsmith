@@ -289,11 +289,19 @@ describe("countCheck and walkHref", () => {
 describe("loop preference", () => {
   it("is off until turned on, and remembered", () => {
     window.localStorage.removeItem("splitsmith.reviewWalk.loop");
-    expect(readLoopOn()).toBe(false);
-    writeLoopOn(true);
-    expect(readLoopOn()).toBe(true);
-    writeLoopOn(false);
-    expect(readLoopOn()).toBe(false);
+    expect(readLoopOn("desktop")).toBe(false);
+    writeLoopOn(true, "desktop");
+    expect(readLoopOn("desktop")).toBe(true);
+    writeLoopOn(false, "desktop");
+    expect(readLoopOn("desktop")).toBe(false);
+  });
+
+  it("starts on for the phone, kept apart from the desktop's", () => {
+    window.localStorage.removeItem("splitsmith.reviewWalk.loop.phone");
+    expect(readLoopOn("phone")).toBe(true);
+    writeLoopOn(false, "phone");
+    expect(readLoopOn("phone")).toBe(false);
+    expect(readLoopOn("desktop")).toBe(false);
   });
 });
 

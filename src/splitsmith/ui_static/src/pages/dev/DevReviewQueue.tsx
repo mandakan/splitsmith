@@ -666,7 +666,7 @@ function PhoneQueue({ loading, queue }: { loading: boolean; queue: DevReviewQueu
       {next ? (
         <Link
           to={walkHref(next.audit_path, next.video_path ?? null)}
-          className="block min-h-11 rounded-md bg-primary px-4 py-3 text-center text-primary-foreground"
+          className="btn-primary block min-h-11 rounded-lg px-4 py-3 text-center"
         >
           <span className="block text-base font-semibold">Continue</span>
           <span className="block text-sm">

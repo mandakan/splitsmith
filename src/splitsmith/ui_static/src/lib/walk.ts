@@ -457,23 +457,25 @@ export function writeGuideOpen(open: boolean): void {
   }
 }
 
-const LOOP_KEY = "splitsmith.reviewWalk.loop";
+const LOOP_KEYS = { desktop: "splitsmith.reviewWalk.loop", phone: "splitsmith.reviewWalk.loop.phone" } as const;
 
-/** Whether each stop's sound repeats as the walk reaches it (off until
- *  turned on, then remembered like the guide). */
-export function readLoopOn(): boolean {
+/** Whether each stop's sound repeats as the walk reaches it: off on the
+ *  desktop until turned on, on for the phone (no keyboard to ask for it),
+ *  each remembered on its own. */
+export function readLoopOn(device: "desktop" | "phone"): boolean {
   try {
-    return window.localStorage.getItem(LOOP_KEY) === "1";
+    const v = window.localStorage.getItem(LOOP_KEYS[device]);
+    return v == null ? device === "phone" : v === "1";
   } catch {
-    return false;
+    return device === "phone";
   }
 }
 
-export function writeLoopOn(on: boolean): void {
+export function writeLoopOn(on: boolean, device: "desktop" | "phone"): void {
   try {
-    window.localStorage.setItem(LOOP_KEY, on ? "1" : "0");
+    window.localStorage.setItem(LOOP_KEYS[device], on ? "1" : "0");
   } catch {
-    // Without storage the loop starts off with every fixture.
+    // Without storage the loop starts at the device's default.
   }
 }
 
