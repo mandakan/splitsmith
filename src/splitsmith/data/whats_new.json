@@ -7,6 +7,12 @@
       "body": "A small logo is drawn at its own size. On tall cards logos make room for each other, names take two lines and text stays clear of the app's buttons; summaries keep names clear of logos."
     },
     {
+      "id": "overlay-on-time-short-start",
+      "date": "2026-10-11",
+      "title": "Overlay on time when a clip starts late",
+      "body": "When a video starts only a few seconds before the beep, the overlay's clock and shot count ran late. They now land on the shots, and such a stage's overlay is drawn again on its next export."
+    },
+    {
       "id": "older-match-overlay-redraw",
       "date": "2026-10-11",
       "title": "Older matches redraw their overlay once",

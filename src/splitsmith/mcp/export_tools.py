@@ -333,7 +333,12 @@ def export_match_tool(
                 )
                 current = export_helpers.overlay_audit_revision(audit_path)
                 upright = export_helpers.overlay_canvas_upright(candidate)
-                if export_helpers.overlay_record_matches(record, audit_revision=current, upright=upright):
+                short_head = export_helpers.overlay_short_head(
+                    primary_clip_beep, project.trim_pre_buffer_seconds
+                )
+                if export_helpers.overlay_record_matches(
+                    record, audit_revision=current, upright=upright, short_head=short_head
+                ):
                     overlay_path = candidate
                 else:
                     stale_stages.append(stage_number)

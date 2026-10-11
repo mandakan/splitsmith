@@ -8176,9 +8176,13 @@ def _seed_match_export_project(
     *,
     stage_count: int = 2,
     stage_numbers: Sequence[int] | None = None,
+    beep_time: float = 5.0,
 ) -> tuple[TestClient, Path]:
     """Seed a project with N stages, each having a primary + beep_time +
     audit JSON + lossless trim ready for match export.
+
+    ``beep_time`` is every primary's beep in its source; under the 5 s
+    pre-buffer it is a short-head stage (#1430).
 
     ``stage_numbers`` overrides the default contiguous ``1..stage_count``
     so callers can seed a *gapped* list (``[1, 2, 4, 5]``) -- the shape a
@@ -8206,7 +8210,7 @@ def _seed_match_export_project(
         project.assign_video(video.path, to_stage_number=n, role="primary")
         primary = project.stage(n).primary()
         assert primary is not None
-        primary.beep_time = 5.0
+        primary.beep_time = beep_time
     project.save(_shooter_root)
 
     audit_dir = _shooter_root / "audit"
@@ -10781,6 +10785,41 @@ def test_match_export_redraws_an_overlay_when_its_look_changed(
     manifest_path.write_text(_json.dumps(manifest), encoding="utf-8")
     assert _run_overlay_match_export(client, monkeypatch, request_style), "edited Look redraws"
     assert _run_overlay_match_export(client, monkeypatch, request_style) == [], "and then reuses again"
+
+
+@pytest.mark.parametrize("request_style", [{}, {"overlay_variant": "plate"}], ids=["classic", "plate"])
+@pytest.mark.parametrize("recorded", ["short-head", "pre-fix"])
+def test_match_export_redraws_a_short_head_overlay_drawn_before_the_fix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request_style: dict, recorded: str
+) -> None:
+    """A stage whose source has 3 s before the beep (5 s pre-buffer): an
+    overlay whose record says it drew the beep at 3 s is reused; one drawn
+    before #1430 (no ``short_head``, so drawn at 5 s, late) is drawn again,
+    and the redraw's own record is then reused."""
+    import json as _json
+
+    from splitsmith.overlay_hud import HudOptions, overlay_settings
+    from splitsmith.ui import exports as exports_mod
+
+    client, root = _seed_match_export_project(tmp_path, stage_count=1, beep_time=3.0)
+    _stub_match_export_probe(monkeypatch)
+    exports_dir = root / "shooters" / "me" / "exports"
+    (exports_dir / "stage1_stage-1_overlay.mov").write_bytes(b"old")
+    settings = overlay_settings(
+        look="splitsmith",
+        variant=request_style.get("overlay_variant", "default"),
+        options=HudOptions(),
+        codec="auto",
+        max_height=None,
+        max_fps=None,
+        audit_revision=exports_mod.overlay_audit_revision(root / "shooters" / "me" / "audit" / "stage1.json"),
+        short_head=3.0 if recorded == "short-head" else None,
+    )
+    (exports_dir / "stage1_stage-1_overlay.json").write_text(_json.dumps(settings))
+
+    calls = _run_overlay_match_export(client, monkeypatch, request_style)
+    assert bool(calls) is (recorded == "pre-fix")
+    assert _run_overlay_match_export(client, monkeypatch, request_style) == [], "then reuses"
 
 
 def test_match_export_never_reuses_a_legacy_overlay_over_an_unreadable_audit(
