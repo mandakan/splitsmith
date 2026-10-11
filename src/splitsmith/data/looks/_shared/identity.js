@@ -5,7 +5,8 @@
 // when there is a logo to show, so a card without identities renders the
 // same bytes as before this file existed. Images are added during
 // DOMContentLoaded, before the load event, so the renderer's wait for
-// load covers them.
+// load covers them. ``scale-down`` never draws a logo larger than its own
+// pixels (#1433).
 (function () {
   var engine = window.splitsmith.engine;
   engine.mountIdentity = function (shooters, slot) {
@@ -33,7 +34,7 @@
       img.style.height = logoHeight + 'px';
       img.style.width = 'auto';
       img.style.maxWidth = (logoHeight * 2) + 'px';
-      img.style.objectFit = 'contain';
+      img.style.objectFit = 'scale-down';
       wrap.appendChild(img);
     });
     document.body.appendChild(wrap);

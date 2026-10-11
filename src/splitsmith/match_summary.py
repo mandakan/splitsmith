@@ -25,6 +25,7 @@ from pathlib import Path
 from PIL import Image
 
 from .coach import statistic_splits
+from .logo_spots import LogoBox, logo_box, paste_logo
 from .match_project import StageScorecard
 from .overlay_html import _face_source
 from .overlay_layout import MIN_FONT_SIZE, Anchor, CellScale, Element, Emphasis, Flow, Group, Role
@@ -409,7 +410,24 @@ def _css_rgb(color: RGB) -> str:
     return f"rgb({color[0]},{color[1]},{color[2]})"
 
 
-def match_summary_html(summary: MatchSummary, *, width: int, height: int, theme: OverlayTheme) -> str:
+def _logo_room(logo: LogoBox | None, *, right: int, top: int) -> str:
+    """A spacer floated into the body's top-right corner, as wide and as
+    tall as the shooter's logo there needs (``logo_spots.logo_box``, its gap
+    included), so every line beside it ends before the logo instead of
+    under it (#1432); ``""`` with no logo, or one the text never reaches.
+    ``right`` is where the body's text ends, ``top`` where it starts."""
+    if logo is None:
+        return ""
+    keep_left, keep_bottom = logo.keep_out()
+    room_w, room_h = right - keep_left, keep_bottom - top
+    if room_w <= 0 or room_h <= 0:
+        return ""
+    return f'<div class="logo-room" style="float: right; width: {room_w}px; height: {room_h}px"></div>\n'
+
+
+def match_summary_html(
+    summary: MatchSummary, *, width: int, height: int, theme: OverlayTheme, logo: LogoBox | None = None
+) -> str:
     """The card as one document, transparent where the backdrop shows. An
     upright canvas (taller than wide) takes its own layout,
     :func:`upright_match_summary_html`. Otherwise type follows the canvas
@@ -417,9 +435,10 @@ def match_summary_html(summary: MatchSummary, *, width: int, height: int, theme:
     16:9 and wider); a squarer one sizes it as a 6:5 card of its width,
     since by its height the headline figures run off the page. The table
     splits into two columns past :data:`ROWS_PER_COLUMN` so a long match
-    never shrinks its rows below a readable size."""
+    never shrinks its rows below a readable size. ``logo`` is where the
+    shooter's logo will be pasted: no line runs under it (#1432)."""
     if is_upright(width, height):
-        return upright_match_summary_html(summary, width=width, height=height, theme=theme)
+        return upright_match_summary_html(summary, width=width, height=height, theme=theme, logo=logo)
     mono_url, mono_format, mono_weight = _face_source(theme.mono_font)
     display_url, display_format, display_weight = _face_source(theme.display_font)
     num, den = SIZE_ASPECT
@@ -560,7 +579,7 @@ th:nth-child(2), td:nth-child(2) {{
 th:nth-child(n+3), td:nth-child(n+3) {{ width: 4.3em; }}
 th:nth-child(5), td:nth-child(5) {{ width: 3.9em; }}
 </style></head><body>
-<div class="head">
+{_logo_room(logo, right=width - pad_x, top=pad_y)}<div class="head">
 <div class="title">{html.escape(summary.title)}</div>
 <div class="label">{html.escape(summary.label)}</div>
 </div>
@@ -648,7 +667,9 @@ if (table) {
     )
 
 
-def upright_match_summary_html(summary: MatchSummary, *, width: int, height: int, theme: OverlayTheme) -> str:
+def upright_match_summary_html(
+    summary: MatchSummary, *, width: int, height: int, theme: OverlayTheme, logo: LogoBox | None = None
+) -> str:
     """The card on an upright canvas (issue #1394, owner decisions
     2026-10-10): a small "Match summary" label over the title (two lines at
     most) and the shooter; Avg split / Best draw / Rounds alone on a row at
@@ -822,7 +843,7 @@ td.nm span {{
 </style>
 {_upright_fit_script(floor=MIN_FONT_SIZE, bottom_line=area.bottom_line)}
 </head><body>
-<div class="kicker">Match summary</div>
+{_logo_room(logo, right=width - pad_right, top=top)}<div class="kicker">Match summary</div>
 <div class="title">{html.escape(summary.title)}</div>
 <div class="label">{html.escape(summary.label)}</div>
 <div class="figs splits">{splits_row}</div>
@@ -979,10 +1000,13 @@ def build_match_summary_still(
     backdrop: Path | None,
     blur_radius: int | None = None,
     dim: float = DEFAULT_DIM,
+    logo: Path | None = None,
 ) -> Image.Image | None:
     """The card as a full-frame RGB still over ``backdrop`` (the last stage's
     final frame, blurred and dimmed, as the stage summary uses). No browser:
-    the frame alone. ``None`` only when there is neither."""
+    the frame alone. ``None`` only when there is neither. ``logo`` (the
+    ``summaries`` logo spot) is pasted top right, the text kept clear of it
+    (#1432)."""
     canvas: Image.Image | None = None
     if backdrop is not None:
         canvas = backdrop_from_frame(backdrop, width=width, height=height, radius=blur_radius, dim_amount=dim)
@@ -990,7 +1014,13 @@ def build_match_summary_still(
     if rasterizer is not None:
         try:
             png = rasterizer.png(
-                match_summary_html(summary, width=width, height=height, theme=theme),
+                match_summary_html(
+                    summary,
+                    width=width,
+                    height=height,
+                    theme=theme,
+                    logo=logo_box(logo, box=(0, 0, width, height)),
+                ),
                 width=width,
                 height=height,
             )
@@ -1005,7 +1035,7 @@ def build_match_summary_still(
     composed = canvas.convert("RGBA")
     if text is not None:
         composed.alpha_composite(text)
-    return composed.convert("RGB")
+    return paste_logo(composed.convert("RGB"), logo)
 
 
 __all__ = [

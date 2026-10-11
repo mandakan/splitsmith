@@ -136,6 +136,78 @@ window.__splitsmithFit = function () {
   function scaleValues(values, bases, factor) {
     values.forEach(function (value, i) { value.style.fontSize = bases[i] * factor + 'px'; });
   }
+  // Lines (opt-in, window.__splitsmithFitLines, set by cell.js on an
+  // upright card): a name that would end in "..." on one line wraps
+  // at its spaces onto at most that many lines instead, centred as the
+  // anchor aligns it, at the largest size down to the width floor at which
+  // every line stays inside the safe edges and the band still fits the
+  // cell's height. Returns false, the name as it was, when no size does,
+  // so the caller cuts it as before.
+  function lineCount(values) {
+    var tops = {};
+    values.forEach(function (value) {
+      var range = document.createRange();
+      range.selectNodeContents(value);
+      Array.prototype.forEach.call(range.getClientRects(), function (r) {
+        if (r.width > 0) { tops[Math.round(r.top)] = true; }
+      });
+    });
+    return Object.keys(tops).length;
+  }
+  function fitLines(cell, el, values, bases, box, lo) {
+    var most = window.__splitsmithFitLines;
+    if (!(most > 1) || !el.querySelector('.role-identity')) { return false; }
+    var stack = el.closest('.anchor-middle-center');
+    var available = stack ? availableHeight(cell) : 0;
+    var anchor = el.closest('.anchor');
+    var align = anchor && anchor.classList.contains('align-center') ? 'center'
+      : anchor && anchor.classList.contains('align-right') ? 'right' : 'left';
+    el.style.maxWidth = Math.max(0, box.right - box.left) + 'px';
+    el.style.minWidth = '0';
+    values.forEach(function (value) {
+      value.style.whiteSpace = 'normal';
+      value.style.textAlign = align;
+    });
+    var scale = stack ? stack.style.getPropertyValue('--fit-scale') : '';
+    function wide(factor) {
+      scaleValues(values, bases, factor);
+      return lineCount(values) <= most && inside(el, box);
+    }
+    function tall() {
+      return !(available > 0) || fits(stack, available);
+    }
+    // The largest size in [floor, top] at which ``test`` holds, applied.
+    function largest(floor, top, test) {
+      if (test(top)) { return top; }
+      for (var i = 0; i < 14; i++) {
+        var mid = (floor + top) / 2;
+        if (test(mid)) { floor = mid; } else { top = mid; }
+      }
+      test(floor);
+      return floor;
+    }
+    if (!wide(lo)) { return undoLines(el, values, bases, lo, stack, scale); }
+    var size = largest(lo, 1, wide);
+    // The extra line costs height: the rest of the band shrinks first
+    // (fitHeight's own step), then the name.
+    if (!tall()) { shrinkToFit(stack, available); }
+    if (!tall()) {
+      if (!(wide(lo) && tall())) { return undoLines(el, values, bases, lo, stack, scale); }
+      largest(lo, size, function (factor) { return wide(factor) && tall(); });
+    }
+    return true;
+  }
+  function undoLines(el, values, bases, lo, stack, scale) {
+    el.style.maxWidth = '';
+    el.style.minWidth = '';
+    values.forEach(function (value) {
+      value.style.whiteSpace = '';
+      value.style.textAlign = '';
+    });
+    if (stack) { stack.style.setProperty('--fit-scale', scale); }
+    scaleValues(values, bases, lo);
+    return false;
+  }
   function fitWidth(cell) {
     var edges = cell.getBoundingClientRect();
     if (!(edges.width > 0)) { return; }
@@ -145,9 +217,21 @@ window.__splitsmithFit = function () {
       var inset = parseFloat(getComputedStyle(cell).paddingRight) || 0;
       edges = {left: edges.left, right: edges.right - inset, top: edges.top, bottom: edges.bottom};
     }
+    // A summary with the shooter's logo pasted in its corner sets
+    // --logo-room: the name's row ends at its anchor's padding, before the
+    // logo, so a name that runs past it shrinks like one past the edge.
+    var logoRoom = getComputedStyle(cell).getPropertyValue('--logo-room').trim();
+    function edgesFor(el) {
+      var row = logoRoom && el.closest('.anchor-top-center');
+      if (!row) { return edges; }
+      var r = row.getBoundingClientRect();
+      var right = r.right - (parseFloat(getComputedStyle(row).paddingRight) || 0);
+      return {left: edges.left, right: Math.min(edges.right, right), top: edges.top, bottom: edges.bottom};
+    }
     cell.querySelectorAll('.el').forEach(function (el) {
-      if (getComputedStyle(el).display === 'none' || !pastEdge(el, edges)) { return; }
-      var box = target(textRect(el), edges);
+      var bounds = edgesFor(el);
+      if (getComputedStyle(el).display === 'none' || !pastEdge(el, bounds)) { return; }
+      var box = target(textRect(el), bounds);
       var values = Array.prototype.slice.call(el.querySelectorAll('.value'));
       var bases = values.map(function (v) { return parseFloat(getComputedStyle(v).fontSize) || 0; });
       var smallest = Math.min.apply(null, bases.filter(function (b) { return b > 0; }).concat([Infinity]));
@@ -163,7 +247,9 @@ window.__splitsmithFit = function () {
         scaleValues(values, bases, lo);
         return;
       }
-      // At WIDTH_FLOOR and still too long: keep its start, end in "...".
+      // At WIDTH_FLOOR and still too long: an upright card's name takes
+      // more lines first (fitLines); otherwise keep its start, end in "...".
+      if (fitLines(cell, el, values, bases, box, lo)) { return; }
       var r = textRect(el);
       el.style.maxWidth = Math.max(0, box.right - Math.max(r.left, box.left)) + 'px';
       el.style.minWidth = '0';

@@ -74,7 +74,13 @@
 
   var engine = window.splitsmith.engine;
   engine.renderGroups = cellHtml;
-  engine.mount = function (groups) { document.body.innerHTML = cellHtml(groups); };
+  engine.mount = function (groups) {
+    document.body.innerHTML = cellHtml(groups);
+    // An upright card's name may take two lines rather than end in "..."
+    // (fit.js fitLines, #1431); a name that fits one line is untouched.
+    var size = window.splitsmith.size;
+    if (size && size.height > size.width) { window.__splitsmithFitLines = 2; }
+  };
   if (typeof window.duration !== 'function') { window.duration = function () { return 0; }; }
   if (typeof window.seek !== 'function') { window.seek = function () {}; }
 })();

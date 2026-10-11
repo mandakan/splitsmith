@@ -203,7 +203,8 @@ window.seek = () => (done = done || attempt());
 def test_a_template_reaches_its_look_its_context_and_nothing_else(
     tmp_path: Path, raster: ChromiumRasterizer, listener: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(look_sandbox, "MAX_ASSET_BYTES", 20_000)
+    # Above the shared fit.js (which must load), far under the noise below.
+    monkeypatch.setattr(look_sandbox, "MAX_ASSET_BYTES", 40_000)
     look = tmp_path / "accounts" / "a" / "looks" / "club"
     template = look / "card.html"
     look.mkdir(parents=True)
@@ -211,7 +212,7 @@ def test_a_template_reaches_its_look_its_context_and_nothing_else(
     _png(look / "badge.png")
     # Noise, which PNG cannot compress: well over the patched cap.
     Image.frombytes("RGBA", (200, 200), os.urandom(200 * 200 * 4)).save(look / "huge.png")
-    assert (look / "huge.png").stat().st_size > 20_000
+    assert (look / "huge.png").stat().st_size > 40_000
     outside = _png(tmp_path / "accounts" / "a" / "looks" / "outside.png")
     own_logo = _png(tmp_path / "accounts" / "a" / "identity" / "logo-1.png")
     other_logo = _png(tmp_path / "accounts" / "b" / "identity" / "logo-2.png")

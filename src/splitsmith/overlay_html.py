@@ -102,7 +102,7 @@ Design rules, each answering one of the old fitter's defects:
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from html import escape
 from importlib.resources import files
 from pathlib import Path
@@ -893,6 +893,21 @@ def cell_html(groups: Sequence[Group], *, scale: CellScale, theme: OverlayTheme)
     )
 
 
+def logo_room_rule(scale: CellScale) -> str:
+    """The rule that keeps a summary's name row clear of a logo pasted in
+    the cell's top-right corner (``logo_spots.paste_logo``, #1432): the row's
+    right padding is the cell's ``--logo-room`` where one is set, its own
+    ``pad`` elsewhere, so the name ends (or ellipsizes) before the logo.
+    Emitted only into a document that has a logo, after the shared rules.
+    The row's groups are shrink-wrapped (the anchor aligns them to the
+    start), so they are also held to the anchor's width, or a long name
+    would run past the padding instead of ending in "..."."""
+    return (
+        f".anchor-top-center.align-left {{ padding-right: var(--logo-room, {scale.pad}px); }}\n"
+        ".anchor-top-center.align-left > .group { max-width: 100%; }"
+    )
+
+
 def single_html(
     groups: Sequence[Group],
     *,
@@ -903,12 +918,15 @@ def single_html(
     accent: str | None = None,
     fit_columns: bool = False,
     cell_style: str | None = None,
+    logo_room: int | None = None,
 ) -> str:
     """One canvas-sized cell as a whole HTML document (issue #684).
 
     ``cell_style`` is extra inline style for the cell (the upright stage
     summary's padding out of the platform safe area, issue #1394); ``None``
-    leaves the document exactly as it was.
+    leaves the document exactly as it was. ``logo_room`` is how far in from
+    the cell's right edge the name's row ends, for a logo pasted in that
+    corner afterwards (:func:`logo_room_rule`, #1432); ``None`` is no logo.
 
     The single-shooter overlay's counterpart to :func:`grid_html`. There
     is exactly one cell and it is the whole frame, so this takes plain
@@ -960,11 +978,15 @@ def single_html(
     styles = [f"--accent:{accent}"] if accent else []
     if cell_style:
         styles.append(cell_style)
+    room_rule = ""
+    if logo_room is not None:
+        styles.append(f"--logo-room:{logo_room}px")
+        room_rule = f"\n{logo_room_rule(scale)}"
     cell_style = ";".join(styles) or None
     return (
         "<!doctype html>\n"
         '<html><head><meta charset="utf-8"><title>overlay</title>'
-        f"<style>{single_css(width=width, height=height, scale=scale, theme=theme)}</style>"
+        f"<style>{single_css(width=width, height=height, scale=scale, theme=theme)}{room_rule}</style>"
         f"{_fit_script(fit_columns=fit_columns)}"
         "</head>"
         f"<body>{_cell_div(groups, style=cell_style)}</body></html>"
@@ -1004,6 +1026,7 @@ def grid_html(
     fit_columns: bool = False,
     upright: SafeArea | None = None,
     top: int = 0,
+    logo_rooms: Mapping[str, int] | None = None,
 ) -> str:
     """A whole canvas-sized grid of declared cells as one HTML document.
 
@@ -1049,8 +1072,16 @@ def grid_html(
     ends a line short of the button column rather than the tile's edge, a
     lit plate keeps to its text, and a unit suffix keeps to the legibility
     floor. ``None`` is the document as it always was.
+
+    ``logo_rooms`` maps a tile's label to how far in from its right edge
+    its name row ends, for that shooter's logo pasted in the tile's corner
+    afterwards (:func:`logo_room_rule`, #1432); a tile it does not name, or
+    ``None``, is laid out as before.
     """
     style = _style_rules(scale=scale, theme=theme)
+    rooms = logo_rooms or {}
+    if rooms:
+        style += f"\n{logo_room_rule(scale)}"
     if upright is not None:
         style += (
             f"\n:root {{ {upright.css_vars()} }}"
@@ -1077,7 +1108,11 @@ def grid_html(
             y0 = top + placement.row * geometry.cell_height
             right, bottom = upright.box_insets(x0, y0, x0 + geometry.cell_width, y0 + geometry.cell_height)
             padding = f"padding:0 {right}px {max(0, bottom - scale.pad)}px 0"
+            if placement.label in rooms:
+                padding += f";--logo-room:{rooms[placement.label]}px"
             inner = _cell_div(groups, style=padding)
+        elif placement.present and placement.label in rooms:
+            inner = _cell_div(groups, style=f"--logo-room:{rooms[placement.label]}px")
         accent = f"--accent:{placement.accent};" if placement.accent else ""
         position = f"grid-row:{placement.row + 1};grid-column:{placement.col + 1};{accent}"
         body_cells.append(f'<div style="{position}">{inner}</div>')

@@ -5,7 +5,9 @@
 // ``data.brand`` is only there for a Look that has a brand, on the cards
 // that draw it, so every other card renders the same bytes as before this
 // file existed. Mounted during DOMContentLoaded, before the load event the
-// renderer waits for, like identity.js.
+// renderer waits for, like identity.js. ``scale-down`` never draws the logo
+// larger than its own pixels (#1433); event.js shrinks the mark into the
+// room beside the event logo when the two would touch (#1431).
 (function () {
   var engine = window.splitsmith.engine;
   engine.mountBrand = function (brand) {
@@ -32,7 +34,7 @@
       img.style.height = logoHeight + 'px';
       img.style.width = 'auto';
       img.style.maxWidth = (logoHeight * 2) + 'px';
-      img.style.objectFit = 'contain';
+      img.style.objectFit = 'scale-down';
       img.style.flex = 'none';
       wrap.appendChild(img);
     }

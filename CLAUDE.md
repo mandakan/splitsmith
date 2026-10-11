@@ -443,8 +443,24 @@ Moving rows of three and a Draw / reload 2x2 with them, whatever the aspect),
 and ``upright_cell_style`` pads the cell out of the safe area.
 ``tests/test_upright_cards.py`` measures both in Chromium against the area
 written out by hand. The shooter's logo (``logo_spots.paste_logo``, 9 %
-of the height, top right) is pasted after the fact and can still sit over
-a long title or name on an upright card, as on main.
+of the height, top right) is pasted after the fact, but the summaries lay
+their text out around it (#1432): ``build_summary_still`` /
+``build_match_summary_still(logo=)`` and the grid stills compute
+``logo_spots.logo_box`` first and hand it to the document (the match
+summary floats a spacer into that corner, the engine cells set
+``--logo-room`` on the name row, ``overlay_html.logo_room_rule``, and
+``fit.js`` shrinks a name past it), so a name ends before the logo. No
+logo, no change to the document. No raster logo is drawn past its own
+pixels (#1433): ``paste_logo`` and ``watermark_image`` cap at 1x, every
+shipped template uses ``object-fit: scale-down``. On the title page and
+the closing card ``_shared/event.js`` settles the corners once the images
+have loaded, before the fit (#1431): a corner mark that touches the event
+logo shrinks by its own aspect into the room beside it, or, when that room
+is under half its width, the event logo and the text move down below the
+corners; and on an upright card ``cell.js`` lets ``fit.js`` wrap a name
+that would end in "..." onto two lines (``fitLines``). Cards whose marks
+never touched, and names that fitted, are pixel-identical.
+``tests/test_card_logos.py`` measures it all in Chromium.
 
 Upright compare grids (#1394 part 2) keep their 2x2 / 3x3 / 4x4 and give
 the stage hold and the grid match summary their own tile layout:

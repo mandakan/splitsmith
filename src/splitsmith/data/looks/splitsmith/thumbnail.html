@@ -16,7 +16,7 @@
   html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; }
   .fade { position: absolute; inset: 0; }
   .corner { position: absolute; display: flex; align-items: center; }
-  .corner img { width: auto; object-fit: contain; flex: none; }
+  .corner img { width: auto; object-fit: scale-down; flex: none; }
   .block { position: absolute; display: flex; flex-direction: column; align-items: flex-start; }
   .title {
     font-family: "Splitsmith Display", sans-serif; font-weight: 700;
@@ -87,7 +87,7 @@
       ev.style.height = Math.round(H * 0.16) + 'px';
       ev.style.width = 'auto';
       ev.style.maxWidth = Math.round(H * 0.4) + 'px';
-      ev.style.objectFit = 'contain';
+      ev.style.objectFit = 'scale-down';
       block.appendChild(ev);
     }
     var title = document.createElement('div');

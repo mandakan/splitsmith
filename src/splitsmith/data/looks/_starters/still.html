@@ -32,7 +32,8 @@
   .title { font-family: "Splitsmith Display", sans-serif; font-weight: 700; line-height: 1; white-space: nowrap; }
   .info { font-family: "Splitsmith Mono", monospace; letter-spacing: 0.04em; white-space: nowrap; }
   .rule { height: 4px; border-radius: 2px; }
-  .logo { position: absolute; object-fit: contain; }
+  /* scale-down: a logo is never drawn larger than its own pixels. */
+  .logo { position: absolute; object-fit: scale-down; }
 </style>
 </head>
 <body>
