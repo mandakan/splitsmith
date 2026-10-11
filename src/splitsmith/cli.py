@@ -1501,7 +1501,9 @@ def _process_one(
             video_path=files.video,
             video=meta,
             shots=shots,
-            beep_offset_seconds=config.output.trim_buffer_seconds,
+            # The trim's own beep: less than the buffer on a short-head
+            # source (#1430).
+            beep_offset_seconds=trim.beep_in_trim(beep.time, config.output.trim_buffer_seconds),
             output_path=files.fcpxml,
             project_name=base,
             config=config.output,

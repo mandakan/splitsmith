@@ -193,6 +193,7 @@ def overlay_settings(
     template: str | None | object = _READ_NOW,
     theme: str | None | object = _READ_NOW,
     upright: bool = False,
+    short_head: float | None = None,
 ) -> dict[str, Any]:
     """What an overlay MOV was drawn with, as recorded beside it and
     compared before a match export reuses it. Classic draws none of the
@@ -222,7 +223,14 @@ def overlay_settings(
     ``layout`` (:data:`UPRIGHT_LAYOUT`): every style keeps out of the
     platform safe area there since issue #1394, so an upright overlay drawn
     before (no key) misses once and is drawn again. A square or wider
-    canvas records no such key, so its records match as they always did."""
+    canvas records no such key, so its records match as they always did.
+
+    An overlay over a trim whose source had less than the pre-buffer before
+    the beep also records ``short_head``, the beep's time in that trim
+    (``ui.exports.overlay_short_head``): until issue #1430 every style drew
+    such a stage with the beep at the pre-buffer, late by the shortfall, so
+    an overlay drawn before (no key) misses once and is drawn again. A trim
+    with the full pre-buffer records no such key."""
     settings: dict[str, Any] = {
         "look": look,
         "variant": variant,
@@ -237,6 +245,8 @@ def overlay_settings(
         settings["template"] = overlay_template_identity(look, variant) if template is _READ_NOW else template
     if upright:
         settings["layout"] = UPRIGHT_LAYOUT
+    if short_head is not None:
+        settings["short_head"] = round(short_head, 3)
     return settings
 
 

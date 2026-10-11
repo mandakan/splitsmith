@@ -710,7 +710,9 @@ def export(
         console.print(f"[red]Error:[/] {exc}")
         raise typer.Exit(code=1) from exc
     if not no_overlay:
-        stages_input = _vouched_overlays(stages_input, theme_option)
+        stages_input = _vouched_overlays(
+            stages_input, theme_option, pre_buffer_seconds=project.trim_pre_buffer_seconds
+        )
 
     project_name = project.name or match.name or "match"
     book = load_snapshot(JsonShooterBookStore())
@@ -834,7 +836,7 @@ def export(
         report_upload(record)
 
 
-def _vouched_overlays(stages_input: list[Any], look: str | None) -> list[Any]:
+def _vouched_overlays(stages_input: list[Any], look: str | None, *, pre_buffer_seconds: float) -> list[Any]:
     """Each stage's overlay MOV only when its record says it was drawn the way
     this export would draw it: from the audit as it stands, with its template
     and its Look's palette and faces as they stand
@@ -844,7 +846,8 @@ def _vouched_overlays(stages_input: list[Any], look: str | None) -> list[Any]:
     ``look`` (an explicit ``--theme``) asks for another. It cannot redraw
     either (it re-cuts nothing; the style a redraw needs is the app's
     request), so a stale overlay is left out and said so; the MOV stays on
-    disk."""
+    disk. ``pre_buffer_seconds`` is the project's, which says whether a
+    stage's trim had a short head (``exports.overlay_short_head``)."""
     from dataclasses import replace
 
     from .ui import exports as export_helpers
@@ -858,15 +861,18 @@ def _vouched_overlays(stages_input: list[Any], look: str | None) -> list[Any]:
             )
             current = export_helpers.overlay_audit_revision(stage_in.audit_path)
             upright = export_helpers.overlay_canvas_upright(mov)
+            short_head = export_helpers.overlay_short_head(stage_in.beep_offset_seconds, pre_buffer_seconds)
             if not export_helpers.overlay_record_matches(
-                record, audit_revision=current, look=look, upright=upright
+                record, audit_revision=current, look=look, upright=upright, short_head=short_head
             ):
                 drawn_in = record.get("look") if record is not None else None
                 if (
                     look is not None
                     and isinstance(drawn_in, str)
                     and drawn_in != look
-                    and export_helpers.overlay_record_matches(record, audit_revision=current, upright=upright)
+                    and export_helpers.overlay_record_matches(
+                        record, audit_revision=current, upright=upright, short_head=short_head
+                    )
                 ):
                     why = (
                         f"was drawn in Look {drawn_in!r}, not {look!r} -- left out; pass "

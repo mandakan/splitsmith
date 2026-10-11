@@ -196,6 +196,16 @@ def overlay_canvas_upright(video: Path) -> bool:
     return is_upright(meta.width, meta.height)
 
 
+def overlay_short_head(beep_time_in_source: float, pre_buffer_seconds: float) -> float | None:
+    """The beep's time in the stage's trim when the source had less than
+    ``pre_buffer_seconds`` before the beep, else ``None``: what an overlay's
+    settings record holds as ``short_head`` (``overlay_settings``, issue
+    #1430). ``beep_time_in_source`` may also be the trim's own beep
+    (``trim.beep_in_trim``): both answer the same."""
+    beep = trim.beep_in_trim(beep_time_in_source, pre_buffer_seconds)
+    return beep if beep < pre_buffer_seconds else None
+
+
 def overlay_record_matches(
     record: dict[str, Any] | None,
     *,
@@ -203,6 +213,7 @@ def overlay_record_matches(
     wanted: dict[str, Any] | None = None,
     look: str | None = None,
     upright: bool = False,
+    short_head: float | None = None,
 ) -> bool:
     """Whether an overlay MOV whose settings record is ``record`` may be
     reused: the one rule for every reuse check (the match export job, the
@@ -216,7 +227,11 @@ def overlay_record_matches(
     itself through ``overlay_settings(upright=...)``) is whether the canvas
     is upright (:func:`overlay_canvas_upright`): an upright record must then
     carry the upright layout, so one drawn before the HUD kept out of the
-    safe area misses. An unreadable audit or record never matches."""
+    safe area misses. ``short_head`` (likewise only without ``wanted``) is
+    the stage's :func:`overlay_short_head`: an overlay over a short-head trim
+    must record where it drew the beep, so one drawn before issue #1430 (at
+    the pre-buffer, late) misses. An unreadable audit or record never
+    matches."""
     if record is None or audit_revision is None:
         return False
     # Nothing vouches for the palette and faces an overlay drew with when its
@@ -241,6 +256,7 @@ def overlay_record_matches(
                 max_fps=record["max_fps"],
                 audit_revision=audit_revision,
                 upright=upright,
+                short_head=short_head,
             )
         except (KeyError, TypeError, ValueError):
             return False
@@ -307,6 +323,11 @@ def export_stage(
     # the audit trail stays clean.
 
     regions = _confirmed_regions(audit_data, audit_path)
+    # Where the beep sits in the primary's lossless trim: the pre-buffer, or
+    # less when the source had less than that before the beep (#1430). Every
+    # output drawn over the trim (overlay, FCPXML markers) reads this, never
+    # the pre-buffer itself.
+    trim_beep = trim.beep_in_trim(beep_time_in_source, pre_buffer_seconds)
 
     exports_dir.mkdir(parents=True, exist_ok=True)
     base = stage_file_base(stage_data.stage_number, stage_data.stage_name)
@@ -488,7 +509,7 @@ def export_stage(
                     audit_path=audit_path,
                     trimmed_video_path=mirror_target,
                     output_path=overlay_target,
-                    beep_offset_seconds=pre_buffer_seconds,
+                    beep_offset_seconds=trim_beep,
                     codec=request.overlay_codec,
                     max_height=request.overlay_max_height,
                     max_fps=request.overlay_max_fps,
@@ -516,6 +537,7 @@ def export_stage(
                             template=drawn_template,
                             theme=drawn_theme,
                             upright=drawn_upright,
+                            short_head=overlay_short_head(beep_time_in_source, pre_buffer_seconds),
                         ),
                         sort_keys=True,
                     ),
@@ -633,7 +655,7 @@ def export_stage(
                     # ``min(pre_buffer, beep_time_in_source)`` -- short heads
                     # truncate the pre-roll, in which case the cam's beep
                     # sits earlier in the file.
-                    sec_beep_offset = min(pre_buffer_seconds, sec.beep_time_in_source)
+                    sec_beep_offset = trim.beep_in_trim(sec.beep_time_in_source, pre_buffer_seconds)
                     fcp_secondaries.append(
                         fcpxml_gen.SecondaryClip(
                             video_path=sec_path,
@@ -642,9 +664,8 @@ def export_stage(
                             label=sec.label,
                         )
                     )
-                # Beep offset within the lossless trim: the trim cut at
-                # ``beep_time - pre_buffer`` from source, so the beep lives
-                # ``pre_buffer`` seconds into the clip.
+                # Beep offset within the lossless trim: ``trim_beep``,
+                # the pre-buffer unless the source's head was shorter.
                 # Probe the overlay so the FCPXML can emit a dedicated
                 # ``<format>`` for it when its dims/fps differ from the
                 # primary. ffprobe failures fall back to "assume mirrors
@@ -660,7 +681,7 @@ def export_stage(
                     video_path=fcp_video,
                     video=meta,
                     shots=shots,
-                    beep_offset_seconds=pre_buffer_seconds,
+                    beep_offset_seconds=trim_beep,
                     output_path=fcpxml_path,
                     project_name=base,
                     config=config.output,
