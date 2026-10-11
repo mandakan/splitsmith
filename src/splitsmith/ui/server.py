@@ -8222,6 +8222,7 @@ def create_app(
     project_root: Path | None = None,
     project_name: str | None = None,
     lab_enabled: bool = False,
+    lab_token: str | None = None,
 ) -> FastAPI:
     """Create the FastAPI app, optionally pre-bound to one match project.
 
@@ -8239,6 +8240,9 @@ def create_app(
     ``lab_enabled`` gates the ``/api/lab/*`` routes (and the SPA reads
     ``/api/server/features`` on mount to know whether to show the Lab
     nav entry). Hidden by default; opt in via ``splitsmith ui --lab``.
+
+    ``lab_token`` admits only requests carrying it (``ui/lab_token``); the
+    CLI requires one when the server binds beyond loopback.
     """
     # Initialise Sentry before constructing FastAPI so its integrations can
     # hook the app. No-op unless ``SENTRY_DSN`` is set (local installs and the
@@ -19453,6 +19457,13 @@ def create_app(
                 )
             return FileResponse(index, headers={"Cache-Control": "no-cache"})
 
+    # Registered last, so it is the outermost middleware: nothing answers a
+    # request without the token, not even a static file.
+    if lab_token:
+        from . import lab_token as _lab_token
+
+        app.middleware("http")(_lab_token.make_middleware(lab_token))
+
     return app
 
 
@@ -19846,6 +19857,7 @@ def serve(
     reload: bool = False,
     lab_enabled: bool = False,
     skip_system_check: bool = False,
+    lab_token: str | None = None,
 ) -> None:
     """Boot uvicorn synchronously. Used by the ``splitsmith ui`` CLI command.
 
@@ -19890,6 +19902,7 @@ def serve(
         project_root=project_root,
         project_name=project_name,
         lab_enabled=lab_enabled,
+        lab_token=lab_token,
     )
     config = uvicorn.Config(app, host=host, port=port, log_level="info")
     server = _JobAwareServer(config, app)

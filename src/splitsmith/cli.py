@@ -428,6 +428,15 @@ def ui(
             "developer tool that loads heavy CLAP/PANN models on first use."
         ),
     ),
+    lab_token: str | None = typer.Option(
+        None,
+        "--lab-token",
+        envvar="SPLITSMITH_LAB_TOKEN",
+        help=(
+            "Answer only requests carrying this token (a ?lab_token= once, "
+            "then a cookie). Required when --host is not a loopback address."
+        ),
+    ),
     skip_system_check: bool = typer.Option(
         False,
         "--skip-system-check",
@@ -448,8 +457,14 @@ def ui(
     ``~/.splitsmith/projects.json`` and binds in-memory once the user picks.
     """
     from . import user_config
+    from .ui.lab_token import is_loopback
     from .ui.server import serve
 
+    if not is_loopback(host) and not lab_token:
+        raise typer.BadParameter(
+            f"--host {host} is reachable from other devices; pass --lab-token "
+            "(scripts/review_session.py --phone does this for you)"
+        )
     if last:
         if project is not None:
             raise typer.BadParameter("--last and --project are mutually exclusive")
@@ -505,6 +520,7 @@ def ui(
             port=port,
             lab_enabled=lab,
             skip_system_check=skip_system_check,
+            lab_token=lab_token,
         )
     except KeyboardInterrupt:
         console.print("\n[yellow]Stopped.[/]")
