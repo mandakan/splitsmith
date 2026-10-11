@@ -86,7 +86,7 @@ def test_list_templates_user_dir_overrides_builtin(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _seed_export_project(tmp_path: Path) -> tuple[Path, Path]:
+def _seed_export_project(tmp_path: Path, *, beep_time: float = 5.0) -> tuple[Path, Path]:
     root = tmp_path / "match"
     src = root / "raw" / "primary.mp4"
     src.parent.mkdir(parents=True, exist_ok=True)
@@ -94,7 +94,7 @@ def _seed_export_project(tmp_path: Path) -> tuple[Path, Path]:
     primary = StageVideo(
         path=Path("raw/primary.mp4"),
         role="primary",
-        beep_time=5.0,
+        beep_time=beep_time,
         beep_source="manual",
         beep_confidence=1.0,
         beep_reviewed=True,
@@ -412,15 +412,23 @@ def test_export_match_rejects_a_transition_kind_outside_the_grammar(tmp_path: Pa
 
 
 def _export_match_with_overlay_on_disk(
-    tmp_path: Path, *, record: str, variant: str = "default", after_record: Callable[[], None] | None = None
+    tmp_path: Path,
+    *,
+    record: str,
+    variant: str = "default",
+    after_record: Callable[[], None] | None = None,
+    beep_time: float = 5.0,
+    short_head: float | None = None,
 ) -> tuple[Path, object, dict]:
     """Seed a stage with a trim and an overlay MOV, write the overlay's
     settings record as ``record`` says (``current`` / ``stale`` / ``none``),
-    and run the MCP match export with the composer mocked."""
+    and run the MCP match export with the composer mocked. ``beep_time`` is
+    the primary's beep in its source (under the 5 s pre-buffer, a short-head
+    stage) and ``short_head`` what the record says about it (#1430)."""
     from splitsmith.overlay_hud import HudOptions, overlay_settings
     from splitsmith.ui import exports as exports_mod
 
-    root, _src = _seed_export_project(tmp_path)
+    root, _src = _seed_export_project(tmp_path, beep_time=beep_time)
     audit_path = _make_audit_json(root / "audit", 1)
     exports_dir = root / "exports"
     exports_dir.mkdir(exist_ok=True)
@@ -436,6 +444,7 @@ def _export_match_with_overlay_on_disk(
             max_height=None,
             max_fps=None,
             audit_revision=exports_mod.overlay_audit_revision(audit_path),
+            short_head=short_head,
         )
         (exports_dir / "stage1_k-vallen_overlay.json").write_text(json.dumps(settings))
     if after_record is not None:
@@ -474,6 +483,25 @@ def test_export_match_reuses_an_overlay_drawn_from_the_current_audit(tmp_path: P
     overlay, stage_input, result = _export_match_with_overlay_on_disk(tmp_path, record="current")
     assert stage_input.overlay_path == overlay
     assert result["anomalies"] == []
+
+
+def test_export_match_reuses_a_short_head_overlay_drawn_at_the_trims_beep(tmp_path: Path) -> None:
+    """The source has 3 s before the beep (5 s pre-buffer) and the record says
+    the overlay drew the beep there (#1430): stitched."""
+    overlay, stage_input, _result = _export_match_with_overlay_on_disk(
+        tmp_path, record="current", beep_time=3.0, short_head=3.0
+    )
+    assert stage_input.overlay_path == overlay
+
+
+def test_export_match_drops_a_short_head_overlay_drawn_before_the_fix(tmp_path: Path) -> None:
+    """The same stage with a record from before #1430 (no ``short_head``: the
+    beep drawn at the pre-buffer, every tick late): left out and said so."""
+    overlay, stage_input, result = _export_match_with_overlay_on_disk(
+        tmp_path, record="current", beep_time=3.0
+    )
+    assert stage_input.overlay_path is None
+    assert any(str(overlay) in a and "left out" in a for a in result["anomalies"])
 
 
 def _shipped_looks_copy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:

@@ -879,6 +879,26 @@ def _vouched_overlays(stages_input: list[Any], look: str | None, *, pre_buffer_s
                         f"--theme {drawn_in} to stitch it, or run the stage's export with the overlay "
                         "on to draw it in this Look"
                     )
+                elif (
+                    short_head is not None
+                    and record is not None
+                    and "short_head" not in record
+                    and export_helpers.overlay_record_matches(
+                        {**record, "short_head": round(short_head, 3)},
+                        audit_revision=current,
+                        look=look,
+                        upright=upright,
+                        short_head=short_head,
+                    )
+                ):
+                    # The one thing that missed: it was drawn before #1430,
+                    # with the beep at the pre-buffer on a clip that starts
+                    # closer to the beep than that.
+                    why = (
+                        "was drawn by an older version that ran late on clips starting less than the "
+                        "pre-buffer before the beep -- left out; run the stage's export with the overlay "
+                        "on to draw it again"
+                    )
                 else:
                     why = (
                         "was drawn from an older audit, Look or template (or has no record of which) "
