@@ -53,6 +53,19 @@
   #stamp { position: absolute; left: 0; right: 0; top: 34%; text-align: center; opacity: 0; }
   #stamp .label { font-size: 2.5vh; letter-spacing: 0.3em; }
   #stamp .num { font-size: 16vh; }
+  /* Upright video: the platform safe area (--safe-bottom, --safe-right
+     from --safe-right-top down) stays clear; body.safe is set from
+     data.safe_area, so a landscape page never matches these rules. */
+  body.safe #band {
+    bottom: var(--safe-bottom); right: var(--safe-right);
+    -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 6vh), transparent);
+    mask-image: linear-gradient(90deg, #000 calc(100% - 6vh), transparent);
+  }
+  body.safe #clock { bottom: calc(var(--safe-bottom) + 3.9vh); }
+  body.safe #count { bottom: calc(var(--safe-bottom) + 3.9vh); right: calc(var(--safe-right) + 2vh); }
+  body.safe #track { bottom: calc(var(--safe-bottom) + 14.5vh); right: calc(var(--safe-right) + 2vh); }
+  body.safe #chip { bottom: calc(var(--safe-bottom) + 26.5vh); }
+  body.safe #stamp { right: var(--safe-right); }
 </style>
 </head>
 <body>
@@ -64,6 +77,9 @@
 <script>
 (function () {
   var s = window.splitsmith;
+  // Upright video (data.safe_area): the body.safe rules keep every element
+  // out of what Shorts, Reels and TikTok draw over.
+  if (s.data.safe_area) document.body.classList.add('safe');
   var theme = s.theme, stage = s.data.stage, opts = s.data.options;
   var shots = stage.shots, beep = stage.beep, rounds = stage.rounds;
   // The helpers every shipped HUD shares (_shared/hud.js).
@@ -76,8 +92,12 @@
   function at(shot) { return along(shot.t) + '%'; }
 
   document.body.style.color = theme.ink;
-  el('band').style.background =
-    'linear-gradient(0deg, ' + rgba(theme.surface, 0.88) + ', ' + rgba(theme.surface, 0) + ')';
+  el('band').style.background = s.data.safe_area
+    // Upright, the band ends at the safe area's line: it fades in over its
+    // first few pixels rather than stopping on a hard edge.
+    ? 'linear-gradient(0deg, ' + rgba(theme.surface, 0) + ', ' + rgba(theme.surface, 0.88) + ' 14%, '
+      + rgba(theme.surface, 0) + ')'
+    : 'linear-gradient(0deg, ' + rgba(theme.surface, 0.88) + ', ' + rgba(theme.surface, 0) + ')';
   el('track').style.background = rgba(theme.ink, 0.22);
   el('fill').style.background = theme.ink;
   el('stampValue').textContent = stage.stage_time.toFixed(2);
@@ -150,14 +170,18 @@
       var track = el('track').getBoundingClientRect();
       var half = tag.offsetWidth / 2, margin = window.innerHeight * 0.02;
       var centre = track.left + track.width * along(last.t) / 100;
-      var tagX = Math.max(half + margin, Math.min(window.innerWidth - half - margin, centre));
+      // Upright, the right edge is the button column's.
+      var edge = window.innerWidth - (s.data.safe_area ? s.data.safe_area.right : 0);
+      var tagX = Math.max(half + margin, Math.min(edge - half - margin, centre));
       if (tagX !== centre) tag.style.left = (tagX - track.left) + 'px';
     }
 
     var stamp = el('stamp');
     var sk = landing ? (landed - STAMP_DELAY) / STAMP_IN : 0;
     stamp.style.opacity = clamp(sk);
-    stamp.style.transform = 'scale(' + (1.4 - 0.4 * backOut(sk)) + ')';
+    // Upright, the stamp grows into place: shrinking from 1.4x it would
+    // sweep over the button column on its way in.
+    stamp.style.transform = 'scale(' + (s.data.safe_area ? 0.8 + 0.2 * backOut(sk) : 1.4 - 0.4 * backOut(sk)) + ')';
   };
 })();
 </script>

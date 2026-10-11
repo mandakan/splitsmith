@@ -248,9 +248,15 @@ def test_an_overlay_style_is_probed_on_three_stages_mid_stage_and_landed(user_di
     prober = _Prober()
     report = look_tools.check_look("club", prober=prober)
     assert report.errors == 0 and report.warnings == 0
-    stages = [data["stage"] for name, data in prober.calls if name == "hud-plate.html"]
+    stages = [
+        data["stage"] for name, data in prober.calls if name == "hud-plate.html" and "safe_area" not in data
+    ]
     # The twelve-round stage carries regions, so it is also probed mid-reload.
     assert sorted(stage["rounds"] for stage in stages) == [8, 8, 12, 12, 12, 32, 32]
+    # Each again on an upright page, with the safe area, and just after a shot (#1394).
+    upright = [data for name, data in prober.calls if name == "hud-plate.html" and "safe_area" in data]
+    assert sorted(data["stage"]["rounds"] for data in upright) == [8, 8, 8, 12, 12, 12, 12, 32, 32, 32]
+    assert all(data["safe_area"] == {"bottom": 140, "right": 73, "right_top": 432} for data in upright)
     assert any(all(shot["cls"] is None for shot in stage["shots"]) for stage in stages)
     times = [at for name, at in prober.probed_at if name == "hud-plate.html"]
     assert all(at is not None for at in times) and len(set(times)) > 1

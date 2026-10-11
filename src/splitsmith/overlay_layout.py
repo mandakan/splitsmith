@@ -238,6 +238,12 @@ class Element:
     #: that already knows which counts are real, not computed from any
     #: rendered size.
     drop_priority: int | None = None
+    #: Overrides the role's own font size, in pixels (#1421). ``None`` (the
+    #: default) draws at the role's :class:`CellScale` size and writes the
+    #: markup it always did. The live grid's corner counter uses it: its
+    #: size is fitted to the cell's width with the clock beside it, while
+    #: the split, the same role, keeps the cell's own size.
+    size: int | None = None
 
 
 @dataclass(frozen=True)

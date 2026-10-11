@@ -1683,3 +1683,79 @@ def test_a_non_dividing_canvas_still_renders_the_hold(tmp_path: Path, shooter_cl
         f"the hold is not showing the still this render composed: mean abs diff "
         f"{to_still:.2f} over the composed frame (threshold {HOLD_MATCHES_ITS_STILL_MAX})"
     )
+
+
+def _ink_runs(flags: np.ndarray) -> list[tuple[int, int]]:
+    """``(first, last)`` index of every run of true values."""
+    runs: list[tuple[int, int]] = []
+    start: int | None = None
+    for index, flag in enumerate(flags.tolist()):
+        if flag and start is None:
+            start = index
+        elif not flag and start is not None:
+            runs.append((start, index - 1))
+            start = None
+    if start is not None:
+        runs.append((start, len(flags) - 1))
+    return runs
+
+
+#: Clear rows required between the clock's glyphs and the counter's on a
+#: stacked corner: a quarter of the 48 px live size. Measured on the fix,
+#: 22 clear rows (the clock's fill ends at row 58, the counter's starts at
+#: 81); on main the two share one band of rows and touch ("2/83.00").
+CORNER_MIN_CLEAR_ROWS = 12
+
+
+@integration
+@needs_ffmpeg
+def test_a_dense_upright_tile_keeps_its_counter_clear_of_the_clock(tmp_path: Path, shooter_clips):
+    """#1421, rendered and measured: a 3x3 grid on a 720x1280 canvas.
+
+    Each cell is 240 px wide, too narrow for the counter top left and the
+    clock top right at 48 px: on main they drew into each other. The fix
+    stacks the counter under the clock, so the top band of every tile that
+    has fired must hold two separate lines of ink with clear rows between
+    them. Measured on the glyph fill (luma over 160); the stroke is dark
+    and the letterbox above the picture is black.
+    """
+    canvas = mp4_grid.GridCanvas(width=720, height=1280, frame_rate_num=30, frame_rate_den=1)
+    shooters = build_roster(tmp_path, shooter_clips, count=9, stages=1)
+    out = tmp_path / "upright-9.mp4"
+    result = mp4_grid.render_grid_mp4(
+        shooters,
+        audio_label="Mathias",
+        output_path=out,
+        canvas=canvas,
+        head_pad_seconds=HEAD_PAD_SECONDS,
+        tail_pad_seconds=TAIL_PAD_SECONDS,
+        overlay=True,
+        ffmpeg_binary=FFMPEG,
+        work_dir=tmp_path / "work-upright-9",
+    )
+    assert result.failed == (), result.failed
+    mid_action = round((HEAD_PAD_SECONDS + POST_BEEP_SECONDS / 2) * 30)
+    frame = np.asarray(_frame_at_index(out, mid_action, tmp_path, "upright-9").convert("L"))
+
+    cell_w, cell_h = 720 // 3, 1280 // 3
+    # The 16:9 picture letterboxed into a 240x426 cell starts 145 px down;
+    # everything above it is the overlay over black.
+    band = 140
+    measured = 0
+    for row in range(3):
+        for col in range(3):
+            top = frame[row * cell_h : row * cell_h + band, col * cell_w : (col + 1) * cell_w] > 160
+            lines = _ink_runs(top.any(axis=1))
+            if not lines:
+                continue  # a tile with no shots, or no audit: no clock, no counter
+            measured += 1
+            assert len(lines) == 2, (
+                f"tile r{row}c{col}: the counter and the clock share rows {lines} -- "
+                "they are drawn on one line in a cell too narrow for both"
+            )
+            clear = lines[1][0] - lines[0][1] - 1
+            assert clear >= CORNER_MIN_CLEAR_ROWS, (
+                f"tile r{row}c{col}: only {clear} clear rows between the clock and the counter "
+                f"(need {CORNER_MIN_CLEAR_ROWS})"
+            )
+    assert measured >= 6, f"only {measured} tiles drew a clock and a counter; the fixture moved"

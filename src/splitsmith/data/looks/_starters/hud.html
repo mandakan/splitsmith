@@ -24,6 +24,10 @@
     stage.reloads[]   start, end, duration, exposed (time no movement covered)
     options           speed_colors, class_labels, landing, position,
                       reload_chip, stage_bar (draw nothing when off)
+  On an upright video window.splitsmith.data.safe_area is set: bottom,
+  right and right_top, in page pixels, also as the CSS variables
+  --safe-bottom, --safe-right and --safe-right-top. Keep everything above
+  the bottom band and, below right_top, left of the right column.
   Never compute a split or a speed yourself; read them. The meta tag above
   lists the positions this style can take, its default first. The stage
   bar and the reload chip the shipped styles draw come from the shared
@@ -46,6 +50,15 @@
   #hud.bottom-right { right: 4vh; bottom: 4vh; }
   #clock { font-size: 8vh; }
   #count, #split { font-size: 4.5vh; }
+  /* Upright video: Shorts, Reels and TikTok draw their captions over the
+     bottom (--safe-bottom) and buttons down the right edge (--safe-right,
+     from --safe-right-top down). body.safe is set below when the context
+     carries data.safe_area; keep every element out of it. */
+  body.safe #hud { flex-wrap: wrap; max-width: calc(100vw - 6vh - var(--safe-right)); }
+  body.safe #hud.bottom-left, body.safe #hud.bottom-right {
+    bottom: calc(var(--safe-bottom) + 4vh); flex-wrap: wrap-reverse;
+  }
+  body.safe #hud.bottom-right { right: calc(var(--safe-right) + 2vh); }
 </style>
 </head>
 <body>
@@ -54,6 +67,7 @@
   var S = window.splitsmith;
   var stage = S.data.stage, options = S.data.options;
   var POP = 0.2;  // seconds the newest split takes to fade in
+  if (S.data.safe_area) document.body.classList.add('safe');
 
   document.getElementById('hud').className = options.position || 'bottom-left';
   document.getElementById('hud').style.color = S.theme.ink;

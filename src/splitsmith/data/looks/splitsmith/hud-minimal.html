@@ -46,6 +46,14 @@
   #stamp { position: absolute; left: 0; right: 0; top: 34%; text-align: center; opacity: 0; }
   #stamp .label { font-size: 2.5vh; letter-spacing: 0.3em; }
   #stamp .num { font-size: 16vh; }
+  /* Upright video: the platform safe area (--safe-bottom, --safe-right
+     from --safe-right-top down) stays clear; body.safe is set from
+     data.safe_area, so a landscape page never matches these rules. */
+  body.safe #clock { bottom: calc(var(--safe-bottom) + 5.3vh); }
+  body.safe #stageBar { bottom: calc(var(--safe-bottom) + 3.4vh); }
+  body.safe #reloadChip { bottom: calc(var(--safe-bottom) + 12.6vh); }
+  body.safe #split { right: var(--safe-right); }
+  body.safe #stamp { right: var(--safe-right); }
 </style>
 </head>
 <body>
@@ -55,6 +63,9 @@
 <script>
 (function () {
   var s = window.splitsmith;
+  // Upright video (data.safe_area): the body.safe rules keep every element
+  // out of what Shorts, Reels and TikTok draw over.
+  if (s.data.safe_area) document.body.classList.add('safe');
   var theme = s.theme, stage = s.data.stage, opts = s.data.options;
   var shots = stage.shots, beep = stage.beep;
   // The helpers every shipped HUD shares (_shared/hud.js).
@@ -119,7 +130,9 @@
     var stamp = el('stamp');
     var sk = landing ? (landed - STAMP_DELAY) / STAMP_IN : 0;
     stamp.style.opacity = clamp(sk);
-    stamp.style.transform = 'scale(' + (1.4 - 0.4 * backOut(sk)) + ')';
+    // Upright, the stamp grows into place: shrinking from 1.4x it would
+    // sweep over the button column on its way in.
+    stamp.style.transform = 'scale(' + (s.data.safe_area ? 0.8 + 0.2 * backOut(sk) : 1.4 - 0.4 * backOut(sk)) + ')';
   };
 })();
 </script>

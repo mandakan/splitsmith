@@ -1,10 +1,16 @@
 {
   "entries": [
     {
+      "id": "grid-counter-clear-of-clock",
+      "date": "2026-10-10",
+      "title": "Shot count and clock apart on tall grids",
+      "body": "In an upright compare video, each tile's shot count could run into its clock. On narrow tiles they now shrink, or the count moves under the clock."
+    },
+    {
       "id": "upright-summary-cards",
       "date": "2026-10-10",
-      "title": "Summaries made for upright video",
-      "body": "On a tall export, stage and match summaries, comparison grids included, show splits first at one size per grid and keep clear of the captions and buttons Shorts and Reels draw on top."
+      "title": "Summaries and overlays for upright video",
+      "body": "On a tall export, summaries, comparison grids included, show splits first and fill the frame, and they and every overlay style keep clear of the captions and buttons Shorts and Reels draw on top."
     },
     {
       "id": "grid-hold-dense-upright",
