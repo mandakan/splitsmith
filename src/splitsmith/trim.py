@@ -168,6 +168,18 @@ def select_audit_encoder(
     return "libx264"
 
 
+def beep_in_trim(beep_time: float, pre_buffer_seconds: float) -> float:
+    """Where the beep sits in a trim :func:`trim_video` cut with
+    ``pre_buffer_seconds`` around a beep at ``beep_time`` in the source.
+
+    The cut starts at ``max(0, beep_time - pre_buffer_seconds)``, so the beep
+    is the pre-buffer into the trim, unless the source had less than that
+    before the beep: then the trim starts at the source's first frame and the
+    beep sits ``beep_time`` into it (issue #1430). The same anchor the
+    players use (``ui.audio``, ``_video_clip_anchor``)."""
+    return min(pre_buffer_seconds, beep_time)
+
+
 def trim_video(
     input_path: Path,
     output_path: Path,

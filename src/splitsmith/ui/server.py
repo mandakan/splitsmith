@@ -4501,6 +4501,9 @@ def register_job_bodies(state: AppState) -> None:
                         # The trim was pulled above; without it the stage is
                         # cut and drawn again whatever this says.
                         upright=trimmed_path.exists() and export_helpers.overlay_canvas_upright(trimmed_path),
+                        short_head=export_helpers.overlay_short_head(
+                            prim.beep_time, proj.trim_pre_buffer_seconds
+                        ),
                     )
                     overlay_reusable = export_helpers.overlay_record_matches(
                         export_helpers.read_overlay_settings(overlay_record),

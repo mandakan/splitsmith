@@ -32,7 +32,13 @@ def _meta(_path: Path) -> VideoMetadata:
     return VideoMetadata(width=1920, height=1080, duration_seconds=20.0, frame_rate_num=30, frame_rate_den=1)
 
 
-def _seed(tmp_path: Path, *, with_trim: bool = True, competitor_name: str | None = "M. Axell") -> Path:
+def _seed(
+    tmp_path: Path,
+    *,
+    with_trim: bool = True,
+    competitor_name: str | None = "M. Axell",
+    beep_time: float = 12.0,
+) -> Path:
     root, shooter_root = scaffold_match(
         tmp_path, name="Bromma Classifier", shooter_slug="me", shooter_name="Me"
     )
@@ -44,7 +50,7 @@ def _seed(tmp_path: Path, *, with_trim: bool = True, competitor_name: str | None
             stage_number=1,
             stage_name="Speed",
             time_seconds=8.0,
-            videos=[StageVideo(path=Path("p.mp4"), role="primary", beep_time=12.0)],
+            videos=[StageVideo(path=Path("p.mp4"), role="primary", beep_time=beep_time)],
         )
     ]
     project.save(shooter_root)
@@ -165,13 +171,17 @@ def _overlay_on_disk(
     change: str,
     drawn_in: str = "splitsmith",
     args: tuple[str, ...] = (),
+    beep_time: float = 12.0,
+    short_head: float | None = None,
 ) -> Any:
     """Seed a stage with an overlay MOV and its record (``record``:
     ``current`` / ``none``, drawn in Look ``drawn_in``), change something
     after it was drawn (``change``: ``nothing`` / ``audit`` / ``palette`` /
     ``font``), and run the CLI's MP4 match export with ``args``. Returns the
     composed stage and the output. Edits a copy of the shipped Looks, never
-    the files."""
+    the files. ``beep_time`` is the primary's beep in its source (under the
+    5 s pre-buffer, a short-head stage) and ``short_head`` what the record
+    says about it (#1430)."""
     import shutil
 
     from splitsmith import looks
@@ -181,7 +191,7 @@ def _overlay_on_disk(
     copy = tmp_path / "shipped-looks"
     shutil.copytree(looks.shipped_looks_dir(), copy)
     monkeypatch.setattr(looks, "shipped_looks_dir", lambda: copy)
-    root = _seed(tmp_path)
+    root = _seed(tmp_path, beep_time=beep_time)
     captured = _capture_mp4(monkeypatch)
     shooter_root = root / "shooters" / "me"
     exports = shooter_root / "exports"
@@ -197,6 +207,7 @@ def _overlay_on_disk(
             max_height=None,
             max_fps=None,
             audit_revision=exports_mod.overlay_audit_revision(audit_path),
+            short_head=short_head,
         )
         exports_mod.overlay_settings_file(exports, base).write_text(json.dumps(settings))
     if change == "audit":
@@ -277,6 +288,30 @@ def test_overlay_in_the_explicit_theme_is_stitched(tmp_path: Path, monkeypatch: 
         tmp_path, monkeypatch, record="current", change="nothing", drawn_in="clean", args=("--theme", "clean")
     )
     assert stage.overlay is not None
+
+
+def test_a_short_head_overlay_drawn_at_the_trims_beep_is_stitched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The source has 3 s before the beep (5 s pre-buffer) and the record says
+    the overlay drew the beep there (#1430): stitched."""
+    stage, output = _overlay_on_disk(
+        tmp_path, monkeypatch, record="current", change="nothing", beep_time=3.0, short_head=3.0
+    )
+    assert stage.overlay is not None
+    assert "left out" not in output
+
+
+def test_a_short_head_overlay_drawn_before_the_fix_is_left_out_and_said_so(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same stage, with a record from before #1430 (no ``short_head``: the
+    beep was drawn at the pre-buffer, every tick late): left out, and the
+    note says it was an older version, not an older audit or Look."""
+    stage, output = _overlay_on_disk(tmp_path, monkeypatch, record="current", change="nothing", beep_time=3.0)
+    assert stage.overlay is None
+    assert "drawn by an older version" in output
+    assert "older audit" not in output
 
 
 def test_bad_format_is_a_usage_error(tmp_path: Path) -> None:

@@ -923,6 +923,7 @@ def _overlay_export(
     monkeypatch: pytest.MonkeyPatch,
     *,
     fall_back: bool = False,
+    beep_time_in_source: float = 10.0,
     **request: Any,
 ) -> tuple[exports_mod.StageExportResult, dict[str, Any]]:
     from splitsmith import overlay_render
@@ -958,7 +959,7 @@ def _overlay_export(
             time_seconds=8.0,
             scorecard_updated_at=datetime(2026, 5, 2, 14, 30, tzinfo=UTC),
         ),
-        beep_time_in_source=10.0,
+        beep_time_in_source=beep_time_in_source,
         config=Config(),
     )
     return result, captured
@@ -992,6 +993,105 @@ def test_a_fallback_is_recorded_as_classic_and_reported(
     assert record["variant"] == "default" and record["options"] == {}
     assert any("fell back to Classic" in a for a in result.anomalies)
     assert not result.export_failures
+
+
+# --- a source with less than the pre-buffer before the beep (#1430) ----------
+
+
+def test_a_short_head_overlay_is_drawn_at_the_trims_own_beep(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The source has 4.08 s before the beep and the pre-buffer is 5 s, so the
+    trim starts at the source's first frame and the beep is 4.08 s into it:
+    the overlay draws it there (before #1430 it drew it at 5 s, every tick
+    0.92 s late) and records where, so an overlay drawn the old way misses."""
+    audit_path, exports_dir = _seed_stage_with_trim(tmp_path)
+    _, captured = _overlay_export(audit_path, exports_dir, monkeypatch, beep_time_in_source=4.084)
+    assert captured["beep_offset_seconds"] == pytest.approx(4.084)
+    record = json.loads((exports_dir / "stage1_stage-1-h1_overlay.json").read_text())
+    assert record["short_head"] == 4.084
+
+
+def test_a_full_head_overlay_and_its_record_are_what_they_always_were(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A source with the whole pre-buffer before the beep draws at the
+    pre-buffer exactly and records no ``short_head`` key: its overlay and
+    its record are byte for byte what they were before #1430."""
+    audit_path, exports_dir = _seed_stage_with_trim(tmp_path)
+    _, captured = _overlay_export(audit_path, exports_dir, monkeypatch, beep_time_in_source=5.0)
+    assert captured["beep_offset_seconds"] == 5.0
+    record = json.loads((exports_dir / "stage1_stage-1-h1_overlay.json").read_text())
+    assert "short_head" not in record
+    assert exports_mod.overlay_record_matches(record, audit_revision=record["audit_revision"])
+
+
+def test_an_overlay_drawn_before_the_short_head_fix_is_drawn_again() -> None:
+    from splitsmith.overlay_hud import HudOptions, overlay_settings, overlay_theme_identity
+
+    def record(short_head: float | None) -> dict[str, Any]:
+        return overlay_settings(
+            look="splitsmith",
+            variant="default",
+            options=HudOptions(),
+            codec="auto",
+            max_height=None,
+            max_fps=None,
+            audit_revision="rev",
+            theme=overlay_theme_identity("splitsmith"),
+            short_head=short_head,
+        )
+
+    short = exports_mod.overlay_short_head(4.084, 5.0)
+    assert short == pytest.approx(4.084)
+    assert exports_mod.overlay_short_head(5.0, 5.0) is None
+    assert exports_mod.overlay_short_head(12.0, 5.0) is None
+    # The trim's own beep answers the same as the source's.
+    assert exports_mod.overlay_short_head(min(5.0, 4.084), 5.0) == short
+    old, new = record(None), record(short)
+    # The reuse check rebuilding the record (MCP, CLI) and the one handed
+    # what the request wants (the app's match export) both miss the old one.
+    assert not exports_mod.overlay_record_matches(old, audit_revision="rev", short_head=short)
+    assert not exports_mod.overlay_record_matches(old, audit_revision="rev", wanted=new)
+    assert exports_mod.overlay_record_matches(new, audit_revision="rev", short_head=short)
+    assert exports_mod.overlay_record_matches(new, audit_revision="rev", wanted=new)
+    # A full-head stage asks for no key and matches the record it always had.
+    assert exports_mod.overlay_record_matches(old, audit_revision="rev")
+
+
+def test_a_short_head_fcpxml_puts_its_markers_at_the_trims_own_beep(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from splitsmith import fcpxml_gen
+
+    captured: dict[str, Any] = {}
+
+    def fake_generate(**kwargs: Any) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr(fcpxml_gen, "probe_video", lambda _p: object())
+    monkeypatch.setattr(fcpxml_gen, "generate_fcpxml", fake_generate)
+    audit_path, exports_dir = _seed_stage_with_trim(tmp_path)
+    for beep, expected in ((4.084, 4.084), (12.0, 5.0)):
+        exports_mod.export_stage(
+            request=exports_mod.StageExportRequest(
+                stage_number=1, write_trim=False, write_csv=False, write_fcpxml=True, write_report=False
+            ),
+            audit_path=audit_path,
+            exports_dir=exports_dir,
+            source_video_path=None,
+            pre_buffer_seconds=5.0,
+            post_buffer_seconds=5.0,
+            stage_data=StageData(
+                stage_number=1,
+                stage_name="Stage 1 -- H1",
+                time_seconds=8.0,
+                scorecard_updated_at=datetime(2026, 5, 2, 14, 30, tzinfo=UTC),
+            ),
+            beep_time_in_source=beep,
+            config=Config(),
+        )
+        assert captured["beep_offset_seconds"] == pytest.approx(expected)
 
 
 def test_read_overlay_settings_takes_a_missing_record_as_the_defaults(tmp_path: Path) -> None:
