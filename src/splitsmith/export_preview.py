@@ -37,7 +37,6 @@ from .events import confirmed_from_doc, reload_figures
 from .export_naming import stage_display_name, stage_file_base
 from .identity import ResolvedIdentity
 from .logo_placeholder import PLACEHOLDER_REVISION
-from .logo_spots import paste_logo
 from .look_brand import brand_mark_json
 from .look_sting import sting_context
 from .look_template import shared_digest
@@ -188,7 +187,13 @@ def _confirmed_regions(audit_doc: dict | None) -> list[StageEvent]:
 #: 8: an upright (taller than wide) match summary and stage summary take
 #: their own layouts, splits first and out of the platform safe area
 #: (``safe_area``, #1394).
-PREVIEW_REVISION = 8
+#: 9: no logo is drawn larger than its own pixels (#1433), a wide brand
+#: mark gives way to the event logo and an upright card's name takes two
+#: lines rather than end in "..." (#1431), and a summary's text keeps
+#: clear of the pasted shooter logo (#1432); every upright card keeps its
+#: text out of the platform safe area, its info lines at one size, and the
+#: end screen never breaks a word.
+PREVIEW_REVISION = 9
 
 
 def preview_key(
@@ -577,9 +582,8 @@ def render_preview(
             theme=theme,
             rasterizer=rasterizer,
             backdrop=frame,
+            logo=summary_logo,
         )
-        if image is not None:
-            image = paste_logo(image, summary_logo)
     elif spec.card == "summary":
         tile = TileStageData(
             label=label,
@@ -600,9 +604,8 @@ def render_preview(
             rasterizer=rasterizer,
             backdrop=frame,
             accent=shooter.accent if shooter is not None else None,
+            logo=summary_logo,
         )
-        if image is not None:
-            image = paste_logo(image, summary_logo)
     else:  # overlay
         styled = _hud_preview(
             spec,

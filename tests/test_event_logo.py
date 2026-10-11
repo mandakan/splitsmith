@@ -249,13 +249,14 @@ def test_logos_keep_their_transparency_on_the_card(tmp_path: Path) -> None:
     brand = tmp_path / "brand-0123456789ab.png"
     brand.write_bytes(_half_clear_png((220, 30, 30)))
     im = _render_title(tmp_path, event, {"logo": brand.resolve().as_uri()})
-    # Event logo: 173 px square centred on x=640 from y=58.
-    assert im.getpixel((600, 140))[3] == 0, im.getpixel((600, 140))
-    r, g, b, a = im.getpixel((690, 140))
+    # Event logo: a 173 px slot centred on x=640 from y=58; the 64 px logo
+    # keeps its own size in the middle of it (#1433): x 608..672, y 112..176.
+    assert im.getpixel((620, 144))[3] == 0, im.getpixel((620, 144))
+    r, g, b, a = im.getpixel((660, 144))
     assert a > 200 and g > 150 and r < 80, (r, g, b, a)
-    # Brand: 86 px square at (29, 29).
-    assert im.getpixel((45, 70))[3] == 0, im.getpixel((45, 70))
-    r, g, b, a = im.getpixel((100, 70))
+    # Brand: an 86 px slot at (29, 29), the logo at x 40..104, y 40..104.
+    assert im.getpixel((50, 72))[3] == 0, im.getpixel((50, 72))
+    r, g, b, a = im.getpixel((95, 72))
     assert a > 200 and r > 180 and g < 80, (r, g, b, a)
 
 

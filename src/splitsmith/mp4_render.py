@@ -79,7 +79,7 @@ from .composition import (
     sting_name,
     xfade_name,
 )
-from .logo_spots import LOGO_MARGIN, WATERMARK_HEIGHT, paste_logo, watermark_image
+from .logo_spots import LOGO_MARGIN, WATERMARK_HEIGHT, watermark_image
 from .look_brand import brand_logo_path, brand_mark_json
 from .look_motion import MotionClipError, motion_overlay_filters, write_motion_clip
 from .look_sting import sting_motion, sting_overlay_filters
@@ -514,6 +514,7 @@ def _render_with_work_dir(
                 rasterizer=rasterizer,
                 backdrop=backdrop,
                 accent=shooters[0].accent if shooters else None,
+                logo=summary_logo,
             )
             if image is None:
                 logger.warning(
@@ -521,7 +522,6 @@ def _render_with_work_dir(
                 )
                 prep.skipped = True
                 return prep
-            image = paste_logo(image, summary_logo)
             png = work_dir / f"{item.name}.png"
             image.save(png)
             prep.png = png
@@ -544,12 +544,12 @@ def _render_with_work_dir(
                 theme=theme if theme is not None else load_theme(overlay_theme),
                 rasterizer=rasterizer,
                 backdrop=backdrop,
+                logo=summary_logo,
             )
             if image is None:
                 logger.warning("no frame and no text to hold the match summary on; skipped")
                 prep.skipped = True
                 return prep
-            image = paste_logo(image, summary_logo)
             png = work_dir / f"{item.name}.png"
             image.save(png)
             prep.png = png

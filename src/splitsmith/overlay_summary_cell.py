@@ -32,6 +32,7 @@ from PIL import Image
 
 from .coach import statistic_split_shots
 from .events import ReloadFigure, exposed_reload_s
+from .logo_spots import LogoBox, logo_box, paste_logo, text_room
 from .match_project import StageScorecard
 from .overlay_html import single_html
 from .overlay_layout import MIN_FONT_SIZE, Anchor, CellScale, ColorToken, Element, Emphasis, Flow, Group, Role
@@ -1042,17 +1043,21 @@ def summary_still_html(
     height: int,
     theme: OverlayTheme,
     accent: str | None = None,
+    logo: LogoBox | None = None,
 ) -> str:
     """The document :func:`build_summary_still` rasterizes. An upright
     canvas (taller than wide) takes the upright layout (issue #1394):
     :func:`upright_summary_scale`, the Splits band first and stacked
     (``summary_groups(upright=True)``), the cell padded out of the platform
     safe area (:func:`upright_cell_style`). Square and wider canvases are
-    the landscape card, unchanged."""
+    the landscape card, unchanged. ``logo`` is where the shooter's logo will
+    be pasted (``logo_spots.logo_box``): the name's row ends before it
+    (#1432)."""
     area = safe_area(width, height)
     if area is not None:
         scale = upright_summary_scale(width, height, dense=_upright_dense(tile))
         groups = summary_groups(tile, label, scale=scale, cell_width=width, cell_height=height, upright=True)
+        cell_right = width - max(0, area.right - scale.pad)
         return single_html(
             groups,
             width=width,
@@ -1062,13 +1067,21 @@ def summary_still_html(
             accent=accent,
             fit_columns=True,
             cell_style=upright_cell_style(area, pad=scale.pad),
+            logo_room=text_room(logo, right=cell_right, minimum=scale.pad),
         )
     scale = summary_scale(height)
     groups = summary_groups(tile, label, scale=scale, cell_width=width, cell_height=height)
     # The summary's table rows fit their own columns (fit.js
     # ``fitColumns``): a portrait card otherwise clips 1.42 to "1.4".
     return single_html(
-        groups, width=width, height=height, scale=scale, theme=theme, accent=accent, fit_columns=True
+        groups,
+        width=width,
+        height=height,
+        scale=scale,
+        theme=theme,
+        accent=accent,
+        fit_columns=True,
+        logo_room=text_room(logo, right=width, minimum=scale.pad),
     )
 
 
@@ -1084,10 +1097,13 @@ def build_summary_still(
     blur_radius: int | None = None,
     dim: float = DEFAULT_DIM,
     accent: str | None = None,
+    logo: Path | None = None,
 ) -> Image.Image | None:
     """One shooter's stage summary as a full-frame ``width x height`` RGB
     still (issue #972): the whole frame is one cell, composed the way the
-    grid composes each of its cells.
+    grid composes each of its cells. ``logo`` (the ``summaries`` logo spot)
+    is pasted top right (``logo_spots.paste_logo``) with the name's row
+    ending before it (#1432), text or not.
 
     ``backdrop`` is the stage's last visible frame, blurred and dimmed
     (:mod:`splitsmith.overlay_still`); ``None`` or unreadable paints the
@@ -1102,7 +1118,15 @@ def build_summary_still(
         canvas = backdrop_from_frame(backdrop, width=width, height=height, radius=blur_radius, dim_amount=dim)
     text: Image.Image | None = None
     if rasterizer is not None:
-        html = summary_still_html(tile, label, width=width, height=height, theme=theme, accent=accent)
+        html = summary_still_html(
+            tile,
+            label,
+            width=width,
+            height=height,
+            theme=theme,
+            accent=accent,
+            logo=logo_box(logo, box=(0, 0, width, height)),
+        )
         try:
             png_bytes = rasterizer.png(html, width=width, height=height)
             with Image.open(io.BytesIO(png_bytes)) as rendered:
@@ -1116,7 +1140,7 @@ def build_summary_still(
     composed = canvas.convert("RGBA")
     if text is not None:
         composed.alpha_composite(text)
-    return composed.convert("RGB")
+    return paste_logo(composed.convert("RGB"), logo)
 
 
 __all__ = [

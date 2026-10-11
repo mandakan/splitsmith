@@ -38,6 +38,13 @@
     wrap.style.right = '0';
     var bottom = Math.round(size.height * 0.04);
     var gap = Math.round(textSize * 0.5);
+    // An upright card's bottom band is the platform's (--safe-bottom, see
+    // cell.js): the line sits just above it, and the cell, already padded
+    // by it, gives up only the line's own height.
+    var safe = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--safe-bottom')) || 0;
+    var cell = document.body.firstElementChild;
+    var padded = safe > 0 && cell && parseFloat(cell.style.paddingBottom) >= safe;
+    if (safe > 0) { bottom = safe + gap; }
     wrap.style.bottom = bottom + 'px';
     wrap.style.display = 'flex';
     wrap.style.justifyContent = 'center';
@@ -54,10 +61,9 @@
     wrap.appendChild(line);
     // The cell is mounted first; take the credit's band off its bottom so a
     // crowded card fits its text above the line instead of under it.
-    var cell = document.body.firstElementChild;
     document.body.appendChild(wrap);
     if (cell && cell !== wrap) {
-      var reserve = bottom + Math.round(textSize * 1.2) + gap;
+      var reserve = (padded ? gap : bottom) + Math.round(textSize * 1.2) + gap;
       cell.style.height = 'calc(' + (cell.style.height || '100%') + ' - ' + reserve + 'px)';
     }
   };

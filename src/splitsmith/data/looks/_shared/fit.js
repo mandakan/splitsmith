@@ -136,18 +136,146 @@ window.__splitsmithFit = function () {
   function scaleValues(values, bases, factor) {
     values.forEach(function (value, i) { value.style.fontSize = bases[i] * factor + 'px'; });
   }
+  // Lines (opt-in, window.__splitsmithFitLines, set by cell.js on an
+  // upright card): a line (the name, an info line; never a figure in a
+  // table column) that would end in "..." on one line wraps at its spaces
+  // onto at most that many lines instead, centred as the anchor aligns
+  // it, at the largest size down to the legibility floor at which
+  // every line stays inside the safe edges and the band still fits the
+  // cell's height. Returns false, the name as it was, when no size does,
+  // so the caller cuts it as before.
+  function lineCount(values) {
+    var tops = {};
+    values.forEach(function (value) {
+      var range = document.createRange();
+      range.selectNodeContents(value);
+      Array.prototype.forEach.call(range.getClientRects(), function (r) {
+        if (r.width > 0) { tops[Math.round(r.top)] = true; }
+      });
+    });
+    return Object.keys(tops).length;
+  }
+  function fitLines(cell, el, values, bases, box, lo) {
+    var most = window.__splitsmithFitLines;
+    if (!(most > 1) || el.closest('.flow-grid')) { return false; }
+    // On two lines the name may go under the one-line width floor, down
+    // to the legibility floor, before any of it is cut.
+    var sizes = bases.filter(function (b) { return b > 0; });
+    if (sizes.length) { lo = Math.min(lo, Math.min(1, window.__splitsmithMinFont / Math.min.apply(null, sizes))); }
+    var stack = el.closest('.anchor-middle-center');
+    var available = stack ? availableHeight(cell) : 0;
+    var anchor = el.closest('.anchor');
+    var align = anchor && anchor.classList.contains('align-center') ? 'center'
+      : anchor && anchor.classList.contains('align-right') ? 'right' : 'left';
+    // No wider than the anchor it is laid out in (a padded cell's anchor
+    // is narrower than the safe edges), or the lines start at the anchor's
+    // edge and run past the box.
+    var width = box.right - box.left;
+    if (anchor && anchor.clientWidth > 0) { width = Math.min(width, anchor.clientWidth); }
+    el.style.maxWidth = Math.max(0, width) + 'px';
+    el.style.minWidth = '0';
+    values.forEach(function (value) {
+      value.style.whiteSpace = 'normal';
+      value.style.textAlign = align;
+    });
+    var scale = stack ? stack.style.getPropertyValue('--fit-scale') : '';
+    function wide(factor) {
+      scaleValues(values, bases, factor);
+      // A word wider than the line clips inside its own value box.
+      var clipped = values.some(function (v) { return v.scrollWidth > v.clientWidth + 0.5; });
+      return !clipped && lineCount(values) <= most && inside(el, box);
+    }
+    function tall() {
+      return !(available > 0) || fits(stack, available);
+    }
+    // The largest size in [floor, top] at which ``test`` holds, applied.
+    function largest(floor, top, test) {
+      if (test(top)) { return top; }
+      for (var i = 0; i < 14; i++) {
+        var mid = (floor + top) / 2;
+        if (test(mid)) { floor = mid; } else { top = mid; }
+      }
+      test(floor);
+      return floor;
+    }
+    if (!wide(lo)) { return undoLines(el, values, bases, lo, stack, scale); }
+    var size = largest(lo, 1, wide);
+    // The extra line costs height: the rest of the band shrinks first
+    // (fitHeight's own step), then the name.
+    if (!tall()) { shrinkToFit(stack, available); }
+    if (!tall()) {
+      if (!(wide(lo) && tall())) { return undoLines(el, values, bases, lo, stack, scale); }
+      largest(lo, size, function (factor) { return wide(factor) && tall(); });
+    }
+    return true;
+  }
+  function undoLines(el, values, bases, lo, stack, scale) {
+    el.style.maxWidth = '';
+    el.style.minWidth = '';
+    values.forEach(function (value) {
+      value.style.whiteSpace = '';
+      value.style.textAlign = '';
+    });
+    if (stack) { stack.style.setProperty('--fit-scale', scale); }
+    scaleValues(values, bases, lo);
+    return false;
+  }
+  // The info block (an upright card's detail lines under the name: date,
+  // shooter, club, division) fits as one: when any line runs past its
+  // edge, every line takes the same size, the largest at which all of
+  // them fit, down to the legibility floor. A line that does not fit even
+  // there is left at the floor for the step below, which wraps it at its
+  // spaces. A block whose lines all fit is left exactly as it was.
+  function fitInfoBlock(cell, edgesFor) {
+    var els = Array.prototype.filter.call(cell.querySelectorAll('.anchor-middle-center .el'), function (el) {
+      return getComputedStyle(el).display !== 'none' && el.querySelector('.role-detail') && !el.closest('.flow-grid');
+    });
+    if (els.length < 2) { return; }
+    if (!els.some(function (el) { return pastEdge(el, edgesFor(el)); })) { return; }
+    var boxes = els.map(function (el) { return target(textRect(el), edgesFor(el)); });
+    var values = [];
+    els.forEach(function (el) { values = values.concat(Array.prototype.slice.call(el.querySelectorAll('.value'))); });
+    var bases = values.map(function (v) { return parseFloat(getComputedStyle(v).fontSize) || 0; });
+    var sizes = bases.filter(function (b) { return b > 0; });
+    if (!sizes.length) { return; }
+    var lo = Math.min(1, window.__splitsmithMinFont / Math.min.apply(null, sizes));
+    var hi = 1;
+    function fitAll() { return els.every(function (el, i) { return inside(el, boxes[i]); }); }
+    scaleValues(values, bases, lo);
+    if (!fitAll()) { return; }
+    for (var i = 0; i < 14; i++) {
+      var mid = (lo + hi) / 2;
+      scaleValues(values, bases, mid);
+      if (fitAll()) { lo = mid; } else { hi = mid; }
+    }
+    scaleValues(values, bases, lo);
+  }
   function fitWidth(cell) {
     var edges = cell.getBoundingClientRect();
     if (!(edges.width > 0)) { return; }
-    if (window.__splitsmithFitUniform) {
-      // An upright grid pads a tile out of the platform's button column:
-      // its text must end inside that padding, not at the tile's edge.
+    if (window.__splitsmithFitUniform || window.__splitsmithFitInset) {
+      // An upright grid pads a tile out of the platform's button column,
+      // and an upright card its cell (cell.js): text must end inside that
+      // padding, not at the tile's edge.
       var inset = parseFloat(getComputedStyle(cell).paddingRight) || 0;
       edges = {left: edges.left, right: edges.right - inset, top: edges.top, bottom: edges.bottom};
     }
+    // A summary with the shooter's logo pasted in its corner sets
+    // --logo-room: the name's row ends at its anchor's padding, before the
+    // logo, so a name that runs past it shrinks like one past the edge.
+    var logoRoom = getComputedStyle(cell).getPropertyValue('--logo-room').trim();
+    function edgesFor(el) {
+      var row = logoRoom && el.closest('.anchor-top-center');
+      if (!row) { return edges; }
+      var r = row.getBoundingClientRect();
+      var right = r.right - (parseFloat(getComputedStyle(row).paddingRight) || 0);
+      return {left: edges.left, right: Math.min(edges.right, right), top: edges.top, bottom: edges.bottom};
+    }
+    if (window.__splitsmithFitLines > 1) { fitInfoBlock(cell, edgesFor); }
     cell.querySelectorAll('.el').forEach(function (el) {
-      if (getComputedStyle(el).display === 'none' || !pastEdge(el, edges)) { return; }
-      var box = target(textRect(el), edges);
+      var bounds = edgesFor(el);
+      if (getComputedStyle(el).display === 'none' || !pastEdge(el, bounds)) { return; }
+      var box = target(textRect(el), bounds);
       var values = Array.prototype.slice.call(el.querySelectorAll('.value'));
       var bases = values.map(function (v) { return parseFloat(getComputedStyle(v).fontSize) || 0; });
       var smallest = Math.min.apply(null, bases.filter(function (b) { return b > 0; }).concat([Infinity]));
@@ -163,7 +291,9 @@ window.__splitsmithFit = function () {
         scaleValues(values, bases, lo);
         return;
       }
-      // At WIDTH_FLOOR and still too long: keep its start, end in "...".
+      // At WIDTH_FLOOR and still too long: an upright card's name takes
+      // more lines first (fitLines); otherwise keep its start, end in "...".
+      if (fitLines(cell, el, values, bases, box, lo)) { return; }
       var r = textRect(el);
       el.style.maxWidth = Math.max(0, box.right - Math.max(r.left, box.left)) + 'px';
       el.style.minWidth = '0';

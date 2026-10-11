@@ -53,7 +53,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from ..logo_spots import paste_logo
+from ..logo_spots import logo_box, paste_logo, text_room
 from ..match_summary import (
     MatchSummary,
     build_match_summary,
@@ -540,7 +540,15 @@ def build_hold_still(
             upright=upright,
         )
         # Each cell's table rows fit their own columns, as the single card's do.
-        html = grid_html(cells, geometry=geometry, scale=scale, theme=theme, fit_columns=True, upright=area)
+        html = grid_html(
+            cells,
+            geometry=geometry,
+            scale=scale,
+            theme=theme,
+            fit_columns=True,
+            upright=area,
+            logo_rooms=_tile_logo_rooms(placements, geometry, logos, area=area, scale=scale),
+        )
         try:
             png_bytes = rasterizer.png(html, width=geometry.canvas_width, height=geometry.canvas_height)
             with Image.open(io.BytesIO(png_bytes)) as overlay_image:
@@ -555,6 +563,46 @@ def build_hold_still(
             canvas.alpha_composite(overlay_rgba)
 
     return _paste_tile_logos(canvas.convert("RGB"), placements, geometry, logos).convert("RGB")
+
+
+def _tile_box(placement: TilePlacement, geometry: SpriteGeometry, top: int) -> tuple[int, int, int, int]:
+    """A tile's ``x, y, width, height`` on the canvas; ``top`` is where the
+    grid starts."""
+    return (
+        placement.col * geometry.cell_width,
+        top + placement.row * geometry.cell_height,
+        geometry.cell_width,
+        geometry.cell_height,
+    )
+
+
+def _tile_logo_rooms(
+    placements: Sequence[TilePlacement],
+    geometry: SpriteGeometry,
+    logos: Mapping[str, Path] | None,
+    *,
+    area: SafeArea | None,
+    scale: CellScale,
+    top: int = 0,
+) -> dict[str, int]:
+    """How far in from its own right edge each tile's name row ends so the
+    shooter's logo pasted in its corner (:func:`_paste_tile_logos`) never
+    covers it (#1432), keyed by label; a tile without a logo, or whose row
+    already ends clear of it, is left out. A tile the upright safe area
+    pads keeps that padding and the room is taken inside it."""
+    rooms: dict[str, int] = {}
+    for placement in placements:
+        logo = (logos or {}).get(placement.label)
+        if logo is None or not placement.present:
+            continue
+        x0, y0, width, height = _tile_box(placement, geometry, top)
+        inset = area.box_insets(x0, y0, x0 + width, y0 + height)[0] if area is not None else 0
+        room = text_room(
+            logo_box(logo, box=(x0, y0, width, height)), right=x0 + width - inset, minimum=scale.pad
+        )
+        if room is not None:
+            rooms[placement.label] = room
+    return rooms
 
 
 def _paste_tile_logos(
@@ -572,13 +620,7 @@ def _paste_tile_logos(
         logo = (logos or {}).get(placement.label)
         if logo is None or not placement.present:
             continue
-        box = (
-            placement.col * geometry.cell_width,
-            top + placement.row * geometry.cell_height,
-            geometry.cell_width,
-            geometry.cell_height,
-        )
-        canvas = paste_logo(canvas, logo, box=box)
+        canvas = paste_logo(canvas, logo, box=_tile_box(placement, geometry, top))
     return canvas
 
 
@@ -780,6 +822,9 @@ def build_match_summary_grid_still(
                     fit_columns=True,
                     upright=area,
                     top=strip,
+                    logo_rooms=_tile_logo_rooms(
+                        placements, geometry, logos, area=area, scale=scale, top=strip
+                    ),
                 ),
                 width=geometry.canvas_width,
                 height=geometry.canvas_height,
