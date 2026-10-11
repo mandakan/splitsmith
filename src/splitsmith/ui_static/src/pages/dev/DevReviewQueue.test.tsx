@@ -186,3 +186,33 @@ describe("DevReviewQueue eval-pending rail", () => {
     expect(await screen.findByText(/run covers 2 \/ 3 pending/i)).toBeInTheDocument();
   });
 });
+
+describe("DevReviewQueue on a phone", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("leads with Continue, resuming the walk already started", async () => {
+    vi.stubGlobal("matchMedia", (q: string) => ({
+      matches: true,
+      media: q,
+      addEventListener() {},
+      removeEventListener() {},
+    }));
+    vi.mocked(api.getDevReviewQueue).mockResolvedValue({
+      pending: [
+        { ...item("stage-shots-a-2026-stage1"), review_status: "needs_review" },
+        { ...item("stage-shots-b-2026-stage2"), review_status: "needs_review", walk_decisions: 2, stage_number: 2 },
+      ],
+      flagged: [],
+      done: [],
+    });
+
+    renderQueue();
+
+    const link = await screen.findByRole("link", { name: /Continue/ });
+    expect(link.getAttribute("href")).toBe(
+      `/review?fixture=${encodeURIComponent("/fixtures/stage-shots-b-2026-stage2.json")}&walk=1`,
+    );
+  });
+});

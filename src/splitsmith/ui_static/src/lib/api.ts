@@ -2825,6 +2825,8 @@ export interface DevReviewQueueItem {
   reasons: string[];
   /** The fixture's source video when it is on this disk; the walk shows it. */
   video_path?: string | null;
+  /** Decisions the review walk has saved on it; Continue resumes these first. */
+  walk_decisions?: number;
 }
 
 export interface DevReviewQueueResponse {

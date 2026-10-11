@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { AuditMarker } from "@/components/MarkerLayer";
+import type { DevReviewQueueItem } from "@/lib/api";
 
 import {
   WALK_DECIDED_EVENT,
@@ -17,6 +18,7 @@ import {
   typicalShotLevel,
   unmarkedBursts,
   walkActionForKey,
+  continueTarget,
   readLoopOn,
   writeLoopOn,
   walkHref,
@@ -292,5 +294,20 @@ describe("loop preference", () => {
     expect(readLoopOn()).toBe(true);
     writeLoopOn(false);
     expect(readLoopOn()).toBe(false);
+  });
+});
+
+describe("continueTarget", () => {
+  const item = (slug: string, extra: Partial<DevReviewQueueItem> = {}) =>
+    ({ slug, audit_path: `/f/${slug}.json`, review_status: "needs_review", walk_decisions: 0, ...extra }) as DevReviewQueueItem;
+
+  it("resumes a started walk before the queue's order", () => {
+    expect(continueTarget([item("a"), item("b", { walk_decisions: 3 })])?.slug).toBe("b");
+  });
+  it("falls back to the first fixture needing review", () => {
+    expect(continueTarget([item("a", { review_status: "reviewed" }), item("b")])?.slug).toBe("b");
+  });
+  it("has nothing to continue on an empty queue", () => {
+    expect(continueTarget([])).toBeNull();
   });
 });

@@ -486,6 +486,13 @@ export function walkHref(auditPath: string, videoPath: string | null): string {
 
 /** The fixture to open after this one is signed off: the queue's next one
  *  whose shots need checking. */
+/** Where a short session picks up: a walk already started (still pending,
+ *  so not signed off), else the queue's first fixture needing review. */
+export function continueTarget(pending: ReadonlyArray<DevReviewQueueItem>): DevReviewQueueItem | null {
+  const open = pending.filter((i) => i.review_status === "needs_review");
+  return open.find((i) => (i.walk_decisions ?? 0) > 0) ?? open[0] ?? null;
+}
+
 export function nextFixtureToReview(
   pending: ReadonlyArray<DevReviewQueueItem>,
   currentSlug: string,
