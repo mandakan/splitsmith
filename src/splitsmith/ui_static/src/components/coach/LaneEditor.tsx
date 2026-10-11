@@ -4,7 +4,8 @@
  * follow MarkerLayer: pointer capture, a travel threshold before a press
  * becomes a drag (wider for touch), Esc restores the pre-drag state. While
  * an edge drags the video seeks to it -- the frame under the cursor is what
- * is being marked. Geometry lives in lib/events.ts and the per-gesture frame
+ * is being marked -- and an arrow nudge seeks to the edge it moved the same
+ * way, so frame-by-frame adjustment shows the frame. Geometry lives in lib/events.ts and the per-gesture frame
  * math in ./laneDrag.ts; this file owns the DOM.
  *
  * Every ``onChange(events, true)`` is a server write upstream, so drag
@@ -106,6 +107,9 @@ export interface LaneEditorProps {
   onCancel?: () => void;
 }
 
+/** How long the time pill stays up after a keyboard nudge. */
+const NUDGE_PILL_MS = 1200;
+
 export function LaneEditor(props: LaneEditorProps) {
   const { shots, events, stageTime, fps = 30, selectedId, readOnly = false } = props;
   const { onSelect, onSeek, onChange, onCancel } = props;
@@ -115,7 +119,14 @@ export function LaneEditor(props: LaneEditorProps) {
   const eventsRef = useRef(events);
   eventsRef.current = events;
   // The time pill: where the drag's moving edge (the seek target) stands, null between drags.
+  // A keyboard nudge shows it briefly too, at the edge it moved.
   const [pill, setPill] = useState<number | null>(null);
+  const nudgePillTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearNudgePill = () => {
+    if (nudgePillTimer.current !== null) clearTimeout(nudgePillTimer.current);
+    nudgePillTimer.current = null;
+  };
+  useEffect(() => clearNudgePill, []);
   // Region elements by id, to move focus between them.
   const regionEls = useRef(new Map<string, HTMLDivElement>());
   // A region a create just committed: focused once it has rendered.
@@ -206,6 +217,7 @@ export function LaneEditor(props: LaneEditorProps) {
     if (drag.mode === "create" && frame.id) drag.id = frame.id;
     emit(frame.events, false);
     onSeek(frame.seek);
+    clearNudgePill();
     setPill(frame.seek);
   };
 
@@ -318,7 +330,19 @@ export function LaneEditor(props: LaneEditorProps) {
       if (next && !sameEvents(next, current)) {
         emit(next, true);
         const moved = next.find((y) => y.id === x.id);
-        if (moved) setAnnouncement(regionLabel(moved));
+        if (moved) {
+          setAnnouncement(regionLabel(moved));
+          // Show the frame being marked, as an edge drag does: seek to the edge
+          // that moved (Shift moves the end) and show the pill for a moment.
+          const edge = e.shiftKey ? moved.end : moved.start;
+          onSeek(edge);
+          clearNudgePill();
+          setPill(edge);
+          nudgePillTimer.current = setTimeout(() => {
+            nudgePillTimer.current = null;
+            setPill(null);
+          }, NUDGE_PILL_MS);
+        }
       }
     } else if (e.key === "Delete" || e.key === "Backspace") {
       e.preventDefault();

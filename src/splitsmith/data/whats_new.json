@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "breakdown-nudge-shows-the-frame",
+      "date": "2026-10-11",
+      "title": "Nudging a region shows the frame",
+      "body": "In Breakdown, moving a region's start or end with the arrow keys now takes the video to that frame and shows its time, as dragging the edge does."
+    },
+    {
       "id": "logos-sharp-and-clear",
       "date": "2026-10-11",
       "title": "Logos stay sharp and clear of text",
