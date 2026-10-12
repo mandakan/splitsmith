@@ -576,31 +576,34 @@ def test_backfill_web_trims_cuts_only_missing_or_stale(tmp_path: Path) -> None:
 
     from splitsmith.config import WebTrimConfig
     from splitsmith.trim import backfill_web_trims
+    from tests.media_bytes import tiny_mp4
+
+    web_bytes = tiny_mp4(duration_s=2.0)
 
     d = tmp_path / "trimmed"
     d.mkdir()
     missing = _touch(d / "stage1_cam_aaa_trimmed.mp4")
     _touch(d / "stage2_cam_bbb_trimmed.mp4")
     fresh_web = _touch(d / "stage2_cam_bbb_web.mp4")
-    fresh_web.write_bytes(b"W")
+    fresh_web.write_bytes(tiny_mp4())
     stale = _touch(d / "stage3_cam_ccc_trimmed.mp4")
     stale_web = _touch(d / "stage3_cam_ccc_web.mp4")
-    stale_web.write_bytes(b"W")
+    stale_web.write_bytes(tiny_mp4())
     os.utime(stale_web, (1, 1))  # older than its trim
     _touch(d / "stage9_cam_ddd_trimmed.params.json")  # not a clip
     _touch(d / "other.mp4")  # not a trim
 
     def runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
-        Path(cmd[-1]).write_bytes(b"WEB")
+        Path(cmd[-1]).write_bytes(web_bytes)
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
 
     cut, errors = backfill_web_trims(d, WebTrimConfig(), ffmpeg_binary="ffmpeg", runner=runner)
 
     assert errors == []
     assert sorted(p.name for p in cut) == ["stage1_cam_aaa_web.mp4", "stage3_cam_ccc_web.mp4"]
-    assert (d / "stage1_cam_aaa_web.mp4").read_bytes() == b"WEB"
-    assert (d / "stage3_cam_ccc_web.mp4").read_bytes() == b"WEB"
-    assert fresh_web.read_bytes() == b"W"
+    assert (d / "stage1_cam_aaa_web.mp4").read_bytes() == web_bytes
+    assert (d / "stage3_cam_ccc_web.mp4").read_bytes() == web_bytes
+    assert fresh_web.read_bytes() == tiny_mp4()
     assert not list(d.glob("*.partial.mp4"))
     assert missing.exists() and stale.exists()
 
@@ -608,6 +611,9 @@ def test_backfill_web_trims_cuts_only_missing_or_stale(tmp_path: Path) -> None:
 def test_backfill_web_trims_reports_failures_and_continues(tmp_path: Path) -> None:
     from splitsmith.config import WebTrimConfig
     from splitsmith.trim import backfill_web_trims
+    from tests.media_bytes import tiny_mp4
+
+    web_bytes = tiny_mp4(duration_s=2.0)
 
     d = tmp_path / "trimmed"
     d.mkdir()
@@ -617,7 +623,7 @@ def test_backfill_web_trims_reports_failures_and_continues(tmp_path: Path) -> No
     def runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
         if "stage1_" in cmd[-1]:
             raise subprocess.CalledProcessError(1, cmd, stderr="bad stream")
-        Path(cmd[-1]).write_bytes(b"WEB")
+        Path(cmd[-1]).write_bytes(web_bytes)
         return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
 
     cut, errors = backfill_web_trims(d, WebTrimConfig(), ffmpeg_binary="ffmpeg", runner=runner)
@@ -634,3 +640,96 @@ def test_backfill_web_trims_missing_dir_is_a_noop(tmp_path: Path) -> None:
 
     cut, errors = backfill_web_trims(tmp_path / "nope", WebTrimConfig(), ffmpeg_binary="ffmpeg")
     assert cut == [] and errors == []
+
+
+def test_two_writers_of_one_rendition_never_share_a_partial(tmp_path: Path) -> None:
+    """The 2026-09-27 corruption: every process wrote <stem>.partial.mp4.
+    Two concurrent writers now write their own partials, the lock makes the
+    second find the first's valid file, and nothing interleaves."""
+    import threading
+
+    from splitsmith.config import WebTrimConfig
+    from splitsmith.trim import web_trim_path, write_web_rendition
+    from tests.media_bytes import tiny_mp4
+
+    d = tmp_path / "trimmed"
+    d.mkdir()
+    trimmed = d / "stage1_cam_aaa_trimmed.mp4"
+    trimmed.write_bytes(tiny_mp4(duration_s=10))
+    outputs: list[str] = []
+    started = threading.Event()
+    release = threading.Event()
+
+    def runner(cmd, **kwargs):
+        out = Path(cmd[-1])
+        outputs.append(out.name)
+        data = tiny_mp4(duration_s=10)
+        with out.open("wb") as fh:
+            fh.write(data[: len(data) // 2])
+            started.set()
+            release.wait(5)
+            fh.write(data[len(data) // 2 :])
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+    errors: list[BaseException] = []
+
+    def work() -> None:
+        try:
+            write_web_rendition(trimmed, WebTrimConfig(), runner=runner)
+        except BaseException as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    a = threading.Thread(target=work)
+    b = threading.Thread(target=work)
+    a.start()
+    started.wait(5)
+    b.start()
+    release.set()
+    a.join(10)
+    b.join(10)
+    assert not errors
+    assert len(outputs) == 1, "the second writer must find the first's rendition, not encode again"
+    assert outputs[0].endswith(".partial.mp4") and outputs[0] != "stage1_cam_aaa_web.partial.mp4"
+    from splitsmith.media_check import valid_mp4
+
+    assert valid_mp4(web_trim_path(trimmed)).ok
+
+
+def test_a_rendition_that_fails_the_check_is_never_published(tmp_path: Path) -> None:
+    from splitsmith.config import WebTrimConfig
+    from splitsmith.trim import FFmpegError, web_trim_path, write_web_rendition
+    from tests.media_bytes import corrupt_moov_mp4, tiny_mp4
+
+    d = tmp_path / "trimmed"
+    d.mkdir()
+    trimmed = d / "stage1_cam_aaa_trimmed.mp4"
+    trimmed.write_bytes(tiny_mp4(duration_s=10))
+
+    def runner(cmd, **kwargs):
+        Path(cmd[-1]).write_bytes(corrupt_moov_mp4())
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+    with pytest.raises(FFmpegError, match="check"):
+        write_web_rendition(trimmed, WebTrimConfig(), runner=runner)
+    assert not web_trim_path(trimmed).exists()
+    assert not list(d.glob("*.partial.mp4"))
+
+
+def test_backfill_recuts_a_corrupt_rendition(tmp_path: Path) -> None:
+    from splitsmith.config import WebTrimConfig
+    from splitsmith.trim import backfill_web_trims
+    from tests.media_bytes import corrupt_moov_mp4, tiny_mp4
+
+    d = tmp_path / "trimmed"
+    d.mkdir()
+    trimmed = d / "stage1_cam_aaa_trimmed.mp4"
+    trimmed.write_bytes(tiny_mp4(duration_s=10))
+    (d / "stage1_cam_aaa_web.mp4").write_bytes(corrupt_moov_mp4())  # newer than the trim
+
+    def runner(cmd, **kwargs):
+        Path(cmd[-1]).write_bytes(tiny_mp4(duration_s=10))
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+    cut, errors = backfill_web_trims(d, WebTrimConfig(), runner=runner)
+    assert errors == []
+    assert [p.name for p in cut] == ["stage1_cam_aaa_web.mp4"]

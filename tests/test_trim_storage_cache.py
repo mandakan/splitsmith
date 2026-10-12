@@ -25,6 +25,15 @@ from splitsmith.storage import FilesystemStorage
 from splitsmith.trim import web_trim_path
 from splitsmith.ui import audio as audio_helpers
 from splitsmith.ui.audio import ensure_video_audit_trim, trimmed_video_path
+from tests.media_bytes import tiny_mp4
+
+TRIM_MP4 = tiny_mp4(duration_s=1.0)
+PRECUT_MP4 = tiny_mp4(duration_s=2.0)
+STALECUT_MP4 = tiny_mp4(duration_s=3.0)
+WEB_MP4 = tiny_mp4(duration_s=4.0)
+PREWEB_MP4 = tiny_mp4(duration_s=5.0)
+OLDWEB_MP4 = tiny_mp4(duration_s=6.0)
+W_MP4 = tiny_mp4(duration_s=7.0)
 
 STAGE = 1
 STAGE_TIME = 10.0
@@ -54,13 +63,13 @@ def fake_trim(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
         calls.append(dict(kwargs))
         dest = Path(kwargs["output_path"])  # type: ignore[arg-type]
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(b"MP4DATA")
+        dest.write_bytes(TRIM_MP4)
 
     monkeypatch.setattr("splitsmith.trim.trim_video", fake_trim_video)
 
     def fake_web(input_path: Path, output_path: Path, config: object, **kwargs: object) -> None:
         calls.append({"web": True, "input_path": input_path, "output_path": output_path})
-        Path(output_path).write_bytes(b"WEBDATA")
+        Path(output_path).write_bytes(WEB_MP4)
 
     monkeypatch.setattr("splitsmith.trim.transcode_web_trim", fake_web)
     return calls
@@ -137,7 +146,7 @@ def test_local_mode_no_storage_runs_trim_and_never_touches_storage(
     output = _cut(root, project, video, source)
 
     assert output.exists()
-    assert output.read_bytes() == b"MP4DATA"
+    assert output.read_bytes() == TRIM_MP4
     assert len(_trim_calls(fake_trim)) == 1
 
 
@@ -153,12 +162,12 @@ def test_storage_cache_hit_skips_trim(tmp_path: Path, fake_trim: list[dict[str, 
     project.bind_storage(storage, scope=SCOPE)
 
     mp4_key, params_key = _trim_keys(project, video, root)
-    storage.write_bytes(mp4_key, b"PRECUT")
+    storage.write_bytes(mp4_key, PRECUT_MP4)
     storage.write_bytes(params_key, (json.dumps(_current_params(project)) + "\n").encode("utf-8"))
 
     output = _cut(root, project, video, source)
 
-    assert output.read_bytes() == b"PRECUT"
+    assert output.read_bytes() == PRECUT_MP4
     assert len(_trim_calls(fake_trim)) == 0  # never re-cut
 
 
@@ -177,11 +186,11 @@ def test_cold_cut_pushes_mp4_and_params_to_storage(
 
     output = _cut(root, project, video, source)
 
-    assert output.read_bytes() == b"MP4DATA"
+    assert output.read_bytes() == TRIM_MP4
     assert len(_trim_calls(fake_trim)) == 1
     mp4_key, params_key = _trim_keys(project, video, root)
     assert storage.exists(mp4_key)
-    assert storage.read_bytes(mp4_key) == b"MP4DATA"
+    assert storage.read_bytes(mp4_key) == TRIM_MP4
     assert storage.exists(params_key)
     assert json.loads(storage.read_bytes(params_key)) == _current_params(project)
 
@@ -219,14 +228,14 @@ def test_storage_params_mismatch_recuts(tmp_path: Path, fake_trim: list[dict[str
     project.bind_storage(storage, scope=SCOPE)
 
     mp4_key, params_key = _trim_keys(project, video, root)
-    storage.write_bytes(mp4_key, b"STALECUT")
+    storage.write_bytes(mp4_key, STALECUT_MP4)
     stale = _current_params(project) | {"beep_time": 99.0}
     storage.write_bytes(params_key, (json.dumps(stale) + "\n").encode("utf-8"))
 
     output = _cut(root, project, video, source)
 
     assert len(_trim_calls(fake_trim)) == 1  # re-cut because params didn't match
-    assert output.read_bytes() == b"MP4DATA"
+    assert output.read_bytes() == TRIM_MP4
 
 
 def test_storage_push_failure_does_not_break_cut(
@@ -251,7 +260,7 @@ def test_storage_push_failure_does_not_break_cut(
     project.bind_storage(storage, scope=SCOPE)
 
     output = _cut(root, project, video, source)
-    assert output.read_bytes() == b"MP4DATA"
+    assert output.read_bytes() == TRIM_MP4
 
 
 def test_storage_pull_torn_file_falls_through_to_trim(
@@ -270,7 +279,7 @@ def test_storage_pull_torn_file_falls_through_to_trim(
     project, video = _project_with_stage_video(root, source)
     project.bind_storage(storage, scope=SCOPE)
     mp4_key, params_key = _trim_keys(project, video, root)
-    storage.write_bytes(mp4_key, b"PRECUT")
+    storage.write_bytes(mp4_key, PRECUT_MP4)
     storage.write_bytes(params_key, (json.dumps(_current_params(project)) + "\n").encode("utf-8"))
 
     def boom(path: str) -> object:
@@ -280,7 +289,7 @@ def test_storage_pull_torn_file_falls_through_to_trim(
 
     output = _cut(root, project, video, source)
 
-    assert output.read_bytes() == b"MP4DATA"
+    assert output.read_bytes() == TRIM_MP4
     assert len(_trim_calls(fake_trim)) == 1
 
 
@@ -322,7 +331,7 @@ def test_trim_available_reports_storage_without_download(
     assert audio_helpers.trim_available(project, output) is False
 
     mp4_key, _ = _trim_keys(project, video, root)
-    storage.write_bytes(mp4_key, b"PRECUT")
+    storage.write_bytes(mp4_key, PRECUT_MP4)
 
     # Still no local copy, but storage has it -> available, no download.
     assert audio_helpers.trim_available(project, output) is True
@@ -525,12 +534,12 @@ def test_pull_trimmed_video_mirrors_from_storage(tmp_path: Path, fake_trim: list
     project, video = _project_with_stage_video(root, source)
     project.bind_storage(storage, scope=SCOPE)
     mp4_key, _ = _trim_keys(project, video, root)
-    storage.write_bytes(mp4_key, b"PRECUT")
+    storage.write_bytes(mp4_key, PRECUT_MP4)
 
     pulled = audio_helpers.pull_trimmed_video(root, STAGE, video, project=project)
 
     assert pulled.exists()
-    assert pulled.read_bytes() == b"PRECUT"
+    assert pulled.read_bytes() == PRECUT_MP4
     assert len(_trim_calls(fake_trim)) == 0
 
 
@@ -554,7 +563,7 @@ def test_cold_cut_also_cuts_web_rendition_from_the_trim(
     output = _cut(root, project, video, source)
 
     web = web_trim_path(output)
-    assert web.read_bytes() == b"WEBDATA"
+    assert web.read_bytes() == WEB_MP4
     (call,) = _web_calls(fake_trim)
     assert call["input_path"] == output
 
@@ -570,7 +579,7 @@ def test_cold_cut_pushes_web_rendition_to_storage(tmp_path: Path, fake_trim: lis
 
     _cut(root, project, video, source)
 
-    assert storage.read_bytes(_web_key(project, video, root)) == b"WEBDATA"
+    assert storage.read_bytes(_web_key(project, video, root)) == WEB_MP4
 
 
 def test_cache_hit_backfills_missing_web_rendition(
@@ -587,15 +596,15 @@ def test_cache_hit_backfills_missing_web_rendition(
     project, video = _project_with_stage_video(root, source)
     project.bind_storage(storage, scope=SCOPE)
     mp4_key, params_key = _trim_keys(project, video, root)
-    storage.write_bytes(mp4_key, b"PRECUT")
+    storage.write_bytes(mp4_key, PRECUT_MP4)
     storage.write_bytes(params_key, (json.dumps(_current_params(project)) + "\n").encode("utf-8"))
 
     output = _cut(root, project, video, source)
 
     assert len(_trim_calls(fake_trim)) == 0
     assert len(_web_calls(fake_trim)) == 1
-    assert web_trim_path(output).read_bytes() == b"WEBDATA"
-    assert storage.read_bytes(_web_key(project, video, root)) == b"WEBDATA"
+    assert web_trim_path(output).read_bytes() == WEB_MP4
+    assert storage.read_bytes(_web_key(project, video, root)) == WEB_MP4
 
 
 def test_cache_hit_pulls_web_rendition_instead_of_transcoding(
@@ -609,14 +618,14 @@ def test_cache_hit_pulls_web_rendition_instead_of_transcoding(
     project, video = _project_with_stage_video(root, source)
     project.bind_storage(storage, scope=SCOPE)
     mp4_key, params_key = _trim_keys(project, video, root)
-    storage.write_bytes(mp4_key, b"PRECUT")
+    storage.write_bytes(mp4_key, PRECUT_MP4)
     storage.write_bytes(params_key, (json.dumps(_current_params(project)) + "\n").encode("utf-8"))
-    storage.write_bytes(_web_key(project, video, root), b"PREWEB")
+    storage.write_bytes(_web_key(project, video, root), PREWEB_MP4)
 
     output = _cut(root, project, video, source)
 
     assert len(_web_calls(fake_trim)) == 0
-    assert web_trim_path(output).read_bytes() == b"PREWEB"
+    assert web_trim_path(output).read_bytes() == PREWEB_MP4
 
 
 def test_local_cache_hit_does_not_retranscode_web(tmp_path: Path, fake_trim: list[dict[str, object]]) -> None:
@@ -638,11 +647,11 @@ def test_recut_replaces_stale_web_rendition(tmp_path: Path, fake_trim: list[dict
     project, video = _project_with_stage_video(root, source)
     output = _cut(root, project, video, source)
     web = web_trim_path(output)
-    web.write_bytes(b"OLDWEB")
+    web.write_bytes(OLDWEB_MP4)
 
     ensure_video_audit_trim(root, STAGE, video, source, BEEP_TIME + 1.0, STAGE_TIME, project=project)
 
-    assert web.read_bytes() == b"WEBDATA"
+    assert web.read_bytes() == WEB_MP4
     assert len(_web_calls(fake_trim)) == 2
 
 
@@ -663,7 +672,7 @@ def test_web_transcode_failure_does_not_fail_the_trim_job(
 
     output = _cut(root, project, video, source)
 
-    assert output.read_bytes() == b"MP4DATA"
+    assert output.read_bytes() == TRIM_MP4
     assert not web_trim_path(output).exists()
 
 
@@ -690,6 +699,6 @@ def test_web_trim_available_checks_local_then_storage(tmp_path: Path) -> None:
     output = trimmed_video_path(root, STAGE, video, project=project)
 
     assert audio_helpers.web_trim_available(project, output) is False
-    storage.write_bytes(_web_key(project, video, root), b"W")
+    storage.write_bytes(_web_key(project, video, root), W_MP4)
     assert audio_helpers.web_trim_available(project, output) is True
     assert not web_trim_path(output).exists()  # a HEAD, never a download

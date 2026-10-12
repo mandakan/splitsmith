@@ -67,13 +67,15 @@ def test_each_stage_streams_its_own_trim(tmp_path: Path) -> None:
 
 
 def test_each_stage_streams_its_own_rendition(tmp_path: Path) -> None:
+    from tests.media_bytes import tiny_mp4
+
     client, base, trims = _bootstrap(tmp_path)
     for n, trim in trims.items():
         st = trim.stat()
         os.utime(trim, ns=(st.st_atime_ns, st.st_mtime_ns - 10_000_000_000))
-        trim_module.web_trim_path(trim).write_bytes(f"stage{n} web".encode())
-    assert _get(client, base, kind="web", stage=2).content == b"stage2 web"
-    assert _get(client, base, kind="web", stage=1).content == b"stage1 web"
+        trim_module.web_trim_path(trim).write_bytes(tiny_mp4(duration_s=float(n)))
+    assert _get(client, base, kind="web", stage=2).content == tiny_mp4(duration_s=2.0)
+    assert _get(client, base, kind="web", stage=1).content == tiny_mp4(duration_s=1.0)
 
 
 def test_without_a_stage_the_first_registration_still_serves(tmp_path: Path) -> None:

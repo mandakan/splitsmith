@@ -44,6 +44,7 @@ def _enable_auto_beep(monkeypatch: pytest.MonkeyPatch) -> None:
 
 from tests.conftest import scaffold_match as _scaffold_match  # noqa: E402
 from tests.conftest import submit_fn  # noqa: E402
+from tests.media_bytes import tiny_mp4  # noqa: E402
 
 _SCOPED_PREFIXES = (
     "/api/shooters/",
@@ -2446,7 +2447,7 @@ def test_detect_beep_auto_trims(tmp_path: Path, monkeypatch) -> None:
     def fake_trim_video(**kwargs):  # type: ignore[no-untyped-def]
         trim_calls.append(kwargs)
         Path(kwargs["output_path"]).parent.mkdir(parents=True, exist_ok=True)
-        Path(kwargs["output_path"]).write_bytes(b"TRIMMED_MP4")
+        Path(kwargs["output_path"]).write_bytes(tiny_mp4())
         return trim.TrimResult(output_path=kwargs["output_path"], start_time=1.5, end_time=23.5)
 
     monkeypatch.setattr(trim, "trim_video", fake_trim_video)
@@ -2615,7 +2616,7 @@ def test_post_trim_endpoint_produces_clip(tmp_path: Path, monkeypatch) -> None:
 
     def fake_trim_video(**kwargs):  # type: ignore[no-untyped-def]
         Path(kwargs["output_path"]).parent.mkdir(parents=True, exist_ok=True)
-        Path(kwargs["output_path"]).write_bytes(b"TRIMMED")
+        Path(kwargs["output_path"]).write_bytes(tiny_mp4())
         return trim.TrimResult(output_path=kwargs["output_path"], start_time=0.0, end_time=20.0)
 
     monkeypatch.setattr(trim, "trim_video", fake_trim_video)
@@ -2653,7 +2654,7 @@ def test_trim_invalidates_when_beep_changes(tmp_path: Path, monkeypatch) -> None
         invocations.append(kwargs)
         out = Path(kwargs["output_path"])
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_bytes(b"T")
+        out.write_bytes(tiny_mp4())
         return trim.TrimResult(output_path=out, start_time=0.0, end_time=15.0)
 
     monkeypatch.setattr(trim, "trim_video", fake_trim_video)
@@ -2712,7 +2713,7 @@ def test_trim_partial_filename_keeps_mp4_extension(tmp_path: Path, monkeypatch) 
         out = Path(kwargs["output_path"])
         captured.append(out)
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_bytes(b"T")
+        out.write_bytes(tiny_mp4())
         return trim.TrimResult(output_path=out, start_time=0.0, end_time=15.0)
 
     monkeypatch.setattr(trim, "trim_video", fake_trim_video)
@@ -2756,7 +2757,7 @@ def test_trim_endpoint_returns_existing_job_when_one_is_running(tmp_path: Path, 
         proceed.wait(timeout=2.0)
         out = Path(kwargs["output_path"])
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_bytes(b"T")
+        out.write_bytes(tiny_mp4())
         return trim.TrimResult(output_path=out, start_time=0.0, end_time=15.0)
 
     monkeypatch.setattr(trim, "trim_video", slow_trim)
@@ -2810,7 +2811,7 @@ def test_cancel_endpoint_aborts_running_trim(tmp_path: Path, monkeypatch) -> Non
             raise
         out = Path(kwargs["output_path"])
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_bytes(b"T")
+        out.write_bytes(tiny_mp4())
         return trim.TrimResult(output_path=out, start_time=0.0, end_time=15.0)
 
     monkeypatch.setattr(trim, "trim_video", slow_trim)
