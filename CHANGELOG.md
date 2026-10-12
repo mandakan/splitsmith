@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.65.2](https://github.com/mandakan/splitsmith/compare/v0.65.1...v0.65.2) (2026-10-12)
+
+
+### Bug Fixes
+
+* **audit:** the phone's whole-stage waveform sits under its shot marks ([#1443](https://github.com/mandakan/splitsmith/issues/1443)) ([d15e412](https://github.com/mandakan/splitsmith/commit/d15e412b668cc62400c89c2036e7b35e2fcb0eea))
+* **breakdown:** an arrow nudge seeks to the edge it moved ([#1437](https://github.com/mandakan/splitsmith/issues/1437)) ([efc91c1](https://github.com/mandakan/splitsmith/commit/efc91c1476e582cca0e155dadeb6fb5872eec70d))
+* **breakdown:** the video follows a dragged region edge; snapping can be turned off ([#1440](https://github.com/mandakan/splitsmith/issues/1440)) ([#1441](https://github.com/mandakan/splitsmith/issues/1441)) ([f0ac86d](https://github.com/mandakan/splitsmith/commit/f0ac86d6dd2984ca622c2121398d0af0f1d2a065))
+* **sync:** media uploads wait long enough for a part on a home uplink ([#1445](https://github.com/mandakan/splitsmith/issues/1445)) ([3e33668](https://github.com/mandakan/splitsmith/commit/3e33668a73684fcbe43923d05fb58e4ed82eb757))
+
 ## [0.65.1](https://github.com/mandakan/splitsmith/compare/v0.65.0...v0.65.1) (2026-10-11)
 
 
