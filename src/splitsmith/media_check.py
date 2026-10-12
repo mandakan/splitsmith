@@ -6,7 +6,9 @@ processes interleaved their bytes in one partial file and 62 renditions with a
 corrupt ``moov`` were renamed into place, trusted for being non-empty, and
 uploaded. The check needs the top-level boxes to tile the file, a ``moov``
 whose children parse inside it, a ``mvhd`` duration, and a video track
-(``hdlr`` ``vide``) with samples. A few milliseconds per file.
+(``hdlr`` ``vide``) with samples. It reads the top-level box headers and the
+``moov`` only, never the media data, so a gigabyte trim costs what a
+rendition does: a few milliseconds.
 """
 
 from __future__ import annotations
@@ -18,6 +20,10 @@ from pathlib import Path
 from pydantic import BaseModel
 
 _CONTAINERS = {b"moov", b"trak", b"mdia", b"minf", b"stbl", b"edts", b"dinf"}
+#: Deeper than any real track's nesting; a crafted file is invalid, not a crash.
+_MAX_DEPTH = 16
+#: A moov larger than this is not something our encodes write.
+_MAX_MOOV = 256 * 1024 * 1024
 
 
 class MediaCheck(BaseModel):
@@ -51,7 +57,9 @@ def _boxes(data: bytes, start: int, end: int):
         pos += size
 
 
-def _track(data: bytes, start: int, end: int) -> tuple[bytes | None, int]:
+def _track(data: bytes, start: int, end: int, depth: int = 0) -> tuple[bytes | None, int]:
+    if depth > _MAX_DEPTH:
+        raise _StructureError("boxes nested too deep")
     handler: bytes | None = None
     samples = 0
     for typ, s, e in _boxes(data, start, end):
@@ -60,24 +68,51 @@ def _track(data: bytes, start: int, end: int) -> tuple[bytes | None, int]:
         elif typ == b"stsz" and e - s >= 12:
             samples = struct.unpack(">I", data[s + 8 : s + 12])[0]
         elif typ in _CONTAINERS:
-            h, n = _track(data, s, e)
+            h, n = _track(data, s, e, depth + 1)
             handler = handler or h
             samples = samples or n
     return handler, samples
 
 
-def _check(data: bytes) -> MediaCheck:
-    if not data:
-        return MediaCheck(ok=False, reason="empty file")
-    moov = None
-    for typ, s, e in _boxes(data, 0, len(data)):
+def _moov_bytes(f, file_size: int) -> bytes | None:
+    """Walk the top-level boxes by their headers (seeking past ``mdat``);
+    the boxes must tile the file. Returns the last ``moov``'s payload."""
+    moov: tuple[int, int] | None = None
+    pos = 0
+    while pos < file_size:
+        if file_size - pos < 8:
+            raise _StructureError("box header runs past its parent")
+        f.seek(pos)
+        head = f.read(16)
+        size, typ = struct.unpack(">I4s", head[:8])
+        header = 8
+        if size == 1:
+            if len(head) < 16:
+                raise _StructureError("box header runs past its parent")
+            size = struct.unpack(">Q", head[8:16])[0]
+            header = 16
+        elif size == 0:
+            size = file_size - pos
+        if size < header or pos + size > file_size:
+            raise _StructureError(f"{typ.decode('latin1')} box overruns its parent")
         if typ == b"moov":
-            moov = (s, e)
+            moov = (pos + header, pos + size)
+        pos += size
     if moov is None:
-        return MediaCheck(ok=False, reason="no moov box")
+        return None
+    if moov[1] - moov[0] > _MAX_MOOV:
+        raise _StructureError("moov box implausibly large")
+    f.seek(moov[0])
+    data = f.read(moov[1] - moov[0])
+    if len(data) != moov[1] - moov[0]:
+        raise _StructureError("moov box truncated")
+    return data
+
+
+def _check_moov(data: bytes) -> MediaCheck:
     duration: float | None = None
     video_samples = 0
-    for typ, s, e in _boxes(data, *moov):
+    for typ, s, e in _boxes(data, 0, len(data)):
         if typ == b"mvhd" and e - s >= 20:
             version = data[s]
             if version == 1 and e - s >= 32:
@@ -99,11 +134,19 @@ def valid_mp4(path: Path) -> MediaCheck:
     """Structural check of the MP4 at ``path``; a missing or unreadable file
     is invalid, never an error."""
     try:
-        data = path.read_bytes()
+        with path.open("rb") as f:
+            file_size = f.seek(0, 2)
+            if file_size == 0:
+                return MediaCheck(ok=False, reason="empty file")
+            moov = _moov_bytes(f, file_size)
     except OSError as exc:
         return MediaCheck(ok=False, reason=f"unreadable: {exc.strerror or exc}")
+    except _StructureError as exc:
+        return MediaCheck(ok=False, reason=f"moov or box structure broken: {exc}")
+    if moov is None:
+        return MediaCheck(ok=False, reason="no moov box")
     try:
-        return _check(data)
+        return _check_moov(moov)
     except _StructureError as exc:
         return MediaCheck(ok=False, reason=f"moov or box structure broken: {exc}")
 

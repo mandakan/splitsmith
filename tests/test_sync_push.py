@@ -72,7 +72,7 @@ from splitsmith.sync import beep_snippets, push
 from splitsmith.sync.client import HostedSyncClient, SyncClientError
 from splitsmith.sync.plan import DocItem, MediaItem, build_push_plan
 from splitsmith.sync.push import MediaItemTiming, PushReport, format_push_message, run_push
-from splitsmith.sync.state import SyncState, load_sync_state
+from splitsmith.sync.state import SyncedItem, SyncState, load_sync_state, save_sync_state
 from tests.media_bytes import tiny_mp4
 
 TRIMMED_NAME = "stage1_cam_abc123_trimmed.mp4"
@@ -894,6 +894,36 @@ def test_a_missing_rendition_stays_on_hosted_until_its_new_trim_is_there(tmp_pat
 
     # Before the push: the recorded trim (if any) is not the local one.
     assert stale_web_renditions(root, load_sync_state(root)) == []
+
+
+def test_a_corrupt_local_rendition_never_costs_hosted_its_full_trim(tmp_path: Path) -> None:
+    """Review I2: a corrupt rendition was pushed, its re-cut failed. The plan
+    sends the full trim (the rendition fails the check); the gc must not
+    delete it in the same push, and the corrupt rendition on hosted goes once
+    hosted has that trim, so hosted plays the trim, not the broken file."""
+    from tests.media_bytes import corrupt_moov_mp4
+
+    root, _ = _build_match(tmp_path)
+    for trim in (root / "shooters").glob("*/trimmed/*_trimmed.mp4"):
+        trim.with_name(trim.name.replace("_trimmed.mp4", "_web.mp4")).write_bytes(corrupt_moov_mp4())
+    state = load_sync_state(root)
+    fake = _FakeHosted()
+    # What a pre-fix desktop pushed: the corrupt rendition, no full trim.
+    match_id = match_model.Match.load(root).match_id
+    for web in (root / "shooters").glob("*/trimmed/*_web.mp4"):
+        st = web.stat()
+        key = f"matches/{match_id}/shooters/{web.parent.parent.name}/trimmed/{web.name}"
+        state.items[key] = SyncedItem(sha256="x", size=st.st_size, mtime_ns=st.st_mtime_ns)
+    save_sync_state(root, state)
+
+    run_push(root, client=fake.clients(), full_media=False)
+    run_push(root, client=fake.clients(), full_media=False)
+
+    items = load_sync_state(root).items
+    assert any(k.endswith("_trimmed.mp4") for k in items)
+    assert not any(c.startswith("media_delete:") and c.endswith("_trimmed.mp4") for c in fake.calls)
+    assert any(c.startswith("media_delete:") and c.endswith("_web.mp4") for c in fake.calls)
+    assert not any(k.endswith("_web.mp4") for k in items)
 
 
 # --- identity logos (slice 3, #1243) ----------------------------------------------

@@ -79,3 +79,50 @@ def test_a_real_ffmpeg_file_and_a_full_range_one_pass(tmp_path: Path) -> None:
         check=True,
     )
     assert media_check.valid_mp4(full_range).ok
+
+
+def test_the_check_reads_the_moov_not_the_whole_file(tmp_path: Path) -> None:
+    """A 4K trim is a gigabyte; the check runs on every trim at each
+    reconcile. It must read box headers and the moov only (review I3)."""
+    import struct
+    import tracemalloc
+
+    from tests.media_bytes import tiny_mp4
+
+    head = tiny_mp4()
+    mdat_payload = 256 * 1024 * 1024
+    clip = tmp_path / "big_trimmed.mp4"
+    with clip.open("wb") as f:
+        f.write(head)
+        f.write(struct.pack(">I4s", 8 + mdat_payload, b"mdat"))
+        f.truncate(len(head) + 8 + mdat_payload)  # sparse: no disk, full size
+    tracemalloc.start()
+    try:
+        check = media_check.valid_mp4(clip)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert check.ok, check.reason
+    assert peak < 8 * 1024 * 1024
+
+
+def test_a_truncated_mdat_is_invalid(tmp_path: Path) -> None:
+    import struct
+
+    from tests.media_bytes import tiny_mp4
+
+    clip = tmp_path / "cut_trimmed.mp4"
+    clip.write_bytes(tiny_mp4() + struct.pack(">I4s", 8 + 1000, b"mdat") + b"\x00" * 10)
+    assert not media_check.valid_mp4(clip).ok
+
+
+def test_deeply_nested_boxes_are_invalid_not_a_crash(tmp_path: Path) -> None:
+    import struct
+
+    payload = b""
+    for _ in range(5000):
+        payload = struct.pack(">I4s", 8 + len(payload), b"trak") + payload
+    moov = struct.pack(">I4s", 8 + len(payload), b"moov") + payload
+    clip = tmp_path / "nested.mp4"
+    clip.write_bytes(moov)
+    assert not media_check.valid_mp4(clip).ok

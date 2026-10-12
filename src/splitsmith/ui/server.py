@@ -241,6 +241,7 @@ from ..match_project import (
     StageVideo,
     VideoRole,
     camera_labels,
+    is_stub_audit,
 )
 from ..match_registry import MatchRegistry
 from ..mp4_render import RenderStep
@@ -689,6 +690,12 @@ def _submit_reconcile_steps(state: AppState, match_root: Path) -> list[Reconcile
         args: dict[str, Any] = {"slug": step.slug, "stage_number": step.stage_number}
         if step.kind == "trim":
             args["video_id"] = step.video_id
+            # A trim healed under an audited stage (its file was gone or
+            # invalid, spec 2026-10-12) must not chain detection over real
+            # shots; video_step never detects over them either.
+            audit_doc = audits.get(step.slug, {}).get(step.stage_number)
+            if audit_doc is not None and not is_stub_audit(audit_doc):
+                args["chain_shot_detect"] = False
         key = _reconcile_key(current_match_id.get(), step.kind, step.slug, step.stage_number)
         state.reconcile_jobs[key] = (match_root, step)
         run_sync(

@@ -28,6 +28,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from .. import match_model
+from ..media_check import valid_mp4_cached
 from ..observability import PhaseTimer
 from .auto_state import load_auto_prefs
 from .base import save_base_doc
@@ -71,7 +72,7 @@ def removable_full_trims(match_root: Path, sync_state: SyncState) -> list[str]:
         if not key.endswith(TRIMMED_SUFFIX):
             continue
         web_key = web_key_for(key)
-        if web_key in sync_state.items and _local_media_path(match_root, web_key).is_file():
+        if web_key in sync_state.items and _rendition_usable(_local_media_path(match_root, web_key)):
             removable.append(key)
     return removable
 
@@ -90,7 +91,7 @@ def stale_web_renditions(match_root: Path, sync_state: SyncState) -> list[str]:
     """
     stale: list[str] = []
     for key in sync_state.items:
-        if not key.endswith(WEB_SUFFIX) or _local_media_path(match_root, key).exists():
+        if not key.endswith(WEB_SUFFIX) or _rendition_usable(_local_media_path(match_root, key)):
             continue
         trim_key = trim_key_for(key)
         recorded = sync_state.items.get(trim_key)
@@ -101,6 +102,14 @@ def stale_web_renditions(match_root: Path, sync_state: SyncState) -> list[str]:
         if recorded.size == st.st_size and recorded.mtime_ns == st.st_mtime_ns:
             stale.append(key)
     return stale
+
+
+def _rendition_usable(path: Path) -> bool:
+    """A local rendition counts only when it passes the structural check,
+    the same rule the planner uses (spec 2026-10-12): an invalid one is never
+    pushed, so it must neither take hosted's full trim away nor keep the
+    broken copy on hosted alive."""
+    return path.is_file() and valid_mp4_cached(path).ok
 
 
 def _local_media_path(match_root: Path, remote_key: str) -> Path:
