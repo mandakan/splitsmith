@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.65.4](https://github.com/mandakan/splitsmith/compare/v0.65.3...v0.65.4) (2026-10-12)
+
+
+### Bug Fixes
+
+* **video:** a paused player in Safari always sits on a frame ([#1449](https://github.com/mandakan/splitsmith/issues/1449)) ([aebe86d](https://github.com/mandakan/splitsmith/commit/aebe86d303ddaf645b3d2cdad4ec8b8386c86cc0))
+
 ## [0.65.3](https://github.com/mandakan/splitsmith/compare/v0.65.2...v0.65.3) (2026-10-12)
 
 
