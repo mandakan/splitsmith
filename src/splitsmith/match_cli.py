@@ -413,6 +413,23 @@ _EXPORT_FORMATS = ("fcpxml", "fcp7xml", "mp4")
 _TITLE_KINDS = ("none", "slate", "lower-third")
 
 
+@match_app.command("verify-media")
+def verify_media(
+    match_path: Path = typer.Argument(..., exists=True, readable=True, help="Match folder to check."),
+) -> None:
+    """Will this match play on splitsmith.app? One line per stage video that
+    is not playable, then the counts. Exit 1 when anything is blocked."""
+    from .sync.verify import verify_match_media
+
+    rows = verify_match_media(match_path)
+    for r in rows:
+        if r.state != "playable":
+            typer.echo(f"{r.state:8} {r.slug} stage {r.stage_number} {r.video}: {r.reason}")
+    counts = {s: sum(r.state == s for r in rows) for s in ("playable", "healing", "blocked")}
+    typer.echo(f"{counts['playable']} playable, {counts['healing']} healing, {counts['blocked']} blocked")
+    raise typer.Exit(1 if counts["blocked"] else 0)
+
+
 @match_app.command("export")
 def export(
     match_path: Path = typer.Argument(..., exists=True, readable=True, help="Match folder."),
