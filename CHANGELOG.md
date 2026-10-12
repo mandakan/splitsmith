@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.65.3](https://github.com/mandakan/splitsmith/compare/v0.65.2...v0.65.3) (2026-10-12)
+
+
+### Bug Fixes
+
+* **video:** Safari shows a stage video's first frame before Play ([#1446](https://github.com/mandakan/splitsmith/issues/1446)) ([c0b7588](https://github.com/mandakan/splitsmith/commit/c0b75885e70af63fb66543426fb4d37cc5dcaec1))
+
 ## [0.65.2](https://github.com/mandakan/splitsmith/compare/v0.65.1...v0.65.2) (2026-10-12)
 
 
