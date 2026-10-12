@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.66.0](https://github.com/mandakan/splitsmith/compare/v0.65.4...v0.66.0) (2026-10-12)
+
+
+### Features
+
+* **audit:** place shots on their rise foot, at any zoom, and seat them on it ([#1454](https://github.com/mandakan/splitsmith/issues/1454)) ([86544b4](https://github.com/mandakan/splitsmith/commit/86544b40b4d6a01df268124b446a01f01048abf6))
+* **lab:** Promote stages shows which fixtures their audits have moved on from ([#1452](https://github.com/mandakan/splitsmith/issues/1452)) ([c2000ae](https://github.com/mandakan/splitsmith/commit/c2000aefda411703ee35c79935dd9fd80e6e915e))
+
 ## [0.65.4](https://github.com/mandakan/splitsmith/compare/v0.65.3...v0.65.4) (2026-10-12)
 
 
