@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.66.1](https://github.com/mandakan/splitsmith/compare/v0.66.0...v0.66.1) (2026-10-12)
+
+
+### Bug Fixes
+
+* **media:** derived media heals itself (only valid files published, legacy caches renamed, files over flags) ([#1456](https://github.com/mandakan/splitsmith/issues/1456)) ([cd45354](https://github.com/mandakan/splitsmith/commit/cd45354ddc79966b5d8f219985eb9432b6783320))
+
 ## [0.66.0](https://github.com/mandakan/splitsmith/compare/v0.65.4...v0.66.0) (2026-10-12)
 
 
