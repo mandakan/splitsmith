@@ -73,6 +73,7 @@ from splitsmith.sync.client import HostedSyncClient, SyncClientError
 from splitsmith.sync.plan import DocItem, MediaItem, build_push_plan
 from splitsmith.sync.push import MediaItemTiming, PushReport, format_push_message, run_push
 from splitsmith.sync.state import SyncState, load_sync_state
+from tests.media_bytes import tiny_mp4
 
 TRIMMED_NAME = "stage1_cam_abc123_trimmed.mp4"
 SIDECAR_NAME = "stage1_cam_abc123_trimmed.params.json"
@@ -102,7 +103,7 @@ def _build_match(tmp_path: Path) -> tuple[Path, str]:
 
     trimmed_dir = shooter_root / "trimmed"
     trimmed_dir.mkdir(exist_ok=True)
-    (trimmed_dir / TRIMMED_NAME).write_bytes(b"x" * 1024)
+    (trimmed_dir / TRIMMED_NAME).write_bytes(tiny_mp4())
     (trimmed_dir / SIDECAR_NAME).write_text(json.dumps({"pre_buffer_seconds": 5.0}), encoding="utf-8")
 
     audit_dir = shooter_root / "audit"
@@ -795,7 +796,7 @@ def test_push_gc_failure_keeps_the_key_for_retry(tmp_path: Path, monkeypatch: py
 
 def _add_web(root: Path) -> None:
     for trim in (root / "shooters").glob("*/trimmed/*_trimmed.mp4"):
-        trim.with_name(trim.name.replace("_trimmed.mp4", "_web.mp4")).write_bytes(b"w" * 32)
+        trim.with_name(trim.name.replace("_trimmed.mp4", "_web.mp4")).write_bytes(tiny_mp4(duration_s=3.0))
 
 
 def test_web_only_push_removes_full_trims_whose_rendition_is_on_hosted(tmp_path: Path) -> None:
@@ -859,7 +860,7 @@ def test_a_full_trim_reuploaded_after_its_rendition_went_away_is_not_deleted(tmp
     for web in (root / "shooters").glob("*/trimmed/*_web.mp4"):
         web.unlink()
     for trim in (root / "shooters").glob("*/trimmed/*_trimmed.mp4"):
-        trim.write_bytes(b"y" * 2048)  # re-cut around the moved beep
+        trim.write_bytes(tiny_mp4(duration_s=2.0))  # re-cut around the moved beep
         os.utime(trim, None)
     fake.calls.clear()
 
@@ -886,7 +887,7 @@ def test_a_missing_rendition_stays_on_hosted_until_its_new_trim_is_there(tmp_pat
     for web in (root / "shooters").glob("*/trimmed/*_web.mp4"):
         web.unlink()
     for trim in (root / "shooters").glob("*/trimmed/*_trimmed.mp4"):
-        trim.write_bytes(b"y" * 2048)
+        trim.write_bytes(tiny_mp4(duration_s=2.0))
         os.utime(trim, None)
 
     from splitsmith.sync.push import stale_web_renditions

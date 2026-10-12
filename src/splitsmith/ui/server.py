@@ -260,6 +260,7 @@ from ..sync.reconcile import (
     load_reconcile_inputs,
     plan_reconcile,
     present_sources_for,
+    valid_trims_for,
     video_step,
 )
 from ..sync.run import format_sync_message
@@ -669,7 +670,11 @@ def _submit_reconcile_steps(state: AppState, match_root: Path) -> list[Reconcile
     projects, audits = load_reconcile_inputs(match_root)
     failures = load_auto_prefs(match_root).reconcile_failures
     steps = plan_reconcile(
-        projects, audits, failures, present_sources=present_sources_for(match_root, projects)
+        projects,
+        audits,
+        failures,
+        present_sources=present_sources_for(match_root, projects),
+        valid_trims=valid_trims_for(match_root, projects),
     )
     queued: list[ReconcileStep] = []
     for step in steps:

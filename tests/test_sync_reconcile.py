@@ -116,3 +116,20 @@ def test_detect_key_ignores_trim_only_inputs() -> None:
     project = MatchProject(name="Me", stages=[_stage(v)])
     key = step_input_key("shot_detect", project, project.stages[0], project.stages[0].videos[0])
     assert key == "beep=12.3400 stage=20.0000"
+
+
+def test_a_stage_marked_trimmed_whose_trim_is_gone_gets_a_trim_step() -> None:
+    """Spec 2026-10-12: the file decides, not the flag. Tallmilan's stages
+    were marked trimmed with no trim on disk and were never cut again."""
+    v = _video(processed={"beep": True, "trim": True, "shot_detect": True})
+    project = MatchProject(name="Me", stages=[_stage(v)])
+    vid = project.stages[0].videos[0].video_id
+    assert plan_reconcile({"me": project}, {"me": {}}, {}, valid_trims={("me", vid)}) == []
+    steps = plan_reconcile({"me": project}, {"me": {}}, {}, valid_trims=set())
+    assert [s.kind for s in steps] == ["trim"]
+
+
+def test_without_the_file_facts_the_flag_still_decides() -> None:
+    v = _video(processed={"beep": True, "trim": True, "shot_detect": True})
+    project = MatchProject(name="Me", stages=[_stage(v)])
+    assert plan_reconcile({"me": project}, {"me": {}}, {}) == []

@@ -300,13 +300,14 @@ def test_status_does_not_count_full_trims_a_web_only_push_skips(tmp_path: Path) 
     """Web-only (v1.1): a full trim beside its rendition is never pushed, so
     it must not read as "files changed since last sync" forever."""
     from splitsmith.sync.auto_state import update_auto_prefs
+    from tests.media_bytes import tiny_mp4
 
     client, match_id = _local_app_with_match(tmp_path)
     root = tmp_path / "match"
     trimmed = match_model.Match.shooter_root(root, "me") / "trimmed"
     trimmed.mkdir(parents=True, exist_ok=True)
-    (trimmed / "stage1_cam_abc_trimmed.mp4").write_bytes(b"x" * 64)
-    (trimmed / "stage1_cam_abc_web.mp4").write_bytes(b"w" * 32)
+    (trimmed / "stage1_cam_abc_trimmed.mp4").write_bytes(tiny_mp4())
+    (trimmed / "stage1_cam_abc_web.mp4").write_bytes(tiny_mp4(duration_s=2.0))
 
     web_only = client.get(f"/api/matches/{match_id}/match/sync/status").json()["pending_media"]
     update_auto_prefs(root, lambda p: setattr(p, "full_media", True))
