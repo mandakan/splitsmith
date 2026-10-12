@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DEFAULT_ROWS } from "@/components/audit/mobile/WrappedWaveform";
 import type { StageAudit } from "@/lib/api";
+import { footFor } from "@/lib/riseFoot";
 import { MobileAudit } from "@/pages/MobileAudit";
 
 const playback = vi.hoisted(() => ({
@@ -542,5 +543,119 @@ describe("MobileAudit stacked cameras (#1410)", () => {
     const dialog = await openOn(project(2, null));
     expect(dialog.querySelector("[data-testid=camera-stack]")).toBeNull();
     expect(dialog.querySelectorAll("video")).toHaveLength(1);
+  });
+});
+
+describe("MobileAudit rise foot", () => {
+  // A 1 ms peaks array (what the phone asks for to place shots): quiet, with
+  // a burst rising 20 ms after each shot's stored time and one at 3.52 s.
+  const DURATION = 22;
+  const hires = (bins: number) => {
+    const peaks = Array.from({ length: bins }, () => 0.01);
+    for (const onset of [2.02, 2.42, 3.52]) {
+      const at = Math.round(onset * (bins / DURATION));
+      for (let i = 0; i < 40; i += 1) peaks[at + i] = i < 3 ? 0.2 * (i + 1) : 0.9 * Math.exp(-i / 15);
+    }
+    return { ...peaksResult(bins), duration: DURATION, peaks };
+  };
+  const snap = () => {
+    const bins = 22_000;
+    const r = hires(bins);
+    return { peaks: r.peaks, duration: r.duration };
+  };
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    apiMock.getStagePeaks.mockImplementation(async (_s: string, _n: number, bins: number) =>
+      bins > PEAKS_CAP ? hires(bins) : peaksResult(PEAKS_SMALL),
+    );
+  });
+
+  async function savedShots() {
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    await waitFor(() => expect(apiMock.saveStageAudit).toHaveBeenCalled());
+    return apiMock.saveStageAudit.mock.calls[0][2] as StageAudit;
+  }
+
+  it("asks for 1 ms peaks to place shots on", async () => {
+    renderPage();
+    await waitFor(() => expect(apiMock.getStagePeaks).toHaveBeenCalledWith("alice", 3, 22_000));
+  });
+
+  it("says how far the selected shot is from its rise foot", async () => {
+    playback.state.playhead = 2.0;
+    renderPage();
+    await waitFor(() => expect(screen.getByText(/ms before the rise foot/)).toBeInTheDocument());
+  });
+
+  it("Seat puts the selected shot on its rise foot and records why", async () => {
+    playback.state.playhead = 2.0;
+    renderPage();
+    const seat = await screen.findByRole("button", { name: "Seat" });
+    await waitFor(() => expect(seat).toBeEnabled());
+    fireEvent.click(seat);
+    expect(screen.getByRole("button", { name: "Seat" })).toBeDisabled();
+    const payload = await savedShots();
+    const foot = footFor(2.0, snap())!;
+    expect(foot).toBeGreaterThan(2.0);
+    expect(payload.shots.find((x) => x.candidate_number === 1)?.time).toBeCloseTo(foot, 3);
+    const moved = (payload.audit_events ?? []).find((e) => e.kind === "marker_time_changed");
+    expect(moved?.payload).toMatchObject({ id: "cand-1", from_time: 2.0, reason: "rise_foot" });
+  });
+
+  it("a shot with no sound within the search window says so and cannot be seated", async () => {
+    playback.state.playhead = 2.0;
+    apiMock.getStagePeaks.mockImplementation(async (_s: string, _n: number, bins: number) =>
+      bins > PEAKS_CAP ? { ...hires(bins), peaks: hires(bins).peaks.map(() => 0.01) } : peaksResult(PEAKS_SMALL),
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByText(/no rise foot within 25 ms/i)).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Seat" })).toBeDisabled();
+  });
+
+  it("a seat clears the nudge count from the readout", async () => {
+    playback.state.playhead = 2.0;
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Seat" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "+10 ms" }));
+    const readout = () => document.querySelector('[aria-live="polite"]')?.textContent ?? "";
+    expect(readout()).toMatch(/\+10 ms/);
+    fireEvent.click(screen.getByRole("button", { name: "Seat" }));
+    expect(readout()).not.toMatch(/ms$/);
+  });
+
+  it("Seat all in the stage menu moves every kept shot after a confirm", async () => {
+    renderPage();
+    await waitFor(() => expect(apiMock.getStagePeaks).toHaveBeenCalledTimes(2));
+    fireEvent.click(await screen.findByRole("button", { name: "Stage actions" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: /seat all on rise foot/i }));
+    expect(apiMock.saveStageAudit).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("button", { name: "Seat them" }));
+    const payload = await savedShots();
+    expect(payload.shots.find((x) => x.candidate_number === 1)?.time).toBeCloseTo(footFor(2.0, snap())!, 3);
+    expect(payload.shots.find((x) => x.candidate_number === 2)?.time).toBeCloseTo(footFor(2.4, snap())!, 3);
+    expect((payload.audit_events ?? []).map((e) => e.kind)).toContain("rise_foot_seat_all");
+  });
+
+  it("an added shot lands on the rise foot from the 1 ms peaks", async () => {
+    playback.state.playhead = 3.5;
+    renderPage();
+    await waitFor(() => expect(apiMock.getStagePeaks).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Add shot at playhead" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Add shot at playhead" }));
+    const payload = await savedShots();
+    const added = payload.shots.find((x) => x.candidate_number == null);
+    expect(added?.time).toBeCloseTo(footFor(3.5, snap())!, 3);
+  });
+
+  it("with snapping turned off an added shot lands exactly at the playhead", async () => {
+    playback.state.playhead = 3.5;
+    renderPage();
+    await waitFor(() => expect(apiMock.getStagePeaks).toHaveBeenCalledTimes(2));
+    fireEvent.click(await screen.findByRole("button", { name: "Stage actions" }));
+    fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: /snap to rise foot/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Add shot at playhead" }));
+    const payload = await savedShots();
+    expect(payload.shots.find((x) => x.candidate_number == null)?.time).toBeCloseTo(3.5, 3);
   });
 });

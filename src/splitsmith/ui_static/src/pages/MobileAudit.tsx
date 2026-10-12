@@ -46,13 +46,17 @@ import { useDialogFocus } from "@/lib/dialogFocus";
 import { isActiveCommand, latestForStage, REDETECT_CONFIRM } from "@/lib/desktopCommands";
 import { useDesktopCommands } from "@/lib/useDesktopCommands";
 import { useMatchHref } from "@/lib/matchHref";
-import { snapToLeadingEdge, type SnapPeaks } from "@/lib/peak-snap";
+import { PEAK_SNAP_TOLERANCE_S, type SnapPeaks } from "@/lib/peak-snap";
+import { footFor, footReadout, readSnapOn, seatAllMoves, writeSnapOn } from "@/lib/riseFoot";
 import { stackCameras } from "@/lib/phoneCameraStack";
 import { createScrubber, type Scrubber } from "@/lib/scrub-audio";
 import { useAuditPlayback } from "@/lib/useAuditPlayback";
 import { useScrubSource } from "@/lib/useScrubSource";
 
 const PEAKS_BINS = 8192;
+// Shots are placed against 1 ms peaks, as on desktop Audit, so a seat lands
+// on the same time on both (lib/riseFoot). Capped like desktop's.
+const SNAP_PEAKS_MAX_BINS = 131_072;
 
 interface PeaksError {
   status: number | null;
@@ -101,6 +105,18 @@ export function MobileAudit() {
   const [markers, setMarkers] = useState<AuditMarker[]>([]);
   const [peaksResult, setPeaksResult] = useState<PeaksResult | null>(null);
   const [peaksError, setPeaksError] = useState<PeaksError | null>(null);
+  // 1 ms peaks for the rise foot; null until they arrive (or when they fail,
+  // which leaves adds exactly at the playhead and Seat disabled).
+  const [footPeaks, setFootPeaks] = useState<SnapPeaks | null>(null);
+  // Snap added shots to their rise foot: on until turned off (the same
+  // setting as desktop Audit's, per browser).
+  const [snapOn, setSnapOn] = useState(readSnapOn);
+  // Where each shot was last placed (an add or a nudge): where its foot is
+  // looked for. A seat never moves it (lib/riseFoot).
+  const [placedAt, setPlacedAt] = useState<Record<string, number>>({});
+  const [seatAllPending, setSeatAllPending] = useState<Array<{ id: string; from: number; to: number }> | null>(
+    null,
+  );
 
   const [heldId, setHeldId] = useState<string | null>(null);
   const [nudgeMs, setNudgeMs] = useState(0);
@@ -147,6 +163,8 @@ export function MobileAudit() {
     setMarkers([]);
     setPeaksResult(null);
     setPeaksError(null);
+    setFootPeaks(null);
+    setPlacedAt({});
 
     api
       .getStageAudit(slug, stageNumber)
@@ -233,10 +251,42 @@ export function MobileAudit() {
     return target.marker.time - keptSorted[idx - 1].time;
   }, [target, keptSorted, beep]);
 
-  const snapPeaks: SnapPeaks | null = useMemo(
-    () => (peaksResult ? { peaks: peaksResult.peaks, duration: peaksResult.duration } : null),
-    [peaksResult],
-  );
+  // Fetch the 1 ms peaks once the stage's duration is known.
+  useEffect(() => {
+    if (!peaksResult || !slug || stageNumber == null) return undefined;
+    const bins = Math.min(SNAP_PEAKS_MAX_BINS, Math.max(PEAKS_BINS, Math.ceil(peaksResult.duration / 0.001)));
+    if (bins <= PEAKS_BINS) {
+      setFootPeaks({ peaks: peaksResult.peaks, duration: peaksResult.duration });
+      return undefined;
+    }
+    let alive = true;
+    api
+      .getStagePeaks(slug, stageNumber, bins)
+      .then((res) => {
+        if (alive) setFootPeaks({ peaks: res.peaks, duration: res.duration });
+      })
+      .catch(() => {
+        if (alive) setFootPeaks(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [peaksResult, slug, stageNumber]);
+
+  const placedFrom = useCallback((m: AuditMarker) => placedAt[m.id] ?? m.time, [placedAt]);
+  const targetFoot =
+    target.kind === "shot" ? footFor(placedFrom(target.marker), footPeaks) : null;
+  // The rule looks PEAK_SNAP_TOLERANCE_S either side of where the shot was
+  // placed; a shot further from its sound has no foot to seat on, and the
+  // readout says so rather than leaving Seat disabled without a reason.
+  const foot =
+    target.kind !== "shot" || footPeaks == null
+      ? null
+      : (footReadout(target.marker.time, targetFoot) ?? {
+          text: `No rise foot within ${Math.round(PEAK_SNAP_TOLERANCE_S * 1000)} ms`,
+          onRule: false,
+        });
+  const canSeat = targetFoot != null && foot != null && !foot.onRule;
 
   // ---- Gestures -----------------------------------------------------------
 
@@ -264,6 +314,7 @@ export function MobileAudit() {
       const toTime = fromTime + deltaMs / 1000;
       recordEvent("marker_time_changed", { id: m.id, from_time: fromTime, to_time: toTime });
       setMarkers((prev) => prev.map((x) => (x.id === m.id ? { ...x, time: toTime } : x)));
+      setPlacedAt((prev) => ({ ...prev, [m.id]: toTime }));
       setHeldId(m.id);
       setNudgeMs((n) => n + deltaMs);
     },
@@ -299,10 +350,11 @@ export function MobileAudit() {
 
   const handleAddShot = useCallback(() => {
     if (target.kind !== "none" || readOnly || saving) return;
-    const snapped = snapPeaks ? snapToLeadingEdge(playback.playhead, snapPeaks) : null;
+    const snapped = snapOn ? footFor(playback.playhead, footPeaks) : null;
     const t = snapped ?? playback.playhead;
     const id = `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     recordEvent("marker_added_manual", { id, time: t });
+    setPlacedAt((prev) => ({ ...prev, [id]: playback.playhead }));
     setMarkers((prev) => [
       ...prev,
       {
@@ -316,7 +368,44 @@ export function MobileAudit() {
         note: "",
       },
     ]);
-  }, [target, readOnly, saving, snapPeaks, playback.playhead, recordEvent]);
+  }, [target, readOnly, saving, snapOn, footPeaks, playback.playhead, recordEvent]);
+
+  // Seat: the selected shot onto its rise foot. Held, like a nudge, so the
+  // target stays on it while the playhead does not move.
+  const handleSeat = useCallback(() => {
+    if (target.kind !== "shot" || readOnly || saving || targetFoot == null) return;
+    const m = target.marker;
+    if (Math.abs(targetFoot - m.time) < 0.0005) return;
+    const from = placedFrom(m);
+    recordEvent("marker_time_changed", { id: m.id, from_time: m.time, to_time: targetFoot, reason: "rise_foot" });
+    setMarkers((prev) => prev.map((x) => (x.id === m.id ? { ...x, time: targetFoot } : x)));
+    setPlacedAt((prev) => ({ ...prev, [m.id]: from }));
+    setHeldId(m.id);
+    setNudgeMs(0);
+  }, [target, readOnly, saving, targetFoot, placedFrom, recordEvent]);
+
+  const askSeatAll = useCallback(() => {
+    setSeatAllPending(seatAllMoves(markers, footPeaks, placedFrom));
+  }, [markers, footPeaks, placedFrom]);
+  const seatAll = useCallback(() => {
+    const moves = seatAllPending ?? [];
+    setSeatAllPending(null);
+    if (moves.length === 0 || readOnly || saving) return;
+    const to = new Map(moves.map((x) => [x.id, x.to]));
+    setPlacedAt((prev) => {
+      const next = { ...prev };
+      for (const x of moves) next[x.id] = prev[x.id] ?? x.from;
+      return next;
+    });
+    recordEvent("rise_foot_seat_all", { moved: moves.length });
+    setMarkers((prev) => prev.map((x) => (to.has(x.id) ? { ...x, time: to.get(x.id)! } : x)));
+  }, [seatAllPending, readOnly, saving, recordEvent]);
+  const toggleSnap = useCallback(() => {
+    setSnapOn((on) => {
+      writeSnapOn(!on);
+      return !on;
+    });
+  }, []);
 
   const handleLoopToggle = useCallback(() => {
     const anchor = target.kind === "shot" ? target.marker.time : playback.playhead;
@@ -557,7 +646,7 @@ export function MobileAudit() {
                   {saving ? "Saving..." : dirty ? "Save *" : "Save"}
                 </Button>
               )}
-              {desktopMirror ? (
+              {!readOnly ? (
                 <span className="relative">
                   <button
                     type="button"
@@ -574,14 +663,38 @@ export function MobileAudit() {
                       type="button"
                       role="menuitem"
                       className={menuItemClass}
-                      disabled={stageCommand != null && isActiveCommand(stageCommand)}
+                      disabled={footPeaks == null || saving}
                       onClick={() => {
                         setMenuOpen(false);
-                        setConfirmRedetect(true);
+                        askSeatAll();
                       }}
                     >
-                      Re-detect on desktop&hellip;
+                      Seat all on rise foot&hellip;
                     </button>
+                    <button
+                      type="button"
+                      role="menuitemcheckbox"
+                      aria-checked={snapOn}
+                      className={menuItemClass}
+                      onClick={toggleSnap}
+                    >
+                      Snap to rise foot
+                      <span className="ml-auto text-sm text-muted">{snapOn ? "on" : "off"}</span>
+                    </button>
+                    {desktopMirror ? (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className={menuItemClass}
+                        disabled={stageCommand != null && isActiveCommand(stageCommand)}
+                        onClick={() => {
+                          setMenuOpen(false);
+                          setConfirmRedetect(true);
+                        }}
+                      >
+                        Re-detect on desktop&hellip;
+                      </button>
+                    ) : null}
                   </Menu>
                 </span>
               ) : null}
@@ -687,6 +800,9 @@ export function MobileAudit() {
                 readOnly={readOnly || saving}
                 hasVideo={videoUrl != null}
                 onNudge={handleNudge}
+                foot={foot}
+                canSeat={canSeat}
+                onSeat={footPeaks ? handleSeat : undefined}
                 onDeleteShot={handleDeleteShot}
                 onShowVideo={handleShowVideo}
                 onPromote={handlePromote}
@@ -749,6 +865,26 @@ export function MobileAudit() {
           confirmDisabled={saving}
           onConfirm={confirmDeleteManual}
           onCancel={() => setConfirmDeleteMarker(null)}
+        />
+
+        <MobileConfirmSheet
+          open={seatAllPending != null}
+          title={
+            seatAllPending == null || seatAllPending.length === 0
+              ? "Every shot is on its rise foot"
+              : `Seat ${seatAllPending.length} of ${keptSorted.length} shots on their rise foot?`
+          }
+          body={
+            seatAllPending == null || seatAllPending.length === 0
+              ? "Nothing to move."
+              : `They move by up to ${Math.round(
+                  Math.max(...seatAllPending.map((x) => Math.abs(x.to - x.from))) * 1000,
+                )} ms. Leaving without saving puts them back.`
+          }
+          confirmLabel={seatAllPending == null || seatAllPending.length === 0 ? "OK" : "Seat them"}
+          confirmDisabled={saving}
+          onConfirm={seatAll}
+          onCancel={() => setSeatAllPending(null)}
         />
 
         <MobileConfirmSheet
