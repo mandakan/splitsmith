@@ -10892,3 +10892,45 @@ def test_a_failed_overlay_redraw_never_ships_the_stale_overlay(
     anomalies = job["result"]["anomalies"]
     assert any("stage 1: overlay left out" in a and "ffmpeg went away" in a for a in anomalies), anomalies
     assert not any("stage 1: overlay not available" in a for a in anomalies), anomalies
+
+
+def test_fixture_source_names_the_snapped_fixtures_source(tmp_path: Path) -> None:
+    """A fixture snapped from another camera (``<source>-<camera>``) reads its
+    source's shots, in time order; an unsnapped one, or one whose source is
+    itself snapped or missing, reads null."""
+    import json as _json
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    fx = tmp_path / "fixtures"
+    fx.mkdir()
+    (fx / "stage-shots-m-stage6-s1.json").write_text(
+        _json.dumps(
+            {"shots": [{"time": 8.4}, {"time": 7.2}, {"time": None}], "stage_rounds": {"expected": 24}}
+        )
+    )
+    (fx / "stage-shots-m-stage6.json").write_text(_json.dumps({"shots": [{"time": 1.0}]}))
+    snapped = fx / "stage-shots-m-stage6-s1-apple-iphone17pro.json"
+    snapped.write_text(_json.dumps({"shots": [], "anchor": {"fixture_slug": "stage6"}}))
+    (fx / "stage-shots-m-stage6-s1-apple-iphone17pro-x.json").write_text(
+        _json.dumps({"shots": [], "anchor": {"fixture_slug": "stage6"}})
+    )
+
+    body = client.get(f"/api/fixture/source?path={snapped}").json()
+    assert body == {
+        "stem": "stage-shots-m-stage6-s1",
+        "path": str((fx / "stage-shots-m-stage6-s1.json").resolve()),
+        "shots": [7.2, 8.4],
+        "rounds": 24,
+        "beep_time": None,
+        "camera": None,
+        "duration": None,
+    }
+
+    # Its source is the longest unsnapped prefix, never another snap.
+    deeper = fx / "stage-shots-m-stage6-s1-apple-iphone17pro-x.json"
+    assert client.get(f"/api/fixture/source?path={deeper}").json()["stem"] == "stage-shots-m-stage6-s1"
+
+    assert client.get(f"/api/fixture/source?path={fx / 'stage-shots-m-stage6-s1.json'}").json() is None
+    lonely = fx / "other-apple-iphone17pro.json"
+    lonely.write_text(_json.dumps({"shots": [], "anchor": {}}))
+    assert client.get(f"/api/fixture/source?path={lonely}").json() is None

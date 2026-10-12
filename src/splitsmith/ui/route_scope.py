@@ -62,6 +62,7 @@ LOCAL_ONLY_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("POST", "/api/match/merge/execute"),
         # Fixture lab and developer tools: read and write files by path.
         ("GET", "/api/fixture/audit"),
+        ("GET", "/api/fixture/source"),
         ("PUT", "/api/fixture/audit"),
         ("GET", "/api/fixture/peaks"),
         ("GET", "/api/fixture/audio"),

@@ -14960,6 +14960,16 @@ def create_app(
             raise HTTPException(status_code=500, detail=f"fixture read failed: {exc}") from exc
         return JSONResponse(payload)
 
+    @app.get("/api/fixture/source")
+    def get_fixture_source(path: str = Query(...)) -> JSONResponse:
+        """The fixture a snapped one was snapped from (its shot times), so the
+        review walk can visit exactly the source's shots; ``null`` when the
+        fixture is not snapped or its source is not on this disk."""
+        from ..lab.core import anchor_source
+
+        source = anchor_source(_resolve_fixture_path(path))
+        return JSONResponse(source.model_dump() if source else None)
+
     @app.put("/api/fixture/audit")
     def put_fixture_audit(
         path: str = Query(...),

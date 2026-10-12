@@ -25,6 +25,15 @@ import {
   writeLoopOn,
   walkHref,
   walkStops,
+  WALK_LOOP,
+  loopWindow,
+  loopNeighbourFlag,
+  readSlowOn,
+  writeSlowOn,
+  quietFlag,
+  jumpTarget,
+  endCheck,
+  fixtureTitle,
 } from "./walk";
 
 /** 1 ms bins over ``duration`` s of quiet noise with a shot-like burst
@@ -155,7 +164,9 @@ describe("scope", () => {
 
   it("walks everything on a snapped fixture or a count that is off, else the kept shots", () => {
     expect(defaultScope({ snapped: true, kept: 24, expectedRounds: 24 })).toBe("all");
-    expect(defaultScope({ snapped: false, kept: 26, expectedRounds: 24 })).toBe("all");
+    expect(defaultScope({ snapped: true, hasSource: true, kept: 24, expectedRounds: 24 })).toBe("source");
+    // More shots than rounds is normal: an audited fixture walks its shots.
+    expect(defaultScope({ snapped: false, kept: 26, expectedRounds: 24 })).toBe("shots");
     expect(defaultScope({ snapped: false, kept: 24, expectedRounds: 24 })).toBe("shots");
     expect(defaultScope({ snapped: false, kept: 24, expectedRounds: null })).toBe("shots");
   });
@@ -342,5 +353,127 @@ describe("phoneLayout", () => {
   });
   it("is the desktop layout with a mouse on a wide window", () => {
     expect(phoneLayout(new URLSearchParams(""), media())).toBe(false);
+  });
+});
+
+describe("the walk's loop", () => {
+  it("puts the phone's stop just after a silence, and keeps the desktop's window", () => {
+    expect(loopWindow(10, WALK_LOOP.phone, 60)).toEqual({ start: 9.85, end: 10.25, gap: 0.6 });
+    expect(loopWindow(10, WALK_LOOP.desktop, 60)).toEqual({ start: 9.5, end: 10.7, gap: 0 });
+  });
+
+  it("stays inside the clip", () => {
+    expect(loopWindow(0.1, WALK_LOOP.phone, 60).start).toBe(0);
+    expect(loopWindow(59.9, WALK_LOOP.phone, 60).end).toBeLessThan(60);
+    expect(loopWindow(59.9, WALK_LOOP.phone, null).end).toBeCloseTo(60.15);
+  });
+
+  it("names every other stop the loop plays, nearest first", () => {
+    expect(loopNeighbourFlag(10, [10.048], WALK_LOOP.phone)).toEqual({
+      tone: "warn",
+      text: "Another stop 48 ms after this one plays in the loop. Half speed hears them as two sounds.",
+    });
+    expect(loopNeighbourFlag(10, [9.88, 10.2, 11], WALK_LOOP.phone)).toEqual({
+      tone: "info",
+      text: "Other stops in the loop: 120 ms before, 200 ms after.",
+    });
+  });
+
+  it("says nothing when the loop holds this stop alone", () => {
+    expect(loopNeighbourFlag(10, [9.5, 10.4, 10.0004], WALK_LOOP.phone)).toBeNull();
+  });
+});
+
+describe("half speed preference", () => {
+  it("is off until turned on, and remembered", () => {
+    window.localStorage.clear();
+    expect(readSlowOn()).toBe(false);
+    writeSlowOn(true);
+    expect(readSlowOn()).toBe(true);
+  });
+});
+
+describe("quietFlag", () => {
+  it("warns at a sound far quieter than the stage's shots", () => {
+    const peaks = envelope(3, [1.0]);
+    const quiet = envelope(3, [2.0], 0.07);
+    const both = { duration: 3, peaks: peaks.peaks.map((v, i) => Math.max(v, quiet.peaks[i])) };
+    expect(quietFlag(both, 2.0, 1)).toEqual({
+      tone: "warn",
+      text: "Quiet: 7 % of a typical shot on this stage. A shot in another bay, or an echo, sounds like this.",
+    });
+  });
+
+  it("says nothing at a sound as loud as a shot, or with no level to compare", () => {
+    const peaks = envelope(3, [1.0]);
+    expect(quietFlag(peaks, 1.0, 1)).toBeNull();
+    expect(quietFlag(peaks, 1.0, 0)).toBeNull();
+  });
+});
+
+describe("jumpTarget", () => {
+  const peaks = envelope(3, [0.5, 1.0, 1.5]);
+  const kept = marker("cand-1", "detected", 0.5);
+  const rejected = marker("cand-2", "rejected", 1.004);
+  const stops = [{ key: "cand-1", markerId: "cand-1", time: 0.5, origin: "kept" as const }];
+
+  it("goes to a stop under the tap", () => {
+    expect(jumpTarget(stops, [kept, rejected], peaks, 0.55)).toEqual({ index: 0 });
+  });
+
+  it("makes a stop for a rejected candidate the walk does not visit", () => {
+    expect(jumpTarget(stops, [kept, rejected], peaks, 1.05)).toEqual({
+      stop: { key: "cand-2", markerId: "cand-2", time: 1.004, origin: "rejected" },
+    });
+  });
+
+  it("makes a stop for a sound nobody marked, at its onset", () => {
+    expect(jumpTarget(stops, [kept], peaks, 1.52)).toEqual({
+      stop: { key: "burst-1500", markerId: null, time: 1.5, origin: "burst" },
+    });
+  });
+
+  it("falls back to the nearest stop in silence", () => {
+    expect(jumpTarget(stops, [kept], peaks, 2.5)).toEqual({ index: 0 });
+  });
+});
+
+describe("endCheck", () => {
+  it("does not pass a sound marked twice, whatever the count", () => {
+    const markers = [
+      marker("a", "detected", 7.357),
+      marker("b", "manual", 7.357),
+      marker("c", "detected", 8.0),
+      marker("r", "rejected", 8.002),
+    ];
+    const check = endCheck(markers, 3, "source");
+    expect(check.ok).toBe(false);
+    expect(check.duplicates.map((m) => m.id)).toEqual(["b"]);
+    expect(check.text).toBe(
+      "3 shots, matching the source camera's 3. One sound is marked twice (7.357 s): tap one to go to it.",
+    );
+    expect(endCheck(markers.filter((m) => m.id !== "b"), 2, "source").ok).toBe(true);
+  });
+});
+
+describe("fixtureTitle", () => {
+  it("names the match, the stage and the camera", () => {
+    expect(
+      fixtureTitle({
+        event_id: "hostfinalen-xi-2026:7:s97dcec94",
+        stage_number: 7,
+        stage_name: "",
+        camera: { id: "apple-iphone17pro", model: "iPhone 17 Pro", position: "squadmate" },
+      }),
+    ).toBe("Hostfinalen XI 2026 · Stage 7 · iPhone 17 Pro, squadmate");
+    expect(
+      fixtureTitle({
+        event_id: "tallmilan-2026:2:s1",
+        stage_number: 2,
+        stage_name: "Unload, and then show clear",
+        camera: { id: "apple-iphone17pro", model: null, position: "shooter" },
+      }),
+    ).toBe('Tallmilan 2026 · Stage 2 "Unload, and then show clear" · iphone17pro, shooter');
+    expect(fixtureTitle({})).toBe("");
   });
 });

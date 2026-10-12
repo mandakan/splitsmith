@@ -15,12 +15,11 @@ import { useWalk } from "@/components/review/useWalk";
 import { WalkGuide } from "@/components/review/WalkGuide";
 import { Button } from "@/components/ui/button";
 import { isTypingTextTarget } from "@/lib/audit-input";
-import { snapToLeadingEdge, type SnapPeaks } from "@/lib/peak-snap";
+import type { SnapPeaks } from "@/lib/peak-snap";
 import type { DecodedAudio } from "@/lib/useDecodedAudio";
 import {
   CLOSEUP_HALF_S,
   DETAIL_HALF_S,
-  placementOf,
   stopFlags,
   stopPrompt,
   walkActionForKey,
@@ -50,6 +49,9 @@ export interface WalkProps {
   loop: boolean;
   onToggleLoop: () => void;
   onLoopStop: (time: number | null) => void;
+  /** Half-speed listening (the phone's walk offers it). */
+  slow?: boolean;
+  onToggleSlow?: () => void;
   /** Sign the fixture off and move on. */
   onDone: () => void;
   onExit: () => void;
@@ -65,10 +67,24 @@ export interface WalkProps {
    *  walk when it changes. */
   scope: WalkScope;
   onScopeChange: (scope: WalkScope) => void;
+  /** Walk again from the first stop, every stop undecided (a signed-off
+   *  fixture included); the phone's end screen offers it. */
+  onRestart?: (scope: WalkScope) => void;
+  /** A snapped fixture's source shots (source clip seconds): the ``source``
+   *  scope walks exactly these (lib/sourceWalk). */
+  source?: number[] | null;
+  /** Which fixture this is, in words (lib/walk ``fixtureTitle``). */
+  title?: string;
+  /** The source camera's audio levels, beep and name: the walk that follows
+   *  the source reads both cameras' loudness at each stop and proposes the beep. */
+  sourceAudio?: { peaks: SnapPeaks; beepTime: number | null; camera: string | null } | null;
+  /** This fixture's beep, and how the walk changes it (the phone's beep step). */
+  beepTime?: number | null;
+  onSetBeep?: (time: number) => void;
 }
 
 export function Walk(props: WalkProps) {
-  const { markers, peaks, expectedRounds, busy } = props;
+  const { markers, peaks, busy } = props;
   const w = useWalk(props);
   const { stops, index, stop, marker, state, time, level, decidedCount, keptCount, check, armed } = w;
   const decided = w.isDecided;
@@ -122,19 +138,20 @@ export function Walk(props: WalkProps) {
     <Button
       size="sm"
       variant="ghost"
-      onClick={() => props.onScopeChange(props.scope === "all" ? "shots" : "all")}
+      onClick={() => props.onScopeChange(props.scope === "all" ? (props.source ? "source" : "shots") : "all")}
       title={
         props.scope === "all"
           ? "Visit the kept shots only"
           : "Also visit every rejected candidate and every loud sound nobody marked"
       }
     >
-      {props.scope === "all" ? "Kept shots only" : "Walk every sound"}
+      {props.scope === "all" ? (props.source ? "Follow the source camera" : "Kept shots only") : "Walk every sound"}
     </Button>
   );
-  const scopeLine =
-    props.scope === "all"
-      ? "Walking every candidate and every loud sound: the shots were snapped from another camera, or their count is off."
+  const scopeLine = w.sourceLine
+    ? w.sourceLine
+    : props.scope === "all"
+      ? "Walking every candidate and every loud sound."
       : "Walking the kept shots: a person labelled this audio and the count matches. The whole stage below shows everything else.";
 
   const loopButton = (
@@ -247,8 +264,7 @@ export function Walk(props: WalkProps) {
     markers,
     snapDisplacementMs: marker ? props.snapDisplacementMs(marker.id) : null,
   });
-  const foot = state === "shot" ? snapToLeadingEdge(time, peaks) : null;
-  const placement = state === "shot" ? placementOf(time, peaks) : null;
+  const { foot, placement } = w;
   const origin =
     stop.origin === "burst"
       ? "unmarked sound"
@@ -274,7 +290,7 @@ export function Walk(props: WalkProps) {
         <span>{origin}</span>
         <span>
           {decidedCount} decided · {keptCount} shots kept
-          {expectedRounds != null ? ` of ${expectedRounds} rounds` : ""}
+          {w.expected != null ? (w.sourceLed ? ` of the source's ${w.expected}` : ` of ${w.expected} rounds`) : ""}
         </span>
         <span className="ml-auto flex gap-1">
           {scopeButton}

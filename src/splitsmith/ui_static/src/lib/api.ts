@@ -1971,6 +1971,19 @@ export interface ShooterRosterRow {
   slug: string | null;
 }
 
+/** The fixture a snapped one was snapped from (``GET /api/fixture/source``). */
+export interface FixtureSource {
+  stem: string;
+  path: string;
+  /** Shot times in the source clip's own seconds, in time order. */
+  shots: number[];
+  rounds: number | null;
+  beep_time: number | null;
+  /** The source camera in words ("GO 3S"). */
+  camera: string | null;
+  duration: number | null;
+}
+
 export interface StageAudit {
   stage_number: number;
   stage_name: string;
@@ -4868,6 +4881,11 @@ export const api = {
   // build so the audit primitives are shared.
   // -----------------------------------------------------------------------
 
+  /** A snapped fixture's source and its shot times; ``null`` for any other. */
+  getFixtureSource: (fixturePath: string) =>
+    request<FixtureSource | null>(
+      `/api/fixture/source?path=${encodeURIComponent(fixturePath)}`,
+    ),
   getFixtureAudit: (fixturePath: string) =>
     request<StageAudit>(`/api/fixture/audit?path=${encodeURIComponent(fixturePath)}`),
 

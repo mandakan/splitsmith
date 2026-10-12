@@ -11,17 +11,30 @@ import type { AuditMarker } from "@/components/MarkerLayer";
 import type { WalkProps } from "@/components/review/Walk";
 import { snapToLeadingEdge } from "@/lib/peak-snap";
 import {
+  alignToSource,
+  alignmentOk,
+  beepProposal,
+  levelAt,
+  levelFlags,
+  soundOnsets,
+  sourceStops,
+  typicalLevelAt,
+  unmapSourceTime,
+  type SourceAlignment,
+} from "@/lib/sourceWalk";
+import {
   WALK_DECIDED_EVENT,
   WALK_METHOD,
-  countCheck,
+  endCheck,
   decisionsFrom,
   isDecided,
-  nearestStop,
+  jumpTarget,
   placementOf,
   stopState,
   stopTime,
   typicalShotLevel,
   walkStops,
+  type StopFlag,
   type WalkDecision,
   type WalkStop,
 } from "@/lib/walk";
@@ -52,12 +65,32 @@ export interface WalkModel {
   time: number;
   /** Where this stop was found: what listening and the loop play around. */
   anchor: number;
+  /** The rule's time for this shot, and where the shot sits against it.
+   *  Found from where the sound is (the stop, or the last tap), never from
+   *  the shot's own time: on a burst with a louder reflection inside the
+   *  search window the rule is not its own fixed point, and Rise foot would
+   *  walk the shot forward a few ms per press. */
+  foot: number | null;
+  placement: ReturnType<typeof placementOf> | null;
   level: number;
   decidedCount: number;
   keptCount: number;
-  check: ReturnType<typeof countCheck>;
+  check: ReturnType<typeof endCheck>;
   armed: boolean;
   isDecided: (stop: WalkStop) => boolean;
+  /** What the count is checked against: the source camera's shots when the
+   *  walk follows it, else the stage's rounds. */
+  expected: number | null;
+  sourceLed: boolean;
+  /** One line on how the walk was chosen for a snapped fixture; ``null``
+   *  for any other fixture. */
+  sourceLine: string | null;
+  /** What both cameras heard at this stop (a walk that follows the source,
+   *  with the source's audio in hand); empty otherwise. */
+  levelFlags: StopFlag[];
+  /** The beep the source puts on this camera, against the stored one;
+   *  ``null`` when the walk does not follow the source or the source has no beep. */
+  beep: { stored: number | null; proposed: number; confirmed: boolean } | null;
   /** Which actions do anything at this stop (the phone disables the rest). */
   can: { riseFoot: boolean; nudge: boolean; notShot: boolean; shot: boolean };
   actions: WalkActions;
@@ -68,7 +101,43 @@ export function useWalk(props: WalkProps, opts?: { holdLoop?: boolean }): WalkMo
   const { markers, peaks, savedEvents, from, expectedRounds, busy } = props;
   // The stops are fixed when the walk opens, so a decision never moves the
   // cursor's ground; a burst marked as a shot binds to its new marker.
-  const [stops] = useState<WalkStop[]>(() => walkStops(markers, peaks, from, props.scope));
+  const [plan] = useState(() => {
+    if (props.scope !== "source") {
+      return { align: null, stops: walkStops(markers, peaks, from, props.scope), line: null, led: false };
+    }
+    const shots = props.source ?? [];
+    const align = alignToSource(shots, soundOnsets(peaks, from));
+    if (align && alignmentOk(align)) {
+      return {
+        align: align as SourceAlignment | null,
+        stops: sourceStops(shots, align, soundOnsets(peaks, from), markers),
+        line: `Following the source camera: its ${shots.length} shots in order (${align.matched} of them line up with a sound here), then any kept shot it has none for.`,
+        led: true,
+      };
+    }
+    return {
+      align: null,
+      stops: walkStops(markers, peaks, from, "all"),
+      line: `This camera does not line up with the source (${align?.matched ?? 0} of ${shots.length} shots land on a sound): the wrong clip, or too far away to hear them. Walking every sound instead.`,
+      led: false,
+    };
+  });
+  // Stops a tap on a stage strip added (``jumpTarget``), kept in time order.
+  const [added, setAdded] = useState<WalkStop[]>([]);
+  const stops = useMemo(
+    () =>
+      added.length === 0
+        ? plan.stops
+        : [...plan.stops, ...added].sort((a, b) => a.time - b.time || a.key.localeCompare(b.key)),
+    [plan.stops, added],
+  );
+  // The source walk moves the snap's misplaced shots onto their sounds once,
+  // when it opens; each is still confirmed at its stop.
+  useEffect(() => {
+    for (const s of stops) if (s.moveFrom != null && s.markerId) props.onSetTime(s.markerId, s.time);
+    // Once per walk: the stops never change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [bound, setBound] = useState<Record<string, string>>({});
   const [decisions, setDecisions] = useState<WalkDecision[]>(() => decisionsFrom(savedEvents));
   const level = useMemo(() => typicalShotLevel(markers, peaks, from), [markers, peaks, from]);
@@ -104,6 +173,12 @@ export function useWalk(props: WalkProps, opts?: { holdLoop?: boolean }): WalkMo
   // Where this stop was found: what Space and the loop play around, so a
   // nudge or F moves the shot under a sound that keeps repeating.
   const anchorRef = useRef(time);
+  // Where the rise foot is looked for: the stop's own time until a tap
+  // places the shot; a nudge or Rise foot never moves it.
+  const [footFromAt, setFootFromAt] = useState<{ key: string; t: number } | null>(null);
+  const footFrom = stop && footFromAt?.key === stop.key ? footFromAt.t : stop ? stop.time : time;
+  const foot = state === "shot" ? snapToLeadingEdge(footFrom, peaks) : null;
+  const placement = state === "shot" ? placementOf(time, peaks, footFrom) : null;
   const { loop, onLoopStop } = props;
   const holdLoop = opts?.holdLoop ?? false;
   useEffect(() => {
@@ -114,7 +189,48 @@ export function useWalk(props: WalkProps, opts?: { holdLoop?: boolean }): WalkMo
   }, [stop?.key, loop, holdLoop]);
   const decidedCount = stops.filter(decided).length;
   const keptCount = markers.filter((m) => m.kind === "detected" || m.kind === "manual").length;
-  const check = countCheck(keptCount, expectedRounds);
+  // Both cameras' loudness here, as shares of each one's typical shot.
+  const sourceAudio = props.sourceAudio ?? null;
+  const sourceTypical = useMemo(
+    () => (sourceAudio ? typicalLevelAt(sourceAudio.peaks, props.source ?? []) : 0),
+    [sourceAudio, props.source],
+  );
+  const stopLevelFlags: StopFlag[] = [];
+  const stopNow = index < stops.length ? stops[index] : null;
+  if (plan.align && sourceAudio && sourceTypical > 0 && level > 0 && stopNow) {
+    const tHere = stopNow.markerId ? (markers.find((m) => m.id === stopNow.markerId)?.time ?? stopNow.time) : stopNow.time;
+    const tThere =
+      stopNow.origin === "source" && stopNow.source
+        ? (props.source ?? [])[stopNow.source.index]
+        : unmapSourceTime(plan.align, tHere);
+    if (tThere != null) {
+      stopLevelFlags.push(
+        ...levelFlags({
+          here: levelAt(peaks, tHere) / level,
+          there: levelAt(sourceAudio.peaks, tThere) / sourceTypical,
+          camera: sourceAudio.camera,
+          origin: stopNow.origin,
+        }),
+      );
+    }
+  }
+  // The beep the source puts here, and whether this walk's beep was confirmed.
+  const beep = useMemo(() => {
+    if (!plan.align || !sourceAudio || sourceAudio.beepTime == null) return null;
+    const stored = props.beepTime ?? null;
+    const proposed = beepProposal(plan.align, sourceAudio.beepTime, peaks);
+    const confirmed =
+      stored != null &&
+      savedEvents.some(
+        (e) => e.kind === "walk_beep" && typeof e.payload.time === "number" && Math.abs(e.payload.time - stored) <= 0.0005,
+      );
+    return { stored, proposed, confirmed };
+  }, [plan.align, sourceAudio, props.beepTime, peaks, savedEvents]);
+
+  // A snapped fixture's count is its source's, in any of its walks.
+  const bySource = (props.source?.length ?? 0) > 0;
+  const expected = bySource ? props.source!.length : expectedRounds;
+  const check = endCheck(markers, expected, bySource ? "source" : "rounds");
 
   useEffect(() => {
     setArmed(false);
@@ -158,7 +274,7 @@ export function useWalk(props: WalkProps, opts?: { holdLoop?: boolean }): WalkMo
     }
     // A shot records whether its time is the rule's, so a later
     // definition change can re-time it from its sound (lib/walk).
-    const placed = state === "shot" ? placementOf(time, peaks) : null;
+    const placed = placement;
     props.onRecord(WALK_DECIDED_EVENT, {
       stop: stop.key,
       state,
@@ -189,7 +305,6 @@ export function useWalk(props: WalkProps, opts?: { holdLoop?: boolean }): WalkMo
 
   const riseFoot = () => {
     if (!stop || state !== "shot" || !marker) return;
-    const foot = snapToLeadingEdge(time, peaks);
     if (foot != null) place(foot);
   };
 
@@ -202,6 +317,13 @@ export function useWalk(props: WalkProps, opts?: { holdLoop?: boolean }): WalkMo
     state,
     time,
     anchor: anchorRef.current,
+    foot,
+    placement,
+    expected,
+    sourceLed: plan.led,
+    sourceLine: plan.line,
+    levelFlags: stopLevelFlags,
+    beep,
     level,
     decidedCount,
     keptCount,
@@ -224,7 +346,10 @@ export function useWalk(props: WalkProps, opts?: { holdLoop?: boolean }): WalkMo
       nudge: (ms: number) => {
         if (onShot) place(time + ms / 1000);
       },
-      place,
+      place: (t: number) => {
+        if (stop) setFootFromAt({ key: stop.key, t });
+        place(t);
+      },
       back: () => {
         if (!stop) {
           if (stops.length > 0) setIndex(stops.length - 1);
@@ -236,8 +361,16 @@ export function useWalk(props: WalkProps, opts?: { holdLoop?: boolean }): WalkMo
         if (stop) props.onListen(anchorRef.current);
       },
       jump: (t: number) => {
-        const i = nearestStop(stops, t);
-        if (i >= 0) setIndex(i);
+        const target = jumpTarget(stops, markers, peaks, t);
+        if (target == null) return;
+        if ("index" in target) {
+          setIndex(target.index);
+          return;
+        }
+        const s = target.stop;
+        const next = [...stops, s].sort((a, b) => a.time - b.time || a.key.localeCompare(b.key));
+        setAdded((prev) => [...prev, s]);
+        setIndex(next.findIndex((x) => x.key === s.key));
       },
       firstUndecided: () => setIndex(firstUndecidedFrom(0)),
     },

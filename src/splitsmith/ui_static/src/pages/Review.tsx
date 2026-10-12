@@ -60,11 +60,13 @@ import {
   api,
   type AuditEvent,
   type PeaksResult,
+  type FixtureSource,
   type StageAudit,
 } from "@/lib/api";
 import { deriveMarkers } from "@/lib/audit-doc";
 import { buildFixtureJson } from "@/lib/fixtureDoc";
 import { useDecodedAudio } from "@/lib/useDecodedAudio";
+import { WalkPlayer } from "@/lib/walkPlayer";
 import { isTypingTextTarget, useBlurOnPointerClick } from "@/lib/audit-input";
 import { zoomActionForKey } from "@/lib/zoomKeys";
 import { placeTime, type SnapPeaks } from "@/lib/peak-snap";
@@ -79,7 +81,12 @@ import {
   readGuideOpen,
   mediaMatches,
   phoneLayout,
+  fixtureTitle,
+  loopWindow,
   readLoopOn,
+  readSlowOn,
+  WALK_LOOP,
+  writeSlowOn,
   writeLoopOn,
   walkHref,
   writeGuideOpen,
@@ -126,6 +133,35 @@ export function Review() {
   // flip it mid-walk), overridden by the walk's switch.
   const [initialScope, setInitialScope] = useState<WalkScope>("all");
   const [scopeOverride, setScopeOverride] = useState<WalkScope | null>(null);
+  // A walk started again (``restartWalk``) ignores the decisions already
+  // saved, so every stop is asked again; 0 resumes from them.
+  const [walkRound, setWalkRound] = useState(0);
+  // A snapped fixture's source shots: its walk follows them (lib/sourceWalk).
+  const [sourceShots, setSourceShots] = useState<number[] | null>(null);
+  const [source, setSource] = useState<FixtureSource | null>(null);
+  // The source's 1 ms levels: the walk reads both cameras' loudness from them.
+  const [sourcePeaks, setSourcePeaks] = useState<SnapPeaks | null>(null);
+  useEffect(() => {
+    setSourcePeaks(null);
+    if (!source?.duration) return;
+    let alive = true;
+    const bins = Math.min(FIXTURE_PEAKS_MAX_BINS, Math.ceil(source.duration / 0.001));
+    api
+      .getFixturePeaks(source.path, bins)
+      .then((p) => {
+        if (alive) setSourcePeaks({ peaks: p.peaks, duration: p.duration });
+      })
+      .catch(() => {
+        // Without them the walk has no level line; nothing else needs them.
+      });
+    return () => {
+      alive = false;
+    };
+  }, [source]);
+  const restartWalk = useCallback((scope: WalkScope) => {
+    setScopeOverride(scope);
+    setWalkRound((n) => n + 1);
+  }, []);
   const walkScope = scopeOverride ?? initialScope;
   useEffect(() => {
     if (!videoLarge) return;
@@ -205,8 +241,11 @@ export function Review() {
   // started (or where the user last scrubbed). On pause / end-of-clip
   // while loopMode is on, the playhead snaps back here.
   const loopAnchorRef = useRef<number | null>(null);
-  // The walk's loop window (``playAround``): playback wraps to its start.
-  const walkRegionRef = useRef<{ start: number; end: number } | null>(null);
+  // The walk's loop window (``playAround``): playback wraps to its start,
+  // after ``gap`` seconds of silence (``resumeAt``, a performance.now()).
+  const walkRegionRef = useRef<{ start: number; end: number; gap: number; resumeAt: number | null } | null>(
+    null,
+  );
 
   // Loop region around the focused marker (#29). Loop on + a focused
   // marker = repeat a tight window around it; loop on + no focus keeps
@@ -284,18 +323,25 @@ export function Review() {
     sessionEventsRef.current = [];
     undoStackRef.current = [];
     isDirtyRef.current = false;
-    api
-      .getFixtureAudit(fixturePath)
-      .then((a) => {
+    Promise.all([
+      api.getFixtureAudit(fixturePath),
+      // No source is a walk of every sound, never a failed page.
+      api.getFixtureSource(fixturePath).catch(() => null),
+    ])
+      .then(([a, source]) => {
         if (!alive) return;
+        setSourceShots(source && source.shots.length > 0 ? source.shots : null);
+        setSource(source);
         auditRef.current = a;
         loadedPathRef.current = fixturePath;
         setAudit(a);
         setMarkers(deriveMarkers(a));
         setScopeOverride(null);
+        setWalkRound(0);
         setInitialScope(
           defaultScope({
             snapped: isSnapped(a as never),
+            hasSource: source != null && source.shots.length > 0,
             kept: (a.shots ?? []).filter((s) => s.time != null).length,
             expectedRounds: (a as unknown as { stage_rounds?: { expected?: number } }).stage_rounds?.expected ?? null,
           }),
@@ -600,9 +646,19 @@ export function Review() {
         // Loop wrap: region end when a marker is focused, clip end otherwise.
         const regionEnd = loopRegion?.end ?? (dur != null ? dur - 0.05 : null);
         const walkRegion = walkMode ? walkRegionRef.current : null;
-        if (walkRegion && t >= walkRegion.end) {
+        if (walkRegion?.resumeAt != null) {
+          // The silence between passes: paused on the start, then play.
+          if (performance.now() >= walkRegion.resumeAt) {
+            walkRegion.resumeAt = null;
+            el.play().catch(() => setIsPlaying(false));
+          }
+        } else if (walkRegion && t >= walkRegion.end) {
           el.currentTime = mediaFromElapsed(walkRegion.start, el);
           setCurrentTime(walkRegion.start);
+          if (walkRegion.gap > 0) {
+            el.pause();
+            walkRegion.resumeAt = performance.now() + walkRegion.gap * 1000;
+          }
         } else if (loopMode && regionEnd != null && t >= regionEnd) {
           const target = loopRegion?.start ?? loopAnchorRef.current ?? 0;
           el.currentTime = mediaFromElapsed(target, el);
@@ -843,42 +899,77 @@ export function Review() {
   // after, once, or on repeat with the walk's loop on (which also starts each
   // stop as the walk reaches it); Space again pauses.
   const listenTimerRef = useRef<number | null>(null);
+  // The phone listens through Web Audio from the decoded samples
+  // (lib/walkPlayer): seeking the streamed video was slower than a pass.
+  const walkPlayerRef = useRef<WalkPlayer | null>(null);
+  const phonePlayer = (): WalkPlayer | null => {
+    if (!phone || !decodedAudio) return null;
+    walkPlayerRef.current ??= new WalkPlayer();
+    return walkPlayerRef.current;
+  };
+  useEffect(() => () => walkPlayerRef.current?.close(), []);
+  // What was last played, so Half speed can play it again at the new rate.
+  const lastPassRef = useRef<{ t: number; repeat: boolean } | null>(null);
   const [walkLoop, setWalkLoop] = useState(() => readLoopOn(phone ? "phone" : "desktop"));
+  // Half speed (the phone's): a 50 ms double becomes 100 ms, two sounds.
+  const [walkSlow, setWalkSlow] = useState(() => phone && readSlowOn());
+  const walkRate = walkSlow ? 0.5 : 1;
   const pauseListening = useCallback(() => {
     if (listenTimerRef.current != null) window.clearTimeout(listenTimerRef.current);
     listenTimerRef.current = null;
+    walkPlayerRef.current?.stop();
+    if (walkRegionRef.current) walkRegionRef.current.resumeAt = null;
     const el = playbackEl();
     el?.pause();
     setIsPlaying(false);
   }, []);
   const playAround = useCallback(
-    (t: number, repeat: boolean) => {
+    (t: number, repeat: boolean, rate: number = walkRate) => {
+      lastPassRef.current = { t, repeat };
+      const { start, end, gap } = loopWindow(t, WALK_LOOP[phone ? "phone" : "desktop"], peaks?.duration ?? null);
+      const player = phonePlayer();
+      if (player && decodedAudio) {
+        playbackEl()?.pause();
+        player.play(decodedAudio, start, end, { loop: repeat, gapS: gap, rate });
+        return;
+      }
       const el = playbackEl();
       if (!el) return;
       if (listenTimerRef.current != null) window.clearTimeout(listenTimerRef.current);
       listenTimerRef.current = null;
-      const start = Math.max(0, t - LOOP_PRE_S);
-      const end = t + LOOP_POST_S;
-      walkRegionRef.current = repeat ? { start, end } : null;
+      walkRegionRef.current = repeat ? { start, end, gap, resumeAt: null } : null;
       handleScrub(start);
+      el.playbackRate = rate;
+      el.preservesPitch = false;
       // A play the browser refuses (no gesture yet on a fresh load) leaves
       // the page paused rather than showing it playing.
       el.play().catch(() => setIsPlaying(false));
       setIsPlaying(true);
       if (!repeat) {
-        listenTimerRef.current = window.setTimeout(pauseListening, (end - start) * 1000);
+        listenTimerRef.current = window.setTimeout(pauseListening, ((end - start) * 1000) / rate);
       }
     },
-    [handleScrub, pauseListening],
+    // phonePlayer reads phone and decodedAudio, both listed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [handleScrub, pauseListening, phone, peaks, walkRate, decodedAudio],
   );
   const listenAround = useCallback(
     (t: number) => {
+      const player = phonePlayer();
+      if (player) {
+        if (player.playing) pauseListening();
+        else playAround(t, walkLoop);
+        return;
+      }
       const el = playbackEl();
       if (!el) return;
-      if (!el.paused) pauseListening();
+      // In the silence between passes the element is paused but the loop plays.
+      if (!el.paused || walkRegionRef.current?.resumeAt != null) pauseListening();
       else playAround(t, walkLoop);
     },
-    [playAround, pauseListening, walkLoop],
+    // phonePlayer reads phone and decodedAudio.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [playAround, pauseListening, walkLoop, phone, decodedAudio],
   );
   const loopStop = useCallback(
     (t: number | null) => {
@@ -899,6 +990,33 @@ export function Review() {
       pauseListening();
     }
   }, [walkLoop, pauseListening, phone]);
+
+  // The walk's beep step: the beep moves, the change is an audit event, and
+  // it saves at once like a decision.
+  const setBeepFromWalk = useCallback(
+    (t: number) => {
+      const base = auditRef.current;
+      if (!base) return;
+      const time = Math.round(t * 1000) / 1000;
+      recordEvent("walk_beep", { from: base.beep_time ?? null, time, method: WALK_METHOD });
+      auditRef.current = { ...base, beep_time: time };
+      setAudit(auditRef.current);
+      isDirtyRef.current = true;
+      setAutosaveTick((n) => n + 1);
+    },
+    [recordEvent],
+  );
+
+  const toggleWalkSlow = useCallback(() => {
+    const on = !walkSlow;
+    writeSlowOn(on);
+    setWalkSlow(on);
+    const el = playbackEl();
+    if (el) el.playbackRate = on ? 0.5 : 1;
+    // The phone's pass is rebuilt at the new rate, its silence with it.
+    const last = lastPassRef.current;
+    if (walkPlayerRef.current?.playing && last) playAround(last.t, last.repeat, on ? 0.5 : 1);
+  }, [walkSlow, playAround]);
 
   const snapDisplacementMs = useCallback(
     (markerId: string): number | null => {
@@ -1206,10 +1324,10 @@ export function Review() {
         <CardContent className={walkMode && phone ? "p-0" : "space-y-4"}>
           {walkMode && peaks && edgePeaks ? (
             <WalkView
-              key={`${fixturePath}:${walkScope}`}
+              key={`${fixturePath}:${walkScope}:${walkRound}`}
               markers={markers}
               peaks={edgePeaks}
-              savedEvents={audit.audit_events ?? []}
+              savedEvents={walkRound > 0 ? [] : (audit.audit_events ?? [])}
               from={(audit.beep_time ?? 0) + BEEP_GUARD_S}
               expectedRounds={
                 (audit as unknown as { stage_rounds?: { expected?: number } }).stage_rounds?.expected ?? null
@@ -1225,6 +1343,8 @@ export function Review() {
               loop={walkLoop}
               onToggleLoop={toggleWalkLoop}
               onLoopStop={loopStop}
+              slow={walkSlow}
+              onToggleSlow={toggleWalkSlow}
               onDone={() => void finishWalk()}
               onExit={() => setWalkMode(false)}
               busy={marking}
@@ -1234,6 +1354,14 @@ export function Review() {
               aside={videoBox}
               scope={walkScope}
               onScopeChange={setScopeOverride}
+              onRestart={restartWalk}
+              source={sourceShots}
+              title={fixtureTitle(audit as never)}
+              sourceAudio={
+                source && sourcePeaks ? { peaks: sourcePeaks, beepTime: source.beep_time, camera: source.camera } : null
+              }
+              beepTime={audit.beep_time ?? null}
+              onSetBeep={setBeepFromWalk}
             />
           ) : walkMode && peaks ? (
             <div className="flex items-center gap-2 text-sm text-muted">
@@ -1426,15 +1554,19 @@ export function Review() {
         onClose={() => setShowHelp(false)}
         mode="review"
       />
-      <SaveToast status={saveStatus} />
+      <SaveToast status={saveStatus} phone={walkMode && phone} />
     </div>
   );
 }
 
-function SaveToast({ status }: { status: SaveStatus }) {
+/** The phone's walk saves on every Confirm: only a failure is worth a word
+ *  there, and it shows at the top, clear of the thumb buttons. */
+function SaveToast({ status, phone = false }: { status: SaveStatus; phone?: boolean }) {
   let label = "";
   let tone = "";
-  if (status.kind === "saving") {
+  if (phone && status.kind !== "error") {
+    // Nothing to say.
+  } else if (status.kind === "saving") {
     label = "Saving fixture...";
     tone = "bg-surface text-ink";
   } else if (status.kind === "saved") {
@@ -1449,7 +1581,11 @@ function SaveToast({ status }: { status: SaveStatus }) {
       <div
         role="status"
         aria-live={status.kind === "error" ? "assertive" : "polite"}
-        className="pointer-events-none fixed bottom-4 right-4 z-toast"
+        className={
+          phone
+            ? "pointer-events-none fixed inset-x-2 top-[calc(0.5rem+env(safe-area-inset-top))] z-toast"
+            : "pointer-events-none fixed bottom-4 right-4 z-toast"
+        }
       >
         {label ? (
           <div
