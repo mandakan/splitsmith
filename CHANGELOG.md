@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.67.0](https://github.com/mandakan/splitsmith/compare/v0.66.1...v0.67.0) (2026-10-12)
+
+
+### Features
+
+* **audit:** Seat, Seat all and rise-foot snapping on the phone ([#1460](https://github.com/mandakan/splitsmith/issues/1460)) ([634a291](https://github.com/mandakan/splitsmith/commit/634a29151899db399271e29a8aa0774b0a4bc56e))
+
 ## [0.66.1](https://github.com/mandakan/splitsmith/compare/v0.66.0...v0.66.1) (2026-10-12)
 
 
