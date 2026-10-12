@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { VideoPanel } from "@/components/VideoPanel";
 import type { StageVideo } from "@/lib/api";
-import { showFirstFrame } from "@/lib/firstFrame";
+import { FIRST_FRAME_SEEK_S, keepOnAFrame, showFirstFrame } from "@/lib/firstFrame";
 
 const video: StageVideo = {
   path: "raw/stage1.mp4",
@@ -48,15 +48,23 @@ const props = {
 };
 
 /** A media element as Safari leaves it after ``loadedmetadata``. */
-function fakeMedia(over: Partial<{ readyState: number; seeking: boolean; currentTime: number }> = {}) {
-  return { readyState: 1, seeking: false, currentTime: 0, ...over } as unknown as HTMLMediaElement;
+function fakeMedia(
+  over: Partial<{ readyState: number; seeking: boolean; currentTime: number; paused: boolean }> = {},
+) {
+  return { readyState: 1, seeking: false, currentTime: 0, paused: true, ...over } as unknown as HTMLMediaElement;
 }
 
 describe("showFirstFrame", () => {
-  it("seeks 1 ms in when metadata came without a frame", () => {
+  it("seeks into the first frame when metadata came without one", () => {
     const el = fakeMedia();
     showFirstFrame(el);
-    expect(el.currentTime).toBe(0.001);
+    expect(el.currentTime).toBe(FIRST_FRAME_SEEK_S);
+  });
+
+  it("seeks past a video track that starts after 0", () => {
+    // Höstfinalen XI stage 7's head-cam rendition: video from 0.020 s; Safari
+    // draws black for any seek before that.
+    expect(FIRST_FRAME_SEEK_S).toBeGreaterThan(0.02);
   });
 
   it("leaves an element alone that has a frame, is seeking, or was placed elsewhere", () => {
@@ -82,6 +90,45 @@ describe("VideoPanel first frame", () => {
       },
     });
     fireEvent.loadedMetadata(el);
-    expect(set).toBe(0.001);
+    expect(set).toBe(FIRST_FRAME_SEEK_S);
+  });
+});
+
+describe("keepOnAFrame", () => {
+  it("moves a paused player off the moments before a late first frame", () => {
+    const el = fakeMedia({ readyState: 4, currentTime: 0 });
+    keepOnAFrame(el);
+    expect(el.currentTime).toBe(FIRST_FRAME_SEEK_S);
+  });
+
+  it("leaves a playing, seeking or later player where it is", () => {
+    for (const el of [
+      fakeMedia({ readyState: 4, paused: false }),
+      fakeMedia({ readyState: 4, seeking: true }),
+      fakeMedia({ readyState: 4, currentTime: 3.5 }),
+    ]) {
+      const before = el.currentTime;
+      keepOnAFrame(el);
+      expect(el.currentTime).toBe(before);
+    }
+  });
+});
+
+describe("VideoPanel after a seek", () => {
+  it("does not leave a paused player before the first frame (a swap back puts it at 0)", () => {
+    const { container } = render(<VideoPanel {...props} videoSrc="/stream?kind=scrub&v=a" />);
+    const el = container.querySelector("video")!;
+    let set: number | null = null;
+    Object.defineProperty(el, "paused", { configurable: true, get: () => true });
+    Object.defineProperty(el, "readyState", { configurable: true, get: () => 4 });
+    Object.defineProperty(el, "currentTime", {
+      configurable: true,
+      get: () => set ?? 0,
+      set: (v: number) => {
+        set = v;
+      },
+    });
+    fireEvent.seeked(el);
+    expect(set).toBe(FIRST_FRAME_SEEK_S);
   });
 });
