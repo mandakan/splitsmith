@@ -50,6 +50,13 @@ _READ_CHUNK_SIZE = 8 * 1024 * 1024
 #: part_size (sidecars, most clips) never fan out at all.
 _PART_UPLOAD_CONCURRENCY = 4
 
+#: Timeouts for the presigned part PUTs (#1444). httpx's default is 5 s for
+#: every connect, write and read; with ``_PART_UPLOAD_CONCURRENCY`` 16 MiB
+#: parts sharing a home uplink, one socket write can block longer than that
+#: while the others drain, and storage can take longer to answer after a
+#: part's last byte. First syncs of large matches failed on it every time.
+_MEDIA_TIMEOUT = httpx.Timeout(30.0, read=120.0, write=120.0)
+
 
 class SyncClientError(RuntimeError):
     """Raised with a user-facing message (401 -> token revoked, 409 -> hosted match exists, etc.)."""
@@ -104,7 +111,7 @@ class HostedSyncClient:
     def _media(self) -> httpx.Client:
         """The client used for presigned-URL part PUTs, created lazily."""
         if self._media_http is None:
-            self._media_http = httpx.Client()
+            self._media_http = httpx.Client(timeout=_MEDIA_TIMEOUT)
         return self._media_http
 
     def ensure_match(self, match_id: str, name: str) -> None:

@@ -922,3 +922,26 @@ def test_a_replaced_logo_is_gcd_like_a_stale_snippet(tmp_path: Path) -> None:
     assert old_key not in remaining
     assert f"matches/{match_id}/shooters/alice/{LOGO_DIR}/{new}" in remaining
     assert report.media_deleted == 1
+
+
+def test_media_uploads_wait_long_enough_for_a_part_on_a_home_uplink() -> None:
+    """#1444: the presigned part PUTs ran on a bare ``httpx.Client()``, whose
+    5 s default for every write and read failed first syncs of large matches
+    (four 16 MiB parts at once on a home uplink). The media client the sync
+    makes for itself waits as long as a part can take; one a caller passes
+    is used as it is."""
+    client = HostedSyncClient(http=httpx.Client())
+    try:
+        timeout = client._media.timeout
+        assert timeout.write is not None and timeout.write >= 120
+        assert timeout.read is not None and timeout.read >= 120
+        assert timeout.connect is not None and timeout.connect >= 30
+    finally:
+        client.close()
+
+    own = httpx.Client(timeout=7.0)
+    client = HostedSyncClient(http=httpx.Client(), media_http=own)
+    try:
+        assert client._media is own
+    finally:
+        client.close()

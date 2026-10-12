@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "sync-large-matches-slow-connection",
+      "date": "2026-10-12",
+      "title": "Big syncs finish on a slow connection",
+      "body": "The first sync of a match with many clips could stop with a timeout on a home connection and fail again on every retry. Uploads now wait long enough for each part."
+    },
+    {
       "id": "phone-audit-wave-under-shots",
       "date": "2026-10-12",
       "title": "Phone Audit draws shots on their sounds",
