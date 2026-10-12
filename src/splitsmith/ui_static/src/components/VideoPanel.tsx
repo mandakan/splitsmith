@@ -31,6 +31,7 @@ import { forwardRef, useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, Clock, LayoutGrid, LayoutList, Loader2 } from "lucide-react";
 
 import { cn, useReleaseMediaOnUnmount } from "@/lib/utils";
+import { showFirstFrame } from "@/lib/firstFrame";
 import { api } from "@/lib/api";
 import type { StageVideo } from "@/lib/api";
 
@@ -188,6 +189,7 @@ function SecondarySlot({ label, src, onRef, onBuffering, overlay }: SecondarySlo
         controls={false}
         className="block h-auto max-h-[40vh] w-full"
         onLoadStart={() => setStatus("loading")}
+        onLoadedMetadata={(e) => showFirstFrame(e.currentTarget)}
         onLoadedData={() => setStatus("ready")}
         onCanPlay={handleResume}
         onPlaying={handleResume}
@@ -492,6 +494,9 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
                 )}
                 data-active-path={active.path}
                 onLoadStart={() => setStatus("loading")}
+                // Safari shows no frame of a metadata-only preload until a
+                // seek or play (lib/firstFrame): black under "Loading video...".
+                onLoadedMetadata={(e) => showFirstFrame(e.currentTarget)}
                 onLoadedData={() => setStatus("ready")}
                 onCanPlay={() => setStatus("ready")}
                 onPlaying={() => setStatus("ready")}
