@@ -31,7 +31,7 @@ import { forwardRef, useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, Clock, LayoutGrid, LayoutList, Loader2 } from "lucide-react";
 
 import { cn, useReleaseMediaOnUnmount } from "@/lib/utils";
-import { showFirstFrame } from "@/lib/firstFrame";
+import { keepOnAFrame, showFirstFrame } from "@/lib/firstFrame";
 import { api } from "@/lib/api";
 import type { StageVideo } from "@/lib/api";
 
@@ -193,7 +193,10 @@ function SecondarySlot({ label, src, onRef, onBuffering, overlay }: SecondarySlo
         onLoadedData={() => setStatus("ready")}
         onCanPlay={handleResume}
         onPlaying={handleResume}
-        onSeeked={() => setStatus("ready")}
+        onSeeked={(e) => {
+          setStatus("ready");
+          keepOnAFrame(e.currentTarget);
+        }}
         onWaiting={handleWaiting}
         onSeeking={() => setStatus("buffering")}
         onStalled={handleWaiting}
@@ -500,7 +503,12 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
                 onLoadedData={() => setStatus("ready")}
                 onCanPlay={() => setStatus("ready")}
                 onPlaying={() => setStatus("ready")}
-                onSeeked={() => setStatus("ready")}
+                onSeeked={(e) => {
+                  setStatus("ready");
+                  // A swap or a seek to the start lands before a late
+                  // video track's first frame: black in Safari.
+                  keepOnAFrame(e.currentTarget);
+                }}
                 onWaiting={() => setStatus(bufferingUnlessErrored)}
                 onSeeking={() => setStatus(bufferingUnlessErrored)}
                 onStalled={() => setStatus(bufferingUnlessErrored)}
