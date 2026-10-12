@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "phone-audit-wave-under-shots",
+      "date": "2026-10-12",
+      "title": "Phone Audit draws shots on their sounds",
+      "body": "On the phone's Audit page the whole-stage waveform drifted a little further from its shot marks on every row, up to 0.4 s on the last. Each sound now sits under its marks."
+    },
+    {
       "id": "breakdown-drag-follows-video",
       "date": "2026-10-11",
       "title": "The video follows a dragged region edge",
