@@ -53,7 +53,10 @@ export function WrappedWaveform({
 }: WrappedWaveformProps) {
   const gesture = useRef<{ pointerId: number; startX: number; grabbed: boolean } | null>(null);
   const rowDur = duration > 0 ? duration / rows : 0;
-  const binsPerRow = Math.ceil(peaks.length / rows);
+  // Each bar sits at its own time, like the markers: rows cut by bin count
+  // drift a fraction of a bin per row when the bins do not split evenly
+  // (1,200 bins in 11 rows put the last row's wave 0.39 s after its shots).
+  const binDur = peaks.length > 0 ? duration / peaks.length : 0;
 
   const timeAt = (row: number, el: Element, clientX: number): number => {
     const rect = el.getBoundingClientRect();
@@ -98,7 +101,8 @@ export function WrappedWaveform({
     <div className="flex min-h-0 flex-1 flex-col gap-px" data-testid="wrapped-waveform">
       {Array.from({ length: rows }, (_, r) => {
         const rowStart = r * rowDur;
-        const rowPeaks = peaks.slice(r * binsPerRow, (r + 1) * binsPerRow);
+        const firstBin = Math.floor(rowStart / binDur);
+        const endBin = Math.min(peaks.length, Math.ceil((rowStart + rowDur) / binDur));
         const rowMarkers = markers.filter((m) => m.time >= rowStart && m.time < rowStart + rowDur);
         const loopIn =
           loop != null && loop.start < rowStart + rowDur && loop.end > rowStart ? loop : null;
@@ -129,13 +133,14 @@ export function WrappedWaveform({
                     fill="var(--color-waveform-loop)"
                   />
                 )}
-                {rowPeaks.map((p, i) => {
+                {peaks.slice(firstBin, endBin).map((p, k) => {
                   const h = Math.max(2, p * 96);
+                  const i = firstBin + k;
                   return (
                     <rect
                       key={i}
-                      x={(i / rowPeaks.length) * 1000}
-                      width={Math.max(1, 1000 / rowPeaks.length - 0.4)}
+                      x={toX(i * binDur)}
+                      width={Math.max(1, (binDur / rowDur) * 1000 - 0.4)}
                       y={50 - h / 2}
                       height={h}
                       fill="var(--color-waveform-bar)"

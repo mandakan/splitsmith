@@ -52,6 +52,24 @@ describe("WrappedWaveform", () => {
     expect(rows[0].querySelector('[data-marker-id="cand-1"]')).toBeNull();
   });
 
+  it("draws a sound under its marker on every row, whatever the bin count", () => {
+    // A stage's 1,200 bins over 51.59 s do not split evenly into 11 rows:
+    // cut by bin count, each row's wave started a bin later than its
+    // markers, 0.39 s late by the last row.
+    const duration = 51.59;
+    const n = 1200;
+    const loud = 1100; // in row 10
+    const wave = Array.from({ length: n }, (_, i) => (i === loud ? 1 : 0.01));
+    const t = ((loud + 0.5) / n) * duration;
+    renderRows({ peaks: wave, duration, markers: [marker({ time: t })] });
+    const row = screen.getAllByTestId("wave-row")[10];
+    const line = row.querySelector('[data-marker-id="cand-1"]')!;
+    const bar = [...row.querySelectorAll("rect")].find((r) => Number(r.getAttribute("height")) > 50)!;
+    const barMid = Number(bar.getAttribute("x")) + Number(bar.getAttribute("width")) / 2;
+    // Within half a bin (a row is 1000 units over 4.69 s; a bin is 43 ms).
+    expect(Math.abs(barMid - Number(line.getAttribute("x1")))).toBeLessThan(6);
+  });
+
   it("marks the target marker distinctly", () => {
     renderRows({ markers: [marker({ time: 6.0 })], targetId: "cand-1" });
     const el = document.querySelector('[data-marker-id="cand-1"]');
