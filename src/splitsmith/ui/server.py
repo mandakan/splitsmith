@@ -18318,6 +18318,38 @@ def create_app(
             _lab_universe_cache["last_run"] = run
             return JSONResponse(run.model_dump(mode="json"))
 
+        @app.post("/api/lab/promote-drift")
+        def lab_promote_drift(payload: dict[str, Any] = Body(...)) -> JSONResponse:  # noqa: B008
+            """For each ``{shooter_slug, stage_number, slug}`` row of the
+            Promote stages panel: how the existing fixture ``slug`` compares
+            with the stage's audit now (``lab.core.audit_drift``), or
+            ``null`` when there is no fixture or no audit to compare."""
+            rows = payload.get("rows")
+            if not isinstance(rows, list):
+                raise HTTPException(status_code=400, detail="payload must include a list 'rows'")
+            root = lab_module.core.DEFAULT_FIXTURES_ROOT
+            out: list[dict[str, Any] | None] = []
+            for row in rows:
+                drift = None
+                if isinstance(row, dict):
+                    slug, shooter, n = row.get("slug"), row.get("shooter_slug"), row.get("stage_number")
+                    fixture = root / f"{slug}.json" if isinstance(slug, str) and "/" not in slug else None
+                    if (
+                        fixture is not None
+                        and fixture.exists()
+                        and isinstance(shooter, str)
+                        and isinstance(n, int)
+                    ):
+                        try:
+                            audit_path = state.materialize_audit(shooter, n)
+                            fixture_doc = json.loads(fixture.read_text(encoding="utf-8"))
+                            audit_doc = json.loads(audit_path.read_text(encoding="utf-8"))
+                            drift = lab_module.core.audit_drift(fixture_doc, audit_doc).model_dump()
+                        except (HTTPException, OSError, ValueError, KeyError):
+                            drift = None
+                out.append(drift)
+            return JSONResponse({"drift": out})
+
         @app.post("/api/lab/promote")
         def lab_promote(payload: dict[str, Any] = Body(...)) -> JSONResponse:  # noqa: B008
             stage_n = payload.get("stage_number")

@@ -4240,6 +4240,16 @@ export const api = {
       `/api/matches/${encodeURIComponent(matchId)}/shooters/${encodeURIComponent(slug)}/exports/overview`,
     ),
 
+  /** How each row's existing fixture compares with its stage's audit now
+   *  (lib/promoteDrift); ``null`` where there is nothing to compare. */
+  promoteDriftIn: (
+    matchId: string,
+    rows: Array<{ shooter_slug: string; stage_number: number; slug: string }>,
+  ) =>
+    request<{ drift: Array<import("@/lib/promoteDrift").AuditDrift | null> }>(
+      `/api/matches/${encodeURIComponent(matchId)}/lab/promote-drift`,
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ rows }) },
+    ),
   promoteFixtureIn: (
     matchId: string,
     payload: {
