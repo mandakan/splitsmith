@@ -164,7 +164,9 @@ describe("MobileAudit desktop requests", () => {
     ctx.value = { project: projectWithVideo(), origin: "hosted", capabilities: ["edit", "review"], refresh: vi.fn() };
     renderPage();
     await screen.findByRole("button", { name: /save/i });
-    expect(screen.queryByRole("button", { name: "Stage actions" })).not.toBeInTheDocument();
+    // The stage menu is there (Seat all, Snap), but it never offers the desktop.
+    fireEvent.click(screen.getByRole("button", { name: "Stage actions" }));
+    expect(screen.queryByRole("menuitem", { name: /re-detect on desktop/i })).not.toBeInTheDocument();
     expect(apiMock.listDesktopCommands).not.toHaveBeenCalled();
   });
 
