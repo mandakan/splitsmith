@@ -35,6 +35,7 @@ export function AuditFooter({ onOpenHelp, camera = null }: AuditFooterProps) {
       <Item keys={["F"]} label="next flag" />
       <Item keys={["K"]} label="toggle shot at playhead" />
       <Item keys={["R"]} label="reject" />
+      <Item keys={["E"]} label="rise foot" />
       <Item keys={["+", "0", "−"]} label="zoom" />
       {camera ? <Item keys={camera === "next" ? ["C", "⇧C"] : ["C"]} label={camera === "next" ? "next / prev camera" : "swap camera"} /> : null}
       <Item keys={[`${MOD}⏎`]} label="save & next" />

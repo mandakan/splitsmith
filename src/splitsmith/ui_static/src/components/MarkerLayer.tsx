@@ -102,11 +102,14 @@ export interface MarkerLayerProps {
    *  its kind's filter is off so focus never lands on an invisible
    *  marker (#666). */
   forcedVisibleId?: string | null;
-  /** Peaks at about 1 ms per bin, used to snap a drop to the shot's leading
-   *  edge while zoomed out (``lib/peak-snap.placeTime``). Zoomed in to 2 ms
-   *  per pixel or finer, or with Shift held, a drop lands exactly. Absent =
-   *  every drop lands exactly. */
+  /** Peaks at about 1 ms per bin, used to snap a drop to the shot's rise
+   *  foot (``lib/peak-snap.placeTime``), whatever the zoom; with Shift held a
+   *  drop lands exactly. Absent (the page's snap is off) = every drop lands
+   *  exactly. */
   snapPeaks?: SnapPeaks;
+  /** The current shot's rise foot (lib/riseFoot), drawn as a thin dashed
+   *  line so a shot off the rule shows how far off; ``null`` draws none. */
+  footTime?: number | null;
 }
 
 export function MarkerLayer(props: MarkerLayerProps) {
@@ -127,6 +130,7 @@ function MarkerLayerInner({
   visibleKinds,
   forcedVisibleId,
   snapPeaks,
+  footTime = null,
 }: MarkerLayerProps) {
   // Drag state lives in a ref so re-renders driven by external time
   // updates don't reset the active drag. ``moved`` only flips once the
@@ -257,21 +261,16 @@ function MarkerLayerInner({
       }
       const live = markers.find((m) => m.id === marker.id);
       let final = live?.time ?? marker.time;
-      // Zoomed out the drop snaps to the shot's leading edge; zoomed in, or
-      // with Shift, it stays exactly where it was let go.
-      const width = e.currentTarget.parentElement?.getBoundingClientRect().width ?? 0;
-      const placed = placeTime(final, {
-        pxPerSecond: duration > 0 ? width / duration : 0,
-        shiftKey: e.shiftKey,
-        peaks: snapPeaks,
-      });
+      // The drop snaps to the shot's rise foot while the page's snap is on
+      // (``snapPeaks`` given); with Shift it stays exactly where it was let go.
+      const placed = placeTime(final, { shiftKey: e.shiftKey, peaks: snapPeaks });
       if (placed !== final) {
         final = placed;
         onTimeChange(marker.id, placed);
       }
       onTimeChangeCommit?.(marker.id, final);
     },
-    [onClick, onTimeChangeCommit, markers, snapPeaks, onTimeChange, duration],
+    [onClick, onTimeChangeCommit, markers, snapPeaks, onTimeChange],
   );
 
   // Esc cancels an in-flight drag: restore the pointerdown-time position
@@ -373,6 +372,15 @@ function MarkerLayerInner({
       className="pointer-events-none absolute inset-0"
       data-marker-layer
     >
+      {footTime != null && footTime >= 0 && footTime <= duration ? (
+        <span
+          aria-hidden
+          data-rise-foot
+          className="pointer-events-none absolute inset-y-0 w-0 border-l border-dashed border-status-complete/80"
+          style={{ left: `${(footTime / duration) * 100}%` }}
+          title="Rise foot"
+        />
+      ) : null}
       {sorted.map((m) => {
         const x = (m.time / duration) * 100;
         const label = describeMarker(m);

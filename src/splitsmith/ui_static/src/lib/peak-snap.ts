@@ -19,10 +19,6 @@ export interface SnapPeaks {
  *  the neighbouring shot on a fast string (splits are 150-400 ms). */
 export const PEAK_SNAP_TOLERANCE_S = 0.025;
 
-/** At this many pixels per second (2 ms per pixel) or more, a drop is placed
- *  exactly: the person can see the edge better than the snap can find it. */
-export const EXACT_PX_PER_SECOND = 500;
-
 /** Minimum normalized amplitude for a bin to count as a shot. Below this
  *  the window is treated as silence and the gesture keeps its raw time. */
 const MIN_PEAK_AMPLITUDE = 0.05;
@@ -94,13 +90,16 @@ export function snapToLeadingEdge(
   return i * binW;
 }
 
-/** Where a marker dropped or added at ``time`` lands. */
+/** Where a marker dropped or added at ``time`` lands: on the shot's rise
+ *  foot when ``peaks`` is given (the page's snap setting is on), exactly with
+ *  Shift or without peaks. Whatever the zoom: snapping used to stop at 2 ms
+ *  per pixel, which turned it off exactly when a person zoomed in to place. */
 export function placeTime(
   time: number,
-  opts: { pxPerSecond: number; shiftKey: boolean; peaks: SnapPeaks | null | undefined },
+  opts: { shiftKey: boolean; peaks: SnapPeaks | null | undefined },
 ): number {
   const exact = Math.round(time * 1000) / 1000;
-  if (opts.shiftKey || opts.pxPerSecond >= EXACT_PX_PER_SECOND || !opts.peaks) return exact;
+  if (opts.shiftKey || !opts.peaks) return exact;
   const edge = snapToLeadingEdge(time, opts.peaks);
   return edge == null ? exact : Math.round(edge * 1000) / 1000;
 }

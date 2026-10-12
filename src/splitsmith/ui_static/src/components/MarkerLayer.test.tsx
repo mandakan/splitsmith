@@ -124,13 +124,14 @@ describe("MarkerLayer focus and placement", () => {
     return onTimeChangeCommit.mock.lastCall?.[1] as number;
   }
 
-  it("snaps a drop to the shot's leading edge when zoomed out", () => {
+  it("snaps a drop to the shot's rise foot when zoomed out", () => {
     // 1000 px over 10 s: 10 ms per pixel.
     expect(dropAt(1000)).toBeCloseTo(3.0, 6);
   });
 
-  it("places a drop exactly when zoomed in to 2 ms per pixel or finer", () => {
-    expect(dropAt(10000)).toBeCloseTo(3.012, 6);
+  it("snaps a drop to the rise foot zoomed in too: snapping no longer follows the zoom", () => {
+    // 10000 px over 10 s: 1 ms per pixel, where a drop used to land exactly.
+    expect(dropAt(10000)).toBeCloseTo(3.0, 6);
   });
 
   it("places a drop exactly with Shift at any zoom", () => {

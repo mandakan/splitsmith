@@ -97,6 +97,8 @@ import { useScrubSource } from "@/lib/useScrubSource";
 import { computeAuditNextStep } from "@/lib/audit-next-step";
 import { useMatchHref } from "@/lib/matchHref";
 import { placeTime, type SnapPeaks } from "@/lib/peak-snap";
+import { footFor, footReadout, readSnapOn, seatAllMoves, writeSnapOn } from "@/lib/riseFoot";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { reviewMaxZoom } from "@/lib/reviewZoom";
 import { deriveStageStatus } from "@/lib/stageStatus";
 import type { Zoom } from "@/lib/timelineView";
@@ -160,6 +162,16 @@ export function Audit() {
   const [peaksLoading, setPeaksLoading] = useState(false);
   const [peaksError, setPeaksError] = useState<string | null>(null);
   const [snapPeaks, setSnapPeaks] = useState<SnapPeaks | null>(null);
+  // Snap placed shots to their rise foot (lib/riseFoot): on until turned off.
+  const [snapOn, setSnapOn] = useState(readSnapOn);
+  const placingPeaks = snapOn ? snapPeaks : null;
+  // Where each shot was last placed (a drag or an add): where its rise foot
+  // is looked for. A seat (E, Seat all) never moves it, or a burst with a
+  // louder reflection would walk the shot forward a few ms per press.
+  const [placedAt, setPlacedAt] = useState<Record<string, number>>({});
+  const [seatAllPending, setSeatAllPending] = useState<Array<{ id: string; from: number; to: number }> | null>(
+    null,
+  );
 
   const [audit, setAudit] = useState<StageAudit | null>(null);
 
@@ -873,9 +885,10 @@ export function Audit() {
   }, [handleMarkerTimeChangeCommit]);
 
   const handleAddManual = useCallback(
-    (time: number, shiftKey = false, pxPerSecond = 0) => {
-      const t = placeTime(time, { pxPerSecond, shiftKey, peaks: snapPeaks });
+    (time: number, shiftKey = false) => {
+      const t = placeTime(time, { shiftKey, peaks: placingPeaks });
       const id = `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      setPlacedAt((prev) => ({ ...prev, [id]: t }));
       recordEvent("marker_added_manual", { id, time: t });
       mutate([
         ...markers,
@@ -892,7 +905,7 @@ export function Audit() {
       ]);
       setFocusedMarkerId(id);
     },
-    [markers, mutate, recordEvent, snapPeaks],
+    [markers, mutate, recordEvent, placingPeaks],
   );
 
   const handleNoteChange = useCallback(
@@ -923,6 +936,53 @@ export function Audit() {
         .sort((a, b) => a.time - b.time || a.id.localeCompare(b.id)),
     [markers],
   );
+
+  // ---- Rise foot (lib/riseFoot) ------------------------------------------
+
+  // A drag's drop is a placement: the foot is looked for from there.
+  const handleDragCommit = useCallback(
+    (id: string, time: number) => {
+      handleMarkerTimeChangeCommit(id, time);
+      setPlacedAt((prev) => ({ ...prev, [id]: time }));
+    },
+    [handleMarkerTimeChangeCommit],
+  );
+  const placedFrom = useCallback((m: AuditMarker) => placedAt[m.id] ?? m.time, [placedAt]);
+  const toggleSnap = useCallback(() => {
+    setSnapOn((on) => {
+      writeSnapOn(!on);
+      return !on;
+    });
+  }, []);
+  // E: the current shot onto its rise foot, one undo step.
+  const seatShot = useCallback(
+    (target: AuditMarker | null) => {
+      if (!target) return;
+      const from = placedFrom(target);
+      const to = footFor(from, snapPeaks);
+      if (to == null || Math.abs(to - target.time) < 0.0005) return;
+      setPlacedAt((prev) => ({ ...prev, [target.id]: from }));
+      recordEvent("marker_time_changed", { id: target.id, from_time: target.time, to_time: to, reason: "rise_foot" });
+      mutate(markers.map((m) => (m.id === target.id ? { ...m, time: to } : m)));
+    },
+    [placedFrom, snapPeaks, recordEvent, mutate, markers],
+  );
+  const askSeatAll = useCallback(() => {
+    setSeatAllPending(seatAllMoves(markers, snapPeaks, placedFrom));
+  }, [markers, snapPeaks, placedFrom]);
+  const seatAll = useCallback(() => {
+    const moves = seatAllPending ?? [];
+    setSeatAllPending(null);
+    if (moves.length === 0) return;
+    const to = new Map(moves.map((x) => [x.id, x.to]));
+    setPlacedAt((prev) => {
+      const next = { ...prev };
+      for (const x of moves) next[x.id] = prev[x.id] ?? x.from;
+      return next;
+    });
+    recordEvent("rise_foot_seat_all", { moved: moves.length });
+    mutate(markers.map((m) => (to.has(m.id) ? { ...m, time: to.get(m.id)! } : m)));
+  }, [seatAllPending, recordEvent, mutate, markers]);
 
   // Live anomaly list -- mirrors what the saved report.txt will surface.
   // Recomputed on every marker / beep / stage-time change so chips + pins
@@ -1361,6 +1421,12 @@ export function Audit() {
           if (target) handleMarkerDelete(target);
           return;
         }
+        if (e.key === "e" || e.key === "E") {
+          // Seat the current shot on its rise foot.
+          e.preventDefault();
+          seatShot(keptShots[Math.min(currentShotIndex, keptShots.length - 1)] ?? null);
+          return;
+        }
         if (e.key === "f" || e.key === "F") {
           // Next flagged shot, wrapping.
           e.preventDefault();
@@ -1451,6 +1517,7 @@ export function Audit() {
     nextStageNumber,
     anomalies,
     pipCycle,
+    seatShot,
   ]);
 
   // Stage switch / unmount: flush any pending nudge bracket so the
@@ -1815,10 +1882,11 @@ export function Audit() {
             onDelete={handleMarkerDelete}
             onTimeChange={handleMarkerTimeChange}
             onTimeChangeBegin={handleMarkerTimeChangeBegin}
-            onTimeChangeCommit={handleMarkerTimeChangeCommit}
+            onTimeChangeCommit={handleDragCommit}
             visibleKinds={visibleKinds}
             forcedVisibleId={forcedVisibleId}
-            snapPeaks={snapPeaks ?? undefined}
+            snapPeaks={placingPeaks ?? undefined}
+            footTime={currentShot ? footFor(placedFrom(currentShot), snapPeaks) : null}
           />
         </div>
       ),
@@ -2063,6 +2131,9 @@ export function Audit() {
                       onToggleKAuto={() => setKAutoProgress((v) => !v)}
                       fullResVideo={scrub.fullRes}
                       onToggleFullResVideo={scrub.available ? () => scrub.setFullRes(!scrub.fullRes) : undefined}
+                      snapRiseFoot={snapOn}
+                      onToggleSnapRiseFoot={toggleSnap}
+                      onSeatAllOnRiseFoot={snapPeaks ? askSeatAll : undefined}
                       action={
                         pipelineAction === "trim" ? (
                           <TrimNowBadge
@@ -2140,6 +2211,8 @@ export function Audit() {
                     }}
                     onAddHere={() => handleAddManual(currentTime)}
                     canAddHere={!shotAtPlayhead}
+                    foot={currentShot ? footReadout(currentShot.time, footFor(placedFrom(currentShot), snapPeaks)) : null}
+                    onSeat={() => seatShot(currentShot)}
                   />
                 </div>
               </div>
@@ -2192,6 +2265,30 @@ export function Audit() {
         )
       ) : null}
       <HelpOverlay open={showHelp} onClose={() => setShowHelp(false)} mode="audit" />
+      {seatAllPending ? (
+        <ConfirmDialog
+          title={
+            seatAllPending.length === 0
+              ? "Every shot is on its rise foot"
+              : `Seat ${seatAllPending.length} of ${keptShots.length} shots on their rise foot?`
+          }
+          body={
+            seatAllPending.length === 0
+              ? "Nothing to move."
+              : `They move by up to ${Math.round(
+                  Math.max(...seatAllPending.map((x) => Math.abs(x.to - x.from))) * 1000,
+                )} ms. Undo puts them all back.`
+          }
+          confirmLabel={seatAllPending.length === 0 ? "OK" : "Seat them"}
+          cancelLabel="Cancel"
+          destructive={false}
+          checkboxes={[]}
+          checked={{}}
+          onToggle={() => {}}
+          onConfirm={seatAll}
+          onCancel={() => setSeatAllPending(null)}
+        />
+      ) : null}
       {!beepStep ? <AuditFooter onOpenHelp={() => setShowHelp(true)} camera={pip.inset == null ? null : pip.counter ? "next" : "swap"} /> : null}
       {saveStatus.kind === "error" ? <SaveToast status={saveStatus} /> : null}
     </div>

@@ -207,10 +207,26 @@ export interface TransportMenuItemsProps {
   action?: ReactNode;
   /** Muted lines at the end of the menu (``lib/auditBand.bandReadouts``). */
   readouts?: string[];
+  /** Snap placed shots to their rise foot (lib/riseFoot), and the stage-wide
+   *  seat. The items render only when ``onToggleSnapRiseFoot`` is given. */
+  snapRiseFoot?: boolean;
+  onToggleSnapRiseFoot?: () => void;
+  onSeatAllOnRiseFoot?: () => void;
 }
 
 export function TransportMenuItems(props: TransportMenuItemsProps) {
-  const { onStepFrame, kAutoProgress, onToggleKAuto, fullResVideo, onToggleFullResVideo, action, readouts = [] } = props;
+  const {
+    onStepFrame,
+    kAutoProgress,
+    onToggleKAuto,
+    fullResVideo,
+    onToggleFullResVideo,
+    action,
+    readouts = [],
+    snapRiseFoot,
+    onToggleSnapRiseFoot,
+    onSeatAllOnRiseFoot,
+  } = props;
   return (
     <>
       <span aria-hidden className="my-1 h-px shrink-0 bg-rule" />
@@ -246,6 +262,27 @@ export function TransportMenuItems(props: TransportMenuItemsProps) {
         Auto-step to the next shot on accept
         <span className="ml-auto text-sm text-muted">{kAutoProgress ? "on" : "off"}</span>
       </button>
+      {onToggleSnapRiseFoot ? (
+        <>
+          <button
+            type="button"
+            role="menuitemcheckbox"
+            aria-checked={Boolean(snapRiseFoot)}
+            className={ITEM}
+            onClick={onToggleSnapRiseFoot}
+            title="Placed shots land on their rise foot; hold Shift to place one exactly"
+          >
+            Snap to rise foot
+            <span className="ml-auto text-sm text-muted">{snapRiseFoot ? "on" : "off"}</span>
+          </button>
+          {onSeatAllOnRiseFoot ? (
+            <button type="button" role="menuitem" className={ITEM} onClick={onSeatAllOnRiseFoot}>
+              <Kbd size="sm">E</Kbd>
+              Seat all shots on their rise foot...
+            </button>
+          ) : null}
+        </>
+      ) : null}
       {onToggleFullResVideo ? (
         <button
           type="button"
