@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { EXACT_PX_PER_SECOND, placeTime, snapToLeadingEdge } from "@/lib/peak-snap";
+import { placeTime, snapToLeadingEdge } from "@/lib/peak-snap";
 
 interface RiseFootCase {
   name: string;
@@ -96,21 +96,16 @@ describe("snapToLeadingEdge", () => {
 describe("placeTime", () => {
   const peaks = trace(0.01, [[3000, 1]]);
 
-  it("snaps to the leading edge when a pixel is coarser than 2 ms", () => {
-    expect(placeTime(3.012, { pxPerSecond: 100, shiftKey: false, peaks: SNAP(peaks) })).toBeCloseTo(3.0, 6);
+  it("snaps to the rise foot whatever the zoom", () => {
+    expect(placeTime(3.012, { shiftKey: false, peaks: SNAP(peaks) })).toBeCloseTo(3.0, 6);
   });
 
-  it("places exactly, on the 1 ms grid, once a pixel is 2 ms or finer", () => {
-    expect(EXACT_PX_PER_SECOND).toBe(500);
-    expect(placeTime(3.0124, { pxPerSecond: 500, shiftKey: false, peaks: SNAP(peaks) })).toBeCloseTo(3.012, 6);
+  it("places exactly, on the 1 ms grid, with Shift", () => {
+    expect(placeTime(3.0124, { shiftKey: true, peaks: SNAP(peaks) })).toBeCloseTo(3.012, 6);
   });
 
-  it("places exactly with Shift at any zoom", () => {
-    expect(placeTime(3.0124, { pxPerSecond: 100, shiftKey: true, peaks: SNAP(peaks) })).toBeCloseTo(3.012, 6);
-  });
-
-  it("places exactly when there is nothing to snap to", () => {
-    expect(placeTime(5.0004, { pxPerSecond: 100, shiftKey: false, peaks: SNAP(peaks) })).toBeCloseTo(5.0, 6);
-    expect(placeTime(3.0124, { pxPerSecond: 100, shiftKey: false, peaks: null })).toBeCloseTo(3.012, 6);
+  it("places exactly with snapping off (no peaks), or with nothing to snap to", () => {
+    expect(placeTime(3.0124, { shiftKey: false, peaks: null })).toBeCloseTo(3.012, 6);
+    expect(placeTime(5.0004, { shiftKey: false, peaks: SNAP(peaks) })).toBeCloseTo(5.0, 6);
   });
 });

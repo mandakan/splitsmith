@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "audit-rise-foot-snap",
+      "date": "2026-10-12",
+      "title": "Place shots on their rise foot in Audit",
+      "body": "Placed shots snap to the rise foot at any zoom; hold Shift to place exactly, or turn Snap off in the timeline's menu. E seats the current shot, and the menu can seat them all."
+    },
+    {
       "id": "safari-video-first-frame",
       "date": "2026-10-12",
       "title": "Videos show their first frame in Safari",

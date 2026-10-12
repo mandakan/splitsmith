@@ -23,6 +23,10 @@ export interface CurrentShotLineProps {
   onAddHere: () => void;
   /** False when the playhead already sits on a shot (K would toggle it off). */
   canAddHere: boolean;
+  /** The current shot against the rise foot (lib/riseFoot.footReadout). */
+  foot?: { text: string; onRule: boolean } | null;
+  /** Seat the current shot on its rise foot (E); absent hides the button. */
+  onSeat?: () => void;
 }
 
 function pad2(n: number): string {
@@ -37,7 +41,19 @@ function Figure({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function CurrentShotLine({ shots, currentIndex, beep = null, onStep, flag, onNoteChange, onReject, onAddHere, canAddHere }: CurrentShotLineProps) {
+export function CurrentShotLine({
+  shots,
+  currentIndex,
+  beep = null,
+  onStep,
+  flag,
+  onNoteChange,
+  onReject,
+  onAddHere,
+  canAddHere,
+  foot = null,
+  onSeat,
+}: CurrentShotLineProps) {
   const total = shots.length;
   const idx = total > 0 ? Math.min(Math.max(currentIndex, 0), total - 1) : -1;
   const current = idx >= 0 ? shots[idx] : null;
@@ -62,6 +78,9 @@ export function CurrentShotLine({ shots, currentIndex, beep = null, onStep, flag
             <Figure label="t" value={current.time.toFixed(2)} />
             <Figure label="conf" value={current.confidence != null ? current.confidence.toFixed(2) : "—"} />
             <Figure label="split" value={split != null ? split.toFixed(3) : "—"} />
+            {foot ? (
+              <span className={foot.onRule ? "text-status-complete" : "text-status-warning"}>{foot.text}</span>
+            ) : null}
             {flag ? (
               <span className="text-live">
                 <i aria-hidden className="mr-1.5 inline-block size-2 rounded-full bg-live align-middle" />
@@ -73,6 +92,11 @@ export function CurrentShotLine({ shots, currentIndex, beep = null, onStep, flag
           <span className="text-muted">No shot at the playhead</span>
         )}
         <span className="ml-auto inline-flex gap-2">
+          {onSeat ? (
+            <Button type="button" size="sm" onClick={onSeat} disabled={!current || !foot || foot.onRule}>
+              Rise foot <Kbd size="sm">E</Kbd>
+            </Button>
+          ) : null}
           <Button type="button" size="sm" onClick={onReject} disabled={!current}>
             Reject <Kbd size="sm">R</Kbd>
           </Button>

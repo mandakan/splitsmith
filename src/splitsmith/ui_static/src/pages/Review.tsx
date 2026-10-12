@@ -470,11 +470,8 @@ export function Review() {
 
   const handleAddManual = useCallback(
     (time: number, shiftKey = false) => {
-      // Zoomed out a new marker snaps to the shot's leading edge; zoomed in
-      // (2 ms per pixel or finer) or with Shift it lands exactly.
-      const pxPerSecond =
-        pixelsPerSecond ?? (peaks && peaks.duration > 0 ? waveformViewport / peaks.duration : 0);
-      const t = placeTime(time, { pxPerSecond, shiftKey, peaks: edgePeaks });
+      // A new marker snaps to the shot's rise foot; with Shift it lands exactly.
+      const t = placeTime(time, { shiftKey, peaks: edgePeaks });
       const id = `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       recordEvent("marker_added_manual", { id, time: t });
       mutate([
@@ -491,7 +488,7 @@ export function Review() {
       ]);
       setFocusedMarkerId(id);
     },
-    [markers, mutate, recordEvent, pixelsPerSecond, peaks, waveformViewport, edgePeaks],
+    [markers, mutate, recordEvent, edgePeaks],
   );
 
   const handleNoteChange = useCallback((id: string, note: string) => {

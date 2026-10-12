@@ -46,6 +46,8 @@ function sections(mode: HelpMode): Section[] {
     { keys: ["Shift", "←", "→"], desc: "Nudge playhead 25 ms" },
     { keys: ["R"], desc: "Reject the current shot (manual: delete)" },
     { keys: ["F"], desc: "Jump to the next flagged shot" },
+    { keys: ["E"], desc: "Seat the current shot on its rise foot" },
+    { keys: ["Shift", "drag"], desc: "Place a shot exactly, without snapping to the rise foot" },
   ];
   const markers: ShortcutRow[] = [
     { keys: ["M"], desc: "Next kept shot" },
