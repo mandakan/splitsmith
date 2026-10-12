@@ -51,6 +51,40 @@ def test_submit_reconcile_steps_queues_a_trim_for_a_pulled_confirm(tmp_path: Pat
     assert next(iter(state.reconcile_jobs.values()))[1].kind == "trim"
 
 
+def test_healing_a_gone_trim_never_redetects_an_audited_stage(tmp_path: Path, monkeypatch) -> None:
+    """Review I1: a stage marked trimmed whose trim is gone gets a trim step
+    (spec 2026-10-12), but its audit doc has real shots: the trim must not
+    chain detection over them, which ``video_step`` never does either."""
+    import json
+
+    client, project_root = _seed_match_export_project(tmp_path, stage_count=1)
+    state = client.app.state.splitsmith_state
+    root = project_root / "shooters" / "me"
+    project = MatchProject.load(root)
+    video = project.stage(1).primary()
+    video.beep_reviewed = True
+    video.processed["trim"] = True
+    project.save(root)
+    audit = root / "audit" / "stage1.json"
+    audit.parent.mkdir(parents=True, exist_ok=True)
+    audit.write_text(
+        json.dumps({"shots": [{"time": 1.0}], "audit_events": [{"kind": "save"}]}), encoding="utf-8"
+    )
+    for trim in (root / "trimmed").glob("*_trimmed.mp4"):
+        trim.unlink()
+    submitted: list[dict] = []
+
+    async def fake_submit(**kw):
+        submitted.append(kw)
+        return _job(f"j{len(submitted)}", kw["kind"], JobStatus.PENDING)
+
+    monkeypatch.setattr(state.jobs, "submit", fake_submit)
+    with _match_context(project_root):
+        server_mod._submit_reconcile_steps(state, project_root)
+    assert [s["kind"] for s in submitted] == ["trim"]
+    assert submitted[0]["args"]["chain_shot_detect"] is False
+
+
 def test_failed_reconcile_step_is_recorded_and_skipped(tmp_path: Path, monkeypatch) -> None:
     client, project_root = _seed_match_export_project(tmp_path, stage_count=1)
     state = client.app.state.splitsmith_state

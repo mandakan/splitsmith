@@ -26,15 +26,18 @@ shelling out.
 
 from __future__ import annotations
 
+import fcntl
 import os
 import platform
 import subprocess
+import uuid
 from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
 from .config import Config, TrimResult, WebTrimConfig
+from .media_check import valid_mp4, valid_mp4_cached
 from .runtime import ENV_CONFIG_FILE
 
 Runner = Callable[..., subprocess.CompletedProcess]
@@ -310,6 +313,59 @@ def web_trim_path(trimmed: Path) -> Path:
     return trimmed.with_name(f"{stem}_web.mp4")
 
 
+def unique_partial(final: Path) -> Path:
+    """A partial name no other process can share (the 2026-09-27 corruption
+    came from every process writing ``<stem>.partial.mp4``). Ends in
+    ``.partial.mp4`` so every glob that skips or sweeps partials still does."""
+    return final.with_name(f"{final.stem}.{os.getpid()}-{uuid.uuid4().hex[:8]}.partial{final.suffix}")
+
+
+def rendition_ok(trimmed: Path) -> bool:
+    """The trim's web rendition is present, not older than the trim, and
+    structurally valid. Validity adds to the mtime rule, never replaces it:
+    a valid rendition of an older window is still stale."""
+    web = web_trim_path(trimmed)
+    try:
+        web_st = web.stat()
+        if web_st.st_size == 0 or web_st.st_mtime < trimmed.stat().st_mtime:
+            return False
+    except OSError:
+        return False
+    return valid_mp4_cached(web).ok
+
+
+def write_web_rendition(
+    trimmed: Path,
+    config: WebTrimConfig,
+    *,
+    ffmpeg_binary: str = "ffmpeg",
+    runner: Runner = subprocess.run,
+) -> Path:
+    """Cut the trim's web rendition and publish it only when it passes the
+    structural check (spec 2026-10-12 derived-media self-heal). A per-file
+    lock makes a second writer wait and then reuse the first's rendition; the
+    partial name is per process. Raises ``FFmpegError`` when ffmpeg fails or
+    its output fails the check; the partial is always removed and a previous
+    good rendition is never replaced by a bad one."""
+    web = web_trim_path(trimmed)
+    lock_path = web.with_name(f"{web.stem}.lock")
+    with lock_path.open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if rendition_ok(trimmed):
+            return web
+        partial = unique_partial(web)
+        try:
+            transcode_web_trim(trimmed, partial, config, ffmpeg_binary=ffmpeg_binary, runner=runner)
+            check = valid_mp4(partial)
+            if not check.ok:
+                raise FFmpegError(f"web rendition failed its check: {check.reason}")
+            partial.replace(web)
+        finally:
+            if partial.exists():
+                partial.unlink()
+    return web
+
+
 def transcode_web_trim(
     input_path: Path,
     output_path: Path,
@@ -396,23 +452,15 @@ def backfill_web_trims(
         return cut, errors
     todo: list[Path] = []
     for trimmed in sorted(trimmed_dir.glob(TRIMMED_CLIP_GLOB)):
-        web = web_trim_path(trimmed)
-        if web.exists() and web.stat().st_size > 0 and web.stat().st_mtime >= trimmed.stat().st_mtime:
+        if rendition_ok(trimmed):
             continue
         todo.append(trimmed)
     for i, trimmed in enumerate(todo, start=1):
         on_progress(i, len(todo), trimmed)
-        web = web_trim_path(trimmed)
-        partial = web.with_name(f"{web.stem}.partial{web.suffix}")
         try:
-            transcode_web_trim(trimmed, partial, config, ffmpeg_binary=ffmpeg_binary, runner=runner)
-            if not (partial.exists() and partial.stat().st_size > 0):
-                raise FFmpegError("ffmpeg produced no output")
-            partial.replace(web)
+            write_web_rendition(trimmed, config, ffmpeg_binary=ffmpeg_binary, runner=runner)
         except FFmpegError as exc:
-            if partial.exists():
-                partial.unlink()
             errors.append(f"{trimmed.name}: web rendition not cut ({exc})")
             continue
-        cut.append(web)
+        cut.append(web_trim_path(trimmed))
     return cut, errors

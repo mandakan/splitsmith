@@ -17,6 +17,9 @@ from splitsmith import trim as trim_module
 from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 from splitsmith.ui import audio as audio_helpers
 from splitsmith.ui.server import create_app
+from tests.media_bytes import tiny_mp4
+
+WEB = tiny_mp4()
 
 
 def _bootstrap(tmp_path: Path) -> tuple[TestClient, str, Path, Path]:
@@ -67,14 +70,14 @@ def test_fresh_web_trim_accepts_a_rendition_cut_after_the_trim(tmp_path: Path) -
     trim.write_bytes(b"trim")
     _age(trim, 10)
     web = trim_module.web_trim_path(trim)
-    web.write_bytes(b"web")
+    web.write_bytes(WEB)
     assert audio_helpers.fresh_web_trim(trim) == web
 
 
 def test_fresh_web_trim_rejects_a_rendition_older_than_the_trim(tmp_path: Path) -> None:
     trim = tmp_path / "stage1_cam_x_trimmed.mp4"
     web = trim_module.web_trim_path(trim)
-    web.write_bytes(b"web")
+    web.write_bytes(WEB)
     _age(web, 10)
     trim.write_bytes(b"re-cut trim")
     assert audio_helpers.fresh_web_trim(trim) is None
@@ -101,8 +104,8 @@ def test_local_scrub_kind_serves_a_fresh_rendition(tmp_path: Path) -> None:
     client, base, trim, web = _bootstrap(tmp_path)
     trim.write_bytes(b"trim bytes")
     _age(trim, 10)
-    web.write_bytes(b"web bytes")
-    assert _stream(client, base, "scrub") == b"web bytes"
+    web.write_bytes(WEB)
+    assert _stream(client, base, "scrub") == WEB
 
 
 def test_local_scrub_kind_serves_the_trim_when_the_rendition_is_stale(tmp_path: Path) -> None:
@@ -150,8 +153,8 @@ def test_local_scrub_kind_404s_while_a_trim_is_recut(tmp_path: Path) -> None:
     client, base, trim, web = _bootstrap(tmp_path)
     trim.write_bytes(b"trim bytes")
     _age(trim, 10)
-    web.write_bytes(b"web bytes")
-    assert _stream(client, base, "scrub") == b"web bytes"
+    web.write_bytes(WEB)
+    assert _stream(client, base, "scrub") == WEB
     trim.unlink()
     web.unlink()
     assert _status(client, base, "scrub") == 404
@@ -162,7 +165,7 @@ def test_local_trim_kind_never_serves_the_rendition(tmp_path: Path) -> None:
     client, base, trim, web = _bootstrap(tmp_path)
     trim.write_bytes(b"trim bytes")
     _age(trim, 10)
-    web.write_bytes(b"web bytes")
+    web.write_bytes(WEB)
     assert _stream(client, base, "trim") == b"trim bytes"
     assert _stream(client, base, "auto") == b"trim bytes"
 
@@ -186,7 +189,7 @@ def test_scrub_version_names_a_fresh_rendition(tmp_path: Path) -> None:
     client, base, trim, web = _bootstrap(tmp_path)
     trim.write_bytes(b"trim bytes")
     _age(trim, 10)
-    web.write_bytes(b"web bytes")
+    web.write_bytes(WEB)
     st = web.stat()
     video = _video(client, base)
     assert video["scrub_version"] == f"{st.st_mtime_ns:x}-{st.st_size:x}"
@@ -212,10 +215,10 @@ def test_scrub_version_moves_when_the_rendition_is_recut(tmp_path: Path) -> None
     client, base, trim, web = _bootstrap(tmp_path)
     trim.write_bytes(b"trim bytes")
     _age(trim, 20)
-    web.write_bytes(b"first web")
+    web.write_bytes(WEB)
     _age(web, 10)
     first = _video(client, base)["scrub_version"]
-    web.write_bytes(b"other web")
+    web.write_bytes(tiny_mp4(duration_s=2.0))
     second = _video(client, base)["scrub_version"]
     assert first is not None and second is not None and first != second
 
@@ -247,3 +250,16 @@ def test_scrub_setting_is_local_only(tmp_path: Path, monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(server, "_hosted_mode_active", lambda: True)
     assert client.get("/api/settings/scrub").status_code == 404
     assert client.put("/api/settings/scrub", json={"full_res_scrub": True}).status_code == 404
+
+
+def test_fresh_web_trim_treats_a_corrupt_rendition_as_absent(tmp_path: Path) -> None:
+    from splitsmith.ui.audio import fresh_web_trim
+    from tests.media_bytes import corrupt_moov_mp4, tiny_mp4
+
+    trimmed = tmp_path / "stage1_cam_aaa_trimmed.mp4"
+    trimmed.write_bytes(tiny_mp4())
+    web = tmp_path / "stage1_cam_aaa_web.mp4"
+    web.write_bytes(corrupt_moov_mp4())
+    assert fresh_web_trim(trimmed) is None
+    web.write_bytes(tiny_mp4())
+    assert fresh_web_trim(trimmed) == web

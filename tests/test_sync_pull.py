@@ -633,6 +633,9 @@ def test_run_sync_missing_local_audit_is_skipped_not_synthesized(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+from tests.media_bytes import tiny_mp4  # noqa: E402
+
+
 def _write_trim(match_root: Path, slug: str = "anna") -> Path:
     trimmed = match_root / "shooters" / slug / "trimmed"
     trimmed.mkdir(parents=True, exist_ok=True)
@@ -650,7 +653,7 @@ def test_run_sync_backfills_web_renditions_before_pushing(tmp_path, monkeypatch)
 
     def fake_transcode(input_path, output_path, config, *, ffmpeg_binary="ffmpeg", runner=None):
         seen.append((input_path, ffmpeg_binary))
-        Path(output_path).write_bytes(b"WEB")
+        Path(output_path).write_bytes(tiny_mp4())
 
     monkeypatch.setattr(trim_module, "transcode_web_trim", fake_transcode)
     client = FakeSyncClient()
@@ -666,7 +669,7 @@ def test_run_sync_backfills_web_renditions_before_pushing(tmp_path, monkeypatch)
     report = run_sync(match_root, client=client, ffmpeg_binary="/opt/ffmpeg")
 
     assert seen == [(clip, "/opt/ffmpeg")]
-    assert trim_module.web_trim_path(clip).read_bytes() == b"WEB"
+    assert trim_module.web_trim_path(clip).read_bytes() == tiny_mp4()
     assert any(k.endswith("/trimmed/stage1_cam_abc123_web.mp4") for k in uploaded)
     assert report.web_trims_cut == 1
     assert report.notes == []
@@ -701,7 +704,7 @@ def test_run_sync_second_run_does_not_retranscode(tmp_path, monkeypatch):
     def fake_transcode(input_path, output_path, config, **kwargs):
         nonlocal calls
         calls += 1
-        Path(output_path).write_bytes(b"WEB")
+        Path(output_path).write_bytes(tiny_mp4())
 
     monkeypatch.setattr(trim_module, "transcode_web_trim", fake_transcode)
     client = FakeSyncClient()

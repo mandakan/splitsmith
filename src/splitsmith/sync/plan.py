@@ -30,6 +30,7 @@ from pydantic import BaseModel, Field
 from ..identity import EVENT_LOGO_DIR, EVENT_LOGO_RE, LOGO_DIR
 from ..match_model import load_match_or_legacy
 from ..match_project import MatchProject
+from ..media_check import valid_mp4_cached
 from .docs import absolute_path_videos, sanitize_project_doc
 from .state import SyncState
 
@@ -229,11 +230,15 @@ def build_push_plan(match_root: Path, *, sync_state: SyncState, full_media: bool
         if trimmed_dir.is_dir():
             for clip_path in sorted(trimmed_dir.glob(_TRIMMED_GLOB)):
                 web = clip_path.with_name(clip_path.name.replace(TRIMMED_SUFFIX, WEB_SUFFIX))
-                has_web = web.exists() and web.stat().st_size > 0
+                # Only a file that passes the structural check is uploaded
+                # (spec 2026-10-12); an invalid rendition never stands in
+                # for its trim while its re-cut is pending.
+                has_web = valid_mp4_cached(web).ok
                 # Web-only (v1.1): the rendition + params stand in for the
                 # trim on hosted. A clip whose transcode failed keeps its
                 # full trim so hosted never has neither.
-                candidates = [clip_path] if (full_media or not has_web) else []
+                want_trim = full_media or not has_web
+                candidates = [clip_path] if want_trim and valid_mp4_cached(clip_path).ok else []
                 sidecar = clip_path.with_suffix(".params.json")
                 if sidecar.exists():
                     candidates.append(sidecar)

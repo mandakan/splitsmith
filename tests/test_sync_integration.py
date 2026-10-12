@@ -51,6 +51,7 @@ from splitsmith.sync.run import run_sync  # noqa: E402
 from splitsmith.sync.state import load_sync_state  # noqa: E402
 
 from .hosted_helpers import _CapturingSender, login, moto_s3_storage  # noqa: E402
+from .media_bytes import tiny_mp4  # noqa: E402
 
 pytestmark = pytest.mark.integration
 
@@ -87,7 +88,7 @@ def _build_local_match(tmp_path: Path) -> tuple[Path, str, str]:
     trimmed_dir = shooter_root / "trimmed"
     trimmed_dir.mkdir(exist_ok=True)
     trimmed_name = f"stage1_cam_{video.video_id}_trimmed.mp4"
-    (trimmed_dir / trimmed_name).write_bytes(b"not a real mp4 - see module docstring " * 64)
+    (trimmed_dir / trimmed_name).write_bytes(tiny_mp4())
 
     audit_dir = shooter_root / "audit"
     audit_dir.mkdir(exist_ok=True)

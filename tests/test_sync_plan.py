@@ -41,6 +41,7 @@ from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 from splitsmith.sync.docs import STRIPPED_PROJECT_FIELDS
 from splitsmith.sync.plan import build_push_plan, doc_identity_key, hash_doc_body
 from splitsmith.sync.state import SYNC_STATE_FILE, SyncedItem, SyncState, load_sync_state, save_sync_state
+from tests.media_bytes import tiny_mp4
 
 TRIMMED_NAME = "stage1_cam_abc123_trimmed.mp4"
 SIDECAR_NAME = "stage1_cam_abc123_trimmed.params.json"
@@ -71,7 +72,7 @@ def _build_basic_match(tmp_path: Path) -> tuple[Path, str]:
 
     trimmed_dir = shooter_root / "trimmed"
     trimmed_dir.mkdir(exist_ok=True)
-    (trimmed_dir / TRIMMED_NAME).write_bytes(b"x" * 1024)
+    (trimmed_dir / TRIMMED_NAME).write_bytes(tiny_mp4())
     (trimmed_dir / SIDECAR_NAME).write_text(json.dumps({"pre_buffer_seconds": 5.0}), encoding="utf-8")
 
     audit_dir = shooter_root / "audit"
@@ -177,7 +178,7 @@ def test_touching_the_clip_reenters_the_plan(tmp_path: Path) -> None:
     state = _synced_state_from(first_plan)
 
     clip = match_model.Match.shooter_root(root, slug) / "trimmed" / TRIMMED_NAME
-    clip.write_bytes(b"y" * 2048)
+    clip.write_bytes(tiny_mp4(duration_s=2.0))
     fresh_ns = time.time_ns() + 5_000_000_000
     os.utime(clip, ns=(fresh_ns, fresh_ns))
 
@@ -185,7 +186,7 @@ def test_touching_the_clip_reenters_the_plan(tmp_path: Path) -> None:
 
     assert len(third_plan.media) == 1
     assert third_plan.media[0].local_path == clip
-    assert third_plan.media[0].size == 2048
+    assert third_plan.media[0].size == len(tiny_mp4(duration_s=2.0))
     # The untouched sidecar is still skipped.
     assert third_plan.media_skipped == 1
 
@@ -399,7 +400,7 @@ def test_plan_skips_unchanged_beep_review_artifacts(tmp_path: Path) -> None:
 def test_plan_includes_web_rendition_beside_its_trim(tmp_path: Path) -> None:
     root, slug = _build_basic_match(tmp_path)
     match_id = match_model.Match.load(root).match_id
-    (root / "shooters" / slug / "trimmed" / WEB_NAME).write_bytes(b"w" * 64)
+    (root / "shooters" / slug / "trimmed" / WEB_NAME).write_bytes(tiny_mp4(duration_s=3.0))
 
     plan = build_push_plan(root, sync_state=SyncState())
 
@@ -425,7 +426,7 @@ def test_plan_ignores_a_web_partial(tmp_path: Path) -> None:
 
 def test_web_only_plan_skips_the_full_trim_but_keeps_params_and_web(tmp_path: Path) -> None:
     root, slug = _build_basic_match(tmp_path)
-    (root / "shooters" / slug / "trimmed" / WEB_NAME).write_bytes(b"w" * 64)
+    (root / "shooters" / slug / "trimmed" / WEB_NAME).write_bytes(tiny_mp4(duration_s=3.0))
 
     plan = build_push_plan(root, sync_state=SyncState(), full_media=False)
 
@@ -477,3 +478,20 @@ def test_an_identity_logo_is_planned_as_media_and_a_stray_file_is_not(tmp_path: 
     match_id = match_model.Match.load(root).match_id
     assert f"matches/{match_id}/shooters/{slug}/{LOGO_DIR}/{name}" in keys
     assert not any("/identity/notes.txt" in key for key in keys)
+
+
+def test_the_push_leaves_out_a_rendition_that_fails_the_check(tmp_path: Path) -> None:
+    """Spec 2026-10-12: an invalid rendition is never uploaded, and never
+    stands in for its trim on a web-only push."""
+    from tests.media_bytes import corrupt_moov_mp4, tiny_mp4
+
+    root, slug = _build_basic_match(tmp_path)
+    trimmed_dir = root / "shooters" / slug / "trimmed"
+    (trimmed_dir / TRIMMED_NAME).write_bytes(tiny_mp4())
+    (trimmed_dir / WEB_NAME).write_bytes(corrupt_moov_mp4())
+
+    plan = build_push_plan(root, sync_state=SyncState(), full_media=False)
+
+    keys = [m.remote_key for m in plan.media]
+    assert not any(k.endswith("_web.mp4") for k in keys)
+    assert any(k.endswith("_trimmed.mp4") for k in keys)

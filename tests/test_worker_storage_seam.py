@@ -145,10 +145,12 @@ def test_audit_trim_mp4_round_trips_worker_to_api(tmp_path: Path, monkeypatch: p
     matching push/pull keys across two working roots."""
     monkeypatch.setattr("splitsmith.trim.select_audit_encoder", lambda *a, **k: "libx264")
 
+    from tests.media_bytes import tiny_mp4
+
     def fake_trim_video(**kwargs: object) -> None:
         dest = Path(kwargs["output_path"])  # type: ignore[arg-type]
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(b"MP4DATA")
+        dest.write_bytes(tiny_mp4())
 
     monkeypatch.setattr("splitsmith.trim.trim_video", fake_trim_video)
 
@@ -181,7 +183,7 @@ def test_audit_trim_mp4_round_trips_worker_to_api(tmp_path: Path, monkeypatch: p
         assert not audio_helpers.trimmed_video_path(ashooter, 1, prim, project=aproj).exists()
         pulled = audio_helpers.pull_trimmed_video(ashooter, 1, prim, project=aproj)
         assert pulled.exists()
-        assert pulled.read_bytes() == b"MP4DATA"
+        assert pulled.read_bytes() == tiny_mp4()
 
 
 def test_export_media_round_trips_worker_to_api(tmp_path: Path) -> None:

@@ -46,6 +46,7 @@ def video_step(
     *,
     detect_enabled: bool = True,
     explicit: bool = False,
+    trim_valid: bool | None = None,
 ) -> StepKind | None:
     """The next step for one video, or None.
 
@@ -54,10 +55,18 @@ def video_step(
     beep-review endpoint always has. Without it (a reconcile pass) the
     step never detects over an audit doc with real content, and honours
     the project's ``shot_detect_on_beep_verified`` gate.
+
+    ``trim_valid`` is whether the current-keyed trim is on disk and passes
+    the structural check (``valid_trims_for``); ``None`` when the caller
+    did not look, and then the flag alone decides.
     """
     if not video.beep_reviewed or video.beep_time is None:
         return None
-    if not video.processed.get("trim"):
+    # The file decides when the caller looked: a flag set by a trim that is
+    # gone (deleted, never synced down, a migration that could not rename
+    # it) must not keep the stage untrimmed forever (spec 2026-10-12).
+    trimmed = video.processed.get("trim") and trim_valid is not False
+    if not trimmed:
         return "trim" if stage.time_seconds > 0 else None
     if video.role != "primary":
         return None
@@ -102,10 +111,13 @@ def plan_reconcile(
     failures: Mapping[str, str],
     *,
     present_sources: Collection[tuple[str, str]] | None = None,
+    valid_trims: Collection[tuple[str, str]] | None = None,
 ) -> list[ReconcileStep]:
     """``present_sources`` holds ``(slug, video_id)`` for every video whose
     source file is on disk (``present_sources_for``); ``None`` leaves
-    reachability out of the trim input key."""
+    reachability out of the trim input key. ``valid_trims`` holds the same
+    pairs for every video whose trim is on disk and valid
+    (``valid_trims_for``); ``None`` trusts the ``processed`` flags."""
     steps: list[ReconcileStep] = []
     for slug in sorted(projects):
         project = projects[slug]
@@ -115,7 +127,13 @@ def plan_reconcile(
         for stage in project.stages:
             audit_doc = audits.get(slug, {}).get(stage.stage_number)
             for video in stage.videos:
-                kind = video_step(stage, video, audit_doc, detect_enabled=detect_enabled)
+                kind = video_step(
+                    stage,
+                    video,
+                    audit_doc,
+                    detect_enabled=detect_enabled,
+                    trim_valid=None if valid_trims is None else (slug, video.video_id) in valid_trims,
+                )
                 if kind is None:
                     continue
                 step = ReconcileStep(
@@ -185,3 +203,24 @@ def present_sources_for(match_root: Path, projects: Mapping[str, MatchProject]) 
                 except OSError:
                     continue
     return present
+
+
+def valid_trims_for(match_root: Path, projects: Mapping[str, MatchProject]) -> set[tuple[str, str]]:
+    """``(slug, video_id)`` of every video whose current-keyed trim is on
+    disk and passes the structural check. A plain stat and parse, cached
+    per file version; never a pull from storage."""
+    from ..media_check import valid_mp4_cached
+    from ..ui.audio import trimmed_video_path
+
+    _, shooter_roots = load_match_or_legacy(match_root)
+    out: set[tuple[str, str]] = set()
+    for slug, project in projects.items():
+        root = shooter_roots.get(slug)
+        if root is None:
+            continue
+        for stage in project.stages:
+            for video in stage.videos:
+                trim = trimmed_video_path(root, stage.stage_number, video, project=project)
+                if valid_mp4_cached(trim).ok:
+                    out.add((slug, video.video_id))
+    return out

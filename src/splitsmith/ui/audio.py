@@ -34,6 +34,7 @@ from pathlib import Path
 from .. import beep_detect
 from ..config import BeepDetectConfig, BeepDetection
 from ..match_project import MatchProject, StageVideo
+from ..media_check import valid_mp4, valid_mp4_cached
 
 logger = logging.getLogger(__name__)
 
@@ -691,7 +692,7 @@ def invalidate_video_audit_trim(
     params = trim_params_path(output)
     partial = output.with_name(f"{output.stem}.partial{output.suffix}")
     web = trim_module.web_trim_path(output)
-    targets = [output, wav, params, partial, web, _web_partial(web)]
+    targets = [output, wav, params, partial, web, *_web_partials(web)]
     # Also sweep the pre-take-spec legacy-keyed trim + sidecar: the
     # legacy read fallback (resolve_trim_for_read) would otherwise keep
     # serving a cut for the OLD beep/stage time after this invalidation.
@@ -851,8 +852,11 @@ def _try_push_trim_to_storage(project: MatchProject | None, local_mp4: Path) -> 
         logger.info("trim cache: push to %s failed: %s", key, exc)
 
 
-def _web_partial(web: Path) -> Path:
-    return web.with_name(f"{web.stem}.partial{web.suffix}")
+def _web_partials(web: Path) -> list[Path]:
+    """Every partial a rendition writer can leave: per-process ones
+    (``trim.unique_partial``) and the old shared name."""
+    old_style = web.with_name(f"{web.stem}.partial{web.suffix}")
+    return [*web.parent.glob(f"{web.stem}.*partial{web.suffix}"), old_style]
 
 
 def _try_pull_web_trim_from_storage(project: MatchProject | None, web: Path) -> bool:
@@ -935,6 +939,9 @@ def fresh_web_trim(trimmed: Path) -> Path | None:
         (trim_st.st_size, trim_st.st_mtime), (web_st.st_size, web_st.st_mtime), trim_required=True
     ):
         return None
+    # A corrupt rendition is absent: the next _ensure_web_trim cuts a new one.
+    if not valid_mp4_cached(web).ok:
+        return None
     return web
 
 
@@ -956,34 +963,25 @@ def _ensure_web_trim(
     from .. import trim as trim_module
 
     web = trim_module.web_trim_path(trimmed)
-    partial = _web_partial(web)
     if fresh_web_trim(trimmed) is not None:
         return web
     if web.exists():
         web.unlink()
     if _try_pull_web_trim_from_storage(project, web):
-        return web
+        if valid_mp4(web).ok:
+            return web
+        logger.warning("web trim: stored rendition of %s fails its check; cutting a new one", trimmed.name)
+        web.unlink()
     try:
-        trim_module.transcode_web_trim(
+        trim_module.write_web_rendition(
             trimmed,
-            partial,
             trim_module.web_trim_config(),
             ffmpeg_binary=ffmpeg_binary,
             **({"runner": runner} if runner is not None else {}),
         )
     except trim_module.FFmpegError as exc:
-        logger.warning("web trim: transcode of %s failed: %s", trimmed.name, exc)
-        if partial.exists():
-            partial.unlink()
+        logger.warning("web trim: %s: %s", trimmed.name, exc)
         return None
-    if not (partial.exists() and partial.stat().st_size > 0):
-        # A runner that returned success without writing (a cancelled
-        # job, a stub) leaves nothing to promote.
-        logger.warning("web trim: transcode of %s produced no output", trimmed.name)
-        if partial.exists():
-            partial.unlink()
-        return None
-    partial.replace(web)
     _try_push_web_trim_to_storage(project, web)
     return web
 
@@ -1135,7 +1133,7 @@ def ensure_video_audit_trim(
 
     output = trimmed_video_path(project_root, stage_number, video, project=project)
     output.parent.mkdir(parents=True, exist_ok=True)
-    partial = output.with_name(f"{output.stem}.partial{output.suffix}")
+    partial = trim_module.unique_partial(output)
     params_file = trim_params_path(output)
     current_params = _current_trim_params(
         primary_beep_time=beep_time,
@@ -1156,15 +1154,18 @@ def ensure_video_audit_trim(
         _try_pull_trim_from_storage(project, output)
 
     cache_hit = (
-        output.exists() and output.stat().st_mtime >= src_resolved.stat().st_mtime and params_file.exists()
+        output.exists()
+        and output.stat().st_mtime >= src_resolved.stat().st_mtime
+        and params_file.exists()
+        and valid_mp4_cached(output).ok
     )
     if cache_hit:
         try:
             existing_params = json.loads(params_file.read_text(encoding="utf-8"))
             if existing_params == current_params:
-                # Cleanup any orphaned .partial from a prior crashed run.
-                if partial.exists():
-                    partial.unlink()
+                # Cleanup any orphaned partial from a prior crashed run.
+                for leftover in output.parent.glob(f"{output.stem}.*partial{output.suffix}"):
+                    leftover.unlink(missing_ok=True)
                 # A trim cut before the web rendition existed (#1031) gets
                 # one now, from the trim itself -- no re-cut of the source.
                 _ensure_web_trim(project, output, ffmpeg_binary=ffmpeg_binary, runner=runner)
@@ -1176,7 +1177,7 @@ def ensure_video_audit_trim(
     # Stale / missing final / params mismatch -> sweep and re-run. The web
     # rendition goes too: it covers the old window.
     web = trim_module.web_trim_path(output)
-    for p in (output, partial, params_file, web, _web_partial(web)):
+    for p in (output, partial, params_file, web, *_web_partials(web)):
         if p.exists():
             p.unlink()
 
@@ -1203,6 +1204,10 @@ def ensure_video_audit_trim(
             partial.unlink()
         raise AudioExtractionError(str(exc)) from exc
 
+    check = valid_mp4(partial)
+    if not check.ok:
+        partial.unlink(missing_ok=True)
+        raise AudioExtractionError(f"trim failed its check: {check.reason}")
     partial.replace(output)
     params_file.write_text(json.dumps(current_params, indent=2) + "\n", encoding="utf-8")
     # Push the freshly-cut trim up so the API can serve the scrub clip and

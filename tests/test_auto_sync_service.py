@@ -14,6 +14,7 @@ from splitsmith.ui.auto_sync import AutoSyncService
 from splitsmith.ui.jobs import JobRegistry
 from splitsmith.user_config import GlobalPrefs
 
+from .media_bytes import tiny_mp4
 from .test_ui_server import _seed_match_export_project
 
 
@@ -246,7 +247,7 @@ def test_status_reports_full_media_and_full_trims_on_hosted(tmp_path: Path) -> N
     trimmed = root / "shooters" / "a" / "trimmed"
     trimmed.mkdir(parents=True)
     (trimmed / "s1_cam_x_trimmed.mp4").write_bytes(b"t")
-    (trimmed / "s1_cam_x_web.mp4").write_bytes(b"w")
+    (trimmed / "s1_cam_x_web.mp4").write_bytes(tiny_mp4())
     item = SyncedItem(sha256="a", size=1, mtime_ns=1)
     save_sync_state(
         root,
@@ -297,7 +298,7 @@ def test_full_trims_on_hosted_counts_only_what_the_next_push_removes(tmp_path: P
         ),
     )
     assert svc.status_for(root)["full_trims_on_hosted"] == 0  # no local rendition
-    (trimmed / "s1_cam_x_web.mp4").write_bytes(b"w")
+    (trimmed / "s1_cam_x_web.mp4").write_bytes(tiny_mp4())
     assert svc.status_for(root)["full_trims_on_hosted"] == 1
 
 

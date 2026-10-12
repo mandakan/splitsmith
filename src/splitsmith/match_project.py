@@ -218,7 +218,9 @@ def _migrate_v1_to_v2(root: Path, project: MatchProject) -> None:
         (audio_dir, "stage*_audit.peaks-*.json"),
         (trimmed_dir, "stage*_trimmed.mp4"),
         (trimmed_dir, "stage*_trimmed.params.json"),
-        (trimmed_dir, "stage*_trimmed.partial.mp4"),
+        (trimmed_dir, "stage*_trimmed.*partial.mp4"),
+        (trimmed_dir, "stage*_web.*partial.mp4"),
+        (trimmed_dir, "stage*_web.lock"),
     ]
     for directory, pattern in patterns:
         if not directory.exists():
