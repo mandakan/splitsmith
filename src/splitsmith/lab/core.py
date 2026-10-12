@@ -14,7 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from pydantic import BaseModel, Field
@@ -769,6 +769,51 @@ def apply_labels(audit_path: Path, labels: list[CandidateLabel]) -> dict[str, in
     audit_path.replace(backup)
     tmp.replace(audit_path)
     return counts
+
+
+#: A shot counts as moved between a fixture and its audit past this.
+DRIFT_TOLERANCE_S = 0.0015
+
+
+class AuditDrift(BaseModel):
+    """How a primary fixture compares with its match audit now.
+
+    ``same``: the audit has the fixture's shots at the fixture's times, so
+    promoting again changes nothing. ``count``: the audit has a different
+    number of shots (shots found or rejected since). ``times``: the same
+    count, some shots moved (re-placed, or a re-cut trim with another time
+    origin). Fixtures carry no record of the audit they came from, and older
+    ones no promotion date, so the shots themselves are compared.
+    """
+
+    state: Literal["same", "count", "times"]
+    fixture_shots: int
+    audit_shots: int
+    #: Shots whose times differ, when the counts agree.
+    moved: int = 0
+
+
+def _shot_times(shots: Any) -> list[float]:
+    if not isinstance(shots, list):
+        return []
+    return sorted(
+        float(s["time"])
+        for s in shots
+        if isinstance(s, dict)
+        and isinstance(s.get("time"), (int, float))
+        and not isinstance(s.get("time"), bool)
+    )
+
+
+def audit_drift(fixture: dict[str, Any], audit: dict[str, Any]) -> AuditDrift:
+    """Compare a fixture's shots with its audit's (both in the trim's time)."""
+    f, a = _shot_times(fixture.get("shots")), _shot_times(audit.get("shots"))
+    if len(f) != len(a):
+        return AuditDrift(state="count", fixture_shots=len(f), audit_shots=len(a))
+    moved = sum(1 for x, y in zip(f, a, strict=True) if abs(x - y) > DRIFT_TOLERANCE_S)
+    return AuditDrift(
+        state="times" if moved else "same", fixture_shots=len(f), audit_shots=len(a), moved=moved
+    )
 
 
 def confirm_review(audit_path: Path, method: str | None = None) -> str:

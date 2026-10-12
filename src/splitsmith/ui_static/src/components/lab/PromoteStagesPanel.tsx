@@ -35,6 +35,7 @@ import {
   type RecentProject,
   type StageExportStatus,
 } from "@/lib/api";
+import { driftLabel, worthPromoting, type AuditDrift } from "@/lib/promoteDrift";
 import { exportSlugify } from "@/lib/slugify";
 import { cn } from "@/lib/utils";
 
@@ -46,6 +47,9 @@ interface BatchRow {
   stageName: string;
   slug: string;
   exists: boolean;
+  /** The existing fixture against the audit now (lib/promoteDrift);
+   *  ``undefined`` until the server answers. */
+  drift?: AuditDrift | null;
   blockers: string[];
   selected: boolean;
   status: "idle" | "running" | "ok" | "error";
@@ -168,6 +172,33 @@ export function PromoteStagesPanel({
     });
   }, [catalog, shooterData]);
 
+  const loadDrift = useCallback(async (mid: string, of: BatchRow[], preselect: boolean) => {
+    const asked = of.filter((r) => r.exists);
+    if (asked.length === 0) return;
+    try {
+      const { drift } = await api.promoteDriftIn(
+        mid,
+        asked.map((r) => ({ shooter_slug: r.shooterSlug, stage_number: r.stageNumber, slug: r.slug })),
+      );
+      const byRow = new Map(asked.map((r, i) => [`${r.shooterSlug}:${r.stageNumber}`, drift[i] ?? null]));
+      setRows((prev) =>
+        prev.map((r) => {
+          const key = `${r.shooterSlug}:${r.stageNumber}`;
+          if (!byRow.has(key)) return r;
+          const next = byRow.get(key) ?? null;
+          return {
+            ...r,
+            drift: next,
+            selected: preselect ? r.selected && worthPromoting(r.exists, next) : r.selected,
+          };
+        }),
+      );
+    } catch {
+      // The column is a hint: without it every row reads "not compared".
+      setRows((prev) => prev.map((r) => (r.exists && r.drift === undefined ? { ...r, drift: null } : r)));
+    }
+  }, []);
+
   const load = useCallback(
     async (mid: string) => {
       setLoading(true);
@@ -196,14 +227,18 @@ export function PromoteStagesPanel({
         );
         setShooterData(data);
         setSelectedShooters(new Set(data.map((d) => d.slug)));
-        setRows(data.flatMap((d) => buildBatchRows(d, catalog)));
+        const built = data.flatMap((d) => buildBatchRows(d, catalog));
+        setRows(built);
+        // Which fixtures the audit has moved on from: those (and new ones)
+        // stay ticked; a fixture that still matches would come back the same.
+        void loadDrift(mid, built, true);
       } catch (err) {
         setLoadError(String(err));
       } finally {
         setLoading(false);
       }
     },
-    [catalog],
+    [catalog, loadDrift],
   );
 
   // Toggling a shooter rebuilds the row set from the cached per-shooter
@@ -308,12 +343,18 @@ export function PromoteStagesPanel({
     try {
       const next = await api.listLabFixtures();
       onCatalogChanged(next);
+      // The promoted rows now match their audits: read the column again.
+      void loadDrift(
+        matchId,
+        rows.map((r) => ({ ...r, exists: next.some((f) => f.slug === r.slug) })),
+        false,
+      );
     } catch {
       // Catalog refresh is best-effort; row-level "ok" status already
       // confirms the server accepted each promote.
     }
     setRunning(false);
-  }, [rows, overwrite, onCatalogChanged, matchId]);
+  }, [rows, overwrite, onCatalogChanged, matchId, loadDrift]);
 
   const eligibleCount = rows.filter((r) => r.blockers.length === 0).length;
   const selectedCount = rows.filter(
@@ -442,6 +483,9 @@ export function PromoteStagesPanel({
                       <th className="px-2 py-1.5 w-10">#</th>
                       <th className="px-2 py-1.5 w-28">Shooter</th>
                       <th className="px-2 py-1.5">Stage / slug</th>
+                      <th className="px-2 py-1.5 w-36" title="The existing fixture against the stage's audit now">
+                        Audit vs fixture
+                      </th>
                       <th className="px-2 py-1.5 w-32">Status</th>
                     </tr>
                   </thead>
@@ -494,6 +538,16 @@ export function PromoteStagesPanel({
                                 {row.message}
                               </div>
                             )}
+                          </td>
+                          <td
+                            className={cn(
+                              "px-2 py-1.5",
+                              worthPromoting(row.exists, row.drift) && row.exists
+                                ? "text-amber-700 dark:text-amber-300"
+                                : "text-muted",
+                            )}
+                          >
+                            {driftLabel(row.exists, row.drift)}
                           </td>
                           <td className="px-2 py-1.5">
                             {row.status === "running" && (

@@ -372,3 +372,58 @@ def test_lab_promote_endpoint_separates_shooter_slug_from_fixture_slug(
     # never by the shooter's registry slug.
     assert audit_path.name.startswith("stage-shots-promote-test-match-stage1")
     assert "me" != audit_path.stem
+
+
+def test_audit_drift_says_whether_promoting_again_would_change_the_fixture() -> None:
+    def shots(*ts: float) -> dict:
+        return {"shots": [{"time": t} for t in ts]}
+
+    same = lab_core.audit_drift(shots(1.0, 2.0), shots(2.0005, 1.0))
+    assert (same.state, same.fixture_shots, same.audit_shots, same.moved) == ("same", 2, 2, 0)
+    found = lab_core.audit_drift(shots(1.0, 2.0), shots(1.0, 1.5, 2.0))
+    assert (found.state, found.fixture_shots, found.audit_shots) == ("count", 2, 3)
+    moved = lab_core.audit_drift(shots(1.0, 2.0), shots(1.0, 2.01))
+    assert (moved.state, moved.moved) == ("times", 1)
+    # Times that are not numbers are not shots.
+    assert lab_core.audit_drift({"shots": [{"time": None}, {"time": True}]}, {"shots": []}).state == "same"
+
+
+def test_lab_promote_drift_compares_each_row_with_its_audit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The Promote stages panel's column: an existing fixture that the
+    audit has moved on from reads its drift; a row with no fixture, or a
+    slug that tries to leave the fixtures folder, reads null."""
+    root = tmp_path / "match"
+    _setup_promote_endpoint_project(root, camera_mount="hand")
+    shooter_audit = root / "shooters" / "me" / "audit" / "stage1.json"
+    doc = json.loads(shooter_audit.read_text())
+    doc["shots"] = [{"time": 2.0}, {"time": 2.4}, {"time": 2.9}]
+    shooter_audit.write_text(json.dumps(doc), encoding="utf-8")
+    fixtures_root = tmp_path / "fixtures-out"
+    fixtures_root.mkdir()
+    (fixtures_root / "stage-shots-x-stage1-t.json").write_text(
+        json.dumps({"shots": [{"time": 2.0}, {"time": 2.4}]})
+    )
+    monkeypatch.setattr(lab_core, "DEFAULT_FIXTURES_ROOT", fixtures_root)
+
+    from tests.conftest import bound_match_id
+
+    app = create_app(project_root=root, project_name="ignored", lab_enabled=True)
+    client = TestClient(app)
+    match_id = bound_match_id(app)
+    resp = client.post(
+        f"/api/matches/{match_id}/lab/promote-drift",
+        json={
+            "rows": [
+                {"shooter_slug": "me", "stage_number": 1, "slug": "stage-shots-x-stage1-t"},
+                {"shooter_slug": "me", "stage_number": 1, "slug": "stage-shots-none"},
+                {"shooter_slug": "me", "stage_number": 1, "slug": "../../etc/passwd"},
+            ]
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    drift = resp.json()["drift"]
+    assert drift[0] == {"state": "count", "fixture_shots": 2, "audit_shots": 3, "moved": 0}
+    assert drift[1] is None
+    assert drift[2] is None
