@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "synced-video-heals-itself",
+      "date": "2026-10-12",
+      "title": "Synced videos play on splitsmith.app",
+      "body": "Some synced matches showed no video on splitsmith.app. The desktop now checks every clip it has cut and cuts a broken or missing one again on the next sync."
+    },
+    {
       "id": "audit-rise-foot-snap",
       "date": "2026-10-12",
       "title": "Place shots on their rise foot in Audit",
