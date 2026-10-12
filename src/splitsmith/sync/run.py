@@ -13,6 +13,7 @@ body after each successful PUT, so a crash anywhere replays correctly.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
@@ -31,6 +32,7 @@ from .auto_state import load_auto_prefs, update_auto_prefs
 from .base import load_base_doc, save_base_doc
 from .client import HostedSyncClient, SyncClientError, SyncMirrorGone, SyncVersionConflict
 from .merge import MergeResult, merge_audit_doc, merge_project_doc
+from .migrate import migrate_legacy_caches
 from .plan import AUDIT_FILENAME_RE, build_push_plan, doc_identity_key
 from .pull import RemoteDoc, plan_pull, remote_doc_key
 from .push import PushReport, run_push, timed_phase
@@ -57,6 +59,9 @@ class SyncReport(PushReport):
     #: Web renditions (#1031) transcoded from existing trims this run,
     #: before the push, so they went up with it.
     web_trims_cut: int = 0
+
+
+logger = logging.getLogger(__name__)
 
 
 def format_sync_message(report: SyncReport) -> str:
@@ -222,6 +227,10 @@ def run_sync(
     timings: dict[str, float] = {}
 
     with timed_phase(timings, timer, "preflight"):
+        try:
+            migrate_legacy_caches(match_root)
+        except OSError as exc:
+            logger.warning("sync: legacy cache migration failed for %s: %s", match_root.name, exc)
         sync_state = load_sync_state(match_root)
         if full_media is None:
             full_media = load_auto_prefs(match_root).full_media

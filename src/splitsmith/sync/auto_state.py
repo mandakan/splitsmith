@@ -48,6 +48,8 @@ class AutoSyncPrefs(BaseModel):
     #: Set when a sync found this match gone from hosted after it had been
     #: synced (deleted there). Sync stays off until "Publish again".
     hosted_deleted_at: datetime | None = None
+    #: Derived-cache layout this match's files are in (sync/migrate.py).
+    cache_schema: int = 0
 
 
 def load_auto_prefs(match_root: Path) -> AutoSyncPrefs:
