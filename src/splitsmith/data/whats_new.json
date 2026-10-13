@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "phone-audit-steadier",
+      "date": "2026-10-13",
+      "title": "A steadier phone Audit",
+      "body": "On the phone's Audit page a tap moves the playhead without playing, a drag can go up or down rows, the page no longer jumps, and the loop follows the shot you pick."
+    },
+    {
       "id": "phone-audit-rise-foot",
       "date": "2026-10-12",
       "title": "Seat shots on their rise foot on the phone",
