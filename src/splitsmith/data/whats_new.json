@@ -4,7 +4,7 @@
       "id": "beep-review-fine-detail",
       "date": "2026-10-13",
       "title": "Place the beep exactly on its start",
-      "body": "Beep review now draws the seconds around the beep in full detail when you zoom in, and Snap to the beep's start puts the beep on the tone's rising edge."
+      "body": "Beep review draws the beep in full detail when you zoom in, says when the beep sits 20 ms or more from the tone's start, and Snap to the beep's start moves it there."
     },
     {
       "id": "audit-waveform-full-length",
