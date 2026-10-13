@@ -97,7 +97,8 @@ import { useScrubSource } from "@/lib/useScrubSource";
 import { computeAuditNextStep } from "@/lib/audit-next-step";
 import { useMatchHref } from "@/lib/matchHref";
 import { placeTime, type SnapPeaks } from "@/lib/peak-snap";
-import { footFor, footReadout, readSnapOn, seatAllMoves, writeSnapOn } from "@/lib/riseFoot";
+import { earlierFootFor, footFor, footReadout, readSnapOn, seatAllMoves, writeSnapOn } from "@/lib/riseFoot";
+import { isPeekKey } from "@/lib/auditKeys";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { reviewMaxZoom } from "@/lib/reviewZoom";
 import { deriveStageStatus } from "@/lib/stageStatus";
@@ -967,6 +968,19 @@ export function Audit() {
     },
     [placedFrom, snapPeaks, recordEvent, mutate, markers],
   );
+  // Shift+E: the current shot onto the burst before it (a blast before the
+  // louder reflection the rule seats on). A placement: E seats from here.
+  const earlierShot = useCallback(
+    (target: AuditMarker | null) => {
+      if (!target) return;
+      const to = earlierFootFor(target.time, snapPeaks);
+      if (to == null) return;
+      setPlacedAt((prev) => ({ ...prev, [target.id]: to }));
+      recordEvent("marker_time_changed", { id: target.id, from_time: target.time, to_time: to, reason: "earlier_rise" });
+      mutate(markers.map((m) => (m.id === target.id ? { ...m, time: to } : m)));
+    },
+    [snapPeaks, recordEvent, mutate, markers],
+  );
   const askSeatAll = useCallback(() => {
     setSeatAllPending(seatAllMoves(markers, snapPeaks, placedFrom));
   }, [markers, snapPeaks, placedFrom]);
@@ -1422,9 +1436,12 @@ export function Audit() {
           return;
         }
         if (e.key === "e" || e.key === "E") {
-          // Seat the current shot on its rise foot.
+          // E seats the current shot on its rise foot; Shift+E moves it
+          // to the burst before it instead.
           e.preventDefault();
-          seatShot(keptShots[Math.min(currentShotIndex, keptShots.length - 1)] ?? null);
+          const current = keptShots[Math.min(currentShotIndex, keptShots.length - 1)] ?? null;
+          if (e.shiftKey) earlierShot(current);
+          else seatShot(current);
           return;
         }
         if (e.key === "f" || e.key === "F") {
@@ -1518,6 +1535,7 @@ export function Audit() {
     anomalies,
     pipCycle,
     seatShot,
+    earlierShot,
   ]);
 
   // Stage switch / unmount: flush any pending nudge bracket so the
@@ -1534,7 +1552,7 @@ export function Audit() {
   // alt-tabs or otherwise loses focus mid-hold.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== "p" && e.key !== "P") return;
+      if (!isPeekKey(e.key)) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.repeat) return;
       const target = e.target as HTMLElement | null;
@@ -1542,7 +1560,7 @@ export function Audit() {
       setPeeking(true);
     };
     const onKeyUp = (e: KeyboardEvent) => {
-      if (e.key !== "p" && e.key !== "P") return;
+      if (!isPeekKey(e.key)) return;
       setPeeking(false);
     };
     const onBlur = () => setPeeking(false);

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { AuditMarker } from "@/components/MarkerLayer";
 
-import { footFor, footReadout, readSnapOn, seatAllMoves, writeSnapOn } from "./riseFoot";
+import { earlierFootFor, footFor, footReadout, readSnapOn, seatAllMoves, writeSnapOn } from "./riseFoot";
 
 /** 1 ms bins over 10 s: a quiet floor and a shot rising from each start bin. */
 function trace(floor: number, shots: number[]): { peaks: number[]; duration: number } {
@@ -65,3 +65,28 @@ describe("seatAllMoves", () => {
     expect(footFor(5.0, null)).toBeNull();
   });
 });
+
+describe("earlierFootFor", () => {
+  /** A blast at 2.000 s, a quiet gap, then a louder reflection at 2.030 s:
+   *  the hand and head cams' shape (2026-10-13) the rule seats on the reflection. */
+  function blastThenReflection() {
+    const p = new Array(10000).fill(0.01);
+    for (let i = 0; i < 12; i++) p[2000 + i] = i < 2 ? 0.3 * (i + 1) : 0.6;
+    for (let i = 0; i < 40; i++) p[2030 + i] = i < 2 ? 0.45 * (i + 1) : 0.9;
+    return { peaks: p, duration: 10 };
+  }
+
+  it("finds the blast before the reflection the rule seats a shot on", () => {
+    const tr = blastThenReflection();
+    const seated = footFor(2.035, tr)!;
+    expect(seated).toBeGreaterThan(2.025);
+    const earlier = earlierFootFor(seated, tr)!;
+    expect(earlier).toBeLessThan(2.003);
+  });
+
+  it("is null when nothing sounds before the shot within reach", () => {
+    expect(earlierFootFor(2.0, trace(0.01, [2000]))).toBeNull();
+    expect(earlierFootFor(2.0, null)).toBeNull();
+  });
+});
+

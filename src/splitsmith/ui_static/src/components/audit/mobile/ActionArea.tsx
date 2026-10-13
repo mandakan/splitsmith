@@ -25,6 +25,10 @@ export interface ActionAreaProps {
   /** Seat the selected shot on its rise foot; absent until the 1 ms
    *  peaks are in, which hides the button. */
   onSeat?(): void;
+  /** Move the shot to the burst before it; absent hides the button. */
+  onEarlier?(): void;
+  /** Whether there is an earlier burst to move to. */
+  canEarlier?: boolean;
   onDeleteShot(): void;
   onShowVideo(): void;
   onPromote(): void;
@@ -48,10 +52,10 @@ function readout(props: ActionAreaProps): string {
   return props.readOnly ? `${text} . read-only` : text;
 }
 
-const btn = "min-h-11 rounded-md border border-rule px-3 font-mono text-sm disabled:opacity-50";
+const btn = "min-h-11 whitespace-nowrap rounded-md border border-rule px-2 font-mono text-sm disabled:opacity-50";
 
 export function ActionArea(props: ActionAreaProps) {
-  const { target, readOnly, hasVideo = true, foot = null, canSeat = false, onNudge, onSeat, onDeleteShot, onShowVideo, onPromote, onAddShot } =
+  const { target, readOnly, hasVideo = true, foot = null, canSeat = false, onEarlier, canEarlier = false, onNudge, onSeat, onDeleteShot, onShowVideo, onPromote, onAddShot } =
     props;
   return (
     <div className="flex flex-col gap-1 px-2 pb-2">
@@ -66,14 +70,14 @@ export function ActionArea(props: ActionAreaProps) {
       >
         {target.kind === "shot" && foot ? foot.text : "\u00a0"}
       </div>
-      <div className="flex min-h-11 gap-2">
+      <div className="flex min-h-11 gap-1.5">
         {target.kind === "shot" && (
           <>
-            <button type="button" className={btn} disabled={readOnly} onClick={() => onNudge(-10)}>
-              -10 ms
+            <button type="button" className={btn} disabled={readOnly} onClick={() => onNudge(-10)} aria-label="-10 ms">
+              -10
             </button>
-            <button type="button" className={btn} disabled={readOnly} onClick={() => onNudge(10)}>
-              +10 ms
+            <button type="button" className={btn} disabled={readOnly} onClick={() => onNudge(10)} aria-label="+10 ms">
+              +10
             </button>
             {onSeat ? (
               <button
@@ -83,6 +87,17 @@ export function ActionArea(props: ActionAreaProps) {
                 onClick={onSeat}
               >
                 Seat
+              </button>
+            ) : null}
+            {onEarlier ? (
+              <button
+                type="button"
+                className={btn}
+                disabled={readOnly || !canEarlier}
+                onClick={onEarlier}
+                aria-label="Earlier rise"
+              >
+                Earlier
               </button>
             ) : null}
             <button type="button" className={btn} disabled={readOnly} onClick={onDeleteShot}>

@@ -12,7 +12,7 @@
  */
 
 import type { AuditMarker } from "@/components/MarkerLayer";
-import { snapToLeadingEdge, type SnapPeaks } from "@/lib/peak-snap";
+import { PEAK_SNAP_TOLERANCE_S, snapToLeadingEdge, type SnapPeaks } from "@/lib/peak-snap";
 
 const SNAP_KEY = "splitsmith.audit.snapRiseFoot";
 
@@ -40,6 +40,22 @@ export function footFor(from: number, peaks: SnapPeaks | null | undefined): numb
   if (!peaks) return null;
   const foot = snapToLeadingEdge(from, peaks);
   return foot == null ? null : Math.round(foot * 1000) / 1000;
+}
+
+/**
+ * The rise foot of the burst before the one at ``time``: the same rule, its
+ * window ending just before ``time`` so the burst there is out of reach.
+ * On the hand and head cams the shot is often a blast and, 20-35 ms later,
+ * a louder reflection; the rule seats on the reflection (2026-10-13), and
+ * this steps back to the blast. ``null`` when nothing sounds within about
+ * 50 ms before the shot.
+ */
+export function earlierFootFor(time: number, peaks: SnapPeaks | null | undefined): number | null {
+  if (!peaks) return null;
+  const from = time - PEAK_SNAP_TOLERANCE_S - 0.001;
+  if (from <= 0) return null;
+  const foot = footFor(from, peaks);
+  return foot != null && foot < time - 0.002 ? foot : null;
 }
 
 /** The selected shot against the rule, in words; ``null`` without a foot. */

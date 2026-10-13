@@ -277,7 +277,6 @@ export function TransportMenuItems(props: TransportMenuItemsProps) {
           </button>
           {onSeatAllOnRiseFoot ? (
             <button type="button" role="menuitem" className={ITEM} onClick={onSeatAllOnRiseFoot}>
-              <Kbd size="sm">E</Kbd>
               Seat all shots on their rise foot...
             </button>
           ) : null}
