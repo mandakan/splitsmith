@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.69.0](https://github.com/mandakan/splitsmith/compare/v0.68.0...v0.69.0) (2026-10-13)
+
+
+### Features
+
+* **audit:** the phone's zoomed lane sits above the whole-stage waveform ([#1468](https://github.com/mandakan/splitsmith/issues/1468)) ([d4b018b](https://github.com/mandakan/splitsmith/commit/d4b018be83c890552dae6693da1ce4325cbdd300))
+
+
+### Build / CI
+
+* run the Python suite as four parallel shards; skip the suites a PR cannot affect ([#1467](https://github.com/mandakan/splitsmith/issues/1467)) ([6fd857f](https://github.com/mandakan/splitsmith/commit/6fd857f4c7dda34860da799a271afbe44c6ea0c2))
+
 ## [0.68.0](https://github.com/mandakan/splitsmith/compare/v0.67.1...v0.68.0) (2026-10-13)
 
 
