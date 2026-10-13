@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "phone-audit-zoom-on-top",
+      "date": "2026-10-13",
+      "title": "The zoomed view sits on top on the phone",
+      "body": "On the phone's Audit page the zoomed view and its zoom buttons are above the whole-stage waveform, so your thumb never covers it while you scrub."
+    },
+    {
       "id": "phone-audit-save-next",
       "date": "2026-10-13",
       "title": "Save and next on the phone",
