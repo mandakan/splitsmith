@@ -839,7 +839,10 @@ def test_render_template_frames_samples_the_end_of_a_capped_span(tmp_path: Path)
 
 
 class _FlakyScreenshotPage(_RecordingPage):
-    """Chromium's transient "Unable to capture screenshot" once, then a PNG."""
+    """Chromium's transient "Unable to capture screenshot" ``FAILURES`` times,
+    then a PNG. Records each wait the retry asks for."""
+
+    FAILURES = 1
 
     def screenshot(
         self, *, type: str, omit_background: bool, timeout: float | None = None
@@ -847,13 +850,15 @@ class _FlakyScreenshotPage(_RecordingPage):
         from playwright.sync_api import Error as PlaywrightError
 
         self.calls.append(("screenshot", type, omit_background))
-        if self.screenshots == 0:
-            self.screenshots += 1
+        self.screenshots += 1
+        if self.screenshots <= self.FAILURES:
             raise PlaywrightError(
                 "Page.screenshot: Protocol error (Page.captureScreenshot): Unable to capture screenshot"
             )
-        self.screenshots += 1
         return _PNG_2x2
+
+    def wait_for_timeout(self, ms: float) -> None:
+        self.calls.append(("wait", ms))
 
 
 def test_png_retries_a_transient_screenshot_failure_once() -> None:
@@ -862,6 +867,36 @@ def test_png_retries_a_transient_screenshot_failure_once() -> None:
     assert rasterizer.png("<html></html>", width=64, height=32) == _PNG_2x2
     page = rasterizer._browser.contexts[0].pages[0]
     assert page.screenshots == 2
+
+
+def test_png_waits_for_the_next_frame_and_tries_again() -> None:
+    """CI on 2026-10-13 failed on the retry itself: an immediate second try
+    met the same frame. Three tries, a wait before each retry."""
+
+    class _TwiceFlaky(_FlakyScreenshotPage):
+        FAILURES = 2
+
+    rasterizer = ChromiumRasterizer()
+    rasterizer._browser = _RecordingBrowser(page_factory=_TwiceFlaky)
+    assert rasterizer.png("<html></html>", width=64, height=32) == _PNG_2x2
+    page = rasterizer._browser.contexts[0].pages[0]
+    assert page.screenshots == 3
+    waits = [c[1] for c in page.calls if c[0] == "wait"]
+    assert len(waits) == 2 and waits[0] < waits[1]
+
+
+def test_a_screenshot_that_keeps_failing_still_raises() -> None:
+    """A page that never draws is a real failure: the retries end."""
+    from playwright.sync_api import Error as PlaywrightError
+
+    class _AlwaysFlaky(_FlakyScreenshotPage):
+        FAILURES = 99
+
+    rasterizer = ChromiumRasterizer()
+    rasterizer._browser = _RecordingBrowser(page_factory=_AlwaysFlaky)
+    with pytest.raises(PlaywrightError, match="Unable to capture screenshot"):
+        rasterizer.png("<html></html>", width=64, height=32)
+    assert rasterizer._browser.contexts[0].pages[0].screenshots == 3
 
 
 def test_any_other_screenshot_failure_is_not_retried() -> None:

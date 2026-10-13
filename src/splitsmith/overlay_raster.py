@@ -76,21 +76,31 @@ logger = logging.getLogger(__name__)
 
 
 #: Chromium's transient screenshot failure: a compositor frame was not ready.
-#: It cleared on a second try every time it was seen (a CI flake, Oct 2026).
+#: A busy 4-core CI runner met it about once in twenty runs (Oct 2026), and
+#: an immediate second try could meet the same frame (2026-10-13), so a retry
+#: waits for the next one first.
 _TRANSIENT_SCREENSHOT = "Unable to capture screenshot"
+#: Waits (ms) before each retry: three tries in all, under half a second.
+_SCREENSHOT_RETRY_WAITS_MS = (100, 300)
 
 
 def _screenshot(page, *, timeout: float | None = None) -> bytes:  # type: ignore[no-untyped-def]
-    """The page as a transparent PNG; Chromium's transient "Unable to capture
-    screenshot" is tried once more, every other error is raised as is.
+    """The page as a transparent PNG. Chromium's transient "Unable to capture
+    screenshot" is tried again after a short wait, up to three tries; every
+    other error, a timeout included, is raised as is. The wait is
+    Playwright's own timer, so no script runs in a template's page.
     ``timeout`` (ms) bounds a template page's (``look_sandbox``)."""
     bound = {} if timeout is None else {"timeout": timeout}
-    try:
-        return page.screenshot(type="png", omit_background=True, **bound)
-    except PlaywrightError as exc:
-        if _TRANSIENT_SCREENSHOT not in str(exc) or isinstance(exc, PlaywrightTimeoutError):
-            raise
-        return page.screenshot(type="png", omit_background=True, **bound)
+    for wait_ms in (*_SCREENSHOT_RETRY_WAITS_MS, None):
+        try:
+            return page.screenshot(type="png", omit_background=True, **bound)
+        except PlaywrightError as exc:
+            transient = _TRANSIENT_SCREENSHOT in str(exc) and not isinstance(exc, PlaywrightTimeoutError)
+            if wait_ms is None or not transient:
+                raise
+            logger.info("screenshot: %s; trying again in %d ms", _TRANSIENT_SCREENSHOT, wait_ms)
+            page.wait_for_timeout(wait_ms)
+    raise AssertionError("unreachable")  # pragma: no cover
 
 
 def describe_page_error(error: object, template_name: str) -> str:
