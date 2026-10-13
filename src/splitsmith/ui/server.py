@@ -13841,6 +13841,10 @@ def create_app(
         stage_number: int,
         video_id: str,
         bins: int = Query(default=1200, ge=16, le=8192),
+        # One window of the WAV, source seconds: the beep picker's 1 ms detail
+        # around the beep. Both or neither.
+        start: float | None = Query(default=None, ge=0),
+        end: float | None = Query(default=None, gt=0),
     ) -> JSONResponse:
         """Return ``bins`` peak magnitudes for ``video``'s WAV.
 
@@ -13850,7 +13854,13 @@ def create_app(
         """
         project, _stage, video = _resolve_stage_video(slug, stage_number, video_id)
         audit = _resolve_video_audio(slug, project, stage_number, video)
-        peaks = waveform_helpers.ensure_peaks(audit.audio_path, bins)
+        if (start is None) != (end is None) or (start is not None and end is not None and end <= start):
+            raise HTTPException(status_code=422, detail="start and end go together, start before end")
+        peaks = (
+            waveform_helpers.ensure_peaks(audit.audio_path, bins)
+            if start is None or end is None
+            else waveform_helpers.ensure_peaks_window(audit.audio_path, bins, start=start, end=end)
+        )
         payload = peaks.model_dump(mode="json")
         payload["beep_time"] = audit.beep_in_clip
         payload["trimmed"] = audit.trimmed

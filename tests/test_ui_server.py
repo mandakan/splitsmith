@@ -2183,6 +2183,36 @@ def test_video_peaks_endpoint_serves_secondary_full_wav(tmp_path: Path, monkeypa
     assert body["beep_time"] == pytest.approx(0.42)
 
 
+def test_video_peaks_endpoint_serves_a_window_at_fine_resolution(tmp_path: Path, monkeypatch) -> None:
+    """``start``/``end`` ask for one window of the video's WAV: the beep
+    picker's 1 ms detail around the beep (2026-10-13: 1,200 bins over the
+    whole source were 25-50 ms bars, too coarse to place a beep)."""
+    import numpy as np
+    import soundfile as sf
+
+    client, _ = _seed_project_with_secondary(tmp_path)
+    audio_dir = tmp_path / "match" / "shooters" / "me" / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    sec_id = _video_id_for(client, 1, "secondary")
+    sec_wav = audio_dir / f"stage1_cam_{sec_id}.wav"
+    audio = np.zeros(48_000, dtype="float32")
+    audio[24_000:24_480] = 0.5  # 0.500-0.510 s
+    sf.write(sec_wav, audio, 48_000)
+
+    from splitsmith.ui import audio as audio_helpers
+
+    monkeypatch.setattr(audio_helpers, "ensure_video_audio", lambda *a, **k: sec_wav)
+
+    resp = client.get(f"/api/shooters/me/stages/1/videos/{sec_id}/peaks?bins=200&start=0.4&end=0.6")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["start"] == pytest.approx(0.4)
+    assert body["duration"] == pytest.approx(0.2)
+    loud = [i for i, p in enumerate(body["peaks"]) if p > 0.3]
+    assert loud and loud[0] == 100  # 0.5 s is 100 ms into the window
+    assert "source_size" not in body
+
+
 def test_video_audio_endpoint_serves_secondary_wav(tmp_path: Path, monkeypatch) -> None:
     """The per-video audio endpoint returns the secondary's own WAV bytes."""
     client, _ = _seed_project_with_secondary(tmp_path)

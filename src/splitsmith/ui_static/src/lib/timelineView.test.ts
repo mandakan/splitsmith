@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  mergeDetailColumns,
   MAX_ZOOM,
   applyWheelZoom,
   clampZoom,
@@ -215,3 +216,22 @@ describe("columnPeaks", () => {
     expect(columnPeaks([], 2, 0, 2, 4, 0, 4)).toEqual([0, 0, 0, 0]);
   });
 });
+
+describe("mergeDetailColumns", () => {
+  it("columns inside the detail window read the fine peaks, the rest keep the coarse ones", () => {
+    // 10 s over 10 columns: column c covers [c, c+1) s. Detail covers 4-6 s.
+    const base = new Array(10).fill(0.2);
+    const detail = { start: 4, duration: 2, peaks: [0.9, 0.1, 0.1, 0.1] }; // 0.5 s bins
+    const out = mergeDetailColumns(base, detail, 0, 10, 10, 0, 10);
+    expect(out[3]).toBe(0.2);
+    expect(out[4]).toBe(0.9); // 4-5 s: bins 0-1
+    expect(out[5]).toBe(0.1); // 5-6 s: bins 2-3
+    expect(out[6]).toBe(0.2);
+  });
+
+  it("without detail the coarse columns are returned unchanged", () => {
+    const base = [0.1, 0.2];
+    expect(mergeDetailColumns(base, null, 0, 2, 2, 0, 2)).toEqual(base);
+  });
+});
+

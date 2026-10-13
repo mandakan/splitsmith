@@ -11,7 +11,7 @@
  */
 import { useEffect, useRef } from "react";
 
-import { columnPeaks } from "@/lib/timelineView";
+import { columnPeaks, mergeDetailColumns, type PeaksDetail } from "@/lib/timelineView";
 
 import type { TimelineGeom } from "./types";
 
@@ -30,6 +30,8 @@ export interface WaveformTrackProps {
   timerStopTime?: number | null;
   /** The loop-mode region, clip seconds. Null/undefined = no shading. */
   loopRegion?: { start: number; end: number } | null;
+  /** Finer peaks for one stretch of the clip, drawn there instead of `peaks`. */
+  detail?: PeaksDetail | null;
 }
 
 function cssVar(name: string, fallback: string): string {
@@ -75,6 +77,7 @@ export function WaveformTrack({
   beepTime,
   timerStopTime,
   loopRegion,
+  detail,
 }: WaveformTrackProps) {
   const ref = useRef<HTMLCanvasElement | null>(null);
   const { contentWidth, viewportWidth, scrollLeft } = geom;
@@ -93,14 +96,22 @@ export function WaveformTrack({
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, height);
     ctx.fillStyle = cssVar("--color-muted", "#8E939B");
-    const cols = columnPeaks(peaks, clipDuration, from, to, contentWidth, scrollLeft, w);
+    const cols = mergeDetailColumns(
+      columnPeaks(peaks, clipDuration, from, to, contentWidth, scrollLeft, w),
+      detail,
+      from,
+      to,
+      contentWidth,
+      scrollLeft,
+      w,
+    );
     const mid = height / 2;
     for (let x = 0; x < w; x += 2) {
       const p = Math.max(cols[x] ?? 0, cols[x + 1] ?? 0);
       const h = Math.max(1, p * (height - 4));
       ctx.fillRect(x, mid - h / 2, 1.5, h);
     }
-  }, [peaks, clipDuration, from, to, contentWidth, viewportWidth, scrollLeft, height]);
+  }, [peaks, clipDuration, from, to, contentWidth, viewportWidth, scrollLeft, height, detail]);
 
   const beepPct = overlayPct(beepTime, from, to);
   const timerStopPct = overlayPct(timerStopTime, from, to);

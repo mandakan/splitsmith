@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "beep-review-fine-detail",
+      "date": "2026-10-13",
+      "title": "Place the beep exactly on its start",
+      "body": "Beep review now draws the seconds around the beep in full detail when you zoom in, and Snap to the beep's start puts the beep on the tone's rising edge."
+    },
+    {
       "id": "audit-waveform-full-length",
       "date": "2026-10-13",
       "title": "The waveform covers the whole stage again",

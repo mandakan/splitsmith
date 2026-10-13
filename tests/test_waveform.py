@@ -150,3 +150,27 @@ def test_the_source_record_stays_out_of_the_api_payload(tmp_path: Path) -> None:
     assert "source_size" not in result.model_dump() and "source_mtime_ns" not in result.model_dump()
     # ...while the saved file carries it, so the next call is a hit.
     assert waveform.cached(wav, bins=10) is not None
+
+
+def test_window_peaks_cover_only_the_window_at_full_resolution(tmp_path: Path) -> None:
+    """The beep picker draws a few seconds at 1 ms over a source that can run
+    minutes: peaks of a slice, placed by ``start``."""
+    audio = np.zeros(10 * 1000, dtype=np.float32)
+    audio[4_050:4_060] = 0.9  # a click at 4.05 s
+    wav = tmp_path / "stage1_cam_x.wav"
+    sf.write(wav, audio, 1000)
+
+    win = waveform.ensure_peaks_window(wav, bins=200, start=4.0, end=4.2)
+    assert win.duration == pytest.approx(0.2)
+    assert win.start == pytest.approx(4.0)
+    assert len(win.peaks) == 200
+    loud = [i for i, p in enumerate(win.peaks) if p > 0.5]
+    assert loud and loud[0] == 50  # 4.05 s is 50 ms into the window, 1 ms bins
+
+
+def test_window_peaks_clamp_to_the_audio(tmp_path: Path) -> None:
+    wav = tmp_path / "stage1_cam_x.wav"
+    sf.write(wav, np.zeros(2 * 1000, dtype=np.float32), 1000)
+    win = waveform.ensure_peaks_window(wav, bins=100, start=-1.0, end=5.0)
+    assert win.start == pytest.approx(0.0)
+    assert win.duration == pytest.approx(2.0)

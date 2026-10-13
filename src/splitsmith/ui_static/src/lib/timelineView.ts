@@ -188,3 +188,46 @@ export function columnPeaks(
   }
   return out;
 }
+
+/** A stretch of the clip drawn finer than the clip's own peaks: ``start``
+ *  and ``duration`` in clip seconds, ``peaks`` evenly over it. */
+export interface PeaksDetail {
+  start: number;
+  duration: number;
+  peaks: number[];
+}
+
+/**
+ * ``base`` (``columnPeaks`` over the whole clip) with every column that lies
+ * wholly inside ``detail`` read from the fine peaks instead. The beep picker
+ * loads a few seconds at 1 ms over a source whose own peaks are 25-50 ms
+ * bars, and zooming into the beep must show where the tone starts.
+ */
+export function mergeDetailColumns(
+  base: number[],
+  detail: PeaksDetail | null | undefined,
+  from: number,
+  to: number,
+  contentPx: number,
+  scrollLeft: number,
+  columns: number,
+): number[] {
+  if (!detail || detail.duration <= 0 || detail.peaks.length === 0) return base;
+  const fine = columnPeaks(
+    detail.peaks,
+    detail.duration,
+    from - detail.start,
+    to - detail.start,
+    contentPx,
+    scrollLeft,
+    columns,
+  );
+  const secPerPx = contentPx > 0 ? (to - from) / contentPx : 0;
+  const end = detail.start + detail.duration;
+  return base.map((v, c) => {
+    const a = from + (scrollLeft + c) * secPerPx;
+    const b = a + secPerPx;
+    return a >= detail.start - 1e-9 && b <= end + 1e-9 ? fine[c] : v;
+  });
+}
+

@@ -1714,6 +1714,9 @@ export interface PeaksResult {
   sample_rate: number;
   bins: number;
   peaks: number[];
+  /** Seconds into the WAV where these peaks begin: 0 for the whole file,
+   *  the window's start when one was asked for. */
+  start?: number;
   /** Where the beep falls in the served clip's local timeline (seconds).
    *  Null when no beep is detected for the primary yet. */
   beep_time: number | null;
@@ -4574,9 +4577,12 @@ export const api = {
     stageNumber: number,
     videoId: string,
     bins = 1200,
+    /** One window of the WAV, source seconds (the beep picker's 1 ms detail). */
+    window?: { start: number; end: number },
   ) =>
     request<PeaksResult>(
-      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/peaks?bins=${bins}`,
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/peaks?bins=${bins}`
+        + (window ? `&start=${window.start}&end=${window.end}` : ""),
     ),
 
   /** URL for the desktop-pushed beep review audio snippet (mirror-only,
