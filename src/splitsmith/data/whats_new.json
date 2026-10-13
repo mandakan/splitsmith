@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "phone-audit-save-next",
+      "date": "2026-10-13",
+      "title": "Save and next on the phone",
+      "body": "On the phone's Audit page, Save & next saves and opens the next stage or shooter. Tap the title to pick any shooter and stage, and Back returns to where you came from."
+    },
+    {
       "id": "phone-audit-steadier",
       "date": "2026-10-13",
       "title": "A steadier phone Audit",

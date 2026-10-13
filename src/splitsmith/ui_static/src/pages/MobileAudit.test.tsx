@@ -1,5 +1,5 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DEFAULT_ROWS } from "@/components/audit/mobile/WrappedWaveform";
@@ -151,7 +151,7 @@ describe("MobileAudit", () => {
     renderPage();
     await waitFor(() => expect(screen.getByTestId("wrapped-waveform")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "Promote candidate" }));
-    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^save( \*)?$/i }));
     await waitFor(() => expect(apiMock.saveStageAudit).toHaveBeenCalled());
     const payload = apiMock.saveStageAudit.mock.calls[0][2] as StageAudit;
     expect(payload.shots.map((s) => s.candidate_number)).toContain(3);
@@ -170,7 +170,7 @@ describe("MobileAudit", () => {
     // getByText, which would ambiguously match both.
     const readout = document.querySelector('[aria-live="polite"]');
     expect(readout?.textContent ?? "").toMatch(/\+10 ms/);
-    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^save( \*)?$/i }));
     await waitFor(() => expect(apiMock.saveStageAudit).toHaveBeenCalled());
     const payload = apiMock.saveStageAudit.mock.calls[0][2] as StageAudit;
     const moved = (payload.audit_events ?? []).find((e) => e.kind === "marker_time_changed");
@@ -185,7 +185,7 @@ describe("MobileAudit", () => {
     renderPage();
     await waitFor(() => expect(screen.getByTestId("wrapped-waveform")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "Promote candidate" }));
-    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^save( \*)?$/i }));
     await waitFor(() => expect(screen.getByText(/changed elsewhere/i)).toBeInTheDocument());
     expect(apiMock.getStageAudit).toHaveBeenCalledTimes(2);
   });
@@ -194,7 +194,7 @@ describe("MobileAudit", () => {
     ctx.value = { ...ctx.value, capabilities: ["share_manage"] };
     renderPage();
     await waitFor(() => expect(screen.getByTestId("wrapped-waveform")).toBeInTheDocument());
-    expect(screen.getByRole("button", { name: /save/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /^save( \*)?$/i })).toBeDisabled();
     expect(screen.getByText(/read-only/)).toBeInTheDocument();
     ctx.value = { ...ctx.value, capabilities: ["edit", "review", "share_manage"] };
   });
@@ -280,7 +280,7 @@ describe("MobileAudit", () => {
     renderPage();
     await waitFor(() => expect(screen.getByTestId("wrapped-waveform")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "+10 ms" })); // dirty, so Save enables
-    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^save( \*)?$/i }));
     await waitFor(() => expect(screen.getByRole("button", { name: "+10 ms" })).toBeDisabled());
     expect(screen.getByRole("button", { name: "-10 ms" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Delete" })).toBeDisabled();
@@ -327,11 +327,11 @@ describe("MobileAudit", () => {
     renderPage();
     await waitFor(() => expect(screen.getByTestId("wrapped-waveform")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "Promote candidate" }));
-    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^save( \*)?$/i }));
     await waitFor(() => expect(screen.getByText(/reload failed/i)).toBeInTheDocument());
     // Dirty edits survive: the Save button still shows the dirty indicator
     // and is enabled again (not stuck disabled from the finished attempt).
-    const saveButton = screen.getByRole("button", { name: /save/i });
+    const saveButton = screen.getByRole("button", { name: /^save( \*)?$/i });
     expect(saveButton).not.toBeDisabled();
     expect(saveButton).toHaveTextContent("Save *");
   });
@@ -573,7 +573,7 @@ describe("MobileAudit rise foot", () => {
   });
 
   async function savedShots() {
-    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^save( \*)?$/i }));
     await waitFor(() => expect(apiMock.saveStageAudit).toHaveBeenCalled());
     return apiMock.saveStageAudit.mock.calls[0][2] as StageAudit;
   }
@@ -703,7 +703,7 @@ describe("MobileAudit gestures and loop", () => {
     renderPage();
     await waitFor(() => expect(screen.getByRole("button", { name: "Add shot at playhead" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Add shot at playhead" }));
-    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^save( \*)?$/i }));
     await waitFor(() => expect(apiMock.saveStageAudit).toHaveBeenCalled());
     const payload = apiMock.saveStageAudit.mock.calls[0][2] as StageAudit;
     const added = payload.shots.find((x) => x.candidate_number == null)!;
@@ -716,5 +716,104 @@ describe("MobileAudit gestures and loop", () => {
     await waitFor(() => expect(screen.getByTestId("wrapped-waveform")).toBeInTheDocument());
     tapAt(2.4);
     expect(playback.state.moveLoop).not.toHaveBeenCalled();
+  });
+});
+
+describe("MobileAudit navigation", () => {
+  // Alice has stages 3 and 4; Bob's first stage is 2.
+  const statuses = (ns: number[]) => ns.map((n) => ({ stage_number: n, status: "ready" }));
+  const shooterRow = (slug: string, name: string, ns: number[], audited = 0) => ({
+    slug,
+    name,
+    selected_shooter_id: null,
+    selected_competitor_id: null,
+    stages_audited: audited,
+    stages_total: ns.length,
+    video_count: ns.length,
+    cameras: [],
+    stages_missing_trim: 0,
+    stage_statuses: statuses(ns),
+  });
+  const project = () => ({
+    stages: [3, 4].map((n) => ({
+      stage_number: n,
+      stage_name: `Stage ${n}`,
+      videos: [{ role: "primary", path: `raw/s${n}.mp4`, processed: { beep: true, trim: true, shot_detect: true } }],
+    })),
+  });
+  const saved = ctx.value;
+
+  beforeEach(() => {
+    ctx.value = {
+      ...saved,
+      project: project(),
+      shooters: [shooterRow("alice", "Alice", [3, 4]), shooterRow("bob", "Bob", [2, 3])],
+    };
+  });
+  afterEach(() => {
+    ctx.value = saved;
+  });
+
+  function Where() {
+    const loc = useLocation();
+    return <div data-testid="where">{loc.pathname}</div>;
+  }
+  function renderAt(entries: string[]) {
+    return render(
+      <MemoryRouter initialEntries={entries} initialIndex={entries.length - 1}>
+        <Routes>
+          <Route path="/match/:matchId/audit/:slug/:stage" element={<><MobileAudit /><Where /></>} />
+          <Route path="*" element={<Where />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  }
+  const where = () => screen.getByTestId("where").textContent;
+
+  it("Save & next saves, even with nothing changed, and opens the next stage", async () => {
+    renderAt(["/match/m1/audit/alice/3"]);
+    fireEvent.click(await screen.findByRole("button", { name: "Save & next" }));
+    await waitFor(() => expect(where()).toBe("/match/m1/audit/alice/4"));
+    expect(apiMock.saveStageAudit).toHaveBeenCalledWith("alice", 3, expect.anything());
+    const payload = apiMock.saveStageAudit.mock.calls[0][2] as StageAudit;
+    expect((payload.audit_events ?? []).map((e) => e.kind)).toContain("save");
+  });
+
+  it("after the shooter's last stage it opens the next shooter's first stage", async () => {
+    renderAt(["/match/m1/audit/alice/4"]);
+    fireEvent.click(await screen.findByRole("button", { name: "Save & next" }));
+    await waitFor(() => expect(where()).toBe("/match/m1/audit/bob/2"));
+  });
+
+  it("a failed save stays on the stage", async () => {
+    apiMock.saveStageAudit.mockRejectedValueOnce(new Error("offline"));
+    renderAt(["/match/m1/audit/alice/3"]);
+    fireEvent.click(await screen.findByRole("button", { name: "Save & next" }));
+    await waitFor(() => expect(screen.getByText(/save failed/i)).toBeInTheDocument());
+    expect(where()).toBe("/match/m1/audit/alice/3");
+  });
+
+  it("Back returns to the page you came from, over any stages stepped through", async () => {
+    renderAt(["/match/m1/audit/alice", "/match/m1/audit/alice/3"]);
+    fireEvent.click(await screen.findByRole("button", { name: "Save & next" }));
+    await waitFor(() => expect(where()).toBe("/match/m1/audit/alice/4"));
+    await screen.findByRole("button", { name: "Save & next" });
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    await waitFor(() => expect(where()).toBe("/match/m1/audit/alice"));
+  });
+
+  it("Back with nowhere to return to goes to the Overview", async () => {
+    renderAt(["/match/m1/audit/alice/3"]);
+    fireEvent.click(await screen.findByRole("button", { name: "Back" }));
+    await waitFor(() => expect(where()).toBe("/match/m1/"));
+  });
+
+  it("the title opens a picker for shooter and stage", async () => {
+    renderAt(["/match/m1/audit/alice/3"]);
+    fireEvent.click(await screen.findByRole("button", { name: /choose shooter and stage/i }));
+    const dialog = await screen.findByRole("dialog", { name: /choose shooter and stage/i });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Bob" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: /stage 03/i }));
+    await waitFor(() => expect(where()).toBe("/match/m1/audit/bob/3"));
   });
 });

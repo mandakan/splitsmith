@@ -13,12 +13,13 @@
  * the two screens' audit_events logs read as one history.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useOutletContext, useParams } from "react-router-dom";
-import { ArrowLeft, MoreHorizontal, X } from "lucide-react";
+import { Link, useLocation, useNavigate, useOutletContext, useParams } from "react-router-dom";
+import { ArrowLeft, ChevronDown, MoreHorizontal, X } from "lucide-react";
 
 import { ActionArea } from "@/components/audit/mobile/ActionArea";
 import { AuditTransport } from "@/components/audit/mobile/AuditTransport";
 import { CameraStack } from "@/components/audit/mobile/CameraStack";
+import { JUMP_TITLE, JumpSheet } from "@/components/audit/mobile/JumpSheet";
 import { DEFAULT_ROWS, WrappedWaveform } from "@/components/audit/mobile/WrappedWaveform";
 import { ZoomLane, type ZoomFactor } from "@/components/audit/mobile/ZoomLane";
 import type { AuditMarker } from "@/components/MarkerLayer";
@@ -46,6 +47,8 @@ import { useDialogFocus } from "@/lib/dialogFocus";
 import { isActiveCommand, latestForStage, REDETECT_CONFIRM } from "@/lib/desktopCommands";
 import { useDesktopCommands } from "@/lib/useDesktopCommands";
 import { useMatchHref } from "@/lib/matchHref";
+import { computeAuditNextStep } from "@/lib/audit-next-step";
+import { jumpShooters, nextTarget, type AuditTarget } from "@/lib/mobileAuditNav";
 import { PEAK_SNAP_TOLERANCE_S, type SnapPeaks } from "@/lib/peak-snap";
 import { footFor, footReadout, readSnapOn, seatAllMoves, writeSnapOn } from "@/lib/riseFoot";
 import { stackCameras } from "@/lib/phoneCameraStack";
@@ -78,7 +81,7 @@ function saveErrorMessage(err: unknown): string {
 }
 
 export function MobileAudit() {
-  const { matchId, slug = "", stage } = useParams();
+  const { slug = "", stage } = useParams();
   const navigate = useNavigate();
   const href = useMatchHref();
   const outletCtx = useOutletContext<MatchShellOutletContext | undefined>();
@@ -126,7 +129,11 @@ export function MobileAudit() {
   const [zoom, setZoom] = useState<ZoomFactor>(3);
   const [videoOpen, setVideoOpen] = useState(false);
   const [confirmDeleteMarker, setConfirmDeleteMarker] = useState<AuditMarker | null>(null);
-  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  // Where to go once unsaved edits are discarded (Back, or a stage picked
+  // in the title's picker); null while no discard question is open.
+  const [pendingNav, setPendingNav] = useState<(() => void) | null>(null);
+  const confirmDiscard = pendingNav != null;
+  const [jumpOpen, setJumpOpen] = useState(false);
 
   const sessionEvents = useRef<AuditEvent[]>([]);
 
@@ -539,8 +546,8 @@ export function MobileAudit() {
 
   // ---- Save -----------------------------------------------------------------
 
-  const handleSave = useCallback(async () => {
-    if (!audit || stageNumber == null || readOnly || saving) return;
+  const handleSave = useCallback(async (): Promise<boolean> => {
+    if (!audit || stageNumber == null || readOnly || saving) return false;
     setSaving(true);
     const keptCount = markers.filter((m) => m.kind === "detected" || m.kind === "manual").length;
     const saveEvent: AuditEvent = {
@@ -567,6 +574,7 @@ export function MobileAudit() {
       setDirty(false);
       outletCtx?.refresh?.();
       setSnack({ message: "Saved", tone: "status" });
+      return true;
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         try {
@@ -599,26 +607,74 @@ export function MobileAudit() {
     } finally {
       setSaving(false);
     }
+    return false;
   }, [audit, stageNumber, readOnly, saving, markers, peaksResult, slug, outletCtx]);
 
   // ---- Back navigation -------------------------------------------------------
 
-  const backHref = `/match/${matchId}/results/${slug}/${stageNumber}`;
+  // Back returns to the page this audit was opened from. Stepping between
+  // stages (Save & next, the picker) replaces the history entry and carries
+  // whether there is a page behind it, so Back skips the stages stepped
+  // through; opened directly, with nothing behind it, Back goes to the
+  // match Overview.
+  const location = useLocation();
+  const canGoBack =
+    (location.state as { canGoBack?: boolean } | null)?.canGoBack ?? location.key !== "default";
+  const goBack = useCallback(() => {
+    if (canGoBack) navigate(-1);
+    else navigate(href(""));
+  }, [canGoBack, navigate, href]);
+  const openStage = useCallback(
+    (t: AuditTarget) => navigate(href("audit", t.slug, String(t.stage)), { replace: true, state: { canGoBack } }),
+    [navigate, href, canGoBack],
+  );
 
   // Desktop auto-saves on navigation; mobile has no such safety net, so a
   // dirty stage must not lose edits to one mis-tap of the back button.
   const handleBack = useCallback(() => {
     if (dirty) {
-      setConfirmDiscard(true);
+      setPendingNav(() => goBack);
       return;
     }
-    navigate(backHref);
-  }, [dirty, navigate, backHref]);
+    goBack();
+  }, [dirty, goBack]);
 
   const confirmDiscardAndBack = useCallback(() => {
-    setConfirmDiscard(false);
-    navigate(backHref);
-  }, [navigate, backHref]);
+    const go = pendingNav;
+    setPendingNav(null);
+    go?.();
+  }, [pendingNav]);
+
+  // The conveyor, in desktop Audit's order: the shooter's next stage with
+  // footage, then the next shooter with stages left, then back.
+  const shooters = useMemo(() => outletCtx?.shooters ?? [], [outletCtx?.shooters]);
+  const stageOptions = useMemo(
+    () =>
+      (outletCtx?.project?.stages ?? [])
+        .filter((s) => s.videos.some((v) => v.role === "primary"))
+        .map((s) => ({ stageNumber: s.stage_number, stageName: s.stage_name }))
+        .sort((a, b) => a.stageNumber - b.stageNumber),
+    [outletCtx?.project?.stages],
+  );
+  const nextStep = useMemo(
+    () => computeAuditNextStep({ shooters, activeSlug: slug, stages: stageOptions, activeStage: stageNumber }),
+    [shooters, slug, stageOptions, stageNumber],
+  );
+  const next = nextTarget(nextStep, shooters);
+  const handleSaveNext = useCallback(async () => {
+    if (!(await handleSave())) return;
+    if (next) openStage(next);
+    else goBack();
+  }, [handleSave, next, openStage, goBack]);
+
+  const handleJump = useCallback(
+    (target: AuditTarget) => {
+      setJumpOpen(false);
+      if (dirty) setPendingNav(() => () => openStage(target));
+      else openStage(target);
+    },
+    [dirty, openStage],
+  );
 
   // ---- No-stage-param: plain stage list, no takeover ------------------------
 
@@ -662,21 +718,39 @@ export function MobileAudit() {
             >
               <ArrowLeft className="size-5" aria-hidden />
             </button>
-            <span className="text-md font-medium text-ink">
-              <span className="mr-1.5 font-mono text-sm text-led">{String(stageNumber).padStart(2, "0")}</span>
-              Audit
-            </span>
+            <button
+              type="button"
+              aria-label={JUMP_TITLE}
+              onClick={() => setJumpOpen(true)}
+              className="flex min-h-11 min-w-0 items-center gap-1 text-md font-medium text-ink"
+            >
+              <span className="font-mono text-sm text-led">{String(stageNumber).padStart(2, "0")}</span>
+              <span className="truncate">
+                {shooters.find((s) => s.slug === slug)?.name ?? "Audit"}
+              </span>
+              <ChevronDown className="size-4 shrink-0 text-ink-2" aria-hidden />
+            </button>
             <div className="ml-auto flex items-center gap-1">
               {audit != null && (
-                <Button
-                  type="button"
-                  variant="primary"
-                  disabled={readOnly || !dirty || saving}
-                  onClick={handleSave}
-                  className="min-h-11"
-                >
-                  {saving ? "Saving..." : dirty ? "Save *" : "Save"}
-                </Button>
+                <>
+                  <Button
+                    type="button"
+                    disabled={readOnly || !dirty || saving}
+                    onClick={() => void handleSave()}
+                    className="min-h-11 px-2.5"
+                  >
+                    {dirty ? "Save *" : "Save"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    disabled={readOnly || saving}
+                    onClick={() => void handleSaveNext()}
+                    className="min-h-11 px-2.5"
+                  >
+                    {saving ? "Saving..." : next ? "Save & next" : "Save & finish"}
+                  </Button>
+                </>
               )}
               {!readOnly ? (
                 <span className="relative">
@@ -885,6 +959,15 @@ export function MobileAudit() {
           </div>
         )}
 
+        <JumpSheet
+          open={jumpOpen}
+          shooters={jumpShooters(shooters, slug)}
+          currentStage={stageNumber}
+          stageNames={Object.fromEntries(stageOptions.map((s) => [s.stageNumber, s.stageName]))}
+          onPick={(pickSlug, pickStage) => handleJump({ slug: pickSlug, stage: pickStage })}
+          onClose={() => setJumpOpen(false)}
+        />
+
         <MobileConfirmSheet
           open={confirmDeleteMarker != null}
           title="Delete manual shot"
@@ -939,7 +1022,7 @@ export function MobileAudit() {
           }. Going back without saving discards them.`}
           confirmLabel="Discard"
           onConfirm={confirmDiscardAndBack}
-          onCancel={() => setConfirmDiscard(false)}
+          onCancel={() => setPendingNav(null)}
         />
       </Portal>
       <Snackbar snack={snack} onDismiss={() => setSnack(null)} />
