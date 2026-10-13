@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.67.1](https://github.com/mandakan/splitsmith/compare/v0.67.0...v0.67.1) (2026-10-13)
+
+
+### Bug Fixes
+
+* **audit:** phone Audit taps without playing, drags across rows, holds its layout, loop follows the shot ([#1462](https://github.com/mandakan/splitsmith/issues/1462)) ([8e0748b](https://github.com/mandakan/splitsmith/commit/8e0748b6e70e187c89ac6af2a48ce76a5c64edf5))
+
 ## [0.67.0](https://github.com/mandakan/splitsmith/compare/v0.66.1...v0.67.0) (2026-10-12)
 
 
