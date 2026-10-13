@@ -28,6 +28,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Timeline, type TimelineTrack } from "@/components/timeline/Timeline";
 import { WaveformTrack } from "@/components/timeline/WaveformTrack";
 import { api, type PeaksResult } from "@/lib/api";
+import type { PeaksDetail } from "@/lib/timelineView";
+import { snapToLeadingEdge } from "@/lib/peak-snap";
 import { coalescedSeek, seekNow } from "@/lib/coalescedSeek";
 import { useSpacePlayPause } from "@/lib/keyboard";
 import type { Zoom } from "@/lib/timelineView";
@@ -69,6 +71,12 @@ export interface BeepTimelineProps {
   onError?: (message: string) => void;
 }
 
+/** The fine window around the beep: seconds either side, at 1 ms. */
+const DETAIL_HALF_S = 2;
+const DETAIL_BINS = 4000;
+/** How far Snap looks for the tone's rising edge, seconds either side.
+ *  Wider than a shot's 25 ms: the beep is the only loud sound this near. */
+const BEEP_SNAP_S = 0.1;
 const CANDIDATES_ROW_H = 22;
 const AUDIO_ROW_H = 120;
 /** Source <-> local tolerance for "is this candidate the chosen one". */
@@ -92,6 +100,7 @@ export function BeepTimeline({
   const [localTime, setLocalTime] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [zoom, setZoom] = useState<Zoom>(null);
+  const [detail, setDetail] = useState<PeaksDetail | null>(null);
   const lastScrubRef = useRef(0);
 
   // The fetch effect parks the video once peaks land (below), using
@@ -184,6 +193,37 @@ export function BeepTimeline({
   }, [playing, media]);
 
   const offset = videoBeepTime != null && peaks?.beep_time != null ? videoBeepTime - peaks.beep_time : 0;
+  const chosenSourceNow = draftSourceTime ?? videoBeepTime;
+  const chosenLocalNow = chosenSourceNow != null ? chosenSourceNow - offset : (peaks?.beep_time ?? null);
+
+  // 1 ms detail for the seconds around the chosen beep: the clip's own
+  // peaks are 1,200 bins over the whole source (25-50 ms bars), too
+  // coarse to see where the tone starts. Fetched again only when the
+  // beep moves out of the window it has.
+  useEffect(() => {
+    if (!peaks || chosenLocalNow == null) return undefined;
+    if (detail && chosenLocalNow - detail.start > 0.5 && detail.start + detail.duration - chosenLocalNow > 0.5) {
+      return undefined;
+    }
+    const start = Math.max(0, Math.round((chosenLocalNow - DETAIL_HALF_S) * 1000) / 1000);
+    const end = Math.min(peaks.duration, Math.round((chosenLocalNow + DETAIL_HALF_S) * 1000) / 1000);
+    if (end <= start) return undefined;
+    let alive = true;
+    api
+      .getVideoPeaks(slug, stageNumber, videoId, DETAIL_BINS, { start, end })
+      .then((d) => {
+        if (alive) setDetail({ start: d.start ?? start, duration: d.duration, peaks: d.peaks });
+      })
+      .catch(() => {
+        // The coarse peaks still draw; the detail is a refinement.
+      });
+    return () => {
+      alive = false;
+    };
+    // detail is read to decide whether to fetch, not a reason to.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [peaks, chosenLocalNow, slug, stageNumber, videoId]);
+  useEffect(() => setDetail(null), [slug, stageNumber, videoId]);
 
   // Space -> play/pause the preview, the same window-level hook every
   // other Splitsmith media surface wires (BeepWaveformPicker
@@ -234,6 +274,19 @@ export function BeepTimeline({
   // video's own confirmed/detected beep. Null when there is neither.
   const chosenSource = draftSourceTime ?? videoBeepTime;
   const chosenLocal = chosenSource != null ? chosenSource - offset : null;
+  // Where Snap would put the beep: the rise-foot rule on the fine window,
+  // looking a little wider than for a shot. Null without detail or a foot.
+  const snapLocal =
+    detail && chosenLocal != null
+      ? (() => {
+          const t = snapToLeadingEdge(
+            chosenLocal - detail.start,
+            { peaks: detail.peaks, duration: detail.duration },
+            BEEP_SNAP_S,
+          );
+          return t == null ? null : Math.round((t + detail.start) * 1000) / 1000;
+        })()
+      : null;
 
   const tracks: TimelineTrack[] = [
     {
@@ -285,6 +338,7 @@ export function BeepTimeline({
           geom={geom}
           height={AUDIO_ROW_H}
           beepTime={chosenLocal}
+          detail={detail}
         />
       ),
     },
@@ -302,6 +356,22 @@ export function BeepTimeline({
       zoom={zoom}
       onZoomChange={setZoom}
       tracks={tracks}
+      actionsEnd={
+        <button
+          type="button"
+          className="min-h-8 rounded-md border border-rule px-2 text-sm text-ink disabled:opacity-50"
+          disabled={snapLocal == null || chosenLocal == null || Math.abs(snapLocal - chosenLocal) < 0.0005}
+          title="Move the beep onto the tone's rising edge"
+          onClick={() => {
+            if (snapLocal == null) return;
+            if (media) seekNow(media, snapLocal);
+            setLocalTime(snapLocal);
+            pick(snapLocal + offset);
+          }}
+        >
+          Snap to the beep's start
+        </button>
+      }
     />
   );
 }

@@ -35,13 +35,18 @@ class PeaksResult(BaseModel):
     sample_rate: int
     bins: int
     peaks: list[float]
+    #: Seconds into the WAV where these peaks begin: 0 for the whole file,
+    #: the window's start for :func:`ensure_peaks_window`.
+    start: float = 0.0
     #: The WAV these peaks were computed from (size, mtime_ns), taken before
     #: it was read. Cache bookkeeping, never part of the API payload.
     source_size: int | None = Field(default=None, exclude=True)
     source_mtime_ns: int | None = Field(default=None, exclude=True)
 
 
-def compute_peaks(audio: np.ndarray, sample_rate: int, bins: int) -> PeaksResult:
+def compute_peaks(
+    audio: np.ndarray, sample_rate: int, bins: int, *, scale: float | None = None
+) -> PeaksResult:
     """Bucket ``audio`` into ``bins`` peak magnitudes normalized to [0, 1].
 
     Each bin's value is ``max(abs(samples_in_bin)) / max(abs(audio))`` so the
@@ -65,7 +70,9 @@ def compute_peaks(audio: np.ndarray, sample_rate: int, bins: int) -> PeaksResult
         )
 
     abs_audio = np.abs(audio).astype(np.float32, copy=False)
-    global_max = float(abs_audio.max())
+    # ``scale`` normalizes a window by its whole file's loudest sample, so
+    # its bars match the file's own peaks drawn beside it.
+    global_max = float(abs_audio.max()) if scale is None else float(scale)
 
     # Edges via linspace: handles n < bins gracefully (some bins may be empty).
     edges = np.linspace(0, n, bins + 1, dtype=np.int64)
@@ -101,7 +108,10 @@ def cached(audio_path: Path, bins: int) -> PeaksResult | None:
     the new WAV, and it was served for that WAV ever after. A result saved
     without the record is a miss, so old caches are recomputed once.
     """
-    cf = cache_path(audio_path, bins)
+    return _read_cache(cache_path(audio_path, bins), audio_path)
+
+
+def _read_cache(cf: Path, audio_path: Path) -> PeaksResult | None:
     if not cf.exists():
         return None
     try:
@@ -112,6 +122,16 @@ def cached(audio_path: Path, bins: int) -> PeaksResult | None:
     if hit.source_size != st.st_size or hit.source_mtime_ns != st.st_mtime_ns:
         return None
     return hit
+
+
+def _write_cache(cf: Path, result: PeaksResult, st: os.stat_result) -> None:
+    cf.parent.mkdir(parents=True, exist_ok=True)
+    # A per-process temporary name and an atomic rename, so two requests
+    # writing the same cache never interleave.
+    tmp = cf.with_name(f"{cf.name}.{os.getpid()}-{uuid.uuid4().hex[:8]}.tmp")
+    record = {**result.model_dump(mode="json"), "source_size": st.st_size, "source_mtime_ns": st.st_mtime_ns}
+    tmp.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(cf)
 
 
 def ensure_peaks(audio_path: Path, bins: int) -> PeaksResult:
@@ -133,12 +153,30 @@ def ensure_peaks(audio_path: Path, bins: int) -> PeaksResult:
     result.source_size = st.st_size
     result.source_mtime_ns = st.st_mtime_ns
 
-    cf = cache_path(audio_path, bins)
-    cf.parent.mkdir(parents=True, exist_ok=True)
-    # A per-process temporary name and an atomic rename, so two requests
-    # writing the same cache never interleave.
-    tmp = cf.with_name(f"{cf.name}.{os.getpid()}-{uuid.uuid4().hex[:8]}.tmp")
-    record = {**result.model_dump(mode="json"), "source_size": st.st_size, "source_mtime_ns": st.st_mtime_ns}
-    tmp.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
-    tmp.replace(cf)
+    _write_cache(cache_path(audio_path, bins), result, st)
+    return result
+
+
+def ensure_peaks_window(audio_path: Path, bins: int, *, start: float, end: float) -> PeaksResult:
+    """Peaks of one window of ``audio_path``, ``[start, end)`` seconds clamped
+    to the file, scaled by the whole file's loudest sample. The beep picker
+    draws a few seconds around the beep at 1 ms over a source that can run
+    minutes. Cached per window, with the same source record as
+    :func:`ensure_peaks`."""
+    st = audio_path.stat()
+    key = f"{audio_path.stem}.peaks-{bins}-{round(start * 1000)}-{round(end * 1000)}.json"
+    cf = audio_path.with_name(key)
+    hit = _read_cache(cf, audio_path)
+    if hit is not None and hit.bins == bins:
+        return hit
+    audio, sr = beep_detect.load_audio(audio_path)
+    n = audio.shape[0]
+    lo = min(n, max(0, int(round(start * sr))))
+    hi = min(n, max(lo, int(round(end * sr))))
+    scale = float(np.abs(audio).max()) if n else 0.0
+    result = compute_peaks(audio[lo:hi], sr, bins, scale=scale)
+    result.start = lo / sr if sr else 0.0
+    result.source_size = st.st_size
+    result.source_mtime_ns = st.st_mtime_ns
+    _write_cache(cf, result, st)
     return result

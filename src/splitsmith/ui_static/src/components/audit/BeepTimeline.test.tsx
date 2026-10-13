@@ -3,6 +3,7 @@ import { StrictMode, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PeaksResult } from "@/lib/api";
+import { snapToLeadingEdge } from "@/lib/peak-snap";
 import { resetTimelinePrefsForTests } from "@/lib/timelinePrefs";
 
 import { BeepTimeline, type BeepCandidate } from "./BeepTimeline";
@@ -489,4 +490,31 @@ describe("BeepTimeline", () => {
 
     expect(screen.getByTestId("timeline-playhead")).toHaveStyle({ left: "600px" });
   });
+
+  it("loads 1 ms detail for the seconds around the beep", async () => {
+    vi.mocked(api.getVideoPeaks).mockResolvedValue(peaksFixture({ beep_time: 5 }));
+    render(<Harness videoId="v1" videoBeepTime={5} />);
+    await screen.findByTestId("waveform-track");
+    expect(api.getVideoPeaks).toHaveBeenCalledWith("alice", 10, "v1", 4000, { start: 3, end: 7 });
+  });
+
+  it("Snap puts the pick on the beep tone's start", async () => {
+    // Coarse peaks for the whole source; the detail window 3-7 s at 1 ms has
+    // the tone rising 40 ms after the confirmed beep at 5.0 s.
+    const fine = new Array(4000).fill(0.01);
+    for (let i = 0; i < 300; i += 1) fine[2040 + i] = i < 3 ? 0.3 * (i + 1) : 0.9;
+    vi.mocked(api.getVideoPeaks).mockImplementation(async (_s, _n, _v, bins) =>
+      bins === 4000
+        ? { ...peaksFixture({ beep_time: 5 }), duration: 4, bins: 4000, peaks: fine, start: 3 }
+        : peaksFixture({ beep_time: 5 }),
+    );
+    const onPick = vi.fn();
+    render(<Harness videoId="v1" videoBeepTime={5} onPick={onPick} />);
+    const snap = await screen.findByRole("button", { name: "Snap to the beep's start" });
+    fireEvent.click(snap);
+    const local = snapToLeadingEdge(5 - 3, { peaks: fine, duration: 4 }, 0.1)!;
+    expect(local).toBeGreaterThan(2.03);
+    expect(onPick).toHaveBeenCalledWith(expect.closeTo(local + 3, 3));
+  });
 });
+
