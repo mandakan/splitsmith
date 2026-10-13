@@ -3508,7 +3508,7 @@ wheels = [
 
 [[package]]
 name = "splitsmith"
-version = "0.69.1"
+version = "0.70.0"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },
