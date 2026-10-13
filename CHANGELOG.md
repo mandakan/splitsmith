@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.69.1](https://github.com/mandakan/splitsmith/compare/v0.69.0...v0.69.1) (2026-10-13)
+
+
+### Bug Fixes
+
+* **audit:** a saved waveform is served only for the WAV it was computed from ([#1470](https://github.com/mandakan/splitsmith/issues/1470)) ([504e670](https://github.com/mandakan/splitsmith/commit/504e6703e14d50dec6db409e724d2751e5ed2b1b))
+
 ## [0.69.0](https://github.com/mandakan/splitsmith/compare/v0.68.0...v0.69.0) (2026-10-13)
 
 
