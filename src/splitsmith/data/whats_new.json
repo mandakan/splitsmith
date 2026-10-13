@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "audit-waveform-full-length",
+      "date": "2026-10-13",
+      "title": "The waveform covers the whole stage again",
+      "body": "On some stages the Audit waveform ended before the audio did, so the playhead ran off the last row. The waveform is now always drawn from the stage audio you hear."
+    },
+    {
       "id": "phone-audit-zoom-on-top",
       "date": "2026-10-13",
       "title": "The zoomed view sits on top on the phone",
