@@ -38,6 +38,13 @@ Personal tool for an IPSC competitor to extract shot splits from head-mounted ca
   New tests must not depend on execution order or share mutable state outside
   `tmp_path`: a worker's process-global caches are its own, but the filesystem,
   ports, and `~/` are not.
+- CI runs the suite as four parallel shards (`SPLITSMITH_TEST_SHARD=i/4`, a
+  CRC of each test id in `tests/conftest.py`; every shard keeps its own
+  integration gate) and, on a pull request, skips the Python suite when only
+  the SPA changed and the SPA job when nothing it reads changed (the
+  `changes` job in `ci.yml`). A new test that reads files across that line
+  (a Python test reading the SPA, an SPA test reading `tests/`) belongs in
+  those rules. Every push to main runs everything.
 - `pytest -m docker` needs `-n0` when the run spans more than one docker-marked
   file: the compose fixtures use fixed container names, and concurrent xdist
   workers collide on them.

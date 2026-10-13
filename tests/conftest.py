@@ -3,6 +3,7 @@
 import os
 import re
 import subprocess
+import zlib
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -206,12 +207,50 @@ def _skip_reason(report: pytest.TestReport) -> str:
     return str(longrepr)
 
 
+# --- Sharding ---------------------------------------------------------------
+#
+# CI splits the suite across parallel jobs (each GitHub runner has four
+# cores, and the suite is CPU-bound): ``SPLITSMITH_TEST_SHARD=i/N`` keeps the
+# tests whose id lands in shard ``i`` of ``N``. The split is a CRC of the
+# test id, never Python's ``hash``, which is salted per process: xdist
+# workers must all keep the same tests or the run refuses to start. It runs
+# before the integration gate counts, so each shard's gate judges its own
+# share (every shard holds integration tests). Unset, nothing changes.
+
+_SHARD_ENV = "SPLITSMITH_TEST_SHARD"
+
+
+def parse_shard(value: str) -> tuple[int, int]:
+    """``"i/N"`` -> ``(i, N)``, 1-based; anything else is a usage error,
+    never a silent full run."""
+    try:
+        index_s, count_s = value.split("/")
+        index, count = int(index_s), int(count_s)
+    except ValueError as exc:
+        raise pytest.UsageError(f"{_SHARD_ENV} must look like 2/4, not {value!r}") from exc
+    if count < 1 or not 1 <= index <= count:
+        raise pytest.UsageError(f"{_SHARD_ENV}={value!r}: the shard must be between 1 and the count")
+    return index, count
+
+
+def in_shard(nodeid: str, index: int, count: int) -> bool:
+    return zlib.crc32(nodeid.encode("utf-8")) % count == index - 1
+
+
 def pytest_collection_modifyitems(
     session: pytest.Session,
     config: pytest.Config,
     items: list[pytest.Item],
 ) -> None:
     global _integration_selected
+    shard = os.environ.get(_SHARD_ENV, "").strip()
+    if shard:
+        index, count = parse_shard(shard)
+        kept = [item for item in items if in_shard(item.nodeid, index, count)]
+        dropped = [item for item in items if not in_shard(item.nodeid, index, count)]
+        if dropped:
+            config.hook.pytest_deselected(items=dropped)
+        items[:] = kept
     _integration_selected = sum(1 for item in items if "integration" in item.keywords)
 
 
