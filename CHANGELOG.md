@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.71.0](https://github.com/mandakan/splitsmith/compare/v0.70.0...v0.71.0) (2026-10-13)
+
+
+### Features
+
+* **audit:** beep review says when the beep sits 20 ms or more from the tone's start ([#1475](https://github.com/mandakan/splitsmith/issues/1475)) ([34401af](https://github.com/mandakan/splitsmith/commit/34401af2ff408b3a06252a1534efa510f2b1d0a3))
+* **audit:** Earlier rise steps a shot back to the blast; Q peeks like P ([#1476](https://github.com/mandakan/splitsmith/issues/1476)) ([056455e](https://github.com/mandakan/splitsmith/commit/056455e3f1821287b5751f0e1ea3d4c9c655d894))
+
 ## [0.70.0](https://github.com/mandakan/splitsmith/compare/v0.69.1...v0.70.0) (2026-10-13)
 
 
