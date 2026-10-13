@@ -48,6 +48,9 @@ def _run_nested_pytest(
     numprocesses: int | None = None,
 ) -> subprocess.CompletedProcess[str]:
     env = {**os.environ}
+    # CI runs this file inside one shard of the suite; the nested run is its
+    # own session over one test and must not inherit the split.
+    env.pop("SPLITSMITH_TEST_SHARD", None)
     if not with_ffmpeg:
         env["PATH"] = _path_without_ffmpeg()
     if require:
