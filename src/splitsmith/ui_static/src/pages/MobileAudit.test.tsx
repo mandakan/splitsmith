@@ -137,6 +137,16 @@ describe("MobileAudit", () => {
     expect(screen.getAllByTestId("wave-row")).toHaveLength(DEFAULT_ROWS);
   });
 
+  it("puts the zoom lane above the whole-stage waveform and the controls below it", async () => {
+    // A thumb scrubbing the waveform must not cover the zoomed view.
+    renderPage();
+    const wave = await screen.findByTestId("wrapped-waveform");
+    const lane = await screen.findByTestId("zoom-lane");
+    const play = screen.getByRole("button", { name: "Play" });
+    expect(lane.compareDocumentPosition(wave) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(wave.compareDocumentPosition(play) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("shows the empty state when there is no audit doc", async () => {
     apiMock.getStageAudit.mockResolvedValue(null);
     renderPage();

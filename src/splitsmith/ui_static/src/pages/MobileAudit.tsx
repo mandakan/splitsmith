@@ -847,6 +847,26 @@ export function MobileAudit() {
             </div>
           ) : (
             <>
+              {/* The zoomed lane sits above the whole-stage waveform: a thumb
+                  scrubbing the waveform never covers it. The transport and the
+                  shot buttons stay at the bottom, under the thumb. */}
+              {peaksResult && (
+                <ZoomLane
+                  peaks={peaksResult.peaks}
+                  duration={peaksResult.duration}
+                  rows={DEFAULT_ROWS}
+                  playhead={playback.playhead}
+                  zoom={zoom}
+                  onZoomChange={setZoom}
+                  markers={markers}
+                  targetId={targetId}
+                  onTap={handleTap}
+                  onGrabStart={handleGrabStart}
+                  onJog={handleScrub}
+                  onGrabEnd={handleGrabEnd}
+                />
+              )}
+
               {peaksResult ? (
                 <WrappedWaveform
                   peaks={peaksResult.peaks}
@@ -869,23 +889,6 @@ export function MobileAudit() {
                 <div className="flex flex-1 items-center justify-center text-sm text-muted">
                   Loading audio...
                 </div>
-              )}
-
-              {peaksResult && (
-                <ZoomLane
-                  peaks={peaksResult.peaks}
-                  duration={peaksResult.duration}
-                  rows={DEFAULT_ROWS}
-                  playhead={playback.playhead}
-                  zoom={zoom}
-                  onZoomChange={setZoom}
-                  markers={markers}
-                  targetId={targetId}
-                  onTap={handleTap}
-                  onGrabStart={handleGrabStart}
-                  onJog={handleScrub}
-                  onGrabEnd={handleGrabEnd}
-                />
               )}
 
               <AuditTransport
