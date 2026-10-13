@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.70.0](https://github.com/mandakan/splitsmith/compare/v0.69.1...v0.70.0) (2026-10-13)
+
+
+### Features
+
+* **audit:** beep review draws the beep in 1 ms detail and snaps it to the tone's start ([#1474](https://github.com/mandakan/splitsmith/issues/1474)) ([c6e6602](https://github.com/mandakan/splitsmith/commit/c6e660282ebed15c2b30277caa0d7b0dcbd37d99))
+
+
+### Bug Fixes
+
+* **raster:** wait for the next frame before retrying a transient screenshot failure ([#1472](https://github.com/mandakan/splitsmith/issues/1472)) ([04cc2dc](https://github.com/mandakan/splitsmith/commit/04cc2dc41fc3e0788b585a181908a2a6a4e94fd2))
+
 ## [0.69.1](https://github.com/mandakan/splitsmith/compare/v0.69.0...v0.69.1) (2026-10-13)
 
 
