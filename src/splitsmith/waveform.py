@@ -17,10 +17,13 @@ without paying full decode cost twice.
 
 from __future__ import annotations
 
+import json
+import os
+import uuid
 from pathlib import Path
 
 import numpy as np
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from . import beep_detect
 
@@ -32,6 +35,10 @@ class PeaksResult(BaseModel):
     sample_rate: int
     bins: int
     peaks: list[float]
+    #: The WAV these peaks were computed from (size, mtime_ns), taken before
+    #: it was read. Cache bookkeeping, never part of the API payload.
+    source_size: int | None = Field(default=None, exclude=True)
+    source_mtime_ns: int | None = Field(default=None, exclude=True)
 
 
 def compute_peaks(audio: np.ndarray, sample_rate: int, bins: int) -> PeaksResult:
@@ -87,18 +94,24 @@ def cache_path(audio_path: Path, bins: int) -> Path:
 def cached(audio_path: Path, bins: int) -> PeaksResult | None:
     """Return cached peaks for ``audio_path`` at ``bins`` resolution, or ``None``.
 
-    Cache is invalid if it predates the audio file's mtime; callers should
-    fall through to :func:`ensure_peaks` in that case.
+    A saved result is valid only for the WAV it was computed from: its
+    recorded size and mtime must match the file now. Timestamps alone are
+    not enough (2026-10-13): a request computing peaks from an older WAV
+    while another replaced it saved its result after the swap, newer than
+    the new WAV, and it was served for that WAV ever after. A result saved
+    without the record is a miss, so old caches are recomputed once.
     """
     cf = cache_path(audio_path, bins)
     if not cf.exists():
         return None
     try:
-        if cf.stat().st_mtime < audio_path.stat().st_mtime:
-            return None
-        return PeaksResult.model_validate_json(cf.read_text(encoding="utf-8"))
+        st = audio_path.stat()
+        hit = PeaksResult.model_validate_json(cf.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
+    if hit.source_size != st.st_size or hit.source_mtime_ns != st.st_mtime_ns:
+        return None
+    return hit
 
 
 def ensure_peaks(audio_path: Path, bins: int) -> PeaksResult:
@@ -112,10 +125,20 @@ def ensure_peaks(audio_path: Path, bins: int) -> PeaksResult:
     if hit is not None and hit.bins == bins:
         return hit
 
+    # Recorded before reading: a WAV replaced while this runs leaves a record
+    # that no longer matches, and the next call recomputes.
+    st = audio_path.stat()
     audio, sr = beep_detect.load_audio(audio_path)
     result = compute_peaks(audio, sr, bins)
+    result.source_size = st.st_size
+    result.source_mtime_ns = st.st_mtime_ns
 
     cf = cache_path(audio_path, bins)
     cf.parent.mkdir(parents=True, exist_ok=True)
-    cf.write_text(result.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    # A per-process temporary name and an atomic rename, so two requests
+    # writing the same cache never interleave.
+    tmp = cf.with_name(f"{cf.name}.{os.getpid()}-{uuid.uuid4().hex[:8]}.tmp")
+    record = {**result.model_dump(mode="json"), "source_size": st.st_size, "source_mtime_ns": st.st_mtime_ns}
+    tmp.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(cf)
     return result

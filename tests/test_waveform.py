@@ -106,3 +106,47 @@ def test_cached_returns_none_on_miss(tmp_path: Path) -> None:
     wav = tmp_path / "stage1_primary.wav"
     sf.write(wav, audio, 48_000)
     assert waveform.cached(wav, bins=10) is None
+
+
+def test_peaks_saved_from_an_older_wav_are_never_served_for_a_newer_one(tmp_path: Path) -> None:
+    """The race on hosted (2026-10-13): one request computed peaks from a
+    19.1 s WAV while another replaced it with the stage's 29.3 s WAV; the
+    peaks were saved after the swap, so their file was newer than the WAV
+    and were served for it ever after. The phone drew 19.1 s of rows under
+    29.3 s of audio. A saved result is trusted only for the WAV it was
+    computed from, whatever the timestamps say."""
+    import os
+
+    wav = tmp_path / "stage8_cam_x_audit.wav"
+    sf.write(wav, np.zeros(19 * 1000, dtype=np.float32), 1000)
+    old = waveform.ensure_peaks(wav, bins=50)
+    assert old.duration == pytest.approx(19.0)
+    cache = waveform.cache_path(wav, 50)
+    # The stage's real WAV replaces it, stamped older than the saved peaks.
+    sf.write(wav, np.zeros(29 * 1000, dtype=np.float32), 1000)
+    older = cache.stat().st_mtime - 10
+    os.utime(wav, (older, older))
+
+    assert waveform.ensure_peaks(wav, bins=50).duration == pytest.approx(29.0)
+
+
+def test_peaks_saved_without_a_source_record_are_computed_again(tmp_path: Path) -> None:
+    """Results saved before the source was recorded cannot be trusted; they
+    are recomputed once, which heals a stage already serving stale peaks."""
+    import json
+
+    wav = tmp_path / "stage1_primary.wav"
+    sf.write(wav, np.zeros(5 * 1000, dtype=np.float32), 1000)
+    cache = waveform.cache_path(wav, 10)
+    cache.write_text(json.dumps({"duration": 2.0, "sample_rate": 1000, "bins": 10, "peaks": [0.0] * 10}))
+
+    assert waveform.ensure_peaks(wav, bins=10).duration == pytest.approx(5.0)
+
+
+def test_the_source_record_stays_out_of_the_api_payload(tmp_path: Path) -> None:
+    wav = tmp_path / "stage1_primary.wav"
+    sf.write(wav, np.zeros(1000, dtype=np.float32), 1000)
+    result = waveform.ensure_peaks(wav, bins=10)
+    assert "source_size" not in result.model_dump() and "source_mtime_ns" not in result.model_dump()
+    # ...while the saved file carries it, so the next call is a hit.
+    assert waveform.cached(wav, bins=10) is not None
