@@ -563,7 +563,16 @@ export function Timeline(props: TimelineProps) {
           className="overflow-x-auto overflow-y-hidden"
           onScroll={(e) => setScrollLeft(e.currentTarget.scrollLeft)}
         >
-          <div ref={contentRef} data-testid="timeline-content" className="relative" style={{ width: content }}>
+          {/* Clip the sideways overflow (a ruler label at the end): past the
+              content's width the band would scroll further than a track's
+              sticky canvas can follow, drawing the waveform ahead of the
+              markers. clip, not hidden, which would unstick it. */}
+          <div
+            ref={contentRef}
+            data-testid="timeline-content"
+            className="relative overflow-x-clip"
+            style={{ width: content }}
+          >
             <div
               data-testid="timeline-ruler"
               className="relative cursor-pointer border-b border-rule"

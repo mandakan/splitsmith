@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "timeline-end-lines-up",
+      "date": "2026-10-13",
+      "title": "The waveform stays under its markers",
+      "body": "Zoomed in and scrolled to the end of a stage, the waveform could slide a few pixels ahead of the shot markers. It now stays lined up at every zoom."
+    },
+    {
       "id": "audit-earlier-rise",
       "date": "2026-10-13",
       "title": "Step a shot back to the blast",

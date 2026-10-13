@@ -203,6 +203,15 @@ describe("Timeline", () => {
     expect(document.body.style.overscrollBehaviorX).toBe("");
   });
 
+  it("clips the content's sideways overflow, so a ruler label at the end never widens the scroll range", () => {
+    // A label past the content's right edge let the band scroll beyond it,
+    // and the waveform's sticky canvas, held inside the content, then sat
+    // left of where it drew (the waveform ran ahead of the markers). clip,
+    // not hidden: hidden would make the content a scroller and unstick it.
+    render(<Harness initialZoom={3} />);
+    expect(screen.getByTestId("timeline-content").className).toContain("overflow-x-clip");
+  });
+
   it("labels the gutter and renders each track", () => {
     render(<Harness />);
     expect(screen.getByText("Audio")).toBeInTheDocument();
