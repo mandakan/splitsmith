@@ -77,6 +77,9 @@ const DETAIL_BINS = 4000;
 /** How far Snap looks for the tone's rising edge, seconds either side.
  *  Wider than a shot's 25 ms: the beep is the only loud sound this near. */
 const BEEP_SNAP_S = 0.1;
+/** A beep this far from its tone's start is worth a look: every split is
+ *  measured from it (a corpus scan, 2026-10-13: 50 of 185 confirmed beeps). */
+const BEEP_OFF_S = 0.02;
 const CANDIDATES_ROW_H = 22;
 const AUDIO_ROW_H = 120;
 /** Source <-> local tolerance for "is this candidate the chosen one". */
@@ -357,20 +360,28 @@ export function BeepTimeline({
       onZoomChange={setZoom}
       tracks={tracks}
       actionsEnd={
-        <button
-          type="button"
-          className="min-h-8 rounded-md border border-rule px-2 text-sm text-ink disabled:opacity-50"
-          disabled={snapLocal == null || chosenLocal == null || Math.abs(snapLocal - chosenLocal) < 0.0005}
-          title="Move the beep onto the tone's rising edge"
-          onClick={() => {
-            if (snapLocal == null) return;
-            if (media) seekNow(media, snapLocal);
-            setLocalTime(snapLocal);
-            pick(snapLocal + offset);
-          }}
-        >
-          Snap to the beep's start
-        </button>
+        <span className="flex items-center gap-2">
+          {snapLocal != null && chosenLocal != null && Math.abs(chosenLocal - snapLocal) >= BEEP_OFF_S ? (
+            <span className="numeral text-sm text-status-warning">
+              {Math.round(Math.abs(chosenLocal - snapLocal) * 1000)} ms{" "}
+              {chosenLocal < snapLocal ? "before" : "after"} the tone's start
+            </span>
+          ) : null}
+          <button
+            type="button"
+            className="min-h-8 rounded-md border border-rule px-2 text-sm text-ink disabled:opacity-50"
+            disabled={snapLocal == null || chosenLocal == null || Math.abs(snapLocal - chosenLocal) < 0.0005}
+            title="Move the beep onto the tone's rising edge"
+            onClick={() => {
+              if (snapLocal == null) return;
+              if (media) seekNow(media, snapLocal);
+              setLocalTime(snapLocal);
+              pick(snapLocal + offset);
+            }}
+          >
+            Snap to the beep's start
+          </button>
+        </span>
       }
     />
   );
