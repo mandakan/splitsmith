@@ -516,5 +516,30 @@ describe("BeepTimeline", () => {
     expect(local).toBeGreaterThan(2.03);
     expect(onPick).toHaveBeenCalledWith(expect.closeTo(local + 3, 3));
   });
+
+  it("says how far the beep sits from the tone's start when it is 20 ms or more", async () => {
+    const fine = new Array(4000).fill(0.01);
+    for (let i = 0; i < 300; i += 1) fine[2040 + i] = i < 3 ? 0.3 * (i + 1) : 0.9;
+    vi.mocked(api.getVideoPeaks).mockImplementation(async (_s, _n, _v, bins) =>
+      bins === 4000
+        ? { ...peaksFixture({ beep_time: 5 }), duration: 4, bins: 4000, peaks: fine, start: 3 }
+        : peaksFixture({ beep_time: 5 }),
+    );
+    render(<Harness videoId="v1" videoBeepTime={5} />);
+    expect(await screen.findByText(/ms before the tone's start/)).toBeInTheDocument();
+  });
+
+  it("says nothing when the beep is already on the tone's start", async () => {
+    const fine = new Array(4000).fill(0.01);
+    for (let i = 0; i < 300; i += 1) fine[2000 + i] = i < 3 ? 0.3 * (i + 1) : 0.9;
+    vi.mocked(api.getVideoPeaks).mockImplementation(async (_s, _n, _v, bins) =>
+      bins === 4000
+        ? { ...peaksFixture({ beep_time: 5 }), duration: 4, bins: 4000, peaks: fine, start: 3 }
+        : peaksFixture({ beep_time: 5 }),
+    );
+    render(<Harness videoId="v1" videoBeepTime={5} />);
+    await screen.findByRole("button", { name: "Snap to the beep's start" });
+    expect(screen.queryByText(/the tone's start$/)).not.toBeInTheDocument();
+  });
 });
 
