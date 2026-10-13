@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.68.0](https://github.com/mandakan/splitsmith/compare/v0.67.1...v0.68.0) (2026-10-13)
+
+
+### Features
+
+* **audit:** Save & next, a shooter and stage picker, and Back to where you came from on the phone ([#1465](https://github.com/mandakan/splitsmith/issues/1465)) ([2b04172](https://github.com/mandakan/splitsmith/commit/2b041727d9242fae646d99883dc7a73cf9eedaf1))
+
 ## [0.67.1](https://github.com/mandakan/splitsmith/compare/v0.67.0...v0.67.1) (2026-10-13)
 
 
