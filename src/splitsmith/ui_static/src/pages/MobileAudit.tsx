@@ -50,7 +50,7 @@ import { useMatchHref } from "@/lib/matchHref";
 import { computeAuditNextStep } from "@/lib/audit-next-step";
 import { jumpShooters, nextTarget, type AuditTarget } from "@/lib/mobileAuditNav";
 import { PEAK_SNAP_TOLERANCE_S, type SnapPeaks } from "@/lib/peak-snap";
-import { footFor, footReadout, readSnapOn, seatAllMoves, writeSnapOn } from "@/lib/riseFoot";
+import { earlierFootFor, footFor, footReadout, readSnapOn, seatAllMoves, writeSnapOn } from "@/lib/riseFoot";
 import { stackCameras } from "@/lib/phoneCameraStack";
 import { createScrubber, type Scrubber } from "@/lib/scrub-audio";
 import { useAuditPlayback } from "@/lib/useAuditPlayback";
@@ -294,6 +294,7 @@ export function MobileAudit() {
           onRule: false,
         });
   const canSeat = targetFoot != null && foot != null && !foot.onRule;
+  const targetEarlier = target.kind === "shot" ? earlierFootFor(target.marker.time, footPeaks) : null;
 
   // ---- Gestures -----------------------------------------------------------
 
@@ -421,6 +422,18 @@ export function MobileAudit() {
     setHeldId(m.id);
     setNudgeMs(0);
   }, [target, readOnly, saving, targetFoot, placedFrom, recordEvent]);
+
+  // Earlier rise: the shot onto the burst before it (a blast before the
+  // louder reflection the rule seats on). A placement: Seat looks from here.
+  const handleEarlier = useCallback(() => {
+    if (target.kind !== "shot" || readOnly || saving || targetEarlier == null) return;
+    const m = target.marker;
+    recordEvent("marker_time_changed", { id: m.id, from_time: m.time, to_time: targetEarlier, reason: "earlier_rise" });
+    setMarkers((prev) => prev.map((x) => (x.id === m.id ? { ...x, time: targetEarlier } : x)));
+    setPlacedAt((prev) => ({ ...prev, [m.id]: targetEarlier }));
+    setHeldId(m.id);
+    setNudgeMs(0);
+  }, [target, readOnly, saving, targetEarlier, recordEvent]);
 
   const askSeatAll = useCallback(() => {
     setSeatAllPending(seatAllMoves(markers, footPeaks, placedFrom));
@@ -911,6 +924,8 @@ export function MobileAudit() {
                 onNudge={handleNudge}
                 foot={foot}
                 canSeat={canSeat}
+                onEarlier={footPeaks ? handleEarlier : undefined}
+                canEarlier={targetEarlier != null}
                 onSeat={footPeaks ? handleSeat : undefined}
                 onDeleteShot={handleDeleteShot}
                 onShowVideo={handleShowVideo}

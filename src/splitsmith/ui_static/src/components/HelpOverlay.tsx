@@ -47,6 +47,7 @@ function sections(mode: HelpMode): Section[] {
     { keys: ["R"], desc: "Reject the current shot (manual: delete)" },
     { keys: ["F"], desc: "Jump to the next flagged shot" },
     { keys: ["E"], desc: "Seat the current shot on its rise foot" },
+    { keys: ["Shift", "E"], desc: "Move the current shot to the rise before it" },
     { keys: ["Shift", "drag"], desc: "Place a shot exactly, without snapping to the rise foot" },
   ];
   const markers: ShortcutRow[] = [
@@ -66,7 +67,7 @@ function sections(mode: HelpMode): Section[] {
   ];
   const view: ShortcutRow[] = [
     { keys: ["L"], desc: "Toggle loop (snaps back to anchor)" },
-    { keys: ["P", "(hold)"], desc: "Peek rejected shots while held" },
+    { keys: ["P", "Q", "(hold)"], desc: "Peek rejected shots while either is held" },
     { keys: ["+"], desc: "Zoom in" },
     { keys: ["0"], desc: "Fit waveform to view" },
     { keys: ["-"], desc: "Zoom out" },

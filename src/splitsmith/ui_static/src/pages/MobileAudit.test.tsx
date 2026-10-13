@@ -827,3 +827,50 @@ describe("MobileAudit navigation", () => {
     await waitFor(() => expect(where()).toBe("/match/m1/audit/bob/3"));
   });
 });
+
+describe("MobileAudit earlier rise", () => {
+  // 1 ms peaks with a blast at 2.000 s and a louder reflection at 2.030 s; cand-1 sits on the reflection.
+  const blastThenReflection = (bins: number) => {
+    const peaks = Array.from({ length: bins }, () => 0.01);
+    const at = (t: number) => Math.round(t * (bins / 22));
+    for (let i = 0; i < 12; i++) peaks[at(2.0) + i] = i < 2 ? 0.3 * (i + 1) : 0.6;
+    for (let i = 0; i < 40; i++) peaks[at(2.03) + i] = i < 2 ? 0.45 * (i + 1) : 0.9;
+    return { ...peaksResult(bins), duration: 22, peaks };
+  };
+  const reflectionDoc = (): StageAudit => {
+    const d = doc();
+    d.shots[0] = { ...d.shots[0], time: 2.03 };
+    d._candidates_pending_audit!.candidates[0] = { ...d._candidates_pending_audit!.candidates[0], time: 2.03 };
+    return d;
+  };
+
+  beforeEach(() => {
+    apiMock.getStageAudit.mockResolvedValue(reflectionDoc());
+    apiMock.getStagePeaks.mockImplementation(async (_s: string, _n: number, bins: number) =>
+      bins > PEAKS_CAP ? blastThenReflection(bins) : peaksResult(PEAKS_SMALL),
+    );
+  });
+
+  it("moves the shot to the burst before it and records why", async () => {
+    playback.state.playhead = 2.03;
+    renderPage();
+    const earlier = await screen.findByRole("button", { name: "Earlier rise" });
+    await waitFor(() => expect(earlier).toBeEnabled());
+    fireEvent.click(earlier);
+    fireEvent.click(screen.getByRole("button", { name: /^save( \*)?$/i }));
+    await waitFor(() => expect(apiMock.saveStageAudit).toHaveBeenCalled());
+    const payload = apiMock.saveStageAudit.mock.calls[0][2] as StageAudit;
+    expect(payload.shots.find((x) => x.candidate_number === 1)!.time).toBeLessThan(2.003);
+    const moved = (payload.audit_events ?? []).find((e) => e.kind === "marker_time_changed");
+    expect(moved?.payload).toMatchObject({ id: "cand-1", reason: "earlier_rise" });
+  });
+
+  it("is disabled when nothing sounds before the shot", async () => {
+    playback.state.playhead = 2.4; // cand-2, alone
+    apiMock.getStageAudit.mockResolvedValue(doc());
+    renderPage();
+    await waitFor(() => expect(apiMock.getStagePeaks).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole("button", { name: "Earlier rise" })).toBeDisabled();
+  });
+});
+
