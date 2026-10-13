@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.71.1](https://github.com/mandakan/splitsmith/compare/v0.71.0...v0.71.1) (2026-10-13)
+
+
+### Bug Fixes
+
+* **timeline:** keep the waveform under its markers at the end of a zoomed band ([#1478](https://github.com/mandakan/splitsmith/issues/1478)) ([2d50cf8](https://github.com/mandakan/splitsmith/commit/2d50cf8b6256af9f83c3cdb69e2af276a62c33aa))
+
 ## [0.71.0](https://github.com/mandakan/splitsmith/compare/v0.70.0...v0.71.0) (2026-10-13)
 
 
