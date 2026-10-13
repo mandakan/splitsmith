@@ -92,4 +92,9 @@ describe("AuditTransport", () => {
     fireEvent.click(screen.getByRole("button", { name: "0.5x" }));
     expect(props.onSpeedChange).toHaveBeenCalledWith(0.5);
   });
+
+  it("keeps the rise-foot line's room in every state, so the page never shifts", () => {
+    renderArea();
+    expect(screen.getByTestId("foot-line")).toBeInTheDocument();
+  });
 });

@@ -290,19 +290,46 @@ export function MobileAudit() {
 
   // ---- Gestures -----------------------------------------------------------
 
-  const handleTap = useCallback((t: number) => playback.playFrom(t), [playback]);
+  // The loop follows the shot the operator selects: while it is on, a tap,
+  // a drag or an add that lands on a different shot re-centres it there.
+  // Only gestures move it, never playback sweeping across the shots
+  // inside the loop.
+  const loopShotRef = useRef<string | null>(null);
+  const followLoop = useCallback(
+    (t: number) => {
+      if (playback.loop == null) return;
+      const sel = resolveTarget(markers, t, null);
+      if (sel.kind !== "shot" || sel.marker.id === loopShotRef.current) return;
+      loopShotRef.current = sel.marker.id;
+      playback.moveLoop(sel.marker.time);
+    },
+    [playback, markers],
+  );
+  const lastScrubRef = useRef<number | null>(null);
+
+  // A tap moves the playhead; only Play plays.
+  const handleTap = useCallback(
+    (t: number) => {
+      playback.seek(t);
+      followLoop(t);
+    },
+    [playback, followLoop],
+  );
   const handleGrabStart = useCallback(() => playback.stop(), [playback]);
   const handleScrub = useCallback(
     (t: number) => {
       playback.seek(t);
       scrubberRef.current?.grainAt(t);
+      lastScrubRef.current = t;
     },
     [playback],
   );
   const handleGrabEnd = useCallback(() => {
-    // Two-verb rule: grab-start stops, grab-end does nothing. Playback
-    // stays stopped until the next explicit tap/play.
-  }, []);
+    // Two-verb rule: grab-start stops, grab-end does nothing to playback.
+    // Playback stays stopped until the next explicit Play.
+    if (lastScrubRef.current != null) followLoop(lastScrubRef.current);
+    lastScrubRef.current = null;
+  }, [followLoop]);
 
   // ---- Actions --------------------------------------------------------------
 
@@ -355,6 +382,10 @@ export function MobileAudit() {
     const id = `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     recordEvent("marker_added_manual", { id, time: t });
     setPlacedAt((prev) => ({ ...prev, [id]: playback.playhead }));
+    if (playback.loop != null) {
+      loopShotRef.current = id;
+      playback.moveLoop(t);
+    }
     setMarkers((prev) => [
       ...prev,
       {
@@ -368,7 +399,7 @@ export function MobileAudit() {
         note: "",
       },
     ]);
-  }, [target, readOnly, saving, snapOn, footPeaks, playback.playhead, recordEvent]);
+  }, [target, readOnly, saving, snapOn, footPeaks, playback, recordEvent]);
 
   // Seat: the selected shot onto its rise foot. Held, like a nudge, so the
   // target stays on it while the playhead does not move.
@@ -409,6 +440,7 @@ export function MobileAudit() {
 
   const handleLoopToggle = useCallback(() => {
     const anchor = target.kind === "shot" ? target.marker.time : playback.playhead;
+    loopShotRef.current = target.kind === "shot" ? target.marker.id : null;
     playback.toggleLoop(anchor);
   }, [target, playback]);
 

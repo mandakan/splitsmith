@@ -12,6 +12,8 @@ import type { LoopRegion } from "@/lib/useAuditPlayback";
 
 export const DEFAULT_ROWS = 11;
 export const GRAB_PX = 6;
+/** The gap between rows (``gap-px`` on the row stack). */
+const ROW_GAP_PX = 1;
 
 export interface WrappedWaveformProps {
   peaks: number[];
@@ -51,7 +53,9 @@ export function WrappedWaveform({
   onScrub,
   onGrabEnd,
 }: WrappedWaveformProps) {
-  const gesture = useRef<{ pointerId: number; startX: number; grabbed: boolean } | null>(null);
+  const gesture = useRef<{ pointerId: number; startX: number; startY: number; grabbed: boolean } | null>(
+    null,
+  );
   const rowDur = duration > 0 ? duration / rows : 0;
   // Each bar sits at its own time, like the markers: rows cut by bin count
   // drift a fraction of a bin per row when the bins do not split evenly
@@ -67,18 +71,26 @@ export function WrappedWaveform({
   const down = (e: ReactPointerEvent<HTMLDivElement>) => {
     // Ignore new pointers if a gesture is already in progress with a different ID
     if (gesture.current != null && gesture.current.pointerId !== e.pointerId) return;
-    gesture.current = { pointerId: e.pointerId, startX: e.clientX, grabbed: false };
+    gesture.current = { pointerId: e.pointerId, startX: e.clientX, startY: e.clientY, grabbed: false };
     if (e.currentTarget.setPointerCapture) e.currentTarget.setPointerCapture(e.pointerId);
   };
   const move = (row: number) => (e: ReactPointerEvent<HTMLDivElement>) => {
     const g = gesture.current;
     if (g == null || g.pointerId !== e.pointerId) return;
-    if (!g.grabbed && Math.abs(e.clientX - g.startX) < GRAB_PX) return;
+    if (!g.grabbed && Math.abs(e.clientX - g.startX) < GRAB_PX && Math.abs(e.clientY - g.startY) < GRAB_PX)
+      return;
     if (!g.grabbed) {
       g.grabbed = true;
       onGrabStart();
     }
-    onScrub(timeAt(row, e.currentTarget, e.clientX));
+    // The pointer is captured by the row it went down on; the row under
+    // the finger now is that row plus whole rows (and their 1 px gaps)
+    // travelled, so a drag down the screen moves the playhead down rows.
+    const rect = e.currentTarget.getBoundingClientRect();
+    const pitch = rect.height + ROW_GAP_PX;
+    const shift = pitch > ROW_GAP_PX ? Math.floor((e.clientY - rect.top) / pitch) : 0;
+    const target = Math.min(rows - 1, Math.max(0, row + shift));
+    onScrub(timeAt(target, e.currentTarget, e.clientX));
   };
   const up = (row: number) => (e: ReactPointerEvent<HTMLDivElement>) => {
     const g = gesture.current;
