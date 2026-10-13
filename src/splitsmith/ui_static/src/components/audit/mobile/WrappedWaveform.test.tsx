@@ -161,4 +161,28 @@ describe("WrappedWaveform", () => {
     // onTap/onScrub from second pointer should not fire
     expect(props.onTap).not.toHaveBeenCalled();
   });
+
+  it("a drag that goes down the screen moves the playhead to the row under the finger", () => {
+    const props = renderRows();
+    const row = screen.getAllByTestId("wave-row")[0];
+    // Rows are 40 px tall with a 1 px gap; 44 s over 11 rows is 4 s a row.
+    row.getBoundingClientRect = () => ({ left: 0, width: 100, top: 0, height: 40 }) as DOMRect;
+    fireEvent.pointerDown(row, { clientX: 10, clientY: 10, pointerId: 1 });
+    fireEvent.pointerMove(row, { clientX: 10, clientY: 92, pointerId: 1 });
+    fireEvent.pointerMove(row, { clientX: 50, clientY: 92, pointerId: 1 });
+    fireEvent.pointerUp(row, { clientX: 50, clientY: 92, pointerId: 1 });
+    expect(props.onGrabStart).toHaveBeenCalledTimes(1);
+    // Row 2 (8-12 s), halfway across: 10 s.
+    expect(props.onScrub).toHaveBeenLastCalledWith(expect.closeTo(10, 1));
+    expect(props.onTap).not.toHaveBeenCalled();
+  });
+
+  it("a drag past the last row stays on the last row", () => {
+    const props = renderRows();
+    const row = screen.getAllByTestId("wave-row")[9];
+    row.getBoundingClientRect = () => ({ left: 0, width: 100, top: 369, height: 40 }) as DOMRect;
+    fireEvent.pointerDown(row, { clientX: 50, clientY: 380, pointerId: 1 });
+    fireEvent.pointerMove(row, { clientX: 50, clientY: 900, pointerId: 1 });
+    expect(props.onScrub).toHaveBeenLastCalledWith(expect.closeTo(42, 1));
+  });
 });

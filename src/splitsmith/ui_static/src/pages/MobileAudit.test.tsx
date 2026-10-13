@@ -18,6 +18,7 @@ const playback = vi.hoisted(() => ({
     seek: vi.fn(),
     setSpeed: vi.fn(),
     toggleLoop: vi.fn(),
+    moveLoop: vi.fn(),
   },
 }));
 vi.mock("@/lib/useAuditPlayback", async (orig) => ({
@@ -657,5 +658,63 @@ describe("MobileAudit rise foot", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add shot at playhead" }));
     const payload = await savedShots();
     expect(payload.shots.find((x) => x.candidate_number == null)?.time).toBeCloseTo(3.5, 3);
+  });
+});
+
+describe("MobileAudit gestures and loop", () => {
+  // 22 s over 11 rows: 2 s a row. cand-1 at 2.0 s and cand-2 at 2.4 s sit in row 1.
+  function tapAt(t: number) {
+    const rows = screen.getAllByTestId("wave-row");
+    const r = Math.floor(t / 2);
+    rows[r].getBoundingClientRect = () => ({ left: 0, width: 100, top: 0, height: 40 }) as DOMRect;
+    const x = ((t - r * 2) / 2) * 100;
+    fireEvent.pointerDown(rows[r], { clientX: x, clientY: 10, pointerId: 1 });
+    fireEvent.pointerUp(rows[r], { clientX: x, clientY: 10, pointerId: 1 });
+  }
+
+  afterEach(() => {
+    playback.state.loop = null;
+  });
+
+  it("a tap on the waveform moves the playhead and does not play", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId("wrapped-waveform")).toBeInTheDocument());
+    tapAt(2.4);
+    expect(playback.state.seek).toHaveBeenCalledWith(expect.closeTo(2.4, 2));
+    expect(playback.state.playFrom).not.toHaveBeenCalled();
+  });
+
+  it("with loop on, tapping another shot moves the loop to it; the same shot keeps it", async () => {
+    playback.state.playhead = 2.0;
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId("wrapped-waveform")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /loop/i }));
+    expect(playback.state.toggleLoop).toHaveBeenCalledWith(2.0);
+    playback.state.loop = { start: 1.3, end: 2.7 } as never;
+    tapAt(2.01); // still cand-1
+    expect(playback.state.moveLoop).not.toHaveBeenCalled();
+    tapAt(2.4); // cand-2
+    expect(playback.state.moveLoop).toHaveBeenCalledWith(2.4);
+  });
+
+  it("with loop on, an added shot pulls the loop to itself", async () => {
+    playback.state.playhead = 5.0;
+    playback.state.loop = { start: 1.3, end: 2.7 } as never;
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Add shot at playhead" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Add shot at playhead" }));
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    await waitFor(() => expect(apiMock.saveStageAudit).toHaveBeenCalled());
+    const payload = apiMock.saveStageAudit.mock.calls[0][2] as StageAudit;
+    const added = payload.shots.find((x) => x.candidate_number == null)!;
+    expect(playback.state.moveLoop).toHaveBeenCalledTimes(1);
+    expect(playback.state.moveLoop).toHaveBeenCalledWith(added.time);
+  });
+
+  it("with loop off, selecting another shot never touches the loop", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId("wrapped-waveform")).toBeInTheDocument());
+    tapAt(2.4);
+    expect(playback.state.moveLoop).not.toHaveBeenCalled();
   });
 });

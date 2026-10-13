@@ -3,7 +3,8 @@
  * over the stage audit WAV, a rAF playhead, an anchored loop region and
  * time-stretched slow playback (preservesPitch stays on). The loop is
  * anchored once when switched on and held there, so jogging inside it
- * does not drag the region along.
+ * does not drag the region along; moveLoop re-centres it on purpose
+ * (the page does, when the operator selects another shot).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -24,6 +25,8 @@ export interface AuditPlayback {
   seek(t: number): void;
   setSpeed(s: PlaybackSpeed): void;
   toggleLoop(anchor: number): void;
+  /** Re-centre a loop that is on; nothing when it is off. */
+  moveLoop(anchor: number): void;
 }
 
 export function useAuditPlayback(
@@ -128,8 +131,16 @@ export function useAuditPlayback(
     });
   }, []);
 
+  const moveLoop = useCallback((anchor: number) => {
+    setLoop((cur) => {
+      if (cur == null) return null;
+      const start = Math.max(0, anchor - LOOP_S / 2);
+      return { start, end: start + LOOP_S };
+    });
+  }, []);
+
   return useMemo(
-    () => ({ playhead, playing, speed, loop, playFrom, stop, seek, setSpeed, toggleLoop }),
-    [playhead, playing, speed, loop, playFrom, stop, seek, setSpeed, toggleLoop],
+    () => ({ playhead, playing, speed, loop, playFrom, stop, seek, setSpeed, toggleLoop, moveLoop }),
+    [playhead, playing, speed, loop, playFrom, stop, seek, setSpeed, toggleLoop, moveLoop],
   );
 }

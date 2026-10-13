@@ -58,10 +58,15 @@ export function ActionArea(props: ActionAreaProps) {
       <div aria-live="polite" className="truncate font-mono text-sm">
         {readout(props)}
       </div>
-      {target.kind === "shot" && foot ? (
-        <div className={`truncate text-sm ${foot.onRule ? "text-muted" : "text-ink-2"}`}>{foot.text}</div>
-      ) : null}
-      <div className="flex gap-2">
+      {/* Always there, empty when it has nothing to say: the area keeps one
+          height in every state, so the waveform above never shifts. */}
+      <div
+        data-testid="foot-line"
+        className={`min-h-5 truncate text-sm ${foot?.onRule ? "text-muted" : "text-ink-2"}`}
+      >
+        {target.kind === "shot" && foot ? foot.text : "\u00a0"}
+      </div>
+      <div className="flex min-h-11 gap-2">
         {target.kind === "shot" && (
           <>
             <button type="button" className={btn} disabled={readOnly} onClick={() => onNudge(-10)}>

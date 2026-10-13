@@ -164,4 +164,13 @@ describe("useAuditPlayback", () => {
       catchSpy.mockRestore();
     }
   });
+
+  it("moveLoop re-centres a loop that is on and does nothing when it is off", () => {
+    const { hook } = setup();
+    act(() => hook.result.current.moveLoop(5.0));
+    expect(hook.result.current.loop).toBeNull();
+    act(() => hook.result.current.toggleLoop(5.0));
+    act(() => hook.result.current.moveLoop(9.0));
+    expect(hook.result.current.loop).toEqual({ start: expect.closeTo(9 - LOOP_S / 2, 5), end: expect.closeTo(9 + LOOP_S / 2, 5) });
+  });
 });
