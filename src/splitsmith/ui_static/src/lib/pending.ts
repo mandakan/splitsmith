@@ -32,9 +32,21 @@ export class StillPendingError extends Error {
   }
 }
 
+/** The job making the file failed; its own error. */
+export class JobFailedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "JobFailedError";
+  }
+}
+
 export interface WhenReadyOptions {
   /** Called once, on the first pending answer. */
   onPending?: () => void;
+  /** The error of the job a pending answer named, once it failed, else
+   *  null. Checked before asking again: without it a failed job was
+   *  invisible and each request queued another (review, 2026-10-14). */
+  jobError?: (jobId: string) => Promise<string | null>;
   signal?: AbortSignal;
   giveUpMs?: number;
   sleep?: (ms: number) => Promise<void>;
@@ -55,5 +67,9 @@ export async function whenReady<T>(fetch: () => Promise<T | Pending>, opts: When
     if (now() >= giveUp) throw new StillPendingError();
     await sleep(pendingDelay(attempt));
     if (opts.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    if (answer.job_id && opts.jobError) {
+      const failed = await opts.jobError(answer.job_id);
+      if (failed != null) throw new JobFailedError(failed);
+    }
   }
 }

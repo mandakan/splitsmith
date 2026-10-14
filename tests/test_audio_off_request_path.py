@@ -172,3 +172,71 @@ def test_a_mirror_with_no_wav_is_pending_and_downloads_nothing(tmp_path: Path) -
 
     assert audio_helpers.published_audit_audio(root, 1, 4.0, project=project, mirror=True) is None
     assert not (root / "trimmed").exists() or not any((root / "trimmed").iterdir())
+
+
+# --- Review findings (2026-10-14) ---------------------------------------------
+
+
+def test_the_job_never_reuses_a_stored_wav_older_than_the_trim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Finding 1: the derive job pulled the stale storage WAV the reader had
+    just refused (same length, so it passed), published nothing new, and the
+    page polled until it gave up. The job cuts from the trim and pushes."""
+    root, project, storage, stem = _mirror(tmp_path)
+    scope = "matches/m1/shooters/me"
+    trim = root / "trimmed" / f"{stem}_trimmed.mp4"
+    trim.parent.mkdir(parents=True, exist_ok=True)
+    trim.write_bytes(tiny_mp4())
+    stale = tmp_path / "stale.wav"
+    _write_wav(stale)
+    storage.write_bytes(f"{scope}/audio/{stem}_audit.wav", stale.read_bytes())
+    _age(storage, f"{scope}/audio/{stem}_audit.wav", 600)
+    storage.write_bytes(f"{scope}/trimmed/{stem}_trimmed.mp4", trim.read_bytes())
+
+    def fresh_cut(source: Path, dest: Path, sample_rate: int, ffmpeg_binary: str) -> None:
+        with wave.open(str(dest), "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(8000)
+            w.writeframes(b"\x7f\x00" * 8000)
+
+    monkeypatch.setattr(audio_helpers, "_extract_audio", fresh_cut)
+
+    result = audio_helpers.ensure_audit_audio(root, 1, lambda: Path("unused"), 4.0, project=project)
+
+    assert result.audio_path.read_bytes() != stale.read_bytes()
+    assert storage.read_bytes(f"{scope}/audio/{stem}_audit.wav") == result.audio_path.read_bytes()
+    assert audio_helpers.published_audit_audio(root, 1, 4.0, project=project) is not None
+
+
+def test_no_derive_job_while_the_stage_is_being_trimmed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Finding 4: a derive job overlapping a re-trim could cut the WAV from
+    the old window. While a trim job runs for the stage the request waits on
+    it instead of queueing a derive job."""
+    client, audit_wav = _trim_without_wav(tmp_path)
+    release = threading.Event()
+
+    def held_trim(*args: object, **kwargs: object) -> None:
+        release.wait(5)
+
+    monkeypatch.setattr(audio_helpers, "ensure_video_audit_trim", held_trim)
+    monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda *a, **k: None)
+    try:
+        assert client.post("/api/shooters/me/stages/1/beep", json={"beep_time": 5.0}).status_code == 200
+        project = client.get("/api/shooters/me/project").json()
+        video_id = project["stages"][0]["videos"][0]["video_id"]
+        trim_job = client.post(f"/api/shooters/me/stages/1/videos/{video_id}/trim")
+        assert trim_job.status_code in (200, 202), trim_job.text
+
+        resp = client.get("/api/shooters/me/stages/1/peaks?bins=64")
+
+        assert resp.status_code == 202
+        kinds = [
+            j["kind"] for j in client.get("/api/me/jobs").json() if j["status"] in ("pending", "running")
+        ]
+        assert "derive_audio" not in kinds
+    finally:
+        release.set()

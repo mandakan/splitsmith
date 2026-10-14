@@ -744,11 +744,13 @@ export function Audit() {
   // The stage WAV only once its waveform loaded (it is published by then;
   // an element pointed at a 202 would fail over to the stream for nothing).
   const primaryAudioSrc =
-    stageNumber == null || !peaks
+    stageNumber == null
       ? null
-      : stageWavFailed
+      : stageWavFailed || peaksError
         ? (primaryCam?.src ?? null)
-        : api.stageAudioUrl(slug, stageNumber);
+        : peaks
+          ? api.stageAudioUrl(slug, stageNumber)
+          : null;
   const primaryAudioBeep = stageWavFailed ? (primaryCam?.beepInClip ?? null) : (peaks?.beep_time ?? null);
   // A swap remounts the big <video> (its src changes); until the new
   // element arrives the old one still names the previous camera, so the

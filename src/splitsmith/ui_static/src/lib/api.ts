@@ -12,6 +12,17 @@ import { authorKey } from "@/lib/authorKey";
 import type { LogoSpot } from "@/lib/logoPlan";
 import { type Pending, whenReady, type WhenReadyOptions } from "@/lib/pending";
 
+/** The error of a derive job a 202 named, once it failed (``lib/pending``).
+ *  An unreadable job reads as still running: the wait's own budget ends it. */
+async function failedJobError(jobId: string): Promise<string | null> {
+  try {
+    const job = await request<Job>(`/api/me/jobs/${encodeURIComponent(jobId)}`);
+    return job.status === "failed" ? job.error || "Preparing the audio failed." : null;
+  } catch {
+    return null;
+  }
+}
+
 export type VideoRole = "primary" | "secondary" | "ignored";
 /** ``"aligned"`` means the in-stream beep detector failed on a secondary
  *  and ``cross_align`` projected the primary's beep into the secondary's
@@ -3831,11 +3842,13 @@ export const api = {
   ) =>
     // The snap reads the video's published WAV; in the rare case it is still
     // being made (spec 2026-10-14) the answer is 202 and this asks again.
-    whenReady(() =>
-      request<BeepSnapResult | Pending>(
-        `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/beep/snap`,
-        { method: "POST", json: { hint_time: hintTime, window_s: windowS } },
-      ),
+    whenReady(
+      () =>
+        request<BeepSnapResult | Pending>(
+          `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/beep/snap`,
+          { method: "POST", json: { hint_time: hintTime, window_s: windowS } },
+        ),
+      { jobError: failedJobError },
     ),
 
   /** Flip ``beep_reviewed`` on a single video (issue #71). Pure UI-state
@@ -4579,7 +4592,7 @@ export const api = {
         request<PeaksResult | Pending>(
           `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/peaks?bins=${bins}`,
         ),
-      opts,
+      { jobError: failedJobError, ...opts },
     ),
 
   /** Per-video peaks. Same payload shape as the stage endpoint so the
@@ -4599,7 +4612,7 @@ export const api = {
           `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/peaks?bins=${bins}`
             + (window ? `&start=${window.start}&end=${window.end}` : ""),
         ),
-      opts,
+      { jobError: failedJobError, ...opts },
     ),
 
   /** URL for the desktop-pushed beep review audio snippet (mirror-only,

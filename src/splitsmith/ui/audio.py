@@ -442,16 +442,18 @@ def ensure_audit_audio(
     # trip) would slow down the hot path; the partial file is now atomic.
     if trimmed_video.exists() and trimmed_video.stat().st_size > 0:
         audio_path = audit_audio_path(project_root, stage_number, project=project)
-        # Try the storage cache before invoking ffmpeg. The audit WAV is
-        # derived from the trimmed MP4, but its content is determined by the
-        # trim params; a worker that already produced this exact WAV pushed
-        # it under the same key. Either way it must be as long as the trim.
+        # Cut from the trim, never pulled from storage: a job runs this when
+        # the readers found storage's copy missing or older than the trim,
+        # and a pulled copy of the same length passed the length check and
+        # was published again unchanged (review, 2026-10-14). As long as
+        # the trim, and pushed for the API to read.
         _publish_audio(
             project,
             audio_path,
             fresh=lambda: _not_older(audio_path, trimmed_video),
             extract=lambda out: _extract_audio(trimmed_video, out, sample_rate, ffmpeg_binary),
             expect_seconds=_own_media_seconds(trimmed_video),
+            pull_storage=False,
         )
         # Beep position inside the trimmed clip = beep_in_source minus
         # trim_start. trim_start = max(0, beep - pre_buffer); so:
@@ -599,7 +601,6 @@ def _publish_audio(
         _try_push_audio_to_storage(project, audio_path)
 
 
-
 def ensure_video_audit_wav(
     project_root: Path,
     stage_number: int,
@@ -626,6 +627,7 @@ def ensure_video_audit_wav(
         pull_storage=False,
     )
     return audio_path
+
 
 # --- Readers: what the request handlers call (spec 2026-10-14) ----------------
 #
@@ -955,8 +957,9 @@ def refresh_trim_params(project: MatchProject | None, trim_path: Path) -> None:
     """Bring the local params sidecar of a web-only mirror's trim in line
     with storage (spec 2026-09-27 v1.1). The desktop re-pushes it whenever it
     re-trims around a moved beep; a changed sidecar also drops the local
-    rendition and the audit WAV cut from it, so the next read pulls and
-    re-extracts instead of serving the old window. One small GET per call;
+    rendition, so nothing local serves the old window. The audit WAV cut
+    from it is refused by the readers once the new rendition is stored
+    (older than its clip) and made again by a job. One small GET per call;
     a storage failure keeps whatever is local."""
     from .. import trim as trim_module
 

@@ -316,8 +316,13 @@ def test_audit_audio_trimmed_path_never_resolves_source(tmp_path: Path, fake_ffm
     result = ensure_audit_audio(root, 1, resolve_source, 2.0, project=project)
 
     assert result.trimmed is True
-    assert result.audio_path.read_bytes() == CACHED_WAV
-    assert len(fake_ffmpeg) == 0  # ffmpeg never ran either
+    # The audit WAV is cut from the pulled trim, never reused from storage:
+    # this producer runs when the readers found storage's copy missing or
+    # older than the trim, and reusing it republished the stale copy
+    # (review, 2026-10-14). One ffmpeg run, on the trim, not the source.
+    assert result.audio_path.read_bytes() == FFMPEG_WAV
+    assert len(fake_ffmpeg) == 1
+    assert "_trimmed.mp4" in " ".join(fake_ffmpeg[0])
 
 
 def test_bind_storage_without_scope_disables_audio_cache(

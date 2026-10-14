@@ -856,3 +856,28 @@ def test_mirror_default_camera_reaches_the_desktop_and_survives_its_push(
     server_project = client.get(f"/api/matches/{match_id}/shooters/{SLUG}/project").json()
     assert server_project["compare_camera"] == "primary"
     assert MatchProject.load(shooter_root).compare_camera == "primary"
+
+
+def test_web_only_mirror_on_an_account_without_hosted_compute_waits_for_the_desktop(
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict], tmp_path: Path, monkeypatch
+) -> None:
+    """Review, 2026-10-14: the sharing tier (sync and share, no hosted
+    compute) runs no jobs. A mirror with no current WAV answers pending with
+    no job, so the phone waits for the desktop's next push; never a 403."""
+    from splitsmith.access import Feature, FeatureRequiredError
+    from splitsmith.db.job_backend import PostgresJobBackend
+
+    async def no_active(self, **kwargs):  # type: ignore[no-untyped-def]
+        return None
+
+    async def refuse(self, **kwargs):  # type: ignore[no-untyped-def]
+        raise FeatureRequiredError(Feature.hosted_compute)
+
+    monkeypatch.setattr(PostgresJobBackend, "find_active", no_active)
+    monkeypatch.setattr(PostgresJobBackend, "submit", refuse)
+    client, match_id, _, _, _ = _web_only_mirror(
+        hosted_app_with_storage, tmp_path, pre_buffer=2.0, with_audit_wav=False
+    )
+    peaks = client.get(f"/api/matches/{match_id}/shooters/{SLUG}/stages/1/peaks")
+    assert peaks.status_code == 202, peaks.text
+    assert peaks.json() == {"pending": True, "active_job": False, "job_id": None}

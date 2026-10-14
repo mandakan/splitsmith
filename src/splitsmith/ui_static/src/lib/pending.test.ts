@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { isPending, pendingDelay, StillPendingError, whenReady } from "@/lib/pending";
+import { isPending, JobFailedError, pendingDelay, StillPendingError, whenReady } from "@/lib/pending";
 
 describe("isPending", () => {
   it("is the server's 202 answer and nothing else", () => {
@@ -67,5 +67,25 @@ describe("whenReady", () => {
     });
     await expect(whenReady(fetch, { signal: ctl.signal, sleep: instant })).rejects.toThrow(/aborted/i);
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops with the job's own error once the job it waited on failed, and asks no more", async () => {
+    // Review, 2026-10-14: a failed job was invisible; each poll found no
+    // active job and queued another, about 25 per open page.
+    const fetch = vi.fn(() => Promise.resolve({ pending: true as const, job_id: "job-1" }));
+    const jobError = vi.fn(async (id: string) => (id === "job-1" ? "ffmpeg failed: no audio stream" : null));
+    const p = whenReady(fetch, { sleep: instant, jobError });
+    await expect(p).rejects.toBeInstanceOf(JobFailedError);
+    await expect(p).rejects.toThrow("ffmpeg failed: no audio stream");
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps asking while the job it waits on is still running", async () => {
+    const answers = [{ pending: true as const, job_id: "job-1" }, { ok: 3 }];
+    const jobError = vi.fn(async () => null);
+    await expect(
+      whenReady(() => Promise.resolve(answers.shift()!), { sleep: instant, jobError }),
+    ).resolves.toEqual({ ok: 3 });
+    expect(jobError).toHaveBeenCalledWith("job-1");
   });
 });

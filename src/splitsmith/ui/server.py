@@ -150,6 +150,7 @@ from .. import (
     beep_windows,
     camera_select,
     cross_align,
+    derived,
     export_runs,
     match_model,
     report,
@@ -3995,15 +3996,19 @@ def register_job_bodies(state: AppState) -> None:
             primary = proj.stage(stage_number).primary()
             if primary is None:
                 raise RuntimeError(f"stage {stage_number} has no primary video")
-            audio_helpers.ensure_audit_audio(
-                root,
-                stage_number,
-                lambda: proj.resolve_video_path(root, primary.path),
-                primary.beep_time,
-                project=proj,
-                ffmpeg_binary=ffmpeg,
-                web_fallback=_is_mirror(),
-            )
+            # The trim's cut lock: never read a trim a re-cut is replacing
+            # on this disk (review, 2026-10-14).
+            trimmed = audio_helpers.trimmed_primary_path(root, stage_number, project=proj)
+            with derived.locked(trimmed, "cut"):
+                audio_helpers.ensure_audit_audio(
+                    root,
+                    stage_number,
+                    lambda: proj.resolve_video_path(root, primary.path),
+                    primary.beep_time,
+                    project=proj,
+                    ffmpeg_binary=ffmpeg,
+                    web_fallback=_is_mirror(),
+                )
         else:
             raise RuntimeError(f"unknown audio target {target!r}")
         handle.update(progress=1.0, message="Done")
@@ -13717,6 +13722,17 @@ def create_app(
         answer 202, the shape the hosted raw-file peaks already use. The SPA
         shows a preparing line and asks again."""
         dedupe_id = {"audit": "audit", "take": f"take:{storage_path}"}.get(target, video_id)
+        if target == "audit" and stage_number is not None:
+            # A trim running for the stage makes the audit WAV itself; a
+            # derive job beside it could cut from the old window (review,
+            # 2026-10-14). Wait on the trim.
+            trimming = run_sync(
+                state.jobs.find_active(kind="trim", stage_number=stage_number, shooter_slug=slug)
+            )
+            if trimming is not None:
+                return JSONResponse(
+                    {"pending": True, "active_job": True, "job_id": trimming.id}, status_code=202
+                )
         existing = run_sync(
             state.jobs.find_active(
                 kind="derive_audio", stage_number=stage_number, shooter_slug=slug, video_id=dedupe_id
@@ -13724,23 +13740,27 @@ def create_app(
         )
         job_id = existing.id if existing is not None else None
         if existing is None:
-            # No hosted_compute: FeatureRequiredError reaches the app's handler,
-            # the clean feature_required 403.
-            job = run_sync(
-                state.jobs.submit(
-                    kind="derive_audio",
-                    stage_number=stage_number,
-                    shooter_slug=slug,
-                    video_id=dedupe_id,
-                    args={
-                        "slug": slug,
-                        "target": target,
-                        "stage_number": stage_number,
-                        "video_id": video_id,
-                        "storage_path": storage_path,
-                    },
+            try:
+                job = run_sync(
+                    state.jobs.submit(
+                        kind="derive_audio",
+                        stage_number=stage_number,
+                        shooter_slug=slug,
+                        video_id=dedupe_id,
+                        args={
+                            "slug": slug,
+                            "target": target,
+                            "stage_number": stage_number,
+                            "video_id": video_id,
+                            "storage_path": storage_path,
+                        },
+                    )
                 )
-            )
+            except FeatureRequiredError:
+                # An account without hosted compute (the sharing tier) runs
+                # no jobs: a mirror's WAV arrives with the desktop's next
+                # push. Pending with no job, never a 403 (review, 2026-10-14).
+                return JSONResponse({"pending": True, "active_job": False, "job_id": None}, status_code=202)
             job_id = job.id
         return JSONResponse({"pending": True, "active_job": True, "job_id": job_id}, status_code=202)
 
@@ -18515,7 +18535,9 @@ def create_app(
             audit_audio = _resolve_audit_audio(shooter_slug, project, stage_n)
             if isinstance(audit_audio, JSONResponse):
                 # Being made by a job (it reads, never cuts): try again shortly.
-                raise HTTPException(status_code=409, detail="the stage's audit WAV is being prepared; try again")
+                raise HTTPException(
+                    status_code=409, detail="the stage's audit WAV is being prepared; try again"
+                )
             audit_wav = audit_audio.audio_path
             if not audit_json.exists() or not audit_wav.exists():
                 raise HTTPException(
