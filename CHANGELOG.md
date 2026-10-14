@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.73.0](https://github.com/mandakan/splitsmith/compare/v0.72.0...v0.73.0) (2026-10-14)
+
+
+### Features
+
+* recheck secondary beeps, review fixtures on the phone; Höstfinalen XI in the corpus ([#1485](https://github.com/mandakan/splitsmith/issues/1485)) ([0de03a4](https://github.com/mandakan/splitsmith/commit/0de03a48025bf9ac46e14beefcb8a2a944e245af))
+
 ## [0.72.0](https://github.com/mandakan/splitsmith/compare/v0.71.2...v0.72.0) (2026-10-14)
 
 
