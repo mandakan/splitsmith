@@ -13,8 +13,9 @@ listed, not written. A summary lands in ``build/promote_secondary/``.
 
 ``--resnap`` also snaps again every angle whose fixture is a snap the anchor
 changed since (``fixture_schema.is_anchor_stale``: its shots differ from the
-ones snapped onto) or that predates seating (no ``anchor.seated``), in place
-and back to ``needs_review``; run it after
+ones snapped onto), whose angle's beep moved since, or that predates seating
+(no ``anchor.seated``): in place and back to ``needs_review``
+(``lab.secondary.snap_is_stale``); run it after
 re-promoting primaries (``promote_audited_stages.py --repromote``). A snap
 someone reviewed by hand is listed, never overwritten.
 
@@ -33,7 +34,7 @@ from pathlib import Path
 from splitsmith import beep_detect
 from splitsmith.ensemble import fixtures as fx_module
 from splitsmith.ensemble.api import load_ensemble_runtime
-from splitsmith.fixture_schema import is_anchor_stale, probe_camera_metadata, review_status
+from splitsmith.fixture_schema import probe_camera_metadata, review_status
 from splitsmith.lab.promote import PromoteFromAnchorRequest, promote_from_anchor, write_promoted_fixture
 from splitsmith.lab.secondary import (
     AnchorFixture,
@@ -42,6 +43,7 @@ from splitsmith.lab.secondary import (
     StageAngles,
     camera_for,
     plan_secondary_promotions,
+    snap_is_stale,
 )
 from splitsmith.match_project import MatchProject
 from splitsmith.runtime import runtime as process_runtime
@@ -131,21 +133,22 @@ def main() -> int:
                 context[v.video_id] = (project, root, stage.stage_number, v, source)
             stages.append(StageAngles(match, root.name, stage.stage_number, tuple(angles)))
 
+    # Each angle's beep as the project has it now: a snap aligned on an
+    # older beep is stale.
+    beeps = {a.file_name: a.beep_time for st in stages for a in st.videos}
+
     def stale(snap: AnchorFixture, anchor: AnchorFixture) -> bool:
         def load(stem: str) -> dict:
             return json.loads((args.fixtures / f"{stem}.json").read_text())
 
-        data = load(snap.stem)
-        # A snap made before snaps were seated on their rise foot is stale
-        # too: snapping it again seats it (2026-10-14).
-        return is_anchor_stale(data, load(anchor.stem)) or not (data.get("anchor") or {}).get("seated")
+        return snap_is_stale(load(snap.stem), load(anchor.stem), beep_now=beeps.get(snap.source_name))
 
     plans = plan_secondary_promotions(stages, corpus, cameras, stale_snap=stale if args.resnap else None)
     todo = [p for p in plans if p.skip is None]
     print(f"{len(plans)} videos without a fixture on a stage with one; {len(todo)} to promote")
     for p in plans:
         what = p.skip or (
-            f"-> {p.slug} (again: its anchor changed, or it predates seating)"
+            f"-> {p.slug} (again: its anchor or beep changed, or it predates seating)"
             if p.replaces
             else f"-> {p.slug}"
         )

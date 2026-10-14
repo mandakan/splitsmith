@@ -1,12 +1,19 @@
 """Planning snapped promotions of secondary angles (#1363)."""
 
-from splitsmith.fixture_schema import REVIEW_NEEDED, REVIEWED, CameraMount, CameraProbeResult
+from splitsmith.fixture_schema import (
+    REVIEW_NEEDED,
+    REVIEWED,
+    CameraMount,
+    CameraProbeResult,
+    shots_revision_sha,
+)
 from splitsmith.lab.secondary import (
     AnchorFixture,
     AngleVideo,
     StageAngles,
     camera_for,
     plan_secondary_promotions,
+    snap_is_stale,
 )
 
 NO_PROBE = CameraProbeResult()
@@ -179,3 +186,35 @@ def test_a_reviewed_snap_whose_anchor_changed_is_listed_never_overwritten():
 def test_without_the_check_a_snapped_angle_is_done():
     stage, anchor, snap = _snapped_stage()
     assert plan_secondary_promotions([stage], [anchor, snap], _cams(("bbbbbb2", GO3S))) == []
+
+
+# --- When a snap is stale (2026-10-14) -----------------------------------------
+
+
+def _snap_doc(beep: float = 5.0, window_start: float = 1.5, seated: bool = True) -> dict:
+    return {
+        "beep_time": beep,
+        "fixture_window_in_source": [window_start, 40.0],
+        "anchor": {"revision_sha": shots_revision_sha([{"time": 1.0}]), "seated": seated},
+        "shots": [],
+    }
+
+
+def test_a_current_snap_is_not_stale():
+    assert not snap_is_stale(_snap_doc(), {"shots": [{"time": 1.0}]}, beep_now=6.5)
+
+
+def test_a_snap_is_stale_when_its_anchor_changed():
+    assert snap_is_stale(_snap_doc(), {"shots": [{"time": 1.2}]}, beep_now=6.5)
+
+
+def test_a_snap_is_stale_when_it_predates_seating():
+    assert snap_is_stale(_snap_doc(seated=False), {"shots": [{"time": 1.0}]}, beep_now=6.5)
+
+
+def test_a_snap_is_stale_when_the_angle_s_beep_moved():
+    """The snap aligns on this angle's own beep (beep_time + the window's
+    start, in the source); moving it moves every shot."""
+    assert snap_is_stale(_snap_doc(), {"shots": [{"time": 1.0}]}, beep_now=6.5709)
+    assert not snap_is_stale(_snap_doc(), {"shots": [{"time": 1.0}]}, beep_now=6.5004)
+    assert not snap_is_stale(_snap_doc(), {"shots": [{"time": 1.0}]}, beep_now=None)

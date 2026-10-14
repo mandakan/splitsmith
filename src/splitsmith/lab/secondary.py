@@ -126,6 +126,27 @@ def _pick_anchor(candidates: list[AnchorFixture]) -> AnchorFixture | None:
     return sorted(reviewed, key=lambda a: (-a.n_shots, a.stem))[0]
 
 
+#: A beep this far from the one a snap aligned on means the snap is stale.
+BEEP_MOVED_S = 0.001
+
+
+def snap_is_stale(snap: dict, anchor: dict, *, beep_now: float | None) -> bool:
+    """Whether a snapped fixture must be snapped again: its anchor's shots
+    changed (``is_anchor_stale``), it predates seating on the rise foot (no
+    ``anchor.seated``), or this angle's beep moved since (``beep_now``, the
+    video's beep in source seconds, against the fixture's beep plus its
+    window's start: the snap aligns on it, so every shot moves with it)."""
+    from ..fixture_schema import is_anchor_stale
+
+    if is_anchor_stale(snap, anchor) or not (snap.get("anchor") or {}).get("seated"):
+        return True
+    window = snap.get("fixture_window_in_source") or [0.0]
+    beep = snap.get("beep_time")
+    if beep_now is None or beep is None:
+        return False
+    return abs(float(beep) + float(window[0]) - float(beep_now)) > BEEP_MOVED_S
+
+
 def plan_secondary_promotions(
     stages: Iterable[StageAngles],
     fixtures: Iterable[AnchorFixture],
@@ -165,7 +186,7 @@ def plan_secondary_promotions(
                     continue
                 camera = cameras.get(v.video_id)
                 if f.review_status == REVIEWED:
-                    skip = "a snap reviewed by hand; its anchor changed since, snap it again by hand"
+                    skip = "a snap reviewed by hand; its anchor or beep changed since, snap it again by hand"
                     plans.append(PlannedPromotion(stage, v, anchor.stem, f.stem, camera, skip))
                 elif v.beep_time is None or not v.beep_reviewed:
                     plans.append(PlannedPromotion(stage, v, anchor.stem, f.stem, camera, "beep not reviewed"))
