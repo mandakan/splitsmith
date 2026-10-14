@@ -2142,8 +2142,10 @@
     }
   ],
   "review": {
-    "status": "needs_review",
+    "status": "reviewed",
     "derived_from": "stage8-b3",
-    "reviewed_at": null
+    "reviewed_at": "2026-10-14T12:50:26.502327+00:00",
+    "confirmed_at": "2026-10-14T12:50:26.502327+00:00",
+    "method": "audit"
   }
 }

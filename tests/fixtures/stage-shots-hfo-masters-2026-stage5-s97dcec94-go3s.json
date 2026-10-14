@@ -1887,8 +1887,10 @@
     }
   ],
   "review": {
-    "status": "needs_review",
+    "status": "reviewed",
     "derived_from": "stage5-a300-h\u00f6ger",
-    "reviewed_at": null
+    "reviewed_at": "2026-10-14T12:43:44.612159+00:00",
+    "confirmed_at": "2026-10-14T12:43:44.612159+00:00",
+    "method": "audit"
   }
 }

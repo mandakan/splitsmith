@@ -1807,8 +1807,10 @@
     }
   ],
   "review": {
-    "status": "needs_review",
+    "status": "reviewed",
     "derived_from": "stage6-a300-fram\u00e5t",
-    "reviewed_at": null
+    "reviewed_at": "2026-10-14T12:45:07.083176+00:00",
+    "confirmed_at": "2026-10-14T12:45:07.083176+00:00",
+    "method": "audit"
   }
 }

@@ -1721,5 +1721,11 @@
   "shooter": {
     "id": "s36ed6e4e"
   },
-  "event_id": "hfo-masters-2026:6:s36ed6e4e"
+  "event_id": "hfo-masters-2026:6:s36ed6e4e",
+  "review": {
+    "confirmed_at": "2026-10-14T12:55:13.462954+00:00",
+    "status": "reviewed",
+    "reviewed_at": "2026-10-14T12:55:13.462954+00:00",
+    "method": "own-audit"
+  }
 }

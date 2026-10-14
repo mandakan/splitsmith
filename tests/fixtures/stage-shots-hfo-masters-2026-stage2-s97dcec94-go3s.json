@@ -2172,8 +2172,10 @@
     }
   ],
   "review": {
-    "status": "needs_review",
+    "status": "reviewed",
     "derived_from": "stage2-a100",
-    "reviewed_at": null
+    "reviewed_at": "2026-10-14T12:43:05.856013+00:00",
+    "confirmed_at": "2026-10-14T12:43:05.856013+00:00",
+    "method": "audit"
   }
 }

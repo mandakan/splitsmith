@@ -1523,8 +1523,10 @@
     }
   ],
   "review": {
-    "status": "needs_review",
+    "status": "reviewed",
     "derived_from": "stage1-b50",
-    "reviewed_at": null
+    "reviewed_at": "2026-10-14T12:29:38.530672+00:00",
+    "confirmed_at": "2026-10-14T12:29:38.530672+00:00",
+    "method": "audit"
   }
 }
