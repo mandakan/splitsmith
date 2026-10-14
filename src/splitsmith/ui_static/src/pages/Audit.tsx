@@ -99,6 +99,7 @@ import { computeAuditNextStep } from "@/lib/audit-next-step";
 import { useMatchHref } from "@/lib/matchHref";
 import { placeTime, type SnapPeaks } from "@/lib/peak-snap";
 import { StillPendingError } from "@/lib/pending";
+import { RECHECK_SECONDARIES, recheckHref, recheckOrder } from "@/lib/beepQueue";
 import { buildFixtureJson } from "@/lib/fixtureDoc";
 import {
   fixtureAuditHref,
@@ -1734,7 +1735,6 @@ export function Audit({ fixture = null }: { fixture?: FixtureTarget | null } = {
   const rows = useMemo(() => shotRows(markers, anomalies), [markers, anomalies]);
   // Step 1 when a video on the stage still needs its beep confirmed, or
   // on Re-pick. Auto-trusted beeps are already reviewed server-side.
-  const beepStep = !fixture && stage != null && (repick || beepStepVideos(stage).length > 0);
   // The ``?beep=<video_id>`` redirect from the old queue page opens step 1
   // on that camera; consumed once.
   useEffect(() => {
@@ -1745,9 +1745,14 @@ export function Audit({ fixture = null }: { fixture?: FixtureTarget | null } = {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- read once on mount
   }, []);
+  // ``?recheck=secondaries``: the recheck pass over the match's secondary
+  // beeps (lib/beepQueue.recheckOrder); ``from`` is the stage it returns to.
+  const recheck = !fixture && searchParams.get("recheck") === RECHECK_SECONDARIES;
+  const recheckFrom = searchParams.get("from");
   // ``?cam=<video_id>``: the beep queue lands on this camera of the stage
   // (a pending beep, not a re-pick). Read on every change: the queue moves
   // between stages without remounting the page.
+  const beepStep = !fixture && stage != null && (repick || recheck || beepStepVideos(stage).length > 0);
   const camParam = searchParams.get("cam");
   useEffect(() => {
     if (camParam) setBeepFocusVideoId(camParam);
@@ -1822,10 +1827,38 @@ export function Audit({ fixture = null }: { fixture?: FixtureTarget | null } = {
     void reloadAudit();
   }, [chainJob, reloadProject, reloadPeaks, reloadAudit]);
 
+  // The recheck pass ends on the stage it started from (``from``), else on
+  // the stage it is on, with the editor open.
+  const endRecheck = useCallback(() => {
+    const [fromSlug, fromStage] = (recheckFrom ?? "").split("/");
+    navigate(
+      fromSlug && fromStage
+        ? href("audit", fromSlug, fromStage)
+        : href("audit", slug, String(stageNumber ?? "")),
+    );
+  }, [recheckFrom, navigate, href, slug, stageNumber]);
+  const startRecheck = useCallback(async () => {
+    try {
+      const q = await api.getBeepQueue(true);
+      const first = recheckOrder(q.stages.flatMap((g) => g.items))[0];
+      if (!first) {
+        setSaveStatus({ kind: "error", message: "No secondary cameras in this match." });
+        return;
+      }
+      navigate(recheckHref(first, href, `${slug}/${stageNumber}`));
+    } catch (err) {
+      setSaveStatus({ kind: "error", message: err instanceof ApiError ? err.detail : String(err) });
+    }
+  }, [navigate, href, slug, stageNumber]);
+
   const handleBeepConfirmed = useCallback(
     async (next: { slug: string; stageNumber: number; videoId?: string } | "done" | null) => {
       setRepick(false);
       setBeepFocusVideoId(null);
+      if (recheck && next === "done") {
+        endRecheck();
+        return;
+      }
       if (next === "done") {
         // The beep queue is empty: back to the Overview, whose next step
         // now says what comes after the beeps.
@@ -1837,12 +1870,17 @@ export function Audit({ fixture = null }: { fixture?: FixtureTarget | null } = {
       void reloadAudit();
       if (next && (next.slug !== slug || next.stageNumber !== stageNumber)) {
         const cam = next.videoId ? `?cam=${encodeURIComponent(next.videoId)}` : "";
-        navigate(`${href("audit", next.slug, String(next.stageNumber))}${cam}`);
+        // The recheck pass carries itself and its way back to the next stage.
+        const pass =
+          recheck && next.videoId
+            ? `&recheck=${RECHECK_SECONDARIES}${recheckFrom ? `&from=${encodeURIComponent(recheckFrom)}` : ""}`
+            : "";
+        navigate(`${href("audit", next.slug, String(next.stageNumber))}${cam}${pass}`);
       } else if (next?.videoId) {
         setBeepFocusVideoId(next.videoId);
       }
     },
-    [reloadProject, reloadPeaks, reloadAudit, navigate, href, slug, stageNumber],
+    [reloadProject, reloadPeaks, reloadAudit, navigate, href, slug, stageNumber, recheck, recheckFrom, endRecheck],
   );
 
   const stageCommand =
@@ -2048,9 +2086,11 @@ export function Audit({ fixture = null }: { fixture?: FixtureTarget | null } = {
             stageNumber={stage.stage_number}
             focusVideoId={beepFocusVideoId}
             repick={repick}
+            recheck={recheck}
             onCancel={() => {
               setRepick(false);
               setBeepFocusVideoId(null);
+              if (recheck) endRecheck();
             }}
             onConfirmed={(next) => void handleBeepConfirmed(next)}
             header={header}
@@ -2287,6 +2327,7 @@ export function Audit({ fixture = null }: { fixture?: FixtureTarget | null } = {
                       snapRiseFoot={snapOn}
                       onToggleSnapRiseFoot={toggleSnap}
                       onSeatAllOnRiseFoot={snapPeaks ? askSeatAll : undefined}
+                      onRecheckSecondaryBeeps={() => void startRecheck()}
                       action={
                         pipelineAction === "trim" ? (
                           <TrimNowBadge

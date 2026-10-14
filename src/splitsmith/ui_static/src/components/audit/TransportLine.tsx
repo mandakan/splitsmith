@@ -212,6 +212,9 @@ export interface TransportMenuItemsProps {
   snapRiseFoot?: boolean;
   onToggleSnapRiseFoot?: () => void;
   onSeatAllOnRiseFoot?: () => void;
+  /** Start the recheck pass over the match's secondary beeps; the item
+   *  renders only when given. */
+  onRecheckSecondaryBeeps?: () => void;
 }
 
 export function TransportMenuItems(props: TransportMenuItemsProps) {
@@ -226,6 +229,7 @@ export function TransportMenuItems(props: TransportMenuItemsProps) {
     snapRiseFoot,
     onToggleSnapRiseFoot,
     onSeatAllOnRiseFoot,
+    onRecheckSecondaryBeeps,
   } = props;
   return (
     <>
@@ -281,6 +285,17 @@ export function TransportMenuItems(props: TransportMenuItemsProps) {
             </button>
           ) : null}
         </>
+      ) : null}
+      {onRecheckSecondaryBeeps ? (
+        <button
+          type="button"
+          role="menuitem"
+          className={ITEM}
+          onClick={onRecheckSecondaryBeeps}
+          title="Walk every secondary camera's beep in the match, one after the other"
+        >
+          Recheck secondary beeps...
+        </button>
       ) : null}
       {onToggleFullResVideo ? (
         <button

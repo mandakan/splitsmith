@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "recheck-secondary-beeps",
+      "date": "2026-10-14",
+      "title": "Recheck every secondary camera's beep",
+      "body": "Recheck secondary beeps, in the menu on Audit's timeline, walks each extra camera's beep in the match. Move one and Confirm, or Looks right to go on without a change."
+    },
+    {
       "id": "seat-all-per-stage",
       "date": "2026-10-14",
       "title": "Seat all stays on the stage you are on",

@@ -84,6 +84,59 @@ export function queueItemHref(
   return `${href("audit", item.slug, String(item.stage_number))}?cam=${encodeURIComponent(item.video_id)}`;
 }
 
+/** The ``recheck`` value that walks the secondary beeps (Audit's
+ *  ``?recheck=secondaries``). */
+export const RECHECK_SECONDARIES = "secondaries";
+
+/** The recheck pass over secondary beeps (2026-10-14): every secondary
+ *  camera in the match, confirmed or not, in stage order then shooter
+ *  order. A secondary's beep aligns its clip on the primary's shots, so a
+ *  beep confirmed by eye a few tens of ms off is worth a second look. */
+export function recheckOrder(items: BeepQueueItem[]): BeepQueueItem[] {
+  const shooterRank = new Map<string, number>();
+  for (const it of items)
+    if (!shooterRank.has(it.slug)) shooterRank.set(it.slug, shooterRank.size);
+  return items
+    .filter((it) => it.role === "secondary")
+    .slice()
+    .sort(
+      (a, b) =>
+        a.stage_number - b.stage_number ||
+        (shooterRank.get(a.slug) ?? 0) - (shooterRank.get(b.slug) ?? 0) ||
+        a.video_id.localeCompare(b.video_id),
+    );
+}
+
+/** The secondary after ``key`` in the recheck order; null after the last
+ *  (the pass ends, it does not wrap round). */
+export function recheckNext(
+  order: BeepQueueItem[],
+  key: QueueKey,
+): BeepQueueItem | null {
+  const i = order.findIndex((it) => same(it, key));
+  return i < 0 ? (order[0] ?? null) : (order[i + 1] ?? null);
+}
+
+/** "Secondary beep 3 of 31" plus who, where and which file. */
+export function recheckLine(
+  item: BeepQueueItem,
+  place: { position: number; total: number },
+): string {
+  const file = item.video_path.split("/").pop() ?? item.video_path;
+  const stage = `Stage ${String(item.stage_number).padStart(2, "0")}`;
+  return `Secondary beep ${place.position} of ${place.total} · ${item.shooter_name} · ${stage} · ${file}`;
+}
+
+/** A camera opened in the recheck pass; ``from`` (``<slug>/<stage>``) is
+ *  the stage the pass returns to when it ends. */
+export function recheckHref(
+  item: BeepQueueItem,
+  href: (...segments: string[]) => string,
+  from: string,
+): string {
+  return `${queueItemHref(item, href)}&recheck=${RECHECK_SECONDARIES}&from=${encodeURIComponent(from)}`;
+}
+
 /** The entry wording wherever beeps wait: "Review beeps · 14 to confirm". */
 export function reviewEntryText(pending: number): string {
   return `Review beeps · ${pending} to confirm`;
