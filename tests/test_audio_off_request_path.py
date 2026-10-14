@@ -41,7 +41,7 @@ def no_extraction_in_requests(monkeypatch: pytest.MonkeyPatch) -> threading.Even
         raise AssertionError("a request ran ffmpeg")
 
     monkeypatch.setattr(audio_helpers, "_extract_audio", refuse)
-    monkeypatch.setattr(audio_helpers, "_run_audio_ffmpeg", refuse)
+    monkeypatch.setattr(audio_helpers, "_run_audio_ffmpeg", refuse, raising=False)
     release = threading.Event()
 
     def held(*args: object, **kwargs: object) -> None:

@@ -14,11 +14,14 @@ describe("stripVisible", () => {
       job("auto_sync", "failed"),
       job("sync_match", "running"),
       job("trim", "running"),
+      job("derive_audio", "running"),
+      job("derive_audio", "failed"),
     ];
     expect(stripVisible(jobs).map((j) => j.id)).toEqual([
       "auto_sync-failed",
       "sync_match-running",
       "trim-running",
+      "derive_audio-failed",
     ]);
   });
 });

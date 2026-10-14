@@ -495,3 +495,64 @@ def test_the_push_leaves_out_a_rendition_that_fails_the_check(tmp_path: Path) ->
     keys = [m.remote_key for m in plan.media]
     assert not any(k.endswith("_web.mp4") for k in keys)
     assert any(k.endswith("_trimmed.mp4") for k in keys)
+
+
+# ---------------------------------------------------------------------------
+# The audit WAV (spec 2026-10-14): pushed after its rendition, never stale
+# ---------------------------------------------------------------------------
+
+WAV_NAME = "stage1_cam_abc123_audit.wav"
+
+
+def _write_audit_wav(root: Path, slug: str) -> Path:
+    import wave
+
+    wav = root / "shooters" / slug / "audio" / WAV_NAME
+    wav.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(wav), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(8000)
+        w.writeframes(b"\x10\x00" * 8000)
+    return wav
+
+
+def test_plan_pushes_the_audit_wav_after_its_rendition(tmp_path: Path) -> None:
+    root, slug = _build_basic_match(tmp_path)
+    match_id = match_model.Match.load(root).match_id
+    (root / "shooters" / slug / "trimmed" / WEB_NAME).write_bytes(tiny_mp4(duration_s=3.0))
+    _write_audit_wav(root, slug)
+
+    plan = build_push_plan(root, sync_state=SyncState(), full_media=False)
+
+    keys = [m.remote_key for m in plan.media]
+    wav_key = f"matches/{match_id}/shooters/{slug}/audio/{WAV_NAME}"
+    web_key = f"matches/{match_id}/shooters/{slug}/trimmed/{WEB_NAME}"
+    assert wav_key in keys
+    assert keys.index(wav_key) > keys.index(web_key)
+
+
+def test_plan_never_pushes_an_audit_wav_older_than_its_trim(tmp_path: Path) -> None:
+    import os
+
+    root, slug = _build_basic_match(tmp_path)
+    wav = _write_audit_wav(root, slug)
+    trim = root / "shooters" / slug / "trimmed" / TRIMMED_NAME
+    later = trim.stat().st_mtime + 60
+    os.utime(trim, (later, later))
+    assert wav.stat().st_mtime < trim.stat().st_mtime
+
+    plan = build_push_plan(root, sync_state=SyncState())
+
+    assert not any(m.remote_key.endswith(WAV_NAME) for m in plan.media)
+
+
+def test_plan_never_pushes_an_unreadable_audit_wav(tmp_path: Path) -> None:
+    root, slug = _build_basic_match(tmp_path)
+    wav = root / "shooters" / slug / "audio" / WAV_NAME
+    wav.parent.mkdir(parents=True, exist_ok=True)
+    wav.write_bytes(b"not a wav")
+
+    plan = build_push_plan(root, sync_state=SyncState())
+
+    assert not any(m.remote_key.endswith(WAV_NAME) for m in plan.media)

@@ -97,6 +97,7 @@ import { useScrubSource } from "@/lib/useScrubSource";
 import { computeAuditNextStep } from "@/lib/audit-next-step";
 import { useMatchHref } from "@/lib/matchHref";
 import { placeTime, type SnapPeaks } from "@/lib/peak-snap";
+import { StillPendingError } from "@/lib/pending";
 import { earlierFootFor, footFor, footReadout, readSnapOn, seatAllMoves, writeSnapOn } from "@/lib/riseFoot";
 import { isPeekKey } from "@/lib/auditKeys";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -161,6 +162,8 @@ export function Audit() {
 
   const [peaks, setPeaks] = useState<PeaksResult | null>(null);
   const [peaksLoading, setPeaksLoading] = useState(false);
+  // The audit WAV is being made by a job (spec 2026-10-14).
+  const [peaksPreparing, setPeaksPreparing] = useState(false);
   const [peaksError, setPeaksError] = useState<string | null>(null);
   const [snapPeaks, setSnapPeaks] = useState<SnapPeaks | null>(null);
   // Snap placed shots to their rise foot (lib/riseFoot): on until turned off.
@@ -531,24 +534,35 @@ export function Audit() {
       return;
     }
     let alive = true;
+    const ctl = new AbortController();
     setPeaksLoading(true);
+    setPeaksPreparing(false);
     setPeaksError(null);
     api
-      .getStagePeaks(slug, stageNumber, PEAK_BINS)
+      .getStagePeaks(slug, stageNumber, PEAK_BINS, {
+        signal: ctl.signal,
+        onPending: () => alive && setPeaksPreparing(true),
+      })
       .then((p) => {
         if (alive) setPeaks(p);
       })
       .catch((err) => {
         if (alive) {
-          setPeaksError(err instanceof ApiError ? err.detail : String(err));
+          setPeaksError(
+            err instanceof StillPendingError ? err.message : err instanceof ApiError ? err.detail : String(err),
+          );
           setPeaks(null);
         }
       })
       .finally(() => {
-        if (alive) setPeaksLoading(false);
+        if (alive) {
+          setPeaksLoading(false);
+          setPeaksPreparing(false);
+        }
       });
     return () => {
       alive = false;
+      ctl.abort();
     };
   }, [slug, stageNumber, primary]);
 
@@ -727,8 +741,14 @@ export function Audit() {
   // over (its served clip shares that anchor, lib/auditPip). With the
   // primary big nothing follows and nothing is muted.
   const primaryCam = pipCameras[0] ?? null;
+  // The stage WAV only once its waveform loaded (it is published by then;
+  // an element pointed at a 202 would fail over to the stream for nothing).
   const primaryAudioSrc =
-    stageNumber == null ? null : stageWavFailed ? (primaryCam?.src ?? null) : api.stageAudioUrl(slug, stageNumber);
+    stageNumber == null || !peaks
+      ? null
+      : stageWavFailed
+        ? (primaryCam?.src ?? null)
+        : api.stageAudioUrl(slug, stageNumber);
   const primaryAudioBeep = stageWavFailed ? (primaryCam?.beepInClip ?? null) : (peaks?.beep_time ?? null);
   // A swap remounts the big <video> (its src changes); until the new
   // element arrives the old one still names the previous camera, so the
@@ -2236,7 +2256,8 @@ export function Audit() {
               </div>
             ) : !prereqShouldShow && peaksLoading ? (
               <div className="flex h-32 items-center justify-center gap-2 text-md text-muted">
-                <Loader2 className="size-4 animate-spin" /> Computing waveform...
+                <Loader2 className="size-4 animate-spin" />{" "}
+                {peaksPreparing ? "Preparing audio..." : "Computing waveform..."}
               </div>
             ) : !prereqShouldShow && peaksError ? (
               <p role="alert" className="text-sm text-led-text">

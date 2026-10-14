@@ -220,11 +220,19 @@ def _setup_promote_endpoint_project(
     trimmed = shooter_root / "trimmed"
     trimmed.mkdir(exist_ok=True)
     trim_path = trimmed / f"stage1_cam_{primary_id}_trimmed.mp4"
-    trim_path.write_bytes(b"\x00" * 16)
+    from tests.media_bytes import tiny_mp4
+
+    trim_path.write_bytes(tiny_mp4())
     audio = shooter_root / "audio"
     audio.mkdir(exist_ok=True)
     audit_wav = audio / f"stage1_cam_{primary_id}_audit.wav"
-    audit_wav.write_bytes(b"RIFF\x00\x00\x00\x00WAVEfake")
+    import wave
+
+    with wave.open(str(audit_wav), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(8000)
+        w.writeframes(b"\x10\x00" * 8000)
     future = time.time() + 10
     os.utime(audit_wav, (future, future))
     audit_dir = shooter_root / "audit"

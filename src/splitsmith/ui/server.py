@@ -13742,7 +13742,7 @@ def create_app(
                 )
             )
             job_id = job.id
-        return JSONResponse({"pending": True, "job_id": job_id}, status_code=202)
+        return JSONResponse({"pending": True, "active_job": True, "job_id": job_id}, status_code=202)
 
     def _resolve_audit_audio(
         slug: str, project: MatchProject, stage_number: int
@@ -18512,10 +18512,10 @@ def create_app(
             except KeyError as exc:
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
             audit_json = state.materialize_audit(shooter_slug, stage_n)
-            try:
-                audit_audio = _resolve_audit_audio(shooter_slug, project, stage_n)
-            except HTTPException:
-                raise
+            audit_audio = _resolve_audit_audio(shooter_slug, project, stage_n)
+            if isinstance(audit_audio, JSONResponse):
+                # Being made by a job (it reads, never cuts): try again shortly.
+                raise HTTPException(status_code=409, detail="the stage's audit WAV is being prepared; try again")
             audit_wav = audit_audio.audio_path
             if not audit_json.exists() or not audit_wav.exists():
                 raise HTTPException(

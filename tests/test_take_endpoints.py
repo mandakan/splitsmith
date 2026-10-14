@@ -455,9 +455,14 @@ def test_take_peaks_404_unknown_filename(tmp_path: Path) -> None:
     assert resp.status_code == 404
 
 
-def test_take_peaks_local_mode_extracts_and_returns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """GET /raw-videos/peaks in local mode extracts audio + returns peaks payload."""
-    from unittest.mock import patch  # noqa: F401 (imported for monkeypatching side-effects)
+def test_take_peaks_local_mode_queues_the_take_wav_then_serves_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GET /raw-videos/peaks in local mode reads the take WAV a job published:
+    202 with the job queued while it is missing, the peaks once it is there.
+    The request never extracts (spec 2026-10-14)."""
+    import shutil
+    import time
 
     import numpy as np
     import soundfile as sf
@@ -466,16 +471,28 @@ def test_take_peaks_local_mode_extracts_and_returns(tmp_path: Path, monkeypatch:
 
     client, filename = _setup_take(tmp_path, n_stages=1)
 
-    # Write a small real WAV so ensure_take_audio has something to return.
     sr = 8000
-    data = np.zeros(sr * 2, dtype=np.float32)  # 2 s silence
     real_wav = tmp_path / "fake_take.wav"
-    sf.write(real_wav, data, sr)
+    sf.write(real_wav, np.zeros(sr * 2, dtype=np.float32), sr)
 
-    # Stub ensure_take_audio to return our pre-baked WAV.
-    with patch.object(audio_helpers, "ensure_take_audio", return_value=real_wav):
-        resp = client.get(f"/api/shooters/me/raw-videos/peaks?filename={filename}&bins=100")
+    def job_makes_it(root, storage_path, source, **kwargs):  # type: ignore[no-untyped-def]
+        dest = audio_helpers.take_audio_path(root, storage_path, project=kwargs.get("project"))
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(real_wav, dest)
+        return dest
 
+    monkeypatch.setattr(audio_helpers, "ensure_take_audio", job_makes_it)
+    url = f"/api/shooters/me/raw-videos/peaks?filename={filename}&bins=100"
+
+    first = client.get(url)
+    assert first.status_code == 202
+    job_id = first.json()["job_id"]
+    deadline = time.time() + 5
+    while client.get(f"/api/me/jobs/{job_id}").json()["status"] in ("pending", "running"):
+        assert time.time() < deadline
+        time.sleep(0.02)
+
+    resp = client.get(url)
     assert resp.status_code == 200
     body = resp.json()
     assert body["bins"] == 100

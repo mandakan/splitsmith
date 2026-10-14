@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DEFAULT_ROWS } from "@/components/audit/mobile/WrappedWaveform";
@@ -133,7 +133,7 @@ describe("MobileAudit", () => {
     apiMock.getStagePeaks.mockResolvedValue(peaksResult(PEAKS_CAP));
     renderPage();
     await waitFor(() => expect(screen.getByTestId("wrapped-waveform")).toBeInTheDocument());
-    expect(apiMock.getStagePeaks).toHaveBeenCalledWith("alice", 3, PEAKS_CAP);
+    expect(apiMock.getStagePeaks).toHaveBeenCalledWith("alice", 3, PEAKS_CAP, expect.any(Object));
     expect(screen.getAllByTestId("wave-row")).toHaveLength(DEFAULT_ROWS);
   });
 
@@ -591,6 +591,33 @@ describe("MobileAudit rise foot", () => {
   it("asks for 1 ms peaks to place shots on", async () => {
     renderPage();
     await waitFor(() => expect(apiMock.getStagePeaks).toHaveBeenCalledWith("alice", 3, 22_000));
+  });
+
+  it("after a stage change, sizes the 1 ms peaks from the new stage, never the one it left", async () => {
+    // Stage 3 runs 22 s, stage 4 10 s. For one render after the change the
+    // page still held stage 3's waveform, and asked for stage 4's 1 ms peaks
+    // with stage 3's bin count (seen in the hosted logs, 2026-10-13).
+    let go: ((to: string) => void) | null = null;
+    function Nav() {
+      go = useNavigate();
+      return null;
+    }
+    apiMock.getStagePeaks.mockImplementation(async (_s: string, n: number, bins: number) => {
+      const duration = n === 3 ? DURATION : 10;
+      return bins > PEAKS_CAP ? { ...hires(bins), duration } : { ...peaksResult(PEAKS_SMALL), duration };
+    });
+    render(
+      <MemoryRouter initialEntries={["/match/m1/audit/alice/3"]}>
+        <Nav />
+        <Routes>
+          <Route path="/match/:matchId/audit/:slug/:stage" element={<MobileAudit />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(apiMock.getStagePeaks).toHaveBeenCalledWith("alice", 3, 22_000));
+    act(() => go!("/match/m1/audit/alice/4"));
+    await waitFor(() => expect(apiMock.getStagePeaks).toHaveBeenCalledWith("alice", 4, 10_000));
+    expect(apiMock.getStagePeaks).not.toHaveBeenCalledWith("alice", 4, 22_000);
   });
 
   it("says how far the selected shot is from its rise foot", async () => {

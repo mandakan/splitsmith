@@ -17,10 +17,14 @@ import { nextBatch } from "@/lib/jobBatch";
 const ACTIVE_POLL_MS = 1000;
 const IDLE_POLL_MS = 5000;
 
-/** Jobs the progress strip shows. Automatic syncs run every few minutes
- *  and would make the strip flicker; they surface only when they fail. */
+/** Background kinds: automatic syncs run every few minutes, and a
+ *  derive_audio job (spec 2026-10-14) is already told by the page that
+ *  asked for it ("Preparing audio"); either would make the strip flicker. */
+const BACKGROUND_KINDS = new Set(["auto_sync", "derive_audio"]);
+
+/** Jobs the progress strip shows. Background kinds surface only when they fail. */
 export function stripVisible(jobs: Job[]): Job[] {
-  return jobs.filter((j) => j.kind !== "auto_sync" || j.status === "failed");
+  return jobs.filter((j) => !BACKGROUND_KINDS.has(j.kind) || j.status === "failed");
 }
 
 /** Pending or running - the set whose departures mean "something just

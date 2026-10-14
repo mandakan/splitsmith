@@ -42,6 +42,7 @@ import {
 } from "@/lib/api";
 import { addFailedKind, auditPipCameras, type AuditPipCamera, type FailedKinds } from "@/lib/auditPip";
 import { buildAuditJson, deriveMarkers } from "@/lib/audit-doc";
+import { StillPendingError } from "@/lib/pending";
 import { resolveTarget } from "@/lib/audit-target";
 import { useDialogFocus } from "@/lib/dialogFocus";
 import { isActiveCommand, latestForStage, REDETECT_CONFIRM } from "@/lib/desktopCommands";
@@ -67,6 +68,9 @@ interface PeaksError {
 }
 
 function peaksErrorFrom(err: unknown): PeaksError {
+  if (err instanceof StillPendingError) {
+    return { status: null, text: "The audio is still being prepared. Try again in a minute." };
+  }
   if (err instanceof ApiError && err.status === 404) {
     return { status: 404, text: "Waiting for the desktop to sync this stage's audio" };
   }
@@ -111,6 +115,12 @@ export function MobileAudit() {
   // 1 ms peaks for the rise foot; null until they arrive (or when they fail,
   // which leaves adds exactly at the playhead and Seat disabled).
   const [footPeaks, setFootPeaks] = useState<SnapPeaks | null>(null);
+  // The audio is being made by a job (spec 2026-10-14): "Preparing audio".
+  const [preparing, setPreparing] = useState(false);
+  // Which stage peaksResult belongs to: for one render after a stage change
+  // it still holds the previous stage's, and the 1 ms request must not be
+  // sized from that.
+  const peaksForRef = useRef<string | null>(null);
   // Snap added shots to their rise foot: on until turned off (the same
   // setting as desktop Audit's, per browser).
   const [snapOn, setSnapOn] = useState(readSnapOn);
@@ -150,7 +160,9 @@ export function MobileAudit() {
   const videoElRef = useRef<HTMLVideoElement | null>(null);
   const videoPanelRef = useRef<HTMLDivElement | null>(null);
 
-  const audioSrc = stageNumber != null ? api.stageAudioUrl(slug, stageNumber) : null;
+  // Only once the waveform loaded: the WAV is published by then, and an
+  // element pointed at a 202 would stay broken (spec 2026-10-14).
+  const audioSrc = stageNumber != null && peaksResult ? api.stageAudioUrl(slug, stageNumber) : null;
   const playback = useAuditPlayback(audioSrc);
 
   const recordEvent = useCallback((kind: string, payload: Record<string, unknown>) => {
@@ -170,8 +182,10 @@ export function MobileAudit() {
     setMarkers([]);
     setPeaksResult(null);
     setPeaksError(null);
+    setPreparing(false);
     setFootPeaks(null);
     setPlacedAt({});
+    const ctl = new AbortController();
 
     api
       .getStageAudit(slug, stageNumber)
@@ -187,18 +201,22 @@ export function MobileAudit() {
       });
 
     api
-      .getStagePeaks(slug, stageNumber, PEAKS_BINS)
+      .getStagePeaks(slug, stageNumber, PEAKS_BINS, { signal: ctl.signal, onPending: () => alive && setPreparing(true) })
       .then((res) => {
         if (!alive) return;
+        peaksForRef.current = `${slug}:${stageNumber}`;
+        setPreparing(false);
         setPeaksResult(res);
       })
       .catch((err) => {
         if (!alive) return;
+        setPreparing(false);
         setPeaksError(peaksErrorFrom(err));
       });
 
     return () => {
       alive = false;
+      ctl.abort();
     };
   }, [slug, stageNumber, reloadToken]);
 
@@ -261,6 +279,7 @@ export function MobileAudit() {
   // Fetch the 1 ms peaks once the stage's duration is known.
   useEffect(() => {
     if (!peaksResult || !slug || stageNumber == null) return undefined;
+    if (peaksForRef.current !== `${slug}:${stageNumber}`) return undefined;
     const bins = Math.min(SNAP_PEAKS_MAX_BINS, Math.max(PEAKS_BINS, Math.ceil(peaksResult.duration / 0.001)));
     if (bins <= PEAKS_BINS) {
       setFootPeaks({ peaks: peaksResult.peaks, duration: peaksResult.duration });
@@ -900,7 +919,7 @@ export function MobileAudit() {
                 </div>
               ) : (
                 <div className="flex flex-1 items-center justify-center text-sm text-muted">
-                  Loading audio...
+                  {preparing ? "Preparing audio..." : "Loading audio..."}
                 </div>
               )}
 

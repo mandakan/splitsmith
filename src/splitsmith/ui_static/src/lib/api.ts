@@ -10,6 +10,7 @@ import type { Feature } from "@/lib/access";
 import type { Anomaly } from "@/lib/anomalies";
 import { authorKey } from "@/lib/authorKey";
 import type { LogoSpot } from "@/lib/logoPlan";
+import { type Pending, whenReady, type WhenReadyOptions } from "@/lib/pending";
 
 export type VideoRole = "primary" | "secondary" | "ignored";
 /** ``"aligned"`` means the in-stream beep detector failed on a secondary
@@ -3828,9 +3829,13 @@ export const api = {
     hintTime: number,
     windowS: number = 0.5,
   ) =>
-    request<BeepSnapResult>(
-      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/beep/snap`,
-      { method: "POST", json: { hint_time: hintTime, window_s: windowS } },
+    // The snap reads the video's published WAV; in the rare case it is still
+    // being made (spec 2026-10-14) the answer is 202 and this asks again.
+    whenReady(() =>
+      request<BeepSnapResult | Pending>(
+        `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/beep/snap`,
+        { method: "POST", json: { hint_time: hintTime, window_s: windowS } },
+      ),
     ),
 
   /** Flip ``beep_reviewed`` on a single video (issue #71). Pure UI-state
@@ -4565,9 +4570,16 @@ export const api = {
   matchExportFileUrl: (filename: string) =>
     scopeRequestPath(`/api/match/exports/file/${encodeURIComponent(filename)}`),
 
-  getStagePeaks: (slug: string, stageNumber: number, bins = 1200) =>
-    request<PeaksResult>(
-      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/peaks?bins=${bins}`,
+  /** The stage's audit-clip peaks. A WAV still being made answers 202
+   *  (spec 2026-10-14); this asks again until it is ready, calling
+   *  ``opts.onPending`` once so the page can say "Preparing audio". */
+  getStagePeaks: (slug: string, stageNumber: number, bins = 1200, opts?: WhenReadyOptions) =>
+    whenReady(
+      () =>
+        request<PeaksResult | Pending>(
+          `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/peaks?bins=${bins}`,
+        ),
+      opts,
     ),
 
   /** Per-video peaks. Same payload shape as the stage endpoint so the
@@ -4579,10 +4591,15 @@ export const api = {
     bins = 1200,
     /** One window of the WAV, source seconds (the beep picker's 1 ms detail). */
     window?: { start: number; end: number },
+    opts?: WhenReadyOptions,
   ) =>
-    request<PeaksResult>(
-      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/peaks?bins=${bins}`
-        + (window ? `&start=${window.start}&end=${window.end}` : ""),
+    whenReady(
+      () =>
+        request<PeaksResult | Pending>(
+          `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/peaks?bins=${bins}`
+            + (window ? `&start=${window.start}&end=${window.end}` : ""),
+        ),
+      opts,
     ),
 
   /** URL for the desktop-pushed beep review audio snippet (mirror-only,

@@ -114,6 +114,8 @@ export function BeepWaveformPicker({
 }) {
   const [peaks, setPeaks] = useState<PeaksResult | null>(null);
   const [loading, setLoading] = useState(true);
+  // The video's WAV is being made by a job (spec 2026-10-14).
+  const [preparing, setPreparing] = useState(false);
   const [unavailable, setUnavailable] = useState(false);
   const [localTime, setLocalTime] = useState<number>(0);
   const [playing, setPlaying] = useState(false);
@@ -148,10 +150,15 @@ export function BeepWaveformPicker({
 
   useEffect(() => {
     let cancelled = false;
+    const ctl = new AbortController();
     setLoading(true);
+    setPreparing(false);
     setUnavailable(false);
     api
-      .getVideoPeaks(slug, stageNumber, videoId)
+      .getVideoPeaks(slug, stageNumber, videoId, undefined, undefined, {
+        signal: ctl.signal,
+        onPending: () => !cancelled && setPreparing(true),
+      })
       .then((p) => {
         if (cancelled) return;
         setPeaks(p);
@@ -181,6 +188,7 @@ export function BeepWaveformPicker({
       });
     return () => {
       cancelled = true;
+      ctl.abort();
     };
   }, [slug, stageNumber, videoId]);
 
@@ -333,7 +341,7 @@ export function BeepWaveformPicker({
     return (
       <div className="flex items-center gap-1 text-xs text-muted">
         <Loader2 className="size-3 animate-spin" aria-hidden />
-        Loading waveform...
+        {preparing ? "Preparing audio..." : "Loading waveform..."}
       </div>
     );
   }

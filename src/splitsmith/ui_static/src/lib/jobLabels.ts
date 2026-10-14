@@ -15,6 +15,7 @@ export const KIND_LABEL: Record<string, string> = {
   generate_proxy: "Generating preview",
   sync_match: "Sync to hosted",
   auto_sync: "Auto-sync",
+  derive_audio: "Prepare audio",
 };
 
 export function kindLabel(kind: string): string {
