@@ -28,6 +28,8 @@ import { peekApproveCode, stashApproveCode, takeApproveCode } from "@/lib/device
 import { ShooterScopedRoute } from "@/components/ShooterScopedRoute";
 import { lazyPage } from "@/lib/lazyPage";
 import { walkFitsPhone } from "@/lib/walk";
+import { RECHECK_SECONDARIES } from "@/lib/beepQueue";
+import { useMatchHref } from "@/lib/matchHref";
 import { BeepReviewRedirect } from "@/components/match/BeepReviewRedirect";
 
 // Pages load on first navigation (#894); the shells above stay eager.
@@ -40,7 +42,10 @@ const MobileAudit = lazyPage<{ fixture?: { path: string; videoPath: string | nul
   () => import("@/pages/MobileAudit"),
   "MobileAudit",
 );
-const MobileBeepReview = lazyPage(() => import("@/pages/MobileBeepReview"), "MobileBeepReview");
+const MobileBeepReview = lazyPage<{ recheck?: boolean; start?: string | null; recheckHref?: string }>(
+  () => import("@/pages/MobileBeepReview"),
+  "MobileBeepReview",
+);
 const Coach = lazyPage(() => import("@/pages/Coach"), "Coach");
 const Breakdown = lazyPage(() => import("@/pages/Breakdown"), "Breakdown");
 const Compare = lazyPage(() => import("@/pages/Compare"), "Compare");
@@ -117,7 +122,19 @@ function RedirectToOverview() {
  * step 1 (UX PR 5), so the route redirects there for one release. */
 function BeepReviewRoute() {
   const isMobile = useIsMobile();
-  return isMobile ? <MobileBeepReview /> : <BeepReviewRedirect />;
+  const [params] = useSearchParams();
+  const href = useMatchHref();
+  // ``?recheck=secondaries&start=<slug::stage::video>``: the recheck pass
+  // over secondary beeps (lib/beepQueue.recheckOrder).
+  return isMobile ? (
+    <MobileBeepReview
+      recheck={params.get("recheck") === RECHECK_SECONDARIES}
+      start={params.get("start")}
+      recheckHref={`${href("beep-review")}?recheck=${RECHECK_SECONDARIES}`}
+    />
+  ) : (
+    <BeepReviewRedirect />
+  );
 }
 
 /* Audit joins beep review as a match-scoped screen with a real mobile

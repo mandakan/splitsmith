@@ -901,3 +901,44 @@ describe("MobileAudit earlier rise", () => {
   });
 });
 
+describe("MobileAudit and the recheck pass over secondary beeps", () => {
+  function Where() {
+    const loc = useLocation();
+    return <div data-testid="where">{loc.pathname + loc.search}</div>;
+  }
+
+  it("a recheck link opened on the phone goes to the phone's pass, on that camera", async () => {
+    render(
+      <MemoryRouter initialEntries={["/match/m1/audit/alice/3?cam=v2&recheck=secondaries&from=alice%2F3"]}>
+        <Routes>
+          <Route path="/match/:matchId/audit/:slug/:stage" element={<MobileAudit />} />
+          <Route path="/match/:matchId/beep-review" element={<p>beep review</p>} />
+        </Routes>
+        <Where />
+      </MemoryRouter>,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("where")).toHaveTextContent(
+        `/match/m1/beep-review?recheck=secondaries&start=${encodeURIComponent("alice::3::v2")}`,
+      ),
+    );
+  });
+
+  it("the stage menu starts the pass", async () => {
+    render(
+      <MemoryRouter initialEntries={["/match/m1/audit/alice/3"]}>
+        <Routes>
+          <Route path="/match/:matchId/audit/:slug/:stage" element={<MobileAudit />} />
+          <Route path="/match/:matchId/beep-review" element={<p>beep review</p>} />
+        </Routes>
+        <Where />
+      </MemoryRouter>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Stage actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Recheck secondary beeps" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("where")).toHaveTextContent("/match/m1/beep-review?recheck=secondaries"),
+    );
+  });
+});
+

@@ -13,7 +13,7 @@
  * the two screens' audit_events logs read as one history.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useLocation, useNavigate, useOutletContext, useParams, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useLocation, useNavigate, useOutletContext, useParams, useSearchParams } from "react-router-dom";
 import { ArrowLeft, ChevronDown, MoreHorizontal, X } from "lucide-react";
 
 import { ActionArea } from "@/components/audit/mobile/ActionArea";
@@ -43,6 +43,7 @@ import {
 } from "@/lib/api";
 import { addFailedKind, auditPipCameras, type AuditPipCamera, type FailedKinds } from "@/lib/auditPip";
 import { buildAuditJson, deriveMarkers } from "@/lib/audit-doc";
+import { RECHECK_SECONDARIES } from "@/lib/beepQueue";
 import { buildFixtureJson } from "@/lib/fixtureDoc";
 import {
   fixtureAuditHref,
@@ -815,6 +816,14 @@ export function MobileAudit({ fixture = null }: { fixture?: FixtureTarget | null
     [dirty, openStage],
   );
 
+  // A recheck link (``?recheck=secondaries&cam=``, the desktop pass's
+  // shape) opened on the phone: the phone's pass is the beep review pager.
+  const recheckCam = searchParams.get("recheck") === RECHECK_SECONDARIES ? searchParams.get("cam") : null;
+  if (!fixture && recheckCam && stageNumber != null) {
+    const start = encodeURIComponent(`${slug}::${stageNumber}::${recheckCam}`);
+    return <Navigate to={`${href("beep-review")}?recheck=${RECHECK_SECONDARIES}&start=${start}`} replace />;
+  }
+
   // ---- No-stage-param: plain stage list, no takeover ------------------------
 
   if (stageNumber == null) {
@@ -947,6 +956,19 @@ export function MobileAudit({ fixture = null }: { fixture?: FixtureTarget | null
                       Snap to rise foot
                       <span className="ml-auto text-sm text-muted">{snapOn ? "on" : "off"}</span>
                     </button>
+                    {!fixture ? (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className={menuItemClass}
+                        onClick={() => {
+                          setMenuOpen(false);
+                          navigate(`${href("beep-review")}?recheck=${RECHECK_SECONDARIES}`);
+                        }}
+                      >
+                        Recheck secondary beeps
+                      </button>
+                    ) : null}
                     {desktopMirror ? (
                       <button
                         type="button"
