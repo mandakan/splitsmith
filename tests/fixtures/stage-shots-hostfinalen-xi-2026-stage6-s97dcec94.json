@@ -73,8 +73,8 @@
     {
       "shot_number": 8,
       "candidate_number": 14,
-      "time": 13.133,
-      "ms_after_beep": 8133,
+      "time": 13.109,
+      "ms_after_beep": 8109,
       "source": "detected",
       "id": "cand-14",
       "interval_class": "split",
@@ -93,8 +93,8 @@
     {
       "shot_number": 10,
       "candidate_number": 16,
-      "time": 13.974,
-      "ms_after_beep": 8974,
+      "time": 13.955,
+      "ms_after_beep": 8955,
       "source": "detected",
       "id": "cand-16",
       "interval_class": "split",
@@ -113,8 +113,8 @@
     {
       "shot_number": 12,
       "candidate_number": 35,
-      "time": 17.329,
-      "ms_after_beep": 12329,
+      "time": 17.345,
+      "ms_after_beep": 12345,
       "source": "detected",
       "id": "cand-35",
       "interval_class": "split",
@@ -123,8 +123,8 @@
     {
       "shot_number": 13,
       "candidate_number": 36,
-      "time": 17.511,
-      "ms_after_beep": 12511,
+      "time": 17.5,
+      "ms_after_beep": 12500,
       "source": "detected",
       "id": "cand-36",
       "interval_class": "split",
@@ -143,8 +143,8 @@
     {
       "shot_number": 15,
       "candidate_number": 45,
-      "time": 19.251,
-      "ms_after_beep": 14251,
+      "time": 19.22,
+      "ms_after_beep": 14220,
       "source": "detected",
       "id": "cand-45",
       "interval_class": "split",
@@ -1729,6 +1729,64 @@
         "shots_count": 26
       },
       "id": "44527afe4b604ba29a4d868af4cec0cc"
+    },
+    {
+      "ts": "2026-10-14T13:21:03.972Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-14",
+        "from_time": 13.133,
+        "to_time": 13.109
+      },
+      "id": "1aa24de52bec42f1903e88786b621415"
+    },
+    {
+      "ts": "2026-10-14T13:21:06.834Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-16",
+        "from_time": 13.974,
+        "to_time": 13.955
+      },
+      "id": "af4ccd1df4f940c38bf97b9ae7298e96"
+    },
+    {
+      "ts": "2026-10-14T13:21:15.717Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-45",
+        "from_time": 19.251,
+        "to_time": 19.22
+      },
+      "id": "16ecb2e2d15743c1a035bce445325659"
+    },
+    {
+      "ts": "2026-10-14T13:21:28.377Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-36",
+        "from_time": 17.511,
+        "to_time": 17.5
+      },
+      "id": "5da9153077bc47938f4bfec73e747e5e"
+    },
+    {
+      "ts": "2026-10-14T13:21:30.988Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-35",
+        "from_time": 17.329,
+        "to_time": 17.345
+      },
+      "id": "19d54943d8ea460a8c01d41f2085724f"
+    },
+    {
+      "ts": "2026-10-14T13:21:32.896Z",
+      "kind": "save",
+      "payload": {
+        "shots_count": 26
+      },
+      "id": "3cff85052da042f8b8b7440b26b6d66c"
     }
   ],
   "events": [
@@ -1740,13 +1798,13 @@
       "source": "auto"
     }
   ],
-  "events_seeded": true,
-  "promoted_at": "2026-10-09T17:23:48.158943+00:00",
+  "events_seeded": 2,
+  "promoted_at": "2026-10-14T13:57:28.755802+00:00",
   "provenance": {
     "stage_number": 6,
-    "stage_name": null
+    "stage_name": ""
   },
-  "source_video": "/Volumes/X9/raw/2026-ho\u0308stfinalen/mathias/head/VID_20260926_141612_00_239.mp4",
+  "source_video": "/Volumes/X9/matches/hostfinalen-xi/shooters/s_71bb3f5f/raw/VID_20260926_141612_00_239.mp4",
   "fixture_window_in_source": [
     41.7918,
     76.3818
@@ -1761,18 +1819,16 @@
     "agc_state": "unknown",
     "sample_rate": 48000,
     "bit_depth": null,
-    "audio_codec": null
+    "audio_codec": "aac"
   },
   "shooter": {
     "id": "s97dcec94"
   },
   "event_id": "hostfinalen-xi-2026:6:s97dcec94",
   "review": {
-    "status": "needs_review",
-    "derived_from": null,
-    "reviewed_at": null,
-    "note": "shot times predate the rise-foot definition (docs/METHODOLOGY.md, 2026-10-10): check each shot's leading edge",
-    "previous_status": "reviewed",
-    "previous_reviewed_at": null
+    "confirmed_at": "2026-10-14T14:01:52.486445+00:00",
+    "status": "reviewed",
+    "reviewed_at": "2026-10-14T14:01:52.486445+00:00",
+    "method": "own-audit"
   }
 }

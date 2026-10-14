@@ -3,8 +3,8 @@
     {
       "shot_number": 1,
       "candidate_number": 5,
-      "time": 6.672,
-      "ms_after_beep": 1672,
+      "time": 6.677,
+      "ms_after_beep": 1677,
       "source": "detected",
       "id": "cand-5",
       "interval_class": "first_shot",
@@ -13,8 +13,8 @@
     {
       "shot_number": 2,
       "candidate_number": 7,
-      "time": 7.128,
-      "ms_after_beep": 2128,
+      "time": 7.134,
+      "ms_after_beep": 2134,
       "source": "detected",
       "id": "cand-7",
       "interval_class": "split",
@@ -23,8 +23,8 @@
     {
       "shot_number": 3,
       "candidate_number": 10,
-      "time": 7.778,
-      "ms_after_beep": 2778,
+      "time": 7.787,
+      "ms_after_beep": 2787,
       "source": "detected",
       "id": "cand-10",
       "interval_class": "split",
@@ -33,8 +33,8 @@
     {
       "shot_number": 4,
       "candidate_number": 12,
-      "time": 8.289,
-      "ms_after_beep": 3289,
+      "time": 8.297,
+      "ms_after_beep": 3297,
       "source": "detected",
       "id": "cand-12",
       "interval_class": "split",
@@ -43,8 +43,8 @@
     {
       "shot_number": 5,
       "candidate_number": 16,
-      "time": 8.942,
-      "ms_after_beep": 3942,
+      "time": 8.949,
+      "ms_after_beep": 3949,
       "source": "detected",
       "id": "cand-16",
       "interval_class": "split",
@@ -53,8 +53,8 @@
     {
       "shot_number": 6,
       "candidate_number": 18,
-      "time": 9.238,
-      "ms_after_beep": 4238,
+      "time": 9.242,
+      "ms_after_beep": 4242,
       "source": "detected",
       "id": "cand-18",
       "interval_class": "split",
@@ -63,8 +63,8 @@
     {
       "shot_number": 7,
       "candidate_number": 22,
-      "time": 10.015,
-      "ms_after_beep": 5015,
+      "time": 10.018,
+      "ms_after_beep": 5018,
       "source": "detected",
       "id": "cand-22",
       "interval_class": "split",
@@ -73,8 +73,8 @@
     {
       "shot_number": 8,
       "candidate_number": 24,
-      "time": 10.349,
-      "ms_after_beep": 5349,
+      "time": 10.356,
+      "ms_after_beep": 5356,
       "source": "detected",
       "id": "cand-24",
       "interval_class": "split",
@@ -83,8 +83,8 @@
     {
       "shot_number": 9,
       "candidate_number": 27,
-      "time": 11.277,
-      "ms_after_beep": 6277,
+      "time": 11.28,
+      "ms_after_beep": 6280,
       "source": "detected",
       "id": "cand-27",
       "interval_class": "split",
@@ -93,8 +93,8 @@
     {
       "shot_number": 10,
       "candidate_number": 29,
-      "time": 11.62,
-      "ms_after_beep": 6620,
+      "time": 11.626,
+      "ms_after_beep": 6626,
       "source": "detected",
       "id": "cand-29",
       "interval_class": "split",
@@ -103,8 +103,8 @@
     {
       "shot_number": 11,
       "candidate_number": 44,
-      "time": 14.889,
-      "ms_after_beep": 9889,
+      "time": 14.89,
+      "ms_after_beep": 9890,
       "source": "detected",
       "id": "cand-44",
       "interval_class": "movement",
@@ -113,8 +113,8 @@
     {
       "shot_number": 12,
       "candidate_number": 46,
-      "time": 15.456,
-      "ms_after_beep": 10456,
+      "time": 15.457,
+      "ms_after_beep": 10457,
       "source": "detected",
       "id": "cand-46",
       "interval_class": "split",
@@ -123,8 +123,8 @@
     {
       "shot_number": 13,
       "candidate_number": 48,
-      "time": 16.092,
-      "ms_after_beep": 11092,
+      "time": 16.098,
+      "ms_after_beep": 11098,
       "source": "detected",
       "id": "cand-48",
       "interval_class": "split",
@@ -133,8 +133,8 @@
     {
       "shot_number": 14,
       "candidate_number": 50,
-      "time": 16.696,
-      "ms_after_beep": 11696,
+      "time": 16.697,
+      "ms_after_beep": 11697,
       "source": "detected",
       "id": "cand-50",
       "interval_class": "split",
@@ -143,8 +143,8 @@
     {
       "shot_number": 15,
       "candidate_number": 53,
-      "time": 17.579,
-      "ms_after_beep": 12579,
+      "time": 17.582,
+      "ms_after_beep": 12582,
       "source": "detected",
       "id": "cand-53",
       "interval_class": "split",
@@ -153,8 +153,8 @@
     {
       "shot_number": 16,
       "candidate_number": 56,
-      "time": 18.885,
-      "ms_after_beep": 13885,
+      "time": 18.886,
+      "ms_after_beep": 13886,
       "source": "detected",
       "id": "cand-56",
       "interval_class": "transition",
@@ -1325,40 +1325,54 @@
         "shots_count": 16
       },
       "id": "39e24017373242bc8ef25b262bc95dc5"
+    },
+    {
+      "ts": "2026-10-14T13:48:36.959Z",
+      "kind": "rise_foot_seat_all",
+      "payload": {
+        "moved": 16
+      },
+      "id": "6507539f4e314132b89ee468af41a89d"
+    },
+    {
+      "ts": "2026-10-14T13:49:17.371Z",
+      "kind": "save",
+      "payload": {
+        "shots_count": 16
+      },
+      "id": "58129a9f4b2143a7b7db80cc3bc50c01"
     }
   ],
-  "promoted_at": "2026-10-09T17:23:48.219687+00:00",
+  "promoted_at": "2026-10-14T13:57:29.046451+00:00",
   "provenance": {
     "stage_number": 1,
-    "stage_name": null
+    "stage_name": ""
   },
-  "source_video": "/Volumes/X9/raw/2026-ho\u0308stfinalen/Ho\u0308stfinalen XI - anton/video-2493_singular_display.mov",
+  "source_video": "/Volumes/X9/matches/hostfinalen-xi/shooters/s_73ac19d5/raw/video-2493_singular_display.mov",
   "fixture_window_in_source": [
     17.2768,
     41.1768
   ],
   "camera": {
-    "id": "unknown",
+    "id": "meta-vanguard",
     "make": "Meta",
     "model": "Vanguard",
     "mount": "head",
     "position": "shooter",
     "audio_source": "internal",
     "agc_state": "unknown",
-    "sample_rate": null,
+    "sample_rate": 48000,
     "bit_depth": null,
-    "audio_codec": null
+    "audio_codec": "aac"
   },
   "shooter": {
     "id": "s0fe3d797"
   },
   "event_id": "hostfinalen-xi-2026:1:s0fe3d797",
   "review": {
-    "status": "needs_review",
-    "derived_from": null,
-    "reviewed_at": null,
-    "note": "shot times predate the rise-foot definition (docs/METHODOLOGY.md, 2026-10-10): check each shot's leading edge",
-    "previous_status": "reviewed",
-    "previous_reviewed_at": null
+    "confirmed_at": "2026-10-14T14:01:52.556088+00:00",
+    "status": "reviewed",
+    "reviewed_at": "2026-10-14T14:01:52.556088+00:00",
+    "method": "own-audit"
   }
 }
