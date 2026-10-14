@@ -1,3 +1,3 @@
 """splitsmith: extract IPSC shot splits from head-mounted camera footage."""
 
-__version__ = "0.71.2"
+__version__ = "0.72.0"
