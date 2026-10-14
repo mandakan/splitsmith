@@ -6,10 +6,16 @@ primary beep and an audit saved in the app, copy the audit JSON and its
 audit WAV into ``tests/fixtures/`` as a reviewed fixture. Its other angles
 can then be snapped onto it with ``scripts/promote_secondary_angles.py``.
 
+``--repromote`` instead promotes again every stage, single-angle too, whose
+own fixture (the name this script gives it) is older than its audit: the
+audit was saved after the fixture's ``promoted_at``. The fixture is
+replaced in place, lab labels included (#1459); a snapped fixture is never
+a stage's own and is left to ``promote_secondary_angles.py --resnap``.
+
 Dry run by default; ``--write`` promotes.
 
 Usage:
-    uv run python scripts/promote_audited_stages.py [--matches DIR ...] [--write]
+    uv run python scripts/promote_audited_stages.py [--matches DIR ...] [--repromote] [--write]
 """
 
 from __future__ import annotations
@@ -52,6 +58,37 @@ def _match_slug(match_dir: Path, project: MatchProject) -> str:
     return f"{name}-{year}" if year else name
 
 
+def _last_saved(audit: Path) -> str | None:
+    """When the audit was last saved in the app (ISO, UTC), or None."""
+    if not audit.exists():
+        return None
+    doc = json.loads(audit.read_text())
+    saves = [e.get("ts") for e in doc.get("audit_events") or [] if e.get("kind") == "save" and e.get("ts")]
+    return max(saves) if saves else None
+
+
+def _stale_reason(fixture: Path, audit: Path) -> str | None:
+    """Why ``fixture`` should not be promoted again, or None when its audit
+    was saved after it was promoted."""
+    if not fixture.exists():
+        return f"no fixture named {fixture.stem} (its fixture has another name)"
+    data = json.loads(fixture.read_text())
+    if data.get("anchor"):
+        return "the fixture is a snap; use promote_secondary_angles.py --resnap"
+    promoted = data.get("promoted_at")
+    saved = _last_saved(audit)
+    if promoted and saved and _utc(saved) <= _utc(promoted):
+        return "fixture is up to date"
+    return None
+
+
+def _utc(ts: str) -> str:
+    """Comparable UTC timestamps: the app writes ``...Z``, the lab ``+00:00``."""
+    from datetime import UTC, datetime
+
+    return datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(UTC).isoformat()
+
+
 def _audited(audit: Path) -> bool:
     if not audit.exists():
         return False
@@ -76,6 +113,11 @@ def main() -> int:
         ),
     )
     ap.add_argument("--note", default="audited by ear on another angle, placed on this one")
+    ap.add_argument(
+        "--repromote",
+        action="store_true",
+        help="promote again the stages whose own fixture is older than their audit (single-angle too)",
+    )
     args = ap.parse_args()
 
     match_dirs = args.matches or sorted(p for p in DEFAULT_MATCHES.iterdir() if p.is_dir())
@@ -89,7 +131,11 @@ def main() -> int:
         for root in sorted(p for p in shooters.iterdir() if (p / "project.json").exists()):
             project = MatchProject.load(root)
             for stage in project.stages:
-                if len(stage.videos) < 2 or any(Path(v.path).name in known for v in stage.videos):
+                has_fixture = any(Path(v.path).name in known for v in stage.videos)
+                if args.repromote:
+                    if not has_fixture:
+                        continue
+                elif len(stage.videos) < 2 or has_fixture:
                     continue
                 where = f"{m.name} {root.name} stage {stage.stage_number}"
                 primary = stage.primary()
@@ -122,6 +168,8 @@ def main() -> int:
                     else "?"
                 )
                 slug = f"stage-shots-{_match_slug(m, project)}-stage{stage.stage_number}-{token}"
+                if skip is None and args.repromote:
+                    skip = _stale_reason(args.fixtures / f"{slug}.json", audit)
                 if skip:
                     print(f"  {where}: skip ({skip})")
                     continue
@@ -156,6 +204,7 @@ def main() -> int:
                         source_video=source,
                         fixture_window_in_source=(start, end),
                         camera=camera.model_dump(mode="json"),
+                        overwrite=args.repromote,
                     )
                 )
                 if flagged:

@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useMemo, type ReactNode } from "react";
 import {
   BrowserRouter,
   Navigate,
@@ -32,7 +32,10 @@ import { BeepReviewRedirect } from "@/components/match/BeepReviewRedirect";
 
 // Pages load on first navigation (#894); the shells above stay eager.
 const Login = lazyPage(() => import("@/pages/Login"), "Login");
-const Audit = lazyPage(() => import("@/pages/Audit"), "Audit");
+const Audit = lazyPage<{ fixture?: { path: string; videoPath: string | null } | null }>(
+  () => import("@/pages/Audit"),
+  "Audit",
+);
 const MobileAudit = lazyPage(() => import("@/pages/MobileAudit"), "MobileAudit");
 const MobileBeepReview = lazyPage(() => import("@/pages/MobileBeepReview"), "MobileBeepReview");
 const Coach = lazyPage(() => import("@/pages/Coach"), "Coach");
@@ -130,6 +133,22 @@ export function AuditRoute() {
 }
 
 /** The fixture editor needs a desk; its review walk fits a phone. */
+/* A corpus fixture reviewed in the Audit page's workspace (spec
+ * 2026-10-14): ``?fixture=<json path>&video=<source path>``, the paths the
+ * review queue holds. */
+function FixtureAuditRoute() {
+  const [params] = useSearchParams();
+  const path = params.get("fixture");
+  const video = params.get("video");
+  const target = useMemo(() => (path ? { path, videoPath: video } : null), [path, video]);
+  if (!target) return <Navigate to="/dev/review" replace />;
+  return (
+    <DesktopGate screen="Fixture review" links={false}>
+      <Audit key={target.path} fixture={target} />
+    </DesktopGate>
+  );
+}
+
 function ReviewRoute() {
   const [params] = useSearchParams();
   return (
@@ -402,6 +421,7 @@ export function App() {
               links into via /review?fixture=..., and /_design is the
               token palette browser. */}
           <Route element={<AppShell />}>
+            <Route path="review/audit" element={<FixtureAuditRoute />} />
             <Route path="review" element={<ReviewRoute />} />
             <Route path="promote-review" element={<DesktopGate screen="Promote review" links={false}><PromoteReview /></DesktopGate>} />
             <Route path="_design" element={<DesktopGate screen="Design system" links={false}><Design /></DesktopGate>} />

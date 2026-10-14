@@ -61,6 +61,18 @@ export interface BeepSnapResult {
   duration_ms: number;
 }
 
+/** ``GET /api/fixture/review-signals`` (spec 2026-10-14): where the Audit
+ *  page's fixture review stops, and what a snap's sign-off counts against. */
+export interface FixtureReviewSignals {
+  moves: Array<{ time: number; suggested: number; move_ms: number }>;
+  edges: Array<{ time: number; displacement_ms: number }>;
+  unmarked: Array<{ time: number; confidence: number | null }>;
+  /** A shot on a louder echo, with the real blast's foot ``earlier``. */
+  echoes: Array<{ time: number; earlier: number }>;
+  reference: { kind: "snap"; times: number[] } | null;
+  rounds: number | null;
+}
+
 export interface StageVideo {
   path: string;
   /** Stable URL-safe id derived from ``path``. Used by per-video API
@@ -4922,6 +4934,9 @@ export const api = {
       method: "PUT",
       json: payload,
     }),
+
+  getFixtureReviewSignals: (fixturePath: string) =>
+    request<FixtureReviewSignals>(`/api/fixture/review-signals?path=${encodeURIComponent(fixturePath)}`),
 
   getFixturePeaks: (fixturePath: string, bins = 1200) =>
     request<PeaksResult>(

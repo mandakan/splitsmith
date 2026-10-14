@@ -7,8 +7,8 @@
     {
       "shot_number": 1,
       "candidate_number": 7,
-      "time": 8.363,
-      "ms_after_beep": 3363,
+      "time": 8.369,
+      "ms_after_beep": 3369,
       "source": "detected",
       "interval_class": "first_shot",
       "interval_class_source": "auto",
@@ -20,35 +20,35 @@
       "time": 9.395,
       "ms_after_beep": 4395,
       "source": "detected",
-      "interval_class": "movement",
+      "interval_class": "transition",
       "interval_class_source": "auto",
       "id": "cand-9"
     },
     {
       "shot_number": 3,
       "candidate_number": 10,
-      "time": 10.398,
-      "ms_after_beep": 5398,
+      "time": 10.399,
+      "ms_after_beep": 5399,
       "source": "detected",
-      "interval_class": "movement",
+      "interval_class": "transition",
       "interval_class_source": "auto",
       "id": "cand-10"
     },
     {
       "shot_number": 4,
       "candidate_number": 14,
-      "time": 11.386,
-      "ms_after_beep": 6386,
+      "time": 11.392,
+      "ms_after_beep": 6392,
       "source": "detected",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto",
       "id": "cand-14"
     },
     {
       "shot_number": 5,
       "candidate_number": 15,
-      "time": 11.613,
-      "ms_after_beep": 6613,
+      "time": 11.617,
+      "ms_after_beep": 6617,
       "source": "detected",
       "interval_class": "split",
       "interval_class_source": "auto",
@@ -57,18 +57,18 @@
     {
       "shot_number": 6,
       "candidate_number": 16,
-      "time": 12.184,
-      "ms_after_beep": 7184,
+      "time": 12.194,
+      "ms_after_beep": 7194,
       "source": "detected",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto",
       "id": "cand-16"
     },
     {
       "shot_number": 7,
       "candidate_number": 17,
-      "time": 12.522,
-      "ms_after_beep": 7522,
+      "time": 12.533,
+      "ms_after_beep": 7533,
       "source": "detected",
       "interval_class": "split",
       "interval_class_source": "auto",
@@ -77,18 +77,18 @@
     {
       "shot_number": 8,
       "candidate_number": 19,
-      "time": 13.256,
-      "ms_after_beep": 8256,
+      "time": 13.26,
+      "ms_after_beep": 8260,
       "source": "detected",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto",
       "id": "cand-19"
     },
     {
       "shot_number": 9,
       "candidate_number": 20,
-      "time": 13.692,
-      "ms_after_beep": 8692,
+      "time": 13.693,
+      "ms_after_beep": 8693,
       "source": "detected",
       "interval_class": "split",
       "interval_class_source": "auto",
@@ -97,10 +97,10 @@
     {
       "shot_number": 10,
       "candidate_number": 21,
-      "time": 14.204,
-      "ms_after_beep": 9204,
+      "time": 14.205,
+      "ms_after_beep": 9205,
       "source": "detected",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto",
       "id": "cand-21"
     }
@@ -508,6 +508,28 @@
       }
     },
     {
+      "id": "e880d161da9548ea91f6651ad84fdcaf",
+      "ts": "2026-08-04T06:11:42.834952+00:00",
+      "kind": "shot_detect_run",
+      "payload": {
+        "consensus": 2,
+        "kept_count": 13,
+        "seeded_shots": true,
+        "candidate_count": 21,
+        "expected_rounds": 10
+      }
+    },
+    {
+      "ts": "2026-08-04T06:16:34.917Z",
+      "kind": "marker_rejected",
+      "payload": {
+        "id": "cand-3",
+        "time": 6.2053,
+        "candidate_number": 3
+      }
+    },
+    {
+      "id": "d55120dec20941a5929ec52b06ea43bf",
       "ts": "2026-08-04T06:16:34.917Z",
       "kind": "marker_rejected",
       "payload": {
@@ -526,6 +548,26 @@
       }
     },
     {
+      "id": "61df98f3be9241399621a54a54a30cfa",
+      "ts": "2026-08-04T06:16:35.801Z",
+      "kind": "marker_rejected",
+      "payload": {
+        "id": "cand-4",
+        "time": 6.3674,
+        "candidate_number": 4
+      }
+    },
+    {
+      "ts": "2026-08-04T06:16:37.684Z",
+      "kind": "marker_rejected",
+      "payload": {
+        "id": "cand-5",
+        "time": 7.2369,
+        "candidate_number": 5
+      }
+    },
+    {
+      "id": "034cb4085ead4bd1b328af73d2801a24",
       "ts": "2026-08-04T06:16:37.684Z",
       "kind": "marker_rejected",
       "payload": {
@@ -540,12 +582,36 @@
       "payload": {
         "shots_count": 10
       }
+    },
+    {
+      "id": "f078e37e4cfc4a778430af1b937b94bd",
+      "ts": "2026-08-04T06:16:49.117Z",
+      "kind": "save",
+      "payload": {
+        "shots_count": 10
+      }
+    },
+    {
+      "id": "4ce0cb835d984e239d35fd807cc0e1ed",
+      "ts": "2026-10-14T10:52:28.358Z",
+      "kind": "rise_foot_seat_all",
+      "payload": {
+        "moved": 9
+      }
+    },
+    {
+      "id": "44f9ebf971e84a24b9b6c5f427a9821f",
+      "ts": "2026-10-14T10:52:40.741Z",
+      "kind": "save",
+      "payload": {
+        "shots_count": 10
+      }
     }
   ],
-  "promoted_at": "2026-08-14T12:38:40.145406+00:00",
+  "promoted_at": "2026-10-14T11:26:39.780886+00:00",
   "provenance": {
     "stage_number": 3,
-    "stage_name": null
+    "stage_name": "A200"
   },
   "source_video": "/Volumes/X9/matches/hfo-masters-2026/shooters/s_f88d8aa0/raw/Mathias_S03_A200.MOV",
   "fixture_window_in_source": [
@@ -553,27 +619,25 @@
     37.3147
   ],
   "camera": {
-    "id": "unknown",
+    "id": "apple-iphone17pro",
     "make": "Apple",
     "model": "iPhone 17 Pro",
     "mount": "hand",
-    "position": "shooter",
+    "position": "squadmate",
     "audio_source": "internal",
     "agc_state": "unknown",
-    "sample_rate": null,
+    "sample_rate": 48000,
     "bit_depth": null,
-    "audio_codec": null
+    "audio_codec": "aac"
   },
   "shooter": {
     "id": "s97dcec94"
   },
   "event_id": "hfo-masters-2026:3:s97dcec94",
   "review": {
-    "status": "needs_review",
-    "derived_from": null,
-    "reviewed_at": null,
-    "note": "shot times predate the rise-foot definition (docs/METHODOLOGY.md, 2026-10-10): check each shot's leading edge",
-    "previous_status": "reviewed",
-    "previous_reviewed_at": null
+    "confirmed_at": "2026-10-14T12:55:13.289218+00:00",
+    "status": "reviewed",
+    "reviewed_at": "2026-10-14T12:55:13.289218+00:00",
+    "method": "own-audit"
   }
 }

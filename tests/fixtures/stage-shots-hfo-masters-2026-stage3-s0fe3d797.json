@@ -7,8 +7,8 @@
     {
       "shot_number": 1,
       "candidate_number": 8,
-      "time": 6.867,
-      "ms_after_beep": 2595,
+      "time": 6.868,
+      "ms_after_beep": 2596,
       "source": "detected",
       "interval_class": "first_shot",
       "interval_class_source": "auto",
@@ -17,18 +17,18 @@
     {
       "shot_number": 2,
       "candidate_number": 10,
-      "time": 7.487,
-      "ms_after_beep": 3215,
+      "time": 7.491,
+      "ms_after_beep": 3219,
       "source": "detected",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto",
       "id": "cand-10"
     },
     {
       "shot_number": 3,
       "candidate_number": 11,
-      "time": 7.734,
-      "ms_after_beep": 3462,
+      "time": 7.688,
+      "ms_after_beep": 3416,
       "source": "detected",
       "interval_class": "split",
       "interval_class_source": "auto",
@@ -37,8 +37,8 @@
     {
       "shot_number": 4,
       "candidate_number": 12,
-      "time": 8.106,
-      "ms_after_beep": 3834,
+      "time": 8.113,
+      "ms_after_beep": 3841,
       "source": "detected",
       "interval_class": "split",
       "interval_class_source": "auto",
@@ -47,8 +47,8 @@
     {
       "shot_number": 5,
       "candidate_number": 13,
-      "time": 8.361,
-      "ms_after_beep": 4089,
+      "time": 8.366,
+      "ms_after_beep": 4094,
       "source": "detected",
       "interval_class": "split",
       "interval_class_source": "auto",
@@ -57,8 +57,8 @@
     {
       "shot_number": 6,
       "candidate_number": 73,
-      "time": 22.42,
-      "ms_after_beep": 18148,
+      "time": 22.423,
+      "ms_after_beep": 18151,
       "source": "detected",
       "interval_class": "movement",
       "interval_class_source": "auto",
@@ -67,38 +67,38 @@
     {
       "shot_number": 7,
       "candidate_number": 75,
-      "time": 23.186,
-      "ms_after_beep": 18914,
+      "time": 23.154,
+      "ms_after_beep": 18882,
       "source": "detected",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto",
       "id": "cand-75"
     },
     {
       "shot_number": 8,
       "candidate_number": 79,
-      "time": 24.061,
-      "ms_after_beep": 19789,
+      "time": 24.062,
+      "ms_after_beep": 19790,
       "source": "detected",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto",
       "id": "cand-79"
     },
     {
       "shot_number": 9,
       "candidate_number": 82,
-      "time": 25.092,
-      "ms_after_beep": 20820,
+      "time": 25.106,
+      "ms_after_beep": 20834,
       "source": "detected",
-      "interval_class": "movement",
+      "interval_class": "transition",
       "interval_class_source": "auto",
       "id": "cand-82"
     },
     {
       "shot_number": 10,
       "candidate_number": 83,
-      "time": 25.394,
-      "ms_after_beep": 21122,
+      "time": 25.365,
+      "ms_after_beep": 21093,
       "source": "detected",
       "interval_class": "split",
       "interval_class_source": "auto",
@@ -107,8 +107,8 @@
     {
       "shot_number": 11,
       "candidate_number": 84,
-      "time": 25.643,
-      "ms_after_beep": 21371,
+      "time": 25.6,
+      "ms_after_beep": 21328,
       "source": "detected",
       "interval_class": "split",
       "interval_class_source": "auto",
@@ -117,10 +117,10 @@
     {
       "shot_number": 12,
       "candidate_number": 88,
-      "time": 26.751,
-      "ms_after_beep": 22479,
+      "time": 26.753,
+      "ms_after_beep": 22481,
       "source": "detected",
-      "interval_class": "movement",
+      "interval_class": "transition",
       "interval_class_source": "auto",
       "id": "cand-88"
     },
@@ -130,7 +130,7 @@
       "time": 27.755,
       "ms_after_beep": 23483,
       "source": "detected",
-      "interval_class": "movement",
+      "interval_class": "transition",
       "interval_class_source": "auto",
       "id": "cand-91"
     }
@@ -1870,6 +1870,28 @@
       }
     },
     {
+      "id": "108058b5c2464df88db8e1d3f185f501",
+      "ts": "2026-08-04T06:06:17.881614+00:00",
+      "kind": "shot_detect_run",
+      "payload": {
+        "consensus": 2,
+        "kept_count": 13,
+        "seeded_shots": true,
+        "candidate_count": 95,
+        "expected_rounds": 10
+      }
+    },
+    {
+      "ts": "2026-08-04T06:08:55.250Z",
+      "kind": "marker_rejected",
+      "payload": {
+        "id": "cand-14",
+        "time": 8.4581,
+        "candidate_number": 14
+      }
+    },
+    {
+      "id": "be9aefc21f4d4aea9b6a588ca3827a09",
       "ts": "2026-08-04T06:08:55.250Z",
       "kind": "marker_rejected",
       "payload": {
@@ -1888,17 +1910,203 @@
       }
     },
     {
+      "id": "f60be183f1f548bc9a6c209ccb30eff8",
+      "ts": "2026-08-04T06:09:20.296Z",
+      "kind": "marker_kept",
+      "payload": {
+        "id": "cand-88",
+        "time": 26.7513,
+        "candidate_number": 88
+      }
+    },
+    {
       "ts": "2026-08-04T06:09:25.362Z",
+      "kind": "save",
+      "payload": {
+        "shots_count": 13
+      }
+    },
+    {
+      "id": "ee6bfa7a993848708c8f0cf88b2767bf",
+      "ts": "2026-08-04T06:09:25.362Z",
+      "kind": "save",
+      "payload": {
+        "shots_count": 13
+      }
+    },
+    {
+      "id": "a73e3049fe9e49b28893bddeb89bc337",
+      "ts": "2026-10-13T10:22:00.536Z",
+      "kind": "rise_foot_seat_all",
+      "payload": {
+        "moved": 12
+      }
+    },
+    {
+      "id": "92e14eb30f7c4a178b7ae2538aae65cc",
+      "ts": "2026-10-13T10:22:04.207Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-11",
+        "to_time": 7.73,
+        "from_time": 7.74
+      }
+    },
+    {
+      "id": "a79c54eae3c74eb298218568c6623030",
+      "ts": "2026-10-13T10:22:04.397Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-11",
+        "to_time": 7.720000000000001,
+        "from_time": 7.73
+      }
+    },
+    {
+      "id": "5671e6ed6df44a5eb4686022cf5a1c10",
+      "ts": "2026-10-13T10:22:04.557Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-11",
+        "to_time": 7.710000000000001,
+        "from_time": 7.720000000000001
+      }
+    },
+    {
+      "id": "560fd94323b04b7c895df3ceb2ab3a49",
+      "ts": "2026-10-13T10:22:04.706Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-11",
+        "to_time": 7.700000000000001,
+        "from_time": 7.710000000000001
+      }
+    },
+    {
+      "id": "a73cb38c86114eeabd692543a43e3a12",
+      "ts": "2026-10-13T10:22:04.864Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-11",
+        "to_time": 7.690000000000001,
+        "from_time": 7.700000000000001
+      }
+    },
+    {
+      "id": "248a66af32454add92448667f2d9d2ab",
+      "ts": "2026-10-13T10:22:05.080Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-11",
+        "to_time": 7.6800000000000015,
+        "from_time": 7.690000000000001
+      }
+    },
+    {
+      "id": "9ae486d91f4e46488a233b64693c0405",
+      "ts": "2026-10-13T10:22:05.349Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-11",
+        "to_time": 7.670000000000002,
+        "from_time": 7.6800000000000015
+      }
+    },
+    {
+      "id": "fcb01e46dfc947cbacf1cd4e2195c292",
+      "ts": "2026-10-13T10:22:05.908Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-11",
+        "reason": "rise_foot",
+        "to_time": 7.688,
+        "from_time": 7.670000000000002
+      }
+    },
+    {
+      "id": "b85834133d254f2d855eddb68aba16c2",
+      "ts": "2026-10-13T10:22:21.569Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-84",
+        "to_time": 25.633999999999997,
+        "from_time": 25.644
+      }
+    },
+    {
+      "id": "c1d46b63cf2e442d894f99500bdde45c",
+      "ts": "2026-10-13T10:22:21.783Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-84",
+        "to_time": 25.623999999999995,
+        "from_time": 25.633999999999997
+      }
+    },
+    {
+      "id": "7ecbb866cebb48e3a64ab8ca012c1c41",
+      "ts": "2026-10-13T10:22:21.943Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-84",
+        "to_time": 25.613999999999994,
+        "from_time": 25.623999999999995
+      }
+    },
+    {
+      "id": "274852786cf941d28b5e36be055a60fd",
+      "ts": "2026-10-13T10:22:22.101Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-84",
+        "to_time": 25.603999999999992,
+        "from_time": 25.613999999999994
+      }
+    },
+    {
+      "id": "cd099dbb4f1b42ea8673858bd0cf225f",
+      "ts": "2026-10-13T10:22:22.279Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-84",
+        "to_time": 25.59399999999999,
+        "from_time": 25.603999999999992
+      }
+    },
+    {
+      "id": "3b49c7ce47a840d08460d71794532dc3",
+      "ts": "2026-10-13T10:22:22.502Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-84",
+        "to_time": 25.58399999999999,
+        "from_time": 25.59399999999999
+      }
+    },
+    {
+      "id": "c81e40a8049b45948fbab3ac2fd2bea5",
+      "ts": "2026-10-13T10:22:23.072Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-84",
+        "reason": "rise_foot",
+        "to_time": 25.6,
+        "from_time": 25.58399999999999
+      }
+    },
+    {
+      "id": "01d4695601d44b9d97b07df666109031",
+      "ts": "2026-10-13T10:22:26.628Z",
       "kind": "save",
       "payload": {
         "shots_count": 13
       }
     }
   ],
-  "promoted_at": "2026-08-14T12:38:39.193363+00:00",
+  "promoted_at": "2026-10-14T11:26:38.152558+00:00",
   "provenance": {
     "stage_number": 3,
-    "stage_name": null
+    "stage_name": "A200"
   },
   "source_video": "/Volumes/X9/matches/hfo-masters-2026/shooters/s_73ec3fed/raw/IMG_2522.MOV",
   "fixture_window_in_source": [
@@ -1906,27 +2114,25 @@
     32.762
   ],
   "camera": {
-    "id": "unknown",
+    "id": "apple-iphone17promax",
     "make": "Apple",
     "model": "iPhone 17 Pro Max",
     "mount": "hand",
-    "position": "shooter",
+    "position": "squadmate",
     "audio_source": "internal",
     "agc_state": "unknown",
-    "sample_rate": null,
+    "sample_rate": 48000,
     "bit_depth": null,
-    "audio_codec": null
+    "audio_codec": "aac"
   },
   "shooter": {
     "id": "s0fe3d797"
   },
   "event_id": "hfo-masters-2026:3:s0fe3d797",
   "review": {
-    "status": "needs_review",
-    "derived_from": null,
-    "reviewed_at": null,
-    "note": "shot times predate the rise-foot definition (docs/METHODOLOGY.md, 2026-10-10): check each shot's leading edge",
-    "previous_status": "reviewed",
-    "previous_reviewed_at": null
+    "confirmed_at": "2026-10-14T12:55:12.526068+00:00",
+    "status": "reviewed",
+    "reviewed_at": "2026-10-14T12:55:12.526068+00:00",
+    "method": "own-audit"
   }
 }

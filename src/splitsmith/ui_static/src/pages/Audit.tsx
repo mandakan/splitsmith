@@ -76,6 +76,7 @@ import {
   type PeaksResult,
   type StageAudit,
   type StageVideo,
+  type FixtureReviewSignals,
 } from "@/lib/api";
 import { detectAnomalies, keptShotsFromMarkers } from "@/lib/anomalies";
 import { bandPipelineAction, bandReadouts } from "@/lib/auditBand";
@@ -98,6 +99,17 @@ import { computeAuditNextStep } from "@/lib/audit-next-step";
 import { useMatchHref } from "@/lib/matchHref";
 import { placeTime, type SnapPeaks } from "@/lib/peak-snap";
 import { StillPendingError } from "@/lib/pending";
+import { buildFixtureJson } from "@/lib/fixtureDoc";
+import {
+  fixtureAuditHref,
+  fixtureProject,
+  fixtureStem,
+  fixtureVideoOffset,
+  nextInQueue,
+  signalAnomalies,
+  signOffLine,
+  type FixtureTarget,
+} from "@/lib/fixtureReview";
 import { earlierFootFor, footFor, footReadout, readSnapOn, seatAllMoves, writeSnapOn } from "@/lib/riseFoot";
 import { isPeekKey } from "@/lib/auditKeys";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -128,7 +140,11 @@ const K_AUTO_PROGRESS_KEY = "splitsmith.audit.k_auto_progress";
 const LOOP_PRE_S = 0.5;
 const LOOP_POST_S = 0.7;
 
-export function Audit() {
+/** ``fixture``: review a corpus fixture in this page's workspace (spec
+ *  2026-10-14). Its shots, audio and source video stand in for a match
+ *  stage's; the match-only steps (beep, trim, detect) do not show, and the
+ *  primary action marks it reviewed and opens the next one. */
+export function Audit({ fixture = null }: { fixture?: FixtureTarget | null } = {}) {
   // ShooterScopedRoute canonicalises every Audit entry to /audit/:slug/:stage
   // (or /audit/:slug when no stage yet), so slug is always populated by the
   // time we render. The slug also keys the component remount on switch.
@@ -148,7 +164,10 @@ export function Audit() {
   const [projectError, setProjectError] = useState<string | null>(null);
   // Shooters come from the MatchShell outlet context now -- one fetch
   // per match, shared with the breadcrumb chip strip. No own fetch.
-  const outletCtx = useOutletContext<MatchShellOutletContext | undefined>();
+  const shellCtx = useOutletContext<MatchShellOutletContext | undefined>();
+  // A fixture has no match shell: nothing of the shell's (shooters, jobs,
+  // origin) applies to it.
+  const outletCtx = fixture ? undefined : shellCtx;
   const shooters = outletCtx?.shooters ?? [];
   // A desktop-synced match on hosted: detection is the desktop's job, so
   // the overflow asks it to run (#1100) instead of a local re-detect that
@@ -274,19 +293,22 @@ export function Audit() {
 
   // ShooterScopedRoute redirects to /shooters when slug is missing, so by
   // the time this renders ``slugParam`` is always a non-empty string.
-  const slug = slugParam!;
+  const slug = fixture ? "fixture" : slugParam!;
 
   const stageNumber = useMemo(() => {
+    if (fixture) return project?.stages[0]?.stage_number ?? null;
     if (stageParam == null) return null;
     const n = Number.parseInt(stageParam, 10);
     return Number.isFinite(n) ? n : null;
-  }, [stageParam]);
+  }, [stageParam, fixture, project]);
 
   // Load project once.
   useEffect(() => {
     let alive = true;
-    api
-      .getProject(slug)
+    const load = fixture
+      ? api.getFixtureAudit(fixture.path).then((doc) => fixtureProject(doc, fixture.videoPath))
+      : api.getProject(slug);
+    load
       .then((p) => {
         if (alive) setProject(p);
       })
@@ -305,6 +327,7 @@ export function Audit() {
   // the request lands.
   const [beepLowConfThreshold, setBeepLowConfThreshold] = useState(0.97);
   useEffect(() => {
+    if (fixture) return;
     let alive = true;
     api
       .getAutomation(slug)
@@ -368,7 +391,7 @@ export function Audit() {
   }, [stageSelectorOptions, stageNumber]);
 
   useEffect(() => {
-    if (stageNumber != null) return;
+    if (fixture || stageNumber != null) return;
     if (stagesWithPrimary.length === 0) return;
     // Must go through ``href`` so the target keeps the ``/match/:matchId``
     // prefix. A bare ``/audit/...`` escapes the match scope, matches no
@@ -483,7 +506,9 @@ export function Audit() {
   const scrub = useScrubSource();
   const servedPlan = useMemo(
     () =>
-      activeVideo
+      fixture && audit
+        ? { kind: "proxy" as const, offset: fixtureVideoOffset(audit) }
+        : activeVideo
         ? planServedClip({
             index: activeVideoIndex,
             beepTime: activeBeep,
@@ -493,7 +518,7 @@ export function Audit() {
             preBufferSeconds: project?.trim_pre_buffer_seconds ?? 5,
           })
         : null,
-    [activeVideo, activeVideoIndex, activeBeep, auditBeep, peaks?.trimmed, project],
+    [activeVideo, activeVideoIndex, activeBeep, auditBeep, peaks?.trimmed, project, fixture, audit],
   );
   const beepOffset = servedPlan?.offset ?? 0;
 
@@ -538,11 +563,13 @@ export function Audit() {
     setPeaksLoading(true);
     setPeaksPreparing(false);
     setPeaksError(null);
-    api
-      .getStagePeaks(slug, stageNumber, PEAK_BINS, {
-        signal: ctl.signal,
-        onPending: () => alive && setPeaksPreparing(true),
-      })
+    (fixture
+      ? api.getFixturePeaks(fixture.path, PEAK_BINS)
+      : api.getStagePeaks(slug, stageNumber, PEAK_BINS, {
+          signal: ctl.signal,
+          onPending: () => alive && setPeaksPreparing(true),
+        })
+    )
       .then((p) => {
         if (alive) setPeaks(p);
       })
@@ -564,7 +591,7 @@ export function Audit() {
       alive = false;
       ctl.abort();
     };
-  }, [slug, stageNumber, primary]);
+  }, [slug, stageNumber, primary, fixture]);
 
   // Peaks at 1 ms per bin: the leading-edge snap of a drop while zoomed out
   // (lib/peak-snap.placeTime), and the waveform the band draws once they
@@ -585,8 +612,7 @@ export function Audit() {
     // grid snapping instead of snapping against the previous clip's array.
     setSnapPeaks(null);
     let alive = true;
-    api
-      .getStagePeaks(slug, stageNumber, bins)
+    (fixture ? api.getFixturePeaks(fixture.path, bins) : api.getStagePeaks(slug, stageNumber, bins))
       .then((p) => {
         if (alive) setSnapPeaks({ peaks: p.peaks, duration: p.duration });
       })
@@ -596,7 +622,7 @@ export function Audit() {
     return () => {
       alive = false;
     };
-  }, [peaks, slug, stageNumber]);
+  }, [peaks, slug, stageNumber, fixture]);
 
   // Every load of the stage's audit takes a ticket; a response applies only
   // while its ticket is the newest. Without it a slow load (the page's
@@ -618,8 +644,7 @@ export function Audit() {
       return;
     }
     const ticket = ++auditLoadSeqRef.current;
-    api
-      .getStageAudit(slug, stageNumber)
+    (fixture ? api.getFixtureAudit(fixture.path) : api.getStageAudit(slug, stageNumber))
       .then((a) => {
         if (ticket !== auditLoadSeqRef.current) return;
         setAudit(a);
@@ -633,7 +658,7 @@ export function Audit() {
     return () => {
       auditLoadSeqRef.current += 1;
     };
-  }, [slug, stageNumber]);
+  }, [slug, stageNumber, fixture]);
 
   // Tab change: re-seek the new <video> to the audit-timeline position.
   useEffect(() => {
@@ -1026,11 +1051,30 @@ export function Audit() {
   // absorbs the "beep looks wrong" heuristic below as a synthetic warn
   // chip -- the dedicated banner is reserved for sync-mode (per design),
   // so passive warnings ride the anomaly row alongside everything else.
+  // A fixture's review signals (spec 2026-10-14): where to stop, and what a
+  // snap's sign-off counts against.
+  const [reviewSignals, setReviewSignals] = useState<FixtureReviewSignals | null>(null);
+  useEffect(() => {
+    if (!fixture) return;
+    let alive = true;
+    api
+      .getFixtureReviewSignals(fixture.path)
+      .then((sig) => {
+        if (alive) setReviewSignals(sig);
+      })
+      .catch(() => {
+        /* no signals: the review is an ordinary audit pass */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [fixture]);
   const anomalies = useMemo(() => {
     if (!stage) return [];
     const shots = keptShotsFromMarkers(markers, auditBeep);
-    return detectAnomalies(shots, stage.time_seconds);
-  }, [markers, auditBeep, stage]);
+    const found = detectAnomalies(shots, stage.time_seconds);
+    return reviewSignals ? [...found, ...signalAnomalies(reviewSignals)] : found;
+  }, [markers, auditBeep, stage, reviewSignals]);
 
   // "Beep looks wrong" heuristic. Fires when the post-detection state
   // has signals that strongly suggest the beep was placed on the wrong
@@ -1231,6 +1275,48 @@ export function Audit() {
         return payload;
       };
       const base = opts.base !== undefined ? opts.base : audit;
+      if (fixture) {
+        // Never write a fixture whose document is not in hand: a save built
+        // on nothing would replace its shots with an empty list.
+        if (!base) return false;
+        setSaveStatus({ kind: "saving" });
+        try {
+          const stem = fixtureStem(fixture.path);
+          let saved = base;
+          if (isDirtyRef.current) {
+            const payload = buildFixtureJson({
+              base,
+              markers,
+              appendEvents: [...appendEvents, { ts: new Date().toISOString(), kind: "save", payload: {} }],
+            });
+            const lastEv = payload.audit_events?.[payload.audit_events.length - 1];
+            if (lastEv && lastEv.kind === "save") lastEv.payload = { shots_count: payload.shots.length };
+            saved = await api.saveFixtureAudit(fixture.path, payload);
+          }
+          auditLoadSeqRef.current += 1;
+          setAudit(saved);
+          sessionEventsRef.current = [];
+          isDirtyRef.current = false;
+          setSaveStatus({ kind: "saved", at: Date.now() });
+          if (opts.advance) {
+            // The queue as it stands before the sign-off, so "next" is the
+            // one after this fixture, inside the queue's filter.
+            const queue = await api.getDevReviewQueue();
+            await api.confirmReviewFixture(stem, "audit");
+            const filter = searchParams.get("q") ?? "";
+            const next = nextInQueue(queue.pending, stem, filter);
+            navigate(
+              next
+                ? fixtureAuditHref(next.audit_path, next.video_path ?? null, filter)
+                : `/dev/review${filter ? `?q=${encodeURIComponent(filter)}` : ""}`,
+            );
+          }
+          return true;
+        } catch (err) {
+          setSaveStatus({ kind: "error", message: err instanceof ApiError ? err.detail : String(err) });
+          return false;
+        }
+      }
       setSaveStatus({ kind: "saving" });
       try {
         let saved: StageAudit;
@@ -1303,6 +1389,8 @@ export function Audit() {
       slugParam,
       shooters,
       stageSelectorOptions,
+      fixture,
+      searchParams,
     ],
   );
 
@@ -1616,7 +1704,11 @@ export function Audit() {
   // Which file the player streams: pinned per <video> element, through
   // the scrub source for a trimmed angle, naming the stage. The rules
   // live in lib/auditVideoSrc.ts.
-  const videoSrc = auditVideoSrc({
+  const videoSrc = fixture
+    ? fixture.videoPath
+      ? api.fixtureVideoUrl(fixture.videoPath)
+      : ""
+    : auditVideoSrc({
     slug,
     video: activeVideo,
     plan: servedPlan,
@@ -1636,7 +1728,7 @@ export function Audit() {
   const rows = useMemo(() => shotRows(markers, anomalies), [markers, anomalies]);
   // Step 1 when a video on the stage still needs its beep confirmed, or
   // on Re-pick. Auto-trusted beeps are already reviewed server-side.
-  const beepStep = stage != null && (repick || beepStepVideos(stage).length > 0);
+  const beepStep = !fixture && stage != null && (repick || beepStepVideos(stage).length > 0);
   // The ``?beep=<video_id>`` redirect from the old queue page opens step 1
   // on that camera; consumed once.
   useEffect(() => {
@@ -1657,20 +1749,19 @@ export function Audit() {
 
   const reloadPeaks = useCallback(() => {
     if (stageNumber == null) return;
-    api
-      .getStagePeaks(slug, stageNumber, PEAK_BINS)
+    (fixture ? api.getFixturePeaks(fixture.path, PEAK_BINS) : api.getStagePeaks(slug, stageNumber, PEAK_BINS))
       .then((np) => setPeaks(np))
       .catch(() => {});
-  }, [slug, stageNumber]);
+  }, [slug, stageNumber, fixture]);
   const reloadAudit = useCallback(async () => {
     if (stageNumber == null) return;
     const ticket = ++auditLoadSeqRef.current;
-    const a = await api.getStageAudit(slug, stageNumber);
+    const a = await (fixture ? api.getFixtureAudit(fixture.path) : api.getStageAudit(slug, stageNumber));
     if (ticket !== auditLoadSeqRef.current) return;
     setAudit(a);
     setMarkers(deriveMarkers(a));
     setConflict(null);
-  }, [slug, stageNumber]);
+  }, [slug, stageNumber, fixture]);
 
   // The conflict banner's two ways out. Keeping the edits saves them over
   // the stored copy (its audit log kept, this session's appended);
@@ -1810,9 +1901,9 @@ export function Audit() {
         ? "detect"
         : null
     : null;
-  const prereqActive = prereqKind != null && stage != null && primary != null;
+  const prereqActive = !fixture && prereqKind != null && stage != null && primary != null;
   // The band menu's pipeline entry (lib/auditBand).
-  const pipelineAction = bandPipelineAction(peaks);
+  const pipelineAction = fixture ? null : bandPipelineAction(peaks);
   // One frame (25 ms) back or forward from the playhead, from the band header.
   const stepFrame = (dir: -1 | 1) => {
     const v = videoRef.current;
@@ -1861,6 +1952,8 @@ export function Audit() {
     activeStage: stageNumber,
   });
   const saving = saveStatus.kind === "saving";
+  const primaryLabel = fixture ? "Mark reviewed & next" : nextStep.label;
+  const signOff = fixture ? signOffLine(keptShots.map((m) => m.time), reviewSignals) : null;
   const currentShot = keptShots[Math.min(currentShotIndex, keptShots.length - 1)] ?? null;
   const currentFlag = currentShot ? (rows.all.find((r) => r.marker.id === currentShot.id)?.flag ?? null) : null;
   const shotAtPlayhead = keptShots.some((s) => Math.abs(s.time - currentTime) < 0.05);
@@ -1961,9 +2054,11 @@ export function Audit() {
               {...header}
               actions={
                 <>
-                  <Button type="button" onClick={() => setRepick(true)}>
-                    Re-pick beep
-                  </Button>
+                  {fixture ? null : (
+                    <Button type="button" onClick={() => setRepick(true)}>
+                      Re-pick beep
+                    </Button>
+                  )}
                   <Button
                     type="button"
                     onClick={undo}
@@ -1978,15 +2073,25 @@ export function Audit() {
                     type="button"
                     variant={prereqShouldShow ? "default" : "primary"}
                     onClick={() => void performSave({ advance: true })}
-                    disabled={saving || prereqShouldShow}
-                    aria-label={nextStep.label}
-                    title={`${nextStep.label} (${MOD_LABEL}+Enter)`}
+                    disabled={saving || prereqShouldShow || (fixture != null && audit == null)}
+                    aria-label={primaryLabel}
+                    title={`${primaryLabel} (${MOD_LABEL}+Enter)`}
                   >
-                    {saving ? "Saving..." : nextStep.label} <Kbd size="sm">{MOD_GLYPH}&#9166;</Kbd>
+                    {saving ? "Saving..." : primaryLabel} <Kbd size="sm">{MOD_GLYPH}&#9166;</Kbd>
                   </Button>
                 </>
               }
             />
+
+            {signOff ? (
+              <p
+                role="status"
+                data-testid="fixture-sign-off"
+                className={cn("mb-4 text-md", signOff.ok ? "text-ink-2" : "text-status-warning")}
+              >
+                {signOff.text}
+              </p>
+            ) : null}
 
             {conflict ? (
               <div

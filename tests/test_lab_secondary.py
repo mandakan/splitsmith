@@ -1,12 +1,20 @@
 """Planning snapped promotions of secondary angles (#1363)."""
 
-from splitsmith.fixture_schema import REVIEW_NEEDED, REVIEWED, CameraMount, CameraProbeResult
+from splitsmith.fixture_schema import (
+    REVIEW_NEEDED,
+    REVIEWED,
+    CameraMount,
+    CameraProbeResult,
+    shots_revision_sha,
+)
 from splitsmith.lab.secondary import (
     AnchorFixture,
     AngleVideo,
     StageAngles,
     camera_for,
     plan_secondary_promotions,
+    snap_beep_now,
+    snap_is_stale,
 )
 
 NO_PROBE = CameraProbeResult()
@@ -126,3 +134,122 @@ def test_the_projects_make_and_model_place_a_renamed_file():
 def test_a_samsung_probe_places_a_renamed_phone_file():
     samsung = camera_for("anton_8_2.mp4", "hand", CameraProbeResult(make="Samsung"))
     assert (samsung.id, samsung.mount) == ("samsung", CameraMount.hand)
+
+
+# --- Re-snapping a snap whose anchor changed (2026-10-14) -----------------------
+
+
+GO3S = "VID_20260101_101010_00_001.mp4"
+
+
+def _snapped_stage():
+    stage = _stage(_video("aaaaaa1", "IMG_1.MOV"), _video("bbbbbb2", GO3S))
+    anchor = AnchorFixture("stage-shots-m-2026-stage1-s1", "IMG_1.MOV", REVIEWED, 20)
+    snap = AnchorFixture(f"{anchor.stem}-go3s", GO3S, REVIEW_NEEDED, 20)
+    return stage, anchor, snap
+
+
+def test_a_snap_whose_anchor_changed_is_snapped_again_in_place():
+    stage, anchor, snap = _snapped_stage()
+    asked: list[tuple[str, str]] = []
+
+    def stale(s: AnchorFixture, a: AnchorFixture) -> bool:
+        asked.append((s.stem, a.stem))
+        return True
+
+    plans = plan_secondary_promotions([stage], [anchor, snap], _cams(("bbbbbb2", GO3S)), stale_snap=stale)
+    assert len(plans) == 1
+    p = plans[0]
+    assert (p.slug, p.anchor_stem, p.skip, p.replaces) == (snap.stem, anchor.stem, None, True)
+    assert asked == [(snap.stem, anchor.stem)]
+
+
+def test_a_snap_whose_anchor_is_unchanged_is_left_alone():
+    stage, anchor, snap = _snapped_stage()
+    plans = plan_secondary_promotions(
+        [stage], [anchor, snap], _cams(("bbbbbb2", GO3S)), stale_snap=lambda s, a: False
+    )
+    assert plans == []
+
+
+def test_a_reviewed_snap_whose_anchor_changed_is_listed_never_overwritten():
+    stage, anchor, snap = _snapped_stage()
+    # Fewer shots than the anchor, so it is not itself picked as the anchor.
+    reviewed = AnchorFixture(snap.stem, GO3S, REVIEWED, 19)
+    plans = plan_secondary_promotions(
+        [stage], [anchor, reviewed], _cams(("bbbbbb2", GO3S)), stale_snap=lambda s, a: True
+    )
+    assert len(plans) == 1
+    assert plans[0].replaces is False
+    assert "reviewed" in plans[0].skip
+
+
+def test_without_the_check_a_snapped_angle_is_done():
+    stage, anchor, snap = _snapped_stage()
+    assert plan_secondary_promotions([stage], [anchor, snap], _cams(("bbbbbb2", GO3S))) == []
+
+
+# --- When a snap is stale (2026-10-14) -----------------------------------------
+
+
+def _snap_doc(beep: float = 5.0, window_start: float = 1.5, seated: bool = True) -> dict:
+    return {
+        "beep_time": beep,
+        "fixture_window_in_source": [window_start, 40.0],
+        "anchor": {"revision_sha": shots_revision_sha([{"time": 1.0}]), "seated": seated},
+        "shots": [],
+    }
+
+
+def test_a_current_snap_is_not_stale():
+    assert not snap_is_stale(_snap_doc(), {"shots": [{"time": 1.0}]}, beep_now=6.5)
+
+
+def test_a_snap_is_stale_when_its_anchor_changed():
+    assert snap_is_stale(_snap_doc(), {"shots": [{"time": 1.2}]}, beep_now=6.5)
+
+
+def test_a_snap_is_stale_when_it_predates_seating():
+    assert snap_is_stale(_snap_doc(seated=False), {"shots": [{"time": 1.0}]}, beep_now=6.5)
+
+
+def test_a_snap_is_stale_when_the_angle_s_beep_moved():
+    """The snap aligns on this angle's own beep (beep_time + the window's
+    start, in the source); moving it moves every shot."""
+    assert snap_is_stale(_snap_doc(), {"shots": [{"time": 1.0}]}, beep_now=6.5709)
+    assert not snap_is_stale(_snap_doc(), {"shots": [{"time": 1.0}]}, beep_now=6.5004)
+    assert not snap_is_stale(_snap_doc(), {"shots": [{"time": 1.0}]}, beep_now=None)
+
+
+def test_a_fixture_that_is_not_a_snap_is_never_stale():
+    """A hand-audited primary can be the stage's anchor's neighbour in the
+    planner's loop; it has no anchor block and must never be snapped over."""
+    primary = {"beep_time": 5.0, "fixture_window_in_source": [1.5, 40.0], "shots": []}
+    assert not snap_is_stale(primary, {"shots": [{"time": 1.0}]}, beep_now=9.9)
+
+
+def test_a_snap_reads_the_beep_of_its_own_stage_and_file():
+    """One file can hold several stages (a single take) and a file name can
+    repeat across matches; the beep is the one for this file on this stage."""
+    beeps = {
+        ("/m/a/raw/VID_1.mp4", 1): 10.0,
+        ("/m/a/raw/VID_1.mp4", 2): 200.0,
+        ("/m/b/raw/VID_1.mp4", 1): 55.0,
+    }
+    snap = {"source_video": "/m/a/raw/VID_1.mp4", "stage_number": 2}
+    assert snap_beep_now(snap, beeps) == 200.0
+    assert snap_beep_now({"source_video": "/m/c/raw/VID_1.mp4", "stage_number": 2}, beeps) is None
+    assert snap_beep_now({"stage_number": 2}, beeps) is None
+
+
+def test_a_snap_finds_its_beep_through_a_linked_source(tmp_path):
+    """A project's raw/ names its footage through links; a snap records
+    the file it read. Both are the same video."""
+    real = tmp_path / "raw" / "VID_1.mp4"
+    real.parent.mkdir()
+    real.write_bytes(b"")
+    link = tmp_path / "project-raw-VID_1.mp4"
+    link.symlink_to(real)
+    beeps = {(str(link.resolve()), 3): 12.5}
+    assert snap_beep_now({"source_video": str(real), "stage_number": 3}, beeps) == 12.5
+    assert snap_beep_now({"source_video": str(link), "stage_number": 3}, beeps) == 12.5

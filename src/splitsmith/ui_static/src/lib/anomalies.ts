@@ -29,7 +29,12 @@ export type AnomalyKind =
   | "double_detection"
   | "long_pause"
   | "shot_count_low"
-  | "shot_count_high";
+  | "shot_count_high"
+  // Fixture review in the Audit page (spec 2026-10-14, lib/fixtureReview).
+  | "review_move"
+  | "review_edge"
+  | "review_unmarked"
+  | "review_echo";
 
 export type AnomalySeverity = "info" | "warn";
 

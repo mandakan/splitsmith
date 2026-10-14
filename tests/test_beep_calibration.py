@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -265,9 +266,12 @@ def test_committed_manifest_references_existing_wavs(fixtures_dir: Path) -> None
         pytest.skip("calibration manifest not built yet")
     manifest = load_manifest(manifest_path)
     assert manifest.fixtures, "manifest is empty -- run build_beep_calibration.py"
+    lock = json.loads((fixtures_dir / "audio.lock.json").read_text())
+    in_r2 = set(lock.get("files", lock))
     for entry in manifest.fixtures:
         clip = fixtures_dir / entry.clip_wav
-        assert clip.exists(), f"{entry.stem}: clip wav missing at {clip}"
+        # A clip whose audio lives in R2 is not in git; the lock is its record.
+        assert clip.exists() or clip.name in in_r2, f"{entry.stem}: clip wav missing at {clip}"
         if entry.full_wav and entry.ground_truth_in_full is not None:
             assert (
                 entry.ground_truth_in_full >= 0.0

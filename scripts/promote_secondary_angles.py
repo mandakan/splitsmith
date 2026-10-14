@@ -11,8 +11,16 @@ fixture, the clip WAV and the promotion report, except where too many
 anchor shots found no onset on the secondary (``--max-missed``); those are
 listed, not written. A summary lands in ``build/promote_secondary/``.
 
+``--resnap`` also snaps again every angle whose fixture is a snap the anchor
+changed since (``fixture_schema.is_anchor_stale``: its shots differ from the
+ones snapped onto), whose angle's beep moved since, or that predates seating
+(no ``anchor.seated``): in place and back to ``needs_review``
+(``lab.secondary.snap_is_stale``); run it after
+re-promoting primaries (``promote_audited_stages.py --repromote``). A snap
+someone reviewed by hand is listed, never overwritten.
+
 Usage:
-    uv run python scripts/promote_secondary_angles.py [--matches DIR ...] [--write]
+    uv run python scripts/promote_secondary_angles.py [--matches DIR ...] [--resnap] [--write]
 """
 
 from __future__ import annotations
@@ -35,6 +43,8 @@ from splitsmith.lab.secondary import (
     StageAngles,
     camera_for,
     plan_secondary_promotions,
+    snap_beep_now,
+    snap_is_stale,
 )
 from splitsmith.match_project import MatchProject
 from splitsmith.runtime import runtime as process_runtime
@@ -91,6 +101,7 @@ def main() -> int:
     ap.add_argument("--fixtures", type=Path, default=fx_module.FIXTURES_DIR)
     ap.add_argument("--write", action="store_true", help="promote; without it, only print the plan")
     ap.add_argument("--max-missed", type=float, default=0.25, help="skip when more anchor shots miss")
+    ap.add_argument("--resnap", action="store_true", help="also snap again snaps whose anchor changed")
     args = ap.parse_args()
 
     match_dirs = args.matches or sorted(p for p in DEFAULT_MATCHES.iterdir() if p.is_dir())
@@ -100,6 +111,9 @@ def main() -> int:
     stages: list[StageAngles] = []
     cameras = {}
     context = {}
+    # Each angle's beep as the project has it now, by (source, stage): a
+    # snap aligned on an older beep is stale.
+    beeps: dict[tuple[str, int], float | None] = {}
     for match, root in _shooter_roots(match_dirs):
         project = MatchProject.load(root)
         for stage in project.stages:
@@ -111,9 +125,10 @@ def main() -> int:
                 angles.append(
                     AngleVideo(v.video_id, name, v.beep_time, bool(v.beep_reviewed), v.camera_mount)
                 )
-                if name in known:
-                    continue
                 source = project.resolve_video_path(root, v.path)
+                beeps[(str(source.resolve()), stage.stage_number)] = v.beep_time
+                if name in known and not args.resnap:
+                    continue
                 probe = probe_camera_metadata(source) if source.exists() else None
                 cameras[v.video_id] = (
                     camera_for(name, v.camera_mount, probe, make=v.camera_make, model=v.camera_model)
@@ -123,11 +138,22 @@ def main() -> int:
                 context[v.video_id] = (project, root, stage.stage_number, v, source)
             stages.append(StageAngles(match, root.name, stage.stage_number, tuple(angles)))
 
-    plans = plan_secondary_promotions(stages, corpus, cameras)
+    def stale(snap: AnchorFixture, anchor: AnchorFixture) -> bool:
+        def load(stem: str) -> dict:
+            return json.loads((args.fixtures / f"{stem}.json").read_text())
+
+        data = load(snap.stem)
+        return snap_is_stale(data, load(anchor.stem), beep_now=snap_beep_now(data, beeps))
+
+    plans = plan_secondary_promotions(stages, corpus, cameras, stale_snap=stale if args.resnap else None)
     todo = [p for p in plans if p.skip is None]
     print(f"{len(plans)} videos without a fixture on a stage with one; {len(todo)} to promote")
     for p in plans:
-        what = p.skip or f"-> {p.slug}"
+        what = p.skip or (
+            f"-> {p.slug} (again: its anchor or beep changed, or it predates seating)"
+            if p.replaces
+            else f"-> {p.slug}"
+        )
         where = f"{p.stage.match} {p.stage.shooter_slug} stage {p.stage.stage_number}"
         print(f"  {where} {p.video.file_name}: {what}")
 
@@ -144,6 +170,12 @@ def main() -> int:
     out = OUT_DIR / ("result.json" if args.write else "plan.json")
     out.write_text(json.dumps(results, indent=2) + "\n")
     print(f"wrote {out}")
+    written = [r["slug"] for r in results if r["status"] == "written"]
+    if written:
+        # Fixture audio lives in R2, never in git: a new or re-cut clip is
+        # not in audio.lock.json until it is pushed.
+        print("push the new clips before committing:")
+        print(f"  uv run python scripts/fixture_audio.py push {' '.join(written)}")
     return 0
 
 
@@ -204,6 +236,7 @@ def _promote(p: PlannedPromotion, ctx, args, runtime, ffmpeg: str) -> dict:
         slug=p.slug,
         trim_wav=_trim(ffmpeg),
         source_video=str(source.resolve()),
+        overwrite=p.replaces,
     )
     return _row(p, "written", None, counts=counts)
 

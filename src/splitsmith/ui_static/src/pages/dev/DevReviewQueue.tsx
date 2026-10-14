@@ -28,6 +28,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useLabRun } from "@/components/lab/useLabRun";
 import { api, type DevReviewQueueItem, type DevReviewQueueResponse } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { fixtureAuditHref, queueFilterMatches } from "@/lib/fixtureReview";
 import { continueTarget, mediaMatches, phoneLayout, walkHref } from "@/lib/walk";
 
 /** State bundle for the queue rail's eval affordance. Labels attach to
@@ -49,6 +50,9 @@ export function DevReviewQueue() {
   const [loading, setLoading] = useState(true);
   const [searchParams, setSearchParams] = useSearchParams();
   const activeSlug = searchParams.get("slug");
+  // The queue's filter (``?q=``), carried into the Audit review so "Mark
+  // reviewed & next" stays inside it.
+  const filter = searchParams.get("q") ?? "";
   // A phone gets Continue and a list; the two panes need a desk.
   const [phone] = useState(() => phoneLayout(searchParams, mediaMatches));
 
@@ -69,21 +73,31 @@ export function DevReviewQueue() {
     };
   }, []);
 
+  const shown = useMemo<DevReviewQueueResponse | null>(() => {
+    if (!queue) return null;
+    const keep = (items: DevReviewQueueItem[]) => items.filter((i) => queueFilterMatches(i, filter));
+    return { ...queue, pending: keep(queue.pending), flagged: keep(queue.flagged), done: keep(queue.done) };
+  }, [queue, filter]);
+
   const allItems = useMemo(() => {
-    if (!queue) return [] as DevReviewQueueItem[];
-    return [...queue.pending, ...queue.flagged, ...queue.done];
-  }, [queue]);
+    if (!shown) return [] as DevReviewQueueItem[];
+    return [...shown.pending, ...shown.flagged, ...shown.done];
+  }, [shown]);
 
   const activeItem = useMemo(() => {
-    if (!queue) return null;
+    if (!shown) return null;
     if (activeSlug) {
-      return allItems.find((it) => it.slug === activeSlug) ?? queue.pending[0] ?? null;
+      return allItems.find((it) => it.slug === activeSlug) ?? shown.pending[0] ?? null;
     }
-    return queue.pending[0] ?? null;
-  }, [queue, activeSlug, allItems]);
+    return shown.pending[0] ?? null;
+  }, [shown, activeSlug, allItems]);
 
   function selectItem(slug: string) {
-    setSearchParams({ slug }, { replace: true });
+    setSearchParams(filter ? { slug, q: filter } : { slug }, { replace: true });
+  }
+
+  function setFilter(q: string) {
+    setSearchParams(q ? { q } : {}, { replace: true });
   }
 
   // "Approve to corpus": stamp the sign-off, refetch the queue so the
@@ -98,8 +112,8 @@ export function DevReviewQueue() {
       await api.confirmReviewFixture(slug);
       const q = await api.getDevReviewQueue();
       setQueue(q);
-      const next = q.pending.find((i) => i.slug !== slug);
-      if (next) setSearchParams({ slug: next.slug }, { replace: true });
+      const next = q.pending.find((i) => i.slug !== slug && queueFilterMatches(i, filter));
+      if (next) selectItem(next.slug);
     } catch (e) {
       setApproveError(String(e));
     } finally {
@@ -107,9 +121,9 @@ export function DevReviewQueue() {
     }
   }
 
-  const totalDone = queue?.done.length ?? 0;
-  const totalPending = queue?.pending.length ?? 0;
-  const totalFlagged = queue?.flagged.length ?? 0;
+  const totalDone = shown?.done.length ?? 0;
+  const totalPending = shown?.pending.length ?? 0;
+  const totalFlagged = shown?.flagged.length ?? 0;
   const total = totalDone + totalPending + totalFlagged;
 
   // Eval-the-pending-set affordance (workflow fix: eval comes before
@@ -150,7 +164,9 @@ export function DevReviewQueue() {
     <div className="grid h-[calc(100vh-86px)] grid-cols-[320px_1fr]">
       <QueueList
         loading={loading}
-        queue={queue}
+        queue={shown}
+        filter={filter}
+        onFilter={setFilter}
         activeSlug={activeItem?.slug ?? null}
         totalDone={totalDone}
         total={total}
@@ -163,6 +179,7 @@ export function DevReviewQueue() {
         approving={approving}
         approveError={approveError}
         onApprove={approveItem}
+        filter={filter}
       />
     </div>
   );
@@ -176,9 +193,13 @@ function QueueList({
   total,
   onSelect,
   pendingEval,
+  filter,
+  onFilter,
 }: {
   loading: boolean;
   queue: DevReviewQueueResponse | null;
+  filter: string;
+  onFilter: (q: string) => void;
   activeSlug: string | null;
   totalDone: number;
   total: number;
@@ -208,6 +229,14 @@ function QueueList({
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface-3">
           <div className="h-full bg-done" style={{ width: `${donePct}%` }} />
         </div>
+        <input
+          type="search"
+          value={filter}
+          onChange={(e) => onFilter(e.target.value)}
+          placeholder="Filter, e.g. hfo go3s"
+          aria-label="Filter the queue"
+          className="mt-3 w-full rounded-md border border-rule bg-surface-2 px-2 py-1 font-mono text-[0.75rem] text-ink"
+        />
 
         {/* Step zero of working the queue: score the pending set so
             every fixture opens with candidates ready to label. */}
@@ -406,12 +435,14 @@ function DetailPane({
   approving,
   approveError,
   onApprove,
+  filter,
 }: {
   item: DevReviewQueueItem | null;
   loading: boolean;
   approving: boolean;
   approveError: string | null;
   onApprove: (slug: string) => void;
+  filter: string;
 }) {
   // Dev-mode match context, threaded the same way DeveloperShell's
   // stepper and the corpus row links do (#884).
@@ -440,10 +471,11 @@ function DetailPane({
     );
   }
 
-  // A fixture whose shots need checking opens in the walk.
+  // A fixture whose shots need checking opens in the Audit page's review
+  // (spec 2026-10-14).
   const reviewUrl =
     item.review_status === "needs_review"
-      ? walkHref(item.audit_path, item.video_path ?? null)
+      ? fixtureAuditHref(item.audit_path, item.video_path ?? null, filter)
       : `/review?fixture=${encodeURIComponent(item.audit_path)}`;
   // Labeling happens on the fixture detail page (candidates only exist
   // there); marker edits stay in /review. The redesign spec's routes

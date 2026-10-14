@@ -29,6 +29,18 @@ FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 CALIBRATION_DIR = FIXTURES_DIR / "beep_calibration"
 
 
+def _clip_audio(stem: str):
+    """The pinned fixture's manifest entry and clip audio. A clip whose audio
+    lives in R2 (``audio.lock.json``) rather than git is skipped when it was
+    not fetched: no test needs it. A clip missing from both still fails."""
+    entry = next(e for e in load_manifest(CALIBRATION_DIR / "manifest.yaml").fixtures if e.stem == stem)
+    clip = FIXTURES_DIR / entry.clip_wav
+    lock = json.loads((FIXTURES_DIR / "audio.lock.json").read_text())
+    if not clip.exists() and clip.name in lock.get("files", lock):
+        pytest.skip(f"{stem}: audio in R2, not fetched (scripts/fixture_audio.py fetch)")
+    return entry, load_audio(clip)
+
+
 def _pinned() -> list[str]:
     baseline = json.loads((CALIBRATION_DIR / "baseline.json").read_text())
     return sorted(r["stem"] for r in baseline["results"] if r["track"] == "clip" and r["correct_top1"])
@@ -42,8 +54,7 @@ def test_the_baseline_pins_a_meaningful_set() -> None:
 
 @pytest.mark.parametrize("stem", _pinned())
 def test_a_fixture_ranked_right_stays_ranked_right(stem: str) -> None:
-    entry = next(e for e in load_manifest(CALIBRATION_DIR / "manifest.yaml").fixtures if e.stem == stem)
-    audio, sample_rate = load_audio(FIXTURES_DIR / entry.clip_wav)
+    entry, (audio, sample_rate) = _clip_audio(stem)
 
     detected = detect_beep(audio, sample_rate, BeepDetectConfig()).time
 
@@ -63,8 +74,7 @@ def _pinned_heuristic() -> list[str]:
 @pytest.mark.parametrize("stem", _pinned_heuristic()[:5])
 def test_the_heuristic_ranker_still_reproduces_today(stem: str) -> None:
     """``ranker: heuristic`` is the escape hatch; it must stay today's detector."""
-    entry = next(e for e in load_manifest(CALIBRATION_DIR / "manifest.yaml").fixtures if e.stem == stem)
-    audio, sample_rate = load_audio(FIXTURES_DIR / entry.clip_wav)
+    entry, (audio, sample_rate) = _clip_audio(stem)
     config = BeepDetectConfig(ranker=BeepRankerConfig(ranker="heuristic"))
 
     detection = detect_beep(audio, sample_rate, config)

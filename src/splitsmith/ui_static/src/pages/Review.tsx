@@ -63,6 +63,7 @@ import {
   type StageAudit,
 } from "@/lib/api";
 import { deriveMarkers } from "@/lib/audit-doc";
+import { fixtureAuditHref } from "@/lib/fixtureReview";
 import { buildFixtureJson } from "@/lib/fixtureDoc";
 import { useDecodedAudio } from "@/lib/useDecodedAudio";
 import { isTypingTextTarget, useBlurOnPointerClick } from "@/lib/audit-input";
@@ -288,6 +289,13 @@ export function Review() {
       .getFixtureAudit(fixturePath)
       .then((a) => {
         if (!alive) return;
+        // A snap is reviewed in the Audit page, never walked: the walk's
+        // candidate stops replaced snapped shots with detected ones
+        // (spec 2026-10-14).
+        if (walkParam && isSnapped(a as never)) {
+          navigate(fixtureAuditHref(fixturePath, videoPath ?? null), { replace: true });
+          return;
+        }
         auditRef.current = a;
         loadedPathRef.current = fixturePath;
         setAudit(a);

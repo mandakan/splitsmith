@@ -64,6 +64,7 @@ LOCAL_ONLY_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("GET", "/api/fixture/audit"),
         ("PUT", "/api/fixture/audit"),
         ("GET", "/api/fixture/peaks"),
+        ("GET", "/api/fixture/review-signals"),
         ("GET", "/api/fixture/audio"),
         ("GET", "/api/fixture/video"),
         ("GET", "/api/dev/model"),

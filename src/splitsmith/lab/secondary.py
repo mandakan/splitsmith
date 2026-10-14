@@ -12,8 +12,9 @@ place is skipped and listed, never guessed.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 
 from ..fixture_schema import (
     REVIEWED,
@@ -62,6 +63,9 @@ class PlannedPromotion:
     slug: str
     camera: Camera | None
     skip: str | None = None
+    #: Snaps again over this angle's existing snap (``slug`` is its stem):
+    #: the anchor's shots changed after it was snapped.
+    replaces: bool = False
 
 
 _GO3S = re.compile(r"^VID_\d{8}_\d{6}_\d{2}_\d{3}.*\.mp4$", re.IGNORECASE)
@@ -123,10 +127,49 @@ def _pick_anchor(candidates: list[AnchorFixture]) -> AnchorFixture | None:
     return sorted(reviewed, key=lambda a: (-a.n_shots, a.stem))[0]
 
 
+#: A beep this far from the one a snap aligned on means the snap is stale.
+BEEP_MOVED_S = 0.001
+
+
+def snap_is_stale(snap: dict, anchor: dict, *, beep_now: float | None) -> bool:
+    """Whether a snapped fixture must be snapped again: its anchor's shots
+    changed (``is_anchor_stale``), it predates seating on the rise foot (no
+    ``anchor.seated``), or this angle's beep moved since (``beep_now``, the
+    video's beep in source seconds, against the fixture's beep plus its
+    window's start: the snap aligns on it, so every shot moves with it)."""
+    from ..fixture_schema import is_anchor_stale
+
+    # Only a snap can be stale: a fixture with no anchor block is a hand
+    # audit, and snapping over it would throw that audit away.
+    if not snap.get("anchor"):
+        return False
+    if is_anchor_stale(snap, anchor) or not snap["anchor"].get("seated"):
+        return True
+    window = snap.get("fixture_window_in_source") or [0.0]
+    beep = snap.get("beep_time")
+    if beep_now is None or beep is None:
+        return False
+    return abs(float(beep) + float(window[0]) - float(beep_now)) > BEEP_MOVED_S
+
+
+def snap_beep_now(snap: dict, beeps: dict[tuple[str, int], float | None]) -> float | None:
+    """This snap's angle's beep as the project has it now, from ``beeps``
+    keyed by (the source video's resolved path, stage number): one file can
+    hold several stages and a file name repeats across matches. None when
+    the snap names no source or the project has no such angle."""
+    source = snap.get("source_video")
+    stage = snap.get("stage_number")
+    if not source or stage is None:
+        return None
+    return beeps.get((str(Path(source).resolve()), int(stage)))
+
+
 def plan_secondary_promotions(
     stages: Iterable[StageAngles],
     fixtures: Iterable[AnchorFixture],
     cameras: Mapping[str, Camera | None],
+    *,
+    stale_snap: Callable[[AnchorFixture, AnchorFixture], bool] | None = None,
 ) -> list[PlannedPromotion]:
     """Every video without a fixture on a stage that has a reviewed fixture.
 
@@ -135,6 +178,12 @@ def plan_secondary_promotions(
     whose only fixtures need review has no anchor (a snap of a snap). Slugs
     are ``<anchor>-<camera id>``, with the video id appended when two videos
     on the stage share a camera id or the slug is taken.
+
+    With ``stale_snap`` (``fixture_schema.is_anchor_stale`` over the two
+    fixtures' JSON), an angle whose fixture is a snap the anchor changed
+    since is planned again in place (``replaces``): re-promoting a primary
+    must reach its secondaries. A snap someone reviewed by hand is listed
+    with the reason, never overwritten.
     """
     by_source: dict[str, AnchorFixture] = {}
     taken: set[str] = set()
@@ -147,6 +196,22 @@ def plan_secondary_promotions(
         on_stage = [by_source[v.file_name] for v in stage.videos if v.file_name in by_source]
         anchor = _pick_anchor(on_stage)
         todo = [v for v in stage.videos if v.file_name not in by_source]
+        if stale_snap is not None and anchor is not None:
+            for v in stage.videos:
+                f = by_source.get(v.file_name)
+                if f is None or f.stem == anchor.stem or not stale_snap(f, anchor):
+                    continue
+                camera = cameras.get(v.video_id)
+                if f.review_status == REVIEWED:
+                    skip = "a snap reviewed by hand; its anchor or beep changed since, snap it again by hand"
+                    plans.append(PlannedPromotion(stage, v, anchor.stem, f.stem, camera, skip))
+                elif v.beep_time is None or not v.beep_reviewed:
+                    plans.append(PlannedPromotion(stage, v, anchor.stem, f.stem, camera, "beep not reviewed"))
+                elif camera is None:
+                    skip = "camera not recognised; set the video's mount or extend docs/cameras.md"
+                    plans.append(PlannedPromotion(stage, v, anchor.stem, f.stem, camera, skip))
+                else:
+                    plans.append(PlannedPromotion(stage, v, anchor.stem, f.stem, camera, replaces=True))
         if not todo or not on_stage:
             continue
         ids = [c.id for v in todo if (c := cameras.get(v.video_id)) is not None]

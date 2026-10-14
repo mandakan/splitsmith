@@ -15177,6 +15177,52 @@ def create_app(
         payload["trimmed"] = True
         return JSONResponse(payload)
 
+    @app.get("/api/fixture/review-signals")
+    def get_fixture_review_signals(path: str = Query(...)) -> JSONResponse:
+        """Where the Audit page's fixture review should stop (spec 2026-10-14,
+        ``lab.review_signals``): suggested moves from the review inventory,
+        snapped shots at their window's edge, kept sounds with no shot near
+        them, and for a snap the shots it was snapped with. Missing inputs
+        (no report, the inventory not built) are empty signals, not errors."""
+        from ..lab.review_signals import review_signals
+
+        target = _resolve_fixture_path(path)
+
+        def load(p: Path) -> dict[str, Any] | None:
+            try:
+                body = json.loads(p.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                return None
+            return body if isinstance(body, dict) else None
+
+        fixture = load(target)
+        if fixture is None:
+            raise HTTPException(status_code=500, detail=f"fixture read failed: {target.name}")
+        report = load(target.with_name(f"{target.stem}-promotion-report.json"))
+        inventory_body = load(target.parent.parent.parent / "build" / "fixture_review_inventory.json") or {}
+        entry = next(
+            (
+                e
+                for e in inventory_body.get("fixtures") or []
+                if isinstance(e, dict) and e.get("slug") == target.stem
+            ),
+            None,
+        )
+        # The fixture's own audio at 1 ms, for the echo check (a published
+        # file, read and enveloped in milliseconds; spec 2026-10-14).
+        envelope = None
+        wav = target.with_suffix(".wav")
+        if wav.exists():
+            from ..rise_foot import peak_envelope
+
+            try:
+                audio, sr = beep_detect.load_audio(wav)
+                envelope = peak_envelope(audio, sr)
+            except Exception as exc:  # noqa: BLE001 -- no audio is no echo check, never an error
+                logger.info("review signals: could not read %s: %s", wav.name, exc)
+        signals = review_signals(fixture, report=report, inventory=entry, envelope=envelope)
+        return JSONResponse(signals.model_dump(mode="json"))
+
     @app.get("/api/fixture/audio")
     def get_fixture_audio(path: str = Query(...)) -> FileResponse:
         """Serve the WAV alongside ``path`` (same stem, .wav extension)."""
