@@ -321,8 +321,9 @@ def test_audit_audio_trimmed_path_never_resolves_source(tmp_path: Path, fake_ffm
     # older than the trim, and reusing it republished the stale copy
     # (review, 2026-10-14). One ffmpeg run, on the trim, not the source.
     assert result.audio_path.read_bytes() == FFMPEG_WAV
-    assert len(fake_ffmpeg) == 1
-    assert "_trimmed.mp4" in " ".join(fake_ffmpeg[0])
+    cut_from_trim = [c for c in fake_ffmpeg if any(a.endswith("_trimmed.mp4") for a in c)]
+    assert len(cut_from_trim) == 1
+    assert not any(str(source) in c for c in fake_ffmpeg)
 
 
 def test_bind_storage_without_scope_disables_audio_cache(
