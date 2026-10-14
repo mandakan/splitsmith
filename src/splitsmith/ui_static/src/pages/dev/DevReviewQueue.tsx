@@ -28,6 +28,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useLabRun } from "@/components/lab/useLabRun";
 import { api, type DevReviewQueueItem, type DevReviewQueueResponse } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { fixtureAuditHref } from "@/lib/fixtureReview";
 import { continueTarget, mediaMatches, phoneLayout, walkHref } from "@/lib/walk";
 
 /** State bundle for the queue rail's eval affordance. Labels attach to
@@ -440,10 +441,11 @@ function DetailPane({
     );
   }
 
-  // A fixture whose shots need checking opens in the walk.
+  // A fixture whose shots need checking opens in the Audit page's review
+  // (spec 2026-10-14).
   const reviewUrl =
     item.review_status === "needs_review"
-      ? walkHref(item.audit_path, item.video_path ?? null)
+      ? fixtureAuditHref(item.audit_path, item.video_path ?? null)
       : `/review?fixture=${encodeURIComponent(item.audit_path)}`;
   // Labeling happens on the fixture detail page (candidates only exist
   // there); marker edits stay in /review. The redesign spec's routes

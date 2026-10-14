@@ -5262,6 +5262,52 @@ def test_fixture_peaks_serves_sibling_wav(tmp_path: Path) -> None:
     assert len(body["peaks"]) == 64
 
 
+def test_fixture_review_signals_read_the_fixture_its_report_and_the_inventory(tmp_path: Path) -> None:
+    """The Audit page's fixture review asks where to stop (spec 2026-10-14):
+    the route reads the fixture, its sibling promotion report and its entry
+    in the review inventory, and answers the signals."""
+    import json as _json
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    root = tmp_path / "repo"
+    fixtures = root / "tests" / "fixtures"
+    fixtures.mkdir(parents=True)
+    fixture = fixtures / "snap.json"
+    fixture.write_text(
+        _json.dumps(
+            {
+                "beep_time": 5.0,
+                "fixture_window_in_source": [1.0, 40.0],
+                "anchor": {"fixture_slug": "a", "snap_window_ms": 60},
+                "shots": [
+                    {"shot_number": 1, "time": 6.0, "source": "promoted", "snap_displacement_ms": 59.0}
+                ],
+                "stage_rounds": {"expected": 1},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (fixtures / "snap-promotion-report.json").write_text(
+        _json.dumps({"per_shot": [{"snapped_time": 7.0}]}), encoding="utf-8"
+    )
+    (root / "build").mkdir()
+    (root / "build" / "fixture_review_inventory.json").write_text(
+        _json.dumps(
+            {"fixtures": [{"slug": "snap", "moves": [{"time": 6.0, "suggested": 5.99, "move_ms": -10.0}]}]}
+        ),
+        encoding="utf-8",
+    )
+
+    resp = client.get(f"/api/fixture/review-signals?path={fixture}")
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["moves"] == [{"time": 6.0, "suggested": 5.99, "move_ms": -10.0}]
+    assert body["edges"] == [{"time": 6.0, "displacement_ms": 59.0}]
+    assert body["reference"] == {"kind": "snap", "times": [6.0]}
+    assert body["rounds"] == 1
+
+
 def test_fixture_peaks_reach_one_millisecond_on_a_long_stage(tmp_path: Path) -> None:
     """The lab review zooms until one bin is 1 ms, so a 60 s fixture
     needs 60 000 bins (the old 8192 cap stopped at ~7 ms)."""
