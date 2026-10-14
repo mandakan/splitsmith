@@ -540,6 +540,11 @@ export function Audit({ fixture = null }: { fixture?: FixtureTarget | null } = {
     undoStackRef.current = [];
     sessionEventsRef.current = [];
     isDirtyRef.current = false;
+    // Where each shot was placed belongs to this stage's markers: candidate
+    // ids repeat from stage to stage, and a placement kept across seated a
+    // shot from another stage's time, seconds away (2026-10-14).
+    setPlacedAt({});
+    setSeatAllPending(null);
     setSaveStatus({ kind: "idle" });
     setCamLayout("focus");
     const v = videoRef.current;
@@ -649,6 +654,7 @@ export function Audit({ fixture = null }: { fixture?: FixtureTarget | null } = {
         if (ticket !== auditLoadSeqRef.current) return;
         setAudit(a);
         setMarkers(deriveMarkers(a));
+        setPlacedAt({});
       })
       .catch(() => {
         if (ticket !== auditLoadSeqRef.current) return;
@@ -1760,6 +1766,7 @@ export function Audit({ fixture = null }: { fixture?: FixtureTarget | null } = {
     if (ticket !== auditLoadSeqRef.current) return;
     setAudit(a);
     setMarkers(deriveMarkers(a));
+    setPlacedAt({});
     setConflict(null);
   }, [slug, stageNumber, fixture]);
 
@@ -1776,6 +1783,7 @@ export function Audit({ fixture = null }: { fixture?: FixtureTarget | null } = {
     auditLoadSeqRef.current += 1;
     setAudit(conflict.stored);
     setMarkers(deriveMarkers(conflict.stored));
+    setPlacedAt({});
     sessionEventsRef.current = [];
     isDirtyRef.current = false;
     setConflict(null);
