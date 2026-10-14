@@ -58,7 +58,9 @@ def _publish(dest: Path, cmd: list[str], *, timeout: float, what: str) -> None:
             ) from exc
 
     def check(partial: Path) -> str | None:
-        return None if partial.exists() and partial.stat().st_size > 0 else f"ffmpeg produced no output ({what})"
+        if partial.exists() and partial.stat().st_size > 0:
+            return None
+        return f"ffmpeg produced no output ({what})"
 
     try:
         derived.produce(dest, fresh=lambda: False, make=make, check=check)

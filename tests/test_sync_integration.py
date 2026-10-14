@@ -509,9 +509,9 @@ def test_web_only_mirror_without_a_pushed_wav_is_pending(
     the job that cuts it from the rendition, never cutting it in the request
     (the 2026-10-13 short-audio incident). The SQLite test app has no queue
     (Procrastinate needs Postgres), so the submission is recorded here."""
-    from splitsmith.db.job_backend import PostgresJobBackend
     from datetime import UTC, datetime
 
+    from splitsmith.db.job_backend import PostgresJobBackend
     from splitsmith.ui.jobs import Job
 
     submitted: list[dict] = []
