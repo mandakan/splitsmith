@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.71.2](https://github.com/mandakan/splitsmith/compare/v0.71.1...v0.71.2) (2026-10-14)
+
+
+### Bug Fixes
+
+* **audio:** requests read derived media, jobs make it ([#1480](https://github.com/mandakan/splitsmith/issues/1480)) ([28ff9ed](https://github.com/mandakan/splitsmith/commit/28ff9edbf206c623c24d259423e70aaac6b729b6))
+
 ## [0.71.1](https://github.com/mandakan/splitsmith/compare/v0.71.0...v0.71.1) (2026-10-13)
 
 
