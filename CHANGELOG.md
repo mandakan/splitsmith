@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.72.0](https://github.com/mandakan/splitsmith/compare/v0.71.2...v0.72.0) (2026-10-14)
+
+
+### Features
+
+* **lab:** review fixtures in the Audit page; HFO Masters 2026 reviewed ([#1482](https://github.com/mandakan/splitsmith/issues/1482)) ([34ddd73](https://github.com/mandakan/splitsmith/commit/34ddd732d3aa9765457256069e2162260b29ce52))
+
+
+### Bug Fixes
+
+* **audit:** Seat looks for a shot's foot from this stage's placement ([#1484](https://github.com/mandakan/splitsmith/issues/1484)) ([cdafc60](https://github.com/mandakan/splitsmith/commit/cdafc60027a44daf3553c6b03d5e5b248fb6de8b))
+
 ## [0.71.2](https://github.com/mandakan/splitsmith/compare/v0.71.1...v0.71.2) (2026-10-14)
 
 
