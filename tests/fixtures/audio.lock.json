@@ -1,6 +1,14 @@
 {
   "version": 1,
   "files": {
+    "stage-shots-hfo-masters-2026-stage1-s0fe3d797.wav": {
+      "sha256": "db0374face497985683fd4a39255ef1b117cfe946703d508e9728d827c0cd462",
+      "bytes": 2138478
+    },
+    "stage-shots-hfo-masters-2026-stage1-s36ed6e4e.wav": {
+      "sha256": "86e37c6bfa0574e95e113f8692db7ddbfb2ae7291584e719141a30cc90b15ac1",
+      "bytes": 2356846
+    },
     "stage-shots-hfo-masters-2026-stage1-s97dcec94-go3s.wav": {
       "sha256": "e9e3af83accfc15e8b7e61f97554a8d3670f028077659e1b5e7ec054ebcd0977",
       "bytes": 2149294
@@ -17,13 +25,29 @@
       "sha256": "c14a063654ea5e11172230a97784cdadd16338ad2e66e3b4e83e700475f4552f",
       "bytes": 3219630
     },
+    "stage-shots-hfo-masters-2026-stage2-s0fe3d797.wav": {
+      "sha256": "2a623cc54666d105f90cf378dcc38770811c155a3715624c711844e2668bde44",
+      "bytes": 2233038
+    },
+    "stage-shots-hfo-masters-2026-stage2-s36ed6e4e.wav": {
+      "sha256": "782b3135d7944b50a1960ac83e370f43b6f6f7f814977c3e10c09bfa8c57547e",
+      "bytes": 2779822
+    },
     "stage-shots-hfo-masters-2026-stage2-s97dcec94-go3s.wav": {
       "sha256": "bc2d4014eb42ade45beb174124cd6b9b22f65ae2a11ed633d8c9e77f913bbf93",
       "bytes": 2531406
     },
+    "stage-shots-hfo-masters-2026-stage2-s9c1a2e74.wav": {
+      "sha256": "2a86693704abbfb94aff54685cb3d86824d3284be4248676958a0d45f51f8334",
+      "bytes": 2490158
+    },
     "stage-shots-hfo-masters-2026-stage3-s97dcec94-go3s.wav": {
       "sha256": "6ba473887859ad9a5000816b4100fda071468d355133d2dd980ab34bd2f8d80a",
       "bytes": 1854702
+    },
+    "stage-shots-hfo-masters-2026-stage3-s9c1a2e74.wav": {
+      "sha256": "3109ac171e320718ad832a1b7f0aeb1770bb1a85ee128abb60a6eb21f183f9be",
+      "bytes": 1911182
     },
     "stage-shots-hfo-masters-2026-stage4-s97dcec94-go3s.wav": {
       "sha256": "3a469b2777b2fbb5e70f143df083015a279204bfc9259b2d97a7b1583ded2f20",
@@ -33,9 +57,21 @@
       "sha256": "dc8387e7dbd280dafc37bb973cade032a7965e0c1bba1650cd5a9e13dc07fb51",
       "bytes": 2604110
     },
+    "stage-shots-hfo-masters-2026-stage6-s0fe3d797.wav": {
+      "sha256": "20b21c29231f050254f32196ec77f033419df5f06d7de2e03bc1f9b9a6e0e289",
+      "bytes": 2916014
+    },
+    "stage-shots-hfo-masters-2026-stage6-s36ed6e4e.wav": {
+      "sha256": "263e3fd16df3c69123a56280985995cae6912b5f24dfd25a7a75a1ec4ae37acd",
+      "bytes": 2641742
+    },
     "stage-shots-hfo-masters-2026-stage6-s97dcec94-go3s.wav": {
       "sha256": "11faabd5e9addadebd25ceceed39934b6867edae5366416ed0efafc37bdfdf52",
       "bytes": 2621102
+    },
+    "stage-shots-hfo-masters-2026-stage7-s36ed6e4e.wav": {
+      "sha256": "decc3c35b2a8b5f20f97c147947514cbe1dc0354670f585eda308ed8fef2190e",
+      "bytes": 2171342
     },
     "stage-shots-hfo-masters-2026-stage7-s97dcec94-go3s.wav": {
       "sha256": "0eca96362700226855fdd555b7494a644b7151c5f9d503e621c5ea09bb52d069",
@@ -44,6 +80,10 @@
     "stage-shots-hfo-masters-2026-stage8-s97dcec94-go3s.wav": {
       "sha256": "74b4f8e21d9038e9079b46abcf66eabe4842cba9d17c6051398e31548648e156",
       "bytes": 3258222
+    },
+    "stage-shots-hfo-masters-2026-stage8-s9c1a2e74.wav": {
+      "sha256": "d80e1033dc6dfb53fea3e9d83ff01b074592a0f3a4b504902a3f52906dd889b5",
+      "bytes": 2826190
     },
     "stage-shots-hfo-masters-2026-stage9-s97dcec94-go3s.wav": {
       "sha256": "addaabd3308ec7b0f637e5f67575fcb107c13e2173d527767e92ac527db1ae53",

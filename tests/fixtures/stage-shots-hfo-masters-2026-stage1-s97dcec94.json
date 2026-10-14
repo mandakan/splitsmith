@@ -7,8 +7,8 @@
     {
       "shot_number": 1,
       "candidate_number": 6,
-      "time": 8.301,
-      "ms_after_beep": 3301,
+      "time": 8.303,
+      "ms_after_beep": 3303,
       "source": "detected",
       "interval_class": "first_shot",
       "interval_class_source": "auto",
@@ -20,45 +20,45 @@
       "time": 8.87,
       "ms_after_beep": 3870,
       "source": "detected",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto",
       "id": "cand-7"
     },
     {
       "shot_number": 3,
       "candidate_number": 8,
-      "time": 9.476,
-      "ms_after_beep": 4476,
+      "time": 9.481,
+      "ms_after_beep": 4481,
       "source": "detected",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto",
       "id": "cand-8"
     },
     {
       "shot_number": 4,
       "candidate_number": 9,
-      "time": 9.993,
-      "ms_after_beep": 4993,
+      "time": 9.994,
+      "ms_after_beep": 4994,
       "source": "detected",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto",
       "id": "cand-9"
     },
     {
       "shot_number": 5,
       "candidate_number": 10,
-      "time": 10.838,
-      "ms_after_beep": 5838,
+      "time": 10.839,
+      "ms_after_beep": 5839,
       "source": "detected",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto",
       "id": "cand-10"
     },
     {
       "shot_number": 6,
       "candidate_number": 11,
-      "time": 11.332,
-      "ms_after_beep": 6332,
+      "time": 11.335,
+      "ms_after_beep": 6335,
       "source": "detected",
       "interval_class": "split",
       "interval_class_source": "auto",
@@ -67,8 +67,8 @@
     {
       "shot_number": 7,
       "candidate_number": 21,
-      "time": 15.05,
-      "ms_after_beep": 10050,
+      "time": 15.059,
+      "ms_after_beep": 10059,
       "source": "detected",
       "interval_class": "movement",
       "interval_class_source": "auto",
@@ -77,18 +77,18 @@
     {
       "shot_number": 8,
       "candidate_number": 22,
-      "time": 15.701,
-      "ms_after_beep": 10701,
+      "time": 15.709,
+      "ms_after_beep": 10709,
       "source": "detected",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto",
       "id": "cand-22"
     },
     {
       "shot_number": 9,
       "candidate_number": 23,
-      "time": 16.091,
-      "ms_after_beep": 11091,
+      "time": 16.078,
+      "ms_after_beep": 11078,
       "source": "detected",
       "interval_class": "split",
       "interval_class_source": "auto",
@@ -97,18 +97,18 @@
     {
       "shot_number": 10,
       "candidate_number": 24,
-      "time": 16.997,
-      "ms_after_beep": 11997,
+      "time": 16.981,
+      "ms_after_beep": 11981,
       "source": "detected",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto",
       "id": "cand-24"
     },
     {
       "shot_number": 11,
       "candidate_number": 25,
-      "time": 17.322,
-      "ms_after_beep": 12322,
+      "time": 17.323,
+      "ms_after_beep": 12323,
       "source": "detected",
       "interval_class": "split",
       "interval_class_source": "auto",
@@ -117,30 +117,30 @@
     {
       "shot_number": 12,
       "candidate_number": 26,
-      "time": 17.971,
-      "ms_after_beep": 12971,
+      "time": 17.972,
+      "ms_after_beep": 12972,
       "source": "detected",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto",
       "id": "cand-26"
     },
     {
       "shot_number": 13,
       "candidate_number": 27,
-      "time": 18.525,
-      "ms_after_beep": 13525,
+      "time": 18.526,
+      "ms_after_beep": 13526,
       "source": "detected",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto",
       "id": "cand-27"
     },
     {
       "shot_number": 14,
       "candidate_number": 28,
-      "time": 19.063,
-      "ms_after_beep": 14063,
+      "time": 19.032,
+      "ms_after_beep": 14032,
       "source": "detected",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto",
       "id": "cand-28"
     }
@@ -674,6 +674,28 @@
       }
     },
     {
+      "id": "4b37c2884dc14dae8786be7cea1a00ca",
+      "ts": "2026-08-04T06:11:39.904975+00:00",
+      "kind": "shot_detect_run",
+      "payload": {
+        "consensus": 2,
+        "kept_count": 15,
+        "seeded_shots": true,
+        "candidate_count": 28,
+        "expected_rounds": 12
+      }
+    },
+    {
+      "ts": "2026-08-04T06:14:53.172Z",
+      "kind": "marker_rejected",
+      "payload": {
+        "id": "cand-5",
+        "time": 7.9456,
+        "candidate_number": 5
+      }
+    },
+    {
+      "id": "5e7bbf2346d74fa79a8768f5077517a4",
       "ts": "2026-08-04T06:14:53.172Z",
       "kind": "marker_rejected",
       "payload": {
@@ -688,12 +710,68 @@
       "payload": {
         "shots_count": 14
       }
+    },
+    {
+      "id": "6cdaad4833cf4beca7fec2d491912eb2",
+      "ts": "2026-08-04T06:15:05.463Z",
+      "kind": "save",
+      "payload": {
+        "shots_count": 14
+      }
+    },
+    {
+      "id": "fdd9c4fc7a9a4ec49ba5f4a7f58bdca6",
+      "ts": "2026-10-14T10:49:27.261Z",
+      "kind": "rise_foot_seat_all",
+      "payload": {
+        "moved": 13
+      }
+    },
+    {
+      "id": "6ca12500843a4e40b1306c23bf279f17",
+      "ts": "2026-10-14T10:49:31.583Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-6",
+        "reason": "earlier_rise",
+        "to_time": 8.303,
+        "from_time": 8.318
+      }
+    },
+    {
+      "id": "2616b388f8d04837a3a756d0bc64f4de",
+      "ts": "2026-10-14T10:49:56.316Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-24",
+        "to_time": 16.991000000000003,
+        "from_time": 16.981
+      }
+    },
+    {
+      "id": "244e11d72423456b9e2010b632936e07",
+      "ts": "2026-10-14T10:49:57.492Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-24",
+        "reason": "rise_foot",
+        "to_time": 16.981,
+        "from_time": 16.991000000000003
+      }
+    },
+    {
+      "id": "9a4bcff6d36048e2bd8404f5b62ce277",
+      "ts": "2026-10-14T10:50:06.767Z",
+      "kind": "save",
+      "payload": {
+        "shots_count": 14
+      }
     }
   ],
-  "promoted_at": "2026-08-14T12:38:40.088237+00:00",
+  "promoted_at": "2026-10-14T11:26:39.651166+00:00",
   "provenance": {
     "stage_number": 1,
-    "stage_name": null
+    "stage_name": "B50"
   },
   "source_video": "/Volumes/X9/matches/hfo-masters-2026/shooters/s_f88d8aa0/raw/Mathias_S01_B50.MOV",
   "fixture_window_in_source": [
@@ -701,27 +779,19 @@
     44.15
   ],
   "camera": {
-    "id": "unknown",
+    "id": "apple-iphone17pro",
     "make": "Apple",
     "model": "iPhone 17 Pro",
     "mount": "hand",
-    "position": "shooter",
+    "position": "squadmate",
     "audio_source": "internal",
     "agc_state": "unknown",
-    "sample_rate": null,
+    "sample_rate": 48000,
     "bit_depth": null,
-    "audio_codec": null
+    "audio_codec": "aac"
   },
   "shooter": {
     "id": "s97dcec94"
   },
-  "event_id": "hfo-masters-2026:1:s97dcec94",
-  "review": {
-    "status": "needs_review",
-    "derived_from": null,
-    "reviewed_at": null,
-    "note": "shot times predate the rise-foot definition (docs/METHODOLOGY.md, 2026-10-10): check each shot's leading edge",
-    "previous_status": "reviewed",
-    "previous_reviewed_at": null
-  }
+  "event_id": "hfo-masters-2026:1:s97dcec94"
 }

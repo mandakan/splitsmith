@@ -11,8 +11,14 @@ fixture, the clip WAV and the promotion report, except where too many
 anchor shots found no onset on the secondary (``--max-missed``); those are
 listed, not written. A summary lands in ``build/promote_secondary/``.
 
+``--resnap`` also snaps again every angle whose fixture is a snap the anchor
+changed since (``fixture_schema.is_anchor_stale``: its shots differ from the
+ones snapped onto), in place and back to ``needs_review``; run it after
+re-promoting primaries (``promote_audited_stages.py --repromote``). A snap
+someone reviewed by hand is listed, never overwritten.
+
 Usage:
-    uv run python scripts/promote_secondary_angles.py [--matches DIR ...] [--write]
+    uv run python scripts/promote_secondary_angles.py [--matches DIR ...] [--resnap] [--write]
 """
 
 from __future__ import annotations
@@ -26,7 +32,7 @@ from pathlib import Path
 from splitsmith import beep_detect
 from splitsmith.ensemble import fixtures as fx_module
 from splitsmith.ensemble.api import load_ensemble_runtime
-from splitsmith.fixture_schema import probe_camera_metadata, review_status
+from splitsmith.fixture_schema import is_anchor_stale, probe_camera_metadata, review_status
 from splitsmith.lab.promote import PromoteFromAnchorRequest, promote_from_anchor, write_promoted_fixture
 from splitsmith.lab.secondary import (
     AnchorFixture,
@@ -91,6 +97,7 @@ def main() -> int:
     ap.add_argument("--fixtures", type=Path, default=fx_module.FIXTURES_DIR)
     ap.add_argument("--write", action="store_true", help="promote; without it, only print the plan")
     ap.add_argument("--max-missed", type=float, default=0.25, help="skip when more anchor shots miss")
+    ap.add_argument("--resnap", action="store_true", help="also snap again snaps whose anchor changed")
     args = ap.parse_args()
 
     match_dirs = args.matches or sorted(p for p in DEFAULT_MATCHES.iterdir() if p.is_dir())
@@ -111,7 +118,7 @@ def main() -> int:
                 angles.append(
                     AngleVideo(v.video_id, name, v.beep_time, bool(v.beep_reviewed), v.camera_mount)
                 )
-                if name in known:
+                if name in known and not args.resnap:
                     continue
                 source = project.resolve_video_path(root, v.path)
                 probe = probe_camera_metadata(source) if source.exists() else None
@@ -123,11 +130,17 @@ def main() -> int:
                 context[v.video_id] = (project, root, stage.stage_number, v, source)
             stages.append(StageAngles(match, root.name, stage.stage_number, tuple(angles)))
 
-    plans = plan_secondary_promotions(stages, corpus, cameras)
+    def stale(snap: AnchorFixture, anchor: AnchorFixture) -> bool:
+        def load(stem: str) -> dict:
+            return json.loads((args.fixtures / f"{stem}.json").read_text())
+
+        return is_anchor_stale(load(snap.stem), load(anchor.stem))
+
+    plans = plan_secondary_promotions(stages, corpus, cameras, stale_snap=stale if args.resnap else None)
     todo = [p for p in plans if p.skip is None]
     print(f"{len(plans)} videos without a fixture on a stage with one; {len(todo)} to promote")
     for p in plans:
-        what = p.skip or f"-> {p.slug}"
+        what = p.skip or (f"-> {p.slug} (again: its anchor changed)" if p.replaces else f"-> {p.slug}")
         where = f"{p.stage.match} {p.stage.shooter_slug} stage {p.stage.stage_number}"
         print(f"  {where} {p.video.file_name}: {what}")
 
@@ -204,6 +217,7 @@ def _promote(p: PlannedPromotion, ctx, args, runtime, ffmpeg: str) -> dict:
         slug=p.slug,
         trim_wav=_trim(ffmpeg),
         source_video=str(source.resolve()),
+        overwrite=p.replaces,
     )
     return _row(p, "written", None, counts=counts)
 
