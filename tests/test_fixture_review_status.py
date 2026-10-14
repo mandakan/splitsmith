@@ -100,6 +100,25 @@ def test_write_promoted_fixture_rebases_to_the_clip(tmp_path):
     assert np.isclose(written["beep_time"] + 25.0, 30.0)
 
 
+def test_a_snap_whose_clip_cannot_be_read_is_not_marked_seated(tmp_path):
+    """An unreadable clip seats nothing, so the snap must not claim it was
+    seated: --resnap reads ``anchor.seated`` to seat it again later."""
+    data = {
+        "beep_time": 30.0,
+        "shots": [{"time": 32.0, "source": "promoted"}],
+        "anchor": {"fixture_slug": "a", "seated": True},
+    }
+    out = write_promoted_fixture(
+        fixture_data=data,
+        promotion_report={"counts": {}},
+        secondary_wav=tmp_path / "src.wav",
+        fixtures_root=tmp_path / "fx",
+        slug="stage-shots-m-2026-stage1-a-cam",
+        trim_wav=lambda src, dst, start, end: dst.write_bytes(b"RIFF"),
+    )
+    assert json.loads(out.read_text())["anchor"]["seated"] is False
+
+
 def test_a_promoted_shot_is_seated_on_its_rise_foot_on_the_fixture_clip(tmp_path):
     """A secondary's review is adjustments only (2026-10-14): the snapped
     shots land on their rise foot on the very clip the fixture keeps, which

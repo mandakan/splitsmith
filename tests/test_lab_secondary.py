@@ -13,6 +13,7 @@ from splitsmith.lab.secondary import (
     StageAngles,
     camera_for,
     plan_secondary_promotions,
+    snap_beep_now,
     snap_is_stale,
 )
 
@@ -218,3 +219,37 @@ def test_a_snap_is_stale_when_the_angle_s_beep_moved():
     assert snap_is_stale(_snap_doc(), {"shots": [{"time": 1.0}]}, beep_now=6.5709)
     assert not snap_is_stale(_snap_doc(), {"shots": [{"time": 1.0}]}, beep_now=6.5004)
     assert not snap_is_stale(_snap_doc(), {"shots": [{"time": 1.0}]}, beep_now=None)
+
+
+def test_a_fixture_that_is_not_a_snap_is_never_stale():
+    """A hand-audited primary can be the stage's anchor's neighbour in the
+    planner's loop; it has no anchor block and must never be snapped over."""
+    primary = {"beep_time": 5.0, "fixture_window_in_source": [1.5, 40.0], "shots": []}
+    assert not snap_is_stale(primary, {"shots": [{"time": 1.0}]}, beep_now=9.9)
+
+
+def test_a_snap_reads_the_beep_of_its_own_stage_and_file():
+    """One file can hold several stages (a single take) and a file name can
+    repeat across matches; the beep is the one for this file on this stage."""
+    beeps = {
+        ("/m/a/raw/VID_1.mp4", 1): 10.0,
+        ("/m/a/raw/VID_1.mp4", 2): 200.0,
+        ("/m/b/raw/VID_1.mp4", 1): 55.0,
+    }
+    snap = {"source_video": "/m/a/raw/VID_1.mp4", "stage_number": 2}
+    assert snap_beep_now(snap, beeps) == 200.0
+    assert snap_beep_now({"source_video": "/m/c/raw/VID_1.mp4", "stage_number": 2}, beeps) is None
+    assert snap_beep_now({"stage_number": 2}, beeps) is None
+
+
+def test_a_snap_finds_its_beep_through_a_linked_source(tmp_path):
+    """A project's raw/ names its footage through links; a snap records
+    the file it read. Both are the same video."""
+    real = tmp_path / "raw" / "VID_1.mp4"
+    real.parent.mkdir()
+    real.write_bytes(b"")
+    link = tmp_path / "project-raw-VID_1.mp4"
+    link.symlink_to(real)
+    beeps = {(str(link.resolve()), 3): 12.5}
+    assert snap_beep_now({"source_video": str(real), "stage_number": 3}, beeps) == 12.5
+    assert snap_beep_now({"source_video": str(link), "stage_number": 3}, beeps) == 12.5

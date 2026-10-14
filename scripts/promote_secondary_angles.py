@@ -43,6 +43,7 @@ from splitsmith.lab.secondary import (
     StageAngles,
     camera_for,
     plan_secondary_promotions,
+    snap_beep_now,
     snap_is_stale,
 )
 from splitsmith.match_project import MatchProject
@@ -110,6 +111,9 @@ def main() -> int:
     stages: list[StageAngles] = []
     cameras = {}
     context = {}
+    # Each angle's beep as the project has it now, by (source, stage): a
+    # snap aligned on an older beep is stale.
+    beeps: dict[tuple[str, int], float | None] = {}
     for match, root in _shooter_roots(match_dirs):
         project = MatchProject.load(root)
         for stage in project.stages:
@@ -121,9 +125,10 @@ def main() -> int:
                 angles.append(
                     AngleVideo(v.video_id, name, v.beep_time, bool(v.beep_reviewed), v.camera_mount)
                 )
+                source = project.resolve_video_path(root, v.path)
+                beeps[(str(source.resolve()), stage.stage_number)] = v.beep_time
                 if name in known and not args.resnap:
                     continue
-                source = project.resolve_video_path(root, v.path)
                 probe = probe_camera_metadata(source) if source.exists() else None
                 cameras[v.video_id] = (
                     camera_for(name, v.camera_mount, probe, make=v.camera_make, model=v.camera_model)
@@ -133,15 +138,12 @@ def main() -> int:
                 context[v.video_id] = (project, root, stage.stage_number, v, source)
             stages.append(StageAngles(match, root.name, stage.stage_number, tuple(angles)))
 
-    # Each angle's beep as the project has it now: a snap aligned on an
-    # older beep is stale.
-    beeps = {a.file_name: a.beep_time for st in stages for a in st.videos}
-
     def stale(snap: AnchorFixture, anchor: AnchorFixture) -> bool:
         def load(stem: str) -> dict:
             return json.loads((args.fixtures / f"{stem}.json").read_text())
 
-        return snap_is_stale(load(snap.stem), load(anchor.stem), beep_now=beeps.get(snap.source_name))
+        data = load(snap.stem)
+        return snap_is_stale(data, load(anchor.stem), beep_now=snap_beep_now(data, beeps))
 
     plans = plan_secondary_promotions(stages, corpus, cameras, stale_snap=stale if args.resnap else None)
     todo = [p for p in plans if p.skip is None]
@@ -168,6 +170,12 @@ def main() -> int:
     out = OUT_DIR / ("result.json" if args.write else "plan.json")
     out.write_text(json.dumps(results, indent=2) + "\n")
     print(f"wrote {out}")
+    written = [r["slug"] for r in results if r["status"] == "written"]
+    if written:
+        # Fixture audio lives in R2, never in git: a new or re-cut clip is
+        # not in audio.lock.json until it is pushed.
+        print("push the new clips before committing:")
+        print(f"  uv run python scripts/fixture_audio.py push {' '.join(written)}")
     return 0
 
 

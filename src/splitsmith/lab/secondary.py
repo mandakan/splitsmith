@@ -14,6 +14,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 
 from ..fixture_schema import (
     REVIEWED,
@@ -138,13 +139,29 @@ def snap_is_stale(snap: dict, anchor: dict, *, beep_now: float | None) -> bool:
     window's start: the snap aligns on it, so every shot moves with it)."""
     from ..fixture_schema import is_anchor_stale
 
-    if is_anchor_stale(snap, anchor) or not (snap.get("anchor") or {}).get("seated"):
+    # Only a snap can be stale: a fixture with no anchor block is a hand
+    # audit, and snapping over it would throw that audit away.
+    if not snap.get("anchor"):
+        return False
+    if is_anchor_stale(snap, anchor) or not snap["anchor"].get("seated"):
         return True
     window = snap.get("fixture_window_in_source") or [0.0]
     beep = snap.get("beep_time")
     if beep_now is None or beep is None:
         return False
     return abs(float(beep) + float(window[0]) - float(beep_now)) > BEEP_MOVED_S
+
+
+def snap_beep_now(snap: dict, beeps: dict[tuple[str, int], float | None]) -> float | None:
+    """This snap's angle's beep as the project has it now, from ``beeps``
+    keyed by (the source video's resolved path, stage number): one file can
+    hold several stages and a file name repeats across matches. None when
+    the snap names no source or the project has no such angle."""
+    source = snap.get("source_video")
+    stage = snap.get("stage_number")
+    if not source or stage is None:
+        return None
+    return beeps.get((str(Path(source).resolve()), int(stage)))
 
 
 def plan_secondary_promotions(

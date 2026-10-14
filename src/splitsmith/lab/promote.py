@@ -265,7 +265,6 @@ def promote_from_anchor(
     # *residual* drift the second pass couldn't model linearly.
     drift_ms_per_minute = _estimate_drift(snaps)
 
-
     # 5. Build fixture JSON.
     anchor_sha = shots_revision_sha(anchor_shots)
     anchor_link = AnchorLink(
@@ -388,7 +387,10 @@ def write_promoted_fixture(
     data["beep_time"] = round(beep - clip_start, 4)
     data["fixture_window_in_source"] = [round(clip_start, 4), round(clip_end, 4)]
     data["shots"] = rebase(data.get("shots", []))
-    _seat_on_clip(data["shots"], fixtures_root / f"{slug}.wav")
+    seated = _seat_on_clip(data["shots"], fixtures_root / f"{slug}.wav")
+    if isinstance(data.get("anchor"), dict):
+        # --resnap seats a snap again when this is not true.
+        data["anchor"]["seated"] = seated
     pending = data.get("_candidates_pending_audit") or {}
     if pending.get("candidates"):
         data["_candidates_pending_audit"] = {**pending, "candidates": rebase(pending["candidates"])}
@@ -451,17 +453,18 @@ def _slug_from_source(anchor: dict[str, Any]) -> str:
     return "anchor"
 
 
-def _seat_on_clip(shots: list[dict[str, Any]], wav: Path) -> None:
+def _seat_on_clip(shots: list[dict[str, Any]], wav: Path) -> bool:
     """Move each snapped shot onto its rise foot on the fixture's own clip:
     the rule every output uses (docs/METHODOLOGY.md) on the audio the review
     page's Seat reads, whose loudest sound sets the rule's thresholds, so a
     secondary's review is adjustments only (2026-10-14). Records how far it
     moved as ``seat_ms``. A shot with no foot near it (silence) stays where
-    the snap put it; an unreadable clip seats nothing."""
+    the snap put it; an unreadable clip seats nothing. Whether the clip was
+    read, so the snap records whether it was seated."""
     try:
         audio, sr = load_audio(wav)
     except Exception:  # noqa: BLE001 -- no clip to read, nothing to seat against
-        return
+        return False
     peaks, duration = peak_envelope(audio, sr)
     for shot in shots:
         if shot.get("source") != "promoted" or shot.get("time") is None:
@@ -474,6 +477,7 @@ def _seat_on_clip(shots: list[dict[str, Any]], wav: Path) -> None:
         shot["time"] = round(foot, 4)
         if shot.get("ms_after_beep") is not None:
             shot["ms_after_beep"] = int(round(shot["ms_after_beep"] + shot["seat_ms"]))
+    return True
 
 
 def _build_fixture(
