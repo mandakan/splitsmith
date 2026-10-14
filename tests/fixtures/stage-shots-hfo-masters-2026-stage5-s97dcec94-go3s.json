@@ -15,182 +15,200 @@
     {
       "shot_number": 1,
       "candidate_number": 7,
-      "time": 7.5409,
-      "ms_after_beep": 2541,
+      "time": 7.5398,
+      "ms_after_beep": 2540,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 56.11,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": -1.1
     },
     {
       "shot_number": 2,
       "candidate_number": 9,
-      "time": 8.0929,
-      "ms_after_beep": 3093,
+      "time": 8.0948,
+      "ms_after_beep": 3095,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 51.06,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 1.9
     },
     {
       "shot_number": 3,
       "candidate_number": 14,
-      "time": 9.5929,
-      "ms_after_beep": 4593,
+      "time": 9.5908,
+      "ms_after_beep": 4591,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 35.63,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": -2.1
     },
     {
       "shot_number": 4,
       "candidate_number": 17,
-      "time": 10.2799,
-      "ms_after_beep": 5280,
+      "time": 10.2787,
+      "ms_after_beep": 5279,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 35.79,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": -1.2
     },
     {
       "shot_number": 5,
       "candidate_number": 33,
-      "time": 14.2579,
-      "ms_after_beep": 9258,
+      "time": 14.2566,
+      "ms_after_beep": 9257,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 11.58,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": -1.3
     },
     {
       "shot_number": 6,
       "candidate_number": 35,
-      "time": 14.6719,
+      "time": 14.6716,
       "ms_after_beep": 9672,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 10.28,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": -0.3
     },
     {
       "shot_number": 7,
       "candidate_number": 39,
-      "time": 15.7509,
-      "ms_after_beep": 10751,
+      "time": 15.7496,
+      "ms_after_beep": 10750,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 15.1,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": -1.3
     },
     {
       "shot_number": 8,
       "candidate_number": 41,
-      "time": 16.1719,
-      "ms_after_beep": 11172,
+      "time": 16.1706,
+      "ms_after_beep": 11171,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 16.81,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": -1.3
     },
     {
       "shot_number": 9,
       "candidate_number": 44,
-      "time": 17.1189,
+      "time": 17.1186,
       "ms_after_beep": 12119,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 16.42,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": -0.3
     },
     {
       "shot_number": 10,
       "candidate_number": 45,
-      "time": 17.3089,
-      "ms_after_beep": 12309,
+      "time": 17.3106,
+      "ms_after_beep": 12311,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 17.74,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 1.7
     },
     {
       "shot_number": 11,
       "candidate_number": 67,
-      "time": 21.7129,
-      "ms_after_beep": 16713,
+      "time": 21.7135,
+      "ms_after_beep": 16714,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 36.18,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 0.6
     },
     {
       "shot_number": 12,
       "candidate_number": 69,
-      "time": 22.3089,
+      "time": 22.3085,
       "ms_after_beep": 17309,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 39.18,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": -0.4
     },
     {
       "shot_number": 13,
       "candidate_number": 71,
-      "time": 23.0619,
+      "time": 23.0624,
       "ms_after_beep": 18062,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 39.46,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 0.5
     },
     {
       "shot_number": 14,
       "candidate_number": 73,
-      "time": 23.4659,
+      "time": 23.4664,
       "ms_after_beep": 18466,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 36.15,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 0.5
     },
     {
       "shot_number": 15,
       "candidate_number": 74,
-      "time": 23.7359,
+      "time": 23.7354,
       "ms_after_beep": 18736,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 35.61,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": -0.5
     },
     {
       "shot_number": 16,
       "candidate_number": 77,
-      "time": 24.6229,
-      "ms_after_beep": 19623,
+      "time": 24.6224,
+      "ms_after_beep": 19622,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 36.11,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": -0.5
     },
     {
       "shot_number": 17,
       "candidate_number": 78,
-      "time": 24.8529,
-      "ms_after_beep": 19853,
+      "time": 24.8534,
+      "ms_after_beep": 19854,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 44.48,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 0.5
     },
     {
       "shot_number": 18,
       "candidate_number": 78,
-      "time": 25.0569,
-      "ms_after_beep": 20057,
+      "time": 25.0564,
+      "ms_after_beep": 20056,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 35.85,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": -0.5
     }
   ],
   "_candidates_pending_audit": {
@@ -1843,14 +1861,15 @@
   "anchor": {
     "fixture_slug": "stage5-a300-h\u00f6ger",
     "revision_sha": "2f403c20e7ebf6f4aac886de84aa76b2826e5f4d493267a0cf0bc8688adc23a2",
-    "promoted_at": "2026-10-14T11:32:17.473193+00:00",
+    "promoted_at": "2026-10-14T12:23:49.339002+00:00",
     "offset_seconds": 0.48014583333333327,
     "drift_ms_per_minute": 0.0,
-    "snap_window_ms": 60
+    "snap_window_ms": 60,
+    "seated": true
   },
   "history": [
     {
-      "at": "2026-10-14T11:32:17.473212+00:00",
+      "at": "2026-10-14T12:23:49.339019+00:00",
       "action": "promote-from-anchor",
       "tool_version": "0.1.0",
       "details": {

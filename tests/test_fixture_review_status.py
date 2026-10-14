@@ -99,6 +99,55 @@ def test_write_promoted_fixture_rebases_to_the_clip(tmp_path):
     assert np.isclose(written["beep_time"] + 25.0, 30.0)
 
 
+def test_a_promoted_shot_is_seated_on_its_rise_foot_on_the_fixture_clip(tmp_path):
+    """A secondary's review is adjustments only (2026-10-14): the snapped
+    shots land on their rise foot on the very clip the fixture keeps, which
+    is what the review page's Seat reads, and say how far they moved."""
+    import soundfile as sf
+
+    from splitsmith.beep_detect import load_audio
+    from splitsmith.rise_foot import peak_envelope, rise_foot
+
+    sr = 48000
+
+    def trim(src: Path, dst: Path, start: float, end: float) -> None:
+        audio = np.zeros(int((end - start) * sr), dtype=np.float32) + 0.001
+        # A shot rising at 32.0 s in the source: up in 3 ms, then a decay.
+        i = int((32.0 - start) * sr)
+        rise, tail = int(0.003 * sr), int(0.03 * sr)
+        audio[i : i + rise] = np.linspace(0.05, 0.9, rise, dtype=np.float32)
+        audio[i + rise : i + rise + tail] = 0.9 * np.exp(-np.arange(tail) / (0.01 * sr)).astype(np.float32)
+        sf.write(dst, audio, sr)
+
+    data = {
+        "beep_time": 30.0,
+        "anchor": {"fixture_slug": "a", "snap_window_ms": 60, "seated": True},
+        "shots": [
+            {"shot_number": 1, "time": 32.008, "source": "promoted", "snap_displacement_ms": 8.0},
+            {"shot_number": 2, "time": 34.0, "source": "promoted", "snap_displacement_ms": 1.0},
+        ],
+    }
+    out = write_promoted_fixture(
+        fixture_data=data,
+        promotion_report={"counts": {}},
+        secondary_wav=tmp_path / "src.wav",
+        fixtures_root=tmp_path / "fx",
+        slug="s",
+        trim_wav=trim,
+    )
+    written = json.loads(out.read_text())
+    audio, rate = load_audio(out.with_suffix(".wav"))
+    peaks, dur = peak_envelope(audio, rate)
+    first, second = written["shots"]
+    foot = rise_foot(peaks, dur, first["time"])
+    assert foot is not None and abs(first["time"] - foot) < 1e-6
+    assert first["seat_ms"] < 0
+    assert first["time"] < 32.008 - 25.0
+    # Silence near the second: left where the snap put it, no seat recorded.
+    assert second["time"] == 34.0 - 25.0
+    assert "seat_ms" not in second
+
+
 def test_write_promoted_fixture_refuses_to_overwrite(tmp_path):
     root = tmp_path / "fx"
     root.mkdir()

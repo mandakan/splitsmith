@@ -114,6 +114,15 @@ export function signalAnomalies(s: FixtureReviewSignals): Anomaly[] {
       time: e.time,
     });
   }
+  for (const e of s.echoes ?? []) {
+    out.push({
+      kind: "review_echo",
+      severity: "warn",
+      message: `On an echo? A blast at ${e.earlier.toFixed(3)} s, ${Math.round((e.time - e.earlier) * 1000)} ms before: Earlier rise moves it there`,
+      shot_number: null,
+      time: e.time,
+    });
+  }
   for (const u of s.unmarked) {
     out.push({
       kind: "review_unmarked",

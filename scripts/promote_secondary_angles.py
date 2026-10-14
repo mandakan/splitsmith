@@ -13,7 +13,8 @@ listed, not written. A summary lands in ``build/promote_secondary/``.
 
 ``--resnap`` also snaps again every angle whose fixture is a snap the anchor
 changed since (``fixture_schema.is_anchor_stale``: its shots differ from the
-ones snapped onto), in place and back to ``needs_review``; run it after
+ones snapped onto) or that predates seating (no ``anchor.seated``), in place
+and back to ``needs_review``; run it after
 re-promoting primaries (``promote_audited_stages.py --repromote``). A snap
 someone reviewed by hand is listed, never overwritten.
 
@@ -134,13 +135,20 @@ def main() -> int:
         def load(stem: str) -> dict:
             return json.loads((args.fixtures / f"{stem}.json").read_text())
 
-        return is_anchor_stale(load(snap.stem), load(anchor.stem))
+        data = load(snap.stem)
+        # A snap made before snaps were seated on their rise foot is stale
+        # too: snapping it again seats it (2026-10-14).
+        return is_anchor_stale(data, load(anchor.stem)) or not (data.get("anchor") or {}).get("seated")
 
     plans = plan_secondary_promotions(stages, corpus, cameras, stale_snap=stale if args.resnap else None)
     todo = [p for p in plans if p.skip is None]
     print(f"{len(plans)} videos without a fixture on a stage with one; {len(todo)} to promote")
     for p in plans:
-        what = p.skip or (f"-> {p.slug} (again: its anchor changed)" if p.replaces else f"-> {p.slug}")
+        what = p.skip or (
+            f"-> {p.slug} (again: its anchor changed, or it predates seating)"
+            if p.replaces
+            else f"-> {p.slug}"
+        )
         where = f"{p.stage.match} {p.stage.shooter_slug} stage {p.stage.stage_number}"
         print(f"  {where} {p.video.file_name}: {what}")
 

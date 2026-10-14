@@ -234,6 +234,10 @@ class AnchorLink(BaseModel):
     offset_seconds: float
     drift_ms_per_minute: float | None = None
     snap_window_ms: int
+    #: The snapped shots were seated on their rise foot on this angle's own
+    #: audio (2026-10-14); a snap without it predates that and is snapped
+    #: again by ``promote_secondary_angles.py --resnap``.
+    seated: bool = False
 
 
 # ---------------------------------------------------------------------------

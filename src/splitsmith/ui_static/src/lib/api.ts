@@ -67,6 +67,8 @@ export interface FixtureReviewSignals {
   moves: Array<{ time: number; suggested: number; move_ms: number }>;
   edges: Array<{ time: number; displacement_ms: number }>;
   unmarked: Array<{ time: number; confidence: number | null }>;
+  /** A shot on a louder echo, with the real blast's foot ``earlier``. */
+  echoes: Array<{ time: number; earlier: number }>;
   reference: { kind: "snap"; times: number[] } | null;
   rounds: number | null;
 }

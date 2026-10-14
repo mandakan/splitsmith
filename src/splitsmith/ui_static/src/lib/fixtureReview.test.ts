@@ -7,6 +7,7 @@ const signals = (over: Partial<FixtureReviewSignals> = {}): FixtureReviewSignals
   moves: [],
   edges: [],
   unmarked: [],
+  echoes: [],
   reference: null,
   rounds: null,
   ...over,
@@ -30,6 +31,14 @@ describe("signalAnomalies", () => {
     expect(flags[1].message).toMatch(/edge of its snap window/);
     expect(flags[2].message).toMatch(/no shot/);
     expect(flags.every((f) => f.severity === "warn")).toBe(true);
+  });
+});
+
+describe("echo flags", () => {
+  it("names the blast before the shot and the fix", () => {
+    const [f] = signalAnomalies(signals({ echoes: [{ time: 2.025, earlier: 2.0 }] }));
+    expect([f.kind, f.time]).toEqual(["review_echo", 2.025]);
+    expect(f.message).toBe("On an echo? A blast at 2.000 s, 25 ms before: Earlier rise moves it there");
   });
 });
 

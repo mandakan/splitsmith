@@ -20,7 +20,8 @@
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 6.64,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 0.0
     },
     {
       "shot_number": 2,
@@ -30,7 +31,8 @@
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": -2.18,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 0.0
     },
     {
       "shot_number": 3,
@@ -40,17 +42,19 @@
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": -5.98,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 0.0
     },
     {
       "shot_number": 4,
       "candidate_number": 10,
-      "time": 7.503,
-      "ms_after_beep": 3419,
+      "time": 7.504,
+      "ms_after_beep": 3420,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": -2.86,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 1.0
     },
     {
       "shot_number": 5,
@@ -60,7 +64,8 @@
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": -6.64,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 0.0
     },
     {
       "shot_number": 6,
@@ -70,17 +75,19 @@
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": -7.53,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 0.0
     },
     {
       "shot_number": 7,
       "candidate_number": 20,
-      "time": 9.145,
-      "ms_after_beep": 5061,
+      "time": 9.146,
+      "ms_after_beep": 5062,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": -8.33,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 1.0
     },
     {
       "shot_number": 8,
@@ -90,7 +97,8 @@
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": -10.21,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 0.0
     },
     {
       "shot_number": 9,
@@ -100,27 +108,30 @@
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 8.18,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 0.0
     },
     {
       "shot_number": 10,
       "candidate_number": 47,
-      "time": 14.833,
-      "ms_after_beep": 10749,
+      "time": 14.834,
+      "ms_after_beep": 10750,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 4.5,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 1.0
     },
     {
       "shot_number": 11,
       "candidate_number": 48,
-      "time": 15.347,
-      "ms_after_beep": 11263,
+      "time": 15.348,
+      "ms_after_beep": 11264,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 5.67,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 1.0
     },
     {
       "shot_number": 12,
@@ -130,7 +141,8 @@
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 6.9,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 0.0
     },
     {
       "shot_number": 13,
@@ -140,17 +152,19 @@
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 7.98,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 0.0
     },
     {
       "shot_number": 14,
       "candidate_number": 62,
-      "time": 17.4,
-      "ms_after_beep": 13316,
+      "time": 17.399,
+      "ms_after_beep": 13315,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 4.33,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": -1.0
     },
     {
       "shot_number": 15,
@@ -160,17 +174,19 @@
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 5.45,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 0.0
     },
     {
       "shot_number": 16,
       "candidate_number": 66,
-      "time": 18.566,
-      "ms_after_beep": 14482,
+      "time": 18.565,
+      "ms_after_beep": 14481,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 5.71,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": -1.0
     },
     {
       "shot_number": 17,
@@ -180,27 +196,30 @@
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 4.83,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 0.0
     },
     {
       "shot_number": 18,
       "candidate_number": 69,
-      "time": 19.748,
-      "ms_after_beep": 15664,
+      "time": 19.745,
+      "ms_after_beep": 15661,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 8.09,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": -3.0
     },
     {
       "shot_number": 19,
       "candidate_number": 70,
-      "time": 20.086,
-      "ms_after_beep": 16002,
+      "time": 20.085,
+      "ms_after_beep": 16001,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 9.2,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": -1.0
     },
     {
       "shot_number": 20,
@@ -210,17 +229,19 @@
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 8.38,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 0.0
     },
     {
       "shot_number": 21,
       "candidate_number": 73,
-      "time": 21.143,
-      "ms_after_beep": 17059,
+      "time": 21.141,
+      "ms_after_beep": 17057,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 7.54,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": -2.0
     },
     {
       "shot_number": 22,
@@ -230,7 +251,8 @@
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": -1.82,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 0.0
     },
     {
       "shot_number": 23,
@@ -240,7 +262,8 @@
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 6.32,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 0.0
     },
     {
       "shot_number": 24,
@@ -250,7 +273,8 @@
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 30.62,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 0.0
     },
     {
       "shot_number": 25,
@@ -260,7 +284,8 @@
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": -0.22,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 0.0
     },
     {
       "shot_number": 26,
@@ -270,17 +295,19 @@
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 0.97,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 0.0
     },
     {
       "shot_number": 27,
       "candidate_number": 113,
-      "time": 29.176,
-      "ms_after_beep": 25092,
+      "time": 29.174,
+      "ms_after_beep": 25090,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 1.13,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": -2.0
     },
     {
       "shot_number": 28,
@@ -290,37 +317,41 @@
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 7.21,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 0.0
     },
     {
       "shot_number": 29,
       "candidate_number": 123,
-      "time": 31.806,
-      "ms_after_beep": 27722,
+      "time": 31.804,
+      "ms_after_beep": 27720,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": -8.02,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": -2.0
     },
     {
       "shot_number": 30,
       "candidate_number": 124,
-      "time": 32.079,
-      "ms_after_beep": 27995,
+      "time": 32.081,
+      "ms_after_beep": 27997,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": -11.93,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 2.0
     },
     {
       "shot_number": 31,
       "candidate_number": 129,
-      "time": 32.78,
-      "ms_after_beep": 28696,
+      "time": 32.778,
+      "ms_after_beep": 28694,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": -7.7,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": -2.0
     },
     {
       "shot_number": 32,
@@ -330,7 +361,8 @@
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": -10.64,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 0.0
     },
     {
       "shot_number": 33,
@@ -340,7 +372,8 @@
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": -8.53,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 0.0
     }
   ],
   "_candidates_pending_audit": {
@@ -3053,14 +3086,15 @@
   "anchor": {
     "fixture_slug": "stage4-a300-v\u00e4nster",
     "revision_sha": "655dc78b0dc97cc6fe06c603f8524d04a504362e7ef3268946f0c0bc34e816fb",
-    "promoted_at": "2026-10-14T11:32:14.020409+00:00",
+    "promoted_at": "2026-10-14T12:23:45.994291+00:00",
     "offset_seconds": -0.9160416666666666,
     "drift_ms_per_minute": 0.0,
-    "snap_window_ms": 60
+    "snap_window_ms": 60,
+    "seated": true
   },
   "history": [
     {
-      "at": "2026-10-14T11:32:14.020438+00:00",
+      "at": "2026-10-14T12:23:45.994308+00:00",
       "action": "promote-from-anchor",
       "tool_version": "0.1.0",
       "details": {

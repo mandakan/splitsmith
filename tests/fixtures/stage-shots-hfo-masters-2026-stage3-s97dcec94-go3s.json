@@ -15,102 +15,112 @@
     {
       "shot_number": 1,
       "candidate_number": 9,
-      "time": 8.4895,
-      "ms_after_beep": 3489,
+      "time": 8.487,
+      "ms_after_beep": 3486,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 16.81,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": -2.5
     },
     {
       "shot_number": 2,
       "candidate_number": 12,
-      "time": 9.5195,
-      "ms_after_beep": 4519,
+      "time": 9.518,
+      "ms_after_beep": 4518,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 22.44,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": -1.5
     },
     {
       "shot_number": 3,
       "candidate_number": 15,
-      "time": 10.5095,
-      "ms_after_beep": 5509,
+      "time": 10.507,
+      "ms_after_beep": 5506,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 10.04,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": -2.5
     },
     {
       "shot_number": 4,
       "candidate_number": 19,
-      "time": 11.5025,
+      "time": 11.502,
       "ms_after_beep": 6502,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 11.62,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": -0.5
     },
     {
       "shot_number": 5,
       "candidate_number": 20,
-      "time": 11.7305,
+      "time": 11.73,
       "ms_after_beep": 6730,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 14.97,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": -0.5
     },
     {
       "shot_number": 6,
       "candidate_number": 21,
-      "time": 12.3045,
-      "ms_after_beep": 7304,
+      "time": 12.302,
+      "ms_after_beep": 7302,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 12.89,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": -2.5
     },
     {
       "shot_number": 7,
       "candidate_number": 22,
-      "time": 12.6445,
-      "ms_after_beep": 7644,
+      "time": 12.643,
+      "ms_after_beep": 7642,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 14.43,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": -1.5
     },
     {
       "shot_number": 8,
       "candidate_number": 24,
-      "time": 13.3725,
-      "ms_after_beep": 8372,
+      "time": 13.37,
+      "ms_after_beep": 8370,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 16.59,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": -2.5
     },
     {
       "shot_number": 9,
       "candidate_number": 26,
-      "time": 13.8055,
-      "ms_after_beep": 8805,
+      "time": 13.803,
+      "ms_after_beep": 8802,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 17.27,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": -2.5
     },
     {
       "shot_number": 10,
       "candidate_number": 28,
-      "time": 14.3185,
-      "ms_after_beep": 9318,
+      "time": 14.317,
+      "ms_after_beep": 9316,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 19.09,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": -1.5
     }
   ],
   "_candidates_pending_audit": {
@@ -743,14 +753,15 @@
   "anchor": {
     "fixture_slug": "stage3-a200",
     "revision_sha": "18a2c1e9229beb82ee19e592cc8bd807567d1f6177691ac74edeb5fb521c17b9",
-    "promoted_at": "2026-10-14T11:32:08.680068+00:00",
+    "promoted_at": "2026-10-14T12:23:40.951544+00:00",
     "offset_seconds": 13.548541666666665,
     "drift_ms_per_minute": 0.0,
-    "snap_window_ms": 60
+    "snap_window_ms": 60,
+    "seated": true
   },
   "history": [
     {
-      "at": "2026-10-14T11:32:08.680100+00:00",
+      "at": "2026-10-14T12:23:40.951559+00:00",
       "action": "promote-from-anchor",
       "tool_version": "0.1.0",
       "details": {

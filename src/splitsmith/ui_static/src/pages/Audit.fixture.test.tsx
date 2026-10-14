@@ -47,6 +47,7 @@ const signals = (): FixtureReviewSignals => ({
   moves: [{ time: 6.0, suggested: 5.992, move_ms: -8 }],
   edges: [],
   unmarked: [],
+  echoes: [],
   reference: { kind: "snap", times: [6.0, 6.5] },
   rounds: 2,
 });

@@ -15208,7 +15208,19 @@ def create_app(
             ),
             None,
         )
-        signals = review_signals(fixture, report=report, inventory=entry)
+        # The fixture's own audio at 1 ms, for the echo check (a published
+        # file, read and enveloped in milliseconds; spec 2026-10-14).
+        envelope = None
+        wav = target.with_suffix(".wav")
+        if wav.exists():
+            from ..rise_foot import peak_envelope
+
+            try:
+                audio, sr = beep_detect.load_audio(wav)
+                envelope = peak_envelope(audio, sr)
+            except Exception as exc:  # noqa: BLE001 -- no audio is no echo check, never an error
+                logger.info("review signals: could not read %s: %s", wav.name, exc)
+        signals = review_signals(fixture, report=report, inventory=entry, envelope=envelope)
         return JSONResponse(signals.model_dump(mode="json"))
 
     @app.get("/api/fixture/audio")

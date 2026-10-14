@@ -15,12 +15,13 @@
     {
       "shot_number": 1,
       "candidate_number": 12,
-      "time": 7.861,
-      "ms_after_beep": 2882,
+      "time": 7.867,
+      "ms_after_beep": 2888,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 17.56,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 6.0
     },
     {
       "shot_number": 2,
@@ -30,7 +31,8 @@
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 10.43,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 0.0
     },
     {
       "shot_number": 3,
@@ -40,17 +42,19 @@
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 6.56,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 0.0
     },
     {
       "shot_number": 4,
       "candidate_number": 36,
-      "time": 12.086,
-      "ms_after_beep": 7107,
+      "time": 12.085,
+      "ms_after_beep": 7106,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 10.6,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": -1.0
     },
     {
       "shot_number": 5,
@@ -60,17 +64,19 @@
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 5.99,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 0.0
     },
     {
       "shot_number": 6,
       "candidate_number": 61,
-      "time": 16.849,
-      "ms_after_beep": 11870,
+      "time": 16.848,
+      "ms_after_beep": 11869,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 7.04,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": -1.0
     },
     {
       "shot_number": 7,
@@ -80,7 +86,8 @@
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 14.29,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 0.0
     },
     {
       "shot_number": 8,
@@ -90,7 +97,8 @@
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 7.22,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 0.0
     },
     {
       "shot_number": 9,
@@ -100,27 +108,30 @@
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 7.6,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 0.0
     },
     {
       "shot_number": 10,
       "candidate_number": 87,
-      "time": 22.576,
-      "ms_after_beep": 17597,
+      "time": 22.575,
+      "ms_after_beep": 17596,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 10.16,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": -1.0
     },
     {
       "shot_number": 11,
       "candidate_number": 90,
-      "time": 23.116,
-      "ms_after_beep": 18137,
+      "time": 23.109,
+      "ms_after_beep": 18130,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 16.55,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": -7.0
     },
     {
       "shot_number": 12,
@@ -130,7 +141,8 @@
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 10.19,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 0.0
     },
     {
       "shot_number": 13,
@@ -140,7 +152,8 @@
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 12.35,
-      "sanity_flag": ""
+      "sanity_flag": "",
+      "seat_ms": 0.0
     }
   ],
   "_candidates_pending_audit": {
@@ -2133,14 +2146,15 @@
   "anchor": {
     "fixture_slug": "stage2-a100",
     "revision_sha": "d457a878ce72ef439edce28784035317566433bef196629e511499bb51b7ec48",
-    "promoted_at": "2026-10-14T11:32:06.747105+00:00",
+    "promoted_at": "2026-10-14T12:23:39.434615+00:00",
     "offset_seconds": -0.020541666666666458,
     "drift_ms_per_minute": 0.0,
-    "snap_window_ms": 60
+    "snap_window_ms": 60,
+    "seated": true
   },
   "history": [
     {
-      "at": "2026-10-14T11:32:06.747139+00:00",
+      "at": "2026-10-14T12:23:39.434631+00:00",
       "action": "promote-from-anchor",
       "tool_version": "0.1.0",
       "details": {

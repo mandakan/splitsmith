@@ -5302,7 +5302,9 @@ def test_fixture_review_signals_read_the_fixture_its_report_and_the_inventory(tm
 
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["moves"] == [{"time": 6.0, "suggested": 5.99, "move_ms": -10.0}]
+    # A snap is seated on the rise foot: the inventory's stricter onset is not shown.
+    assert body["moves"] == []
+    assert body["echoes"] == []
     assert body["edges"] == [{"time": 6.0, "displacement_ms": 59.0}]
     assert body["reference"] == {"kind": "snap", "times": [6.0]}
     assert body["rounds"] == 1
