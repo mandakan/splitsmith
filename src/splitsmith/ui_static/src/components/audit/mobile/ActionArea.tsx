@@ -21,6 +21,10 @@ export interface ActionAreaProps {
   foot?: { text: string; onRule: boolean } | null;
   /** Whether the selected shot has a rise foot it is not already on. */
   canSeat?: boolean;
+  /** Reviewing a fixture: the review flag at the selection (lib/fixtureReview
+   *  ``flagAt``), ``null`` for none. Absent outside a review, which leaves
+   *  the line out. */
+  flag?: string | null;
   onNudge(deltaMs: -10 | 10): void;
   /** Seat the selected shot on its rise foot; absent until the 1 ms
    *  peaks are in, which hides the button. */
@@ -55,7 +59,7 @@ function readout(props: ActionAreaProps): string {
 const btn = "min-h-11 whitespace-nowrap rounded-md border border-rule px-2 font-mono text-sm disabled:opacity-50";
 
 export function ActionArea(props: ActionAreaProps) {
-  const { target, readOnly, hasVideo = true, foot = null, canSeat = false, onEarlier, canEarlier = false, onNudge, onSeat, onDeleteShot, onShowVideo, onPromote, onAddShot } =
+  const { target, readOnly, hasVideo = true, foot = null, canSeat = false, flag, onEarlier, canEarlier = false, onNudge, onSeat, onDeleteShot, onShowVideo, onPromote, onAddShot } =
     props;
   return (
     <div className="flex flex-col gap-1 px-2 pb-2">
@@ -70,6 +74,12 @@ export function ActionArea(props: ActionAreaProps) {
       >
         {target.kind === "shot" && foot ? foot.text : "\u00a0"}
       </div>
+      {flag !== undefined ? (
+        // Two lines, always there in a review, so the buttons never move.
+        <div data-testid="review-flag" className="line-clamp-2 min-h-10 text-sm text-ink">
+          {flag ?? "\u00a0"}
+        </div>
+      ) : null}
       <div className="flex min-h-11 gap-1.5">
         {target.kind === "shot" && (
           <>

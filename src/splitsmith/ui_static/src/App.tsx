@@ -36,7 +36,10 @@ const Audit = lazyPage<{ fixture?: { path: string; videoPath: string | null } | 
   () => import("@/pages/Audit"),
   "Audit",
 );
-const MobileAudit = lazyPage(() => import("@/pages/MobileAudit"), "MobileAudit");
+const MobileAudit = lazyPage<{ fixture?: { path: string; videoPath: string | null } | null }>(
+  () => import("@/pages/MobileAudit"),
+  "MobileAudit",
+);
 const MobileBeepReview = lazyPage(() => import("@/pages/MobileBeepReview"), "MobileBeepReview");
 const Coach = lazyPage(() => import("@/pages/Coach"), "Coach");
 const Breakdown = lazyPage(() => import("@/pages/Breakdown"), "Breakdown");
@@ -135,13 +138,15 @@ export function AuditRoute() {
 /** The fixture editor needs a desk; its review walk fits a phone. */
 /* A corpus fixture reviewed in the Audit page's workspace (spec
  * 2026-10-14): ``?fixture=<json path>&video=<source path>``, the paths the
- * review queue holds. */
+ * review queue holds. A phone gets the phone's Audit page. */
 function FixtureAuditRoute() {
+  const isMobile = useIsMobile();
   const [params] = useSearchParams();
   const path = params.get("fixture");
   const video = params.get("video");
   const target = useMemo(() => (path ? { path, videoPath: video } : null), [path, video]);
   if (!target) return <Navigate to="/dev/review" replace />;
+  if (isMobile) return <MobileAudit key={target.path} fixture={target} />;
   return (
     <DesktopGate screen="Fixture review" links={false}>
       <Audit key={target.path} fixture={target} />

@@ -29,7 +29,7 @@ import { useLabRun } from "@/components/lab/useLabRun";
 import { api, type DevReviewQueueItem, type DevReviewQueueResponse } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { fixtureAuditHref, queueFilterMatches } from "@/lib/fixtureReview";
-import { continueTarget, mediaMatches, phoneLayout, walkHref } from "@/lib/walk";
+import { continueTarget, mediaMatches, phoneLayout } from "@/lib/walk";
 
 /** State bundle for the queue rail's eval affordance. Labels attach to
  *  detection candidates, and candidates only exist inside an eval run --
@@ -158,7 +158,7 @@ export function DevReviewQueue() {
     onRun: () => void runEval(workSlugs),
   };
 
-  if (phone) return <PhoneQueue loading={loading} queue={queue} />;
+  if (phone) return <PhoneQueue loading={loading} queue={shown} filter={filter} onFilter={setFilter} />;
 
   return (
     <div className="grid h-[calc(100vh-86px)] grid-cols-[320px_1fr]">
@@ -685,10 +685,22 @@ function DetailPane({
 }
 
 /** The queue on a phone: one button that picks up where the last session
- *  stopped, then the fixtures still needing review. */
-function PhoneQueue({ loading, queue }: { loading: boolean; queue: DevReviewQueueResponse | null }) {
+ *  stopped, then the fixtures still needing review, each opening in the
+ *  phone's Audit page inside the queue's filter. */
+function PhoneQueue({
+  loading,
+  queue,
+  filter,
+  onFilter,
+}: {
+  loading: boolean;
+  queue: DevReviewQueueResponse | null;
+  filter: string;
+  onFilter: (q: string) => void;
+}) {
   if (loading || !queue) return <p className="p-4 text-sm text-muted">Loading the queue...</p>;
   const next = continueTarget(queue.pending);
+  const reviewHref = (i: DevReviewQueueItem) => fixtureAuditHref(i.audit_path, i.video_path ?? null, filter);
   const open = queue.pending.filter((i) => i.review_status === "needs_review");
   // The camera is what tells two angles of one stage apart: the slug's tail
   // after the shooter.
@@ -701,9 +713,17 @@ function PhoneQueue({ loading, queue }: { loading: boolean; queue: DevReviewQueu
     i.slug;
   return (
     <div className="space-y-4 p-4">
+      <input
+        type="search"
+        value={filter}
+        onChange={(e) => onFilter(e.target.value)}
+        placeholder="Filter, e.g. hostfinalen"
+        aria-label="Filter the queue"
+        className="min-h-11 w-full rounded-md border border-rule bg-surface-2 px-3 text-base text-ink"
+      />
       {next ? (
         <Link
-          to={walkHref(next.audit_path, next.video_path ?? null)}
+          to={reviewHref(next)}
           className="btn-primary block min-h-11 rounded-lg px-4 py-3 text-center"
         >
           <span className="block text-base font-semibold">Continue</span>
@@ -720,7 +740,7 @@ function PhoneQueue({ loading, queue }: { loading: boolean; queue: DevReviewQueu
           {open.map((i) => (
             <li key={i.slug}>
               <Link
-                to={walkHref(i.audit_path, i.video_path ?? null)}
+                to={reviewHref(i)}
                 className="flex min-h-11 items-center justify-between gap-2 py-2"
               >
                 <span className="text-ink">{name(i)}</span>
