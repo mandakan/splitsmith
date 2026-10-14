@@ -42,8 +42,9 @@ def test_the_corpus_marks_the_snapped_and_the_flagged_fixtures():
         snapped = d.get("anchor") or any(
             h.get("action") == "promote-from-anchor" for h in d.get("history") or []
         )
-        flagged = (d.get("review") or {}).get("status") == "needs_review"
-        if snapped or flagged:
+        status = (d.get("review") or {}).get("status")
+        # A snap needs review until its review block says reviewed.
+        if (snapped and status != "reviewed") or status == "needs_review":
             expected.add(p.stem)
     assert len(expected) >= 12
     needs = {f.stem for f in fx_module.all_fixtures() if f.review_status == "needs_review"}
