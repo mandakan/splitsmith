@@ -7,7 +7,13 @@
  * the band, and the sign-off counts a snap's shots against the shots it was
  * snapped with, never the scorecard's rounds.
  */
-import type { FixtureReviewSignals, MatchProject, StageAudit, StageVideo } from "@/lib/api";
+import type {
+  DevReviewQueueItem,
+  FixtureReviewSignals,
+  MatchProject,
+  StageAudit,
+  StageVideo,
+} from "@/lib/api";
 import type { Anomaly } from "@/lib/anomalies";
 
 /** What the page opens: the fixture JSON and its source video, both paths. */
@@ -185,8 +191,34 @@ export function fixtureStem(path: string): string {
 }
 
 /** The Audit page reviewing a fixture, with its source video when that is
- *  on this disk. */
-export function fixtureAuditHref(auditPath: string, videoPath: string | null): string {
+ *  on this disk, and the queue's filter (``q``) so "next" stays inside it. */
+export function fixtureAuditHref(auditPath: string, videoPath: string | null, filter = ""): string {
   const video = videoPath ? `&video=${encodeURIComponent(videoPath)}` : "";
-  return `/review/audit?fixture=${encodeURIComponent(auditPath)}${video}`;
+  const q = filter.trim() ? `&q=${encodeURIComponent(filter.trim())}` : "";
+  return `/review/audit?fixture=${encodeURIComponent(auditPath)}${video}${q}`;
+}
+
+/** Whether a queue item matches the queue's filter: every word of it, in any
+ *  case, somewhere in the slug, the venue or the source. Blank matches all. */
+export function queueFilterMatches(item: DevReviewQueueItem, filter: string): boolean {
+  const words = filter.toLowerCase().split(/\s+/).filter(Boolean);
+  const text = [item.slug, item.venue ?? "", item.source_label].join(" ").toLowerCase();
+  return words.every((w) => text.includes(w));
+}
+
+/** The fixture to open after this one is signed off: the next one after it in
+ *  the queue (as it stood before the sign-off) whose shots need checking and
+ *  that matches the filter, wrapping to the first; null when none is left. */
+export function nextInQueue(
+  pending: ReadonlyArray<DevReviewQueueItem>,
+  currentSlug: string,
+  filter: string,
+): DevReviewQueueItem | null {
+  const at = pending.findIndex((i) => i.slug === currentSlug);
+  const order = at < 0 ? pending : [...pending.slice(at + 1), ...pending.slice(0, at)];
+  return (
+    order.find(
+      (i) => i.slug !== currentSlug && i.review_status === "needs_review" && queueFilterMatches(i, filter),
+    ) ?? null
+  );
 }

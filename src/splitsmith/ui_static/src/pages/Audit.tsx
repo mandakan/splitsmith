@@ -105,11 +105,11 @@ import {
   fixtureProject,
   fixtureStem,
   fixtureVideoOffset,
+  nextInQueue,
   signalAnomalies,
   signOffLine,
   type FixtureTarget,
 } from "@/lib/fixtureReview";
-import { nextFixtureToReview } from "@/lib/walk";
 import { earlierFootFor, footFor, footReadout, readSnapOn, seatAllMoves, writeSnapOn } from "@/lib/riseFoot";
 import { isPeekKey } from "@/lib/auditKeys";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -1299,9 +1299,17 @@ export function Audit({ fixture = null }: { fixture?: FixtureTarget | null } = {
           isDirtyRef.current = false;
           setSaveStatus({ kind: "saved", at: Date.now() });
           if (opts.advance) {
+            // The queue as it stands before the sign-off, so "next" is the
+            // one after this fixture, inside the queue's filter.
+            const queue = await api.getDevReviewQueue();
             await api.confirmReviewFixture(stem, "audit");
-            const next = nextFixtureToReview((await api.getDevReviewQueue()).pending, stem);
-            navigate(next ? fixtureAuditHref(next.audit_path, next.video_path ?? null) : "/dev/review");
+            const filter = searchParams.get("q") ?? "";
+            const next = nextInQueue(queue.pending, stem, filter);
+            navigate(
+              next
+                ? fixtureAuditHref(next.audit_path, next.video_path ?? null, filter)
+                : `/dev/review${filter ? `?q=${encodeURIComponent(filter)}` : ""}`,
+            );
           }
           return true;
         } catch (err) {
@@ -1382,6 +1390,7 @@ export function Audit({ fixture = null }: { fixture?: FixtureTarget | null } = {
       shooters,
       stageSelectorOptions,
       fixture,
+      searchParams,
     ],
   );
 

@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import type { FixtureReviewSignals, StageAudit } from "@/lib/api";
-import { fixtureProject, fixtureVideoOffset, signalAnomalies, signOffLine } from "@/lib/fixtureReview";
+import type { DevReviewQueueItem, FixtureReviewSignals, StageAudit } from "@/lib/api";
+import {
+  fixtureAuditHref,
+  fixtureProject,
+  fixtureVideoOffset,
+  nextInQueue,
+  queueFilterMatches,
+  signalAnomalies,
+  signOffLine,
+} from "@/lib/fixtureReview";
 
 const signals = (over: Partial<FixtureReviewSignals> = {}): FixtureReviewSignals => ({
   moves: [],
@@ -92,5 +100,50 @@ describe("fixtureProject", () => {
   it("puts the video's clock the window's start ahead of the fixture's", () => {
     expect(fixtureVideoOffset(doc)).toBe(1.5);
     expect(fixtureVideoOffset({ shots: [] } as unknown as StageAudit)).toBe(0);
+  });
+});
+
+describe("the review queue's filter and next fixture", () => {
+  const item = (slug: string, status: "needs_review" | "reviewed" = "needs_review") =>
+    ({ slug, review_status: status, venue: null, source_label: "match" }) as DevReviewQueueItem;
+  const queue = [
+    item("stage-shots-a-stage3-go3s"),
+    item("stage-shots-hfo-masters-2026-stage1-go3s"),
+    item("stage-shots-b-stage1-iphone"),
+    item("stage-shots-hfo-masters-2026-stage2-go3s"),
+    item("stage-shots-hfo-masters-2026-stage4-go3s", "reviewed"),
+    item("stage-shots-hfo-masters-2026-stage5-go3s"),
+  ];
+
+  it("matches every word of the filter, in any order and case", () => {
+    expect(queueFilterMatches(queue[1], "GO3S hfo")).toBe(true);
+    expect(queueFilterMatches(queue[2], "hfo go3s")).toBe(false);
+    expect(queueFilterMatches(queue[2], "  ")).toBe(true);
+  });
+
+  it("takes the next fixture after this one, not the top of the queue", () => {
+    expect(nextInQueue(queue, "stage-shots-b-stage1-iphone", "")?.slug).toBe(
+      "stage-shots-hfo-masters-2026-stage2-go3s",
+    );
+  });
+
+  it("stays inside the filter and skips reviewed fixtures", () => {
+    expect(nextInQueue(queue, "stage-shots-hfo-masters-2026-stage2-go3s", "hfo go3s")?.slug).toBe(
+      "stage-shots-hfo-masters-2026-stage5-go3s",
+    );
+  });
+
+  it("wraps to the filter's first open fixture, and is null when none is left", () => {
+    expect(nextInQueue(queue, "stage-shots-hfo-masters-2026-stage5-go3s", "hfo")?.slug).toBe(
+      "stage-shots-hfo-masters-2026-stage1-go3s",
+    );
+    expect(nextInQueue([queue[1]], queue[1].slug, "hfo")).toBeNull();
+  });
+
+  it("carries the filter on the Audit link", () => {
+    expect(fixtureAuditHref("/f/a.json", null, "hfo go3s")).toBe(
+      "/review/audit?fixture=%2Ff%2Fa.json&q=hfo%20go3s",
+    );
+    expect(fixtureAuditHref("/f/a.json", null, "")).toBe("/review/audit?fixture=%2Ff%2Fa.json");
   });
 });
