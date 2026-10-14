@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "seat-all-per-stage",
+      "date": "2026-10-14",
+      "title": "Seat all stays on the stage you are on",
+      "body": "After seating shots on one stage, Seat all on the next stage on the desktop could move shots seconds away, onto another stage's times. It now seats each shot where it sits on this stage."
+    },
+    {
       "id": "audio-prepared-before-audit",
       "date": "2026-10-14",
       "title": "Audit never draws half a stage",
