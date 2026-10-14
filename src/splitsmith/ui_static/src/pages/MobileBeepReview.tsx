@@ -18,11 +18,12 @@
  *      operator at desktop and keep Confirm disabled (confirming a beep
  *      with no evidence in front of the operator is not a real review).
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 
 import { api, READ_ONLY_MIRROR_MESSAGE } from "@/lib/api";
 import type { BeepQueueItem, BeepSnippetPeaks } from "@/lib/api";
+import { recheckOrder } from "@/lib/beepQueue";
 import { useBeepQueue, DESTRUCTIVE_RERUN_WARNING, keyOf } from "@/lib/useBeepQueue";
 import { BeepWaveformPicker } from "@/components/BeepSection";
 import { BeepReticle, type ReticleMarker } from "@/components/audit/BeepReticle";
@@ -36,11 +37,33 @@ const PLAY_LEAD_S = 0.4; // "Play from line" starts this far before the pick
  *  away and back must not turn a plain confirm into a destructive re-run. */
 const SAME_BEEP_S = 0.005;
 
-export function MobileBeepReview() {
+/** What applying a moved secondary beep does: its trim is cut again on the
+ *  new beep. A secondary has no shot timeline, so nothing is re-detected. */
+export const RECHECK_APPLY_WARNING =
+  "Applying re-cuts this camera's clip on the new beep. The primary's shots stay as they are.";
+
+const RECHECK_DONE = "done";
+
+export interface MobileBeepReviewProps {
+  /** The recheck pass over secondary beeps (``?recheck=secondaries``):
+   *  pages over every secondary camera, confirmed or not
+   *  (lib/beepQueue.recheckOrder) instead of the pending queue. */
+  recheck?: boolean;
+  /** The camera the pass starts at, as ``slug::stage::video``. */
+  start?: string | null;
+  /** Where the pass opens; shown when every beep is confirmed. */
+  recheckHref?: string;
+}
+
+export function MobileBeepReview({ recheck = false, start = null, recheckHref }: MobileBeepReviewProps = {}) {
   const q = useBeepQueue();
   const [draft, setDraft] = useState<number | null>(null);
   const [sheet, setSheet] = useState<null | "confirm" | "redetect">(null);
-  useEffect(() => setDraft(null), [q.activeKey]);
+  // The recheck pass keeps its own place: the queue's active item follows
+  // the pending backlog, which a recheck of confirmed beeps is not.
+  const recheckItems = useMemo(() => recheckOrder(q.flatItems), [q.flatItems]);
+  const [recheckKey, setRecheckKey] = useState<string | null>(start);
+  useEffect(() => setDraft(null), [q.activeKey, recheckKey]);
 
   if (!q.data) {
     return (
@@ -49,14 +72,32 @@ export function MobileBeepReview() {
       </div>
     );
   }
-  const item = q.active;
+  const recheckAt = recheck
+    ? recheckKey === RECHECK_DONE
+      ? -1
+      : Math.max(0, recheckItems.findIndex((it) => keyOf(it) === recheckKey))
+    : -1;
+  const item = recheck ? (recheckItems[recheckAt] ?? null) : q.active;
   if (!item) {
     return (
-      <div className="px-5 py-10 text-center text-sm text-muted" role="status">
-        All quiet - every beep is confirmed.
+      <div className="flex flex-col items-center gap-4 px-5 py-10 text-center text-sm text-muted" role="status">
+        {recheck
+          ? recheckItems.length
+            ? "Every secondary beep checked."
+            : "No secondary cameras in this match."
+          : "All quiet - every beep is confirmed."}
+        {!recheck && recheckHref ? (
+          <a href={recheckHref} className="min-h-11 rounded-md border border-rule px-4 py-2.5 text-ink">
+            Recheck secondary beeps
+          </a>
+        ) : null}
       </div>
     );
   }
+  const recheckNextItem = () => {
+    const next = recheckItems[recheckAt + 1];
+    setRecheckKey(next ? keyOf(next) : RECHECK_DONE);
+  };
   const position = q.pendingItems.findIndex((it) => keyOf(it) === keyOf(item));
   const effective = draft ?? item.beep_time;
   const mediaAvailable = item.proxy_ready || item.snippet_ready;
@@ -64,15 +105,20 @@ export function MobileBeepReview() {
   const changed = draft != null && (item.beep_time == null || Math.abs(draft - item.beep_time) >= SAME_BEEP_S);
   const doConfirm = () => {
     if (changed) setSheet("confirm"); // picking a new time is destructive
+    else if (recheck) recheckNextItem(); // the beep stands: nothing written
     else void q.confirm(item);
   };
 
   return (
     <div className="mx-auto max-w-md px-4 pb-24 pt-4">
       <header className="mb-3 flex items-center justify-between">
-        <Kicker>Beep review</Kicker>
+        <Kicker>{recheck ? "Recheck" : "Beep review"}</Kicker>
         <span className="text-sm text-muted" aria-live="polite">
-          {position >= 0 ? `${position + 1} of ${q.pendingItems.length}` : "confirmed"}
+          {recheck
+            ? `Secondary beep ${recheckAt + 1} of ${recheckItems.length}`
+            : position >= 0
+              ? `${position + 1} of ${q.pendingItems.length}`
+              : "confirmed"}
         </span>
       </header>
       <div className="rounded-lg border border-rule bg-surface p-4">
@@ -97,16 +143,27 @@ export function MobileBeepReview() {
             onClick={doConfirm}
             className="btn-led-fill inline-flex min-h-11 items-center justify-center rounded-md px-5 disabled:opacity-40"
           >
-            {changed ? "Apply new time and confirm" : "Confirm beep"}
+            {changed ? "Apply new time and confirm" : recheck ? "Looks right, next" : "Confirm beep"}
           </button>
           <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={q.skip}
-              className="min-h-11 flex-1 rounded border border-rule px-4 text-sm text-ink"
-            >
-              Skip
-            </button>
+            {recheck ? (
+              <button
+                type="button"
+                disabled={recheckAt <= 0}
+                onClick={() => setRecheckKey(keyOf(recheckItems[recheckAt - 1]))}
+                className="min-h-11 flex-1 rounded border border-rule px-4 text-sm text-ink disabled:opacity-40"
+              >
+                Previous camera
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={q.skip}
+                className="min-h-11 flex-1 rounded border border-rule px-4 text-sm text-ink"
+              >
+                Skip
+              </button>
+            )}
             {/* #756: disabled (not hidden) when edit is denied - a
              *  missing Re-detect next to a live Confirm would read as a
              *  bug. Confirm/skip stay live regardless (review-class). */}
@@ -120,7 +177,7 @@ export function MobileBeepReview() {
               Re-detect
             </button>
           </div>
-          <div className="flex gap-2">
+          <div className={recheck ? "hidden" : "flex gap-2"}>
             <button
               type="button"
               onClick={q.prevItem}
@@ -148,11 +205,13 @@ export function MobileBeepReview() {
       <MobileConfirmSheet
         open={sheet === "confirm"}
         title="Apply new beep time?"
-        body={DESTRUCTIVE_RERUN_WARNING}
+        body={recheck && item.role === "secondary" ? RECHECK_APPLY_WARNING : DESTRUCTIVE_RERUN_WARNING}
         confirmLabel="Apply and confirm"
         onConfirm={() => {
           setSheet(null);
-          void q.confirm(item, changed ? draft! : undefined);
+          const applied = q.confirm(item, changed ? draft! : undefined);
+          // The pass moves on once the new beep is written.
+          if (recheck) void Promise.resolve(applied).then(recheckNextItem);
         }}
         onCancel={() => setSheet(null)}
       />

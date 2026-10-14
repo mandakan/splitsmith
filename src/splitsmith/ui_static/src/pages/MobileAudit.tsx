@@ -13,7 +13,7 @@
  * the two screens' audit_events logs read as one history.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useLocation, useNavigate, useOutletContext, useParams } from "react-router-dom";
+import { Link, Navigate, useLocation, useNavigate, useOutletContext, useParams, useSearchParams } from "react-router-dom";
 import { ArrowLeft, ChevronDown, MoreHorizontal, X } from "lucide-react";
 
 import { ActionArea } from "@/components/audit/mobile/ActionArea";
@@ -36,12 +36,25 @@ import {
   api,
   capabilityDenied,
   type AuditEvent,
+  type FixtureReviewSignals,
   type PeaksResult,
   type StageAudit,
   type StageVideo,
 } from "@/lib/api";
 import { addFailedKind, auditPipCameras, type AuditPipCamera, type FailedKinds } from "@/lib/auditPip";
 import { buildAuditJson, deriveMarkers } from "@/lib/audit-doc";
+import { RECHECK_SECONDARIES } from "@/lib/beepQueue";
+import { buildFixtureJson } from "@/lib/fixtureDoc";
+import {
+  fixtureAuditHref,
+  fixtureStem,
+  fixtureVideoOffset,
+  flagAt,
+  nextInQueue,
+  signalAnomalies,
+  signOffLine,
+  type FixtureTarget,
+} from "@/lib/fixtureReview";
 import { StillPendingError } from "@/lib/pending";
 import { resolveTarget } from "@/lib/audit-target";
 import { useDialogFocus } from "@/lib/dialogFocus";
@@ -84,13 +97,24 @@ function saveErrorMessage(err: unknown): string {
   return String(err);
 }
 
-export function MobileAudit() {
+/** ``fixture``: review a corpus fixture here, as desktop Audit does (spec
+ *  2026-10-14): its own shots, audio and source video, its review flags
+ *  beside the selected shot, and Mark reviewed & next in place of Save &
+ *  next. Nothing of a match applies to it. */
+export function MobileAudit({ fixture = null }: { fixture?: FixtureTarget | null } = {}) {
   const { slug = "", stage } = useParams();
   const navigate = useNavigate();
   const href = useMatchHref();
-  const outletCtx = useOutletContext<MatchShellOutletContext | undefined>();
+  const shellCtx = useOutletContext<MatchShellOutletContext | undefined>();
+  // A fixture has no match shell: nothing of the shell's applies to it.
+  const outletCtx = fixture ? undefined : shellCtx;
+  const [searchParams] = useSearchParams();
+  const fixturePath = fixture?.path ?? null;
 
-  const stageNumber = stage != null ? Number(stage) : null;
+  // A fixture is one stage; its number is the document's, for display only.
+  const stageNumber = fixture ? 0 : stage != null ? Number(stage) : null;
+  // Which clip the loaded peaks belong to (see peaksForRef).
+  const peaksKey = fixturePath != null ? `fixture:${fixturePath}` : `${slug}:${stageNumber}`;
   const readOnly = capabilityDenied(outletCtx?.capabilities, "review");
   // A desktop-synced match: detection runs on the desktop, so the phone
   // asks it to (#1100) instead of offering a local re-detect.
@@ -162,7 +186,13 @@ export function MobileAudit() {
 
   // Only once the waveform loaded: the WAV is published by then, and an
   // element pointed at a 202 would stay broken (spec 2026-10-14).
-  const audioSrc = stageNumber != null && peaksResult ? api.stageAudioUrl(slug, stageNumber) : null;
+  const audioSrc = !peaksResult
+    ? null
+    : fixturePath != null
+      ? api.fixtureAudioUrl(fixturePath)
+      : stageNumber != null
+        ? api.stageAudioUrl(slug, stageNumber)
+        : null;
   const playback = useAuditPlayback(audioSrc);
 
   const recordEvent = useCallback((kind: string, payload: Record<string, unknown>) => {
@@ -175,7 +205,7 @@ export function MobileAudit() {
   // rendering, and vice versa (#757 distinction between "no audit yet"
   // and "audio not synced yet").
   useEffect(() => {
-    if (!slug || stageNumber == null) return undefined;
+    if (fixturePath == null && (!slug || stageNumber == null)) return undefined;
     let alive = true;
     setAudit(undefined);
     setAuditError(null);
@@ -187,8 +217,7 @@ export function MobileAudit() {
     setPlacedAt({});
     const ctl = new AbortController();
 
-    api
-      .getStageAudit(slug, stageNumber)
+    (fixturePath != null ? api.getFixtureAudit(fixturePath) : api.getStageAudit(slug, stageNumber!))
       .then((doc) => {
         if (!alive) return;
         setAudit(doc);
@@ -200,11 +229,16 @@ export function MobileAudit() {
         setAuditError(saveErrorMessage(err));
       });
 
-    api
-      .getStagePeaks(slug, stageNumber, PEAKS_BINS, { signal: ctl.signal, onPending: () => alive && setPreparing(true) })
+    (fixturePath != null
+      ? api.getFixturePeaks(fixturePath, PEAKS_BINS)
+      : api.getStagePeaks(slug, stageNumber!, PEAKS_BINS, {
+          signal: ctl.signal,
+          onPending: () => alive && setPreparing(true),
+        })
+    )
       .then((res) => {
         if (!alive) return;
-        peaksForRef.current = `${slug}:${stageNumber}`;
+        peaksForRef.current = peaksKey;
         setPreparing(false);
         setPeaksResult(res);
       })
@@ -218,7 +252,7 @@ export function MobileAudit() {
       alive = false;
       ctl.abort();
     };
-  }, [slug, stageNumber, reloadToken]);
+  }, [slug, stageNumber, reloadToken, fixturePath, peaksKey]);
 
   // Scrubber lifecycle: create once the audio src is known, dispose on
   // unmount / src change. Every failure path degrades to silent
@@ -278,16 +312,15 @@ export function MobileAudit() {
 
   // Fetch the 1 ms peaks once the stage's duration is known.
   useEffect(() => {
-    if (!peaksResult || !slug || stageNumber == null) return undefined;
-    if (peaksForRef.current !== `${slug}:${stageNumber}`) return undefined;
+    if (!peaksResult || (fixturePath == null && (!slug || stageNumber == null))) return undefined;
+    if (peaksForRef.current !== peaksKey) return undefined;
     const bins = Math.min(SNAP_PEAKS_MAX_BINS, Math.max(PEAKS_BINS, Math.ceil(peaksResult.duration / 0.001)));
     if (bins <= PEAKS_BINS) {
       setFootPeaks({ peaks: peaksResult.peaks, duration: peaksResult.duration });
       return undefined;
     }
     let alive = true;
-    api
-      .getStagePeaks(slug, stageNumber, bins)
+    (fixturePath != null ? api.getFixturePeaks(fixturePath, bins) : api.getStagePeaks(slug, stageNumber!, bins))
       .then((res) => {
         if (alive) setFootPeaks({ peaks: res.peaks, duration: res.duration });
       })
@@ -297,7 +330,33 @@ export function MobileAudit() {
     return () => {
       alive = false;
     };
-  }, [peaksResult, slug, stageNumber]);
+  }, [peaksResult, slug, stageNumber, fixturePath, peaksKey]);
+
+  // A fixture's review signals (spec 2026-10-14): the phone has no pins, so
+  // the selected shot's flag reads beside it in the action area.
+  const [reviewSignals, setReviewSignals] = useState<FixtureReviewSignals | null>(null);
+  useEffect(() => {
+    if (fixturePath == null) return undefined;
+    let alive = true;
+    setReviewSignals(null);
+    api
+      .getFixtureReviewSignals(fixturePath)
+      .then((s) => {
+        if (alive) setReviewSignals(s);
+      })
+      .catch(() => {
+        if (alive) setReviewSignals(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [fixturePath]);
+  const reviewFlags = useMemo(() => (reviewSignals ? signalAnomalies(reviewSignals) : []), [reviewSignals]);
+  const reviewFlag =
+    fixture == null
+      ? undefined
+      : flagAt(reviewFlags, target.kind === "none" ? playback.playhead : target.marker.time);
+  const signOff = fixture ? signOffLine(keptSorted.map((m) => m.time), reviewSignals) : null;
 
   const placedFrom = useCallback((m: AuditMarker) => placedAt[m.id] ?? m.time, [placedAt]);
   const targetFoot =
@@ -515,11 +574,14 @@ export function MobileAudit() {
     // still trimmed-clip-local. Also gates the Video button on peaks
     // being loaded at all, since there is no defensible kind to seek into
     // before that - the seek-into-nothing case.
+    if (fixture) return fixture.videoPath && peaksResult ? api.fixtureVideoUrl(fixture.videoPath) : null;
     if (!primaryVideo || !peaksResult) return null;
     if (!peaksResult.trimmed) return api.videoStreamUrl(slug, primaryVideo.path, "auto", null, stageNumber);
     const choice = chooseScrub(primaryVideo);
     return api.videoStreamUrl(slug, primaryVideo.path, choice.kind, choice.version, stageNumber);
-  }, [primaryVideo, peaksResult, slug, chooseScrub, stageNumber]);
+  }, [primaryVideo, peaksResult, slug, chooseScrub, stageNumber, fixture]);
+  // A fixture's video is its source file; its clip starts this far in.
+  const videoOffset = fixture && audit ? fixtureVideoOffset(audit) : 0;
 
   // Where the dialog's video starts, captured when Video is pressed. The tap
   // that selected the shot also started its audio, so the playhead-derived
@@ -573,8 +635,8 @@ export function MobileAudit() {
   const handleVideoLoadedMetadata = useCallback(() => {
     const el = videoElRef.current;
     if (!el) return;
-    el.currentTime = videoSeekRef.current;
-  }, []);
+    el.currentTime = videoSeekRef.current + videoOffset;
+  }, [videoOffset]);
 
   // ---- Save -----------------------------------------------------------------
 
@@ -587,6 +649,27 @@ export function MobileAudit() {
       kind: "save",
       payload: { shots_count: keptCount },
     };
+    if (fixturePath != null) {
+      // The fixture's own builder: an untouched snapped shot is written as
+      // it was, with its snap fields.
+      try {
+        const saved = await api.saveFixtureAudit(
+          fixturePath,
+          buildFixtureJson({ base: audit, markers, appendEvents: [...sessionEvents.current, saveEvent] }),
+        );
+        setAudit(saved);
+        setMarkers(deriveMarkers(saved));
+        sessionEvents.current = [];
+        setDirty(false);
+        setSnack({ message: "Saved", tone: "status" });
+        return true;
+      } catch (err) {
+        setSnack({ message: `Save failed: ${saveErrorMessage(err)}`, tone: "error" });
+        return false;
+      } finally {
+        setSaving(false);
+      }
+    }
     const payload = buildAuditJson({
       base: audit,
       stage: {
@@ -640,7 +723,7 @@ export function MobileAudit() {
       setSaving(false);
     }
     return false;
-  }, [audit, stageNumber, readOnly, saving, markers, peaksResult, slug, outletCtx]);
+  }, [audit, stageNumber, readOnly, saving, markers, peaksResult, slug, outletCtx, fixturePath]);
 
   // ---- Back navigation -------------------------------------------------------
 
@@ -652,10 +735,13 @@ export function MobileAudit() {
   const location = useLocation();
   const canGoBack =
     (location.state as { canGoBack?: boolean } | null)?.canGoBack ?? location.key !== "default";
+  // The queue's filter, which a review carries from fixture to fixture.
+  const queueFilter = searchParams.get("q") ?? "";
+  const queueHref = `/dev/review${queueFilter ? `?q=${encodeURIComponent(queueFilter)}` : ""}`;
   const goBack = useCallback(() => {
     if (canGoBack) navigate(-1);
-    else navigate(href(""));
-  }, [canGoBack, navigate, href]);
+    else navigate(fixture ? queueHref : href(""));
+  }, [canGoBack, navigate, href, fixture, queueHref]);
   const openStage = useCallback(
     (t: AuditTarget) => navigate(href("audit", t.slug, String(t.stage)), { replace: true, state: { canGoBack } }),
     [navigate, href, canGoBack],
@@ -699,6 +785,28 @@ export function MobileAudit() {
     else goBack();
   }, [handleSave, next, openStage, goBack]);
 
+  // Mark reviewed & next: save any edit, sign the fixture off, and open the
+  // next one after it in the queue as it stood, inside the queue's filter.
+  const handleReviewNext = useCallback(async () => {
+    if (fixturePath == null || audit == null) return;
+    if (dirty && !(await handleSave())) return;
+    setSaving(true);
+    try {
+      const stem = fixtureStem(fixturePath);
+      const queue = await api.getDevReviewQueue();
+      await api.confirmReviewFixture(stem, "audit");
+      const nextItem = nextInQueue(queue.pending, stem, queueFilter);
+      navigate(
+        nextItem ? fixtureAuditHref(nextItem.audit_path, nextItem.video_path ?? null, queueFilter) : queueHref,
+        { replace: true, state: { canGoBack } },
+      );
+    } catch (err) {
+      setSnack({ message: `Could not mark it reviewed: ${saveErrorMessage(err)}`, tone: "error" });
+    } finally {
+      setSaving(false);
+    }
+  }, [fixturePath, audit, dirty, handleSave, queueFilter, queueHref, navigate, canGoBack]);
+
   const handleJump = useCallback(
     (target: AuditTarget) => {
       setJumpOpen(false);
@@ -707,6 +815,14 @@ export function MobileAudit() {
     },
     [dirty, openStage],
   );
+
+  // A recheck link (``?recheck=secondaries&cam=``, the desktop pass's
+  // shape) opened on the phone: the phone's pass is the beep review pager.
+  const recheckCam = searchParams.get("recheck") === RECHECK_SECONDARIES ? searchParams.get("cam") : null;
+  if (!fixture && recheckCam && stageNumber != null) {
+    const start = encodeURIComponent(`${slug}::${stageNumber}::${recheckCam}`);
+    return <Navigate to={`${href("beep-review")}?recheck=${RECHECK_SECONDARIES}&start=${start}`} replace />;
+  }
 
   // ---- No-stage-param: plain stage list, no takeover ------------------------
 
@@ -750,18 +866,27 @@ export function MobileAudit() {
             >
               <ArrowLeft className="size-5" aria-hidden />
             </button>
-            <button
-              type="button"
-              aria-label={JUMP_TITLE}
-              onClick={() => setJumpOpen(true)}
-              className="flex min-h-11 min-w-0 items-center gap-1 text-md font-medium text-ink"
-            >
-              <span className="font-mono text-sm text-led">{String(stageNumber).padStart(2, "0")}</span>
-              <span className="truncate">
-                {shooters.find((s) => s.slug === slug)?.name ?? "Audit"}
+            {fixture ? (
+              <span className="flex min-h-11 min-w-0 items-center gap-1 text-md font-medium text-ink">
+                <span className="font-mono text-sm text-led">
+                  {String(audit?.stage_number ?? "").padStart(2, "0")}
+                </span>
+                <span className="truncate">{audit?.stage_name ?? "Review"}</span>
               </span>
-              <ChevronDown className="size-4 shrink-0 text-ink-2" aria-hidden />
-            </button>
+            ) : (
+              <button
+                type="button"
+                aria-label={JUMP_TITLE}
+                onClick={() => setJumpOpen(true)}
+                className="flex min-h-11 min-w-0 items-center gap-1 text-md font-medium text-ink"
+              >
+                <span className="font-mono text-sm text-led">{String(stageNumber).padStart(2, "0")}</span>
+                <span className="truncate">
+                  {shooters.find((s) => s.slug === slug)?.name ?? "Audit"}
+                </span>
+                <ChevronDown className="size-4 shrink-0 text-ink-2" aria-hidden />
+              </button>
+            )}
             <div className="ml-auto flex items-center gap-1">
               {audit != null && (
                 <>
@@ -773,15 +898,27 @@ export function MobileAudit() {
                   >
                     {dirty ? "Save *" : "Save"}
                   </Button>
-                  <Button
-                    type="button"
-                    variant="primary"
-                    disabled={readOnly || saving}
-                    onClick={() => void handleSaveNext()}
-                    className="min-h-11 px-2.5"
-                  >
-                    {saving ? "Saving..." : next ? "Save & next" : "Save & finish"}
-                  </Button>
+                  {fixture ? (
+                    <Button
+                      type="button"
+                      variant="primary"
+                      disabled={saving}
+                      onClick={() => void handleReviewNext()}
+                      className="min-h-11 px-2.5"
+                    >
+                      Mark reviewed &amp; next
+                    </Button>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="primary"
+                      disabled={readOnly || saving}
+                      onClick={() => void handleSaveNext()}
+                      className="min-h-11 px-2.5"
+                    >
+                      {saving ? "Saving..." : next ? "Save & next" : "Save & finish"}
+                    </Button>
+                  )}
                 </>
               )}
               {!readOnly ? (
@@ -819,6 +956,19 @@ export function MobileAudit() {
                       Snap to rise foot
                       <span className="ml-auto text-sm text-muted">{snapOn ? "on" : "off"}</span>
                     </button>
+                    {!fixture ? (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className={menuItemClass}
+                        onClick={() => {
+                          setMenuOpen(false);
+                          navigate(`${href("beep-review")}?recheck=${RECHECK_SECONDARIES}`);
+                        }}
+                      >
+                        Recheck secondary beeps
+                      </button>
+                    ) : null}
                     {desktopMirror ? (
                       <button
                         type="button"
@@ -838,6 +988,14 @@ export function MobileAudit() {
               ) : null}
             </div>
           </header>
+          {signOff ? (
+            <p
+              data-testid="fixture-sign-off"
+              className={`border-b border-rule px-3 py-1.5 text-sm ${signOff.ok ? "text-muted" : "text-ink"}`}
+            >
+              {signOff.text}
+            </p>
+          ) : null}
           {stageCommand ? (
             <DesktopCommandLine
               command={stageCommand}
@@ -942,6 +1100,7 @@ export function MobileAudit() {
                 hasVideo={videoUrl != null}
                 onNudge={handleNudge}
                 foot={foot}
+                flag={reviewFlag}
                 canSeat={canSeat}
                 onEarlier={footPeaks ? handleEarlier : undefined}
                 canEarlier={targetEarlier != null}
@@ -1054,7 +1213,7 @@ export function MobileAudit() {
         <MobileConfirmSheet
           open={confirmDiscard}
           title="Discard unsaved edits?"
-          body={`Stage ${stageNumber} has ${sessionEvents.current.length} unsaved edit${
+          body={`${fixture ? "This fixture" : `Stage ${stageNumber}`} has ${sessionEvents.current.length} unsaved edit${
             sessionEvents.current.length === 1 ? "" : "s"
           }. Going back without saving discards them.`}
           confirmLabel="Discard"

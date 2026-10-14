@@ -184,6 +184,22 @@ export function signOffLine(kept: number[], s: FixtureReviewSignals | null): { o
   };
 }
 
+/** How near a flag's time a shot must be for the flag to be its own: a
+ *  seat or a nudge moves the shot a few ms off the time it was flagged at. */
+const FLAG_REACH_S = 0.015;
+
+/** The flag for the shot at ``time`` on the phone, which has no pins: the
+ *  nearest flag within a few ms, else ``null``. */
+export function flagAt(flags: ReadonlyArray<Anomaly>, time: number | null): string | null {
+  if (time == null) return null;
+  let best: Anomaly | null = null;
+  for (const f of flags) {
+    if (f.time == null || Math.abs(f.time - time) > FLAG_REACH_S) continue;
+    if (best == null || Math.abs(f.time - time) < Math.abs((best.time ?? 0) - time)) best = f;
+  }
+  return best?.message ?? null;
+}
+
 /** The fixture's stem (its slug in the review queue) from its JSON path. */
 export function fixtureStem(path: string): string {
   const name = path.split("/").pop() ?? path;

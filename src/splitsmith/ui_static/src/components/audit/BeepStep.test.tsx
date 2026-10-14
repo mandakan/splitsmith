@@ -420,3 +420,46 @@ describe("BeepStep", () => {
     });
   });
 });
+
+describe("BeepStep rechecking the secondary beeps", () => {
+  const sec = (stage: number, over: Partial<BeepQueueItem> = {}) =>
+    item({
+      stage_number: stage,
+      role: "secondary",
+      video_id: `s${stage}`,
+      video_path: `raw/IMG_${stage}.MOV`,
+      beep_reviewed: true,
+      status: "confirmed",
+      ...over,
+    });
+  const PRIMARY = item({ beep_reviewed: true, status: "confirmed" });
+
+  it("names the secondary and moves on with Looks right, writing nothing", () => {
+    const state = hookState([PRIMARY, sec(10), sec(11)]);
+    const { onConfirmed } = renderStep(state, { recheck: true, focusVideoId: "s10" });
+    expect(screen.getByText(/Secondary beep 1 of 2/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Looks right, next" }));
+    expect(state.confirm).not.toHaveBeenCalled();
+    expect(onConfirmed).toHaveBeenCalledWith({ slug: "alice", stageNumber: 11, videoId: "s11" });
+  });
+
+  it("Confirm & next writes a moved beep, then goes on; after the last it is done", async () => {
+    const state = hookState([PRIMARY, sec(10)]);
+    const { onConfirmed } = renderStep(state, { recheck: true, focusVideoId: "s10" });
+    fireEvent.click(screen.getByTestId("timeline-pick"));
+    fireEvent.click(screen.getByRole("button", { name: /Confirm & next/ }));
+    await vi.waitFor(() => expect(state.confirm).toHaveBeenCalledWith(expect.objectContaining({ video_id: "s10" }), 9.87));
+    await vi.waitFor(() => expect(onConfirmed).toHaveBeenCalledWith("done"));
+  });
+
+  it("Confirm & next on an untouched beep writes nothing and goes on", async () => {
+    const state = hookState([PRIMARY, sec(10), sec(11)]);
+    const { onConfirmed } = renderStep(state, { recheck: true, focusVideoId: "s10" });
+    fireEvent.click(screen.getByRole("button", { name: /Confirm & next/ }));
+    await vi.waitFor(() =>
+      expect(onConfirmed).toHaveBeenCalledWith({ slug: "alice", stageNumber: 11, videoId: "s11" }),
+    );
+    expect(state.confirm).not.toHaveBeenCalled();
+  });
+});
+

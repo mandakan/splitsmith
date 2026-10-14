@@ -5,6 +5,7 @@ import {
   fixtureAuditHref,
   fixtureProject,
   fixtureVideoOffset,
+  flagAt,
   nextInQueue,
   queueFilterMatches,
   signalAnomalies,
@@ -147,3 +148,28 @@ describe("the review queue's filter and next fixture", () => {
     expect(fixtureAuditHref("/f/a.json", null, "")).toBe("/review/audit?fixture=%2Ff%2Fa.json");
   });
 });
+
+describe("the flag for the shot the phone has selected", () => {
+  const flags = signalAnomalies(
+    signals({
+      edges: [{ time: 6.0, displacement_ms: 58 }],
+      echoes: [{ time: 7.2, earlier: 7.18 }],
+    }),
+  );
+
+  it("is the flag at the shot's time", () => {
+    expect(flagAt(flags, 6.0)).toMatch(/at the edge of its snap window/);
+    expect(flagAt(flags, 7.2)).toMatch(/On an echo\? A blast at 7.180 s/);
+  });
+
+  it("reads within a few ms, since a seat or nudge moves the shot", () => {
+    expect(flagAt(flags, 6.004)).toMatch(/edge of its snap window/);
+    expect(flagAt(flags, 6.03)).toBeNull();
+  });
+
+  it("is null with no flags or no shot", () => {
+    expect(flagAt([], 6.0)).toBeNull();
+    expect(flagAt(flags, null)).toBeNull();
+  });
+});
+

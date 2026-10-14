@@ -824,9 +824,11 @@
   },
   "event_id": "hostfinalen-xi-2026:4:s36ed6e4e",
   "review": {
-    "status": "needs_review",
+    "status": "reviewed",
     "derived_from": null,
-    "reviewed_at": null,
-    "note": "audited by ear on another angle, placed on this one"
+    "reviewed_at": "2026-10-14T13:59:57.158929+00:00",
+    "note": "audited by ear on another angle, placed on this one",
+    "confirmed_at": "2026-10-14T13:59:57.158929+00:00",
+    "method": "own-audit"
   }
 }

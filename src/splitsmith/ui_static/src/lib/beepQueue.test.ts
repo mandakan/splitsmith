@@ -6,6 +6,10 @@ import {
   queueLine,
   queueOrder,
   queuePlace,
+  recheckHref,
+  recheckLine,
+  recheckNext,
+  recheckOrder,
   reviewEntryText,
 } from "./beepQueue";
 
@@ -101,3 +105,44 @@ describe("beep review queue", () => {
     expect(nextInQueue(queueOrder(one), key(one[0]))).toBeNull();
   });
 });
+
+describe("rechecking the secondary beeps", () => {
+  const items = [
+    item("mathias", 2, "secondary", "confirmed"),
+    item("anton", 1, "primary", "confirmed"),
+    item("anton", 2, "secondary", "unreviewed"),
+    item("mathias", 1, "secondary", "confirmed"),
+    item("anton", 1, "secondary", "confirmed"),
+  ];
+
+  it("walks every secondary, confirmed or not, by stage then shooter; never a primary", () => {
+    expect(recheckOrder(items).map((it) => it.video_id)).toEqual([
+      "mathias-1-secondary",
+      "anton-1-secondary",
+      "mathias-2-secondary",
+      "anton-2-secondary",
+    ]);
+  });
+
+  it("goes to the next one and stops after the last, never wrapping round", () => {
+    const order = recheckOrder(items);
+    const key = (it: BeepQueueItem) => ({ slug: it.slug, stageNumber: it.stage_number, videoId: it.video_id });
+    expect(recheckNext(order, key(order[1]))?.video_id).toBe("mathias-2-secondary");
+    expect(recheckNext(order, key(order[3]))).toBeNull();
+  });
+
+  it("says which secondary of how many, and whose", () => {
+    const order = recheckOrder(items);
+    expect(recheckLine(order[2], { position: 3, total: 4 })).toBe(
+      "Secondary beep 3 of 4 · Mathias Axell · Stage 02 · mathias_2_secondary.MOV",
+    );
+  });
+
+  it("links a camera into the pass, remembering where it started", () => {
+    const href = (...seg: string[]) => `/match/m1/${seg.join("/")}`;
+    expect(recheckHref(recheckOrder(items)[0], href, "anton/3")).toBe(
+      "/match/m1/audit/mathias/1?cam=mathias-1-secondary&recheck=secondaries&from=anton%2F3",
+    );
+  });
+});
+

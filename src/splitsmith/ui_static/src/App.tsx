@@ -28,6 +28,8 @@ import { peekApproveCode, stashApproveCode, takeApproveCode } from "@/lib/device
 import { ShooterScopedRoute } from "@/components/ShooterScopedRoute";
 import { lazyPage } from "@/lib/lazyPage";
 import { walkFitsPhone } from "@/lib/walk";
+import { RECHECK_SECONDARIES } from "@/lib/beepQueue";
+import { useMatchHref } from "@/lib/matchHref";
 import { BeepReviewRedirect } from "@/components/match/BeepReviewRedirect";
 
 // Pages load on first navigation (#894); the shells above stay eager.
@@ -36,8 +38,14 @@ const Audit = lazyPage<{ fixture?: { path: string; videoPath: string | null } | 
   () => import("@/pages/Audit"),
   "Audit",
 );
-const MobileAudit = lazyPage(() => import("@/pages/MobileAudit"), "MobileAudit");
-const MobileBeepReview = lazyPage(() => import("@/pages/MobileBeepReview"), "MobileBeepReview");
+const MobileAudit = lazyPage<{ fixture?: { path: string; videoPath: string | null } | null }>(
+  () => import("@/pages/MobileAudit"),
+  "MobileAudit",
+);
+const MobileBeepReview = lazyPage<{ recheck?: boolean; start?: string | null; recheckHref?: string }>(
+  () => import("@/pages/MobileBeepReview"),
+  "MobileBeepReview",
+);
 const Coach = lazyPage(() => import("@/pages/Coach"), "Coach");
 const Breakdown = lazyPage(() => import("@/pages/Breakdown"), "Breakdown");
 const Compare = lazyPage(() => import("@/pages/Compare"), "Compare");
@@ -114,7 +122,19 @@ function RedirectToOverview() {
  * step 1 (UX PR 5), so the route redirects there for one release. */
 function BeepReviewRoute() {
   const isMobile = useIsMobile();
-  return isMobile ? <MobileBeepReview /> : <BeepReviewRedirect />;
+  const [params] = useSearchParams();
+  const href = useMatchHref();
+  // ``?recheck=secondaries&start=<slug::stage::video>``: the recheck pass
+  // over secondary beeps (lib/beepQueue.recheckOrder).
+  return isMobile ? (
+    <MobileBeepReview
+      recheck={params.get("recheck") === RECHECK_SECONDARIES}
+      start={params.get("start")}
+      recheckHref={`${href("beep-review")}?recheck=${RECHECK_SECONDARIES}`}
+    />
+  ) : (
+    <BeepReviewRedirect />
+  );
 }
 
 /* Audit joins beep review as a match-scoped screen with a real mobile
@@ -135,13 +155,15 @@ export function AuditRoute() {
 /** The fixture editor needs a desk; its review walk fits a phone. */
 /* A corpus fixture reviewed in the Audit page's workspace (spec
  * 2026-10-14): ``?fixture=<json path>&video=<source path>``, the paths the
- * review queue holds. */
+ * review queue holds. A phone gets the phone's Audit page. */
 function FixtureAuditRoute() {
+  const isMobile = useIsMobile();
   const [params] = useSearchParams();
   const path = params.get("fixture");
   const video = params.get("video");
   const target = useMemo(() => (path ? { path, videoPath: video } : null), [path, video]);
   if (!target) return <Navigate to="/dev/review" replace />;
+  if (isMobile) return <MobileAudit key={target.path} fixture={target} />;
   return (
     <DesktopGate screen="Fixture review" links={false}>
       <Audit key={target.path} fixture={target} />

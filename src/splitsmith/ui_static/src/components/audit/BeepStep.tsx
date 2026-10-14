@@ -32,6 +32,9 @@ import {
   queueLine,
   queueOrder,
   queuePlace,
+  recheckLine,
+  recheckNext,
+  recheckOrder,
 } from "@/lib/beepQueue";
 import { isTypingTextTarget } from "@/lib/audit-input";
 import {
@@ -51,6 +54,11 @@ export interface BeepStepProps {
   focusVideoId?: string | null;
   /** Re-pick from step 2: the stage is already trimmed; Cancel is offered. */
   repick?: boolean;
+  /** The recheck pass over secondary beeps (``?recheck=secondaries``):
+   *  walks every secondary in stage order; Confirm writes only a moved
+   *  beep, Looks right moves on without writing, and after the last the
+   *  pass is "done". */
+  recheck?: boolean;
   onCancel?: () => void;
   /** Where to go after Confirm & next or Later: the next beep in queue
    *  order (with its camera), "done" when the queue is empty, or null to
@@ -78,6 +86,7 @@ export function BeepStep({
   stageNumber,
   focusVideoId,
   repick,
+  recheck = false,
   onCancel,
   onConfirmed,
   header,
@@ -157,7 +166,10 @@ export function BeepStep({
     [item],
   );
 
-  const order = useMemo(() => queueOrder(queue.flatItems), [queue.flatItems]);
+  const order = useMemo(
+    () => (recheck ? recheckOrder(queue.flatItems) : queueOrder(queue.flatItems)),
+    [queue.flatItems, recheck],
+  );
   const place = item
     ? queuePlace(order, {
         slug: item.slug,
@@ -171,11 +183,12 @@ export function BeepStep({
   // the parent, "done" when nothing else waits.
   const goNext = useCallback(
     (from: BeepQueueItem, snapshot: BeepQueueItem[]) => {
-      const next = nextInQueue(snapshot, {
+      const key = {
         slug: from.slug,
         stageNumber: from.stage_number,
         videoId: from.video_id,
-      });
+      };
+      const next = recheck ? recheckNext(snapshot, key) : nextInQueue(snapshot, key);
       if (!next) {
         onConfirmed("done");
         return;
@@ -190,7 +203,7 @@ export function BeepStep({
         videoId: next.video_id,
       });
     },
-    [onConfirmed, slug, stageNumber],
+    [onConfirmed, slug, stageNumber, recheck],
   );
 
   const canConfirm = item != null && selectedTime != null && !queue.busy;
@@ -202,6 +215,11 @@ export function BeepStep({
     const changed =
       draft != null &&
       (item.beep_time == null || Math.abs(draft - item.beep_time) >= 0.005);
+    if (recheck && !changed) {
+      // The beep stands: on to the next secondary, nothing written.
+      goNext(item, order);
+      return;
+    }
     if (item.beep_reviewed && !changed) {
       onCancel?.();
       return;
@@ -209,7 +227,7 @@ export function BeepStep({
     const snapshot = order;
     await queue.confirm(item, changed ? draft! : undefined);
     // A re-picked beep returns to its stage; a queued one moves on.
-    if (repick) {
+    if (repick && !recheck) {
       onConfirmed(null);
       return;
     }
@@ -223,6 +241,7 @@ export function BeepStep({
     onConfirmed,
     order,
     repick,
+    recheck,
     goNext,
   ]);
 
@@ -261,7 +280,20 @@ export function BeepStep({
           ? `Re-detecting${queue.redetectPct != null ? ` ${queue.redetectPct}%` : "..."}`
           : "Re-detect"}
       </Button>
-      {repick ? (
+      {recheck ? (
+        <>
+          <Button type="button" onClick={onCancel}>
+            Stop
+          </Button>
+          <Button
+            type="button"
+            onClick={() => item && goNext(item, order)}
+            disabled={!item || queue.busy}
+          >
+            Looks right, next
+          </Button>
+        </>
+      ) : repick ? (
         <Button type="button" onClick={onCancel}>
           Cancel
         </Button>
@@ -299,9 +331,9 @@ export function BeepStep({
           {queue.error}
         </p>
       ) : null}
-      {item && place && !repick ? (
+      {item && place && (recheck || !repick) ? (
         <p className="numeral mb-2 text-md text-ink" aria-live="polite">
-          {queueLine(item, place)}
+          {recheck ? recheckLine(item, place) : queueLine(item, place)}
         </p>
       ) : null}
       <div className="mb-3 flex flex-wrap items-center gap-3 text-md text-ink-2">

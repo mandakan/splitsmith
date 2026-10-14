@@ -14,7 +14,7 @@ from splitsmith.ensemble.tta import compute_tta_agreement
 from splitsmith.shot_detect import detect_shots
 
 FIXTURES = Path(__file__).parent / "fixtures"
-GO3S_FIXTURE = "stage-shots-hostfinalen-xi-2026-stage7-s97dcec94"
+GO3S_FIXTURE = "stage-shots-hostfinalen-xi-2026-stage1-s97dcec94"
 
 
 def _stage(name: str, gain: float = 1.0, lowpass_hz: float | None = None):

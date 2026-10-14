@@ -192,7 +192,7 @@ describe("DevReviewQueue on a phone", () => {
     vi.unstubAllGlobals();
   });
 
-  it("leads with Continue, resuming the walk already started", async () => {
+  it("leads with Continue, opening the phone's Audit review", async () => {
     vi.stubGlobal("matchMedia", (q: string) => ({
       matches: true,
       media: q,
@@ -212,8 +212,34 @@ describe("DevReviewQueue on a phone", () => {
 
     const link = await screen.findByRole("link", { name: /Continue/ });
     expect(link.getAttribute("href")).toBe(
-      `/review?fixture=${encodeURIComponent("/fixtures/stage-shots-b-2026-stage2.json")}&walk=1`,
+      `/review/audit?fixture=${encodeURIComponent("/fixtures/stage-shots-b-2026-stage2.json")}`,
     );
+  });
+
+  it("filters the queue and carries the filter into the review", async () => {
+    vi.stubGlobal("matchMedia", (q: string) => ({
+      matches: true,
+      media: q,
+      addEventListener() {},
+      removeEventListener() {},
+    }));
+    vi.mocked(api.getDevReviewQueue).mockResolvedValue({
+      pending: [
+        { ...item("stage-shots-a-2026-stage1-s1-go3s"), review_status: "needs_review", venue: "a" },
+        { ...item("stage-shots-hostfinalen-2026-stage2-s1-go3s"), review_status: "needs_review", venue: "hf" },
+      ],
+      flagged: [],
+      done: [],
+    });
+
+    renderQueue("?q=hostfinalen");
+
+    const link = await screen.findByRole("link", { name: /Continue/ });
+    expect(link.getAttribute("href")).toBe(
+      `/review/audit?fixture=${encodeURIComponent("/fixtures/stage-shots-hostfinalen-2026-stage2-s1-go3s.json")}&q=hostfinalen`,
+    );
+    expect(screen.getByRole("searchbox", { name: "Filter the queue" })).toHaveValue("hostfinalen");
+    expect(screen.queryByText(/^a, stage 1/)).toBeNull();
   });
 
   it("tells apart two angles of one stage by their camera", async () => {
