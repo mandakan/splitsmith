@@ -23,6 +23,27 @@ import pytest
 from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 from splitsmith.storage import FilesystemStorage
 from splitsmith.ui.audio import ensure_audit_audio, ensure_video_audio
+from tests.media_bytes import tiny_mp4
+
+
+def _wav(level: int) -> bytes:
+    """One second of mono 16-bit PCM at a constant ``level``: distinct bytes
+    per level, so a test can tell which copy it got."""
+    import io
+    import wave
+
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(8000)
+        w.writeframes(level.to_bytes(2, "little", signed=True) * 8000)
+    return buf.getvalue()
+
+
+#: What the fake ffmpeg writes, and what a worker pushed earlier.
+FFMPEG_WAV = _wav(100)
+CACHED_WAV = _wav(200)
 
 
 @pytest.fixture
@@ -53,7 +74,7 @@ def fake_ffmpeg(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
         # ensure_video_audio (-vn <dest>).
         dest = Path(cmd[-1])
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(b"WAVDATA")
+        dest.write_bytes(FFMPEG_WAV)
         return subprocess.CompletedProcess(cmd, returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr("splitsmith.ui.audio.subprocess.run", fake_run)
@@ -94,7 +115,7 @@ def test_local_mode_no_storage_runs_ffmpeg_and_never_touches_storage(
     result = ensure_video_audio(root, 1, video, source, project=project)
 
     assert result.exists()
-    assert result.read_bytes() == b"WAVDATA"
+    assert result.read_bytes() == FFMPEG_WAV
     assert len(fake_ffmpeg) == 1  # ffmpeg ran exactly once
 
 
@@ -118,11 +139,11 @@ def test_storage_cache_hit_skips_ffmpeg(tmp_path: Path, fake_ffmpeg: list[list[s
     # would have produced.
     audio_basename = f"stage1_cam_{video.video_id}.wav"
     cached_key = f"matches/m1/shooters/me/audio/{audio_basename}"
-    storage.write_bytes(cached_key, b"PRECACHED")
+    storage.write_bytes(cached_key, CACHED_WAV)
 
     result = ensure_video_audio(root, 1, video, source, project=project)
 
-    assert result.read_bytes() == b"PRECACHED"
+    assert result.read_bytes() == CACHED_WAV
     assert len(fake_ffmpeg) == 0  # ffmpeg never ran
 
 
@@ -143,12 +164,12 @@ def test_extraction_pushes_to_storage_when_cold(tmp_path: Path, fake_ffmpeg: lis
 
     result = ensure_video_audio(root, 1, video, source, project=project)
 
-    assert result.read_bytes() == b"WAVDATA"
+    assert result.read_bytes() == FFMPEG_WAV
     assert len(fake_ffmpeg) == 1
     # The freshly-extracted WAV landed in the storage cache.
     cached_key = f"matches/m1/shooters/me/audio/stage1_cam_{video.video_id}.wav"
     assert storage.exists(cached_key)
-    assert storage.read_bytes(cached_key) == b"WAVDATA"
+    assert storage.read_bytes(cached_key) == FFMPEG_WAV
 
 
 def test_local_cache_hit_skips_storage_and_ffmpeg(tmp_path: Path, fake_ffmpeg: list[list[str]]) -> None:
@@ -205,7 +226,7 @@ def test_storage_push_failure_does_not_break_extraction(
     project.bind_storage(storage, scope="matches/m1/shooters/me")
 
     result = ensure_video_audio(root, 1, video, source, project=project)
-    assert result.read_bytes() == b"WAVDATA"
+    assert result.read_bytes() == FFMPEG_WAV
 
 
 def test_storage_pull_torn_file_falls_through_to_ffmpeg(
@@ -228,7 +249,7 @@ def test_storage_pull_torn_file_falls_through_to_ffmpeg(
     project.bind_storage(storage, scope="matches/m1/shooters/me")
     audio_basename = f"stage1_cam_{video.video_id}.wav"
     cached_key = f"matches/m1/shooters/me/audio/{audio_basename}"
-    storage.write_bytes(cached_key, b"PRECACHED")
+    storage.write_bytes(cached_key, CACHED_WAV)
 
     # Sabotage the pull: open_stream raises after exists() says True.
     def boom(path: str) -> object:
@@ -240,7 +261,7 @@ def test_storage_pull_torn_file_falls_through_to_ffmpeg(
 
     # ffmpeg ran because the pull failed, and the local file is the
     # ffmpeg output, not a half-downloaded PRECACHED.
-    assert result.read_bytes() == b"WAVDATA"
+    assert result.read_bytes() == FFMPEG_WAV
     assert len(fake_ffmpeg) == 1
 
 
@@ -286,8 +307,8 @@ def test_audit_audio_trimmed_path_never_resolves_source(tmp_path: Path, fake_ffm
     # Seed the trim MP4 + derived audit WAV in storage so the trimmed
     # branch is fully satisfied without ffmpeg.
     scope = "matches/m1/shooters/me"
-    storage.write_bytes(f"{scope}/trimmed/stage1_cam_{video.video_id}_trimmed.mp4", b"TRIMDATA")
-    storage.write_bytes(f"{scope}/audio/stage1_cam_{video.video_id}_audit.wav", b"AUDITWAV")
+    storage.write_bytes(f"{scope}/trimmed/stage1_cam_{video.video_id}_trimmed.mp4", tiny_mp4())
+    storage.write_bytes(f"{scope}/audio/stage1_cam_{video.video_id}_audit.wav", CACHED_WAV)
 
     def resolve_source() -> Path:
         raise AssertionError("source resolver must not be called on the trimmed path")
@@ -295,8 +316,14 @@ def test_audit_audio_trimmed_path_never_resolves_source(tmp_path: Path, fake_ffm
     result = ensure_audit_audio(root, 1, resolve_source, 2.0, project=project)
 
     assert result.trimmed is True
-    assert result.audio_path.read_bytes() == b"AUDITWAV"
-    assert len(fake_ffmpeg) == 0  # ffmpeg never ran either
+    # The audit WAV is cut from the pulled trim, never reused from storage:
+    # this producer runs when the readers found storage's copy missing or
+    # older than the trim, and reusing it republished the stale copy
+    # (review, 2026-10-14). One ffmpeg run, on the trim, not the source.
+    assert result.audio_path.read_bytes() == FFMPEG_WAV
+    cut_from_trim = [c for c in fake_ffmpeg if any(a.endswith("_trimmed.mp4") for a in c)]
+    assert len(cut_from_trim) == 1
+    assert not any(str(source) in c for c in fake_ffmpeg)
 
 
 def test_bind_storage_without_scope_disables_audio_cache(

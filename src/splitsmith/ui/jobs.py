@@ -70,6 +70,8 @@ logger = logging.getLogger(__name__)
 JOB_PRIORITY: dict[str, int] = {
     # User-facing ingest path -- responsive when a new video lands.
     "detect_beep": 0,
+    # A page is showing "Preparing audio" until this lands (spec 2026-10-14).
+    "derive_audio": 0,
     "trim": 1,
     # Slow ensemble; happily yields its slot to incoming beep/trim work.
     "shot_detect": 2,

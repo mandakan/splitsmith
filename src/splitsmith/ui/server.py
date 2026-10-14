@@ -150,6 +150,7 @@ from .. import (
     beep_windows,
     camera_select,
     cross_align,
+    derived,
     export_runs,
     match_model,
     report,
@@ -3892,6 +3893,17 @@ def register_job_bodies(state: AppState) -> None:
                 runner=_cancellable_runner(handle),
                 ffmpeg_binary=process_runtime().ffmpeg_binary,
             )
+        # The audit WAV is the trim's second product (spec 2026-10-14): the
+        # audit screen reads it and never cuts it. Best-effort: a failure
+        # here leaves it to a derive_audio job on first read.
+        handle.update(progress=0.75, message="Cutting audit audio...")
+        with handle.timer.phase("audit_wav"):
+            try:
+                audio_helpers.ensure_video_audit_wav(
+                    root, stage_number, video, project=proj, ffmpeg_binary=process_runtime().ffmpeg_binary
+                )
+            except (audio_helpers.AudioExtractionError, FileNotFoundError) as exc:
+                logger.warning("trim: audit WAV for stage %s %s not cut: %s", stage_number, video_id, exc)
         handle.update(progress=0.85, message="Saving project...")
         with handle.timer.phase("persist"):
             # Read-modify-write to avoid stomping concurrent edits made
@@ -3943,6 +3955,62 @@ def register_job_bodies(state: AppState) -> None:
                         args={"slug": slug, "stage_number": stage_number},
                     )
                 )
+        handle.update(progress=1.0, message="Done")
+
+    def _run_derive_audio(
+        handle: JobHandle,
+        *,
+        slug: str,
+        target: str,
+        stage_number: int | None = None,
+        video_id: str | None = None,
+        storage_path: str | None = None,
+    ) -> None:
+        """Make a derived WAV a request asked for and found missing (spec
+        2026-10-14: requests read, jobs make). ``target`` is ``audit`` (the
+        stage's audit WAV, from the trim, the mirror's rendition or, with
+        no trim, the primary's source), ``video`` (one video's full source
+        WAV, for the beep picker) or ``take`` (a raw file's overview WAV)."""
+        proj = state.shooter_project(slug)
+        root = state.shooter_root(slug)
+        ffmpeg = process_runtime().ffmpeg_binary
+        handle.update(progress=0.2, message="Preparing audio...")
+        if target == "take":
+            if storage_path is None:
+                raise RuntimeError("take audio needs storage_path")
+            source = proj.resolve_video_path(root, Path(storage_path))
+            audio_helpers.ensure_take_audio(root, storage_path, source, project=proj, ffmpeg_binary=ffmpeg)
+        elif target == "video":
+            if stage_number is None or video_id is None:
+                raise RuntimeError("video audio needs stage_number and video_id")
+            video = proj.stage(stage_number).find_video_by_id(video_id)
+            if video is None:
+                raise RuntimeError(f"video {video_id} is gone from stage {stage_number}")
+            source = proj.resolve_video_path(root, video.path)
+            audio_helpers.ensure_video_audio(
+                root, stage_number, video, source, project=proj, ffmpeg_binary=ffmpeg
+            )
+        elif target == "audit":
+            if stage_number is None:
+                raise RuntimeError("audit audio needs stage_number")
+            primary = proj.stage(stage_number).primary()
+            if primary is None:
+                raise RuntimeError(f"stage {stage_number} has no primary video")
+            # The trim's cut lock: never read a trim a re-cut is replacing
+            # on this disk (review, 2026-10-14).
+            trimmed = audio_helpers.trimmed_primary_path(root, stage_number, project=proj)
+            with derived.locked(trimmed, "cut"):
+                audio_helpers.ensure_audit_audio(
+                    root,
+                    stage_number,
+                    lambda: proj.resolve_video_path(root, primary.path),
+                    primary.beep_time,
+                    project=proj,
+                    ffmpeg_binary=ffmpeg,
+                    web_fallback=_is_mirror(),
+                )
+        else:
+            raise RuntimeError(f"unknown audio target {target!r}")
         handle.update(progress=1.0, message="Done")
 
     def _run_shot_detect(handle: JobHandle, slug: str, stage_number: int, reset: bool = False) -> None:
@@ -5000,6 +5068,7 @@ def register_job_bodies(state: AppState) -> None:
     state.jobs.bodies.register(system_api.JOB_KIND, system_api.run_chromium_install)
     state.jobs.bodies.register("detect_beep", _run_detect_beep_for_video)
     state.jobs.bodies.register("trim", _run_trim)
+    state.jobs.bodies.register("derive_audio", _run_derive_audio)
     state.jobs.bodies.register("shot_detect", _run_shot_detect)
     state.jobs.bodies.register("export", _run_export_for_stage)
     state.jobs.bodies.register("match_export", _run_match_export)
@@ -10872,7 +10941,7 @@ def create_app(
     ) -> JSONResponse:
         """Return ``bins`` peak magnitudes for the take's whole-file envelope waveform.
 
-        Local mode: extract the 8 kHz take WAV on demand, then compute peaks.
+        Local mode: compute peaks from the 8 kHz take WAV a job published (202 while it is made).
 
         Hosted mode: the worker pushes a pre-computed peaks JSON to storage
         after detection. When the JSON is absent from storage this endpoint
@@ -10925,10 +10994,10 @@ def create_app(
             result = waveform_helpers.PeaksResult.model_validate_json(peaks_path.read_text(encoding="utf-8"))
             return JSONResponse(result.model_dump(mode="json"))
 
-        # Local mode: extract + compute on demand.
-        video_path = Path(storage_path)
-        source = project.resolve_video_path(root, video_path)
-        wav = audio_helpers.ensure_take_audio(root, storage_path, source, project=project)
+        # Local mode: compute from the take WAV a job published.
+        wav = audio_helpers.published_take_audio(root, storage_path, project=project)
+        if wav is None:
+            return _audio_pending(slug, "take", storage_path=storage_path)
         result = waveform_helpers.ensure_peaks(wav, bins)
         return JSONResponse(result.model_dump(mode="json"))
 
@@ -12954,14 +13023,15 @@ def create_app(
         if req.window_s <= 0.0:
             raise HTTPException(status_code=400, detail="window_s must be > 0")
 
-        audio_path = audio_helpers.ensure_video_audio(
+        audio_path = audio_helpers.published_video_audio(
             state.shooter_root(slug),
             stage_number,
             video,
-            source,
             project=project,
-            ffmpeg_binary=process_runtime().ffmpeg_binary,
+            source=_local_source(project, slug, video),
         )
+        if audio_path is None:
+            return _audio_pending(slug, "video", stage_number=stage_number, video_id=video.video_id)
         audio, sr = beep_detect.load_audio(audio_path)
         duration_s = audio.size / sr if sr > 0 else 0.0
         if duration_s <= 0:
@@ -13639,11 +13709,67 @@ def create_app(
         await _maybe_chain_trim(slug, stage, primary)
         return JSONResponse(project.model_dump(mode="json"))
 
+    def _audio_pending(
+        slug: str,
+        target: str,
+        *,
+        stage_number: int | None = None,
+        video_id: str | None = None,
+        storage_path: str | None = None,
+    ) -> JSONResponse:
+        """The WAV a request wants is not published yet: submit the one job
+        that makes it (deduplicated on kind, stage, shooter and video) and
+        answer 202, the shape the hosted raw-file peaks already use. The SPA
+        shows a preparing line and asks again."""
+        dedupe_id = {"audit": "audit", "take": f"take:{storage_path}"}.get(target, video_id)
+        if target == "audit" and stage_number is not None:
+            # A trim running for the stage makes the audit WAV itself; a
+            # derive job beside it could cut from the old window (review,
+            # 2026-10-14). Wait on the trim.
+            trimming = run_sync(
+                state.jobs.find_active(kind="trim", stage_number=stage_number, shooter_slug=slug)
+            )
+            if trimming is not None:
+                return JSONResponse(
+                    {"pending": True, "active_job": True, "job_id": trimming.id}, status_code=202
+                )
+        existing = run_sync(
+            state.jobs.find_active(
+                kind="derive_audio", stage_number=stage_number, shooter_slug=slug, video_id=dedupe_id
+            )
+        )
+        job_id = existing.id if existing is not None else None
+        if existing is None:
+            try:
+                job = run_sync(
+                    state.jobs.submit(
+                        kind="derive_audio",
+                        stage_number=stage_number,
+                        shooter_slug=slug,
+                        video_id=dedupe_id,
+                        args={
+                            "slug": slug,
+                            "target": target,
+                            "stage_number": stage_number,
+                            "video_id": video_id,
+                            "storage_path": storage_path,
+                        },
+                    )
+                )
+            except FeatureRequiredError:
+                # An account without hosted compute (the sharing tier) runs
+                # no jobs: a mirror's WAV arrives with the desktop's next
+                # push. Pending with no job, never a 403 (review, 2026-10-14).
+                return JSONResponse({"pending": True, "active_job": False, "job_id": None}, status_code=202)
+            job_id = job.id
+        return JSONResponse({"pending": True, "active_job": True, "job_id": job_id}, status_code=202)
+
     def _resolve_audit_audio(
         slug: str, project: MatchProject, stage_number: int
-    ) -> audio_helpers.AuditAudioResult:
-        """Shared resolver for /audio + /peaks: prefers the trimmed clip's
-        WAV, falls back to full primary on cache miss / no trim."""
+    ) -> audio_helpers.AuditAudioResult | JSONResponse:
+        """Shared resolver for /audio + /peaks: the published audit WAV
+        (trimmed clip's, else the full primary's), or a 202 pending while
+        a job makes it. Never extracts here (spec 2026-10-14)."""
         try:
             stage = project.stage(stage_number)
         except KeyError as exc:
@@ -13654,27 +13780,20 @@ def create_app(
                 status_code=404,
                 detail=f"stage {stage_number} has no primary video",
             )
-        try:
-            return audio_helpers.ensure_audit_audio(
-                state.shooter_root(slug),
-                stage_number,
-                # Lazy: the trimmed path (the common case) pulls only the
-                # small trim + WAV from storage and never needs the source.
-                # Resolving it eagerly mirrors the whole source from R2 (#592).
-                lambda: project.resolve_video_path(state.shooter_root(slug), primary.path),
-                primary.beep_time,
-                project=project,
-                ffmpeg_binary=process_runtime().ffmpeg_binary,
-                web_fallback=_is_mirror(),
-            )
-        except FileNotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except audio_helpers.AudioExtractionError as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        published = audio_helpers.published_audit_audio(
+            state.shooter_root(slug),
+            stage_number,
+            primary.beep_time,
+            project=project,
+            mirror=_is_mirror(),
+        )
+        if published is not None:
+            return published
+        return _audio_pending(slug, "audit", stage_number=stage_number)
 
     def _resolve_video_audio(
         slug: str, project: MatchProject, stage_number: int, video: StageVideo
-    ) -> audio_helpers.AuditAudioResult:
+    ) -> audio_helpers.AuditAudioResult | JSONResponse:
         """Per-video version of :func:`_resolve_audit_audio`.
 
         Always returns the full source WAV, regardless of role. The picker
@@ -13687,25 +13806,31 @@ def create_app(
         ``beep_in_clip`` is just ``video.beep_time``; the WAV is in source
         time so no trim offset applies.
         """
-        source = project.resolve_video_path(state.shooter_root(slug), video.path)
-        try:
-            audio_path = audio_helpers.ensure_video_audio(
-                state.shooter_root(slug),
-                stage_number,
-                video,
-                source,
-                project=project,
-                ffmpeg_binary=process_runtime().ffmpeg_binary,
-            )
-        except FileNotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except audio_helpers.AudioExtractionError as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        audio_path = audio_helpers.published_video_audio(
+            state.shooter_root(slug),
+            stage_number,
+            video,
+            project=project,
+            source=_local_source(project, slug, video),
+        )
+        if audio_path is None:
+            return _audio_pending(slug, "video", stage_number=stage_number, video_id=video.video_id)
         return audio_helpers.AuditAudioResult(
             audio_path=audio_path,
             beep_in_clip=video.beep_time,
             trimmed=False,
         )
+
+    def _local_source(project: MatchProject, slug: str, video: StageVideo) -> Path | None:
+        """``video``'s source when it is a file on this disk, for the
+        freshness check; never mirrors a remote source (that is a job's)."""
+        if state.storage is not None:
+            return None
+        try:
+            source = project.resolve_video_path(state.shooter_root(slug), video.path)
+        except Exception:  # noqa: BLE001 -- an unresolvable source just skips the check
+            return None
+        return source if source.exists() else None
 
     def _serve_beep_preview(
         slug: str,
@@ -13774,8 +13899,8 @@ def create_app(
             )
         return _serve_beep_preview(slug, project, stage_number, primary, t)
 
-    @app.get("/api/shooters/{slug}/stages/{stage_number}/audio")
-    def stage_audio(slug: str, stage_number: int) -> FileResponse:
+    @app.get("/api/shooters/{slug}/stages/{stage_number}/audio", response_model=None)
+    def stage_audio(slug: str, stage_number: int) -> FileResponse | JSONResponse:
         """Serve the audit-clip WAV for ``stage_number``.
 
         Prefers the primary's audit WAV (extracted from the short-GOP trimmed
@@ -13786,6 +13911,8 @@ def create_app(
         """
         project = state.shooter_project(slug)
         result = _resolve_audit_audio(slug, project, stage_number)
+        if isinstance(result, JSONResponse):
+            return result
         return FileResponse(
             result.audio_path,
             media_type="audio/wav",
@@ -13810,14 +13937,16 @@ def create_app(
         """
         project = state.shooter_project(slug)
         audit = _resolve_audit_audio(slug, project, stage_number)
+        if isinstance(audit, JSONResponse):
+            return audit
         peaks = waveform_helpers.ensure_peaks(audit.audio_path, bins)
         payload = peaks.model_dump(mode="json")
         payload["beep_time"] = audit.beep_in_clip
         payload["trimmed"] = audit.trimmed
         return JSONResponse(payload)
 
-    @app.get("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/audio")
-    def video_audio(slug: str, stage_number: int, video_id: str) -> FileResponse:
+    @app.get("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/audio", response_model=None)
+    def video_audio(slug: str, stage_number: int, video_id: str) -> FileResponse | JSONResponse:
         """Serve ``video``'s WAV for the per-video beep picker.
 
         Primary forwards to the legacy stage audio resolver so the
@@ -13829,6 +13958,8 @@ def create_app(
         """
         project, _stage, video = _resolve_stage_video(slug, stage_number, video_id)
         result = _resolve_video_audio(slug, project, stage_number, video)
+        if isinstance(result, JSONResponse):
+            return result
         return FileResponse(
             result.audio_path,
             media_type="audio/wav",
@@ -13853,9 +13984,11 @@ def create_app(
         only thing that varies between roles is the URL.
         """
         project, _stage, video = _resolve_stage_video(slug, stage_number, video_id)
-        audit = _resolve_video_audio(slug, project, stage_number, video)
         if (start is None) != (end is None) or (start is not None and end is not None and end <= start):
             raise HTTPException(status_code=422, detail="start and end go together, start before end")
+        audit = _resolve_video_audio(slug, project, stage_number, video)
+        if isinstance(audit, JSONResponse):
+            return audit
         peaks = (
             waveform_helpers.ensure_peaks(audit.audio_path, bins)
             if start is None or end is None
@@ -18399,10 +18532,12 @@ def create_app(
             except KeyError as exc:
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
             audit_json = state.materialize_audit(shooter_slug, stage_n)
-            try:
-                audit_audio = _resolve_audit_audio(shooter_slug, project, stage_n)
-            except HTTPException:
-                raise
+            audit_audio = _resolve_audit_audio(shooter_slug, project, stage_n)
+            if isinstance(audit_audio, JSONResponse):
+                # Being made by a job (it reads, never cuts): try again shortly.
+                raise HTTPException(
+                    status_code=409, detail="the stage's audit WAV is being prepared; try again"
+                )
             audit_wav = audit_audio.audio_path
             if not audit_json.exists() or not audit_wav.exists():
                 raise HTTPException(

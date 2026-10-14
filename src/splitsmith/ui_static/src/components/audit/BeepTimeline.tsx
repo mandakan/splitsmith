@@ -99,6 +99,8 @@ export function BeepTimeline({
 }: BeepTimelineProps) {
   const [peaks, setPeaks] = useState<PeaksResult | null>(null);
   const [loading, setLoading] = useState(true);
+  // The video's WAV is being made by a job (spec 2026-10-14).
+  const [preparing, setPreparing] = useState(false);
   const [failed, setFailed] = useState(false);
   const [localTime, setLocalTime] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -120,12 +122,17 @@ export function BeepTimeline({
 
   useEffect(() => {
     let alive = true;
+    const ctl = new AbortController();
     setLoading(true);
+    setPreparing(false);
     setFailed(false);
     setPeaks(null);
     setZoom(null);
     api
-      .getVideoPeaks(slug, stageNumber, videoId)
+      .getVideoPeaks(slug, stageNumber, videoId, undefined, undefined, {
+        signal: ctl.signal,
+        onPending: () => alive && setPreparing(true),
+      })
       .then((p) => {
         if (!alive) return;
         setPeaks(p);
@@ -147,6 +154,7 @@ export function BeepTimeline({
       });
     return () => {
       alive = false;
+      ctl.abort();
     };
     // onError is a per-render callback, not part of what identifies "which
     // video's peaks to fetch"; including it would refetch on every render
@@ -261,7 +269,9 @@ export function BeepTimeline({
 
   if (loading) {
     return (
-      <div className="rounded-[10px] border border-rule bg-surface-2 p-3 text-sm text-muted">Loading audio</div>
+      <div className="rounded-[10px] border border-rule bg-surface-2 p-3 text-sm text-muted">
+        {preparing ? "Preparing audio" : "Loading audio"}
+      </div>
     );
   }
   if (failed || !peaks) {

@@ -27,6 +27,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from ..derived import wav_problem
 from ..identity import EVENT_LOGO_DIR, EVENT_LOGO_RE, LOGO_DIR
 from ..match_model import load_match_or_legacy
 from ..match_project import MatchProject
@@ -51,6 +52,27 @@ _LOGO_FILE_RE = re.compile(r"^logo-[0-9a-f]{12}\.(?:png|jpe?g|webp)$")
 _WEB_GLOB = "stage*_cam_*_web.mp4"
 TRIMMED_SUFFIX = "_trimmed.mp4"
 WEB_SUFFIX = "_web.mp4"
+#: The clip's audit WAV (``audio/stage<N>_cam_<video_id>_audit.wav``), cut
+#: from the trim by the trim job and pushed so hosted reads it rather than
+#: cutting it from the rendition (spec 2026-10-14).
+AUDIT_WAV_SUFFIX = "_audit.wav"
+
+
+def audit_wav_for(trimmed: Path) -> Path:
+    """The local audit WAV of the trim at ``trimmed``."""
+    stem = trimmed.name[: -len(TRIMMED_SUFFIX)]
+    return trimmed.parent.parent / "audio" / f"{stem}{AUDIT_WAV_SUFFIX}"
+
+
+def _audit_wav_current(wav: Path, trimmed: Path) -> bool:
+    """A readable WAV not older than its trim: one cut from an older window
+    is never pushed (hosted would take it for current)."""
+    try:
+        if wav.stat().st_mtime < trimmed.stat().st_mtime:
+            return False
+    except OSError:
+        return False
+    return wav_problem(wav) is None
 
 
 def web_key_for(trim_key: str) -> str:
@@ -244,8 +266,14 @@ def build_push_plan(match_root: Path, *, sync_state: SyncState, full_media: bool
                     candidates.append(sidecar)
                 if has_web:
                     candidates.append(web)
-                for candidate in candidates:
-                    remote_key = _remote_key(match.match_id, slug, candidate.name)
+                # The audit WAV goes last, after the rendition, so its stored
+                # time is the later one: hosted serves a WAV only when it is
+                # not older than the clip it was cut from.
+                planned = [(c, _remote_key(match.match_id, slug, c.name)) for c in candidates]
+                wav = audit_wav_for(clip_path)
+                if _audit_wav_current(wav, clip_path):
+                    planned.append((wav, _remote_key(match.match_id, slug, wav.name, subdir="audio")))
+                for candidate, remote_key in planned:
                     item = _plan_media_item(candidate, remote_key, sync_state)
                     if item is None:
                         media_skipped += 1

@@ -914,10 +914,33 @@ Web-only mirrors (spec 2026-09-27 v1.1): a desktop mirror has no
 On a mirror only (``_is_mirror()``, origin ``desktop``), ``kind=trim`` and
 ``kind=auto`` redirect to the rendition when the full trim is absent, the
 clip anchor comes from the pushed params (``try_pull_web_trim`` +
-``trim_pre_buffer_seconds_for``), and the audit WAV is extracted from the
-rendition (``ensure_audit_audio(web_fallback=True)``). A hosted-native
+``trim_pre_buffer_seconds_for``), and the audit WAV is the one the desktop
+pushed (below), else cut from the rendition by a job. A hosted-native
 match keeps "``kind=trim`` never substitutes", pinned by
 ``test_hosted_native_match_without_a_trim_still_404s_kind_trim``.
+
+**Requests read derived media; jobs make it** (spec
+``2026-10-14-derived-media-off-the-request-path-design``). On 2026-10-13
+three requests from one phone each cut a stage's audio themselves, one from
+a rendition another was still downloading, and the phone was served a short
+WAV. A request never runs ffmpeg, decodes a source or mirrors a large file:
+the audio and peaks routes, the beep snap and the raw-file peaks read
+through ``ui/audio.published_audit_audio`` / ``published_video_audio`` /
+``published_take_audio`` and, on a miss, ``_audio_pending`` queues one
+``derive_audio`` job (deduplicated on kind, stage, shooter, video) and
+answers 202 ``{pending, active_job, job_id}``; the SPA's ``lib/pending``
+(``whenReady``) asks again and the page says "Preparing audio". The trim
+job also cuts the audit WAV (``ensure_video_audit_wav``) and the desktop
+push carries it after the rendition (``sync/plan.audit_wav_for``, the
+``audio/`` key in ``_SYNC_MEDIA_KEY_RE``, never deletable); a stored WAV is
+current only when it is not older than the clip it was cut from. Every
+derived file is written through ``splitsmith.derived``: a unique partial,
+a check (``valid_mp4``, ``wav_problem`` against the clip's ``mvhd``
+length), a rename. A lock is opt-in (``produce(lock=True)``,
+``derived.locked``) for writers two local processes run at once; the queue
+is what coordinates. The beep preview clip stays synchronous (one clip per
+scrubbed ``t``) but publishes whole. A new route that needs a derived file
+reads it and queues its job; it never calls an ``ensure_*`` producer.
 
 ## Export presets (spec 2026-09-15)
 

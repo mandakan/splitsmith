@@ -260,9 +260,12 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
   useEffect(() => {
     if (!wantPeaks) return;
     let alive = true;
+    // A WAV still being made answers 202 and the request asks again
+    // (spec 2026-10-14); the track stays a placeholder meanwhile.
+    const ctl = new AbortController();
     setPeaksLoading(true);
     api
-      .getStagePeaks(slug, stage, PEAK_BINS)
+      .getStagePeaks(slug, stage, PEAK_BINS, { signal: ctl.signal })
       .then((p) => {
         if (alive) setPeaks(p);
       })
@@ -274,6 +277,7 @@ export function useStageWorkspace(slug: string, stage: number, options: StageWor
       });
     return () => {
       alive = false;
+      ctl.abort();
     };
   }, [slug, stage, wantPeaks]);
 

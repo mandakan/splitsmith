@@ -53,12 +53,23 @@ def test_window_excluding_beep_raises_not_found(tmp_path: Path) -> None:
             audio_helpers.detect_video_beep(tmp_path, 1, video, Path("raw/take.mp4"), window=window)
 
 
+def _write_wav(path: Path) -> None:
+    """What ffmpeg would leave: a real (tiny) WAV, which the producer checks."""
+    import wave
+
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(8000)
+        w.writeframes(b"\x00\x00" * 800)
+
+
 def test_window_wav_ffmpeg_args_and_cache(tmp_path: Path) -> None:
     calls: list[list[str]] = []
 
     def fake_run(cmd, check, capture_output, text):  # noqa: ANN001
         calls.append(cmd)
-        Path(cmd[-1]).write_bytes(b"RIFF")
+        _write_wav(Path(cmd[-1]))
 
         class R:  # minimal CompletedProcess stand-in
             returncode = 0
@@ -88,7 +99,7 @@ def test_ensure_take_audio_uses_8khz_and_caches(tmp_path: Path) -> None:
 
     def fake_run(cmd, check, capture_output, text):  # noqa: ANN001
         calls.append(cmd)
-        Path(cmd[-1]).write_bytes(b"RIFF")
+        _write_wav(Path(cmd[-1]))
 
         class R:
             returncode = 0

@@ -511,6 +511,9 @@ describe("BeepTimeline", () => {
     const onPick = vi.fn();
     render(<Harness videoId="v1" videoBeepTime={5} onPick={onPick} />);
     const snap = await screen.findByRole("button", { name: "Snap to the beep's start" });
+    // The hint is drawn from the 1 ms detail: once it shows, Snap uses the
+    // detail too (clicking earlier snapped on the coarse peaks under CI load).
+    await screen.findByText(/ms before the tone's start/);
     fireEvent.click(snap);
     const local = snapToLeadingEdge(5 - 3, { peaks: fine, duration: 4 }, 0.1)!;
     expect(local).toBeGreaterThan(2.03);

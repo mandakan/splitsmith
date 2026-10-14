@@ -25,6 +25,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from . import derived
 from .video_probe import source_cache_key
 
 
@@ -39,6 +40,32 @@ def cached(path: Path, cache_dir: Path) -> Path | None:
         return None
     candidate = cache_dir / f"{key}.jpg"
     return candidate if candidate.exists() else None
+
+
+def _publish(dest: Path, cmd: list[str], *, timeout: float, what: str) -> None:
+    """Run ffmpeg ``cmd`` (all but its output) into a partial and publish it
+    as ``dest`` whole (``derived.produce``): a page polling for the file, or
+    a second request for the same one, never reads half of it."""
+
+    def make(partial: Path) -> None:
+        try:
+            subprocess.run([*cmd, str(partial)], check=True, capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            raise ThumbnailError(f"ffmpeg timed out extracting {what}") from exc
+        except subprocess.CalledProcessError as exc:
+            raise ThumbnailError(
+                f"ffmpeg failed (exit {exc.returncode}): {exc.stderr or exc.stdout!r}"
+            ) from exc
+
+    def check(partial: Path) -> str | None:
+        if partial.exists() and partial.stat().st_size > 0:
+            return None
+        return f"ffmpeg produced no output ({what})"
+
+    try:
+        derived.produce(dest, fresh=lambda: False, make=make, check=check)
+    except derived.DerivedFileError as exc:
+        raise ThumbnailError(str(exc)) from exc
 
 
 def thumbnail_path(path: Path, cache_dir: Path) -> Path | None:
@@ -104,16 +131,8 @@ def ensure(
         f"scale={width}:-2",
         "-q:v",
         "4",
-        str(dest),
     ]
-    try:
-        subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=timeout)
-    except subprocess.TimeoutExpired as exc:
-        raise ThumbnailError(f"ffmpeg timed out extracting thumbnail for {source}") from exc
-    except subprocess.CalledProcessError as exc:
-        raise ThumbnailError(f"ffmpeg failed (exit {exc.returncode}): {exc.stderr or exc.stdout!r}") from exc
-    if not dest.exists():
-        raise ThumbnailError(f"ffmpeg produced no output for {source}")
+    _publish(dest, cmd, timeout=timeout, what=f"thumbnail for {source}")
     return dest
 
 
@@ -179,7 +198,6 @@ def ensure_strip(
         )
     graph = ";".join(chains) + ";" + "".join(f"[v{i}]" for i in range(frames)) + f"hstack=inputs={frames}"
     dest.parent.mkdir(parents=True, exist_ok=True)
-    partial = dest.with_suffix(".partial.jpg")
     cmd = [
         ffmpeg_binary,
         "-hide_banner",
@@ -193,18 +211,9 @@ def ensure_strip(
         "1",
         "-q:v",
         "5",
-        str(partial),
     ]
-    try:
-        subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=timeout)
-    except subprocess.TimeoutExpired as exc:
-        raise ThumbnailError(f"ffmpeg timed out building a strip for {source}") from exc
-    except subprocess.CalledProcessError as exc:
-        raise ThumbnailError(f"ffmpeg failed (exit {exc.returncode}): {exc.stderr or exc.stdout!r}") from exc
-    if not partial.exists():
-        raise ThumbnailError(f"ffmpeg produced no strip for {source}")
-    # Atomic: the page polls for the strip and must never read half a JPEG.
-    partial.replace(dest)
+    # Whole: the page polls for the strip and must never read half a JPEG.
+    _publish(dest, cmd, timeout=timeout, what=f"strip for {source}")
     return dest
 
 
@@ -308,14 +317,6 @@ def ensure_clip(
         "1",
         "-movflags",
         "+faststart",
-        str(dest),
     ]
-    try:
-        subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=timeout)
-    except subprocess.TimeoutExpired as exc:
-        raise ThumbnailError(f"ffmpeg timed out extracting clip for {source}") from exc
-    except subprocess.CalledProcessError as exc:
-        raise ThumbnailError(f"ffmpeg failed (exit {exc.returncode}): {exc.stderr or exc.stdout!r}") from exc
-    if not dest.exists():
-        raise ThumbnailError(f"ffmpeg produced no clip for {source}")
+    _publish(dest, cmd, timeout=timeout, what=f"clip for {source}")
     return dest

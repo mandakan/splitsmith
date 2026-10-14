@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "audio-prepared-before-audit",
+      "date": "2026-10-14",
+      "title": "Audit never draws half a stage",
+      "body": "When a stage's audio is not ready yet, Audit, beep review and the take waveform say Preparing audio and load it as soon as it is, instead of drawing a stage that ends early."
+    },
+    {
       "id": "timeline-end-lines-up",
       "date": "2026-10-13",
       "title": "The waveform stays under its markers",
