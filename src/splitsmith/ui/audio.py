@@ -31,10 +31,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from .. import beep_detect
+from .. import beep_detect, derived
 from ..config import BeepDetectConfig, BeepDetection
 from ..match_project import MatchProject, StageVideo
 from ..media_check import valid_mp4, valid_mp4_cached
+from ..storage import StorageObject
 
 logger = logging.getLogger(__name__)
 
@@ -212,45 +213,19 @@ def ensure_video_audio(
     if not src_resolved.exists():
         raise FileNotFoundError(f"video missing on disk: {src_resolved}")
 
-    if audio_path.exists() and audio_path.stat().st_mtime >= src_resolved.stat().st_mtime:
-        return audio_path
-
     # Storage cache (hosted mode): another worker may have already
     # extracted this WAV. Pulling 5 MB from S3 beats running ffmpeg
-    # against a 500 MB raw video. Local mode skips this -- ``project``
-    # has no storage bound, so the key resolves to ``None`` and the
-    # helper returns False without touching the network.
-    if _try_pull_audio_from_storage(project, audio_path):
-        return audio_path
-
-    if not shutil.which(ffmpeg_binary):
-        raise AudioExtractionError(f"ffmpeg binary not found: {ffmpeg_binary}")
-
-    cmd = [
-        ffmpeg_binary,
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-y",
-        "-i",
-        str(src_resolved),
-        "-ac",
-        "1",
-        "-ar",
-        str(sample_rate),
-        "-vn",
-        str(audio_path),
-    ]
-    try:
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
-    except subprocess.CalledProcessError as exc:
-        raise AudioExtractionError(
-            f"ffmpeg failed (exit {exc.returncode}): {exc.stderr or exc.stdout!r}"
-        ) from exc
-    # Push the freshly-extracted WAV up to the storage cache so the
-    # next worker that touches this project can skip ffmpeg. Best-
-    # effort: a network blip during push doesn't fail the job.
-    _try_push_audio_to_storage(project, audio_path)
+    # against a 500 MB raw video; local mode has no storage and skips it.
+    # A raw source's audio can end before its video, so the WAV is held to
+    # being readable and non-empty only.
+    _publish_audio(
+        project,
+        audio_path,
+        fresh=lambda: _not_older(audio_path, src_resolved),
+        extract=lambda out: _run_audio_ffmpeg(
+            ["-i", str(src_resolved), "-ac", "1", "-ar", str(sample_rate), "-vn"], out, ffmpeg_binary
+        ),
+    )
     return audio_path
 
 
@@ -297,38 +272,28 @@ def ensure_video_window_audio(
     src_resolved = source_video.resolve()
     if not src_resolved.exists():
         raise FileNotFoundError(f"video missing on disk: {src_resolved}")
-    if audio_path.exists() and audio_path.stat().st_mtime >= src_resolved.stat().st_mtime:
-        return audio_path
-    if _try_pull_audio_from_storage(project, audio_path):
-        return audio_path
-    if not shutil.which(ffmpeg_binary):
-        raise AudioExtractionError(f"ffmpeg binary not found: {ffmpeg_binary}")
-    cmd = [
-        ffmpeg_binary,
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-y",
-        "-ss",
-        str(start_s),
-        "-t",
-        str(end_s - start_s),
-        "-i",
-        str(src_resolved),
-        "-ac",
-        "1",
-        "-ar",
-        str(sample_rate),
-        "-vn",
-        str(audio_path),
-    ]
-    try:
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
-    except subprocess.CalledProcessError as exc:
-        raise AudioExtractionError(
-            f"ffmpeg failed (exit {exc.returncode}): {exc.stderr or exc.stdout!r}"
-        ) from exc
-    _try_push_audio_to_storage(project, audio_path)
+    _publish_audio(
+        project,
+        audio_path,
+        fresh=lambda: _not_older(audio_path, src_resolved),
+        extract=lambda out: _run_audio_ffmpeg(
+            [
+                "-ss",
+                str(start_s),
+                "-t",
+                str(end_s - start_s),
+                "-i",
+                str(src_resolved),
+                "-ac",
+                "1",
+                "-ar",
+                str(sample_rate),
+                "-vn",
+            ],
+            out,
+            ffmpeg_binary,
+        ),
+    )
     return audio_path
 
 
@@ -375,37 +340,14 @@ def ensure_take_audio(
     if not src_resolved.exists():
         raise FileNotFoundError(f"video missing on disk: {src_resolved}")
 
-    if audio_path.exists() and audio_path.stat().st_mtime >= src_resolved.stat().st_mtime:
-        return audio_path
-
-    if _try_pull_audio_from_storage(project, audio_path):
-        return audio_path
-
-    if not shutil.which(ffmpeg_binary):
-        raise AudioExtractionError(f"ffmpeg binary not found: {ffmpeg_binary}")
-
-    cmd = [
-        ffmpeg_binary,
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-y",
-        "-i",
-        str(src_resolved),
-        "-ac",
-        "1",
-        "-ar",
-        str(sample_rate),
-        "-vn",
-        str(audio_path),
-    ]
-    try:
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
-    except subprocess.CalledProcessError as exc:
-        raise AudioExtractionError(
-            f"ffmpeg failed (exit {exc.returncode}): {exc.stderr or exc.stdout!r}"
-        ) from exc
-    _try_push_audio_to_storage(project, audio_path)
+    _publish_audio(
+        project,
+        audio_path,
+        fresh=lambda: _not_older(audio_path, src_resolved),
+        extract=lambda out: _run_audio_ffmpeg(
+            ["-i", str(src_resolved), "-ac", "1", "-ar", str(sample_rate), "-vn"], out, ffmpeg_binary
+        ),
+    )
     return audio_path
 
 
@@ -500,15 +442,17 @@ def ensure_audit_audio(
     # trip) would slow down the hot path; the partial file is now atomic.
     if trimmed_video.exists() and trimmed_video.stat().st_size > 0:
         audio_path = audit_audio_path(project_root, stage_number, project=project)
-        audio_path.parent.mkdir(parents=True, exist_ok=True)
-        if not audio_path.exists() or audio_path.stat().st_mtime < trimmed_video.stat().st_mtime:
-            # Try the storage cache before invoking ffmpeg. The audit
-            # WAV is derived from the trimmed MP4, but its content is
-            # determined by the trim params; a worker that already
-            # produced this exact WAV pushed it under the same key.
-            if not _try_pull_audio_from_storage(project, audio_path):
-                _extract_audio(trimmed_video, audio_path, sample_rate, ffmpeg_binary)
-                _try_push_audio_to_storage(project, audio_path)
+        # Try the storage cache before invoking ffmpeg. The audit WAV is
+        # derived from the trimmed MP4, but its content is determined by the
+        # trim params; a worker that already produced this exact WAV pushed
+        # it under the same key. Either way it must be as long as the trim.
+        _publish_audio(
+            project,
+            audio_path,
+            fresh=lambda: _not_older(audio_path, trimmed_video),
+            extract=lambda out: _extract_audio(trimmed_video, out, sample_rate, ffmpeg_binary),
+            expect_seconds=_own_media_seconds(trimmed_video),
+        )
         # Beep position inside the trimmed clip = beep_in_source minus
         # trim_start. trim_start = max(0, beep - pre_buffer); so:
         #   beep_in_clip = min(beep_in_source, pre_buffer)
@@ -521,13 +465,18 @@ def ensure_audit_audio(
         web = try_pull_web_trim(project, trimmed_video)
         if web is not None:
             audio_path = audit_audio_path(project_root, stage_number, project=project)
-            audio_path.parent.mkdir(parents=True, exist_ok=True)
-            # No storage WAV cache here: a WAV pushed by another container
-            # may have been cut from an older rendition. A local re-pull of
-            # the rendition (refresh_trim_params) makes it newer than the
-            # WAV, which re-extracts.
-            if not audio_path.exists() or audio_path.stat().st_mtime < web.stat().st_mtime:
-                _extract_audio(web, audio_path, sample_rate, ffmpeg_binary)
+            # Never pulled from storage here: a WAV there may have been cut
+            # from an older rendition (the readers check that against the
+            # rendition's own upload). Pushed once cut: this runs in a job,
+            # often on the worker, and the API serves what storage holds.
+            _publish_audio(
+                project,
+                audio_path,
+                fresh=lambda: _not_older(audio_path, web),
+                extract=lambda out: _extract_audio(web, out, sample_rate, ffmpeg_binary),
+                expect_seconds=_own_media_seconds(web),
+                pull_storage=False,
+            )
             # The anchor is the trim's, from the pushed params sidecar: the
             # trim may have been cut with a different pre-buffer than the
             # project's current setting.
@@ -582,6 +531,236 @@ def _extract_audio(
         ) from exc
 
 
+def _run_audio_ffmpeg(args: list[str], out: Path, ffmpeg_binary: str) -> None:
+    """ffmpeg ``args`` writing a WAV to ``out`` (a partial: see
+    :func:`_publish_audio`)."""
+    if not shutil.which(ffmpeg_binary):
+        raise AudioExtractionError(f"ffmpeg binary not found: {ffmpeg_binary}")
+    cmd = [ffmpeg_binary, "-hide_banner", "-loglevel", "error", "-y", *args, str(out)]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        raise AudioExtractionError(
+            f"ffmpeg failed (exit {exc.returncode}): {exc.stderr or exc.stdout!r}"
+        ) from exc
+
+
+def _not_older(path: Path, source: Path) -> bool:
+    """``path`` exists and is not older than ``source``."""
+    try:
+        return path.stat().st_mtime >= source.stat().st_mtime
+    except OSError:
+        return False
+
+
+def _own_media_seconds(path: Path) -> float | None:
+    """The length of a trim or rendition we cut ourselves (its ``mvhd``),
+    which the audio cut from it must match; None when it does not parse.
+    Not for raw camera files, whose audio may legitimately end early."""
+    check = valid_mp4_cached(path)
+    return check.duration_s if check.ok else None
+
+
+def _publish_audio(
+    project: MatchProject | None,
+    audio_path: Path,
+    *,
+    fresh: Callable[[], bool],
+    extract: Callable[[Path], None],
+    expect_seconds: float | None = None,
+    pull_storage: bool = True,
+) -> None:
+    """Publish ``audio_path`` whole (``derived.produce``): from the storage
+    cache when it holds a usable copy, else by ``extract``; pushed up when
+    extracted here. ffmpeg exits 0 on an input still being written and
+    leaves a short WAV, which was served once (2026-10-13), so a WAV shorter
+    than ``expect_seconds`` is never published, from storage or ffmpeg."""
+    from_storage = False
+
+    def check(p: Path) -> str | None:
+        return derived.wav_problem(p, expect_seconds=expect_seconds)
+
+    def make(partial: Path) -> None:
+        nonlocal from_storage
+        if pull_storage and _try_pull_audio_from_storage(project, audio_path, dest=partial):
+            problem = check(partial)
+            if problem is None:
+                from_storage = True
+                return
+            logger.info("audio cache: refused storage copy of %s: %s", audio_path.name, problem)
+            partial.unlink(missing_ok=True)
+        extract(partial)
+
+    try:
+        produced = derived.produce(audio_path, fresh=fresh, make=make, check=check)
+    except derived.DerivedFileError as exc:
+        raise AudioExtractionError(str(exc)) from exc
+    if produced and not from_storage:
+        _try_push_audio_to_storage(project, audio_path)
+
+
+
+def ensure_video_audit_wav(
+    project_root: Path,
+    stage_number: int,
+    video: StageVideo,
+    *,
+    project: MatchProject,
+    sample_rate: int = 48000,
+    ffmpeg_binary: str = "ffmpeg",
+) -> Path:
+    """Cut ``video``'s audit WAV from its trim, published whole and pushed to
+    storage: the trim job's second product (spec 2026-10-14), so the audit
+    screen reads it rather than a request extracting it. Raises
+    ``FileNotFoundError`` when the trim is not on this disk."""
+    trimmed = trimmed_video_path(project_root, stage_number, video, project=project)
+    if not _usable_mp4(trimmed):
+        raise FileNotFoundError(f"no usable trim for {trimmed.name}")
+    audio_path = video_audit_audio_path(project_root, stage_number, video, project=project)
+    _publish_audio(
+        project,
+        audio_path,
+        fresh=lambda: _not_older(audio_path, trimmed),
+        extract=lambda out: _extract_audio(trimmed, out, sample_rate, ffmpeg_binary),
+        expect_seconds=_own_media_seconds(trimmed),
+        pull_storage=False,
+    )
+    return audio_path
+
+# --- Readers: what the request handlers call (spec 2026-10-14) ----------------
+#
+# A request never derives media: no ffmpeg, no decode of a source, no mirror
+# of a large source or trim from storage. These lookups answer with a WAV a
+# job already published (on this disk, or downloaded whole from storage), or
+# None, and the route then submits the producing job and answers 202.
+
+
+def _storage_stat(project: MatchProject | None, key: str | None) -> StorageObject | None:
+    if key is None or project is None or project._storage is None:
+        return None
+    try:
+        return project._storage.stat(key)
+    except Exception as exc:  # noqa: BLE001 -- a storage hiccup is a miss
+        logger.info("audio read: storage.stat(%s) raised %s", key, exc)
+        return None
+
+
+def _stored_at(obj: StorageObject | None) -> float | None:
+    return obj.last_modified.timestamp() if obj is not None and obj.last_modified is not None else None
+
+
+def _published_wav(project: MatchProject | None, wav: Path, *, cut_from: StorageObject | None = None) -> bool:
+    """``wav`` is on this disk, or downloaded whole from storage now. With
+    ``cut_from`` (the clip the WAV is cut from, as stored), a copy is current
+    only when it is not older than that clip: a WAV of an older window must
+    not be served for a re-cut one."""
+    since = _stored_at(cut_from)
+    try:
+        st = wav.stat()
+        if st.st_size > 0 and (since is None or st.st_mtime >= since) and derived.wav_problem(wav) is None:
+            return True
+    except OSError:
+        pass
+    key = _storage_audio_key(project, wav)
+    remote = _storage_stat(project, key)
+    if remote is None:
+        return False
+    stored = _stored_at(remote)
+    if since is not None and (stored is None or stored < since):
+        return False
+    return derived.download(project._storage, key, wav, check=derived.wav_problem)  # type: ignore[union-attr]
+
+
+def published_audit_audio(
+    project_root: Path,
+    stage_number: int,
+    primary_beep_time: float | None,
+    *,
+    project: MatchProject,
+    mirror: bool = False,
+) -> AuditAudioResult | None:
+    """The audit WAV :func:`ensure_audit_audio` would serve, if a job has
+    published it; None when it still has to be made."""
+    trimmed_video = trimmed_primary_path(project_root, stage_number, project=project)
+    audio_path = audit_audio_path(project_root, stage_number, project=project)
+    from .. import trim as trim_module
+
+    web = trim_module.web_trim_path(trimmed_video)
+    if _usable_mp4(trimmed_video):
+        clip: StorageObject | None = None
+        if _not_older(audio_path, trimmed_video) and derived.wav_problem(audio_path) is None:
+            return _trimmed_result(audio_path, primary_beep_time, project.trim_pre_buffer_seconds)
+        clip = _storage_stat(project, _storage_trim_key(project, trimmed_video))
+        if clip is not None and _published_wav(project, audio_path, cut_from=clip):
+            return _trimmed_result(audio_path, primary_beep_time, project.trim_pre_buffer_seconds)
+        return None
+    trim_stored = _storage_stat(project, _storage_trim_key(project, trimmed_video))
+    if trim_stored is not None:
+        if _published_wav(project, audio_path, cut_from=trim_stored):
+            return _trimmed_result(audio_path, primary_beep_time, project.trim_pre_buffer_seconds)
+        return None
+    if mirror:
+        web_stored = _storage_stat(project, _storage_trim_key(project, web))
+        if web_stored is None and not _usable_mp4(web):
+            return None
+        if _published_wav(project, audio_path, cut_from=web_stored):
+            # The anchor is the trim's, from the pushed params sidecar: the
+            # trim may have been cut with a different pre-buffer than the
+            # project's current setting.
+            refresh_trim_params(project, trimmed_video)
+            pre_buffer = trim_pre_buffer_seconds_for(trimmed_video, default=project.trim_pre_buffer_seconds)
+            return _trimmed_result(audio_path, primary_beep_time, pre_buffer)
+        return None
+    # No trim anywhere: the primary's full source WAV, as ensure_audit_audio
+    # falls back to.
+    primary = project.stage(stage_number).primary()
+    if primary is None:
+        return None
+    full = published_video_audio(project_root, stage_number, primary, project=project)
+    if full is None:
+        return None
+    return AuditAudioResult(audio_path=full, beep_in_clip=primary_beep_time, trimmed=False)
+
+
+def _trimmed_result(audio_path: Path, beep: float | None, pre_buffer: float) -> AuditAudioResult:
+    # Beep position inside the trimmed clip = beep_in_source minus
+    # trim_start. trim_start = max(0, beep - pre_buffer); so:
+    #   beep_in_clip = min(beep_in_source, pre_buffer)
+    return AuditAudioResult(
+        audio_path=audio_path,
+        beep_in_clip=min(beep, pre_buffer) if beep is not None else None,
+        trimmed=True,
+    )
+
+
+def published_video_audio(
+    project_root: Path,
+    stage_number: int,
+    video: StageVideo,
+    *,
+    project: MatchProject,
+    source: Path | None = None,
+) -> Path | None:
+    """``video``'s full source WAV (:func:`ensure_video_audio`), if a job has
+    published it. ``source``, when it is on this disk, must not be newer."""
+    wav = video_audio_path(project_root, stage_number, video, project=project)
+    if source is not None:
+        try:
+            if wav.stat().st_mtime < source.stat().st_mtime:
+                return None
+        except OSError:
+            pass
+    return wav if _published_wav(project, wav) else None
+
+
+def published_take_audio(
+    project_root: Path, storage_path: str, *, project: MatchProject | None = None
+) -> Path | None:
+    """A raw file's take WAV (:func:`ensure_take_audio`), if published."""
+    wav = take_audio_path(project_root, storage_path, project=project)
+    return wav if _published_wav(project, wav) else None
+
+
 def _storage_audio_key(project: MatchProject | None, local_wav: Path) -> str | None:
     """Compute the storage key for an extracted audio WAV.
 
@@ -597,10 +776,13 @@ def _storage_audio_key(project: MatchProject | None, local_wav: Path) -> str | N
     return f"{project._storage_scope}/audio/{local_wav.name}"
 
 
-def _try_pull_audio_from_storage(project: MatchProject | None, local_wav: Path) -> bool:
+def _try_pull_audio_from_storage(
+    project: MatchProject | None, local_wav: Path, *, dest: Path | None = None
+) -> bool:
     """If the WAV exists in the project's storage cache, download it
-    into ``local_wav`` and return True. Returns False when no
-    storage is bound, the key is absent, or the download fails.
+    into ``dest`` (a partial of ``local_wav``, whose name keys the cache)
+    and return True. Returns False when no storage is bound, the key is
+    absent, or the download fails.
 
     Best-effort by design: a storage hiccup falls through to ffmpeg
     rather than failing the detection job. Logs at INFO so the
@@ -616,19 +798,17 @@ def _try_pull_audio_from_storage(project: MatchProject | None, local_wav: Path) 
     except Exception as exc:
         logger.info("audio cache: storage.exists(%s) raised %s", key, exc)
         return False
+    target = dest if dest is not None else local_wav
     try:
-        local_wav.parent.mkdir(parents=True, exist_ok=True)
-        with storage.open_stream(key) as src, local_wav.open("wb") as dst:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with storage.open_stream(key) as src, target.open("wb") as dst:
             shutil.copyfileobj(src, dst)
         return True
     except Exception as exc:
         logger.info("audio cache: pull from %s failed: %s", key, exc)
         # Leave nothing half-written behind so the ffmpeg fallback
         # doesn't trip over a torn file.
-        try:
-            local_wav.unlink()
-        except FileNotFoundError:
-            pass
+        target.unlink(missing_ok=True)
         return False
 
 
@@ -707,6 +887,18 @@ def invalidate_video_audit_trim(
             pass
 
 
+def _mp4_problem(path: Path) -> str | None:
+    check = valid_mp4(path)
+    return None if check.ok else check.reason
+
+
+def _usable_mp4(path: Path) -> bool:
+    try:
+        return path.stat().st_size > 0 and valid_mp4_cached(path).ok
+    except OSError:
+        return False
+
+
 def _storage_trim_key(project: MatchProject | None, local_mp4: Path) -> str | None:
     """Compute the storage key for an audit-trim MP4.
 
@@ -748,26 +940,15 @@ def _try_pull_trim_from_storage(project: MatchProject | None, local_mp4: Path) -
         return False
     params_local = trim_params_path(local_mp4)
     params_key = f"{key.rsplit('/', 1)[0]}/{params_local.name}"
-    try:
-        local_mp4.parent.mkdir(parents=True, exist_ok=True)
-        with storage.open_stream(key) as src, local_mp4.open("wb") as dst:
-            shutil.copyfileobj(src, dst)
-        # Pull the sidecar when present; its absence just forces a re-cut.
-        try:
-            if storage.exists(params_key):
-                with storage.open_stream(params_key) as src, params_local.open("wb") as dst:
-                    shutil.copyfileobj(src, dst)
-        except Exception as exc:
-            logger.info("trim cache: params pull from %s failed: %s", params_key, exc)
-        return True
-    except Exception as exc:
-        logger.info("trim cache: pull from %s failed: %s", key, exc)
-        for torn in (local_mp4, params_local):
-            try:
-                torn.unlink()
-            except FileNotFoundError:
-                pass
+    # Whole or not at all (``derived.download``): a request reading the trim
+    # mid-pull took a half file for the real one.
+    if not derived.download(
+        storage, key, local_mp4, fresh=lambda: _usable_mp4(local_mp4), check=_mp4_problem
+    ):
         return False
+    # Pull the sidecar when present; its absence just forces a re-cut.
+    derived.download(storage, params_key, params_local)
+    return True
 
 
 def refresh_trim_params(project: MatchProject | None, trim_path: Path) -> None:
@@ -795,8 +976,7 @@ def refresh_trim_params(project: MatchProject | None, trim_path: Path) -> None:
         local = None
     if local == remote:
         return
-    params.parent.mkdir(parents=True, exist_ok=True)
-    params.write_bytes(remote)
+    derived.produce(params, fresh=lambda: False, make=lambda p: p.write_bytes(remote))
     trim_module.web_trim_path(trim_path).unlink(missing_ok=True)
 
 
@@ -816,17 +996,12 @@ def try_pull_web_trim(project: MatchProject | None, trim_path: Path) -> Path | N
     if key is None:
         return None
     storage = project._storage  # type: ignore[union-attr]
-    try:
-        if not storage.exists(key):
-            return None
-        web.parent.mkdir(parents=True, exist_ok=True)
-        with storage.open_stream(key) as src, web.open("wb") as dst:
-            shutil.copyfileobj(src, dst)
+    # Whole or not at all: on 2026-10-13 a request extracted the audit WAV
+    # from a rendition another request was still streaming into this path,
+    # and the phone was served a stage 17.7 s short.
+    if derived.download(storage, key, web, fresh=lambda: _usable_mp4(web), check=_mp4_problem):
         return web
-    except Exception as exc:
-        logger.info("web trim cache: pull from %s failed: %s", key, exc)
-        web.unlink(missing_ok=True)
-        return None
+    return None
 
 
 def _try_push_trim_to_storage(project: MatchProject | None, local_mp4: Path) -> None:
@@ -866,18 +1041,7 @@ def _try_pull_web_trim_from_storage(project: MatchProject | None, web: Path) -> 
     if key is None:
         return False
     storage = project._storage  # type: ignore[union-attr]
-    try:
-        if not storage.exists(key):
-            return False
-        web.parent.mkdir(parents=True, exist_ok=True)
-        with storage.open_stream(key) as src, web.open("wb") as dst:
-            shutil.copyfileobj(src, dst)
-        return True
-    except Exception as exc:
-        logger.info("web trim cache: pull of %s failed: %s", key, exc)
-        if web.exists():
-            web.unlink()
-        return False
+    return derived.download(storage, key, web, fresh=lambda: _usable_mp4(web), check=_mp4_problem)
 
 
 def _try_push_web_trim_to_storage(project: MatchProject | None, web: Path) -> None:
@@ -1145,76 +1309,83 @@ def ensure_video_audit_trim(
     if not src_resolved.exists():
         raise FileNotFoundError(f"video missing on disk: {src_resolved}")
 
-    # Storage cache (hosted mode): another worker may have already cut
-    # this trim. Pull the MP4 + params sidecar into place so the cache_hit
-    # check below can validate + reuse it instead of re-running ffmpeg
-    # against the (large) source. Local mode skips this -- the key
-    # resolves to None and the helper returns without touching the network.
-    if not output.exists():
-        _try_pull_trim_from_storage(project, output)
+    # One cut at a time per trim: a second cut swept the first's freshly
+    # published trim (and every partial beside it) while readers used it.
+    with derived.locked(output, "cut"):
+        # Storage cache (hosted mode): another worker may have already cut
+        # this trim. Pull the MP4 + params sidecar into place so the cache_hit
+        # check below can validate + reuse it instead of re-running ffmpeg
+        # against the (large) source. Local mode skips this -- the key
+        # resolves to None and the helper returns without touching the network.
+        if not output.exists():
+            _try_pull_trim_from_storage(project, output)
 
-    cache_hit = (
-        output.exists()
-        and output.stat().st_mtime >= src_resolved.stat().st_mtime
-        and params_file.exists()
-        and valid_mp4_cached(output).ok
-    )
-    if cache_hit:
+        cache_hit = (
+            output.exists()
+            and output.stat().st_mtime >= src_resolved.stat().st_mtime
+            and params_file.exists()
+            and valid_mp4_cached(output).ok
+        )
+        if cache_hit:
+            try:
+                existing_params = json.loads(params_file.read_text(encoding="utf-8"))
+                if existing_params == current_params:
+                    # Cleanup any orphaned partial from a prior crashed run.
+                    for leftover in output.parent.glob(f"{output.stem}.*partial{output.suffix}"):
+                        leftover.unlink(missing_ok=True)
+                    # A trim cut before the web rendition existed (#1031) gets
+                    # one now, from the trim itself -- no re-cut of the source.
+                    _ensure_web_trim(project, output, ffmpeg_binary=ffmpeg_binary, runner=runner)
+                    return output
+            except (OSError, ValueError):
+                # Treat unreadable sidecar as cache miss.
+                pass
+
+        # Stale / missing final / params mismatch -> sweep and re-run. The web
+        # rendition goes too: it covers the old window.
+        web = trim_module.web_trim_path(output)
+        for p in (output, partial, params_file, web, *_web_partials(web)):
+            if p.exists():
+                p.unlink()
+
+        encoder = trim_module.select_audit_encoder(project.trim_audit_encoder, ffmpeg_binary=ffmpeg_binary)
+        trim_kwargs: dict[str, object] = {
+            "input_path": src_resolved,
+            "output_path": partial,
+            "beep_time": beep_time,
+            "stage_time": stage_time_seconds,
+            "pre_buffer_seconds": project.trim_pre_buffer_seconds,
+            "post_buffer_seconds": project.trim_post_buffer_seconds,
+            "mode": "audit",
+            "video_encoder": encoder,
+            "ffmpeg_binary": ffmpeg_binary,
+            "overwrite": True,
+        }
+        if runner is not None:
+            trim_kwargs["runner"] = runner
         try:
-            existing_params = json.loads(params_file.read_text(encoding="utf-8"))
-            if existing_params == current_params:
-                # Cleanup any orphaned partial from a prior crashed run.
-                for leftover in output.parent.glob(f"{output.stem}.*partial{output.suffix}"):
-                    leftover.unlink(missing_ok=True)
-                # A trim cut before the web rendition existed (#1031) gets
-                # one now, from the trim itself -- no re-cut of the source.
-                _ensure_web_trim(project, output, ffmpeg_binary=ffmpeg_binary, runner=runner)
-                return output
-        except (OSError, ValueError):
-            # Treat unreadable sidecar as cache miss.
-            pass
+            trim_module.trim_video(**trim_kwargs)
+        except trim_module.FFmpegError as exc:
+            # ffmpeg may have written some bytes before bailing; delete them.
+            if partial.exists():
+                partial.unlink()
+            raise AudioExtractionError(str(exc)) from exc
 
-    # Stale / missing final / params mismatch -> sweep and re-run. The web
-    # rendition goes too: it covers the old window.
-    web = trim_module.web_trim_path(output)
-    for p in (output, partial, params_file, web, *_web_partials(web)):
-        if p.exists():
-            p.unlink()
-
-    encoder = trim_module.select_audit_encoder(project.trim_audit_encoder, ffmpeg_binary=ffmpeg_binary)
-    trim_kwargs: dict[str, object] = {
-        "input_path": src_resolved,
-        "output_path": partial,
-        "beep_time": beep_time,
-        "stage_time": stage_time_seconds,
-        "pre_buffer_seconds": project.trim_pre_buffer_seconds,
-        "post_buffer_seconds": project.trim_post_buffer_seconds,
-        "mode": "audit",
-        "video_encoder": encoder,
-        "ffmpeg_binary": ffmpeg_binary,
-        "overwrite": True,
-    }
-    if runner is not None:
-        trim_kwargs["runner"] = runner
-    try:
-        trim_module.trim_video(**trim_kwargs)
-    except trim_module.FFmpegError as exc:
-        # ffmpeg may have written some bytes before bailing; delete them.
-        if partial.exists():
-            partial.unlink()
-        raise AudioExtractionError(str(exc)) from exc
-
-    check = valid_mp4(partial)
-    if not check.ok:
-        partial.unlink(missing_ok=True)
-        raise AudioExtractionError(f"trim failed its check: {check.reason}")
-    partial.replace(output)
-    params_file.write_text(json.dumps(current_params, indent=2) + "\n", encoding="utf-8")
-    # Push the freshly-cut trim up so the API can serve the scrub clip and
-    # the next worker can skip the re-cut. Best-effort; local mode no-ops.
-    _try_push_trim_to_storage(project, output)
-    _ensure_web_trim(project, output, ffmpeg_binary=ffmpeg_binary, runner=runner)
-    return output
+        check = valid_mp4(partial)
+        if not check.ok:
+            partial.unlink(missing_ok=True)
+            raise AudioExtractionError(f"trim failed its check: {check.reason}")
+        partial.replace(output)
+        derived.produce(
+            params_file,
+            fresh=lambda: False,
+            make=lambda p: p.write_text(json.dumps(current_params, indent=2) + "\n", encoding="utf-8"),
+        )
+        # Push the freshly-cut trim up so the API can serve the scrub clip and
+        # the next worker can skip the re-cut. Best-effort; local mode no-ops.
+        _try_push_trim_to_storage(project, output)
+        _ensure_web_trim(project, output, ffmpeg_binary=ffmpeg_binary, runner=runner)
+        return output
 
 
 def ensure_audit_trim(

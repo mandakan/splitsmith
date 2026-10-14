@@ -1821,18 +1821,18 @@ _BEEP_FIXTURE_TRUTH = 4.877  # seconds (rise-foot, see beep-test.json)
 
 
 def _stub_video_audio_with_fixture(monkeypatch) -> None:
-    """Point the snap endpoint's audio loader at the real beep fixture WAV.
+    """Publish the real beep fixture WAV as the video's audio.
 
-    The seeded primary's source is a zero-byte ``.mp4`` so we can't run
-    ffmpeg against it; the fixture WAV gives the snap detector a real
-    signal to refine against.
+    The seeded primary's source is a zero-byte ``.mp4`` so no job could cut
+    a WAV from it; the fixture WAV gives the snap detector a real signal to
+    refine against. The snap reads what a job published, never extracts.
     """
     from splitsmith.ui import audio as audio_helpers
 
-    def fake_ensure(root, n, video, source, **kwargs):  # type: ignore[no-untyped-def]
+    def fake_published(root, n, video, **kwargs):  # type: ignore[no-untyped-def]
         return _BEEP_FIXTURE_WAV
 
-    monkeypatch.setattr(audio_helpers, "ensure_video_audio", fake_ensure)
+    monkeypatch.setattr(audio_helpers, "published_video_audio", fake_published)
 
 
 def test_snap_beep_refines_user_hint_to_truth(tmp_path: Path, monkeypatch) -> None:
@@ -1908,22 +1908,16 @@ def test_manual_override_clears_candidate_list(tmp_path: Path, monkeypatch) -> N
 
 
 def test_audio_endpoint_serves_cached_wav(tmp_path: Path, monkeypatch) -> None:
-    """The /audio endpoint asks the helper for the cached WAV; we stub the
-    helper to drop a small WAV file in place rather than running ffmpeg."""
+    """With no trim, /audio serves the primary's full WAV a job published."""
+    import numpy as np
+    import soundfile as sf
+
     client, _ = _seed_project_with_primary(tmp_path)
 
     project_root = tmp_path / "match"
-    fake_wav, _audit, _trim = _primary_cache_paths(project_root)
-    fake_wav.parent.mkdir(parents=True, exist_ok=True)
-    # Minimal RIFF header + tiny data chunk; the test only checks that bytes flow.
-    fake_wav.write_bytes(b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00" + b"\x00" * 16)
-
-    from splitsmith.ui import audio as audio_helpers
-
-    def fake_ensure(root, n, source, **kwargs):  # type: ignore[no-untyped-def]
-        return fake_wav
-
-    monkeypatch.setattr(audio_helpers, "ensure_primary_audio", fake_ensure)
+    full_wav, _audit, _trim = _primary_cache_paths(project_root)
+    full_wav.parent.mkdir(parents=True, exist_ok=True)
+    sf.write(full_wav, np.zeros(4_800, dtype="float32"), 48_000)
 
     resp = client.get("/api/shooters/me/stages/1/audio")
     assert resp.status_code == 200
@@ -2105,27 +2099,19 @@ def test_peaks_endpoint_uses_trimmed_audio_when_present(tmp_path: Path, monkeypa
     primary.beep_time = 30.0  # source-time beep; trim default buffer is 5s
     project.save(_shooter_root)
 
-    # Create a fake "trimmed" mp4 placeholder so the existence check passes.
+    # A trim and the audit WAV the trim job published beside it.
+    from tests.media_bytes import tiny_mp4
+
     trimmed_dir = _shooter_root / "trimmed"
     trimmed_dir.mkdir(parents=True, exist_ok=True)
     _full, audit_wav, trimmed_mp4 = _primary_cache_paths(project_root)
-    trimmed_mp4.write_bytes(b"\x00fake_mp4")
+    trimmed_mp4.write_bytes(tiny_mp4())
 
-    # Stub _extract_audio so we don't actually shell out; drop a known WAV
-    # at the audit-cache path.
     audio_dir = _shooter_root / "audio"
     audio_dir.mkdir(parents=True, exist_ok=True)
     audio = np.zeros(48_000, dtype="float32")
     audio[20_000:21_000] = 0.7
     sf.write(audit_wav, audio, 48_000)
-
-    from splitsmith.ui import audio as audio_helpers
-
-    def fake_extract(source, dest, sample_rate, ffmpeg_binary):  # type: ignore[no-untyped-def]
-        # Already wrote audit_wav above; pretend ffmpeg ran.
-        return None
-
-    monkeypatch.setattr(audio_helpers, "_extract_audio", fake_extract)
 
     resp = client.get("/api/shooters/me/stages/1/peaks?bins=64")
     assert resp.status_code == 200
@@ -2223,14 +2209,10 @@ def test_video_audio_endpoint_serves_secondary_wav(tmp_path: Path, monkeypatch) 
 
     sec_id = _video_id_for(client, 1, "secondary")
     sec_wav = audio_dir / f"stage1_cam_{sec_id}.wav"
-    sec_wav.write_bytes(b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00" + b"\x00" * 16)
+    import numpy as np
+    import soundfile as sf
 
-    from splitsmith.ui import audio as audio_helpers
-
-    def fake_ensure_video(root, n, video, source, **kwargs):  # type: ignore[no-untyped-def]
-        return sec_wav
-
-    monkeypatch.setattr(audio_helpers, "ensure_video_audio", fake_ensure_video)
+    sf.write(sec_wav, np.zeros(4_800, dtype="float32"), 48_000)
 
     resp = client.get(f"/api/shooters/me/stages/1/videos/{sec_id}/audio")
     assert resp.status_code == 200
