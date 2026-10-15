@@ -34,14 +34,16 @@ SNIPPET_MARGIN_S = 5.0
 # detector searches the first 30 s, so that is what the phone must see.
 DEFAULT_WINDOW_END_S = 30.0
 MIN_SNIPPET_S = 2.0
-# Peak resolution scales with the snippet (10 ms per bin) so the phone
-# picker can zoom to the beep's onset; PEAK_BINS is the floor.
+# Peak resolution scales with the snippet (1 ms per bin) so the phone
+# picker can place the beep to the ms and snap to its start; PEAK_BINS is
+# the floor.
 PEAK_BINS = 600
-PEAK_BINS_PER_S = 100
+PEAK_BINS_PER_S = 1000
 SNIPPET_SAMPLE_RATE = 16000
 # Bumped when the snippet's shape changes so already-pushed snippets
 # regenerate on the next push. 2: whole search window, 10 ms peaks.
-SNIPPET_VERSION = 2
+# 3: 1 ms peaks (2026-10-15).
+SNIPPET_VERSION = 3
 
 
 class BeepSnippetReport(BaseModel):

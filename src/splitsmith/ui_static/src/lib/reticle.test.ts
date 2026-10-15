@@ -1,6 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import { columnPeaks, formatTime, initialPps, ppsBounds, ticks, tickStep, timeAtX, xAtTime } from "./reticle";
+import {
+  beepStartNear,
+  columnPeaks,
+  formatTime,
+  initialPps,
+  ppsBounds,
+  ticks,
+  tickStep,
+  timeAtX,
+  visibleGain,
+  xAtTime,
+} from "./reticle";
 
 const range = { start: 10, end: 40 };
 
@@ -55,3 +66,36 @@ describe("reticle geometry", () => {
     expect(wide).toEqual([0.9]);
   });
 });
+
+/** 1 ms bins over 10..20 s: a quiet hum, a quiet beep rising at 14.000 s
+ *  (2 % of the shots) and a shot at 15.000 s. */
+function beepAndShot(): number[] {
+  const p = new Array(10000).fill(0.0004);
+  const put = (t: number, levels: number[]) =>
+    levels.forEach((v, k) => (p[Math.round((t - 10) * 1000) + k] = v));
+  put(14.0, [0.004, 0.012, 0.02, 0.02, 0.02, 0.02, 0.02, 0.02]);
+  put(15.0, [0.2, 0.7, 1.0, 0.8, 0.5]);
+  return p;
+}
+
+describe("the beep picker on a quiet beep", () => {
+  const range = { start: 10, end: 20 };
+
+  it("scales the visible window to its own loudest bar, never past the cap", () => {
+    expect(visibleGain([0.02, 0.01, null])).toBeCloseTo(50);
+    expect(visibleGain([0.5, 1.0])).toBe(1);
+    expect(visibleGain([0.0001])).toBe(50);
+    expect(visibleGain([null, null])).toBe(1);
+  });
+
+  it("finds a quiet beep's start near the line, however loud the shots", () => {
+    expect(beepStartNear(beepAndShot(), range, 14.012)).toBeCloseTo(14.0, 3);
+    expect(beepStartNear(beepAndShot(), range, 13.99)).toBeCloseTo(14.0, 3);
+  });
+
+  it("does not move the line where nothing rises", () => {
+    expect(beepStartNear(beepAndShot(), range, 12.0)).toBeNull();
+    expect(beepStartNear(new Array(10000).fill(0.2), range, 14.0)).toBeNull();
+  });
+});
+

@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "phone-beep-picker-snap",
+      "date": "2026-10-15",
+      "title": "A quiet beep you can see and land on",
+      "body": "On the phone, the beep picker draws what is on screen at full height and lands the line on the beep's start when you let go. Turn Snap off beside the zoom buttons."
+    },
+    {
       "id": "recheck-secondary-beeps",
       "date": "2026-10-14",
       "title": "Recheck every secondary camera's beep",
