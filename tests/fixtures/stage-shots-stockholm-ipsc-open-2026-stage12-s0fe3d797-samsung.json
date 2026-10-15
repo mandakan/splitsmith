@@ -1253,8 +1253,10 @@
     }
   ],
   "review": {
-    "status": "needs_review",
+    "status": "reviewed",
     "derived_from": "stage12-stage-b2-left",
-    "reviewed_at": null
+    "reviewed_at": "2026-10-15T16:45:27.467593+00:00",
+    "confirmed_at": "2026-10-15T16:45:27.467593+00:00",
+    "method": "audit"
   }
 }

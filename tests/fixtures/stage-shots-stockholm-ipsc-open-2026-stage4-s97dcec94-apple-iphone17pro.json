@@ -1129,8 +1129,10 @@
     }
   ],
   "review": {
-    "status": "needs_review",
+    "status": "reviewed",
     "derived_from": "stage4-b6-front",
-    "reviewed_at": null
+    "reviewed_at": "2026-10-15T16:43:55.044254+00:00",
+    "confirmed_at": "2026-10-15T16:43:55.044254+00:00",
+    "method": "audit"
   }
 }

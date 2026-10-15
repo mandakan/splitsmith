@@ -923,8 +923,10 @@
     }
   ],
   "review": {
-    "status": "needs_review",
+    "status": "reviewed",
     "derived_from": "stage7-b4-front",
-    "reviewed_at": null
+    "reviewed_at": "2026-10-15T16:43:33.057602+00:00",
+    "confirmed_at": "2026-10-15T16:43:33.057602+00:00",
+    "method": "audit"
   }
 }
