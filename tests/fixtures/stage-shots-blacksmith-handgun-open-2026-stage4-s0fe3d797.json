@@ -1850,5 +1850,11 @@
   "shooter": {
     "id": "s0fe3d797"
   },
-  "event_id": "blacksmith-handgun-open-2026:4:s0fe3d797"
+  "event_id": "blacksmith-handgun-open-2026:4:s0fe3d797",
+  "review": {
+    "confirmed_at": "2026-10-15T13:44:20.006496+00:00",
+    "status": "reviewed",
+    "reviewed_at": "2026-10-15T13:44:20.006496+00:00",
+    "method": "own-audit"
+  }
 }
