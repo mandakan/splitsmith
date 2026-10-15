@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.73.1](https://github.com/mandakan/splitsmith/compare/v0.73.0...v0.73.1) (2026-10-15)
+
+
+### Bug Fixes
+
+* **sync:** a confirmed secondary keeps its beep snippet for the recheck ([#1487](https://github.com/mandakan/splitsmith/issues/1487)) ([87b1122](https://github.com/mandakan/splitsmith/commit/87b11227281f172ce8853d7d67988ed78984e062))
+
 ## [0.73.0](https://github.com/mandakan/splitsmith/compare/v0.72.0...v0.73.0) (2026-10-14)
 
 
