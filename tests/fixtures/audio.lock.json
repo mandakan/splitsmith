@@ -1,6 +1,94 @@
 {
   "version": 1,
   "files": {
+    "stage-shots-blacksmith-handgun-open-2026-stage1-s97dcec94-apple-iphone17pro.wav": {
+      "sha256": "c3a2fd7fd1839e29d63853514076cf7ac40732bb16ebaf9c5b7dac2afafc6419",
+      "bytes": 5057678
+    },
+    "stage-shots-blacksmith-handgun-open-2026-stage1-s97dcec94.wav": {
+      "sha256": "7d6a4ee581449221065222ac91205fd6a563dbaaf2216d07d091ccd4a2d8523a",
+      "bytes": 5066766
+    },
+    "stage-shots-blacksmith-handgun-open-2026-stage2-s36ed6e4e.wav": {
+      "sha256": "4945a80dbfa4503263f02432e97a454a6864371adc7d1c6ab89c86cc33656cd9",
+      "bytes": 2007502
+    },
+    "stage-shots-blacksmith-handgun-open-2026-stage2-s97dcec94-apple-iphone17pro.wav": {
+      "sha256": "f92e19abd20d516dc3c81e0d1824a70a54d6ebbaa5ddc45e2bc5bae4bf9bdafe",
+      "bytes": 2158542
+    },
+    "stage-shots-blacksmith-handgun-open-2026-stage2-s97dcec94.wav": {
+      "sha256": "e6a73cc986adf897f0fab63578c9d9292e3cc2013449e8e545c00ea2343ea451",
+      "bytes": 2158990
+    },
+    "stage-shots-blacksmith-handgun-open-2026-stage3-s36ed6e4e.wav": {
+      "sha256": "d8b891d2f981323dfeb11a7e25c8a56e6f7ee7f7426a487e422d4da8a9d91970",
+      "bytes": 2450478
+    },
+    "stage-shots-blacksmith-handgun-open-2026-stage3-s97dcec94-apple-iphone17pro.wav": {
+      "sha256": "c2e9f894adbf3d4ed7515dbf393838b5f6d2dcd63f310125cc7571933a54bf4c",
+      "bytes": 2435694
+    },
+    "stage-shots-blacksmith-handgun-open-2026-stage3-s97dcec94.wav": {
+      "sha256": "9f0f03c65f2c78baf2b6a86460deed16f0f16ee175aff9d25802e203a29ccae4",
+      "bytes": 2438190
+    },
+    "stage-shots-blacksmith-handgun-open-2026-stage4-s36ed6e4e.wav": {
+      "sha256": "928c253f897dd95d2a3063e6fccb517c54a59b73d0d3e33d9697458e4f984747",
+      "bytes": 2443662
+    },
+    "stage-shots-blacksmith-handgun-open-2026-stage4-s97dcec94.wav": {
+      "sha256": "c8c597f403431e8d0c920d2960f5c1184e87bced42bf1f5a6eb8a84c8738702c",
+      "bytes": 2369166
+    },
+    "stage-shots-blacksmith-handgun-open-2026-stage5-s36ed6e4e.wav": {
+      "sha256": "36e71fc5d7eee0b5ef1aade570e989ca86b13c720e247bafc9efe0ae64b7c350",
+      "bytes": 2944494
+    },
+    "stage-shots-blacksmith-handgun-open-2026-stage5-s97dcec94-go3s.wav": {
+      "sha256": "c7fafcec21d820209a1c6486b65bf1f6b185614c3ecf88378c70c3f85d81fa71",
+      "bytes": 3196014
+    },
+    "stage-shots-blacksmith-handgun-open-2026-stage5-s97dcec94.wav": {
+      "sha256": "44fb84f714a51ace3959bbf085a1365fac94a04499b696308201d8b18e4ab874",
+      "bytes": 3197518
+    },
+    "stage-shots-blacksmith-handgun-open-2026-stage6-s36ed6e4e.wav": {
+      "sha256": "0794aa376d5923f34cc1088cb3521fbeac8864bab4793383585b1e5f3b8ae9ae",
+      "bytes": 1913358
+    },
+    "stage-shots-blacksmith-handgun-open-2026-stage6-s97dcec94-go3s.wav": {
+      "sha256": "9ac008798cbfbfbac3f0dc86141af02e2296d6ce3afd7cd12f44450bdafe8ca6",
+      "bytes": 1826478
+    },
+    "stage-shots-blacksmith-handgun-open-2026-stage6-s97dcec94.wav": {
+      "sha256": "f8bd1a1ffd5b27eb88a759d9cf6e0c86fbddabf784727054b351b7f48edde3cf",
+      "bytes": 1777838
+    },
+    "stage-shots-blacksmith-handgun-open-2026-stage7-s36ed6e4e.wav": {
+      "sha256": "1067a2952ee424758449e859dfc80d821823e75e7b204cd607d2a6c093ccdefe",
+      "bytes": 2831598
+    },
+    "stage-shots-blacksmith-handgun-open-2026-stage7-s97dcec94-go3s.wav": {
+      "sha256": "6ba3bbe3c731b3a3c788c05a1d524cfb1c1484e0e40d2d8a6a37f804a08eb2cf",
+      "bytes": 3041358
+    },
+    "stage-shots-blacksmith-handgun-open-2026-stage7-s97dcec94.wav": {
+      "sha256": "219d8c7b30570e602792ac1572ef87c333f7bfaf01eacc5d6a8d7093b02bb850",
+      "bytes": 3042318
+    },
+    "stage-shots-blacksmith-handgun-open-2026-stage8-s36ed6e4e.wav": {
+      "sha256": "3293bb00f3880d1c442c4d8e2627a26ecbb59912e8d920a84e5d077fc7f5c9b6",
+      "bytes": 3182702
+    },
+    "stage-shots-blacksmith-handgun-open-2026-stage8-s97dcec94-go3s.wav": {
+      "sha256": "c47607abc52dfa3aa724ccf82471c3e93ab1fa1cae3e7167229fdbddc98c97d4",
+      "bytes": 3504750
+    },
+    "stage-shots-blacksmith-handgun-open-2026-stage8-s97dcec94.wav": {
+      "sha256": "775794e3d41426be2f26ffeeb28ed84fa43086a96c44d2f322688eec32bec223",
+      "bytes": 3503342
+    },
     "stage-shots-hfo-masters-2026-stage1-s0fe3d797.wav": {
       "sha256": "db0374face497985683fd4a39255ef1b117cfe946703d508e9728d827c0cd462",
       "bytes": 2138478

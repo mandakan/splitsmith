@@ -7,100 +7,142 @@
     {
       "shot_number": 1,
       "candidate_number": 4,
-      "time": 6.375,
-      "ms_after_beep": 1375,
-      "source": "detected"
+      "time": 6.349,
+      "ms_after_beep": 1349,
+      "source": "detected",
+      "interval_class": "first_shot",
+      "interval_class_source": "auto",
+      "id": "cand-4"
     },
     {
       "shot_number": 2,
       "candidate_number": 5,
-      "time": 6.59,
-      "ms_after_beep": 1590,
-      "source": "detected"
+      "time": 6.574,
+      "ms_after_beep": 1574,
+      "source": "detected",
+      "interval_class": "split",
+      "interval_class_source": "auto",
+      "id": "cand-5"
     },
     {
       "shot_number": 3,
       "candidate_number": 6,
-      "time": 6.726,
-      "ms_after_beep": 1726,
-      "source": "detected"
+      "time": 6.738,
+      "ms_after_beep": 1738,
+      "source": "detected",
+      "interval_class": "split",
+      "interval_class_source": "auto",
+      "id": "cand-6"
     },
     {
       "shot_number": 4,
       "candidate_number": 9,
-      "time": 9.487,
-      "ms_after_beep": 4487,
-      "source": "detected"
+      "time": 9.49,
+      "ms_after_beep": 4490,
+      "source": "detected",
+      "interval_class": "movement",
+      "interval_class_source": "auto",
+      "id": "cand-9"
     },
     {
       "shot_number": 5,
       "candidate_number": 10,
-      "time": 9.725,
-      "ms_after_beep": 4725,
-      "source": "detected"
+      "time": 9.727,
+      "ms_after_beep": 4727,
+      "source": "detected",
+      "interval_class": "split",
+      "interval_class_source": "auto",
+      "id": "cand-10"
     },
     {
       "shot_number": 6,
       "candidate_number": 12,
-      "time": 10.166,
-      "ms_after_beep": 5166,
-      "source": "detected"
+      "time": 10.167,
+      "ms_after_beep": 5167,
+      "source": "detected",
+      "interval_class": "split",
+      "interval_class_source": "auto",
+      "id": "cand-12"
     },
     {
       "shot_number": 7,
       "candidate_number": 13,
       "time": 10.431,
       "ms_after_beep": 5431,
-      "source": "detected"
+      "source": "detected",
+      "interval_class": "split",
+      "interval_class_source": "auto",
+      "id": "cand-13"
     },
     {
       "shot_number": 8,
       "candidate_number": 14,
-      "time": 12.036,
-      "ms_after_beep": 7036,
-      "source": "detected"
+      "time": 12.02,
+      "ms_after_beep": 7020,
+      "source": "detected",
+      "interval_class": "transition",
+      "interval_class_source": "auto",
+      "id": "cand-14"
     },
     {
       "shot_number": 9,
       "candidate_number": 16,
-      "time": 12.382,
-      "ms_after_beep": 7382,
-      "source": "detected"
+      "time": 12.383,
+      "ms_after_beep": 7383,
+      "source": "detected",
+      "interval_class": "split",
+      "interval_class_source": "auto",
+      "id": "cand-16"
     },
     {
       "shot_number": 10,
       "candidate_number": 17,
-      "time": 12.757,
-      "ms_after_beep": 7757,
-      "source": "detected"
+      "time": 12.731,
+      "ms_after_beep": 7731,
+      "source": "detected",
+      "interval_class": "split",
+      "interval_class_source": "auto",
+      "id": "cand-17"
     },
     {
       "shot_number": 11,
       "candidate_number": 18,
-      "time": 13.04,
-      "ms_after_beep": 8040,
-      "source": "detected"
+      "time": 13.042,
+      "ms_after_beep": 8042,
+      "source": "detected",
+      "interval_class": "split",
+      "interval_class_source": "auto",
+      "id": "cand-18"
     },
     {
       "shot_number": 12,
       "candidate_number": 19,
-      "time": 14.552,
-      "ms_after_beep": 9552,
-      "source": "detected"
+      "time": 14.553,
+      "ms_after_beep": 9553,
+      "source": "detected",
+      "interval_class": "transition",
+      "interval_class_source": "auto",
+      "id": "cand-19"
     },
     {
       "shot_number": 13,
       "candidate_number": 20,
       "time": 14.758,
       "ms_after_beep": 9758,
-      "source": "detected"
+      "source": "detected",
+      "interval_class": "split",
+      "interval_class_source": "auto",
+      "id": "cand-20"
     },
     {
       "shot_number": 14,
       "candidate_number": 21,
       "time": 14.916,
       "ms_after_beep": 9916,
-      "source": "detected"
+      "source": "detected",
+      "interval_class": "split",
+      "interval_class_source": "auto",
+      "id": "cand-21"
     }
   ],
   "stage_rounds": {
@@ -524,6 +566,28 @@
       }
     },
     {
+      "id": "1b1b003f21934f55800f37a1353fa01e",
+      "ts": "2026-05-11T10:29:18.171801+00:00",
+      "kind": "shot_detect_run",
+      "payload": {
+        "consensus": 2,
+        "kept_count": 15,
+        "seeded_shots": true,
+        "candidate_count": 22,
+        "expected_rounds": 12
+      }
+    },
+    {
+      "ts": "2026-05-11T10:42:31.163Z",
+      "kind": "marker_rejected",
+      "payload": {
+        "id": "cand-3",
+        "time": 6.0048,
+        "candidate_number": 3
+      }
+    },
+    {
+      "id": "a8faf9ef8d514595a6772cab5dba8d98",
       "ts": "2026-05-11T10:42:31.163Z",
       "kind": "marker_rejected",
       "payload": {
@@ -540,45 +604,91 @@
       }
     },
     {
+      "id": "03cea97e24e74d72a2b08e381cd30ecb",
+      "ts": "2026-05-11T10:42:55.874Z",
+      "kind": "save",
+      "payload": {
+        "shots_count": 14
+      }
+    },
+    {
       "ts": "2026-05-11T10:49:56.388Z",
+      "kind": "save",
+      "payload": {
+        "shots_count": 14
+      }
+    },
+    {
+      "id": "0fe3b450e8de46a7b6e69168bb220692",
+      "ts": "2026-05-11T10:49:56.388Z",
+      "kind": "save",
+      "payload": {
+        "shots_count": 14
+      }
+    },
+    {
+      "id": "8f6dc96c0fc042a98cf8cd34066c8073",
+      "ts": "2026-10-15T13:19:27.884Z",
+      "kind": "rise_foot_seat_all",
+      "payload": {
+        "moved": 10
+      }
+    },
+    {
+      "id": "7f9ca77180b84450aee743c3b8467933",
+      "ts": "2026-10-15T13:19:30.645Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-5",
+        "reason": "earlier_rise",
+        "to_time": 6.574,
+        "from_time": 6.59
+      }
+    },
+    {
+      "id": "6984de7f9e59414fa2dadc8d9c227475",
+      "ts": "2026-10-15T13:19:39.780Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-14",
+        "reason": "earlier_rise",
+        "to_time": 12.02,
+        "from_time": 12.033
+      }
+    },
+    {
+      "id": "551b51bc14db4b73a5cf699b98d232e2",
+      "ts": "2026-10-15T13:19:47.451Z",
       "kind": "save",
       "payload": {
         "shots_count": 14
       }
     }
   ],
-  "promoted_at": "2026-05-11T10:51:22.877893+00:00",
+  "promoted_at": "2026-10-15T13:26:05.831297+00:00",
   "provenance": {
     "stage_number": 6,
-    "stage_name": null
+    "stage_name": "H4"
   },
-  "source_video": "/Volumes/X9/raw/2026-blacksmith-handgun-open/martin/hand/IMG_2990.MOV",
+  "source_video": "/Volumes/X9/matches/blacksmith-handgun-open-2026/shooters/s_b3d21334/raw/IMG_2990.MOV",
   "fixture_window_in_source": [
     24.6762,
     44.5962
   ],
   "camera": {
-    "id": "unknown",
-    "make": null,
-    "model": null,
+    "id": "apple-iphone17pro",
+    "make": "Apple",
+    "model": "iPhone 17 Pro",
     "mount": "hand",
-    "position": "shooter",
+    "position": "squadmate",
     "audio_source": "internal",
     "agc_state": "unknown",
-    "sample_rate": null,
+    "sample_rate": 48000,
     "bit_depth": null,
-    "audio_codec": null
+    "audio_codec": "aac"
   },
   "shooter": {
     "id": "s36ed6e4e"
   },
-  "event_id": "blacksmith-handgun-open-2026:6:s36ed6e4e",
-  "review": {
-    "status": "needs_review",
-    "derived_from": null,
-    "reviewed_at": null,
-    "note": "shot times predate the rise-foot definition (docs/METHODOLOGY.md, 2026-10-10): check each shot's leading edge",
-    "previous_status": "reviewed",
-    "previous_reviewed_at": null
-  }
+  "event_id": "blacksmith-handgun-open-2026:6:s36ed6e4e"
 }
