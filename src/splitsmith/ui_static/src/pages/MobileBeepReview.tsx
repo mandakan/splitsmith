@@ -139,7 +139,10 @@ export function MobileBeepReview({ recheck = false, start = null, recheckHref }:
         <div className="mt-4 flex flex-col gap-2">
           <button
             type="button"
-            disabled={q.busy || !mediaAvailable || (item.beep_time == null && draft == null)}
+            // Looks right writes nothing, so it never waits on media.
+            disabled={
+              q.busy || (!(recheck && !changed) && (!mediaAvailable || (item.beep_time == null && draft == null)))
+            }
             onClick={doConfirm}
             className="btn-led-fill inline-flex min-h-11 items-center justify-center rounded-md px-5 disabled:opacity-40"
           >

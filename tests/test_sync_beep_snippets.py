@@ -166,6 +166,19 @@ def test_reviewed_video_gets_no_snippet_and_stale_one_is_removed(tmp_path: Path)
     assert not (out / f"{video.video_id}.peaks.json").exists()
 
 
+def test_a_reviewed_secondary_keeps_its_snippet_for_the_recheck(tmp_path: Path):
+    """The recheck pass over secondary beeps (2026-10-14) reviews confirmed
+    secondaries on the phone, which on a mirror plays only these snippets:
+    a secondary's stays after its beep is confirmed. A primary's goes."""
+    match_root, shooter_root, project, video = _seed(tmp_path, reviewed=True)
+    video.role = "secondary"
+    project.save(shooter_root)
+
+    report = generate_beep_snippets(match_root)
+    assert report.generated == 1 and report.removed == 0
+    assert (shooter_root / "beep_review" / f"{video.video_id}.m4a").exists()
+
+
 def test_missing_beep_uses_video_beep_window(tmp_path: Path):
     """No beep_time, no candidates, but the video carries a search window
     from a prior detection run - the snippet should be cut from that
