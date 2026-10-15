@@ -92,3 +92,18 @@ def test_a_download_with_the_wrong_hash_is_refused(fa, tmp_path, monkeypatch):
     assert "hash mismatch" in err
     assert not (tmp_path / "x.wav").exists()
     assert not list(tmp_path.glob("*.part"))
+
+
+def test_fetch_only_takes_the_named_wavs_and_reports_unknown_names(fa, tmp_path, monkeypatch):
+    """CI fetches the WAVs its tests read, not the whole corpus; a name the
+    manifest lacks is an error, never a silent skip."""
+    fa.save_manifest({"a.wav": {"sha256": "1" * 64, "bytes": 1}, "b.wav": {"sha256": "2" * 64, "bytes": 1}})
+    names = tmp_path / "ci.txt"
+    names.write_text("# read by the tests\na\n\nc.wav  # gone\n")
+    assert fa.read_names(names) == ["a.wav", "c.wav"]
+
+    served = []
+    monkeypatch.setattr(fa, "_download", lambda _u, name, _e: served.append(name))
+    errors = fa.fetch("https://x", only=fa.read_names(names))
+    assert served == ["a.wav"]
+    assert errors == ["c.wav: not in audio.lock.json"]

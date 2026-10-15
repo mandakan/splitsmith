@@ -1,6 +1,74 @@
 {
   "version": 1,
   "files": {
+    "beep-test.wav": {
+      "sha256": "27ba325bcd4f641160fe000b34a8580df561d4419975a5426161d1e5642df6ad",
+      "bytes": 1777704
+    },
+    "stage-shots-blacksmith-2026-stage1-s97dcec94-apple-iphone17pro.wav": {
+      "sha256": "8e662af7b8a7ab6ee2df12fe3879771c90811306969fd20504d0fc684cd3e290",
+      "bytes": 5058318
+    },
+    "stage-shots-blacksmith-2026-stage1-s97dcec94.wav": {
+      "sha256": "0dbb9760d5f600e29797405a0ced93702cc394115f7d5a11ba3b468293008b25",
+      "bytes": 4297004
+    },
+    "stage-shots-blacksmith-2026-stage2-s97dcec94-apple-iphone17pro.wav": {
+      "sha256": "92883edab0dc200e8bbffde0724f4bc47e13e500ba0eae2417569df60462bfb2",
+      "bytes": 2158542
+    },
+    "stage-shots-blacksmith-2026-stage2-s97dcec94.wav": {
+      "sha256": "35287d2b8d7a035c3f70aa814c75e1781cb19a3768f79eccfaeefcd0bf907c7e",
+      "bytes": 1390124
+    },
+    "stage-shots-blacksmith-2026-stage3-s97dcec94-apple-iphone17pro.wav": {
+      "sha256": "56b3a3656200dfcb54e1da0a307e4e85145f4e30b8d979b8ee418e2baaeb8f0a",
+      "bytes": 2118798
+    },
+    "stage-shots-blacksmith-2026-stage3-s97dcec94.wav": {
+      "sha256": "e46b4f7ed4a840b2da6632df07b805d80fe675d3a3c43a9964238331bceda733",
+      "bytes": 1289324
+    },
+    "stage-shots-blacksmith-2026-stage5-s97dcec94-apple-iphone17pro.wav": {
+      "sha256": "3f7fd1270154f16cfeedbf6491044f55e8cd40c60d44cb870cf3dcb823cb2214",
+      "bytes": 3198510
+    },
+    "stage-shots-blacksmith-2026-stage5-s97dcec94.wav": {
+      "sha256": "4b7eeb5da4615d97ae14ec155dfde814708ebb5f674923f63a7ac6ad0b6469bc",
+      "bytes": 2428844
+    },
+    "stage-shots-blacksmith-2026-stage6-s97dcec94-apple-iphone17pro.wav": {
+      "sha256": "538ae9f7065fd0d49d87dde2dcd0e200486f49981b5479b42f0e32b91a6c6779",
+      "bytes": 1652814
+    },
+    "stage-shots-blacksmith-2026-stage6-s97dcec94.wav": {
+      "sha256": "e898e5ed9ce0f9bee2c77d34fb9496321cf6df7023484a9a5e9740da879fc316",
+      "bytes": 1060844
+    },
+    "stage-shots-blacksmith-2026-stage7-s97dcec94-apple-iphone17pro.wav": {
+      "sha256": "920bdbc69c042f57bc9d2ee13e22032735aedc51802ebcd36fcfc4ef5d4dcc4f",
+      "bytes": 3041742
+    },
+    "stage-shots-blacksmith-2026-stage7-s97dcec94.wav": {
+      "sha256": "eeb16802e397c46f047ee520bfd0e1fba71026aa29cfa52dccbb3a8f53b08ef4",
+      "bytes": 2273326
+    },
+    "stage-shots-blacksmith-2026-stage8-s97dcec94-apple-iphone17pro.wav": {
+      "sha256": "075ccae5fa5864b2ed0650c51642d5ab8c3f1579614496dd29a784fed9503f8c",
+      "bytes": 3503886
+    },
+    "stage-shots-blacksmith-2026-stage8-s97dcec94.wav": {
+      "sha256": "ed4957df2a3ffeaa23235b97133a8ec7aaa9d6564514117779acea0175842901",
+      "bytes": 2734124
+    },
+    "stage-shots-blacksmith-handgun-open-2026-stage1-s0fe3d797.wav": {
+      "sha256": "207f50db5141bb31c2c0d5a52a0b8f09f5ef878219703f448d06ba49d0d0d52d",
+      "bytes": 4278190
+    },
+    "stage-shots-blacksmith-handgun-open-2026-stage1-s36ed6e4e.wav": {
+      "sha256": "71b04052afed10baf51a7edec67b301e18ff70296dd5c1f45ce684326577dbab",
+      "bytes": 3988942
+    },
     "stage-shots-blacksmith-handgun-open-2026-stage1-s97dcec94-apple-iphone17pro.wav": {
       "sha256": "c3a2fd7fd1839e29d63853514076cf7ac40732bb16ebaf9c5b7dac2afafc6419",
       "bytes": 5057678
@@ -8,6 +76,10 @@
     "stage-shots-blacksmith-handgun-open-2026-stage1-s97dcec94.wav": {
       "sha256": "7d6a4ee581449221065222ac91205fd6a563dbaaf2216d07d091ccd4a2d8523a",
       "bytes": 5066766
+    },
+    "stage-shots-blacksmith-handgun-open-2026-stage2-s0fe3d797.wav": {
+      "sha256": "b956abbd3c856a7490cf045c11931760e3140301efa1039eb99684e8f9e049d7",
+      "bytes": 2085966
     },
     "stage-shots-blacksmith-handgun-open-2026-stage2-s36ed6e4e.wav": {
       "sha256": "4945a80dbfa4503263f02432e97a454a6864371adc7d1c6ab89c86cc33656cd9",
@@ -21,6 +93,10 @@
       "sha256": "e6a73cc986adf897f0fab63578c9d9292e3cc2013449e8e545c00ea2343ea451",
       "bytes": 2158990
     },
+    "stage-shots-blacksmith-handgun-open-2026-stage3-s0fe3d797.wav": {
+      "sha256": "5b739191065b410d54eb6b33950244b45b163478bffa47cb80be4b70ddf89b76",
+      "bytes": 3131982
+    },
     "stage-shots-blacksmith-handgun-open-2026-stage3-s36ed6e4e.wav": {
       "sha256": "d8b891d2f981323dfeb11a7e25c8a56e6f7ee7f7426a487e422d4da8a9d91970",
       "bytes": 2450478
@@ -33,6 +109,10 @@
       "sha256": "9f0f03c65f2c78baf2b6a86460deed16f0f16ee175aff9d25802e203a29ccae4",
       "bytes": 2438190
     },
+    "stage-shots-blacksmith-handgun-open-2026-stage4-s0fe3d797.wav": {
+      "sha256": "e55753e427f234f1fddcb927355f99640b71b3fc73460bdd1edd7bbf30442088",
+      "bytes": 2773134
+    },
     "stage-shots-blacksmith-handgun-open-2026-stage4-s36ed6e4e.wav": {
       "sha256": "928c253f897dd95d2a3063e6fccb517c54a59b73d0d3e33d9697458e4f984747",
       "bytes": 2443662
@@ -40,6 +120,10 @@
     "stage-shots-blacksmith-handgun-open-2026-stage4-s97dcec94.wav": {
       "sha256": "c8c597f403431e8d0c920d2960f5c1184e87bced42bf1f5a6eb8a84c8738702c",
       "bytes": 2369166
+    },
+    "stage-shots-blacksmith-handgun-open-2026-stage5-s0fe3d797.wav": {
+      "sha256": "ac18e75a84bf21d04bba4fe7d9c8ea1dc7e2b9f38df8af054766435c096af935",
+      "bytes": 3100846
     },
     "stage-shots-blacksmith-handgun-open-2026-stage5-s36ed6e4e.wav": {
       "sha256": "36e71fc5d7eee0b5ef1aade570e989ca86b13c720e247bafc9efe0ae64b7c350",
@@ -53,6 +137,10 @@
       "sha256": "44fb84f714a51ace3959bbf085a1365fac94a04499b696308201d8b18e4ab874",
       "bytes": 3197518
     },
+    "stage-shots-blacksmith-handgun-open-2026-stage6-s0fe3d797.wav": {
+      "sha256": "7338e3a93137cb906ad2062eb744b1038631ca884ba8dad607607404aa27ba98",
+      "bytes": 1942766
+    },
     "stage-shots-blacksmith-handgun-open-2026-stage6-s36ed6e4e.wav": {
       "sha256": "0794aa376d5923f34cc1088cb3521fbeac8864bab4793383585b1e5f3b8ae9ae",
       "bytes": 1913358
@@ -64,6 +152,10 @@
     "stage-shots-blacksmith-handgun-open-2026-stage6-s97dcec94.wav": {
       "sha256": "f8bd1a1ffd5b27eb88a759d9cf6e0c86fbddabf784727054b351b7f48edde3cf",
       "bytes": 1777838
+    },
+    "stage-shots-blacksmith-handgun-open-2026-stage7-s0fe3d797.wav": {
+      "sha256": "248b6930870afabec4b75b32061c93ede456fa65eb3d2b3395c867f5bfbd775a",
+      "bytes": 3143182
     },
     "stage-shots-blacksmith-handgun-open-2026-stage7-s36ed6e4e.wav": {
       "sha256": "1067a2952ee424758449e859dfc80d821823e75e7b204cd607d2a6c093ccdefe",
@@ -77,6 +169,10 @@
       "sha256": "219d8c7b30570e602792ac1572ef87c333f7bfaf01eacc5d6a8d7093b02bb850",
       "bytes": 3042318
     },
+    "stage-shots-blacksmith-handgun-open-2026-stage8-s0fe3d797.wav": {
+      "sha256": "d7335cfe50dbceb90fb495633511e7364d6fbb64ebc27f95a844e801a5f18904",
+      "bytes": 3478830
+    },
     "stage-shots-blacksmith-handgun-open-2026-stage8-s36ed6e4e.wav": {
       "sha256": "3293bb00f3880d1c442c4d8e2627a26ecbb59912e8d920a84e5d077fc7f5c9b6",
       "bytes": 3182702
@@ -88,6 +184,78 @@
     "stage-shots-blacksmith-handgun-open-2026-stage8-s97dcec94.wav": {
       "sha256": "775794e3d41426be2f26ffeeb28ed84fa43086a96c44d2f322688eec32bec223",
       "bytes": 3503342
+    },
+    "stage-shots-bofors-bombardment-2026-stage1-s0fe3d797.wav": {
+      "sha256": "34f7a9a4575e4fd79a3157587da19b12224114e332d357616f568f98a9b843dc",
+      "bytes": 2963406
+    },
+    "stage-shots-bofors-bombardment-2026-stage1-s36ed6e4e.wav": {
+      "sha256": "d3bcbab8afa711027c84d1113d17bcbf5ec713e693ec4ee9211c05b0ed935131",
+      "bytes": 3102958
+    },
+    "stage-shots-bofors-bombardment-2026-stage2-s0fe3d797.wav": {
+      "sha256": "d287d6483eff7d42794e1cb108a3bfdefd9b06e644a1c9b3e7bbfb68655e5cef",
+      "bytes": 2351054
+    },
+    "stage-shots-bofors-bombardment-2026-stage2-s36ed6e4e.wav": {
+      "sha256": "b73f72a226509c92f498fed460c1af068a734a4690766d285414ee82c257aecb",
+      "bytes": 2153678
+    },
+    "stage-shots-bofors-bombardment-2026-stage3-s0fe3d797.wav": {
+      "sha256": "86489f79076d8f1cb249968366e4d6653c5b22c1fd6b3cb26af13c2d3a009b0a",
+      "bytes": 1781710
+    },
+    "stage-shots-bofors-bombardment-2026-stage3-s36ed6e4e.wav": {
+      "sha256": "92b89d27d7c4e0740e8b5e2b8844a810c254a7f50a749dd841d0f849ec78d87b",
+      "bytes": 1591534
+    },
+    "stage-shots-bofors-bombardment-2026-stage4-s0fe3d797.wav": {
+      "sha256": "701d1961d2d9db1509a9f88b506a32b963eff79a0c7a5fa1b0cb27434fd008f1",
+      "bytes": 5162958
+    },
+    "stage-shots-bofors-bombardment-2026-stage4-s36ed6e4e.wav": {
+      "sha256": "446daf95b1def8164c6473663ce61fa592bcfeb7235445180b02f6404882d02c",
+      "bytes": 2265646
+    },
+    "stage-shots-bofors-bombardment-2026-stage5-s0fe3d797.wav": {
+      "sha256": "57146f82480723e65878f2aabfa806e7e6a90c2dc4778e959b528312ce14c8b9",
+      "bytes": 3499982
+    },
+    "stage-shots-bofors-bombardment-2026-stage5-s36ed6e4e.wav": {
+      "sha256": "ecfd6d341b987bd1353c61f3b8baf401066fd94111ec4d7f1992c2d3f52a0433",
+      "bytes": 3186542
+    },
+    "stage-shots-bofors-bombardment-2026-stage6-s0fe3d797.wav": {
+      "sha256": "1a7287ab417f84558a7b160e86e803a0d6f3349905cd25d488a0d45feee3d710",
+      "bytes": 3713070
+    },
+    "stage-shots-bofors-bombardment-2026-stage6-s36ed6e4e.wav": {
+      "sha256": "77807a2e5084e6654ad062a32feac1f9a2fad1e7a20f35cf1992a7d2244249bb",
+      "bytes": 3709678
+    },
+    "stage-shots-bofors-bombardment-2026-stage7-s0fe3d797.wav": {
+      "sha256": "e8fdb35da906f4aad35d0f1d98c117ba2a99baa2ebd5b350b45e11d6bffcf2c6",
+      "bytes": 2779086
+    },
+    "stage-shots-bofors-bombardment-2026-stage7-s36ed6e4e.wav": {
+      "sha256": "faa39dbfc89b86f2cf99f268fa710dc61e5c282e0da16c0da86f92092d23c0c5",
+      "bytes": 2875982
+    },
+    "stage-shots-bofors-bombardment-2026-stage8-s0fe3d797.wav": {
+      "sha256": "544f5748552ae9e91edf784f804baf9a50dcf4707d07dc45a0aa938f0e335e1e",
+      "bytes": 2082766
+    },
+    "stage-shots-bofors-bombardment-2026-stage8-s36ed6e4e.wav": {
+      "sha256": "5ccb3a1d53a9bf27e9c486d4dc4e207e1ed14bc1dd072eaff7dabbdfd90366d6",
+      "bytes": 1777966
+    },
+    "stage-shots-bofors-bombardment-2026-stage9-s0fe3d797.wav": {
+      "sha256": "c0400e6005c77c87a0d79b3beba1cb9ba3aa2d08153210eb903db3688e3230f5",
+      "bytes": 2281422
+    },
+    "stage-shots-bofors-bombardment-2026-stage9-s36ed6e4e.wav": {
+      "sha256": "0448b51d446e0e869807dda743adef5abbfc7f8d7a55f137c630818c071dfb4f",
+      "bytes": 2384782
     },
     "stage-shots-hfo-masters-2026-stage1-s0fe3d797.wav": {
       "sha256": "db0374face497985683fd4a39255ef1b117cfe946703d508e9728d827c0cd462",
@@ -101,17 +269,73 @@
       "sha256": "e9e3af83accfc15e8b7e61f97554a8d3670f028077659e1b5e7ec054ebcd0977",
       "bytes": 2149294
     },
+    "stage-shots-hfo-masters-2026-stage1-s97dcec94.wav": {
+      "sha256": "24bac0e83fe2bc684a057684614fa198eb39b73d32c827362b29141749a042af",
+      "bytes": 2306830
+    },
+    "stage-shots-hfo-masters-2026-stage1-s9c1a2e74.wav": {
+      "sha256": "5f7e0f9e43b3623d06ecaaa6f13742636b64ce2f440977a4f05c15063c84c55a",
+      "bytes": 2122350
+    },
+    "stage-shots-hfo-masters-2026-stage10-s0fe3d797.wav": {
+      "sha256": "995c4a9c9ea09318e3cede1b7d424805eb5886b44ff3af133262f98210686872",
+      "bytes": 3680206
+    },
+    "stage-shots-hfo-masters-2026-stage10-s36ed6e4e.wav": {
+      "sha256": "16fc69ed6d2cfafe578d4ab51f2e2226e1954ab50833ce712f9405f6ad18cff3",
+      "bytes": 3791438
+    },
     "stage-shots-hfo-masters-2026-stage10-s97dcec94-go3s.wav": {
       "sha256": "2affc707bc0efe7839723a7d559c5e6fe188ebbac9013d25ede14676e0ca7f87",
       "bytes": 3716622
+    },
+    "stage-shots-hfo-masters-2026-stage10-s97dcec94.wav": {
+      "sha256": "b95ba310744ed468c9939e31281626b2a96b3b7957ca07f19e6293e0a6f9f0c7",
+      "bytes": 3720526
+    },
+    "stage-shots-hfo-masters-2026-stage10-s9c1a2e74.wav": {
+      "sha256": "c1bd36f3e3002ed7fd36577c490fb010272fa4efff50c2b9ea4c5530189c5edd",
+      "bytes": 4012494
+    },
+    "stage-shots-hfo-masters-2026-stage11-s0fe3d797.wav": {
+      "sha256": "a7449f1035bd93e993b70d3ce366c62df46b025508a0044e0bd3388a18c97dbe",
+      "bytes": 3524558
+    },
+    "stage-shots-hfo-masters-2026-stage11-s36ed6e4e.wav": {
+      "sha256": "d6e68b42cc875a02e4529a968cef01fa3399d564d08956203b548ee9358d20fa",
+      "bytes": 3448398
     },
     "stage-shots-hfo-masters-2026-stage11-s97dcec94-go3s.wav": {
       "sha256": "46f14652519a253164cb94343cc102eb1948e9c08730b34716cb97eacd7f00b1",
       "bytes": 3379470
     },
+    "stage-shots-hfo-masters-2026-stage11-s97dcec94.wav": {
+      "sha256": "83b9efae3ff4270b1fe226e9675973be1fa4bfd6ae93fda87b02a32ba0a629b7",
+      "bytes": 3381582
+    },
+    "stage-shots-hfo-masters-2026-stage11-s9c1a2e74.wav": {
+      "sha256": "76ae95953a4436d893681bff88cf622238580e18499c0ea40c3d9899a0d35f9c",
+      "bytes": 3564078
+    },
+    "stage-shots-hfo-masters-2026-stage12-s0fe3d797.wav": {
+      "sha256": "bcff14598612cbeb7bae41dd350389a97fa01545429cf96644068412d9904e06",
+      "bytes": 3438446
+    },
+    "stage-shots-hfo-masters-2026-stage12-s36ed6e4e.wav": {
+      "sha256": "2ea5d79c812cedb011b2c39722dfad2e29b9384e4aca3d7de442497c68b80451",
+      "bytes": 3201742
+    },
     "stage-shots-hfo-masters-2026-stage12-s97dcec94-go3s.wav": {
       "sha256": "c14a063654ea5e11172230a97784cdadd16338ad2e66e3b4e83e700475f4552f",
       "bytes": 3219630
+    },
+    "stage-shots-hfo-masters-2026-stage12-s97dcec94.wav": {
+      "sha256": "bd82239d8f4d6a84d6aef26d178438fe1082dd299afd95b9797e0f4c154ce329",
+      "bytes": 3417582
+    },
+    "stage-shots-hfo-masters-2026-stage12-s9c1a2e74.wav": {
+      "sha256": "c9adff27e6e3bc021e15a28adf9cd3142e12024b67a152e61578544a58570c2d",
+      "bytes": 2888238
     },
     "stage-shots-hfo-masters-2026-stage2-s0fe3d797.wav": {
       "sha256": "2a623cc54666d105f90cf378dcc38770811c155a3715624c711844e2668bde44",
@@ -125,25 +349,73 @@
       "sha256": "bc2d4014eb42ade45beb174124cd6b9b22f65ae2a11ed633d8c9e77f913bbf93",
       "bytes": 2531406
     },
+    "stage-shots-hfo-masters-2026-stage2-s97dcec94.wav": {
+      "sha256": "cccf0b8cb270742f973f8e92786452872ffeca5e93b1b55036046382f73d637c",
+      "bytes": 2810638
+    },
     "stage-shots-hfo-masters-2026-stage2-s9c1a2e74.wav": {
       "sha256": "2a86693704abbfb94aff54685cb3d86824d3284be4248676958a0d45f51f8334",
       "bytes": 2490158
+    },
+    "stage-shots-hfo-masters-2026-stage3-s0fe3d797.wav": {
+      "sha256": "2423251adf948ac0fb28724c56c6424df360d838b53f7c99f09a311707e284cb",
+      "bytes": 2975694
+    },
+    "stage-shots-hfo-masters-2026-stage3-s36ed6e4e.wav": {
+      "sha256": "c9acaf53b8a21ae694331a2140044ea90d6f9dfa20f997ce556c1fa07e4a9e9b",
+      "bytes": 2058798
     },
     "stage-shots-hfo-masters-2026-stage3-s97dcec94-go3s.wav": {
       "sha256": "6ba473887859ad9a5000816b4100fda071468d355133d2dd980ab34bd2f8d80a",
       "bytes": 1854702
     },
+    "stage-shots-hfo-masters-2026-stage3-s97dcec94.wav": {
+      "sha256": "ef5d42b7806dd4aa7c7337630b6ba924824b3602b3f87ec77ee2267695bb2226",
+      "bytes": 1856430
+    },
     "stage-shots-hfo-masters-2026-stage3-s9c1a2e74.wav": {
       "sha256": "3109ac171e320718ad832a1b7f0aeb1770bb1a85ee128abb60a6eb21f183f9be",
       "bytes": 1911182
+    },
+    "stage-shots-hfo-masters-2026-stage4-s0fe3d797.wav": {
+      "sha256": "c7c0ab0d35d34cfb4c58511d20d590c6c88666e1fc5f9d0d2c9c5146f8ab48d9",
+      "bytes": 3483598
+    },
+    "stage-shots-hfo-masters-2026-stage4-s36ed6e4e.wav": {
+      "sha256": "4005181801dc8ca86a9db1e2055eebe2d140b52251e8bbe7a464d220a542f3fa",
+      "bytes": 3679918
     },
     "stage-shots-hfo-masters-2026-stage4-s97dcec94-go3s.wav": {
       "sha256": "3a469b2777b2fbb5e70f143df083015a279204bfc9259b2d97a7b1583ded2f20",
       "bytes": 3680046
     },
+    "stage-shots-hfo-masters-2026-stage4-s97dcec94.wav": {
+      "sha256": "2b9c9d287d55725fef10aa6cbb815dc01ad5d0036a056994fd3c64b36e0efbdb",
+      "bytes": 3768654
+    },
+    "stage-shots-hfo-masters-2026-stage4-s9c1a2e74.wav": {
+      "sha256": "ec2715c45caaded6118d4fd8da22b1abc97ef50979b77e268498abb67bb271c3",
+      "bytes": 3652878
+    },
+    "stage-shots-hfo-masters-2026-stage5-s0fe3d797.wav": {
+      "sha256": "2c516fb4682d2c003c18c196cb0ae019d800fe4dd46ca60992c324d3ed8b0160",
+      "bytes": 2312142
+    },
+    "stage-shots-hfo-masters-2026-stage5-s36ed6e4e.wav": {
+      "sha256": "756f4b28c1c1e16c30b90f734de31a1cdb95c803b665644e11bfbef3d6f94000",
+      "bytes": 2731246
+    },
     "stage-shots-hfo-masters-2026-stage5-s97dcec94-go3s.wav": {
       "sha256": "dc8387e7dbd280dafc37bb973cade032a7965e0c1bba1650cd5a9e13dc07fb51",
       "bytes": 2604110
+    },
+    "stage-shots-hfo-masters-2026-stage5-s97dcec94.wav": {
+      "sha256": "1962de9b2cd273da67bc3057e29a372ac92affe2ed4fabce51c3572364c3f320",
+      "bytes": 2885358
+    },
+    "stage-shots-hfo-masters-2026-stage5-s9c1a2e74.wav": {
+      "sha256": "4e6bd9738dffbaec4aa63bdd5554305264d0f633062bff827f2a802ac9999665",
+      "bytes": 2678382
     },
     "stage-shots-hfo-masters-2026-stage6-s0fe3d797.wav": {
       "sha256": "20b21c29231f050254f32196ec77f033419df5f06d7de2e03bc1f9b9a6e0e289",
@@ -157,6 +429,18 @@
       "sha256": "11faabd5e9addadebd25ceceed39934b6867edae5366416ed0efafc37bdfdf52",
       "bytes": 2621102
     },
+    "stage-shots-hfo-masters-2026-stage6-s97dcec94.wav": {
+      "sha256": "c55cfbaca7665ae1475ac396ba4f4ed5bd48ff847a476d2e650e30bb6766f4d1",
+      "bytes": 2711214
+    },
+    "stage-shots-hfo-masters-2026-stage6-s9c1a2e74.wav": {
+      "sha256": "f0ec57f494be2e8da064fb3582ed4f6df55932dda802dd1b74c9720317365fba",
+      "bytes": 2371534
+    },
+    "stage-shots-hfo-masters-2026-stage7-s0fe3d797.wav": {
+      "sha256": "b7b2a68282d185d1502ccc316880f9fc6421a2d95058e50fdd9ac5e77cb39119",
+      "bytes": 1675214
+    },
     "stage-shots-hfo-masters-2026-stage7-s36ed6e4e.wav": {
       "sha256": "decc3c35b2a8b5f20f97c147947514cbe1dc0354670f585eda308ed8fef2190e",
       "bytes": 2171342
@@ -165,21 +449,61 @@
       "sha256": "0eca96362700226855fdd555b7494a644b7151c5f9d503e621c5ea09bb52d069",
       "bytes": 2270478
     },
+    "stage-shots-hfo-masters-2026-stage7-s97dcec94.wav": {
+      "sha256": "9e803a70f2e0a1018d77070dc26266d09bb853ffffd275c4012f06b290708bf3",
+      "bytes": 2017902
+    },
+    "stage-shots-hfo-masters-2026-stage7-s9c1a2e74.wav": {
+      "sha256": "7ac186e59acc5bbc5113dcf54de7a93c0840227223b3385c10357cb8abd12853",
+      "bytes": 1685454
+    },
+    "stage-shots-hfo-masters-2026-stage8-s0fe3d797.wav": {
+      "sha256": "d0b88f3d34d6e79ee964b851962518c1f2445bcbfb18ddb3b854959a08dbb7d1",
+      "bytes": 2709454
+    },
+    "stage-shots-hfo-masters-2026-stage8-s36ed6e4e.wav": {
+      "sha256": "49e76f45040520c23db1eb022c405d86d0784a04ad24ca12a658382191bc04f4",
+      "bytes": 3107310
+    },
     "stage-shots-hfo-masters-2026-stage8-s97dcec94-go3s.wav": {
       "sha256": "74b4f8e21d9038e9079b46abcf66eabe4842cba9d17c6051398e31548648e156",
       "bytes": 3258222
+    },
+    "stage-shots-hfo-masters-2026-stage8-s97dcec94.wav": {
+      "sha256": "f9909d8ffc21d2579745cd1c7373e05b991f37ab4edf54c581073177a6ec085c",
+      "bytes": 3261262
     },
     "stage-shots-hfo-masters-2026-stage8-s9c1a2e74.wav": {
       "sha256": "d80e1033dc6dfb53fea3e9d83ff01b074592a0f3a4b504902a3f52906dd889b5",
       "bytes": 2826190
     },
+    "stage-shots-hfo-masters-2026-stage9-s0fe3d797.wav": {
+      "sha256": "f8f5d9a92fa94d6c7c72a74924e27cf9ed66f27b578d723ebc98914e2f608bb0",
+      "bytes": 1937358
+    },
+    "stage-shots-hfo-masters-2026-stage9-s36ed6e4e.wav": {
+      "sha256": "103c4ea4aecab84bf9e03efbd875851cc671490d60b384c7089dafaacda2a22f",
+      "bytes": 2062254
+    },
     "stage-shots-hfo-masters-2026-stage9-s97dcec94-go3s.wav": {
       "sha256": "addaabd3308ec7b0f637e5f67575fcb107c13e2173d527767e92ac527db1ae53",
       "bytes": 2333838
     },
+    "stage-shots-hfo-masters-2026-stage9-s97dcec94.wav": {
+      "sha256": "e0a5d12722023ed7037c761e71be7cae1760773102a8fc10db017e327c4c4d02",
+      "bytes": 2334414
+    },
+    "stage-shots-hfo-masters-2026-stage9-s9c1a2e74.wav": {
+      "sha256": "847c7ad47d7443cbe019b2948368ce19e37725796c16b99f60ab1f2c38b43850",
+      "bytes": 2274382
+    },
     "stage-shots-hostfinalen-xi-2026-stage1-s0fe3d797-apple-iphone17promax.wav": {
       "sha256": "bdd4a80bc81ac2679312fcc1bf750349555df113d2df1525f9a146f630d73bc6",
       "bytes": 1945998
+    },
+    "stage-shots-hostfinalen-xi-2026-stage1-s0fe3d797.wav": {
+      "sha256": "faa479c9680c46bf6a757fa7bdc81cc161f966b3cff23f8ec14f1a7fa6dd3f16",
+      "bytes": 2296046
     },
     "stage-shots-hostfinalen-xi-2026-stage1-s36ed6e4e-apple-iphone17pro.wav": {
       "sha256": "acf887da565f47d021ffb829a4998a2391a892b55d493911559717b4303b95bb",
@@ -193,9 +517,17 @@
       "sha256": "2643baae2584c003cd94de623d43ac38d61f0b4b2b212fd6120db8e7abe5b636",
       "bytes": 2178222
     },
+    "stage-shots-hostfinalen-xi-2026-stage1-s97dcec94.wav": {
+      "sha256": "930c8090cc78f6cefc992567c6b731e6455e6c5da1a5bea1f3e1a701ffc1e3d3",
+      "bytes": 2263246
+    },
     "stage-shots-hostfinalen-xi-2026-stage2-s0fe3d797-apple-iphone17promax.wav": {
       "sha256": "b12cf14974bfbb22a02d267ce2ab4bf816e67663bea78e42e6ab9c35d4c06709",
       "bytes": 3212558
+    },
+    "stage-shots-hostfinalen-xi-2026-stage2-s0fe3d797.wav": {
+      "sha256": "f6d762af5695227bc25e41a8cac445cdfc385667912aedc6149ff50d81abfe7f",
+      "bytes": 3710190
     },
     "stage-shots-hostfinalen-xi-2026-stage2-s36ed6e4e-apple-iphone17pro.wav": {
       "sha256": "b2972fad15d1f14531e327016a70c70af847bae8b54da8f77012915beec55f99",
@@ -209,6 +541,10 @@
       "sha256": "de2bff5b647e9471cf12f6dd7e770abda82988af82e1b32155580cee4672113d",
       "bytes": 3321774
     },
+    "stage-shots-hostfinalen-xi-2026-stage2-s97dcec94.wav": {
+      "sha256": "b849fc14a2688e30d6b4881d94ea5100958bde4a2e8308db381a3f050880e048",
+      "bytes": 3684526
+    },
     "stage-shots-hostfinalen-xi-2026-stage3-s0fe3d797-apple-iphone17promax.wav": {
       "sha256": "826d265b393c392250884c94e6c3fefafbae52cbd63209d26956bce7b7037993",
       "bytes": 2416110
@@ -216,6 +552,10 @@
     "stage-shots-hostfinalen-xi-2026-stage3-s0fe3d797-samsung.wav": {
       "sha256": "7bf4e681dded50e653e117243017540cbe85bae4a1cfe11db53078ebf4feee69",
       "bytes": 2908590
+    },
+    "stage-shots-hostfinalen-xi-2026-stage3-s0fe3d797.wav": {
+      "sha256": "2ba3e4bcc7e062b35884b84710f01395bd01516fc479a03923c1673baa934e0e",
+      "bytes": 2909166
     },
     "stage-shots-hostfinalen-xi-2026-stage3-s36ed6e4e-apple-iphone17pro.wav": {
       "sha256": "78f231914e952fe91aac48da3b4a1643f453dbf56763e30eddde6c32cea23fc4",
@@ -237,6 +577,10 @@
       "sha256": "da9f7010f5d301c5af93b230e0d8fca379cda8f3babedbae673d236debe6c94d",
       "bytes": 1651918
     },
+    "stage-shots-hostfinalen-xi-2026-stage3-s97dcec94.wav": {
+      "sha256": "acffd71d0f9b4cdc5da2e3bf64f47e864a2916e87284e891ab0c7644e26b6b5a",
+      "bytes": 2127054
+    },
     "stage-shots-hostfinalen-xi-2026-stage4-s0fe3d797-apple-iphone17promax.wav": {
       "sha256": "cf2c20ee21c17d7703d7f3638640a55144ceddab2772f2bd6c337efc850731ac",
       "bytes": 2589998
@@ -244,6 +588,10 @@
     "stage-shots-hostfinalen-xi-2026-stage4-s0fe3d797-samsung.wav": {
       "sha256": "60dd27a0b4cba0945a8f45ceae25a613ead0c821c5951a1034ee9d76baaa6c4a",
       "bytes": 2672718
+    },
+    "stage-shots-hostfinalen-xi-2026-stage4-s0fe3d797.wav": {
+      "sha256": "dbe67c88d3ee1f571da6b041a5213f221715a9bdd41974f4404e35cf5f626387",
+      "bytes": 3066350
     },
     "stage-shots-hostfinalen-xi-2026-stage4-s36ed6e4e-samsung.wav": {
       "sha256": "139358acde260ec79b9f4da7ec0bd9ccba3c23290929d945920db4f685e45cb5",
@@ -257,6 +605,10 @@
       "sha256": "da0889e458991ccdaa00ac3845781ecbe6cdf93901c300caad56bcd23aa643f5",
       "bytes": 2249038
     },
+    "stage-shots-hostfinalen-xi-2026-stage4-s97dcec94.wav": {
+      "sha256": "da4a4092dff47de4b91bf79428295b145bce96b18c9213e2068954849c23eadb",
+      "bytes": 2489070
+    },
     "stage-shots-hostfinalen-xi-2026-stage5-s0fe3d797-apple-iphone17promax.wav": {
       "sha256": "66a7e9ef2c7d0d74c1cd90be0df4a8215517c7a2cc1bb86697df6b50517e1eb7",
       "bytes": 3889838
@@ -264,6 +616,10 @@
     "stage-shots-hostfinalen-xi-2026-stage5-s0fe3d797-samsung.wav": {
       "sha256": "1fb3601b9ea07ef1d4ba4346b5a16adc9ebf80b8ddc734182851807eb79098fe",
       "bytes": 4147534
+    },
+    "stage-shots-hostfinalen-xi-2026-stage5-s0fe3d797.wav": {
+      "sha256": "aa25f42187f7cc5c451f5733aa567089234a1f7e3b5f158d23ed165e44b95f87",
+      "bytes": 4256142
     },
     "stage-shots-hostfinalen-xi-2026-stage5-s36ed6e4e-apple-iphone17pro.wav": {
       "sha256": "9f1cdb489d6d046c83dba572baaef1e893859ed6b995c2211dbb951f407469bc",
@@ -277,9 +633,17 @@
       "sha256": "cf33ac922f9cda945ef425b7123d4b36188ac0f26a5133b58dd89a8be92b0dfa",
       "bytes": 4023150
     },
+    "stage-shots-hostfinalen-xi-2026-stage5-s97dcec94.wav": {
+      "sha256": "10f8fa39926e41ffd0d3ece8397bc258e0b49fd5eb29137df64b4aa8d7156cf9",
+      "bytes": 4075310
+    },
     "stage-shots-hostfinalen-xi-2026-stage6-s0fe3d797-samsung.wav": {
       "sha256": "2a4f4df4962aa605c0d2286356edf9850a7c1a28540e8a3618a234a1f0c7bbd2",
       "bytes": 3739020
+    },
+    "stage-shots-hostfinalen-xi-2026-stage6-s0fe3d797.wav": {
+      "sha256": "762ee19b571ca4e585bab041575b83564abd1207d807575caf0e94d8f54ff1ea",
+      "bytes": 3889006
     },
     "stage-shots-hostfinalen-xi-2026-stage6-s36ed6e4e-samsung.wav": {
       "sha256": "4c33f37cd77b5c9a6c1b6c546595dd766af24ae8d62941da8f07409dbcb5c21d",
@@ -297,9 +661,17 @@
       "sha256": "fad2534d1ed8fe318d9157f4705b4519b680d220f2368714950b6115f40b67e9",
       "bytes": 3042318
     },
+    "stage-shots-hostfinalen-xi-2026-stage6-s97dcec94.wav": {
+      "sha256": "f0d7ee48b8c72027dacf1fa9ce8e48256bc90f1c149192f528a0596dc5a48cc8",
+      "bytes": 3321934
+    },
     "stage-shots-hostfinalen-xi-2026-stage7-s0fe3d797-apple-iphone17promax.wav": {
       "sha256": "c45a7687d818ddf9b5206c0612829f4f2173442b7477e4d36815b739e96016bd",
       "bytes": 4603758
+    },
+    "stage-shots-hostfinalen-xi-2026-stage7-s0fe3d797.wav": {
+      "sha256": "278dbe3a8badaa2aca2869eaa45992b97e3cbad68d137348777a59ac11ac7a32",
+      "bytes": 5050126
     },
     "stage-shots-hostfinalen-xi-2026-stage7-s36ed6e4e-apple-iphone17pro.wav": {
       "sha256": "5c88c2b192b40b782a9a0de1955fa8eda702002eb08b3e91e9d96a59d741f895",
@@ -324,6 +696,10 @@
     "stage-shots-hostfinalen-xi-2026-stage8-s0fe3d797-samsung.wav": {
       "sha256": "8c69746fced0955c7ba1c12a4e9a518284b5ae6f3f3eb17365cc8e18e808c51a",
       "bytes": 2404078
+    },
+    "stage-shots-hostfinalen-xi-2026-stage8-s0fe3d797.wav": {
+      "sha256": "5e2709d88b058884f132d9e176e4f691026e92ef8facdc1cabf5070e30b445db",
+      "bytes": 2409678
     },
     "stage-shots-hostfinalen-xi-2026-stage8-s36ed6e4e-apple-iphone17pro.wav": {
       "sha256": "43ca7d8e419eaba5e46c1759e5e8a4ff477d76eefc08e07bc14ba4774a78e072",
@@ -553,9 +929,129 @@
       "sha256": "ac225d97764429cb4fd77f9c5856c1cee79746281cc3d8594e09888bc16fd8ba",
       "bytes": 3379150
     },
+    "stage-shots-tallmilan-2026-stage1-s36ed6e4e.wav": {
+      "sha256": "d45c1e891279a23807e7da044fbc76e6da852e32f2b2f5b7236adfb04220b1cc",
+      "bytes": 4954062
+    },
+    "stage-shots-tallmilan-2026-stage2-s36ed6e4e.wav": {
+      "sha256": "d34673661f46095dff0903a1cd2e910f81ba91ebdfaad053fb42a41591d6057c",
+      "bytes": 2765070
+    },
+    "stage-shots-tallmilan-2026-stage2-s97dcec94-apple-iphone17pro.wav": {
+      "sha256": "afc9dcac5a2666811c68f702afc4eb040c1abd9e50d76a449a9c62e190167ef4",
+      "bytes": 3168782
+    },
+    "stage-shots-tallmilan-2026-stage2-s97dcec94.wav": {
+      "sha256": "f00eb8b38bf14226d4fb882949e56bf97eb5d2f3ec96d17c3e3432f5b2927119",
+      "bytes": 2636204
+    },
+    "stage-shots-tallmilan-2026-stage3-s36ed6e4e.wav": {
+      "sha256": "686f3278457e0cc39b4ef760d3e0f5d8950102c5a0bda96b37218799a20d7571",
+      "bytes": 1949678
+    },
+    "stage-shots-tallmilan-2026-stage3-s97dcec94.wav": {
+      "sha256": "bb63817fa87b3ec81b6a6e548c7461566e4a5cca72cef0f37ea1ecc6de302312",
+      "bytes": 1607086
+    },
+    "stage-shots-tallmilan-2026-stage4-s36ed6e4e.wav": {
+      "sha256": "ae600237f8c307a577544cc02f200a910af74f66d5146e7585f5e0a062a8cffa",
+      "bytes": 3163310
+    },
     "stage-shots-tallmilan-2026-stage4-s97dcec94-apple-iphone17pro-9e5155.wav": {
       "sha256": "519b6f8cc10061b37fc07d09436de051d88ae2894f4f293b52e17c348ef3b7b1",
       "bytes": 3098094
+    },
+    "stage-shots-tallmilan-2026-stage4-s97dcec94-apple-iphone17pro.wav": {
+      "sha256": "ad5879a84c6797a2f87710540c738f6e715982141d4060ae1300311c7df169d2",
+      "bytes": 2750094
+    },
+    "stage-shots-tallmilan-2026-stage4-s97dcec94.wav": {
+      "sha256": "3a82a93493b0f7fa1ade667bfa249751a63c2a2a620eebc3949759f461053858",
+      "bytes": 3102830
+    },
+    "stage-shots-tallmilan-2026-stage5-s36ed6e4e.wav": {
+      "sha256": "cc8b6a93e9b3ec39843794eefc1278c9080e3f2270105d6f89231eb0130f898b",
+      "bytes": 3122702
+    },
+    "stage-shots-tallmilan-2026-stage5-s97dcec94-apple-iphone17pro.wav": {
+      "sha256": "e9d8683b3a9fe5af1100b37bb3b932cd714a730c8379898f9559ddaf05a86fad",
+      "bytes": 2731982
+    },
+    "stage-shots-tallmilan-2026-stage5-s97dcec94.wav": {
+      "sha256": "510c0604b989d3e6ec8b6ab010f105a91d52bae5ef9b5a5a152127b2104a8170",
+      "bytes": 2544044
+    },
+    "stage-shots-tallmilan-2026-stage6-s36ed6e4e.wav": {
+      "sha256": "82307f47f63cdf7afd26eb0af40e820522569befbea8a9d593e866fb389be58b",
+      "bytes": 2617582
+    },
+    "stage-shots-tallmilan-2026-stage6-s97dcec94-apple-iphone17pro.wav": {
+      "sha256": "adb8c83b3c734c978f26884c6fa9ffdec84ceb40d7312fcfa518315f0624724c",
+      "bytes": 2450766
+    },
+    "stage-shots-tallmilan-2026-stage6-s97dcec94.wav": {
+      "sha256": "10e5f89545022c225a20e48d7edf977b652fd93601d5335dc5f4d4ed20e76cbc",
+      "bytes": 1682924
+    },
+    "stage-shots-tallmilan-2026-stage7-s36ed6e4e.wav": {
+      "sha256": "48e354305a4f0ece2728a8b36b7c89b1e0b32ed268c3a7789340b18b3abfa9e8",
+      "bytes": 2479918
+    },
+    "stage-shots-tallmilan-2026-stage7-s97dcec94-apple-iphone17pro.wav": {
+      "sha256": "654c400b21aa57e7837929b09e4d6edb109acb6c6cecf40001cef814ed2a9fa8",
+      "bytes": 2595150
+    },
+    "stage-shots-tallmilan-2026-stage7-s97dcec94.wav": {
+      "sha256": "0086316c5dbd21df969a17abfa0491307453fe1f2f231a274b518565c03e2391",
+      "bytes": 1828844
+    },
+    "stage-shots-vads-easter-shoot-gotta-go-fast-stage1-s0fe3d797.wav": {
+      "sha256": "a7cb7e1effda8d4bfd726175fb0efc4f9d7a2e6f2d6d0bd7f7511d64c7859fac",
+      "bytes": 1755086
+    },
+    "stage-shots-vads-easter-shoot-gotta-go-fast-stage1-s36ed6e4e.wav": {
+      "sha256": "4c79ea2be907425732cf267fa2cc40d67a900b5abde33a32eb0cb6d86a486f2f",
+      "bytes": 1953262
+    },
+    "stage-shots-vads-easter-shoot-gotta-go-fast-stage2-s0fe3d797.wav": {
+      "sha256": "c9b85d9ba94963e7969a5ac87180e436a5561aefbe962eba9fbb9944e2ca181a",
+      "bytes": 3549134
+    },
+    "stage-shots-vads-easter-shoot-gotta-go-fast-stage2-s36ed6e4e.wav": {
+      "sha256": "80b9146a6fd66ccdac11ea67ddc2b49786077f194ed0d81f40d65c9221ea2c1b",
+      "bytes": 3364206
+    },
+    "stage-shots-vads-easter-shoot-gotta-go-fast-stage3-s0fe3d797.wav": {
+      "sha256": "0196b274c86de1f47659e557fc2dffb453ac2e193fc8cddc67f68c983401606b",
+      "bytes": 4325326
+    },
+    "stage-shots-vads-easter-shoot-gotta-go-fast-stage3-s36ed6e4e.wav": {
+      "sha256": "b549b37bd134c464ce8da43354009415f8cbeecdb804d4086ca39adc01d967ab",
+      "bytes": 4391982
+    },
+    "stage-shots-vads-easter-shoot-gotta-go-fast-stage4-s0fe3d797.wav": {
+      "sha256": "e714e568e8a3c3a4a0f0f54e27df5f805e24c9dee86c501e6f661efca15a285a",
+      "bytes": 2623438
+    },
+    "stage-shots-vads-easter-shoot-gotta-go-fast-stage4-s36ed6e4e.wav": {
+      "sha256": "172066a204764ca51e30c7b7e22dd7f7e6f92d84855a5e1393860b069d4f2bda",
+      "bytes": 2638510
+    },
+    "stage-shots-vads-easter-shoot-gotta-go-fast-stage5-s0fe3d797.wav": {
+      "sha256": "3565ea08acf2af748d2c27adc7569139cc60e4b483f8d8c86ad25695e84b04db",
+      "bytes": 2760654
+    },
+    "stage-shots-vads-easter-shoot-gotta-go-fast-stage5-s36ed6e4e.wav": {
+      "sha256": "dca2760d7288bb4e6138e06dbe0abbfd7902f22d97398b2cee0a31a43321acb2",
+      "bytes": 3185966
+    },
+    "stage-shots-vads-easter-shoot-gotta-go-fast-stage6-s0fe3d797.wav": {
+      "sha256": "7f542677b324407d8df9c348341df30077b28045d7fb3576ce29257632da1ed6",
+      "bytes": 3196878
+    },
+    "stage-shots-vads-easter-shoot-gotta-go-fast-stage6-s36ed6e4e.wav": {
+      "sha256": "9505f6bef36fb2de128e87451f20867c4a816ea1e6879f3fab828ceac1931e95",
+      "bytes": 3378126
     }
   }
 }
