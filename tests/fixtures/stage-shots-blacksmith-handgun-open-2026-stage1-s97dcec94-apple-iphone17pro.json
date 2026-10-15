@@ -1747,8 +1747,10 @@
     }
   ],
   "review": {
-    "status": "needs_review",
+    "status": "reviewed",
     "derived_from": "stage1-k-vallen",
-    "reviewed_at": null
+    "reviewed_at": "2026-10-15T13:47:32.335076+00:00",
+    "confirmed_at": "2026-10-15T13:47:32.335076+00:00",
+    "method": "audit"
   }
 }

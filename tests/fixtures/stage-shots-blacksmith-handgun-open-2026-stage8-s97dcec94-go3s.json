@@ -2506,8 +2506,10 @@
     }
   ],
   "review": {
-    "status": "needs_review",
+    "status": "reviewed",
     "derived_from": "stage8-h6",
-    "reviewed_at": null
+    "reviewed_at": "2026-10-15T13:45:23.996095+00:00",
+    "confirmed_at": "2026-10-15T13:45:23.996095+00:00",
+    "method": "audit"
   }
 }
