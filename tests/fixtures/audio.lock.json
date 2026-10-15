@@ -381,6 +381,10 @@
       "sha256": "a8be968f4f8f8cbd3b2b0622af39e41a42d101189b765dd4f0dd766a2b060443",
       "bytes": 1650318
     },
+    "stage-shots-stockholm-ipsc-open-2026-stage11-s36ed6e4e.wav": {
+      "sha256": "5941ce14dbacc7dfdc75d70c98c42898fff57ce3c3eab9a474dd7b37348b0f64",
+      "bytes": 2228302
+    },
     "stage-shots-stockholm-ipsc-open-2026-stage12-s0fe3d797-samsung.wav": {
       "sha256": "46836ffe60b0822b796e9ad84cb681f7e3c4429368ed199eed9b4bc57b3dc55f",
       "bytes": 3794382

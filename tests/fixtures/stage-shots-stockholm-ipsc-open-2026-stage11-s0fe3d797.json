@@ -745,9 +745,9 @@
   },
   "event_id": "stockholm-ipsc-open-2026:11:s0fe3d797",
   "review": {
-    "confirmed_at": "2026-10-15T14:51:19.084541+00:00",
+    "confirmed_at": "2026-10-15T15:20:10.088164+00:00",
     "status": "reviewed",
-    "reviewed_at": "2026-10-15T14:51:19.084541+00:00",
+    "reviewed_at": "2026-10-15T15:20:10.088164+00:00",
     "method": "own-audit"
   }
 }
