@@ -10953,3 +10953,71 @@ def test_a_failed_overlay_redraw_never_ships_the_stale_overlay(
     anomalies = job["result"]["anomalies"]
     assert any("stage 1: overlay left out" in a and "ffmpeg went away" in a for a in anomalies), anomalies
     assert not any("stage 1: overlay not available" in a for a in anomalies), anomalies
+
+
+# --- A beep before the clip (2026-10-15) -----------------------------------------
+
+
+def test_a_secondary_beep_may_sit_before_its_clip_a_primary_never(tmp_path: Path) -> None:
+    """A secondary camera that started during the beep has its beep before
+    0; a primary's beep is where its shots are measured from and must be in
+    its clip. More than 2 s before the clip is no cut-off beep."""
+    client, _ = _seed_project_with_secondary(tmp_path)
+    sec_id = _video_id_for(client, 1, "secondary")
+    prim_id = _video_id_for(client, 1, "primary")
+
+    ok = client.post(f"/api/shooters/me/stages/1/videos/{sec_id}/beep", json={"beep_time": -0.21})
+    assert ok.status_code == 200, ok.text
+    assert next(v for v in ok.json()["stages"][0]["videos"] if v["video_id"] == sec_id)[
+        "beep_time"
+    ] == pytest.approx(-0.21)
+
+    assert (
+        client.post(f"/api/shooters/me/stages/1/videos/{prim_id}/beep", json={"beep_time": -0.21}).status_code
+        == 400
+    )
+    assert (
+        client.post(f"/api/shooters/me/stages/1/videos/{sec_id}/beep", json={"beep_time": -2.5}).status_code
+        == 400
+    )
+
+
+def test_the_queue_confirms_a_secondary_beep_before_its_clip(tmp_path: Path) -> None:
+    from splitsmith import match_model
+
+    root = tmp_path / "match"
+    _build_project_with_primary(
+        root,
+        "Before the clip",
+        beep_time=25.13,
+        beep_source="manual",
+        beep_confidence=1.0,
+        beep_reviewed=True,
+    )
+    secondary_id = _add_stage_video(
+        root,
+        role="secondary",
+        filename="secondary.mp4",
+        beep_time=0.0,
+        beep_source="manual",
+        beep_confidence=1.0,
+        beep_reviewed=True,
+    )
+    app = _match_create_app(project_root=root, project_name="ignored")
+    client = _MatchClient(app)
+
+    resp = client.post(
+        "/api/match/beep-queue/confirm",
+        json={"slug": "me", "stage_number": 1, "video_id": secondary_id, "time": -0.21, "source": "manual"},
+    )
+    assert resp.status_code == 200, resp.text
+    project = MatchProject.load(match_model.Match.shooter_root(root, "me"))
+    secondary = next(v for v in project.stages[0].videos if v.video_id == secondary_id)
+    assert secondary.beep_time == pytest.approx(-0.21)
+
+    primary_id = next(v.video_id for v in project.stages[0].videos if v.role == "primary")
+    refused = client.post(
+        "/api/match/beep-queue/confirm",
+        json={"slug": "me", "stage_number": 1, "video_id": primary_id, "time": -0.21, "source": "manual"},
+    )
+    assert refused.status_code == 400

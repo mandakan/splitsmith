@@ -593,6 +593,10 @@ def _state_conflict_excs() -> tuple[type[BaseException], ...]:
 # thundering herd. Exhausting it re-raises -> the job fails loudly.
 _AUDIT_SAVE_MAX_ATTEMPTS = 4
 
+# How far before its clip a secondary camera's beep may sit: one that started
+# recording during the beep, whose tone is well under a second (2026-10-15).
+BEEP_BEFORE_CLIP_MAX_S = 2.0
+
 # Filename of the desktop export-run log; defined beside the model so
 # ``backup`` can archive it without importing the server.
 EXPORT_RUNS_FILE = export_runs.LOG_FILENAME
@@ -12923,8 +12927,8 @@ def create_app(
         same advance the auto-detect job performs on success (Task 5).
         """
         project, stage, video = _resolve_stage_video(slug, stage_number, video_id)
-        if req.beep_time is not None and req.beep_time < 0.0:
-            raise HTTPException(status_code=400, detail="beep_time must be >= 0")
+        if req.beep_time is not None:
+            _check_beep_time(video, req.beep_time)
         _apply_beep_override(slug, project, stage, video, req.beep_time)
         project.save(state.shooter_root(slug))
         # Mirrors mark state only: no raw media exists hosted-side, so
@@ -12937,6 +12941,21 @@ def create_app(
             except FeatureRequiredError as exc:
                 _log_chain_skipped("detect_beep", slug, stage_number, exc)
         return JSONResponse(project.model_dump(mode="json"))
+
+    def _check_beep_time(video: StageVideo, beep_time: float) -> None:
+        """A beep before its clip is allowed for a secondary camera only, and
+        only a little before (2026-10-15): one that started recording during
+        the beep. A primary's shots are measured from its beep, which must
+        be in its clip."""
+        if beep_time >= 0.0:
+            return
+        if video.role != "secondary":
+            raise HTTPException(status_code=400, detail="beep_time must be >= 0 for a primary camera")
+        if beep_time < -BEEP_BEFORE_CLIP_MAX_S:
+            raise HTTPException(
+                status_code=400,
+                detail=f"a beep more than {BEEP_BEFORE_CLIP_MAX_S:g} s before the clip is not one it cut off",
+            )
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/beep")
     async def override_beep(slug: str, stage_number: int, req: BeepOverrideRequest) -> JSONResponse:
@@ -17764,6 +17783,7 @@ def create_app(
         if target_video is None:
             raise HTTPException(status_code=404, detail="video not found")
         if req.time is not None:
+            _check_beep_time(target_video, float(req.time))
             target_video.beep_time = float(req.time)
             target_video.beep_source = "manual" if req.source == "manual" else "detected"
         if target_video.beep_time is None:
