@@ -163,12 +163,28 @@ wheel and both desktop smokes read it, one in a bare container). CI's python
 shards fetch the WAVs the tests read (``fetch --only tests/fixtures/audio.ci.txt``,
 cached on the lock and the list); a new test that reads a fixture WAV adds
 it to that list. ``uv run python scripts/fixture_audio.py fetch``
-before a build or a sweep (a missing WAV is a skipped fixture, silently);
+before a sweep (there a missing WAV is a skipped fixture, silently);
 ``push <stem>`` uploads a new or changed WAV to ``splitsmith-fixtures``
 (served at ``fixtures.splitsmith.app``) through ``wrangler r2 object put``,
 so it needs a ``wrangler login`` on the account that owns splitsmith.app, and
-records it. Never commit a fixture WAV
-again; no test needs the external ones (the suite was run without them).
+records it. Never commit a fixture WAV again.
+
+The calibration build checks its inputs before it fits anything
+(``ensure_audio`` and ``scripts/feature_caches.py``): every fixture's WAV
+against the lock (missing ones fetched from R2; one the lock lacks, one R2
+cannot serve, or a local one that differs from the lock, which is a re-cut
+not pushed yet, stops the build), and its CLAP / PANN caches against that
+WAV by the ``wav_sha256`` stamped into them (an unstamped cache is checked
+once against fresh candidate times, then stamped). A stale or missing cache
+stops the build unless ``--extract``. A row-count check let a re-cut clip's
+old features through. ``--matches`` picks the corpus by match; ``--out
+build/models/<name>`` writes a **model bundle** (``ensemble.model_bundle``:
+calibration, ONNX graphs, ``heldout/`` with per-match leave-one-match-out
+figures and labelled OOF rows, and ``model.json`` naming every file and
+fixture WAV by sha256) and leaves the shipped model and the parity
+references alone. The lab's Models page lists the shipped model and every
+bundle and compares any two (``/dev/models?model=&vs=``). Choosing a
+bundle at runtime is not built.
 
 The review-time variant generator ``scripts/build_ensemble_fixture.py``
 still exists for offline comparison under ``build/ensemble-review/``.

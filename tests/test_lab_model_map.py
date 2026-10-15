@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
+import pytest
+
 from splitsmith.ensemble.fixtures import Fixture
+from splitsmith.lab import model_map
 from splitsmith.lab.model_map import (
     BUILD_SCRIPT,
     build_model_map,
+    fixture_heldout,
     gbdt_hyperparameters,
     ranker_held_out,
     shipped_ranker_kind,
@@ -205,6 +210,52 @@ def test_version_lists_what_it_added_and_dropped() -> None:
     assert second.added == ["stage-shots-alpha-2026-stage1-sabc-iphone"]
     assert second.removed == ["x"]
     assert second.recall == {"headcam": 0.95}
+
+
+def test_fixture_heldout_counts_each_fixture_at_its_heads_threshold() -> None:
+    rows = [
+        {"fixture": "h", "label": 1, "score_c_lomo": 0.5},  # headcam threshold 0.2: found
+        {"fixture": "h", "label": 0, "score_c_lomo": 0.3},  # extra
+        {"fixture": "p", "label": 1, "score_c_lomo": 0.5},  # handheld threshold 0.9: missed
+        {"fixture": "p", "label": 1, "score_c_lomo": float("nan")},  # unscorable fold: left out
+        {"fixture": "old", "score_c_lomo": 0.9},  # a build without labels
+        {"fixture": "gone", "label": 1, "score_c_lomo": 0.9},  # not calibrating this model
+    ]
+    out = fixture_heldout(rows, {"h": 0.2, "p": 0.9, "old": 0.5})
+    assert {k: (v.tp, v.fp, v.fn) for k, v in out.items()} == {"h": (1, 1, 0), "p": (0, 0, 1)}
+
+
+def test_models_are_the_shipped_one_and_every_bundle(tmp_path, monkeypatch) -> None:
+    """The route resolves a model id only through this list, so an id is a
+    folder name under build/models or ``shipped``, never a path."""
+    from splitsmith.ensemble import model_bundle as mb
+
+    folder = tmp_path / "reaudit"
+    folder.mkdir()
+    (folder / mb.CALIBRATION_NAME).write_text(json.dumps(CAL))
+    mb.write_manifest(
+        folder,
+        mb.ModelManifest(
+            name="Re-audited",
+            version="v1",
+            built_at="2026-10-15T18:00:00+00:00",
+            selection=mb.CorpusSelection(matches=["alpha-2026"], reviewed_only=True),
+        ),
+    )
+    monkeypatch.setattr(mb, "MODELS_DIR", tmp_path)
+    shipped = tmp_path / "shipped_cal.json"
+    shipped.write_text(json.dumps(CAL))
+
+    sources = model_map.model_sources(shipped)
+    assert list(sources) == ["shipped", "reaudit"]
+    assert sources["reaudit"][1] == folder / "heldout"
+
+    m = model_map.load_model_map(shipped, "reaudit")
+    assert m.model is not None and m.model.name == "Re-audited"
+    assert m.model.selection == "matches: alpha-2026, reviewed only"
+    assert [s.id for s in m.models] == ["shipped", "reaudit"]
+    with pytest.raises(KeyError):
+        model_map.load_model_map(shipped, "../etc")
 
 
 def test_gbdt_hyperparameters_are_read_from_the_build_script() -> None:

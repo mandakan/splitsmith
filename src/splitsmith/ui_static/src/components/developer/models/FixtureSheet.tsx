@@ -71,7 +71,7 @@ export function FixtureSheet({
             <Label>Voter C</Label>
             {head ? (
               <p className="text-sm text-ink-2">
-                One of the {head.n_fixtures} fixtures the {head.camera_class} head was calibrated on. Its threshold{" "}
+                One of the {head.n_fixtures} fixtures the {head.camera_class} classifier was trained on. Its threshold{" "}
                 <span className="numeral">{head.voter_c_threshold?.toFixed(4)}</span> was picked over all of them.
               </p>
             ) : null}
@@ -82,7 +82,7 @@ export function FixtureSheet({
               </p>
             ) : head ? null : (
               <p className="text-sm text-ink-2">
-                Not in the shipped build. It joins the {f.camera_class} head at the next retrain
+                Not in this build. It joins the {f.camera_class} classifier at the next retrain
                 {f.review_status === "needs_review" ? ", once reviewed (or now, unless the build runs reviewed only)" : ""}.
               </p>
             )}

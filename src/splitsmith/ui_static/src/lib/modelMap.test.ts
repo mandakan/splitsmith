@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   angleOf,
+  compareHeads,
   corpusFlow,
+  corpusMembership,
+  heldOutTone,
+  paramRows,
+  type ModelMap,
   corpusRows,
   filterFixtures,
   fixtureFlags,
@@ -184,6 +189,80 @@ describe("versionSeries", () => {
       [1, true],
       [3, false],
     ]);
+  });
+});
+
+describe("heldOutTone", () => {
+  it("ranks a missed shot over extra detections, and says nothing without data", () => {
+    expect(heldOutTone(fx("a", { heldout_lomo: { tp: 9, fp: 2, fn: 1 } }))).toBe("missed");
+    expect(heldOutTone(fx("a", { heldout_lomo: { tp: 9, fp: 2, fn: 0 } }))).toBe("extra");
+    expect(heldOutTone(fx("a", { heldout_lomo: { tp: 9, fp: 0, fn: 0 } }))).toBe("clean");
+    expect(heldOutTone(fx("a"))).toBeNull();
+  });
+});
+
+describe("comparing two models", () => {
+  const m = (recall: number) => ({ precision: 0.9, recall, f1: 0, tp: 0, fp: 0, fn: 0 });
+  const head = (cls: "headcam" | "handheld", recall: number, byMatch: Record<string, number>) =>
+    ({
+      camera_class: cls,
+      n_fixtures: 1,
+      n_candidates: 10,
+      n_positives: 5,
+      voter_a_floor: 0.01,
+      voter_b_threshold: 0.03,
+      voter_c_threshold: recall,
+      cv: null,
+      onnx: null,
+      onnx_bytes: null,
+      heldout: [{ split: "lomo", at_shipped_threshold: m(recall), own_threshold: null, at_own_threshold: null }],
+      heldout_matches: [],
+      heldout_stages: null,
+      heldout_candidates: null,
+      lomo_by_match: Object.fromEntries(Object.entries(byMatch).map(([k, v]) => [k, m(v)])),
+    }) as VoterCHead;
+  const model = (fixtures: ModelMapFixture[], heads: VoterCHead[]) =>
+    ({ fixtures, ensemble: { heads, target_recall: 0.95, tolerance_ms: 75, feature_dim: 57 } }) as unknown as ModelMap;
+
+  const a = model(
+    [fx("both"), fx("onlyA"), fx("onlyB", { voter_c: null }), fx("none", { voter_c: null })],
+    [head("headcam", 0.82, { alpha: 0.7, beta: 0.9 })],
+  );
+  const b = model(
+    [fx("both"), fx("onlyA", { voter_c: null }), fx("onlyB"), fx("none", { voter_c: null })],
+    [head("headcam", 0.9, { beta: 0.95, gamma: 0.8 }), head("handheld", 0.95, {})],
+  );
+
+  it("says which model each fixture calibrated", () => {
+    expect(corpusMembership(a, b)).toEqual({ both: "both", onlyA: "a", onlyB: "b", none: "neither" });
+  });
+
+  it("lines up splits and matches per head, a head only one model has included", () => {
+    const heads = compareHeads(a, b);
+    expect(heads.map((h) => h.cameraClass)).toEqual(["headcam", "handheld"]);
+    const lomo = heads[0].rows.find((r) => r.split === "lomo")!;
+    expect([lomo.a?.recall, lomo.b?.recall]).toEqual([0.82, 0.9]);
+    expect(heads[0].rows.find((r) => r.split === "grouped")).toEqual({ split: "grouped", a: null, b: null });
+    expect(heads[0].matches.map((x) => [x.match, x.a?.recall ?? null, x.b?.recall ?? null])).toEqual([
+      ["alpha", 0.7, null],
+      ["beta", 0.9, 0.95],
+      ["gamma", null, 0.8],
+    ]);
+    expect(heads[1].rows.find((r) => r.split === "lomo")?.a).toBeNull();
+    // A build that recorded no per-match figures is told apart from a match it never saw.
+    expect(heads[0].perMatch).toEqual({ a: true, b: true });
+    expect(heads[1].perMatch).toEqual({ a: false, b: false });
+  });
+
+  it("marks the parameters that differ", () => {
+    const rows = paramRows(a, b);
+    expect(rows.find((r) => r.label === "Target recall")?.differs).toBe(false);
+    expect(rows.find((r) => r.label === "headcam: voter C threshold")).toMatchObject({
+      a: "0.8200",
+      b: "0.9000",
+      differs: true,
+    });
+    expect(rows.find((r) => r.label === "handheld: fixtures")).toMatchObject({ a: "--", b: "1", differs: true });
   });
 });
 

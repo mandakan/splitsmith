@@ -48,7 +48,7 @@ export function CorpusFlow({
           viewBox={`-4 -8 ${W + 8} ${H + 24}`}
           className="h-auto w-full max-w-[760px]"
           role="img"
-          aria-label="How the fixtures reach the shipped voter C heads"
+          aria-label="How the fixtures reach the two voter C classifiers"
         >
           {laid.links.map((l) => {
             const key = `${l.source}>${l.target}`;

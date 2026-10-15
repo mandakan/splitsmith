@@ -26,7 +26,7 @@ export function ParametersPanel({ ensemble }: { ensemble: EnsembleModel }) {
         <Table>
           <thead>
             <tr>
-              <Th>Voter C head</Th>
+              <Th>Voter C classifier</Th>
               {heads.map((h) => (
                 <Th key={h.camera_class} align="right">
                   {h.camera_class}

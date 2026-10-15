@@ -11,6 +11,8 @@ import { useMemo } from "react";
 import { Label, Segmented } from "@/components/ui";
 import {
   HELD_OUT_COLOR,
+  HELD_OUT_TONE_COLOR,
+  MEMBERSHIP_COLOR,
   STATUS_COLOR,
   STATUS_LABEL,
   STATUS_ORDER,
@@ -18,29 +20,37 @@ import {
   corpusRows,
   fixtureFlags,
   fixtureStatus,
+  heldOutTone,
   matchKey,
+  type Membership,
   type ModelMapFixture,
 } from "@/lib/modelMap";
 import { cn } from "@/lib/utils";
 
-export type MapLens = "status" | "fold" | "ranker";
+export type MapLens = "status" | "fold" | "heldout" | "compare" | "ranker";
 
-const LENSES = [
-  { value: "status", label: "Shipped build" },
-  { value: "fold", label: "Match fold" },
-  { value: "ranker", label: "Beep ranker" },
-] as const;
-
-function tileColor(f: ModelMapFixture, lens: MapLens, folds: Record<string, string>): string {
+function tileColor(
+  f: ModelMapFixture,
+  lens: MapLens,
+  folds: Record<string, string>,
+  membership: Record<string, Membership> | null,
+): string {
   if (lens === "fold") return f.voter_c ? (folds[matchKey(f)] ?? "var(--color-muted)") : "transparent";
   if (lens === "ranker") return HELD_OUT_COLOR[f.beep_ranker?.held_out ?? "none"];
+  if (lens === "heldout") {
+    const tone = heldOutTone(f);
+    return tone ? HELD_OUT_TONE_COLOR[tone] : "var(--color-whisper)";
+  }
+  if (lens === "compare") return MEMBERSHIP_COLOR[membership?.[f.stem] ?? "neither"];
   return STATUS_COLOR[fixtureStatus(f)];
 }
 
 /** A tile is hollow when the lens has nothing to say about the fixture. */
-function hollow(f: ModelMapFixture, lens: MapLens): boolean {
+function hollow(f: ModelMapFixture, lens: MapLens, membership: Record<string, Membership> | null): boolean {
   if (lens === "status") return fixtureStatus(f) === "unused" || fixtureStatus(f) === "superseded";
   if (lens === "fold") return f.voter_c === null;
+  if (lens === "heldout") return heldOutTone(f) === null;
+  if (lens === "compare") return (membership?.[f.stem] ?? "neither") === "neither";
   return !f.beep_ranker?.held_out;
 }
 
@@ -52,6 +62,8 @@ export function CorpusMap({
   highlight,
   selected,
   onSelect,
+  membership = null,
+  names = { a: "A", b: "B" },
 }: {
   fixtures: ModelMapFixture[];
   lens: MapLens;
@@ -60,15 +72,25 @@ export function CorpusMap({
   highlight: Set<string> | null;
   selected: string | null;
   onSelect: (stem: string) => void;
+  /** Which of two compared models each fixture calibrated; the Compare lens needs it. */
+  membership?: Record<string, Membership> | null;
+  names?: { a: string; b: string };
 }) {
   const rows = useMemo(() => corpusRows(fixtures), [fixtures]);
+  const lenses = [
+    { value: "status" as const, label: "Build" },
+    { value: "fold" as const, label: "Match fold" },
+    { value: "heldout" as const, label: "Held out" },
+    ...(membership ? [{ value: "compare" as const, label: "Compare" }] : []),
+    { value: "ranker" as const, label: "Beep ranker" },
+  ];
   return (
     <section className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Label>Corpus map</Label>
-        <Segmented label="Colour tiles by" value={lens} options={LENSES} onChange={onLens} />
+        <Segmented label="Colour tiles by" value={lens} options={lenses} onChange={onLens} />
       </div>
-      <Legend lens={lens} folds={folds} />
+      <Legend lens={lens} folds={folds} names={names} />
       {rows.length === 0 ? (
         <p className="text-sm text-muted">No fixture matches the filter.</p>
       ) : (
@@ -91,7 +113,7 @@ export function CorpusMap({
                     <div className="flex gap-[3px]">
                       {block.fixtures.map((f) => {
                         const dim = highlight !== null && !highlight.has(f.stem);
-                        const color = tileColor(f, lens, folds);
+                        const color = tileColor(f, lens, folds, membership);
                         return (
                           <button
                             key={f.stem}
@@ -105,7 +127,7 @@ export function CorpusMap({
                               selected === f.stem && "ring-2 ring-ink",
                             )}
                             style={
-                              hollow(f, lens)
+                              hollow(f, lens, membership)
                                 ? { borderColor: color === "transparent" ? "var(--color-whisper)" : color }
                                 : { background: color, borderColor: color }
                             }
@@ -164,7 +186,15 @@ function Swatch({ color, hollow = false, children }: { color: string; hollow?: b
   );
 }
 
-function Legend({ lens, folds }: { lens: MapLens; folds: Record<string, string> }) {
+function Legend({
+  lens,
+  folds,
+  names,
+}: {
+  lens: MapLens;
+  folds: Record<string, string>;
+  names: { a: string; b: string };
+}) {
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
       {lens === "status"
@@ -203,6 +233,26 @@ function Legend({ lens, folds }: { lens: MapLens; folds: Record<string, string> 
           ))}
           <Swatch color="var(--color-whisper)" hollow>
             Not calibrating
+          </Swatch>
+        </>
+      ) : null}
+      {lens === "heldout" ? (
+        <>
+          <Swatch color={HELD_OUT_TONE_COLOR.clean}>Every shot, nothing else</Swatch>
+          <Swatch color={HELD_OUT_TONE_COLOR.missed}>Missed a shot</Swatch>
+          <Swatch color={HELD_OUT_TONE_COLOR.extra}>Extra detections only</Swatch>
+          <Swatch color="var(--color-whisper)" hollow>
+            Not scored by this build
+          </Swatch>
+        </>
+      ) : null}
+      {lens === "compare" ? (
+        <>
+          <Swatch color={MEMBERSHIP_COLOR.both}>Both models</Swatch>
+          <Swatch color={MEMBERSHIP_COLOR.a}>{`Only ${names.a}`}</Swatch>
+          <Swatch color={MEMBERSHIP_COLOR.b}>{`Only ${names.b}`}</Swatch>
+          <Swatch color={MEMBERSHIP_COLOR.neither} hollow>
+            Neither
           </Swatch>
         </>
       ) : null}

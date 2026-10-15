@@ -75,6 +75,30 @@ class ModelMapFixture(BaseModel):
     match_group: str | None
     stage_group: str | None
     beep_ranker: BeepRankerUse | None
+    # This model's voter C on this fixture while its match was left out, at
+    # the head's threshold. ``None``: the build recorded no labels (builds
+    # before the bundle work) or the fixture did not calibrate the model.
+    heldout_lomo: FixtureHeldOut | None = None
+
+
+class FixtureHeldOut(BaseModel):
+    tp: int
+    fp: int
+    fn: int
+
+
+class ModelSummary(BaseModel):
+    """One model the page can show: the shipped one, or a bundle under
+    ``build/models`` (``ensemble.model_bundle``)."""
+
+    id: str
+    name: str
+    version: str
+    channel: str
+    built_at: str | None
+    description: str | None = None
+    n_fixtures: dict[str, int] = {}
+    selection: str | None = None
 
 
 class SplitMetrics(BaseModel):
@@ -108,6 +132,8 @@ class VoterCHead(BaseModel):
     heldout_matches: list[str]
     heldout_stages: int | None
     heldout_candidates: int | None
+    # Leave one match out, each match scored by the model that never saw it.
+    lomo_by_match: dict[str, SplitMetrics] = {}
 
 
 class ModelArtifact(BaseModel):
@@ -175,6 +201,8 @@ class ModelMap(BaseModel):
     ensemble: EnsembleModel
     beep_ranker: BeepRankerModel | None
     history: list[ModelVersion]
+    model: ModelSummary | None = None
+    models: list[ModelSummary] = []
 
 
 # -- pure assembly ---------------------------------------------------------
@@ -264,9 +292,40 @@ def _heads(
                 heldout_matches=list(h.get("matches") or []),
                 heldout_stages=h.get("n_stages"),
                 heldout_candidates=h.get("n_candidates"),
+                lomo_by_match={
+                    m: met
+                    for m, b in (h.get("lomo_by_match") or {}).items()
+                    if (met := _metrics(b)) is not None
+                },
             )
         )
     return heads
+
+
+def fixture_heldout(
+    oof_rows: Iterable[Mapping[str, Any]], thresholds: Mapping[str, float]
+) -> dict[str, FixtureHeldOut]:
+    """Each fixture's leave-one-match-out outcome at its head's threshold.
+
+    ``oof_rows`` are the build's ``voter_c_oof.parquet`` rows; ``thresholds``
+    maps each fixture to the voter C threshold of the head it calibrated.
+    Rows without a label (builds before labels were recorded) or a score
+    (an unscorable fold) are left out, so such a build yields nothing.
+    """
+    out: dict[str, list[int]] = {}
+    for r in oof_rows:
+        stem, label, score = r.get("fixture"), r.get("label"), r.get("score_c_lomo")
+        if stem not in thresholds or label is None or score is None or score != score:
+            continue
+        kept = score >= thresholds[stem]
+        c = out.setdefault(stem, [0, 0, 0])
+        if kept and label == 1:
+            c[0] += 1
+        elif kept:
+            c[1] += 1
+        elif label == 1:
+            c[2] += 1
+    return {s: FixtureHeldOut(tp=c[0], fp=c[1], fn=c[2]) for s, c in out.items()}
 
 
 def shipped_ranker_kind(version: str | None) -> str:
@@ -369,6 +428,9 @@ def build_model_map(
     hyperparameters: Mapping[str, Any],
     artifact_sizes: Mapping[str, int],
     history: list[ModelVersion],
+    heldout_by_fixture: Mapping[str, FixtureHeldOut] | None = None,
+    model: ModelSummary | None = None,
+    models: list[ModelSummary] | None = None,
 ) -> ModelMap:
     by_class = calibration_fixtures_by_class(calibration)
     head_of: dict[str, CameraClass] = {}
@@ -413,6 +475,7 @@ def build_model_map(
                     if man is not None
                     else None
                 ),
+                heldout_lomo=(heldout_by_fixture or {}).get(fx.stem),
             )
         )
 
@@ -448,6 +511,8 @@ def build_model_map(
         ensemble=ensemble,
         beep_ranker=_ranker(ranker_report, ranker_version),
         history=history,
+        model=model,
+        models=list(models or []),
     )
 
 
@@ -556,11 +621,79 @@ def calibration_history(repo: Path = REPO_ROOT, path: str = CALIBRATION_REPO_PAT
     return versions
 
 
-def load_model_map(calibration_path: Path) -> ModelMap:
-    """Read every source and assemble the page's payload."""
+SHIPPED_ID = "shipped"
+
+
+def _summary(model_id: str, calibration: Mapping[str, Any], manifest: Any | None) -> ModelSummary:
+    built = calibration.get("built_at")
+    counts = {k: len(v) for k, v in calibration_fixtures_by_class(calibration).items()}
+    if manifest is None:
+        return ModelSummary(
+            id=model_id,
+            name="Shipped",
+            version=f"v{built[:10].replace('-', '.')}" if built else "unknown",
+            channel="shipped",
+            built_at=built,
+            description="The model in src/splitsmith/data that the app runs.",
+            n_fixtures=counts,
+        )
+    sel = manifest.selection
+    selection = (
+        f"matches: {', '.join(sel.matches)}" if sel.matches else f"{len(sel.fixtures or [])} named fixtures"
+    ) + (", reviewed only" if sel.reviewed_only else "")
+    return ModelSummary(
+        id=model_id,
+        name=manifest.name,
+        version=manifest.version,
+        channel=manifest.channel,
+        built_at=manifest.built_at,
+        description=manifest.description,
+        n_fixtures=counts,
+        selection=selection,
+    )
+
+
+def model_sources(shipped_calibration: Path) -> dict[str, tuple[Path, Path, Any | None]]:
+    """Every model the page can show: id -> (calibration file, held-out
+    folder, bundle manifest or ``None`` for the shipped model). Bundle ids are
+    their folder names under ``build/models``; nothing else resolves."""
+    from ..ensemble import model_bundle as mb
+
+    out: dict[str, tuple[Path, Path, Any | None]] = {
+        SHIPPED_ID: (shipped_calibration, HELDOUT_REPORT.parent, None)
+    }
+    for folder, manifest in mb.list_bundles():
+        if folder.name != SHIPPED_ID:
+            out[folder.name] = (folder / mb.CALIBRATION_NAME, folder / "heldout", manifest)
+    return out
+
+
+def _oof_rows(heldout_dir: Path) -> list[dict[str, Any]]:
+    try:
+        import pyarrow.parquet as pq
+    except ImportError:  # dev-only dependency; the page still renders without it
+        return []
+    try:
+        return pq.read_table(heldout_dir / "voter_c_oof.parquet").to_pylist()
+    except (OSError, ValueError):
+        return []
+
+
+def load_model_map(shipped_calibration: Path, model_id: str = SHIPPED_ID) -> ModelMap:
+    """Read every source for one model and assemble the page's payload.
+    Raises ``KeyError`` for an id :func:`model_sources` does not list."""
     from ..config import BeepRankerConfig
 
+    sources = model_sources(shipped_calibration)
+    calibration_path, heldout_dir, manifest = sources[model_id]
+    summaries = [_summary(i, _read_json(p) or {}, m) for i, (p, _h, m) in sources.items()]
     calibration = _read_json(calibration_path) or {}
+    thresholds = {
+        stem: float(block["voter_c_threshold"])
+        for block in (calibration.get("thresholds_by_camera_class") or {}).values()
+        if block.get("voter_c_threshold") is not None
+        for stem in block.get("calibration_fixtures") or []
+    }
     fixtures = all_fixtures()
     event_ids = {
         fx.stem: (_read_json(FIXTURES_DIR / f"{fx.stem}.json") or {}).get("event_id") for fx in fixtures
@@ -583,7 +716,10 @@ def load_model_map(calibration_path: Path) -> ModelMap:
         fixtures=fixtures,
         event_ids=event_ids,
         calibration=calibration,
-        heldout=_read_json(HELDOUT_REPORT),
+        heldout=_read_json(heldout_dir / "report.json"),
+        heldout_by_fixture=fixture_heldout(_oof_rows(heldout_dir), thresholds),
+        model=next(s for s in summaries if s.id == model_id),
+        models=summaries,
         ranker_report=_read_json(RANKER_DIR / "ranker_report.json"),
         ranker_manifest=manifest if isinstance(manifest, dict) else None,
         ranker_version=BeepRankerConfig().model_version,
