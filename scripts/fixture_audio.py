@@ -7,6 +7,7 @@ A changed WAV is a new object under a new hash, so the manifest in git is the
 whole version history and nothing in the bucket is ever overwritten.
 
     uv run python scripts/fixture_audio.py fetch    # download what is missing, verify every hash
+    uv run python scripts/fixture_audio.py fetch --only tests/fixtures/audio.ci.txt  # just the WAVs CI reads
     uv run python scripts/fixture_audio.py status   # what is local, missing or changed
     uv run python scripts/fixture_audio.py push STEM_OR_WAV ...  # upload, then record in the manifest
 
@@ -117,15 +118,34 @@ def _download(base_url: str, name: str, entry: dict) -> str | None:
         tmp.unlink(missing_ok=True)
 
 
-def fetch(base_url: str, workers: int = 8) -> list[str]:
-    """Download every manifest WAV that is missing or differs; return the errors."""
-    files = load_manifest()
+def read_names(path: Path) -> list[str]:
+    """A names file: one WAV per line (``.wav`` optional), ``#`` comments and blanks ignored."""
+    out = []
+    for line in path.read_text().splitlines():
+        name = line.split("#", 1)[0].strip()
+        if name:
+            out.append(name if name.endswith(".wav") else f"{name}.wav")
+    return out
+
+
+def select(files: dict[str, dict], only: list[str] | None) -> tuple[dict[str, dict], list[str]]:
+    """The manifest entries ``only`` names (all of them when ``None``), and the
+    names it asks for that the manifest does not hold."""
+    if only is None:
+        return files, []
+    return {n: files[n] for n in only if n in files}, [n for n in only if n not in files]
+
+
+def fetch(base_url: str, workers: int = 8, only: list[str] | None = None) -> list[str]:
+    """Download every manifest WAV (or every one ``only`` names) that is missing
+    or differs; return the errors. A name the manifest lacks is an error."""
+    files, unknown = select(load_manifest(), only)
     st = status(files)
     todo = st["missing"] + st["changed"]
     with ThreadPoolExecutor(workers) as pool:
         errors = list(pool.map(lambda n: _download(base_url, n, files[n]), todo))
     print(f"{len(st['ok'])} present, {len(todo)} fetched")
-    return [e for e in errors if e]
+    return [f"{n}: not in {MANIFEST.name}" for n in unknown] + [e for e in errors if e]
 
 
 def _object_exists(base_url: str, digest: str) -> bool:
@@ -164,13 +184,14 @@ def main() -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     f = sub.add_parser("fetch")
     f.add_argument("--url", default=os.environ.get("SPLITSMITH_FIXTURE_AUDIO_URL", DEFAULT_URL))
+    f.add_argument("--only", type=Path, help="fetch only the WAVs this names file lists (one per line)")
     sub.add_parser("status")
     p = sub.add_parser("push")
     p.add_argument("names", nargs="+")
     p.add_argument("--url", default=os.environ.get("SPLITSMITH_FIXTURE_AUDIO_URL", DEFAULT_URL))
     args = ap.parse_args()
     if args.cmd == "fetch":
-        errors = fetch(args.url)
+        errors = fetch(args.url, only=read_names(args.only) if args.only else None)
         for e in errors:
             print(f"error: {e}", file=sys.stderr)
         return 1 if errors else 0

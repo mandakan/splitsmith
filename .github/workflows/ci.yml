@@ -107,6 +107,20 @@ jobs:
         if: matrix.shard == 1
         run: uv run black --check src tests scripts
 
+      - name: Cache the fixture WAVs the tests read
+        # Fixture audio lives in R2, content-addressed (scripts/fixture_audio.py);
+        # the key moves whenever the lock or the list does, so a changed WAV is
+        # always fetched fresh.
+        uses: actions/cache@v4
+        with:
+          path: tests/fixtures/*.wav
+          key: fixture-audio-${{ hashFiles('tests/fixtures/audio.lock.json', 'tests/fixtures/audio.ci.txt') }}
+
+      - name: Fetch the fixture WAVs the tests read
+        # Public bucket, no credentials. Verifies every hash, so a restored
+        # cache that does not match the lock is downloaded again.
+        run: python3 scripts/fixture_audio.py fetch --only tests/fixtures/audio.ci.txt
+
       - name: Warm numba/librosa JIT cache (avoids the xdist compile race, #742)
         # librosa's numba kernels compile on first use into a shared
         # ``.nbi``/``.nbc`` cache inside site-packages, and those writes are
