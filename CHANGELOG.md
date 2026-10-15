@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.74.0](https://github.com/mandakan/splitsmith/compare/v0.73.1...v0.74.0) (2026-10-15)
+
+
+### Features
+
+* **beep:** the phone's beep picker fits a quiet beep and snaps to its start ([#1489](https://github.com/mandakan/splitsmith/issues/1489)) ([fcaea4f](https://github.com/mandakan/splitsmith/commit/fcaea4f86c34fcc431f31e62950b4ada9cb60e5b))
+
 ## [0.73.1](https://github.com/mandakan/splitsmith/compare/v0.73.0...v0.73.1) (2026-10-15)
 
 
