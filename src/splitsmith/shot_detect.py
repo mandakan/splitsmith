@@ -128,12 +128,12 @@ def detect_shots(
         raise ValueError("audio must be 1-D (mono); mix down before calling detect_shots")
     if audio.size == 0:
         raise ValueError("audio is empty")
-    if beep_time < 0.0:
-        raise ValueError(f"beep_time must be non-negative, got {beep_time}")
+    # A beep before 0 is a secondary camera that started recording during the
+    # beep (2026-10-15): its shots are in the audio, the window starts at it.
     if stage_time <= 0.0:
         raise ValueError(f"stage_time must be positive, got {stage_time}")
 
-    search_lo = int(round((beep_time + _POST_BEEP_SKIP_S) * sample_rate))
+    search_lo = max(0, int(round((beep_time + _POST_BEEP_SKIP_S) * sample_rate)))
     search_hi = min(audio.size, int(round((beep_time + stage_time + 1.0) * sample_rate)))
     if search_hi <= search_lo:
         return []
