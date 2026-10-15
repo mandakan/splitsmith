@@ -341,13 +341,29 @@
       "sha256": "a2d50d0aa92adfdd0e98a2c11e56772c53f2b1532e769c82c95e1b73377742bc",
       "bytes": 2450030
     },
+    "stage-shots-stockholm-ipsc-open-2026-stage1-s0fe3d797.wav": {
+      "sha256": "e6e10d0ff1d96ebbd7e74acb2b6e4e0e1e550bc53048f34a24a062a985b277d8",
+      "bytes": 2185306
+    },
+    "stage-shots-stockholm-ipsc-open-2026-stage1-s36ed6e4e.wav": {
+      "sha256": "d6034b18e0a309d50d7a2004d6e6e985f46aada983acffa67ab8fcdb39c37518",
+      "bytes": 2701870
+    },
     "stage-shots-stockholm-ipsc-open-2026-stage1-s97dcec94-apple-iphone17pro.wav": {
       "sha256": "74ab76e7ede0408a462b996e5a1e69f511020627e0b5cb071f137c48963ef089",
       "bytes": 2449710
     },
     "stage-shots-stockholm-ipsc-open-2026-stage1-s97dcec94.wav": {
-      "sha256": "acc83adf65b68904e4c9e8db0a4da6738bb5e3e542df7b6a3d07dcd039bb4795",
-      "bytes": 2449358
+      "sha256": "d0c199a84b56af477d019292ef033161e6414692ced2190b0d8d8eaf44fbba1d",
+      "bytes": 2449774
+    },
+    "stage-shots-stockholm-ipsc-open-2026-stage10-s0fe3d797.wav": {
+      "sha256": "899c33b68832838c7703d8dc45c1bbf6bbd0ba27c692734c8ec39b73c4895bca",
+      "bytes": 3648910
+    },
+    "stage-shots-stockholm-ipsc-open-2026-stage10-s36ed6e4e.wav": {
+      "sha256": "716cdb60dea3c288335b7660dbe20c6fef5f26945a88dce63a218cd4a2178301",
+      "bytes": 3295214
     },
     "stage-shots-stockholm-ipsc-open-2026-stage10-s97dcec94-apple-iphone17pro.wav": {
       "sha256": "ffa3e4c0a31640c34c6312951c7e49102eaf46ef6d2d4b1ae10297b88173c9d0",
@@ -378,8 +394,8 @@
       "bytes": 4089998
     },
     "stage-shots-stockholm-ipsc-open-2026-stage12-s36ed6e4e.wav": {
-      "sha256": "19b7a4dfe46469c46dfa84f170241d777614bcd60cfe3d6b0e25bbe08ff98159",
-      "bytes": 4247662
+      "sha256": "165c3d320ff8f80b4b4ab0e1e7526b80ab2b075a38b409dc9e54c62c24cc6a46",
+      "bytes": 4247086
     },
     "stage-shots-stockholm-ipsc-open-2026-stage12-s97dcec94-apple-iphone17pro.wav": {
       "sha256": "a6822a4f10a1c0f0354affd853d92953ec2e0a07a234b0055915212654bd44c8",
@@ -389,13 +405,29 @@
       "sha256": "197b53a301c143367911971f65d706a0ad287c2d5651c4a522098ecd60a03c7c",
       "bytes": 3532142
     },
+    "stage-shots-stockholm-ipsc-open-2026-stage2-s0fe3d797.wav": {
+      "sha256": "d79cd505f9be79dac9a4734a4336447be26ead5d5d9ee68ba6c5c3662975acb1",
+      "bytes": 5018998
+    },
+    "stage-shots-stockholm-ipsc-open-2026-stage2-s36ed6e4e.wav": {
+      "sha256": "b127e62f8ffe9dd95219372fc52ce042f31d8e59a8d118ec58aaee0a274a2e42",
+      "bytes": 5815316
+    },
     "stage-shots-stockholm-ipsc-open-2026-stage2-s97dcec94-apple-iphone17pro.wav": {
       "sha256": "3746e2da2185edbc150a582b81ea952cf48d3747fc6963f1561a5c825999bd67",
       "bytes": 5633646
     },
     "stage-shots-stockholm-ipsc-open-2026-stage2-s97dcec94.wav": {
-      "sha256": "24fd69098a7cda06cb50b5b2467302d65d5ca1320f4f26e2e470759b8d7af9ef",
-      "bytes": 5629134
+      "sha256": "fd7cb94d9e6b7f3df821ca2204edebf8143f976e9293526a1f0038b432e99cb2",
+      "bytes": 5629390
+    },
+    "stage-shots-stockholm-ipsc-open-2026-stage3-s0fe3d797.wav": {
+      "sha256": "cfefda49fe8a07cffbf69321f2fc6a98f63530ccdbf131769023771fa0c0e1af",
+      "bytes": 3958804
+    },
+    "stage-shots-stockholm-ipsc-open-2026-stage3-s36ed6e4e.wav": {
+      "sha256": "68154f9804a832dfe7d0ac4fe5365558bf885292a3792135c813fb115425834d",
+      "bytes": 4422094
     },
     "stage-shots-stockholm-ipsc-open-2026-stage3-s97dcec94-apple-iphone17pro.wav": {
       "sha256": "86a28124a5f855548f0d5dbbc6b059faae5af359ba1b39a995cd1ae9d471c5cd",
@@ -405,13 +437,29 @@
       "sha256": "0ce1a81b0e6729dab51128cfe49bedd66e56c126f6b5de0959553433aefed000",
       "bytes": 4044494
     },
+    "stage-shots-stockholm-ipsc-open-2026-stage4-s0fe3d797.wav": {
+      "sha256": "131237eac79e11c5bfcd886b0a24508801bd633464e966eb5ea3e54e974e15cd",
+      "bytes": 2399082
+    },
+    "stage-shots-stockholm-ipsc-open-2026-stage4-s36ed6e4e.wav": {
+      "sha256": "9c92d3334ae57dc6e27e51347f325caaf3ead215f6c56276d022d50456bec823",
+      "bytes": 2677614
+    },
     "stage-shots-stockholm-ipsc-open-2026-stage4-s97dcec94-apple-iphone17pro.wav": {
-      "sha256": "2fdbd5c768d66cec800ad851f81b70f94302e80eabe424899ecb82bde07d4958",
-      "bytes": 3401038
+      "sha256": "9eb4db042712e4856fac2e0a635626eb63828f3c3917b006a0248da8ebc6761e",
+      "bytes": 3385678
     },
     "stage-shots-stockholm-ipsc-open-2026-stage4-s97dcec94.wav": {
       "sha256": "972c402b69d79ef9c6b3e63d0c3f1d4ecc8aad9b2d2683ffd43b3e2624f67233",
       "bytes": 3675822
+    },
+    "stage-shots-stockholm-ipsc-open-2026-stage5-s0fe3d797.wav": {
+      "sha256": "a4187adfa23accd2e3f9734a8b5d777b3e7a28bbb43de260c31be279051113e7",
+      "bytes": 2875342
+    },
+    "stage-shots-stockholm-ipsc-open-2026-stage5-s36ed6e4e.wav": {
+      "sha256": "01a195e673154eb494904577916f95307c2af5d2bc3617d3ce51a93ba0a381f9",
+      "bytes": 2375918
     },
     "stage-shots-stockholm-ipsc-open-2026-stage5-s97dcec94-apple-iphone17promax.wav": {
       "sha256": "46648beaaaac1b36e18c5264067311a99752b3dea11170aee9527753ca448e37",
@@ -421,21 +469,37 @@
       "sha256": "07f1d7e4d3e37f9fc2dc2e5205681a23434a9fe9895e4bf66c442c94b1ea1c43",
       "bytes": 2958478
     },
+    "stage-shots-stockholm-ipsc-open-2026-stage6-s0fe3d797.wav": {
+      "sha256": "d02ffdc8583f487353bb0c028d9b841646a255e2b3678c5350d6473e0a1c089f",
+      "bytes": 4854474
+    },
+    "stage-shots-stockholm-ipsc-open-2026-stage6-s36ed6e4e.wav": {
+      "sha256": "a194390ec081805ae3acea845ed7bfa0e56dfcee2a46584c9b59233e9ae63a48",
+      "bytes": 5235918
+    },
     "stage-shots-stockholm-ipsc-open-2026-stage6-s97dcec94-apple-iphone17pro.wav": {
-      "sha256": "a4a3bbb6e7a632a9e3f4bbf528cb72aa7f544e558503cd7741f2bde1ef33e1e6",
-      "bytes": 4833486
+      "sha256": "cb7056b785d6f8d13a90d0ed2ed29e9c1923b71f2d8d8ba8ebc1056bb2efe7d9",
+      "bytes": 4852878
     },
     "stage-shots-stockholm-ipsc-open-2026-stage6-s97dcec94.wav": {
       "sha256": "392b1a1d612c2907ffa978d306d2def1f4b1871ee79e4bb9817d3dc01bf79390",
       "bytes": 4853102
     },
+    "stage-shots-stockholm-ipsc-open-2026-stage7-s0fe3d797.wav": {
+      "sha256": "1f02d9145a0192b26c818ec1a6ec7521e7d4d6aa1a18e4e4286b46bc25cb5afa",
+      "bytes": 1633422
+    },
+    "stage-shots-stockholm-ipsc-open-2026-stage7-s36ed6e4e.wav": {
+      "sha256": "abf00d1a5bdd688d963fe987a570ce67e7e931bb57b249421c002c471f78cb8c",
+      "bytes": 2012206
+    },
     "stage-shots-stockholm-ipsc-open-2026-stage7-s97dcec94-apple-iphone17pro.wav": {
-      "sha256": "07baf1f2b0fb9bc9151164b466bca7a4054220d0e07d9f0751e08427ea61b242",
-      "bytes": 2154798
+      "sha256": "a36a3023291d96d832912afbf994b4dfb6d69dc34fd8afa24d58c0a3bc5bec5e",
+      "bytes": 2141166
     },
     "stage-shots-stockholm-ipsc-open-2026-stage7-s97dcec94-apple-iphone17promax.wav": {
-      "sha256": "3e87ebabfc40a301f73eb0d12f2642ea5ea338fd571b9b193b8c4bdcd63e9cc2",
-      "bytes": 2254254
+      "sha256": "53e38773136ba949a670ca6d95ac4b61afef2b15d41345ca6025cc0281d0022f",
+      "bytes": 2282670
     },
     "stage-shots-stockholm-ipsc-open-2026-stage7-s97dcec94.wav": {
       "sha256": "fec97c3dccb71b7834d8af25162972f7715715098260ca46eac8fa191d08a057",
@@ -469,13 +533,21 @@
       "sha256": "a933b164bb51b5400d34a9b0a971696492400d45efd8ff48f5636af4cd918478",
       "bytes": 3078126
     },
+    "stage-shots-stockholm-ipsc-open-2026-stage9-s0fe3d797.wav": {
+      "sha256": "a528661764d3cd2980a2207a3a13cb0dafba43dcd6734ff111365d358e23f86e",
+      "bytes": 2619470
+    },
+    "stage-shots-stockholm-ipsc-open-2026-stage9-s36ed6e4e.wav": {
+      "sha256": "e2e3ed1dfb1932c059561d15af2d8070244b41f5b7a29f2d757b2b5e91586a29",
+      "bytes": 2825774
+    },
     "stage-shots-stockholm-ipsc-open-2026-stage9-s97dcec94-apple-iphone17pro.wav": {
       "sha256": "52542e3646f57c846ddbfa9f27981691aacbccbe1ca084adf76332d057a5c922",
       "bytes": 3226414
     },
     "stage-shots-stockholm-ipsc-open-2026-stage9-s97dcec94.wav": {
-      "sha256": "fe3c21880f8c3c0d06dc664b7272723c395ec99ec64bbc4b04bb2375d41dd60b",
-      "bytes": 3378894
+      "sha256": "ac225d97764429cb4fd77f9c5856c1cee79746281cc3d8594e09888bc16fd8ba",
+      "bytes": 3379150
     },
     "stage-shots-tallmilan-2026-stage4-s97dcec94-apple-iphone17pro-9e5155.wav": {
       "sha256": "519b6f8cc10061b37fc07d09436de051d88ae2894f4f293b52e17c348ef3b7b1",

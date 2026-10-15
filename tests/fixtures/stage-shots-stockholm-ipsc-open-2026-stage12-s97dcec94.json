@@ -21,7 +21,7 @@
       "ms_after_beep": 2794,
       "source": "detected",
       "id": "cand-11",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
@@ -31,7 +31,7 @@
       "ms_after_beep": 3751,
       "source": "detected",
       "id": "cand-14",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
@@ -41,14 +41,14 @@
       "ms_after_beep": 5159,
       "source": "detected",
       "id": "cand-17",
-      "interval_class": "movement",
+      "interval_class": "transition",
       "interval_class_source": "auto"
     },
     {
       "shot_number": 5,
       "candidate_number": 18,
-      "time": 10.587,
-      "ms_after_beep": 5587,
+      "time": 10.565,
+      "ms_after_beep": 5565,
       "source": "detected",
       "id": "cand-18",
       "interval_class": "split",
@@ -61,37 +61,37 @@
       "ms_after_beep": 7026,
       "source": "detected",
       "id": "cand-24",
-      "interval_class": "movement",
+      "interval_class": "transition",
       "interval_class_source": "auto"
     },
     {
       "shot_number": 7,
       "candidate_number": 25,
-      "time": 12.733,
-      "ms_after_beep": 7733,
+      "time": 12.709,
+      "ms_after_beep": 7709,
       "source": "detected",
       "id": "cand-25",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
       "shot_number": 8,
       "candidate_number": 26,
-      "time": 13.532,
-      "ms_after_beep": 8532,
+      "time": 13.553,
+      "ms_after_beep": 8553,
       "source": "detected",
       "id": "cand-26",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
       "shot_number": 9,
       "candidate_number": 28,
-      "time": 14.341,
-      "ms_after_beep": 9341,
+      "time": 14.317,
+      "ms_after_beep": 9317,
       "source": "detected",
       "id": "cand-28",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
@@ -101,17 +101,17 @@
       "ms_after_beep": 10120,
       "source": "detected",
       "id": "cand-30",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
       "shot_number": 11,
       "candidate_number": 31,
-      "time": 15.713,
-      "ms_after_beep": 10713,
+      "time": 15.688,
+      "ms_after_beep": 10688,
       "source": "detected",
       "id": "cand-31",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
@@ -131,7 +131,7 @@
       "ms_after_beep": 14506,
       "source": "detected",
       "id": "cand-41",
-      "interval_class": "movement",
+      "interval_class": "transition",
       "interval_class_source": "auto"
     },
     {
@@ -141,17 +141,17 @@
       "ms_after_beep": 15432,
       "source": "detected",
       "id": "cand-43",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
       "shot_number": 15,
       "candidate_number": 45,
-      "time": 21.602,
-      "ms_after_beep": 16602,
+      "time": 21.577,
+      "ms_after_beep": 16577,
       "source": "detected",
       "id": "cand-45",
-      "interval_class": "movement",
+      "interval_class": "transition",
       "interval_class_source": "auto"
     },
     {
@@ -171,7 +171,7 @@
       "ms_after_beep": 20782,
       "source": "detected",
       "id": "cand-62",
-      "interval_class": "movement",
+      "interval_class": "transition",
       "interval_class_source": "auto"
     },
     {
@@ -181,7 +181,7 @@
       "ms_after_beep": 21298,
       "source": "detected",
       "id": "cand-63",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
@@ -191,7 +191,7 @@
       "ms_after_beep": 22243,
       "source": "detected",
       "id": "cand-64",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
@@ -201,7 +201,7 @@
       "ms_after_beep": 22792,
       "source": "detected",
       "id": "cand-65",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
@@ -211,7 +211,7 @@
       "ms_after_beep": 23709,
       "source": "detected",
       "id": "cand-67",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
@@ -221,7 +221,7 @@
       "ms_after_beep": 24840,
       "source": "detected",
       "id": "cand-68",
-      "interval_class": "movement",
+      "interval_class": "transition",
       "interval_class_source": "auto"
     },
     {
@@ -231,7 +231,7 @@
       "ms_after_beep": 25512,
       "source": "detected",
       "id": "cand-69",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
@@ -241,7 +241,7 @@
       "ms_after_beep": 26078,
       "source": "detected",
       "id": "cand-70",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
@@ -251,7 +251,7 @@
       "ms_after_beep": 26789,
       "source": "detected",
       "id": "cand-71",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto"
     }
   ],
@@ -1649,9 +1649,147 @@
         "shots_count": 25
       },
       "id": "5b5c9df1b55e437d8f29794b2089f35a"
+    },
+    {
+      "ts": "2026-10-15T14:32:11.237Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-18",
+        "from_time": 10.587,
+        "to_time": 10.565,
+        "reason": "earlier_rise"
+      },
+      "id": "e8f1c5e5973c47b3a9ffa2f963b62a3c"
+    },
+    {
+      "ts": "2026-10-15T14:32:12.960Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-25",
+        "from_time": 12.733,
+        "to_time": 12.709,
+        "reason": "earlier_rise"
+      },
+      "id": "0bf922aa89cd4159a7721ddc946b6cd0"
+    },
+    {
+      "ts": "2026-10-15T14:32:14.537Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-26",
+        "from_time": 13.532,
+        "to_time": 13.553,
+        "reason": "rise_foot"
+      },
+      "id": "763812931bac4755bfa9b25549882774"
+    },
+    {
+      "ts": "2026-10-15T14:32:15.973Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-26",
+        "from_time": 13.553,
+        "to_time": 13.506,
+        "reason": "earlier_rise"
+      },
+      "id": "c3bff5c502d74436af72427c397d8c1e"
+    },
+    {
+      "ts": "2026-10-15T14:32:17.355Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-26",
+        "from_time": 13.506,
+        "to_time": 13.483,
+        "reason": "rise_foot"
+      },
+      "id": "193bee8591ea4932a96a891ac73345fe"
+    },
+    {
+      "ts": "2026-10-15T14:32:22.601Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-26",
+        "from_time": 13.483,
+        "to_time": 13.553
+      },
+      "id": "efd6e7147ba249b284bbc71d69e18518"
+    },
+    {
+      "ts": "2026-10-15T14:32:23.677Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-26",
+        "from_time": 13.553,
+        "to_time": 13.506,
+        "reason": "earlier_rise"
+      },
+      "id": "08e538fac9644b5985f9834efed87949"
+    },
+    {
+      "ts": "2026-10-15T14:32:24.392Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-26",
+        "from_time": 13.506,
+        "to_time": 13.483,
+        "reason": "rise_foot"
+      },
+      "id": "d31568a09a694b1192923b8a0f214285"
+    },
+    {
+      "ts": "2026-10-15T14:32:26.491Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-26",
+        "from_time": 13.483,
+        "to_time": 13.553
+      },
+      "id": "af0481b103e8405f91614ef4a8392e88"
+    },
+    {
+      "ts": "2026-10-15T14:32:29.136Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-28",
+        "from_time": 14.341,
+        "to_time": 14.317,
+        "reason": "earlier_rise"
+      },
+      "id": "386acd686a654a379f08dca32f5dc8bb"
+    },
+    {
+      "ts": "2026-10-15T14:32:31.526Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-31",
+        "from_time": 15.713,
+        "to_time": 15.688,
+        "reason": "earlier_rise"
+      },
+      "id": "7c0a957c164e4039bb3f6744a01e1cf2"
+    },
+    {
+      "ts": "2026-10-15T14:32:35.503Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-45",
+        "from_time": 21.602,
+        "to_time": 21.577,
+        "reason": "earlier_rise"
+      },
+      "id": "a9e9d62952d04509a9b9c21b90635f1a"
+    },
+    {
+      "ts": "2026-10-15T14:32:44.273Z",
+      "kind": "save",
+      "payload": {
+        "shots_count": 25
+      },
+      "id": "86760ab6c3fe4f13af2f0bd45c392049"
     }
   ],
-  "promoted_at": "2026-10-10T05:25:56.040416+00:00",
+  "promoted_at": "2026-10-15T14:51:07.510091+00:00",
   "provenance": {
     "stage_number": 12,
     "stage_name": "Stage B2 Left"
@@ -1678,11 +1816,9 @@
   },
   "event_id": "stockholm-ipsc-open-2026:12:s97dcec94",
   "review": {
-    "status": "needs_review",
-    "derived_from": null,
-    "reviewed_at": null,
-    "note": "shot times predate the rise-foot definition (docs/METHODOLOGY.md, 2026-10-10): check each shot's leading edge",
-    "previous_status": "reviewed",
-    "previous_reviewed_at": null
+    "confirmed_at": "2026-10-15T14:51:19.086742+00:00",
+    "status": "reviewed",
+    "reviewed_at": "2026-10-15T14:51:19.086742+00:00",
+    "method": "own-audit"
   }
 }

@@ -21,17 +21,17 @@
       "ms_after_beep": 4923,
       "source": "detected",
       "id": "cand-14",
-      "interval_class": "movement",
+      "interval_class": "transition",
       "interval_class_source": "auto"
     },
     {
       "shot_number": 3,
       "candidate_number": 16,
-      "time": 10.976,
-      "ms_after_beep": 5976,
+      "time": 10.957,
+      "ms_after_beep": 5957,
       "source": "detected",
       "id": "cand-16",
-      "interval_class": "movement",
+      "interval_class": "transition",
       "interval_class_source": "auto"
     },
     {
@@ -41,7 +41,7 @@
       "ms_after_beep": 7310,
       "source": "detected",
       "id": "cand-19",
-      "interval_class": "movement",
+      "interval_class": "transition",
       "interval_class_source": "auto"
     },
     {
@@ -61,7 +61,7 @@
       "ms_after_beep": 11154,
       "source": "detected",
       "id": "cand-24",
-      "interval_class": "movement",
+      "interval_class": "transition",
       "interval_class_source": "auto"
     },
     {
@@ -71,7 +71,7 @@
       "ms_after_beep": 11922,
       "source": "detected",
       "id": "cand-25",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
@@ -91,7 +91,7 @@
       "ms_after_beep": 16887,
       "source": "detected",
       "id": "cand-39",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
@@ -101,7 +101,7 @@
       "ms_after_beep": 17948,
       "source": "detected",
       "id": "cand-41",
-      "interval_class": "movement",
+      "interval_class": "transition",
       "interval_class_source": "auto"
     },
     {
@@ -111,7 +111,7 @@
       "ms_after_beep": 19141,
       "source": "detected",
       "id": "cand-44",
-      "interval_class": "movement",
+      "interval_class": "transition",
       "interval_class_source": "auto"
     },
     {
@@ -121,7 +121,7 @@
       "ms_after_beep": 19846,
       "source": "detected",
       "id": "cand-46",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
@@ -131,7 +131,7 @@
       "ms_after_beep": 20581,
       "source": "detected",
       "id": "cand-47",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
@@ -141,7 +141,7 @@
       "ms_after_beep": 21350,
       "source": "detected",
       "id": "cand-49",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
@@ -151,7 +151,7 @@
       "ms_after_beep": 22028,
       "source": "detected",
       "id": "cand-51",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto"
     }
   ],
@@ -1153,9 +1153,28 @@
         "shots_count": 15
       },
       "id": "7bde21c7bb4d488799f1b3063e668b78"
+    },
+    {
+      "ts": "2026-10-15T14:30:52.274Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-16",
+        "from_time": 10.976,
+        "to_time": 10.957,
+        "reason": "earlier_rise"
+      },
+      "id": "f05bc17a4f1e45ecad5e601b5c00488f"
+    },
+    {
+      "ts": "2026-10-15T14:31:03.340Z",
+      "kind": "save",
+      "payload": {
+        "shots_count": 15
+      },
+      "id": "d6cd0b38e532464bb629a48e229a0b8a"
     }
   ],
-  "promoted_at": "2026-10-10T05:25:55.742298+00:00",
+  "promoted_at": "2026-10-15T14:51:07.161845+00:00",
   "provenance": {
     "stage_number": 8,
     "stage_name": "B4 Rear"
@@ -1182,11 +1201,9 @@
   },
   "event_id": "stockholm-ipsc-open-2026:8:s97dcec94",
   "review": {
-    "status": "needs_review",
-    "derived_from": null,
-    "reviewed_at": null,
-    "note": "shot times predate the rise-foot definition (docs/METHODOLOGY.md, 2026-10-10): check each shot's leading edge",
-    "previous_status": "reviewed",
-    "previous_reviewed_at": null
+    "confirmed_at": "2026-10-15T14:51:19.104898+00:00",
+    "status": "reviewed",
+    "reviewed_at": "2026-10-15T14:51:19.104898+00:00",
+    "method": "own-audit"
   }
 }
