@@ -39,6 +39,7 @@ import argparse
 import datetime as dt
 import functools
 import json
+import sys
 from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
@@ -68,8 +69,14 @@ from splitsmith.ensemble.tta import compute_tta_agreement
 from splitsmith.ensemble.voters import within_stage_amp_anchor
 from splitsmith.shot_detect import detect_shots
 
-# Sibling scripts: the CLI runs with scripts/ on sys.path, and the UI's
-# retrain job and the tests put it there before importing this module.
+# Sibling scripts. The CLI runs with scripts/ on sys.path, but the UI's
+# retrain job and some tests load this file by path, so make the folder
+# importable here rather than trust every caller to (appended: it never
+# shadows an installed module).
+_SCRIPTS_DIR = str(Path(__file__).resolve().parent)
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.append(_SCRIPTS_DIR)
+
 import feature_caches  # noqa: E402  isort: skip
 import fixture_audio  # noqa: E402  isort: skip
 
