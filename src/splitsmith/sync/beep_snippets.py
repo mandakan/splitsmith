@@ -10,8 +10,10 @@ there; hosted serves it so a phone can review beeps on a mirror match.
 Skip logic is an ``input_hash`` stored inside the peaks JSON - a digest of
 the fields that shape the snippet. Unchanged inputs mean no ffmpeg run and
 untouched mtimes, so the push plan's size+mtime check skips the upload too.
-Videos that become reviewed get their snippet files removed so they stop
-being pushed.
+A primary that becomes reviewed gets its snippet files removed so they stop
+being pushed. A secondary keeps its own: the recheck pass over secondary
+beeps (2026-10-14) reviews confirmed ones on the phone, which on a mirror
+plays nothing else.
 """
 
 from __future__ import annotations
@@ -166,7 +168,7 @@ def _process_video(
     m4a = out_dir / f"{video.video_id}.m4a"
     peaks_path = out_dir / f"{video.video_id}.peaks.json"
 
-    if video.beep_reviewed:
+    if video.beep_reviewed and video.role != "secondary":
         removed = False
         for stale in (m4a, peaks_path):
             if stale.exists():

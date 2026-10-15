@@ -137,4 +137,17 @@ describe("MobileBeepReview rechecking the secondary beeps", () => {
       "/match/m1/beep-review?recheck=secondaries",
     );
   });
+
+  it("Looks right moves on even when no media was pushed for the camera", () => {
+    renderPager(
+      hookState({
+        flatItems: [PRIMARY, item({ proxy_ready: false, snippet_ready: false }), SEC2],
+      }),
+    );
+    const next = screen.getByRole("button", { name: "Looks right, next" });
+    expect(next).toBeEnabled();
+    fireEvent.click(next);
+    expect(screen.getByText("Secondary beep 2 of 2")).toBeInTheDocument();
+  });
 });
+
