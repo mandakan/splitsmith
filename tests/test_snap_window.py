@@ -212,3 +212,26 @@ def test_onset_lag_is_zero_when_the_beeps_agree():
         span_s=3.5,
     )
     assert abs(lag_s) <= 0.003
+
+
+def test_onset_lag_is_zero_when_the_secondary_beep_is_before_its_clip():
+    """A camera that started recording during the beep has its beep before 0
+    (2026-10-15). The lag window then starts before the clip, and reading it
+    from 0 instead shifted every onset: Höstfinalen stage 3's iPhone came out
+    328 ms early and each shot snapped onto the one before it."""
+    from splitsmith.lab.snap_window import estimate_onset_lag
+
+    shots = [1.0, 1.4, 2.2, 2.9, 3.3]
+    anchor = _clicks([5.0 + s for s in shots], 10.0, seed=5)
+    secondary = _clicks([-0.129 + s for s in shots], 5.0, seed=6)
+    lag_s, contrast = estimate_onset_lag(
+        anchor_audio=anchor,
+        anchor_sr=48000,
+        anchor_beep_time=5.0,
+        secondary_audio=secondary,
+        secondary_sr=48000,
+        secondary_beep_time=-0.129,
+        span_s=3.8,
+    )
+    assert abs(lag_s) <= 0.003
+    assert contrast > 1.5

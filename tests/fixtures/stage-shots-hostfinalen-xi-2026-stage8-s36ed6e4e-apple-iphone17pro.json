@@ -7,7 +7,7 @@
     2.312,
     29.361
   ],
-  "beep_time": 5.0,
+  "beep_time": 5,
   "tolerance_ms": 15,
   "stage_time_seconds": 17.07,
   "stage_window_end_in_fixture": null,
@@ -21,7 +21,7 @@
       "subclass": "unknown",
       "snap_displacement_ms": -8.14,
       "sanity_flag": "",
-      "seat_ms": -6.0
+      "seat_ms": -6
     },
     {
       "shot_number": 2,
@@ -32,7 +32,7 @@
       "subclass": "unknown",
       "snap_displacement_ms": 1.61,
       "sanity_flag": "",
-      "seat_ms": -13.0
+      "seat_ms": -13
     },
     {
       "shot_number": 3,
@@ -43,7 +43,7 @@
       "subclass": "unknown",
       "snap_displacement_ms": 2.22,
       "sanity_flag": "",
-      "seat_ms": -1.0
+      "seat_ms": -1
     },
     {
       "shot_number": 4,
@@ -54,7 +54,7 @@
       "subclass": "unknown",
       "snap_displacement_ms": 0.94,
       "sanity_flag": "",
-      "seat_ms": -2.0
+      "seat_ms": -2
     },
     {
       "shot_number": 5,
@@ -65,18 +65,17 @@
       "subclass": "unknown",
       "snap_displacement_ms": -15.82,
       "sanity_flag": "",
-      "seat_ms": -3.0
+      "seat_ms": -3
     },
     {
       "shot_number": 6,
       "candidate_number": 17,
-      "time": 14.624,
-      "ms_after_beep": 9624,
-      "source": "promoted",
+      "time": 14.613,
+      "ms_after_beep": 9613,
+      "source": "detected",
       "subclass": "unknown",
-      "snap_displacement_ms": -10.08,
       "sanity_flag": "",
-      "seat_ms": -1.0
+      "seat_ms": -1
     },
     {
       "shot_number": 7,
@@ -87,7 +86,7 @@
       "subclass": "unknown",
       "snap_displacement_ms": -2.43,
       "sanity_flag": "",
-      "seat_ms": -7.0
+      "seat_ms": -7
     },
     {
       "shot_number": 8,
@@ -98,7 +97,7 @@
       "subclass": "unknown",
       "snap_displacement_ms": -1.85,
       "sanity_flag": "",
-      "seat_ms": -2.0
+      "seat_ms": -2
     },
     {
       "shot_number": 9,
@@ -109,7 +108,7 @@
       "subclass": "unknown",
       "snap_displacement_ms": -2.14,
       "sanity_flag": "",
-      "seat_ms": -4.0
+      "seat_ms": -4
     },
     {
       "shot_number": 10,
@@ -120,7 +119,7 @@
       "subclass": "unknown",
       "snap_displacement_ms": -2.4,
       "sanity_flag": "",
-      "seat_ms": -3.0
+      "seat_ms": -3
     },
     {
       "shot_number": 11,
@@ -131,7 +130,7 @@
       "subclass": "unknown",
       "snap_displacement_ms": -1.82,
       "sanity_flag": "",
-      "seat_ms": -4.0
+      "seat_ms": -4
     },
     {
       "shot_number": 12,
@@ -142,7 +141,7 @@
       "subclass": "unknown",
       "snap_displacement_ms": -1.74,
       "sanity_flag": "",
-      "seat_ms": -1.0
+      "seat_ms": -1
     },
     {
       "shot_number": 13,
@@ -151,9 +150,9 @@
       "ms_after_beep": 17047,
       "source": "promoted",
       "subclass": "unknown",
-      "snap_displacement_ms": -1.0,
+      "snap_displacement_ms": -1,
       "sanity_flag": "",
-      "seat_ms": -2.0
+      "seat_ms": -2
     }
   ],
   "_candidates_pending_audit": {
@@ -169,12 +168,12 @@
         "vote_c": 0,
         "vote_e": 0,
         "vote_total": 1,
-        "apriori_boost": 0.0,
-        "ensemble_score": 1.0,
+        "apriori_boost": 0,
+        "ensemble_score": 1,
         "score_c": 0.0025,
         "clap_diff": -0.0399,
         "gunshot_prob": 0.0005,
-        "voter_e_signal": 0.0,
+        "voter_e_signal": 0,
         "kept": false,
         "amp_floor_vetoed": false
       },
@@ -189,12 +188,12 @@
         "vote_c": 0,
         "vote_e": 0,
         "vote_total": 2,
-        "apriori_boost": 0.0,
-        "ensemble_score": 2.0,
+        "apriori_boost": 0,
+        "ensemble_score": 2,
         "score_c": 0.046,
         "clap_diff": 0.3667,
         "gunshot_prob": 0.1151,
-        "voter_e_signal": 0.0,
+        "voter_e_signal": 0,
         "kept": false,
         "amp_floor_vetoed": false
       },
@@ -209,12 +208,12 @@
         "vote_c": 1,
         "vote_e": 0,
         "vote_total": 3,
-        "apriori_boost": 0.0,
-        "ensemble_score": 3.0,
+        "apriori_boost": 0,
+        "ensemble_score": 3,
         "score_c": 0.7194,
         "clap_diff": 0.362,
         "gunshot_prob": 0.1254,
-        "voter_e_signal": 0.0,
+        "voter_e_signal": 0,
         "kept": true,
         "amp_floor_vetoed": false
       },
@@ -229,12 +228,12 @@
         "vote_c": 1,
         "vote_e": 0,
         "vote_total": 3,
-        "apriori_boost": 1.0,
-        "ensemble_score": 4.0,
+        "apriori_boost": 1,
+        "ensemble_score": 4,
         "score_c": 0.987,
         "clap_diff": 0.3419,
         "gunshot_prob": 0.1717,
-        "voter_e_signal": 0.0,
+        "voter_e_signal": 0,
         "kept": true,
         "amp_floor_vetoed": false
       },
@@ -249,12 +248,12 @@
         "vote_c": 1,
         "vote_e": 0,
         "vote_total": 3,
-        "apriori_boost": 1.0,
-        "ensemble_score": 4.0,
+        "apriori_boost": 1,
+        "ensemble_score": 4,
         "score_c": 0.9862,
         "clap_diff": 0.3578,
         "gunshot_prob": 0.1997,
-        "voter_e_signal": 0.0,
+        "voter_e_signal": 0,
         "kept": true,
         "amp_floor_vetoed": false
       },
@@ -269,12 +268,12 @@
         "vote_c": 1,
         "vote_e": 0,
         "vote_total": 1,
-        "apriori_boost": 0.0,
-        "ensemble_score": 1.0,
+        "apriori_boost": 0,
+        "ensemble_score": 1,
         "score_c": 0.1852,
         "clap_diff": 0.0216,
         "gunshot_prob": 0.0015,
-        "voter_e_signal": 0.0,
+        "voter_e_signal": 0,
         "kept": false,
         "amp_floor_vetoed": false
       },
@@ -289,12 +288,12 @@
         "vote_c": 1,
         "vote_e": 0,
         "vote_total": 1,
-        "apriori_boost": 0.0,
-        "ensemble_score": 1.0,
+        "apriori_boost": 0,
+        "ensemble_score": 1,
         "score_c": 0.0775,
         "clap_diff": 0.0146,
         "gunshot_prob": 0.0008,
-        "voter_e_signal": 0.0,
+        "voter_e_signal": 0,
         "kept": false,
         "amp_floor_vetoed": false
       },
@@ -309,12 +308,12 @@
         "vote_c": 0,
         "vote_e": 0,
         "vote_total": 2,
-        "apriori_boost": 0.0,
-        "ensemble_score": 2.0,
+        "apriori_boost": 0,
+        "ensemble_score": 2,
         "score_c": 0.0631,
         "clap_diff": 0.0402,
         "gunshot_prob": 0.0012,
-        "voter_e_signal": 0.0,
+        "voter_e_signal": 0,
         "kept": false,
         "amp_floor_vetoed": false
       },
@@ -329,12 +328,12 @@
         "vote_c": 1,
         "vote_e": 0,
         "vote_total": 3,
-        "apriori_boost": 0.0,
-        "ensemble_score": 3.0,
+        "apriori_boost": 0,
+        "ensemble_score": 3,
         "score_c": 0.1331,
         "clap_diff": 0.0706,
         "gunshot_prob": 0.0014,
-        "voter_e_signal": 0.0,
+        "voter_e_signal": 0,
         "kept": false,
         "amp_floor_vetoed": true
       },
@@ -349,12 +348,12 @@
         "vote_c": 0,
         "vote_e": 0,
         "vote_total": 2,
-        "apriori_boost": 0.0,
-        "ensemble_score": 2.0,
+        "apriori_boost": 0,
+        "ensemble_score": 2,
         "score_c": 0.0041,
         "clap_diff": 0.0483,
         "gunshot_prob": 0.0008,
-        "voter_e_signal": 0.0,
+        "voter_e_signal": 0,
         "kept": false,
         "amp_floor_vetoed": false
       },
@@ -369,12 +368,12 @@
         "vote_c": 0,
         "vote_e": 0,
         "vote_total": 1,
-        "apriori_boost": 0.0,
-        "ensemble_score": 1.0,
+        "apriori_boost": 0,
+        "ensemble_score": 1,
         "score_c": 0.0094,
         "clap_diff": 0.0263,
         "gunshot_prob": 0.0009,
-        "voter_e_signal": 0.0,
+        "voter_e_signal": 0,
         "kept": false,
         "amp_floor_vetoed": false
       },
@@ -389,12 +388,12 @@
         "vote_c": 0,
         "vote_e": 0,
         "vote_total": 2,
-        "apriori_boost": 1.0,
-        "ensemble_score": 3.0,
+        "apriori_boost": 1,
+        "ensemble_score": 3,
         "score_c": 0.0154,
         "clap_diff": 0.1992,
         "gunshot_prob": 0.0082,
-        "voter_e_signal": 0.0,
+        "voter_e_signal": 0,
         "kept": false,
         "amp_floor_vetoed": false
       },
@@ -409,12 +408,12 @@
         "vote_c": 0,
         "vote_e": 0,
         "vote_total": 2,
-        "apriori_boost": 0.0,
-        "ensemble_score": 2.0,
+        "apriori_boost": 0,
+        "ensemble_score": 2,
         "score_c": 0.0041,
         "clap_diff": 0.2427,
         "gunshot_prob": 0.0047,
-        "voter_e_signal": 0.0,
+        "voter_e_signal": 0,
         "kept": false,
         "amp_floor_vetoed": false
       },
@@ -429,12 +428,12 @@
         "vote_c": 0,
         "vote_e": 0,
         "vote_total": 2,
-        "apriori_boost": 1.0,
-        "ensemble_score": 3.0,
+        "apriori_boost": 1,
+        "ensemble_score": 3,
         "score_c": 0.0088,
         "clap_diff": 0.2435,
         "gunshot_prob": 0.001,
-        "voter_e_signal": 0.0,
+        "voter_e_signal": 0,
         "kept": false,
         "amp_floor_vetoed": false
       },
@@ -449,12 +448,12 @@
         "vote_c": 1,
         "vote_e": 0,
         "vote_total": 3,
-        "apriori_boost": 1.0,
-        "ensemble_score": 4.0,
+        "apriori_boost": 1,
+        "ensemble_score": 4,
         "score_c": 0.0646,
         "clap_diff": 0.2831,
         "gunshot_prob": 0.0025,
-        "voter_e_signal": 0.0,
+        "voter_e_signal": 0,
         "kept": true,
         "amp_floor_vetoed": false
       },
@@ -469,12 +468,12 @@
         "vote_c": 1,
         "vote_e": 0,
         "vote_total": 3,
-        "apriori_boost": 1.0,
-        "ensemble_score": 4.0,
+        "apriori_boost": 1,
+        "ensemble_score": 4,
         "score_c": 0.972,
         "clap_diff": 0.3435,
         "gunshot_prob": 0.0519,
-        "voter_e_signal": 0.0,
+        "voter_e_signal": 0,
         "kept": true,
         "amp_floor_vetoed": false
       },
@@ -489,12 +488,12 @@
         "vote_c": 1,
         "vote_e": 0,
         "vote_total": 3,
-        "apriori_boost": 1.0,
-        "ensemble_score": 4.0,
+        "apriori_boost": 1,
+        "ensemble_score": 4,
         "score_c": 0.9355,
         "clap_diff": 0.3961,
         "gunshot_prob": 0.1465,
-        "voter_e_signal": 0.0,
+        "voter_e_signal": 0,
         "kept": true,
         "amp_floor_vetoed": false
       },
@@ -509,12 +508,12 @@
         "vote_c": 0,
         "vote_e": 0,
         "vote_total": 2,
-        "apriori_boost": 0.0,
-        "ensemble_score": 2.0,
+        "apriori_boost": 0,
+        "ensemble_score": 2,
         "score_c": 0.0174,
         "clap_diff": 0.3882,
         "gunshot_prob": 0.0609,
-        "voter_e_signal": 0.0,
+        "voter_e_signal": 0,
         "kept": false,
         "amp_floor_vetoed": false
       },
@@ -529,12 +528,12 @@
         "vote_c": 0,
         "vote_e": 0,
         "vote_total": 1,
-        "apriori_boost": 0.0,
-        "ensemble_score": 1.0,
+        "apriori_boost": 0,
+        "ensemble_score": 1,
         "score_c": 0.0043,
         "clap_diff": 0.3086,
         "gunshot_prob": 0.0242,
-        "voter_e_signal": 0.0,
+        "voter_e_signal": 0,
         "kept": false,
         "amp_floor_vetoed": false
       },
@@ -549,12 +548,12 @@
         "vote_c": 0,
         "vote_e": 0,
         "vote_total": 2,
-        "apriori_boost": 0.0,
-        "ensemble_score": 2.0,
+        "apriori_boost": 0,
+        "ensemble_score": 2,
         "score_c": 0.0404,
         "clap_diff": 0.3349,
         "gunshot_prob": 0.0018,
-        "voter_e_signal": 0.0,
+        "voter_e_signal": 0,
         "kept": false,
         "amp_floor_vetoed": false
       },
@@ -569,12 +568,12 @@
         "vote_c": 0,
         "vote_e": 0,
         "vote_total": 2,
-        "apriori_boost": 0.0,
-        "ensemble_score": 2.0,
+        "apriori_boost": 0,
+        "ensemble_score": 2,
         "score_c": 0.0186,
         "clap_diff": 0.2958,
         "gunshot_prob": 0.0019,
-        "voter_e_signal": 0.0,
+        "voter_e_signal": 0,
         "kept": false,
         "amp_floor_vetoed": false
       },
@@ -589,12 +588,12 @@
         "vote_c": 0,
         "vote_e": 0,
         "vote_total": 2,
-        "apriori_boost": 0.0,
-        "ensemble_score": 2.0,
+        "apriori_boost": 0,
+        "ensemble_score": 2,
         "score_c": 0.0125,
         "clap_diff": 0.1961,
         "gunshot_prob": 0.0012,
-        "voter_e_signal": 0.0,
+        "voter_e_signal": 0,
         "kept": false,
         "amp_floor_vetoed": false
       },
@@ -609,12 +608,12 @@
         "vote_c": 1,
         "vote_e": 0,
         "vote_total": 3,
-        "apriori_boost": 0.0,
-        "ensemble_score": 3.0,
+        "apriori_boost": 0,
+        "ensemble_score": 3,
         "score_c": 0.984,
         "clap_diff": 0.3676,
         "gunshot_prob": 0.3598,
-        "voter_e_signal": 0.0,
+        "voter_e_signal": 0,
         "kept": true,
         "amp_floor_vetoed": false
       },
@@ -629,12 +628,12 @@
         "vote_c": 1,
         "vote_e": 0,
         "vote_total": 3,
-        "apriori_boost": 1.0,
-        "ensemble_score": 4.0,
+        "apriori_boost": 1,
+        "ensemble_score": 4,
         "score_c": 0.6307,
         "clap_diff": 0.3704,
         "gunshot_prob": 0.1248,
-        "voter_e_signal": 0.0,
+        "voter_e_signal": 0,
         "kept": true,
         "amp_floor_vetoed": false
       },
@@ -649,12 +648,12 @@
         "vote_c": 1,
         "vote_e": 0,
         "vote_total": 3,
-        "apriori_boost": 0.0,
-        "ensemble_score": 3.0,
+        "apriori_boost": 0,
+        "ensemble_score": 3,
         "score_c": 0.9903,
         "clap_diff": 0.3804,
         "gunshot_prob": 0.1936,
-        "voter_e_signal": 0.0,
+        "voter_e_signal": 0,
         "kept": true,
         "amp_floor_vetoed": false
       },
@@ -669,12 +668,12 @@
         "vote_c": 1,
         "vote_e": 0,
         "vote_total": 3,
-        "apriori_boost": 1.0,
-        "ensemble_score": 4.0,
+        "apriori_boost": 1,
+        "ensemble_score": 4,
         "score_c": 0.6622,
         "clap_diff": 0.3582,
         "gunshot_prob": 0.2458,
-        "voter_e_signal": 0.0,
+        "voter_e_signal": 0,
         "kept": true,
         "amp_floor_vetoed": false
       },
@@ -689,12 +688,12 @@
         "vote_c": 0,
         "vote_e": 0,
         "vote_total": 2,
-        "apriori_boost": 0.0,
-        "ensemble_score": 2.0,
+        "apriori_boost": 0,
+        "ensemble_score": 2,
         "score_c": 0.0106,
         "clap_diff": 0.3842,
         "gunshot_prob": 0.3359,
-        "voter_e_signal": 0.0,
+        "voter_e_signal": 0,
         "kept": false,
         "amp_floor_vetoed": false
       },
@@ -709,12 +708,12 @@
         "vote_c": 1,
         "vote_e": 0,
         "vote_total": 3,
-        "apriori_boost": 1.0,
-        "ensemble_score": 4.0,
+        "apriori_boost": 1,
+        "ensemble_score": 4,
         "score_c": 0.6406,
         "clap_diff": 0.3801,
         "gunshot_prob": 0.2661,
-        "voter_e_signal": 0.0,
+        "voter_e_signal": 0,
         "kept": true,
         "amp_floor_vetoed": false
       },
@@ -729,12 +728,12 @@
         "vote_c": 0,
         "vote_e": 0,
         "vote_total": 2,
-        "apriori_boost": 0.0,
-        "ensemble_score": 2.0,
+        "apriori_boost": 0,
+        "ensemble_score": 2,
         "score_c": 0.0593,
         "clap_diff": 0.3091,
         "gunshot_prob": 0.0175,
-        "voter_e_signal": 0.0,
+        "voter_e_signal": 0,
         "kept": false,
         "amp_floor_vetoed": false
       },
@@ -749,12 +748,12 @@
         "vote_c": 0,
         "vote_e": 0,
         "vote_total": 2,
-        "apriori_boost": 1.0,
-        "ensemble_score": 3.0,
+        "apriori_boost": 1,
+        "ensemble_score": 3,
         "score_c": 0.0219,
         "clap_diff": 0.4113,
         "gunshot_prob": 0.0358,
-        "voter_e_signal": 0.0,
+        "voter_e_signal": 0,
         "kept": false,
         "amp_floor_vetoed": false
       },
@@ -769,12 +768,12 @@
         "vote_c": 1,
         "vote_e": 0,
         "vote_total": 3,
-        "apriori_boost": 1.0,
-        "ensemble_score": 4.0,
+        "apriori_boost": 1,
+        "ensemble_score": 4,
         "score_c": 0.9579,
         "clap_diff": 0.3475,
         "gunshot_prob": 0.0765,
-        "voter_e_signal": 0.0,
+        "voter_e_signal": 0,
         "kept": true,
         "amp_floor_vetoed": false
       }
@@ -808,7 +807,7 @@
     "revision_sha": "8732f9332cdaa005dcbfc25ec02ba9262c328a8bac2e46d29f65a806c3fcdfc6",
     "promoted_at": "2026-10-15T08:02:12.642790+00:00",
     "offset_seconds": 2.3120000000000003,
-    "drift_ms_per_minute": -0.0,
+    "drift_ms_per_minute": 0,
     "snap_window_ms": 60,
     "seated": true
   },
@@ -824,7 +823,7 @@
         "snapped": 13,
         "missed": 0,
         "sanity_flagged": 0,
-        "onset_lag_ms": 0.0,
+        "onset_lag_ms": 0,
         "onset_lag_contrast": 1.022,
         "onset_lag_applied": false,
         "at_window_edge": 0
@@ -832,8 +831,29 @@
     }
   ],
   "review": {
-    "status": "needs_review",
+    "status": "reviewed",
     "derived_from": "stage8",
-    "reviewed_at": null
-  }
+    "reviewed_at": "2026-10-15T10:25:26.986792+00:00",
+    "confirmed_at": "2026-10-15T10:25:26.986792+00:00",
+    "method": "audit"
+  },
+  "audit_events": [
+    {
+      "ts": "2026-10-15T10:25:17.269Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-17",
+        "from_time": 14.624,
+        "to_time": 14.613,
+        "reason": "earlier_rise"
+      }
+    },
+    {
+      "ts": "2026-10-15T10:25:26.474Z",
+      "kind": "save",
+      "payload": {
+        "shots_count": 13
+      }
+    }
+  ]
 }

@@ -164,7 +164,13 @@ def _peak_envelope(audio: np.ndarray, source_sr: int, target_sr: int) -> np.ndar
 
 
 def _onset_strength(audio: np.ndarray, sr: int, start_s: float, end_s: float) -> np.ndarray:
-    """Rises of the log block-max envelope at 1 kHz over ``[start_s, end_s)``."""
+    """Rises of the log block-max envelope at 1 kHz over ``[start_s, end_s)``.
+
+    Index 0 is ``start_s`` even when that is before the audio (a camera that
+    started recording during the beep, 2026-10-15): the part before 0 is
+    silence. Read from 0 instead, every onset sat that much early and the
+    lag search found a shift of one shot.
+    """
     i0, i1 = max(0, int(start_s * sr)), max(0, int(end_s * sr))
     env = _peak_envelope(np.asarray(audio[i0:i1], dtype=np.float32), sr, _GUIDED_ENVELOPE_SR)
     if env.size < 2:
@@ -172,6 +178,8 @@ def _onset_strength(audio: np.ndarray, sr: int, start_s: float, end_s: float) ->
     env = np.log1p(env / (float(np.median(env)) + 1e-9))
     onset = np.maximum(np.diff(env, prepend=env[0]), 0.0)
     onset = np.convolve(onset, np.ones(3) / 3, mode="same")
+    if start_s < 0.0:
+        onset = np.concatenate([np.zeros(int(round(-start_s * _GUIDED_ENVELOPE_SR))), onset])
     return onset - onset.mean()
 
 

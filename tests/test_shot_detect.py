@@ -142,6 +142,20 @@ def _make_burst_audio(sr: int, total_s: float, bursts: list[tuple[float, float]]
     return audio
 
 
+def test_detect_shots_with_the_beep_before_the_audio() -> None:
+    """A secondary camera that started recording during the beep has its
+    beep before 0 (2026-10-15); its shots are found in its audio and the
+    first split still runs from the beep."""
+    sr = 48000
+    audio = _make_burst_audio(sr, total_s=3.0, bursts=[(1.200, 0.6)])
+
+    shots = detect_shots(audio, sr, beep_time=-0.145, stage_time=2.0, config=ShotDetectConfig())
+    assert any(abs(s.time_absolute - 1.2) < 0.01 for s in shots)
+    assert shots[0].split == pytest.approx(shots[0].time_absolute + 0.145, abs=1e-6)
+    # (Near-silent synthetic audio also onsets at the window's start, as it
+    # does with a beep at 0; the snap's ensemble and anchor match drop it.)
+
+
 def test_detect_shots_refractory_drops_quiet_close_neighbour() -> None:
     """Within the refractory window (default 150 ms), a low-amplitude onset
     following a much louder one is suppressed as a likely echo."""
@@ -305,8 +319,6 @@ def test_detect_shots_validates_inputs() -> None:
         detect_shots(np.array([], dtype=np.float32), sr, 0.0, 1.0, ShotDetectConfig())
     with pytest.raises(ValueError, match="1-D"):
         detect_shots(np.zeros((sr, 2), dtype=np.float32), sr, 0.0, 1.0, ShotDetectConfig())
-    with pytest.raises(ValueError, match="beep_time"):
-        detect_shots(audio, sr, -0.1, 1.0, ShotDetectConfig())
     with pytest.raises(ValueError, match="stage_time"):
         detect_shots(audio, sr, 0.0, 0.0, ShotDetectConfig())
 

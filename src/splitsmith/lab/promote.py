@@ -236,9 +236,9 @@ def promote_from_anchor(
             drift_ms_per_s=0.0,
         )
         first_pass_drift_per_minute = _estimate_drift(first_pass)
-        drift_ms_per_s = (
-            (first_pass_drift_per_minute or 0.0) / 60.0 if first_pass_drift_per_minute is not None else 0.0
-        )
+        drift_ms_per_s, drift_warning = _drift_to_apply(first_pass_drift_per_minute)
+        if drift_warning:
+            warnings.append(drift_warning)
         snaps = guided_snap_anchor_shots(
             anchor_beep_time=anchor_beep,
             anchor_shots=anchor_shot_times,
@@ -432,10 +432,47 @@ def _estimate_drift(snaps: list[SnapResult]) -> float | None:
     ]
     if len(pairs) < 2:
         return None
-    times = np.array([p[0] for p in pairs], dtype=np.float64)
-    disps = np.array([p[1] for p in pairs], dtype=np.float64)
+    # Shots the wide first pass put on a wrong sound sit far from the typical
+    # shift and are left out of the fit (2026-10-15: four early ones moved
+    # 110-140 ms made a -169 ms/min line on a camera whose clock agreed to
+    # 1.4 ms/min). Real drift moves every shot a little, so it stays.
+    disps_all = np.array([p[1] for p in pairs], dtype=np.float64)
+    med = float(np.median(disps_all))
+    mad = float(np.median(np.abs(disps_all - med)))
+    keep = [p for p in pairs if abs(p[1] - med) <= max(_DRIFT_OUTLIER_MIN_MS, 4.0 * 1.4826 * mad)]
+    if len(keep) < 2:
+        return 0.0
+    times = np.array([p[0] for p in keep], dtype=np.float64)
+    disps = np.array([p[1] for p in keep], dtype=np.float64)
+    if float(np.ptp(times)) < 1e-6:
+        return 0.0
     slope = float(np.polyfit(times, disps, 1)[0])
     return round(slope * 60.0, 3)
+
+
+#: A shot further than this from the typical first-pass shift (or 4 MADs,
+#: whichever is wider) sits on another sound and stays out of the drift fit.
+_DRIFT_OUTLIER_MIN_MS = 15.0
+
+
+#: Past this a drift fit is a fit through wrong snaps, and applying it moves
+#: every later shot. Real drift between two cameras' audio reaches about
+#: 120 ms/min (Höstfinalen XI, 2026-10-15: phones against action cams,
+#: measured on the clips' own onsets), so only a broken fit gets here.
+MAX_DRIFT_MS_PER_MIN = 200.0
+
+
+def _drift_to_apply(per_minute: float | None) -> tuple[float, str | None]:
+    """The first pass's drift as the second pass applies it (ms per s), and a
+    warning when it is past what a clock does and so is not applied."""
+    if per_minute is None:
+        return 0.0, None
+    if abs(per_minute) > MAX_DRIFT_MS_PER_MIN:
+        return 0.0, (
+            f"first-pass drift {per_minute:+.1f} ms/min not applied: past the "
+            f"{MAX_DRIFT_MS_PER_MIN:g} ms/min any camera pair drifts; some snaps likely sit on other sounds"
+        )
+    return per_minute / 60.0, None
 
 
 def _slug_from_source(anchor: dict[str, Any]) -> str:
