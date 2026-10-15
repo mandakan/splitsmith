@@ -20,7 +20,9 @@ from splitsmith.fixture_schema import (
     shots_revision_sha,
 )
 from splitsmith.lab.promote import (
+    MAX_DRIFT_MS_PER_MIN,
     _build_fixture,
+    _drift_to_apply,
     _estimate_drift,
     _slug_from_source,
 )
@@ -316,3 +318,40 @@ def test_build_fixture_beep_time_is_secondary_beep() -> None:
         ensemble_result=_make_minimal_ensemble_result(),
     )
     assert fixture["beep_time"] == 1.135
+
+
+# Höstfinalen XI stage 5, iPhone 17 Pro Max (2026-10-15): the first pass
+# snapped four of the first six shots onto later sounds in its 150 ms
+# window; every other shot moved about 3 ms. A plain line through that is
+# -169 ms/min and pulled the stage's last shots 90 ms early.
+_STAGE5_FIRST_PASS = [
+    (2.03, 115.6), (2.82, 115.6), (3.73, 0.6), (4.13, 138.6), (4.57, 109.6), (4.88, 40.6),
+    (11.27, 20.6), (12.15, 2.6), (12.94, 3.6), (13.95, 3.6), (14.56, 45.6), (15.54, 4.6),
+    (16.20, 3.6), (17.36, 3.6), (18.37, 8.6), (19.18, 2.6), (25.13, 3.6), (25.66, 3.6),
+    (26.59, 2.6), (27.15, 0.6), (27.92, 2.6), (28.53, 2.6), (29.02, -0.4), (29.68, 2.6),
+    (30.31, 11.6), (31.47, 2.6), (31.96, 0.6), (32.44, -6.4),
+]
+
+
+def test_a_few_wrong_first_snaps_do_not_make_a_drift() -> None:
+    snaps = [
+        _make_snap(i, t, t + d / 1000, displacement_ms=d, time_since_beep_s=t)
+        for i, (t, d) in enumerate(_STAGE5_FIRST_PASS, start=1)
+    ]
+    drift = _estimate_drift(snaps)
+    assert drift is not None
+    # What matters is how far it moves a shot over the 32 s stage: under 3 ms.
+    assert abs(drift) * 32.44 / 60 < 3.0
+
+
+def test_a_drift_no_camera_pair_runs_at_is_not_applied() -> None:
+    """Real drift between two cameras' audio reaches about 120 ms/min; a fit
+    far past that is a fit through wrong snaps, and applying it moves every
+    later shot. Real drift is applied."""
+    assert _drift_to_apply(4.0) == (4.0 / 60.0, None)
+    assert _drift_to_apply(116.0)[1] is None
+    per_s, warning = _drift_to_apply(MAX_DRIFT_MS_PER_MIN + 5.0)
+    assert per_s == 0.0
+    assert warning is not None and "not applied" in warning
+    assert _drift_to_apply(None) == (0.0, None)
+
