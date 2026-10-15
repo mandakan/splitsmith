@@ -9,91 +9,130 @@
       "candidate_number": 4,
       "time": 6.295,
       "ms_after_beep": 1295,
-      "source": "detected"
+      "source": "detected",
+      "interval_class": "first_shot",
+      "interval_class_source": "auto",
+      "id": "cand-4"
     },
     {
       "shot_number": 2,
       "candidate_number": 5,
       "time": 6.515,
       "ms_after_beep": 1515,
-      "source": "detected"
+      "source": "detected",
+      "interval_class": "split",
+      "interval_class_source": "auto",
+      "id": "cand-5"
     },
     {
       "shot_number": 3,
       "candidate_number": 20,
       "time": 9.165,
       "ms_after_beep": 4165,
-      "source": "detected"
+      "source": "detected",
+      "interval_class": "movement",
+      "interval_class_source": "auto",
+      "id": "cand-20"
     },
     {
       "shot_number": 4,
       "candidate_number": 21,
       "time": 9.433,
       "ms_after_beep": 4433,
-      "source": "detected"
+      "source": "detected",
+      "interval_class": "split",
+      "interval_class_source": "auto",
+      "id": "cand-21"
     },
     {
       "shot_number": 5,
       "candidate_number": 22,
       "time": 9.752,
       "ms_after_beep": 4752,
-      "source": "detected"
+      "source": "detected",
+      "interval_class": "split",
+      "interval_class_source": "auto",
+      "id": "cand-22"
     },
     {
       "shot_number": 6,
       "candidate_number": 24,
       "time": 10.186,
       "ms_after_beep": 5186,
-      "source": "detected"
+      "source": "detected",
+      "interval_class": "split",
+      "interval_class_source": "auto",
+      "id": "cand-24"
     },
     {
       "shot_number": 7,
       "candidate_number": 25,
-      "time": 10.476,
-      "ms_after_beep": 5476,
-      "source": "detected"
+      "time": 10.486,
+      "ms_after_beep": 5486,
+      "source": "detected",
+      "interval_class": "split",
+      "interval_class_source": "auto",
+      "id": "cand-25"
     },
     {
       "shot_number": 8,
       "candidate_number": 29,
       "time": 11.426,
       "ms_after_beep": 6426,
-      "source": "detected"
+      "source": "detected",
+      "interval_class": "split",
+      "interval_class_source": "auto",
+      "id": "cand-29"
     },
     {
       "shot_number": 9,
       "candidate_number": 30,
       "time": 11.708,
       "ms_after_beep": 6708,
-      "source": "detected"
+      "source": "detected",
+      "interval_class": "split",
+      "interval_class_source": "auto",
+      "id": "cand-30"
     },
     {
       "shot_number": 10,
       "candidate_number": 31,
       "time": 12.064,
       "ms_after_beep": 7064,
-      "source": "detected"
+      "source": "detected",
+      "interval_class": "split",
+      "interval_class_source": "auto",
+      "id": "cand-31"
     },
     {
       "shot_number": 11,
       "candidate_number": 36,
       "time": 13.177,
       "ms_after_beep": 8177,
-      "source": "detected"
+      "source": "detected",
+      "interval_class": "transition",
+      "interval_class_source": "auto",
+      "id": "cand-36"
     },
     {
       "shot_number": 12,
       "candidate_number": 46,
       "time": 14.89,
       "ms_after_beep": 9890,
-      "source": "detected"
+      "source": "detected",
+      "interval_class": "transition",
+      "interval_class_source": "auto",
+      "id": "cand-46"
     },
     {
       "shot_number": 13,
       "candidate_number": 47,
       "time": 15.19,
       "ms_after_beep": 10190,
-      "source": "detected"
+      "source": "detected",
+      "interval_class": "split",
+      "interval_class_source": "auto",
+      "id": "cand-47"
     }
   ],
   "stage_rounds": {
@@ -1021,6 +1060,28 @@
       }
     },
     {
+      "id": "d217d5b0774146dd93e9299e15b81009",
+      "ts": "2026-05-11T13:35:08.172453+00:00",
+      "kind": "shot_detect_run",
+      "payload": {
+        "consensus": 2,
+        "kept_count": 15,
+        "seeded_shots": true,
+        "candidate_count": 50,
+        "expected_rounds": 12
+      }
+    },
+    {
+      "ts": "2026-05-11T13:45:56.492Z",
+      "kind": "marker_rejected",
+      "payload": {
+        "id": "cand-18",
+        "time": 8.6072,
+        "candidate_number": 18
+      }
+    },
+    {
+      "id": "143a3c8bae7b4021beed4ef8f1cc14b5",
       "ts": "2026-05-11T13:45:56.492Z",
       "kind": "marker_rejected",
       "payload": {
@@ -1039,6 +1100,24 @@
       }
     },
     {
+      "id": "a7d197c4c9234995a91e7fee74b79af1",
+      "ts": "2026-05-11T13:46:00.533Z",
+      "kind": "marker_rejected",
+      "payload": {
+        "id": "cand-35",
+        "time": 13.0514,
+        "candidate_number": 35
+      }
+    },
+    {
+      "ts": "2026-05-11T13:46:03.684Z",
+      "kind": "save",
+      "payload": {
+        "shots_count": 13
+      }
+    },
+    {
+      "id": "5ef3d5f3d7834ae99cb837ceef5290ac",
       "ts": "2026-05-11T13:46:03.684Z",
       "kind": "save",
       "payload": {
@@ -1057,6 +1136,18 @@
       }
     },
     {
+      "id": "3e64647bd0304b3e935b2ca3f03ba18a",
+      "ts": "2026-05-11T16:56:47.638832+00:00",
+      "kind": "shot_detect_run",
+      "payload": {
+        "consensus": 2,
+        "kept_count": 15,
+        "seeded_shots": true,
+        "candidate_count": 43,
+        "expected_rounds": 12
+      }
+    },
+    {
       "ts": "2026-05-11T18:06:15.658987+00:00",
       "kind": "shot_detect_run",
       "payload": {
@@ -1068,6 +1159,28 @@
       }
     },
     {
+      "id": "f9c08f1cb2504889ab8958c55e6df4d0",
+      "ts": "2026-05-11T18:06:15.658987+00:00",
+      "kind": "shot_detect_run",
+      "payload": {
+        "consensus": 2,
+        "kept_count": 15,
+        "seeded_shots": false,
+        "candidate_count": 50,
+        "expected_rounds": 12
+      }
+    },
+    {
+      "ts": "2026-05-11T18:07:47.362Z",
+      "kind": "marker_rejected",
+      "payload": {
+        "id": "cand-16",
+        "time": 8.3161,
+        "candidate_number": 16
+      }
+    },
+    {
+      "id": "60244e16034e41199cbb4e298c4447c4",
       "ts": "2026-05-11T18:07:47.362Z",
       "kind": "marker_rejected",
       "payload": {
@@ -1086,6 +1199,26 @@
       }
     },
     {
+      "id": "661a7c6bb3c9414db4238c1d191c8e68",
+      "ts": "2026-05-11T18:07:48.187Z",
+      "kind": "marker_rejected",
+      "payload": {
+        "id": "cand-18",
+        "time": 8.6072,
+        "candidate_number": 18
+      }
+    },
+    {
+      "ts": "2026-05-11T18:07:49.654Z",
+      "kind": "marker_rejected",
+      "payload": {
+        "id": "cand-19",
+        "time": 8.9917,
+        "candidate_number": 19
+      }
+    },
+    {
+      "id": "003b4c2569f248e6beb91c819906ab59",
       "ts": "2026-05-11T18:07:49.654Z",
       "kind": "marker_rejected",
       "payload": {
@@ -1104,6 +1237,26 @@
       }
     },
     {
+      "id": "37168a5239b044a48875305f64dc2317",
+      "ts": "2026-05-11T18:07:50.921Z",
+      "kind": "marker_kept",
+      "payload": {
+        "id": "cand-21",
+        "time": 9.4332,
+        "candidate_number": 21
+      }
+    },
+    {
+      "ts": "2026-05-11T18:07:53.353Z",
+      "kind": "marker_rejected",
+      "payload": {
+        "id": "cand-23",
+        "time": 10.077,
+        "candidate_number": 23
+      }
+    },
+    {
+      "id": "6d3d06199f514da09bf5893fc0be98af",
       "ts": "2026-05-11T18:07:53.353Z",
       "kind": "marker_rejected",
       "payload": {
@@ -1122,6 +1275,26 @@
       }
     },
     {
+      "id": "c2e0ff7b54ba47fd9be4527dd3cb4f2f",
+      "ts": "2026-05-11T18:07:54.203Z",
+      "kind": "marker_kept",
+      "payload": {
+        "id": "cand-24",
+        "time": 10.1864,
+        "candidate_number": 24
+      }
+    },
+    {
+      "ts": "2026-05-11T18:07:55.162Z",
+      "kind": "marker_kept",
+      "payload": {
+        "id": "cand-25",
+        "time": 10.4759,
+        "candidate_number": 25
+      }
+    },
+    {
+      "id": "32e459ca8e8742bba00fb7a06b33d74c",
       "ts": "2026-05-11T18:07:55.162Z",
       "kind": "marker_kept",
       "payload": {
@@ -1140,6 +1313,26 @@
       }
     },
     {
+      "id": "5af519ae862a449eb78be3c32ebe91d2",
+      "ts": "2026-05-11T18:07:57.486Z",
+      "kind": "marker_rejected",
+      "payload": {
+        "id": "cand-27",
+        "time": 10.8953,
+        "candidate_number": 27
+      }
+    },
+    {
+      "ts": "2026-05-11T18:07:58.412Z",
+      "kind": "marker_rejected",
+      "payload": {
+        "id": "cand-28",
+        "time": 11.2443,
+        "candidate_number": 28
+      }
+    },
+    {
+      "id": "c0e0220e55724b46b85ba4c81b14b623",
       "ts": "2026-05-11T18:07:58.412Z",
       "kind": "marker_rejected",
       "payload": {
@@ -1158,6 +1351,26 @@
       }
     },
     {
+      "id": "547c903efdc04ffb98d729bd40816146",
+      "ts": "2026-05-11T18:08:01.487Z",
+      "kind": "marker_kept",
+      "payload": {
+        "id": "cand-30",
+        "time": 11.7075,
+        "candidate_number": 30
+      }
+    },
+    {
+      "ts": "2026-05-11T18:08:02.503Z",
+      "kind": "marker_kept",
+      "payload": {
+        "id": "cand-31",
+        "time": 12.0643,
+        "candidate_number": 31
+      }
+    },
+    {
+      "id": "8562777896c541a1b8ea52f74e0f1efa",
       "ts": "2026-05-11T18:08:02.503Z",
       "kind": "marker_kept",
       "payload": {
@@ -1176,6 +1389,26 @@
       }
     },
     {
+      "id": "7921c7378b9b40219512e5b686d60bb7",
+      "ts": "2026-05-11T18:08:04.120Z",
+      "kind": "marker_rejected",
+      "payload": {
+        "id": "cand-33",
+        "time": 12.6635,
+        "candidate_number": 33
+      }
+    },
+    {
+      "ts": "2026-05-11T18:08:05.004Z",
+      "kind": "marker_rejected",
+      "payload": {
+        "id": "cand-34",
+        "time": 12.8657,
+        "candidate_number": 34
+      }
+    },
+    {
+      "id": "29b4da23eb854fbcab9ae95e46e3238c",
       "ts": "2026-05-11T18:08:05.004Z",
       "kind": "marker_rejected",
       "payload": {
@@ -1194,6 +1427,26 @@
       }
     },
     {
+      "id": "4c5b6599bd064cdaa0666599ce2dc67e",
+      "ts": "2026-05-11T18:08:06.753Z",
+      "kind": "marker_kept",
+      "payload": {
+        "id": "cand-36",
+        "time": 13.1771,
+        "candidate_number": 36
+      }
+    },
+    {
+      "ts": "2026-05-11T18:08:07.703Z",
+      "kind": "marker_rejected",
+      "payload": {
+        "id": "cand-39",
+        "time": 13.4611,
+        "candidate_number": 39
+      }
+    },
+    {
+      "id": "48ef42eb7ccc4456bdfe9818843a8a93",
       "ts": "2026-05-11T18:08:07.703Z",
       "kind": "marker_rejected",
       "payload": {
@@ -1212,6 +1465,26 @@
       }
     },
     {
+      "id": "14cd446d392c4999b362bb2ea65e2c98",
+      "ts": "2026-05-11T18:08:08.936Z",
+      "kind": "marker_rejected",
+      "payload": {
+        "id": "cand-40",
+        "time": 13.5527,
+        "candidate_number": 40
+      }
+    },
+    {
+      "ts": "2026-05-11T18:08:11.170Z",
+      "kind": "marker_kept",
+      "payload": {
+        "id": "cand-46",
+        "time": 14.8901,
+        "candidate_number": 46
+      }
+    },
+    {
+      "id": "1fd8fdce7c7c44ceb9f1493eb90557a4",
       "ts": "2026-05-11T18:08:11.170Z",
       "kind": "marker_kept",
       "payload": {
@@ -1230,45 +1503,73 @@
       }
     },
     {
+      "id": "271cc51c5d6d4dcdbf7155c3b499a3c6",
+      "ts": "2026-05-11T18:08:12.153Z",
+      "kind": "marker_kept",
+      "payload": {
+        "id": "cand-47",
+        "time": 15.1901,
+        "candidate_number": 47
+      }
+    },
+    {
       "ts": "2026-05-11T18:08:16.404Z",
+      "kind": "save",
+      "payload": {
+        "shots_count": 13
+      }
+    },
+    {
+      "id": "d439442663ab4b58814889624ff5b671",
+      "ts": "2026-05-11T18:08:16.404Z",
+      "kind": "save",
+      "payload": {
+        "shots_count": 13
+      }
+    },
+    {
+      "id": "5d75eba5e9a94035b9ac9ce92099fddb",
+      "ts": "2026-10-15T11:45:28.534Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-25",
+        "to_time": 10.486,
+        "from_time": 10.476
+      }
+    },
+    {
+      "id": "f18b2e9755254c19af4e8934cf3c5c59",
+      "ts": "2026-10-15T11:45:38.922Z",
       "kind": "save",
       "payload": {
         "shots_count": 13
       }
     }
   ],
-  "promoted_at": "2026-05-11T18:15:36.411916+00:00",
+  "promoted_at": "2026-10-15T13:07:36.683538+00:00",
   "provenance": {
     "stage_number": 6,
-    "stage_name": null
+    "stage_name": "H4"
   },
-  "source_video": "/Volumes/X9/raw/2026-blacksmith-handgun-open/anton/head/video-1173_singular_display.mov",
+  "source_video": "/Volumes/X9/matches/blacksmith-handgun-open-2026/shooters/s_46039db3/raw/video-1173_singular_display.mov",
   "fixture_window_in_source": [
     1.3735,
     21.6035
   ],
   "camera": {
-    "id": "unknown",
+    "id": "meta-vanguard",
     "make": "Meta",
     "model": "Vanguard",
     "mount": "head",
     "position": "shooter",
     "audio_source": "internal",
     "agc_state": "unknown",
-    "sample_rate": null,
+    "sample_rate": 48000,
     "bit_depth": null,
-    "audio_codec": null
+    "audio_codec": "aac"
   },
   "shooter": {
     "id": "s0fe3d797"
   },
-  "event_id": "blacksmith-handgun-open-2026:6:s0fe3d797",
-  "review": {
-    "status": "needs_review",
-    "derived_from": null,
-    "reviewed_at": null,
-    "note": "shot times predate the rise-foot definition (docs/METHODOLOGY.md, 2026-10-10): check each shot's leading edge",
-    "previous_status": "reviewed",
-    "previous_reviewed_at": null
-  }
+  "event_id": "blacksmith-handgun-open-2026:6:s0fe3d797"
 }
