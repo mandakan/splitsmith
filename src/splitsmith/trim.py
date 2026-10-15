@@ -222,8 +222,9 @@ def trim_video(
     """
     pre = pre_buffer_seconds if pre_buffer_seconds is not None else buffer_seconds
     post = post_buffer_seconds if post_buffer_seconds is not None else buffer_seconds
-    if beep_time < 0.0:
-        raise ValueError(f"beep_time must be non-negative, got {beep_time}")
+    # A beep before 0 is a secondary camera that started during the beep
+    # (2026-10-15): the cut starts at its first frame, as for any beep
+    # nearer the start than the pre-buffer.
     if stage_time < 0.0:
         raise ValueError(f"stage_time must be non-negative, got {stage_time}")
     if pre < 0.0:

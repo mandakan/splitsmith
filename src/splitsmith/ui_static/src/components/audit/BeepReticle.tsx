@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 
 import { Button } from "@/components/ui/button";
+import { toneEndNear } from "@/lib/beepTone";
 import {
   beepStartNear,
   clamp,
@@ -38,6 +39,9 @@ export interface BeepReticleProps {
   markers: ReticleMarker[];
   /** Playback position while the snippet plays, else null. */
   playhead: number | null;
+  /** What a let-go drag snaps to: the beep's start (the default), or the
+   *  tone's end when the beep starts before the clip (lib/beepTone). */
+  snapTo?: "start" | "end";
   /** Bumped by the parent to zoom in on ``value`` (a candidate jump). */
   focusSpan?: { span: number; nonce: number } | null;
   ariaLabel: string;
@@ -112,7 +116,9 @@ function vline(ctx: CanvasRenderingContext2D, x: number, y0: number, y1: number,
   ctx.setLineDash([]);
 }
 
-export function BeepReticle({ peaks, range, value, onChange, markers, playhead, focusSpan, ariaLabel }: BeepReticleProps) {
+export function BeepReticle({ peaks, range, value, onChange, markers, playhead, focusSpan, ariaLabel,
+  snapTo = "start",
+}: BeepReticleProps) {
   const [wrapRef, width] = useWidth();
   const [pps, setPps] = useState<number | null>(null);
   const mainRef = useRef<HTMLCanvasElement | null>(null);
@@ -295,8 +301,12 @@ export function BeepReticle({ peaks, range, value, onChange, markers, playhead, 
     // A drag let go lands on the beep's start, when one is near.
     if (pointers.current.size === 0 && dragged.current) {
       dragged.current = false;
-      const start = snapOn ? beepStartNear(peaks, range, centerRef.current) : null;
-      if (start != null) setCenter(start);
+      const at = !snapOn
+        ? null
+        : snapTo === "end"
+          ? toneEndNear(peaks, range, centerRef.current)
+          : beepStartNear(peaks, range, centerRef.current);
+      if (at != null) setCenter(at);
     }
   };
 

@@ -153,17 +153,20 @@ def test_skips_when_inputs_unchanged_and_regenerates_on_change(tmp_path: Path):
     assert third.generated == 1
 
 
-def test_reviewed_video_gets_no_snippet_and_stale_one_is_removed(tmp_path: Path):
+def test_a_reviewed_primary_keeps_its_snippet(tmp_path: Path):
+    """A secondary whose beep starts before its clip takes the beep's length
+    from its stage's primary (2026-10-15), which on a mirror is only these
+    snippets: a primary keeps its own once its beep is confirmed."""
     match_root, shooter_root, project, video = _seed(tmp_path)
-    assert generate_beep_snippets(match_root).generated == 1  # snippet exists
+    assert generate_beep_snippets(match_root).generated == 1
 
     video.beep_reviewed = True
     project.save(shooter_root)
     report = generate_beep_snippets(match_root)
-    assert report.generated == 0 and report.removed == 1
+    assert report.removed == 0
     out = shooter_root / "beep_review"
-    assert not (out / f"{video.video_id}.m4a").exists()
-    assert not (out / f"{video.video_id}.peaks.json").exists()
+    assert (out / f"{video.video_id}.m4a").exists()
+    assert (out / f"{video.video_id}.peaks.json").exists()
 
 
 def test_a_reviewed_secondary_keeps_its_snippet_for_the_recheck(tmp_path: Path):

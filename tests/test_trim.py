@@ -97,8 +97,6 @@ def test_trim_rejects_negative_inputs(tmp_path: Path) -> None:
     src = _touch(tmp_path / "in.mp4")
     dst = tmp_path / "out.mp4"
     runner = _RecordingRunner()
-    with pytest.raises(ValueError, match="beep_time"):
-        trim_video(src, dst, beep_time=-1.0, stage_time=10.0, runner=runner)
     with pytest.raises(ValueError, match="stage_time"):
         trim_video(src, dst, beep_time=1.0, stage_time=-1.0, runner=runner)
     with pytest.raises(ValueError, match="buffer_seconds"):
@@ -733,3 +731,17 @@ def test_backfill_recuts_a_corrupt_rendition(tmp_path: Path) -> None:
     cut, errors = backfill_web_trims(d, WebTrimConfig(), runner=runner)
     assert errors == []
     assert [p.name for p in cut] == ["stage1_cam_aaa_web.mp4"]
+
+
+def test_a_beep_before_the_clip_trims_from_its_first_frame(tmp_path: Path) -> None:
+    """A secondary camera that started recording during the beep has its
+    beep before 0 (2026-10-15): the cut starts at the first frame and runs
+    to the beep plus the stage plus the buffer."""
+    src = _touch(tmp_path / "in.mp4")
+    dst = tmp_path / "out.mp4"
+    runner = _RecordingRunner()
+    result = trim_video(src, dst, beep_time=-0.4, stage_time=10.0, buffer_seconds=5.0, runner=runner)
+    cmd = runner.calls[0]
+    assert cmd[cmd.index("-ss") + 1] == "0.000"
+    assert result.start_time == 0.0
+    assert result.end_time == pytest.approx(14.6)
