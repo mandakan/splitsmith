@@ -665,8 +665,10 @@
     }
   ],
   "review": {
-    "status": "needs_review",
+    "status": "reviewed",
     "derived_from": "stage1",
-    "reviewed_at": null
+    "reviewed_at": "2026-10-15T10:34:40.535436+00:00",
+    "confirmed_at": "2026-10-15T10:34:40.535436+00:00",
+    "method": "audit"
   }
 }

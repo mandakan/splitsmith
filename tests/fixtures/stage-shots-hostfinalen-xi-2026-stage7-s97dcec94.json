@@ -125,17 +125,27 @@
       "interval_class_source": "auto"
     },
     {
+      "id": "cand-653",
+      "time": 16.053,
+      "source": "detected",
       "shot_number": 13,
+      "ms_after_beep": 11053,
+      "interval_class": "split",
+      "candidate_number": 653,
+      "interval_class_source": "auto"
+    },
+    {
+      "shot_number": 14,
       "candidate_number": 654,
       "time": 16.571,
       "ms_after_beep": 11571,
       "source": "detected",
       "id": "cand-654",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 14,
+      "shot_number": 15,
       "candidate_number": 657,
       "time": 17.352,
       "ms_after_beep": 12352,
@@ -145,7 +155,7 @@
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 15,
+      "shot_number": 16,
       "candidate_number": 659,
       "time": 17.882,
       "ms_after_beep": 12882,
@@ -155,7 +165,7 @@
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 16,
+      "shot_number": 17,
       "candidate_number": 679,
       "time": 21.492,
       "ms_after_beep": 16492,
@@ -165,7 +175,7 @@
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 17,
+      "shot_number": 18,
       "candidate_number": 680,
       "time": 21.661,
       "ms_after_beep": 16661,
@@ -175,7 +185,7 @@
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 18,
+      "shot_number": 19,
       "candidate_number": 681,
       "time": 22.05,
       "ms_after_beep": 17050,
@@ -185,7 +195,7 @@
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 19,
+      "shot_number": 20,
       "candidate_number": 682,
       "time": 22.203,
       "ms_after_beep": 17203,
@@ -195,7 +205,7 @@
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 20,
+      "shot_number": 21,
       "candidate_number": 683,
       "time": 22.518,
       "ms_after_beep": 17518,
@@ -205,7 +215,7 @@
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 21,
+      "shot_number": 22,
       "candidate_number": 695,
       "time": 25.368,
       "ms_after_beep": 20368,
@@ -215,7 +225,7 @@
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 22,
+      "shot_number": 23,
       "candidate_number": 697,
       "time": 26.332,
       "ms_after_beep": 21332,
@@ -225,7 +235,7 @@
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 23,
+      "shot_number": 24,
       "candidate_number": 700,
       "time": 27.3,
       "ms_after_beep": 22300,
@@ -235,7 +245,7 @@
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 24,
+      "shot_number": 25,
       "candidate_number": 701,
       "time": 27.684,
       "ms_after_beep": 22684,
@@ -245,7 +255,7 @@
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 25,
+      "shot_number": 26,
       "candidate_number": 702,
       "time": 28.133,
       "ms_after_beep": 23133,
@@ -255,7 +265,7 @@
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 26,
+      "shot_number": 27,
       "candidate_number": 704,
       "time": 30.061,
       "ms_after_beep": 25061,
@@ -265,7 +275,7 @@
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 27,
+      "shot_number": 28,
       "candidate_number": 705,
       "time": 30.624,
       "ms_after_beep": 25624,
@@ -275,7 +285,7 @@
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 28,
+      "shot_number": 29,
       "candidate_number": 708,
       "time": 32.035,
       "ms_after_beep": 27035,
@@ -285,7 +295,7 @@
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 29,
+      "shot_number": 30,
       "candidate_number": 709,
       "time": 32.588,
       "ms_after_beep": 27588,
@@ -295,7 +305,7 @@
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 30,
+      "shot_number": 31,
       "candidate_number": 712,
       "time": 33.657,
       "ms_after_beep": 28657,
@@ -305,7 +315,7 @@
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 31,
+      "shot_number": 32,
       "candidate_number": 715,
       "time": 35.028,
       "ms_after_beep": 30028,
@@ -315,7 +325,7 @@
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 32,
+      "shot_number": 33,
       "candidate_number": 734,
       "time": 39.516,
       "ms_after_beep": 34516,
@@ -325,7 +335,7 @@
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 33,
+      "shot_number": 34,
       "candidate_number": 749,
       "time": 42.642,
       "ms_after_beep": 37642,
@@ -335,7 +345,7 @@
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 34,
+      "shot_number": 35,
       "candidate_number": 754,
       "time": 43.531,
       "ms_after_beep": 38531,
@@ -345,7 +355,7 @@
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 35,
+      "shot_number": 36,
       "candidate_number": 761,
       "time": 45.984,
       "ms_after_beep": 40984,
@@ -355,7 +365,7 @@
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 36,
+      "shot_number": 37,
       "candidate_number": 762,
       "time": 46.577,
       "ms_after_beep": 41577,
@@ -4503,10 +4513,90 @@
         "shots_count": 36
       },
       "id": "279942b8143749439f1fe31252fa81d1"
+    },
+    {
+      "id": "4ea4ab580de94b129f623ffe294e3d79",
+      "ts": "2026-10-15T10:49:22.815Z",
+      "kind": "marker_kept",
+      "payload": {
+        "id": "cand-653",
+        "time": 16.003,
+        "candidate_number": 653
+      }
+    },
+    {
+      "id": "4931c336a9ba48a9865f9ce611af4e5c",
+      "ts": "2026-10-15T10:49:24.456Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-653",
+        "reason": "rise_foot",
+        "to_time": 16.004,
+        "from_time": 16.003
+      }
+    },
+    {
+      "id": "165228f1fc094997ad72c4e3b9507774",
+      "ts": "2026-10-15T10:49:26.356Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-653",
+        "to_time": 16.014000000000003,
+        "from_time": 16.004
+      }
+    },
+    {
+      "id": "e1a91993ccb641d19a7882448cfb0446",
+      "ts": "2026-10-15T10:49:26.556Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-653",
+        "to_time": 16.024000000000004,
+        "from_time": 16.014000000000003
+      }
+    },
+    {
+      "id": "300a0d27357f4383bb3cb3c47de6ddb9",
+      "ts": "2026-10-15T10:49:26.887Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-653",
+        "to_time": 16.034000000000006,
+        "from_time": 16.024000000000004
+      }
+    },
+    {
+      "id": "43f57ecdcc6a404e9d44b9d4dced563a",
+      "ts": "2026-10-15T10:49:27.081Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-653",
+        "to_time": 16.044000000000008,
+        "from_time": 16.034000000000006
+      }
+    },
+    {
+      "id": "aace4595747642fbb609ae18a593e0aa",
+      "ts": "2026-10-15T10:49:27.992Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-653",
+        "reason": "rise_foot",
+        "to_time": 16.053,
+        "from_time": 16.044000000000008
+      }
+    },
+    {
+      "id": "53e223506ab14dd498433ae039b05f48",
+      "ts": "2026-10-15T10:49:29.454Z",
+      "kind": "save",
+      "payload": {
+        "shots_count": 37
+      }
     }
   ],
   "events": [],
-  "promoted_at": "2026-10-14T13:57:28.871449+00:00",
+  "promoted_at": "2026-10-15T10:50:33.241799+00:00",
   "provenance": {
     "stage_number": 7,
     "stage_name": ""
@@ -4533,9 +4623,9 @@
   },
   "event_id": "hostfinalen-xi-2026:7:s97dcec94",
   "review": {
-    "confirmed_at": "2026-10-14T14:01:51.993779+00:00",
+    "confirmed_at": "2026-10-15T10:54:29.170170+00:00",
     "status": "reviewed",
-    "reviewed_at": "2026-10-14T14:01:51.993779+00:00",
+    "reviewed_at": "2026-10-15T10:54:29.170170+00:00",
     "method": "own-audit"
   }
 }

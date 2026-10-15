@@ -52,16 +52,6 @@
     },
     {
       "shot_number": 6,
-      "candidate_number": 89,
-      "time": 9.184,
-      "ms_after_beep": 4184,
-      "source": "detected",
-      "id": "cand-89",
-      "interval_class": "split",
-      "interval_class_source": "auto"
-    },
-    {
-      "shot_number": 7,
       "candidate_number": 90,
       "time": 9.454,
       "ms_after_beep": 4454,
@@ -71,7 +61,7 @@
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 8,
+      "shot_number": 7,
       "candidate_number": 91,
       "time": 9.809,
       "ms_after_beep": 4809,
@@ -81,7 +71,7 @@
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 9,
+      "shot_number": 8,
       "candidate_number": 93,
       "time": 10.369,
       "ms_after_beep": 5369,
@@ -91,7 +81,7 @@
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 10,
+      "shot_number": 9,
       "candidate_number": 94,
       "time": 11.058,
       "ms_after_beep": 6058,
@@ -101,7 +91,7 @@
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 11,
+      "shot_number": 10,
       "candidate_number": 95,
       "time": 11.437,
       "ms_after_beep": 6437,
@@ -111,7 +101,7 @@
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 12,
+      "shot_number": 11,
       "candidate_number": 96,
       "time": 12.018,
       "ms_after_beep": 7018,
@@ -121,7 +111,7 @@
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 13,
+      "shot_number": 12,
       "candidate_number": 117,
       "time": 17.174,
       "ms_after_beep": 12174,
@@ -131,7 +121,7 @@
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 14,
+      "shot_number": 13,
       "candidate_number": 118,
       "time": 17.544,
       "ms_after_beep": 12544,
@@ -141,7 +131,7 @@
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 15,
+      "shot_number": 14,
       "candidate_number": 119,
       "time": 18.084,
       "ms_after_beep": 13084,
@@ -151,7 +141,7 @@
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 16,
+      "shot_number": 15,
       "candidate_number": 120,
       "time": 18.329,
       "ms_after_beep": 13329,
@@ -161,7 +151,7 @@
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 17,
+      "shot_number": 16,
       "candidate_number": 122,
       "time": 18.914,
       "ms_after_beep": 13914,
@@ -171,7 +161,7 @@
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 18,
+      "shot_number": 17,
       "candidate_number": null,
       "time": 19.311,
       "ms_after_beep": 14311,
@@ -1467,9 +1457,27 @@
         "shots_count": 18
       },
       "id": "6fc12d95607b404084970546bf3e0f0d"
+    },
+    {
+      "id": "340c828686a6488d9b22dfaf7530cfcd",
+      "ts": "2026-10-15T10:47:47.122Z",
+      "kind": "marker_rejected",
+      "payload": {
+        "id": "cand-89",
+        "time": 9.184,
+        "candidate_number": 89
+      }
+    },
+    {
+      "id": "4fe7ecb21ee146ed8a98b7c5db1b35eb",
+      "ts": "2026-10-15T10:47:51.310Z",
+      "kind": "save",
+      "payload": {
+        "shots_count": 17
+      }
     }
   ],
-  "promoted_at": "2026-10-14T13:57:29.564658+00:00",
+  "promoted_at": "2026-10-15T10:50:33.535035+00:00",
   "provenance": {
     "stage_number": 1,
     "stage_name": ""
@@ -1496,9 +1504,9 @@
   },
   "event_id": "hostfinalen-xi-2026:1:s36ed6e4e",
   "review": {
-    "confirmed_at": "2026-10-14T14:01:51.959224+00:00",
+    "confirmed_at": "2026-10-15T10:54:29.166975+00:00",
     "status": "reviewed",
-    "reviewed_at": "2026-10-14T14:01:51.959224+00:00",
+    "reviewed_at": "2026-10-15T10:54:29.166975+00:00",
     "method": "own-audit"
   }
 }
