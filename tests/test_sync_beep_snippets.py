@@ -112,7 +112,7 @@ def test_generates_snippet_for_unreviewed_video(tmp_path: Path):
     assert peaks["duration"] == pytest.approx(20.0, abs=0.5)
     assert peaks["beep_time"] == 6.0
     assert len(peaks["peaks"]) == peaks["bins"]
-    assert peaks["bins"] >= 100 * 20  # 10 ms per bin so the phone can zoom
+    assert peaks["bins"] >= 1000 * 19  # 1 ms per bin: the phone places and snaps to the ms
 
 
 def test_wrong_pick_does_not_hide_the_search_window(tmp_path: Path):

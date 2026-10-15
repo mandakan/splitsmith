@@ -6,11 +6,19 @@ import { BeepReticle } from "./BeepReticle";
 
 const WIDTH = 320;
 
-function Harness({ initial = 20, onChange }: { initial?: number; onChange?: (t: number) => void }) {
+function Harness({
+  initial = 20,
+  onChange,
+  peaks = new Array(3000).fill(0.2),
+}: {
+  initial?: number;
+  onChange?: (t: number) => void;
+  peaks?: number[];
+}) {
   const [value, setValue] = useState(initial);
   return (
     <BeepReticle
-      peaks={new Array(3000).fill(0.2)}
+      peaks={peaks}
       range={{ start: 10, end: 40 }}
       value={value}
       onChange={(t) => {
@@ -105,4 +113,24 @@ describe("BeepReticle", () => {
     fireEvent.keyDown(slider, { key: "ArrowLeft", shiftKey: true });
     expect(valueNow()).toBeCloseTo(19.91);
   });
+
+  it("snaps to the beep's start when a drag is let go, and not with Snap off", () => {
+    // 1 ms bins over 10..40 s, a quiet beep rising at 20.300 s.
+    const peaks = new Array(30000).fill(0.0004);
+    [0.004, 0.012, 0.02, 0.02, 0.02, 0.02, 0.02].forEach((v, k) => (peaks[10300 + k] = v));
+    peaks[15000] = 1.0; // a shot far away sets the clip's scale
+    render(<Harness peaks={peaks} initial={20.31} />);
+    const main = screen.getByTestId("reticle-main");
+    fireEvent.pointerDown(main, { pointerId: 1, clientX: 200 });
+    fireEvent.pointerMove(main, { pointerId: 1, clientX: 200.2 });
+    fireEvent.pointerUp(main, { pointerId: 1 });
+    expect(valueNow()).toBeCloseTo(20.3, 3);
+
+    fireEvent.click(screen.getByRole("switch", { name: "Snap to the beep's start" }));
+    fireEvent.pointerDown(main, { pointerId: 2, clientX: 200 });
+    fireEvent.pointerMove(main, { pointerId: 2, clientX: 199.6 });
+    fireEvent.pointerUp(main, { pointerId: 2 });
+    expect(valueNow()).toBeCloseTo(20.31, 3);
+  });
 });
+

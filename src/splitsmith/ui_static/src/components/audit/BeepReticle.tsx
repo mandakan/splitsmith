@@ -11,11 +11,13 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 
 import { Button } from "@/components/ui/button";
 import {
+  beepStartNear,
   clamp,
   columnPeaks,
   initialPps,
   ppsBounds,
   ticks,
+  visibleGain,
   visibleRange,
   xAtTime,
   type Range,
@@ -46,6 +48,24 @@ const RULER_H = 20;
 const OVERVIEW_H = 32;
 const ZOOM_STEP = 1.6;
 const NUDGE_S = 0.01;
+const SNAP_KEY = "splitsmith.beepPicker.snap";
+
+/** Snap a let-go drag to the beep's start: on until turned off, per browser. */
+function readSnap(): boolean {
+  try {
+    return window.localStorage.getItem(SNAP_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+function writeSnap(on: boolean): void {
+  try {
+    window.localStorage.setItem(SNAP_KEY, on ? "1" : "0");
+  } catch {
+    // Without storage the setting starts on with every page.
+  }
+}
 
 function useWidth() {
   const [width, setWidth] = useState(0);
@@ -156,10 +176,13 @@ export function BeepReticle({ peaks, range, value, onChange, markers, playhead, 
 
     ctx.fillStyle = token("--color-waveform-bar", "rgba(255,45,45,0.35)");
     const cols = columnPeaks(peaks, range, view);
+    // The visible window at full height: a beep far quieter than the
+    // shots is still a shape you can see (2026-10-15).
+    const gain = visibleGain(cols);
     for (let c = 0; c < cols.length; c++) {
       const v = cols[c];
       if (v == null) continue;
-      const h = Math.max(1, v * (waveH - 4));
+      const h = Math.max(1, Math.min(waveH - 4, v * gain * (waveH - 4)));
       ctx.fillRect(c, mid - h / 2, 1, h);
     }
 
@@ -231,6 +254,9 @@ export function BeepReticle({ peaks, range, value, onChange, markers, playhead, 
   // A pinch is anchored to its starting state, so zoom and mid-point pan
   // compose without drift however many moves it takes.
   const pinch = useRef<{ dist: number; mid: number; pps: number; center: number } | null>(null);
+  // A one-finger drag since the last press: letting it go snaps.
+  const dragged = useRef(false);
+  const [snapOn, setSnapOn] = useState(readSnap);
 
   const pinchState = () => {
     const xs = [...pointers.current.values()];
@@ -239,6 +265,7 @@ export function BeepReticle({ peaks, range, value, onChange, markers, playhead, 
   const onPointerDown = (e: PointerEvent<HTMLCanvasElement>) => {
     e.currentTarget.setPointerCapture(e.pointerId);
     pointers.current.set(e.pointerId, e.clientX);
+    if (pointers.current.size === 1) dragged.current = false;
     if (pointers.current.size === 2 && ppsRef.current != null)
       pinch.current = { ...pinchState(), pps: ppsRef.current, center: centerRef.current };
   };
@@ -248,6 +275,7 @@ export function BeepReticle({ peaks, range, value, onChange, markers, playhead, 
     if (prev == null || p == null) return;
     if (pointers.current.size === 1) {
       pointers.current.set(e.pointerId, e.clientX);
+      dragged.current = true;
       setCenter(centerRef.current - (e.clientX - prev) / p);
       return;
     }
@@ -264,6 +292,12 @@ export function BeepReticle({ peaks, range, value, onChange, markers, playhead, 
   const onPointerEnd = (e: PointerEvent<HTMLCanvasElement>) => {
     pointers.current.delete(e.pointerId);
     if (pointers.current.size < 2) pinch.current = null;
+    // A drag let go lands on the beep's start, when one is near.
+    if (pointers.current.size === 0 && dragged.current) {
+      dragged.current = false;
+      const start = snapOn ? beepStartNear(peaks, range, centerRef.current) : null;
+      if (start != null) setCenter(start);
+    }
   };
 
   // Trackpad / mouse wheel, so the picker is usable when testing on a
@@ -350,6 +384,21 @@ export function BeepReticle({ peaks, range, value, onChange, markers, playhead, 
         </Button>
         <Button type="button" className="h-11" onClick={() => bounds && setPps(bounds.min)} disabled={!bounds || pps == null || pps <= bounds.min}>
           Whole clip
+        </Button>
+        <Button
+          type="button"
+          role="switch"
+          aria-checked={snapOn}
+          aria-label="Snap to the beep's start"
+          className="h-11"
+          onClick={() =>
+            setSnapOn((on) => {
+              writeSnap(!on);
+              return !on;
+            })
+          }
+        >
+          Snap {snapOn ? "on" : "off"}
         </Button>
         <span className="numeral ml-auto text-sm text-muted">{span != null ? `${span < 1 ? span.toFixed(2) : span.toFixed(1)} s across` : ""}</span>
       </div>
