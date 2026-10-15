@@ -7,8 +7,8 @@
     {
       "shot_number": 1,
       "candidate_number": 3,
-      "time": 4.792,
-      "ms_after_beep": 2042,
+      "time": 4.754,
+      "ms_after_beep": 2004,
       "source": "detected",
       "id": "cand-3",
       "interval_class": "first_shot",
@@ -17,68 +17,68 @@
     {
       "shot_number": 2,
       "candidate_number": 4,
-      "time": 5.424,
-      "ms_after_beep": 2673,
+      "time": 5.396,
+      "ms_after_beep": 2646,
       "source": "detected",
       "id": "cand-4",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
       "shot_number": 3,
       "candidate_number": 5,
-      "time": 6.106,
-      "ms_after_beep": 3356,
+      "time": 6.077,
+      "ms_after_beep": 3327,
       "source": "detected",
       "id": "cand-5",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
       "shot_number": 4,
       "candidate_number": 6,
-      "time": 6.92,
-      "ms_after_beep": 4170,
+      "time": 6.897,
+      "ms_after_beep": 4147,
       "source": "detected",
       "id": "cand-6",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
       "shot_number": 5,
       "candidate_number": 7,
-      "time": 7.771,
-      "ms_after_beep": 5021,
+      "time": 7.753,
+      "ms_after_beep": 5003,
       "source": "detected",
       "id": "cand-7",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
       "shot_number": 6,
       "candidate_number": 8,
-      "time": 8.377,
-      "ms_after_beep": 5627,
+      "time": 8.358,
+      "ms_after_beep": 5608,
       "source": "detected",
       "id": "cand-8",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
       "shot_number": 7,
       "candidate_number": 9,
-      "time": 9.155,
-      "ms_after_beep": 6405,
+      "time": 9.128,
+      "ms_after_beep": 6378,
       "source": "detected",
       "id": "cand-9",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
       "shot_number": 8,
       "candidate_number": 10,
-      "time": 9.582,
-      "ms_after_beep": 6832,
+      "time": 9.563,
+      "ms_after_beep": 6813,
       "source": "detected",
       "id": "cand-10",
       "interval_class": "split",
@@ -97,18 +97,18 @@
     {
       "shot_number": 10,
       "candidate_number": 17,
-      "time": 13.067,
-      "ms_after_beep": 10317,
+      "time": 13.046,
+      "ms_after_beep": 10296,
       "source": "detected",
       "id": "cand-17",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
       "shot_number": 11,
       "candidate_number": 18,
-      "time": 13.333,
-      "ms_after_beep": 10583,
+      "time": 13.314,
+      "ms_after_beep": 10564,
       "source": "detected",
       "id": "cand-18",
       "interval_class": "split",
@@ -117,8 +117,8 @@
     {
       "shot_number": 12,
       "candidate_number": 19,
-      "time": 13.617,
-      "ms_after_beep": 10867,
+      "time": 13.597,
+      "ms_after_beep": 10847,
       "source": "detected",
       "id": "cand-19",
       "interval_class": "split",
@@ -127,21 +127,21 @@
     {
       "shot_number": 13,
       "candidate_number": 20,
-      "time": 14.176,
-      "ms_after_beep": 11426,
+      "time": 14.159,
+      "ms_after_beep": 11409,
       "source": "detected",
       "id": "cand-20",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
       "shot_number": 14,
       "candidate_number": 21,
-      "time": 15.169,
-      "ms_after_beep": 12419,
+      "time": 15.147,
+      "ms_after_beep": 12397,
       "source": "detected",
       "id": "cand-21",
-      "interval_class": "transition",
+      "interval_class": "split",
       "interval_class_source": "auto"
     }
   ],
@@ -565,9 +565,160 @@
         "shots_count": 14
       },
       "id": "891c8f4066524b58949c4928c57c4553"
+    },
+    {
+      "ts": "2026-10-15T14:17:29.154Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-3",
+        "from_time": 4.792,
+        "to_time": 4.754,
+        "reason": "earlier_rise"
+      },
+      "id": "441c8c13b67947ef83f2b5a6daa891af"
+    },
+    {
+      "ts": "2026-10-15T14:17:30.378Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-4",
+        "from_time": 5.424,
+        "to_time": 5.396,
+        "reason": "earlier_rise"
+      },
+      "id": "dc3f25942fbc4f6d964dae0888052ede"
+    },
+    {
+      "ts": "2026-10-15T14:17:31.415Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-5",
+        "from_time": 6.106,
+        "to_time": 6.077,
+        "reason": "earlier_rise"
+      },
+      "id": "8fb0267b49644144b132420708aaf84e"
+    },
+    {
+      "ts": "2026-10-15T14:17:32.315Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-6",
+        "from_time": 6.92,
+        "to_time": 6.897,
+        "reason": "earlier_rise"
+      },
+      "id": "bde1b8434a744790bf998c9d60fa72a4"
+    },
+    {
+      "ts": "2026-10-15T14:17:33.630Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-7",
+        "from_time": 7.771,
+        "to_time": 7.753,
+        "reason": "earlier_rise"
+      },
+      "id": "0ab5731365b74b6489af87a2c6e871b3"
+    },
+    {
+      "ts": "2026-10-15T14:17:34.357Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-8",
+        "from_time": 8.377,
+        "to_time": 8.358,
+        "reason": "earlier_rise"
+      },
+      "id": "e355321881cf41a3b564dc48968f9887"
+    },
+    {
+      "ts": "2026-10-15T14:17:35.127Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-9",
+        "from_time": 9.155,
+        "to_time": 9.128,
+        "reason": "earlier_rise"
+      },
+      "id": "9aa0b3751b2d4a9daf90d49e9c6d9da9"
+    },
+    {
+      "ts": "2026-10-15T14:17:35.829Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-10",
+        "from_time": 9.582,
+        "to_time": 9.563,
+        "reason": "earlier_rise"
+      },
+      "id": "35a787e6ebf84a11890107a88a0f0395"
+    },
+    {
+      "ts": "2026-10-15T14:17:39.183Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-17",
+        "from_time": 13.067,
+        "to_time": 13.046,
+        "reason": "earlier_rise"
+      },
+      "id": "b3eb5d49910340f68ca6c900885447db"
+    },
+    {
+      "ts": "2026-10-15T14:17:39.927Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-18",
+        "from_time": 13.333,
+        "to_time": 13.314,
+        "reason": "earlier_rise"
+      },
+      "id": "cbff12eba6064c798cc82bf74fbe1770"
+    },
+    {
+      "ts": "2026-10-15T14:17:40.724Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-19",
+        "from_time": 13.617,
+        "to_time": 13.597,
+        "reason": "earlier_rise"
+      },
+      "id": "515366d68dbd4b56b79f8af82bea8320"
+    },
+    {
+      "ts": "2026-10-15T14:17:41.532Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-20",
+        "from_time": 14.176,
+        "to_time": 14.159,
+        "reason": "earlier_rise"
+      },
+      "id": "9024a1d692b8417ebeba46663612adc5"
+    },
+    {
+      "ts": "2026-10-15T14:17:42.961Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-21",
+        "from_time": 15.169,
+        "to_time": 15.147,
+        "reason": "earlier_rise"
+      },
+      "id": "d2f79d68eac84fe1bee70cb20db16965"
+    },
+    {
+      "ts": "2026-10-15T14:17:45.912Z",
+      "kind": "save",
+      "payload": {
+        "shots_count": 14
+      },
+      "id": "28a4031fa12e42c0b72e4913f674ffa9"
     }
   ],
-  "promoted_at": "2026-10-10T05:25:54.914405+00:00",
+  "promoted_at": "2026-10-15T14:51:06.199075+00:00",
   "provenance": {
     "stage_number": 11,
     "stage_name": "B2 Right"
@@ -594,11 +745,9 @@
   },
   "event_id": "stockholm-ipsc-open-2026:11:s0fe3d797",
   "review": {
-    "status": "needs_review",
-    "derived_from": null,
-    "reviewed_at": null,
-    "note": "shot times predate the rise-foot definition (docs/METHODOLOGY.md, 2026-10-10): check each shot's leading edge",
-    "previous_status": "reviewed",
-    "previous_reviewed_at": null
+    "confirmed_at": "2026-10-15T15:20:10.088164+00:00",
+    "status": "reviewed",
+    "reviewed_at": "2026-10-15T15:20:10.088164+00:00",
+    "method": "own-audit"
   }
 }
