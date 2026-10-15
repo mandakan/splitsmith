@@ -9382,6 +9382,23 @@ def test_dev_model_endpoint_returns_calibration_metadata(tmp_path: Path) -> None
     assert {"voter_c_precision_cv", "voter_c_recall_cv", "voter_c_f1_cv"} <= set(a_class)
 
 
+def test_dev_models_endpoint_maps_the_corpus_onto_the_shipped_heads(tmp_path: Path) -> None:
+    """/api/dev/models feeds the lab's Models page: every fixture with the
+    head it calibrated, and both shipped heads with their parameters."""
+    root = tmp_path / "match"
+    MatchProject.init(root, name="Dev Match").save(root)
+    client = _MatchClient(_match_create_app(project_root=root, project_name="ignored"))
+
+    resp = client.get("/api/dev/models")
+    assert resp.status_code == 200
+    body = resp.json()
+    heads = {h["camera_class"]: h for h in body["ensemble"]["heads"]}
+    assert set(heads) == {"headcam", "handheld"}
+    calibrated = {f["stem"] for f in body["fixtures"] if f["voter_c"]}
+    assert len(calibrated) == heads["headcam"]["n_fixtures"] + heads["handheld"]["n_fixtures"]
+    assert body["ensemble"]["hyperparameters"]["max_depth"] >= 1
+
+
 def test_dev_review_queue_buckets_fixtures(tmp_path: Path) -> None:
     """/api/dev/review-queue groups fixtures into pending/flagged/done
     so the dev review page can render its three queue sections."""

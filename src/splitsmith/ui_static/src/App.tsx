@@ -57,6 +57,7 @@ const DevFixtureDetail = lazyPage(() => import("@/pages/dev/DevFixtureDetail"), 
 const DevRetrain = lazyPage(() => import("@/pages/dev/DevRetrain"), "DevRetrain");
 const DevReviewQueue = lazyPage(() => import("@/pages/dev/DevReviewQueue"), "DevReviewQueue");
 const DevValidate = lazyPage(() => import("@/pages/dev/DevValidate"), "DevValidate");
+const DevModels = lazyPage(() => import("@/pages/dev/DevModels"), "DevModels");
 const ExportRoute = lazyPage(() => import("@/pages/Export"), "ExportRoute");
 const Home = lazyPage(() => import("@/pages/Home"), "Home");
 const FootageSort = lazyPage(() => import("@/pages/FootageSort"), "FootageSort");
@@ -433,6 +434,7 @@ export function App() {
             <Route path="dev/review/:slug" element={<DesktopGate screen="Developer tools" links={false}><DevFixtureDetail /></DesktopGate>} />
             <Route path="dev/validate" element={<DesktopGate screen="Developer tools" links={false}><DevValidate /></DesktopGate>} />
             <Route path="dev/retrain" element={<DesktopGate screen="Developer tools" links={false}><DevRetrain /></DesktopGate>} />
+            <Route path="dev/models" element={<DesktopGate screen="Developer tools" links={false}><DevModels /></DesktopGate>} />
             {/* Legacy Lab redirects (#331 final task) so old dev-mode
                 bookmarks/links don't 404. */}
             <Route path="dev/legacy/lab" element={<RedirectLegacyLab />} />

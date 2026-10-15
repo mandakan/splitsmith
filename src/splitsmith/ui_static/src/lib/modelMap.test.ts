@@ -1,0 +1,195 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  angleOf,
+  corpusFlow,
+  corpusRows,
+  filterFixtures,
+  fixtureFlags,
+  fixtureStatus,
+  foldsFor,
+  heldOutGap,
+  layoutFlow,
+  NO_FILTER,
+  versionSeries,
+  type ModelMapFixture,
+  type VoterCHead,
+} from "./modelMap";
+
+function fx(stem: string, over: Partial<ModelMapFixture> = {}): ModelMapFixture {
+  return {
+    stem,
+    match: "alpha-2026",
+    stage: 1,
+    shooter_id: "sabc12345",
+    camera_class: "headcam",
+    camera: "Insta360 GO 3S",
+    n_shots: 12,
+    expected_rounds: 12,
+    has_wav: true,
+    review_status: "reviewed",
+    superseded_by: null,
+    wrong_clip: false,
+    voter_c: "headcam",
+    match_group: "alpha-2026",
+    stage_group: "alpha-2026:1",
+    beep_ranker: null,
+    ...over,
+  };
+}
+
+describe("fixtureStatus", () => {
+  it("is the head a fixture calibrated, whatever happened to it since", () => {
+    expect(fixtureStatus(fx("a", { superseded_by: "b", review_status: "needs_review" }))).toBe("headcam");
+    expect(fixtureStatus(fx("a", { review_status: "needs_review" }))).toBe("headcam");
+    expect(fixtureStatus(fx("a", { voter_c: "handheld" }))).toBe("handheld");
+  });
+
+  it("sorts the rest by why they are not in the build", () => {
+    expect(fixtureStatus(fx("a", { voter_c: null, superseded_by: "b", review_status: "needs_review" }))).toBe(
+      "superseded",
+    );
+    expect(fixtureStatus(fx("a", { voter_c: null, review_status: "needs_review" }))).toBe("review");
+    expect(fixtureStatus(fx("a", { voter_c: null }))).toBe("unused");
+  });
+
+  it("flags a calibrating fixture that is leaving or unreviewed", () => {
+    expect(fixtureFlags(fx("a", { superseded_by: "b", review_status: "needs_review" }))).toEqual({
+      leaving: true,
+      unreviewed: false,
+    });
+    expect(fixtureFlags(fx("a", { review_status: "needs_review" }))).toEqual({ leaving: false, unreviewed: true });
+    expect(fixtureFlags(fx("a", { voter_c: null, review_status: "needs_review" }))).toEqual({
+      leaving: false,
+      unreviewed: false,
+    });
+  });
+});
+
+describe("corpusRows", () => {
+  it("groups by the fold's match, stages in order, tiles by shooter", () => {
+    const rows = corpusRows([
+      fx("b2", { stage: 2, shooter_id: "s2" }),
+      fx("b1", { stage: 2, shooter_id: "s1" }),
+      fx("a1", { stage: 1 }),
+      fx("z", { match_group: "beta-2026", match: "alpha-2026" }),
+    ]);
+    expect(rows.map((r) => r.match)).toEqual(["alpha-2026", "beta-2026"]);
+    expect(rows[0].stages.map((s) => s.stage)).toEqual([1, 2]);
+    expect(rows[0].stages[1].fixtures.map((f) => f.stem)).toEqual(["b1", "b2"]);
+    expect(rows[0].count).toBe(3);
+  });
+});
+
+describe("filterFixtures", () => {
+  it("ANDs every filter and matches text on stem or camera", () => {
+    const all = [fx("a"), fx("b", { camera_class: "handheld", voter_c: "handheld", camera: "Apple iPhone" })];
+    expect(filterFixtures(all, { ...NO_FILTER, cameraClass: "handheld" }).map((f) => f.stem)).toEqual(["b"]);
+    expect(filterFixtures(all, { ...NO_FILTER, text: "iphone" }).map((f) => f.stem)).toEqual(["b"]);
+    expect(filterFixtures(all, { ...NO_FILTER, status: "headcam", text: "iphone" })).toEqual([]);
+  });
+});
+
+describe("corpusFlow + layoutFlow", () => {
+  const fixtures = [
+    fx("a"),
+    fx("b", { voter_c: null }),
+    fx("c", { camera_class: "handheld", voter_c: "handheld" }),
+    fx("d", { camera_class: "handheld", voter_c: null, superseded_by: "c" }),
+    fx("e", { camera_class: "handheld", voter_c: null, review_status: "needs_review" }),
+  ];
+
+  it("sends every fixture down exactly one path", () => {
+    const { nodes, links } = corpusFlow(fixtures);
+    const into = (id: string) => links.filter((l) => l.target === id).reduce((s, l) => s + l.value, 0);
+    expect(into("cls:headcam") + into("cls:handheld")).toBe(5);
+    const statuses = nodes.filter((n) => n.column === 2).map((n) => n.id);
+    expect(statuses.reduce((s, id) => s + into(id), 0)).toBe(5);
+    expect(links.find((l) => l.target === "st:superseded")?.stems).toEqual(["d"]);
+  });
+
+  it("draws no node for a status no fixture has", () => {
+    const { nodes } = corpusFlow([fx("a")]);
+    expect(nodes.map((n) => n.id)).toEqual(["corpus", "cls:headcam", "st:headcam"]);
+  });
+
+  it("lays bands out so each node's height matches its flow", () => {
+    const laid = layoutFlow(corpusFlow(fixtures), { width: 300, height: 200, gap: 10 });
+    const corpus = laid.nodes.find((n) => n.id === "corpus")!;
+    const head = laid.nodes.find((n) => n.id === "cls:headcam")!;
+    const hand = laid.nodes.find((n) => n.id === "cls:handheld")!;
+    expect(head.h + hand.h).toBeCloseTo(corpus.h, 6);
+    expect(hand.y).toBeCloseTo(head.y + head.h + 10, 6);
+    expect(laid.nodes.every((n) => n.y + n.h <= 200 + 1e-6)).toBe(true);
+    expect(laid.links.every((l) => l.d.startsWith("M"))).toBe(true);
+  });
+});
+
+describe("foldsFor", () => {
+  const fixtures = [
+    fx("a"),
+    fx("b", { stage: 2, stage_group: "alpha-2026:2", camera_class: "handheld", voter_c: "handheld" }),
+    fx("c", { match_group: "beta-2026", stage_group: "beta-2026:1" }),
+    fx("d", { voter_c: null }),
+  ];
+
+  it("folds leave-one-match-out by match over calibrating fixtures only", () => {
+    expect(foldsFor("lomo", fixtures)).toEqual([
+      { key: "alpha-2026", fixtures: 2, headcam: 1, handheld: 1 },
+      { key: "beta-2026", fixtures: 1, headcam: 1, handheld: 0 },
+    ]);
+  });
+
+  it("groups the stage split by stage and has no folds for the candidate split", () => {
+    expect(foldsFor("grouped", fixtures).map((f) => f.key).sort()).toEqual([
+      "alpha-2026:1",
+      "alpha-2026:2",
+      "beta-2026:1",
+    ]);
+    expect(foldsFor("stratified", fixtures)).toEqual([]);
+  });
+});
+
+describe("heldOutGap", () => {
+  it("is each honest split's loss against the by-candidate split", () => {
+    const m = (recall: number, precision: number) => ({ precision, recall, f1: 0, tp: 0, fp: 0, fn: 0 });
+    const head = {
+      heldout: [
+        { split: "stratified", at_shipped_threshold: m(0.95, 0.9), own_threshold: null, at_own_threshold: null },
+        { split: "lomo", at_shipped_threshold: m(0.9, 0.85), own_threshold: null, at_own_threshold: null },
+      ],
+    } as unknown as VoterCHead;
+    const gap = heldOutGap(head);
+    expect(gap).toHaveLength(1);
+    expect(gap[0].split).toBe("lomo");
+    expect(gap[0].recall).toBeCloseTo(-0.05, 6);
+  });
+});
+
+describe("versionSeries", () => {
+  it("marks the versions that moved the corpus", () => {
+    const v = (added: string[], n: Record<string, number>) => ({
+      sha: "x",
+      date: "2026-01-01",
+      subject: "",
+      built_at: null,
+      n_fixtures: n,
+      recall: {},
+      precision: {},
+      added,
+      removed: [],
+    });
+    const s = versionSeries([v(["a"], { all: 1 }), v([], { headcam: 1, handheld: 2 })]);
+    expect(s.map((p) => [p.total, p.changed])).toEqual([
+      [1, true],
+      [3, false],
+    ]);
+  });
+});
+
+describe("angleOf", () => {
+  it("names the camera suffix of a secondary and calls the rest primary", () => {
+    expect(angleOf(fx("stage-shots-alpha-2026-stage1-s97dcec94-apple-iphone17pro"))).toBe("apple-iphone17pro");
+    expect(angleOf(fx("stage-shots-alpha-2026-stage1-s97dcec94"))).toBe("primary");
+  });
+});

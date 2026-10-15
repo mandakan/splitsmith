@@ -68,6 +68,7 @@ LOCAL_ONLY_ROUTES: frozenset[tuple[str, str]] = frozenset(
         ("GET", "/api/fixture/audio"),
         ("GET", "/api/fixture/video"),
         ("GET", "/api/dev/model"),
+        ("GET", "/api/dev/models"),
         ("GET", "/api/dev/review-queue"),
         ("POST", "/api/dev/review-queue/{slug}/confirm"),
         # Ends the embedded sidecar process.

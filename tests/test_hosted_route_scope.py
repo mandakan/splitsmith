@@ -61,6 +61,7 @@ EXPECTED_LOCAL_ONLY: set[tuple[str, str]] = {
     ("GET", "/api/fixture/audio"),
     ("GET", "/api/fixture/video"),
     ("GET", "/api/dev/model"),
+    ("GET", "/api/dev/models"),
     ("GET", "/api/dev/review-queue"),
     ("POST", "/api/dev/review-queue/{slug}/confirm"),
     ("POST", "/api/shutdown"),
