@@ -57,6 +57,8 @@ OUT_DIR = Path("build/promote_secondary")
 def _corpus(fixtures_dir: Path) -> list[AnchorFixture]:
     out = []
     for f in fx_module.all_fixtures(fixtures_dir):
+        if f.superseded_by or f.stem in fx_module.WRONG_CLIP_FIXTURES:
+            continue  # replaced in the corpus, or wrong footage: neither an anchor nor a claimed angle
         data = json.loads((fixtures_dir / f"{f.stem}.json").read_text())
         source = data.get("source_video") or data.get("source")
         if not source:

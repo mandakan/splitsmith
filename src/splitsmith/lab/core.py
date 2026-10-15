@@ -186,12 +186,17 @@ class FixtureRecord(BaseModel):
     # can render siblings together. Stored on the fixture JSON when
     # available; falls back to slug derivation for legacy fixtures.
     event_id: str | None = None
+    # A newer fixture of the same footage that replaces this one in the
+    # corpus (``ensemble.fixtures.Fixture.superseded_by``): kept for the
+    # tests that load it by name, never trained on, never queued.
+    superseded_by: str | None = None
 
     @property
     def needs_review(self) -> bool:
         """True when the fixture entered the corpus without a human label pass.
 
-        An explicit "Approve to corpus" sign-off (``review_confirmed_at``)
+        A superseded fixture is out of the corpus and never pending. An
+        explicit "Approve to corpus" sign-off (``review_confirmed_at``)
         clears pending regardless of path. Otherwise: anchor-promoted
         fixtures are always pending -- their subclasses are *copied* from
         the anchor, so label presence proves nothing; the diff-confirm
@@ -200,6 +205,8 @@ class FixtureRecord(BaseModel):
         Hand-dropped fixtures predate promotion entirely and are treated
         as reviewed.
         """
+        if self.superseded_by:
+            return False
         if self.review_status == REVIEW_NEEDED:
             return True  # labels classify shots; they do not check their times
         if self.review_confirmed_at is not None:
@@ -281,6 +288,7 @@ def list_fixtures(fixtures_root: Path | None = None) -> list[FixtureRecord]:
                 anchor_slug=anchor_slug,
                 event_id=event_id,
                 review_status=review_status(payload),
+                superseded_by=payload.get("superseded_by") or None,
                 review_priority=priorities.get(json_path.stem, (None, []))[0],
                 review_reasons=priorities.get(json_path.stem, (None, []))[1],
             )

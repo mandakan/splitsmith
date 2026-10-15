@@ -183,3 +183,25 @@ def test_real_corpus_camera_classes_partition_audited() -> None:
     assert classes <= {"headcam", "handheld"}
     # No audited fixture should be missing a mount.
     assert all(f.mount in {"head", "hand"} for f in audited)
+
+
+def test_superseded_fixture_is_left_out_of_training_but_still_discovered(tmp_path: Path, monkeypatch) -> None:
+    """An old fixture kept for the tests that load it by name, but replaced in
+    the corpus by a newer audit of the same footage, must not be trained on
+    twice: ``audited`` / ``fixture_stems`` drop it unless asked."""
+    old = "stage-shots-old-2026-stage1-s12345678"
+    new = "stage-shots-new-2026-stage1-s12345678"
+    _write_audit(tmp_path, old)
+    _write_audit(tmp_path, new)
+    data = json.loads((tmp_path / f"{old}.json").read_text())
+    data["superseded_by"] = new
+    (tmp_path / f"{old}.json").write_text(json.dumps(data))
+    monkeypatch.setattr(registry, "FIXTURES_DIR", tmp_path)
+    registry.all_fixtures.cache_clear()
+
+    by_stem = {f.stem: f for f in registry.all_fixtures(tmp_path)}
+    assert by_stem[old].superseded_by == new
+    assert by_stem[new].superseded_by is None
+    assert registry.fixture_stems() == [new]
+    assert registry.fixture_stems(reviewed_only=True) == [new]
+    assert registry.fixture_stems(include_superseded=True) == [new, old]

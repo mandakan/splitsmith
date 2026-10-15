@@ -57,6 +57,9 @@ def main() -> int:
     entries = []
     missing_audio = 0
     for f in fx_module.all_fixtures(args.fixtures):
+        if f.superseded_by:
+            # Replaced in the corpus by a newer audit; nothing to review.
+            continue
         data = json.loads((args.fixtures / f"{f.stem}.json").read_text())
         wav = args.fixtures / f"{f.stem}.wav"
         spread = None

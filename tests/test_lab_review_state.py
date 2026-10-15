@@ -144,6 +144,25 @@ def test_needs_review_status_trumps_a_label_pass() -> None:
     assert rec.needs_review is True
 
 
+def test_a_superseded_fixture_is_not_queued_for_review(tmp_path: Path) -> None:
+    """A fixture a newer audit replaces in the corpus is kept for the tests
+    that load it by name; reviewing it would be work nobody uses."""
+    fixtures = tmp_path / "fixtures"
+    fixtures.mkdir()
+    _write_fixture(
+        fixtures,
+        "stage-shots-blacksmith-2026-stage6-s97dcec94",
+        {
+            "shots": [{"time": 5.5}],
+            "review": {"status": "needs_review"},
+            "superseded_by": "stage-shots-blacksmith-handgun-open-2026-stage6-s97dcec94",
+        },
+    )
+    (rec,) = list_fixtures(fixtures)
+    assert rec.superseded_by == "stage-shots-blacksmith-handgun-open-2026-stage6-s97dcec94"
+    assert rec.needs_review is False
+
+
 def test_list_fixtures_carries_the_inventory_priority(tmp_path: Path) -> None:
     fixtures = tmp_path / "tests" / "fixtures"
     fixtures.mkdir(parents=True)

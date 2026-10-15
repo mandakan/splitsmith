@@ -417,5 +417,6 @@
     "note": "shot times predate the rise-foot definition (docs/METHODOLOGY.md, 2026-10-10): check each shot's leading edge",
     "previous_status": "reviewed",
     "previous_reviewed_at": null
-  }
+  },
+  "superseded_by": "stage-shots-blacksmith-handgun-open-2026-stage3-s97dcec94"
 }
