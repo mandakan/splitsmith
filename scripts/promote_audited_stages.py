@@ -40,6 +40,8 @@ DEFAULT_MATCHES = Path("/Volumes/X9/matches")
 def _known_sources(fixtures_dir: Path) -> set[str]:
     names = set()
     for f in fx_module.all_fixtures(fixtures_dir):
+        if f.superseded_by or f.stem in fx_module.WRONG_CLIP_FIXTURES:
+            continue  # replaced in the corpus, or cut from footage it does not label
         data = json.loads((fixtures_dir / f"{f.stem}.json").read_text())
         for key in ("source_video", "source"):
             if data.get(key):
@@ -118,6 +120,11 @@ def main() -> int:
         action="store_true",
         help="promote again the stages whose own fixture is older than their audit (single-angle too)",
     )
+    ap.add_argument(
+        "--single",
+        action="store_true",
+        help="also promote a stage filmed by one camera that has no fixture yet",
+    )
     args = ap.parse_args()
 
     match_dirs = args.matches or sorted(p for p in DEFAULT_MATCHES.iterdir() if p.is_dir())
@@ -135,7 +142,7 @@ def main() -> int:
                 if args.repromote:
                     if not has_fixture:
                         continue
-                elif len(stage.videos) < 2 or has_fixture:
+                elif has_fixture or (len(stage.videos) < 2 and not args.single):
                     continue
                 where = f"{m.name} {root.name} stage {stage.stage_number}"
                 primary = stage.primary()

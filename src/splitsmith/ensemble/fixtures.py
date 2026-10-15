@@ -74,6 +74,10 @@ class Fixture:
     n_audited_shots: int
     has_wav: bool
     review_status: str = REVIEWED
+    # The stem of a newer fixture of the same footage that replaces this one
+    # in the corpus. The old file stays because tests load it by name; the
+    # training and evaluation lists (``audited``) leave it out.
+    superseded_by: str | None = None
 
     @property
     def audited(self) -> bool:
@@ -140,6 +144,7 @@ def _scan(fixtures_dir: Path) -> Iterator[Fixture]:
             n_audited_shots=len(data.get("shots") or []),
             has_wav=json_path.with_suffix(".wav").exists(),
             review_status=review_status(data),
+            superseded_by=data.get("superseded_by") or None,
         )
 
 
@@ -186,14 +191,19 @@ def audited(
     match: str | None = None,
     exclude_wrong_clip: bool = False,
     reviewed_only: bool = False,
+    include_superseded: bool = False,
 ) -> list[Fixture]:
     """Return audited fixtures (``n_audited_shots > 0``), optionally filtered.
 
     All filter args are AND-combined. Unfiltered ``audited()`` returns
-    every fixture with at least one verified shot. ``reviewed_only`` drops
-    fixtures snapped from another angle that nobody has reviewed yet (#1363).
+    every fixture with at least one verified shot that no newer fixture
+    replaces (``superseded_by``; ``include_superseded`` keeps those).
+    ``reviewed_only`` drops fixtures snapped from another angle that nobody
+    has reviewed yet (#1363).
     """
     items = [f for f in all_fixtures() if f.audited]
+    if not include_superseded:
+        items = [f for f in items if f.superseded_by is None]
     if mount is not None:
         items = [f for f in items if f.mount == mount]
     if shooter_id is not None:
@@ -214,6 +224,7 @@ def fixture_stems(
     match: str | None = None,
     exclude_wrong_clip: bool = False,
     reviewed_only: bool = False,
+    include_superseded: bool = False,
 ) -> list[str]:
     """Drop-in replacement for the old ``DEFAULT_FIXTURES`` literals.
 
@@ -228,5 +239,6 @@ def fixture_stems(
             match=match,
             exclude_wrong_clip=exclude_wrong_clip,
             reviewed_only=reviewed_only,
+            include_superseded=include_superseded,
         )
     ]
