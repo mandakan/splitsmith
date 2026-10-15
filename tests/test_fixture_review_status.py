@@ -100,6 +100,31 @@ def test_write_promoted_fixture_rebases_to_the_clip(tmp_path):
     assert np.isclose(written["beep_time"] + 25.0, 30.0)
 
 
+def test_a_snap_whose_beep_is_before_its_clip_keeps_it_there(tmp_path):
+    """A camera that started recording during the beep (2026-10-15): its
+    clip is cut from the first frame and the fixture's beep is before 0,
+    so every shot keeps its distance from the beep."""
+    cuts = []
+
+    def trim(src: Path, dst: Path, start: float, end: float) -> None:
+        cuts.append((start, end))
+        dst.write_bytes(b"RIFF")
+
+    out = write_promoted_fixture(
+        fixture_data={"beep_time": -0.2, "shots": [{"time": 1.8}]},
+        promotion_report={"counts": {}},
+        secondary_wav=tmp_path / "src.wav",
+        fixtures_root=tmp_path / "fx",
+        slug="stage-shots-m-2026-stage1-a-cam",
+        trim_wav=trim,
+    )
+    written = json.loads(out.read_text())
+    assert cuts[0][0] == 0.0
+    assert written["beep_time"] == -0.2
+    assert written["fixture_window_in_source"][0] == 0.0
+    assert written["shots"][0]["time"] == 1.8
+
+
 def test_a_snap_whose_clip_cannot_be_read_is_not_marked_seated(tmp_path):
     """An unreadable clip seats nothing, so the snap must not claim it was
     seated: --resnap reads ``anchor.seated`` to seat it again later."""

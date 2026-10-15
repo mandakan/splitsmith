@@ -24,6 +24,7 @@ import { Loader2 } from "lucide-react";
 import { api, READ_ONLY_MIRROR_MESSAGE } from "@/lib/api";
 import type { BeepQueueItem, BeepSnippetPeaks } from "@/lib/api";
 import { recheckOrder } from "@/lib/beepQueue";
+import { stageTone, toneEndNear, toneLength } from "@/lib/beepTone";
 import { useBeepQueue, DESTRUCTIVE_RERUN_WARNING, keyOf } from "@/lib/useBeepQueue";
 import { BeepWaveformPicker } from "@/components/BeepSection";
 import { BeepReticle, type ReticleMarker } from "@/components/audit/BeepReticle";
@@ -64,6 +65,11 @@ export function MobileBeepReview({ recheck = false, start = null, recheckHref }:
   const recheckItems = useMemo(() => recheckOrder(q.flatItems), [q.flatItems]);
   const [recheckKey, setRecheckKey] = useState<string | null>(start);
   useEffect(() => setDraft(null), [q.activeKey, recheckKey]);
+  // "Beep starts before the clip" (2026-10-15): set per card, on already
+  // for a secondary whose beep is before 0.
+  const [beforeClip, setBeforeClip] = useState(false);
+  // A measured tone re-renders the card, which hands it to the picker.
+  useToneUpdates();
 
   if (!q.data) {
     return (
@@ -94,6 +100,7 @@ export function MobileBeepReview({ recheck = false, start = null, recheckHref }:
       </div>
     );
   }
+  const canBeforeClip = item.role === "secondary" && !item.proxy_ready && item.snippet_ready;
   const recheckNextItem = () => {
     const next = recheckItems[recheckAt + 1];
     setRecheckKey(next ? keyOf(next) : RECHECK_DONE);
@@ -127,7 +134,23 @@ export function MobileBeepReview({ recheck = false, start = null, recheckHref }:
           {item.role === "secondary" ? " (secondary)" : ""}
         </div>
         <StatusLine item={item} />
-        <MediaArea item={item} draft={draft} onPick={setDraft} setError={q.setError} />
+        {canBeforeClip ? (
+          <BeforeClipSwitch
+            key={keyOf(item)}
+            item={item}
+            items={q.flatItems}
+            on={beforeClip}
+            onChange={setBeforeClip}
+            draft={draft}
+          />
+        ) : null}
+        <MediaArea
+          item={item}
+          draft={draft}
+          onPick={setDraft}
+          setError={q.setError}
+          tone={canBeforeClip && beforeClip ? toneFor(q.flatItems, item) : null}
+        />
         {effective != null ? (
           <NudgeRow value={effective} onNudge={(d) => setDraft((effective ?? 0) + d)} />
         ) : null}
@@ -253,16 +276,125 @@ function StatusLine({ item }: { item: BeepQueueItem }) {
   return <p className="mb-3 text-xs text-muted">{text}</p>;
 }
 
+/** The stage's tone length, measured on its head cams' beep snippets
+ *  (every shooter's; lib/beepTone.stageTone), cached per stage. */
+const toneCache = new Map<string, ReturnType<typeof stageTone> | "loading">();
+const toneListeners = new Set<() => void>();
+
+function stageKey(item: BeepQueueItem): string {
+  return String(item.stage_number);
+}
+
+function headCams(items: ReadonlyArray<BeepQueueItem>, item: BeepQueueItem): BeepQueueItem[] {
+  return items.filter(
+    (it) => it.role === "primary" && it.stage_number === item.stage_number && it.snippet_ready && it.beep_time != null,
+  );
+}
+
+function measureTone(items: ReadonlyArray<BeepQueueItem>, item: BeepQueueItem): void {
+  const key = stageKey(item);
+  if (toneCache.has(key)) return;
+  toneCache.set(key, "loading");
+  void Promise.all(
+    headCams(items, item).map((h) =>
+      api
+        .getBeepSnippetPeaks(h.slug, h.stage_number, h.video_id)
+        .then((p) =>
+          toneLength(p.peaks, { start: p.snippet_start, end: p.snippet_start + p.duration }, h.beep_time!),
+        )
+        .catch(() => null),
+    ),
+  ).then((lengths) => {
+    toneCache.set(key, stageTone(lengths));
+    toneListeners.forEach((f) => f());
+  });
+}
+
+/** The measured tone in seconds for this card's stage, or null. */
+function toneFor(items: ReadonlyArray<BeepQueueItem>, item: BeepQueueItem): number | null {
+  const t = toneCache.get(stageKey(item));
+  return t == null || t === "loading" ? (measureTone(items, item), null) : t.tone;
+}
+
+function useToneUpdates(): void {
+  const [, bump] = useState(0);
+  useEffect(() => {
+    const f = () => bump((n) => n + 1);
+    toneListeners.add(f);
+    return () => {
+      toneListeners.delete(f);
+    };
+  }, []);
+}
+
+/** "Beep starts before the clip": a camera that started recording during
+ *  the beep has only the tone's end in its clip (2026-10-15). The line goes
+ *  on that end and the beep is set the stage's tone length earlier. */
+function BeforeClipSwitch({
+  item,
+  items,
+  on,
+  onChange,
+  draft,
+}: {
+  item: BeepQueueItem;
+  items: ReadonlyArray<BeepQueueItem>;
+  on: boolean;
+  onChange: (on: boolean) => void;
+  draft: number | null;
+}) {
+  useEffect(() => {
+    onChange(item.beep_time != null && item.beep_time < 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per card
+  }, []);
+  if (on) measureTone(items, item);
+  const measured = toneCache.get(stageKey(item));
+  const beep = draft ?? item.beep_time;
+  const line = !on
+    ? null
+    : measured === "loading" || measured === undefined
+      ? "Measuring the tone on the head cams..."
+      : measured == null
+        ? "No head cam's beep audio here to measure the tone from."
+        : `Beep at ${beep != null ? beep.toFixed(3) : "?"} s · tone ${measured.tone.toFixed(3)} s from ${measured.count} head cam${
+            measured.count === 1 ? "" : "s"
+          }${measured.count > 1 ? ` (within ${Math.round(measured.spread * 1000)} ms)` : ""}`;
+  return (
+    <div className="mb-3 space-y-1">
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        aria-label="Beep starts before the clip"
+        onClick={() => onChange(!on)}
+        className="min-h-11 w-full rounded border border-rule px-3 text-left text-sm text-ink"
+      >
+        Beep starts before the clip
+        <span className="float-right text-muted">{on ? "on" : "off"}</span>
+      </button>
+      {line ? (
+        <p data-testid="before-clip-line" className="text-sm text-ink">
+          {line}
+        </p>
+      ) : null}
+      {on ? <p className="text-xs text-muted">Put the line on the end of the tone.</p> : null}
+    </div>
+  );
+}
+
 function MediaArea({
   item,
   draft,
   onPick,
   setError,
+  tone = null,
 }: {
   item: BeepQueueItem;
   draft: number | null;
   onPick: (t: number | null) => void;
   setError: (msg: string | null) => void;
+  /** Set when the beep starts before the clip: the line is the tone's end. */
+  tone?: number | null;
 }) {
   if (item.proxy_ready) {
     return (
@@ -289,7 +421,7 @@ function MediaArea({
     return (
       <div className="mb-3 space-y-2">
         <p className="text-xs text-muted">Video available on desktop - reviewing from the audio snippet.</p>
-        <SnippetPlayer item={item} draft={draft} onPick={onPick} />
+        <SnippetPlayer item={item} draft={draft} onPick={onPick} tone={tone} />
       </div>
     );
   }
@@ -304,10 +436,12 @@ function SnippetPlayer({
   item,
   draft,
   onPick,
+  tone = null,
 }: {
   item: BeepQueueItem;
   draft: number | null;
   onPick: (t: number | null) => void;
+  tone?: number | null;
 }) {
   const [peaks, setPeaks] = useState<BeepSnippetPeaks | null>(null);
   const [peaksFailed, setPeaksFailed] = useState(false);
@@ -345,6 +479,24 @@ function SnippetPlayer({
     [],
   );
 
+  // Before the clip: find where the tone stops near the clip's start and put
+  // the line there, once per card, unless a time was already picked.
+  const placedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (tone == null || !peaks || draft != null) return;
+    const key = `${item.video_id}:${tone}`;
+    if (placedRef.current === key) return;
+    placedRef.current = key;
+    const reach = (tone + 0.1) / 2;
+    const end = toneEndNear(
+      peaks.peaks,
+      { start: peaks.snippet_start, end: peaks.snippet_start + peaks.duration },
+      peaks.snippet_start + reach,
+      reach + 0.05,
+    );
+    if (end != null) onPick(Math.round((end - tone) * 1000) / 1000);
+  }, [tone, peaks, draft, item.video_id, onPick]);
+
   if (peaksFailed) {
     return (
       <p className="text-sm text-muted" role="status">
@@ -361,7 +513,11 @@ function SnippetPlayer({
   }
 
   const range = { start: peaks.snippet_start, end: peaks.snippet_start + peaks.duration };
-  const value = draft ?? item.beep_time ?? item.alt_candidates[0]?.time ?? range.start + peaks.duration / 2;
+  const beepValue = draft ?? item.beep_time ?? item.alt_candidates[0]?.time ?? range.start + peaks.duration / 2;
+  // Before the clip the line is the tone's end; the beep is ``tone`` before it.
+  const value = tone != null ? beepValue + tone : beepValue;
+  const pickLine = (t: number | null) =>
+    onPick(t == null || tone == null ? t : Math.round((t - tone) * 1000) / 1000);
   const alts = item.alt_candidates.filter((c) => item.beep_time == null || Math.abs(c.time - item.beep_time) >= 0.005);
   const markers: ReticleMarker[] = [
     ...(item.beep_time != null ? [{ time: item.beep_time, kind: "detected" as const }] : []),
@@ -407,7 +563,8 @@ function SnippetPlayer({
         peaks={peaks.peaks}
         range={range}
         value={value}
-        onChange={onPick}
+        onChange={pickLine}
+        snapTo={tone != null ? "end" : "start"}
         markers={markers}
         playhead={playhead}
         focusSpan={focusSpan}

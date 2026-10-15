@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "beep-before-the-clip",
+      "date": "2026-10-15",
+      "title": "A camera that started during the beep",
+      "body": "On the phone's beep card, Beep starts before the clip puts the line on the tone's end and sets the beep that tone's length earlier, measured on the stage's head cams."
+    },
+    {
       "id": "phone-beep-picker-snap",
       "date": "2026-10-15",
       "title": "A quiet beep you can see and land on",

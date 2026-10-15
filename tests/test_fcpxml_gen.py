@@ -662,6 +662,39 @@ def test_generate_fcpxml_secondary_with_short_pre_uses_offset(tmp_path: Path) ->
     assert cam_clip.attrib["start"] == "0s"
 
 
+def test_generate_fcpxml_secondary_whose_beep_is_before_its_clip(tmp_path: Path) -> None:
+    """A cam that started recording during the beep (2026-10-15) has its beep
+    before its first frame: it starts that much later on the timeline than
+    the primary's beep, from its own first frame."""
+    video = tmp_path / "v.mp4"
+    video.write_bytes(b"")
+    secondary = tmp_path / "cam_late.mp4"
+    secondary.write_bytes(b"")
+    out = tmp_path / "v.fcpxml"
+    generate_fcpxml(
+        video_path=video,
+        video=_meta_30fps(),
+        shots=[_shot(1, time_from_beep=1.0, split=1.0)],
+        beep_offset_seconds=5.0,
+        output_path=out,
+        project_name="v",
+        config=OutputConfig(),
+        secondaries=[
+            fcpxml_mod.SecondaryClip(
+                video_path=secondary,
+                video=_meta_30fps(),
+                beep_offset_seconds=-0.2,  # the beep 0.2 s before this cam's first frame
+                label="Cam late",
+            )
+        ],
+    )
+    cam_clip = ET.fromstring(out.read_bytes()).find(".//spine/asset-clip/asset-clip")
+    assert cam_clip is not None
+    # 5.2 s @ 30 fps = 156 frames
+    assert cam_clip.attrib["offset"] == "156/30s"
+    assert cam_clip.attrib["start"] == "0s"
+
+
 def test_generate_fcpxml_secondary_with_long_pre_uses_start(tmp_path: Path) -> None:
     """A cam whose clip-local beep sits later than the primary's beep gets
     offset=0 and a positive ``start``: we skip into the cam's media so its
