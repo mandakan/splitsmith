@@ -5,7 +5,7 @@
   "stage_name": "",
   "fixture_window_in_source": [
     0.0,
-    24.832
+    25.167
   ],
   "beep_time": -0.129,
   "tolerance_ms": 15,
@@ -14,118 +14,122 @@
   "shots": [
     {
       "shot_number": 1,
-      "candidate_number": 2,
-      "time": 1.285,
-      "ms_after_beep": 1414,
+      "candidate_number": 4,
+      "time": 1.574,
+      "ms_after_beep": 1703,
       "source": "promoted",
       "subclass": "unknown",
-      "snap_displacement_ms": 40.16,
-      "sanity_flag": "low-amplitude"
+      "snap_displacement_ms": 1.27,
+      "sanity_flag": "",
+      "seat_ms": -2.0
     },
     {
       "shot_number": 2,
-      "candidate_number": 4,
-      "time": 1.679,
-      "ms_after_beep": 1808,
+      "candidate_number": 5,
+      "time": 2.024,
+      "ms_after_beep": 2153,
       "source": "promoted",
       "subclass": "unknown",
-      "snap_displacement_ms": -24.79,
+      "snap_displacement_ms": -4.93,
       "sanity_flag": "",
-      "seat_ms": 3.0
+      "seat_ms": -2.0
     },
     {
       "shot_number": 3,
-      "candidate_number": 28,
-      "time": 15.153,
-      "ms_after_beep": 15282,
-      "source": "promoted",
-      "subclass": "unknown",
-      "snap_displacement_ms": 49.49,
-      "sanity_flag": "low-amplitude",
-      "seat_ms": 18.0
-    },
-    {
-      "shot_number": 4,
       "candidate_number": 29,
       "time": 15.415,
       "ms_after_beep": 15544,
       "source": "promoted",
       "subclass": "unknown",
-      "snap_displacement_ms": 0.53,
+      "snap_displacement_ms": 4.33,
       "sanity_flag": "",
       "seat_ms": -12.0
     },
     {
-      "shot_number": 5,
-      "candidate_number": 32,
-      "time": 16.944,
-      "ms_after_beep": 17073,
+      "shot_number": 4,
+      "candidate_number": 30,
+      "time": 15.759,
+      "ms_after_beep": 15888,
       "source": "promoted",
       "subclass": "unknown",
-      "snap_displacement_ms": 32.67,
+      "snap_displacement_ms": -2.81,
       "sanity_flag": "",
       "seat_ms": -2.0
     },
     {
-      "shot_number": 6,
+      "shot_number": 5,
       "candidate_number": 33,
       "time": 17.256,
       "ms_after_beep": 17385,
       "source": "promoted",
       "subclass": "unknown",
-      "snap_displacement_ms": 39.7,
+      "snap_displacement_ms": 7.55,
       "sanity_flag": "",
       "seat_ms": -3.0
     },
     {
-      "shot_number": 7,
-      "candidate_number": 35,
-      "time": 17.791,
-      "ms_after_beep": 17920,
+      "shot_number": 6,
+      "candidate_number": 34,
+      "time": 17.552,
+      "ms_after_beep": 17681,
       "source": "promoted",
       "subclass": "unknown",
-      "snap_displacement_ms": -44.24,
-      "sanity_flag": "low-amplitude"
+      "snap_displacement_ms": -4.58,
+      "sanity_flag": "",
+      "seat_ms": -1.0
+    },
+    {
+      "shot_number": 7,
+      "candidate_number": 36,
+      "time": 18.171,
+      "ms_after_beep": 18300,
+      "source": "promoted",
+      "subclass": "unknown",
+      "snap_displacement_ms": 1.15,
+      "sanity_flag": "",
+      "seat_ms": -4.0
     },
     {
       "shot_number": 8,
       "candidate_number": 37,
-      "time": 18.581,
-      "ms_after_beep": 18710,
+      "time": 18.973,
+      "ms_after_beep": 19102,
       "source": "promoted",
       "subclass": "unknown",
-      "snap_displacement_ms": -59.17,
-      "sanity_flag": "low-amplitude"
+      "snap_displacement_ms": -5.19,
+      "sanity_flag": "",
+      "seat_ms": -1.0
     },
     {
       "shot_number": 9,
-      "candidate_number": 37,
-      "time": 18.916,
-      "ms_after_beep": 19045,
+      "candidate_number": 38,
+      "time": 19.221,
+      "ms_after_beep": 19350,
       "source": "promoted",
       "subclass": "unknown",
-      "snap_displacement_ms": 30.86,
+      "snap_displacement_ms": -3.3,
       "sanity_flag": "",
       "seat_ms": -1.0
     },
     {
       "shot_number": 10,
-      "candidate_number": 38,
-      "time": 19.45,
-      "ms_after_beep": 19579,
-      "source": "promoted",
-      "subclass": "unknown",
-      "snap_displacement_ms": -43.08,
-      "sanity_flag": "low-amplitude"
-    },
-    {
-      "shot_number": 11,
       "candidate_number": 39,
       "time": 19.829,
       "ms_after_beep": 19958,
       "source": "promoted",
       "subclass": "unknown",
-      "snap_displacement_ms": 0.95,
+      "snap_displacement_ms": -0.56,
+      "sanity_flag": "",
+      "seat_ms": -3.0
+    },
+    {
+      "shot_number": 11,
+      "candidate_number": 40,
+      "time": 20.164,
+      "ms_after_beep": 20293,
+      "source": "promoted",
+      "subclass": "unknown",
+      "snap_displacement_ms": -3.7,
       "sanity_flag": "",
       "seat_ms": -3.0
     }
@@ -960,15 +964,15 @@
   "anchor": {
     "fixture_slug": "stage3",
     "revision_sha": "1883350f7df71f88de7d750cba252111b8c1584696fae1472b19e02cc5239799",
-    "promoted_at": "2026-10-15T09:03:29.929626+00:00",
+    "promoted_at": "2026-10-15T09:15:13.423996+00:00",
     "offset_seconds": -5.129,
-    "drift_ms_per_minute": -62.338,
+    "drift_ms_per_minute": 0.0,
     "snap_window_ms": 60,
     "seated": true
   },
   "history": [
     {
-      "at": "2026-10-15T09:03:29.929644+00:00",
+      "at": "2026-10-15T09:15:13.424040+00:00",
       "action": "promote-from-anchor",
       "tool_version": "0.1.0",
       "details": {
@@ -977,11 +981,11 @@
         "voter_a_candidate_count": 40,
         "snapped": 11,
         "missed": 0,
-        "sanity_flagged": 5,
-        "onset_lag_ms": -328.0,
-        "onset_lag_contrast": 4.585,
+        "sanity_flagged": 0,
+        "onset_lag_ms": 1.0,
+        "onset_lag_contrast": 4.584,
         "onset_lag_applied": true,
-        "at_window_edge": 1
+        "at_window_edge": 0
       }
     }
   ],
