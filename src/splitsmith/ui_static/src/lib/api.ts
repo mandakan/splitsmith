@@ -10,6 +10,7 @@ import type { Feature } from "@/lib/access";
 import type { Anomaly } from "@/lib/anomalies";
 import { authorKey } from "@/lib/authorKey";
 import type { LogoSpot } from "@/lib/logoPlan";
+import type { ModelMap } from "@/lib/modelMap";
 import { type Pending, whenReady, type WhenReadyOptions } from "@/lib/pending";
 
 /** The error of a derive job a 202 named, once it failed (``lib/pending``).
@@ -5016,6 +5017,9 @@ export const api = {
   /** Developer-mode model info: active version, recall, fixture count,
    *  + step-counter map used to colour the workflow stepper. */
   getDeveloperModel: () => request<DeveloperModelInfo>("/api/dev/model"),
+
+  /** The lab's Models page: corpus, shipped heads, held-out splits, history. */
+  getDevModels: () => request<ModelMap>("/api/dev/models"),
 
   /** Review-queue rollup: promoted-from-match items, GitHub submissions,
    *  ad-hoc fixture review tasks. Drives /dev/review. */

@@ -17,7 +17,7 @@
  * means hosted /dev/* gains a sign-out path it never had before.
  */
 
-import { Check, Layers, Zap } from "lucide-react";
+import { Check, Layers, Network, Zap } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { NavLink, Outlet, useLocation, useNavigate, type To } from "react-router-dom";
@@ -148,7 +148,7 @@ export function DeveloperShell() {
         <span className="text-subtle">Developer</span>
         <span className="text-whisper">/</span>
         <span className="font-bold text-ink">
-          {activeIdx >= 0 ? STEPS[activeIdx].label : "Workspace"}
+          {activeIdx >= 0 ? STEPS[activeIdx].label : pathname.startsWith("/dev/models") ? "Models" : "Workspace"}
         </span>
       </div>
       <ModelChip model={model} />
@@ -326,6 +326,9 @@ function DeveloperSidebar({
         Tools
       </div>
       <div className="flex flex-col gap-px">
+        <SubLink to={withMatch("/dev/models")} icon={<Network className="size-[15px]" />}>
+          Models
+        </SubLink>
         <SubLink to="/_design" icon={<Layers className="size-[15px]" />}>
           Design system
         </SubLink>
