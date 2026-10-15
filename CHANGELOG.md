@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.75.0](https://github.com/mandakan/splitsmith/compare/v0.74.0...v0.75.0) (2026-10-15)
+
+
+### Features
+
+* **beep:** a secondary's beep may start before its clip; Höstfinalen re-snapped ([#1491](https://github.com/mandakan/splitsmith/issues/1491)) ([cbf4fef](https://github.com/mandakan/splitsmith/commit/cbf4feff8a771a5552765bbfcbcf762a977e7fdf))
+
 ## [0.74.0](https://github.com/mandakan/splitsmith/compare/v0.73.1...v0.74.0) (2026-10-15)
 
 
