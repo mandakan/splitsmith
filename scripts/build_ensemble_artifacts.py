@@ -68,6 +68,11 @@ from splitsmith.ensemble.tta import compute_tta_agreement
 from splitsmith.ensemble.voters import within_stage_amp_anchor
 from splitsmith.shot_detect import detect_shots
 
+# Sibling scripts: the CLI runs with scripts/ on sys.path, and the UI's
+# retrain job and the tests put it there before importing this module.
+import feature_caches  # noqa: E402  isort: skip
+import fixture_audio  # noqa: E402  isort: skip
+
 # Every audited fixture; the discovery is filesystem-driven so adding a
 # new audited JSON + WAV under tests/fixtures/ picks it up automatically.
 # WRONG_CLIP_FIXTURES still applies as a Voter E exclusion -- those
@@ -651,6 +656,15 @@ def _heldout_class_report(
             "own_threshold": round(float(own), 6),
             "at_own_threshold": _prf_at(probs, labels, own),
         }
+    lomo = heldout.get("lomo")
+    if lomo is not None:
+        # Each match scored by the model that never saw it, at the shipped
+        # threshold: which matches the class generalises to and which not.
+        matches = np.array([_event_groups(r["fixture"])[0] for r in rows])
+        report["lomo_by_match"] = {
+            m: _prf_at(lomo[matches == m], labels[matches == m], shipped_threshold)
+            for m in sorted(set(matches.tolist()))
+        }
     return report
 
 
@@ -667,6 +681,7 @@ def _heldout_rows(
             "fixture": r["fixture"],
             "candidate_idx": int(r["candidate_idx"]),
             "t_absolute": float(r["t_absolute"]),
+            "label": int(r["label"]),
             "score_c_stratified": float(cv_probs[i]),
         }
         for name in ("grouped", "lomo"):
@@ -683,13 +698,14 @@ def _write_heldout(
     target_recall: float,
     tolerance_ms: float,
     log: Callable[[str], None],
+    out: Path = HELDOUT_DIR,
 ) -> None:
-    """Write ``HELDOUT_DIR/report.json`` and ``voter_c_oof.parquet``."""
+    """Write ``out/report.json`` and ``voter_c_oof.parquet``."""
     import pyarrow as pa
     import pyarrow.parquet as pq
 
-    HELDOUT_DIR.mkdir(parents=True, exist_ok=True)
-    (HELDOUT_DIR / "report.json").write_text(
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "report.json").write_text(
         json.dumps(
             {
                 "built_at": dt.datetime.now(dt.UTC).isoformat(),
@@ -706,7 +722,7 @@ def _write_heldout(
         )
         + "\n"
     )
-    pq.write_table(pa.Table.from_pylist(rows), HELDOUT_DIR / "voter_c_oof.parquet")
+    pq.write_table(pa.Table.from_pylist(rows), out / "voter_c_oof.parquet")
     for cls, r in report.items():
         parts = []
         for name in ("stratified", "grouped", "lomo"):
@@ -717,7 +733,7 @@ def _write_heldout(
             m = block["at_shipped_threshold"]
             parts.append(f"{name} P/R/F1={m['precision']:.3f}/{m['recall']:.3f}/{m['f1']:.3f}")
         log(f"  held-out {cls}: " + "  ".join(parts))
-    log(f"  held-out report + OOF probabilities -> {HELDOUT_DIR}/")
+    log(f"  held-out report + OOF probabilities -> {out}/")
 
 
 def _train_voter_c_for_class(rows: list[dict], target_recall: float):
@@ -1099,9 +1115,81 @@ def _carry_model_artifacts(cal_path: Path) -> dict | None:
     return block if isinstance(block, dict) else None
 
 
+def _event_match(stem: str) -> str | None:
+    """The match a fixture's ``event_id`` names (the fold key), else its stem's."""
+    try:
+        event_id = json.loads((FIXTURES_DIR / f"{stem}.json").read_text()).get("event_id") or ""
+    except (OSError, json.JSONDecodeError):
+        return None
+    return event_id.split(":")[0] if event_id.count(":") == 2 else None
+
+
+def select_fixtures(matches: list[str], *, reviewed_only: bool) -> list[str]:
+    """Every training fixture (superseded ones left out) of the named matches."""
+    wanted = set(matches)
+    stems = [s for s in fixture_stems(reviewed_only=reviewed_only) if _event_match(s) in wanted]
+    found = {_event_match(s) for s in stems}
+    unknown = sorted(wanted - found)
+    if unknown:
+        raise BuildError(f"no fixtures for match(es): {', '.join(unknown)}")
+    return stems
+
+
+def ensure_audio(fixtures: list[str], *, log: Callable[[str], None] = print) -> dict[str, str]:
+    """Every fixture's WAV, checked against ``audio.lock.json``; missing ones
+    fetched from R2. Returns stem -> WAV sha256.
+
+    A WAV the lock does not know, one R2 cannot serve, or a local one that
+    differs from the lock (a re-cut not pushed yet: fetching would overwrite
+    it) stops the build. It used to skip such a fixture with a log line,
+    which quietly built on a smaller corpus than asked for.
+    """
+    lock = fixture_audio.load_manifest()
+    names = {f"{s}.wav": s for s in fixtures}
+    unknown = sorted(n for n in names if n not in lock)
+    if unknown:
+        raise BuildError(
+            f"{len(unknown)} fixture WAV(s) are not in audio.lock.json "
+            f"(push them with scripts/fixture_audio.py push): {', '.join(unknown[:5])}"
+        )
+    subset = {n: lock[n] for n in names}
+    st = fixture_audio.status(subset)
+    if st["changed"]:
+        raise BuildError(
+            f"{len(st['changed'])} fixture WAV(s) differ from audio.lock.json: push the new audio "
+            f"(scripts/fixture_audio.py push) or restore it (delete it, then build again): "
+            f"{', '.join(st['changed'][:5])}"
+        )
+    if st["missing"]:
+        log(f"Fetching {len(st['missing'])} fixture WAV(s) from R2...")
+        errors = fixture_audio.fetch(fixture_audio.DEFAULT_URL, only=st["missing"])
+        if errors:
+            raise BuildError("could not fetch fixture audio: " + "; ".join(errors[:5]))
+    return {s: subset[n]["sha256"] for n, s in names.items()}
+
+
+def _git_sha() -> str | None:
+    import subprocess
+
+    try:
+        res = subprocess.run(
+            ["git", "rev-parse", "--short=12", "HEAD"], capture_output=True, text=True, timeout=10
+        )
+    except OSError:
+        return None
+    return res.stdout.strip() or None
+
+
 def build_artifacts(
     fixtures: list[str] | None = None,
     *,
+    matches: list[str] | None = None,
+    out_dir: Path | None = None,
+    name: str | None = None,
+    version: str | None = None,
+    channel: str = "experimental",
+    description: str | None = None,
+    extract: bool = False,
     target_recall: float = 0.95,
     tolerance_ms: float = 75.0,
     mining_cap_ratio: float = DEFAULT_NEG_CAP_RATIO,
@@ -1118,12 +1206,32 @@ def build_artifacts(
     drive the same code path as the CLI. Logs progress through ``log``;
     returns the calibration dict that was written. ``reviewed_only`` leaves
     out fixtures snapped from another angle that nobody has reviewed (#1363).
+
+    ``matches`` picks the corpus by match (the ``event_id`` fold key)
+    instead of naming fixtures. ``out_dir`` writes a model bundle there
+    (``ensemble.model_bundle``: calibration, ONNX graphs, ``heldout/`` and
+    ``model.json``) and leaves the shipped model, its held-out report and
+    the ONNX parity references alone. Before anything is fitted, every
+    fixture's WAV is checked against the R2 lock (missing ones fetched) and
+    its feature caches against that WAV; ``extract`` re-extracts the stale
+    or missing caches, otherwise they stop the build.
     """
+    if matches:
+        fixtures = select_fixtures(matches, reviewed_only=reviewed_only)
     if not fixtures:
         fixtures = fixture_stems(reviewed_only=True) if reviewed_only else list(DEFAULT_FIXTURES)
     fixtures = list(fixtures)
     unreviewed = set(fixtures) - set(fixture_stems(reviewed_only=True))
     log(f"Calibrating ensemble over {len(fixtures)} fixture(s), {len(unreviewed)} not yet reviewed...")
+    digests = ensure_audio(fixtures, log=log)
+    stale = feature_caches.ensure_features(
+        [f for f in fixtures if f not in WRONG_CLIP_FIXTURES], digests, extract=extract, log=log
+    )
+    if stale:
+        raise BuildError(
+            f"{len(stale)} fixture(s) have feature caches that are missing or were made from other "
+            "audio; build again with --extract to re-extract them: " + ", ".join(stale[:5])
+        )
     universe = _build_universe(fixtures, tolerance_ms, log=log)
     if not universe:
         raise BuildError(
@@ -1233,8 +1341,14 @@ def build_artifacts(
 
     if not thresholds_by_class:
         raise BuildError("no camera class produced calibrated thresholds; need >= 1 positive")
+    data_dir = out_dir if out_dir is not None else DATA_DIR
     _write_heldout(
-        heldout_report, heldout_rows, target_recall=target_recall, tolerance_ms=tolerance_ms, log=log
+        heldout_report,
+        heldout_rows,
+        target_recall=target_recall,
+        tolerance_ms=tolerance_ms,
+        log=log,
+        out=out_dir / "heldout" if out_dir is not None else HELDOUT_DIR,
     )
 
     # Voter E (issue #183): train CLIP visual probe head on the head-mounted
@@ -1286,9 +1400,9 @@ def build_artifacts(
         f"C={default_thresholds['voter_c_threshold']:.4f})"
     )
 
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    cal_path = DATA_DIR / "ensemble_calibration.json"
-    voter_e_path = DATA_DIR / DEFAULT_VOTER_E_PROBE_FILENAME
+    data_dir.mkdir(parents=True, exist_ok=True)
+    cal_path = data_dir / "ensemble_calibration.json"
+    voter_e_path = data_dir / DEFAULT_VOTER_E_PROBE_FILENAME
 
     # ONNX instead of joblib (#649): the pickles bound the shipped models
     # to whichever scikit-learn version the installing user resolved.
@@ -1296,7 +1410,7 @@ def build_artifacts(
     # never leaves a JSON pointing at artifacts that don't exist.
     voter_c_onnx_artifacts: dict[str, str] = {}
     for cls, cls_model in sorted(voter_c_models.items()):
-        onnx_path = DATA_DIR / f"voter_c_gbdt_{cls}.onnx"
+        onnx_path = data_dir / f"voter_c_gbdt_{cls}.onnx"
         _export_onnx_proba(cls_model, int(cls_model.n_features_in_), onnx_path)
         voter_c_onnx_artifacts[cls] = onnx_path.name
         log(f"Wrote {onnx_path}")
@@ -1332,12 +1446,40 @@ def build_artifacts(
         "voter_e_provenance": voter_e_provenance,
         **mining_provenance,
     }
-    carried = _carry_model_artifacts(cal_path)
+    # A bundle shares the shipped CLAP / PANN exports, so it carries the
+    # shipped block (its own folder has no previous calibration).
+    carried = _carry_model_artifacts(cal_path if out_dir is None else DATA_DIR / "ensemble_calibration.json")
     if carried is not None:
         cal["model_artifacts"] = carried
         log("Carried model_artifacts block forward from the previous calibration.")
     cal_path.write_text(json.dumps(cal, indent=2) + "\n")
     log(f"Wrote {cal_path}")
+
+    if out_dir is not None:
+        from splitsmith.ensemble import model_bundle as mb
+
+        built = dt.datetime.fromisoformat(cal["built_at"])
+        manifest = mb.ModelManifest(
+            name=name or out_dir.name,
+            version=version or built.strftime("v%Y.%m.%d.%H%M"),
+            channel=channel,
+            built_at=cal["built_at"],
+            git_sha=_git_sha(),
+            description=description,
+            selection=mb.CorpusSelection(
+                matches=sorted(matches) if matches else None,
+                fixtures=None if matches else fixtures,
+                reviewed_only=reviewed_only,
+            ),
+            corpus=[
+                mb.CorpusFixture(stem=f, wav_sha256=digests[f])
+                for f in cal["calibration_fixtures"]
+                if f in digests
+            ],
+        )
+        log(f"Wrote {mb.write_manifest(out_dir, manifest)}")
+        # The parity references pin the shipped graphs; a bundle never touches them.
+        return cal
 
     # Frozen sklearn probabilities for tests/test_onnx_parity.py. Skipped
     # in a wheel context (the dev retrain endpoint), where tests/ is absent.
@@ -1404,10 +1546,44 @@ def main() -> None:
         action="store_true",
         help="Leave out fixtures snapped from another angle that nobody has reviewed yet.",
     )
+    p.add_argument(
+        "--matches",
+        nargs="+",
+        metavar="MATCH",
+        help="Build on every fixture of these matches (event_id match keys) instead of --fixture.",
+    )
+    p.add_argument(
+        "--out",
+        type=Path,
+        help=(
+            "Write a model bundle into this folder (e.g. build/models/<name>) instead of over the "
+            "shipped model in src/splitsmith/data; the lab's Models page lists build/models/."
+        ),
+    )
+    p.add_argument("--name", help="Bundle name (default: the --out folder's name).")
+    p.add_argument("--version", help="Bundle version (default: vYYYY.MM.DD.HHMM of the build).")
+    p.add_argument(
+        "--channel", default="experimental", choices=["experimental", "pre-release", "premium", "shipped"]
+    )
+    p.add_argument("--description", help="One line on what this model is for.")
+    p.add_argument(
+        "--extract",
+        action="store_true",
+        help="Re-extract CLAP / PANN caches that are missing or were made from other audio.",
+    )
     args = p.parse_args()
+    if any(v is not None for v in (args.name, args.version, args.description)) and args.out is None:
+        p.error("--name, --version and --description describe a bundle; add --out")
     try:
         build_artifacts(
             fixtures=args.fixture or None,
+            matches=args.matches,
+            out_dir=args.out,
+            name=args.name,
+            version=args.version,
+            channel=args.channel,
+            description=args.description,
+            extract=args.extract,
             target_recall=args.target_recall,
             tolerance_ms=args.tolerance_ms,
             mining_cap_ratio=args.mining_cap_ratio,

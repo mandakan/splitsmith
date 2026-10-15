@@ -97,11 +97,11 @@ export function VersionTimeline({
         <div className="mt-1 flex flex-wrap gap-4 text-sm text-muted">
           <span className="inline-flex items-center gap-1.5">
             <i aria-hidden className="size-2.5 rounded-[2px] bg-beep/50" />
-            Headcam head
+            Headcam classifier
           </span>
           <span className="inline-flex items-center gap-1.5">
             <i aria-hidden className="size-2.5 rounded-[2px] bg-manual/50" />
-            Handheld head (one shared corpus before May 5)
+            Handheld classifier (one shared classifier before May 5)
           </span>
           <span>Big dots changed the corpus. Click a version.</span>
         </div>

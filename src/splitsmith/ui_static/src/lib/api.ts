@@ -5019,7 +5019,8 @@ export const api = {
   getDeveloperModel: () => request<DeveloperModelInfo>("/api/dev/model"),
 
   /** The lab's Models page: corpus, shipped heads, held-out splits, history. */
-  getDevModels: () => request<ModelMap>("/api/dev/models"),
+  getDevModels: (model?: string) =>
+    request<ModelMap>(model ? `/api/dev/models?model=${encodeURIComponent(model)}` : "/api/dev/models"),
 
   /** Review-queue rollup: promoted-from-match items, GitHub submissions,
    *  ad-hoc fixture review tasks. Drives /dev/review. */

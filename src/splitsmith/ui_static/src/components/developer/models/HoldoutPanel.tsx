@@ -9,6 +9,7 @@ import { useMemo } from "react";
 
 import { Chip, Label, Segmented } from "@/components/ui";
 import {
+  CLASSIFIER_LABEL,
   SPLIT_EXPLAIN,
   SPLIT_LABEL,
   foldsFor,
@@ -137,7 +138,7 @@ function HeadBars({ head, active }: { head: VoterCHead; active: SplitName }) {
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-baseline gap-2">
         <i aria-hidden className="size-2 rounded-full" style={{ background: HEAD_COLOR[head.camera_class] }} />
-        <span className="text-md text-ink">{head.camera_class === "headcam" ? "Headcam head" : "Handheld head"}</span>
+        <span className="text-md text-ink">{CLASSIFIER_LABEL[head.camera_class]}</span>
         <span className="text-sm text-muted">
           {head.n_fixtures} fixtures, {head.heldout_stages ?? "?"} stages, {head.heldout_matches.length} matches
         </span>

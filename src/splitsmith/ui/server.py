@@ -19560,14 +19560,20 @@ def create_app(
         )
 
     @app.get("/api/dev/models")
-    def dev_models() -> dict[str, Any]:
-        """The lab's Models page: every fixture, the shipped models it feeds,
-        their parameters, the held-out splits and the shipped versions
-        (``lab.model_map``). Read-only, assembled from files on disk."""
+    def dev_models(model: str = Query("shipped", max_length=200)) -> dict[str, Any]:
+        """The lab's Models page: every fixture, the model it feeds, its
+        parameters, the held-out splits and the shipped versions
+        (``lab.model_map``). ``model`` is ``shipped`` or a bundle under
+        ``build/models`` (the payload's ``models`` lists them); any other
+        value is a 404. Read-only, assembled from files on disk."""
         from ..lab.model_map import load_model_map
         from ..runtime import runtime as _artifact_runtime
 
-        return load_model_map(_artifact_runtime().artifact("ensemble_calibration.json")).model_dump()
+        try:
+            payload = load_model_map(_artifact_runtime().artifact("ensemble_calibration.json"), model)
+        except KeyError:
+            raise HTTPException(status_code=404, detail=f"no model {model!r}") from None
+        return payload.model_dump()
 
     @app.get("/api/dev/review-queue", response_model=DevReviewQueueResponse)
     def dev_review_queue() -> DevReviewQueueResponse:

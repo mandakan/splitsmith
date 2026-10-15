@@ -28,28 +28,34 @@ def _build_mod():
     return mod
 
 
-def test_empty_universe_raises_builderror_naming_the_extract_scripts(
+def test_missing_feature_caches_raise_builderror_naming_the_fix(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     mod = _build_mod()
+    import feature_caches
+
     fixtures_dir = tmp_path / "fixtures"
     cache_dir = fixtures_dir / ".cache"
     fixtures_dir.mkdir()
     # One real-looking fixture with audio but no CLAP/PANN cache -- the
-    # exact state of a fresh checkout / cleaned cache.
-    (fixtures_dir / "stage-shots-hfo-masters-2026-stage1-s0fe3d797.json").write_text(
+    # exact state of a fresh checkout / cleaned cache. The build now stops
+    # in its preflight, before any detection, and says how to fix it.
+    stem = "stage-shots-hfo-masters-2026-stage1-s0fe3d797"
+    (fixtures_dir / f"{stem}.json").write_text(
         json.dumps({"beep_time": 1.0, "stage_time_seconds": 10.0, "shots": [{"time": 2.0}]})
     )
-    (fixtures_dir / "stage-shots-hfo-masters-2026-stage1-s0fe3d797.wav").write_bytes(b"")
+    (fixtures_dir / f"{stem}.wav").write_bytes(b"")
     monkeypatch.setattr(mod, "FIXTURES_DIR", fixtures_dir)
     monkeypatch.setattr(mod, "CACHE_DIR", cache_dir)
+    monkeypatch.setattr(feature_caches, "CACHE_DIR", cache_dir)
+    monkeypatch.setattr(mod, "ensure_audio", lambda fixtures, log=print: dict.fromkeys(fixtures, "0" * 64))
 
     with pytest.raises(mod.BuildError) as exc:
-        mod.build_artifacts(fixtures=["stage-shots-hfo-masters-2026-stage1-s0fe3d797"])
+        mod.build_artifacts(fixtures=[stem])
 
     msg = str(exc.value)
-    assert "extract_clap_features.py" in msg
-    assert "extract_audio_embeddings.py" in msg
+    assert "--extract" in msg
+    assert stem in msg
 
 
 def test_builderror_is_a_real_exception_not_systemexit() -> None:

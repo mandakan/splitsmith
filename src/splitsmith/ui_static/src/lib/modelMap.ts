@@ -31,6 +31,19 @@ export interface ModelMapFixture {
   match_group: string | null;
   stage_group: string | null;
   beep_ranker: BeepRankerUse | null;
+  /** This model's voter C on the fixture while its match was left out. */
+  heldout_lomo?: { tp: number; fp: number; fn: number } | null;
+}
+
+export interface ModelSummary {
+  id: string;
+  name: string;
+  version: string;
+  channel: string;
+  built_at: string | null;
+  description: string | null;
+  n_fixtures: Record<string, number>;
+  selection: string | null;
 }
 
 export interface SplitMetrics {
@@ -64,6 +77,7 @@ export interface VoterCHead {
   heldout_matches: string[];
   heldout_stages: number | null;
   heldout_candidates: number | null;
+  lomo_by_match?: Record<string, SplitMetrics>;
 }
 
 export interface ModelArtifact {
@@ -131,6 +145,8 @@ export interface ModelMap {
   ensemble: EnsembleModel;
   beep_ranker: BeepRankerModel | null;
   history: ModelVersion[];
+  model?: ModelSummary | null;
+  models?: ModelSummary[];
 }
 
 // -- status ------------------------------------------------------------------
@@ -163,9 +179,23 @@ export function fixtureFlags(f: ModelMapFixture): { leaving: boolean; unreviewed
   };
 }
 
+/**
+ * Voter C is two classifiers, trained apart: one on head-mounted cameras,
+ * one on everything else (phones and action cameras held or on a stand).
+ * The build calls them heads; the page says classifier, since "headcam
+ * head" reads as a body part.
+ */
+export const CLASSIFIER_LABEL: Record<CameraClass, string> = {
+  headcam: "Headcam classifier",
+  handheld: "Handheld classifier",
+};
+
+export const CLASSIFIER_EXPLAIN =
+  "Shot classification (voter C) is two classifiers trained apart: one on head-mounted cameras, one on handheld cameras (phones and action cameras held or on a stand). Each fixture trains the one for its camera.";
+
 export const STATUS_LABEL: Record<FixtureStatus, string> = {
-  headcam: "Headcam head",
-  handheld: "Handheld head",
+  headcam: "Headcam classifier",
+  handheld: "Handheld classifier",
   review: "Awaiting review",
   unused: "Not in build",
   superseded: "Superseded",
@@ -496,6 +526,112 @@ export function versionSeries(history: ModelVersion[]): VersionPoint[] {
     const total = Object.values(v.n_fixtures).reduce((s, n) => s + n, 0);
     return { index, version: v, total, headcam, handheld, changed: v.added.length + v.removed.length > 0 };
   });
+}
+
+// -- held out, per fixture ---------------------------------------------------------
+
+export type HeldOutTone = "clean" | "missed" | "extra";
+
+/**
+ * A fixture's leave-one-match-out outcome: every shot found and nothing
+ * else (``clean``), a shot missed (``missed``, whatever else happened), or
+ * only extra detections (``extra``). ``null`` when the build recorded none.
+ */
+export function heldOutTone(f: ModelMapFixture): HeldOutTone | null {
+  const h = f.heldout_lomo;
+  if (!h) return null;
+  if (h.fn > 0) return "missed";
+  if (h.fp > 0) return "extra";
+  return "clean";
+}
+
+export const HELD_OUT_TONE_COLOR: Record<HeldOutTone, string> = {
+  clean: "var(--color-done)",
+  missed: "var(--color-live)",
+  extra: "var(--color-manual)",
+};
+
+// -- comparing two models ------------------------------------------------------------
+
+export type Membership = "both" | "a" | "b" | "neither";
+
+export const MEMBERSHIP_COLOR: Record<Membership, string> = {
+  both: "var(--color-ink-2)",
+  a: "var(--color-beep)",
+  b: "var(--color-manual)",
+  neither: "var(--color-whisper)",
+};
+
+/** Which of the two models each fixture calibrated, by stem. */
+export function corpusMembership(a: ModelMap, b: ModelMap): Record<string, Membership> {
+  const inB = new Set(b.fixtures.filter((f) => f.voter_c).map((f) => f.stem));
+  const out: Record<string, Membership> = {};
+  for (const f of a.fixtures) {
+    const ia = f.voter_c !== null;
+    const ib = inB.has(f.stem);
+    out[f.stem] = ia && ib ? "both" : ia ? "a" : ib ? "b" : "neither";
+  }
+  return out;
+}
+
+export interface HeadComparison {
+  cameraClass: CameraClass;
+  rows: { split: SplitName; a: SplitMetrics | null; b: SplitMetrics | null }[];
+  matches: { match: string; a: SplitMetrics | null; b: SplitMetrics | null }[];
+  /** Whether each model's build recorded per-match figures at all (older builds did not). */
+  perMatch: { a: boolean; b: boolean };
+}
+
+/** Both models' figures per head, split by split and match by match. */
+export function compareHeads(a: ModelMap, b: ModelMap): HeadComparison[] {
+  const out: HeadComparison[] = [];
+  for (const cls of ["headcam", "handheld"] as CameraClass[]) {
+    const ha = a.ensemble.heads.find((h) => h.camera_class === cls) ?? null;
+    const hb = b.ensemble.heads.find((h) => h.camera_class === cls) ?? null;
+    if (!ha && !hb) continue;
+    const at = (h: VoterCHead | null, s: SplitName) =>
+      h?.heldout.find((x) => x.split === s)?.at_shipped_threshold ?? null;
+    const ma = ha?.lomo_by_match ?? {};
+    const mb = hb?.lomo_by_match ?? {};
+    const matches = [...new Set([...Object.keys(ma), ...Object.keys(mb)])].sort();
+    out.push({
+      cameraClass: cls,
+      rows: (["stratified", "grouped", "lomo"] as SplitName[]).map((s) => ({ split: s, a: at(ha, s), b: at(hb, s) })),
+      matches: matches.map((m) => ({ match: m, a: ma[m] ?? null, b: mb[m] ?? null })),
+      perMatch: { a: Object.keys(ma).length > 0, b: Object.keys(mb).length > 0 },
+    });
+  }
+  return out;
+}
+
+export interface ParamRow {
+  label: string;
+  a: string;
+  b: string;
+  differs: boolean;
+}
+
+/** The parameters that describe each model, side by side. */
+export function paramRows(a: ModelMap, b: ModelMap): ParamRow[] {
+  const fmt = (v: number | null | undefined, d = 4) => (v === null || v === undefined ? "--" : v.toFixed(d));
+  const rows: [string, string, string][] = [
+    ["Target recall", fmt(a.ensemble.target_recall, 2), fmt(b.ensemble.target_recall, 2)],
+    ["Match tolerance ms", fmt(a.ensemble.tolerance_ms, 0), fmt(b.ensemble.tolerance_ms, 0)],
+    ["Voter C features", String(a.ensemble.feature_dim ?? "--"), String(b.ensemble.feature_dim ?? "--")],
+  ];
+  for (const cls of ["headcam", "handheld"] as CameraClass[]) {
+    const ha = a.ensemble.heads.find((h) => h.camera_class === cls);
+    const hb = b.ensemble.heads.find((h) => h.camera_class === cls);
+    rows.push(
+      [`${cls}: fixtures`, String(ha?.n_fixtures ?? "--"), String(hb?.n_fixtures ?? "--")],
+      [`${cls}: candidates`, String(ha?.n_candidates ?? "--"), String(hb?.n_candidates ?? "--")],
+      [`${cls}: shots`, String(ha?.n_positives ?? "--"), String(hb?.n_positives ?? "--")],
+      [`${cls}: voter A floor`, fmt(ha?.voter_a_floor), fmt(hb?.voter_a_floor)],
+      [`${cls}: voter B threshold`, fmt(ha?.voter_b_threshold), fmt(hb?.voter_b_threshold)],
+      [`${cls}: voter C threshold`, fmt(ha?.voter_c_threshold), fmt(hb?.voter_c_threshold)],
+    );
+  }
+  return rows.map(([label, va, vb]) => ({ label, a: va, b: vb, differs: va !== vb }));
 }
 
 // -- formatting ----------------------------------------------------------------
