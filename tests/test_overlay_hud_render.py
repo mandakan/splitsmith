@@ -228,17 +228,17 @@ def test_a_template_that_declares_keys_gets_them(tmp_path: Path, monkeypatch: py
     home = tmp_path / "home"
     monkeypatch.setenv("SPLITSMITH_HOME", str(home))
     manifest = json.loads((looks.shipped_looks_dir() / "clean" / "look.json").read_text(encoding="utf-8"))
-    manifest["name"] = "doom"
-    manifest["slots"] = {"overlay": {"doom": "hud-doom.html"}}
-    root = home / "looks" / "doom"
+    manifest["name"] = "retro"
+    manifest["slots"] = {"overlay": {"retro": "hud-retro.html"}}
+    root = home / "looks" / "retro"
     root.mkdir(parents=True)
     (root / "look.json").write_text(json.dumps(manifest), encoding="utf-8")
-    (root / "hud-doom.html").write_text(
+    (root / "hud-retro.html").write_text(
         '<!doctype html><meta name="splitsmith-data" content="ammo,scoring">', encoding="utf-8"
     )
     _Encoder(monkeypatch)
     fake = _FakeRasterizer()
-    _render(tmp_path, fake, theme="doom", variant="doom", hud_extras=_EXTRAS)
+    _render(tmp_path, fake, theme="retro", variant="retro", hud_extras=_EXTRAS)
     data = fake.timelines[0]["context"].data
     assert set(data) == {"stage", "options", "scoring", "ammo"}
     assert data["ammo"]["per_shot"] == [15, 14, 13]

@@ -1,5 +1,5 @@
 """Opt-in HUD data: ammo, bursts, scoring spreads, and the opt-in itself
-(spec 2026-10-16-freedoom-hud-design)."""
+(spec 2026-10-16-hud-scoring-data-design)."""
 
 from __future__ import annotations
 
@@ -281,44 +281,44 @@ def test_scoring_identity_is_none_for_classic_and_for_shipped_templates() -> Non
 
 
 @pytest.fixture
-def doom_look(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def retro_look(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A user Look whose overlay template declares every key."""
     monkeypatch.setenv("SPLITSMITH_HOME", str(tmp_path))
     manifest = json.loads((looks.shipped_looks_dir() / "clean" / "look.json").read_text(encoding="utf-8"))
-    manifest["name"] = "doom"
-    manifest["slots"] = {"overlay": {"doom": "hud-doom.html"}}
-    root = tmp_path / "looks" / "doom"
+    manifest["name"] = "retro"
+    manifest["slots"] = {"overlay": {"retro": "hud-retro.html"}}
+    root = tmp_path / "looks" / "retro"
     root.mkdir(parents=True)
     (root / "look.json").write_text(json.dumps(manifest), encoding="utf-8")
-    (root / "hud-doom.html").write_text(
+    (root / "hud-retro.html").write_text(
         '<!doctype html><meta name="splitsmith-data" content="scoring,ammo,bursts">', encoding="utf-8"
     )
     return root
 
 
-def test_a_declaring_template_records_a_scoring_identity(doom_look: Path) -> None:
+def test_a_declaring_template_records_a_scoring_identity(retro_look: Path) -> None:
     extras = HudExtras(scorecard=_card(alphas=10), capacity=15)
-    identity = overlay_data_identity("doom", "doom", extras)
+    identity = overlay_data_identity("retro", "retro", extras)
     assert identity == extras_identity(("scoring", "ammo", "bursts"), extras)
     rescored = HudExtras(scorecard=_card(alphas=9, misses=1), capacity=15)
-    assert overlay_data_identity("doom", "doom", rescored) != identity
+    assert overlay_data_identity("retro", "retro", rescored) != identity
 
 
-def test_a_rescored_stage_does_not_reuse_its_overlay(doom_look: Path) -> None:
+def test_a_rescored_stage_does_not_reuse_its_overlay(retro_look: Path) -> None:
     """The CLI's and the MCP tool's reuse check (no ``wanted``): the record
     must have been drawn with the scorecard as it stands."""
     from splitsmith.ui.exports import overlay_record_matches
 
     extras = HudExtras(scorecard=_card(alphas=10), capacity=15)
     record = overlay_settings(
-        look="doom",
-        variant="doom",
+        look="retro",
+        variant="retro",
         options=HudOptions(),
         codec="auto",
         max_height=None,
         max_fps=None,
         audit_revision="r1",
-        hud_data=overlay_data_identity("doom", "doom", extras),
+        hud_data=overlay_data_identity("retro", "retro", extras),
     )
     assert overlay_record_matches(record, audit_revision="r1", hud_extras=extras)
     rescored = HudExtras(scorecard=_card(alphas=9, misses=1), capacity=15)

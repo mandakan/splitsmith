@@ -366,8 +366,8 @@ default, so the page's Built-in always means it.
 
 ```json
 "slots": {
-  "summary": { "finished": "summary-finished.html" },
-  "match_summary": { "tally": "match-tally.html" }
+  "summary": { "results": "summary-results.html" },
+  "match_summary": { "table": "match-table.html" }
 }
 ```
 

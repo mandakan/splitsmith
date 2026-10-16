@@ -153,10 +153,10 @@ describe("previewBody with a Look (#1246)", () => {
   });
 
   it("previews one shooter's summary style moving, the built-in card still, and no style on the grid", () => {
-    const doom: LookInfo[] = [
+    const retro: LookInfo[] = [
       {
-        name: "doom",
-        label: "Doom",
+        name: "retro",
+        label: "Retro",
         source: "user",
         accent_series: [],
         preview: null,
@@ -167,14 +167,14 @@ describe("previewBody with a Look (#1246)", () => {
         },
       },
     ];
-    const styled = { ...DEFAULT_EXPORT_SETTINGS, mode: "single" as const, look: "doom", summaryVariant: "finished", matchSummaryVariant: "tally" };
-    const summary = previewBody(styled, "summary", 1, "", doom);
+    const styled = { ...DEFAULT_EXPORT_SETTINGS, mode: "single" as const, look: "retro", summaryVariant: "finished", matchSummaryVariant: "tally" };
+    const summary = previewBody(styled, "summary", 1, "", retro);
     expect([summary.variant, summary.motion]).toEqual(["finished", true]);
-    expect(previewBody(styled, "match_summary", 1, "", doom).variant).toBe("tally");
-    const builtIn = previewBody({ ...styled, summaryVariant: "default" }, "summary", 1, "", doom);
+    expect(previewBody(styled, "match_summary", 1, "", retro).variant).toBe("tally");
+    const builtIn = previewBody({ ...styled, summaryVariant: "default" }, "summary", 1, "", retro);
     expect(builtIn).not.toHaveProperty("variant");
     expect(builtIn).not.toHaveProperty("motion");
-    const grid = previewBody({ ...styled, mode: "compare" as const }, "match_summary", 1, "", doom);
+    const grid = previewBody({ ...styled, mode: "compare" as const }, "match_summary", 1, "", retro);
     expect(grid).not.toHaveProperty("variant");
     expect(grid).not.toHaveProperty("motion");
   });

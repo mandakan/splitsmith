@@ -1,20 +1,20 @@
-# Freedoom HUD: scoring, ammo and movement for HUD templates
+# Scoring, ammo and burst data for HUD templates
 
 Status: draft, 2026-10-16
 
 ## Goal
 
-Render a Freedoom-style status bar over headcam footage, for fun. The template
-itself is a **personal desktop Look** (`~/.splitsmith/looks/freedoom/`), never
-shipped. What lands in the repo is what any HUD template could use:
+Give overlay templates the stage's own sport data, so a Look can draw a
+richer live HUD over headcam footage: rounds left in the magazine, the
+scorecard's hits building up over the run, the cadence of each string of
+shots. What lands in the repo is what any HUD template could use:
 
 1. scoring, ammo and burst data on the HUD context, opt-in per template;
-2. movement proposals and a bulk Keep, so the regions behind it exist without
-   a manual pass per stage.
+2. movement proposals and a bulk Keep, so the regions behind the magazine
+   count exist without a manual pass per stage.
 
-Headcam only: the gun is already in the frame, so there is no weapon sprite.
-The "weapon" is what the shooter's cadence looks like (ARMS panel, face,
-screen flashes).
+The first template to use it is a personal desktop Look, never shipped; the
+public example is the `broadcast` starter.
 
 ## 1. Opt-in context
 
@@ -48,7 +48,7 @@ later, if the rail preview turns out to matter for this Look.
 The overlay record (`overlay_record_matches`) gains a `hud_data` identity (a
 hash of the declared keys at their provider versions and the `HudExtras` the
 template saw) **only when the template declared a key**, so a scorecard
-re-import redraws a Freedoom overlay and nothing else.
+re-import redraws a declaring overlay and nothing else.
 
 ### The provider registry
 
@@ -81,16 +81,15 @@ totals. Procedurals are not per-shot; they ride `totals` only.
   (Bresenham-style, no randomness).
 - `fast`: worst outcomes on the fastest splits first ("speed costs").
 - `moving`: worst outcomes on shots fired moving first, then `fast`.
-- `end`: everything A until the last shots, which take the damage.
+- `end`: everything A until the last shots, which take the C, D and M.
 
 All four ship at once so the template can switch by editing one line, with no
 re-render plumbing. Shots and hits rarely match one-to-one (steel, makeup
 shots, two hits per target): outcomes are allotted to shots by proportion,
 and a shot with nothing left to allot is `hit: null` (a puff).
 
-Health and armour are the template's mapping, not data. The intended first
-try: health falls from 100 to `stage_pct` along the chosen spread's damage;
-armour is the A share so far.
+What a template derives from a spread (a running points figure, an A share)
+is its own presentation, not new data.
 
 Match percentage is not on `StageScorecard`. Out of scope until the project
 stores it.
@@ -108,21 +107,19 @@ Computed in Python (`overlay_hud.ammo_plan`), never in the template:
   were left (a tactical reload keeps the chambered one), `capacity` at
   slide lock;
 - `ok` is false when any count would go below zero, which means a reload
-  region is missing. The counter shows it rather than clamping: it is an
-  audit check as much as a joke.
+  region is missing. The counter shows it rather than clamping: it doubles
+  as an audit check.
 
 `capacity` is `None` for a division with no entry (Open, Standard); `ammo`
-is then `null` and the template draws something else (infinity, a Doom
+is then `null` and the template draws something else (infinity, a
 "--").
 
 ### `data.bursts` (key `bursts`)
 
 Shots grouped into bursts: a new burst starts at any gap classed
 `transition`, `movement` or `reload`. Each burst carries
-`{first, last, mean_split, min_split}` and each shot its burst index. The
-weapon mapping (chaingun under ~0.18 s, super shotgun for a pair, pistol for
-slow aimed fire, BFG for the last burst) is the template's, so it can be
-tuned without touching the repo.
+`{first, last, mean_split, min_split}` and each shot its burst index. How a
+template shows a string of shots (its length, its pace) is the template's.
 
 ## 2. Movement and reload regions
 
@@ -138,20 +135,12 @@ region alone (the existing rule).
 on the stage becomes `manual`, one events PUT through `useStageEvents`).
 Match-wide Keep is later, if the per-stage pass proves slow.
 
-## 3. The personal Look (not in the repo)
+## 3. The Look itself (not in the repo)
 
-- Freedoom's assets (BSD licence, kept beside them) are extracted once from
-  the WAD to PNGs: `STBAR`, the face set `STF*`, the digit glyphs `STTNUM*`,
-  the ARMS digits. Digits are images, so `looks check`'s font rule never
-  fires.
-- `image-rendering: pixelated`, scaled by an integer step of the page height.
-- Face: idle frames on a clock, a wince on a shot whose spread says `M` or
-  `ns`, the grin from the last shot through `settle()`; looks left or right
-  through a movement region.
-- Screen tints: a short red flash on a miss, the item-pickup gold on a reload's
-  end.
-- Landscape first. Upright lifts the bar above the safe band under
-  `body.safe`; later.
+The first Look to use this is personal. The `broadcast` starter is the
+public example of the contract: a sports-broadcast style bar with the
+magazine count, the hit tally building over the run and the current string's
+pace.
 
 ## Tests
 
@@ -170,7 +159,7 @@ Match-wide Keep is later, if the per-stage pass proves slow.
 1. `ammo`, `bursts`, `scoring` in `overlay_hud` with `HudExtras` plumbing and
    the opt-in.
 2. Movement seeding v3 and Keep all.
-3. The Freedoom Look locally; findings go back into the spreads.
+3. The Look locally; findings go back into the spreads.
 
 What's new: step 2 is user-facing (an entry); step 1 is not visible until a
 template uses it.

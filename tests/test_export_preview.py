@@ -540,19 +540,19 @@ def test_the_preview_cache_key_moves_when_a_region_is_confirmed() -> None:
 
 
 @pytest.fixture
-def doom_look(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201
+def retro_look(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201
     import json
 
     from splitsmith import looks
 
     monkeypatch.setenv("SPLITSMITH_HOME", str(tmp_path / "home"))
     manifest = json.loads((looks.shipped_looks_dir() / "clean" / "look.json").read_text(encoding="utf-8"))
-    manifest.update(name="doom", slots={"summary": {"finished": "sum.html"}})
-    root = tmp_path / "home" / "looks" / "doom"
+    manifest.update(name="retro", slots={"summary": {"finished": "sum.html"}})
+    root = tmp_path / "home" / "looks" / "retro"
     root.mkdir(parents=True)
     (root / "look.json").write_text(json.dumps(manifest), encoding="utf-8")
     (root / "sum.html").write_text("<!doctype html>", encoding="utf-8")
-    return load_look("doom")
+    return load_look("retro")
 
 
 def _render_with(
@@ -571,12 +571,12 @@ def _render_with(
     )
 
 
-def test_a_summary_style_previews_through_its_template(tmp_path: Path, doom_look) -> None:  # noqa: ANN001
+def test_a_summary_style_previews_through_its_template(tmp_path: Path, retro_look) -> None:  # noqa: ANN001
     raster = _StubRasterizer()
     png = _render_with(
         tmp_path,
         ep.PreviewSpec(card="summary", stage_number=3, width=480, variant="finished"),
-        doom_look,
+        retro_look,
         raster,
     )
     assert _png_size(png) == (480, 270)
@@ -585,19 +585,19 @@ def test_a_summary_style_previews_through_its_template(tmp_path: Path, doom_look
     assert not any(h.startswith("<!doctype html>") for h in raster.htmls), "no engine card"
 
 
-def test_a_moving_summary_style_previews_as_a_webp(tmp_path: Path, doom_look) -> None:  # noqa: ANN001
+def test_a_moving_summary_style_previews_as_a_webp(tmp_path: Path, retro_look) -> None:  # noqa: ANN001
     raster = _StubRasterizer(motion_seconds=1.0)
     data = _render_with(
         tmp_path,
         ep.PreviewSpec(card="summary", stage_number=3, width=480, variant="finished", motion=True),
-        doom_look,
+        retro_look,
         raster,
     )
     assert data[:4] == b"RIFF" and data[8:12] == b"WEBP"
     assert raster.frames_rendered == 12, "one second at the preview's 12 fps"
 
 
-def test_the_default_summary_previews_the_engine_card(tmp_path: Path, doom_look) -> None:  # noqa: ANN001
+def test_the_default_summary_previews_the_engine_card(tmp_path: Path, retro_look) -> None:  # noqa: ANN001
     raster = _StubRasterizer()
-    _render_with(tmp_path, ep.PreviewSpec(card="summary", stage_number=3, width=480), doom_look, raster)
+    _render_with(tmp_path, ep.PreviewSpec(card="summary", stage_number=3, width=480), retro_look, raster)
     assert raster.frame_requests == [] and any(h.startswith("<!doctype html>") for h in raster.htmls)

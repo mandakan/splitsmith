@@ -7,7 +7,7 @@ Status: draft, 2026-10-16
 The single-shooter stage summary hold and the match summary are the two
 cards a Look cannot restyle: both are engine HTML (`summary_still_html`,
 `match_summary_html`) rasterized to a still. A Look that wants its own
-summary (the Freedoom Look's FINISHED tally is the first) has had to draw it
+summary (the first was a personal Look's results board) has had to draw it
 inside the overlay after the last shot, which covers the run's tail and
 leaves the real summary hold to be switched off. This makes both summaries
 template slots like the title page and the slate, with the engine card kept
@@ -72,7 +72,7 @@ rounds, min_rounds, dq
 Absent stays absent (`None`), as `TileStageData` already promises. The
 providers reach the summary through the same `HudExtras` the overlay uses,
 resolved by `ui.exports.hud_extras_for` and carried on the IR (below), so a
-Freedoom summary reads `data.scoring.spreads` exactly as its HUD does.
+summary template reads `data.scoring.spreads` exactly as its HUD does.
 
 ### Match summary: `window.splitsmith.data`
 
@@ -90,7 +90,7 @@ No providers in this slice: they are per stage. A later key can add them.
 
 Both items render like an animated card (`card_motion` / `render_template_frames`):
 
-- A template with `duration() > 0` animates (Freedoom's count-up); one
+- A template with `duration() > 0` animates (a count-up); one
   without is a still (`poster()` or the first frame).
 - The backdrop is the stage's tail frame (the match summary: the last
   stage's), through `card_backdrop`, as cards do. The engine summary's own
@@ -142,11 +142,11 @@ MP4 agree.
 - Docs: `docs/looks/authoring.md` gains "Summaries"; the `_starters` gain a
   `summary` starter; CLAUDE.md's rendered-cards section names the slots.
 
-## Freedoom
+## The first template
 
-`summary-finished.html` (slot `summary`, variant `finished`) is the FINISHED
-tally, animated over `duration()`; the HUD loses its intermission and its
-`settle()` drops back to the landing. A match-summary variant can follow.
+A personal Look's results board (slot `summary`, a named variant), counting up
+over `duration()`; its HUD no longer draws one after the last shot, and its
+`settle()` drops back to the landing.
 
 ## Tests
 
@@ -166,7 +166,7 @@ tally, animated over `duration()`; the HUD loses its intermission and its
 2. Slots, resolvers, IR fields, the render path and `summary_card.py`.
 3. Requests, preset, CLI, preview, `looks check` / `preview`, starter, docs.
 4. SPA Style picker.
-5. Freedoom summary template; HUD intermission removed.
+5. The personal Look's summary template; its HUD workaround removed.
 
 What's new: one entry once a Look can offer a summary style (desktop Look
 authors are the audience; no shipped Look changes).

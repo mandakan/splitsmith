@@ -46,15 +46,15 @@ def _tile() -> TileStageData:
 
 
 @pytest.fixture
-def doom(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def retro(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A user Look with a summary and a match summary template."""
     monkeypatch.setenv("SPLITSMITH_HOME", str(tmp_path / "home"))
     manifest = json.loads((looks.shipped_looks_dir() / "clean" / "look.json").read_text(encoding="utf-8"))
     manifest.update(
-        name="doom",
+        name="retro",
         slots={"summary": {"finished": "sum.html"}, "match_summary": {"tally": "match.html"}},
     )
-    root = tmp_path / "home" / "looks" / "doom"
+    root = tmp_path / "home" / "looks" / "retro"
     root.mkdir(parents=True)
     (root / "look.json").write_text(json.dumps(manifest), encoding="utf-8")
     (root / "sum.html").write_text(
@@ -146,17 +146,17 @@ def _summary_contexts(fake: _FakeRasterizer) -> list[dict]:
     ]
 
 
-def test_the_default_summary_draws_the_engine_card(tmp_path: Path, doom: Path) -> None:
+def test_the_default_summary_draws_the_engine_card(tmp_path: Path, retro: Path) -> None:
     fake = _FakeRasterizer()
-    _render(tmp_path, _summarised_composition(tmp_path), fake, "doom")
+    _render(tmp_path, _summarised_composition(tmp_path), fake, "retro")
     assert _summary_contexts(fake) == []
     assert [c for c in fake.calls if c.startswith("<!doctype html>")], "the engine's summary HTML"
 
 
-def test_a_still_summary_template_composes_one_png(tmp_path: Path, doom: Path) -> None:
+def test_a_still_summary_template_composes_one_png(tmp_path: Path, retro: Path) -> None:
     fake = _FakeRasterizer()
     result, runner, work = _render(
-        tmp_path, _with_variant(_summarised_composition(tmp_path), "finished"), fake, "doom"
+        tmp_path, _with_variant(_summarised_composition(tmp_path), "finished"), fake, "retro"
     )
     contexts = _summary_contexts(fake)
     assert len(contexts) == 2 and contexts[0]["card"]["text"] == "Me"
@@ -168,18 +168,18 @@ def test_a_still_summary_template_composes_one_png(tmp_path: Path, doom: Path) -
 
 
 def test_an_animated_summary_template_is_a_motion_segment(
-    tmp_path: Path, doom: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, retro: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(mp4_render, "write_motion_clip", _fake_clip_writer)
     fake = _FakeRasterizer(motion_seconds=0.5)
     _r, runner, work = _render(
-        tmp_path, _with_variant(_summarised_composition(tmp_path), "finished"), fake, "doom"
+        tmp_path, _with_variant(_summarised_composition(tmp_path), "finished"), fake, "retro"
     )
     cmd = _command_writing(runner, "summary_000.mp4")
     assert str(work / "summary_000_motion.mov") in cmd and str(work / "summary_000_backdrop.png") in cmd
 
 
-def test_a_failing_template_draws_the_engine_card_and_says_so(tmp_path: Path, doom: Path) -> None:
+def test_a_failing_template_draws_the_engine_card_and_says_so(tmp_path: Path, retro: Path) -> None:
     class _Broken(_FakeRasterizer):
         def render_template_frames(self, template, **kwargs):  # noqa: ANN001, ANN003
             if template.name == "sum.html":
@@ -188,20 +188,20 @@ def test_a_failing_template_draws_the_engine_card_and_says_so(tmp_path: Path, do
 
     fake = _Broken()
     result, runner, work = _render(
-        tmp_path, _with_variant(_summarised_composition(tmp_path), "finished"), fake, "doom"
+        tmp_path, _with_variant(_summarised_composition(tmp_path), "finished"), fake, "retro"
     )
     assert [c for c in fake.calls if c.startswith("<!doctype html>")], "the engine card stood in"
     assert any("stage summary drew the built-in card" in d and "sum.html" in d for d in result.degradations)
     assert str(work / "summary_000.png") in _command_writing(runner, "summary_000.mp4")
 
 
-def test_a_summary_style_the_look_lacks_is_noted(tmp_path: Path, doom: Path) -> None:
+def test_a_summary_style_the_look_lacks_is_noted(tmp_path: Path, retro: Path) -> None:
     fake = _FakeRasterizer()
-    result, _r, _w = _render(tmp_path, _with_variant(_summarised_composition(tmp_path), "nope"), fake, "doom")
-    assert any("'nope' is not in Look 'doom'" in d for d in result.degradations)
+    result, _r, _w = _render(tmp_path, _with_variant(_summarised_composition(tmp_path), "nope"), fake, "retro")
+    assert any("'nope' is not in Look 'retro'" in d for d in result.degradations)
 
 
-def test_a_match_summary_template_draws_the_match_as_data(tmp_path: Path, doom: Path) -> None:
+def test_a_match_summary_template_draws_the_match_as_data(tmp_path: Path, retro: Path) -> None:
     from splitsmith.match_summary import MatchSummary, MatchSummaryRow
 
     row = MatchSummaryRow(1, "Bay", 10.0, False, 4.2, 55.0, 1.1, 0.4)
@@ -210,7 +210,7 @@ def test_a_match_summary_template_draws_the_match_as_data(tmp_path: Path, doom: 
         _summarised_composition(tmp_path), match_summary=summary, match_summary_variant="tally"
     )
     fake = _FakeRasterizer()
-    _result, runner, work = _render(tmp_path, comp, fake, "doom")
+    _result, runner, work = _render(tmp_path, comp, fake, "retro")
     (context,) = [
         r[1]["data"] for r in fake.frame_requests if r[1]["data"]["card"]["slot"] == "match_summary"
     ]
@@ -222,21 +222,21 @@ def test_a_match_summary_template_draws_the_match_as_data(tmp_path: Path, doom: 
 
 
 def test_an_animated_summary_beside_a_transition_renders_its_edge(
-    tmp_path: Path, doom: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, retro: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The fade out of an animated summary is an edge of its clip, offset to
     the clip's last ``half`` seconds, as an animated card's tail edge is."""
     monkeypatch.setattr(mp4_render, "write_motion_clip", _fake_clip_writer)
     comp = _with_variant(_transitioned_composition(tmp_path, summaries=True), "finished")
     fake = _FakeRasterizer(motion_seconds=0.5)
-    result, runner, work = _render(tmp_path, comp, fake, "doom")
+    result, runner, work = _render(tmp_path, comp, fake, "retro")
     edge = _command_writing(runner, "_tail.mp4")
     assert str(work / "summary_000_motion.mov") in edge
     assert not any("transition" in d for d in result.degradations), result.degradations
 
 
 def test_a_summary_clip_that_fails_draws_the_built_in_card_and_says_so(
-    tmp_path: Path, doom: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, retro: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from splitsmith.look_motion import MotionClipError
 
@@ -246,14 +246,14 @@ def test_a_summary_clip_that_fails_draws_the_built_in_card_and_says_so(
     monkeypatch.setattr(mp4_render, "write_motion_clip", broken)
     fake = _FakeRasterizer(motion_seconds=0.5)
     result, runner, work = _render(
-        tmp_path, _with_variant(_summarised_composition(tmp_path), "finished"), fake, "doom"
+        tmp_path, _with_variant(_summarised_composition(tmp_path), "finished"), fake, "retro"
     )
     assert str(work / "summary_000.png") in _command_writing(runner, "summary_000.mp4")
     assert [c for c in fake.calls if c.startswith("<!doctype html>")], "the engine card stood in"
     assert any("summary_000 drew the built-in card" in d for d in result.degradations)
 
 
-def test_a_still_template_whose_frame_fails_says_the_built_in_card_drew(tmp_path: Path, doom: Path) -> None:
+def test_a_still_template_whose_frame_fails_says_the_built_in_card_drew(tmp_path: Path, retro: Path) -> None:
     from splitsmith.overlay_raster import TemplateFrames
 
     class _BadFrame(_FakeRasterizer):
@@ -273,7 +273,7 @@ def test_a_still_template_whose_frame_fails_says_the_built_in_card_drew(tmp_path
             )
 
     result, _r, _w = _render(
-        tmp_path, _with_variant(_summarised_composition(tmp_path), "finished"), _BadFrame(), "doom"
+        tmp_path, _with_variant(_summarised_composition(tmp_path), "finished"), _BadFrame(), "retro"
     )
     assert any("drew the built-in card" in d for d in result.degradations)
     assert not any("was left out" in d for d in result.degradations)

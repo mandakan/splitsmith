@@ -1,4 +1,4 @@
-"""Opt-in HUD data beyond ``data.stage`` (spec ``2026-10-16-freedoom-hud-design``).
+"""Opt-in HUD data beyond ``data.stage`` (spec ``2026-10-16-hud-scoring-data-design``).
 
 A template asks for keys with
 ``<meta name="splitsmith-data" content="scoring,ammo,bursts">``; one that

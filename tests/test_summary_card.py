@@ -116,15 +116,15 @@ class _TemplateRasterizer(_FakeRasterizer):
 
 
 @pytest.fixture
-def doom(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def retro(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import json
 
     from splitsmith import looks
 
     monkeypatch.setenv("SPLITSMITH_HOME", str(tmp_path / "home"))
     manifest = json.loads((looks.shipped_looks_dir() / "clean" / "look.json").read_text(encoding="utf-8"))
-    manifest.update(name="doom", slots={"summary": {"finished": "sum.html"}})
-    root = tmp_path / "home" / "looks" / "doom"
+    manifest.update(name="retro", slots={"summary": {"finished": "sum.html"}})
+    root = tmp_path / "home" / "looks" / "retro"
     root.mkdir(parents=True)
     (root / "look.json").write_text(json.dumps(manifest), encoding="utf-8")
     (root / "sum.html").write_text("<!doctype html>", encoding="utf-8")
@@ -145,12 +145,12 @@ def _card_with(
         runner=_runner([]),
         rasterizer=fake,
         probe=_meta,
-        theme="doom",
+        theme="retro",
         **kwargs,
     )
 
 
-def test_a_summary_style_is_held_at_its_templates_poster(tmp_path: Path, doom: None) -> None:
+def test_a_summary_style_is_held_at_its_templates_poster(tmp_path: Path, retro: None) -> None:
     fake = _TemplateRasterizer()
     result = _card_with(tmp_path, fake, variant="finished")
     ((name, data),) = fake.templates
@@ -160,7 +160,7 @@ def test_a_summary_style_is_held_at_its_templates_poster(tmp_path: Path, doom: N
     assert result.degradations == ()
 
 
-def test_a_failing_summary_template_holds_the_engine_card_and_says_so(tmp_path: Path, doom: None) -> None:
+def test_a_failing_summary_template_holds_the_engine_card_and_says_so(tmp_path: Path, retro: None) -> None:
     fake = _TemplateRasterizer(fail=True)
     result = _card_with(tmp_path, fake, variant="finished")
     assert fake.calls and "M. Axell" in fake.calls[0], "the engine card stood in"
