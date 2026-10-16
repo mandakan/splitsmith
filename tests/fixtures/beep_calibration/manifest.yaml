@@ -836,7 +836,7 @@ fixtures:
   camera_kind: head
   camera_id: go3s
   clip_wav: stage-shots-tallmilan-2026-stage2-s97dcec94.wav
-  ground_truth_in_clip: 0.5
+  ground_truth_in_clip: 5
   tolerance_ms: 15.0
   full_wav: full/stage-shots-tallmilan-2026-stage2-s97dcec94_full.wav
   ground_truth_in_full: 28.7817
@@ -856,7 +856,7 @@ fixtures:
   camera_kind: head
   camera_id: go3s
   clip_wav: stage-shots-tallmilan-2026-stage3-s97dcec94.wav
-  ground_truth_in_clip: 0.5
+  ground_truth_in_clip: 5
   tolerance_ms: 15.0
   full_wav: full/stage-shots-tallmilan-2026-stage3-s97dcec94_full.wav
   ground_truth_in_full: 19.8924
@@ -909,7 +909,7 @@ fixtures:
   camera_kind: head
   camera_id: go3s
   clip_wav: stage-shots-tallmilan-2026-stage5-s97dcec94.wav
-  ground_truth_in_clip: 0.5
+  ground_truth_in_clip: 5
   tolerance_ms: 15.0
   full_wav: full/stage-shots-tallmilan-2026-stage5-s97dcec94_full.wav
   ground_truth_in_full: 15.0302
@@ -938,7 +938,7 @@ fixtures:
   camera_kind: head
   camera_id: go3s
   clip_wav: stage-shots-tallmilan-2026-stage6-s97dcec94.wav
-  ground_truth_in_clip: 0.5
+  ground_truth_in_clip: 5
   tolerance_ms: 15.0
   full_wav: full/stage-shots-tallmilan-2026-stage6-s97dcec94_full.wav
   ground_truth_in_full: 20.454
@@ -968,7 +968,7 @@ fixtures:
   camera_kind: head
   camera_id: go3s
   clip_wav: stage-shots-tallmilan-2026-stage7-s97dcec94.wav
-  ground_truth_in_clip: 0.5
+  ground_truth_in_clip: 5
   tolerance_ms: 15.0
   full_wav: full/stage-shots-tallmilan-2026-stage7-s97dcec94_full.wav
   ground_truth_in_full: 21.879
