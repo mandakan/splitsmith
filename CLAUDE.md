@@ -158,7 +158,7 @@ Fixture audio is **not in git** (#1363): ``tests/fixtures/audio.lock.json``
 maps every fixture WAV to its sha256, the bytes live content-addressed in a
 public-read R2 bucket (``wav/<sha256>.wav``) and ``tests/fixtures/.gitignore``
 keeps the local copies out. One WAV is also still in git on purpose, the
-smoke fixture ``stage-shots-tallmilan-2026-stage3-s97dcec94.wav`` (the slim
+smoke fixture ``stage-shots-tallmilan-2026-stage3-s97dcec94-pin.wav`` (the slim
 wheel and both desktop smokes read it, one in a bare container). CI's python
 shards fetch the WAVs the tests read (``fetch --only tests/fixtures/audio.ci.txt``,
 cached on the lock and the list); a new test that reads a fixture WAV adds

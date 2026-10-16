@@ -3,7 +3,7 @@
 # WAVs still in git before they moved to R2; CI fetches exactly them so its
 # view of the corpus did not change. A new test that reads a fixture WAV
 # adds its name here. The smoke fixture
-# stage-shots-tallmilan-2026-stage3-s97dcec94.wav stays in git (three smoke
+# stage-shots-tallmilan-2026-stage3-s97dcec94-pin.wav stays in git (three smoke
 # jobs, one in a bare container, read it) and is not listed.
 beep-test.wav
 stage-shots-blacksmith-2026-stage1-s97dcec94-apple-iphone17pro.wav
@@ -102,7 +102,7 @@ stage-shots-hostfinalen-xi-2026-stage8-s0fe3d797.wav
 stage-shots-tallmilan-2026-stage1-s36ed6e4e.wav
 stage-shots-tallmilan-2026-stage2-s36ed6e4e.wav
 stage-shots-tallmilan-2026-stage2-s97dcec94-apple-iphone17pro.wav
-stage-shots-tallmilan-2026-stage2-s97dcec94.wav
+stage-shots-tallmilan-2026-stage2-s97dcec94-pin.wav
 stage-shots-tallmilan-2026-stage3-s36ed6e4e.wav
 stage-shots-tallmilan-2026-stage4-s36ed6e4e.wav
 stage-shots-tallmilan-2026-stage4-s97dcec94-apple-iphone17pro.wav
@@ -115,7 +115,7 @@ stage-shots-tallmilan-2026-stage6-s97dcec94-apple-iphone17pro.wav
 stage-shots-tallmilan-2026-stage6-s97dcec94.wav
 stage-shots-tallmilan-2026-stage7-s36ed6e4e.wav
 stage-shots-tallmilan-2026-stage7-s97dcec94-apple-iphone17pro.wav
-stage-shots-tallmilan-2026-stage7-s97dcec94.wav
+stage-shots-tallmilan-2026-stage7-s97dcec94-pin.wav
 stage-shots-vads-easter-shoot-gotta-go-fast-stage1-s0fe3d797.wav
 stage-shots-vads-easter-shoot-gotta-go-fast-stage1-s36ed6e4e.wav
 stage-shots-vads-easter-shoot-gotta-go-fast-stage2-s0fe3d797.wav

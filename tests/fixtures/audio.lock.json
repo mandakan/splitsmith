@@ -930,31 +930,63 @@
       "bytes": 3379150
     },
     "stage-shots-tallmilan-2026-stage1-s36ed6e4e.wav": {
-      "sha256": "d45c1e891279a23807e7da044fbc76e6da852e32f2b2f5b7236adfb04220b1cc",
+      "sha256": "50ca816531634178fe91a25de38acc9319b04f64815e7e0d48780186d511187c",
       "bytes": 4954062
     },
+    "stage-shots-tallmilan-2026-stage1-s97dcec94.wav": {
+      "sha256": "5f2f1482dd79d9dd349fdfafe236ef30fd183d2e91d4c5c9c03862906c7b8323",
+      "bytes": 4278446
+    },
+    "stage-shots-tallmilan-2026-stage1-s9c1a2e74.wav": {
+      "sha256": "cfaa918bc1d3f5da82035b941b332af1fe47d5dd5d2191d5580f5eb2dd89d5f2",
+      "bytes": 3752494
+    },
+    "stage-shots-tallmilan-2026-stage2-s0fe3d797.wav": {
+      "sha256": "dde07a1a02c77c81cf044fc206db2af09458239f45926dc44b2869467fb5b114",
+      "bytes": 3199758
+    },
     "stage-shots-tallmilan-2026-stage2-s36ed6e4e.wav": {
-      "sha256": "d34673661f46095dff0903a1cd2e910f81ba91ebdfaad053fb42a41591d6057c",
-      "bytes": 2765070
+      "sha256": "b2a05a436488f63a2028b1982f02247402a527f5cea0be410f5ef094692a9b20",
+      "bytes": 2764846
     },
     "stage-shots-tallmilan-2026-stage2-s97dcec94-apple-iphone17pro.wav": {
-      "sha256": "afc9dcac5a2666811c68f702afc4eb040c1abd9e50d76a449a9c62e190167ef4",
-      "bytes": 3168782
+      "sha256": "40e229952fbb7796ca4ee01abeaf2c6a31018cbbde7fb623411c1b00272d5012",
+      "bytes": 3168718
     },
-    "stage-shots-tallmilan-2026-stage2-s97dcec94.wav": {
+    "stage-shots-tallmilan-2026-stage2-s97dcec94-pin.wav": {
       "sha256": "f00eb8b38bf14226d4fb882949e56bf97eb5d2f3ec96d17c3e3432f5b2927119",
       "bytes": 2636204
     },
+    "stage-shots-tallmilan-2026-stage2-s97dcec94.wav": {
+      "sha256": "d0f042fb0cf61f6bf9d3d9118ff90c04163dd67f0557c7cdb7410b8a836337d9",
+      "bytes": 3404302
+    },
+    "stage-shots-tallmilan-2026-stage2-s9c1a2e74.wav": {
+      "sha256": "fb1a098230d78fe6d8790bffd2200e00876a58f4dd6605065026ca213fe862ad",
+      "bytes": 2716878
+    },
+    "stage-shots-tallmilan-2026-stage3-s0fe3d797.wav": {
+      "sha256": "592a720cdcbd7c5900f998711b184179f8c80148849369f7ac43a148374af38b",
+      "bytes": 2077358
+    },
     "stage-shots-tallmilan-2026-stage3-s36ed6e4e.wav": {
-      "sha256": "686f3278457e0cc39b4ef760d3e0f5d8950102c5a0bda96b37218799a20d7571",
-      "bytes": 1949678
+      "sha256": "fefe623fb504ade5e66054fc186aaf0ae487f8c59686f5b2663f88271fc77483",
+      "bytes": 1949390
     },
     "stage-shots-tallmilan-2026-stage3-s97dcec94.wav": {
-      "sha256": "bb63817fa87b3ec81b6a6e548c7461566e4a5cca72cef0f37ea1ecc6de302312",
-      "bytes": 1607086
+      "sha256": "b2f608278171719c32556af4a6d1dcdf6b0dc0fd05208c6585bb5d4155dc3a7b",
+      "bytes": 2375630
+    },
+    "stage-shots-tallmilan-2026-stage3-s9c1a2e74.wav": {
+      "sha256": "c71717c05e5ee412466a3ca7b88437e9d5b9a4fa997a22cf978a38ff5beb7a50",
+      "bytes": 1927118
+    },
+    "stage-shots-tallmilan-2026-stage4-s0fe3d797.wav": {
+      "sha256": "0a88cd51667b04ab140cd9813786cdb0aa5c4c1f0b461a2e0b6bcde313d0cb94",
+      "bytes": 2730798
     },
     "stage-shots-tallmilan-2026-stage4-s36ed6e4e.wav": {
-      "sha256": "ae600237f8c307a577544cc02f200a910af74f66d5146e7585f5e0a062a8cffa",
+      "sha256": "04b6c0950ea14ef3a2f87c1471726840ec32730736dc4c1f64f2a695cd7242d1",
       "bytes": 3163310
     },
     "stage-shots-tallmilan-2026-stage4-s97dcec94-apple-iphone17pro-9e5155.wav": {
@@ -966,44 +998,72 @@
       "bytes": 2750094
     },
     "stage-shots-tallmilan-2026-stage4-s97dcec94.wav": {
-      "sha256": "3a82a93493b0f7fa1ade667bfa249751a63c2a2a620eebc3949759f461053858",
+      "sha256": "544c076c5c3f289577a888632a07f53dfae64c8720a97252f7617948ad39a639",
       "bytes": 3102830
     },
+    "stage-shots-tallmilan-2026-stage4-s9c1a2e74.wav": {
+      "sha256": "7fe900a7362f83d4db07fbd226dbfcd87dd00014132548ef9fb2cbf80b18083e",
+      "bytes": 3108910
+    },
+    "stage-shots-tallmilan-2026-stage5-s0fe3d797.wav": {
+      "sha256": "ffc3afc9ae4e0c6051adab45979f708a412f3fc9d6f3371b7f744b6689b77690",
+      "bytes": 3333262
+    },
     "stage-shots-tallmilan-2026-stage5-s36ed6e4e.wav": {
-      "sha256": "cc8b6a93e9b3ec39843794eefc1278c9080e3f2270105d6f89231eb0130f898b",
+      "sha256": "541a55e3f59d9ae91f0bfc734ceda70ef2960f5bb2c1aab0b74eb9b6f86d3033",
       "bytes": 3122702
     },
     "stage-shots-tallmilan-2026-stage5-s97dcec94-apple-iphone17pro.wav": {
-      "sha256": "e9d8683b3a9fe5af1100b37bb3b932cd714a730c8379898f9559ddaf05a86fad",
-      "bytes": 2731982
+      "sha256": "9a498e26992bfacb7a34e9efb2575b9f4a34731d234e2fb1094b5b4d18a37cde",
+      "bytes": 2730798
     },
     "stage-shots-tallmilan-2026-stage5-s97dcec94.wav": {
-      "sha256": "510c0604b989d3e6ec8b6ab010f105a91d52bae5ef9b5a5a152127b2104a8170",
-      "bytes": 2544044
+      "sha256": "ed0dfa041a92c8be3985bf68fa23639c1fedfc2ba44d49a0b618c4a33009820d",
+      "bytes": 3313422
+    },
+    "stage-shots-tallmilan-2026-stage5-s9c1a2e74.wav": {
+      "sha256": "33505b2aeb3bc00466cc284d49faed10d5c8231982b0f325172167d8f74239c9",
+      "bytes": 3111566
+    },
+    "stage-shots-tallmilan-2026-stage6-s0fe3d797.wav": {
+      "sha256": "3b3bcc5a7a103f411302567a9364733aec4aeb1262542e47490471a2c52ddab2",
+      "bytes": 2518958
     },
     "stage-shots-tallmilan-2026-stage6-s36ed6e4e.wav": {
-      "sha256": "82307f47f63cdf7afd26eb0af40e820522569befbea8a9d593e866fb389be58b",
+      "sha256": "afac901fcdd295828d8ab511f86d5c729893f2908cfe1270b0d8d6f2504d0bca",
       "bytes": 2617582
     },
     "stage-shots-tallmilan-2026-stage6-s97dcec94-apple-iphone17pro.wav": {
-      "sha256": "adb8c83b3c734c978f26884c6fa9ffdec84ceb40d7312fcfa518315f0624724c",
+      "sha256": "84fc493808d5d117eed14aa8abc58295338e539175f869c5fed42a8b53959de1",
       "bytes": 2450766
     },
     "stage-shots-tallmilan-2026-stage6-s97dcec94.wav": {
-      "sha256": "10e5f89545022c225a20e48d7edf977b652fd93601d5335dc5f4d4ed20e76cbc",
-      "bytes": 1682924
+      "sha256": "bac649969a10ceeb2f2f14c4d63f1c0a95d155d295dad144079cbdf1497f79bf",
+      "bytes": 2452654
+    },
+    "stage-shots-tallmilan-2026-stage6-s9c1a2e74.wav": {
+      "sha256": "4067ade748230371deeaea7646b00961a8923faf6bf1c7fde6af0f2b3fb26a1c",
+      "bytes": 2333070
     },
     "stage-shots-tallmilan-2026-stage7-s36ed6e4e.wav": {
-      "sha256": "48e354305a4f0ece2728a8b36b7c89b1e0b32ed268c3a7789340b18b3abfa9e8",
+      "sha256": "cd157e0b9e10c32a3e4f6059cecf6e10e6e01728c9e12e6fcd7075797379b0c1",
       "bytes": 2479918
     },
     "stage-shots-tallmilan-2026-stage7-s97dcec94-apple-iphone17pro.wav": {
-      "sha256": "654c400b21aa57e7837929b09e4d6edb109acb6c6cecf40001cef814ed2a9fa8",
+      "sha256": "daa4f2c3477b24bb1145bf369fd36899b661dc619272c9c148182bf7e5008427",
       "bytes": 2595150
     },
-    "stage-shots-tallmilan-2026-stage7-s97dcec94.wav": {
+    "stage-shots-tallmilan-2026-stage7-s97dcec94-pin.wav": {
       "sha256": "0086316c5dbd21df969a17abfa0491307453fe1f2f231a274b518565c03e2391",
       "bytes": 1828844
+    },
+    "stage-shots-tallmilan-2026-stage7-s97dcec94.wav": {
+      "sha256": "1b3e7f9cbc1a06cb3d9ba6ceaa7167329acf63b8792ea7813a6f70b1d2fc63d9",
+      "bytes": 2598830
+    },
+    "stage-shots-tallmilan-2026-stage7-s9c1a2e74.wav": {
+      "sha256": "28f951b6fa046eba6771b061ee74f3d4bef774aed17f25bdeca6292a447b0185",
+      "bytes": 2206126
     },
     "stage-shots-vads-easter-shoot-gotta-go-fast-stage1-s0fe3d797.wav": {
       "sha256": "a7cb7e1effda8d4bfd726175fb0efc4f9d7a2e6f2d6d0bd7f7511d64c7859fac",

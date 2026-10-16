@@ -10,6 +10,7 @@
       "time": 7.533,
       "ms_after_beep": 2533,
       "source": "detected",
+      "id": "cand-5",
       "interval_class": "first_shot",
       "interval_class_source": "auto"
     },
@@ -19,7 +20,8 @@
       "time": 8.124,
       "ms_after_beep": 3124,
       "source": "detected",
-      "interval_class": "transition",
+      "id": "cand-7",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
@@ -28,7 +30,8 @@
       "time": 8.857,
       "ms_after_beep": 3857,
       "source": "detected",
-      "interval_class": "transition",
+      "id": "cand-9",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
@@ -37,7 +40,8 @@
       "time": 9.547,
       "ms_after_beep": 4547,
       "source": "detected",
-      "interval_class": "transition",
+      "id": "cand-11",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
@@ -46,286 +50,298 @@
       "time": 10.402,
       "ms_after_beep": 5402,
       "source": "detected",
-      "interval_class": "transition",
+      "id": "cand-12",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
       "shot_number": 6,
-      "candidate_number": 18,
-      "time": 14.213,
-      "ms_after_beep": 9213,
+      "candidate_number": 22,
+      "time": 15.619,
+      "ms_after_beep": 10619,
       "source": "detected",
+      "id": "cand-22",
       "interval_class": "movement",
       "interval_class_source": "auto"
     },
     {
       "shot_number": 7,
-      "candidate_number": 19,
-      "time": 14.607,
-      "ms_after_beep": 9607,
+      "candidate_number": 23,
+      "time": 16.179,
+      "ms_after_beep": 11179,
       "source": "detected",
+      "id": "cand-23",
       "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
       "shot_number": 8,
-      "candidate_number": 22,
-      "time": 15.619,
-      "ms_after_beep": 10619,
+      "candidate_number": 24,
+      "time": 16.472,
+      "ms_after_beep": 11472,
       "source": "detected",
-      "interval_class": "movement",
+      "id": "cand-24",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
       "shot_number": 9,
-      "candidate_number": 23,
-      "time": 16.142,
-      "ms_after_beep": 11142,
+      "candidate_number": 26,
+      "time": 18.05,
+      "ms_after_beep": 13050,
       "source": "detected",
+      "id": "cand-26",
       "interval_class": "transition",
       "interval_class_source": "auto"
     },
     {
       "shot_number": 10,
-      "candidate_number": 24,
-      "time": 16.493,
-      "ms_after_beep": 11493,
+      "candidate_number": 27,
+      "time": 18.495,
+      "ms_after_beep": 13495,
       "source": "detected",
+      "id": "cand-27",
       "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
       "shot_number": 11,
-      "candidate_number": 26,
-      "time": 18.064,
-      "ms_after_beep": 13064,
+      "candidate_number": 28,
+      "time": 19.717,
+      "ms_after_beep": 14717,
       "source": "detected",
-      "interval_class": "movement",
+      "id": "cand-28",
+      "interval_class": "transition",
       "interval_class_source": "auto"
     },
     {
       "shot_number": 12,
-      "candidate_number": 27,
-      "time": 18.534,
-      "ms_after_beep": 13534,
+      "candidate_number": 29,
+      "time": 20.207,
+      "ms_after_beep": 15207,
       "source": "detected",
+      "id": "cand-29",
       "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
       "shot_number": 13,
-      "candidate_number": 28,
-      "time": 19.717,
-      "ms_after_beep": 14717,
+      "candidate_number": 30,
+      "time": 20.704,
+      "ms_after_beep": 15704,
       "source": "detected",
-      "interval_class": "movement",
+      "id": "cand-30",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
       "shot_number": 14,
-      "candidate_number": 29,
-      "time": 20.207,
-      "ms_after_beep": 15207,
+      "candidate_number": 31,
+      "time": 21.218,
+      "ms_after_beep": 16218,
       "source": "detected",
+      "id": "cand-31",
       "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
       "shot_number": 15,
-      "candidate_number": 30,
-      "time": 20.744,
-      "ms_after_beep": 15744,
+      "candidate_number": 35,
+      "time": 25.666,
+      "ms_after_beep": 20666,
       "source": "detected",
-      "interval_class": "transition",
+      "id": "cand-35",
+      "interval_class": "movement",
       "interval_class_source": "auto"
     },
     {
       "shot_number": 16,
-      "candidate_number": 31,
-      "time": 21.218,
-      "ms_after_beep": 16218,
+      "candidate_number": 36,
+      "time": 26.37,
+      "ms_after_beep": 21370,
       "source": "detected",
+      "id": "cand-36",
       "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
       "shot_number": 17,
-      "candidate_number": 35,
-      "time": 25.666,
-      "ms_after_beep": 20666,
+      "candidate_number": 37,
+      "time": 26.922,
+      "ms_after_beep": 21922,
       "source": "detected",
-      "interval_class": "movement",
+      "id": "cand-37",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
       "shot_number": 18,
-      "candidate_number": 36,
-      "time": 26.399,
-      "ms_after_beep": 21399,
-      "source": "detected",
-      "interval_class": "transition",
-      "interval_class_source": "auto"
-    },
-    {
-      "shot_number": 19,
-      "candidate_number": 37,
-      "time": 26.952,
-      "ms_after_beep": 21952,
-      "source": "detected",
-      "interval_class": "transition",
-      "interval_class_source": "auto"
-    },
-    {
-      "shot_number": 20,
       "candidate_number": 38,
       "time": 27.318,
       "ms_after_beep": 22318,
       "source": "detected",
+      "id": "cand-38",
+      "interval_class": "split",
+      "interval_class_source": "auto"
+    },
+    {
+      "shot_number": 19,
+      "candidate_number": 39,
+      "time": 28.307,
+      "ms_after_beep": 23307,
+      "source": "detected",
+      "id": "cand-39",
+      "interval_class": "split",
+      "interval_class_source": "auto"
+    },
+    {
+      "shot_number": 20,
+      "candidate_number": 40,
+      "time": 28.833,
+      "ms_after_beep": 23833,
+      "source": "detected",
+      "id": "cand-40",
       "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
       "shot_number": 21,
-      "candidate_number": 39,
-      "time": 28.307,
-      "ms_after_beep": 23307,
-      "source": "detected",
-      "interval_class": "transition",
-      "interval_class_source": "auto"
-    },
-    {
-      "shot_number": 22,
-      "candidate_number": 40,
-      "time": 28.833,
-      "ms_after_beep": 23833,
-      "source": "detected",
-      "interval_class": "transition",
-      "interval_class_source": "auto"
-    },
-    {
-      "shot_number": 23,
       "candidate_number": 41,
       "time": 29.395,
       "ms_after_beep": 24395,
       "source": "detected",
-      "interval_class": "transition",
+      "id": "cand-41",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 24,
+      "shot_number": 22,
       "candidate_number": 42,
       "time": 29.989,
       "ms_after_beep": 24989,
       "source": "detected",
-      "interval_class": "transition",
+      "id": "cand-42",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 25,
+      "shot_number": 23,
       "candidate_number": 46,
       "time": 33.82,
       "ms_after_beep": 28820,
       "source": "detected",
+      "id": "cand-46",
       "interval_class": "movement",
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 26,
+      "shot_number": 24,
       "candidate_number": 47,
-      "time": 34.555,
-      "ms_after_beep": 29555,
+      "time": 34.542,
+      "ms_after_beep": 29542,
       "source": "detected",
-      "interval_class": "transition",
+      "id": "cand-47",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 27,
+      "shot_number": 25,
       "candidate_number": 48,
       "time": 35.148,
       "ms_after_beep": 30148,
       "source": "detected",
-      "interval_class": "transition",
+      "id": "cand-48",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 28,
+      "shot_number": 26,
       "candidate_number": 49,
       "time": 35.66,
       "ms_after_beep": 30660,
       "source": "detected",
-      "interval_class": "transition",
+      "id": "cand-49",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 29,
+      "shot_number": 27,
       "candidate_number": 50,
       "time": 36.443,
       "ms_after_beep": 31443,
       "source": "detected",
-      "interval_class": "transition",
+      "id": "cand-50",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 30,
+      "shot_number": 28,
       "candidate_number": 51,
-      "time": 37.012,
-      "ms_after_beep": 32012,
+      "time": 36.982,
+      "ms_after_beep": 31982,
       "source": "detected",
-      "interval_class": "transition",
+      "id": "cand-51",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 31,
+      "shot_number": 29,
       "candidate_number": 52,
       "time": 37.851,
       "ms_after_beep": 32851,
       "source": "detected",
+      "id": "cand-52",
+      "interval_class": "split",
+      "interval_class_source": "auto"
+    },
+    {
+      "shot_number": 30,
+      "candidate_number": 65,
+      "time": 43.353,
+      "ms_after_beep": 38353,
+      "source": "detected",
+      "id": "cand-65",
+      "interval_class": "movement",
+      "interval_class_source": "auto"
+    },
+    {
+      "shot_number": 31,
+      "candidate_number": 67,
+      "time": 44.397,
+      "ms_after_beep": 39397,
+      "source": "detected",
+      "id": "cand-67",
       "interval_class": "transition",
       "interval_class_source": "auto"
     },
     {
       "shot_number": 32,
-      "candidate_number": 65,
-      "time": 43.353,
-      "ms_after_beep": 38353,
-      "source": "detected",
-      "interval_class": "movement",
-      "interval_class_source": "auto"
-    },
-    {
-      "shot_number": 33,
-      "candidate_number": 67,
-      "time": 44.397,
-      "ms_after_beep": 39397,
-      "source": "detected",
-      "interval_class": "movement",
-      "interval_class_source": "auto"
-    },
-    {
-      "shot_number": 34,
       "candidate_number": 68,
       "time": 45.213,
       "ms_after_beep": 40213,
       "source": "detected",
-      "interval_class": "transition",
+      "id": "cand-68",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 35,
+      "shot_number": 33,
       "candidate_number": 69,
-      "time": 45.985,
-      "ms_after_beep": 40985,
+      "time": 45.955,
+      "ms_after_beep": 40955,
       "source": "detected",
-      "interval_class": "transition",
+      "id": "cand-69",
+      "interval_class": "split",
       "interval_class_source": "auto"
     },
     {
-      "shot_number": 36,
+      "shot_number": 34,
       "candidate_number": 70,
-      "time": 46.622,
-      "ms_after_beep": 41622,
+      "time": 46.593,
+      "ms_after_beep": 41593,
       "source": "detected",
-      "interval_class": "transition",
+      "id": "cand-70",
+      "interval_class": "split",
       "interval_class_source": "auto"
     }
   ],
@@ -1681,14 +1697,16 @@
         "consensus": 3,
         "expected_rounds": 26,
         "seeded_shots": true
-      }
+      },
+      "id": "b2f2bc1d06f541b39cd91ec9355b6bf3"
     },
     {
       "ts": "2026-05-09T14:51:32.732250+00:00",
       "kind": "coach_reclassify",
       "payload": {
         "shot_count": 13
-      }
+      },
+      "id": "54fd5e5d9cdf44829546b67f9df9c89e"
     },
     {
       "ts": "2026-05-09T14:54:14.333177+00:00",
@@ -1699,7 +1717,8 @@
         "consensus": 3,
         "expected_rounds": 26,
         "seeded_shots": false
-      }
+      },
+      "id": "60605ebb4e6e47d18c2dab9f04656ba2"
     },
     {
       "ts": "2026-05-09T15:19:13.929Z",
@@ -1708,7 +1727,8 @@
         "id": "cand-1",
         "time": 5.75,
         "candidate_number": 1
-      }
+      },
+      "id": "31d7ae17f80c454caefa966859bcd5b4"
     },
     {
       "ts": "2026-05-09T15:19:14.504Z",
@@ -1717,7 +1737,8 @@
         "id": "cand-2",
         "time": 5.898,
         "candidate_number": 2
-      }
+      },
+      "id": "c0ebfea50b80452dbd6eb2081b20845e"
     },
     {
       "ts": "2026-05-09T15:19:15.404Z",
@@ -1726,7 +1747,8 @@
         "id": "cand-3",
         "time": 6.4676,
         "candidate_number": 3
-      }
+      },
+      "id": "f11ec20d808545e687b7e387b36d64fb"
     },
     {
       "ts": "2026-05-09T15:19:16.696Z",
@@ -1735,7 +1757,8 @@
         "id": "cand-5",
         "time": 7.5328,
         "candidate_number": 5
-      }
+      },
+      "id": "4abc8f7cb34b460789f3dc12afe1cd7a"
     },
     {
       "ts": "2026-05-09T15:19:18.008Z",
@@ -1744,7 +1767,8 @@
         "id": "cand-7",
         "time": 8.1239,
         "candidate_number": 7
-      }
+      },
+      "id": "4704acacaa90480684ab126de6ecdc07"
     },
     {
       "ts": "2026-05-09T15:19:19.628Z",
@@ -1753,7 +1777,8 @@
         "id": "cand-9",
         "time": 8.8567,
         "candidate_number": 9
-      }
+      },
+      "id": "f0e62c3f3b194837b97d8410869df222"
     },
     {
       "ts": "2026-05-09T15:19:21.021Z",
@@ -1762,7 +1787,8 @@
         "id": "cand-11",
         "time": 9.5466,
         "candidate_number": 11
-      }
+      },
+      "id": "12336e6eddc14f9990e6e944b16c19c0"
     },
     {
       "ts": "2026-05-09T15:19:22.324Z",
@@ -1771,7 +1797,8 @@
         "id": "cand-13",
         "time": 10.4783,
         "candidate_number": 13
-      }
+      },
+      "id": "16219e1193274a449d44e90c97ff351c"
     },
     {
       "ts": "2026-05-09T15:19:23.629Z",
@@ -1780,7 +1807,8 @@
         "id": "cand-13",
         "time": 10.4783,
         "candidate_number": 13
-      }
+      },
+      "id": "75fc648f840a464fa940db2eecd14e71"
     },
     {
       "ts": "2026-05-09T15:19:24.588Z",
@@ -1789,7 +1817,8 @@
         "id": "cand-13",
         "time": 10.4783,
         "candidate_number": 13
-      }
+      },
+      "id": "11fba89d33b44b8abaa9de0e2ecec991"
     },
     {
       "ts": "2026-05-09T15:19:25.746Z",
@@ -1798,7 +1827,8 @@
         "id": "cand-12",
         "time": 10.4019,
         "candidate_number": 12
-      }
+      },
+      "id": "e739ce323862427596ab3933d8252038"
     },
     {
       "ts": "2026-05-09T15:19:26.947Z",
@@ -1807,7 +1837,8 @@
         "id": "cand-13",
         "time": 10.4783,
         "candidate_number": 13
-      }
+      },
+      "id": "cdeef0c4a5fa46fe98b51aebd179cb1d"
     },
     {
       "ts": "2026-05-09T15:19:29.920Z",
@@ -1816,7 +1847,8 @@
         "id": "cand-22",
         "time": 15.6187,
         "candidate_number": 22
-      }
+      },
+      "id": "b6ef9eeb256c4472bb6986a1501557bb"
     },
     {
       "ts": "2026-05-09T15:19:31.037Z",
@@ -1825,7 +1857,8 @@
         "id": "cand-23",
         "time": 16.1422,
         "candidate_number": 23
-      }
+      },
+      "id": "8bc185c5fc1846259166877fe35afc1e"
     },
     {
       "ts": "2026-05-09T15:19:31.870Z",
@@ -1834,7 +1867,8 @@
         "id": "cand-24",
         "time": 16.493,
         "candidate_number": 24
-      }
+      },
+      "id": "f9379da65d8a4e41b2eae3f698486b5f"
     },
     {
       "ts": "2026-05-09T15:19:33.612Z",
@@ -1843,7 +1877,8 @@
         "id": "cand-26",
         "time": 18.0638,
         "candidate_number": 26
-      }
+      },
+      "id": "9f4012d96c88477589d8a6fb1732a25a"
     },
     {
       "ts": "2026-05-09T15:19:34.483Z",
@@ -1852,7 +1887,8 @@
         "id": "cand-27",
         "time": 18.5335,
         "candidate_number": 27
-      }
+      },
+      "id": "3b8f35c47e294c43acf1a0c7fcb2aa49"
     },
     {
       "ts": "2026-05-09T15:19:37.216Z",
@@ -1861,7 +1897,8 @@
         "id": "cand-27",
         "from_time": 18.5335,
         "to_time": 18.4789
-      }
+      },
+      "id": "7fa021c7b0424978b1432e93ecc99bfb"
     },
     {
       "ts": "2026-05-09T15:19:40.108Z",
@@ -1870,7 +1907,8 @@
         "id": "cand-28",
         "time": 19.7167,
         "candidate_number": 28
-      }
+      },
+      "id": "b32e8a1e7cc34855ab675470f5ebc76d"
     },
     {
       "ts": "2026-05-09T15:19:40.992Z",
@@ -1879,7 +1917,8 @@
         "id": "cand-29",
         "time": 20.2072,
         "candidate_number": 29
-      }
+      },
+      "id": "f77a7b7fd1314d2bbdb64bf00ad3225d"
     },
     {
       "ts": "2026-05-09T15:19:43.444Z",
@@ -1888,7 +1927,8 @@
         "id": "cand-30",
         "from_time": 20.7437,
         "to_time": 20.6831
-      }
+      },
+      "id": "695add530aec45a7981f6bd032a41ef4"
     },
     {
       "ts": "2026-05-09T15:19:44.117Z",
@@ -1897,7 +1937,8 @@
         "id": "cand-30",
         "time": 20.6831,
         "candidate_number": 30
-      }
+      },
+      "id": "bb952c71d1454b35acd04fd0c32eab65"
     },
     {
       "ts": "2026-05-09T15:19:46.140Z",
@@ -1906,7 +1947,8 @@
         "id": "cand-30",
         "from_time": 20.6831,
         "to_time": 20.7473
-      }
+      },
+      "id": "7fa325f635814b10a8d31eb6cec0773f"
     },
     {
       "ts": "2026-05-09T15:19:47.195Z",
@@ -1915,7 +1957,8 @@
         "id": "cand-31",
         "time": 21.2176,
         "candidate_number": 31
-      }
+      },
+      "id": "b9f3052eafb34a309811d21d4439fede"
     },
     {
       "ts": "2026-05-09T15:19:49.424Z",
@@ -1924,7 +1967,8 @@
         "id": "cand-35",
         "time": 25.6662,
         "candidate_number": 35
-      }
+      },
+      "id": "be87668774d347e0a3954fa60c29f0a4"
     },
     {
       "ts": "2026-05-09T15:19:50.641Z",
@@ -1933,7 +1977,8 @@
         "id": "cand-36",
         "time": 26.3987,
         "candidate_number": 36
-      }
+      },
+      "id": "10d44553c11b4af5bd77bab1938d299a"
     },
     {
       "ts": "2026-05-09T15:19:51.566Z",
@@ -1942,7 +1987,8 @@
         "id": "cand-37",
         "time": 26.9518,
         "candidate_number": 37
-      }
+      },
+      "id": "d0a1764ad65f437aa95a472b87ed1ed9"
     },
     {
       "ts": "2026-05-09T15:19:52.249Z",
@@ -1951,7 +1997,8 @@
         "id": "cand-38",
         "time": 27.3179,
         "candidate_number": 38
-      }
+      },
+      "id": "7ac875d415ed49f781eca44f9131c7c6"
     },
     {
       "ts": "2026-05-09T15:19:53.953Z",
@@ -1960,7 +2007,8 @@
         "id": "cand-39",
         "time": 28.3072,
         "candidate_number": 39
-      }
+      },
+      "id": "7cbe50d5a12e4be8ace82b3cba96e7c9"
     },
     {
       "ts": "2026-05-09T15:19:54.758Z",
@@ -1969,7 +2017,8 @@
         "id": "cand-40",
         "time": 28.8329,
         "candidate_number": 40
-      }
+      },
+      "id": "a24f1df9bd55407cbf3452dd04c30ba2"
     },
     {
       "ts": "2026-05-09T15:19:55.524Z",
@@ -1978,7 +2027,8 @@
         "id": "cand-41",
         "time": 29.3949,
         "candidate_number": 41
-      }
+      },
+      "id": "1675a71035f843b286b41522b5042d14"
     },
     {
       "ts": "2026-05-09T15:19:56.309Z",
@@ -1987,7 +2037,8 @@
         "id": "cand-42",
         "time": 29.9889,
         "candidate_number": 42
-      }
+      },
+      "id": "eaff9972080d4e6bbf84fc01c6c9821b"
     },
     {
       "ts": "2026-05-09T15:19:58.599Z",
@@ -1996,7 +2047,8 @@
         "id": "cand-46",
         "time": 33.8197,
         "candidate_number": 46
-      }
+      },
+      "id": "0083c985808a495ca2962443835de491"
     },
     {
       "ts": "2026-05-09T15:19:59.433Z",
@@ -2005,7 +2057,8 @@
         "id": "cand-47",
         "time": 34.5551,
         "candidate_number": 47
-      }
+      },
+      "id": "4e4fced7470a4395af4421207ac0fcb9"
     },
     {
       "ts": "2026-05-09T15:20:00.308Z",
@@ -2014,7 +2067,8 @@
         "id": "cand-48",
         "time": 35.1475,
         "candidate_number": 48
-      }
+      },
+      "id": "fa0f474a75954fa2ba833e7c60e3b147"
     },
     {
       "ts": "2026-05-09T15:20:01.091Z",
@@ -2023,7 +2077,8 @@
         "id": "cand-49",
         "time": 35.6595,
         "candidate_number": 49
-      }
+      },
+      "id": "50ef34ec2ecd4e828dd57af8815bf538"
     },
     {
       "ts": "2026-05-09T15:20:01.908Z",
@@ -2032,7 +2087,8 @@
         "id": "cand-50",
         "time": 36.443,
         "candidate_number": 50
-      }
+      },
+      "id": "2b759c1f84cf4b90b69915589da6ca7b"
     },
     {
       "ts": "2026-05-09T15:20:02.719Z",
@@ -2041,7 +2097,8 @@
         "id": "cand-51",
         "time": 37.0116,
         "candidate_number": 51
-      }
+      },
+      "id": "3cdf22b54fc342d5aca0d873049ecb7f"
     },
     {
       "ts": "2026-05-09T15:20:03.587Z",
@@ -2050,7 +2107,8 @@
         "id": "cand-52",
         "time": 37.8514,
         "candidate_number": 52
-      }
+      },
+      "id": "2c55b83b428f4ad782257464a62a2adc"
     },
     {
       "ts": "2026-05-09T15:20:06.006Z",
@@ -2059,7 +2117,8 @@
         "id": "cand-65",
         "time": 43.3527,
         "candidate_number": 65
-      }
+      },
+      "id": "65100e991f714ae1ba0e2076b41dddc2"
     },
     {
       "ts": "2026-05-09T15:20:06.953Z",
@@ -2068,7 +2127,8 @@
         "id": "cand-67",
         "time": 44.397,
         "candidate_number": 67
-      }
+      },
+      "id": "ad9cb642059646ed89c81bf9239e5cb0"
     },
     {
       "ts": "2026-05-09T15:20:07.753Z",
@@ -2077,7 +2137,8 @@
         "id": "cand-68",
         "time": 45.2126,
         "candidate_number": 68
-      }
+      },
+      "id": "b8b13fbfb1644d80bc0d16aa2fa10470"
     },
     {
       "ts": "2026-05-09T15:20:08.554Z",
@@ -2086,7 +2147,8 @@
         "id": "cand-69",
         "time": 45.9852,
         "candidate_number": 69
-      }
+      },
+      "id": "e970b3f685ed4da083d24d05f2ee6340"
     },
     {
       "ts": "2026-05-09T15:20:09.503Z",
@@ -2095,62 +2157,223 @@
         "id": "cand-70",
         "time": 46.6223,
         "candidate_number": 70
-      }
+      },
+      "id": "41b170a3bdaa4ee0a965fe1d1af1496d"
     },
     {
       "ts": "2026-05-09T15:20:10.962Z",
       "kind": "save",
       "payload": {
         "shots_count": 36
-      }
+      },
+      "id": "e1b85804210b45309be20e59c246b853"
     },
     {
       "ts": "2026-05-09T19:24:44.998Z",
       "kind": "save",
       "payload": {
         "shots_count": 36
-      }
+      },
+      "id": "e3cb7a3e38794b079a15b31be47a5b79"
     },
     {
       "ts": "2026-05-09T19:24:50.836467+00:00",
       "kind": "coach_reclassify",
       "payload": {
         "shot_count": 36
-      }
+      },
+      "id": "d64e0e7eb41a45b2ac2b706a2dd2dd08"
+    },
+    {
+      "ts": "2026-10-16T08:27:51.908Z",
+      "kind": "marker_rejected",
+      "payload": {
+        "id": "cand-18",
+        "time": 14.213,
+        "candidate_number": 18
+      },
+      "id": "f8f726cddf50410aa0ef9e230351ba64"
+    },
+    {
+      "ts": "2026-10-16T08:27:53.009Z",
+      "kind": "marker_rejected",
+      "payload": {
+        "id": "cand-19",
+        "time": 14.607,
+        "candidate_number": 19
+      },
+      "id": "ca606efd222841a1a4ad2770c83556f7"
+    },
+    {
+      "ts": "2026-10-16T08:27:55.625Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-23",
+        "from_time": 16.142,
+        "to_time": 16.144,
+        "reason": "rise_foot"
+      },
+      "id": "a43f31a9f1f444459292ec32add7d547"
+    },
+    {
+      "ts": "2026-10-16T08:27:58.790Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-23",
+        "from_time": 16.144,
+        "to_time": 16.179
+      },
+      "id": "8420021b1d2c4284a588a26cd5cbcfe0"
+    },
+    {
+      "ts": "2026-10-16T08:28:04.460Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-24",
+        "from_time": 16.493,
+        "to_time": 16.472,
+        "reason": "earlier_rise"
+      },
+      "id": "89e706f3d1d341f78074c1253f1ac5bf"
+    },
+    {
+      "ts": "2026-10-16T08:28:05.713Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-26",
+        "from_time": 18.064,
+        "to_time": 18.05,
+        "reason": "earlier_rise"
+      },
+      "id": "2e6edaf71a984c2d91ac4d5a36614a0f"
+    },
+    {
+      "ts": "2026-10-16T08:28:06.451Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-27",
+        "from_time": 18.534,
+        "to_time": 18.495,
+        "reason": "earlier_rise"
+      },
+      "id": "fcd04f6925354deb97a2facdefa9b2a5"
+    },
+    {
+      "ts": "2026-10-16T08:28:09.276Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-30",
+        "from_time": 20.744,
+        "to_time": 20.704,
+        "reason": "earlier_rise"
+      },
+      "id": "c2b62f279aa841639f378a8d99d46dc8"
+    },
+    {
+      "ts": "2026-10-16T08:28:11.861Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-36",
+        "from_time": 26.399,
+        "to_time": 26.37,
+        "reason": "earlier_rise"
+      },
+      "id": "188d7f7931254d3cbbdc253c99dca816"
+    },
+    {
+      "ts": "2026-10-16T08:28:12.647Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-37",
+        "from_time": 26.952,
+        "to_time": 26.922,
+        "reason": "earlier_rise"
+      },
+      "id": "5aa4ef92d9544125a0e27b9e8b068f90"
+    },
+    {
+      "ts": "2026-10-16T08:28:18.200Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-47",
+        "from_time": 34.555,
+        "to_time": 34.542,
+        "reason": "earlier_rise"
+      },
+      "id": "07b4ffe8684f45b6821ac6694e43de58"
+    },
+    {
+      "ts": "2026-10-16T08:28:21.243Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-51",
+        "from_time": 37.012,
+        "to_time": 36.982,
+        "reason": "earlier_rise"
+      },
+      "id": "7f4366ba47c443d19eb260560f330b5a"
+    },
+    {
+      "ts": "2026-10-16T08:28:25.701Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-69",
+        "from_time": 45.985,
+        "to_time": 45.955,
+        "reason": "earlier_rise"
+      },
+      "id": "c65dc971c10f43ed968d1170ceb6bb0a"
+    },
+    {
+      "ts": "2026-10-16T08:28:28.171Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-70",
+        "from_time": 46.622,
+        "to_time": 46.593,
+        "reason": "earlier_rise"
+      },
+      "id": "0250257717f34390aab18744e6552ca7"
+    },
+    {
+      "ts": "2026-10-16T08:28:31.499Z",
+      "kind": "save",
+      "payload": {
+        "shots_count": 34
+      },
+      "id": "ecf31b36298f48dd81c11d8fa5abcae9"
     }
   ],
-  "promoted_at": "2026-05-09T19:59:28.878667+00:00",
+  "promoted_at": "2026-10-16T09:01:09.991454+00:00",
   "provenance": {
     "stage_number": 1,
-    "stage_name": null
+    "stage_name": "You forgot one"
+  },
+  "source_video": "/Volumes/X9/matches/tallmilan-2026/shooters/s_54addbc6/raw/martin_stage_1.MOV",
+  "fixture_window_in_source": [
+    33.28,
+    84.88
+  ],
+  "camera": {
+    "id": "apple-iphone17pro",
+    "make": "Apple",
+    "model": "iPhone 17 Pro",
+    "mount": "hand",
+    "position": "squadmate",
+    "audio_source": "internal",
+    "agc_state": "unknown",
+    "sample_rate": 48000,
+    "bit_depth": null,
+    "audio_codec": "aac"
   },
   "shooter": {
     "id": "s36ed6e4e"
   },
   "event_id": "tallmilan-2026:1:s36ed6e4e",
-  "camera": {
-    "id": "unknown",
-    "make": null,
-    "model": null,
-    "mount": "hand",
-    "position": "shooter",
-    "audio_source": "internal",
-    "agc_state": "unknown",
-    "sample_rate": null,
-    "bit_depth": null,
-    "audio_codec": null
-  },
-  "source_video": "/Volumes/X9/raw/2026-tallmilan/martin/hand/martin_stage_1.MOV",
-  "fixture_window_in_source": [
-    33.28,
-    84.88
-  ],
   "review": {
-    "status": "needs_review",
-    "derived_from": null,
-    "reviewed_at": null,
-    "note": "shot times predate the rise-foot definition (docs/METHODOLOGY.md, 2026-10-10): check each shot's leading edge",
-    "previous_status": "reviewed",
-    "previous_reviewed_at": null
+    "confirmed_at": "2026-10-16T09:01:33.969883+00:00",
+    "status": "reviewed",
+    "reviewed_at": "2026-10-16T09:01:33.969883+00:00",
+    "method": "own-audit"
   }
 }

@@ -40,7 +40,6 @@ FIXTURES_DIR: Path = Path(__file__).resolve().parents[3] / "tests" / "fixtures"
 WRONG_CLIP_FIXTURES: frozenset[str] = frozenset(
     {
         "stage-shots-blacksmith-2026-stage6-s97dcec94-apple-iphone17pro",
-        "stage-shots-tallmilan-2026-stage4-s97dcec94-apple-iphone17pro",
     }
 )
 

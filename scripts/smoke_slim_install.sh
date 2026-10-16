@@ -23,7 +23,7 @@ SCRATCH_ROOT="${SMOKE_SCRATCH_ROOT:-${HOME}/.claude-tmp}"
 SMOKE_DIR="${SCRATCH_ROOT}/slim-smoke"
 SMOKE_VENV="${SMOKE_DIR}/venv"
 SMOKE_CFG="${SMOKE_DIR}/cfg"
-SAMPLE_WAV="${REPO_ROOT}/tests/fixtures/stage-shots-tallmilan-2026-stage3-s97dcec94.wav"
+SAMPLE_WAV="${REPO_ROOT}/tests/fixtures/stage-shots-tallmilan-2026-stage3-s97dcec94-pin.wav"
 
 REBUILD_VENV=0
 REFETCH_MODELS=0
