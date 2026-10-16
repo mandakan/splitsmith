@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.76.0](https://github.com/mandakan/splitsmith/compare/v0.75.0...v0.76.0) (2026-10-16)
+
+
+### Features
+
+* **audit:** the desktop beep step scales its waveform to what is on screen ([f352720](https://github.com/mandakan/splitsmith/commit/f3527207f043343c88a7588c74a112bbcda0e85a))
+* **detection:** choose a stage's shots together with a whole-stage decoder, on by default ([9bde3f0](https://github.com/mandakan/splitsmith/commit/9bde3f0d004b5a33f047b4fe85f1731c1e3f638e))
+* **footage:** link a shooter added by name to the scoreboard ([a41aa82](https://github.com/mandakan/splitsmith/commit/a41aa82e6cad8e609b2bcfe97cb3809edba15e05))
+
+
+### Bug Fixes
+
+* **audit:** reload the stage when its detection ends between two polls ([ad4caf1](https://github.com/mandakan/splitsmith/commit/ad4caf15e63a8b8b9d515d090b613086b45a4851))
+* **footage-sort:** naming a clip never undoes the clip named before it ([86012b2](https://github.com/mandakan/splitsmith/commit/86012b2b6168550b641ed0587a5f53b1ebf6bd2b))
+* **footage:** making a clip primary swaps safely, keeping a confirmed beep and a backup ([e83295e](https://github.com/mandakan/splitsmith/commit/e83295ec8aa3bdee066371932cd9d71017a9a577))
+
 ## [0.75.0](https://github.com/mandakan/splitsmith/compare/v0.74.0...v0.75.0) (2026-10-15)
 
 
