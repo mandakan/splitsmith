@@ -247,7 +247,7 @@ from ..match_project import (
 from ..match_registry import MatchRegistry
 from ..mp4_render import RenderStep
 from ..observability import StructuredJsonFormatter, init_sentry
-from ..overlay_hud import overlay_settings
+from ..overlay_hud import overlay_scoring_identity, overlay_settings
 from ..runtime import runtime as process_runtime
 from ..share_card import stage_figures
 from ..shot_id import ensure_shot_ids, has_usable_id
@@ -4353,6 +4353,7 @@ def register_job_bodies(state: AppState) -> None:
                     shooter_label=proj.competitor_name or proj.name,
                     stage_time_is_manual=stg.time_seconds_manual,
                     segment_cache=match_export_helpers.render_segment_cache(Config().output),
+                    hud_extras=export_helpers.hud_extras_for(proj, stg),
                 )
         except StageExportError as exc:
             # Surface as a job failure with the exporter's own message so
@@ -4588,6 +4589,9 @@ def register_job_bodies(state: AppState) -> None:
                         short_head=export_helpers.overlay_short_head(
                             prim.beep_time, proj.trim_pre_buffer_seconds
                         ),
+                        scoring=overlay_scoring_identity(
+                            req.overlay_theme, req.overlay_variant, export_helpers.hud_extras_for(proj, stg)
+                        ),
                     )
                     overlay_reusable = export_helpers.overlay_record_matches(
                         export_helpers.read_overlay_settings(overlay_record),
@@ -4656,6 +4660,7 @@ def register_job_bodies(state: AppState) -> None:
                             config=Config(),
                             secondaries=secondaries_in,
                             segment_cache=match_export_helpers.render_segment_cache(Config().output),
+                            hud_extras=export_helpers.hud_extras_for(proj, stg),
                         )
                     except StageExportError as exc:
                         raise RuntimeError(f"stage {stage_number}: {exc}") from exc

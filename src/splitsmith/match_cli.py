@@ -728,7 +728,7 @@ def export(
         raise typer.Exit(code=1) from exc
     if not no_overlay:
         stages_input = _vouched_overlays(
-            stages_input, theme_option, pre_buffer_seconds=project.trim_pre_buffer_seconds
+            stages_input, theme_option, pre_buffer_seconds=project.trim_pre_buffer_seconds, project=project
         )
 
     project_name = project.name or match.name or "match"
@@ -853,7 +853,9 @@ def export(
         report_upload(record)
 
 
-def _vouched_overlays(stages_input: list[Any], look: str | None, *, pre_buffer_seconds: float) -> list[Any]:
+def _vouched_overlays(
+    stages_input: list[Any], look: str | None, *, pre_buffer_seconds: float, project: Any = None
+) -> list[Any]:
     """Each stage's overlay MOV only when its record says it was drawn the way
     this export would draw it: from the audit as it stands, with its template
     and its Look's palette and faces as they stand
@@ -864,7 +866,9 @@ def _vouched_overlays(stages_input: list[Any], look: str | None, *, pre_buffer_s
     either (it re-cuts nothing; the style a redraw needs is the app's
     request), so a stale overlay is left out and said so; the MOV stays on
     disk. ``pre_buffer_seconds`` is the project's, which says whether a
-    stage's trim had a short head (``exports.overlay_short_head``)."""
+    stage's trim had a short head (``exports.overlay_short_head``). ``project``
+    gives each stage's scorecard and division (``exports.hud_extras_for``),
+    which a template that declares ``splitsmith-data`` keys was drawn with."""
     from dataclasses import replace
 
     from .ui import exports as export_helpers
@@ -879,8 +883,18 @@ def _vouched_overlays(stages_input: list[Any], look: str | None, *, pre_buffer_s
             current = export_helpers.overlay_audit_revision(stage_in.audit_path)
             upright = export_helpers.overlay_canvas_upright(mov)
             short_head = export_helpers.overlay_short_head(stage_in.beep_offset_seconds, pre_buffer_seconds)
+            extras = (
+                export_helpers.hud_extras_for(project, project.stage(stage_in.stage_number))
+                if project is not None
+                else None
+            )
             if not export_helpers.overlay_record_matches(
-                record, audit_revision=current, look=look, upright=upright, short_head=short_head
+                record,
+                audit_revision=current,
+                look=look,
+                upright=upright,
+                short_head=short_head,
+                hud_extras=extras,
             ):
                 drawn_in = record.get("look") if record is not None else None
                 if (
@@ -888,7 +902,11 @@ def _vouched_overlays(stages_input: list[Any], look: str | None, *, pre_buffer_s
                     and isinstance(drawn_in, str)
                     and drawn_in != look
                     and export_helpers.overlay_record_matches(
-                        record, audit_revision=current, upright=upright, short_head=short_head
+                        record,
+                        audit_revision=current,
+                        upright=upright,
+                        short_head=short_head,
+                        hud_extras=extras,
                     )
                 ):
                     why = (
@@ -906,6 +924,7 @@ def _vouched_overlays(stages_input: list[Any], look: str | None, *, pre_buffer_s
                         look=look,
                         upright=upright,
                         short_head=short_head,
+                        hud_extras=extras,
                     )
                 ):
                     # The one thing that missed: it was drawn before #1430,
@@ -918,7 +937,8 @@ def _vouched_overlays(stages_input: list[Any], look: str | None, *, pre_buffer_s
                     )
                 else:
                     why = (
-                        "was drawn from an older audit, Look or template (or has no record of which) "
+                        "was drawn from an older audit, Look, template or scorecard "
+                        "(or has no record of which) "
                         "-- left out; run the stage's export with the overlay on to draw it again"
                     )
                 console.print(

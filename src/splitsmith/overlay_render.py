@@ -43,6 +43,7 @@ from PIL import Image, ImageFont
 
 from .config import VideoMetadata
 from .fcpxml_gen import probe_video
+from .hud_extras import HudExtras
 from .looks import DEFAULT_VARIANT, load_look, overlay_template_for
 from .overlay_clock import clock_common_options, clock_text, elapsed_text_option
 from .overlay_html import single_html
@@ -514,6 +515,7 @@ def render_overlay(
     hud_options: HudOptions | None = None,
     segment_cache: SegmentCache | None = None,
     degraded: list[str] | None = None,
+    hud_extras: HudExtras | None = None,
 ) -> Path:
     """Render an alpha overlay MOV alongside a trimmed clip.
 
@@ -565,6 +567,9 @@ def render_overlay(
     ``segment_cache``: where a template HUD's MOV is cached; ignored by
         Classic, which has no cache.
     ``degraded``: collects one export-report line per fallback.
+    ``hud_extras``: the stage's scorecard, name and magazine capacity, for a
+        template that declares ``splitsmith-data`` keys; ignored by Classic
+        and by every template that declares none.
 
     Returns the written ``output_path``.
     """
@@ -621,6 +626,7 @@ def render_overlay(
                         options=hud_options or HudOptions(),
                         rasterizer=active,
                         segment_cache=segment_cache,
+                        extras=hud_extras,
                     )
             except HudFallbackError as exc:
                 note = f"overlay style {variant!r} fell back to Classic: {exc}"

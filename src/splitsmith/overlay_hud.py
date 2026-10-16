@@ -29,6 +29,7 @@ from pydantic import BaseModel, ConfigDict, field_validator
 
 from .config import StageEvent
 from .events import confirmed, reload_figures, shot_is_moving
+from .hud_extras import HudExtras, declared_data, extras_identity
 from .looks import DEFAULT_VARIANT, LOOK_NAME_RE
 from .safe_area import SafeArea
 from .stage_summary_data import TileShot
@@ -158,6 +159,25 @@ def overlay_template_identity(look: str, variant: str) -> str | None:
     return digest.hexdigest()
 
 
+def overlay_scoring_identity(look: str, variant: str, extras: HudExtras | None) -> str | None:
+    """What an overlay's record carries as ``scoring``: the opt-in data keys
+    the template drawing ``variant`` declares and the :class:`HudExtras` it
+    is drawn with (``hud_extras.extras_identity``). ``None`` for Classic, for
+    a style no Look draws and for a template that declares no key, so every
+    such record is what it always was."""
+    if variant == DEFAULT_VARIANT:
+        return None
+    from .looks import LookError, load_look, overlay_template_for
+
+    try:
+        template = overlay_template_for(load_look(look), variant)
+    except LookError:
+        return None
+    if template is None:
+        return None
+    return extras_identity(declared_data(template), extras)
+
+
 def overlay_theme_identity(look: str) -> str | None:
     """What every overlay style reads from ``look`` besides its template: the
     palette (``look_template.theme_tokens`` of ``load_theme``) and the two
@@ -194,6 +214,7 @@ def overlay_settings(
     theme: str | None | object = _READ_NOW,
     upright: bool = False,
     short_head: float | None = None,
+    scoring: str | None = None,
 ) -> dict[str, Any]:
     """What an overlay MOV was drawn with, as recorded beside it and
     compared before a match export reuses it. Classic draws none of the
@@ -230,7 +251,12 @@ def overlay_settings(
     (``ui.exports.overlay_short_head``): until issue #1430 every style drew
     such a stage with the beep at the pre-buffer, late by the shortfall, so
     an overlay drawn before (no key) misses once and is drawn again. A trim
-    with the full pre-buffer records no such key."""
+    with the full pre-buffer records no such key.
+
+    A template that declares ``splitsmith-data`` keys also records
+    ``scoring`` (:func:`overlay_scoring_identity`): a scorecard re-import or a
+    division change moves what it draws. Every other record carries no such
+    key. Passed like ``audit_revision``, read before the render."""
     settings: dict[str, Any] = {
         "look": look,
         "variant": variant,
@@ -247,6 +273,8 @@ def overlay_settings(
         settings["layout"] = UPRIGHT_LAYOUT
     if short_head is not None:
         settings["short_head"] = round(short_head, 3)
+    if scoring is not None:
+        settings["scoring"] = scoring
     return settings
 
 
@@ -446,6 +474,7 @@ __all__ = [
     "hud_page_size",
     "hud_safe_area_data",
     "hud_stage_data",
+    "overlay_scoring_identity",
     "overlay_settings",
     "resolve_position",
     "speed_tiers",

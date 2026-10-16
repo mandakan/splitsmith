@@ -24,13 +24,15 @@ from .. import csv_gen, fcpxml_gen, overlay_render, report, summary_card, trim
 from ..audit_data import StageExportError, audit_shots_to_engine_shots, read_audit_data
 from ..audit_revision import audit_revision
 from ..config import Config, ReportFiles, StageAnalysis, StageData, StageEvent
-from ..events import confirmed_from_doc
+from ..events import capacity_for, confirmed_from_doc
 from ..export_naming import stage_file_base
+from ..hud_extras import HudExtras
 from ..looks import DEFAULT_VARIANT
-from ..match_project import StageScorecard
+from ..match_project import MatchProject, StageEntry, StageScorecard
 from ..overlay_hud import (
     LEGACY_OVERLAY_SETTINGS,
     HudOptions,
+    overlay_scoring_identity,
     overlay_settings,
     overlay_template_identity,
     overlay_theme_identity,
@@ -206,6 +208,22 @@ def overlay_short_head(beep_time_in_source: float, pre_buffer_seconds: float) ->
     return beep if beep < pre_buffer_seconds else None
 
 
+def hud_extras_for(project: MatchProject, stage: StageEntry) -> HudExtras:
+    """What a template HUD may know of ``stage`` beyond its audit
+    (``hud_extras.HudExtras``): its name, number and scorecard, the shooter's
+    division and that division's magazine capacity. The one resolver every
+    overlay writer and reuse check uses, so both sides agree on the
+    record's ``scoring``."""
+    division = project.competitor_division
+    return HudExtras(
+        stage_name=stage.stage_name,
+        stage_number=stage.stage_number,
+        scorecard=stage.scorecard,
+        division=division,
+        capacity=capacity_for(division),
+    )
+
+
 def overlay_record_matches(
     record: dict[str, Any] | None,
     *,
@@ -214,6 +232,7 @@ def overlay_record_matches(
     look: str | None = None,
     upright: bool = False,
     short_head: float | None = None,
+    hud_extras: HudExtras | None = None,
 ) -> bool:
     """Whether an overlay MOV whose settings record is ``record`` may be
     reused: the one rule for every reuse check (the match export job, the
@@ -230,8 +249,10 @@ def overlay_record_matches(
     safe area misses. ``short_head`` (likewise only without ``wanted``) is
     the stage's :func:`overlay_short_head`: an overlay over a short-head trim
     must record where it drew the beep, so one drawn before issue #1430 (at
-    the pre-buffer, late) misses. An unreadable audit or record never
-    matches."""
+    the pre-buffer, late) misses. ``hud_extras`` (likewise only without
+    ``wanted``) is the stage's :func:`hud_extras_for`: a template that declares
+    ``splitsmith-data`` keys must have been drawn with the scorecard and
+    division as they stand. An unreadable audit or record never matches."""
     if record is None or audit_revision is None:
         return False
     # Nothing vouches for the palette and faces an overlay drew with when its
@@ -246,9 +267,10 @@ def overlay_record_matches(
     if wanted is None:
         try:
             variant = str(record["variant"])
+            wanted_look = str(record["look"]) if look is None else look
             options = HudOptions(**record["options"]) if variant != DEFAULT_VARIANT else HudOptions()
             wanted = overlay_settings(
-                look=str(record["look"]) if look is None else look,
+                look=wanted_look,
                 variant=variant,
                 options=options,
                 codec=record["codec"],
@@ -257,6 +279,7 @@ def overlay_record_matches(
                 audit_revision=audit_revision,
                 upright=upright,
                 short_head=short_head,
+                scoring=overlay_scoring_identity(wanted_look, variant, hud_extras),
             )
         except (KeyError, TypeError, ValueError):
             return False
@@ -287,6 +310,7 @@ def export_stage(
     shooter_label: str | None = None,
     stage_time_is_manual: bool = False,
     segment_cache: SegmentCache | None = None,
+    hud_extras: HudExtras | None = None,
 ) -> StageExportResult:
     """Run the export for one stage. Pure orchestration over the engine
     modules; never re-detects.
@@ -296,6 +320,9 @@ def export_stage(
     scoreboard's hit counts and hit factor, the name on the card, and
     whether the stage time was typed rather than scored. Absent stays
     absent -- the card draws less, never a zero.
+
+    ``hud_extras`` (:func:`hud_extras_for`) reaches a template HUD that
+    declares ``splitsmith-data`` keys, and its record's ``scoring``.
 
     Produces (subject to the request flags):
       - ``stage<N>_<slug>_trimmed.mp4`` -- lossless stream-copy trim of the
@@ -503,6 +530,9 @@ def export_stage(
             drawn_revision = overlay_audit_revision(audit_path)
             drawn_template = overlay_template_identity(request.overlay_theme, request.overlay_variant)
             drawn_theme = overlay_theme_identity(request.overlay_theme)
+            drawn_scoring = overlay_scoring_identity(
+                request.overlay_theme, request.overlay_variant, hud_extras
+            )
             drawn_upright = overlay_canvas_upright(mirror_target)
             try:
                 overlay_render.render_overlay(
@@ -518,6 +548,7 @@ def export_stage(
                     hud_options=request.overlay_options,
                     segment_cache=segment_cache,
                     degraded=overlay_notes,
+                    hud_extras=hud_extras,
                 )
                 overlay_path = overlay_target
                 # Record what was drawn: a fallback drew Classic, so a later
@@ -538,6 +569,8 @@ def export_stage(
                             theme=drawn_theme,
                             upright=drawn_upright,
                             short_head=overlay_short_head(beep_time_in_source, pre_buffer_seconds),
+                            # A fallback drew Classic, which reads no extras.
+                            scoring=None if overlay_notes else drawn_scoring,
                         ),
                         sort_keys=True,
                     ),
