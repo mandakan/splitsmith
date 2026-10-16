@@ -30,7 +30,13 @@ EVENTS_SEEDED_FIELD: Final = "events_seeded"
 #: What ``events_seeded`` holds after seeding. 2: a capacity places the
 #: fewest reloads the round count forces, in the longest gaps (version 1,
 #: stored as ``True``, took the first long gap in each magazine's window).
-SEED_VERSION: Final = 2
+#: 3: movement proposals over every gap the auto-classifier calls movement.
+SEED_VERSION: Final = 3
+#: How far a seeded movement stays in from the shots either side of its gap
+#: (at most a quarter of the gap): ``shot_is_moving`` is inclusive, and a
+#: region on the shot's own time would call the shot before the move, and
+#: the one after it, fired moving.
+MOVEMENT_SEED_INSET_S: Final = 0.1
 #: Shortest region the editor will produce; a handle dragged past its
 #: partner stops here rather than inverting.
 MIN_EVENT_S: Final = 0.05
@@ -159,6 +165,17 @@ def shot_times_from_doc(doc: dict[str, Any]) -> list[float]:
     return sorted(times)
 
 
+def movement_gap_ends(doc: dict[str, Any]) -> list[float]:
+    """The times (seconds from the beep) of the kept shots whose gap, the one
+    before them, is classed ``movement``, by the auto-classifier or by hand.
+    What the seeder proposes movement regions over."""
+    return [
+        ms / 1000.0
+        for s in doc.get("shots") or []
+        if isinstance(s, dict) and s.get("interval_class") == "movement" and (ms := shot_ms(s)) is not None
+    ]
+
+
 def _overlaps(a: StageEvent, b: StageEvent) -> bool:
     return a.start < b.end and b.start < a.end
 
@@ -269,17 +286,24 @@ def seed_events(
     hint_min_s: float,
     capacity: int | None,
     min_reload_s: float = 0.6,
+    movement_gaps: Sequence[float] = (),
 ) -> list[StageEvent]:
-    """Propose ``reload`` regions, each spanning a whole gap, ``source="auto"``.
+    """Propose ``reload`` regions, each spanning a whole gap, and
+    ``movement`` regions, all ``source="auto"``.
 
-    Without a capacity: every gap over the hint. With one, the round count
-    decides: at most ``capacity + 1`` shots fit between reloads (one
-    chambered on a full magazine; a bound, not a count), so the proposals
-    are the fewest reloads that keep every run of shots within it, placed
-    in the longest gaps those runs allow. Only a gap of at least
+    Reloads, without a capacity: every gap over the hint. With one, the
+    round count decides: at most ``capacity + 1`` shots fit between reloads
+    (one chambered on a full magazine; a bound, not a count), so the
+    proposals are the fewest reloads that keep every run of shots within
+    it, placed in the longest gaps those runs allow. Only a gap of at least
     ``min_reload_s`` can hold a reload; when no placement exists over those
     gaps, any gap may. A stage that fits in one magazine gets none, however
-    long its gaps. Movement is never seeded.
+    long its gaps.
+
+    Movements: one per gap that ends on a shot time in ``movement_gaps``
+    (the shots whose gap the auto-classifier calls movement), inset
+    :data:`MOVEMENT_SEED_INSET_S` from both shots so neither reads as fired
+    moving. A movement may sit over a reload: a reload on the move.
 
     A gap that cannot be a region is never proposed: one that starts before
     the beep (a pre-beep first shot), has no length, or has a time that is
@@ -288,6 +312,35 @@ def seed_events(
     """
     times = sorted(t for t in shot_times if math.isfinite(t))
     gaps = [times[i + 1] - times[i] for i in range(len(times) - 1)]
+    seeds: list[StageEvent] = []
+    seeds.extend(_reload_seeds(times, gaps, hint_min_s, capacity, min_reload_s))
+    moving_ends = {t for t in movement_gaps if math.isfinite(t)}
+    for g, gap in enumerate(gaps):
+        start, end = times[g], times[g + 1]
+        if end not in moving_ends or start < 0.0 or end <= start:
+            continue
+        inset = min(MOVEMENT_SEED_INSET_S, gap / 4)
+        if gap - 2 * inset < MIN_EVENT_S:
+            continue
+        seeds.append(
+            StageEvent(
+                id=next_event_id(seeds),
+                kind="movement",
+                start=round(start + inset, 6),
+                end=round(end - inset, 6),
+                source="auto",
+            )
+        )
+    return seeds
+
+
+def _reload_seeds(
+    times: Sequence[float],
+    gaps: Sequence[float],
+    hint_min_s: float,
+    capacity: int | None,
+    min_reload_s: float,
+) -> list[StageEvent]:
     seeds: list[StageEvent] = []
 
     def _seed(g: int) -> None:
@@ -367,7 +420,13 @@ def seed_doc(
     times = shot_times_from_doc(doc)
     if not times:
         return False
-    seeds = seed_events(times, hint_min_s=hint_min_s, capacity=capacity, min_reload_s=min_reload_s)
+    seeds = seed_events(
+        times,
+        hint_min_s=hint_min_s,
+        capacity=capacity,
+        min_reload_s=min_reload_s,
+        movement_gaps=movement_gap_ends(doc),
+    )
     if not seeds and not again:
         return False
     events = [e.model_dump(exclude_none=True) for e in seeds]

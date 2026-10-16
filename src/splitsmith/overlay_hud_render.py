@@ -31,6 +31,7 @@ from typing import Any, Literal
 from .audit_data import read_audit_data
 from .config import StageEvent
 from .events import confirmed_from_doc
+from .hud_extras import HudExtras, declared_data, hud_extras_data
 from .look_template import TemplateContext, engine_block, shared_url, template_digest, theme_tokens
 from .overlay_html import single_css
 from .overlay_hud import (
@@ -78,6 +79,7 @@ def hud_context(
     width: int,
     height: int,
     fps: float,
+    extras: dict[str, Any] | None = None,
 ) -> TemplateContext:
     """``window.splitsmith`` for a HUD: the stage and the options as data,
     the theme's tokens, and the engine stylesheet for its font faces.
@@ -88,8 +90,12 @@ def hud_context(
     ``--safe-bottom`` / ``--safe-right`` / ``--safe-right-top`` on
     ``:root`` at the end of the engine stylesheet. A square or wider page
     gets neither, so its context, and with it the template digest, is what
-    it always was."""
-    data: dict[str, Any] = {"stage": stage, "options": options}
+    it always was.
+
+    ``extras`` is the opt-in data a template declared
+    (``hud_extras.hud_extras_data``), merged at the top level of ``data``;
+    a template that declared none gets no new key."""
+    data: dict[str, Any] = {"stage": stage, "options": options, **(extras or {})}
     css = single_css(width=width, height=height, scale=CellScale.for_cell(height), theme=theme)
     area = safe_area(width, height)
     if area is not None:
@@ -134,8 +140,12 @@ def render_hud_overlay(
     options: HudOptions,
     rasterizer: Rasterizer,
     segment_cache: SegmentCache | None,
+    extras: HudExtras | None = None,
 ) -> Path:
-    """Render the stage's HUD through ``template`` into ``output_path``."""
+    """Render the stage's HUD through ``template`` into ``output_path``.
+    ``extras`` is what the request layer knows of the stage beyond the
+    audit; it reaches the context only through the keys the template
+    declares (``hud_extras.declared_data``)."""
     # Deferred: overlay_render imports this module, and the encoder argv
     # and the partial-output rule are its own, shared by both paths.
     from .overlay_render import _build_ffmpeg_cmd, _discard_partial_output
@@ -146,7 +156,11 @@ def render_hud_overlay(
     fps = rate_num / rate_den
     frame_count = max(0, int(round(duration_seconds * fps)))
     page_width, page_height = hud_page_size(width, height)
-    stage = hud_stage_data(shots, beep_in_clip=beep_offset_seconds, events=_confirmed_regions(audit_path))
+    regions = _confirmed_regions(audit_path)
+    stage = hud_stage_data(shots, beep_in_clip=beep_offset_seconds, events=regions)
+    extras_data = hud_extras_data(
+        declared_data(template), shots, beep_in_clip=beep_offset_seconds, events=regions, extras=extras
+    )
     position = resolve_position(options.position, declared_positions(template))
     context = hud_context(
         stage=stage,
@@ -155,6 +169,7 @@ def render_hud_overlay(
         width=page_width,
         height=page_height,
         fps=fps,
+        extras=extras_data,
     )
     scale = None if (page_width, page_height) == (width, height) else f"scale={width}:{height}:flags=lanczos"
     rate = f"{rate_num}/{rate_den}"

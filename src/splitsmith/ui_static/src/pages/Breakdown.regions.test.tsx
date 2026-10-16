@@ -154,6 +154,31 @@ describe("region saves on Breakdown", () => {
     expect(screen.queryByRole("button", { name: "Keep" })).toBeNull();
   });
 
+  it("Keep all confirms every proposal in one PUT and then goes away", async () => {
+    const kept: StageEvent = { id: "evt-1", kind: "movement", start: 1.4, end: 3.5, source: "manual" };
+    const reload: StageEvent = { id: "evt-2", kind: "reload", start: 8.05, end: 9.47, source: "auto" };
+    const move: StageEvent = { id: "evt-3", kind: "movement", start: 8.15, end: 9.37, source: "auto" };
+    const all = [kept, { ...reload, source: "manual" as const }, { ...move, source: "manual" as const }];
+    vi.mocked(api.getStageCoach).mockResolvedValue(stageWith([kept, reload, move], "v1v1v1v1v1v1v1v1"));
+    vi.mocked(api.putStageEvents).mockResolvedValue(stageWith(all, "v2v2v2v2v2v2v2v2"));
+    renderBreakdown();
+    const row = await screen.findByTestId("keep-all-proposals");
+    expect(row).toHaveTextContent("2");
+    fireEvent.click(screen.getByRole("button", { name: "Keep all" }));
+    await waitFor(() => expect(api.putStageEvents).toHaveBeenCalledTimes(1));
+    expect(api.putStageEvents).toHaveBeenCalledWith("anna", 1, all, "v1v1v1v1v1v1v1v1");
+    await waitFor(() => expect(screen.queryByTestId("keep-all-proposals")).toBeNull());
+  });
+
+  it("Keep all is not offered when every region is kept", async () => {
+    vi.mocked(api.getStageCoach).mockResolvedValue(
+      stageWith([{ id: "evt-1", kind: "reload", start: 8.05, end: 9.47, source: "manual" }]),
+    );
+    renderBreakdown();
+    await screen.findByTestId("event-evt-1");
+    expect(screen.queryByTestId("keep-all-proposals")).toBeNull();
+  });
+
   it("a 409 on the PUT reloads the coach payload", async () => {
     const stale = stageWith([{ id: "evt-1", kind: "reload", start: 8.05, end: 9.47, source: "auto" }], "old");
     const fresh = stageWith([{ id: "evt-2", kind: "movement", start: 1, end: 2, source: "manual" }], "new");

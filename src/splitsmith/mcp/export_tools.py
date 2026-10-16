@@ -337,7 +337,11 @@ def export_match_tool(
                     primary_clip_beep, project.trim_pre_buffer_seconds
                 )
                 if export_helpers.overlay_record_matches(
-                    record, audit_revision=current, upright=upright, short_head=short_head
+                    record,
+                    audit_revision=current,
+                    upright=upright,
+                    short_head=short_head,
+                    hud_extras=export_helpers.hud_extras_for(project, stage, root),
                 ):
                     overlay_path = candidate
                 else:

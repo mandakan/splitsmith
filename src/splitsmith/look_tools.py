@@ -33,6 +33,7 @@ from PIL import Image, ImageDraw
 
 from . import composition
 from .config import StageEvent
+from .hud_extras import HudExtras, declared_data, hud_extras_data
 from .identity import ResolvedIdentity
 from .look_brand import brand_json
 from .look_sting import sting_context
@@ -54,6 +55,7 @@ from .looks import (
     user_looks_dir,
     variants_for,
 )
+from .match_project import StageScorecard
 from .overlay_card import build_card_still, build_lower_third, card_context
 from .overlay_hud import HudOptions, declared_positions, hud_options_data, hud_stage_data, resolve_position
 from .overlay_raster import Rasterizer, TemplateFrames, TemplateProbe, TemplateScriptError
@@ -436,6 +438,27 @@ HUD_LANDED_AFTER = 2.0
 HUD_STILL_AFTER = 0.7
 #: How long after a shot the upright probe looks: a split's flash is up.
 HUD_AFTER_SHOT = 0.1
+#: What a template that declares ``splitsmith-data`` keys is checked with:
+#: a scored Production Optics stage, so the ammo counter and every spread
+#: have something to draw. The same for every sample stage; its counts need
+#: not match a sample's shots (real scorecards rarely do either).
+HUD_SAMPLE_EXTRAS = HudExtras(
+    stage_name="Sample stage with a long name",
+    stage_number=3,
+    scorecard=StageScorecard(
+        hit_factor=5.1234,
+        stage_points=98,
+        stage_pct=87.5,
+        alphas=18,
+        charlies=4,
+        deltas=1,
+        misses=1,
+        no_shoots=1,
+        procedurals=0,
+    ),
+    division="Production Optics",
+    capacity=15,
+)
 
 
 def _hud_stage(gaps: Sequence[tuple[str | None, float]]) -> list[TileShot]:
@@ -498,6 +521,13 @@ def _hud_context(
     from .overlay_hud_render import hud_context
 
     stage = hud_stage_data(sample.shots, beep_in_clip=HUD_SAMPLE_BEEP, events=sample.events)
+    extras = hud_extras_data(
+        declared_data(template),
+        sample.shots,
+        beep_in_clip=HUD_SAMPLE_BEEP,
+        events=sample.events,
+        extras=HUD_SAMPLE_EXTRAS,
+    )
     position = resolve_position(None, declared_positions(template))
     # Both region toggles on: a check with them off would never draw the
     # chip or the stage bar, and a stage without regions draws neither.
@@ -508,6 +538,7 @@ def _hud_context(
         width=width,
         height=height,
         fps=CHECK_FPS,
+        extras=extras,
     )
 
 

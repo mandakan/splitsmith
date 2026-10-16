@@ -12,8 +12,10 @@ from typing import Any
 import pytest
 from PIL import Image
 
-from splitsmith import overlay_render
+from splitsmith import looks, overlay_render
 from splitsmith.config import VideoMetadata
+from splitsmith.hud_extras import HudExtras
+from splitsmith.match_project import StageScorecard
 from splitsmith.overlay_hud import HudOptions
 from splitsmith.overlay_raster import TemplateFrames, TemplateScriptError
 from splitsmith.segment_cache import SegmentCache
@@ -202,6 +204,46 @@ def test_a_corrupt_events_list_renders_without_regions(
     (timeline,) = fake.timelines
     stage = timeline["context"].data["stage"]
     assert stage["events"] == [] and stage["reloads"] == [] and stage["rounds"] == 3
+
+
+_EXTRAS = HudExtras(
+    stage_name="Bay 3",
+    stage_number=3,
+    scorecard=StageScorecard(hit_factor=5.0, stage_pct=80.0, alphas=2, charlies=1),
+    division="Production Optics",
+    capacity=15,
+)
+
+
+def test_a_shipped_template_gets_no_extras_whatever_is_passed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _Encoder(monkeypatch)
+    fake = _FakeRasterizer()
+    _render(tmp_path, fake, variant="plate", hud_extras=_EXTRAS)
+    assert set(fake.timelines[0]["context"].data) == {"stage", "options"}
+
+
+def test_a_template_that_declares_keys_gets_them(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv("SPLITSMITH_HOME", str(home))
+    manifest = json.loads((looks.shipped_looks_dir() / "clean" / "look.json").read_text(encoding="utf-8"))
+    manifest["name"] = "doom"
+    manifest["slots"] = {"overlay": {"doom": "hud-doom.html"}}
+    root = home / "looks" / "doom"
+    root.mkdir(parents=True)
+    (root / "look.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (root / "hud-doom.html").write_text(
+        '<!doctype html><meta name="splitsmith-data" content="ammo,scoring">', encoding="utf-8"
+    )
+    _Encoder(monkeypatch)
+    fake = _FakeRasterizer()
+    _render(tmp_path, fake, theme="doom", variant="doom", hud_extras=_EXTRAS)
+    data = fake.timelines[0]["context"].data
+    assert set(data) == {"stage", "options", "scoring", "ammo"}
+    assert data["ammo"]["per_shot"] == [15, 14, 13]
+    assert data["scoring"]["name"] == "Bay 3"
+    assert data["scoring"]["spreads"]["even"][-1]["totals"] == {"A": 2, "C": 1, "D": 0, "M": 0, "NS": 0}
 
 
 def test_confirming_a_region_misses_the_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

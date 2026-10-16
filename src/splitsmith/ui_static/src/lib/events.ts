@@ -66,6 +66,11 @@ export function keepEvent(events: StageEvent[], id: string): StageEvent[] {
   return events.map((e) => (e.id === id ? { ...e, source: "manual" as const } : e));
 }
 
+/** Keep all: every proposal confirmed at once, each exactly as {@link keepEvent} would. */
+export function keepAllEvents(events: StageEvent[]): StageEvent[] {
+  return events.map((e) => (e.source === "manual" ? e : { ...e, source: "manual" as const }));
+}
+
 export function shotIsMoving(t: number, events: StageEvent[]): boolean {
   return events.some((e) => e.kind === "movement" && e.start <= t && t <= e.end);
 }

@@ -1335,7 +1335,11 @@ Seeding (``events.seed_doc``) runs once per stage (``events_seeded``,
 which holds ``events.SEED_VERSION``) on the coach GET **with ``?seed=1``**,
 which only Breakdown sends (``useStageWorkspace``'s ``seed``); Coach, the
 Splits stage page and Compare read every stage and must never write one.
-Reload only, never movement: every hinted gap (``reload_hint_min_s``), or with a division
+Movement (seed v3): one proposal per gap the stored classes call
+``movement``, inset ``MOVEMENT_SEED_INSET_S`` from both shots, since
+``shot_is_moving`` is inclusive and a region on a shot's time would call
+the shots either side fired moving; it may sit over a reload proposal (a
+reload on the move). Reloads: every hinted gap (``reload_hint_min_s``), or with a division
 capacity (``DivisionCapacityConfig``, keyed on the SSI string so the power
 factor rides in the name) the round count decides: the fewest reloads that
 keep every run within ``capacity + 1`` shots, in the longest gaps those
