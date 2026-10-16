@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "audit-save-after-beep-confirm",
+      "date": "2026-10-16",
+      "title": "Confirm a beep, then audit and save",
+      "body": "After confirming a beep in Audit, a quick shot detection could leave the page on the stage as it was before, and Save said the stage was saved elsewhere. Audit now shows the new shots."
+    },
+    {
       "id": "link-shooter-to-scoreboard",
       "date": "2026-10-16",
       "title": "Link a shooter to the scoreboard later",
