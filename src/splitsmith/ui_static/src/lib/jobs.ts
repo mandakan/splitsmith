@@ -34,8 +34,26 @@ export function isJobActive(job: Job): boolean {
   return job.status === "pending" || job.status === "running";
 }
 
+/** Jobs that ended between the poll ``prev`` and the poll ``next``: seen
+ *  active and now not, or absent before and already ended. The second kind
+ *  matters: a fast job (a 1.5 s shot detection after a beep confirm) can
+ *  start and finish between two idle polls and is never seen running.
+ *  ``prev`` null is the first poll, whose finished rows are history. */
+export function settledBetween(prev: Job[] | null, next: Job[]): Job[] {
+  if (prev === null) return [];
+  const before = new Map(prev.map((j) => [j.id, j]));
+  return next.filter((j) => {
+    if (isJobActive(j)) return false;
+    const was = before.get(j.id);
+    return was === undefined || isJobActive(was);
+  });
+}
+
 export interface JobsState {
   jobs: Job[];
+  /** Jobs that ended since the previous poll (``settledBetween``); a new
+   *  array only when there are some, so an effect on it runs once each. */
+  settled: Job[];
   running: Job[];
   pending: Job[];
   failed: Job[];
@@ -58,6 +76,8 @@ export function useJobs(): JobsState {
   const [error, setError] = useState<string | null>(null);
   const [retryRefusal, setRetryRefusal] = useState<JobsState["retryRefusal"]>(null);
   const [batch, setBatch] = useState<ReadonlySet<string>>(() => new Set());
+  const [settled, setSettled] = useState<Job[]>([]);
+  const lastListRef = useRef<Job[] | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const refresh = useCallback(async () => {
@@ -66,6 +86,9 @@ export function useJobs(): JobsState {
     abortRef.current = controller;
     try {
       const list = await api.listJobs({ signal: controller.signal });
+      const ended = settledBetween(lastListRef.current, list);
+      lastListRef.current = list;
+      if (ended.length > 0) setSettled(ended);
       setJobs(list);
       setBatch((prev) => nextBatch(prev, stripVisible(list).filter(isJobActive)));
       setError(null);
@@ -140,6 +163,7 @@ export function useJobs(): JobsState {
 
   return {
     jobs,
+    settled,
     running,
     pending,
     failed,

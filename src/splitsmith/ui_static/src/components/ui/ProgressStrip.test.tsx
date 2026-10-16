@@ -35,6 +35,7 @@ function state(jobs: Job[], batch?: string[]): JobsState {
     failed: jobs.filter((j) => j.status === "failed" && !j.acknowledged),
     error: null,
     retryRefusal: null,
+    settled: [],
     batch: new Set(batch ?? [...running, ...pending].map((j) => j.id)),
     refresh: vi.fn(),
     acknowledge: vi.fn(),
