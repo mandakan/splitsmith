@@ -291,7 +291,23 @@ markup through ``_shared/cell.js`` (a port of ``overlay_html._cell_div``,
 held to it by ``tests/test_look_template.py``) and ``_shared/fit.js``
 (the one fit policy, also inlined by ``overlay_html``); a template gets
 ``window.splitsmith`` from ``look_template.TemplateContext`` before its
-scripts run. The summary and the live overlay are not templates yet.
+scripts run. The live overlay has its own template path (below). The
+single-shooter **stage summary hold and match summary** are slots too
+(``summary``, ``match_summary``; spec
+``2026-10-16-summary-templates-design``): like the overlay, ``default`` is
+the engine's card and never names a file (``looks.summary_template_for``
+answers ``None``), so every default render is the PNG and argv it always
+was. A named variant goes through ``summary_template``: ``data.figures``
+(``stage_summary_data.stage_summary_figures``, the engine card's numbers as
+data, pinned to its text by ``tests/test_stage_summary_figures.py``),
+``data.stage`` (``hud_stage_data`` with the beep at 0), the declared HUD
+providers (``SummaryHold.extras``, built by ``hud_extras.hud_extras_from``
+like the overlay's), or ``data.match``; rendered as a still or an animated
+card keyed by ``template_digest``; a template that fails draws the engine
+card plus a degradation. The stage export's summary file and the previews
+hold it at ``poster()``. ``summary_variant`` / ``match_summary_variant``
+ride the requests and the preset; unset is ``default``, never
+``card_variant``. The compare grid's holds are still engine only.
 Check pixels with the frame scripts, not argv.
 
 A template that animates (``duration() > 0``) is rendered frame by frame

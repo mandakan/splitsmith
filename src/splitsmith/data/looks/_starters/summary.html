@@ -1,0 +1,90 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>starter: stage summary</title>
+<!--
+  A stage summary: held after the stage's action, over its last frame
+  blurred. Name it under "summary" in look.json with a variant name (the
+  "default" summary is the built-in card) and pick it as the Stage summary
+  style on the Export page.
+
+  window.splitsmith.data has, besides card and shooters:
+    figures   the numbers the built-in card shows, never re-derive them:
+              time_seconds, time_is_manual, hit_factor, stage_pct, points,
+              counts { A, C, D, M, NS, P }, draw,
+              splits { best, avg, worst, n }, static / moving (the same,
+              with confirmed movement), reloads { count, avg, exposed },
+              rounds, min_rounds, dq. A figure that was never read is null.
+    stage     the HUD's stage data with the beep at 0: shots[] (t, split,
+              cls, label, tier, moving), events[], reloads[]
+    safe_area on an upright video: keep clear of it, as an overlay does
+  More data (scoring, ammo, bursts) arrives when the page asks for it:
+    <meta name="splitsmith-data" content="scoring">
+  An animated summary defines duration(), seek(t) and poster(), as an
+  animated card does (starter: animated). Guide: docs/looks/authoring.md#summaries
+-->
+<script>
+  document.write('<style>' + window.splitsmith.engine.css + '</style>');
+</script>
+<style>
+  html, body { margin: 0; background: transparent; overflow: hidden; }
+  .card {
+    position: absolute; inset: 0; box-sizing: border-box;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.5em;
+  }
+  .name { font-family: "Splitsmith Display", sans-serif; font-weight: 700; line-height: 1; white-space: nowrap; }
+  .figures { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.6em 1.6em; font-family: "Splitsmith Mono", monospace; }
+  .figure { display: flex; flex-direction: column; align-items: center; }
+  .value { font-weight: 700; }
+  .caption { letter-spacing: 0.08em; text-transform: uppercase; }
+  body.safe .card { padding-bottom: var(--safe-bottom); padding-right: var(--safe-right); }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="name" id="name"></div>
+  <div class="figures" id="figures"></div>
+</div>
+<script>
+  var S = window.splitsmith, F = S.data.figures, H = Math.min(S.size.height, S.size.width);
+  if (S.data.safe_area) document.body.classList.add('safe');
+
+  var nameEl = document.getElementById('name');
+  nameEl.textContent = S.data.card.text;
+  nameEl.style.color = S.theme.ink;
+  nameEl.style.fontSize = Math.round(H * 0.08) + 'px';
+
+  function two(x) { return x == null ? null : x.toFixed(2); }
+  var shown = [
+    ['Time', F.time_seconds == null ? null : two(F.time_seconds) + 's'],
+    ['HF', two(F.hit_factor)],
+    ['Draw', two(F.draw)],
+    ['Avg split', F.splits ? two(F.splits.avg) : null]
+  ].filter(function (pair) { return pair[1] != null; });
+
+  var row = document.getElementById('figures');
+  row.style.fontSize = Math.round(H * 0.05) + 'px';
+  shown.forEach(function (pair) {
+    var cell = document.createElement('div');
+    cell.className = 'figure';
+    cell.innerHTML = '<span class="value"></span><span class="caption"></span>';
+    cell.firstChild.textContent = pair[1];
+    cell.firstChild.style.color = S.theme.split;
+    cell.lastChild.textContent = pair[0];
+    cell.lastChild.style.color = S.theme.muted;
+    cell.lastChild.style.fontSize = '0.4em';
+    row.appendChild(cell);
+  });
+
+  // A long name shrinks to fit the frame rather than run off it.
+  window.__splitsmithFit = function () {
+    var size = parseFloat(nameEl.style.fontSize);
+    while (nameEl.scrollWidth > S.size.width * 0.9 && size > S.engine.min_font_size) {
+      size -= 1;
+      nameEl.style.fontSize = size + 'px';
+    }
+  };
+</script>
+</body>
+</html>

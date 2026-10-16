@@ -17,6 +17,7 @@ default Look to your own templates.
 - [Lower third](#lower-third)
 - [Stings](#stings)
 - [Overlay styles](#overlay-styles)
+- [Summaries](#summaries)
 - [Logos and identity](#logos-and-identity)
 - [Your brand](#your-brand)
 - [What a template can load](#what-a-template-can-load)
@@ -58,6 +59,7 @@ Five starters ship, each a short commented template:
 | `lower-third` | A band over the first seconds of a stage |
 | `sting` | A band swept across the cut between stages |
 | `hud` | An overlay style: the clock, the count and the last split in a corner |
+| `summary` | A stage summary: the stage's name and its time, hit factor, draw and average split |
 
 ## look.json
 
@@ -351,6 +353,49 @@ body.safe #clock { bottom: calc(var(--safe-bottom) + 4vh); }
 `looks check` probes every overlay style on an upright page too, mid-stage,
 just after a shot and landed, and warns about any text or painted box that
 reaches into the area.
+
+## Summaries
+
+The stage summary (held after each stage's action) and the match summary
+(after the last stage) are slots too: `summary` and `match_summary`. Their
+`default` is the built-in card and cannot name a file; give your template a
+variant name and pick it as the Style under Stage summary or Match summary on
+the Export page (`--summary-variant` / `--match-summary-variant` on `match
+export`). `styles` in `look.json` can make it the Look's default.
+
+```json
+"slots": {
+  "summary": { "finished": "summary-finished.html" },
+  "match_summary": { "tally": "match-tally.html" }
+}
+```
+
+A summary template is drawn over the stage's last frame, blurred, like a card,
+and gets `data.card` (`text` is the shooter's name, or the match title) and
+`data.shooters`. A stage summary also gets:
+
+- `data.figures`: every number the built-in card shows, so yours never
+  disagrees with it: `time_seconds`, `time_is_manual`, `hit_factor`,
+  `stage_pct`, `points`, `counts` (`A`, `C`, `D`, `M`, `NS`, `P`), `draw`,
+  `splits` (`best`, `avg`, `worst`, `n`), `static` and `moving` (the same,
+  when the stage has confirmed movement), `reloads` (`count`, `avg`,
+  `exposed`), `rounds`, `min_rounds`, `dq`. A figure that was never read is
+  `null`.
+- `data.stage`: the overlay's stage data with the beep at 0 (shots, regions,
+  reloads), for drawing the run itself.
+- the overlay's opt-in data, when the page asks for it:
+  `<meta name="splitsmith-data" content="scoring,ammo,bursts">`.
+
+A match summary gets `data.match`: `title`, `label`, `rows` (one per stage:
+`number`, `name`, `time_seconds`, `time_is_manual`, `hit_factor`,
+`stage_pct`, `draw`, `avg_split`, `dq`), `avg_split`, `best_draw`, `rounds`,
+`hits`, `split_stages`, `scored_stages`, `dq`.
+
+A summary may animate (`duration()`, `seek(t)`, `poster()`, as an animated
+card): the stage export's summary file and the previews show its `poster()`,
+so make that the finished picture. On an upright video `data.safe_area` is
+set, as for an overlay. A template that fails draws the built-in card and the
+export says why. Start from `splitsmith looks new <name> --starter summary`.
 
 ## Logos and identity
 
