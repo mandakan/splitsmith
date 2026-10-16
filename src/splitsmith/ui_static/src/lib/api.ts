@@ -3588,8 +3588,9 @@ export const api = {
    *  refuses with a 409 (``code: "audit_exists"``) when the stage has
    *  shots in its audit JSON and ``confirm`` is false; the SPA should
    *  prompt then re-call with ``confirm=true``. On confirm, the existing
-   *  audit JSON is renamed to ``.bak`` and detection re-runs on the new
-   *  primary's audio. */
+   *  audit JSON is kept as ``stage<N>.pre-swap-<time>.json`` and the
+   *  stage's trim and shots are redone on the new primary (a confirmed
+   *  beep on it is kept). */
   /** Override the heuristic camera mount on a single video. The mapping
    *  to ensemble threshold class (handheld vs headcam) happens server-
    *  side via ``camera_class_from_mount``. Pass ``null`` to clear the

@@ -1595,6 +1595,41 @@ def test_detect_beep_400_when_no_primary(tmp_path: Path) -> None:
     assert resp.status_code == 400
 
 
+def test_swap_primary_with_a_confirmed_beep_chains_the_trim(tmp_path: Path, monkeypatch) -> None:
+    """The new primary's beep was confirmed on its own audio: the swap keeps
+    it and goes straight to the trim (which chains detection), with no new
+    beep detection to race the confirmed beep (2026-10-16)."""
+    monkeypatch.setenv("SPLITSMITH_AUTO_BEEP_DISABLED", "1")
+    client, src = _seed_project_with_primary(tmp_path)
+    (src.parent / "HEAD.mp4").write_bytes(b"")
+    client.post(
+        "/api/shooters/me/videos/scan",
+        json={"source_dir": str(src.parent), "auto_assign_primary": False},
+    )
+    client.post(
+        "/api/shooters/me/assignments/move",
+        json={"video_path": "raw/HEAD.mp4", "to_stage_number": 1, "role": "secondary"},
+    )
+    project_json = tmp_path / "match" / "shooters" / "me" / "project.json"
+    doc = json.loads(project_json.read_text())
+    head = next(v for v in doc["stages"][0]["videos"] if v["path"] == "raw/HEAD.mp4")
+    head.update(beep_time=3.5, beep_source="manual", beep_reviewed=True)
+    head["processed"] = {"beep": True, "shot_detect": False, "trim": False}
+    project_json.write_text(json.dumps(doc))
+
+    resp = client.post(
+        "/api/shooters/me/assignments/swap-primary",
+        json={"video_path": "raw/HEAD.mp4", "stage_number": 1, "confirm": True},
+    )
+
+    assert resp.status_code == 200, resp.text
+    new = next(v for v in resp.json()["stages"][0]["videos"] if v["path"] == "raw/HEAD.mp4")
+    assert (new["role"], new["beep_time"], new["beep_reviewed"]) == ("primary", 3.5, True)
+    kinds = [(j["kind"], j.get("video_id")) for j in client.get("/api/me/jobs").json()]
+    assert ("trim", new["video_id"]) in kinds
+    assert not any(k == "detect_beep" for k, _ in kinds)
+
+
 def test_override_beep_sets_manual_source(tmp_path: Path) -> None:
     client, _ = _seed_project_with_primary(tmp_path)
     resp = client.post("/api/shooters/me/stages/1/beep", json={"beep_time": 12.5})

@@ -37,6 +37,7 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Portal } from "@/components/ui/Portal";
 import { useConfirm } from "@/components/useConfirm";
 import {
+  ApiError,
   apiErrorText,
   api,
   capabilityDenied,
@@ -628,6 +629,48 @@ function IngestInner({ slug }: { slug: string }) {
     [href],
   );
 
+  // Making a clip primary on the stage it is already on is a swap, not a
+  // move: the stage's audit was measured on the old primary's clock. The
+  // server keeps the audit as a backup and redoes the trim and the shots
+  // on the new primary (a beep confirmed on it is kept); with audit work on
+  // the stage it refuses until the user confirms (2026-10-16). A plain move
+  // left the audit in place, on the wrong camera's clock.
+  async function promoteToPrimary(targetSlug: string, videoPath: string, stage: number): Promise<void> {
+    if (editDenied) {
+      setError(READ_ONLY_MIRROR_MESSAGE);
+      return;
+    }
+    setError(null);
+    let updated: MatchProject;
+    try {
+      updated = await api.swapPrimary(targetSlug, videoPath, stage, false);
+    } catch (e: unknown) {
+      const detail = e instanceof ApiError ? (e.body as { detail?: { code?: string; current_primary?: string } } | null)?.detail : null;
+      if (!(e instanceof ApiError && e.status === 409 && detail?.code === "audit_exists")) {
+        setError(apiErrorText(e, "Could not make the video primary."));
+        return;
+      }
+      const name = videoPath.split("/").pop() ?? videoPath;
+      const current = detail.current_primary?.split("/").pop() ?? "the current primary";
+      const ok = await confirm({
+        title: `Make ${name} primary on stage ${stage}?`,
+        body: `Stage ${stage} has audit work on ${current}, timed on that camera. It is kept as a backup, the stage is trimmed and its shots detected again on ${name}, and you audit it again. A beep you confirmed on ${name} stays.`,
+        confirmLabel: "Make primary",
+        destructive: false,
+      });
+      if (!ok.confirmed) return;
+      try {
+        updated = await api.swapPrimary(targetSlug, videoPath, stage, true);
+      } catch (e2: unknown) {
+        setError(apiErrorText(e2, "Could not make the video primary."));
+        return;
+      }
+    }
+    if (targetSlug === slug) setProject(updated);
+    else setOthers((cur) => ({ ...cur, [targetSlug]: updated }));
+    outletCtx?.refresh();
+  }
+
   // Writes on another shooter's clip go through the same endpoints with
   // that slug; the matrix refetches that project afterwards.
   async function moveOn(
@@ -637,6 +680,10 @@ function IngestInner({ slug }: { slug: string }) {
     role: VideoRole,
     fromStage?: number | null,
   ): Promise<void> {
+    if (role === "primary" && toStage != null && toStage === fromStage) {
+      await promoteToPrimary(targetSlug, videoPath, toStage);
+      return;
+    }
     if (targetSlug === slug) {
       await moveAssignment(videoPath, toStage, role, fromStage);
       return;

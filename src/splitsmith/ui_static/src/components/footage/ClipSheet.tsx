@@ -179,6 +179,9 @@ export function ClipSheet(props: ClipSheetProps) {
     }
   }
   async function setRole(next: VideoRole) {
+    // The role it already has: nothing to do (for "primary" a request would
+    // be a swap with itself).
+    if (next === video.role) return;
     setRowBusy(true);
     try {
       await onMove(video.path, currentStage, next, currentStage);
