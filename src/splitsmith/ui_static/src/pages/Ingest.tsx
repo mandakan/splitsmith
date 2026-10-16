@@ -561,6 +561,8 @@ function IngestInner({ slug }: { slug: string }) {
   // for an empty cell.
   const [sheet, setSheet] = useState<{ slug: string; videoId: string | null; assignStage: number | null } | null>(null);
   const [addShooterOpen, setAddShooterOpen] = useState(false);
+  // The shooter the add sheet links to the scoreboard; null adds a new one.
+  const [linkFor, setLinkFor] = useState<ShooterListEntry | null>(null);
   const [identityFor, setIdentityFor] = useState<ShooterListEntry | null>(null);
   // You (spec 2026-10-08): the roster marks the shooter with your SSI id.
   const [me, setMe] = useState<ScoreboardIdentity | null>(null);
@@ -825,7 +827,13 @@ function IngestInner({ slug }: { slug: string }) {
                 Find moved videos
               </Button>
             ) : null}
-            <Button onClick={() => setAddShooterOpen(true)} disabled={editDenied}>
+            <Button
+              onClick={() => {
+                setLinkFor(null);
+                setAddShooterOpen(true);
+              }}
+              disabled={editDenied}
+            >
               Add shooter
             </Button>
             {uploadDenied ? null : (
@@ -968,7 +976,14 @@ function IngestInner({ slug }: { slug: string }) {
               activeSlug={slug}
               editDenied={editDenied}
               hrefs={{ footage: hrefs.footage, audit: hrefs.audit1 }}
-              onAdd={() => setAddShooterOpen(true)}
+              onAdd={() => {
+                setLinkFor(null);
+                setAddShooterOpen(true);
+              }}
+              onLinkScoreboard={(s) => {
+                setLinkFor(s);
+                setAddShooterOpen(true);
+              }}
               onRemove={(s) => void removeShooter(s)}
               onRebuildTrims={(s) => void rebuildTrims(s)}
               onIdentity={(s) => setIdentityFor(s)}
@@ -1024,7 +1039,9 @@ function IngestInner({ slug }: { slug: string }) {
         project={project}
         shooters={shooters}
         editDenied={editDenied}
+        linkTo={linkFor}
         onChanged={() => {
+          if (linkFor) setAddShooterOpen(false);
           outletCtx?.refresh();
           void reload();
           setOthersTick((n) => n + 1);

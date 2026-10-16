@@ -182,4 +182,20 @@ describe("ShootersPanel Edit look", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: /Edit look/ }));
     expect(onIdentity).toHaveBeenCalledWith(linked);
   });
+
+  it("offers Link to scoreboard only for a shooter without an SSI id", () => {
+    const onLink = vi.fn();
+    const linked = { ...ME, selected_shooter_id: 42 } as ShooterListEntry;
+    const unlinked = { ...ANNA, selected_shooter_id: null } as ShooterListEntry;
+    render(
+      <MemoryRouter>
+        <ShootersPanel shooters={[linked, unlinked]} activeSlug="me" editDenied={false} hrefs={{ footage: (s) => `/m/ingest/${s}`, audit: (s) => `/m/audit/${s}` }} onAdd={vi.fn()} onRemove={vi.fn()} onRebuildTrims={vi.fn()} onIdentity={vi.fn()} onLinkScoreboard={onLink} />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Mathias Axell actions" }));
+    expect(screen.queryByRole("menuitem", { name: /Link to scoreboard/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Anna Berg actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Link to scoreboard/ }));
+    expect(onLink).toHaveBeenCalledWith(unlinked);
+  });
 });

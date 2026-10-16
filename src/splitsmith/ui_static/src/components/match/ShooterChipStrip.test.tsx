@@ -44,7 +44,7 @@ describe("ShooterChipStrip menu", () => {
     renderStrip(vi.fn());
     fireEvent.click(screen.getByRole("button", { name: "More for Guest" }));
     expect(screen.queryByRole("menuitem", { name: "Edit look" })).toBeNull();
-    expect(screen.getByText(/Link Guest to the scoreboard/)).toBeInTheDocument();
+    expect(screen.getByText(/To give Guest a look of their own, link them to the scoreboard/)).toBeInTheDocument();
   });
 
   it("has no menu where the page offers none", () => {
