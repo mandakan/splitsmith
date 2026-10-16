@@ -24,13 +24,19 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from PIL import Image
+
 from .config import VideoMetadata
 from .fcpxml_gen import probe_video
+from .hud_extras import HudExtras
+from .looks import DEFAULT_VARIANT, LookError, load_look
+from .overlay_card import card_backdrop, card_failures, compose_card
 from .overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
 from .overlay_summary_cell import build_summary_still
 from .overlay_theme import ThemeName, load_theme
 from .runtime import Runner, runtime
 from .stage_summary_data import TileStageData
+from .summary_template import resolve_stage_summary, summary_poster
 
 logger = logging.getLogger(__name__)
 
@@ -67,8 +73,15 @@ def render_summary_card(
     runner: Runner = subprocess.run,
     rasterizer: Rasterizer | None = None,
     probe: Callable[[Path], VideoMetadata] | None = None,
+    variant: str = DEFAULT_VARIANT,
+    extras: HudExtras | None = None,
 ) -> SummaryCardResult:
     """Write the stage's summary still and its held MOV next to the trim.
+
+    ``variant`` is the Look's ``summary`` style (spec
+    2026-10-16-summary-templates-design): ``default`` is the engine's card;
+    a template is held at its ``poster()`` over the tail frame, and one that
+    fails is the engine's card plus a degradation.
 
     ``rasterizer`` left ``None`` opens one
     :class:`~splitsmith.overlay_raster.ChromiumRasterizer` for the call; a
@@ -100,15 +113,29 @@ def render_summary_card(
                 degradations.append(f"summary text skipped: {exc.detail}")
                 logger.warning("%s", degradations[-1])
         try:
-            still = build_summary_still(
-                data,
-                label,
-                width=meta.width,
-                height=meta.height,
-                theme=load_theme(theme),
-                rasterizer=active,
-                backdrop=backdrop,
-            )
+            still = None
+            if active is not None:
+                still = _template_still(
+                    data,
+                    label,
+                    meta=meta,
+                    look_name=theme,
+                    variant=variant,
+                    extras=extras,
+                    rasterizer=active,
+                    backdrop=backdrop,
+                    degradations=degradations,
+                )
+            if still is None:
+                still = build_summary_still(
+                    data,
+                    label,
+                    width=meta.width,
+                    height=meta.height,
+                    theme=load_theme(theme),
+                    rasterizer=active,
+                    backdrop=backdrop,
+                )
         finally:
             if owned is not None:
                 owned.__exit__(None, None, None)
@@ -136,6 +163,45 @@ def render_summary_card(
             f"ffmpeg exited {completed.returncode} writing {mov_path.name}: {detail.strip()[-2000:]}"
         )
     return SummaryCardResult(png_path=png_path, mov_path=mov_path, degradations=tuple(degradations))
+
+
+def _template_still(
+    data: TileStageData,
+    label: str,
+    *,
+    meta: VideoMetadata,
+    look_name: str,
+    variant: str,
+    extras: HudExtras | None,
+    rasterizer: Rasterizer,
+    backdrop: Path | None,
+    degradations: list[str],
+) -> Image.Image | None:
+    """The summary drawn by the Look's template at its poster, over the
+    tail frame; ``None`` for the engine's card (the default, or a template
+    that is missing or failed, with the reason in ``degradations``)."""
+    try:
+        look = load_look(look_name)
+    except LookError:
+        return None
+    with card_failures() as notes:
+        resolved = resolve_stage_summary(
+            look,
+            tile=data,
+            label=label,
+            variant=variant,
+            extras=extras,
+            duration_seconds=DEFAULT_SECONDS,
+            width=meta.width,
+            height=meta.height,
+            fps=meta.frame_rate_num / meta.frame_rate_den,
+        )
+        text = summary_poster(resolved, rasterizer=rasterizer) if resolved is not None else None
+    degradations.extend(notes)
+    if text is None:
+        return None
+    canvas = card_backdrop(backdrop, width=meta.width, height=meta.height, look=look)
+    return compose_card(text, canvas)
 
 
 def _grab_last_frame(

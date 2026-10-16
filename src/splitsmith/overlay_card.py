@@ -290,11 +290,17 @@ def with_card_failures(
 
 
 def _note_failure(what: str, template: Path, exc: BaseException) -> None:
-    notes = _failures.get()
-    if notes is None:
-        return
     reason = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
-    notes.append(f"{what} was left out: its template {template.name} failed ({reason})")
+    note_card_degradation(f"{what} was left out: its template {template.name} failed ({reason})")
+
+
+def note_card_degradation(line: str) -> None:
+    """Add ``line`` to the render's degradations (:func:`card_failures`);
+    nothing outside one. For a card that degraded rather than went: a
+    summary template that failed draws the engine's card instead."""
+    notes = _failures.get()
+    if notes is not None:
+        notes.append(line)
 
 
 def _rasterize(

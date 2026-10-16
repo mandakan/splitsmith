@@ -102,6 +102,7 @@ from .overlay_summary_cell import build_summary_still
 from .overlay_theme import ThemeName, load_theme, theme_for
 from .runtime import runtime
 from .segment_cache import SegmentCache
+from .summary_template import match_summary_motion, stage_summary_motion
 
 logger = logging.getLogger(__name__)
 
@@ -414,6 +415,26 @@ def _render_with_work_dir(
     killed: list[str] = []
     prepared: dict[int, _Prepared] = {}
 
+    def template_prep(name: str, motion: CardMotion, backdrop: Path | None, prep: _Prepared) -> bool:
+        """Fill ``prep`` from a summary template's ``motion`` over the tail
+        ``backdrop``, as a card's is filled: a still is one PNG, an
+        animation a backdrop and a clip. ``False`` when a still's frame
+        fails (noted); the caller draws the engine's card."""
+        assert look is not None
+        canvas = card_backdrop(backdrop, width=sequence.width, height=sequence.height, look=look)
+        if not motion.animated:
+            text = first_frame_image(motion)
+            if text is None:
+                return False
+            prep.png = work_dir / f"{name}.png"
+            compose_card(text, canvas).save(prep.png)
+            return True
+        prep.backdrop_png = work_dir / f"{name}_backdrop.png"
+        canvas.save(prep.backdrop_png)
+        prep.clip_path = work_dir / f"{name}_motion.mov"
+        prep.motion = motion
+        return True
+
     def prepare(item: SpineItem) -> _Prepared:
         """Everything an item's encode (or a boundary's edge of it) reads
         from disk: the lower third, a card's PNG or its backdrop and motion
@@ -505,6 +526,24 @@ def _render_with_work_dir(
                 ffmpeg_binary=ffmpeg_binary,
                 runner=runner,
             )
+            if look is not None and rasterizer is not None:
+                # A Look's summary template (spec 2026-10-16); ``None`` is
+                # the engine's card below, the default or a fallback.
+                motion = stage_summary_motion(
+                    look,
+                    tile=item.hold.data,
+                    label=item.hold.label,
+                    variant=item.hold.variant,
+                    extras=item.hold.extras,
+                    duration_seconds=item.hold.duration_seconds,
+                    width=sequence.width,
+                    height=sequence.height,
+                    fps=fps,
+                    rasterizer=rasterizer,
+                    shooters=shooters,
+                )
+                if motion is not None and template_prep(item.name, motion, backdrop, prep):
+                    return prep
             image = build_summary_still(
                 item.hold.data,
                 item.hold.label,
@@ -537,6 +576,19 @@ def _render_with_work_dir(
                 ffmpeg_binary=ffmpeg_binary,
                 runner=runner,
             )
+            if look is not None and rasterizer is not None:
+                motion = match_summary_motion(
+                    look,
+                    summary=item.summary,
+                    variant=composition.match_summary_variant,
+                    width=sequence.width,
+                    height=sequence.height,
+                    fps=fps,
+                    rasterizer=rasterizer,
+                    shooters=shooters,
+                )
+                if motion is not None and template_prep(item.name, motion, backdrop, prep):
+                    return prep
             image = build_match_summary_still(
                 item.summary,
                 width=sequence.width,
@@ -641,8 +693,35 @@ def _render_with_work_dir(
         if isinstance(item, _SummaryItem | _MatchSummaryItem):
             if prep.skipped:
                 return None
-            assert prep.png is not None
             still_out = work_dir / f"{item.name}.mp4"
+            if prep.motion is not None:
+                # An animated summary template: encoded as a motion card is.
+                assert prep.backdrop_png is not None and prep.clip_path is not None
+                cmd = _build_motion_card_command(
+                    prep.backdrop_png,
+                    prep.clip_path,
+                    seconds=item.duration_seconds,
+                    sequence=sequence,
+                    output_path=still_out,
+                    ffmpeg_binary=ffmpeg_binary,
+                    youtube_preset=youtube_preset,
+                    clip_offset_seconds=item.head_cut_seconds,
+                )
+                try:
+                    return encode(
+                        cmd,
+                        still_out,
+                        index=next_step(),
+                        label=_step_label(item, timeline),
+                        virtual_inputs={str(prep.clip_path): prep.motion.digest},
+                        prepare=clip_writer(prep.motion, prep.clip_path),
+                    )
+                except MotionClipError as exc:
+                    logger.warning("%s: %s; the summary is skipped", item.name, exc)
+                    return None
+                finally:
+                    prep.motion.close()
+            assert prep.png is not None
             cmd = _build_still_command(
                 prep.png,
                 seconds=item.duration_seconds,

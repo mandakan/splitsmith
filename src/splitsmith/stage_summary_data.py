@@ -83,6 +83,10 @@ class TileStageData:
     #: (:func:`load_stage_reloads`). Empty when there are none, which is
     #: every stage nobody marked up: the summary then draws no reload row.
     reloads: tuple[ReloadFigure, ...] = ()
+    #: The stage's confirmed regions (:func:`load_stage_events`), for a
+    #: summary template's ``data.stage``. The engine card reads ``reloads``
+    #: and ``shots[].moving`` and never this.
+    events: tuple[StageEvent, ...] = ()
 
     @property
     def shot_count(self) -> int:
@@ -117,6 +121,18 @@ def load_stage_reloads(audit_path: Path) -> tuple[ReloadFigure, ...]:
     if not isinstance(audit_data, dict):
         return ()
     return tuple(reload_figures(_confirmed_events(audit_data, audit_path)))
+
+
+def load_stage_events(audit_path: Path) -> tuple[StageEvent, ...]:
+    """This stage's confirmed regions. Missing, unreadable or corrupt reads
+    as none, as :func:`load_stage_reloads` does."""
+    try:
+        audit_data = read_audit_data(audit_path)
+    except Exception:  # noqa: BLE001 -- load_stage_shots already says why this file is unreadable
+        return ()
+    if not isinstance(audit_data, dict):
+        return ()
+    return tuple(_confirmed_events(audit_data, audit_path))
 
 
 def load_stage_shots(audit_path: Path) -> tuple[TileShot, ...]:
@@ -307,6 +323,7 @@ __all__ = [
     "StageSummaryFigures",
     "TileShot",
     "TileStageData",
+    "load_stage_events",
     "load_stage_reloads",
     "load_stage_shots",
     "stage_summary_figures",
