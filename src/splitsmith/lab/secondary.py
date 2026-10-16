@@ -53,6 +53,10 @@ class AnchorFixture:
     source_name: str
     review_status: str
     n_shots: int
+    #: The stage the fixture labels (from its ``event_id``). A multi-stage
+    #: single take is the source of one fixture per stage, so a file name
+    #: alone does not say which; ``None`` on fixtures without an event id.
+    stage_number: int | None = None
 
 
 @dataclass(frozen=True)
@@ -185,20 +189,30 @@ def plan_secondary_promotions(
     must reach its secondaries. A snap someone reviewed by hand is listed
     with the reason, never overwritten.
     """
-    by_source: dict[str, AnchorFixture] = {}
+    # A fixture is found by its stage and file: a multi-stage single take is
+    # the primary (or a secondary) on several stages, one fixture each, and
+    # by file name alone every stage found the first (Ess Black Handgun 2026).
+    by_stage_file: dict[tuple[int, str], AnchorFixture] = {}
+    by_file: dict[str, AnchorFixture] = {}
     taken: set[str] = set()
     for f in fixtures:
-        by_source.setdefault(f.source_name, f)
+        if f.stage_number is not None:
+            by_stage_file.setdefault((f.stage_number, f.source_name), f)
+        else:
+            by_file.setdefault(f.source_name, f)
         taken.add(f.stem)
+
+    def fixture_of(stage: StageAngles, file_name: str) -> AnchorFixture | None:
+        return by_stage_file.get((stage.stage_number, file_name)) or by_file.get(file_name)
 
     plans: list[PlannedPromotion] = []
     for stage in stages:
-        on_stage = [by_source[v.file_name] for v in stage.videos if v.file_name in by_source]
+        on_stage = [f for v in stage.videos if (f := fixture_of(stage, v.file_name)) is not None]
         anchor = _pick_anchor(on_stage)
-        todo = [v for v in stage.videos if v.file_name not in by_source]
+        todo = [v for v in stage.videos if fixture_of(stage, v.file_name) is None]
         if stale_snap is not None and anchor is not None:
             for v in stage.videos:
-                f = by_source.get(v.file_name)
+                f = fixture_of(stage, v.file_name)
                 if f is None or f.stem == anchor.stem or not stale_snap(f, anchor):
                     continue
                 camera = cameras.get(v.video_id)

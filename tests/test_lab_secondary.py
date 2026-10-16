@@ -253,3 +253,32 @@ def test_a_snap_finds_its_beep_through_a_linked_source(tmp_path):
     beeps = {(str(link.resolve()), 3): 12.5}
     assert snap_beep_now({"source_video": str(real), "stage_number": 3}, beeps) == 12.5
     assert snap_beep_now({"source_video": str(link), "stage_number": 3}, beeps) == 12.5
+
+
+def test_a_take_on_two_stages_snaps_each_stage_onto_its_own_anchor():
+    """One headcam take is the primary on stages 7 and 8 (a multi-stage single
+    take), so two fixtures share its file name. Each stage's secondary snaps
+    onto its own stage's fixture, and a clip registered on both stages gets a
+    snap on each. Keyed by file name alone, stage 8 found stage 7's fixture
+    (Ess Black Handgun 2026)."""
+    take = "VID_20260412_163829_00_053.mp4"
+    anchors = [
+        AnchorFixture("stage-shots-m-2026-stage7-s1", take, REVIEWED, 13, stage_number=7),
+        AnchorFixture("stage-shots-m-2026-stage8-s1", take, REVIEWED, 15, stage_number=8),
+    ]
+    s7 = _stage(_video("t7", take), _video("a7", "IMG_2190.MOV"), _video("both7", "IMG_9000.MOV"), n=7)
+    s8 = _stage(_video("t8", take), _video("b8", "IMG_2191.MOV"), _video("both8", "IMG_9000.MOV"), n=8)
+    cams = _cams(
+        ("a7", "IMG_2190.MOV"), ("b8", "IMG_2191.MOV"), ("both7", "IMG_9000.MOV"), ("both8", "IMG_9000.MOV")
+    )
+
+    plans = plan_secondary_promotions([s7, s8], anchors, cams)
+
+    got = sorted((p.video.video_id, p.anchor_stem) for p in plans if p.skip is None)
+    assert got == [
+        ("a7", "stage-shots-m-2026-stage7-s1"),
+        ("b8", "stage-shots-m-2026-stage8-s1"),
+        ("both7", "stage-shots-m-2026-stage7-s1"),
+        ("both8", "stage-shots-m-2026-stage8-s1"),
+    ]
+    assert all(p.slug.startswith(p.anchor_stem) for p in plans)
