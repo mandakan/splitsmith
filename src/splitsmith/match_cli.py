@@ -506,6 +506,16 @@ def export(
     match_summary_seconds: float = typer.Option(
         6.0, "--match-summary-seconds", help="Seconds the match summary holds."
     ),
+    summary_variant: str = typer.Option(
+        "default",
+        "--summary-variant",
+        help="The Look's stage summary style; 'default' is the built-in card.",
+    ),
+    match_summary_variant: str = typer.Option(
+        "default",
+        "--match-summary-variant",
+        help="The Look's match summary style; 'default' is the built-in card.",
+    ),
     summary_hold: float = typer.Option(
         0.0,
         "--summary-hold",
@@ -769,6 +779,9 @@ def export(
         account_brand=load_brand(JsonAccountProfileStore()) if account_brand else None,
         logo_spots=spots,
         card_variant=card_variant,
+        summary_variant=summary_variant,
+        match_summary_variant=match_summary_variant,
+        division=competitor_division(project, shooter_root),
         overlay_theme=overlay_theme,  # type: ignore[arg-type]
         summary_hold_seconds=summary_hold,
         match_summary=match_summary,

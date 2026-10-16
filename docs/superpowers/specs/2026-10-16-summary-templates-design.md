@@ -114,8 +114,10 @@ MP4 agree.
 - Request bodies (`ui/exports_api.MatchExportRequest`,
   `ui/match_exports.MatchExportRequest`), `ExportPresetBody`, the stage
   export request and the preview request gain `summary_variant` and
-  `match_summary_variant` (`None` is `card_variant`, the CLI's knob, then
-  `default`), validated by shape like `stage_card_variant`.
+  `match_summary_variant` (`None` is `default`, never `card_variant`: a
+  card style such as `rise` names no summary, and falling back to it would
+  add a degradation note to every export that sets it), validated by shape
+  in the preset like `stage_card_variant`.
 - CLI: `--summary-variant` and `--match-summary-variant` on `match export`.
 - `looks.SLOT_NAMES` gains `match_summary` (`summary` is already reserved);
   `check_styles` admits both, so `styles` can pick a template-less Look's

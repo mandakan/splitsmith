@@ -27,13 +27,14 @@ from ..config import OutputConfig, StageRounds
 from ..events import confirmed_from_doc
 from ..export_naming import match_file_base, stage_display_name, stage_file_base
 from ..identity import ResolvedIdentity
+from ..looks import DEFAULT_VARIANT
 from ..match_project import MatchProject, StageScorecard
 from ..match_summary import DEFAULT_MATCH_SUMMARY_SECONDS, MatchSummary, build_match_summary
 from ..overlay_theme import ThemeName
 from ..runtime import runtime
 from ..segment_cache import SegmentCache
 from ..shooter_book import EMPTY_BOOK, BookSnapshot
-from ..stage_summary_data import TileStageData, load_stage_reloads, load_stage_shots
+from ..stage_summary_data import TileStageData, load_stage_events, load_stage_reloads, load_stage_shots
 from .identity_media import effective_identity
 
 PipLayout = Literal["stacked", "pip-corners"]
@@ -371,6 +372,15 @@ class MatchExportRequestData:
     title_page_variant: str | None = None
     stage_card_variant: str | None = None
     closing_card_variant: str | None = None
+    # The summaries' Look styles (spec 2026-10-16-summary-templates-design);
+    # ``None`` is ``default`` (the engine's card), never ``card_variant``: a
+    # card style such as ``rise`` names no summary.
+    summary_variant: str | None = None
+    match_summary_variant: str | None = None
+    #: The shooter's division, resolved by the caller
+    #: (``division.competitor_division``): what a summary template's ammo and
+    #: scoring data read (``ui.exports.hud_extras_from``).
+    division: str | None = None
     # The overlay theme also styles the cards, so the two read as one.
     overlay_theme: ThemeName = "splitsmith"
     # Issue #972. Seconds to hold each stage's summary after its action
@@ -732,7 +742,10 @@ def export_match(
                 f"(current renderer: {request.output_format})"
             )
         else:
+            from .exports import hud_extras_from
+
             label = request.shooter_label or request.project_name
+            summary_variant = request.summary_variant or DEFAULT_VARIANT
             for idx, stage_input in enumerate(stages):
                 summaries[idx] = composition.SummaryHold(
                     data=TileStageData(
@@ -744,9 +757,18 @@ def export_match(
                         scorecard=stage_input.scorecard,
                         stage_rounds=stage_input.stage_rounds,
                         reloads=load_stage_reloads(stage_input.audit_path),
+                        events=load_stage_events(stage_input.audit_path),
                     ),
                     label=label,
                     duration_seconds=request.summary_hold_seconds,
+                    variant=summary_variant,
+                    extras=hud_extras_from(
+                        stage_name=stage_input.stage_name,
+                        stage_number=stage_input.stage_number,
+                        scorecard=stage_input.scorecard,
+                        stage_rounds=stage_input.stage_rounds,
+                        division=request.division,
+                    ),
                 )
     # The match summary card (spec 2026-10-07-match-summary-design): every
     # stage's figures, read the way the stage summary reads them.
@@ -835,6 +857,7 @@ def export_match(
         closing=closing,
         summaries=summaries,
         match_summary=match_summary,
+        match_summary_variant=request.match_summary_variant or DEFAULT_VARIANT,
         shooters=(
             (
                 composition.CompositionShooter(

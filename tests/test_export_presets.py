@@ -186,3 +186,15 @@ def test_the_body_carries_the_look_and_the_per_slot_variants() -> None:
     for bad in ({"look": "Not a name"}, {"stage_card_variant": "../x"}):
         with pytest.raises(pydantic.ValidationError):
             ExportPresetBody.model_validate(bad)
+
+
+def test_the_body_carries_the_summary_styles() -> None:
+    """Spec 2026-10-16-summary-templates-design: defaulted, so an older body
+    loads with the engine's cards; validated by shape like the card styles."""
+    body = ExportPresetBody()
+    assert (body.summary_variant, body.match_summary_variant) == ("default", "default")
+    body = ExportPresetBody.model_validate({"summary_variant": "finished", "match_summary_variant": "tally"})
+    assert (body.summary_variant, body.match_summary_variant) == ("finished", "tally")
+    for bad in ({"summary_variant": "../x"}, {"match_summary_variant": "Bad Name"}):
+        with pytest.raises(pydantic.ValidationError):
+            ExportPresetBody.model_validate(bad)

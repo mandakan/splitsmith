@@ -90,13 +90,24 @@ class ExportPresetBody(OverlayStyleFields, BaseModel):
     title_page_variant: str = "default"
     stage_card_variant: str = "default"
     closing_card_variant: str = "default"
+    # The summaries' Look styles (spec 2026-10-16-summary-templates-design);
+    # ``default`` is the engine's card.
+    summary_variant: str = "default"
+    match_summary_variant: str = "default"
 
     @field_validator("transition_kind")
     @classmethod
     def _transition_kind(cls, value: str) -> str:
         return composition.validate_transition_kind(value)
 
-    @field_validator("look", "title_page_variant", "stage_card_variant", "closing_card_variant")
+    @field_validator(
+        "look",
+        "title_page_variant",
+        "stage_card_variant",
+        "closing_card_variant",
+        "summary_variant",
+        "match_summary_variant",
+    )
     @classmethod
     def _look_name_shape(cls, value: str) -> str:
         if not looks.LOOK_NAME_RE.match(value):
