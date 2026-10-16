@@ -78,6 +78,7 @@ if _SCRIPTS_DIR not in sys.path:
     sys.path.append(_SCRIPTS_DIR)
 
 import feature_caches  # noqa: E402  isort: skip
+import fit_stage_decoder  # noqa: E402  isort: skip
 import fixture_audio  # noqa: E402  isort: skip
 
 # Every audited fixture; the discovery is filesystem-driven so adding a
@@ -229,6 +230,12 @@ def _build_universe(
                     # voter C probabilities can be joined onto the sweep.
                     "candidate_idx": i,
                     "t_absolute": float(cand_t[i]),
+                    # The shot time the runtime reports (the rise foot), and
+                    # the stage facts the whole-stage decoder reads.
+                    "t_shot": float(shot.time_absolute),
+                    "beep_time": float(truth["beep_time"]),
+                    "stage_time": float(truth["stage_time_seconds"]),
+                    "clip_duration": len(audio) / sr,
                     "camera_class": cam_class,
                     "camera_make": cam_make,
                     "camera_model": cam_model,
@@ -696,6 +703,87 @@ def _heldout_rows(
             row[f"score_c_{name}"] = float(probs[i]) if probs is not None else float("nan")
         out.append(row)
     return out
+
+
+def _fit_decoder(
+    universe: list[dict],
+    heldout_rows: list[dict],
+    thresholds_by_class: dict[str, dict],
+    tolerance_ms: float,
+    fast_floor_s: float | None,
+    log: Callable[[str], None],
+):
+    """The whole-stage decoder (``ensemble.decoder``), fitted on every
+    candidate whose voter C score is out of fold by match. ``None`` when a
+    class had a single match (no leave-one-match-out scores)."""
+    by_key = {(r["fixture"], r["candidate_idx"]): r for r in universe}
+    rows: list[dict] = []
+    for h in heldout_rows:
+        if not np.isfinite(h.get("score_c_lomo", float("nan"))):
+            continue
+        u = by_key[(h["fixture"], h["candidate_idx"])]
+        b_thr = thresholds_by_class[u["camera_class"]]["voter_b_threshold"]
+        rows.append(
+            {
+                "fixture": u["fixture"],
+                "match": _event_groups(u["fixture"])[0],
+                "t_shot": u["t_shot"],
+                "label": int(u["label"]),
+                "score_c": float(h["score_c_lomo"]),
+                "clap_diff": u["clap_diff"],
+                "gunshot_prob": u["gunshot_prob"],
+                "confidence": u["confidence"],
+                "peak_amp": u["peak_amp"],
+                "vote_b": int(u["clap_diff"] >= b_thr),
+            }
+        )
+    if not rows:
+        log("  decoder: no out-of-fold voter C scores; skipped")
+        return None
+    stages: dict[str, dict] = {}
+    for fix in {r["fixture"] for r in rows}:
+        u = next(r for r in universe if r["fixture"] == fix)
+        truth = json.loads((FIXTURES_DIR / f"{fix}.json").read_text())
+        stages[fix] = {
+            "truth": sorted(float(s["time"]) for s in truth.get("shots", [])),
+            "beep": u["beep_time"],
+            "stage_time": u["stage_time"],
+            "duration": u["clip_duration"],
+            "expected": u["expected_rounds"],
+        }
+    # A fixture with candidates scored in only some folds is decoded on those.
+    return fit_stage_decoder.fit_stage_decoder(
+        rows, stages, tolerance_ms=tolerance_ms, fast_floor_s=fast_floor_s, log=log
+    )
+
+
+def _write_decoder_only(
+    cal_path: Path,
+    universe: list[dict],
+    heldout_rows: list[dict],
+    tolerance_ms: float,
+    fast_floor_s: float | None,
+    log: Callable[[str], None],
+) -> dict:
+    """Fit the whole-stage decoder for an existing calibration and write
+    only its ``decoder`` block; the models, thresholds and every other field
+    stay as they are. Voter B's vote, one of the recalibration's inputs, is
+    taken at that calibration's own thresholds, as the runtime computes it."""
+    if not cal_path.exists():
+        raise BuildError(f"{cal_path}: no calibration to add a decoder to")
+    cal = json.loads(cal_path.read_text())
+    shipped = cal.get("thresholds_by_camera_class") or {}
+    thresholds = {
+        cls: {"voter_b_threshold": shipped.get(cls, {}).get("voter_b_threshold", cal["voter_b_threshold"])}
+        for cls in {u["camera_class"] for u in universe}
+    }
+    decoder = _fit_decoder(universe, heldout_rows, thresholds, tolerance_ms, fast_floor_s, log)
+    if decoder is None:
+        raise BuildError("the decoder could not be fitted (needs at least two matches)")
+    cal["decoder"] = decoder.model_dump()
+    cal_path.write_text(json.dumps(cal, indent=2) + "\n")
+    log(f"Wrote the decoder into {cal_path} (nothing else changed)")
+    return cal
 
 
 def _write_heldout(
@@ -1205,6 +1293,8 @@ def build_artifacts(
     voter_e_target_recall: float = DEFAULT_VOTER_E_TARGET_RECALL,
     rebuild_visual: bool = False,
     reviewed_only: bool = False,
+    decoder_fast_floor_s: float | None = None,
+    decoder_only: bool = False,
     log: Callable[[str], None] = print,
 ) -> dict:
     """Run the calibration build and write artifacts under ``DATA_DIR``.
@@ -1349,6 +1439,15 @@ def build_artifacts(
     if not thresholds_by_class:
         raise BuildError("no camera class produced calibrated thresholds; need >= 1 positive")
     data_dir = out_dir if out_dir is not None else DATA_DIR
+    if decoder_only:
+        return _write_decoder_only(
+            data_dir / "ensemble_calibration.json",
+            universe,
+            heldout_rows,
+            tolerance_ms,
+            decoder_fast_floor_s,
+            log,
+        )
     _write_heldout(
         heldout_report,
         heldout_rows,
@@ -1356,6 +1455,9 @@ def build_artifacts(
         tolerance_ms=tolerance_ms,
         log=log,
         out=out_dir / "heldout" if out_dir is not None else HELDOUT_DIR,
+    )
+    decoder = _fit_decoder(
+        universe, heldout_rows, thresholds_by_class, tolerance_ms, decoder_fast_floor_s, log
     )
 
     # Voter E (issue #183): train CLIP visual probe head on the head-mounted
@@ -1451,6 +1553,7 @@ def build_artifacts(
         "camera_model_metadata": camera_model_meta or None,
         "voter_c_metrics_by_camera_class": metrics_by_class,
         "voter_e_provenance": voter_e_provenance,
+        "decoder": decoder.model_dump() if decoder is not None else None,
         **mining_provenance,
     }
     # A bundle shares the shipped CLAP / PANN exports, so it carries the
@@ -1574,6 +1677,24 @@ def main() -> None:
     )
     p.add_argument("--description", help="One line on what this model is for.")
     p.add_argument(
+        "--decoder-only",
+        action="store_true",
+        help=(
+            "Fit the whole-stage decoder and write only its block into the existing "
+            "calibration (the shipped one, or --out's); models and thresholds are untouched."
+        ),
+    )
+    p.add_argument(
+        "--decoder-fast-floor",
+        type=float,
+        default=None,
+        metavar="SECONDS",
+        help=(
+            "Flatten the whole-stage decoder's split prior below this split, so "
+            "shooting faster than the corpus is not penalised (default: the corpus's shape)."
+        ),
+    )
+    p.add_argument(
         "--extract",
         action="store_true",
         help="Re-extract CLAP / PANN caches that are missing or were made from other audio.",
@@ -1599,6 +1720,8 @@ def main() -> None:
             voter_e_target_recall=args.voter_e_target_recall,
             rebuild_visual=args.rebuild_visual,
             reviewed_only=args.reviewed_only,
+            decoder_fast_floor_s=args.decoder_fast_floor,
+            decoder_only=args.decoder_only,
         )
     except BuildError as exc:
         # Clean CLI failure without a traceback; in-process callers (the

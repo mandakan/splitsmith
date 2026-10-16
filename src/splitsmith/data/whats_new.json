@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "whole-stage-shot-detection",
+      "date": "2026-10-16",
+      "title": "Better shot detection, head cameras most",
+      "body": "Detection now picks a stage's shots together, using the rhythm of real splits and the stage time, so fewer echoes and missed shots, on head cameras most. It applies to stages detected from now on."
+    },
+    {
       "id": "safe-primary-swap",
       "date": "2026-10-16",
       "title": "Change a stage's primary camera safely",

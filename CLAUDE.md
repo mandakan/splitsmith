@@ -123,6 +123,21 @@ The shot-detection pipeline is a 3-voter ensemble, not raw signal processing:
 - **Consensus** -- a candidate is kept when ``vote_total + apriori_boost
   >= consensus`` (default 2-of-3). The apriori boost biases toward
   expected-shot-count regions when prior info is known.
+- **Whole-stage decoder** (``ensemble/decoder.py``, on by default since
+  2026-10-16) -- replaces the consensus and the headcam amplitude veto when
+  the calibration has a ``decoder`` block: one logistic recalibration over
+  the voters' signals gives each candidate P(shot), and a dynamic program
+  keeps the best-scoring *set* for the stage under a split prior (the
+  corpus's splits) and an end prior (the last shot at beep + stage time;
+  off when the clip ends early). It needs only the beep and the stage time;
+  the round count is not used (its weight tunes to 0). Fitted by the build
+  on leave-one-match-out voter C scores (``scripts/fit_stage_decoder.py``);
+  ``--decoder-only`` fits it for an existing calibration and writes only
+  that block, which is how the shipped one got it.
+  ``SPLITSMITH_STAGE_DECODER=0`` keeps the consensus (=1 forces the
+  decoder). Held out it took F1 from 94.2 to 96.0 with round counts and
+  93.3 to 95.9 without (headcams 86.5 to 92.0 blind); its worst stages are
+  a camera whose shots score low and another bay's shots that score high.
 
 The pipeline lives in ``src/splitsmith/ensemble/`` and is wired into the
 production UI's ``/api/stages/{n}/shot-detect`` endpoint. Calibration
