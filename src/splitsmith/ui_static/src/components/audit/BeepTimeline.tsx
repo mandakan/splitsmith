@@ -352,6 +352,7 @@ export function BeepTimeline({
           height={AUDIO_ROW_H}
           beepTime={chosenLocal}
           detail={detail}
+          fitVisible
         />
       ),
     },
