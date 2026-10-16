@@ -52,7 +52,7 @@ fi
 
 # Detection through the bundled CLI (same fixture and range as ci.yml's slim-smoke).
 "$RES/python/bin/splitsmith" detect \
-  --video "$ROOT/tests/fixtures/stage-shots-tallmilan-2026-stage3-s97dcec94.wav" --time 14.74 | tee "$CFG/detect.txt"
+  --video "$ROOT/tests/fixtures/stage-shots-tallmilan-2026-stage3-s97dcec94-pin.wav" --time 14.74 | tee "$CFG/detect.txt"
 count="$(grep -oE '[0-9]+ shots' "$CFG/detect.txt" | head -1 | grep -oE '[0-9]+' || true)"
 if [ -z "$count" ] || [ "$count" -lt 20 ] || [ "$count" -gt 80 ]; then
   echo "detect produced '$count' candidates; expected 20-80"; exit 1

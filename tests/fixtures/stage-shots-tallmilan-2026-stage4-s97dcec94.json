@@ -10,55 +10,69 @@
       "time": 7.811,
       "ms_after_beep": 2811,
       "source": "detected",
-      "subclass": "barrel"
+      "id": "cand-8",
+      "interval_class": "first_shot",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 2,
       "candidate_number": 9,
-      "time": 8.426,
-      "ms_after_beep": 3426,
+      "time": 8.4,
+      "ms_after_beep": 3400,
       "source": "detected",
-      "subclass": "barrel"
+      "id": "cand-9",
+      "interval_class": "split",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 3,
       "candidate_number": 10,
-      "time": 9.05,
-      "ms_after_beep": 4050,
+      "time": 9.024,
+      "ms_after_beep": 4024,
       "source": "detected",
-      "subclass": "barrel"
+      "id": "cand-10",
+      "interval_class": "split",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 4,
       "candidate_number": 11,
-      "time": 9.631,
-      "ms_after_beep": 4631,
+      "time": 9.61,
+      "ms_after_beep": 4610,
       "source": "detected",
-      "subclass": "barrel"
+      "id": "cand-11",
+      "interval_class": "split",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 5,
       "candidate_number": 12,
-      "time": 10.165,
-      "ms_after_beep": 5165,
+      "time": 10.145,
+      "ms_after_beep": 5145,
       "source": "detected",
-      "subclass": "barrel"
+      "id": "cand-12",
+      "interval_class": "split",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 6,
       "candidate_number": 13,
-      "time": 10.725,
-      "ms_after_beep": 5725,
+      "time": 10.707,
+      "ms_after_beep": 5707,
       "source": "detected",
-      "subclass": "barrel"
+      "id": "cand-13",
+      "interval_class": "split",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 7,
       "candidate_number": 14,
-      "time": 11.215,
-      "ms_after_beep": 6215,
+      "time": 11.201,
+      "ms_after_beep": 6201,
       "source": "detected",
-      "subclass": "barrel"
+      "id": "cand-14",
+      "interval_class": "split",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 8,
@@ -66,7 +80,9 @@
       "time": 13.864,
       "ms_after_beep": 8864,
       "source": "detected",
-      "subclass": "barrel"
+      "id": "cand-24",
+      "interval_class": "movement",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 9,
@@ -74,7 +90,9 @@
       "time": 14.703,
       "ms_after_beep": 9703,
       "source": "detected",
-      "subclass": "barrel"
+      "id": "cand-26",
+      "interval_class": "split",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 10,
@@ -82,7 +100,9 @@
       "time": 15.423,
       "ms_after_beep": 10423,
       "source": "detected",
-      "subclass": "barrel"
+      "id": "cand-27",
+      "interval_class": "split",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 11,
@@ -90,7 +110,9 @@
       "time": 19.047,
       "ms_after_beep": 14047,
       "source": "detected",
-      "subclass": "barrel"
+      "id": "cand-35",
+      "interval_class": "movement",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 12,
@@ -98,7 +120,9 @@
       "time": 19.934,
       "ms_after_beep": 14934,
       "source": "detected",
-      "subclass": "barrel"
+      "id": "cand-37",
+      "interval_class": "split",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 13,
@@ -106,7 +130,9 @@
       "time": 23.399,
       "ms_after_beep": 18399,
       "source": "detected",
-      "subclass": "barrel"
+      "id": "cand-51",
+      "interval_class": "movement",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 14,
@@ -114,7 +140,9 @@
       "time": 24.51,
       "ms_after_beep": 19510,
       "source": "detected",
-      "subclass": "barrel"
+      "id": "cand-53",
+      "interval_class": "transition",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 15,
@@ -122,7 +150,9 @@
       "time": 25.178,
       "ms_after_beep": 20178,
       "source": "detected",
-      "subclass": "barrel"
+      "id": "cand-55",
+      "interval_class": "split",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 16,
@@ -130,7 +160,9 @@
       "time": 25.876,
       "ms_after_beep": 20876,
       "source": "detected",
-      "subclass": "barrel"
+      "id": "cand-56",
+      "interval_class": "split",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 17,
@@ -138,7 +170,9 @@
       "time": 26.701,
       "ms_after_beep": 21701,
       "source": "detected",
-      "subclass": "barrel"
+      "id": "cand-57",
+      "interval_class": "split",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 18,
@@ -146,7 +180,9 @@
       "time": 27.27,
       "ms_after_beep": 22270,
       "source": "detected",
-      "subclass": "barrel"
+      "id": "cand-59",
+      "interval_class": "split",
+      "interval_class_source": "auto"
     }
   ],
   "audit_events": [
@@ -156,14 +192,16 @@
       "payload": {
         "id": "manual-1777711078970-pwvh51",
         "time": 2.889571057192375
-      }
+      },
+      "id": "b72cce7f580e417f871d83f2cbe02eb8"
     },
     {
       "ts": "2026-05-02T08:38:19.971Z",
       "kind": "save",
       "payload": {
         "shots_count": 1
-      }
+      },
+      "id": "6e3cc307aa854b3f8f9850456745e4c3"
     },
     {
       "ts": "2026-05-02T08:42:59.212Z",
@@ -172,7 +210,8 @@
         "id": "manual-shot-1",
         "from_time": 2.89,
         "to_time": 2.889
-      }
+      },
+      "id": "4b4c421d4fc1412588f36cd4bbfdb440"
     },
     {
       "ts": "2026-05-02T08:42:59.220Z",
@@ -181,7 +220,8 @@
         "id": "manual-shot-1",
         "from_time": 2.889,
         "to_time": 2.8996999999999997
-      }
+      },
+      "id": "185f8f324d4b4475a5870d29568ea227"
     },
     {
       "ts": "2026-05-02T08:42:59.228Z",
@@ -190,7 +230,8 @@
         "id": "manual-shot-1",
         "from_time": 2.8996999999999997,
         "to_time": 2.9211
-      }
+      },
+      "id": "49e4eab7a07f476aaf06d882889b0a1b"
     },
     {
       "ts": "2026-05-02T08:42:59.236Z",
@@ -199,7 +240,8 @@
         "id": "manual-shot-1",
         "from_time": 2.9211,
         "to_time": 2.9532
-      }
+      },
+      "id": "53c5570381b843cfa1ad5c3bf4d1d4e2"
     },
     {
       "ts": "2026-05-02T08:42:59.245Z",
@@ -208,7 +250,8 @@
         "id": "manual-shot-1",
         "from_time": 2.9532,
         "to_time": 2.9745999999999997
-      }
+      },
+      "id": "195f1968f0204ad49bb9633dcbfb15a2"
     },
     {
       "ts": "2026-05-02T08:42:59.253Z",
@@ -217,7 +260,8 @@
         "id": "manual-shot-1",
         "from_time": 2.9745999999999997,
         "to_time": 3.0067
-      }
+      },
+      "id": "78ee48821431463caaed1cff41212c0a"
     },
     {
       "ts": "2026-05-02T08:42:59.261Z",
@@ -226,7 +270,8 @@
         "id": "manual-shot-1",
         "from_time": 3.0067,
         "to_time": 3.0494999999999997
-      }
+      },
+      "id": "d49f622307b94683b8bb4cf0b3d25bc0"
     },
     {
       "ts": "2026-05-02T08:42:59.270Z",
@@ -235,7 +280,8 @@
         "id": "manual-shot-1",
         "from_time": 3.0494999999999997,
         "to_time": 3.0816
-      }
+      },
+      "id": "f08c9c7ab76e4e698124cf59238b70ca"
     },
     {
       "ts": "2026-05-02T08:42:59.279Z",
@@ -244,7 +290,8 @@
         "id": "manual-shot-1",
         "from_time": 3.0816,
         "to_time": 3.1243999999999996
-      }
+      },
+      "id": "26867c5f5f61453f9564ab29d26ff2c5"
     },
     {
       "ts": "2026-05-02T08:42:59.287Z",
@@ -253,7 +300,8 @@
         "id": "manual-shot-1",
         "from_time": 3.1243999999999996,
         "to_time": 3.1565
-      }
+      },
+      "id": "2be36acd6e0444ae90547bbb7a61e40f"
     },
     {
       "ts": "2026-05-02T08:42:59.295Z",
@@ -262,7 +310,8 @@
         "id": "manual-shot-1",
         "from_time": 3.1565,
         "to_time": 3.1993
-      }
+      },
+      "id": "5beafb5e687141fa87f67cd6338891fe"
     },
     {
       "ts": "2026-05-02T08:42:59.310Z",
@@ -271,7 +320,8 @@
         "id": "manual-shot-1",
         "from_time": 3.1993,
         "to_time": 3.2207
-      }
+      },
+      "id": "c32e52b64c9341babc872bf2fb788d91"
     },
     {
       "ts": "2026-05-02T08:42:59.321Z",
@@ -280,7 +330,8 @@
         "id": "manual-shot-1",
         "from_time": 3.2207,
         "to_time": 3.2527999999999997
-      }
+      },
+      "id": "077b5c98505f4ae3be053be2c9cda8d6"
     },
     {
       "ts": "2026-05-02T08:42:59.328Z",
@@ -289,7 +340,8 @@
         "id": "manual-shot-1",
         "from_time": 3.2527999999999997,
         "to_time": 3.2634999999999996
-      }
+      },
+      "id": "cae661c0056b4060b6fbb2a4fc9abbc0"
     },
     {
       "ts": "2026-05-02T08:42:59.336Z",
@@ -298,7 +350,8 @@
         "id": "manual-shot-1",
         "from_time": 3.2634999999999996,
         "to_time": 3.2742
-      }
+      },
+      "id": "43004cfddfaf4018a5124c272c5edbba"
     },
     {
       "ts": "2026-05-02T08:42:59.345Z",
@@ -307,7 +360,8 @@
         "id": "manual-shot-1",
         "from_time": 3.2742,
         "to_time": 3.2849
-      }
+      },
+      "id": "0cca238988c14e23b8ce6d64109080a4"
     },
     {
       "ts": "2026-05-02T08:42:59.361Z",
@@ -316,7 +370,8 @@
         "id": "manual-shot-1",
         "from_time": 3.2849,
         "to_time": 3.2956
-      }
+      },
+      "id": "31b51f4a1ef04ca58ac09875d3f177b2"
     },
     {
       "ts": "2026-05-02T08:42:59.395Z",
@@ -325,7 +380,8 @@
         "id": "manual-shot-1",
         "from_time": 3.2956,
         "to_time": 3.3063
-      }
+      },
+      "id": "e059e355d87d4f6a857b081029a75357"
     },
     {
       "ts": "2026-05-02T08:42:59.669Z",
@@ -334,7 +390,8 @@
         "id": "manual-shot-1",
         "from_time": 3.3063,
         "to_time": 3.2956
-      }
+      },
+      "id": "b6b27e488b3e48668aeca03f8a962755"
     },
     {
       "ts": "2026-05-02T08:43:04.460Z",
@@ -343,7 +400,8 @@
         "id": "manual-shot-1",
         "from_time": 3.2956,
         "to_time": 3.3169999999999997
-      }
+      },
+      "id": "9b96c9a781004fdd960cbd4d8259f81b"
     },
     {
       "ts": "2026-05-02T08:43:04.561Z",
@@ -352,7 +410,8 @@
         "id": "manual-shot-1",
         "from_time": 3.3169999999999997,
         "to_time": 3.3063
-      }
+      },
+      "id": "1755e5a036f24c75bd6974f54c515589"
     },
     {
       "ts": "2026-05-02T08:43:04.571Z",
@@ -361,7 +420,8 @@
         "id": "manual-shot-1",
         "from_time": 3.3063,
         "to_time": 3.2742
-      }
+      },
+      "id": "9218a041e7cf4f0ea07bc387223eba50"
     },
     {
       "ts": "2026-05-02T08:43:04.578Z",
@@ -370,7 +430,8 @@
         "id": "manual-shot-1",
         "from_time": 3.2742,
         "to_time": 3.1885999999999997
-      }
+      },
+      "id": "126ac3c22f324492bf408bc17010fe91"
     },
     {
       "ts": "2026-05-02T08:43:04.594Z",
@@ -379,7 +440,8 @@
         "id": "manual-shot-1",
         "from_time": 3.1885999999999997,
         "to_time": 3.1136999999999997
-      }
+      },
+      "id": "f1e837503e6845f682e02a84ca017613"
     },
     {
       "ts": "2026-05-02T08:43:04.604Z",
@@ -388,7 +450,8 @@
         "id": "manual-shot-1",
         "from_time": 3.1136999999999997,
         "to_time": 2.9425
-      }
+      },
+      "id": "8622edd3cab4456d9cf483ad4edd4dc6"
     },
     {
       "ts": "2026-05-02T08:43:04.617Z",
@@ -397,7 +460,8 @@
         "id": "manual-shot-1",
         "from_time": 2.9425,
         "to_time": 2.8676
-      }
+      },
+      "id": "5681edeb8c2a4fef8712fb481dd1b964"
     },
     {
       "ts": "2026-05-02T08:43:04.628Z",
@@ -406,7 +470,8 @@
         "id": "manual-shot-1",
         "from_time": 2.8676,
         "to_time": 2.782
-      }
+      },
+      "id": "d8e919c8abb2433386a8a6b7860959fa"
     },
     {
       "ts": "2026-05-02T08:43:04.633Z",
@@ -415,7 +480,8 @@
         "id": "manual-shot-1",
         "from_time": 2.782,
         "to_time": 2.6963999999999997
-      }
+      },
+      "id": "b5d20e38c1134965863703bb6f9956dd"
     },
     {
       "ts": "2026-05-02T08:43:04.641Z",
@@ -424,7 +490,8 @@
         "id": "manual-shot-1",
         "from_time": 2.6963999999999997,
         "to_time": 2.6214999999999997
-      }
+      },
+      "id": "3404c49bfd2e4d468fc446695ac65fa7"
     },
     {
       "ts": "2026-05-02T08:43:04.649Z",
@@ -433,7 +500,8 @@
         "id": "manual-shot-1",
         "from_time": 2.6214999999999997,
         "to_time": 2.568
-      }
+      },
+      "id": "09f2ecccea414cc5af66696db58fb955"
     },
     {
       "ts": "2026-05-02T08:43:04.657Z",
@@ -442,7 +510,8 @@
         "id": "manual-shot-1",
         "from_time": 2.568,
         "to_time": 2.5252
-      }
+      },
+      "id": "d3894b153b504f679b81c3995f02b1d6"
     },
     {
       "ts": "2026-05-02T08:43:04.666Z",
@@ -451,7 +520,8 @@
         "id": "manual-shot-1",
         "from_time": 2.5252,
         "to_time": 2.4717
-      }
+      },
+      "id": "b7460567abba46ea90ef7b2382ac5a09"
     },
     {
       "ts": "2026-05-02T08:43:04.674Z",
@@ -460,7 +530,8 @@
         "id": "manual-shot-1",
         "from_time": 2.4717,
         "to_time": 2.4396
-      }
+      },
+      "id": "8da0579b4a764d4fa685a2807966ae09"
     },
     {
       "ts": "2026-05-02T08:43:04.683Z",
@@ -469,7 +540,8 @@
         "id": "manual-shot-1",
         "from_time": 2.4396,
         "to_time": 2.3968
-      }
+      },
+      "id": "8779130b7803473e95a7301fa7cc802b"
     },
     {
       "ts": "2026-05-02T08:43:04.698Z",
@@ -478,7 +550,8 @@
         "id": "manual-shot-1",
         "from_time": 2.3968,
         "to_time": 2.3647
-      }
+      },
+      "id": "adc3a9fe08be4bc28fbf6d52ad14f2cc"
     },
     {
       "ts": "2026-05-02T08:43:04.715Z",
@@ -487,7 +560,8 @@
         "id": "manual-shot-1",
         "from_time": 2.3647,
         "to_time": 2.3432999999999997
-      }
+      },
+      "id": "05a652a9177a49f7812e7e5c67b762f1"
     },
     {
       "ts": "2026-05-02T08:43:04.865Z",
@@ -496,7 +570,8 @@
         "id": "manual-shot-1",
         "from_time": 2.3432999999999997,
         "to_time": 2.3326
-      }
+      },
+      "id": "9353889b3da746489fbacd003197c15d"
     },
     {
       "ts": "2026-05-02T08:43:04.881Z",
@@ -505,7 +580,8 @@
         "id": "manual-shot-1",
         "from_time": 2.3326,
         "to_time": 2.3219
-      }
+      },
+      "id": "d5d0212eaf874d94a17531f2ef2fab71"
     },
     {
       "ts": "2026-05-02T08:43:04.891Z",
@@ -514,7 +590,8 @@
         "id": "manual-shot-1",
         "from_time": 2.3219,
         "to_time": 2.3112
-      }
+      },
+      "id": "a4c7c3680c594f68a9e326976766e316"
     },
     {
       "ts": "2026-05-02T08:43:04.907Z",
@@ -523,7 +600,8 @@
         "id": "manual-shot-1",
         "from_time": 2.3112,
         "to_time": 2.2898
-      }
+      },
+      "id": "df9949980d8a4fc79856062868eedcf7"
     },
     {
       "ts": "2026-05-02T08:43:04.915Z",
@@ -532,7 +610,8 @@
         "id": "manual-shot-1",
         "from_time": 2.2898,
         "to_time": 2.2577
-      }
+      },
+      "id": "d8aff76303a04412a335c62ab5b2f3d2"
     },
     {
       "ts": "2026-05-02T08:43:04.923Z",
@@ -541,7 +620,8 @@
         "id": "manual-shot-1",
         "from_time": 2.2577,
         "to_time": 2.1935
-      }
+      },
+      "id": "1c23cac7ce054ef3b0f764dcd4283565"
     },
     {
       "ts": "2026-05-02T08:43:04.933Z",
@@ -550,7 +630,8 @@
         "id": "manual-shot-1",
         "from_time": 2.1935,
         "to_time": 2.1507
-      }
+      },
+      "id": "d5767c5886074a95986fff740489d3f1"
     },
     {
       "ts": "2026-05-02T08:43:04.939Z",
@@ -559,7 +640,8 @@
         "id": "manual-shot-1",
         "from_time": 2.1507,
         "to_time": 2.1079
-      }
+      },
+      "id": "de7ec5fdea894718a5dee8cd7266d610"
     },
     {
       "ts": "2026-05-02T08:43:04.948Z",
@@ -568,7 +650,8 @@
         "id": "manual-shot-1",
         "from_time": 2.1079,
         "to_time": 2.0650999999999997
-      }
+      },
+      "id": "db342e14cd7643808af2e06241dbd2ef"
     },
     {
       "ts": "2026-05-02T08:43:04.957Z",
@@ -577,7 +660,8 @@
         "id": "manual-shot-1",
         "from_time": 2.0650999999999997,
         "to_time": 2.0116
-      }
+      },
+      "id": "ad0f8f38c0254a7b8966605b1f430c80"
     },
     {
       "ts": "2026-05-02T08:43:04.965Z",
@@ -586,7 +670,8 @@
         "id": "manual-shot-1",
         "from_time": 2.0116,
         "to_time": 1.9687999999999999
-      }
+      },
+      "id": "663fd54e91a7470da123026641e92a6a"
     },
     {
       "ts": "2026-05-02T08:43:04.974Z",
@@ -595,7 +680,8 @@
         "id": "manual-shot-1",
         "from_time": 1.9687999999999999,
         "to_time": 1.926
-      }
+      },
+      "id": "a216b08b1b134b409ac6d2ffa2bd5423"
     },
     {
       "ts": "2026-05-02T08:43:04.982Z",
@@ -604,7 +690,8 @@
         "id": "manual-shot-1",
         "from_time": 1.926,
         "to_time": 1.8832
-      }
+      },
+      "id": "bf0bde14ebbf4450b5cbfeae4ce04e7c"
     },
     {
       "ts": "2026-05-02T08:43:04.990Z",
@@ -613,7 +700,8 @@
         "id": "manual-shot-1",
         "from_time": 1.8832,
         "to_time": 1.8296999999999999
-      }
+      },
+      "id": "2e073b51e3bb4c20bd5364e12918ef0e"
     },
     {
       "ts": "2026-05-02T08:43:04.998Z",
@@ -622,7 +710,8 @@
         "id": "manual-shot-1",
         "from_time": 1.8296999999999999,
         "to_time": 1.7762
-      }
+      },
+      "id": "dfabb91b047c403f8c06cf12aa9ae420"
     },
     {
       "ts": "2026-05-02T08:43:05.007Z",
@@ -631,7 +720,8 @@
         "id": "manual-shot-1",
         "from_time": 1.7762,
         "to_time": 1.7333999999999998
-      }
+      },
+      "id": "9a7669a3683d4cd2b870b4af37d1e469"
     },
     {
       "ts": "2026-05-02T08:43:05.015Z",
@@ -640,7 +730,8 @@
         "id": "manual-shot-1",
         "from_time": 1.7333999999999998,
         "to_time": 1.6905999999999999
-      }
+      },
+      "id": "b0274330af0e43f389df5d2a9be17158"
     },
     {
       "ts": "2026-05-02T08:43:05.024Z",
@@ -649,7 +740,8 @@
         "id": "manual-shot-1",
         "from_time": 1.6905999999999999,
         "to_time": 1.6692
-      }
+      },
+      "id": "c6e52e4b74f54300ac7520d542eb7cfe"
     },
     {
       "ts": "2026-05-02T08:43:05.032Z",
@@ -658,7 +750,8 @@
         "id": "manual-shot-1",
         "from_time": 1.6692,
         "to_time": 1.6371
-      }
+      },
+      "id": "a420ca34c9404c68831e76c580535cc2"
     },
     {
       "ts": "2026-05-02T08:43:05.040Z",
@@ -667,7 +760,8 @@
         "id": "manual-shot-1",
         "from_time": 1.6371,
         "to_time": 1.6157
-      }
+      },
+      "id": "b4d052a7654544afba4cd9cb7bc92e8e"
     },
     {
       "ts": "2026-05-02T08:43:05.048Z",
@@ -676,7 +770,8 @@
         "id": "manual-shot-1",
         "from_time": 1.6157,
         "to_time": 1.605
-      }
+      },
+      "id": "43650c52c20a4045a1437fdb10e8f4ff"
     },
     {
       "ts": "2026-05-02T08:43:05.056Z",
@@ -685,7 +780,8 @@
         "id": "manual-shot-1",
         "from_time": 1.605,
         "to_time": 1.5836
-      }
+      },
+      "id": "7382aab9cb074c66b904263c0af980d8"
     },
     {
       "ts": "2026-05-02T08:43:05.073Z",
@@ -694,7 +790,8 @@
         "id": "manual-shot-1",
         "from_time": 1.5836,
         "to_time": 1.5729
-      }
+      },
+      "id": "3b79a723520a4eb69e69907a8851de80"
     },
     {
       "ts": "2026-05-02T08:43:05.181Z",
@@ -703,7 +800,8 @@
         "id": "manual-shot-1",
         "from_time": 1.5729,
         "to_time": 1.5836
-      }
+      },
+      "id": "afa0d7f0a669448ead0e6a97508f79a6"
     },
     {
       "ts": "2026-05-02T08:43:05.192Z",
@@ -712,7 +810,8 @@
         "id": "manual-shot-1",
         "from_time": 1.5836,
         "to_time": 1.605
-      }
+      },
+      "id": "04d2e5713a344acaac4b6e1fe53a3b3c"
     },
     {
       "ts": "2026-05-02T08:43:05.200Z",
@@ -721,7 +820,8 @@
         "id": "manual-shot-1",
         "from_time": 1.605,
         "to_time": 1.6263999999999998
-      }
+      },
+      "id": "73eef25cdf184cde8de4dc7c04207bd9"
     },
     {
       "ts": "2026-05-02T08:43:05.210Z",
@@ -730,7 +830,8 @@
         "id": "manual-shot-1",
         "from_time": 1.6263999999999998,
         "to_time": 1.6584999999999999
-      }
+      },
+      "id": "1804a38939e149e490466d18eb610438"
     },
     {
       "ts": "2026-05-02T08:43:05.215Z",
@@ -739,7 +840,8 @@
         "id": "manual-shot-1",
         "from_time": 1.6584999999999999,
         "to_time": 1.7333999999999998
-      }
+      },
+      "id": "8caebc95f60c443682110de1777c80da"
     },
     {
       "ts": "2026-05-02T08:43:05.224Z",
@@ -748,7 +850,8 @@
         "id": "manual-shot-1",
         "from_time": 1.7333999999999998,
         "to_time": 1.8296999999999999
-      }
+      },
+      "id": "e1c91a81525a4e059dcc8f20ff85faff"
     },
     {
       "ts": "2026-05-02T08:43:05.232Z",
@@ -757,7 +860,8 @@
         "id": "manual-shot-1",
         "from_time": 1.8296999999999999,
         "to_time": 2.0972
-      }
+      },
+      "id": "e8a438a394eb47ad86b6ac9154d3293e"
     },
     {
       "ts": "2026-05-02T08:43:05.245Z",
@@ -766,7 +870,8 @@
         "id": "manual-shot-1",
         "from_time": 2.0972,
         "to_time": 2.2790999999999997
-      }
+      },
+      "id": "78f3e23fccc14c82b1eee42484d7691b"
     },
     {
       "ts": "2026-05-02T08:43:05.255Z",
@@ -775,7 +880,8 @@
         "id": "manual-shot-1",
         "from_time": 2.2790999999999997,
         "to_time": 2.4930999999999996
-      }
+      },
+      "id": "1a3f3a4a6d734cf0ab4193dc205cb38b"
     },
     {
       "ts": "2026-05-02T08:43:05.261Z",
@@ -784,7 +890,8 @@
         "id": "manual-shot-1",
         "from_time": 2.4930999999999996,
         "to_time": 2.6856999999999998
-      }
+      },
+      "id": "b23e78c42c0f4228a438bf68e29558f3"
     },
     {
       "ts": "2026-05-02T08:43:05.270Z",
@@ -793,7 +900,8 @@
         "id": "manual-shot-1",
         "from_time": 2.6856999999999998,
         "to_time": 2.889
-      }
+      },
+      "id": "434a3d3cc6434d20b262b49dd7a7321f"
     },
     {
       "ts": "2026-05-02T08:43:05.278Z",
@@ -802,7 +910,8 @@
         "id": "manual-shot-1",
         "from_time": 2.889,
         "to_time": 3.1565
-      }
+      },
+      "id": "b93fc6e0539a43d0bc565e1be85540de"
     },
     {
       "ts": "2026-05-02T08:43:05.288Z",
@@ -811,7 +920,8 @@
         "id": "manual-shot-1",
         "from_time": 3.1565,
         "to_time": 3.4454
-      }
+      },
+      "id": "3e322c96ff604cfe8e2ab869521f1d21"
     },
     {
       "ts": "2026-05-02T08:43:05.296Z",
@@ -820,7 +930,8 @@
         "id": "manual-shot-1",
         "from_time": 3.4454,
         "to_time": 3.7342999999999997
-      }
+      },
+      "id": "5471569dc9174d30a30028a31a13d949"
     },
     {
       "ts": "2026-05-02T08:43:05.303Z",
@@ -829,7 +940,8 @@
         "id": "manual-shot-1",
         "from_time": 3.7342999999999997,
         "to_time": 4.0125
-      }
+      },
+      "id": "f371d44af72446c5b9eebd3eed904287"
     },
     {
       "ts": "2026-05-02T08:43:05.311Z",
@@ -838,7 +950,8 @@
         "id": "manual-shot-1",
         "from_time": 4.0125,
         "to_time": 4.2265
-      }
+      },
+      "id": "5b04dc9601da4c96a5178e09f6464994"
     },
     {
       "ts": "2026-05-02T08:43:05.322Z",
@@ -847,7 +960,8 @@
         "id": "manual-shot-1",
         "from_time": 4.2265,
         "to_time": 4.387
-      }
+      },
+      "id": "dfde6f3db85c48c7936e9929894cda88"
     },
     {
       "ts": "2026-05-02T08:43:05.327Z",
@@ -856,7 +970,8 @@
         "id": "manual-shot-1",
         "from_time": 4.387,
         "to_time": 4.5261
-      }
+      },
+      "id": "1409bf510ed042a4a2b5756074ae0429"
     },
     {
       "ts": "2026-05-02T08:43:05.336Z",
@@ -865,7 +980,8 @@
         "id": "manual-shot-1",
         "from_time": 4.5261,
         "to_time": 4.7401
-      }
+      },
+      "id": "b783c47a412344b38151d96f69063c58"
     },
     {
       "ts": "2026-05-02T08:43:05.352Z",
@@ -874,7 +990,8 @@
         "id": "manual-shot-1",
         "from_time": 4.7401,
         "to_time": 4.836399999999999
-      }
+      },
+      "id": "2e824f9bac604908ac7818419d8f8b5d"
     },
     {
       "ts": "2026-05-02T08:43:05.361Z",
@@ -883,7 +1000,8 @@
         "id": "manual-shot-1",
         "from_time": 4.836399999999999,
         "to_time": 4.9327
-      }
+      },
+      "id": "0dac9be3b3a44f7390498801c2aa73af"
     },
     {
       "ts": "2026-05-02T08:43:05.369Z",
@@ -892,7 +1010,8 @@
         "id": "manual-shot-1",
         "from_time": 4.9327,
         "to_time": 4.9969
-      }
+      },
+      "id": "a19cc0ca079741b7850bc805154b3707"
     },
     {
       "ts": "2026-05-02T08:43:05.377Z",
@@ -901,7 +1020,8 @@
         "id": "manual-shot-1",
         "from_time": 4.9969,
         "to_time": 5.029
-      }
+      },
+      "id": "7d7e1b55fd944eaf99e2dd6eb74fe0f6"
     },
     {
       "ts": "2026-05-02T08:43:05.386Z",
@@ -910,7 +1030,8 @@
         "id": "manual-shot-1",
         "from_time": 5.029,
         "to_time": 5.0504
-      }
+      },
+      "id": "723c8014009843e88781bb3f8a109cba"
     },
     {
       "ts": "2026-05-02T08:43:05.394Z",
@@ -919,7 +1040,8 @@
         "id": "manual-shot-1",
         "from_time": 5.0504,
         "to_time": 5.0718
-      }
+      },
+      "id": "a1f5404d80ae482b86668537b964c9d7"
     },
     {
       "ts": "2026-05-02T08:43:05.403Z",
@@ -928,7 +1050,8 @@
         "id": "manual-shot-1",
         "from_time": 5.0718,
         "to_time": 5.0931999999999995
-      }
+      },
+      "id": "a88d74d55c2641e286070b6213928884"
     },
     {
       "ts": "2026-05-02T08:43:05.411Z",
@@ -937,7 +1060,8 @@
         "id": "manual-shot-1",
         "from_time": 5.0931999999999995,
         "to_time": 5.114599999999999
-      }
+      },
+      "id": "6b1f55c5e31948a0a1f3417faa2fb59e"
     },
     {
       "ts": "2026-05-02T08:43:05.419Z",
@@ -946,7 +1070,8 @@
         "id": "manual-shot-1",
         "from_time": 5.114599999999999,
         "to_time": 5.136
-      }
+      },
+      "id": "484a5ec25df342559ad84da2d4882db2"
     },
     {
       "ts": "2026-05-02T08:43:05.429Z",
@@ -955,7 +1080,8 @@
         "id": "manual-shot-1",
         "from_time": 5.136,
         "to_time": 5.1467
-      }
+      },
+      "id": "8d4708a6d39e406b83bcf7b179dee45c"
     },
     {
       "ts": "2026-05-02T08:43:05.437Z",
@@ -964,7 +1090,8 @@
         "id": "manual-shot-1",
         "from_time": 5.1467,
         "to_time": 5.1574
-      }
+      },
+      "id": "4dfa4ad544a142d5b4c29ec52741aab3"
     },
     {
       "ts": "2026-05-02T08:43:05.446Z",
@@ -973,7 +1100,8 @@
         "id": "manual-shot-1",
         "from_time": 5.1574,
         "to_time": 5.1681
-      }
+      },
+      "id": "1bd8ea83a98f45c1b7d5a2207f9f4b96"
     },
     {
       "ts": "2026-05-02T08:43:05.452Z",
@@ -982,7 +1110,8 @@
         "id": "manual-shot-1",
         "from_time": 5.1681,
         "to_time": 5.1895
-      }
+      },
+      "id": "a27451da13ba414aaeb62ed0ef688bc3"
     },
     {
       "ts": "2026-05-02T08:43:05.461Z",
@@ -991,7 +1120,8 @@
         "id": "manual-shot-1",
         "from_time": 5.1895,
         "to_time": 5.2002
-      }
+      },
+      "id": "3370d578e819405fbba0edf5867953e7"
     },
     {
       "ts": "2026-05-02T08:43:05.473Z",
@@ -1000,7 +1130,8 @@
         "id": "manual-shot-1",
         "from_time": 5.2002,
         "to_time": 5.2109
-      }
+      },
+      "id": "87a84bc32e5b4b82a0696fb25d61aaa3"
     },
     {
       "ts": "2026-05-02T08:43:05.477Z",
@@ -1009,7 +1140,8 @@
         "id": "manual-shot-1",
         "from_time": 5.2109,
         "to_time": 5.2216
-      }
+      },
+      "id": "15e7adbb23ef40dc988059adbdf6dbeb"
     },
     {
       "ts": "2026-05-02T08:43:05.494Z",
@@ -1018,7 +1150,8 @@
         "id": "manual-shot-1",
         "from_time": 5.2216,
         "to_time": 5.2322999999999995
-      }
+      },
+      "id": "ba97833b9d454c858a26b0f8ffcf13b5"
     },
     {
       "ts": "2026-05-02T08:43:05.528Z",
@@ -1027,7 +1160,8 @@
         "id": "manual-shot-1",
         "from_time": 5.2322999999999995,
         "to_time": 5.242999999999999
-      }
+      },
+      "id": "e8726987d5884800bcc86ee63f18854e"
     },
     {
       "ts": "2026-05-02T08:43:05.618Z",
@@ -1036,7 +1170,8 @@
         "id": "manual-shot-1",
         "from_time": 5.242999999999999,
         "to_time": 5.2322999999999995
-      }
+      },
+      "id": "5891be2662474f38bda8ae6f5da30e6d"
     },
     {
       "ts": "2026-05-02T08:43:05.635Z",
@@ -1045,7 +1180,8 @@
         "id": "manual-shot-1",
         "from_time": 5.2322999999999995,
         "to_time": 5.2216
-      }
+      },
+      "id": "841e78af3c10404aa1a6689cdccdbeae"
     },
     {
       "ts": "2026-05-02T08:43:05.644Z",
@@ -1054,7 +1190,8 @@
         "id": "manual-shot-1",
         "from_time": 5.2216,
         "to_time": 5.2109
-      }
+      },
+      "id": "59cf24c5e12b40fbbdd2db18a1228173"
     },
     {
       "ts": "2026-05-02T08:43:05.654Z",
@@ -1063,7 +1200,8 @@
         "id": "manual-shot-1",
         "from_time": 5.2109,
         "to_time": 5.1895
-      }
+      },
+      "id": "2b384e05959f46f6b5e46113fa2f8c83"
     },
     {
       "ts": "2026-05-02T08:43:05.660Z",
@@ -1072,7 +1210,8 @@
         "id": "manual-shot-1",
         "from_time": 5.1895,
         "to_time": 5.1574
-      }
+      },
+      "id": "d74f0e74b9f944d09c095c00542cdee5"
     },
     {
       "ts": "2026-05-02T08:43:05.669Z",
@@ -1081,7 +1220,8 @@
         "id": "manual-shot-1",
         "from_time": 5.1574,
         "to_time": 5.0825
-      }
+      },
+      "id": "dd4ada6d7d124de6a77dbadd0fc61651"
     },
     {
       "ts": "2026-05-02T08:43:05.677Z",
@@ -1090,7 +1230,8 @@
         "id": "manual-shot-1",
         "from_time": 5.0825,
         "to_time": 5.0076
-      }
+      },
+      "id": "1bdb225ed2964bb6af5fc58d3bac64af"
     },
     {
       "ts": "2026-05-02T08:43:05.686Z",
@@ -1099,7 +1240,8 @@
         "id": "manual-shot-1",
         "from_time": 5.0076,
         "to_time": 4.9327
-      }
+      },
+      "id": "93bc96e685aa4933a8b3105f21b678dd"
     },
     {
       "ts": "2026-05-02T08:43:05.694Z",
@@ -1108,7 +1250,8 @@
         "id": "manual-shot-1",
         "from_time": 4.9327,
         "to_time": 4.825699999999999
-      }
+      },
+      "id": "da6afacd279f4aeaa57f81308eedf20e"
     },
     {
       "ts": "2026-05-02T08:43:05.703Z",
@@ -1117,7 +1260,8 @@
         "id": "manual-shot-1",
         "from_time": 4.825699999999999,
         "to_time": 4.7187
-      }
+      },
+      "id": "3043a04673cd47639d4602fbf407f8dc"
     },
     {
       "ts": "2026-05-02T08:43:05.711Z",
@@ -1126,7 +1270,8 @@
         "id": "manual-shot-1",
         "from_time": 4.7187,
         "to_time": 4.6331
-      }
+      },
+      "id": "9cd78e6c9cb04b0d8f1dfb526e0e102f"
     },
     {
       "ts": "2026-05-02T08:43:05.719Z",
@@ -1135,7 +1280,8 @@
         "id": "manual-shot-1",
         "from_time": 4.6331,
         "to_time": 4.5903
-      }
+      },
+      "id": "29c0f5d667644dbb90de9c52730cf14a"
     },
     {
       "ts": "2026-05-02T08:43:05.728Z",
@@ -1144,7 +1290,8 @@
         "id": "manual-shot-1",
         "from_time": 4.5903,
         "to_time": 4.547499999999999
-      }
+      },
+      "id": "0b820631d7f949c3be67599c8da4e45f"
     },
     {
       "ts": "2026-05-02T08:43:05.736Z",
@@ -1153,7 +1300,8 @@
         "id": "manual-shot-1",
         "from_time": 4.547499999999999,
         "to_time": 4.4833
-      }
+      },
+      "id": "c3717112de2a498d9923dcd89a1bceb9"
     },
     {
       "ts": "2026-05-02T08:43:05.744Z",
@@ -1162,7 +1310,8 @@
         "id": "manual-shot-1",
         "from_time": 4.4833,
         "to_time": 4.4512
-      }
+      },
+      "id": "0ed4ad260ab34c888f384fcbe38d5a10"
     },
     {
       "ts": "2026-05-02T08:43:05.753Z",
@@ -1171,7 +1320,8 @@
         "id": "manual-shot-1",
         "from_time": 4.4512,
         "to_time": 4.4298
-      }
+      },
+      "id": "c49282aa412a4b93b8255d652ff719f2"
     },
     {
       "ts": "2026-05-02T08:43:05.761Z",
@@ -1180,7 +1330,8 @@
         "id": "manual-shot-1",
         "from_time": 4.4298,
         "to_time": 4.408399999999999
-      }
+      },
+      "id": "f129116f9e37442b8851a93defc67a5e"
     },
     {
       "ts": "2026-05-02T08:43:05.769Z",
@@ -1189,7 +1340,8 @@
         "id": "manual-shot-1",
         "from_time": 4.408399999999999,
         "to_time": 4.3976999999999995
-      }
+      },
+      "id": "581d70c2d2384972a1962ac2061831fa"
     },
     {
       "ts": "2026-05-02T08:43:05.802Z",
@@ -1198,7 +1350,8 @@
         "id": "manual-shot-1",
         "from_time": 4.3976999999999995,
         "to_time": 4.408399999999999
-      }
+      },
+      "id": "acd260edf6324cc2a36de7297aaeb4e8"
     },
     {
       "ts": "2026-05-02T08:43:05.820Z",
@@ -1207,7 +1360,8 @@
         "id": "manual-shot-1",
         "from_time": 4.408399999999999,
         "to_time": 4.419099999999999
-      }
+      },
+      "id": "4eb56b882e48431eb01f0ad4acdc5fe2"
     },
     {
       "ts": "2026-05-02T08:43:05.830Z",
@@ -1216,7 +1370,8 @@
         "id": "manual-shot-1",
         "from_time": 4.419099999999999,
         "to_time": 4.4405
-      }
+      },
+      "id": "06634c26ac034c738c1144cebc56df62"
     },
     {
       "ts": "2026-05-02T08:43:05.837Z",
@@ -1225,7 +1380,8 @@
         "id": "manual-shot-1",
         "from_time": 4.4405,
         "to_time": 4.4619
-      }
+      },
+      "id": "c9e063932b9146c8a921aa9ecc383ea8"
     },
     {
       "ts": "2026-05-02T08:43:05.846Z",
@@ -1234,7 +1390,8 @@
         "id": "manual-shot-1",
         "from_time": 4.4619,
         "to_time": 4.494
-      }
+      },
+      "id": "19acb198c8664755a8bc428441b9a906"
     },
     {
       "ts": "2026-05-02T08:43:05.852Z",
@@ -1243,7 +1400,8 @@
         "id": "manual-shot-1",
         "from_time": 4.494,
         "to_time": 4.547499999999999
-      }
+      },
+      "id": "109f5b3e9a304cf7a1c3b0d40741e355"
     },
     {
       "ts": "2026-05-02T08:43:05.863Z",
@@ -1252,7 +1410,8 @@
         "id": "manual-shot-1",
         "from_time": 4.547499999999999,
         "to_time": 4.6117
-      }
+      },
+      "id": "2dcee98b02a54dfbb806ee70ff101421"
     },
     {
       "ts": "2026-05-02T08:43:05.869Z",
@@ -1261,7 +1420,8 @@
         "id": "manual-shot-1",
         "from_time": 4.6117,
         "to_time": 4.6652
-      }
+      },
+      "id": "2cb37b77b8b24d959b58735dd23756f3"
     },
     {
       "ts": "2026-05-02T08:43:05.878Z",
@@ -1270,7 +1430,8 @@
         "id": "manual-shot-1",
         "from_time": 4.6652,
         "to_time": 4.7294
-      }
+      },
+      "id": "f83f986f6ca24f76b0b04646e7c6fe0b"
     },
     {
       "ts": "2026-05-02T08:43:05.888Z",
@@ -1279,7 +1440,8 @@
         "id": "manual-shot-1",
         "from_time": 4.7294,
         "to_time": 4.7829
-      }
+      },
+      "id": "1636ed9c65864190ac562f9a6968aeca"
     },
     {
       "ts": "2026-05-02T08:43:05.894Z",
@@ -1288,7 +1450,8 @@
         "id": "manual-shot-1",
         "from_time": 4.7829,
         "to_time": 4.8149999999999995
-      }
+      },
+      "id": "22313fde3c7f426186d0bffa5169635f"
     },
     {
       "ts": "2026-05-02T08:43:05.903Z",
@@ -1297,7 +1460,8 @@
         "id": "manual-shot-1",
         "from_time": 4.8149999999999995,
         "to_time": 4.8471
-      }
+      },
+      "id": "3f4d3a87b86e459c9a95cb7c1cf72a8c"
     },
     {
       "ts": "2026-05-02T08:43:05.911Z",
@@ -1306,7 +1470,8 @@
         "id": "manual-shot-1",
         "from_time": 4.8471,
         "to_time": 4.8792
-      }
+      },
+      "id": "9281dd7c236541348d7cb1a5533fd09a"
     },
     {
       "ts": "2026-05-02T08:43:05.919Z",
@@ -1315,7 +1480,8 @@
         "id": "manual-shot-1",
         "from_time": 4.8792,
         "to_time": 4.9006
-      }
+      },
+      "id": "231369b628264022b255c819ced47f0c"
     },
     {
       "ts": "2026-05-02T08:43:05.928Z",
@@ -1324,7 +1490,8 @@
         "id": "manual-shot-1",
         "from_time": 4.9006,
         "to_time": 4.9113
-      }
+      },
+      "id": "363393bb51b44265a65a53f88ad2dc1e"
     },
     {
       "ts": "2026-05-02T08:43:05.944Z",
@@ -1333,7 +1500,8 @@
         "id": "manual-shot-1",
         "from_time": 4.9113,
         "to_time": 4.922
-      }
+      },
+      "id": "806cccb332ae4d9a9014169c5eb077db"
     },
     {
       "ts": "2026-05-02T08:43:06.169Z",
@@ -1342,7 +1510,8 @@
         "id": "manual-shot-1",
         "from_time": 4.922,
         "to_time": 4.9113
-      }
+      },
+      "id": "aa6a8ed7357c43c2abc51bb755d627af"
     },
     {
       "ts": "2026-05-02T08:43:06.203Z",
@@ -1351,7 +1520,8 @@
         "id": "manual-shot-1",
         "from_time": 4.9113,
         "to_time": 4.922
-      }
+      },
+      "id": "efa2fde2ac7143b2be67d3bfeaff13c8"
     },
     {
       "ts": "2026-05-02T08:43:06.245Z",
@@ -1360,7 +1530,8 @@
         "id": "manual-shot-1",
         "from_time": 4.922,
         "to_time": 4.9327
-      }
+      },
+      "id": "c95d604b30064b408deea6a55b4ca985"
     },
     {
       "ts": "2026-05-02T08:43:06.261Z",
@@ -1369,7 +1540,8 @@
         "id": "manual-shot-1",
         "from_time": 4.9327,
         "to_time": 4.9434
-      }
+      },
+      "id": "1706e0ae721640a68815a6931e96c870"
     },
     {
       "ts": "2026-05-02T08:43:06.292Z",
@@ -1378,7 +1550,8 @@
         "id": "manual-shot-1",
         "from_time": 4.9434,
         "to_time": 4.9540999999999995
-      }
+      },
+      "id": "f581e3935f5b4e7db09d44907fe20785"
     },
     {
       "ts": "2026-05-02T08:43:06.300Z",
@@ -1387,7 +1560,8 @@
         "id": "manual-shot-1",
         "from_time": 4.9540999999999995,
         "to_time": 4.964799999999999
-      }
+      },
+      "id": "458387bd5ea04620ab04f9a2b73fc300"
     },
     {
       "ts": "2026-05-02T08:43:06.308Z",
@@ -1396,7 +1570,8 @@
         "id": "manual-shot-1",
         "from_time": 4.964799999999999,
         "to_time": 4.975499999999999
-      }
+      },
+      "id": "a1c71e4b812046f5b9d4c7e824f7b37e"
     },
     {
       "ts": "2026-05-02T08:43:06.322Z",
@@ -1405,7 +1580,8 @@
         "id": "manual-shot-1",
         "from_time": 4.975499999999999,
         "to_time": 4.986199999999999
-      }
+      },
+      "id": "cc56c947b5c84e318756c2fc3ba2d0b7"
     },
     {
       "ts": "2026-05-02T08:43:06.333Z",
@@ -1414,7 +1590,8 @@
         "id": "manual-shot-1",
         "from_time": 4.986199999999999,
         "to_time": 4.9969
-      }
+      },
+      "id": "90c09dc550da4fa0a972ff314031abf9"
     },
     {
       "ts": "2026-05-02T08:43:06.340Z",
@@ -1423,7 +1600,8 @@
         "id": "manual-shot-1",
         "from_time": 4.9969,
         "to_time": 5.0076
-      }
+      },
+      "id": "ba82ee644fe14b70a1faf0369148fc97"
     },
     {
       "ts": "2026-05-02T08:43:06.373Z",
@@ -1432,7 +1610,8 @@
         "id": "manual-shot-1",
         "from_time": 5.0076,
         "to_time": 5.0183
-      }
+      },
+      "id": "2803054031404b4bae09c7e00488ba57"
     },
     {
       "ts": "2026-05-02T08:43:07.273Z",
@@ -1441,7 +1620,8 @@
         "id": "manual-shot-1",
         "from_time": 5.0183,
         "to_time": 4.9969
-      }
+      },
+      "id": "d788b1e4780549cfb6a148fc84f1a60e"
     },
     {
       "ts": "2026-05-02T08:43:07.283Z",
@@ -1450,7 +1630,8 @@
         "id": "manual-shot-1",
         "from_time": 4.9969,
         "to_time": 4.986199999999999
-      }
+      },
+      "id": "1b1742a7e4614c21b7cca49e214963f8"
     },
     {
       "ts": "2026-05-02T08:43:07.290Z",
@@ -1459,7 +1640,8 @@
         "id": "manual-shot-1",
         "from_time": 4.986199999999999,
         "to_time": 4.964799999999999
-      }
+      },
+      "id": "7e6b4b96b703484abcc89354116f6d40"
     },
     {
       "ts": "2026-05-02T08:43:07.298Z",
@@ -1468,7 +1650,8 @@
         "id": "manual-shot-1",
         "from_time": 4.964799999999999,
         "to_time": 4.9434
-      }
+      },
+      "id": "b9bdeb9e753145bd9d38f4fac382bfbc"
     },
     {
       "ts": "2026-05-02T08:43:07.307Z",
@@ -1477,7 +1660,8 @@
         "id": "manual-shot-1",
         "from_time": 4.9434,
         "to_time": 4.9327
-      }
+      },
+      "id": "9f9e83f45bd84d6d88176129b3cc84a8"
     },
     {
       "ts": "2026-05-02T08:43:07.323Z",
@@ -1486,7 +1670,8 @@
         "id": "manual-shot-1",
         "from_time": 4.9327,
         "to_time": 4.922
-      }
+      },
+      "id": "6bc78adf6d864062955f71d3f1f386e2"
     },
     {
       "ts": "2026-05-02T08:43:07.333Z",
@@ -1495,7 +1680,8 @@
         "id": "manual-shot-1",
         "from_time": 4.922,
         "to_time": 4.9113
-      }
+      },
+      "id": "36d839df10d8442cb35a28db5dd78595"
     },
     {
       "ts": "2026-05-02T08:43:07.433Z",
@@ -1504,7 +1690,8 @@
         "id": "manual-shot-1",
         "from_time": 4.9113,
         "to_time": 4.922
-      }
+      },
+      "id": "350396a6462641129ff4ef8bd3a2d190"
     },
     {
       "ts": "2026-05-02T08:43:07.447Z",
@@ -1513,7 +1700,8 @@
         "id": "manual-shot-1",
         "from_time": 4.922,
         "to_time": 4.9327
-      }
+      },
+      "id": "602a9bcd8c394797b9c498620efd3a2e"
     },
     {
       "ts": "2026-05-02T08:43:07.458Z",
@@ -1522,7 +1710,8 @@
         "id": "manual-shot-1",
         "from_time": 4.9327,
         "to_time": 4.9540999999999995
-      }
+      },
+      "id": "08d5a5f24578469daa98db384c1928cd"
     },
     {
       "ts": "2026-05-02T08:43:07.465Z",
@@ -1531,7 +1720,8 @@
         "id": "manual-shot-1",
         "from_time": 4.9540999999999995,
         "to_time": 4.964799999999999
-      }
+      },
+      "id": "aec9c4dd069e403786ca75e8a8a0a977"
     },
     {
       "ts": "2026-05-02T08:43:07.474Z",
@@ -1540,7 +1730,8 @@
         "id": "manual-shot-1",
         "from_time": 4.964799999999999,
         "to_time": 4.986199999999999
-      }
+      },
+      "id": "36a1731bccd449e99a36f1e86c70dad5"
     },
     {
       "ts": "2026-05-02T08:43:07.482Z",
@@ -1549,7 +1740,8 @@
         "id": "manual-shot-1",
         "from_time": 4.986199999999999,
         "to_time": 4.9969
-      }
+      },
+      "id": "d70376626ded494f961aabb7f5fea24e"
     },
     {
       "ts": "2026-05-02T08:43:07.489Z",
@@ -1558,7 +1750,8 @@
         "id": "manual-shot-1",
         "from_time": 4.9969,
         "to_time": 5.0076
-      }
+      },
+      "id": "9ca24c6259884ff084babf4f87a0fe0d"
     },
     {
       "ts": "2026-05-02T08:43:07.500Z",
@@ -1567,7 +1760,8 @@
         "id": "manual-shot-1",
         "from_time": 5.0076,
         "to_time": 5.029
-      }
+      },
+      "id": "5c97a65c17184496a3eb3c67bd0078f2"
     },
     {
       "ts": "2026-05-02T08:43:07.515Z",
@@ -1576,7 +1770,8 @@
         "id": "manual-shot-1",
         "from_time": 5.029,
         "to_time": 5.0397
-      }
+      },
+      "id": "49e1f2f87039426dbef0fbd47f7862b3"
     },
     {
       "ts": "2026-05-02T08:43:07.532Z",
@@ -1585,7 +1780,8 @@
         "id": "manual-shot-1",
         "from_time": 5.0397,
         "to_time": 5.0504
-      }
+      },
+      "id": "acdc0ac5503a4c2990701557991da39b"
     },
     {
       "ts": "2026-05-02T08:43:07.547Z",
@@ -1594,7 +1790,8 @@
         "id": "manual-shot-1",
         "from_time": 5.0504,
         "to_time": 5.0611
-      }
+      },
+      "id": "bc7a8eab209a4dfd8c9cf41d02bb9660"
     },
     {
       "ts": "2026-05-02T08:43:07.644Z",
@@ -1603,7 +1800,8 @@
         "id": "manual-shot-1",
         "from_time": 5.0611,
         "to_time": 5.0718
-      }
+      },
+      "id": "c37a7c406640425e924c86c89bd29d34"
     },
     {
       "ts": "2026-05-02T08:43:08.336Z",
@@ -1612,7 +1810,8 @@
         "id": "manual-shot-1",
         "from_time": 5.0718,
         "to_time": 5.0611
-      }
+      },
+      "id": "ac60269f4da6475c8f6cf11951970097"
     },
     {
       "ts": "2026-05-02T08:43:08.377Z",
@@ -1621,7 +1820,8 @@
         "id": "manual-shot-1",
         "from_time": 5.0611,
         "to_time": 5.0504
-      }
+      },
+      "id": "3781993786394c09b1e0c8411ef67dd9"
     },
     {
       "ts": "2026-05-02T08:43:08.387Z",
@@ -1630,7 +1830,8 @@
         "id": "manual-shot-1",
         "from_time": 5.0504,
         "to_time": 5.0397
-      }
+      },
+      "id": "e1e0f40f991548818fa00e720a28186a"
     },
     {
       "ts": "2026-05-02T08:43:08.419Z",
@@ -1639,7 +1840,8 @@
         "id": "manual-shot-1",
         "from_time": 5.0397,
         "to_time": 5.029
-      }
+      },
+      "id": "14edabd924ee47fc9988605a17755af6"
     },
     {
       "ts": "2026-05-02T08:43:08.544Z",
@@ -1648,7 +1850,8 @@
         "id": "manual-shot-1",
         "from_time": 5.029,
         "to_time": 5.0397
-      }
+      },
+      "id": "67d3f24d2ffd499580942f0f4f7d37fb"
     },
     {
       "ts": "2026-05-02T08:43:08.571Z",
@@ -1657,7 +1860,8 @@
         "id": "manual-shot-1",
         "from_time": 5.0397,
         "to_time": 5.0504
-      }
+      },
+      "id": "eb03ea264b6d441c908d6f2eb0b57da8"
     },
     {
       "ts": "2026-05-02T08:43:08.585Z",
@@ -1666,7 +1870,8 @@
         "id": "manual-shot-1",
         "from_time": 5.0504,
         "to_time": 5.0611
-      }
+      },
+      "id": "0196f06369e44409b9c57f1466b99e1e"
     },
     {
       "ts": "2026-05-02T08:43:08.610Z",
@@ -1675,7 +1880,8 @@
         "id": "manual-shot-1",
         "from_time": 5.0611,
         "to_time": 5.0718
-      }
+      },
+      "id": "581df7c0af934f6eac07949d25027bba"
     },
     {
       "ts": "2026-05-02T08:43:09.135Z",
@@ -1684,7 +1890,8 @@
         "id": "manual-shot-1",
         "from_time": 5.0718,
         "to_time": 5.0611
-      }
+      },
+      "id": "a40aee5567ae4fdc8f5387cc08c4cca0"
     },
     {
       "ts": "2026-05-02T08:43:09.169Z",
@@ -1693,7 +1900,8 @@
         "id": "manual-shot-1",
         "from_time": 5.0611,
         "to_time": 5.0504
-      }
+      },
+      "id": "17ead78144834196bd3e351ae3b0b098"
     },
     {
       "ts": "2026-05-02T08:43:09.185Z",
@@ -1702,7 +1910,8 @@
         "id": "manual-shot-1",
         "from_time": 5.0504,
         "to_time": 5.0397
-      }
+      },
+      "id": "f2fa6d4b8fa346578d9d11e2d6147619"
     },
     {
       "ts": "2026-05-02T08:43:09.195Z",
@@ -1711,7 +1920,8 @@
         "id": "manual-shot-1",
         "from_time": 5.0397,
         "to_time": 5.029
-      }
+      },
+      "id": "4c92d422c89f48b6976952edb7c80446"
     },
     {
       "ts": "2026-05-02T08:43:09.854Z",
@@ -1720,7 +1930,8 @@
         "id": "manual-shot-1",
         "from_time": 5.029,
         "to_time": 5.0183
-      }
+      },
+      "id": "9ef9e8bd52e24b8cb6a6f758f91bcb11"
     },
     {
       "ts": "2026-05-02T08:43:09.861Z",
@@ -1729,7 +1940,8 @@
         "id": "manual-shot-1",
         "from_time": 5.0183,
         "to_time": 5.0076
-      }
+      },
+      "id": "06c55fcb1d8b40d8bb4b38e2ca08af6b"
     },
     {
       "ts": "2026-05-02T08:43:09.870Z",
@@ -1738,7 +1950,8 @@
         "id": "manual-shot-1",
         "from_time": 5.0076,
         "to_time": 4.986199999999999
-      }
+      },
+      "id": "96504d59e6e143d1a2b16204c4f69592"
     },
     {
       "ts": "2026-05-02T08:43:09.877Z",
@@ -1747,7 +1960,8 @@
         "id": "manual-shot-1",
         "from_time": 4.986199999999999,
         "to_time": 4.9540999999999995
-      }
+      },
+      "id": "c2c17ca3863f463681654b549c8d6c46"
     },
     {
       "ts": "2026-05-02T08:43:09.885Z",
@@ -1756,7 +1970,8 @@
         "id": "manual-shot-1",
         "from_time": 4.9540999999999995,
         "to_time": 4.922
-      }
+      },
+      "id": "8989ce3b3a59473ebec45a6867716112"
     },
     {
       "ts": "2026-05-02T08:43:09.894Z",
@@ -1765,7 +1980,8 @@
         "id": "manual-shot-1",
         "from_time": 4.922,
         "to_time": 4.8578
-      }
+      },
+      "id": "805f248c3904440da58d6e7712735fce"
     },
     {
       "ts": "2026-05-02T08:43:09.902Z",
@@ -1774,7 +1990,8 @@
         "id": "manual-shot-1",
         "from_time": 4.8578,
         "to_time": 4.7829
-      }
+      },
+      "id": "bf91eee4613d455caaaa58f0906ee37b"
     },
     {
       "ts": "2026-05-02T08:43:09.911Z",
@@ -1783,7 +2000,8 @@
         "id": "manual-shot-1",
         "from_time": 4.7829,
         "to_time": 4.601
-      }
+      },
+      "id": "798e9d5d2cc1432fa95cf4dd34c49d06"
     },
     {
       "ts": "2026-05-02T08:43:09.919Z",
@@ -1792,7 +2010,8 @@
         "id": "manual-shot-1",
         "from_time": 4.601,
         "to_time": 4.4726
-      }
+      },
+      "id": "0c604cae1eb2423490612da1d1a411bc"
     },
     {
       "ts": "2026-05-02T08:43:09.928Z",
@@ -1801,7 +2020,8 @@
         "id": "manual-shot-1",
         "from_time": 4.4726,
         "to_time": 4.3549
-      }
+      },
+      "id": "f881465948ed48f6831aeca325b9dcc7"
     },
     {
       "ts": "2026-05-02T08:43:09.936Z",
@@ -1810,7 +2030,8 @@
         "id": "manual-shot-1",
         "from_time": 4.3549,
         "to_time": 4.2479
-      }
+      },
+      "id": "bbc90f3660fb4cf6a963e0dbdacd4d9e"
     },
     {
       "ts": "2026-05-02T08:43:09.944Z",
@@ -1819,7 +2040,8 @@
         "id": "manual-shot-1",
         "from_time": 4.2479,
         "to_time": 4.1194999999999995
-      }
+      },
+      "id": "389d9e9851454e97b58c6da629652cd7"
     },
     {
       "ts": "2026-05-02T08:43:09.953Z",
@@ -1828,7 +2050,8 @@
         "id": "manual-shot-1",
         "from_time": 4.1194999999999995,
         "to_time": 3.9804
-      }
+      },
+      "id": "c89b3381ad8f4860befaebcd4018d826"
     },
     {
       "ts": "2026-05-02T08:43:09.961Z",
@@ -1837,7 +2060,8 @@
         "id": "manual-shot-1",
         "from_time": 3.9804,
         "to_time": 3.8413
-      }
+      },
+      "id": "53234a78145d48bf8ed740a404c5e1a2"
     },
     {
       "ts": "2026-05-02T08:43:09.969Z",
@@ -1846,7 +2070,8 @@
         "id": "manual-shot-1",
         "from_time": 3.8413,
         "to_time": 3.7236
-      }
+      },
+      "id": "1ff9f328810e4a48ab4a4838f96b1b61"
     },
     {
       "ts": "2026-05-02T08:43:09.978Z",
@@ -1855,7 +2080,8 @@
         "id": "manual-shot-1",
         "from_time": 3.7236,
         "to_time": 3.6165999999999996
-      }
+      },
+      "id": "b23308ff74da4f6c90dfc2d5560dda6b"
     },
     {
       "ts": "2026-05-02T08:43:09.986Z",
@@ -1864,7 +2090,8 @@
         "id": "manual-shot-1",
         "from_time": 3.6165999999999996,
         "to_time": 3.5202999999999998
-      }
+      },
+      "id": "5df9da6c0f6340acaf1eec538cffe0ef"
     },
     {
       "ts": "2026-05-02T08:43:09.994Z",
@@ -1873,7 +2100,8 @@
         "id": "manual-shot-1",
         "from_time": 3.5202999999999998,
         "to_time": 3.4667999999999997
-      }
+      },
+      "id": "4dfdbbf10e3048f1bc27c39a6fba14c2"
     },
     {
       "ts": "2026-05-02T08:43:10.002Z",
@@ -1882,7 +2110,8 @@
         "id": "manual-shot-1",
         "from_time": 3.4667999999999997,
         "to_time": 3.424
-      }
+      },
+      "id": "414ff898097d4099a782b78ef7daf7a9"
     },
     {
       "ts": "2026-05-02T08:43:10.011Z",
@@ -1891,7 +2120,8 @@
         "id": "manual-shot-1",
         "from_time": 3.424,
         "to_time": 3.3811999999999998
-      }
+      },
+      "id": "9cd45e4d28684d8fa0f7cee1c9efdd78"
     },
     {
       "ts": "2026-05-02T08:43:10.019Z",
@@ -1900,7 +2130,8 @@
         "id": "manual-shot-1",
         "from_time": 3.3811999999999998,
         "to_time": 3.3491
-      }
+      },
+      "id": "b38a2ae801e341e0901e373571e5892a"
     },
     {
       "ts": "2026-05-02T08:43:10.028Z",
@@ -1909,7 +2140,8 @@
         "id": "manual-shot-1",
         "from_time": 3.3491,
         "to_time": 3.3169999999999997
-      }
+      },
+      "id": "36cef234bac3488b8b010df6dfe644e6"
     },
     {
       "ts": "2026-05-02T08:43:10.036Z",
@@ -1918,7 +2150,8 @@
         "id": "manual-shot-1",
         "from_time": 3.3169999999999997,
         "to_time": 3.2956
-      }
+      },
+      "id": "0abd0cd5824641928037b840ed2b3257"
     },
     {
       "ts": "2026-05-02T08:43:10.044Z",
@@ -1927,7 +2160,8 @@
         "id": "manual-shot-1",
         "from_time": 3.2956,
         "to_time": 3.2742
-      }
+      },
+      "id": "e9cc0323999a4803b47783a739317493"
     },
     {
       "ts": "2026-05-02T08:43:10.052Z",
@@ -1936,7 +2170,8 @@
         "id": "manual-shot-1",
         "from_time": 3.2742,
         "to_time": 3.2634999999999996
-      }
+      },
+      "id": "ff28e355916542c2a4c2110c1c2dd860"
     },
     {
       "ts": "2026-05-02T08:43:10.061Z",
@@ -1945,7 +2180,8 @@
         "id": "manual-shot-1",
         "from_time": 3.2634999999999996,
         "to_time": 3.2527999999999997
-      }
+      },
+      "id": "44e2c33487eb465b9f2d48474cb9ad9d"
     },
     {
       "ts": "2026-05-02T08:43:10.177Z",
@@ -1954,7 +2190,8 @@
         "id": "manual-shot-1",
         "from_time": 3.2527999999999997,
         "to_time": 3.2634999999999996
-      }
+      },
+      "id": "7e7ffba0a7214c01aa6166687c212f9f"
     },
     {
       "ts": "2026-05-02T08:43:10.194Z",
@@ -1963,7 +2200,8 @@
         "id": "manual-shot-1",
         "from_time": 3.2634999999999996,
         "to_time": 3.2849
-      }
+      },
+      "id": "64797e07fc4e4db6959873ce3bae8123"
     },
     {
       "ts": "2026-05-02T08:43:10.203Z",
@@ -1972,7 +2210,8 @@
         "id": "manual-shot-1",
         "from_time": 3.2849,
         "to_time": 3.3063
-      }
+      },
+      "id": "e57fc53f55a34793a911663732caabf2"
     },
     {
       "ts": "2026-05-02T08:43:10.214Z",
@@ -1981,7 +2220,8 @@
         "id": "manual-shot-1",
         "from_time": 3.3063,
         "to_time": 3.3384
-      }
+      },
+      "id": "89b5e32d91f8411799a2420e4f4cf77e"
     },
     {
       "ts": "2026-05-02T08:43:10.220Z",
@@ -1990,7 +2230,8 @@
         "id": "manual-shot-1",
         "from_time": 3.3384,
         "to_time": 3.3705
-      }
+      },
+      "id": "9b14e7a810bb46dba678c40f99d9468b"
     },
     {
       "ts": "2026-05-02T08:43:10.228Z",
@@ -1999,7 +2240,8 @@
         "id": "manual-shot-1",
         "from_time": 3.3705,
         "to_time": 3.4025999999999996
-      }
+      },
+      "id": "abdba519251047a08d532a2f89cd0541"
     },
     {
       "ts": "2026-05-02T08:43:10.236Z",
@@ -2008,7 +2250,8 @@
         "id": "manual-shot-1",
         "from_time": 3.4025999999999996,
         "to_time": 3.4560999999999997
-      }
+      },
+      "id": "d28d78d62e2a4b529ffc3c510495fd63"
     },
     {
       "ts": "2026-05-02T08:43:10.244Z",
@@ -2017,7 +2260,8 @@
         "id": "manual-shot-1",
         "from_time": 3.4560999999999997,
         "to_time": 3.4989
-      }
+      },
+      "id": "21d4a0186e2b4c02b7da282f1f282b91"
     },
     {
       "ts": "2026-05-02T08:43:10.253Z",
@@ -2026,7 +2270,8 @@
         "id": "manual-shot-1",
         "from_time": 3.4989,
         "to_time": 3.5416999999999996
-      }
+      },
+      "id": "64cebf92ab0543b5a38533f1f2c48895"
     },
     {
       "ts": "2026-05-02T08:43:10.261Z",
@@ -2035,7 +2280,8 @@
         "id": "manual-shot-1",
         "from_time": 3.5416999999999996,
         "to_time": 3.5845
-      }
+      },
+      "id": "7be8b3829ae941a990bf31e4aeb1b1ea"
     },
     {
       "ts": "2026-05-02T08:43:10.271Z",
@@ -2044,7 +2290,8 @@
         "id": "manual-shot-1",
         "from_time": 3.5845,
         "to_time": 3.638
-      }
+      },
+      "id": "d37eefdf1f6e49399cfc11dbddb7fdca"
     },
     {
       "ts": "2026-05-02T08:43:10.284Z",
@@ -2053,7 +2300,8 @@
         "id": "manual-shot-1",
         "from_time": 3.638,
         "to_time": 3.6593999999999998
-      }
+      },
+      "id": "aa56d60456d4413a80b4a7e9be44e06a"
     },
     {
       "ts": "2026-05-02T08:43:10.296Z",
@@ -2062,7 +2310,8 @@
         "id": "manual-shot-1",
         "from_time": 3.6593999999999998,
         "to_time": 3.7022
-      }
+      },
+      "id": "1c0f782f67ec40b393e6c09804638c1c"
     },
     {
       "ts": "2026-05-02T08:43:10.303Z",
@@ -2071,7 +2320,8 @@
         "id": "manual-shot-1",
         "from_time": 3.7022,
         "to_time": 3.7129
-      }
+      },
+      "id": "4e09c474f8ca45dd8ae2fac263b83db3"
     },
     {
       "ts": "2026-05-02T08:43:10.352Z",
@@ -2080,7 +2330,8 @@
         "id": "manual-shot-1",
         "from_time": 3.7129,
         "to_time": 3.7022
-      }
+      },
+      "id": "4e68e0e00fbe41d4bb62941545624a02"
     },
     {
       "ts": "2026-05-02T08:43:10.361Z",
@@ -2089,7 +2340,8 @@
         "id": "manual-shot-1",
         "from_time": 3.7022,
         "to_time": 3.6700999999999997
-      }
+      },
+      "id": "8a1d222f45c94b84b4a21904be816f5b"
     },
     {
       "ts": "2026-05-02T08:43:10.371Z",
@@ -2098,7 +2350,8 @@
         "id": "manual-shot-1",
         "from_time": 3.6700999999999997,
         "to_time": 3.638
-      }
+      },
+      "id": "8bd2d8061f5c41bbb9d041e0dfa16567"
     },
     {
       "ts": "2026-05-02T08:43:10.379Z",
@@ -2107,7 +2360,8 @@
         "id": "manual-shot-1",
         "from_time": 3.638,
         "to_time": 3.5631
-      }
+      },
+      "id": "774d09101048454f8e398cac03047152"
     },
     {
       "ts": "2026-05-02T08:43:10.387Z",
@@ -2116,7 +2370,8 @@
         "id": "manual-shot-1",
         "from_time": 3.5631,
         "to_time": 3.4667999999999997
-      }
+      },
+      "id": "12e01b9986ac41958541fc217a704479"
     },
     {
       "ts": "2026-05-02T08:43:10.394Z",
@@ -2125,7 +2380,8 @@
         "id": "manual-shot-1",
         "from_time": 3.4667999999999997,
         "to_time": 3.3598
-      }
+      },
+      "id": "b7e716cf308b4f7899565ffac3bd3a1a"
     },
     {
       "ts": "2026-05-02T08:43:10.404Z",
@@ -2134,7 +2390,8 @@
         "id": "manual-shot-1",
         "from_time": 3.3598,
         "to_time": 3.21
-      }
+      },
+      "id": "b538fb16a79d4404a4daad4ac92d6f45"
     },
     {
       "ts": "2026-05-02T08:43:10.412Z",
@@ -2143,7 +2400,8 @@
         "id": "manual-shot-1",
         "from_time": 3.21,
         "to_time": 3.0067
-      }
+      },
+      "id": "75694fefb2224cfb8df2e981435524ec"
     },
     {
       "ts": "2026-05-02T08:43:10.420Z",
@@ -2152,7 +2410,8 @@
         "id": "manual-shot-1",
         "from_time": 3.0067,
         "to_time": 2.8676
-      }
+      },
+      "id": "77629a0afeb543d9b11e2910992b866e"
     },
     {
       "ts": "2026-05-02T08:43:10.428Z",
@@ -2161,7 +2420,8 @@
         "id": "manual-shot-1",
         "from_time": 2.8676,
         "to_time": 2.7392
-      }
+      },
+      "id": "369a6b4a0ccf4171954c3e2c8c6ec75c"
     },
     {
       "ts": "2026-05-02T08:43:10.436Z",
@@ -2170,7 +2430,8 @@
         "id": "manual-shot-1",
         "from_time": 2.7392,
         "to_time": 2.5894
-      }
+      },
+      "id": "83ddbc56338d46c4ada137327f06a58b"
     },
     {
       "ts": "2026-05-02T08:43:10.446Z",
@@ -2179,7 +2440,8 @@
         "id": "manual-shot-1",
         "from_time": 2.5894,
         "to_time": 2.461
-      }
+      },
+      "id": "5edfc858c0b34f9f9cc8d995cadb7d32"
     },
     {
       "ts": "2026-05-02T08:43:10.453Z",
@@ -2188,7 +2450,8 @@
         "id": "manual-shot-1",
         "from_time": 2.461,
         "to_time": 2.3754
-      }
+      },
+      "id": "f946dd9ba1dc403f94b16289d1ce40ee"
     },
     {
       "ts": "2026-05-02T08:43:10.461Z",
@@ -2197,7 +2460,8 @@
         "id": "manual-shot-1",
         "from_time": 2.3754,
         "to_time": 2.3112
-      }
+      },
+      "id": "4d9f9653af2240f2b83a022d2378daa0"
     },
     {
       "ts": "2026-05-02T08:43:10.469Z",
@@ -2206,7 +2470,8 @@
         "id": "manual-shot-1",
         "from_time": 2.3112,
         "to_time": 2.2363
-      }
+      },
+      "id": "e695ee85a1a04f508a8e97e18ec7ec74"
     },
     {
       "ts": "2026-05-02T08:43:10.479Z",
@@ -2215,7 +2480,8 @@
         "id": "manual-shot-1",
         "from_time": 2.2363,
         "to_time": 2.1614
-      }
+      },
+      "id": "e8b2cf090b7c48cb8346a517777c1251"
     },
     {
       "ts": "2026-05-02T08:43:10.487Z",
@@ -2224,7 +2490,8 @@
         "id": "manual-shot-1",
         "from_time": 2.1614,
         "to_time": 2.1292999999999997
-      }
+      },
+      "id": "ca14a22a6ca544e6a61cc55b68c5ef98"
     },
     {
       "ts": "2026-05-02T08:43:10.494Z",
@@ -2233,7 +2500,8 @@
         "id": "manual-shot-1",
         "from_time": 2.1292999999999997,
         "to_time": 2.1079
-      }
+      },
+      "id": "0f5a9aa7b94e404ca4cc523f914febe3"
     },
     {
       "ts": "2026-05-02T08:43:10.504Z",
@@ -2242,7 +2510,8 @@
         "id": "manual-shot-1",
         "from_time": 2.1079,
         "to_time": 2.0758
-      }
+      },
+      "id": "df14739ad3f742b68423ec3f15a9076f"
     },
     {
       "ts": "2026-05-02T08:43:10.510Z",
@@ -2251,7 +2520,8 @@
         "id": "manual-shot-1",
         "from_time": 2.0758,
         "to_time": 2.0650999999999997
-      }
+      },
+      "id": "b830e26e63cb423db2ecdbd33af5c001"
     },
     {
       "ts": "2026-05-02T08:43:10.520Z",
@@ -2260,7 +2530,8 @@
         "id": "manual-shot-1",
         "from_time": 2.0650999999999997,
         "to_time": 2.0437
-      }
+      },
+      "id": "3ff09b6674924e6296a2a9d85dc1432f"
     },
     {
       "ts": "2026-05-02T08:43:10.527Z",
@@ -2269,7 +2540,8 @@
         "id": "manual-shot-1",
         "from_time": 2.0437,
         "to_time": 2.033
-      }
+      },
+      "id": "00074417827e4c93a1e5b04a916a6eea"
     },
     {
       "ts": "2026-05-02T08:43:10.544Z",
@@ -2278,7 +2550,8 @@
         "id": "manual-shot-1",
         "from_time": 2.033,
         "to_time": 2.0223
-      }
+      },
+      "id": "80d894de284a4d8a9503071beb35c1ec"
     },
     {
       "ts": "2026-05-02T08:43:10.554Z",
@@ -2287,7 +2560,8 @@
         "id": "manual-shot-1",
         "from_time": 2.0223,
         "to_time": 2.0116
-      }
+      },
+      "id": "222e377a182344b3bfdcc0815b42f9f5"
     },
     {
       "ts": "2026-05-02T08:43:10.586Z",
@@ -2296,7 +2570,8 @@
         "id": "manual-shot-1",
         "from_time": 2.0116,
         "to_time": 2.0008999999999997
-      }
+      },
+      "id": "265fdd869da344f79c211607ee3e8f37"
     },
     {
       "ts": "2026-05-02T08:43:10.695Z",
@@ -2305,7 +2580,8 @@
         "id": "manual-shot-1",
         "from_time": 2.0008999999999997,
         "to_time": 2.0116
-      }
+      },
+      "id": "1f09ed1040f749dab4f9b7ba40b19db8"
     },
     {
       "ts": "2026-05-02T08:43:10.720Z",
@@ -2314,7 +2590,8 @@
         "id": "manual-shot-1",
         "from_time": 2.0116,
         "to_time": 2.0223
-      }
+      },
+      "id": "4b27c3749a474ac7b9392684ac1d8f3e"
     },
     {
       "ts": "2026-05-02T08:43:10.729Z",
@@ -2323,7 +2600,8 @@
         "id": "manual-shot-1",
         "from_time": 2.0223,
         "to_time": 2.033
-      }
+      },
+      "id": "d520851d6cf74adfad7f3b3f01458dd1"
     },
     {
       "ts": "2026-05-02T08:43:10.744Z",
@@ -2332,7 +2610,8 @@
         "id": "manual-shot-1",
         "from_time": 2.033,
         "to_time": 2.0437
-      }
+      },
+      "id": "97f2ed8935664531bc643e71ab7f69b1"
     },
     {
       "ts": "2026-05-02T08:43:10.753Z",
@@ -2341,7 +2620,8 @@
         "id": "manual-shot-1",
         "from_time": 2.0437,
         "to_time": 2.0544
-      }
+      },
+      "id": "bd533b5dbb61406db27a21818ccf8bca"
     },
     {
       "ts": "2026-05-02T08:43:10.761Z",
@@ -2350,7 +2630,8 @@
         "id": "manual-shot-1",
         "from_time": 2.0544,
         "to_time": 2.0650999999999997
-      }
+      },
+      "id": "ca91c7e2efaa4122ae727d79ed3a025a"
     },
     {
       "ts": "2026-05-02T08:43:10.777Z",
@@ -2359,7 +2640,8 @@
         "id": "manual-shot-1",
         "from_time": 2.0650999999999997,
         "to_time": 2.0758
-      }
+      },
+      "id": "937f39362fac486aa1101e5c282c96da"
     },
     {
       "ts": "2026-05-02T08:43:10.794Z",
@@ -2368,7 +2650,8 @@
         "id": "manual-shot-1",
         "from_time": 2.0758,
         "to_time": 2.0865
-      }
+      },
+      "id": "d6fee63847fe4a159466296cdba40a19"
     },
     {
       "ts": "2026-05-02T08:43:10.803Z",
@@ -2377,7 +2660,8 @@
         "id": "manual-shot-1",
         "from_time": 2.0865,
         "to_time": 2.1079
-      }
+      },
+      "id": "be29585855554c5798da1d55fa170329"
     },
     {
       "ts": "2026-05-02T08:43:10.811Z",
@@ -2386,7 +2670,8 @@
         "id": "manual-shot-1",
         "from_time": 2.1079,
         "to_time": 2.1186
-      }
+      },
+      "id": "52780b04f2ec490faaa7854f1ed355b2"
     },
     {
       "ts": "2026-05-02T08:43:10.819Z",
@@ -2395,7 +2680,8 @@
         "id": "manual-shot-1",
         "from_time": 2.1186,
         "to_time": 2.1399999999999997
-      }
+      },
+      "id": "d0b0dcdb5af04395a99d5d9ea507d460"
     },
     {
       "ts": "2026-05-02T08:43:10.828Z",
@@ -2404,7 +2690,8 @@
         "id": "manual-shot-1",
         "from_time": 2.1399999999999997,
         "to_time": 2.1721
-      }
+      },
+      "id": "6369c286f4434e539b9d96974749a1d4"
     },
     {
       "ts": "2026-05-02T08:43:10.836Z",
@@ -2413,7 +2700,8 @@
         "id": "manual-shot-1",
         "from_time": 2.1721,
         "to_time": 2.1935
-      }
+      },
+      "id": "de220f953e464f61865cc82778496de6"
     },
     {
       "ts": "2026-05-02T08:43:10.844Z",
@@ -2422,7 +2710,8 @@
         "id": "manual-shot-1",
         "from_time": 2.1935,
         "to_time": 2.2149
-      }
+      },
+      "id": "1893a43759ca4a1b8e0dbcc8bdd8e2f7"
     },
     {
       "ts": "2026-05-02T08:43:10.854Z",
@@ -2431,7 +2720,8 @@
         "id": "manual-shot-1",
         "from_time": 2.2149,
         "to_time": 2.2363
-      }
+      },
+      "id": "ee2f4e64bd494fe6941169dddba1680d"
     },
     {
       "ts": "2026-05-02T08:43:10.862Z",
@@ -2440,7 +2730,8 @@
         "id": "manual-shot-1",
         "from_time": 2.2363,
         "to_time": 2.2683999999999997
-      }
+      },
+      "id": "4a1fc8bd12884c918253bf5dd1f8429f"
     },
     {
       "ts": "2026-05-02T08:43:10.871Z",
@@ -2449,7 +2740,8 @@
         "id": "manual-shot-1",
         "from_time": 2.2683999999999997,
         "to_time": 2.2898
-      }
+      },
+      "id": "cb2e4be2326841e0a45500727123643b"
     },
     {
       "ts": "2026-05-02T08:43:10.878Z",
@@ -2458,7 +2750,8 @@
         "id": "manual-shot-1",
         "from_time": 2.2898,
         "to_time": 2.3005
-      }
+      },
+      "id": "89692f347bc647e7aee29cce992e2a1e"
     },
     {
       "ts": "2026-05-02T08:43:10.887Z",
@@ -2467,7 +2760,8 @@
         "id": "manual-shot-1",
         "from_time": 2.3005,
         "to_time": 2.3326
-      }
+      },
+      "id": "6632ab0e35bf4f6289b96be3e190f746"
     },
     {
       "ts": "2026-05-02T08:43:10.902Z",
@@ -2476,7 +2770,8 @@
         "id": "manual-shot-1",
         "from_time": 2.3326,
         "to_time": 2.3432999999999997
-      }
+      },
+      "id": "eacc117e39aa436d893352342cb13ac9"
     },
     {
       "ts": "2026-05-02T08:43:10.912Z",
@@ -2485,7 +2780,8 @@
         "id": "manual-shot-1",
         "from_time": 2.3432999999999997,
         "to_time": 2.354
-      }
+      },
+      "id": "d8c7729039744860b5537b1f4120e5e4"
     },
     {
       "ts": "2026-05-02T08:43:11.035Z",
@@ -2494,7 +2790,8 @@
         "id": "manual-shot-1",
         "from_time": 2.354,
         "to_time": 2.3647
-      }
+      },
+      "id": "8fd64f26f51b4d4284eaaf48c83635eb"
     },
     {
       "ts": "2026-05-02T08:43:11.344Z",
@@ -2503,7 +2800,8 @@
         "id": "manual-shot-1",
         "from_time": 2.3647,
         "to_time": 2.354
-      }
+      },
+      "id": "f59ef82761fa469a929a6b6e871ef021"
     },
     {
       "ts": "2026-05-02T08:43:11.369Z",
@@ -2512,7 +2810,8 @@
         "id": "manual-shot-1",
         "from_time": 2.354,
         "to_time": 2.3432999999999997
-      }
+      },
+      "id": "343f5e33c914459eb3c784871dfa3e48"
     },
     {
       "ts": "2026-05-02T08:43:11.394Z",
@@ -2521,14 +2820,16 @@
         "id": "manual-shot-1",
         "from_time": 2.3432999999999997,
         "to_time": 2.3326
-      }
+      },
+      "id": "47b9a697bae143cf8c4dddde961339df"
     },
     {
       "ts": "2026-05-02T08:45:13.230Z",
       "kind": "save",
       "payload": {
         "shots_count": 1
-      }
+      },
+      "id": "3a94899110c44990880a9117ce5378cf"
     },
     {
       "ts": "2026-05-02T11:08:36.494857+00:00",
@@ -2536,7 +2837,8 @@
       "payload": {
         "candidate_count": 68,
         "seeded_shots": false
-      }
+      },
+      "id": "bf7edd72872d4150895deeda437a7428"
     },
     {
       "ts": "2026-05-02T11:27:23.950925+00:00",
@@ -2544,7 +2846,8 @@
       "payload": {
         "candidate_count": 68,
         "seeded_shots": false
-      }
+      },
+      "id": "30b9fd9447694c7396488e0efa261f65"
     },
     {
       "ts": "2026-05-02T11:30:43.686730+00:00",
@@ -2552,7 +2855,8 @@
       "payload": {
         "candidate_count": 68,
         "seeded_shots": false
-      }
+      },
+      "id": "669d1fe5ee64409d987b5ff3224dfb81"
     },
     {
       "ts": "2026-05-02T11:33:45.008483+00:00",
@@ -2560,7 +2864,8 @@
       "payload": {
         "candidate_count": 53,
         "seeded_shots": false
-      }
+      },
+      "id": "1fc14df7cc9340bf827a346a1f52f9e4"
     },
     {
       "ts": "2026-05-02T15:30:57.941564+00:00",
@@ -2571,14 +2876,16 @@
         "consensus": 3,
         "expected_rounds": null,
         "seeded_shots": true
-      }
+      },
+      "id": "cf41fd1e89d94375b94983115c8164aa"
     },
     {
       "ts": "2026-05-02T15:31:06.394Z",
       "kind": "save",
       "payload": {
         "shots_count": 35
-      }
+      },
+      "id": "204f8e02d2d54d1e8db550113bdd8fc4"
     },
     {
       "ts": "2026-05-02T17:01:34.697Z",
@@ -2587,7 +2894,8 @@
         "id": "cand-3",
         "time": 6.1994,
         "candidate_number": 3
-      }
+      },
+      "id": "73fa894aef8c431e8af25d7a630c9317"
     },
     {
       "ts": "2026-05-02T17:01:35.412Z",
@@ -2596,7 +2904,8 @@
         "id": "cand-4",
         "time": 6.2899,
         "candidate_number": 4
-      }
+      },
+      "id": "e43fa746ed184f0ba11a54ede5a8c2c6"
     },
     {
       "ts": "2026-05-02T17:01:35.780Z",
@@ -2605,7 +2914,8 @@
         "id": "cand-5",
         "time": 6.5845,
         "candidate_number": 5
-      }
+      },
+      "id": "07e00877bd494a6790f6bf033a3f4fcb"
     },
     {
       "ts": "2026-05-02T17:01:36.146Z",
@@ -2614,7 +2924,8 @@
         "id": "cand-6",
         "time": 6.7678,
         "candidate_number": 6
-      }
+      },
+      "id": "aa96aeaf10a34a148359b8d99f607891"
     },
     {
       "ts": "2026-05-02T17:01:38.887Z",
@@ -2623,7 +2934,8 @@
         "id": "cand-4",
         "time": 6.2899,
         "candidate_number": 4
-      }
+      },
+      "id": "7cf919224ee149cf95183a98ebe2c3bf"
     },
     {
       "ts": "2026-05-02T17:01:39.815Z",
@@ -2632,7 +2944,8 @@
         "id": "cand-5",
         "time": 6.5845,
         "candidate_number": 5
-      }
+      },
+      "id": "7cf796a58a7b4b1eb0ec7657858d0e11"
     },
     {
       "ts": "2026-05-02T17:01:40.266Z",
@@ -2641,7 +2954,8 @@
         "id": "cand-6",
         "time": 6.7678,
         "candidate_number": 6
-      }
+      },
+      "id": "eb671b2c5bb34d3a972cda907d3c0c5d"
     },
     {
       "ts": "2026-05-02T17:01:42.447Z",
@@ -2650,14 +2964,16 @@
         "id": "cand-3",
         "time": 6.1994,
         "candidate_number": 3
-      }
+      },
+      "id": "8fda965265124ad9ac9a515eed33fe4d"
     },
     {
       "ts": "2026-05-02T17:01:44.986Z",
       "kind": "save",
       "payload": {
         "shots_count": 35
-      }
+      },
+      "id": "935c8ae7d87e45de8b3ea29e9cd67db2"
     },
     {
       "ts": "2026-05-02T17:39:07.923Z",
@@ -2666,7 +2982,8 @@
         "id": "cand-14",
         "time": 11.2146,
         "candidate_number": 14
-      }
+      },
+      "id": "5e85b76b423c4cb8a97d21fdcea93a86"
     },
     {
       "ts": "2026-05-02T17:39:10.605Z",
@@ -2675,7 +2992,8 @@
         "id": "cand-13",
         "time": 10.7251,
         "candidate_number": 13
-      }
+      },
+      "id": "2ec81a180a2e44e7808d54ed8b767abc"
     },
     {
       "ts": "2026-05-02T17:39:12.038Z",
@@ -2684,7 +3002,8 @@
         "id": "cand-13",
         "time": 10.7251,
         "candidate_number": 13
-      }
+      },
+      "id": "d05888d990434488be9377d004e0566d"
     },
     {
       "ts": "2026-05-02T17:39:21.564Z",
@@ -2693,7 +3012,8 @@
         "id": "cand-26",
         "time": 14.703,
         "candidate_number": 26
-      }
+      },
+      "id": "39db4047c10e42a483eb4b5c1ba841fd"
     },
     {
       "ts": "2026-05-02T17:39:22.872Z",
@@ -2702,7 +3022,8 @@
         "id": "cand-26",
         "time": 14.703,
         "candidate_number": 26
-      }
+      },
+      "id": "6b4e7ebe3957475d9e59b8fab06a618f"
     },
     {
       "ts": "2026-05-02T17:39:23.547Z",
@@ -2711,7 +3032,8 @@
         "id": "cand-26",
         "time": 14.703,
         "candidate_number": 26
-      }
+      },
+      "id": "034bee82ab514996b2d11e632556750a"
     },
     {
       "ts": "2026-05-02T17:39:35.535Z",
@@ -2720,7 +3042,8 @@
         "id": "cand-17",
         "time": 11.6768,
         "candidate_number": 17
-      }
+      },
+      "id": "9f17e8320ee24725b800c9bc927d412a"
     },
     {
       "ts": "2026-05-02T17:39:36.622Z",
@@ -2729,7 +3052,8 @@
         "id": "cand-18",
         "time": 11.7927,
         "candidate_number": 18
-      }
+      },
+      "id": "13b78b5813914b069a00befcf6fadf2d"
     },
     {
       "ts": "2026-05-02T17:39:40.605Z",
@@ -2738,7 +3062,8 @@
         "id": "cand-16",
         "time": 11.593,
         "candidate_number": 16
-      }
+      },
+      "id": "f8a2dd72c88747ceafdf22a94128d177"
     },
     {
       "ts": "2026-05-02T17:39:44.393Z",
@@ -2747,7 +3072,8 @@
         "id": "cand-25",
         "time": 14.6259,
         "candidate_number": 25
-      }
+      },
+      "id": "8bf77b8cc06d4e458773090d1d1bbbc0"
     },
     {
       "ts": "2026-05-02T17:39:45.293Z",
@@ -2756,7 +3082,8 @@
         "id": "cand-26",
         "time": 14.703,
         "candidate_number": 26
-      }
+      },
+      "id": "4ca289b535044a6ab74c8a91187a18e1"
     },
     {
       "ts": "2026-05-02T17:39:50.436Z",
@@ -2765,7 +3092,8 @@
         "id": "cand-28",
         "time": 16.1252,
         "candidate_number": 28
-      }
+      },
+      "id": "0e561f8f89c74c95820c5cb3c7df4a02"
     },
     {
       "ts": "2026-05-02T17:39:52.343Z",
@@ -2774,7 +3102,8 @@
         "id": "cand-31",
         "time": 17.0323,
         "candidate_number": 31
-      }
+      },
+      "id": "8fa09f5f79cd4ca6a29e78f88433a1ed"
     },
     {
       "ts": "2026-05-02T17:39:53.109Z",
@@ -2783,7 +3112,8 @@
         "id": "cand-32",
         "time": 17.1398,
         "candidate_number": 32
-      }
+      },
+      "id": "0ace4cd9f59541f5a52d4e8e82d728bb"
     },
     {
       "ts": "2026-05-02T17:39:54.067Z",
@@ -2792,7 +3122,8 @@
         "id": "cand-33",
         "time": 17.655,
         "candidate_number": 33
-      }
+      },
+      "id": "77955c52fa6f4061a26a20b78ca208ad"
     },
     {
       "ts": "2026-05-02T17:39:55.784Z",
@@ -2801,7 +3132,8 @@
         "id": "cand-36",
         "time": 19.6294,
         "candidate_number": 36
-      }
+      },
+      "id": "f3068422a0ad42a68220025aaae0c81e"
     },
     {
       "ts": "2026-05-02T17:40:03.381Z",
@@ -2810,7 +3142,8 @@
         "id": "cand-38",
         "time": 20.5869,
         "candidate_number": 38
-      }
+      },
+      "id": "e55191d3d36d400d8e22f0e7458bb1f7"
     },
     {
       "ts": "2026-05-02T17:40:03.756Z",
@@ -2819,7 +3152,8 @@
         "id": "cand-39",
         "time": 20.7711,
         "candidate_number": 39
-      }
+      },
+      "id": "c8d7d69d8451419b8555219f8f750a57"
     },
     {
       "ts": "2026-05-02T17:40:04.243Z",
@@ -2828,7 +3162,8 @@
         "id": "cand-40",
         "time": 20.9018,
         "candidate_number": 40
-      }
+      },
+      "id": "58b61a0284ee4652b8883b914aff54c1"
     },
     {
       "ts": "2026-05-02T17:40:04.580Z",
@@ -2837,7 +3172,8 @@
         "id": "cand-42",
         "time": 21.1273,
         "candidate_number": 42
-      }
+      },
+      "id": "f6bd96e1bb514cd6ac6184d66eeb5b6a"
     },
     {
       "ts": "2026-05-02T17:40:04.938Z",
@@ -2846,7 +3182,8 @@
         "id": "cand-43",
         "time": 21.4577,
         "candidate_number": 43
-      }
+      },
+      "id": "e513aee2348f498aa5e82abe6ffcd982"
     },
     {
       "ts": "2026-05-02T17:40:05.275Z",
@@ -2855,7 +3192,8 @@
         "id": "cand-44",
         "time": 21.6982,
         "candidate_number": 44
-      }
+      },
+      "id": "c1b5d1e464804d61bc52acdc3742b775"
     },
     {
       "ts": "2026-05-02T17:40:06.195Z",
@@ -2864,7 +3202,8 @@
         "id": "cand-45",
         "time": 21.9862,
         "candidate_number": 45
-      }
+      },
+      "id": "df72cb477d8c4c98899bc2efd3028662"
     },
     {
       "ts": "2026-05-02T17:40:06.527Z",
@@ -2873,7 +3212,8 @@
         "id": "cand-46",
         "time": 22.123,
         "candidate_number": 46
-      }
+      },
+      "id": "bbd42db6cb0f40d6a1ea048e8bb7c2dc"
     },
     {
       "ts": "2026-05-02T17:40:06.889Z",
@@ -2882,7 +3222,8 @@
         "id": "cand-47",
         "time": 22.3024,
         "candidate_number": 47
-      }
+      },
+      "id": "2b7efef024b44040a94537edf45f347e"
     },
     {
       "ts": "2026-05-02T17:40:07.593Z",
@@ -2891,7 +3232,8 @@
         "id": "cand-48",
         "time": 22.513,
         "candidate_number": 48
-      }
+      },
+      "id": "1fe824f8a58048e2a3778589304ead2b"
     },
     {
       "ts": "2026-05-02T17:40:09.781Z",
@@ -2900,7 +3242,8 @@
         "id": "cand-52",
         "time": 23.7407,
         "candidate_number": 52
-      }
+      },
+      "id": "2518c9617c5e4fb9be62db3262e25abb"
     },
     {
       "ts": "2026-05-02T17:40:12.566Z",
@@ -2909,14 +3252,16 @@
         "id": "cand-63",
         "time": 28.1184,
         "candidate_number": 63
-      }
+      },
+      "id": "39316bb00c8f4bfabc72e35dbba67167"
     },
     {
       "ts": "2026-05-02T17:40:14.961Z",
       "kind": "save",
       "payload": {
         "shots_count": 15
-      }
+      },
+      "id": "61881beda89c45eca6eb7634b8ca2f0d"
     },
     {
       "ts": "2026-05-04T13:10:29.989972+00:00",
@@ -2927,7 +3272,8 @@
         "consensus": 3,
         "expected_rounds": null,
         "seeded_shots": false
-      }
+      },
+      "id": "969216af3cd84e6a9a68cd691aa5c247"
     },
     {
       "ts": "2026-05-04T13:13:49.386Z",
@@ -2936,7 +3282,8 @@
         "id": "cand-13",
         "time": 10.7251,
         "candidate_number": 13
-      }
+      },
+      "id": "ff3a0368f66f43679232dfa0ef216ec4"
     },
     {
       "ts": "2026-05-04T13:14:04.720Z",
@@ -2945,7 +3292,8 @@
         "id": "cand-56",
         "time": 25.8764,
         "candidate_number": 56
-      }
+      },
+      "id": "0754c38043534301bcacedda616cb51a"
     },
     {
       "ts": "2026-05-04T13:14:06.253Z",
@@ -2954,21 +3302,153 @@
         "id": "cand-59",
         "time": 27.2702,
         "candidate_number": 59
-      }
+      },
+      "id": "9e2e17f25bc042f4918e9a964d074fe7"
     },
     {
       "ts": "2026-05-04T13:14:10.728Z",
       "kind": "save",
       "payload": {
         "shots_count": 18
-      }
+      },
+      "id": "55a0522a5d8f4ef4b9bf0ec8a446242a"
     },
     {
-      "ts": "2026-05-05T12:10:42.636Z",
+      "ts": "2026-05-06T12:48:52.708172+00:00",
+      "kind": "coach_reclassify",
+      "payload": {
+        "shot_count": 18
+      },
+      "id": "919bc262cfbe4253b88feb8fc62e27ad"
+    },
+    {
+      "ts": "2026-10-16T08:19:45.189Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-9",
+        "from_time": 8.426,
+        "to_time": 8.419,
+        "reason": "earlier_rise"
+      },
+      "id": "f6ba7574d56c46d1abddb2deb58b2fd0"
+    },
+    {
+      "ts": "2026-10-16T08:19:46.046Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-9",
+        "from_time": 8.419,
+        "to_time": 8.4,
+        "reason": "earlier_rise"
+      },
+      "id": "0c21a02a94cb42b88c7b9eb94d9b5fae"
+    },
+    {
+      "ts": "2026-10-16T08:19:47.314Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-10",
+        "from_time": 9.05,
+        "to_time": 9.028,
+        "reason": "earlier_rise"
+      },
+      "id": "84c95c728a74499c912378b9ff65364d"
+    },
+    {
+      "ts": "2026-10-16T08:19:47.854Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-10",
+        "from_time": 9.028,
+        "to_time": 9.024,
+        "reason": "earlier_rise"
+      },
+      "id": "2741a254943740b0876e47be0b1ab3ee"
+    },
+    {
+      "ts": "2026-10-16T08:19:48.962Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-11",
+        "from_time": 9.631,
+        "to_time": 9.61,
+        "reason": "earlier_rise"
+      },
+      "id": "99c98268619b409ea1d12e99bb06e438"
+    },
+    {
+      "ts": "2026-10-16T08:19:49.877Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-12",
+        "from_time": 10.165,
+        "to_time": 10.154,
+        "reason": "earlier_rise"
+      },
+      "id": "909adfb11b5e4acb98ff559701245330"
+    },
+    {
+      "ts": "2026-10-16T08:19:50.589Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-12",
+        "from_time": 10.154,
+        "to_time": 10.145,
+        "reason": "earlier_rise"
+      },
+      "id": "bab9112885c9473a96524acb294e0478"
+    },
+    {
+      "ts": "2026-10-16T08:19:51.518Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-13",
+        "from_time": 10.725,
+        "to_time": 10.719,
+        "reason": "earlier_rise"
+      },
+      "id": "e3e6e4cbf89b458fb914d2c279785811"
+    },
+    {
+      "ts": "2026-10-16T08:19:51.881Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-13",
+        "from_time": 10.719,
+        "to_time": 10.707,
+        "reason": "earlier_rise"
+      },
+      "id": "c6f0f559e4054017ba84a6e776e06648"
+    },
+    {
+      "ts": "2026-10-16T08:19:55.109Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-14",
+        "from_time": 11.215,
+        "to_time": 11.208,
+        "reason": "earlier_rise"
+      },
+      "id": "d4d2f19ca0c74788bdf2d1d53bc8b852"
+    },
+    {
+      "ts": "2026-10-16T08:19:55.453Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-14",
+        "from_time": 11.208,
+        "to_time": 11.201,
+        "reason": "earlier_rise"
+      },
+      "id": "d621c0f043b84575aae7ca7a9cb520bb"
+    },
+    {
+      "ts": "2026-10-16T08:20:15.253Z",
       "kind": "save",
       "payload": {
         "shots_count": 18
-      }
+      },
+      "id": "e7603fd1d35e4413936d089a947d9e60"
     }
   ],
   "_candidates_pending_audit": {
@@ -4047,61 +4527,18 @@
         "clap_diff": 0.121,
         "gunshot_prob": 0.0022
       }
-    ],
-    "labels_by_time": {
-      "11.601": "barrel_echo",
-      "11.687": "barrel_echo",
-      "11.798": "barrel_echo",
-      "14.604": "steel_ring",
-      "17.035": "handling",
-      "17.156": "handling",
-      "19.634": "steel_ring",
-      "20.564": "steel_ring",
-      "20.781": "steel_ring",
-      "21.992": "handling",
-      "22.116": "handling",
-      "22.318": "speech",
-      "22.516": "speech",
-      "6.292": "movement",
-      "7.468": "speech",
-      "12.362": "speech",
-      "12.427": "speech",
-      "12.665": "movement",
-      "12.995": "movement",
-      "16.272": "steel_ring",
-      "16.375": "cross_bay",
-      "17.664": "speech",
-      "18.516": "speech",
-      "21.007": "steel_ring",
-      "21.136": "steel_ring",
-      "21.475": "movement",
-      "21.678": "movement",
-      "22.792": "speech",
-      "24.975": "barrel_echo",
-      "27.896": "barrel_echo",
-      "5.662": "speech",
-      "5.941": "speech",
-      "6.199": "speech",
-      "6.585": "speech",
-      "6.779": "speech",
-      "11.392": "barrel_echo",
-      "12.507": "speech",
-      "27.212": "barrel_echo",
-      "27.762": "barrel_echo",
-      "23.742": "barrel_echo",
-      "16.106": "steel_ring",
-      "20.882": "other",
-      "28.030": "other",
-      "28.135": "other",
-      "22.911": "speech"
-    }
+    ]
   },
-  "promoted_at": "2026-05-05T11:56:05.475505+00:00",
-  "promoted_from": "audit/stage4.json",
+  "promoted_at": "2026-10-16T09:01:09.521111+00:00",
   "provenance": {
     "stage_number": 4,
-    "stage_name": null
+    "stage_name": "Revenge of the tunnor"
   },
+  "source_video": "/Volumes/X9/matches/tallmilan-2026/shooters/s_3deb12ee/raw/VID_20260426_135341_00_042.mp4",
+  "fixture_window_in_source": [
+    15.445,
+    47.745
+  ],
   "camera": {
     "id": "go3s",
     "make": "Insta360",
@@ -4112,34 +4549,16 @@
     "agc_state": "unknown",
     "sample_rate": 48000,
     "bit_depth": null,
-    "audio_codec": null
+    "audio_codec": "aac"
   },
-  "venue": {
-    "environment": "outdoor",
-    "surface": "unknown"
-  },
-  "gun": {
-    "calibre": "9mm",
-    "muzzle_device": "none",
-    "action": "semi-auto",
-    "power_factor": "minor"
-  },
-  "history": [],
   "shooter": {
     "id": "s97dcec94"
   },
   "event_id": "tallmilan-2026:4:s97dcec94",
-  "source_video": "/Volumes/X9/raw/2026-tallmilan/mathias/head/VID_20260426_135341_00_042.mp4",
-  "fixture_window_in_source": [
-    15.445,
-    47.7653
-  ],
   "review": {
-    "status": "needs_review",
-    "derived_from": null,
-    "reviewed_at": null,
-    "note": "shot times predate the rise-foot definition (docs/METHODOLOGY.md, 2026-10-10): check each shot's leading edge",
-    "previous_status": "reviewed",
-    "previous_reviewed_at": null
+    "confirmed_at": "2026-10-16T09:01:33.984810+00:00",
+    "status": "reviewed",
+    "reviewed_at": "2026-10-16T09:01:33.984810+00:00",
+    "method": "own-audit"
   }
 }

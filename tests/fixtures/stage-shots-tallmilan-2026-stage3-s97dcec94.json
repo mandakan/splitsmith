@@ -1,456 +1,1031 @@
 {
-  "source": "stage_sample.mp4 stage 3 'Per told me to do it!' (audio extracted at 48 kHz mono)",
   "stage_number": 3,
   "stage_name": "Per told me to do it!",
-  "fixture_window_in_source": [
-    19.3924,
-    36.1324
-  ],
-  "beep_time": 0.5,
-  "tolerance_ms": 15,
   "stage_time_seconds": 14.74,
-  "stage_window_end_in_fixture": 15.24,
+  "beep_time": 5,
   "shots": [
     {
       "shot_number": 1,
       "candidate_number": 3,
-      "time": 2.2548,
+      "time": 6.755,
       "ms_after_beep": 1755,
       "source": "detected",
-      "subclass": "paper"
+      "id": "cand-3",
+      "interval_class": "first_shot",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 2,
       "candidate_number": 4,
-      "time": 2.7188,
-      "ms_after_beep": 2219,
+      "time": 7.187,
+      "ms_after_beep": 2187,
       "source": "detected",
-      "subclass": "paper"
+      "id": "cand-4",
+      "interval_class": "split",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 3,
       "candidate_number": 5,
-      "time": 3.2891,
-      "ms_after_beep": 2789,
+      "time": 7.765,
+      "ms_after_beep": 2765,
       "source": "detected",
-      "subclass": "paper"
+      "id": "cand-5",
+      "interval_class": "split",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 4,
       "candidate_number": 6,
-      "time": 3.7381,
-      "ms_after_beep": 3238,
+      "time": 8.214,
+      "ms_after_beep": 3214,
       "source": "detected",
-      "subclass": "paper"
+      "id": "cand-6",
+      "interval_class": "split",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 5,
       "candidate_number": 7,
-      "time": 4.4737,
+      "time": 8.974,
       "ms_after_beep": 3974,
       "source": "detected",
-      "subclass": "paper"
+      "id": "cand-7",
+      "interval_class": "split",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 6,
       "candidate_number": 8,
-      "time": 5.1441,
-      "ms_after_beep": 4644,
+      "time": 9.645,
+      "ms_after_beep": 4645,
       "source": "detected",
-      "subclass": "paper"
+      "id": "cand-8",
+      "interval_class": "split",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 7,
       "candidate_number": 9,
-      "time": 5.6687,
+      "time": 10.169,
       "ms_after_beep": 5169,
       "source": "detected",
-      "subclass": "paper"
+      "id": "cand-9",
+      "interval_class": "split",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 8,
       "candidate_number": 14,
-      "time": 7.6399,
+      "time": 12.14,
       "ms_after_beep": 7140,
       "source": "detected",
-      "subclass": "paper"
+      "id": "cand-14",
+      "interval_class": "transition",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 9,
       "candidate_number": 15,
-      "time": 7.8948,
+      "time": 12.395,
       "ms_after_beep": 7395,
       "source": "detected",
-      "subclass": "paper"
+      "id": "cand-15",
+      "interval_class": "split",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 10,
       "candidate_number": 16,
-      "time": 8.5036,
-      "ms_after_beep": 8004,
+      "time": 12.981,
+      "ms_after_beep": 7981,
       "source": "detected",
-      "subclass": "paper"
+      "id": "cand-16",
+      "interval_class": "split",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 11,
       "candidate_number": 24,
-      "time": 10.5628,
+      "time": 15.063,
       "ms_after_beep": 10063,
       "source": "detected",
-      "subclass": "paper"
+      "id": "cand-24",
+      "interval_class": "movement",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 12,
       "candidate_number": 25,
-      "time": 11.0721,
-      "ms_after_beep": 10572,
+      "time": 15.54,
+      "ms_after_beep": 10540,
       "source": "detected",
-      "subclass": "paper"
+      "id": "cand-25",
+      "interval_class": "split",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 13,
       "candidate_number": 33,
-      "time": 13.4912,
-      "ms_after_beep": 12991,
+      "time": 17.992,
+      "ms_after_beep": 12992,
       "source": "detected",
-      "subclass": "paper"
+      "id": "cand-33",
+      "interval_class": "movement",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 14,
       "candidate_number": 35,
-      "time": 14.4004,
-      "ms_after_beep": 13900,
+      "time": 18.873,
+      "ms_after_beep": 13873,
       "source": "detected",
-      "subclass": "steel"
+      "id": "cand-35",
+      "interval_class": "split",
+      "interval_class_source": "auto"
     },
     {
       "shot_number": 15,
       "candidate_number": 37,
-      "time": 15.1698,
-      "ms_after_beep": 14670,
+      "time": 19.645,
+      "ms_after_beep": 14645,
       "source": "detected",
-      "subclass": "steel"
+      "id": "cand-37",
+      "interval_class": "split",
+      "interval_class_source": "auto"
     }
   ],
   "_candidates_pending_audit": {
-    "_note": "Auto-detected by current shot_detect (rise-foot leading edge with reverb-chain re-anchor). NOT ground truth.",
+    "_note": "4-voter ensemble (issue #31). vote_a/b/c/d=1 means the voter kept the candidate; ensemble_score = vote_total + apriori_boost. shots[] is seeded from candidates with ensemble_score >= consensus.",
+    "consensus": 3,
+    "expected_rounds": null,
     "candidates": [
       {
         "candidate_number": 1,
-        "time": 1.2239,
-        "ms_after_beep": 723.9,
+        "time": 5.7233,
+        "ms_after_beep": 723,
         "peak_amplitude": 0.249,
-        "confidence": 0.54
+        "confidence": 0.535,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 0,
+        "vote_d": 1,
+        "vote_total": 3,
+        "apriori_boost": 0,
+        "ensemble_score": 3,
+        "score_c": 0.0018,
+        "clap_diff": 0.1305,
+        "gunshot_prob": 0.0166
       },
       {
         "candidate_number": 2,
-        "time": 1.4779,
-        "ms_after_beep": 977.9,
+        "time": 6.002,
+        "ms_after_beep": 1002,
         "peak_amplitude": 0.0571,
-        "confidence": 0.16
+        "confidence": 0.163,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 0,
+        "vote_d": 1,
+        "vote_total": 3,
+        "apriori_boost": 0,
+        "ensemble_score": 3,
+        "score_c": 0.0009,
+        "clap_diff": 0.1451,
+        "gunshot_prob": 0.0063
       },
       {
         "candidate_number": 3,
-        "time": 2.2579,
-        "ms_after_beep": 1757.9,
+        "time": 6.7552,
+        "ms_after_beep": 1755,
         "peak_amplitude": 0.3326,
-        "confidence": 0.79
+        "confidence": 0.794,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 1,
+        "vote_d": 1,
+        "vote_total": 4,
+        "apriori_boost": 0,
+        "ensemble_score": 4,
+        "score_c": 0.9772,
+        "clap_diff": 0.4333,
+        "gunshot_prob": 0.0347
       },
       {
         "candidate_number": 4,
-        "time": 2.6978,
-        "ms_after_beep": 2197.8,
-        "peak_amplitude": 0.373,
-        "confidence": 0.27
+        "time": 7.1872,
+        "ms_after_beep": 2187,
+        "peak_amplitude": 0.265,
+        "confidence": 0.417,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 1,
+        "vote_d": 1,
+        "vote_total": 4,
+        "apriori_boost": 0,
+        "ensemble_score": 4,
+        "score_c": 0.9863,
+        "clap_diff": 0.4079,
+        "gunshot_prob": 0.0275
       },
       {
         "candidate_number": 5,
-        "time": 3.2638,
-        "ms_after_beep": 2763.8,
+        "time": 7.7895,
+        "ms_after_beep": 2789,
         "peak_amplitude": 0.2181,
-        "confidence": 0.24
+        "confidence": 0.239,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 1,
+        "vote_d": 1,
+        "vote_total": 4,
+        "apriori_boost": 0,
+        "ensemble_score": 4,
+        "score_c": 0.9816,
+        "clap_diff": 0.4075,
+        "gunshot_prob": 0.0218
       },
       {
         "candidate_number": 6,
-        "time": 3.7138,
-        "ms_after_beep": 3213.8,
+        "time": 8.2385,
+        "ms_after_beep": 3238,
         "peak_amplitude": 0.2292,
-        "confidence": 0.19
+        "confidence": 0.184,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 1,
+        "vote_d": 1,
+        "vote_total": 4,
+        "apriori_boost": 0,
+        "ensemble_score": 4,
+        "score_c": 0.9202,
+        "clap_diff": 0.3663,
+        "gunshot_prob": 0.0233
       },
       {
         "candidate_number": 7,
-        "time": 4.4767,
-        "ms_after_beep": 3976.7,
+        "time": 8.9741,
+        "ms_after_beep": 3974,
         "peak_amplitude": 0.1578,
-        "confidence": 0.23
+        "confidence": 0.225,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 1,
+        "vote_d": 1,
+        "vote_total": 4,
+        "apriori_boost": 0,
+        "ensemble_score": 4,
+        "score_c": 0.9909,
+        "clap_diff": 0.409,
+        "gunshot_prob": 0.2136
       },
       {
         "candidate_number": 8,
-        "time": 5.1477,
-        "ms_after_beep": 4647.7,
+        "time": 9.6445,
+        "ms_after_beep": 4645,
         "peak_amplitude": 0.1397,
-        "confidence": 0.28
+        "confidence": 0.281,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 1,
+        "vote_d": 1,
+        "vote_total": 4,
+        "apriori_boost": 0,
+        "ensemble_score": 4,
+        "score_c": 0.9707,
+        "clap_diff": 0.3823,
+        "gunshot_prob": 0.0363
       },
       {
         "candidate_number": 9,
-        "time": 5.6697,
-        "ms_after_beep": 5169.7,
+        "time": 10.1691,
+        "ms_after_beep": 5169,
         "peak_amplitude": 0.477,
-        "confidence": 0.24
+        "confidence": 0.24,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 1,
+        "vote_d": 1,
+        "vote_total": 4,
+        "apriori_boost": 0,
+        "ensemble_score": 4,
+        "score_c": 0.9817,
+        "clap_diff": 0.3196,
+        "gunshot_prob": 0.039
       },
       {
         "candidate_number": 10,
-        "time": 6.4386,
-        "ms_after_beep": 5938.6,
-        "peak_amplitude": 0.0896,
-        "confidence": 0.02
+        "time": 10.924,
+        "ms_after_beep": 5924,
+        "peak_amplitude": 0.0894,
+        "confidence": 0.02,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 0,
+        "vote_d": 1,
+        "vote_total": 3,
+        "apriori_boost": 0,
+        "ensemble_score": 3,
+        "score_c": 0.0081,
+        "clap_diff": 0.1609,
+        "gunshot_prob": 0.0528
       },
       {
         "candidate_number": 11,
-        "time": 6.7856,
-        "ms_after_beep": 6285.6,
+        "time": 11.2833,
+        "ms_after_beep": 6283,
         "peak_amplitude": 0.1177,
-        "confidence": 0.04
+        "confidence": 0.042,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 0,
+        "vote_d": 1,
+        "vote_total": 3,
+        "apriori_boost": 0,
+        "ensemble_score": 3,
+        "score_c": 0.0029,
+        "clap_diff": 0.1704,
+        "gunshot_prob": 0.0064
       },
       {
         "candidate_number": 12,
-        "time": 7.0086,
-        "ms_after_beep": 6508.6,
-        "peak_amplitude": 0.3591,
-        "confidence": 0.13
+        "time": 11.4959,
+        "ms_after_beep": 6496,
+        "peak_amplitude": 0.0492,
+        "confidence": 0.05,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 0,
+        "vote_d": 1,
+        "vote_total": 3,
+        "apriori_boost": 0,
+        "ensemble_score": 3,
+        "score_c": 0.0041,
+        "clap_diff": 0.1576,
+        "gunshot_prob": 0.0029
       },
       {
         "candidate_number": 13,
-        "time": 7.1356,
-        "ms_after_beep": 6635.6,
+        "time": 11.63,
+        "ms_after_beep": 6630,
         "peak_amplitude": 0.0757,
-        "confidence": 0.05
+        "confidence": 0.051,
+        "vote_a": 1,
+        "vote_b": 0,
+        "vote_c": 0,
+        "vote_d": 1,
+        "vote_total": 2,
+        "apriori_boost": 0,
+        "ensemble_score": 2,
+        "score_c": 0.0013,
+        "clap_diff": 0.1132,
+        "gunshot_prob": 0.003
       },
       {
         "candidate_number": 14,
-        "time": 7.6406,
-        "ms_after_beep": 7140.6,
+        "time": 12.1403,
+        "ms_after_beep": 7140,
         "peak_amplitude": 0.6214,
-        "confidence": 0.39
+        "confidence": 0.398,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 1,
+        "vote_d": 1,
+        "vote_total": 4,
+        "apriori_boost": 0,
+        "ensemble_score": 4,
+        "score_c": 0.9784,
+        "clap_diff": 0.3561,
+        "gunshot_prob": 0.1131
       },
       {
         "candidate_number": 15,
-        "time": 7.8995,
-        "ms_after_beep": 7399.5,
-        "peak_amplitude": 0.428,
-        "confidence": 0.19
+        "time": 12.3952,
+        "ms_after_beep": 7395,
+        "peak_amplitude": 0.4167,
+        "confidence": 0.19,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 1,
+        "vote_d": 1,
+        "vote_total": 4,
+        "apriori_boost": 0,
+        "ensemble_score": 4,
+        "score_c": 0.9472,
+        "clap_diff": 0.3724,
+        "gunshot_prob": 0.2576
       },
       {
         "candidate_number": 16,
-        "time": 8.4805,
-        "ms_after_beep": 7980.5,
+        "time": 13.004,
+        "ms_after_beep": 8004,
         "peak_amplitude": 0.2323,
-        "confidence": 0.21
+        "confidence": 0.216,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 1,
+        "vote_d": 1,
+        "vote_total": 4,
+        "apriori_boost": 0,
+        "ensemble_score": 4,
+        "score_c": 0.9504,
+        "clap_diff": 0.3205,
+        "gunshot_prob": 0.0224
       },
       {
         "candidate_number": 17,
-        "time": 8.8615,
-        "ms_after_beep": 8361.5,
-        "peak_amplitude": 0.2449,
-        "confidence": 0.06
+        "time": 13.382,
+        "ms_after_beep": 8382,
+        "peak_amplitude": 0.2459,
+        "confidence": 0.06,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 1,
+        "vote_d": 1,
+        "vote_total": 4,
+        "apriori_boost": 0,
+        "ensemble_score": 4,
+        "score_c": 0.1464,
+        "clap_diff": 0.3213,
+        "gunshot_prob": 0.0709
       },
       {
         "candidate_number": 18,
-        "time": 9.2425,
-        "ms_after_beep": 8742.5,
-        "peak_amplitude": 0.1566,
-        "confidence": 0.06
+        "time": 13.7661,
+        "ms_after_beep": 8766,
+        "peak_amplitude": 0.1565,
+        "confidence": 0.056,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 1,
+        "vote_d": 1,
+        "vote_total": 4,
+        "apriori_boost": 0,
+        "ensemble_score": 4,
+        "score_c": 0.0838,
+        "clap_diff": 0.2543,
+        "gunshot_prob": 0.0634
       },
       {
         "candidate_number": 19,
-        "time": 9.4364,
-        "ms_after_beep": 8936.4,
+        "time": 13.9269,
+        "ms_after_beep": 8927,
         "peak_amplitude": 0.0962,
-        "confidence": 0.01
+        "confidence": 0.013,
+        "vote_a": 0,
+        "vote_b": 1,
+        "vote_c": 0,
+        "vote_d": 1,
+        "vote_total": 2,
+        "apriori_boost": 0,
+        "ensemble_score": 2,
+        "score_c": 0.0021,
+        "clap_diff": 0.1546,
+        "gunshot_prob": 0.0696
       },
       {
         "candidate_number": 20,
-        "time": 9.5514,
-        "ms_after_beep": 9051.4,
+        "time": 14.0689,
+        "ms_after_beep": 9069,
         "peak_amplitude": 0.1141,
-        "confidence": 0.02
+        "confidence": 0.016,
+        "vote_a": 0,
+        "vote_b": 1,
+        "vote_c": 0,
+        "vote_d": 1,
+        "vote_total": 2,
+        "apriori_boost": 0,
+        "ensemble_score": 2,
+        "score_c": 0.0011,
+        "clap_diff": 0.1205,
+        "gunshot_prob": 0.1319
       },
       {
         "candidate_number": 21,
-        "time": 9.6954,
-        "ms_after_beep": 9195.4,
-        "peak_amplitude": 0.2089,
-        "confidence": 0.39
+        "time": 14.1862,
+        "ms_after_beep": 9186,
+        "peak_amplitude": 0.209,
+        "confidence": 0.392,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 0,
+        "vote_d": 1,
+        "vote_total": 3,
+        "apriori_boost": 0,
+        "ensemble_score": 3,
+        "score_c": 0.0032,
+        "clap_diff": 0.1769,
+        "gunshot_prob": 0.0665
       },
       {
         "candidate_number": 22,
-        "time": 9.7884,
-        "ms_after_beep": 9288.4,
+        "time": 14.2721,
+        "ms_after_beep": 9272,
         "peak_amplitude": 0.348,
-        "confidence": 0.18
+        "confidence": 0.183,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 0,
+        "vote_d": 1,
+        "vote_total": 3,
+        "apriori_boost": 0,
+        "ensemble_score": 3,
+        "score_c": 0.0061,
+        "clap_diff": 0.1725,
+        "gunshot_prob": 0.0805
       },
       {
         "candidate_number": 23,
-        "time": 10.1814,
-        "ms_after_beep": 9681.4,
-        "peak_amplitude": 0.0584,
-        "confidence": 0.01
+        "time": 14.6625,
+        "ms_after_beep": 9663,
+        "peak_amplitude": 0.0583,
+        "confidence": 0.009,
+        "vote_a": 0,
+        "vote_b": 1,
+        "vote_c": 0,
+        "vote_d": 1,
+        "vote_total": 2,
+        "apriori_boost": 0,
+        "ensemble_score": 2,
+        "score_c": 0.0031,
+        "clap_diff": 0.1905,
+        "gunshot_prob": 0.133
       },
       {
         "candidate_number": 24,
-        "time": 10.5634,
-        "ms_after_beep": 10063.4,
+        "time": 15.0632,
+        "ms_after_beep": 10063,
         "peak_amplitude": 0.5874,
-        "confidence": 0.49
+        "confidence": 0.493,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 1,
+        "vote_d": 1,
+        "vote_total": 4,
+        "apriori_boost": 0,
+        "ensemble_score": 4,
+        "score_c": 0.9799,
+        "clap_diff": 0.366,
+        "gunshot_prob": 0.0714
       },
       {
         "candidate_number": 25,
-        "time": 11.0724,
-        "ms_after_beep": 10572.4,
+        "time": 15.5725,
+        "ms_after_beep": 10573,
         "peak_amplitude": 0.5493,
-        "confidence": 0.22
+        "confidence": 0.222,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 1,
+        "vote_d": 1,
+        "vote_total": 4,
+        "apriori_boost": 0,
+        "ensemble_score": 4,
+        "score_c": 0.9392,
+        "clap_diff": 0.3943,
+        "gunshot_prob": 0.0126
       },
       {
         "candidate_number": 26,
-        "time": 11.8563,
-        "ms_after_beep": 11356.3,
-        "peak_amplitude": 0.331,
-        "confidence": 0.02
+        "time": 16.3562,
+        "ms_after_beep": 11356,
+        "peak_amplitude": 0.3311,
+        "confidence": 0.023,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 0,
+        "vote_d": 1,
+        "vote_total": 3,
+        "apriori_boost": 0,
+        "ensemble_score": 3,
+        "score_c": 0.0104,
+        "clap_diff": 0.1582,
+        "gunshot_prob": 0.0094
       },
       {
         "candidate_number": 27,
-        "time": 11.9733,
-        "ms_after_beep": 11473.3,
-        "peak_amplitude": 0.2014,
-        "confidence": 0.06
+        "time": 16.4715,
+        "ms_after_beep": 11471,
+        "peak_amplitude": 0.2018,
+        "confidence": 0.059,
+        "vote_a": 1,
+        "vote_b": 0,
+        "vote_c": 0,
+        "vote_d": 1,
+        "vote_total": 2,
+        "apriori_boost": 0,
+        "ensemble_score": 2,
+        "score_c": 0.0014,
+        "clap_diff": 0.0993,
+        "gunshot_prob": 0.0015
       },
       {
         "candidate_number": 28,
-        "time": 12.1643,
-        "ms_after_beep": 11664.3,
+        "time": 16.671,
+        "ms_after_beep": 11671,
         "peak_amplitude": 0.0836,
-        "confidence": 0.03
+        "confidence": 0.031,
+        "vote_a": 1,
+        "vote_b": 0,
+        "vote_c": 0,
+        "vote_d": 1,
+        "vote_total": 2,
+        "apriori_boost": 0,
+        "ensemble_score": 2,
+        "score_c": 0.0024,
+        "clap_diff": 0.0913,
+        "gunshot_prob": 0.0016
       },
       {
         "candidate_number": 29,
-        "time": 12.3133,
-        "ms_after_beep": 11813.3,
-        "peak_amplitude": 0.0827,
-        "confidence": 0.07
+        "time": 16.8023,
+        "ms_after_beep": 11802,
+        "peak_amplitude": 0.0822,
+        "confidence": 0.07,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 0,
+        "vote_d": 1,
+        "vote_total": 3,
+        "apriori_boost": 0,
+        "ensemble_score": 3,
+        "score_c": 0.0012,
+        "clap_diff": 0.1358,
+        "gunshot_prob": 0.004
       },
       {
         "candidate_number": 30,
-        "time": 12.4553,
-        "ms_after_beep": 11955.3,
+        "time": 16.9614,
+        "ms_after_beep": 11961,
         "peak_amplitude": 0.0984,
-        "confidence": 0.07
+        "confidence": 0.068,
+        "vote_a": 1,
+        "vote_b": 0,
+        "vote_c": 0,
+        "vote_d": 1,
+        "vote_total": 2,
+        "apriori_boost": 0,
+        "ensemble_score": 2,
+        "score_c": 0.0012,
+        "clap_diff": 0.0746,
+        "gunshot_prob": 0.0025
       },
       {
         "candidate_number": 31,
-        "time": 12.6773,
-        "ms_after_beep": 12177.3,
+        "time": 17.1964,
+        "ms_after_beep": 12196,
         "peak_amplitude": 0.0506,
-        "confidence": 0.02
+        "confidence": 0.022,
+        "vote_a": 1,
+        "vote_b": 0,
+        "vote_c": 0,
+        "vote_d": 1,
+        "vote_total": 2,
+        "apriori_boost": 0,
+        "ensemble_score": 2,
+        "score_c": 0.0012,
+        "clap_diff": 0.072,
+        "gunshot_prob": 0.0019
       },
       {
         "candidate_number": 32,
-        "time": 13.3072,
-        "ms_after_beep": 12807.2,
+        "time": 17.8059,
+        "ms_after_beep": 12806,
         "peak_amplitude": 0.051,
-        "confidence": 0.01
+        "confidence": 0.008,
+        "vote_a": 0,
+        "vote_b": 1,
+        "vote_c": 0,
+        "vote_d": 1,
+        "vote_total": 2,
+        "apriori_boost": 0,
+        "ensemble_score": 2,
+        "score_c": 0.0029,
+        "clap_diff": 0.3735,
+        "gunshot_prob": 0.2336
       },
       {
         "candidate_number": 33,
-        "time": 13.4922,
-        "ms_after_beep": 12992.2,
+        "time": 17.9916,
+        "ms_after_beep": 12992,
         "peak_amplitude": 0.6638,
-        "confidence": 0.62
+        "confidence": 0.613,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 1,
+        "vote_d": 1,
+        "vote_total": 4,
+        "apriori_boost": 0,
+        "ensemble_score": 4,
+        "score_c": 0.9907,
+        "clap_diff": 0.3844,
+        "gunshot_prob": 0.0708
       },
       {
         "candidate_number": 34,
-        "time": 14.2522,
-        "ms_after_beep": 13752.2,
+        "time": 18.7804,
+        "ms_after_beep": 13780,
         "peak_amplitude": 0.0331,
-        "confidence": 0.02
+        "confidence": 0.021,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 1,
+        "vote_d": 1,
+        "vote_total": 4,
+        "apriori_boost": 0,
+        "ensemble_score": 4,
+        "score_c": 0.0628,
+        "clap_diff": 0.387,
+        "gunshot_prob": 0.1649
       },
       {
         "candidate_number": 35,
-        "time": 14.3732,
-        "ms_after_beep": 13873.2,
-        "peak_amplitude": 0.2523,
-        "confidence": 0.23
+        "time": 18.898,
+        "ms_after_beep": 13898,
+        "peak_amplitude": 0.2538,
+        "confidence": 0.219,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 1,
+        "vote_d": 1,
+        "vote_total": 4,
+        "apriori_boost": 0,
+        "ensemble_score": 4,
+        "score_c": 0.9832,
+        "clap_diff": 0.3816,
+        "gunshot_prob": 0.182
       },
       {
         "candidate_number": 36,
-        "time": 14.9691,
-        "ms_after_beep": 14469.1,
+        "time": 19.4887,
+        "ms_after_beep": 14489,
         "peak_amplitude": 0.2765,
-        "confidence": 0.32
+        "confidence": 0.326,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 1,
+        "vote_d": 1,
+        "vote_total": 4,
+        "apriori_boost": 0,
+        "ensemble_score": 4,
+        "score_c": 0.1229,
+        "clap_diff": 0.3243,
+        "gunshot_prob": 0.0774
       },
       {
         "candidate_number": 37,
-        "time": 15.1451,
-        "ms_after_beep": 14645.1,
-        "peak_amplitude": 0.25,
-        "confidence": 0.21
+        "time": 19.6702,
+        "ms_after_beep": 14670,
+        "peak_amplitude": 0.2499,
+        "confidence": 0.212,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 1,
+        "vote_d": 1,
+        "vote_total": 4,
+        "apriori_boost": 0,
+        "ensemble_score": 4,
+        "score_c": 0.8633,
+        "clap_diff": 0.3175,
+        "gunshot_prob": 0.0255
       },
       {
         "candidate_number": 38,
-        "time": 15.7221,
-        "ms_after_beep": 15222.1,
+        "time": 20.2337,
+        "ms_after_beep": 15234,
         "peak_amplitude": 0.2391,
-        "confidence": 0.25
+        "confidence": 0.249,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 1,
+        "vote_d": 1,
+        "vote_total": 4,
+        "apriori_boost": 0,
+        "ensemble_score": 4,
+        "score_c": 0.154,
+        "clap_diff": 0.3048,
+        "gunshot_prob": 0.0273
       },
       {
         "candidate_number": 39,
-        "time": 15.9451,
-        "ms_after_beep": 15445.1,
+        "time": 20.4276,
+        "ms_after_beep": 15428,
         "peak_amplitude": 0.092,
-        "confidence": 0.06
+        "confidence": 0.065,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 0,
+        "vote_d": 1,
+        "vote_total": 3,
+        "apriori_boost": 0,
+        "ensemble_score": 3,
+        "score_c": 0.0017,
+        "clap_diff": 0.1809,
+        "gunshot_prob": 0.0163
       },
       {
         "candidate_number": 40,
-        "time": 16.1661,
-        "ms_after_beep": 15666.1,
+        "time": 20.6656,
+        "ms_after_beep": 15666,
         "peak_amplitude": 0.2669,
-        "confidence": 0.39
+        "confidence": 0.386,
+        "vote_a": 1,
+        "vote_b": 1,
+        "vote_c": 0,
+        "vote_d": 1,
+        "vote_total": 3,
+        "apriori_boost": 0,
+        "ensemble_score": 3,
+        "score_c": 0.0029,
+        "clap_diff": 0.1647,
+        "gunshot_prob": 0.0086
       }
-    ],
-    "labels_by_time": {
-      "1.224": "handling",
-      "9.695": "handling",
-      "14.969": "steel_ring",
-      "15.722": "steel_ring",
-      "16.166": "handling",
-      "1.478": "movement",
-      "6.439": "movement",
-      "6.786": "cross_bay",
-      "7.009": "cross_bay",
-      "8.861": "wind",
-      "9.242": "wind",
-      "9.788": "handling",
-      "11.856": "wind",
-      "12.313": "movement",
-      "14.252": "cross_bay",
-      "15.945": "handling",
-      "7.136": "cross_bay",
-      "9.436": "handling",
-      "9.569": "handling",
-      "10.181": "wind",
-      "11.973": "movement",
-      "12.164": "movement",
-      "12.455": "movement",
-      "12.677": "movement",
-      "13.307": "movement"
+    ]
+  },
+  "audit_events": [
+    {
+      "ts": "2026-05-04T13:09:51.863431+00:00",
+      "kind": "shot_detect_run",
+      "payload": {
+        "candidate_count": 40,
+        "kept_count": 20,
+        "consensus": 3,
+        "expected_rounds": null,
+        "seeded_shots": true
+      },
+      "id": "19f8ac4748ef4b14a76b99c910442407"
+    },
+    {
+      "ts": "2026-05-04T13:13:05.995Z",
+      "kind": "marker_rejected",
+      "payload": {
+        "id": "cand-17",
+        "time": 13.382,
+        "candidate_number": 17
+      },
+      "id": "706edd8a6a3d42b59b3d6c229f9f3d46"
+    },
+    {
+      "ts": "2026-05-04T13:13:06.787Z",
+      "kind": "marker_rejected",
+      "payload": {
+        "id": "cand-18",
+        "time": 13.7661,
+        "candidate_number": 18
+      },
+      "id": "4fef531fa7a24a00ada7cb7b4e9bf9f1"
+    },
+    {
+      "ts": "2026-05-04T13:13:10.220Z",
+      "kind": "marker_rejected",
+      "payload": {
+        "id": "cand-35",
+        "time": 18.898,
+        "candidate_number": 35
+      },
+      "id": "f6959201f43f485fb88a65b7847702d5"
+    },
+    {
+      "ts": "2026-05-04T13:13:20.016Z",
+      "kind": "marker_rejected",
+      "payload": {
+        "id": "cand-34",
+        "time": 18.7804,
+        "candidate_number": 34
+      },
+      "id": "795252dac48446c681845efa6d00561b"
+    },
+    {
+      "ts": "2026-05-04T13:13:21.058Z",
+      "kind": "marker_kept",
+      "payload": {
+        "id": "cand-35",
+        "time": 18.898,
+        "candidate_number": 35
+      },
+      "id": "59483e2ae9ab49ce87b8efa713e513dd"
+    },
+    {
+      "ts": "2026-05-04T13:13:24.372Z",
+      "kind": "marker_rejected",
+      "payload": {
+        "id": "cand-36",
+        "time": 19.4887,
+        "candidate_number": 36
+      },
+      "id": "4d0200576dd14f3e9446bfe66f387df2"
+    },
+    {
+      "ts": "2026-05-04T13:13:26.832Z",
+      "kind": "marker_rejected",
+      "payload": {
+        "id": "cand-38",
+        "time": 20.2337,
+        "candidate_number": 38
+      },
+      "id": "5b4fc5be7a444bae8a3f8c9efb713ee8"
+    },
+    {
+      "ts": "2026-05-04T13:13:34.699Z",
+      "kind": "save",
+      "payload": {
+        "shots_count": 15
+      },
+      "id": "23ba0a3aa11b430fbe3c75067e264367"
+    },
+    {
+      "ts": "2026-05-06T12:48:50.071111+00:00",
+      "kind": "coach_reclassify",
+      "payload": {
+        "shot_count": 15
+      },
+      "id": "f65862ed154d40f28184a523b17be9d7"
+    },
+    {
+      "ts": "2026-10-16T08:19:13.975Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-5",
+        "from_time": 7.79,
+        "to_time": 7.765,
+        "reason": "earlier_rise"
+      },
+      "id": "7c448f6b455d409e96714d51f9d1ddab"
+    },
+    {
+      "ts": "2026-10-16T08:19:14.785Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-6",
+        "from_time": 8.239,
+        "to_time": 8.214,
+        "reason": "earlier_rise"
+      },
+      "id": "51c6e445696c4750a22009846e1ba7da"
+    },
+    {
+      "ts": "2026-10-16T08:19:24.297Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-16",
+        "from_time": 13.004,
+        "to_time": 12.981,
+        "reason": "earlier_rise"
+      },
+      "id": "b12c045843984956a3ff4a5f7b4b8002"
+    },
+    {
+      "ts": "2026-10-16T08:19:29.479Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-25",
+        "from_time": 15.573,
+        "to_time": 15.54,
+        "reason": "earlier_rise"
+      },
+      "id": "b1c82799629441979182f98947634875"
+    },
+    {
+      "ts": "2026-10-16T08:19:34.979Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-35",
+        "from_time": 18.898,
+        "to_time": 18.873,
+        "reason": "earlier_rise"
+      },
+      "id": "a59fd5635551482bbc0e2eac75daf5aa"
+    },
+    {
+      "ts": "2026-10-16T08:19:36.865Z",
+      "kind": "marker_time_changed",
+      "payload": {
+        "id": "cand-37",
+        "from_time": 19.67,
+        "to_time": 19.645,
+        "reason": "earlier_rise"
+      },
+      "id": "59d8b339a3a1453d91c81611cfad048d"
+    },
+    {
+      "ts": "2026-10-16T08:19:40.055Z",
+      "kind": "save",
+      "payload": {
+        "shots_count": 15
+      },
+      "id": "6b362e3a678e48489c07c2a59401739f"
     }
+  ],
+  "promoted_at": "2026-10-16T09:01:09.400649+00:00",
+  "provenance": {
+    "stage_number": 3,
+    "stage_name": "Per told me to do it!"
   },
-  "stage_rounds": {
-    "paper": 5,
-    "poppers": 2,
-    "plates": 0,
-    "shots_per_paper": 2,
-    "expected": 12
-  },
+  "source_video": "/Volumes/X9/matches/tallmilan-2026/shooters/s_3deb12ee/raw/VID_20260426_165837_00_049.mp4",
+  "fixture_window_in_source": [
+    14.8924,
+    39.6324
+  ],
   "camera": {
     "id": "go3s",
     "make": "Insta360",
@@ -461,30 +1036,16 @@
     "agc_state": "unknown",
     "sample_rate": 48000,
     "bit_depth": null,
-    "audio_codec": null
-  },
-  "history": [],
-  "venue": {
-    "environment": "outdoor",
-    "surface": "unknown"
-  },
-  "gun": {
-    "calibre": "9mm",
-    "muzzle_device": "none",
-    "action": "semi-auto",
-    "power_factor": "minor"
+    "audio_codec": "aac"
   },
   "shooter": {
     "id": "s97dcec94"
   },
   "event_id": "tallmilan-2026:3:s97dcec94",
-  "source_video": "/Volumes/X9/raw/2026-tallmilan/mathias/head/VID_20260426_165837_00_049.mp4",
   "review": {
-    "status": "needs_review",
-    "derived_from": null,
-    "reviewed_at": null,
-    "note": "shot times predate the rise-foot definition (docs/METHODOLOGY.md, 2026-10-10): check each shot's leading edge",
-    "previous_status": "reviewed",
-    "previous_reviewed_at": null
+    "confirmed_at": "2026-10-16T09:01:33.980576+00:00",
+    "status": "reviewed",
+    "reviewed_at": "2026-10-16T09:01:33.980576+00:00",
+    "method": "own-audit"
   }
 }

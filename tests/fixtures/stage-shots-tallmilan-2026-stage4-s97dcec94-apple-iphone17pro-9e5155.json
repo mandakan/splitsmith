@@ -18,69 +18,76 @@
       "time": 7.813,
       "ms_after_beep": 2813,
       "source": "promoted",
-      "subclass": "barrel",
-      "snap_displacement_ms": -1.53,
-      "sanity_flag": ""
+      "subclass": "unknown",
+      "snap_displacement_ms": 1.37,
+      "sanity_flag": "",
+      "seat_ms": 0.0
     },
     {
       "shot_number": 2,
       "candidate_number": 3,
-      "time": 8.399,
-      "ms_after_beep": 3399,
+      "time": 8.397,
+      "ms_after_beep": 3397,
       "source": "promoted",
-      "subclass": "barrel",
-      "snap_displacement_ms": -31.3,
-      "sanity_flag": ""
+      "subclass": "unknown",
+      "snap_displacement_ms": -1.77,
+      "sanity_flag": "",
+      "seat_ms": -2.0
     },
     {
       "shot_number": 3,
       "candidate_number": 4,
-      "time": 9.023,
-      "ms_after_beep": 4023,
+      "time": 9.02,
+      "ms_after_beep": 4020,
       "source": "promoted",
-      "subclass": "barrel",
-      "snap_displacement_ms": -32.09,
-      "sanity_flag": ""
+      "subclass": "unknown",
+      "snap_displacement_ms": -1.91,
+      "sanity_flag": "",
+      "seat_ms": -3.0
     },
     {
       "shot_number": 4,
       "candidate_number": 5,
-      "time": 9.603,
-      "ms_after_beep": 4603,
+      "time": 9.602,
+      "ms_after_beep": 4602,
       "source": "promoted",
-      "subclass": "barrel",
-      "snap_displacement_ms": -33.82,
-      "sanity_flag": ""
+      "subclass": "unknown",
+      "snap_displacement_ms": -8.04,
+      "sanity_flag": "",
+      "seat_ms": -1.0
     },
     {
       "shot_number": 5,
       "candidate_number": 6,
-      "time": 10.138,
-      "ms_after_beep": 5138,
+      "time": 10.136,
+      "ms_after_beep": 5136,
       "source": "promoted",
-      "subclass": "barrel",
-      "snap_displacement_ms": -33.49,
-      "sanity_flag": ""
+      "subclass": "unknown",
+      "snap_displacement_ms": -8.16,
+      "sanity_flag": "",
+      "seat_ms": -2.0
     },
     {
       "shot_number": 6,
       "candidate_number": 7,
-      "time": 10.706,
-      "ms_after_beep": 5706,
+      "time": 10.705,
+      "ms_after_beep": 5705,
       "source": "promoted",
-      "subclass": "barrel",
-      "snap_displacement_ms": -26.19,
-      "sanity_flag": ""
+      "subclass": "unknown",
+      "snap_displacement_ms": -2.29,
+      "sanity_flag": "",
+      "seat_ms": -1.0
     },
     {
       "shot_number": 7,
       "candidate_number": 8,
-      "time": 11.195,
-      "ms_after_beep": 6195,
+      "time": 11.194,
+      "ms_after_beep": 6194,
       "source": "promoted",
-      "subclass": "barrel",
-      "snap_displacement_ms": -27.81,
-      "sanity_flag": ""
+      "subclass": "unknown",
+      "snap_displacement_ms": -7.4,
+      "sanity_flag": "",
+      "seat_ms": -1.0
     },
     {
       "shot_number": 8,
@@ -88,117 +95,128 @@
       "time": 13.868,
       "ms_after_beep": 8868,
       "source": "promoted",
-      "subclass": "barrel",
-      "snap_displacement_ms": -7.13,
-      "sanity_flag": ""
+      "subclass": "unknown",
+      "snap_displacement_ms": 2.0,
+      "sanity_flag": "",
+      "seat_ms": 0.0
     },
     {
       "shot_number": 9,
       "candidate_number": 10,
-      "time": 14.704,
-      "ms_after_beep": 9704,
+      "time": 14.703,
+      "ms_after_beep": 9703,
       "source": "promoted",
-      "subclass": "barrel",
-      "snap_displacement_ms": -11.19,
-      "sanity_flag": ""
+      "subclass": "unknown",
+      "snap_displacement_ms": -1.19,
+      "sanity_flag": "",
+      "seat_ms": -1.0
     },
     {
       "shot_number": 10,
       "candidate_number": 11,
-      "time": 15.424,
-      "ms_after_beep": 10424,
+      "time": 15.423,
+      "ms_after_beep": 10423,
       "source": "promoted",
-      "subclass": "barrel",
-      "snap_displacement_ms": -12.09,
-      "sanity_flag": ""
+      "subclass": "unknown",
+      "snap_displacement_ms": -1.35,
+      "sanity_flag": "",
+      "seat_ms": -1.0
     },
     {
       "shot_number": 11,
       "candidate_number": 15,
-      "time": 19.048,
-      "ms_after_beep": 14048,
+      "time": 19.047,
+      "ms_after_beep": 14047,
       "source": "promoted",
-      "subclass": "barrel",
-      "snap_displacement_ms": -16.64,
-      "sanity_flag": ""
+      "subclass": "unknown",
+      "snap_displacement_ms": -2.17,
+      "sanity_flag": "",
+      "seat_ms": -1.0
     },
     {
       "shot_number": 12,
       "candidate_number": 17,
-      "time": 19.935,
-      "ms_after_beep": 14935,
+      "time": 19.93,
+      "ms_after_beep": 14930,
       "source": "promoted",
-      "subclass": "barrel",
-      "snap_displacement_ms": -17.76,
-      "sanity_flag": ""
+      "subclass": "unknown",
+      "snap_displacement_ms": -2.37,
+      "sanity_flag": "",
+      "seat_ms": -5.0
     },
     {
       "shot_number": 13,
       "candidate_number": 20,
-      "time": 23.4,
-      "ms_after_beep": 18400,
+      "time": 23.39,
+      "ms_after_beep": 18390,
       "source": "promoted",
-      "subclass": "barrel",
-      "snap_displacement_ms": -22.11,
-      "sanity_flag": ""
+      "subclass": "unknown",
+      "snap_displacement_ms": -3.15,
+      "sanity_flag": "",
+      "seat_ms": -10.0
     },
     {
       "shot_number": 14,
       "candidate_number": 21,
-      "time": 24.511,
-      "ms_after_beep": 19511,
+      "time": 24.509,
+      "ms_after_beep": 19509,
       "source": "promoted",
-      "subclass": "barrel",
-      "snap_displacement_ms": -23.5,
-      "sanity_flag": ""
+      "subclass": "unknown",
+      "snap_displacement_ms": -3.4,
+      "sanity_flag": "",
+      "seat_ms": -2.0
     },
     {
       "shot_number": 15,
       "candidate_number": 22,
-      "time": 25.179,
-      "ms_after_beep": 20179,
+      "time": 25.178,
+      "ms_after_beep": 20178,
       "source": "promoted",
-      "subclass": "barrel",
-      "snap_displacement_ms": -24.34,
-      "sanity_flag": ""
+      "subclass": "unknown",
+      "snap_displacement_ms": -3.55,
+      "sanity_flag": "",
+      "seat_ms": -1.0
     },
     {
       "shot_number": 16,
       "candidate_number": 23,
-      "time": 25.878,
-      "ms_after_beep": 20878,
+      "time": 25.877,
+      "ms_after_beep": 20877,
       "source": "promoted",
-      "subclass": "barrel",
-      "snap_displacement_ms": -24.22,
-      "sanity_flag": ""
+      "subclass": "unknown",
+      "snap_displacement_ms": -2.71,
+      "sanity_flag": "",
+      "seat_ms": -1.0
     },
     {
       "shot_number": 17,
       "candidate_number": 24,
-      "time": 26.703,
-      "ms_after_beep": 21703,
+      "time": 26.701,
+      "ms_after_beep": 21701,
       "source": "promoted",
-      "subclass": "barrel",
-      "snap_displacement_ms": -25.25,
-      "sanity_flag": ""
+      "subclass": "unknown",
+      "snap_displacement_ms": -2.9,
+      "sanity_flag": "",
+      "seat_ms": -2.0
     },
     {
       "shot_number": 18,
       "candidate_number": 25,
-      "time": 27.271,
-      "ms_after_beep": 22271,
+      "time": 27.27,
+      "ms_after_beep": 22270,
       "source": "promoted",
-      "subclass": "barrel",
-      "snap_displacement_ms": -26.97,
-      "sanity_flag": ""
+      "subclass": "unknown",
+      "snap_displacement_ms": -4.03,
+      "sanity_flag": "",
+      "seat_ms": -1.0
     }
   ],
   "_candidates_pending_audit": {
     "candidates": [
       {
         "candidate_number": 1,
-        "time": 5.6516,
-        "ms_after_beep": 652,
+        "time": 5.664,
+        "ms_after_beep": 664,
         "peak_amplitude": 0.0056,
         "confidence": 0.047,
         "vote_a": 1,
@@ -217,8 +235,8 @@
       },
       {
         "candidate_number": 2,
-        "time": 7.8251,
-        "ms_after_beep": 2825,
+        "time": 7.813,
+        "ms_after_beep": 2813,
         "peak_amplitude": 0.2979,
         "confidence": 0.144,
         "vote_a": 1,
@@ -237,8 +255,8 @@
       },
       {
         "candidate_number": 3,
-        "time": 8.4337,
-        "ms_after_beep": 3434,
+        "time": 8.39,
+        "ms_after_beep": 3390,
         "peak_amplitude": 0.3002,
         "confidence": 0.146,
         "vote_a": 1,
@@ -257,8 +275,8 @@
       },
       {
         "candidate_number": 4,
-        "time": 9.0181,
-        "ms_after_beep": 4018,
+        "time": 9.02,
+        "ms_after_beep": 4020,
         "peak_amplitude": 0.1056,
         "confidence": 0.227,
         "vote_a": 1,
@@ -277,7 +295,7 @@
       },
       {
         "candidate_number": 5,
-        "time": 9.6016,
+        "time": 9.602,
         "ms_after_beep": 4602,
         "peak_amplitude": 0.5968,
         "confidence": 0.342,
@@ -297,8 +315,8 @@
       },
       {
         "candidate_number": 6,
-        "time": 10.1335,
-        "ms_after_beep": 5134,
+        "time": 10.136,
+        "ms_after_beep": 5136,
         "peak_amplitude": 0.3665,
         "confidence": 0.378,
         "vote_a": 1,
@@ -317,8 +335,8 @@
       },
       {
         "candidate_number": 7,
-        "time": 10.7038,
-        "ms_after_beep": 5704,
+        "time": 10.705,
+        "ms_after_beep": 5705,
         "peak_amplitude": 0.6354,
         "confidence": 0.326,
         "vote_a": 1,
@@ -357,8 +375,8 @@
       },
       {
         "candidate_number": 9,
-        "time": 13.8673,
-        "ms_after_beep": 8867,
+        "time": 13.868,
+        "ms_after_beep": 8868,
         "peak_amplitude": 0.6861,
         "confidence": 0.177,
         "vote_a": 1,
@@ -377,8 +395,8 @@
       },
       {
         "candidate_number": 10,
-        "time": 14.698,
-        "ms_after_beep": 9698,
+        "time": 14.703,
+        "ms_after_beep": 9703,
         "peak_amplitude": 0.0326,
         "confidence": 0.085,
         "vote_a": 1,
@@ -397,7 +415,7 @@
       },
       {
         "candidate_number": 11,
-        "time": 15.4226,
+        "time": 15.423,
         "ms_after_beep": 10423,
         "peak_amplitude": 0.6792,
         "confidence": 0.182,
@@ -477,8 +495,8 @@
       },
       {
         "candidate_number": 15,
-        "time": 19.0391,
-        "ms_after_beep": 14039,
+        "time": 19.047,
+        "ms_after_beep": 14047,
         "peak_amplitude": 0.0443,
         "confidence": 0.11,
         "vote_a": 1,
@@ -497,8 +515,8 @@
       },
       {
         "candidate_number": 16,
-        "time": 19.6154,
-        "ms_after_beep": 14615,
+        "time": 19.59,
+        "ms_after_beep": 14590,
         "peak_amplitude": 0.0977,
         "confidence": 0.083,
         "vote_a": 1,
@@ -517,8 +535,8 @@
       },
       {
         "candidate_number": 17,
-        "time": 19.9262,
-        "ms_after_beep": 14926,
+        "time": 19.93,
+        "ms_after_beep": 14930,
         "peak_amplitude": 0.0417,
         "confidence": 0.154,
         "vote_a": 1,
@@ -577,7 +595,7 @@
       },
       {
         "candidate_number": 20,
-        "time": 23.3898,
+        "time": 23.39,
         "ms_after_beep": 18390,
         "peak_amplitude": 0.0926,
         "confidence": 0.308,
@@ -597,8 +615,8 @@
       },
       {
         "candidate_number": 21,
-        "time": 24.5221,
-        "ms_after_beep": 19522,
+        "time": 24.509,
+        "ms_after_beep": 19509,
         "peak_amplitude": 0.3293,
         "confidence": 0.127,
         "vote_a": 1,
@@ -617,8 +635,8 @@
       },
       {
         "candidate_number": 22,
-        "time": 25.1737,
-        "ms_after_beep": 20174,
+        "time": 25.178,
+        "ms_after_beep": 20178,
         "peak_amplitude": 0.0729,
         "confidence": 0.18,
         "vote_a": 1,
@@ -637,8 +655,8 @@
       },
       {
         "candidate_number": 23,
-        "time": 25.873,
-        "ms_after_beep": 20873,
+        "time": 25.877,
+        "ms_after_beep": 20877,
         "peak_amplitude": 0.0702,
         "confidence": 0.212,
         "vote_a": 1,
@@ -657,8 +675,8 @@
       },
       {
         "candidate_number": 24,
-        "time": 26.6997,
-        "ms_after_beep": 21700,
+        "time": 26.701,
+        "ms_after_beep": 21701,
         "peak_amplitude": 0.8448,
         "confidence": 0.368,
         "vote_a": 1,
@@ -677,8 +695,8 @@
       },
       {
         "candidate_number": 25,
-        "time": 27.2694,
-        "ms_after_beep": 22269,
+        "time": 27.27,
+        "ms_after_beep": 22270,
         "peak_amplitude": 0.7711,
         "confidence": 0.35,
         "vote_a": 1,
@@ -718,15 +736,16 @@
   },
   "anchor": {
     "fixture_slug": "stage4-revenge-of-the-tunnor",
-    "revision_sha": "3f9485e9bb2723043ff0c7c3e30a3b99397ef900ec1fc3f0cd236edbbcfaae94",
-    "promoted_at": "2026-10-10T05:24:23.795723+00:00",
+    "revision_sha": "fe4349c4e6f8726ab4407d446fa606f5ab7618ab9cf567b39cdddfd3e8060936",
+    "promoted_at": "2026-10-16T09:01:25.893117+00:00",
     "offset_seconds": 16.178,
     "drift_ms_per_minute": 0.0,
-    "snap_window_ms": 60
+    "snap_window_ms": 60,
+    "seated": true
   },
   "history": [
     {
-      "at": "2026-10-10T05:24:23.795740+00:00",
+      "at": "2026-10-16T09:01:25.893139+00:00",
       "action": "promote-from-anchor",
       "tool_version": "0.1.0",
       "details": {
@@ -744,8 +763,10 @@
     }
   ],
   "review": {
-    "status": "needs_review",
+    "status": "reviewed",
     "derived_from": "stage4-revenge-of-the-tunnor",
-    "reviewed_at": null
+    "reviewed_at": "2026-10-16T09:05:50.243448+00:00",
+    "confirmed_at": "2026-10-16T09:05:50.243448+00:00",
+    "method": "audit"
   }
 }
