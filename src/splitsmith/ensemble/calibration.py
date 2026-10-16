@@ -35,6 +35,7 @@ import numpy as np
 from pydantic import BaseModel, Field
 
 from ..runtime import runtime
+from .decoder import StageDecoder
 
 # Coarse camera classes the ensemble stratifies thresholds on. Keeping the
 # vocabulary small on purpose: we only stratify per-voter thresholds today,
@@ -261,6 +262,16 @@ class EnsembleCalibration(BaseModel):
             "Class used when the caller does not provide one or provides "
             "a class with no calibrated thresholds. Default ``headcam`` "
             "preserves byte-identical behaviour for existing projects."
+        ),
+    )
+    decoder: StageDecoder | None = Field(
+        default=None,
+        description=(
+            "Whole-stage decoder (``ensemble.decoder``), experimental: fitted "
+            "by the build on leave-one-match-out voter C scores. ``None`` on "
+            "artifacts built before it; the runtime uses it only when "
+            "``EnsembleConfig.stage_decoder`` (or SPLITSMITH_STAGE_DECODER=1) "
+            "asks for it."
         ),
     )
     thresholds_by_camera_class: dict[str, ClassThresholds] | None = Field(

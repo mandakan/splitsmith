@@ -8,6 +8,7 @@ the per-candidate universe voter A produces.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,7 @@ from pydantic import BaseModel, Field
 
 from ..config import ShotDetectConfig
 from ..shot_detect import detect_shots
+from . import decoder as dec
 from . import features as feat
 from . import visual as vis
 from . import voters
@@ -28,9 +30,24 @@ from .calibration import (
 )
 from .tta import compute_tta_agreement
 
+#: Overrides ``EnsembleConfig.stage_decoder``: "0" keeps the consensus vote
+#: (the escape hatch), "1" forces the whole-stage decoder (A/B runs).
+ENV_STAGE_DECODER = "SPLITSMITH_STAGE_DECODER"
+
 
 class EnsembleConfig(BaseModel):
     """Tunable parameters that don't depend on the calibration set."""
+
+    stage_decoder: bool = Field(
+        default=True,
+        description=(
+            "Let the calibration's whole-stage decoder (``ensemble.decoder``) "
+            "choose the kept candidates instead of the consensus vote and the "
+            "headcam amplitude veto. SPLITSMITH_STAGE_DECODER=0 turns it off "
+            "and =1 on, whatever this says. A calibration without a decoder "
+            "keeps the consensus."
+        ),
+    )
 
     consensus: int = Field(
         default=2,
@@ -169,6 +186,13 @@ class EnsembleCandidate(BaseModel):
     )
     kept: bool = Field(
         description="True when this candidate is part of the consensus shots set.",
+    )
+    decoder_prob: float | None = Field(
+        default=None,
+        description=(
+            "The whole-stage decoder's recalibrated P(shot), when the decoder "
+            "chose the kept set; ``None`` under the consensus vote."
+        ),
     )
     amp_floor_vetoed: bool = Field(
         default=False,
@@ -403,6 +427,25 @@ def detect_shots_ensemble(
             amp_floor_vetoed = keep_mask & ~new_keep
             keep_mask = new_keep
 
+    decoder_probs: np.ndarray | None = None
+    env_decoder = os.environ.get(ENV_STAGE_DECODER)
+    decoder_on = {"0": False, "1": True}.get(env_decoder or "", cfg.stage_decoder)
+    if cal.decoder is not None and decoder_on:
+        decoder_probs = dec.shot_probabilities(
+            cal.decoder,
+            dec.decoder_features(score_c, clap_diff, gunshot_prob, confidences, peak_amps, vb),
+        )
+        keep_mask = dec.decode_stage(
+            cal.decoder,
+            shot_times,
+            decoder_probs,
+            beep_time=beep_time,
+            stage_time=stage_time,
+            clip_duration=len(audio) / sample_rate,
+            expected_rounds=expected_rounds,
+        )
+        amp_floor_vetoed = np.zeros(n, dtype=bool)
+
     candidates: list[EnsembleCandidate] = []
     for i in range(n):
         candidates.append(
@@ -424,6 +467,7 @@ def detect_shots_ensemble(
                 gunshot_prob=round(float(gunshot_prob[i]), 4),
                 voter_e_signal=round(float(voter_e_signal[i]), 4),
                 kept=bool(keep_mask[i]),
+                decoder_prob=None if decoder_probs is None else round(float(decoder_probs[i]), 4),
                 amp_floor_vetoed=bool(amp_floor_vetoed[i]),
             )
         )
