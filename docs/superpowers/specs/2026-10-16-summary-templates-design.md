@@ -52,10 +52,13 @@ safe_area on an upright canvas, as cards get it
           <meta name="splitsmith-data" content="scoring,ammo,bursts">
 ```
 
-`figures` is new and is the one place the summary's numbers are computed:
-`stage_summary_data.stage_summary_figures(tile) -> StageSummaryFigures`
-(Pydantic), extracted from `overlay_summary_cell.summary_groups` and read
-back by it, so the engine card and a template can never disagree:
+`figures` is new: `stage_summary_data.stage_summary_figures(tile) ->
+StageSummaryFigures` (Pydantic). It calls the same rule owners the engine
+card calls (`coach.statistic_split_shots`, `events.exposed_reload_s`, the
+scorecard), and `tests/test_stage_summary_figures.py` holds its numbers
+against the engine card's own text on the same stages, so the two can
+never disagree. (`summary_groups` keeps formatting inline: it serves three
+layouts and the grid, and rewiring it would risk pixels for nothing.)
 
 ```
 time_seconds, time_is_manual, hit_factor, stage_pct, points,

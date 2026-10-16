@@ -18,10 +18,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel, Field
+
 from .audit_data import audit_shots_to_engine_shots, read_audit_data
-from .coach import heal_unclassified
+from .coach import heal_unclassified, statistic_split_shots
 from .config import IntervalClass, StageEvent, StageRounds
-from .events import ReloadFigure, confirmed_from_doc, reload_figures, shot_is_moving
+from .events import ReloadFigure, confirmed_from_doc, exposed_reload_s, reload_figures, shot_is_moving
 from .match_project import StageScorecard, is_stub_audit
 
 logger = logging.getLogger(__name__)
@@ -194,4 +196,118 @@ def load_stage_shots(audit_path: Path) -> tuple[TileShot, ...]:
     return tuple(shots)
 
 
-__all__ = ["TileShot", "TileStageData", "load_stage_reloads", "load_stage_shots"]
+class SplitFigures(BaseModel):
+    """Best / Avg / Worst over a set of splits, and how many there were."""
+
+    best: float
+    avg: float
+    worst: float
+    n: int
+
+
+class ReloadSummary(BaseModel):
+    """The stage's confirmed reloads: count, mean duration, exposed time."""
+
+    count: int
+    avg: float
+    exposed: float
+
+
+class StageSummaryFigures(BaseModel):
+    """The numbers a stage summary shows, as data (spec
+    ``2026-10-16-summary-templates-design``): what a summary template reads
+    as ``data.figures``. Each comes from the rule that owns it, the one the
+    engine card calls too (``coach.statistic_split_shots``,
+    ``events.exposed_reload_s``, the scorecard), so a template and the
+    engine card never disagree; ``tests/test_stage_summary_figures.py`` holds
+    the two side by side. Absent stays ``None``: nothing here invents a zero.
+    A DQ keeps its time and drops its scoring, as the engine card does."""
+
+    time_seconds: float | None = None
+    time_is_manual: bool = False
+    hit_factor: float | None = None
+    stage_pct: float | None = None
+    points: float | None = None
+    #: The scorecard's counts, by tag (A, C, D, M, NS, P); a column the
+    #: scoreboard never carried is left out.
+    counts: dict[str, int] = Field(default_factory=dict)
+    draw: float | None = None
+    splits: SplitFigures | None = None
+    #: Static and moving splits, both set only when the stage has confirmed
+    #: movement covering at least one split and at least one split outside.
+    static: SplitFigures | None = None
+    moving: SplitFigures | None = None
+    reloads: ReloadSummary | None = None
+    rounds: int = 0
+    min_rounds: int | None = None
+    dq: bool = False
+
+
+_COUNT_TAGS = (
+    ("A", "alphas"),
+    ("C", "charlies"),
+    ("D", "deltas"),
+    ("M", "misses"),
+    ("NS", "no_shoots"),
+    ("P", "procedurals"),
+)
+
+
+def _split_figures(splits: list[float]) -> SplitFigures | None:
+    if not splits:
+        return None
+    return SplitFigures(
+        best=round(min(splits), 6),
+        avg=round(sum(splits) / len(splits), 6),
+        worst=round(max(splits), 6),
+        n=len(splits),
+    )
+
+
+def stage_summary_figures(tile: TileStageData) -> StageSummaryFigures:
+    """The figures for ``tile``'s summary (:class:`StageSummaryFigures`)."""
+    card = tile.scorecard
+    dq = bool(card is not None and card.dq)
+    active = card if card is not None and not dq else None
+    figures = StageSummaryFigures(
+        time_seconds=tile.stage_time_seconds,
+        time_is_manual=tile.stage_time_is_manual,
+        rounds=tile.shot_count,
+        min_rounds=tile.stage_rounds.expected if tile.stage_rounds is not None else None,
+        dq=dq,
+    )
+    if active is not None:
+        figures.hit_factor = active.hit_factor
+        figures.stage_pct = active.stage_pct
+        figures.points = active.stage_points
+        figures.counts = {
+            tag: value for tag, name in _COUNT_TAGS if (value := getattr(active, name)) is not None
+        }
+    if tile.has_shots:
+        selected = statistic_split_shots(tile.shots)
+        figures.draw = round(tile.shots[0].split, 6)
+        figures.splits = _split_figures([s.split for s in selected])
+        static = [s.split for s in selected if not s.moving]
+        moving = [s.split for s in selected if s.moving]
+        if static and moving:
+            figures.static = _split_figures(static)
+            figures.moving = _split_figures(moving)
+    if tile.reloads:
+        figures.reloads = ReloadSummary(
+            count=len(tile.reloads),
+            avg=round(sum(r.duration for r in tile.reloads) / len(tile.reloads), 6),
+            exposed=round(exposed_reload_s(tile.reloads), 6),
+        )
+    return figures
+
+
+__all__ = [
+    "ReloadSummary",
+    "SplitFigures",
+    "StageSummaryFigures",
+    "TileShot",
+    "TileStageData",
+    "load_stage_reloads",
+    "load_stage_shots",
+    "stage_summary_figures",
+]
