@@ -359,3 +359,42 @@ def test_providers_never_see_a_proposal() -> None:
         mp.setitem(PROVIDERS, "probe", HudDataProvider("probe", 1, build))
         hud_extras_data(("probe",), _STAGE, beep_in_clip=0.0, events=[proposal, confirmed_one], extras=None)
     assert seen == [["manual"]]
+
+
+# -- the resolver ----------------------------------------------------------
+
+
+def test_hud_extras_for_resolves_the_division_as_breakdown_does(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A project pinned before the division was stored: Breakdown's seeder
+    finds it in the shooter directory's scoreboard files, so the HUD must
+    too, or its ammo counter vanishes where Breakdown proposed reloads."""
+    from splitsmith.match_project import MatchProject, StageEntry
+    from splitsmith.ui import exports
+
+    asked: list[Path | None] = []
+
+    def resolver(project: MatchProject, project_dir: Path | None) -> str | None:
+        asked.append(project_dir)
+        return "Production Optics"
+
+    monkeypatch.setattr(exports, "competitor_division", resolver)
+    project = MatchProject(name="M")
+    stage = StageEntry(stage_number=2, stage_name="Bay 2", time_seconds=10.0)
+    extras = exports.hud_extras_for(project, stage, tmp_path)
+    assert asked == [tmp_path]
+    assert (extras.division, extras.capacity) == ("Production Optics", 15)
+    assert extras.burst_split_max is not None
+
+
+def test_the_burst_cutoff_rides_the_extras_and_the_identity() -> None:
+    shots = _shots((None, 1.0), (None, 0.3), (None, 0.8), (None, 0.2))
+    keys = ("bursts",)
+    loose = hud_extras_data(keys, shots, beep_in_clip=0.0, events=(), extras=HudExtras(burst_split_max=1.0))
+    tight = hud_extras_data(keys, shots, beep_in_clip=0.0, events=(), extras=HudExtras(burst_split_max=0.5))
+    assert loose["bursts"]["shot_burst"] == [0, 0, 0, 0]
+    assert tight["bursts"]["shot_burst"] == [0, 0, 1, 1]
+    assert extras_identity(keys, HudExtras(burst_split_max=1.0)) != extras_identity(
+        keys, HudExtras(burst_split_max=0.5)
+    )

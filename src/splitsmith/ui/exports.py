@@ -23,7 +23,9 @@ from typing import Any
 from .. import csv_gen, fcpxml_gen, overlay_render, report, summary_card, trim
 from ..audit_data import StageExportError, audit_shots_to_engine_shots, read_audit_data
 from ..audit_revision import audit_revision
+from ..coach import split_stat_split_max
 from ..config import Config, ReportFiles, StageAnalysis, StageData, StageEvent
+from ..division import competitor_division
 from ..events import capacity_for, confirmed_from_doc
 from ..export_naming import stage_file_base
 from ..hud_extras import HudExtras
@@ -208,19 +210,25 @@ def overlay_short_head(beep_time_in_source: float, pre_buffer_seconds: float) ->
     return beep if beep < pre_buffer_seconds else None
 
 
-def hud_extras_for(project: MatchProject, stage: StageEntry) -> HudExtras:
+def hud_extras_for(project: MatchProject, stage: StageEntry, project_dir: Path | None) -> HudExtras:
     """What a template HUD may know of ``stage`` beyond its audit
     (``hud_extras.HudExtras``): its name, number and scorecard, the shooter's
-    division and that division's magazine capacity. The one resolver every
-    overlay writer and reuse check uses, so both sides agree on the
-    record's ``hud_data``."""
-    division = project.competitor_division
+    division and that division's magazine capacity, and the burst cutoff.
+    The one resolver every overlay writer and reuse check uses, so both
+    sides agree on the record's ``hud_data``.
+
+    The division resolves as Breakdown's seeder resolves it
+    (``division.competitor_division``): the stored value, else the shooter
+    directory's scoreboard files (``project_dir``) for a project pinned
+    before the division was stored. Never the network."""
+    division = competitor_division(project, project_dir)
     return HudExtras(
         stage_name=stage.stage_name,
         stage_number=stage.stage_number,
         scorecard=stage.scorecard,
         division=division,
         capacity=capacity_for(division),
+        burst_split_max=split_stat_split_max(),
     )
 
 

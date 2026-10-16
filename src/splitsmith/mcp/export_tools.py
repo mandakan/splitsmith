@@ -341,7 +341,7 @@ def export_match_tool(
                     audit_revision=current,
                     upright=upright,
                     short_head=short_head,
-                    hud_extras=export_helpers.hud_extras_for(project, stage),
+                    hud_extras=export_helpers.hud_extras_for(project, stage, root),
                 ):
                     overlay_path = candidate
                 else:

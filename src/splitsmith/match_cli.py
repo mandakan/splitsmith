@@ -728,7 +728,11 @@ def export(
         raise typer.Exit(code=1) from exc
     if not no_overlay:
         stages_input = _vouched_overlays(
-            stages_input, theme_option, pre_buffer_seconds=project.trim_pre_buffer_seconds, project=project
+            stages_input,
+            theme_option,
+            pre_buffer_seconds=project.trim_pre_buffer_seconds,
+            project=project,
+            project_dir=shooter_root,
         )
 
     project_name = project.name or match.name or "match"
@@ -854,7 +858,12 @@ def export(
 
 
 def _vouched_overlays(
-    stages_input: list[Any], look: str | None, *, pre_buffer_seconds: float, project: Any = None
+    stages_input: list[Any],
+    look: str | None,
+    *,
+    pre_buffer_seconds: float,
+    project: Any = None,
+    project_dir: Path | None = None,
 ) -> list[Any]:
     """Each stage's overlay MOV only when its record says it was drawn the way
     this export would draw it: from the audit as it stands, with its template
@@ -884,7 +893,7 @@ def _vouched_overlays(
             upright = export_helpers.overlay_canvas_upright(mov)
             short_head = export_helpers.overlay_short_head(stage_in.beep_offset_seconds, pre_buffer_seconds)
             extras = (
-                export_helpers.hud_extras_for(project, project.stage(stage_in.stage_number))
+                export_helpers.hud_extras_for(project, project.stage(stage_in.stage_number), project_dir)
                 if project is not None
                 else None
             )

@@ -4353,7 +4353,7 @@ def register_job_bodies(state: AppState) -> None:
                     shooter_label=proj.competitor_name or proj.name,
                     stage_time_is_manual=stg.time_seconds_manual,
                     segment_cache=match_export_helpers.render_segment_cache(Config().output),
-                    hud_extras=export_helpers.hud_extras_for(proj, stg),
+                    hud_extras=export_helpers.hud_extras_for(proj, stg, state.shooter_root(slug)),
                 )
         except StageExportError as exc:
             # Surface as a job failure with the exporter's own message so
@@ -4590,7 +4590,9 @@ def register_job_bodies(state: AppState) -> None:
                             prim.beep_time, proj.trim_pre_buffer_seconds
                         ),
                         hud_data=overlay_data_identity(
-                            req.overlay_theme, req.overlay_variant, export_helpers.hud_extras_for(proj, stg)
+                            req.overlay_theme,
+                            req.overlay_variant,
+                            export_helpers.hud_extras_for(proj, stg, state.shooter_root(slug)),
                         ),
                     )
                     overlay_reusable = export_helpers.overlay_record_matches(
@@ -4660,7 +4662,7 @@ def register_job_bodies(state: AppState) -> None:
                             config=Config(),
                             secondaries=secondaries_in,
                             segment_cache=match_export_helpers.render_segment_cache(Config().output),
-                            hud_extras=export_helpers.hud_extras_for(proj, stg),
+                            hud_extras=export_helpers.hud_extras_for(proj, stg, state.shooter_root(slug)),
                         )
                     except StageExportError as exc:
                         raise RuntimeError(f"stage {stage_number}: {exc}") from exc

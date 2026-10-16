@@ -64,6 +64,11 @@ class HudExtras(BaseModel):
     #: Magazine capacity (``events.capacity_for`` of the division); ``None``
     #: for a division with no entry, which draws no ammo counter.
     capacity: int | None = None
+    #: The split above which an unclassified gap ends a burst
+    #: (``coach.split_stat_split_max``, which a ``SPLITSMITH_CONFIG`` can
+    #: move). Carried here, not read at render time, so a changed cutoff is
+    #: in the record's ``hud_data`` and redraws. ``None`` reads it now.
+    burst_split_max: float | None = None
 
 
 @dataclass(frozen=True)
@@ -182,14 +187,15 @@ def ammo_plan(
     }
 
 
-def bursts(shots: Sequence[TileShot]) -> dict[str, Any]:
+def bursts(shots: Sequence[TileShot], *, split_max: float | None = None) -> dict[str, Any]:
     """``data.bursts``: shots grouped by the gaps between them. A burst ends
     at a gap classed transition, movement, reload or activation; an
-    unclassified gap breaks one when it is over the auto-classifier's split
-    cutoff (``coach.split_stat_split_max``). ``mean_split`` and
-    ``min_split`` read the splits inside a burst only, so a burst of one
-    has neither. ``shot_burst[i]`` is shot ``i``'s burst."""
-    cutoff = split_stat_split_max()
+    unclassified gap breaks one when it is over ``split_max`` (the
+    auto-classifier's split cutoff, ``coach.split_stat_split_max``, when
+    ``None``). ``mean_split`` and ``min_split`` read the splits inside a
+    burst only, so a burst of one has neither. ``shot_burst[i]`` is shot
+    ``i``'s burst."""
+    cutoff = split_stat_split_max() if split_max is None else split_max
     groups: list[list[int]] = []
     for i, shot in enumerate(shots):
         cls = shot.interval_class
@@ -330,7 +336,7 @@ register(
         ),
     )
 )
-register(HudDataProvider("bursts", 1, lambda i: bursts(i.shots)))
+register(HudDataProvider("bursts", 1, lambda i: bursts(i.shots, split_max=i.extras.burst_split_max)))
 
 
 __all__ = [
