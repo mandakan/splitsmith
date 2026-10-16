@@ -173,6 +173,7 @@ describe("buildOverviewRows", () => {
     expect(rows[0].cells.map((c) => c.slug)).toEqual(["s1", "s2"]);
     expect(rows[0].lead?.slug).toBe("s1");
     expect(rows[0].auditedCount).toBe(1);
+    expect(rows[0].filmedCount).toBe(2);
     expect(rows[0].worst.kind).toBe("audit");
   });
 });
