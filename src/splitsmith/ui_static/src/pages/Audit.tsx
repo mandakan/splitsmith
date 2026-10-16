@@ -1814,18 +1814,28 @@ export function Audit({ fixture = null }: { fixture?: FixtureTarget | null } = {
       j.stage_number === stageNumber,
   );
   const chainRunning = chainJob ? { kind: chainJob.kind, progress: chainJob.progress ?? null } : null;
-  const chainWasRunningRef = useRef(false);
+  // Reload when this stage's trim or detection ends, including one the
+  // poller never saw running (``settledBetween``): after a confirm on a
+  // stage whose trim is cached, detection can take 1.5 s, inside one idle
+  // poll, and watching for a running job left the page on the copy it
+  // loaded before detection wrote, so the next save was refused as
+  // "saved elsewhere".
+  const settled = outletCtx?.jobsState?.settled;
   useEffect(() => {
-    if (chainJob) {
-      chainWasRunningRef.current = true;
-      return;
-    }
-    if (!chainWasRunningRef.current) return;
-    chainWasRunningRef.current = false;
+    if (!settled) return;
+    const ours = settled.some(
+      (j) =>
+        (j.kind === "trim" || j.kind === "shot_detect") &&
+        j.shooter_slug === slug &&
+        j.stage_number === stageNumber,
+    );
+    if (!ours) return;
     void reloadProject();
     reloadPeaks();
     void reloadAudit();
-  }, [chainJob, reloadProject, reloadPeaks, reloadAudit]);
+    // A new settled array is a new poll's answer; the stage changing is not.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settled]);
 
   // The recheck pass ends on the stage it started from (``from``), else on
   // the stage it is on, with the editor open.
