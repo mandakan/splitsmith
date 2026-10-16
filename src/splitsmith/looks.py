@@ -135,10 +135,11 @@ def check_accent_series(value: list[str]) -> list[str]:
 
 
 def check_styles(value: dict[str, str]) -> dict[str, str]:
-    allowed = (*get_args(CardSlot), *SUMMARY_SLOTS)
+    # Card slots only: a summary's ``default`` is the engine's card by rule,
+    # so ``styles`` may not turn it into a template the page calls Built-in.
     for slot, variant in value.items():
-        if slot not in allowed:
-            raise ValueError(f"styles: {slot!r} is not a card slot; expected one of {allowed}")
+        if slot not in get_args(CardSlot):
+            raise ValueError(f"styles: {slot!r} is not a card slot; expected one of {get_args(CardSlot)}")
         if not _NAME_RE.fullmatch(variant):
             raise ValueError(f"styles: slot {slot!r}: variant name {variant!r} must match {_NAME_RE.pattern}")
     return value
@@ -510,12 +511,10 @@ def overlay_template_for(look: Look, variant: str) -> Path | None:
 def summary_template_for(look: Look, slot: SummarySlot, variant: str = DEFAULT_VARIANT) -> Path | None:
     """The template that draws the ``summary`` or ``match_summary`` card in
     ``variant`` for ``look`` (spec 2026-10-16-summary-templates-design): the
-    Look's own, else the shipped default Look's. ``default`` resolves
-    through the manifest's ``styles`` first, as a card's does. ``None`` for
-    ``default`` itself (the engine's card) and for a variant neither Look
-    has; the renderer draws the engine card then and notes why."""
-    if variant == DEFAULT_VARIANT and slot in look.manifest.styles:
-        variant = look.manifest.styles[slot]
+    Look's own, else the shipped default Look's. ``None`` for ``default``
+    (always the engine's card: ``styles`` cannot name a summary slot) and
+    for a variant neither Look has; the renderer draws the engine card then
+    and notes why."""
     if variant == DEFAULT_VARIANT:
         return None
     own = look.own_template(slot, variant)

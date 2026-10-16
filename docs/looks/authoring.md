@@ -361,7 +361,8 @@ The stage summary (held after each stage's action) and the match summary
 `default` is the built-in card and cannot name a file; give your template a
 variant name and pick it as the Style under Stage summary or Match summary on
 the Export page (`--summary-variant` / `--match-summary-variant` on `match
-export`). `styles` in `look.json` can make it the Look's default.
+export`). `styles` cannot name a summary slot: the built-in card stays the
+default, so the page's Built-in always means it.
 
 ```json
 "slots": {

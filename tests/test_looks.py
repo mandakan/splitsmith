@@ -383,6 +383,9 @@ def test_styles_pick_the_variant_a_slots_default_draws(user_dir: Path) -> None:
     "styles, message",
     [
         ({"overlay": "rise"}, "card slot"),
+        # A summary's default is the built-in card by rule.
+        ({"summary": "finished"}, "card slot"),
+        ({"match_summary": "tally"}, "card slot"),
         ({"slate": "Rise!"}, "variant name"),
         ({"transition": "x"}, "card slot"),
     ],
@@ -473,12 +476,11 @@ def test_the_catalog_lists_the_positions_of_each_overlay_style(user_dir: Path) -
 # -- summary slots (spec 2026-10-16-summary-templates-design) --------------
 
 
-def _summary_look(root: Path, *, styles: dict[str, str] | None = None) -> None:
+def _summary_look(root: Path) -> None:
     base = json.loads((looks.shipped_looks_dir() / "clean" / "look.json").read_text(encoding="utf-8"))
     base.update(
         name="doom",
         slots={"summary": {"finished": "sum.html"}, "match_summary": {"tally": "match.html"}},
-        styles=styles or {},
     )
     d = root / "doom"
     d.mkdir(parents=True)
@@ -506,10 +508,3 @@ def test_a_named_summary_variant_resolves_to_the_looks_file(user_dir: Path) -> N
     assert looks.summary_template_for(doom, "summary", "finished").name == "sum.html"
     assert looks.summary_template_for(doom, "match_summary", "tally").name == "match.html"
     assert looks.summary_template_for(doom, "summary", "nope") is None
-
-
-def test_styles_pick_a_summary_variant_for_default(user_dir: Path) -> None:
-    _summary_look(user_dir, styles={"summary": "finished"})
-    doom = looks.load_look("doom")
-    assert looks.summary_template_for(doom, "summary").name == "sum.html"
-    assert looks.summary_template_for(doom, "match_summary") is None

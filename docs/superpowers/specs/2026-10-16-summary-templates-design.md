@@ -119,9 +119,10 @@ MP4 agree.
   add a degradation note to every export that sets it), validated by shape
   in the preset like `stage_card_variant`.
 - CLI: `--summary-variant` and `--match-summary-variant` on `match export`.
-- `looks.SLOT_NAMES` gains `match_summary` (`summary` is already reserved);
-  `check_styles` admits both, so `styles` can pick a template-less Look's
-  summary variant like any card's.
+- `looks.SLOT_NAMES` gains `match_summary` (`summary` is already reserved).
+  `styles` may not name either: a summary's `default` is the built-in card
+  by rule, and the Export page calls it Built-in, so a Look that remapped it
+  would make that label false (found rendering the Style picker).
 - `look_catalog` lists both slots; previews follow `preview_file`.
 
 ## Preview, check, gallery
