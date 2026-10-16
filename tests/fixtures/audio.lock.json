@@ -257,6 +257,138 @@
       "sha256": "0448b51d446e0e869807dda743adef5abbfc7f8d7a55f137c630818c071dfb4f",
       "bytes": 2384782
     },
+    "stage-shots-ess-black-handgun-2026-stage1-s97dcec94-apple-iphone17promax.wav": {
+      "sha256": "46ba476e2805af0b31911c752d6bc25b8753c2418b414813aeb978f38eb0d0c7",
+      "bytes": 3081102
+    },
+    "stage-shots-ess-black-handgun-2026-stage1-s97dcec94.wav": {
+      "sha256": "97d84c0ad60db3f78d9eb117784e0cf5f98555f3bc52c450c4f5a7055c3c7638",
+      "bytes": 3429454
+    },
+    "stage-shots-ess-black-handgun-2026-stage10-s97dcec94-apple-iphone17promax.wav": {
+      "sha256": "50f3848515c61e9613264d53139127c80b5006cb146824c7283a9fe253317e79",
+      "bytes": 3557038
+    },
+    "stage-shots-ess-black-handgun-2026-stage10-s97dcec94.wav": {
+      "sha256": "71474935cb7800085581236f06a102e8cf262c35810126211f9a9a3ed42e89c5",
+      "bytes": 4029710
+    },
+    "stage-shots-ess-black-handgun-2026-stage11-s97dcec94-apple-iphone17promax.wav": {
+      "sha256": "3e2eff02473bda3a304d22606bd7929089011bb9296aa6a5f2dc64e013aabb04",
+      "bytes": 5504814
+    },
+    "stage-shots-ess-black-handgun-2026-stage11-s97dcec94.wav": {
+      "sha256": "8b6f06296a5ec3783f0ea05e5dcc50ab5bc0c3267052ab7d8f490a2031ddd0db",
+      "bytes": 5646190
+    },
+    "stage-shots-ess-black-handgun-2026-stage12-s97dcec94-apple-iphone17promax.wav": {
+      "sha256": "116c44988860732171396a6b663fafa0be27fc902f9edfc88ad48004e048745b",
+      "bytes": 1509358
+    },
+    "stage-shots-ess-black-handgun-2026-stage12-s97dcec94.wav": {
+      "sha256": "de456f28273687e6292220d8ba7f75c37dab63200aa39308052075d41295bd18",
+      "bytes": 1911854
+    },
+    "stage-shots-ess-black-handgun-2026-stage2-s97dcec94-apple-iphone17promax.wav": {
+      "sha256": "6fccdbb40379e89f4cf0673b2e85b6fc2bf72f1382fcc10e4683c306bc2ace03",
+      "bytes": 2717262
+    },
+    "stage-shots-ess-black-handgun-2026-stage2-s97dcec94.wav": {
+      "sha256": "a80715a585786f899b5163b68638b7527239b2f86f12838378b5b3fe3cc7e6ae",
+      "bytes": 2770798
+    },
+    "stage-shots-ess-black-handgun-2026-stage3-s97dcec94-apple-iphone17promax.wav": {
+      "sha256": "3d1b41f32fb0f26909dd1e6dc174853d0e486075ca92b5b31f34af9fcd931fac",
+      "bytes": 1992878
+    },
+    "stage-shots-ess-black-handgun-2026-stage3-s97dcec94.wav": {
+      "sha256": "ec66586c3569e8fc6fc5d4ce037ee2c6650748cc8940fc42255c2d60ab7c381b",
+      "bytes": 2074638
+    },
+    "stage-shots-ess-black-handgun-2026-stage4-s97dcec94.wav": {
+      "sha256": "9c4cda006db9d58c664f594289a3ad8106ca7f7128018375b7c6a6efa8000a87",
+      "bytes": 2340814
+    },
+    "stage-shots-ess-black-handgun-2026-stage5-s97dcec94-apple-iphone17promax.wav": {
+      "sha256": "3a64975624b20a8f5248447371ff160aa6b0610d84072cc4d12e4c4f5c8b68aa",
+      "bytes": 2481038
+    },
+    "stage-shots-ess-black-handgun-2026-stage5-s97dcec94.wav": {
+      "sha256": "afb4f5c83b8a28b4858bc6592233d5bf8ff2451e0ebd6b46a4655754f090d333",
+      "bytes": 2969646
+    },
+    "stage-shots-ess-black-handgun-2026-stage6-s0fe3d797-meta-vanguard.wav": {
+      "sha256": "ef329e571fadc2ea933d58c80a7111dc25c2f09995136dcc61de69f115908dbd",
+      "bytes": 3024078
+    },
+    "stage-shots-ess-black-handgun-2026-stage6-s0fe3d797.wav": {
+      "sha256": "486e8dab935f9597c4ff909033f7d0f3955b09890f53c553fc663e7a0ea376ae",
+      "bytes": 2911918
+    },
+    "stage-shots-ess-black-handgun-2026-stage6-s36ed6e4e.wav": {
+      "sha256": "edadff1194c434f723fd415ff430b372a161303471ddc142e3662b5ca7813180",
+      "bytes": 3171438
+    },
+    "stage-shots-ess-black-handgun-2026-stage6-s97dcec94.wav": {
+      "sha256": "2c0c71460b2d0d4d0806e43aee34ff4e2369d901bc9645a502cd77892f9db12f",
+      "bytes": 3696558
+    },
+    "stage-shots-ess-black-handgun-2026-stage7-s0fe3d797-go3s-db60a2.wav": {
+      "sha256": "85e759761186149c167f08360454d33f6556874898fa12b8be4a0e6587cc0a0f",
+      "bytes": 2751086
+    },
+    "stage-shots-ess-black-handgun-2026-stage7-s0fe3d797-meta-vanguard.wav": {
+      "sha256": "b3b5f59ee732caf8da03b53cd6cfd80bebb3f02e2552b4cd12c381d21992d89a",
+      "bytes": 2928366
+    },
+    "stage-shots-ess-black-handgun-2026-stage7-s0fe3d797.wav": {
+      "sha256": "398666d2b123752a46e8047a735fac0872bf5a7a0df82a1b61ef419eb3991769",
+      "bytes": 2905966
+    },
+    "stage-shots-ess-black-handgun-2026-stage7-s36ed6e4e.wav": {
+      "sha256": "68674f2512548bf95ba3d296fbc7d82fa1a083c9882af028a14882d294f9b1a5",
+      "bytes": 2783022
+    },
+    "stage-shots-ess-black-handgun-2026-stage7-s97dcec94-apple-iphone17promax-0ea51c.wav": {
+      "sha256": "9876fde78e3b32ea5c1f1ca2c0d3fdacbdd4be9aa048bd6c9e03593cdd4dd56a",
+      "bytes": 2305038
+    },
+    "stage-shots-ess-black-handgun-2026-stage7-s97dcec94.wav": {
+      "sha256": "36e55ec51ea11932b39b0ea93d675920fe2f3e0d3d592c8f85ff8581e7f91ef9",
+      "bytes": 2699374
+    },
+    "stage-shots-ess-black-handgun-2026-stage8-s0fe3d797-apple-iphone17promax.wav": {
+      "sha256": "972c50812d2988152835d8b335ee3587a636c69444070449793264c56327f80c",
+      "bytes": 3292974
+    },
+    "stage-shots-ess-black-handgun-2026-stage8-s0fe3d797-go3s.wav": {
+      "sha256": "2969aef69e5e9b824b139e08cf11c1322bc7df7513ae6ae83659449e87119d7e",
+      "bytes": 3196590
+    },
+    "stage-shots-ess-black-handgun-2026-stage8-s0fe3d797.wav": {
+      "sha256": "592716a4a29fa992ee1a35371e2c3ebfb48c876bc2d45cb0ded75ce5c20bb8ff",
+      "bytes": 3645230
+    },
+    "stage-shots-ess-black-handgun-2026-stage8-s36ed6e4e.wav": {
+      "sha256": "9829356614e8e2f38d5ae7a72d134fbeed10a48db398c7eb9b6c921a630dd466",
+      "bytes": 3364558
+    },
+    "stage-shots-ess-black-handgun-2026-stage8-s97dcec94-apple-iphone17promax.wav": {
+      "sha256": "7197c8bc5af991811cfb20aff65e095c36bec3333d178626991e500d15abadf2",
+      "bytes": 2564398
+    },
+    "stage-shots-ess-black-handgun-2026-stage8-s97dcec94.wav": {
+      "sha256": "f52137aa22f533a0fd3b7c0c728f11800300e18dbc1b50fed4d6d4a37f4ae3f0",
+      "bytes": 2894254
+    },
+    "stage-shots-ess-black-handgun-2026-stage9-s97dcec94-apple-iphone17promax.wav": {
+      "sha256": "697c7052d69895d2ef0c336d37d455a030d0d52816d700de4fdbd7fcb987ef00",
+      "bytes": 3427918
+    },
+    "stage-shots-ess-black-handgun-2026-stage9-s97dcec94.wav": {
+      "sha256": "bb6389f8b12ba4a32dbb90228e36dbb375d17341b0df7a8bb0d2fb451f7eb479",
+      "bytes": 3913326
+    },
     "stage-shots-hfo-masters-2026-stage1-s0fe3d797.wav": {
       "sha256": "db0374face497985683fd4a39255ef1b117cfe946703d508e9728d827c0cd462",
       "bytes": 2138478

@@ -63,7 +63,11 @@ def _corpus(fixtures_dir: Path) -> list[AnchorFixture]:
         source = data.get("source_video") or data.get("source")
         if not source:
             continue
-        out.append(AnchorFixture(f.stem, Path(source).name, review_status(data), f.n_audited_shots))
+        event = str(data.get("event_id") or "").split(":")
+        stage_number = int(event[1]) if len(event) == 3 and event[1].isdigit() else None
+        out.append(
+            AnchorFixture(f.stem, Path(source).name, review_status(data), f.n_audited_shots, stage_number)
+        )
     return out
 
 
