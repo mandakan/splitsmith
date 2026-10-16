@@ -1,0 +1,161 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="splitsmith-data" content="scoring,ammo,bursts">
+<title>starter: broadcast stage summary</title>
+<!--
+  A results board held after the stage, using every piece of data a stage
+  summary can read. It counts up as it comes in: an animated summary
+  defines duration(), seek(t) and poster() like an animated card, and the
+  previews and the stage export's summary file show poster(), so poster()
+  is the finished board.
+
+  window.splitsmith.data:
+    card       { slot: "summary", variant, text (the shooter), info, duration_seconds }
+    shooters[] { label, accent, club, logo }
+    figures    what the built-in card shows, never re-derive it:
+               time_seconds, time_is_manual, hit_factor, stage_pct, points,
+               counts {A, C, D, M, NS, P}, draw, splits {best, avg, worst, n},
+               static / moving (the same, with confirmed movement),
+               reloads {count, avg, exposed}, rounds, min_rounds, dq.
+               A figure that was never read is null.
+    stage      the overlay's stage data with the beep at 0: shots[], events[],
+               reloads[], stage_time, rounds
+    scoring, ammo, bursts  as an overlay gets them (asked for above)
+    safe_area  on an upright video
+  Guide: docs/looks/authoring.md#summaries
+-->
+<script>
+  document.write('<style>' + window.splitsmith.engine.css + '</style>');
+</script>
+<style>
+  html, body { margin: 0; background: transparent; overflow: hidden; }
+  #shade { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.55); }
+  #board {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: min(84vw, 120vh); box-sizing: border-box; padding: 3vh 4vh;
+    font-family: "Splitsmith Mono", monospace; border-radius: 1vh;
+  }
+  #head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.6vh 2vh; margin-bottom: 2vh; }
+  #name { font-family: "Splitsmith Display", sans-serif; font-size: 5.6vh; font-weight: 700; line-height: 1; white-space: nowrap; }
+  #who { font-size: 2.2vh; opacity: 0.8; }
+  .figs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.6vh 2vh; margin-bottom: 2vh; }
+  .cap { font-size: 1.5vh; letter-spacing: 0.12em; text-transform: uppercase; opacity: 0.7; }
+  .val { font-size: 3.6vh; font-weight: 700; }
+  #counts { display: flex; gap: 2.4vh; font-size: 3vh; font-weight: 700; margin-bottom: 2vh; }
+  #timeline { position: relative; height: 3vh; border-radius: 0.6vh; overflow: hidden; margin-bottom: 1.4vh; }
+  #timeline i { position: absolute; top: 0; bottom: 0; opacity: 0.85; }
+  #timeline b { position: absolute; top: 15%; bottom: 15%; width: 0.3vh; }
+  #notes { font-size: 1.8vh; opacity: 0.85; white-space: normal; }
+  body.safe #board { top: 3vh; left: 2vh; transform: none; width: calc(100vw - 4vh - var(--safe-right)); padding: 2vh; }
+  body.safe .figs { grid-template-columns: repeat(3, 1fr); gap: 1vh 1.4vh; }
+  body.safe .val { font-size: 2.8vh; }
+  body.safe #counts { font-size: 2.4vh; flex-wrap: wrap; gap: 1.4vh; }
+</style>
+</head>
+<body>
+<div id="shade"></div>
+<div id="board">
+  <div id="head"><span id="name"></span><span id="who"></span></div>
+  <div class="figs" id="grid"></div>
+  <div id="counts"></div>
+  <div id="timeline"></div>
+  <div id="notes"></div>
+</div>
+<script>
+  var S = window.splitsmith, D = S.data, T = S.theme, F = D.figures, stage = D.stage;
+  var scoring = D.scoring || {}, ammo = D.ammo, bursts = D.bursts;
+  var shooter = (D.shooters || [])[0] || {};
+  var COUNT = 1.6;  // seconds the board takes to count up
+  var $ = function (id) { return document.getElementById(id); };
+  if (D.safe_area) document.body.classList.add('safe');
+
+  $('board').style.background = T.surface;
+  $('board').style.color = T.ink;
+  $('board').style.borderTop = '0.6vh solid ' + (shooter.accent || T.accent);
+  $('name').textContent = scoring.name || 'Stage';
+  $('who').textContent = [D.card.text, shooter.club, scoring.division].filter(Boolean).join(' / ');
+
+  function two(x) { return x == null ? '-' : x.toFixed(2); }
+  // Each figure: caption, value, how to print a share of it while counting.
+  var cells = [
+    ['Time' + (F.time_is_manual ? ' (manual)' : ''), F.time_seconds, function (v) { return two(v) + 's'; }],
+    ['Hit factor', F.hit_factor, two],
+    ['Stage', F.stage_pct, function (v) { return v.toFixed(1) + '%'; }],
+    ['Points', F.points, function (v) { return String(Math.round(v)); }],
+    ['Draw', F.draw, two],
+    ['Best split', F.splits && F.splits.best, two],
+    ['Avg split', F.splits && F.splits.avg, two],
+    ['Worst split', F.splits && F.splits.worst, two],
+    ['Static avg', F.static && F.static.avg, two],
+    ['Moving avg', F.moving && F.moving.avg, two],
+    ['Reloads', F.reloads && F.reloads.count, function (v) { return String(Math.round(v)); }],
+    ['Exposed reload', F.reloads && F.reloads.exposed, function (v) { return two(v) + 's'; }],
+    ['Rounds', F.rounds, function (v) { return Math.round(v) + (F.min_rounds ? ' / ' + F.min_rounds : ''); }]
+  ].filter(function (c) { return c[1] != null; });
+
+  $('grid').innerHTML = cells.map(function (c, i) {
+    return '<div><div class="cap">' + c[0] + '</div><div class="val" id="v' + i + '"></div></div>';
+  }).join('');
+
+  var colour = { A: T.split_good, C: T.ink, D: T.split, M: T.accent, NS: T.accent, P: T.accent };
+  $('counts').innerHTML = ['A', 'C', 'D', 'M', 'NS', 'P'].filter(function (k) { return k in F.counts; }).map(function (k) {
+    return '<span style="color:' + colour[k] + '">' + k + ' ' + F.counts[k] + '</span>';
+  }).join('') + (F.dq ? '<span style="color:' + T.accent + '">DQ</span>' : '');
+
+  // The run itself, from data.stage: regions as bands, shots as ticks.
+  var span = Math.max(0.1, stage.stage_time);
+  var line = $('timeline');
+  line.style.background = T.rule;
+  function x(t) { return Math.max(0, Math.min(100, 100 * t / span)); }
+  stage.events.forEach(function (e) {
+    var band = document.createElement('i');
+    band.style.left = x(e.start) + '%';
+    band.style.width = Math.max(0.5, x(e.end) - x(e.start)) + '%';
+    band.style.background = e.kind === 'reload' ? T.reload : e.kind === 'movement' ? T.movement : T.muted;
+    line.appendChild(band);
+  });
+  stage.shots.forEach(function (shot) {
+    var tick = document.createElement('b');
+    tick.style.left = x(shot.t) + '%';
+    tick.style.background = shot.tier === 'good' ? T.split_good : shot.tier === 'slow' ? T.accent : T.ink;
+    line.appendChild(tick);
+  });
+
+  // The opt-in data, as one line of notes.
+  var notes = [];
+  if (bursts) {
+    var longest = bursts.bursts.reduce(function (a, b) { return b.shots > a.shots ? b : a; }, bursts.bursts[0]);
+    if (longest) notes.push(bursts.bursts.length + ' strings, the longest ' + longest.shots + ' shots' +
+      (longest.mean_split != null ? ' at ' + two(longest.mean_split) : ''));
+  }
+  if (ammo) {
+    var changes = ammo.refills.length;
+    notes.push(changes + (changes === 1 ? ' magazine change' : ' magazine changes') + (ammo.ok ? '' : ' (a reload is unmarked)'));
+  }
+  if (scoring.spreads) notes.push('hits per shot are estimates');
+  $('notes').textContent = notes.join(' / ');
+
+  function paint(p) {
+    cells.forEach(function (c, i) {
+      // Each figure starts a little after the one before and all land at p = 1.
+      var share = Math.max(0, Math.min(1, (p - 0.5 * i / cells.length) / 0.5));
+      $('v' + i).textContent = share > 0 ? c[2](c[1] * share) : '';
+    });
+  }
+
+  window.duration = function () { return COUNT; };
+  window.poster = function () { return COUNT; };
+  window.seek = function (t) { paint(Math.min(1, t / COUNT)); };
+  window.__splitsmithFit = function () {
+    var name = $('name'), size = parseFloat(getComputedStyle(name).fontSize);
+    while (name.getBoundingClientRect().right > $('board').getBoundingClientRect().right - 20 && size > S.engine.min_font_size) {
+      size -= 1;
+      name.style.fontSize = size + 'px';
+    }
+  };
+  paint(1);
+</script>
+</body>
+</html>

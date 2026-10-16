@@ -75,6 +75,7 @@ STARTERS: dict[str, str] = {
     "sting": "sting.html",
     "hud": "hud.html",
     "summary": "summary.html",
+    "broadcast": "broadcast-hud.html",
 }
 #: The starters the template editor offers as replacement text: the card and
 #: sting templates it edits. An overlay style or a summary is not edited there.
@@ -86,7 +87,28 @@ _STARTER_SLOTS: dict[str, dict[str, object]] = {
     "sting": {STING_SLOT: {"sting": "sting.html"}},
     "hud": {OVERLAY_SLOT: {"hud": "hud.html"}},
     "summary": {"summary": {"summary": "summary.html"}},
+    # The reference Look: every slot a template can draw, each using all of
+    # the data its slot gets (docs/looks/authoring.md).
+    "broadcast": {
+        "title_page": "broadcast-card.html",
+        "slate": "broadcast-card.html",
+        "lower_third": "broadcast-card.html",
+        "closing": "broadcast-card.html",
+        OVERLAY_SLOT: {"broadcast": "broadcast-hud.html"},
+        "summary": {"results": "broadcast-summary.html"},
+        "match_summary": {"table": "broadcast-match.html"},
+    },
 }
+
+
+def _starter_files(starter: str) -> list[str]:
+    """Every template file a starter's slots name, its own first."""
+    files = [STARTERS[starter]]
+    for spec in _STARTER_SLOTS[starter].values():
+        for file in spec.values() if isinstance(spec, dict) else [spec]:
+            if file not in files:
+                files.append(file)
+    return files
 CARD_SLOTS: tuple[Literal["title_page", "slate", "lower_third", "closing"], ...] = (
     "title_page",
     "slate",
@@ -212,7 +234,7 @@ def new_look(
         base = load_look(DEFAULT_LOOK)
         manifest = base.manifest.model_dump(exclude={"source"})
         manifest.update(name=name, label=_label(name), slots=_STARTER_SLOTS[starter])
-        files = {STARTERS[starter]: shipped_looks_dir() / "_starters" / STARTERS[starter]}
+        files = {file: shipped_looks_dir() / "_starters" / file for file in _starter_files(starter)}
     else:
         source = strict_look(from_look or DEFAULT_LOOK)
         manifest = source.manifest.model_dump(exclude={"source"})

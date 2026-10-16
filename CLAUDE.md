@@ -351,7 +351,7 @@ directory, the shipped default's standing in for one a Look lacks
 
 Authoring a Look (epic #1267, spec 2026-10-07): ``splitsmith looks list |
 new | check | preview`` (``looks_cli`` over ``look_tools``) and the guide
-``docs/looks/authoring.md`` with four starters in ``data/looks/_starters/``.
+``docs/looks/authoring.md`` with the starters in ``data/looks/_starters/`` (``broadcast`` reads every data field).
 ``looks check`` loads every template a Look owns through
 ``ChromiumRasterizer.probe_template`` against three sample cards (one
 shooter with a logo, two without, a 52-character stage name) and words what

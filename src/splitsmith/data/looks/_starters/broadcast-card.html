@@ -1,0 +1,127 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>starter: broadcast card</title>
+<!--
+  One template for the title page, the stage slate, the lower third and
+  the closing card, using every piece of data a card can read. It slides
+  in: an animated card defines duration(), seek(t) and poster().
+
+  window.splitsmith.data:
+    card       { slot ("title_page", "slate", "lower_third", "closing"),
+                 variant, text (the match or the stage name),
+                 info (the lines under it), duration_seconds }
+    shooters[] { label, accent, club, logo (a file URL or null) }
+    brand      { logo, line }  your brand: title page and closing card only
+    event      { logo }        the event's logo: title page and closing card only
+    credit     { text }        "Made with splitsmith": the closing card only
+    groups     the built-in card's own layout; yours may ignore it
+  A key a card does not carry is absent, never null: test for it.
+  window.splitsmith.size is the frame; size things from its height.
+  Guide: docs/looks/authoring.md#templates
+-->
+<script>
+  document.write('<style>' + window.splitsmith.engine.css + '</style>');
+</script>
+<style>
+  html, body { margin: 0; background: transparent; overflow: hidden; }
+  #card { position: absolute; display: flex; flex-direction: column; gap: 1.2vh; }
+  #card.full { left: 0; right: 0; top: 0; bottom: 0; align-items: center; justify-content: center; text-align: center; }
+  #card.band { left: 4vh; bottom: 12vh; padding: 1.6vh 2.6vh; border-radius: 0.8vh; }
+  #text { font-family: "Splitsmith Display", sans-serif; font-weight: 700; line-height: 1; white-space: nowrap; }
+  .info { font-family: "Splitsmith Mono", monospace; font-size: 2.6vh; letter-spacing: 0.06em; white-space: nowrap; }
+  #shooters { display: flex; gap: 3vh; justify-content: center; margin-top: 1vh; }
+  .shooter { display: flex; align-items: center; gap: 1.2vh; font-family: "Splitsmith Mono", monospace; font-size: 2.6vh; }
+  .shooter img { height: 5vh; width: 5vh; object-fit: scale-down; }
+  .shooter .club { opacity: 0.75; font-size: 2vh; }
+  .rule { height: 0.6vh; width: 14vh; border-radius: 0.3vh; }
+  #brand { position: absolute; left: 3vh; top: 3vh; display: flex; align-items: center; gap: 1.4vh; font-family: "Splitsmith Mono", monospace; font-size: 2.2vh; }
+  #brand img { height: 7vh; max-width: 20vh; object-fit: scale-down; }
+  #event { height: 14vh; max-width: 40vh; object-fit: scale-down; }
+  #credit { position: absolute; left: 0; right: 0; bottom: 3vh; text-align: center; font-family: "Splitsmith Mono", monospace; font-size: 1.8vh; opacity: 0.7; }
+  body.safe #credit { bottom: calc(var(--safe-bottom) + 1vh); }
+  body.safe #card.band { bottom: calc(var(--safe-bottom) + 2vh); }
+  body.safe #card.full { padding-bottom: var(--safe-bottom); padding-right: var(--safe-right); }
+</style>
+</head>
+<body>
+<div id="card"></div>
+<script>
+  var S = window.splitsmith, D = S.data, T = S.theme, card = D.card;
+  var lower = card.slot === 'lower_third';
+  var RISE = 0.6;  // seconds the card takes to come in
+  var $ = function (id) { return document.getElementById(id); };
+  var el = $('card');
+  if (/--safe-bottom/.test(S.engine.css)) document.body.classList.add('safe');
+
+  function node(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+
+  el.className = lower ? 'band' : 'full';
+  if (lower) { el.style.background = T.surface; el.style.color = T.ink; }
+  if (D.event) {
+    var ev = node('img'); ev.id = 'event'; ev.src = D.event.logo; el.appendChild(ev);
+  }
+  var title = node('div', null, card.text);
+  title.id = 'text';
+  title.style.color = T.ink;
+  title.style.fontSize = (lower ? 4.2 : card.slot === 'slate' ? 9 : 10) + 'vh';
+  el.appendChild(title);
+  var rule = node('div', 'rule');
+  rule.style.background = (D.shooters && D.shooters[0] && D.shooters[0].accent) || T.accent;
+  el.appendChild(rule);
+  (card.info || []).forEach(function (line) {
+    var info = node('div', 'info', line);
+    info.style.color = T.ink_2;
+    el.appendChild(info);
+  });
+  if (!lower && D.shooters && D.shooters.length) {
+    var row = node('div'); row.id = 'shooters';
+    D.shooters.forEach(function (s) {
+      var item = node('div', 'shooter');
+      if (s.logo) { var img = node('img'); img.src = s.logo; item.appendChild(img); }
+      var name = node('span', null, s.label);
+      name.style.color = s.accent || T.ink;
+      item.appendChild(name);
+      if (s.club) item.appendChild(node('span', 'club', s.club));
+      row.appendChild(item);
+    });
+    el.appendChild(row);
+  }
+  if (D.brand) {
+    var brand = node('div'); brand.id = 'brand'; brand.style.color = T.ink;
+    if (D.brand.logo) { var logo = node('img'); logo.src = D.brand.logo; brand.appendChild(logo); }
+    if (D.brand.line) brand.appendChild(node('span', null, D.brand.line));
+    document.body.appendChild(brand);
+  }
+  if (D.credit) {
+    var credit = node('div', null, D.credit.text); credit.id = 'credit'; credit.style.color = T.ink;
+    document.body.appendChild(credit);
+  }
+
+  window.duration = function () { return RISE; };
+  window.poster = function () { return RISE; };
+  window.seek = function (t) {
+    var p = Math.max(0, Math.min(1, t / RISE)), ease = 1 - Math.pow(1 - p, 3);
+    el.style.opacity = String(ease);
+    el.style.transform = 'translateY(' + ((1 - ease) * 3) + 'vh)';
+  };
+  // Long names shrink to fit the frame rather than run off it.
+  window.__splitsmithFit = function () {
+    var size = parseFloat(title.style.fontSize) * S.size.height / 100;
+    title.style.fontSize = size + 'px';
+    var room = S.size.width * (lower ? 0.6 : 0.9);
+    while (title.scrollWidth > room && size > S.engine.min_font_size) {
+      size -= 1;
+      title.style.fontSize = size + 'px';
+    }
+  };
+  window.seek(RISE);
+</script>
+</body>
+</html>

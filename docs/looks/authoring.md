@@ -50,7 +50,7 @@ file is never touched). A copy of your own Look carries every file. Pick a Look 
 with `--theme <name>` on `match export` and `--overlay-theme <name>` on
 `compare export`.
 
-Five starters ship, each a short commented template:
+Seven starters ship. Six are each a short commented template for one slot:
 
 | Starter | What it is |
 |---|---|
@@ -60,6 +60,13 @@ Five starters ship, each a short commented template:
 | `sting` | A band swept across the cut between stages |
 | `hud` | An overlay style: the clock, the count and the last split in a corner |
 | `summary` | A stage summary: the stage's name and its time, hit factor, draw and average split |
+
+The seventh, `broadcast`, is a whole Look and the reference for the data:
+one animated card for the title page, slates, lower third and closing card,
+an overlay style (`broadcast`), a stage summary (`results`) and a match
+summary (`table`), between them reading every field a template can be
+given, each one commented where it is read. Start there to see what a field
+holds, then delete what your Look does not need.
 
 ## look.json
 
@@ -396,7 +403,8 @@ A summary may animate (`duration()`, `seek(t)`, `poster()`, as an animated
 card): the stage export's summary file and the previews show its `poster()`,
 so make that the finished picture. On an upright video `data.safe_area` is
 set, as for an overlay. A template that fails draws the built-in card and the
-export says why. Start from `splitsmith looks new <name> --starter summary`.
+export says why. Start from `splitsmith looks new <name> --starter summary`;
+the `broadcast` starter has one of each that reads every field.
 
 ## Logos and identity
 
