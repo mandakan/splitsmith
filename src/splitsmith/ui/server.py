@@ -14736,7 +14736,7 @@ def create_app(
             if seed:
                 keep_seed = not share_read and not _is_mirror()
                 target = copy.deepcopy(payload)
-                # Stage events (spec 2026-10-08): reload proposals, seeded once
+                # Stage events (spec 2026-10-08): reload and movement proposals, seeded once
                 # per stage. An earlier seeder's untouched proposals are
                 # replaced, and the shots classified again (confirmed regions
                 # only) so nothing an old proposal may have set stays.
@@ -14751,7 +14751,7 @@ def create_app(
                     if seeded and reseeding:
                         _classify_doc(target, stage_number, cfg)
                 except Exception:  # noqa: BLE001 -- a seed must never fail the read
-                    logger.exception("stage %s/%s: seeding reload proposals failed", slug, stage_number)
+                    logger.exception("stage %s/%s: seeding region proposals failed", slug, stage_number)
                     seeded = False
                 if seeded:
                     view = target

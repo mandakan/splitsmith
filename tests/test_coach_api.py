@@ -16,6 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from splitsmith.audit_revision import audit_revision
+from splitsmith.events import SEED_VERSION
 from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 from splitsmith.ui.server import create_app
 
@@ -86,6 +87,11 @@ def _bootstrap(
 
 def _read(audit_file: Path) -> dict[str, Any]:
     return json.loads(audit_file.read_text(encoding="utf-8"))
+
+
+def _reloads(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The reload regions only: the seeder proposes movements too (v3)."""
+    return [e for e in events if e["kind"] == "reload"]
 
 
 # ---------------------------------------------------------------------------
@@ -641,7 +647,7 @@ def test_get_coach_seeds_a_reload_proposal_once(tmp_path: Path) -> None:
     _write_shots(audit_file, _po_shots_with_a_reload_gap())
 
     body = client.get(f"{base}/shooters/me/stages/1/coach?seed=1").json()
-    assert [(e["kind"], e["source"]) for e in body["events"]] == [("reload", "auto")]
+    assert [(e["kind"], e["source"]) for e in _reloads(body["events"])] == [("reload", "auto")]
     assert body["events"][0]["start"] == pytest.approx(12 * 0.3 + 0.9)  # the 12th shot, 1.2 + 11*0.3
     assert body["events"][0]["id"] == "evt-1"
     # The summary counts confirmed regions only: the proposal is not one.
@@ -650,8 +656,8 @@ def test_get_coach_seeds_a_reload_proposal_once(tmp_path: Path) -> None:
     assert isinstance(body["_version"], str) and len(body["_version"]) == 16
 
     stored = json.loads(audit_file.read_text(encoding="utf-8"))
-    assert stored["events_seeded"] == 2
-    assert len(stored["events"]) == 1
+    assert stored["events_seeded"] == SEED_VERSION
+    assert len(_reloads(stored["events"])) == 1
 
     # The user deletes the proposal; the next read does not resurrect it.
     stored["events"] = []
@@ -664,7 +670,7 @@ def test_get_coach_without_a_division_seeds_from_the_hint_alone(tmp_path: Path) 
     client, audit_file, base = _bootstrap(tmp_path)
     _write_shots(audit_file, [1000, 1300, 4000, 4300, 7200])  # two gaps over 2.5 s
     body = client.get(f"{base}/shooters/me/stages/1/coach?seed=1").json()
-    assert [e["kind"] for e in body["events"]] == ["reload", "reload"]
+    assert [e["kind"] for e in _reloads(body["events"])] == ["reload", "reload"]
 
 
 def test_get_coach_marks_moving_shots_and_sums_the_summary(tmp_path: Path) -> None:
@@ -725,7 +731,7 @@ def test_get_coach_version_is_the_stored_docs_revision(
 
     monkeypatch.setattr(server_module, "_is_mirror", lambda: True)
     body = client.get(f"{base}/shooters/me/stages/1/coach?seed=1").json()
-    assert [e["kind"] for e in body["events"]] == ["reload"]  # served in memory
+    assert [e["kind"] for e in _reloads(body["events"])] == ["reload"]  # served in memory
     healed = _read(audit_file)
     assert "events" not in healed and "events_seeded" not in healed  # the seed is not persisted
     assert healed["shots"] != before["shots"]  # the heal is (v0.64.1)
@@ -734,7 +740,7 @@ def test_get_coach_version_is_the_stored_docs_revision(
     monkeypatch.setattr(server_module, "_is_mirror", lambda: False)
     body = client.get(f"{base}/shooters/me/stages/1/coach?seed=1").json()
     stored = _read(audit_file)
-    assert stored["events_seeded"] == 2
+    assert stored["events_seeded"] == SEED_VERSION
     assert body["_version"] == audit_revision(stored)
 
 
@@ -844,7 +850,7 @@ def test_put_events_replaces_the_list_and_returns_the_coach_payload(tmp_path: Pa
 
     stored = json.loads(audit_file.read_text(encoding="utf-8"))
     assert stored["events"] == events
-    assert stored["events_seeded"] == 2
+    assert stored["events_seeded"] == SEED_VERSION
     assert stored["audit_events"][-1]["kind"] == "events_save"
     assert stored["audit_events"][-1]["payload"] == {"count": 2}
 
@@ -1149,9 +1155,11 @@ def test_get_coach_reseeds_an_older_seeders_untouched_proposals(tmp_path: Path) 
     audit_file.write_text(json.dumps(doc) + "\n", encoding="utf-8")
 
     body = client.get(f"{base}/shooters/me/stages/1/coach?seed=1").json()
-    assert [(round(e["start"], 3), e["source"]) for e in body["events"]] == [(middle[-1] / 1000, "auto")]
+    assert [(round(e["start"], 3), e["source"]) for e in _reloads(body["events"])] == [
+        (middle[-1] / 1000, "auto")
+    ]
     stored = json.loads(audit_file.read_text(encoding="utf-8"))
-    assert stored["events_seeded"] == 2
+    assert stored["events_seeded"] == SEED_VERSION
     # Classified again: the old proposal's auto ``reload`` goes, and the new
     # proposal sets none (a proposal never touches a stored class).
     assert stored["shots"][4]["interval_class"] == "movement"
@@ -1276,7 +1284,7 @@ def _stage_with_a_proposal_only(tmp_path: Path) -> tuple[TestClient, Path, str]:
     doc = _read(audit_file)
     doc["shots"] = _classified([1000, 1300, 3600])
     doc["events"] = [{"id": "evt-1", "kind": "reload", "start": 1.3, "end": 3.6, "source": "auto"}]
-    doc["events_seeded"] = 2
+    doc["events_seeded"] = SEED_VERSION
     audit_file.write_text(json.dumps(doc) + "\n", encoding="utf-8")
     assert _stored_class(audit_file, 2) == "movement"
     return client, audit_file, base
@@ -1333,7 +1341,7 @@ def test_the_heal_ignores_a_proposal(tmp_path: Path) -> None:
     doc = _read(audit_file)
     doc["shots"] = [{"shot_number": i + 1, "ms_after_beep": m} for i, m in enumerate([1000, 1300, 3600])]
     doc["events"] = [{"id": "evt-1", "kind": "reload", "start": 1.3, "end": 3.6, "source": "auto"}]
-    doc["events_seeded"] = 2
+    doc["events_seeded"] = SEED_VERSION
     audit_file.write_text(json.dumps(doc) + "\n", encoding="utf-8")
     body = _coach(client, base)
     assert body["shots"][2]["interval_class"] == "movement"
@@ -1368,9 +1376,9 @@ def test_get_with_seed_persists_proposals_once(tmp_path: Path) -> None:
     shots_before = _read(audit_file)["shots"]
 
     body = client.get(f"{base}/shooters/me/stages/1/coach?seed=1").json()
-    assert [(e["kind"], e["source"]) for e in body["events"]] == [("reload", "auto")]
+    assert [(e["kind"], e["source"]) for e in _reloads(body["events"])] == [("reload", "auto")]
     stored = _read(audit_file)
-    assert stored["events_seeded"] == 2 and len(stored["events"]) == 1
+    assert stored["events_seeded"] == SEED_VERSION and len(_reloads(stored["events"])) == 1
     assert stored["shots"] == shots_before  # the proposal moved no class
     after_first = audit_file.read_bytes()
 
@@ -1406,7 +1414,7 @@ def test_a_pre_beep_first_shot_before_a_long_gap_is_served(tmp_path: Path, query
         assert e["start"] >= 0
     # The gap after the beep (3.8 -> 7.0) is still proposed when seeding.
     if query:
-        assert [(e["start"], e["end"]) for e in resp.json()["events"]] == [(3.8, 7.0)]
+        assert [(e["start"], e["end"]) for e in _reloads(resp.json()["events"])] == [(3.8, 7.0)]
 
 
 def test_a_failing_seed_serves_the_stage_without_proposals(
@@ -1457,7 +1465,7 @@ def test_a_proposed_movement_does_not_mark_shots_moving(tmp_path: Path) -> None:
     doc = _read(audit_file)
     doc["shots"] = _classified([1000, 1300, 3600])
     doc["events"] = [{"id": "evt-1", "kind": "movement", "start": 1.2, "end": 3.7, "source": "auto"}]
-    doc["events_seeded"] = 2
+    doc["events_seeded"] = SEED_VERSION
     audit_file.write_text(json.dumps(doc) + "\n", encoding="utf-8")
     body = _coach(client, base)
     assert [s["moving"] for s in body["shots"]] == [False, False, False]

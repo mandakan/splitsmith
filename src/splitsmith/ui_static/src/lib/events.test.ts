@@ -8,6 +8,7 @@ import type { StageEvent, StageEventSummary } from "@/lib/api";
 import {
   clampToLane,
   enclosingMovement,
+  keepAllEvents,
   keepEvent,
   nextEventId,
   reloadFigures,
@@ -132,6 +133,15 @@ describe("editor helpers", () => {
     expect(next).toEqual([events[0], { ...auto, source: "manual" }]);
     expect(next[0]).toBe(events[0]);
     expect(events[1].source).toBe("auto");
+  });
+
+  it("keepAllEvents confirms every proposal and leaves kept regions as they are", () => {
+    const kept = ev("evt-1", "movement", 1, 3);
+    const events = [kept, ev("evt-2", "reload", 2, 4, "auto"), ev("evt-3", "movement", 5, 6, "auto")];
+    const next = keepAllEvents(events);
+    expect(next.map((e) => e.source)).toEqual(["manual", "manual", "manual"]);
+    expect(next[0]).toBe(kept);
+    expect(next.slice(1)).toEqual([keepEvent(events, "evt-2")[1], keepEvent(events, "evt-3")[2]]);
   });
 
   it("timeFromX maps and clamps", () => {

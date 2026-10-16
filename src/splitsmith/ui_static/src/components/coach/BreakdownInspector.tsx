@@ -10,6 +10,8 @@
  * - The shot list's section folds to its header and scrolls inside itself.
  * - The whole inspector folds to a rail that names the selection, giving
  *   the viewer the width.
+ * - While the stage has unconfirmed proposals, "Keep all" confirms every
+ *   one in a single save, as Keep on each card would.
  *
  * Both folds are per browser and shared by every stage (lib/breakdownPrefs).
  */
@@ -26,6 +28,7 @@ import { Chip } from "@/components/ui/Chip";
 import { Label } from "@/components/ui/Label";
 import type { CoachShot, StageEvent } from "@/lib/api";
 import { useInspectorFolded, useShotsFolded } from "@/lib/breakdownPrefs";
+import { keepAllEvents } from "@/lib/events";
 import { gapTier } from "@/lib/splits";
 import { BUDGET_LABEL, BUDGET_TICK } from "@/lib/timeBudget";
 import type { StageView, StageWorkspace } from "@/lib/useStageWorkspace";
@@ -85,6 +88,7 @@ export function BreakdownInspector({ ws, view, compact, scrollRef }: BreakdownIn
   }
 
   const selectShot = (shot: CoachShot) => ws.seekToShot(shot);
+  const proposals = regions.events.filter((e) => e.source !== "manual").length;
   return (
     <aside
       ref={scrollRef}
@@ -130,6 +134,20 @@ export function BreakdownInspector({ ws, view, compact, scrollRef }: BreakdownIn
       {regions.issue ? (
         <div className="shrink-0">
           <SaveNotice issue={regions.issue} busy={regions.busy} onRetry={regions.retry} onDismiss={regions.dismiss} />
+        </div>
+      ) : null}
+      {!eventsReadOnly && proposals > 0 ? (
+        <div data-testid="keep-all-proposals" className="flex h-8 shrink-0 items-center gap-2">
+          <Label>Proposals</Label>
+          <span className="numeral text-sm text-muted">{proposals}</span>
+          <Button
+            type="button"
+            size="sm"
+            className="ml-auto"
+            onClick={() => regions.change(keepAllEvents(regions.events), true)}
+          >
+            Keep all
+          </Button>
         </div>
       ) : null}
       {eventsReadOnly ? (

@@ -11,6 +11,7 @@ import pytest
 
 from splitsmith.beep_detect import BeepNotFoundError
 from splitsmith.config import BeepCandidate, BeepDetection
+from splitsmith.events import SEED_VERSION
 from splitsmith.match_project import (
     STUB_AUDIT_DETECTION,
     MatchProject,
@@ -617,7 +618,7 @@ def test_detect_shots_reset_applies_the_servers_reset_rule(tmp_path: Path) -> No
                     {"id": "evt-1", "kind": "reload", "start": 0.5, "end": 1.5, "source": "auto"},
                     manual,
                 ],
-                "events_seeded": 2,
+                "events_seeded": SEED_VERSION,
                 # Only the log still remembers candidate 12.
                 "audit_events": [
                     {
@@ -672,7 +673,7 @@ def test_detect_shots_without_reset_numbers_past_the_high_water_mark(tmp_path: P
                 "beep_time": 5.0,
                 "shots": [{"shot_number": 1, "id": "cand-3", "candidate_number": 3, "time": 5.5}],
                 "events": [{"id": "evt-1", "kind": "reload", "start": 0.5, "end": 1.5, "source": "auto"}],
-                "events_seeded": 2,
+                "events_seeded": SEED_VERSION,
             }
         ),
         encoding="utf-8",
@@ -683,7 +684,7 @@ def test_detect_shots_without_reset_numbers_past_the_high_water_mark(tmp_path: P
     doc = json.loads(audit_file.read_text())
     assert [c["candidate_number"] for c in doc["_candidates_pending_audit"]["candidates"]] == [4, 5]
     assert [s["candidate_number"] for s in doc["shots"]] == [3]
-    assert doc["events_seeded"] == 2
+    assert doc["events_seeded"] == SEED_VERSION
     assert len(doc["events"]) == 1
     assert {e["kind"] for e in doc["audit_events"]} == {"shot_detect_run"}
 
@@ -791,7 +792,7 @@ def test_coach_get_reseeds_after_an_mcp_reset(tmp_path: Path) -> None:
                 "beep_time": 5.0,
                 "shots": [{"shot_number": 1, "time": 6.0, "ms_after_beep": 1000, "source": "detected"}],
                 "events": [{"id": "evt-1", "kind": "reload", "start": 9.0, "end": 10.0, "source": "auto"}],
-                "events_seeded": 2,
+                "events_seeded": SEED_VERSION,
             }
         ),
         encoding="utf-8",
@@ -805,7 +806,8 @@ def test_coach_get_reseeds_after_an_mcp_reset(tmp_path: Path) -> None:
     app = create_app(project_root=match_root, project_name="MCP Reseed")
     match_id = app.state.splitsmith_state.matches.known_ids()[0]
     body = TestClient(app).get(f"/api/matches/{match_id}/shooters/me/stages/1/coach?seed=1").json()
-    assert [(e["kind"], e["source"]) for e in body["events"]] == [("reload", "auto")]
+    reloads = [e for e in body["events"] if e["kind"] == "reload"]
+    assert [e["source"] for e in reloads] == ["auto"]
     assert body["events"][0]["start"] == pytest.approx(quick[-1], abs=0.01)
 
 

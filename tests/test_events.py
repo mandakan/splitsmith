@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from splitsmith.config import Config, DivisionCapacityConfig, StageEvent
 from splitsmith.events import (
+    SEED_VERSION,
     capacity_config,
     capacity_for,
     confirmed,
@@ -246,7 +247,7 @@ def test_seed_doc_runs_once_and_only_with_shots() -> None:
         "shots": [{"shot_number": i + 1, "ms_after_beep": int(round(t * 1000))} for i, t in enumerate(times)]
     }
     assert seed_doc(doc, hint_min_s=2.5, capacity=15) is True
-    assert doc["events_seeded"] == 2
+    assert doc["events_seeded"] == SEED_VERSION
     assert [e["kind"] for e in doc["events"]] == ["reload"]
     assert "note" not in doc["events"][0]
 
@@ -397,7 +398,7 @@ def test_an_earlier_seeders_untouched_proposals_are_replaced() -> None:
     ]
     doc = _doc(times, old, True)
     assert seed_doc(doc, hint_min_s=2.5, capacity=15) is True
-    assert doc["events_seeded"] == 2
+    assert doc["events_seeded"] == SEED_VERSION
     assert [(round(e["start"], 3), e["source"]) for e in doc["events"]] == [(round(times[13], 3), "auto")]
     assert seed_doc(doc, hint_min_s=2.5, capacity=15) is False, "once"
 
@@ -442,3 +443,68 @@ def test_seed_doc_with_nothing_to_propose_leaves_the_doc_untouched() -> None:
     doc = {"shots": [{"ms_after_beep": 1000}, {"ms_after_beep": 1300}]}
     assert seed_doc(doc, hint_min_s=2.5, capacity=None) is False
     assert doc == {"shots": [{"ms_after_beep": 1000}, {"ms_after_beep": 1300}]}
+
+
+# -- movement proposals (seed v3) ------------------------------------------
+
+
+def _classified_doc(rows: list[tuple[int, str | None]], **extra: object) -> dict:
+    """Shots as (ms after the beep, interval class of the gap before it)."""
+    shots = [
+        {"shot_number": i + 1, "ms_after_beep": ms, **({"interval_class": cls} if cls else {})}
+        for i, (ms, cls) in enumerate(rows)
+    ]
+    return {"shots": shots, **extra}
+
+
+def test_a_movement_gap_is_proposed_inset_from_its_shots() -> None:
+    doc = _classified_doc([(1000, "first_shot"), (1300, "split"), (3600, "movement"), (3900, "split")])
+    assert seed_doc(doc, hint_min_s=2.5, capacity=None) is True
+    (movement,) = [e for e in doc["events"] if e["kind"] == "movement"]
+    assert (movement["start"], movement["end"], movement["source"]) == (1.4, 3.5, "auto")
+    region = StageEvent.model_validate({**movement, "source": "manual"})
+    assert not shot_is_moving(1.3, [region]) and not shot_is_moving(3.6, [region])
+
+
+def test_movement_rides_beside_a_reload_proposal_over_the_same_gap() -> None:
+    doc = _classified_doc([(1000, "first_shot"), (4000, "movement"), (4300, "split")])
+    assert seed_doc(doc, hint_min_s=2.5, capacity=None) is True
+    assert sorted((e["kind"], e["start"], e["end"]) for e in doc["events"]) == [
+        ("movement", 1.1, 3.9),
+        ("reload", 1.0, 4.0),
+    ]
+    validate_lanes(_events(doc["events"]))
+
+
+def test_unclassified_and_non_movement_gaps_get_no_movement() -> None:
+    plain = _classified_doc([(1000, None), (3400, None), (3700, None)])
+    transition = _classified_doc([(1000, "first_shot"), (3400, "transition"), (3700, "split")])
+    for doc in (plain, transition):
+        seed_doc(doc, hint_min_s=2.5, capacity=None)
+        assert not [e for e in doc.get("events", []) if e["kind"] == "movement"]
+
+
+def test_a_gap_too_short_for_an_inset_movement_is_skipped() -> None:
+    # 0.08 s, inset a quarter each side, leaves 0.04 s: under MIN_EVENT_S.
+    assert seed_events([1.0, 1.08], hint_min_s=2.5, capacity=None, movement_gaps=[1.08]) == []
+
+
+def test_a_pre_beep_gap_never_gets_a_movement() -> None:
+    assert seed_events([-0.5, 2.0], hint_min_s=9.0, capacity=None, movement_gaps=[2.0]) == []
+
+
+def test_an_earlier_seeders_reloads_are_replaced_with_movements_added() -> None:
+    rows = [(1000, "first_shot"), (1300, "split"), (3600, "movement"), (3900, "split")]
+    old = [{"id": "evt-1", "kind": "reload", "start": 1.3, "end": 3.6, "source": "auto"}]
+    doc = _classified_doc(rows, events=old, events_seeded=2)
+    assert seed_doc(doc, hint_min_s=2.5, capacity=None) is True
+    assert doc["events_seeded"] == SEED_VERSION
+    assert [e["kind"] for e in doc["events"]] == ["movement"], "2.3 s is under the reload hint"
+
+
+def test_a_v2_stage_with_a_kept_reload_gets_no_movement() -> None:
+    rows = [(1000, "first_shot"), (1300, "split"), (3600, "movement"), (3900, "split")]
+    kept = [{"id": "evt-1", "kind": "reload", "start": 1.3, "end": 3.6, "source": "manual"}]
+    doc = _classified_doc(rows, events=kept, events_seeded=2)
+    assert seed_doc(doc, hint_min_s=2.5, capacity=None) is False
+    assert doc["events"] == kept
