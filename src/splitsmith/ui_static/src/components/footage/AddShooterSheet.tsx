@@ -5,6 +5,11 @@
  * competitor's identity, so their splits get an expected-rounds prior);
  * "Add by name" is the plain form. An unlinked match gets the connect
  * flow beside the name form.
+ *
+ * With ``linkTo`` it links that existing shooter instead: the same roster,
+ * and a pick pins the competitor on them (``select-shooter``), which also
+ * merges their stage times. A shooter added by name has no stage times and
+ * no SSI id, and nothing else in the app can link one afterwards.
  */
 import { useEffect, useMemo, useState } from "react";
 
@@ -27,13 +32,15 @@ export interface AddShooterSheetProps {
   project: MatchProject | null;
   shooters: ShooterListEntry[];
   editDenied: boolean;
-  /** After a shooter was added, or the match was linked to the scoreboard. */
+  /** After a shooter was added or linked, or the match was linked to the scoreboard. */
   onChanged: () => void;
+  /** Link this shooter to a competitor instead of adding a new one. */
+  linkTo?: ShooterListEntry | null;
 }
 
 const INPUT = "w-full rounded-md border border-rule-strong bg-surface-2 px-2.5 py-1.5 text-md text-ink placeholder:text-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led";
 
-export function AddShooterSheet({ open, onClose, project, shooters, editDenied, onChanged }: AddShooterSheetProps) {
+export function AddShooterSheet({ open, onClose, project, shooters, editDenied, onChanged, linkTo = null }: AddShooterSheetProps) {
   const scoreboardMatchId = project?.scoreboard_match_id ?? null;
   const scoreboardContentType = project?.scoreboard_content_type ?? null;
   const isLinked = scoreboardMatchId != null && scoreboardContentType != null;
@@ -41,7 +48,9 @@ export function AddShooterSheet({ open, onClose, project, shooters, editDenied, 
   const [roster, setRoster] = useState<ScoreboardMatchCompetitor[] | null>(null);
   const [rosterLoading, setRosterLoading] = useState(false);
   const [rosterError, setRosterError] = useState<string | null>(null);
-  const [filter, setFilter] = useState("");
+  const [filter, setFilter] = useState(linkTo?.name ?? "");
+  // A sheet kept mounted between shooters starts from the new one's name.
+  useEffect(() => setFilter(linkTo?.name ?? ""), [linkTo]);
   const [pickingId, setPickingId] = useState<number | null>(null);
   const [name, setName] = useState("");
   const [adding, setAdding] = useState(false);
@@ -93,7 +102,8 @@ export function AddShooterSheet({ open, onClose, project, shooters, editDenied, 
     setPickingId(c.id);
     setError(null);
     try {
-      await api.addMatchShooter({ name: c.name, division: c.division, selected_shooter_id: c.shooterId, selected_competitor_id: c.id });
+      if (linkTo) await api.selectScoreboardShooter(linkTo.slug, c.shooterId, c.id);
+      else await api.addMatchShooter({ name: c.name, division: c.division, selected_shooter_id: c.shooterId, selected_competitor_id: c.id });
       onChanged();
     } catch (e) {
       setError(e instanceof ApiError ? e.detail : String(e));
@@ -117,11 +127,12 @@ export function AddShooterSheet({ open, onClose, project, shooters, editDenied, 
     }
   }
 
-  const showRoster = isLinked && !manual;
+  const showRoster = isLinked && (!manual || linkTo != null);
+  const title = linkTo ? `Link ${linkTo.name} to the scoreboard` : "Add shooter";
   return (
-    <Sheet open={open} onClose={onClose} label="Add shooter">
+    <Sheet open={open} onClose={onClose} label={title}>
       <div className="flex items-center gap-3 border-b border-rule px-4 py-3">
-        <span className="min-w-0 flex-1 text-md font-medium text-ink">Add shooter</span>
+        <span className="min-w-0 flex-1 text-md font-medium text-ink">{title}</span>
         <Button size="sm" variant="ghost" onClick={onClose} aria-label="Close">
           &#10005;
         </Button>
@@ -131,7 +142,9 @@ export function AddShooterSheet({ open, onClose, project, shooters, editDenied, 
         {showRoster ? (
           <>
             <p className="text-sm text-muted">
-              This match is linked to the scoreboard: pick a competitor and their splits get an expected-rounds prior.
+              {linkTo
+                ? `Pick ${linkTo.name} on the scoreboard: their stage times come in, so Audit can trim, and they get a look of their own.`
+                : "This match is linked to the scoreboard: pick a competitor and their splits get an expected-rounds prior."}
             </p>
             <input
               type="search"
@@ -161,17 +174,20 @@ export function AddShooterSheet({ open, onClose, project, shooters, editDenied, 
                   >
                     <span className="min-w-0 flex-1 truncate text-ink">{c.name}</span>
                     <span className="truncate text-sm text-muted">{[c.division, c.club].filter(Boolean).join(" · ")}</span>
-                    {pickingId === c.id ? <span className="text-sm text-muted">Adding…</span> : null}
+                    {pickingId === c.id ? <span className="text-sm text-muted">{linkTo ? "Linking…" : "Adding…"}</span> : null}
                   </button>
                 ))
               )}
             </div>
-            <button type="button" onClick={() => setManual(true)} className="self-start text-sm text-ink-2 hover:text-ink">
-              Add by name instead
-            </button>
+            {linkTo ? null : (
+              <button type="button" onClick={() => setManual(true)} className="self-start text-sm text-ink-2 hover:text-ink">
+                Add by name instead
+              </button>
+            )}
           </>
         ) : (
           <>
+            {linkTo ? null : (
             <form
               onSubmit={(e) => {
                 e.preventDefault();
@@ -185,6 +201,7 @@ export function AddShooterSheet({ open, onClose, project, shooters, editDenied, 
                 {adding ? "Adding…" : "Add shooter"}
               </Button>
             </form>
+            )}
             {isLinked ? (
               <button type="button" onClick={() => setManual(false)} className="self-start text-sm text-ink-2 hover:text-ink">
                 Pick from the scoreboard roster instead

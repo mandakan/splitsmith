@@ -23,7 +23,7 @@ export function canEdit(row: ShooterRosterRow): boolean {
 export function rowNote(row: ShooterRosterRow): string {
   if (row.shooter_id === null) {
     const where = row.source === "none" ? `In ${row.last_match_name}` : `Set in ${row.last_match_name}`;
-    return `${where}. Link them to the scoreboard to give them a look of their own.`;
+    return `${where}. To give them a look of their own, link them to the scoreboard from their menu on that match's Footage page.`;
   }
   const matches = `${row.match_count} ${row.match_count === 1 ? "match" : "matches"}`;
   if (row.source === "none") return `${matches} · no look set`;

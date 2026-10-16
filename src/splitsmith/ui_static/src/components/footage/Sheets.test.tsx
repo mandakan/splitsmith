@@ -25,6 +25,7 @@ vi.mock("@/lib/api", async (orig) => {
         ],
       }),
       addMatchShooter: vi.fn().mockResolvedValue({ shooters: [] }),
+      selectScoreboardShooter: vi.fn().mockResolvedValue({ stage_times_merged: 7 }),
     },
   };
 });
@@ -159,6 +160,22 @@ describe("AddShooterSheet", () => {
     await vi.waitFor(() =>
       expect(api.addMatchShooter).toHaveBeenCalledWith({ name: "Anna Berg", division: "PO", selected_shooter_id: 11, selected_competitor_id: 1 }),
     );
+    await vi.waitFor(() => expect(onChanged).toHaveBeenCalled());
+  });
+
+  it("link mode links an existing shooter to a competitor, never adds one", async () => {
+    const onChanged = vi.fn();
+    render(
+      <AddShooterSheet open onClose={vi.fn()} project={linked} shooters={[ME, ANNA]} linkTo={ANNA} editDenied={false} onChanged={onChanged} />,
+    );
+    expect(screen.getByText("Link Anna to the scoreboard")).toBeInTheDocument();
+    // Their own name filters the roster; adding by name is not offered.
+    expect(screen.getByLabelText("Filter roster")).toHaveValue("Anna");
+    expect(screen.queryByText("Add by name instead")).toBeNull();
+    const adds = vi.mocked(api.addMatchShooter).mock.calls.length;
+    fireEvent.click(await screen.findByRole("button", { name: /Anna Berg/ }));
+    await vi.waitFor(() => expect(api.selectScoreboardShooter).toHaveBeenCalledWith("anna", 11, 1));
+    expect(vi.mocked(api.addMatchShooter).mock.calls.length).toBe(adds);
     await vi.waitFor(() => expect(onChanged).toHaveBeenCalled());
   });
 

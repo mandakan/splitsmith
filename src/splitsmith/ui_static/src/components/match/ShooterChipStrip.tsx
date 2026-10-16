@@ -170,7 +170,7 @@ export function ShooterChipStrip({
                     </button>
                   ) : (
                     <p className="max-w-56 px-2.5 py-1.5 text-sm text-muted">
-                      Link {s.name} to the scoreboard to give them a look of their own.
+                      To give {s.name} a look of their own, link them to the scoreboard from their menu on Footage.
                     </p>
                   )}
                 </Menu>

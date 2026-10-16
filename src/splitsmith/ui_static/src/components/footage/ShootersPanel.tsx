@@ -30,6 +30,8 @@ export interface ShootersPanelProps {
   me?: ScoreboardIdentity | null;
   /** Make this shooter you (their SSI id becomes yours). */
   onThisIsMe?: (shooter: ShooterListEntry) => void;
+  /** Link a shooter added by name to their scoreboard competitor. */
+  onLinkScoreboard?: (shooter: ShooterListEntry) => void;
 }
 
 function initials(name: string): string {
@@ -53,6 +55,7 @@ export function ShootersPanel({
   onIdentity,
   me = null,
   onThisIsMe,
+  onLinkScoreboard,
 }: ShootersPanelProps) {
   const [menuFor, setMenuFor] = useState<string | null>(null);
   return (
@@ -118,6 +121,20 @@ export function ShootersPanel({
               >
                 Edit look&hellip;
               </button>
+              {onLinkScoreboard && s.selected_shooter_id == null ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className={menuItemClass}
+                  disabled={editDenied}
+                  onClick={() => {
+                    setMenuFor(null);
+                    onLinkScoreboard(s);
+                  }}
+                >
+                  Link to scoreboard&hellip;
+                </button>
+              ) : null}
               {onThisIsMe && s.selected_shooter_id != null && !isYou(s.selected_shooter_id, me) ? (
                 <button
                   type="button"

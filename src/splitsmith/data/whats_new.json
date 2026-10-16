@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "link-shooter-to-scoreboard",
+      "date": "2026-10-16",
+      "title": "Link a shooter to the scoreboard later",
+      "body": "A shooter added by name has no stage times, so Audit cannot trim. Link to scoreboard in their menu on the Footage page picks them on the scoreboard and brings the times in."
+    },
+    {
       "id": "sort-footage-keeps-answers",
       "date": "2026-10-16",
       "title": "Sort footage keeps every clip you name",
