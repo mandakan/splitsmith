@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "look-summary-styles",
+      "date": "2026-10-16",
+      "title": "Looks can restyle the summaries",
+      "body": "A Look of your own can now draw the stage summary and the match summary its own way. Pick its style under Stage summary or Match summary on the Export page. On the computer app."
+    },
+    {
       "id": "movement-proposals-keep-all",
       "date": "2026-10-16",
       "title": "Suggested movement, and Keep all",

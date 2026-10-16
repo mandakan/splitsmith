@@ -68,6 +68,20 @@ describe("settingsToBody / applyBody", () => {
   });
 });
 
+describe("summary styles", () => {
+  it("round-trip, and a body stored before they shipped applies the built-in cards", () => {
+    const styled = { ...DEFAULT_EXPORT_SETTINGS, summaryVariant: "finished", matchSummaryVariant: "tally" };
+    const body = settingsToBody(styled);
+    expect([body.summary_variant, body.match_summary_variant]).toEqual(["finished", "tally"]);
+    expect(applyBody(DEFAULT_EXPORT_SETTINGS, body).summaryVariant).toBe("finished");
+    const legacy: Partial<ExportPresetBody> = { ...body };
+    delete legacy.summary_variant;
+    delete legacy.match_summary_variant;
+    const applied = applyBody(styled, legacy as ExportPresetBody);
+    expect([applied.summaryVariant, applied.matchSummaryVariant]).toEqual(["default", "default"]);
+  });
+});
+
 describe("title_division", () => {
   it("a body stored before the option shipped applies it on", () => {
     const legacy: Partial<ExportPresetBody> = { ...YOUTUBE };

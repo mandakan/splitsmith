@@ -126,6 +126,8 @@ export type MatchExportCardFields = Pick<
       | "title_page_variant"
       | "stage_card_variant"
       | "closing_card_variant"
+      | "summary_variant"
+      | "match_summary_variant"
     >
   >;
 
@@ -159,7 +161,7 @@ export function matchExportFields(
     summary_hold_seconds: clampSeconds(options.summaryHoldSeconds, 0),
     match_summary: options.matchSummary,
     match_summary_seconds: clampSeconds(options.matchSummarySeconds, MIN_CARD_SECONDS),
-    ...variantFields(look, ["title_page_variant", "closing_card_variant"]),
+    ...variantFields(look, ["title_page_variant", "closing_card_variant", "summary_variant", "match_summary_variant"]),
   };
 }
 
@@ -208,6 +210,8 @@ const VARIANT_SOURCE = {
   title_page_variant: "titlePageVariant",
   stage_card_variant: "stageCardVariant",
   closing_card_variant: "closingCardVariant",
+  summary_variant: "summaryVariant",
+  match_summary_variant: "matchSummaryVariant",
 } as const;
 
 /** The named variant fields of ``look`` that are not the default. */

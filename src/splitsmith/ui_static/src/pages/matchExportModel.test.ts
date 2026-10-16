@@ -301,7 +301,7 @@ describe("buildCompareGridPayload transitions (#1244)", () => {
 
 
 describe("the Look on the payloads (#1246)", () => {
-  const look = { look: "clean", titlePageVariant: "rise", stageCardVariant: "rise", closingCardVariant: "default" };
+  const look = { look: "clean", titlePageVariant: "rise", stageCardVariant: "rise", closingCardVariant: "default", summaryVariant: "default", matchSummaryVariant: "default" };
 
   it("the match export carries overlay_theme and the variants its format draws", () => {
     const base: MatchExportPayloadInput = {
@@ -328,7 +328,7 @@ describe("the Look on the payloads (#1246)", () => {
     expect(payload.stage_card_variant).toBe("rise");
     expect(payload).not.toHaveProperty("closing_card_variant");
     expect(buildMatchExportPayload(base)).not.toHaveProperty("overlay_theme");
-    const defaults = { look: "splitsmith", titlePageVariant: "default", stageCardVariant: "default", closingCardVariant: "default" };
+    const defaults = { look: "splitsmith", titlePageVariant: "default", stageCardVariant: "default", closingCardVariant: "default", summaryVariant: "default", matchSummaryVariant: "default" };
     expect(buildMatchExportPayload({ ...base, look: defaults })).toEqual(buildMatchExportPayload(base));
     const xml = buildMatchExportPayload({ ...base, look, outputFormat: "fcp7xml" });
     expect(xml.overlay_theme).toBe("clean");
@@ -343,7 +343,7 @@ describe("the Look on the payloads (#1246)", () => {
     const carded = buildCompareGridPayload({ ...base, look, render: { ...DEFAULT_RENDER_OPTIONS, titlePage: true } });
     expect(carded.title_page_variant).toBe("rise");
     expect(buildCompareGridPayload(base)).not.toHaveProperty("overlay_theme");
-    const defaults = { look: "splitsmith", titlePageVariant: "default", stageCardVariant: "default", closingCardVariant: "default" };
+    const defaults = { look: "splitsmith", titlePageVariant: "default", stageCardVariant: "default", closingCardVariant: "default", summaryVariant: "default", matchSummaryVariant: "default" };
     expect(buildCompareGridPayload({ ...base, look: defaults })).toEqual(buildCompareGridPayload(base));
   });
 });

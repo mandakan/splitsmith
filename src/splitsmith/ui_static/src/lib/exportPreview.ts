@@ -64,6 +64,10 @@ export function variantForCard(settings: LookChoice, card: PreviewCard): string 
     case "slate":
     case "lower-third":
       return settings.stageCardVariant;
+    case "summary":
+      return settings.summaryVariant;
+    case "match_summary":
+      return settings.matchSummaryVariant;
     default:
       return null;
   }

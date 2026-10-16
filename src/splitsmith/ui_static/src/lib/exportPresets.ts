@@ -114,6 +114,9 @@ export interface ExportSettings {
   titlePageVariant: string;
   stageCardVariant: string;
   closingCardVariant: string;
+  /** The summaries' Look styles (spec 2026-10-16); ``default`` is the built-in card. */
+  summaryVariant: string;
+  matchSummaryVariant: string;
   /** ``titleInfo`` inside is match-specific and never stored. */
   renderOptions: RenderOptions;
   includeOverlay: boolean;
@@ -143,6 +146,8 @@ export const DEFAULT_EXPORT_SETTINGS: ExportSettings = {
   titlePageVariant: "default",
   stageCardVariant: "default",
   closingCardVariant: "default",
+  summaryVariant: "default",
+  matchSummaryVariant: "default",
   renderOptions: DEFAULT_RENDER_OPTIONS,
   includeOverlay: false,
   overlayStyle: DEFAULT_OVERLAY_STYLE,
@@ -183,6 +188,8 @@ export function settingsToBody(s: ExportSettings): ExportPresetBody {
     title_page_variant: s.titlePageVariant,
     stage_card_variant: s.stageCardVariant,
     closing_card_variant: s.closingCardVariant,
+    summary_variant: s.summaryVariant,
+    match_summary_variant: s.matchSummaryVariant,
     title_page: s.renderOptions.titlePage,
     title_page_seconds: finite(s.renderOptions.titlePageDurationSeconds, D.titlePageDurationSeconds),
     title_division: s.renderOptions.titleDivision,
@@ -236,6 +243,8 @@ export function applyBody(s: ExportSettings, body: ExportPresetBody): ExportSett
     titlePageVariant: body.title_page_variant ?? "default",
     stageCardVariant: body.stage_card_variant ?? "default",
     closingCardVariant: body.closing_card_variant ?? "default",
+    summaryVariant: body.summary_variant ?? "default",
+    matchSummaryVariant: body.match_summary_variant ?? "default",
     renderOptions: {
       ...s.renderOptions,
       titlePage: body.title_page,

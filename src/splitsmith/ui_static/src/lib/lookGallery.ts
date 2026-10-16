@@ -387,11 +387,17 @@ export function visibleSlots(
 }
 
 /** Which settings field and which catalog slot a card slot's Style
- *  control reads and writes (#1246); the other slots have no Style. */
-export const VARIANT_FIELD: Partial<Record<LookSlotId, { field: keyof LookChoice; slot: LookSlotName }>> = {
+ *  control reads and writes (#1246); the other slots have no Style.
+ *  ``modes`` limits it: the summaries' templates are single-shooter only
+ *  (the compare grid's holds are the engine's). */
+export const VARIANT_FIELD: Partial<
+  Record<LookSlotId, { field: keyof LookChoice; slot: LookSlotName; modes?: ExportMode[] }>
+> = {
   titlePage: { field: "titlePageVariant", slot: "title_page" },
   stageCard: { field: "stageCardVariant", slot: "stage_card" },
   closingCard: { field: "closingCardVariant", slot: "closing" },
+  summaryHold: { field: "summaryVariant", slot: "summary", modes: ["single"] },
+  matchSummary: { field: "matchSummaryVariant", slot: "match_summary", modes: ["single"] },
 };
 
 /** The Look tiles: one per installed Look, first in the group (#1246). */

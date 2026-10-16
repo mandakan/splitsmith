@@ -56,6 +56,8 @@ const matchPayload: Required<MatchExportRequestPayload> = {
   title_page_variant: "rise",
   stage_card_variant: "default",
   closing_card_variant: "rise",
+  summary_variant: "finished",
+  match_summary_variant: "tally",
   intro_path: "/intro.mp4",
   outro_path: "/outro.mp4",
   youtube_sidecar: true,
