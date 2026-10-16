@@ -30,6 +30,27 @@ describe("WaveformTrack", () => {
     expect(ctx.fillRect).toHaveBeenCalled();
   });
 
+  it("lifts a quiet window to full height only with fitVisible", () => {
+    const tallest = (fitVisible: boolean) => {
+      const ctx = { setTransform: vi.fn(), clearRect: vi.fn(), fillRect: vi.fn(), fillStyle: "" };
+      vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(ctx as unknown as CanvasRenderingContext2D);
+      render(
+        <WaveformTrack
+          peaks={new Array(600).fill(0.1)}
+          clipDuration={60}
+          from={0}
+          to={60}
+          geom={geom(1)}
+          height={56}
+          fitVisible={fitVisible}
+        />,
+      );
+      return Math.max(...ctx.fillRect.mock.calls.map((c) => c[3] as number));
+    };
+    expect(tallest(false)).toBeCloseTo(0.1 * 52);
+    expect(tallest(true)).toBeCloseTo(52);
+  });
+
   it("says there is no audio when peaks are missing", () => {
     render(<WaveformTrack peaks={null} clipDuration={0} from={0} to={10} geom={geom(1)} height={56} />);
     expect(screen.getByText("No audio")).toBeInTheDocument();
