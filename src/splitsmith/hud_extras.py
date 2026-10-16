@@ -154,9 +154,11 @@ def ammo_plan(
 ) -> dict[str, Any] | None:
     """``data.ammo``: rounds left after each shot, from a full magazine with
     one chambered (``capacity + 1``). Each confirmed reload refills before
-    the first shot at or after its start: to ``capacity + 1`` when rounds
-    were left (a tactical reload keeps the chambered one), to ``capacity``
-    at slide lock. ``refills[].t`` is the reload's end in clip seconds, when
+    the first shot after its start: to ``capacity + 1`` when rounds were
+    left (a tactical reload keeps the chambered one), to ``capacity`` at
+    slide lock. A shot at the reload's own start was fired before it: a
+    seeded reload spans its whole gap, so it starts on the last shot of
+    the magazine. ``refills[].t`` is the reload's end in clip seconds, when
     the magazine seats. A count below zero is kept, not clamped, and ``ok``
     goes false: a reload region is missing. ``None`` without a capacity."""
     if capacity is None or capacity <= 0:
@@ -175,7 +177,7 @@ def ammo_plan(
         refills.append({"t": _clip(beep_in_clip, reload.end), "rounds": left})
 
     for shot in shots:
-        while pending and pending[0].start <= shot.time_from_beep:
+        while pending and pending[0].start < shot.time_from_beep:
             refill()
         left -= 1
         per_shot.append(left)
@@ -335,7 +337,7 @@ register(HudDataProvider("scoring", 2, lambda i: scoring_data(i.shots, events=i.
 register(
     HudDataProvider(
         "ammo",
-        1,
+        2,
         lambda i: ammo_plan(
             i.shots, beep_in_clip=i.beep_in_clip, events=i.events, capacity=i.extras.capacity
         ),

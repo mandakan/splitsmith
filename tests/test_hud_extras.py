@@ -87,6 +87,17 @@ def test_ammo_counts_down_from_a_full_magazine_plus_one() -> None:
     assert plan == {"capacity": 3, "start": 4, "per_shot": [3, 2, 1], "refills": [], "ok": True}
 
 
+def test_a_shot_at_the_reloads_start_was_fired_before_it() -> None:
+    """A seeded reload spans its whole gap, so it starts on the magazine's
+    last shot: that shot counts down the old magazine, and the counter
+    shows what is left until the new one seats."""
+    shots = _shots(("first_shot", 1.0), ("split", 0.2), ("reload", 2.0), ("split", 0.2))
+    plan = ammo_plan(shots, beep_in_clip=0.0, events=[_reload(1.2, 3.2)], capacity=3)
+    assert plan is not None
+    assert plan["per_shot"] == [3, 2, 3, 2]
+    assert plan["refills"] == [{"t": 3.2, "rounds": 4}]
+
+
 def test_a_tactical_reload_keeps_the_chambered_round() -> None:
     shots = _shots(("first_shot", 1.0), ("split", 0.2), ("reload", 2.0), ("split", 0.2))
     plan = ammo_plan(shots, beep_in_clip=1.0, events=[_reload(1.4, 2.9)], capacity=3)
