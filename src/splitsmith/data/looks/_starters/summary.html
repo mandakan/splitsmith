@@ -19,8 +19,9 @@
     stage     the HUD's stage data with the beep at 0: shots[] (t, split,
               cls, label, tier, moving), events[], reloads[]
     safe_area on an upright video: keep clear of it, as an overlay does
-  More data (scoring, ammo, bursts) arrives when the page asks for it:
-    <meta name="splitsmith-data" content="scoring">
+  More data (scoring, ammo, bursts) arrives when the page asks for it, with
+  a meta tag named "splitsmith-data" whose content lists the keys, as an
+  overlay style asks (guide: Overlay styles).
   An animated summary defines duration(), seek(t) and poster(), as an
   animated card does (starter: animated). Guide: docs/looks/authoring.md#summaries
 -->
