@@ -228,6 +228,7 @@ def hud_extras_for(project: MatchProject, stage: StageEntry, project_dir: Path |
         scorecard=stage.scorecard,
         division=division,
         capacity=capacity_for(division),
+        min_rounds=stage.stage_rounds.expected if stage.stage_rounds else None,
         burst_split_max=split_stat_split_max(),
     )
 

@@ -457,6 +457,7 @@ HUD_SAMPLE_EXTRAS = HudExtras(
         procedurals=0,
     ),
     division="Production Optics",
+    min_rounds=24,
     capacity=15,
 )
 

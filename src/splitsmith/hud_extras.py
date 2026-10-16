@@ -69,6 +69,10 @@ class HudExtras(BaseModel):
     #: move). Carried here, not read at render time, so a changed cutoff is
     #: in the record's ``hud_data`` and redraws. ``None`` reads it now.
     burst_split_max: float | None = None
+    #: The fewest rounds that can score every target (SSI's ``min_rounds``,
+    #: ``StageEntry.stage_rounds.expected``); ``None`` when the scoreboard
+    #: gave none.
+    min_rounds: int | None = None
 
 
 @dataclass(frozen=True)
@@ -286,6 +290,7 @@ def scoring_data(
         "name": extras.stage_name,
         "number": extras.stage_number,
         "division": extras.division,
+        "min_rounds": extras.min_rounds,
         "hit_factor": card.hit_factor if card else None,
         "stage_pct": card.stage_pct if card else None,
         "points": card.stage_points if card else None,
@@ -326,7 +331,7 @@ def hud_extras_data(
     return {key: provider.build(inputs) for key, provider in PROVIDERS.items() if key in keys}
 
 
-register(HudDataProvider("scoring", 1, lambda i: scoring_data(i.shots, events=i.events, extras=i.extras)))
+register(HudDataProvider("scoring", 2, lambda i: scoring_data(i.shots, events=i.events, extras=i.extras)))
 register(
     HudDataProvider(
         "ammo",

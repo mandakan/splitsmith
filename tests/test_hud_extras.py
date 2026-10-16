@@ -386,6 +386,27 @@ def test_hud_extras_for_resolves_the_division_as_breakdown_does(
     assert asked == [tmp_path]
     assert (extras.division, extras.capacity) == ("Production Optics", 15)
     assert extras.burst_split_max is not None
+    assert extras.min_rounds is None, "no scoreboard rounds, no minimum"
+
+
+def test_min_rounds_comes_from_the_scoreboard_and_reaches_scoring(tmp_path: Path) -> None:
+    from splitsmith.config import StageRounds
+    from splitsmith.match_project import MatchProject, StageEntry
+    from splitsmith.ui import exports
+
+    stage = StageEntry(
+        stage_number=2,
+        stage_name="Skolhuset",
+        time_seconds=36.18,
+        stage_rounds=StageRounds(expected=32, paper_targets=16, steel_targets=0),
+    )
+    extras = exports.hud_extras_for(MatchProject(name="M"), stage, tmp_path)
+    assert extras.min_rounds == 32
+    out = hud_extras_data(("scoring",), _STAGE, beep_in_clip=0.0, events=(), extras=extras)
+    assert out["scoring"]["min_rounds"] == 32
+    assert extras_identity(("scoring",), extras) != extras_identity(
+        ("scoring",), extras.model_copy(update={"min_rounds": 30})
+    )
 
 
 def test_the_burst_cutoff_rides_the_extras_and_the_identity() -> None:
