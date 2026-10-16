@@ -109,6 +109,8 @@ def _starter_files(starter: str) -> list[str]:
             if file not in files:
                 files.append(file)
     return files
+
+
 CARD_SLOTS: tuple[Literal["title_page", "slate", "lower_third", "closing"], ...] = (
     "title_page",
     "slate",
