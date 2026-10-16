@@ -23,12 +23,11 @@ from typing import Any
 from .. import csv_gen, fcpxml_gen, overlay_render, report, summary_card, trim
 from ..audit_data import StageExportError, audit_shots_to_engine_shots, read_audit_data
 from ..audit_revision import audit_revision
-from ..coach import split_stat_split_max
-from ..config import Config, ReportFiles, StageAnalysis, StageData, StageEvent, StageRounds
+from ..config import Config, ReportFiles, StageAnalysis, StageData, StageEvent
 from ..division import competitor_division
-from ..events import capacity_for, confirmed_from_doc
+from ..events import confirmed_from_doc
 from ..export_naming import stage_file_base
-from ..hud_extras import HudExtras
+from ..hud_extras import HudExtras, hud_extras_from
 from ..looks import DEFAULT_VARIANT
 from ..match_project import MatchProject, StageEntry, StageScorecard
 from ..overlay_hud import (
@@ -230,28 +229,6 @@ def hud_extras_for(project: MatchProject, stage: StageEntry, project_dir: Path |
         scorecard=stage.scorecard,
         stage_rounds=stage.stage_rounds,
         division=competitor_division(project, project_dir),
-    )
-
-
-def hud_extras_from(
-    *,
-    stage_name: str | None,
-    stage_number: int,
-    scorecard: StageScorecard | None,
-    stage_rounds: StageRounds | None,
-    division: str | None,
-) -> HudExtras:
-    """:class:`HudExtras` from a stage's fields and an already resolved
-    division: the one builder :func:`hud_extras_for` and the match export's
-    summary holds share."""
-    return HudExtras(
-        stage_name=stage_name,
-        stage_number=stage_number,
-        scorecard=scorecard,
-        division=division,
-        capacity=capacity_for(division),
-        min_rounds=stage_rounds.expected if stage_rounds else None,
-        burst_split_max=split_stat_split_max(),
     )
 
 

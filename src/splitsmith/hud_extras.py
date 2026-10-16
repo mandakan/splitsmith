@@ -31,8 +31,8 @@ from typing import Any, Literal, get_args
 from pydantic import BaseModel, ConfigDict
 
 from .coach import split_stat_split_max
-from .config import StageEvent
-from .events import confirmed, shot_is_moving
+from .config import StageEvent, StageRounds
+from .events import capacity_for, confirmed, shot_is_moving
 from .match_project import StageScorecard
 from .stage_summary_data import TileShot
 
@@ -73,6 +73,29 @@ class HudExtras(BaseModel):
     #: ``StageEntry.stage_rounds.expected``); ``None`` when the scoreboard
     #: gave none.
     min_rounds: int | None = None
+
+
+def hud_extras_from(
+    *,
+    stage_name: str | None,
+    stage_number: int,
+    scorecard: StageScorecard | None,
+    stage_rounds: StageRounds | None,
+    division: str | None,
+) -> HudExtras:
+    """:class:`HudExtras` from a stage's fields and an already resolved
+    division (``division.competitor_division``): the one builder every
+    writer shares (``ui.exports.hud_extras_for``, the match export's summary
+    holds, the export preview), so their records and pictures agree."""
+    return HudExtras(
+        stage_name=stage_name,
+        stage_number=stage_number,
+        scorecard=scorecard,
+        division=division,
+        capacity=capacity_for(division),
+        min_rounds=stage_rounds.expected if stage_rounds else None,
+        burst_split_max=split_stat_split_max(),
+    )
 
 
 @dataclass(frozen=True)
@@ -359,6 +382,7 @@ __all__ = [
     "declared_data",
     "extras_identity",
     "hud_extras_data",
+    "hud_extras_from",
     "register",
     "scoring_data",
     "spread",

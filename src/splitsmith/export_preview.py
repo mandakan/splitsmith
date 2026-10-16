@@ -33,8 +33,10 @@ from PIL import Image
 
 from . import composition
 from .config import StageEvent
+from .division import competitor_division
 from .events import confirmed_from_doc, reload_figures
 from .export_naming import stage_display_name, stage_file_base
+from .hud_extras import hud_extras_from
 from .identity import ResolvedIdentity
 from .logo_placeholder import PLACEHOLDER_REVISION
 from .look_brand import brand_mark_json
@@ -53,6 +55,13 @@ from .overlay_summary_cell import build_summary_still
 from .overlay_theme import OverlayTheme, theme_for
 from .shooter_book import EMPTY_BOOK, BookSnapshot
 from .stage_summary_data import TileShot, TileStageData, load_stage_shots
+from .summary_template import (
+    ResolvedSummary,
+    resolve_match_summary,
+    resolve_stage_summary,
+    summary_motion,
+    summary_poster,
+)
 from .ui.audio import resolve_trim_for_read
 from .ui.match_exports import title_info_lines
 
@@ -575,16 +584,31 @@ def render_preview(
     elif spec.card == "match_summary":
         if match_summary is None:
             raise PreviewError(409, "the match summary needs the match's stages")
-        image = build_match_summary_still(
-            match_summary,
+        resolved = resolve_match_summary(
+            look,
+            summary=match_summary,
+            variant=spec.variant,
             width=spec.width,
             height=spec.height,
-            theme=theme,
-            rasterizer=rasterizer,
-            backdrop=frame,
-            logo=summary_logo,
+            fps=float(MOTION_FPS),
+            shooters=size["shooters"],
         )
+        styled = _summary_template(resolved, spec, look, rasterizer, frame, moving=moving)
+        if isinstance(styled, bytes):
+            return styled
+        image = styled
+        if image is None:
+            image = build_match_summary_still(
+                match_summary,
+                width=spec.width,
+                height=spec.height,
+                theme=theme,
+                rasterizer=rasterizer,
+                backdrop=frame,
+                logo=summary_logo,
+            )
     elif spec.card == "summary":
+        regions = _confirmed_regions(audit_doc)
         tile = TileStageData(
             label=label,
             stage_number=spec.stage_number,
@@ -593,19 +617,43 @@ def render_preview(
             stage_time_is_manual=stage.time_seconds_manual,
             scorecard=stage.scorecard,
             stage_rounds=stage.stage_rounds,
-            reloads=tuple(reload_figures(_confirmed_regions(audit_doc))),
+            reloads=tuple(reload_figures(regions)),
+            events=tuple(regions),
         )
-        image = build_summary_still(
-            tile,
-            label,
+        resolved = resolve_stage_summary(
+            look,
+            tile=tile,
+            label=label,
+            variant=spec.variant,
+            extras=hud_extras_from(
+                stage_name=stage.stage_name,
+                stage_number=stage.stage_number,
+                scorecard=stage.scorecard,
+                stage_rounds=stage.stage_rounds,
+                division=competitor_division(project, root),
+            ),
+            duration_seconds=SUMMARY_PREVIEW_SECONDS,
             width=spec.width,
             height=spec.height,
-            theme=theme,
-            rasterizer=rasterizer,
-            backdrop=frame,
-            accent=shooter.accent if shooter is not None else None,
-            logo=summary_logo,
+            fps=float(MOTION_FPS),
+            shooters=size["shooters"],
         )
+        styled = _summary_template(resolved, spec, look, rasterizer, frame, moving=moving)
+        if isinstance(styled, bytes):
+            return styled
+        image = styled
+        if image is None:
+            image = build_summary_still(
+                tile,
+                label,
+                width=spec.width,
+                height=spec.height,
+                theme=theme,
+                rasterizer=rasterizer,
+                backdrop=frame,
+                accent=shooter.accent if shooter is not None else None,
+                logo=summary_logo,
+            )
     else:  # overlay
         styled = _hud_preview(
             spec,
@@ -737,6 +785,43 @@ def _hud_preview(
 
 def _layers(raw_frames, width: int, height: int) -> list[Image.Image]:  # type: ignore[no-untyped-def]
     return [Image.frombytes("RGBA", (width, height), raw) for raw in raw_frames]
+
+
+#: How long a summary template animates in the preview: the render's
+#: default hold (``composition.SummaryHold``).
+SUMMARY_PREVIEW_SECONDS = 3.0
+
+
+def _summary_template(
+    resolved: ResolvedSummary | None,
+    spec: PreviewSpec,
+    look: Look,
+    rasterizer: Rasterizer,
+    frame: Path | None,
+    *,
+    moving: bool,
+) -> bytes | Image.Image | None:
+    """A summary drawn by the Look's template (spec
+    2026-10-16-summary-templates-design): a looping WebP when ``moving`` and
+    it animates, else its poster over the backdrop. ``None`` for the
+    engine's card (the default style, or a template that failed)."""
+    if resolved is None:
+        return None
+    backdrop = card_backdrop(frame, width=spec.width, height=spec.height, look=look).convert("RGBA")
+    if moving:
+        motion = summary_motion(resolved, rasterizer=rasterizer)
+        if motion is None:
+            return None
+        try:
+            layers = _layers(motion.frames.frames, spec.width, spec.height) if motion.animated else None
+        finally:
+            motion.close()
+        if layers:
+            return _webp([Image.alpha_composite(backdrop, layer).convert("RGB") for layer in layers])
+    text = summary_poster(resolved, rasterizer=rasterizer)
+    if text is None:
+        return None
+    return Image.alpha_composite(backdrop, text).convert("RGB")
 
 
 def _card_motion(

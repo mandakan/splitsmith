@@ -742,7 +742,7 @@ def export_match(
                 f"(current renderer: {request.output_format})"
             )
         else:
-            from .exports import hud_extras_from
+            from ..hud_extras import hud_extras_from
 
             label = request.shooter_label or request.project_name
             summary_variant = request.summary_variant or DEFAULT_VARIANT
