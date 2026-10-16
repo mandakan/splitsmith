@@ -192,7 +192,10 @@ export function setsClock(view: SortView, clipId: string): boolean {
 }
 
 /** The user names a clip's run. On a camera whose clock is unknown (or was
- *  set by an earlier answer) that answer is the camera's one anchor. */
+ *  set by an earlier answer) that answer is the camera's one anchor, and
+ *  the anchor it replaces stays its own clip's answer as an override: with
+ *  no scorecard time an anchor sets no clock, so every clip is named by
+ *  hand and none may undo the one before. */
 export function assignClip(
   view: SortView,
   clipId: string,
@@ -203,6 +206,9 @@ export function assignClip(
   if (setsClock(view, clipId)) {
     const camera = cameraOf(view, clipId);
     const sameCamera = new Set(camera?.clip_ids ?? []);
+    for (const a of d.anchors) {
+      if (sameCamera.has(a.clip_id)) d.overrides.push({ ...a });
+    }
     d.anchors = d.anchors.filter((a) => !sameCamera.has(a.clip_id));
     d.anchors.push({ clip_id: clipId, shooter, stage });
   } else {
