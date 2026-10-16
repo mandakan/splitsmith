@@ -29,6 +29,7 @@ from .. import composition
 from .. import templates as templates_module
 from ..config import Config
 from ..config import StageData as EngineStageData
+from ..division import competitor_division
 from ..export_naming import stage_file_base
 from ..match_project import MatchProject, StageEntry
 from ..ui import exports as export_helpers
@@ -369,6 +370,7 @@ def export_match_tool(
         tail_pad_seconds=tail_pad_seconds,
         include_secondaries=include_secondaries,
         include_overlay=include_overlay,
+        division=competitor_division(project, root),
         project_name=project_name or project.name or "match",
         pip_layout=pip_layout,
         output_format=output_format,

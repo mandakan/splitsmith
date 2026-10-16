@@ -837,7 +837,28 @@ def check_folder(name: str, root: Path, source: Literal["shipped", "user"], *, p
                     (case, prober.probe_template(own, context=context, width=width, height=height))
                     for case, context, width, height in cases
                 ]
-                items.extend(_judge(f"{summary_slot} {variant} {own.name}", results))
+                subject = f"{summary_slot} {variant} {own.name}"
+                found = _judge(subject, results)
+                # An upright summary keeps its text out of what Shorts, Reels
+                # and TikTok draw over (the probe measures it on every page
+                # that carries ``data.safe_area``). Text only: a summary may
+                # dim the whole frame behind it, which an overlay never does.
+                texts = [
+                    (case, hit) for case, probe in results for hit in probe.unsafe if hit[0].startswith('"')
+                ]
+                if texts and not any(item.level == "error" for item in found):
+                    case, (what, by) = texts[0]
+                    found = [item for item in found if item.level != "ok"]
+                    found.append(
+                        CheckItem(
+                            subject,
+                            "warn",
+                            f"{what} reaches {by} px into an upright video's safe area, where Shorts, "
+                            "Reels and TikTok draw their captions and buttons; keep clear of "
+                            f"data.safe_area (sample: {case})",
+                        )
+                    )
+                items.extend(found)
         for target_slot, variant, template in targets:
             subject = f"{target_slot} {variant} {template.name}"
             results = [

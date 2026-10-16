@@ -27,6 +27,7 @@ from tests.test_mp4_render import (
     _FakeRasterizer,
     _ok,
     _summarised_composition,
+    _transitioned_composition,
 )
 
 _MOVE = StageEvent(id="evt-1", kind="movement", start=1.1, end=1.25, source="manual")
@@ -215,3 +216,64 @@ def test_a_match_summary_template_draws_the_match_as_data(tmp_path: Path, doom: 
     ]
     assert context["card"]["text"] == "Little Trouble" and context["match"]["rows"][0]["name"] == "Bay"
     assert str(work / "match_summary.png") in _command_writing(runner, "match_summary.mp4")
+
+
+# -- review findings: transitions and failures -----------------------------
+
+
+def test_an_animated_summary_beside_a_transition_renders_its_edge(
+    tmp_path: Path, doom: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The fade out of an animated summary is an edge of its clip, offset to
+    the clip's last ``half`` seconds, as an animated card's tail edge is."""
+    monkeypatch.setattr(mp4_render, "write_motion_clip", _fake_clip_writer)
+    comp = _with_variant(_transitioned_composition(tmp_path, summaries=True), "finished")
+    fake = _FakeRasterizer(motion_seconds=0.5)
+    result, runner, work = _render(tmp_path, comp, fake, "doom")
+    edge = _command_writing(runner, "_tail.mp4")
+    assert str(work / "summary_000_motion.mov") in edge
+    assert not any("transition" in d for d in result.degradations), result.degradations
+
+
+def test_a_summary_clip_that_fails_draws_the_built_in_card_and_says_so(
+    tmp_path: Path, doom: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from splitsmith.look_motion import MotionClipError
+
+    def broken(frames, *, out: Path, fps: float, ffmpeg_binary: str):  # noqa: ANN001, ANN202
+        raise MotionClipError("frame 12 failed")
+
+    monkeypatch.setattr(mp4_render, "write_motion_clip", broken)
+    fake = _FakeRasterizer(motion_seconds=0.5)
+    result, runner, work = _render(
+        tmp_path, _with_variant(_summarised_composition(tmp_path), "finished"), fake, "doom"
+    )
+    assert str(work / "summary_000.png") in _command_writing(runner, "summary_000.mp4")
+    assert [c for c in fake.calls if c.startswith("<!doctype html>")], "the engine card stood in"
+    assert any("summary_000 drew the built-in card" in d for d in result.degradations)
+
+
+def test_a_still_template_whose_frame_fails_says_the_built_in_card_drew(tmp_path: Path, doom: Path) -> None:
+    from splitsmith.overlay_raster import TemplateFrames
+
+    class _BadFrame(_FakeRasterizer):
+        def render_template_frames(self, template, **kwargs):  # noqa: ANN001, ANN003
+            frames = super().render_template_frames(template, **kwargs)
+
+            def boom():
+                raise RuntimeError("bad frame")
+                yield b""  # pragma: no cover
+
+            return TemplateFrames(
+                duration=frames.duration,
+                frame_count=frames.frame_count,
+                width=frames.width,
+                height=frames.height,
+                frames=boom(),
+            )
+
+    result, _r, _w = _render(
+        tmp_path, _with_variant(_summarised_composition(tmp_path), "finished"), _BadFrame(), "doom"
+    )
+    assert any("drew the built-in card" in d for d in result.degradations)
+    assert not any("was left out" in d for d in result.degradations)

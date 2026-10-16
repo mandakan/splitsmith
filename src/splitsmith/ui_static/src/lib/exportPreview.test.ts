@@ -151,6 +151,33 @@ describe("previewBody with a Look (#1246)", () => {
     expect(previewBody(clean, "title", 1, "", catalog).look).toBe("clean");
     expect(previewBody(clean, "title", 1, "", catalog)).not.toHaveProperty("variant");
   });
+
+  it("previews one shooter's summary style moving, the built-in card still, and no style on the grid", () => {
+    const doom: LookInfo[] = [
+      {
+        name: "doom",
+        label: "Doom",
+        source: "user",
+        accent_series: [],
+        preview: null,
+        slots: {
+          title_page: [], slate: [], lower_third: [], closing: [], transition: [],
+          summary: [{ name: "finished", preview: null }],
+          match_summary: [{ name: "tally", preview: null }],
+        },
+      },
+    ];
+    const styled = { ...DEFAULT_EXPORT_SETTINGS, mode: "single" as const, look: "doom", summaryVariant: "finished", matchSummaryVariant: "tally" };
+    const summary = previewBody(styled, "summary", 1, "", doom);
+    expect([summary.variant, summary.motion]).toEqual(["finished", true]);
+    expect(previewBody(styled, "match_summary", 1, "", doom).variant).toBe("tally");
+    const builtIn = previewBody({ ...styled, summaryVariant: "default" }, "summary", 1, "", doom);
+    expect(builtIn).not.toHaveProperty("variant");
+    expect(builtIn).not.toHaveProperty("motion");
+    const grid = previewBody({ ...styled, mode: "compare" as const }, "match_summary", 1, "", doom);
+    expect(grid).not.toHaveProperty("variant");
+    expect(grid).not.toHaveProperty("motion");
+  });
 });
 
 
