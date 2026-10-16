@@ -102,6 +102,27 @@ def test_every_starter_passes_check(
     assert problems == [], problems
 
 
+def test_a_summary_in_the_upright_safe_area_is_a_warning(
+    raster, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Spec 2026-10-16-summary-templates-design: an upright summary keeps its
+    text out of what Shorts, Reels and TikTok draw over, as an overlay style
+    does; a shade over the whole frame behind it is fine."""
+    monkeypatch.setenv("SPLITSMITH_HOME", str(tmp_path))
+    root = look_tools.new_look("mine", starter="summary")
+    (root / "summary.html").write_text(
+        "<!doctype html><style>html,body{margin:0;background:transparent}"
+        "#shade{position:absolute;inset:0;background:rgba(0,0,0,.7)}"
+        "#line{position:absolute;left:0;bottom:1vh;font:6vh sans-serif;color:#fff}</style>"
+        '<div id="shade"></div><div id="line">Scoring footer</div>',
+        encoding="utf-8",
+    )
+    report = look_tools.check_look("mine", prober=raster)
+    warnings = [i.message for i in report.items if i.level == "warn" and i.subject.startswith("summary ")]
+    assert any('"Scoring footer" reaches' in m and "upright" in m for m in warnings), warnings
+    assert not any("#shade" in m for m in warnings), warnings
+
+
 @pytest.mark.parametrize("name", ["splitsmith", "clean"])
 def test_the_shipped_looks_have_no_errors(
     raster, name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

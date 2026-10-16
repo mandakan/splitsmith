@@ -1144,6 +1144,9 @@ export interface ExportPresetBody extends OverlayStyleBody {
   title_page_variant: string;
   stage_card_variant: string;
   closing_card_variant: string;
+  /** The summaries' Look styles (spec 2026-10-16); absent on an older body. */
+  summary_variant?: string;
+  match_summary_variant?: string;
   title_page: boolean;
   title_page_seconds: number;
   title_division: boolean;
@@ -1497,6 +1500,9 @@ export interface MatchExportRequestPayload extends OverlayStyleBody {
   title_page_variant?: string | null;
   stage_card_variant?: string | null;
   closing_card_variant?: string | null;
+  /** The summaries' Look styles (spec 2026-10-16); unset is the built-in card. */
+  summary_variant?: string | null;
+  match_summary_variant?: string | null;
   /** Issue #972. Hold each stage's summary -- name, scoring, splits over
    *  the blurred last frame -- for this many seconds after its action in
    *  the rendered MP4. 0 (the server default) is off. */

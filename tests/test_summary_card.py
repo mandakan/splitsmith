@@ -98,6 +98,75 @@ def test_card_writes_a_png_and_a_prores_mov_at_the_trims_geometry(tmp_path: Path
     ]
 
 
+class _TemplateRasterizer(_FakeRasterizer):
+    """Also draws Look templates, recording what each was handed."""
+
+    def __init__(self, *, fail: bool = False) -> None:
+        super().__init__()
+        self.templates: list[tuple[str, dict]] = []
+        self.fail = fail
+
+    def render_template(self, template: Path, *, context, width: int, height: int) -> bytes:  # noqa: ANN001
+        if self.fail:
+            raise RuntimeError("boom")
+        self.templates.append((template.name, context.data))
+        buf = io.BytesIO()
+        Image.new("RGBA", (width, height), (0, 0, 0, 0)).save(buf, format="PNG")
+        return buf.getvalue()
+
+
+@pytest.fixture
+def retro(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import json
+
+    from splitsmith import looks
+
+    monkeypatch.setenv("SPLITSMITH_HOME", str(tmp_path / "home"))
+    manifest = json.loads((looks.shipped_looks_dir() / "clean" / "look.json").read_text(encoding="utf-8"))
+    manifest.update(name="retro", slots={"summary": {"finished": "sum.html"}})
+    root = tmp_path / "home" / "looks" / "retro"
+    root.mkdir(parents=True)
+    (root / "look.json").write_text(json.dumps(manifest), encoding="utf-8")
+    (root / "sum.html").write_text("<!doctype html>", encoding="utf-8")
+
+
+def _card_with(
+    tmp_path: Path, fake: _FakeRasterizer, **kwargs
+) -> summary_card.SummaryCardResult:  # noqa: ANN003
+    trim = tmp_path / "stage1_trimmed.mp4"
+    trim.write_bytes(b"")
+    return summary_card.render_summary_card(
+        data=_data(),
+        label="M. Axell",
+        trimmed_video_path=trim,
+        png_path=tmp_path / "stage1_summary.png",
+        mov_path=tmp_path / "stage1_summary.mov",
+        ffmpeg_binary="/bin/ffmpeg",
+        runner=_runner([]),
+        rasterizer=fake,
+        probe=_meta,
+        theme="retro",
+        **kwargs,
+    )
+
+
+def test_a_summary_style_is_held_at_its_templates_poster(tmp_path: Path, retro: None) -> None:
+    fake = _TemplateRasterizer()
+    result = _card_with(tmp_path, fake, variant="finished")
+    ((name, data),) = fake.templates
+    assert name == "sum.html" and data["card"]["slot"] == "summary"
+    assert data["figures"]["hit_factor"] == 12.0
+    assert fake.calls == [], "the engine card was not drawn"
+    assert result.degradations == ()
+
+
+def test_a_failing_summary_template_holds_the_engine_card_and_says_so(tmp_path: Path, retro: None) -> None:
+    fake = _TemplateRasterizer(fail=True)
+    result = _card_with(tmp_path, fake, variant="finished")
+    assert fake.calls and "M. Axell" in fake.calls[0], "the engine card stood in"
+    assert any("built-in card" in d and "sum.html" in d for d in result.degradations)
+
+
 def test_no_browser_keeps_the_blurred_frame_and_says_so(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

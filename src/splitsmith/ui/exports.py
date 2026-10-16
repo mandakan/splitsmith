@@ -23,12 +23,11 @@ from typing import Any
 from .. import csv_gen, fcpxml_gen, overlay_render, report, summary_card, trim
 from ..audit_data import StageExportError, audit_shots_to_engine_shots, read_audit_data
 from ..audit_revision import audit_revision
-from ..coach import split_stat_split_max
 from ..config import Config, ReportFiles, StageAnalysis, StageData, StageEvent
 from ..division import competitor_division
-from ..events import capacity_for, confirmed_from_doc
+from ..events import confirmed_from_doc
 from ..export_naming import stage_file_base
-from ..hud_extras import HudExtras
+from ..hud_extras import HudExtras, hud_extras_from
 from ..looks import DEFAULT_VARIANT
 from ..match_project import MatchProject, StageEntry, StageScorecard
 from ..overlay_hud import (
@@ -43,7 +42,7 @@ from ..overlay_render import OverlayCodec
 from ..overlay_theme import ThemeName
 from ..safe_area import is_upright
 from ..segment_cache import SegmentCache
-from ..stage_summary_data import TileStageData, load_stage_reloads, load_stage_shots
+from ..stage_summary_data import TileStageData, load_stage_events, load_stage_reloads, load_stage_shots
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +88,9 @@ class StageExportRequest:
     # existing per-stage export is byte-identical.
     write_summary_card: bool = False
     summary_hold_seconds: float = summary_card.DEFAULT_SECONDS
+    # The Look's summary style (spec 2026-10-16-summary-templates-design);
+    # ``default`` is the engine's card.
+    summary_variant: str = DEFAULT_VARIANT
 
 
 @dataclass(frozen=True)
@@ -221,14 +223,12 @@ def hud_extras_for(project: MatchProject, stage: StageEntry, project_dir: Path |
     (``division.competitor_division``): the stored value, else the shooter
     directory's scoreboard files (``project_dir``) for a project pinned
     before the division was stored. Never the network."""
-    division = competitor_division(project, project_dir)
-    return HudExtras(
+    return hud_extras_from(
         stage_name=stage.stage_name,
         stage_number=stage.stage_number,
         scorecard=stage.scorecard,
-        division=division,
-        capacity=capacity_for(division),
-        burst_split_max=split_stat_split_max(),
+        stage_rounds=stage.stage_rounds,
+        division=competitor_division(project, project_dir),
     )
 
 
@@ -632,6 +632,7 @@ def export_stage(
                         stage_time_is_manual=stage_time_is_manual,
                         scorecard=scorecard,
                         reloads=load_stage_reloads(audit_path),
+                        events=load_stage_events(audit_path),
                     ),
                     label=label,
                     trimmed_video_path=card_source,
@@ -639,6 +640,8 @@ def export_stage(
                     mov_path=exports_dir / f"{base}_summary.mov",
                     seconds=request.summary_hold_seconds,
                     theme=request.overlay_theme,
+                    variant=request.summary_variant,
+                    extras=hud_extras,
                 )
             except (summary_card.SummaryCardError, OSError, fcpxml_gen.FFprobeError) as exc:
                 skip_reasons.append(f"summary card not written: {exc}")

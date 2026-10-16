@@ -1,5 +1,5 @@
 """Opt-in HUD data: ammo, bursts, scoring spreads, and the opt-in itself
-(spec 2026-10-16-freedoom-hud-design)."""
+(spec 2026-10-16-hud-scoring-data-design)."""
 
 from __future__ import annotations
 
@@ -66,7 +66,8 @@ def test_a_template_without_the_tag_declares_nothing(tmp_path: Path) -> None:
 def test_no_shipped_template_declares_a_key() -> None:
     """What keeps every shipped HUD's context, digest and cached MOV as they
     were: they get no extras at all."""
-    templates = sorted(looks.shipped_looks_dir().rglob("*.html"))
+    # The starters are not shipped Looks: they are copied into a Look of your own.
+    templates = sorted(t for t in looks.shipped_looks_dir().rglob("*.html") if "_starters" not in t.parts)
     assert templates
     for template in templates:
         assert declared_data(template) == (), template.name
@@ -85,6 +86,17 @@ def test_ammo_counts_down_from_a_full_magazine_plus_one() -> None:
         _shots(("first_shot", 1.0), ("split", 0.2), ("split", 0.2)), beep_in_clip=1.0, events=(), capacity=3
     )
     assert plan == {"capacity": 3, "start": 4, "per_shot": [3, 2, 1], "refills": [], "ok": True}
+
+
+def test_a_shot_at_the_reloads_start_was_fired_before_it() -> None:
+    """A seeded reload spans its whole gap, so it starts on the magazine's
+    last shot: that shot counts down the old magazine, and the counter
+    shows what is left until the new one seats."""
+    shots = _shots(("first_shot", 1.0), ("split", 0.2), ("reload", 2.0), ("split", 0.2))
+    plan = ammo_plan(shots, beep_in_clip=0.0, events=[_reload(1.2, 3.2)], capacity=3)
+    assert plan is not None
+    assert plan["per_shot"] == [3, 2, 3, 2]
+    assert plan["refills"] == [{"t": 3.2, "rounds": 4}]
 
 
 def test_a_tactical_reload_keeps_the_chambered_round() -> None:
@@ -270,44 +282,44 @@ def test_scoring_identity_is_none_for_classic_and_for_shipped_templates() -> Non
 
 
 @pytest.fixture
-def doom_look(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def retro_look(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A user Look whose overlay template declares every key."""
     monkeypatch.setenv("SPLITSMITH_HOME", str(tmp_path))
     manifest = json.loads((looks.shipped_looks_dir() / "clean" / "look.json").read_text(encoding="utf-8"))
-    manifest["name"] = "doom"
-    manifest["slots"] = {"overlay": {"doom": "hud-doom.html"}}
-    root = tmp_path / "looks" / "doom"
+    manifest["name"] = "retro"
+    manifest["slots"] = {"overlay": {"retro": "hud-retro.html"}}
+    root = tmp_path / "looks" / "retro"
     root.mkdir(parents=True)
     (root / "look.json").write_text(json.dumps(manifest), encoding="utf-8")
-    (root / "hud-doom.html").write_text(
+    (root / "hud-retro.html").write_text(
         '<!doctype html><meta name="splitsmith-data" content="scoring,ammo,bursts">', encoding="utf-8"
     )
     return root
 
 
-def test_a_declaring_template_records_a_scoring_identity(doom_look: Path) -> None:
+def test_a_declaring_template_records_a_scoring_identity(retro_look: Path) -> None:
     extras = HudExtras(scorecard=_card(alphas=10), capacity=15)
-    identity = overlay_data_identity("doom", "doom", extras)
+    identity = overlay_data_identity("retro", "retro", extras)
     assert identity == extras_identity(("scoring", "ammo", "bursts"), extras)
     rescored = HudExtras(scorecard=_card(alphas=9, misses=1), capacity=15)
-    assert overlay_data_identity("doom", "doom", rescored) != identity
+    assert overlay_data_identity("retro", "retro", rescored) != identity
 
 
-def test_a_rescored_stage_does_not_reuse_its_overlay(doom_look: Path) -> None:
+def test_a_rescored_stage_does_not_reuse_its_overlay(retro_look: Path) -> None:
     """The CLI's and the MCP tool's reuse check (no ``wanted``): the record
     must have been drawn with the scorecard as it stands."""
     from splitsmith.ui.exports import overlay_record_matches
 
     extras = HudExtras(scorecard=_card(alphas=10), capacity=15)
     record = overlay_settings(
-        look="doom",
-        variant="doom",
+        look="retro",
+        variant="retro",
         options=HudOptions(),
         codec="auto",
         max_height=None,
         max_fps=None,
         audit_revision="r1",
-        hud_data=overlay_data_identity("doom", "doom", extras),
+        hud_data=overlay_data_identity("retro", "retro", extras),
     )
     assert overlay_record_matches(record, audit_revision="r1", hud_extras=extras)
     rescored = HudExtras(scorecard=_card(alphas=9, misses=1), capacity=15)
@@ -386,6 +398,27 @@ def test_hud_extras_for_resolves_the_division_as_breakdown_does(
     assert asked == [tmp_path]
     assert (extras.division, extras.capacity) == ("Production Optics", 15)
     assert extras.burst_split_max is not None
+    assert extras.min_rounds is None, "no scoreboard rounds, no minimum"
+
+
+def test_min_rounds_comes_from_the_scoreboard_and_reaches_scoring(tmp_path: Path) -> None:
+    from splitsmith.config import StageRounds
+    from splitsmith.match_project import MatchProject, StageEntry
+    from splitsmith.ui import exports
+
+    stage = StageEntry(
+        stage_number=2,
+        stage_name="Skolhuset",
+        time_seconds=36.18,
+        stage_rounds=StageRounds(expected=32, paper_targets=16, steel_targets=0),
+    )
+    extras = exports.hud_extras_for(MatchProject(name="M"), stage, tmp_path)
+    assert extras.min_rounds == 32
+    out = hud_extras_data(("scoring",), _STAGE, beep_in_clip=0.0, events=(), extras=extras)
+    assert out["scoring"]["min_rounds"] == 32
+    assert extras_identity(("scoring",), extras) != extras_identity(
+        ("scoring",), extras.model_copy(update={"min_rounds": 30})
+    )
 
 
 def test_the_burst_cutoff_rides_the_extras_and_the_identity() -> None:

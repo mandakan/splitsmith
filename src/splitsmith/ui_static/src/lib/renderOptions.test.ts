@@ -204,7 +204,7 @@ describe("transitionsSupported by format and mode (#1244)", () => {
 
 
 describe("the Look choice on the mappers (#1246)", () => {
-  const choice = { look: "clean", titlePageVariant: "rise", stageCardVariant: "default", closingCardVariant: "rise" };
+  const choice = { look: "clean", titlePageVariant: "rise", stageCardVariant: "default", closingCardVariant: "rise", summaryVariant: "default", matchSummaryVariant: "default" };
 
   it("matchExportFields sends the match-card variants where cards go and the stage card's where stage cards go", () => {
     const mp4 = matchExportFields(ON, "mp4", choice);
@@ -218,8 +218,24 @@ describe("the Look choice on the mappers (#1246)", () => {
     const fcp7 = matchExportFields(ON, "fcp7xml", { ...choice, stageCardVariant: "rise" });
     expect("stage_card_variant" in fcp7).toBe(false);
     expect(matchExportFields(ON, "mp4")).not.toHaveProperty("title_page_variant");
-    const defaults = { look: "splitsmith", titlePageVariant: "default", stageCardVariant: "default", closingCardVariant: "default" };
+    const defaults = { look: "splitsmith", titlePageVariant: "default", stageCardVariant: "default", closingCardVariant: "default", summaryVariant: "default", matchSummaryVariant: "default" };
     expect(matchExportFields(ON, "mp4", defaults)).toEqual(matchExportFields(ON, "mp4"));
+  });
+
+  it("matchExportFields sends the summary styles on an mp4 only, and only when set", () => {
+    const styled = { ...choice, summaryVariant: "finished", matchSummaryVariant: "tally" };
+    const mp4 = matchExportFields(ON, "mp4", styled);
+    expect([mp4.summary_variant, mp4.match_summary_variant]).toEqual(["finished", "tally"]);
+    expect(matchExportFields(ON, "mp4", choice)).not.toHaveProperty("summary_variant");
+    const xml = matchExportFields(ON, "fcpxml", styled);
+    expect(xml).not.toHaveProperty("summary_variant");
+    expect(xml).not.toHaveProperty("match_summary_variant");
+  });
+
+  it("gridExportFields never sends a summary style: the grid's holds are the engine's", () => {
+    const fields = gridExportFields(ON, { ...choice, summaryVariant: "finished", matchSummaryVariant: "tally" });
+    expect(fields).not.toHaveProperty("summary_variant");
+    expect(fields).not.toHaveProperty("match_summary_variant");
   });
 
   it("gridExportFields sends all three", () => {

@@ -30,11 +30,26 @@ export interface LookChoice {
   titlePageVariant: string;
   stageCardVariant: string;
   closingCardVariant: string;
+  /** The stage summary's and the match summary's styles (spec
+   *  2026-10-16-summary-templates-design); ``default`` is the built-in card. */
+  summaryVariant: string;
+  matchSummaryVariant: string;
 }
 
 /** The card slots the catalog names; ``stage_card`` is the page's one
  *  choice for both the slate and the lower third. */
-export type LookSlotName = "title_page" | "slate" | "lower_third" | "closing" | "stage_card";
+export type LookSlotName =
+  | "title_page"
+  | "slate"
+  | "lower_third"
+  | "closing"
+  | "stage_card"
+  | "summary"
+  | "match_summary";
+
+/** Slots whose ``default`` is the built-in card, never a template: the
+ *  catalog lists only their named variants, so ``default`` goes first here. */
+const ENGINE_DEFAULT_SLOTS: ReadonlySet<LookSlotName> = new Set(["summary", "match_summary"]);
 
 /** What the page knows before the catalog answers (or when it cannot):
  *  the shipped default with its still card only and no previews. */
@@ -50,6 +65,7 @@ export const BUILTIN_LOOKS: LookInfo[] = [
       slate: [{ name: DEFAULT_VARIANT, preview: null }],
       lower_third: [{ name: DEFAULT_VARIANT, preview: null }],
       summary: [],
+      match_summary: [],
       closing: [{ name: DEFAULT_VARIANT, preview: null }],
       transition: [],
     },
@@ -70,7 +86,9 @@ export function visibleLook(looks: LookInfo[], name: string): string {
 export function variantsFor(looks: LookInfo[], look: string, slot: LookSlotName): LookVariantInfo[] {
   const info = lookNamed(looks, visibleLook(looks, look)) ?? BUILTIN_LOOKS[0];
   const key = slot === "stage_card" ? "slate" : slot;
-  return info.slots[key] ?? [];
+  const named = info.slots[key] ?? [];
+  if (!ENGINE_DEFAULT_SLOTS.has(slot) || named.some((v) => v.name === DEFAULT_VARIANT)) return named;
+  return [{ name: DEFAULT_VARIANT, preview: null }, ...named];
 }
 
 /** The stored variant when the Look offers it, else ``default``. */
@@ -92,6 +110,8 @@ export function resolveLookChoice(looks: LookInfo[], settings: LookChoice): Look
     titlePageVariant: visibleVariant(looks, look, "title_page", settings.titlePageVariant),
     stageCardVariant: visibleVariant(looks, look, "stage_card", settings.stageCardVariant),
     closingCardVariant: visibleVariant(looks, look, "closing", settings.closingCardVariant),
+    summaryVariant: visibleVariant(looks, look, "summary", settings.summaryVariant),
+    matchSummaryVariant: visibleVariant(looks, look, "match_summary", settings.matchSummaryVariant),
   };
 }
 
@@ -180,5 +200,7 @@ export function lookChoiceOf(settings: LookChoice): LookChoice {
     titlePageVariant: settings.titlePageVariant,
     stageCardVariant: settings.stageCardVariant,
     closingCardVariant: settings.closingCardVariant,
+    summaryVariant: settings.summaryVariant,
+    matchSummaryVariant: settings.matchSummaryVariant,
   };
 }

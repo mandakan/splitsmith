@@ -113,13 +113,19 @@ function SlotRow({
   const help = variantHelp(selected, settings.mode);
   // The card's template variant (#1246): a Style under the tiles while
   // the card is on and the chosen Look has more than one to offer.
-  const styleField = VARIANT_FIELD[slot.id];
+  const field = VARIANT_FIELD[slot.id];
+  const styleField = field && (!field.modes || field.modes.includes(settings.mode)) ? field : undefined;
   const styles = styleField ? variantsFor(looks, settings.look, styleField.slot) : [];
+  // A summary's ``default`` is the built-in card, not a template of the Look's.
+  const builtIn = styleField?.modes !== undefined;
   const style =
     styleField && on && styles.length > 1
       ? {
           value: visibleVariant(looks, settings.look, styleField.slot, settings[styleField.field]),
-          options: styles.map((v) => ({ value: v.name, label: capitalise(v.name) })),
+          options: styles.map((v) => ({
+            value: v.name,
+            label: builtIn && v.name === "default" ? "Built-in" : capitalise(v.name),
+          })),
           write: (value: string) => patch({ [styleField.field]: value } as Partial<ExportSettings>),
         }
       : null;

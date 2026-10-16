@@ -382,7 +382,10 @@ def test_styles_pick_the_variant_a_slots_default_draws(user_dir: Path) -> None:
 @pytest.mark.parametrize(
     "styles, message",
     [
-        ({"summary": "rise"}, "card slot"),
+        ({"overlay": "rise"}, "card slot"),
+        # A summary's default is the built-in card by rule.
+        ({"summary": "finished"}, "card slot"),
+        ({"match_summary": "tally"}, "card slot"),
         ({"slate": "Rise!"}, "variant name"),
         ({"transition": "x"}, "card slot"),
     ],
@@ -468,3 +471,40 @@ def test_the_catalog_lists_the_positions_of_each_overlay_style(user_dir: Path) -
     assert positions["ticker"] == ["top-right", "top-left"]
     assert positions["timeline"] == [] and positions["minimal"] == []
     assert all(v.positions == [] for v in splitsmith.slots["slate"])
+
+
+# -- summary slots (spec 2026-10-16-summary-templates-design) --------------
+
+
+def _summary_look(root: Path) -> None:
+    base = json.loads((looks.shipped_looks_dir() / "clean" / "look.json").read_text(encoding="utf-8"))
+    base.update(
+        name="retro",
+        slots={"summary": {"finished": "sum.html"}, "match_summary": {"tally": "match.html"}},
+    )
+    d = root / "retro"
+    d.mkdir(parents=True)
+    (d / "look.json").write_text(json.dumps(base), encoding="utf-8")
+    for file in ("sum.html", "match.html"):
+        (d / file).write_text("<!doctype html>", encoding="utf-8")
+
+
+@pytest.mark.parametrize("slot", ["summary", "match_summary"])
+def test_a_summary_slots_default_is_the_engine_card(slot: str) -> None:
+    with pytest.raises(ValueError, match="summary card"):
+        looks.LookManifest.model_validate(_manifest("mine", {slot: "sum.html"}))
+
+
+def test_the_default_summary_variant_draws_no_template(user_dir: Path) -> None:
+    _summary_look(user_dir)
+    retro = looks.load_look("retro")
+    assert looks.summary_template_for(retro, "summary") is None
+    assert looks.summary_template_for(looks.load_look("splitsmith"), "summary", "finished") is None
+
+
+def test_a_named_summary_variant_resolves_to_the_looks_file(user_dir: Path) -> None:
+    _summary_look(user_dir)
+    retro = looks.load_look("retro")
+    assert looks.summary_template_for(retro, "summary", "finished").name == "sum.html"
+    assert looks.summary_template_for(retro, "match_summary", "tally").name == "match.html"
+    assert looks.summary_template_for(retro, "summary", "nope") is None

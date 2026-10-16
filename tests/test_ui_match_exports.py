@@ -1174,6 +1174,59 @@ def test_summary_hold_carries_the_stages_confirmed_reloads(
     assert [(r.event_id, r.duration) for r in hold.data.reloads] == [("evt-1", 1.25)]
 
 
+def test_summary_styles_reach_the_composition_with_the_stages_extras(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Spec 2026-10-16-summary-templates-design: the hold carries its Look
+    style, its confirmed regions and the HUD extras a template's providers
+    read; the match summary its own style."""
+    captured = _capture_mp4(monkeypatch)
+    stage = _one_stage_input(tmp_path)
+    doc = json.loads(stage.audit_path.read_text())
+    doc["events"] = [{"id": "evt-1", "kind": "movement", "start": 0.1, "end": 0.4, "source": "manual"}]
+    stage.audit_path.write_text(json.dumps(doc))
+    match_exports_mod.export_match(
+        stages=[stage],
+        request=_card_request(
+            summary_hold_seconds=3.0,
+            summary_variant="finished",
+            match_summary=True,
+            match_summary_variant="tally",
+            division="Production Optics",
+        ),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    comp = captured["comp"]
+    hold = comp.stages[0].summary
+    assert hold.variant == "finished"
+    assert [e.id for e in hold.data.events] == ["evt-1"]
+    assert hold.extras is not None and (hold.extras.division, hold.extras.capacity) == (
+        "Production Optics",
+        15,
+    )
+    assert comp.match_summary_variant == "tally"
+
+
+def test_an_unset_summary_style_is_the_engine_card_whatever_the_card_variant(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """``card_variant`` (the CLI's knob, ``rise``) styles the cards only: a
+    summary that followed it would ask every Look for a ``rise`` summary."""
+    captured = _capture_mp4(monkeypatch)
+    match_exports_mod.export_match(
+        stages=[_one_stage_input(tmp_path)],
+        request=_card_request(summary_hold_seconds=3.0, match_summary=True, card_variant="rise"),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    comp = captured["comp"]
+    assert comp.stages[0].summary.variant == "default"
+    assert comp.match_summary_variant == "default"
+
+
 def test_summary_hold_off_by_default(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     captured = _capture_mp4(monkeypatch)
     match_exports_mod.export_match(

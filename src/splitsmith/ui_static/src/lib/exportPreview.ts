@@ -53,8 +53,8 @@ export function previewCardFor(focus: LookFocus | null, mode: ExportMode = "sing
 const finite = (n: number, fallback: number) => (Number.isFinite(n) ? n : fallback);
 
 /** The settings field whose variant a card previews with; null for the
- *  cards that have no template variant (the frame, the summary, the
- *  overlay). */
+ *  cards that have no template variant (the frame, the overlay, which
+ *  carries its own style fields). */
 export function variantForCard(settings: LookChoice, card: PreviewCard): string | null {
   switch (card) {
     case "title":
@@ -64,6 +64,10 @@ export function variantForCard(settings: LookChoice, card: PreviewCard): string 
     case "slate":
     case "lower-third":
       return settings.stageCardVariant;
+    case "summary":
+      return settings.summaryVariant;
+    case "match_summary":
+      return settings.matchSummaryVariant;
     default:
       return null;
   }
@@ -99,8 +103,15 @@ export function previewBody(
   const resolved = resolveLookChoice(looks, lookChoiceOf(settings));
   const look = nonDefault(resolved.look, DEFAULT_LOOK);
   if (look) body.look = look;
-  const variant = variantForCard(resolved, card);
-  if (variant !== null && variant !== DEFAULT_VARIANT) body.variant = variant;
+  // A summary's style is one shooter's only: the grid's holds are the engine's.
+  const summary = SUMMARY_CARDS.has(card);
+  const variant = summary && settings.mode !== "single" ? null : variantForCard(resolved, card);
+  if (variant !== null && variant !== DEFAULT_VARIANT) {
+    body.variant = variant;
+    // A summary template may animate; the built-in card never does, so its
+    // request (and cache key) stays what it was.
+    if (summary) body.motion = true;
+  }
   // The timeline pads with the form's values; the grid and the trims
   // pad with the project's own buffers, which the server defaults to.
   if (settings.mode === "single") {
@@ -122,6 +133,7 @@ export function previewBody(
 }
 
 const MOVING_CARDS: ReadonlySet<PreviewCard> = new Set(["title", "slate", "lower-third", "closing"]);
+const SUMMARY_CARDS: ReadonlySet<PreviewCard> = new Set(["summary", "match_summary"]);
 
 export function previewCaption(
   focus: LookFocus | null,

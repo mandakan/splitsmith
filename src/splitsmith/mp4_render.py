@@ -64,6 +64,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal, Protocol
 
+from PIL import Image
+
 from .composition import (
     Composition,
     ConnectedClip,
@@ -95,6 +97,7 @@ from .overlay_card import (
     first_frame_image,
     lower_third_clip_filters,
     lower_third_filters,
+    note_card_degradation,
     with_card_failures,
 )
 from .overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
@@ -102,6 +105,7 @@ from .overlay_summary_cell import build_summary_still
 from .overlay_theme import ThemeName, load_theme, theme_for
 from .runtime import runtime
 from .segment_cache import SegmentCache
+from .summary_template import match_summary_motion, stage_summary_motion
 
 logger = logging.getLogger(__name__)
 
@@ -414,6 +418,73 @@ def _render_with_work_dir(
     killed: list[str] = []
     prepared: dict[int, _Prepared] = {}
 
+    def template_prep(name: str, motion: CardMotion, backdrop: Path | None, prep: _Prepared) -> bool:
+        """Fill ``prep`` from a summary template's ``motion`` over the tail
+        ``backdrop``, as a card's is filled: a still is one PNG, an
+        animation a backdrop and a clip. ``False`` when a still's frame
+        fails (noted); the caller draws the engine's card."""
+        assert look is not None
+        try:
+            canvas = card_backdrop(backdrop, width=sequence.width, height=sequence.height, look=look)
+        except BaseException:
+            motion.close()
+            raise
+        if not motion.animated:
+            try:
+                raw = next(iter(motion.frames.frames))
+            except Exception as exc:  # noqa: BLE001 -- a bad template costs the template
+                reason = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
+                note_card_degradation(
+                    f"{name} drew the built-in card: its template {motion.template.name} failed ({reason})"
+                )
+                return False
+            finally:
+                motion.close()
+            text = Image.frombytes("RGBA", (motion.frames.width, motion.frames.height), raw)
+            prep.png = work_dir / f"{name}.png"
+            compose_card(text, canvas).save(prep.png)
+            return True
+        prep.backdrop_png = work_dir / f"{name}_backdrop.png"
+        canvas.save(prep.backdrop_png)
+        prep.clip_path = work_dir / f"{name}_motion.mov"
+        prep.motion = motion
+        return True
+
+    def engine_summary_png(item: _SummaryItem | _MatchSummaryItem, backdrop: Path | None) -> Path | None:
+        """The engine's own summary card for ``item`` over its tail
+        ``backdrop``, as a PNG; ``None`` when there is neither a frame nor
+        text to hold on (logged)."""
+        if isinstance(item, _SummaryItem):
+            image = build_summary_still(
+                item.hold.data,
+                item.hold.label,
+                width=sequence.width,
+                height=sequence.height,
+                theme=theme if theme is not None else load_theme(overlay_theme),
+                rasterizer=rasterizer,
+                backdrop=backdrop,
+                accent=shooters[0].accent if shooters else None,
+                logo=summary_logo,
+            )
+            what = f"stage {item.stage_index}: the summary"
+        else:
+            image = build_match_summary_still(
+                item.summary,
+                width=sequence.width,
+                height=sequence.height,
+                theme=theme if theme is not None else load_theme(overlay_theme),
+                rasterizer=rasterizer,
+                backdrop=backdrop,
+                logo=summary_logo,
+            )
+            what = "the match summary"
+        if image is None:
+            logger.warning("%s: no frame and no text to hold on; skipped", what)
+            return None
+        png = work_dir / f"{item.name}.png"
+        image.save(png)
+        return png
+
     def prepare(item: SpineItem) -> _Prepared:
         """Everything an item's encode (or a boundary's edge of it) reads
         from disk: the lower third, a card's PNG or its backdrop and motion
@@ -505,26 +576,27 @@ def _render_with_work_dir(
                 ffmpeg_binary=ffmpeg_binary,
                 runner=runner,
             )
-            image = build_summary_still(
-                item.hold.data,
-                item.hold.label,
-                width=sequence.width,
-                height=sequence.height,
-                theme=theme if theme is not None else load_theme(overlay_theme),
-                rasterizer=rasterizer,
-                backdrop=backdrop,
-                accent=shooters[0].accent if shooters else None,
-                logo=summary_logo,
-            )
-            if image is None:
-                logger.warning(
-                    "stage %d: no frame and no text to hold the summary on; skipped", item.stage_index
+            if look is not None and rasterizer is not None:
+                # A Look's summary template (spec 2026-10-16); ``None`` is
+                # the engine's card below, the default or a fallback.
+                motion = stage_summary_motion(
+                    look,
+                    tile=item.hold.data,
+                    label=item.hold.label,
+                    variant=item.hold.variant,
+                    extras=item.hold.extras,
+                    duration_seconds=item.hold.duration_seconds,
+                    width=sequence.width,
+                    height=sequence.height,
+                    fps=fps,
+                    rasterizer=rasterizer,
+                    shooters=shooters,
                 )
-                prep.skipped = True
-                return prep
-            png = work_dir / f"{item.name}.png"
-            image.save(png)
-            prep.png = png
+                if motion is not None and template_prep(item.name, motion, backdrop, prep):
+                    prep.tail_frame = backdrop
+                    return prep
+            prep.png = engine_summary_png(item, backdrop)
+            prep.skipped = prep.png is None
             return prep
         if isinstance(item, _MatchSummaryItem):
             prep = _Prepared()
@@ -537,22 +609,22 @@ def _render_with_work_dir(
                 ffmpeg_binary=ffmpeg_binary,
                 runner=runner,
             )
-            image = build_match_summary_still(
-                item.summary,
-                width=sequence.width,
-                height=sequence.height,
-                theme=theme if theme is not None else load_theme(overlay_theme),
-                rasterizer=rasterizer,
-                backdrop=backdrop,
-                logo=summary_logo,
-            )
-            if image is None:
-                logger.warning("no frame and no text to hold the match summary on; skipped")
-                prep.skipped = True
-                return prep
-            png = work_dir / f"{item.name}.png"
-            image.save(png)
-            prep.png = png
+            if look is not None and rasterizer is not None:
+                motion = match_summary_motion(
+                    look,
+                    summary=item.summary,
+                    variant=composition.match_summary_variant,
+                    width=sequence.width,
+                    height=sequence.height,
+                    fps=fps,
+                    rasterizer=rasterizer,
+                    shooters=shooters,
+                )
+                if motion is not None and template_prep(item.name, motion, backdrop, prep):
+                    prep.tail_frame = backdrop
+                    return prep
+            prep.png = engine_summary_png(item, backdrop)
+            prep.skipped = prep.png is None
             return prep
         return _Prepared()
 
@@ -641,8 +713,47 @@ def _render_with_work_dir(
         if isinstance(item, _SummaryItem | _MatchSummaryItem):
             if prep.skipped:
                 return None
-            assert prep.png is not None
             still_out = work_dir / f"{item.name}.mp4"
+            if prep.motion is not None:
+                # An animated summary template: encoded as a motion card is.
+                assert prep.backdrop_png is not None and prep.clip_path is not None
+                cmd = _build_motion_card_command(
+                    prep.backdrop_png,
+                    prep.clip_path,
+                    seconds=item.duration_seconds,
+                    sequence=sequence,
+                    output_path=still_out,
+                    ffmpeg_binary=ffmpeg_binary,
+                    youtube_preset=youtube_preset,
+                    clip_offset_seconds=item.head_cut_seconds,
+                )
+                try:
+                    return encode(
+                        cmd,
+                        still_out,
+                        index=next_step(),
+                        label=_step_label(item, timeline),
+                        virtual_inputs={str(prep.clip_path): prep.motion.digest},
+                        prepare=clip_writer(prep.motion, prep.clip_path),
+                    )
+                except MotionClipError as exc:
+                    logger.warning("%s: %s; drawing the built-in summary", item.name, exc)
+                    note_card_degradation(f"{item.name} drew the built-in card: its template failed ({exc})")
+                    png = engine_summary_png(item, prep.tail_frame)
+                    if png is None:
+                        return None
+                    cmd = _build_still_command(
+                        png,
+                        seconds=item.duration_seconds,
+                        sequence=sequence,
+                        output_path=still_out,
+                        ffmpeg_binary=ffmpeg_binary,
+                        youtube_preset=youtube_preset,
+                    )
+                    return encode(cmd, still_out, index=next_step(), label=_step_label(item, timeline))
+                finally:
+                    prep.motion.close()
+            assert prep.png is not None
             cmd = _build_still_command(
                 prep.png,
                 seconds=item.duration_seconds,
@@ -724,9 +835,8 @@ def _render_with_work_dir(
                     youtube_preset=youtube_preset,
                 )
                 return encode(cmd, out, index=next_step(), label=label)
-            assert (
-                isinstance(item, _StillItem) and prep.backdrop_png is not None and prep.clip_path is not None
-            )
+            # A card, or a summary drawn by an animated Look template.
+            assert prep.backdrop_png is not None and prep.clip_path is not None
             cmd = _build_motion_card_command(
                 prep.backdrop_png,
                 prep.clip_path,
@@ -1108,6 +1218,12 @@ class _SummaryItem:
         return f"summary_{self.stage_index:03d}"
 
     @property
+    def card_seconds(self) -> float:
+        """The full hold before any cut, as a card's ``card_seconds``: what a
+        boundary edge of an animated summary offsets its clip by."""
+        return self.hold.duration_seconds
+
+    @property
     def duration_seconds(self) -> float:
         return self.hold.duration_seconds - self.head_cut_seconds - self.tail_cut_seconds
 
@@ -1127,6 +1243,11 @@ class _MatchSummaryItem:
     @property
     def name(self) -> str:
         return "match_summary"
+
+    @property
+    def card_seconds(self) -> float:
+        """The full card before any cut (see :attr:`_SummaryItem.card_seconds`)."""
+        return self.summary.duration_seconds
 
     @property
     def duration_seconds(self) -> float:
@@ -1472,6 +1593,9 @@ class _Prepared:
     clip_path: Path | None = None
     motion: CardMotion | None = None
     skipped: bool = False
+    #: A summary drawn by an animated template keeps its raw tail frame, so
+    #: an encode that fails can still draw the engine's card over it.
+    tail_frame: Path | None = None
 
 
 @dataclass(frozen=True)

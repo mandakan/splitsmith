@@ -85,6 +85,8 @@ class ExportStageRequest(OverlayStyleFields, BaseModel):
     # (``<base>_summary.png`` + a held ``.mov``) next to the overlay.
     write_summary_card: bool = False
     summary_hold_seconds: float = 3.0
+    # The Look's summary style (spec 2026-10-16-summary-templates-design).
+    summary_variant: str = "default"
     # Palette preset for the overlay text + stroke. ``"splitsmith"``
     # (default) uses the same tokens the web UI ships, mirrored into
     # ``data/looks/splitsmith/look.json``. ``"clean"`` is the neutral
@@ -216,6 +218,10 @@ class MatchExportRequest(OverlayStyleFields, BaseModel):
     title_page_variant: str | None = None
     stage_card_variant: str | None = None
     closing_card_variant: str | None = None
+    # The summaries' Look styles (spec 2026-10-16-summary-templates-design);
+    # ``None`` is ``default`` (the engine's card), never ``card_variant``.
+    summary_variant: str | None = None
+    match_summary_variant: str | None = None
     # Issue #972. Hold each stage's summary (name, scoring, splits over
     # the blurred last frame) for this many seconds after its action in
     # the rendered MP4. 0 is off. Other renderers surface an anomaly.

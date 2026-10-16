@@ -1,4 +1,4 @@
-"""Opt-in HUD data beyond ``data.stage`` (spec ``2026-10-16-freedoom-hud-design``).
+"""Opt-in HUD data beyond ``data.stage`` (spec ``2026-10-16-hud-scoring-data-design``).
 
 A template asks for keys with
 ``<meta name="splitsmith-data" content="scoring,ammo,bursts">``; one that
@@ -31,8 +31,8 @@ from typing import Any, Literal, get_args
 from pydantic import BaseModel, ConfigDict
 
 from .coach import split_stat_split_max
-from .config import StageEvent
-from .events import confirmed, shot_is_moving
+from .config import StageEvent, StageRounds
+from .events import capacity_for, confirmed, shot_is_moving
 from .match_project import StageScorecard
 from .stage_summary_data import TileShot
 
@@ -69,6 +69,33 @@ class HudExtras(BaseModel):
     #: move). Carried here, not read at render time, so a changed cutoff is
     #: in the record's ``hud_data`` and redraws. ``None`` reads it now.
     burst_split_max: float | None = None
+    #: The fewest rounds that can score every target (SSI's ``min_rounds``,
+    #: ``StageEntry.stage_rounds.expected``); ``None`` when the scoreboard
+    #: gave none.
+    min_rounds: int | None = None
+
+
+def hud_extras_from(
+    *,
+    stage_name: str | None,
+    stage_number: int,
+    scorecard: StageScorecard | None,
+    stage_rounds: StageRounds | None,
+    division: str | None,
+) -> HudExtras:
+    """:class:`HudExtras` from a stage's fields and an already resolved
+    division (``division.competitor_division``): the one builder every
+    writer shares (``ui.exports.hud_extras_for``, the match export's summary
+    holds, the export preview), so their records and pictures agree."""
+    return HudExtras(
+        stage_name=stage_name,
+        stage_number=stage_number,
+        scorecard=scorecard,
+        division=division,
+        capacity=capacity_for(division),
+        min_rounds=stage_rounds.expected if stage_rounds else None,
+        burst_split_max=split_stat_split_max(),
+    )
 
 
 @dataclass(frozen=True)
@@ -150,9 +177,11 @@ def ammo_plan(
 ) -> dict[str, Any] | None:
     """``data.ammo``: rounds left after each shot, from a full magazine with
     one chambered (``capacity + 1``). Each confirmed reload refills before
-    the first shot at or after its start: to ``capacity + 1`` when rounds
-    were left (a tactical reload keeps the chambered one), to ``capacity``
-    at slide lock. ``refills[].t`` is the reload's end in clip seconds, when
+    the first shot after its start: to ``capacity + 1`` when rounds were
+    left (a tactical reload keeps the chambered one), to ``capacity`` at
+    slide lock. A shot at the reload's own start was fired before it: a
+    seeded reload spans its whole gap, so it starts on the last shot of
+    the magazine. ``refills[].t`` is the reload's end in clip seconds, when
     the magazine seats. A count below zero is kept, not clamped, and ``ok``
     goes false: a reload region is missing. ``None`` without a capacity."""
     if capacity is None or capacity <= 0:
@@ -171,7 +200,7 @@ def ammo_plan(
         refills.append({"t": _clip(beep_in_clip, reload.end), "rounds": left})
 
     for shot in shots:
-        while pending and pending[0].start <= shot.time_from_beep:
+        while pending and pending[0].start < shot.time_from_beep:
             refill()
         left -= 1
         per_shot.append(left)
@@ -286,6 +315,7 @@ def scoring_data(
         "name": extras.stage_name,
         "number": extras.stage_number,
         "division": extras.division,
+        "min_rounds": extras.min_rounds,
         "hit_factor": card.hit_factor if card else None,
         "stage_pct": card.stage_pct if card else None,
         "points": card.stage_points if card else None,
@@ -326,11 +356,11 @@ def hud_extras_data(
     return {key: provider.build(inputs) for key, provider in PROVIDERS.items() if key in keys}
 
 
-register(HudDataProvider("scoring", 1, lambda i: scoring_data(i.shots, events=i.events, extras=i.extras)))
+register(HudDataProvider("scoring", 2, lambda i: scoring_data(i.shots, events=i.events, extras=i.extras)))
 register(
     HudDataProvider(
         "ammo",
-        1,
+        2,
         lambda i: ammo_plan(
             i.shots, beep_in_clip=i.beep_in_clip, events=i.events, capacity=i.extras.capacity
         ),
@@ -352,6 +382,7 @@ __all__ = [
     "declared_data",
     "extras_identity",
     "hud_extras_data",
+    "hud_extras_from",
     "register",
     "scoring_data",
     "spread",

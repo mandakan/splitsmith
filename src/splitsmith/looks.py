@@ -38,14 +38,17 @@ SLOT_NAMES: tuple[str, ...] = (
     "slate",
     "lower_third",
     "summary",
+    "match_summary",
     "closing",
     "transition",
     "overlay",
     "thumbnail",
 )
-"""Every slot a manifest may name. ``summary`` is reserved: no renderer
-reads it in this slice, the stage summary still composes through
-``overlay_summary_cell``. ``transition`` holds the Look's stings (issue
+"""Every slot a manifest may name. ``summary`` and ``match_summary`` are
+the single-shooter stage summary hold and match summary (spec
+2026-10-16-summary-templates-design): like ``overlay``, their ``default``
+is the engine's own card and can never name a file; another variant is a
+template. ``transition`` holds the Look's stings (issue
 #1245): each variant is a ``sting:<variant>`` transition kind.
 ``overlay`` holds the template HUDs (spec 2026-10-08): its ``default`` is
 the engine's Classic overlay and can never name a file. ``thumbnail``
@@ -54,6 +57,10 @@ draws the YouTube thumbnail over an action frame (``thumbnail_card``)."""
 STING_SLOT = "transition"
 OVERLAY_SLOT = "overlay"
 THUMBNAIL_SLOT = "thumbnail"
+SummarySlot = Literal["summary", "match_summary"]
+SUMMARY_SLOTS: tuple[SummarySlot, ...] = ("summary", "match_summary")
+#: Slots whose ``default`` is drawn by the engine, never by a template.
+ENGINE_DEFAULT_SLOTS: tuple[str, ...] = (OVERLAY_SLOT, *SUMMARY_SLOTS)
 PREVIEW_DIR = "preview"
 """Where a Look keeps the gallery's pictures of it (issue #1246):
 ``<slot>-<variant>.png`` (or ``.webp``) per template variant and
@@ -128,6 +135,8 @@ def check_accent_series(value: list[str]) -> list[str]:
 
 
 def check_styles(value: dict[str, str]) -> dict[str, str]:
+    # Card slots only: a summary's ``default`` is the engine's card by rule,
+    # so ``styles`` may not turn it into a template the page calls Built-in.
     for slot, variant in value.items():
         if slot not in get_args(CardSlot):
             raise ValueError(f"styles: {slot!r} is not a card slot; expected one of {get_args(CardSlot)}")
@@ -224,9 +233,10 @@ class LookManifest(BaseModel):
         for slot, variants in value.items():
             if slot not in SLOT_NAMES:
                 raise ValueError(f"unknown slot {slot!r}; expected one of {SLOT_NAMES}")
-            if slot == OVERLAY_SLOT and DEFAULT_VARIANT in variants:
+            if slot in ENGINE_DEFAULT_SLOTS and DEFAULT_VARIANT in variants:
+                engine = "Classic overlay" if slot == OVERLAY_SLOT else "summary card"
                 raise ValueError(
-                    "slot 'overlay': 'default' is the engine's Classic overlay and cannot name a template; "
+                    f"slot {slot!r}: 'default' is the engine's {engine} and cannot name a template; "
                     "give the template a variant name"
                 )
             for variant, file in variants.items():
@@ -498,6 +508,21 @@ def overlay_template_for(look: Look, variant: str) -> Path | None:
     return _shipped_default().own_template(OVERLAY_SLOT, variant)
 
 
+def summary_template_for(look: Look, slot: SummarySlot, variant: str = DEFAULT_VARIANT) -> Path | None:
+    """The template that draws the ``summary`` or ``match_summary`` card in
+    ``variant`` for ``look`` (spec 2026-10-16-summary-templates-design): the
+    Look's own, else the shipped default Look's. ``None`` for ``default``
+    (always the engine's card: ``styles`` cannot name a summary slot) and
+    for a variant neither Look has; the renderer draws the engine card then
+    and notes why."""
+    if variant == DEFAULT_VARIANT:
+        return None
+    own = look.own_template(slot, variant)
+    if own is not None:
+        return own
+    return _shipped_default().own_template(slot, variant)
+
+
 def preview_file(look: Look, slot: str, variant: str = DEFAULT_VARIANT) -> Path | None:
     """The picture the gallery shows for ``variant`` of ``slot`` in ``look``
     (``slot`` ``"look"`` is the Look's own sample tile): the Look's
@@ -660,6 +685,10 @@ __all__ = [
     "shared_dir",
     "shipped_looks_dir",
     "overlay_template_for",
+    "ENGINE_DEFAULT_SLOTS",
+    "SUMMARY_SLOTS",
+    "SummarySlot",
+    "summary_template_for",
     "sting_template_for",
     "template_for",
     "user_looks_dir",

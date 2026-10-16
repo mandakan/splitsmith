@@ -47,6 +47,7 @@ from .config import OutputConfig, Shot, StageEvent, VideoMetadata
 from .stage_summary_data import TileStageData
 
 if TYPE_CHECKING:
+    from .hud_extras import HudExtras
     from .match_summary import MatchSummary
 
 
@@ -155,6 +156,12 @@ class SummaryHold:
     data: TileStageData
     label: str
     duration_seconds: float = 3.0
+    #: The Look's ``summary`` variant (spec 2026-10-16-summary-templates-
+    #: design): ``default`` is the engine's card, any other a template.
+    variant: str = "default"
+    #: What a summary template's declared ``splitsmith-data`` keys read
+    #: (``ui.exports.hud_extras_for``); the engine card never reads it.
+    extras: HudExtras | None = None
 
 
 @dataclass(frozen=True)
@@ -564,6 +571,8 @@ class Composition:
     #: The match summary card after the last stage, before ``closing``
     #: (spec 2026-10-07-match-summary-design); only the MP4 renderer draws it.
     match_summary: MatchSummary | None = None
+    #: The Look's ``match_summary`` variant: ``default`` is the engine's card.
+    match_summary_variant: str = "default"
     #: Where logos go beyond the cards (``logo_spots``): empty draws what the
     #: renderers always drew; the request layer sends the export's choice.
     logo_spots: frozenset[str] = frozenset()
@@ -606,6 +615,7 @@ def from_stage_compositions(
     summaries: dict[int, SummaryHold] | None = None,
     shooters: SequenceProto[CompositionShooter] = (),
     match_summary: MatchSummary | None = None,
+    match_summary_variant: str = "default",
     logo_spots: frozenset[str] = frozenset(),
     brand: BrandMark | None = None,
     watermark_corner: Literal["top-left", "top-right"] = "top-left",
@@ -709,6 +719,7 @@ def from_stage_compositions(
         closing=closing,
         shooters=tuple(shooters),
         match_summary=match_summary,
+        match_summary_variant=match_summary_variant,
         logo_spots=frozenset(logo_spots),
         brand=brand,
         watermark_corner=watermark_corner,

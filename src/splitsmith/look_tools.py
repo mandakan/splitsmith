@@ -32,7 +32,8 @@ from typing import Literal, Protocol
 from PIL import Image, ImageDraw
 
 from . import composition
-from .config import StageEvent
+from .config import StageEvent, StageRounds
+from .events import reload_figures
 from .hud_extras import HudExtras, declared_data, hud_extras_data
 from .identity import ResolvedIdentity
 from .look_brand import brand_json
@@ -44,8 +45,10 @@ from .looks import (
     MANIFEST_FILE,
     OVERLAY_SLOT,
     STING_SLOT,
+    SUMMARY_SLOTS,
     Look,
     LookError,
+    SummarySlot,
     load_look,
     look_files,
     read_look,
@@ -56,11 +59,13 @@ from .looks import (
     variants_for,
 )
 from .match_project import StageScorecard
+from .match_summary import MatchSummary, MatchSummaryRow
 from .overlay_card import build_card_still, build_lower_third, card_context
 from .overlay_hud import HudOptions, declared_positions, hud_options_data, hud_stage_data, resolve_position
 from .overlay_raster import Rasterizer, TemplateFrames, TemplateProbe, TemplateScriptError
 from .overlay_theme import theme_for
-from .stage_summary_data import TileShot
+from .stage_summary_data import TileShot, TileStageData
+from .summary_template import match_summary_payload, stage_summary_payload, summary_context
 
 #: The starter templates ``looks new --starter`` copies (``data/looks/_starters/``).
 STARTERS: dict[str, str] = {
@@ -69,9 +74,11 @@ STARTERS: dict[str, str] = {
     "lower-third": "lower-third.html",
     "sting": "sting.html",
     "hud": "hud.html",
+    "summary": "summary.html",
+    "broadcast": "broadcast-hud.html",
 }
 #: The starters the template editor offers as replacement text: the card and
-#: sting templates it edits. An overlay style is not edited there.
+#: sting templates it edits. An overlay style or a summary is not edited there.
 EDITOR_STARTERS: tuple[str, ...] = ("animated", "lower-third", "still", "sting")
 _STARTER_SLOTS: dict[str, dict[str, object]] = {
     "still": {"title_page": "still.html", "slate": "still.html", "closing": "still.html"},
@@ -79,7 +86,31 @@ _STARTER_SLOTS: dict[str, dict[str, object]] = {
     "lower-third": {"lower_third": "lower-third.html"},
     "sting": {STING_SLOT: {"sting": "sting.html"}},
     "hud": {OVERLAY_SLOT: {"hud": "hud.html"}},
+    "summary": {"summary": {"summary": "summary.html"}},
+    # The reference Look: every slot a template can draw, each using all of
+    # the data its slot gets (docs/looks/authoring.md).
+    "broadcast": {
+        "title_page": "broadcast-card.html",
+        "slate": "broadcast-card.html",
+        "lower_third": "broadcast-card.html",
+        "closing": "broadcast-card.html",
+        OVERLAY_SLOT: {"broadcast": "broadcast-hud.html"},
+        "summary": {"results": "broadcast-summary.html"},
+        "match_summary": {"table": "broadcast-match.html"},
+    },
 }
+
+
+def _starter_files(starter: str) -> list[str]:
+    """Every template file a starter's slots name, its own first."""
+    files = [STARTERS[starter]]
+    for spec in _STARTER_SLOTS[starter].values():
+        for file in spec.values() if isinstance(spec, dict) else [spec]:
+            if file not in files:
+                files.append(file)
+    return files
+
+
 CARD_SLOTS: tuple[Literal["title_page", "slate", "lower_third", "closing"], ...] = (
     "title_page",
     "slate",
@@ -205,7 +236,7 @@ def new_look(
         base = load_look(DEFAULT_LOOK)
         manifest = base.manifest.model_dump(exclude={"source"})
         manifest.update(name=name, label=_label(name), slots=_STARTER_SLOTS[starter])
-        files = {STARTERS[starter]: shipped_looks_dir() / "_starters" / STARTERS[starter]}
+        files = {file: shipped_looks_dir() / "_starters" / file for file in _starter_files(starter)}
     else:
         source = strict_look(from_look or DEFAULT_LOOK)
         manifest = source.manifest.model_dump(exclude={"source"})
@@ -457,6 +488,7 @@ HUD_SAMPLE_EXTRAS = HudExtras(
         procedurals=0,
     ),
     division="Production Optics",
+    min_rounds=24,
     capacity=15,
 )
 
@@ -512,6 +544,98 @@ def hud_samples() -> list[HudSample]:
         HudSample("32 rounds", _hud_stage(long)),
         HudSample("no class data", _hud_stage(bare)),
     ]
+
+
+#: The name the summary samples print: long, as a real one can be.
+SUMMARY_SAMPLE_LABEL = "Sample shooter with a long name"
+
+
+def summary_samples(
+    look: Look,
+    slot: SummarySlot,
+    variant: str,
+    template: Path,
+    *,
+    sizes: Sequence[tuple[str, int, int]] | None = None,
+) -> list[tuple[str, TemplateContext, int, int]]:
+    """The cases ``looks check`` and ``looks preview`` draw a summary
+    template on (spec 2026-10-16-summary-templates-design): every HUD sample
+    stage as a stage summary, scored like :data:`HUD_SAMPLE_EXTRAS`, and the
+    twelve-round one again upright; or a six-stage match summary with a
+    stage name past the card's width and a manual time, landscape and
+    upright. ``sizes`` is ``(case suffix, width, height)`` per canvas, the
+    check's landscape and upright pages by default. ``(case, context,
+    width, height)``."""
+    theme = theme_for(look)
+    if sizes is None:
+        sizes = [("", CHECK_WIDTH, CHECK_HEIGHT), (", upright", CHECK_UPRIGHT_WIDTH, CHECK_UPRIGHT_HEIGHT)]
+    out: list[tuple[str, TemplateContext, int, int]] = []
+    if slot == "summary":
+        for index, sample in enumerate(hud_samples()):
+            tile = TileStageData(
+                label=SUMMARY_SAMPLE_LABEL,
+                stage_number=3,
+                shots=tuple(sample.shots),
+                stage_time_seconds=sample.shots[-1].time_from_beep if sample.shots else None,
+                scorecard=HUD_SAMPLE_EXTRAS.scorecard,
+                stage_rounds=StageRounds(expected=HUD_SAMPLE_EXTRAS.min_rounds),
+                reloads=tuple(reload_figures(sample.events)),
+                events=sample.events,
+            )
+            payload = stage_summary_payload(tile, extras=HUD_SAMPLE_EXTRAS, keys=declared_data(template))
+            for suffix, width, height in sizes if index == 0 else sizes[:1]:
+                context = summary_context(
+                    slot=slot,
+                    variant=variant,
+                    text=SUMMARY_SAMPLE_LABEL,
+                    payload=payload,
+                    duration_seconds=3.0,
+                    width=width,
+                    height=height,
+                    fps=CHECK_FPS,
+                    theme=theme,
+                )
+                out.append((f"{sample.name}{suffix}", context, width, height))
+        return out
+    rows = tuple(
+        MatchSummaryRow(
+            number=n,
+            name="Stage with a name long enough to run past the card" if n == 2 else f"Stage {n}",
+            time_seconds=10.0 + n * 3.1,
+            time_is_manual=n == 4,
+            hit_factor=4.0 + n * 0.3,
+            stage_pct=50.0 + n * 6.0,
+            draw=1.1 + n * 0.05,
+            avg_split=0.3 + n * 0.01,
+        )
+        for n in range(1, 7)
+    )
+    summary = MatchSummary(
+        title="Sample match with a long name",
+        label=SUMMARY_SAMPLE_LABEL,
+        rows=rows,
+        avg_split=0.33,
+        best_draw=1.15,
+        rounds=140,
+        hits={"A": 110, "C": 22, "D": 5, "M": 3, "NS": 1, "P": 0},
+        split_stages=6,
+        scored_stages=6,
+    )
+    payload = match_summary_payload(summary)
+    for suffix, width, height in sizes:
+        context = summary_context(
+            slot=slot,
+            variant=variant,
+            text=summary.title,
+            payload=payload,
+            duration_seconds=summary.duration_seconds,
+            width=width,
+            height=height,
+            fps=CHECK_FPS,
+            theme=theme,
+        )
+        out.append((f"six stages{suffix}", context, width, height))
+    return out
 
 
 def _hud_context(
@@ -727,6 +851,38 @@ def check_folder(name: str, root: Path, source: Literal["shipped", "user"], *, p
             own = look.own_template(OVERLAY_SLOT, variant)
             if own is not None:
                 items.extend(_check_hud(f"{OVERLAY_SLOT} {variant} {own.name}", look, own, prober))
+        for summary_slot in SUMMARY_SLOTS:
+            for variant in look.variants(summary_slot):
+                own = look.own_template(summary_slot, variant)
+                if own is None:
+                    continue
+                cases = summary_samples(look, summary_slot, variant, own)
+                results = [
+                    (case, prober.probe_template(own, context=context, width=width, height=height))
+                    for case, context, width, height in cases
+                ]
+                subject = f"{summary_slot} {variant} {own.name}"
+                found = _judge(subject, results)
+                # An upright summary keeps its text out of what Shorts, Reels
+                # and TikTok draw over (the probe measures it on every page
+                # that carries ``data.safe_area``). Text only: a summary may
+                # dim the whole frame behind it, which an overlay never does.
+                texts = [
+                    (case, hit) for case, probe in results for hit in probe.unsafe if hit[0].startswith('"')
+                ]
+                if texts and not any(item.level == "error" for item in found):
+                    case, (what, by) = texts[0]
+                    found = [item for item in found if item.level != "ok"]
+                    found.append(
+                        CheckItem(
+                            subject,
+                            "warn",
+                            f"{what} reaches {by} px into an upright video's safe area, where Shorts, "
+                            "Reels and TikTok draw their captions and buttons; keep clear of "
+                            f"data.safe_area (sample: {case})",
+                        )
+                    )
+                items.extend(found)
         for target_slot, variant, template in targets:
             subject = f"{target_slot} {variant} {template.name}"
             results = [
@@ -890,6 +1046,22 @@ def preview_look(
             path = out / f"{STING_SLOT}-{variant}.png"
             _over(frame, png).save(path)
             written.append((f"sting / {variant}", path))
+        for summary_slot in SUMMARY_SLOTS:
+            for variant in look.variants(summary_slot):
+                template = look.own_template(summary_slot, variant)
+                if template is None:
+                    continue
+                (_case, context, width, height), *_rest = summary_samples(
+                    look, summary_slot, variant, template, sizes=[("", PREVIEW_WIDTH, PREVIEW_HEIGHT)]
+                )
+                try:
+                    png = rasterizer.render_template(template, context=context, width=width, height=height)
+                except TemplateScriptError:
+                    skipped.append(f"{summary_slot} / {variant}")
+                    continue
+                path = out / f"{summary_slot}-{variant}.png"
+                _over(frame, png).save(path)
+                written.append((f"{summary_slot} / {variant}", path))
     paths = [path for _, path in written]
     paths.append(_contact_sheet(written, out))
     return PreviewResult(tuple(paths), tuple(skipped))

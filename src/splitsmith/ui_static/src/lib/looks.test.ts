@@ -50,7 +50,7 @@ const CATALOG: LookInfo[] = [
       title_page: [{ name: "default", preview: null }],
       slate: [{ name: "default", preview: null }],
       lower_third: [{ name: "default", preview: null }],
-      summary: [],
+      summary: [{ name: "finished", preview: null }],
       closing: [{ name: "default", preview: null }],
       transition: [],
     },
@@ -75,6 +75,14 @@ describe("variantsFor / visibleVariant", () => {
     expect(visibleVariant(CATALOG, "splitsmith", "slate", "nope")).toBe("default");
   });
 
+  it("a summary's styles start with the built-in card, which the catalog never lists", () => {
+    expect(variantsFor(CATALOG, "club", "summary").map((v) => v.name)).toEqual(["default", "finished"]);
+    expect(variantsFor(CATALOG, "splitsmith", "summary").map((v) => v.name)).toEqual(["default"]);
+    expect(variantsFor(CATALOG, "club", "match_summary").map((v) => v.name)).toEqual(["default"]);
+    expect(visibleVariant(CATALOG, "club", "summary", "finished")).toBe("finished");
+    expect(visibleVariant(CATALOG, "splitsmith", "summary", "finished")).toBe("default");
+  });
+
   it("the stage card's variant is the slate's and the lower third's together", () => {
     expect(visibleVariant(CATALOG, "splitsmith", "stage_card", "rise")).toBe("rise");
   });
@@ -96,18 +104,24 @@ describe("resolveLookChoice", () => {
       titlePageVariant: "rise",
       stageCardVariant: "nope",
       closingCardVariant: "rise",
+      summaryVariant: "finished",
+      matchSummaryVariant: "tally",
     };
     expect(resolveLookChoice(CATALOG, settings)).toEqual({
       look: "splitsmith",
       titlePageVariant: "rise",
       stageCardVariant: "default",
       closingCardVariant: "rise",
+      summaryVariant: "default",
+      matchSummaryVariant: "default",
     });
     expect(resolveLookChoice(CATALOG, { ...settings, look: "club" })).toEqual({
       look: "club",
       titlePageVariant: "default",
       stageCardVariant: "default",
       closingCardVariant: "default",
+      summaryVariant: "finished",
+      matchSummaryVariant: "default",
     });
   });
 });
@@ -133,7 +147,14 @@ describe("requestLook", () => {
 
   it("resolves against a loaded catalog and admits the server's kinds and the chosen Look's stings", () => {
     const { choice, kinds } = requestLook(loaded, { ...settings, look: "splitsmith" });
-    expect(choice).toEqual({ look: "splitsmith", titlePageVariant: "rise", stageCardVariant: "default", closingCardVariant: "default" });
+    expect(choice).toEqual({
+      look: "splitsmith",
+      titlePageVariant: "rise",
+      stageCardVariant: "default",
+      closingCardVariant: "default",
+      summaryVariant: "default",
+      matchSummaryVariant: "default",
+    });
     expect(kinds).toEqual([...FAMILY_KINDS, "sting:wipe"]);
     expect(requestLook(loaded, settings).kinds).toEqual(FAMILY_KINDS);
   });
@@ -141,7 +162,14 @@ describe("requestLook", () => {
   it("sends the stored names unresolved when the catalog could not be fetched, so the server decides", () => {
     const failed = { looks: BUILTIN_LOOKS, transitions: [], loaded: true, failed: true };
     const { choice, kinds } = requestLook(failed, settings);
-    expect(choice).toEqual({ look: "club", titlePageVariant: "rise", stageCardVariant: "nope", closingCardVariant: "default" });
+    expect(choice).toEqual({
+      look: "club",
+      titlePageVariant: "rise",
+      stageCardVariant: "nope",
+      closingCardVariant: "default",
+      summaryVariant: "default",
+      matchSummaryVariant: "default",
+    });
     expect(kinds).toEqual(["sting:wipe"]);
     expect(requestLook(failed, { ...settings, transitionKind: "vuwind" }).kinds).toEqual(["vuwind"]);
     expect(requestLook(failed, { ...settings, transitionKind: "none" }).kinds).toEqual([]);
