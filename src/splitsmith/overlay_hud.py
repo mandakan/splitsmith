@@ -159,8 +159,8 @@ def overlay_template_identity(look: str, variant: str) -> str | None:
     return digest.hexdigest()
 
 
-def overlay_scoring_identity(look: str, variant: str, extras: HudExtras | None) -> str | None:
-    """What an overlay's record carries as ``scoring``: the opt-in data keys
+def overlay_data_identity(look: str, variant: str, extras: HudExtras | None) -> str | None:
+    """What an overlay's record carries as ``hud_data``: the opt-in data keys
     the template drawing ``variant`` declares and the :class:`HudExtras` it
     is drawn with (``hud_extras.extras_identity``). ``None`` for Classic, for
     a style no Look draws and for a template that declares no key, so every
@@ -214,7 +214,7 @@ def overlay_settings(
     theme: str | None | object = _READ_NOW,
     upright: bool = False,
     short_head: float | None = None,
-    scoring: str | None = None,
+    hud_data: str | None = None,
 ) -> dict[str, Any]:
     """What an overlay MOV was drawn with, as recorded beside it and
     compared before a match export reuses it. Classic draws none of the
@@ -254,9 +254,10 @@ def overlay_settings(
     with the full pre-buffer records no such key.
 
     A template that declares ``splitsmith-data`` keys also records
-    ``scoring`` (:func:`overlay_scoring_identity`): a scorecard re-import or a
-    division change moves what it draws. Every other record carries no such
-    key. Passed like ``audit_revision``, read before the render."""
+    ``hud_data`` (:func:`overlay_data_identity`): a scorecard re-import, a
+    division change or a provider version bump moves what it draws. Every
+    other record carries no such key. Passed like ``audit_revision``, read
+    before the render."""
     settings: dict[str, Any] = {
         "look": look,
         "variant": variant,
@@ -273,8 +274,8 @@ def overlay_settings(
         settings["layout"] = UPRIGHT_LAYOUT
     if short_head is not None:
         settings["short_head"] = round(short_head, 3)
-    if scoring is not None:
-        settings["scoring"] = scoring
+    if hud_data is not None:
+        settings["hud_data"] = hud_data
     return settings
 
 
@@ -474,7 +475,7 @@ __all__ = [
     "hud_page_size",
     "hud_safe_area_data",
     "hud_stage_data",
-    "overlay_scoring_identity",
+    "overlay_data_identity",
     "overlay_settings",
     "resolve_position",
     "speed_tiers",

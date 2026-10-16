@@ -1,10 +1,18 @@
 """Opt-in HUD data beyond ``data.stage`` (spec ``2026-10-16-freedoom-hud-design``).
 
-A template asks for these keys with
+A template asks for keys with
 ``<meta name="splitsmith-data" content="scoring,ammo,bursts">``; one that
 asks for nothing gets exactly the context it always did, so its digest and
 cached MOVs never move. Like ``overlay_hud``, this module is pure: every
 figure a template draws is computed here, never in the template.
+
+Each key is a :class:`HudDataProvider` in one registry (:data:`PROVIDERS`):
+a name, a version and a pure function of :class:`HudInputs`. A new data
+source is one provider (and, when it needs something the audit does not
+hold, one field on :class:`HudExtras` filled by ``ui.exports.hud_extras_for``);
+nothing else changes. Bump a provider's ``version`` when its output changes
+for the same inputs: the version is in every declaring overlay's record, so
+those overlays draw again and no other does.
 
 There is no per-shot score. ``scoring.spreads`` therefore guesses, four ways,
 which shot took which hit; every guess ends on the scorecard's totals, and
@@ -15,7 +23,8 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, get_args
 
@@ -26,9 +35,6 @@ from .config import StageEvent
 from .events import confirmed, shot_is_moving
 from .match_project import StageScorecard
 from .stage_summary_data import TileShot
-
-HudDataKey = Literal["scoring", "ammo", "bursts"]
-HUD_DATA_KEYS: tuple[HudDataKey, ...] = get_args(HudDataKey)
 
 SpreadName = Literal["even", "fast", "moving", "end"]
 SPREADS: tuple[SpreadName, ...] = get_args(SpreadName)
@@ -60,10 +66,49 @@ class HudExtras(BaseModel):
     capacity: int | None = None
 
 
-def declared_data(template: Path) -> tuple[HudDataKey, ...]:
+@dataclass(frozen=True)
+class HudInputs:
+    """Everything a provider may read: the stage's shots in time order, where
+    the beep sits in the clip, its confirmed regions only, and the facts
+    beyond the audit."""
+
+    shots: Sequence[TileShot]
+    beep_in_clip: float
+    events: Sequence[StageEvent]
+    extras: HudExtras
+
+
+@dataclass(frozen=True)
+class HudDataProvider:
+    """One opt-in ``data`` key."""
+
+    key: str
+    #: Bump when the output changes for the same inputs.
+    version: int
+    build: Callable[[HudInputs], Any]
+
+
+#: Every opt-in key, in the order a context carries them. Filled by
+#: :func:`register` at the bottom of this module.
+PROVIDERS: dict[str, HudDataProvider] = {}
+
+#: Keys a provider may never take: the context's own.
+_RESERVED = frozenset({"stage", "options", "safe_area"})
+
+
+def register(provider: HudDataProvider) -> HudDataProvider:
+    if provider.key in _RESERVED or not re.fullmatch(r"[a-z][a-z0-9_]*", provider.key):
+        raise ValueError(f"{provider.key!r} cannot be a HUD data key")
+    if provider.key in PROVIDERS:
+        raise ValueError(f"HUD data key {provider.key!r} is registered twice")
+    PROVIDERS[provider.key] = provider
+    return provider
+
+
+def declared_data(template: Path) -> tuple[str, ...]:
     """The extra keys a template asks for, from its
-    ``<meta name="splitsmith-data">`` tag, in :data:`HUD_DATA_KEYS` order.
-    Read as text: no browser. Unknown names are ignored."""
+    ``<meta name="splitsmith-data">`` tag, in registry order. Read as text:
+    no browser. Unknown names are ignored."""
     try:
         match = _DATA_META.search(template.read_text(encoding="utf-8"))
     except OSError:
@@ -71,18 +116,20 @@ def declared_data(template: Path) -> tuple[HudDataKey, ...]:
     if match is None:
         return ()
     names = {name.strip() for name in match.group(1).split(",")}
-    return tuple(key for key in HUD_DATA_KEYS if key in names)
+    return tuple(key for key in PROVIDERS if key in names)
 
 
-def extras_identity(keys: Sequence[HudDataKey], extras: HudExtras | None) -> str | None:
-    """What an overlay's record carries as ``scoring``: the keys the template
-    declared and the extras it was drawn with. ``None`` when it declared
-    none, so the record of every other template is what it always was."""
-    if not keys:
+def extras_identity(keys: Sequence[str], extras: HudExtras | None) -> str | None:
+    """What an overlay's record carries as ``hud_data``: the keys the template
+    declared, each at its provider's version, and the extras it was drawn
+    with. ``None`` when it declared none, so the record of every other
+    template is what it always was."""
+    known = [key for key in keys if key in PROVIDERS]
+    if not known:
         return None
     body = (extras or HudExtras()).model_dump_json()
-    payload = f"{','.join(keys)}\0{body}"
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    versions = ",".join(f"{key}@{PROVIDERS[key].version}" for key in known)
+    return hashlib.sha256(f"{versions}\0{body}".encode()).hexdigest()
 
 
 def _clip(beep_in_clip: float, seconds_from_beep: float) -> float:
@@ -256,31 +303,42 @@ def scoring_data(
 
 
 def hud_extras_data(
-    keys: Sequence[HudDataKey],
+    keys: Sequence[str],
     shots: Sequence[TileShot],
     *,
     beep_in_clip: float,
     events: Sequence[StageEvent],
     extras: HudExtras | None,
 ) -> dict[str, Any]:
-    """The top-level ``data`` keys a template declared, and only those.
-    ``shots`` are in time order, as ``load_stage_shots`` returns them."""
-    out: dict[str, Any] = {}
-    if "scoring" in keys:
-        out["scoring"] = scoring_data(shots, events=events, extras=extras)
-    if "ammo" in keys:
-        capacity = extras.capacity if extras else None
-        out["ammo"] = ammo_plan(shots, beep_in_clip=beep_in_clip, events=events, capacity=capacity)
-    if "bursts" in keys:
-        out["bursts"] = bursts(shots)
-    return out
+    """The top-level ``data`` keys a template declared, and only those, in
+    registry order. ``shots`` are in time order, as ``load_stage_shots``
+    returns them; ``events`` are narrowed to confirmed regions here, so no
+    provider can draw a proposal."""
+    inputs = HudInputs(
+        shots=shots, beep_in_clip=beep_in_clip, events=confirmed(events), extras=extras or HudExtras()
+    )
+    return {key: provider.build(inputs) for key, provider in PROVIDERS.items() if key in keys}
+
+
+register(HudDataProvider("scoring", 1, lambda i: scoring_data(i.shots, events=i.events, extras=i.extras)))
+register(
+    HudDataProvider(
+        "ammo",
+        1,
+        lambda i: ammo_plan(
+            i.shots, beep_in_clip=i.beep_in_clip, events=i.events, capacity=i.extras.capacity
+        ),
+    )
+)
+register(HudDataProvider("bursts", 1, lambda i: bursts(i.shots)))
 
 
 __all__ = [
     "BURST_BREAK_CLASSES",
-    "HUD_DATA_KEYS",
-    "HudDataKey",
+    "PROVIDERS",
+    "HudDataProvider",
     "HudExtras",
+    "HudInputs",
     "SPREADS",
     "SpreadName",
     "ammo_plan",
@@ -288,6 +346,7 @@ __all__ = [
     "declared_data",
     "extras_identity",
     "hud_extras_data",
+    "register",
     "scoring_data",
     "spread",
 ]

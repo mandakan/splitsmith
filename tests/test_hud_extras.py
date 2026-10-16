@@ -11,18 +11,22 @@ import pytest
 from splitsmith import looks
 from splitsmith.config import StageEvent
 from splitsmith.hud_extras import (
+    PROVIDERS,
     SPREADS,
+    HudDataProvider,
     HudExtras,
+    HudInputs,
     ammo_plan,
     bursts,
     declared_data,
     extras_identity,
     hud_extras_data,
+    register,
     scoring_data,
     spread,
 )
 from splitsmith.match_project import StageScorecard
-from splitsmith.overlay_hud import HudOptions, overlay_scoring_identity, overlay_settings
+from splitsmith.overlay_hud import HudOptions, overlay_data_identity, overlay_settings
 from splitsmith.stage_summary_data import TileShot
 
 
@@ -242,7 +246,7 @@ def test_extras_identity_is_none_without_keys_and_moves_with_the_scorecard() -> 
     assert extras_identity(("ammo",), HudExtras()) != extras_identity(("scoring",), HudExtras())
 
 
-def test_a_record_without_scoring_is_what_it_always_was() -> None:
+def test_a_record_without_hud_data_is_what_it_always_was() -> None:
     kwargs = dict(  # noqa: C408
         look="splitsmith",
         variant="plate",
@@ -254,15 +258,15 @@ def test_a_record_without_scoring_is_what_it_always_was() -> None:
         template="t",
         theme="th",
     )
-    assert "scoring" not in overlay_settings(**kwargs)  # type: ignore[arg-type]
-    assert overlay_settings(**kwargs, scoring="s")["scoring"] == "s"  # type: ignore[arg-type]
+    assert "hud_data" not in overlay_settings(**kwargs)  # type: ignore[arg-type]
+    assert overlay_settings(**kwargs, hud_data="s")["hud_data"] == "s"  # type: ignore[arg-type]
 
 
 def test_scoring_identity_is_none_for_classic_and_for_shipped_templates() -> None:
     extras = HudExtras(scorecard=_card(alphas=10), capacity=15)
-    assert overlay_scoring_identity("splitsmith", "default", extras) is None
-    assert overlay_scoring_identity("splitsmith", "plate", extras) is None
-    assert overlay_scoring_identity("splitsmith", "no-such-style", extras) is None
+    assert overlay_data_identity("splitsmith", "default", extras) is None
+    assert overlay_data_identity("splitsmith", "plate", extras) is None
+    assert overlay_data_identity("splitsmith", "no-such-style", extras) is None
 
 
 @pytest.fixture
@@ -283,10 +287,10 @@ def doom_look(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def test_a_declaring_template_records_a_scoring_identity(doom_look: Path) -> None:
     extras = HudExtras(scorecard=_card(alphas=10), capacity=15)
-    identity = overlay_scoring_identity("doom", "doom", extras)
+    identity = overlay_data_identity("doom", "doom", extras)
     assert identity == extras_identity(("scoring", "ammo", "bursts"), extras)
     rescored = HudExtras(scorecard=_card(alphas=9, misses=1), capacity=15)
-    assert overlay_scoring_identity("doom", "doom", rescored) != identity
+    assert overlay_data_identity("doom", "doom", rescored) != identity
 
 
 def test_a_rescored_stage_does_not_reuse_its_overlay(doom_look: Path) -> None:
@@ -303,9 +307,55 @@ def test_a_rescored_stage_does_not_reuse_its_overlay(doom_look: Path) -> None:
         max_height=None,
         max_fps=None,
         audit_revision="r1",
-        scoring=overlay_scoring_identity("doom", "doom", extras),
+        hud_data=overlay_data_identity("doom", "doom", extras),
     )
     assert overlay_record_matches(record, audit_revision="r1", hud_extras=extras)
     rescored = HudExtras(scorecard=_card(alphas=9, misses=1), capacity=15)
     assert not overlay_record_matches(record, audit_revision="r1", hud_extras=rescored)
     assert not overlay_record_matches(record, audit_revision="r1"), "no extras is not this scorecard"
+
+
+# -- the registry --------------------------------------------------------
+
+
+def test_the_registry_holds_the_three_keys_in_order() -> None:
+    assert list(PROVIDERS) == ["scoring", "ammo", "bursts"]
+
+
+@pytest.mark.parametrize("key", ["stage", "options", "safe_area", "Bad-Key", "scoring"])
+def test_register_refuses_reserved_malformed_and_duplicate_keys(key: str) -> None:
+    with pytest.raises(ValueError):
+        register(HudDataProvider(key, 1, lambda _i: None))
+    assert "Bad-Key" not in PROVIDERS
+
+
+def test_a_new_provider_reaches_only_a_template_that_declares_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setitem(PROVIDERS, "shot_count", HudDataProvider("shot_count", 1, lambda i: len(i.shots)))
+    template = tmp_path / "hud.html"
+    template.write_text('<meta name="splitsmith-data" content="shot_count">', encoding="utf-8")
+    keys = declared_data(template)
+    assert keys == ("shot_count",)
+    out = hud_extras_data(keys, _STAGE, beep_in_clip=1.0, events=(), extras=None)
+    assert out == {"shot_count": len(_STAGE)}
+
+
+def test_bumping_a_provider_version_moves_the_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    before = extras_identity(("bursts",), HudExtras())
+    monkeypatch.setitem(PROVIDERS, "bursts", HudDataProvider("bursts", 2, PROVIDERS["bursts"].build))
+    assert extras_identity(("bursts",), HudExtras()) != before
+
+
+def test_providers_never_see_a_proposal() -> None:
+    seen: list[list[str]] = []
+
+    def build(inputs: HudInputs) -> None:
+        seen.append([e.source for e in inputs.events])
+
+    proposal = StageEvent(id="evt-1", kind="reload", start=1.0, end=2.0, source="auto")
+    confirmed_one = StageEvent(id="evt-2", kind="reload", start=3.0, end=4.0, source="manual")
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setitem(PROVIDERS, "probe", HudDataProvider("probe", 1, build))
+        hud_extras_data(("probe",), _STAGE, beep_in_clip=0.0, events=[proposal, confirmed_one], extras=None)
+    assert seen == [["manual"]]

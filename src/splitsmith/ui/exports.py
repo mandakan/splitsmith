@@ -32,7 +32,7 @@ from ..match_project import MatchProject, StageEntry, StageScorecard
 from ..overlay_hud import (
     LEGACY_OVERLAY_SETTINGS,
     HudOptions,
-    overlay_scoring_identity,
+    overlay_data_identity,
     overlay_settings,
     overlay_template_identity,
     overlay_theme_identity,
@@ -213,7 +213,7 @@ def hud_extras_for(project: MatchProject, stage: StageEntry) -> HudExtras:
     (``hud_extras.HudExtras``): its name, number and scorecard, the shooter's
     division and that division's magazine capacity. The one resolver every
     overlay writer and reuse check uses, so both sides agree on the
-    record's ``scoring``."""
+    record's ``hud_data``."""
     division = project.competitor_division
     return HudExtras(
         stage_name=stage.stage_name,
@@ -279,7 +279,7 @@ def overlay_record_matches(
                 audit_revision=audit_revision,
                 upright=upright,
                 short_head=short_head,
-                scoring=overlay_scoring_identity(wanted_look, variant, hud_extras),
+                hud_data=overlay_data_identity(wanted_look, variant, hud_extras),
             )
         except (KeyError, TypeError, ValueError):
             return False
@@ -322,7 +322,7 @@ def export_stage(
     absent -- the card draws less, never a zero.
 
     ``hud_extras`` (:func:`hud_extras_for`) reaches a template HUD that
-    declares ``splitsmith-data`` keys, and its record's ``scoring``.
+    declares ``splitsmith-data`` keys, and its record's ``hud_data``.
 
     Produces (subject to the request flags):
       - ``stage<N>_<slug>_trimmed.mp4`` -- lossless stream-copy trim of the
@@ -530,9 +530,7 @@ def export_stage(
             drawn_revision = overlay_audit_revision(audit_path)
             drawn_template = overlay_template_identity(request.overlay_theme, request.overlay_variant)
             drawn_theme = overlay_theme_identity(request.overlay_theme)
-            drawn_scoring = overlay_scoring_identity(
-                request.overlay_theme, request.overlay_variant, hud_extras
-            )
+            drawn_data = overlay_data_identity(request.overlay_theme, request.overlay_variant, hud_extras)
             drawn_upright = overlay_canvas_upright(mirror_target)
             try:
                 overlay_render.render_overlay(
@@ -570,7 +568,7 @@ def export_stage(
                             upright=drawn_upright,
                             short_head=overlay_short_head(beep_time_in_source, pre_buffer_seconds),
                             # A fallback drew Classic, which reads no extras.
-                            scoring=None if overlay_notes else drawn_scoring,
+                            hud_data=None if overlay_notes else drawn_data,
                         ),
                         sort_keys=True,
                     ),

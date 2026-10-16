@@ -45,9 +45,24 @@ with `scoring` fields `null` and `ammo` `null`, and must draw that case
 anyway. Wiring the preview needs the scorecard in its request and cache key;
 later, if the rail preview turns out to matter for this Look.
 
-The overlay record (`overlay_record_matches`) gains a `scoring` identity (a
-hash of the `HudExtras` the template saw) **only when the template declared
-a key**, so a scorecard re-import redraws a Freedoom overlay and nothing else.
+The overlay record (`overlay_record_matches`) gains a `hud_data` identity (a
+hash of the declared keys at their provider versions and the `HudExtras` the
+template saw) **only when the template declared a key**, so a scorecard
+re-import redraws a Freedoom overlay and nothing else.
+
+### The provider registry
+
+The keys are not a closed list. Each is a `HudDataProvider` (key, version,
+a pure function of `HudInputs`: shots in time order, the beep in clip
+seconds, confirmed regions only, `HudExtras`) in `hud_extras.PROVIDERS`. A
+new data source is one `register(...)` call, plus a `HudExtras` field when
+it needs something the audit lacks; the render, `looks check`, the record
+and the reuse checks pick it up with no edit. Bumping a provider's version
+redraws exactly the overlays that declare it. The context's own keys
+(`stage`, `options`, `safe_area`) cannot be registered.
+
+The same providers are the natural source for detailed exports (a per-stage
+JSON or CSV of every key); not built here.
 
 ### `data.scoring` (key `scoring`)
 
