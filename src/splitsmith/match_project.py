@@ -2518,6 +2518,9 @@ class MatchProject(BaseModel):
         if located is None:
             raise KeyError(f"video {path} not registered with project")
         from_stage = located[0].stage_number if located[0] is not None else None
+        if from_stage == stage_number and located[1].role == "primary":
+            # Already the primary: nothing to swap, and nothing to back up or redo.
+            return located[1]
 
         # Move-then-promote uses the standard assign_video path. If the video
         # was already on this stage, it gets pulled out and re-attached; the
@@ -2526,33 +2529,40 @@ class MatchProject(BaseModel):
         new_primary = self.assign_video(
             path, to_stage_number=stage_number, role="primary", from_stage_number=from_stage
         )
-        new_primary.processed = {"beep": False, "shot_detect": False, "trim": False}
-        new_primary.beep_time = None
-        new_primary.beep_source = None
-        new_primary.beep_peak_amplitude = None
-        new_primary.beep_duration_ms = None
-        new_primary.beep_candidates = []
-        new_primary.beep_ranker_version = None
-        new_primary.beep_reviewed = False
-        new_primary.beep_auto_detect_failed = False
+        # A beep is measured on the video's own audio, whatever its role, so
+        # one the user confirmed stays confirmed (2026-10-16): only the trim
+        # and the shots are redone. An unconfirmed beep is detected again.
+        keep_beep = new_primary.beep_reviewed and new_primary.beep_time is not None
+        new_primary.processed = {"beep": keep_beep, "shot_detect": False, "trim": False}
+        if not keep_beep:
+            new_primary.beep_time = None
+            new_primary.beep_source = None
+            new_primary.beep_peak_amplitude = None
+            new_primary.beep_duration_ms = None
+            new_primary.beep_candidates = []
+            new_primary.beep_ranker_version = None
+            new_primary.beep_reviewed = False
+            new_primary.beep_auto_detect_failed = False
         new_primary.beep_alignment_confidence = None
         new_primary.beep_alignment_delta_ms = None
 
         if backup_audit:
             audit_file = self.audit_path(root) / f"stage{stage_number}.json"
             if audit_file.exists():
-                bak = audit_file.with_suffix(audit_file.suffix + ".bak")
-                # If a previous .bak already exists, overwrite it: keeping
-                # multiple generations is more confusing than helpful, and
-                # the user's most recent audit is the most useful to recover.
+                # Under a name of its own: every audit save rewrites
+                # stage<N>.json.bak, so a backup there was gone after the
+                # first save on the new primary. Never overwritten.
+                stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%f")
+                backup = audit_file.with_name(f"stage{stage_number}.pre-swap-{stamp}.json")
+                n = 1
+                while backup.exists():
+                    backup = audit_file.with_name(f"stage{stage_number}.pre-swap-{stamp}-{n}.json")
+                    n += 1
                 try:
-                    if bak.exists():
-                        bak.unlink()
-                    audit_file.rename(bak)
+                    audit_file.rename(backup)
                 except OSError:
-                    # Fall back to a copy-then-delete via best-effort; if
-                    # even that fails, leave audit in place rather than
-                    # destroying it. The caller can decide what to do.
+                    # Leave the audit in place rather than lose it; the
+                    # caller can decide what to do.
                     pass
 
         # The fresh primary needs a re-trim too (audio source changed). The

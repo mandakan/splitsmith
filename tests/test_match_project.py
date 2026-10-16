@@ -1853,9 +1853,97 @@ def test_swap_primary_backs_up_audit_and_clears_processed(tmp_path: Path) -> Non
     # Old primary demoted to secondary.
     old = next(v for v in project.stages[0].videos if v.path == Path("raw/a.mp4"))
     assert old.role == "secondary"
-    # Audit JSON renamed to .bak.
+    # The audit is kept under a name of its own, never the save's .bak.
     assert not audit.exists()
-    assert (root / "audit" / "stage1.json.bak").exists()
+    backups = list((root / "audit").glob("stage1.pre-swap-*.json"))
+    assert len(backups) == 1
+    assert json.loads(backups[0].read_text())["shots"][0]["time"] == 1.0
+
+
+def _two_camera_stage(root: Path, *, b_reviewed: bool) -> MatchProject:
+    project = MatchProject.init(root, name="m")
+    project.stages.append(StageEntry(stage_number=1, stage_name="S1", time_seconds=10.0))
+    project.stages[0].videos.append(
+        StageVideo(
+            path=Path("raw/a.mp4"),
+            role="primary",
+            processed={"beep": True, "shot_detect": True, "trim": True},
+            beep_time=1.234,
+            beep_reviewed=True,
+        )
+    )
+    project.stages[0].videos.append(
+        StageVideo(
+            path=Path("raw/b.mp4"),
+            role="secondary",
+            processed={"beep": True, "shot_detect": False, "trim": True},
+            beep_time=3.5,
+            beep_source="manual",
+            beep_reviewed=b_reviewed,
+        )
+    )
+    return project
+
+
+def test_swap_primary_keeps_a_confirmed_beep(tmp_path: Path) -> None:
+    """A beep is measured on the video's own audio, whatever its role: one
+    the user confirmed stays confirmed, so the swap only re-trims and
+    re-detects shots."""
+    root = tmp_path / "m"
+    project = _two_camera_stage(root, b_reviewed=True)
+
+    new_primary = project.swap_primary(Path("raw/b.mp4"), root=root, stage_number=1)
+
+    kept = (new_primary.beep_time, new_primary.beep_reviewed, new_primary.beep_source)
+    assert kept == (3.5, True, "manual")
+    assert new_primary.processed == {"beep": True, "shot_detect": False, "trim": False}
+
+
+def test_swap_primary_clears_an_unconfirmed_beep(tmp_path: Path) -> None:
+    root = tmp_path / "m"
+    project = _two_camera_stage(root, b_reviewed=False)
+
+    new_primary = project.swap_primary(Path("raw/b.mp4"), root=root, stage_number=1)
+
+    assert new_primary.beep_time is None and new_primary.beep_reviewed is False
+    assert new_primary.processed["beep"] is False
+
+
+def test_swapping_in_the_current_primary_changes_nothing(tmp_path: Path) -> None:
+    """A role click on the clip that is already primary must not back the
+    audit up and redo the stage."""
+    root = tmp_path / "m"
+    project = _two_camera_stage(root, b_reviewed=True)
+    audit = root / "audit" / "stage1.json"
+    shot = {"shot_number": 1, "candidate_number": 1, "time": 1.0, "ms_after_beep": 100}
+    audit.write_text(json.dumps({"stage_number": 1, "stage_name": "S1", "shots": [shot]}))
+
+    same = project.swap_primary(Path("raw/a.mp4"), root=root, stage_number=1)
+
+    assert same.processed == {"beep": True, "shot_detect": True, "trim": True}
+    assert audit.exists()
+    assert not list((root / "audit").glob("stage1.pre-swap-*.json"))
+
+
+def test_swap_primary_never_overwrites_a_backup(tmp_path: Path) -> None:
+    """Every audit save rewrites stage<N>.json.bak, so a swap backup there was
+    gone after the first save on the new primary. Two swaps keep two backups
+    and leave the .bak alone."""
+    root = tmp_path / "m"
+    project = _two_camera_stage(root, b_reviewed=True)
+    audit = root / "audit" / "stage1.json"
+    bak = root / "audit" / "stage1.json.bak"
+    bak.write_text('{"older": true}')
+    shot = {"shot_number": 1, "candidate_number": 1, "time": 1.0, "ms_after_beep": 100}
+    audit.write_text(json.dumps({"stage_number": 1, "stage_name": "S1", "shots": [shot]}))
+
+    project.swap_primary(Path("raw/b.mp4"), root=root, stage_number=1)
+    audit.write_text(json.dumps({"stage_number": 1, "stage_name": "S1", "shots": [shot, shot]}))
+    project.swap_primary(Path("raw/a.mp4"), root=root, stage_number=1)
+
+    backups = sorted((root / "audit").glob("stage1.pre-swap-*.json"))
+    assert [len(json.loads(p.read_text())["shots"]) for p in backups] == [1, 2]
+    assert json.loads(bak.read_text()) == {"older": True}
 
 
 def test_swap_primary_skips_backup_when_no_audit(tmp_path: Path) -> None:

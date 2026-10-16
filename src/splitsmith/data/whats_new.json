@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "safe-primary-swap",
+      "date": "2026-10-16",
+      "title": "Change a stage's primary camera safely",
+      "body": "Setting another clip as Primary on the Footage page keeps the stage's audit as a backup, keeps a beep you confirmed, and detects the shots again on the new camera, asking first."
+    },
+    {
       "id": "audit-save-after-beep-confirm",
       "date": "2026-10-16",
       "title": "Confirm a beep, then audit and save",

@@ -6527,7 +6527,8 @@ class SwapPrimaryRequest(BaseModel):
     has audit work and ``confirm`` is False, the endpoint refuses with a
     409 response describing what would be lost so the SPA can prompt the
     user. Passing ``confirm=True`` performs the swap and renames the
-    existing audit JSON to ``stage<N>.json.bak``.
+    existing audit JSON to ``stage<N>.pre-swap-<time>.json``, which no
+    later save overwrites.
     """
 
     video_path: str
@@ -15917,8 +15918,10 @@ def create_app(
 
         Audit-safe: when the stage has shots in its audit JSON, refuses with
         a 409 response unless ``confirm=True`` is passed. On confirm, the
-        audit JSON is renamed to ``.bak`` so a bad swap is recoverable, and
-        the new primary's processed flags are cleared so detection re-runs.
+        audit JSON is kept as ``stage<N>.pre-swap-<time>.json`` so a bad
+        swap is recoverable, and the stage's trim and shots are redone on
+        the new primary. A beep the user confirmed on it is kept, and the
+        trim is chained at once; an unconfirmed one is detected again.
         """
         root = state.shooter_root(slug)
         project = await state.shooter_project_async(slug)
@@ -15927,6 +15930,10 @@ def create_app(
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+        current = stage.primary()
+        if current is not None and str(current.path) == req.video_path:
+            # Already the primary: nothing to swap, back up or redo.
+            return JSONResponse(project.model_dump(mode="json"))
         warns = project.primary_swap_warns(root, stage_number=req.stage_number)
         if warns and not req.confirm:
             existing = stage.primary()
@@ -15936,8 +15943,8 @@ def create_app(
                     "code": "audit_exists",
                     "message": (
                         f"Stage {req.stage_number} has audit work on its current "
-                        "primary. Confirm the swap to back the audit up to .bak "
-                        "and re-run detection on the new primary."
+                        "primary. Confirm the swap to keep the audit as a backup "
+                        "and run detection again on the new primary."
                     ),
                     "stage_number": req.stage_number,
                     "current_primary": str(existing.path) if existing else None,
@@ -15965,7 +15972,14 @@ def create_app(
         # response path; the media mirror it used to pay for is gone (#638).
         new_primary = project.stage(req.stage_number).primary()
         if new_primary is not None:
-            background.add_task(_auto_queue_beep_if_needed, slug, project, req.stage_number, new_primary)
+            if new_primary.beep_reviewed and new_primary.beep_time is not None:
+                # A confirmed beep was kept (2026-10-16): go straight to the
+                # trim, which chains detection. Queuing a beep detection here
+                # raced the confirmed beep and could leave it unreviewed.
+                if current_match_origin.get() != "desktop":
+                    await _maybe_chain_trim(slug, project.stage(req.stage_number), new_primary)
+            else:
+                background.add_task(_auto_queue_beep_if_needed, slug, project, req.stage_number, new_primary)
 
         return JSONResponse(project.model_dump(mode="json"))
 
