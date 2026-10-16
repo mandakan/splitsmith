@@ -233,23 +233,29 @@ function ParentRow({
   onToggle: () => void;
 }) {
   const n = row.cells.length;
-  const count = (pred: (c: OverviewCell) => boolean) => `${row.cells.filter(pred).length} / ${n}`;
+  const filmed = row.filmedCount;
+  const dash = <span className="text-subtle">{"\u2014"}</span>;
+  // Beep, shots and audit count over the shooters with footage only.
+  const count = (pred: (c: OverviewCell) => boolean) =>
+    filmed === 0 ? dash : `${row.cells.filter((c) => c.videoCount > 0 && pred(c)).length} / ${filmed}`;
   const lead = row.lead;
   const dim = !(lead?.audited ?? false);
   return (
     <Tr current={current}>
       <Td kind="ordinal">{pad2(row.stageNumber)}</Td>
       <Td kind="name">{row.stageName}</Td>
-      <Td>{count((c) => c.videoCount > 0)}</Td>
+      <Td>{`${filmed} / ${n}`}</Td>
       <Td>{count((c) => c.beepReviewed)}</Td>
       <Td>{count((c) => c.shotCount > 0)}</Td>
       <Td>
-        {row.auditedCount === n ? (
+        {filmed === 0 ? (
+          <span className="text-subtle">No footage</span>
+        ) : row.auditedCount === filmed ? (
           <Chip tone="ok" tick="fire">
             {row.auditedCount} audited
           </Chip>
         ) : (
-          <Chip tone="warn">{`${row.auditedCount} / ${n} audited`}</Chip>
+          <Chip tone="warn">{`${row.auditedCount} / ${filmed} audited`}</Chip>
         )}
       </Td>
       <Td kind="num" dim={dim}>

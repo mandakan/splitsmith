@@ -108,4 +108,37 @@ describe("OverviewTable", () => {
     expect(screen.getByText("Anna")).toBeInTheDocument();
     expect(screen.getByText("Mathias Axell")).toBeInTheDocument();
   });
+
+  it("multi-shooter: beep, shots and audit count only the shooters with footage", () => {
+    const filmed = TRIAGE.cells[2];
+    const triage: TriageResponse = {
+      ...TRIAGE,
+      cells: [
+        filmed,
+        cell({ stage_number: 6, stage_name: "B5 All", slug: "s2", shooter_name: "Anna" }),
+        cell({ stage_number: 6, stage_name: "B5 All", slug: "s3", shooter_name: "Anton" }),
+      ],
+    };
+    renderTable({}, [shooter("s1", "Mathias Axell"), shooter("s2", "Anna"), shooter("s3", "Anton")], triage);
+    const parent = screen.getAllByRole("row")[1];
+    const cells = within(parent).getAllByRole("cell");
+    expect(cells[2]).toHaveTextContent("1 / 3");
+    expect(cells[3]).toHaveTextContent("1 / 1");
+    expect(cells[4]).toHaveTextContent("1 / 1");
+    expect(within(parent).getByText("0 / 1 audited")).toBeInTheDocument();
+  });
+
+  it("multi-shooter: a stage nobody has footage of says so", () => {
+    const triage: TriageResponse = {
+      ...TRIAGE,
+      cells: [TRIAGE.cells[0], cell({ ...TRIAGE.cells[0], slug: "s2", shooter_name: "Anna" })],
+    };
+    renderTable({}, [shooter("s1", "Mathias Axell"), shooter("s2", "Anna")], triage);
+    const parent = screen.getAllByRole("row")[1];
+    const cells = within(parent).getAllByRole("cell");
+    expect(cells[2]).toHaveTextContent("0 / 2");
+    expect(cells[3]).toHaveTextContent("\u2014");
+    expect(cells[4]).toHaveTextContent("\u2014");
+    expect(cells[5]).toHaveTextContent("No footage");
+  });
 });

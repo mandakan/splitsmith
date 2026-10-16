@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "overview-counts-filmed-shooters",
+      "date": "2026-10-16",
+      "title": "Overview counts only shooters you filmed",
+      "body": "On the Overview, a stage's beep, shots and audit counts now leave out shooters with no footage of it, and a stage nobody was filmed on says No footage."
+    },
+    {
       "id": "whole-stage-shot-detection",
       "date": "2026-10-16",
       "title": "Better shot detection, head cameras most",

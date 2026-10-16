@@ -60,6 +60,10 @@ export interface OverviewRow {
   cells: OverviewCell[];
   /** The lead (audio-source or only) shooter's cell: the parent row's figures. */
   lead: OverviewCell | null;
+  /** Shooters with footage of this stage: the denominator of every
+   *  count after Footage, since a shooter nobody filmed has no beep,
+   *  shots or audit to wait for. */
+  filmedCount: number;
   auditedCount: number;
   worst: RowAction;
 }
@@ -135,7 +139,8 @@ export function buildOverviewRows(args: {
         stageName: name,
         cells,
         lead,
-        auditedCount: cells.filter((c) => c.audited).length,
+        filmedCount: cells.filter((c) => c.videoCount > 0).length,
+        auditedCount: cells.filter((c) => c.audited && c.videoCount > 0).length,
         worst,
       };
     });
