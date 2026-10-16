@@ -80,8 +80,10 @@
 
   // A long name shrinks to fit the frame rather than run off it.
   window.__splitsmithFit = function () {
+    var card = nameEl.parentNode, pad = getComputedStyle(card);
+    var room = 0.9 * (card.clientWidth - parseFloat(pad.paddingLeft) - parseFloat(pad.paddingRight));
     var size = parseFloat(nameEl.style.fontSize);
-    while (nameEl.scrollWidth > S.size.width * 0.9 && size > S.engine.min_font_size) {
+    while (nameEl.scrollWidth > room && size > S.engine.min_font_size) {
       size -= 1;
       nameEl.style.fontSize = size + 'px';
     }

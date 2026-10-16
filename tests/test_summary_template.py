@@ -197,7 +197,9 @@ def test_a_failing_template_draws_the_engine_card_and_says_so(tmp_path: Path, re
 
 def test_a_summary_style_the_look_lacks_is_noted(tmp_path: Path, retro: Path) -> None:
     fake = _FakeRasterizer()
-    result, _r, _w = _render(tmp_path, _with_variant(_summarised_composition(tmp_path), "nope"), fake, "retro")
+    result, _r, _w = _render(
+        tmp_path, _with_variant(_summarised_composition(tmp_path), "nope"), fake, "retro"
+    )
     assert any("'nope' is not in Look 'retro'" in d for d in result.degradations)
 
 
