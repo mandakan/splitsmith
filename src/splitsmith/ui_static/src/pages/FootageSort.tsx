@@ -638,7 +638,9 @@ function AssignSheet({
             }))}
             onChange={(key) => {
               setShooter(key);
-              setStage(null);
+              // A stage picked first stays when this shooter has it.
+              const has = view.shooters.find((s) => s.key === key)?.stages.includes(stage ?? -1);
+              if (!has) setStage(null);
             }}
           />
         </div>

@@ -165,8 +165,31 @@ describe("decisions", () => {
     expect(d.anchors).toEqual([
       { clip_id: "head/VID_1.mp4", shooter: "mathias", stage: 1 },
     ]);
-    expect(d.overrides).toEqual([]);
+    // The earlier anchor clip keeps its answer as its own choice.
+    expect(d.overrides).toEqual([
+      { clip_id: "head/VID_2.mp4", shooter: "mathias", stage: 2 },
+    ]);
     expect(d.checked["head/VID_1.mp4"]).toBe(true);
+  });
+
+  it("naming clip after clip on a camera whose clock stays unknown keeps every answer", () => {
+    // No scorecard time: an anchor cannot set the clock, so each clip is
+    // named by hand and none may undo the one before.
+    let v = view();
+    const apply = (d: ReturnType<typeof assignClip>) => {
+      v = { ...v, anchors: d.anchors, overrides: d.overrides, user_checked: d.checked };
+    };
+    apply(assignClip(v, "head/VID_1.mp4", "anton", 1));
+    apply(assignClip(v, "head/VID_2.mp4", "anton", 2));
+
+    const named = [...v.anchors, ...v.overrides].map((x) => [x.clip_id, "stage" in x ? x.stage : null]);
+    expect(named).toEqual(
+      expect.arrayContaining([
+        ["head/VID_1.mp4", 1],
+        ["head/VID_2.mp4", 2],
+      ]),
+    );
+    expect(v.user_checked).toEqual({ "head/VID_1.mp4": true, "head/VID_2.mp4": true });
   });
 
   it("naming a clip of a trusted camera is an override and checks it", () => {

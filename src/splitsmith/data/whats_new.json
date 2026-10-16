@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "sort-footage-keeps-answers",
+      "date": "2026-10-16",
+      "title": "Sort footage keeps every clip you name",
+      "body": "On Sort footage, naming a clip from a camera whose clock is unknown no longer undoes the clip you named before it, and a stage picked before the shooter stays picked."
+    },
+    {
       "id": "beep-before-the-clip",
       "date": "2026-10-15",
       "title": "A camera that started during the beep",

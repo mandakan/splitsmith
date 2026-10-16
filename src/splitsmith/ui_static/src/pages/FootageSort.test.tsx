@@ -180,6 +180,31 @@ describe("FootageSort", () => {
     });
   });
 
+  it("keeps a stage chosen before the shooter", async () => {
+    renderPage();
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Choose" }),
+    );
+    const sheet = screen.getByRole("dialog", { name: "VID_1.mp4" });
+    await userEvent.selectOptions(
+      within(sheet).getByRole("combobox", { name: "Stage" }),
+      "2",
+    );
+    await userEvent.click(
+      within(sheet).getByRole("button", { name: "Anton Johansson" }),
+    );
+    await userEvent.click(
+      within(sheet).getByRole("button", { name: "Use this" }),
+    );
+
+    expect(api.putFootageSortDecisions).toHaveBeenCalledWith("abc123", {
+      anchors: [{ clip_id: "head/VID_1.mp4", shooter: "anton", stage: 2 }],
+      overrides: [],
+      checked: { "head/VID_1.mp4": true },
+    });
+  });
+
   it("naming the run of an unknown-clock clip anchors its camera", async () => {
     renderPage();
 
