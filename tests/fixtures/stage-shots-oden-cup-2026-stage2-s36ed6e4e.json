@@ -7,8 +7,8 @@
     {
       "shot_number": 1,
       "candidate_number": 2,
-      "time": 6.625,
-      "ms_after_beep": 1625,
+      "time": 6.704,
+      "ms_after_beep": 1704,
       "source": "detected",
       "id": "cand-2",
       "interval_class": "first_shot",
@@ -17,8 +17,8 @@
     {
       "shot_number": 2,
       "candidate_number": 3,
-      "time": 7.061,
-      "ms_after_beep": 2061,
+      "time": 7.14,
+      "ms_after_beep": 2140,
       "source": "detected",
       "id": "cand-3",
       "interval_class": "split",
@@ -27,8 +27,8 @@
     {
       "shot_number": 3,
       "candidate_number": 4,
-      "time": 7.416,
-      "ms_after_beep": 2416,
+      "time": 7.495,
+      "ms_after_beep": 2495,
       "source": "detected",
       "id": "cand-4",
       "interval_class": "split",
@@ -37,8 +37,8 @@
     {
       "shot_number": 4,
       "candidate_number": 5,
-      "time": 7.776,
-      "ms_after_beep": 2776,
+      "time": 7.855,
+      "ms_after_beep": 2855,
       "source": "detected",
       "id": "cand-5",
       "interval_class": "split",
@@ -47,8 +47,8 @@
     {
       "shot_number": 5,
       "candidate_number": 6,
-      "time": 8.756,
-      "ms_after_beep": 3756,
+      "time": 8.835,
+      "ms_after_beep": 3835,
       "source": "detected",
       "id": "cand-6",
       "interval_class": "split",
@@ -57,8 +57,8 @@
     {
       "shot_number": 6,
       "candidate_number": 7,
-      "time": 9.803,
-      "ms_after_beep": 4803,
+      "time": 9.882,
+      "ms_after_beep": 4882,
       "source": "detected",
       "id": "cand-7",
       "interval_class": "transition",
@@ -67,8 +67,8 @@
     {
       "shot_number": 7,
       "candidate_number": 8,
-      "time": 10.24,
-      "ms_after_beep": 5240,
+      "time": 10.319,
+      "ms_after_beep": 5319,
       "source": "detected",
       "id": "cand-8",
       "interval_class": "split",
@@ -77,8 +77,8 @@
     {
       "shot_number": 8,
       "candidate_number": 14,
-      "time": 12.615,
-      "ms_after_beep": 7615,
+      "time": 12.694,
+      "ms_after_beep": 7694,
       "source": "detected",
       "id": "cand-14",
       "interval_class": "movement",
@@ -87,8 +87,8 @@
     {
       "shot_number": 9,
       "candidate_number": 15,
-      "time": 12.856,
-      "ms_after_beep": 7856,
+      "time": 12.935,
+      "ms_after_beep": 7935,
       "source": "detected",
       "id": "cand-15",
       "interval_class": "split",
@@ -97,8 +97,8 @@
     {
       "shot_number": 10,
       "candidate_number": 16,
-      "time": 13.084,
-      "ms_after_beep": 8084,
+      "time": 13.163,
+      "ms_after_beep": 8163,
       "source": "detected",
       "id": "cand-16",
       "interval_class": "split",
@@ -107,8 +107,8 @@
     {
       "shot_number": 11,
       "candidate_number": 20,
-      "time": 16.07,
-      "ms_after_beep": 11070,
+      "time": 16.149,
+      "ms_after_beep": 11149,
       "source": "detected",
       "id": "cand-20",
       "interval_class": "movement",
@@ -117,8 +117,8 @@
     {
       "shot_number": 12,
       "candidate_number": 21,
-      "time": 16.35,
-      "ms_after_beep": 11350,
+      "time": 16.429,
+      "ms_after_beep": 11429,
       "source": "detected",
       "id": "cand-21",
       "interval_class": "split",
@@ -127,8 +127,8 @@
     {
       "shot_number": 13,
       "candidate_number": 22,
-      "time": 16.875,
-      "ms_after_beep": 11875,
+      "time": 16.954,
+      "ms_after_beep": 11954,
       "source": "detected",
       "id": "cand-22",
       "interval_class": "split",
@@ -137,8 +137,8 @@
     {
       "shot_number": 14,
       "candidate_number": 23,
-      "time": 17.296,
-      "ms_after_beep": 12296,
+      "time": 17.375,
+      "ms_after_beep": 12375,
       "source": "detected",
       "id": "cand-23",
       "interval_class": "split",
@@ -147,8 +147,8 @@
     {
       "shot_number": 15,
       "candidate_number": 24,
-      "time": 17.645,
-      "ms_after_beep": 12645,
+      "time": 17.724,
+      "ms_after_beep": 12724,
       "source": "detected",
       "id": "cand-24",
       "interval_class": "split",
@@ -157,8 +157,8 @@
     {
       "shot_number": 16,
       "candidate_number": 25,
-      "time": 18.36,
-      "ms_after_beep": 13360,
+      "time": 18.439,
+      "ms_after_beep": 13439,
       "source": "detected",
       "id": "cand-25",
       "interval_class": "split",
@@ -167,8 +167,8 @@
     {
       "shot_number": 17,
       "candidate_number": 26,
-      "time": 18.894,
-      "ms_after_beep": 13894,
+      "time": 18.973,
+      "ms_after_beep": 13973,
       "source": "detected",
       "id": "cand-26",
       "interval_class": "split",
@@ -177,8 +177,8 @@
     {
       "shot_number": 18,
       "candidate_number": 27,
-      "time": 19.631,
-      "ms_after_beep": 14631,
+      "time": 19.71,
+      "ms_after_beep": 14710,
       "source": "detected",
       "id": "cand-27",
       "interval_class": "split",
@@ -187,8 +187,8 @@
     {
       "shot_number": 19,
       "candidate_number": 33,
-      "time": 24.703,
-      "ms_after_beep": 19703,
+      "time": 24.782,
+      "ms_after_beep": 19782,
       "source": "detected",
       "id": "cand-33",
       "interval_class": "movement",
@@ -197,8 +197,8 @@
     {
       "shot_number": 20,
       "candidate_number": 34,
-      "time": 25.053,
-      "ms_after_beep": 20053,
+      "time": 25.132,
+      "ms_after_beep": 20132,
       "source": "detected",
       "id": "cand-34",
       "interval_class": "split",
@@ -207,8 +207,8 @@
     {
       "shot_number": 21,
       "candidate_number": 35,
-      "time": 25.35,
-      "ms_after_beep": 20350,
+      "time": 25.429,
+      "ms_after_beep": 20429,
       "source": "detected",
       "id": "cand-35",
       "interval_class": "split",
@@ -217,8 +217,8 @@
     {
       "shot_number": 22,
       "candidate_number": 36,
-      "time": 26.069,
-      "ms_after_beep": 21069,
+      "time": 26.148,
+      "ms_after_beep": 21148,
       "source": "detected",
       "id": "cand-36",
       "interval_class": "split",
@@ -227,8 +227,8 @@
     {
       "shot_number": 23,
       "candidate_number": 37,
-      "time": 26.447,
-      "ms_after_beep": 21447,
+      "time": 26.526,
+      "ms_after_beep": 21526,
       "source": "detected",
       "id": "cand-37",
       "interval_class": "split",
@@ -237,8 +237,8 @@
     {
       "shot_number": 24,
       "candidate_number": 38,
-      "time": 26.757,
-      "ms_after_beep": 21757,
+      "time": 26.836,
+      "ms_after_beep": 21836,
       "source": "detected",
       "id": "cand-38",
       "interval_class": "split",
@@ -247,8 +247,8 @@
     {
       "shot_number": 25,
       "candidate_number": 39,
-      "time": 27.23,
-      "ms_after_beep": 22230,
+      "time": 27.309,
+      "ms_after_beep": 22309,
       "source": "detected",
       "id": "cand-39",
       "interval_class": "split",
@@ -257,8 +257,8 @@
     {
       "shot_number": 26,
       "candidate_number": 40,
-      "time": 27.553,
-      "ms_after_beep": 22553,
+      "time": 27.632,
+      "ms_after_beep": 22632,
       "source": "detected",
       "id": "cand-40",
       "interval_class": "split",
@@ -267,8 +267,8 @@
     {
       "shot_number": 27,
       "candidate_number": 41,
-      "time": 28.921,
-      "ms_after_beep": 23921,
+      "time": 29.0,
+      "ms_after_beep": 24000,
       "source": "detected",
       "id": "cand-41",
       "interval_class": "transition",
@@ -277,8 +277,8 @@
     {
       "shot_number": 28,
       "candidate_number": 42,
-      "time": 29.359,
-      "ms_after_beep": 24359,
+      "time": 29.438,
+      "ms_after_beep": 24438,
       "source": "detected",
       "id": "cand-42",
       "interval_class": "split",
@@ -287,8 +287,8 @@
     {
       "shot_number": 29,
       "candidate_number": 43,
-      "time": 29.726,
-      "ms_after_beep": 24726,
+      "time": 29.805,
+      "ms_after_beep": 24805,
       "source": "detected",
       "id": "cand-43",
       "interval_class": "split",
@@ -307,8 +307,8 @@
     "candidates": [
       {
         "candidate_number": 1,
-        "time": 6.5186,
-        "ms_after_beep": 1519,
+        "time": 6.5976,
+        "ms_after_beep": 1598,
         "peak_amplitude": 0.7714,
         "confidence": 0.05,
         "vote_a": 1,
@@ -325,8 +325,8 @@
       },
       {
         "candidate_number": 2,
-        "time": 6.6502,
-        "ms_after_beep": 1650,
+        "time": 6.7292,
+        "ms_after_beep": 1729,
         "peak_amplitude": 0.1604,
         "confidence": 0.088,
         "vote_a": 1,
@@ -343,8 +343,8 @@
       },
       {
         "candidate_number": 3,
-        "time": 7.0605,
-        "ms_after_beep": 2060,
+        "time": 7.1395,
+        "ms_after_beep": 2139,
         "peak_amplitude": 0.0566,
         "confidence": 0.156,
         "vote_a": 1,
@@ -361,8 +361,8 @@
       },
       {
         "candidate_number": 4,
-        "time": 7.4159,
-        "ms_after_beep": 2416,
+        "time": 7.4949,
+        "ms_after_beep": 2495,
         "peak_amplitude": 0.0197,
         "confidence": 0.242,
         "vote_a": 1,
@@ -379,8 +379,8 @@
       },
       {
         "candidate_number": 5,
-        "time": 7.7756,
-        "ms_after_beep": 2776,
+        "time": 7.8546,
+        "ms_after_beep": 2855,
         "peak_amplitude": 0.0166,
         "confidence": 0.195,
         "vote_a": 1,
@@ -397,8 +397,8 @@
       },
       {
         "candidate_number": 6,
-        "time": 8.7558,
-        "ms_after_beep": 3756,
+        "time": 8.8348,
+        "ms_after_beep": 3835,
         "peak_amplitude": 0.784,
         "confidence": 0.455,
         "vote_a": 1,
@@ -415,8 +415,8 @@
       },
       {
         "candidate_number": 7,
-        "time": 9.8025,
-        "ms_after_beep": 4803,
+        "time": 9.8815,
+        "ms_after_beep": 4882,
         "peak_amplitude": 0.7713,
         "confidence": 0.241,
         "vote_a": 1,
@@ -433,8 +433,8 @@
       },
       {
         "candidate_number": 8,
-        "time": 10.2572,
-        "ms_after_beep": 5257,
+        "time": 10.3362,
+        "ms_after_beep": 5336,
         "peak_amplitude": 0.3202,
         "confidence": 0.17,
         "vote_a": 1,
@@ -451,8 +451,8 @@
       },
       {
         "candidate_number": 9,
-        "time": 10.7702,
-        "ms_after_beep": 5770,
+        "time": 10.8492,
+        "ms_after_beep": 5849,
         "peak_amplitude": 0.0048,
         "confidence": 0.019,
         "vote_a": 1,
@@ -469,8 +469,8 @@
       },
       {
         "candidate_number": 10,
-        "time": 11.25,
-        "ms_after_beep": 6250,
+        "time": 11.329,
+        "ms_after_beep": 6329,
         "peak_amplitude": 0.01,
         "confidence": 0.019,
         "vote_a": 1,
@@ -487,8 +487,8 @@
       },
       {
         "candidate_number": 11,
-        "time": 11.57,
-        "ms_after_beep": 6570,
+        "time": 11.649,
+        "ms_after_beep": 6649,
         "peak_amplitude": 0.0342,
         "confidence": 0.03,
         "vote_a": 1,
@@ -505,8 +505,8 @@
       },
       {
         "candidate_number": 12,
-        "time": 11.82,
-        "ms_after_beep": 6820,
+        "time": 11.899,
+        "ms_after_beep": 6899,
         "peak_amplitude": 0.0283,
         "confidence": 0.028,
         "vote_a": 1,
@@ -523,8 +523,8 @@
       },
       {
         "candidate_number": 13,
-        "time": 12.3716,
-        "ms_after_beep": 7372,
+        "time": 12.4506,
+        "ms_after_beep": 7451,
         "peak_amplitude": 0.0707,
         "confidence": 0.044,
         "vote_a": 1,
@@ -541,8 +541,8 @@
       },
       {
         "candidate_number": 14,
-        "time": 12.6154,
-        "ms_after_beep": 7615,
+        "time": 12.6944,
+        "ms_after_beep": 7694,
         "peak_amplitude": 0.927,
         "confidence": 0.48,
         "vote_a": 1,
@@ -559,8 +559,8 @@
       },
       {
         "candidate_number": 15,
-        "time": 12.8689,
-        "ms_after_beep": 7869,
+        "time": 12.9479,
+        "ms_after_beep": 7948,
         "peak_amplitude": 0.4347,
         "confidence": 0.208,
         "vote_a": 1,
@@ -577,8 +577,8 @@
       },
       {
         "candidate_number": 16,
-        "time": 13.0996,
-        "ms_after_beep": 8100,
+        "time": 13.1786,
+        "ms_after_beep": 8179,
         "peak_amplitude": 0.2317,
         "confidence": 0.14,
         "vote_a": 1,
@@ -595,8 +595,8 @@
       },
       {
         "candidate_number": 17,
-        "time": 14.1274,
-        "ms_after_beep": 9127,
+        "time": 14.2064,
+        "ms_after_beep": 9206,
         "peak_amplitude": 0.0229,
         "confidence": 0.03,
         "vote_a": 1,
@@ -613,8 +613,8 @@
       },
       {
         "candidate_number": 18,
-        "time": 14.5783,
-        "ms_after_beep": 9578,
+        "time": 14.6573,
+        "ms_after_beep": 9657,
         "peak_amplitude": 0.0228,
         "confidence": 0.072,
         "vote_a": 1,
@@ -631,8 +631,8 @@
       },
       {
         "candidate_number": 19,
-        "time": 15.5938,
-        "ms_after_beep": 10594,
+        "time": 15.6728,
+        "ms_after_beep": 10673,
         "peak_amplitude": 0.0145,
         "confidence": 0.041,
         "vote_a": 1,
@@ -649,8 +649,8 @@
       },
       {
         "candidate_number": 20,
-        "time": 16.0701,
-        "ms_after_beep": 11070,
+        "time": 16.1491,
+        "ms_after_beep": 11149,
         "peak_amplitude": 0.7732,
         "confidence": 0.585,
         "vote_a": 1,
@@ -667,8 +667,8 @@
       },
       {
         "candidate_number": 21,
-        "time": 16.3498,
-        "ms_after_beep": 11350,
+        "time": 16.4288,
+        "ms_after_beep": 11429,
         "peak_amplitude": 0.0483,
         "confidence": 0.228,
         "vote_a": 1,
@@ -685,8 +685,8 @@
       },
       {
         "candidate_number": 22,
-        "time": 16.8963,
-        "ms_after_beep": 11896,
+        "time": 16.9753,
+        "ms_after_beep": 11975,
         "peak_amplitude": 0.1869,
         "confidence": 0.202,
         "vote_a": 1,
@@ -703,8 +703,8 @@
       },
       {
         "candidate_number": 23,
-        "time": 17.3418,
-        "ms_after_beep": 12342,
+        "time": 17.4208,
+        "ms_after_beep": 12421,
         "peak_amplitude": 0.1368,
         "confidence": 0.34,
         "vote_a": 1,
@@ -721,8 +721,8 @@
       },
       {
         "candidate_number": 24,
-        "time": 17.6641,
-        "ms_after_beep": 12664,
+        "time": 17.7431,
+        "ms_after_beep": 12743,
         "peak_amplitude": 0.1751,
         "confidence": 0.174,
         "vote_a": 1,
@@ -739,8 +739,8 @@
       },
       {
         "candidate_number": 25,
-        "time": 18.3975,
-        "ms_after_beep": 13398,
+        "time": 18.4765,
+        "ms_after_beep": 13477,
         "peak_amplitude": 0.1979,
         "confidence": 0.273,
         "vote_a": 1,
@@ -757,8 +757,8 @@
       },
       {
         "candidate_number": 26,
-        "time": 18.9095,
-        "ms_after_beep": 13910,
+        "time": 18.9885,
+        "ms_after_beep": 13989,
         "peak_amplitude": 0.1086,
         "confidence": 0.209,
         "vote_a": 1,
@@ -775,8 +775,8 @@
       },
       {
         "candidate_number": 27,
-        "time": 19.6311,
-        "ms_after_beep": 14631,
+        "time": 19.7101,
+        "ms_after_beep": 14710,
         "peak_amplitude": 0.6851,
         "confidence": 0.772,
         "vote_a": 1,
@@ -793,8 +793,8 @@
       },
       {
         "candidate_number": 28,
-        "time": 20.145,
-        "ms_after_beep": 15145,
+        "time": 20.224,
+        "ms_after_beep": 15224,
         "peak_amplitude": 0.0035,
         "confidence": 0.026,
         "vote_a": 1,
@@ -811,8 +811,8 @@
       },
       {
         "candidate_number": 29,
-        "time": 20.6893,
-        "ms_after_beep": 15689,
+        "time": 20.7683,
+        "ms_after_beep": 15768,
         "peak_amplitude": 0.0031,
         "confidence": 0.038,
         "vote_a": 1,
@@ -829,8 +829,8 @@
       },
       {
         "candidate_number": 30,
-        "time": 22.0427,
-        "ms_after_beep": 17043,
+        "time": 22.1217,
+        "ms_after_beep": 17122,
         "peak_amplitude": 0.0005,
         "confidence": 0.009,
         "vote_a": 0,
@@ -847,8 +847,8 @@
       },
       {
         "candidate_number": 31,
-        "time": 22.4606,
-        "ms_after_beep": 17461,
+        "time": 22.5396,
+        "ms_after_beep": 17540,
         "peak_amplitude": 0.0024,
         "confidence": 0.012,
         "vote_a": 0,
@@ -865,8 +865,8 @@
       },
       {
         "candidate_number": 32,
-        "time": 23.9245,
-        "ms_after_beep": 18924,
+        "time": 24.0035,
+        "ms_after_beep": 19003,
         "peak_amplitude": 0.0318,
         "confidence": 0.074,
         "vote_a": 1,
@@ -883,8 +883,8 @@
       },
       {
         "candidate_number": 33,
-        "time": 24.7027,
-        "ms_after_beep": 19703,
+        "time": 24.7817,
+        "ms_after_beep": 19782,
         "peak_amplitude": 0.1204,
         "confidence": 0.197,
         "vote_a": 1,
@@ -901,8 +901,8 @@
       },
       {
         "candidate_number": 34,
-        "time": 25.0717,
-        "ms_after_beep": 20072,
+        "time": 25.1507,
+        "ms_after_beep": 20151,
         "peak_amplitude": 0.09,
         "confidence": 0.085,
         "vote_a": 1,
@@ -919,8 +919,8 @@
       },
       {
         "candidate_number": 35,
-        "time": 25.3794,
-        "ms_after_beep": 20379,
+        "time": 25.4584,
+        "ms_after_beep": 20458,
         "peak_amplitude": 0.2838,
         "confidence": 0.158,
         "vote_a": 1,
@@ -937,8 +937,8 @@
       },
       {
         "candidate_number": 36,
-        "time": 26.11,
-        "ms_after_beep": 21110,
+        "time": 26.189,
+        "ms_after_beep": 21189,
         "peak_amplitude": 0.3621,
         "confidence": 0.214,
         "vote_a": 1,
@@ -955,8 +955,8 @@
       },
       {
         "candidate_number": 37,
-        "time": 26.4474,
-        "ms_after_beep": 21447,
+        "time": 26.5264,
+        "ms_after_beep": 21526,
         "peak_amplitude": 0.148,
         "confidence": 0.223,
         "vote_a": 1,
@@ -973,8 +973,8 @@
       },
       {
         "candidate_number": 38,
-        "time": 26.7571,
-        "ms_after_beep": 21757,
+        "time": 26.8361,
+        "ms_after_beep": 21836,
         "peak_amplitude": 0.5474,
         "confidence": 0.235,
         "vote_a": 1,
@@ -991,8 +991,8 @@
       },
       {
         "candidate_number": 39,
-        "time": 27.2296,
-        "ms_after_beep": 22230,
+        "time": 27.3086,
+        "ms_after_beep": 22309,
         "peak_amplitude": 0.0364,
         "confidence": 0.229,
         "vote_a": 1,
@@ -1009,8 +1009,8 @@
       },
       {
         "candidate_number": 40,
-        "time": 27.5814,
-        "ms_after_beep": 22581,
+        "time": 27.6604,
+        "ms_after_beep": 22660,
         "peak_amplitude": 0.1945,
         "confidence": 0.122,
         "vote_a": 1,
@@ -1027,8 +1027,8 @@
       },
       {
         "candidate_number": 41,
-        "time": 28.9211,
-        "ms_after_beep": 23921,
+        "time": 29.0001,
+        "ms_after_beep": 24000,
         "peak_amplitude": 0.1606,
         "confidence": 0.185,
         "vote_a": 1,
@@ -1045,8 +1045,8 @@
       },
       {
         "candidate_number": 42,
-        "time": 29.359,
-        "ms_after_beep": 24359,
+        "time": 29.438,
+        "ms_after_beep": 24438,
         "peak_amplitude": 0.1277,
         "confidence": 0.203,
         "vote_a": 1,
@@ -1063,8 +1063,8 @@
       },
       {
         "candidate_number": 43,
-        "time": 29.7261,
-        "ms_after_beep": 24726,
+        "time": 29.8051,
+        "ms_after_beep": 24805,
         "peak_amplitude": 0.0218,
         "confidence": 0.12,
         "vote_a": 1,
@@ -1253,17 +1253,309 @@
         "shots_count": 29
       },
       "id": "1e44c9e7aaa54c61b8e9ff88feed3a59"
+    },
+    {
+      "id": "5429e08815094b8c8b3f8ccbeffe0225",
+      "ts": "2026-10-17T12:55:05.032458+00:00",
+      "kind": "marker_deleted",
+      "payload": {
+        "id": "cand-2",
+        "reason": "shot_detect_reset"
+      }
+    },
+    {
+      "id": "83a024aa4c68460595deea6bf31f92c8",
+      "ts": "2026-10-17T12:55:05.032458+00:00",
+      "kind": "marker_deleted",
+      "payload": {
+        "id": "cand-3",
+        "reason": "shot_detect_reset"
+      }
+    },
+    {
+      "id": "f3d14d8d54c1420a96b160bb6fa901eb",
+      "ts": "2026-10-17T12:55:05.032458+00:00",
+      "kind": "marker_deleted",
+      "payload": {
+        "id": "cand-4",
+        "reason": "shot_detect_reset"
+      }
+    },
+    {
+      "id": "1c10d299394a49f5b6c56111c543f991",
+      "ts": "2026-10-17T12:55:05.032458+00:00",
+      "kind": "marker_deleted",
+      "payload": {
+        "id": "cand-5",
+        "reason": "shot_detect_reset"
+      }
+    },
+    {
+      "id": "b7fd8668f20c4ccfba58074361d31d0c",
+      "ts": "2026-10-17T12:55:05.032458+00:00",
+      "kind": "marker_deleted",
+      "payload": {
+        "id": "cand-6",
+        "reason": "shot_detect_reset"
+      }
+    },
+    {
+      "id": "041a183766da422494d56975f0984148",
+      "ts": "2026-10-17T12:55:05.032458+00:00",
+      "kind": "marker_deleted",
+      "payload": {
+        "id": "cand-7",
+        "reason": "shot_detect_reset"
+      }
+    },
+    {
+      "id": "10350b7a6855421f94a563252268a838",
+      "ts": "2026-10-17T12:55:05.032458+00:00",
+      "kind": "marker_deleted",
+      "payload": {
+        "id": "cand-8",
+        "reason": "shot_detect_reset"
+      }
+    },
+    {
+      "id": "991be93d144443ffbb5a5a43b7c16e39",
+      "ts": "2026-10-17T12:55:05.032458+00:00",
+      "kind": "marker_deleted",
+      "payload": {
+        "id": "cand-14",
+        "reason": "shot_detect_reset"
+      }
+    },
+    {
+      "id": "d1bec27055074ba98318614d7b69123e",
+      "ts": "2026-10-17T12:55:05.032458+00:00",
+      "kind": "marker_deleted",
+      "payload": {
+        "id": "cand-15",
+        "reason": "shot_detect_reset"
+      }
+    },
+    {
+      "id": "ca042b7f140c459aa0903fc0cee6cbe2",
+      "ts": "2026-10-17T12:55:05.032458+00:00",
+      "kind": "marker_deleted",
+      "payload": {
+        "id": "cand-16",
+        "reason": "shot_detect_reset"
+      }
+    },
+    {
+      "id": "e5b7ffd2cf1d402180f963aba4b046c3",
+      "ts": "2026-10-17T12:55:05.032458+00:00",
+      "kind": "marker_deleted",
+      "payload": {
+        "id": "cand-20",
+        "reason": "shot_detect_reset"
+      }
+    },
+    {
+      "id": "d079e5488fc44da69224b12d89c6d13c",
+      "ts": "2026-10-17T12:55:05.032458+00:00",
+      "kind": "marker_deleted",
+      "payload": {
+        "id": "cand-21",
+        "reason": "shot_detect_reset"
+      }
+    },
+    {
+      "id": "eceefd7228be497296fc52fe7e19167c",
+      "ts": "2026-10-17T12:55:05.032458+00:00",
+      "kind": "marker_deleted",
+      "payload": {
+        "id": "cand-22",
+        "reason": "shot_detect_reset"
+      }
+    },
+    {
+      "id": "583526e137074f0da14a5507fe06c6f8",
+      "ts": "2026-10-17T12:55:05.032458+00:00",
+      "kind": "marker_deleted",
+      "payload": {
+        "id": "cand-23",
+        "reason": "shot_detect_reset"
+      }
+    },
+    {
+      "id": "36bf042765b143cd8b5c90a1e23fcf06",
+      "ts": "2026-10-17T12:55:05.032458+00:00",
+      "kind": "marker_deleted",
+      "payload": {
+        "id": "cand-24",
+        "reason": "shot_detect_reset"
+      }
+    },
+    {
+      "id": "9837c6b06874404094171690f5fcaa82",
+      "ts": "2026-10-17T12:55:05.032458+00:00",
+      "kind": "marker_deleted",
+      "payload": {
+        "id": "cand-25",
+        "reason": "shot_detect_reset"
+      }
+    },
+    {
+      "id": "718e0db8e306407b9a6ccbac3716f3a7",
+      "ts": "2026-10-17T12:55:05.032458+00:00",
+      "kind": "marker_deleted",
+      "payload": {
+        "id": "cand-26",
+        "reason": "shot_detect_reset"
+      }
+    },
+    {
+      "id": "916b5c743389466194347ce3d073f8b1",
+      "ts": "2026-10-17T12:55:05.032458+00:00",
+      "kind": "marker_deleted",
+      "payload": {
+        "id": "cand-27",
+        "reason": "shot_detect_reset"
+      }
+    },
+    {
+      "id": "b9f2c1728b394c06a25805cce77c6473",
+      "ts": "2026-10-17T12:55:05.032458+00:00",
+      "kind": "marker_deleted",
+      "payload": {
+        "id": "cand-33",
+        "reason": "shot_detect_reset"
+      }
+    },
+    {
+      "id": "11e4a01a9e5d49eb8da803026cd53bac",
+      "ts": "2026-10-17T12:55:05.032458+00:00",
+      "kind": "marker_deleted",
+      "payload": {
+        "id": "cand-34",
+        "reason": "shot_detect_reset"
+      }
+    },
+    {
+      "id": "3205782c99394b3492cdd7ac1a3ffdf0",
+      "ts": "2026-10-17T12:55:05.032458+00:00",
+      "kind": "marker_deleted",
+      "payload": {
+        "id": "cand-35",
+        "reason": "shot_detect_reset"
+      }
+    },
+    {
+      "id": "97228902d61b4a66bf57c032d02280da",
+      "ts": "2026-10-17T12:55:05.032458+00:00",
+      "kind": "marker_deleted",
+      "payload": {
+        "id": "cand-36",
+        "reason": "shot_detect_reset"
+      }
+    },
+    {
+      "id": "23f85d8db709426197b8c5569769fc59",
+      "ts": "2026-10-17T12:55:05.032458+00:00",
+      "kind": "marker_deleted",
+      "payload": {
+        "id": "cand-37",
+        "reason": "shot_detect_reset"
+      }
+    },
+    {
+      "id": "0abeb8fcf3ff469f8aafc26f563c290b",
+      "ts": "2026-10-17T12:55:05.032458+00:00",
+      "kind": "marker_deleted",
+      "payload": {
+        "id": "cand-38",
+        "reason": "shot_detect_reset"
+      }
+    },
+    {
+      "id": "38f8f8b284144440987fa42b5d89640a",
+      "ts": "2026-10-17T12:55:05.032458+00:00",
+      "kind": "marker_deleted",
+      "payload": {
+        "id": "cand-39",
+        "reason": "shot_detect_reset"
+      }
+    },
+    {
+      "id": "56dc5440c6824413bd03a5b414fdc8b9",
+      "ts": "2026-10-17T12:55:05.032458+00:00",
+      "kind": "marker_deleted",
+      "payload": {
+        "id": "cand-40",
+        "reason": "shot_detect_reset"
+      }
+    },
+    {
+      "id": "c3b96eb1203d44abaf2cf139ee2df98e",
+      "ts": "2026-10-17T12:55:05.032458+00:00",
+      "kind": "marker_deleted",
+      "payload": {
+        "id": "cand-41",
+        "reason": "shot_detect_reset"
+      }
+    },
+    {
+      "id": "53d88529b9e746ccaeef3fee84bb2425",
+      "ts": "2026-10-17T12:55:05.032458+00:00",
+      "kind": "marker_deleted",
+      "payload": {
+        "id": "cand-42",
+        "reason": "shot_detect_reset"
+      }
+    },
+    {
+      "id": "97b325b174124dcba854d9b1a169e51a",
+      "ts": "2026-10-17T12:55:05.032458+00:00",
+      "kind": "marker_deleted",
+      "payload": {
+        "id": "cand-43",
+        "reason": "shot_detect_reset"
+      }
+    },
+    {
+      "id": "1fe4c854def74c359d8f9723d841d08a",
+      "ts": "2026-10-17T12:55:05.032600+00:00",
+      "kind": "shot_detect_run",
+      "payload": {
+        "candidate_count": 46,
+        "kept_count": 28,
+        "consensus": 2,
+        "expected_rounds": 24,
+        "seeded_shots": true,
+        "source": "mcp"
+      }
+    },
+    {
+      "kind": "beep_moved_to_tone",
+      "ts": "2026-10-17T12:53:42.701021+00:00",
+      "delta_ms": -79,
+      "old_source_beep": 36.79001948990712,
+      "new_source_beep": 36.711,
+      "note": "reset to detector markers for a re-audit"
+    },
+    {
+      "kind": "beep_moved_to_tone",
+      "ts": "2026-10-17T12:56:44.630886+00:00",
+      "delta_ms": -79,
+      "note": "audited times shifted onto the moved beep"
+    },
+    {
+      "kind": "save",
+      "ts": "2026-10-17T12:56:44.630886+00:00"
     }
   ],
-  "promoted_at": "2026-10-17T12:26:24.494155+00:00",
+  "promoted_at": "2026-10-17T12:57:40.629322+00:00",
   "provenance": {
     "stage_number": 2,
     "stage_name": "Stage 2"
   },
   "source_video": "/Volumes/X9/matches/oden-cup-2026/shooters/s_5343aac3/raw/Martin_stage_2.MOV",
   "fixture_window_in_source": [
-    31.79,
-    66.62
+    31.711,
+    66.541
   ],
   "camera": {
     "id": "apple-iphone17pro",
