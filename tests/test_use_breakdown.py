@@ -151,7 +151,12 @@ def test_the_match_cli_threads_the_choice(tmp_path: Path, monkeypatch: pytest.Mo
 
 @pytest.mark.parametrize(
     ("drawn_with", "args", "stitched"),
-    [(True, (), True), (False, ("--no-breakdown",), True), (True, ("--no-breakdown",), False), (False, (), False)],
+    [
+        (True, (), True),
+        (False, ("--no-breakdown",), True),
+        (True, ("--no-breakdown",), False),
+        (False, (), False),
+    ],
 )
 def test_the_match_cli_stitches_an_overlay_only_drawn_the_way_it_asks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, drawn_with: bool, args: tuple, stitched: bool
@@ -188,7 +193,7 @@ def test_the_mcp_stage_export_threads_the_choice(tmp_path: Path) -> None:
         "R",
         (),
         {
-            **{name: None for name in (*fields, "overlay_path")},
+            **dict.fromkeys((*fields, "overlay_path")),
             "stage_number": 1,
             "shots_written": 0,
             "anomalies": [],
@@ -229,7 +234,11 @@ def test_the_mcp_match_export_threads_the_choice(tmp_path: Path) -> None:
     _make_audit_json(root / "audit", 1)
     (root / "exports").mkdir(exist_ok=True)
     (root / "exports" / "stage1_k-vallen_trimmed.mp4").write_bytes(b"x")
-    fake = type("R", (), {"fcpxml_path": root / "m.fcpxml", "stage_count": 1, "duration_seconds": 1.0, "anomalies": []})()
+    fake = type(
+        "R",
+        (),
+        {"fcpxml_path": root / "m.fcpxml", "stage_count": 1, "duration_seconds": 1.0, "anomalies": []},
+    )()
     seen: list = []
     with patch("splitsmith.mcp.export_tools.match_export_helpers.export_match", return_value=fake) as mock:
         for breakdown in (True, False):
@@ -284,7 +293,9 @@ def test_the_previews_match_summary_follows_the_switch(tmp_path: Path) -> None:
     project, _root = _project(tmp_path)
     docs = {3: {**AUDIT, "events": _REGIONS}}
     used = ep.match_summary_for(project, docs, title="T", label="M", work_dir=tmp_path / "a")
-    unused = ep.match_summary_for(project, docs, title="T", label="M", work_dir=tmp_path / "b", breakdown=False)
+    unused = ep.match_summary_for(
+        project, docs, title="T", label="M", work_dir=tmp_path / "b", breakdown=False
+    )
     assert used.rows[0].draw == pytest.approx(0.92)
     assert unused.rows[0].draw == pytest.approx(1.42)
 
@@ -308,7 +319,7 @@ def test_the_preview_route_threads_the_choice(tmp_path: Path, monkeypatch: pytes
     from splitsmith import runtime as runtime_module
     from splitsmith.ui import export_preview_api
 
-    from .test_look_editor_api import _factory, _Recorder
+    from .test_look_editor_api import _factory
     from .test_ui_server import _seed_match_export_project
 
     monkeypatch.setattr(export_preview_api, "rasterizer_factory", _factory)

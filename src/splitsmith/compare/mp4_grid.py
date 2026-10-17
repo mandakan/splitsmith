@@ -3520,7 +3520,9 @@ def render_grid_mp4(
     card_look = load_look(overlay_theme) if cards_requested or sting_requested else None
     card_theme = theme_for(card_look) if card_look is not None else None
     free_theme = card_theme or (load_theme(overlay_theme) if free_requested else None)
-    free_tiles = load_overlay_data(shooters, breakdown=breakdown) if free_requested and free_cell == "splits" else {}
+    free_tiles = (
+        load_overlay_data(shooters, breakdown=breakdown) if free_requested and free_cell == "splits" else {}
+    )
     free_rounds = load_expected_rounds(shooters) if free_requested and free_cell == "stage" else {}
     # Read for the stage cards whether or not the overlay is on: the count
     # comes from project.json alone, so a slate without ``--overlay``

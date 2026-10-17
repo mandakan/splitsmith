@@ -932,17 +932,14 @@ def _vouched_overlays(
                 breakdown=breakdown,
             ):
                 drawn_in = record.get("look") if record is not None else None
-                if (
-                    record is not None
-                    and export_helpers.overlay_record_matches(
-                        record,
-                        audit_revision=current,
-                        look=look,
-                        upright=upright,
-                        short_head=short_head,
-                        hud_extras=extras,
-                        breakdown=not breakdown,
-                    )
+                if record is not None and export_helpers.overlay_record_matches(
+                    record,
+                    audit_revision=current,
+                    look=look,
+                    upright=upright,
+                    short_head=short_head,
+                    hud_extras=extras,
+                    breakdown=not breakdown,
                 ):
                     drawn = "without" if breakdown else "with"
                     flag = "--no-breakdown" if breakdown else "--breakdown"

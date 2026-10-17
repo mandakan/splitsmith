@@ -390,9 +390,7 @@ def match_summary_for(
     for stage in chosen:
         folder = work_dir / f"stage{stage.stage_number}"
         folder.mkdir(parents=True, exist_ok=True)
-        shots, regions = _shots_and_regions(
-            audit_docs.get(stage.stage_number), folder, breakdown=breakdown
-        )
+        shots, regions = _shots_and_regions(audit_docs.get(stage.stage_number), folder, breakdown=breakdown)
         stages.append(
             (
                 # The name the export prints (``match_exports``): "Stage N" for a blank one.
@@ -755,7 +753,9 @@ def _hud_preview(
     # Deferred: overlay_hud_render builds on the renderer's encoder module.
     from .overlay_hud_render import hud_context
 
-    stage = hud_stage_data(shots, beep_in_clip=HUD_PREVIEW_BEEP, events=_confirmed_regions(audit_doc, breakdown=spec.breakdown))
+    stage = hud_stage_data(
+        shots, beep_in_clip=HUD_PREVIEW_BEEP, events=_confirmed_regions(audit_doc, breakdown=spec.breakdown)
+    )
     position = resolve_position(spec.overlay_options.position, declared_positions(template))
     context = hud_context(
         stage=stage,
