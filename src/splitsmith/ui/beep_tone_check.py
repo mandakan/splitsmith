@@ -6,11 +6,14 @@ again once the WAV exists."""
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from .. import beep_detect, beep_tone
 from ..match_project import MatchProject, StageVideo
 from . import audio as audio_helpers
+
+logger = logging.getLogger(__name__)
 
 
 def record_tone_offset(root: Path, project: MatchProject, stage_number: int, video: StageVideo) -> bool:
@@ -19,9 +22,15 @@ def record_tone_offset(root: Path, project: MatchProject, stage_number: int, vid
     wav = audio_helpers.published_video_audio(root, stage_number, video, project=project, source=None)
     if wav is None:
         return False
-    audio, sr = beep_detect.load_audio(wav)
-    video.beep_tone_offset_ms = beep_tone.tone_offset_ms(
-        audio, sr, float(video.beep_time), beep_tone.tone_band(audio, sr, float(video.beep_time))
-    )
-    video.beep_tone_for = float(video.beep_time)
+    try:
+        audio, sr = beep_detect.load_audio(wav)
+        beep = float(video.beep_time)
+        offset = beep_tone.tone_offset_ms(audio, sr, beep, beep_tone.tone_band(audio, sr, beep))
+    except Exception:  # noqa: BLE001  (derived and optional: never fail a confirm or a job)
+        logger.warning(
+            "tone offset not measured for %s stage %s", video.video_id, stage_number, exc_info=True
+        )
+        return False
+    video.beep_tone_offset_ms = offset
+    video.beep_tone_for = beep
     return True

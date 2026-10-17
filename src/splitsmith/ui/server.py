@@ -3998,8 +3998,14 @@ def register_job_bodies(state: AppState) -> None:
             audio_helpers.ensure_video_audio(
                 root, stage_number, video, source, project=proj, ffmpeg_binary=ffmpeg
             )
-            if beep_tone_check.record_tone_offset(root, proj, stage_number, video):
-                proj.save(root)
+            # Onto the project as it is now: ffmpeg ran long enough for an
+            # edit (a beep confirmed elsewhere) that the snapshot above lacks.
+            fresh = state.shooter_project(slug)
+            fresh_video = fresh.stage(stage_number).find_video_by_id(video_id)
+            if fresh_video is not None and beep_tone_check.record_tone_offset(
+                root, fresh, stage_number, fresh_video
+            ):
+                fresh.save(root)
         elif target == "audit":
             if stage_number is None:
                 raise RuntimeError("audit audio needs stage_number")

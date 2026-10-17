@@ -114,10 +114,15 @@ def tone_offset_ms(
 
     The start is the earliest moment within ``reach_s`` of the beep where
     the level rises above the floor and stays up for most of the next
-    ``_SUSTAIN_S``: a timer tone lasts 300 to 500 ms, a cross-bay shot's
-    energy dies in tens. Not Snap's rule (the nearest peak, walked back),
+    ``_SUSTAIN_S``: a timer tone lasts 300 to 500 ms, so a short transient
+    alone does not qualify. Not Snap's rule (the nearest peak, walked back),
     which lands mid-tone on a tone that wavers and peaks late (Little
-    Trouble 1, Bofors 5, 2026-10-17). None when nothing within reach stays up."""
+    Trouble 1, Bofors 5, 2026-10-17). None when nothing within reach stays up.
+
+    Meaningful only where a timer tone is near the beep: anywhere sustained
+    sound lies within reach (a steel ring, reverb, a voice) it reads that
+    sound. A review measured 78 of 92 isolated shots giving a number. On
+    confirmed beeps it agreed with the audited one within 6 ms on 57 of 66."""
     win, start = _window(audio, sr, beep_s - _CFG.window_s, beep_s + _CFG.window_s)
     if win.size == 0:
         return None

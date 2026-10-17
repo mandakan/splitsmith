@@ -2058,7 +2058,9 @@ and Snap read it through the peaks route's ``band``. A confirmed beep's
 distance from its tone is ``beep_tone.tone_offset_ms``: the earliest rise
 within ``reach_s`` (0.3 s) that stays up for 80 % of the next 100 ms. That is
 deliberately not Snap's nearest-peak rule, which lands mid-tone on a tone
-that wavers, nor a shot's rise, whose energy dies in tens of ms. The value
+that wavers. It reads any sustained sound within reach, a steel ring or a
+voice as well as a tone, so it is a measure for confirmed beeps, not a beep
+detector (78 of 92 isolated shots gave a number in a review). The value
 is stored on the video with the beep time it was measured for
 (``beep_tone_offset_ms`` / ``beep_tone_for``; ``tone_flag_ms`` ignores a value
 whose beep moved or was unreviewed). It is written on confirm, on the manual
