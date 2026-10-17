@@ -37,7 +37,7 @@ from splitsmith.beep_calibration import (
     summarize,
 )
 from splitsmith.beep_detect import BeepNotFoundError, detect_beep, load_audio
-from splitsmith.config import BeepDetectConfig
+from splitsmith.config import BeepDetectConfig, BeepRankerConfig
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures"
@@ -205,6 +205,17 @@ def main() -> None:
     parser.add_argument("--tag", action="append", help="Restrict to fixtures with this tag (repeatable).")
     parser.add_argument("--stem", action="append", help="Restrict to fixtures with this stem (repeatable).")
     parser.add_argument("--json", type=Path, help="Write the per-fixture results to this JSON file.")
+    parser.add_argument(
+        "--ranker",
+        choices=["learned", "heuristic"],
+        default="learned",
+        help="How candidates are ranked (default: learned, the shipped ranker).",
+    )
+    parser.add_argument(
+        "--no-tone-onset",
+        action="store_true",
+        help="Keep each candidate's rise-foot edge instead of its timer tone's start.",
+    )
     args = parser.parse_args()
 
     manifest = load_manifest(args.manifest)
@@ -224,7 +235,7 @@ def main() -> None:
         raise SystemExit("no fixtures matched the filters")
 
     tracks = tuple(args.track) if args.track else ("clip", "full")
-    config = BeepDetectConfig()
+    config = BeepDetectConfig(ranker=BeepRankerConfig(ranker=args.ranker), tone_onset=not args.no_tone_onset)
 
     results: list[FixtureEvalResult] = []
     for entry in selected:

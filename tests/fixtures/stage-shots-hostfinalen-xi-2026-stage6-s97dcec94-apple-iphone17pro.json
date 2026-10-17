@@ -1205,7 +1205,7 @@
   },
   "anchor": {
     "fixture_slug": "stage6",
-    "revision_sha": "02daabd8479294ae5d6f08de7320c1dfc2aa7471aee9c591fcb659fb048a54cd",
+    "revision_sha": "6964f9afca172e45c3220af5ab7ff696736d85ad0a065ed2172ab72b8a84d91e",
     "promoted_at": "2026-10-15T09:03:27.834455+00:00",
     "offset_seconds": -5.145,
     "drift_ms_per_minute": 49.71,

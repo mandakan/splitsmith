@@ -65,6 +65,7 @@ import soundfile as sf
 from scipy.fft import next_fast_len
 from scipy.signal import butter, hilbert, sosfiltfilt
 
+from . import beep_tone
 from .beep_features import candidate_features, feature_vector
 from .config import BeepCandidate, BeepDetectConfig, BeepDetection, BeepFeatures, BeepRankerConfig
 
@@ -454,9 +455,14 @@ def detect_beep(
     ranked_models: list[BeepCandidate] = []
     for run, score, confidence in sorted(scored, key=lambda t: t[1], reverse=True):
         leading_idx = _rise_foot_leading_edge(env_fine, run.start, run.end, noise_floor)
+        time = leading_idx / sample_rate
+        if config.tone_onset:
+            onset = beep_tone.tone_onset(window, sample_rate, time)
+            if onset is not None:
+                time = max(0.0, onset)
         ranked_models.append(
             BeepCandidate(
-                time=leading_idx / sample_rate,
+                time=time,
                 score=score,
                 peak_amplitude=run.run_peak,
                 duration_ms=(run.end - run.start) * 1000.0 / sample_rate,

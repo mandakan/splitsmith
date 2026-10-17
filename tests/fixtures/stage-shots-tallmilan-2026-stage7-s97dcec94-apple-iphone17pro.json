@@ -837,7 +837,7 @@
   },
   "anchor": {
     "fixture_slug": "stage7-go-sit-in-the-corner",
-    "revision_sha": "cf217a7f7f78d05478f8279c865545be8ac9416703f9e54301602a26ee87a505",
+    "revision_sha": "71c209b6d7f94814edb9d464ace7fefca583e7655da6cad8e8b0d0aca1c2e23a",
     "promoted_at": "2026-10-16T09:01:32.423738+00:00",
     "offset_seconds": 9.91,
     "drift_ms_per_minute": 0,

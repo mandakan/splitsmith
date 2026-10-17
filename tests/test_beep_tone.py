@@ -121,3 +121,48 @@ def test_a_corrected_beep_sits_on_its_tone() -> None:
     assert lo < 2700 < hi
     banded = beep_tone.tone_offset_ms(audio, sr, beep, (lo, hi))
     assert banded is not None and abs(banded) < 5
+
+
+def _fixture(stem: str) -> tuple[np.ndarray, int, float]:
+    wav = FIXTURES / f"{stem}.wav"
+    if not wav.exists() or not (FIXTURES / f"{stem}.json").exists():
+        pytest.skip("fixture not here (scripts/fixture_audio.py fetch)")
+    beep = float(json.loads((FIXTURES / f"{stem}.json").read_text())["beep_time"])
+    audio, sr = beep_detect.load_audio(wav)
+    return audio, sr, beep
+
+
+def test_the_timer_line_is_the_fundamental_not_its_harmonic() -> None:
+    """Stockholm IPSC Open 6 on an iPhone: a 2.7 kHz timer whose 5.4 kHz
+    harmonic stands out in more columns. The harmonic was read as the timer,
+    and its start measured 158 ms before the beep."""
+    audio, sr, beep = _fixture("stage-shots-stockholm-ipsc-open-2026-stage6-s97dcec94-apple-iphone17pro")
+    assert beep_tone.tone_line_hz(audio, sr, beep) == pytest.approx(2700, abs=60)
+
+
+@pytest.mark.parametrize(
+    ("stem", "old_error_ms"),
+    [
+        # The run starts on a sound 127 ms before the tone.
+        ("stage-shots-little-trouble-in-big-satra-2026-stage2-s97dcec94", -127),
+        # The run starts 137 ms into the tone.
+        ("stage-shots-blacksmith-handgun-open-2026-stage4-s97dcec94", 137),
+    ],
+)
+def test_detect_beep_puts_the_beep_on_its_tone(stem: str, old_error_ms: int) -> None:
+    """Both were confident mistakes of the rise-foot edge (0.96 and 1.00)."""
+    from splitsmith.config import BeepDetectConfig
+
+    audio, sr, beep = _fixture(stem)
+    old = beep_detect.detect_beep(audio, sr, BeepDetectConfig(tone_onset=False)).time
+    assert (old - beep) * 1000 == pytest.approx(old_error_ms, abs=5)
+    new = beep_detect.detect_beep(audio, sr, BeepDetectConfig()).time
+    assert abs(new - beep) * 1000 < 10
+
+
+def test_a_harmonic_starting_at_the_beep_keeps_it() -> None:
+    """Tallmilan 7 on an iPhone: the 3.2 kHz line starts at the beep, its
+    weak 1.6 kHz fundamental reads late; the beep stays."""
+    audio, sr, beep = _fixture("stage-shots-tallmilan-2026-stage7-s97dcec94-apple-iphone17pro")
+    assert beep_tone.tone_line_hz(audio, sr, beep) == pytest.approx(1600, abs=60)
+    assert beep_tone.tone_onset(audio, sr, beep) is None

@@ -7,7 +7,7 @@
     0.0,
     34.301
   ],
-  "beep_time": 1.5584,
+  "beep_time": 1.3674,
   "tolerance_ms": 15,
   "stage_time_seconds": 27.96,
   "stage_window_end_in_fixture": null,
@@ -16,7 +16,7 @@
       "shot_number": 1,
       "candidate_number": 14,
       "time": 6.402,
-      "ms_after_beep": 4844,
+      "ms_after_beep": 5035,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": -0.41,
@@ -27,7 +27,7 @@
       "shot_number": 2,
       "candidate_number": 54,
       "time": 21.046,
-      "ms_after_beep": 19488,
+      "ms_after_beep": 19679,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": -12.89,
@@ -38,7 +38,7 @@
       "shot_number": 3,
       "candidate_number": 58,
       "time": 22.637,
-      "ms_after_beep": 21079,
+      "ms_after_beep": 21270,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 5.24,
@@ -49,7 +49,7 @@
       "shot_number": 4,
       "candidate_number": 60,
       "time": 23.777,
-      "ms_after_beep": 22219,
+      "ms_after_beep": 22410,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": -17.14,
@@ -60,7 +60,7 @@
       "shot_number": 5,
       "candidate_number": 65,
       "time": 26.673,
-      "ms_after_beep": 25115,
+      "ms_after_beep": 25306,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 22.46,
@@ -71,7 +71,7 @@
       "shot_number": 6,
       "candidate_number": 68,
       "time": 27.643,
-      "ms_after_beep": 26085,
+      "ms_after_beep": 26276,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": 22.3,
@@ -82,7 +82,7 @@
       "shot_number": 7,
       "candidate_number": 70,
       "time": 28.671,
-      "ms_after_beep": 27113,
+      "ms_after_beep": 27304,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": -21.97,
@@ -93,7 +93,7 @@
       "shot_number": 8,
       "candidate_number": 71,
       "time": 29.3,
-      "ms_after_beep": 27742,
+      "ms_after_beep": 27933,
       "source": "promoted",
       "subclass": "unknown",
       "snap_displacement_ms": -12.71,
@@ -1716,5 +1716,18 @@
     "reviewed_at": "2026-10-16T14:15:30.440052+00:00",
     "confirmed_at": "2026-10-16T14:15:30.440052+00:00",
     "method": "audit"
-  }
+  },
+  "audit_events": [
+    {
+      "id": "91ddf43a8e164809a1a78c12b588c9ae",
+      "ts": "2026-10-17T15:41:00.439Z",
+      "kind": "beep_moved_to_tone",
+      "payload": {
+        "from": 1.5584,
+        "to": 1.3674,
+        "delta_ms": -191,
+        "basis": "timer tone onset, read on a spectrogram (beep label audit 2026-10-17)"
+      }
+    }
+  ]
 }

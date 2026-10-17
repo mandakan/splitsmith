@@ -95,18 +95,21 @@ def test_a_stored_candidate_without_features_still_loads() -> None:
 
 def test_detect_beep_attaches_the_features_candidate_features_computes() -> None:
     """No skew: what the trainer reads off a candidate is exactly what a
-    direct call on the same run returns. ``detect_beep`` ranks runs by
-    score (a stable sort), so its candidates line up with the runs sorted
-    the same way."""
+    direct call on the same run returns, for every candidate."""
     entry = load_manifest(FIXTURES / "beep_calibration" / "manifest.yaml").fixtures[1]
     audio, sr = load_audio(FIXTURES / entry.clip_wav)
     config = BeepDetectConfig(top_n_candidates=1000)
 
     detection = detect_beep(audio, sr, config)
-    runs = sorted(_candidate_runs(audio, sr, config), key=lambda r: r.score, reverse=True)
+    runs = _candidate_runs(audio, sr, config)
+    # The learned ranker orders candidates by its own probability, not by
+    # a run's heuristic score, so a candidate is paired with its run by the
+    # run's own peak and length.
+    by_identity = {(r.run_peak, (r.end - r.start) * 1000.0 / sr): r for r in runs}
 
-    assert len(detection.candidates) == len(runs) > 1
-    for candidate, run in zip(detection.candidates, runs, strict=True):
+    assert len(detection.candidates) == len(runs) == len(by_identity) > 1
+    for candidate in detection.candidates:
+        run = by_identity[(candidate.peak_amplitude, candidate.duration_ms)]
         assert candidate.features == candidate_features(
             run.audio,
             sr,

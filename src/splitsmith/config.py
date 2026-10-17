@@ -447,6 +447,13 @@ class BeepDetectConfig(BaseModel):
     # pick the right one without typing a timestamp by hand (issue #22).
     # ``0`` returns just the winner (legacy behaviour).
     top_n_candidates: int = 5
+    # Place each candidate's time on its timer tone's sustained rise, in the
+    # band of the timer's own line (``beep_tone.tone_onset``), instead of
+    # the rise foot of the run's envelope in the fixed band above. The run
+    # can start on a sound just before the tone, or after its start, and
+    # some timers sit outside the fixed band. A candidate with no tonal line
+    # keeps its rise foot. ``False`` is the old leading edge.
+    tone_onset: bool = True
     # How candidates are ranked and how confident the winner is (#949).
     ranker: BeepRankerConfig = Field(default_factory=BeepRankerConfig)
 

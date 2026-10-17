@@ -17,7 +17,7 @@ HEURISTIC = BeepDetectConfig(ranker=BeepRankerConfig(ranker="heuristic"))
 
 # The heuristic gets this one wrong; the out-of-fold LR gets it right
 # (ranker_report.json, models.lr.fixed, one of 42).
-FIXED = "stage-shots-blacksmith-2026-stage6-s97dcec94-apple-iphone17pro"
+FIXED = "stage-shots-blacksmith-handgun-open-2026-stage5-s0fe3d797"
 
 
 def _entry(stem: str):

@@ -31,6 +31,18 @@ _LEVEL_FRAC = 0.15
 _TONE_HALF_HZ = 200.0
 _LINE_PROMINENCE = 4.0
 _LINE_MIN_SHARE = 0.15
+# A line at a half or a third of the winner's frequency is the fundamental
+# when it stands out in at least this share of the winner's columns.
+_FUNDAMENTAL_SHARE = 0.5
+# Where a line starts (tone_onset): the window and hop of its spectrogram,
+# how long it must keep standing out and in what share of that time, how far
+# from the given time to look, and how close a line start counts as "at" it.
+_ONSET_NPERSEG = 1024
+_ONSET_HOP_S = 0.002
+_ONSET_SUSTAIN_S = 0.1
+_ONSET_SHARE = 0.8
+_ONSET_REACH_S = 0.3
+_ONSET_KEEP_S = 0.04
 
 
 class Spectrogram(BaseModel):
@@ -63,33 +75,130 @@ def default_band() -> tuple[float, float]:
     return (cfg.tonal_band_lo_hz, cfg.tonal_band_hi_hz)
 
 
-def tone_band(audio: np.ndarray, sr: int, beep_s: float) -> tuple[float, float]:
-    """+-``_TONE_HALF_HZ`` around the timer's own frequency: the steadiest
-    tonal line within 1.5 to 7 kHz from 0.3 s before the beep to 0.5 s after
-    (the bin that stands ``_LINE_PROMINENCE``x over its +-300 Hz neighbours in
-    the most columns). The corpus's timers run from 1.6 to 5.4 kHz, so a fixed
-    band misses some, and a narrow one keeps most of a shot out. The
-    detector's band when no line stands out (silence, a timer drowned out).
-    On the 2026-10-17 corpus pass it agreed with the audited beep within 6 ms
-    on 57 of 66 primaries."""
+def tone_line_hz(audio: np.ndarray, sr: int, beep_s: float) -> float | None:
+    """The timer's own frequency near ``beep_s``: the steadiest tonal line
+    within 1.5 to 7 kHz from 0.3 s before it to 0.5 s after (the bin that
+    stands ``_LINE_PROMINENCE``x over its +-300 Hz neighbours in the most
+    columns), else None when no line stands out (silence, a timer drowned
+    out). The corpus's timers run from 1.6 to 5.4 kHz.
+
+    A timer's harmonic can stand out more than the tone itself where the
+    noise is quieter up there (Stockholm IPSC Open 6 on an iPhone: a 2.7 kHz
+    timer read as 5.4 kHz, and the start measured on the harmonic was 158 ms
+    early), so a line at half or a third of the winner's frequency that
+    stands out in at least half as many columns is taken instead."""
     lo = max(0, int(round((beep_s - 0.3) * sr)))
     hi = min(len(audio), int(round((beep_s + 0.5) * sr)))
     if hi - lo < 4096:
-        return default_band()
+        return None
     f, _t, z = stft(audio[lo:hi], fs=sr, nperseg=4096, noverlap=4096 - int(0.01 * sr))
     keep = (f >= 1500) & (f <= 7000)
     m, f = np.abs(z[keep]), f[keep]
     if m.size == 0 or m.max() <= 0:
-        return default_band()
+        return None
     k = max(1, int(round(300 / (f[1] - f[0]))))
     pad = np.pad(m, ((k, k), (0, 0)), mode="edge")
     med = np.stack([np.median(pad[i : i + 2 * k + 1], axis=0) for i in range(m.shape[0])])
     score = (m / (med + 1e-12) > _LINE_PROMINENCE).mean(axis=1)
     i = int(score.argmax())
     if score[i] < _LINE_MIN_SHARE:
+        return None
+    step = f[1] - f[0]
+    for div in (3, 2):
+        j = int(round((f[i] / div - f[0]) / step))
+        if j < 1 or j >= len(f) - 1:
+            continue
+        near = j - 1 + int(score[j - 1 : j + 2].argmax())
+        if score[near] >= max(_LINE_MIN_SHARE, _FUNDAMENTAL_SHARE * score[i]):
+            return float(f[near])
+    return float(f[i])
+
+
+def tone_band(audio: np.ndarray, sr: int, beep_s: float) -> tuple[float, float]:
+    """+-``_TONE_HALF_HZ`` around :func:`tone_line_hz`: a fixed band misses
+    some timers, and a narrow one keeps most of a shot out. The detector's
+    band when no line stands out. On the 2026-10-17 corpus pass it agreed
+    with the audited beep within 6 ms on 57 of 66 primaries."""
+    hz = tone_line_hz(audio, sr, beep_s)
+    if hz is None:
         return default_band()
-    hz = float(f[i])
     return (hz - _TONE_HALF_HZ, hz + _TONE_HALF_HZ)
+
+
+def _line_onset(audio: np.ndarray, sr: int, near_s: float, hz: float) -> float | None:
+    """The first moment within ``_ONSET_REACH_S`` of ``near_s`` where a line
+    at ``hz`` stands ``_LINE_PROMINENCE``x over its +-300 Hz neighbours and
+    keeps standing out for ``_ONSET_SHARE`` of the next ``_ONSET_SUSTAIN_S``.
+    Prominence, not level: a broadband sound never makes a line, and a quiet
+    tone still does."""
+    lo = max(0, int((near_s - _ONSET_REACH_S - 0.05) * sr))
+    hi = min(len(audio), int((near_s + _ONSET_REACH_S + _ONSET_SUSTAIN_S + 0.05) * sr))
+    if hi - lo < _ONSET_NPERSEG:
+        return None
+    hop = int(_ONSET_HOP_S * sr)
+    f, t, z = stft(audio[lo:hi], fs=sr, nperseg=_ONSET_NPERSEG, noverlap=_ONSET_NPERSEG - hop, boundary=None)
+    m = np.abs(z)
+    step = f[1] - f[0]
+    b = int(round(hz / step))
+    k = max(2, int(round(300 / step)))
+    if b - k < 0 or b + k >= len(f):
+        return None
+    line = m[b - 1 : b + 2].max(axis=0)
+    neigh = np.median(np.concatenate([m[b - k : b - 2], m[b + 3 : b + k + 1]]), axis=0)
+    present = line / (neigh + 1e-12) > _LINE_PROMINENCE
+    times = lo / sr + t
+    n = max(1, int(round(_ONSET_SUSTAIN_S / _ONSET_HOP_S)))
+    csum = np.concatenate([[0], np.cumsum(present)])
+    for i in range(len(present) - n):
+        if times[i] < near_s - _ONSET_REACH_S:
+            continue
+        if times[i] > near_s + _ONSET_REACH_S:
+            break
+        if present[i] and csum[i + n] - csum[i] >= _ONSET_SHARE * n:
+            # The first window holding the line: the tone entered it about a
+            # quarter window before its centre.
+            return float(times[i]) - _ONSET_NPERSEG / (4 * sr)
+    return None
+
+
+def tone_onset(audio: np.ndarray, sr: int, near_s: float) -> float | None:
+    """Where the timer's tone starts, seconds, when ``near_s`` is clearly off
+    it; None to keep ``near_s``.
+
+    The timer's line (:func:`tone_line_hz`) and its half, double and triple
+    are each found where they start (:func:`_line_onset`). When any of them
+    starts within ``_ONSET_KEEP_S`` of ``near_s`` it is kept: a weak
+    fundamental can rise late where a harmonic is plain (Tallmilan 7). Else
+    the fundamental's start, refined to its band's sustained rise
+    (:func:`tone_offset_ms`) when that lies within ``_ONSET_KEEP_S``.
+
+    Taking the earliest line instead moved good beeps early onto stray lines,
+    and keeping ``near_s`` when the level rule agreed on any line put back
+    confident mistakes: a harmonic passed it at a wrong pick (HFO Masters 6,
+    Little Trouble 2). On the corrected 2026-10-17 corpus the detector's
+    top-1 went from 284 to 295 of 329, and no wrong beep kept 0.95 or more.
+    The three it moved off a right beep are weak tones on two Samsung clips
+    and Oden Cup 5, all below 0.7."""
+    hz = tone_line_hz(audio, sr, near_s)
+    if hz is None:
+        return None
+    found: list[tuple[float, float]] = []
+    for mult in (0.5, 1.0, 2.0, 3.0):
+        h = hz * mult
+        if 1200 <= h <= 9000:
+            onset = _line_onset(audio, sr, near_s, h)
+            if onset is not None:
+                found.append((onset, h))
+    if any(abs(onset - near_s) <= _ONSET_KEEP_S for onset, _h in found):
+        return None
+    fundamental = [onset for onset, h in found if h == hz]
+    if not fundamental:
+        return None
+    onset = fundamental[0]
+    off = tone_offset_ms(audio, sr, onset, (hz - _TONE_HALF_HZ, hz + _TONE_HALF_HZ))
+    if off is not None and abs(off) <= _ONSET_KEEP_S * 1000:
+        return onset + off / 1000.0
+    return onset
 
 
 def band_pass(audio: np.ndarray, sr: int, lo_hz: float, hi_hz: float) -> np.ndarray:

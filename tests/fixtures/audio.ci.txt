@@ -129,3 +129,5 @@ stage-shots-vads-easter-shoot-gotta-go-fast-stage5-s36ed6e4e.wav
 stage-shots-vads-easter-shoot-gotta-go-fast-stage6-s0fe3d797.wav
 stage-shots-vads-easter-shoot-gotta-go-fast-stage6-s36ed6e4e.wav
 stage-shots-little-trouble-in-big-satra-2026-stage2-s97dcec94.wav
+stage-shots-stockholm-ipsc-open-2026-stage6-s97dcec94-apple-iphone17pro.wav
+stage-shots-blacksmith-handgun-open-2026-stage4-s97dcec94.wav

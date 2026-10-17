@@ -73,9 +73,11 @@ def _pinned_heuristic() -> list[str]:
 
 @pytest.mark.parametrize("stem", _pinned_heuristic()[:5])
 def test_the_heuristic_ranker_still_reproduces_today(stem: str) -> None:
-    """``ranker: heuristic`` is the escape hatch; it must stay today's detector."""
+    """``ranker: heuristic`` with ``tone_onset: false`` is the escape hatch;
+    it must stay the detector before both (``baseline_heuristic.json``:
+    ``eval_beep_detector.py --track clip --ranker heuristic --no-tone-onset``)."""
     entry, (audio, sample_rate) = _clip_audio(stem)
-    config = BeepDetectConfig(ranker=BeepRankerConfig(ranker="heuristic"))
+    config = BeepDetectConfig(ranker=BeepRankerConfig(ranker="heuristic"), tone_onset=False)
 
     detection = detect_beep(audio, sample_rate, config)
 

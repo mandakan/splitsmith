@@ -752,7 +752,7 @@
   },
   "anchor": {
     "fixture_slug": "stage3-a200",
-    "revision_sha": "18a2c1e9229beb82ee19e592cc8bd807567d1f6177691ac74edeb5fb521c17b9",
+    "revision_sha": "1a48115839f64353a160788f3eb77451c4cca2c6180f7b7f9f4def7d281945e1",
     "promoted_at": "2026-10-14T12:23:40.951544+00:00",
     "offset_seconds": 13.548541666666665,
     "drift_ms_per_minute": 0.0,

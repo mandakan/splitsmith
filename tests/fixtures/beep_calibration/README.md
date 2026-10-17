@@ -40,6 +40,11 @@ uv run python scripts/build_beep_calibration.py
 uv run python scripts/build_beep_calibration.py --preserve-tags  # keep hand-edits
 ```
 
+The manifest holds reviewed, current shot fixtures only: a superseded one
+(its replacement is in the corpus), one snapped from another angle that
+nobody has reviewed, and one whose beep falls before its clip starts are
+left out, so the ranker never trains or scores on them.
+
 A rebuild on a machine without the gitignored full-track WAVs keeps the
 full-track references the manifest already has. In the eval, a track
 whose WAV is missing counts as `unavailable`, never as a miss.
@@ -52,6 +57,7 @@ uv run python scripts/eval_beep_detector.py --tag handheld
 uv run python scripts/eval_beep_detector.py --track full
 uv run python scripts/eval_beep_detector.py --json out/run.json
 uv run python scripts/eval_beep_detector.py --track clip --json tests/fixtures/beep_calibration/baseline.json
+uv run python scripts/eval_beep_detector.py --track clip --ranker heuristic --no-tone-onset --json tests/fixtures/beep_calibration/baseline_heuristic.json
 ```
 
 ## Auto-tag rules
