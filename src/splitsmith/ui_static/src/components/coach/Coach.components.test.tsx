@@ -98,6 +98,23 @@ describe("EventCard", () => {
     expect(within(card).getByRole("button", { name: "Reload" })).toHaveAttribute("aria-pressed", "true");
   });
 
+  it("relabels a region to Draw, and refuses a second draw saying why", () => {
+    const onKind = vi.fn();
+    const move = [E("evt-1", "movement", 0, 2.3)];
+    const { rerender } = render(
+      <EventCard event={move[0]} events={move} onKind={onKind} onKeep={vi.fn()} onDelete={vi.fn()} onDone={vi.fn()} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Draw" }));
+    expect(onKind).toHaveBeenCalledWith("draw");
+    const withDraw = [E("evt-1", "movement", 0, 2.3), E("evt-2", "draw", 1.3, 2.4)];
+    rerender(
+      <EventCard event={withDraw[0]} events={withDraw} onKind={onKind} onKeep={vi.fn()} onDelete={vi.fn()} onDone={vi.fn()} />,
+    );
+    const draw = screen.getByRole("button", { name: "Draw" });
+    expect(draw).toBeDisabled();
+    expect(draw).toHaveAttribute("title", "A stage has one draw");
+  });
+
   it("a standing reload is exposed for its whole duration; a movement shows no exposed row", () => {
     const standing = [E("evt-2", "reload", 8.05, 9.47)];
     const { rerender } = render(<EventCard event={standing[0]} events={standing} onKind={vi.fn()} onKeep={vi.fn()} onDelete={vi.fn()} onDone={vi.fn()} />);

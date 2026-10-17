@@ -1355,7 +1355,19 @@ Movement (seed v3): one proposal per gap the stored classes call
 ``movement``, inset ``MOVEMENT_SEED_INSET_S`` from both shots, since
 ``shot_is_moving`` is inclusive and a region on a shot's time would call
 the shots either side fired moving; it may sit over a reload proposal (a
-reload on the move). Reloads: every hinted gap (``reload_hint_min_s``), or with a division
+reload on the move). Draw (seed v4, spec ``2026-10-17-draw-region-design``):
+a ``draw`` region (the hands starting the draw to the first shot; its own
+lane, first; one per stage, ``validate_lanes`` on both sides; may overlap a
+movement, a draw on the move) is proposed from the beep to the first shot
+on every stage whose first shot follows the beep, and a movement over the
+same span, inset from the shot, when that shot comes more than
+``draw_movement_min_s`` (2.0 s, ``CoachAutoClassifyConfig``) after the beep.
+2.0 s catches 47 % of the corpus's stages (median first shot 1.94 s) on
+purpose: a wrong guess is one tap to delete or relabel. Both are opt-in
+seeder arguments only the coach GET passes. ``events_from_doc`` skips a
+region of a kind this version does not know (with a warning) instead of
+failing the stage, so an install one version behind reads a doc holding
+a draw; a corrupt known region still fails it. Reloads: every hinted gap (``reload_hint_min_s``), or with a division
 capacity (``DivisionCapacityConfig``, keyed on the SSI string so the power
 factor rides in the name) the round count decides: the fewest reloads that
 keep every run within ``capacity + 1`` shots, in the longest gaps those

@@ -232,6 +232,15 @@ def test_proposals_never_reach_the_stage() -> None:
     assert all(s["moving"] is False for s in data["shots"])
 
 
+def test_a_confirmed_draw_does_not_reach_the_stage_yet() -> None:
+    """The overlay's draw band is slice 3 (spec 2026-10-17): until then a
+    draw never reaches a template, so no HUD or summary template draws it
+    as an unknown, muted band."""
+    events = [_event("evt-1", "draw", 0.4, 1.2), _event("evt-2", "movement", 3.4, 6.1)]
+    data = hud_stage_data(EVENT_SHOTS, beep_in_clip=2.0, events=events)
+    assert [e["kind"] for e in data["events"]] == ["movement"]
+
+
 def test_a_stage_without_events_still_carries_the_keys() -> None:
     data = hud_stage_data(EVENT_SHOTS, beep_in_clip=2.0)
     assert data["events"] == [] and data["reloads"] == []

@@ -12,15 +12,22 @@ import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/Chip";
 import { Label } from "@/components/ui/Label";
 import { Segmented, type SegmentedOption } from "@/components/ui/Segmented";
+import { LANES } from "@/components/coach/laneDrag";
 import type { StageEvent, StageEventKind } from "@/lib/api";
 import { enclosingMovement, reloadFigures, withKind } from "@/lib/events";
 import { cn } from "@/lib/utils";
 
-const KINDS: readonly { value: StageEventKind; label: string }[] = [
-  { value: "movement", label: "Movement" },
-  { value: "reload", label: "Reload" },
-  { value: "activation", label: "Activation" },
-];
+// Every lane, in lane order; a Record so a new kind fails the typecheck here.
+const KIND_LABEL: Record<StageEventKind, string> = {
+  draw: "Draw",
+  movement: "Movement",
+  reload: "Reload",
+  activation: "Activation",
+};
+const KINDS: readonly { value: StageEventKind; label: string }[] = LANES.map((value) => ({
+  value,
+  label: KIND_LABEL[value],
+}));
 
 export interface EventCardProps {
   event: StageEvent;
@@ -43,7 +50,9 @@ export function EventCard({ event, events, onKind, onKeep, onDelete, onDone, com
   const exposed = event.kind === "reload" ? (reloadFigures(events).find((f) => f.eventId === event.id)?.exposed ?? null) : null;
   const options: SegmentedOption<StageEventKind>[] = KINDS.map((k) => {
     const blocked = k.value !== event.kind && withKind(events, event.id, k.value) === null;
-    return { ...k, tick: k.value, disabled: blocked, title: blocked ? "Overlaps a region in that lane" : undefined };
+    const secondDraw = k.value === "draw" && events.some((e) => e.kind === "draw" && e.id !== event.id);
+    const why = secondDraw ? "A stage has one draw" : "Overlaps a region in that lane";
+    return { ...k, tick: k.value, disabled: blocked, title: blocked ? why : undefined };
   });
   const kindControl = (
     <Segmented

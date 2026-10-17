@@ -592,7 +592,7 @@ def test_reclassify_notes_a_corrupt_events_list_and_classifies_without_it(tmp_pa
         {"shot_number": 1, "ms_after_beep": 1500},
         {"shot_number": 2, "ms_after_beep": 3800},  # 2.3 s: movement
     ]
-    doc["events"] = [{"id": "evt-1", "kind": "nap", "start": 1.0, "end": 2.0, "source": "manual"}]
+    doc["events"] = [{"id": "evt-1", "kind": "movement", "start": 2.0, "end": 1.0, "source": "manual"}]
     audit.write_text(json.dumps(doc))
 
     result = runner.invoke(app, ["match", "reclassify", str(root), "--shooter", "me"])

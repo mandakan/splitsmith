@@ -69,6 +69,7 @@ export { DRAG_THRESHOLD_PX, LANES, SNAP_PX, TOUCH_DRAG_THRESHOLD_PX } from "./la
 /** Gutter rows for the Timeline band: Shots, then one per lane, current heights (h-8 / h-9). */
 export const LANE_ROWS: { label: string; height: number }[] = [
   { label: "Shots", height: 32 },
+  { label: "Draw", height: 36 },
   { label: "Movement", height: 36 },
   { label: "Reload", height: 36 },
   { label: "Activation", height: 36 },
@@ -82,7 +83,12 @@ function regionLabel(x: StageEvent): string {
   return `${LANE_LABEL[x.kind]} ${x.start.toFixed(2)} to ${x.end.toFixed(2)}, ${(x.end - x.start).toFixed(2)} seconds, ${state}`;
 }
 
-const HANDLE_FILL: Record<StageEventKind, string> = { movement: "bg-beep", reload: "bg-live", activation: "bg-ink-2" };
+const HANDLE_FILL: Record<StageEventKind, string> = {
+  draw: "bg-led",
+  movement: "bg-beep",
+  reload: "bg-live",
+  activation: "bg-ink-2",
+};
 
 export interface LaneEditorProps {
   shots: { shot_number: number; time_from_beep: number }[];

@@ -34,9 +34,19 @@ import { BUDGET_LABEL, BUDGET_TICK } from "@/lib/timeBudget";
 import type { StageView, StageWorkspace } from "@/lib/useStageWorkspace";
 import { cn } from "@/lib/utils";
 
-const KIND_LABEL: Record<StageEvent["kind"], string> = { movement: "Movement", reload: "Reload", activation: "Activation" };
+const KIND_LABEL: Record<StageEvent["kind"], string> = {
+  draw: "Draw",
+  movement: "Movement",
+  reload: "Reload",
+  activation: "Activation",
+};
 // The lanes' hues (LaneEditor), so the rail's tick reads as the lane it came from.
-const KIND_TICK: Record<StageEvent["kind"], string> = { movement: "bg-beep", reload: "bg-live", activation: "bg-ink-2" };
+const KIND_TICK: Record<StageEvent["kind"], string> = {
+  draw: "bg-led",
+  movement: "bg-beep",
+  reload: "bg-live",
+  activation: "bg-ink-2",
+};
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
 

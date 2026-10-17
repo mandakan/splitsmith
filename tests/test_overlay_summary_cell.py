@@ -490,7 +490,7 @@ def test_reloads_load_from_confirmed_regions_only(tmp_path: Path) -> None:
 
 
 def test_a_corrupt_events_list_keeps_the_shots_and_draws_no_regions(tmp_path: Path) -> None:
-    bad = {"id": "evt-1", "kind": "teleport", "start": 1, "end": 2, "source": "manual"}
+    bad = {"id": "evt-1", "kind": "movement", "start": 2, "end": 1, "source": "manual"}
     path = _audit(tmp_path, [_MOVE_1, bad])
     shots = load_stage_shots(path)
     assert len(shots) == len(_EVENT_SHOTS)

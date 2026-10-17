@@ -60,8 +60,10 @@ IntervalClassSource = Literal["auto", "manual"]
 
 # Stage events (spec 2026-10-08): regions on the stage timeline, one lane
 # per kind. Independent of shots -- a movement may span several shots,
-# which the per-gap ``interval_class`` cannot say.
-EventKind = Literal["movement", "reload", "activation"]
+# which the per-gap ``interval_class`` cannot say. A draw (spec
+# 2026-10-17) is the hands starting the draw to the first shot, one per
+# stage, and may overlap a movement (a draw on the move).
+EventKind = Literal["draw", "movement", "reload", "activation"]
 
 
 class StageEvent(BaseModel):
@@ -648,6 +650,13 @@ class CoachAutoClassifyConfig(BaseModel):
     # The shortest gap a proposed reload may sit in, when the division's
     # magazine capacity places the proposals: nobody reloads in 0.3 s.
     reload_min_s: float = Field(default=0.60, gt=0.0)
+    # A first shot later than this after the beep gets a movement proposal
+    # from the beep to it, beside the draw proposal (the shooter moved
+    # before shooting). 2.0 s although it catches 47 % of the 265 audited
+    # stages of 2026-10-17 (median first shot 1.94 s): with a draw region
+    # beside it, a wrong guess is one tap to delete or relabel (spec
+    # 2026-10-17).
+    draw_movement_min_s: float = Field(default=2.00, gt=0.0)
 
 
 class DivisionCapacityConfig(BaseModel):

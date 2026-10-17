@@ -14772,6 +14772,9 @@ def create_app(
                         hint_min_s=cfg.reload_hint_min_s,
                         capacity=capacity,
                         min_reload_s=cfg.reload_min_s,
+                        # A late first shot: the shooter moved before shooting.
+                        draw=True,
+                        draw_movement_min_s=cfg.draw_movement_min_s,
                     )
                     if seeded and reseeding:
                         _classify_doc(target, stage_number, cfg)

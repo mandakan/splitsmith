@@ -7,10 +7,16 @@
 import type { StageEvent, StageEventKind } from "@/lib/api";
 import { MIN_EVENT_S, clampToLane, nextEventId } from "@/lib/events";
 
-export const LANES: readonly StageEventKind[] = ["movement", "reload", "activation"];
-export const LANE_LABEL: Record<StageEventKind, string> = { movement: "Movement", reload: "Reload", activation: "Activation" };
-// Budget hues (Chip TICK): movement beep, reload live, activation ink-2. The lanes and the phone's focus strip draw with them.
+export const LANES: readonly StageEventKind[] = ["draw", "movement", "reload", "activation"];
+export const LANE_LABEL: Record<StageEventKind, string> = {
+  draw: "Draw",
+  movement: "Movement",
+  reload: "Reload",
+  activation: "Activation",
+};
+// Budget hues (Chip TICK): draw led, movement beep, reload live, activation ink-2. The lanes and the phone's focus strip draw with them.
 export const LANE_FILL: Record<StageEventKind, string> = {
+  draw: "bg-led/30 border-led",
   movement: "bg-beep/30 border-beep",
   reload: "bg-live/30 border-live",
   activation: "bg-ink-2/20 border-ink-2",
@@ -90,6 +96,9 @@ export function dragFrame(
   if (drag.mode === "create") {
     // The moving edge stops at the nearest same-lane region on either side of the anchor.
     const lane = current.filter((x) => x.kind === drag.kind && x.id !== drag.id);
+    // A stage has one draw (spec 2026-10-17): a drag on the Draw lane beside
+    // it creates nothing, rather than a region the commit would then refuse.
+    if (drag.kind === "draw" && lane.length > 0) return null;
     const lo = Math.max(0, ...lane.filter((x) => x.end <= drag.anchorT).map((x) => x.end));
     const hi = Math.min(duration, ...lane.filter((x) => x.start >= drag.anchorT).map((x) => x.start));
     const edge = Math.min(Math.max(snap(t), lo), hi);

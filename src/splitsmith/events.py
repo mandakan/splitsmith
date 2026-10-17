@@ -16,11 +16,11 @@ import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, get_args
 
 from pydantic import BaseModel
 
-from .config import Config, DivisionCapacityConfig, StageEvent
+from .config import Config, DivisionCapacityConfig, EventKind, StageEvent
 from .runtime import ENV_CONFIG_FILE
 
 logger = logging.getLogger(__name__)
@@ -31,7 +31,10 @@ EVENTS_SEEDED_FIELD: Final = "events_seeded"
 #: fewest reloads the round count forces, in the longest gaps (version 1,
 #: stored as ``True``, took the first long gap in each magazine's window).
 #: 3: movement proposals over every gap the auto-classifier calls movement.
-SEED_VERSION: Final = 3
+#: 4: a draw from the beep to the first shot on every stage, and a movement
+#: over the same span when the first shot comes late
+#: (``CoachAutoClassifyConfig.draw_movement_min_s``, 2.0 s; spec 2026-10-17).
+SEED_VERSION: Final = 4
 #: How far a seeded movement stays in from the shots either side of its gap
 #: (at most a quarter of the gap): ``shot_is_moving`` is inclusive, and a
 #: region on the shot's own time would call the shot before the move, and
@@ -71,10 +74,14 @@ class StageEventSummary(BaseModel):
 
 
 def validate_lanes(events: Sequence[StageEvent]) -> None:
-    """Two events of one kind never overlap (touching edges are fine)."""
+    """Two events of one kind never overlap (touching edges are fine), and a
+    stage has one draw at most."""
     by_kind: dict[str, list[StageEvent]] = {}
     for e in events:
         by_kind.setdefault(e.kind, []).append(e)
+    draws = by_kind.get("draw", [])
+    if len(draws) > 1:
+        raise ValueError(f"draw events {draws[0].id} and {draws[1].id}: a stage has one draw")
     for kind, lane in by_kind.items():
         lane.sort(key=lambda e: (e.start, e.end))
         for prev, cur in zip(lane, lane[1:], strict=False):
@@ -93,8 +100,19 @@ def next_event_id(events: Iterable[StageEvent | dict[str, Any]]) -> str:
 
 
 def events_from_doc(doc: dict[str, Any]) -> list[StageEvent]:
+    """The doc's regions. A region of a kind this version does not know (a
+    newer version wrote it, as ``draw`` once was new) is skipped with a
+    warning, never fatal: failing the list made the stage's coach read a
+    422 on an install one version behind. Any other bad entry still raises."""
     raw = doc.get(EVENTS_FIELD) or []
-    return [StageEvent.model_validate(e) for e in raw]
+    known = set(get_args(EventKind))
+    out: list[StageEvent] = []
+    for e in raw:
+        if isinstance(e, dict) and isinstance(e.get("kind"), str) and e["kind"] not in known:
+            logger.warning("skipping a stage event of unknown kind %r", e["kind"])
+            continue
+        out.append(StageEvent.model_validate(e))
+    return out
 
 
 def confirmed(events: Sequence[StageEvent]) -> list[StageEvent]:
@@ -107,12 +125,16 @@ def confirmed(events: Sequence[StageEvent]) -> list[StageEvent]:
 
 def region_marker_label(event: StageEvent) -> str:
     """An editor marker's name for a confirmed region: ``Reload 1.42`` /
-    ``Movement`` / ``Activation`` (spec 2026-10-08, part 2). A reload's
-    label carries its duration; the other two kinds don't -- the marker's
-    own duration already shows the span. The FCPXML and FCP7 XML exports
+    ``Draw 0.98`` / ``Movement`` / ``Activation`` (spec 2026-10-08, part 2;
+    draw 2026-10-17). A reload's and a draw's labels carry their duration,
+    the figure each stands for; the others don't -- the marker's own
+    duration already shows the span. The FCPXML and FCP7 XML exports
     both name their region markers through this."""
     if event.kind == "reload":
         return f"Reload {event.end - event.start:.2f}"
+    if event.kind == "draw":
+        # Like a reload, a draw's length is the figure (spec 2026-10-17).
+        return f"Draw {event.end - event.start:.2f}"
     if event.kind == "movement":
         return "Movement"
     return "Activation"
@@ -287,6 +309,8 @@ def seed_events(
     capacity: int | None,
     min_reload_s: float = 0.6,
     movement_gaps: Sequence[float] = (),
+    draw: bool = False,
+    draw_movement_min_s: float | None = None,
 ) -> list[StageEvent]:
     """Propose ``reload`` regions, each spanning a whole gap, and
     ``movement`` regions, all ``source="auto"``.
@@ -305,6 +329,13 @@ def seed_events(
     :data:`MOVEMENT_SEED_INSET_S` from both shots so neither reads as fired
     moving. A movement may sit over a reload: a reload on the move.
 
+    The draw: with ``draw``, a ``draw`` region from the beep to the first
+    shot (the user moves its start to where the hands moved). With
+    ``draw_movement_min_s``, a first shot more than that after the beep (a
+    start that moves before it shoots) also gets a movement over the same
+    span, inset from that shot. Either is one tap to delete or relabel when
+    wrong; ``False`` / ``None`` propose none.
+
     A gap that cannot be a region is never proposed: one that starts before
     the beep (a pre-beep first shot), has no length, or has a time that is
     not a finite number. The seeder runs on a coach GET, and an invalid
@@ -314,6 +345,18 @@ def seed_events(
     gaps = [times[i + 1] - times[i] for i in range(len(times) - 1)]
     seeds: list[StageEvent] = []
     seeds.extend(_reload_seeds(times, gaps, hint_min_s, capacity, min_reload_s))
+    if draw and times and times[0] >= MIN_EVENT_S:
+        seeds.append(StageEvent(id=next_event_id(seeds), kind="draw", start=0.0, end=times[0], source="auto"))
+    if draw_movement_min_s is not None and times and times[0] > draw_movement_min_s and times[0] > 0.0:
+        seeds.append(
+            StageEvent(
+                id=next_event_id(seeds),
+                kind="movement",
+                start=0.0,
+                end=round(times[0] - MOVEMENT_SEED_INSET_S, 6),
+                source="auto",
+            )
+        )
     moving_ends = {t for t in movement_gaps if math.isfinite(t)}
     for g, gap in enumerate(gaps):
         start, end = times[g], times[g + 1]
@@ -404,7 +447,13 @@ def reseedable(doc: dict[str, Any]) -> bool:
 
 
 def seed_doc(
-    doc: dict[str, Any], *, hint_min_s: float, capacity: int | None, min_reload_s: float = 0.6
+    doc: dict[str, Any],
+    *,
+    hint_min_s: float,
+    capacity: int | None,
+    min_reload_s: float = 0.6,
+    draw: bool = False,
+    draw_movement_min_s: float | None = None,
 ) -> bool:
     """Seed once per stage, or again over an earlier seeder's untouched
     proposals (:func:`reseedable`). Returns True when the doc changed.
@@ -426,6 +475,8 @@ def seed_doc(
         capacity=capacity,
         min_reload_s=min_reload_s,
         movement_gaps=movement_gap_ends(doc),
+        draw=draw,
+        draw_movement_min_s=draw_movement_min_s,
     )
     if not seeds and not again:
         return False

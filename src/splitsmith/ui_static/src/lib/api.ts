@@ -1814,7 +1814,7 @@ export type CoachIntervalClassSource = "auto" | "manual";
 /** Stage events (spec 2026-10-08): regions on the stage timeline in
  *  seconds from the beep, one lane per kind. A reload's handles mean hand
  *  off the grip -> gun back on target. */
-export type StageEventKind = "movement" | "reload" | "activation";
+export type StageEventKind = "draw" | "movement" | "reload" | "activation";
 export interface StageEvent {
   id: string;
   kind: StageEventKind;

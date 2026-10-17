@@ -517,8 +517,8 @@ describe("Breakdown inspector (#1372)", () => {
 describe("Breakdown splitter (#1373)", () => {
   // A measured page: 700 px shared by the viewer row and the band (plus the
   // 6 px splitter), a 53 px transport under a 347 px video, a band 303 px
-  // tall with every row at its own height. Floor: 303 less the Reload and
-  // Activation lanes (72) = 231; the video's 200 px floor caps the band at
+  // tall with every row at its own height. Floor: 303 less the Movement,
+  // Reload and Activation lanes (108) = 195; the video's 200 px floor caps the band at
   // 700 - 53 - 200 = 447.
   const box = (top: number, height: number) =>
     ({ top, bottom: top + height, height, left: 0, right: 1000, width: 1000, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
@@ -550,7 +550,7 @@ describe("Breakdown splitter (#1373)", () => {
     expect(band().style.height).toBe("");
     expect(audioRow().style.height).toBe("56px");
     expect(sep).toHaveAttribute("aria-valuemin", String(700 - 447));
-    expect(sep).toHaveAttribute("aria-valuemax", String(700 - 231));
+    expect(sep).toHaveAttribute("aria-valuemax", String(700 - 195));
   });
 
   it("a remembered split is drawn, clamped to this window, and its extra height goes to the Audio row", async () => {
@@ -571,25 +571,25 @@ describe("Breakdown splitter (#1373)", () => {
     renderAt("/match/m1/breakdown/anna/2");
     const sep = await screen.findByRole("separator");
     fireEvent.keyDown(sep, { key: "End" });
-    expect(band().style.height).toBe("231px");
-    expect(window.localStorage.getItem(BAND_HEIGHT_KEY)).toBe("231");
+    expect(band().style.height).toBe("195px");
+    expect(window.localStorage.getItem(BAND_HEIGHT_KEY)).toBe("195");
     fireEvent.keyDown(sep, { key: "ArrowUp" });
-    expect(window.localStorage.getItem(BAND_HEIGHT_KEY)).toBe("247");
+    expect(window.localStorage.getItem(BAND_HEIGHT_KEY)).toBe("211");
     fireEvent.doubleClick(sep);
     expect(band().style.height).toBe("447px");
     expect(window.localStorage.getItem(BAND_HEIGHT_KEY)).toBe("447");
     fireEvent.doubleClick(sep);
-    expect(band().style.height).toBe("247px");
-    expect(window.localStorage.getItem(BAND_HEIGHT_KEY)).toBe("247");
+    expect(band().style.height).toBe("211px");
+    expect(window.localStorage.getItem(BAND_HEIGHT_KEY)).toBe("211");
   });
 
   it("a band under its natural height scrolls only its rows: the header and the ruler stay", async () => {
-    window.localStorage.setItem(BAND_HEIGHT_KEY, "231");
+    window.localStorage.setItem(BAND_HEIGHT_KEY, "195");
     renderAt("/match/m1/breakdown/anna/2");
     await screen.findByRole("separator");
     const rows = screen.getByTestId("timeline-rows");
     const gutter = screen.getByTestId("timeline-gutter-rows");
-    // Audio, Shots and one lane: 303 - 231 = 72 px of rows below.
+    // Audio, Shots and one lane: 303 - 195 = 108 px of rows below.
     expect(rows.style.height).toBe("124px");
     expect(gutter.style.height).toBe(rows.style.height);
     expect(rows).toHaveClass("overflow-y-auto");
