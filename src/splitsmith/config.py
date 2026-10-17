@@ -680,6 +680,26 @@ class DivisionCapacityConfig(BaseModel):
     )
 
 
+class BeepToneConfig(BaseModel):
+    """The beep step's tone check and spectral view (spec
+    2026-10-17-beep-spectral-view-design). The band is the detector's own
+    tonal band (``BeepDetectConfig.tonal_band_*``); this holds the rest."""
+
+    # A confirmed beep this far or farther from its tone's start is flagged.
+    flag_ms: float = 20.0
+    # How far from the confirmed beep the tone's rise is looked for. Wider
+    # than Snap's 0.1 s for a shot: on Little Trouble stage 2 the tone began
+    # 191 ms after the confirmed beep, past a cross-bay shot at +78 ms that a
+    # 0.1 s reach found instead (2026-10-17). In the band the tone is the
+    # strongest thing within 0.3 s, so the rule lands on it.
+    reach_s: float = 0.3
+    # Seconds either side of the beep the offset reads.
+    window_s: float = 1.0
+    # The spectrogram's top frequency and its longest request window.
+    max_hz: float = 8000.0
+    max_window_s: float = 4.0
+
+
 class BeepWindowConfig(BaseModel):
     """Search-window derivation for multi-stage single-take videos.
 
@@ -707,6 +727,7 @@ class Config(BaseModel):
     coach_auto_classify: CoachAutoClassifyConfig = Field(default_factory=CoachAutoClassifyConfig)
     division_capacity: DivisionCapacityConfig = Field(default_factory=DivisionCapacityConfig)
     beep_windows: BeepWindowConfig = Field(default_factory=BeepWindowConfig)
+    beep_tone: BeepToneConfig = Field(default_factory=BeepToneConfig)
     web_trim: WebTrimConfig = Field(default_factory=WebTrimConfig)
     footage_sort: FootageSortConfig = Field(default_factory=FootageSortConfig)
     access: AccessConfig = Field(default_factory=AccessConfig)
