@@ -51,6 +51,39 @@ def test_a_confirmed_draw_is_the_stages_draw_everywhere(with_movement: bool) -> 
     assert [e.text for e in draws] == ["0.98"]
 
 
+def test_the_upright_card_reads_the_draw_region_too() -> None:
+    from splitsmith.overlay_summary_cell import summary_groups, upright_summary_scale
+
+    tile = _draw_tile(with_movement=False)
+    groups = summary_groups(
+        tile,
+        "Me",
+        scale=upright_summary_scale(1080, 1920, dense=False),
+        cell_width=1080,
+        cell_height=1920,
+        upright=True,
+    )
+    assert [e.text for g in groups for e in g.elements if e.caption == "Draw"] == ["0.98"]
+
+
+def test_every_tile_builder_carries_the_stages_regions() -> None:
+    """The Draw reads ``TileStageData.events``: a production builder with
+    shots that forgets them shows the first shot as the draw, silently.
+    Filler tiles (no shots) are exempt."""
+    import ast
+
+    root = Path(__file__).parent.parent / "src" / "splitsmith"
+    missing = []
+    for path in root.rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not (isinstance(node, ast.Call) and getattr(node.func, "id", None) == "TileStageData"):
+                continue
+            keywords = {k.arg for k in node.keywords}
+            if "shots" in keywords and "events" not in keywords:
+                missing.append(f"{path.relative_to(root)}:{node.lineno}")
+    assert missing == []
+
+
 def test_the_match_summary_reads_the_draw_region_too() -> None:
     from splitsmith.match_summary import build_match_summary
 
