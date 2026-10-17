@@ -116,9 +116,10 @@ offset of the confirmed beep. It is never computed per request.
 - The trim job writes it too, once the audit WAV exists, for a confirm
   that ran before its WAV.
 - It is a project field and syncs with the project doc like
-  ``beep_confidence``. An older install ignores the unknown key, since
-  project models already ignore extras; check this, and add it to the
-  model's tolerated fields if they do not.
+  ``beep_confidence``. ``StageVideo`` has no ``model_config``, so
+  Pydantic's default ignores the key on an older install. If an older
+  install saves the project, the field is dropped. That is harmless for a
+  measured value: the next confirm or the backfill writes it again.
 - ``scripts/measure_beep_tones.py`` backfills every confirmed beep in
   the matches on X9: a dry run by default, ``--write`` saves. It prints
   the full-range and the band-limited offsets side by side, which is
