@@ -114,15 +114,20 @@ class TileStageData:
         return self.shots[-1].time_from_beep if self.shots else None
 
 
-def _confirmed_events(audit_data: dict[str, Any], audit_path: Path) -> list[StageEvent]:
+def _confirmed_events(
+    audit_data: dict[str, Any], audit_path: Path, *, breakdown: bool = True
+) -> list[StageEvent]:
     """The doc's confirmed regions. A corrupt events list must not cost the
     stage its shots (one bad doc, a 12-stage render): it reads as none, the
     way the HUD render and the export preview treat it
-    (``events.confirmed_from_doc``)."""
+    (``events.confirmed_from_doc``). ``breakdown=False`` (an export with
+    "Use Breakdown" off) reads none at all."""
+    if not breakdown:
+        return []
     return confirmed_from_doc(audit_data, log_context=f"stage summary: {audit_path}")
 
 
-def load_stage_reloads(audit_path: Path) -> tuple[ReloadFigure, ...]:
+def load_stage_reloads(audit_path: Path, *, breakdown: bool = True) -> tuple[ReloadFigure, ...]:
     """This stage's confirmed reloads as :class:`~splitsmith.events.ReloadFigure`
     records (duration, exposed time against the confirmed movements).
     An auto proposal is never here. Missing, unreadable or corrupt reads as
@@ -133,10 +138,10 @@ def load_stage_reloads(audit_path: Path) -> tuple[ReloadFigure, ...]:
         return ()
     if not isinstance(audit_data, dict):
         return ()
-    return tuple(reload_figures(_confirmed_events(audit_data, audit_path)))
+    return tuple(reload_figures(_confirmed_events(audit_data, audit_path, breakdown=breakdown)))
 
 
-def load_stage_events(audit_path: Path) -> tuple[StageEvent, ...]:
+def load_stage_events(audit_path: Path, *, breakdown: bool = True) -> tuple[StageEvent, ...]:
     """This stage's confirmed regions. Missing, unreadable or corrupt reads
     as none, as :func:`load_stage_reloads` does."""
     try:
@@ -145,10 +150,10 @@ def load_stage_events(audit_path: Path) -> tuple[StageEvent, ...]:
         return ()
     if not isinstance(audit_data, dict):
         return ()
-    return tuple(_confirmed_events(audit_data, audit_path))
+    return tuple(_confirmed_events(audit_data, audit_path, breakdown=breakdown))
 
 
-def load_stage_shots(audit_path: Path) -> tuple[TileShot, ...]:
+def load_stage_shots(audit_path: Path, *, breakdown: bool = True) -> tuple[TileShot, ...]:
     """Read this stage's audited shots, measured from the beep.
 
     ``beep_time_in_source=0.0`` makes the engine's ``time_absolute``
@@ -198,7 +203,7 @@ def load_stage_shots(audit_path: Path) -> tuple[TileShot, ...]:
         # here because this path never writes back.
         heal_unclassified(audit_data.get("shots"))
         engine_shots = audit_shots_to_engine_shots(audit_data, beep_time_in_source=0.0)
-        regions = _confirmed_events(audit_data, audit_path)
+        regions = _confirmed_events(audit_data, audit_path, breakdown=breakdown)
     except Exception as exc:  # noqa: BLE001 -- one bad file must not fail the render
         logger.warning(
             "stage summary: unreadable audit %s (%s); rendering this stage without shots",

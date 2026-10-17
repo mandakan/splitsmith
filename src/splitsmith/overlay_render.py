@@ -522,6 +522,7 @@ def render_overlay(
     segment_cache: SegmentCache | None = None,
     degraded: list[str] | None = None,
     hud_extras: HudExtras | None = None,
+    breakdown: bool = True,
 ) -> Path:
     """Render an alpha overlay MOV alongside a trimmed clip.
 
@@ -576,6 +577,9 @@ def render_overlay(
     ``hud_extras``: the stage's scorecard, name and magazine capacity, for a
         template that declares ``splitsmith-data`` keys; ignored by Classic
         and by every template that declares none.
+    ``breakdown``: the export's "Use Breakdown" switch. ``False`` draws the
+        stage as one nobody broke down: no region band or chip, no shot
+        fired moving, and shot 1's split the time from the beep.
 
     Returns the written ``output_path``.
     """
@@ -633,6 +637,7 @@ def render_overlay(
                         rasterizer=active,
                         segment_cache=segment_cache,
                         extras=hud_extras,
+                        breakdown=breakdown,
                     )
             except HudFallbackError as exc:
                 note = f"overlay style {variant!r} fell back to Classic: {exc}"
@@ -645,7 +650,9 @@ def render_overlay(
 
     # A confirmed draw region is shot 1's split (spec 2026-10-17); None keeps
     # the time from the beep.
-    draw = draw_seconds(None, confirmed_from_doc(audit_data, log_context=audit_path.name))
+    draw = (
+        draw_seconds(None, confirmed_from_doc(audit_data, log_context=audit_path.name)) if breakdown else None
+    )
     states = build_frame_states(
         shot_times_in_clip=shot_times,
         beep_time_in_clip=beep_offset_seconds,
