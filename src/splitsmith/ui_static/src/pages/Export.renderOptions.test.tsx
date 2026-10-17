@@ -370,6 +370,22 @@ describe("Export rendered-video rows", () => {
     expect(vi.mocked(api.exportCompareGrid).mock.calls[0][0].breakdown).toBe(false);
   });
 
+  it("a hidden switch sends nothing, even when it was turned off", async () => {
+    const regions = { draw: 1.2, avg_split: 0.3, fastest_split: 0.2, shot_count: 6, split_count: 4 };
+    vi.mocked(api.getProject).mockResolvedValue({
+      ...PROJECT,
+      stages: PROJECT.stages.map((s, i) => (i === 0 ? { ...s, figures: { ...regions, regions: 2 } } : s)),
+    } as MatchProject);
+    const { user } = await renderPage();
+    await user.click(screen.getByRole("checkbox", { name: "Use Breakdown" }));
+    // Leave only the stage with no regions: the switch goes, and so does the field.
+    await user.click(screen.getByRole("checkbox", { name: /Stage 1/i }));
+    expect(screen.queryByRole("checkbox", { name: "Use Breakdown" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: /export bundle/i }));
+    await waitFor(() => expect(api.exportMatch).toHaveBeenCalledTimes(1));
+    expect("breakdown" in vi.mocked(api.exportMatch).mock.calls[0][1]).toBe(false);
+  });
+
   it("no Breakdown switch where no selected stage has a confirmed region", async () => {
     await renderPage();
     expect(screen.queryByRole("checkbox", { name: "Use Breakdown" })).toBeNull();

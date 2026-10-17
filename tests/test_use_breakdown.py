@@ -390,3 +390,47 @@ def test_the_overlay_cli_threads_the_choice(tmp_path: Path, monkeypatch: pytest.
     assert seen["breakdown"] is True and tiles[-1].reloads
     CliRunner().invoke(app, [*base, "--no-breakdown"])
     assert seen["breakdown"] is False and tiles[-1].reloads == () and tiles[-1].events == ()
+
+
+def test_the_stage_export_route_threads_the_choice(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from splitsmith.ui import exports as exports_mod
+
+    from .test_ui_server import _seed_match_export_project, _wait_for_job
+
+    client, _root = _seed_match_export_project(tmp_path, stage_count=1)
+    seen: list = []
+    real = exports_mod.export_stage
+
+    def capture(**kwargs: object) -> object:
+        seen.append(kwargs["request"])
+        return real(**kwargs)
+
+    monkeypatch.setattr(exports_mod, "export_stage", capture)
+    body = {"write_trim": False, "write_fcpxml": False, "write_report": False, "write_overlay": False}
+    for extra in ({}, {"breakdown": False}):
+        resp = client.post("/api/shooters/me/stages/1/export", json={**body, **extra})
+        assert resp.status_code == 200, resp.text
+        assert _wait_for_job(client, resp.json()["id"])["status"] == "succeeded"
+    assert [req.breakdown for req in seen] == [True, False]
+
+
+@pytest.mark.parametrize("tool", ["export_stage", "export_match"])
+def test_the_mcp_wrappers_pass_the_choice_on(tool: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The FastMCP wrapper is what an agent calls; the tool functions are
+    tested directly elsewhere, so a wrapper that dropped the argument would
+    pass them."""
+    import asyncio
+
+    from splitsmith.mcp import create_server, export_tools
+
+    seen: dict = {}
+
+    def capture(*_args: object, **kwargs: object) -> dict:
+        seen.update(kwargs)
+        return {}
+
+    monkeypatch.setattr(export_tools, f"{tool}_tool", capture)
+    args = {"project_root": "/nowhere", "breakdown": False}
+    args.update({"stage_number": 1} if tool == "export_stage" else {"stage_numbers": [1]})
+    asyncio.run(create_server().call_tool(tool, args))
+    assert seen["breakdown"] is False

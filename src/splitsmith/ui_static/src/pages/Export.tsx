@@ -403,6 +403,13 @@ function ExportInner({ slug }: { slug: string }) {
     orderedSelection.some(
       (n) => (project?.stages.find((s) => s.stage_number === n)?.figures?.regions ?? 0) > 0,
     );
+  // A hidden switch is on for every request: off where it cannot be seen
+  // would still move overlay records and preview keys for nothing.
+  const sentBreakdown = breakdownShown ? useBreakdown : true;
+  const previewSettings = useMemo(
+    () => (view.useBreakdown === sentBreakdown ? view : { ...view, useBreakdown: sentBreakdown }),
+    [view, sentBreakdown],
+  );
 
   // Secondaries with a confirmed beep on the selected stages: what the
   // cam rows offer, and zero is what hides them.
@@ -686,7 +693,7 @@ function ExportInner({ slug }: { slug: string }) {
         look: lookRequest.choice,
         kinds: lookRequest.kinds,
         youtubeConnected: false,
-        useBreakdown,
+        useBreakdown: sentBreakdown,
       }),
     );
   }
@@ -719,7 +726,7 @@ function ExportInner({ slug }: { slug: string }) {
           look: lookRequest.choice,
           kinds: lookRequest.kinds,
           youtubeConnected: !!youtubeSettings?.connected,
-          useBreakdown,
+          useBreakdown: sentBreakdown,
         }),
       );
       setJob(submitted);
@@ -757,7 +764,7 @@ function ExportInner({ slug }: { slug: string }) {
         descriptionLead,
         uploadOptions,
         youtubeConnected: !!youtubeSettings?.connected,
-        useBreakdown,
+        useBreakdown: sentBreakdown,
       });
       const submitted = await api.exportCompareGrid(payload);
       setJob(submitted);
@@ -1075,7 +1082,7 @@ function ExportInner({ slug }: { slug: string }) {
               slug={compare ? audioFrom || slug : slug}
               stageNumber={orderedSelection[0] ?? 0}
               stageNumbers={orderedSelection}
-              settings={view}
+              settings={previewSettings}
               projectName={projectName || project?.name || ""}
               focus={lookFocus}
               hover={lookHover}
