@@ -1,0 +1,92 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>starter: broadcast thumbnail</title>
+<!--
+  The YouTube thumbnail, using every piece of data the thumbnail slot gets.
+  The renderer lays it over a sharp 1280x720 action frame: draw on a
+  transparent page and darken only what the text needs. It is seen small,
+  so a few words in big type.
+  window.splitsmith.data:
+    thumbnail  { title, lines[] }  the video's title and the lines under it
+    shooters[] { label, accent, club, logo }
+    brand      { logo, line }  your brand, when the export draws it
+    event      { logo }        the event's logo, when the match has one
+  A key the thumbnail does not carry is absent: test for it.
+  Guide: docs/looks/authoring.md#the-thumbnail
+-->
+<script>
+  document.write('<style>' + window.splitsmith.engine.css + '</style>');
+</script>
+<style>
+  html, body { margin: 0; background: transparent; overflow: hidden; width: 100vw; height: 100vh; }
+  #shade { position: absolute; left: 0; right: 0; bottom: 0; height: 58%;
+           background: linear-gradient(to bottom, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.82) 45%); }
+  #block { position: absolute; left: 5vh; right: 5vh; bottom: 6vh; display: flex; flex-direction: column; gap: 1.6vh; }
+  #rule { height: 1.2vh; width: 18vh; border-radius: 0.6vh; }
+  #title { font-family: "Splitsmith Display", sans-serif; font-weight: 700; font-size: 15vh; line-height: 0.95;
+           text-transform: uppercase; }
+  .line { font-family: "Splitsmith Mono", monospace; font-size: 5vh; font-weight: 700; white-space: nowrap; }
+  #corner { position: absolute; top: 4vh; right: 4vh; display: flex; gap: 2vh; }
+  #corner img { height: 16vh; max-width: 30vh; object-fit: scale-down; }
+  #brand { position: absolute; top: 4vh; left: 4vh; display: flex; align-items: center; gap: 1.6vh;
+           font-family: "Splitsmith Mono", monospace; font-size: 3.6vh; }
+  #brand img { height: 12vh; max-width: 28vh; object-fit: scale-down; }
+</style>
+</head>
+<body>
+<div id="shade"></div>
+<div id="block"><div id="rule"></div><div id="title"></div></div>
+<div id="corner"></div>
+<script>
+  var S = window.splitsmith, D = S.data, T = S.theme, TH = D.thumbnail || {};
+  var shooters = D.shooters || [];
+  var $ = function (id) { return document.getElementById(id); };
+
+  $('title').textContent = TH.title || '';
+  $('title').style.color = T.ink;
+  $('rule').style.background = (shooters[0] && shooters[0].accent) || T.accent;
+  (TH.lines || []).forEach(function (text) {
+    var line = document.createElement('div');
+    line.className = 'line';
+    line.textContent = text;
+    line.style.color = T.ink_2;
+    $('block').appendChild(line);
+  });
+  // The shooters' logos top right; else the event's.
+  var logos = shooters.map(function (s) { return s.logo; }).filter(Boolean);
+  if (!logos.length && D.event && D.event.logo) logos = [D.event.logo];
+  logos.slice(0, 3).forEach(function (src) {
+    var img = document.createElement('img');
+    img.src = src;
+    $('corner').appendChild(img);
+  });
+  if (D.brand) {
+    var brand = document.createElement('div');
+    brand.id = 'brand';
+    brand.style.color = T.ink;
+    if (D.brand.logo) { var logo = document.createElement('img'); logo.src = D.brand.logo; brand.appendChild(logo); }
+    if (D.brand.line) { var span = document.createElement('span'); span.textContent = D.brand.line; brand.appendChild(span); }
+    document.body.appendChild(brand);
+  }
+
+  // Two lines of title at most: count the lines the text wraps to (a Range
+  // reads the text, not the box) and shrink until there are two.
+  function lines(el) {
+    var range = document.createRange();
+    range.selectNodeContents(el);
+    var tops = {};
+    Array.prototype.forEach.call(range.getClientRects(), function (r) { tops[Math.round(r.top)] = true; });
+    return Object.keys(tops).length;
+  }
+  window.__splitsmithFit = function () {
+    var title = $('title'), size = parseFloat(getComputedStyle(title).fontSize);
+    while (lines(title) > 2 && size > S.engine.min_font_size) {
+      size -= 2;
+      title.style.fontSize = size + 'px';
+    }
+  };
+</script>
+</body>
+</html>

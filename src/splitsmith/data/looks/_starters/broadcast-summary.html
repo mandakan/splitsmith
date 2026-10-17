@@ -20,8 +20,8 @@
                static / moving (the same, with confirmed movement),
                reloads {count, avg, exposed}, rounds, min_rounds, dq.
                A figure that was never read is null.
-    stage      the overlay's stage data with the beep at 0: shots[], events[],
-               reloads[], stage_time, rounds
+    stage      the overlay's stage data with the beep at 0: shots[], events[]
+               (draw, movement, reload, activation), reloads[], stage_time, rounds
     scoring, ammo, bursts  as an overlay gets them (asked for above)
     safe_area  on an upright video
   Guide: docs/looks/authoring.md#summaries
@@ -47,6 +47,8 @@
   #timeline { position: relative; height: 3vh; border-radius: 0.6vh; overflow: hidden; margin-bottom: 1.4vh; }
   #timeline i { position: absolute; top: 0; bottom: 0; opacity: 0.85; }
   #timeline b { position: absolute; top: 15%; bottom: 15%; width: 0.3vh; }
+  #legend { display: flex; flex-wrap: wrap; gap: 0.6vh 2.4vh; font-size: 1.9vh; margin-bottom: 1.4vh; }
+  #legend i { display: inline-block; width: 1.4vh; height: 1.4vh; border-radius: 0.3vh; margin-right: 0.7vh; vertical-align: -0.15vh; }
   #notes { font-size: 1.8vh; opacity: 0.85; white-space: normal; }
   body.safe #board { top: 3vh; left: 2vh; transform: none; width: calc(100vw - 4vh - var(--safe-right)); padding: 2vh; }
   body.safe .figs { grid-template-columns: repeat(3, 1fr); gap: 1vh 1.4vh; }
@@ -61,6 +63,7 @@
   <div class="figs" id="grid"></div>
   <div id="counts"></div>
   <div id="timeline"></div>
+  <div id="legend"></div>
   <div id="notes"></div>
 </div>
 <script>
@@ -91,6 +94,7 @@
     ['Static avg', F.static && F.static.avg, two],
     ['Moving avg', F.moving && F.moving.avg, two],
     ['Reloads', F.reloads && F.reloads.count, function (v) { return String(Math.round(v)); }],
+    ['Reload avg', F.reloads && F.reloads.avg, function (v) { return two(v) + 's'; }],
     ['Exposed reload', F.reloads && F.reloads.exposed, function (v) { return two(v) + 's'; }],
     ['Rounds', F.rounds, function (v) { return Math.round(v) + (F.min_rounds ? ' / ' + F.min_rounds : ''); }]
   ].filter(function (c) { return c[1] != null; });
@@ -104,6 +108,10 @@
     return '<span style="color:' + colour[k] + '">' + k + ' ' + F.counts[k] + '</span>';
   }).join('') + (F.dq ? '<span style="color:' + T.accent + '">DQ</span>' : '');
 
+  // A region's colour: the theme's own for draw, movement and reload; an
+  // activation in ink_2, the neutral the app draws it in.
+  var REGION_COLOUR = { draw: T.draw, movement: T.movement, reload: T.reload, activation: T.ink_2 };
+
   // The run itself, from data.stage: regions as bands, shots as ticks.
   var span = Math.max(0.1, stage.stage_time);
   var line = $('timeline');
@@ -113,9 +121,23 @@
     var band = document.createElement('i');
     band.style.left = x(e.start) + '%';
     band.style.width = Math.max(0.5, x(e.end) - x(e.start)) + '%';
-    band.style.background = ({draw: T.draw, movement: T.movement, reload: T.reload})[e.kind] || T.muted;
+    band.style.background = REGION_COLOUR[e.kind] || T.muted;
     line.appendChild(band);
   });
+
+  // The legend: each kind of region the stage has, in its colour, with what
+  // it took. The draw is the Draw figure; the rest are counts and time.
+  var legend = [];
+  ['draw', 'movement', 'reload', 'activation'].forEach(function (kind) {
+    var mine = stage.events.filter(function (e) { return e.kind === kind; });
+    if (!mine.length) return;
+    var total = mine.reduce(function (s, e) { return s + (e.end - e.start); }, 0);
+    var text = kind === 'draw' ? 'Draw ' + two(F.draw != null ? F.draw : total)
+      : ({ movement: 'Moving', reload: 'Reload', activation: 'Activation' })[kind] + ' ' + mine.length + ' x, ' +
+        total.toFixed(1) + 's';
+    legend.push('<span><i style="background:' + REGION_COLOUR[kind] + '"></i>' + text + '</span>');
+  });
+  $('legend').innerHTML = legend.join('');
   stage.shots.forEach(function (shot) {
     var tick = document.createElement('b');
     tick.style.left = x(shot.t) + '%';

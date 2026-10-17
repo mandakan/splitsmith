@@ -147,6 +147,35 @@ def test_new_from_a_starter_is_a_loadable_look_with_the_starter_in_its_slots(
     ).read_text(encoding="utf-8")
 
 
+def test_the_broadcast_starter_fills_every_slot(user_dir: Path) -> None:
+    """The reference Look: every slot a template can draw."""
+    look_tools.new_look("mine", starter="broadcast")
+    assert set(looks.load_look("mine").manifest.slots) == {
+        "title_page",
+        "slate",
+        "lower_third",
+        "closing",
+        "thumbnail",
+        "overlay",
+        "summary",
+        "match_summary",
+        "transition",
+    }
+
+
+def test_the_shipped_broadcast_look_is_the_broadcast_starter() -> None:
+    """The shipped Look draws the starter's templates byte for byte, so the
+    copy a user starts from is the one the Export page shows."""
+    shipped = looks.shipped_looks_dir() / "broadcast"
+    starters = looks.shipped_looks_dir() / "_starters"
+    files = sorted(p.name for p in shipped.glob("*.html"))
+    assert files == sorted(p.name for p in starters.glob("broadcast-*.html"))
+    for name in files:
+        assert (shipped / name).read_bytes() == (starters / name).read_bytes(), name
+    manifest = json.loads((shipped / "look.json").read_text(encoding="utf-8"))
+    assert manifest["slots"] == look_tools._STARTER_SLOTS["broadcast"]
+
+
 def test_new_refuses_an_existing_look_a_shipped_name_and_a_bad_name(user_dir: Path) -> None:
     look_tools.new_look("club", from_look="clean")
     with pytest.raises(look_tools.LookToolError, match="already exists"):

@@ -93,10 +93,12 @@ _STARTER_SLOTS: dict[str, dict[str, object]] = {
         "title_page": "broadcast-card.html",
         "slate": "broadcast-card.html",
         "lower_third": "broadcast-card.html",
-        "closing": "broadcast-card.html",
+        "closing": {"default": "broadcast-card.html", "end-screen": "broadcast-card.html"},
+        "thumbnail": "broadcast-thumbnail.html",
         OVERLAY_SLOT: {"broadcast": "broadcast-hud.html"},
         "summary": {"results": "broadcast-summary.html"},
         "match_summary": {"table": "broadcast-match.html"},
+        STING_SLOT: {"push": "broadcast-sting.html"},
     },
 }
 

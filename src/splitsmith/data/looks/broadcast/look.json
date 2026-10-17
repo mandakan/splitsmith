@@ -1,0 +1,107 @@
+{
+  "accent_series": [
+    "#3b82f6",
+    "#fbbf24",
+    "#4ade80",
+    "#f472b6",
+    "#c084fc",
+    "#2dd4bf"
+  ],
+  "colors": {
+    "accent": [
+      59,
+      130,
+      246
+    ],
+    "accent_fill": [
+      37,
+      99,
+      235
+    ],
+    "accent_text": [
+      191,
+      219,
+      254
+    ],
+    "ink": [
+      248,
+      250,
+      252
+    ],
+    "ink_2": [
+      203,
+      213,
+      225
+    ],
+    "muted": [
+      148,
+      163,
+      184
+    ],
+    "rule": [
+      30,
+      41,
+      59
+    ],
+    "split": [
+      251,
+      191,
+      36
+    ],
+    "split_good": [
+      74,
+      222,
+      128
+    ],
+    "split_slow": [
+      255,
+      45,
+      45
+    ],
+    "stroke": [
+      2,
+      6,
+      23
+    ],
+    "subtle": [
+      100,
+      116,
+      139
+    ],
+    "surface": [
+      15,
+      23,
+      42
+    ]
+  },
+  "fonts": {
+    "display": "Antonio",
+    "mono": "JetBrains Mono",
+    "sans": "Geist"
+  },
+  "label": "Broadcast",
+  "name": "broadcast",
+  "schema_version": 1,
+  "slots": {
+    "closing": {
+      "default": "broadcast-card.html",
+      "end-screen": "broadcast-card.html"
+    },
+    "lower_third": "broadcast-card.html",
+    "match_summary": {
+      "table": "broadcast-match.html"
+    },
+    "overlay": {
+      "broadcast": "broadcast-hud.html"
+    },
+    "slate": "broadcast-card.html",
+    "summary": {
+      "results": "broadcast-summary.html"
+    },
+    "thumbnail": "broadcast-thumbnail.html",
+    "title_page": "broadcast-card.html",
+    "transition": {
+      "push": "broadcast-sting.html"
+    }
+  }
+}

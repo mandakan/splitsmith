@@ -1,0 +1,224 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="splitsmith-positions" content="bottom-left,top-left">
+<meta name="splitsmith-data" content="scoring,ammo,bursts">
+<title>starter: broadcast overlay</title>
+<!--
+  A sports-broadcast overlay that uses every piece of data an overlay
+  style can read. Use it as the reference; delete what your style does
+  not need.
+
+  The two hooks:
+    seek(t)    draw the overlay at t seconds of clip time
+    settle()   seconds the overlay keeps moving after the last shot
+
+  The meta tags above:
+    splitsmith-positions  where this style can sit, its default first
+    splitsmith-data       opt-in data: scoring, ammo, bursts
+
+  window.splitsmith.data:
+    stage.beep, stage.stage_time, stage.rounds
+    stage.shots[]      t (clip seconds), split, cls, label ("Draw", ...),
+                       tier ("good" / "normal" / "slow" / null), moving
+    stage.events[]     confirmed regions: kind (draw, movement, reload,
+                       activation), start, end (clip seconds)
+    stage.reloads[]    start, end, duration, exposed
+    options            speed_colors, class_labels, landing, reload_chip,
+                       stage_bar, position (draw nothing a toggle turns off)
+    safe_area          bottom, right, right_top: only on an upright video
+    scoring            name, number, division, min_rounds, hit_factor,
+                       stage_pct, points, procedurals, totals {A,C,D,M,NS},
+                       spreads {even, fast, moving, end}: there is no
+                       per-shot score, so each is a guess at which shot took
+                       which hit (hits[], ns, totals) ending on the scorecard
+    ammo               capacity, start, per_shot[], refills[] {t, rounds}, ok
+                       (null for a division with no magazine capacity)
+    bursts             bursts[] {first, last, shots, mean_split, min_split},
+                       shot_burst[] (each shot's string)
+  window.splitsmith.theme holds the Look's colours.
+  Guide: docs/looks/authoring.md#overlay-styles
+-->
+<script>
+  document.write('<style>' + window.splitsmith.engine.css + '</style>');
+</script>
+<style>
+  html, body { margin: 0; background: transparent; overflow: hidden; }
+  #hud { position: absolute; display: flex; flex-direction: column; gap: 0.8vh; max-width: calc(100vw - 6vh); font-family: "Splitsmith Mono", monospace; white-space: nowrap; }
+  #hud.bottom-left { left: 3vh; bottom: 3vh; }
+  #hud.top-left { left: 3vh; top: 3vh; }
+  .bar { display: flex; flex-wrap: wrap; align-items: stretch; border-radius: 0.6vh; overflow: hidden; box-shadow: 0 0.4vh 1.6vh rgba(0, 0, 0, 0.45); }
+  .box { display: flex; flex-direction: column; justify-content: center; padding: 0.7vh 1.3vh; }
+  .cap { font-size: 1.4vh; letter-spacing: 0.12em; text-transform: uppercase; opacity: 0.7; }
+  .val { font-size: 3vh; font-weight: 700; line-height: 1.1; }
+  .small { font-size: 2.2vh; font-weight: 700; }
+  #title { font-family: "Splitsmith Display", sans-serif; font-size: 3vh; font-weight: 700; }
+  .hits { display: flex; gap: 1.1vh; }
+  #track { position: relative; height: 1.2vh; width: 46vh; border-radius: 0.6vh; overflow: hidden; }
+  #track i { position: absolute; top: 0; bottom: 0; }
+  #track b { position: absolute; top: 0; bottom: 0; width: 0.25vh; }
+  #chip, #landing { align-self: flex-start; }
+  body.safe #hud.bottom-left { bottom: calc(var(--safe-bottom) + 2vh); }
+  body.safe #hud { max-width: calc(100vw - 6vh - var(--safe-right)); }
+  body.safe .bar { flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<div id="hud">
+  <div class="bar" id="landing"><div class="box" id="result"></div></div>
+  <div class="bar" id="chip"><div class="box"><span class="cap">Reload</span><span class="small" id="reload"></span></div></div>
+  <div id="track"></div>
+  <div class="bar" id="main">
+    <div class="box" id="titleCell"><span class="cap" id="sub"></span><span id="title"></span></div>
+    <div class="box"><span class="cap">Time</span><span class="val" id="clock">0.00</span></div>
+    <div class="box"><span class="cap">Rounds</span><span class="val" id="rounds"></span></div>
+    <div class="box" id="magCell"><span class="cap" id="magCap">Mag</span><span class="val" id="mag"></span></div>
+    <div class="box"><span class="cap" id="splitCap">Split</span><span class="val" id="split">-</span></div>
+    <div class="box" id="stringCell"><span class="cap">String</span><span class="val" id="string">-</span></div>
+    <div class="box" id="hitsCell"><span class="cap">Hits (est.)</span><span class="val hits" id="hits"></span></div>
+    <div class="box" id="nowCell"><span class="cap">Now</span><span class="val" id="now"></span></div>
+  </div>
+</div>
+<script>
+  var S = window.splitsmith, D = S.data, T = S.theme;
+  var stage = D.stage, shots = stage.shots, opt = D.options;
+  var scoring = D.scoring || {}, ammo = D.ammo, bursts = D.bursts;
+  var SPREAD = 'even';  // or fast, moving, end: four guesses at the same totals
+  var spread = scoring.spreads ? scoring.spreads[SPREAD] : null;
+  var LANDING = 0.6;    // seconds the result card takes to come up
+  var $ = function (id) { return document.getElementById(id); };
+  if (D.safe_area) document.body.classList.add('safe');
+
+  $('hud').className = opt.position || 'bottom-left';
+  ['main', 'landing', 'chip'].forEach(function (id) { $(id).style.background = T.surface; $(id).style.color = T.ink; });
+  $('titleCell').style.background = T.accent;
+  $('title').textContent = scoring.name || 'Stage';
+  $('sub').textContent = [scoring.number ? 'Stage ' + scoring.number : null, scoring.division].filter(Boolean).join(' / ');
+  if (!ammo) $('magCell').style.display = 'none';
+  if (!bursts) $('stringCell').style.display = 'none';
+  if (!spread) $('hitsCell').style.display = 'none';
+
+  // A region's colour: the theme's own for draw, movement and reload; an
+  // activation in ink_2, the neutral the app draws it in.
+  var REGION_COLOUR = { draw: T.draw, movement: T.movement, reload: T.reload, activation: T.ink_2 };
+  var REGION_LABEL = { draw: 'Draw', movement: 'Moving', reload: 'Reload', activation: 'Activation' };
+
+  // The stage bar: regions as bands, shots as ticks (options.stage_bar).
+  var track = $('track');
+  var span = Math.max(0.1, stage.stage_time);
+  function x(t) { return Math.max(0, Math.min(100, 100 * (t - stage.beep) / span)); }
+  if (opt.stage_bar) {
+    track.style.background = T.rule;
+    stage.events.forEach(function (e) {
+      var band = document.createElement('i');
+      band.style.left = x(e.start) + '%';
+      band.style.width = Math.max(0.5, x(e.end) - x(e.start)) + '%';
+      band.style.background = REGION_COLOUR[e.kind] || T.muted;
+      band.style.opacity = '0.8';
+      track.appendChild(band);
+    });
+  } else {
+    track.style.display = 'none';
+  }
+  if (!opt.stage_bar) $('nowCell').style.display = 'none';
+
+  // The region underway at t, with how long it has run: a reload or a draw
+  // over a movement reads "on the move".
+  function regionAt(t) {
+    var on = stage.events.filter(function (e) { return e.start <= t && t <= e.end; });
+    if (!on.length) return null;
+    var order = ['reload', 'draw', 'activation', 'movement'];
+    on.sort(function (a, b) { return order.indexOf(a.kind) - order.indexOf(b.kind); });
+    var first = on[0];
+    var moving = first.kind !== 'movement' && on.some(function (e) { return e.kind === 'movement'; });
+    return { kind: first.kind, label: REGION_LABEL[first.kind] + (moving ? ' on the move' : ''), ran: t - first.start };
+  }
+
+  function tierColour(shot) {
+    if (!opt.speed_colors || !shot.tier) return T.split;
+    return shot.tier === 'good' ? T.split_good : shot.tier === 'slow' ? T.accent : T.split;
+  }
+
+  window.settle = function () { return opt.landing ? LANDING : 0; };
+
+  window.seek = function (t) {
+    var n = 0;
+    while (n < shots.length && shots[n].t <= t) n++;
+    var last = n ? shots[n - 1] : null;
+    var done = n === shots.length && n > 0;
+
+    $('clock').textContent = (done ? stage.stage_time : Math.max(0, t - stage.beep)).toFixed(2);
+    var need = scoring.min_rounds ? ' / ' + scoring.min_rounds : ' / ' + stage.rounds;
+    $('rounds').textContent = n + need;
+
+    if (last) {
+      $('split').textContent = last.split.toFixed(2) + (last.moving ? ' >' : '');
+      $('split').style.color = tierColour(last);
+      $('splitCap').textContent = opt.class_labels && last.label ? last.label : 'Split';
+    }
+
+    if (ammo) {
+      var left = n ? ammo.per_shot[n - 1] : ammo.start;
+      var lastT = last ? last.t : -1;
+      ammo.refills.forEach(function (r) { if (r.t <= t && r.t >= lastT) left = r.rounds; });
+      $('mag').textContent = String(Math.max(0, left)) + '/' + ammo.capacity;
+      $('mag').style.color = left <= 2 ? T.split : T.ink;
+      $('magCap').textContent = ammo.ok ? 'Mag' : 'Mag (check reloads)';
+    }
+
+    if (bursts && last) {
+      var b = bursts.bursts[bursts.shot_burst[n - 1]];
+      var nth = n - b.first;
+      $('string').textContent = nth + '/' + b.shots + (b.mean_split != null ? ' ' + b.mean_split.toFixed(2) : '');
+    }
+
+    if (spread) {
+      var tot = n ? spread[n - 1].totals : { A: 0, C: 0, D: 0, M: 0, NS: 0 };
+      var colour = { A: T.split_good, C: T.ink, D: T.split, M: T.accent, NS: T.accent };
+      $('hits').innerHTML = ['A', 'C', 'D', 'M', 'NS'].map(function (k) {
+        return '<span style="color:' + colour[k] + '">' + k + tot[k] + '</span>';
+      }).join('');
+    }
+
+    if (opt.stage_bar) {
+      Array.prototype.slice.call(track.querySelectorAll('b')).forEach(function (el) { el.remove(); });
+      for (var i = 0; i < n; i++) {
+        var tick = document.createElement('b');
+        tick.style.left = x(shots[i].t) + '%';
+        tick.style.background = tierColour(shots[i]);
+        track.appendChild(tick);
+      }
+    }
+
+    // The region underway (options.stage_bar), in its colour.
+    if (opt.stage_bar) {
+      var region = regionAt(t);
+      $('nowCell').style.display = region ? 'flex' : 'none';
+      if (region) {
+        $('now').textContent = region.label + ' ' + region.ran.toFixed(1);
+        $('now').style.color = REGION_COLOUR[region.kind] || T.ink;
+      }
+    }
+
+    // The reload chip (options.reload_chip): up through a confirmed reload.
+    var reload = opt.reload_chip ? stage.reloads.filter(function (r) { return r.start <= t && t <= r.end + 0.4; })[0] : null;
+    $('chip').style.display = reload ? 'flex' : 'none';
+    if (reload) $('reload').textContent = reload.duration.toFixed(2) + 's / ' + reload.exposed.toFixed(2) + 's exposed';
+
+    // The landing (options.landing): the scorecard once the last shot is in.
+    var up = done && opt.landing ? Math.min(1, (t - last.t) / LANDING) : 0;
+    $('landing').style.display = up > 0 ? 'flex' : 'none';
+    $('landing').style.opacity = String(up);
+    if (up > 0) {
+      var parts = [];
+      if (scoring.hit_factor != null) parts.push('HF ' + scoring.hit_factor.toFixed(2));
+      if (scoring.stage_pct != null) parts.push(scoring.stage_pct.toFixed(1) + '%');
+      if (scoring.points != null) parts.push(scoring.points + ' pts');
+      if (scoring.procedurals) parts.push(scoring.procedurals + ' P');
+      $('result').innerHTML = '<span class="small">' + (parts.join('  ') || 'Done') + '</span>';
+    }
+  };
+</script>
+</body>
+</html>

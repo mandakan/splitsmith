@@ -22,7 +22,8 @@
     stage.beep, stage.stage_time, stage.rounds
     stage.shots[]      t (clip seconds), split, cls, label ("Draw", ...),
                        tier ("good" / "normal" / "slow" / null), moving
-    stage.events[]     confirmed regions: kind, start, end (clip seconds)
+    stage.events[]     confirmed regions: kind (draw, movement, reload,
+                       activation), start, end (clip seconds)
     stage.reloads[]    start, end, duration, exposed
     options            speed_colors, class_labels, landing, reload_chip,
                        stage_bar, position (draw nothing a toggle turns off)
@@ -76,6 +77,7 @@
     <div class="box"><span class="cap" id="splitCap">Split</span><span class="val" id="split">-</span></div>
     <div class="box" id="stringCell"><span class="cap">String</span><span class="val" id="string">-</span></div>
     <div class="box" id="hitsCell"><span class="cap">Hits (est.)</span><span class="val hits" id="hits"></span></div>
+    <div class="box" id="nowCell"><span class="cap">Now</span><span class="val" id="now"></span></div>
   </div>
 </div>
 <script>
@@ -97,6 +99,11 @@
   if (!bursts) $('stringCell').style.display = 'none';
   if (!spread) $('hitsCell').style.display = 'none';
 
+  // A region's colour: the theme's own for draw, movement and reload; an
+  // activation in ink_2, the neutral the app draws it in.
+  var REGION_COLOUR = { draw: T.draw, movement: T.movement, reload: T.reload, activation: T.ink_2 };
+  var REGION_LABEL = { draw: 'Draw', movement: 'Moving', reload: 'Reload', activation: 'Activation' };
+
   // The stage bar: regions as bands, shots as ticks (options.stage_bar).
   var track = $('track');
   var span = Math.max(0.1, stage.stage_time);
@@ -107,12 +114,25 @@
       var band = document.createElement('i');
       band.style.left = x(e.start) + '%';
       band.style.width = Math.max(0.5, x(e.end) - x(e.start)) + '%';
-      band.style.background = ({draw: T.draw, movement: T.movement, reload: T.reload})[e.kind] || T.muted;
+      band.style.background = REGION_COLOUR[e.kind] || T.muted;
       band.style.opacity = '0.8';
       track.appendChild(band);
     });
   } else {
     track.style.display = 'none';
+  }
+  if (!opt.stage_bar) $('nowCell').style.display = 'none';
+
+  // The region underway at t, with how long it has run: a reload or a draw
+  // over a movement reads "on the move".
+  function regionAt(t) {
+    var on = stage.events.filter(function (e) { return e.start <= t && t <= e.end; });
+    if (!on.length) return null;
+    var order = ['reload', 'draw', 'activation', 'movement'];
+    on.sort(function (a, b) { return order.indexOf(a.kind) - order.indexOf(b.kind); });
+    var first = on[0];
+    var moving = first.kind !== 'movement' && on.some(function (e) { return e.kind === 'movement'; });
+    return { kind: first.kind, label: REGION_LABEL[first.kind] + (moving ? ' on the move' : ''), ran: t - first.start };
   }
 
   function tierColour(shot) {
@@ -168,6 +188,16 @@
         tick.style.left = x(shots[i].t) + '%';
         tick.style.background = tierColour(shots[i]);
         track.appendChild(tick);
+      }
+    }
+
+    // The region underway (options.stage_bar), in its colour.
+    if (opt.stage_bar) {
+      var region = regionAt(t);
+      $('nowCell').style.display = region ? 'flex' : 'none';
+      if (region) {
+        $('now').textContent = region.label + ' ' + region.ran.toFixed(1);
+        $('now').style.color = REGION_COLOUR[region.kind] || T.ink;
       }
     }
 

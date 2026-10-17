@@ -65,12 +65,21 @@ def test_a_template_without_the_tag_declares_nothing(tmp_path: Path) -> None:
 
 def test_no_shipped_template_declares_a_key() -> None:
     """What keeps every shipped HUD's context, digest and cached MOV as they
-    were: they get no extras at all."""
+    were: they get no extras at all. The broadcast Look is the reference
+    for every piece of data a template can read and opts in on purpose."""
     # The starters are not shipped Looks: they are copied into a Look of your own.
-    templates = sorted(t for t in looks.shipped_looks_dir().rglob("*.html") if "_starters" not in t.parts)
+    templates = sorted(
+        t for t in looks.shipped_looks_dir().rglob("*.html") if "_starters" not in t.parts and "broadcast" not in t.parts
+    )
     assert templates
     for template in templates:
         assert declared_data(template) == (), template.name
+    broadcast = looks.shipped_looks_dir() / "broadcast"
+    declaring = {t.name: declared_data(t) for t in broadcast.glob("*.html") if declared_data(t)}
+    assert declaring == {
+        "broadcast-hud.html": ("scoring", "ammo", "bursts"),
+        "broadcast-summary.html": ("scoring", "ammo", "bursts"),
+    }
 
 
 def test_nothing_declared_adds_no_key() -> None:

@@ -10,7 +10,8 @@
 
   window.splitsmith.data:
     card       { slot ("title_page", "slate", "lower_third", "closing"),
-                 variant, text (the match or the stage name),
+                 variant ("end-screen" lays the closing card out in the
+                 left two fifths), text (the match or the stage name),
                  info (the lines under it), duration_seconds }
     shooters[] { label, accent, club, logo (a file URL or null) }
     brand      { logo, line }  your brand: title page and closing card only
@@ -29,6 +30,11 @@
   #card { position: absolute; display: flex; flex-direction: column; gap: 1.2vh; }
   #card.full { left: 0; right: 0; top: 0; bottom: 0; align-items: center; justify-content: center; text-align: center; }
   #card.band { left: 4vh; bottom: 12vh; padding: 1.6vh 2.6vh; border-radius: 0.8vh; }
+  /* The closing card's end-screen style: everything in the left two fifths,
+     so YouTube's end-screen elements have the right of the frame. */
+  #card.end { left: 6vh; top: 0; bottom: 0; width: 38vw; justify-content: center; align-items: flex-start; text-align: left; }
+  #card.end #shooters { justify-content: flex-start; flex-wrap: wrap; }
+  body.end #credit { left: 6vh; right: auto; text-align: left; }
   #text { font-family: "Splitsmith Display", sans-serif; font-weight: 700; line-height: 1; white-space: nowrap; }
   .info { font-family: "Splitsmith Mono", monospace; font-size: 2.6vh; letter-spacing: 0.06em; white-space: nowrap; }
   #shooters { display: flex; gap: 3vh; justify-content: center; margin-top: 1vh; }
@@ -62,7 +68,10 @@
     return n;
   }
 
-  el.className = lower ? 'band' : 'full';
+  // The closing card's end-screen style (variant "end-screen").
+  var endScreen = card.slot === 'closing' && card.variant === 'end-screen';
+  el.className = lower ? 'band' : endScreen ? 'end' : 'full';
+  if (endScreen) document.body.classList.add('end');
   if (lower) { el.style.background = T.surface; el.style.color = T.ink; }
   if (D.event) {
     var ev = node('img'); ev.id = 'event'; ev.src = D.event.logo; el.appendChild(ev);
@@ -115,7 +124,9 @@
   window.__splitsmithFit = function () {
     var size = parseFloat(title.style.fontSize) * S.size.height / 100;
     title.style.fontSize = size + 'px';
-    var room = S.size.width * (lower ? 0.6 : 0.9);
+    // On an upright video the button column on the right is not room.
+    var safeRight = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--safe-right')) || 0;
+    var room = (S.size.width - safeRight) * (lower ? 0.6 : endScreen ? 0.38 : 0.9);
     while (title.scrollWidth > room && size > S.engine.min_font_size) {
       size -= 1;
       title.style.fontSize = size + 'px';

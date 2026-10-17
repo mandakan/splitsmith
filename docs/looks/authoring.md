@@ -61,12 +61,22 @@ Seven starters ship. Six are each a short commented template for one slot:
 | `hud` | An overlay style: the clock, the count and the last split in a corner |
 | `summary` | A stage summary: the stage's name and its time, hit factor, draw and average split |
 
-The seventh, `broadcast`, is a whole Look and the reference for the data:
-one animated card for the title page, slates, lower third and closing card,
-an overlay style (`broadcast`), a stage summary (`results`) and a match
-summary (`table`), between them reading every field a template can be
-given, each one commented where it is read. Start there to see what a field
-holds, then delete what your Look does not need.
+The seventh, `broadcast`, is a whole Look and the reference for the data. It
+fills every slot a template can draw:
+
+- **Cards:** one animated card for the title page, slates, lower third and
+  closing card, with an `end-screen` closing style.
+- **Overlay style** (`broadcast`): its Now cell names the region underway,
+  draw, movement, reload or activation, on or off the move.
+- **Stage summary** (`results`), with a legend of the stage's regions.
+- **Match summary** (`table`).
+- **YouTube thumbnail.**
+- **Sting** (`push`).
+
+Between them they read every field a template can be given, each commented
+where it is read. Start there to see what a field holds, then delete what your
+Look does not need. The same templates ship as the **Broadcast** Look, so the
+Export page shows all of it before you copy anything.
 
 ## look.json
 
