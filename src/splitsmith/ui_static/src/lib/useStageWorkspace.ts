@@ -432,7 +432,7 @@ export interface StageView {
   tFromBeep: number;
   /** The audit audio's beep in its own clip, else the coach anchor. */
   audioBeep: number;
-  /** Regions are desktop-owned: a mirror (no edit capability) and the phone read them. */
+  /** Regions are desktop-owned: a mirror without the edit capability reads them. */
   eventsReadOnly: boolean;
   selectedEvent: StageEvent | null;
   prevStage: number | null;
@@ -474,7 +474,7 @@ export function deriveStageView(ws: StageWorkspace, slug: string, stage: number)
   const stream = primary ? bigStream(primary, ws.scrub, slug, stage) : null;
   const playingScrub = stream?.playingScrub ?? false;
   const streamUrl = stream?.url ?? null;
-  const eventsReadOnly = ws.isMobile || capabilityDenied(project.capabilities, "edit");
+  const eventsReadOnly = capabilityDenied(project.capabilities, "edit");
   const { events, selectedId } = ws.regions;
   const selectedEvent = eventsReadOnly ? null : (events.find((e) => e.id === selectedId) ?? null);
   const stageSeconds = project.stages.find((s) => s.stage_number === stage)?.time_seconds ?? 0;

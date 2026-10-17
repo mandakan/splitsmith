@@ -15,4 +15,13 @@ describe("scrubSource", () => {
   ] as const)("%s", (_name, args, expected) => {
     expect(scrubSource(args)).toEqual(expected);
   });
+
+  it("plays the rendition on a phone even when full resolution is on", () => {
+    expect(scrubSource({ ...base, fullRes: true, phone: true })).toEqual({ kind: "scrub", version: "w1" });
+    expect(scrubSource({ ...base, fullRes: true, phone: false })).toEqual({ kind: "trim", version: "t1" });
+  });
+
+  it("falls back to the trim on a phone when the rendition failed", () => {
+    expect(scrubSource({ ...base, failed: true, phone: true })).toEqual({ kind: "trim", version: "t1" });
+  });
 });

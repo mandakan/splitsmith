@@ -12,6 +12,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, type StageVideo } from "@/lib/api";
 import { useDeploymentMode } from "@/lib/features";
 import { scrubSource, type ScrubChoice } from "@/lib/scrubSource";
+import { useIsMobile } from "@/lib/useIsMobile";
 
 type ScrubVideo = Pick<StageVideo, "path" | "trim_version" | "scrub_version">;
 
@@ -48,6 +49,7 @@ export function useScrubSource() {
     });
   }, []);
 
+  const phone = useIsMobile();
   const markFailed = useCallback((video: ScrubVideo) => {
     const key = failureKey(video);
     setFailed((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
@@ -60,8 +62,9 @@ export function useScrubSource() {
         scrubVersion: video.scrub_version,
         fullRes,
         failed: failed.has(failureKey(video)),
+        phone,
       }),
-    [fullRes, failed],
+    [fullRes, failed, phone],
   );
 
   return { fullRes, available, setFullRes, choose, markFailed };

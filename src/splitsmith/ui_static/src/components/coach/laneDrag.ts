@@ -66,13 +66,15 @@ export function sameEvents(a: StageEvent[], b: StageEvent[]): boolean {
 }
 
 /**
- * One frame of a drag past its threshold. ``t`` is the time under the
- * pointer; ``snap`` applies the shot snap (identity when snapping is off
- * for this gesture: the "Snap to shots" switch, which Alt inverts). Null when
- * the frame changes nothing (a create still shorter than MIN_EVENT_S).
+ * One frame of a gesture: a LaneEditor drag past its threshold, or a phone
+ * edge drag (``lib/edgeDrag``, which has no pointer fields). ``t`` is the
+ * time under the pointer; ``snap`` applies the shot snap (identity when
+ * snapping is off for this gesture: the "Snap to shots" switch, which Alt
+ * inverts). Null when the frame changes nothing (a create still shorter
+ * than MIN_EVENT_S).
  */
 export function dragFrame(
-  drag: Drag,
+  drag: DragInit,
   current: StageEvent[],
   t: number,
   snap: (t: number) => number,
