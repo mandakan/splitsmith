@@ -14773,6 +14773,7 @@ def create_app(
                         capacity=capacity,
                         min_reload_s=cfg.reload_min_s,
                         # A late first shot: the shooter moved before shooting.
+                        draw=True,
                         draw_movement_min_s=cfg.draw_movement_min_s,
                     )
                     if seeded and reseeding:

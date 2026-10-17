@@ -78,6 +78,13 @@ def test_lane_ok(case: dict) -> None:
     validate_lanes(_events(case["events"]))  # no raise
 
 
+def test_a_draw_marker_carries_its_length() -> None:
+    from splitsmith.events import region_marker_label
+
+    draw = StageEvent(id="evt-1", kind="draw", start=1.3, end=2.28, source="manual")
+    assert region_marker_label(draw) == "Draw 0.98"
+
+
 def test_a_region_of_a_kind_this_version_does_not_know_is_skipped_not_fatal() -> None:
     """A newer version may store a kind this one lacks (as ``draw`` was
     once new): the read keeps every region it knows and drops the rest."""
@@ -510,35 +517,50 @@ def test_a_gap_too_short_for_an_inset_movement_is_skipped() -> None:
     assert seed_events([1.0, 1.08], hint_min_s=2.5, capacity=None, movement_gaps=[1.08]) == []
 
 
-def test_a_late_first_shot_gets_a_movement_from_the_beep() -> None:
-    (movement,) = seed_events([2.6, 2.9], hint_min_s=9.0, capacity=None, draw_movement_min_s=2.0)
-    assert (movement.kind, movement.start, movement.end, movement.source) == ("movement", 0.0, 2.5, "auto")
+def _kinds(seeds):
+    return sorted((e.kind, e.start, e.end) for e in seeds)
+
+
+def test_every_first_shot_gets_a_draw_from_the_beep() -> None:
+    (draw,) = seed_events([1.4, 1.7], hint_min_s=9.0, capacity=None, draw=True, draw_movement_min_s=2.0)
+    assert (draw.kind, draw.start, draw.end, draw.source) == ("draw", 0.0, 1.4, "auto")
+
+
+def test_a_late_first_shot_gets_a_movement_beside_the_draw() -> None:
+    seeds = seed_events([2.6, 2.9], hint_min_s=9.0, capacity=None, draw=True, draw_movement_min_s=2.0)
+    assert _kinds(seeds) == [("draw", 0.0, 2.6), ("movement", 0.0, 2.5)]
+    movement = next(e for e in seeds if e.kind == "movement")
     # Inset from the first shot, so it does not read as fired moving.
     assert not shot_is_moving(2.6, [movement.model_copy(update={"source": "manual"})])
+    validate_lanes(seeds)
 
 
-def test_a_standing_draw_gets_no_movement() -> None:
-    assert seed_events([1.4, 1.7], hint_min_s=9.0, capacity=None, draw_movement_min_s=2.0) == []
-    # "Over" the threshold: a first shot exactly on it is a standing draw.
-    assert seed_events([2.0, 2.3], hint_min_s=9.0, capacity=None, draw_movement_min_s=2.0) == []
+def test_a_first_shot_on_the_cutoff_gets_the_draw_only() -> None:
+    seeds = seed_events([2.0, 2.3], hint_min_s=9.0, capacity=None, draw=True, draw_movement_min_s=2.0)
+    assert _kinds(seeds) == [("draw", 0.0, 2.0)]
 
 
-def test_no_draw_threshold_proposes_no_draw_movement() -> None:
+def test_the_movement_needs_no_draw_and_the_draw_no_cutoff() -> None:
+    assert _kinds(seed_events([2.6, 2.9], hint_min_s=9.0, capacity=None, draw_movement_min_s=2.0)) == [
+        ("movement", 0.0, 2.5)
+    ]
+    assert _kinds(seed_events([2.6, 2.9], hint_min_s=9.0, capacity=None, draw=True)) == [("draw", 0.0, 2.6)]
     assert seed_events([3.0, 3.3], hint_min_s=9.0, capacity=None) == []
 
 
-def test_a_pre_beep_first_shot_gets_no_draw_movement() -> None:
-    assert seed_events([-0.2, 3.0], hint_min_s=9.0, capacity=None, draw_movement_min_s=2.0) == []
+def test_a_pre_beep_first_shot_gets_no_draw_and_no_draw_movement() -> None:
+    assert seed_events([-0.2, 3.0], hint_min_s=9.0, capacity=None, draw=True, draw_movement_min_s=2.0) == []
 
 
-def test_seed_doc_proposes_the_draw_movement_beside_the_others() -> None:
+def test_seed_doc_proposes_the_draw_and_its_movement_beside_the_others() -> None:
     doc = _classified_doc([(2600, "first_shot"), (2900, "split"), (5200, "movement"), (5500, "split")])
-    assert seed_doc(doc, hint_min_s=9.0, capacity=None, draw_movement_min_s=2.0) is True
+    assert seed_doc(doc, hint_min_s=9.0, capacity=None, draw=True, draw_movement_min_s=2.0) is True
     assert sorted((e["kind"], e["start"], e["end"]) for e in doc["events"]) == [
+        ("draw", 0.0, 2.6),
         ("movement", 0.0, 2.5),
         ("movement", 3.0, 5.1),
     ]
-    assert [e["id"] for e in doc["events"]] == ["evt-1", "evt-2"]
+    assert sorted(e["id"] for e in doc["events"]) == ["evt-1", "evt-2", "evt-3"]
     validate_lanes(_events(doc["events"]))
 
 

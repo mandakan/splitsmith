@@ -31,8 +31,9 @@ EVENTS_SEEDED_FIELD: Final = "events_seeded"
 #: fewest reloads the round count forces, in the longest gaps (version 1,
 #: stored as ``True``, took the first long gap in each magazine's window).
 #: 3: movement proposals over every gap the auto-classifier calls movement.
-#: 4: a movement from the beep when the first shot comes late
-#: (``CoachAutoClassifyConfig.draw_movement_min_s``, 3.0 s).
+#: 4: a draw from the beep to the first shot on every stage, and a movement
+#: over the same span when the first shot comes late
+#: (``CoachAutoClassifyConfig.draw_movement_min_s``, 2.0 s; spec 2026-10-17).
 SEED_VERSION: Final = 4
 #: How far a seeded movement stays in from the shots either side of its gap
 #: (at most a quarter of the gap): ``shot_is_moving`` is inclusive, and a
@@ -124,12 +125,16 @@ def confirmed(events: Sequence[StageEvent]) -> list[StageEvent]:
 
 def region_marker_label(event: StageEvent) -> str:
     """An editor marker's name for a confirmed region: ``Reload 1.42`` /
-    ``Movement`` / ``Activation`` (spec 2026-10-08, part 2). A reload's
-    label carries its duration; the other two kinds don't -- the marker's
-    own duration already shows the span. The FCPXML and FCP7 XML exports
+    ``Draw 0.98`` / ``Movement`` / ``Activation`` (spec 2026-10-08, part 2;
+    draw 2026-10-17). A reload's and a draw's labels carry their duration,
+    the figure each stands for; the others don't -- the marker's own
+    duration already shows the span. The FCPXML and FCP7 XML exports
     both name their region markers through this."""
     if event.kind == "reload":
         return f"Reload {event.end - event.start:.2f}"
+    if event.kind == "draw":
+        # Like a reload, a draw's length is the figure (spec 2026-10-17).
+        return f"Draw {event.end - event.start:.2f}"
     if event.kind == "movement":
         return "Movement"
     return "Activation"
@@ -304,6 +309,7 @@ def seed_events(
     capacity: int | None,
     min_reload_s: float = 0.6,
     movement_gaps: Sequence[float] = (),
+    draw: bool = False,
     draw_movement_min_s: float | None = None,
 ) -> list[StageEvent]:
     """Propose ``reload`` regions, each spanning a whole gap, and
@@ -323,10 +329,12 @@ def seed_events(
     :data:`MOVEMENT_SEED_INSET_S` from both shots so neither reads as fired
     moving. A movement may sit over a reload: a reload on the move.
 
-    The draw: with ``draw_movement_min_s``, a first shot more than that
-    after the beep (a start that moves before it shoots) gets a movement
-    from the beep to the first shot, inset from that shot the same way.
-    Easy to delete when the shooter only drew slowly; ``None`` proposes none.
+    The draw: with ``draw``, a ``draw`` region from the beep to the first
+    shot (the user moves its start to where the hands moved). With
+    ``draw_movement_min_s``, a first shot more than that after the beep (a
+    start that moves before it shoots) also gets a movement over the same
+    span, inset from that shot. Either is one tap to delete or relabel when
+    wrong; ``False`` / ``None`` propose none.
 
     A gap that cannot be a region is never proposed: one that starts before
     the beep (a pre-beep first shot), has no length, or has a time that is
@@ -337,6 +345,8 @@ def seed_events(
     gaps = [times[i + 1] - times[i] for i in range(len(times) - 1)]
     seeds: list[StageEvent] = []
     seeds.extend(_reload_seeds(times, gaps, hint_min_s, capacity, min_reload_s))
+    if draw and times and times[0] >= MIN_EVENT_S:
+        seeds.append(StageEvent(id=next_event_id(seeds), kind="draw", start=0.0, end=times[0], source="auto"))
     if draw_movement_min_s is not None and times and times[0] > draw_movement_min_s and times[0] > 0.0:
         seeds.append(
             StageEvent(
@@ -442,6 +452,7 @@ def seed_doc(
     hint_min_s: float,
     capacity: int | None,
     min_reload_s: float = 0.6,
+    draw: bool = False,
     draw_movement_min_s: float | None = None,
 ) -> bool:
     """Seed once per stage, or again over an earlier seeder's untouched
@@ -464,6 +475,7 @@ def seed_doc(
         capacity=capacity,
         min_reload_s=min_reload_s,
         movement_gaps=movement_gap_ends(doc),
+        draw=draw,
         draw_movement_min_s=draw_movement_min_s,
     )
     if not seeds and not again:

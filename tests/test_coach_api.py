@@ -666,23 +666,24 @@ def test_get_coach_seeds_a_reload_proposal_once(tmp_path: Path) -> None:
     assert body2["events"] == []
 
 
-def test_get_coach_proposes_a_movement_before_a_late_first_shot(tmp_path: Path) -> None:
-    """A first shot more than ``draw_movement_min_s`` (3.0 s) after the beep:
-    the shooter moved before shooting, proposed from the beep to the shot."""
+def test_get_coach_proposes_a_draw_and_a_movement_before_a_late_first_shot(tmp_path: Path) -> None:
+    """A first shot more than ``draw_movement_min_s`` (2.0 s) after the beep:
+    a draw and a movement, both from the beep (spec 2026-10-17)."""
     client, audit_file, base = _bootstrap(tmp_path)
-    _write_shots(audit_file, [3400, 3700, 4000])
+    _write_shots(audit_file, [2400, 2700, 3000])
     body = client.get(f"{base}/shooters/me/stages/1/coach?seed=1").json()
-    assert [(e["kind"], e["start"], e["end"], e["source"]) for e in body["events"]] == [
-        ("movement", 0.0, 3.3, "auto")
+    assert sorted((e["kind"], e["start"], e["end"], e["source"]) for e in body["events"]) == [
+        ("draw", 0.0, 2.4, "auto"),
+        ("movement", 0.0, 2.3, "auto"),
     ]
     assert json.loads(audit_file.read_text(encoding="utf-8"))["events_seeded"] == SEED_VERSION == 4
 
 
-def test_get_coach_proposes_nothing_before_a_slow_standing_draw(tmp_path: Path) -> None:
-    # 2.5 s: past a transition, still a draw (the corpus median is 1.94 s).
+def test_get_coach_proposes_only_a_draw_before_a_standing_draw(tmp_path: Path) -> None:
     client, audit_file, base = _bootstrap(tmp_path)
-    _write_shots(audit_file, [2500, 2800, 3100])
-    assert client.get(f"{base}/shooters/me/stages/1/coach?seed=1").json()["events"] == []
+    _write_shots(audit_file, [1800, 2100, 2400])
+    body = client.get(f"{base}/shooters/me/stages/1/coach?seed=1").json()
+    assert [(e["kind"], e["start"], e["end"]) for e in body["events"]] == [("draw", 0.0, 1.8)]
 
 
 def test_get_coach_without_a_division_seeds_from_the_hint_alone(tmp_path: Path) -> None:
@@ -852,9 +853,10 @@ def test_get_coach_seeds_by_division_capacity_when_no_gap_is_hinted(tmp_path: Pa
     _write_shots(audit_file, shots)
 
     body = client.get(f"{base}/shooters/me/stages/1/coach?seed=1").json()
-    assert [(e["kind"], e["source"]) for e in body["events"]] == [("reload", "auto")]
-    assert body["events"][0]["start"] == pytest.approx(shots[13] / 1000)
-    assert body["events"][0]["end"] == pytest.approx(shots[14] / 1000)
+    reloads = _reloads(body["events"])
+    assert [(e["kind"], e["source"]) for e in reloads] == [("reload", "auto")]
+    assert reloads[0]["start"] == pytest.approx(shots[13] / 1000)
+    assert reloads[0]["end"] == pytest.approx(shots[14] / 1000)
     # A proposal is not a confirmed reload: the warning stands until one is.
     assert body["event_summary"]["capacity_warning"] == "20 shots without a reload"
 
@@ -873,7 +875,7 @@ def test_get_coach_capacity_from_the_scoreboard_files_of_an_older_project(tmp_pa
     client, audit_file, base = _bootstrap(tmp_path, pinned_competitor=727539)  # Production Optics
     _write_shots(audit_file, _po_shots_past_capacity_without_a_hinted_gap())
     body = client.get(f"{base}/shooters/me/stages/1/coach?seed=1").json()
-    assert [e["kind"] for e in body["events"]] == ["reload"]
+    assert [e["kind"] for e in _reloads(body["events"])] == ["reload"]
 
 
 # ---------------------------------------------------------------------------
@@ -1444,7 +1446,9 @@ def test_get_with_seed_persists_proposals_once(tmp_path: Path) -> None:
 def test_get_with_seed_and_nothing_to_propose_writes_nothing(tmp_path: Path) -> None:
     client, audit_file, base = _bootstrap(tmp_path)
     doc = _read(audit_file)
-    doc["shots"] = _classified([1000, 1300, 1600, 1900])
+    # A first shot before the beep: no draw to propose (seed v4 proposes a
+    # draw on any stage whose first shot follows the beep), no long gaps.
+    doc["shots"] = _classified([-100, 200, 500, 800])
     audit_file.write_text(json.dumps(doc) + "\n", encoding="utf-8")
     before = audit_file.read_bytes()
     body = client.get(f"{base}/shooters/me/stages/1/coach?seed=1").json()
@@ -1498,13 +1502,13 @@ def test_the_capacity_warning_does_not_move_when_breakdown_proposes(tmp_path: Pa
 
     assert _coach(client, base)["event_summary"]["capacity_warning"] == warning
     seeded = client.get(f"{base}/shooters/me/stages/1/coach?seed=1").json()
-    assert [e["source"] for e in seeded["events"]] == ["auto"]
+    assert {e["source"] for e in seeded["events"]} == {"auto"}
     after = _coach(client, base)
     assert after["event_summary"]["capacity_warning"] == warning
     assert after["event_summary"]["reloads"] == 0
     assert all(s["moving"] is False for s in after["shots"])
 
-    confirmed = [{**seeded["events"][0], "source": "manual"}]
+    confirmed = [{**_reloads(seeded["events"])[0], "source": "manual"}]
     resp = client.put(
         f"{base}/shooters/me/stages/1/events", json={"events": confirmed, "_version": after["_version"]}
     )

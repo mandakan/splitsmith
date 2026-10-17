@@ -651,11 +651,12 @@ class CoachAutoClassifyConfig(BaseModel):
     # magazine capacity places the proposals: nobody reloads in 0.3 s.
     reload_min_s: float = Field(default=0.60, gt=0.0)
     # A first shot later than this after the beep gets a movement proposal
-    # from the beep to it (the shooter moved before shooting). 3.0 s: over
-    # the 265 audited stages of 2026-10-17 the median first shot was 1.94 s
-    # (middle half 1.65-2.41 s), and 12 % were over 3.0 s against 47 % over
-    # 2.0 s, mostly slow draws from awkward start positions.
-    draw_movement_min_s: float = Field(default=3.00, gt=0.0)
+    # from the beep to it, beside the draw proposal (the shooter moved
+    # before shooting). 2.0 s although it catches 47 % of the 265 audited
+    # stages of 2026-10-17 (median first shot 1.94 s): with a draw region
+    # beside it, a wrong guess is one tap to delete or relabel (spec
+    # 2026-10-17).
+    draw_movement_min_s: float = Field(default=2.00, gt=0.0)
 
 
 class DivisionCapacityConfig(BaseModel):

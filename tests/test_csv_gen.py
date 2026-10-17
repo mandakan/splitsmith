@@ -147,6 +147,12 @@ def test_write_events_csv_writes_header_and_rows(tmp_path: Path) -> None:
     assert lines[2] == "evt-2,movement,3.400,6.100,2.700,manual,to box B"
 
 
+def test_write_events_csv_writes_a_draw_like_any_region(tmp_path: Path) -> None:
+    out = tmp_path / "events.csv"
+    write_events_csv([StageEvent(id="evt-1", kind="draw", start=1.3, end=2.28, source="manual")], out)
+    assert out.read_text().splitlines()[1] == "evt-1,draw,1.300,2.280,0.980,manual,"
+
+
 def test_write_events_csv_with_no_events_still_writes_header_only(tmp_path: Path) -> None:
     out = tmp_path / "empty_events.csv"
     write_events_csv([], out)
