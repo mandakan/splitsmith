@@ -95,17 +95,19 @@ def test_a_shot_at_the_reloads_start_was_fired_before_it() -> None:
     shots = _shots(("first_shot", 1.0), ("split", 0.2), ("reload", 2.0), ("split", 0.2))
     plan = ammo_plan(shots, beep_in_clip=0.0, events=[_reload(1.2, 3.2)], capacity=3)
     assert plan is not None
-    assert plan["per_shot"] == [3, 2, 3, 2]
-    assert plan["refills"] == [{"t": 3.2, "rounds": 4}]
+    assert plan["per_shot"] == [3, 2, 2, 1]
+    assert plan["refills"] == [{"t": 3.2, "rounds": 3}]
 
 
-def test_a_tactical_reload_keeps_the_chambered_round() -> None:
+def test_a_reload_with_rounds_left_refills_to_the_capacity() -> None:
+    """Only the first magazine, on a stage that starts loaded, holds one
+    more than the capacity: a reload seats the capacity, whatever was left."""
     shots = _shots(("first_shot", 1.0), ("split", 0.2), ("reload", 2.0), ("split", 0.2))
     plan = ammo_plan(shots, beep_in_clip=1.0, events=[_reload(1.4, 2.9)], capacity=3)
     assert plan is not None
-    # 4 -> 3, 2; reload with rounds left: back to 4; then 3, 2.
-    assert plan["per_shot"] == [3, 2, 3, 2]
-    assert plan["refills"] == [{"t": 3.9, "rounds": 4}]
+    # 4 -> 3, 2; the reload seats 3; then 2, 1.
+    assert plan["per_shot"] == [3, 2, 2, 1]
+    assert plan["refills"] == [{"t": 3.9, "rounds": 3}]
 
 
 def test_a_slide_lock_reload_refills_to_the_capacity() -> None:
@@ -133,7 +135,7 @@ def test_a_proposal_never_refills() -> None:
 
 def test_a_reload_after_the_last_shot_still_seats_a_magazine() -> None:
     plan = ammo_plan(_shots(("first_shot", 1.0)), beep_in_clip=0.0, events=[_reload(2.0, 3.0)], capacity=5)
-    assert plan is not None and plan["refills"] == [{"t": 3.0, "rounds": 6}]
+    assert plan is not None and plan["refills"] == [{"t": 3.0, "rounds": 5}]
 
 
 def test_no_capacity_is_no_ammo() -> None:

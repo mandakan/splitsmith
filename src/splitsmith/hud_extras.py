@@ -176,10 +176,10 @@ def ammo_plan(
     capacity: int | None,
 ) -> dict[str, Any] | None:
     """``data.ammo``: rounds left after each shot, from a full magazine with
-    one chambered (``capacity + 1``). Each confirmed reload refills before
-    the first shot after its start: to ``capacity + 1`` when rounds were
-    left (a tactical reload keeps the chambered one), to ``capacity`` at
-    slide lock. A shot at the reload's own start was fired before it: a
+    one chambered (``capacity + 1``): only the first magazine, on a stage
+    that starts loaded, can hold more than the capacity. Each confirmed
+    reload refills to ``capacity`` before the first shot after its start,
+    whatever was left. A shot at the reload's own start was fired before it: a
     seeded reload spans its whole gap, so it starts on the last shot of
     the magazine. ``refills[].t`` is the reload's end in clip seconds, when
     the magazine seats. A count below zero is kept, not clamped, and ``ok``
@@ -196,7 +196,7 @@ def ammo_plan(
     def refill() -> None:
         nonlocal left
         reload = pending.pop(0)
-        left = capacity + 1 if left > 0 else capacity
+        left = capacity
         refills.append({"t": _clip(beep_in_clip, reload.end), "rounds": left})
 
     for shot in shots:
