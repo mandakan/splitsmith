@@ -119,8 +119,30 @@ export function BeepTimeline({
   // detector's band) or a custom band: the Audio row and Snap read it.
   const [filter, setFilter] = useBeepFilter();
   const band = bandParam(filter, spectrum?.tone_band ?? null);
-  // The band the held detail was fetched with: a new band fetches again.
-  const detailBandRef = useRef<string | undefined>(undefined);
+  // The band the held detail was fetched with, set when its response
+  // lands (not when it is asked for: a dropped response must ask again).
+  const [detailBand, setDetailBand] = useState<string | undefined>(undefined);
+  // The custom band's fields as typed: committed on blur or Enter when
+  // valid, so a value can be typed through ones that are not valid yet.
+  const [lowDraft, setLowDraft] = useState("");
+  const [highDraft, setHighDraft] = useState("");
+  useEffect(() => {
+    if (filter.kind === "custom") {
+      setLowDraft(String(filter.lo));
+      setHighDraft(String(filter.hi));
+    }
+  }, [filter]);
+  const commitCustom = () => {
+    if (filter.kind !== "custom") return;
+    const lo = Number(lowDraft);
+    const hi = Number(highDraft);
+    if (validBand(lo, hi)) {
+      if (lo !== filter.lo || hi !== filter.hi) setFilter({ kind: "custom", lo, hi });
+    } else {
+      setLowDraft(String(filter.lo));
+      setHighDraft(String(filter.hi));
+    }
+  };
   const lastScrubRef = useRef(0);
 
   // The fetch effect parks the video once peaks land (below), using
@@ -230,13 +252,12 @@ export function BeepTimeline({
     if (!peaks || chosenLocalNow == null) return undefined;
     if (
       detail &&
-      detailBandRef.current === band &&
+      detailBand === band &&
       chosenLocalNow - detail.start > 0.5 &&
       detail.start + detail.duration - chosenLocalNow > 0.5
     ) {
       return undefined;
     }
-    detailBandRef.current = band;
     const start = Math.max(0, Math.round((chosenLocalNow - DETAIL_HALF_S) * 1000) / 1000);
     const end = Math.min(peaks.duration, Math.round((chosenLocalNow + DETAIL_HALF_S) * 1000) / 1000);
     if (end <= start) return undefined;
@@ -244,7 +265,10 @@ export function BeepTimeline({
     api
       .getVideoPeaks(slug, stageNumber, videoId, DETAIL_BINS, { start, end }, undefined, band)
       .then((d) => {
-        if (alive) setDetail({ start: d.start ?? start, duration: d.duration, peaks: d.peaks });
+        if (alive) {
+          setDetail({ start: d.start ?? start, duration: d.duration, peaks: d.peaks });
+          setDetailBand(band);
+        }
       })
       .catch(() => {
         // The coarse peaks still draw; the detail is a refinement.
@@ -458,10 +482,11 @@ export function BeepTimeline({
                 aria-label="Low Hz"
                 type="number"
                 className="numeral w-16 rounded-md border border-rule bg-surface-2 px-1"
-                value={filter.lo}
-                onChange={(e) => {
-                  const lo = Number(e.target.value);
-                  if (validBand(lo, filter.hi)) setFilter({ ...filter, lo });
+                value={lowDraft}
+                onChange={(e) => setLowDraft(e.target.value)}
+                onBlur={commitCustom}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") commitCustom();
                 }}
               />
               to
@@ -469,10 +494,11 @@ export function BeepTimeline({
                 aria-label="High Hz"
                 type="number"
                 className="numeral w-16 rounded-md border border-rule bg-surface-2 px-1"
-                value={filter.hi}
-                onChange={(e) => {
-                  const hi = Number(e.target.value);
-                  if (validBand(filter.lo, hi)) setFilter({ ...filter, hi });
+                value={highDraft}
+                onChange={(e) => setHighDraft(e.target.value)}
+                onBlur={commitCustom}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") commitCustom();
                 }}
               />
               Hz

@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { StrictMode, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -586,5 +587,45 @@ describe("the timer tone filter and the spectrum row (spec 2026-10-17)", () => {
     rerender(<Harness videoId="v1" videoBeepTime={5} draftSourceTime={8} />);
     await waitFor(() => expect(api.getVideoSpectrum).toHaveBeenCalledTimes(2));
     expect(vi.mocked(api.getVideoSpectrum).mock.calls[1][3]).toEqual({ start: 6.5, end: 9.5 });
+  });
+});
+
+describe("review fixes (2026-10-17)", () => {
+  it("asks again for the new band when a nudge drops its first response", async () => {
+    const SPEC = {
+      start: 3.5,
+      duration: 3,
+      hz: [0, 2000, 4000, 6000],
+      columns: 2,
+      data: btoa(String.fromCharCode(0, 10, 200, 0, 0, 10, 200, 0)),
+      tone_band: [2507, 2907] as [number, number],
+    };
+    let resolveSpectrum!: (s: typeof SPEC) => void;
+    vi.mocked(api.getVideoSpectrum).mockReturnValue(new Promise((r) => (resolveSpectrum = r)));
+    vi.mocked(api.getVideoPeaks).mockImplementation((_s, _n, _v, bins, _w, _o, band) =>
+      bins === 4000 && band === "2507-2907"
+        ? new Promise(() => {}) // in flight until the nudge drops it
+        : Promise.resolve(peaksFixture({ beep_time: 5 })),
+    );
+    const { rerender } = render(<Harness videoId="v1" videoBeepTime={5} />);
+    await waitFor(() => expect(api.getVideoPeaks).toHaveBeenCalledWith("alice", 10, "v1", 4000, { start: 3, end: 7 }, undefined, "2200-3500"));
+    await act(async () => resolveSpectrum(SPEC));
+    const asked = () => vi.mocked(api.getVideoPeaks).mock.calls.filter((c) => c[6] === "2507-2907").length;
+    await waitFor(() => expect(asked()).toBe(1));
+    rerender(<Harness videoId="v1" videoBeepTime={5} draftSourceTime={5.05} />);
+    await waitFor(() => expect(asked()).toBe(2));
+  });
+
+  it("lets a custom band be typed through values that are not valid yet", async () => {
+    vi.mocked(api.getVideoPeaks).mockResolvedValue(peaksFixture({ beep_time: 5 }));
+    render(<Harness videoId="v1" videoBeepTime={5} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Custom" }));
+    const low = screen.getByRole("spinbutton", { name: "Low Hz" }) as HTMLInputElement;
+    const user = userEvent.setup();
+    await user.clear(low);
+    await user.type(low, "1500");
+    expect(low.value).toBe("1500");
+    await user.tab();
+    await waitFor(() => expect(vi.mocked(api.getVideoPeaks).mock.calls.at(-1)?.[6]).toBe("1500-3500"));
   });
 });
