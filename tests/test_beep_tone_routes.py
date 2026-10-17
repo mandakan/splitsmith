@@ -55,3 +55,36 @@ def test_banded_peaks_lose_the_shot(overlap) -> None:
 def test_band_validation(overlap, band: str) -> None:
     client, vid = overlap
     assert client.get(_url(vid) + f"&band={band}").status_code == 422
+
+
+def test_spectrum_shows_the_tone(overlap) -> None:
+    import base64
+
+    client, vid = overlap
+    r = client.get(f"/api/shooters/me/stages/1/videos/{vid}/spectrum?start=0.5&end=1.5")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    grid = np.frombuffer(base64.b64decode(body["data"]), dtype=np.uint8).reshape(
+        body["columns"], len(body["hz"])
+    )
+    col = int((1.2 - body["start"]) / body["duration"] * body["columns"])
+    assert abs(body["hz"][int(grid[col].argmax())] - 2800) < 100
+    lo, hi = body["tone_band"]
+    assert lo < 2800 < hi  # the timer's own band, for the Timer tone filter
+
+
+def test_spectrum_window_is_capped(overlap) -> None:
+    client, vid = overlap
+    body = client.get(f"/api/shooters/me/stages/1/videos/{vid}/spectrum?start=0&end=60").json()
+    assert body["duration"] <= 4.0 + 1e-6
+
+
+def test_spectrum_without_audio_is_pending(tmp_path) -> None:
+    from .test_ui_server import _seed_match_export_project
+
+    client, root = _seed_match_export_project(tmp_path, stage_count=1)
+    from splitsmith.match_project import MatchProject
+
+    vid = MatchProject.load(root / "shooters" / "me").stage(1).primary().video_id
+    r = client.get(f"/api/shooters/me/stages/1/videos/{vid}/spectrum?start=0&end=1")
+    assert r.status_code == 202 and r.json()["pending"] is True

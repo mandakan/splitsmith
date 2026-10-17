@@ -14074,6 +14074,34 @@ def create_app(
         payload["trimmed"] = audit.trimmed
         return JSONResponse(payload)
 
+    @app.get("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/spectrum")
+    def video_spectrum(
+        slug: str,
+        stage_number: int,
+        video_id: str,
+        start: float = Query(ge=0),
+        end: float = Query(gt=0),
+    ) -> JSONResponse:
+        """The beep step's spectrogram row (spec 2026-10-17): one window of
+        the video's own WAV, 0 to 8 kHz, ~5 ms columns, the window capped at
+        ``BeepToneConfig.max_window_s``, plus ``tone_band``: the timer's own
+        band around the video's beep, which the Timer tone filter asks for.
+        Reads the published WAV; when it is missing, queues ``derive_audio``
+        and answers 202 like the peaks."""
+        from .. import beep_detect, beep_tone
+
+        if end <= start:
+            raise HTTPException(status_code=422, detail="start before end")
+        project, _stage, video = _resolve_stage_video(slug, stage_number, video_id)
+        audit = _resolve_video_audio(slug, project, stage_number, video)
+        if isinstance(audit, JSONResponse):
+            return audit
+        audio, sr = beep_detect.load_audio(audit.audio_path)
+        payload = beep_tone.spectrogram(audio, sr, start, end).model_dump(mode="json")
+        around = float(video.beep_time) if video.beep_time is not None else (start + end) / 2
+        payload["tone_band"] = list(beep_tone.tone_band(audio, sr, around))
+        return JSONResponse(payload)
+
     def _beep_snippet_key(slug: str, video_id: str, suffix: str) -> str | None:
         """Build the desktop-pushed snippet key, or None with no match/storage bound."""
         match_id = current_match_id.get()
