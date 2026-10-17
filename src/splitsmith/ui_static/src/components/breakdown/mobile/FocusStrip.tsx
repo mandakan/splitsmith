@@ -31,8 +31,12 @@ export function FocusStrip({
   activeEdge: "start" | "end" | null;
   onEdge: (edge: "start" | "end") => void;
 }) {
+  // At most six ruler labels: a phone's width holds no more side by side.
+  const span = w.to - w.from;
+  const step = [0.5, 1, 2, 5].find((s) => span / s <= 6) ?? 10;
   const ticks: number[] = [];
-  for (let t = Math.ceil(w.from * 2) / 2; t <= w.to; t += 0.5) ticks.push(t);
+  for (let t = Math.ceil(w.from / step) * step; t <= w.to + 1e-9; t += step) ticks.push(t);
+  const label = (t: number) => (step < 1 ? t.toFixed(1) : String(Math.round(t)));
   const inside = (t: number) => t >= w.from && t <= w.to;
   const neighbours = events.filter(
     (e) => e.kind === region.kind && e.id !== region.id && e.end >= w.from && e.start <= w.to,
@@ -47,10 +51,11 @@ export function FocusStrip({
         {ticks.map((t) => (
           <span
             key={t}
+            data-ruler-label
             className="numeral absolute top-0 -translate-x-1/2 text-sm text-muted"
             style={{ left: pct(fracOf(t, w)) }}
           >
-            {t.toFixed(1)}
+            {label(t)}
           </span>
         ))}
       </div>

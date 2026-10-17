@@ -71,6 +71,22 @@ describe("FocusStrip", () => {
     fireEvent.click(screen.getByRole("button", { name: "Adjust end, 9.40 s" }));
     expect(onEdge).toHaveBeenLastCalledWith("end");
   });
+  it("labels the ruler sparsely enough to read on a phone", () => {
+    const { container } = render(
+      <FocusStrip
+        window={{ from: 1.64, to: 8.86 }}
+        events={[region]}
+        region={region}
+        shots={[]}
+        tFromBeep={8}
+        readOnly
+        activeEdge={null}
+        onEdge={vi.fn()}
+      />,
+    );
+    const labels = Array.from(container.querySelectorAll("[data-ruler-label]")).map((el) => el.textContent);
+    expect(labels).toEqual(["2", "4", "6", "8"]);
+  });
   it("has no handles when read-only", () => {
     render(
       <FocusStrip

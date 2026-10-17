@@ -13,7 +13,7 @@
  * ``useStageEvents``'; the player is the workspace's. A match without the
  * edit capability (a desktop mirror on hosted) reads only.
  */
-import { ArrowLeft, ArrowRight, Loader2, MoreHorizontal } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Loader2, MoreHorizontal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useLocation, useOutletContext, useParams } from "react-router-dom";
 
@@ -478,6 +478,7 @@ function MobileBreakdownStage({ slug, stage }: { slug: string; stage: number }) 
                     onClick={() => setKind(kind)}
                   >
                     {LANE_LABEL[kind]}
+                    {kind === open.kind ? <Check className="ml-auto size-4" aria-hidden /> : null}
                   </Button>
                 );
               })
