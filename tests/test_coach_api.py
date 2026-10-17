@@ -666,6 +666,25 @@ def test_get_coach_seeds_a_reload_proposal_once(tmp_path: Path) -> None:
     assert body2["events"] == []
 
 
+def test_get_coach_proposes_a_movement_before_a_late_first_shot(tmp_path: Path) -> None:
+    """A first shot more than ``draw_movement_min_s`` (3.0 s) after the beep:
+    the shooter moved before shooting, proposed from the beep to the shot."""
+    client, audit_file, base = _bootstrap(tmp_path)
+    _write_shots(audit_file, [3400, 3700, 4000])
+    body = client.get(f"{base}/shooters/me/stages/1/coach?seed=1").json()
+    assert [(e["kind"], e["start"], e["end"], e["source"]) for e in body["events"]] == [
+        ("movement", 0.0, 3.3, "auto")
+    ]
+    assert json.loads(audit_file.read_text(encoding="utf-8"))["events_seeded"] == SEED_VERSION == 4
+
+
+def test_get_coach_proposes_nothing_before_a_slow_standing_draw(tmp_path: Path) -> None:
+    # 2.5 s: past a transition, still a draw (the corpus median is 1.94 s).
+    client, audit_file, base = _bootstrap(tmp_path)
+    _write_shots(audit_file, [2500, 2800, 3100])
+    assert client.get(f"{base}/shooters/me/stages/1/coach?seed=1").json()["events"] == []
+
+
 def test_get_coach_without_a_division_seeds_from_the_hint_alone(tmp_path: Path) -> None:
     client, audit_file, base = _bootstrap(tmp_path)
     _write_shots(audit_file, [1000, 1300, 4000, 4300, 7200])  # two gaps over 2.5 s

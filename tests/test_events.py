@@ -489,6 +489,38 @@ def test_a_gap_too_short_for_an_inset_movement_is_skipped() -> None:
     assert seed_events([1.0, 1.08], hint_min_s=2.5, capacity=None, movement_gaps=[1.08]) == []
 
 
+def test_a_late_first_shot_gets_a_movement_from_the_beep() -> None:
+    (movement,) = seed_events([2.6, 2.9], hint_min_s=9.0, capacity=None, draw_movement_min_s=2.0)
+    assert (movement.kind, movement.start, movement.end, movement.source) == ("movement", 0.0, 2.5, "auto")
+    # Inset from the first shot, so it does not read as fired moving.
+    assert not shot_is_moving(2.6, [movement.model_copy(update={"source": "manual"})])
+
+
+def test_a_standing_draw_gets_no_movement() -> None:
+    assert seed_events([1.4, 1.7], hint_min_s=9.0, capacity=None, draw_movement_min_s=2.0) == []
+    # "Over" the threshold: a first shot exactly on it is a standing draw.
+    assert seed_events([2.0, 2.3], hint_min_s=9.0, capacity=None, draw_movement_min_s=2.0) == []
+
+
+def test_no_draw_threshold_proposes_no_draw_movement() -> None:
+    assert seed_events([3.0, 3.3], hint_min_s=9.0, capacity=None) == []
+
+
+def test_a_pre_beep_first_shot_gets_no_draw_movement() -> None:
+    assert seed_events([-0.2, 3.0], hint_min_s=9.0, capacity=None, draw_movement_min_s=2.0) == []
+
+
+def test_seed_doc_proposes_the_draw_movement_beside_the_others() -> None:
+    doc = _classified_doc([(2600, "first_shot"), (2900, "split"), (5200, "movement"), (5500, "split")])
+    assert seed_doc(doc, hint_min_s=9.0, capacity=None, draw_movement_min_s=2.0) is True
+    assert sorted((e["kind"], e["start"], e["end"]) for e in doc["events"]) == [
+        ("movement", 0.0, 2.5),
+        ("movement", 3.0, 5.1),
+    ]
+    assert [e["id"] for e in doc["events"]] == ["evt-1", "evt-2"]
+    validate_lanes(_events(doc["events"]))
+
+
 def test_a_pre_beep_gap_never_gets_a_movement() -> None:
     assert seed_events([-0.5, 2.0], hint_min_s=9.0, capacity=None, movement_gaps=[2.0]) == []
 
