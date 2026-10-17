@@ -158,6 +158,7 @@ from .. import (
     video_probe,
     youtube_sidecar,
 )
+from .. import beep_tone as beep_tone_module
 from .. import cleanup as cleanup_module
 from .. import coach as coach_module
 from .. import coach_distributions as coach_distributions_module
@@ -244,6 +245,7 @@ from ..match_project import (
     VideoRole,
     camera_labels,
     is_stub_audit,
+    tone_flag_ms,
 )
 from ..match_registry import MatchRegistry
 from ..mp4_render import RenderStep
@@ -5526,6 +5528,9 @@ class TriageCell(BaseModel):
     draw: float | None = None
     avg_split: float | None = None
     time_seconds: float = 0.0
+    # The stage's confirmed beeps' distance from their tone (spec
+    # 2026-10-17), the largest in magnitude; None when none is measured.
+    beep_tone_offset_ms: float | None = None
 
 
 class TriageResponse(BaseModel):
@@ -5535,6 +5540,8 @@ class TriageResponse(BaseModel):
     cells: list[TriageCell]
     flagged_count: int
     beep_low_confidence_threshold: float
+    # A beep this far or farther from its tone gets Overview's Check beep.
+    beep_tone_flag_ms: float = 20.0
 
 
 class TriageSummaryResponse(BaseModel):
@@ -16898,6 +16905,9 @@ def create_app(
                         needs_attention = TriageAttentionOut(**na_raw)
                     except ValidationError:
                         needs_attention = None
+                tones = [
+                    o for o in (tone_flag_ms(v) for v in stg.videos if v.role != "ignored") if o is not None
+                ]
                 cells.append(
                     TriageCell(
                         slug=slug,
@@ -16915,6 +16925,7 @@ def create_app(
                         draw=figures.draw if figures is not None else None,
                         avg_split=figures.avg_split if figures is not None else None,
                         time_seconds=float(stg.time_seconds),
+                        beep_tone_offset_ms=max(tones, key=abs) if tones else None,
                     )
                 )
         cells.sort(key=lambda c: (c.stage_number, c.shooter_name.lower()))
@@ -16924,6 +16935,7 @@ def create_app(
             cells=cells,
             flagged_count=_count_flagged(docs),
             beep_low_confidence_threshold=threshold,
+            beep_tone_flag_ms=beep_tone_module.beep_tone_config().flag_ms,
         )
 
     @app.get("/api/match/triage", response_model=TriageResponse)

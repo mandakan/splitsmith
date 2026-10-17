@@ -39,3 +39,12 @@ def test_a_manual_beep_stores_its_tone_offset(overlap) -> None:  # noqa: F811
     video = MatchProject.model_validate(r.json()).stage(1).find_video_by_id(vid)
     assert video.beep_tone_for == 1.0
     assert abs(tone_flag_ms(video)) < 6
+
+
+def test_triage_carries_the_worst_counted_offset(overlap) -> None:  # noqa: F811
+    client, vid = overlap
+    client.post(f"/api/shooters/me/stages/1/videos/{vid}/beep", json={"beep_time": 0.96})
+    body = client.get("/api/match/triage").json()
+    cell = next(c for c in body["cells"] if c["stage_number"] == 1)
+    assert body["beep_tone_flag_ms"] == 20.0
+    assert cell["beep_tone_offset_ms"] is not None and cell["beep_tone_offset_ms"] > 20

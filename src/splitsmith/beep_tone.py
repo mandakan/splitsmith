@@ -44,6 +44,20 @@ class Spectrogram(BaseModel):
     data: str
 
 
+def beep_tone_config() -> BeepToneConfig:
+    """The tone check's settings: from ``SPLITSMITH_CONFIG`` (a YAML
+    ``config.Config`` document) when set, else the defaults, the way
+    ``coach.auto_classify_config`` reads its own."""
+    import os
+    from pathlib import Path
+
+    from .config import Config
+    from .runtime import ENV_CONFIG_FILE
+
+    raw = os.environ.get(ENV_CONFIG_FILE, "").strip()
+    return Config.load(Path(raw).expanduser()).beep_tone if raw else BeepToneConfig()
+
+
 def default_band() -> tuple[float, float]:
     cfg = BeepDetectConfig()
     return (cfg.tonal_band_lo_hz, cfg.tonal_band_hi_hz)
