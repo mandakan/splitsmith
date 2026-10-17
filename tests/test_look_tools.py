@@ -163,6 +163,18 @@ def test_the_broadcast_starter_fills_every_slot(user_dir: Path) -> None:
     }
 
 
+def test_a_broadcast_starter_copy_is_the_looks_own_not_an_outdated_copy(user_dir: Path) -> None:
+    """The starter's files ship as the Broadcast Look's, so the template
+    history knows them; they are still not copies of the default Look's
+    templates: refresh would fall back to the default card, not the same
+    one, and must leave them."""
+    look_tools.new_look("mine", starter="broadcast")
+    look = looks.load_look("mine")
+    assert look_tools.outdated_copies(look) == ()
+    assert look_tools.refresh_templates("mine") == ()
+    assert set(looks.load_look("mine").manifest.slots) >= {"title_page", "overlay", "thumbnail", "transition"}
+
+
 def test_the_shipped_broadcast_look_is_the_broadcast_starter() -> None:
     """The shipped Look draws the starter's templates byte for byte, so the
     copy a user starts from is the one the Export page shows."""

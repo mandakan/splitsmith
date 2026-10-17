@@ -1439,11 +1439,11 @@ def test_the_export_request_accepts_any_installed_look_and_names_them_on_a_miss(
     from splitsmith.ui import exports_api
 
     assert exports_api.MatchExportRequest(stage_numbers=[1], overlay_theme="clean").overlay_theme == "clean"
-    with pytest.raises(pydantic.ValidationError, match="splitsmith, clean"):
+    with pytest.raises(pydantic.ValidationError, match="splitsmith, broadcast, clean"):
         exports_api.MatchExportRequest(stage_numbers=[1], overlay_theme="nope")
-    with pytest.raises(pydantic.ValidationError, match="splitsmith, clean"):
+    with pytest.raises(pydantic.ValidationError, match="splitsmith, broadcast, clean"):
         exports_api.CompareGridRequest(stage_numbers=[1], audio_from="a", overlay_theme="nope")
-    with pytest.raises(pydantic.ValidationError, match="splitsmith, clean"):
+    with pytest.raises(pydantic.ValidationError, match="splitsmith, broadcast, clean"):
         exports_api.ExportStageRequest(overlay_theme="nope")
     request = exports_api.MatchExportRequest(
         stage_numbers=[1], title_page_variant="rise", stage_card_variant="default"
