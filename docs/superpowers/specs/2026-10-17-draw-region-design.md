@@ -101,6 +101,14 @@ kept, edited or deleted region is left alone.
    pink (`#F472B6`, the app's `--color-draw`), not red (the brand, the
    draw interval and the slow split) nor violet (the transition). Shot 1's
    split on every overlay is the Draw figure.
+4. **Use Breakdown.** One export switch, on by default: off, no region
+   reaches any output (the draw included), as if the stage had never been
+   broken down; proposals never reach one either way. It rides every
+   export request, the preview, the presets, the CLIs (`--no-breakdown`)
+   and the MCP tools, and an overlay's record carries it, so one drawn the
+   other way is redrawn (or left out, in the CLI and MCP). The Export page
+   shows it under Output only where a selected stage has a confirmed
+   region, or on the grid; a match without any shows nothing (#1371).
 
 Each slice ships with its tests and a frame check where pixels change.
 
