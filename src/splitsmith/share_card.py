@@ -26,6 +26,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .coach import SplitStatInterval, statistic_splits
+from .config import StageEvent
+from .events import draw_seconds
 
 FigureSource = Literal["coach", "threshold", "empty"]
 
@@ -45,6 +47,7 @@ def stage_figures(
     shots: Sequence[SplitStatInterval],
     *,
     split_max: float | None = None,
+    regions: Sequence[StageEvent] = (),
 ) -> StageFigures:
     """The two headline figures a stage card shows, plus their provenance.
 
@@ -68,7 +71,8 @@ def stage_figures(
     splits = statistic_splits(shots, split_max=split_max)
     classified = any(s.interval_class is not None for s in shots)
     return StageFigures(
-        draw=shots[0].split,
+        # A confirmed draw region's length, else the first split (spec 2026-10-17).
+        draw=draw_seconds(shots[0].split, regions),
         avg_split=(sum(splits) / len(splits)) if splits else None,
         split_count=len(splits),
         interval_count=len(shots),

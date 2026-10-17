@@ -432,6 +432,30 @@ def test_triage_cells_carry_pipeline_fields(client: _MatchClient) -> None:
     assert s2["avg_split"] is None
 
 
+def test_a_confirmed_draw_region_is_the_draw_in_the_payloads(client: _MatchClient) -> None:
+    """Spec 2026-10-17: the project payload's figures and the triage cell
+    show the draw region's length once it is confirmed, the first shot's
+    time while it is only proposed."""
+    doc = {
+        "stage_number": 1,
+        "shots": [
+            {"shot_number": 1, "ms_after_beep": 2300},
+            {"shot_number": 2, "ms_after_beep": 2600},
+            {"shot_number": 3, "ms_after_beep": 2900},
+        ],
+        "audit_events": [],
+    }
+    assert client.put("/api/shooters/alice/stages/1/audit", json=doc).status_code == 200
+    version = client.get("/api/shooters/alice/stages/1/coach").json()["_version"]
+    region = {"id": "evt-1", "kind": "draw", "start": 1.4, "end": 2.3, "source": "manual"}
+    resp = client.put("/api/shooters/alice/stages/1/events", json={"events": [region], "_version": version})
+    assert resp.status_code == 200, resp.text
+    stages = {s["stage_number"]: s for s in client.get("/api/shooters/alice/project").json()["stages"]}
+    assert stages[1]["figures"]["draw"] == pytest.approx(0.9)
+    cells = {c["stage_number"]: c for c in client.get("/api/match/triage").json()["cells"]}
+    assert cells[1]["draw"] == pytest.approx(0.9)
+
+
 def test_project_stages_carry_figures(client: _MatchClient) -> None:
     """The Splits page (UX PR 4) reads draw / avg split / fastest split /
     shot count per stage from the project payload, on both the owner and

@@ -49,6 +49,7 @@ from pydantic import BaseModel
 
 from .. import coach as coach_module
 from ..audit_data import audit_shots_to_engine_shots
+from ..events import confirmed_from_doc
 from ..overlay_theme import load_theme
 from ..share_card import CompareCard, MatchCard, RosterEntry, StageCard, card_hash, stage_figures
 from ..share_card_render import cached_card_png, render_card_png
@@ -162,7 +163,8 @@ def build_stage_card(
     shots = audit_shots_to_engine_shots(payload, beep_time_in_source=0.0)
     if not shots:
         return None
-    figures = stage_figures(shots)
+    # The Draw is a confirmed draw region's length when there is one (spec 2026-10-17).
+    figures = stage_figures(shots, regions=confirmed_from_doc(payload, log_context=f"stage {stage_number}"))
     return StageCard(
         stage_number=stage_number,
         stage_name=stg.stage_name or f"Stage {stage_number}",

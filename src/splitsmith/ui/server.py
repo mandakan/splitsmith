@@ -8130,7 +8130,9 @@ def _stage_figures_payload(doc: dict | None, project: MatchProject, stage_number
     prim = stage.primary() if stage is not None else None
     beep = prim.beep_time if prim is not None and prim.beep_time is not None else 0.0
     shots = audit_shots_to_engine_shots(doc, beep_time_in_source=beep)
-    fig = stage_figures(shots)
+    fig = stage_figures(
+        shots, regions=events_module.confirmed_from_doc(doc, log_context=f"stage {stage_number}")
+    )
     splits = statistic_splits(shots) if shots else []
     return {
         "draw": fig.draw,
@@ -16813,7 +16815,16 @@ def create_app(
                         a.model_dump()
                         for a in report.detect_anomalies_structured(engine_shots, beep, stg.time_seconds)
                     ]
-                figures = stage_figures(engine_shots) if doc is not None else None
+                figures = (
+                    stage_figures(
+                        engine_shots,
+                        regions=events_module.confirmed_from_doc(
+                            doc, log_context=f"stage {stg.stage_number}"
+                        ),
+                    )
+                    if doc is not None
+                    else None
+                )
                 confs = [v.beep_confidence for v in stg.videos if v.beep_confidence is not None]
                 na_raw = doc.get("needs_attention") if isinstance(doc, dict) else None
                 needs_attention: TriageAttentionOut | None = None
