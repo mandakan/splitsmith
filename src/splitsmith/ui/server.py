@@ -270,7 +270,7 @@ from ..sync.run import format_sync_message
 from ..sync.run import run_sync as run_bidirectional_sync  # ..async_bridge.run_sync already owns this name
 from ..sync.state import SyncState, load_sync_state, save_sync_state
 from . import audio as audio_helpers
-from . import export_storage, stage_edit
+from . import beep_tone_check, export_storage, stage_edit
 from . import exports as export_helpers
 from . import match_exports as match_export_helpers
 from . import shooter_move as shooter_move_module
@@ -3996,6 +3996,8 @@ def register_job_bodies(state: AppState) -> None:
             audio_helpers.ensure_video_audio(
                 root, stage_number, video, source, project=proj, ffmpeg_binary=ffmpeg
             )
+            if beep_tone_check.record_tone_offset(root, proj, stage_number, video):
+                proj.save(root)
         elif target == "audit":
             if stage_number is None:
                 raise RuntimeError("audit audio needs stage_number")
@@ -12965,6 +12967,7 @@ def create_app(
         if req.beep_time is not None:
             _check_beep_time(video, req.beep_time)
         _apply_beep_override(slug, project, stage, video, req.beep_time)
+        beep_tone_check.record_tone_offset(state.shooter_root(slug), project, stage.stage_number, video)
         project.save(state.shooter_root(slug))
         # Mirrors mark state only: no raw media exists hosted-side, so
         # there is nothing to trim or detect against. Desktop re-derives
@@ -13191,6 +13194,14 @@ def create_app(
         stub nor the job is written. Desktop re-derives on its next sync
         pull.
         """
+        # The beep's distance from its tone (spec 2026-10-17), when its
+        # source WAV is published here; the derive job measures it otherwise.
+        proj_now = state.shooter_project(slug)
+        target = proj_now.stage(stage_number).find_video_by_id(video.video_id)
+        if target is not None and beep_tone_check.record_tone_offset(
+            state.shooter_root(slug), proj_now, stage_number, target
+        ):
+            proj_now.save(state.shooter_root(slug))
         if current_match_origin.get() == "desktop":
             return
         with _audit_rmw():
