@@ -52,7 +52,9 @@ already exists, and phones see it.
 - A header: the stage, and a menu holding Snap to shots, Keep all and
   Whole stage (later).
 - The queue: one segment per proposal, the current one marked.
-- The video (StageVideo).
+- The primary camera's video (`PhoneVideo`, bound to the workspace's
+  `videoRef`). There is no picture-in-picture inset on the phone in this
+  slice; the other cameras can come later through `PipView`.
 - The region's chips: kind, Auto, and its duration.
 - The focus strip.
 - Delete, Kind, Keep (primary).
@@ -132,16 +134,19 @@ No server change is needed for the page itself.
 The client assumes 30 fps (LaneEditor's nudge, Audit's step). The spike's
 camera records at 50, so a frame step there moves 1.7 frames.
 
-- The trim job records the trim's frame rate in its `.params.json`
-  (`fps`, from the ffprobe it already runs or one more `-show_entries
-  stream=r_frame_rate`).
-- The coach payload carries it per video as `fps` (null when the params
-  have none).
-- `edgeDrag` and the desktop LaneEditor nudge use it, else 30.
+- `media_check` already walks every trim's `moov` (no ffprobe, cached per
+  file version). It also reads the video track's `mdhd` (timescale and
+  duration), and `MediaCheck.frame_rate` is its samples over its seconds.
+- The coach payload carries it per video as `fps`: the local trim's,
+  through `valid_mp4_cached`. It is null when the trim is not on this disk
+  (hosted, a mirror) or its boxes do not say.
+- `edgeDrag`, the desktop LaneEditor nudge and its pill's frame number use
+  it, else 30.
 
-A trim cut before this has no `fps` until it is trimmed again, or until the
-cached-trim path (`_ensure_web_trim`, which already runs when a trim is
-found) adds it. A request never probes.
+Not the trim's `.params.json`: the trim cache compares that file for
+equality (`existing_params == current_params`) and sync compares it byte for
+byte, so a new key there would re-cut every trim and drop every local
+rendition. Reading the MP4 needs no migration: every existing trim answers.
 
 This is its own small PR, first, and it fixes desktop nudges on 50 fps
 footage too.
@@ -156,14 +161,15 @@ footage too.
   and sends one PUT with that region manual; Delete; a kind that would
   overlap is disabled; edge mode commits on Done and Cancel restores; a
   desktop mirror renders read-only with no Keep.
-- Python: the trim params carry `fps`; the coach payload exposes it.
+- Python: `media_check` reads the frame rate (tiny MP4 bytes and a real
+  ffmpeg file); the coach payload exposes it, null without a local trim.
 - In a browser: Playwright at 390x844 with touch emulation for each state
   (screenshots in the PR). Then on a real Android phone and iPhone over the
   LAN through the CLI's `--host` / `--lab-token`.
 
 ## Slices
 
-1. Frame rate in the trim params and the payload, used by the desktop nudge.
+1. Frame rate from the trim's MP4 into the payload, used by the desktop nudge.
 2. The phone page: the proposal view, edge mode and read-only (this design).
 
 Later, each its own design:
