@@ -31,7 +31,9 @@ EVENTS_SEEDED_FIELD: Final = "events_seeded"
 #: fewest reloads the round count forces, in the longest gaps (version 1,
 #: stored as ``True``, took the first long gap in each magazine's window).
 #: 3: movement proposals over every gap the auto-classifier calls movement.
-SEED_VERSION: Final = 3
+#: 4: a movement from the beep when the first shot comes late
+#: (``CoachAutoClassifyConfig.draw_movement_min_s``, 3.0 s).
+SEED_VERSION: Final = 4
 #: How far a seeded movement stays in from the shots either side of its gap
 #: (at most a quarter of the gap): ``shot_is_moving`` is inclusive, and a
 #: region on the shot's own time would call the shot before the move, and
@@ -287,6 +289,7 @@ def seed_events(
     capacity: int | None,
     min_reload_s: float = 0.6,
     movement_gaps: Sequence[float] = (),
+    draw_movement_min_s: float | None = None,
 ) -> list[StageEvent]:
     """Propose ``reload`` regions, each spanning a whole gap, and
     ``movement`` regions, all ``source="auto"``.
@@ -305,6 +308,11 @@ def seed_events(
     :data:`MOVEMENT_SEED_INSET_S` from both shots so neither reads as fired
     moving. A movement may sit over a reload: a reload on the move.
 
+    The draw: with ``draw_movement_min_s``, a first shot more than that
+    after the beep (a start that moves before it shoots) gets a movement
+    from the beep to the first shot, inset from that shot the same way.
+    Easy to delete when the shooter only drew slowly; ``None`` proposes none.
+
     A gap that cannot be a region is never proposed: one that starts before
     the beep (a pre-beep first shot), has no length, or has a time that is
     not a finite number. The seeder runs on a coach GET, and an invalid
@@ -314,6 +322,16 @@ def seed_events(
     gaps = [times[i + 1] - times[i] for i in range(len(times) - 1)]
     seeds: list[StageEvent] = []
     seeds.extend(_reload_seeds(times, gaps, hint_min_s, capacity, min_reload_s))
+    if draw_movement_min_s is not None and times and times[0] > draw_movement_min_s and times[0] > 0.0:
+        seeds.append(
+            StageEvent(
+                id=next_event_id(seeds),
+                kind="movement",
+                start=0.0,
+                end=round(times[0] - MOVEMENT_SEED_INSET_S, 6),
+                source="auto",
+            )
+        )
     moving_ends = {t for t in movement_gaps if math.isfinite(t)}
     for g, gap in enumerate(gaps):
         start, end = times[g], times[g + 1]
@@ -404,7 +422,12 @@ def reseedable(doc: dict[str, Any]) -> bool:
 
 
 def seed_doc(
-    doc: dict[str, Any], *, hint_min_s: float, capacity: int | None, min_reload_s: float = 0.6
+    doc: dict[str, Any],
+    *,
+    hint_min_s: float,
+    capacity: int | None,
+    min_reload_s: float = 0.6,
+    draw_movement_min_s: float | None = None,
 ) -> bool:
     """Seed once per stage, or again over an earlier seeder's untouched
     proposals (:func:`reseedable`). Returns True when the doc changed.
@@ -426,6 +449,7 @@ def seed_doc(
         capacity=capacity,
         min_reload_s=min_reload_s,
         movement_gaps=movement_gap_ends(doc),
+        draw_movement_min_s=draw_movement_min_s,
     )
     if not seeds and not again:
         return False

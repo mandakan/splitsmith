@@ -1355,7 +1355,11 @@ Movement (seed v3): one proposal per gap the stored classes call
 ``movement``, inset ``MOVEMENT_SEED_INSET_S`` from both shots, since
 ``shot_is_moving`` is inclusive and a region on a shot's time would call
 the shots either side fired moving; it may sit over a reload proposal (a
-reload on the move). Reloads: every hinted gap (``reload_hint_min_s``), or with a division
+reload on the move). Seed v4 adds one from the beep to just before the
+first shot when that shot comes more than ``draw_movement_min_s`` (3.0 s,
+``CoachAutoClassifyConfig``) after the beep: over the 265 audited stages of
+2026-10-17 the median first shot was 1.94 s, and 2.0 s would have proposed
+on 47 % of stages, mostly slow draws. Reloads: every hinted gap (``reload_hint_min_s``), or with a division
 capacity (``DivisionCapacityConfig``, keyed on the SSI string so the power
 factor rides in the name) the round count decides: the fewest reloads that
 keep every run within ``capacity + 1`` shots, in the longest gaps those
