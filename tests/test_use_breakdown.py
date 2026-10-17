@@ -161,3 +161,70 @@ def test_the_match_cli_stitches_an_overlay_only_drawn_the_way_it_asks(
         flag = "--breakdown" if drawn_with else "--no-breakdown"
         assert ("drawn with the Breakdown" if drawn_with else "drawn without the Breakdown") in output
         assert flag in output and "older audit" not in output
+
+
+# --- the MCP tools ----------------------------------------------------------------------
+
+
+def test_the_mcp_stage_export_threads_the_choice(tmp_path: Path) -> None:
+    from unittest.mock import patch
+
+    from splitsmith.mcp import export_tools
+
+    from .test_mcp_export_tools import _make_audit_json, _seed_export_project
+
+    root, _src = _seed_export_project(tmp_path)
+    _make_audit_json(root / "audit", 1)
+    fields = ("trimmed_video_path", "csv_path", "events_csv_path", "fcpxml_path", "report_path")
+    fake = type(
+        "R",
+        (),
+        {
+            **{name: None for name in (*fields, "overlay_path")},
+            "stage_number": 1,
+            "shots_written": 0,
+            "anomalies": [],
+            "secondary_trimmed_paths": {},
+        },
+    )()
+    seen: list = []
+    with patch("splitsmith.mcp.export_tools.export_helpers.export_stage", return_value=fake) as mock_export:
+        for breakdown in (True, False):
+            export_tools.export_stage_tool(str(root), stage_number=1, breakdown=breakdown)
+            seen.append(mock_export.call_args.kwargs["request"].breakdown)
+    assert seen == [True, False]
+
+
+@pytest.mark.parametrize(
+    ("drawn_with", "breakdown", "stitched"),
+    [(True, True, True), (False, False, True), (True, False, False), (False, True, False)],
+)
+def test_the_mcp_match_export_stitches_an_overlay_only_drawn_the_way_it_asks(
+    tmp_path: Path, drawn_with: bool, breakdown: bool, stitched: bool
+) -> None:
+    from .test_mcp_export_tools import _export_match_with_overlay_on_disk
+
+    overlay, stage_input, _result = _export_match_with_overlay_on_disk(
+        tmp_path, record="current", breakdown=breakdown, drawn_with_breakdown=drawn_with
+    )
+    assert (stage_input.overlay_path == overlay) is stitched
+
+
+def test_the_mcp_match_export_threads_the_choice(tmp_path: Path) -> None:
+    from unittest.mock import patch
+
+    from splitsmith.mcp import export_tools
+
+    from .test_mcp_export_tools import _make_audit_json, _seed_export_project
+
+    root, _src = _seed_export_project(tmp_path)
+    _make_audit_json(root / "audit", 1)
+    (root / "exports").mkdir(exist_ok=True)
+    (root / "exports" / "stage1_k-vallen_trimmed.mp4").write_bytes(b"x")
+    fake = type("R", (), {"fcpxml_path": root / "m.fcpxml", "stage_count": 1, "duration_seconds": 1.0, "anomalies": []})()
+    seen: list = []
+    with patch("splitsmith.mcp.export_tools.match_export_helpers.export_match", return_value=fake) as mock:
+        for breakdown in (True, False):
+            export_tools.export_match_tool(str(root), stage_numbers=[1], breakdown=breakdown)
+            seen.append(mock.call_args.kwargs["request"].breakdown)
+    assert seen == [True, False]
