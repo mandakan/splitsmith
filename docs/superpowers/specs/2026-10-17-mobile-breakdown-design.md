@@ -168,7 +168,26 @@ footage too.
 
 Later, each its own design:
 
-- "Open on your phone" for the desktop app.
+- **Pair your phone** with the desktop app, its own design (the next one
+  after this). There are two ways in, both ending at the desktop's own
+  server on the LAN:
+  - A QR code on the desktop.
+  - Account discovery: phone and desktop are both signed in to
+    my.splitsmith.app, and hosted offers the phone "your desktop is on this
+    network", matching the public IP of the desktop's auto-sync polls
+    against the phone's request, with the QR as the fallback.
+
+  Constraints known now:
+  - Hosted can only hand the phone a top-level link to
+    `http://<lan-address>:<port>/`. An HTTPS page cannot fetch, proxy or
+    embed a plain-HTTP private address.
+  - The link carries a short-lived, single-use pairing code that the
+    desktop swaps for its cookie. Hosted never holds the LAN secret.
+  - Listening on the LAN is an explicit desktop opt-in ("Allow my phone"),
+    off by default. Without it the app stays on loopback, as today.
+  - It is plain HTTP on the home network, so the token, not transport
+    encryption, is the protection.
+  - macOS asks once whether the app may accept incoming connections.
 - The whole-stage view and "add at the playhead". Both open the same focus
   strip and edge mode, which is why the strip takes any region and the queue
   is only a picker.
