@@ -294,6 +294,7 @@ def create_server(name: str = "splitsmith") -> FastMCP:
         overlay_max_height: int | None = None,
         overlay_max_fps: float | None = None,
         overlay_theme: str = "splitsmith",
+        breakdown: bool = True,
     ) -> dict:
         """Run a single stage's export.
 
@@ -302,7 +303,8 @@ def create_server(name: str = "splitsmith") -> FastMCP:
         FCPXML, report, and optional overlay MOV. Precondition: primary
         has ``beep_time``. No audit needed -- without one the trim is
         still cut and the shot-dependent artefacts skip themselves,
-        reporting why in ``anomalies``.
+        reporting why in ``anomalies``. ``breakdown=False`` exports it as if
+        nobody broke it down (no confirmed region reaches any output).
         """
         return export_tools.export_stage_tool(
             project_root,
@@ -316,6 +318,7 @@ def create_server(name: str = "splitsmith") -> FastMCP:
             overlay_max_height=overlay_max_height,
             overlay_max_fps=overlay_max_fps,
             overlay_theme=overlay_theme,
+            breakdown=breakdown,
         )
 
     @mcp.tool()
@@ -337,6 +340,7 @@ def create_server(name: str = "splitsmith") -> FastMCP:
         outro_path: str | None = None,
         youtube_sidecar: bool = False,
         youtube_preset: bool = False,
+        breakdown: bool = True,
     ) -> dict:
         """Stitch N stages into one match-level export (FCPXML / FCP7
         / MP4) plus optional YouTube sidecar.
@@ -346,7 +350,9 @@ def create_server(name: str = "splitsmith") -> FastMCP:
         ``export_stage`` for every stage first; this tool errors when
         any required artefact is missing rather than auto-building
         them inline (the explicit-step shape matches the rest of the
-        MCP surface and keeps timing predictable).
+        MCP surface and keeps timing predictable). ``breakdown=False``
+        leaves every stage's confirmed regions out of the markers and the
+        summaries, and an overlay drawn with them out of the stitch.
         """
         return export_tools.export_match_tool(
             project_root,
@@ -366,6 +372,7 @@ def create_server(name: str = "splitsmith") -> FastMCP:
             outro_path=outro_path,
             youtube_sidecar=youtube_sidecar,
             youtube_preset=youtube_preset,
+            breakdown=breakdown,
         )
 
     @mcp.tool()

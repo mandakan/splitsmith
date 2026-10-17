@@ -1154,6 +1154,7 @@ def test_overlay_cli_forwards_its_flags_to_render_overlay(
         hud_options: Any = None,
         segment_cache: Any = None,
         degraded: list[str] | None = None,
+        breakdown: bool = True,
     ) -> Path:
         captured.update(
             audit_path=audit_path,
@@ -1227,6 +1228,7 @@ def test_overlay_cli_defaults_theme_to_splitsmith_when_omitted(
         hud_options: Any = None,
         segment_cache: Any = None,
         degraded: list[str] | None = None,
+        breakdown: bool = True,
     ) -> Path:
         captured["theme"] = theme
         output_path.write_bytes(b"")

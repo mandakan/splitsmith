@@ -479,6 +479,14 @@ def export(
         "--made-with/--no-made-with",
         help="'Made with splitsmith' at the bottom of the closing card.",
     ),
+    breakdown: bool = typer.Option(
+        True,
+        "--breakdown/--no-breakdown",
+        help=(
+            "Use the stages' confirmed Breakdown regions (draw, movement, reloads) in the "
+            "summaries, the markers and the overlay; --no-breakdown exports every stage without them."
+        ),
+    ),
     account_brand: bool = typer.Option(
         True,
         "--account-brand/--no-account-brand",
@@ -743,6 +751,7 @@ def export(
             pre_buffer_seconds=project.trim_pre_buffer_seconds,
             project=project,
             project_dir=shooter_root,
+            breakdown=breakdown,
         )
 
     project_name = project.name or match.name or "match"
@@ -776,6 +785,7 @@ def export(
         title_page_duration_seconds=title_page_duration,
         closing_card=closing_card,
         made_with=made_with,
+        breakdown=breakdown,
         account_brand=load_brand(JsonAccountProfileStore()) if account_brand else None,
         logo_spots=spots,
         card_variant=card_variant,
@@ -877,6 +887,7 @@ def _vouched_overlays(
     pre_buffer_seconds: float,
     project: Any = None,
     project_dir: Path | None = None,
+    breakdown: bool = True,
 ) -> list[Any]:
     """Each stage's overlay MOV only when its record says it was drawn the way
     this export would draw it: from the audit as it stands, with its template
@@ -890,7 +901,8 @@ def _vouched_overlays(
     disk. ``pre_buffer_seconds`` is the project's, which says whether a
     stage's trim had a short head (``exports.overlay_short_head``). ``project``
     gives each stage's scorecard and division (``exports.hud_extras_for``),
-    which a template that declares ``splitsmith-data`` keys was drawn with."""
+    which a template that declares ``splitsmith-data`` keys was drawn with.
+    ``breakdown`` is the run's ``--breakdown`` switch, wanted like the Look."""
     from dataclasses import replace
 
     from .ui import exports as export_helpers
@@ -917,9 +929,25 @@ def _vouched_overlays(
                 upright=upright,
                 short_head=short_head,
                 hud_extras=extras,
+                breakdown=breakdown,
             ):
                 drawn_in = record.get("look") if record is not None else None
-                if (
+                if record is not None and export_helpers.overlay_record_matches(
+                    record,
+                    audit_revision=current,
+                    look=look,
+                    upright=upright,
+                    short_head=short_head,
+                    hud_extras=extras,
+                    breakdown=not breakdown,
+                ):
+                    drawn = "without" if breakdown else "with"
+                    flag = "--no-breakdown" if breakdown else "--breakdown"
+                    why = (
+                        f"was drawn {drawn} the Breakdown -- left out; pass {flag} to stitch it, "
+                        "or run the stage's export with the overlay on to draw it again"
+                    )
+                elif (
                     look is not None
                     and isinstance(drawn_in, str)
                     and drawn_in != look
@@ -929,6 +957,7 @@ def _vouched_overlays(
                         upright=upright,
                         short_head=short_head,
                         hud_extras=extras,
+                        breakdown=breakdown,
                     )
                 ):
                     why = (
@@ -947,6 +976,7 @@ def _vouched_overlays(
                         upright=upright,
                         short_head=short_head,
                         hud_extras=extras,
+                        breakdown=breakdown,
                     )
                 ):
                     # The one thing that missed: it was drawn before #1430,

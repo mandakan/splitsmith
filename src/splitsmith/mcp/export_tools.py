@@ -102,6 +102,7 @@ def export_stage_tool(
     overlay_max_height: int | None = None,
     overlay_max_fps: float | None = None,
     overlay_theme: str = "splitsmith",
+    breakdown: bool = True,
 ) -> dict[str, Any]:
     """Run the per-stage export -- writes the lossless trim + CSV +
     FCPXML + report (and optional overlay) into ``<project>/exports/``.
@@ -118,6 +119,9 @@ def export_stage_tool(
 
     Returns paths to the artefacts written + per-secondary trim map +
     any anomalies surfaced by the engine.
+
+    ``breakdown`` False exports the stage as if nobody broke it down: no
+    confirmed region reaches the CSV, the markers, the summary or the overlay.
     """
     root = resolve_project_root(project_root)
     project = MatchProject.load(root)
@@ -175,6 +179,7 @@ def export_stage_tool(
         overlay_max_height=overlay_max_height,
         overlay_max_fps=overlay_max_fps,
         overlay_theme=overlay_theme,
+        breakdown=breakdown,
     )
     result = export_helpers.export_stage(
         request=request,
@@ -222,6 +227,7 @@ def export_match_tool(
     outro_path: str | None = None,
     youtube_sidecar: bool = False,
     youtube_preset: bool = False,
+    breakdown: bool = True,
 ) -> dict[str, Any]:
     """Stitch N stages into one match-level export.
 
@@ -246,6 +252,9 @@ def export_match_tool(
     Returns ``{output_path, stage_count, duration_seconds, anomalies}``.
     Anomalies are non-fatal warnings the engine surfaced (e.g. a
     stage exported without shots, an intro file missing).
+
+    ``breakdown`` False: no confirmed region reaches the markers or the
+    summaries, and an overlay drawn with them is left out like a stale one.
     """
     # Before any artefact is looked for: the open kind is refused here as
     # the request bodies refuse it, not after a trim turned out missing.
@@ -343,14 +352,15 @@ def export_match_tool(
                     upright=upright,
                     short_head=short_head,
                     hud_extras=export_helpers.hud_extras_for(project, stage, root),
+                    breakdown=breakdown,
                 ):
                     overlay_path = candidate
                 else:
                     stale_stages.append(stage_number)
                     stale_overlays.append(
                         f"stage {stage_number}: overlay at {candidate} was drawn from an older audit or "
-                        "template (or has no record of which) -- left out; call export_stage with "
-                        "write_overlay=True to draw it again"
+                        "template, or with the Breakdown set otherwise (or has no record of which) -- "
+                        "left out; call export_stage with write_overlay=True to draw it again"
                     )
         stages_input.append(
             match_export_helpers.MatchStageInput(
@@ -370,6 +380,7 @@ def export_match_tool(
         tail_pad_seconds=tail_pad_seconds,
         include_secondaries=include_secondaries,
         include_overlay=include_overlay,
+        breakdown=breakdown,
         division=competitor_division(project, root),
         project_name=project_name or project.name or "match",
         pip_layout=pip_layout,

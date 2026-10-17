@@ -3250,6 +3250,7 @@ def render_grid_mp4(
     match_summary_seconds: float = 0.0,
     logo_spots: frozenset[str] = frozenset(),
     brand: BrandMark | None = None,
+    breakdown: bool = True,
 ) -> GridRenderResult:
     """Render every stage as a grid, then stitch them into one MP4.
 
@@ -3365,6 +3366,9 @@ def render_grid_mp4(
     before the closing card, every shooter's match figures in their own
     slot over their own last frame. It reads the shot data itself, so it
     does not need ``overlay``; with no browser it is the frames alone.
+
+    ``breakdown`` off (the export's "Use Breakdown" switch) reads no
+    stage region into the holds or the match summary.
     """
     # Before the canvas, the binary or anything else: this is a caller
     # error, not a render outcome, and it costs nothing to say so first.
@@ -3433,7 +3437,7 @@ def render_grid_mp4(
     race = free_cell == "race" and any(_unreached_cells(p) for p in plans)
     sprites = overlay or race
     if sprites:
-        overlay_data = load_overlay_data(shooters)
+        overlay_data = load_overlay_data(shooters, breakdown=breakdown)
         # One face for the whole overlay: the clock draws whatever the
         # sprite beside it resolved, so the two halves cannot diverge.
         # ``drawtext`` opens this path itself, long after this call, so it
@@ -3516,7 +3520,9 @@ def render_grid_mp4(
     card_look = load_look(overlay_theme) if cards_requested or sting_requested else None
     card_theme = theme_for(card_look) if card_look is not None else None
     free_theme = card_theme or (load_theme(overlay_theme) if free_requested else None)
-    free_tiles = load_overlay_data(shooters) if free_requested and free_cell == "splits" else {}
+    free_tiles = (
+        load_overlay_data(shooters, breakdown=breakdown) if free_requested and free_cell == "splits" else {}
+    )
     free_rounds = load_expected_rounds(shooters) if free_requested and free_cell == "stage" else {}
     # Read for the stage cards whether or not the overlay is on: the count
     # comes from project.json alone, so a slate without ``--overlay``
@@ -3675,7 +3681,7 @@ def render_grid_mp4(
         title = match_name or (title_page.text if title_page else closing.text if closing else "")
         summaries = grid_match_summaries(
             plans,
-            overlay_data or load_overlay_data(shooters),
+            overlay_data or load_overlay_data(shooters, breakdown=breakdown),
             title=title,
             duration_seconds=match_summary_seconds,
         )

@@ -255,6 +255,7 @@ function ExportInner({ slug }: { slug: string }) {
     transitionSeconds,
     renderOptions,
     includeOverlay,
+    useBreakdown,
     gridOverlay,
     gridHoldSeconds,
     gridFreeCell,
@@ -393,6 +394,21 @@ function ExportInner({ slug }: { slug: string }) {
   const orderedSelection = useMemo(
     () => rows.map((r) => r.stage.stage_number).filter((n) => selection.has(n)),
     [rows, selection],
+  );
+  // The Breakdown switch shows only where it changes something: a selected
+  // stage with a confirmed region (#1371 keeps an unbroken-down match free
+  // of it), or the grid, whose other shooters may have some.
+  const breakdownShown =
+    mode === "compare" ||
+    orderedSelection.some(
+      (n) => (project?.stages.find((s) => s.stage_number === n)?.figures?.regions ?? 0) > 0,
+    );
+  // A hidden switch is on for every request: off where it cannot be seen
+  // would still move overlay records and preview keys for nothing.
+  const sentBreakdown = breakdownShown ? useBreakdown : true;
+  const previewSettings = useMemo(
+    () => (view.useBreakdown === sentBreakdown ? view : { ...view, useBreakdown: sentBreakdown }),
+    [view, sentBreakdown],
   );
 
   // Secondaries with a confirmed beep on the selected stages: what the
@@ -677,6 +693,7 @@ function ExportInner({ slug }: { slug: string }) {
         look: lookRequest.choice,
         kinds: lookRequest.kinds,
         youtubeConnected: false,
+        useBreakdown: sentBreakdown,
       }),
     );
   }
@@ -709,6 +726,7 @@ function ExportInner({ slug }: { slug: string }) {
           look: lookRequest.choice,
           kinds: lookRequest.kinds,
           youtubeConnected: !!youtubeSettings?.connected,
+          useBreakdown: sentBreakdown,
         }),
       );
       setJob(submitted);
@@ -746,6 +764,7 @@ function ExportInner({ slug }: { slug: string }) {
         descriptionLead,
         uploadOptions,
         youtubeConnected: !!youtubeSettings?.connected,
+        useBreakdown: sentBreakdown,
       });
       const submitted = await api.exportCompareGrid(payload);
       setJob(submitted);
@@ -822,6 +841,7 @@ function ExportInner({ slug }: { slug: string }) {
     reference: shooters.find((s) => s.slug === audioFrom)?.name ?? null,
     canvas: canvas.label,
     bare: bareSelected,
+    breakdown: breakdownShown ? useBreakdown : undefined,
   });
   const summaryCtx = {
     secondaryCount,
@@ -952,6 +972,7 @@ function ExportInner({ slug }: { slug: string }) {
               camChoices={camChoices}
               bareSelected={bareSelected}
               onDesktop={onDesktop}
+              showBreakdown={breakdownShown}
             />
           </Section>
 
@@ -1061,7 +1082,7 @@ function ExportInner({ slug }: { slug: string }) {
               slug={compare ? audioFrom || slug : slug}
               stageNumber={orderedSelection[0] ?? 0}
               stageNumbers={orderedSelection}
-              settings={view}
+              settings={previewSettings}
               projectName={projectName || project?.name || ""}
               focus={lookFocus}
               hover={lookHover}

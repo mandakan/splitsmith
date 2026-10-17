@@ -50,6 +50,8 @@ export interface OutputGroupProps {
   bareSelected: number;
   /** The linked desktop renders: always an MP4 with the YouTube preset. */
   onDesktop?: boolean;
+  /** The "Use Breakdown" switch: only where a stage it exports has a confirmed region. */
+  showBreakdown?: boolean;
 }
 
 export function OutputGroup({
@@ -67,8 +69,13 @@ export function OutputGroup({
   camChoices,
   bareSelected,
   onDesktop = false,
+  showBreakdown = false,
 }: OutputGroupProps) {
-  const { mode, outputFormat, includeOverlay, overlayCodec, youtube, camOptions } = settings;
+  const { mode, outputFormat, includeOverlay, overlayCodec, youtube, camOptions, useBreakdown } = settings;
+  const breakdown = (grid: boolean) =>
+    showBreakdown ? (
+      <BreakdownField checked={useBreakdown} onChange={(v) => patch({ useBreakdown: v })} busy={busy} grid={grid} />
+    ) : null;
   if (mode === "trims") {
     return (
       <Field
@@ -120,6 +127,7 @@ export function OutputGroup({
           grid
           busy={busy}
         />
+        {breakdown(true)}
         {gridFreeCells(shooters.length) > 0 ? (
           <Field label="Free square" help={FREE_CELL_HELP[settings.gridFreeCell]}>
             <Segmented<GridFreeCell>
@@ -169,6 +177,7 @@ export function OutputGroup({
           className="w-full max-w-xs"
         />
       </Field>
+      {breakdown(false)}
       {includeOverlay ? (
         <Field
           label="Overlay codec"
@@ -218,5 +227,44 @@ export function OutputGroup({
         busy={busy}
       />
     </>
+  );
+}
+
+/** "Use Breakdown": the stages' confirmed regions in the export, both modes
+ *  and every format; a proposal nobody confirmed never reaches one either way. */
+function BreakdownField({
+  checked,
+  onChange,
+  busy,
+  grid,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  busy: boolean;
+  grid: boolean;
+}) {
+  return (
+    <Field
+      label="Breakdown"
+      help={
+        checked
+          ? grid
+            ? "The draw, movement and reloads you confirmed on Breakdown, in the summaries."
+            : "The draw, movement and reloads you confirmed on Breakdown, in the summaries, the overlay and the markers."
+          : "Off: every stage exports as if it had no Breakdown."
+      }
+    >
+      <label className="flex items-center gap-2 text-md text-ink-2">
+        <input
+          type="checkbox"
+          aria-label="Use Breakdown"
+          checked={checked}
+          disabled={busy}
+          onChange={(e) => onChange(e.target.checked)}
+          className="accent-[var(--color-ink)]"
+        />
+        Use Breakdown
+      </label>
+    </Field>
   );
 }

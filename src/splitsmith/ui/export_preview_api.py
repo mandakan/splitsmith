@@ -76,6 +76,8 @@ class ExportPreviewRequest(OverlayStyleFields, BaseModel):
     stage_numbers: list[int] | None = None
     #: "Made with splitsmith" on the closing card.
     made_with: bool = True
+    #: The export's "Use Breakdown" switch: off, no region reaches the card.
+    breakdown: bool = True
     #: Your account's brand on the title page and the closing card.
     account_brand: bool = True
     head_pad_seconds: float = Field(default=5.0, ge=0)
@@ -187,6 +189,7 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
                     label=project.competitor_name or name,
                     work_dir=Path(summary_work),
                     stage_numbers=chosen,
+                    breakdown=req.breakdown,
                 )
             stage_number = chosen[-1]
     audit_doc, _audit_version = state.load_audit(slug, stage_number)
@@ -228,6 +231,7 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
         backdrop=req.backdrop,
         event_logo=event_logo.name if event_logo is not None else None,
         made_with=req.made_with,
+        breakdown=req.breakdown,
         summary_digest=summary_digest(match_summary) if match_summary is not None else None,
         book_identity=identity_digest(book_entry) if book_entry is not None else None,
         account_brand=brand_digest(brand) if brand is not None else None,

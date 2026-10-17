@@ -100,6 +100,8 @@ export function previewBody(
     logo_spots: normalizeSpots(settings.renderOptions.logoSpots),
     project_name: projectName.trim() || null,
   };
+  // Only when off, so an untouched form keeps the request (and key) it had.
+  if (!settings.useBreakdown) body.breakdown = false;
   const resolved = resolveLookChoice(looks, lookChoiceOf(settings));
   const look = nonDefault(resolved.look, DEFAULT_LOOK);
   if (look) body.look = look;

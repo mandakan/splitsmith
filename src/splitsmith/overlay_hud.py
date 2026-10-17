@@ -215,6 +215,7 @@ def overlay_settings(
     upright: bool = False,
     short_head: float | None = None,
     hud_data: str | None = None,
+    breakdown: bool = True,
 ) -> dict[str, Any]:
     """What an overlay MOV was drawn with, as recorded beside it and
     compared before a match export reuses it. Classic draws none of the
@@ -257,7 +258,12 @@ def overlay_settings(
     ``hud_data`` (:func:`overlay_data_identity`): a scorecard re-import, a
     division change or a provider version bump moves what it draws. Every
     other record carries no such key. Passed like ``audit_revision``, read
-    before the render."""
+    before the render.
+
+    An overlay drawn with the export's "Use Breakdown" off records
+    ``breakdown: false``: it drew no region, so it never serves an export that
+    wants them, nor one with regions an export that turned them off. On is
+    the default and records no key, so every record from before matches."""
     settings: dict[str, Any] = {
         "look": look,
         "variant": variant,
@@ -276,6 +282,8 @@ def overlay_settings(
         settings["short_head"] = round(short_head, 3)
     if hud_data is not None:
         settings["hud_data"] = hud_data
+    if not breakdown:
+        settings["breakdown"] = False
     return settings
 
 

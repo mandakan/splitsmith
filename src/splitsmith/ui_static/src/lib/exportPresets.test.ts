@@ -389,3 +389,16 @@ describe("lastMatchFormat", () => {
     expect(lastMatchFormat([{ kind: "stage", formats: ["fcpxml"] }])).toBeNull();
   });
 });
+
+describe("breakdown", () => {
+  it("is on by default, a body stored before it shipped applies it on, and off round-trips", () => {
+    expect(DEFAULT_EXPORT_SETTINGS.useBreakdown).toBe(true);
+    expect(settingsToBody(DEFAULT_EXPORT_SETTINGS).breakdown).toBe(true);
+    const legacy: Partial<ExportPresetBody> = { ...YOUTUBE };
+    delete legacy.breakdown;
+    const off = { ...DEFAULT_EXPORT_SETTINGS, useBreakdown: false };
+    expect(applyBody(off, legacy as ExportPresetBody).useBreakdown).toBe(true);
+    expect(settingsToBody(off).breakdown).toBe(false);
+    expect(applyBody(DEFAULT_EXPORT_SETTINGS, settingsToBody(off)).useBreakdown).toBe(false);
+  });
+});

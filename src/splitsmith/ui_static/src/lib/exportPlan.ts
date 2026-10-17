@@ -152,6 +152,8 @@ export interface SummaryLine {
   dim?: boolean;
 }
 
+const BREAKDOWN_OFF: SummaryLine = { label: "Breakdown", value: "not used" };
+
 export function summaryLines(args: {
   mode: ExportMode;
   selected: number;
@@ -178,6 +180,8 @@ export function summaryLines(args: {
   canvas: string | null;
   /** Selected bundle stages going out without splits (``ExportStageRow.bare``). */
   bare?: number;
+  /** "Use Breakdown"; a line only when off. */
+  breakdown?: boolean;
 }): SummaryLine[] {
   const lines: SummaryLine[] = [{ label: "Stages", value: `${args.selected} / ${args.eligible}` }];
   if (args.mode === "trims") {
@@ -190,6 +194,7 @@ export function summaryLines(args: {
     lines.push({ label: "Reference", value: args.reference ?? "—", dim: args.reference === null });
     lines.push({ label: "Canvas", value: args.canvas ?? "—" });
     lines.push(cards);
+    if (args.breakdown === false) lines.push(BREAKDOWN_OFF);
     return lines;
   }
   if (args.bare) {
@@ -212,6 +217,7 @@ export function summaryLines(args: {
   if (args.youtube !== null) {
     lines.push(args.youtube ? { label: "YouTube", value: "preset + sidecar" } : { label: "YouTube", value: "off", dim: true });
   }
+  if (args.breakdown === false) lines.push(BREAKDOWN_OFF);
   return lines;
 }
 

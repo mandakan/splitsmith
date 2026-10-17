@@ -1542,6 +1542,28 @@ Coach's ``StageStrip`` and its stat strip (on the move, exposed reload,
 auto proposals only) commits ``lib/events.keepEvent``: ``source`` to
 ``manual``, nothing else; dragging, nudging or changing kind confirm too.
 
+**Use Breakdown** (the export's one switch, on by default): off, an export
+reads every stage as one nobody broke down, confirmed regions included (no
+markers, no reload row or Static / Moving split, no ``moving`` column, no
+stage bar or reload chip, the Draw is the first shot; a ``write_csv`` stage
+export deletes an earlier events CSV, locally and hosted, as for any stage
+with no confirmed region). It is ``breakdown``
+on every request body (stage, match, grid, preview), ``ExportPresetBody``,
+``MatchExportRequestData``, both renderers, both CLIs and ``splitsmith
+overlay`` (``--no-breakdown``) and both MCP export tools; a new region
+reader takes it. The engine half is the loaders' ``breakdown=``
+(``stage_summary_data._confirmed_events``), ``export_preview``'s and
+``overlay_hud_render``'s reads and Classic's draw. An overlay drawn without
+it records ``breakdown: false`` (``overlay_settings``; on, no key, so every
+record from before matches), so ``overlay_record_matches`` redraws or, in
+the CLI and MCP, leaves out an overlay drawn the other way; the CLI's note
+names the flag that stitches it. The SPA sends it only when off
+(``useBreakdown`` on ``ExportSettings``; a hidden switch sends on, the preview
+included, ``sentBreakdown`` in ``Export.tsx``) and shows the switch only where it
+changes something: a selected stage with a confirmed region
+(``figures.regions``), or the grid. A match with none shows no Breakdown on
+Export at all (#1371).
+
 HUD contract (``overlay_hud.hud_stage_data``): ``data.stage.events``
 (``{kind, start, end}``, clip seconds like ``shots[].t``),
 ``data.stage.reloads`` (``{start, end, duration, exposed}``, exposed

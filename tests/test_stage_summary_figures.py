@@ -66,6 +66,22 @@ def test_the_upright_card_reads_the_draw_region_too() -> None:
     assert [e.text for g in groups for e in g.elements if e.caption == "Draw"] == ["0.98"]
 
 
+def test_without_the_breakdown_the_loaders_read_no_regions(tmp_path: Path) -> None:
+    """The export's 'Use Breakdown' switch off: the stage reads as one
+    nobody broke down -- no regions, no reloads, no shot fired moving."""
+    from splitsmith.stage_summary_data import load_stage_events, load_stage_reloads, load_stage_shots
+
+    audit = _audit(tmp_path, [_MOVE_1, _MOVE_2, _RELOAD])
+    assert load_stage_events(audit) and load_stage_reloads(audit)
+    assert any(s.moving for s in load_stage_shots(audit))
+    assert load_stage_events(audit, breakdown=False) == ()
+    assert load_stage_reloads(audit, breakdown=False) == ()
+    assert not any(s.moving for s in load_stage_shots(audit, breakdown=False))
+    assert [s.split for s in load_stage_shots(audit, breakdown=False)] == [
+        s.split for s in load_stage_shots(audit)
+    ]
+
+
 def test_every_tile_builder_carries_the_stages_regions() -> None:
     """The Draw reads ``TileStageData.events``: a production builder with
     shots that forgets them shows the first shot as the draw, silently.

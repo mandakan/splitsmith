@@ -155,6 +155,14 @@ def export(
         "--made-with/--no-made-with",
         help="'Made with splitsmith' at the bottom of the closing card.",
     ),
+    breakdown: bool = typer.Option(
+        True,
+        "--breakdown/--no-breakdown",
+        help=(
+            "Use the stages' confirmed Breakdown regions in the summary holds and the match "
+            "summary; --no-breakdown renders every stage without them. --format mp4 only."
+        ),
+    ),
     account_brand: bool = typer.Option(
         True,
         "--account-brand/--no-account-brand",
@@ -331,6 +339,7 @@ def export(
             summary_hold=summary_hold,
             transition=transition,
             transition_seconds=transition_seconds,
+            breakdown=breakdown,
             cards=CardOptions(
                 stage_titles=titles,  # type: ignore[arg-type]  # validated above against _TITLE_KINDS
                 title_duration_seconds=title_duration,
@@ -480,6 +489,7 @@ def _export_from_match(
     cards: CardOptions | None = None,
     transition: str = "none",
     transition_seconds: float = 0.5,
+    breakdown: bool = True,
 ) -> None:
     """Render the compare export directly from a merged Match."""
     match = Match.load(match_root)
@@ -550,6 +560,7 @@ def _export_from_match(
             summary_hold=summary_hold,
             transition=transition,
             transition_seconds=transition_seconds,
+            breakdown=breakdown,
             cards=cards or CardOptions(),
             match=match,
             event_logo=ensure_local_event_logo(match.branding, match_root, storage=None, match_id=None),
@@ -582,6 +593,7 @@ def _render_grid_mp4(
     event_logo: Path | None = None,
     transition: str = "none",
     transition_seconds: float = 0.5,
+    breakdown: bool = True,
 ) -> None:
     """Render the grid straight to MP4, owning the scratch work dir.
 
@@ -685,6 +697,7 @@ def _render_grid_mp4(
                 match_summary_seconds=cards.match_summary_seconds,
                 logo_spots=cards.logo_spots,
                 brand=brand if cards.account_brand else None,
+                breakdown=breakdown,
             )
         except mp4_grid.GridRenderError as exc:
             console.print(f"[red]Error:[/] {exc}")

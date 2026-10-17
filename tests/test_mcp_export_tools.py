@@ -419,6 +419,8 @@ def _export_match_with_overlay_on_disk(
     after_record: Callable[[], None] | None = None,
     beep_time: float = 5.0,
     short_head: float | None = None,
+    breakdown: bool = True,
+    drawn_with_breakdown: bool = True,
 ) -> tuple[Path, object, dict]:
     """Seed a stage with a trim and an overlay MOV, write the overlay's
     settings record as ``record`` says (``current`` / ``stale`` / ``none``),
@@ -445,6 +447,7 @@ def _export_match_with_overlay_on_disk(
             max_fps=None,
             audit_revision=exports_mod.overlay_audit_revision(audit_path),
             short_head=short_head,
+            breakdown=drawn_with_breakdown,
         )
         (exports_dir / "stage1_k-vallen_overlay.json").write_text(json.dumps(settings))
     if after_record is not None:
@@ -475,7 +478,9 @@ def _export_match_with_overlay_on_disk(
         "splitsmith.mcp.export_tools.match_export_helpers.export_match",
         return_value=fake_result,
     ) as mock_export:
-        result = export_tools.export_match_tool(str(root), stage_numbers=[1], include_overlay=True)
+        result = export_tools.export_match_tool(
+            str(root), stage_numbers=[1], include_overlay=True, breakdown=breakdown
+        )
     return overlay, mock_export.call_args.kwargs["stages"][0], result
 
 

@@ -27,6 +27,8 @@ logger = logging.getLogger(__name__)
 
 def load_overlay_data(
     shooters: Sequence[CompareShooterBundle],
+    *,
+    breakdown: bool = True,
 ) -> dict[tuple[str, int], TileStageData]:
     """Read shots + scoring for every (label, stage) the roster covers.
 
@@ -34,12 +36,17 @@ def load_overlay_data(
     nothing could be read for it -- the overlay draws less, it does not
     skip a tile, and a caller should never have to distinguish "absent
     from the mapping" from "present but empty".
+
+    ``breakdown`` off (the export's "Use Breakdown" switch) reads no
+    region: every tile is the stage as if nobody broke it down.
     """
     out: dict[tuple[str, int], TileStageData] = {}
     for bundle in shooters:
         project = _load_project(bundle)
         for stage_number, stage in sorted(bundle.stages_by_number.items()):
-            out[(bundle.label, stage_number)] = _load_tile(bundle, stage, stage_number, project)
+            out[(bundle.label, stage_number)] = _load_tile(
+                bundle, stage, stage_number, project, breakdown=breakdown
+            )
     return out
 
 
@@ -93,11 +100,11 @@ def _load_project(bundle: CompareShooterBundle) -> MatchProject | None:
         return None
 
 
-def _load_shots(stage: CompareStageBundle) -> tuple[TileShot, ...]:
+def _load_shots(stage: CompareStageBundle, *, breakdown: bool = True) -> tuple[TileShot, ...]:
     """This stage's audited shots, measured from the beep -- see
     :func:`splitsmith.stage_summary_data.load_stage_shots`, where the
     reader lives since issue #972."""
-    return load_stage_shots(stage.audit_path)
+    return load_stage_shots(stage.audit_path, breakdown=breakdown)
 
 
 def _load_tile(
@@ -105,15 +112,17 @@ def _load_tile(
     stage: CompareStageBundle,
     stage_number: int,
     project: MatchProject | None,
+    *,
+    breakdown: bool = True,
 ) -> TileStageData:
     """Build one tile's overlay data, degrading rather than raising."""
-    shots = _load_shots(stage)
+    shots = _load_shots(stage, breakdown=breakdown)
     # Confirmed reloads ride on the tile so the grid hold's summary gets the
     # same reload row the single-shooter card does (spec 2026-10-08, part 2).
-    reloads = load_stage_reloads(stage.audit_path)
+    reloads = load_stage_reloads(stage.audit_path, breakdown=breakdown)
     # And the confirmed regions, for the tile's Draw (a draw region's
     # length, spec 2026-10-17).
-    events = load_stage_events(stage.audit_path)
+    events = load_stage_events(stage.audit_path, breakdown=breakdown)
     entry = None
     if project is not None:
         try:

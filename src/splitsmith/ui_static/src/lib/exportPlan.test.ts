@@ -153,6 +153,15 @@ describe("summaryLines", () => {
     expect(lines[2]).toEqual({ label: "Transitions", value: "cut", dim: true });
     expect(lines[3]).toEqual({ label: "Cards", value: "off", dim: true });
   });
+  it("says the Breakdown is not used only when it is off, in both modes", () => {
+    for (const mode of ["single", "compare"] as const) {
+      expect(summaryLines({ ...base, mode }).some((l) => l.label === "Breakdown")).toBe(false);
+      expect(summaryLines({ ...base, mode, breakdown: true }).some((l) => l.label === "Breakdown")).toBe(false);
+      const off = summaryLines({ ...base, mode, breakdown: false });
+      expect(off[off.length - 1]).toEqual({ label: "Breakdown", value: "not used" });
+    }
+    expect(summaryLines({ ...base, mode: "trims", breakdown: false }).some((l) => l.label === "Breakdown")).toBe(false);
+  });
   it("names the overlay style when one is chosen", () => {
     const on = summaryLines({ ...base, mode: "single", overlay: true });
     expect(on.find((l) => l.label === "Overlay")).toEqual({ label: "Overlay", value: "on" });

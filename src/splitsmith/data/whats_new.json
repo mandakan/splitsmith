@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "export-use-breakdown",
+      "date": "2026-10-17",
+      "title": "Export with or without your Breakdown",
+      "body": "Turn off Use Breakdown under Output on the Export page to leave the draw, movement and reloads you confirmed out of a video or timeline. It shows once a stage has some."
+    },
+    {
       "id": "breakdown-draw-region",
       "date": "2026-10-17",
       "title": "Mark the draw, even on the move",

@@ -1453,3 +1453,49 @@ def test_the_export_request_accepts_any_installed_look_and_names_them_on_a_miss(
         "default",
         None,
     )
+
+
+def test_export_match_without_the_breakdown_carries_no_region_marker(tmp_path: Path) -> None:
+    """The export's 'Use Breakdown' switch off: a confirmed region is as
+    absent from the timeline as a proposal is."""
+    events = [{"id": "evt-1", "kind": "reload", "start": 8.05, "end": 9.47, "source": "manual"}]
+    result = match_exports_mod.export_match(
+        stages=[_stage_input_with_events(tmp_path, events)],
+        request=_card_request(output_format="fcpxml", breakdown=False),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    assert "Reload" not in result.fcpxml_path.read_text(encoding="utf-8")
+
+
+def test_without_the_breakdown_the_summaries_read_no_region(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Switch off: the hold has no reloads or regions, and the match
+    summary's Draw is the first shot again, not the draw region."""
+    captured = _capture_mp4(monkeypatch)
+    stage = _one_stage_input(tmp_path)
+    doc = json.loads(stage.audit_path.read_text())
+    doc["events"] = [
+        {"id": "evt-1", "kind": "reload", "start": 1.0, "end": 2.25, "source": "manual"},
+        {"id": "evt-2", "kind": "draw", "start": 0.1, "end": 0.2, "source": "manual"},
+    ]
+    stage.audit_path.write_text(json.dumps(doc))
+
+    def run(breakdown: bool):  # noqa: ANN202
+        match_exports_mod.export_match(
+            stages=[stage],
+            request=_card_request(summary_hold_seconds=3.0, match_summary=True, breakdown=breakdown),
+            exports_dir=tmp_path / f"exports-{breakdown}",
+            config=OutputConfig(),
+            probe=_stub_probe,
+        )
+        comp = captured["comp"]
+        return comp.stages[0].summary.data, comp.match_summary.rows[0].draw
+
+    hold, draw = run(True)
+    assert hold.reloads and hold.events and draw == 0.1
+    hold, draw = run(False)
+    assert hold.reloads == () and hold.events == ()
+    assert draw is not None and draw != 0.1

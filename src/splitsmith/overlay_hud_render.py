@@ -141,22 +141,24 @@ def render_hud_overlay(
     rasterizer: Rasterizer,
     segment_cache: SegmentCache | None,
     extras: HudExtras | None = None,
+    breakdown: bool = True,
 ) -> Path:
     """Render the stage's HUD through ``template`` into ``output_path``.
     ``extras`` is what the request layer knows of the stage beyond the
     audit; it reaches the context only through the keys the template
-    declares (``hud_extras.declared_data``)."""
+    declares (``hud_extras.declared_data``). ``breakdown=False`` (an export
+    with "Use Breakdown" off) draws the stage as one nobody broke down."""
     # Deferred: overlay_render imports this module, and the encoder argv
     # and the partial-output rule are its own, shared by both paths.
     from .overlay_render import _build_ffmpeg_cmd, _discard_partial_output
 
-    shots = load_stage_shots(audit_path)
+    shots = load_stage_shots(audit_path, breakdown=breakdown)
     if not shots:
         raise HudFallbackError("no readable shots in the audit")
     fps = rate_num / rate_den
     frame_count = max(0, int(round(duration_seconds * fps)))
     page_width, page_height = hud_page_size(width, height)
-    regions = _confirmed_regions(audit_path)
+    regions = _confirmed_regions(audit_path) if breakdown else []
     stage = hud_stage_data(shots, beep_in_clip=beep_offset_seconds, events=regions)
     extras_data = hud_extras_data(
         declared_data(template), shots, beep_in_clip=beep_offset_seconds, events=regions, extras=extras

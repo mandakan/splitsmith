@@ -377,6 +377,9 @@ class MatchExportRequestData:
     # card style such as ``rise`` names no summary.
     summary_variant: str | None = None
     match_summary_variant: str | None = None
+    #: The export's "Use Breakdown" switch: off, the stage's regions reach
+    #: no output (markers, summaries, overlay), as if nobody broke it down.
+    breakdown: bool = True
     #: The shooter's division, resolved by the caller
     #: (``division.competitor_division``): what a summary template's ammo and
     #: scoring data read (``ui.exports.hud_extras_from``).
@@ -529,7 +532,11 @@ def export_match(
         # Confirmed regions only (spec 2026-10-08, part 2) -- an auto
         # proposal carries into the match FCPXML / FCP7 XML no more than
         # it does the per-stage export.
-        regions = confirmed_from_doc(audit_data, log_context=f"stage {stage_input.stage_number}")
+        regions = (
+            confirmed_from_doc(audit_data, log_context=f"stage {stage_input.stage_number}")
+            if request.breakdown
+            else []
+        )
         # Empty ``shots[]`` is permissive (#214): the stage still rides
         # the spine as a trim-only segment with its chapter (chapters are
         # per stage). What it loses is what depends on shots: the shot
@@ -751,13 +758,13 @@ def export_match(
                     data=TileStageData(
                         label=label,
                         stage_number=stage_input.stage_number,
-                        shots=load_stage_shots(stage_input.audit_path),
+                        shots=load_stage_shots(stage_input.audit_path, breakdown=request.breakdown),
                         stage_time_seconds=stage_input.stage_time_seconds,
                         stage_time_is_manual=stage_input.stage_time_is_manual,
                         scorecard=stage_input.scorecard,
                         stage_rounds=stage_input.stage_rounds,
-                        reloads=load_stage_reloads(stage_input.audit_path),
-                        events=load_stage_events(stage_input.audit_path),
+                        reloads=load_stage_reloads(stage_input.audit_path, breakdown=request.breakdown),
+                        events=load_stage_events(stage_input.audit_path, breakdown=request.breakdown),
                     ),
                     label=label,
                     duration_seconds=request.summary_hold_seconds,
@@ -788,13 +795,13 @@ def export_match(
                         TileStageData(
                             label=label,
                             stage_number=stage_input.stage_number,
-                            shots=load_stage_shots(stage_input.audit_path),
+                            shots=load_stage_shots(stage_input.audit_path, breakdown=request.breakdown),
                             stage_time_seconds=stage_input.stage_time_seconds,
                             stage_time_is_manual=stage_input.stage_time_is_manual,
                             scorecard=stage_input.scorecard,
                             stage_rounds=stage_input.stage_rounds,
                             # The Draw (a draw region's length, spec 2026-10-17).
-                            events=load_stage_events(stage_input.audit_path),
+                            events=load_stage_events(stage_input.audit_path, breakdown=request.breakdown),
                         ),
                     )
                     for stage_input in stages

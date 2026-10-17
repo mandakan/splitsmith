@@ -91,6 +91,10 @@ class StageExportRequest:
     # The Look's summary style (spec 2026-10-16-summary-templates-design);
     # ``default`` is the engine's card.
     summary_variant: str = DEFAULT_VARIANT
+    # "Use Breakdown": with it off the export reads no region at all -- no
+    # moving shots, events CSV, region markers, overlay bands or summary
+    # rows, and the Draw is the first shot -- as a stage nobody broke down.
+    breakdown: bool = True
 
 
 @dataclass(frozen=True)
@@ -241,6 +245,7 @@ def overlay_record_matches(
     upright: bool = False,
     short_head: float | None = None,
     hud_extras: HudExtras | None = None,
+    breakdown: bool = True,
 ) -> bool:
     """Whether an overlay MOV whose settings record is ``record`` may be
     reused: the one rule for every reuse check (the match export job, the
@@ -260,7 +265,9 @@ def overlay_record_matches(
     the pre-buffer, late) misses. ``hud_extras`` (likewise only without
     ``wanted``) is the stage's :func:`hud_extras_for`: a template that declares
     ``splitsmith-data`` keys must have been drawn with the scorecard and
-    division as they stand. An unreadable audit or record never matches."""
+    division as they stand. ``breakdown`` (likewise only without ``wanted``)
+    is the export's "Use Breakdown" switch. An unreadable audit or record
+    never matches."""
     if record is None or audit_revision is None:
         return False
     # Nothing vouches for the palette and faces an overlay drew with when its
@@ -288,6 +295,7 @@ def overlay_record_matches(
                 upright=upright,
                 short_head=short_head,
                 hud_data=overlay_data_identity(wanted_look, variant, hud_extras),
+                breakdown=breakdown,
             )
         except (KeyError, TypeError, ValueError):
             return False
@@ -357,7 +365,8 @@ def export_stage(
     # surfaces "No shots detected in the stage window" for this case so
     # the audit trail stays clean.
 
-    regions = _confirmed_regions(audit_data, audit_path)
+    # "Use Breakdown" off: the stage exports as one nobody broke down.
+    regions = _confirmed_regions(audit_data, audit_path) if request.breakdown else []
     # Where the beep sits in the primary's lossless trim: the pre-buffer, or
     # less when the source had less than that before the beep (#1430). Every
     # output drawn over the trim (overlay, FCPXML markers) reads this, never
@@ -555,6 +564,7 @@ def export_stage(
                     segment_cache=segment_cache,
                     degraded=overlay_notes,
                     hud_extras=hud_extras,
+                    breakdown=request.breakdown,
                 )
                 overlay_path = overlay_target
                 # Record what was drawn: a fallback drew Classic, so a later
@@ -577,6 +587,7 @@ def export_stage(
                             short_head=overlay_short_head(beep_time_in_source, pre_buffer_seconds),
                             # A fallback drew Classic, which reads no extras.
                             hud_data=None if overlay_notes else drawn_data,
+                            breakdown=request.breakdown,
                         ),
                         sort_keys=True,
                     ),
@@ -625,14 +636,14 @@ def export_stage(
                     data=TileStageData(
                         label=label,
                         stage_number=stage_data.stage_number,
-                        shots=load_stage_shots(audit_path),
+                        shots=load_stage_shots(audit_path, breakdown=request.breakdown),
                         # The model treats <=0 as unset; a zero-second
                         # stage time is never real.
                         stage_time_seconds=stage_data.time_seconds if stage_data.time_seconds > 0 else None,
                         stage_time_is_manual=stage_time_is_manual,
                         scorecard=scorecard,
-                        reloads=load_stage_reloads(audit_path),
-                        events=load_stage_events(audit_path),
+                        reloads=load_stage_reloads(audit_path, breakdown=request.breakdown),
+                        events=load_stage_events(audit_path, breakdown=request.breakdown),
                     ),
                     label=label,
                     trimmed_video_path=card_source,

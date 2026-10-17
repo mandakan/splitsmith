@@ -1059,6 +1059,35 @@ def test_an_overlay_drawn_before_the_short_head_fix_is_drawn_again() -> None:
     assert exports_mod.overlay_record_matches(old, audit_revision="rev")
 
 
+def test_an_overlay_drawn_with_the_breakdown_is_never_reused_without_it() -> None:
+    """The 'Use Breakdown' switch: an overlay drawn with regions must not
+    serve an export that turned them off, nor the other way round. 'On' is
+    the default and records no key, so every existing record still matches."""
+    from splitsmith.overlay_hud import HudOptions, overlay_settings, overlay_theme_identity
+
+    def record(breakdown: bool) -> dict[str, Any]:
+        return overlay_settings(
+            look="splitsmith",
+            variant="default",
+            options=HudOptions(),
+            codec="auto",
+            max_height=None,
+            max_fps=None,
+            audit_revision="rev",
+            theme=overlay_theme_identity("splitsmith"),
+            breakdown=breakdown,
+        )
+
+    on, off = record(True), record(False)
+    assert "breakdown" not in on and off["breakdown"] is False
+    assert not exports_mod.overlay_record_matches(on, audit_revision="rev", wanted=off)
+    assert not exports_mod.overlay_record_matches(off, audit_revision="rev", wanted=on)
+    assert not exports_mod.overlay_record_matches(on, audit_revision="rev", breakdown=False)
+    assert not exports_mod.overlay_record_matches(off, audit_revision="rev")
+    assert exports_mod.overlay_record_matches(off, audit_revision="rev", breakdown=False)
+    assert exports_mod.overlay_record_matches(on, audit_revision="rev")
+
+
 def test_a_short_head_fcpxml_puts_its_markers_at_the_trims_own_beep(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1448,6 +1477,47 @@ def test_export_stage_moving_column_true_inside_a_confirmed_movement_region(tmp_
     events_rows = list(csv.reader(events_csv.open()))
     assert events_rows[0] == ["id", "kind", "start", "end", "duration", "source", "note"]
     assert events_rows[1] == ["evt-1", "movement", "3.000", "6.000", "3.000", "manual", ""]
+
+
+def test_export_stage_without_the_breakdown_reads_no_region(tmp_path: Path) -> None:
+    """'Use Breakdown' off: the stage exports as one nobody broke down -- no
+    shot moving, no events CSV -- however many regions are confirmed."""
+    audit_path = tmp_path / "stage1.json"
+    doc = _audit_payload(
+        shots=[
+            {"shot_number": 1, "candidate_number": 1, "time": 5.5, "ms_after_beep": 500},
+            {"shot_number": 2, "candidate_number": 2, "time": 9.0, "ms_after_beep": 4000},
+        ]
+    )
+    doc["events"] = [_event("evt-1", "movement", 3.0, 6.0, source="manual")]
+    audit_path.write_text(json.dumps(doc), encoding="utf-8")
+    exports_dir = tmp_path / "exports"
+    result = exports_mod.export_stage(
+        request=exports_mod.StageExportRequest(
+            stage_number=1,
+            write_trim=False,
+            write_csv=True,
+            write_fcpxml=False,
+            write_report=False,
+            breakdown=False,
+        ),
+        audit_path=audit_path,
+        exports_dir=exports_dir,
+        source_video_path=None,
+        pre_buffer_seconds=5.0,
+        post_buffer_seconds=5.0,
+        stage_data=StageData(
+            stage_number=1,
+            stage_name="Stage 1 -- H1",
+            time_seconds=8.0,
+            scorecard_updated_at=datetime(2026, 5, 2, 14, 30, tzinfo=UTC),
+        ),
+        beep_time_in_source=10.0,
+        config=Config(),
+    )
+    rows = list(csv.reader(result.csv_path.open()))
+    assert [r[-1] for r in rows[1:]] == ["false", "false"]
+    assert not (exports_dir / "stage1_stage-1-h1_events.csv").exists()
 
 
 def test_export_stage_with_no_confirmed_regions_writes_no_events_csv(tmp_path: Path) -> None:
