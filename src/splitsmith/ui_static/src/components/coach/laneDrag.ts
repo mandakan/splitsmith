@@ -96,6 +96,9 @@ export function dragFrame(
   if (drag.mode === "create") {
     // The moving edge stops at the nearest same-lane region on either side of the anchor.
     const lane = current.filter((x) => x.kind === drag.kind && x.id !== drag.id);
+    // A stage has one draw (spec 2026-10-17): a drag on the Draw lane beside
+    // it creates nothing, rather than a region the commit would then refuse.
+    if (drag.kind === "draw" && lane.length > 0) return null;
     const lo = Math.max(0, ...lane.filter((x) => x.end <= drag.anchorT).map((x) => x.end));
     const hi = Math.min(duration, ...lane.filter((x) => x.start >= drag.anchorT).map((x) => x.start));
     const edge = Math.min(Math.max(snap(t), lo), hi);

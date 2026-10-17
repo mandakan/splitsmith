@@ -349,9 +349,13 @@ def hud_stage_data(
         ],
         "stage_time": round(shots[-1].time_from_beep, 6) if shots else 0.0,
         "rounds": len(shots),
+        # A draw reaches no template until the overlay's draw band ships
+        # (spec 2026-10-17, slice 3): every shipped style would draw it as
+        # an unknown, muted band over the movement it sits in.
         "events": [
             {"kind": e.kind, "start": _clip(beep_in_clip, e.start), "end": _clip(beep_in_clip, e.end)}
             for e in regions
+            if e.kind != "draw"
         ],
         "reloads": [
             {
