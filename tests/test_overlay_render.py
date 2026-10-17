@@ -76,7 +76,12 @@ def test_a_confirmed_draw_is_shot_ones_split_on_classic() -> None:
     """Spec 2026-10-17: shot 1's split is the draw; with a confirmed draw
     region Classic shows its length, as every other Draw surface does.
     Later shots are untouched."""
-    kwargs = dict(shot_times_in_clip=[3.32, 3.62], beep_time_in_clip=1.0, fps=10.0, duration_seconds=5.0)
+    kwargs = {
+        "shot_times_in_clip": [3.32, 3.62],
+        "beep_time_in_clip": 1.0,
+        "fps": 10.0,
+        "duration_seconds": 5.0,
+    }
     plain = overlay_render.build_frame_states(**kwargs)
     drawn = overlay_render.build_frame_states(**kwargs, draw_seconds=0.98)
     assert plain[34].last_split == pytest.approx(2.32)
