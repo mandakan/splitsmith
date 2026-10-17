@@ -4341,6 +4341,7 @@ def register_job_bodies(state: AppState) -> None:
                         write_summary_card=req.write_summary_card,
                         summary_hold_seconds=req.summary_hold_seconds,
                         summary_variant=req.summary_variant,
+                        breakdown=req.breakdown,
                     ),
                     audit_path=audit_file,
                     exports_dir=exports_dir,
@@ -4596,6 +4597,7 @@ def register_job_bodies(state: AppState) -> None:
                             req.overlay_variant,
                             export_helpers.hud_extras_for(proj, stg, state.shooter_root(slug)),
                         ),
+                        breakdown=req.breakdown,
                     )
                     overlay_reusable = export_helpers.overlay_record_matches(
                         export_helpers.read_overlay_settings(overlay_record),
@@ -4653,6 +4655,7 @@ def register_job_bodies(state: AppState) -> None:
                                 overlay_theme=req.overlay_theme,
                                 overlay_variant=req.overlay_variant,
                                 overlay_options=req.hud_options(),
+                                breakdown=req.breakdown,
                             ),
                             audit_path=audit_dir / f"stage{stage_number}.json",
                             exports_dir=exports_dir,
@@ -4771,6 +4774,7 @@ def register_job_bodies(state: AppState) -> None:
                 closing_card_variant=req.closing_card_variant,
                 summary_variant=req.summary_variant,
                 match_summary_variant=req.match_summary_variant,
+                breakdown=req.breakdown,
                 division=competitor_division(proj, state.shooter_root(slug)),
                 overlay_theme=req.overlay_theme,
                 summary_hold_seconds=req.summary_hold_seconds,
