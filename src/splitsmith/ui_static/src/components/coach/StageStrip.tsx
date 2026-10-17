@@ -15,17 +15,11 @@
  */
 import { useMemo, useRef } from "react";
 
-import { CHIP_TICK_BG } from "@/components/ui/chipTicks";
-import type { CoachShot, StageEvent, StageEventKind } from "@/lib/api";
+import { CHIP_TICK_BG, HUE_STRIP } from "@/components/ui/chipTicks";
+import type { CoachShot, StageEvent } from "@/lib/api";
 import { playheadX, stepShot, stripGeometry, stripTarget } from "@/lib/stageStrip";
+import { LANE_TICK } from "@/components/coach/laneDrag";
 import { cn } from "@/lib/utils";
-
-const BAR_BG: Record<StageEventKind, string> = {
-  draw: "bg-draw/30",
-  movement: "bg-beep/30",
-  activation: "bg-ink-2/25",
-  reload: "bg-live",
-};
 
 export interface StageStripProps {
   shots: CoachShot[];
@@ -84,7 +78,7 @@ export function StageStrip({ shots, events, stageTime, tFromBeep, activeShotNumb
             key={b.id}
             aria-hidden
             data-strip-bar={b.kind}
-            className={cn("pointer-events-none absolute rounded-sm", BAR_BG[b.kind], b.tall ? "inset-y-1.5" : "top-[19px] h-2.5")}
+            className={cn("pointer-events-none absolute rounded-sm", HUE_STRIP[LANE_TICK[b.kind]], b.tall ? "inset-y-1.5" : "top-[19px] h-2.5")}
             style={{ left: pct(b.x0), width: pct(b.x1 - b.x0) }}
           />
         ))}

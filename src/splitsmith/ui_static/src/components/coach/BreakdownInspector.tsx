@@ -30,6 +30,8 @@ import type { CoachShot, StageEvent } from "@/lib/api";
 import { useInspectorFolded, useShotsFolded } from "@/lib/breakdownPrefs";
 import { keepAllEvents } from "@/lib/events";
 import { gapTier } from "@/lib/splits";
+import { LANE_TICK } from "@/components/coach/laneDrag";
+import { CHIP_TICK_BG } from "@/components/ui/chipTicks";
 import { BUDGET_LABEL, BUDGET_TICK } from "@/lib/timeBudget";
 import type { StageView, StageWorkspace } from "@/lib/useStageWorkspace";
 import { cn } from "@/lib/utils";
@@ -39,13 +41,6 @@ const KIND_LABEL: Record<StageEvent["kind"], string> = {
   movement: "Movement",
   reload: "Reload",
   activation: "Activation",
-};
-// The lanes' hues (LaneEditor), so the rail's tick reads as the lane it came from.
-const KIND_TICK: Record<StageEvent["kind"], string> = {
-  draw: "bg-draw",
-  movement: "bg-beep",
-  reload: "bg-live",
-  activation: "bg-ink-2",
 };
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
@@ -86,7 +81,7 @@ export function BreakdownInspector({ ws, view, compact, scrollRef }: BreakdownIn
           <div data-testid="inspector-rail-selection" className="flex flex-col items-center gap-2">
             <i
               aria-hidden
-              className={cn("size-1.5 rounded-full", selectedEvent ? KIND_TICK[selectedEvent.kind] : "bg-muted")}
+              className={cn("size-1.5 rounded-full", selectedEvent ? CHIP_TICK_BG[LANE_TICK[selectedEvent.kind]] : "bg-muted")}
             />
             <Label tone="ink" className="[writing-mode:vertical-rl]">
               {what}

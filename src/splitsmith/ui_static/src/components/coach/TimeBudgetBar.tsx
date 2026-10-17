@@ -6,18 +6,9 @@
  * renders the match page's thin, unlabelled bar; `scale` (0-1) draws it
  * on a shared time axis.
  */
-import { BUDGET_LABEL, type BudgetClass, type TimeBudget } from "@/lib/timeBudget";
+import { HUE_FILL } from "@/components/ui/chipTicks";
+import { BUDGET_LABEL, BUDGET_TICK, type TimeBudget } from "@/lib/timeBudget";
 import { cn } from "@/lib/utils";
-
-const FILL: Record<BudgetClass, string> = {
-  first_shot: "bg-draw text-bg",
-  movement: "bg-beep text-bg",
-  transition: "bg-manual text-bg",
-  split: "bg-done text-bg",
-  reload: "bg-live text-bg",
-  activation: "bg-ink-2 text-bg",
-  unclassified: "bg-surface-3 text-ink-2",
-};
 
 export interface TimeBudgetBarProps {
   budget: TimeBudget;
@@ -43,7 +34,7 @@ export function TimeBudgetBar({ budget, compact = false, scale = 1, className }:
           style={{ flexGrow: s.seconds, flexBasis: 0 }}
           className={cn(
             "numeral flex min-w-0 items-center justify-center overflow-hidden whitespace-nowrap text-sm",
-            FILL[s.cls],
+            HUE_FILL[BUDGET_TICK[s.cls]],
             s.outliers.length > 0 && "shadow-[inset_0_0_0_2px_var(--color-live)]",
           )}
         >

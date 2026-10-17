@@ -9,7 +9,9 @@
  * source is isolated behind TierBaselines so a rolling cross-match
  * baseline can be swapped in later without touching consumers.
  */
+import { HUE_TONE } from "@/components/ui/chipTicks";
 import type { CoachIntervalClass, CoachMatchDistributions } from "@/lib/api";
+import { BUDGET_TICK } from "@/lib/timeBudget";
 
 export type TierLabel = "quick" | "typical" | "long";
 
@@ -196,11 +198,12 @@ export function beepElapsed(
   return stageTime != null ? Math.min(raw, stageTime) : raw;
 }
 
+/** Each class's pill in its hue (``chipTicks.HUE_TONE``, by ``BUDGET_TICK``). */
 export const INTERVAL_TONE: Record<CoachIntervalClass, string> = {
-  first_shot: "text-draw border-draw/40 bg-draw/10",
-  split: "text-done border-done/40 bg-done/10",
-  transition: "text-manual border-manual/40 bg-manual/10",
-  movement: "text-beep border-beep/40 bg-beep-tint",
-  reload: "text-live border-live/40 bg-live/10",
-  activation: "text-ink-2 border-rule-strong bg-surface-3",
+  first_shot: HUE_TONE[BUDGET_TICK.first_shot],
+  split: HUE_TONE[BUDGET_TICK.split],
+  transition: HUE_TONE[BUDGET_TICK.transition],
+  movement: HUE_TONE[BUDGET_TICK.movement],
+  reload: HUE_TONE[BUDGET_TICK.reload],
+  activation: HUE_TONE[BUDGET_TICK.activation],
 };

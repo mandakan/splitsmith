@@ -4,18 +4,10 @@
  * (#1371); a click writes the class as a manual override through the
  * page's shot PATCH.
  */
+import { CHIP_TICK_BG } from "@/components/ui/chipTicks";
 import type { CoachIntervalClass } from "@/lib/api";
 import { BUDGET_LABEL, BUDGET_ORDER, BUDGET_TICK } from "@/lib/timeBudget";
 import { cn } from "@/lib/utils";
-
-const TICK_BG: Record<string, string> = {
-  draw: "bg-draw",
-  movement: "bg-beep",
-  transition: "bg-manual",
-  fire: "bg-done",
-  reload: "bg-live",
-  activation: "bg-ink-2",
-};
 
 const CLASSES = BUDGET_ORDER.filter((c): c is CoachIntervalClass => c !== "unclassified");
 
@@ -50,7 +42,7 @@ export function IntervalClassControl({
               on ? "bg-surface-3 text-ink" : "text-muted hover:text-ink",
             )}
           >
-            <i aria-hidden className={cn("size-1.5 rounded-full", TICK_BG[BUDGET_TICK[cls]])} />
+            <i aria-hidden className={cn("size-1.5 rounded-full", CHIP_TICK_BG[BUDGET_TICK[cls]])} />
             {BUDGET_LABEL[cls]}
           </button>
         );
