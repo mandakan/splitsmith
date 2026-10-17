@@ -7,8 +7,8 @@ import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { LANE_TICK } from "@/components/coach/laneDrag";
-import { CHIP_TICK_BG, HUE_FILL } from "@/components/ui/chipTicks";
-import { BUDGET_TICK } from "@/lib/timeBudget";
+import { CHIP_TICK_BG, HUE_FILL, HUE_PATTERN, hueSwatch } from "@/components/ui/chipTicks";
+import { BUDGET_ORDER, BUDGET_TICK } from "@/lib/timeBudget";
 
 // A map entry keyed by a class or kind whose value names a colour utility.
 const KEYED_COLOUR =
@@ -26,5 +26,20 @@ describe("the hues", () => {
     expect(BUDGET_TICK.first_shot).toBe(LANE_TICK.draw);
     expect(CHIP_TICK_BG[BUDGET_TICK.first_shot]).not.toBe("bg-led");
     expect(HUE_FILL[BUDGET_TICK.first_shot]).toMatch(/^bg-draw /);
+  });
+});
+
+describe("colour is never the only cue (WCAG 1.4.1)", () => {
+  it("gives every interval class its own pattern, but two solids that differ by lightness", () => {
+    const patterned = BUDGET_ORDER.filter((c) => c !== "unclassified").map((c) => HUE_PATTERN[BUDGET_TICK[c]]);
+    const solids = BUDGET_ORDER.filter((c) => c !== "unclassified" && HUE_PATTERN[BUDGET_TICK[c]] === "");
+    expect(solids.sort()).toEqual(["first_shot", "split"]);
+    const marks = patterned.filter((p) => p !== "");
+    expect(new Set(marks).size).toBe(marks.length);
+  });
+
+  it("puts the pattern on the legend swatch that decodes it", () => {
+    expect(hueSwatch("movement")).toContain("hue-stripes");
+    expect(hueSwatch("draw")).toContain("bg-draw");
   });
 });

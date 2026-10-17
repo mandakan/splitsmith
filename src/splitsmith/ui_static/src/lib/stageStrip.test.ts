@@ -49,6 +49,11 @@ describe("stripGeometry", () => {
     expect(g.bars[0]).toMatchObject({ x0: 0.3, x1: 1, tall: true });
     expect(g.bars[1]).toMatchObject({ x0: 0.4, x1: 0.5, tall: false });
   });
+
+  it("names each region in words, so a band is never colour alone", () => {
+    const events: StageEvent[] = [{ id: "d", kind: "draw", start: 0.5, end: 1.42, source: "manual" }];
+    expect(stripGeometry(SHOTS, events, 10).bars[0].label).toBe("Draw 0.50 to 1.42 s");
+  });
 });
 
 describe("stripTarget", () => {

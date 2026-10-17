@@ -6,7 +6,7 @@
  * renders the match page's thin, unlabelled bar; `scale` (0-1) draws it
  * on a shared time axis.
  */
-import { HUE_FILL } from "@/components/ui/chipTicks";
+import { CHIP_TICK_BG, HUE_FILL, HUE_PATTERN } from "@/components/ui/chipTicks";
 import { BUDGET_LABEL, BUDGET_TICK, type TimeBudget } from "@/lib/timeBudget";
 import { cn } from "@/lib/utils";
 
@@ -35,10 +35,16 @@ export function TimeBudgetBar({ budget, compact = false, scale = 1, className }:
           className={cn(
             "numeral flex min-w-0 items-center justify-center overflow-hidden whitespace-nowrap text-sm",
             HUE_FILL[BUDGET_TICK[s.cls]],
+            HUE_PATTERN[BUDGET_TICK[s.cls]],
             s.outliers.length > 0 && "shadow-[inset_0_0_0_2px_var(--color-live)]",
           )}
         >
-          {!compact && s.share >= 0.08 ? `${s.share >= 0.18 ? `${BUDGET_LABEL[s.cls].toLowerCase()} ` : ""}${s.seconds.toFixed(2)}` : null}
+          {!compact && s.share >= 0.08 ? (
+            // On a solid patch of the hue, so the pattern never runs under the text.
+            <span className={cn("rounded-sm px-1", CHIP_TICK_BG[BUDGET_TICK[s.cls]])}>
+              {`${s.share >= 0.18 ? `${BUDGET_LABEL[s.cls].toLowerCase()} ` : ""}${s.seconds.toFixed(2)}`}
+            </span>
+          ) : null}
         </span>
       ))}
     </div>

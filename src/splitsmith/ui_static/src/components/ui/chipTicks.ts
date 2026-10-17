@@ -86,3 +86,24 @@ export const HUE_TONE: Record<ChipTick, string> = {
   muted: "text-ink-2 border-rule-strong bg-surface-3",
   neutral: "text-ink border-rule-strong bg-surface-3",
 };
+
+/** Each hue's texture (WCAG 1.4.1: colour is never the only cue). Draw and
+ *  fire stay solid and differ by lightness; every other class has its own
+ *  mark. A bar segment, a strip band and a legend swatch all carry it. */
+export const HUE_PATTERN: Record<ChipTick, string> = {
+  draw: "",
+  primary: "",
+  movement: "hue-stripes",
+  transition: "hue-dots",
+  fire: "",
+  reload: "hue-hatch",
+  activation: "hue-lines",
+  muted: "",
+  neutral: "",
+};
+
+/** A legend swatch that decodes a bar: its hue and its pattern, square so the
+ *  texture shows. */
+export function hueSwatch(tick: ChipTick): string {
+  return `size-3 shrink-0 rounded-sm ${CHIP_TICK_BG[tick]} ${HUE_PATTERN[tick]}`.trimEnd();
+}

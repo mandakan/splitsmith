@@ -7,6 +7,7 @@
  * counts them. Positions are fractions of the strip's width (0..1), so the
  * component maps them to percentages and never measures. Pure, no React.
  */
+import { LANE_LABEL } from "@/components/coach/laneDrag";
 import type { ChipTick } from "@/components/ui/Chip";
 import type { CoachShot, StageEvent, StageEventKind } from "@/lib/api";
 import { shotOrdinal } from "@/lib/coachReview";
@@ -34,6 +35,8 @@ export interface StripBar {
   x1: number;
   /** Movement and activation span the strip's height; a reload is the short bar over them. */
   tall: boolean;
+  /** The region in words ("Draw 0.50 to 1.42 s"): what a screen reader hears. */
+  label: string;
 }
 
 export interface StripGeometry {
@@ -79,6 +82,7 @@ export function stripGeometry(
       x0: clamp01(e.start / duration),
       x1: clamp01(e.end / duration),
       tall: e.kind !== "reload",
+      label: `${LANE_LABEL[e.kind]} ${e.start.toFixed(2)} to ${e.end.toFixed(2)} s`,
     }))
     .filter((b) => b.x1 > b.x0)
     .sort((a, b) => Number(b.tall) - Number(a.tall) || a.x0 - b.x0);
