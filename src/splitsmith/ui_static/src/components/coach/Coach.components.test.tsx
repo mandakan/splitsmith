@@ -98,6 +98,14 @@ describe("EventCard", () => {
     expect(within(card).getByRole("button", { name: "Reload" })).toHaveAttribute("aria-pressed", "true");
   });
 
+  it("ticks a draw region in the draw pink, not the draw interval's red", () => {
+    const draw = [E("evt-1", "draw", 1.3, 2.3)];
+    render(<EventCard event={draw[0]} events={draw} onKind={vi.fn()} onKeep={vi.fn()} onDelete={vi.fn()} onDone={vi.fn()} />);
+    const tick = screen.getByRole("button", { name: "Draw" }).querySelector("i");
+    expect(tick?.className).toContain("bg-draw");
+    expect(tick?.className).not.toContain("bg-led");
+  });
+
   it("relabels a region to Draw, and refuses a second draw saying why", () => {
     const onKind = vi.fn();
     const move = [E("evt-1", "movement", 0, 2.3)];

@@ -31,22 +31,27 @@
     // Percent along the stage of clip time x, 0 at the beep.
     function along(x) { return 100 * clamp((x - beep) / span); }
     function regionColour(kind) {
-      return kind === 'movement' ? theme.movement : kind === 'reload' ? theme.reload : theme.muted;
+      if (kind === 'movement') return theme.movement;
+      if (kind === 'reload') return theme.reload;
+      if (kind === 'draw') return theme.draw;
+      return theme.muted;
     }
-    // The bar's pieces: movement and activation whole, then each reload cut
-    // where it meets a movement -- that slice takes the bar's top half, so
-    // the movement shows under it and the bar says the reload was on the
-    // move. A piece that meets another of the same reload is square on that
-    // side, so the reload reads as one band with a step in it.
+    // What happens on top of a movement: a reload or a draw on the move.
+    var OVER_MOVEMENT = {reload: true, draw: true};
+    // The bar's pieces: movement and activation whole, then each reload and
+    // draw cut where it meets a movement -- that slice takes the bar's top
+    // half, so the movement shows under it and the bar says it happened on
+    // the move. A piece that meets another of the same region is square on
+    // that side, so the region reads as one band with a step in it.
     function pieces(regions) {
       var out = [], moves = [];
       regions.forEach(function (r) {
-        if (r.kind === 'reload') return;
+        if (OVER_MOVEMENT[r.kind]) return;
         out.push({kind: r.kind, start: r.start, end: r.end, half: false});
         if (r.kind === 'movement') moves.push(r);
       });
       regions.forEach(function (r) {
-        if (r.kind !== 'reload') return;
+        if (!OVER_MOVEMENT[r.kind]) return;
         var cuts = moves
           .filter(function (m) { return m.start < r.end && r.start < m.end; })
           .map(function (m) { return [Math.max(r.start, m.start), Math.min(r.end, m.end)]; })
@@ -54,16 +59,16 @@
         var from = r.start;
         cuts.forEach(function (c) {
           if (c[0] > from) {
-            out.push({kind: 'reload', start: from, end: c[0], half: false, joinL: from > r.start, joinR: true});
+            out.push({kind: r.kind, start: from, end: c[0], half: false, joinL: from > r.start, joinR: true});
           }
           if (c[1] > from) {
             var s = Math.max(from, c[0]);
-            out.push({kind: 'reload', start: s, end: c[1], half: true, joinL: s > r.start, joinR: c[1] < r.end});
+            out.push({kind: r.kind, start: s, end: c[1], half: true, joinL: s > r.start, joinR: c[1] < r.end});
             from = c[1];
           }
         });
         if (from < r.end) {
-          out.push({kind: 'reload', start: from, end: r.end, half: false, joinL: from > r.start, joinR: false});
+          out.push({kind: r.kind, start: from, end: r.end, half: false, joinL: from > r.start, joinR: false});
         }
       });
       return out;

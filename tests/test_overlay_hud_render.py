@@ -1085,6 +1085,33 @@ def test_style_stage_bar_draws_one_band_per_confirmed_region_as_it_happens(varia
 
 @pytest.mark.integration
 @pytest.mark.parametrize("variant", _STYLES)
+def test_style_stage_bar_draws_a_draw_on_the_move_over_the_movement(variant: str) -> None:
+    """Spec 2026-10-17 (slice 3): a confirmed draw reaches the bar in the
+    draw colour and, where it meets a movement, takes the bar's top half,
+    as a reload on the move does."""
+    draw = {"id": "evt-5", "kind": "draw", "start": 1.3, "end": 1.9, "source": "manual"}
+    with ChromiumRasterizer() as rasterizer:
+        view = _timeline_view(
+            rasterizer, events=[_TL_MOVEMENT, draw], variant=variant, stage_bar=True, landing=False
+        )
+        try:
+            landed = _style_at(view, variant, 1.0 + 6.0)
+        finally:
+            view.close()
+    assert sorted(b["kind"] for b in landed["bands"]) == ["draw", "draw", "movement"]
+    assert {b["colour"] for b in landed["bands"] if b["kind"] == "draw"} == {"rgb(244, 114, 182)"}
+    bar = landed["bar"]
+    height = bar["bottom"] - bar["top"]
+    standing, on_move = sorted(
+        (b for b in landed["bands"] if b["kind"] == "draw"), key=lambda b: b["box"]["left"]
+    )
+    assert standing["box"]["bottom"] - standing["box"]["top"] == pytest.approx(height, abs=0.5)
+    assert on_move["box"]["top"] == pytest.approx(bar["top"], abs=0.5)
+    assert on_move["box"]["bottom"] - on_move["box"]["top"] == pytest.approx(height / 2, abs=0.5)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("variant", _STYLES)
 def test_style_clamps_a_reload_past_the_last_shot_and_settles_after_its_fade(variant: str) -> None:
     late = {"id": "evt-2", "kind": "reload", "start": 4.8, "end": 6.5, "source": "manual"}
     with ChromiumRasterizer() as rasterizer:

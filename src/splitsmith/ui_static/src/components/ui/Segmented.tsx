@@ -7,17 +7,8 @@
 import { cn } from "@/lib/utils";
 
 import type { ChipTick } from "./Chip";
-
-const TICK: Record<ChipTick, string> = {
-  draw: "bg-led",
-  movement: "bg-beep",
-  transition: "bg-manual",
-  fire: "bg-done",
-  reload: "bg-live",
-  activation: "bg-ink-2",
-  muted: "bg-muted",
-  neutral: "bg-ink",
-};
+// The chip's own hues, one table for both (a copy here went stale once).
+import { CHIP_TICK_BG as TICK } from "./chipTicks";
 
 export interface SegmentedOption<T extends string> {
   value: T;

@@ -28,7 +28,7 @@ from typing import Any, Literal, get_args
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from .config import StageEvent
-from .events import confirmed, reload_figures, shot_is_moving
+from .events import confirmed, draw_seconds, reload_figures, shot_is_moving
 from .hud_extras import HudExtras, declared_data, extras_identity
 from .looks import DEFAULT_VARIANT, LOOK_NAME_RE
 from .safe_area import SafeArea
@@ -339,23 +339,21 @@ def hud_stage_data(
         "shots": [
             {
                 "t": _clip(beep_in_clip, shot.time_from_beep),
-                "split": round(shot.split, 6),
+                # Shot 1's split is the draw: a confirmed draw region's
+                # length when there is one (spec 2026-10-17).
+                "split": round(draw_seconds(shot.split, regions) if index == 0 else shot.split, 6),
                 "cls": shot.interval_class,
                 "label": CLASS_LABELS.get(shot.interval_class) if shot.interval_class else None,
                 "tier": tier,
                 "moving": shot_is_moving(shot.time_from_beep, regions),
             }
-            for shot, tier in zip(shots, tiers, strict=True)
+            for index, (shot, tier) in enumerate(zip(shots, tiers, strict=True))
         ],
         "stage_time": round(shots[-1].time_from_beep, 6) if shots else 0.0,
         "rounds": len(shots),
-        # A draw reaches no template until the overlay's draw band ships
-        # (spec 2026-10-17, slice 3): every shipped style would draw it as
-        # an unknown, muted band over the movement it sits in.
         "events": [
             {"kind": e.kind, "start": _clip(beep_in_clip, e.start), "end": _clip(beep_in_clip, e.end)}
             for e in regions
-            if e.kind != "draw"
         ],
         "reloads": [
             {

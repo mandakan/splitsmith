@@ -42,7 +42,7 @@ const KIND_LABEL: Record<StageEvent["kind"], string> = {
 };
 // The lanes' hues (LaneEditor), so the rail's tick reads as the lane it came from.
 const KIND_TICK: Record<StageEvent["kind"], string> = {
-  draw: "bg-led",
+  draw: "bg-draw",
   movement: "bg-beep",
   reload: "bg-live",
   activation: "bg-ink-2",

@@ -21,7 +21,7 @@ import { playheadX, stepShot, stripGeometry, stripTarget } from "@/lib/stageStri
 import { cn } from "@/lib/utils";
 
 const BAR_BG: Record<StageEventKind, string> = {
-  draw: "bg-led/30",
+  draw: "bg-draw/30",
   movement: "bg-beep/30",
   activation: "bg-ink-2/25",
   reload: "bg-live",

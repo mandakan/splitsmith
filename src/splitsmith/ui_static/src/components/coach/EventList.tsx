@@ -4,6 +4,7 @@
  * reload reads as its duration and exposed time, a movement or activation as
  * its range, a movement with the shots fired inside it.
  */
+import { LANE_TICK } from "@/components/coach/laneDrag";
 import { Chip } from "@/components/ui/Chip";
 import type { StageEvent, StageEventKind } from "@/lib/api";
 import { reloadFigures } from "@/lib/events";
@@ -33,7 +34,7 @@ export function EventList({ events, shots }: EventListProps) {
           e.kind === "movement" ? shots.filter((s) => e.start <= s.time_from_beep && s.time_from_beep <= e.end).length : 0;
         return (
           <li key={e.id} className="flex items-baseline justify-between gap-3 py-2">
-            <Chip tick={e.kind}>{NAME[e.kind]}</Chip>
+            <Chip tick={LANE_TICK[e.kind]}>{NAME[e.kind]}</Chip>
             <span className="numeral text-md text-ink-2">
               {fig ? (
                 <>

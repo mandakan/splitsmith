@@ -113,7 +113,7 @@
     var band = document.createElement('i');
     band.style.left = x(e.start) + '%';
     band.style.width = Math.max(0.5, x(e.end) - x(e.start)) + '%';
-    band.style.background = e.kind === 'reload' ? T.reload : e.kind === 'movement' ? T.movement : T.muted;
+    band.style.background = ({draw: T.draw, movement: T.movement, reload: T.reload})[e.kind] || T.muted;
     line.appendChild(band);
   });
   stage.shots.forEach(function (shot) {

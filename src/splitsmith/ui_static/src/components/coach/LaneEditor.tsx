@@ -84,7 +84,7 @@ function regionLabel(x: StageEvent): string {
 }
 
 const HANDLE_FILL: Record<StageEventKind, string> = {
-  draw: "bg-led",
+  draw: "bg-draw",
   movement: "bg-beep",
   reload: "bg-live",
   activation: "bg-ink-2",
