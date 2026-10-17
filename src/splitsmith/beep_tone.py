@@ -21,6 +21,11 @@ _CFG = BeepToneConfig()
 _COLUMN_S = 0.005
 _NPERSEG = 1024
 _DB_RANGE = 80.0
+# The tone check: how long a rise must stay up, how much of that time, and
+# its level against the loudest of the reach window.
+_SUSTAIN_S = 0.1
+_SUSTAIN_SHARE = 0.8
+_LEVEL_FRAC = 0.15
 
 
 class Spectrogram(BaseModel):
@@ -56,18 +61,52 @@ def _window(audio: np.ndarray, sr: int, start_s: float, end_s: float) -> tuple[n
 def tone_offset_ms(
     audio: np.ndarray, sr: int, beep_s: float, band: tuple[float, float] | None
 ) -> float | None:
-    """The beep's distance from its tone's rise foot, ms; positive when the
-    beep is before the rise. ``band`` None is the full range (the old rule).
-    None when there is no rise within Snap's reach."""
+    """The beep's distance from its tone's start, ms; positive when the beep
+    is before the tone. ``band`` None is the full range.
+
+    The start is the earliest moment within ``reach_s`` of the beep where
+    the level rises above the floor and stays up for most of the next
+    ``_SUSTAIN_S``: a timer tone lasts 300 to 500 ms, a cross-bay shot's
+    energy dies in tens. Not Snap's rule (the nearest peak, walked back),
+    which lands mid-tone on a tone that wavers and peaks late (Little
+    Trouble 1, Bofors 5, 2026-10-17). None when nothing within reach stays up."""
     win, start = _window(audio, sr, beep_s - _CFG.window_s, beep_s + _CFG.window_s)
     if win.size == 0:
         return None
     sig = band_pass(win, sr, *band) if band is not None else win
     peaks, duration = rise_foot.peak_envelope(sig, sr)
-    foot = rise_foot.rise_foot(peaks, duration, beep_s - start, tolerance_s=_CFG.reach_s)
-    if foot is None:
+    p = np.asarray(peaks, dtype=np.float64)
+    if p.size == 0 or duration <= 0:
         return None
-    return round((foot + start - beep_s) * 1000, 1)
+    bin_s = duration / p.size
+    beep = beep_s - start
+
+    def at(t: float) -> int:
+        return min(p.size, max(0, int(round(t / bin_s))))
+
+    pre = p[: at(beep - _CFG.reach_s - 0.05)]
+    floor = float(np.percentile(pre, 20)) if pre.size else 0.0
+    ref_win = p[at(beep - _CFG.reach_s) : at(beep + _CFG.reach_s + _SUSTAIN_S)]
+    if ref_win.size == 0:
+        return None
+    ref = float(np.percentile(ref_win, 90))
+    threshold = max(4 * floor, _LEVEL_FRAC * ref)
+    if threshold <= 0:
+        return None
+    above = p >= threshold
+    n = max(1, at(_SUSTAIN_S))
+    # Share of each bin's next n bins that are above, by a running sum.
+    csum = np.concatenate([[0], np.cumsum(above)])
+    for i in range(at(beep - _CFG.reach_s), at(beep + _CFG.reach_s)):
+        if i + n > p.size:
+            break
+        if above[i] and (csum[i + n] - csum[i]) >= _SUSTAIN_SHARE * n:
+            # Back to the foot of the rise, a few bins at most.
+            j = i
+            while j > 0 and i - j < at(0.01) and p[j - 1] >= max(2 * floor, 0.5 * threshold) and p[j - 1] < p[j]:
+                j -= 1
+            return round((j * bin_s - beep) * 1000, 1)
+    return None
 
 
 def spectrogram(audio: np.ndarray, sr: int, start_s: float, end_s: float) -> Spectrogram:

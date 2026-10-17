@@ -52,6 +52,21 @@ def test_a_shot_before_the_tone_moves_the_full_range_foot_not_the_band_one() -> 
     assert full is not None and full < -25
 
 
+def test_a_wavering_tone_starts_where_it_starts() -> None:
+    """A timer tone that beats and grows louder 200 ms in (Little Trouble 1,
+    Bofors 5): its start is its onset, not a dip before its loudest point."""
+    t = np.arange(2 * SR) / SR
+    env = np.where((t >= 1.0) & (t < 1.45), 0.25 + 0.35 * (t - 1.0) / 0.45 * (0.5 + 0.5 * np.cos(2 * np.pi * 9 * (t - 1.0))), 0.0)
+    sig = (env * np.sin(2 * np.pi * 2800 * t)).astype(np.float32)
+    assert beep_tone.tone_offset_ms(sig, SR, 1.0, (2200, 3500)) == pytest.approx(0.0, abs=6)
+
+
+def test_a_tone_before_the_beep_reads_negative() -> None:
+    """Oden Cup Martin 2: the tone starts 80 ms before the confirmed beep."""
+    sig = _tone(2.0, 2800, 0.92)
+    assert beep_tone.tone_offset_ms(sig, SR, 1.0, (2200, 3500)) == pytest.approx(-80.0, abs=6)
+
+
 def test_silence_has_no_tone() -> None:
     assert beep_tone.tone_offset_ms(np.zeros(2 * SR, dtype=np.float32), SR, 1.0, (2200, 3500)) is None
 
