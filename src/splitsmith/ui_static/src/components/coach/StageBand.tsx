@@ -40,14 +40,14 @@ export function StageBand({ ws, view, compact = false, toolbar, audioHeight = AU
   const [keysOn, setKeysOn] = useState(false);
   const [snapOn, setSnapOn] = useSnapToShots();
   const { coach, peaks, peaksLoading, scrub, regions } = ws;
-  const { stageTime, tFromBeep, audioBeep, eventsReadOnly } = view;
+  const { span, tFromBeep, audioBeep, eventsReadOnly } = view;
   if (!coach) return null;
   const showHints = !compact || keysOn;
   const fps = clipFps(coach.videos);
   return (
     <div>
       <Timeline
-        duration={stageTime}
+        duration={span}
         origin={0}
         fps={fps}
         currentTime={tFromBeep}
@@ -116,7 +116,7 @@ export function StageBand({ ws, view, compact = false, toolbar, audioHeight = AU
                   peaks={peaks?.peaks ?? null}
                   clipDuration={peaks?.duration ?? 0}
                   from={audioBeep}
-                  to={audioBeep + stageTime}
+                  to={audioBeep + span}
                   geom={geom}
                   height={audioHeight}
                 />
@@ -129,7 +129,7 @@ export function StageBand({ ws, view, compact = false, toolbar, audioHeight = AU
               <LaneEditor
                 shots={coach.shots}
                 events={regions.events}
-                stageTime={stageTime}
+                stageTime={span}
                 fps={fps}
                 currentTime={tFromBeep}
                 selectedId={regions.selectedId}

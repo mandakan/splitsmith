@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  BAND_TAIL_S,
+  bandSpan,
   mergeDetailColumns,
   MAX_ZOOM,
   applyWheelZoom,
@@ -235,3 +237,16 @@ describe("mergeDetailColumns", () => {
   });
 });
 
+
+describe("bandSpan", () => {
+  it("reaches past the last shot when it comes after the stage time", () => {
+    // Little Trouble stage 4: scorecard 23.19 s, last shot 23.349 s.
+    expect(bandSpan(23.19, [1.2, 22.4, 23.349])).toBeCloseTo(23.349 + BAND_TAIL_S, 6);
+  });
+  it("keeps the stage time when every shot is inside it", () => {
+    expect(bandSpan(13.21, [1.1, 13.055])).toBeCloseTo(13.21 + BAND_TAIL_S, 6);
+  });
+  it("has a length with no stage time and no shots", () => {
+    expect(bandSpan(0, [])).toBeGreaterThan(0);
+  });
+});

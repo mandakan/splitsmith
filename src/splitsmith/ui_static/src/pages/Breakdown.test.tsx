@@ -1,3 +1,4 @@
+import { BAND_TAIL_S } from "@/lib/timelineView";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { flushSync } from "react-dom";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
@@ -136,6 +137,20 @@ describe("Breakdown", () => {
     HTMLElement.prototype.setPointerCapture = vi.fn();
     HTMLElement.prototype.hasPointerCapture = vi.fn(() => true);
     HTMLElement.prototype.releasePointerCapture = vi.fn();
+  });
+
+  it("the band reaches past a last shot the scorecard time ends before", async () => {
+    // A timer that stopped before the last shot the audio holds (2.6 s vs 3 s).
+    vi.mocked(api.getProject).mockResolvedValue({
+      ...(PROJECT as unknown as { stages: { stage_number: number }[] }),
+      stages: (PROJECT as unknown as { stages: { stage_number: number }[] }).stages.map((s) =>
+        s.stage_number === 2 ? { ...s, time_seconds: 2.6 } : s,
+      ),
+    } as never);
+    vi.mocked(api.getStageCoach).mockResolvedValue(coach(EVENTS));
+    renderAt("/match/m1/breakdown/anna/2");
+    const last = await screen.findByTestId("shot-3");
+    expect(parseFloat(last.style.left)).toBeLessThan(100);
   });
 
   it("the bare shooter route lands on the first stage with a time", async () => {
@@ -434,7 +449,8 @@ describe("Breakdown inspector (#1372)", () => {
       });
       fireEvent.click(screen.getByTestId("event-evt-2"));
       const handle = screen.getByTestId("handle-evt-2-end");
-      const px = (s: number) => (s / 16.2) * 1000;
+      // The band spans the stage time plus its margin (timelineView.bandSpan).
+      const px = (s: number) => (s / (16.2 + BAND_TAIL_S)) * 1000;
       fireEvent.pointerDown(handle, { pointerId: 8, clientX: px(4.1), clientY: 10, button: 0 });
       for (const s of [4.5, 4.7, 4.9, 5.1, 5.3]) {
         fireEvent.pointerMove(handle, { pointerId: 8, clientX: px(s), clientY: 10, altKey: true });

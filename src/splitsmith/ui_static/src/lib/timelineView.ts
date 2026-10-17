@@ -11,6 +11,20 @@ export type Zoom = number | null;
 
 export const MAX_ZOOM = 16;
 export const ZOOM_STEP = 1.5;
+
+/** Seconds the band runs past its last moment: the last shot is never on the edge, and a
+ *  timer, sensor or detector that disagrees with the video keeps some room. */
+export const BAND_TAIL_S = 1;
+
+/** How long a stage's band runs, from the beep: the stage time or the last
+ *  shot, whichever is later (a scorecard time can end before the last shot
+ *  the audio holds), plus a short tail. Regions are left out on purpose: an
+ *  edge dragged to the end would otherwise grow the band on every drag. */
+export function bandSpan(stageTime: number, shotTimes: readonly number[]): number {
+  const last = shotTimes.length > 0 ? Math.max(...shotTimes) : 0;
+  const end = Math.max(stageTime, last);
+  return (end > 0 ? end : 1) + BAND_TAIL_S;
+}
 /** exp(-deltaY * rate): a 100 px wheel notch is about 1.28x, a pinch frame a few percent. */
 const ZOOM_WHEEL_RATE = 0.0025;
 const LINE_PX = 16;

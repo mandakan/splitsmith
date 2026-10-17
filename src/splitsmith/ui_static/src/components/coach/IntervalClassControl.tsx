@@ -9,7 +9,7 @@ import { BUDGET_LABEL, BUDGET_ORDER, BUDGET_TICK } from "@/lib/timeBudget";
 import { cn } from "@/lib/utils";
 
 const TICK_BG: Record<string, string> = {
-  draw: "bg-led",
+  draw: "bg-draw",
   movement: "bg-beep",
   transition: "bg-manual",
   fire: "bg-done",

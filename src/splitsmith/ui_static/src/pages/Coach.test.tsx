@@ -339,8 +339,8 @@ describe("Coach deep links (#1377)", () => {
     const { container } = renderCoachRoute("/match/m1/coach/anna/1?t=2.5&shot=2");
     await screen.findByRole("region", { name: "Shots" });
     expect(container.querySelector('[data-shot-number="2"]')).toHaveAttribute("aria-current", "true");
-    // The strip's playhead sits at 2.5 of the stage's 16.2 s.
-    expect(screen.getByTestId("strip-playhead").style.left).toMatch(/^15\.43/);
+    // The strip's playhead sits at 2.5 of the band's 16.2 s plus its margin.
+    expect(screen.getByTestId("strip-playhead").style.left).toMatch(/^14\.53/);
     expect(screen.getByRole("link", { name: "Adjust in Breakdown" })).toHaveAttribute(
       "href",
       "/match/m1/breakdown/anna/1?t=2.5&shot=2",

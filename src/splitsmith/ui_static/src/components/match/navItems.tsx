@@ -100,15 +100,6 @@ export function matchNavItems(args: {
     },
     { key: "results", group: "analyse", to: `${base}/results`, icon: <MonitorPlay className="size-[15px]" />, label: "Splits" },
     {
-      key: "coach",
-      group: "analyse",
-      to: shooterSlug ? `${base}/coach/${shooterSlug}` : `${base}/coach`,
-      icon: <ClipboardCheck className="size-[15px]" />,
-      label: "Coach",
-      disabled: !hasFootage,
-      disabledHint: footageHint,
-    },
-    {
       // Optional region and interval editor (#1371): a neutral count badge
       // when regions exist, nothing otherwise; never a pending badge.
       key: "breakdown",
@@ -122,6 +113,15 @@ export function matchNavItems(args: {
       badgeKind: "count",
       // A total over the shooter's stages, so the label says so.
       badgeAriaLabel: regions ? `${regions} ${regions === 1 ? "region" : "regions"} in this match` : undefined,
+    },
+    {
+      key: "coach",
+      group: "analyse",
+      to: shooterSlug ? `${base}/coach/${shooterSlug}` : `${base}/coach`,
+      icon: <ClipboardCheck className="size-[15px]" />,
+      label: "Coach",
+      disabled: !hasFootage,
+      disabledHint: footageHint,
     },
     ...(multiShooter
       ? [
