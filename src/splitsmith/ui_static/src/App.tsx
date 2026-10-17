@@ -48,6 +48,7 @@ const MobileBeepReview = lazyPage<{ recheck?: boolean; start?: string | null; re
 );
 const Coach = lazyPage(() => import("@/pages/Coach"), "Coach");
 const Breakdown = lazyPage(() => import("@/pages/Breakdown"), "Breakdown");
+const MobileBreakdown = lazyPage(() => import("@/pages/MobileBreakdown"), "MobileBreakdown");
 const Compare = lazyPage(() => import("@/pages/Compare"), "Compare");
 const CreateMatch = lazyPage(() => import("@/pages/CreateMatch"), "CreateMatch");
 const Design = lazyPage(() => import("@/pages/Design"), "Design");
@@ -149,6 +150,20 @@ export function AuditRoute() {
   ) : (
     <DesktopGate screen="Audit">
       <Audit />
+    </DesktopGate>
+  );
+}
+
+/* Breakdown on a phone (spec 2026-10-17): reviewing proposals. Below
+ * 768 px this renders MobileBreakdown; the desktop workspace stays behind
+ * DesktopGate. */
+export function BreakdownRoute() {
+  const isMobile = useIsMobile();
+  return isMobile ? (
+    <MobileBreakdown />
+  ) : (
+    <DesktopGate screen="Breakdown">
+      <Breakdown />
     </DesktopGate>
   );
 }
@@ -381,16 +396,11 @@ export function App() {
                 element={<ShooterScopedRoute element={<DesktopGate screen="Coach"><Coach /></DesktopGate>} />}
               />
               <Route path="coach" element={<DefaultShooterRedirect base="coach" />} />
-              {/* Breakdown (#1371): the optional region and interval editor,
-                  desktop only like Coach. */}
-              <Route
-                path="breakdown/:slug"
-                element={<ShooterScopedRoute element={<DesktopGate screen="Breakdown"><Breakdown /></DesktopGate>} />}
-              />
-              <Route
-                path="breakdown/:slug/:stage"
-                element={<ShooterScopedRoute element={<DesktopGate screen="Breakdown"><Breakdown /></DesktopGate>} />}
-              />
+              {/* Breakdown (#1371): the optional region and interval editor.
+                  A phone reviews proposals (BreakdownRoute); Coach stays
+                  desktop only. */}
+              <Route path="breakdown/:slug" element={<ShooterScopedRoute element={<BreakdownRoute />} />} />
+              <Route path="breakdown/:slug/:stage" element={<ShooterScopedRoute element={<BreakdownRoute />} />} />
               <Route path="breakdown" element={<DefaultShooterRedirect base="breakdown" />} />
               <Route path="beep-review" element={<BeepReviewRoute />} />
               {/* Take overview: carve-up review for one multi-stage raw

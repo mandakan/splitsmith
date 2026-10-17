@@ -12,17 +12,19 @@ beforeEach(() => {
 
 describe("EdgePad", () => {
   function pad() {
+    const onStart = vi.fn();
     const onMove = vi.fn();
     const onEnd = vi.fn();
     const onCancel = vi.fn();
-    render(<EdgePad onMove={onMove} onEnd={onEnd} onCancel={onCancel} label="Drag to move the start" />);
+    render(<EdgePad onStart={onStart} onMove={onMove} onEnd={onEnd} onCancel={onCancel} label="Drag to move the start" />);
     const el = screen.getByTestId("edge-pad");
     Object.defineProperty(el, "clientWidth", { value: 300 });
-    return { el, onMove, onEnd, onCancel };
+    return { el, onStart, onMove, onEnd, onCancel };
   }
   it("reports the finger's travel as a share of its width", () => {
-    const { el, onMove, onEnd } = pad();
+    const { el, onStart, onMove, onEnd } = pad();
     fireEvent.pointerDown(el, { pointerId: 1, clientX: 100 });
+    expect(onStart).toHaveBeenCalledTimes(1);
     fireEvent.pointerMove(el, { pointerId: 1, clientX: 175 });
     expect(onMove).toHaveBeenLastCalledWith(0.25, 300);
     fireEvent.pointerUp(el, { pointerId: 1, clientX: 175 });

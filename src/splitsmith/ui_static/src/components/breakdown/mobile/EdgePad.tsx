@@ -9,6 +9,7 @@ import { useRef, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 export function EdgePad({
+  onStart,
   onMove,
   onEnd,
   onCancel,
@@ -16,6 +17,8 @@ export function EdgePad({
   className,
   children,
 }: {
+  /** A finger went down: the page records the region every frame of this gesture is judged from. */
+  onStart: () => void;
   onMove: (dxFrac: number, padPx: number) => void;
   onEnd: () => void;
   onCancel: () => void;
@@ -34,6 +37,7 @@ export function EdgePad({
         if (down.current) return;
         e.currentTarget.setPointerCapture(e.pointerId);
         down.current = { id: e.pointerId, x: e.clientX };
+        onStart();
       }}
       onPointerMove={(e) => {
         const d = down.current;
