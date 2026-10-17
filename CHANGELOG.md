@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.78.0](https://github.com/mandakan/splitsmith/compare/v0.77.0...v0.78.0) (2026-10-17)
+
+
+### Features
+
+* **beep:** put the detected beep on the timer tone's start; audit the corpus beep labels ([#1532](https://github.com/mandakan/splitsmith/issues/1532)) ([487bb62](https://github.com/mandakan/splitsmith/commit/487bb6274eb95320fb39370b558cdd6d7f4e67dd))
+* **looks:** a Broadcast Look that fills every slot and shows every region ([#1537](https://github.com/mandakan/splitsmith/issues/1537)) ([dc7cf99](https://github.com/mandakan/splitsmith/commit/dc7cf99f80b237b6e99040d72efef579c051a3ae))
+
+
+### Bug Fixes
+
+* **events:** a region before a moved beep starts at the beep; one bad region no longer hides the rest ([#1534](https://github.com/mandakan/splitsmith/issues/1534)) ([6a09a55](https://github.com/mandakan/splitsmith/commit/6a09a5575e485ecb545bde5d825d576b74ad4d86))
+* **hud:** a reload refills to the magazine's capacity, never one over ([#1536](https://github.com/mandakan/splitsmith/issues/1536)) ([753e98d](https://github.com/mandakan/splitsmith/commit/753e98dbd5da6e78a2ab08b618b039d8f90b3456))
+
 ## [0.77.0](https://github.com/mandakan/splitsmith/compare/v0.76.0...v0.77.0) (2026-10-17)
 
 
