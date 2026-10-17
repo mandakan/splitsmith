@@ -13,6 +13,7 @@ import { LANE_ROWS, LaneEditor, LaneHints } from "@/components/coach/LaneEditor"
 import { Timeline } from "@/components/timeline/Timeline";
 import { WaveformTrack } from "@/components/timeline/WaveformTrack";
 import { menuItemClass } from "@/components/ui/Menu";
+import { clipFps } from "@/lib/clipFps";
 import { useSnapToShots } from "@/lib/timelinePrefs";
 import { type Zoom } from "@/lib/timelineView";
 import type { StageView, StageWorkspace } from "@/lib/useStageWorkspace";
@@ -42,12 +43,13 @@ export function StageBand({ ws, view, compact = false, toolbar, audioHeight = AU
   const { stageTime, tFromBeep, audioBeep, eventsReadOnly } = view;
   if (!coach) return null;
   const showHints = !compact || keysOn;
+  const fps = clipFps(coach.videos);
   return (
     <div>
       <Timeline
         duration={stageTime}
         origin={0}
-        fps={30}
+        fps={fps}
         currentTime={tFromBeep}
         playing={ws.isPlaying}
         onSeek={ws.seekFromBeep}
@@ -128,6 +130,7 @@ export function StageBand({ ws, view, compact = false, toolbar, audioHeight = AU
                 shots={coach.shots}
                 events={regions.events}
                 stageTime={stageTime}
+                fps={fps}
                 currentTime={tFromBeep}
                 selectedId={regions.selectedId}
                 readOnly={eventsReadOnly}

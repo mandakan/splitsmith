@@ -166,6 +166,7 @@ from .. import events as events_module
 from .. import export_presets as export_presets_module
 from .. import look_store as look_store_module
 from .. import looks as looks_module
+from .. import media_check as media_check_module
 from .. import models as model_layer
 from .. import shooter_book as shooter_book_module
 from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy monkeypatch points)
@@ -8224,6 +8225,21 @@ def _scrub_version_for(root: Path, stage_number: int, video: StageVideo, project
     return f"{st.st_mtime_ns:x}-{st.st_size:x}"
 
 
+def _frame_rate_for(root: Path, stage_number: int, video: StageVideo, project: MatchProject) -> float | None:
+    """The local audit trim's frame rate from its own boxes (``media_check``,
+    cached per file version), or None. The rendition is cut from the trim at
+    the same rate. Local files only, like :func:`_trim_version_for`: a trim
+    that is not on this disk (hosted, a mirror) has none and the SPA uses 30.
+    """
+    try:
+        trim = audio_helpers.resolve_trim_for_read(root, stage_number, video, project=project)
+    except OSError:
+        return None
+    if trim is None:
+        return None
+    return media_check_module.valid_mp4_cached(trim).frame_rate
+
+
 def _hosted_scrub_version_for(
     presence: StoragePresence, root: Path, stage_number: int, video: StageVideo, project: MatchProject
 ) -> str | None:
@@ -14442,6 +14458,9 @@ def create_app(
                         if presence is not None and not v.path.is_absolute()
                         else _scrub_version_for(root, stg.stage_number, v, project)
                     ),
+                    # Frame steps and the pill's frame number (spec 2026-10-17):
+                    # null when the trim is not on this disk; the SPA uses 30.
+                    "fps": _frame_rate_for(root, stg.stage_number, v, project),
                 }
             )
         return out

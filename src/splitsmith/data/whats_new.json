@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "breakdown-frame-steps",
+      "date": "2026-10-17",
+      "title": "Frame steps match your camera",
+      "body": "On Breakdown, the arrow keys now move a region's edge by one frame of your own footage, at 50 or 60 fps as well as 30, and the time readout counts those frames."
+    },
+    {
       "id": "look-summary-styles",
       "date": "2026-10-16",
       "title": "Looks can restyle the summaries",
