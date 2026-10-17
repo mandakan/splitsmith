@@ -141,10 +141,18 @@ function MobileBreakdownStage({ slug, stage }: { slug: string; stage: number }) 
     moveOn(next, open);
   };
   const setKind = (kind: StageEventKind) => {
-    if (!open) return;
-    const next = withKind(events, open.id, kind);
-    if (next) regions.change(next, true);
     setKindOpen(false);
+    // The current kind is no choice: it must not confirm the proposal.
+    if (!open || kind === open.kind) return;
+    const next = withKind(events, open.id, kind);
+    if (!next) return;
+    regions.change(next, true);
+    // A new kind confirms a proposal, which leaves the queue: move on.
+    if (open.source === "auto") moveOn(next, open);
+  };
+  const pause = () => {
+    stopAt.current = null;
+    videoRef.current?.pause();
   };
 
   // Edge mode: frames are local, Done commits once, Cancel restores.
@@ -152,6 +160,8 @@ function MobileBreakdownStage({ slug, stage }: { slug: string; stage: number }) 
     if (!open || readOnly) return;
     const g = beginEdge(events, open.id, target);
     if (!g) return;
+    // The picture is the edge in edge mode: playback would fight the drag.
+    pause();
     setEdit({ g, pill: null });
     ws.seekFromBeep(target === "end" ? g.before.end : g.before.start);
   };
@@ -181,8 +191,13 @@ function MobileBreakdownStage({ slug, stage }: { slug: string; stage: number }) 
   const done = () => {
     if (!edit) return;
     const startEvents = regions.events.map((e) => (e.id === edit.g.id ? edit.g.before : e));
-    if (sameEvents(startEvents, regions.events)) regions.cancel();
-    else regions.change(regions.events, true);
+    if (sameEvents(startEvents, regions.events)) {
+      regions.cancel();
+    } else {
+      regions.change(regions.events, true);
+      // An edited proposal is confirmed and leaves the queue: move on (spec).
+      if (edit.g.before.source === "auto") moveOn(regions.events, edit.g.before);
+    }
     setEdit(null);
   };
   const cancel = () => {
@@ -346,8 +361,8 @@ function MobileBreakdownStage({ slug, stage }: { slug: string; stage: number }) 
       {open == null ? (
         <div className="flex flex-col items-start gap-2">
           <p className="text-md text-muted">No proposals on this stage</p>
-          <Button type="button" className="min-h-11" onClick={() => play(0, null)}>
-            Play stage
+          <Button type="button" className="min-h-11" onClick={() => (ws.isPlaying ? pause() : play(0, null))}>
+            {ws.isPlaying ? "Pause" : "Play stage"}
           </Button>
         </div>
       ) : (
@@ -434,11 +449,12 @@ function MobileBreakdownStage({ slug, stage }: { slug: string; stage: number }) 
                   variant="ghost"
                   className="min-h-11 flex-1"
                   onClick={() => {
+                    if (ws.isPlaying) return pause();
                     const w = playWindow(open, view.stageTime);
                     play(w.from, w.to);
                   }}
                 >
-                  Play region
+                  {ws.isPlaying ? "Pause" : "Play region"}
                 </Button>
                 <Button
                   type="button"

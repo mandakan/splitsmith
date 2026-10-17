@@ -169,7 +169,7 @@ describe("MobileBreakdown", () => {
     expect(screen.getByRole("button", { name: "Activation" })).toHaveProperty("disabled", false);
   });
 
-  it("edge mode saves nothing until Done, then once; Cancel restores without saving", async () => {
+  it("edge mode saves nothing until Done, then once", async () => {
     vi.mocked(api.getStageCoach).mockResolvedValue(stageWith([R1], "v1v1v1v1v1v1v1v1"));
     vi.mocked(api.putStageEvents).mockImplementation(async (_s, _n, events) => stageWith(events, "v2v2v2v2v2v2v2v2"));
     renderPage();
@@ -185,7 +185,13 @@ describe("MobileBreakdown", () => {
     const sent = vi.mocked(api.putStageEvents).mock.calls[0][2][0];
     expect(sent.start).toBeCloseTo(4.1);
     expect(sent.source).toBe("manual");
+    // The only proposal is now confirmed: the queue is empty.
+    expect(await screen.findByText("No proposals on this stage")).toBeTruthy();
+  });
 
+  it("Cancel restores the region edge mode found and saves nothing", async () => {
+    vi.mocked(api.getStageCoach).mockResolvedValue(stageWith([R1]));
+    renderPage();
     fireEvent.click(await screen.findByRole("button", { name: /Adjust end/ }));
     const pad2 = padOf();
     fireEvent.pointerDown(pad2, { pointerId: 2, clientX: 100 });
@@ -193,8 +199,78 @@ describe("MobileBreakdown", () => {
     fireEvent.pointerUp(pad2, { pointerId: 2, clientX: 160 });
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     await settle();
-    expect(api.putStageEvents).toHaveBeenCalledTimes(1);
+    expect(api.putStageEvents).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Adjust end, 5.20 s" })).toBeTruthy();
+    expect(screen.getByText("Proposal 1 of 1")).toBeTruthy();
+  });
+
+  it("a second gesture in one edge session continues from where the first left the edge", async () => {
+    vi.mocked(api.getStageCoach).mockResolvedValue(stageWith([R1]));
+    vi.mocked(api.putStageEvents).mockImplementation(async (_s, _n, events) => stageWith(events));
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /Adjust start/ }));
+    const pad = padOf();
+    fireEvent.pointerDown(pad, { pointerId: 1, clientX: 100 });
+    fireEvent.pointerMove(pad, { pointerId: 1, clientX: 130 });
+    fireEvent.pointerUp(pad, { pointerId: 1, clientX: 130 });
+    fireEvent.pointerDown(pad, { pointerId: 2, clientX: 200 });
+    fireEvent.pointerMove(pad, { pointerId: 2, clientX: 230 });
+    fireEvent.pointerUp(pad, { pointerId: 2, clientX: 230 });
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() => expect(api.putStageEvents).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(api.putStageEvents).mock.calls[0][2][0].start).toBeCloseTo(4.2);
+  });
+
+  it("Done with nothing changed saves nothing and leaves the proposal a proposal", async () => {
+    vi.mocked(api.getStageCoach).mockResolvedValue(stageWith([R1]));
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /Adjust start/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    await settle();
+    expect(api.putStageEvents).not.toHaveBeenCalled();
+    expect(screen.getByText("Proposal 1 of 1")).toBeTruthy();
+  });
+
+  it("Done after an edit confirms the proposal and moves on to the next one", async () => {
+    vi.mocked(api.getStageCoach).mockResolvedValue(stageWith([M1, R1]));
+    vi.mocked(api.putStageEvents).mockImplementation(async (_s, _n, events) => stageWith(events));
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /Adjust start/ }));
+    fireEvent.click(screen.getByRole("button", { name: "+1 frame" }));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() => expect(screen.getByTestId("open-region").textContent).toContain("Reload"));
+    expect(screen.getByText("Proposal 1 of 1")).toBeTruthy();
+  });
+
+  it("a new kind confirms the proposal and moves on; the current kind changes nothing", async () => {
+    vi.mocked(api.getStageCoach).mockResolvedValue(stageWith([M1, R1]));
+    vi.mocked(api.putStageEvents).mockImplementation(async (_s, _n, events) => stageWith(events));
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Kind" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Movement/ }));
+    await settle();
+    expect(api.putStageEvents).not.toHaveBeenCalled();
+    expect(screen.getByTestId("open-region").textContent).toContain("Movement");
+
+    fireEvent.click(screen.getByRole("button", { name: "Kind" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Activation/ }));
+    await waitFor(() => expect(api.putStageEvents).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(api.putStageEvents).mock.calls[0][2].find((e) => e.id === "m1")?.kind).toBe("activation");
+    expect(screen.getByTestId("open-region").textContent).toContain("Reload");
+  });
+
+  it("playing turns Play region into Pause, which stops it, and edge mode pauses", async () => {
+    vi.mocked(api.getStageCoach).mockResolvedValue(stageWith([R1]));
+    renderPage();
+    await screen.findByRole("button", { name: "Play region" });
+    const video = screen.getByTestId("phone-video").querySelector("video")!;
+    const pause = vi.fn();
+    Object.defineProperty(video, "pause", { value: pause, configurable: true });
+    fireEvent.play(video);
+    fireEvent.click(await screen.findByRole("button", { name: "Pause" }));
+    expect(pause).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: /Adjust start/ }));
+    expect(pause).toHaveBeenCalledTimes(2);
   });
 
   it("a frame step moves the edge by one frame of the clip", async () => {
