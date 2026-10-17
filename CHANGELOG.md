@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.77.0](https://github.com/mandakan/splitsmith/compare/v0.76.0...v0.77.0) (2026-10-17)
+
+
+### Features
+
+* **beep:** a spectrogram and the timer's own band on the beep step, and a tone check ([#1531](https://github.com/mandakan/splitsmith/issues/1531)) ([7acd72c](https://github.com/mandakan/splitsmith/commit/7acd72c50725eb95d09fd17e5d00df3f193bfd7e))
+* **breakdown:** draw regions ([#1523](https://github.com/mandakan/splitsmith/issues/1523)) ([68ea31f](https://github.com/mandakan/splitsmith/commit/68ea31f283b69922532caef3c5f483ce0693fe99))
+* **breakdown:** review proposals on a phone ([#1521](https://github.com/mandakan/splitsmith/issues/1521)) ([db04d34](https://github.com/mandakan/splitsmith/commit/db04d34ac60bc7af0986e3acfddc6418a82d88fa))
+* **breakdown:** the Draw figure is the draw region ([#1524](https://github.com/mandakan/splitsmith/issues/1524)) ([60e4b0d](https://github.com/mandakan/splitsmith/commit/60e4b0d21dcd9be03052f053b59fe2c0587f702f))
+* **export:** a Use Breakdown switch on every export ([#1526](https://github.com/mandakan/splitsmith/issues/1526)) ([15249bf](https://github.com/mandakan/splitsmith/commit/15249bf2c07ed97024e6203ac328e298cc7de612))
+* HUD data providers, movement proposals and Keep all ([#1518](https://github.com/mandakan/splitsmith/issues/1518)) ([7ced484](https://github.com/mandakan/splitsmith/commit/7ced4847405c33e9df7f1819f2ed7ce7bea60e79))
+* **looks:** stage and match summary templates ([#1519](https://github.com/mandakan/splitsmith/issues/1519)) ([acffef7](https://github.com/mandakan/splitsmith/commit/acffef76e579c0f3260fb66757c458e201a0d810))
+* **overlay:** the draw band, and shot 1 shows the draw ([#1525](https://github.com/mandakan/splitsmith/issues/1525)) ([4ce5cf9](https://github.com/mandakan/splitsmith/commit/4ce5cf96dddcd773a5c9ab6c82c1590c55b56141))
+
+
+### Bug Fixes
+
+* **breakdown:** frame steps use the clip's own frame rate ([#1520](https://github.com/mandakan/splitsmith/issues/1520)) ([270ba38](https://github.com/mandakan/splitsmith/commit/270ba38b637b24ad0ec9f1898a3c178e90ac5975))
+* **breakdown:** the band runs past the last shot; Breakdown before Coach; one draw hue ([#1527](https://github.com/mandakan/splitsmith/issues/1527)) ([55b3ff6](https://github.com/mandakan/splitsmith/commit/55b3ff65348cbcf8235f2e267670a36ee8ec8b50))
+* **coach:** one hue map, and a pattern per class so colour is never the only cue ([#1529](https://github.com/mandakan/splitsmith/issues/1529)) ([506228e](https://github.com/mandakan/splitsmith/commit/506228e73e4ff12d36af325da785c6ba26a703f1))
+* **overview:** count beep, shots and audit over the shooters with footage ([#1516](https://github.com/mandakan/splitsmith/issues/1516)) ([0d4e9df](https://github.com/mandakan/splitsmith/commit/0d4e9df1686fe184432eeed574867345928267f3))
+
 ## [0.76.0](https://github.com/mandakan/splitsmith/compare/v0.75.0...v0.76.0) (2026-10-16)
 
 
