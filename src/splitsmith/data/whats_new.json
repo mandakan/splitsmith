@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "beep-timer-tone",
+      "date": "2026-10-17",
+      "title": "Find the beep under a shot",
+      "body": "The beep step on Audit shows a spectrogram and filters to your timer's own tone, so Snap finds the beep even when a shot lands on it. Overview marks a beep that sits off its tone."
+    },
+    {
       "id": "coach-patterns",
       "date": "2026-10-17",
       "title": "Coach reads without telling colours apart",
