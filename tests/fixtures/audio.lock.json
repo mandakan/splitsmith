@@ -945,6 +945,106 @@
       "sha256": "5b29235d3ade8c77c1d6eed7b02d1461ff2177da0cdb7c4c7b5e1e54adbbe4d1",
       "bytes": 3192558
     },
+    "stage-shots-oden-cup-2026-stage1-s0fe3d797.wav": {
+      "sha256": "fc837a4049b8590b93b9ed018d22e52dc052c93857e4ddf6e1818ed726478ee2",
+      "bytes": 5335246
+    },
+    "stage-shots-oden-cup-2026-stage1-s36ed6e4e.wav": {
+      "sha256": "83ec10a16b04fb4d0172436b6688fee99d593c00cfaf3174f286587a1ef3091f",
+      "bytes": 4469070
+    },
+    "stage-shots-oden-cup-2026-stage10-s0fe3d797.wav": {
+      "sha256": "a7095d46499f573d54a52c2959c331bb4e83287b126380ec5764c03a8d1446c8",
+      "bytes": 2317390
+    },
+    "stage-shots-oden-cup-2026-stage10-s36ed6e4e.wav": {
+      "sha256": "15e8b8aacd18e693250d2c95feffc4baa39148cc2448b0d9a32f70c15c4374d3",
+      "bytes": 1898414
+    },
+    "stage-shots-oden-cup-2026-stage11-s0fe3d797-meta-vanguard.wav": {
+      "sha256": "4423b8f230f4df434db2d7b9cef528f5975672a6e505e9b87a9bc99b7e6e5214",
+      "bytes": 2087694
+    },
+    "stage-shots-oden-cup-2026-stage11-s0fe3d797.wav": {
+      "sha256": "2dd8c80da3945fc7c289bbb4b92ceb4f9a0cacd37e875e81d96cb508b9c0b826",
+      "bytes": 2086606
+    },
+    "stage-shots-oden-cup-2026-stage11-s36ed6e4e.wav": {
+      "sha256": "8aa46138aeae37ef84504bcc373a88b63d67176aec8e09194fe27b9b78775099",
+      "bytes": 1806926
+    },
+    "stage-shots-oden-cup-2026-stage12-s0fe3d797.wav": {
+      "sha256": "c0f31c3924ffea30e00ede5990829f5c55efebe87cd228372ea3d65914c822ef",
+      "bytes": 5376686
+    },
+    "stage-shots-oden-cup-2026-stage12-s36ed6e4e.wav": {
+      "sha256": "2a7747e5811b94cf6cdcb0036a50ebf94a0ea65c3f6c5930fe901912350cc4e2",
+      "bytes": 4278702
+    },
+    "stage-shots-oden-cup-2026-stage2-s0fe3d797.wav": {
+      "sha256": "34eb5f142d781ec0c2ce9ac47349fad84db62be6804bc8ca56acf2756b414e15",
+      "bytes": 3970958
+    },
+    "stage-shots-oden-cup-2026-stage2-s36ed6e4e.wav": {
+      "sha256": "f586517632c3b62e30dbf645ab0c580a87f43b419a797dd75d8bcd71eef7e6af",
+      "bytes": 3344014
+    },
+    "stage-shots-oden-cup-2026-stage3-s0fe3d797.wav": {
+      "sha256": "a3dae116638512f078599fdbdb8b5c1faa474000e49491fae322c2c9a4f5728d",
+      "bytes": 2610062
+    },
+    "stage-shots-oden-cup-2026-stage3-s36ed6e4e.wav": {
+      "sha256": "bdc3e2da8606b06daf3d9410b2d7a0cfac9494a93a9722e9e403d591743b817c",
+      "bytes": 1811694
+    },
+    "stage-shots-oden-cup-2026-stage4-s0fe3d797.wav": {
+      "sha256": "ade54477e470eaeb8b3c16d216574b776393e474ffc1d2df78338958dc84c4cc",
+      "bytes": 2501358
+    },
+    "stage-shots-oden-cup-2026-stage4-s36ed6e4e.wav": {
+      "sha256": "be3e19692574b80883bf83455f8be6175908331a788cb672192aa7c8845ce761",
+      "bytes": 2373486
+    },
+    "stage-shots-oden-cup-2026-stage5-s0fe3d797.wav": {
+      "sha256": "250e8b01f4610499ce37140e623f389120d4705c925bdccc69f9eb979d9be41c",
+      "bytes": 3271182
+    },
+    "stage-shots-oden-cup-2026-stage5-s36ed6e4e.wav": {
+      "sha256": "080ff530344a6247e47fc3858f74a12cafe94a156c50a20b9ae5ca29aa45a06c",
+      "bytes": 3305582
+    },
+    "stage-shots-oden-cup-2026-stage6-s0fe3d797.wav": {
+      "sha256": "58a848a9f842aded407b0b5d9594659b89fb380186038607104d68bea4ca654e",
+      "bytes": 3465230
+    },
+    "stage-shots-oden-cup-2026-stage6-s36ed6e4e.wav": {
+      "sha256": "31f7b31a5f719052a3bae44467104004a6190f362e984f839da1a85c052e980e",
+      "bytes": 2721102
+    },
+    "stage-shots-oden-cup-2026-stage7-s0fe3d797.wav": {
+      "sha256": "cb04c46dda24a7284d5280f1dd1b707295e6ce0e5a7f41c1f151fc94b84a4e99",
+      "bytes": 3762350
+    },
+    "stage-shots-oden-cup-2026-stage7-s36ed6e4e.wav": {
+      "sha256": "b00b344f03be92595358cfe9401e22fe8ccec33d3e06025a2723e33ff7109502",
+      "bytes": 3657006
+    },
+    "stage-shots-oden-cup-2026-stage8-s0fe3d797.wav": {
+      "sha256": "d9813780c67f026a4f48cb74895ab30f814373c31457502c19c58273f4866b67",
+      "bytes": 3603982
+    },
+    "stage-shots-oden-cup-2026-stage8-s36ed6e4e.wav": {
+      "sha256": "8355df2b6df305f9a1ad0671ae546e358aee7451a4fcc0e0139bca26d520c45c",
+      "bytes": 3573006
+    },
+    "stage-shots-oden-cup-2026-stage9-s0fe3d797.wav": {
+      "sha256": "0d15728029fa934a6e8f4ad46fb509624000457bed351c07eecb4ea3892a9873",
+      "bytes": 2681550
+    },
+    "stage-shots-oden-cup-2026-stage9-s36ed6e4e.wav": {
+      "sha256": "be39c9a87da4079e4e4ccf8189bdaeb3976954076e4268f06e38d1f125a53447",
+      "bytes": 2353646
+    },
     "stage-shots-stockholm-ipsc-open-2026-stage1-s0fe3d797.wav": {
       "sha256": "e6e10d0ff1d96ebbd7e74acb2b6e4e0e1e550bc53048f34a24a062a985b277d8",
       "bytes": 2185306
