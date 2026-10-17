@@ -14,7 +14,12 @@ export interface EventListProps {
 }
 
 const f2 = (x: number) => x.toFixed(2);
-const NAME: Record<StageEventKind, string> = { movement: "Movement", reload: "Reload", activation: "Activation" };
+const NAME: Record<StageEventKind, string> = {
+  draw: "Draw",
+  movement: "Movement",
+  reload: "Reload",
+  activation: "Activation",
+};
 
 export function EventList({ events, shots }: EventListProps) {
   if (events.length === 0) return null;

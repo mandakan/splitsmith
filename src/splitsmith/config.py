@@ -60,8 +60,10 @@ IntervalClassSource = Literal["auto", "manual"]
 
 # Stage events (spec 2026-10-08): regions on the stage timeline, one lane
 # per kind. Independent of shots -- a movement may span several shots,
-# which the per-gap ``interval_class`` cannot say.
-EventKind = Literal["movement", "reload", "activation"]
+# which the per-gap ``interval_class`` cannot say. A draw (spec
+# 2026-10-17) is the hands starting the draw to the first shot, one per
+# stage, and may overlap a movement (a draw on the move).
+EventKind = Literal["draw", "movement", "reload", "activation"]
 
 
 class StageEvent(BaseModel):

@@ -78,6 +78,24 @@ def test_lane_ok(case: dict) -> None:
     validate_lanes(_events(case["events"]))  # no raise
 
 
+def test_a_region_of_a_kind_this_version_does_not_know_is_skipped_not_fatal() -> None:
+    """A newer version may store a kind this one lacks (as ``draw`` was
+    once new): the read keeps every region it knows and drops the rest."""
+    doc = {
+        "events": [
+            {"id": "evt-1", "kind": "movement", "start": 1.0, "end": 2.0, "source": "manual"},
+            {"id": "evt-2", "kind": "juggle", "start": 3.0, "end": 4.0, "source": "manual"},
+        ]
+    }
+    assert [e.id for e in events_from_doc(doc)] == ["evt-1"]
+
+
+def test_a_known_kind_with_a_bad_shape_still_fails_the_read() -> None:
+    doc = {"events": [{"id": "evt-1", "kind": "movement", "start": 2.0, "end": 1.0, "source": "manual"}]}
+    with pytest.raises(ValidationError):
+        events_from_doc(doc)
+
+
 def test_stage_event_end_must_follow_start() -> None:
     with pytest.raises(ValidationError):
         StageEvent(id="evt-1", kind="reload", start=2.0, end=2.0, source="manual")
@@ -126,8 +144,11 @@ def test_events_from_doc_and_shot_times() -> None:
     assert shot_times_from_doc(doc) == [1.5, 1.8]
     assert [e.id for e in events_from_doc(doc)] == ["evt-1"]
     assert events_from_doc({"shots": []}) == []
-    with pytest.raises(ValueError):
+    # An unknown kind is a newer version's region: skipped (spec 2026-10-17), not fatal.
+    assert (
         events_from_doc({"events": [{"id": "evt-1", "kind": "nap", "start": 1, "end": 2, "source": "auto"}]})
+        == []
+    )
 
 
 def test_stage_event_summary_sorts_its_shot_times() -> None:

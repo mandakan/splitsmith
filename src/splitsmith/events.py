@@ -16,11 +16,11 @@ import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, get_args
 
 from pydantic import BaseModel
 
-from .config import Config, DivisionCapacityConfig, StageEvent
+from .config import Config, DivisionCapacityConfig, EventKind, StageEvent
 from .runtime import ENV_CONFIG_FILE
 
 logger = logging.getLogger(__name__)
@@ -73,10 +73,14 @@ class StageEventSummary(BaseModel):
 
 
 def validate_lanes(events: Sequence[StageEvent]) -> None:
-    """Two events of one kind never overlap (touching edges are fine)."""
+    """Two events of one kind never overlap (touching edges are fine), and a
+    stage has one draw at most."""
     by_kind: dict[str, list[StageEvent]] = {}
     for e in events:
         by_kind.setdefault(e.kind, []).append(e)
+    draws = by_kind.get("draw", [])
+    if len(draws) > 1:
+        raise ValueError(f"draw events {draws[0].id} and {draws[1].id}: a stage has one draw")
     for kind, lane in by_kind.items():
         lane.sort(key=lambda e: (e.start, e.end))
         for prev, cur in zip(lane, lane[1:], strict=False):
@@ -95,8 +99,19 @@ def next_event_id(events: Iterable[StageEvent | dict[str, Any]]) -> str:
 
 
 def events_from_doc(doc: dict[str, Any]) -> list[StageEvent]:
+    """The doc's regions. A region of a kind this version does not know (a
+    newer version wrote it, as ``draw`` once was new) is skipped with a
+    warning, never fatal: failing the list made the stage's coach read a
+    422 on an install one version behind. Any other bad entry still raises."""
     raw = doc.get(EVENTS_FIELD) or []
-    return [StageEvent.model_validate(e) for e in raw]
+    known = set(get_args(EventKind))
+    out: list[StageEvent] = []
+    for e in raw:
+        if isinstance(e, dict) and isinstance(e.get("kind"), str) and e["kind"] not in known:
+            logger.warning("skipping a stage event of unknown kind %r", e["kind"])
+            continue
+        out.append(StageEvent.model_validate(e))
+    return out
 
 
 def confirmed(events: Sequence[StageEvent]) -> list[StageEvent]:

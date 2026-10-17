@@ -27,6 +27,9 @@ const overlaps = (a: StageEvent, b: StageEvent) => a.start < b.end && b.start < 
 export function validateLanes(events: StageEvent[]): string | null {
   const byKind = new Map<string, StageEvent[]>();
   for (const e of events) byKind.set(e.kind, [...(byKind.get(e.kind) ?? []), e]);
+  // A stage has one draw (spec 2026-10-17), however far apart two would be.
+  const draws = byKind.get("draw") ?? [];
+  if (draws.length > 1) return `draw events ${draws[0].id} and ${draws[1].id}: a stage has one draw`;
   for (const [kind, lane] of byKind) {
     lane.sort((a, b) => a.start - b.start || a.end - b.end);
     for (let i = 1; i < lane.length; i++) {

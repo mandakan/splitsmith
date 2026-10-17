@@ -644,6 +644,7 @@ describe("LaneEditor", () => {
       render(<Harness initial={MIXED} />);
       expect(screen.getByRole("group", { name: "Region lanes" })).toBe(screen.getByTestId("lane-editor"));
       expect(screen.getAllByRole("listbox").map((l) => l.getAttribute("aria-label"))).toEqual([
+        "Draw regions",
         "Movement regions",
         "Reload regions",
         "Activation regions",

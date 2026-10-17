@@ -7,10 +7,16 @@
 import type { StageEvent, StageEventKind } from "@/lib/api";
 import { MIN_EVENT_S, clampToLane, nextEventId } from "@/lib/events";
 
-export const LANES: readonly StageEventKind[] = ["movement", "reload", "activation"];
-export const LANE_LABEL: Record<StageEventKind, string> = { movement: "Movement", reload: "Reload", activation: "Activation" };
-// Budget hues (Chip TICK): movement beep, reload live, activation ink-2. The lanes and the phone's focus strip draw with them.
+export const LANES: readonly StageEventKind[] = ["draw", "movement", "reload", "activation"];
+export const LANE_LABEL: Record<StageEventKind, string> = {
+  draw: "Draw",
+  movement: "Movement",
+  reload: "Reload",
+  activation: "Activation",
+};
+// Budget hues (Chip TICK): draw led, movement beep, reload live, activation ink-2. The lanes and the phone's focus strip draw with them.
 export const LANE_FILL: Record<StageEventKind, string> = {
+  draw: "bg-led/30 border-led",
   movement: "bg-beep/30 border-beep",
   reload: "bg-live/30 border-live",
   activation: "bg-ink-2/20 border-ink-2",

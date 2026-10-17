@@ -803,10 +803,24 @@ def test_get_coach_resolves_the_capacity_once(tmp_path: Path, monkeypatch: pytes
     assert calls == ["Production Optics"]
 
 
+def test_get_coach_serves_a_stage_holding_a_kind_this_version_does_not_know(tmp_path: Path) -> None:
+    """A newer version's region kind is skipped, never a 422 (spec 2026-10-17)."""
+    client, audit_file, base = _bootstrap(tmp_path)
+    doc = json.loads(audit_file.read_text(encoding="utf-8"))
+    doc["events"] = [
+        {"id": "evt-1", "kind": "juggle", "start": 0.2, "end": 0.9, "source": "manual"},
+        {"id": "evt-2", "kind": "movement", "start": 2.0, "end": 3.0, "source": "manual"},
+    ]
+    audit_file.write_text(json.dumps(doc) + "\n", encoding="utf-8")
+    resp = client.get(f"{base}/shooters/me/stages/1/coach")
+    assert resp.status_code == 200, resp.text
+    assert [e["id"] for e in resp.json()["events"]] == ["evt-2"]
+
+
 def test_get_coach_corrupt_events_are_a_422(tmp_path: Path) -> None:
     client, audit_file, base = _bootstrap(tmp_path)
     doc = json.loads(audit_file.read_text(encoding="utf-8"))
-    doc["events"] = [{"id": "evt-1", "kind": "nap", "start": 1.0, "end": 2.0, "source": "manual"}]
+    doc["events"] = [{"id": "evt-1", "kind": "movement", "start": 2.0, "end": 1.0, "source": "manual"}]
     audit_file.write_text(json.dumps(doc) + "\n", encoding="utf-8")
     resp = client.get(f"{base}/shooters/me/stages/1/coach")
     assert resp.status_code == 422, resp.text
@@ -1123,7 +1137,7 @@ def test_coach_patch_keeps_a_region_derived_reload(tmp_path: Path) -> None:
 def test_reclassify_with_corrupt_events_is_a_422_and_leaves_the_doc(tmp_path: Path) -> None:
     client, audit_file, base = _bootstrap(tmp_path)
     doc = _read(audit_file)
-    doc["events"] = [{"id": "evt-1", "kind": "nap", "start": 1.0, "end": 2.0, "source": "manual"}]
+    doc["events"] = [{"id": "evt-1", "kind": "movement", "start": 2.0, "end": 1.0, "source": "manual"}]
     audit_file.write_text(json.dumps(doc) + "\n", encoding="utf-8")
     before = audit_file.read_text(encoding="utf-8")
     resp = client.post(f"{base}/shooters/me/stages/1/coach/reclassify")
@@ -1139,7 +1153,7 @@ def test_reclassify_without_shots_and_corrupt_events_is_a_422_before_saving(tmp_
     client, audit_file, base = _bootstrap(tmp_path)
     doc = _read(audit_file)
     del doc["shots"]
-    doc["events"] = [{"id": "evt-1", "kind": "nap", "start": 1.0, "end": 2.0, "source": "manual"}]
+    doc["events"] = [{"id": "evt-1", "kind": "movement", "start": 2.0, "end": 1.0, "source": "manual"}]
     audit_file.write_text(json.dumps(doc) + "\n", encoding="utf-8")
     before = audit_file.read_text(encoding="utf-8")
     resp = client.post(f"{base}/shooters/me/stages/1/coach/reclassify")
@@ -1154,7 +1168,7 @@ def test_coach_patch_with_corrupt_events_is_a_422_and_leaves_the_doc(tmp_path: P
     (#1330); this keeps the PATCH from regressing into that."""
     client, audit_file, base = _bootstrap(tmp_path)
     doc = _read(audit_file)
-    doc["events"] = [{"id": "evt-1", "kind": "nap", "start": 1.0, "end": 2.0, "source": "manual"}]
+    doc["events"] = [{"id": "evt-1", "kind": "movement", "start": 2.0, "end": 1.0, "source": "manual"}]
     audit_file.write_text(json.dumps(doc) + "\n", encoding="utf-8")
     before = audit_file.read_text(encoding="utf-8")
     resp = client.patch(f"{base}/shooters/me/stages/1/shots/1/coach", json={"coaching_note": "x"})
@@ -1287,7 +1301,7 @@ def test_stage_note_rejects_an_unknown_field(tmp_path: Path) -> None:
 def test_stage_note_with_corrupt_events_is_a_422_and_leaves_the_doc(tmp_path: Path) -> None:
     client, audit_file, base = _bootstrap(tmp_path)
     doc = _read(audit_file)
-    doc["events"] = [{"id": "evt-1", "kind": "nap", "start": 1.0, "end": 2.0, "source": "manual"}]
+    doc["events"] = [{"id": "evt-1", "kind": "movement", "start": 2.0, "end": 1.0, "source": "manual"}]
     audit_file.write_text(json.dumps(doc) + "\n", encoding="utf-8")
     before = audit_file.read_text(encoding="utf-8")
     resp = _note(client, base, {"stage_note": "x"})
