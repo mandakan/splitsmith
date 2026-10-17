@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "breakdown-draw-region",
+      "date": "2026-10-17",
+      "title": "Mark the draw, even on the move",
+      "body": "Breakdown has a Draw lane: it suggests one before every first shot, and movement too when that shot comes late. Drag the draw's start to where your hands moved."
+    },
+    {
       "id": "breakdown-on-phone",
       "date": "2026-10-17",
       "title": "Review Breakdown proposals on your phone",
@@ -22,7 +28,7 @@
       "id": "movement-proposals-keep-all",
       "date": "2026-10-16",
       "title": "Suggested movement, and Keep all",
-      "body": "Breakdown now suggests movement where you moved, before a late first shot too, beside its suggested reloads. Keep all, above the shot list, confirms every suggestion on the stage at once."
+      "body": "Breakdown now suggests movement over the gaps where you moved, beside its suggested reloads. Keep all, above the shot list, confirms every suggestion on the stage at once."
     },
     {
       "id": "overview-counts-filmed-shooters",
