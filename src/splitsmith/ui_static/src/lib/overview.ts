@@ -50,6 +50,9 @@ export interface OverviewCell {
   provisional: boolean;
   /** A detect / trim / shot-detect job for this shooter and stage is in flight. */
   running: boolean;
+  /** The beep's distance from its tone, ms, when at or past the server's
+   *  threshold (spec 2026-10-17): Overview's Check beep. Else null. */
+  checkBeep: number | null;
   action: RowAction;
 }
 
@@ -70,7 +73,7 @@ export interface OverviewRow {
 
 const PIPELINE_KINDS = new Set(["detect_beep", "trim", "shot_detect"]);
 
-export function rowAction(cell: Omit<OverviewCell, "action">, _threshold: number): RowAction {
+export function rowAction(cell: Omit<OverviewCell, "action" | "checkBeep">, _threshold: number): RowAction {
   if (cell.status === "skipped") return { kind: "none" };
   if (cell.videoCount === 0) return { kind: "add_footage" };
   // A detect / trim / shot-detect job queued or running comes first: right
@@ -82,7 +85,7 @@ export function rowAction(cell: Omit<OverviewCell, "action">, _threshold: number
   return { kind: "audit", accept: cell.shotCount > 0 };
 }
 
-function toCell(raw: TriageCell, jobs: Job[], threshold: number): OverviewCell {
+function toCell(raw: TriageCell, jobs: Job[], threshold: number, toneFlag: number): OverviewCell {
   const audited = countsAsDone(raw.status);
   const running = jobs.some(
     (j) =>
@@ -91,7 +94,7 @@ function toCell(raw: TriageCell, jobs: Job[], threshold: number): OverviewCell {
       j.shooter_slug === raw.slug &&
       j.stage_number === raw.stage_number,
   );
-  const base: Omit<OverviewCell, "action"> = {
+  const base: Omit<OverviewCell, "action" | "checkBeep"> = {
     slug: raw.slug,
     shooterName: raw.shooter_name,
     status: raw.status,
@@ -108,7 +111,9 @@ function toCell(raw: TriageCell, jobs: Job[], threshold: number): OverviewCell {
     provisional: !audited && (raw.draw != null || raw.avg_split != null || raw.shot_count > 0),
     running,
   };
-  return { ...base, action: rowAction(base, threshold) };
+  const tone = raw.beep_tone_offset_ms ?? null;
+  const checkBeep = tone != null && Math.abs(tone) >= toneFlag ? tone : null;
+  return { ...base, checkBeep, action: rowAction(base, threshold) };
 }
 
 export function buildOverviewRows(args: {
@@ -122,7 +127,8 @@ export function buildOverviewRows(args: {
   const byStage = new Map<number, { name: string; cells: OverviewCell[] }>();
   for (const raw of triage.cells) {
     const entry = byStage.get(raw.stage_number) ?? { name: raw.stage_name, cells: [] };
-    entry.cells.push(toCell(raw, jobs, triage.beep_low_confidence_threshold));
+    // An older server sends no threshold and never flags.
+    entry.cells.push(toCell(raw, jobs, triage.beep_low_confidence_threshold, triage.beep_tone_flag_ms ?? Infinity));
     byStage.set(raw.stage_number, entry);
   }
   return [...byStage.entries()]

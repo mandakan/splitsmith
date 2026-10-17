@@ -126,7 +126,10 @@ export function OverviewCards({ rows, filterSlug, currentStage, editDenied, href
                 <span className="mr-2 font-mono text-xs text-muted">{pad2(row.stageNumber)}</span>
                 <span className="font-medium text-ink">{row.stageName}</span>
               </span>
-              <State cell={cell} />
+              <span className="inline-flex shrink-0 items-center gap-1.5">
+                {cell.checkBeep != null ? <Chip tone="warn">check beep</Chip> : null}
+                <State cell={cell} />
+              </span>
             </div>
             <div className="mt-1.5 flex flex-wrap gap-x-3.5 text-sm text-muted">
               <span>{cell.videoCount === 0 ? "no footage" : cell.videoCount === 1 ? "1 cam" : `${cell.videoCount} cams`}</span>
