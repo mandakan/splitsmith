@@ -1367,7 +1367,15 @@ purpose: a wrong guess is one tap to delete or relabel. Both are opt-in
 seeder arguments only the coach GET passes. ``events_from_doc`` skips a
 region of a kind this version does not know (with a warning) instead of
 failing the stage, so an install one version behind reads a doc holding
-a draw; a corrupt known region still fails it. Reloads: every hinted gap (``reload_hint_min_s``), or with a division
+a draw; a corrupt known region still fails it. The stage's **Draw figure**
+is ``events.draw_seconds`` (TS ``drawSeconds``, ``cases.json`` ``draws``):
+a confirmed draw region's length, else the first shot's time from the beep.
+Every Draw surface reads it: ``TileStageData.draw`` (the summary card, its
+figures, the match summary, the compare cell; every tile builder carries
+the stage's confirmed ``events`` for it), ``share_card.stage_figures(...,
+regions=)`` (the project payload, the triage cells, the share card) and
+Coach's ``reviewFigures``. A new Draw surface calls it. There is no "on the
+move" figure: a draw and a movement are independent regions. Reloads: every hinted gap (``reload_hint_min_s``), or with a division
 capacity (``DivisionCapacityConfig``, keyed on the SSI string so the power
 factor rides in the name) the round count decides: the fewest reloads that
 keep every run within ``capacity + 1`` shots, in the longest gaps those

@@ -4,7 +4,7 @@
       "id": "breakdown-draw-region",
       "date": "2026-10-17",
       "title": "Mark the draw, even on the move",
-      "body": "Breakdown has a Draw lane: it suggests one before every first shot, and movement too when that shot comes late. Drag the draw's start to where your hands moved."
+      "body": "Breakdown has a Draw lane, suggested before every first shot. Drag its start to where your hands moved and keep it: your Draw time is then the draw itself, not the time to the first shot."
     },
     {
       "id": "breakdown-on-phone",
