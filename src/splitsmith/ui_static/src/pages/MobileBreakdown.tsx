@@ -92,6 +92,21 @@ function MobileBreakdownStage({ slug, stage }: { slug: string; stage: number }) 
     if (open == null && !edit) setOpenId(nextOpenId(events, -Infinity));
   }, [open, edit, events]);
 
+  // The picture follows the open region: its start whenever another region
+  // opens (the first, Keep / Delete / Done moving on, Prev / Next). Keyed on
+  // the id, not the times, so an edge being dragged is not sought twice.
+  // Before the video loads (iOS) the workspace keeps the position and
+  // seeks there on load.
+  const openStart = open?.start ?? null;
+  const openStartRef = useRef(openStart);
+  openStartRef.current = openStart;
+  const seekRef = useRef(ws.seekFromBeep);
+  seekRef.current = ws.seekFromBeep;
+  const hasCoach = coach != null;
+  useEffect(() => {
+    if (hasCoach && openStartRef.current != null) seekRef.current(openStartRef.current);
+  }, [openId, hasCoach]);
+
   // Play region: stop half a second after it.
   const tFromBeep = view?.tFromBeep ?? 0;
   const { videoRef } = ws;

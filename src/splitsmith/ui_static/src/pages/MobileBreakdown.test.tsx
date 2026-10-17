@@ -135,6 +135,28 @@ describe("MobileBreakdown", () => {
     expect(api.getStageCoach).toHaveBeenCalledWith("anna", 1, { seed: true });
   });
 
+  it("the picture follows the open region: its start on open and on moving on", async () => {
+    const writes: number[] = [];
+    const proto = HTMLMediaElement.prototype;
+    const original = Object.getOwnPropertyDescriptor(proto, "currentTime");
+    Object.defineProperty(proto, "currentTime", {
+      configurable: true,
+      get: () => writes[writes.length - 1] ?? 0,
+      set: (v: number) => writes.push(v),
+    });
+    try {
+      vi.mocked(api.getStageCoach).mockResolvedValue(stageWith([R1, M1]));
+      vi.mocked(api.putStageEvents).mockImplementation(async (_s, _n, events) => stageWith(events));
+      renderPage();
+      // beep_in_clip 5: M1 starts 2 s after the beep, R1 4 s.
+      await waitFor(() => expect(writes).toContain(7));
+      fireEvent.click(screen.getByRole("button", { name: "Next" }));
+      await waitFor(() => expect(writes[writes.length - 1]).toBe(9));
+    } finally {
+      if (original) Object.defineProperty(proto, "currentTime", original);
+    }
+  });
+
   it("Keep confirms the open proposal, saves once and moves on", async () => {
     vi.mocked(api.getStageCoach).mockResolvedValue(stageWith([R1, M1], "v1v1v1v1v1v1v1v1"));
     vi.mocked(api.putStageEvents).mockResolvedValue(stageWith([R1, { ...M1, source: "manual" }], "v2v2v2v2v2v2v2v2"));
