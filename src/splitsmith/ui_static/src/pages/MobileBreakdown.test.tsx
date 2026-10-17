@@ -204,6 +204,25 @@ describe("MobileBreakdown", () => {
     expect(screen.getByText("Proposal 1 of 1")).toBeTruthy();
   });
 
+  it("dragging a handle on the strip moves that edge under the finger, saved on Done", async () => {
+    vi.mocked(api.getStageCoach).mockResolvedValue(stageWith([R1]));
+    vi.mocked(api.putStageEvents).mockImplementation(async (_s, _n, events) => stageWith(events));
+    renderPage();
+    const handle = await screen.findByRole("button", { name: /Adjust start/ });
+    // R1 is 4-5.2 s in a 16.2 s stage: its window is 2-7.2 s, 5.2 s wide.
+    Object.defineProperty(screen.getByTestId("focus-strip"), "clientWidth", { value: 300, configurable: true });
+    fireEvent.pointerDown(handle, { pointerId: 1, clientX: 100 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 115 });
+    fireEvent.pointerMove(handle, { pointerId: 1, clientX: 130 });
+    fireEvent.pointerUp(handle, { pointerId: 1, clientX: 130 });
+    expect(screen.getByRole("button", { name: "Done" })).toBeTruthy();
+    await settle();
+    expect(api.putStageEvents).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() => expect(api.putStageEvents).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(api.putStageEvents).mock.calls[0][2][0].start).toBeCloseTo(4.52);
+  });
+
   it("a second gesture in one edge session continues from where the first left the edge", async () => {
     vi.mocked(api.getStageCoach).mockResolvedValue(stageWith([R1]));
     vi.mocked(api.putStageEvents).mockImplementation(async (_s, _n, events) => stageWith(events));

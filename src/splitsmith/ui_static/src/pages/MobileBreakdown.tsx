@@ -18,7 +18,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useLocation, useOutletContext, useParams } from "react-router-dom";
 
 import { EdgePad } from "@/components/breakdown/mobile/EdgePad";
-import { FocusStrip } from "@/components/breakdown/mobile/FocusStrip";
+import { FocusStrip, type HandleDrag } from "@/components/breakdown/mobile/FocusStrip";
 import { PhoneVideo } from "@/components/breakdown/mobile/PhoneVideo";
 import { LANE_LABEL, LANES, sameEvents } from "@/components/coach/laneDrag";
 import { SaveNotice } from "@/components/coach/SaveNotice";
@@ -33,7 +33,7 @@ import type { StageEvent, StageEventKind } from "@/lib/api";
 import { clipFps } from "@/lib/clipFps";
 import { beginEdge, edgeFrame, restoreRegion, snappedTo, stepEdge, type EdgeGesture, type EdgeTarget } from "@/lib/edgeDrag";
 import { keepAllEvents, keepEvent, withKind } from "@/lib/events";
-import { focusWindow, playWindow } from "@/lib/focusWindow";
+import { focusWindow, playWindow, type FocusWindow } from "@/lib/focusWindow";
 import { useMatchHref } from "@/lib/matchHref";
 import { nextOpenId, prevOpenId, proposals, queuePosition } from "@/lib/proposalQueue";
 import { useSnapToShots } from "@/lib/timelinePrefs";
@@ -78,6 +78,10 @@ function MobileBreakdownStage({ slug, stage }: { slug: string; stage: number }) 
   // The region as it stood when the finger went down on a pad: every frame
   // of that gesture is judged from it, and an interrupted gesture puts it back.
   const gestureBase = useRef<StageEvent | null>(null);
+  // A handle drag on the strip: which edge, and the window frozen while it
+  // lasts so the strip does not rescale under the finger.
+  const stripEdge = useRef<"start" | "end">("start");
+  const [frozenWindow, setFrozenWindow] = useState<FocusWindow | null>(null);
   const view = deriveStageView(ws, slug, stage);
 
   // Open the first proposal once the regions are there, and move on
@@ -216,6 +220,45 @@ function MobileBreakdownStage({ slug, stage }: { slug: string; stage: number }) 
     setEdit({ ...edit, pill: { t, snapped: null } });
   };
 
+  // Dragging a handle on the strip: edge mode for that edge, the edge under
+  // the finger on the strip's scale; Done still saves it.
+  const handleDrag: HandleDrag = {
+    start: (edge) => {
+      if (!open || readOnly) return;
+      const w = focusWindow(open, view.stageTime);
+      setFrozenWindow(w);
+      stripEdge.current = edge;
+      if (!edit) startEdge(edge);
+      else if (edit.g.target !== edge) switchTarget(edge);
+      gestureBase.current = regions.events.find((e) => e.id === open.id) ?? open;
+    },
+    move: (dxFrac, stripPx) => {
+      const base = gestureBase.current;
+      if (!base) return;
+      // The first frame can land before the frozen window has rendered.
+      const w = frozenWindow ?? focusWindow(base, view.stageTime);
+      const frame = edgeFrame({ target: stripEdge.current, id: base.id, before: base }, regions.events, dxFrac, {
+        snap: snapOn,
+        shotTimes,
+        duration: view.stageTime,
+        padPx: stripPx,
+        secondsPerWidth: w.to - w.from,
+      });
+      if (!frame) return;
+      regions.change(frame.events, false);
+      ws.seekFromBeep(frame.seek);
+      const pillNow = { t: frame.edge, snapped: snappedTo(frame.edge, frame.seek, coach.shots) };
+      setEdit((prev) => (prev ? { ...prev, pill: pillNow } : prev));
+    },
+    end: () => {
+      gestureBase.current = null;
+      setFrozenWindow(null);
+    },
+    cancel: () => {
+      onPadCancel();
+      setFrozenWindow(null);
+    },
+  };
   // A gesture on the pad that the OS took back (a call, an edge swipe) puts
   // the region back where this gesture found it; Cancel restores the edit.
   const onPadEnd = () => {
@@ -374,7 +417,8 @@ function MobileBreakdownStage({ slug, stage }: { slug: string; stage: number }) 
             <span className="numeral text-md text-ink-2">{(open.end - open.start).toFixed(2)} s</span>
           </div>
           <FocusStrip
-            window={focusWindow(open, view.stageTime)}
+            window={frozenWindow ?? focusWindow(open, view.stageTime)}
+            onHandleDrag={readOnly ? undefined : handleDrag}
             events={events}
             region={open}
             shots={coach.shots}

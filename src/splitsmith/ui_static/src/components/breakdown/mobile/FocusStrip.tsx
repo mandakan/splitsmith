@@ -1,16 +1,28 @@
 /**
  * The phone's focus strip (spec 2026-10-17): one region and 2 s around it
  * (``lib/focusWindow``), with the ruler, the shots, the region's same-lane
- * neighbours and the playhead. Its handles are 44 px buttons that open edge
- * mode; nothing drags on the strip itself, so a finger never has to hit a
- * thin edge. It takes any region, a proposal or a confirmed one.
+ * neighbours and the playhead. Its handles are 44 px: a tap opens edge mode,
+ * and a drag moves that edge under the finger on the strip's own scale (the
+ * pad in edge mode is the fine control). It takes any region, a proposal or
+ * a confirmed one.
  */
-import { LANE_FILL } from "@/components/coach/laneDrag";
+import { useRef } from "react";
+
+import { DRAG_THRESHOLD_PX, LANE_FILL, TOUCH_DRAG_THRESHOLD_PX } from "@/components/coach/laneDrag";
 import type { StageEvent } from "@/lib/api";
 import { fracOf, type FocusWindow } from "@/lib/focusWindow";
 import { cn } from "@/lib/utils";
 
 const pct = (f: number) => `${f * 100}%`;
+
+/** A handle dragged on the strip (the natural gesture; a tap opens edge mode too). */
+export interface HandleDrag {
+  start: (edge: "start" | "end") => void;
+  /** The finger's travel since it went down, over the strip's width. */
+  move: (dxFrac: number, stripPx: number) => void;
+  end: () => void;
+  cancel: () => void;
+}
 
 export function FocusStrip({
   window: w,
@@ -21,6 +33,7 @@ export function FocusStrip({
   readOnly,
   activeEdge,
   onEdge,
+  onHandleDrag,
 }: {
   window: FocusWindow;
   events: StageEvent[];
@@ -30,7 +43,13 @@ export function FocusStrip({
   readOnly: boolean;
   activeEdge: "start" | "end" | null;
   onEdge: (edge: "start" | "end") => void;
+  /** A handle dragged past the threshold: ``move`` gets the travel over the strip's width. */
+  onHandleDrag?: HandleDrag;
 }) {
+  const stripRef = useRef<HTMLDivElement | null>(null);
+  const press = useRef<{ id: number; x: number; edge: "start" | "end"; threshold: number; moved: boolean } | null>(null);
+  // A press that moved still fires a click on release; that click is not a tap.
+  const swallowClick = useRef(false);
   // At most six ruler labels: a phone's width holds no more side by side.
   const span = w.to - w.from;
   const step = [0.5, 1, 2, 5].find((s) => span / s <= 6) ?? 10;
@@ -46,7 +65,11 @@ export function FocusStrip({
     width: pct(Math.max(fracOf(e.end, w) - fracOf(e.start, w), 0.005)),
   });
   return (
-    <div data-testid="focus-strip" className="relative h-24 overflow-hidden rounded-md border border-rule bg-surface">
+    <div
+      ref={stripRef}
+      data-testid="focus-strip"
+      className="relative h-24 overflow-hidden rounded-md border border-rule bg-surface"
+    >
       <div className="absolute inset-x-0 top-0 h-4 border-b border-rule">
         {ticks.map((t) => (
           <span
@@ -89,8 +112,48 @@ export function FocusStrip({
                 type="button"
                 aria-label={`Adjust ${edge}, ${t.toFixed(2)} s`}
                 aria-pressed={activeEdge === edge}
-                onClick={() => onEdge(edge)}
-                className="absolute top-9 flex h-12 w-11 -translate-x-1/2 items-center justify-center"
+                onClick={() => {
+                  if (swallowClick.current) {
+                    swallowClick.current = false;
+                    return;
+                  }
+                  onEdge(edge);
+                }}
+                onPointerDown={(e) => {
+                  if (!onHandleDrag || press.current) return;
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                  swallowClick.current = false;
+                  const threshold = e.pointerType === "touch" ? TOUCH_DRAG_THRESHOLD_PX : DRAG_THRESHOLD_PX;
+                  press.current = { id: e.pointerId, x: e.clientX, edge, threshold, moved: false };
+                }}
+                onPointerMove={(e) => {
+                  const p = press.current;
+                  if (!onHandleDrag || !p || p.id !== e.pointerId) return;
+                  const dx = e.clientX - p.x;
+                  if (!p.moved) {
+                    if (Math.abs(dx) < p.threshold) return;
+                    p.moved = true;
+                    onHandleDrag.start(p.edge);
+                  }
+                  const width = Math.max(stripRef.current?.clientWidth ?? 0, 1);
+                  onHandleDrag.move(dx / width, width);
+                }}
+                onPointerUp={(e) => {
+                  const p = press.current;
+                  if (!p || p.id !== e.pointerId) return;
+                  press.current = null;
+                  if (p.moved) {
+                    swallowClick.current = true;
+                    onHandleDrag?.end();
+                  }
+                }}
+                onPointerCancel={(e) => {
+                  const p = press.current;
+                  if (!p || p.id !== e.pointerId) return;
+                  press.current = null;
+                  if (p.moved) onHandleDrag?.cancel();
+                }}
+                className="absolute top-9 flex h-12 w-11 -translate-x-1/2 touch-none items-center justify-center"
                 style={{ left: pct(fracOf(t, w)) }}
               >
                 <span className={cn("h-9 w-2.5 rounded-sm", activeEdge === edge ? "bg-led" : "bg-ink")} />

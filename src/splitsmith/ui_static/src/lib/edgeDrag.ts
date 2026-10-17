@@ -27,16 +27,22 @@ export function beginEdge(events: StageEvent[], id: string, target: EdgeTarget):
   return before ? { target, id, before } : null;
 }
 
-/** One frame: ``dxFrac`` is the finger's travel since it went down, over the pad's width. */
+/**
+ * One frame: ``dxFrac`` is the finger's travel since it went down, over the
+ * surface's width. The pad is one second wide (the default); a handle
+ * dragged on the focus strip passes the strip's span, so it stays under the
+ * finger.
+ */
 export function edgeFrame(
   g: EdgeGesture,
   current: StageEvent[],
   dxFrac: number,
-  opts: { snap: boolean; shotTimes: number[]; duration: number; padPx: number },
+  opts: { snap: boolean; shotTimes: number[]; duration: number; padPx: number; secondsPerWidth?: number },
 ): Frame | null {
-  const delta = dxFrac * SECONDS_PER_WIDTH;
-  // The snap tolerance is the desktop's 8 px, in the pad's seconds per pixel.
-  const tolerance = (SNAP_PX / Math.max(opts.padPx, 1)) * SECONDS_PER_WIDTH;
+  const perWidth = opts.secondsPerWidth ?? SECONDS_PER_WIDTH;
+  const delta = dxFrac * perWidth;
+  // The snap tolerance is the desktop's 8 px, in the surface's seconds per pixel.
+  const tolerance = (SNAP_PX / Math.max(opts.padPx, 1)) * perWidth;
   const snap = (t: number) => (opts.snap ? snapTime(t, [0, ...opts.shotTimes], tolerance) : t);
   if (g.target === "body") {
     return dragFrame(

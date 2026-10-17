@@ -71,6 +71,38 @@ describe("FocusStrip", () => {
     fireEvent.click(screen.getByRole("button", { name: "Adjust end, 9.40 s" }));
     expect(onEdge).toHaveBeenLastCalledWith("end");
   });
+  it("drags a handle: start, travel over the strip's width, end; never a tap", () => {
+    const onEdge = vi.fn();
+    const drag = { start: vi.fn(), move: vi.fn(), end: vi.fn(), cancel: vi.fn() };
+    render(
+      <FocusStrip
+        window={{ from: 6, to: 11.4 }}
+        events={[region]}
+        region={region}
+        shots={[]}
+        tFromBeep={8}
+        readOnly={false}
+        activeEdge={null}
+        onEdge={onEdge}
+        onHandleDrag={drag}
+      />,
+    );
+    Object.defineProperty(screen.getByTestId("focus-strip"), "clientWidth", { value: 300 });
+    const end = screen.getByRole("button", { name: /Adjust end/ });
+    fireEvent.pointerDown(end, { pointerId: 1, clientX: 200 });
+    fireEvent.pointerMove(end, { pointerId: 1, clientX: 203 }); // under the threshold: still a tap
+    expect(drag.start).not.toHaveBeenCalled();
+    fireEvent.pointerMove(end, { pointerId: 1, clientX: 230 });
+    expect(drag.start).toHaveBeenCalledWith("end");
+    expect(drag.move).toHaveBeenLastCalledWith(0.1, 300);
+    fireEvent.pointerUp(end, { pointerId: 1, clientX: 230 });
+    expect(drag.end).toHaveBeenCalledTimes(1);
+    fireEvent.click(end); // the click a moved press still fires is not a tap
+    expect(onEdge).not.toHaveBeenCalled();
+    fireEvent.pointerDown(end, { pointerId: 2, clientX: 200 });
+    fireEvent.pointerCancel(end, { pointerId: 2 });
+    expect(drag.cancel).not.toHaveBeenCalled(); // nothing started, nothing to cancel
+  });
   it("labels the ruler sparsely enough to read on a phone", () => {
     const { container } = render(
       <FocusStrip

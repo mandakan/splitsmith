@@ -26,6 +26,15 @@ describe("a relative edge drag", () => {
     expect(f.edge).toBe(9.5);
     expect(f.seek).toBeCloseTo(9.49);
   });
+  it("follows the finger on the strip's own scale when given one", () => {
+    const g = beginEdge(LIST, "r", "start")!;
+    // A 5 s strip: a tenth of its width is half a second.
+    const f = edgeFrame(g, LIST, 0.1, { ...opts, secondsPerWidth: 5 })!;
+    expect(f.edge).toBeCloseTo(8.5);
+    // The snap tolerance scales with it: 8 px of 300 on a 5 s strip is ~0.13 s.
+    const snapped = edgeFrame(beginEdge(LIST, "r", "end")!, LIST, 0.016, { ...opts, snap: true, secondsPerWidth: 5 })!;
+    expect(snapped.edge).toBe(9.5);
+  });
   it("does not snap with snapping off", () => {
     const g = beginEdge(LIST, "r", "end")!;
     expect(edgeFrame(g, LIST, 0.09, opts)!.edge).toBeCloseTo(9.49);
