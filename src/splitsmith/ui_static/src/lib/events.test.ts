@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import type { StageEvent, StageEventSummary } from "@/lib/api";
 import {
   clampToLane,
+  drawSeconds,
   enclosingMovement,
   keepAllEvents,
   keepEvent,
@@ -35,6 +36,7 @@ interface Fixture {
   cases: Case[];
   lane_violations: { name: string; events: StageEvent[]; mentions: string[] }[];
   lane_ok: { name: string; events: StageEvent[] }[];
+  draws: { name: string; first_shot: number | null; events: StageEvent[]; expect: { draw: number | null } }[];
 }
 
 // The same file tests/test_events.py reads: a case lives on both sides or not at all.
@@ -77,6 +79,12 @@ describe("events fixture parity", () => {
 
   it.each(FIXTURE.lane_ok.map((c) => [c.name, c] as const))("ok: %s", (_n, c) => {
     expect(validateLanes(c.events)).toBeNull();
+  });
+
+  it.each(FIXTURE.draws.map((c) => [c.name, c] as const))("draw: %s", (_n, c) => {
+    const got = drawSeconds(c.first_shot, c.events);
+    if (c.expect.draw === null) expect(got).toBeNull();
+    else expect(r2(got as number)).toBeCloseTo(c.expect.draw, 9);
   });
 });
 

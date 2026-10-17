@@ -29,6 +29,12 @@ describe("reviewFigures", () => {
     expect(f.draw).toBe(1.5);
   });
 
+  it("reads the draw off a confirmed draw region, never a proposed one", () => {
+    const draw: StageEvent = { id: "d", kind: "draw", start: 0.6, end: 1.5, source: "auto" };
+    expect(reviewFigures(SHOTS, [draw]).draw).toBe(1.5);
+    expect(reviewFigures(SHOTS, [{ ...draw, source: "manual" }]).draw).toBeCloseTo(0.9);
+  });
+
   it("orders by time, whatever order the payload has", () => {
     expect(reviewFigures([...SHOTS].reverse(), []).draw).toBe(1.5);
   });

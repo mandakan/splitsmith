@@ -60,6 +60,16 @@ export function withKind(events: StageEvent[], id: string, kind: StageEventKind)
  * (``source === "manual"``), in their stored order. The twin of
  * ``events.confirmed``; an auto proposal is a guess nobody looked at.
  */
+/**
+ * The stage's Draw figure (spec 2026-10-17): a confirmed draw region's
+ * length, else the first shot's time from the beep (null without shots).
+ * The twin of ``events.draw_seconds``; a proposal never counts.
+ */
+export function drawSeconds(firstShotS: number | null, events: StageEvent[]): number | null {
+  const draw = events.find((e) => e.kind === "draw" && e.source === "manual");
+  return draw ? draw.end - draw.start : firstShotS;
+}
+
 export function confirmedEvents(events: StageEvent[]): StageEvent[] {
   return events.filter((e) => e.source === "manual");
 }

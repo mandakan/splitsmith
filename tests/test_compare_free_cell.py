@@ -74,6 +74,20 @@ def test_splits_mark_the_best_of_each_column_and_dash_what_is_missing() -> None:
     assert all(e.caption is None for e in martin.elements)
 
 
+def test_a_confirmed_draw_region_is_the_shooters_draw() -> None:
+    """Spec 2026-10-17: Anton's confirmed 1.0 s draw beats Martin's 1.40."""
+    from dataclasses import replace
+
+    from splitsmith.config import StageEvent
+
+    draw = StageEvent(id="evt-1", kind="draw", start=0.6, end=1.6, source="manual")
+    tiles = {**CTX.tiles, "Anton": replace(CTX.tiles["Anton"], events=(draw,))}
+    groups = free_cell_groups("splits", replace(CTX, tiles=tiles))
+    anton = groups[1]
+    assert anton.elements[1].text == "1.00"
+    assert anton.elements[1].color == ColorToken.SPLIT_GOOD
+
+
 def test_splits_with_no_audited_shots_say_so() -> None:
     empty = replace(CTX, tiles={})
     assert _texts(free_cell_groups("splits", empty))[1] == ["No audited shots on this stage"]

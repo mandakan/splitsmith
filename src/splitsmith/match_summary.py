@@ -108,7 +108,7 @@ def build_match_summary(
         dq = bool(card is not None and card.dq)
         any_dq = any_dq or dq
         splits = statistic_splits(tile.shots) if tile.has_shots else []
-        draw = tile.shots[0].split if tile.has_shots else None
+        draw = tile.draw if tile.has_shots else None
         if tile.has_shots:
             split_stages += 1
             rounds += tile.shot_count

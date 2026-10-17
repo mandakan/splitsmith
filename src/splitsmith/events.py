@@ -123,6 +123,19 @@ def confirmed(events: Sequence[StageEvent]) -> list[StageEvent]:
     return [e for e in events if e.source == "manual"]
 
 
+def draw_seconds(first_shot_s: float | None, regions: Sequence[StageEvent]) -> float | None:
+    """The stage's Draw figure (spec 2026-10-17): a confirmed draw region's
+    length, else the first shot's time from the beep (``None`` without
+    shots). The one rule every Draw surface reads (the summary card, the
+    match summary, the share card, the project payload, Compare);
+    ``drawSeconds`` in ``lib/events.ts`` is its twin, held to the shared
+    ``cases.json``. A proposal never counts, whatever the caller passes."""
+    draw = next((e for e in regions if e.kind == "draw" and e.source == "manual"), None)
+    if draw is not None:
+        return draw.end - draw.start
+    return first_shot_s
+
+
 def region_marker_label(event: StageEvent) -> str:
     """An editor marker's name for a confirmed region: ``Reload 1.42`` /
     ``Draw 0.98`` / ``Movement`` / ``Activation`` (spec 2026-10-08, part 2;

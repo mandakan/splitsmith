@@ -59,9 +59,10 @@ kept, edited or deleted region is left alone.
   - the project payload's `stages[].figures`, which feeds Splits, the stage
     page and Compare;
   - the compare grid's cells.
-- **Draw on the move.** A confirmed draw that overlaps a confirmed movement
-  is "on the move". It is derived, never stored: `figures.draw_moving`, a
-  boolean, which the summary card shows as a note under Draw.
+- **No "on the move" figure** (decided while building slice 2). A draw and
+  a movement are independent regions that may overlap, and the regions
+  themselves say so: the lanes, Coach's strip and, in slice 3, the overlay
+  band show both. No derived flag combines them.
 - Nothing else changes. The split statistics, the time budget and the
   interval classes do not read regions, as now.
 
@@ -95,8 +96,7 @@ kept, edited or deleted region is left alone.
 1. **The kind.** The model, tolerant reading, the editor (desktop and
    phone), the seeder (v4: draw always, movement past 2.0 s), the markers
    and the CSV. PR #1522 is closed in favour of this.
-2. **The figures.** `draw_seconds` and `draw_moving`, every consumer above,
-   and the summary card's note.
+2. **The figures.** `draw_seconds` and every consumer above.
 3. **The overlay.** The HUD band colour and `_shared/hud.js`.
 
 Each slice ships with its tests and a frame check where pixels change.

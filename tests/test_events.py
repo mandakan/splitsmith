@@ -73,6 +73,17 @@ def test_lane_violation_names_both_events(case: dict) -> None:
         assert ident in str(exc.value)
 
 
+@pytest.mark.parametrize("case", DATA["draws"], ids=lambda c: c["name"])
+def test_draw_figure(case: dict) -> None:
+    from splitsmith.events import draw_seconds
+
+    got = draw_seconds(case["first_shot"], _events(case["events"]))
+    want = case["expect"]["draw"]
+    assert (got is None) == (want is None)
+    if want is not None:
+        assert round(got, 2) == pytest.approx(want)
+
+
 @pytest.mark.parametrize("case", DATA["lane_ok"], ids=lambda c: c["name"])
 def test_lane_ok(case: dict) -> None:
     validate_lanes(_events(case["events"]))  # no raise
