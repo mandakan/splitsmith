@@ -40,6 +40,7 @@ from splitsmith.beep_calibration import (
     read_audit_json,
     save_manifest,
 )
+from splitsmith.ensemble.fixtures import all_fixtures, fixture_stems
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures"
@@ -86,7 +87,9 @@ def build_entry(
     if not isinstance(audit, dict):
         return None
     beep_time = audit.get("beep_time")
-    if beep_time is None:
+    # A secondary's beep may fall before its clip starts (#1491): that clip
+    # holds no beep for a detector to find.
+    if beep_time is None or float(beep_time) < 0:
         return None
     stem = audit_path.stem
     clip_wav = audit_path.with_suffix(".wav")
@@ -145,6 +148,7 @@ def build_manifest(
     *,
     preserve_tags: bool = False,
     existing: BeepCalibrationManifest | None = None,
+    skip: frozenset[str] = frozenset(),
 ) -> BeepCalibrationManifest:
     """Walk ``fixtures_dir`` and return the rebuilt manifest.
 
@@ -152,6 +156,7 @@ def build_manifest(
     the auto-heuristic tags are unioned with whatever the user added.
     ``existing`` also carries full-track references whose WAVs are not on
     this machine (see :func:`build_entry`), with or without the flag.
+    ``skip`` names stems to leave out (see :func:`unfit_stems`).
     """
     prior = {e.stem: e for e in existing.fixtures} if existing is not None else {}
     prior_tags: dict[str, list[str]] = {}
@@ -160,7 +165,7 @@ def build_manifest(
 
     entries: list[BeepFixtureEntry] = []
     for audit_path in sorted(fixtures_dir.iterdir()):
-        if not is_fixture_audit_json(audit_path):
+        if not is_fixture_audit_json(audit_path) or audit_path.stem in skip:
             continue
         entry = build_entry(audit_path, fixtures_dir=fixtures_dir, prior=prior.get(audit_path.stem))
         if entry is None:
@@ -170,6 +175,15 @@ def build_manifest(
             entry = entry.model_copy(update={"tags": merged})
         entries.append(entry)
     return BeepCalibrationManifest(fixtures=entries)
+
+
+def unfit_stems() -> frozenset[str]:
+    """Shot fixtures the ranker must not train or score on: superseded ones
+    (their replacement is in the corpus) and ones snapped from another angle
+    that nobody has reviewed yet (#1363). Other audit JSONs (``beep-test``)
+    are not shot fixtures and stay."""
+    keep = set(fixture_stems(reviewed_only=True))
+    return frozenset(f.stem for f in all_fixtures() if f.stem not in keep)
 
 
 def main() -> None:
@@ -193,7 +207,7 @@ def main() -> None:
     args = parser.parse_args()
 
     existing = load_manifest(args.manifest)
-    manifest = build_manifest(preserve_tags=args.preserve_tags, existing=existing)
+    manifest = build_manifest(preserve_tags=args.preserve_tags, existing=existing, skip=unfit_stems())
 
     print(f"Discovered {len(manifest.fixtures)} fixtures:")
     for entry in manifest.fixtures:

@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "beep-on-the-tone",
+      "date": "2026-10-17",
+      "title": "Detected beeps start on the timer tone",
+      "body": "The detected beep now starts where your timer's tone does, not on a shot or click just before it or partway in. Fewer beeps need moving by hand on the beep step."
+    },
+    {
       "id": "beep-timer-tone",
       "date": "2026-10-17",
       "title": "Find the beep under a shot",

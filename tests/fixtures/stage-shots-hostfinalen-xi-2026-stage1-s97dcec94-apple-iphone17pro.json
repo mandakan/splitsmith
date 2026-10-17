@@ -527,7 +527,7 @@
   },
   "anchor": {
     "fixture_slug": "stage1",
-    "revision_sha": "c27a99e58df014004d3e8f852227a2494a9c8cccd8b280e3c2b9335f5535f2aa",
+    "revision_sha": "6c19b5f96ecf0c0d1942d40f10d47e1fc9eb4227a11a4f69d4290dbb3be39b11",
     "promoted_at": "2026-10-14T13:58:03.822323+00:00",
     "offset_seconds": 0.9359999999999999,
     "drift_ms_per_minute": 0,

@@ -674,7 +674,7 @@
   },
   "anchor": {
     "fixture_slug": "stage8",
-    "revision_sha": "40e715779eca10724c9017529325323826cd687af37555df3be70c022d3e1887",
+    "revision_sha": "1e006f052047ec68aa7a4d10cd68acb79a175fbedce1d50b70b42bfc43afc459",
     "promoted_at": "2026-10-14T13:58:23.908012+00:00",
     "offset_seconds": -4.697115643833228,
     "drift_ms_per_minute": 0.0,
