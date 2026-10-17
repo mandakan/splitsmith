@@ -1644,6 +1644,29 @@ and Breakdown also reads ``&region=`` (``lib/stageLink``, applied once on
 load by ``useStageWorkspace``'s ``link``); a stale or malformed one is
 ignored.
 
+**Breakdown on a phone** (spec ``2026-10-17-mobile-breakdown-design``):
+below 768 px ``App.tsx``'s ``BreakdownRoute`` renders ``MobileBreakdown``
+(the desktop workspace stays behind ``DesktopGate``; Coach stays desktop
+only). It reviews the seeder's proposals one at a time: the queue
+(``lib/proposalQueue``, proposals by start), a focus strip of the open
+region plus 2 s each side (``lib/focusWindow``,
+``components/breakdown/mobile/FocusStrip``, 44 px handles that open edge
+mode, never a drag on the strip), Keep / Delete / Kind, Play region. Edge
+mode (``lib/edgeDrag`` over ``laneDrag.dragFrame``, which takes a
+``DragInit``) moves an edge by the finger's travel on the video or the
+pad (``EdgePad``: one pad width is one second), each frame judged from the
+region at finger-down, the video seeking to the unsnapped edge; frames are
+``regions.change(next, false)`` and only Done commits, Cancel restores the
+region edge mode found and a ``pointercancel`` the one the gesture found.
+Frame steps use ``clipFps`` (the coach payload's per-video ``fps``, read
+from the trim's own ``mdhd`` by ``media_check``, null off this disk, else
+30). The phone plays the 720p rendition whatever ``full_res_scrub`` says
+(``scrubSource``'s ``phone``), and ``PhoneVideo`` shows "Tap to load"
+until metadata loads (iOS loads no media before a tap). Read-only is the
+edit capability alone (``deriveStageView``), so a desktop mirror on hosted
+reads only. A phone reaches the desktop's server through the CLI's
+``--host`` / ``--lab-token`` until phone pairing exists (a later design).
+
 ## Hosted access tiers (spec 2026-10-03)
 
 An account has **features** (``splitsmith.access.Feature``: ``sync``,
