@@ -31,9 +31,9 @@ def user_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path / "looks"
 
 
-def test_the_two_shipped_looks_load_with_the_default_first(user_dir: Path) -> None:
+def test_the_shipped_looks_load_with_the_default_first(user_dir: Path) -> None:
     names = [look.name for look in looks.list_looks()]
-    assert names[:2] == ["splitsmith", "clean"]
+    assert names[:3] == ["splitsmith", "broadcast", "clean"]
     assert all(look.source == "shipped" for look in looks.list_looks())
 
 
@@ -53,7 +53,7 @@ def test_clean_declares_no_slots_and_falls_back_to_the_default_templates() -> No
 def test_a_user_look_is_listed_after_the_shipped_ones(user_dir: Path) -> None:
     _write_look(user_dir, "club")
     names = [look.name for look in looks.list_looks()]
-    assert names == ["splitsmith", "clean", "club"]
+    assert names == ["splitsmith", "broadcast", "clean", "club"]
     assert looks.load_look("club").source == "user"
 
 
@@ -77,7 +77,7 @@ def test_list_looks_skips_a_broken_user_look_and_warns(
     (user_dir / "no-manifest").mkdir()
     with caplog.at_level(logging.WARNING, logger="splitsmith.looks"):
         names = [look.name for look in looks.list_looks()]
-    assert names == ["splitsmith", "clean"]
+    assert names == ["splitsmith", "broadcast", "clean"]
     assert "broken" in caplog.text
 
 
@@ -321,7 +321,7 @@ def test_a_user_look_may_declare_its_own_sting(user_dir: Path) -> None:
 
 def test_the_catalog_lists_every_slot_with_default_first_and_previews(user_dir: Path) -> None:
     catalog = looks.look_catalog()
-    assert [c.name for c in catalog][:2] == ["splitsmith", "clean"]
+    assert [c.name for c in catalog][:3] == ["splitsmith", "broadcast", "clean"]
     splitsmith = catalog[0]
     assert splitsmith.label == "Splitsmith" and splitsmith.source == "shipped"
     assert set(splitsmith.slots) == set(looks.SLOT_NAMES)
@@ -428,7 +428,7 @@ def test_a_provider_replaces_the_user_looks_folder_and_none_means_no_user_looks(
         looks.reset_user_looks_provider(token)
     token = looks.set_user_looks_provider(lambda: None)
     try:
-        assert looks.look_names() == ("splitsmith", "clean")
+        assert looks.look_names() == ("splitsmith", "broadcast", "clean")
         with pytest.raises(looks.LookNotFoundError):
             looks.load_look("home-look")
     finally:
@@ -439,7 +439,7 @@ def test_a_provider_replaces_the_user_looks_folder_and_none_means_no_user_looks(
 def test_the_catalog_marks_user_looks_editable(user_dir: Path) -> None:
     _write_look(user_dir, "club")
     editable = {info.name: info.editable for info in looks.look_catalog()}
-    assert editable == {"splitsmith": False, "clean": False, "club": True}
+    assert editable == {"splitsmith": False, "broadcast": False, "clean": False, "club": True}
 
 
 # --- the overlay slot (template HUD, spec 2026-10-08) ------------------------

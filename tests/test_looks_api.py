@@ -17,7 +17,7 @@ def client(tmp_path: Path):
 
 def test_get_looks_lists_the_shipped_looks(client) -> None:
     body = client.get("/api/looks").json()
-    assert [look["name"] for look in body["looks"]][:2] == ["splitsmith", "clean"]
+    assert [look["name"] for look in body["looks"]][:3] == ["splitsmith", "broadcast", "clean"]
     splitsmith = body["looks"][0]
     assert splitsmith["slots"]["title_page"][1] == {
         "name": "rise",

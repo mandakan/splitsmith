@@ -1,0 +1,90 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>starter: broadcast sting</title>
+<!--
+  The transition between two stages, using every piece of data a sting
+  gets. A panel in the Look's surface sweeps across with an accent edge,
+  holds over the cut carrying the next stage's name, and sweeps away. It
+  is drawn over the boundary's crossfade for the whole transition.
+  window.splitsmith.data:
+    transition { kind ("sting:<name>"), name, duration_seconds,
+                 from, to }   the labels either side of the cut
+    shooters[] { label, accent, club, logo }
+    brand      { logo, line } when the export puts your brand on the wipe
+  duration() must return transition.duration_seconds: the renderer
+  samples exactly that long.
+  Guide: docs/looks/authoring.md#stings
+-->
+<script>
+  document.write('<style>' + window.splitsmith.engine.css + '</style>');
+</script>
+<style>
+  html, body { margin: 0; background: transparent; overflow: hidden; width: 100vw; height: 100vh; }
+  #panel { position: absolute; top: 0; bottom: 0; left: 0; width: 100vw; display: flex; flex-direction: column;
+           justify-content: center; padding: 0 10vh; box-sizing: border-box; gap: 1.4vh; }
+  #edge { position: absolute; top: 0; bottom: 0; width: 1.6vh; }
+  .cap { font-family: "Splitsmith Mono", monospace; font-size: 2.4vh; letter-spacing: 0.14em; text-transform: uppercase; }
+  #to { align-self: flex-start; font-family: "Splitsmith Display", sans-serif; font-weight: 700; font-size: 11vh; line-height: 1; white-space: nowrap; }
+  #mark { position: absolute; right: 8vh; top: 50%; transform: translateY(-50%); height: 18vh; max-width: 30vh; object-fit: scale-down; }
+</style>
+</head>
+<body>
+<div id="panel"><div class="cap" id="next">Next</div><div id="to"></div></div>
+<div id="edge"></div>
+<script>
+  var S = window.splitsmith, D = S.data, T = S.theme, TR = D.transition || {};
+  var LENGTH = TR.duration_seconds || 1;
+  var $ = function (id) { return document.getElementById(id); };
+  var accent = (D.shooters && D.shooters[0] && D.shooters[0].accent) || T.accent;
+
+  $('panel').style.background = T.surface;
+  $('panel').style.color = T.ink;
+  $('next').style.color = T.ink_2;
+  $('edge').style.background = accent;
+  $('to').textContent = TR.to || '';
+  if (!TR.to) $('next').style.display = 'none';
+  // Your brand when the export puts it on the wipe; else a single shooter logo.
+  var mark = D.brand && D.brand.logo ? D.brand.logo : null;
+  if (!mark) {
+    var logos = (D.shooters || []).map(function (s) { return s.logo; }).filter(Boolean);
+    if (logos.length === 1) mark = logos[0];
+  }
+  if (mark) {
+    var img = document.createElement('img');
+    img.id = 'mark';
+    img.src = mark;
+    $('panel').appendChild(img);
+  }
+
+  // In over the first 40 %, hold, out over the last 40 %: the panel covers
+  // the frame across the cut, so the crossfade underneath never shows.
+  function ease(p) { return p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2; }
+  function paint(t) {
+    var p = t / LENGTH, x;
+    if (p < 0.4) x = -100 + 100 * ease(p / 0.4);
+    else if (p > 0.6) x = 100 * ease((p - 0.6) / 0.4);
+    else x = 0;
+    $('panel').style.transform = 'translateX(' + x + 'vw)';
+    // The accent edge leads the panel in and trails it out.
+    $('edge').style.left = p < 0.5 ? 'calc(' + (x + 100) + 'vw - 1.6vh)' : x + 'vw';
+    $('edge').style.display = x <= -100 || x >= 100 ? 'none' : 'block';
+  }
+  var now = LENGTH / 2;
+  window.duration = function () { return LENGTH; };
+  window.poster = function () { return LENGTH / 2; };
+  window.seek = function (t) { now = t; paint(t); };
+  window.__splitsmithFit = function () {
+    var to = $('to'), size = parseFloat(getComputedStyle(to).fontSize);
+    // The name's own width (the element hugs its text: align-self above).
+    while (to.getBoundingClientRect().width > S.size.width * 0.7 && size > S.engine.min_font_size) {
+      size -= 2;
+      to.style.fontSize = size + 'px';
+    }
+    paint(now);
+  };
+  paint(now);
+</script>
+</body>
+</html>

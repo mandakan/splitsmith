@@ -146,5 +146,5 @@ def test_a_queued_job_sees_its_accounts_looks_and_none_after(tmp_path: Path) -> 
         asyncio.run(tasks[queue_mod.RUN_COMPUTE_JOB_TASK](job_id="j", user_id="u", kind="noop"))  # type: ignore[operator]
     finally:
         server.user_looks_cache_root = original  # type: ignore[assignment]
-    assert seen == [("splitsmith", "clean", "club")]
+    assert seen == [("splitsmith", "broadcast", "clean", "club")]
     assert "club" not in looks.look_names()

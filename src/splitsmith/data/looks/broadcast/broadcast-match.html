@@ -1,0 +1,110 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>starter: broadcast match summary</title>
+<!--
+  The match standings board after the last stage, using every piece of
+  data a match summary can read. A still: no duration(), so it is one frame
+  held for the summary's seconds.
+
+  window.splitsmith.data:
+    card       { slot: "match_summary", variant, text (the match title), info, duration_seconds }
+    shooters[] { label, accent, club, logo }
+    match      title, label (the shooter), dq,
+               rows[] { number, name, time_seconds, time_is_manual,
+                        hit_factor, stage_pct, draw, avg_split, dq },
+               avg_split, best_draw, rounds,
+               hits {A, C, D, M, NS, P} (a count no stage reported is null),
+               split_stages, scored_stages (how many stages each figure
+               stands on)
+    safe_area  on an upright video
+  Guide: docs/looks/authoring.md#summaries
+-->
+<script>
+  document.write('<style>' + window.splitsmith.engine.css + '</style>');
+</script>
+<style>
+  html, body { margin: 0; background: transparent; overflow: hidden; }
+  #shade { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.6); }
+  #board {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: min(88vw, 130vh); box-sizing: border-box; padding: 3vh 4vh;
+    font-family: "Splitsmith Mono", monospace; border-radius: 1vh;
+  }
+  #title { font-family: "Splitsmith Display", sans-serif; font-size: 5vh; font-weight: 700; line-height: 1.05; }
+  #who { font-size: 2.2vh; opacity: 0.8; margin: 0.6vh 0 2vh; }
+  #figures { display: flex; gap: 4vh; margin-bottom: 2vh; }
+  .cap { font-size: 1.5vh; letter-spacing: 0.12em; text-transform: uppercase; opacity: 0.7; }
+  .val { font-size: 3.4vh; font-weight: 700; }
+  table { width: 100%; border-collapse: collapse; font-size: 2.2vh; }
+  th { text-align: right; font-size: 1.5vh; letter-spacing: 0.1em; text-transform: uppercase; opacity: 0.7; padding: 0.6vh 1vh; }
+  td { text-align: right; padding: 0.6vh 1vh; }
+  th:nth-child(2), td:nth-child(2) { text-align: left; max-width: 40vh; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #hits { margin-top: 1.6vh; font-size: 2.4vh; font-weight: 700; display: flex; gap: 2vh; }
+  #coverage { margin-top: 1vh; font-size: 1.7vh; opacity: 0.75; }
+  body.safe #board { top: 3vh; left: 2vh; transform: none; width: calc(100vw - 4vh - var(--safe-right)); padding: 2vh; }
+  body.safe table { font-size: 1.6vh; }
+  body.safe th:nth-child(2), body.safe td:nth-child(2) { max-width: 14vh; }
+  body.safe #figures { gap: 2vh; }
+  body.safe .wide { display: none; }
+</style>
+</head>
+<body>
+<div id="shade"></div>
+<div id="board">
+  <div id="title"></div>
+  <div id="who"></div>
+  <div id="figures"></div>
+  <table id="table"></table>
+  <div id="hits"></div>
+  <div id="coverage"></div>
+</div>
+<script>
+  var S = window.splitsmith, D = S.data, T = S.theme, M = D.match;
+  var shooter = (D.shooters || [])[0] || {};
+  var $ = function (id) { return document.getElementById(id); };
+  if (D.safe_area) document.body.classList.add('safe');
+
+  $('board').style.background = T.surface;
+  $('board').style.color = T.ink;
+  $('board').style.borderTop = '0.6vh solid ' + (shooter.accent || T.accent);
+  $('title').textContent = M.title || D.card.text;
+  $('who').textContent = [M.label, shooter.club].filter(Boolean).join(' / ') + (M.dq ? ' / DQ' : '');
+
+  function two(x) { return x == null ? '-' : x.toFixed(2); }
+  $('figures').innerHTML = [
+    ['Avg split', two(M.avg_split)],
+    ['Best draw', two(M.best_draw)],
+    ['Rounds', M.rounds == null ? '-' : String(M.rounds)]
+  ].map(function (f) { return '<div><div class="cap">' + f[0] + '</div><div class="val">' + f[1] + '</div></div>'; }).join('');
+
+  var head = '<tr><th>#</th><th>Stage</th><th>Time</th><th>HF</th><th>%</th><th class="wide">Draw</th><th class="wide">Avg</th></tr>';
+  $('table').innerHTML = head + M.rows.map(function (r) {
+    var time = r.time_seconds == null ? '-' : two(r.time_seconds) + (r.time_is_manual ? '*' : '');
+    var name = document.createElement('span');
+    name.textContent = r.name;
+    return '<tr' + (r.dq ? ' style="color:' + T.accent + '"' : '') + '><td>' + r.number + '</td><td>' + name.innerHTML +
+      '</td><td>' + time + '</td><td>' + two(r.hit_factor) + '</td><td>' +
+      (r.stage_pct == null ? '-' : r.stage_pct.toFixed(1)) + '</td><td class="wide">' + two(r.draw) +
+      '</td><td class="wide">' + two(r.avg_split) + '</td></tr>';
+  }).join('');
+
+  var colour = { A: T.split_good, C: T.ink, D: T.split, M: T.accent, NS: T.accent, P: T.accent };
+  $('hits').innerHTML = M.hits ? ['A', 'C', 'D', 'M', 'NS', 'P'].map(function (k) {
+    var v = M.hits[k];
+    return '<span style="color:' + colour[k] + '">' + k + ' ' + (v == null ? '-' : v) + '</span>';
+  }).join('') : '';
+  $('coverage').textContent = 'Splits from ' + M.split_stages + ' of ' + M.rows.length + ' stages, scores from ' +
+    M.scored_stages + (M.rows.some(function (r) { return r.time_is_manual; }) ? '; * time entered by hand' : '');
+
+  window.__splitsmithFit = function () {
+    var t = $('title'), size = parseFloat(getComputedStyle(t).fontSize);
+    while (t.scrollWidth > t.clientWidth + 1 && size > S.engine.min_font_size) {
+      size -= 1;
+      t.style.fontSize = size + 'px';
+    }
+  };
+</script>
+</body>
+</html>

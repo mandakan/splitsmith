@@ -1,6 +1,12 @@
 {
   "entries": [
     {
+      "id": "broadcast-look",
+      "date": "2026-10-17",
+      "title": "A Broadcast Look for every card",
+      "body": "Pick Broadcast under Look on the Export page: sports graphics for every card, the overlay, summaries, the thumbnail and a push transition, with draw, movement and reloads shown."
+    },
+    {
       "id": "beep-on-the-tone",
       "date": "2026-10-17",
       "title": "Detected beeps start on the timer tone",

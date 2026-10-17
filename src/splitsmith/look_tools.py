@@ -93,10 +93,12 @@ _STARTER_SLOTS: dict[str, dict[str, object]] = {
         "title_page": "broadcast-card.html",
         "slate": "broadcast-card.html",
         "lower_third": "broadcast-card.html",
-        "closing": "broadcast-card.html",
+        "closing": {"default": "broadcast-card.html", "end-screen": "broadcast-card.html"},
+        "thumbnail": "broadcast-thumbnail.html",
         OVERLAY_SLOT: {"broadcast": "broadcast-hud.html"},
         "summary": {"results": "broadcast-summary.html"},
         "match_summary": {"table": "broadcast-match.html"},
+        STING_SLOT: {"push": "broadcast-sting.html"},
     },
 }
 
@@ -283,19 +285,33 @@ def _named_files(look: Look) -> set[str]:
 
 def _shipped_copies(look: Look) -> dict[str, bool]:
     """The template files ``look`` names that are byte-identical to some
-    version of the shipped file of the same name, each with whether that
-    version is still the current one. Anything else is the Look's own."""
+    version of the shipped default Look's file of the same name, each with
+    whether that version is still the current one. Anything else is the
+    Look's own.
+
+    A file another shipped Look draws (the ``broadcast`` starter's, which
+    ships as the Broadcast Look) is the Look's own too: dropping it would
+    fall back to the default Look's card, a different template, not to the
+    same one."""
     history = shipped_template_history()
     current_dir = shipped_looks_dir() / DEFAULT_LOOK
+    others = {
+        p.name
+        for p in shipped_looks_dir().glob("*/*.html")
+        if p.parent.name != DEFAULT_LOOK and not p.parent.name.startswith("_")
+    }
     out: dict[str, bool] = {}
     for file in sorted(_named_files(look)):
         path = look.root / file
         if path.is_symlink() or not path.is_file():
             continue
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
-        if history.get(digest) != Path(file).name:
+        name = Path(file).name
+        current = current_dir / name
+        if not current.is_file() and name in others:
             continue
-        current = current_dir / Path(file).name
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if history.get(digest) != name:
+            continue
         out[file] = current.is_file() and hashlib.sha256(current.read_bytes()).hexdigest() == digest
     return out
 
